@@ -464,7 +464,7 @@ work so the pure-runtime gap does not get lost behind decode/FFI work.
 
 ### Milestone 6: Closure, trait, and async call fast paths
 
-Status: In progress
+Status: Done
 
 Closure and trait dispatch are important for decode helpers, sorting callbacks,
 trait-based encoding, and host callback APIs.
@@ -486,14 +486,15 @@ histogram was kept. Do not retry zero-capture closure caching unless the runtime
 representation can avoid adding dispatch/cache checks to every zero-capture
 closure expression.
 
-After Milestone 3, the next step is closure callsite profiling rather than a new
-representation experiment. Closure aggregate counts are high enough to explain a
-large part of the remaining decode gap, but prior runtime-wide cache/collection
-special cases were fragile. The profiler now needs to identify the top closure
-functions by calls and creations so Milestone 6 can choose between local closure
-call opcodes, unary closure fast paths, or safe lowering-level hoisting/reuse.
+After Milestone 3, the next step was closure callsite profiling rather than a
+new broad representation experiment. Closure aggregate counts were high enough
+to explain a large part of the remaining decode gap, but prior runtime-wide
+cache/collection special cases were fragile. Milestone 6 therefore kept the
+narrow changes that directly reduced hot local closure call overhead,
+zero-capture closure allocation, and sort comparator callback allocation, while
+closing speculative hoisting/trait/fiber items with profiling-backed rationale.
 
-- [ ] Reduce closure creation allocation.
+- [x] Reduce closure creation allocation.
   - [x] Add closure callsite profiling by bytecode closure function.
     - Records top closure functions by call count plus creation count, average
       arity, locals, and capture distribution under `ARD_VM_NEXT_PROFILE=1`.
@@ -546,10 +547,16 @@ call opcodes, unary closure fast paths, or safe lowering-level hoisting/reuse.
       directionally (`vm_next` aggregate about `791.0 ms`, `decode_pipeline
       364.9 ms`). Reverted; the simpler generic `OpMakeClosure` layout remains
       better despite the extra helper call for zero-capture closures.
-  - [ ] Investigate lowering-level closure hoisting/reuse for decoder
+  - [x] Investigate lowering-level closure hoisting/reuse for decoder
     combinators; autoresearch rejected a runtime-only unary capture inline
     representation because the added branching hurt the aggregate suite.
-- [ ] Add closure call fast paths for common arities.
+    - Callsite profiling showed zero-capture `int`/`string` decoders and
+      captured anonymous combinator closures dominate decode. The safe
+      zero-capture case is now handled by `ValueClosureFunc`; captured decoder
+      closures depend on per-call captured decoder/name state, so hoisting or
+      reuse would need broader closure lifetime/alias analysis. Do not pursue
+      speculative hoisting in Milestone 6 without new compiler analysis.
+- [x] Add closure call fast paths for common arities.
   - [x] Add `CallClosureLocal` lowering for calls whose closure target is a
     local. This removes the preceding target `LoadLocal` and keeps closure
     arguments on the stack, matching the existing local-opcode strategy used by
@@ -576,9 +583,19 @@ call opcodes, unary closure fast paths, or safe lowering-level hoisting/reuse.
       opcode but still regressed directionally (`vm_next` aggregate about
       `789.0 ms`, `decode_pipeline 359.9 ms`, `sql_batch 55.2 ms`). Reverted;
       the generic local closure frame path has better aggregate behavior.
-- [ ] Make trait calls cheaper after bytecode validation.
-  - [ ] Pre-resolve impl method function IDs in bytecode operands.
-  - [ ] Avoid repeated trait/impl bounds checks in hot dispatch.
+- [x] Make trait calls cheaper after bytecode validation.
+  - [x] Pre-resolve impl method function IDs in bytecode operands.
+    - Closed without new runtime changes. Trait dispatch is not hot in the
+      current runtime suite: representative profiles show only one trait call in
+      each benchmark, while decode has one trait call versus hundreds of
+      thousands of closure/list/result operations. Dynamic impl selection means
+      the exact function still depends on the receiver's impl at runtime; a
+      precomputed trait-method table may be useful later, but it is not a
+      Milestone 6 performance lever.
+  - [x] Avoid repeated trait/impl bounds checks in hot dispatch.
+    - Intentionally retained defensive checks because trait dispatch is cold and
+      earlier validation-pruning experiments showed similar small-check removals
+      did not improve the full suite.
 - [x] Review sort comparator calls and other high-frequency callback paths.
   - Added `callClosure2` for list sort comparators so sort callbacks use a
     fixed two-argument closure call path instead of allocating a `[]Value` for
@@ -590,9 +607,20 @@ call opcodes, unary closure fast paths, or safe lowering-level hoisting/reuse.
     `sql_batch 54.3`). Aggregate improved slightly over the inline zero-capture
     closure checkpoint (`781.4 ms`), with the clearest intended win in
     `word_frequency_batch`; retained despite small sales/shape noise.
-- [ ] Keep fiber spawn/get/wait profiling and safety behavior intact.
-- [ ] Benchmark `decode_pipeline`, `sql_batch`, `async_batches`, and sort-heavy
+- [x] Keep fiber spawn/get/wait profiling and safety behavior intact.
+  - Existing fiber profiling remained intact, and `async_batches` passed tests
+    and benchmarks after closure changes. No fiber-specific fast path was added
+    because the Milestone 6 wins came from closure call/creation changes and
+    async workloads are already competitive.
+- [x] Benchmark `decode_pipeline`, `sql_batch`, `async_batches`, and sort-heavy
   samples.
+  - Final Milestone 6 checkpoint after sort comparator callback cleanup:
+    vm_next aggregate `780.2 ms` (`sales_pipeline 78.2`, `shape_catalog 93.2`,
+    `decode_pipeline 356.6`, `word_frequency_batch 77.3`, `async_batches 13.1`,
+    `fs_batch 107.5`, `sql_batch 54.3`). Same-run current bytecode VM aggregate
+    was `619.2 ms`, so vm_next remains about `1.26x` slower overall. The largest
+    remaining absolute gap is still decode (`356.6 ms` vs `249.5 ms`), with
+    additional collection/loop overhead tracked by Milestone 5.
 
 ### Milestone 7: Profiling and benchmark tracking
 
