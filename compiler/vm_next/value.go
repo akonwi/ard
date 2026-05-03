@@ -29,6 +29,7 @@ const (
 	ValueExtern
 	ValueDynamic
 	ValueClosure
+	ValueClosureFunc
 	ValueFiber
 )
 
@@ -207,6 +208,9 @@ func Dynamic(typeID air.TypeID, raw any) Value {
 }
 
 func Closure(typeID air.TypeID, function air.FunctionID, captures []Value) Value {
+	if len(captures) == 0 {
+		return Value{Kind: ValueClosureFunc, Type: typeID, Int: int(function)}
+	}
 	return Value{Kind: ValueClosure, Type: typeID, Ref: &ClosureValue{Type: typeID, Function: function, Captures: captures}}
 }
 
@@ -296,6 +300,8 @@ func (v Value) GoValue() any {
 		return dynamicValue.Raw
 	case ValueClosure:
 		return v.Ref
+	case ValueClosureFunc:
+		return &ClosureValue{Type: v.Type, Function: air.FunctionID(v.Int)}
 	case ValueFiber:
 		return v.Ref
 	default:
@@ -472,7 +478,24 @@ func (v Value) dynamicValue() (*DynamicValue, error) {
 	return dynamicValue, nil
 }
 
+func closureParts(v Value) (air.FunctionID, []Value, bool) {
+	if v.Kind == ValueClosureFunc {
+		return air.FunctionID(v.Int), nil, true
+	}
+	if v.Kind != ValueClosure {
+		return air.NoFunction, nil, false
+	}
+	closureValue, ok := v.Ref.(*ClosureValue)
+	if !ok || closureValue == nil {
+		return air.NoFunction, nil, false
+	}
+	return closureValue.Function, closureValue.Captures, true
+}
+
 func closureRef(v Value) (*ClosureValue, bool) {
+	if v.Kind == ValueClosureFunc {
+		return &ClosureValue{Type: v.Type, Function: air.FunctionID(v.Int)}, true
+	}
 	if v.Kind != ValueClosure {
 		return nil, false
 	}
@@ -481,7 +504,7 @@ func closureRef(v Value) (*ClosureValue, bool) {
 }
 
 func closureValueError(v Value) error {
-	if v.Kind != ValueClosure {
+	if v.Kind != ValueClosure && v.Kind != ValueClosureFunc {
 		return fmt.Errorf("expected closure value, got kind %d", v.Kind)
 	}
 	return fmt.Errorf("closure value has invalid payload %T", v.Ref)

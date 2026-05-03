@@ -1029,7 +1029,7 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 	if value.Kind == ValueTraitObject && target.Kind() == reflect.Interface && target.NumMethod() == 0 {
 		return vm.traitObjectToHost(value, target)
 	}
-	if value.Kind == ValueClosure && isHostCallbackType(target) {
+	if (value.Kind == ValueClosure || value.Kind == ValueClosureFunc) && isHostCallbackType(target) {
 		return vm.closureToHostCallback(value, target)
 	}
 	if value.Kind == ValueList && target.Kind() == reflect.Slice {

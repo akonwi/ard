@@ -139,16 +139,16 @@ func initTraitBytecodeLocals(fnName string, locals []Value, receiver Value, args
 	return nil
 }
 
-func (vm *VM) newClosureBytecodeFrame(closure *ClosureValue, fn *vmcode.Function, args []Value, stackBase int) (bytecodeFrame, error) {
+func (vm *VM) newClosureBytecodeFrame(captures []Value, fn *vmcode.Function, args []Value, stackBase int) (bytecodeFrame, error) {
 	if len(args) != fn.Arity {
 		return bytecodeFrame{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, fn.Arity, len(args))
 	}
-	if len(closure.Captures) != len(fn.Captures) {
-		return bytecodeFrame{}, fmt.Errorf("%s expects %d captures, got %d", fn.Name, len(fn.Captures), len(closure.Captures))
+	if len(captures) != len(fn.Captures) {
+		return bytecodeFrame{}, fmt.Errorf("%s expects %d captures, got %d", fn.Name, len(fn.Captures), len(captures))
 	}
 	if vm.profile != nil {
 		vm.profile.RecordClosureCall(len(args), fn.Locals)
-		vm.profile.RecordClosureFunctionCall(fn.Name, len(args), len(closure.Captures), fn.Locals)
+		vm.profile.RecordClosureFunctionCall(fn.Name, len(args), len(captures), fn.Locals)
 		vm.profile.RecordLocalsAlloc(fn.Locals)
 	}
 	locals := vm.getValueSlice(fn.Locals)
@@ -161,7 +161,7 @@ func (vm *VM) newClosureBytecodeFrame(closure *ClosureValue, fn *vmcode.Function
 			vm.putValueSlice(locals)
 			return bytecodeFrame{}, fmt.Errorf("%s capture %s has invalid local %d", fn.Name, capture.Name, capture.Local)
 		}
-		locals[capture.Local] = closure.Captures[i]
+		locals[capture.Local] = captures[i]
 	}
 	return bytecodeFrame{fn: fn, locals: locals, stackBase: stackBase}, nil
 }
@@ -236,23 +236,23 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 	}
 	prepareClosureFrame := func(target Value, args []Value) (*vmcode.Function, []Value, int, error) {
 		vm.recordRefAccess(refAccessClosure)
-		closure, ok := closureRef(target)
+		function, captures, ok := closureParts(target)
 		if !ok {
 			return nil, nil, 0, closureValueError(target)
 		}
-		callee, ok := vm.bytecode.Function(closure.Function)
+		callee, ok := vm.bytecode.Function(function)
 		if !ok {
-			return nil, nil, 0, fmt.Errorf("invalid closure function id %d", closure.Function)
+			return nil, nil, 0, fmt.Errorf("invalid closure function id %d", function)
 		}
 		if len(args) != callee.Arity {
 			return nil, nil, 0, fmt.Errorf("%s expects %d args, got %d", callee.Name, callee.Arity, len(args))
 		}
-		if len(closure.Captures) != len(callee.Captures) {
-			return nil, nil, 0, fmt.Errorf("%s expects %d captures, got %d", callee.Name, len(callee.Captures), len(closure.Captures))
+		if len(captures) != len(callee.Captures) {
+			return nil, nil, 0, fmt.Errorf("%s expects %d captures, got %d", callee.Name, len(callee.Captures), len(captures))
 		}
 		if vm.profile != nil {
 			vm.profile.RecordClosureCall(len(args), callee.Locals)
-			vm.profile.RecordClosureFunctionCall(callee.Name, len(args), len(closure.Captures), callee.Locals)
+			vm.profile.RecordClosureFunctionCall(callee.Name, len(args), len(captures), callee.Locals)
 			vm.profile.RecordLocalsAlloc(callee.Locals)
 		}
 		nextLocals, localsBase := takeArenaLocals(callee.Locals)
@@ -265,7 +265,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				localsArena = localsArena[:localsBase]
 				return nil, nil, 0, fmt.Errorf("%s capture %s has invalid local %d", callee.Name, capture.Name, capture.Local)
 			}
-			nextLocals[capture.Local] = closure.Captures[i]
+			nextLocals[capture.Local] = captures[i]
 		}
 		return callee, nextLocals, localsBase, nil
 	}
@@ -381,7 +381,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 					closureName = closureFn.Name
 				}
 				vm.profile.RecordClosureFunctionCreation(closureName, len(captures))
-				vm.profile.RecordValueAlloc(valueAllocClosure)
+				if len(captures) > 0 {
+					vm.profile.RecordValueAlloc(valueAllocClosure)
+				}
 			}
 			push(Closure(air.TypeID(inst.A), air.FunctionID(inst.C), captures))
 		case vmcode.OpCallClosure:
@@ -936,29 +938,37 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 	return Value{}, fmt.Errorf("bytecode frame loop exited without return")
 }
 
-func (vm *VM) runBytecodeClosure(closure *ClosureValue, args []Value) (Value, error) {
-	fn, ok := vm.bytecode.Function(closure.Function)
+func (vm *VM) runBytecodeClosureValue(value Value, args []Value) (Value, error) {
+	function, captures, ok := closureParts(value)
 	if !ok {
-		return Value{}, fmt.Errorf("invalid closure function id %d", closure.Function)
+		return Value{}, closureValueError(value)
 	}
-	frame, err := vm.newClosureBytecodeFrame(closure, fn, args, 0)
+	fn, ok := vm.bytecode.Function(function)
+	if !ok {
+		return Value{}, fmt.Errorf("invalid closure function id %d", function)
+	}
+	frame, err := vm.newClosureBytecodeFrame(captures, fn, args, 0)
 	if err != nil {
 		return Value{}, err
 	}
 	return vm.runBytecodeFrameLoop(frame)
 }
 
-func (vm *VM) runBytecodeClosure1(closure *ClosureValue, arg Value) (Value, error) {
-	fn, ok := vm.bytecode.Function(closure.Function)
+func (vm *VM) runBytecodeClosureValue1(value Value, arg Value) (Value, error) {
+	function, captures, ok := closureParts(value)
 	if !ok {
-		return Value{}, fmt.Errorf("invalid closure function id %d", closure.Function)
+		return Value{}, closureValueError(value)
+	}
+	fn, ok := vm.bytecode.Function(function)
+	if !ok {
+		return Value{}, fmt.Errorf("invalid closure function id %d", function)
 	}
 	if fn.Arity != 1 {
 		return Value{}, fmt.Errorf("%s expects %d args, got 1", fn.Name, fn.Arity)
 	}
 	var args [1]Value
 	args[0] = arg
-	frame, err := vm.newClosureBytecodeFrame(closure, fn, args[:], 0)
+	frame, err := vm.newClosureBytecodeFrame(captures, fn, args[:], 0)
 	if err != nil {
 		return Value{}, err
 	}

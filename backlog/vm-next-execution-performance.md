@@ -510,8 +510,24 @@ call opcodes, unary closure fast paths, or safe lowering-level hoisting/reuse.
   - [x] Evaluate capture distribution and zero-capture closure caching. Both
     map-backed and bytecode-indexed cache experiments passed tests but regressed
     the full benchmark suite, so only the profiling histogram was kept.
-  - [ ] Avoid capture slice allocation for zero-capture closures only if a
+  - [x] Avoid capture slice allocation for zero-capture closures only if a
     cheaper representation than runtime caching is available.
+    - Added a dedicated inline zero-capture closure value (`ValueClosureFunc`)
+      that stores the bytecode function ID in `Value.Int` and avoids allocating
+      a `ClosureValue` record for zero-capture closures. Hot closure call paths
+      use closure parts directly, while compatibility paths still reconstruct a
+      `ClosureValue` when needed for host callbacks/Go conversion.
+    - Decode profile effect: closure creations remain ~120k, but counted
+      closure heap allocations drop from ~120k to ~72k because the ~48k
+      zero-capture `int`/`string` decoder closures no longer allocate wrapper
+      records.
+    - 10-run runtime checkpoint: vm_next aggregate `781.4 ms`
+      (`sales_pipeline 77.3`, `shape_catalog 91.5`, `decode_pipeline 357.6`,
+      `word_frequency_batch 78.4`, `async_batches 13.3`, `fs_batch 108.9`,
+      `sql_batch 54.4`). This is a small aggregate improvement over the
+      `CallClosureLocal` checkpoint (`785.6 ms`), mostly from fs noise and small
+      collection/sql/decode movement; retain because it removes real allocation
+      on a semantically narrow zero-capture case without runtime caching.
   - [x] Evaluate small-arity capture collection fast paths for `OpMakeClosure`.
     Special-casing 0/1/2 captures removed `popArgs` profile counts but did not
     remove captured-slice allocation, and the full 10-run suite did not improve;
