@@ -541,6 +541,11 @@ call opcodes, unary closure fast paths, or safe lowering-level hoisting/reuse.
       checkpoint; `decode_pipeline 358.3 ms` vs `357.6 ms`). Reverted. Further
       captured-closure storage changes should come from a design that also
       removes/reuses the capture slice itself.
+    - Evaluated a zero-capture-only `OpMakeClosure` branch after inline
+      zero-capture closures landed. Tests passed, but the 10-run suite regressed
+      directionally (`vm_next` aggregate about `791.0 ms`, `decode_pipeline
+      364.9 ms`). Reverted; the simpler generic `OpMakeClosure` layout remains
+      better despite the extra helper call for zero-capture closures.
   - [ ] Investigate lowering-level closure hoisting/reuse for decoder
     combinators; autoresearch rejected a runtime-only unary capture inline
     representation because the added branching hurt the aggregate suite.
