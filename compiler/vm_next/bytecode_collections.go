@@ -14,9 +14,9 @@ func (vm *VM) execBytecodeListOp(inst vmcode.Instruction, stack *[]Value) (Value
 		return Value{}, err
 	}
 	vm.recordRefAccess(refAccessList)
-	listValue, err := target.listValue()
-	if err != nil {
-		return Value{}, err
+	listValue, ok := listRef(target)
+	if !ok {
+		return Value{}, listValueError(target)
 	}
 	var out Value
 	switch inst.Op {
@@ -105,9 +105,9 @@ func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, stack *[]Value) (Value,
 		return Value{}, err
 	}
 	vm.recordRefAccess(refAccessMap)
-	mapValue, err := target.mapValue()
-	if err != nil {
-		return Value{}, err
+	mapValue, ok := mapRef(target)
+	if !ok {
+		return Value{}, mapValueError(target)
 	}
 	var out Value
 	switch inst.Op {

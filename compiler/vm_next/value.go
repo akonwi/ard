@@ -310,37 +310,70 @@ func (v Value) GoValueString() string {
 	return fmt.Sprint(v.GoValue())
 }
 
-func (v Value) structValue() (*StructValue, error) {
+func structRef(v Value) (*StructValue, bool) {
 	if v.Kind != ValueStruct {
-		return nil, fmt.Errorf("expected struct value, got kind %d", v.Kind)
+		return nil, false
 	}
 	structValue, ok := v.Ref.(*StructValue)
-	if !ok || structValue == nil {
-		return nil, fmt.Errorf("struct value has invalid payload %T", v.Ref)
+	return structValue, ok && structValue != nil
+}
+
+func structValueError(v Value) error {
+	if v.Kind != ValueStruct {
+		return fmt.Errorf("expected struct value, got kind %d", v.Kind)
 	}
-	return structValue, nil
+	return fmt.Errorf("struct value has invalid payload %T", v.Ref)
+}
+
+func (v Value) structValue() (*StructValue, error) {
+	if structValue, ok := structRef(v); ok {
+		return structValue, nil
+	}
+	return nil, structValueError(v)
+}
+
+func listRef(v Value) (*ListValue, bool) {
+	if v.Kind != ValueList {
+		return nil, false
+	}
+	listValue, ok := v.Ref.(*ListValue)
+	return listValue, ok && listValue != nil
+}
+
+func listValueError(v Value) error {
+	if v.Kind != ValueList {
+		return fmt.Errorf("expected list value, got kind %d", v.Kind)
+	}
+	return fmt.Errorf("list value has invalid payload %T", v.Ref)
 }
 
 func (v Value) listValue() (*ListValue, error) {
-	if v.Kind != ValueList {
-		return nil, fmt.Errorf("expected list value, got kind %d", v.Kind)
+	if listValue, ok := listRef(v); ok {
+		return listValue, nil
 	}
-	listValue, ok := v.Ref.(*ListValue)
-	if !ok || listValue == nil {
-		return nil, fmt.Errorf("list value has invalid payload %T", v.Ref)
+	return nil, listValueError(v)
+}
+
+func mapRef(v Value) (*MapValue, bool) {
+	if v.Kind != ValueMap {
+		return nil, false
 	}
-	return listValue, nil
+	mapValue, ok := v.Ref.(*MapValue)
+	return mapValue, ok && mapValue != nil
+}
+
+func mapValueError(v Value) error {
+	if v.Kind != ValueMap {
+		return fmt.Errorf("expected map value, got kind %d", v.Kind)
+	}
+	return fmt.Errorf("map value has invalid payload %T", v.Ref)
 }
 
 func (v Value) mapValue() (*MapValue, error) {
-	if v.Kind != ValueMap {
-		return nil, fmt.Errorf("expected map value, got kind %d", v.Kind)
+	if mapValue, ok := mapRef(v); ok {
+		return mapValue, nil
 	}
-	mapValue, ok := v.Ref.(*MapValue)
-	if !ok || mapValue == nil {
-		return nil, fmt.Errorf("map value has invalid payload %T", v.Ref)
-	}
-	return mapValue, nil
+	return nil, mapValueError(v)
 }
 
 func (v Value) maybeValue() (*MaybeValue, error) {
@@ -384,15 +417,26 @@ func (v Value) resultValue() (*ResultValue, error) {
 	return &ResultValue{Type: v.Type, Ok: ok, Value: value}, nil
 }
 
-func (v Value) unionValue() (*UnionValue, error) {
+func unionRef(v Value) (*UnionValue, bool) {
 	if v.Kind != ValueUnion {
-		return nil, fmt.Errorf("expected union value, got kind %d", v.Kind)
+		return nil, false
 	}
 	unionValue, ok := v.Ref.(*UnionValue)
-	if !ok || unionValue == nil {
-		return nil, fmt.Errorf("union value has invalid payload %T", v.Ref)
+	return unionValue, ok && unionValue != nil
+}
+
+func unionValueError(v Value) error {
+	if v.Kind != ValueUnion {
+		return fmt.Errorf("expected union value, got kind %d", v.Kind)
 	}
-	return unionValue, nil
+	return fmt.Errorf("union value has invalid payload %T", v.Ref)
+}
+
+func (v Value) unionValue() (*UnionValue, error) {
+	if unionValue, ok := unionRef(v); ok {
+		return unionValue, nil
+	}
+	return nil, unionValueError(v)
 }
 
 func (v Value) traitObjectValue() (*TraitObjectValue, error) {
@@ -428,15 +472,26 @@ func (v Value) dynamicValue() (*DynamicValue, error) {
 	return dynamicValue, nil
 }
 
-func (v Value) closureValue() (*ClosureValue, error) {
+func closureRef(v Value) (*ClosureValue, bool) {
 	if v.Kind != ValueClosure {
-		return nil, fmt.Errorf("expected closure value, got kind %d", v.Kind)
+		return nil, false
 	}
 	closureValue, ok := v.Ref.(*ClosureValue)
-	if !ok || closureValue == nil {
-		return nil, fmt.Errorf("closure value has invalid payload %T", v.Ref)
+	return closureValue, ok && closureValue != nil
+}
+
+func closureValueError(v Value) error {
+	if v.Kind != ValueClosure {
+		return fmt.Errorf("expected closure value, got kind %d", v.Kind)
 	}
-	return closureValue, nil
+	return fmt.Errorf("closure value has invalid payload %T", v.Ref)
+}
+
+func (v Value) closureValue() (*ClosureValue, error) {
+	if closureValue, ok := closureRef(v); ok {
+		return closureValue, nil
+	}
+	return nil, closureValueError(v)
 }
 
 func (v Value) fiberValue() (*FiberValue, error) {

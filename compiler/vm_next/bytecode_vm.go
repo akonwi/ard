@@ -351,9 +351,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			targetIndex := len(stack) - inst.B - 1
 			target := stack[targetIndex]
 			vm.recordRefAccess(refAccessClosure)
-			closure, err := target.closureValue()
-			if err != nil {
-				return Value{}, err
+			closure, ok := closureRef(target)
+			if !ok {
+				return Value{}, closureValueError(target)
 			}
 			callee, ok := vm.bytecode.Function(closure.Function)
 			if !ok {
@@ -513,9 +513,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, err
 			}
 			vm.recordRefAccess(refAccessUnion)
-			unionValue, err := value.unionValue()
-			if err != nil {
-				return Value{}, err
+			unionValue, ok := unionRef(value)
+			if !ok {
+				return Value{}, unionValueError(value)
 			}
 			push(Int(air.TypeID(inst.A), int(unionValue.Tag)))
 		case vmcode.OpUnionTagLocal:
@@ -523,9 +523,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, fmt.Errorf("%s: local %d out of range", fn.Name, inst.B)
 			}
 			vm.recordRefAccess(refAccessUnion)
-			unionValue, err := locals[inst.B].unionValue()
-			if err != nil {
-				return Value{}, err
+			unionValue, ok := unionRef(locals[inst.B])
+			if !ok {
+				return Value{}, unionValueError(locals[inst.B])
 			}
 			push(Int(air.TypeID(inst.A), int(unionValue.Tag)))
 		case vmcode.OpUnionValue:
@@ -534,9 +534,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, err
 			}
 			vm.recordRefAccess(refAccessUnion)
-			unionValue, err := value.unionValue()
-			if err != nil {
-				return Value{}, err
+			unionValue, ok := unionRef(value)
+			if !ok {
+				return Value{}, unionValueError(value)
 			}
 			push(unionValue.Value)
 		case vmcode.OpUnionValueLocal:
@@ -544,9 +544,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, fmt.Errorf("%s: local %d out of range", fn.Name, inst.B)
 			}
 			vm.recordRefAccess(refAccessUnion)
-			unionValue, err := locals[inst.B].unionValue()
-			if err != nil {
-				return Value{}, err
+			unionValue, ok := unionRef(locals[inst.B])
+			if !ok {
+				return Value{}, unionValueError(locals[inst.B])
 			}
 			push(unionValue.Value)
 		case vmcode.OpIntAdd, vmcode.OpIntSub, vmcode.OpIntMul, vmcode.OpIntDiv, vmcode.OpIntMod:
@@ -663,9 +663,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, fmt.Errorf("%s: list local %d out of range", fn.Name, inst.B)
 			}
 			vm.recordRefAccess(refAccessList)
-			listValue, err := locals[inst.B].listValue()
-			if err != nil {
-				return Value{}, err
+			listValue, ok := listRef(locals[inst.B])
+			if !ok {
+				return Value{}, listValueError(locals[inst.B])
 			}
 			push(Int(air.TypeID(inst.A), len(listValue.Items)))
 		case vmcode.OpListAtLocal:
@@ -673,9 +673,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, fmt.Errorf("%s: list/index local out of range", fn.Name)
 			}
 			vm.recordRefAccess(refAccessList)
-			listValue, err := locals[inst.B].listValue()
-			if err != nil {
-				return Value{}, err
+			listValue, ok := listRef(locals[inst.B])
+			if !ok {
+				return Value{}, listValueError(locals[inst.B])
 			}
 			indexValue := locals[inst.C]
 			if indexValue.Kind != ValueInt {
@@ -695,9 +695,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, fmt.Errorf("list index must be Int")
 			}
 			vm.recordRefAccess(refAccessList)
-			listValue, err := locals[inst.C].listValue()
-			if err != nil {
-				return Value{}, err
+			listValue, ok := listRef(locals[inst.C])
+			if !ok {
+				return Value{}, listValueError(locals[inst.C])
 			}
 			push(Bool(air.TypeID(inst.A), indexValue.Int < len(listValue.Items)))
 		case vmcode.OpListAt, vmcode.OpListPrepend, vmcode.OpListPush, vmcode.OpListSet, vmcode.OpListSize, vmcode.OpListSort, vmcode.OpListSwap:
@@ -728,9 +728,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, fmt.Errorf("%s: map local %d out of range", fn.Name, inst.B)
 			}
 			vm.recordRefAccess(refAccessMap)
-			mapValue, err := locals[inst.B].mapValue()
-			if err != nil {
-				return Value{}, err
+			mapValue, ok := mapRef(locals[inst.B])
+			if !ok {
+				return Value{}, mapValueError(locals[inst.B])
 			}
 			push(Int(air.TypeID(inst.A), len(mapValue.Entries)))
 		case vmcode.OpMapIndexLtLocal:
@@ -742,9 +742,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, fmt.Errorf("map entry index must be Int")
 			}
 			vm.recordRefAccess(refAccessMap)
-			mapValue, err := locals[inst.C].mapValue()
-			if err != nil {
-				return Value{}, err
+			mapValue, ok := mapRef(locals[inst.C])
+			if !ok {
+				return Value{}, mapValueError(locals[inst.C])
 			}
 			push(Bool(air.TypeID(inst.A), indexValue.Int < len(mapValue.Entries)))
 		case vmcode.OpMapKeyAtLocal, vmcode.OpMapValueAtLocal:
@@ -752,9 +752,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, fmt.Errorf("%s: map/index local out of range", fn.Name)
 			}
 			vm.recordRefAccess(refAccessMap)
-			mapValue, err := locals[inst.B].mapValue()
-			if err != nil {
-				return Value{}, err
+			mapValue, ok := mapRef(locals[inst.B])
+			if !ok {
+				return Value{}, mapValueError(locals[inst.B])
 			}
 			indexValue := locals[inst.C]
 			if indexValue.Kind != ValueInt {
@@ -791,9 +791,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, err
 			}
 			vm.recordRefAccess(refAccessStruct)
-			structValue, err := value.structValue()
-			if err != nil {
-				return Value{}, err
+			structValue, ok := structRef(value)
+			if !ok {
+				return Value{}, structValueError(value)
 			}
 			if inst.B < 0 || inst.B >= len(structValue.Fields) {
 				return Value{}, fmt.Errorf("field index %d out of range", inst.B)
@@ -804,9 +804,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, fmt.Errorf("%s: local %d out of range", fn.Name, inst.B)
 			}
 			vm.recordRefAccess(refAccessStruct)
-			structValue, err := locals[inst.B].structValue()
-			if err != nil {
-				return Value{}, err
+			structValue, ok := structRef(locals[inst.B])
+			if !ok {
+				return Value{}, structValueError(locals[inst.B])
 			}
 			if inst.C < 0 || inst.C >= len(structValue.Fields) {
 				return Value{}, fmt.Errorf("field index %d out of range", inst.C)
@@ -822,9 +822,9 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, err
 			}
 			vm.recordRefAccess(refAccessStruct)
-			structValue, err := target.structValue()
-			if err != nil {
-				return Value{}, err
+			structValue, ok := structRef(target)
+			if !ok {
+				return Value{}, structValueError(target)
 			}
 			if inst.B < 0 || inst.B >= len(structValue.Fields) {
 				return Value{}, fmt.Errorf("field index %d out of range", inst.B)

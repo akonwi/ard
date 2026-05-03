@@ -330,6 +330,10 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
   - [ ] Prefer typed heap references or tagged heap records.
   - [x] Add profiling counters for typed `Ref any` access by helper kind so
     future storage changes can be driven by actual assertion/access volume.
+  - [x] Add inlineable fast-ref helpers for hot list/map/struct/union/closure
+    access paths while preserving detailed defensive error messages on the cold
+    invalid path. This targets the `decode_pipeline` profile where list, map,
+    and closure `Ref` access dominate remaining value-representation pressure.
   - [x] Avoid repeated stack traffic and value assertions for local match
     subjects by lowering Result and Union match probes/extractions to local
     bytecode opcodes (`ResultIsOkLocal`, `ResultExpectLocal`,

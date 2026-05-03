@@ -103,18 +103,18 @@ func (vm *VM) runTest(test air.Test) TestOutcome {
 
 func (vm *VM) callClosure(value Value, args []Value) (Value, error) {
 	vm.recordRefAccess(refAccessClosure)
-	closure, err := value.closureValue()
-	if err != nil {
-		return Value{}, err
+	closure, ok := closureRef(value)
+	if !ok {
+		return Value{}, closureValueError(value)
 	}
 	return vm.runBytecodeClosure(closure, args)
 }
 
 func (vm *VM) callClosure1(value Value, arg Value) (Value, error) {
 	vm.recordRefAccess(refAccessClosure)
-	closure, err := value.closureValue()
-	if err != nil {
-		return Value{}, err
+	closure, ok := closureRef(value)
+	if !ok {
+		return Value{}, closureValueError(value)
 	}
 	return vm.runBytecodeClosure1(closure, arg)
 }
