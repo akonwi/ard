@@ -164,23 +164,47 @@ func (vm *VM) execBytecodeResultLocalOp(inst vmcode.Instruction, locals []Value)
 	if inst.B < 0 || inst.B >= len(locals) {
 		return Value{}, fmt.Errorf("result local %d out of range", inst.B)
 	}
-	resultValue, err := locals[inst.B].resultValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if inst.Op == vmcode.OpResultIsOkLocal {
-		return Bool(air.TypeID(inst.A), resultValue.Ok), nil
-	}
-	if inst.Op == vmcode.OpResultExpectLocal {
-		if !resultValue.Ok {
-			return Value{}, fmt.Errorf("expected Result to be ok")
+	target := locals[inst.B]
+	if target.Kind == ValueResultInt || target.Kind == ValueResultStr || target.Kind == ValueResultBool || target.Kind == ValueResultFloat {
+		if inst.Op == vmcode.OpResultIsOkLocal {
+			return Bool(air.TypeID(inst.A), true), nil
 		}
-		return resultValue.Value, nil
-	}
-	if resultValue.Ok {
+		if inst.Op == vmcode.OpResultExpectLocal {
+			if target.Kind == ValueResultInt {
+				return Int(air.NoType, target.Int), nil
+			}
+			if target.Kind == ValueResultStr {
+				return Str(air.NoType, target.Str), nil
+			}
+			if target.Kind == ValueResultBool {
+				return Bool(air.NoType, target.Bool), nil
+			}
+			return Float(air.NoType, target.Float), nil
+		}
 		return Value{}, fmt.Errorf("expected Result error value")
 	}
-	return resultValue.Value, nil
+	if target.Kind != ValueResult {
+		return Value{}, fmt.Errorf("expected result value, got kind %d", target.Kind)
+	}
+	var resultPayload Value
+	if payload, ok := target.Ref.(*Value); ok && payload != nil {
+		resultPayload = *payload
+	} else {
+		return Value{}, fmt.Errorf("result value has invalid payload %T", target.Ref)
+	}
+	if inst.Op == vmcode.OpResultIsOkLocal {
+		return Bool(air.TypeID(inst.A), target.Bool), nil
+	}
+	if inst.Op == vmcode.OpResultExpectLocal {
+		if !target.Bool {
+			return Value{}, fmt.Errorf("expected Result to be ok")
+		}
+		return resultPayload, nil
+	}
+	if target.Bool {
+		return Value{}, fmt.Errorf("expected Result error value")
+	}
+	return resultPayload, nil
 }
 
 func (vm *VM) execBytecodeResultOp(inst vmcode.Instruction, stack *[]Value) (Value, error) {
@@ -188,15 +212,15 @@ func (vm *VM) execBytecodeResultOp(inst vmcode.Instruction, stack *[]Value) (Val
 	if err != nil {
 		return Value{}, err
 	}
-	resultValue, err := target.resultValue()
+	resultOK, resultPayload, err := target.resultParts()
 	if err != nil {
 		return Value{}, err
 	}
 	var out Value
 	switch inst.Op {
 	case vmcode.OpResultExpect:
-		if resultValue.Ok {
-			out = resultValue.Value
+		if resultOK {
+			out = resultPayload
 			break
 		}
 		message := "expected Result to be ok"
@@ -205,13 +229,13 @@ func (vm *VM) execBytecodeResultOp(inst vmcode.Instruction, stack *[]Value) (Val
 		}
 		return Value{}, fmt.Errorf("%s", message)
 	case vmcode.OpResultErrValue:
-		if resultValue.Ok {
+		if resultOK {
 			return Value{}, fmt.Errorf("expected Result error value")
 		}
-		out = resultValue.Value
+		out = resultPayload
 	case vmcode.OpResultOr:
-		if resultValue.Ok {
-			out = resultValue.Value
+		if resultOK {
+			out = resultPayload
 			break
 		}
 		if len(args) != 1 {
@@ -219,18 +243,18 @@ func (vm *VM) execBytecodeResultOp(inst vmcode.Instruction, stack *[]Value) (Val
 		}
 		out = args[0]
 	case vmcode.OpResultIsOk:
-		out = Bool(air.TypeID(inst.A), resultValue.Ok)
+		out = Bool(air.TypeID(inst.A), resultOK)
 	case vmcode.OpResultIsErr:
-		out = Bool(air.TypeID(inst.A), !resultValue.Ok)
+		out = Bool(air.TypeID(inst.A), !resultOK)
 	case vmcode.OpResultMap:
-		if !resultValue.Ok {
+		if !resultOK {
 			if vm.profile != nil {
 				vm.profile.RecordValueAlloc(valueAllocResult)
 			}
-			out = Result(air.TypeID(inst.A), false, resultValue.Value)
+			out = Result(air.TypeID(inst.A), false, resultPayload)
 			break
 		}
-		mapped, err := vm.callClosure1(args[0], resultValue.Value)
+		mapped, err := vm.callClosure1(args[0], resultPayload)
 		if err != nil {
 			return Value{}, err
 		}
@@ -239,14 +263,14 @@ func (vm *VM) execBytecodeResultOp(inst vmcode.Instruction, stack *[]Value) (Val
 		}
 		out = Result(air.TypeID(inst.A), true, mapped)
 	case vmcode.OpResultMapErr:
-		if resultValue.Ok {
+		if resultOK {
 			if vm.profile != nil {
 				vm.profile.RecordValueAlloc(valueAllocResult)
 			}
-			out = Result(air.TypeID(inst.A), true, resultValue.Value)
+			out = Result(air.TypeID(inst.A), true, resultPayload)
 			break
 		}
-		mapped, err := vm.callClosure1(args[0], resultValue.Value)
+		mapped, err := vm.callClosure1(args[0], resultPayload)
 		if err != nil {
 			return Value{}, err
 		}
@@ -255,14 +279,14 @@ func (vm *VM) execBytecodeResultOp(inst vmcode.Instruction, stack *[]Value) (Val
 		}
 		out = Result(air.TypeID(inst.A), false, mapped)
 	case vmcode.OpResultAndThen:
-		if !resultValue.Ok {
+		if !resultOK {
 			if vm.profile != nil {
 				vm.profile.RecordValueAlloc(valueAllocResult)
 			}
-			out = Result(air.TypeID(inst.A), false, resultValue.Value)
+			out = Result(air.TypeID(inst.A), false, resultPayload)
 			break
 		}
-		out, err = vm.callClosure1(args[0], resultValue.Value)
+		out, err = vm.callClosure1(args[0], resultPayload)
 		if err != nil {
 			return Value{}, err
 		}
@@ -278,23 +302,40 @@ func (vm *VM) execBytecodeTryResult(inst vmcode.Instruction, pop func() (Value, 
 	if err != nil {
 		return Value{}, -1, false, err
 	}
-	resultValue, err := target.resultValue()
-	if err != nil {
-		return Value{}, -1, false, err
+	if target.Kind == ValueResultInt {
+		return Int(air.NoType, target.Int), -1, false, nil
 	}
-	if resultValue.Ok {
-		return resultValue.Value, -1, false, nil
+	if target.Kind == ValueResultStr {
+		return Str(air.NoType, target.Str), -1, false, nil
+	}
+	if target.Kind == ValueResultBool {
+		return Bool(air.NoType, target.Bool), -1, false, nil
+	}
+	if target.Kind == ValueResultFloat {
+		return Float(air.NoType, target.Float), -1, false, nil
+	}
+	if target.Kind != ValueResult {
+		return Value{}, -1, false, fmt.Errorf("expected result value, got kind %d", target.Kind)
+	}
+	var resultPayload Value
+	if payload, ok := target.Ref.(*Value); ok && payload != nil {
+		resultPayload = *payload
+	} else {
+		return Value{}, -1, false, fmt.Errorf("result value has invalid payload %T", target.Ref)
+	}
+	if target.Bool {
+		return resultPayload, -1, false, nil
 	}
 	if inst.B >= 0 {
 		if inst.C >= 0 && inst.C < len(locals) {
-			locals[inst.C] = resultValue.Value
+			locals[inst.C] = resultPayload
 		}
 		return Value{}, inst.B, false, nil
 	}
 	if vm.profile != nil {
 		vm.profile.RecordValueAlloc(valueAllocResult)
 	}
-	return Result(air.TypeID(inst.A), false, resultValue.Value), -1, true, nil
+	return Result(air.TypeID(inst.A), false, resultPayload), -1, true, nil
 }
 
 func (vm *VM) execBytecodeTryMaybe(inst vmcode.Instruction, pop func() (Value, error), locals []Value) (value Value, jump int, returned bool, err error) {

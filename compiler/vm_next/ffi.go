@@ -409,7 +409,7 @@ func (vm *VM) fastDecodeIntResultWithInfo(returnType air.TypeID, info air.TypeIn
 		vm.profile.RecordValueAlloc(valueAllocResult)
 	}
 	if result.Ok {
-		return Result(returnType, true, Int(info.Value, result.Value)), nil
+		return ResultInt(returnType, info.Value, result.Value), nil
 	}
 	errValue, err := vm.fastDecodeErrorValue(info.Error, result.Error)
 	if err != nil {
@@ -431,7 +431,7 @@ func (vm *VM) fastDecodeStringResultWithInfo(returnType air.TypeID, info air.Typ
 		vm.profile.RecordValueAlloc(valueAllocResult)
 	}
 	if result.Ok {
-		return Result(returnType, true, Str(info.Value, result.Value)), nil
+		return ResultStr(returnType, info.Value, result.Value), nil
 	}
 	errValue, err := vm.fastDecodeErrorValue(info.Error, result.Error)
 	if err != nil {
@@ -453,7 +453,7 @@ func (vm *VM) fastDecodeFloatResultWithInfo(returnType air.TypeID, info air.Type
 		vm.profile.RecordValueAlloc(valueAllocResult)
 	}
 	if result.Ok {
-		return Result(returnType, true, Float(info.Value, result.Value)), nil
+		return ResultFloat(returnType, info.Value, result.Value), nil
 	}
 	errValue, err := vm.fastDecodeErrorValue(info.Error, result.Error)
 	if err != nil {
@@ -475,7 +475,7 @@ func (vm *VM) fastDecodeBoolResultWithInfo(returnType air.TypeID, info air.TypeI
 		vm.profile.RecordValueAlloc(valueAllocResult)
 	}
 	if result.Ok {
-		return Result(returnType, true, Bool(info.Value, result.Value)), nil
+		return ResultBool(returnType, info.Value, result.Value), nil
 	}
 	errValue, err := vm.fastDecodeErrorValue(info.Error, result.Error)
 	if err != nil {
@@ -506,7 +506,7 @@ func (vm *VM) fastBoolStringErrorResultWithInfo(returnType air.TypeID, info air.
 	if hostErr != nil {
 		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
 	}
-	return Result(returnType, true, Bool(info.Value, out)), nil
+	return ResultBool(returnType, info.Value, out), nil
 }
 
 func (vm *VM) fastVoidStringErrorResult(returnType air.TypeID, hostErr error) (Value, error) {

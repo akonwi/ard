@@ -80,17 +80,17 @@ func (vm *VM) runTest(test air.Test) TestOutcome {
 		outcome.Message = err.Error()
 		return outcome
 	}
-	result, err := value.resultValue()
+	resultOK, resultValue, err := value.resultParts()
 	if err != nil {
 		outcome.Message = err.Error()
 		return outcome
 	}
-	if result.Ok {
+	if resultOK {
 		outcome.Status = TestPass
 		return outcome
 	}
 	outcome.Status = TestFail
-	outcome.Message = result.Value.GoValueString()
+	outcome.Message = resultValue.GoValueString()
 	return outcome
 }
 
@@ -148,12 +148,12 @@ func copyValue(value Value) Value {
 			return value
 		}
 		return Maybe(value.Type, maybeValue.Some, copyValue(maybeValue.Value))
-	case ValueResult:
-		resultValue, ok := value.Ref.(*ResultValue)
-		if !ok || resultValue == nil {
+	case ValueResult, ValueResultInt, ValueResultStr, ValueResultBool, ValueResultFloat:
+		resultOK, resultValue, err := value.resultParts()
+		if err != nil {
 			return value
 		}
-		return Result(value.Type, resultValue.Ok, copyValue(resultValue.Value))
+		return Result(value.Type, resultOK, copyValue(resultValue))
 	case ValueUnion:
 		unionValue, ok := value.Ref.(*UnionValue)
 		if !ok || unionValue == nil {
@@ -192,6 +192,14 @@ func mapEntryIndex(mapValue *MapValue, key Value) int {
 }
 
 func valuesEqual(left, right Value) bool {
+	if (left.Kind == ValueResult || left.Kind == ValueResultInt || left.Kind == ValueResultStr || left.Kind == ValueResultBool || left.Kind == ValueResultFloat) && (right.Kind == ValueResult || right.Kind == ValueResultInt || right.Kind == ValueResultStr || right.Kind == ValueResultBool || right.Kind == ValueResultFloat) {
+		leftOKTag, leftValue, leftErr := left.resultParts()
+		rightOKTag, rightValue, rightErr := right.resultParts()
+		if leftErr != nil || rightErr != nil || leftOKTag != rightOKTag {
+			return false
+		}
+		return valuesEqual(leftValue, rightValue)
+	}
 	if left.Kind == ValueMaybe && right.Kind == ValueMaybe {
 		leftMaybe, leftOK := left.Ref.(*MaybeValue)
 		rightMaybe, rightOK := right.Ref.(*MaybeValue)
@@ -235,13 +243,6 @@ func valuesEqual(left, right Value) bool {
 			}
 		}
 		return true
-	case ValueResult:
-		leftResult, leftOK := left.Ref.(*ResultValue)
-		rightResult, rightOK := right.Ref.(*ResultValue)
-		if !leftOK || !rightOK || leftResult.Ok != rightResult.Ok {
-			return false
-		}
-		return valuesEqual(leftResult.Value, rightResult.Value)
 	default:
 		return left.GoValue() == right.GoValue()
 	}
