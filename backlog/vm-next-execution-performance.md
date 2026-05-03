@@ -334,6 +334,19 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
     access paths while preserving detailed defensive error messages on the cold
     invalid path. This targets the `decode_pipeline` profile where list, map,
     and closure `Ref` access dominate remaining value-representation pressure.
+    - Checkpoint commit: `fa53c17 perf(vm_next): inline hot value ref access`.
+    - 10-run runtime suite after this change: aggregate `806.7 ms`; strongest
+      directional win was `decode_pipeline` at `367.5 ms` vs the immediately
+      previous `383.2 ms` checkpoint. `word_frequency_batch` also improved to
+      `78.7 ms`, and `sql_batch` to `55.3 ms`; `fs_batch` remained noisy.
+    - Same-suite current bytecode VM comparison: aggregate `634.8 ms`, so
+      `vm_next` remains about `1.27x` slower overall. The largest remaining
+      absolute gap is still `decode_pipeline` (`vm_next 367.5 ms` vs current VM
+      `254.3 ms`), followed by collection/loop-heavy `word_frequency_batch`
+      (`78.7 ms` vs `52.0 ms`).
+    - Next decode-oriented work should continue targeting list/map/closure
+      access and closure churn. Detailed counters show `Maybe` and zero-value
+      handling are not decode bottlenecks.
   - [x] Avoid repeated stack traffic and value assertions for local match
     subjects by lowering Result and Union match probes/extractions to local
     bytecode opcodes (`ResultIsOkLocal`, `ResultExpectLocal`,
