@@ -464,7 +464,7 @@ work so the pure-runtime gap does not get lost behind decode/FFI work.
 
 ### Milestone 6: Closure, trait, and async call fast paths
 
-Status: Pending
+Status: In progress
 
 Closure and trait dispatch are important for decode helpers, sorting callbacks,
 trait-based encoding, and host callback APIs.
@@ -486,7 +486,27 @@ histogram was kept. Do not retry zero-capture closure caching unless the runtime
 representation can avoid adding dispatch/cache checks to every zero-capture
 closure expression.
 
+After Milestone 3, the next step is closure callsite profiling rather than a new
+representation experiment. Closure aggregate counts are high enough to explain a
+large part of the remaining decode gap, but prior runtime-wide cache/collection
+special cases were fragile. The profiler now needs to identify the top closure
+functions by calls and creations so Milestone 6 can choose between local closure
+call opcodes, unary closure fast paths, or safe lowering-level hoisting/reuse.
+
 - [ ] Reduce closure creation allocation.
+  - [x] Add closure callsite profiling by bytecode closure function.
+    - Records top closure functions by call count plus creation count, average
+      arity, locals, and capture distribution under `ARD_VM_NEXT_PROFILE=1`.
+      This is intended to guide targeted lowering/call-path changes and avoid
+      repeating broad closure-cache experiments that regressed the full suite.
+    - Initial `decode_pipeline` sample shows closure traffic is concentrated in
+      a small set of unary decoder functions/closures: `int` (~336k calls,
+      ~36k zero-capture creations), one 2-capture anonymous decoder closure
+      (~36k calls/creations), `string` (~48k calls, ~12k zero-capture
+      creations), one 1-capture anonymous closure (~24k calls/creations), and
+      one 2-capture anonymous closure (~12k calls/creations). This strongly
+      suggests local/unary closure call lowering or safe non-escaping direct
+      calls will be more promising than another broad closure cache.
   - [x] Evaluate capture distribution and zero-capture closure caching. Both
     map-backed and bytecode-indexed cache experiments passed tests but regressed
     the full benchmark suite, so only the profiling histogram was kept.

@@ -59,6 +59,21 @@ type bindingProfile struct {
 	convertOut time.Duration
 }
 
+type closureFunctionProfile struct {
+	name         string
+	calls        int
+	creations    int
+	argcSum      int
+	maxArity     int
+	captureSum   int
+	maxCaptures  int
+	locals       int
+	zeroCapture  int
+	oneCapture   int
+	twoCapture   int
+	threePlusCap int
+}
+
 type executionProfile struct {
 	started time.Time
 
@@ -103,8 +118,9 @@ type executionProfile struct {
 	externHostNS   atomic.Int64
 	externOutNS    atomic.Int64
 
-	mu              sync.Mutex
-	externByBinding map[string]*bindingProfile
+	mu                sync.Mutex
+	externByBinding   map[string]*bindingProfile
+	closureByFunction map[string]*closureFunctionProfile
 }
 
 func newExecutionProfile() *executionProfile {
@@ -112,8 +128,9 @@ func newExecutionProfile() *executionProfile {
 		return nil
 	}
 	return &executionProfile{
-		started:         time.Now(),
-		externByBinding: make(map[string]*bindingProfile),
+		started:           time.Now(),
+		externByBinding:   make(map[string]*bindingProfile),
+		closureByFunction: make(map[string]*closureFunctionProfile),
 	}
 }
 
@@ -139,6 +156,18 @@ func (p *executionProfile) RecordClosureCreation(captures int) {
 	if p == nil {
 		return
 	}
+	p.recordClosureCreation(captures)
+}
+
+func (p *executionProfile) RecordClosureFunctionCreation(name string, captures int) {
+	if p == nil {
+		return
+	}
+	p.recordClosureCreation(captures)
+	p.recordClosureFunction(name, false, 0, captures, 0)
+}
+
+func (p *executionProfile) recordClosureCreation(captures int) {
 	p.closureCreations.Add(1)
 	p.captureSlots.Add(uint64(captures))
 	bucket := captures
@@ -149,6 +178,13 @@ func (p *executionProfile) RecordClosureCreation(captures int) {
 		bucket = 0
 	}
 	p.captureBuckets[bucket].Add(1)
+}
+
+func (p *executionProfile) RecordClosureFunctionCall(name string, argc int, captures int, locals int) {
+	if p == nil {
+		return
+	}
+	p.recordClosureFunction(name, true, argc, captures, locals)
 }
 
 func (p *executionProfile) RecordTraitCall() {
@@ -263,6 +299,43 @@ func (p *executionProfile) RecordZeroValue(kind zeroValueKind) {
 	p.zeroValues[kind].Add(1)
 }
 
+func (p *executionProfile) recordClosureFunction(name string, call bool, argc int, captures int, locals int) {
+	if name == "" {
+		name = "<unknown>"
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	stat := p.closureByFunction[name]
+	if stat == nil {
+		stat = &closureFunctionProfile{name: name}
+		p.closureByFunction[name] = stat
+	}
+	if call {
+		stat.calls++
+		stat.argcSum += argc
+		if argc > stat.maxArity {
+			stat.maxArity = argc
+		}
+		stat.locals = locals
+		return
+	}
+	stat.creations++
+	stat.captureSum += captures
+	if captures > stat.maxCaptures {
+		stat.maxCaptures = captures
+	}
+	switch {
+	case captures <= 0:
+		stat.zeroCapture++
+	case captures == 1:
+		stat.oneCapture++
+	case captures == 2:
+		stat.twoCapture++
+	default:
+		stat.threePlusCap++
+	}
+}
+
 func (p *executionProfile) RecordExternCall(binding string, argc int, convertIn, host, convertOut time.Duration) {
 	if p == nil {
 		return
@@ -341,6 +414,7 @@ func (p *executionProfile) Report() string {
 			p.captureBuckets[3].Load(),
 			avgCaptures,
 			avgClosureArity)
+		p.writeClosureFunctionReport(&out)
 	}
 	if p.fiberSpawns.Load() > 0 || fiberWaits > 0 {
 		fmt.Fprintf(&out, "fibers spawned=%d waits=%d wait_total=%s\n", p.fiberSpawns.Load(), fiberWaits, time.Duration(p.fiberWaitNS.Load()).Round(time.Microsecond))
@@ -427,6 +501,51 @@ func (p *executionProfile) writeMilestone3ProfileReport(out *strings.Builder) {
 			p.zeroValues[zeroValueTraitObject].Load(),
 			p.zeroValues[zeroValueExtern].Load(),
 			p.zeroValues[zeroValueOther].Load())
+	}
+}
+
+func (p *executionProfile) writeClosureFunctionReport(out *strings.Builder) {
+	p.mu.Lock()
+	functions := make([]*closureFunctionProfile, 0, len(p.closureByFunction))
+	for _, stat := range p.closureByFunction {
+		copy := *stat
+		functions = append(functions, &copy)
+	}
+	p.mu.Unlock()
+	if len(functions) == 0 {
+		return
+	}
+	sort.Slice(functions, func(i, j int) bool {
+		left := functions[i].calls + functions[i].creations
+		right := functions[j].calls + functions[j].creations
+		if left == right {
+			return functions[i].name < functions[j].name
+		}
+		return left > right
+	})
+	limit := profileTopN()
+	if limit > len(functions) {
+		limit = len(functions)
+	}
+	fmt.Fprintf(out, "top closure functions (by calls+creations):\n")
+	for i := 0; i < limit; i++ {
+		stat := functions[i]
+		avgArity := avgInt(stat.argcSum, stat.calls)
+		avgCaptures := avgInt(stat.captureSum, stat.creations)
+		fmt.Fprintf(out, "  %2d. %s calls=%d creations=%d avg_arity=%.2f max_arity=%d avg_captures=%.2f max_captures=%d cap0=%d cap1=%d cap2=%d cap3plus=%d locals=%d\n",
+			i+1,
+			stat.name,
+			stat.calls,
+			stat.creations,
+			avgArity,
+			stat.maxArity,
+			avgCaptures,
+			stat.maxCaptures,
+			stat.zeroCapture,
+			stat.oneCapture,
+			stat.twoCapture,
+			stat.threePlusCap,
+			stat.locals)
 	}
 }
 
@@ -536,6 +655,13 @@ func writeTopCounts(out *strings.Builder, title string, counts []kindCount) {
 }
 
 func avgUint64(total uint64, count uint64) float64 {
+	if count == 0 {
+		return 0
+	}
+	return float64(total) / float64(count)
+}
+
+func avgInt(total int, count int) float64 {
 	if count == 0 {
 		return 0
 	}

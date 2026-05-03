@@ -148,6 +148,7 @@ func (vm *VM) newClosureBytecodeFrame(closure *ClosureValue, fn *vmcode.Function
 	}
 	if vm.profile != nil {
 		vm.profile.RecordClosureCall(len(args), fn.Locals)
+		vm.profile.RecordClosureFunctionCall(fn.Name, len(args), len(closure.Captures), fn.Locals)
 		vm.profile.RecordLocalsAlloc(fn.Locals)
 	}
 	locals := vm.getValueSlice(fn.Locals)
@@ -340,7 +341,11 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, err
 			}
 			if vm.profile != nil {
-				vm.profile.RecordClosureCreation(len(captures))
+				closureName := ""
+				if closureFn, ok := vm.bytecode.Function(air.FunctionID(inst.C)); ok {
+					closureName = closureFn.Name
+				}
+				vm.profile.RecordClosureFunctionCreation(closureName, len(captures))
 				vm.profile.RecordValueAlloc(valueAllocClosure)
 			}
 			push(Closure(air.TypeID(inst.A), air.FunctionID(inst.C), captures))
@@ -368,6 +373,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			}
 			if vm.profile != nil {
 				vm.profile.RecordClosureCall(len(args), callee.Locals)
+				vm.profile.RecordClosureFunctionCall(callee.Name, len(args), len(closure.Captures), callee.Locals)
 				vm.profile.RecordLocalsAlloc(callee.Locals)
 			}
 			locals, localsBase := takeArenaLocals(callee.Locals)
