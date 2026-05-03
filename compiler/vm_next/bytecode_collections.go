@@ -207,7 +207,7 @@ func popMethodArgs(profile *executionProfile, pop func() (Value, error), argCoun
 func (vm *VM) bytecodeMaybeElem(typeID air.TypeID) air.TypeID {
 	typeInfo, err := vm.typeInfo(typeID)
 	if err != nil || typeInfo.Kind != air.TypeMaybe {
-		return vm.mustTypeID(air.TypeVoid)
+		return vm.voidType
 	}
 	return typeInfo.Elem
 }

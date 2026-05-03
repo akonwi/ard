@@ -14,6 +14,7 @@ type VM struct {
 	bytecode    *vmcode.Program
 	externs     hostExternAdapters
 	profile     *executionProfile
+	voidType    air.TypeID
 	valueSlices sync.Pool
 }
 
@@ -37,14 +38,14 @@ func New(program *air.Program) (*VM, error) {
 
 func (vm *VM) RunEntry() (Value, error) {
 	if vm.program.Entry == air.NoFunction {
-		return vm.zeroValue(vm.mustTypeID(air.TypeVoid)), nil
+		return vm.zeroValue(vm.voidType), nil
 	}
 	return vm.runBytecode(vm.program.Entry, nil)
 }
 
 func (vm *VM) RunScript() (Value, error) {
 	if vm.program.Script == air.NoFunction {
-		return vm.zeroValue(vm.mustTypeID(air.TypeVoid)), nil
+		return vm.zeroValue(vm.voidType), nil
 	}
 	return vm.runBytecode(vm.program.Script, nil)
 }
@@ -282,13 +283,20 @@ func (vm *VM) typeInfo(id air.TypeID) (air.TypeInfo, error) {
 	return vm.program.Types[id-1], nil
 }
 
-func (vm *VM) mustTypeID(kind air.TypeKind) air.TypeID {
-	for _, typ := range vm.program.Types {
+func typeIDForKind(program *air.Program, kind air.TypeKind) air.TypeID {
+	if program == nil {
+		return air.NoType
+	}
+	for _, typ := range program.Types {
 		if typ.Kind == kind {
 			return typ.ID
 		}
 	}
 	return air.NoType
+}
+
+func (vm *VM) mustTypeID(kind air.TypeKind) air.TypeID {
+	return typeIDForKind(vm.program, kind)
 }
 
 func (vm *VM) zeroValue(typeID air.TypeID) Value {

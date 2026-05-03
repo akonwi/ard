@@ -233,18 +233,25 @@ Recommended Milestone 2 feedback loop:
 
 ### Milestone 3: Value representation improvements
 
-Status: In progress — Result representation complete; remaining Maybe,
-`Ref any`, and zero-value work is profiling-gated.
+Status: Done
 
 The current `Value` representation boxes many common Ard values behind `Ref any`.
 This is simple but allocation-heavy and type-assertion-heavy.
 
-This milestone is now the primary follow-up for the remaining `decode_pipeline`
-gap after Milestone 2. Profiling shows decode still executes hundreds of
+This milestone was the primary follow-up for the remaining `decode_pipeline`
+gap after Milestone 2. Profiling showed decode still executed hundreds of
 thousands of `TryResult`, `Return`, closure, and frame operations. Fast FFI
-adapters removed much of the reflective boundary cost, so the next decode wins
-are likely in `Result`/`Maybe` representation, cheaper zero values, and reducing
-wrapper allocation/type-assertion churn on success-heavy decode paths.
+adapters removed much of the reflective boundary cost, and Milestone 3 narrowed
+that remaining value pressure to Result representation plus hot wrapper/ref
+access paths.
+
+Milestone 3 is complete as of the `vm_next` Result representation, detailed
+value-profile counters, inlineable hot `Ref` access helpers, and cached runtime
+Void `TypeID` lookup. The remaining decode gap is no longer primarily a generic
+value-representation problem: detailed profiles point to list/map access,
+closure calls/creation, and loop/interpreter mechanics. Those follow-ups are
+tracked in Milestones 5 and 6 rather than extending this milestone with broader
+speculative representation changes.
 
 - [x] Measure allocation counts for `vm_next` execution with Go allocation
   profiling or additional counters.
@@ -291,13 +298,14 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
     10-run runtime suite did not improve directionally, so the change was not
     kept. Zero-value caching should only be revisited with allocation evidence
     showing repeated zero construction as a standalone bottleneck.
-- [ ] Inline or specialize common wrappers.
-  - [ ] `Maybe` fast representation.
-    - Profiling-gated. A broad Result-style `Maybe` representation was already
-      rejected, and new counters show Maybe is hot in shape/sql/word-frequency
-      paths but cold in decode. Prefer lower-risk access/lowering experiments
-      over a global representation change unless profiles show a specific hot
-      Maybe shape.
+- [x] Inline or specialize common wrappers.
+  - [x] `Maybe` fast representation.
+    - Closed without a global representation change. A broad Result-style
+      `Maybe` representation was already rejected, and detailed counters show
+      Maybe is hot in shape/sql/word-frequency paths but cold in decode. The
+      hot `Maybe` sites are mostly `Some` results from collection/map access, so
+      remaining opportunities belong with Milestone 5 collection/lowering work
+      rather than a global `ValueMaybe` redesign.
   - [x] Result fast representation.
     - Autoresearch retained a coherent Result redesign: inline success tag in
       `Value.Bool`, generic payload as typed `*Value`, dedicated internal
@@ -326,8 +334,12 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
     not improve and introduced compatibility overhead in result access. Do not
     keep ad hoc partial encodings unless paired with a broader tagged
     representation.
-- [ ] Reduce `Ref any` usage on hot paths.
-  - [ ] Prefer typed heap references or tagged heap records.
+- [x] Reduce `Ref any` usage on hot paths.
+  - [x] Prefer typed heap references or tagged heap records.
+    - Retained the successful typed `*Value` Result payload plus dedicated
+      scalar Result tags. Broader storage redesigns for Maybe/Union/reference
+      payloads regressed, so the retained completion strategy is typed/narrow
+      records only where profiles and full-suite benchmarks justified them.
   - [x] Add profiling counters for typed `Ref any` access by helper kind so
     future storage changes can be driven by actual assertion/access volume.
   - [x] Add inlineable fast-ref helpers for hot list/map/struct/union/closure
@@ -355,13 +367,37 @@ wrapper allocation/type-assertion churn on success-heavy decode paths.
     decode/shape/sql hot paths. A follow-up attempt to inline the Result-local
     helper directly into the interpreter switch passed tests but worsened the
     full 10-run suite, so the smaller helper-based form was retained.
-  - [ ] Avoid repeated Go type assertions for validated value kinds.
-- [ ] Add cheaper zero-value handling.
+  - [x] Avoid repeated Go type assertions for validated value kinds.
+    - Completed for the hot validated paths identified by profiles using local
+      Result/Union opcodes and inlineable fast-ref helpers for list/map/struct/
+      union/closure access. Further assertion elimination should be tied to a
+      specific Milestone 5/6 lowering or closure change.
+- [x] Add cheaper zero-value handling.
   - [x] Add profiling counters for `zeroValue` calls by AIR type category.
-  - [ ] Cache common zero values by `TypeID` where safe.
-  - [ ] Avoid repeatedly scanning type tables for `Void`.
+  - [x] Cache common zero values by `TypeID` where safe.
+    - A broad immutable zero-value cache was evaluated and rejected because it
+      did not improve the 10-run runtime suite. Detailed counters now show zero
+      values are cold for decode and mostly `Void` in sql/fs-style paths, so no
+      broader zero cache is retained for Milestone 3.
+  - [x] Avoid repeatedly scanning type tables for `Void`.
+    - Cached the runtime Void `TypeID` in `VM` and use it for empty entry/script
+      returns and fallback Maybe zero handling instead of repeatedly scanning
+      the type table.
 - [x] Benchmark decode/result-heavy and map/maybe-heavy workloads after local
   match subject opcodes.
+- [x] Run final Milestone 3 validation.
+  - `cd compiler && go test ./...`
+  - `cd compiler && go test -tags vmnext_profile_detail ./vm_next`
+  - `cd compiler && ./benchmarks/run.sh --mode runtime --runs 10 --warmup 3`
+  - Final Milestone 3 checkpoint after cached Void `TypeID`: vm_next aggregate
+    `805.2 ms` (`sales_pipeline 77.2`, `shape_catalog 97.6`,
+    `decode_pipeline 369.9`, `word_frequency_batch 78.7`, `async_batches 16.3`,
+    `fs_batch 110.4`, `sql_batch 55.1`). The same run's current bytecode VM
+    aggregate was `641.3 ms` with noisy `shape_catalog`/`async_batches`, so
+    vm_next remains about `1.26x` slower overall. Use the earlier `fa53c17`
+    checkpoint (`decode_pipeline 367.5 ms`) as the cleaner decode signal for
+    the hot Ref-access optimization; the cached Void `TypeID` change is a small
+    cleanup/closure item rather than a major benchmark driver.
 
 ### Milestone 4: Direct generated FFI adapters
 

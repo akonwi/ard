@@ -365,7 +365,7 @@ func (vm *VM) execBytecodeTryMaybe(inst vmcode.Instruction, pop func() (Value, e
 func (vm *VM) bytecodeZeroMaybeForReturn(returnType air.TypeID) Value {
 	typeInfo, err := vm.typeInfo(returnType)
 	if err != nil || typeInfo.Kind != air.TypeMaybe {
-		return vm.zeroValue(vm.mustTypeID(air.TypeVoid))
+		return vm.zeroValue(vm.voidType)
 	}
 	return vm.zeroValue(typeInfo.Elem)
 }

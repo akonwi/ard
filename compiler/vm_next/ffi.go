@@ -65,7 +65,7 @@ func NewWithExterns(program *air.Program, externs HostFunctionRegistry) (*VM, er
 	for name, fn := range externs {
 		registry[name] = fn
 	}
-	vm := &VM{program: program, profile: newExecutionProfile()}
+	vm := &VM{program: program, profile: newExecutionProfile(), voidType: typeIDForKind(program, air.TypeVoid)}
 	code, err := vmcode.Lower(program)
 	if err != nil {
 		return nil, err
