@@ -975,6 +975,28 @@ func (vm *VM) runBytecodeClosureValue1(value Value, arg Value) (Value, error) {
 	return vm.runBytecodeFrameLoop(frame)
 }
 
+func (vm *VM) runBytecodeClosureValue2(value Value, left Value, right Value) (Value, error) {
+	function, captures, ok := closureParts(value)
+	if !ok {
+		return Value{}, closureValueError(value)
+	}
+	fn, ok := vm.bytecode.Function(function)
+	if !ok {
+		return Value{}, fmt.Errorf("invalid closure function id %d", function)
+	}
+	if fn.Arity != 2 {
+		return Value{}, fmt.Errorf("%s expects %d args, got 2", fn.Name, fn.Arity)
+	}
+	var args [2]Value
+	args[0] = left
+	args[1] = right
+	frame, err := vm.newClosureBytecodeFrame(captures, fn, args[:], 0)
+	if err != nil {
+		return Value{}, err
+	}
+	return vm.runBytecodeFrameLoop(frame)
+}
+
 func (vm *VM) bytecodeConstant(index int, kind vmcode.ConstantKind) (vmcode.Constant, error) {
 	if index < 0 || index >= len(vm.bytecode.Constants) {
 		return vmcode.Constant{}, fmt.Errorf("constant index %d out of range", index)

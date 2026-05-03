@@ -112,6 +112,11 @@ func (vm *VM) callClosure1(value Value, arg Value) (Value, error) {
 	return vm.runBytecodeClosureValue1(value, arg)
 }
 
+func (vm *VM) callClosure2(value Value, left Value, right Value) (Value, error) {
+	vm.recordRefAccess(refAccessClosure)
+	return vm.runBytecodeClosureValue2(value, left, right)
+}
+
 func copyValue(value Value) Value {
 	switch value.Kind {
 	case ValueStruct:

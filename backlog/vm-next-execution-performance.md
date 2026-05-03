@@ -579,7 +579,17 @@ call opcodes, unary closure fast paths, or safe lowering-level hoisting/reuse.
 - [ ] Make trait calls cheaper after bytecode validation.
   - [ ] Pre-resolve impl method function IDs in bytecode operands.
   - [ ] Avoid repeated trait/impl bounds checks in hot dispatch.
-- [ ] Review sort comparator calls and other high-frequency callback paths.
+- [x] Review sort comparator calls and other high-frequency callback paths.
+  - Added `callClosure2` for list sort comparators so sort callbacks use a
+    fixed two-argument closure call path instead of allocating a `[]Value` for
+    every comparison. This targets `sales_pipeline`, `shape_catalog`, and
+    `word_frequency_batch` sort-heavy paths while preserving callback semantics.
+  - 10-run runtime checkpoint: vm_next aggregate `780.2 ms`
+    (`sales_pipeline 78.2`, `shape_catalog 93.2`, `decode_pipeline 356.6`,
+    `word_frequency_batch 77.3`, `async_batches 13.1`, `fs_batch 107.5`,
+    `sql_batch 54.3`). Aggregate improved slightly over the inline zero-capture
+    closure checkpoint (`781.4 ms`), with the clearest intended win in
+    `word_frequency_batch`; retained despite small sales/shape noise.
 - [ ] Keep fiber spawn/get/wait profiling and safety behavior intact.
 - [ ] Benchmark `decode_pipeline`, `sql_batch`, `async_batches`, and sort-heavy
   samples.

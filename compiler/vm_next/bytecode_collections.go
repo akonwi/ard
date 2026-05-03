@@ -74,10 +74,7 @@ func (vm *VM) execBytecodeListOp(inst vmcode.Instruction, stack *[]Value) (Value
 			if sortErr != nil {
 				return false
 			}
-			if vm.profile != nil {
-				vm.profile.RecordArgSliceAlloc(2)
-			}
-			value, err := vm.callClosure(comparator, []Value{listValue.Items[i], listValue.Items[j]})
+			value, err := vm.callClosure2(comparator, listValue.Items[i], listValue.Items[j])
 			if err != nil {
 				sortErr = err
 				return false
