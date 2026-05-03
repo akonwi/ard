@@ -535,8 +535,14 @@ call opcodes, unary closure fast paths, or safe lowering-level hoisting/reuse.
       `sql_batch 54.4`). The same run's current bytecode VM aggregate was
       `627.8 ms`; vm_next remains about `1.25x` slower overall, with decode
       still the largest absolute gap (`357.8 ms` vs `250.7 ms`).
-  - [ ] Pay special attention to unary closure calls from decode and
+  - [x] Pay special attention to unary closure calls from decode and
     `Maybe`/`Result` mapper paths.
+    - Evaluated a narrower `CallClosure1Local` opcode after `CallClosureLocal`
+      converted all hot decode closure calls to local-target calls. It kept the
+      same opcode count reduction but regressed the 10-run runtime suite
+      (`vm_next` aggregate about `791.7 ms` vs the `785.6 ms` `CallClosureLocal`
+      checkpoint, with `decode_pipeline` `361.8 ms` vs `357.8 ms`). Reverted;
+      keep the more general `CallClosureLocal` path.
 - [ ] Make trait calls cheaper after bytecode validation.
   - [ ] Pre-resolve impl method function IDs in bytecode operands.
   - [ ] Avoid repeated trait/impl bounds checks in hot dispatch.
