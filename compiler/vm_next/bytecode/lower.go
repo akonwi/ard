@@ -163,6 +163,15 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 		}
 		fl.emit(Instruction{Op: OpMakeClosure, A: int(expr.Type), B: len(expr.CaptureLocals), C: int(expr.Function)})
 	case air.ExprCallClosure:
+		if expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal {
+			for i := range expr.Args {
+				if err := fl.lowerExpr(&expr.Args[i]); err != nil {
+					return err
+				}
+			}
+			fl.emit(Instruction{Op: OpCallClosureLocal, A: int(expr.Type), B: int(expr.Target.Local), C: len(expr.Args)})
+			break
+		}
 		if err := fl.lowerExpr(expr.Target); err != nil {
 			return err
 		}

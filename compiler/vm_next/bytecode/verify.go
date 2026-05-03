@@ -38,6 +38,10 @@ func verifyFunction(program *Program, fn *Function) error {
 			if inst.A < 0 || inst.A >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: local index out of range", fn.Name, ip)
 			}
+		case OpCallClosureLocal:
+			if inst.B < 0 || inst.B >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: closure local index out of range", fn.Name, ip)
+			}
 		case OpResultExpectLocal, OpResultErrValueLocal, OpResultIsOkLocal:
 			if inst.B < 0 || inst.B >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: result local index out of range", fn.Name, ip)
@@ -112,6 +116,8 @@ func stackEffect(inst Instruction) (pop int, push int, err error) {
 		return inst.Imm + 1, 1, nil
 	case OpCallClosure:
 		return inst.B + 1, 1, nil
+	case OpCallClosureLocal:
+		return inst.C, 1, nil
 	case OpReturn:
 		return 1, 0, nil
 	case OpIntAdd, OpIntSub, OpIntMul, OpIntDiv, OpIntMod,

@@ -522,6 +522,19 @@ call opcodes, unary closure fast paths, or safe lowering-level hoisting/reuse.
     combinators; autoresearch rejected a runtime-only unary capture inline
     representation because the added branching hurt the aggregate suite.
 - [ ] Add closure call fast paths for common arities.
+  - [x] Add `CallClosureLocal` lowering for calls whose closure target is a
+    local. This removes the preceding target `LoadLocal` and keeps closure
+    arguments on the stack, matching the existing local-opcode strategy used by
+    Result/list/map hot paths.
+    - Decode profile effect: `CallClosure` becomes `CallClosureLocal` for the
+      hot closure call sites and `LoadLocal` drops by ~456k in `decode_pipeline`
+      (`~4.31M` to `~3.85M` in representative profiles).
+    - 10-run runtime checkpoint after this change: vm_next aggregate `785.6 ms`
+      (`sales_pipeline 77.2`, `shape_catalog 91.2`, `decode_pipeline 357.8`,
+      `word_frequency_batch 78.3`, `async_batches 13.1`, `fs_batch 113.6`,
+      `sql_batch 54.4`). The same run's current bytecode VM aggregate was
+      `627.8 ms`; vm_next remains about `1.25x` slower overall, with decode
+      still the largest absolute gap (`357.8 ms` vs `250.7 ms`).
   - [ ] Pay special attention to unary closure calls from decode and
     `Maybe`/`Result` mapper paths.
 - [ ] Make trait calls cheaper after bytecode validation.

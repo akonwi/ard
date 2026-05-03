@@ -234,6 +234,41 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 		stack = append(stack, value)
 		return Value{}, false
 	}
+	prepareClosureFrame := func(target Value, args []Value) (*vmcode.Function, []Value, int, error) {
+		vm.recordRefAccess(refAccessClosure)
+		closure, ok := closureRef(target)
+		if !ok {
+			return nil, nil, 0, closureValueError(target)
+		}
+		callee, ok := vm.bytecode.Function(closure.Function)
+		if !ok {
+			return nil, nil, 0, fmt.Errorf("invalid closure function id %d", closure.Function)
+		}
+		if len(args) != callee.Arity {
+			return nil, nil, 0, fmt.Errorf("%s expects %d args, got %d", callee.Name, callee.Arity, len(args))
+		}
+		if len(closure.Captures) != len(callee.Captures) {
+			return nil, nil, 0, fmt.Errorf("%s expects %d captures, got %d", callee.Name, len(callee.Captures), len(closure.Captures))
+		}
+		if vm.profile != nil {
+			vm.profile.RecordClosureCall(len(args), callee.Locals)
+			vm.profile.RecordClosureFunctionCall(callee.Name, len(args), len(closure.Captures), callee.Locals)
+			vm.profile.RecordLocalsAlloc(callee.Locals)
+		}
+		nextLocals, localsBase := takeArenaLocals(callee.Locals)
+		if err := initBytecodeLocals(callee.Name, nextLocals, args); err != nil {
+			localsArena = localsArena[:localsBase]
+			return nil, nil, 0, err
+		}
+		for i, capture := range callee.Captures {
+			if int(capture.Local) < 0 || int(capture.Local) >= len(nextLocals) {
+				localsArena = localsArena[:localsBase]
+				return nil, nil, 0, fmt.Errorf("%s capture %s has invalid local %d", callee.Name, capture.Name, capture.Local)
+			}
+			nextLocals[capture.Local] = closure.Captures[i]
+		}
+		return callee, nextLocals, localsBase, nil
+	}
 
 	for len(frames) > 0 {
 		frame = &frames[len(frames)-1]
@@ -355,41 +390,30 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			}
 			targetIndex := len(stack) - inst.B - 1
 			target := stack[targetIndex]
-			vm.recordRefAccess(refAccessClosure)
-			closure, ok := closureRef(target)
-			if !ok {
-				return Value{}, closureValueError(target)
-			}
-			callee, ok := vm.bytecode.Function(closure.Function)
-			if !ok {
-				return Value{}, fmt.Errorf("invalid closure function id %d", closure.Function)
-			}
 			args := stack[targetIndex+1:]
-			if len(args) != callee.Arity {
-				return Value{}, fmt.Errorf("%s expects %d args, got %d", callee.Name, callee.Arity, len(args))
-			}
-			if len(closure.Captures) != len(callee.Captures) {
-				return Value{}, fmt.Errorf("%s expects %d captures, got %d", callee.Name, len(callee.Captures), len(closure.Captures))
-			}
-			if vm.profile != nil {
-				vm.profile.RecordClosureCall(len(args), callee.Locals)
-				vm.profile.RecordClosureFunctionCall(callee.Name, len(args), len(closure.Captures), callee.Locals)
-				vm.profile.RecordLocalsAlloc(callee.Locals)
-			}
-			locals, localsBase := takeArenaLocals(callee.Locals)
-			if err := initBytecodeLocals(callee.Name, locals, args); err != nil {
-				localsArena = localsArena[:localsBase]
+			callee, locals, localsBase, err := prepareClosureFrame(target, args)
+			if err != nil {
 				return Value{}, err
-			}
-			for i, capture := range callee.Captures {
-				if int(capture.Local) < 0 || int(capture.Local) >= len(locals) {
-					localsArena = localsArena[:localsBase]
-					return Value{}, fmt.Errorf("%s capture %s has invalid local %d", callee.Name, capture.Name, capture.Local)
-				}
-				locals[capture.Local] = closure.Captures[i]
 			}
 			stack = stack[:targetIndex]
 			frames = append(frames, bytecodeFrame{fn: callee, locals: locals, stackBase: targetIndex, localsBase: localsBase, arenaLocals: true})
+			continue
+		case vmcode.OpCallClosureLocal:
+			if inst.B < 0 || inst.B >= len(locals) {
+				return Value{}, fmt.Errorf("%s: closure local %d out of range", fn.Name, inst.B)
+			}
+			if inst.C < 0 || inst.C > len(stack)-frame.stackBase {
+				return Value{}, fmt.Errorf("closure local call: stack underflow")
+			}
+			targetIndex := len(stack) - inst.C
+			target := locals[inst.B]
+			args := stack[targetIndex:]
+			callee, nextLocals, localsBase, err := prepareClosureFrame(target, args)
+			if err != nil {
+				return Value{}, err
+			}
+			stack = stack[:targetIndex]
+			frames = append(frames, bytecodeFrame{fn: callee, locals: nextLocals, stackBase: targetIndex, localsBase: localsBase, arenaLocals: true})
 			continue
 		case vmcode.OpSpawnFiber:
 			fiber := &FiberValue{Type: air.TypeID(inst.A), Done: make(chan struct{})}

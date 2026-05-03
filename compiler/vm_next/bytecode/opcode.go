@@ -43,6 +43,7 @@ const (
 	OpCallTrait
 	OpMakeClosure
 	OpCallClosure
+	OpCallClosureLocal
 	OpSpawnFiber
 	OpFiberGet
 	OpFiberJoin
@@ -199,6 +200,8 @@ func (op Opcode) String() string {
 		return "MakeClosure"
 	case OpCallClosure:
 		return "CallClosure"
+	case OpCallClosureLocal:
+		return "CallClosureLocal"
 	case OpSpawnFiber:
 		return "SpawnFiber"
 	case OpFiberGet:
