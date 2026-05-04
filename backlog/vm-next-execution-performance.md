@@ -755,7 +755,91 @@ Recommended focus:
 - [x] Benchmark with the official runtime suite and track `decode_pipeline`
   separately from aggregate `total_ms`.
 
-### Milestone 8: Profiling and benchmark tracking
+### Milestone 8: Scalable FFI performance architecture
+
+Status: In progress
+
+After M4 rejected VM-local direct adapter matrices, the remaining FFI performance
+problem should be solved with a scalable architecture rather than hidden
+`vm_next` fast paths. The goal is to recover the benefits of non-reflective FFI
+where it matters while keeping stdlib semantics and host representation details
+out of generic VM adapter code.
+
+Chosen direction: generate adapters from stdlib FFI metadata.
+
+The adapter layer is an internal compiler/runtime concern. External stdlib FFI
+host code should remain ignorant of adapter concepts and continue exposing normal
+Go functions. The compiler/runtime can generate any non-reflective wrappers it
+needs from the same metadata that already defines stdlib FFI bindings.
+
+Accepted design:
+
+1. Generate adapters from stdlib FFI metadata.
+   - Use the stdlib FFI registry / generated metadata as the source of truth.
+   - Generated code can call typed host functions without `reflect.Call`, but
+     should be regenerated whenever stdlib signatures change.
+   - `vm_next` should load/register generated adapters; it should not hand
+     maintain a growing signature switch.
+   - Keep generated adapter behavior signature-driven and metadata-driven, not
+     benchmark-driven or binding-name-special-cased.
+
+Rejected designs:
+
+2. Do not make stdlib FFI functions expose a VM-native adapter form.
+   - External FFI code should not know about adapters. Adapters are an internal
+     compiler/runtime implementation detail.
+3. Do not change the vm_next stdlib extern ABI for hot decode functions to
+   accept/return Value-like handles.
+   - This would create a special lower-level ABI for one family of stdlib calls
+     instead of solving FFI generation generally.
+4. Do not move decode primitives out of external FFI into VM intrinsics.
+   - This does not scale across targets and would make decode semantics a VM
+     concern rather than a stdlib/target concern.
+
+Checklist:
+
+- [x] Compare the four designs and pick generated adapters as the primary
+  direction.
+- [x] Generate `vm_next` stdlib host adapters from the existing stdlib FFI
+  metadata generator.
+  - The generated adapters type-assert the registered host function, convert
+    `Value` arguments to typed Go values, call the host function directly, and
+    convert typed returns back to `Value` without `reflect.Call`.
+  - Generation uses Go AST construction/printer APIs for the adapter file rather
+    than hand-building Go source strings.
+- [x] Preserve generic reflective fallback for user/custom externs.
+  - If no generated stdlib adapter matches, or if a same-binding override does
+    not have the generated stdlib function type, `vm_next` falls back to the
+    validated reflective adapter path.
+- [x] Keep stdlib semantics outside generic VM adapter code.
+  - Generated adapters call the registered host functions; they do not
+    reimplement binding behavior such as decode semantics.
+- [x] Avoid binding-name special cases in `vm_next/ffi.go`.
+  - `ffi.go` only asks the generated adapter registry for an optional direct
+    callable; binding-specific cases live in generated code.
+- [x] Benchmark at least `decode_pipeline`, `sql_batch`, and full runtime suite.
+  - Focus run after generated adapters: `decode_pipeline` vm_next `306.3 ms`
+    vs current VM `259.8 ms`; `sql_batch` vm_next `51.9 ms` vs current VM
+    `50.2 ms`.
+  - Full runtime-suite run after generated adapters: vm_next aggregate about
+    `642.8 ms` vs current VM about `680.9 ms` in the same run. `decode_pipeline`
+    remains the largest gap at `306.3 ms` vs `262.1 ms`.
+
+Next FFI architecture item:
+
+- [ ] Generalize FFI adapter generation beyond the built-in stdlib.
+  - Long-term, any host extern contract should be able to generate the same
+    pieces the stdlib now generates: host-facing Go declarations plus internal
+    `vm_next` adapter glue.
+  - Host implementations should remain ordinary Go functions and should not know
+    about adapters, `Value`, stacks, or VM internals.
+  - Generated adapters should become the intended production path for custom
+    host extern sets, with reflective fallback kept for development, tests,
+    dynamic embedding, and unsupported shapes while generator coverage matures.
+  - This would let embedders write normal host functions while avoiding
+    `reflect.Call` in steady-state execution.
+
+### Milestone 9: Profiling and benchmark tracking
 
 Status: Pending
 

@@ -17,10 +17,13 @@ type HostFunctionRegistry map[string]any
 
 type hostExternAdapters map[air.ExternID]hostExternAdapter
 
+type hostExternDirect func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error)
+
 type hostExternAdapter struct {
 	binding    string
 	extern     air.Extern
 	callable   reflect.Value
+	direct     hostExternDirect
 	inputs     []reflect.Type
 	inputPlans []hostInputPlan
 	buildErr   error
@@ -147,10 +150,12 @@ func (vm *VM) newHostExternAdapter(extern air.Extern, binding string, fn any) (h
 	if err := vm.validateHostReturns(extern.Signature.Return, fnType); err != nil {
 		return hostExternAdapter{}, err
 	}
+	direct, _ := generatedStdlibHostExternAdapter(binding, fn)
 	return hostExternAdapter{
 		binding:    binding,
 		extern:     extern,
 		callable:   callable,
+		direct:     direct,
 		inputs:     inputs,
 		inputPlans: inputPlans,
 	}, nil
@@ -162,6 +167,16 @@ func (adapter hostExternAdapter) call(vm *VM, args []Value) (Value, error) {
 	}
 	if len(adapter.inputs) != len(args) {
 		return Value{}, fmt.Errorf("extern %s expects %d args, got %d", adapter.binding, len(adapter.inputs), len(args))
+	}
+	if adapter.direct != nil {
+		if vm.profile == nil {
+			return adapter.direct(vm, adapter.extern, adapter.binding, args)
+		}
+		start := time.Now()
+		value, err := adapter.direct(vm, adapter.extern, adapter.binding, args)
+		duration := time.Since(start)
+		vm.profile.RecordExternCall(adapter.binding, len(args), 0, duration, 0)
+		return value, err
 	}
 	if vm.profile == nil {
 		inputs, err := adapter.hostInputs(vm, args)
