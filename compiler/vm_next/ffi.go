@@ -36,10 +36,9 @@ func generatedHostExternAdapter(binding string, fn any) (hostExternDirect, bool)
 }
 
 type hostExternAdapter struct {
-	binding  string
-	extern   air.Extern
-	direct   hostExternDirect
-	buildErr error
+	binding string
+	extern  air.Extern
+	direct  hostExternDirect
 }
 
 var (
@@ -73,7 +72,11 @@ func NewWithExterns(program *air.Program, externs HostFunctionRegistry) (*VM, er
 		return nil, err
 	}
 	vm.bytecode = code
-	vm.externs = vm.buildHostExternAdapters(registry)
+	adapters, err := vm.buildHostExternAdapters(registry)
+	if err != nil {
+		return nil, err
+	}
+	vm.externs = adapters
 	return vm, nil
 }
 
@@ -108,7 +111,7 @@ func (vm *VM) callExtern(id air.ExternID, args []Value) (value Value, err error)
 	return adapter.call(vm, args)
 }
 
-func (vm *VM) buildHostExternAdapters(registry HostFunctionRegistry) hostExternAdapters {
+func (vm *VM) buildHostExternAdapters(registry HostFunctionRegistry) (hostExternAdapters, error) {
 	adapters := hostExternAdapters{}
 	for _, extern := range vm.program.Externs {
 		binding := goExternBinding(extern)
@@ -118,11 +121,11 @@ func (vm *VM) buildHostExternAdapters(registry HostFunctionRegistry) hostExternA
 		}
 		adapter, err := vm.newHostExternAdapter(extern, binding, fn)
 		if err != nil {
-			adapter = hostExternAdapter{binding: binding, extern: extern, buildErr: err}
+			return nil, fmt.Errorf("extern %s adapter: %w", binding, err)
 		}
 		adapters[extern.ID] = adapter
 	}
-	return adapters
+	return adapters, nil
 }
 
 func (vm *VM) newHostExternAdapter(extern air.Extern, binding string, fn any) (hostExternAdapter, error) {
@@ -155,9 +158,6 @@ func (vm *VM) newHostExternAdapter(extern air.Extern, binding string, fn any) (h
 }
 
 func (adapter hostExternAdapter) call(vm *VM, args []Value) (Value, error) {
-	if adapter.buildErr != nil {
-		return Value{}, fmt.Errorf("extern %s adapter: %w", adapter.binding, adapter.buildErr)
-	}
 	if len(adapter.extern.Signature.Params) != len(args) {
 		return Value{}, fmt.Errorf("extern %s expects %d args, got %d", adapter.binding, len(adapter.extern.Signature.Params), len(args))
 	}

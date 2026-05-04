@@ -7,7 +7,7 @@ import (
 	"github.com/akonwi/ard/air"
 )
 
-func stdlibHostArg[T any](vm *VM, value Value) (T, error) {
+func generatedHostArg[T any](vm *VM, value Value) (T, error) {
 	var zero T
 	target := reflect.TypeFor[T]()
 	switch target {
@@ -61,15 +61,15 @@ func stdlibHostArg[T any](vm *VM, value Value) (T, error) {
 	return out, nil
 }
 
-func stdlibHostReturnVoid(vm *VM, returnType air.TypeID) (Value, error) {
+func generatedHostReturnVoid(vm *VM, returnType air.TypeID) (Value, error) {
 	return vm.zeroValue(returnType), nil
 }
 
-func stdlibHostReturnValue[T any](vm *VM, returnType air.TypeID, value T) (Value, error) {
-	return stdlibHostValueToValue(vm, returnType, value)
+func generatedHostReturnValue[T any](vm *VM, returnType air.TypeID, value T) (Value, error) {
+	return generatedHostValueToValue(vm, returnType, value)
 }
 
-func stdlibHostReturnError(vm *VM, returnType air.TypeID, err error) (Value, error) {
+func generatedHostReturnError(vm *VM, returnType air.TypeID, err error) (Value, error) {
 	returnInfo, infoErr := vm.typeInfo(returnType)
 	if infoErr != nil {
 		return Value{}, infoErr
@@ -80,7 +80,7 @@ func stdlibHostReturnError(vm *VM, returnType air.TypeID, err error) (Value, err
 	return Result(returnType, true, vm.zeroValue(returnInfo.Value)), nil
 }
 
-func stdlibHostReturnValueError[T any](vm *VM, returnType air.TypeID, value T, err error) (Value, error) {
+func generatedHostReturnValueError[T any](vm *VM, returnType air.TypeID, value T, err error) (Value, error) {
 	returnInfo, infoErr := vm.typeInfo(returnType)
 	if infoErr != nil {
 		return Value{}, infoErr
@@ -88,33 +88,33 @@ func stdlibHostReturnValueError[T any](vm *VM, returnType air.TypeID, value T, e
 	if err != nil {
 		return vm.resultErr(returnType, returnInfo.Error, err)
 	}
-	okValue, convertErr := stdlibHostValueToValue(vm, returnInfo.Value, value)
+	okValue, convertErr := generatedHostValueToValue(vm, returnInfo.Value, value)
 	if convertErr != nil {
 		return Value{}, convertErr
 	}
 	return Result(returnType, true, okValue), nil
 }
 
-func stdlibHostReturnResult[T, E any](vm *VM, returnType air.TypeID, value T, errValue E, ok bool) (Value, error) {
+func generatedHostReturnResult[T, E any](vm *VM, returnType air.TypeID, value T, errValue E, ok bool) (Value, error) {
 	returnInfo, err := vm.typeInfo(returnType)
 	if err != nil {
 		return Value{}, err
 	}
 	if ok {
-		okValue, err := stdlibHostValueToValue(vm, returnInfo.Value, value)
+		okValue, err := generatedHostValueToValue(vm, returnInfo.Value, value)
 		if err != nil {
 			return Value{}, err
 		}
 		return Result(returnType, true, okValue), nil
 	}
-	convertedErr, err := stdlibHostValueToValue(vm, returnInfo.Error, errValue)
+	convertedErr, err := generatedHostValueToValue(vm, returnInfo.Error, errValue)
 	if err != nil {
 		return Value{}, err
 	}
 	return Result(returnType, false, convertedErr), nil
 }
 
-func stdlibHostValueToValue[T any](vm *VM, typeID air.TypeID, value T) (Value, error) {
+func generatedHostValueToValue[T any](vm *VM, typeID air.TypeID, value T) (Value, error) {
 	typeInfo, err := vm.typeInfo(typeID)
 	if err != nil {
 		return Value{}, err

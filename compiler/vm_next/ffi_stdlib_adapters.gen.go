@@ -19,12 +19,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[stdlibffi.Callback0[struct{}]](vm, args[0])
+			arg0, err := generatedHostArg[stdlibffi.Callback0[struct{}]](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "Base64Decode":
 		typed, ok := fn.(func(string, stdlibffi.Maybe[bool]) (string, error))
@@ -32,16 +32,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[stdlibffi.Maybe[bool]](vm, args[1])
+			arg1, err := generatedHostArg[stdlibffi.Maybe[bool]](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0, out1 := typed(arg0, arg1)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "Base64DecodeURL":
 		typed, ok := fn.(func(string, stdlibffi.Maybe[bool]) (string, error))
@@ -49,16 +49,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[stdlibffi.Maybe[bool]](vm, args[1])
+			arg1, err := generatedHostArg[stdlibffi.Maybe[bool]](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0, out1 := typed(arg0, arg1)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "Base64Encode":
 		typed, ok := fn.(func(string, stdlibffi.Maybe[bool]) string)
@@ -66,16 +66,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[stdlibffi.Maybe[bool]](vm, args[1])
+			arg1, err := generatedHostArg[stdlibffi.Maybe[bool]](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0 := typed(arg0, arg1)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "Base64EncodeURL":
 		typed, ok := fn.(func(string, stdlibffi.Maybe[bool]) string)
@@ -83,16 +83,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[stdlibffi.Maybe[bool]](vm, args[1])
+			arg1, err := generatedHostArg[stdlibffi.Maybe[bool]](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0 := typed(arg0, arg1)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "BoolToDynamic":
 		typed, ok := fn.(func(bool) any)
@@ -100,12 +100,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[bool](vm, args[0])
+			arg0, err := generatedHostArg[bool](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "CryptoHashPassword":
 		typed, ok := fn.(func(string, stdlibffi.Maybe[int]) (string, error))
@@ -113,16 +113,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[stdlibffi.Maybe[int]](vm, args[1])
+			arg1, err := generatedHostArg[stdlibffi.Maybe[int]](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0, out1 := typed(arg0, arg1)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "CryptoMd5":
 		typed, ok := fn.(func(string) string)
@@ -130,12 +130,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "CryptoScryptHash":
 		typed, ok := fn.(func(string, stdlibffi.Maybe[string], stdlibffi.Maybe[int], stdlibffi.Maybe[int], stdlibffi.Maybe[int], stdlibffi.Maybe[int]) (string, error))
@@ -143,32 +143,32 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[stdlibffi.Maybe[string]](vm, args[1])
+			arg1, err := generatedHostArg[stdlibffi.Maybe[string]](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
-			arg2, err := stdlibHostArg[stdlibffi.Maybe[int]](vm, args[2])
+			arg2, err := generatedHostArg[stdlibffi.Maybe[int]](vm, args[2])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 2: %w", binding, err)
 			}
-			arg3, err := stdlibHostArg[stdlibffi.Maybe[int]](vm, args[3])
+			arg3, err := generatedHostArg[stdlibffi.Maybe[int]](vm, args[3])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 3: %w", binding, err)
 			}
-			arg4, err := stdlibHostArg[stdlibffi.Maybe[int]](vm, args[4])
+			arg4, err := generatedHostArg[stdlibffi.Maybe[int]](vm, args[4])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 4: %w", binding, err)
 			}
-			arg5, err := stdlibHostArg[stdlibffi.Maybe[int]](vm, args[5])
+			arg5, err := generatedHostArg[stdlibffi.Maybe[int]](vm, args[5])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 5: %w", binding, err)
 			}
 			out0, out1 := typed(arg0, arg1, arg2, arg3, arg4, arg5)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "CryptoScryptVerify":
 		typed, ok := fn.(func(string, string, stdlibffi.Maybe[int], stdlibffi.Maybe[int], stdlibffi.Maybe[int], stdlibffi.Maybe[int]) (bool, error))
@@ -176,32 +176,32 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[string](vm, args[1])
+			arg1, err := generatedHostArg[string](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
-			arg2, err := stdlibHostArg[stdlibffi.Maybe[int]](vm, args[2])
+			arg2, err := generatedHostArg[stdlibffi.Maybe[int]](vm, args[2])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 2: %w", binding, err)
 			}
-			arg3, err := stdlibHostArg[stdlibffi.Maybe[int]](vm, args[3])
+			arg3, err := generatedHostArg[stdlibffi.Maybe[int]](vm, args[3])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 3: %w", binding, err)
 			}
-			arg4, err := stdlibHostArg[stdlibffi.Maybe[int]](vm, args[4])
+			arg4, err := generatedHostArg[stdlibffi.Maybe[int]](vm, args[4])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 4: %w", binding, err)
 			}
-			arg5, err := stdlibHostArg[stdlibffi.Maybe[int]](vm, args[5])
+			arg5, err := generatedHostArg[stdlibffi.Maybe[int]](vm, args[5])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 5: %w", binding, err)
 			}
 			out0, out1 := typed(arg0, arg1, arg2, arg3, arg4, arg5)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "CryptoSha256":
 		typed, ok := fn.(func(string) string)
@@ -209,12 +209,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "CryptoSha512":
 		typed, ok := fn.(func(string) string)
@@ -222,12 +222,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "CryptoUUID":
 		typed, ok := fn.(func() string)
@@ -236,7 +236,7 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
 			out0 := typed()
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "CryptoVerifyPassword":
 		typed, ok := fn.(func(string, string) (bool, error))
@@ -244,16 +244,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[string](vm, args[1])
+			arg1, err := generatedHostArg[string](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0, out1 := typed(arg0, arg1)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "DecodeBool":
 		typed, ok := fn.(func(any) stdlibffi.Result[bool, stdlibffi.Error])
@@ -261,12 +261,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[any](vm, args[0])
+			arg0, err := generatedHostArg[any](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnResult(vm, extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
+			return generatedHostReturnResult(vm, extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
 		}, true
 	case "DecodeFloat":
 		typed, ok := fn.(func(any) stdlibffi.Result[float64, stdlibffi.Error])
@@ -274,12 +274,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[any](vm, args[0])
+			arg0, err := generatedHostArg[any](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnResult(vm, extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
+			return generatedHostReturnResult(vm, extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
 		}, true
 	case "DecodeInt":
 		typed, ok := fn.(func(any) stdlibffi.Result[int, stdlibffi.Error])
@@ -287,12 +287,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[any](vm, args[0])
+			arg0, err := generatedHostArg[any](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnResult(vm, extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
+			return generatedHostReturnResult(vm, extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
 		}, true
 	case "DecodeString":
 		typed, ok := fn.(func(any) stdlibffi.Result[string, stdlibffi.Error])
@@ -300,12 +300,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[any](vm, args[0])
+			arg0, err := generatedHostArg[any](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnResult(vm, extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
+			return generatedHostReturnResult(vm, extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
 		}, true
 	case "DynamicToList":
 		typed, ok := fn.(func(any) ([]any, error))
@@ -313,12 +313,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[any](vm, args[0])
+			arg0, err := generatedHostArg[any](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0, out1 := typed(arg0)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "DynamicToMap":
 		typed, ok := fn.(func(any) (map[string]any, error))
@@ -326,12 +326,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[any](vm, args[0])
+			arg0, err := generatedHostArg[any](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0, out1 := typed(arg0)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "EnvGet":
 		typed, ok := fn.(func(string) stdlibffi.Maybe[string])
@@ -339,12 +339,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "ExtractField":
 		typed, ok := fn.(func(any, string) (any, error))
@@ -352,16 +352,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[any](vm, args[0])
+			arg0, err := generatedHostArg[any](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[string](vm, args[1])
+			arg1, err := generatedHostArg[string](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0, out1 := typed(arg0, arg1)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "FS_Abs":
 		typed, ok := fn.(func(string) (string, error))
@@ -369,12 +369,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0, out1 := typed(arg0)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "FS_AppendFile":
 		typed, ok := fn.(func(string, string) error)
@@ -382,16 +382,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[string](vm, args[1])
+			arg1, err := generatedHostArg[string](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0 := typed(arg0, arg1)
-			return stdlibHostReturnError(vm, extern.Signature.Return, out0)
+			return generatedHostReturnError(vm, extern.Signature.Return, out0)
 		}, true
 	case "FS_Copy":
 		typed, ok := fn.(func(string, string) error)
@@ -399,16 +399,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[string](vm, args[1])
+			arg1, err := generatedHostArg[string](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0 := typed(arg0, arg1)
-			return stdlibHostReturnError(vm, extern.Signature.Return, out0)
+			return generatedHostReturnError(vm, extern.Signature.Return, out0)
 		}, true
 	case "FS_CreateDir":
 		typed, ok := fn.(func(string) error)
@@ -416,12 +416,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnError(vm, extern.Signature.Return, out0)
+			return generatedHostReturnError(vm, extern.Signature.Return, out0)
 		}, true
 	case "FS_CreateFile":
 		typed, ok := fn.(func(string) (bool, error))
@@ -429,12 +429,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0, out1 := typed(arg0)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "FS_Cwd":
 		typed, ok := fn.(func() (string, error))
@@ -443,7 +443,7 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
 			out0, out1 := typed()
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "FS_DeleteDir":
 		typed, ok := fn.(func(string) error)
@@ -451,12 +451,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnError(vm, extern.Signature.Return, out0)
+			return generatedHostReturnError(vm, extern.Signature.Return, out0)
 		}, true
 	case "FS_DeleteFile":
 		typed, ok := fn.(func(string) error)
@@ -464,12 +464,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnError(vm, extern.Signature.Return, out0)
+			return generatedHostReturnError(vm, extern.Signature.Return, out0)
 		}, true
 	case "FS_Exists":
 		typed, ok := fn.(func(string) bool)
@@ -477,12 +477,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "FS_IsDir":
 		typed, ok := fn.(func(string) bool)
@@ -490,12 +490,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "FS_IsFile":
 		typed, ok := fn.(func(string) bool)
@@ -503,12 +503,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "FS_ListDir":
 		typed, ok := fn.(func(string) (map[string]bool, error))
@@ -516,12 +516,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0, out1 := typed(arg0)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "FS_ReadFile":
 		typed, ok := fn.(func(string) (string, error))
@@ -529,12 +529,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0, out1 := typed(arg0)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "FS_Rename":
 		typed, ok := fn.(func(string, string) error)
@@ -542,16 +542,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[string](vm, args[1])
+			arg1, err := generatedHostArg[string](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0 := typed(arg0, arg1)
-			return stdlibHostReturnError(vm, extern.Signature.Return, out0)
+			return generatedHostReturnError(vm, extern.Signature.Return, out0)
 		}, true
 	case "FS_WriteFile":
 		typed, ok := fn.(func(string, string) error)
@@ -559,16 +559,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[string](vm, args[1])
+			arg1, err := generatedHostArg[string](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0 := typed(arg0, arg1)
-			return stdlibHostReturnError(vm, extern.Signature.Return, out0)
+			return generatedHostReturnError(vm, extern.Signature.Return, out0)
 		}, true
 	case "FloatFloor":
 		typed, ok := fn.(func(float64) float64)
@@ -576,12 +576,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[float64](vm, args[0])
+			arg0, err := generatedHostArg[float64](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "FloatFromInt":
 		typed, ok := fn.(func(int) float64)
@@ -589,12 +589,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[int](vm, args[0])
+			arg0, err := generatedHostArg[int](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "FloatFromStr":
 		typed, ok := fn.(func(string) stdlibffi.Maybe[float64])
@@ -602,12 +602,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "FloatToDynamic":
 		typed, ok := fn.(func(float64) any)
@@ -615,12 +615,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[float64](vm, args[0])
+			arg0, err := generatedHostArg[float64](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "GetPathValue":
 		typed, ok := fn.(func(stdlibffi.RawRequest, string) string)
@@ -628,16 +628,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[stdlibffi.RawRequest](vm, args[0])
+			arg0, err := generatedHostArg[stdlibffi.RawRequest](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[string](vm, args[1])
+			arg1, err := generatedHostArg[string](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0 := typed(arg0, arg1)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "GetQueryParam":
 		typed, ok := fn.(func(stdlibffi.RawRequest, string) string)
@@ -645,16 +645,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[stdlibffi.RawRequest](vm, args[0])
+			arg0, err := generatedHostArg[stdlibffi.RawRequest](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[string](vm, args[1])
+			arg1, err := generatedHostArg[string](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0 := typed(arg0, arg1)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "GetReqPath":
 		typed, ok := fn.(func(stdlibffi.RawRequest) string)
@@ -662,12 +662,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[stdlibffi.RawRequest](vm, args[0])
+			arg0, err := generatedHostArg[stdlibffi.RawRequest](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "GetTodayString":
 		typed, ok := fn.(func() string)
@@ -676,7 +676,7 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
 			out0 := typed()
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "HTTP_Do":
 		typed, ok := fn.(func(string, string, any, map[string]string, stdlibffi.Maybe[int]) (stdlibffi.RawResponse, error))
@@ -684,28 +684,28 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[string](vm, args[1])
+			arg1, err := generatedHostArg[string](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
-			arg2, err := stdlibHostArg[any](vm, args[2])
+			arg2, err := generatedHostArg[any](vm, args[2])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 2: %w", binding, err)
 			}
-			arg3, err := stdlibHostArg[map[string]string](vm, args[3])
+			arg3, err := generatedHostArg[map[string]string](vm, args[3])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 3: %w", binding, err)
 			}
-			arg4, err := stdlibHostArg[stdlibffi.Maybe[int]](vm, args[4])
+			arg4, err := generatedHostArg[stdlibffi.Maybe[int]](vm, args[4])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 4: %w", binding, err)
 			}
 			out0, out1 := typed(arg0, arg1, arg2, arg3, arg4)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "HTTP_ResponseBody":
 		typed, ok := fn.(func(stdlibffi.RawResponse) (string, error))
@@ -713,12 +713,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[stdlibffi.RawResponse](vm, args[0])
+			arg0, err := generatedHostArg[stdlibffi.RawResponse](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0, out1 := typed(arg0)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "HTTP_ResponseClose":
 		typed, ok := fn.(func(stdlibffi.RawResponse))
@@ -726,12 +726,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[stdlibffi.RawResponse](vm, args[0])
+			arg0, err := generatedHostArg[stdlibffi.RawResponse](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			typed(arg0)
-			return stdlibHostReturnVoid(vm, extern.Signature.Return)
+			return generatedHostReturnVoid(vm, extern.Signature.Return)
 		}, true
 	case "HTTP_ResponseHeaders":
 		typed, ok := fn.(func(stdlibffi.RawResponse) map[string]string)
@@ -739,12 +739,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[stdlibffi.RawResponse](vm, args[0])
+			arg0, err := generatedHostArg[stdlibffi.RawResponse](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "HTTP_ResponseStatus":
 		typed, ok := fn.(func(stdlibffi.RawResponse) int)
@@ -752,12 +752,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[stdlibffi.RawResponse](vm, args[0])
+			arg0, err := generatedHostArg[stdlibffi.RawResponse](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "HTTP_Serve":
 		typed, ok := fn.(func(int, map[string]stdlibffi.Callback2[stdlibffi.Request, *stdlibffi.Response, struct{}]) error)
@@ -765,16 +765,16 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[int](vm, args[0])
+			arg0, err := generatedHostArg[int](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[map[string]stdlibffi.Callback2[stdlibffi.Request, *stdlibffi.Response, struct{}]](vm, args[1])
+			arg1, err := generatedHostArg[map[string]stdlibffi.Callback2[stdlibffi.Request, *stdlibffi.Response, struct{}]](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
 			out0 := typed(arg0, arg1)
-			return stdlibHostReturnError(vm, extern.Signature.Return, out0)
+			return generatedHostReturnError(vm, extern.Signature.Return, out0)
 		}, true
 	case "HexDecode":
 		typed, ok := fn.(func(string) (string, error))
@@ -782,12 +782,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0, out1 := typed(arg0)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "HexEncode":
 		typed, ok := fn.(func(string) string)
@@ -795,12 +795,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "IntFromStr":
 		typed, ok := fn.(func(string) stdlibffi.Maybe[int])
@@ -808,12 +808,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "IntToDynamic":
 		typed, ok := fn.(func(int) any)
@@ -821,12 +821,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[int](vm, args[0])
+			arg0, err := generatedHostArg[int](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "IsNil":
 		typed, ok := fn.(func(any) bool)
@@ -834,12 +834,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[any](vm, args[0])
+			arg0, err := generatedHostArg[any](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "JsonEncode":
 		typed, ok := fn.(func(any) (string, error))
@@ -847,12 +847,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[any](vm, args[0])
+			arg0, err := generatedHostArg[any](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0, out1 := typed(arg0)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "JsonToDynamic":
 		typed, ok := fn.(func(string) (any, error))
@@ -860,12 +860,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0, out1 := typed(arg0)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "ListToDynamic":
 		typed, ok := fn.(func([]any) any)
@@ -873,12 +873,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[[]any](vm, args[0])
+			arg0, err := generatedHostArg[[]any](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "MapToDynamic":
 		typed, ok := fn.(func(map[string]any) any)
@@ -886,12 +886,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[map[string]any](vm, args[0])
+			arg0, err := generatedHostArg[map[string]any](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "Now":
 		typed, ok := fn.(func() int)
@@ -900,7 +900,7 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
 			out0 := typed()
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "OsArgs":
 		typed, ok := fn.(func() []string)
@@ -909,7 +909,7 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
 			out0 := typed()
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "Print":
 		typed, ok := fn.(func(string))
@@ -917,12 +917,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			typed(arg0)
-			return stdlibHostReturnVoid(vm, extern.Signature.Return)
+			return generatedHostReturnVoid(vm, extern.Signature.Return)
 		}, true
 	case "ReadLine":
 		typed, ok := fn.(func() (string, error))
@@ -931,7 +931,7 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
 			out0, out1 := typed()
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "Sleep":
 		typed, ok := fn.(func(int))
@@ -939,12 +939,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[int](vm, args[0])
+			arg0, err := generatedHostArg[int](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			typed(arg0)
-			return stdlibHostReturnVoid(vm, extern.Signature.Return)
+			return generatedHostReturnVoid(vm, extern.Signature.Return)
 		}, true
 	case "SqlBeginTx":
 		typed, ok := fn.(func(stdlibffi.Db) (stdlibffi.Tx, error))
@@ -952,12 +952,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[stdlibffi.Db](vm, args[0])
+			arg0, err := generatedHostArg[stdlibffi.Db](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0, out1 := typed(arg0)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "SqlClose":
 		typed, ok := fn.(func(stdlibffi.Db) error)
@@ -965,12 +965,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[stdlibffi.Db](vm, args[0])
+			arg0, err := generatedHostArg[stdlibffi.Db](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnError(vm, extern.Signature.Return, out0)
+			return generatedHostReturnError(vm, extern.Signature.Return, out0)
 		}, true
 	case "SqlCommit":
 		typed, ok := fn.(func(stdlibffi.Tx) error)
@@ -978,12 +978,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[stdlibffi.Tx](vm, args[0])
+			arg0, err := generatedHostArg[stdlibffi.Tx](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnError(vm, extern.Signature.Return, out0)
+			return generatedHostReturnError(vm, extern.Signature.Return, out0)
 		}, true
 	case "SqlCreateConnection":
 		typed, ok := fn.(func(string) (stdlibffi.Db, error))
@@ -991,12 +991,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0, out1 := typed(arg0)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "SqlExecute":
 		typed, ok := fn.(func(any, string, []any) error)
@@ -1004,20 +1004,20 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[any](vm, args[0])
+			arg0, err := generatedHostArg[any](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[string](vm, args[1])
+			arg1, err := generatedHostArg[string](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
-			arg2, err := stdlibHostArg[[]any](vm, args[2])
+			arg2, err := generatedHostArg[[]any](vm, args[2])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 2: %w", binding, err)
 			}
 			out0 := typed(arg0, arg1, arg2)
-			return stdlibHostReturnError(vm, extern.Signature.Return, out0)
+			return generatedHostReturnError(vm, extern.Signature.Return, out0)
 		}, true
 	case "SqlExtractParams":
 		typed, ok := fn.(func(string) []string)
@@ -1025,12 +1025,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "SqlQuery":
 		typed, ok := fn.(func(any, string, []any) ([]any, error))
@@ -1038,20 +1038,20 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[any](vm, args[0])
+			arg0, err := generatedHostArg[any](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1, err := stdlibHostArg[string](vm, args[1])
+			arg1, err := generatedHostArg[string](vm, args[1])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
-			arg2, err := stdlibHostArg[[]any](vm, args[2])
+			arg2, err := generatedHostArg[[]any](vm, args[2])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 2: %w", binding, err)
 			}
 			out0, out1 := typed(arg0, arg1, arg2)
-			return stdlibHostReturnValueError(vm, extern.Signature.Return, out0, out1)
+			return generatedHostReturnValueError(vm, extern.Signature.Return, out0, out1)
 		}, true
 	case "SqlRollback":
 		typed, ok := fn.(func(stdlibffi.Tx) error)
@@ -1059,12 +1059,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[stdlibffi.Tx](vm, args[0])
+			arg0, err := generatedHostArg[stdlibffi.Tx](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnError(vm, extern.Signature.Return, out0)
+			return generatedHostReturnError(vm, extern.Signature.Return, out0)
 		}, true
 	case "StrToDynamic":
 		typed, ok := fn.(func(string) any)
@@ -1072,12 +1072,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[string](vm, args[0])
+			arg0, err := generatedHostArg[string](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "VoidToDynamic":
 		typed, ok := fn.(func() any)
@@ -1086,7 +1086,7 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
 			out0 := typed()
-			return stdlibHostReturnValue(vm, extern.Signature.Return, out0)
+			return generatedHostReturnValue(vm, extern.Signature.Return, out0)
 		}, true
 	case "WaitFor":
 		typed, ok := fn.(func(stdlibffi.WaitGroup))
@@ -1094,12 +1094,12 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 			return nil, false
 		}
 		return func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error) {
-			arg0, err := stdlibHostArg[stdlibffi.WaitGroup](vm, args[0])
+			arg0, err := generatedHostArg[stdlibffi.WaitGroup](vm, args[0])
 			if err != nil {
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			typed(arg0)
-			return stdlibHostReturnVoid(vm, extern.Signature.Return)
+			return generatedHostReturnVoid(vm, extern.Signature.Return)
 		}, true
 	}
 	return nil, false

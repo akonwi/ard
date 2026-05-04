@@ -588,7 +588,7 @@ func vmNextAdapterFuncLit(c contract, opts generateOptions, fn hostFunction) ast
 			&ast.AssignStmt{
 				Lhs: []ast.Expr{ast.NewIdent(argName), ast.NewIdent("err")},
 				Tok: token.DEFINE,
-				Rhs: []ast.Expr{callExpr(&ast.IndexExpr{X: ast.NewIdent("stdlibHostArg"), Index: argType}, ast.NewIdent("vm"), indexExpr(ast.NewIdent("args"), intLit(i)))},
+				Rhs: []ast.Expr{callExpr(&ast.IndexExpr{X: ast.NewIdent("generatedHostArg"), Index: argType}, ast.NewIdent("vm"), indexExpr(ast.NewIdent("args"), intLit(i)))},
 			},
 			&ast.IfStmt{
 				Cond: &ast.BinaryExpr{X: ast.NewIdent("err"), Op: token.NEQ, Y: ast.NewIdent("nil")},
@@ -606,14 +606,14 @@ func vmNextAdapterFuncLit(c contract, opts generateOptions, fn hostFunction) ast
 	case 0:
 		stmts = append(stmts,
 			&ast.ExprStmt{X: hostCall},
-			returnStmt(callExpr(ast.NewIdent("stdlibHostReturnVoid"), ast.NewIdent("vm"), selector("extern", "Signature", "Return"))),
+			returnStmt(callExpr(ast.NewIdent("generatedHostReturnVoid"), ast.NewIdent("vm"), selector("extern", "Signature", "Return"))),
 		)
 	case 1:
 		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("out0")}, Tok: token.DEFINE, Rhs: []ast.Expr{hostCall}})
 		stmts = append(stmts, returnStmt(vmNextReturnCall(fn.Returns[0], "out0")))
 	case 2:
 		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("out0"), ast.NewIdent("out1")}, Tok: token.DEFINE, Rhs: []ast.Expr{hostCall}})
-		stmts = append(stmts, returnStmt(callExpr(ast.NewIdent("stdlibHostReturnValueError"), ast.NewIdent("vm"), selector("extern", "Signature", "Return"), ast.NewIdent("out0"), ast.NewIdent("out1"))))
+		stmts = append(stmts, returnStmt(callExpr(ast.NewIdent("generatedHostReturnValueError"), ast.NewIdent("vm"), selector("extern", "Signature", "Return"), ast.NewIdent("out0"), ast.NewIdent("out1"))))
 	default:
 		stmts = append(stmts, returnStmt(&ast.CompositeLit{Type: ast.NewIdent("Value")}, callExpr(selector("fmt", "Errorf"), stringLit("unsupported generated stdlib adapter return count for %s"), ast.NewIdent("binding"))))
 	}
@@ -638,7 +638,7 @@ func vmNextAdapterFuncLit(c contract, opts generateOptions, fn hostFunction) ast
 func vmNextReturnCall(returnType, outName string) ast.Expr {
 	if strings.HasPrefix(returnType, "Result[") {
 		return callExpr(
-			ast.NewIdent("stdlibHostReturnResult"),
+			ast.NewIdent("generatedHostReturnResult"),
 			ast.NewIdent("vm"),
 			selector("extern", "Signature", "Return"),
 			selector(outName, "Value"),
@@ -647,9 +647,9 @@ func vmNextReturnCall(returnType, outName string) ast.Expr {
 		)
 	}
 	if returnType == "error" {
-		return callExpr(ast.NewIdent("stdlibHostReturnError"), ast.NewIdent("vm"), selector("extern", "Signature", "Return"), ast.NewIdent(outName))
+		return callExpr(ast.NewIdent("generatedHostReturnError"), ast.NewIdent("vm"), selector("extern", "Signature", "Return"), ast.NewIdent(outName))
 	}
-	return callExpr(ast.NewIdent("stdlibHostReturnValue"), ast.NewIdent("vm"), selector("extern", "Signature", "Return"), ast.NewIdent(outName))
+	return callExpr(ast.NewIdent("generatedHostReturnValue"), ast.NewIdent("vm"), selector("extern", "Signature", "Return"), ast.NewIdent(outName))
 }
 
 func vmNextFuncType(c contract, opts generateOptions, fn hostFunction) string {
