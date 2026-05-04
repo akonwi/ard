@@ -407,9 +407,8 @@ func (vm *VM) newFastHostExternAdapter(extern air.Extern, fn any) func(*VM, []Va
 
 func dynamicArg(value Value) any {
 	if value.Kind == ValueDynamic {
-		if dynamicValue, ok := value.Ref.(*DynamicValue); ok && dynamicValue != nil {
-			return dynamicValue.Raw
-		}
+		raw, _ := value.dynamicRaw()
+		return raw
 	}
 	return value.GoValue()
 }
@@ -1435,14 +1434,14 @@ func (vm *VM) hostExternToValue(typeID air.TypeID, value reflect.Value) (Value, 
 
 func (vm *VM) dynamicToHost(value Value, target reflect.Type) (reflect.Value, error) {
 	vm.recordRefAccess(refAccessDynamic)
-	dynamicValue, err := value.dynamicValue()
+	dynamicRaw, err := value.dynamicRaw()
 	if err != nil {
 		return reflect.Value{}, err
 	}
-	if dynamicValue.Raw == nil {
+	if dynamicRaw == nil {
 		return reflect.Zero(target), nil
 	}
-	raw := reflect.ValueOf(dynamicValue.Raw)
+	raw := reflect.ValueOf(dynamicRaw)
 	if raw.Type().AssignableTo(target) {
 		return raw, nil
 	}

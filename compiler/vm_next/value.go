@@ -101,11 +101,6 @@ type ExternValue struct {
 	Handle any
 }
 
-type DynamicValue struct {
-	Type air.TypeID
-	Raw  any
-}
-
 type ClosureValue struct {
 	Type     air.TypeID
 	Function air.FunctionID
@@ -205,7 +200,7 @@ func Extern(typeID air.TypeID, handle any) Value {
 }
 
 func Dynamic(typeID air.TypeID, raw any) Value {
-	return Value{Kind: ValueDynamic, Type: typeID, Ref: &DynamicValue{Type: typeID, Raw: raw}}
+	return Value{Kind: ValueDynamic, Type: typeID, Ref: raw}
 }
 
 func Closure(typeID air.TypeID, function air.FunctionID, captures []Value) Value {
@@ -294,11 +289,7 @@ func (v Value) GoValue() any {
 		}
 		return externValue.Handle
 	case ValueDynamic:
-		dynamicValue, ok := v.Ref.(*DynamicValue)
-		if !ok {
-			return nil
-		}
-		return dynamicValue.Raw
+		return v.Ref
 	case ValueClosure:
 		return v.Ref
 	case ValueClosureFunc:
@@ -468,15 +459,11 @@ func (v Value) externValue() (*ExternValue, error) {
 	return externValue, nil
 }
 
-func (v Value) dynamicValue() (*DynamicValue, error) {
+func (v Value) dynamicRaw() (any, error) {
 	if v.Kind != ValueDynamic {
 		return nil, fmt.Errorf("expected Dynamic value, got kind %d", v.Kind)
 	}
-	dynamicValue, ok := v.Ref.(*DynamicValue)
-	if !ok || dynamicValue == nil {
-		return nil, fmt.Errorf("Dynamic value has invalid payload %T", v.Ref)
-	}
-	return dynamicValue, nil
+	return v.Ref, nil
 }
 
 func closureParts(v Value) (air.FunctionID, []Value, bool) {
