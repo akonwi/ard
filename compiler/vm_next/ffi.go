@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/akonwi/ard/air"
 	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
+	vmcode "github.com/akonwi/ard/vm_next/bytecode"
+	vmnextffi "github.com/akonwi/ard/vm_next/ffi"
 )
 
 type HostFunctionRegistry map[string]any
@@ -16,11 +19,9 @@ type HostFunctionRegistry map[string]any
 type hostExternAdapters map[air.ExternID]hostExternAdapter
 
 type hostExternAdapter struct {
-	binding  string
-	extern   air.Extern
-	callable reflect.Value
-	inputs   []reflect.Type
-	buildErr error
+	binding string
+	extern  air.Extern
+	direct  vmnextffi.ExternAdapter
 }
 
 var (
@@ -28,21 +29,41 @@ var (
 	hostMaybeType  = reflect.TypeFor[stdlibffi.Maybe[any]]()
 	hostResultType = reflect.TypeFor[stdlibffi.Result[any, any]]()
 	anyInterface   = reflect.TypeFor[any]()
+	intType        = reflect.TypeFor[int]()
+	float64Type    = reflect.TypeFor[float64]()
+	boolType       = reflect.TypeFor[bool]()
+	stringType     = reflect.TypeFor[string]()
 )
 
 func NewWithExterns(program *air.Program, externs HostFunctionRegistry) (*VM, error) {
+	return NewWithOptions(program, Options{Externs: externs})
+}
+
+func NewWithOptions(program *air.Program, options Options) (*VM, error) {
 	if err := air.Validate(program); err != nil {
 		return nil, err
 	}
 	registry := HostFunctionRegistry{}
-	for name, fn := range stdlibffi.HostFunctions {
+	for name, fn := range stdlibffi.NewHostFunctions(stdlibffi.HostConfig{Args: options.Args}) {
 		registry[name] = fn
 	}
-	for name, fn := range externs {
+	for name, fn := range options.Externs {
 		registry[name] = fn
 	}
-	vm := &VM{program: program}
-	vm.externs = vm.buildHostExternAdapters(registry)
+	vm := &VM{program: program, profile: newExecutionProfile(), voidType: typeIDForKind(program, air.TypeVoid)}
+	code, err := vmcode.Lower(program)
+	if err != nil {
+		return nil, err
+	}
+	if err := vmcode.Verify(code); err != nil {
+		return nil, err
+	}
+	vm.bytecode = code
+	adapters, err := vm.buildHostExternAdapters(registry)
+	if err != nil {
+		return nil, err
+	}
+	vm.externs = adapters
 	return vm, nil
 }
 
@@ -77,7 +98,7 @@ func (vm *VM) callExtern(id air.ExternID, args []Value) (value Value, err error)
 	return adapter.call(vm, args)
 }
 
-func (vm *VM) buildHostExternAdapters(registry HostFunctionRegistry) hostExternAdapters {
+func (vm *VM) buildHostExternAdapters(registry HostFunctionRegistry) (hostExternAdapters, error) {
 	adapters := hostExternAdapters{}
 	for _, extern := range vm.program.Externs {
 		binding := goExternBinding(extern)
@@ -87,57 +108,67 @@ func (vm *VM) buildHostExternAdapters(registry HostFunctionRegistry) hostExternA
 		}
 		adapter, err := vm.newHostExternAdapter(extern, binding, fn)
 		if err != nil {
-			adapter = hostExternAdapter{binding: binding, extern: extern, buildErr: err}
+			return nil, fmt.Errorf("extern %s adapter: %w", binding, err)
 		}
 		adapters[extern.ID] = adapter
 	}
-	return adapters
+	return adapters, nil
 }
 
 func (vm *VM) newHostExternAdapter(extern air.Extern, binding string, fn any) (hostExternAdapter, error) {
-	callable := reflect.ValueOf(fn)
-	if !callable.IsValid() || callable.Kind() != reflect.Func {
+	fnValue := reflect.ValueOf(fn)
+	if !fnValue.IsValid() || fnValue.Kind() != reflect.Func {
 		return hostExternAdapter{}, fmt.Errorf("extern binding %q is %T, want func", binding, fn)
 	}
-	fnType := callable.Type()
+	fnType := fnValue.Type()
 	if fnType.NumIn() != len(extern.Signature.Params) {
 		return hostExternAdapter{}, fmt.Errorf("extern %s expects %d params from AIR, host function accepts %d", binding, len(extern.Signature.Params), fnType.NumIn())
 	}
-	inputs := make([]reflect.Type, len(extern.Signature.Params))
 	for i, param := range extern.Signature.Params {
 		target := fnType.In(i)
 		if err := vm.validateHostParamType(param.Type, target); err != nil {
 			return hostExternAdapter{}, fmt.Errorf("arg %d %s: %w", i, param.Name, err)
 		}
-		inputs[i] = target
 	}
 	if err := vm.validateHostReturns(extern.Signature.Return, fnType); err != nil {
 		return hostExternAdapter{}, err
 	}
+	direct, ok := vmnextffi.Adapter(binding, fn)
+	if !ok {
+		return hostExternAdapter{}, fmt.Errorf("extern %s has no generated vm_next adapter", binding)
+	}
 	return hostExternAdapter{
-		binding:  binding,
-		extern:   extern,
-		callable: callable,
-		inputs:   inputs,
+		binding: binding,
+		extern:  extern,
+		direct:  direct,
 	}, nil
 }
 
 func (adapter hostExternAdapter) call(vm *VM, args []Value) (Value, error) {
-	if adapter.buildErr != nil {
-		return Value{}, fmt.Errorf("extern %s adapter: %w", adapter.binding, adapter.buildErr)
+	if len(adapter.extern.Signature.Params) != len(args) {
+		return Value{}, fmt.Errorf("extern %s expects %d args, got %d", adapter.binding, len(adapter.extern.Signature.Params), len(args))
 	}
-	if len(adapter.inputs) != len(args) {
-		return Value{}, fmt.Errorf("extern %s expects %d args, got %d", adapter.binding, len(adapter.inputs), len(args))
+	bridge := generatedHostBridge{vm: vm}
+	if vm.profile == nil {
+		return adapter.callDirect(bridge, args)
 	}
-	inputs := make([]reflect.Value, len(args))
-	for i, arg := range args {
-		input, err := vm.valueToHost(arg, adapter.inputs[i])
-		if err != nil {
-			return Value{}, fmt.Errorf("extern %s arg %d: %w", adapter.binding, i, err)
-		}
-		inputs[i] = input
+	start := time.Now()
+	value, err := adapter.callDirect(bridge, args)
+	duration := time.Since(start)
+	vm.profile.RecordExternCall(adapter.binding, len(args), 0, duration, 0)
+	return value, err
+}
+
+func (adapter hostExternAdapter) callDirect(bridge generatedHostBridge, args []Value) (Value, error) {
+	out, err := adapter.direct(bridge, adapter.extern, adapter.binding, args)
+	if err != nil {
+		return Value{}, err
 	}
-	return vm.hostReturnsToValue(adapter.extern.Signature.Return, adapter.callable.Call(inputs))
+	value, ok := out.(Value)
+	if !ok {
+		return Value{}, fmt.Errorf("extern %s generated adapter returned %T, want vm_next.Value", adapter.binding, out)
+	}
+	return value, nil
 }
 
 func goExternBinding(extern air.Extern) string {
@@ -275,8 +306,14 @@ func (vm *VM) validateHostType(typeID air.TypeID, target reflect.Type, param boo
 		if target.Kind() != reflect.Map {
 			return fmt.Errorf("map %s must use host map, got %s", typeInfo.Name, target)
 		}
-		if err := vm.validateHostType(typeInfo.Key, target.Key(), param); err != nil {
-			return fmt.Errorf("map key: %w", err)
+		keyInfo, err := vm.typeInfo(typeInfo.Key)
+		if err != nil {
+			return err
+		}
+		if !(keyInfo.Kind == air.TypeDynamic && target.Key().Kind() == reflect.String) {
+			if err := vm.validateHostType(typeInfo.Key, target.Key(), param); err != nil {
+				return fmt.Errorf("map key: %w", err)
+			}
 		}
 		if err := vm.validateHostType(typeInfo.Value, target.Elem(), param); err != nil {
 			return fmt.Errorf("map value: %w", err)
@@ -377,10 +414,12 @@ func (vm *VM) validateHostFunctionType(typeInfo air.TypeInfo, target reflect.Typ
 
 func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, error) {
 	if isHostMaybeType(target) {
+		vm.recordRefAccess(refAccessMaybe)
 		maybeValue, err := value.maybeValue()
 		if err != nil {
 			return reflect.Value{}, err
 		}
+		vm.recordMaybeAccess(maybeValue)
 		out := reflect.New(target).Elem()
 		if !maybeValue.Some {
 			return out, nil
@@ -403,7 +442,7 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 	if value.Kind == ValueTraitObject && target.Kind() == reflect.Interface && target.NumMethod() == 0 {
 		return vm.traitObjectToHost(value, target)
 	}
-	if value.Kind == ValueClosure && isHostCallbackType(target) {
+	if (value.Kind == ValueClosure || value.Kind == ValueClosureFunc) && isHostCallbackType(target) {
 		return vm.closureToHostCallback(value, target)
 	}
 	if value.Kind == ValueList && target.Kind() == reflect.Slice {
@@ -433,10 +472,12 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 			return out, nil
 		}
 		if value.Kind == ValueMaybe {
+			vm.recordRefAccess(refAccessMaybe)
 			maybeValue, err := value.maybeValue()
 			if err != nil {
 				return reflect.Value{}, err
 			}
+			vm.recordMaybeAccess(maybeValue)
 			if !maybeValue.Some {
 				return reflect.Zero(target), nil
 			}
@@ -482,70 +523,6 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 	return reflect.Value{}, fmt.Errorf("unsupported host parameter type %s", target)
 }
 
-func (vm *VM) hostReturnsToValue(returnType air.TypeID, returns []reflect.Value) (Value, error) {
-	returnInfo, err := vm.typeInfo(returnType)
-	if err != nil {
-		return Value{}, err
-	}
-	if len(returns) == 0 {
-		return vm.zeroValue(returnType), nil
-	}
-	if returnInfo.Kind == air.TypeResult {
-		return vm.hostReturnsToResult(returnInfo, returnType, returns)
-	}
-	if len(returns) != 1 {
-		return Value{}, fmt.Errorf("extern returned %d values for non-Result type", len(returns))
-	}
-	return vm.hostValueToValue(returnType, returns[0])
-}
-
-func (vm *VM) hostReturnsToResult(returnInfo air.TypeInfo, returnType air.TypeID, returns []reflect.Value) (Value, error) {
-	if len(returns) == 1 && isHostResultType(returns[0].Type()) {
-		return vm.hostResultToValue(returnInfo, returnType, returns[0])
-	}
-	if len(returns) == 1 && isErrorValue(returns[0]) {
-		if !returns[0].IsNil() {
-			return vm.resultErr(returnType, returnInfo.Error, returns[0].Interface().(error))
-		}
-		return Result(returnType, true, vm.zeroValue(returnInfo.Value)), nil
-	}
-	if len(returns) == 2 && isErrorValue(returns[1]) {
-		if !returns[1].IsNil() {
-			return vm.resultErr(returnType, returnInfo.Error, returns[1].Interface().(error))
-		}
-		value, err := vm.hostValueToValue(returnInfo.Value, returns[0])
-		if err != nil {
-			return Value{}, err
-		}
-		return Result(returnType, true, value), nil
-	}
-	return Value{}, fmt.Errorf("Result extern must return error or (value, error), got %d values", len(returns))
-}
-
-func (vm *VM) hostResultToValue(returnInfo air.TypeInfo, returnType air.TypeID, value reflect.Value) (Value, error) {
-	for value.Kind() == reflect.Interface {
-		if value.IsNil() {
-			return Result(returnType, false, vm.zeroValue(returnInfo.Error)), nil
-		}
-		value = value.Elem()
-	}
-	if value.Kind() != reflect.Struct {
-		return Value{}, fmt.Errorf("host Result value must be struct, got %s", value.Type())
-	}
-	if value.FieldByName("Ok").Bool() {
-		okValue, err := vm.hostValueToValue(returnInfo.Value, value.FieldByName("Value"))
-		if err != nil {
-			return Value{}, err
-		}
-		return Result(returnType, true, okValue), nil
-	}
-	errValue, err := vm.hostValueToValue(returnInfo.Error, value.FieldByName("Error"))
-	if err != nil {
-		return Value{}, err
-	}
-	return Result(returnType, false, errValue), nil
-}
-
 func (vm *VM) resultErr(resultType, errType air.TypeID, err error) (Value, error) {
 	errValue, convertErr := vm.hostValueToValue(errType, reflect.ValueOf(err.Error()))
 	if convertErr != nil {
@@ -561,6 +538,7 @@ func (vm *VM) hostValueToValue(typeID air.TypeID, value reflect.Value) (Value, e
 	}
 	if !value.IsValid() {
 		if typeInfo.Kind == air.TypeMaybe {
+			vm.recordMaybeDetailAlloc(false)
 			return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem)), nil
 		}
 		return vm.zeroValue(typeID), nil
@@ -574,12 +552,14 @@ func (vm *VM) hostValueToValue(typeID air.TypeID, value reflect.Value) (Value, e
 	if typeInfo.Kind == air.TypeMaybe && isHostMaybeType(value.Type()) {
 		some := value.FieldByName("Some").Bool()
 		if !some {
+			vm.recordMaybeDetailAlloc(false)
 			return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem)), nil
 		}
 		inner, err := vm.hostValueToValue(typeInfo.Elem, value.FieldByName("Value"))
 		if err != nil {
 			return Value{}, err
 		}
+		vm.recordMaybeDetailAlloc(true)
 		return Maybe(typeID, true, inner), nil
 	}
 	switch typeInfo.Kind {
@@ -622,6 +602,7 @@ func (vm *VM) hostValueToValue(typeID air.TypeID, value reflect.Value) (Value, e
 	case air.TypeMaybe:
 		if value.Kind() == reflect.Pointer {
 			if value.IsNil() {
+				vm.recordMaybeDetailAlloc(false)
 				return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem)), nil
 			}
 			value = value.Elem()
@@ -630,6 +611,7 @@ func (vm *VM) hostValueToValue(typeID air.TypeID, value reflect.Value) (Value, e
 		if err != nil {
 			return Value{}, err
 		}
+		vm.recordMaybeDetailAlloc(true)
 		return Maybe(typeID, true, inner), nil
 	case air.TypeStruct:
 		return vm.hostStructToValue(typeInfo, value)
@@ -641,6 +623,7 @@ func (vm *VM) hostValueToValue(typeID air.TypeID, value reflect.Value) (Value, e
 }
 
 func (vm *VM) externToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	vm.recordRefAccess(refAccessExtern)
 	externValue, err := value.externValue()
 	if err != nil {
 		return reflect.Value{}, err
@@ -710,14 +693,15 @@ func (vm *VM) hostExternToValue(typeID air.TypeID, value reflect.Value) (Value, 
 }
 
 func (vm *VM) dynamicToHost(value Value, target reflect.Type) (reflect.Value, error) {
-	dynamicValue, err := value.dynamicValue()
+	vm.recordRefAccess(refAccessDynamic)
+	dynamicRaw, err := value.dynamicRaw()
 	if err != nil {
 		return reflect.Value{}, err
 	}
-	if dynamicValue.Raw == nil {
+	if dynamicRaw == nil {
 		return reflect.Zero(target), nil
 	}
-	raw := reflect.ValueOf(dynamicValue.Raw)
+	raw := reflect.ValueOf(dynamicRaw)
 	if raw.Type().AssignableTo(target) {
 		return raw, nil
 	}
@@ -725,6 +709,7 @@ func (vm *VM) dynamicToHost(value Value, target reflect.Type) (reflect.Value, er
 }
 
 func (vm *VM) unionToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	vm.recordRefAccess(refAccessUnion)
 	unionValue, err := value.unionValue()
 	if err != nil {
 		return reflect.Value{}, err
@@ -762,6 +747,7 @@ func (vm *VM) traitObjectToHost(value Value, target reflect.Type) (reflect.Value
 	if !vm.isEncodableTraitObject(typeInfo) {
 		return reflect.Value{}, fmt.Errorf("trait object %s cannot be passed as host any", typeInfo.Name)
 	}
+	vm.recordRefAccess(refAccessTraitObject)
 	traitObject, err := value.traitObjectValue()
 	if err != nil {
 		return reflect.Value{}, err
@@ -795,6 +781,7 @@ func (vm *VM) isEncodableTraitObject(typeInfo air.TypeInfo) bool {
 }
 
 func (vm *VM) closureToHostCallback(value Value, target reflect.Type) (reflect.Value, error) {
+	vm.recordRefAccess(refAccessClosure)
 	closure, err := value.closureValue()
 	if err != nil {
 		return reflect.Value{}, err
@@ -853,6 +840,7 @@ func (vm *VM) closureToHostCallback(value Value, target reflect.Type) (reflect.V
 }
 
 func (vm *VM) listToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	vm.recordRefAccess(refAccessList)
 	listValue, err := value.listValue()
 	if err != nil {
 		return reflect.Value{}, err
@@ -890,6 +878,7 @@ func (vm *VM) hostListToValue(typeInfo air.TypeInfo, value reflect.Value) (Value
 }
 
 func (vm *VM) mapToHost(value Value, target reflect.Type) (reflect.Value, error) {
+	vm.recordRefAccess(refAccessMap)
 	mapValue, err := value.mapValue()
 	if err != nil {
 		return reflect.Value{}, err
@@ -943,6 +932,7 @@ func (vm *VM) structToHost(value Value, target reflect.Type) (reflect.Value, err
 	if typeInfo.Kind != air.TypeStruct {
 		return reflect.Value{}, fmt.Errorf("cannot pass AIR type %s as Go struct", typeInfo.Name)
 	}
+	vm.recordRefAccess(refAccessStruct)
 	structValue, err := value.structValue()
 	if err != nil {
 		return reflect.Value{}, err

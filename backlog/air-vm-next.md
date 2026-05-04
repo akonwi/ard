@@ -908,6 +908,18 @@ Status: Done
 - [x] Consider Milestone 8 plus this milestone the parity gate for replacing the
   current bytecode VM as the primary VM target.
 
+### Post-Milestone 9: vm_next execution performance
+
+Completed. The final record lives in
+[`compiler/docs/vm-next-execution-performance.md`](../compiler/docs/vm-next-execution-performance.md).
+
+Status: Done
+
+The closed execution-performance work covered the real `AIR -> vm_next`
+bytecode/lowered instruction layer plus runtime optimizations for frames,
+argument passing, value representation, generated FFI adapters, collections,
+closures, traits, async, and profiling.
+
 ### Milestone 10: rewrite the Go target
 
 Moved to [rewrite-go-target.md](rewrite-go-target.md).

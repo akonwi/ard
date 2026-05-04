@@ -1,4 +1,8 @@
 # TODO
+- [ ] make `vm_next/bytecode.Verify` control-flow aware
+  * verify per-basic-block stack heights instead of only a linear stack counter
+  * check branch target stack compatibility and return/termination behavior
+  * this matters before treating serialized vm_next bytecode as a hard safety boundary
 - [ ] allow FFI in user land
 - [ ] make duplicate FFI binding registration return an error
 - [ ] Dependency system

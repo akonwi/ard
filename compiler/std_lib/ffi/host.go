@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/akonwi/ard/runtime"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/mattn/go-sqlite3"
@@ -33,80 +33,96 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-var HostFunctions = Host{
-	Base64Decode:         Base64Decode,
-	Base64DecodeURL:      Base64DecodeURL,
-	Base64Encode:         Base64Encode,
-	Base64EncodeURL:      Base64EncodeURL,
-	BoolToDynamic:        BoolToDynamic,
-	CryptoHashPassword:   CryptoHashPassword,
-	CryptoMd5:            CryptoMd5,
-	CryptoScryptHash:     CryptoScryptHash,
-	CryptoScryptVerify:   CryptoScryptVerify,
-	CryptoSha256:         CryptoSha256,
-	CryptoSha512:         CryptoSha512,
-	CryptoUUID:           CryptoUUID,
-	CryptoVerifyPassword: CryptoVerifyPassword,
-	DecodeBool:           DecodeBool,
-	DecodeFloat:          DecodeFloat,
-	DecodeInt:            DecodeInt,
-	DecodeString:         DecodeString,
-	DynamicToList:        DynamicToList,
-	DynamicToMap:         DynamicToMap,
-	EnvGet:               EnvGet,
-	ExtractField:         ExtractField,
-	FSAbs:                FSAbs,
-	FSAppendFile:         FSAppendFile,
-	FSCopy:               FSCopy,
-	FSCreateDir:          FSCreateDir,
-	FSCreateFile:         FSCreateFile,
-	FSCwd:                FSCwd,
-	FSDeleteDir:          FSDeleteDir,
-	FSDeleteFile:         FSDeleteFile,
-	FSExists:             FSExists,
-	FSIsDir:              FSIsDir,
-	FSIsFile:             FSIsFile,
-	FSListDir:            FSListDir,
-	FSReadFile:           FSReadFile,
-	FSRename:             FSRename,
-	FSWriteFile:          FSWriteFile,
-	FloatFloor:           FloatFloor,
-	FloatFromInt:         FloatFromInt,
-	FloatFromStr:         FloatFromStr,
-	FloatToDynamic:       FloatToDynamic,
-	GetPathValue:         GetPathValue,
-	GetQueryParam:        GetQueryParam,
-	GetReqPath:           GetReqPath,
-	HTTPDo:               HTTPDo,
-	HTTPResponseBody:     HTTPResponseBody,
-	HTTPResponseClose:    HTTPResponseClose,
-	HTTPResponseHeaders:  HTTPResponseHeaders,
-	HTTPResponseStatus:   HTTPResponseStatus,
-	HTTPServe:            HTTPServe,
-	HexDecode:            HexDecode,
-	HexEncode:            HexEncode,
-	IntFromStr:           IntFromStr,
-	IntToDynamic:         IntToDynamic,
-	IsNil:                IsNil,
-	JsonEncode:           JsonEncode,
-	JsonToDynamic:        JsonToDynamic,
-	ListToDynamic:        ListToDynamic,
-	MapToDynamic:         MapToDynamic,
-	OsArgs:               OsArgs,
-	Print:                Print,
-	ReadLine:             ReadLine,
-	Sleep:                Sleep,
-	SqlBeginTx:           SqlBeginTx,
-	SqlClose:             SqlClose,
-	SqlCommit:            SqlCommit,
-	SqlCreateConnection:  SqlCreateConnection,
-	SqlExecute:           SqlExecute,
-	SqlExtractParams:     SqlExtractParams,
-	SqlQuery:             SqlQuery,
-	SqlRollback:          SqlRollback,
-	StrToDynamic:         StrToDynamic,
-	VoidToDynamic:        VoidToDynamic,
-}.Functions()
+type HostConfig struct {
+	Args []string
+}
+
+var HostFunctions = NewHostFunctions(HostConfig{})
+
+func NewHostFunctions(config HostConfig) map[string]any {
+	return NewHost(config).Functions()
+}
+
+func NewHost(config HostConfig) Host {
+	args := config.Args
+	if args != nil {
+		args = append([]string(nil), args...)
+	}
+	return Host{
+		Base64Decode:         Base64Decode,
+		Base64DecodeURL:      Base64DecodeURL,
+		Base64Encode:         Base64Encode,
+		Base64EncodeURL:      Base64EncodeURL,
+		BoolToDynamic:        BoolToDynamic,
+		CryptoHashPassword:   CryptoHashPassword,
+		CryptoMd5:            CryptoMd5,
+		CryptoScryptHash:     CryptoScryptHash,
+		CryptoScryptVerify:   CryptoScryptVerify,
+		CryptoSha256:         CryptoSha256,
+		CryptoSha512:         CryptoSha512,
+		CryptoUUID:           CryptoUUID,
+		CryptoVerifyPassword: CryptoVerifyPassword,
+		DecodeBool:           DecodeBool,
+		DecodeFloat:          DecodeFloat,
+		DecodeInt:            DecodeInt,
+		DecodeString:         DecodeString,
+		DynamicToList:        DynamicToList,
+		DynamicToMap:         DynamicToMap,
+		EnvGet:               EnvGet,
+		ExtractField:         ExtractField,
+		FSAbs:                FSAbs,
+		FSAppendFile:         FSAppendFile,
+		FSCopy:               FSCopy,
+		FSCreateDir:          FSCreateDir,
+		FSCreateFile:         FSCreateFile,
+		FSCwd:                FSCwd,
+		FSDeleteDir:          FSDeleteDir,
+		FSDeleteFile:         FSDeleteFile,
+		FSExists:             FSExists,
+		FSIsDir:              FSIsDir,
+		FSIsFile:             FSIsFile,
+		FSListDir:            FSListDir,
+		FSReadFile:           FSReadFile,
+		FSRename:             FSRename,
+		FSWriteFile:          FSWriteFile,
+		FloatFloor:           FloatFloor,
+		FloatFromInt:         FloatFromInt,
+		FloatFromStr:         FloatFromStr,
+		FloatToDynamic:       FloatToDynamic,
+		GetPathValue:         GetPathValue,
+		GetQueryParam:        GetQueryParam,
+		GetReqPath:           GetReqPath,
+		HTTPDo:               HTTPDo,
+		HTTPResponseBody:     HTTPResponseBody,
+		HTTPResponseClose:    HTTPResponseClose,
+		HTTPResponseHeaders:  HTTPResponseHeaders,
+		HTTPResponseStatus:   HTTPResponseStatus,
+		HTTPServe:            HTTPServe,
+		HexDecode:            HexDecode,
+		HexEncode:            HexEncode,
+		IntFromStr:           IntFromStr,
+		IntToDynamic:         IntToDynamic,
+		IsNil:                IsNil,
+		JsonEncode:           JsonEncode,
+		JsonToDynamic:        JsonToDynamic,
+		ListToDynamic:        ListToDynamic,
+		MapToDynamic:         MapToDynamic,
+		OsArgs:               func() []string { return hostOSArgs(args) },
+		Print:                Print,
+		ReadLine:             ReadLine,
+		Sleep:                Sleep,
+		SqlBeginTx:           SqlBeginTx,
+		SqlClose:             SqlClose,
+		SqlCommit:            SqlCommit,
+		SqlCreateConnection:  SqlCreateConnection,
+		SqlExecute:           SqlExecute,
+		SqlExtractParams:     SqlExtractParams,
+		SqlQuery:             SqlQuery,
+		SqlRollback:          SqlRollback,
+		StrToDynamic:         StrToDynamic,
+		VoidToDynamic:        VoidToDynamic,
+	}
+}
 
 type sqlConnection struct {
 	db     *sql.DB
@@ -132,7 +148,14 @@ type sqlRunner interface {
 }
 
 func OsArgs() []string {
-	return runtime.CurrentOSArgs()
+	return hostOSArgs(nil)
+}
+
+func hostOSArgs(args []string) []string {
+	if args != nil {
+		return append([]string(nil), args...)
+	}
+	return append([]string(nil), os.Args...)
 }
 
 func Print(str string) {
@@ -735,9 +758,7 @@ func IsNil(data any) bool {
 
 func JsonToDynamic(input string) (any, error) {
 	var out any
-	decoder := json.NewDecoder(strings.NewReader(input))
-	decoder.UseNumber()
-	if err := decoder.Decode(&out); err != nil {
+	if err := jsonv2.Unmarshal([]byte(input), &out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -765,8 +786,9 @@ func DecodeInt(data any) Result[int, Error] {
 	case int64:
 		return Ok[int, Error](int(value))
 	case float64:
-		if math.Trunc(value) == value {
-			return Ok[int, Error](int(value))
+		parsed := int(value)
+		if value == float64(parsed) {
+			return Ok[int, Error](parsed)
 		}
 	case json.Number:
 		if parsed, err := value.Int64(); err == nil {
@@ -809,17 +831,21 @@ func DynamicToList(data any) ([]any, error) {
 	return nil, fmt.Errorf("%s", formatDynamicValueForError(data))
 }
 
-func DynamicToMap(data any) (map[any]any, error) {
+func DynamicToMap(data any) (map[string]any, error) {
 	if data == nil {
 		return nil, fmt.Errorf("Void")
 	}
-	if values, ok := data.(map[any]any); ok {
+	if values, ok := data.(map[string]any); ok {
 		return values, nil
 	}
-	if values, ok := data.(map[string]any); ok {
-		out := make(map[any]any, len(values))
+	if values, ok := data.(map[any]any); ok {
+		out := make(map[string]any, len(values))
 		for key, value := range values {
-			out[key] = value
+			keyString, ok := key.(string)
+			if !ok {
+				return nil, fmt.Errorf("%s", formatDynamicValueForError(data))
+			}
+			out[keyString] = value
 		}
 		return out, nil
 	}

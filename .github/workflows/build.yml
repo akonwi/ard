@@ -27,6 +27,13 @@ jobs:
         working-directory: compiler
         run: go mod download
 
+      - name: Generate stdlib FFI bridge code
+        working-directory: compiler
+        run: go generate -tags=goexperiment.jsonv2 ./std_lib/ffi
+
+      - name: Check generated files are current
+        run: git diff --exit-code
+
       - name: Run tests
         working-directory: compiler
         run: go test -tags=goexperiment.jsonv2 ./...

@@ -3,15 +3,24 @@ package vm_next
 import (
 	"fmt"
 	"sort"
-	"strconv"
-	"strings"
+	"sync"
 
 	"github.com/akonwi/ard/air"
+	vmcode "github.com/akonwi/ard/vm_next/bytecode"
 )
 
 type VM struct {
-	program *air.Program
-	externs hostExternAdapters
+	program     *air.Program
+	bytecode    *vmcode.Program
+	externs     hostExternAdapters
+	profile     *executionProfile
+	voidType    air.TypeID
+	valueSlices sync.Pool
+}
+
+type Options struct {
+	Args    []string
+	Externs HostFunctionRegistry
 }
 
 type TestStatus string
@@ -29,30 +38,44 @@ type TestOutcome struct {
 }
 
 func New(program *air.Program) (*VM, error) {
-	return NewWithExterns(program, nil)
+	return NewWithOptions(program, Options{})
 }
 
 func (vm *VM) RunEntry() (Value, error) {
 	if vm.program.Entry == air.NoFunction {
-		return vm.zeroValue(vm.mustTypeID(air.TypeVoid)), nil
+		return vm.zeroValue(vm.voidType), nil
 	}
-	return vm.call(vm.program.Entry, nil)
+	return vm.runBytecode(vm.program.Entry, nil)
 }
 
 func (vm *VM) RunScript() (Value, error) {
 	if vm.program.Script == air.NoFunction {
-		return vm.zeroValue(vm.mustTypeID(air.TypeVoid)), nil
+		return vm.zeroValue(vm.voidType), nil
 	}
-	return vm.call(vm.program.Script, nil)
+	return vm.runBytecode(vm.program.Script, nil)
 }
 
 func (vm *VM) Call(name string, args ...Value) (Value, error) {
 	for _, fn := range vm.program.Functions {
 		if fn.Name == name {
-			return vm.call(fn.ID, args)
+			return vm.runBytecode(fn.ID, args)
 		}
 	}
 	return Value{}, fmt.Errorf("function not found: %s", name)
+}
+
+func (vm *VM) ProfileReport() string {
+	if vm == nil || vm.profile == nil {
+		return ""
+	}
+	return vm.profile.Report()
+}
+
+func (vm *VM) recordMaybeAlloc(some bool) {
+	if vm == nil || vm.profile == nil {
+		return
+	}
+	vm.profile.RecordMaybeAlloc(some)
 }
 
 func (vm *VM) RunTests() []TestOutcome {
@@ -65,437 +88,38 @@ func (vm *VM) RunTests() []TestOutcome {
 
 func (vm *VM) runTest(test air.Test) TestOutcome {
 	outcome := TestOutcome{Name: test.Name, Status: TestPanic}
-	value, err := vm.call(test.Function, nil)
+	value, err := vm.runBytecode(test.Function, nil)
 	if err != nil {
 		outcome.Message = err.Error()
 		return outcome
 	}
-	result, err := value.resultValue()
+	resultOK, resultValue, err := value.resultParts()
 	if err != nil {
 		outcome.Message = err.Error()
 		return outcome
 	}
-	if result.Ok {
+	if resultOK {
 		outcome.Status = TestPass
 		return outcome
 	}
 	outcome.Status = TestFail
-	outcome.Message = result.Value.GoValueString()
+	outcome.Message = resultValue.GoValueString()
 	return outcome
 }
 
-func (vm *VM) call(id air.FunctionID, args []Value) (Value, error) {
-	if id < 0 || int(id) >= len(vm.program.Functions) {
-		return Value{}, fmt.Errorf("invalid function id %d", id)
-	}
-	fn := vm.program.Functions[id]
-	if len(args) != len(fn.Signature.Params) {
-		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, len(fn.Signature.Params), len(args))
-	}
-	frame := &frame{
-		vm:     vm,
-		fn:     fn,
-		locals: make([]Value, len(fn.Locals)),
-	}
-	for i, arg := range args {
-		frame.locals[i] = arg
-	}
-	value, err := frame.evalBlock(fn.Body)
-	if ret, ok := err.(earlyReturn); ok {
-		return ret.value, nil
-	}
-	return value, err
-}
-
 func (vm *VM) callClosure(value Value, args []Value) (Value, error) {
-	closure, err := value.closureValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if closure.Function < 0 || int(closure.Function) >= len(vm.program.Functions) {
-		return Value{}, fmt.Errorf("invalid closure function id %d", closure.Function)
-	}
-	fn := vm.program.Functions[closure.Function]
-	if len(args) != len(fn.Signature.Params) {
-		return Value{}, fmt.Errorf("%s expects %d args, got %d", fn.Name, len(fn.Signature.Params), len(args))
-	}
-	if len(closure.Captures) != len(fn.Captures) {
-		return Value{}, fmt.Errorf("%s expects %d captures, got %d", fn.Name, len(fn.Captures), len(closure.Captures))
-	}
-	frame := &frame{
-		vm:     vm,
-		fn:     fn,
-		locals: make([]Value, len(fn.Locals)),
-	}
-	for i, arg := range args {
-		frame.locals[i] = arg
-	}
-	for i, capture := range fn.Captures {
-		if int(capture.Local) < 0 || int(capture.Local) >= len(frame.locals) {
-			return Value{}, fmt.Errorf("%s capture %s has invalid local %d", fn.Name, capture.Name, capture.Local)
-		}
-		frame.locals[capture.Local] = closure.Captures[i]
-	}
-	result, err := frame.evalBlock(fn.Body)
-	if ret, ok := err.(earlyReturn); ok {
-		return ret.value, nil
-	}
-	return result, err
+	vm.recordRefAccess(refAccessClosure)
+	return vm.runBytecodeClosureValue(value, args)
 }
 
-type frame struct {
-	vm     *VM
-	fn     air.Function
-	locals []Value
+func (vm *VM) callClosure1(value Value, arg Value) (Value, error) {
+	vm.recordRefAccess(refAccessClosure)
+	return vm.runBytecodeClosureValue1(value, arg)
 }
 
-type earlyReturn struct {
-	value Value
-}
-
-func (e earlyReturn) Error() string {
-	return "early return"
-}
-
-type loopBreak struct{}
-
-func (l loopBreak) Error() string {
-	return "break"
-}
-
-func (f *frame) evalBlock(block air.Block) (Value, error) {
-	return f.evalBlockWithDefault(block, f.fn.Signature.Return)
-}
-
-func (f *frame) evalBlockWithDefault(block air.Block, defaultType air.TypeID) (Value, error) {
-	for _, stmt := range block.Stmts {
-		if _, err := f.evalStmt(stmt); err != nil {
-			return Value{}, err
-		}
-	}
-	if block.Result == nil {
-		return f.vm.zeroValue(defaultType), nil
-	}
-	return f.evalExpr(*block.Result)
-}
-
-func (f *frame) evalStmt(stmt air.Stmt) (Value, error) {
-	switch stmt.Kind {
-	case air.StmtLet:
-		value, err := f.evalExprPtr(stmt.Value)
-		if err != nil {
-			return Value{}, err
-		}
-		if int(stmt.Local) < 0 || int(stmt.Local) >= len(f.locals) {
-			return Value{}, fmt.Errorf("invalid local id %d", stmt.Local)
-		}
-		f.locals[stmt.Local] = value
-		return value, nil
-	case air.StmtAssign:
-		value, err := f.evalExprPtr(stmt.Value)
-		if err != nil {
-			return Value{}, err
-		}
-		if int(stmt.Local) < 0 || int(stmt.Local) >= len(f.locals) {
-			return Value{}, fmt.Errorf("invalid local id %d", stmt.Local)
-		}
-		f.locals[stmt.Local] = value
-		return value, nil
-	case air.StmtSetField:
-		target, err := f.evalExprPtr(stmt.Target)
-		if err != nil {
-			return Value{}, err
-		}
-		structValue, err := target.structValue()
-		if err != nil {
-			return Value{}, err
-		}
-		if stmt.Field < 0 || stmt.Field >= len(structValue.Fields) {
-			return Value{}, fmt.Errorf("invalid field index %d", stmt.Field)
-		}
-		value, err := f.evalExprPtr(stmt.Value)
-		if err != nil {
-			return Value{}, err
-		}
-		structValue.Fields[stmt.Field] = value
-		return value, nil
-	case air.StmtExpr:
-		return f.evalExprPtr(stmt.Expr)
-	case air.StmtWhile:
-		return f.evalWhile(stmt)
-	case air.StmtBreak:
-		return Value{}, loopBreak{}
-	default:
-		return Value{}, fmt.Errorf("unsupported stmt kind %d", stmt.Kind)
-	}
-}
-
-func (f *frame) evalWhile(stmt air.Stmt) (Value, error) {
-	for {
-		condition, err := f.evalExprPtr(stmt.Condition)
-		if err != nil {
-			return Value{}, err
-		}
-		if condition.Kind != ValueBool {
-			return Value{}, fmt.Errorf("while condition must be bool, got kind %d", condition.Kind)
-		}
-		if !condition.Bool {
-			return f.vm.zeroValue(f.vm.mustTypeID(air.TypeVoid)), nil
-		}
-		if _, err := f.evalBlockWithDefault(stmt.Body, f.vm.mustTypeID(air.TypeVoid)); err != nil {
-			if _, ok := err.(loopBreak); ok {
-				return f.vm.zeroValue(f.vm.mustTypeID(air.TypeVoid)), nil
-			}
-			return Value{}, err
-		}
-	}
-}
-
-func (f *frame) evalExprPtr(expr *air.Expr) (Value, error) {
-	if expr == nil {
-		return f.vm.zeroValue(f.vm.mustTypeID(air.TypeVoid)), nil
-	}
-	return f.evalExpr(*expr)
-}
-
-func (f *frame) evalExpr(expr air.Expr) (Value, error) {
-	switch expr.Kind {
-	case air.ExprConstVoid:
-		return Void(expr.Type), nil
-	case air.ExprConstInt:
-		return Int(expr.Type, expr.Int), nil
-	case air.ExprConstFloat:
-		return Float(expr.Type, expr.Float), nil
-	case air.ExprConstBool:
-		return Bool(expr.Type, expr.Bool), nil
-	case air.ExprConstStr:
-		return Str(expr.Type, expr.Str), nil
-	case air.ExprPanic:
-		message, err := f.evalExprPtr(expr.Target)
-		if err != nil {
-			return Value{}, err
-		}
-		return Value{}, fmt.Errorf("%s", message.GoValueString())
-	case air.ExprEnumVariant:
-		return Enum(expr.Type, expr.Discriminant), nil
-	case air.ExprLoadLocal:
-		if int(expr.Local) < 0 || int(expr.Local) >= len(f.locals) {
-			return Value{}, fmt.Errorf("invalid local id %d", expr.Local)
-		}
-		return f.locals[expr.Local], nil
-	case air.ExprCall:
-		args, err := f.evalArgs(expr.Args)
-		if err != nil {
-			return Value{}, err
-		}
-		return f.vm.call(expr.Function, args)
-	case air.ExprMakeClosure:
-		return f.evalMakeClosure(expr)
-	case air.ExprCallClosure:
-		return f.evalCallClosure(expr)
-	case air.ExprSpawnFiber:
-		return f.evalSpawnFiber(expr)
-	case air.ExprFiberGet:
-		return f.evalFiberGet(expr)
-	case air.ExprFiberJoin:
-		return f.evalFiberJoin(expr)
-	case air.ExprUnionWrap:
-		return f.evalUnionWrap(expr)
-	case air.ExprMatchUnion:
-		return f.evalUnionMatch(expr)
-	case air.ExprTraitUpcast:
-		return f.evalTraitUpcast(expr)
-	case air.ExprCallTrait:
-		return f.evalTraitCall(expr)
-	case air.ExprCopy:
-		return f.evalCopy(expr)
-	case air.ExprCallExtern:
-		args, err := f.evalArgs(expr.Args)
-		if err != nil {
-			return Value{}, err
-		}
-		return f.vm.callExtern(expr.Extern, args)
-	case air.ExprMakeList:
-		return f.evalMakeList(expr)
-	case air.ExprListAt:
-		return f.evalListAt(expr)
-	case air.ExprListPrepend, air.ExprListPush:
-		return f.evalListAppend(expr)
-	case air.ExprListSet:
-		return f.evalListSet(expr)
-	case air.ExprListSize:
-		return f.evalListSize(expr)
-	case air.ExprListSort:
-		return f.evalListSort(expr)
-	case air.ExprListSwap:
-		return f.evalListSwap(expr)
-	case air.ExprMakeMap:
-		return f.evalMakeMap(expr)
-	case air.ExprMapKeys:
-		return f.evalMapKeys(expr)
-	case air.ExprMapSize:
-		return f.evalMapSize(expr)
-	case air.ExprMapGet:
-		return f.evalMapGet(expr)
-	case air.ExprMapSet:
-		return f.evalMapSet(expr)
-	case air.ExprMapDrop:
-		return f.evalMapDrop(expr)
-	case air.ExprMapHas:
-		return f.evalMapHas(expr)
-	case air.ExprMapKeyAt:
-		return f.evalMapEntryAt(expr, true)
-	case air.ExprMapValueAt:
-		return f.evalMapEntryAt(expr, false)
-	case air.ExprMakeStruct:
-		return f.evalMakeStruct(expr)
-	case air.ExprGetField:
-		return f.evalGetField(expr)
-	case air.ExprIntAdd, air.ExprIntSub, air.ExprIntMul, air.ExprIntDiv, air.ExprIntMod:
-		return f.evalIntBinary(expr)
-	case air.ExprFloatAdd, air.ExprFloatSub, air.ExprFloatMul, air.ExprFloatDiv:
-		return f.evalFloatBinary(expr)
-	case air.ExprStrConcat:
-		left, right, err := f.evalBinaryOperands(expr)
-		if err != nil {
-			return Value{}, err
-		}
-		return Str(expr.Type, left.Str+right.Str), nil
-	case air.ExprToStr:
-		return f.evalToStr(expr)
-	case air.ExprToDynamic:
-		return f.evalToDynamic(expr)
-	case air.ExprStrAt:
-		return f.evalStrAt(expr)
-	case air.ExprStrSize, air.ExprStrIsEmpty, air.ExprStrContains, air.ExprStrReplace, air.ExprStrReplaceAll, air.ExprStrSplit, air.ExprStrStartsWith, air.ExprStrTrim:
-		return f.evalStrMethod(expr)
-	case air.ExprEq, air.ExprNotEq:
-		return f.evalEquality(expr)
-	case air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte:
-		return f.evalComparison(expr)
-	case air.ExprAnd, air.ExprOr:
-		return f.evalBoolBinary(expr)
-	case air.ExprNot:
-		target, err := f.evalExprPtr(expr.Target)
-		if err != nil {
-			return Value{}, err
-		}
-		return Bool(expr.Type, !target.Bool), nil
-	case air.ExprNeg:
-		target, err := f.evalExprPtr(expr.Target)
-		if err != nil {
-			return Value{}, err
-		}
-		switch target.Kind {
-		case ValueInt:
-			return Int(expr.Type, -target.Int), nil
-		case ValueFloat:
-			return Float(expr.Type, -target.Float), nil
-		default:
-			return Value{}, fmt.Errorf("cannot negate value kind %d", target.Kind)
-		}
-	case air.ExprBlock:
-		return f.evalBlockWithDefault(expr.Body, expr.Type)
-	case air.ExprIf:
-		condition, err := f.evalExprPtr(expr.Condition)
-		if err != nil {
-			return Value{}, err
-		}
-		if condition.Kind != ValueBool {
-			return Value{}, fmt.Errorf("if condition must be bool, got kind %d", condition.Kind)
-		}
-		if condition.Bool {
-			return f.evalBlockWithDefault(expr.Then, expr.Type)
-		}
-		return f.evalBlockWithDefault(expr.Else, expr.Type)
-	case air.ExprMakeResultOk, air.ExprMakeResultErr:
-		value, err := f.evalExprPtr(expr.Target)
-		if err != nil {
-			return Value{}, err
-		}
-		return Result(expr.Type, expr.Kind == air.ExprMakeResultOk, value), nil
-	case air.ExprMatchEnum:
-		return f.evalEnumMatch(expr)
-	case air.ExprMatchInt:
-		return f.evalIntMatch(expr)
-	case air.ExprMakeMaybeSome:
-		value, err := f.evalExprPtr(expr.Target)
-		if err != nil {
-			return Value{}, err
-		}
-		return Maybe(expr.Type, true, value), nil
-	case air.ExprMakeMaybeNone:
-		return Maybe(expr.Type, false, f.vm.zeroValue(f.mustMaybeElem(expr.Type))), nil
-	case air.ExprMatchMaybe:
-		return f.evalMaybeMatch(expr)
-	case air.ExprMaybeExpect:
-		return f.evalMaybeExpect(expr)
-	case air.ExprMaybeIsNone, air.ExprMaybeIsSome:
-		return f.evalMaybePredicate(expr)
-	case air.ExprMaybeOr:
-		return f.evalMaybeOr(expr)
-	case air.ExprMaybeMap, air.ExprMaybeAndThen:
-		return f.evalMaybeMap(expr)
-	case air.ExprMatchResult:
-		return f.evalResultMatch(expr)
-	case air.ExprResultExpect:
-		return f.evalResultExpect(expr)
-	case air.ExprResultOr:
-		return f.evalResultOr(expr)
-	case air.ExprResultIsOk, air.ExprResultIsErr:
-		return f.evalResultPredicate(expr)
-	case air.ExprResultMap, air.ExprResultMapErr, air.ExprResultAndThen:
-		return f.evalResultMap(expr)
-	case air.ExprTryResult:
-		return f.evalTryResult(expr)
-	case air.ExprTryMaybe:
-		return f.evalTryMaybe(expr)
-	default:
-		return Value{}, fmt.Errorf("unsupported expr kind %d", expr.Kind)
-	}
-}
-
-func (f *frame) evalArgs(args []air.Expr) ([]Value, error) {
-	out := make([]Value, len(args))
-	for i, arg := range args {
-		value, err := f.evalExpr(arg)
-		if err != nil {
-			return nil, err
-		}
-		out[i] = value
-	}
-	return out, nil
-}
-
-func (f *frame) evalMakeClosure(expr air.Expr) (Value, error) {
-	captures := make([]Value, len(expr.CaptureLocals))
-	for i, local := range expr.CaptureLocals {
-		if int(local) < 0 || int(local) >= len(f.locals) {
-			return Value{}, fmt.Errorf("invalid closure capture local id %d", local)
-		}
-		captures[i] = f.locals[local]
-	}
-	return Closure(expr.Type, expr.Function, captures), nil
-}
-
-func (f *frame) evalCallClosure(expr air.Expr) (Value, error) {
-	target, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	args, err := f.evalArgs(expr.Args)
-	if err != nil {
-		return Value{}, err
-	}
-	return f.vm.callClosure(target, args)
-}
-
-func (f *frame) evalCopy(expr air.Expr) (Value, error) {
-	value, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	return copyValue(value), nil
+func (vm *VM) callClosure2(value Value, left Value, right Value) (Value, error) {
+	vm.recordRefAccess(refAccessClosure)
+	return vm.runBytecodeClosureValue2(value, left, right)
 }
 
 func copyValue(value Value) Value {
@@ -536,12 +160,12 @@ func copyValue(value Value) Value {
 			return value
 		}
 		return Maybe(value.Type, maybeValue.Some, copyValue(maybeValue.Value))
-	case ValueResult:
-		resultValue, ok := value.Ref.(*ResultValue)
-		if !ok || resultValue == nil {
+	case ValueResult, ValueResultInt, ValueResultStr, ValueResultBool, ValueResultFloat:
+		resultOK, resultValue, err := value.resultParts()
+		if err != nil {
 			return value
 		}
-		return Result(value.Type, resultValue.Ok, copyValue(resultValue.Value))
+		return Result(value.Type, resultOK, copyValue(resultValue))
 	case ValueUnion:
 		unionValue, ok := value.Ref.(*UnionValue)
 		if !ok || unionValue == nil {
@@ -553,919 +177,108 @@ func copyValue(value Value) Value {
 	}
 }
 
-func (f *frame) evalSpawnFiber(expr air.Expr) (Value, error) {
-	fiber := &FiberValue{
-		Type: expr.Type,
-		Done: make(chan struct{}),
-	}
-	if expr.Target != nil {
-		target, err := f.evalExprPtr(expr.Target)
-		if err != nil {
-			return Value{}, err
-		}
-		go func() {
-			defer close(fiber.Done)
-			fiber.Result, fiber.Err = f.vm.callClosure(target, nil)
-		}()
-		return Fiber(expr.Type, fiber), nil
-	}
-	if expr.Function < 0 {
-		return Value{}, fmt.Errorf("fiber spawn missing target")
-	}
-	go func() {
-		defer close(fiber.Done)
-		fiber.Result, fiber.Err = f.vm.call(expr.Function, nil)
-	}()
-	return Fiber(expr.Type, fiber), nil
-}
-
-func (f *frame) evalFiberGet(expr air.Expr) (Value, error) {
-	target, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	fiber, err := target.fiberValue()
-	if err != nil {
-		return Value{}, err
-	}
-	<-fiber.Done
-	if fiber.Err != nil {
-		return Value{}, fiber.Err
-	}
-	return fiber.Result, nil
-}
-
-func (f *frame) evalFiberJoin(expr air.Expr) (Value, error) {
-	target, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	fiber, err := target.fiberValue()
-	if err != nil {
-		return Value{}, err
-	}
-	<-fiber.Done
-	if fiber.Err != nil {
-		return Value{}, fiber.Err
-	}
-	return f.vm.zeroValue(expr.Type), nil
-}
-
-func (f *frame) evalMakeStruct(expr air.Expr) (Value, error) {
-	typeInfo, err := f.vm.typeInfo(expr.Type)
-	if err != nil {
-		return Value{}, err
-	}
-	fields := make([]Value, len(typeInfo.Fields))
-	for _, field := range typeInfo.Fields {
-		if field.Index < 0 || field.Index >= len(fields) {
-			return Value{}, fmt.Errorf("invalid field index %d on %s", field.Index, typeInfo.Name)
-		}
-		fields[field.Index] = f.vm.zeroValue(field.Type)
-	}
-	for _, field := range expr.Fields {
-		if field.Index < 0 || field.Index >= len(fields) {
-			return Value{}, fmt.Errorf("invalid struct field index %d", field.Index)
-		}
-		value, err := f.evalExpr(field.Value)
-		if err != nil {
-			return Value{}, err
-		}
-		fields[field.Index] = value
-	}
-	return Struct(expr.Type, fields), nil
-}
-
-func (f *frame) evalUnionWrap(expr air.Expr) (Value, error) {
-	value, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	return Union(expr.Type, expr.Tag, value), nil
-}
-
-func (f *frame) evalTraitUpcast(expr air.Expr) (Value, error) {
-	value, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	return TraitObject(expr.Type, expr.Trait, expr.Impl, value), nil
-}
-
-func (f *frame) evalToStr(expr air.Expr) (Value, error) {
-	value, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	switch value.Kind {
-	case ValueStr:
-		return Str(expr.Type, value.Str), nil
-	case ValueInt:
-		return Str(expr.Type, strconv.Itoa(value.Int)), nil
-	case ValueFloat:
-		return Str(expr.Type, strconv.FormatFloat(value.Float, 'f', -1, 64)), nil
-	case ValueBool:
-		return Str(expr.Type, strconv.FormatBool(value.Bool)), nil
-	default:
-		return Value{}, fmt.Errorf("cannot convert value kind %d to Str", value.Kind)
-	}
-}
-
-func (f *frame) evalToDynamic(expr air.Expr) (Value, error) {
-	value, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	return Dynamic(expr.Type, value.GoValue()), nil
-}
-
-func (f *frame) evalStrMethod(expr air.Expr) (Value, error) {
-	target, args, err := f.evalStrMethodArgs(expr)
-	if err != nil {
-		return Value{}, err
-	}
-	switch expr.Kind {
-	case air.ExprStrSize:
-		return Int(expr.Type, len(target)), nil
-	case air.ExprStrIsEmpty:
-		return Bool(expr.Type, target == ""), nil
-	case air.ExprStrContains:
-		return Bool(expr.Type, strings.Contains(target, args[0])), nil
-	case air.ExprStrReplace:
-		return Str(expr.Type, strings.Replace(target, args[0], args[1], 1)), nil
-	case air.ExprStrReplaceAll:
-		return Str(expr.Type, strings.ReplaceAll(target, args[0], args[1])), nil
-	case air.ExprStrSplit:
-		parts := strings.Split(target, args[0])
-		items := make([]Value, len(parts))
-		strType := f.vm.mustTypeID(air.TypeStr)
-		for i, part := range parts {
-			items[i] = Str(strType, part)
-		}
-		return List(expr.Type, items), nil
-	case air.ExprStrStartsWith:
-		return Bool(expr.Type, strings.HasPrefix(target, args[0])), nil
-	case air.ExprStrTrim:
-		return Str(expr.Type, strings.Trim(target, " ")), nil
-	default:
-		return Value{}, fmt.Errorf("unsupported string method expr %d", expr.Kind)
-	}
-}
-
-func (f *frame) evalStrAt(expr air.Expr) (Value, error) {
-	target, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	if target.Kind != ValueStr {
-		return Value{}, fmt.Errorf("string index target must be Str, got kind %d", target.Kind)
-	}
-	if len(expr.Args) != 1 {
-		return Value{}, fmt.Errorf("string index expects one argument, got %d", len(expr.Args))
-	}
-	index, err := f.evalExpr(expr.Args[0])
-	if err != nil {
-		return Value{}, err
-	}
-	if index.Kind != ValueInt {
-		return Value{}, fmt.Errorf("string index must be Int, got kind %d", index.Kind)
-	}
-	runes := []rune(target.Str)
-	if index.Int < 0 || index.Int >= len(runes) {
-		return Value{}, fmt.Errorf("string index out of range")
-	}
-	return Str(expr.Type, string(runes[index.Int])), nil
-}
-
-func (f *frame) evalStrMethodArgs(expr air.Expr) (string, []string, error) {
-	target, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return "", nil, err
-	}
-	if target.Kind != ValueStr {
-		return "", nil, fmt.Errorf("string method target must be Str, got kind %d", target.Kind)
-	}
-	args := make([]string, len(expr.Args))
-	for i, arg := range expr.Args {
-		value, err := f.evalExpr(arg)
-		if err != nil {
-			return "", nil, err
-		}
-		if value.Kind != ValueStr {
-			return "", nil, fmt.Errorf("string method arg %d must be Str, got kind %d", i, value.Kind)
-		}
-		args[i] = value.Str
-	}
-	return target.Str, args, nil
-}
-
-func (f *frame) evalMakeList(expr air.Expr) (Value, error) {
-	items := make([]Value, len(expr.Args))
-	for i, item := range expr.Args {
-		value, err := f.evalExpr(item)
-		if err != nil {
-			return Value{}, err
-		}
-		items[i] = value
-	}
-	return List(expr.Type, items), nil
-}
-
-func (f *frame) evalListAt(expr air.Expr) (Value, error) {
-	listValue, args, err := f.evalListMethodArgs(expr, 1)
-	if err != nil {
-		return Value{}, err
-	}
-	if args[0].Kind != ValueInt {
-		return Value{}, fmt.Errorf("list index must be Int, got kind %d", args[0].Kind)
-	}
-	index := args[0].Int
-	if index < 0 || index >= len(listValue.Items) {
-		return Value{}, fmt.Errorf("list index out of range")
-	}
-	return listValue.Items[index], nil
-}
-
-func (f *frame) evalListAppend(expr air.Expr) (Value, error) {
-	listValue, args, err := f.evalListMethodArgs(expr, 1)
-	if err != nil {
-		return Value{}, err
-	}
-	if expr.Kind == air.ExprListPrepend {
-		listValue.Items = append([]Value{args[0]}, listValue.Items...)
-	} else {
-		listValue.Items = append(listValue.Items, args[0])
-	}
-	return Int(expr.Type, len(listValue.Items)), nil
-}
-
-func (f *frame) evalListSet(expr air.Expr) (Value, error) {
-	listValue, args, err := f.evalListMethodArgs(expr, 2)
-	if err != nil {
-		return Value{}, err
-	}
-	if args[0].Kind != ValueInt {
-		return Value{}, fmt.Errorf("list index must be Int, got kind %d", args[0].Kind)
-	}
-	index := args[0].Int
-	if index < 0 || index >= len(listValue.Items) {
-		return Bool(expr.Type, false), nil
-	}
-	listValue.Items[index] = args[1]
-	return Bool(expr.Type, true), nil
-}
-
-func (f *frame) evalListSize(expr air.Expr) (Value, error) {
-	listValue, _, err := f.evalListMethodArgs(expr, 0)
-	if err != nil {
-		return Value{}, err
-	}
-	return Int(expr.Type, len(listValue.Items)), nil
-}
-
-func (f *frame) evalListSort(expr air.Expr) (Value, error) {
-	listValue, args, err := f.evalListMethodArgs(expr, 1)
-	if err != nil {
-		return Value{}, err
-	}
-	var sortErr error
-	sort.SliceStable(listValue.Items, func(i, j int) bool {
-		if sortErr != nil {
-			return false
-		}
-		value, err := f.vm.callClosure(args[0], []Value{listValue.Items[i], listValue.Items[j]})
-		if err != nil {
-			sortErr = err
-			return false
-		}
-		if value.Kind != ValueBool {
-			sortErr = fmt.Errorf("list sort comparator must return Bool, got kind %d", value.Kind)
-			return false
-		}
-		return value.Bool
-	})
-	if sortErr != nil {
-		return Value{}, sortErr
-	}
-	return f.vm.zeroValue(expr.Type), nil
-}
-
-func (f *frame) evalListSwap(expr air.Expr) (Value, error) {
-	listValue, args, err := f.evalListMethodArgs(expr, 2)
-	if err != nil {
-		return Value{}, err
-	}
-	if args[0].Kind != ValueInt || args[1].Kind != ValueInt {
-		return Value{}, fmt.Errorf("list swap indexes must be Int")
-	}
-	left, right := args[0].Int, args[1].Int
-	if left < 0 || left >= len(listValue.Items) || right < 0 || right >= len(listValue.Items) {
-		return Value{}, fmt.Errorf("list index out of range")
-	}
-	listValue.Items[left], listValue.Items[right] = listValue.Items[right], listValue.Items[left]
-	return f.vm.zeroValue(expr.Type), nil
-}
-
-func (f *frame) evalListMethodArgs(expr air.Expr, wantArgs int) (*ListValue, []Value, error) {
-	target, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return nil, nil, err
-	}
-	listValue, err := target.listValue()
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(expr.Args) != wantArgs {
-		return nil, nil, fmt.Errorf("list method expects %d args, got %d", wantArgs, len(expr.Args))
-	}
-	args, err := f.evalArgs(expr.Args)
-	if err != nil {
-		return nil, nil, err
-	}
-	return listValue, args, nil
-}
-
-func (f *frame) evalMakeMap(expr air.Expr) (Value, error) {
-	entries := make([]MapEntryValue, len(expr.Entries))
-	for i, entry := range expr.Entries {
-		key, err := f.evalExpr(entry.Key)
-		if err != nil {
-			return Value{}, err
-		}
-		value, err := f.evalExpr(entry.Value)
-		if err != nil {
-			return Value{}, err
-		}
-		entries[i] = MapEntryValue{Key: key, Value: value}
-	}
-	return Map(expr.Type, entries), nil
-}
-
-func (f *frame) evalMapKeys(expr air.Expr) (Value, error) {
-	mapValue, _, err := f.evalMapMethodArgs(expr, 0)
-	if err != nil {
-		return Value{}, err
-	}
-	keys := make([]Value, len(mapValue.Entries))
-	for i, entry := range mapValue.Entries {
-		keys[i] = entry.Key
-	}
-	sort.SliceStable(keys, func(i, j int) bool {
-		return valuesLess(keys[i], keys[j])
-	})
-	return List(expr.Type, keys), nil
-}
-
-func (f *frame) evalMapSize(expr air.Expr) (Value, error) {
-	mapValue, _, err := f.evalMapMethodArgs(expr, 0)
-	if err != nil {
-		return Value{}, err
-	}
-	return Int(expr.Type, len(mapValue.Entries)), nil
-}
-
-func (f *frame) evalMapGet(expr air.Expr) (Value, error) {
-	mapValue, args, err := f.evalMapMethodArgs(expr, 1)
-	if err != nil {
-		return Value{}, err
-	}
-	if index := mapEntryIndex(mapValue, args[0]); index >= 0 {
-		return Maybe(expr.Type, true, mapValue.Entries[index].Value), nil
-	}
-	return Maybe(expr.Type, false, f.vm.zeroValue(f.mustMaybeElem(expr.Type))), nil
-}
-
-func (f *frame) evalMapSet(expr air.Expr) (Value, error) {
-	mapValue, args, err := f.evalMapMethodArgs(expr, 2)
-	if err != nil {
-		return Value{}, err
-	}
-	if index := mapEntryIndex(mapValue, args[0]); index >= 0 {
-		mapValue.Entries[index].Value = args[1]
-	} else {
-		mapValue.Entries = append(mapValue.Entries, MapEntryValue{Key: args[0], Value: args[1]})
-	}
-	return Bool(expr.Type, true), nil
-}
-
-func (f *frame) evalMapDrop(expr air.Expr) (Value, error) {
-	mapValue, args, err := f.evalMapMethodArgs(expr, 1)
-	if err != nil {
-		return Value{}, err
-	}
-	if index := mapEntryIndex(mapValue, args[0]); index >= 0 {
-		mapValue.Entries = append(mapValue.Entries[:index], mapValue.Entries[index+1:]...)
-	}
-	return f.vm.zeroValue(expr.Type), nil
-}
-
-func (f *frame) evalMapHas(expr air.Expr) (Value, error) {
-	mapValue, args, err := f.evalMapMethodArgs(expr, 1)
-	if err != nil {
-		return Value{}, err
-	}
-	return Bool(expr.Type, mapEntryIndex(mapValue, args[0]) >= 0), nil
-}
-
-func (f *frame) evalMapEntryAt(expr air.Expr, key bool) (Value, error) {
-	mapValue, args, err := f.evalMapMethodArgs(expr, 1)
-	if err != nil {
-		return Value{}, err
-	}
-	if args[0].Kind != ValueInt {
-		return Value{}, fmt.Errorf("map entry index must be Int, got kind %d", args[0].Kind)
-	}
-	index := args[0].Int
-	if index < 0 || index >= len(mapValue.Entries) {
-		return Value{}, fmt.Errorf("map entry index out of range")
-	}
-	entries := sortedMapEntries(mapValue)
-	if key {
-		return entries[index].Key, nil
-	}
-	return entries[index].Value, nil
-}
-
 func sortedMapEntries(mapValue *MapValue) []MapEntryValue {
-	entries := make([]MapEntryValue, len(mapValue.Entries))
-	copy(entries, mapValue.Entries)
-	sort.SliceStable(entries, func(i, j int) bool {
-		return valuesLess(entries[i].Key, entries[j].Key)
-	})
+	if mapValue == nil {
+		return nil
+	}
+	if !mapValue.SortedDirty && len(mapValue.SortedEntries) == len(mapValue.Entries) {
+		return mapValue.SortedEntries
+	}
+	indices := sortedMapIndices(mapValue)
+	entries := make([]MapEntryValue, len(indices))
+	for i, entryIndex := range indices {
+		entries[i] = mapValue.Entries[entryIndex]
+	}
+	mapValue.SortedEntries = entries
 	return entries
 }
 
-func (f *frame) evalMapMethodArgs(expr air.Expr, wantArgs int) (*MapValue, []Value, error) {
-	target, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return nil, nil, err
+func sortedMapEntryAt(mapValue *MapValue, index int) (*MapEntryValue, bool) {
+	if mapValue == nil || index < 0 || index >= len(mapValue.Entries) {
+		return nil, false
 	}
-	mapValue, err := target.mapValue()
-	if err != nil {
-		return nil, nil, err
+	indices := sortedMapIndices(mapValue)
+	return &mapValue.Entries[indices[index]], true
+}
+
+func sortedMapIndices(mapValue *MapValue) []int {
+	if !mapValue.SortedDirty && len(mapValue.SortedIndices) == len(mapValue.Entries) {
+		return mapValue.SortedIndices
 	}
-	if len(expr.Args) != wantArgs {
-		return nil, nil, fmt.Errorf("map method expects %d args, got %d", wantArgs, len(expr.Args))
+	indices := make([]int, len(mapValue.Entries))
+	for i := range indices {
+		indices[i] = i
 	}
-	args, err := f.evalArgs(expr.Args)
-	if err != nil {
-		return nil, nil, err
-	}
-	return mapValue, args, nil
+	sort.SliceStable(indices, func(i, j int) bool {
+		return valuesLess(mapValue.Entries[indices[i]].Key, mapValue.Entries[indices[j]].Key)
+	})
+	mapValue.SortedIndices = indices
+	mapValue.SortedEntries = nil
+	mapValue.SortedDirty = false
+	return indices
 }
 
 func mapEntryIndex(mapValue *MapValue, key Value) int {
-	for i, entry := range mapValue.Entries {
-		if valuesEqual(entry.Key, key) {
-			return i
-		}
-	}
-	return -1
-}
-
-func (f *frame) evalGetField(expr air.Expr) (Value, error) {
-	target, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	structValue, err := target.structValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if expr.Field < 0 || expr.Field >= len(structValue.Fields) {
-		return Value{}, fmt.Errorf("invalid field index %d", expr.Field)
-	}
-	return structValue.Fields[expr.Field], nil
-}
-
-func (f *frame) evalEnumMatch(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	if subject.Kind != ValueEnum {
-		return Value{}, fmt.Errorf("enum match subject must be enum, got kind %d", subject.Kind)
-	}
-	for _, matchCase := range expr.EnumCases {
-		if subject.Int == matchCase.Discriminant {
-			return f.evalBlockWithDefault(matchCase.Body, expr.Type)
-		}
-	}
-	if expr.CatchAll.Result != nil || len(expr.CatchAll.Stmts) > 0 {
-		return f.evalBlockWithDefault(expr.CatchAll, expr.Type)
-	}
-	return f.vm.zeroValue(expr.Type), nil
-}
-
-func (f *frame) evalIntMatch(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	if subject.Kind != ValueInt {
-		return Value{}, fmt.Errorf("int match subject must be int, got kind %d", subject.Kind)
-	}
-	for _, matchCase := range expr.IntCases {
-		if subject.Int == matchCase.Value {
-			return f.evalBlockWithDefault(matchCase.Body, expr.Type)
-		}
-	}
-	for _, matchCase := range expr.RangeCases {
-		if subject.Int >= matchCase.Start && subject.Int <= matchCase.End {
-			return f.evalBlockWithDefault(matchCase.Body, expr.Type)
-		}
-	}
-	if expr.CatchAll.Result != nil || len(expr.CatchAll.Stmts) > 0 {
-		return f.evalBlockWithDefault(expr.CatchAll, expr.Type)
-	}
-	return f.vm.zeroValue(expr.Type), nil
-}
-
-func (f *frame) evalUnionMatch(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	unionValue, err := subject.unionValue()
-	if err != nil {
-		return Value{}, err
-	}
-	for _, matchCase := range expr.UnionCases {
-		if unionValue.Tag == matchCase.Tag {
-			if int(matchCase.Local) < 0 || int(matchCase.Local) >= len(f.locals) {
-				return Value{}, fmt.Errorf("invalid union match local id %d", matchCase.Local)
+	entries := mapValue.Entries
+	switch key.Kind {
+	case ValueInt, ValueEnum:
+		for i := range entries {
+			entryKey := entries[i].Key
+			if (entryKey.Kind == ValueInt || entryKey.Kind == ValueEnum) && entryKey.Int == key.Int {
+				return i
 			}
-			f.locals[matchCase.Local] = unionValue.Value
-			return f.evalBlockWithDefault(matchCase.Body, expr.Type)
 		}
-	}
-	if expr.CatchAll.Result != nil || len(expr.CatchAll.Stmts) > 0 {
-		return f.evalBlockWithDefault(expr.CatchAll, expr.Type)
-	}
-	return f.vm.zeroValue(expr.Type), nil
-}
-
-func (f *frame) evalTraitCall(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	traitObject, err := subject.traitObjectValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if traitObject.Trait != expr.Trait {
-		return Value{}, fmt.Errorf("trait object has trait %d, call expects %d", traitObject.Trait, expr.Trait)
-	}
-	if traitObject.Impl < 0 || int(traitObject.Impl) >= len(f.vm.program.Impls) {
-		return Value{}, fmt.Errorf("invalid trait object impl %d", traitObject.Impl)
-	}
-	impl := f.vm.program.Impls[traitObject.Impl]
-	if impl.Trait != expr.Trait {
-		return Value{}, fmt.Errorf("impl %d has trait %d, call expects %d", traitObject.Impl, impl.Trait, expr.Trait)
-	}
-	if expr.Method < 0 || expr.Method >= len(impl.Methods) {
-		return Value{}, fmt.Errorf("invalid trait method index %d for impl %d", expr.Method, traitObject.Impl)
-	}
-	args, err := f.evalArgs(expr.Args)
-	if err != nil {
-		return Value{}, err
-	}
-	args = append([]Value{traitObject.Value}, args...)
-	return f.vm.call(impl.Methods[expr.Method], args)
-}
-
-func (f *frame) evalMaybeMatch(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	maybeValue, err := subject.maybeValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if maybeValue.Some {
-		if int(expr.SomeLocal) < 0 || int(expr.SomeLocal) >= len(f.locals) {
-			return Value{}, fmt.Errorf("invalid Maybe match local id %d", expr.SomeLocal)
+		return -1
+	case ValueStr:
+		for i := range entries {
+			entryKey := entries[i].Key
+			if entryKey.Kind == ValueStr && entryKey.Str == key.Str {
+				return i
+			}
 		}
-		f.locals[expr.SomeLocal] = maybeValue.Value
-		return f.evalBlockWithDefault(expr.Some, expr.Type)
-	}
-	return f.evalBlockWithDefault(expr.None, expr.Type)
-}
-
-func (f *frame) evalMaybeExpect(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	maybeValue, err := subject.maybeValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if maybeValue.Some {
-		return maybeValue.Value, nil
-	}
-	message := "expected Maybe to contain a value"
-	if len(expr.Args) > 0 {
-		arg, err := f.evalExpr(expr.Args[0])
-		if err != nil {
-			return Value{}, err
+		return -1
+	case ValueBool:
+		for i := range entries {
+			entryKey := entries[i].Key
+			if entryKey.Kind == ValueBool && entryKey.Bool == key.Bool {
+				return i
+			}
 		}
-		message = arg.GoValueString()
-	}
-	return Value{}, fmt.Errorf("%s", message)
-}
-
-func (f *frame) evalMaybePredicate(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	maybeValue, err := subject.maybeValue()
-	if err != nil {
-		return Value{}, err
-	}
-	return Bool(expr.Type, expr.Kind == air.ExprMaybeIsSome && maybeValue.Some || expr.Kind == air.ExprMaybeIsNone && !maybeValue.Some), nil
-}
-
-func (f *frame) evalMaybeOr(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	maybeValue, err := subject.maybeValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if maybeValue.Some {
-		return maybeValue.Value, nil
-	}
-	if len(expr.Args) != 1 {
-		return Value{}, fmt.Errorf("Maybe.or expects one fallback argument, got %d", len(expr.Args))
-	}
-	return f.evalExpr(expr.Args[0])
-}
-
-func (f *frame) evalMaybeMap(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	maybeValue, err := subject.maybeValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if len(expr.Args) != 1 {
-		return Value{}, fmt.Errorf("Maybe closure method expects one function argument, got %d", len(expr.Args))
-	}
-	if !maybeValue.Some {
-		return Maybe(expr.Type, false, f.vm.zeroValue(f.mustMaybeElem(expr.Type))), nil
-	}
-	closure, err := f.evalExpr(expr.Args[0])
-	if err != nil {
-		return Value{}, err
-	}
-	mapped, err := f.vm.callClosure(closure, []Value{maybeValue.Value})
-	if err != nil {
-		return Value{}, err
-	}
-	if expr.Kind == air.ExprMaybeAndThen {
-		return mapped, nil
-	}
-	return Maybe(expr.Type, true, mapped), nil
-}
-
-func (f *frame) evalResultMatch(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	resultValue, err := subject.resultValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if resultValue.Ok {
-		if int(expr.OkLocal) < 0 || int(expr.OkLocal) >= len(f.locals) {
-			return Value{}, fmt.Errorf("invalid Result match ok local id %d", expr.OkLocal)
+		return -1
+	case ValueFloat:
+		for i := range entries {
+			entryKey := entries[i].Key
+			if entryKey.Kind == ValueFloat && entryKey.Float == key.Float {
+				return i
+			}
 		}
-		f.locals[expr.OkLocal] = resultValue.Value
-		return f.evalBlockWithDefault(expr.Ok, expr.Type)
-	}
-	if int(expr.ErrLocal) < 0 || int(expr.ErrLocal) >= len(f.locals) {
-		return Value{}, fmt.Errorf("invalid Result match err local id %d", expr.ErrLocal)
-	}
-	f.locals[expr.ErrLocal] = resultValue.Value
-	return f.evalBlockWithDefault(expr.Err, expr.Type)
-}
-
-func (f *frame) evalResultExpect(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	resultValue, err := subject.resultValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if resultValue.Ok {
-		return resultValue.Value, nil
-	}
-	message := "expected Result to be ok"
-	if len(expr.Args) > 0 {
-		arg, err := f.evalExpr(expr.Args[0])
-		if err != nil {
-			return Value{}, err
+		return -1
+	case ValueVoid:
+		for i := range entries {
+			if entries[i].Key.Kind == ValueVoid {
+				return i
+			}
 		}
-		message = arg.GoValueString()
-	}
-	return Value{}, fmt.Errorf("%s", message)
-}
-
-func (f *frame) evalResultOr(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	resultValue, err := subject.resultValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if resultValue.Ok {
-		return resultValue.Value, nil
-	}
-	if len(expr.Args) != 1 {
-		return Value{}, fmt.Errorf("Result.or expects one fallback argument, got %d", len(expr.Args))
-	}
-	return f.evalExpr(expr.Args[0])
-}
-
-func (f *frame) evalResultPredicate(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	resultValue, err := subject.resultValue()
-	if err != nil {
-		return Value{}, err
-	}
-	return Bool(expr.Type, expr.Kind == air.ExprResultIsOk && resultValue.Ok || expr.Kind == air.ExprResultIsErr && !resultValue.Ok), nil
-}
-
-func (f *frame) evalResultMap(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	resultValue, err := subject.resultValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if len(expr.Args) != 1 {
-		return Value{}, fmt.Errorf("Result closure method expects one function argument, got %d", len(expr.Args))
-	}
-	switch expr.Kind {
-	case air.ExprResultMap:
-		if !resultValue.Ok {
-			return Result(expr.Type, false, resultValue.Value), nil
-		}
-		closure, err := f.evalExpr(expr.Args[0])
-		if err != nil {
-			return Value{}, err
-		}
-		mapped, err := f.vm.callClosure(closure, []Value{resultValue.Value})
-		if err != nil {
-			return Value{}, err
-		}
-		return Result(expr.Type, true, mapped), nil
-	case air.ExprResultMapErr:
-		if resultValue.Ok {
-			return Result(expr.Type, true, resultValue.Value), nil
-		}
-		closure, err := f.evalExpr(expr.Args[0])
-		if err != nil {
-			return Value{}, err
-		}
-		mapped, err := f.vm.callClosure(closure, []Value{resultValue.Value})
-		if err != nil {
-			return Value{}, err
-		}
-		return Result(expr.Type, false, mapped), nil
-	case air.ExprResultAndThen:
-		if !resultValue.Ok {
-			return Result(expr.Type, false, resultValue.Value), nil
-		}
-		closure, err := f.evalExpr(expr.Args[0])
-		if err != nil {
-			return Value{}, err
-		}
-		return f.vm.callClosure(closure, []Value{resultValue.Value})
+		return -1
 	default:
-		return Value{}, fmt.Errorf("unsupported Result closure method %d", expr.Kind)
-	}
-}
-
-func (f *frame) evalTryResult(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	resultValue, err := subject.resultValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if resultValue.Ok {
-		return resultValue.Value, nil
-	}
-	if expr.HasCatch {
-		if int(expr.CatchLocal) < 0 || int(expr.CatchLocal) >= len(f.locals) {
-			return Value{}, fmt.Errorf("invalid Result try catch local id %d", expr.CatchLocal)
+		for i := range entries {
+			if valuesEqual(entries[i].Key, key) {
+				return i
+			}
 		}
-		f.locals[expr.CatchLocal] = resultValue.Value
-		value, err := f.evalBlockWithDefault(expr.Catch, f.fn.Signature.Return)
-		if err != nil {
-			return Value{}, err
-		}
-		return Value{}, earlyReturn{value: value}
+		return -1
 	}
-	return Value{}, earlyReturn{value: Result(f.fn.Signature.Return, false, resultValue.Value)}
-}
-
-func (f *frame) evalTryMaybe(expr air.Expr) (Value, error) {
-	subject, err := f.evalExprPtr(expr.Target)
-	if err != nil {
-		return Value{}, err
-	}
-	maybeValue, err := subject.maybeValue()
-	if err != nil {
-		return Value{}, err
-	}
-	if maybeValue.Some {
-		return maybeValue.Value, nil
-	}
-	if expr.HasCatch {
-		value, err := f.evalBlockWithDefault(expr.Catch, f.fn.Signature.Return)
-		if err != nil {
-			return Value{}, err
-		}
-		return Value{}, earlyReturn{value: value}
-	}
-	return Value{}, earlyReturn{value: Maybe(f.fn.Signature.Return, false, f.zeroMaybeForFunctionReturn())}
-}
-
-func (f *frame) evalIntBinary(expr air.Expr) (Value, error) {
-	left, right, err := f.evalBinaryOperands(expr)
-	if err != nil {
-		return Value{}, err
-	}
-	switch expr.Kind {
-	case air.ExprIntAdd:
-		return Int(expr.Type, left.Int+right.Int), nil
-	case air.ExprIntSub:
-		return Int(expr.Type, left.Int-right.Int), nil
-	case air.ExprIntMul:
-		return Int(expr.Type, left.Int*right.Int), nil
-	case air.ExprIntDiv:
-		return Int(expr.Type, left.Int/right.Int), nil
-	case air.ExprIntMod:
-		return Int(expr.Type, left.Int%right.Int), nil
-	default:
-		return Value{}, fmt.Errorf("unsupported int op %d", expr.Kind)
-	}
-}
-
-func (f *frame) evalFloatBinary(expr air.Expr) (Value, error) {
-	left, right, err := f.evalBinaryOperands(expr)
-	if err != nil {
-		return Value{}, err
-	}
-	switch expr.Kind {
-	case air.ExprFloatAdd:
-		return Float(expr.Type, left.Float+right.Float), nil
-	case air.ExprFloatSub:
-		return Float(expr.Type, left.Float-right.Float), nil
-	case air.ExprFloatMul:
-		return Float(expr.Type, left.Float*right.Float), nil
-	case air.ExprFloatDiv:
-		return Float(expr.Type, left.Float/right.Float), nil
-	default:
-		return Value{}, fmt.Errorf("unsupported float op %d", expr.Kind)
-	}
-}
-
-func (f *frame) evalEquality(expr air.Expr) (Value, error) {
-	left, right, err := f.evalBinaryOperands(expr)
-	if err != nil {
-		return Value{}, err
-	}
-	equal := valuesEqual(left, right)
-	if expr.Kind == air.ExprNotEq {
-		equal = !equal
-	}
-	return Bool(expr.Type, equal), nil
 }
 
 func valuesEqual(left, right Value) bool {
+	if (left.Kind == ValueResult || left.Kind == ValueResultInt || left.Kind == ValueResultStr || left.Kind == ValueResultBool || left.Kind == ValueResultFloat) && (right.Kind == ValueResult || right.Kind == ValueResultInt || right.Kind == ValueResultStr || right.Kind == ValueResultBool || right.Kind == ValueResultFloat) {
+		leftOKTag, leftValue, leftErr := left.resultParts()
+		rightOKTag, rightValue, rightErr := right.resultParts()
+		if leftErr != nil || rightErr != nil || leftOKTag != rightOKTag {
+			return false
+		}
+		return valuesEqual(leftValue, rightValue)
+	}
 	if left.Kind == ValueMaybe && right.Kind == ValueMaybe {
 		leftMaybe, leftOK := left.Ref.(*MaybeValue)
 		rightMaybe, rightOK := right.Ref.(*MaybeValue)
@@ -1509,13 +322,6 @@ func valuesEqual(left, right Value) bool {
 			}
 		}
 		return true
-	case ValueResult:
-		leftResult, leftOK := left.Ref.(*ResultValue)
-		rightResult, rightOK := right.Ref.(*ResultValue)
-		if !leftOK || !rightOK || leftResult.Ok != rightResult.Ok {
-			return false
-		}
-		return valuesEqual(leftResult.Value, rightResult.Value)
 	default:
 		return left.GoValue() == right.GoValue()
 	}
@@ -1539,71 +345,6 @@ func valuesLess(left, right Value) bool {
 	}
 }
 
-func (f *frame) evalComparison(expr air.Expr) (Value, error) {
-	left, right, err := f.evalBinaryOperands(expr)
-	if err != nil {
-		return Value{}, err
-	}
-	var result bool
-	switch left.Kind {
-	case ValueInt, ValueEnum:
-		switch expr.Kind {
-		case air.ExprLt:
-			result = left.Int < right.Int
-		case air.ExprLte:
-			result = left.Int <= right.Int
-		case air.ExprGt:
-			result = left.Int > right.Int
-		case air.ExprGte:
-			result = left.Int >= right.Int
-		}
-	case ValueFloat:
-		switch expr.Kind {
-		case air.ExprLt:
-			result = left.Float < right.Float
-		case air.ExprLte:
-			result = left.Float <= right.Float
-		case air.ExprGt:
-			result = left.Float > right.Float
-		case air.ExprGte:
-			result = left.Float >= right.Float
-		}
-	default:
-		return Value{}, fmt.Errorf("cannot compare value kind %d", left.Kind)
-	}
-	return Bool(expr.Type, result), nil
-}
-
-func (f *frame) evalBoolBinary(expr air.Expr) (Value, error) {
-	left, right, err := f.evalBinaryOperands(expr)
-	if err != nil {
-		return Value{}, err
-	}
-	switch expr.Kind {
-	case air.ExprAnd:
-		return Bool(expr.Type, left.Bool && right.Bool), nil
-	case air.ExprOr:
-		return Bool(expr.Type, left.Bool || right.Bool), nil
-	default:
-		return Value{}, fmt.Errorf("unsupported bool op %d", expr.Kind)
-	}
-}
-
-func (f *frame) evalBinaryOperands(expr air.Expr) (Value, Value, error) {
-	if expr.Left == nil || expr.Right == nil {
-		return Value{}, Value{}, fmt.Errorf("binary expression %d missing operand", expr.Kind)
-	}
-	left, err := f.evalExprPtr(expr.Left)
-	if err != nil {
-		return Value{}, Value{}, err
-	}
-	right, err := f.evalExprPtr(expr.Right)
-	if err != nil {
-		return Value{}, Value{}, err
-	}
-	return left, right, nil
-}
-
 func (vm *VM) typeInfo(id air.TypeID) (air.TypeInfo, error) {
 	if id <= 0 || int(id) > len(vm.program.Types) {
 		return air.TypeInfo{}, fmt.Errorf("invalid type id %d", id)
@@ -1611,8 +352,11 @@ func (vm *VM) typeInfo(id air.TypeID) (air.TypeInfo, error) {
 	return vm.program.Types[id-1], nil
 }
 
-func (vm *VM) mustTypeID(kind air.TypeKind) air.TypeID {
-	for _, typ := range vm.program.Types {
+func typeIDForKind(program *air.Program, kind air.TypeKind) air.TypeID {
+	if program == nil {
+		return air.NoType
+	}
+	for _, typ := range program.Types {
 		if typ.Kind == kind {
 			return typ.ID
 		}
@@ -1620,11 +364,16 @@ func (vm *VM) mustTypeID(kind air.TypeKind) air.TypeID {
 	return air.NoType
 }
 
+func (vm *VM) mustTypeID(kind air.TypeKind) air.TypeID {
+	return typeIDForKind(vm.program, kind)
+}
+
 func (vm *VM) zeroValue(typeID air.TypeID) Value {
 	typeInfo, err := vm.typeInfo(typeID)
 	if err != nil {
 		return Value{}
 	}
+	vm.recordZeroValue(zeroValueProfileKind(typeInfo.Kind))
 	switch typeInfo.Kind {
 	case air.TypeVoid:
 		return Void(typeID)
@@ -1650,6 +399,7 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 		}
 		return Enum(typeID, typeInfo.Variants[0].Discriminant)
 	case air.TypeMaybe:
+		vm.recordMaybeDetailAlloc(false)
 		return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem))
 	case air.TypeStruct:
 		fields := make([]Value, len(typeInfo.Fields))
@@ -1674,24 +424,41 @@ func (vm *VM) zeroValue(typeID air.TypeID) Value {
 	}
 }
 
+func zeroValueProfileKind(kind air.TypeKind) zeroValueKind {
+	switch kind {
+	case air.TypeVoid:
+		return zeroValueVoid
+	case air.TypeInt, air.TypeFloat, air.TypeBool, air.TypeStr:
+		return zeroValueScalar
+	case air.TypeList:
+		return zeroValueList
+	case air.TypeMap:
+		return zeroValueMap
+	case air.TypeDynamic:
+		return zeroValueDynamic
+	case air.TypeFiber:
+		return zeroValueFiber
+	case air.TypeEnum:
+		return zeroValueEnum
+	case air.TypeMaybe:
+		return zeroValueMaybe
+	case air.TypeStruct:
+		return zeroValueStruct
+	case air.TypeResult:
+		return zeroValueResult
+	case air.TypeUnion:
+		return zeroValueUnion
+	case air.TypeTraitObject:
+		return zeroValueTraitObject
+	case air.TypeExtern:
+		return zeroValueExtern
+	default:
+		return zeroValueOther
+	}
+}
+
 func closedFiberDone() chan struct{} {
 	done := make(chan struct{})
 	close(done)
 	return done
-}
-
-func (f *frame) mustMaybeElem(typeID air.TypeID) air.TypeID {
-	typeInfo, err := f.vm.typeInfo(typeID)
-	if err != nil || typeInfo.Kind != air.TypeMaybe {
-		return f.vm.mustTypeID(air.TypeVoid)
-	}
-	return typeInfo.Elem
-}
-
-func (f *frame) zeroMaybeForFunctionReturn() Value {
-	typeInfo, err := f.vm.typeInfo(f.fn.Signature.Return)
-	if err != nil || typeInfo.Kind != air.TypeMaybe {
-		return f.vm.zeroValue(f.vm.mustTypeID(air.TypeVoid))
-	}
-	return f.vm.zeroValue(typeInfo.Elem)
 }

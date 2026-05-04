@@ -156,7 +156,7 @@ type Host struct {
 	DecodeInt            func(data any) Result[int, Error]
 	DecodeString         func(data any) Result[string, Error]
 	DynamicToList        func(data any) ([]any, error)
-	DynamicToMap         func(data any) (map[any]any, error)
+	DynamicToMap         func(data any) (map[string]any, error)
 	EnvGet               func(key string) Maybe[string]
 	ExtractField         func(data any, name string) (any, error)
 	FSAbs                func(path string) (string, error)
