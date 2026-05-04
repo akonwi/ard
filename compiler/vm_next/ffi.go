@@ -275,6 +275,85 @@ func (vm *VM) newFastHostExternAdapter(extern air.Extern, fn any) func(*VM, []Va
 			}
 			return Bool(extern.Signature.Return, typed(dynamicArg(args[0]))), nil
 		}
+	case func(string):
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str", goExternBinding(extern))
+			}
+			typed(args[0].Str)
+			return Void(extern.Signature.Return), nil
+		}
+	case func(int):
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueInt {
+				return Value{}, fmt.Errorf("extern %s expects Int", goExternBinding(extern))
+			}
+			typed(args[0].Int)
+			return Void(extern.Signature.Return), nil
+		}
+	case func() string:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 0 {
+				return Value{}, fmt.Errorf("extern %s expects no args", goExternBinding(extern))
+			}
+			return Str(extern.Signature.Return, typed()), nil
+		}
+	case func() any:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 0 {
+				return Value{}, fmt.Errorf("extern %s expects no args", goExternBinding(extern))
+			}
+			return Dynamic(extern.Signature.Return, typed()), nil
+		}
+	case func(string) string:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str", goExternBinding(extern))
+			}
+			return Str(extern.Signature.Return, typed(args[0].Str)), nil
+		}
+	case func(string) any:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str", goExternBinding(extern))
+			}
+			return Dynamic(extern.Signature.Return, typed(args[0].Str)), nil
+		}
+	case func(int) float64:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueInt {
+				return Value{}, fmt.Errorf("extern %s expects Int", goExternBinding(extern))
+			}
+			return Float(extern.Signature.Return, typed(args[0].Int)), nil
+		}
+	case func(int) any:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueInt {
+				return Value{}, fmt.Errorf("extern %s expects Int", goExternBinding(extern))
+			}
+			return Dynamic(extern.Signature.Return, typed(args[0].Int)), nil
+		}
+	case func(float64) float64:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueFloat {
+				return Value{}, fmt.Errorf("extern %s expects Float", goExternBinding(extern))
+			}
+			return Float(extern.Signature.Return, typed(args[0].Float)), nil
+		}
+	case func(float64) any:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueFloat {
+				return Value{}, fmt.Errorf("extern %s expects Float", goExternBinding(extern))
+			}
+			return Dynamic(extern.Signature.Return, typed(args[0].Float)), nil
+		}
+	case func(bool) any:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueBool {
+				return Value{}, fmt.Errorf("extern %s expects Bool", goExternBinding(extern))
+			}
+			return Dynamic(extern.Signature.Return, typed(args[0].Bool)), nil
+		}
 	case func(string) bool:
 		return func(vm *VM, args []Value) (Value, error) {
 			if len(args) != 1 || args[0].Kind != ValueStr {
@@ -324,6 +403,13 @@ func (vm *VM) newFastHostExternAdapter(extern air.Extern, fn any) func(*VM, []Va
 			out, err := typed()
 			return vm.fastStringStringErrorResultWithInfo(extern.Signature.Return, returnInfo, out, err)
 		}
+	case func() []string:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 0 {
+				return Value{}, fmt.Errorf("extern %s expects no args", goExternBinding(extern))
+			}
+			return stringListValue(vm, extern.Signature.Return, typed())
+		}
 	case func(string) (string, error):
 		if !isResultReturn {
 			return nil
@@ -345,6 +431,13 @@ func (vm *VM) newFastHostExternAdapter(extern air.Extern, fn any) func(*VM, []Va
 			}
 			out, err := typed(args[0].Str)
 			return vm.fastStringBoolMapResultWithInfo(extern.Signature.Return, returnInfo, resultValueInfo, out, err)
+		}
+	case func(string) []string:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str", goExternBinding(extern))
+			}
+			return stringListValue(vm, extern.Signature.Return, typed(args[0].Str))
 		}
 	case func(string) (any, error):
 		if !isResultReturn {
@@ -438,6 +531,27 @@ func (vm *VM) newFastHostExternAdapter(extern air.Extern, fn any) func(*VM, []Va
 			out, hostErr := typed(conn, args[1].Str, values)
 			return vm.fastDynamicListResultWithInfo(extern.Signature.Return, returnInfo, resultValueInfo, out, hostErr)
 		}
+	case func(string) stdlibffi.Maybe[int]:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str", goExternBinding(extern))
+			}
+			return vm.fastMaybeIntValue(extern.Signature.Return, typed(args[0].Str))
+		}
+	case func(string) stdlibffi.Maybe[string]:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str", goExternBinding(extern))
+			}
+			return vm.fastMaybeStringValue(extern.Signature.Return, typed(args[0].Str))
+		}
+	case func(string) stdlibffi.Maybe[float64]:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 || args[0].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects Str", goExternBinding(extern))
+			}
+			return vm.fastMaybeFloatValue(extern.Signature.Return, typed(args[0].Str))
+		}
 	}
 	return nil
 }
@@ -494,6 +608,57 @@ func hostAnyListArg(value Value) ([]any, error) {
 		out[i] = hostItem
 	}
 	return out, nil
+}
+
+func stringListValue(vm *VM, typeID air.TypeID, raw []string) (Value, error) {
+	listInfo, err := vm.typeInfo(typeID)
+	if err != nil {
+		return Value{}, err
+	}
+	items := make([]Value, len(raw))
+	for i, item := range raw {
+		items[i] = Str(listInfo.Elem, item)
+	}
+	return List(typeID, items), nil
+}
+
+func (vm *VM) fastMaybeIntValue(typeID air.TypeID, raw stdlibffi.Maybe[int]) (Value, error) {
+	info, err := vm.typeInfo(typeID)
+	if err != nil {
+		return Value{}, err
+	}
+	if !raw.Some {
+		vm.recordMaybeAlloc(false)
+		return Maybe(typeID, false, vm.zeroValue(info.Elem)), nil
+	}
+	vm.recordMaybeAlloc(true)
+	return Maybe(typeID, true, Int(info.Elem, raw.Value)), nil
+}
+
+func (vm *VM) fastMaybeStringValue(typeID air.TypeID, raw stdlibffi.Maybe[string]) (Value, error) {
+	info, err := vm.typeInfo(typeID)
+	if err != nil {
+		return Value{}, err
+	}
+	if !raw.Some {
+		vm.recordMaybeAlloc(false)
+		return Maybe(typeID, false, vm.zeroValue(info.Elem)), nil
+	}
+	vm.recordMaybeAlloc(true)
+	return Maybe(typeID, true, Str(info.Elem, raw.Value)), nil
+}
+
+func (vm *VM) fastMaybeFloatValue(typeID air.TypeID, raw stdlibffi.Maybe[float64]) (Value, error) {
+	info, err := vm.typeInfo(typeID)
+	if err != nil {
+		return Value{}, err
+	}
+	if !raw.Some {
+		vm.recordMaybeAlloc(false)
+		return Maybe(typeID, false, vm.zeroValue(info.Elem)), nil
+	}
+	vm.recordMaybeAlloc(true)
+	return Maybe(typeID, true, Float(info.Elem, raw.Value)), nil
 }
 
 func (vm *VM) fastResultInfo(returnType air.TypeID) (air.TypeInfo, error) {
