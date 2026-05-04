@@ -1,6 +1,7 @@
 package vm_next
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -199,6 +200,7 @@ func (adapter hostExternAdapter) call(vm *VM, args []Value) (Value, error) {
 }
 
 func (vm *VM) newFastHostExternAdapter(extern air.Extern, fn any) func(*VM, []Value) (Value, error) {
+	binding := goExternBinding(extern)
 	returnInfo, returnInfoErr := vm.typeInfo(extern.Signature.Return)
 	isResultReturn := returnInfoErr == nil && returnInfo.Kind == air.TypeResult
 	var resultValueInfo air.TypeInfo
@@ -210,6 +212,14 @@ func (vm *VM) newFastHostExternAdapter(extern air.Extern, fn any) func(*VM, []Va
 		if !isResultReturn {
 			return nil
 		}
+		if binding == "DecodeInt" {
+			return func(vm *VM, args []Value) (Value, error) {
+				if len(args) != 1 {
+					return Value{}, fmt.Errorf("extern %s expects one arg", goExternBinding(extern))
+				}
+				return vm.fastStdlibDecodeIntResultWithInfo(extern.Signature.Return, returnInfo, dynamicArg(args[0]), typed)
+			}
+		}
 		return func(vm *VM, args []Value) (Value, error) {
 			if len(args) != 1 {
 				return Value{}, fmt.Errorf("extern %s expects one arg", goExternBinding(extern))
@@ -220,6 +230,14 @@ func (vm *VM) newFastHostExternAdapter(extern air.Extern, fn any) func(*VM, []Va
 	case func(any) stdlibffi.Result[string, stdlibffi.Error]:
 		if !isResultReturn {
 			return nil
+		}
+		if binding == "DecodeString" {
+			return func(vm *VM, args []Value) (Value, error) {
+				if len(args) != 1 {
+					return Value{}, fmt.Errorf("extern %s expects one arg", goExternBinding(extern))
+				}
+				return vm.fastStdlibDecodeStringResultWithInfo(extern.Signature.Return, returnInfo, dynamicArg(args[0]), typed)
+			}
 		}
 		return func(vm *VM, args []Value) (Value, error) {
 			if len(args) != 1 {
@@ -429,6 +447,37 @@ func (vm *VM) fastDecodeIntResultWithInfo(returnType air.TypeID, info air.TypeIn
 	return Result(returnType, false, errValue), nil
 }
 
+func (vm *VM) fastStdlibDecodeIntResultWithInfo(returnType air.TypeID, info air.TypeInfo, raw any, fallback func(any) stdlibffi.Result[int, stdlibffi.Error]) (Value, error) {
+	switch value := raw.(type) {
+	case int:
+		if vm.profile != nil {
+			vm.profile.RecordValueAlloc(valueAllocResult)
+		}
+		return ResultInt(returnType, info.Value, value), nil
+	case int64:
+		if vm.profile != nil {
+			vm.profile.RecordValueAlloc(valueAllocResult)
+		}
+		return ResultInt(returnType, info.Value, int(value)), nil
+	case float64:
+		parsed := int(value)
+		if value == float64(parsed) {
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocResult)
+			}
+			return ResultInt(returnType, info.Value, parsed), nil
+		}
+	case json.Number:
+		if parsed, err := value.Int64(); err == nil {
+			if vm.profile != nil {
+				vm.profile.RecordValueAlloc(valueAllocResult)
+			}
+			return ResultInt(returnType, info.Value, int(parsed)), nil
+		}
+	}
+	return vm.fastDecodeIntResultWithInfo(returnType, info, fallback(raw))
+}
+
 func (vm *VM) fastDecodeStringResult(returnType air.TypeID, result stdlibffi.Result[string, stdlibffi.Error]) (Value, error) {
 	info, err := vm.fastResultInfo(returnType)
 	if err != nil {
@@ -449,6 +498,16 @@ func (vm *VM) fastDecodeStringResultWithInfo(returnType air.TypeID, info air.Typ
 		return Value{}, err
 	}
 	return Result(returnType, false, errValue), nil
+}
+
+func (vm *VM) fastStdlibDecodeStringResultWithInfo(returnType air.TypeID, info air.TypeInfo, raw any, fallback func(any) stdlibffi.Result[string, stdlibffi.Error]) (Value, error) {
+	if value, ok := raw.(string); ok {
+		if vm.profile != nil {
+			vm.profile.RecordValueAlloc(valueAllocResult)
+		}
+		return ResultStr(returnType, info.Value, value), nil
+	}
+	return vm.fastDecodeStringResultWithInfo(returnType, info, fallback(raw))
 }
 
 func (vm *VM) fastDecodeFloatResult(returnType air.TypeID, result stdlibffi.Result[float64, stdlibffi.Error]) (Value, error) {

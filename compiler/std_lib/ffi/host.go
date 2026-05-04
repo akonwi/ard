@@ -764,8 +764,9 @@ func DecodeInt(data any) Result[int, Error] {
 	case int64:
 		return Ok[int, Error](int(value))
 	case float64:
-		if math.Trunc(value) == value {
-			return Ok[int, Error](int(value))
+		parsed := int(value)
+		if value == float64(parsed) {
+			return Ok[int, Error](parsed)
 		}
 	case json.Number:
 		if parsed, err := value.Int64(); err == nil {
