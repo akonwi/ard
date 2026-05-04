@@ -552,6 +552,120 @@ func (vm *VM) newFastHostExternAdapter(extern air.Extern, fn any) func(*VM, []Va
 			}
 			return vm.fastMaybeFloatValue(extern.Signature.Return, typed(args[0].Str))
 		}
+	case func(stdlibffi.Db) error:
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects Db", goExternBinding(extern))
+			}
+			db, err := dbArg(args[0])
+			if err != nil {
+				return Value{}, err
+			}
+			return vm.fastVoidStringErrorResultWithInfo(extern.Signature.Return, returnInfo, typed(db))
+		}
+	case func(stdlibffi.Tx) error:
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects Tx", goExternBinding(extern))
+			}
+			tx, err := txArg(args[0])
+			if err != nil {
+				return Value{}, err
+			}
+			return vm.fastVoidStringErrorResultWithInfo(extern.Signature.Return, returnInfo, typed(tx))
+		}
+	case func(stdlibffi.Db) (stdlibffi.Tx, error):
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects Db", goExternBinding(extern))
+			}
+			db, err := dbArg(args[0])
+			if err != nil {
+				return Value{}, err
+			}
+			out, hostErr := typed(db)
+			return vm.fastExternStringErrorResultWithInfo(extern.Signature.Return, returnInfo, out.Handle, hostErr)
+		}
+	case func(stdlibffi.RawResponse) int:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects RawResponse", goExternBinding(extern))
+			}
+			resp, err := rawResponseArg(args[0])
+			if err != nil {
+				return Value{}, err
+			}
+			return Int(extern.Signature.Return, typed(resp)), nil
+		}
+	case func(stdlibffi.RawResponse):
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects RawResponse", goExternBinding(extern))
+			}
+			resp, err := rawResponseArg(args[0])
+			if err != nil {
+				return Value{}, err
+			}
+			typed(resp)
+			return Void(extern.Signature.Return), nil
+		}
+	case func(stdlibffi.RawResponse) (string, error):
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects RawResponse", goExternBinding(extern))
+			}
+			resp, err := rawResponseArg(args[0])
+			if err != nil {
+				return Value{}, err
+			}
+			out, hostErr := typed(resp)
+			return vm.fastStringStringErrorResultWithInfo(extern.Signature.Return, returnInfo, out, hostErr)
+		}
+	case func(stdlibffi.RawResponse) map[string]string:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects RawResponse", goExternBinding(extern))
+			}
+			resp, err := rawResponseArg(args[0])
+			if err != nil {
+				return Value{}, err
+			}
+			return stringStringMapValue(vm, extern.Signature.Return, typed(resp))
+		}
+	case func(stdlibffi.RawRequest) string:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects RawRequest", goExternBinding(extern))
+			}
+			req, err := rawRequestArg(args[0])
+			if err != nil {
+				return Value{}, err
+			}
+			return Str(extern.Signature.Return, typed(req)), nil
+		}
+	case func(stdlibffi.RawRequest, string) string:
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 2 || args[1].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects RawRequest, Str", goExternBinding(extern))
+			}
+			req, err := rawRequestArg(args[0])
+			if err != nil {
+				return Value{}, err
+			}
+			return Str(extern.Signature.Return, typed(req, args[1].Str)), nil
+		}
 	}
 	return nil
 }
@@ -563,14 +677,38 @@ func dynamicArg(value Value) any {
 	return value.GoValue()
 }
 
+func externHandleArg(value Value) (any, error) {
+	externValue, err := value.externValue()
+	if err != nil {
+		return nil, err
+	}
+	return externValue.Handle, nil
+}
+
+func dbArg(value Value) (stdlibffi.Db, error) {
+	handle, err := externHandleArg(value)
+	return stdlibffi.Db{Handle: handle}, err
+}
+
+func txArg(value Value) (stdlibffi.Tx, error) {
+	handle, err := externHandleArg(value)
+	return stdlibffi.Tx{Handle: handle}, err
+}
+
+func rawRequestArg(value Value) (stdlibffi.RawRequest, error) {
+	handle, err := externHandleArg(value)
+	return stdlibffi.RawRequest{Handle: handle}, err
+}
+
+func rawResponseArg(value Value) (stdlibffi.RawResponse, error) {
+	handle, err := externHandleArg(value)
+	return stdlibffi.RawResponse{Handle: handle}, err
+}
+
 func hostAnyArg(value Value) (any, error) {
 	switch value.Kind {
 	case ValueExtern:
-		externValue, err := value.externValue()
-		if err != nil {
-			return nil, err
-		}
-		return externValue.Handle, nil
+		return externHandleArg(value)
 	case ValueUnion:
 		unionValue, err := value.unionValue()
 		if err != nil {
@@ -620,6 +758,28 @@ func stringListValue(vm *VM, typeID air.TypeID, raw []string) (Value, error) {
 		items[i] = Str(listInfo.Elem, item)
 	}
 	return List(typeID, items), nil
+}
+
+func stringStringMapValue(vm *VM, typeID air.TypeID, raw map[string]string) (Value, error) {
+	mapInfo, err := vm.typeInfo(typeID)
+	if err != nil {
+		return Value{}, err
+	}
+	entries := make([]MapEntryValue, 0, len(raw))
+	for key, value := range raw {
+		entries = append(entries, MapEntryValue{Key: Str(mapInfo.Key, key), Value: Str(mapInfo.Value, value)})
+	}
+	return Map(typeID, entries), nil
+}
+
+func (vm *VM) fastExternStringErrorResultWithInfo(returnType air.TypeID, info air.TypeInfo, handle any, hostErr error) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
+	if hostErr != nil {
+		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
+	}
+	return Result(returnType, true, Extern(info.Value, handle)), nil
 }
 
 func (vm *VM) fastMaybeIntValue(typeID air.TypeID, raw stdlibffi.Maybe[int]) (Value, error) {
