@@ -679,29 +679,6 @@ func TestVMNextBytecodeParityCryptoUUID(t *testing.T) {
 	}
 }
 
-func TestVMNextBytecodeParityFFIPanicRecovery(t *testing.T) {
-	got := runSourceWithExterns(t, `
-		extern fn panic_test_ffi(message: Str) Str!Str = "PanicTestFFI"
-
-		match panic_test_ffi("test message") {
-			err(message) => message,
-			ok(_) => "unexpected success",
-		}
-	`, HostFunctionRegistry{
-		"PanicTestFFI": func(message string) (string, error) {
-			panic("test panic: " + message)
-		},
-	})
-
-	if got.Kind != ValueStr {
-		t.Fatalf("got %#v, want panic message string", got)
-	}
-	if !strings.Contains(got.Str, "panic in FFI function 'PanicTestFFI'") ||
-		!strings.Contains(got.Str, "test panic: test message") {
-		t.Fatalf("panic message = %q", got.Str)
-	}
-}
-
 func TestVMNextBytecodeParityHttpMethod(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{

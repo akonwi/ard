@@ -21,6 +21,13 @@ jobs:
           go-version: "1.26"
           cache: true
 
+      - name: Generate stdlib FFI bridge code
+        working-directory: compiler
+        run: go generate -tags=goexperiment.jsonv2 ./std_lib/ffi
+
+      - name: Check generated files are current
+        run: git diff --exit-code
+
       - name: Run compiler unit tests
         working-directory: compiler
         run: go test -tags=goexperiment.jsonv2 ./...

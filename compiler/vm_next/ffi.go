@@ -18,31 +18,28 @@ type HostFunctionRegistry map[string]any
 type hostExternAdapters map[air.ExternID]hostExternAdapter
 
 type hostExternDirect func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error)
+type hostExternAdapterLookup func(binding string, fn any) (hostExternDirect, bool)
 
-type hostExternAdapter struct {
-	binding    string
-	extern     air.Extern
-	callable   reflect.Value
-	direct     hostExternDirect
-	inputs     []reflect.Type
-	inputPlans []hostInputPlan
-	buildErr   error
+var generatedHostExternAdapterLookups []hostExternAdapterLookup
+
+func registerGeneratedHostExternAdapter(lookup hostExternAdapterLookup) {
+	generatedHostExternAdapterLookups = append(generatedHostExternAdapterLookups, lookup)
 }
 
-type hostInputKind uint8
+func generatedHostExternAdapter(binding string, fn any) (hostExternDirect, bool) {
+	for i := len(generatedHostExternAdapterLookups) - 1; i >= 0; i-- {
+		if direct, ok := generatedHostExternAdapterLookups[i](binding, fn); ok {
+			return direct, true
+		}
+	}
+	return nil, false
+}
 
-const (
-	hostInputGeneric hostInputKind = iota
-	hostInputInt
-	hostInputFloat64
-	hostInputBool
-	hostInputString
-	hostInputDynamicAny
-)
-
-type hostInputPlan struct {
-	kind   hostInputKind
-	target reflect.Type
+type hostExternAdapter struct {
+	binding  string
+	extern   air.Extern
+	direct   hostExternDirect
+	buildErr error
 }
 
 var (
@@ -129,35 +126,31 @@ func (vm *VM) buildHostExternAdapters(registry HostFunctionRegistry) hostExternA
 }
 
 func (vm *VM) newHostExternAdapter(extern air.Extern, binding string, fn any) (hostExternAdapter, error) {
-	callable := reflect.ValueOf(fn)
-	if !callable.IsValid() || callable.Kind() != reflect.Func {
+	fnValue := reflect.ValueOf(fn)
+	if !fnValue.IsValid() || fnValue.Kind() != reflect.Func {
 		return hostExternAdapter{}, fmt.Errorf("extern binding %q is %T, want func", binding, fn)
 	}
-	fnType := callable.Type()
+	fnType := fnValue.Type()
 	if fnType.NumIn() != len(extern.Signature.Params) {
 		return hostExternAdapter{}, fmt.Errorf("extern %s expects %d params from AIR, host function accepts %d", binding, len(extern.Signature.Params), fnType.NumIn())
 	}
-	inputs := make([]reflect.Type, len(extern.Signature.Params))
-	inputPlans := make([]hostInputPlan, len(extern.Signature.Params))
 	for i, param := range extern.Signature.Params {
 		target := fnType.In(i)
 		if err := vm.validateHostParamType(param.Type, target); err != nil {
 			return hostExternAdapter{}, fmt.Errorf("arg %d %s: %w", i, param.Name, err)
 		}
-		inputs[i] = target
-		inputPlans[i] = vm.newHostInputPlan(param.Type, target)
 	}
 	if err := vm.validateHostReturns(extern.Signature.Return, fnType); err != nil {
 		return hostExternAdapter{}, err
 	}
-	direct, _ := generatedStdlibHostExternAdapter(binding, fn)
+	direct, ok := generatedHostExternAdapter(binding, fn)
+	if !ok {
+		return hostExternAdapter{}, fmt.Errorf("extern %s has no generated vm_next adapter", binding)
+	}
 	return hostExternAdapter{
-		binding:    binding,
-		extern:     extern,
-		callable:   callable,
-		direct:     direct,
-		inputs:     inputs,
-		inputPlans: inputPlans,
+		binding: binding,
+		extern:  extern,
+		direct:  direct,
 	}, nil
 }
 
@@ -165,135 +158,17 @@ func (adapter hostExternAdapter) call(vm *VM, args []Value) (Value, error) {
 	if adapter.buildErr != nil {
 		return Value{}, fmt.Errorf("extern %s adapter: %w", adapter.binding, adapter.buildErr)
 	}
-	if len(adapter.inputs) != len(args) {
-		return Value{}, fmt.Errorf("extern %s expects %d args, got %d", adapter.binding, len(adapter.inputs), len(args))
-	}
-	if adapter.direct != nil {
-		if vm.profile == nil {
-			return adapter.direct(vm, adapter.extern, adapter.binding, args)
-		}
-		start := time.Now()
-		value, err := adapter.direct(vm, adapter.extern, adapter.binding, args)
-		duration := time.Since(start)
-		vm.profile.RecordExternCall(adapter.binding, len(args), 0, duration, 0)
-		return value, err
+	if len(adapter.extern.Signature.Params) != len(args) {
+		return Value{}, fmt.Errorf("extern %s expects %d args, got %d", adapter.binding, len(adapter.extern.Signature.Params), len(args))
 	}
 	if vm.profile == nil {
-		inputs, err := adapter.hostInputs(vm, args)
-		if err != nil {
-			return Value{}, err
-		}
-		return vm.hostReturnsToValue(adapter.extern.Signature.Return, adapter.callable.Call(inputs))
+		return adapter.direct(vm, adapter.extern, adapter.binding, args)
 	}
-
-	convertInStart := time.Now()
-	inputs, err := adapter.hostInputs(vm, args)
-	if err != nil {
-		return Value{}, err
-	}
-	convertIn := time.Since(convertInStart)
-	hostStart := time.Now()
-	hostReturns := adapter.callable.Call(inputs)
-	hostDuration := time.Since(hostStart)
-	convertOutStart := time.Now()
-	value, err := vm.hostReturnsToValue(adapter.extern.Signature.Return, hostReturns)
-	convertOut := time.Since(convertOutStart)
-	vm.profile.RecordExternCall(adapter.binding, len(args), convertIn, hostDuration, convertOut)
+	start := time.Now()
+	value, err := adapter.direct(vm, adapter.extern, adapter.binding, args)
+	duration := time.Since(start)
+	vm.profile.RecordExternCall(adapter.binding, len(args), 0, duration, 0)
 	return value, err
-}
-
-func (adapter hostExternAdapter) hostInputs(vm *VM, args []Value) ([]reflect.Value, error) {
-	var small [3]reflect.Value
-	var inputs []reflect.Value
-	if len(args) <= len(small) {
-		inputs = small[:len(args)]
-	} else {
-		inputs = make([]reflect.Value, len(args))
-	}
-	for i, arg := range args {
-		input, err := adapter.inputPlans[i].valueToHost(vm, arg)
-		if err != nil {
-			return nil, fmt.Errorf("extern %s arg %d: %w", adapter.binding, i, err)
-		}
-		inputs[i] = input
-	}
-	return inputs, nil
-}
-
-func (vm *VM) newHostInputPlan(typeID air.TypeID, target reflect.Type) hostInputPlan {
-	plan := hostInputPlan{target: target}
-	info, err := vm.typeInfo(typeID)
-	if err != nil {
-		return plan
-	}
-	switch target.Kind() {
-	case reflect.Int:
-		if info.Kind == air.TypeInt || info.Kind == air.TypeEnum {
-			plan.kind = hostInputInt
-		}
-	case reflect.Float64:
-		if info.Kind == air.TypeFloat {
-			plan.kind = hostInputFloat64
-		}
-	case reflect.Bool:
-		if info.Kind == air.TypeBool {
-			plan.kind = hostInputBool
-		}
-	case reflect.String:
-		if info.Kind == air.TypeStr {
-			plan.kind = hostInputString
-		}
-	case reflect.Interface:
-		if target.NumMethod() == 0 && info.Kind == air.TypeDynamic {
-			plan.kind = hostInputDynamicAny
-		}
-	}
-	return plan
-}
-
-func (plan hostInputPlan) valueToHost(vm *VM, value Value) (reflect.Value, error) {
-	switch plan.kind {
-	case hostInputInt:
-		if value.Kind != ValueInt && value.Kind != ValueEnum {
-			return reflect.Value{}, fmt.Errorf("expected int-compatible value, got kind %d", value.Kind)
-		}
-		out := reflect.ValueOf(value.Int)
-		if plan.target != intType {
-			out = out.Convert(plan.target)
-		}
-		return out, nil
-	case hostInputFloat64:
-		if value.Kind != ValueFloat {
-			return reflect.Value{}, fmt.Errorf("expected float value, got kind %d", value.Kind)
-		}
-		out := reflect.ValueOf(value.Float)
-		if plan.target != float64Type {
-			out = out.Convert(plan.target)
-		}
-		return out, nil
-	case hostInputBool:
-		if value.Kind != ValueBool {
-			return reflect.Value{}, fmt.Errorf("expected bool value, got kind %d", value.Kind)
-		}
-		out := reflect.ValueOf(value.Bool)
-		if plan.target != boolType {
-			out = out.Convert(plan.target)
-		}
-		return out, nil
-	case hostInputString:
-		if value.Kind != ValueStr {
-			return reflect.Value{}, fmt.Errorf("expected string value, got kind %d", value.Kind)
-		}
-		out := reflect.ValueOf(value.Str)
-		if plan.target != stringType {
-			out = out.Convert(plan.target)
-		}
-		return out, nil
-	case hostInputDynamicAny:
-		return vm.dynamicToHost(value, plan.target)
-	default:
-		return vm.valueToHost(value, plan.target)
-	}
 }
 
 func goExternBinding(extern air.Extern) string {
@@ -646,70 +521,6 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 		}
 	}
 	return reflect.Value{}, fmt.Errorf("unsupported host parameter type %s", target)
-}
-
-func (vm *VM) hostReturnsToValue(returnType air.TypeID, returns []reflect.Value) (Value, error) {
-	returnInfo, err := vm.typeInfo(returnType)
-	if err != nil {
-		return Value{}, err
-	}
-	if len(returns) == 0 {
-		return vm.zeroValue(returnType), nil
-	}
-	if returnInfo.Kind == air.TypeResult {
-		return vm.hostReturnsToResult(returnInfo, returnType, returns)
-	}
-	if len(returns) != 1 {
-		return Value{}, fmt.Errorf("extern returned %d values for non-Result type", len(returns))
-	}
-	return vm.hostValueToValue(returnType, returns[0])
-}
-
-func (vm *VM) hostReturnsToResult(returnInfo air.TypeInfo, returnType air.TypeID, returns []reflect.Value) (Value, error) {
-	if len(returns) == 1 && isHostResultType(returns[0].Type()) {
-		return vm.hostResultToValue(returnInfo, returnType, returns[0])
-	}
-	if len(returns) == 1 && isErrorValue(returns[0]) {
-		if !returns[0].IsNil() {
-			return vm.resultErr(returnType, returnInfo.Error, returns[0].Interface().(error))
-		}
-		return Result(returnType, true, vm.zeroValue(returnInfo.Value)), nil
-	}
-	if len(returns) == 2 && isErrorValue(returns[1]) {
-		if !returns[1].IsNil() {
-			return vm.resultErr(returnType, returnInfo.Error, returns[1].Interface().(error))
-		}
-		value, err := vm.hostValueToValue(returnInfo.Value, returns[0])
-		if err != nil {
-			return Value{}, err
-		}
-		return Result(returnType, true, value), nil
-	}
-	return Value{}, fmt.Errorf("Result extern must return error or (value, error), got %d values", len(returns))
-}
-
-func (vm *VM) hostResultToValue(returnInfo air.TypeInfo, returnType air.TypeID, value reflect.Value) (Value, error) {
-	for value.Kind() == reflect.Interface {
-		if value.IsNil() {
-			return Result(returnType, false, vm.zeroValue(returnInfo.Error)), nil
-		}
-		value = value.Elem()
-	}
-	if value.Kind() != reflect.Struct {
-		return Value{}, fmt.Errorf("host Result value must be struct, got %s", value.Type())
-	}
-	if value.FieldByName("Ok").Bool() {
-		okValue, err := vm.hostValueToValue(returnInfo.Value, value.FieldByName("Value"))
-		if err != nil {
-			return Value{}, err
-		}
-		return Result(returnType, true, okValue), nil
-	}
-	errValue, err := vm.hostValueToValue(returnInfo.Error, value.FieldByName("Error"))
-	if err != nil {
-		return Value{}, err
-	}
-	return Result(returnType, false, errValue), nil
 }
 
 func (vm *VM) resultErr(resultType, errType air.TypeID, err error) (Value, error) {

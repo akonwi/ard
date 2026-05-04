@@ -810,10 +810,11 @@ Checklist:
     convert typed returns back to `Value` without `reflect.Call`.
   - Generation uses Go AST construction/printer APIs for the adapter file rather
     than hand-building Go source strings.
-- [x] Preserve generic reflective fallback for user/custom externs.
-  - If no generated stdlib adapter matches, or if a same-binding override does
-    not have the generated stdlib function type, `vm_next` falls back to the
-    validated reflective adapter path.
+- [x] Remove the generic reflective fallback from `vm_next` host extern calls.
+  - Host externs now require a generated adapter. Overrides of stdlib bindings
+    still work when the override matches the generated stdlib signature.
+  - Arbitrary ad-hoc host functions are no longer a supported `vm_next` unit-test
+    path; custom externs need generated bridge code.
 - [x] Keep stdlib semantics outside generic VM adapter code.
   - Generated adapters call the registered host functions; they do not
     reimplement binding behavior such as decode semantics.
@@ -830,44 +831,57 @@ Checklist:
 
 Next FFI architecture plan:
 
-1. Make generation a prerequisite for tests and local validation.
-   - Update local docs and CI workflows so FFI/vm_next validation runs
-     generation before tests, e.g. `cd compiler && go generate ./std_lib/ffi &&
-     go test ./...`.
-   - CI should also fail on stale generated files, e.g. run generation and then
-     `git diff --exit-code` before or after tests.
+1. Make generation a prerequisite for tests and local validation. Done.
+   - Local instructions now run `cd compiler && go generate ./std_lib/ffi && go
+     test ./...` for the full compiler test suite.
+   - CI now runs stdlib FFI generation before compiler tests and fails on stale
+     generated files with `git diff --exit-code`.
    - This ensures stdlib tests always compile against fresh host declarations
      and fresh `vm_next` bridge code.
 2. Remove or rewrite unit tests that depend on arbitrary ad-hoc reflective FFI.
-   - Keep tests that exercise stdlib externs because they use generated bridge
+   Done.
+   - Removed `vm_next` unit tests whose only host path was arbitrary inline
+     `HostFunctionRegistry` reflection.
+   - Kept tests that exercise stdlib externs because they use generated bridge
      code.
    - Tests may still override stdlib bindings such as `Print` or `HTTP_Serve` as
      long as the override matches the generated stdlib signature.
-   - Do not preserve the reflective fallback solely for unit-test convenience.
-     Prefer integration coverage through real extern declarations and generated
-     bridges.
-3. Generalize FFI adapter generation beyond the built-in stdlib.
+3. Generalize FFI adapter generation beyond the built-in stdlib. In progress.
+   - The extern bridge generator now lives under `compiler/ffi`
+     rather than beside stdlib host code. FFI bridge generation is a compiler
+     concern; stdlib is just one consumer.
+   - The generator accepts output/package/import options so the same generator
+     can be aimed at other declared extern contracts instead of being hardcoded
+     only to stdlib paths. The generated host package defaults to `ffi`, matching
+     the intended project layout where `/ffi` contains host code.
+   - Generated adapter files self-register with `vm_next`, so additional extern
+     bridge files can be generated into the `vm_next` package without editing
+     `ffi.go`.
    - Any host extern contract should be able to generate the same pieces the
      stdlib now generates: host-facing Go declarations plus internal `vm_next`
      adapter glue.
    - Host implementations should remain ordinary Go functions and should not
      know about adapters, `Value`, stacks, or VM internals.
    - Generated adapters should become the intended production path for custom
-     host extern sets, with reflective fallback kept only while generator
-     coverage matures.
+     host extern sets. Until then, custom host externs are not a primary
+     `vm_next` execution path.
    - Unsupported declared extern signatures should become explicit generator
      errors or documented skips; runtime-needed externs must not silently depend
      on VM reflection.
    - This would let embedders write normal host functions while avoiding
      `reflect.Call` in steady-state execution.
-4. Remove arbitrary reflective host-function fallback from `vm_next` after the
-   generated bridge path is general enough.
-   - `hostExternAdapter.callable` and `reflect.Call` should disappear from
-     steady-state `vm_next` FFI.
-   - Panic wrapping, Result/Maybe conversion, and host error semantics must be
+4. Remove arbitrary reflective host-function fallback from `vm_next`. Done for
+   runtime calls.
+   - `hostExternAdapter.callable`, reflective input plans, and `reflect.Call`
+     were removed from `vm_next` host extern dispatch.
+   - Panic wrapping, Result/Maybe conversion, and host error semantics are
      preserved by generated adapters.
-   - Public API likely needs to move away from loose `HostFunctionRegistry` maps
-     toward generated host contracts or generated bridge registries.
+   - Focus benchmark after removing fallback: `decode_pipeline` vm_next
+     `298.8 ms` vs current VM `258.5 ms`; `sql_batch` vm_next `51.4 ms` vs
+     current VM `51.3 ms`.
+   - Public API still accepts `HostFunctionRegistry` for stdlib-binding
+     overrides; longer term it should move toward generated host contracts or
+     generated bridge registries for non-stdlib externs.
 
 Additional constraints and reminders:
 

@@ -5,7 +5,6 @@ import (
 	"reflect"
 
 	"github.com/akonwi/ard/air"
-	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
 )
 
 func stdlibHostArg[T any](vm *VM, value Value) (T, error) {
@@ -96,23 +95,23 @@ func stdlibHostReturnValueError[T any](vm *VM, returnType air.TypeID, value T, e
 	return Result(returnType, true, okValue), nil
 }
 
-func stdlibHostReturnResult[T, E any](vm *VM, returnType air.TypeID, result stdlibffi.Result[T, E]) (Value, error) {
+func stdlibHostReturnResult[T, E any](vm *VM, returnType air.TypeID, value T, errValue E, ok bool) (Value, error) {
 	returnInfo, err := vm.typeInfo(returnType)
 	if err != nil {
 		return Value{}, err
 	}
-	if result.Ok {
-		okValue, err := stdlibHostValueToValue(vm, returnInfo.Value, result.Value)
+	if ok {
+		okValue, err := stdlibHostValueToValue(vm, returnInfo.Value, value)
 		if err != nil {
 			return Value{}, err
 		}
 		return Result(returnType, true, okValue), nil
 	}
-	errValue, err := stdlibHostValueToValue(vm, returnInfo.Error, result.Error)
+	convertedErr, err := stdlibHostValueToValue(vm, returnInfo.Error, errValue)
 	if err != nil {
 		return Value{}, err
 	}
-	return Result(returnType, false, errValue), nil
+	return Result(returnType, false, convertedErr), nil
 }
 
 func stdlibHostValueToValue[T any](vm *VM, typeID air.TypeID, value T) (Value, error) {

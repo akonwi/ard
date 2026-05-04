@@ -8,6 +8,9 @@ import (
 	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
 )
 
+func init() {
+	registerGeneratedHostExternAdapter(generatedStdlibHostExternAdapter)
+}
 func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect, bool) {
 	switch binding {
 	case "AsyncStart":
@@ -263,7 +266,7 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnResult(vm, extern.Signature.Return, out0)
+			return stdlibHostReturnResult(vm, extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
 		}, true
 	case "DecodeFloat":
 		typed, ok := fn.(func(any) stdlibffi.Result[float64, stdlibffi.Error])
@@ -276,7 +279,7 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnResult(vm, extern.Signature.Return, out0)
+			return stdlibHostReturnResult(vm, extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
 		}, true
 	case "DecodeInt":
 		typed, ok := fn.(func(any) stdlibffi.Result[int, stdlibffi.Error])
@@ -289,7 +292,7 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnResult(vm, extern.Signature.Return, out0)
+			return stdlibHostReturnResult(vm, extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
 		}, true
 	case "DecodeString":
 		typed, ok := fn.(func(any) stdlibffi.Result[string, stdlibffi.Error])
@@ -302,7 +305,7 @@ func generatedStdlibHostExternAdapter(binding string, fn any) (hostExternDirect,
 				return Value{}, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return stdlibHostReturnResult(vm, extern.Signature.Return, out0)
+			return stdlibHostReturnResult(vm, extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
 		}, true
 	case "DynamicToList":
 		typed, ok := fn.(func(any) ([]any, error))

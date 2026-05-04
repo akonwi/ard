@@ -36,11 +36,12 @@ All commands should be run from the `/compiler` directory:
   > Important: do not stage and commit the built binary
 - Run Ard program: `cd compiler && go run main.go run samples/[file].ard`
 - Format Ard files: `cd compiler && go run main.go format [path]`
-- Run all tests: `cd compiler && go test ./...`
+- Run all tests: `cd compiler && go generate ./std_lib/ffi && go test ./...`
 - Run package tests: `cd compiler && go test ./ast` or `go test ./checker` or `go test ./bytecode/vm`
 - Run single test: `cd compiler && go test -run TestName ./[package]`
 - Verbose testing: `cd compiler && go test -v ./...`
-- Generate FFI registry: `cd compiler && go generate ./bytecode/vm` (run when adding new FFI functions)
+- Generate stdlib FFI host/VM bridge code: `cd compiler && go generate ./std_lib/ffi` (run before tests and when changing stdlib extern declarations)
+- Generate current bytecode VM FFI registry: `cd compiler && go generate ./bytecode/vm` (run when changing current VM FFI functions)
 
 ## Instructions
 - use the gopls tool (Go language server) to get diagnostics and compilation info
