@@ -688,6 +688,9 @@ M7 progress to date:
   `DynamicValue` wrapper for every Dynamic value. This is especially relevant to
   decode, which wraps many JSON list/map elements as Dynamic; it reduced the
   10-run `decode_pipeline` mean from about `261.0 ms` to about `253.7 ms`.
+- Simplified vm_next dynamic extern argument extraction to read the inline
+  Dynamic payload directly, trimming the hot FFI argument path without changing
+  observable Dynamic values.
 - Latest 10-run runtime-suite checkpoint after these M7 changes: vm_next
   `decode_pipeline` `253.7 ms` versus current VM `250.2 ms`, leaving an
   approximately `3.5 ms` decode gap. The same run had vm_next aggregate
@@ -703,6 +706,9 @@ M7 progress to date:
     regressed profiled wall time and was reverted.
   - Retesting only the `DynamicToList` inline adapter after inline Dynamic
     payloads still regressed profiled wall time, so it was reverted as well.
+  - Adding a specialized `ValueResultDynamic` representation reduced profiled
+    Result ref accesses by about 48k but did not improve the official
+    `decode_pipeline` benchmark, so it was reverted.
 
 Recommended focus:
 
