@@ -407,8 +407,7 @@ func (vm *VM) newFastHostExternAdapter(extern air.Extern, fn any) func(*VM, []Va
 
 func dynamicArg(value Value) any {
 	if value.Kind == ValueDynamic {
-		raw, _ := value.dynamicRaw()
-		return raw
+		return value.Ref
 	}
 	return value.GoValue()
 }
