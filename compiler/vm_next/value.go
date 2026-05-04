@@ -58,6 +58,7 @@ type MapValue struct {
 	Type          air.TypeID
 	Entries       []MapEntryValue
 	SortedEntries []MapEntryValue
+	SortedIndices []int
 	SortedDirty   bool
 }
 

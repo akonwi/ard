@@ -121,24 +121,12 @@ func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, stack *[]Value) (Value,
 		if len(args) != 1 {
 			return Value{}, fmt.Errorf("map get expects key")
 		}
-		if index := mapEntryIndex(mapValue, args[0]); index >= 0 {
-			vm.recordMaybeDetailAlloc(true)
-			out = Maybe(air.TypeID(inst.A), true, mapValue.Entries[index].Value)
-			break
-		}
-		vm.recordMaybeDetailAlloc(false)
-		out = Maybe(air.TypeID(inst.A), false, vm.zeroValue(vm.bytecodeMaybeElem(air.TypeID(inst.A))))
+		out = vm.mapGetOutput(air.TypeID(inst.A), mapValue, args[0])
 	case vmcode.OpMapSet:
 		if len(args) != 2 {
 			return Value{}, fmt.Errorf("map set expects key and value")
 		}
-		if index := mapEntryIndex(mapValue, args[0]); index >= 0 {
-			mapValue.Entries[index].Value = args[1]
-		} else {
-			mapValue.Entries = append(mapValue.Entries, MapEntryValue{Key: args[0], Value: args[1]})
-		}
-		mapValue.SortedDirty = true
-		out = Bool(air.TypeID(inst.A), true)
+		out = mapSetOutput(air.TypeID(inst.A), mapValue, args[0], args[1])
 	case vmcode.OpMapDrop:
 		if len(args) != 1 {
 			return Value{}, fmt.Errorf("map drop expects key")
@@ -157,15 +145,14 @@ func (vm *VM) execBytecodeMapOp(inst vmcode.Instruction, stack *[]Value) (Value,
 		if len(args) != 1 || args[0].Kind != ValueInt {
 			return Value{}, fmt.Errorf("map entry index must be Int")
 		}
-		index := args[0].Int
-		if index < 0 || index >= len(mapValue.Entries) {
+		entry, ok := sortedMapEntryAt(mapValue, args[0].Int)
+		if !ok {
 			return Value{}, fmt.Errorf("map entry index out of range")
 		}
-		entries := sortedMapEntries(mapValue)
 		if inst.Op == vmcode.OpMapKeyAt {
-			out = entries[index].Key
+			out = entry.Key
 		} else {
-			out = entries[index].Value
+			out = entry.Value
 		}
 	default:
 		return Value{}, fmt.Errorf("unsupported map opcode %s", inst.Op)
@@ -199,6 +186,44 @@ func popMethodArgs(profile *executionProfile, pop func() (Value, error), argCoun
 		return nil, Value{}, err
 	}
 	return args, target, nil
+}
+
+func (vm *VM) mapGetOutput(typeID air.TypeID, mapValue *MapValue, key Value) Value {
+	if index := mapEntryIndex(mapValue, key); index >= 0 {
+		vm.recordMaybeDetailAlloc(true)
+		return Maybe(typeID, true, mapValue.Entries[index].Value)
+	}
+	vm.recordMaybeDetailAlloc(false)
+	return Maybe(typeID, false, vm.zeroValue(vm.bytecodeMaybeElem(typeID)))
+}
+
+func (vm *VM) mapIncrementIntOutput(typeID air.TypeID, mapValue *MapValue, key Value, delta int) (Value, error) {
+	if index := mapEntryIndex(mapValue, key); index >= 0 {
+		current := mapValue.Entries[index].Value
+		if current.Kind != ValueInt {
+			return Value{}, fmt.Errorf("map increment value must be Int, got kind %d", current.Kind)
+		}
+		mapValue.Entries[index].Value = Int(current.Type, current.Int+delta)
+		mapValue.SortedDirty = true
+		return Bool(typeID, true), nil
+	}
+	valueType := air.NoType
+	if typeInfo, err := vm.typeInfo(mapValue.Type); err == nil {
+		valueType = typeInfo.Value
+	}
+	mapValue.Entries = append(mapValue.Entries, MapEntryValue{Key: key, Value: Int(valueType, delta)})
+	mapValue.SortedDirty = true
+	return Bool(typeID, true), nil
+}
+
+func mapSetOutput(typeID air.TypeID, mapValue *MapValue, key Value, value Value) Value {
+	if index := mapEntryIndex(mapValue, key); index >= 0 {
+		mapValue.Entries[index].Value = value
+	} else {
+		mapValue.Entries = append(mapValue.Entries, MapEntryValue{Key: key, Value: value})
+	}
+	mapValue.SortedDirty = true
+	return Bool(typeID, true)
 }
 
 func (vm *VM) bytecodeMaybeElem(typeID air.TypeID) air.TypeID {

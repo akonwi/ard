@@ -335,6 +335,74 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if !condition.Bool {
 				frame.ip = inst.A
 			}
+		case vmcode.OpStoreIntAddConstLocalJump:
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: int local out of range", fn.Name)
+			}
+			value := locals[inst.C]
+			if value.Kind != ValueInt {
+				return Value{}, fmt.Errorf("int add local must be Int, got kind %d", value.Kind)
+			}
+			locals[inst.B] = Int(value.Type, value.Int+inst.Imm)
+			frame.ip = inst.A
+		case vmcode.OpJumpIfIntGtLocal:
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: int local out of range", fn.Name)
+			}
+			left := locals[inst.B]
+			right := locals[inst.C]
+			if left.Kind != ValueInt || right.Kind != ValueInt {
+				return Value{}, fmt.Errorf("int comparison locals must be Int")
+			}
+			if left.Int > right.Int {
+				frame.ip = inst.A
+			}
+		case vmcode.OpJumpIfIntModConstNotEqConstLocal:
+			if inst.B < 0 || inst.B >= len(locals) {
+				return Value{}, fmt.Errorf("%s: int local %d out of range", fn.Name, inst.B)
+			}
+			value := locals[inst.B]
+			if value.Kind != ValueInt {
+				return Value{}, fmt.Errorf("int modulo local must be Int, got kind %d", value.Kind)
+			}
+			if inst.C == 0 {
+				return Value{}, fmt.Errorf("integer modulo by zero")
+			}
+			if value.Int%inst.C != inst.Imm {
+				frame.ip = inst.A
+			}
+		case vmcode.OpJumpIfListIndexGeLocal:
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: list/index local out of range", fn.Name)
+			}
+			indexValue := locals[inst.B]
+			if indexValue.Kind != ValueInt {
+				return Value{}, fmt.Errorf("list index must be Int")
+			}
+			vm.recordRefAccess(refAccessList)
+			listValue, ok := listRef(locals[inst.C])
+			if !ok {
+				return Value{}, listValueError(locals[inst.C])
+			}
+			if indexValue.Int >= len(listValue.Items) {
+				frame.ip = inst.A
+			}
+		case vmcode.OpJumpIfMapIndexGeLocal:
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: map/index local out of range", fn.Name)
+			}
+			indexValue := locals[inst.B]
+			if indexValue.Kind != ValueInt {
+				return Value{}, fmt.Errorf("map entry index must be Int")
+			}
+			vm.recordRefAccess(refAccessMap)
+			mapValue, ok := mapRef(locals[inst.C])
+			if !ok {
+				return Value{}, mapValueError(locals[inst.C])
+			}
+			if indexValue.Int >= len(mapValue.Entries) {
+				frame.ip = inst.A
+			}
 		case vmcode.OpCall:
 			if inst.B < 0 || inst.B > len(stack)-frame.stackBase {
 				return Value{}, fmt.Errorf("%s: stack underflow", fn.Name)
@@ -581,6 +649,15 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, unionValueError(locals[inst.B])
 			}
 			push(unionValue.Value)
+		case vmcode.OpIntAddConstLocal:
+			if inst.B < 0 || inst.B >= len(locals) {
+				return Value{}, fmt.Errorf("%s: int local %d out of range", fn.Name, inst.B)
+			}
+			value := locals[inst.B]
+			if value.Kind != ValueInt {
+				return Value{}, fmt.Errorf("int add local must be Int, got kind %d", value.Kind)
+			}
+			push(Int(air.TypeID(inst.A), value.Int+inst.Imm))
 		case vmcode.OpIntAdd, vmcode.OpIntSub, vmcode.OpIntMul, vmcode.OpIntDiv, vmcode.OpIntMod:
 			left, right, err := popBinary(pop)
 			if err != nil {
@@ -718,6 +795,27 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, fmt.Errorf("list index out of range")
 			}
 			push(listValue.Items[index])
+		case vmcode.OpListAtModLocal:
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: list/index local out of range", fn.Name)
+			}
+			vm.recordRefAccess(refAccessList)
+			listValue, ok := listRef(locals[inst.B])
+			if !ok {
+				return Value{}, listValueError(locals[inst.B])
+			}
+			indexValue := locals[inst.C]
+			if indexValue.Kind != ValueInt {
+				return Value{}, fmt.Errorf("list index must be Int")
+			}
+			if len(listValue.Items) == 0 {
+				return Value{}, fmt.Errorf("integer modulo by zero")
+			}
+			index := (indexValue.Int + inst.Imm) % len(listValue.Items)
+			if index < 0 {
+				index += len(listValue.Items)
+			}
+			push(listValue.Items[index])
 		case vmcode.OpListIndexLtLocal:
 			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
 				return Value{}, fmt.Errorf("%s: list/index local out of range", fn.Name)
@@ -732,6 +830,23 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, listValueError(locals[inst.C])
 			}
 			push(Bool(air.TypeID(inst.A), indexValue.Int < len(listValue.Items)))
+		case vmcode.OpListPushLocal, vmcode.OpListPushLocalDrop:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			if inst.B < 0 || inst.B >= len(locals) {
+				return Value{}, fmt.Errorf("%s: list local %d out of range", fn.Name, inst.B)
+			}
+			vm.recordRefAccess(refAccessList)
+			listValue, ok := listRef(locals[inst.B])
+			if !ok {
+				return Value{}, listValueError(locals[inst.B])
+			}
+			listValue.Items = append(listValue.Items, value)
+			if inst.Op == vmcode.OpListPushLocal {
+				push(Int(air.TypeID(inst.A), len(listValue.Items)))
+			}
 		case vmcode.OpListAt, vmcode.OpListPrepend, vmcode.OpListPush, vmcode.OpListSet, vmcode.OpListSize, vmcode.OpListSort, vmcode.OpListSwap:
 			value, err := vm.execBytecodeListOp(inst, &stack)
 			if err != nil {
@@ -779,6 +894,118 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 				return Value{}, mapValueError(locals[inst.C])
 			}
 			push(Bool(air.TypeID(inst.A), indexValue.Int < len(mapValue.Entries)))
+		case vmcode.OpMapGetLocal:
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: map/key local out of range", fn.Name)
+			}
+			vm.recordRefAccess(refAccessMap)
+			mapValue, ok := mapRef(locals[inst.B])
+			if !ok {
+				return Value{}, mapValueError(locals[inst.B])
+			}
+			push(vm.mapGetOutput(air.TypeID(inst.A), mapValue, locals[inst.C]))
+		case vmcode.OpMapGetLocalTryMaybe:
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: map/key local out of range", fn.Name)
+			}
+			vm.recordRefAccess(refAccessMap)
+			mapValue, ok := mapRef(locals[inst.B])
+			if !ok {
+				return Value{}, mapValueError(locals[inst.B])
+			}
+			if index := mapEntryIndex(mapValue, locals[inst.C]); index >= 0 {
+				push(mapValue.Entries[index].Value)
+			} else if inst.Imm >= 0 {
+				frame.ip = inst.Imm
+			} else {
+				vm.recordMaybeAlloc(false)
+				if result, done := returnFromFrame(Maybe(air.TypeID(inst.A), false, vm.bytecodeZeroMaybeForReturn(air.TypeID(inst.A)))); done {
+					return result, nil
+				}
+			}
+		case vmcode.OpMapGetOrConstIntLocal:
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: map/key local out of range", fn.Name)
+			}
+			vm.recordRefAccess(refAccessMap)
+			mapValue, ok := mapRef(locals[inst.B])
+			if !ok {
+				return Value{}, mapValueError(locals[inst.B])
+			}
+			if index := mapEntryIndex(mapValue, locals[inst.C]); index >= 0 {
+				push(mapValue.Entries[index].Value)
+			} else {
+				push(Int(air.TypeID(inst.A), inst.Imm))
+			}
+		case vmcode.OpMapGetOrConstIntLocalKey:
+			if inst.B < 0 || inst.B >= len(locals) {
+				return Value{}, fmt.Errorf("%s: map local %d out of range", fn.Name, inst.B)
+			}
+			if len(stack) == 0 {
+				return Value{}, fmt.Errorf("map get key: stack underflow")
+			}
+			vm.recordRefAccess(refAccessMap)
+			mapValue, ok := mapRef(locals[inst.B])
+			if !ok {
+				return Value{}, mapValueError(locals[inst.B])
+			}
+			key := stack[len(stack)-1]
+			if index := mapEntryIndex(mapValue, key); index >= 0 {
+				push(mapValue.Entries[index].Value)
+			} else {
+				push(Int(air.TypeID(inst.A), inst.Imm))
+			}
+		case vmcode.OpMapIncrementIntLocal, vmcode.OpMapIncrementIntLocalDrop:
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: map/key local out of range", fn.Name)
+			}
+			vm.recordRefAccess(refAccessMap)
+			mapValue, ok := mapRef(locals[inst.B])
+			if !ok {
+				return Value{}, mapValueError(locals[inst.B])
+			}
+			out, err := vm.mapIncrementIntOutput(air.TypeID(inst.A), mapValue, locals[inst.C], inst.Imm)
+			if err != nil {
+				return Value{}, err
+			}
+			if inst.Op == vmcode.OpMapIncrementIntLocal {
+				push(out)
+			}
+		case vmcode.OpMapSetLocalStackKeyDrop:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			key, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			if inst.B < 0 || inst.B >= len(locals) {
+				return Value{}, fmt.Errorf("%s: map local %d out of range", fn.Name, inst.B)
+			}
+			vm.recordRefAccess(refAccessMap)
+			mapValue, ok := mapRef(locals[inst.B])
+			if !ok {
+				return Value{}, mapValueError(locals[inst.B])
+			}
+			mapSetOutput(air.TypeID(inst.A), mapValue, key, value)
+		case vmcode.OpMapSetLocal, vmcode.OpMapSetLocalDrop:
+			value, err := pop()
+			if err != nil {
+				return Value{}, err
+			}
+			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
+				return Value{}, fmt.Errorf("%s: map/key local out of range", fn.Name)
+			}
+			vm.recordRefAccess(refAccessMap)
+			mapValue, ok := mapRef(locals[inst.B])
+			if !ok {
+				return Value{}, mapValueError(locals[inst.B])
+			}
+			out := mapSetOutput(air.TypeID(inst.A), mapValue, locals[inst.C], value)
+			if inst.Op == vmcode.OpMapSetLocal {
+				push(out)
+			}
 		case vmcode.OpMapKeyAtLocal, vmcode.OpMapValueAtLocal:
 			if inst.B < 0 || inst.B >= len(locals) || inst.C < 0 || inst.C >= len(locals) {
 				return Value{}, fmt.Errorf("%s: map/index local out of range", fn.Name)
@@ -792,15 +1019,14 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			if indexValue.Kind != ValueInt {
 				return Value{}, fmt.Errorf("map entry index must be Int")
 			}
-			index := indexValue.Int
-			if index < 0 || index >= len(mapValue.Entries) {
+			entry, ok := sortedMapEntryAt(mapValue, indexValue.Int)
+			if !ok {
 				return Value{}, fmt.Errorf("map entry index out of range")
 			}
-			entries := sortedMapEntries(mapValue)
 			if inst.Op == vmcode.OpMapKeyAtLocal {
-				push(entries[index].Key)
+				push(entry.Key)
 			} else {
-				push(entries[index].Value)
+				push(entry.Value)
 			}
 		case vmcode.OpMapKeys, vmcode.OpMapSize, vmcode.OpMapGet, vmcode.OpMapSet, vmcode.OpMapDrop, vmcode.OpMapHas, vmcode.OpMapKeyAt, vmcode.OpMapValueAt:
 			value, err := vm.execBytecodeMapOp(inst, &stack)

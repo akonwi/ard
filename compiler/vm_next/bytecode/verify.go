@@ -38,6 +38,10 @@ func verifyFunction(program *Program, fn *Function) error {
 			if inst.A < 0 || inst.A >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: local index out of range", fn.Name, ip)
 			}
+		case OpIntAddConstLocal:
+			if inst.B < 0 || inst.B >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: int local index out of range", fn.Name, ip)
+			}
 		case OpCallClosureLocal:
 			if inst.B < 0 || inst.B >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: closure local index out of range", fn.Name, ip)
@@ -58,21 +62,60 @@ func verifyFunction(program *Program, fn *Function) error {
 			if inst.B < 0 || inst.B >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: list local index out of range", fn.Name, ip)
 			}
-		case OpListAtLocal, OpListIndexLtLocal:
+		case OpListAtLocal, OpListAtModLocal, OpListIndexLtLocal:
 			if inst.B < 0 || inst.B >= fn.Locals || inst.C < 0 || inst.C >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: list/index local out of range", fn.Name, ip)
+			}
+		case OpListPushLocal, OpListPushLocalDrop:
+			if inst.B < 0 || inst.B >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: list local index out of range", fn.Name, ip)
 			}
 		case OpMapSizeLocal:
 			if inst.B < 0 || inst.B >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: map local index out of range", fn.Name, ip)
 			}
-		case OpMapIndexLtLocal, OpMapKeyAtLocal, OpMapValueAtLocal:
+		case OpMapIndexLtLocal, OpMapKeyAtLocal, OpMapValueAtLocal, OpMapGetLocal, OpMapGetLocalTryMaybe, OpMapGetOrConstIntLocal, OpMapSetLocal, OpMapSetLocalDrop, OpMapIncrementIntLocal, OpMapIncrementIntLocalDrop:
 			if inst.B < 0 || inst.B >= fn.Locals || inst.C < 0 || inst.C >= fn.Locals {
 				return fmt.Errorf("%s ip=%d: map/index local out of range", fn.Name, ip)
+			}
+			if inst.Op == OpMapGetLocalTryMaybe && inst.Imm >= 0 && inst.Imm > len(fn.Code) {
+				return fmt.Errorf("%s ip=%d: try maybe jump target out of range", fn.Name, ip)
+			}
+		case OpMapGetOrConstIntLocalKey, OpMapSetLocalStackKeyDrop:
+			if inst.B < 0 || inst.B >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: map local index out of range", fn.Name, ip)
 			}
 		case OpJump, OpJumpIfFalse:
 			if inst.A < 0 || inst.A > len(fn.Code) {
 				return fmt.Errorf("%s ip=%d: jump target out of range", fn.Name, ip)
+			}
+		case OpStoreIntAddConstLocalJump:
+			if inst.A < 0 || inst.A > len(fn.Code) {
+				return fmt.Errorf("%s ip=%d: jump target out of range", fn.Name, ip)
+			}
+			if inst.B < 0 || inst.B >= fn.Locals || inst.C < 0 || inst.C >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: int local index out of range", fn.Name, ip)
+			}
+		case OpJumpIfListIndexGeLocal, OpJumpIfMapIndexGeLocal:
+			if inst.A < 0 || inst.A > len(fn.Code) {
+				return fmt.Errorf("%s ip=%d: jump target out of range", fn.Name, ip)
+			}
+			if inst.B < 0 || inst.B >= fn.Locals || inst.C < 0 || inst.C >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: jump index/collection local out of range", fn.Name, ip)
+			}
+		case OpJumpIfIntGtLocal:
+			if inst.A < 0 || inst.A > len(fn.Code) {
+				return fmt.Errorf("%s ip=%d: jump target out of range", fn.Name, ip)
+			}
+			if inst.B < 0 || inst.B >= fn.Locals || inst.C < 0 || inst.C >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: int local index out of range", fn.Name, ip)
+			}
+		case OpJumpIfIntModConstNotEqConstLocal:
+			if inst.A < 0 || inst.A > len(fn.Code) {
+				return fmt.Errorf("%s ip=%d: jump target out of range", fn.Name, ip)
+			}
+			if inst.B < 0 || inst.B >= fn.Locals {
+				return fmt.Errorf("%s ip=%d: int local index out of range", fn.Name, ip)
 			}
 		case OpCall:
 			if inst.A < 0 || inst.A >= len(program.Functions) {
@@ -98,9 +141,9 @@ func stackEffect(inst Instruction) (pop int, push int, err error) {
 	switch inst.Op {
 	case OpNoop:
 		return 0, 0, nil
-	case OpConstVoid, OpConstInt, OpConstFloat, OpConstBool, OpConstStr, OpLoadLocal,
-		OpListSizeLocal, OpListAtLocal, OpListIndexLtLocal,
-		OpMapSizeLocal, OpMapIndexLtLocal, OpMapKeyAtLocal, OpMapValueAtLocal,
+	case OpConstVoid, OpConstInt, OpConstFloat, OpConstBool, OpConstStr, OpLoadLocal, OpIntAddConstLocal,
+		OpListSizeLocal, OpListAtLocal, OpListAtModLocal, OpListIndexLtLocal,
+		OpMapSizeLocal, OpMapIndexLtLocal, OpMapKeyAtLocal, OpMapValueAtLocal, OpMapGetLocal, OpMapGetLocalTryMaybe, OpMapGetOrConstIntLocal, OpMapGetOrConstIntLocalKey,
 		OpUnionTagLocal, OpUnionValueLocal,
 		OpResultExpectLocal, OpResultErrValueLocal, OpResultIsOkLocal:
 		return 0, 1, nil
@@ -110,6 +153,8 @@ func stackEffect(inst Instruction) (pop int, push int, err error) {
 		return 0, 0, nil
 	case OpJumpIfFalse:
 		return 1, 0, nil
+	case OpJumpIfListIndexGeLocal, OpJumpIfMapIndexGeLocal, OpJumpIfIntGtLocal, OpJumpIfIntModConstNotEqConstLocal, OpStoreIntAddConstLocalJump:
+		return 0, 0, nil
 	case OpCall, OpCallExtern:
 		return inst.B, 1, nil
 	case OpCallTrait:
@@ -134,6 +179,20 @@ func stackEffect(inst Instruction) (pop int, push int, err error) {
 		return 0, 1, nil
 	case OpSetField:
 		return 2, 0, nil
+	case OpListPushLocal:
+		return 1, 1, nil
+	case OpListPushLocalDrop:
+		return 1, 0, nil
+	case OpMapSetLocal:
+		return 1, 1, nil
+	case OpMapSetLocalDrop:
+		return 1, 0, nil
+	case OpMapSetLocalStackKeyDrop:
+		return 2, 0, nil
+	case OpMapIncrementIntLocal:
+		return 0, 1, nil
+	case OpMapIncrementIntLocalDrop:
+		return 0, 0, nil
 	case OpBlock:
 		return 0, 0, nil
 	case OpMakeList, OpMakeStruct, OpMakeClosure:

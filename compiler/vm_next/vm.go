@@ -179,23 +179,90 @@ func sortedMapEntries(mapValue *MapValue) []MapEntryValue {
 	if !mapValue.SortedDirty && len(mapValue.SortedEntries) == len(mapValue.Entries) {
 		return mapValue.SortedEntries
 	}
-	entries := make([]MapEntryValue, len(mapValue.Entries))
-	copy(entries, mapValue.Entries)
-	sort.SliceStable(entries, func(i, j int) bool {
-		return valuesLess(entries[i].Key, entries[j].Key)
-	})
+	indices := sortedMapIndices(mapValue)
+	entries := make([]MapEntryValue, len(indices))
+	for i, entryIndex := range indices {
+		entries[i] = mapValue.Entries[entryIndex]
+	}
 	mapValue.SortedEntries = entries
-	mapValue.SortedDirty = false
 	return entries
 }
 
-func mapEntryIndex(mapValue *MapValue, key Value) int {
-	for i, entry := range mapValue.Entries {
-		if valuesEqual(entry.Key, key) {
-			return i
-		}
+func sortedMapEntryAt(mapValue *MapValue, index int) (*MapEntryValue, bool) {
+	if mapValue == nil || index < 0 || index >= len(mapValue.Entries) {
+		return nil, false
 	}
-	return -1
+	indices := sortedMapIndices(mapValue)
+	return &mapValue.Entries[indices[index]], true
+}
+
+func sortedMapIndices(mapValue *MapValue) []int {
+	if !mapValue.SortedDirty && len(mapValue.SortedIndices) == len(mapValue.Entries) {
+		return mapValue.SortedIndices
+	}
+	indices := make([]int, len(mapValue.Entries))
+	for i := range indices {
+		indices[i] = i
+	}
+	sort.SliceStable(indices, func(i, j int) bool {
+		return valuesLess(mapValue.Entries[indices[i]].Key, mapValue.Entries[indices[j]].Key)
+	})
+	mapValue.SortedIndices = indices
+	mapValue.SortedEntries = nil
+	mapValue.SortedDirty = false
+	return indices
+}
+
+func mapEntryIndex(mapValue *MapValue, key Value) int {
+	entries := mapValue.Entries
+	switch key.Kind {
+	case ValueInt, ValueEnum:
+		for i := range entries {
+			entryKey := entries[i].Key
+			if (entryKey.Kind == ValueInt || entryKey.Kind == ValueEnum) && entryKey.Int == key.Int {
+				return i
+			}
+		}
+		return -1
+	case ValueStr:
+		for i := range entries {
+			entryKey := entries[i].Key
+			if entryKey.Kind == ValueStr && entryKey.Str == key.Str {
+				return i
+			}
+		}
+		return -1
+	case ValueBool:
+		for i := range entries {
+			entryKey := entries[i].Key
+			if entryKey.Kind == ValueBool && entryKey.Bool == key.Bool {
+				return i
+			}
+		}
+		return -1
+	case ValueFloat:
+		for i := range entries {
+			entryKey := entries[i].Key
+			if entryKey.Kind == ValueFloat && entryKey.Float == key.Float {
+				return i
+			}
+		}
+		return -1
+	case ValueVoid:
+		for i := range entries {
+			if entries[i].Key.Kind == ValueVoid {
+				return i
+			}
+		}
+		return -1
+	default:
+		for i := range entries {
+			if valuesEqual(entries[i].Key, key) {
+				return i
+			}
+		}
+		return -1
+	}
 }
 
 func valuesEqual(left, right Value) bool {

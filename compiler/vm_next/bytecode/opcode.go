@@ -14,9 +14,15 @@ const (
 	OpPop
 	OpJump
 	OpJumpIfFalse
+	OpStoreIntAddConstLocalJump
+	OpJumpIfIntGtLocal
+	OpJumpIfIntModConstNotEqConstLocal
+	OpJumpIfListIndexGeLocal
+	OpJumpIfMapIndexGeLocal
 	OpCall
 	OpReturn
 	OpIntAdd
+	OpIntAddConstLocal
 	OpIntSub
 	OpIntMul
 	OpIntDiv
@@ -60,7 +66,10 @@ const (
 	OpListSize
 	OpListSizeLocal
 	OpListAtLocal
+	OpListAtModLocal
 	OpListIndexLtLocal
+	OpListPushLocal
+	OpListPushLocalDrop
 	OpListSort
 	OpListSwap
 	OpMakeMap
@@ -69,7 +78,16 @@ const (
 	OpMapSizeLocal
 	OpMapIndexLtLocal
 	OpMapGet
+	OpMapGetLocal
+	OpMapGetLocalTryMaybe
+	OpMapGetOrConstIntLocal
+	OpMapGetOrConstIntLocalKey
 	OpMapSet
+	OpMapSetLocal
+	OpMapSetLocalDrop
+	OpMapSetLocalStackKeyDrop
+	OpMapIncrementIntLocal
+	OpMapIncrementIntLocalDrop
 	OpMapDrop
 	OpMapHas
 	OpMapKeyAt
@@ -142,12 +160,24 @@ func (op Opcode) String() string {
 		return "Jump"
 	case OpJumpIfFalse:
 		return "JumpIfFalse"
+	case OpStoreIntAddConstLocalJump:
+		return "StoreIntAddConstLocalJump"
+	case OpJumpIfIntGtLocal:
+		return "JumpIfIntGtLocal"
+	case OpJumpIfIntModConstNotEqConstLocal:
+		return "JumpIfIntModConstNotEqConstLocal"
+	case OpJumpIfListIndexGeLocal:
+		return "JumpIfListIndexGeLocal"
+	case OpJumpIfMapIndexGeLocal:
+		return "JumpIfMapIndexGeLocal"
 	case OpCall:
 		return "Call"
 	case OpReturn:
 		return "Return"
 	case OpIntAdd:
 		return "IntAdd"
+	case OpIntAddConstLocal:
+		return "IntAddConstLocal"
 	case OpIntSub:
 		return "IntSub"
 	case OpIntMul:
@@ -234,8 +264,14 @@ func (op Opcode) String() string {
 		return "ListSizeLocal"
 	case OpListAtLocal:
 		return "ListAtLocal"
+	case OpListAtModLocal:
+		return "ListAtModLocal"
 	case OpListIndexLtLocal:
 		return "ListIndexLtLocal"
+	case OpListPushLocal:
+		return "ListPushLocal"
+	case OpListPushLocalDrop:
+		return "ListPushLocalDrop"
 	case OpListSort:
 		return "ListSort"
 	case OpListSwap:
@@ -252,8 +288,26 @@ func (op Opcode) String() string {
 		return "MapIndexLtLocal"
 	case OpMapGet:
 		return "MapGet"
+	case OpMapGetLocal:
+		return "MapGetLocal"
+	case OpMapGetLocalTryMaybe:
+		return "MapGetLocalTryMaybe"
+	case OpMapGetOrConstIntLocal:
+		return "MapGetOrConstIntLocal"
+	case OpMapGetOrConstIntLocalKey:
+		return "MapGetOrConstIntLocalKey"
 	case OpMapSet:
 		return "MapSet"
+	case OpMapSetLocal:
+		return "MapSetLocal"
+	case OpMapSetLocalDrop:
+		return "MapSetLocalDrop"
+	case OpMapSetLocalStackKeyDrop:
+		return "MapSetLocalStackKeyDrop"
+	case OpMapIncrementIntLocal:
+		return "MapIncrementIntLocal"
+	case OpMapIncrementIntLocalDrop:
+		return "MapIncrementIntLocalDrop"
 	case OpMapDrop:
 		return "MapDrop"
 	case OpMapHas:

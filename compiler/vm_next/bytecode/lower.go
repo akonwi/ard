@@ -91,6 +91,9 @@ func (fl *functionLowerer) lowerStmt(stmt *air.Stmt) error {
 		fl.emit(Instruction{Op: OpSetField, A: int(stmt.Type), B: stmt.Field})
 		return nil
 	case air.StmtExpr:
+		if ok, err := fl.lowerDiscardedExpr(stmt.Expr); ok || err != nil {
+			return err
+		}
 		if err := fl.lowerExpr(stmt.Expr); err != nil {
 			return err
 		}
@@ -110,25 +113,125 @@ func (fl *functionLowerer) lowerStmt(stmt *air.Stmt) error {
 	}
 }
 
+func (fl *functionLowerer) lowerDiscardedExpr(expr *air.Expr) (bool, error) {
+	if expr == nil {
+		return false, nil
+	}
+	if expr.Kind == air.ExprMatchResult {
+		return true, fl.lowerResultMatchDiscarded(expr)
+	}
+	if expr.Kind == air.ExprListPush && expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal && len(expr.Args) == 1 {
+		if err := fl.lowerExpr(&expr.Args[0]); err != nil {
+			return true, err
+		}
+		fl.emit(Instruction{Op: OpListPushLocalDrop, B: int(expr.Target.Local)})
+		return true, nil
+	}
+	if expr.Kind == air.ExprMapSet && expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal && len(expr.Args) == 2 {
+		if expr.Args[0].Kind == air.ExprLoadLocal {
+			if delta, ok := mapIncrementDelta(expr.Target.Local, expr.Args[0].Local, &expr.Args[1]); ok {
+				fl.emit(Instruction{Op: OpMapIncrementIntLocalDrop, B: int(expr.Target.Local), C: int(expr.Args[0].Local), Imm: delta})
+				return true, nil
+			}
+		}
+		if deltaExpr, ok := mapIncrementValueDelta(expr.Target.Local, &expr.Args[0], &expr.Args[1]); ok {
+			if err := fl.lowerExpr(&expr.Args[0]); err != nil {
+				return true, err
+			}
+			fl.emit(Instruction{Op: OpMapGetOrConstIntLocalKey, A: int(expr.Args[1].Type), B: int(expr.Target.Local), Imm: 0})
+			if err := fl.lowerExpr(deltaExpr); err != nil {
+				return true, err
+			}
+			fl.emit(Instruction{Op: OpIntAdd, A: int(expr.Args[1].Type)})
+			fl.emit(Instruction{Op: OpMapSetLocalStackKeyDrop, B: int(expr.Target.Local)})
+			return true, nil
+		}
+		if expr.Args[0].Kind == air.ExprLoadLocal {
+			if err := fl.lowerExpr(&expr.Args[1]); err != nil {
+				return true, err
+			}
+			fl.emit(Instruction{Op: OpMapSetLocalDrop, B: int(expr.Target.Local), C: int(expr.Args[0].Local)})
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (fl *functionLowerer) lowerWhile(stmt *air.Stmt) error {
 	loopStart := len(fl.code)
-	if err := fl.lowerExpr(stmt.Condition); err != nil {
-		return err
+	jumpEnd, ok := fl.lowerLoopConditionJump(stmt.Condition)
+	if !ok {
+		if err := fl.lowerExpr(stmt.Condition); err != nil {
+			return err
+		}
+		jumpEnd = fl.emit(Instruction{Op: OpJumpIfFalse})
 	}
-	jumpEnd := fl.emit(Instruction{Op: OpJumpIfFalse})
 	fl.breakStack = append(fl.breakStack, nil)
-	if err := fl.lowerBlock(stmt.Body, fl.mustTypeID(air.TypeVoid)); err != nil {
+	if err := fl.lowerVoidBlock(stmt.Body); err != nil {
 		return err
 	}
 	breaks := fl.breakStack[len(fl.breakStack)-1]
 	fl.breakStack = fl.breakStack[:len(fl.breakStack)-1]
-	fl.emit(Instruction{Op: OpJump, A: loopStart})
+	if !fl.tryFuseLoopBackedgeIncrement(loopStart) {
+		fl.emit(Instruction{Op: OpJump, A: loopStart})
+	}
 	loopEnd := len(fl.code)
 	fl.patch(jumpEnd, loopEnd)
 	for _, jump := range breaks {
 		fl.patch(jump, loopEnd)
 	}
 	return nil
+}
+
+func (fl *functionLowerer) lowerVoidBlock(block air.Block) error {
+	for i := range block.Stmts {
+		if err := fl.lowerStmt(&block.Stmts[i]); err != nil {
+			return err
+		}
+	}
+	if block.Result != nil {
+		if ok, err := fl.lowerDiscardedExpr(block.Result); ok || err != nil {
+			return err
+		}
+		if err := fl.lowerExpr(block.Result); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpPop})
+	}
+	return nil
+}
+
+func (fl *functionLowerer) tryFuseLoopBackedgeIncrement(loopStart int) bool {
+	if len(fl.code) < 2 {
+		return false
+	}
+	store := fl.code[len(fl.code)-1]
+	add := fl.code[len(fl.code)-2]
+	if store.Op != OpStoreLocal || add.Op != OpIntAddConstLocal {
+		return false
+	}
+	fl.code = fl.code[:len(fl.code)-2]
+	fl.emit(Instruction{Op: OpStoreIntAddConstLocalJump, A: loopStart, B: store.A, C: add.B, Imm: add.Imm})
+	return true
+}
+
+func (fl *functionLowerer) lowerLoopConditionJump(expr *air.Expr) (int, bool) {
+	if expr == nil || expr.Left == nil || expr.Left.Kind != air.ExprLoadLocal || expr.Right == nil {
+		return 0, false
+	}
+	if expr.Kind == air.ExprLte && expr.Right.Kind == air.ExprLoadLocal {
+		return fl.emit(Instruction{Op: OpJumpIfIntGtLocal, B: int(expr.Left.Local), C: int(expr.Right.Local)}), true
+	}
+	if expr.Kind != air.ExprLt {
+		return 0, false
+	}
+	if expr.Right.Kind == air.ExprListSize && expr.Right.Target != nil && expr.Right.Target.Kind == air.ExprLoadLocal {
+		return fl.emit(Instruction{Op: OpJumpIfListIndexGeLocal, B: int(expr.Left.Local), C: int(expr.Right.Target.Local)}), true
+	}
+	if expr.Right.Kind == air.ExprMapSize && expr.Right.Target != nil && expr.Right.Target.Kind == air.ExprLoadLocal {
+		return fl.emit(Instruction{Op: OpJumpIfMapIndexGeLocal, B: int(expr.Left.Local), C: int(expr.Right.Target.Local)}), true
+	}
+	return 0, false
 }
 
 func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
@@ -243,10 +346,16 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 		fl.emit(Instruction{Op: OpBlock})
 		return fl.lowerBlock(expr.Body, expr.Type)
 	case air.ExprIf:
-		if err := fl.lowerExpr(expr.Condition); err != nil {
+		jumpFalse, ok, err := fl.lowerIfFalseJump(expr.Condition)
+		if err != nil {
 			return err
 		}
-		jumpFalse := fl.emit(Instruction{Op: OpJumpIfFalse})
+		if !ok {
+			if err := fl.lowerExpr(expr.Condition); err != nil {
+				return err
+			}
+			jumpFalse = fl.emit(Instruction{Op: OpJumpIfFalse})
+		}
 		if err := fl.lowerBlock(expr.Then, expr.Type); err != nil {
 			return err
 		}
@@ -341,6 +450,36 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 		return fmt.Errorf("unsupported expression kind %d", expr.Kind)
 	}
 	return nil
+}
+
+func (fl *functionLowerer) lowerIfFalseJump(expr *air.Expr) (int, bool, error) {
+	if local, divisor, expected, ok := intModConstEqConstLocal(expr); ok {
+		if divisor == 0 {
+			return 0, false, fmt.Errorf("integer modulo by zero")
+		}
+		return fl.emit(Instruction{Op: OpJumpIfIntModConstNotEqConstLocal, B: int(local), C: divisor, Imm: expected}), true, nil
+	}
+	return 0, false, nil
+}
+
+func intModConstEqConstLocal(expr *air.Expr) (air.LocalID, int, int, bool) {
+	if expr == nil || expr.Kind != air.ExprEq {
+		return 0, 0, 0, false
+	}
+	if local, divisor, ok := intModConstLocal(expr.Left); ok && expr.Right != nil && expr.Right.Kind == air.ExprConstInt {
+		return local, divisor, expr.Right.Int, true
+	}
+	if local, divisor, ok := intModConstLocal(expr.Right); ok && expr.Left != nil && expr.Left.Kind == air.ExprConstInt {
+		return local, divisor, expr.Left.Int, true
+	}
+	return 0, 0, 0, false
+}
+
+func intModConstLocal(expr *air.Expr) (air.LocalID, int, bool) {
+	if expr == nil || expr.Kind != air.ExprIntMod || expr.Left == nil || expr.Left.Kind != air.ExprLoadLocal || expr.Right == nil || expr.Right.Kind != air.ExprConstInt {
+		return 0, 0, false
+	}
+	return expr.Left.Local, expr.Right.Int, true
 }
 
 func (fl *functionLowerer) lowerEnumMatch(expr *air.Expr) error {
@@ -471,6 +610,16 @@ func (fl *functionLowerer) lowerUnionMatch(expr *air.Expr) error {
 }
 
 func (fl *functionLowerer) lowerResultMatch(expr *air.Expr) error {
+	return fl.lowerResultMatchWithBlocks(expr, fl.lowerBlock)
+}
+
+func (fl *functionLowerer) lowerResultMatchDiscarded(expr *air.Expr) error {
+	return fl.lowerResultMatchWithBlocks(expr, func(block air.Block, _ air.TypeID) error {
+		return fl.lowerVoidBlock(block)
+	})
+}
+
+func (fl *functionLowerer) lowerResultMatchWithBlocks(expr *air.Expr, lowerBlock func(air.Block, air.TypeID) error) error {
 	subjectLocal := fl.tempLocal()
 	if err := fl.lowerExpr(expr.Target); err != nil {
 		return err
@@ -480,14 +629,14 @@ func (fl *functionLowerer) lowerResultMatch(expr *air.Expr) error {
 	jumpErr := fl.emit(Instruction{Op: OpJumpIfFalse})
 	fl.emit(Instruction{Op: OpResultExpectLocal, A: int(expr.Type), B: subjectLocal})
 	fl.emit(Instruction{Op: OpStoreLocal, A: int(expr.OkLocal)})
-	if err := fl.lowerBlock(expr.Ok, expr.Type); err != nil {
+	if err := lowerBlock(expr.Ok, expr.Type); err != nil {
 		return err
 	}
 	jumpEnd := fl.emit(Instruction{Op: OpJump})
 	fl.patch(jumpErr, len(fl.code))
 	fl.emit(Instruction{Op: OpResultErrValueLocal, A: int(expr.Type), B: subjectLocal})
 	fl.emit(Instruction{Op: OpStoreLocal, A: int(expr.ErrLocal)})
-	if err := fl.lowerBlock(expr.Err, expr.Type); err != nil {
+	if err := lowerBlock(expr.Err, expr.Type); err != nil {
 		return err
 	}
 	fl.patch(jumpEnd, len(fl.code))
@@ -508,6 +657,10 @@ func (fl *functionLowerer) lowerStrOp(expr *air.Expr) error {
 }
 
 func (fl *functionLowerer) lowerMaybeOp(expr *air.Expr) error {
+	if expr.Kind == air.ExprMaybeOr && len(expr.Args) == 1 && expr.Args[0].Kind == air.ExprConstInt && expr.Target != nil && expr.Target.Kind == air.ExprMapGet && expr.Target.Target != nil && expr.Target.Target.Kind == air.ExprLoadLocal && len(expr.Target.Args) == 1 && expr.Target.Args[0].Kind == air.ExprLoadLocal {
+		fl.emit(Instruction{Op: OpMapGetOrConstIntLocal, A: int(expr.Type), B: int(expr.Target.Target.Local), C: int(expr.Target.Args[0].Local), Imm: expr.Args[0].Int})
+		return nil
+	}
 	if err := fl.lowerExpr(expr.Target); err != nil {
 		return err
 	}
@@ -534,6 +687,21 @@ func (fl *functionLowerer) lowerResultOp(expr *air.Expr) error {
 }
 
 func (fl *functionLowerer) lowerTryOp(expr *air.Expr, op Opcode) error {
+	if op == OpTryMaybe && expr.Target != nil && expr.Target.Kind == air.ExprMapGet && expr.Target.Target != nil && expr.Target.Target.Kind == air.ExprLoadLocal && len(expr.Target.Args) == 1 && expr.Target.Args[0].Kind == air.ExprLoadLocal {
+		inst := Instruction{Op: OpMapGetLocalTryMaybe, A: int(fl.fn.Signature.Return), B: int(expr.Target.Target.Local), C: int(expr.Target.Args[0].Local), Imm: -1}
+		tryIndex := fl.emit(inst)
+		if !expr.HasCatch {
+			return nil
+		}
+		jumpNormal := fl.emit(Instruction{Op: OpJump})
+		fl.code[tryIndex].Imm = len(fl.code)
+		if err := fl.lowerBlock(expr.Catch, fl.fn.Signature.Return); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpReturn})
+		fl.patch(jumpNormal, len(fl.code))
+		return nil
+	}
 	if err := fl.lowerExpr(expr.Target); err != nil {
 		return err
 	}
@@ -557,8 +725,21 @@ func (fl *functionLowerer) lowerListOp(expr *air.Expr) error {
 		fl.emit(Instruction{Op: OpListSizeLocal, A: int(expr.Type), B: int(expr.Target.Local)})
 		return nil
 	}
-	if expr.Kind == air.ExprListAt && expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal && len(expr.Args) == 1 && expr.Args[0].Kind == air.ExprLoadLocal {
-		fl.emit(Instruction{Op: OpListAtLocal, A: int(expr.Type), B: int(expr.Target.Local), C: int(expr.Args[0].Local)})
+	if expr.Kind == air.ExprListAt && expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal && len(expr.Args) == 1 {
+		if expr.Args[0].Kind == air.ExprLoadLocal {
+			fl.emit(Instruction{Op: OpListAtLocal, A: int(expr.Type), B: int(expr.Target.Local), C: int(expr.Args[0].Local)})
+			return nil
+		}
+		if indexLocal, offset, ok := listAtModuloIndex(expr.Target.Local, &expr.Args[0]); ok {
+			fl.emit(Instruction{Op: OpListAtModLocal, A: int(expr.Type), B: int(expr.Target.Local), C: int(indexLocal), Imm: offset})
+			return nil
+		}
+	}
+	if expr.Kind == air.ExprListPush && expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal && len(expr.Args) == 1 {
+		if err := fl.lowerExpr(&expr.Args[0]); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpListPushLocal, A: int(expr.Type), B: int(expr.Target.Local)})
 		return nil
 	}
 	if err := fl.lowerExpr(expr.Target); err != nil {
@@ -578,12 +759,29 @@ func (fl *functionLowerer) lowerMapOp(expr *air.Expr) error {
 		fl.emit(Instruction{Op: OpMapSizeLocal, A: int(expr.Type), B: int(expr.Target.Local)})
 		return nil
 	}
-	if (expr.Kind == air.ExprMapKeyAt || expr.Kind == air.ExprMapValueAt) && expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal && len(expr.Args) == 1 && expr.Args[0].Kind == air.ExprLoadLocal {
-		op := OpMapKeyAtLocal
-		if expr.Kind == air.ExprMapValueAt {
-			op = OpMapValueAtLocal
+	if expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal && len(expr.Args) == 1 && expr.Args[0].Kind == air.ExprLoadLocal {
+		if expr.Kind == air.ExprMapGet {
+			fl.emit(Instruction{Op: OpMapGetLocal, A: int(expr.Type), B: int(expr.Target.Local), C: int(expr.Args[0].Local)})
+			return nil
 		}
-		fl.emit(Instruction{Op: op, A: int(expr.Type), B: int(expr.Target.Local), C: int(expr.Args[0].Local)})
+		if expr.Kind == air.ExprMapKeyAt || expr.Kind == air.ExprMapValueAt {
+			op := OpMapKeyAtLocal
+			if expr.Kind == air.ExprMapValueAt {
+				op = OpMapValueAtLocal
+			}
+			fl.emit(Instruction{Op: op, A: int(expr.Type), B: int(expr.Target.Local), C: int(expr.Args[0].Local)})
+			return nil
+		}
+	}
+	if expr.Kind == air.ExprMapSet && expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal && len(expr.Args) == 2 && expr.Args[0].Kind == air.ExprLoadLocal {
+		if delta, ok := mapIncrementDelta(expr.Target.Local, expr.Args[0].Local, &expr.Args[1]); ok {
+			fl.emit(Instruction{Op: OpMapIncrementIntLocal, A: int(expr.Type), B: int(expr.Target.Local), C: int(expr.Args[0].Local), Imm: delta})
+			return nil
+		}
+		if err := fl.lowerExpr(&expr.Args[1]); err != nil {
+			return err
+		}
+		fl.emit(Instruction{Op: OpMapSetLocal, A: int(expr.Type), B: int(expr.Target.Local), C: int(expr.Args[0].Local)})
 		return nil
 	}
 	if err := fl.lowerExpr(expr.Target); err != nil {
@@ -710,6 +908,105 @@ func listOpcode(kind air.ExprKind) Opcode {
 	}
 }
 
+func listAtModuloIndex(listLocal air.LocalID, expr *air.Expr) (air.LocalID, int, bool) {
+	if expr == nil || expr.Kind != air.ExprIntMod || expr.Right == nil || expr.Right.Kind != air.ExprListSize || expr.Right.Target == nil || expr.Right.Target.Kind != air.ExprLoadLocal || expr.Right.Target.Local != listLocal {
+		return 0, 0, false
+	}
+	if expr.Left != nil && expr.Left.Kind == air.ExprLoadLocal {
+		return expr.Left.Local, 0, true
+	}
+	if expr.Left != nil && expr.Left.Kind == air.ExprIntAdd {
+		if expr.Left.Left != nil && expr.Left.Left.Kind == air.ExprLoadLocal && expr.Left.Right != nil && expr.Left.Right.Kind == air.ExprConstInt {
+			return expr.Left.Left.Local, expr.Left.Right.Int, true
+		}
+		if expr.Left.Right != nil && expr.Left.Right.Kind == air.ExprLoadLocal && expr.Left.Left != nil && expr.Left.Left.Kind == air.ExprConstInt {
+			return expr.Left.Right.Local, expr.Left.Left.Int, true
+		}
+	}
+	return 0, 0, false
+}
+
+func mapIncrementDelta(mapLocal air.LocalID, keyLocal air.LocalID, value *air.Expr) (int, bool) {
+	if value == nil || value.Kind != air.ExprIntAdd {
+		return 0, false
+	}
+	if delta, ok := mapIncrementSide(mapLocal, keyLocal, value.Left, value.Right); ok {
+		return delta, true
+	}
+	return mapIncrementSide(mapLocal, keyLocal, value.Right, value.Left)
+}
+
+func mapIncrementSide(mapLocal air.LocalID, keyLocal air.LocalID, maybeExpr *air.Expr, deltaExpr *air.Expr) (int, bool) {
+	if deltaExpr == nil || deltaExpr.Kind != air.ExprConstInt {
+		return 0, false
+	}
+	if maybeExpr == nil || maybeExpr.Kind != air.ExprMaybeOr || len(maybeExpr.Args) != 1 || maybeExpr.Args[0].Kind != air.ExprConstInt || maybeExpr.Args[0].Int != 0 {
+		return 0, false
+	}
+	getExpr := maybeExpr.Target
+	if getExpr == nil || getExpr.Kind != air.ExprMapGet || getExpr.Target == nil || getExpr.Target.Kind != air.ExprLoadLocal || getExpr.Target.Local != mapLocal || len(getExpr.Args) != 1 || getExpr.Args[0].Kind != air.ExprLoadLocal || getExpr.Args[0].Local != keyLocal {
+		return 0, false
+	}
+	return deltaExpr.Int, true
+}
+
+func mapIncrementValueDelta(mapLocal air.LocalID, keyExpr *air.Expr, value *air.Expr) (*air.Expr, bool) {
+	if keyExpr == nil || !safeSingleEvalMapKeyExpr(keyExpr) || value == nil || value.Kind != air.ExprIntAdd {
+		return nil, false
+	}
+	if delta, ok := mapIncrementValueSide(mapLocal, keyExpr, value.Left, value.Right); ok {
+		return delta, true
+	}
+	return mapIncrementValueSide(mapLocal, keyExpr, value.Right, value.Left)
+}
+
+func mapIncrementValueSide(mapLocal air.LocalID, keyExpr *air.Expr, maybeExpr *air.Expr, deltaExpr *air.Expr) (*air.Expr, bool) {
+	if deltaExpr == nil || maybeExpr == nil || maybeExpr.Kind != air.ExprMaybeOr || len(maybeExpr.Args) != 1 || maybeExpr.Args[0].Kind != air.ExprConstInt || maybeExpr.Args[0].Int != 0 {
+		return nil, false
+	}
+	getExpr := maybeExpr.Target
+	if getExpr == nil || getExpr.Kind != air.ExprMapGet || getExpr.Target == nil || getExpr.Target.Kind != air.ExprLoadLocal || getExpr.Target.Local != mapLocal || len(getExpr.Args) != 1 || !sameMapKeyExpr(keyExpr, &getExpr.Args[0]) {
+		return nil, false
+	}
+	return deltaExpr, true
+}
+
+func safeSingleEvalMapKeyExpr(expr *air.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	switch expr.Kind {
+	case air.ExprLoadLocal, air.ExprConstInt, air.ExprConstBool, air.ExprConstStr, air.ExprEnumVariant:
+		return true
+	case air.ExprGetField:
+		return expr.Target != nil && expr.Target.Kind == air.ExprLoadLocal
+	default:
+		return false
+	}
+}
+
+func sameMapKeyExpr(left *air.Expr, right *air.Expr) bool {
+	if left == nil || right == nil || left.Kind != right.Kind {
+		return false
+	}
+	switch left.Kind {
+	case air.ExprLoadLocal:
+		return left.Local == right.Local
+	case air.ExprConstInt:
+		return left.Int == right.Int
+	case air.ExprConstBool:
+		return left.Bool == right.Bool
+	case air.ExprConstStr:
+		return left.Str == right.Str
+	case air.ExprEnumVariant:
+		return left.Type == right.Type && left.Variant == right.Variant && left.Discriminant == right.Discriminant
+	case air.ExprGetField:
+		return left.Field == right.Field && left.Target != nil && right.Target != nil && left.Target.Kind == air.ExprLoadLocal && right.Target.Kind == air.ExprLoadLocal && left.Target.Local == right.Target.Local
+	default:
+		return false
+	}
+}
+
 func mapOpcode(kind air.ExprKind) Opcode {
 	switch kind {
 	case air.ExprMapKeys:
@@ -734,6 +1031,16 @@ func mapOpcode(kind air.ExprKind) Opcode {
 }
 
 func (fl *functionLowerer) lowerBinary(expr *air.Expr) error {
+	if expr.Kind == air.ExprIntAdd {
+		if expr.Left != nil && expr.Left.Kind == air.ExprLoadLocal && expr.Right != nil && expr.Right.Kind == air.ExprConstInt {
+			fl.emit(Instruction{Op: OpIntAddConstLocal, A: int(expr.Type), B: int(expr.Left.Local), Imm: expr.Right.Int})
+			return nil
+		}
+		if expr.Right != nil && expr.Right.Kind == air.ExprLoadLocal && expr.Left != nil && expr.Left.Kind == air.ExprConstInt {
+			fl.emit(Instruction{Op: OpIntAddConstLocal, A: int(expr.Type), B: int(expr.Right.Local), Imm: expr.Left.Int})
+			return nil
+		}
+	}
 	if expr.Kind == air.ExprLt && expr.Left != nil && expr.Left.Kind == air.ExprLoadLocal && expr.Right != nil {
 		if expr.Right.Kind == air.ExprListSize && expr.Right.Target != nil && expr.Right.Target.Kind == air.ExprLoadLocal {
 			fl.emit(Instruction{Op: OpListIndexLtLocal, A: int(expr.Type), B: int(expr.Left.Local), C: int(expr.Right.Target.Local)})
@@ -890,6 +1197,20 @@ func (fl *functionLowerer) addConst(c Constant) int {
 }
 
 func (fl *functionLowerer) emit(inst Instruction) int {
+	if inst.Op == OpPop && len(fl.code) > 0 {
+		last := &fl.code[len(fl.code)-1]
+		switch last.Op {
+		case OpListPushLocal:
+			last.Op = OpListPushLocalDrop
+			return len(fl.code) - 1
+		case OpMapSetLocal:
+			last.Op = OpMapSetLocalDrop
+			return len(fl.code) - 1
+		case OpMapIncrementIntLocal:
+			last.Op = OpMapIncrementIntLocalDrop
+			return len(fl.code) - 1
+		}
+	}
 	index := len(fl.code)
 	fl.code = append(fl.code, inst)
 	return index
