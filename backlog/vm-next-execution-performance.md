@@ -684,10 +684,14 @@ M7 progress to date:
   success path while retaining the original host functions as error fallbacks.
   This reduced profiled `DecodeInt` from about `14.3 ms` to about `11.7 ms` and
   `DecodeString` from about `2.3 ms` to about `1.9 ms`.
+- Stored vm_next Dynamic payloads directly in `Value.Ref` instead of allocating a
+  `DynamicValue` wrapper for every Dynamic value. This is especially relevant to
+  decode, which wraps many JSON list/map elements as Dynamic; it reduced the
+  10-run `decode_pipeline` mean from about `261.0 ms` to about `253.7 ms`.
 - Latest 10-run runtime-suite checkpoint after these M7 changes: vm_next
-  `decode_pipeline` `261.0 ms` versus current VM `252.3 ms`, leaving an
-  approximately `8.7 ms` decode gap. The same run had vm_next aggregate
-  `553.4 ms` versus current VM aggregate `625.9 ms`.
+  `decode_pipeline` `253.7 ms` versus current VM `250.2 ms`, leaving an
+  approximately `3.5 ms` decode gap. The same run had vm_next aggregate
+  `543.1 ms` versus current VM aggregate `614.9 ms`.
 - Rejected follow-up experiments during this pass:
   - Inlining stdlib `DynamicToList`, `DynamicToMap`, and `ExtractField` success
     checks into vm_next adapters looked plausible from profile data but
@@ -697,6 +701,8 @@ M7 progress to date:
     effects outweighing the removed helper call.
   - Adding a larger zero-capture `CallClosureLocal` inline branch similarly
     regressed profiled wall time and was reverted.
+  - Retesting only the `DynamicToList` inline adapter after inline Dynamic
+    payloads still regressed profiled wall time, so it was reverted as well.
 
 Recommended focus:
 
@@ -1103,7 +1109,7 @@ Outcome: vm_next is now faster on aggregate (`0.961x` current VM) and much
 faster on most pure collection/loop workloads. The remaining major gap is
 `decode_pipeline`, which is now tracked as its own follow-up milestone.
 
-### Milestone 7 decode extern checkpoint
+### Milestone 7 decode/dynamic checkpoint
 
 Validation:
 
@@ -1120,25 +1126,28 @@ Changes in this checkpoint:
 - vm_next has hot success-path adapters for stdlib `DecodeInt` and
   `DecodeString`, while still falling back to the host functions for error
   formatting and less common dynamic payload shapes.
+- vm_next Dynamic values now store their raw payload directly in `Value.Ref`,
+  removing the per-Dynamic wrapper allocation from JSON/list/map decode paths.
 
 10-run mean runtime benchmark snapshot:
 
 | Benchmark | vm_next | current bytecode VM |
 |---|---:|---:|
-| `sales_pipeline` | 48.1 ms | 68.5 ms |
-| `shape_catalog` | 57.8 ms | 81.8 ms |
-| `decode_pipeline` | 261.0 ms | 252.3 ms |
-| `word_frequency_batch` | 25.6 ms | 52.0 ms |
-| `async_batches` | 8.4 ms | 14.5 ms |
-| `fs_batch` | 103.9 ms | 108.2 ms |
-| `sql_batch` | 48.6 ms | 48.6 ms |
-| **total** | **553.4 ms** | **625.9 ms** |
+| `sales_pipeline` | 47.6 ms | 66.4 ms |
+| `shape_catalog` | 57.5 ms | 80.2 ms |
+| `decode_pipeline` | 253.7 ms | 250.2 ms |
+| `word_frequency_batch` | 25.7 ms | 51.0 ms |
+| `async_batches` | 8.0 ms | 14.1 ms |
+| `fs_batch` | 103.4 ms | 106.0 ms |
+| `sql_batch` | 47.2 ms | 47.0 ms |
+| **total** | **543.1 ms** | **614.9 ms** |
 
 Outcome: the decode gap narrowed from about `53 ms` in the Milestone 5 best run
-(`305.7 ms` vs `252.6 ms`) to about `9 ms` in this checkpoint (`261.0 ms` vs
-`252.3 ms`). The large extern gap has mostly been removed; remaining M7 work is
-likely in decoder combinator structure, Result/try control flow, closure calls,
-and generic interpreter loop overhead rather than JSON parsing itself.
+(`305.7 ms` vs `252.6 ms`) to about `3.5 ms` in this checkpoint (`253.7 ms` vs
+`250.2 ms`). The large extern and Dynamic wrapper gaps have mostly been removed;
+remaining M7 work is likely in decoder combinator structure, Result/try control
+flow, closure calls, and generic interpreter loop overhead rather than JSON
+parsing or Dynamic payload boxing itself.
 
 ### Initial notes
 
