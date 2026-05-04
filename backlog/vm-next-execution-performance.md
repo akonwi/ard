@@ -401,7 +401,7 @@ speculative representation changes.
 
 ### Milestone 4: Direct generated FFI adapters
 
-Status: In progress
+Status: Done
 
 The current `vm_next` FFI path validates signatures at VM construction, but each
 extern call still uses reflection for argument conversion, invocation, and return
@@ -418,12 +418,24 @@ conversion. This is especially visible in decode and SQL workloads.
     `SqlQuery`. SQL profile dropped extern boundary/conversion time from about
     `27.7 ms` (`convert_in=1.8 ms`, `convert_out=0.8 ms`) to about `18.9 ms`
     (`convert_in≈0`, `convert_out≈0`) on `sql_batch`.
-- [ ] Generate scalar adapters for `Int`, `Float`, `Bool`, `Str`, `Void`.
-- [ ] Generate direct adapters for `Maybe[T]` and error-backed `Result[T,E]`.
+- [x] Generate scalar adapters for `Int`, `Float`, `Bool`, `Str`, `Void`.
+  - Added direct adapters for common scalar input/output shapes including
+    `func(string)`, `func(int)`, `func() string`, `func(string) string`,
+    `func(int) float64`, `func(float64) float64`, and primitive-to-Dynamic
+    helpers.
+- [x] Generate direct adapters for `Maybe[T]` and error-backed `Result[T,E]`.
+  - Added direct Maybe return adapters for `Maybe[Int]`, `Maybe[Str]`, and
+    `Maybe[Float]`; retained existing and expanded direct Result wrappers for
+    string/error, bool/error, void/error, extern/error, Dynamic/error, list, and
+    map return shapes.
 - [x] Generate direct adapters for stdlib decode/json/sql hot externs.
-- [ ] Keep panic recovery and `Result` error wrapping semantics intact.
-- [ ] Preserve callback handle behavior for VM-to-host callback APIs.
-- [ ] Benchmark `decode_pipeline`, `sql_batch`, `fs_batch`, and HTTP parity
+- [x] Keep panic recovery and `Result` error wrapping semantics intact.
+  - Fast adapters still run through `callExtern`, so panic recovery and
+    Result-return panic wrapping remain centralized.
+- [x] Preserve callback handle behavior for VM-to-host callback APIs.
+  - Callback-heavy shapes such as HTTP server callbacks and async callbacks keep
+    the reflective/validated fallback path rather than forcing direct adapters.
+- [x] Benchmark `decode_pipeline`, `sql_batch`, `fs_batch`, and HTTP parity
   coverage.
 
 ### Milestone 5: Collection and iteration fast paths
@@ -1130,7 +1142,7 @@ Outcome: vm_next is now faster on aggregate (`0.961x` current VM) and much
 faster on most pure collection/loop workloads. The remaining major gap is
 `decode_pipeline`, which is now tracked as its own follow-up milestone.
 
-### Milestone 4 SQL direct-adapter checkpoint
+### Milestone 4 direct-adapter completion snapshot
 
 Validation:
 
@@ -1146,8 +1158,11 @@ Changes in this checkpoint:
 - Added non-reflective conversion helpers for SQL-style host `any` arguments and
   `[Value]` lists, including `Db | Tx` union connection values and primitive
   SQL parameter unions.
-- Preserved panic recovery, `Result` wrapping, and reflective fallback for other
-  extern signatures.
+- Expanded direct stdlib adapter coverage for scalar helpers, primitive
+  `Dynamic` constructors, `Maybe` parse/env returns, string-list returns,
+  extern-wrapper SQL/HTTP helpers, and raw HTTP request/response accessors.
+- Preserved panic recovery, `Result` wrapping, callback behavior, and reflective
+  fallback for unsupported/custom extern signatures.
 
 Profile impact on `sql_batch`:
 
@@ -1159,23 +1174,24 @@ Profile impact on `sql_batch`:
 | `SqlExecute` total | ~15.6 ms | ~11.0 ms |
 | `SqlQuery` total | ~5.7 ms | ~3.9 ms |
 
-10-run runtime-suite checkpoint after the SQL adapter slice:
+Final 10-run runtime-suite checkpoint after M4:
 
 | Benchmark | vm_next | current bytecode VM |
 |---|---:|---:|
-| `sales_pipeline` | 48.9 ms | 68.3 ms |
-| `shape_catalog` | 60.1 ms | 83.4 ms |
-| `decode_pipeline` | 262.3 ms | 258.2 ms |
-| `word_frequency_batch` | 26.7 ms | 52.8 ms |
-| `async_batches` | 8.7 ms | 16.5 ms |
-| `fs_batch` | 112.7 ms | 114.4 ms |
-| `sql_batch` | 47.0 ms | 49.6 ms |
-| **total** | **566.4 ms** | **643.2 ms** |
+| `sales_pipeline` | 49.0 ms | 69.6 ms |
+| `shape_catalog` | 59.7 ms | 84.9 ms |
+| `decode_pipeline` | 261.6 ms | 258.0 ms |
+| `word_frequency_batch` | 27.5 ms | 52.6 ms |
+| `async_batches` | 8.2 ms | 15.9 ms |
+| `fs_batch` | 110.0 ms | 115.8 ms |
+| `sql_batch` | 47.1 ms | 50.2 ms |
+| **total** | **563.1 ms** | **647.0 ms** |
 
 The full-suite run was noisier than the M7 completion run, but the SQL-specific
 profile and same-run `sql_batch` result both show that direct SQL adapters remove
-most remaining reflective SQL boundary cost. Broader scalar/Maybe/generated
-adapter coverage remains open in M4.
+most remaining reflective SQL boundary cost. Remaining FFI reflection is now
+mostly for callback-heavy/custom shapes where preserving validated fallback
+behavior is preferable to adding branch-heavy direct paths.
 
 ### Milestone 7 completion snapshot
 
