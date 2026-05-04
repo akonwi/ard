@@ -641,7 +641,7 @@ closing speculative hoisting/trait/fiber items with profiling-backed rationale.
 
 ### Milestone 7: Decode pipeline performance
 
-Status: In progress
+Status: Done
 
 After Milestone 5, `vm_next` beats the current bytecode VM on aggregate, but
 `decode_pipeline` remains the largest known benchmark gap. In the best retained
@@ -691,10 +691,10 @@ M7 progress to date:
 - Simplified vm_next dynamic extern argument extraction to read the inline
   Dynamic payload directly, trimming the hot FFI argument path without changing
   observable Dynamic values.
-- Latest 10-run runtime-suite checkpoint after these M7 changes: vm_next
-  `decode_pipeline` `253.7 ms` versus current VM `250.2 ms`, leaving an
-  approximately `3.5 ms` decode gap. The same run had vm_next aggregate
-  `543.1 ms` versus current VM aggregate `614.9 ms`.
+- Final 10-run runtime-suite checkpoint after these M7 changes: vm_next
+  `decode_pipeline` `253.1 ms` versus current VM `248.8 ms`, leaving an
+  approximately `4.3 ms` decode gap. The same run had vm_next aggregate
+  `546.0 ms` versus current VM aggregate `616.2 ms`.
 - Rejected follow-up experiments during this pass:
   - Inlining stdlib `DynamicToList`, `DynamicToMap`, and `ExtractField` success
     checks into vm_next adapters looked plausible from profile data but
@@ -709,6 +709,9 @@ M7 progress to date:
   - Adding a specialized `ValueResultDynamic` representation reduced profiled
     Result ref accesses by about 48k but did not improve the official
     `decode_pipeline` benchmark, so it was reverted.
+  - Storing one- and two-capture closures inline removed all profiled closure
+    capture slice allocations in `decode_pipeline`, but increased profiled wall
+    time substantially, so it was reverted.
 
 Recommended focus:
 
@@ -717,15 +720,19 @@ Recommended focus:
 - [x] Separate decode time into host JSON/dynamic extern work, Result/try
   control flow, closure dispatch/creation, collection iteration, and local loop
   overhead.
-- [ ] Prefer decode-general improvements that also preserve aggregate stability;
+- [x] Prefer decode-general improvements that also preserve aggregate stability;
   avoid benchmark-name or payload-specific behavior.
-- [ ] Investigate whether more direct generated FFI adapters for dynamic/json
+- [x] Investigate whether more direct generated FFI adapters for dynamic/json
   decode externs belong here or should be completed under Milestone 4 first.
-- [ ] Investigate decoder Result/try lowering only if it removes meaningful work
+  - M7 kept only narrow stdlib decode fast paths and host representation fixes.
+    Broader generated/direct adapter coverage remains in Milestone 4.
+- [x] Investigate decoder Result/try lowering only if it removes meaningful work
   without recreating previously rejected broad fused try/extern shapes.
-- [ ] Keep collection semantics, deterministic map iteration, closure semantics,
+  - Tried direct `TryResult` dispatch inlining and a `ValueResultDynamic` shape;
+    both failed official benchmark validation and were reverted.
+- [x] Keep collection semantics, deterministic map iteration, closure semantics,
   and public Ard behavior unchanged.
-- [ ] Benchmark with the official runtime suite and track `decode_pipeline`
+- [x] Benchmark with the official runtime suite and track `decode_pipeline`
   separately from aggregate `total_ms`.
 
 ### Milestone 8: Profiling and benchmark tracking
@@ -1115,7 +1122,7 @@ Outcome: vm_next is now faster on aggregate (`0.961x` current VM) and much
 faster on most pure collection/loop workloads. The remaining major gap is
 `decode_pipeline`, which is now tracked as its own follow-up milestone.
 
-### Milestone 7 decode/dynamic checkpoint
+### Milestone 7 completion snapshot
 
 Validation:
 
@@ -1139,21 +1146,21 @@ Changes in this checkpoint:
 
 | Benchmark | vm_next | current bytecode VM |
 |---|---:|---:|
-| `sales_pipeline` | 47.6 ms | 66.4 ms |
-| `shape_catalog` | 57.5 ms | 80.2 ms |
-| `decode_pipeline` | 253.7 ms | 250.2 ms |
-| `word_frequency_batch` | 25.7 ms | 51.0 ms |
-| `async_batches` | 8.0 ms | 14.1 ms |
-| `fs_batch` | 103.4 ms | 106.0 ms |
-| `sql_batch` | 47.2 ms | 47.0 ms |
-| **total** | **543.1 ms** | **614.9 ms** |
+| `sales_pipeline` | 47.5 ms | 66.2 ms |
+| `shape_catalog` | 57.5 ms | 80.3 ms |
+| `decode_pipeline` | 253.1 ms | 248.8 ms |
+| `word_frequency_batch` | 25.6 ms | 51.0 ms |
+| `async_batches` | 8.1 ms | 14.3 ms |
+| `fs_batch` | 107.2 ms | 108.1 ms |
+| `sql_batch` | 47.0 ms | 47.5 ms |
+| **total** | **546.0 ms** | **616.2 ms** |
 
 Outcome: the decode gap narrowed from about `53 ms` in the Milestone 5 best run
-(`305.7 ms` vs `252.6 ms`) to about `3.5 ms` in this checkpoint (`253.7 ms` vs
-`250.2 ms`). The large extern and Dynamic wrapper gaps have mostly been removed;
-remaining M7 work is likely in decoder combinator structure, Result/try control
-flow, closure calls, and generic interpreter loop overhead rather than JSON
-parsing or Dynamic payload boxing itself.
+(`305.7 ms` vs `252.6 ms`) to about `4.3 ms` in this completion checkpoint
+(`253.1 ms` vs `248.8 ms`). The large extern and Dynamic wrapper gaps have been
+removed; remaining decode difference is small enough that further work should
+move to broader generated FFI adapter coverage (Milestone 4) or general
+interpreter/decoder-combinator architecture rather than more M7-specific tuning.
 
 ### Initial notes
 
