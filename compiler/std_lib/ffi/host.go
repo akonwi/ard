@@ -808,17 +808,21 @@ func DynamicToList(data any) ([]any, error) {
 	return nil, fmt.Errorf("%s", formatDynamicValueForError(data))
 }
 
-func DynamicToMap(data any) (map[any]any, error) {
+func DynamicToMap(data any) (map[string]any, error) {
 	if data == nil {
 		return nil, fmt.Errorf("Void")
 	}
-	if values, ok := data.(map[any]any); ok {
+	if values, ok := data.(map[string]any); ok {
 		return values, nil
 	}
-	if values, ok := data.(map[string]any); ok {
-		out := make(map[any]any, len(values))
+	if values, ok := data.(map[any]any); ok {
+		out := make(map[string]any, len(values))
 		for key, value := range values {
-			out[key] = value
+			keyString, ok := key.(string)
+			if !ok {
+				return nil, fmt.Errorf("%s", formatDynamicValueForError(data))
+			}
+			out[keyString] = value
 		}
 		return out, nil
 	}

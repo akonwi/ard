@@ -361,6 +361,17 @@ func (vm *VM) newFastHostExternAdapter(extern air.Extern, fn any) func(*VM, []Va
 			out, err := typed(dynamicArg(args[0]))
 			return vm.fastDynamicMapResultWithInfo(extern.Signature.Return, returnInfo, resultValueInfo, out, err)
 		}
+	case func(any) (map[string]any, error):
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 1 {
+				return Value{}, fmt.Errorf("extern %s expects one arg", goExternBinding(extern))
+			}
+			out, err := typed(dynamicArg(args[0]))
+			return vm.fastStringDynamicMapResultWithInfo(extern.Signature.Return, returnInfo, resultValueInfo, out, err)
+		}
 	case func(any, string) (any, error):
 		if !isResultReturn {
 			return nil
@@ -641,6 +652,20 @@ func (vm *VM) fastDynamicMapResultWithInfo(returnType air.TypeID, info air.TypeI
 	return Result(returnType, true, Map(info.Value, entries)), nil
 }
 
+func (vm *VM) fastStringDynamicMapResultWithInfo(returnType air.TypeID, info air.TypeInfo, mapInfo air.TypeInfo, raw map[string]any, hostErr error) (Value, error) {
+	if vm.profile != nil {
+		vm.profile.RecordValueAlloc(valueAllocResult)
+	}
+	if hostErr != nil {
+		return Result(returnType, false, vm.fastStringErrorValue(info.Error, hostErr)), nil
+	}
+	entries := make([]MapEntryValue, 0, len(raw))
+	for key, value := range raw {
+		entries = append(entries, MapEntryValue{Key: Dynamic(mapInfo.Key, key), Value: Dynamic(mapInfo.Value, value)})
+	}
+	return Result(returnType, true, Map(info.Value, entries)), nil
+}
+
 func (vm *VM) fastDecodeErrorValue(typeID air.TypeID, decodeErr stdlibffi.Error) (Value, error) {
 	info, err := vm.typeInfo(typeID)
 	if err != nil {
@@ -899,8 +924,14 @@ func (vm *VM) validateHostType(typeID air.TypeID, target reflect.Type, param boo
 		if target.Kind() != reflect.Map {
 			return fmt.Errorf("map %s must use host map, got %s", typeInfo.Name, target)
 		}
-		if err := vm.validateHostType(typeInfo.Key, target.Key(), param); err != nil {
-			return fmt.Errorf("map key: %w", err)
+		keyInfo, err := vm.typeInfo(typeInfo.Key)
+		if err != nil {
+			return err
+		}
+		if !(keyInfo.Kind == air.TypeDynamic && target.Key().Kind() == reflect.String) {
+			if err := vm.validateHostType(typeInfo.Key, target.Key(), param); err != nil {
+				return fmt.Errorf("map key: %w", err)
+			}
 		}
 		if err := vm.validateHostType(typeInfo.Value, target.Elem(), param); err != nil {
 			return fmt.Errorf("map value: %w", err)
