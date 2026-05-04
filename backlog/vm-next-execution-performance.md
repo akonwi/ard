@@ -765,23 +765,26 @@ problem should be solved with a scalable architecture rather than hidden
 where it matters while keeping stdlib semantics and host representation details
 out of generic VM adapter code.
 
-Chosen direction: generate adapters from stdlib FFI metadata.
+Chosen direction: generate adapters from declared extern metadata.
 
-The adapter layer is an internal compiler/runtime concern. External stdlib FFI
-host code should remain ignorant of adapter concepts and continue exposing normal
-Go functions. The compiler/runtime can generate any non-reflective wrappers it
-needs from the same metadata that already defines stdlib FFI bindings.
+The adapter layer is an internal compiler/runtime concern. External FFI host code
+should remain ignorant of adapter concepts and continue exposing normal Go
+functions. The compiler/runtime can generate any non-reflective wrappers it needs
+from the same extern declarations that already define host signatures. The
+current implementation starts with stdlib externs; the intended architecture is a
+general extern bridge generator for `vm_next`, with stdlib as one consumer.
 
 Accepted design:
 
-1. Generate adapters from stdlib FFI metadata.
-   - Use the stdlib FFI registry / generated metadata as the source of truth.
+1. Generate adapters from declared extern metadata.
+   - Use Ard extern declarations / generated metadata as the source of truth.
    - Generated code can call typed host functions without `reflect.Call`, but
-     should be regenerated whenever stdlib signatures change.
+     should be regenerated whenever extern signatures change.
    - `vm_next` should load/register generated adapters; it should not hand
      maintain a growing signature switch.
    - Keep generated adapter behavior signature-driven and metadata-driven, not
      benchmark-driven or binding-name-special-cased.
+   - Scope is `vm_next` only; leave the current bytecode VM FFI registry alone.
 
 Rejected designs:
 
@@ -825,19 +828,55 @@ Checklist:
     `642.8 ms` vs current VM about `680.9 ms` in the same run. `decode_pipeline`
     remains the largest gap at `306.3 ms` vs `262.1 ms`.
 
-Next FFI architecture item:
+Next FFI architecture plan:
 
-- [ ] Generalize FFI adapter generation beyond the built-in stdlib.
-  - Long-term, any host extern contract should be able to generate the same
-    pieces the stdlib now generates: host-facing Go declarations plus internal
-    `vm_next` adapter glue.
-  - Host implementations should remain ordinary Go functions and should not know
-    about adapters, `Value`, stacks, or VM internals.
-  - Generated adapters should become the intended production path for custom
-    host extern sets, with reflective fallback kept for development, tests,
-    dynamic embedding, and unsupported shapes while generator coverage matures.
-  - This would let embedders write normal host functions while avoiding
-    `reflect.Call` in steady-state execution.
+1. Make generation a prerequisite for tests and local validation.
+   - Update local docs and CI workflows so FFI/vm_next validation runs
+     generation before tests, e.g. `cd compiler && go generate ./std_lib/ffi &&
+     go test ./...`.
+   - CI should also fail on stale generated files, e.g. run generation and then
+     `git diff --exit-code` before or after tests.
+   - This ensures stdlib tests always compile against fresh host declarations
+     and fresh `vm_next` bridge code.
+2. Remove or rewrite unit tests that depend on arbitrary ad-hoc reflective FFI.
+   - Keep tests that exercise stdlib externs because they use generated bridge
+     code.
+   - Tests may still override stdlib bindings such as `Print` or `HTTP_Serve` as
+     long as the override matches the generated stdlib signature.
+   - Do not preserve the reflective fallback solely for unit-test convenience.
+     Prefer integration coverage through real extern declarations and generated
+     bridges.
+3. Generalize FFI adapter generation beyond the built-in stdlib.
+   - Any host extern contract should be able to generate the same pieces the
+     stdlib now generates: host-facing Go declarations plus internal `vm_next`
+     adapter glue.
+   - Host implementations should remain ordinary Go functions and should not
+     know about adapters, `Value`, stacks, or VM internals.
+   - Generated adapters should become the intended production path for custom
+     host extern sets, with reflective fallback kept only while generator
+     coverage matures.
+   - Unsupported declared extern signatures should become explicit generator
+     errors or documented skips; runtime-needed externs must not silently depend
+     on VM reflection.
+   - This would let embedders write normal host functions while avoiding
+     `reflect.Call` in steady-state execution.
+4. Remove arbitrary reflective host-function fallback from `vm_next` after the
+   generated bridge path is general enough.
+   - `hostExternAdapter.callable` and `reflect.Call` should disappear from
+     steady-state `vm_next` FFI.
+   - Panic wrapping, Result/Maybe conversion, and host error semantics must be
+     preserved by generated adapters.
+   - Public API likely needs to move away from loose `HostFunctionRegistry` maps
+     toward generated host contracts or generated bridge registries.
+
+Additional constraints and reminders:
+
+- Leave the current bytecode VM alone; this architecture work is only for
+  `vm_next`.
+- Keep cross-target semantics intact. Go bridge generation must not turn decode,
+  HTTP, SQL, or other stdlib behavior into VM-only semantics.
+- Keep or add integration coverage for stdlib FFI paths such as decode/json, fs,
+  sql, http, async, crypto/base64/hex, env/os/time.
 
 ### Milestone 9: Profiling and benchmark tracking
 
