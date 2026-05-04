@@ -408,9 +408,12 @@ extern call still uses reflection for argument conversion, invocation, and retur
 conversion. This is especially visible in decode and SQL workloads.
 
 - [x] Generate or register direct typed adapter functions keyed by `ExternID`.
-  - Direct adapters are registered in `newFastHostExternAdapter` and stored in
-    each `hostExternAdapter.fast` slot keyed by AIR `ExternID`, with reflection
-    retained as fallback for unsupported/custom host function shapes.
+  - Direct adapters are registered in `newDirectHostExternAdapter` and stored in
+    each `hostExternAdapter.direct` slot keyed by AIR `ExternID`, with
+    reflection retained as fallback for unsupported/custom host function shapes.
+  - The direct-adapter implementation is isolated in
+    `compiler/vm_next/ffi_direct_adapters.go`; `ffi.go` now owns generic FFI
+    validation, panic/result wrapping, profiling, and reflective fallback only.
 - [x] Avoid `reflect.Value` creation and `reflect.Call` in steady-state extern
   calls for retained hot stdlib shapes.
   - M4 added direct SQL adapters for `func(any, string, []any) error` and
@@ -429,6 +432,9 @@ conversion. This is especially visible in decode and SQL workloads.
     string/error, bool/error, void/error, extern/error, Dynamic/error, list, and
     map return shapes.
 - [x] Generate direct adapters for stdlib decode/json/sql hot externs.
+  - Removed binding-name semantic shortcuts from the VM adapter layer. Direct
+    adapters are signature-driven and call the registered host function rather
+    than reimplementing stdlib semantics in `vm_next`.
 - [x] Keep panic recovery and `Result` error wrapping semantics intact.
   - Fast adapters still run through `callExtern`, so panic recovery and
     Result-return panic wrapping remain centralized.
@@ -1163,12 +1169,18 @@ Changes in this checkpoint:
   extern-wrapper SQL/HTTP helpers, and raw HTTP request/response accessors.
 - Preserved panic recovery, `Result` wrapping, callback behavior, and reflective
   fallback for unsupported/custom extern signatures.
+- Refactored direct adapters out of `ffi.go` into `ffi_direct_adapters.go` and
+  renamed the adapter slot from `fast` to `direct`, making `ffi.go` independent
+  of stdlib-specific signature cases.
+- Removed binding-name shortcuts for decode scalar externs so direct adapters no
+  longer reimplement stdlib semantics based on names like `DecodeInt` or
+  `DecodeString`.
 
 Profile impact on `sql_batch`:
 
 | Metric | before | after |
 |---|---:|---:|
-| extern total | ~27.7 ms | ~18.9 ms |
+| extern total | ~27.7 ms | ~18.0 ms |
 | extern convert_in | ~1.8 ms | ~0 ms |
 | extern convert_out | ~0.8 ms | ~0 ms |
 | `SqlExecute` total | ~15.6 ms | ~11.0 ms |
@@ -1178,14 +1190,14 @@ Final 10-run runtime-suite checkpoint after M4:
 
 | Benchmark | vm_next | current bytecode VM |
 |---|---:|---:|
-| `sales_pipeline` | 49.0 ms | 69.6 ms |
-| `shape_catalog` | 59.7 ms | 84.9 ms |
-| `decode_pipeline` | 261.6 ms | 258.0 ms |
-| `word_frequency_batch` | 27.5 ms | 52.6 ms |
-| `async_batches` | 8.2 ms | 15.9 ms |
-| `fs_batch` | 110.0 ms | 115.8 ms |
-| `sql_batch` | 47.1 ms | 50.2 ms |
-| **total** | **563.1 ms** | **647.0 ms** |
+| `sales_pipeline` | 49.3 ms | 73.7 ms |
+| `shape_catalog` | 59.7 ms | 86.8 ms |
+| `decode_pipeline` | 268.2 ms | 259.2 ms |
+| `word_frequency_batch` | 26.3 ms | 54.7 ms |
+| `async_batches` | 9.7 ms | 15.7 ms |
+| `fs_batch` | 113.4 ms | 116.7 ms |
+| `sql_batch` | 47.8 ms | 50.4 ms |
+| **total** | **574.4 ms** | **657.2 ms** |
 
 The full-suite run was noisier than the M7 completion run, but the SQL-specific
 profile and same-run `sql_batch` result both show that direct SQL adapters remove
