@@ -208,11 +208,11 @@ Recommended Milestone 2 feedback loop:
     patterns.
 - [x] Pull forward limited direct FFI fast paths where they unblock runtime
   execution benchmarks.
-  - [x] Add signature-based adapters for stdlib dynamic/decode externs.
-  - [x] Add signature-based adapters for common string/bool/error filesystem
-    and SQL-style externs.
-  - [x] Precompute Result/value type metadata captured by fast FFI adapters.
-  - [ ] Generalize into generated/direct adapter coverage in Milestone 4.
+  - Historical note: signature-based direct adapters were evaluated during M2,
+    M4, and M7, but were later removed because VM-local stdlib adapter matrices
+    do not scale. Future FFI optimization should be generated from stdlib
+    metadata or implemented in stdlib host functions rather than hand-written in
+    `vm_next`.
 - [x] Remove redundant runtime validation from trusted hot paths after bytecode
   validation succeeds.
   - Closed as intentionally not pursued further for Milestone 2. Multiple
@@ -401,48 +401,41 @@ speculative representation changes.
 
 ### Milestone 4: Direct generated FFI adapters
 
-Status: Done
+Status: Rejected / removed
 
-The current `vm_next` FFI path validates signatures at VM construction, but each
-extern call still uses reflection for argument conversion, invocation, and return
-conversion. This is especially visible in decode and SQL workloads.
+This milestone originally explored avoiding `reflect.Value` creation and
+`reflect.Call` for hot stdlib externs by adding direct typed adapters in
+`vm_next`. The performance wins were real for SQL/decode profiles, but the
+approach was rejected architecturally:
 
-- [x] Generate or register direct typed adapter functions keyed by `ExternID`.
-  - Direct adapters are registered in `newDirectHostExternAdapter` and stored in
-    each `hostExternAdapter.direct` slot keyed by AIR `ExternID`, with
-    reflection retained as fallback for unsupported/custom host function shapes.
-  - The direct-adapter implementation is isolated in
-    `compiler/vm_next/ffi_direct_adapters.go`; `ffi.go` now owns generic FFI
-    validation, panic/result wrapping, profiling, and reflective fallback only.
-- [x] Avoid `reflect.Value` creation and `reflect.Call` in steady-state extern
-  calls for retained hot stdlib shapes.
-  - M4 added direct SQL adapters for `func(any, string, []any) error` and
-    `func(any, string, []any) ([]any, error)`, covering `SqlExecute` and
-    `SqlQuery`. SQL profile dropped extern boundary/conversion time from about
-    `27.7 ms` (`convert_in=1.8 ms`, `convert_out=0.8 ms`) to about `18.9 ms`
-    (`convert_in≈0`, `convert_out≈0`) on `sql_batch`.
-- [x] Generate scalar adapters for `Int`, `Float`, `Bool`, `Str`, `Void`.
-  - Added direct adapters for common scalar input/output shapes including
-    `func(string)`, `func(int)`, `func() string`, `func(string) string`,
-    `func(int) float64`, `func(float64) float64`, and primitive-to-Dynamic
-    helpers.
-- [x] Generate direct adapters for `Maybe[T]` and error-backed `Result[T,E]`.
-  - Added direct Maybe return adapters for `Maybe[Int]`, `Maybe[Str]`, and
-    `Maybe[Float]`; retained existing and expanded direct Result wrappers for
-    string/error, bool/error, void/error, extern/error, Dynamic/error, list, and
-    map return shapes.
-- [x] Generate direct adapters for stdlib decode/json/sql hot externs.
-  - Removed binding-name semantic shortcuts from the VM adapter layer. Direct
-    adapters are signature-driven and call the registered host function rather
-    than reimplementing stdlib semantics in `vm_next`.
-- [x] Keep panic recovery and `Result` error wrapping semantics intact.
-  - Fast adapters still run through `callExtern`, so panic recovery and
-    Result-return panic wrapping remain centralized.
-- [x] Preserve callback handle behavior for VM-to-host callback APIs.
-  - Callback-heavy shapes such as HTTP server callbacks and async callbacks keep
-    the reflective/validated fallback path rather than forcing direct adapters.
-- [x] Benchmark `decode_pipeline`, `sql_batch`, `fs_batch`, and HTTP parity
-  coverage.
+- VM internals started accumulating knowledge of stdlib-specific bindings and
+  host representation details.
+- Name-based shortcuts such as `DecodeInt` / `DecodeString` duplicated stdlib
+  semantics inside `vm_next`.
+- The adapter type-switch grew with every stdlib signature and would not scale as
+  the standard library evolves.
+- Custom/user externs still needed reflection, so the system became two adapter
+  models rather than one coherent FFI design.
+
+The direct-adapter implementation and `hostExternAdapter.direct` hook were
+removed. `compiler/vm_next/ffi.go` now uses the validated reflective adapter path
+for all host externs again. This keeps the FFI layer generic and makes stdlib
+semantics live in `compiler/std_lib/ffi`, not in the VM.
+
+Future FFI performance work should avoid hand-maintained VM special cases. If
+reflection overhead becomes important again, prefer one of these designs:
+
+- Generate direct adapters from the same source of truth that defines stdlib FFI
+  bindings, so adapter coverage changes automatically with the stdlib.
+- Move semantic optimizations into `compiler/std_lib/ffi` host functions
+  themselves, where the stdlib behavior already lives.
+- Add a public opt-in adapter API for custom host registries rather than hidden
+  binding-name or stdlib-shape checks inside `vm_next`.
+
+Validation after removing the direct adapter layer:
+
+- `cd compiler && go test ./...`
+- `cd compiler && go test -tags vmnext_profile_detail ./vm_next`
 
 ### Milestone 5: Collection and iteration fast paths
 
@@ -705,11 +698,10 @@ M7 progress to date:
   copying them through `map[any]any`, and taught vm_next's fast adapter to wrap
   string keys directly as Dynamic keys. This reduced profiled `DynamicToMap`
   time from about `8.1 ms` to about `5.4 ms`.
-- Added vm_next-specific fast scalar success paths for stdlib `DecodeInt` and
-  `DecodeString`, avoiding the host `Result[...]` construction on the hot
-  success path while retaining the original host functions as error fallbacks.
-  This reduced profiled `DecodeInt` from about `14.3 ms` to about `11.7 ms` and
-  `DecodeString` from about `2.3 ms` to about `1.9 ms`.
+- Evaluated vm_next-specific direct scalar success paths for stdlib `DecodeInt`
+  and `DecodeString`. They improved decode profiles, but were later removed
+  during M4 cleanup because VM-local stdlib semantic shortcuts do not scale and
+  duplicate stdlib behavior.
 - Stored vm_next Dynamic payloads directly in `Value.Ref` instead of allocating a
   `DynamicValue` wrapper for every Dynamic value. This is especially relevant to
   decode, which wraps many JSON list/map elements as Dynamic; it reduced the
@@ -750,8 +742,10 @@ Recommended focus:
   avoid benchmark-name or payload-specific behavior.
 - [x] Investigate whether more direct generated FFI adapters for dynamic/json
   decode externs belong here or should be completed under Milestone 4 first.
-  - M7 kept only narrow stdlib decode fast paths and host representation fixes.
-    Broader generated/direct adapter coverage remains in Milestone 4.
+  - M7 kept host representation fixes. Later M4 experiments showed that
+    hand-maintained direct adapters are not the right architecture; future FFI
+    optimization should use generation from stdlib metadata or host-side
+    stdlib changes instead.
 - [x] Investigate decoder Result/try lowering only if it removes meaningful work
   without recreating previously rejected broad fused try/extern shapes.
   - Tried direct `TryResult` dispatch inlining and a `ValueResultDynamic` shape;
@@ -1049,8 +1043,8 @@ Changes in this checkpoint:
 | **total** | **821.3 ms** |
 
 This remains broadly in line with the locals fast-path checkpoint and keeps the
-remaining reflective extern path simpler to profile before Milestone 4 expands
-coverage with generated/direct adapters.
+remaining reflective extern path simpler to profile before any future generated
+FFI adapter work. M4 later rejected hand-maintained VM-local direct adapters.
 
 ### Milestone 2 locals arena checkpoint
 
@@ -1148,62 +1142,28 @@ Outcome: vm_next is now faster on aggregate (`0.961x` current VM) and much
 faster on most pure collection/loop workloads. The remaining major gap is
 `decode_pipeline`, which is now tracked as its own follow-up milestone.
 
-### Milestone 4 direct-adapter completion snapshot
+### Milestone 4 direct-adapter attempt and removal
 
-Validation:
+Validation after removal:
 
 - `cd compiler && go test ./...`
 - `cd compiler && go test -tags vmnext_profile_detail ./vm_next`
-- `cd compiler && ./benchmarks/run.sh --mode runtime --runs 10 --warmup 3`
 
-Changes in this checkpoint:
+Summary:
 
-- Added direct vm_next adapters for SQL host functions with signatures
-  `func(any, string, []any) error` and
-  `func(any, string, []any) ([]any, error)`.
-- Added non-reflective conversion helpers for SQL-style host `any` arguments and
-  `[Value]` lists, including `Db | Tx` union connection values and primitive
-  SQL parameter unions.
-- Expanded direct stdlib adapter coverage for scalar helpers, primitive
-  `Dynamic` constructors, `Maybe` parse/env returns, string-list returns,
-  extern-wrapper SQL/HTTP helpers, and raw HTTP request/response accessors.
-- Preserved panic recovery, `Result` wrapping, callback behavior, and reflective
-  fallback for unsupported/custom extern signatures.
-- Refactored direct adapters out of `ffi.go` into `ffi_direct_adapters.go` and
-  renamed the adapter slot from `fast` to `direct`, making `ffi.go` independent
-  of stdlib-specific signature cases.
-- Removed binding-name shortcuts for decode scalar externs so direct adapters no
-  longer reimplement stdlib semantics based on names like `DecodeInt` or
-  `DecodeString`.
+- Direct adapters for SQL, scalar, Maybe, Dynamic, and raw extern-wrapper shapes
+  were implemented and benchmarked.
+- SQL profiling showed that direct adapters could remove most reflective SQL
+  boundary cost.
+- The design was rejected because it embedded stdlib-specific signature and
+  representation knowledge in `vm_next`, and because the hand-maintained adapter
+  matrix would grow with every stdlib FFI change.
+- The direct adapter file and VM adapter hook were deleted. `vm_next` now uses
+  the generic validated reflective adapter path for host externs.
 
-Profile impact on `sql_batch`:
-
-| Metric | before | after |
-|---|---:|---:|
-| extern total | ~27.7 ms | ~18.0 ms |
-| extern convert_in | ~1.8 ms | ~0 ms |
-| extern convert_out | ~0.8 ms | ~0 ms |
-| `SqlExecute` total | ~15.6 ms | ~11.0 ms |
-| `SqlQuery` total | ~5.7 ms | ~3.9 ms |
-
-Final 10-run runtime-suite checkpoint after M4:
-
-| Benchmark | vm_next | current bytecode VM |
-|---|---:|---:|
-| `sales_pipeline` | 49.3 ms | 73.7 ms |
-| `shape_catalog` | 59.7 ms | 86.8 ms |
-| `decode_pipeline` | 268.2 ms | 259.2 ms |
-| `word_frequency_batch` | 26.3 ms | 54.7 ms |
-| `async_batches` | 9.7 ms | 15.7 ms |
-| `fs_batch` | 113.4 ms | 116.7 ms |
-| `sql_batch` | 47.8 ms | 50.4 ms |
-| **total** | **574.4 ms** | **657.2 ms** |
-
-The full-suite run was noisier than the M7 completion run, but the SQL-specific
-profile and same-run `sql_batch` result both show that direct SQL adapters remove
-most remaining reflective SQL boundary cost. Remaining FFI reflection is now
-mostly for callback-heavy/custom shapes where preserving validated fallback
-behavior is preferable to adding branch-heavy direct paths.
+Outcome: M4 is closed as a rejected strategy. Future FFI optimization should use
+code generation from stdlib FFI metadata or move optimizations into stdlib host
+functions rather than adding VM-local fast paths.
 
 ### Milestone 7 completion snapshot
 
@@ -1219,9 +1179,9 @@ Changes in this checkpoint:
   `encoding/json` v1 decoder + `UseNumber()`.
 - `DynamicToMap` keeps JSON object maps as `map[string]any`, avoiding an
   intermediate `map[any]any` copy before vm_next wraps keys as Dynamic values.
-- vm_next has hot success-path adapters for stdlib `DecodeInt` and
-  `DecodeString`, while still falling back to the host functions for error
-  formatting and less common dynamic payload shapes.
+- Direct hot success-path adapters for stdlib `DecodeInt` and `DecodeString`
+  were evaluated during M7, but later removed during M4 cleanup because they
+  embedded stdlib semantic shortcuts in `vm_next`.
 - vm_next Dynamic values now store their raw payload directly in `Value.Ref`,
   removing the per-Dynamic wrapper allocation from JSON/list/map decode paths.
 
@@ -1242,7 +1202,7 @@ Outcome: the decode gap narrowed from about `53 ms` in the Milestone 5 best run
 (`305.7 ms` vs `252.6 ms`) to about `4.3 ms` in this completion checkpoint
 (`253.1 ms` vs `248.8 ms`). The large extern and Dynamic wrapper gaps have been
 removed; remaining decode difference is small enough that further work should
-move to broader generated FFI adapter coverage (Milestone 4) or general
+move to generated FFI adapter work from stdlib metadata or general
 interpreter/decoder-combinator architecture rather than more M7-specific tuning.
 
 ### Initial notes
