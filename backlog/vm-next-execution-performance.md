@@ -401,18 +401,26 @@ speculative representation changes.
 
 ### Milestone 4: Direct generated FFI adapters
 
-Status: Pending
+Status: In progress
 
 The current `vm_next` FFI path validates signatures at VM construction, but each
 extern call still uses reflection for argument conversion, invocation, and return
 conversion. This is especially visible in decode and SQL workloads.
 
-- [ ] Generate or register direct typed adapter functions keyed by `ExternID`.
-- [ ] Avoid `reflect.Value` creation and `reflect.Call` in steady-state extern
-  calls.
+- [x] Generate or register direct typed adapter functions keyed by `ExternID`.
+  - Direct adapters are registered in `newFastHostExternAdapter` and stored in
+    each `hostExternAdapter.fast` slot keyed by AIR `ExternID`, with reflection
+    retained as fallback for unsupported/custom host function shapes.
+- [x] Avoid `reflect.Value` creation and `reflect.Call` in steady-state extern
+  calls for retained hot stdlib shapes.
+  - M4 added direct SQL adapters for `func(any, string, []any) error` and
+    `func(any, string, []any) ([]any, error)`, covering `SqlExecute` and
+    `SqlQuery`. SQL profile dropped extern boundary/conversion time from about
+    `27.7 ms` (`convert_in=1.8 ms`, `convert_out=0.8 ms`) to about `18.9 ms`
+    (`convert_in≈0`, `convert_out≈0`) on `sql_batch`.
 - [ ] Generate scalar adapters for `Int`, `Float`, `Bool`, `Str`, `Void`.
 - [ ] Generate direct adapters for `Maybe[T]` and error-backed `Result[T,E]`.
-- [ ] Generate direct adapters for stdlib decode/json/sql hot externs.
+- [x] Generate direct adapters for stdlib decode/json/sql hot externs.
 - [ ] Keep panic recovery and `Result` error wrapping semantics intact.
 - [ ] Preserve callback handle behavior for VM-to-host callback APIs.
 - [ ] Benchmark `decode_pipeline`, `sql_batch`, `fs_batch`, and HTTP parity
@@ -1121,6 +1129,53 @@ autoresearch session:
 Outcome: vm_next is now faster on aggregate (`0.961x` current VM) and much
 faster on most pure collection/loop workloads. The remaining major gap is
 `decode_pipeline`, which is now tracked as its own follow-up milestone.
+
+### Milestone 4 SQL direct-adapter checkpoint
+
+Validation:
+
+- `cd compiler && go test ./...`
+- `cd compiler && go test -tags vmnext_profile_detail ./vm_next`
+- `cd compiler && ./benchmarks/run.sh --mode runtime --runs 10 --warmup 3`
+
+Changes in this checkpoint:
+
+- Added direct vm_next adapters for SQL host functions with signatures
+  `func(any, string, []any) error` and
+  `func(any, string, []any) ([]any, error)`.
+- Added non-reflective conversion helpers for SQL-style host `any` arguments and
+  `[Value]` lists, including `Db | Tx` union connection values and primitive
+  SQL parameter unions.
+- Preserved panic recovery, `Result` wrapping, and reflective fallback for other
+  extern signatures.
+
+Profile impact on `sql_batch`:
+
+| Metric | before | after |
+|---|---:|---:|
+| extern total | ~27.7 ms | ~18.9 ms |
+| extern convert_in | ~1.8 ms | ~0 ms |
+| extern convert_out | ~0.8 ms | ~0 ms |
+| `SqlExecute` total | ~15.6 ms | ~11.0 ms |
+| `SqlQuery` total | ~5.7 ms | ~3.9 ms |
+
+10-run runtime-suite checkpoint after the SQL adapter slice:
+
+| Benchmark | vm_next | current bytecode VM |
+|---|---:|---:|
+| `sales_pipeline` | 48.9 ms | 68.3 ms |
+| `shape_catalog` | 60.1 ms | 83.4 ms |
+| `decode_pipeline` | 262.3 ms | 258.2 ms |
+| `word_frequency_batch` | 26.7 ms | 52.8 ms |
+| `async_batches` | 8.7 ms | 16.5 ms |
+| `fs_batch` | 112.7 ms | 114.4 ms |
+| `sql_batch` | 47.0 ms | 49.6 ms |
+| **total** | **566.4 ms** | **643.2 ms** |
+
+The full-suite run was noisier than the M7 completion run, but the SQL-specific
+profile and same-run `sql_batch` result both show that direct SQL adapters remove
+most remaining reflective SQL boundary cost. Broader scalar/Maybe/generated
+adapter coverage remains open in M4.
 
 ### Milestone 7 completion snapshot
 
