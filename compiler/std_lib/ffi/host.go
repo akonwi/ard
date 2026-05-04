@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -735,9 +736,7 @@ func IsNil(data any) bool {
 
 func JsonToDynamic(input string) (any, error) {
 	var out any
-	decoder := json.NewDecoder(strings.NewReader(input))
-	decoder.UseNumber()
-	if err := decoder.Decode(&out); err != nil {
+	if err := jsonv2.Unmarshal([]byte(input), &out); err != nil {
 		return nil, err
 	}
 	return out, nil
