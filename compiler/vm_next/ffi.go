@@ -11,34 +11,17 @@ import (
 	"github.com/akonwi/ard/air"
 	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
 	vmcode "github.com/akonwi/ard/vm_next/bytecode"
+	vmnextffi "github.com/akonwi/ard/vm_next/ffi"
 )
 
 type HostFunctionRegistry map[string]any
 
 type hostExternAdapters map[air.ExternID]hostExternAdapter
 
-type hostExternDirect func(vm *VM, extern air.Extern, binding string, args []Value) (Value, error)
-type hostExternAdapterLookup func(binding string, fn any) (hostExternDirect, bool)
-
-var generatedHostExternAdapterLookups []hostExternAdapterLookup
-
-func registerGeneratedHostExternAdapter(lookup hostExternAdapterLookup) {
-	generatedHostExternAdapterLookups = append(generatedHostExternAdapterLookups, lookup)
-}
-
-func generatedHostExternAdapter(binding string, fn any) (hostExternDirect, bool) {
-	for i := len(generatedHostExternAdapterLookups) - 1; i >= 0; i-- {
-		if direct, ok := generatedHostExternAdapterLookups[i](binding, fn); ok {
-			return direct, true
-		}
-	}
-	return nil, false
-}
-
 type hostExternAdapter struct {
 	binding string
 	extern  air.Extern
-	direct  hostExternDirect
+	direct  vmnextffi.ExternAdapter
 }
 
 var (
@@ -53,14 +36,18 @@ var (
 )
 
 func NewWithExterns(program *air.Program, externs HostFunctionRegistry) (*VM, error) {
+	return NewWithOptions(program, Options{Externs: externs})
+}
+
+func NewWithOptions(program *air.Program, options Options) (*VM, error) {
 	if err := air.Validate(program); err != nil {
 		return nil, err
 	}
 	registry := HostFunctionRegistry{}
-	for name, fn := range stdlibffi.HostFunctions {
+	for name, fn := range stdlibffi.NewHostFunctions(stdlibffi.HostConfig{Args: options.Args}) {
 		registry[name] = fn
 	}
-	for name, fn := range externs {
+	for name, fn := range options.Externs {
 		registry[name] = fn
 	}
 	vm := &VM{program: program, profile: newExecutionProfile(), voidType: typeIDForKind(program, air.TypeVoid)}
@@ -146,7 +133,7 @@ func (vm *VM) newHostExternAdapter(extern air.Extern, binding string, fn any) (h
 	if err := vm.validateHostReturns(extern.Signature.Return, fnType); err != nil {
 		return hostExternAdapter{}, err
 	}
-	direct, ok := generatedHostExternAdapter(binding, fn)
+	direct, ok := vmnextffi.Adapter(binding, fn)
 	if !ok {
 		return hostExternAdapter{}, fmt.Errorf("extern %s has no generated vm_next adapter", binding)
 	}
@@ -161,14 +148,27 @@ func (adapter hostExternAdapter) call(vm *VM, args []Value) (Value, error) {
 	if len(adapter.extern.Signature.Params) != len(args) {
 		return Value{}, fmt.Errorf("extern %s expects %d args, got %d", adapter.binding, len(adapter.extern.Signature.Params), len(args))
 	}
+	bridge := generatedHostBridge{vm: vm}
 	if vm.profile == nil {
-		return adapter.direct(vm, adapter.extern, adapter.binding, args)
+		return adapter.callDirect(bridge, args)
 	}
 	start := time.Now()
-	value, err := adapter.direct(vm, adapter.extern, adapter.binding, args)
+	value, err := adapter.callDirect(bridge, args)
 	duration := time.Since(start)
 	vm.profile.RecordExternCall(adapter.binding, len(args), 0, duration, 0)
 	return value, err
+}
+
+func (adapter hostExternAdapter) callDirect(bridge generatedHostBridge, args []Value) (Value, error) {
+	out, err := adapter.direct(bridge, adapter.extern, adapter.binding, args)
+	if err != nil {
+		return Value{}, err
+	}
+	value, ok := out.(Value)
+	if !ok {
+		return Value{}, fmt.Errorf("extern %s generated adapter returned %T, want vm_next.Value", adapter.binding, out)
+	}
+	return value, nil
 }
 
 func goExternBinding(extern air.Extern) string {

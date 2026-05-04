@@ -840,13 +840,10 @@ func runVMNextProgram(program *air.Program, args []string) error {
 }
 
 func runVMNextProgramProfile(program *air.Program, args []string, profile *pipelineProfile) error {
-	runtime.SetOSArgs(args)
-	defer runtime.SetOSArgs(nil)
-
 	var vm *vm_next.VM
 	if err := profile.Time("vm_next.init", func() error {
 		var initErr error
-		vm, initErr = vm_next.New(program)
+		vm, initErr = vm_next.NewWithOptions(program, vm_next.Options{Args: args})
 		return initErr
 	}); err != nil {
 		return err

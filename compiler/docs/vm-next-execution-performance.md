@@ -66,9 +66,8 @@ All execution-performance milestones are complete.
    - Removed VM-local decode semantic shortcuts during FFI cleanup.
 8. **Scalable FFI performance architecture**
    - Generated vm_next stdlib FFI adapters from declared extern metadata.
-   - Moved FFI bridge generation to `compiler/ffi/generate.go` as a compiler
-     concern; `compiler/std_lib/ffi` remains the stdlib Ard project's host-code
-     package.
+   - Moved vm_next FFI bridge generation to `compiler/vm_next/ffi/generate.go`;
+     `compiler/std_lib/ffi` remains the stdlib Ard project's host-code package.
    - Made generation part of local and CI validation.
    - Removed arbitrary reflective `reflect.Call` host extern dispatch from
      vm_next.
@@ -114,19 +113,32 @@ Generated adapters:
 The stdlib generation hook is:
 
 ```go
-//go:generate go run ../../ffi/generate.go
+//go:generate go run ../../vm_next/ffi/generate.go
 ```
 
-from `compiler/std_lib/ffi/doc.go`.
+from `compiler/std_lib/ffi/doc.go`. It emits both host declarations and the
+`vm_next` adapter lookup into the stdlib host package:
 
-### FFI generation is a compiler concern
+```text
+compiler/std_lib/ffi/ard.gen.go
+compiler/std_lib/ffi/vm_next_adapters.gen.go
+```
 
-The bridge generator lives in `compiler/ffi/generate.go`. It is not colocated
-with stdlib host code because it is not unique to the stdlib.
+`vm_next` owns only the generic adapter registry/API and bridge implementation
+that lets generated host adapter packages convert to and from VM values.
+
+### FFI adapter generation is vm_next-specific
+
+The adapter registry/API and bridge generator live under `compiler/vm_next/ffi`.
+They are not colocated with stdlib host code because the generated adapters are
+runtime plumbing, while `compiler/std_lib/ffi` is the stdlib Ard project's host
+implementation package.
 
 The generated host package defaults to `ffi`, matching the intended project
 layout where a project's `/ffi` directory contains host code. The stdlib follows
-that same shape as an Ard project under `compiler/std_lib/ffi`.
+that same shape as an Ard project under `compiler/std_lib/ffi`. The legacy
+`compiler/ffi` package remains for the current bytecode VM and Go-oriented
+runtime paths.
 
 ### Leave the current bytecode VM alone
 

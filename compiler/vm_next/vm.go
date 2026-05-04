@@ -18,6 +18,11 @@ type VM struct {
 	valueSlices sync.Pool
 }
 
+type Options struct {
+	Args    []string
+	Externs HostFunctionRegistry
+}
+
 type TestStatus string
 
 const (
@@ -33,7 +38,7 @@ type TestOutcome struct {
 }
 
 func New(program *air.Program) (*VM, error) {
-	return NewWithExterns(program, nil)
+	return NewWithOptions(program, Options{})
 }
 
 func (vm *VM) RunEntry() (Value, error) {
