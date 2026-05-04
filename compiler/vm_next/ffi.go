@@ -401,6 +401,43 @@ func (vm *VM) newFastHostExternAdapter(extern air.Extern, fn any) func(*VM, []Va
 			out, err := typed(dynamicArg(args[0]), args[1].Str)
 			return vm.fastDynamicResultWithInfo(extern.Signature.Return, returnInfo, out, err)
 		}
+	case func(any, string, []any) error:
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 3 || args[1].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects connection, Str, list", goExternBinding(extern))
+			}
+			conn, err := hostAnyArg(args[0])
+			if err != nil {
+				return Value{}, err
+			}
+			values, err := hostAnyListArg(args[2])
+			if err != nil {
+				return Value{}, err
+			}
+			return vm.fastVoidStringErrorResultWithInfo(extern.Signature.Return, returnInfo, typed(conn, args[1].Str, values))
+		}
+	case func(any, string, []any) ([]any, error):
+		if !isResultReturn {
+			return nil
+		}
+		return func(vm *VM, args []Value) (Value, error) {
+			if len(args) != 3 || args[1].Kind != ValueStr {
+				return Value{}, fmt.Errorf("extern %s expects connection, Str, list", goExternBinding(extern))
+			}
+			conn, err := hostAnyArg(args[0])
+			if err != nil {
+				return Value{}, err
+			}
+			values, err := hostAnyListArg(args[2])
+			if err != nil {
+				return Value{}, err
+			}
+			out, hostErr := typed(conn, args[1].Str, values)
+			return vm.fastDynamicListResultWithInfo(extern.Signature.Return, returnInfo, resultValueInfo, out, hostErr)
+		}
 	}
 	return nil
 }
@@ -410,6 +447,53 @@ func dynamicArg(value Value) any {
 		return value.Ref
 	}
 	return value.GoValue()
+}
+
+func hostAnyArg(value Value) (any, error) {
+	switch value.Kind {
+	case ValueExtern:
+		externValue, err := value.externValue()
+		if err != nil {
+			return nil, err
+		}
+		return externValue.Handle, nil
+	case ValueUnion:
+		unionValue, err := value.unionValue()
+		if err != nil {
+			return nil, err
+		}
+		return hostAnyArg(unionValue.Value)
+	case ValueDynamic:
+		return value.Ref, nil
+	case ValueVoid:
+		return nil, nil
+	case ValueInt:
+		return value.Int, nil
+	case ValueFloat:
+		return value.Float, nil
+	case ValueBool:
+		return value.Bool, nil
+	case ValueStr:
+		return value.Str, nil
+	default:
+		return value.GoValue(), nil
+	}
+}
+
+func hostAnyListArg(value Value) ([]any, error) {
+	listValue, err := value.listValue()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, len(listValue.Items))
+	for i, item := range listValue.Items {
+		hostItem, err := hostAnyArg(item)
+		if err != nil {
+			return nil, fmt.Errorf("list item %d: %w", i, err)
+		}
+		out[i] = hostItem
+	}
+	return out, nil
 }
 
 func (vm *VM) fastResultInfo(returnType air.TypeID) (air.TypeInfo, error) {
