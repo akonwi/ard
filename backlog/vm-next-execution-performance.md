@@ -126,7 +126,7 @@ Feedback loop for this milestone:
 
 ### Milestone 2: Remove obvious interpreter allocation overhead
 
-Status: In progress
+Status: Done
 
 Once the bytecode path exists, reduce allocation and dispatch overhead in the new
 execution loop.
@@ -167,7 +167,7 @@ Recommended Milestone 2 feedback loop:
   - [x] Direct function, closure, trait, and extern call counts from bytecode.
   - [x] Opcode counters gated by `ARD_VM_NEXT_PROFILE=1`.
   - [x] Allocation counters for frames, locals slices, stacks, and arg slices.
-- [ ] Avoid generic `[]Value` allocation for common call arities.
+- [x] Avoid generic `[]Value` allocation for common call arities.
   - [x] Direct call path reads args from the caller stack instead of allocating
     a temporary args slice.
   - [x] Closure bytecode call path reads args from the caller stack instead of
@@ -182,7 +182,7 @@ Recommended Milestone 2 feedback loop:
     - [x] Precompute scalar/dynamic host input conversion plans after signature
       validation so generic reflective extern calls avoid repeated type-shape
       dispatch before constructing `reflect.Value` inputs.
-- [ ] Introduce reusable frame/local storage.
+- [x] Introduce reusable frame/local storage.
   - [x] Reuse locals and operand stack slices through a VM-local `sync.Pool`.
   - [x] Avoid allocating a fresh locals slice on every call when a pooled slice
     is available.
@@ -229,7 +229,7 @@ Recommended Milestone 2 feedback loop:
   - Earlier autoresearch also rejected trusting extern arity and removing local
     bounds checks. Keep defensive validation unless a future profile identifies
     a specific check with measurable standalone cost.
-- [ ] Benchmark pure-runtime programs after each step.
+- [x] Benchmark pure-runtime programs after each step.
 
 ### Milestone 3: Value representation improvements
 
