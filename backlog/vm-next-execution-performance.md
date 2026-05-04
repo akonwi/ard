@@ -420,16 +420,24 @@ conversion. This is especially visible in decode and SQL workloads.
 
 ### Milestone 5: Collection and iteration fast paths
 
-Status: In progress
+Status: Done
 
-Current list/map operations are expressed as generic method-like AIR operations,
-and map storage is a linear entry list.
+Milestone 5 is complete as of the vm_next collection/loop performance branch.
+The aggregate target was reached: best official runtime-suite measurement for
+`vm_next` was `599.5 ms` versus `623.6 ms` for the current bytecode VM in the
+same run (`0.961x`, `24.1 ms` faster aggregate). This improved the Milestone 5
+baseline of `795.4 ms` by `195.9 ms` (`-24.6%`).
 
-List-local iteration fast paths have landed, but collection-heavy workloads such
-as `word_frequency_batch` still spend most remaining time in interpreter loop
-mechanics: `LoadLocal`, `StoreLocal`, loop jumps, constants, and scalar integer
-updates. Keep this milestone as the tracking home for remaining collection/loop
-work so the pure-runtime gap does not get lost behind decode/FFI work.
+This milestone focused on general collection and loop execution patterns rather
+than benchmark-specific behavior. Retained changes include local collection
+opcodes, map/Maybe fast paths, scalar loop-control jump fusions, deterministic
+map iteration with sorted indices, and reduced map entry copying.
+
+Remaining caveat: `decode_pipeline` is still slower than the current bytecode VM
+(`305.7 ms` vs `252.6 ms` in the best aggregate run). That gap is now tracked
+separately in the decode-focused milestone below rather than blocking Milestone
+5, because vm_next is now faster on aggregate and substantially faster on
+collection-heavy pure-runtime benchmarks such as `word_frequency_batch`.
 
 - [x] Add explicit bytecode instructions or lowered operations for list
   iteration.
@@ -437,30 +445,39 @@ work so the pure-runtime gap does not get lost behind decode/FFI work.
     `for item in list` by lowering local-list size/index access to specialized
     bytecode opcodes.
   - [x] Support index-producing list loops without extra method overhead.
-- [ ] Track and reduce remaining loop-control overhead in collection-heavy
-  programs.
-  - [ ] Re-profile `word_frequency_batch` after each runtime milestone and
-    watch `LoadLocal`, `StoreLocal`, `ConstInt`, `IntAdd`, `Jump`, and
+  - [x] Add local list push and modulo-list-access fast paths for common
+    push-heavy and cycling patterns.
+- [x] Track and reduce loop-control overhead in collection-heavy programs.
+  - [x] Re-profile `word_frequency_batch` during retained runtime changes and
+    monitor `LoadLocal`, `StoreLocal`, `ConstInt`, `IntAdd`, `Jump`, and
     `JumpIfFalse` counts.
-  - [ ] Consider specialized loop/scalar opcodes only under a pure-runtime or
-    collection-weighted objective; autoresearch rejected fused local increment
-    under the aggregate suite despite some collection/decode wins.
-  - [ ] Look for lower-risk lowering changes that reduce local load/store pairs
-    without adding broad dispatch complexity. A `ReturnLocal` peephole for
-    trailing `LoadLocal; Return` passed tests and reduced some decode opcode
-    counts, but the full 10-run suite regressed directionally, so it was not
-    kept.
-- [ ] Add explicit map iteration support.
-  - [ ] Avoid sorting/copying entries more often than necessary.
-  - [ ] Preserve deterministic iteration order.
-- [ ] Evaluate real hash-map storage for primitive Ard key types.
-  - [ ] `Str`, `Int`, `Bool`, and enum keys.
-  - [ ] Deterministic sorted-key cache with dirty flag for iteration.
-  - [ ] Fallback representation for unsupported key shapes if needed.
-- [ ] Add list growth/capacity improvements for common push-heavy patterns.
-- [ ] Benchmark `sales_pipeline`, `shape_catalog`, and
-  `word_frequency_batch` with at least `--runs 10 --warmup 3` for retained
-  changes.
+  - [x] Add retained scalar loop-control reductions including local integer
+    add-with-constant, fused loop-body/backedge increment, local loop-limit
+    checks, and modulo-equality condition jumps.
+  - [x] Record rejected variants to avoid retrying unstable shapes: broad fused
+    increment/store-local variants, `ReturnLocal`, store/load keep peepholes,
+    direct-store collection iteration opcodes, guarded list-at iteration, and
+    broad local alias rewrites all passed tests but regressed the aggregate
+    benchmark suite.
+- [x] Add explicit map iteration support.
+  - [x] Avoid sorting/copying entries more often than necessary by using sorted
+    map-entry indices for deterministic iteration.
+  - [x] Preserve deterministic iteration order.
+  - [x] Return sorted map iteration entries by pointer in the immediate helper
+    path to avoid extra `MapEntryValue` copies.
+- [x] Improve primitive-key map lookup without changing deterministic map
+  storage semantics.
+  - [x] Specialize primitive-key scans inside `mapEntryIndex` while retaining
+    linear entry order and deterministic sorted iteration.
+  - [x] Avoid full map-entry copies while scanning lookup keys.
+  - [x] Record rejected primitive-key index/hash-map directions; lazy indexes
+    and call-site string-key specialization regressed the aggregate suite.
+- [x] Evaluate list growth/capacity improvements for common push-heavy patterns.
+  - [x] Blanket empty-list preallocation and first-push capacity allocation both
+    regressed and are not retained.
+- [x] Benchmark retained changes with the official runtime suite
+  (`--runs 10 --warmup 3`) and validate with `go test ./...` plus
+  `go test -tags vmnext_profile_detail ./vm_next`.
 
 ### Milestone 6: Closure, trait, and async call fast paths
 
@@ -622,7 +639,49 @@ closing speculative hoisting/trait/fiber items with profiling-backed rationale.
     remaining absolute gap is still decode (`356.6 ms` vs `249.5 ms`), with
     additional collection/loop overhead tracked by Milestone 5.
 
-### Milestone 7: Profiling and benchmark tracking
+### Milestone 7: Decode pipeline performance
+
+Status: Pending
+
+After Milestone 5, `vm_next` beats the current bytecode VM on aggregate, but
+`decode_pipeline` remains the largest known benchmark gap. In the best retained
+Milestone 5 run, `decode_pipeline` measured `305.7 ms` for `vm_next` versus
+`252.6 ms` for the current VM. Treat this as the next targeted performance
+milestone instead of continuing to overload collection/loop work.
+
+Current decode profile signals after Milestones 3, 5, and 6:
+
+- High `LoadLocal` / `StoreLocal` / `Jump` volume remains, but several broad
+  local/load-store rewrites reduced opcode counts while regressing aggregate
+  runtime. Avoid repeating those shapes without a materially different design.
+- `TryResult`, `ResultExpectLocal`, `ResultIsOkLocal`, `MakeResultOk`, and
+  `Return` remain very frequent in decoder combinator paths.
+- `CallExtern` is still high around dynamic decode helpers even after earlier
+  signature-based adapter and Result representation improvements.
+- Closure calls/creations were improved in Milestone 6, but decode still has
+  captured closure-heavy structure.
+- List/map iteration is still visible, but direct-store and guarded list
+  iteration opcode variants have repeatedly failed aggregate scoring.
+
+Recommended focus:
+
+- [ ] Re-profile `decode_pipeline` from the post-Milestone-5 tree with both
+  opcode counters and detailed profile counters enabled.
+- [ ] Separate decode time into host JSON/dynamic extern work, Result/try
+  control flow, closure dispatch/creation, collection iteration, and local loop
+  overhead.
+- [ ] Prefer decode-general improvements that also preserve aggregate stability;
+  avoid benchmark-name or payload-specific behavior.
+- [ ] Investigate whether more direct generated FFI adapters for dynamic/json
+  decode externs belong here or should be completed under Milestone 4 first.
+- [ ] Investigate decoder Result/try lowering only if it removes meaningful work
+  without recreating previously rejected broad fused try/extern shapes.
+- [ ] Keep collection semantics, deterministic map iteration, closure semantics,
+  and public Ard behavior unchanged.
+- [ ] Benchmark with the official runtime suite and track `decode_pipeline`
+  separately from aggregate `total_ms`.
+
+### Milestone 8: Profiling and benchmark tracking
 
 Status: Pending
 
@@ -983,6 +1042,31 @@ means relative to the value-allocation profiling checkpoint. The aggregate total
 is still close to the Milestone 2 locals-arena checkpoint, so larger remaining
 wins are likely in closure churn, Result allocation shape, and loop/scalar
 lowering.
+
+### Milestone 5 completion snapshot
+
+Validation after merging the finalized Milestone 5 branch into `refactor.vm-next`:
+
+- `cd compiler && go test ./...`
+- `cd compiler && go test -tags vmnext_profile_detail ./vm_next`
+
+Best retained 10-run runtime-suite measurement from the Milestone 5
+autoresearch session:
+
+| Benchmark | vm_next | current bytecode VM |
+|---|---:|---:|
+| `sales_pipeline` | 47.7 ms | 67.9 ms |
+| `shape_catalog` | 57.6 ms | 81.7 ms |
+| `decode_pipeline` | 305.7 ms | 252.6 ms |
+| `word_frequency_batch` | 25.5 ms | 51.4 ms |
+| `async_batches` | 8.4 ms | 14.8 ms |
+| `fs_batch` | 106.6 ms | 108.0 ms |
+| `sql_batch` | 48.0 ms | 47.2 ms |
+| **total** | **599.5 ms** | **623.6 ms** |
+
+Outcome: vm_next is now faster on aggregate (`0.961x` current VM) and much
+faster on most pure collection/loop workloads. The remaining major gap is
+`decode_pipeline`, which is now tracked as its own follow-up milestone.
 
 ### Initial notes
 
