@@ -267,8 +267,9 @@ Status: Complete
   - this is enough to run `samples/collections.ard`, `samples/maps.ard`, and
     decode-driven map/list workflows such as `pokemon`
 - [x] Settle the default Go lowering for `Maybe`.
-  - the backend now treats generated generic `ardMaybe[T]` as the default Go
-    representation for Ard nullable values
+  - the backend now treats `runtime.Maybe[T]` from
+    `github.com/akonwi/ard/runtime` as the default Go representation for Ard
+    nullable values
 - [x] Settle the default Go lowering for `Result`.
   - the backend now treats generated generic `ardResult[T, E]` as the default
     Go representation for Ard result values

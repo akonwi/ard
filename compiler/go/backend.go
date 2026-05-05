@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
+	goruntime "runtime"
 	"strings"
 
 	"github.com/akonwi/ard/air"
@@ -99,7 +99,7 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 }
 
 func compilerModuleRoot() (string, bool) {
-	_, file, _, ok := runtime.Caller(0)
+	_, file, _, ok := goruntime.Caller(0)
 	if !ok {
 		return "", false
 	}
