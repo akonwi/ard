@@ -301,6 +301,11 @@ Status: In progress
 
 - [ ] Add Go target parity tests using the existing `vm_next` parity corpus.
 - [ ] Run sample programs through `--target go`.
+  - current automated sample coverage includes `variables`, `loops`,
+    `collections`, `nullables`, `maps`, `lights`, `temperatures`, `modules`,
+    and `type-unions`
+  - manual sample checks have also reached interactive/result-driven flows like
+    `guess` and `tic-tac-toe`
 - [ ] Add project-level regression coverage for real Ard applications.
 - [ ] Add runtime benchmark coverage for the rewritten Go target.
 - [ ] Reach the release gate: `ard run --target go` can run all existing Ard

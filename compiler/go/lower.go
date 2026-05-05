@@ -99,6 +99,7 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	l.currentImports["io"] = "io"
 	l.currentImports["os"] = "os"
 	l.currentImports["slices"] = "slices"
+	l.currentImports["strconv"] = "strconv"
 	l.currentImports["strings"] = "strings"
 	const src = `package main
 
@@ -127,6 +128,14 @@ func ardReadLine() ardResult[string, string] {
 		return ardResult[string, string]{err: err.Error()}
 	}
 	return ardResult[string, string]{value: strings.TrimRight(line, "\r\n"), ok: true}
+}
+
+func ardIntFromStr(value string) ardMaybe[int] {
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return ardMaybe[int]{}
+	}
+	return ardMaybe[int]{value: parsed, ok: true}
 }
 
 func ardSortedIntKeys[V any](m map[int]V) []int {
@@ -264,8 +273,12 @@ func (l *lowerer) lowerBlock(fn air.Function, block air.Block, returnType air.Ty
 		}
 		stmts = append(stmts, result.stmts...)
 		if returnType == air.NoType || l.isVoidType(returnType) {
-			if !isVoidExpr(result.expr) {
-				stmts = append(stmts, &ast.ExprStmt{X: result.expr})
+			if l.isVoidType(block.Result.Type) || isVoidExpr(result.expr) {
+				if !isVoidExpr(result.expr) {
+					stmts = append(stmts, &ast.ExprStmt{X: result.expr})
+				}
+			} else {
+				stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{result.expr}})
 			}
 		} else {
 			stmts = append(stmts, &ast.ReturnStmt{Results: []ast.Expr{result.expr}})
@@ -422,12 +435,27 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{expr: &ast.CompositeLit{Type: typ}}, nil
 	case air.ExprMatchMaybe:
 		return l.lowerMatchMaybe(fn, expr)
+	case air.ExprMaybeOr:
+		return l.lowerMaybeOr(fn, expr)
 	case air.ExprResultExpect:
 		return l.lowerResultExpect(fn, expr)
+	case air.ExprResultOr:
+		return l.lowerResultOr(fn, expr)
+	case air.ExprMatchResult:
+		return l.lowerMatchResult(fn, expr)
 	case air.ExprMatchEnum:
 		return l.lowerMatchEnum(fn, expr)
 	case air.ExprMakeList:
 		return l.lowerMakeList(fn, expr)
+	case air.ExprStrTrim:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("str trim missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "TrimSpace"), Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprStrIsEmpty:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("str is_empty missing target")
@@ -465,6 +493,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: target.expr, Index: index.expr}}, nil
 	case air.ExprListPush:
 		return l.lowerListPush(fn, expr)
+	case air.ExprListSet:
+		return l.lowerListSet(fn, expr)
 	case air.ExprMakeMap:
 		return l.lowerMakeMap(fn, expr)
 	case air.ExprMapSize:
@@ -658,8 +688,12 @@ func (l *lowerer) lowerValueBlock(fn air.Function, block air.Block, resultType a
 		}
 		stmts = append(stmts, result.stmts...)
 		if l.isVoidType(resultType) {
-			if !isVoidExpr(result.expr) {
-				stmts = append(stmts, &ast.ExprStmt{X: result.expr})
+			if l.isVoidType(block.Result.Type) || isVoidExpr(result.expr) {
+				if !isVoidExpr(result.expr) {
+					stmts = append(stmts, &ast.ExprStmt{X: result.expr})
+				}
+			} else {
+				stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{result.expr}})
 			}
 		} else {
 			if target == nil {
@@ -919,6 +953,131 @@ func (l *lowerer) lowerMatchEnum(fn air.Function, expr air.Expr) (loweredExpr, e
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
 
+func (l *lowerer) lowerMaybeOr(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("maybe or expects target and one arg")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	defaultValue, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetTemp := l.nextTemp()
+	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetExpr := ast.NewIdent(targetTemp)
+	resultTemp := l.nextTemp()
+	resultDecls, err := l.declareTemp(expr.Type, resultTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := ast.NewIdent(resultTemp)
+	stmts := append(target.stmts, defaultValue.stmts...)
+	stmts = append(stmts, targetDecls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	stmts = append(stmts, resultDecls...)
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("ok")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("value")}}}}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{defaultValue.expr}}}},
+	})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) lowerResultOr(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("result or expects target and one arg")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	defaultValue, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetTemp := l.nextTemp()
+	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetExpr := ast.NewIdent(targetTemp)
+	resultTemp := l.nextTemp()
+	resultDecls, err := l.declareTemp(expr.Type, resultTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := ast.NewIdent(resultTemp)
+	stmts := append(target.stmts, defaultValue.stmts...)
+	stmts = append(stmts, targetDecls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	stmts = append(stmts, resultDecls...)
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("ok")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("value")}}}}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{defaultValue.expr}}}},
+	})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) lowerMatchResult(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("result match missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetTemp := l.nextTemp()
+	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetExpr := ast.NewIdent(targetTemp)
+	resultExpr := ast.NewIdent("nil")
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	stmts = append(stmts, targetDecls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	var assignTarget ast.Expr
+	if !l.isVoidType(expr.Type) {
+		temp := l.nextTemp()
+		decls, err := l.declareTemp(expr.Type, temp)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, decls...)
+		assignTarget = ast.NewIdent(temp)
+		resultExpr = ast.NewIdent(temp)
+	}
+	okName := localName(fn, expr.OkLocal)
+	errName := localName(fn, expr.ErrLocal)
+	l.declaredLocals[expr.OkLocal] = true
+	l.declaredLocals[expr.ErrLocal] = true
+	okBind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("value")}}}
+	errBind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("err")}}}
+	okBody, err := l.lowerValueBlock(fn, expr.Ok, expr.Type, assignTarget)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	okBody = append([]ast.Stmt{okBind, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(okName)}}}, okBody...)
+	errBody, err := l.lowerValueBlock(fn, expr.Err, expr.Type, assignTarget)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	errBody = append([]ast.Stmt{errBind, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(errName)}}}, errBody...)
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("ok")},
+		Body: &ast.BlockStmt{List: okBody},
+		Else: &ast.BlockStmt{List: errBody},
+	})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
 func (l *lowerer) lowerResultExpect(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("result expect missing target")
@@ -966,8 +1125,16 @@ func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, 
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	targetTemp := l.nextTemp()
+	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetExpr := ast.NewIdent(targetTemp)
 	resultExpr := ast.NewIdent("nil")
 	stmts := append([]ast.Stmt{}, target.stmts...)
+	stmts = append(stmts, targetDecls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	var assignTarget ast.Expr
 	if !l.isVoidType(expr.Type) {
 		temp := l.nextTemp()
@@ -981,7 +1148,7 @@ func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, 
 	}
 	someName := localName(fn, expr.SomeLocal)
 	l.declaredLocals[expr.SomeLocal] = true
-	someDecl := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(someName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("value")}}}
+	someDecl := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(someName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("value")}}}
 	someBody, err := l.lowerValueBlock(fn, expr.Some, expr.Type, assignTarget)
 	if err != nil {
 		return loweredExpr{}, err
@@ -992,7 +1159,7 @@ func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{}, err
 	}
 	stmts = append(stmts, &ast.IfStmt{
-		Cond: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("ok")},
+		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("ok")},
 		Body: &ast.BlockStmt{List: someBody},
 		Else: &ast.BlockStmt{List: noneBody},
 	})
@@ -1015,6 +1182,28 @@ func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, er
 		elts = append(elts, loweredArg.expr)
 	}
 	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
+}
+
+func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 2 {
+		return loweredExpr{}, fmt.Errorf("list set expects target and two args")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	index, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	value, err := l.lowerExpr(fn, expr.Args[1])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := append(target.stmts, index.stmts...)
+	stmts = append(stmts, value.stmts...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: index.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{value.expr}})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent("true")}, nil
 }
 
 func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -1280,6 +1469,8 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("float64"), Args: args}}, nil
 	case "ReadLine":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("ardReadLine")}}, nil
+	case "IntFromStr":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("ardIntFromStr"), Args: args}}, nil
 	default:
 		return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
 	}
