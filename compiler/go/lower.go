@@ -95,12 +95,38 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 }
 
 func (l *lowerer) runtimePreludeDecls() []ast.Decl {
+	l.currentImports["bufio"] = "bufio"
+	l.currentImports["io"] = "io"
+	l.currentImports["os"] = "os"
 	l.currentImports["slices"] = "slices"
+	l.currentImports["strings"] = "strings"
 	const src = `package main
 
 type ardMaybe[T any] struct {
 	value T
 	ok    bool
+}
+
+type ardResult[T any, E any] struct {
+	value T
+	err   E
+	ok    bool
+}
+
+var ardStdinReader = bufio.NewReader(os.Stdin)
+
+func ardReadLine() ardResult[string, string] {
+	line, err := ardStdinReader.ReadString('\n')
+	if err != nil {
+		if err == io.EOF {
+			if line == "" {
+				return ardResult[string, string]{value: "", ok: true}
+			}
+			return ardResult[string, string]{value: strings.TrimRight(line, "\r\n"), ok: true}
+		}
+		return ardResult[string, string]{err: err.Error()}
+	}
+	return ardResult[string, string]{value: strings.TrimRight(line, "\r\n"), ok: true}
 }
 
 func ardSortedIntKeys[V any](m map[int]V) []int {
@@ -396,10 +422,21 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{expr: &ast.CompositeLit{Type: typ}}, nil
 	case air.ExprMatchMaybe:
 		return l.lowerMatchMaybe(fn, expr)
+	case air.ExprResultExpect:
+		return l.lowerResultExpect(fn, expr)
 	case air.ExprMatchEnum:
 		return l.lowerMatchEnum(fn, expr)
 	case air.ExprMakeList:
 		return l.lowerMakeList(fn, expr)
+	case air.ExprStrIsEmpty:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("str is_empty missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.BinaryExpr{X: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target.expr}}, Op: token.EQL, Y: &ast.BasicLit{Kind: token.INT, Value: "0"}}}, nil
 	case air.ExprListSize:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("list size missing target")
@@ -706,6 +743,16 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		return &ast.IndexExpr{X: ast.NewIdent("ardMaybe"), Index: elem}, nil
+	case air.TypeResult:
+		value, err := l.goType(info.Value)
+		if err != nil {
+			return nil, err
+		}
+		errType, err := l.goType(info.Error)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.IndexListExpr{X: ast.NewIdent("ardResult"), Indices: []ast.Expr{value, errType}}, nil
 	case air.TypeList:
 		elem, err := l.goType(info.Elem)
 		if err != nil {
@@ -870,6 +917,45 @@ func (l *lowerer) lowerMatchEnum(fn air.Function, expr air.Expr) (loweredExpr, e
 	}
 	stmts = append(stmts, &ast.SwitchStmt{Tag: target.expr, Body: &ast.BlockStmt{List: cases}})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) lowerResultExpect(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("result expect missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("result expect expects one argument")
+	}
+	message, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultTemp := l.nextTemp()
+	resultDecls, err := l.declareTemp(expr.Target.Type, resultTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	temp := l.nextTemp()
+	decls, err := l.declareTemp(expr.Type, temp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := ast.NewIdent(resultTemp)
+	panicMsg := &ast.BinaryExpr{X: message.expr, Op: token.ADD, Y: &ast.BinaryExpr{X: &ast.BasicLit{Kind: token.STRING, Value: `": "`}, Op: token.ADD, Y: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{&ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("err")}}}}}
+	stmts := append(target.stmts, message.stmts...)
+	stmts = append(stmts, resultDecls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	stmts = append(stmts, decls...)
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("ok")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("value")}}}}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{panicMsg}}}}},
+	})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
 }
 
 func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -1192,6 +1278,8 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Println"), Args: args}}, nil
 	case "FloatFromInt":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("float64"), Args: args}}, nil
+	case "ReadLine":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("ardReadLine")}}, nil
 	default:
 		return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
 	}

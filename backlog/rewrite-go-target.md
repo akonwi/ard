@@ -266,6 +266,9 @@ Status: In progress
     nullable locals, map lookups, and Maybe matches can execute while the final
     representation decision remains open
 - [ ] Settle the default Go lowering for `Result`.
+  - current subset uses a generated generic `ardResult[T, E]` helper type so
+    `read_line().expect(...)` and similar flows can execute while the final
+    representation decision remains open
 - [ ] Keep runtime helpers minimal and justify each one.
 
 ### Milestone 4: advanced language features
@@ -284,10 +287,10 @@ Status: In progress
 Status: In progress
 
 - [ ] Lower extern calls to direct Go calls by default.
-  - current subset support exists for `Print` and `FloatFromInt`; broader
-    extern coverage is still pending
-  - this is enough for the current `ard/io::_print` path and simple numeric
-    conversion cases used by the initial sample coverage
+  - current subset support exists for `Print`, `FloatFromInt`, and
+    `ReadLine`; broader extern coverage is still pending
+  - this is enough for the current `ard/io::_print` path, simple numeric
+    conversion cases, and initial stdin-backed string input flows
 - [ ] Generate thin wrappers only where direct calls are insufficient.
 - [ ] Support generated structs across the Go extern boundary.
 - [ ] Support opaque extern types.

@@ -107,6 +107,38 @@ func TestGenerateSourcesSupportsStructsAndEnums(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesSupportsResultExpectAndStringPredicates(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/io
+
+		fn main() Bool {
+			let line = io::read_line().expect("no line")
+			line.is_empty()
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	combined := ""
+	for _, source := range sources {
+		combined += string(source)
+	}
+	if !strings.Contains(combined, "type ardResult") {
+		t.Fatalf("generated source missing result helper:\n%s", combined)
+	}
+	if !strings.Contains(combined, "ardReadLine()") {
+		t.Fatalf("generated source missing ReadLine lowering:\n%s", combined)
+	}
+	if !strings.Contains(combined, "panic(\"no line\"") {
+		t.Fatalf("generated source missing Result.expect lowering:\n%s", combined)
+	}
+	if !strings.Contains(combined, "len(line") {
+		t.Fatalf("generated source missing is_empty lowering:\n%s", combined)
+	}
+}
+
 func TestGenerateSourcesSupportsIfAndWhile(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
