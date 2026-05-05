@@ -341,6 +341,8 @@ Status: In progress
   - current manual sample coverage also exercises generated closure literals via
     `List.sort` in `tic-tac-toe`
 - [ ] Add project-level regression coverage for real Ard applications.
+- [ ] Preserve generated target artifacts under a project-local `.build/`
+      directory for inspection and debugging.
 - [ ] Add runtime benchmark coverage for the rewritten Go target.
 - [ ] Reach the release gate: `ard run --target go` can run all existing Ard
       programs.
