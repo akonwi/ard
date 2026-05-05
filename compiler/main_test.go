@@ -9,6 +9,7 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/backend"
+	gotarget "github.com/akonwi/ard/go"
 )
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -133,6 +134,60 @@ func TestRunVMNextProgram(t *testing.T) {
 	}
 	if err := runVMNextProgram(program, []string{"ard", "run", "--target", "vm_next", sourcePath}); err != nil {
 		t.Fatalf("run vm_next: %v", err)
+	}
+}
+
+func TestRunGoProgram(t *testing.T) {
+	tempDir := t.TempDir()
+	sourcePath := filepath.Join(tempDir, "main.ard")
+	source := `
+		fn add(a: Int, b: Int) Int {
+			a + b
+		}
+
+		fn main() Int {
+			add(2, 3)
+		}
+	`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	module, err := loadModule(sourcePath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
+		t.Fatalf("run go target: %v", err)
+	}
+}
+
+func TestBuildGoBinary(t *testing.T) {
+	tempDir := t.TempDir()
+	sourcePath := filepath.Join(tempDir, "main.ard")
+	outputPath := filepath.Join(tempDir, "main-bin")
+	source := `
+		fn main() Void {
+			()
+		}
+	`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	builtPath, err := buildGoBinary(sourcePath, outputPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("build go target: %v", err)
+	}
+	if builtPath != outputPath {
+		t.Fatalf("built path = %q, want %q", builtPath, outputPath)
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("stat built binary: %v", err)
 	}
 }
 

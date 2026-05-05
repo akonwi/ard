@@ -23,7 +23,7 @@ experimental transpiler.
 
 ## Status
 
-Pending
+In progress
 
 ## Context
 
@@ -211,29 +211,41 @@ emit a direct static Go call.
 
 ### Milestone 1: backend skeleton
 
-- [ ] Recreate `compiler/go_backend/` with a clean package layout.
-- [ ] Add the public backend entrypoints for run/build/generate.
-- [ ] Lower AIR directly into Go AST.
-- [ ] Render generated Go through `go/format`.
-- [ ] Generate one Go file per Ard module.
-- [ ] Generate one Go package per Ard project.
-- [ ] Establish deterministic symbol naming and import planning.
-- [ ] Support a tiny end-to-end subset: constants, locals, arithmetic, direct
+Status: In progress
+
+- [x] Recreate the Go target implementation under `compiler/go/` with a clean
+      package layout.
+- [x] Add the public backend entrypoints for generate/run/build.
+- [x] Lower AIR directly into Go AST.
+- [x] Render generated Go through `go/format`.
+- [x] Generate one Go file per Ard module.
+- [x] Generate one Go package per Ard project.
+- [x] Establish deterministic symbol naming.
+- [x] Support a tiny end-to-end subset: constants, locals, arithmetic, direct
       function calls, and `main`.
-- [ ] Define the extern lowering model, even if initial support is stubbed.
+- [ ] Expand import planning beyond the current minimal subset.
+- [ ] Define the extern lowering model in code, even if initial support is
+      stubbed.
 
 ### Milestone 2: structured control flow
 
-- [ ] Lower block expressions through temporaries and statement setup.
-- [ ] Lower `if` expressions and `if` statements.
-- [ ] Lower assignments and mutable locals.
-- [ ] Lower loops and control-flow-heavy statement bodies.
+Status: In progress
+
+- [x] Lower block expressions through temporaries and statement setup for the
+      current scalar subset.
+- [x] Lower `if` expressions and `if` statements for the current scalar subset.
+- [x] Lower assignments and mutable locals for the current scalar subset.
+- [x] Lower loops and control-flow-heavy statement bodies for the current
+      scalar subset.
+- [ ] Expand control-flow lowering coverage beyond the current scalar subset.
 - [ ] Lower `try` into explicit intermediate values and early returns.
 
 ### Milestone 3: core data model
 
-- [ ] Generate Ard structs as Go structs.
-- [ ] Generate enums.
+Status: In progress
+
+- [x] Generate Ard structs as Go structs for the current subset.
+- [x] Generate enums for the current subset.
 - [ ] Lower lists and maps to native Go containers where representable.
 - [ ] Settle the default Go lowering for `Maybe`.
 - [ ] Settle the default Go lowering for `Result`.

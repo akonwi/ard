@@ -18,6 +18,7 @@ import (
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/frontend"
+	gotarget "github.com/akonwi/ard/go"
 	"github.com/akonwi/ard/javascript"
 	"github.com/akonwi/ard/runtime"
 	"github.com/akonwi/ard/version"
@@ -113,8 +114,29 @@ func main() {
 					os.Exit(1)
 				}
 			case backend.TargetGo:
-				fmt.Println(goTargetRewriteError())
-				os.Exit(1)
+				profile := newPipelineProfile("run go")
+				defer profile.Print()
+				var module checker.Module
+				if err := profile.Time("frontend.load_module", func() error {
+					var loadErr error
+					module, loadErr = loadModule(inputPath, target)
+					return loadErr
+				}); err != nil {
+					os.Exit(1)
+				}
+				var program *air.Program
+				if err := profile.Time("air.lower", func() error {
+					var lowerErr error
+					program, lowerErr = air.Lower(module)
+					return lowerErr
+				}); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				if err := gotarget.RunProgram(program, os.Args); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
 			case backend.TargetJSBrowser, backend.TargetJSServer:
 				if err := javascript.Run(inputPath, target, os.Args); err != nil {
 					fmt.Println(err)
@@ -144,7 +166,7 @@ func main() {
 			case backend.TargetVMNext:
 				builtPath, err = buildVMNextBinary(inputPath, outputPath)
 			case backend.TargetGo:
-				err = goTargetRewriteError()
+				builtPath, err = buildGoBinary(inputPath, outputPath, target)
 			case backend.TargetJSBrowser, backend.TargetJSServer:
 				builtPath, err = javascript.Build(inputPath, outputPath, target)
 			default:
@@ -204,10 +226,6 @@ func main() {
 func check(inputPath string) bool {
 	_, err := loadModule(inputPath, "")
 	return err == nil
-}
-
-func goTargetRewriteError() error {
-	return fmt.Errorf("go target rewrite in progress")
 }
 
 func loadModule(inputPath string, target string) (checker.Module, error) {
@@ -703,6 +721,47 @@ func buildBytecodeBinary(inputPath string, outputPath string, target string) (st
 		return "", err
 	}
 	return outputPath, nil
+}
+
+func buildGoBinary(inputPath string, outputPath string, target string) (string, error) {
+	profile := newPipelineProfile("build go")
+	defer profile.Print()
+	var module checker.Module
+	if err := profile.Time("frontend.load_module", func() error {
+		var loadErr error
+		module, loadErr = loadModule(inputPath, target)
+		return loadErr
+	}); err != nil {
+		return "", err
+	}
+	var program *air.Program
+	if err := profile.Time("air.lower", func() error {
+		var lowerErr error
+		program, lowerErr = air.Lower(module)
+		return lowerErr
+	}); err != nil {
+		return "", err
+	}
+	if err := profile.Time("air.validate", func() error {
+		return air.Validate(program)
+	}); err != nil {
+		return "", err
+	}
+	if outputPath == "" {
+		outputPath = filepath.Base(strings.TrimSuffix(inputPath, filepath.Ext(inputPath)))
+		if outputPath == "" || outputPath == "." || outputPath == string(filepath.Separator) {
+			outputPath = "main"
+		}
+	}
+	var builtPath string
+	if err := profile.Time("go.build", func() error {
+		var buildErr error
+		builtPath, buildErr = gotarget.BuildProgram(program, outputPath)
+		return buildErr
+	}); err != nil {
+		return "", err
+	}
+	return builtPath, nil
 }
 
 func buildVMNextBinary(inputPath string, outputPath string) (string, error) {
