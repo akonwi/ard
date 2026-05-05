@@ -372,6 +372,39 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			Rhs: []ast.Expr{value.expr},
 		})
 		return out, nil
+	case air.StmtSetField:
+		if stmt.Target == nil {
+			return nil, fmt.Errorf("field set statement missing target")
+		}
+		if stmt.Value == nil {
+			return nil, fmt.Errorf("field set statement missing value")
+		}
+		target, err := l.lowerExpr(fn, *stmt.Target)
+		if err != nil {
+			return nil, err
+		}
+		if !validTypeID(l.program, stmt.Target.Type) {
+			return nil, fmt.Errorf("invalid field set target type %d", stmt.Target.Type)
+		}
+		targetType := l.program.Types[stmt.Target.Type-1]
+		if targetType.Kind != air.TypeStruct {
+			return nil, fmt.Errorf("field set target must be struct, got kind %d", targetType.Kind)
+		}
+		if stmt.Field < 0 || stmt.Field >= len(targetType.Fields) {
+			return nil, fmt.Errorf("invalid field set index %d", stmt.Field)
+		}
+		value, err := l.lowerExpr(fn, *stmt.Value)
+		if err != nil {
+			return nil, err
+		}
+		out := append([]ast.Stmt{}, target.stmts...)
+		out = append(out, value.stmts...)
+		out = append(out, &ast.AssignStmt{
+			Lhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(targetType.Fields[stmt.Field].Name)}},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{value.expr},
+		})
+		return out, nil
 	case air.StmtExpr:
 		if stmt.Expr == nil {
 			return nil, fmt.Errorf("expr statement missing expression")
@@ -900,7 +933,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return &ast.MapType{Key: key, Value: value}, nil
 	case air.TypeStruct, air.TypeEnum, air.TypeUnion:
 		return ast.NewIdent(typeName(l.program, info)), nil
-	case air.TypeTraitObject:
+	case air.TypeDynamic, air.TypeExtern, air.TypeTraitObject:
 		return ast.NewIdent("any"), nil
 	default:
 		return nil, fmt.Errorf("unsupported Go type kind %d", info.Kind)

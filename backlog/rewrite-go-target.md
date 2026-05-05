@@ -253,6 +253,7 @@ Status: In progress
 Status: In progress
 
 - [x] Generate Ard structs as Go structs for the current subset.
+  - basic struct field write lowering now exists through `StmtSetField`
 - [x] Generate enums for the current subset.
 - [ ] Lower lists and maps to native Go containers where representable.
   - current subset support now includes list literals plus `size`, `at`, and
@@ -292,13 +293,16 @@ Status: In progress
 Status: In progress
 
 - [ ] Lower extern calls to direct Go calls by default.
-  - current subset support exists for `Print`, `FloatFromInt`, and
-    `ReadLine`; broader extern coverage is still pending
+  - current subset support exists for `Print`, `FloatFromInt`, `ReadLine`,
+    `IntFromStr`, and `Sleep`; broader extern coverage is still pending
   - this is enough for the current `ard/io::_print` path, simple numeric
-    conversion cases, and initial stdin-backed string input flows
+    conversion cases, initial stdin-backed string input flows, and async sleep
+    flows
 - [ ] Generate thin wrappers only where direct calls are insufficient.
 - [ ] Support generated structs across the Go extern boundary.
 - [ ] Support opaque extern types.
+  - current type lowering accepts `Dynamic` and opaque extern host types as
+    `any`, but resource-specific extern helpers are still pending
 - [ ] Support callback externs as native Go closures.
 - [ ] Compile self-hosted stdlib modules from AIR.
 
@@ -310,6 +314,8 @@ Status: In progress
     `collections`, `nullables`, `maps`, `lights`, `temperatures`, `modules`,
     `type-unions`, and `concurrent_stress`
   - current lowering can also run `word_frequency`
+  - current next known server-side blocker is direct extern coverage for
+    `HTTP_Serve`
   - manual sample checks have also reached interactive/result-driven flows like
     `guess` and `tic-tac-toe`
   - current manual sample coverage also exercises generated closure literals via

@@ -139,6 +139,33 @@ func TestGenerateSourcesSupportsResultExpectAndStringPredicates(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesSupportsFieldMutation(t *testing.T) {
+	program := lowerSource(t, `
+		struct Counter {
+			value: Int,
+		}
+
+		fn bump(counter: Counter) Int {
+			mut current = counter
+			current.value = current.value + 1
+			current.value
+		}
+
+		fn main() Int {
+			bump(Counter{value: 1})
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "current_1.value = current_1.value + 1") {
+		t.Fatalf("generated source missing field mutation lowering:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesSupportsIfAndWhile(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
