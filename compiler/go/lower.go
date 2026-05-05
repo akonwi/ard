@@ -140,6 +140,16 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 			fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(field.Name)}, Type: fieldType})
 		}
 		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
+	case air.TypeUnion:
+		fields := []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("tag")}, Type: ast.NewIdent("uint32")}}
+		for _, member := range typ.Members {
+			memberType, err := l.goType(member.Type)
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(unionMemberFieldName(member))}, Type: memberType})
+		}
+		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
 	case air.TypeEnum:
 		specs := []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: ast.NewIdent("int")}}
 		for _, variant := range typ.Variants {
@@ -335,6 +345,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{expr: &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", expr.Str)}}, nil
 	case air.ExprLoadLocal:
 		return loweredExpr{expr: ast.NewIdent(localName(fn, expr.Local))}, nil
+	case air.ExprUnionWrap:
+		return l.lowerUnionWrap(fn, expr)
+	case air.ExprMatchUnion:
+		return l.lowerMatchUnion(fn, expr)
 	case air.ExprTraitUpcast:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("trait upcast missing target")
@@ -382,6 +396,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{expr: &ast.CompositeLit{Type: typ}}, nil
 	case air.ExprMatchMaybe:
 		return l.lowerMatchMaybe(fn, expr)
+	case air.ExprMatchEnum:
+		return l.lowerMatchEnum(fn, expr)
 	case air.ExprMakeList:
 		return l.lowerMakeList(fn, expr)
 	case air.ExprListSize:
@@ -706,7 +722,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		return &ast.MapType{Key: key, Value: value}, nil
-	case air.TypeStruct, air.TypeEnum:
+	case air.TypeStruct, air.TypeEnum, air.TypeUnion:
 		return ast.NewIdent(typeName(l.program, info)), nil
 	case air.TypeTraitObject:
 		return ast.NewIdent("any"), nil
@@ -722,6 +738,138 @@ func (l *lowerer) isVoidType(typeID air.TypeID) bool {
 func (l *lowerer) qualified(alias string, importPath string, name string) ast.Expr {
 	l.currentImports[alias] = importPath
 	return &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name)}
+}
+
+func (l *lowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("union wrap missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if !validTypeID(l.program, expr.Type) {
+		return loweredExpr{}, fmt.Errorf("invalid union type id %d", expr.Type)
+	}
+	unionType := l.program.Types[expr.Type-1]
+	if unionType.Kind != air.TypeUnion {
+		return loweredExpr{}, fmt.Errorf("union wrap with non-union type %s", unionType.Name)
+	}
+	fieldName := ""
+	for _, member := range unionType.Members {
+		if member.Tag == expr.Tag {
+			fieldName = unionMemberFieldName(member)
+			break
+		}
+	}
+	if fieldName == "" {
+		return loweredExpr{}, fmt.Errorf("invalid union tag %d for %s", expr.Tag, unionType.Name)
+	}
+	return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, unionType)), Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("tag"), Value: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", expr.Tag)}},
+		&ast.KeyValueExpr{Key: ast.NewIdent(fieldName), Value: target.expr},
+	}}}, nil
+}
+
+func (l *lowerer) lowerMatchUnion(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("union match missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if !validTypeID(l.program, expr.Target.Type) {
+		return loweredExpr{}, fmt.Errorf("invalid union target type %d", expr.Target.Type)
+	}
+	unionType := l.program.Types[expr.Target.Type-1]
+	resultExpr := ast.NewIdent("nil")
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	var assignTarget ast.Expr
+	if !l.isVoidType(expr.Type) {
+		temp := l.nextTemp()
+		decls, err := l.declareTemp(expr.Type, temp)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, decls...)
+		assignTarget = ast.NewIdent(temp)
+		resultExpr = ast.NewIdent(temp)
+	}
+	cases := make([]ast.Stmt, 0, len(expr.UnionCases)+1)
+	for _, unionCase := range expr.UnionCases {
+		fieldName := ""
+		for _, member := range unionType.Members {
+			if member.Tag == unionCase.Tag {
+				fieldName = unionMemberFieldName(member)
+				break
+			}
+		}
+		if fieldName == "" {
+			return loweredExpr{}, fmt.Errorf("invalid union case tag %d", unionCase.Tag)
+		}
+		localName := localName(fn, unionCase.Local)
+		l.declaredLocals[unionCase.Local] = true
+		bind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(localName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(fieldName)}}}
+		body, err := l.lowerValueBlock(fn, unionCase.Body, expr.Type, assignTarget)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		body = append([]ast.Stmt{bind, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(localName)}}}, body...)
+		cases = append(cases, &ast.CaseClause{List: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", unionCase.Tag)}}, Body: body})
+	}
+	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
+		body, err := l.lowerValueBlock(fn, expr.CatchAll, expr.Type, assignTarget)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		cases = append(cases, &ast.CaseClause{Body: body})
+	}
+	stmts = append(stmts, &ast.SwitchStmt{Tag: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("tag")}, Body: &ast.BlockStmt{List: cases}})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) lowerMatchEnum(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("enum match missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := ast.NewIdent("nil")
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	var assignTarget ast.Expr
+	if !l.isVoidType(expr.Type) {
+		temp := l.nextTemp()
+		decls, err := l.declareTemp(expr.Type, temp)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, decls...)
+		assignTarget = ast.NewIdent(temp)
+		resultExpr = ast.NewIdent(temp)
+	}
+	cases := make([]ast.Stmt, 0, len(expr.EnumCases)+1)
+	for _, enumCase := range expr.EnumCases {
+		body, err := l.lowerValueBlock(fn, enumCase.Body, expr.Type, assignTarget)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		cases = append(cases, &ast.CaseClause{
+			List: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", enumCase.Discriminant)}},
+			Body: body,
+		})
+	}
+	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
+		body, err := l.lowerValueBlock(fn, expr.CatchAll, expr.Type, assignTarget)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		cases = append(cases, &ast.CaseClause{Body: body})
+	}
+	stmts = append(stmts, &ast.SwitchStmt{Tag: target.expr, Body: &ast.BlockStmt{List: cases}})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
 
 func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -1042,6 +1190,8 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 	switch binding {
 	case "Print":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Println"), Args: args}}, nil
+	case "FloatFromInt":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("float64"), Args: args}}, nil
 	default:
 		return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
 	}

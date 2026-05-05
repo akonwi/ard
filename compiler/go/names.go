@@ -60,6 +60,14 @@ func enumVariantName(program *air.Program, typ air.TypeInfo, variant air.Variant
 	return typeName(program, typ) + "__" + sanitizeName(variant.Name)
 }
 
+func unionMemberFieldName(member air.UnionMember) string {
+	name := sanitizeName(member.Name)
+	if name == "" {
+		return fmt.Sprintf("member_%d", member.Tag)
+	}
+	return name
+}
+
 func localName(fn air.Function, local air.LocalID) string {
 	if int(local) >= 0 && int(local) < len(fn.Locals) {
 		name := sanitizeName(fn.Locals[local].Name)

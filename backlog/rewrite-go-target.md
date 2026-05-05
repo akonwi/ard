@@ -243,6 +243,8 @@ Status: In progress
       sample subset (`samples/loops.ard`).
 - [x] Expand control-flow lowering enough to support Maybe-based branching in
       the current sample subset (`samples/nullables.ard`).
+- [x] Expand control-flow lowering enough to support enum matching in the
+      current sample subset (`samples/lights.ard`).
 - [ ] Expand control-flow lowering coverage beyond the current sample subset.
 - [ ] Lower `try` into explicit intermediate values and early returns.
 
@@ -268,7 +270,11 @@ Status: In progress
 
 ### Milestone 4: advanced language features
 
+Status: In progress
+
 - [ ] Generate tagged unions.
+  - current subset support is being built around generated union structs with a
+    tag field plus one field per member type
 - [ ] Generate native Go closures and capture handling.
 - [ ] Lower trait dispatch where dynamic trait objects are required.
 - [ ] Lower fibers to goroutines and typed handles.
@@ -278,10 +284,10 @@ Status: In progress
 Status: In progress
 
 - [ ] Lower extern calls to direct Go calls by default.
-  - current subset support exists for `Print`; broader extern coverage is still
-    pending
-  - this is enough for the current `ard/io::_print` path used by the initial
-    sample coverage
+  - current subset support exists for `Print` and `FloatFromInt`; broader
+    extern coverage is still pending
+  - this is enough for the current `ard/io::_print` path and simple numeric
+    conversion cases used by the initial sample coverage
 - [ ] Generate thin wrappers only where direct calls are insufficient.
 - [ ] Support generated structs across the Go extern boundary.
 - [ ] Support opaque extern types.
