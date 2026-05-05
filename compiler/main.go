@@ -18,7 +18,6 @@ import (
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/frontend"
-	go_backend "github.com/akonwi/ard/go_backend"
 	"github.com/akonwi/ard/javascript"
 	"github.com/akonwi/ard/runtime"
 	"github.com/akonwi/ard/version"
@@ -114,10 +113,8 @@ func main() {
 					os.Exit(1)
 				}
 			case backend.TargetGo:
-				if err := go_backend.Run(inputPath, os.Args); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
+				fmt.Println(goTargetRewriteError())
+				os.Exit(1)
 			case backend.TargetJSBrowser, backend.TargetJSServer:
 				if err := javascript.Run(inputPath, target, os.Args); err != nil {
 					fmt.Println(err)
@@ -147,7 +144,7 @@ func main() {
 			case backend.TargetVMNext:
 				builtPath, err = buildVMNextBinary(inputPath, outputPath)
 			case backend.TargetGo:
-				builtPath, err = go_backend.BuildBinary(inputPath, outputPath)
+				err = goTargetRewriteError()
 			case backend.TargetJSBrowser, backend.TargetJSServer:
 				builtPath, err = javascript.Build(inputPath, outputPath, target)
 			default:
@@ -207,6 +204,10 @@ func main() {
 func check(inputPath string) bool {
 	_, err := loadModule(inputPath, "")
 	return err == nil
+}
+
+func goTargetRewriteError() error {
+	return fmt.Errorf("go target rewrite in progress")
 }
 
 func loadModule(inputPath string, target string) (checker.Module, error) {
