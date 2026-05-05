@@ -23,7 +23,7 @@ type lowerer struct {
 
 	moduleByPath map[string]ModuleID
 	moduleByName map[string]checker.Module
-	typeByName   map[string]TypeID
+	typeByKey    map[string]TypeID
 	traits       map[string]TraitID
 	impls        map[string]ImplID
 	functions    map[string]FunctionID
@@ -53,7 +53,7 @@ func newLowerer() *lowerer {
 		},
 		moduleByPath: map[string]ModuleID{},
 		moduleByName: map[string]checker.Module{},
-		typeByName:   map[string]TypeID{},
+		typeByKey:    map[string]TypeID{},
 		traits:       map[string]TraitID{},
 		impls:        map[string]ImplID{},
 		functions:    map[string]FunctionID{},
@@ -1009,13 +1009,14 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	if tv, ok := t.(*checker.TypeVar); ok && tv.Actual() != nil {
 		return l.internType(tv.Actual())
 	}
+	key := airTypeKey(t)
 	name := airTypeName(t)
-	if id, ok := l.typeByName[name]; ok {
+	if id, ok := l.typeByKey[key]; ok {
 		return id, nil
 	}
 
 	id := TypeID(len(l.program.Types) + 1)
-	l.typeByName[name] = id
+	l.typeByKey[key] = id
 	l.program.Types = append(l.program.Types, TypeInfo{ID: id, Name: name})
 	idx := len(l.program.Types) - 1
 	info := TypeInfo{ID: id, Name: name}
@@ -1160,13 +1161,13 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 }
 
 func (l *lowerer) internSyntheticType(name string, info TypeInfo) (TypeID, error) {
-	if id, ok := l.typeByName[name]; ok {
+	if id, ok := l.typeByKey[name]; ok {
 		return id, nil
 	}
 	id := TypeID(len(l.program.Types) + 1)
 	info.ID = id
 	info.Name = name
-	l.typeByName[name] = id
+	l.typeByKey[name] = id
 	l.program.Types = append(l.program.Types, info)
 	return id, nil
 }
@@ -1375,6 +1376,113 @@ func airTypeName(t checker.Type) string {
 		}
 	}
 	return t.String()
+}
+
+func airTypeKey(t checker.Type) string {
+	if t == nil {
+		return "<nil>"
+	}
+	if tv, ok := t.(*checker.TypeVar); ok && tv.Actual() != nil {
+		return airTypeKey(tv.Actual())
+	}
+	switch typ := t.(type) {
+	case *checker.List:
+		return "list<" + airTypeKey(typ.Of()) + ">"
+	case *checker.Map:
+		return "map<" + airTypeKey(typ.Key()) + "," + airTypeKey(typ.Value()) + ">"
+	case *checker.Maybe:
+		return "maybe<" + airTypeKey(typ.Of()) + ">"
+	case *checker.Result:
+		return "result<" + airTypeKey(typ.Val()) + "," + airTypeKey(typ.Err()) + ">"
+	case *checker.StructDef:
+		if typ.Name == "Fiber" {
+			if elem, ok := typ.Fields["result"]; ok {
+				return "fiber<" + airTypeKey(elem) + ">"
+			}
+		}
+		return airStructKey(typ)
+	case *checker.Enum:
+		return airEnumKey(typ)
+	case *checker.Union:
+		return airUnionKey(typ)
+	case *checker.FunctionDef:
+		return airFunctionTypeKey(typ.Parameters, typ.ReturnType)
+	case *checker.ExternalFunctionDef:
+		return airFunctionTypeKey(typ.Parameters, typ.ReturnType)
+	default:
+		return t.String()
+	}
+}
+
+func airStructKey(typ *checker.StructDef) string {
+	fields := sortedFieldNames(typ.Fields)
+	key := "struct " + typ.Name + "{"
+	for i, name := range fields {
+		if i > 0 {
+			key += ","
+		}
+		key += name + ":" + airTypeKey(typ.Fields[name])
+	}
+	key += "}"
+	if len(typ.Methods) == 0 {
+		return key
+	}
+	methodNames := make([]string, 0, len(typ.Methods))
+	for name := range typ.Methods {
+		methodNames = append(methodNames, name)
+	}
+	sort.Strings(methodNames)
+	key += " methods{"
+	for i, name := range methodNames {
+		if i > 0 {
+			key += ","
+		}
+		method := typ.Methods[name]
+		key += name + ":" + airFunctionTypeKey(method.Parameters, method.ReturnType)
+	}
+	key += "}"
+	return key
+}
+
+func airEnumKey(typ *checker.Enum) string {
+	key := "enum " + typ.Name + "{"
+	for i, variant := range typ.Values {
+		if i > 0 {
+			key += ","
+		}
+		key += variant.Name
+	}
+	key += "}"
+	return key
+}
+
+func airUnionKey(typ *checker.Union) string {
+	parts := make([]string, len(typ.Types))
+	for i, member := range typ.Types {
+		parts[i] = airTypeKey(member)
+	}
+	sort.Strings(parts)
+	key := "union " + typ.Name + "{"
+	for i, part := range parts {
+		if i > 0 {
+			key += "|"
+		}
+		key += part
+	}
+	key += "}"
+	return key
+}
+
+func airFunctionTypeKey(params []checker.Parameter, returnType checker.Type) string {
+	key := "fn("
+	for i, param := range params {
+		if i > 0 {
+			key += ","
+		}
+		key += airTypeKey(param.Type)
+	}
+	key += ")->" + airTypeKey(returnType)
+	return key
 }
 
 func (fl *functionLowerer) lowerBlock(stmts []checker.Statement) (Block, error) {
