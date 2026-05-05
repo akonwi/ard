@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"sort"
+	"strings"
 	"unicode"
 
 	"github.com/akonwi/ard/air"
@@ -22,6 +23,7 @@ type lowerer struct {
 	tempCounter    int
 	currentImports map[string]string
 	declaredLocals map[air.LocalID]bool
+	runtimeHelpers map[string]bool
 }
 
 func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, error) {
@@ -31,9 +33,26 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if err := air.Validate(program); err != nil {
 		return nil, err
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName)}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}}
 	files := map[string]*ast.File{}
+	rootID, err := rootFunction(program)
+	if err != nil {
+		return nil, err
+	}
+	rootModuleID := program.Functions[rootID].Module
+	modules := make([]air.Module, 0, len(program.Modules))
 	for _, module := range program.Modules {
+		if module.ID != rootModuleID {
+			modules = append(modules, module)
+		}
+	}
+	for _, module := range program.Modules {
+		if module.ID == rootModuleID {
+			modules = append(modules, module)
+			break
+		}
+	}
+	for _, module := range modules {
 		file, err := l.lowerModule(module)
 		if err != nil {
 			return nil, err
@@ -51,7 +70,6 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 		return nil, err
 	}
 	if module.ID == l.program.Functions[rootID].Module {
-		decls = append(decls, l.runtimePreludeDecls()...)
 		for _, typ := range l.program.Types {
 			typeDecls, err := l.lowerTypeDecls(typ)
 			if err != nil {
@@ -76,150 +94,210 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 			return nil, err
 		}
 		decls = append(decls, mainDecl)
+		decls = append(l.runtimePreludeDecls(), decls...)
 	}
 	if len(l.currentImports) > 0 {
-		importDecl := &ast.GenDecl{Tok: token.IMPORT}
-		aliases := make([]string, 0, len(l.currentImports))
-		for alias := range l.currentImports {
-			aliases = append(aliases, alias)
+		usedImports := l.usedImports(decls)
+		if len(usedImports) > 0 {
+			importDecl := &ast.GenDecl{Tok: token.IMPORT}
+			aliases := make([]string, 0, len(usedImports))
+			for alias := range usedImports {
+				aliases = append(aliases, alias)
+			}
+			sort.Strings(aliases)
+			for _, alias := range aliases {
+				importDecl.Specs = append(importDecl.Specs, &ast.ImportSpec{
+					Name: ast.NewIdent(alias),
+					Path: &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", usedImports[alias])},
+				})
+			}
+			decls = append([]ast.Decl{importDecl}, decls...)
 		}
-		sort.Strings(aliases)
-		for _, alias := range aliases {
-			importDecl.Specs = append(importDecl.Specs, &ast.ImportSpec{
-				Name: ast.NewIdent(alias),
-				Path: &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", l.currentImports[alias])},
-			})
-		}
-		decls = append([]ast.Decl{importDecl}, decls...)
 	}
 	return &ast.File{Name: ast.NewIdent(l.packageName), Decls: decls}, nil
 }
 
-func (l *lowerer) runtimePreludeDecls() []ast.Decl {
-	l.currentImports["bufio"] = "bufio"
-	l.currentImports["fmt"] = "fmt"
-	l.currentImports["io"] = "io"
-	l.currentImports["stdlibffi"] = "github.com/akonwi/ard/std_lib/ffi"
-	l.currentImports["os"] = "os"
-	l.currentImports["slices"] = "slices"
-	l.currentImports["strconv"] = "strconv"
-	l.currentImports["strings"] = "strings"
-	const src = `package main
-
-type ardMaybe[T any] struct {
-	value T
-	ok    bool
-}
-
-type ardResult[T any, E any] struct {
-	value T
-	err   E
-	ok    bool
-}
-
-type ardFiberState[T any] struct {
-	ch    chan T
-	value T
-	done  bool
-}
-
-type ardFiber[T any] struct {
-	state *ardFiberState[T]
-}
-
-func ardSpawnFiber[T any](do func() T) ardFiber[T] {
-	state := &ardFiberState[T]{ch: make(chan T, 1)}
-	go func() {
-		state.ch <- do()
-	}()
-	return ardFiber[T]{state: state}
-}
-
-func ardJoinFiber[T any](fiber ardFiber[T]) {
-	if !fiber.state.done {
-		fiber.state.value = <-fiber.state.ch
-		fiber.state.done = true
-	}
-}
-
-func ardGetFiber[T any](fiber ardFiber[T]) T {
-	ardJoinFiber(fiber)
-	return fiber.state.value
-}
-
-var ardStdinReader = bufio.NewReader(os.Stdin)
-
-func ardReadLine() ardResult[string, string] {
-	line, err := ardStdinReader.ReadString('\n')
-	if err != nil {
-		if err == io.EOF {
-			if line == "" {
-				return ardResult[string, string]{value: "", ok: true}
+func (l *lowerer) usedImports(decls []ast.Decl) map[string]string {
+	used := map[string]string{}
+	for _, decl := range decls {
+		ast.Inspect(decl, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
 			}
-			return ardResult[string, string]{value: strings.TrimRight(line, "\r\n"), ok: true}
+			ident, ok := selector.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			path, ok := l.currentImports[ident.Name]
+			if !ok {
+				return true
+			}
+			used[ident.Name] = path
+			return true
+		})
+	}
+	return used
+}
+
+func (l *lowerer) markRuntimeHelper(name string) {
+	l.runtimeHelpers[name] = true
+}
+
+func (l *lowerer) runtimePreludeDecls() []ast.Decl {
+	parts := []string{"package main\n"}
+	if l.runtimeHelpers["maybe"] {
+		parts = append(parts, `
+	type ardMaybe[T any] struct {
+		value T
+		ok    bool
+	}
+`)
+	}
+	if l.runtimeHelpers["result"] {
+		parts = append(parts, `
+	type ardResult[T any, E any] struct {
+		value T
+		err   E
+		ok    bool
+	}
+`)
+	}
+	if l.runtimeHelpers["fiber"] {
+		parts = append(parts, `
+	type ardFiberState[T any] struct {
+		ch    chan T
+		value T
+		done  bool
+	}
+
+	type ardFiber[T any] struct {
+		state *ardFiberState[T]
+	}
+
+	func ardSpawnFiber[T any](do func() T) ardFiber[T] {
+		state := &ardFiberState[T]{ch: make(chan T, 1)}
+		go func() {
+			state.ch <- do()
+		}()
+		return ardFiber[T]{state: state}
+	}
+
+	func ardJoinFiber[T any](fiber ardFiber[T]) {
+		if !fiber.state.done {
+			fiber.state.value = <-fiber.state.ch
+			fiber.state.done = true
 		}
-		return ardResult[string, string]{err: err.Error()}
 	}
-	return ardResult[string, string]{value: strings.TrimRight(line, "\r\n"), ok: true}
-}
 
-func ardIntFromStr(value string) ardMaybe[int] {
-	parsed, err := strconv.Atoi(value)
-	if err != nil {
-		return ardMaybe[int]{}
+	func ardGetFiber[T any](fiber ardFiber[T]) T {
+		ardJoinFiber(fiber)
+		return fiber.state.value
 	}
-	return ardMaybe[int]{value: parsed, ok: true}
-}
+`)
+	}
+	if l.runtimeHelpers["read_line"] {
+		l.currentImports["bufio"] = "bufio"
+		l.currentImports["io"] = "io"
+		l.currentImports["os"] = "os"
+		l.currentImports["strings"] = "strings"
+		parts = append(parts, `
+	var ardStdinReader = bufio.NewReader(os.Stdin)
 
-func ardSortedIntKeys[V any](m map[int]V) []int {
-	keys := make([]int, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
-}
-
-func ardSortedStringKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
-}
-
-func ardSortedAnyKeys[V any](m map[any]V) []any {
-	keys := make([]any, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.SortFunc(keys, func(a any, b any) int {
-		as := fmt.Sprint(a)
-		bs := fmt.Sprint(b)
-		if as < bs {
-			return -1
+	func ardReadLine() ardResult[string, string] {
+		line, err := ardStdinReader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				if line == "" {
+					return ardResult[string, string]{value: "", ok: true}
+				}
+				return ardResult[string, string]{value: strings.TrimRight(line, "\r\n"), ok: true}
+			}
+			return ardResult[string, string]{err: err.Error()}
 		}
-		if as > bs {
-			return 1
+		return ardResult[string, string]{value: strings.TrimRight(line, "\r\n"), ok: true}
+	}
+`)
+	}
+	if l.runtimeHelpers["int_from_str"] {
+		l.currentImports["strconv"] = "strconv"
+		parts = append(parts, `
+	func ardIntFromStr(value string) ardMaybe[int] {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return ardMaybe[int]{}
 		}
-		return 0
-	})
-	return keys
-}
-
-func ardDynamicToAnyMap(data any) (map[any]any, error) {
-	values, err := stdlibffi.DynamicToMap(data)
-	if err != nil {
-		return nil, err
+		return ardMaybe[int]{value: parsed, ok: true}
 	}
-	out := make(map[any]any, len(values))
-	for key, value := range values {
-		out[key] = value
+`)
 	}
-	return out, nil
-}
-`
+	if l.runtimeHelpers["sorted_int_keys"] {
+		l.currentImports["slices"] = "slices"
+		parts = append(parts, `
+	func ardSortedIntKeys[V any](m map[int]V) []int {
+		keys := make([]int, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		return keys
+	}
+`)
+	}
+	if l.runtimeHelpers["sorted_string_keys"] {
+		l.currentImports["slices"] = "slices"
+		parts = append(parts, `
+	func ardSortedStringKeys[V any](m map[string]V) []string {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		return keys
+	}
+`)
+	}
+	if l.runtimeHelpers["sorted_any_keys"] {
+		l.currentImports["fmt"] = "fmt"
+		l.currentImports["slices"] = "slices"
+		parts = append(parts, `
+	func ardSortedAnyKeys[V any](m map[any]V) []any {
+		keys := make([]any, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		slices.SortFunc(keys, func(a any, b any) int {
+			as := fmt.Sprint(a)
+			bs := fmt.Sprint(b)
+			if as < bs {
+				return -1
+			}
+			if as > bs {
+				return 1
+			}
+			return 0
+		})
+		return keys
+	}
+`)
+	}
+	if l.runtimeHelpers["dynamic_to_any_map"] {
+		l.currentImports["stdlibffi"] = "github.com/akonwi/ard/std_lib/ffi"
+		parts = append(parts, `
+	func ardDynamicToAnyMap(data any) (map[any]any, error) {
+		values, err := stdlibffi.DynamicToMap(data)
+		if err != nil {
+			return nil, err
+		}
+		out := make(map[any]any, len(values))
+		for key, value := range values {
+			out[key] = value
+		}
+		return out, nil
+	}
+`)
+	}
+	src := strings.Join(parts, "\n")
 	file, err := parser.ParseFile(token.NewFileSet(), "prelude.go", src, 0)
 	if err != nil {
 		panic(err)
@@ -749,6 +827,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerListPrepend(fn, expr)
 	case air.ExprListSet:
 		return l.lowerListSet(fn, expr)
+	case air.ExprListSwap:
+		return l.lowerListSwap(fn, expr)
 	case air.ExprListSort:
 		return l.lowerListSort(fn, expr)
 	case air.ExprMakeMap:
@@ -770,6 +850,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMapSet(fn, expr)
 	case air.ExprMapDrop:
 		return l.lowerMapDrop(fn, expr)
+	case air.ExprMapKeys:
+		return l.lowerMapKeys(fn, expr)
 	case air.ExprMapKeyAt:
 		return l.lowerMapKeyAt(fn, expr)
 	case air.ExprMapValueAt:
@@ -1070,12 +1152,14 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 	case air.TypeStr:
 		return ast.NewIdent("string"), nil
 	case air.TypeMaybe:
+		l.markRuntimeHelper("maybe")
 		elem, err := l.goType(info.Elem)
 		if err != nil {
 			return nil, err
 		}
 		return &ast.IndexExpr{X: ast.NewIdent("ardMaybe"), Index: elem}, nil
 	case air.TypeFiber:
+		l.markRuntimeHelper("fiber")
 		elem, err := l.goType(info.Elem)
 		if err != nil {
 			return nil, err
@@ -1103,6 +1187,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		}
 		return fnType, nil
 	case air.TypeResult:
+		l.markRuntimeHelper("result")
 		value, err := l.goType(info.Value)
 		if err != nil {
 			return nil, err
@@ -1848,6 +1933,34 @@ func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, err
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("true")}, nil
 }
 
+func (l *lowerer) lowerListSwap(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 2 {
+		return loweredExpr{}, fmt.Errorf("list swap expects target and two indexes")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	left, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	right, err := l.lowerExpr(fn, expr.Args[1])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	leftName := l.nextTemp()
+	rightName := l.nextTemp()
+	stmts := append(target.stmts, left.stmts...)
+	stmts = append(stmts, right.stmts...)
+	stmts = append(stmts,
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(leftName)}, Tok: token.DEFINE, Rhs: []ast.Expr{left.expr}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(rightName)}, Tok: token.DEFINE, Rhs: []ast.Expr{right.expr}},
+		&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: ast.NewIdent(leftName)}, &ast.IndexExpr{X: target.expr, Index: ast.NewIdent(rightName)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: ast.NewIdent(rightName)}, &ast.IndexExpr{X: target.expr, Index: ast.NewIdent(leftName)}}},
+	)
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
+}
+
 func (l *lowerer) lowerListPrepend(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil || len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("list prepend expects target and value")
@@ -2054,6 +2167,21 @@ func (l *lowerer) lowerMapDrop(fn air.Function, expr air.Expr) (loweredExpr, err
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 }
 
+func (l *lowerer) lowerMapKeys(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("map keys missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	helper, err := l.mapKeyHelper(expr.Target.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent(helper), Args: []ast.Expr{target.expr}}}, nil
+}
+
 func (l *lowerer) lowerMapKeyAt(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil || len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("map key_at expects target and one arg")
@@ -2107,10 +2235,13 @@ func (l *lowerer) mapKeyHelper(typeID air.TypeID) (string, error) {
 	keyType := l.program.Types[info.Key-1]
 	switch keyType.Kind {
 	case air.TypeInt:
+		l.markRuntimeHelper("sorted_int_keys")
 		return "ardSortedIntKeys", nil
 	case air.TypeStr:
+		l.markRuntimeHelper("sorted_string_keys")
 		return "ardSortedStringKeys", nil
 	case air.TypeDynamic, air.TypeExtern:
+		l.markRuntimeHelper("sorted_any_keys")
 		return "ardSortedAnyKeys", nil
 	default:
 		return "", fmt.Errorf("unsupported map key type %s for ordered iteration", keyType.Name)
@@ -2403,8 +2534,12 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 	case "FloatFromInt":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("float64"), Args: args}}, nil
 	case "ReadLine":
+		l.markRuntimeHelper("result")
+		l.markRuntimeHelper("read_line")
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("ardReadLine")}}, nil
 	case "IntFromStr":
+		l.markRuntimeHelper("maybe")
+		l.markRuntimeHelper("int_from_str")
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("ardIntFromStr"), Args: args}}, nil
 	case "Sleep":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("time", "time", "Sleep"), Args: []ast.Expr{&ast.CallExpr{Fun: l.qualified("time", "time", "Duration"), Args: args}}}}, nil
@@ -2446,6 +2581,7 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		wrapped.stmts = append(stmts, wrapped.stmts...)
 		return wrapped, nil
 	case "DynamicToMap":
+		l.markRuntimeHelper("dynamic_to_any_map")
 		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: ast.NewIdent("ardDynamicToAnyMap"), Args: args})
 		if err != nil {
 			return loweredExpr{}, err

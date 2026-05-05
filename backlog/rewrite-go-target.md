@@ -254,30 +254,31 @@ Status: Complete
 
 ### Milestone 3: core data model
 
-Status: In progress
+Status: Complete
 
 - [x] Generate Ard structs as Go structs for the current subset.
   - basic struct field write lowering now exists through `StmtSetField`
 - [x] Generate enums for the current subset.
-- [ ] Lower lists and maps to native Go containers where representable.
-  - current subset support now includes list literals plus `size`, `at`, and
-    local `push`
-  - current subset support now includes map literals plus `size`, `has`, `get`,
-    `set`, `drop`, key iteration helpers, and value iteration helpers
-  - this is enough to run `samples/collections.ard` and `samples/maps.ard`;
-    broader list/map method coverage is still pending
-- [ ] Settle the default Go lowering for `Maybe`.
-  - current subset uses a generated generic `ardMaybe[T]` helper type so
-    nullable locals, map lookups, and Maybe matches can execute while the final
-    representation decision remains open
-- [ ] Settle the default Go lowering for `Result`.
-  - current subset uses a generated generic `ardResult[T, E]` helper type so
-    `read_line().expect(...)` and similar flows can execute while the final
-    representation decision remains open
-- [ ] Keep runtime helpers minimal and justify each one.
-- [ ] Expand import planning beyond the current minimal subset.
-  - this should happen before broader stdlib/module lowering leans on a much
-    wider import surface
+- [x] Lower lists and maps to native Go containers where representable.
+  - current subset support includes list literals plus `size`, `at`, `push`,
+    `prepend`, `set`, `swap`, and sort-backed comparator flows
+  - current subset support includes map literals plus `size`, `has`, `get`,
+    `set`, `drop`, `keys`, key iteration helpers, and value iteration helpers
+  - this is enough to run `samples/collections.ard`, `samples/maps.ard`, and
+    decode-driven map/list workflows such as `pokemon`
+- [x] Settle the default Go lowering for `Maybe`.
+  - the backend now treats generated generic `ardMaybe[T]` as the default Go
+    representation for Ard nullable values
+- [x] Settle the default Go lowering for `Result`.
+  - the backend now treats generated generic `ardResult[T, E]` as the default
+    Go representation for Ard result values
+- [x] Keep runtime helpers minimal and justify each one.
+  - the shared helper surface is intentionally limited to `ardMaybe`,
+    `ardResult`, `ardFiber`, stdin parsing helpers, and deterministic key/
+    dynamic conversion helpers needed by generated container and host flows
+- [x] Expand import planning beyond the current minimal subset.
+  - imports are now emitted from actual alias usage in generated AST instead of
+    eagerly mirroring the full runtime prelude surface
 
 ### Milestone 4: advanced language features
 

@@ -231,6 +231,47 @@ func TestGenerateSourcesUsesPointersForMutableStructParams(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesSupportsListSwapAndMapKeys(t *testing.T) {
+	program := lowerSource(t, `
+		fn main() Int {
+			mut items = [1, 2, 3]
+			items.swap(0, 2)
+			let values = ["b": 2, "a": 1]
+			let keys = values.keys()
+			items.at(0) + keys.size()
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "items_0[local_") && !strings.Contains(source, "items_0[_tmp_") {
+		t.Fatalf("generated source missing list swap lowering:\n%s", source)
+	}
+	if !strings.Contains(source, "ardSortedStringKeys(values_1)") {
+		t.Fatalf("generated source missing map keys lowering:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesEmitsOnlyUsedImports(t *testing.T) {
+	program := lowerSource(t, `
+		fn main() Int {
+			1
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if strings.Contains(source, "bufio \"bufio\"") || strings.Contains(source, "strconv \"strconv\"") || strings.Contains(source, "strings \"strings\"") {
+		t.Fatalf("generated source included unused runtime imports:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesSupportsFieldMutation(t *testing.T) {
 	program := lowerSource(t, `
 		struct Counter {
