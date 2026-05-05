@@ -106,6 +106,52 @@ func TestLowerStructLayoutAndFieldAccess(t *testing.T) {
 	}
 }
 
+func TestLowerKeepsDistinctStructTypesWithSameName(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/http
+
+		struct Request {
+			isNotification: Bool,
+		}
+
+		fn local_flag(req: Request) Bool {
+			req.isNotification
+		}
+
+		fn http_body(req: http::Request) Dynamic? {
+			req.body
+		}
+	`)
+
+	requestStructs := []TypeInfo{}
+	for _, typ := range program.Types {
+		if typ.Kind == TypeStruct && typ.Name == "Request" {
+			requestStructs = append(requestStructs, typ)
+		}
+	}
+	if len(requestStructs) != 2 {
+		t.Fatalf("Request struct count = %d, want 2", len(requestStructs))
+	}
+
+	hasNotificationRequest := false
+	hasBodyRequest := false
+	for _, typ := range requestStructs {
+		fieldNames := map[string]bool{}
+		for _, field := range typ.Fields {
+			fieldNames[field.Name] = true
+		}
+		if fieldNames["isNotification"] {
+			hasNotificationRequest = true
+		}
+		if fieldNames["body"] {
+			hasBodyRequest = true
+		}
+	}
+	if !hasNotificationRequest || !hasBodyRequest {
+		t.Fatalf("distinct Request field sets not preserved: notification=%v body=%v", hasNotificationRequest, hasBodyRequest)
+	}
+}
+
 func TestLowerIfExpression(t *testing.T) {
 	program := lowerSource(t, `
 		fn choose(flag: Bool) Int {
