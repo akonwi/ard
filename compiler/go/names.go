@@ -64,7 +64,10 @@ func localName(fn air.Function, local air.LocalID) string {
 	if int(local) >= 0 && int(local) < len(fn.Locals) {
 		name := sanitizeName(fn.Locals[local].Name)
 		if name != "" {
-			return name
+			if int(local) < len(fn.Signature.Params) {
+				return name
+			}
+			return fmt.Sprintf("%s_%d", name, local)
 		}
 	}
 	return fmt.Sprintf("local_%d", local)

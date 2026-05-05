@@ -223,9 +223,11 @@ Status: In progress
 - [x] Establish deterministic symbol naming.
 - [x] Support a tiny end-to-end subset: constants, locals, arithmetic, direct
       function calls, and `main`.
+- [x] Add basic import planning for the current subset.
 - [ ] Expand import planning beyond the current minimal subset.
-- [ ] Define the extern lowering model in code, even if initial support is
-      stubbed.
+- [x] Define the extern lowering model in code for the current subset.
+  - direct lowering now exists for the current `go = "Print"` path used by
+    `ard/io::_print`
 
 ### Milestone 2: structured control flow
 
@@ -237,7 +239,9 @@ Status: In progress
 - [x] Lower assignments and mutable locals for the current scalar subset.
 - [x] Lower loops and control-flow-heavy statement bodies for the current
       scalar subset.
-- [ ] Expand control-flow lowering coverage beyond the current scalar subset.
+- [x] Expand control-flow lowering enough to run the current loop-oriented
+      sample subset (`samples/loops.ard`).
+- [ ] Expand control-flow lowering coverage beyond the current sample subset.
 - [ ] Lower `try` into explicit intermediate values and early returns.
 
 ### Milestone 3: core data model
@@ -247,6 +251,10 @@ Status: In progress
 - [x] Generate Ard structs as Go structs for the current subset.
 - [x] Generate enums for the current subset.
 - [ ] Lower lists and maps to native Go containers where representable.
+  - current subset support now includes list literals plus `size`, `at`, and
+    local `push`
+  - this is enough to run `samples/collections.ard`; broader list/map method
+    coverage is still pending
 - [ ] Settle the default Go lowering for `Maybe`.
 - [ ] Settle the default Go lowering for `Result`.
 - [ ] Keep runtime helpers minimal and justify each one.
@@ -260,7 +268,13 @@ Status: In progress
 
 ### Milestone 5: FFI and stdlib integration
 
+Status: In progress
+
 - [ ] Lower extern calls to direct Go calls by default.
+  - current subset support exists for `Print`; broader extern coverage is still
+    pending
+  - this is enough for the current `ard/io::_print` path used by the initial
+    sample coverage
 - [ ] Generate thin wrappers only where direct calls are insufficient.
 - [ ] Support generated structs across the Go extern boundary.
 - [ ] Support opaque extern types.

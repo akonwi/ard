@@ -15,9 +15,11 @@ type loweredExpr struct {
 }
 
 type lowerer struct {
-	program     *air.Program
-	packageName string
-	tempCounter int
+	program        *air.Program
+	packageName    string
+	tempCounter    int
+	currentImports map[string]string
+	declaredLocals map[air.LocalID]bool
 }
 
 func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, error) {
@@ -40,6 +42,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 }
 
 func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
+	l.currentImports = map[string]string{}
 	decls := []ast.Decl{}
 	rootID, err := rootFunction(l.program)
 	if err != nil {
@@ -70,6 +73,21 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 			return nil, err
 		}
 		decls = append(decls, mainDecl)
+	}
+	if len(l.currentImports) > 0 {
+		importDecl := &ast.GenDecl{Tok: token.IMPORT}
+		aliases := make([]string, 0, len(l.currentImports))
+		for alias := range l.currentImports {
+			aliases = append(aliases, alias)
+		}
+		sort.Strings(aliases)
+		for _, alias := range aliases {
+			importDecl.Specs = append(importDecl.Specs, &ast.ImportSpec{
+				Name: ast.NewIdent(alias),
+				Path: &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", l.currentImports[alias])},
+			})
+		}
+		decls = append([]ast.Decl{importDecl}, decls...)
 	}
 	return &ast.File{Name: ast.NewIdent(l.packageName), Decls: decls}, nil
 }
@@ -122,6 +140,7 @@ func (l *lowerer) lowerMainWrapper(root air.FunctionID) (ast.Decl, error) {
 }
 
 func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
+	l.declaredLocals = map[air.LocalID]bool{}
 	params := []*ast.Field{}
 	for _, param := range fn.Signature.Params {
 		paramType, err := l.goType(param.Type)
@@ -132,6 +151,11 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 			Names: []*ast.Ident{ast.NewIdent(sanitizeName(param.Name))},
 			Type:  paramType,
 		})
+	}
+	for _, local := range fn.Locals {
+		if int(local.ID) < len(fn.Signature.Params) {
+			l.declaredLocals[local.ID] = true
+		}
 	}
 	body, err := l.lowerBlock(fn, fn.Body, fn.Signature.Return)
 	if err != nil {
@@ -167,7 +191,11 @@ func (l *lowerer) lowerBlock(fn air.Function, block air.Block, returnType air.Ty
 			return nil, err
 		}
 		stmts = append(stmts, result.stmts...)
-		if returnType != air.NoType && !l.isVoidType(returnType) {
+		if returnType == air.NoType || l.isVoidType(returnType) {
+			if !isVoidExpr(result.expr) {
+				stmts = append(stmts, &ast.ExprStmt{X: result.expr})
+			}
+		} else {
 			stmts = append(stmts, &ast.ReturnStmt{Results: []ast.Expr{result.expr}})
 		}
 	}
@@ -186,11 +214,18 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		}
 		name := localName(fn, stmt.Local)
 		out := append([]ast.Stmt{}, value.stmts...)
+		tok := token.DEFINE
+		if l.declaredLocals[stmt.Local] {
+			tok = token.ASSIGN
+		} else {
+			l.declaredLocals[stmt.Local] = true
+		}
 		out = append(out, &ast.AssignStmt{
 			Lhs: []ast.Expr{ast.NewIdent(name)},
-			Tok: token.DEFINE,
+			Tok: tok,
 			Rhs: []ast.Expr{value.expr},
 		})
+		out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(name)}})
 		return out, nil
 	case air.StmtAssign:
 		if stmt.Value == nil {
@@ -216,7 +251,11 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			return nil, err
 		}
 		out := append([]ast.Stmt{}, expr.stmts...)
-		out = append(out, &ast.ExprStmt{X: expr.expr})
+		if l.isVoidType(stmt.Expr.Type) || isVoidExpr(expr.expr) {
+			out = append(out, &ast.ExprStmt{X: expr.expr})
+		} else {
+			out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{expr.expr}})
+		}
 		return out, nil
 	case air.StmtWhile:
 		if stmt.Condition == nil {
@@ -258,6 +297,59 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{expr: &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", expr.Str)}}, nil
 	case air.ExprLoadLocal:
 		return loweredExpr{expr: ast.NewIdent(localName(fn, expr.Local))}, nil
+	case air.ExprTraitUpcast:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("trait upcast missing target")
+		}
+		return l.lowerExpr(fn, *expr.Target)
+	case air.ExprCallTrait:
+		return l.lowerTraitCall(fn, expr)
+	case air.ExprToStr:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("to_str missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{target.expr}}}, nil
+	case air.ExprCallExtern:
+		return l.lowerExternCall(fn, expr)
+	case air.ExprCopy:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("copy missing target")
+		}
+		return l.lowerExpr(fn, *expr.Target)
+	case air.ExprMakeList:
+		return l.lowerMakeList(fn, expr)
+	case air.ExprListSize:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("list size missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target.expr}}}, nil
+	case air.ExprListAt:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("list at missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		if len(expr.Args) != 1 {
+			return loweredExpr{}, fmt.Errorf("list at expects one arg")
+		}
+		index, err := l.lowerExpr(fn, expr.Args[0])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts := append(target.stmts, index.stmts...)
+		return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: target.expr, Index: index.expr}}, nil
+	case air.ExprListPush:
+		return l.lowerListPush(fn, expr)
 	case air.ExprEnumVariant:
 		if !validTypeID(l.program, expr.Type) {
 			return loweredExpr{}, fmt.Errorf("invalid enum type id %d", expr.Type)
@@ -430,7 +522,11 @@ func (l *lowerer) lowerValueBlock(fn air.Function, block air.Block, resultType a
 			return nil, err
 		}
 		stmts = append(stmts, result.stmts...)
-		if !l.isVoidType(resultType) {
+		if l.isVoidType(resultType) {
+			if !isVoidExpr(result.expr) {
+				stmts = append(stmts, &ast.ExprStmt{X: result.expr})
+			}
+		} else {
 			if target == nil {
 				return nil, fmt.Errorf("non-void block result missing target")
 			}
@@ -506,8 +602,26 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return ast.NewIdent("bool"), nil
 	case air.TypeStr:
 		return ast.NewIdent("string"), nil
+	case air.TypeList:
+		elem, err := l.goType(info.Elem)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ArrayType{Elt: elem}, nil
+	case air.TypeMap:
+		key, err := l.goType(info.Key)
+		if err != nil {
+			return nil, err
+		}
+		value, err := l.goType(info.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.MapType{Key: key, Value: value}, nil
 	case air.TypeStruct, air.TypeEnum:
 		return ast.NewIdent(typeName(l.program, info)), nil
+	case air.TypeTraitObject:
+		return ast.NewIdent("any"), nil
 	default:
 		return nil, fmt.Errorf("unsupported Go type kind %d", info.Kind)
 	}
@@ -515,6 +629,110 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 
 func (l *lowerer) isVoidType(typeID air.TypeID) bool {
 	return validTypeID(l.program, typeID) && l.program.Types[typeID-1].Kind == air.TypeVoid
+}
+
+func (l *lowerer) qualified(alias string, importPath string, name string) ast.Expr {
+	l.currentImports[alias] = importPath
+	return &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name)}
+}
+
+func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	typ, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	elts := make([]ast.Expr, 0, len(expr.Args))
+	stmts := []ast.Stmt{}
+	for _, arg := range expr.Args {
+		loweredArg, err := l.lowerExpr(fn, arg)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, loweredArg.stmts...)
+		elts = append(elts, loweredArg.expr)
+	}
+	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
+}
+
+func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("list push missing target")
+	}
+	if expr.Target.Kind != air.ExprLoadLocal {
+		return loweredExpr{}, fmt.Errorf("list push currently requires local target")
+	}
+	if len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("list push expects one arg")
+	}
+	value, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	name := localName(fn, expr.Target.Local)
+	assign := &ast.AssignStmt{
+		Lhs: []ast.Expr{ast.NewIdent(name)},
+		Tok: token.ASSIGN,
+		Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{ast.NewIdent(name), value.expr}}},
+	}
+	stmts := append([]ast.Stmt{}, value.stmts...)
+	stmts = append(stmts, assign)
+	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(name)}}}, nil
+}
+
+func (l *lowerer) lowerTraitCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("trait call missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if expr.Trait < 0 || int(expr.Trait) >= len(l.program.Traits) {
+		return loweredExpr{}, fmt.Errorf("invalid trait id %d", expr.Trait)
+	}
+	trait := l.program.Traits[expr.Trait]
+	if expr.Method < 0 || expr.Method >= len(trait.Methods) {
+		return loweredExpr{}, fmt.Errorf("invalid trait method %d for %s", expr.Method, trait.Name)
+	}
+	method := trait.Methods[expr.Method]
+	switch {
+	case trait.Name == "ToString" && method.Name == "to_str":
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{target.expr}}}, nil
+	default:
+		return loweredExpr{}, fmt.Errorf("unsupported trait call %s.%s", trait.Name, method.Name)
+	}
+}
+
+func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Extern < 0 || int(expr.Extern) >= len(l.program.Externs) {
+		return loweredExpr{}, fmt.Errorf("invalid extern id %d", expr.Extern)
+	}
+	ext := l.program.Externs[expr.Extern]
+	args := make([]ast.Expr, 0, len(expr.Args))
+	stmts := []ast.Stmt{}
+	for _, arg := range expr.Args {
+		loweredArg, err := l.lowerExpr(fn, arg)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, loweredArg.stmts...)
+		args = append(args, loweredArg.expr)
+	}
+	binding := ext.Name
+	if goBinding, ok := ext.Bindings["go"]; ok && goBinding != "" {
+		binding = goBinding
+	}
+	switch binding {
+	case "Print":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Println"), Args: args}}, nil
+	default:
+		return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
+	}
+}
+
+func isVoidExpr(expr ast.Expr) bool {
+	ident, ok := expr.(*ast.Ident)
+	return ok && ident.Name == "nil"
 }
 
 func validFunctionID(program *air.Program, id air.FunctionID) bool {

@@ -99,10 +99,10 @@ func TestGenerateSourcesSupportsStructsAndEnums(t *testing.T) {
 	if !strings.Contains(combined, "type type__User struct") {
 		t.Fatalf("generated source missing struct type:\n%s", combined)
 	}
-	if !strings.Contains(combined, "user := type__User{age: 41, name: \"Ada\"}") {
+	if !strings.Contains(combined, "type__User{age: 41, name: \"Ada\"}") {
 		t.Fatalf("generated source missing struct literal lowering:\n%s", combined)
 	}
-	if !strings.Contains(combined, "return user.age + 1") {
+	if !strings.Contains(combined, ".age + 1") {
 		t.Fatalf("generated source missing field access lowering:\n%s", combined)
 	}
 }
@@ -127,10 +127,10 @@ func TestGenerateSourcesSupportsIfAndWhile(t *testing.T) {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !strings.Contains(source, "for count < 3") {
+	if !strings.Contains(source, "< 3 {") {
 		t.Fatalf("generated source missing while lowering:\n%s", source)
 	}
-	if !strings.Contains(source, "if count == 3") {
+	if !strings.Contains(source, "== 3 {") {
 		t.Fatalf("generated source missing if lowering:\n%s", source)
 	}
 	if !strings.Contains(source, "var _tmp_0 int") {
