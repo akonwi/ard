@@ -231,7 +231,7 @@ Status: In progress
 
 ### Milestone 2: structured control flow
 
-Status: In progress
+Status: Complete
 
 - [x] Lower block expressions through temporaries and statement setup for the
       current scalar subset.
@@ -245,8 +245,13 @@ Status: In progress
       the current sample subset (`samples/nullables.ard`).
 - [x] Expand control-flow lowering enough to support enum matching in the
       current sample subset (`samples/lights.ard`).
-- [ ] Expand control-flow lowering coverage beyond the current sample subset.
-- [ ] Lower `try` into explicit intermediate values and early returns.
+- [x] Expand control-flow lowering coverage beyond the current sample subset.
+  - current control-flow coverage now reaches interactive/result-heavy and
+    decode-heavy programs such as `todo-list`, `pokemon`, and buildable server
+    flows
+- [x] Lower `try` into explicit intermediate values and early returns.
+  - current lowering handles `try` for `Maybe` and `Result`, with catch blocks
+    and propagated early returns across differing result value shapes
 
 ### Milestone 3: core data model
 

@@ -107,6 +107,42 @@ func TestGenerateSourcesSupportsStructsAndEnums(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesSupportsTryMaybeCatchAndEarlyReturn(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn missing() Int? {
+			maybe::none()
+		}
+
+		fn with_default() Int {
+			let value = try missing() -> _ { 42 }
+			value
+		}
+
+		fn passthrough() Int? {
+			let value = try missing()
+			maybe::some(value)
+		}
+
+		fn main() Int {
+			with_default()
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "return _tmp_") {
+		t.Fatalf("generated source missing try early return lowering:\n%s", source)
+	}
+	if !strings.Contains(source, "= 42") {
+		t.Fatalf("generated source missing try catch lowering:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesPropagatesTryResultAcrossDifferentResultValueTypes(t *testing.T) {
 	program := lowerSource(t, `
 		fn read_text() Str!Str {
