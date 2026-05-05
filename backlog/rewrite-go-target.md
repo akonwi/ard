@@ -303,10 +303,12 @@ Status: In progress
 - [ ] Support generated structs across the Go extern boundary.
 - [ ] Support opaque extern types.
   - current type lowering accepts `Dynamic` and opaque extern host types as
-    `any`, but resource-specific extern helpers are still pending
+    `any`, and direct HTTP serve/client helper coverage is now partially in
+    place through host stdlib wrappers
 - [ ] Support callback externs as native Go closures.
-  - current remaining server-side work is centered here, especially
-    `HTTP_Serve`-style callback adaptation for mutable response handlers
+  - current subset now includes an initial `HTTP_Serve` callback adaptation
+    for mutable response handlers
+  - broader callback coverage beyond the HTTP serve shape is still pending
 - [ ] Compile self-hosted stdlib modules from AIR.
   - current lowering can compile deeper self-hosted stdlib paths such as
     `ard/decode` by covering try ops, integer matches, dynamic conversions, and
@@ -320,8 +322,9 @@ Status: In progress
     `collections`, `nullables`, `maps`, `lights`, `temperatures`, `modules`,
     `type-unions`, and `concurrent_stress`
   - current lowering can also run `word_frequency` and `pokemon`
-  - current next known server-side blocker is direct extern coverage for
-    `HTTP_Serve`
+  - current build coverage now includes `server`
+  - current next known server-side work is broader callback/host coverage
+    beyond the initial `HTTP_Serve` path
   - manual sample checks have also reached interactive/result-driven flows like
     `guess` and `tic-tac-toe`
   - current manual sample coverage also exercises generated closure literals via

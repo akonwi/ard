@@ -301,6 +301,25 @@ func TestRunGoTargetMapsSample(t *testing.T) {
 	}
 }
 
+func TestBuildGoTargetServerSample(t *testing.T) {
+	sourcePath := filepath.Join("samples", "server.ard")
+	module, err := loadModule(sourcePath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	outputPath := filepath.Join(t.TempDir(), "server-bin")
+	if _, err := gotarget.BuildProgram(program, outputPath); err != nil {
+		t.Fatalf("build go server sample: %v", err)
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("stat built server binary: %v", err)
+	}
+}
+
 func TestRunGoTargetModulesSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "modules.ard")
 	module, err := loadModule(sourcePath, backend.TargetGo)
