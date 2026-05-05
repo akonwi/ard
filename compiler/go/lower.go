@@ -3,6 +3,7 @@ package gotarget
 import (
 	"fmt"
 	"go/ast"
+	"go/parser"
 	"go/token"
 	"sort"
 
@@ -49,6 +50,7 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 		return nil, err
 	}
 	if module.ID == l.program.Functions[rootID].Module {
+		decls = append(decls, l.runtimePreludeDecls()...)
 		for _, typ := range l.program.Types {
 			typeDecls, err := l.lowerTypeDecls(typ)
 			if err != nil {
@@ -90,6 +92,40 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 		decls = append([]ast.Decl{importDecl}, decls...)
 	}
 	return &ast.File{Name: ast.NewIdent(l.packageName), Decls: decls}, nil
+}
+
+func (l *lowerer) runtimePreludeDecls() []ast.Decl {
+	l.currentImports["slices"] = "slices"
+	const src = `package main
+
+type ardMaybe[T any] struct {
+	value T
+	ok    bool
+}
+
+func ardSortedIntKeys[V any](m map[int]V) []int {
+	keys := make([]int, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+func ardSortedStringKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+`
+	file, err := parser.ParseFile(token.NewFileSet(), "prelude.go", src, 0)
+	if err != nil {
+		panic(err)
+	}
+	return file.Decls
 }
 
 func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
@@ -252,7 +288,9 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		}
 		out := append([]ast.Stmt{}, expr.stmts...)
 		if l.isVoidType(stmt.Expr.Type) || isVoidExpr(expr.expr) {
-			out = append(out, &ast.ExprStmt{X: expr.expr})
+			if !isVoidExpr(expr.expr) {
+				out = append(out, &ast.ExprStmt{X: expr.expr})
+			}
 		} else {
 			out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{expr.expr}})
 		}
@@ -320,6 +358,30 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, fmt.Errorf("copy missing target")
 		}
 		return l.lowerExpr(fn, *expr.Target)
+	case air.ExprMakeMaybeSome:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("maybe some missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		typ, err := l.goType(expr.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: typ, Elts: []ast.Expr{
+			&ast.KeyValueExpr{Key: ast.NewIdent("value"), Value: target.expr},
+			&ast.KeyValueExpr{Key: ast.NewIdent("ok"), Value: ast.NewIdent("true")},
+		}}}, nil
+	case air.ExprMakeMaybeNone:
+		typ, err := l.goType(expr.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{expr: &ast.CompositeLit{Type: typ}}, nil
+	case air.ExprMatchMaybe:
+		return l.lowerMatchMaybe(fn, expr)
 	case air.ExprMakeList:
 		return l.lowerMakeList(fn, expr)
 	case air.ExprListSize:
@@ -350,6 +412,29 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: target.expr, Index: index.expr}}, nil
 	case air.ExprListPush:
 		return l.lowerListPush(fn, expr)
+	case air.ExprMakeMap:
+		return l.lowerMakeMap(fn, expr)
+	case air.ExprMapSize:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("map size missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target.expr}}}, nil
+	case air.ExprMapHas:
+		return l.lowerMapHas(fn, expr)
+	case air.ExprMapGet:
+		return l.lowerMapGet(fn, expr)
+	case air.ExprMapSet:
+		return l.lowerMapSet(fn, expr)
+	case air.ExprMapDrop:
+		return l.lowerMapDrop(fn, expr)
+	case air.ExprMapKeyAt:
+		return l.lowerMapKeyAt(fn, expr)
+	case air.ExprMapValueAt:
+		return l.lowerMapValueAt(fn, expr)
 	case air.ExprEnumVariant:
 		if !validTypeID(l.program, expr.Type) {
 			return loweredExpr{}, fmt.Errorf("invalid enum type id %d", expr.Type)
@@ -475,11 +560,8 @@ func (l *lowerer) lowerIfExpr(fn air.Function, expr air.Expr) (loweredExpr, erro
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	if len(condition.stmts) != 0 {
-		return loweredExpr{}, fmt.Errorf("if conditions with setup statements are not supported yet")
-	}
 	resultExpr := ast.NewIdent("nil")
-	stmts := []ast.Stmt{}
+	stmts := append([]ast.Stmt{}, condition.stmts...)
 	var target ast.Expr
 	if !l.isVoidType(expr.Type) {
 		temp := l.nextTemp()
@@ -602,6 +684,12 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return ast.NewIdent("bool"), nil
 	case air.TypeStr:
 		return ast.NewIdent("string"), nil
+	case air.TypeMaybe:
+		elem, err := l.goType(info.Elem)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.IndexExpr{X: ast.NewIdent("ardMaybe"), Index: elem}, nil
 	case air.TypeList:
 		elem, err := l.goType(info.Elem)
 		if err != nil {
@@ -634,6 +722,47 @@ func (l *lowerer) isVoidType(typeID air.TypeID) bool {
 func (l *lowerer) qualified(alias string, importPath string, name string) ast.Expr {
 	l.currentImports[alias] = importPath
 	return &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name)}
+}
+
+func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("maybe match missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := ast.NewIdent("nil")
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	var assignTarget ast.Expr
+	if !l.isVoidType(expr.Type) {
+		temp := l.nextTemp()
+		decls, err := l.declareTemp(expr.Type, temp)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, decls...)
+		assignTarget = ast.NewIdent(temp)
+		resultExpr = ast.NewIdent(temp)
+	}
+	someName := localName(fn, expr.SomeLocal)
+	l.declaredLocals[expr.SomeLocal] = true
+	someDecl := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(someName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("value")}}}
+	someBody, err := l.lowerValueBlock(fn, expr.Some, expr.Type, assignTarget)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	someBody = append([]ast.Stmt{someDecl, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(someName)}}}, someBody...)
+	noneBody, err := l.lowerValueBlock(fn, expr.None, expr.Type, assignTarget)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("ok")},
+		Body: &ast.BlockStmt{List: someBody},
+		Else: &ast.BlockStmt{List: noneBody},
+	})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
 
 func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -677,6 +806,194 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 	stmts := append([]ast.Stmt{}, value.stmts...)
 	stmts = append(stmts, assign)
 	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(name)}}}, nil
+}
+
+func (l *lowerer) lowerMakeMap(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	typ, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	elts := make([]ast.Expr, 0, len(expr.Entries))
+	stmts := []ast.Stmt{}
+	for _, entry := range expr.Entries {
+		key, err := l.lowerExpr(fn, entry.Key)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		value, err := l.lowerExpr(fn, entry.Value)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, key.stmts...)
+		stmts = append(stmts, value.stmts...)
+		elts = append(elts, &ast.KeyValueExpr{Key: key.expr, Value: value.expr})
+	}
+	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
+}
+
+func (l *lowerer) lowerMapHas(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("map has expects target and one arg")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	key, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	temp := l.nextTemp()
+	decls, err := l.declareTemp(expr.Type, temp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	okName := l.nextTemp()
+	stmts := append(target.stmts, key.stmts...)
+	stmts = append(stmts, decls...)
+	lookup := &ast.IndexExpr{X: target.expr, Index: key.expr}
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_"), ast.NewIdent(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{lookup}})
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(okName)}})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
+}
+
+func (l *lowerer) lowerMapGet(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("map get expects target and one arg")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	key, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	temp := l.nextTemp()
+	decls, err := l.declareTemp(expr.Type, temp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	valueTemp := l.nextTemp()
+	okName := l.nextTemp()
+	lookup := &ast.IndexExpr{X: target.expr, Index: key.expr}
+	stmts := append(target.stmts, key.stmts...)
+	stmts = append(stmts, decls...)
+	stmts = append(stmts, &ast.IfStmt{
+		Init: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(valueTemp), ast.NewIdent(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{lookup}},
+		Cond: ast.NewIdent(okName),
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CompositeLit{Type: mustTypeExpr(l, expr.Type), Elts: []ast.Expr{
+				&ast.KeyValueExpr{Key: ast.NewIdent("value"), Value: ast.NewIdent(valueTemp)},
+				&ast.KeyValueExpr{Key: ast.NewIdent("ok"), Value: ast.NewIdent("true")},
+			}}}},
+		}},
+	})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
+}
+
+func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || expr.Target.Kind != air.ExprLoadLocal || len(expr.Args) != 2 {
+		return loweredExpr{}, fmt.Errorf("map set currently requires local target and two args")
+	}
+	key, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	value, err := l.lowerExpr(fn, expr.Args[1])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	name := localName(fn, expr.Target.Local)
+	stmts := append(key.stmts, value.stmts...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(name), Index: key.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{value.expr}})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent("true")}, nil
+}
+
+func (l *lowerer) lowerMapDrop(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("map drop expects target and one arg")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	key, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := append(target.stmts, key.stmts...)
+	stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("delete"), Args: []ast.Expr{target.expr, key.expr}}})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
+}
+
+func (l *lowerer) lowerMapKeyAt(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("map key_at expects target and one arg")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	index, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	helper, err := l.mapKeyHelper(expr.Target.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	keys := &ast.CallExpr{Fun: ast.NewIdent(helper), Args: []ast.Expr{target.expr}}
+	stmts := append(target.stmts, index.stmts...)
+	return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: keys, Index: index.expr}}, nil
+}
+
+func (l *lowerer) lowerMapValueAt(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("map value_at expects target and one arg")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	index, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	helper, err := l.mapKeyHelper(expr.Target.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	keyExpr := &ast.IndexExpr{X: &ast.CallExpr{Fun: ast.NewIdent(helper), Args: []ast.Expr{target.expr}}, Index: index.expr}
+	stmts := append(target.stmts, index.stmts...)
+	return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: target.expr, Index: keyExpr}}, nil
+}
+
+func (l *lowerer) mapKeyHelper(typeID air.TypeID) (string, error) {
+	if !validTypeID(l.program, typeID) {
+		return "", fmt.Errorf("invalid map type %d", typeID)
+	}
+	info := l.program.Types[typeID-1]
+	if info.Kind != air.TypeMap {
+		return "", fmt.Errorf("type %s is not a map", info.Name)
+	}
+	keyType := l.program.Types[info.Key-1]
+	switch keyType.Kind {
+	case air.TypeInt:
+		return "ardSortedIntKeys", nil
+	case air.TypeStr:
+		return "ardSortedStringKeys", nil
+	default:
+		return "", fmt.Errorf("unsupported map key type %s for ordered iteration", keyType.Name)
+	}
+}
+
+func mustTypeExpr(l *lowerer, typeID air.TypeID) ast.Expr {
+	typ, err := l.goType(typeID)
+	if err != nil {
+		panic(err)
+	}
+	return typ
 }
 
 func (l *lowerer) lowerTraitCall(fn air.Function, expr air.Expr) (loweredExpr, error) {

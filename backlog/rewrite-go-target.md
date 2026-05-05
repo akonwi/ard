@@ -241,6 +241,8 @@ Status: In progress
       scalar subset.
 - [x] Expand control-flow lowering enough to run the current loop-oriented
       sample subset (`samples/loops.ard`).
+- [x] Expand control-flow lowering enough to support Maybe-based branching in
+      the current sample subset (`samples/nullables.ard`).
 - [ ] Expand control-flow lowering coverage beyond the current sample subset.
 - [ ] Lower `try` into explicit intermediate values and early returns.
 
@@ -253,9 +255,14 @@ Status: In progress
 - [ ] Lower lists and maps to native Go containers where representable.
   - current subset support now includes list literals plus `size`, `at`, and
     local `push`
-  - this is enough to run `samples/collections.ard`; broader list/map method
-    coverage is still pending
+  - current subset support now includes map literals plus `size`, `has`, `get`,
+    `set`, `drop`, key iteration helpers, and value iteration helpers
+  - this is enough to run `samples/collections.ard` and `samples/maps.ard`;
+    broader list/map method coverage is still pending
 - [ ] Settle the default Go lowering for `Maybe`.
+  - current subset uses a generated generic `ardMaybe[T]` helper type so
+    nullable locals, map lookups, and Maybe matches can execute while the final
+    representation decision remains open
 - [ ] Settle the default Go lowering for `Result`.
 - [ ] Keep runtime helpers minimal and justify each one.
 

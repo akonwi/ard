@@ -181,6 +181,21 @@ func TestRunGoTargetVariablesSample(t *testing.T) {
 	}
 }
 
+func TestRunGoTargetNullablesSample(t *testing.T) {
+	sourcePath := filepath.Join("samples", "nullables.ard")
+	module, err := loadModule(sourcePath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
+		t.Fatalf("run go nullables sample: %v", err)
+	}
+}
+
 func TestRunGoTargetLoopsSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "loops.ard")
 	module, err := loadModule(sourcePath, backend.TargetGo)
@@ -208,6 +223,36 @@ func TestRunGoTargetCollectionsSample(t *testing.T) {
 	}
 	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
 		t.Fatalf("run go collections sample: %v", err)
+	}
+}
+
+func TestRunGoTargetMapsSample(t *testing.T) {
+	sourcePath := filepath.Join("samples", "maps.ard")
+	module, err := loadModule(sourcePath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
+		t.Fatalf("run go maps sample: %v", err)
+	}
+}
+
+func TestRunGoTargetModulesSample(t *testing.T) {
+	sourcePath := filepath.Join("samples", "modules.ard")
+	module, err := loadModule(sourcePath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
+		t.Fatalf("run go modules sample: %v", err)
 	}
 }
 
