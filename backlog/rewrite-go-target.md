@@ -279,6 +279,8 @@ Status: In progress
   - current subset support is being built around generated union structs with a
     tag field plus one field per member type
 - [ ] Generate native Go closures and capture handling.
+  - current subset support exists for generated closure literals used in sample
+    comparator flows such as `List.sort`
 - [ ] Lower trait dispatch where dynamic trait objects are required.
 - [ ] Lower fibers to goroutines and typed handles.
 
@@ -306,6 +308,8 @@ Status: In progress
     and `type-unions`
   - manual sample checks have also reached interactive/result-driven flows like
     `guess` and `tic-tac-toe`
+  - current manual sample coverage also exercises generated closure literals via
+    `List.sort` in `tic-tac-toe`
 - [ ] Add project-level regression coverage for real Ard applications.
 - [ ] Add runtime benchmark coverage for the rewritten Go target.
 - [ ] Reach the release gate: `ard run --target go` can run all existing Ard

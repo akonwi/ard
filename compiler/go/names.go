@@ -69,6 +69,14 @@ func unionMemberFieldName(member air.UnionMember) string {
 }
 
 func localName(fn air.Function, local air.LocalID) string {
+	for _, capture := range fn.Captures {
+		if capture.Local == local {
+			name := sanitizeName(capture.Name)
+			if name != "" {
+				return name
+			}
+		}
+	}
 	if int(local) >= 0 && int(local) < len(fn.Locals) {
 		name := sanitizeName(fn.Locals[local].Name)
 		if name != "" {

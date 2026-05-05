@@ -223,6 +223,17 @@ func (l *lowerer) lowerMainWrapper(root air.FunctionID) (ast.Decl, error) {
 func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 	l.declaredLocals = map[air.LocalID]bool{}
 	params := []*ast.Field{}
+	for _, capture := range fn.Captures {
+		captureType, err := l.goType(capture.Type)
+		if err != nil {
+			return nil, err
+		}
+		params = append(params, &ast.Field{
+			Names: []*ast.Ident{ast.NewIdent(sanitizeName(capture.Name))},
+			Type:  captureType,
+		})
+		l.declaredLocals[capture.Local] = true
+	}
 	for _, param := range fn.Signature.Params {
 		paramType, err := l.goType(param.Type)
 		if err != nil {
@@ -406,6 +417,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprCallExtern:
 		return l.lowerExternCall(fn, expr)
+	case air.ExprMakeClosure:
+		return l.lowerMakeClosure(fn, expr)
+	case air.ExprCallClosure:
+		return l.lowerCallClosure(fn, expr)
 	case air.ExprCopy:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("copy missing target")
@@ -447,6 +462,20 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMatchEnum(fn, expr)
 	case air.ExprMakeList:
 		return l.lowerMakeList(fn, expr)
+	case air.ExprStrSplit:
+		if expr.Target == nil || len(expr.Args) != 1 {
+			return loweredExpr{}, fmt.Errorf("str split expects target and delimiter")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		delimiter, err := l.lowerExpr(fn, expr.Args[0])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts := append(target.stmts, delimiter.stmts...)
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "Split"), Args: []ast.Expr{target.expr, delimiter.expr}}}, nil
 	case air.ExprStrTrim:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("str trim missing target")
@@ -495,6 +524,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerListPush(fn, expr)
 	case air.ExprListSet:
 		return l.lowerListSet(fn, expr)
+	case air.ExprListSort:
+		return l.lowerListSort(fn, expr)
 	case air.ExprMakeMap:
 		return l.lowerMakeMap(fn, expr)
 	case air.ExprMapSize:
@@ -777,6 +808,24 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		return &ast.IndexExpr{X: ast.NewIdent("ardMaybe"), Index: elem}, nil
+	case air.TypeFunction:
+		params := make([]*ast.Field, 0, len(info.Params))
+		for _, paramTypeID := range info.Params {
+			paramType, err := l.goType(paramTypeID)
+			if err != nil {
+				return nil, err
+			}
+			params = append(params, &ast.Field{Type: paramType})
+		}
+		fnType := &ast.FuncType{Params: &ast.FieldList{List: params}}
+		if !l.isVoidType(info.Return) {
+			returnType, err := l.goType(info.Return)
+			if err != nil {
+				return nil, err
+			}
+			fnType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
+		}
+		return fnType, nil
 	case air.TypeResult:
 		value, err := l.goType(info.Value)
 		if err != nil {
@@ -1184,6 +1233,66 @@ func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, er
 	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
 }
 
+func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if !validFunctionID(l.program, expr.Function) {
+		return loweredExpr{}, fmt.Errorf("invalid closure function %d", expr.Function)
+	}
+	closureFn := l.program.Functions[expr.Function]
+	closureType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	funcType, _ := closureType.(*ast.FuncType)
+	callArgs := make([]ast.Expr, 0, len(expr.CaptureLocals)+len(closureFn.Signature.Params))
+	stmts := []ast.Stmt{}
+	for _, local := range expr.CaptureLocals {
+		callArgs = append(callArgs, ast.NewIdent(localName(fn, local)))
+	}
+	params := []*ast.Field{}
+	for i, param := range closureFn.Signature.Params {
+		paramType, err := l.goType(param.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		name := sanitizeName(param.Name)
+		if name == "" {
+			name = fmt.Sprintf("arg_%d", i)
+		}
+		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: paramType})
+		callArgs = append(callArgs, ast.NewIdent(name))
+	}
+	bodyStmts := []ast.Stmt{}
+	call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, closureFn)), Args: callArgs}
+	if l.isVoidType(closureFn.Signature.Return) {
+		bodyStmts = append(bodyStmts, &ast.ExprStmt{X: call})
+	} else {
+		bodyStmts = append(bodyStmts, &ast.ReturnStmt{Results: []ast.Expr{call}})
+	}
+	funcLit := &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{List: params}, Results: funcType.Results}, Body: &ast.BlockStmt{List: bodyStmts}}
+	return loweredExpr{stmts: stmts, expr: funcLit}, nil
+}
+
+func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("call closure missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	args := make([]ast.Expr, 0, len(expr.Args))
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	for _, arg := range expr.Args {
+		loweredArg, err := l.lowerExpr(fn, arg)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, loweredArg.stmts...)
+		args = append(args, loweredArg.expr)
+	}
+	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: target.expr, Args: args}}, nil
+}
+
 func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil || len(expr.Args) != 2 {
 		return loweredExpr{}, fmt.Errorf("list set expects target and two args")
@@ -1204,6 +1313,39 @@ func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, err
 	stmts = append(stmts, value.stmts...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: index.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{value.expr}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("true")}, nil
+}
+
+func (l *lowerer) lowerListSort(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("list sort expects target and comparator")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	cmp, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	l.currentImports["sort"] = "sort"
+	lessFunc := &ast.FuncLit{
+		Type: &ast.FuncType{
+			Params: &ast.FieldList{List: []*ast.Field{
+				{Names: []*ast.Ident{ast.NewIdent("i")}, Type: ast.NewIdent("int")},
+				{Names: []*ast.Ident{ast.NewIdent("j")}, Type: ast.NewIdent("int")},
+			}},
+			Results: &ast.FieldList{List: []*ast.Field{{Type: ast.NewIdent("bool")}}},
+		},
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: cmp.expr, Args: []ast.Expr{
+				&ast.IndexExpr{X: target.expr, Index: ast.NewIdent("i")},
+				&ast.IndexExpr{X: target.expr, Index: ast.NewIdent("j")},
+			}}}},
+		}},
+	}
+	stmts := append(target.stmts, cmp.stmts...)
+	stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent("sort"), Sel: ast.NewIdent("SliceStable")}, Args: []ast.Expr{target.expr, lessFunc}}})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 }
 
 func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, error) {
