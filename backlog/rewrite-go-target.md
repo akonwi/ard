@@ -224,7 +224,6 @@ Status: In progress
 - [x] Support a tiny end-to-end subset: constants, locals, arithmetic, direct
       function calls, and `main`.
 - [x] Add basic import planning for the current subset.
-- [ ] Expand import planning beyond the current minimal subset.
 - [x] Define the extern lowering model in code for the current subset.
   - direct lowering now exists for the current `go = "Print"` path used by
     `ard/io::_print`
@@ -276,6 +275,9 @@ Status: In progress
     `read_line().expect(...)` and similar flows can execute while the final
     representation decision remains open
 - [ ] Keep runtime helpers minimal and justify each one.
+- [ ] Expand import planning beyond the current minimal subset.
+  - this should happen before broader stdlib/module lowering leans on a much
+    wider import surface
 
 ### Milestone 4: advanced language features
 
