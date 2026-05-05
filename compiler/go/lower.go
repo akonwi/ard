@@ -114,6 +114,36 @@ type ardResult[T any, E any] struct {
 	ok    bool
 }
 
+type ardFiberState[T any] struct {
+	ch    chan T
+	value T
+	done  bool
+}
+
+type ardFiber[T any] struct {
+	state *ardFiberState[T]
+}
+
+func ardSpawnFiber[T any](do func() T) ardFiber[T] {
+	state := &ardFiberState[T]{ch: make(chan T, 1)}
+	go func() {
+		state.ch <- do()
+	}()
+	return ardFiber[T]{state: state}
+}
+
+func ardJoinFiber[T any](fiber ardFiber[T]) {
+	if !fiber.state.done {
+		fiber.state.value = <-fiber.state.ch
+		fiber.state.done = true
+	}
+}
+
+func ardGetFiber[T any](fiber ardFiber[T]) T {
+	ardJoinFiber(fiber)
+	return fiber.state.value
+}
+
 var ardStdinReader = bufio.NewReader(os.Stdin)
 
 func ardReadLine() ardResult[string, string] {
@@ -249,13 +279,17 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 			l.declaredLocals[local.ID] = true
 		}
 	}
-	body, err := l.lowerBlock(fn, fn.Body, fn.Signature.Return)
+	returnTypeID := fn.Signature.Return
+	if len(fn.Captures) > 0 && l.isVoidType(returnTypeID) && fn.Body.Result != nil && !l.isVoidType(fn.Body.Result.Type) {
+		returnTypeID = fn.Body.Result.Type
+	}
+	body, err := l.lowerBlock(fn, fn.Body, returnTypeID)
 	if err != nil {
 		return nil, err
 	}
 	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
-	if !l.isVoidType(fn.Signature.Return) {
-		returnType, err := l.goType(fn.Signature.Return)
+	if !l.isVoidType(returnTypeID) {
+		returnType, err := l.goType(returnTypeID)
 		if err != nil {
 			return nil, err
 		}
@@ -417,6 +451,12 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprCallExtern:
 		return l.lowerExternCall(fn, expr)
+	case air.ExprSpawnFiber:
+		return l.lowerSpawnFiber(fn, expr)
+	case air.ExprFiberGet:
+		return l.lowerFiberGet(fn, expr)
+	case air.ExprFiberJoin:
+		return l.lowerFiberJoin(fn, expr)
 	case air.ExprMakeClosure:
 		return l.lowerMakeClosure(fn, expr)
 	case air.ExprCallClosure:
@@ -808,6 +848,12 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		return &ast.IndexExpr{X: ast.NewIdent("ardMaybe"), Index: elem}, nil
+	case air.TypeFiber:
+		elem, err := l.goType(info.Elem)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.IndexExpr{X: ast.NewIdent("ardFiber"), Index: elem}, nil
 	case air.TypeFunction:
 		params := make([]*ast.Field, 0, len(info.Params))
 		for _, paramTypeID := range info.Params {
@@ -1233,6 +1279,49 @@ func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, er
 	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
 }
 
+func (l *lowerer) lowerSpawnFiber(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	var targetExpr ast.Expr
+	stmts := []ast.Stmt{}
+	if expr.Target != nil {
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, target.stmts...)
+		targetExpr = target.expr
+	} else {
+		if !validFunctionID(l.program, expr.Function) {
+			return loweredExpr{}, fmt.Errorf("invalid fiber function %d", expr.Function)
+		}
+		targetFn := l.program.Functions[expr.Function]
+		targetExpr = &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: mustTypeExpr(l, targetFn.Signature.Return)}}}}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, targetFn))}}}}}}
+	}
+	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: ast.NewIdent("ardSpawnFiber"), Index: mustTypeExpr(l, l.program.Types[expr.Type-1].Elem)}, Args: []ast.Expr{targetExpr}}}, nil
+}
+
+func (l *lowerer) lowerFiberGet(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("fiber get missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: ast.NewIdent("ardGetFiber"), Index: mustTypeExpr(l, expr.Type)}, Args: []ast.Expr{target.expr}}}, nil
+}
+
+func (l *lowerer) lowerFiberJoin(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("fiber join missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	fiberType := l.program.Types[expr.Target.Type-1]
+	return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: ast.NewIdent("ardJoinFiber"), Index: mustTypeExpr(l, fiberType.Elem)}, Args: []ast.Expr{target.expr}}}, nil
+}
+
 func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if !validFunctionID(l.program, expr.Function) {
 		return loweredExpr{}, fmt.Errorf("invalid closure function %d", expr.Function)
@@ -1263,12 +1352,24 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	}
 	bodyStmts := []ast.Stmt{}
 	call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, closureFn)), Args: callArgs}
-	if l.isVoidType(closureFn.Signature.Return) {
+	if funcType == nil {
+		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}}
+	} else {
+		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}, Results: funcType.Results}
+	}
+	if (funcType.Results == nil || len(funcType.Results.List) == 0) && closureFn.Body.Result != nil && !l.isVoidType(closureFn.Body.Result.Type) {
+		returnType, err := l.goType(closureFn.Body.Result.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		funcType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
+	}
+	if funcType.Results == nil || len(funcType.Results.List) == 0 {
 		bodyStmts = append(bodyStmts, &ast.ExprStmt{X: call})
 	} else {
 		bodyStmts = append(bodyStmts, &ast.ReturnStmt{Results: []ast.Expr{call}})
 	}
-	funcLit := &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{List: params}, Results: funcType.Results}, Body: &ast.BlockStmt{List: bodyStmts}}
+	funcLit := &ast.FuncLit{Type: funcType, Body: &ast.BlockStmt{List: bodyStmts}}
 	return loweredExpr{stmts: stmts, expr: funcLit}, nil
 }
 
@@ -1613,6 +1714,8 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("ardReadLine")}}, nil
 	case "IntFromStr":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("ardIntFromStr"), Args: args}}, nil
+	case "Sleep":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("time", "time", "Sleep"), Args: []ast.Expr{&ast.CallExpr{Fun: l.qualified("time", "time", "Duration"), Args: args}}}}, nil
 	default:
 		return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
 	}

@@ -281,8 +281,11 @@ Status: In progress
 - [ ] Generate native Go closures and capture handling.
   - current subset support exists for generated closure literals used in sample
     comparator flows such as `List.sort`
+  - current subset support also covers captured closures in async sample flows
 - [ ] Lower trait dispatch where dynamic trait objects are required.
 - [ ] Lower fibers to goroutines and typed handles.
+  - current subset support exists through generated `ardFiber[T]` helpers and
+    `ardSpawnFiber` / `ardJoinFiber` / `ardGetFiber`
 
 ### Milestone 5: FFI and stdlib integration
 
@@ -305,7 +308,8 @@ Status: In progress
 - [ ] Run sample programs through `--target go`.
   - current automated sample coverage includes `variables`, `loops`,
     `collections`, `nullables`, `maps`, `lights`, `temperatures`, `modules`,
-    and `type-unions`
+    `type-unions`, and `concurrent_stress`
+  - current lowering can also run `word_frequency`
   - manual sample checks have also reached interactive/result-driven flows like
     `guess` and `tic-tac-toe`
   - current manual sample coverage also exercises generated closure literals via
