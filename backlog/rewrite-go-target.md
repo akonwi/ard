@@ -304,6 +304,17 @@ Status: Complete
 
 Status: In progress
 
+Open design questions to settle during this milestone:
+- [ ] When should an extern lower to a direct static Go call with no wrapper?
+- [ ] When should a generated wrapper adapt Ard `Maybe` / `Result` to host
+      `Maybe` / `Result` or Go `error` shapes?
+- [ ] When should `Dynamic` remain `any`, and when should the backend emit
+      explicit list/map/object conversion helpers?
+- [ ] How should opaque host resource handles be represented and passed
+      consistently across extern boundaries?
+- [ ] How should callback-shaped externs be lowered so mutability, return
+      conventions, and host error behavior stay consistent?
+
 - [ ] Lower extern calls to direct Go calls by default.
   - current subset support exists for `Print`, `FloatFromInt`, `FloatFromStr`,
     `FloatFloor`, `ReadLine`, `IntFromStr`, `Sleep`, `EnvGet`, `OsArgs`,
