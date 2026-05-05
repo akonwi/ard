@@ -305,13 +305,17 @@ Status: Complete
 Status: In progress
 
 - [ ] Lower extern calls to direct Go calls by default.
-  - current subset support exists for `Print`, `FloatFromInt`, `ReadLine`,
-    `IntFromStr`, `Sleep`, JSON/decode helpers, and HTTP client response flows;
+  - current subset support exists for `Print`, `FloatFromInt`, `FloatFromStr`,
+    `FloatFloor`, `ReadLine`, `IntFromStr`, `Sleep`, `EnvGet`, `OsArgs`,
+    base64/hex helpers, JSON/decode helpers, and HTTP client response flows;
     broader extern coverage is still pending
   - this is enough for the current `ard/io::_print` path, simple numeric
     conversion cases, initial stdin-backed string input flows, async sleep
-    flows, and HTTP client / decode-driven samples like `pokemon`
+    flows, common encoding/env/argv helpers, and HTTP client / decode-driven
+    samples like `pokemon`
 - [ ] Generate thin wrappers only where direct calls are insufficient.
+  - current subset uses thin generated wrappers for cases like stdlib `Maybe`
+    bridging, dynamic map conversion, and host callback adaptation
 - [ ] Support generated structs across the Go extern boundary.
 - [ ] Support opaque extern types.
   - current type lowering accepts `Dynamic` and opaque extern host types as
@@ -325,8 +329,8 @@ Status: In progress
   - broader callback coverage beyond the HTTP serve shape is still pending
 - [ ] Compile self-hosted stdlib modules from AIR.
   - current lowering can compile deeper self-hosted stdlib paths such as
-    `ard/decode` by covering try ops, integer matches, dynamic conversions, and
-    generic duplicate-name emission
+    `ard/decode`, plus common extern-backed utility modules like `ard/base64`,
+    `ard/hex`, `ard/env`, `ard/argv`, `ard/float`, and `ard/dynamic`
 
 ### Milestone 6: parity and rollout
 

@@ -281,6 +281,28 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	}
 `)
 	}
+	if l.runtimeHelpers["list_to_dynamic"] {
+		parts = append(parts, `
+	func ardListToDynamic[T any](list []T) any {
+		out := make([]any, len(list))
+		for i, value := range list {
+			out[i] = value
+		}
+		return out
+	}
+`)
+	}
+	if l.runtimeHelpers["map_to_dynamic"] {
+		parts = append(parts, `
+	func ardMapToDynamic[V any](from map[string]V) any {
+		out := make(map[string]any, len(from))
+		for key, value := range from {
+			out[key] = value
+		}
+		return out
+	}
+`)
+	}
 	if l.runtimeHelpers["dynamic_to_any_map"] {
 		l.currentImports["stdlibffi"] = "github.com/akonwi/ard/std_lib/ffi"
 		parts = append(parts, `
@@ -2289,6 +2311,28 @@ func exportedFieldName(name string) string {
 	return string(runes)
 }
 
+func (l *lowerer) wrapStdlibMaybeCall(maybeTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
+	maybeType, err := l.goType(maybeTypeID)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	info := l.program.Types[maybeTypeID-1]
+	elemType, err := l.goType(info.Elem)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	temp := l.nextTemp()
+	stdlibMaybeType := &ast.IndexExpr{X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Maybe"), Index: elemType}
+	stmts := []ast.Stmt{
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(temp)}, Type: stdlibMaybeType}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}},
+	}
+	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: maybeType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("value"), Value: &ast.SelectorExpr{X: ast.NewIdent(temp), Sel: ast.NewIdent("Value")}},
+		&ast.KeyValueExpr{Key: ast.NewIdent("ok"), Value: &ast.SelectorExpr{X: ast.NewIdent(temp), Sel: ast.NewIdent("Some")}},
+	}}}, nil
+}
+
 func (l *lowerer) stdlibMaybeExpr(typeID air.TypeID, expr ast.Expr) (ast.Expr, error) {
 	if !validTypeID(l.program, typeID) {
 		return nil, fmt.Errorf("invalid maybe type id %d", typeID)
@@ -2543,6 +2587,82 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("ardIntFromStr"), Args: args}}, nil
 	case "Sleep":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("time", "time", "Sleep"), Args: []ast.Expr{&ast.CallExpr{Fun: l.qualified("time", "time", "Duration"), Args: args}}}}, nil
+	case "FloatFromStr":
+		wrapped, err := l.wrapStdlibMaybeCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FloatFromStr"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "FloatFloor":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FloatFloor"), Args: args}}, nil
+	case "EnvGet":
+		wrapped, err := l.wrapStdlibMaybeCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "EnvGet"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "OsArgs":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "OsArgs"), Args: args}}, nil
+	case "Base64Encode":
+		noPad, err := l.stdlibMaybeExpr(expr.Args[1].Type, args[1])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Base64Encode"), Args: []ast.Expr{args[0], noPad}}}, nil
+	case "Base64Decode":
+		noPad, err := l.stdlibMaybeExpr(expr.Args[1].Type, args[1])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Base64Decode"), Args: []ast.Expr{args[0], noPad}})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "Base64EncodeURL":
+		noPad, err := l.stdlibMaybeExpr(expr.Args[1].Type, args[1])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Base64EncodeURL"), Args: []ast.Expr{args[0], noPad}}}, nil
+	case "Base64DecodeURL":
+		noPad, err := l.stdlibMaybeExpr(expr.Args[1].Type, args[1])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Base64DecodeURL"), Args: []ast.Expr{args[0], noPad}})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "HexEncode":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HexEncode"), Args: args}}, nil
+	case "HexDecode":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HexDecode"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "StrToDynamic", "IntToDynamic", "FloatToDynamic", "BoolToDynamic":
+		return loweredExpr{stmts: stmts, expr: args[0]}, nil
+	case "ListToDynamic":
+		l.markRuntimeHelper("list_to_dynamic")
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("ardListToDynamic"), Args: args}}, nil
+	case "MapToDynamic":
+		l.markRuntimeHelper("map_to_dynamic")
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("ardMapToDynamic"), Args: args}}, nil
+	case "JsonEncode":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "JsonEncode"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
 	case "VoidToDynamic":
 		return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 	case "JsonToDynamic":

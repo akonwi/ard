@@ -170,6 +170,35 @@ func TestGenerateSourcesPropagatesTryResultAcrossDifferentResultValueTypes(t *te
 	}
 }
 
+func TestRunProgramSupportsCommonStdlibExterns(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/argv
+		use ard/base64
+		use ard/dynamic
+		use ard/env
+		use ard/float
+		use ard/hex
+
+		fn main() Bool {
+			let encoded = base64::encode("hi", true)
+			let decoded = base64::decode(encoded, true).expect("decode")
+			let hexed = hex::encode(decoded)
+			let unhex = hex::decode(hexed).expect("hex")
+			let args = argv::os_args()
+			let _path = env::get("PATH")
+			let parsed = float::from_str("3.5").or(0.0)
+			let floored = float::floor(parsed)
+			let _dyn_list = dynamic::from_list([dynamic::from_str(unhex)])
+			let _dyn_map = dynamic::object(["value": dynamic::from_int(args.size())])
+			unhex == "hi" and floored == 3.0 and args.size() >= 0
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestGenerateSourcesSupportsResultExpectAndStringPredicates(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io
