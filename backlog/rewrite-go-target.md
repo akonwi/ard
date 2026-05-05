@@ -282,19 +282,23 @@ Status: Complete
 
 ### Milestone 4: advanced language features
 
-Status: In progress
+Status: Complete
 
-- [ ] Generate tagged unions.
-  - current subset support is being built around generated union structs with a
-    tag field plus one field per member type
-- [ ] Generate native Go closures and capture handling.
+- [x] Generate tagged unions.
+  - current subset support uses generated union structs with a tag field plus
+    one field per member type
+  - this is enough to run `samples/type-unions.ard`
+- [x] Generate native Go closures and capture handling.
   - current subset support exists for generated closure literals used in sample
     comparator flows such as `List.sort`
   - current subset support also covers captured closures in async sample flows
-- [ ] Lower trait dispatch where dynamic trait objects are required.
-- [ ] Lower fibers to goroutines and typed handles.
+- [x] Lower trait dispatch where dynamic trait objects are required.
+  - current subset support covers dynamic `Str::ToString` dispatch used by
+    `samples/traits.ard`
+- [x] Lower fibers to goroutines and typed handles.
   - current subset support exists through generated `ardFiber[T]` helpers and
     `ardSpawnFiber` / `ardJoinFiber` / `ardGetFiber`
+  - this is enough to run `samples/concurrent_stress.ard`
 
 ### Milestone 5: FFI and stdlib integration
 

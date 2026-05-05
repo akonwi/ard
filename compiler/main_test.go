@@ -196,6 +196,21 @@ func TestRunGoTargetNullablesSample(t *testing.T) {
 	}
 }
 
+func TestRunGoTargetTraitsSample(t *testing.T) {
+	sourcePath := filepath.Join("samples", "traits.ard")
+	module, err := loadModule(sourcePath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
+		t.Fatalf("run go traits sample: %v", err)
+	}
+}
+
 func TestRunGoTargetConcurrentStressSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "concurrent_stress.ard")
 	module, err := loadModule(sourcePath, backend.TargetGo)

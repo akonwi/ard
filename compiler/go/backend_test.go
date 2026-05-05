@@ -231,6 +231,67 @@ func TestGenerateSourcesUsesPointersForMutableStructParams(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesSupportsCapturedClosureSort(t *testing.T) {
+	program := lowerSource(t, `
+		fn main() Int {
+			mut items = [3, 1, 2]
+			let bias = 0
+			items.sort(fn(a: Int, b: Int) Bool {
+				a + bias < b + bias
+			})
+			items.at(0)
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "sort.SliceStable") {
+		t.Fatalf("generated source missing list sort lowering:\n%s", source)
+	}
+	if !strings.Contains(source, "func(a int, b int) bool") {
+		t.Fatalf("generated source missing closure literal lowering:\n%s", source)
+	}
+	if !strings.Contains(source, "bias") {
+		t.Fatalf("generated source missing closure capture usage:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesSupportsTraitObjectDispatch(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/io
+
+		struct Book {
+			title: Str,
+		}
+
+		impl Str::ToString for Book {
+			fn to_str() Str {
+				self.title
+			}
+		}
+
+		fn show(item: Str::ToString) Str {
+			item.to_str()
+		}
+
+		fn main() Str {
+			show(Book{title: "The Hobbit"})
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "fmt.Sprint(item)") {
+		t.Fatalf("generated source missing trait object dispatch lowering:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesSupportsListSwapAndMapKeys(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
