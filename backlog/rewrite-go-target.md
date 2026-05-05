@@ -271,12 +271,13 @@ Status: Complete
     `github.com/akonwi/ard/runtime` as the default Go representation for Ard
     nullable values
 - [x] Settle the default Go lowering for `Result`.
-  - the backend now treats generated generic `ardResult[T, E]` as the default
-    Go representation for Ard result values
+  - the backend now treats `runtime.Result[T, E]` from
+    `github.com/akonwi/ard/runtime` as the default Go representation for Ard
+    result values
 - [x] Keep runtime helpers minimal and justify each one.
   - the shared helper surface is intentionally limited to shared runtime types
-    like `runtime.Maybe[T]`, generated helpers such as `ardResult` and
-    `ardFiber`, stdin parsing helpers, and deterministic key/dynamic
+    like `runtime.Maybe[T]` and `runtime.Result[T, E]`, generated helpers such
+    as `ardFiber`, stdin parsing helpers, and deterministic key/dynamic
     conversion helpers needed by generated container and host flows
 - [x] Expand import planning beyond the current minimal subset.
   - imports are now emitted from actual alias usage in generated AST instead of

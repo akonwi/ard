@@ -147,13 +147,7 @@ func (l *lowerer) markRuntimeHelper(name string) {
 func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	parts := []string{"package main\n"}
 	if l.runtimeHelpers["result"] {
-		parts = append(parts, `
-	type ardResult[T any, E any] struct {
-		value T
-		err   E
-		ok    bool
-	}
-`)
+		l.currentImports["runtime"] = "github.com/akonwi/ard/runtime"
 	}
 	if l.runtimeHelpers["fiber"] {
 		parts = append(parts, `
@@ -193,21 +187,22 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 		l.currentImports["io"] = "io"
 		l.currentImports["os"] = "os"
 		l.currentImports["strings"] = "strings"
+		l.currentImports["runtime"] = "github.com/akonwi/ard/runtime"
 		parts = append(parts, `
 	var ardStdinReader = bufio.NewReader(os.Stdin)
 
-	func ardReadLine() ardResult[string, string] {
+	func ardReadLine() runtime.Result[string, string] {
 		line, err := ardStdinReader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
 				if line == "" {
-					return ardResult[string, string]{value: "", ok: true}
+					return runtime.Result[string, string]{Value: "", Ok: true}
 				}
-				return ardResult[string, string]{value: strings.TrimRight(line, "\r\n"), ok: true}
+				return runtime.Result[string, string]{Value: strings.TrimRight(line, "\r\n"), Ok: true}
 			}
-			return ardResult[string, string]{err: err.Error()}
+			return runtime.Result[string, string]{Err: err.Error()}
 		}
-		return ardResult[string, string]{value: strings.TrimRight(line, "\r\n"), ok: true}
+		return runtime.Result[string, string]{Value: strings.TrimRight(line, "\r\n"), Ok: true}
 	}
 `)
 	}
@@ -669,8 +664,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			valueExpr = voidValueExpr()
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: typ, Elts: []ast.Expr{
-			&ast.KeyValueExpr{Key: ast.NewIdent("value"), Value: valueExpr},
-			&ast.KeyValueExpr{Key: ast.NewIdent("ok"), Value: ast.NewIdent("true")},
+			&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: valueExpr},
+			&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: ast.NewIdent("true")},
 		}}}, nil
 	case air.ExprMakeResultErr:
 		if expr.Target == nil {
@@ -685,7 +680,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: typ, Elts: []ast.Expr{
-			&ast.KeyValueExpr{Key: ast.NewIdent("err"), Value: target.expr},
+			&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: target.expr},
 		}}}, nil
 	case air.ExprMatchMaybe:
 		return l.lowerMatchMaybe(fn, expr)
@@ -1210,7 +1205,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &ast.IndexListExpr{X: ast.NewIdent("ardResult"), Indices: []ast.Expr{value, errType}}, nil
+		return &ast.IndexListExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "Result"), Indices: []ast.Expr{value, errType}}, nil
 	case air.TypeList:
 		elem, err := l.goType(info.Elem)
 		if err != nil {
@@ -1490,8 +1485,8 @@ func (l *lowerer) lowerResultOr(fn air.Function, expr air.Expr) (loweredExpr, er
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
 	stmts = append(stmts, &ast.IfStmt{
-		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("ok")},
-		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("value")}}}}},
+		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Ok")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}}},
 		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{defaultValue.expr}}}},
 	})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
@@ -1530,8 +1525,8 @@ func (l *lowerer) lowerMatchResult(fn air.Function, expr air.Expr) (loweredExpr,
 	errName := localName(fn, expr.ErrLocal)
 	l.declaredLocals[expr.OkLocal] = true
 	l.declaredLocals[expr.ErrLocal] = true
-	okBind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("value")}}}
-	errBind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("err")}}}
+	okBind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}
+	errBind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Err")}}}
 	okBody, err := l.lowerValueBlock(fn, expr.Ok, expr.Type, assignTarget)
 	if err != nil {
 		return loweredExpr{}, err
@@ -1543,7 +1538,7 @@ func (l *lowerer) lowerMatchResult(fn air.Function, expr air.Expr) (loweredExpr,
 	}
 	errBody = append([]ast.Stmt{errBind, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(errName)}}}, errBody...)
 	stmts = append(stmts, &ast.IfStmt{
-		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("ok")},
+		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Ok")},
 		Body: &ast.BlockStmt{List: okBody},
 		Else: &ast.BlockStmt{List: errBody},
 	})
@@ -1571,13 +1566,13 @@ func (l *lowerer) lowerResultExpect(fn air.Function, expr air.Expr) (loweredExpr
 		return loweredExpr{}, err
 	}
 	resultExpr := ast.NewIdent(resultTemp)
-	panicMsg := &ast.BinaryExpr{X: message.expr, Op: token.ADD, Y: &ast.BinaryExpr{X: &ast.BasicLit{Kind: token.STRING, Value: `": "`}, Op: token.ADD, Y: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{&ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("err")}}}}}
+	panicMsg := &ast.BinaryExpr{X: message.expr, Op: token.ADD, Y: &ast.BinaryExpr{X: &ast.BasicLit{Kind: token.STRING, Value: `": "`}, Op: token.ADD, Y: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{&ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("Err")}}}}}
 	stmts := append(target.stmts, message.stmts...)
 	stmts = append(stmts, resultDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	if l.isVoidType(expr.Type) {
 		stmts = append(stmts, &ast.IfStmt{
-			Cond: &ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("ok")},
+			Cond: &ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("Ok")},
 			Body: &ast.BlockStmt{},
 			Else: &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{panicMsg}}}}},
 		})
@@ -1590,8 +1585,8 @@ func (l *lowerer) lowerResultExpect(fn air.Function, expr air.Expr) (loweredExpr
 	}
 	stmts = append(stmts, decls...)
 	stmts = append(stmts, &ast.IfStmt{
-		Cond: &ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("ok")},
-		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("value")}}}}},
+		Cond: &ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("Ok")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("Value")}}}}},
 		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{panicMsg}}}}},
 	})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
@@ -1627,12 +1622,12 @@ func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, e
 	}
 	okBody := []ast.Stmt{}
 	if assignTarget != nil {
-		okBody = append(okBody, &ast.AssignStmt{Lhs: []ast.Expr{assignTarget}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("value")}}})
+		okBody = append(okBody, &ast.AssignStmt{Lhs: []ast.Expr{assignTarget}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}})
 		if expr.HasCatch {
 			okBody = append(okBody, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{assignTarget}})
 		}
 	} else {
-		okBody = append(okBody, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("value")}}})
+		okBody = append(okBody, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}})
 	}
 	var elseBody []ast.Stmt
 	if expr.HasCatch {
@@ -1644,7 +1639,7 @@ func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, e
 		catchTarget := ast.NewIdent(catchTargetName)
 		errName := localName(fn, expr.CatchLocal)
 		l.declaredLocals[expr.CatchLocal] = true
-		errBind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("err")}}}
+		errBind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Err")}}}
 		catchBody, err := l.lowerValueBlock(fn, expr.Catch, fn.Signature.Return, catchTarget)
 		if err != nil {
 			return loweredExpr{}, err
@@ -1664,12 +1659,12 @@ func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, e
 				return loweredExpr{}, err
 			}
 			returnExpr = &ast.CompositeLit{Type: returnType, Elts: []ast.Expr{
-				&ast.KeyValueExpr{Key: ast.NewIdent("err"), Value: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("err")}},
+				&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Err")}},
 			}}
 		}
 		elseBody = []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{returnExpr}}}
 	}
-	stmts = append(stmts, &ast.IfStmt{Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("ok")}, Body: &ast.BlockStmt{List: okBody}, Else: &ast.BlockStmt{List: elseBody}})
+	stmts = append(stmts, &ast.IfStmt{Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Ok")}, Body: &ast.BlockStmt{List: okBody}, Else: &ast.BlockStmt{List: elseBody}})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
 
@@ -2374,10 +2369,6 @@ func (l *lowerer) wrapValueErrorCall(resultTypeID air.TypeID, call ast.Expr) (lo
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	errType, err := l.goType(resultType.Error)
-	if err != nil {
-		return loweredExpr{}, err
-	}
 	valueTemp := l.nextTemp()
 	errTemp := l.nextTemp()
 	decls := []ast.Stmt{
@@ -2390,10 +2381,10 @@ func (l *lowerer) wrapValueErrorCall(resultTypeID air.TypeID, call ast.Expr) (lo
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	resultExpr := &ast.CompositeLit{Type: &ast.IndexListExpr{X: ast.NewIdent("ardResult"), Indices: []ast.Expr{valueType, errType}}, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("value"), Value: ast.NewIdent(valueTemp)},
-		&ast.KeyValueExpr{Key: ast.NewIdent("err"), Value: errExpr},
-		&ast.KeyValueExpr{Key: ast.NewIdent("ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: ast.NewIdent("nil")}},
+	resultExpr := &ast.CompositeLit{Type: mustTypeExpr(l, resultTypeID), Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: ast.NewIdent(valueTemp)},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: errExpr},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: ast.NewIdent("nil")}},
 	}}
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
@@ -2505,9 +2496,9 @@ func (l *lowerer) lowerHTTPServeExtern(args []ast.Expr, handlerMapType air.TypeI
 		return loweredExpr{}, err
 	}
 	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("value"), Value: voidValueExpr()},
-		&ast.KeyValueExpr{Key: ast.NewIdent("err"), Value: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{ast.NewIdent(errName)}}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errName), Op: token.EQL, Y: ast.NewIdent("nil")}},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: voidValueExpr()},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{ast.NewIdent(errName)}}},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errName), Op: token.EQL, Y: ast.NewIdent("nil")}},
 	}}}, nil
 }
 
@@ -2523,10 +2514,6 @@ func (l *lowerer) wrapStdlibResultCall(resultTypeID air.TypeID, call ast.Expr) (
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	errType, err := l.goType(resultType.Error)
-	if err != nil {
-		return loweredExpr{}, err
-	}
 	resultTemp := l.nextTemp()
 	stdlibResultType := &ast.IndexListExpr{X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Result"), Indices: []ast.Expr{valueType, l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Error")}}
 	stmts := []ast.Stmt{
@@ -2537,10 +2524,10 @@ func (l *lowerer) wrapStdlibResultCall(resultTypeID air.TypeID, call ast.Expr) (
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	resultExpr := &ast.CompositeLit{Type: &ast.IndexListExpr{X: ast.NewIdent("ardResult"), Indices: []ast.Expr{valueType, errType}}, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("value"), Value: &ast.SelectorExpr{X: ast.NewIdent(resultTemp), Sel: ast.NewIdent("Value")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("err"), Value: errExpr},
-		&ast.KeyValueExpr{Key: ast.NewIdent("ok"), Value: &ast.SelectorExpr{X: ast.NewIdent(resultTemp), Sel: ast.NewIdent("Ok")}},
+	resultExpr := &ast.CompositeLit{Type: mustTypeExpr(l, resultTypeID), Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.SelectorExpr{X: ast.NewIdent(resultTemp), Sel: ast.NewIdent("Value")}},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: errExpr},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.SelectorExpr{X: ast.NewIdent(resultTemp), Sel: ast.NewIdent("Ok")}},
 	}}
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }

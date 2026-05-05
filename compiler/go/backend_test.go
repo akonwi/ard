@@ -165,7 +165,7 @@ func TestGenerateSourcesPropagatesTryResultAcrossDifferentResultValueTypes(t *te
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !strings.Contains(source, "return ardResult[int, string]{err: _tmp_") {
+	if !strings.Contains(source, "return runtime.Result[int, string]{Err: _tmp_") {
 		t.Fatalf("generated source missing result error propagation conversion:\n%s", source)
 	}
 }
@@ -217,8 +217,8 @@ func TestGenerateSourcesSupportsResultExpectAndStringPredicates(t *testing.T) {
 	for _, source := range sources {
 		combined += string(source)
 	}
-	if !strings.Contains(combined, "type ardResult") {
-		t.Fatalf("generated source missing result helper:\n%s", combined)
+	if !strings.Contains(combined, "runtime.Result[string, string]") {
+		t.Fatalf("generated source missing runtime.Result usage:\n%s", combined)
 	}
 	if !strings.Contains(combined, "ardReadLine()") {
 		t.Fatalf("generated source missing ReadLine lowering:\n%s", combined)
