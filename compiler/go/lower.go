@@ -299,7 +299,7 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 		l.declaredLocals[capture.Local] = true
 	}
 	for _, param := range fn.Signature.Params {
-		paramType, err := l.goType(param.Type)
+		paramType, err := l.goParamType(param)
 		if err != nil {
 			return nil, err
 		}
@@ -825,18 +825,25 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 	case air.ExprCall:
 		args := make([]ast.Expr, 0, len(expr.Args))
 		stmts := []ast.Stmt{}
-		for _, arg := range expr.Args {
+		if !validFunctionID(l.program, expr.Function) {
+			return loweredExpr{}, fmt.Errorf("invalid function id %d", expr.Function)
+		}
+		target := l.program.Functions[expr.Function]
+		for i, arg := range expr.Args {
 			loweredArg, err := l.lowerExpr(fn, arg)
 			if err != nil {
 				return loweredExpr{}, err
 			}
 			stmts = append(stmts, loweredArg.stmts...)
-			args = append(args, loweredArg.expr)
+			argExpr := loweredArg.expr
+			if i < len(target.Signature.Params) && target.Signature.Params[i].Mutable && validTypeID(l.program, target.Signature.Params[i].Type) {
+				paramType := l.program.Types[target.Signature.Params[i].Type-1]
+				if paramType.Kind == air.TypeStruct {
+					argExpr = &ast.UnaryExpr{Op: token.AND, X: argExpr}
+				}
+			}
+			args = append(args, argExpr)
 		}
-		if !validFunctionID(l.program, expr.Function) {
-			return loweredExpr{}, fmt.Errorf("invalid function id %d", expr.Function)
-		}
-		target := l.program.Functions[expr.Function]
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, target)), Args: args}}, nil
 	case air.ExprIntAdd, air.ExprIntSub, air.ExprIntMul, air.ExprIntDiv, air.ExprIntMod,
 		air.ExprFloatAdd, air.ExprFloatSub, air.ExprFloatMul, air.ExprFloatDiv,
@@ -1019,6 +1026,33 @@ func voidValueExpr() ast.Expr {
 	return &ast.CompositeLit{Type: voidTypeExpr()}
 }
 
+func (l *lowerer) goParamType(param air.Param) (ast.Expr, error) {
+	typ, err := l.goType(param.Type)
+	if err != nil {
+		return nil, err
+	}
+	if !param.Mutable || !validTypeID(l.program, param.Type) {
+		return typ, nil
+	}
+	info := l.program.Types[param.Type-1]
+	if info.Kind == air.TypeStruct {
+		return &ast.StarExpr{X: typ}, nil
+	}
+	return typ, nil
+}
+
+func (l *lowerer) isHTTPHandlerFunctionType(info air.TypeInfo) bool {
+	if info.Kind != air.TypeFunction || len(info.Params) != 2 || !l.isVoidType(info.Return) {
+		return false
+	}
+	if !validTypeID(l.program, info.Params[0]) || !validTypeID(l.program, info.Params[1]) {
+		return false
+	}
+	left := l.program.Types[info.Params[0]-1]
+	right := l.program.Types[info.Params[1]-1]
+	return left.Kind == air.TypeStruct && right.Kind == air.TypeStruct && left.Name == "Request" && right.Name == "Response"
+}
+
 func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 	if !validTypeID(l.program, typeID) {
 		return nil, fmt.Errorf("invalid type id %d", typeID)
@@ -1049,10 +1083,13 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return &ast.IndexExpr{X: ast.NewIdent("ardFiber"), Index: elem}, nil
 	case air.TypeFunction:
 		params := make([]*ast.Field, 0, len(info.Params))
-		for _, paramTypeID := range info.Params {
+		for i, paramTypeID := range info.Params {
 			paramType, err := l.goType(paramTypeID)
 			if err != nil {
 				return nil, err
+			}
+			if l.isHTTPHandlerFunctionType(info) && i == 1 {
+				paramType = &ast.StarExpr{X: paramType}
 			}
 			params = append(params, &ast.Field{Type: paramType})
 		}
@@ -1734,7 +1771,7 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	}
 	params := []*ast.Field{}
 	for i, param := range closureFn.Signature.Params {
-		paramType, err := l.goType(param.Type)
+		paramType, err := l.goParamType(param)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -2275,7 +2312,7 @@ func (l *lowerer) lowerHTTPServeExtern(args []ast.Expr, handlerMapType air.TypeI
 		Body: &ast.BlockStmt{List: []ast.Stmt{
 			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(ardReqName)}, Tok: token.DEFINE, Rhs: []ast.Expr{ardReqLit}},
 			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(ardResName)}, Tok: token.DEFINE, Rhs: []ast.Expr{ardResLit}},
-			&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent(handlerName), Args: []ast.Expr{ast.NewIdent(ardReqName), ast.NewIdent(ardResName)}}},
+			&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent(handlerName), Args: []ast.Expr{ast.NewIdent(ardReqName), &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(ardResName)}}}},
 			&ast.AssignStmt{Lhs: []ast.Expr{&ast.StarExpr{X: ast.NewIdent(resName)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{stdlibResLit}},
 			&ast.ReturnStmt{Results: []ast.Expr{voidValueExpr(), ast.NewIdent("nil")}},
 		}},

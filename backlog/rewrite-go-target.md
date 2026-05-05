@@ -308,6 +308,8 @@ Status: In progress
 - [ ] Support callback externs as native Go closures.
   - current subset now includes an initial `HTTP_Serve` callback adaptation
     for mutable response handlers
+  - mutable struct params in the generated Go subset now lower through pointer
+    parameters/calls where needed to preserve callback-side mutations
   - broader callback coverage beyond the HTTP serve shape is still pending
 - [ ] Compile self-hosted stdlib modules from AIR.
   - current lowering can compile deeper self-hosted stdlib paths such as
@@ -323,6 +325,7 @@ Status: In progress
     `type-unions`, and `concurrent_stress`
   - current lowering can also run `word_frequency` and `pokemon`
   - current build coverage now includes `server`
+  - manual route checks now cover `/`, `/me`, and `/api/auth/sign-up`
   - current next known server-side work is broader callback/host coverage
     beyond the initial `HTTP_Serve` path
   - manual sample checks have also reached interactive/result-driven flows like

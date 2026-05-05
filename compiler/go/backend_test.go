@@ -166,6 +166,35 @@ func TestGenerateSourcesSupportsResultExpectAndStringPredicates(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesUsesPointersForMutableStructParams(t *testing.T) {
+	program := lowerSource(t, `
+		struct Response {
+			body: Str,
+		}
+
+		fn set_body(mut res: Response) Void {
+			res.body = "ok"
+		}
+
+		fn main() Void {
+			mut res = Response{body: ""}
+			set_body(res)
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "func test_ard__set_body(res *type__Response)") {
+		t.Fatalf("generated source missing pointer mutable param lowering:\n%s", source)
+	}
+	if !strings.Contains(source, "test_ard__set_body(&res_0)") {
+		t.Fatalf("generated source missing pointer call lowering:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesSupportsFieldMutation(t *testing.T) {
 	program := lowerSource(t, `
 		struct Counter {
