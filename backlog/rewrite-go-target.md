@@ -4,6 +4,23 @@ This backlog tracks a clean replacement for Ard's Go target after AIR and
 `vm_next` parity. The intent is to start over from AIR, not to refactor the
 current Go emitter into shape.
 
+## Ultimate goal
+
+The end state is that `ard run --target go` and `ard build --target go` can run
+existing Ard programs with the same broad coverage users expect from the primary
+runtime targets.
+
+That means the rewritten Go target should eventually be able to execute:
+
+- normal Ard applications
+- sample programs
+- test programs
+- stdlib-driven programs
+- real projects that currently run on the VM targets
+
+In short: the Go target should become a real backend for Ard, not a partial or
+experimental transpiler.
+
 ## Status
 
 Pending
@@ -26,28 +43,108 @@ architecture, runtime assumptions, or lowering strategy by default.
 ## Goals
 
 - Build the Go target from scratch against AIR.
+- Use a real compiler pipeline: `AIR -> Go AST -> go/format`.
+- Emit idiomatic Go where the target supports a direct mapping.
+- Generate one Go file per Ard module.
+- Generate one Go package for the whole Ard project.
 - Generate native Go values for Ard scalars and containers.
 - Generate Go structs for Ard structs crossing backend and FFI boundaries.
 - Generate tagged representations for Ard unions.
 - Generate native Go closures for ordinary Ard function values.
 - Lower Ard fibers to goroutines plus typed fiber/result handles.
 - Coalesce self-hosted Ard stdlib modules into generated Go.
-- Emit direct Go calls or generated adapters for low-level externs.
+- Emit direct Go calls or thin generated wrappers for low-level externs.
 - Preserve Ard's testing model and single-file executable workflow where
   possible.
+- Reach the point where `--target go` can run all existing Ard programs.
 
 ## Non-goals
 
 - Do not preserve the current Go target's implementation structure.
 - Do not incrementally patch the current Go target into the AIR model.
+- Do not introduce a dedicated Go-specific IR unless direct AIR-to-Go-AST
+  lowering proves insufficient later.
 - Do not make `runtime.Object` part of generated Go.
 - Do not model every Ard value as `any`.
+- Do not copy VM-oriented extern registries, callback handle tables, or
+  adapter registration flows into the Go backend when direct Go calls are
+  available.
 - Do not force `vm_next` callback handles into generated Go when native Go
   closures are available.
 
+## Pipeline
+
+The new backend should be a proper compiler pipeline, parallel to `vm_next` and
+`compiler/javascript`:
+
+```text
+Ard source
+  -> parse
+  -> checker
+  -> AIR
+  -> Go backend lowering
+  -> Go AST
+  -> go/format
+  -> generated Go source / built binary
+```
+
+The Go backend should take `air.Program` as its semantic input. It should not
+rely on checker nodes, parse AST, old bytecode structures, or the deleted Go
+backend architecture.
+
+A separate Go-specific IR is not planned as part of the rewrite. The initial
+implementation should lower AIR directly into Go AST, with backend-owned helper
+state for imports, symbols, files, and expression lowering.
+
+## Output structure
+
+The default output structure should be:
+
+- one generated Go package per Ard project
+- one generated Go file per Ard module
+
+This keeps module boundaries visible in generated code while avoiding the
+complexity of a multi-package Go emission strategy during the rewrite.
+
+## Lowering approach
+
+The backend should lower Ard semantics into Go semantics explicitly.
+
+It should not try to preserve expression-oriented Ard syntax when Go's
+statement-oriented structure is a better fit. When needed, AIR expressions
+should lower into:
+
+- setup statements
+- intermediate temporaries
+- a final Go expression or value
+- explicit early returns
+
+That approach is especially important for:
+
+- block expressions
+- `if` expressions
+- `try`
+- match lowering
+- short-circuiting flows
+
+The working mental model is:
+
+```go
+type loweredExpr struct {
+    Stmts []ast.Stmt
+    Expr  ast.Expr
+}
+```
+
+The generated Go should be pure and idiomatic where possible. Ard semantics such
+as `try` should become explicit Go control flow, temporary values, and early
+returns rather than being forced through runtime abstractions.
+
 ## Type Mapping
 
-Initial Go mapping should follow the AIR design:
+Initial Go mapping should follow the AIR design, but the backend should prefer
+plain Go representations where they make the generated code clearer and more
+idiomatic:
 
 ```text
 Int          -> int
@@ -58,14 +155,20 @@ Str          -> string
 [K:V]        -> map[K]V for Ard-keyable K
 struct       -> generated Go struct
 enum         -> generated named integer type
-T?           -> ardrt.Maybe[T]
-T!E          -> ardrt.Result[T,E] or `(T, error)` where the binding says so
+T?           -> plain Go shape where practical, likely `(T, bool)`
+T!E          -> plain Go shape where practical, often `(T, error)`
 union        -> generated tagged representation
 Dynamic      -> opaque dynamic representation behind decode APIs
 extern type  -> host resource handle
 fn(...) ...  -> native Go function
 Fiber[T]     -> generated/runtime fiber handle
 ```
+
+Small runtime helper types may still be useful in some cases, but the default
+rule should be:
+
+> lower to plain Go first; introduce runtime helpers only when they materially
+> improve the generated code or are required to preserve Ard semantics cleanly.
 
 ## Stdlib Model
 
@@ -81,25 +184,82 @@ Examples:
 
 ## FFI Model
 
-The Go target should reuse the generated FFI contract:
+The Go target should take advantage of the fact that the output is already Go.
+Unlike `vm_next`, it should not need a registry-based or VM-style adapter layer
+for normal extern calls.
 
-- generated structs are the default boundary type
-- opaque externs represent host resources that do not fit Ard's type system
-- callback boundaries become native Go closures in generated Go
-- explicit adapters can support host-native structs later
+The preferred model is:
 
-## Checklist
+- direct Go calls for externs by default
+- generated structs as the default boundary type
+- opaque externs for host resources that do not fit Ard's type system
+- native Go closures for callback boundaries
+- thin generated wrappers only when needed to reconcile Ard semantics with the
+  chosen Go representation
 
-- [ ] Choose the package layout for the replacement Go target.
-- [ ] Lower AIR scalar expressions and direct calls to Go.
-- [ ] Generate package/module structure from AIR modules.
-- [ ] Generate structs, enums, `Maybe`, and `Result`.
+That means the Go backend should avoid rebuilding VM-oriented concepts such as:
+
+- extern registration maps
+- dynamic binding registries
+- callback handle tables
+- generalized runtime conversion layers
+
+Where an extern already matches the generated Go surface, the backend should
+emit a direct static Go call.
+
+## Milestones
+
+### Milestone 1: backend skeleton
+
+- [ ] Recreate `compiler/go_backend/` with a clean package layout.
+- [ ] Add the public backend entrypoints for run/build/generate.
+- [ ] Lower AIR directly into Go AST.
+- [ ] Render generated Go through `go/format`.
+- [ ] Generate one Go file per Ard module.
+- [ ] Generate one Go package per Ard project.
+- [ ] Establish deterministic symbol naming and import planning.
+- [ ] Support a tiny end-to-end subset: constants, locals, arithmetic, direct
+      function calls, and `main`.
+- [ ] Define the extern lowering model, even if initial support is stubbed.
+
+### Milestone 2: structured control flow
+
+- [ ] Lower block expressions through temporaries and statement setup.
+- [ ] Lower `if` expressions and `if` statements.
+- [ ] Lower assignments and mutable locals.
+- [ ] Lower loops and control-flow-heavy statement bodies.
+- [ ] Lower `try` into explicit intermediate values and early returns.
+
+### Milestone 3: core data model
+
+- [ ] Generate Ard structs as Go structs.
+- [ ] Generate enums.
+- [ ] Lower lists and maps to native Go containers where representable.
+- [ ] Settle the default Go lowering for `Maybe`.
+- [ ] Settle the default Go lowering for `Result`.
+- [ ] Keep runtime helpers minimal and justify each one.
+
+### Milestone 4: advanced language features
+
 - [ ] Generate tagged unions.
-- [ ] Generate trait dispatch where dynamic trait objects are required.
+- [ ] Generate native Go closures and capture handling.
+- [ ] Lower trait dispatch where dynamic trait objects are required.
 - [ ] Lower fibers to goroutines and typed handles.
-- [ ] Generate native Go closures and captures.
-- [ ] Integrate generated/project FFI adapters.
+
+### Milestone 5: FFI and stdlib integration
+
+- [ ] Lower extern calls to direct Go calls by default.
+- [ ] Generate thin wrappers only where direct calls are insufficient.
+- [ ] Support generated structs across the Go extern boundary.
+- [ ] Support opaque extern types.
+- [ ] Support callback externs as native Go closures.
 - [ ] Compile self-hosted stdlib modules from AIR.
-- [ ] Add Go target parity tests using the existing `vm_next` parity corpus and
-  sample programs.
+
+### Milestone 6: parity and rollout
+
+- [ ] Add Go target parity tests using the existing `vm_next` parity corpus.
+- [ ] Run sample programs through `--target go`.
+- [ ] Add project-level regression coverage for real Ard applications.
 - [ ] Add runtime benchmark coverage for the rewritten Go target.
+- [ ] Reach the release gate: `ard run --target go` can run all existing Ard
+      programs.
