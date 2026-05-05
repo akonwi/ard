@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/akonwi/ard/air"
 )
@@ -85,15 +87,31 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 			return err
 		}
 	}
-	const goMod = "module generated\n\ngo 1.24\n"
+	goMod := "module generated\n\ngo 1.24\n"
+	if moduleRoot, ok := compilerModuleRoot(); ok {
+		goMod += "\nrequire github.com/akonwi/ard v0.0.0\n"
+		goMod += fmt.Sprintf("replace github.com/akonwi/ard => %s\n", moduleRoot)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o644); err != nil {
 		return err
 	}
 	return nil
 }
 
+func compilerModuleRoot() (string, bool) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", false
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), ".."))
+	if strings.TrimSpace(root) == "" {
+		return "", false
+	}
+	return root, true
+}
+
 func buildGeneratedProgram(dir string, outputPath string) error {
-	cmd := exec.Command("go", "build", "-o", outputPath, ".")
+	cmd := exec.Command("go", "build", "-mod=mod", "-o", outputPath, ".")
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

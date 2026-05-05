@@ -294,17 +294,23 @@ Status: In progress
 
 - [ ] Lower extern calls to direct Go calls by default.
   - current subset support exists for `Print`, `FloatFromInt`, `ReadLine`,
-    `IntFromStr`, and `Sleep`; broader extern coverage is still pending
+    `IntFromStr`, `Sleep`, JSON/decode helpers, and HTTP client response flows;
+    broader extern coverage is still pending
   - this is enough for the current `ard/io::_print` path, simple numeric
-    conversion cases, initial stdin-backed string input flows, and async sleep
-    flows
+    conversion cases, initial stdin-backed string input flows, async sleep
+    flows, and HTTP client / decode-driven samples like `pokemon`
 - [ ] Generate thin wrappers only where direct calls are insufficient.
 - [ ] Support generated structs across the Go extern boundary.
 - [ ] Support opaque extern types.
   - current type lowering accepts `Dynamic` and opaque extern host types as
     `any`, but resource-specific extern helpers are still pending
 - [ ] Support callback externs as native Go closures.
+  - current remaining server-side work is centered here, especially
+    `HTTP_Serve`-style callback adaptation for mutable response handlers
 - [ ] Compile self-hosted stdlib modules from AIR.
+  - current lowering can compile deeper self-hosted stdlib paths such as
+    `ard/decode` by covering try ops, integer matches, dynamic conversions, and
+    generic duplicate-name emission
 
 ### Milestone 6: parity and rollout
 
@@ -313,7 +319,7 @@ Status: In progress
   - current automated sample coverage includes `variables`, `loops`,
     `collections`, `nullables`, `maps`, `lights`, `temperatures`, `modules`,
     `type-unions`, and `concurrent_stress`
-  - current lowering can also run `word_frequency`
+  - current lowering can also run `word_frequency` and `pokemon`
   - current next known server-side blocker is direct extern coverage for
     `HTTP_Serve`
   - manual sample checks have also reached interactive/result-driven flows like

@@ -107,6 +107,33 @@ func TestGenerateSourcesSupportsStructsAndEnums(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesPropagatesTryResultAcrossDifferentResultValueTypes(t *testing.T) {
+	program := lowerSource(t, `
+		fn read_text() Str!Str {
+			Result::err("bad")
+		}
+
+		fn parse() Int!Str {
+			let text = try read_text()
+			let _ignore = text
+			Result::ok(1)
+		}
+
+		fn main() Int!Str {
+			parse()
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "return ardResult[int, string]{err: _tmp_") {
+		t.Fatalf("generated source missing result error propagation conversion:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesSupportsResultExpectAndStringPredicates(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io

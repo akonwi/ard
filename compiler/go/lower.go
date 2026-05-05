@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"sort"
+	"unicode"
 
 	"github.com/akonwi/ard/air"
 )
@@ -96,7 +97,9 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 
 func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	l.currentImports["bufio"] = "bufio"
+	l.currentImports["fmt"] = "fmt"
 	l.currentImports["io"] = "io"
+	l.currentImports["stdlibffi"] = "github.com/akonwi/ard/std_lib/ffi"
 	l.currentImports["os"] = "os"
 	l.currentImports["slices"] = "slices"
 	l.currentImports["strconv"] = "strconv"
@@ -184,6 +187,37 @@ func ardSortedStringKeys[V any](m map[string]V) []string {
 	}
 	slices.Sort(keys)
 	return keys
+}
+
+func ardSortedAnyKeys[V any](m map[any]V) []any {
+	keys := make([]any, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.SortFunc(keys, func(a any, b any) int {
+		as := fmt.Sprint(a)
+		bs := fmt.Sprint(b)
+		if as < bs {
+			return -1
+		}
+		if as > bs {
+			return 1
+		}
+		return 0
+	})
+	return keys
+}
+
+func ardDynamicToAnyMap(data any) (map[any]any, error) {
+	values, err := stdlibffi.DynamicToMap(data)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[any]any, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out, nil
 }
 `
 	file, err := parser.ParseFile(token.NewFileSet(), "prelude.go", src, 0)
@@ -521,8 +555,41 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		return loweredExpr{expr: &ast.CompositeLit{Type: typ}}, nil
+	case air.ExprMakeResultOk:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("result ok missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		typ, err := l.goType(expr.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: typ, Elts: []ast.Expr{
+			&ast.KeyValueExpr{Key: ast.NewIdent("value"), Value: target.expr},
+			&ast.KeyValueExpr{Key: ast.NewIdent("ok"), Value: ast.NewIdent("true")},
+		}}}, nil
+	case air.ExprMakeResultErr:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("result err missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		typ, err := l.goType(expr.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: typ, Elts: []ast.Expr{
+			&ast.KeyValueExpr{Key: ast.NewIdent("err"), Value: target.expr},
+		}}}, nil
 	case air.ExprMatchMaybe:
 		return l.lowerMatchMaybe(fn, expr)
+	case air.ExprTryMaybe:
+		return l.lowerTryMaybe(fn, expr)
 	case air.ExprMaybeOr:
 		return l.lowerMaybeOr(fn, expr)
 	case air.ExprResultExpect:
@@ -531,8 +598,12 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerResultOr(fn, expr)
 	case air.ExprMatchResult:
 		return l.lowerMatchResult(fn, expr)
+	case air.ExprTryResult:
+		return l.lowerTryResult(fn, expr)
 	case air.ExprMatchEnum:
 		return l.lowerMatchEnum(fn, expr)
+	case air.ExprMatchInt:
+		return l.lowerMatchInt(fn, expr)
 	case air.ExprMakeList:
 		return l.lowerMakeList(fn, expr)
 	case air.ExprStrSplit:
@@ -549,6 +620,11 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		stmts := append(target.stmts, delimiter.stmts...)
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "Split"), Args: []ast.Expr{target.expr, delimiter.expr}}}, nil
+	case air.ExprToDynamic:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("to dynamic missing target")
+		}
+		return l.lowerExpr(fn, *expr.Target)
 	case air.ExprStrTrim:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("str trim missing target")
@@ -595,6 +671,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: target.expr, Index: index.expr}}, nil
 	case air.ExprListPush:
 		return l.lowerListPush(fn, expr)
+	case air.ExprListPrepend:
+		return l.lowerListPrepend(fn, expr)
 	case air.ExprListSet:
 		return l.lowerListSet(fn, expr)
 	case air.ExprListSort:
@@ -1038,6 +1116,54 @@ func (l *lowerer) lowerMatchUnion(fn air.Function, expr air.Expr) (loweredExpr, 
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
 
+func (l *lowerer) lowerMatchInt(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("int match missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := ast.NewIdent("nil")
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	var assignTarget ast.Expr
+	if !l.isVoidType(expr.Type) {
+		temp := l.nextTemp()
+		decls, err := l.declareTemp(expr.Type, temp)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, decls...)
+		assignTarget = ast.NewIdent(temp)
+		resultExpr = ast.NewIdent(temp)
+	}
+	cases := make([]ast.Stmt, 0, len(expr.IntCases)+len(expr.RangeCases)+1)
+	for _, intCase := range expr.IntCases {
+		body, err := l.lowerValueBlock(fn, intCase.Body, expr.Type, assignTarget)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		cases = append(cases, &ast.CaseClause{List: []ast.Expr{&ast.BinaryExpr{X: target.expr, Op: token.EQL, Y: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", intCase.Value)}}}, Body: body})
+	}
+	for _, rangeCase := range expr.RangeCases {
+		body, err := l.lowerValueBlock(fn, rangeCase.Body, expr.Type, assignTarget)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		cond := &ast.BinaryExpr{X: &ast.BinaryExpr{X: target.expr, Op: token.GEQ, Y: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", rangeCase.Start)}}, Op: token.LAND, Y: &ast.BinaryExpr{X: target.expr, Op: token.LEQ, Y: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", rangeCase.End)}}}
+		cases = append(cases, &ast.CaseClause{List: []ast.Expr{cond}, Body: body})
+	}
+	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
+		body, err := l.lowerValueBlock(fn, expr.CatchAll, expr.Type, assignTarget)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		cases = append(cases, &ast.CaseClause{Body: body})
+	}
+	stmts = append(stmts, &ast.SwitchStmt{Tag: ast.NewIdent("true"), Body: &ast.BlockStmt{List: cases}})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
 func (l *lowerer) lowerMatchEnum(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("enum match missing target")
@@ -1245,6 +1371,152 @@ func (l *lowerer) lowerResultExpect(fn air.Function, expr air.Expr) (loweredExpr
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
 }
 
+func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("try result missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetTemp := l.nextTemp()
+	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetExpr := ast.NewIdent(targetTemp)
+	stmts := append(target.stmts, targetDecls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	var resultExpr ast.Expr = ast.NewIdent("nil")
+	var assignTarget ast.Expr
+	if !l.isVoidType(expr.Type) {
+		temp := l.nextTemp()
+		decls, err := l.declareTemp(expr.Type, temp)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, decls...)
+		resultExpr = ast.NewIdent(temp)
+		assignTarget = resultExpr
+	}
+	okBody := []ast.Stmt{}
+	if assignTarget != nil {
+		okBody = append(okBody, &ast.AssignStmt{Lhs: []ast.Expr{assignTarget}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("value")}}})
+		if expr.HasCatch {
+			okBody = append(okBody, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{assignTarget}})
+		}
+	} else {
+		okBody = append(okBody, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("value")}}})
+	}
+	var elseBody []ast.Stmt
+	if expr.HasCatch {
+		catchTargetName := l.nextTemp()
+		catchDecls, err := l.declareTemp(fn.Signature.Return, catchTargetName)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		catchTarget := ast.NewIdent(catchTargetName)
+		errName := localName(fn, expr.CatchLocal)
+		l.declaredLocals[expr.CatchLocal] = true
+		errBind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("err")}}}
+		catchBody, err := l.lowerValueBlock(fn, expr.Catch, fn.Signature.Return, catchTarget)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		elseBody = append(catchDecls, errBind, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(errName)}})
+		elseBody = append(elseBody, catchBody...)
+		if !l.isVoidType(fn.Signature.Return) {
+			elseBody = append(elseBody, &ast.ReturnStmt{Results: []ast.Expr{catchTarget}})
+		} else {
+			elseBody = append(elseBody, &ast.ReturnStmt{})
+		}
+	} else {
+		returnExpr := ast.Expr(targetExpr)
+		if fn.Signature.Return != expr.Target.Type {
+			returnType, err := l.goType(fn.Signature.Return)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			returnExpr = &ast.CompositeLit{Type: returnType, Elts: []ast.Expr{
+				&ast.KeyValueExpr{Key: ast.NewIdent("err"), Value: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("err")}},
+			}}
+		}
+		elseBody = []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{returnExpr}}}
+	}
+	stmts = append(stmts, &ast.IfStmt{Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("ok")}, Body: &ast.BlockStmt{List: okBody}, Else: &ast.BlockStmt{List: elseBody}})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) lowerTryMaybe(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("try maybe missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetTemp := l.nextTemp()
+	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetExpr := ast.NewIdent(targetTemp)
+	stmts := append(target.stmts, targetDecls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	var resultExpr ast.Expr = ast.NewIdent("nil")
+	var assignTarget ast.Expr
+	if !l.isVoidType(expr.Type) {
+		temp := l.nextTemp()
+		decls, err := l.declareTemp(expr.Type, temp)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, decls...)
+		resultExpr = ast.NewIdent(temp)
+		assignTarget = resultExpr
+	}
+	someBody := []ast.Stmt{}
+	if assignTarget != nil {
+		someBody = append(someBody, &ast.AssignStmt{Lhs: []ast.Expr{assignTarget}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("value")}}})
+		if expr.HasCatch {
+			someBody = append(someBody, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{assignTarget}})
+		}
+	} else {
+		someBody = append(someBody, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("value")}}})
+	}
+	var noneBody []ast.Stmt
+	if expr.HasCatch {
+		catchTargetName := l.nextTemp()
+		catchDecls, err := l.declareTemp(fn.Signature.Return, catchTargetName)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		catchTarget := ast.NewIdent(catchTargetName)
+		catchBody, err := l.lowerValueBlock(fn, expr.Catch, fn.Signature.Return, catchTarget)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		noneBody = append(catchDecls, catchBody...)
+		if !l.isVoidType(fn.Signature.Return) {
+			noneBody = append(noneBody, &ast.ReturnStmt{Results: []ast.Expr{catchTarget}})
+		} else {
+			noneBody = append(noneBody, &ast.ReturnStmt{})
+		}
+	} else {
+		returnExpr := ast.Expr(targetExpr)
+		if fn.Signature.Return != expr.Target.Type {
+			returnType, err := l.goType(fn.Signature.Return)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			returnExpr = &ast.CompositeLit{Type: returnType}
+		}
+		noneBody = []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{returnExpr}}}
+	}
+	stmts = append(stmts, &ast.IfStmt{Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("ok")}, Body: &ast.BlockStmt{List: someBody}, Else: &ast.BlockStmt{List: noneBody}})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
 func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("maybe match missing target")
@@ -1447,6 +1719,35 @@ func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, err
 	stmts = append(stmts, value.stmts...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: index.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{value.expr}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("true")}, nil
+}
+
+func (l *lowerer) lowerListPrepend(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("list prepend expects target and value")
+	}
+	if expr.Target.Kind != air.ExprLoadLocal {
+		return loweredExpr{}, fmt.Errorf("list prepend currently requires local target")
+	}
+	value, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if !validTypeID(l.program, expr.Target.Type) {
+		return loweredExpr{}, fmt.Errorf("invalid list prepend target type")
+	}
+	listInfo := l.program.Types[expr.Target.Type-1]
+	if listInfo.Kind != air.TypeList {
+		return loweredExpr{}, fmt.Errorf("list prepend target type kind %d", listInfo.Kind)
+	}
+	elemType, err := l.goType(listInfo.Elem)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	name := localName(fn, expr.Target.Local)
+	assign := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{&ast.CompositeLit{Type: &ast.ArrayType{Elt: elemType}, Elts: []ast.Expr{value.expr}}, ast.NewIdent(name)}, Ellipsis: 2}}}
+	stmts := append([]ast.Stmt{}, value.stmts...)
+	stmts = append(stmts, assign)
+	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(name)}}}, nil
 }
 
 func (l *lowerer) lowerListSort(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -1682,6 +1983,8 @@ func (l *lowerer) mapKeyHelper(typeID air.TypeID) (string, error) {
 		return "ardSortedIntKeys", nil
 	case air.TypeStr:
 		return "ardSortedStringKeys", nil
+	case air.TypeDynamic, air.TypeExtern:
+		return "ardSortedAnyKeys", nil
 	default:
 		return "", fmt.Errorf("unsupported map key type %s for ordered iteration", keyType.Name)
 	}
@@ -1719,6 +2022,122 @@ func (l *lowerer) lowerTraitCall(fn air.Function, expr air.Expr) (loweredExpr, e
 	}
 }
 
+func exportedFieldName(name string) string {
+	if name == "" {
+		return ""
+	}
+	runes := []rune(name)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
+}
+
+func (l *lowerer) stdlibMaybeExpr(typeID air.TypeID, expr ast.Expr) (ast.Expr, error) {
+	if !validTypeID(l.program, typeID) {
+		return nil, fmt.Errorf("invalid maybe type id %d", typeID)
+	}
+	info := l.program.Types[typeID-1]
+	if info.Kind != air.TypeMaybe {
+		return nil, fmt.Errorf("expected maybe type, got kind %d", info.Kind)
+	}
+	elemType, err := l.goType(info.Elem)
+	if err != nil {
+		return nil, err
+	}
+	stdlibMaybeType := &ast.IndexExpr{X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Maybe"), Index: elemType}
+	return &ast.CompositeLit{Type: stdlibMaybeType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("value")}},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("ok")}},
+	}}, nil
+}
+
+func (l *lowerer) convertStdlibError(typeID air.TypeID, expr ast.Expr) (ast.Expr, error) {
+	if !validTypeID(l.program, typeID) {
+		return nil, fmt.Errorf("invalid error type id %d", typeID)
+	}
+	info := l.program.Types[typeID-1]
+	if info.Kind == air.TypeStr {
+		return &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{expr}}, nil
+	}
+	if info.Kind != air.TypeStruct {
+		return nil, fmt.Errorf("unsupported stdlib error target kind %d", info.Kind)
+	}
+	elts := make([]ast.Expr, 0, len(info.Fields))
+	for _, field := range info.Fields {
+		elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(field.Name), Value: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent(exportedFieldName(field.Name))}})
+	}
+	return &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, info)), Elts: elts}, nil
+}
+
+func (l *lowerer) wrapValueErrorCall(resultTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
+	if !validTypeID(l.program, resultTypeID) {
+		return loweredExpr{}, fmt.Errorf("invalid result type id %d", resultTypeID)
+	}
+	resultType := l.program.Types[resultTypeID-1]
+	if resultType.Kind != air.TypeResult {
+		return loweredExpr{}, fmt.Errorf("expected result type, got kind %d", resultType.Kind)
+	}
+	valueType, err := l.goType(resultType.Value)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	errType, err := l.goType(resultType.Error)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	valueTemp := l.nextTemp()
+	errTemp := l.nextTemp()
+	decls := []ast.Stmt{
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(valueTemp)}, Type: valueType}}}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(errTemp)}, Type: ast.NewIdent("error")}}}},
+	}
+	stmts := append([]ast.Stmt{}, decls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(valueTemp), ast.NewIdent(errTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}})
+	errExpr, err := l.convertStdlibError(resultType.Error, ast.NewIdent(errTemp))
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := &ast.CompositeLit{Type: &ast.IndexListExpr{X: ast.NewIdent("ardResult"), Indices: []ast.Expr{valueType, errType}}, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("value"), Value: ast.NewIdent(valueTemp)},
+		&ast.KeyValueExpr{Key: ast.NewIdent("err"), Value: errExpr},
+		&ast.KeyValueExpr{Key: ast.NewIdent("ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: ast.NewIdent("nil")}},
+	}}
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) wrapStdlibResultCall(resultTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
+	if !validTypeID(l.program, resultTypeID) {
+		return loweredExpr{}, fmt.Errorf("invalid result type id %d", resultTypeID)
+	}
+	resultType := l.program.Types[resultTypeID-1]
+	if resultType.Kind != air.TypeResult {
+		return loweredExpr{}, fmt.Errorf("expected result type, got kind %d", resultType.Kind)
+	}
+	valueType, err := l.goType(resultType.Value)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	errType, err := l.goType(resultType.Error)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultTemp := l.nextTemp()
+	stdlibResultType := &ast.IndexListExpr{X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Result"), Indices: []ast.Expr{valueType, l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Error")}}
+	stmts := []ast.Stmt{
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: stdlibResultType}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}},
+	}
+	errExpr, err := l.convertStdlibError(resultType.Error, &ast.SelectorExpr{X: ast.NewIdent(resultTemp), Sel: ast.NewIdent("Error")})
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := &ast.CompositeLit{Type: &ast.IndexListExpr{X: ast.NewIdent("ardResult"), Indices: []ast.Expr{valueType, errType}}, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("value"), Value: &ast.SelectorExpr{X: ast.NewIdent(resultTemp), Sel: ast.NewIdent("Value")}},
+		&ast.KeyValueExpr{Key: ast.NewIdent("err"), Value: errExpr},
+		&ast.KeyValueExpr{Key: ast.NewIdent("ok"), Value: &ast.SelectorExpr{X: ast.NewIdent(resultTemp), Sel: ast.NewIdent("Ok")}},
+	}}
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
 func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Extern < 0 || int(expr.Extern) >= len(l.program.Externs) {
 		return loweredExpr{}, fmt.Errorf("invalid extern id %d", expr.Extern)
@@ -1749,6 +2168,83 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("ardIntFromStr"), Args: args}}, nil
 	case "Sleep":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("time", "time", "Sleep"), Args: []ast.Expr{&ast.CallExpr{Fun: l.qualified("time", "time", "Duration"), Args: args}}}}, nil
+	case "VoidToDynamic":
+		return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
+	case "JsonToDynamic":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "JsonToDynamic"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "ExtractField":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "ExtractField"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "DecodeString":
+		wrapped, err := l.wrapStdlibResultCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "DecodeString"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "DecodeInt":
+		wrapped, err := l.wrapStdlibResultCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "DecodeInt"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "DynamicToList":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "DynamicToList"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "DynamicToMap":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: ast.NewIdent("ardDynamicToAnyMap"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "HTTP_Do":
+		if len(args) != 5 {
+			return loweredExpr{}, fmt.Errorf("HTTP_Do expects 5 args")
+		}
+		timeoutArg, err := l.stdlibMaybeExpr(expr.Args[4].Type, args[4])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPDo"), Args: []ast.Expr{args[0], args[1], args[2], args[3], timeoutArg}})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "HTTP_ResponseStatus":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseStatus"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawResponse")}}}}, nil
+	case "HTTP_ResponseHeaders":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseHeaders"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawResponse")}}}}, nil
+	case "HTTP_ResponseBody":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseBody"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawResponse")}}})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "HTTP_ResponseClose":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseClose"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawResponse")}}}}, nil
+	case "GetReqPath":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "GetReqPath"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawRequest")}}}}, nil
+	case "GetPathValue":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "GetPathValue"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawRequest")}, args[1]}}}, nil
+	case "GetQueryParam":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "GetQueryParam"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawRequest")}, args[1]}}}, nil
 	default:
 		return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
 	}

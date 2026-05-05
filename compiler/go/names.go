@@ -30,6 +30,16 @@ func functionName(program *air.Program, fn air.Function) string {
 	if suffix == "" {
 		suffix = fmt.Sprintf("fn_%d", fn.ID)
 	}
+	duplicate := false
+	for _, other := range program.Functions {
+		if other.ID != fn.ID && other.Module == fn.Module && other.Name == fn.Name {
+			duplicate = true
+			break
+		}
+	}
+	if duplicate {
+		return fmt.Sprintf("%s__%s_%d", moduleName, suffix, fn.ID)
+	}
 	return moduleName + "__" + suffix
 }
 
