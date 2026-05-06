@@ -402,12 +402,12 @@ Open design questions to settle during this milestone:
     generic equality cases, Result try propagation/catch flows including nested
     `try` inside match arms returning `Result` values, Maybe/Result matches,
     Maybe/Result fallback and predicate combinators, callback-based
-    Maybe/Result map/and_then/map_err combinators, and an initial decode-host
-    subset (`Dynamic::list`, `Dynamic::object`, `decode::from_json` on string
-    input), plus structs and enum matching
-  - next known host/decode parity gap: `decode::field(...)` / `decode::path(...)`
-    on the Go target appear to hang during generated-program execution and need
-    dedicated investigation before being promoted into the parity suite
+    Maybe/Result map/and_then/map_err combinators, and a broader decode-host
+    subset including `Dynamic::list`, `Dynamic::object`, `decode::from_json`,
+    `decode::field`, and `decode::path`
+  - the earlier `decode::field` / `decode::path` investigation turned out to be
+    a parity-test source escaping issue around JSON-object braces, not a Go
+    target execution hang
   - parity harness result normalization now unwraps generated top-level
     `runtime.Maybe`/`runtime.Result` values to match vm_next observable output
 - [ ] Run sample programs through `--target go`.

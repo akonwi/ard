@@ -782,7 +782,27 @@ func TestGoTargetParityDecodeHostFlows(t *testing.T) {
 				}
 			`,
 		},
-		// TODO: decode::field / decode::path host parity still needs investigation on the Go target.
+		{
+			name: "decode field string",
+			input: `
+				use ard/decode
+				fn main() Str {
+					let data = decode::from_json("\{\"name\": \"John Doe\"\}").expect("parse")
+					decode::run(data, decode::field("name", decode::string)).expect("decode")
+				}
+			`,
+		},
+		{
+			name: "path with array index",
+			input: `
+				use ard/decode
+				fn main() Int {
+					let data = decode::from_json("\{\"items\": [10, 20, 30]\}").expect("parse")
+					let result = decode::run(data, decode::path(["items", 1], decode::int))
+					result.expect("decode")
+				}
+			`,
+		},
 	})
 }
 
