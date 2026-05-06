@@ -974,6 +974,60 @@ func TestGoTargetParityConcurrentModuleAccess(t *testing.T) {
 	}
 }
 
+func TestGoTargetParityAsyncTiming(t *testing.T) {
+	t.Run("async sleep waits requested duration", func(t *testing.T) {
+		start := time.Now()
+		program := lowerParitySource(t, `
+			use ard/async
+			fn main() Int {
+				async::sleep(1000000)
+				0
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "0" {
+			t.Fatalf("got %s, want 0", got)
+		}
+		if elapsed := time.Since(start); elapsed < time.Millisecond {
+			t.Fatalf("expected script to take >= 1ms, took %v", elapsed)
+		}
+	})
+
+	t.Run("joining fibers waits for concurrent work", func(t *testing.T) {
+		start := time.Now()
+		program := lowerParitySource(t, `
+			use ard/async
+			fn main() Int {
+				let fiber1 = async::start(fn() { async::sleep(2000000) })
+				let fiber2 = async::start(fn() { async::sleep(1000000) })
+				let fiber3 = async::start(fn() { async::sleep(1000000) })
+				fiber1.join()
+				fiber2.join()
+				fiber3.join()
+				0
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "0" {
+			t.Fatalf("got %s, want 0", got)
+		}
+		if elapsed := time.Since(start); elapsed < 2*time.Millisecond {
+			t.Fatalf("expected concurrent execution >= 2ms, got %v", elapsed)
+		}
+	})
+
+	t.Run("async eval get returns computed value", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			use ard/async
+			fn main() Int {
+				let fiber = async::eval(fn() Int { 40 + 2 })
+				fiber.get()
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
+	})
+}
+
 func TestGoTargetParityPrinting(t *testing.T) {
 	got := runGoTargetSourceStdout(t, `
 		use ard/io

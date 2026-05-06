@@ -417,11 +417,12 @@ Open design questions to settle during this milestone:
     timeout parity, and the current SQL parity slice including parameter
     extraction, query all/first, missing-parameter errors, nullable SQL values,
     rollback, and commit/transaction query flows
-  - next concrete parity blocker found while continuing expansion: stdlib
-    `ard/async` host externs are not wired for the Go target/runtime parity
-    path yet (`AsyncStart`, `AsyncEval`, `WaitFor`, `GetResult`); generic async
-    externs are still skipped in generated FFI host surfaces, so vm_next async
-    timing parity cannot yet be promoted
+  - async parity is now promoted for current vm_next timing/value coverage:
+    `async::sleep`, `async::start(...).join()`, and `async::eval(...).get()`
+  - next likely parity gap is no longer language/runtime async itself, but the
+    lack of a Go-target parity harness path for custom extern overrides used by
+    vm_next tests like FFI panic recovery and HTTP server callback interception;
+    generated Go currently runs against the concrete stdlib host directly
   - parity harness result normalization now unwraps generated top-level
     `runtime.Maybe`/`runtime.Result` values to match vm_next observable output
 - [ ] Run sample programs through `--target go`.

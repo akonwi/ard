@@ -2326,6 +2326,7 @@ func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, er
 }
 
 func (l *lowerer) lowerSpawnFiber(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	l.markRuntimeHelper("fiber")
 	var targetExpr ast.Expr
 	stmts := []ast.Stmt{}
 	if expr.Target != nil {
@@ -2335,6 +2336,18 @@ func (l *lowerer) lowerSpawnFiber(fn air.Function, expr air.Expr) (loweredExpr, 
 		}
 		stmts = append(stmts, target.stmts...)
 		targetExpr = target.expr
+		if validTypeID(l.program, expr.Type) {
+			fiberType := l.program.Types[expr.Type-1]
+			if validTypeID(l.program, fiberType.Elem) && l.program.Types[fiberType.Elem-1].Kind == air.TypeVoid {
+				targetExpr = &ast.FuncLit{
+					Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: voidTypeExpr()}}}},
+					Body: &ast.BlockStmt{List: []ast.Stmt{
+						&ast.ExprStmt{X: &ast.CallExpr{Fun: target.expr}},
+						&ast.ReturnStmt{Results: []ast.Expr{voidValueExpr()}},
+					}},
+				}
+			}
+		}
 	} else {
 		if !validFunctionID(l.program, expr.Function) {
 			return loweredExpr{}, fmt.Errorf("invalid fiber function %d", expr.Function)
@@ -2346,6 +2359,7 @@ func (l *lowerer) lowerSpawnFiber(fn air.Function, expr air.Expr) (loweredExpr, 
 }
 
 func (l *lowerer) lowerFiberGet(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	l.markRuntimeHelper("fiber")
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("fiber get missing target")
 	}
@@ -2357,6 +2371,7 @@ func (l *lowerer) lowerFiberGet(fn air.Function, expr air.Expr) (loweredExpr, er
 }
 
 func (l *lowerer) lowerFiberJoin(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	l.markRuntimeHelper("fiber")
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("fiber join missing target")
 	}
