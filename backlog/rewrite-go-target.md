@@ -393,7 +393,8 @@ Open design questions to settle during this milestone:
   - current Go-target-vs-vm_next parity coverage now exercises a broader core
     subset via generated-program JSON result comparison, including arithmetic,
     comparison chains, string size checks, structured branching, recursion,
-    closures, list sorting, sorted map keys, Maybe/Result matches,
+    closures, list sorting, sorted map keys, loop forms over ranges/numbers/
+    strings/lists/maps plus break behavior, Maybe/Result matches,
     Maybe/Result fallback and predicate combinators, and callback-based
     Maybe/Result map/and_then/map_err combinators, plus structs and enum
     matching

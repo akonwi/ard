@@ -199,6 +199,110 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityLoops(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "basic for loop",
+			input: `
+				fn main() Int {
+					mut sum = 0
+					for mut even = 0; even <= 10; even =+ 2 {
+						sum =+ even
+					}
+					sum
+				}
+			`,
+		},
+		{
+			name: "loop over numeric range",
+			input: `
+				fn main() Int {
+					mut sum = 0
+					for i in 1..5 {
+						sum = sum + i
+					}
+					sum
+				}
+			`,
+		},
+		{
+			name: "loop over a number",
+			input: `
+				fn main() Int {
+					mut sum = 0
+					for i in 5 {
+						sum = sum + i
+					}
+					sum
+				}
+			`,
+		},
+		{
+			name: "looping over a string",
+			input: `
+				fn main() Str {
+					mut res = ""
+					for c in "hello" {
+						res = "{c}{res}"
+					}
+					res
+				}
+			`,
+		},
+		{
+			name: "looping over a list",
+			input: `
+				fn main() Int {
+					mut sum = 0
+					for n in [1,2,3,4,5] {
+						sum = sum + n
+					}
+					sum
+				}
+			`,
+		},
+		{
+			name: "looping over a map",
+			input: `
+				fn main() Int {
+					mut sum = 0
+					for k,count in ["key":3, "foobar":6] {
+						sum =+ count
+					}
+					sum
+				}
+			`,
+		},
+		{
+			name: "looping over a map uses sorted keys",
+			input: `
+				fn main() Str {
+					mut out = ""
+					for key,val in [3:"c", 1:"a", 2:"b"] {
+						out = out + "{key}:{val};"
+					}
+					out
+				}
+			`,
+		},
+		{
+			name: "break out of loop",
+			input: `
+				fn main() Int {
+					mut count = 5
+					while count > 0 {
+						count = count - 1
+						if count == 3 {
+							break
+						}
+					}
+					count
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
