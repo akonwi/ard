@@ -38,7 +38,22 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 			`,
 		},
 		{name: "unary not", input: `fn main() Bool { not true }`},
+		{name: "unary negative float", input: `fn main() Float { -20.1 }`},
 		{name: "arithmetic precedence", input: `fn main() Int { 30 + (20 * 4) }`},
+		{name: "chained comparisons", input: `fn main() Bool { 200 <= 250 <= 300 }`},
+		{
+			name: "if else if else",
+			input: `
+				fn main() Str {
+					let is_on = false
+					mut result = ""
+					if is_on { result = "then" }
+					else if result.size() == 0 { result = "else if" }
+					else { result = "else" }
+					result
+				}
+			`,
+		},
 		{
 			name: "inline block expression",
 			input: `
@@ -77,6 +92,99 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 						i = i + 1
 					}
 					total
+				}
+			`,
+		},
+		{
+			name: "first class function value",
+			input: `
+				fn main() Int {
+					let sub = fn(a: Int, b: Int) Int { a - b }
+					sub(30, 8)
+				}
+			`,
+		},
+		{
+			name: "closure lexical scoping",
+			input: `
+				fn createAdder(base: Int) fn(Int) Int {
+					fn(x: Int) Int {
+						base + x
+					}
+				}
+
+				fn main() Int {
+					let addFive = createAdder(5)
+					addFive(10)
+				}
+			`,
+		},
+		{
+			name: "list sort with closure",
+			input: `
+				fn main() [Int] {
+					mut values = [5, 1, 3]
+					values.sort(fn(a: Int, b: Int) Bool { a < b })
+					values
+				}
+			`,
+		},
+		{
+			name: "map keys use sorted order",
+			input: `
+				fn main() [Str] {
+					let values = ["b": 2, "a": 1, "c": 3]
+					values.keys()
+				}
+			`,
+		},
+		{
+			name: "maybe match some",
+			input: `
+				use ard/maybe
+
+				fn main() Int {
+					match maybe::some(42) {
+						s => s,
+						_ => 0,
+					}
+				}
+			`,
+		},
+		{
+			name: "result match ok",
+			input: `
+				fn main() Int {
+					match Result::ok(42) {
+						ok => ok,
+						err => 0,
+					}
+				}
+			`,
+		},
+		{
+			name: "struct field reassignment",
+			input: `
+				struct Person { name: Str, age: Int }
+
+				fn main() Int {
+					mut person = Person{name: "Alice", age: 30}
+					person.age = 31
+					person.age
+				}
+			`,
+		},
+		{
+			name: "enum match",
+			input: `
+				enum Light { Red, Yellow, Green }
+
+				fn main() Str {
+					match Light::Yellow {
+						Light::Red => "stop",
+						Light::Yellow => "wait",
+						Light::Green => "go",
+					}
 				}
 			`,
 		},
@@ -179,7 +287,7 @@ func main() {
 	if err := os.WriteFile(filepath.Join(tempDir, "runner.go"), []byte(runner), 0o644); err != nil {
 		t.Fatalf("write runner: %v", err)
 	}
-	goMod := "module generated\n\ngo 1.24\n"
+	goMod := "module generated\n\ngo 1.26.0\n"
 	if moduleRoot, ok := compilerModuleRoot(); ok {
 		goMod += "\nrequire github.com/akonwi/ard v0.0.0\n"
 		goMod += fmt.Sprintf("replace github.com/akonwi/ard => %s\n", moduleRoot)
