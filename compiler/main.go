@@ -18,7 +18,7 @@ import (
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/frontend"
-	go_backend "github.com/akonwi/ard/go_backend"
+	gotarget "github.com/akonwi/ard/go"
 	"github.com/akonwi/ard/javascript"
 	"github.com/akonwi/ard/runtime"
 	"github.com/akonwi/ard/version"
@@ -114,7 +114,26 @@ func main() {
 					os.Exit(1)
 				}
 			case backend.TargetGo:
-				if err := go_backend.Run(inputPath, os.Args); err != nil {
+				profile := newPipelineProfile("run go")
+				defer profile.Print()
+				var module checker.Module
+				if err := profile.Time("frontend.load_module", func() error {
+					var loadErr error
+					module, loadErr = loadModule(inputPath, target)
+					return loadErr
+				}); err != nil {
+					os.Exit(1)
+				}
+				var program *air.Program
+				if err := profile.Time("air.lower", func() error {
+					var lowerErr error
+					program, lowerErr = air.Lower(module)
+					return lowerErr
+				}); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				if err := gotarget.RunProgram(program, os.Args); err != nil {
 					fmt.Println(err)
 					os.Exit(1)
 				}
@@ -147,7 +166,7 @@ func main() {
 			case backend.TargetVMNext:
 				builtPath, err = buildVMNextBinary(inputPath, outputPath)
 			case backend.TargetGo:
-				builtPath, err = go_backend.BuildBinary(inputPath, outputPath)
+				builtPath, err = buildGoBinary(inputPath, outputPath, target)
 			case backend.TargetJSBrowser, backend.TargetJSServer:
 				builtPath, err = javascript.Build(inputPath, outputPath, target)
 			default:
@@ -286,20 +305,9 @@ func parseBuildArgs(args []string) (string, string, string, error) {
 		return "", "", "", fmt.Errorf("expected filepath argument")
 	}
 	if outputPath == "" {
-		// Try to use the project name from ard.toml
-		inputDir := filepath.Dir(inputPath)
-		if inputDir == "" {
-			inputDir = "."
-		}
-		if project, err := checker.FindProjectRoot(inputDir); err == nil && project.ProjectName != "" {
-			// Check if the project name came from ard.toml (not just directory fallback)
-			tomlPath := filepath.Join(project.RootPath, "ard.toml")
-			if _, statErr := os.Stat(tomlPath); statErr == nil {
-				outputPath = project.ProjectName
-			}
-		}
-		if outputPath == "" {
-			outputPath = strings.TrimSuffix(inputPath, filepath.Ext(inputPath))
+		outputPath = filepath.Base(strings.TrimSuffix(inputPath, filepath.Ext(inputPath)))
+		if outputPath == "" || outputPath == "." || outputPath == string(filepath.Separator) {
+			outputPath = "main"
 		}
 	}
 	return inputPath, outputPath, target, nil
@@ -702,6 +710,47 @@ func buildBytecodeBinary(inputPath string, outputPath string, target string) (st
 		return "", err
 	}
 	return outputPath, nil
+}
+
+func buildGoBinary(inputPath string, outputPath string, target string) (string, error) {
+	profile := newPipelineProfile("build go")
+	defer profile.Print()
+	var module checker.Module
+	if err := profile.Time("frontend.load_module", func() error {
+		var loadErr error
+		module, loadErr = loadModule(inputPath, target)
+		return loadErr
+	}); err != nil {
+		return "", err
+	}
+	var program *air.Program
+	if err := profile.Time("air.lower", func() error {
+		var lowerErr error
+		program, lowerErr = air.Lower(module)
+		return lowerErr
+	}); err != nil {
+		return "", err
+	}
+	if err := profile.Time("air.validate", func() error {
+		return air.Validate(program)
+	}); err != nil {
+		return "", err
+	}
+	if outputPath == "" {
+		outputPath = filepath.Base(strings.TrimSuffix(inputPath, filepath.Ext(inputPath)))
+		if outputPath == "" || outputPath == "." || outputPath == string(filepath.Separator) {
+			outputPath = "main"
+		}
+	}
+	var builtPath string
+	if err := profile.Time("go.build", func() error {
+		var buildErr error
+		builtPath, buildErr = gotarget.BuildProgram(program, outputPath)
+		return buildErr
+	}); err != nil {
+		return "", err
+	}
+	return builtPath, nil
 }
 
 func buildVMNextBinary(inputPath string, outputPath string) (string, error) {

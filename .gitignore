@@ -1,15 +1,9 @@
 node_modules
-build
+ard-out/
 
 .DS_Store
-
-**/.claude/settings.local.json
-
-.codanna*
-.fastembed_*
 
 *.wasm
 
 zed-plugin/grammars/*
-compiler/ard
 .tmp/

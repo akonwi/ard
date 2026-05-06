@@ -94,7 +94,7 @@ This is intended for CI.
 - Whether `ard ffi init` should run `go mod tidy` automatically or leave that as
   an explicit user step.
 - How project FFI packages should be referenced by `ard run --target vm_next`
-  before the Go target rewrite exists.
+  and other execution/build flows now that the Go target rewrite exists.
 - Whether generated project FFI should eventually share a package with generated
   Go target output or remain a stable companion package.
 

@@ -117,6 +117,12 @@ func (fl *functionLowerer) lowerDiscardedExpr(expr *air.Expr) (bool, error) {
 	if expr == nil {
 		return false, nil
 	}
+	if expr.Kind == air.ExprBlock {
+		return true, fl.lowerDiscardedBlock(expr.Body)
+	}
+	if expr.Kind == air.ExprIf {
+		return true, fl.lowerDiscardedIf(expr)
+	}
 	if expr.Kind == air.ExprMatchResult {
 		return true, fl.lowerResultMatchDiscarded(expr)
 	}
@@ -155,6 +161,48 @@ func (fl *functionLowerer) lowerDiscardedExpr(expr *air.Expr) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func (fl *functionLowerer) lowerDiscardedBlock(block air.Block) error {
+	for i := range block.Stmts {
+		if err := fl.lowerStmt(&block.Stmts[i]); err != nil {
+			return err
+		}
+	}
+	if block.Result == nil {
+		return nil
+	}
+	if ok, err := fl.lowerDiscardedExpr(block.Result); ok || err != nil {
+		return err
+	}
+	if err := fl.lowerExpr(block.Result); err != nil {
+		return err
+	}
+	fl.emit(Instruction{Op: OpPop})
+	return nil
+}
+
+func (fl *functionLowerer) lowerDiscardedIf(expr *air.Expr) error {
+	jumpFalse, ok, err := fl.lowerIfFalseJump(expr.Condition)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		if err := fl.lowerExpr(expr.Condition); err != nil {
+			return err
+		}
+		jumpFalse = fl.emit(Instruction{Op: OpJumpIfFalse})
+	}
+	if err := fl.lowerDiscardedBlock(expr.Then); err != nil {
+		return err
+	}
+	jumpEnd := fl.emit(Instruction{Op: OpJump})
+	fl.patch(jumpFalse, len(fl.code))
+	if err := fl.lowerDiscardedBlock(expr.Else); err != nil {
+		return err
+	}
+	fl.patch(jumpEnd, len(fl.code))
+	return nil
 }
 
 func (fl *functionLowerer) lowerWhile(stmt *air.Stmt) error {
@@ -205,6 +253,9 @@ func (fl *functionLowerer) tryFuseLoopBackedgeIncrement(loopStart int) bool {
 	if len(fl.code) < 2 {
 		return false
 	}
+	if fl.hasPatchedJumpTo(len(fl.code)) {
+		return false
+	}
 	store := fl.code[len(fl.code)-1]
 	add := fl.code[len(fl.code)-2]
 	if store.Op != OpStoreLocal || add.Op != OpIntAddConstLocal {
@@ -213,6 +264,26 @@ func (fl *functionLowerer) tryFuseLoopBackedgeIncrement(loopStart int) bool {
 	fl.code = fl.code[:len(fl.code)-2]
 	fl.emit(Instruction{Op: OpStoreIntAddConstLocalJump, A: loopStart, B: store.A, C: add.B, Imm: add.Imm})
 	return true
+}
+
+func (fl *functionLowerer) hasPatchedJumpTo(target int) bool {
+	for _, inst := range fl.code {
+		switch inst.Op {
+		case OpJump, OpJumpIfFalse, OpStoreIntAddConstLocalJump, OpJumpIfListIndexGeLocal, OpJumpIfMapIndexGeLocal, OpJumpIfIntGtLocal, OpJumpIfIntModConstNotEqConstLocal:
+			if inst.A == target {
+				return true
+			}
+		case OpTryResult, OpTryMaybe:
+			if inst.B == target {
+				return true
+			}
+		case OpMapGetLocalTryMaybe:
+			if inst.Imm == target {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (fl *functionLowerer) lowerLoopConditionJump(expr *air.Expr) (int, bool) {

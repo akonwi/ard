@@ -2,68 +2,43 @@
 
 package ffi
 
-type Maybe[T any] struct {
-	Value T
-	Some  bool
-}
+import ardruntime "github.com/akonwi/ard/runtime"
+
+type Maybe[T any] = ardruntime.Maybe[T]
 
 func Some[T any](value T) Maybe[T] {
-	return Maybe[T]{Value: value, Some: true}
+	return ardruntime.Some(value)
 }
 
 func None[T any]() Maybe[T] {
-	return Maybe[T]{}
+	return ardruntime.None[T]()
 }
 
-type Result[T, E any] struct {
-	Value T
-	Error E
-	Ok    bool
-}
+type Result[T, E any] = ardruntime.Result[T, E]
 
 func Ok[T, E any](value T) Result[T, E] {
-	return Result[T, E]{Value: value, Ok: true}
+	return ardruntime.Ok[T, E](value)
 }
 
 func Err[T, E any](err E) Result[T, E] {
-	return Result[T, E]{Error: err}
+	return ardruntime.Err[T](err)
 }
 
-type Callback0[R any] struct {
-	Call func() (R, error)
-}
-type Callback1[A, R any] struct {
-	Call func(A) (R, error)
-}
-type Callback2[A, B, R any] struct {
-	Call func(A, B) (R, error)
-}
+type Db = any
 
-type Db struct {
-	Handle any
-}
+type RawRequest = any
 
-type RawRequest struct {
-	Handle any
-}
+type RawResponse = any
 
-type RawResponse struct {
-	Handle any
-}
+type Tx = any
 
-type Tx struct {
-	Handle any
-}
-
-type WaitGroup struct {
-	Handle any
-}
+type WaitGroup = any
 
 type Conn = any
 
 type Decoder = any
 
-type HandlerFn = Callback2[Request, *Response, struct{}]
+type HandlerFn = func(Request, *Response) (struct{}, error)
 
 type JsonInput = any
 
@@ -137,7 +112,7 @@ type Transaction struct {
 }
 
 type Host struct {
-	AsyncStart           func(do Callback0[struct{}]) Fiber[struct{}]
+	AsyncStart           func(do func() (struct{}, error)) Fiber[struct{}]
 	Base64Decode         func(input string, no_pad Maybe[bool]) (string, error)
 	Base64DecodeURL      func(input string, no_pad Maybe[bool]) (string, error)
 	Base64Encode         func(input string, no_pad Maybe[bool]) string
@@ -187,7 +162,7 @@ type Host struct {
 	HTTPResponseClose    func(resp RawResponse)
 	HTTPResponseHeaders  func(resp RawResponse) map[string]string
 	HTTPResponseStatus   func(resp RawResponse) int
-	HTTPServe            func(port int, handlers map[string]Callback2[Request, *Response, struct{}]) error
+	HTTPServe            func(port int, handlers map[string]func(Request, *Response) (struct{}, error)) error
 	HexDecode            func(input string) (string, error)
 	HexEncode            func(bytes string) string
 	IntFromStr           func(str string) Maybe[int]

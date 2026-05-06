@@ -525,17 +525,17 @@ func SqlCreateConnection(connectionString string) (Db, error) {
 	driver := detectSQLDriver(connectionString)
 	db, err := sql.Open(driver, connectionString)
 	if err != nil {
-		return Db{}, err
+		return nil, err
 	}
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
-		return Db{}, fmt.Errorf("failed to connect to database: %w", err)
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
-	return Db{Handle: &sqlConnection{db: db, driver: driver}}, nil
+	return &sqlConnection{db: db, driver: driver}, nil
 }
 
 func SqlClose(db Db) error {
-	conn, ok := db.Handle.(*sqlConnection)
+	conn, ok := db.(*sqlConnection)
 	if !ok {
 		return fmt.Errorf("SQL Error: invalid connection object")
 	}
@@ -543,19 +543,19 @@ func SqlClose(db Db) error {
 }
 
 func SqlBeginTx(db Db) (Tx, error) {
-	conn, ok := db.Handle.(*sqlConnection)
+	conn, ok := db.(*sqlConnection)
 	if !ok {
-		return Tx{}, fmt.Errorf("SQL Error: invalid connection object")
+		return nil, fmt.Errorf("SQL Error: invalid connection object")
 	}
 	tx, err := conn.db.Begin()
 	if err != nil {
-		return Tx{}, fmt.Errorf("failed to begin transaction: %w", err)
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	return Tx{Handle: &sqlTransaction{tx: tx, driver: conn.driver}}, nil
+	return &sqlTransaction{tx: tx, driver: conn.driver}, nil
 }
 
 func SqlCommit(tx Tx) error {
-	wrapped, ok := tx.Handle.(*sqlTransaction)
+	wrapped, ok := tx.(*sqlTransaction)
 	if !ok {
 		return fmt.Errorf("SQL Error: invalid transaction object")
 	}
@@ -563,7 +563,7 @@ func SqlCommit(tx Tx) error {
 }
 
 func SqlRollback(tx Tx) error {
-	wrapped, ok := tx.Handle.(*sqlTransaction)
+	wrapped, ok := tx.(*sqlTransaction)
 	if !ok {
 		return fmt.Errorf("SQL Error: invalid transaction object")
 	}
@@ -881,7 +881,7 @@ func HTTPDo(method string, url string, body any, headers map[string]string, time
 		default:
 			encoded, err := json.Marshal(value)
 			if err != nil {
-				return RawResponse{}, err
+				return nil, err
 			}
 			bodyReader = strings.NewReader(string(encoded))
 		}
@@ -889,7 +889,7 @@ func HTTPDo(method string, url string, body any, headers map[string]string, time
 
 	req, err := http.NewRequest(method, url, bodyReader)
 	if err != nil {
-		return RawResponse{}, err
+		return nil, err
 	}
 	for key, value := range headers {
 		req.Header.Set(key, value)
@@ -901,20 +901,20 @@ func HTTPDo(method string, url string, body any, headers map[string]string, time
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return RawResponse{}, err
+		return nil, err
 	}
-	return RawResponse{Handle: resp}, nil
+	return resp, nil
 }
 
 func HTTPResponseStatus(resp RawResponse) int {
-	if response, ok := resp.Handle.(*http.Response); ok {
+	if response, ok := resp.(*http.Response); ok {
 		return response.StatusCode
 	}
 	return 0
 }
 
 func HTTPResponseHeaders(resp RawResponse) map[string]string {
-	response, ok := resp.Handle.(*http.Response)
+	response, ok := resp.(*http.Response)
 	if !ok {
 		return map[string]string{}
 	}
@@ -928,7 +928,7 @@ func HTTPResponseHeaders(resp RawResponse) map[string]string {
 }
 
 func HTTPResponseBody(resp RawResponse) (string, error) {
-	response, ok := resp.Handle.(*http.Response)
+	response, ok := resp.(*http.Response)
 	if !ok {
 		return "", fmt.Errorf("invalid HTTP response handle")
 	}
@@ -940,33 +940,33 @@ func HTTPResponseBody(resp RawResponse) (string, error) {
 }
 
 func HTTPResponseClose(resp RawResponse) {
-	if response, ok := resp.Handle.(*http.Response); ok && response.Body != nil {
+	if response, ok := resp.(*http.Response); ok && response.Body != nil {
 		_ = response.Body.Close()
 	}
 }
 
 func GetReqPath(req RawRequest) string {
-	if request, ok := req.Handle.(*http.Request); ok && request.URL != nil {
+	if request, ok := req.(*http.Request); ok && request.URL != nil {
 		return request.URL.Path
 	}
 	return ""
 }
 
 func GetPathValue(req RawRequest, name string) string {
-	if request, ok := req.Handle.(*http.Request); ok {
+	if request, ok := req.(*http.Request); ok {
 		return request.PathValue(name)
 	}
 	return ""
 }
 
 func GetQueryParam(req RawRequest, name string) string {
-	if request, ok := req.Handle.(*http.Request); ok && request.URL != nil {
+	if request, ok := req.(*http.Request); ok && request.URL != nil {
 		return request.URL.Query().Get(name)
 	}
 	return ""
 }
 
-func HTTPServe(port int, handlers map[string]Callback2[Request, *Response, struct{}]) error {
+func HTTPServe(port int, handlers map[string]func(Request, *Response) (struct{}, error)) error {
 	mux := http.NewServeMux()
 	for path, handler := range handlers {
 		path := path
@@ -977,13 +977,13 @@ func HTTPServe(port int, handlers map[string]Callback2[Request, *Response, struc
 				Url:     req.URL.String(),
 				Headers: requestHeaders(req),
 				Body:    requestBody(req),
-				Raw:     Some(RawRequest{Handle: req}),
+				Raw:     Some[any](req),
 			}
 			ardRes := Response{
 				Status:  200,
 				Headers: map[string]string{},
 			}
-			if _, err := handler.Call(ardReq, &ardRes); err != nil {
+			if _, err := handler(ardReq, &ardRes); err != nil {
 				http.Error(writer, err.Error(), http.StatusInternalServerError)
 				return
 			}
