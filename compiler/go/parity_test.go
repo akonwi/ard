@@ -181,6 +181,21 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 			`,
 		},
 		{
+			name: "map set through struct field",
+			input: `
+				struct Response { headers: [Str: Str] }
+
+				fn main() Str {
+					mut res = Response{headers: [:]}
+					let _ = res.headers.set("Content-Type", "application/json")
+					match res.headers.get("Content-Type") {
+						v => v,
+						_ => "missing",
+					}
+				}
+			`,
+		},
+		{
 			name: "enum match",
 			input: `
 				enum Light { Red, Yellow, Green }

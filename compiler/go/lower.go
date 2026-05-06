@@ -2691,8 +2691,12 @@ func (l *lowerer) lowerMapGet(fn air.Function, expr air.Expr) (loweredExpr, erro
 }
 
 func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.Target == nil || expr.Target.Kind != air.ExprLoadLocal || len(expr.Args) != 2 {
-		return loweredExpr{}, fmt.Errorf("map set currently requires local target and two args")
+	if expr.Target == nil || len(expr.Args) != 2 {
+		return loweredExpr{}, fmt.Errorf("map set expects target and two args")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
 	}
 	key, err := l.lowerExpr(fn, expr.Args[0])
 	if err != nil {
@@ -2702,9 +2706,9 @@ func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, erro
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	name := localName(fn, expr.Target.Local)
-	stmts := append(key.stmts, value.stmts...)
-	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(name), Index: key.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{value.expr}})
+	stmts := append(target.stmts, key.stmts...)
+	stmts = append(stmts, value.stmts...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: key.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{value.expr}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("true")}, nil
 }
 
