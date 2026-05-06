@@ -199,6 +199,79 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "maybe or fallback",
+			input: `
+				use ard/maybe
+				fn main() Str {
+					let a: Str? = maybe::none()
+					a.or("foo")
+				}
+			`,
+		},
+		{
+			name: "maybe is none",
+			input: `
+				use ard/maybe
+				fn main() Bool {
+					maybe::none().is_none()
+				}
+			`,
+		},
+		{
+			name: "maybe is some",
+			input: `
+				use ard/maybe
+				fn main() Bool {
+					maybe::some(1).is_some()
+				}
+			`,
+		},
+		{
+			name: "maybe expect returns value",
+			input: `
+				use ard/maybe
+				fn main() Int {
+					maybe::some(42).expect("Should not panic")
+				}
+			`,
+		},
+		{
+			name: "result or fallback",
+			input: `
+				fn divide(a: Int, b: Int) Int!Str {
+					match b == 0 {
+						true => Result::err("cannot divide by 0"),
+						false => Result::ok(a / b),
+					}
+				}
+				fn main() Int {
+					let res = divide(100, 0)
+					res.or(-1)
+				}
+			`,
+		},
+		{
+			name: "result is ok",
+			input: `
+				fn main() Bool {
+					Result::ok(42).is_ok()
+				}
+			`,
+		},
+		{
+			name: "result is err",
+			input: `
+				fn main() Bool {
+					Result::err("bad").is_err()
+				}
+			`,
+			},
+		})
+}
+
 func runGoParityCases(t *testing.T, cases []goParityCase) {
 	t.Helper()
 	for _, tc := range cases {
