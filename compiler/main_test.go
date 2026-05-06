@@ -466,6 +466,13 @@ func TestParseBuildArgs(t *testing.T) {
 			target: "",
 		},
 		{
+			name:   "nested input defaults to file basename",
+			args:   []string{"samples/main.ard"},
+			path:   "samples/main.ard",
+			out:    "main",
+			target: "",
+		},
+		{
 			name:   "explicit output and target",
 			args:   []string{"samples/main.ard", "--out", "demo", "--target", "go"},
 			path:   "samples/main.ard",
