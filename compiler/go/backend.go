@@ -87,7 +87,7 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 			return err
 		}
 	}
-	goMod := "module generated\n\ngo 1.24\n"
+	goMod := "module generated\n\ngo 1.26.0\n"
 	if moduleRoot, ok := compilerModuleRoot(); ok {
 		goMod += "\nrequire github.com/akonwi/ard v0.0.0\n"
 		goMod += fmt.Sprintf("replace github.com/akonwi/ard => %s\n", moduleRoot)
