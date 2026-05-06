@@ -395,12 +395,12 @@ Open design questions to settle during this milestone:
     comparison chains, string size checks and string helper methods,
     structured branching, recursion, closures, list sorting, sorted map keys,
     loop forms over ranges/numbers/strings/lists/maps plus break behavior,
-    list/map mutation and access operations, boolean/enum/int/range/
-    conditional match forms, Result try propagation/catch flows including
-    nested `try` inside match arms returning `Result` values, Maybe/Result
-    matches, Maybe/Result fallback and predicate combinators, and callback-based
-    Maybe/Result map/and_then/map_err combinators, plus structs and enum
-    matching
+    list/map mutation and access operations, nullable-argument omission and
+    auto-wrapping flows, boolean/enum/int/range/conditional match forms,
+    Result try propagation/catch flows including nested `try` inside match arms
+    returning `Result` values, Maybe/Result matches, Maybe/Result fallback and
+    predicate combinators, and callback-based Maybe/Result map/and_then/
+    map_err combinators, plus structs and enum matching
   - parity harness result normalization now unwraps generated top-level
     `runtime.Maybe`/`runtime.Result` values to match vm_next observable output
 - [ ] Run sample programs through `--target go`.

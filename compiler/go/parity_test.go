@@ -303,6 +303,113 @@ func TestGoTargetParityLoops(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityNullableArguments(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "omitting nullable parameters",
+			input: `
+				use ard/maybe
+				fn add(a: Int, b: Int?) Int {
+					a + b.or(0)
+				}
+				fn main() Int {
+					add(1)
+				}
+			`,
+		},
+		{
+			name: "omitting nullable parameters with explicit value",
+			input: `
+				use ard/maybe
+				fn add(a: Int, b: Int?) Int {
+					a + b.or(0)
+				}
+				fn main() Int {
+					add(1, maybe::some(5))
+				}
+			`,
+		},
+		{
+			name: "automatic wrapping of non nullable values for nullable parameters",
+			input: `
+				fn add(a: Int, b: Int?) Int {
+					a + b.or(0)
+				}
+				fn main() Int {
+					add(1, 5)
+				}
+			`,
+		},
+		{
+			name: "automatic wrapping works with omitted args",
+			input: `
+				fn test(a: Int, b: Int?, c: Str?) Str {
+					let bval = b.or(0)
+					let cval = c.or("default")
+					"{a},{bval},{cval}"
+				}
+				fn main() Str {
+					test(42)
+				}
+			`,
+		},
+		{
+			name: "automatic wrapping with all arguments provided",
+			input: `
+				fn test(a: Int, b: Int?, c: Str?) Str {
+					let bval = b.or(0)
+					let cval = c.or("default")
+					"{a},{bval},{cval}"
+				}
+				fn main() Str {
+					test(42, 7, "hello")
+				}
+			`,
+		},
+		{
+			name: "automatic wrapping of list literals for nullable parameters",
+			input: `
+				fn process(items: [Int]?) Bool {
+					match items {
+						lst => true
+						_ => false
+					}
+				}
+				fn main() Bool {
+					process([10, 20, 30])
+				}
+			`,
+		},
+		{
+			name: "automatic wrapping of map literals for nullable parameters",
+			input: `
+				fn process(data: [Str:Int]?) Bool {
+					match data {
+						m => true
+						_ => false
+					}
+				}
+				fn main() Bool {
+					process(["count": 42])
+				}
+			`,
+		},
+		{
+			name: "automatic wrapping with labeled arguments in different order",
+			input: `
+				fn test(a: Int, b: Int?, c: Str?) Str {
+					let bval = b.or(0)
+					let cval = c.or("default")
+					"{a},{bval},{cval}"
+				}
+				fn main() Str {
+					test(c: "reorder", b: 99, a: 5)
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityTry(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
