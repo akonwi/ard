@@ -400,15 +400,20 @@ Open design questions to settle during this milestone:
     omission and auto-wrapping, boolean/enum/int/range/conditional match
     forms, enum/int comparisons and explicit enum values, union matching,
     generic equality cases, Result try propagation/catch flows including nested
-    `try` inside match arms returning `Result` values, Maybe/Result matches,
-    Maybe/Result fallback and predicate combinators, callback-based
-    Maybe/Result map/and_then/map_err combinators, and a broader decode-host
+    `try` inside match arms returning `Result` values, Maybe try basics,
+    Maybe/Result matches, Maybe/Result fallback and predicate combinators,
+    callback-based Maybe/Result map/and_then/map_err combinators, env lookup,
+    JSON primitive encoding, crypto hash externs, and a broader decode-host
     subset including dynamic list/object conversion, `decode::from_json`,
     `decode::field`, `decode::path`, decode error reporting, nullable decode,
     list/map decode, `decode::one_of`, and `decode::flatten`
   - Go target host/decode parity now also covers the `IsNil` extern path used
-    by `decode::nullable(...)` and direct `panic(...)` lowering used by decode
-    error assertions in the parity corpus
+    by `decode::nullable(...)`, direct `panic(...)` lowering used by decode
+    error assertions in the parity corpus, and crypto hash extern bindings
+  - next known parity blocker: chained property-style `try` on nested `Maybe`
+    access (for example `try get_user().profile.name -> _ { ... }`) still
+    generates incorrect intermediate `Maybe` types on the Go target and is not
+    yet promoted into the passing parity suite
   - parity harness result normalization now unwraps generated top-level
     `runtime.Maybe`/`runtime.Result` values to match vm_next observable output
 - [ ] Run sample programs through `--target go`.

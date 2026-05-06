@@ -529,6 +529,64 @@ func TestGoTargetParityNullableStructFields(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityTryOnMaybe(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "try on maybe some returns unwrapped value",
+			input: `
+				use ard/maybe
+				fn get_value() Int? {
+					maybe::some(42)
+				}
+				fn test() Int? {
+					let value = try get_value()
+					maybe::some(value + 1)
+				}
+				fn main() Int {
+					let result = test()
+					match result {
+						value => value,
+						_ => -1
+					}
+				}
+			`,
+		},
+		{
+			name: "try on maybe none propagates none",
+			input: `
+				use ard/maybe
+				fn get_value() Int? {
+					maybe::none()
+				}
+				fn test() Int? {
+					let value = try get_value()
+					maybe::some(value + 1)
+				}
+				fn main() Int {
+					let result = test()
+					match result {
+						value => value,
+						_ => -999
+					}
+				}
+			`,
+		},
+		{
+			name: "try on maybe with catch block transforms none",
+			input: `
+				use ard/maybe
+				fn get_value() Int? {
+					maybe::none()
+				}
+				fn main() Int {
+					let value = try get_value() -> _ { 42 }
+					value
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityTry(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -658,6 +716,48 @@ func TestGoTargetParityTry(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityCryptoHashes(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "md5 hashes hello",
+			input: `
+				use ard/crypto
+				fn main() Str {
+					crypto::md5("hello")
+				}
+			`,
+		},
+		{
+			name: "sha256 returns raw bytes",
+			input: `
+				use ard/crypto
+				fn main() Int {
+					crypto::sha256("").size()
+				}
+			`,
+		},
+		{
+			name: "sha256 can be hex encoded",
+			input: `
+				use ard/crypto
+				use ard/hex
+				fn main() Str {
+					hex::encode(crypto::sha256(""))
+				}
+			`,
+		},
+		{
+			name: "sha512 returns raw bytes",
+			input: `
+				use ard/crypto
+				fn main() Int {
+					crypto::sha512("hello").size()
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -738,6 +838,30 @@ func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
 						value => value == 3,
 						_ => false
 					}
+				}
+			`,
+		},
+	})
+}
+
+func TestGoTargetParityEnvGet(t *testing.T) {
+	t.Setenv("ARD_VM_NEXT_ENV_TEST", "present")
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "env get returns some string for set variable",
+			input: `
+				use ard/env
+				fn main() Str {
+					env::get("ARD_VM_NEXT_ENV_TEST").or("")
+				}
+			`,
+		},
+		{
+			name: "env get returns none for missing variable",
+			input: `
+				use ard/env
+				fn main() Bool {
+					env::get("ARD_VM_NEXT_MISSING_ENV_TEST").is_none()
 				}
 			`,
 		},
@@ -896,6 +1020,19 @@ func TestGoTargetParityDecodeHostFlows(t *testing.T) {
 				}
 			`,
 		},
+	})
+}
+
+func TestGoTargetParityEncodeJSONPrimitives(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{name: "encoding str", input: `use ard/encode
+fn main() Str { encode::json("hello").expect("encode failed") }`},
+		{name: "encoding int", input: `use ard/encode
+fn main() Str { encode::json(200).expect("encode failed") }`},
+		{name: "encoding float", input: `use ard/encode
+fn main() Str { encode::json(98.6).expect("encode failed") }`},
+		{name: "encoding bool", input: `use ard/encode
+fn main() Str { encode::json(true).expect("encode failed") }`},
 	})
 }
 
