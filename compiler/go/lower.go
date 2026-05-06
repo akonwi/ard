@@ -256,6 +256,12 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 	switch typ.Kind {
 	case air.TypeStruct:
+		if l.isStdlibFFIBackedType(typ) {
+			decl := &ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{
+				&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Assign: token.Pos(1), Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", typ.Name)},
+			}}
+			return []ast.Decl{decl}, nil
+		}
 		fields := make([]*ast.Field, 0, len(typ.Fields))
 		for _, field := range typ.Fields {
 			fieldType, err := l.goType(field.Type)
@@ -276,7 +282,12 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 		}
 		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
 	case air.TypeEnum:
-		specs := []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: ast.NewIdent("int")}}
+		typeSpec := &ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: ast.NewIdent("int")}
+		if l.isStdlibFFIBackedType(typ) {
+			typeSpec.Assign = token.Pos(1)
+			typeSpec.Type = l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", typ.Name)
+		}
+		specs := []ast.Spec{typeSpec}
 		for _, variant := range typ.Variants {
 			specs = append(specs, &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(enumVariantName(l.program, typ, variant))}, Type: ast.NewIdent(typeName(l.program, typ)), Values: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", variant.Discriminant)}}})
 		}
@@ -1071,6 +1082,28 @@ func (l *lowerer) goParamType(param air.Param) (ast.Expr, error) {
 	return typ, nil
 }
 
+func (l *lowerer) modulePathForType(typeID air.TypeID) string {
+	for _, module := range l.program.Modules {
+		for _, moduleTypeID := range module.Types {
+			if moduleTypeID == typeID {
+				return module.Path
+			}
+		}
+	}
+	return ""
+}
+
+func (l *lowerer) isStdlibFFIBackedType(info air.TypeInfo) bool {
+	if info.ID == 0 {
+		return false
+	}
+	if info.Kind != air.TypeStruct && info.Kind != air.TypeEnum {
+		return false
+	}
+	path := l.modulePathForType(info.ID)
+	return strings.HasPrefix(path, "ard/") && info.Name != ""
+}
+
 func (l *lowerer) isHTTPHandlerFunctionType(info air.TypeInfo) bool {
 	if info.Kind != air.TypeFunction || len(info.Params) != 2 || !l.isVoidType(info.Return) {
 		return false
@@ -1160,7 +1193,12 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		return &ast.MapType{Key: key, Value: value}, nil
-	case air.TypeStruct, air.TypeEnum, air.TypeUnion:
+	case air.TypeStruct, air.TypeEnum:
+		if l.isStdlibFFIBackedType(info) {
+			return l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", info.Name), nil
+		}
+		return ast.NewIdent(typeName(l.program, info)), nil
+	case air.TypeUnion:
 		return ast.NewIdent(typeName(l.program, info)), nil
 	case air.TypeDynamic, air.TypeExtern, air.TypeTraitObject:
 		return ast.NewIdent("any"), nil
@@ -2345,13 +2383,12 @@ func (l *lowerer) lowerHTTPServeExtern(args []ast.Expr, handlerMapType air.TypeI
 	reqType := l.program.Types[fnInfo.Params[0]-1]
 	resType := l.program.Types[fnInfo.Params[1]-1]
 
-	callbackType := &ast.IndexListExpr{
-		X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Callback2"),
-		Indices: []ast.Expr{
-			l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Request"),
-			&ast.StarExpr{X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Response")},
-			voidTypeExpr(),
-		},
+	callbackType := &ast.FuncType{
+		Params: &ast.FieldList{List: []*ast.Field{
+			{Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Request")},
+			{Type: &ast.StarExpr{X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Response")}},
+		}},
+		Results: &ast.FieldList{List: []*ast.Field{{Type: voidTypeExpr()}, {Type: ast.NewIdent("error")}}},
 	}
 	adapterType := &ast.MapType{Key: ast.NewIdent("string"), Value: callbackType}
 	adapterName := l.nextTemp()
@@ -2423,7 +2460,7 @@ func (l *lowerer) lowerHTTPServeExtern(args []ast.Expr, handlerMapType air.TypeI
 			Tok:   token.DEFINE,
 			X:     args[1],
 			Body: &ast.BlockStmt{List: []ast.Stmt{
-				&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(adapterName), Index: ast.NewIdent(pathName)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CompositeLit{Type: callbackType, Elts: []ast.Expr{&ast.KeyValueExpr{Key: ast.NewIdent("Call"), Value: wrapperFunc}}}}},
+				&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(adapterName), Index: ast.NewIdent(pathName)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{wrapperFunc}},
 			}},
 		},
 		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(errName)}, Type: ast.NewIdent("error")}}}},
@@ -2623,24 +2660,24 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		wrapped.stmts = append(stmts, wrapped.stmts...)
 		return wrapped, nil
 	case "HTTP_ResponseStatus":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseStatus"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawResponse")}}}}, nil
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseStatus"), Args: args}}, nil
 	case "HTTP_ResponseHeaders":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseHeaders"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawResponse")}}}}, nil
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseHeaders"), Args: args}}, nil
 	case "HTTP_ResponseBody":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseBody"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawResponse")}}})
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseBody"), Args: args})
 		if err != nil {
 			return loweredExpr{}, err
 		}
 		wrapped.stmts = append(stmts, wrapped.stmts...)
 		return wrapped, nil
 	case "HTTP_ResponseClose":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseClose"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawResponse")}}}}, nil
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseClose"), Args: args}}, nil
 	case "GetReqPath":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "GetReqPath"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawRequest")}}}}, nil
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "GetReqPath"), Args: args}}, nil
 	case "GetPathValue":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "GetPathValue"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawRequest")}, args[1]}}}, nil
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "GetPathValue"), Args: args}}, nil
 	case "GetQueryParam":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "GetQueryParam"), Args: []ast.Expr{&ast.TypeAssertExpr{X: args[0], Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "RawRequest")}, args[1]}}}, nil
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "GetQueryParam"), Args: args}}, nil
 	case "HTTP_Serve":
 		wrapped, err := l.lowerHTTPServeExtern(args, expr.Args[1].Type, expr.Type)
 		if err != nil {

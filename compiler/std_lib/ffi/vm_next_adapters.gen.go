@@ -23,16 +23,16 @@ func generatedHostCast[T any](value any) (T, bool) {
 func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 	switch binding {
 	case "AsyncStart":
-		typed, ok := fn.(func(Callback0[struct{}]) Fiber[struct{}])
+		typed, ok := fn.(func(func() (struct{}, error)) Fiber[struct{}])
 		if !ok {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[Callback0[struct{}]]())
+			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[func() (struct{}, error)]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg0, ok := generatedHostCast[Callback0[struct{}]](arg0Raw)
+			arg0, ok := generatedHostCast[func() (struct{}, error)](arg0Raw)
 			if !ok {
 				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
@@ -865,7 +865,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return bridge.HostReturnValue(extern.Signature.Return, out0)
 		}, true
 	case "HTTP_Serve":
-		typed, ok := fn.(func(int, map[string]Callback2[Request, *Response, struct{}]) error)
+		typed, ok := fn.(func(int, map[string]func(Request, *Response) (struct{}, error)) error)
 		if !ok {
 			return nil, false
 		}
@@ -874,11 +874,11 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1Raw, err := bridge.HostArg(args, 1, reflect.TypeFor[map[string]Callback2[Request, *Response, struct{}]]())
+			arg1Raw, err := bridge.HostArg(args, 1, reflect.TypeFor[map[string]func(Request, *Response) (struct{}, error)]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
-			arg1, ok := generatedHostCast[map[string]Callback2[Request, *Response, struct{}]](arg1Raw)
+			arg1, ok := generatedHostCast[map[string]func(Request, *Response) (struct{}, error)](arg1Raw)
 			if !ok {
 				return nil, fmt.Errorf("extern %s arg 1: cannot use generated host arg %T", binding, arg1Raw)
 			}

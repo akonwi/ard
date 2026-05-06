@@ -426,8 +426,11 @@ func functionTypeGoType(fn *parse.FunctionType, aliases map[string]string, defin
 			return "", err
 		}
 	}
-	args = append(args, returnType)
-	return fmt.Sprintf("Callback%d[%s]", len(fn.Params), strings.Join(args, ", ")), nil
+	params := strings.Join(args, ", ")
+	if len(fn.Params) == 0 {
+		params = ""
+	}
+	return fmt.Sprintf("func(%s) (%s, error)", params, returnType), nil
 }
 
 func render(c contract, packageName string) ([]byte, error) {
@@ -441,12 +444,8 @@ func render(c contract, packageName string) ([]byte, error) {
 	out.WriteString("type Result[T, E any] = ardruntime.Result[T, E]\n\n")
 	out.WriteString("func Ok[T, E any](value T) Result[T, E] {\n\treturn ardruntime.Ok[T, E](value)\n}\n\n")
 	out.WriteString("func Err[T, E any](err E) Result[T, E] {\n\treturn ardruntime.Err[T](err)\n}\n\n")
-	out.WriteString("type Callback0[R any] struct {\n\tCall func() (R, error)\n}\n")
-	out.WriteString("type Callback1[A, R any] struct {\n\tCall func(A) (R, error)\n}\n")
-	out.WriteString("type Callback2[A, B, R any] struct {\n\tCall func(A, B) (R, error)\n}\n\n")
-
 	for _, typ := range c.ExternTypes {
-		fmt.Fprintf(&out, "type %s struct {\n\tHandle any\n}\n\n", typ.Name)
+		fmt.Fprintf(&out, "type %s = any\n\n", typ.Name)
 	}
 	for _, alias := range c.Aliases {
 		fmt.Fprintf(&out, "type %s = %s\n\n", alias.Name, alias.Type)

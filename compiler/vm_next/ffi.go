@@ -28,7 +28,6 @@ var (
 	errorInterface = reflect.TypeFor[error]()
 	hostMaybeType  = reflect.TypeFor[stdlibffi.Maybe[any]]()
 	hostResultType = reflect.TypeFor[stdlibffi.Result[any, any]]()
-	hostCallback0  = reflect.TypeFor[stdlibffi.Callback0[any]]()
 	anyInterface   = reflect.TypeFor[any]()
 	intType        = reflect.TypeFor[int]()
 	float64Type    = reflect.TypeFor[float64]()
@@ -390,7 +389,7 @@ func (vm *VM) validateHostExternType(typeInfo air.TypeInfo, target reflect.Type)
 
 func (vm *VM) validateHostFunctionType(typeInfo air.TypeInfo, target reflect.Type, param bool) error {
 	if !isHostCallbackType(target) {
-		return fmt.Errorf("function type %s must use host callback handle, got %s", typeInfo.Name, target)
+		return fmt.Errorf("function type %s must use host callback func, got %s", typeInfo.Name, target)
 	}
 	callType, err := callbackCallType(target)
 	if err != nil {
@@ -838,9 +837,7 @@ func (vm *VM) closureToHostCallback(value Value, target reflect.Type) (reflect.V
 		}
 		return []reflect.Value{hostResult, errorValue}
 	})
-	out := reflect.New(target).Elem()
-	out.FieldByName("Call").Set(callback)
-	return out, nil
+	return callback, nil
 }
 
 func (vm *VM) listToHost(value Value, target reflect.Type) (reflect.Value, error) {
@@ -1004,23 +1001,14 @@ func isHostResultType(typ reflect.Type) bool {
 }
 
 func isHostCallbackType(typ reflect.Type) bool {
-	return typ.Kind() == reflect.Struct &&
-		typ.PkgPath() == hostCallback0.PkgPath() &&
-		strings.HasPrefix(typ.Name(), "Callback")
+	return typ.Kind() == reflect.Func
 }
 
 func callbackCallType(typ reflect.Type) (reflect.Type, error) {
-	field, ok := typ.FieldByName("Call")
-	if !ok {
-		return nil, fmt.Errorf("host callback %s missing Call field", typ)
+	if typ.Kind() != reflect.Func {
+		return nil, fmt.Errorf("host callback %s must be func, got %s", typ, typ.Kind())
 	}
-	if field.PkgPath != "" {
-		return nil, fmt.Errorf("host callback %s Call field is not exported", typ)
-	}
-	if field.Type.Kind() != reflect.Func {
-		return nil, fmt.Errorf("host callback %s Call field must be func, got %s", typ, field.Type)
-	}
-	return field.Type, nil
+	return typ, nil
 }
 
 func goExportedName(name string) string {

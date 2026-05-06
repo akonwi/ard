@@ -748,7 +748,7 @@ func TestVMNextBytecodeParityHttpServerCallbacks(t *testing.T) {
 
 		http::serve(9999, routes).expect("serve failed")
 	`, HostFunctionRegistry{
-		"HTTP_Serve": func(port int, handlers map[string]stdlibffi.Callback2[stdlibffi.Request, *stdlibffi.Response, struct{}]) error {
+		"HTTP_Serve": func(port int, handlers map[string]func(stdlibffi.Request, *stdlibffi.Response) (struct{}, error)) error {
 			if port != 9999 {
 				return fmt.Errorf("port = %d, want 9999", port)
 			}
@@ -759,12 +759,12 @@ func TestVMNextBytecodeParityHttpServerCallbacks(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "http://example.test/users/42?debug=true", nil)
 			req.SetPathValue("id", "42")
 			res := &stdlibffi.Response{Status: 200, Headers: map[string]string{}}
-			_, err := handler.Call(stdlibffi.Request{
+			_, err := handler(stdlibffi.Request{
 				Method:  stdlibffi.Method(1),
 				Url:     req.URL.String(),
 				Headers: map[string]string{"Content-Type": "application/json"},
 				Body:    stdlibffi.Some[any](`{"email":"ada@example.com"}`),
-				Raw:     stdlibffi.Some(stdlibffi.RawRequest{Handle: req}),
+				Raw:     stdlibffi.Some[any](req),
 			}, res)
 			if err != nil {
 				return err

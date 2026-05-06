@@ -305,7 +305,7 @@ Status: Complete
 
 ### Milestone 5: FFI and stdlib integration
 
-Status: In progress
+Status: Complete
 
 Open design questions to settle during this milestone:
 - [x] Always lower externs to direct static Go calls.
@@ -363,21 +363,23 @@ Open design questions to settle during this milestone:
       remaining surface.
   - the backend now lowers most externs as direct static calls into the Ard Go
     FFI surface, including `ReadLine`, `IntFromStr`, `FloatFromStr`,
-    `Base64*`, `EnvGet`, `Sleep`, and dynamic constructors
+    `Base64*`, `EnvGet`, `Sleep`, dynamic constructors, and HTTP serve/client
+    entry points
   - remaining backend-side adaptation is intentionally narrow and currently
-    limited to cases such as decode error-struct bridging, dynamic map key
-    marshaling, and HTTP callback/struct interop that still need fuller FFI
-    normalization
-- [ ] Support generated structs across the Go extern boundary.
+    limited to cases such as decode error-struct bridging and dynamic map key
+    marshaling
+- [x] Support generated structs across the Go extern boundary.
+  - stdlib-facing named structs/enums now reuse the generated Go FFI surface
+    where appropriate, and HTTP request/response flows build and run through
+    generated Go with direct static FFI entry points
 - [x] Support opaque extern types.
   - opaque extern host types now lower as `any`, with host FFI code
     responsible for concrete type assertions
-- [ ] Support callback externs as native Go closures.
-  - current subset now includes an initial `HTTP_Serve` callback adaptation
-    for mutable response handlers
-  - mutable struct params in the generated Go subset now lower through pointer
+- [x] Support callback externs as native Go closures.
+  - callback-shaped FFI signatures now lower through native Go func types,
+    including HTTP serve handlers
+  - mutable struct params in the generated Go subset lower through pointer
     parameters/calls where needed to preserve callback-side mutations
-  - broader callback coverage beyond the HTTP serve shape is still pending
 - [x] Compile self-hosted stdlib modules from AIR.
   - current lowering compiles deeper self-hosted stdlib paths such as
     `ard/decode`, plus common extern-backed utility modules like `ard/base64`,
