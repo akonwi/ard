@@ -303,6 +303,93 @@ func TestGoTargetParityLoops(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityTry(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "try early return with catch block",
+			input: `
+				fn test_early_return() Str {
+					try Result::err("test") -> err {
+						"caught: {err}"
+					}
+					"should not reach here"
+				}
+				fn main() Str {
+					test_early_return()
+				}
+			`,
+		},
+		{
+			name: "try success with catch block",
+			input: `
+				fn foobar() Int!Str {
+					Result::ok(42)
+				}
+				fn do_thing() Str {
+					let result = try foobar() -> err {
+						"error: {err}"
+					}
+					"success: {result}"
+				}
+				fn main() Str {
+					do_thing()
+				}
+			`,
+		},
+		{
+			name: "try without catch propagates error",
+			input: `
+				fn foobar() Int!Str {
+					Result::err("error")
+				}
+				fn do_thing() Int!Str {
+					let res = try foobar()
+					Result::ok(res * 2)
+				}
+				fn main() Int!Str {
+					do_thing()
+				}
+			`,
+		},
+		{
+			name: "try without catch success",
+			input: `
+				fn foobar() Int!Str {
+					Result::ok(21)
+				}
+				fn do_thing() Int!Str {
+					let res = try foobar()
+					Result::ok(res * 2)
+				}
+				fn main() Int!Str {
+					do_thing()
+				}
+			`,
+		},
+		{
+			name: "try with catch in match block",
+			input: `
+				fn risky_operation() Str!Str {
+					Result::err("operation failed")
+				}
+				fn process_with_catch(flag: Bool) Str {
+					match flag {
+						true => {
+							try risky_operation() -> err {
+								"caught: {err}"
+							}
+						}
+						false => "no operation"
+					}
+				}
+				fn main() Str {
+					process_with_catch(true)
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityStringHelpers(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{name: "int to str", input: `fn main() Str { 100.to_str() }`},
@@ -803,15 +890,67 @@ func runGoTargetParityJSON(t *testing.T, program *air.Program) string {
 
 import (
 	"fmt"
+	"reflect"
 	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
 )
 
 func main() {
-	encoded, err := stdlibffi.JsonEncode(%s())
+	encoded, err := stdlibffi.JsonEncode(normalizeParityValue(%s()))
 	if err != nil {
 		panic(err)
 	}
 	fmt.Print(encoded)
+}
+
+func normalizeParityValue(value any) any {
+	if value == nil {
+		return nil
+	}
+	v := reflect.ValueOf(value)
+	return normalizeReflectValue(v)
+}
+
+func normalizeReflectValue(v reflect.Value) any {
+	if !v.IsValid() {
+		return nil
+	}
+	for v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return nil
+		}
+		v = v.Elem()
+	}
+	if v.Kind() == reflect.Struct {
+		if some := v.FieldByName("Some"); some.IsValid() && some.Kind() == reflect.Bool {
+			if !some.Bool() {
+				return nil
+			}
+			return normalizeReflectValue(v.FieldByName("Value"))
+		}
+		if ok := v.FieldByName("Ok"); ok.IsValid() && ok.Kind() == reflect.Bool {
+			if ok.Bool() {
+				return normalizeReflectValue(v.FieldByName("Value"))
+			}
+			return normalizeReflectValue(v.FieldByName("Err"))
+		}
+	}
+	switch v.Kind() {
+	case reflect.Slice, reflect.Array:
+		out := make([]any, v.Len())
+		for i := range out {
+			out[i] = normalizeReflectValue(v.Index(i))
+		}
+		return out
+	case reflect.Map:
+		out := make(map[string]any, v.Len())
+		iter := v.MapRange()
+		for iter.Next() {
+			out[fmt.Sprint(iter.Key().Interface())] = normalizeReflectValue(iter.Value())
+		}
+		return out
+	default:
+		return v.Interface()
+	}
 }
 `, scriptFn)
 	if err := os.WriteFile(filepath.Join(tempDir, "runner.go"), []byte(runner), 0o644); err != nil {
