@@ -744,6 +744,48 @@ func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityDecodeHostFlows(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "dynamic list decodes back to list",
+			input: `
+				use ard/decode
+				fn main() Int {
+					let foo = [1,2,3]
+					let data = Dynamic::list(from: foo, of: Dynamic::from_int)
+					let list = decode::run(data, decode::list(decode::int)).expect("Couldn't decode data")
+					list.at(1)
+				}
+			`,
+		},
+		{
+			name: "dynamic object decodes back to map",
+			input: `
+				use ard/decode
+				fn main() Int {
+					let data = Dynamic::object([
+						"foo": Dynamic::from_int(0),
+						"baz": Dynamic::from_int(1),
+					])
+					let m = decode::run(data, decode::map(decode::string, decode::int)).expect("Couldn't decode data")
+					m.get("foo").or(-1)
+				}
+			`,
+		},
+		{
+			name: "from json accepts string input",
+			input: `
+				use ard/decode
+				fn main() Int {
+					let data = decode::from_json("42").expect("parse")
+					decode::run(data, decode::int).expect("decode")
+				}
+			`,
+		},
+		// TODO: decode::field / decode::path host parity still needs investigation on the Go target.
+	})
+}
+
 func TestGoTargetParityStringHelpers(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{name: "int to str", input: `fn main() Str { 100.to_str() }`},
