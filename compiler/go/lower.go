@@ -2891,6 +2891,34 @@ func (l *lowerer) wrapValueErrorCall(resultTypeID air.TypeID, call ast.Expr) (lo
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
 
+func (l *lowerer) wrapErrorCall(resultTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
+	if !validTypeID(l.program, resultTypeID) {
+		return loweredExpr{}, fmt.Errorf("invalid result type id %d", resultTypeID)
+	}
+	resultType := l.program.Types[resultTypeID-1]
+	if resultType.Kind != air.TypeResult {
+		return loweredExpr{}, fmt.Errorf("expected result type, got kind %d", resultType.Kind)
+	}
+	if !validTypeID(l.program, resultType.Value) || l.program.Types[resultType.Value-1].Kind != air.TypeVoid {
+		return loweredExpr{}, fmt.Errorf("expected void result value, got type %d", resultType.Value)
+	}
+	errTemp := l.nextTemp()
+	stmts := []ast.Stmt{
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(errTemp)}, Type: ast.NewIdent("error")}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}},
+	}
+	errExpr, err := l.convertStdlibError(resultType.Error, ast.NewIdent(errTemp))
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := &ast.CompositeLit{Type: mustTypeExpr(l, resultTypeID), Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: voidValueExpr()},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: errExpr},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: ast.NewIdent("nil")}},
+	}}
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
 func (l *lowerer) lowerHTTPServeExtern(args []ast.Expr, handlerMapType air.TypeID, resultTypeID air.TypeID) (loweredExpr, error) {
 	if len(args) != 2 {
 		return loweredExpr{}, fmt.Errorf("HTTP_Serve expects 2 args")
@@ -3059,6 +3087,96 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FloatFromInt"), Args: args}}, nil
 	case "ReadLine":
 		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "ReadLine"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "FS_Exists":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSExists"), Args: args}}, nil
+	case "FS_IsFile":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSIsFile"), Args: args}}, nil
+	case "FS_IsDir":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSIsDir"), Args: args}}, nil
+	case "FS_CreateFile":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSCreateFile"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "FS_WriteFile":
+		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSWriteFile"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "FS_AppendFile":
+		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSAppendFile"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "FS_ReadFile":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSReadFile"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "FS_DeleteFile":
+		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSDeleteFile"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "FS_Copy":
+		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSCopy"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "FS_Rename":
+		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSRename"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "FS_Cwd":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSCwd"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "FS_Abs":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSAbs"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "FS_CreateDir":
+		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSCreateDir"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "FS_DeleteDir":
+		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSDeleteDir"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "FS_ListDir":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSListDir"), Args: args})
 		if err != nil {
 			return loweredExpr{}, err
 		}

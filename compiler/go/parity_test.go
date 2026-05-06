@@ -965,6 +965,87 @@ fn main() Int { duration::from_hours(2) }`},
 	})
 }
 
+func TestGoTargetParityFS(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "go-target-fs-parity")
+	dir := filepath.Join(root, "workspace")
+	file := filepath.Join(dir, "sample.txt")
+	copyFile := filepath.Join(dir, "copy.txt")
+	renamedFile := filepath.Join(dir, "renamed.txt")
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "fs create dir exists and is dir",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fn main() Bool {
+					fs::delete_dir(%q).expect("")
+					fs::create_dir(%q).expect("")
+					fs::exists(%q) and fs::is_dir(%q)
+				}
+			`, root, dir, dir, dir),
+		},
+		{
+			name: "fs write append and read",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fn main() Str {
+					fs::delete_dir(%q).expect("")
+					fs::create_dir(%q).expect("")
+					fs::create_file(%q).expect("")
+					fs::write(%q, "hello").expect("")
+					fs::append(%q, " world").expect("")
+					fs::read(%q).expect("")
+				}
+			`, root, dir, file, file, file, file),
+		},
+		{
+			name: "fs copy rename delete and is file",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fn main() Bool {
+					fs::delete_dir(%q).expect("")
+					fs::create_dir(%q).expect("")
+					fs::write(%q, "hello!").expect("")
+					fs::copy(%q, %q).expect("")
+					fs::rename(%q, %q).expect("")
+					let renamed_ok = fs::is_file(%q) and fs::read(%q).expect("") == "hello!"
+					fs::delete(%q).expect("")
+					fs::delete(%q).expect("")
+					renamed_ok and not fs::exists(%q) and not fs::exists(%q)
+				}
+			`, root, dir, file, file, copyFile, copyFile, renamedFile, renamedFile, renamedFile, file, renamedFile, file, renamedFile),
+		},
+		{
+			name: "fs cwd abs and list dir",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fn main() Bool {
+					fs::delete_dir(%q).expect("")
+					fs::create_dir(%q).expect("")
+					fs::write(%q, "a").expect("")
+					fs::write(%q, "b").expect("")
+					let entries = fs::list_dir(%q).expect("")
+					let cwd = fs::cwd().expect("")
+					let abs = fs::abs(%q).expect("")
+					entries.size() == 2 and cwd.size() > 0 and abs.size() >= %d
+				}
+			`, root, dir, file, copyFile, dir, dir, len(dir)),
+		},
+		{
+			name: "fs delete dir removes tree",
+			input: fmt.Sprintf(`
+				use ard/fs
+				fn main() Bool {
+					fs::delete_dir(%q).expect("")
+					fs::create_dir(%q).expect("")
+					fs::write(%q, "bye").expect("")
+					fs::delete_dir(%q).expect("")
+					not fs::exists(%q)
+				}
+			`, root, dir, file, dir, dir),
+		},
+	})
+}
+
 func TestGoTargetParityEnvGet(t *testing.T) {
 	t.Setenv("ARD_VM_NEXT_ENV_TEST", "present")
 	runGoParityCases(t, []goParityCase{
