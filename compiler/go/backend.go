@@ -153,11 +153,33 @@ func compilerModuleRoot() (string, bool) {
 }
 
 func buildGeneratedProgram(dir string, outputPath string) error {
-	cmd := exec.Command("go", "build", "-mod=mod", "-o", outputPath, ".")
+	cmd := exec.Command("go", "build", "-tags=goexperiment.jsonv2", "-mod=mod", "-o", outputPath, ".")
 	cmd.Dir = dir
+	cmd.Env = appendGoExperimentJSONv2(os.Environ())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func appendGoExperimentJSONv2(env []string) []string {
+	for i, entry := range env {
+		if !strings.HasPrefix(entry, "GOEXPERIMENT=") {
+			continue
+		}
+		current := strings.TrimPrefix(entry, "GOEXPERIMENT=")
+		if current == "" {
+			env[i] = "GOEXPERIMENT=jsonv2"
+			return env
+		}
+		for _, experiment := range strings.Split(current, ",") {
+			if experiment == "jsonv2" {
+				return env
+			}
+		}
+		env[i] = entry + ",jsonv2"
+		return env
+	}
+	return append(env, "GOEXPERIMENT=jsonv2")
 }
 
 func programArgs(args []string) []string {
