@@ -336,8 +336,11 @@ Open design questions to settle during this milestone:
     checks
   - any remaining conversion code should be limited to unavoidable host-API
     marshaling, not general `Dynamic` lowering semantics
-- [ ] How should opaque host resource handles be represented and passed
-      consistently across extern boundaries?
+- [x] Represent opaque host resource handles as Go `any`.
+  - generated Go should treat opaque extern values as fully opaque and only
+    store, pass, and return them across the FFI boundary
+  - host FFI implementations are responsible for asserting the expected
+    concrete Go types
 - [ ] How should callback-shaped externs be lowered so mutability, return
       conventions, and host error behavior stay consistent?
 
