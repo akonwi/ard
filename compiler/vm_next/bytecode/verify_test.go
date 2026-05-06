@@ -3,7 +3,51 @@ package bytecode
 import (
 	"strings"
 	"testing"
+
+	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 )
+
+func TestLowerDiscardedIfWithListPushVerifies(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn build_shapes(count: Int) [Int] {
+			mut shapes: [Int] = []
+			for i in 0..count {
+				if i % 4 == 0 {
+					shapes.push(i)
+				} else if i % 4 == 1 {
+					shapes.push(i + 1)
+				} else {
+					shapes.push(i + 2)
+				}
+			}
+			shapes
+		}
+		fn main() Int {
+			build_shapes(10).size()
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := air.Lower(c.Module())
+	if err != nil {
+		t.Fatalf("air lower: %v", err)
+	}
+	bytecodeProgram, err := Lower(program)
+	if err != nil {
+		t.Fatalf("bytecode lower: %v", err)
+	}
+	if err := Verify(bytecodeProgram); err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+}
 
 func TestVerifyAcceptsStraightLineStackUsage(t *testing.T) {
 	program := verifierTestProgram(Function{
