@@ -309,10 +309,15 @@ Status: In progress
 
 Open design questions to settle during this milestone:
 - [ ] When should an extern lower to a direct static Go call with no wrapper?
-- [ ] When should a generated wrapper adapt Ard `Maybe` / `Result` to host
-      `Maybe` / `Result` or Go `error` shapes?
-- [ ] When should `Dynamic` remain `any`, and when should the backend emit
-      explicit list/map/object conversion helpers?
+- [x] Settle the default Go lowering for `Dynamic`.
+  - the backend now treats `Dynamic` as plain Go `any`
+  - `Dynamic` is specifically for arbitrary data at I/O boundaries such as API
+    payloads and decoded input data, with explicit parsing done through the
+    decode API
+  - preserving non-Ard host values across Go/Ard boundaries should prefer
+    opaque types rather than treating `Dynamic` as a general extern transport
+- [ ] When should the backend emit explicit list/map/object conversion helpers
+      for `Dynamic`-typed I/O data?
 - [ ] How should opaque host resource handles be represented and passed
       consistently across extern boundaries?
 - [ ] How should callback-shaped externs be lowered so mutability, return
@@ -328,8 +333,8 @@ Open design questions to settle during this milestone:
     flows, common encoding/env/argv helpers, and HTTP client / decode-driven
     samples like `pokemon`
 - [ ] Generate thin wrappers only where direct calls are insufficient.
-  - current subset uses thin generated wrappers for cases like stdlib `Maybe`
-    bridging, dynamic map conversion, and host callback adaptation
+  - current subset uses thin generated wrappers for cases like dynamic map
+    conversion and host callback adaptation
 - [ ] Support generated structs across the Go extern boundary.
 - [ ] Support opaque extern types.
   - current type lowering accepts `Dynamic` and opaque extern host types as
