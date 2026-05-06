@@ -803,6 +803,99 @@ func TestGoTargetParityDecodeHostFlows(t *testing.T) {
 				}
 			`,
 		},
+		{
+			name: "string decoder fails on int returns error list",
+			input: `
+				use ard/decode
+				fn main() Str {
+					let data = Dynamic::from(42)
+					let result = decode::run(data, decode::string)
+					match result {
+						err(errs) => {
+							if not errs.size() == 1 { panic("Expected 1 error. Got {errs.size()}") }
+							errs.at(0).to_str()
+						},
+						ok(_) => ""
+					}
+				}
+			`,
+		},
+		{
+			name: "nullable string on null returns none",
+			input: `
+				use ard/decode
+				fn main() Bool {
+					let data = decode::from_json("null").expect("parse")
+					let result = decode::run(data, decode::nullable(decode::string)).expect("decode")
+					result.is_none()
+				}
+			`,
+		},
+		{
+			name: "can decode a list",
+			input: `
+				use ard/decode
+				fn main() Int {
+					let data = decode::from_json("[1, 2, 3, 4, 5]").expect("parse")
+					let list = decode::run(data, decode::list(decode::int)).expect("decode")
+					list.at(4)
+				}
+			`,
+		},
+		{
+			name: "map of string keys to integers",
+			input: `
+				use ard/decode
+				fn main() Int {
+					let data = decode::from_json("\{\"age\": 30, \"score\": 95\}").expect("parse")
+					let decode_map = decode::map(decode::string, decode::int)
+					let m = decode_map(data).expect("decode")
+					m.get("age").or(0)
+				}
+			`,
+		},
+		{
+			name: "path error includes array index",
+			input: `
+				use ard/decode
+				fn main() Str {
+					let data = decode::from_json("\{\"items\": [\"a\", \"b\"]\}").expect("parse")
+					let result = decode::run(data, decode::path(["items", 1], decode::int))
+					match result {
+						ok => "unexpected success",
+						err(errs) => errs.at(0).to_str(),
+					}
+				}
+			`,
+		},
+		{
+			name: "one of falls back to alternate decoder",
+			input: `
+				use ard/decode
+				fn int_to_string(data: Dynamic) Str![decode::Error] {
+					let int = try decode::int(data)
+					Result::ok(int.to_str())
+				}
+				fn main() Str {
+					let data = decode::from_json("20").expect("parse")
+					let take_string = decode::one_of(decode::string, [int_to_string])
+					take_string(data).expect("decode")
+				}
+			`,
+		},
+		{
+			name: "flatten multiple errors with newlines",
+			input: `
+				use ard/decode
+				fn main() Str {
+					let errors = [
+						decode::Error{expected: "Int", found: "false", path: ["[1]"]},
+						decode::Error{expected: "Str", found: "42", path: ["[2]"]},
+					]
+					decode::flatten(errors)
+				}
+			`,
+		},
 	})
 }
 

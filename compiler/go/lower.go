@@ -531,6 +531,17 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{expr: ast.NewIdent("false")}, nil
 	case air.ExprConstStr:
 		return loweredExpr{expr: &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("%q", expr.Str)}}, nil
+	case air.ExprPanic:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("panic missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts := append([]ast.Stmt{}, target.stmts...)
+		stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{target.expr}}})
+		return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 	case air.ExprLoadLocal:
 		return loweredExpr{expr: ast.NewIdent(localName(fn, expr.Local))}, nil
 	case air.ExprUnionWrap:
@@ -3034,6 +3045,8 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		}
 		wrapped.stmts = append(stmts, wrapped.stmts...)
 		return wrapped, nil
+	case "IsNil":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "IsNil"), Args: args}}, nil
 	case "ExtractField":
 		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "ExtractField"), Args: args})
 		if err != nil {

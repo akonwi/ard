@@ -403,11 +403,12 @@ Open design questions to settle during this milestone:
     `try` inside match arms returning `Result` values, Maybe/Result matches,
     Maybe/Result fallback and predicate combinators, callback-based
     Maybe/Result map/and_then/map_err combinators, and a broader decode-host
-    subset including `Dynamic::list`, `Dynamic::object`, `decode::from_json`,
-    `decode::field`, and `decode::path`
-  - the earlier `decode::field` / `decode::path` investigation turned out to be
-    a parity-test source escaping issue around JSON-object braces, not a Go
-    target execution hang
+    subset including dynamic list/object conversion, `decode::from_json`,
+    `decode::field`, `decode::path`, decode error reporting, nullable decode,
+    list/map decode, `decode::one_of`, and `decode::flatten`
+  - Go target host/decode parity now also covers the `IsNil` extern path used
+    by `decode::nullable(...)` and direct `panic(...)` lowering used by decode
+    error assertions in the parity corpus
   - parity harness result normalization now unwraps generated top-level
     `runtime.Maybe`/`runtime.Result` values to match vm_next observable output
 - [ ] Run sample programs through `--target go`.
