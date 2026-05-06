@@ -754,6 +754,33 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.BinaryExpr{X: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target.expr}}, Op: token.EQL, Y: &ast.BasicLit{Kind: token.INT, Value: "0"}}}, nil
+	case air.ExprStrSize:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("str size missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target.expr}}}, nil
+	case air.ExprStrAt:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("str at missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		if len(expr.Args) != 1 {
+			return loweredExpr{}, fmt.Errorf("str at expects one arg")
+		}
+		index, err := l.lowerExpr(fn, expr.Args[0])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts := append(target.stmts, index.stmts...)
+		byteExpr := &ast.IndexExpr{X: target.expr, Index: index.expr}
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("string"), Args: []ast.Expr{byteExpr}}}, nil
 	case air.ExprListSize:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("list size missing target")
