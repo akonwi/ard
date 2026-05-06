@@ -316,8 +316,17 @@ Open design questions to settle during this milestone:
     decode API
   - preserving non-Ard host values across Go/Ard boundaries should prefer
     opaque types rather than treating `Dynamic` as a general extern transport
-- [ ] When should the backend emit explicit list/map/object conversion helpers
-      for `Dynamic`-typed I/O data?
+- [x] Do not emit general-purpose list/map/object conversion helpers for
+      `Dynamic`.
+  - `Dynamic` lowers to Go `any`
+  - typed interpretation of dynamic I/O data belongs to explicit APIs,
+    especially `ard/decode`
+  - `ard/decode` acts as the JSON/dynamic FFI surface via a small explicit host
+    API: JSON parsing into `any`, scalar decoders returning structured decode
+    errors, and structural helpers such as list/map/field extraction and nil
+    checks
+  - any remaining conversion code should be limited to unavoidable host-API
+    marshaling, not general `Dynamic` lowering semantics
 - [ ] How should opaque host resource handles be represented and passed
       consistently across extern boundaries?
 - [ ] How should callback-shaped externs be lowered so mutability, return
