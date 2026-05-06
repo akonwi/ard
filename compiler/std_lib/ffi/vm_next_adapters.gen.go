@@ -335,7 +335,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return bridge.HostReturnResult(extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
+			return bridge.HostReturnResult(extern.Signature.Return, out0.Value, out0.Err, out0.Ok)
 		}, true
 	case "DecodeFloat":
 		typed, ok := fn.(func(any) Result[float64, Error])
@@ -348,7 +348,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return bridge.HostReturnResult(extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
+			return bridge.HostReturnResult(extern.Signature.Return, out0.Value, out0.Err, out0.Ok)
 		}, true
 	case "DecodeInt":
 		typed, ok := fn.(func(any) Result[int, Error])
@@ -361,7 +361,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return bridge.HostReturnResult(extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
+			return bridge.HostReturnResult(extern.Signature.Return, out0.Value, out0.Err, out0.Ok)
 		}, true
 	case "DecodeString":
 		typed, ok := fn.(func(any) Result[string, Error])
@@ -374,7 +374,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
 			out0 := typed(arg0)
-			return bridge.HostReturnResult(extern.Signature.Return, out0.Value, out0.Error, out0.Ok)
+			return bridge.HostReturnResult(extern.Signature.Return, out0.Value, out0.Err, out0.Ok)
 		}, true
 	case "DynamicToList":
 		typed, ok := fn.(func(any) ([]any, error))

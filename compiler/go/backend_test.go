@@ -220,14 +220,49 @@ func TestGenerateSourcesSupportsResultExpectAndStringPredicates(t *testing.T) {
 	if !strings.Contains(combined, "runtime.Result[string, string]") {
 		t.Fatalf("generated source missing runtime.Result usage:\n%s", combined)
 	}
-	if !strings.Contains(combined, "ardReadLine()") {
+	if !strings.Contains(combined, "stdlibffi.ReadLine()") {
 		t.Fatalf("generated source missing ReadLine lowering:\n%s", combined)
+	}
+	if strings.Contains(combined, "ardReadLine") {
+		t.Fatalf("generated source should not use legacy ReadLine helper:\n%s", combined)
 	}
 	if !strings.Contains(combined, "panic(\"no line\"") {
 		t.Fatalf("generated source missing Result.expect lowering:\n%s", combined)
 	}
 	if !strings.Contains(combined, "len(line") {
 		t.Fatalf("generated source missing is_empty lowering:\n%s", combined)
+	}
+}
+
+func TestGenerateSourcesUsesDirectStdlibMaybeCalls(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/dynamic
+		use ard/env
+		use ard/float
+		use ard/int
+
+		fn main() Bool {
+			let _a = env::get("PATH")
+			let _b = float::from_str("1.5")
+			let _c = int::from_str("2")
+			let _d = dynamic::object(["a": dynamic::from_int(1)])
+			true
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "stdlibffi.EnvGet(") || !strings.Contains(source, "stdlibffi.FloatFromStr(") || !strings.Contains(source, "stdlibffi.IntFromStr(") {
+		t.Fatalf("generated source missing direct stdlib maybe calls:\n%s", source)
+	}
+	if strings.Contains(source, "ardIntFromStr") {
+		t.Fatalf("generated source should not use legacy IntFromStr helper:\n%s", source)
+	}
+	if strings.Contains(source, "ardMapToDynamic") {
+		t.Fatalf("generated source should not use legacy MapToDynamic helper:\n%s", source)
 	}
 }
 

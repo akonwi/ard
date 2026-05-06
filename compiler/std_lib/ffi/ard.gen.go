@@ -2,31 +2,26 @@
 
 package ffi
 
-type Maybe[T any] struct {
-	Value T
-	Some  bool
-}
+import ardruntime "github.com/akonwi/ard/runtime"
+
+type Maybe[T any] = ardruntime.Maybe[T]
 
 func Some[T any](value T) Maybe[T] {
-	return Maybe[T]{Value: value, Some: true}
+	return ardruntime.Some(value)
 }
 
 func None[T any]() Maybe[T] {
-	return Maybe[T]{}
+	return ardruntime.None[T]()
 }
 
-type Result[T, E any] struct {
-	Value T
-	Error E
-	Ok    bool
-}
+type Result[T, E any] = ardruntime.Result[T, E]
 
 func Ok[T, E any](value T) Result[T, E] {
-	return Result[T, E]{Value: value, Ok: true}
+	return ardruntime.Ok[T, E](value)
 }
 
 func Err[T, E any](err E) Result[T, E] {
-	return Result[T, E]{Error: err}
+	return ardruntime.Err[T](err)
 }
 
 type Callback0[R any] struct {

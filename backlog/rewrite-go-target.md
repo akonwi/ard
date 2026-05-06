@@ -359,26 +359,31 @@ Open design questions to settle during this milestone:
     conversion cases, initial stdin-backed string input flows, async sleep
     flows, common encoding/env/argv helpers, and HTTP client / decode-driven
     samples like `pokemon`
-- [ ] Keep backend-generated extern adapters exceptional and minimize their
+- [x] Keep backend-generated extern adapters exceptional and minimize their
       remaining surface.
-  - current subset still contains some backend-side adaptation for host
-    callback shapes and should continue moving that normalization into the FFI
-    surface itself
+  - the backend now lowers most externs as direct static calls into the Ard Go
+    FFI surface, including `ReadLine`, `IntFromStr`, `FloatFromStr`,
+    `Base64*`, `EnvGet`, `Sleep`, and dynamic constructors
+  - remaining backend-side adaptation is intentionally narrow and currently
+    limited to cases such as decode error-struct bridging, dynamic map key
+    marshaling, and HTTP callback/struct interop that still need fuller FFI
+    normalization
 - [ ] Support generated structs across the Go extern boundary.
-- [ ] Support opaque extern types.
-  - current type lowering accepts `Dynamic` and opaque extern host types as
-    `any`, and direct HTTP serve/client helper coverage is now partially in
-    place through host stdlib wrappers
+- [x] Support opaque extern types.
+  - opaque extern host types now lower as `any`, with host FFI code
+    responsible for concrete type assertions
 - [ ] Support callback externs as native Go closures.
   - current subset now includes an initial `HTTP_Serve` callback adaptation
     for mutable response handlers
   - mutable struct params in the generated Go subset now lower through pointer
     parameters/calls where needed to preserve callback-side mutations
   - broader callback coverage beyond the HTTP serve shape is still pending
-- [ ] Compile self-hosted stdlib modules from AIR.
-  - current lowering can compile deeper self-hosted stdlib paths such as
+- [x] Compile self-hosted stdlib modules from AIR.
+  - current lowering compiles deeper self-hosted stdlib paths such as
     `ard/decode`, plus common extern-backed utility modules like `ard/base64`,
     `ard/hex`, `ard/env`, `ard/argv`, `ard/float`, and `ard/dynamic`
+  - root Go target coverage now includes server/decode-oriented flows that
+    exercise these modules through generated Go builds/tests
 
 ### Milestone 6: parity and rollout
 

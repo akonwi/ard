@@ -28,6 +28,7 @@ var (
 	errorInterface = reflect.TypeFor[error]()
 	hostMaybeType  = reflect.TypeFor[stdlibffi.Maybe[any]]()
 	hostResultType = reflect.TypeFor[stdlibffi.Result[any, any]]()
+	hostCallback0  = reflect.TypeFor[stdlibffi.Callback0[any]]()
 	anyInterface   = reflect.TypeFor[any]()
 	intType        = reflect.TypeFor[int]()
 	float64Type    = reflect.TypeFor[float64]()
@@ -231,9 +232,12 @@ func (vm *VM) validateHostResultType(typeInfo air.TypeInfo, target reflect.Type,
 	if !ok {
 		return fmt.Errorf("host Result type %s missing Value field", target)
 	}
-	errorField, ok := target.FieldByName("Error")
+	errorField, ok := target.FieldByName("Err")
 	if !ok {
-		return fmt.Errorf("host Result type %s missing Error field", target)
+		errorField, ok = target.FieldByName("Error")
+		if !ok {
+			return fmt.Errorf("host Result type %s missing Err/Error field", target)
+		}
 	}
 	okField, ok := target.FieldByName("Ok")
 	if !ok {
@@ -1001,7 +1005,7 @@ func isHostResultType(typ reflect.Type) bool {
 
 func isHostCallbackType(typ reflect.Type) bool {
 	return typ.Kind() == reflect.Struct &&
-		typ.PkgPath() == hostMaybeType.PkgPath() &&
+		typ.PkgPath() == hostCallback0.PkgPath() &&
 		strings.HasPrefix(typ.Name(), "Callback")
 }
 
