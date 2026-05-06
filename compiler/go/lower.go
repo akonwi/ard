@@ -263,12 +263,81 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	}
 `)
 	}
+	helperNames := make([]string, 0, len(l.runtimeHelpers))
+	for name := range l.runtimeHelpers {
+		if strings.HasPrefix(name, "union_to_any:") || strings.HasPrefix(name, "union_slice_to_any:") {
+			helperNames = append(helperNames, name)
+		}
+	}
+	sort.Strings(helperNames)
+	for _, name := range helperNames {
+		switch {
+		case strings.HasPrefix(name, "union_to_any:"):
+			parts = append(parts, l.renderUnionToAnyHelper(name))
+		case strings.HasPrefix(name, "union_slice_to_any:"):
+			parts = append(parts, l.renderUnionSliceToAnyHelper(name))
+		}
+	}
 	src := strings.Join(parts, "\n")
 	file, err := parser.ParseFile(token.NewFileSet(), "prelude.go", src, 0)
 	if err != nil {
 		panic(err)
 	}
 	return file.Decls
+}
+
+func unionToAnyHelperName(typeID air.TypeID) string {
+	return fmt.Sprintf("ardUnionToAny_%d", typeID)
+}
+
+func unionSliceToAnyHelperName(typeID air.TypeID) string {
+	return fmt.Sprintf("ardUnionSliceToAny_%d", typeID)
+}
+
+func (l *lowerer) renderUnionToAnyHelper(helper string) string {
+	typeID := air.TypeID(0)
+	if _, err := fmt.Sscanf(strings.TrimPrefix(helper, "union_to_any:"), "%d", &typeID); err != nil || !validTypeID(l.program, typeID) {
+		panic(fmt.Sprintf("invalid union helper key: %s", helper))
+	}
+	info := l.program.Types[typeID-1]
+	if info.Kind != air.TypeUnion {
+		panic(fmt.Sprintf("union helper %s references non-union type %d", helper, typeID))
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "func %s(value %s) any {\n", unionToAnyHelperName(typeID), typeName(l.program, info))
+	sb.WriteString("\tswitch value.tag {\n")
+	for _, member := range info.Members {
+		fmt.Fprintf(&sb, "\tcase %d:\n", member.Tag)
+		if validTypeID(l.program, member.Type) && l.program.Types[member.Type-1].Kind == air.TypeVoid {
+			sb.WriteString("\t\treturn nil\n")
+		} else {
+			fmt.Fprintf(&sb, "\t\treturn value.%s\n", unionMemberFieldName(member))
+		}
+	}
+	sb.WriteString("\tdefault:\n\t\treturn nil\n\t}\n}\n")
+	return sb.String()
+}
+
+func (l *lowerer) renderUnionSliceToAnyHelper(helper string) string {
+	typeID := air.TypeID(0)
+	if _, err := fmt.Sscanf(strings.TrimPrefix(helper, "union_slice_to_any:"), "%d", &typeID); err != nil || !validTypeID(l.program, typeID) {
+		panic(fmt.Sprintf("invalid union slice helper key: %s", helper))
+	}
+	listInfo := l.program.Types[typeID-1]
+	if listInfo.Kind != air.TypeList || !validTypeID(l.program, listInfo.Elem) {
+		panic(fmt.Sprintf("union slice helper %s references invalid list type %d", helper, typeID))
+	}
+	elemInfo := l.program.Types[listInfo.Elem-1]
+	if elemInfo.Kind != air.TypeUnion {
+		panic(fmt.Sprintf("union slice helper %s references non-union elem %d", helper, listInfo.Elem))
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "func %s(values []%s) []any {\n", unionSliceToAnyHelperName(typeID), typeName(l.program, elemInfo))
+	sb.WriteString("\tout := make([]any, len(values))\n")
+	sb.WriteString("\tfor i, value := range values {\n")
+	fmt.Fprintf(&sb, "\t\tout[i] = %s(value)\n", unionToAnyHelperName(listInfo.Elem))
+	sb.WriteString("\t}\n\treturn out\n}\n")
+	return sb.String()
 }
 
 func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
@@ -3011,28 +3080,8 @@ func (l *lowerer) lowerUnionArgToAny(expr ast.Expr, typeID air.TypeID) (loweredE
 	if info.Kind != air.TypeUnion {
 		return loweredExpr{expr: expr}, nil
 	}
-	temp := l.nextTemp()
-	wrappedExpr := expr
-	if _, ok := expr.(*ast.CompositeLit); ok {
-		wrappedExpr = &ast.ParenExpr{X: expr}
-	}
-	stmts := []ast.Stmt{
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(temp)}, Type: ast.NewIdent("any")}}}},
-	}
-	cases := make([]ast.Stmt, 0, len(info.Members))
-	for _, member := range info.Members {
-		fieldName := unionMemberFieldName(member)
-		valueExpr := ast.Expr(&ast.SelectorExpr{X: wrappedExpr, Sel: ast.NewIdent(fieldName)})
-		if validTypeID(l.program, member.Type) && l.program.Types[member.Type-1].Kind == air.TypeVoid {
-			valueExpr = ast.NewIdent("nil")
-		}
-		cases = append(cases, &ast.CaseClause{
-			List: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", member.Tag)}},
-			Body: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}}},
-		})
-	}
-	stmts = append(stmts, &ast.SwitchStmt{Tag: &ast.SelectorExpr{X: wrappedExpr, Sel: ast.NewIdent("tag")}, Body: &ast.BlockStmt{List: cases}})
-	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
+	l.markRuntimeHelper(fmt.Sprintf("union_to_any:%d", typeID))
+	return loweredExpr{expr: &ast.CallExpr{Fun: ast.NewIdent(unionToAnyHelperName(typeID)), Args: []ast.Expr{expr}}}, nil
 }
 
 func (l *lowerer) lowerUnionSliceArgToAny(expr ast.Expr, typeID air.TypeID) (loweredExpr, error) {
@@ -3048,17 +3097,9 @@ func (l *lowerer) lowerUnionSliceArgToAny(expr ast.Expr, typeID air.TypeID) (low
 		l.markRuntimeHelper("list_to_any_slice")
 		return loweredExpr{expr: &ast.CallExpr{Fun: ast.NewIdent("ardListToAnySlice"), Args: []ast.Expr{expr}}}, nil
 	}
-	valueTemp := l.nextTemp()
-	indexTemp := l.nextTemp()
-	outTemp := l.nextTemp()
-	stmts := []ast.Stmt{
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(outTemp)}, Type: &ast.ArrayType{Elt: ast.NewIdent("any")}}}}},
-		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(outTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("make"), Args: []ast.Expr{&ast.ArrayType{Elt: ast.NewIdent("any")}, &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{expr}}}}}},
-		&ast.RangeStmt{Key: ast.NewIdent(indexTemp), Value: ast.NewIdent(valueTemp), Tok: token.DEFINE, X: expr, Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.SwitchStmt{Tag: &ast.SelectorExpr{X: ast.NewIdent(valueTemp), Sel: ast.NewIdent("tag")}, Body: &ast.BlockStmt{List: unionSliceCaseClauses(l.program, elemInfo, outTemp, indexTemp, valueTemp)}},
-		}}},
-	}
-	return loweredExpr{stmts: stmts, expr: ast.NewIdent(outTemp)}, nil
+	l.markRuntimeHelper(fmt.Sprintf("union_to_any:%d", listInfo.Elem))
+	l.markRuntimeHelper(fmt.Sprintf("union_slice_to_any:%d", typeID))
+	return loweredExpr{expr: &ast.CallExpr{Fun: ast.NewIdent(unionSliceToAnyHelperName(typeID)), Args: []ast.Expr{expr}}}, nil
 }
 
 func unionSliceCaseClauses(program *air.Program, unionInfo air.TypeInfo, outTemp string, indexTemp string, valueTemp string) []ast.Stmt {

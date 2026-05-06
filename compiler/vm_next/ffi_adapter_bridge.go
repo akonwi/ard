@@ -5,6 +5,7 @@ import (
 	"reflect"
 
 	"github.com/akonwi/ard/air"
+	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
 )
 
 type generatedHostBridge struct {
@@ -63,6 +64,90 @@ func (bridge generatedHostBridge) HostArgString(args any, index int) (string, er
 	return value.Str, nil
 }
 
+func (bridge generatedHostBridge) HostArgMaybeBool(args any, index int) (any, error) {
+	value, err := generatedHostArgValue(args, index)
+	if err != nil {
+		return nil, err
+	}
+	if value.Kind != ValueMaybe {
+		return nil, fmt.Errorf("expected maybe value, got kind %d", value.Kind)
+	}
+	maybeValue, err := value.maybeValue()
+	if err != nil {
+		return nil, err
+	}
+	if !maybeValue.Some {
+		return stdlibffi.None[bool](), nil
+	}
+	if maybeValue.Value.Kind != ValueBool {
+		return nil, fmt.Errorf("expected bool maybe value, got kind %d", maybeValue.Value.Kind)
+	}
+	return stdlibffi.Some(maybeValue.Value.Bool), nil
+}
+
+func (bridge generatedHostBridge) HostArgMaybeInt(args any, index int) (any, error) {
+	value, err := generatedHostArgValue(args, index)
+	if err != nil {
+		return nil, err
+	}
+	if value.Kind != ValueMaybe {
+		return nil, fmt.Errorf("expected maybe value, got kind %d", value.Kind)
+	}
+	maybeValue, err := value.maybeValue()
+	if err != nil {
+		return nil, err
+	}
+	if !maybeValue.Some {
+		return stdlibffi.None[int](), nil
+	}
+	if maybeValue.Value.Kind != ValueInt && maybeValue.Value.Kind != ValueEnum {
+		return nil, fmt.Errorf("expected int maybe value, got kind %d", maybeValue.Value.Kind)
+	}
+	return stdlibffi.Some(maybeValue.Value.Int), nil
+}
+
+func (bridge generatedHostBridge) HostArgMaybeFloat64(args any, index int) (any, error) {
+	value, err := generatedHostArgValue(args, index)
+	if err != nil {
+		return nil, err
+	}
+	if value.Kind != ValueMaybe {
+		return nil, fmt.Errorf("expected maybe value, got kind %d", value.Kind)
+	}
+	maybeValue, err := value.maybeValue()
+	if err != nil {
+		return nil, err
+	}
+	if !maybeValue.Some {
+		return stdlibffi.None[float64](), nil
+	}
+	if maybeValue.Value.Kind != ValueFloat {
+		return nil, fmt.Errorf("expected float maybe value, got kind %d", maybeValue.Value.Kind)
+	}
+	return stdlibffi.Some(maybeValue.Value.Float), nil
+}
+
+func (bridge generatedHostBridge) HostArgMaybeString(args any, index int) (any, error) {
+	value, err := generatedHostArgValue(args, index)
+	if err != nil {
+		return nil, err
+	}
+	if value.Kind != ValueMaybe {
+		return nil, fmt.Errorf("expected maybe value, got kind %d", value.Kind)
+	}
+	maybeValue, err := value.maybeValue()
+	if err != nil {
+		return nil, err
+	}
+	if !maybeValue.Some {
+		return stdlibffi.None[string](), nil
+	}
+	if maybeValue.Value.Kind != ValueStr {
+		return nil, fmt.Errorf("expected string maybe value, got kind %d", maybeValue.Value.Kind)
+	}
+	return stdlibffi.Some(maybeValue.Value.Str), nil
+}
+
 func (bridge generatedHostBridge) HostArgAny(args any, index int) (any, error) {
 	value, err := generatedHostArgValue(args, index)
 	if err != nil {
@@ -76,6 +161,76 @@ func (bridge generatedHostBridge) HostArgAny(args any, index int) (any, error) {
 		return raw, nil
 	}
 	return bridge.vm.generatedHostArg(value, anyInterface)
+}
+
+func (bridge generatedHostBridge) HostArgAnySlice(args any, index int) ([]any, error) {
+	value, err := generatedHostArgValue(args, index)
+	if err != nil {
+		return nil, err
+	}
+	if value.Kind != ValueList {
+		return nil, fmt.Errorf("expected list value, got kind %d", value.Kind)
+	}
+	listValue, err := value.listValue()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]any, len(listValue.Items))
+	for i, item := range listValue.Items {
+		hostItem, err := bridge.vm.generatedHostArg(item, anyInterface)
+		if err != nil {
+			return nil, fmt.Errorf("list item %d: %w", i, err)
+		}
+		out[i] = hostItem
+	}
+	return out, nil
+}
+
+func (bridge generatedHostBridge) HostArgStringSlice(args any, index int) ([]string, error) {
+	value, err := generatedHostArgValue(args, index)
+	if err != nil {
+		return nil, err
+	}
+	if value.Kind != ValueList {
+		return nil, fmt.Errorf("expected list value, got kind %d", value.Kind)
+	}
+	listValue, err := value.listValue()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(listValue.Items))
+	for i, item := range listValue.Items {
+		if item.Kind != ValueStr {
+			return nil, fmt.Errorf("list item %d: expected string value, got kind %d", i, item.Kind)
+		}
+		out[i] = item.Str
+	}
+	return out, nil
+}
+
+func (bridge generatedHostBridge) HostArgStringMap(args any, index int) (map[string]string, error) {
+	value, err := generatedHostArgValue(args, index)
+	if err != nil {
+		return nil, err
+	}
+	if value.Kind != ValueMap {
+		return nil, fmt.Errorf("expected map value, got kind %d", value.Kind)
+	}
+	mapValue, err := value.mapValue()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(mapValue.Entries))
+	for i, entry := range mapValue.Entries {
+		if entry.Key.Kind != ValueStr {
+			return nil, fmt.Errorf("map key %d: expected string key, got kind %d", i, entry.Key.Kind)
+		}
+		if entry.Value.Kind != ValueStr {
+			return nil, fmt.Errorf("map value %q: expected string value, got kind %d", entry.Key.Str, entry.Value.Kind)
+		}
+		out[entry.Key.Str] = entry.Value.Str
+	}
+	return out, nil
 }
 
 func generatedHostArgValue(args any, index int) (Value, error) {
@@ -225,6 +380,156 @@ func (vm *VM) generatedHostValueToValue(typeID air.TypeID, value any) (Value, er
 		}
 	case air.TypeDynamic:
 		return Dynamic(typeID, value), nil
+	case air.TypeMaybe:
+		switch v := value.(type) {
+		case stdlibffi.Maybe[bool]:
+			if !v.Some {
+				return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem)), nil
+			}
+			inner, err := vm.generatedHostValueToValue(typeInfo.Elem, v.Value)
+			if err != nil {
+				return Value{}, err
+			}
+			return Maybe(typeID, true, inner), nil
+		case stdlibffi.Maybe[int]:
+			if !v.Some {
+				return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem)), nil
+			}
+			inner, err := vm.generatedHostValueToValue(typeInfo.Elem, v.Value)
+			if err != nil {
+				return Value{}, err
+			}
+			return Maybe(typeID, true, inner), nil
+		case stdlibffi.Maybe[float64]:
+			if !v.Some {
+				return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem)), nil
+			}
+			inner, err := vm.generatedHostValueToValue(typeInfo.Elem, v.Value)
+			if err != nil {
+				return Value{}, err
+			}
+			return Maybe(typeID, true, inner), nil
+		case stdlibffi.Maybe[string]:
+			if !v.Some {
+				return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem)), nil
+			}
+			inner, err := vm.generatedHostValueToValue(typeInfo.Elem, v.Value)
+			if err != nil {
+				return Value{}, err
+			}
+			return Maybe(typeID, true, inner), nil
+		case stdlibffi.Maybe[any]:
+			if !v.Some {
+				return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem)), nil
+			}
+			inner, err := vm.generatedHostValueToValue(typeInfo.Elem, v.Value)
+			if err != nil {
+				return Value{}, err
+			}
+			return Maybe(typeID, true, inner), nil
+		}
+	case air.TypeList:
+		if values, ok := value.([]any); ok {
+			items := make([]Value, len(values))
+			for i, item := range values {
+				converted, err := vm.generatedHostValueToValue(typeInfo.Elem, item)
+				if err != nil {
+					return Value{}, fmt.Errorf("list item %d: %w", i, err)
+				}
+				items[i] = converted
+			}
+			return List(typeID, items), nil
+		}
+		if values, ok := value.([]string); ok {
+			items := make([]Value, len(values))
+			for i, item := range values {
+				converted, err := vm.generatedHostValueToValue(typeInfo.Elem, item)
+				if err != nil {
+					return Value{}, fmt.Errorf("list item %d: %w", i, err)
+				}
+				items[i] = converted
+			}
+			return List(typeID, items), nil
+		}
+		if values, ok := value.([]int); ok {
+			items := make([]Value, len(values))
+			for i, item := range values {
+				converted, err := vm.generatedHostValueToValue(typeInfo.Elem, item)
+				if err != nil {
+					return Value{}, fmt.Errorf("list item %d: %w", i, err)
+				}
+				items[i] = converted
+			}
+			return List(typeID, items), nil
+		}
+		if values, ok := value.([]float64); ok {
+			items := make([]Value, len(values))
+			for i, item := range values {
+				converted, err := vm.generatedHostValueToValue(typeInfo.Elem, item)
+				if err != nil {
+					return Value{}, fmt.Errorf("list item %d: %w", i, err)
+				}
+				items[i] = converted
+			}
+			return List(typeID, items), nil
+		}
+		if values, ok := value.([]bool); ok {
+			items := make([]Value, len(values))
+			for i, item := range values {
+				converted, err := vm.generatedHostValueToValue(typeInfo.Elem, item)
+				if err != nil {
+					return Value{}, fmt.Errorf("list item %d: %w", i, err)
+				}
+				items[i] = converted
+			}
+			return List(typeID, items), nil
+		}
+	case air.TypeMap:
+		if values, ok := value.(map[string]any); ok {
+			entries := make([]MapEntryValue, 0, len(values))
+			for key, item := range values {
+				convertedKey, err := vm.generatedHostValueToValue(typeInfo.Key, key)
+				if err != nil {
+					return Value{}, fmt.Errorf("map key %q: %w", key, err)
+				}
+				convertedValue, err := vm.generatedHostValueToValue(typeInfo.Value, item)
+				if err != nil {
+					return Value{}, fmt.Errorf("map value %q: %w", key, err)
+				}
+				entries = append(entries, MapEntryValue{Key: convertedKey, Value: convertedValue})
+			}
+			return Map(typeID, entries), nil
+		}
+		if values, ok := value.(map[string]string); ok {
+			entries := make([]MapEntryValue, 0, len(values))
+			for key, item := range values {
+				convertedKey, err := vm.generatedHostValueToValue(typeInfo.Key, key)
+				if err != nil {
+					return Value{}, fmt.Errorf("map key %q: %w", key, err)
+				}
+				convertedValue, err := vm.generatedHostValueToValue(typeInfo.Value, item)
+				if err != nil {
+					return Value{}, fmt.Errorf("map value %q: %w", key, err)
+				}
+				entries = append(entries, MapEntryValue{Key: convertedKey, Value: convertedValue})
+			}
+			return Map(typeID, entries), nil
+		}
+		if values, ok := value.(map[string]bool); ok {
+			entries := make([]MapEntryValue, 0, len(values))
+			for key, item := range values {
+				convertedKey, err := vm.generatedHostValueToValue(typeInfo.Key, key)
+				if err != nil {
+					return Value{}, fmt.Errorf("map key %q: %w", key, err)
+				}
+				convertedValue, err := vm.generatedHostValueToValue(typeInfo.Value, item)
+				if err != nil {
+					return Value{}, fmt.Errorf("map value %q: %w", key, err)
+				}
+				entries = append(entries, MapEntryValue{Key: convertedKey, Value: convertedValue})
+			}
+			return Map(typeID, entries), nil
+		}
 	}
 	if value == nil {
 		return vm.hostValueToValue(typeID, reflect.Value{})

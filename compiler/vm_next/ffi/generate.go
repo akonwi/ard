@@ -589,15 +589,33 @@ func vmNextAdapterCase(c contract, opts generateOptions, fn hostFunction) (ast.S
 	}, nil
 }
 
-func vmNextAdapterArgStmts(argName string, index int, goType string) []ast.Stmt {
-	directMethod := map[string]string{
-		"int":     "HostArgInt",
-		"float64": "HostArgFloat64",
-		"bool":    "HostArgBool",
-		"string":  "HostArgString",
-		"any":     "HostArgAny",
-	}[goType]
+func vmNextAdapterArgStmts(c contract, argName string, index int, goType string) []ast.Stmt {
+	directMethod := vmNextDirectBridgeMethod(c, goType)
+	argType := mustParseGoExpr(qualifyVMNextType(goType))
 	if directMethod != "" {
+		if vmNextDirectBridgeMethodNeedsCast(goType) {
+			argRawName := argName + "Raw"
+			return []ast.Stmt{
+				&ast.AssignStmt{
+					Lhs: []ast.Expr{ast.NewIdent(argRawName), ast.NewIdent("err")},
+					Tok: token.DEFINE,
+					Rhs: []ast.Expr{callExpr(selector("bridge", directMethod), ast.NewIdent("args"), intLit(index))},
+				},
+				&ast.IfStmt{
+					Cond: &ast.BinaryExpr{X: ast.NewIdent("err"), Op: token.NEQ, Y: ast.NewIdent("nil")},
+					Body: &ast.BlockStmt{List: []ast.Stmt{returnStmt(ast.NewIdent("nil"), callExpr(selector("fmt", "Errorf"), stringLit("extern %s arg "+strconv.Itoa(index)+": %w"), ast.NewIdent("binding"), ast.NewIdent("err")))}},
+				},
+				&ast.AssignStmt{
+					Lhs: []ast.Expr{ast.NewIdent(argName), ast.NewIdent("ok")},
+					Tok: token.DEFINE,
+					Rhs: []ast.Expr{callExpr(&ast.IndexExpr{X: ast.NewIdent("generatedHostCast"), Index: argType}, ast.NewIdent(argRawName))},
+				},
+				&ast.IfStmt{
+					Cond: &ast.UnaryExpr{Op: token.NOT, X: ast.NewIdent("ok")},
+					Body: &ast.BlockStmt{List: []ast.Stmt{returnStmt(ast.NewIdent("nil"), callExpr(selector("fmt", "Errorf"), stringLit("extern %s arg "+strconv.Itoa(index)+": cannot use generated host arg %T"), ast.NewIdent("binding"), ast.NewIdent(argRawName)))}},
+				},
+			}
+		}
 		return []ast.Stmt{
 			&ast.AssignStmt{
 				Lhs: []ast.Expr{ast.NewIdent(argName), ast.NewIdent("err")},
@@ -611,7 +629,6 @@ func vmNextAdapterArgStmts(argName string, index int, goType string) []ast.Stmt 
 		}
 	}
 
-	argType := mustParseGoExpr(qualifyVMNextType(goType))
 	argRawName := argName + "Raw"
 	return []ast.Stmt{
 		&ast.AssignStmt{
@@ -639,7 +656,7 @@ func vmNextAdapterFuncLit(c contract, opts generateOptions, fn hostFunction) ast
 	stmts := make([]ast.Stmt, 0, len(fn.Params)*2+3)
 	for i, param := range fn.Params {
 		argName := fmt.Sprintf("arg%d", i)
-		stmts = append(stmts, vmNextAdapterArgStmts(argName, i, param.Type)...)
+		stmts = append(stmts, vmNextAdapterArgStmts(c, argName, i, param.Type)...)
 	}
 
 	callArgs := make([]ast.Expr, 0, len(fn.Params))
@@ -712,6 +729,55 @@ func vmNextFuncType(fn hostFunction) string {
 		sig += " (" + strings.Join(returns, ", ") + ")"
 	}
 	return sig
+}
+
+func vmNextDirectBridgeMethod(c contract, goType string) string {
+	switch goType {
+	case "int":
+		return "HostArgInt"
+	case "float64":
+		return "HostArgFloat64"
+	case "bool":
+		return "HostArgBool"
+	case "string":
+		return "HostArgString"
+	case "Maybe[bool]":
+		return "HostArgMaybeBool"
+	case "Maybe[int]":
+		return "HostArgMaybeInt"
+	case "Maybe[float64]":
+		return "HostArgMaybeFloat64"
+	case "Maybe[string]":
+		return "HostArgMaybeString"
+	case "any":
+		return "HostArgAny"
+	case "[]any":
+		return "HostArgAnySlice"
+	case "[]string":
+		return "HostArgStringSlice"
+	case "map[string]string":
+		return "HostArgStringMap"
+	}
+	for _, alias := range c.Aliases {
+		if alias.Name == goType && alias.Type == "any" {
+			return "HostArgAny"
+		}
+	}
+	for _, extern := range c.ExternTypes {
+		if extern.Name == goType {
+			return "HostArgAny"
+		}
+	}
+	return ""
+}
+
+func vmNextDirectBridgeMethodNeedsCast(goType string) bool {
+	switch goType {
+	case "Maybe[bool]", "Maybe[int]", "Maybe[float64]", "Maybe[string]":
+		return true
+	default:
+		return false
+	}
 }
 
 func qualifyVMNextType(goType string) string {

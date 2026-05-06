@@ -49,7 +49,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1Raw, err := bridge.HostArg(args, 1, reflect.TypeFor[Maybe[bool]]())
+			arg1Raw, err := bridge.HostArgMaybeBool(args, 1)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
@@ -70,7 +70,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1Raw, err := bridge.HostArg(args, 1, reflect.TypeFor[Maybe[bool]]())
+			arg1Raw, err := bridge.HostArgMaybeBool(args, 1)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
@@ -91,7 +91,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1Raw, err := bridge.HostArg(args, 1, reflect.TypeFor[Maybe[bool]]())
+			arg1Raw, err := bridge.HostArgMaybeBool(args, 1)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
@@ -112,7 +112,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1Raw, err := bridge.HostArg(args, 1, reflect.TypeFor[Maybe[bool]]())
+			arg1Raw, err := bridge.HostArgMaybeBool(args, 1)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
@@ -146,7 +146,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1Raw, err := bridge.HostArg(args, 1, reflect.TypeFor[Maybe[int]]())
+			arg1Raw, err := bridge.HostArgMaybeInt(args, 1)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
@@ -180,7 +180,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
 			}
-			arg1Raw, err := bridge.HostArg(args, 1, reflect.TypeFor[Maybe[string]]())
+			arg1Raw, err := bridge.HostArgMaybeString(args, 1)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
@@ -188,7 +188,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if !ok {
 				return nil, fmt.Errorf("extern %s arg 1: cannot use generated host arg %T", binding, arg1Raw)
 			}
-			arg2Raw, err := bridge.HostArg(args, 2, reflect.TypeFor[Maybe[int]]())
+			arg2Raw, err := bridge.HostArgMaybeInt(args, 2)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 2: %w", binding, err)
 			}
@@ -196,7 +196,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if !ok {
 				return nil, fmt.Errorf("extern %s arg 2: cannot use generated host arg %T", binding, arg2Raw)
 			}
-			arg3Raw, err := bridge.HostArg(args, 3, reflect.TypeFor[Maybe[int]]())
+			arg3Raw, err := bridge.HostArgMaybeInt(args, 3)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 3: %w", binding, err)
 			}
@@ -204,7 +204,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if !ok {
 				return nil, fmt.Errorf("extern %s arg 3: cannot use generated host arg %T", binding, arg3Raw)
 			}
-			arg4Raw, err := bridge.HostArg(args, 4, reflect.TypeFor[Maybe[int]]())
+			arg4Raw, err := bridge.HostArgMaybeInt(args, 4)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 4: %w", binding, err)
 			}
@@ -212,7 +212,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if !ok {
 				return nil, fmt.Errorf("extern %s arg 4: cannot use generated host arg %T", binding, arg4Raw)
 			}
-			arg5Raw, err := bridge.HostArg(args, 5, reflect.TypeFor[Maybe[int]]())
+			arg5Raw, err := bridge.HostArgMaybeInt(args, 5)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 5: %w", binding, err)
 			}
@@ -237,7 +237,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
-			arg2Raw, err := bridge.HostArg(args, 2, reflect.TypeFor[Maybe[int]]())
+			arg2Raw, err := bridge.HostArgMaybeInt(args, 2)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 2: %w", binding, err)
 			}
@@ -245,7 +245,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if !ok {
 				return nil, fmt.Errorf("extern %s arg 2: cannot use generated host arg %T", binding, arg2Raw)
 			}
-			arg3Raw, err := bridge.HostArg(args, 3, reflect.TypeFor[Maybe[int]]())
+			arg3Raw, err := bridge.HostArgMaybeInt(args, 3)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 3: %w", binding, err)
 			}
@@ -253,7 +253,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if !ok {
 				return nil, fmt.Errorf("extern %s arg 3: cannot use generated host arg %T", binding, arg3Raw)
 			}
-			arg4Raw, err := bridge.HostArg(args, 4, reflect.TypeFor[Maybe[int]]())
+			arg4Raw, err := bridge.HostArgMaybeInt(args, 4)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 4: %w", binding, err)
 			}
@@ -261,7 +261,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if !ok {
 				return nil, fmt.Errorf("extern %s arg 4: cannot use generated host arg %T", binding, arg4Raw)
 			}
-			arg5Raw, err := bridge.HostArg(args, 5, reflect.TypeFor[Maybe[int]]())
+			arg5Raw, err := bridge.HostArgMaybeInt(args, 5)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 5: %w", binding, err)
 			}
@@ -697,13 +697,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawRequest]())
+			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
-			}
-			arg0, ok := generatedHostCast[RawRequest](arg0Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
 			arg1, err := bridge.HostArgString(args, 1)
 			if err != nil {
@@ -718,13 +714,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawRequest]())
+			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
-			}
-			arg0, ok := generatedHostCast[RawRequest](arg0Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
 			arg1, err := bridge.HostArgString(args, 1)
 			if err != nil {
@@ -739,13 +731,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawRequest]())
+			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
-			}
-			arg0, ok := generatedHostCast[RawRequest](arg0Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
 			out0 := typed(arg0)
 			return bridge.HostReturnValue(extern.Signature.Return, out0)
@@ -777,15 +765,11 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 2: %w", binding, err)
 			}
-			arg3Raw, err := bridge.HostArg(args, 3, reflect.TypeFor[map[string]string]())
+			arg3, err := bridge.HostArgStringMap(args, 3)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 3: %w", binding, err)
 			}
-			arg3, ok := generatedHostCast[map[string]string](arg3Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 3: cannot use generated host arg %T", binding, arg3Raw)
-			}
-			arg4Raw, err := bridge.HostArg(args, 4, reflect.TypeFor[Maybe[int]]())
+			arg4Raw, err := bridge.HostArgMaybeInt(args, 4)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 4: %w", binding, err)
 			}
@@ -802,13 +786,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawResponse]())
+			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
-			}
-			arg0, ok := generatedHostCast[RawResponse](arg0Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
 			out0, out1 := typed(arg0)
 			return bridge.HostReturnValueError(extern.Signature.Return, out0, out1)
@@ -819,13 +799,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawResponse]())
+			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
-			}
-			arg0, ok := generatedHostCast[RawResponse](arg0Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
 			typed(arg0)
 			return bridge.HostReturnVoid(extern.Signature.Return)
@@ -836,13 +812,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawResponse]())
+			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
-			}
-			arg0, ok := generatedHostCast[RawResponse](arg0Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
 			out0 := typed(arg0)
 			return bridge.HostReturnValue(extern.Signature.Return, out0)
@@ -853,13 +825,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawResponse]())
+			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
-			}
-			arg0, ok := generatedHostCast[RawResponse](arg0Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
 			out0 := typed(arg0)
 			return bridge.HostReturnValue(extern.Signature.Return, out0)
@@ -982,13 +950,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[[]any]())
+			arg0, err := bridge.HostArgAnySlice(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
-			}
-			arg0, ok := generatedHostCast[[]any](arg0Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
 			out0 := typed(arg0)
 			return bridge.HostReturnValue(extern.Signature.Return, out0)
@@ -1069,13 +1033,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[Db]())
+			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
-			}
-			arg0, ok := generatedHostCast[Db](arg0Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
 			out0, out1 := typed(arg0)
 			return bridge.HostReturnValueError(extern.Signature.Return, out0, out1)
@@ -1086,13 +1046,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[Db]())
+			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
-			}
-			arg0, ok := generatedHostCast[Db](arg0Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
 			out0 := typed(arg0)
 			return bridge.HostReturnError(extern.Signature.Return, out0)
@@ -1103,13 +1059,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[Tx]())
+			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
-			}
-			arg0, ok := generatedHostCast[Tx](arg0Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
 			out0 := typed(arg0)
 			return bridge.HostReturnError(extern.Signature.Return, out0)
@@ -1141,13 +1093,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
-			arg2Raw, err := bridge.HostArg(args, 2, reflect.TypeFor[[]any]())
+			arg2, err := bridge.HostArgAnySlice(args, 2)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 2: %w", binding, err)
-			}
-			arg2, ok := generatedHostCast[[]any](arg2Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 2: cannot use generated host arg %T", binding, arg2Raw)
 			}
 			out0 := typed(arg0, arg1, arg2)
 			return bridge.HostReturnError(extern.Signature.Return, out0)
@@ -1179,13 +1127,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 1: %w", binding, err)
 			}
-			arg2Raw, err := bridge.HostArg(args, 2, reflect.TypeFor[[]any]())
+			arg2, err := bridge.HostArgAnySlice(args, 2)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 2: %w", binding, err)
-			}
-			arg2, ok := generatedHostCast[[]any](arg2Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 2: cannot use generated host arg %T", binding, arg2Raw)
 			}
 			out0, out1 := typed(arg0, arg1, arg2)
 			return bridge.HostReturnValueError(extern.Signature.Return, out0, out1)
@@ -1196,13 +1140,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[Tx]())
+			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
-			}
-			arg0, ok := generatedHostCast[Tx](arg0Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
 			out0 := typed(arg0)
 			return bridge.HostReturnError(extern.Signature.Return, out0)
@@ -1235,13 +1175,9 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 			return nil, false
 		}
 		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
-			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[WaitGroup]())
+			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
-			}
-			arg0, ok := generatedHostCast[WaitGroup](arg0Raw)
-			if !ok {
-				return nil, fmt.Errorf("extern %s arg 0: cannot use generated host arg %T", binding, arg0Raw)
 			}
 			typed(arg0)
 			return bridge.HostReturnVoid(extern.Signature.Return)
