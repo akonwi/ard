@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/akonwi/ard/air"
@@ -584,6 +585,22 @@ func TestGoTargetParityTryOnMaybe(t *testing.T) {
 				}
 			`,
 		},
+		{
+			name: "try on maybe chained fallback",
+			input: `
+				use ard/maybe
+				struct Profile { name: Str? }
+				struct User { profile: Profile? }
+				fn get_user() User? {
+					let profile = maybe::some(Profile{name: maybe::none()})
+					maybe::some(User{profile: profile})
+				}
+				fn main() Str {
+					let name = try get_user().profile.name -> _ { "Sample" }
+					name
+				}
+			`,
+		},
 	})
 }
 
@@ -755,6 +772,37 @@ func TestGoTargetParityCryptoHashes(t *testing.T) {
 				}
 			`,
 		},
+		{
+			name: "crypto password hashing",
+			input: `
+				use ard/crypto
+				fn check() Bool!Str {
+					let hashed = try crypto::hash("password123", 4)
+					let verified = try crypto::verify("password123", hashed)
+					let wrong = try crypto::verify("wrong-password", hashed)
+					Result::ok(verified and not wrong and crypto::hash("password123", 32).is_err())
+				}
+				fn main() Bool {
+					check().expect("crypto password check failed")
+				}
+			`,
+		},
+		{
+			name: "crypto scrypt",
+			input: `
+				use ard/crypto
+				fn check() Bool!Str {
+					let hashed = try crypto::scrypt_hash("password", "73616c74", 16, 1, 1, 16)
+					let verified = try crypto::scrypt_verify("password", hashed, 16, 1, 1, 16)
+					let deterministic = hashed == "73616c74:d360147c2a2db7903186e387bb385547"
+					let malformed = crypto::scrypt_verify("password123", "bad-hash").is_err()
+					Result::ok(deterministic and verified and malformed)
+				}
+				fn main() Bool {
+					check().expect("scrypt check failed")
+				}
+			`,
+		},
 	})
 }
 
@@ -844,6 +892,79 @@ func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityConcurrentModuleAccess(t *testing.T) {
+	const workers = 20
+	var wg sync.WaitGroup
+	errCh := make(chan error, workers)
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					errCh <- fmt.Errorf("panic: %v", r)
+				}
+			}()
+			program := lowerParitySource(t, `
+				use ard/decode
+				fn main() Int {
+					let d = decode::from_json("[1,2,3]").expect("")
+					decode::run(d, decode::list(decode::int)).expect("").size()
+				}
+			`)
+			if got := runGoTargetParityJSON(t, program); got != "3" {
+				errCh <- fmt.Errorf("got %s, want 3", got)
+				return
+			}
+			errCh <- nil
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("concurrent go parity failed: %v", err)
+		}
+	}
+}
+
+func TestGoTargetParityPrinting(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `
+		use ard/io
+		fn main() {
+			io::print("Hello, World!")
+		}
+	`)
+	if got != "Hello, World!\n" {
+		t.Fatalf("stdout = %q, want %q", got, "Hello, World!\n")
+	}
+}
+
+func TestGoTargetParityEscapeSequences(t *testing.T) {
+	got := runGoTargetSourceStdout(t, `
+		use ard/io
+		fn main() {
+			io::print("Line 1\nLine 2")
+			io::print("Tab:\tText")
+		}
+	`)
+	want := "Line 1\nLine 2\nTab:\tText\n"
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestGoTargetParityDurationFunctions(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{name: "from seconds", input: `use ard/duration
+fn main() Int { duration::from_seconds(20) }`},
+		{name: "from minutes", input: `use ard/duration
+fn main() Int { duration::from_minutes(5) }`},
+		{name: "from hours", input: `use ard/duration
+fn main() Int { duration::from_hours(2) }`},
+	})
+}
+
 func TestGoTargetParityEnvGet(t *testing.T) {
 	t.Setenv("ARD_VM_NEXT_ENV_TEST", "present")
 	runGoParityCases(t, []goParityCase{
@@ -903,6 +1024,30 @@ func TestGoTargetParityDecodeHostFlows(t *testing.T) {
 				fn main() Int {
 					let data = decode::from_json("42").expect("parse")
 					decode::run(data, decode::int).expect("decode")
+				}
+			`,
+		},
+		{
+			name: "from json accepts dynamic string input",
+			input: `
+				use ard/decode
+				fn main() Int {
+					let raw = Dynamic::from("\{\"count\": 7\}")
+					let data = decode::from_json(raw).expect("parse")
+					decode::run(data, decode::field("count", decode::int)).expect("decode")
+				}
+			`,
+		},
+		{
+			name: "from json rejects non string dynamic input",
+			input: `
+				use ard/decode
+				fn main() Str {
+					let raw = Dynamic::from(42)
+					match decode::from_json(raw) {
+						err(msg) => msg,
+						ok(_) => "unexpected success",
+					}
 				}
 			`,
 		},
@@ -975,6 +1120,16 @@ func TestGoTargetParityDecodeHostFlows(t *testing.T) {
 					let decode_map = decode::map(decode::string, decode::int)
 					let m = decode_map(data).expect("decode")
 					m.get("age").or(0)
+				}
+			`,
+		},
+		{
+			name: "decode nested path with mixed segments",
+			input: `
+				use ard/decode
+				fn main() Str {
+					let data = decode::from_json("\{\"response\": [\{\"name\": \"Alice\"\}, \{\"name\": \"Bob\"\}]\}").expect("parse")
+					decode::run(data, decode::path(["response", 0, "name"], decode::string)).expect("decode")
 				}
 			`,
 		},
@@ -1611,6 +1766,43 @@ func normalizeReflectValue(v reflect.Value) any {
 		t.Fatalf("write go.mod: %v", err)
 	}
 	binaryPath := filepath.Join(tempDir, "parity-bin")
+	if err := buildGeneratedProgram(tempDir, binaryPath); err != nil {
+		t.Fatalf("build generated program: %v", err)
+	}
+	cmd := exec.Command(binaryPath)
+	cmd.Env = os.Environ()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run generated program: %v\nstderr:\n%s", err, stderr.String())
+	}
+	return stdout.String()
+}
+
+func runGoTargetSourceStdout(t *testing.T, input string) string {
+	t.Helper()
+	program := lowerParitySource(t, input)
+	tempDir := t.TempDir()
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("generate sources: %v", err)
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
+			t.Fatalf("write source %s: %v", name, err)
+		}
+	}
+	goMod := "module generated\n\ngo 1.26.0\n"
+	if moduleRoot, ok := compilerModuleRoot(); ok {
+		goMod += "\nrequire github.com/akonwi/ard v0.0.0\n"
+		goMod += fmt.Sprintf("replace github.com/akonwi/ard => %s\n", moduleRoot)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	binaryPath := filepath.Join(tempDir, "stdout-bin")
 	if err := buildGeneratedProgram(tempDir, binaryPath); err != nil {
 		t.Fatalf("build generated program: %v", err)
 	}

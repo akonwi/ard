@@ -913,6 +913,50 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, fmt.Errorf("invalid target type id %d", expr.Target.Type)
 		}
 		targetType := l.program.Types[expr.Target.Type-1]
+		if targetType.Kind == air.TypeMaybe {
+			if !validTypeID(l.program, targetType.Elem) {
+				return loweredExpr{}, fmt.Errorf("invalid maybe elem type id %d", targetType.Elem)
+			}
+			elemType := l.program.Types[targetType.Elem-1]
+			if elemType.Kind != air.TypeStruct || expr.Field < 0 || expr.Field >= len(elemType.Fields) {
+				return loweredExpr{}, fmt.Errorf("invalid field index %d", expr.Field)
+			}
+			field := elemType.Fields[expr.Field]
+			targetTemp := l.nextTemp()
+			targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			resultTemp := l.nextTemp()
+			resultDecls, err := l.declareTemp(expr.Type, resultTemp)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			targetExpr := ast.NewIdent(targetTemp)
+			resultExpr := ast.NewIdent(resultTemp)
+			stmts := append([]ast.Stmt{}, target.stmts...)
+			stmts = append(stmts, targetDecls...)
+			stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+			stmts = append(stmts, resultDecls...)
+			fieldExpr := &ast.SelectorExpr{X: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}, Sel: ast.NewIdent(field.Name)}
+			assignValue := ast.Expr(fieldExpr)
+			if expr.Type != field.Type {
+				resultInfo := l.program.Types[expr.Type-1]
+				if resultInfo.Kind == air.TypeMaybe && resultInfo.Elem == field.Type {
+					assignValue = &ast.CompositeLit{Type: mustTypeExpr(l, expr.Type), Elts: []ast.Expr{
+						&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: fieldExpr},
+						&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: ast.NewIdent("true")},
+					}}
+				} else {
+					return loweredExpr{}, fmt.Errorf("unsupported maybe field projection from %s.%s to type %d", elemType.Name, field.Name, expr.Type)
+				}
+			}
+			stmts = append(stmts, &ast.IfStmt{
+				Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Some")},
+				Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{assignValue}}}},
+			})
+			return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+		}
 		if targetType.Kind != air.TypeStruct || expr.Field < 0 || expr.Field >= len(targetType.Fields) {
 			return loweredExpr{}, fmt.Errorf("invalid field index %d", expr.Field)
 		}
@@ -1095,6 +1139,37 @@ func (l *lowerer) canOverrideExprType(expr air.Expr, expectedType air.TypeID) bo
 	default:
 		return false
 	}
+}
+
+func (l *lowerer) shouldPropagateMaybeNone(expr air.Expr) bool {
+	if expr.Target == nil || expr.Type == expr.Target.Type {
+		return false
+	}
+	if len(expr.None.Stmts) != 0 || expr.None.Result == nil {
+		return false
+	}
+	return sameAIRExpr(*expr.None.Result, *expr.Target)
+}
+
+func sameAIRExpr(a air.Expr, b air.Expr) bool {
+	if a.Kind != b.Kind || a.Type != b.Type || a.Field != b.Field || a.Local != b.Local || a.Function != b.Function || a.Extern != b.Extern {
+		return false
+	}
+	if a.Int != b.Int || a.Float != b.Float || a.Bool != b.Bool || a.Str != b.Str {
+		return false
+	}
+	if (a.Target == nil) != (b.Target == nil) || len(a.Args) != len(b.Args) {
+		return false
+	}
+	if a.Target != nil && !sameAIRExpr(*a.Target, *b.Target) {
+		return false
+	}
+	for i := range a.Args {
+		if !sameAIRExpr(a.Args[i], b.Args[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func (l *lowerer) declareTemp(typeID air.TypeID, name string) ([]ast.Stmt, error) {
@@ -2197,9 +2272,14 @@ func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{}, err
 	}
 	someBody = append([]ast.Stmt{someDecl, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(someName)}}}, someBody...)
-	noneBody, err := l.lowerValueBlock(fn, expr.None, expr.Type, assignTarget)
-	if err != nil {
-		return loweredExpr{}, err
+	var noneBody []ast.Stmt
+	if l.shouldPropagateMaybeNone(expr) {
+		noneBody = nil
+	} else {
+		noneBody, err = l.lowerValueBlock(fn, expr.None, expr.Type, assignTarget)
+		if err != nil {
+			return loweredExpr{}, err
+		}
 	}
 	stmts = append(stmts, &ast.IfStmt{
 		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Some")},
@@ -3004,6 +3084,34 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoSha256"), Args: args}}, nil
 	case "CryptoSha512":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoSha512"), Args: args}}, nil
+	case "CryptoHashPassword":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoHashPassword"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "CryptoVerifyPassword":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoVerifyPassword"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "CryptoScryptHash":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoScryptHash"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "CryptoScryptVerify":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoScryptVerify"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
 	case "Base64Decode":
 		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Base64Decode"), Args: args})
 		if err != nil {

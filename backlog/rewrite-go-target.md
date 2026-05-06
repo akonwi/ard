@@ -410,10 +410,10 @@ Open design questions to settle during this milestone:
   - Go target host/decode parity now also covers the `IsNil` extern path used
     by `decode::nullable(...)`, direct `panic(...)` lowering used by decode
     error assertions in the parity corpus, and crypto hash extern bindings
-  - next known parity blocker: chained property-style `try` on nested `Maybe`
-    access (for example `try get_user().profile.name -> _ { ... }`) still
-    generates incorrect intermediate `Maybe` types on the Go target and is not
-    yet promoted into the passing parity suite
+  - next known parity blocker: filesystem extern bindings are still missing in
+    the Go target extern lowering (`FS_Exists`, `FS_WriteFile`, `FS_ReadFile`,
+    and likely the rest of the `ard/fs` surface), so project/file-system host
+    parity cannot yet be promoted into the suite
   - parity harness result normalization now unwraps generated top-level
     `runtime.Maybe`/`runtime.Result` values to match vm_next observable output
 - [ ] Run sample programs through `--target go`.
