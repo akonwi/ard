@@ -268,8 +268,124 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 					Result::err("bad").is_err()
 				}
 			`,
-			},
-		})
+		},
+		{
+			name: "maybe map transforms some",
+			input: `
+				use ard/maybe
+				fn main() Int {
+					let result = maybe::some(41).map(fn(value) { value + 1 })
+					result.or(0)
+				}
+			`,
+		},
+		{
+			name: "maybe map keeps none",
+			input: `
+				use ard/maybe
+				fn main() Bool {
+					let result: Int? = maybe::none()
+					result.map(fn(value) { value + 1 }).is_none()
+				}
+			`,
+		},
+		{
+			name: "maybe and then transforms some",
+			input: `
+				use ard/maybe
+				fn main() Int {
+					let result = maybe::some(21).and_then(fn(value) { maybe::some(value * 2) })
+					result.or(0)
+				}
+			`,
+		},
+		{
+			name: "maybe and then keeps none",
+			input: `
+				use ard/maybe
+				fn main() Bool {
+					let result: Int? = maybe::none()
+					result.and_then(fn(value) { maybe::some(value + 1) }).is_none()
+				}
+			`,
+		},
+		{
+			name: "result map transforms ok",
+			input: `
+				fn main() Int {
+					let res: Int!Str = Result::ok(21)
+					let mapped = res.map(fn(value) { value * 2 })
+					mapped.or(0)
+				}
+			`,
+		},
+		{
+			name: "result map leaves err unchanged",
+			input: `
+				fn main() Str {
+					let res: Int!Str = Result::err("bad")
+					let mapped = res.map(fn(value) { value * 2 })
+					match mapped {
+						err(msg) => msg,
+						ok(value) => value.to_str(),
+					}
+				}
+			`,
+		},
+		{
+			name: "result map err transforms err",
+			input: `
+				fn main() Int {
+					let res: Int!Str = Result::err("bad")
+					let mapped = res.map_err(fn(err) { err.size() })
+					match mapped {
+						err(size) => size,
+						ok(value) => value,
+					}
+				}
+			`,
+		},
+		{
+			name: "result map err leaves ok unchanged",
+			input: `
+				fn main() Int {
+					let res: Int!Str = Result::ok(42)
+					let mapped = res.map_err(fn(err) { err.size() })
+					mapped.or(0)
+				}
+			`,
+		},
+		{
+			name: "result and then chains ok",
+			input: `
+				fn main() Int {
+					let res: Int!Str = Result::ok(21)
+					let chained = res.and_then(fn(value) { Result::ok(value * 2) })
+					chained.or(0)
+				}
+			`,
+		},
+		{
+			name: "result and then propagates callback errors",
+			input: `
+				fn main() Bool {
+					let res: Int!Str = Result::ok(21)
+					let chained = res.and_then(fn(value) { Result::err("bad") })
+					chained.is_err()
+				}
+			`,
+		},
+		{
+			name: "result and then leaves err unchanged",
+			input: `
+				fn main() Bool {
+					let res: Int!Str = Result::err("bad")
+					let chained = res.and_then(fn(value) { Result::ok(value * 2) })
+					chained.is_err()
+				}
+			`,
+		},
+	})
 }
 
 func runGoParityCases(t *testing.T, cases []goParityCase) {

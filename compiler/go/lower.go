@@ -643,10 +643,20 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMaybeIsSome(fn, expr)
 	case air.ExprMaybeOr:
 		return l.lowerMaybeOr(fn, expr)
+	case air.ExprMaybeMap:
+		return l.lowerMaybeMap(fn, expr)
+	case air.ExprMaybeAndThen:
+		return l.lowerMaybeAndThen(fn, expr)
 	case air.ExprResultExpect:
 		return l.lowerResultExpect(fn, expr)
 	case air.ExprResultOr:
 		return l.lowerResultOr(fn, expr)
+	case air.ExprResultMap:
+		return l.lowerResultMap(fn, expr)
+	case air.ExprResultMapErr:
+		return l.lowerResultMapErr(fn, expr)
+	case air.ExprResultAndThen:
+		return l.lowerResultAndThen(fn, expr)
 	case air.ExprResultIsOk:
 		return l.lowerResultIsOk(fn, expr)
 	case air.ExprResultIsErr:
@@ -1573,6 +1583,103 @@ func (l *lowerer) lowerResultOr(fn air.Function, expr air.Expr) (loweredExpr, er
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
 
+func (l *lowerer) lowerMaybeMap(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("maybe map expects target and callback")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	callback, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultTemp := l.nextTemp()
+	resultDecls, err := l.declareTemp(expr.Type, resultTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetTemp := l.nextTemp()
+	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := ast.NewIdent(resultTemp)
+	targetExpr := ast.NewIdent(targetTemp)
+	stmts := append(target.stmts, callback.stmts...)
+	stmts = append(stmts, targetDecls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	stmts = append(stmts, resultDecls...)
+	resultType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}
+	var valueExpr ast.Expr = call
+	if l.isVoidType(expr.Type) || isVoidExpr(call) {
+		valueExpr = voidValueExpr()
+	}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Some")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{
+				Lhs: []ast.Expr{resultExpr},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+					&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: valueExpr},
+					&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: ast.NewIdent("true")},
+				}}},
+			},
+		}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType}}},
+		}},
+	})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) lowerMaybeAndThen(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("maybe and_then expects target and callback")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	callback, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultTemp := l.nextTemp()
+	resultDecls, err := l.declareTemp(expr.Type, resultTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetTemp := l.nextTemp()
+	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := ast.NewIdent(resultTemp)
+	targetExpr := ast.NewIdent(targetTemp)
+	stmts := append(target.stmts, callback.stmts...)
+	stmts = append(stmts, targetDecls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	stmts = append(stmts, resultDecls...)
+	resultType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Some")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}}}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType}}}}},
+	})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
 func (l *lowerer) lowerResultIsOk(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("result is_ok missing target")
@@ -1593,6 +1700,177 @@ func (l *lowerer) lowerResultIsErr(fn air.Function, expr air.Expr) (loweredExpr,
 		return loweredExpr{}, err
 	}
 	return loweredExpr{stmts: target.stmts, expr: &ast.UnaryExpr{Op: token.NOT, X: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Ok")}}}, nil
+}
+
+func (l *lowerer) lowerResultMap(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("result map expects target and callback")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	callback, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultTemp := l.nextTemp()
+	resultDecls, err := l.declareTemp(expr.Type, resultTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetTemp := l.nextTemp()
+	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := ast.NewIdent(resultTemp)
+	targetExpr := ast.NewIdent(targetTemp)
+	stmts := append(target.stmts, callback.stmts...)
+	stmts = append(stmts, targetDecls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	stmts = append(stmts, resultDecls...)
+	resultType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}
+	var valueExpr ast.Expr = call
+	if l.isVoidType(expr.Type) || isVoidExpr(call) {
+		valueExpr = voidValueExpr()
+	}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Ok")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{
+				Lhs: []ast.Expr{resultExpr},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+					&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: valueExpr},
+					&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: ast.NewIdent("true")},
+				}}},
+			},
+		}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{
+				Lhs: []ast.Expr{resultExpr},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+					&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Err")}},
+				}}},
+			},
+		}},
+	})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) lowerResultMapErr(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("result map_err expects target and callback")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	callback, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultTemp := l.nextTemp()
+	resultDecls, err := l.declareTemp(expr.Type, resultTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetTemp := l.nextTemp()
+	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := ast.NewIdent(resultTemp)
+	targetExpr := ast.NewIdent(targetTemp)
+	stmts := append(target.stmts, callback.stmts...)
+	stmts = append(stmts, targetDecls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	stmts = append(stmts, resultDecls...)
+	resultType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Err")}}}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Ok")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{
+				Lhs: []ast.Expr{resultExpr},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+					&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}},
+					&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: ast.NewIdent("true")},
+				}}},
+			},
+		}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{
+				Lhs: []ast.Expr{resultExpr},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+					&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: call},
+				}}},
+			},
+		}},
+	})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) lowerResultAndThen(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("result and_then expects target and callback")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	callback, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultTemp := l.nextTemp()
+	resultDecls, err := l.declareTemp(expr.Type, resultTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetTemp := l.nextTemp()
+	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := ast.NewIdent(resultTemp)
+	targetExpr := ast.NewIdent(targetTemp)
+	stmts := append(target.stmts, callback.stmts...)
+	stmts = append(stmts, targetDecls...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	stmts = append(stmts, resultDecls...)
+	resultType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Ok")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}},
+		}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{
+				Lhs: []ast.Expr{resultExpr},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+					&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Err")}},
+				}}},
+			},
+		}},
+	})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
 
 func (l *lowerer) lowerMatchResult(fn air.Function, expr air.Expr) (loweredExpr, error) {
