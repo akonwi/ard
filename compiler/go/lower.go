@@ -764,7 +764,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "TrimSpace"), Args: []ast.Expr{target.expr}}}, nil
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "Trim"), Args: []ast.Expr{target.expr, &ast.BasicLit{Kind: token.STRING, Value: `" "`}}}}, nil
 	case air.ExprStrIsEmpty:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("str is_empty missing target")

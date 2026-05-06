@@ -303,6 +303,19 @@ func TestGoTargetParityLoops(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityStringHelpers(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{name: "int to str", input: `fn main() Str { 100.to_str() }`},
+		{name: "bool to str", input: `fn main() Str { true.to_str() }`},
+		{name: "str replace all", input: `fn main() Str { "hello world hello world".replace_all("world", "universe") }`},
+		{name: "str contains", input: `fn main() Bool { "hello".contains("ell") }`},
+		{name: "str starts with", input: `fn main() Bool { "hello".starts_with("he") }`},
+		{name: "str split", input: `fn main() [Str] { "a,b,c".split(",") }`},
+		{name: "str trim", input: `fn main() Str { "  hello \n".trim() }`},
+		{name: "str is empty", input: `fn main() Bool { "".is_empty() }`},
+	})
+}
+
 func TestGoTargetParityMatching(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
