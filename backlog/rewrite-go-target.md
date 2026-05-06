@@ -413,9 +413,15 @@ Open design questions to settle during this milestone:
   - Go target host parity now also covers the `ard/fs` extern surface needed by
     current parity corpus slices: exists/is_file/is_dir, create/write/append/
     read/delete/copy/rename, cwd/abs, create/delete dir, and list_dir
-  - no new concrete Go-target parity blocker was found in this pass after
-    promoting filesystem host coverage; continue expanding against remaining
-    vm_next parity slices until the next failing case appears
+  - Go target host parity also now covers `crypto::uuid()`, HTTP method/client
+    timeout parity, and the current SQL parity slice including parameter
+    extraction, query all/first, missing-parameter errors, nullable SQL values,
+    rollback, and commit/transaction query flows
+  - next concrete parity blocker found while continuing expansion: stdlib
+    `ard/async` host externs are not wired for the Go target/runtime parity
+    path yet (`AsyncStart`, `AsyncEval`, `WaitFor`, `GetResult`); generic async
+    externs are still skipped in generated FFI host surfaces, so vm_next async
+    timing parity cannot yet be promoted
   - parity harness result normalization now unwraps generated top-level
     `runtime.Maybe`/`runtime.Result` values to match vm_next observable output
 - [ ] Run sample programs through `--target go`.

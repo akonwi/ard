@@ -245,6 +245,17 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	}
 `)
 	}
+	if l.runtimeHelpers["list_to_any_slice"] {
+		parts = append(parts, `
+	func ardListToAnySlice[T any](values []T) []any {
+		out := make([]any, len(values))
+		for i, value := range values {
+			out[i] = value
+		}
+		return out
+	}
+`)
+	}
 	src := strings.Join(parts, "\n")
 	file, err := parser.ParseFile(token.NewFileSet(), "prelude.go", src, 0)
 	if err != nil {
@@ -898,7 +909,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 				return loweredExpr{}, err
 			}
 			stmts = append(stmts, value.stmts...)
-			elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(field.Name), Value: value.expr})
+			elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(typ, field.Name)), Value: value.expr})
 		}
 		return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, typ)), Elts: elts}}, nil
 	case air.ExprGetField:
@@ -938,7 +949,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			stmts = append(stmts, targetDecls...)
 			stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 			stmts = append(stmts, resultDecls...)
-			fieldExpr := &ast.SelectorExpr{X: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}, Sel: ast.NewIdent(field.Name)}
+			fieldExpr := &ast.SelectorExpr{X: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}, Sel: ast.NewIdent(l.goFieldName(elemType, field.Name))}
 			assignValue := ast.Expr(fieldExpr)
 			if expr.Type != field.Type {
 				resultInfo := l.program.Types[expr.Type-1]
@@ -960,7 +971,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if targetType.Kind != air.TypeStruct || expr.Field < 0 || expr.Field >= len(targetType.Fields) {
 			return loweredExpr{}, fmt.Errorf("invalid field index %d", expr.Field)
 		}
-		return loweredExpr{stmts: target.stmts, expr: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(targetType.Fields[expr.Field].Name)}}, nil
+		return loweredExpr{stmts: target.stmts, expr: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, targetType.Fields[expr.Field].Name))}}, nil
 	case air.ExprBlock:
 		return l.lowerBlockExpr(fn, expr)
 	case air.ExprIf:
@@ -1404,9 +1415,16 @@ func (l *lowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (loweredExpr, e
 	if fieldName == "" {
 		return loweredExpr{}, fmt.Errorf("invalid union tag %d for %s", expr.Tag, unionType.Name)
 	}
+	fieldValue := target.expr
+	for _, member := range unionType.Members {
+		if member.Tag == expr.Tag && validTypeID(l.program, member.Type) && l.program.Types[member.Type-1].Kind == air.TypeVoid {
+			fieldValue = voidValueExpr()
+			break
+		}
+	}
 	return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, unionType)), Elts: []ast.Expr{
 		&ast.KeyValueExpr{Key: ast.NewIdent("tag"), Value: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", expr.Tag)}},
-		&ast.KeyValueExpr{Key: ast.NewIdent(fieldName), Value: target.expr},
+		&ast.KeyValueExpr{Key: ast.NewIdent(fieldName), Value: fieldValue},
 	}}}, nil
 }
 
@@ -2800,6 +2818,13 @@ func exportedFieldName(name string) string {
 	return string(runes)
 }
 
+func (l *lowerer) goFieldName(typ air.TypeInfo, fieldName string) string {
+	if l.isStdlibFFIBackedType(typ) {
+		return exportedFieldName(fieldName)
+	}
+	return fieldName
+}
+
 func (l *lowerer) wrapStdlibMaybeCall(maybeTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
 	maybeType, err := l.goType(maybeTypeID)
 	if err != nil {
@@ -2917,6 +2942,79 @@ func (l *lowerer) wrapErrorCall(resultTypeID air.TypeID, call ast.Expr) (lowered
 		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: ast.NewIdent("nil")}},
 	}}
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) lowerUnionArgToAny(expr ast.Expr, typeID air.TypeID) (loweredExpr, error) {
+	if !validTypeID(l.program, typeID) {
+		return loweredExpr{}, fmt.Errorf("invalid union type id %d", typeID)
+	}
+	info := l.program.Types[typeID-1]
+	if info.Kind != air.TypeUnion {
+		return loweredExpr{expr: expr}, nil
+	}
+	temp := l.nextTemp()
+	wrappedExpr := expr
+	if _, ok := expr.(*ast.CompositeLit); ok {
+		wrappedExpr = &ast.ParenExpr{X: expr}
+	}
+	stmts := []ast.Stmt{
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(temp)}, Type: ast.NewIdent("any")}}}},
+	}
+	cases := make([]ast.Stmt, 0, len(info.Members))
+	for _, member := range info.Members {
+		fieldName := unionMemberFieldName(member)
+		valueExpr := ast.Expr(&ast.SelectorExpr{X: wrappedExpr, Sel: ast.NewIdent(fieldName)})
+		if validTypeID(l.program, member.Type) && l.program.Types[member.Type-1].Kind == air.TypeVoid {
+			valueExpr = ast.NewIdent("nil")
+		}
+		cases = append(cases, &ast.CaseClause{
+			List: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", member.Tag)}},
+			Body: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}}},
+		})
+	}
+	stmts = append(stmts, &ast.SwitchStmt{Tag: &ast.SelectorExpr{X: wrappedExpr, Sel: ast.NewIdent("tag")}, Body: &ast.BlockStmt{List: cases}})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
+}
+
+func (l *lowerer) lowerUnionSliceArgToAny(expr ast.Expr, typeID air.TypeID) (loweredExpr, error) {
+	if !validTypeID(l.program, typeID) {
+		return loweredExpr{}, fmt.Errorf("invalid list type id %d", typeID)
+	}
+	listInfo := l.program.Types[typeID-1]
+	if listInfo.Kind != air.TypeList || !validTypeID(l.program, listInfo.Elem) {
+		return loweredExpr{expr: expr}, nil
+	}
+	elemInfo := l.program.Types[listInfo.Elem-1]
+	if elemInfo.Kind != air.TypeUnion {
+		l.markRuntimeHelper("list_to_any_slice")
+		return loweredExpr{expr: &ast.CallExpr{Fun: ast.NewIdent("ardListToAnySlice"), Args: []ast.Expr{expr}}}, nil
+	}
+	valueTemp := l.nextTemp()
+	indexTemp := l.nextTemp()
+	outTemp := l.nextTemp()
+	stmts := []ast.Stmt{
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(outTemp)}, Type: &ast.ArrayType{Elt: ast.NewIdent("any")}}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(outTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("make"), Args: []ast.Expr{&ast.ArrayType{Elt: ast.NewIdent("any")}, &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{expr}}}}}},
+		&ast.RangeStmt{Key: ast.NewIdent(indexTemp), Value: ast.NewIdent(valueTemp), Tok: token.DEFINE, X: expr, Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.SwitchStmt{Tag: &ast.SelectorExpr{X: ast.NewIdent(valueTemp), Sel: ast.NewIdent("tag")}, Body: &ast.BlockStmt{List: unionSliceCaseClauses(l.program, elemInfo, outTemp, indexTemp, valueTemp)}},
+		}}},
+	}
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(outTemp)}, nil
+}
+
+func unionSliceCaseClauses(program *air.Program, unionInfo air.TypeInfo, outTemp string, indexTemp string, valueTemp string) []ast.Stmt {
+	cases := make([]ast.Stmt, 0, len(unionInfo.Members))
+	for _, member := range unionInfo.Members {
+		valueExpr := ast.Expr(&ast.SelectorExpr{X: ast.NewIdent(valueTemp), Sel: ast.NewIdent(unionMemberFieldName(member))})
+		if validTypeID(program, member.Type) && program.Types[member.Type-1].Kind == air.TypeVoid {
+			valueExpr = ast.NewIdent("nil")
+		}
+		cases = append(cases, &ast.CaseClause{
+			List: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", member.Tag)}},
+			Body: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(outTemp), Index: ast.NewIdent(indexTemp)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}}},
+		})
+	}
+	return cases
 }
 
 func (l *lowerer) lowerHTTPServeExtern(args []ast.Expr, handlerMapType air.TypeID, resultTypeID air.TypeID) (loweredExpr, error) {
@@ -3196,12 +3294,97 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "OsArgs"), Args: args}}, nil
 	case "Base64Encode":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Base64Encode"), Args: args}}, nil
+	case "SqlCreateConnection":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlCreateConnection"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "SqlClose":
+		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlClose"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "SqlExecute":
+		sqlArgs := append([]ast.Expr{}, args...)
+		if len(sqlArgs) != 3 {
+			return loweredExpr{}, fmt.Errorf("SqlExecute expects 3 args")
+		}
+		connArg, err := l.lowerUnionArgToAny(sqlArgs[0], expr.Args[0].Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, connArg.stmts...)
+		sqlArgs[0] = connArg.expr
+		valueArgs, err := l.lowerUnionSliceArgToAny(sqlArgs[2], expr.Args[2].Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, valueArgs.stmts...)
+		sqlArgs[2] = valueArgs.expr
+		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlExecute"), Args: sqlArgs})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "SqlQuery":
+		sqlArgs := append([]ast.Expr{}, args...)
+		if len(sqlArgs) != 3 {
+			return loweredExpr{}, fmt.Errorf("SqlQuery expects 3 args")
+		}
+		connArg, err := l.lowerUnionArgToAny(sqlArgs[0], expr.Args[0].Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, connArg.stmts...)
+		sqlArgs[0] = connArg.expr
+		valueArgs, err := l.lowerUnionSliceArgToAny(sqlArgs[2], expr.Args[2].Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, valueArgs.stmts...)
+		sqlArgs[2] = valueArgs.expr
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlQuery"), Args: sqlArgs})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "SqlBeginTx":
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlBeginTx"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "SqlCommit":
+		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlCommit"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "SqlRollback":
+		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlRollback"), Args: args})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "SqlExtractParams":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlExtractParams"), Args: args}}, nil
 	case "CryptoMd5":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoMd5"), Args: args}}, nil
 	case "CryptoSha256":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoSha256"), Args: args}}, nil
 	case "CryptoSha512":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoSha512"), Args: args}}, nil
+	case "CryptoUUID":
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoUUID"), Args: args}}, nil
 	case "CryptoHashPassword":
 		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoHashPassword"), Args: args})
 		if err != nil {

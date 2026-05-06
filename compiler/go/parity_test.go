@@ -7,11 +7,16 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
@@ -892,6 +897,47 @@ func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityConcurrentMethodAccess(t *testing.T) {
+	const workers = 20
+	var wg sync.WaitGroup
+	errCh := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					errCh <- fmt.Errorf("panic: %v", r)
+				}
+			}()
+			input := `
+				fn main() Int {
+					mut list = [1,2,3]
+					list.push(4)
+					list.size()
+				}
+			`
+			if id%2 == 1 {
+				input = `
+					fn main() Str {
+						"hello world".replace_all("world", "ard")
+					}
+				`
+			}
+			program := lowerParitySource(t, input)
+			_ = runGoTargetParityJSON(t, program)
+			errCh <- nil
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("concurrent go parity failed: %v", err)
+		}
+	}
+}
+
 func TestGoTargetParityConcurrentModuleAccess(t *testing.T) {
 	const workers = 20
 	var wg sync.WaitGroup
@@ -1042,6 +1088,202 @@ func TestGoTargetParityFS(t *testing.T) {
 					not fs::exists(%q)
 				}
 			`, root, dir, file, dir, dir),
+		},
+	})
+}
+
+func TestGoTargetParityCryptoUUID(t *testing.T) {
+	program := lowerParitySource(t, `
+		use ard/crypto
+		fn main() Str { crypto::uuid() }
+	`)
+	got := runGoTargetParityJSON(t, program)
+	uuid, err := strconv.Unquote(got)
+	if err != nil {
+		t.Fatalf("unquote uuid %q: %v", got, err)
+	}
+	pattern := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	if !pattern.MatchString(uuid) {
+		t.Fatalf("uuid = %q", uuid)
+	}
+}
+
+func TestGoTargetParityHTTP(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "method implements tostring",
+			input: `
+				use ard/http
+				fn main() Str {
+					let method = http::Method::Post
+					"{method}"
+				}
+			`,
+		},
+	})
+
+	t.Run("request timeout uses req timeout", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(1100 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		}))
+		defer server.Close()
+		runGoParityCases(t, []goParityCase{{
+			name: "http send request timeout fallback",
+			input: fmt.Sprintf(`
+				use ard/http
+				use ard/maybe
+				fn main() Int {
+					http::send(http::Request{
+						method: http::Method::Get,
+						url: %q,
+						headers: [:],
+						timeout: maybe::some(1),
+					}).or(http::Response::new(-1, "")).status
+				}
+			`, server.URL),
+		}})
+	})
+
+	t.Run("call site timeout overrides req timeout", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(1100 * time.Millisecond)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte("created"))
+		}))
+		defer server.Close()
+		runGoParityCases(t, []goParityCase{{
+			name: "http send override timeout succeeds",
+			input: fmt.Sprintf(`
+				use ard/http
+				use ard/maybe
+				fn main() Int {
+					let req = http::Request{
+						method: http::Method::Get,
+						url: %q,
+						headers: [:],
+						timeout: maybe::some(1),
+					}
+					http::send(req, 2).or(http::Response::new(-1, "")).status
+				}
+			`, server.URL),
+		}})
+	})
+}
+
+func TestGoTargetParitySQL(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "query.db")
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "sql extract params in query order",
+			input: `
+				use ard/sql
+				fn main() Int {
+					let names = sql::extract_params("SELECT * FROM players WHERE league_id = @league_id AND season = @season AND (home_id = @team_id OR away_id = @team_id)")
+					names.size()
+				}
+			`,
+		},
+		{
+			name: "sql query all decodes row fields",
+			input: fmt.Sprintf(`
+				use ard/sql
+				use ard/decode
+				fn main() Str {
+					let db = sql::open(%q).expect("Failed to open database")
+					db.exec("DROP TABLE IF EXISTS players").expect("Failed to drop table")
+					db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
+					db.exec("INSERT INTO players (name, number) VALUES ('John Doe', 2)").expect("Failed to insert player 1")
+					db.exec("INSERT INTO players (name, number) VALUES ('Jane Smith', 5)").expect("Failed to insert player 2")
+					let query = db.query("SELECT id, name, number FROM players WHERE number = @number")
+					let rows = query.all(["number": 5]).expect("Failed to query players")
+					let decode_name = decode::field("name", decode::string)
+					decode_name(rows.at(0)).expect("Unable to decode row")
+				}
+			`, dbPath),
+		},
+		{
+			name: "sql query first returns maybe row",
+			input: fmt.Sprintf(`
+				use ard/sql
+				use ard/decode
+				fn main() Int {
+					let db = sql::open(%q).expect("Failed to open database")
+					let query = db.query("SELECT id FROM players WHERE number = @number")
+					let maybe_row = query.first(["number": 5]).expect("Failed to query players")
+					let row = maybe_row.expect("Found none")
+					decode::run(row, decode::field("id", decode::int)).expect("Failed to decode id")
+				}
+			`, dbPath),
+		},
+		{
+			name: "sql missing parameter reports error",
+			input: fmt.Sprintf(`
+				use ard/sql
+				fn main() Str {
+					let db = sql::open(%q).expect("Failed to open database")
+					let stmt = db.query("INSERT INTO players (name, number) VALUES (@name, @number)")
+					match stmt.run(["name": "John Doe", "int": 2]) {
+						err(msg) => msg,
+						ok(_) => "unexpected success",
+					}
+				}
+			`, dbPath),
+		},
+		{
+			name: "sql rollback discards inserted rows",
+			input: fmt.Sprintf(`
+				use ard/sql
+				fn main() Int {
+					let db = sql::open(%q).expect("Failed to open database")
+					db.exec("DROP TABLE IF EXISTS users").expect("Failed to drop table")
+					db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)").expect("Failed to create table")
+					let tx = db.begin().expect("Failed to begin transaction")
+					tx.exec("INSERT INTO users (id, name) VALUES (1, 'joe')").expect("Failed to insert")
+					tx.rollback().expect("Failed to rollback transaction")
+					let rows = db.query("SELECT * FROM users").all([:]).expect("Failed to get all")
+					rows.size()
+				}
+			`, filepath.Join(filepath.Dir(dbPath), "rollback.db")),
+		},
+		{
+			name: "sql inserting null round trips as nullable field",
+			input: fmt.Sprintf(`
+				use ard/sql
+				use ard/decode
+				fn main() Bool {
+					let db = sql::open(%q).expect("Failed to open database")
+					db.exec("DROP TABLE IF EXISTS users").expect("Failed to drop table")
+					let create_table = db.query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
+					create_table.run([:]).expect("Failed to create table")
+					let stmt = db.query("INSERT INTO users (name, email) VALUES (@name, @email)")
+					let values: [Str:sql::Value] = ["name": "John Doe", "email": ()]
+					stmt.run(values).expect("Failed to insert row")
+					let query = db.query("SELECT email FROM users WHERE id = 1")
+					let rows = query.all(values).expect("Failed to find users with id 1")
+					let email = decode::run(rows.at(0), decode::field("email", decode::nullable(decode::string))).expect("Failed to decode email")
+					email.is_none()
+				}
+			`, filepath.Join(filepath.Dir(dbPath), "maybe.db")),
+		},
+		{
+			name: "sql commit persists inserted rows and query params work in tx",
+			input: fmt.Sprintf(`
+				use ard/sql
+				use ard/decode
+				fn main() Str {
+					let db = sql::open(%q).expect("Failed to open database")
+					db.exec("DROP TABLE IF EXISTS users").expect("Failed to drop table")
+					db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)").expect("Failed to create table")
+					let tx = db.begin().expect("Failed to begin transaction")
+					tx.exec("INSERT INTO users (name, age) VALUES ('User1', 25)").expect("Failed to insert User1")
+					tx.exec("INSERT INTO users (name, age) VALUES ('User2', 30)").expect("Failed to insert User2")
+					let rows = tx.query("SELECT * FROM users WHERE age = @age").all(["age": 30]).expect("Failed to query in transaction")
+					tx.commit().expect("Failed to commit transaction")
+					decode::run(rows.at(0), decode::field("name", decode::string)).expect("Failed to decode name")
+				}
+			`, filepath.Join(filepath.Dir(dbPath), "commit.db")),
 		},
 	})
 }
