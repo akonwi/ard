@@ -341,8 +341,14 @@ Open design questions to settle during this milestone:
     store, pass, and return them across the FFI boundary
   - host FFI implementations are responsible for asserting the expected
     concrete Go types
-- [ ] How should callback-shaped externs be lowered so mutability, return
-      conventions, and host error behavior stay consistent?
+- [x] Lower callback-shaped externs as anonymous Go funcs/closures passed
+      directly into static FFI calls.
+  - callback signatures should follow the normal Ard-to-Go lowering rules:
+    mutable params become pointers where needed, `Dynamic` lowers to `any`,
+    opaque handles lower to `any`, and optional/fallible returns use
+    `runtime.Maybe[...]` / `runtime.Result[...]`
+  - if a host API expects a different callback convention, that normalization
+    belongs in the FFI implementation rather than backend-generated adapters
 
 - [x] Lower extern calls to direct Go calls by default.
   - current subset support exists for `Print`, `FloatFromInt`, `FloatFromStr`,
