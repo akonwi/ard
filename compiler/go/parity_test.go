@@ -303,6 +303,98 @@ func TestGoTargetParityLoops(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityCollectionsMutation(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "list prepend grows list",
+			input: `
+				fn main() Int {
+					mut list = [1,2,3]
+					list.prepend(4)
+					list.size()
+				}
+			`,
+		},
+		{
+			name: "list push grows list",
+			input: `
+				fn main() Int {
+					mut list = [1,2,3]
+					list.push(4)
+					list.size()
+				}
+			`,
+		},
+		{
+			name: "list at after push",
+			input: `
+				fn main() Int {
+					mut list = [1,2,3]
+					list.push(4)
+					list.at(3)
+				}
+			`,
+		},
+		{
+			name: "list set updates item",
+			input: `
+				fn main() Int {
+					mut list = [1,2,3]
+					list.set(1, 10)
+					list.at(1)
+				}
+			`,
+		},
+		{
+			name: "list swap swaps values",
+			input: `
+				fn main() Int {
+					mut list = [1,2,3]
+					list.swap(0,2)
+					list.at(0)
+				}
+			`,
+		},
+		{
+			name: "map size",
+			input: `
+				fn main() Int {
+					let items = ["a": 1, "b": 2]
+					items.size()
+				}
+			`,
+		},
+		{
+			name: "map has existing key",
+			input: `
+				fn main() Bool {
+					let items = ["a": 1, "b": 2]
+					items.has("a")
+				}
+			`,
+		},
+		{
+			name: "map get existing key",
+			input: `
+				fn main() Int {
+					let items = ["a": 1, "b": 2]
+					items.get("a").or(0)
+				}
+			`,
+		},
+		{
+			name: "map drop removes key",
+			input: `
+				fn main() Bool {
+					mut items = ["a": 1, "b": 2]
+					items.drop("a")
+					not items.has("a")
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{

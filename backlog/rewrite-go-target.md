@@ -394,10 +394,10 @@ Open design questions to settle during this milestone:
     subset via generated-program JSON result comparison, including arithmetic,
     comparison chains, string size checks, structured branching, recursion,
     closures, list sorting, sorted map keys, loop forms over ranges/numbers/
-    strings/lists/maps plus break behavior, Maybe/Result matches,
-    Maybe/Result fallback and predicate combinators, and callback-based
-    Maybe/Result map/and_then/map_err combinators, plus structs and enum
-    matching
+    strings/lists/maps plus break behavior, list/map mutation and access
+    operations, Maybe/Result matches, Maybe/Result fallback and predicate
+    combinators, and callback-based Maybe/Result map/and_then/map_err
+    combinators, plus structs and enum matching
 - [ ] Run sample programs through `--target go`.
   - current automated sample coverage includes `variables`, `loops`,
     `collections`, `nullables`, `maps`, `lights`, `temperatures`, `modules`,
