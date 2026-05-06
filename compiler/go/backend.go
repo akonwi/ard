@@ -133,11 +133,21 @@ func defaultPackageName(name string) string {
 }
 
 func rootFunction(program *air.Program) (air.FunctionID, error) {
-	if program.Entry != air.NoFunction {
-		return program.Entry, nil
-	}
-	if program.Script != air.NoFunction {
-		return program.Script, nil
+	if rootID, ok := findRootFunction(program); ok {
+		return rootID, nil
 	}
 	return air.NoFunction, fmt.Errorf("AIR program has no entry or script function")
+}
+
+func findRootFunction(program *air.Program) (air.FunctionID, bool) {
+	if program == nil {
+		return air.NoFunction, false
+	}
+	if program.Entry != air.NoFunction {
+		return program.Entry, true
+	}
+	if program.Script != air.NoFunction {
+		return program.Script, true
+	}
+	return air.NoFunction, false
 }

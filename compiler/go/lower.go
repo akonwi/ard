@@ -35,22 +35,23 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	}
 	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}}
 	files := map[string]*ast.File{}
-	rootID, err := rootFunction(program)
-	if err != nil {
-		return nil, err
-	}
-	rootModuleID := program.Functions[rootID].Module
+	rootID, hasRoot := findRootFunction(program)
 	modules := make([]air.Module, 0, len(program.Modules))
-	for _, module := range program.Modules {
-		if module.ID != rootModuleID {
-			modules = append(modules, module)
+	if hasRoot {
+		rootModuleID := program.Functions[rootID].Module
+		for _, module := range program.Modules {
+			if module.ID != rootModuleID {
+				modules = append(modules, module)
+			}
 		}
-	}
-	for _, module := range program.Modules {
-		if module.ID == rootModuleID {
-			modules = append(modules, module)
-			break
+		for _, module := range program.Modules {
+			if module.ID == rootModuleID {
+				modules = append(modules, module)
+				break
+			}
 		}
+	} else {
+		modules = append(modules, program.Modules...)
 	}
 	for _, module := range modules {
 		file, err := l.lowerModule(module)
@@ -65,11 +66,14 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 	l.currentImports = map[string]string{}
 	decls := []ast.Decl{}
-	rootID, err := rootFunction(l.program)
-	if err != nil {
-		return nil, err
+	rootID, hasRoot := findRootFunction(l.program)
+	mainModuleID := air.ModuleID(0)
+	if hasRoot {
+		mainModuleID = l.program.Functions[rootID].Module
+	} else if len(l.program.Modules) > 0 {
+		mainModuleID = l.program.Modules[len(l.program.Modules)-1].ID
 	}
-	if module.ID == l.program.Functions[rootID].Module {
+	if module.ID == mainModuleID {
 		for _, typ := range l.program.Types {
 			typeDecls, err := l.lowerTypeDecls(typ)
 			if err != nil {
@@ -88,7 +92,10 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 		}
 		decls = append(decls, decl)
 	}
-	if module.ID == l.program.Functions[rootID].Module {
+	if !hasRoot && module.ID == mainModuleID {
+		decls = append(l.runtimePreludeDecls(), decls...)
+		decls = append(decls, &ast.FuncDecl{Name: ast.NewIdent("main"), Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{}})
+	} else if hasRoot && module.ID == mainModuleID {
 		mainDecl, err := l.lowerMainWrapper(rootID)
 		if err != nil {
 			return nil, err
@@ -574,7 +581,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{target.expr}}}, nil
+		return loweredExpr{stmts: target.stmts, expr: l.toStringExpr(expr.Target.Type, target.expr)}, nil
 	case air.ExprCallExtern:
 		return l.lowerExternCall(fn, expr)
 	case air.ExprSpawnFiber:
@@ -1388,6 +1395,13 @@ func (l *lowerer) isVoidType(typeID air.TypeID) bool {
 func (l *lowerer) qualified(alias string, importPath string, name string) ast.Expr {
 	l.currentImports[alias] = importPath
 	return &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name)}
+}
+
+func (l *lowerer) toStringExpr(typeID air.TypeID, expr ast.Expr) ast.Expr {
+	if validTypeID(l.program, typeID) && l.program.Types[typeID-1].Kind == air.TypeFloat {
+		return &ast.CallExpr{Fun: l.qualified("strconv", "strconv", "FormatFloat"), Args: []ast.Expr{expr, &ast.BasicLit{Kind: token.CHAR, Value: "'f'"}, &ast.BasicLit{Kind: token.INT, Value: "2"}, &ast.BasicLit{Kind: token.INT, Value: "64"}}}
+	}
+	return &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{expr}}
 }
 
 func (l *lowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -2818,10 +2832,36 @@ func (l *lowerer) lowerTraitCall(fn air.Function, expr air.Expr) (loweredExpr, e
 	method := trait.Methods[expr.Method]
 	switch {
 	case trait.Name == "ToString" && method.Name == "to_str":
-		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{target.expr}}}, nil
+		if validTypeID(l.program, expr.Target.Type) && l.program.Types[expr.Target.Type-1].Kind == air.TypeTraitObject {
+			return l.lowerTraitObjectToString(target, expr.Trait, expr.Method)
+		}
+		return loweredExpr{stmts: target.stmts, expr: l.toStringExpr(expr.Target.Type, target.expr)}, nil
 	default:
 		return loweredExpr{}, fmt.Errorf("unsupported trait call %s.%s", trait.Name, method.Name)
 	}
+}
+
+func (l *lowerer) lowerTraitObjectToString(target loweredExpr, traitID air.TraitID, methodIndex int) (loweredExpr, error) {
+	resultTemp := l.nextTemp()
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: ast.NewIdent("string")}}}})
+	cases := []ast.Stmt{}
+	for _, impl := range l.program.Impls {
+		if impl.Trait != traitID || methodIndex >= len(impl.Methods) || !validTypeID(l.program, impl.ForType) {
+			continue
+		}
+		methodFn := l.program.Functions[impl.Methods[methodIndex]]
+		cases = append(cases, &ast.CaseClause{
+			List: []ast.Expr{mustTypeExpr(l, impl.ForType)},
+			Body: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, methodFn)), Args: []ast.Expr{ast.NewIdent("typed")}}}}},
+		})
+	}
+	if len(cases) == 0 {
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{target.expr}}}, nil
+	}
+	cases = append(cases, &ast.CaseClause{Body: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{target.expr}}}}}})
+	stmts = append(stmts, &ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("typed")}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: target.expr}}}, Body: &ast.BlockStmt{List: cases}})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
 }
 
 func exportedFieldName(name string) string {

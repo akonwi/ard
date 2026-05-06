@@ -57,6 +57,18 @@ func TestRunProgramExecutesSimpleMain(t *testing.T) {
 	}
 }
 
+func TestRunProgramAllowsModuleWithoutEntry(t *testing.T) {
+	program := lowerSource(t, `
+		fn add(a: Int, b: Int) Int {
+			a + b
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestGenerateSourcesSupportsStructsAndEnums(t *testing.T) {
 	program := lowerSource(t, `
 		enum Direction {
@@ -351,8 +363,11 @@ func TestGenerateSourcesSupportsTraitObjectDispatch(t *testing.T) {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !strings.Contains(source, "fmt.Sprint(item)") {
+	if !strings.Contains(source, "type switch") && !strings.Contains(source, "switch typed := item.(type)") {
 		t.Fatalf("generated source missing trait object dispatch lowering:\n%s", source)
+	}
+	if !strings.Contains(source, "Book_ToString_to_str(typed)") {
+		t.Fatalf("generated source missing concrete trait dispatch call:\n%s", source)
 	}
 }
 

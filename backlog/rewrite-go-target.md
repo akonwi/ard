@@ -426,16 +426,18 @@ Open design questions to settle during this milestone:
   - parity harness result normalization now unwraps generated top-level
     `runtime.Maybe`/`runtime.Result` values to match vm_next observable output
 - [ ] Run sample programs through `--target go`.
-  - current automated sample coverage includes `variables`, `loops`,
-    `collections`, `nullables`, `maps`, `lights`, `temperatures`, `modules`,
-    `type-unions`, and `concurrent_stress`
-  - current lowering can also run `word_frequency` and `pokemon`
-  - current build coverage now includes `server`
+  - current direct run parity against the default bytecode target now matches
+    for the non-interactive sample corpus:
+    `variables`, `collections`, `fibonacci`, `fizzbuzz`, `grades`, `lights`,
+    `loops`, `maps`, `maths` (module-only/no entry), `modules`, `nullables`,
+    `temperatures`, `traits`, `type-unions`, `concurrent_stress`, `pokemon`,
+    `word_frequency`, and `escape-sequences`
+  - current build coverage now also includes interactive/server-oriented sample
+    binaries: `guess`, `todo-list`, `tic-tac-toe`, and `server`
   - manual route checks now cover `/`, `/me`, and `/api/auth/sign-up`
-  - current next known server-side work is broader callback/host coverage
-    beyond the initial `HTTP_Serve` path
-  - manual sample checks have also reached interactive/result-driven flows like
-    `guess` and `tic-tac-toe`
+  - current next sample-observability work is broader end-to-end execution
+    coverage for interactive/server programs rather than non-interactive sample
+    semantics, which now match in the checked corpus
   - current manual sample coverage also exercises generated closure literals via
     `List.sort` in `tic-tac-toe`
 - [ ] Add project-level regression coverage for real Ard applications.
