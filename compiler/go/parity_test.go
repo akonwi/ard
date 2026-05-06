@@ -303,6 +303,138 @@ func TestGoTargetParityLoops(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityMatching(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "matching on booleans",
+			input: `
+				fn main() Str {
+					let is_on = true
+					match is_on {
+						true => "on",
+						false => "off"
+					}
+				}
+			`,
+		},
+		{
+			name: "enum catch all",
+			input: `
+				enum Direction {
+					Up, Down, Left, Right
+				}
+				fn main() Str {
+					let dir: Direction = Direction::Right
+					match dir {
+						Direction::Up => "North",
+						Direction::Down => "South",
+						_ => "skip"
+					}
+				}
+			`,
+		},
+		{
+			name: "matching on an int",
+			input: `
+				fn main() Str {
+					let value = 0
+					match value {
+						-1 => "less",
+						0 => "equal",
+						1 => "greater",
+						_ => "panic"
+					}
+				}
+			`,
+		},
+		{
+			name: "matching with ranges",
+			input: `
+				fn main() Str {
+					let value = 80
+					match value {
+						-100..0 => "how?",
+						0..60 => "F",
+						_ => "pass"
+					}
+				}
+			`,
+		},
+		{
+			name: "matching on int with custom enum values",
+			input: `
+				enum HttpStatus {
+					Ok = 200,
+					Created = 201,
+					NotFound = 404,
+					ServerError = 500
+				}
+				fn main() Str {
+					let code: Int = 404
+					match code {
+						HttpStatus::Ok => "Success",
+						HttpStatus::Created => "Created",
+						HttpStatus::NotFound => "Not Found",
+						HttpStatus::ServerError => "Server Error",
+						_ => "Unknown"
+					}
+				}
+			`,
+		},
+		{
+			name: "matching on int with mixed custom enum values and ranges",
+			input: `
+				enum Status {
+					Pending = 0,
+					Active = 100,
+					Inactive = 101,
+					Deleted = 999
+				}
+				fn main() Str {
+					let code: Int = 150
+					match code {
+						Status::Pending => "Pending",
+						Status::Active => "Active",
+						Status::Inactive => "Inactive",
+						100..199 => "In range 100-199",
+						Status::Deleted => "Deleted",
+						_ => "Unknown"
+					}
+				}
+			`,
+		},
+		{
+			name: "conditional matching with catch all",
+			input: `
+				fn main() Str {
+					let score = 85
+					match {
+						score >= 90 => "A",
+						score >= 80 => "B",
+						score >= 70 => "C",
+						score >= 60 => "D",
+						_ => "F"
+					}
+				}
+			`,
+		},
+		{
+			name: "conditional matching with boolean conditions",
+			input: `
+				fn main() Str {
+					let a = true
+					let b = false
+					match {
+						a and b => "both true",
+						a or b => "at least one true",
+						_ => "both false"
+					}
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityCollectionsMutation(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
