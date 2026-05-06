@@ -922,6 +922,7 @@ closures, traits, async, and profiling.
 
 ### Milestone 10: rewrite the Go target
 
-Moved to [rewrite-go-target.md](rewrite-go-target.md).
+The Go target architecture and current design decisions are documented in
+[`compiler/docs/go-emission-architecture.md`](../compiler/docs/go-emission-architecture.md).
 
-Status: Pending
+Any remaining rollout follow-up work now lives in `TODO.md`.

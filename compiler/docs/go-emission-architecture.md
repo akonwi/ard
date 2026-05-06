@@ -2,122 +2,231 @@
 
 This document describes Ard's current Go backend architecture.
 
-The Go backend is now IR-first end to end for production transpilation. The old checker-backed Go AST emitter has been removed. Production code generation lowers checked Ard modules into backend IR, renders that IR into Go AST, and formats the result with Go's standard tooling.
+The current Go target lives under `compiler/go` and is built directly on AIR.
+The previous Go backend implementation and its backend-specific IR have been
+removed.
+
+The Go target is intended to be a real Ard backend, not a partial transpiler.
+It supports `ard run --target go` and `ard build --target go` by lowering AIR
+into Go AST, formatting the generated source with Go's standard tooling, and
+then invoking the Go toolchain.
 
 ## Pipeline
 
 ```text
-parse AST
-→ checker checked tree
-→ backend IR
-→ Go file IR
+Ard source
+→ parse
+→ checker
+→ AIR
+→ compiler/go lowering
 → go/ast
 → go/format
-→ generated .go files
+→ generated Go source
+→ go build / go run-equivalent binary execution
 ```
 
-For production Go-target transpilation, the main path is:
+At the public API level, the backend surface is:
 
-```text
-CompileEntrypoint / compilePackageSource / compileModuleSource
-→ lowering.LowerModuleToBackendIR(...)
-→ emitGoFileFromBackendIR(...)
-→ optimizeGoFileIR(...)
-→ renderGoFile(...)
-```
+- `GenerateSources(program, options)`
+- `RunProgram(program, args)`
+- `BuildProgram(program, outputPath)`
 
 ## Stage responsibilities
 
-### 1. Checker checked tree
+### 1. Checker and AIR
 
-The checker remains the semantic source of truth.
+The checker remains the semantic source of truth for Ard programs.
 
 It is responsible for:
+- parsing/import resolution inputs needed for semantic analysis
 - name resolution
 - type checking
-- target-aware semantic shaping before backend lowering
+- shaping the checked program for AIR lowering
 
-### 2. Backend IR
+AIR is the backend input boundary.
 
-`compiler/go_backend/ir` is the backend-owned semantic boundary.
+The Go backend does not lower from parse ASTs, checker nodes, legacy bytecode
+structures, or the deleted `compiler/go_backend` implementation.
 
-It models:
-- module/package identity
-- Go import metadata needed by emission
-- required imported Ard module paths for generated-project writing
-- declarations: structs, enums, unions, extern types, functions, vars
-- statement/expression structure for function bodies and entrypoint execution
-- backend-specific metadata such as trait types/coercions, method ownership, and by-ref mutable params
+### 2. AIR to Go lowering
 
-`compiler/go_backend/lowering` is responsible for lowering checked modules into this IR.
+`compiler/go/lower.go` lowers `air.Program` directly into Go AST fragments plus
+backend-owned helper state.
 
-### 3. Go file assembly
+This lowering stage is responsible for:
+- deterministic naming of generated symbols
+- per-module file assembly
+- import planning based on actual generated usage
+- Ard-to-Go type mapping
+- statement-oriented lowering for expression-oriented Ard constructs
+- extern call lowering
+- generation of small backend-owned helper functions where needed
 
-`goFileIR` is a lightweight file-assembly stage that organizes lowered backend IR output into target Go files.
+The backend does not introduce a separate Go-specific semantic IR today. The
+main working model is direct AIR-to-Go lowering with temporary backend state.
 
-It is responsible for:
-- package clause
-- import block assembly
-- ordered top-level declaration grouping
+### 3. Go AST rendering and formatting
 
-It is not a second semantic IR. Semantic decisions should already be made by backend IR lowering and backend IR emission; this stage only organizes emitted Go declarations into final file structure.
+`compiler/go/render.go` renders the generated Go AST through `go/format`.
 
-### 4. Go AST emission
+Formatting is the final source emission step. The backend does not maintain a
+string-template emitter for production codegen.
 
-`compiler/go_backend/backend_ir_emit.go` renders backend IR directly into `go/ast` nodes.
+### 4. Toolchain execution
 
-This stage is responsible for:
-- type declaration emission
-- function/method emission
-- entrypoint `main` synthesis
-- native lowering of backend IR statements/expressions into Go syntax
+`RunProgram` and `BuildProgram` materialize a generated Go workspace, write the
+formatted source files, synthesize a `go.mod`, and invoke `go build`.
 
-There is no production fallback to a separate checker-backed emitter.
+- `RunProgram` builds a temporary executable inside the generated workspace and
+  runs it with the forwarded Ard CLI program arguments.
+- `BuildProgram` builds the final binary at the requested output path.
 
-### 5. Formatting
+## Output structure
 
-`renderGoFile(...)` and `format.Node(...)` perform final Go source rendering.
+The backend emits:
 
-Formatting is the only source-text emission step.
+- one generated Go package per Ard project
+- one generated Go file per Ard module
 
-## Current state
+This keeps Ard module boundaries visible in generated code while avoiding a
+multi-package emission strategy.
 
-The backend now has these properties:
+## Artifact workspace layout
 
-- production transpilation is backend-IR-first
-- the old checker→AST emitter path has been deleted
-- imports and generated-project dependency discovery are produced during lowering and carried on backend IR module metadata
-- declaration emission, body emission, and synthesized entrypoint emission are all native backend IR render paths
+Generated workspaces are preserved under a project-local output directory:
 
-## Generated project writing
+- `ard-out/go/run`
+- `ard-out/go/build`
 
-When the Go backend writes a generated Go project, it:
+Each new run or build clears and rewrites the corresponding directory.
 
-1. lowers the checked Ard module to backend IR
-2. compiles the entrypoint module from backend IR
-3. uses backend IR module metadata to determine which imported Ard modules must also be written
-4. recursively compiles those imported modules through the same IR-first path
+This layout is intended for inspection and debugging, not for stable checked-in
+artifacts.
 
-This keeps project emission aligned with the same backend boundary used by direct module compilation.
+## Lowering approach
 
-## Design goals
+The Go backend lowers Ard semantics into explicit Go semantics. It does not try
+to preserve Ard's surface syntax mechanically when a statement-oriented Go shape
+is clearer or more correct.
 
-This architecture is intended to keep the Go backend:
-- deterministic
-- structurally testable
-- easy to profile by stage
-- explicit about unsupported cases
-- free of source-snippet parse-back or hidden legacy fallback behavior
+In practice, complex AIR expressions often lower into:
 
-## Success criteria
+- setup statements
+- temporaries
+- a final Go expression or assigned result
+- explicit control flow and early returns
 
-The intended long-term shape is:
+This is especially important for:
+
+- block expressions
+- `if` expressions
+- `match`
+- `try`
+- short-circuiting flows
+- async/fiber coordination
+
+## Type mapping
+
+The backend prefers plain Go representations where that keeps the generated code
+clear, but uses a few shared runtime types where they encode Ard semantics more
+cleanly.
+
+Current default mapping:
 
 ```text
-checked Ard tree
-→ backend IR lowering
-→ native backend IR emission
-→ go/ast
-→ formatted Go source
+Int          -> int
+Float        -> float64
+Bool         -> bool
+Str          -> string
+[T]          -> []T
+[K:V]        -> map[K]V where K is representable as a Go map key
+struct       -> generated Go struct
+enum         -> generated named integer type
+union        -> generated tagged Go struct
+T?           -> runtime.Maybe[T]
+T!E          -> runtime.Result[T, E]
+Dynamic      -> any
+extern type  -> any
+trait object -> any where required by the current lowering surface
+fn(...) ...  -> native Go function
+Fiber[T]     -> generated/runtime-backed typed fiber handle
 ```
 
+Small generated helpers are still used where needed, but the default rule is to
+lower to native Go values first and only introduce helpers when Ard semantics or
+host interop make that worthwhile.
+
+## Runtime helper policy
+
+The backend intentionally keeps its helper surface small.
+
+Shared runtime usage is centered on:
+
+- `github.com/akonwi/ard/runtime.Maybe[T]`
+- `github.com/akonwi/ard/runtime.Result[T, E]`
+
+Generated helper functions may also be emitted for specific backend needs such
+as:
+
+- fiber coordination
+- deterministic key ordering helpers
+- narrow dynamic conversion helpers used by host/decode paths
+- stdin parsing or similar execution support
+
+The backend should not regress toward a universal object runtime or VM-shaped
+value layer.
+
+## Stdlib and FFI model
+
+Pure Ard stdlib modules compile through the normal AIR pipeline into generated
+Go.
+
+Extern-backed stdlib and host capability modules are lowered as direct static Go
+calls wherever possible. The preferred model is:
+
+- direct calls into the Ard Go FFI surface
+- generated wrappers only when required for representation adaptation
+- native Go closures for callback-shaped externs
+- opaque host values carried as `any`
+
+The Go target intentionally avoids VM-style concepts such as:
+
+- extern registration maps
+- dynamic binding registries
+- callback handle tables
+- general runtime object conversion layers
+
+If a host boundary is awkward, the preferred fix is usually to normalize the Go
+FFI surface rather than add more backend-specific adapter machinery.
+
+## Current architectural decisions
+
+The following decisions are intentional and should be treated as current design
+constraints unless replaced explicitly:
+
+- The backend input boundary is `air.Program`.
+- The backend lowers directly from AIR to Go AST.
+- Generated Go is rendered through `go/format`.
+- The backend emits one package per Ard project and one file per Ard module.
+- `Maybe` lowers as `runtime.Maybe[T]`.
+- `Result` lowers as `runtime.Result[T, E]`.
+- `Dynamic` lowers as plain Go `any`.
+- Opaque extern values lower as `any`.
+- Extern calls should be direct static Go calls by default.
+- Generated artifacts live under `ard-out/go/{run,build}` and are overwritten
+  on each new run/build.
+
+## Non-goals
+
+The current Go backend should not:
+
+- reintroduce the deleted `compiler/go_backend` architecture
+- introduce a universal `runtime.Object` representation for generated Go
+- model all Ard values as `any`
+- copy `vm_next`'s registry-driven host adapter model into generated Go
+- preserve Ard surface syntax at the expense of correct and maintainable Go
+  lowering
+
+## Related work
+
+Open rollout work for the Go target is tracked in `TODO.md`.

@@ -18,3 +18,6 @@
   * current Go target had to compensate during lowering when nested blocks/match arms/try expressions carried weaker AIR types like `Int!Void` even though the enclosing context required `Int!Str`
   * investigate whether AIR should normalize these nested contextual `Result`/`Maybe` expression types earlier so backends need less context-sensitive repair
   * treat this as an AIR-wide design follow-up, not just a Go-target workaround, because it may affect vm_next, diagnostics, and other backends
+- [ ] automate current Go-target sample/server/manual checks into durable regression tests
+  * cover the existing interactive stdin flows and server route assertions for `--target go`
+  * normalize volatile response fields like `Date` where needed
