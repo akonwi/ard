@@ -434,10 +434,15 @@ Open design questions to settle during this milestone:
     `word_frequency`, and `escape-sequences`
   - current build coverage now also includes interactive/server-oriented sample
     binaries: `guess`, `todo-list`, `tic-tac-toe`, and `server`
-  - manual route checks now cover `/`, `/me`, and `/api/auth/sign-up`
-  - current next sample-observability work is broader end-to-end execution
-    coverage for interactive/server programs rather than non-interactive sample
-    semantics, which now match in the checked corpus
+  - current end-to-end interactive checks now match between default bytecode and
+    `--target go` for `guess`, `todo-list`, and `tic-tac-toe` with scripted
+    stdin flows
+  - manual route checks now cover `/`, `/me`, `/error`, and
+    `/api/auth/sign-up`; Go-target server responses match the default runtime
+    semantically (status/body/headers except expected transport-varying fields
+    like `Date`)
+  - current next sample-observability work is broader server-side/manual route
+    coverage beyond the checked paths, rather than core sample execution parity
   - current manual sample coverage also exercises generated closure literals via
     `List.sort` in `tic-tac-toe`
 - [ ] Add project-level regression coverage for real Ard applications.
