@@ -491,7 +491,7 @@ func TestBuildProgramProducesBinary(t *testing.T) {
 	}
 }
 
-func TestRunProgramPreservesArtifactsUnderDotBuild(t *testing.T) {
+func TestRunProgramPreservesArtifactsUnderArdOut(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Void {
 			()
@@ -509,16 +509,16 @@ func TestRunProgramPreservesArtifactsUnderDotBuild(t *testing.T) {
 	if err := RunProgram(program, []string{"ard", "run", "main.ard"}); err != nil {
 		t.Fatalf("RunProgram error = %v", err)
 	}
-	matches, err := filepath.Glob(filepath.Join(projectDir, ".build", "go-target", "run", "session-*", "*.go"))
+	matches, err := filepath.Glob(filepath.Join(projectDir, "ard-out", "go", "run", "*.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(matches) == 0 {
-		t.Fatalf("expected generated sources under %s", filepath.Join(projectDir, ".build", "go-target", "run"))
+		t.Fatalf("expected generated sources under %s", filepath.Join(projectDir, "ard-out", "go", "run"))
 	}
 }
 
-func TestArtifactWorkspaceUsesProjectLocalDotBuild(t *testing.T) {
+func TestArtifactWorkspaceUsesProjectLocalArdOut(t *testing.T) {
 	projectDir := t.TempDir()
 	mainPath := filepath.Join(projectDir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte("fn main() {}"), 0o644); err != nil {
@@ -535,8 +535,8 @@ func TestArtifactWorkspaceUsesProjectLocalDotBuild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(workspace, filepath.Join(projectDir, ".build", "go-target", "build")) {
-		t.Fatalf("workspace = %q, want under project .build", workspace)
+	if workspace != filepath.Join(projectDir, "ard-out", "go", "build") {
+		t.Fatalf("workspace = %q, want %q", workspace, filepath.Join(projectDir, "ard-out", "go", "build"))
 	}
 }
 

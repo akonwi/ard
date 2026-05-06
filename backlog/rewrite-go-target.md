@@ -449,11 +449,12 @@ Open design questions to settle during this milestone:
 - [ ] Turn the current sample-program run/build/manual route checks into durable
       regression coverage (including scripted stdin flows and server route
       assertions with normalization for volatile headers like `Date`).
-- [x] Preserve generated target artifacts under a project-local `.build/`
+- [x] Preserve generated target artifacts under a project-local `ard-out/`
       directory for inspection and debugging.
-  - Go target run/build now writes generated sources and temporary build
-    sessions under project-local `.build/go-target/{run,build}/session-*`
-    instead of deleting system temp dirs after execution
+  - Go target run/build now writes generated sources and build workspaces
+    under `ard-out/go/{run,build}` and overwrites the previous
+    contents on each new run/build instead of deleting system temp dirs after
+    execution.
 - [ ] Add runtime benchmark coverage for the rewritten Go target.
 - [ ] Reach the release gate: `ard run --target go` can run all existing Ard
       programs.

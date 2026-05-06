@@ -109,11 +109,14 @@ func artifactWorkspace(pathHint string, purpose string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	base := filepath.Join(rootDir, ".build", "go-target", purpose)
+	base := filepath.Join(rootDir, "ard-out", "go", purpose)
+	if err := os.RemoveAll(base); err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(base, 0o755); err != nil {
 		return "", err
 	}
-	return os.MkdirTemp(base, "session-*")
+	return base, nil
 }
 
 func artifactRootDir(pathHint string) (string, error) {
