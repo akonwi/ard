@@ -308,7 +308,16 @@ Status: Complete
 Status: In progress
 
 Open design questions to settle during this milestone:
-- [ ] When should an extern lower to a direct static Go call with no wrapper?
+- [x] Always lower externs to direct static Go calls.
+  - generated Go should call the Ard Go FFI surface directly, with no extra
+    backend-generated wrapper layer
+  - the extern binding signature tells the backend how to interpret returned Go
+    values and lower them into canonical generated-Go shapes such as
+    `runtime.Result[...]` and `runtime.Maybe[...]`
+  - host FFI functions may still return native Go tuples where useful, but
+    generated Go should consistently use the Ard runtime representations
+  - if a boundary is awkward to call directly, the FFI surface should be
+    normalized rather than patched with backend-generated adapters
 - [x] Settle the default Go lowering for `Dynamic`.
   - the backend now treats `Dynamic` as plain Go `any`
   - `Dynamic` is specifically for arbitrary data at I/O boundaries such as API
@@ -332,7 +341,7 @@ Open design questions to settle during this milestone:
 - [ ] How should callback-shaped externs be lowered so mutability, return
       conventions, and host error behavior stay consistent?
 
-- [ ] Lower extern calls to direct Go calls by default.
+- [x] Lower extern calls to direct Go calls by default.
   - current subset support exists for `Print`, `FloatFromInt`, `FloatFromStr`,
     `FloatFloor`, `ReadLine`, `IntFromStr`, `Sleep`, `EnvGet`, `OsArgs`,
     base64/hex helpers, JSON/decode helpers, and HTTP client response flows;
@@ -341,9 +350,11 @@ Open design questions to settle during this milestone:
     conversion cases, initial stdin-backed string input flows, async sleep
     flows, common encoding/env/argv helpers, and HTTP client / decode-driven
     samples like `pokemon`
-- [ ] Generate thin wrappers only where direct calls are insufficient.
-  - current subset uses thin generated wrappers for cases like dynamic map
-    conversion and host callback adaptation
+- [ ] Keep backend-generated extern adapters exceptional and minimize their
+      remaining surface.
+  - current subset still contains some backend-side adaptation for host
+    callback shapes and should continue moving that normalization into the FFI
+    surface itself
 - [ ] Support generated structs across the Go extern boundary.
 - [ ] Support opaque extern types.
   - current type lowering accepts `Dynamic` and opaque extern host types as
