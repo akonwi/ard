@@ -491,6 +491,55 @@ func TestBuildProgramProducesBinary(t *testing.T) {
 	}
 }
 
+func TestRunProgramPreservesArtifactsUnderDotBuild(t *testing.T) {
+	program := lowerSource(t, `
+		fn main() Void {
+			()
+		}
+	`)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectDir := t.TempDir()
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(wd)
+	if err := RunProgram(program, []string{"ard", "run", "main.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	matches, err := filepath.Glob(filepath.Join(projectDir, ".build", "go-target", "run", "session-*", "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) == 0 {
+		t.Fatalf("expected generated sources under %s", filepath.Join(projectDir, ".build", "go-target", "run"))
+	}
+}
+
+func TestArtifactWorkspaceUsesProjectLocalDotBuild(t *testing.T) {
+	projectDir := t.TempDir()
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte("fn main() {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := artifactRootDir(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root != projectDir {
+		t.Fatalf("artifact root = %q, want %q", root, projectDir)
+	}
+	workspace, err := artifactWorkspace(mainPath, "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(workspace, filepath.Join(projectDir, ".build", "go-target", "build")) {
+		t.Fatalf("workspace = %q, want under project .build", workspace)
+	}
+}
+
 func mapsKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for key := range m {

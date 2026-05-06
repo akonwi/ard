@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/checker"
 )
 
 type Options struct {
@@ -32,16 +33,15 @@ func GenerateSources(program *air.Program, options Options) (map[string][]byte, 
 }
 
 func RunProgram(program *air.Program, args []string) error {
-	tempDir, err := os.MkdirTemp("", "ard-go-target-run-*")
+	workspaceDir, err := artifactWorkspace(inputPathFromCLIArgs(args), "run")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tempDir)
-	if err := writeProgram(tempDir, program, Options{PackageName: "main"}); err != nil {
+	if err := writeProgram(workspaceDir, program, Options{PackageName: "main"}); err != nil {
 		return err
 	}
-	binaryPath := filepath.Join(tempDir, "ard-program")
-	if err := buildGeneratedProgram(tempDir, binaryPath); err != nil {
+	binaryPath := filepath.Join(workspaceDir, "ard-program")
+	if err := buildGeneratedProgram(workspaceDir, binaryPath); err != nil {
 		return err
 	}
 	cmd := exec.Command(binaryPath, programArgs(args)...)
@@ -55,12 +55,11 @@ func RunProgram(program *air.Program, args []string) error {
 }
 
 func BuildProgram(program *air.Program, outputPath string) (string, error) {
-	tempDir, err := os.MkdirTemp("", "ard-go-target-build-*")
+	workspaceDir, err := artifactWorkspace(outputPath, "build")
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(tempDir)
-	if err := writeProgram(tempDir, program, Options{PackageName: "main"}); err != nil {
+	if err := writeProgram(workspaceDir, program, Options{PackageName: "main"}); err != nil {
 		return "", err
 	}
 	if outputPath == "" {
@@ -70,7 +69,7 @@ func BuildProgram(program *air.Program, outputPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := buildGeneratedProgram(tempDir, absOutput); err != nil {
+	if err := buildGeneratedProgram(workspaceDir, absOutput); err != nil {
 		return "", err
 	}
 	return absOutput, nil
@@ -96,6 +95,46 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 		return err
 	}
 	return nil
+}
+
+func inputPathFromCLIArgs(args []string) string {
+	if len(args) >= 3 && strings.TrimSpace(args[2]) != "" {
+		return args[2]
+	}
+	return "."
+}
+
+func artifactWorkspace(pathHint string, purpose string) (string, error) {
+	rootDir, err := artifactRootDir(pathHint)
+	if err != nil {
+		return "", err
+	}
+	base := filepath.Join(rootDir, ".build", "go-target", purpose)
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return "", err
+	}
+	return os.MkdirTemp(base, "session-*")
+}
+
+func artifactRootDir(pathHint string) (string, error) {
+	if strings.TrimSpace(pathHint) == "" {
+		return os.Getwd()
+	}
+	pathHint = filepath.Clean(pathHint)
+	absPath, err := filepath.Abs(pathHint)
+	if err != nil {
+		return "", err
+	}
+	candidate := absPath
+	if info, statErr := os.Stat(absPath); statErr == nil && !info.IsDir() {
+		candidate = filepath.Dir(absPath)
+	} else if statErr != nil {
+		candidate = filepath.Dir(absPath)
+	}
+	if project, err := checker.FindProjectRoot(candidate); err == nil && strings.TrimSpace(project.RootPath) != "" {
+		return project.RootPath, nil
+	}
+	return candidate, nil
 }
 
 func compilerModuleRoot() (string, bool) {

@@ -425,7 +425,7 @@ Open design questions to settle during this milestone:
     generated Go currently runs against the concrete stdlib host directly
   - parity harness result normalization now unwraps generated top-level
     `runtime.Maybe`/`runtime.Result` values to match vm_next observable output
-- [ ] Run sample programs through `--target go`.
+- [x] Run sample programs through `--target go`.
   - current direct run parity against the default bytecode target now matches
     for the non-interactive sample corpus:
     `variables`, `collections`, `fibonacci`, `fizzbuzz`, `grades`, `lights`,
@@ -446,8 +446,14 @@ Open design questions to settle during this milestone:
   - current manual sample coverage also exercises generated closure literals via
     `List.sort` in `tic-tac-toe`
 - [ ] Add project-level regression coverage for real Ard applications.
-- [ ] Preserve generated target artifacts under a project-local `.build/`
+- [ ] Turn the current sample-program run/build/manual route checks into durable
+      regression coverage (including scripted stdin flows and server route
+      assertions with normalization for volatile headers like `Date`).
+- [x] Preserve generated target artifacts under a project-local `.build/`
       directory for inspection and debugging.
+  - Go target run/build now writes generated sources and temporary build
+    sessions under project-local `.build/go-target/{run,build}/session-*`
+    instead of deleting system temp dirs after execution
 - [ ] Add runtime benchmark coverage for the rewritten Go target.
 - [ ] Reach the release gate: `ard run --target go` can run all existing Ard
       programs.
