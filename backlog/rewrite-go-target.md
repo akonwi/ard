@@ -390,6 +390,8 @@ Open design questions to settle during this milestone:
 ### Milestone 6: parity and rollout
 
 - [ ] Add Go target parity tests using the existing `vm_next` parity corpus.
+  - initial Go-target-vs-vm_next parity coverage now exists for a core subset
+    of expression/script cases via generated-program JSON result comparison
 - [ ] Run sample programs through `--target go`.
   - current automated sample coverage includes `variables`, `loops`,
     `collections`, `nullables`, `maps`, `lights`, `temperatures`, `modules`,

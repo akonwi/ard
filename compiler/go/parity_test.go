@@ -1,0 +1,250 @@
+package gotarget
+
+import (
+	"bytes"
+	"fmt"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+
+	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
+	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
+	vmnext "github.com/akonwi/ard/vm_next"
+)
+
+type goParityCase struct {
+	name  string
+	input string
+}
+
+func TestGoTargetParityCoreCorpus(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "reassigning variables",
+			input: `
+				fn main() Int {
+					mut val = 1
+					val = 2
+					val = 3
+					val
+				}
+			`,
+		},
+		{name: "unary not", input: `fn main() Bool { not true }`},
+		{name: "arithmetic precedence", input: `fn main() Int { 30 + (20 * 4) }`},
+		{
+			name: "inline block expression",
+			input: `
+				fn main() Int {
+					let value = {
+						let x = 10
+						let y = 32
+						x + y
+					}
+					value
+				}
+			`,
+		},
+		{
+			name: "recursive function",
+			input: `
+				fn fib(n: Int) Int {
+					match n <= 1 {
+						true => n,
+						false => fib(n - 1) + fib(n - 2),
+					}
+				}
+				fn main() Int {
+					fib(8)
+				}
+			`,
+		},
+		{
+			name: "while loop accumulation",
+			input: `
+				fn main() Int {
+					mut i = 0
+					mut total = 0
+					while i < 5 {
+						total = total + i
+						i = i + 1
+					}
+					total
+				}
+			`,
+		},
+		{
+			name: "map literal",
+			input: `
+				fn main() [Str: Int] {
+					["a": 1, "b": 2]
+				}
+			`,
+		},
+	})
+}
+
+func runGoParityCases(t *testing.T, cases []goParityCase) {
+	t.Helper()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			program := lowerParitySource(t, tc.input)
+			gotVM := runVMNextParityJSON(t, program)
+			gotGo := runGoTargetParityJSON(t, program)
+			if gotGo != gotVM {
+				t.Fatalf("json mismatch\nvm_next: %s\ngo:      %s", gotVM, gotGo)
+			}
+		})
+	}
+}
+
+func lowerParitySource(t *testing.T, input string) *air.Program {
+	t.Helper()
+	result := parse.Parse([]byte(input), "parity.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New("parity.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := air.Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	return program
+}
+
+func runVMNextParityJSON(t *testing.T, program *air.Program) string {
+	t.Helper()
+	vm, err := vmnext.New(program)
+	if err != nil {
+		t.Fatalf("new vm: %v", err)
+	}
+	got, err := vm.RunEntry()
+	if err != nil {
+		t.Fatalf("run vm: %v", err)
+	}
+	encoded, err := stdlibffi.JsonEncode(normalizeJSONValue(got.GoValue()))
+	if err != nil {
+		t.Fatalf("encode vm result: %v", err)
+	}
+	return encoded
+}
+
+func runGoTargetParityJSON(t *testing.T, program *air.Program) string {
+	t.Helper()
+	tempDir := t.TempDir()
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("generate sources: %v", err)
+	}
+	for name, source := range sources {
+		trimmed, err := stripGeneratedMain(source)
+		if err != nil {
+			t.Fatalf("strip main from %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(tempDir, name), trimmed, 0o644); err != nil {
+			t.Fatalf("write source %s: %v", name, err)
+		}
+	}
+	rootID, err := rootFunction(program)
+	if err != nil {
+		t.Fatalf("root function: %v", err)
+	}
+	scriptFn := functionName(program, program.Functions[rootID])
+	runner := fmt.Sprintf(`package main
+
+import (
+	"fmt"
+	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
+)
+
+func main() {
+	encoded, err := stdlibffi.JsonEncode(%s())
+	if err != nil {
+		panic(err)
+	}
+	fmt.Print(encoded)
+}
+`, scriptFn)
+	if err := os.WriteFile(filepath.Join(tempDir, "runner.go"), []byte(runner), 0o644); err != nil {
+		t.Fatalf("write runner: %v", err)
+	}
+	goMod := "module generated\n\ngo 1.24\n"
+	if moduleRoot, ok := compilerModuleRoot(); ok {
+		goMod += "\nrequire github.com/akonwi/ard v0.0.0\n"
+		goMod += fmt.Sprintf("replace github.com/akonwi/ard => %s\n", moduleRoot)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	binaryPath := filepath.Join(tempDir, "parity-bin")
+	if err := buildGeneratedProgram(tempDir, binaryPath); err != nil {
+		t.Fatalf("build generated program: %v", err)
+	}
+	cmd := exec.Command(binaryPath)
+	cmd.Env = os.Environ()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run generated program: %v\nstderr:\n%s", err, stderr.String())
+	}
+	return stdout.String()
+}
+
+func stripGeneratedMain(source []byte) ([]byte, error) {
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "generated.go", source, parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
+	filtered := file.Decls[:0]
+	for _, decl := range file.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name != nil && fn.Name.Name == "main" {
+			continue
+		}
+		filtered = append(filtered, decl)
+	}
+	file.Decls = filtered
+	var out bytes.Buffer
+	if err := format.Node(&out, fileSet, file); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+func normalizeJSONValue(value any) any {
+	switch v := value.(type) {
+	case map[any]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[fmt.Sprint(key)] = normalizeJSONValue(item)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[key] = normalizeJSONValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = normalizeJSONValue(item)
+		}
+		return out
+	default:
+		return value
+	}
+}
