@@ -658,6 +658,92 @@ func TestGoTargetParityTry(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "enum to int comparison",
+			input: `
+				enum Status { active, inactive, pending }
+				fn main() Bool {
+					let status = Status::active
+					status == 0
+				}
+			`,
+		},
+		{
+			name: "enum explicit value",
+			input: `
+				enum HttpStatus {
+					Ok = 200,
+					Created = 201,
+					Not_Found = 404
+				}
+				fn main() HttpStatus {
+					HttpStatus::Ok
+				}
+			`,
+		},
+		{
+			name: "enum equality",
+			input: `
+				enum Direction { Up, Down, Left, Right }
+				fn main() Bool {
+					let dir1 = Direction::Up
+					let dir2 = Direction::Down
+					dir1 == dir2
+				}
+			`,
+		},
+		{
+			name: "union matching",
+			input: `
+				type Printable = Str | Int | Bool
+				fn print(p: Printable) Str {
+					match p {
+						Str(str) => str,
+						Int(int) => int.to_str(),
+						_ => "boolean value"
+					}
+				}
+				fn main() Str {
+					print(20)
+				}
+			`,
+		},
+		{
+			name: "direct generic return compared with equals",
+			input: `
+				fn id<$T>(value: $T) $T {
+					value
+				}
+				fn main() Bool {
+					id(3) == 3
+				}
+			`,
+		},
+		{
+			name: "inline maybe wrapping in generic context",
+			input: `
+				use ard/maybe
+				fn main() Bool {
+					mut found = maybe::none<Int>()
+					let list = [1, 2, 3, 4, 5]
+					for t in list {
+						if t == 3 {
+							found = maybe::some(t)
+							break
+						}
+					}
+					match found {
+						value => value == 3,
+						_ => false
+					}
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityStringHelpers(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{name: "int to str", input: `fn main() Str { 100.to_str() }`},
