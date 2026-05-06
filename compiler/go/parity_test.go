@@ -410,6 +410,33 @@ func TestGoTargetParityNullableArguments(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityAnonymousFunctionInference(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "callback with inferred Str parameter",
+			input: `
+				fn process(f: fn(Str) Bool) Bool {
+					f("hello")
+				}
+				fn main() Bool {
+					process(fn(x) { x.size() > 0 })
+				}
+			`,
+		},
+		{
+			name: "callback with inferred Bool return type",
+			input: `
+				fn check(f: fn(Str) Bool) Bool {
+					f("test")
+				}
+				fn main() Bool {
+					check(fn(s) { true })
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityNullableStructFields(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{

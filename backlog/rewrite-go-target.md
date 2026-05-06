@@ -393,15 +393,15 @@ Open design questions to settle during this milestone:
   - current Go-target-vs-vm_next parity coverage now exercises a broader core
     subset via generated-program JSON result comparison, including arithmetic,
     comparison chains, string size checks and string helper methods,
-    structured branching, recursion, closures, list sorting, sorted map keys,
-    loop forms over ranges/numbers/strings/lists/maps plus break behavior,
-    list/map mutation and access operations, nullable-argument omission and
-    auto-wrapping flows, nullable struct field omission and auto-wrapping,
-    boolean/enum/int/range/conditional match forms, Result try propagation/
-    catch flows including nested `try` inside match arms returning `Result`
-    values, Maybe/Result matches, Maybe/Result fallback and predicate
-    combinators, and callback-based Maybe/Result map/and_then/map_err
-    combinators, plus structs and enum matching
+    structured branching, recursion, closures, anonymous-function inference,
+    list sorting, sorted map keys, loop forms over ranges/numbers/strings/
+    lists/maps plus break behavior, list/map mutation and access operations,
+    nullable-argument omission and auto-wrapping flows, nullable struct field
+    omission and auto-wrapping, boolean/enum/int/range/conditional match
+    forms, Result try propagation/catch flows including nested `try` inside
+    match arms returning `Result` values, Maybe/Result matches, Maybe/Result
+    fallback and predicate combinators, and callback-based Maybe/Result
+    map/and_then/map_err combinators, plus structs and enum matching
   - parity harness result normalization now unwraps generated top-level
     `runtime.Maybe`/`runtime.Result` values to match vm_next observable output
 - [ ] Run sample programs through `--target go`.
