@@ -367,6 +367,48 @@ func TestGoTargetParityTry(t *testing.T) {
 			`,
 		},
 		{
+			name: "try in enum match success case",
+			input: `
+				enum Status { active, inactive }
+				fn get_result() Int!Str {
+					Result::ok(42)
+				}
+				fn process_status(status: Status) Int!Str {
+					match status {
+						Status::active => {
+							let value = try get_result()
+							Result::ok(value + 1)
+						}
+						Status::inactive => Result::err("inactive")
+					}
+				}
+				fn main() Int {
+					process_status(Status::active).expect("")
+				}
+			`,
+		},
+		{
+			name: "try in maybe match success",
+			input: `
+				use ard/maybe
+				fn get_result() Int!Str {
+					Result::ok(100)
+				}
+				fn process_maybe(maybe_val: Int?) Int!Str {
+					match maybe_val {
+						val => {
+							let result = try get_result()
+							Result::ok(result + val)
+						}
+						_ => Result::err("no value")
+					}
+				}
+				fn main() Int {
+					process_maybe(maybe::some(5)).expect("")
+				}
+			`,
+		},
+		{
 			name: "try with catch in match block",
 			input: `
 				fn risky_operation() Str!Str {

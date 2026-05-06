@@ -396,15 +396,13 @@ Open design questions to settle during this milestone:
     structured branching, recursion, closures, list sorting, sorted map keys,
     loop forms over ranges/numbers/strings/lists/maps plus break behavior,
     list/map mutation and access operations, boolean/enum/int/range/
-    conditional match forms, Result try propagation/catch flows, Maybe/Result
+    conditional match forms, Result try propagation/catch flows including
+    nested `try` inside match arms returning `Result` values, Maybe/Result
     matches, Maybe/Result fallback and predicate combinators, and callback-based
     Maybe/Result map/and_then/map_err combinators, plus structs and enum
     matching
   - parity harness result normalization now unwraps generated top-level
     `runtime.Maybe`/`runtime.Result` values to match vm_next observable output
-  - next known parity gap: `try` nested inside match arms that return
-    `Result`-typed values still appears to expose a Go-target type mismatch in
-    certain branches
 - [ ] Run sample programs through `--target go`.
   - current automated sample coverage includes `variables`, `loops`,
     `collections`, `nullables`, `maps`, `lights`, `temperatures`, `modules`,

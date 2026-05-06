@@ -383,7 +383,7 @@ func (l *lowerer) lowerBlock(fn air.Function, block air.Block, returnType air.Ty
 		stmts = append(stmts, lowered...)
 	}
 	if block.Result != nil {
-		result, err := l.lowerExpr(fn, *block.Result)
+		result, err := l.lowerExprWithExpectedType(fn, *block.Result, returnType)
 		if err != nil {
 			return nil, err
 		}
@@ -1033,7 +1033,7 @@ func (l *lowerer) lowerValueBlock(fn air.Function, block air.Block, resultType a
 		stmts = append(stmts, lowered...)
 	}
 	if block.Result != nil {
-		result, err := l.lowerExpr(fn, *block.Result)
+		result, err := l.lowerExprWithExpectedType(fn, *block.Result, resultType)
 		if err != nil {
 			return nil, err
 		}
@@ -1054,6 +1054,36 @@ func (l *lowerer) lowerValueBlock(fn air.Function, block air.Block, resultType a
 		}
 	}
 	return stmts, nil
+}
+
+func (l *lowerer) lowerExprWithExpectedType(fn air.Function, expr air.Expr, expectedType air.TypeID) (loweredExpr, error) {
+	if expectedType != air.NoType && expectedType != expr.Type && l.canOverrideExprType(expr, expectedType) {
+		cloned := expr
+		cloned.Type = expectedType
+		return l.lowerExpr(fn, cloned)
+	}
+	return l.lowerExpr(fn, expr)
+}
+
+func (l *lowerer) canOverrideExprType(expr air.Expr, expectedType air.TypeID) bool {
+	if !validTypeID(l.program, expr.Type) || !validTypeID(l.program, expectedType) {
+		return false
+	}
+	from := l.program.Types[expr.Type-1]
+	to := l.program.Types[expectedType-1]
+	if from.Kind != to.Kind {
+		return false
+	}
+	switch expr.Kind {
+	case air.ExprMakeResultOk, air.ExprMakeResultErr,
+		air.ExprMakeMaybeSome, air.ExprMakeMaybeNone,
+		air.ExprBlock, air.ExprIf,
+		air.ExprMatchEnum, air.ExprMatchInt, air.ExprMatchMaybe, air.ExprMatchResult,
+		air.ExprTryResult, air.ExprTryMaybe:
+		return from.Kind == air.TypeResult || from.Kind == air.TypeMaybe
+	default:
+		return false
+	}
 }
 
 func (l *lowerer) declareTemp(typeID air.TypeID, name string) ([]ast.Stmt, error) {
