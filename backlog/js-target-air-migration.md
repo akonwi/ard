@@ -309,7 +309,7 @@ Once parity is acceptable:
 - [ ] Keep `ard run --target js-browser` rejected with a clear message.
 - [ ] Update `ard build --target js-server` to lower AIR before JS dispatch.
 - [ ] Update `ard build --target js-browser` to lower AIR before JS dispatch.
-- [ ] Preserve project-info access for project FFI companion copying.
+- [x] Preserve project-info access for project FFI companion copying.
 
 ### Module/source generation
 
@@ -317,8 +317,8 @@ Once parity is acceptable:
 - [x] Emit one `.mjs` file per AIR module.
 - [x] Generate deterministic module aliases.
 - [x] Generate deterministic output paths for imported modules.
-- [ ] Export public module symbols where needed.
-- [ ] Invoke AIR root function/script for `js-server` run output.
+- [x] Export public module symbols where needed.
+- [x] Invoke AIR root function/script for `js-server` run output.
 
 ### Type declarations and values
 
@@ -326,7 +326,7 @@ Once parity is acceptable:
 - [x] Lower struct type declarations.
 - [x] Lower struct construction.
 - [x] Lower struct field access.
-- [ ] Lower struct field assignment.
+- [x] Lower struct field assignment.
 - [x] Lower enum declarations.
 - [x] Lower enum variants.
 - [ ] Lower union wrapping.
@@ -344,7 +344,7 @@ Once parity is acceptable:
 - [x] Lower `let` statements.
 - [x] Lower assignments.
 - [x] Lower direct function calls.
-- [ ] Lower extern calls.
+- [x] Lower extern calls.
 - [ ] Lower closures.
 - [ ] Lower closure calls.
 - [ ] Lower captures.
@@ -423,9 +423,9 @@ Once parity is acceptable:
 
 - [x] Detect stdlib JS FFI usage from AIR extern metadata.
 - [x] Detect project JS FFI usage from AIR extern metadata.
-- [ ] Preserve `js` binding fallback if applicable.
-- [ ] Preserve `js-server` binding selection.
-- [ ] Preserve `js-browser` binding selection.
+- [x] Preserve `js` binding fallback if applicable.
+- [x] Preserve `js-server` binding selection.
+- [x] Preserve `js-browser` binding selection.
 - [x] Copy `ard.prelude.mjs`.
 - [x] Copy stdlib FFI companion when used.
 - [x] Copy project FFI companion when used.
@@ -443,6 +443,7 @@ Once parity is acceptable:
 - [ ] Add parity tests for maybe/result/try/match.
   - [x] Added initial AIR source assertions for Maybe/Result constructors and `or`.
 - [ ] Add parity tests for modules/imports.
+  - [x] Added initial AIR source assertions for imported function calls.
 - [ ] Add parity tests for JS externs.
 - [ ] Keep or update browser-output tests.
 - [ ] Run `cd compiler && go test ./javascript`.
@@ -470,3 +471,4 @@ Once parity is acceptable:
 - Added initial AIR-first JavaScript backend scaffold in `compiler/javascript/air_backend.go`.
 - Added minimal AIR source-generation/build tests while keeping the legacy checker backend intact.
 - Fixed AIR TypeID indexing in the JS lowerer and expanded AIR lowering for strings, collections, Maybe, and Result operations.
+- Added AIR imported-function module dependency detection, basic extern call references, and struct field assignment lowering.

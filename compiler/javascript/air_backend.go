@@ -158,10 +158,19 @@ func (l *airJSLowerer) planModuleFiles() {
 func (l *airJSLowerer) lowerModule(module air.Module, invokeRoot bool) (string, error) {
 	var b strings.Builder
 	outputPath := l.moduleFiles[module.ID]
+	preludeImport := relativeJSImport(outputPath, "ard.prelude.mjs")
 	imports := []string{
-		jsNamedImportLine([]string{"Maybe", "Result", "ardEq", "ardToString", "makeArdError", "makeEnum", "isEnumOf"}, relativeJSImport(outputPath, "ard.prelude.mjs")),
+		jsNamedImportLine([]string{"Maybe", "Result", "ardEq", "ardToString", "makeArdError", "makeEnum", "isEnumOf"}, preludeImport),
+		jsNamespaceImportLine("prelude", preludeImport),
 	}
-	for _, importedID := range module.Imports {
+	ffi := l.collectFFIArtifacts()
+	if ffi.useStdlib {
+		imports = append(imports, jsNamespaceImportLine("stdlib", relativeJSImport(outputPath, "ffi.stdlib."+l.target+".mjs")))
+	}
+	if ffi.useProject {
+		imports = append(imports, jsNamespaceImportLine("project", relativeJSImport(outputPath, "ffi.project."+l.target+".mjs")))
+	}
+	for _, importedID := range l.moduleDependencyIDs(module) {
 		if importPath, ok := l.moduleFiles[importedID]; ok {
 			imports = append(imports, jsNamespaceImportLine(moduleAlias(l.program.Modules[importedID].Path), relativeJSImport(outputPath, importPath)))
 		}
@@ -213,6 +222,102 @@ func (l *airJSLowerer) lowerModule(module air.Module, invokeRoot bool) (string, 
 		b.WriteByte('\n')
 	}
 	return b.String(), nil
+}
+
+func (l *airJSLowerer) moduleDependencyIDs(module air.Module) []air.ModuleID {
+	seen := map[air.ModuleID]bool{}
+	add := func(id air.ModuleID) {
+		if id != module.ID {
+			seen[id] = true
+		}
+	}
+	for _, importedID := range module.Imports {
+		add(importedID)
+	}
+	var visitBlock func(air.Block)
+	var visitExpr func(air.Expr)
+	visitBlock = func(block air.Block) {
+		for _, stmt := range block.Stmts {
+			if stmt.Value != nil {
+				visitExpr(*stmt.Value)
+			}
+			if stmt.Expr != nil {
+				visitExpr(*stmt.Expr)
+			}
+			if stmt.Target != nil {
+				visitExpr(*stmt.Target)
+			}
+			if stmt.Condition != nil {
+				visitExpr(*stmt.Condition)
+			}
+			visitBlock(stmt.Body)
+		}
+		if block.Result != nil {
+			visitExpr(*block.Result)
+		}
+	}
+	visitExpr = func(expr air.Expr) {
+		if expr.Kind == air.ExprCall && int(expr.Function) >= 0 && int(expr.Function) < len(l.program.Functions) {
+			add(l.program.Functions[expr.Function].Module)
+		}
+		for _, arg := range expr.Args {
+			visitExpr(arg)
+		}
+		for _, entry := range expr.Entries {
+			visitExpr(entry.Key)
+			visitExpr(entry.Value)
+		}
+		for _, field := range expr.Fields {
+			visitExpr(field.Value)
+		}
+		for _, matchCase := range expr.EnumCases {
+			visitBlock(matchCase.Body)
+		}
+		for _, matchCase := range expr.IntCases {
+			visitBlock(matchCase.Body)
+		}
+		for _, matchCase := range expr.RangeCases {
+			visitBlock(matchCase.Body)
+		}
+		for _, matchCase := range expr.UnionCases {
+			visitBlock(matchCase.Body)
+		}
+		if expr.Target != nil {
+			visitExpr(*expr.Target)
+		}
+		if expr.Left != nil {
+			visitExpr(*expr.Left)
+		}
+		if expr.Right != nil {
+			visitExpr(*expr.Right)
+		}
+		if expr.Condition != nil {
+			visitExpr(*expr.Condition)
+		}
+		visitBlock(expr.Body)
+		visitBlock(expr.Then)
+		visitBlock(expr.Else)
+		visitBlock(expr.CatchAll)
+		visitBlock(expr.Some)
+		visitBlock(expr.None)
+		visitBlock(expr.Ok)
+		visitBlock(expr.Err)
+		visitBlock(expr.Catch)
+	}
+	for _, functionID := range module.Functions {
+		if int(functionID) >= 0 && int(functionID) < len(l.program.Functions) {
+			visitBlock(l.program.Functions[functionID].Body)
+		}
+	}
+	if l.program.Script != air.NoFunction && int(l.program.Script) < len(l.program.Functions) && l.program.Functions[l.program.Script].Module == module.ID {
+		visitBlock(l.program.Functions[l.program.Script].Body)
+	}
+	ids := make([]air.ModuleID, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
 }
 
 func (l *airJSLowerer) lowerTypeDecl(typeID air.TypeID) (string, error) {
@@ -309,6 +414,20 @@ func (l *airJSLowerer) lowerStmt(fn air.Function, stmt air.Stmt) (string, error)
 			return "", err
 		}
 		return l.localName(fn, stmt.Local) + " = " + value + ";", nil
+	case air.StmtSetField:
+		target, err := l.lowerExpr(fn, *stmt.Target)
+		if err != nil {
+			return "", err
+		}
+		value, err := l.lowerExpr(fn, *stmt.Value)
+		if err != nil {
+			return "", err
+		}
+		t, ok := l.typeInfo(stmt.Target.Type)
+		if !ok || stmt.Field < 0 || stmt.Field >= len(t.Fields) {
+			return "", fmt.Errorf("unknown field %d on type %d", stmt.Field, stmt.Target.Type)
+		}
+		return target + "." + jsName(t.Fields[stmt.Field].Name) + " = " + value + ";", nil
 	case air.StmtExpr:
 		value, err := l.lowerExpr(fn, *stmt.Expr)
 		if err != nil {
@@ -354,7 +473,17 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		if err != nil {
 			return "", err
 		}
-		return renderJSExpr(jsCallExprIR{Callee: l.functionName(expr.Function), Args: args}), nil
+		return renderJSExpr(jsCallExprIR{Callee: l.functionRef(fn.Module, expr.Function), Args: args}), nil
+	case air.ExprCallExtern:
+		args, err := l.lowerArgs(fn, expr.Args)
+		if err != nil {
+			return "", err
+		}
+		callee, err := l.externRef(expr.Extern)
+		if err != nil {
+			return "", err
+		}
+		return renderJSExpr(jsCallExprIR{Callee: callee, Args: args}), nil
 	case air.ExprMakeStruct:
 		args := make([]string, len(expr.Fields))
 		for i, field := range expr.Fields {
@@ -730,6 +859,46 @@ func (l *airJSLowerer) functionName(id air.FunctionID) string {
 		return "__ard_script"
 	}
 	return jsName(fn.Name)
+}
+
+func (l *airJSLowerer) functionRef(from air.ModuleID, id air.FunctionID) string {
+	name := l.functionName(id)
+	if id == air.NoFunction || int(id) < 0 || int(id) >= len(l.program.Functions) {
+		return name
+	}
+	callee := l.program.Functions[id]
+	if callee.Module == from {
+		return name
+	}
+	if int(callee.Module) >= 0 && int(callee.Module) < len(l.program.Modules) {
+		return moduleAlias(l.program.Modules[callee.Module].Path) + "." + name
+	}
+	return name
+}
+
+func (l *airJSLowerer) externRef(id air.ExternID) (string, error) {
+	if int(id) < 0 || int(id) >= len(l.program.Externs) {
+		return "", fmt.Errorf("unknown extern %d", id)
+	}
+	ext := l.program.Externs[id]
+	binding := ext.Bindings[l.target]
+	if binding == "" {
+		binding = ext.Bindings["js"]
+	}
+	if binding == "" {
+		return "", fmt.Errorf("extern %s has no JavaScript binding for %s", ext.Name, l.target)
+	}
+	objectName := "project"
+	if int(ext.Module) >= 0 && int(ext.Module) < len(l.program.Modules) && strings.HasPrefix(l.program.Modules[ext.Module].Path, "ard/") {
+		objectName = "stdlib"
+		if _, ok := ext.Bindings["js"]; ok && ext.Bindings[l.target] == "" {
+			objectName = "prelude"
+		}
+	}
+	if isJSIdentifier(binding) {
+		return objectName + "." + binding, nil
+	}
+	return objectName + "[" + strconv.Quote(binding) + "]", nil
 }
 
 func (l *airJSLowerer) moduleExports(module air.Module) []string {

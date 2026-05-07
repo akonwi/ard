@@ -1966,3 +1966,47 @@ let ok_value = ok.or(0)
 		}
 	}
 }
+
+func TestGenerateSourcesFromAIRImportedModuleCalls(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "utils.ard"), []byte(`
+fn add(a: Int, b: Int) Int {
+  a + b
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write utils module: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/utils
+
+let result = utils::add(1, 2)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := string(files["main.mjs"])
+	if !strings.Contains(source, `import * as demo_utils from "./demo/utils.mjs";`) {
+		t.Fatalf("expected imported module import, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const result = demo_utils.add(1, 2);") {
+		t.Fatalf("expected imported module call, got:\n%s", source)
+	}
+	if !strings.Contains(string(files["demo/utils.mjs"]), "function add(a, b) {") {
+		t.Fatalf("expected imported module source, got:\n%s", string(files["demo/utils.mjs"]))
+	}
+}
