@@ -2273,3 +2273,46 @@ fn maybe_chain(value: Int?) Int? {
 		}
 	}
 }
+
+func TestGenerateSourcesFromAIRTraitToStringAndExternAdapters(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+extern fn maybe_value() Int? = {
+  js-server = "maybeValue"
+}
+extern fn result_value() Int!Str = {
+  js-server = "resultValue"
+}
+
+let label = 42.to_str()
+let maybe = maybe_value()
+let result = result_value()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, ffi, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	if !ffi.useProject {
+		t.Fatalf("expected project ffi artifact use")
+	}
+	source := string(files["main.mjs"])
+	for _, expected := range []string{"ardToString(42)", "Maybe.none()", "Maybe.some(__extern)", "Result.ok(__extern.ok)", "Result.err(__extern.error)"} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("expected %q in AIR JS output, got:\n%s", expected, source)
+		}
+	}
+}

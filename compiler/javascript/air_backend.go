@@ -502,7 +502,8 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		if err != nil {
 			return "", err
 		}
-		return renderJSExpr(jsCallExprIR{Callee: callee, Args: args}), nil
+		call := renderJSExpr(jsCallExprIR{Callee: callee, Args: args})
+		return l.adaptExternReturn(call, expr.Type)
 	case air.ExprMakeClosure:
 		return l.lowerMakeClosure(fn, expr)
 	case air.ExprCallClosure:
@@ -646,6 +647,8 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 			return "", err
 		}
 		return renderJSExpr(jsUnaryExprIR{Op: "-", Value: rawJSExpr(value)}), nil
+	case air.ExprCallTrait:
+		return l.lowerTraitCall(fn, expr)
 	case air.ExprToStr:
 		value, err := l.lowerExpr(fn, *expr.Target)
 		if err != nil {
@@ -664,6 +667,45 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		return renderJSDoc(jsIIFEDoc("throw makeArdError(\"panic\", \"air\", " + strconv.Quote(fn.Name) + ", 0, " + message + ");")), nil
 	default:
 		return "", fmt.Errorf("unsupported AIR JS expression kind %d", expr.Kind)
+	}
+}
+
+func (l *airJSLowerer) lowerTraitCall(fn air.Function, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("trait call missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return "", err
+	}
+	if expr.Trait < 0 || int(expr.Trait) >= len(l.program.Traits) {
+		return "", fmt.Errorf("invalid trait id %d", expr.Trait)
+	}
+	trait := l.program.Traits[expr.Trait]
+	if expr.Method < 0 || expr.Method >= len(trait.Methods) {
+		return "", fmt.Errorf("invalid trait method %d for %s", expr.Method, trait.Name)
+	}
+	method := trait.Methods[expr.Method]
+	if trait.Name == "ToString" && method.Name == "to_str" {
+		return renderJSExpr(jsCallExprIR{Callee: "ardToString", Args: []string{target}}), nil
+	}
+	return "", fmt.Errorf("unsupported AIR JS trait call %s.%s", trait.Name, method.Name)
+}
+
+func (l *airJSLowerer) adaptExternReturn(call string, typeID air.TypeID) (string, error) {
+	t, ok := l.typeInfo(typeID)
+	if !ok {
+		return call, nil
+	}
+	switch t.Kind {
+	case air.TypeMaybe:
+		body := "const __extern = " + call + ";\nreturn (__extern === undefined || __extern === null) ? Maybe.none() : Maybe.some(__extern);"
+		return renderJSDoc(jsIIFEDoc(body)), nil
+	case air.TypeResult:
+		body := "const __extern = " + call + ";\nif (__extern && Object.prototype.hasOwnProperty.call(__extern, \"ok\")) return Result.ok(__extern.ok);\nif (__extern && Object.prototype.hasOwnProperty.call(__extern, \"error\")) return Result.err(__extern.error);\nif (__extern && Object.prototype.hasOwnProperty.call(__extern, \"err\")) return Result.err(__extern.err);\nreturn __extern;"
+		return renderJSDoc(jsIIFEDoc(body)), nil
+	default:
+		return call, nil
 	}
 }
 

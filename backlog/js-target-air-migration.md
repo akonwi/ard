@@ -411,8 +411,8 @@ Once parity is acceptable:
 
 ### Traits, dynamic, and async
 
-- [ ] Lower trait upcasts.
-- [ ] Lower trait method calls.
+- [x] Lower trait upcasts.
+- [x] Lower trait method calls.
 - [x] Lower `Dynamic` conversions.
 - [ ] Lower spawn fiber.
 - [ ] Lower fiber get.
@@ -429,8 +429,8 @@ Once parity is acceptable:
 - [x] Copy `ard.prelude.mjs`.
 - [x] Copy stdlib FFI companion when used.
 - [x] Copy project FFI companion when used.
-- [ ] Preserve external return adaptation for `Maybe`.
-- [ ] Preserve external return adaptation for `Result`.
+- [x] Preserve external return adaptation for `Maybe`.
+- [x] Preserve external return adaptation for `Result`.
 - [ ] Preserve external struct/list/map adaptation where currently supported.
 
 ### Tests and validation
@@ -447,6 +447,7 @@ Once parity is acceptable:
 - [ ] Add parity tests for modules/imports.
   - [x] Added initial AIR source assertions for imported function calls.
 - [ ] Add parity tests for JS externs.
+  - [x] Added initial AIR source assertions for project extern imports and Maybe/Result return adapters.
 - [ ] Keep or update browser-output tests.
 - [ ] Run `cd compiler && go test ./javascript`.
 - [ ] Run `cd compiler && go test ./air ./go ./backend`.
@@ -479,3 +480,4 @@ Once parity is acceptable:
 - Added AIR dynamic identity lowering and map key/value indexed helper lowering used by map iteration.
 - Added AIR closure/capture lowering and simple tagged-object union wrap/match lowering.
 - Added AIR try lowering for tail expressions and `let` bindings with Result/Maybe propagation.
+- Added AIR ToString trait call lowering and Maybe/Result extern return adapters.
