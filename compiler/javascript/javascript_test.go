@@ -2350,3 +2350,53 @@ let out = fiber.get()
 		t.Fatalf("expected synchronous fiber lowering in AIR JS output, got:\n%s", source)
 	}
 }
+
+func TestGenerateSourcesFromAIRExternStructListMapAdapters(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+struct Person { age: Int }
+
+extern fn get_person() Person = {
+  js-server = "getPerson"
+}
+extern fn get_people() [Person] = {
+  js-server = "getPeople"
+}
+extern fn get_scores() [Str: Person] = {
+  js-server = "getScores"
+}
+
+let person = get_person()
+let people = get_people()
+let scores = get_scores()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := string(files["main.mjs"])
+	for _, expected := range []string{
+		"new Person",
+		"Array.isArray(project.getPeople())",
+		"new Map(Object.entries",
+		"__map instanceof Map",
+	} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("expected %q in AIR JS output, got:\n%s", expected, source)
+		}
+	}
+}

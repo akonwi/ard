@@ -740,13 +740,74 @@ func (l *airJSLowerer) adaptExternReturn(call string, typeID air.TypeID) (string
 	}
 	switch t.Kind {
 	case air.TypeMaybe:
-		body := "const __extern = " + call + ";\nreturn (__extern === undefined || __extern === null) ? Maybe.none() : Maybe.some(__extern);"
+		adapted, err := l.adaptExternValue("__extern", t.Elem)
+		if err != nil {
+			return "", err
+		}
+		body := "const __extern = " + call + ";\nreturn (__extern === undefined || __extern === null) ? Maybe.none() : Maybe.some(" + adapted + ");"
 		return renderJSDoc(jsIIFEDoc(body)), nil
 	case air.TypeResult:
-		body := "const __extern = " + call + ";\nif (__extern && Object.prototype.hasOwnProperty.call(__extern, \"ok\")) return Result.ok(__extern.ok);\nif (__extern && Object.prototype.hasOwnProperty.call(__extern, \"error\")) return Result.err(__extern.error);\nif (__extern && Object.prototype.hasOwnProperty.call(__extern, \"err\")) return Result.err(__extern.err);\nreturn __extern;"
+		adaptedOk, err := l.adaptExternValue("__extern.ok", t.Value)
+		if err != nil {
+			return "", err
+		}
+		adaptedErr, err := l.adaptExternValue("__extern.error", t.Error)
+		if err != nil {
+			return "", err
+		}
+		adaptedAltErr, err := l.adaptExternValue("__extern.err", t.Error)
+		if err != nil {
+			return "", err
+		}
+		body := "const __extern = " + call + ";\nif (__extern && Object.prototype.hasOwnProperty.call(__extern, \"ok\")) return Result.ok(" + adaptedOk + ");\nif (__extern && Object.prototype.hasOwnProperty.call(__extern, \"error\")) return Result.err(" + adaptedErr + ");\nif (__extern && Object.prototype.hasOwnProperty.call(__extern, \"err\")) return Result.err(" + adaptedAltErr + ");\nreturn __extern;"
 		return renderJSDoc(jsIIFEDoc(body)), nil
 	default:
-		return call, nil
+		return l.adaptExternValue(call, typeID)
+	}
+}
+
+func (l *airJSLowerer) adaptExternValue(value string, typeID air.TypeID) (string, error) {
+	t, ok := l.typeInfo(typeID)
+	if !ok {
+		return value, nil
+	}
+	switch t.Kind {
+	case air.TypeStruct:
+		args := make([]string, len(t.Fields))
+		for i, field := range t.Fields {
+			adapted, err := l.adaptExternValue(value+"["+strconv.Quote(field.Name)+"]", field.Type)
+			if err != nil {
+				return "", err
+			}
+			args[i] = adapted
+		}
+		return "(" + value + " instanceof " + jsName(t.Name) + " ? " + value + " : new " + jsName(t.Name) + "(" + strings.Join(args, ", ") + "))", nil
+	case air.TypeList:
+		adapted, err := l.adaptExternValue("__item", t.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "Array.isArray(" + value + ") ? " + value + ".map((__item) => " + adapted + ") : []", nil
+	case air.TypeMap:
+		adaptedKey, err := l.adaptExternValue("__key", t.Key)
+		if err != nil {
+			return "", err
+		}
+		adaptedValue, err := l.adaptExternValue("__value", t.Value)
+		if err != nil {
+			return "", err
+		}
+		body := "const __map = " + value + ";\nif (__map instanceof Map) return new Map(Array.from(__map.entries(), ([__key, __value]) => [" + adaptedKey + ", " + adaptedValue + "]));\nreturn new Map(Object.entries(__map ?? {}).map(([__key, __value]) => [" + adaptedKey + ", " + adaptedValue + "]));"
+		return renderJSDoc(jsIIFEDoc(body)), nil
+	case air.TypeMaybe:
+		adapted, err := l.adaptExternValue("__maybe", t.Elem)
+		if err != nil {
+			return "", err
+		}
+		body := "const __maybe = " + value + ";\nreturn (__maybe === undefined || __maybe === null) ? Maybe.none() : Maybe.some(" + adapted + ");"
+		return renderJSDoc(jsIIFEDoc(body)), nil
+	default:
+		return value, nil
 	}
 }
 

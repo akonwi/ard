@@ -431,7 +431,7 @@ Once parity is acceptable:
 - [x] Copy project FFI companion when used.
 - [x] Preserve external return adaptation for `Maybe`.
 - [x] Preserve external return adaptation for `Result`.
-- [ ] Preserve external struct/list/map adaptation where currently supported.
+- [x] Preserve external struct/list/map adaptation where currently supported.
 
 ### Tests and validation
 
@@ -448,6 +448,7 @@ Once parity is acceptable:
   - [x] Added initial AIR source assertions for imported function calls.
 - [ ] Add parity tests for JS externs.
   - [x] Added initial AIR source assertions for project extern imports and Maybe/Result return adapters.
+  - [x] Added initial AIR source assertions for extern struct/list/map return adapters.
 - [ ] Keep or update browser-output tests.
 - [x] Run `cd compiler && go test ./javascript`.
 - [ ] Run `cd compiler && go test ./air ./go ./backend`.
@@ -482,4 +483,5 @@ Once parity is acceptable:
 - Added AIR try lowering for tail expressions and `let` bindings with Result/Maybe propagation.
 - Added AIR ToString trait call lowering and Maybe/Result extern return adapters.
 - Added initial synchronous AIR fiber lowering (`spawn`, `get`, `join`) for JS; this preserves value semantics but not concurrency.
+- Added AIR extern return adapters for structs, lists, maps, and nested Maybe/Result payloads.
 - Trialed routing main CLI through AIR, but kept legacy CLI route active until AIR JS reaches stdlib/browser parity.
