@@ -295,7 +295,7 @@ Once parity is acceptable:
 
 ### Planning and scaffolding
 
-- [ ] Confirm desired public JS backend API names/signatures.
+- [x] Confirm desired public JS backend API names/signatures.
 - [x] Add AIR-first backend options type.
 - [x] Add `GenerateSources` for `*air.Program`.
 - [x] Add `RunProgram` for `*air.Program`.
@@ -305,10 +305,10 @@ Once parity is acceptable:
 
 ### CLI integration
 
-- [ ] Update `ard run --target js-server` to lower AIR before JS dispatch.
-- [ ] Keep `ard run --target js-browser` rejected with a clear message.
-- [ ] Update `ard build --target js-server` to lower AIR before JS dispatch.
-- [ ] Update `ard build --target js-browser` to lower AIR before JS dispatch.
+- [x] Update `ard run --target js-server` to lower AIR before JS dispatch.
+- [x] Keep `ard run --target js-browser` rejected with a clear message.
+- [x] Update `ard build --target js-server` to lower AIR before JS dispatch.
+- [x] Update `ard build --target js-browser` to lower AIR before JS dispatch.
 - [x] Preserve project-info access for project FFI companion copying.
 
 ### Module/source generation
@@ -449,7 +449,7 @@ Once parity is acceptable:
 - [ ] Add parity tests for JS externs.
   - [x] Added initial AIR source assertions for project extern imports and Maybe/Result return adapters.
 - [ ] Keep or update browser-output tests.
-- [ ] Run `cd compiler && go test ./javascript`.
+- [x] Run `cd compiler && go test ./javascript`.
 - [ ] Run `cd compiler && go test ./air ./go ./backend`.
 - [ ] Run `cd compiler && go generate ./std_lib/ffi && go test ./...` before final cleanup.
 
@@ -481,3 +481,4 @@ Once parity is acceptable:
 - Added AIR closure/capture lowering and simple tagged-object union wrap/match lowering.
 - Added AIR try lowering for tail expressions and `let` bindings with Result/Maybe propagation.
 - Added AIR ToString trait call lowering and Maybe/Result extern return adapters.
+- Switched main CLI js-server/js-browser build paths and js-server run path to frontend → AIR → JS backend; browser run still rejects directly.
