@@ -76,9 +76,25 @@ type Fiber[T any] struct {
 	Result T
 }
 
+type IntPartition struct {
+	Selected []int
+	Others   []int
+}
+
 type Partition[T any] struct {
 	Selected []T
 	Others   []T
+}
+
+type PersonJSONTest struct {
+	Name     string
+	Age      int
+	Employed Maybe[bool]
+}
+
+type PredictionJSONTest struct {
+	Advice Maybe[string]
+	Winner Maybe[WinnerJSONTest]
 }
 
 type PreparedQuery struct {
@@ -109,6 +125,12 @@ type Response struct {
 
 type Transaction struct {
 	Tx Tx
+}
+
+type WinnerJSONTest struct {
+	Id      int
+	Name    string
+	Comment string
 }
 
 type Host struct {

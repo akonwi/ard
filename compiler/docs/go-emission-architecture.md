@@ -223,7 +223,7 @@ The current Go backend should not:
 - reintroduce the deleted `compiler/go_backend` architecture
 - introduce a universal `runtime.Object` representation for generated Go
 - model all Ard values as `any`
-- copy `vm_next`'s registry-driven host adapter model into generated Go
+- copy `vm`'s registry-driven host adapter model into generated Go
 - preserve Ard surface syntax at the expense of correct and maintainable Go
   lowering
 

@@ -2,8 +2,7 @@
 
 This directory contains a small benchmark corpus for comparing:
 
-- the default bytecode VM target (`ard run` / `ard build`)
-- the next VM target (`ard run --target vm_next` / `ard build --target vm_next`)
+- the VM target (`ard run` / `ard build`)
 - the Go backend (`ard run --target go` / `ard build --target go`)
 - the JavaScript server backend where supported (`ard run --target js-server` / `ard build --target js-server`)
 - handwritten idiomatic Go variants (`benchmarks/go/*`)
@@ -45,7 +44,6 @@ From `compiler/`:
 
 Builds the Ard CLI once, then for each benchmark builds:
 - one VM binary
-- one `vm_next` binary
 - one Ard Go-target binary
 - one handwritten idiomatic Go binary
 - one `js-server` module where supported
@@ -58,7 +56,7 @@ and benchmarks the resulting executables / runtime entrypoints.
 
 ### End-to-end CLI comparison
 
-Benchmarks the full `ard run` / `ard run --target vm_next` / `ard run --target go` / `ard run --target js-server` path instead of prebuilt binaries. The handwritten Go variant is included via `go run`:
+Benchmarks the full `ard run` / `ard run --target go` / `ard run --target js-server` path instead of prebuilt binaries. The handwritten Go variant is included via `go run`:
 
 ```bash
 ./benchmarks/run.sh --mode cli

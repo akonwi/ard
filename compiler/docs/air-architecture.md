@@ -16,7 +16,7 @@ In particular, AIR gives Ard:
 - a way to keep backend logic independent from checker-internal type shaping
 - a semantic layer that is not tied to VM object layouts or generated Go code
 
-AIR is the architectural boundary that lets both `vm_next` and the Go backend
+AIR is the architectural boundary that lets both `vm` and the Go backend
 consume the same checked Ard program.
 
 ## Pipeline position
@@ -31,7 +31,7 @@ Ard source
 
 Today that means:
 
-- `vm_next` lowers AIR into its own bytecode/runtime execution model
+- `vm` lowers AIR into its own bytecode/runtime execution model
 - `compiler/go` lowers AIR into Go AST and formatted Go source
 
 ## Design intent
@@ -151,9 +151,9 @@ backend execution/codegen proceeds. Examples include:
 This keeps backend assumptions explicit and helps move correctness checks out of
 individual backend implementations.
 
-## Relationship to vm_next
+## Relationship to vm
 
-`vm_next` was the first major backend built around AIR.
+`vm` was the first major backend built around AIR.
 
 That work established several important architectural outcomes:
 
@@ -189,6 +189,6 @@ The following constraints should continue to guide AIR evolution:
 
 ## Historical note
 
-AIR emerged from the work that introduced `vm_next` and enabled the later Go
+AIR emerged from the work that introduced `vm` and enabled the later Go
 backend rewrite. That migration work is complete; this document captures the
 enduring architectural intent rather than the original backlog plan.

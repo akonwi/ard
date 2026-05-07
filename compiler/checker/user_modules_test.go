@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 )
 
 func TestUserModulePathResolution(t *testing.T) {

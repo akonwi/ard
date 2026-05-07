@@ -61,10 +61,10 @@ func TestParseRunArgs(t *testing.T) {
 			target: "go",
 		},
 		{
-			name:   "vm_next target",
-			args:   []string{"--target", "vm_next", "samples/main.ard"},
+			name:   "vm target",
+			args:   []string{"--target", "vm", "samples/main.ard"},
 			path:   "samples/main.ard",
-			target: "vm_next",
+			target: "vm",
 		},
 		{
 			name:       "missing target value",
@@ -112,7 +112,7 @@ func TestParseRunArgs(t *testing.T) {
 	}
 }
 
-func TestRunVMNextProgram(t *testing.T) {
+func TestRunVMProgram(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "main.ard")
 	source := `
@@ -124,7 +124,7 @@ func TestRunVMNextProgram(t *testing.T) {
 		t.Fatalf("write source: %v", err)
 	}
 
-	module, err := loadModule(sourcePath, backend.TargetVMNext)
+	module, err := loadModule(sourcePath, backend.TargetVM)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -132,8 +132,8 @@ func TestRunVMNextProgram(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lower AIR: %v", err)
 	}
-	if err := runVMNextProgram(program, []string{"ard", "run", "--target", "vm_next", sourcePath}); err != nil {
-		t.Fatalf("run vm_next: %v", err)
+	if err := runVMProgram(program, []string{"ard", "run", "--target", "vm", sourcePath}); err != nil {
+		t.Fatalf("run vm: %v", err)
 	}
 }
 
@@ -480,11 +480,11 @@ func TestParseBuildArgs(t *testing.T) {
 			target: "go",
 		},
 		{
-			name:   "vm_next target",
-			args:   []string{"samples/main.ard", "--out", "demo", "--target", "vm_next"},
+			name:   "vm target",
+			args:   []string{"samples/main.ard", "--out", "demo", "--target", "vm"},
 			path:   "samples/main.ard",
 			out:    "demo",
-			target: "vm_next",
+			target: "vm",
 		},
 		{
 			name:       "missing target value",
@@ -823,10 +823,6 @@ func TestArgsForEmbeddedProgram(t *testing.T) {
 }
 
 func TestReadEmbeddedPayloadFromPath(t *testing.T) {
-	if len(vmNextFooterMarker) != len(bytecodeFooterMarker) {
-		t.Fatalf("vm_next footer marker length = %d, want %d", len(vmNextFooterMarker), len(bytecodeFooterMarker))
-	}
-
 	path := filepath.Join(t.TempDir(), "embedded")
 	file, err := os.Create(path)
 	if err != nil {
@@ -839,7 +835,7 @@ func TestReadEmbeddedPayloadFromPath(t *testing.T) {
 	if _, err := file.Write(payload); err != nil {
 		t.Fatalf("write payload: %v", err)
 	}
-	if err := writeFooter(file, vmNextFooterMarker, uint64(len(payload))); err != nil {
+	if err := writeFooter(file, vmFooterMarker, uint64(len(payload))); err != nil {
 		t.Fatalf("write footer: %v", err)
 	}
 	if err := file.Close(); err != nil {
@@ -850,25 +846,25 @@ func TestReadEmbeddedPayloadFromPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read embedded payload: %v", err)
 	}
-	if marker != vmNextFooterMarker {
-		t.Fatalf("marker = %q, want %q", marker, vmNextFooterMarker)
+	if marker != vmFooterMarker {
+		t.Fatalf("marker = %q, want %q", marker, vmFooterMarker)
 	}
 	if string(got) != string(payload) {
 		t.Fatalf("payload = %q, want %q", got, payload)
 	}
 }
 
-func TestBuildVMNextBinaryRequiresMain(t *testing.T) {
+func TestBuildVMBinaryRequiresMain(t *testing.T) {
 	sourcePath := filepath.Join(t.TempDir(), "script.ard")
 	if err := os.WriteFile(sourcePath, []byte("1 + 1"), 0o644); err != nil {
 		t.Fatalf("write source: %v", err)
 	}
 
-	_, err := buildVMNextBinary(sourcePath, filepath.Join(t.TempDir(), "script"))
+	_, err := buildVMBinary(sourcePath, filepath.Join(t.TempDir(), "script"))
 	if err == nil {
-		t.Fatal("buildVMNextBinary succeeded, want missing main error")
+		t.Fatal("buildVMBinary succeeded, want missing main error")
 	}
-	if !strings.Contains(err.Error(), "vm_next builds require fn main()") {
+	if !strings.Contains(err.Error(), "vm builds require fn main()") {
 		t.Fatalf("error = %v", err)
 	}
 }

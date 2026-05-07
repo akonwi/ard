@@ -13,22 +13,16 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/backend"
-	"github.com/akonwi/ard/bytecode"
-	bytecodevm "github.com/akonwi/ard/bytecode/vm"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
 	"github.com/akonwi/ard/javascript"
-	"github.com/akonwi/ard/runtime"
 	"github.com/akonwi/ard/version"
-	vm_next "github.com/akonwi/ard/vm_next"
+	vm "github.com/akonwi/ard/vm"
 )
 
-const (
-	bytecodeFooterMarker = "ARDBYTECODEv1"
-	vmNextFooterMarker   = "ARDVMNEXTv001"
-)
+const vmFooterMarker = "ARDVMv001"
 
 func main() {
 	if maybeRunEmbedded() {
@@ -71,26 +65,8 @@ func main() {
 				os.Exit(1)
 			}
 			switch target {
-			case backend.TargetBytecode:
-				module, err := loadModule(inputPath, target)
-				if err != nil {
-					os.Exit(1)
-				}
-				program, err := bytecode.NewEmitter().EmitProgram(module)
-				if err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-				if err := bytecode.VerifyProgram(program); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-				if runErr := runBytecodeProgram(program, os.Args); runErr != nil {
-					fmt.Println(runErr)
-					os.Exit(1)
-				}
-			case backend.TargetVMNext:
-				profile := newPipelineProfile("run vm_next")
+			case backend.TargetVM:
+				profile := newPipelineProfile("run vm")
 				defer profile.Print()
 				var module checker.Module
 				if err := profile.Time("frontend.load_module", func() error {
@@ -109,7 +85,7 @@ func main() {
 					fmt.Println(err)
 					os.Exit(1)
 				}
-				if err := runVMNextProgramProfile(program, os.Args, profile); err != nil {
+				if err := runVMProgramProfile(program, os.Args, profile); err != nil {
 					fmt.Println(err)
 					os.Exit(1)
 				}
@@ -161,10 +137,8 @@ func main() {
 			}
 			var builtPath string
 			switch target {
-			case backend.TargetBytecode:
-				builtPath, err = buildBytecodeBinary(inputPath, outputPath, target)
-			case backend.TargetVMNext:
-				builtPath, err = buildVMNextBinary(inputPath, outputPath)
+			case backend.TargetVM:
+				builtPath, err = buildVMBinary(inputPath, outputPath)
 			case backend.TargetGo:
 				builtPath, err = buildGoBinary(inputPath, outputPath, target)
 			case backend.TargetJSBrowser, backend.TargetJSServer:
@@ -501,18 +475,23 @@ func runTests(inputPath, filter string, failFast bool) bool {
 			continue
 		}
 
-		program, err := bytecode.NewTestEmitter().EmitProgram(module)
+		program, err := air.Lower(module)
 		if err != nil {
 			fmt.Println(err)
 			return false
 		}
-		if err := bytecode.VerifyProgram(program); err != nil {
+		if err := air.Validate(program); err != nil {
+			fmt.Println(err)
+			return false
+		}
+		vm, err := vm.NewWithOptions(program, vm.Options{Args: os.Args})
+		if err != nil {
 			fmt.Println(err)
 			return false
 		}
 
 		for _, test := range tests {
-			outcome := runCompiledTest(program, test)
+			outcome := runCompiledTest(vm, test)
 			outcomes = append(outcomes, outcome)
 			reportTestOutcome(outcome)
 			if failFast && outcome.status != testPass {
@@ -631,35 +610,23 @@ func (t discoveredTest) displayName() string {
 	return fmt.Sprintf("%s::%s", t.displayPath, t.name)
 }
 
-func runCompiledTest(program bytecode.Program, test discoveredTest) testOutcome {
-	runtime.SetOSArgs(os.Args)
-	defer runtime.SetOSArgs(nil)
-
-	res, err := bytecodevm.New(program).Run(test.name)
-	if err != nil {
-		return testOutcome{test: test, status: testPanic, message: err.Error()}
+func runCompiledTest(machine *vm.VM, test discoveredTest) testOutcome {
+	result := machine.RunNamedTest(test.name)
+	outcome := testOutcome{test: test, message: result.Message}
+	switch result.Status {
+	case vm.TestPass:
+		outcome.status = testPass
+	case vm.TestFail:
+		outcome.status = testFail
+	case vm.TestPanic:
+		outcome.status = testPanic
+	default:
+		outcome.status = testPanic
+		if outcome.message == "" {
+			outcome.message = fmt.Sprintf("unknown test status: %s", result.Status)
+		}
 	}
-	if res == nil {
-		return testOutcome{test: test, status: testPanic, message: "test returned no result"}
-	}
-	if !res.IsResult() {
-		return testOutcome{test: test, status: testPanic, message: "test did not return a Result"}
-	}
-	if res.IsErr() {
-		return testOutcome{test: test, status: testFail, message: resultMessage(res)}
-	}
-	return testOutcome{test: test, status: testPass}
-}
-
-func resultMessage(res *runtime.Object) string {
-	if res == nil {
-		return ""
-	}
-	unwrapped := res.UnwrapResult()
-	if msg, ok := unwrapped.IsStr(); ok {
-		return msg
-	}
-	return fmt.Sprintf("%v", unwrapped.GoValue())
+	return outcome
 }
 
 func reportTestOutcome(outcome testOutcome) {
@@ -684,32 +651,6 @@ func reportTestSummary(outcomes []testOutcome) {
 		}
 	}
 	fmt.Printf("\n%d passed; %d failed; %d panicked\n", passed, failed, panicked)
-}
-
-func buildBytecodeBinary(inputPath string, outputPath string, target string) (string, error) {
-	module, err := loadModule(inputPath, target)
-	if err != nil {
-		return "", err
-	}
-	program, err := bytecode.NewEmitter().EmitProgram(module)
-	if err != nil {
-		return "", err
-	}
-	if err := bytecode.VerifyProgram(program); err != nil {
-		return "", err
-	}
-	data, err := bytecode.SerializeProgram(program)
-	if err != nil {
-		return "", err
-	}
-	selfPath, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	if err := writeEmbeddedBinary(selfPath, outputPath, bytecodeFooterMarker, data); err != nil {
-		return "", err
-	}
-	return outputPath, nil
 }
 
 func buildGoBinary(inputPath string, outputPath string, target string) (string, error) {
@@ -753,13 +694,13 @@ func buildGoBinary(inputPath string, outputPath string, target string) (string, 
 	return builtPath, nil
 }
 
-func buildVMNextBinary(inputPath string, outputPath string) (string, error) {
-	profile := newPipelineProfile("build vm_next")
+func buildVMBinary(inputPath string, outputPath string) (string, error) {
+	profile := newPipelineProfile("build vm")
 	defer profile.Print()
 	var module checker.Module
 	if err := profile.Time("frontend.load_module", func() error {
 		var loadErr error
-		module, loadErr = loadModule(inputPath, backend.TargetVMNext)
+		module, loadErr = loadModule(inputPath, backend.TargetVM)
 		return loadErr
 	}); err != nil {
 		return "", err
@@ -778,7 +719,7 @@ func buildVMNextBinary(inputPath string, outputPath string) (string, error) {
 		return "", err
 	}
 	if program.Entry == air.NoFunction {
-		return "", fmt.Errorf("vm_next builds require fn main()")
+		return "", fmt.Errorf("vm builds require fn main()")
 	}
 	var data []byte
 	if err := profile.Time("air.serialize", func() error {
@@ -793,7 +734,7 @@ func buildVMNextBinary(inputPath string, outputPath string) (string, error) {
 		return "", err
 	}
 	if err := profile.Time("embed.write_binary", func() error {
-		return writeEmbeddedBinary(selfPath, outputPath, vmNextFooterMarker, data)
+		return writeEmbeddedBinary(selfPath, outputPath, vmFooterMarker, data)
 	}); err != nil {
 		return "", err
 	}
@@ -816,22 +757,8 @@ func maybeRunEmbedded() bool {
 		return false
 	}
 	switch marker {
-	case bytecodeFooterMarker:
-		program, err := bytecode.DeserializeProgram(data)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to deserialize bytecode:", err)
-			os.Exit(1)
-		}
-		if err := bytecode.VerifyProgram(program); err != nil {
-			fmt.Fprintln(os.Stderr, "Invalid bytecode:", err)
-			os.Exit(1)
-		}
-		if runErr := runBytecodeProgram(program, argsForEmbeddedProgram(os.Args)); runErr != nil {
-			fmt.Fprintln(os.Stderr, runErr)
-			os.Exit(1)
-		}
-	case vmNextFooterMarker:
-		profile := newPipelineProfile("embedded vm_next")
+	case vmFooterMarker:
+		profile := newPipelineProfile("embedded vm")
 		defer profile.Print()
 		var program *air.Program
 		if err := profile.Time("air.deserialize", func() error {
@@ -839,16 +766,16 @@ func maybeRunEmbedded() bool {
 			program, deserializeErr = air.DeserializeProgram(data)
 			return deserializeErr
 		}); err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to deserialize vm_next AIR:", err)
+			fmt.Fprintln(os.Stderr, "Failed to deserialize vm AIR:", err)
 			os.Exit(1)
 		}
 		if err := profile.Time("air.validate", func() error {
 			return air.Validate(program)
 		}); err != nil {
-			fmt.Fprintln(os.Stderr, "Invalid vm_next AIR:", err)
+			fmt.Fprintln(os.Stderr, "Invalid vm AIR:", err)
 			os.Exit(1)
 		}
-		if runErr := runVMNextProgramProfile(program, argsForEmbeddedProgram(os.Args), profile); runErr != nil {
+		if runErr := runVMProgramProfile(program, argsForEmbeddedProgram(os.Args), profile); runErr != nil {
 			fmt.Fprintln(os.Stderr, runErr)
 			os.Exit(1)
 		}
@@ -858,55 +785,29 @@ func maybeRunEmbedded() bool {
 	return true
 }
 
-func runBytecodeProgram(program bytecode.Program, args []string) error {
-	profiling := bytecodevm.ProfilingEnabled()
-	if profiling {
-		runtime.EnableObjectProfiling(true)
-		runtime.ResetObjectProfile()
-	} else {
-		runtime.EnableObjectProfiling(false)
-	}
-	defer runtime.EnableObjectProfiling(false)
-
-	runtime.SetOSArgs(args)
-	defer runtime.SetOSArgs(nil)
-
-	vm := bytecodevm.New(program)
-	_, runErr := vm.Run("main")
-	if profiling {
-		if report := vm.ProfileReport(); report != "" {
-			fmt.Fprintln(os.Stderr, report)
-		}
-		if report := runtime.ObjectProfileReport(); report != "" {
-			fmt.Fprintln(os.Stderr, report)
-		}
-	}
-	return runErr
+func runVMProgram(program *air.Program, args []string) error {
+	return runVMProgramProfile(program, args, nil)
 }
 
-func runVMNextProgram(program *air.Program, args []string) error {
-	return runVMNextProgramProfile(program, args, nil)
-}
-
-func runVMNextProgramProfile(program *air.Program, args []string, profile *pipelineProfile) error {
-	var vm *vm_next.VM
-	if err := profile.Time("vm_next.init", func() error {
+func runVMProgramProfile(program *air.Program, args []string, profile *pipelineProfile) error {
+	var machine *vm.VM
+	if err := profile.Time("vm.init", func() error {
 		var initErr error
-		vm, initErr = vm_next.NewWithOptions(program, vm_next.Options{Args: args})
+		machine, initErr = vm.NewWithOptions(program, vm.Options{Args: args})
 		return initErr
 	}); err != nil {
 		return err
 	}
 	var err error
-	runErr := profile.Time("vm_next.run", func() error {
+	runErr := profile.Time("vm.run", func() error {
 		if program.Entry != air.NoFunction {
-			_, err = vm.RunEntry()
+			_, err = machine.RunEntry()
 			return err
 		}
-		_, err = vm.RunScript()
+		_, err = machine.RunScript()
 		return err
 	})
-	if report := vm.ProfileReport(); report != "" {
+	if report := machine.ProfileReport(); report != "" {
 		fmt.Fprintln(os.Stderr, report)
 	}
 	return runErr
@@ -966,7 +867,7 @@ func readEmbeddedPayloadFromPath(path string) (string, []byte, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	footerSize := int64(len(bytecodeFooterMarker) + 8)
+	footerSize := int64(len(vmFooterMarker) + 8)
 	if info.Size() < footerSize {
 		return "", nil, nil
 	}
@@ -978,11 +879,11 @@ func readEmbeddedPayloadFromPath(path string) (string, []byte, error) {
 	if _, err := io.ReadFull(file, footer); err != nil {
 		return "", nil, err
 	}
-	marker := string(footer[:len(bytecodeFooterMarker)])
-	if marker != bytecodeFooterMarker && marker != vmNextFooterMarker {
+	marker := string(footer[:len(vmFooterMarker)])
+	if marker != vmFooterMarker {
 		return "", nil, nil
 	}
-	length := binary.LittleEndian.Uint64(footer[len(bytecodeFooterMarker):])
+	length := binary.LittleEndian.Uint64(footer[len(vmFooterMarker):])
 	dataOffset := info.Size() - footerSize - int64(length)
 	if dataOffset < 0 {
 		return "", nil, fmt.Errorf("invalid embedded payload length")

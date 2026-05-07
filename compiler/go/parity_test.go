@@ -22,7 +22,7 @@ import (
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
-	vmnext "github.com/akonwi/ard/vm_next"
+	vmnext "github.com/akonwi/ard/vm"
 )
 
 type goParityCase struct {
@@ -1358,14 +1358,14 @@ func TestGoTargetParitySQL(t *testing.T) {
 }
 
 func TestGoTargetParityEnvGet(t *testing.T) {
-	t.Setenv("ARD_VM_NEXT_ENV_TEST", "present")
+	t.Setenv("ARD_VM_ENV_TEST", "present")
 	runGoParityCases(t, []goParityCase{
 		{
 			name: "env get returns some string for set variable",
 			input: `
 				use ard/env
 				fn main() Str {
-					env::get("ARD_VM_NEXT_ENV_TEST").or("")
+					env::get("ARD_VM_ENV_TEST").or("")
 				}
 			`,
 		},
@@ -1374,7 +1374,7 @@ func TestGoTargetParityEnvGet(t *testing.T) {
 			input: `
 				use ard/env
 				fn main() Bool {
-					env::get("ARD_VM_NEXT_MISSING_ENV_TEST").is_none()
+					env::get("ARD_VM_MISSING_ENV_TEST").is_none()
 				}
 			`,
 		},
@@ -2014,10 +2014,10 @@ func runGoParityCases(t *testing.T, cases []goParityCase) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			program := lowerParitySource(t, tc.input)
-			gotVM := runVMNextParityJSON(t, program)
+			gotVM := runVMParityJSON(t, program)
 			gotGo := runGoTargetParityJSON(t, program)
 			if gotGo != gotVM {
-				t.Fatalf("json mismatch\nvm_next: %s\ngo:      %s", gotVM, gotGo)
+				t.Fatalf("json mismatch\nvm: %s\ngo:      %s", gotVM, gotGo)
 			}
 		})
 	}
@@ -2041,7 +2041,7 @@ func lowerParitySource(t *testing.T, input string) *air.Program {
 	return program
 }
 
-func runVMNextParityJSON(t *testing.T, program *air.Program) string {
+func runVMParityJSON(t *testing.T, program *air.Program) string {
 	t.Helper()
 	vm, err := vmnext.New(program)
 	if err != nil {

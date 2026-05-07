@@ -64,6 +64,11 @@ struct Partition {
   others: [$T],
 }
 
+struct IntPartition {
+  selected: [Int],
+  others: [Int],
+}
+
 fn partition(list: [$T], where: fn($T) Bool) Partition<$T> {
   mut selected: [$T] = []
   mut others: [$T] = []
@@ -76,6 +81,20 @@ fn partition(list: [$T], where: fn($T) Bool) Partition<$T> {
   }
 
   Partition{selected: selected, others: others}
+}
+
+fn partition_int(list: [Int], where: fn(Int) Bool) IntPartition {
+  mut selected: [Int] = []
+  mut others: [Int] = []
+
+  for t in list {
+    match where(t) {
+      true => selected.push(t),
+      false => others.push(t),
+    }
+  }
+
+  IntPartition{selected: selected, others: others}
 }
 
 test fn test_concat_combines_lists() Void!Str {
@@ -125,7 +144,7 @@ test fn test_find_returns_some_for_match() Void!Str {
 }
 
 test fn test_partition_splits_matching_and_other_values() Void!Str {
-  let parts = partition(
+  let parts = partition_int(
     [1, 2, 3, 4, 5],
     fn(n: Int) Bool {
       n > 2

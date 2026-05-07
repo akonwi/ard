@@ -1,0 +1,517 @@
+package vm
+
+import (
+	"fmt"
+
+	"github.com/akonwi/ard/air"
+)
+
+type ValueKind uint8
+
+const (
+	ValueVoid ValueKind = iota
+	ValueInt
+	ValueFloat
+	ValueBool
+	ValueStr
+	ValueEnum
+	ValueMaybe
+	ValueStruct
+	ValueList
+	ValueMap
+	ValueResult
+	ValueResultInt
+	ValueResultStr
+	ValueResultBool
+	ValueResultFloat
+	ValueUnion
+	ValueTraitObject
+	ValueExtern
+	ValueDynamic
+	ValueClosure
+	ValueClosureFunc
+	ValueFiber
+)
+
+type Value struct {
+	Kind ValueKind
+	Type air.TypeID
+
+	Int   int
+	Float float64
+	Bool  bool
+	Str   string
+	Ref   any
+}
+
+type StructValue struct {
+	Type   air.TypeID
+	Fields []Value
+}
+
+type ListValue struct {
+	Type  air.TypeID
+	Items []Value
+}
+
+type MapValue struct {
+	Type          air.TypeID
+	Entries       []MapEntryValue
+	SortedEntries []MapEntryValue
+	SortedIndices []int
+	SortedDirty   bool
+}
+
+type MapEntryValue struct {
+	Key   Value
+	Value Value
+}
+
+type ResultValue struct {
+	Type  air.TypeID
+	Ok    bool
+	Value Value
+}
+
+type ResultIntValue struct {
+	Int int
+}
+
+type UnionValue struct {
+	Type  air.TypeID
+	Tag   uint32
+	Value Value
+}
+
+type TraitObjectValue struct {
+	Type  air.TypeID
+	Trait air.TraitID
+	Impl  air.ImplID
+	Value Value
+}
+
+type MaybeValue struct {
+	Type  air.TypeID
+	Some  bool
+	Value Value
+}
+
+type ExternValue struct {
+	Type   air.TypeID
+	Handle any
+}
+
+type ClosureValue struct {
+	Type     air.TypeID
+	Function air.FunctionID
+	Captures []Value
+}
+
+type FiberValue struct {
+	Type   air.TypeID
+	Done   chan struct{}
+	Result Value
+	Err    error
+}
+
+func Void(typeID air.TypeID) Value {
+	return Value{Kind: ValueVoid, Type: typeID}
+}
+
+func Int(typeID air.TypeID, value int) Value {
+	return Value{Kind: ValueInt, Type: typeID, Int: value}
+}
+
+func Float(typeID air.TypeID, value float64) Value {
+	return Value{Kind: ValueFloat, Type: typeID, Float: value}
+}
+
+func Bool(typeID air.TypeID, value bool) Value {
+	return Value{Kind: ValueBool, Type: typeID, Bool: value}
+}
+
+func Str(typeID air.TypeID, value string) Value {
+	return Value{Kind: ValueStr, Type: typeID, Str: value}
+}
+
+func Enum(typeID air.TypeID, discriminant int) Value {
+	return Value{Kind: ValueEnum, Type: typeID, Int: discriminant}
+}
+
+func Maybe(typeID air.TypeID, some bool, value Value) Value {
+	return Value{Kind: ValueMaybe, Type: typeID, Ref: &MaybeValue{Type: typeID, Some: some, Value: value}}
+}
+
+func Struct(typeID air.TypeID, fields []Value) Value {
+	return Value{Kind: ValueStruct, Type: typeID, Ref: &StructValue{Type: typeID, Fields: fields}}
+}
+
+func List(typeID air.TypeID, items []Value) Value {
+	return Value{Kind: ValueList, Type: typeID, Ref: &ListValue{Type: typeID, Items: items}}
+}
+
+func Map(typeID air.TypeID, entries []MapEntryValue) Value {
+	return Value{Kind: ValueMap, Type: typeID, Ref: &MapValue{Type: typeID, Entries: entries, SortedDirty: true}}
+}
+
+func Result(typeID air.TypeID, ok bool, value Value) Value {
+	if ok {
+		switch value.Kind {
+		case ValueInt:
+			return ResultInt(typeID, value.Type, value.Int)
+		case ValueFloat:
+			return ResultFloat(typeID, value.Type, value.Float)
+		case ValueBool:
+			return ResultBool(typeID, value.Type, value.Bool)
+		case ValueStr:
+			return ResultStr(typeID, value.Type, value.Str)
+		}
+	}
+	payload := value
+	return Value{Kind: ValueResult, Type: typeID, Bool: ok, Ref: &payload}
+}
+
+func ResultInt(typeID air.TypeID, valueType air.TypeID, value int) Value {
+	return Value{Kind: ValueResultInt, Type: typeID, Bool: true, Int: value}
+}
+
+func ResultStr(typeID air.TypeID, valueType air.TypeID, value string) Value {
+	return Value{Kind: ValueResultStr, Type: typeID, Bool: true, Str: value}
+}
+
+func ResultBool(typeID air.TypeID, valueType air.TypeID, value bool) Value {
+	return Value{Kind: ValueResultBool, Type: typeID, Bool: value}
+}
+
+func ResultFloat(typeID air.TypeID, valueType air.TypeID, value float64) Value {
+	return Value{Kind: ValueResultFloat, Type: typeID, Bool: true, Float: value}
+}
+
+func Union(typeID air.TypeID, tag uint32, value Value) Value {
+	return Value{Kind: ValueUnion, Type: typeID, Ref: &UnionValue{Type: typeID, Tag: tag, Value: value}}
+}
+
+func TraitObject(typeID air.TypeID, trait air.TraitID, impl air.ImplID, value Value) Value {
+	return Value{Kind: ValueTraitObject, Type: typeID, Ref: &TraitObjectValue{Type: typeID, Trait: trait, Impl: impl, Value: value}}
+}
+
+func Extern(typeID air.TypeID, handle any) Value {
+	return Value{Kind: ValueExtern, Type: typeID, Ref: &ExternValue{Type: typeID, Handle: handle}}
+}
+
+func Dynamic(typeID air.TypeID, raw any) Value {
+	return Value{Kind: ValueDynamic, Type: typeID, Ref: raw}
+}
+
+func Closure(typeID air.TypeID, function air.FunctionID, captures []Value) Value {
+	if len(captures) == 0 {
+		return Value{Kind: ValueClosureFunc, Type: typeID, Int: int(function)}
+	}
+	return Value{Kind: ValueClosure, Type: typeID, Ref: &ClosureValue{Type: typeID, Function: function, Captures: captures}}
+}
+
+func Fiber(typeID air.TypeID, fiber *FiberValue) Value {
+	return Value{Kind: ValueFiber, Type: typeID, Ref: fiber}
+}
+
+func (v Value) GoValue() any {
+	switch v.Kind {
+	case ValueVoid:
+		return nil
+	case ValueInt:
+		return v.Int
+	case ValueFloat:
+		return v.Float
+	case ValueBool:
+		return v.Bool
+	case ValueStr:
+		return v.Str
+	case ValueEnum:
+		return v.Int
+	case ValueMaybe:
+		maybeValue, ok := v.Ref.(*MaybeValue)
+		if !ok || !maybeValue.Some {
+			return nil
+		}
+		return maybeValue.Value.GoValue()
+	case ValueStruct:
+		structValue, ok := v.Ref.(*StructValue)
+		if !ok {
+			return nil
+		}
+		out := make([]any, len(structValue.Fields))
+		for i, field := range structValue.Fields {
+			out[i] = field.GoValue()
+		}
+		return out
+	case ValueList:
+		listValue, ok := v.Ref.(*ListValue)
+		if !ok {
+			return nil
+		}
+		out := make([]any, len(listValue.Items))
+		for i, item := range listValue.Items {
+			out[i] = item.GoValue()
+		}
+		return out
+	case ValueMap:
+		mapValue, ok := v.Ref.(*MapValue)
+		if !ok {
+			return nil
+		}
+		out := make(map[any]any, len(mapValue.Entries))
+		for _, entry := range mapValue.Entries {
+			out[entry.Key.GoValue()] = entry.Value.GoValue()
+		}
+		return out
+	case ValueResult, ValueResultInt, ValueResultStr, ValueResultBool, ValueResultFloat:
+		_, resultValue, err := v.resultParts()
+		if err != nil {
+			return nil
+		}
+		return resultValue.GoValue()
+	case ValueUnion:
+		unionValue, ok := v.Ref.(*UnionValue)
+		if !ok {
+			return nil
+		}
+		return unionValue.Value.GoValue()
+	case ValueTraitObject:
+		traitObjectValue, ok := v.Ref.(*TraitObjectValue)
+		if !ok {
+			return nil
+		}
+		return traitObjectValue.Value.GoValue()
+	case ValueExtern:
+		externValue, ok := v.Ref.(*ExternValue)
+		if !ok {
+			return nil
+		}
+		return externValue.Handle
+	case ValueDynamic:
+		return v.Ref
+	case ValueClosure:
+		return v.Ref
+	case ValueClosureFunc:
+		return &ClosureValue{Type: v.Type, Function: air.FunctionID(v.Int)}
+	case ValueFiber:
+		return v.Ref
+	default:
+		return nil
+	}
+}
+
+func (v Value) GoValueString() string {
+	if v.Kind == ValueStr {
+		return v.Str
+	}
+	return fmt.Sprint(v.GoValue())
+}
+
+func structRef(v Value) (*StructValue, bool) {
+	if v.Kind != ValueStruct {
+		return nil, false
+	}
+	structValue, ok := v.Ref.(*StructValue)
+	return structValue, ok && structValue != nil
+}
+
+func structValueError(v Value) error {
+	if v.Kind != ValueStruct {
+		return fmt.Errorf("expected struct value, got kind %d", v.Kind)
+	}
+	return fmt.Errorf("struct value has invalid payload %T", v.Ref)
+}
+
+func (v Value) structValue() (*StructValue, error) {
+	if structValue, ok := structRef(v); ok {
+		return structValue, nil
+	}
+	return nil, structValueError(v)
+}
+
+func listRef(v Value) (*ListValue, bool) {
+	if v.Kind != ValueList {
+		return nil, false
+	}
+	listValue, ok := v.Ref.(*ListValue)
+	return listValue, ok && listValue != nil
+}
+
+func listValueError(v Value) error {
+	if v.Kind != ValueList {
+		return fmt.Errorf("expected list value, got kind %d", v.Kind)
+	}
+	return fmt.Errorf("list value has invalid payload %T", v.Ref)
+}
+
+func (v Value) listValue() (*ListValue, error) {
+	if listValue, ok := listRef(v); ok {
+		return listValue, nil
+	}
+	return nil, listValueError(v)
+}
+
+func mapRef(v Value) (*MapValue, bool) {
+	if v.Kind != ValueMap {
+		return nil, false
+	}
+	mapValue, ok := v.Ref.(*MapValue)
+	return mapValue, ok && mapValue != nil
+}
+
+func mapValueError(v Value) error {
+	if v.Kind != ValueMap {
+		return fmt.Errorf("expected map value, got kind %d", v.Kind)
+	}
+	return fmt.Errorf("map value has invalid payload %T", v.Ref)
+}
+
+func (v Value) mapValue() (*MapValue, error) {
+	if mapValue, ok := mapRef(v); ok {
+		return mapValue, nil
+	}
+	return nil, mapValueError(v)
+}
+
+func (v Value) maybeValue() (*MaybeValue, error) {
+	if v.Kind != ValueMaybe {
+		return nil, fmt.Errorf("expected Maybe value, got kind %d", v.Kind)
+	}
+	maybeValue, ok := v.Ref.(*MaybeValue)
+	if !ok || maybeValue == nil {
+		return nil, fmt.Errorf("Maybe value has invalid payload %T", v.Ref)
+	}
+	return maybeValue, nil
+}
+
+func (v Value) resultParts() (bool, Value, error) {
+	if v.Kind == ValueResultInt {
+		return true, Int(air.NoType, v.Int), nil
+	}
+	if v.Kind == ValueResultStr {
+		return true, Str(air.NoType, v.Str), nil
+	}
+	if v.Kind == ValueResultBool {
+		return true, Bool(air.NoType, v.Bool), nil
+	}
+	if v.Kind == ValueResultFloat {
+		return true, Float(air.NoType, v.Float), nil
+	}
+	if v.Kind != ValueResult {
+		return false, Value{}, fmt.Errorf("expected result value, got kind %d", v.Kind)
+	}
+	if payload, ok := v.Ref.(*Value); ok && payload != nil {
+		return v.Bool, *payload, nil
+	}
+	return false, Value{}, fmt.Errorf("result value has invalid payload %T", v.Ref)
+}
+
+func (v Value) resultValue() (*ResultValue, error) {
+	ok, value, err := v.resultParts()
+	if err != nil {
+		return nil, err
+	}
+	return &ResultValue{Type: v.Type, Ok: ok, Value: value}, nil
+}
+
+func unionRef(v Value) (*UnionValue, bool) {
+	if v.Kind != ValueUnion {
+		return nil, false
+	}
+	unionValue, ok := v.Ref.(*UnionValue)
+	return unionValue, ok && unionValue != nil
+}
+
+func unionValueError(v Value) error {
+	if v.Kind != ValueUnion {
+		return fmt.Errorf("expected union value, got kind %d", v.Kind)
+	}
+	return fmt.Errorf("union value has invalid payload %T", v.Ref)
+}
+
+func (v Value) unionValue() (*UnionValue, error) {
+	if unionValue, ok := unionRef(v); ok {
+		return unionValue, nil
+	}
+	return nil, unionValueError(v)
+}
+
+func (v Value) traitObjectValue() (*TraitObjectValue, error) {
+	if v.Kind != ValueTraitObject {
+		return nil, fmt.Errorf("expected trait object value, got kind %d", v.Kind)
+	}
+	traitObjectValue, ok := v.Ref.(*TraitObjectValue)
+	if !ok || traitObjectValue == nil {
+		return nil, fmt.Errorf("trait object value has invalid payload %T", v.Ref)
+	}
+	return traitObjectValue, nil
+}
+
+func (v Value) externValue() (*ExternValue, error) {
+	if v.Kind != ValueExtern {
+		return nil, fmt.Errorf("expected extern value, got kind %d", v.Kind)
+	}
+	externValue, ok := v.Ref.(*ExternValue)
+	if !ok || externValue == nil {
+		return nil, fmt.Errorf("extern value has invalid payload %T", v.Ref)
+	}
+	return externValue, nil
+}
+
+func (v Value) dynamicRaw() (any, error) {
+	if v.Kind != ValueDynamic {
+		return nil, fmt.Errorf("expected Dynamic value, got kind %d", v.Kind)
+	}
+	return v.Ref, nil
+}
+
+func closureParts(v Value) (air.FunctionID, []Value, bool) {
+	if v.Kind == ValueClosureFunc {
+		return air.FunctionID(v.Int), nil, true
+	}
+	if v.Kind != ValueClosure {
+		return air.NoFunction, nil, false
+	}
+	closureValue, ok := v.Ref.(*ClosureValue)
+	if !ok || closureValue == nil {
+		return air.NoFunction, nil, false
+	}
+	return closureValue.Function, closureValue.Captures, true
+}
+
+func closureRef(v Value) (*ClosureValue, bool) {
+	if v.Kind == ValueClosureFunc {
+		return &ClosureValue{Type: v.Type, Function: air.FunctionID(v.Int)}, true
+	}
+	if v.Kind != ValueClosure {
+		return nil, false
+	}
+	closureValue, ok := v.Ref.(*ClosureValue)
+	return closureValue, ok && closureValue != nil
+}
+
+func closureValueError(v Value) error {
+	if v.Kind != ValueClosure && v.Kind != ValueClosureFunc {
+		return fmt.Errorf("expected closure value, got kind %d", v.Kind)
+	}
+	return fmt.Errorf("closure value has invalid payload %T", v.Ref)
+}
+
+func (v Value) closureValue() (*ClosureValue, error) {
+	if closureValue, ok := closureRef(v); ok {
+		return closureValue, nil
+	}
+	return nil, closureValueError(v)
+}
+
+func (v Value) fiberValue() (*FiberValue, error) {
+	if v.Kind != ValueFiber {
+		return nil, fmt.Errorf("expected fiber value, got kind %d", v.Kind)
+	}
+	fiberValue, ok := v.Ref.(*FiberValue)
+	if !ok || fiberValue == nil {
+		return nil, fmt.Errorf("fiber value has invalid payload %T", v.Ref)
+	}
+	return fiberValue, nil
+}
