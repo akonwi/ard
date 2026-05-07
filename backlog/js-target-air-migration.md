@@ -330,8 +330,8 @@ Once parity is acceptable:
 - [x] Lower enum declarations.
 - [x] Lower enum variants.
 - [ ] Lower union wrapping.
-- [ ] Lower maybe values.
-- [ ] Lower result values.
+- [x] Lower maybe values.
+- [x] Lower result values.
 - [x] Lower list values.
 - [x] Lower map values.
 - [ ] Lower dynamic/extern opaque values.
@@ -364,19 +364,19 @@ Once parity is acceptable:
 
 ### Collections
 
-- [ ] Lower list `at`.
-- [ ] Lower list `prepend`.
-- [ ] Lower list `push`.
-- [ ] Lower list `set`.
-- [ ] Lower list `size`.
-- [ ] Lower list `sort`.
-- [ ] Lower list `swap`.
-- [ ] Lower map `keys`.
-- [ ] Lower map `size`.
-- [ ] Lower map `get`.
-- [ ] Lower map `set`.
-- [ ] Lower map `drop`.
-- [ ] Lower map `has`.
+- [x] Lower list `at`.
+- [x] Lower list `prepend`.
+- [x] Lower list `push`.
+- [x] Lower list `set`.
+- [x] Lower list `size`.
+- [x] Lower list `sort`.
+- [x] Lower list `swap`.
+- [x] Lower map `keys`.
+- [x] Lower map `size`.
+- [x] Lower map `get`.
+- [x] Lower map `set`.
+- [x] Lower map `drop`.
+- [x] Lower map `has`.
 - [ ] Lower map key/value indexed iteration helpers if needed by AIR loops.
 
 ### Control flow and matching
@@ -395,19 +395,19 @@ Once parity is acceptable:
 
 ### Maybe/result methods
 
-- [ ] Lower maybe `expect`.
-- [ ] Lower maybe `is_none`.
-- [ ] Lower maybe `is_some`.
-- [ ] Lower maybe `or`.
-- [ ] Lower maybe `map`.
-- [ ] Lower maybe `and_then`.
-- [ ] Lower result `expect`.
-- [ ] Lower result `or`.
-- [ ] Lower result `is_ok`.
-- [ ] Lower result `is_err`.
-- [ ] Lower result `map`.
-- [ ] Lower result `map_err`.
-- [ ] Lower result `and_then`.
+- [x] Lower maybe `expect`.
+- [x] Lower maybe `is_none`.
+- [x] Lower maybe `is_some`.
+- [x] Lower maybe `or`.
+- [x] Lower maybe `map`.
+- [x] Lower maybe `and_then`.
+- [x] Lower result `expect`.
+- [x] Lower result `or`.
+- [x] Lower result `is_ok`.
+- [x] Lower result `is_err`.
+- [x] Lower result `map`.
+- [x] Lower result `map_err`.
+- [x] Lower result `and_then`.
 
 ### Traits, dynamic, and async
 
@@ -439,7 +439,9 @@ Once parity is acceptable:
 - [ ] Port existing JS build tests to the AIR backend.
 - [ ] Add `js-server` run parity tests for primitive programs.
 - [ ] Add parity tests for structs/enums/lists/maps.
+  - [x] Added initial AIR source assertions for list/map values and methods.
 - [ ] Add parity tests for maybe/result/try/match.
+  - [x] Added initial AIR source assertions for Maybe/Result constructors and `or`.
 - [ ] Add parity tests for modules/imports.
 - [ ] Add parity tests for JS externs.
 - [ ] Keep or update browser-output tests.
@@ -467,3 +469,4 @@ Once parity is acceptable:
 - Created on branch `refactor.js-target` as the migration reference checklist.
 - Added initial AIR-first JavaScript backend scaffold in `compiler/javascript/air_backend.go`.
 - Added minimal AIR source-generation/build tests while keeping the legacy checker backend intact.
+- Fixed AIR TypeID indexing in the JS lowerer and expanded AIR lowering for strings, collections, Maybe, and Result operations.

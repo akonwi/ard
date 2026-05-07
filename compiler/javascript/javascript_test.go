@@ -1921,3 +1921,48 @@ fn main() {
 		t.Fatalf("expected prelude companion: %v", err)
 	}
 }
+
+func TestGenerateSourcesFromAIRCollectionsMaybeResult(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/maybe
+
+let size = [1, 2, 3].size()
+let first = [1, 2, 3].at(0)
+let present = ["a": 1].get("a").or(0)
+let some = maybe::some(2).or(0)
+let ok: Int!Str = Result::ok(1)
+let ok_value = ok.or(0)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := string(files["main.mjs"])
+	for _, expected := range []string{
+		"const size = [1, 2, 3].length;",
+		"const first = [1, 2, 3][0];",
+		"Maybe.some",
+		"Maybe.some(2).or(0)",
+		"Result.ok(1)",
+		"ok.or(0)",
+	} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("expected %q in AIR JS output, got:\n%s", expected, source)
+		}
+	}
+}
