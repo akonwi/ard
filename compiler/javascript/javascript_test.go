@@ -2083,3 +2083,32 @@ fn result_pick(value: Int!Str) Str {
 		}
 	}
 }
+
+func TestRunProgramFromAIRServerPrimitive(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn main() Int {
+  1 + 2
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	if err := RunProgram(program, backend.TargetJSServer, nil, loaded.ProjectInfo); err != nil {
+		t.Fatalf("run AIR JS program: %v", err)
+	}
+}

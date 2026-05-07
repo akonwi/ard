@@ -437,7 +437,7 @@ Once parity is acceptable:
 
 - [x] Add unit tests for minimal AIR JS source generation.
 - [ ] Port existing JS build tests to the AIR backend.
-- [ ] Add `js-server` run parity tests for primitive programs.
+- [x] Add `js-server` run parity tests for primitive programs.
 - [ ] Add parity tests for structs/enums/lists/maps.
   - [x] Added initial AIR source assertions for list/map values and methods.
 - [ ] Add parity tests for maybe/result/try/match.
@@ -474,3 +474,4 @@ Once parity is acceptable:
 - Fixed AIR TypeID indexing in the JS lowerer and expanded AIR lowering for strings, collections, Maybe, and Result operations.
 - Added AIR imported-function module dependency detection, basic extern call references, and struct field assignment lowering.
 - Added AIR enum/int/maybe/result match expression lowering using JavaScript IIFEs.
+- Added a primitive `js-server` AIR `RunProgram` smoke test.
