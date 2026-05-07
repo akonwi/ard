@@ -2442,3 +2442,39 @@ let answer = value()
 		t.Fatalf("expected copied browser ffi companion: %v", err)
 	}
 }
+
+func TestGenerateSourcesFromAIRImportedStructConstruction(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "models.ard"), []byte(`
+struct Person { age: Int }
+`), 0o644); err != nil {
+		t.Fatalf("failed to write models module: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/models
+
+let person = models::Person{age: 42}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := string(files["main.mjs"])
+	if !strings.Contains(source, "class Person") || !strings.Contains(source, "new Person(42)") {
+		t.Fatalf("expected imported struct type declaration and constructor, got:\n%s", source)
+	}
+}

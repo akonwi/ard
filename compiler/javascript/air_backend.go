@@ -178,10 +178,10 @@ func (l *airJSLowerer) lowerModule(module air.Module, invokeRoot bool) (string, 
 	}
 	b.WriteString(renderJSDoc(jsModulePreambleDoc(imports, l.target)))
 	b.WriteByte('\n')
-	for _, typeID := range module.Types {
-		decl, err := l.lowerTypeDecl(typeID)
+	for _, typ := range l.program.Types {
+		decl, err := l.lowerTypeDecl(typ.ID)
 		if err != nil {
-			return "", fmt.Errorf("module %s type %d: %w", module.Path, typeID, err)
+			return "", fmt.Errorf("module %s type %d: %w", module.Path, typ.ID, err)
 		}
 		if strings.TrimSpace(decl) != "" {
 			b.WriteString(decl)
@@ -260,6 +260,11 @@ func (l *airJSLowerer) moduleDependencyIDs(module air.Module) []air.ModuleID {
 	visitExpr = func(expr air.Expr) {
 		if expr.Kind == air.ExprCall && int(expr.Function) >= 0 && int(expr.Function) < len(l.program.Functions) {
 			add(l.program.Functions[expr.Function].Module)
+		}
+		if expr.Kind == air.ExprMakeStruct || expr.Kind == air.ExprEnumVariant {
+			if owner, ok := l.typeModule(expr.Type); ok {
+				add(owner)
+			}
 		}
 		for _, arg := range expr.Args {
 			visitExpr(arg)
@@ -523,11 +528,10 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 			}
 			args[i] = value
 		}
-		t, ok := l.typeInfo(expr.Type)
-		if !ok {
+		if _, ok := l.typeInfo(expr.Type); !ok {
 			return "", fmt.Errorf("unknown struct type %d", expr.Type)
 		}
-		return renderJSExpr(jsNewExprIR{Ctor: jsName(t.Name), Args: args}), nil
+		return renderJSExpr(jsNewExprIR{Ctor: l.typeRef(fn.Module, expr.Type), Args: args}), nil
 	case air.ExprGetField:
 		target, err := l.lowerExpr(fn, *expr.Target)
 		if err != nil {
@@ -544,7 +548,7 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		if !ok || expr.Variant < 0 || expr.Variant >= len(t.Variants) {
 			return "", fmt.Errorf("unknown enum variant %d on type %d", expr.Variant, expr.Type)
 		}
-		return jsName(t.Name) + "." + jsName(t.Variants[expr.Variant].Name), nil
+		return l.typeRef(fn.Module, expr.Type) + "." + jsName(t.Variants[expr.Variant].Name), nil
 	case air.ExprMakeList:
 		args, err := l.lowerArgs(fn, expr.Args)
 		if err != nil {
@@ -1337,6 +1341,33 @@ func (l *airJSLowerer) localName(fn air.Function, local air.LocalID) string {
 		return jsName(fn.Locals[local].Name)
 	}
 	return "__local" + strconv.Itoa(int(local))
+}
+
+func (l *airJSLowerer) typeModule(typeID air.TypeID) (air.ModuleID, bool) {
+	for _, module := range l.program.Modules {
+		for _, moduleType := range module.Types {
+			if moduleType == typeID {
+				return module.ID, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func (l *airJSLowerer) typeRef(from air.ModuleID, typeID air.TypeID) string {
+	t, ok := l.typeInfo(typeID)
+	if !ok {
+		return "__missing_type"
+	}
+	name := jsName(t.Name)
+	moduleID, ok := l.typeModule(typeID)
+	if !ok || moduleID == from {
+		return name
+	}
+	if int(moduleID) >= 0 && int(moduleID) < len(l.program.Modules) {
+		return moduleAlias(l.program.Modules[moduleID].Path) + "." + name
+	}
+	return name
 }
 
 func (l *airJSLowerer) functionName(id air.FunctionID) string {

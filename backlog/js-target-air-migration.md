@@ -446,6 +446,7 @@ Once parity is acceptable:
   - [x] Added initial AIR source assertions for enum/int/maybe/result matches.
 - [ ] Add parity tests for modules/imports.
   - [x] Added initial AIR source assertions for imported function calls.
+  - [x] Added initial AIR source assertions for imported struct construction.
 - [ ] Add parity tests for JS externs.
   - [x] Added initial AIR source assertions for project extern imports and Maybe/Result return adapters.
   - [x] Added initial AIR source assertions for extern struct/list/map return adapters.
@@ -485,5 +486,6 @@ Once parity is acceptable:
 - Added initial synchronous AIR fiber lowering (`spawn`, `get`, `join`) for JS; this preserves value semantics but not concurrency.
 - Added AIR extern return adapters for structs, lists, maps, and nested Maybe/Result payloads.
 - Added AIR browser BuildProgram coverage for project FFI imports and companion copying.
+- AIR JS now emits struct/enum type declarations into each generated module so imported struct literals have constructors available.
 - Validation checkpoint: `cd compiler && go test ./air ./go ./backend` passed.
 - Trialed routing main CLI through AIR, but kept legacy CLI route active until AIR JS reaches stdlib/browser parity.
