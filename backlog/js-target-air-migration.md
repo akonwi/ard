@@ -451,7 +451,7 @@ Once parity is acceptable:
   - [x] Added initial AIR source assertions for extern struct/list/map return adapters.
 - [x] Keep or update browser-output tests.
 - [x] Run `cd compiler && go test ./javascript`.
-- [ ] Run `cd compiler && go test ./air ./go ./backend`.
+- [x] Run `cd compiler && go test ./air ./go ./backend`.
 - [ ] Run `cd compiler && go generate ./std_lib/ffi && go test ./...` before final cleanup.
 
 ## Open Design Points
@@ -485,4 +485,5 @@ Once parity is acceptable:
 - Added initial synchronous AIR fiber lowering (`spawn`, `get`, `join`) for JS; this preserves value semantics but not concurrency.
 - Added AIR extern return adapters for structs, lists, maps, and nested Maybe/Result payloads.
 - Added AIR browser BuildProgram coverage for project FFI imports and companion copying.
+- Validation checkpoint: `cd compiler && go test ./air ./go ./backend` passed.
 - Trialed routing main CLI through AIR, but kept legacy CLI route active until AIR JS reaches stdlib/browser parity.
