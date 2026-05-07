@@ -385,6 +385,14 @@ func (l *airJSLowerer) lowerBlock(fn air.Function, block air.Block, returns bool
 		}
 	}
 	if block.Result != nil {
+		if returns && (block.Result.Kind == air.ExprTryResult || block.Result.Kind == air.ExprTryMaybe) {
+			tryLines, err := l.lowerTryTail(fn, *block.Result)
+			if err != nil {
+				return "", err
+			}
+			lines = append(lines, tryLines...)
+			return strings.Join(lines, "\n"), nil
+		}
 		expr, err := l.lowerExpr(fn, *block.Result)
 		if err != nil {
 			return "", err
@@ -403,6 +411,9 @@ func (l *airJSLowerer) lowerBlock(fn air.Function, block air.Block, returns bool
 func (l *airJSLowerer) lowerStmt(fn air.Function, stmt air.Stmt) (string, error) {
 	switch stmt.Kind {
 	case air.StmtLet:
+		if stmt.Value != nil && (stmt.Value.Kind == air.ExprTryResult || stmt.Value.Kind == air.ExprTryMaybe) {
+			return l.lowerTryLet(fn, stmt)
+		}
 		value, err := l.lowerExpr(fn, *stmt.Value)
 		if err != nil {
 			return "", err
@@ -557,6 +568,8 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		return l.lowerResultOp(fn, expr)
 	case air.ExprStrAt, air.ExprStrSize, air.ExprStrIsEmpty, air.ExprStrContains, air.ExprStrReplace, air.ExprStrReplaceAll, air.ExprStrSplit, air.ExprStrStartsWith, air.ExprStrTrim:
 		return l.lowerStrOp(fn, expr)
+	case air.ExprTryResult, air.ExprTryMaybe:
+		return l.lowerTryExpr(fn, expr)
 	case air.ExprMatchEnum:
 		return l.lowerEnumMatch(fn, expr)
 	case air.ExprMatchInt:
@@ -652,6 +665,99 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 	default:
 		return "", fmt.Errorf("unsupported AIR JS expression kind %d", expr.Kind)
 	}
+}
+
+func (l *airJSLowerer) lowerTryLet(fn air.Function, stmt air.Stmt) (string, error) {
+	tryExpr := *stmt.Value
+	if tryExpr.Target == nil {
+		return "", fmt.Errorf("try expression missing target")
+	}
+	target, err := l.lowerExpr(fn, *tryExpr.Target)
+	if err != nil {
+		return "", err
+	}
+	tryVar := l.temp("try")
+	lines := []string{"const " + tryVar + " = " + target + ";"}
+	if tryExpr.Kind == air.ExprTryResult {
+		if tryExpr.HasCatch {
+			catchLines, err := l.lowerTryCatchReturn(fn, tryExpr, tryVar)
+			if err != nil {
+				return "", err
+			}
+			lines = append(lines, "if ("+tryVar+".isErr()) "+renderJSDoc(jsBareBlockDoc(strings.Join(catchLines, "\n"))))
+		} else {
+			lines = append(lines, "if ("+tryVar+".isErr()) return Result.err("+tryVar+".error);")
+		}
+		lines = append(lines, "const "+l.localName(fn, stmt.Local)+" = "+tryVar+".ok;")
+	} else {
+		if tryExpr.HasCatch {
+			catchLines, err := l.lowerTryCatchReturn(fn, tryExpr, tryVar)
+			if err != nil {
+				return "", err
+			}
+			lines = append(lines, "if ("+tryVar+".isNone()) "+renderJSDoc(jsBareBlockDoc(strings.Join(catchLines, "\n"))))
+		} else {
+			lines = append(lines, "if ("+tryVar+".isNone()) return Maybe.none();")
+		}
+		lines = append(lines, "const "+l.localName(fn, stmt.Local)+" = "+tryVar+".value;")
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+func (l *airJSLowerer) lowerTryTail(fn air.Function, expr air.Expr) ([]string, error) {
+	if expr.Target == nil {
+		return nil, fmt.Errorf("try expression missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return nil, err
+	}
+	tryVar := l.temp("try")
+	lines := []string{"const " + tryVar + " = " + target + ";"}
+	if expr.Kind == air.ExprTryResult {
+		if expr.HasCatch {
+			catchLines, err := l.lowerTryCatchReturn(fn, expr, tryVar)
+			if err != nil {
+				return nil, err
+			}
+			lines = append(lines, "if ("+tryVar+".isErr()) "+renderJSDoc(jsBareBlockDoc(strings.Join(catchLines, "\n"))))
+		} else {
+			lines = append(lines, "if ("+tryVar+".isErr()) return Result.err("+tryVar+".error);")
+		}
+		lines = append(lines, "return "+tryVar+".ok;")
+	} else {
+		if expr.HasCatch {
+			catchLines, err := l.lowerTryCatchReturn(fn, expr, tryVar)
+			if err != nil {
+				return nil, err
+			}
+			lines = append(lines, "if ("+tryVar+".isNone()) "+renderJSDoc(jsBareBlockDoc(strings.Join(catchLines, "\n"))))
+		} else {
+			lines = append(lines, "if ("+tryVar+".isNone()) return Maybe.none();")
+		}
+		lines = append(lines, "return "+tryVar+".value;")
+	}
+	return lines, nil
+}
+
+func (l *airJSLowerer) lowerTryCatchReturn(fn air.Function, expr air.Expr, tryVar string) ([]string, error) {
+	bindings := []string{}
+	if expr.Kind == air.ExprTryResult && expr.CatchLocal >= 0 {
+		bindings = append(bindings, "const "+l.localName(fn, expr.CatchLocal)+" = "+tryVar+".error;")
+	}
+	body, err := l.lowerBlockWithBindings(fn, expr.Catch, bindings)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(body, "\n"), nil
+}
+
+func (l *airJSLowerer) lowerTryExpr(fn air.Function, expr air.Expr) (string, error) {
+	lines, err := l.lowerTryTail(fn, expr)
+	if err != nil {
+		return "", err
+	}
+	return renderJSDoc(jsIIFEDoc(strings.Join(lines, "\n"))), nil
 }
 
 func (l *airJSLowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (string, error) {

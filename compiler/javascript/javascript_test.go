@@ -2229,3 +2229,47 @@ let value = print(20)
 		t.Fatalf("expected union wrap/match in AIR JS output, got:\n%s", source)
 	}
 }
+
+func TestGenerateSourcesFromAIRTryLet(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/maybe
+
+fn render(value: Int!Str) Str!Str {
+  let out = try value
+  Result::ok(out.to_str())
+}
+
+fn maybe_chain(value: Int?) Int? {
+  let out = try value
+  maybe::some(out + 1)
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := ""
+	for _, content := range files {
+		source += string(content)
+	}
+	for _, expected := range []string{".isErr()) return Result.err", ".isNone()) return Maybe.none()", ".ok;", ".value;"} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("expected %q in AIR JS output, got:\n%s", expected, source)
+		}
+	}
+}

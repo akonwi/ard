@@ -390,8 +390,8 @@ Once parity is acceptable:
 - [x] Lower union match.
 - [x] Lower maybe match.
 - [x] Lower result match.
-- [ ] Lower result `try`.
-- [ ] Lower maybe `try`.
+- [x] Lower result `try`.
+- [x] Lower maybe `try`.
 
 ### Maybe/result methods
 
@@ -478,3 +478,4 @@ Once parity is acceptable:
 - Added a primitive `js-server` AIR `RunProgram` smoke test.
 - Added AIR dynamic identity lowering and map key/value indexed helper lowering used by map iteration.
 - Added AIR closure/capture lowering and simple tagged-object union wrap/match lowering.
+- Added AIR try lowering for tail expressions and `let` bindings with Result/Maybe propagation.
