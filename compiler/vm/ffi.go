@@ -1,4 +1,4 @@
-package vm_next
+package vm
 
 import (
 	"errors"
@@ -10,8 +10,8 @@ import (
 
 	"github.com/akonwi/ard/air"
 	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
-	vmcode "github.com/akonwi/ard/vm_next/bytecode"
-	vmnextffi "github.com/akonwi/ard/vm_next/ffi"
+	vmcode "github.com/akonwi/ard/vm/bytecode"
+	vmffi "github.com/akonwi/ard/vm/ffi"
 )
 
 type HostFunctionRegistry map[string]any
@@ -21,7 +21,7 @@ type hostExternAdapters map[air.ExternID]hostExternAdapter
 type hostExternAdapter struct {
 	binding string
 	extern  air.Extern
-	direct  vmnextffi.ExternAdapter
+	direct  vmffi.ExternAdapter
 }
 
 var (
@@ -133,9 +133,9 @@ func (vm *VM) newHostExternAdapter(extern air.Extern, binding string, fn any) (h
 	if err := vm.validateHostReturns(extern.Signature.Return, fnType); err != nil {
 		return hostExternAdapter{}, err
 	}
-	direct, ok := vmnextffi.Adapter(binding, fn)
+	direct, ok := vmffi.Adapter(binding, fn)
 	if !ok {
-		return hostExternAdapter{}, fmt.Errorf("extern %s has no generated vm_next adapter", binding)
+		return hostExternAdapter{}, fmt.Errorf("extern %s has no generated vm adapter", binding)
 	}
 	return hostExternAdapter{
 		binding: binding,
@@ -166,7 +166,7 @@ func (adapter hostExternAdapter) callDirect(bridge generatedHostBridge, args []V
 	}
 	value, ok := out.(Value)
 	if !ok {
-		return Value{}, fmt.Errorf("extern %s generated adapter returned %T, want vm_next.Value", adapter.binding, out)
+		return Value{}, fmt.Errorf("extern %s generated adapter returned %T, want vm.Value", adapter.binding, out)
 	}
 	return value, nil
 }

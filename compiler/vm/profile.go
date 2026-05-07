@@ -1,4 +1,4 @@
-package vm_next
+package vm
 
 import (
 	"fmt"
@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"github.com/akonwi/ard/air"
-	vmcode "github.com/akonwi/ard/vm_next/bytecode"
+	vmcode "github.com/akonwi/ard/vm/bytecode"
 )
 
 const (
-	profileEnvVar       = "ARD_VM_NEXT_PROFILE"
+	profileEnvVar       = "ARD_VM_PROFILE"
 	profileCompatEnvVar = "ARD_VM_PROFILE"
-	profileTopEnvVar    = "ARD_VM_NEXT_PROFILE_TOP"
+	profileTopEnvVar    = "ARD_VM_PROFILE_TOP"
 	profileCompatTopEnv = "ARD_VM_PROFILE_TOP"
 )
 
@@ -392,7 +392,7 @@ func (p *executionProfile) Report() string {
 	fiberWaits := p.fiberWaits.Load()
 
 	var out strings.Builder
-	fmt.Fprintf(&out, "[ard vm_next profile]\n")
+	fmt.Fprintf(&out, "[ard vm profile]\n")
 	fmt.Fprintf(&out, "wall=%s\n", wall.Round(time.Microsecond))
 	fmt.Fprintf(&out, "calls direct=%d closure=%d trait=%d extern=%d\n", directCalls, closureCalls, p.traitCalls.Load(), externCalls)
 	fmt.Fprintf(&out, "frames=%d max_locals=%d\n", p.frames.Load(), p.maxLocals.Load())

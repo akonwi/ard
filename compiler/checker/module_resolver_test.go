@@ -42,8 +42,8 @@ func TestFindProjectRoot(t *testing.T) {
 	if project.ProjectName != "test_project" {
 		t.Errorf("Expected project name 'test_project', got '%s'", project.ProjectName)
 	}
-	if project.Target != "vm_next" {
-		t.Errorf("Expected default target 'vm_next', got '%s'", project.Target)
+	if project.Target != "vm" {
+		t.Errorf("Expected default target 'vm', got '%s'", project.Target)
 	}
 
 	if project.RootPath != tempDir {
@@ -56,7 +56,7 @@ func TestFindProjectRootReadsTarget(t *testing.T) {
 		name   string
 		target string
 	}{
-		{name: "vm_next", target: "vm_next"},
+		{name: "vm", target: "vm"},
 		{name: "go", target: "go"},
 		{name: "js-browser", target: "js-browser"},
 		{name: "js-server", target: "js-server"},

@@ -1,4 +1,4 @@
-package vm_next
+package vm
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestVMNextBytecodeParitySQLExtractParams(t *testing.T) {
+func TestVMBytecodeParitySQLExtractParams(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "extracts params in query order",
@@ -36,7 +36,7 @@ func TestVMNextBytecodeParitySQLExtractParams(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParitySQLQueryRunAllAndFirst(t *testing.T) {
+func TestVMBytecodeParitySQLQueryRunAllAndFirst(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "query.db")
 
 	runBytecodeParityCases(t, []bytecodeParityCase{
@@ -75,7 +75,7 @@ func TestVMNextBytecodeParitySQLQueryRunAllAndFirst(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParitySQLInsertingNull(t *testing.T) {
+func TestVMBytecodeParitySQLInsertingNull(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "maybe.db")
 
 	runBytecodeParityCases(t, []bytecodeParityCase{
@@ -106,7 +106,7 @@ func TestVMNextBytecodeParitySQLInsertingNull(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParitySQLMissingParameters(t *testing.T) {
+func TestVMBytecodeParitySQLMissingParameters(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "missing.db")
 
 	runBytecodeParityCases(t, []bytecodeParityCase{
@@ -129,7 +129,7 @@ func TestVMNextBytecodeParitySQLMissingParameters(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParitySQLTransactions(t *testing.T) {
+func TestVMBytecodeParitySQLTransactions(t *testing.T) {
 	rollbackDB := filepath.Join(t.TempDir(), "rollback.db")
 	commitDB := filepath.Join(t.TempDir(), "commit.db")
 

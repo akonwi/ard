@@ -1,8 +1,8 @@
-package vm_next
+package vm
 
 import "testing"
 
-func TestVMNextStdlibCryptoHashes(t *testing.T) {
+func TestVMStdlibCryptoHashes(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "md5 hashes hello",
@@ -40,7 +40,7 @@ func TestVMNextStdlibCryptoHashes(t *testing.T) {
 	})
 }
 
-func TestVMNextStdlibCryptoPasswordHashing(t *testing.T) {
+func TestVMStdlibCryptoPasswordHashing(t *testing.T) {
 	got := runSourceGoValue(t, `
 		use ard/crypto
 
@@ -60,7 +60,7 @@ func TestVMNextStdlibCryptoPasswordHashing(t *testing.T) {
 	}
 }
 
-func TestVMNextStdlibCryptoScrypt(t *testing.T) {
+func TestVMStdlibCryptoScrypt(t *testing.T) {
 	got := runSourceGoValue(t, `
 		use ard/crypto
 

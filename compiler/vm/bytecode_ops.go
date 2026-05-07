@@ -1,11 +1,11 @@
-package vm_next
+package vm
 
 import (
 	"fmt"
 	"strings"
 
 	"github.com/akonwi/ard/air"
-	vmcode "github.com/akonwi/ard/vm_next/bytecode"
+	vmcode "github.com/akonwi/ard/vm/bytecode"
 )
 
 func (vm *VM) execBytecodeStrOp(inst vmcode.Instruction, stack *[]Value) (Value, error) {

@@ -138,7 +138,6 @@ run_runtime_benchmark() {
   local rel_path="$2"
   local tmp_dir="$3"
   local vm_bin="$tmp_dir/${name}-vm"
-  local vm_next_bin="$tmp_dir/${name}-vm-next"
   local go_bin="$tmp_dir/${name}-go"
   local js_out="$tmp_dir/${name}.mjs"
   local js_runner="$tmp_dir/${name}-runner.mjs"
@@ -150,7 +149,6 @@ run_runtime_benchmark() {
 
   echo "==> building runtime binaries for $name"
   (cd "$ROOT_DIR" && "$ARD_BIN" build "$rel_path" --out "$vm_bin")
-  (cd "$ROOT_DIR" && "$ARD_BIN" build "$rel_path" --target vm_next --out "$vm_next_bin")
   (cd "$ROOT_DIR" && "$ARD_BIN" build "$rel_path" --target go --out "$go_bin")
   cleanup_generated_program_dir "$rel_path"
   (cd "$ROOT_DIR" && go build -o "$native_go_bin" "$native_go_src")
@@ -163,7 +161,6 @@ run_runtime_benchmark() {
 
   local commands=(
     --command-name "vm:$name" "$vm_bin"
-    --command-name "vm_next:$name" "$vm_next_bin"
     --command-name "go:$name" "$go_bin"
     --command-name "native-go:$name" "$native_go_bin"
   )
@@ -182,8 +179,6 @@ EOF
   echo "==> verifying outputs for $name"
   local expected actual
   expected="$($vm_bin)"
-  actual="$($vm_next_bin)"
-  assert_same_output "$name" "vm" "$expected" "vm_next" "$actual"
   actual="$($go_bin)"
   assert_same_output "$name" "vm" "$expected" "go" "$actual"
   actual="$($native_go_bin)"
@@ -220,8 +215,6 @@ run_cli_benchmark() {
   echo "==> verifying outputs for $name"
   local expected actual
   expected="$(cd "$ROOT_DIR" && "$ARD_BIN" run "$rel_path")"
-  actual="$(cd "$ROOT_DIR" && "$ARD_BIN" run --target vm_next "$rel_path")"
-  assert_same_output "$name" "vm" "$expected" "vm_next" "$actual"
   actual="$(cd "$ROOT_DIR" && "$ARD_BIN" run --target go "$rel_path")"
   assert_same_output "$name" "vm" "$expected" "go" "$actual"
   cleanup_generated_program_dir "$rel_path"
@@ -235,7 +228,6 @@ run_cli_benchmark() {
 
   local commands=(
     --command-name "vm:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run '$rel_path'"
-    --command-name "vm_next:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run --target vm_next '$rel_path'"
     --command-name "go:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run --target go '$rel_path'"
     --command-name "native-go:$name" "cd '$ROOT_DIR' && go run '$native_go_src'"
   )

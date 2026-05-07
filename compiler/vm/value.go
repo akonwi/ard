@@ -1,4 +1,4 @@
-package vm_next
+package vm
 
 import (
 	"fmt"

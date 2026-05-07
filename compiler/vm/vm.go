@@ -1,4 +1,4 @@
-package vm_next
+package vm
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/akonwi/ard/air"
-	vmcode "github.com/akonwi/ard/vm_next/bytecode"
+	vmcode "github.com/akonwi/ard/vm/bytecode"
 )
 
 type VM struct {

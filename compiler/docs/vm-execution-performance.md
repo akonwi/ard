@@ -1,15 +1,14 @@
-# vm_next Execution Performance Completion Record
+# vm Execution Performance Completion Record
 
 Status: complete
 
-This document records the completed vm_next execution-performance work that was
-previously tracked in `backlog/vm-next-execution-performance.md`. That backlog is
-now closed; future vm_next performance or userland-FFI work should be tracked as
-new, focused milestones.
+This document records the completed vm execution-performance work. That earlier
+backlog is now closed; future vm performance or userland-FFI work should be
+tracked as new, focused milestones.
 
 ## Goal
 
-Improve real `compiler/vm_next` runtime performance without changing Ard
+Improve real `compiler/vm` runtime performance without changing Ard
 semantics, benchmark inputs, benchmark expected outputs, deterministic map
 iteration, or observable collection mutation behavior.
 
@@ -24,7 +23,7 @@ Standard correctness checks were:
 ```bash
 cd compiler && go generate ./std_lib/ffi
 cd compiler && go test ./...
-cd compiler && go test -tags vmnext_profile_detail ./vm_next
+cd compiler && go test -tags vmnext_profile_detail ./vm
 ```
 
 ## Completed milestones
@@ -32,9 +31,9 @@ cd compiler && go test -tags vmnext_profile_detail ./vm_next
 All execution-performance milestones are complete.
 
 1. **Bytecode execution foundation**
-   - vm_next runs through lowered bytecode with verifier coverage and parity
+   - vm runs through lowered bytecode with verifier coverage and parity
      tests.
-   - Bytecode execution became the default vm_next path.
+   - Bytecode execution became the default vm path.
 2. **Interpreter allocation overhead**
    - Removed avoidable temporary argument slices and reduced frame/local/stack
      allocation pressure.
@@ -52,7 +51,7 @@ All execution-performance milestones are complete.
 5. **Collection and iteration fast paths**
    - Added local collection/loop opcodes and map iteration improvements while
      preserving deterministic iteration order and map/list semantics.
-   - vm_next beat the current bytecode VM on aggregate in the best retained
+   - vm beat the current bytecode VM on aggregate in the best retained
      Milestone 5 run.
 6. **Closure, trait, and async call paths**
    - Added closure profiling and retained targeted zero-capture/closure-call and
@@ -65,15 +64,15 @@ All execution-performance milestones are complete.
    - Stored Dynamic payloads inline in `Value.Ref`.
    - Removed VM-local decode semantic shortcuts during FFI cleanup.
 8. **Scalable FFI performance architecture**
-   - Generated vm_next stdlib FFI adapters from declared extern metadata.
-   - Moved vm_next FFI bridge generation to `compiler/vm_next/ffi/generate.go`;
+   - Generated vm stdlib FFI adapters from declared extern metadata.
+   - Moved vm FFI bridge generation to `compiler/vm/ffi/generate.go`;
      `compiler/std_lib/ffi` remains the stdlib Ard project's host-code package.
    - Made generation part of local and CI validation.
    - Removed arbitrary reflective `reflect.Call` host extern dispatch from
-     vm_next.
+     vm.
 9. **Profiling and benchmark tracking**
    - Completed throughout the work rather than as a final separate pass.
-   - `ARD_VM_NEXT_PROFILE=1` reports opcode counts, calls, extern binding time,
+   - `ARD_VM_PROFILE=1` reports opcode counts, calls, extern binding time,
      frame/local/stack allocation counters, value allocation counters, and
      optional detailed profile sections.
 
@@ -81,7 +80,7 @@ All execution-performance milestones are complete.
 
 ### Keep VM FFI generic
 
-Generic VM FFI machinery belongs in `compiler/vm_next/ffi.go`. Stdlib-specific
+Generic VM FFI machinery belongs in `compiler/vm/ffi.go`. Stdlib-specific
 or generated adapter details must live outside generic VM dispatch code.
 
 The VM should not reimplement stdlib behavior for names such as `DecodeInt`,
@@ -89,15 +88,15 @@ The VM should not reimplement stdlib behavior for names such as `DecodeInt`,
 binding-aware because they are generated from extern metadata, but they must call
 the registered host function rather than duplicate its semantics.
 
-### Generated adapters are the vm_next host-extern path
+### Generated adapters are the vm host-extern path
 
-The production vm_next host-extern path is generated adapter code:
+The production vm host-extern path is generated adapter code:
 
 ```text
 Ard extern declarations
   -> generated Go host contract
   -> ordinary Go host implementation
-  -> generated vm_next adapter glue
+  -> generated vm adapter glue
   -> OpCallExtern calls the generated adapter
 ```
 
@@ -113,23 +112,23 @@ Generated adapters:
 The stdlib generation hook is:
 
 ```go
-//go:generate go run ../../vm_next/ffi/generate.go
+//go:generate go run ../../vm/ffi/generate.go
 ```
 
 from `compiler/std_lib/ffi/doc.go`. It emits both host declarations and the
-`vm_next` adapter lookup into the stdlib host package:
+`vm` adapter lookup into the stdlib host package:
 
 ```text
 compiler/std_lib/ffi/ard.gen.go
-compiler/std_lib/ffi/vm_next_adapters.gen.go
+compiler/std_lib/ffi/vm_adapters.gen.go
 ```
 
-`vm_next` owns only the generic adapter registry/API and bridge implementation
+`vm` owns only the generic adapter registry/API and bridge implementation
 that lets generated host adapter packages convert to and from VM values.
 
-### FFI adapter generation is vm_next-specific
+### FFI adapter generation is vm-specific
 
-The adapter registry/API and bridge generator live under `compiler/vm_next/ffi`.
+The adapter registry/API and bridge generator live under `compiler/vm/ffi`.
 They are not colocated with stdlib host code because the generated adapters are
 runtime plumbing, while `compiler/std_lib/ffi` is the stdlib Ard project's host
 implementation package.
@@ -142,7 +141,7 @@ runtime paths.
 
 ### Leave the current bytecode VM alone
 
-The generated vm_next adapter architecture was scoped to `vm_next`. The current
+The generated vm adapter architecture was scoped to `vm`. The current
 bytecode VM FFI registry and wrapper generator were intentionally left alone.
 
 ### Testing and CI require generation
@@ -156,10 +155,10 @@ Local full validation should use:
 cd compiler && go generate ./std_lib/ffi && go test ./...
 ```
 
-For vm_next detailed profile coverage, also run:
+For vm detailed profile coverage, also run:
 
 ```bash
-cd compiler && go test -tags vmnext_profile_detail ./vm_next
+cd compiler && go test -tags vmnext_profile_detail ./vm
 ```
 
 Unit tests that existed only to validate arbitrary ad-hoc reflective FFI were
@@ -170,17 +169,17 @@ removed. Tests may still override stdlib bindings such as `Print` or
 
 Representative retained checkpoints:
 
-- **Milestone 5 best aggregate:** vm_next `599.5 ms` vs current bytecode VM
+- **Milestone 5 best aggregate:** vm `599.5 ms` vs current bytecode VM
   `623.6 ms` in the same run (`0.961x`, `24.1 ms` faster aggregate).
 - **Milestone 7 decode checkpoint before later FFI architecture cleanup:**
-  `decode_pipeline` vm_next `253.1 ms` vs current VM `248.8 ms`; aggregate
-  vm_next `546.0 ms` vs current VM `616.2 ms`.
+  `decode_pipeline` vm `253.1 ms` vs current VM `248.8 ms`; aggregate
+  vm `546.0 ms` vs current VM `616.2 ms`.
 - **Generated adapter checkpoint:** focused run after generated adapters:
-  `decode_pipeline` vm_next `306.3 ms` vs current VM `259.8 ms`; `sql_batch`
-  vm_next `51.9 ms` vs current VM `50.2 ms`.
-- **No reflective fallback checkpoint:** focused run after removing vm_next
-  reflective host extern dispatch: `decode_pipeline` vm_next `298.8 ms` vs
-  current VM `258.5 ms`; `sql_batch` vm_next `51.4 ms` vs current VM `51.3 ms`.
+  `decode_pipeline` vm `306.3 ms` vs current VM `259.8 ms`; `sql_batch`
+  vm `51.9 ms` vs current VM `50.2 ms`.
+- **No reflective fallback checkpoint:** focused run after removing vm
+  reflective host extern dispatch: `decode_pipeline` vm `298.8 ms` vs
+  current VM `258.5 ms`; `sql_batch` vm `51.4 ms` vs current VM `51.3 ms`.
 
 The decode benchmark remains the clearest remaining gap, but the original
 execution-performance backlog is complete: the remaining work is future targeted
@@ -190,7 +189,7 @@ performance or userland FFI tooling, not an open milestone in this closed plan.
 
 Do not retry these without materially new evidence or a different design:
 
-- Hand-maintained direct adapter matrices in `vm_next`.
+- Hand-maintained direct adapter matrices in `vm`.
 - Binding-name semantic shortcuts in generic VM FFI code.
 - VM intrinsics for decode primitives as a replacement for externs.
 - A special Value-like ABI only for hot decode externs.
@@ -206,7 +205,7 @@ Do not retry these without materially new evidence or a different design:
 Future work should be tracked separately. Good follow-ups include:
 
 - Wire the general extern bridge generator into userland Ard project tooling so
-  custom host extern sets can generate the same host contract and vm_next adapter
+  custom host extern sets can generate the same host contract and vm adapter
   glue as the stdlib.
 - Continue decode-focused profiling if closing the remaining decode gap becomes
   important.

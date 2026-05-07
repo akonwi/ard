@@ -1,8 +1,8 @@
-package vm_next
+package vm
 
 import "testing"
 
-func TestVMNextBytecodeParityEncodeJSONPrimitives(t *testing.T) {
+func TestVMBytecodeParityEncodeJSONPrimitives(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "encoding Str",

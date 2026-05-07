@@ -1,4 +1,4 @@
-package vm_next
+package vm
 
 import (
 	"bytes"
@@ -15,7 +15,7 @@ import (
 	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
 )
 
-func TestVMNextBytecodeParityDurationFunctions(t *testing.T) {
+func TestVMBytecodeParityDurationFunctions(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "from_seconds",
@@ -44,7 +44,7 @@ func TestVMNextBytecodeParityDurationFunctions(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityDynamicDecode(t *testing.T) {
+func TestVMBytecodeParityDynamicDecode(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "Dynamic::list can decode back to a list",
@@ -76,7 +76,7 @@ func TestVMNextBytecodeParityDynamicDecode(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityDecodePrimitives(t *testing.T) {
+func TestVMBytecodeParityDecodePrimitives(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "decode string from external data",
@@ -117,7 +117,7 @@ func TestVMNextBytecodeParityDecodePrimitives(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityDecodeErrors(t *testing.T) {
+func TestVMBytecodeParityDecodeErrors(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "string decoder fails on int - returns error list",
@@ -177,7 +177,7 @@ func TestVMNextBytecodeParityDecodeErrors(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityFromJSONInputTypes(t *testing.T) {
+func TestVMBytecodeParityFromJSONInputTypes(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "from_json accepts Str input",
@@ -213,7 +213,7 @@ func TestVMNextBytecodeParityFromJSONInputTypes(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityDecodeNullableListMapAndField(t *testing.T) {
+func TestVMBytecodeParityDecodeNullableListMapAndField(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "nullable string decoder with valid string returns some",
@@ -271,7 +271,7 @@ func TestVMNextBytecodeParityDecodeNullableListMapAndField(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityDecodePathOneOfAndFlatten(t *testing.T) {
+func TestVMBytecodeParityDecodePathOneOfAndFlatten(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "path with only string segments",
@@ -344,15 +344,15 @@ func TestVMNextBytecodeParityDecodePathOneOfAndFlatten(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityEnvGet(t *testing.T) {
-	t.Setenv("ARD_VM_NEXT_ENV_TEST", "present")
+func TestVMBytecodeParityEnvGet(t *testing.T) {
+	t.Setenv("ARD_VM_ENV_TEST", "present")
 
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "env::get returns Some string for set variables",
 			input: `
 				use ard/env
-				env::get("ARD_VM_NEXT_ENV_TEST").or("")
+				env::get("ARD_VM_ENV_TEST").or("")
 			`,
 			want: "present",
 		},
@@ -360,15 +360,15 @@ func TestVMNextBytecodeParityEnvGet(t *testing.T) {
 			name: "env::get returns None for non-existent variable",
 			input: `
 				use ard/env
-				env::get("ARD_VM_NEXT_MISSING_ENV_TEST").is_none()
+				env::get("ARD_VM_MISSING_ENV_TEST").is_none()
 			`,
 			want: true,
 		},
 	})
 }
 
-func TestVMNextBytecodeParityPrinting(t *testing.T) {
-	got := captureVMNextStdout(t, `
+func TestVMBytecodeParityPrinting(t *testing.T) {
+	got := captureVMStdout(t, `
 		use ard/io
 		io::print("Hello, World!")
 	`)
@@ -378,8 +378,8 @@ func TestVMNextBytecodeParityPrinting(t *testing.T) {
 	}
 }
 
-func TestVMNextBytecodeParityEscapeSequences(t *testing.T) {
-	got := captureVMNextStdout(t, `
+func TestVMBytecodeParityEscapeSequences(t *testing.T) {
+	got := captureVMStdout(t, `
 		use ard/io
 		io::print("Line 1\nLine 2")
 		io::print("Tab\tTest")
@@ -399,7 +399,7 @@ func TestVMNextBytecodeParityEscapeSequences(t *testing.T) {
 	}
 }
 
-func TestVMNextBytecodeParityFS(t *testing.T) {
+func TestVMBytecodeParityFS(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "fake.file")
 	dirPath := filepath.Join(tmpDir, "a", "b", "c")
@@ -499,7 +499,7 @@ func TestVMNextBytecodeParityFS(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityFSCopyRenameCwdAndAbs(t *testing.T) {
+func TestVMBytecodeParityFSCopyRenameCwdAndAbs(t *testing.T) {
 	tmpDir := t.TempDir()
 	srcPath := filepath.Join(tmpDir, "source.txt")
 	copyPath := filepath.Join(tmpDir, "copy.txt")
@@ -589,7 +589,7 @@ func TestVMNextBytecodeParityFSCopyRenameCwdAndAbs(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityFSDeleteDirAndListDir(t *testing.T) {
+func TestVMBytecodeParityFSDeleteDirAndListDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	dirPath := filepath.Join(tmpDir, "removeme", "nested")
 	filePath := filepath.Join(dirPath, "file.txt")
@@ -662,7 +662,7 @@ func TestVMNextBytecodeParityFSDeleteDirAndListDir(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityCryptoUUID(t *testing.T) {
+func TestVMBytecodeParityCryptoUUID(t *testing.T) {
 	out := runSourceGoValue(t, `
 		use ard/crypto
 		crypto::uuid()
@@ -679,7 +679,7 @@ func TestVMNextBytecodeParityCryptoUUID(t *testing.T) {
 	}
 }
 
-func TestVMNextBytecodeParityFFIPanicRecovery(t *testing.T) {
+func TestVMBytecodeParityFFIPanicRecovery(t *testing.T) {
 	got := runSourceWithExterns(t, `
 		use ard/base64
 
@@ -702,7 +702,7 @@ func TestVMNextBytecodeParityFFIPanicRecovery(t *testing.T) {
 	}
 }
 
-func TestVMNextBytecodeParityHttpMethod(t *testing.T) {
+func TestVMBytecodeParityHttpMethod(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "Method implements ToString",
@@ -716,7 +716,7 @@ func TestVMNextBytecodeParityHttpMethod(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityHttpServerCallbacks(t *testing.T) {
+func TestVMBytecodeParityHttpServerCallbacks(t *testing.T) {
 	got := runSourceWithExterns(t, `
 		use ard/decode
 		use ard/http
@@ -787,7 +787,7 @@ func TestVMNextBytecodeParityHttpServerCallbacks(t *testing.T) {
 	}
 }
 
-func TestVMNextBytecodeParityHttpSendUsesRequestTimeout(t *testing.T) {
+func TestVMBytecodeParityHttpSendUsesRequestTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(1100 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
@@ -812,7 +812,7 @@ func TestVMNextBytecodeParityHttpSendUsesRequestTimeout(t *testing.T) {
 	}
 }
 
-func TestVMNextBytecodeParityHttpSendCallSiteTimeoutOverridesRequestTimeout(t *testing.T) {
+func TestVMBytecodeParityHttpSendCallSiteTimeoutOverridesRequestTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(1100 * time.Millisecond)
 		w.WriteHeader(http.StatusCreated)
@@ -839,7 +839,7 @@ func TestVMNextBytecodeParityHttpSendCallSiteTimeoutOverridesRequestTimeout(t *t
 	}
 }
 
-func TestVMNextBytecodeParityAsyncTiming(t *testing.T) {
+func TestVMBytecodeParityAsyncTiming(t *testing.T) {
 	t.Run("async::sleep waits at least requested duration", func(t *testing.T) {
 		start := time.Now()
 		runSource(t, `
@@ -888,7 +888,7 @@ func TestVMNextBytecodeParityAsyncTiming(t *testing.T) {
 	})
 }
 
-func captureVMNextStdout(t *testing.T, input string) string {
+func captureVMStdout(t *testing.T, input string) string {
 	t.Helper()
 
 	old := os.Stdout

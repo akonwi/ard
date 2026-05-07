@@ -1,4 +1,4 @@
-package vm_next
+package vm
 
 import (
 	"reflect"
@@ -30,7 +30,7 @@ func runSourceGoValue(t *testing.T, input string) any {
 	return runSource(t, input).GoValue()
 }
 
-func TestVMNextBytecodeParityCoreExpressions(t *testing.T) {
+func TestVMBytecodeParityCoreExpressions(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "reassigning variables",
@@ -73,7 +73,7 @@ func TestVMNextBytecodeParityCoreExpressions(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityMultilineDotChaining(t *testing.T) {
+func TestVMBytecodeParityMultilineDotChaining(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "property access on next line",
@@ -117,14 +117,14 @@ func TestVMNextBytecodeParityMultilineDotChaining(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityNotGrouping(t *testing.T) {
+func TestVMBytecodeParityNotGrouping(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{name: "grouped not binds before and", input: `(not false) and false`, want: false},
 		{name: "ungrouped not keeps historical precedence", input: `not false and false`, want: true},
 	})
 }
 
-func TestVMNextBytecodeParityFunctions(t *testing.T) {
+func TestVMBytecodeParityFunctions(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "noop function",
@@ -272,7 +272,7 @@ func TestVMNextBytecodeParityFunctions(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityNullableArguments(t *testing.T) {
+func TestVMBytecodeParityNullableArguments(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "omitting nullable parameters",
@@ -409,7 +409,7 @@ func TestVMNextBytecodeParityNullableArguments(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityInferringAnonymousFunctionTypes(t *testing.T) {
+func TestVMBytecodeParityInferringAnonymousFunctionTypes(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "callback with inferred Str parameter",
@@ -436,7 +436,7 @@ func TestVMNextBytecodeParityInferringAnonymousFunctionTypes(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityTry(t *testing.T) {
+func TestVMBytecodeParityTry(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "early return",
@@ -746,7 +746,7 @@ func TestVMNextBytecodeParityTry(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityMaybes(t *testing.T) {
+func TestVMBytecodeParityMaybes(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "equality comparison returns false when each are different",
@@ -866,7 +866,7 @@ func TestVMNextBytecodeParityMaybes(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityResults(t *testing.T) {
+func TestVMBytecodeParityResults(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{name: "ok", input: `Result::ok(200)`, want: 200},
 		{name: "err", input: `Result::err(404)`, want: 404},
@@ -993,7 +993,7 @@ func TestVMNextBytecodeParityResults(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityLists(t *testing.T) {
+func TestVMBytecodeParityLists(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{name: "list literal", input: `[1, 2, 3]`, want: []any{1, 2, 3}},
 		{name: "List.size", input: `[1,2,3].size()`, want: 3},
@@ -1054,7 +1054,7 @@ func TestVMNextBytecodeParityLists(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityMaps(t *testing.T) {
+func TestVMBytecodeParityMaps(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{name: "map literal", input: `["a": 1, "b": 2]`, want: map[any]any{"a": 1, "b": 2}},
 		{
@@ -1093,7 +1093,7 @@ func TestVMNextBytecodeParityMaps(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityLoops(t *testing.T) {
+func TestVMBytecodeParityLoops(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "basic for loop",
@@ -1200,7 +1200,7 @@ func TestVMNextBytecodeParityLoops(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityMatching(t *testing.T) {
+func TestVMBytecodeParityMatching(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "matching on booleans",
@@ -1394,7 +1394,7 @@ func TestVMNextBytecodeParityMatching(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityStructs(t *testing.T) {
+func TestVMBytecodeParityStructs(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "Struct usage",
@@ -1542,7 +1542,7 @@ func TestVMNextBytecodeParityStructs(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityEnumsUnions(t *testing.T) {
+func TestVMBytecodeParityEnumsUnions(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "enum to int comparison",
@@ -1593,7 +1593,7 @@ func TestVMNextBytecodeParityEnumsUnions(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityGenericEquality(t *testing.T) {
+func TestVMBytecodeParityGenericEquality(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "direct generic return compared with ==",
@@ -1628,7 +1628,7 @@ func TestVMNextBytecodeParityGenericEquality(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityTypeAPIs(t *testing.T) {
+func TestVMBytecodeParityTypeAPIs(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{name: "Int.to_str", input: `100.to_str()`, want: "100"},
 		{name: "Bool.to_str", input: `true.to_str()`, want: "true"},
@@ -1637,7 +1637,7 @@ func TestVMNextBytecodeParityTypeAPIs(t *testing.T) {
 	})
 }
 
-func TestVMNextBytecodeParityTryOnMaybe(t *testing.T) {
+func TestVMBytecodeParityTryOnMaybe(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{
 			name: "try on Maybe::some returns unwrapped value",

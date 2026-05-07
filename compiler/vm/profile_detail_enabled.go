@@ -1,6 +1,6 @@
 //go:build vmnext_profile_detail
 
-package vm_next
+package vm
 
 func (vm *VM) recordRefAccess(kind refAccessKind) {
 	if vm == nil || vm.profile == nil {

@@ -3,11 +3,11 @@ package backend
 import "fmt"
 
 const (
-	TargetVMNext    = "vm_next"
+	TargetVM        = "vm"
 	TargetGo        = "go"
 	TargetJSBrowser = "js-browser"
 	TargetJSServer  = "js-server"
-	DefaultTarget   = TargetVMNext
+	DefaultTarget   = TargetVM
 )
 
 func ParseTarget(raw string) (string, error) {

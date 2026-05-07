@@ -1,4 +1,4 @@
-package vm_next
+package vm
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
-func TestVMNextBytecodeParityConcurrentMethodAccess(t *testing.T) {
+func TestVMBytecodeParityConcurrentMethodAccess(t *testing.T) {
 	const workers = 50
 	var wg sync.WaitGroup
 	errCh := make(chan error, workers)
@@ -19,7 +19,7 @@ func TestVMNextBytecodeParityConcurrentMethodAccess(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errCh <- runVMNextErr(`
+			errCh <- runVMErr(`
 				let nums = [3,1,2]
 				List::map(nums, fn(n: Int) Int { n + 1 }).size()
 			`)
@@ -35,7 +35,7 @@ func TestVMNextBytecodeParityConcurrentMethodAccess(t *testing.T) {
 	}
 }
 
-func TestVMNextBytecodeParityConcurrentMethodAccessWithMultipleMethods(t *testing.T) {
+func TestVMBytecodeParityConcurrentMethodAccessWithMultipleMethods(t *testing.T) {
 	const workers = 60
 	var wg sync.WaitGroup
 	errCh := make(chan error, workers)
@@ -45,14 +45,14 @@ func TestVMNextBytecodeParityConcurrentMethodAccessWithMultipleMethods(t *testin
 		go func(id int) {
 			defer wg.Done()
 			if id%2 == 0 {
-				errCh <- runVMNextErr(`
+				errCh <- runVMErr(`
 					mut list = [1,2,3]
 					list.push(4)
 					list.size()
 				`)
 				return
 			}
-			errCh <- runVMNextErr(`
+			errCh <- runVMErr(`
 				let s = "hello world"
 				s.replace_all("world", "ard")
 			`)
@@ -68,7 +68,7 @@ func TestVMNextBytecodeParityConcurrentMethodAccessWithMultipleMethods(t *testin
 	}
 }
 
-func TestVMNextBytecodeParityConcurrentModuleAccess(t *testing.T) {
+func TestVMBytecodeParityConcurrentModuleAccess(t *testing.T) {
 	const workers = 50
 	var wg sync.WaitGroup
 	errCh := make(chan error, workers)
@@ -77,7 +77,7 @@ func TestVMNextBytecodeParityConcurrentModuleAccess(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errCh <- runVMNextErr(`
+			errCh <- runVMErr(`
 				use ard/decode
 				let d = decode::from_json("[1,2,3]").expect("")
 				decode::run(d, decode::list(decode::int)).expect("").size()
@@ -94,7 +94,7 @@ func TestVMNextBytecodeParityConcurrentModuleAccess(t *testing.T) {
 	}
 }
 
-func runVMNextErr(input string) error {
+func runVMErr(input string) error {
 	result := parse.Parse([]byte(input), "test.ard")
 	if len(result.Errors) > 0 {
 		return fmt.Errorf("parse errors: %v", result.Errors[0].Message)

@@ -1,4 +1,4 @@
-package vm_next
+package vm
 
 type valueAllocKind uint8
 

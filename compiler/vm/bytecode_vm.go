@@ -1,11 +1,11 @@
-package vm_next
+package vm
 
 import (
 	"fmt"
 	"strconv"
 
 	"github.com/akonwi/ard/air"
-	vmcode "github.com/akonwi/ard/vm_next/bytecode"
+	vmcode "github.com/akonwi/ard/vm/bytecode"
 )
 
 type bytecodeFrame struct {
@@ -58,7 +58,7 @@ func (vm *VM) putValueSlice(slice []Value) {
 
 func (vm *VM) runBytecode(id air.FunctionID, args []Value) (Value, error) {
 	if vm.bytecode == nil {
-		return Value{}, fmt.Errorf("vm_next bytecode program is not initialized")
+		return Value{}, fmt.Errorf("vm bytecode program is not initialized")
 	}
 	frame, err := vm.newDirectBytecodeFrame(id, args, 0)
 	if err != nil {

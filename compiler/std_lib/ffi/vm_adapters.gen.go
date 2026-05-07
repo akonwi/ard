@@ -5,12 +5,12 @@ package ffi
 import (
 	"fmt"
 	"github.com/akonwi/ard/air"
-	vmnextffi "github.com/akonwi/ard/vm_next/ffi"
+	vmffi "github.com/akonwi/ard/vm/ffi"
 	"reflect"
 )
 
 func init() {
-	vmnextffi.RegisterAdapterLookup(VMNextAdapter)
+	vmffi.RegisterAdapterLookup(VMAdapter)
 }
 func generatedHostCast[T any](value any) (T, bool) {
 	var zero T
@@ -20,14 +20,14 @@ func generatedHostCast[T any](value any) (T, bool) {
 	out, ok := value.(T)
 	return out, ok
 }
-func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
+func VMAdapter(binding string, fn any) (vmffi.ExternAdapter, bool) {
 	switch binding {
 	case "AsyncStart":
 		typed, ok := fn.(func(func() (struct{}, error)) Fiber[struct{}])
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[func() (struct{}, error)]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -44,7 +44,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -65,7 +65,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -86,7 +86,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -107,7 +107,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -128,7 +128,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgBool(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -141,7 +141,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -162,7 +162,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -175,7 +175,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -228,7 +228,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -277,7 +277,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -290,7 +290,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -303,7 +303,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			out0 := typed()
 			return bridge.HostReturnValue(extern.Signature.Return, out0)
 		}, true
@@ -312,7 +312,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -329,7 +329,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -342,7 +342,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -355,7 +355,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -368,7 +368,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -381,7 +381,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -394,7 +394,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -407,7 +407,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -420,7 +420,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -437,7 +437,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -450,7 +450,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -467,7 +467,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -484,7 +484,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -497,7 +497,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -510,7 +510,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			out0, out1 := typed()
 			return bridge.HostReturnValueError(extern.Signature.Return, out0, out1)
 		}, true
@@ -519,7 +519,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -532,7 +532,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -545,7 +545,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -558,7 +558,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -571,7 +571,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -584,7 +584,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -597,7 +597,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -610,7 +610,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -627,7 +627,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -644,7 +644,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgFloat64(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -657,7 +657,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgInt(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -670,7 +670,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -683,7 +683,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgFloat64(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -696,7 +696,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawRequest]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -717,7 +717,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawRequest]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -738,7 +738,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawRequest]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -755,7 +755,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			out0 := typed()
 			return bridge.HostReturnValue(extern.Signature.Return, out0)
 		}, true
@@ -764,7 +764,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -801,7 +801,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawResponse]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -818,7 +818,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawResponse]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -835,7 +835,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawResponse]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -852,7 +852,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[RawResponse]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -869,7 +869,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgInt(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -890,7 +890,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -903,7 +903,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -916,7 +916,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -929,7 +929,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgInt(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -942,7 +942,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -955,7 +955,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -968,7 +968,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -981,7 +981,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[[]any]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -998,7 +998,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[map[string]any]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -1015,7 +1015,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			out0 := typed()
 			return bridge.HostReturnValue(extern.Signature.Return, out0)
 		}, true
@@ -1024,7 +1024,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			out0 := typed()
 			return bridge.HostReturnValue(extern.Signature.Return, out0)
 		}, true
@@ -1033,7 +1033,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -1046,7 +1046,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			out0, out1 := typed()
 			return bridge.HostReturnValueError(extern.Signature.Return, out0, out1)
 		}, true
@@ -1055,7 +1055,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgInt(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -1068,7 +1068,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[Db]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -1085,7 +1085,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[Db]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -1102,7 +1102,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[Tx]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -1119,7 +1119,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -1132,7 +1132,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -1157,7 +1157,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -1170,7 +1170,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgAny(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -1195,7 +1195,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[Tx]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -1212,7 +1212,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0, err := bridge.HostArgString(args, 0)
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)
@@ -1225,7 +1225,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			out0 := typed()
 			return bridge.HostReturnValue(extern.Signature.Return, out0)
 		}, true
@@ -1234,7 +1234,7 @@ func VMNextAdapter(binding string, fn any) (vmnextffi.ExternAdapter, bool) {
 		if !ok {
 			return nil, false
 		}
-		return func(bridge vmnextffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
+		return func(bridge vmffi.Bridge, extern air.Extern, binding string, args any) (any, error) {
 			arg0Raw, err := bridge.HostArg(args, 0, reflect.TypeFor[WaitGroup]())
 			if err != nil {
 				return nil, fmt.Errorf("extern %s arg 0: %w", binding, err)

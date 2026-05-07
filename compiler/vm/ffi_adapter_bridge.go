@@ -1,4 +1,4 @@
-package vm_next
+package vm
 
 import (
 	"fmt"
@@ -81,7 +81,7 @@ func (bridge generatedHostBridge) HostArgAny(args any, index int) (any, error) {
 func generatedHostArgValue(args any, index int) (Value, error) {
 	values, ok := args.([]Value)
 	if !ok {
-		return Value{}, fmt.Errorf("generated host adapter args must be []vm_next.Value, got %T", args)
+		return Value{}, fmt.Errorf("generated host adapter args must be []vm.Value, got %T", args)
 	}
 	if index < 0 || index >= len(values) {
 		return Value{}, fmt.Errorf("generated host adapter arg index %d out of range", index)
