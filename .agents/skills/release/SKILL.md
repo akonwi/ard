@@ -9,6 +9,8 @@ description: Cut a new Ard version release end-to-end. Creates and pushes a new 
 
 Cut a new version of the Ard compiler and publish release notes. This skill handles the full flow: tag → CI → release notes. For notes-only updates to an existing release, use the `release-notes` skill instead.
 
+In this repo, the release process is driven by pushing a `v*` git tag. That tag triggers the `Release Binaries` GitHub Actions workflow, and the workflow creates the GitHub release plus uploaded binaries.
+
 ## Prerequisites
 
 - On `main`, working tree clean, up to date with `origin/main`
