@@ -13,22 +13,16 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/backend"
-	"github.com/akonwi/ard/bytecode"
-	bytecodevm "github.com/akonwi/ard/bytecode/vm"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
 	"github.com/akonwi/ard/javascript"
-	"github.com/akonwi/ard/runtime"
 	"github.com/akonwi/ard/version"
 	vm_next "github.com/akonwi/ard/vm_next"
 )
 
-const (
-	bytecodeFooterMarker = "ARDBYTECODEv1"
-	vmNextFooterMarker   = "ARDVMNEXTv001"
-)
+const vmNextFooterMarker = "ARDVMNEXTv001"
 
 func main() {
 	if maybeRunEmbedded() {
@@ -481,18 +475,23 @@ func runTests(inputPath, filter string, failFast bool) bool {
 			continue
 		}
 
-		program, err := bytecode.NewTestEmitter().EmitProgram(module)
+		program, err := air.Lower(module)
 		if err != nil {
 			fmt.Println(err)
 			return false
 		}
-		if err := bytecode.VerifyProgram(program); err != nil {
+		if err := air.Validate(program); err != nil {
+			fmt.Println(err)
+			return false
+		}
+		vm, err := vm_next.NewWithOptions(program, vm_next.Options{Args: os.Args})
+		if err != nil {
 			fmt.Println(err)
 			return false
 		}
 
 		for _, test := range tests {
-			outcome := runCompiledTest(program, test)
+			outcome := runCompiledTest(vm, test)
 			outcomes = append(outcomes, outcome)
 			reportTestOutcome(outcome)
 			if failFast && outcome.status != testPass {
@@ -611,35 +610,23 @@ func (t discoveredTest) displayName() string {
 	return fmt.Sprintf("%s::%s", t.displayPath, t.name)
 }
 
-func runCompiledTest(program bytecode.Program, test discoveredTest) testOutcome {
-	runtime.SetOSArgs(os.Args)
-	defer runtime.SetOSArgs(nil)
-
-	res, err := bytecodevm.New(program).Run(test.name)
-	if err != nil {
-		return testOutcome{test: test, status: testPanic, message: err.Error()}
+func runCompiledTest(vm *vm_next.VM, test discoveredTest) testOutcome {
+	result := vm.RunNamedTest(test.name)
+	outcome := testOutcome{test: test, message: result.Message}
+	switch result.Status {
+	case vm_next.TestPass:
+		outcome.status = testPass
+	case vm_next.TestFail:
+		outcome.status = testFail
+	case vm_next.TestPanic:
+		outcome.status = testPanic
+	default:
+		outcome.status = testPanic
+		if outcome.message == "" {
+			outcome.message = fmt.Sprintf("unknown test status: %s", result.Status)
+		}
 	}
-	if res == nil {
-		return testOutcome{test: test, status: testPanic, message: "test returned no result"}
-	}
-	if !res.IsResult() {
-		return testOutcome{test: test, status: testPanic, message: "test did not return a Result"}
-	}
-	if res.IsErr() {
-		return testOutcome{test: test, status: testFail, message: resultMessage(res)}
-	}
-	return testOutcome{test: test, status: testPass}
-}
-
-func resultMessage(res *runtime.Object) string {
-	if res == nil {
-		return ""
-	}
-	unwrapped := res.UnwrapResult()
-	if msg, ok := unwrapped.IsStr(); ok {
-		return msg
-	}
-	return fmt.Sprintf("%v", unwrapped.GoValue())
+	return outcome
 }
 
 func reportTestOutcome(outcome testOutcome) {
@@ -664,32 +651,6 @@ func reportTestSummary(outcomes []testOutcome) {
 		}
 	}
 	fmt.Printf("\n%d passed; %d failed; %d panicked\n", passed, failed, panicked)
-}
-
-func buildBytecodeBinary(inputPath string, outputPath string, target string) (string, error) {
-	module, err := loadModule(inputPath, target)
-	if err != nil {
-		return "", err
-	}
-	program, err := bytecode.NewEmitter().EmitProgram(module)
-	if err != nil {
-		return "", err
-	}
-	if err := bytecode.VerifyProgram(program); err != nil {
-		return "", err
-	}
-	data, err := bytecode.SerializeProgram(program)
-	if err != nil {
-		return "", err
-	}
-	selfPath, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	if err := writeEmbeddedBinary(selfPath, outputPath, bytecodeFooterMarker, data); err != nil {
-		return "", err
-	}
-	return outputPath, nil
 }
 
 func buildGoBinary(inputPath string, outputPath string, target string) (string, error) {
@@ -796,20 +757,6 @@ func maybeRunEmbedded() bool {
 		return false
 	}
 	switch marker {
-	case bytecodeFooterMarker:
-		program, err := bytecode.DeserializeProgram(data)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to deserialize bytecode:", err)
-			os.Exit(1)
-		}
-		if err := bytecode.VerifyProgram(program); err != nil {
-			fmt.Fprintln(os.Stderr, "Invalid bytecode:", err)
-			os.Exit(1)
-		}
-		if runErr := runBytecodeProgram(program, argsForEmbeddedProgram(os.Args)); runErr != nil {
-			fmt.Fprintln(os.Stderr, runErr)
-			os.Exit(1)
-		}
 	case vmNextFooterMarker:
 		profile := newPipelineProfile("embedded vm_next")
 		defer profile.Print()
@@ -836,32 +783,6 @@ func maybeRunEmbedded() bool {
 		return false
 	}
 	return true
-}
-
-func runBytecodeProgram(program bytecode.Program, args []string) error {
-	profiling := bytecodevm.ProfilingEnabled()
-	if profiling {
-		runtime.EnableObjectProfiling(true)
-		runtime.ResetObjectProfile()
-	} else {
-		runtime.EnableObjectProfiling(false)
-	}
-	defer runtime.EnableObjectProfiling(false)
-
-	runtime.SetOSArgs(args)
-	defer runtime.SetOSArgs(nil)
-
-	vm := bytecodevm.New(program)
-	_, runErr := vm.Run("main")
-	if profiling {
-		if report := vm.ProfileReport(); report != "" {
-			fmt.Fprintln(os.Stderr, report)
-		}
-		if report := runtime.ObjectProfileReport(); report != "" {
-			fmt.Fprintln(os.Stderr, report)
-		}
-	}
-	return runErr
 }
 
 func runVMNextProgram(program *air.Program, args []string) error {
@@ -946,7 +867,7 @@ func readEmbeddedPayloadFromPath(path string) (string, []byte, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	footerSize := int64(len(bytecodeFooterMarker) + 8)
+	footerSize := int64(len(vmNextFooterMarker) + 8)
 	if info.Size() < footerSize {
 		return "", nil, nil
 	}
@@ -958,11 +879,11 @@ func readEmbeddedPayloadFromPath(path string) (string, []byte, error) {
 	if _, err := io.ReadFull(file, footer); err != nil {
 		return "", nil, err
 	}
-	marker := string(footer[:len(bytecodeFooterMarker)])
-	if marker != bytecodeFooterMarker && marker != vmNextFooterMarker {
+	marker := string(footer[:len(vmNextFooterMarker)])
+	if marker != vmNextFooterMarker {
 		return "", nil, nil
 	}
-	length := binary.LittleEndian.Uint64(footer[len(bytecodeFooterMarker):])
+	length := binary.LittleEndian.Uint64(footer[len(vmNextFooterMarker):])
 	dataOffset := info.Size() - footerSize - int64(length)
 	if dataOffset < 0 {
 		return "", nil, fmt.Errorf("invalid embedded payload length")

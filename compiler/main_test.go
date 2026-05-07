@@ -823,10 +823,6 @@ func TestArgsForEmbeddedProgram(t *testing.T) {
 }
 
 func TestReadEmbeddedPayloadFromPath(t *testing.T) {
-	if len(vmNextFooterMarker) != len(bytecodeFooterMarker) {
-		t.Fatalf("vm_next footer marker length = %d, want %d", len(vmNextFooterMarker), len(bytecodeFooterMarker))
-	}
-
 	path := filepath.Join(t.TempDir(), "embedded")
 	file, err := os.Create(path)
 	if err != nil {

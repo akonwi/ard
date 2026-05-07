@@ -86,6 +86,15 @@ func (vm *VM) RunTests() []TestOutcome {
 	return outcomes
 }
 
+func (vm *VM) RunNamedTest(name string) TestOutcome {
+	for _, test := range vm.program.Tests {
+		if test.Name == name {
+			return vm.runTest(test)
+		}
+	}
+	return TestOutcome{Name: name, Status: TestPanic, Message: fmt.Sprintf("test not found: %s", name)}
+}
+
 func (vm *VM) runTest(test air.Test) TestOutcome {
 	outcome := TestOutcome{Name: test.Name, Status: TestPanic}
 	value, err := vm.runBytecode(test.Function, nil)
