@@ -11,7 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/backend"
+	"github.com/akonwi/ard/frontend"
 )
 
 func TestBuildWritesSimpleJavaScriptModule(t *testing.T) {
@@ -1837,5 +1839,85 @@ fn main() Int {
 
 	if err := Run(mainPath, backend.TargetJSServer, []string{"ard", "run", mainPath, "--target", "js-server"}); err != nil {
 		t.Fatalf("did not expect error: %v", err)
+	}
+}
+
+func TestGenerateSourcesFromAIRSimpleModule(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn add(a: Int, b: Int) Int {
+  a + b
+}
+
+let result = add(1, 2)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := string(files["main.mjs"])
+	if !strings.Contains(source, "function add(a, b) {") {
+		t.Fatalf("expected function definition in AIR JS output, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const result = add(1, 2);") {
+		t.Fatalf("expected script let in AIR JS output, got:\n%s", source)
+	}
+	if !strings.Contains(source, "export { add };") {
+		t.Fatalf("expected function export in AIR JS output, got:\n%s", source)
+	}
+}
+
+func TestBuildProgramFromAIRWritesModule(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn main() {
+  "ok"
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSBrowser)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	outputPath := filepath.Join(dir, "main.mjs")
+	builtPath, err := BuildProgram(program, outputPath, backend.TargetJSBrowser, loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build AIR JS program: %v", err)
+	}
+	if builtPath != outputPath {
+		t.Fatalf("expected built path %q, got %q", outputPath, builtPath)
+	}
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if !strings.Contains(string(out), "function main() {") {
+		t.Fatalf("expected main function in output, got:\n%s", string(out))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ard.prelude.mjs")); err != nil {
+		t.Fatalf("expected prelude companion: %v", err)
 	}
 }
