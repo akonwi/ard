@@ -103,6 +103,7 @@ type airJSLowerer struct {
 	target      string
 	rootFile    string
 	moduleFiles map[air.ModuleID]string
+	tempCounter int
 }
 
 func generateSourcesFromAIR(program *air.Program, options Options) (map[string][]byte, FFIArtifacts, error) {
@@ -545,6 +546,14 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		return l.lowerResultOp(fn, expr)
 	case air.ExprStrAt, air.ExprStrSize, air.ExprStrIsEmpty, air.ExprStrContains, air.ExprStrReplace, air.ExprStrReplaceAll, air.ExprStrSplit, air.ExprStrStartsWith, air.ExprStrTrim:
 		return l.lowerStrOp(fn, expr)
+	case air.ExprMatchEnum:
+		return l.lowerEnumMatch(fn, expr)
+	case air.ExprMatchInt:
+		return l.lowerIntMatch(fn, expr)
+	case air.ExprMatchMaybe:
+		return l.lowerMaybeMatch(fn, expr)
+	case air.ExprMatchResult:
+		return l.lowerResultMatch(fn, expr)
 	case air.ExprBlock:
 		body, err := l.lowerBlock(fn, expr.Body, true)
 		if err != nil {
@@ -630,6 +639,140 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 	default:
 		return "", fmt.Errorf("unsupported AIR JS expression kind %d", expr.Kind)
 	}
+}
+
+func (l *airJSLowerer) lowerBlockWithBindings(fn air.Function, block air.Block, bindings []string) (string, error) {
+	body, err := l.lowerBlock(fn, block, true)
+	if err != nil {
+		return "", err
+	}
+	if len(bindings) == 0 {
+		return body, nil
+	}
+	return strings.Join(append(bindings, body), "\n"), nil
+}
+
+func (l *airJSLowerer) lowerEnumMatch(fn air.Function, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("enum match missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return "", err
+	}
+	targetType, ok := l.typeInfo(expr.Target.Type)
+	if !ok {
+		return "", fmt.Errorf("unknown enum match type %d", expr.Target.Type)
+	}
+	matchVar := l.temp("match")
+	lines := []string{"const " + matchVar + " = " + target + ";"}
+	for _, matchCase := range expr.EnumCases {
+		body, err := l.lowerBlock(fn, matchCase.Body, true)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, "if (isEnumOf("+matchVar+", "+strconv.Quote(targetType.Name)+") && "+matchVar+".value === "+strconv.Itoa(matchCase.Discriminant)+") "+renderJSDoc(jsBareBlockDoc(body)))
+	}
+	if !airBlockIsZero(expr.CatchAll) {
+		body, err := l.lowerBlock(fn, expr.CatchAll, true)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, renderJSDoc(jsBareBlockDoc(body)))
+	} else {
+		lines = append(lines, `throw makeArdError("panic", "match", "enum", 0, "non-exhaustive enum match");`)
+	}
+	return renderJSDoc(jsIIFEDoc(strings.Join(lines, "\n"))), nil
+}
+
+func (l *airJSLowerer) lowerIntMatch(fn air.Function, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("int match missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return "", err
+	}
+	matchVar := l.temp("match")
+	lines := []string{"const " + matchVar + " = " + target + ";"}
+	for _, matchCase := range expr.IntCases {
+		body, err := l.lowerBlock(fn, matchCase.Body, true)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, "if ("+matchVar+" === "+strconv.Itoa(matchCase.Value)+") "+renderJSDoc(jsBareBlockDoc(body)))
+	}
+	for _, matchCase := range expr.RangeCases {
+		body, err := l.lowerBlock(fn, matchCase.Body, true)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, "if ("+matchVar+" >= "+strconv.Itoa(matchCase.Start)+" && "+matchVar+" <= "+strconv.Itoa(matchCase.End)+") "+renderJSDoc(jsBareBlockDoc(body)))
+	}
+	if !airBlockIsZero(expr.CatchAll) {
+		body, err := l.lowerBlock(fn, expr.CatchAll, true)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, renderJSDoc(jsBareBlockDoc(body)))
+	} else {
+		lines = append(lines, `throw makeArdError("panic", "match", "int", 0, "non-exhaustive int match");`)
+	}
+	return renderJSDoc(jsIIFEDoc(strings.Join(lines, "\n"))), nil
+}
+
+func (l *airJSLowerer) lowerMaybeMatch(fn air.Function, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("maybe match missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return "", err
+	}
+	matchVar := l.temp("match")
+	bindings := []string{}
+	if expr.SomeLocal >= 0 {
+		bindings = append(bindings, "const "+l.localName(fn, expr.SomeLocal)+" = "+matchVar+".value;")
+	}
+	someBody, err := l.lowerBlockWithBindings(fn, expr.Some, bindings)
+	if err != nil {
+		return "", err
+	}
+	noneBody, err := l.lowerBlock(fn, expr.None, true)
+	if err != nil {
+		return "", err
+	}
+	lines := []string{"const " + matchVar + " = " + target + ";", renderJSDoc(jsIfDoc(matchVar+".isSome()", someBody, jsBareBlockDoc(noneBody)))}
+	return renderJSDoc(jsIIFEDoc(strings.Join(lines, "\n"))), nil
+}
+
+func (l *airJSLowerer) lowerResultMatch(fn air.Function, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("result match missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return "", err
+	}
+	matchVar := l.temp("match")
+	okBindings := []string{}
+	if expr.OkLocal >= 0 {
+		okBindings = append(okBindings, "const "+l.localName(fn, expr.OkLocal)+" = "+matchVar+".ok;")
+	}
+	okBody, err := l.lowerBlockWithBindings(fn, expr.Ok, okBindings)
+	if err != nil {
+		return "", err
+	}
+	errBindings := []string{}
+	if expr.ErrLocal >= 0 {
+		errBindings = append(errBindings, "const "+l.localName(fn, expr.ErrLocal)+" = "+matchVar+".error;")
+	}
+	errBody, err := l.lowerBlockWithBindings(fn, expr.Err, errBindings)
+	if err != nil {
+		return "", err
+	}
+	lines := []string{"const " + matchVar + " = " + target + ";", renderJSDoc(jsIfDoc(matchVar+".isOk()", okBody, jsBareBlockDoc(errBody)))}
+	return renderJSDoc(jsIIFEDoc(strings.Join(lines, "\n"))), nil
 }
 
 func (l *airJSLowerer) lowerListOp(fn air.Function, expr air.Expr) (string, error) {
@@ -918,6 +1061,16 @@ func (l *airJSLowerer) moduleExports(module air.Module) []string {
 	}
 	sort.Strings(exports)
 	return exports
+}
+
+func (l *airJSLowerer) temp(prefix string) string {
+	name := "__" + prefix + strconv.Itoa(l.tempCounter)
+	l.tempCounter++
+	return name
+}
+
+func airBlockIsZero(block air.Block) bool {
+	return len(block.Stmts) == 0 && block.Result == nil
 }
 
 func (l *airJSLowerer) typeInfo(id air.TypeID) (air.TypeInfo, bool) {

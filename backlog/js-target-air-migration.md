@@ -385,11 +385,11 @@ Once parity is acceptable:
 - [x] Lower `if` expressions.
 - [x] Lower `while` statements.
 - [x] Lower break handling.
-- [ ] Lower enum match.
-- [ ] Lower int/range match.
+- [x] Lower enum match.
+- [x] Lower int/range match.
 - [ ] Lower union match.
-- [ ] Lower maybe match.
-- [ ] Lower result match.
+- [x] Lower maybe match.
+- [x] Lower result match.
 - [ ] Lower result `try`.
 - [ ] Lower maybe `try`.
 
@@ -442,6 +442,7 @@ Once parity is acceptable:
   - [x] Added initial AIR source assertions for list/map values and methods.
 - [ ] Add parity tests for maybe/result/try/match.
   - [x] Added initial AIR source assertions for Maybe/Result constructors and `or`.
+  - [x] Added initial AIR source assertions for enum/int/maybe/result matches.
 - [ ] Add parity tests for modules/imports.
   - [x] Added initial AIR source assertions for imported function calls.
 - [ ] Add parity tests for JS externs.
@@ -472,3 +473,4 @@ Once parity is acceptable:
 - Added minimal AIR source-generation/build tests while keeping the legacy checker backend intact.
 - Fixed AIR TypeID indexing in the JS lowerer and expanded AIR lowering for strings, collections, Maybe, and Result operations.
 - Added AIR imported-function module dependency detection, basic extern call references, and struct field assignment lowering.
+- Added AIR enum/int/maybe/result match expression lowering using JavaScript IIFEs.

@@ -2010,3 +2010,76 @@ let result = utils::add(1, 2)
 		t.Fatalf("expected imported module source, got:\n%s", string(files["demo/utils.mjs"]))
 	}
 }
+
+func TestGenerateSourcesFromAIRMatches(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/maybe
+
+enum Status { active, inactive }
+
+fn label(status: Status) Int {
+  match status {
+    Status::active => 1,
+    Status::inactive => 2,
+  }
+}
+
+fn bucket(num: Int) Str {
+  match num {
+    0 => "zero",
+    1..3 => "few",
+    _ => "many",
+  }
+}
+
+fn maybe_pick(value: Int?) Int {
+  match value {
+    num => num,
+    _ => 0,
+  }
+}
+
+fn result_pick(value: Int!Str) Str {
+  match value {
+    ok(num) => num.to_str(),
+    err(msg) => msg,
+  }
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := ""
+	for _, content := range files {
+		source += string(content)
+	}
+	for _, expected := range []string{
+		`if (isEnumOf(__match`,
+		`.value === 0)`,
+		`if (__match`,
+		`>= 1 && __match`,
+		`.isSome()`,
+		`.isOk()`,
+		`.error;`,
+	} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("expected %q in AIR JS output, got:\n%s", expected, source)
+		}
+	}
+}
