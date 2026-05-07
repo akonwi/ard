@@ -9,6 +9,23 @@ extern fn encode(value: $T) Str!Str = {
   js = "JsonEncode"
 }
 
+struct PersonJSONTest {
+  name: Str,
+  age: Int,
+  employed: Bool?,
+}
+
+struct WinnerJSONTest {
+  id: Int,
+  name: Str,
+  comment: Str,
+}
+
+struct PredictionJSONTest {
+  advice: Str?,
+  winner: WinnerJSONTest?,
+}
+
 test fn test_encode_int() Void!Str {
   let out = try encode(200)
   testing::assert(out == "200", "Expected integer JSON encoding")
@@ -46,13 +63,7 @@ test fn test_encode_list() Void!Str {
 }
 
 test fn test_encode_struct_with_nullable_field() Void!Str {
-  struct Person {
-    name: Str,
-    age: Int,
-    employed: Bool?,
-  }
-
-  let john = Person{
+  let john = PersonJSONTest{
     name: "John",
     age: 30,
     employed: maybe::none(),
@@ -85,21 +96,10 @@ test fn test_encode_map() Void!Str {
 }
 
 test fn test_encode_nullable_nested_struct_with_value() Void!Str {
-  struct Winner {
-    id: Int,
-    name: Str,
-    comment: Str,
-  }
-
-  struct Prediction {
-    advice: Str?,
-    winner: Winner?,
-  }
-
-  let prediction = Prediction{
+  let prediction = PredictionJSONTest{
     advice: maybe::some("Double chance"),
     winner: maybe::some(
-      Winner{
+      WinnerJSONTest{
         id: 1598,
         name: "Orlando City SC",
         comment: "Win or draw",
@@ -117,18 +117,7 @@ test fn test_encode_nullable_nested_struct_with_value() Void!Str {
 }
 
 test fn test_encode_nullable_nested_struct_with_null() Void!Str {
-  struct Winner {
-    id: Int,
-    name: Str,
-    comment: Str,
-  }
-
-  struct Prediction {
-    advice: Str?,
-    winner: Winner?,
-  }
-
-  let prediction = Prediction{advice: maybe::some("No prediction"), winner: maybe::none()}
+  let prediction = PredictionJSONTest{advice: maybe::some("No prediction"), winner: maybe::none()}
   let out = try encode(prediction)
   try testing::assert(
     out.contains("\"winner\":null"),
@@ -139,13 +128,7 @@ test fn test_encode_nullable_nested_struct_with_null() Void!Str {
 }
 
 test fn test_encode_nullable_struct_none() Void!Str {
-  struct Person {
-    name: Str,
-    age: Int,
-    employed: Bool?,
-  }
-
-  let maybe_person: Person? = maybe::none()
+  let maybe_person: PersonJSONTest? = maybe::none()
   let out = try encode(maybe_person)
   testing::assert(out == "null", "Expected none struct to encode as null")
 }

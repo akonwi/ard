@@ -776,7 +776,7 @@ func (vm *VM) traitObjectToHost(value Value, target reflect.Type) (reflect.Value
 func (vm *VM) canPassAsHostAny(typeInfo air.TypeInfo) bool {
 	switch typeInfo.Kind {
 	case air.TypeVoid, air.TypeInt, air.TypeFloat, air.TypeBool, air.TypeStr, air.TypeEnum,
-		air.TypeDynamic, air.TypeExtern, air.TypeUnion, air.TypeMaybe, air.TypeList, air.TypeMap, air.TypeStruct:
+		air.TypeDynamic, air.TypeExtern, air.TypeUnion, air.TypeMaybe, air.TypeList, air.TypeMap, air.TypeStruct, air.TypeResult:
 		return true
 	default:
 		return vm.isEncodableTraitObject(typeInfo)
@@ -854,6 +854,20 @@ func (vm *VM) hostAnyValueWithType(value Value, typeInfo air.TypeInfo) (any, err
 			return nil, err
 		}
 		return vm.encodableValueToHostAny(maybeValue.Value, elemInfo)
+	case ValueResult, ValueResultInt, ValueResultStr, ValueResultBool, ValueResultFloat:
+		resultOK, resultValue, err := value.resultParts()
+		if err != nil {
+			return nil, err
+		}
+		resultInfoID := typeInfo.Value
+		if !resultOK {
+			resultInfoID = typeInfo.Error
+		}
+		resultInfo, err := vm.typeInfo(resultInfoID)
+		if err != nil {
+			return nil, err
+		}
+		return vm.encodableValueToHostAny(resultValue, resultInfo)
 	case ValueList:
 		vm.recordRefAccess(refAccessList)
 		listValue, err := value.listValue()
