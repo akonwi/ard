@@ -2400,3 +2400,45 @@ let scores = get_scores()
 		}
 	}
 }
+
+func TestBuildProgramFromAIRBrowserProjectFFI(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.js-browser.mjs"), []byte("export function value() { return 42; }\n"), 0o644); err != nil {
+		t.Fatalf("failed to write browser ffi: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+extern fn value() Int = {
+  js-browser = "value"
+}
+
+let answer = value()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSBrowser)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := BuildProgram(program, outputPath, backend.TargetJSBrowser, loaded.ProjectInfo); err != nil {
+		t.Fatalf("build AIR browser JS: %v", err)
+	}
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if !strings.Contains(string(out), `import * as project from "./ffi.project.js-browser.mjs";`) || !strings.Contains(string(out), "project.value()") {
+		t.Fatalf("expected browser project ffi import/call, got:\n%s", string(out))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ffi.project.js-browser.mjs")); err != nil {
+		t.Fatalf("expected copied browser ffi companion: %v", err)
+	}
+}
