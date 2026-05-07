@@ -58,7 +58,7 @@ func typeName(program *air.Program, typ air.TypeInfo) string {
 	}
 	name := sanitizeName(typ.Name)
 	if moduleName == "" {
-		moduleName = "type"
+		moduleName = fmt.Sprintf("type_%d", typ.ID)
 	}
 	if name == "" {
 		name = fmt.Sprintf("type_%d", typ.ID)

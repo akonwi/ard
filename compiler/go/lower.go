@@ -427,12 +427,19 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		if stmt.Value == nil {
 			return nil, fmt.Errorf("let statement missing value")
 		}
-		value, err := l.lowerExpr(fn, *stmt.Value)
+		localType := l.resolvedLocalType(fn, stmt.Local)
+		value, err := l.lowerExprWithExpectedType(fn, *stmt.Value, localType)
 		if err != nil {
 			return nil, err
 		}
-		name := localName(fn, stmt.Local)
 		out := append([]ast.Stmt{}, value.stmts...)
+		if l.isVoidType(localType) || isVoidExpr(value.expr) {
+			if !isVoidExpr(value.expr) {
+				out = append(out, &ast.ExprStmt{X: value.expr})
+			}
+			return out, nil
+		}
+		name := localName(fn, stmt.Local)
 		tok := token.DEFINE
 		if l.declaredLocals[stmt.Local] {
 			tok = token.ASSIGN
@@ -450,11 +457,18 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		if stmt.Value == nil {
 			return nil, fmt.Errorf("assign statement missing value")
 		}
-		value, err := l.lowerExpr(fn, *stmt.Value)
+		localType := l.resolvedLocalType(fn, stmt.Local)
+		value, err := l.lowerExprWithExpectedType(fn, *stmt.Value, localType)
 		if err != nil {
 			return nil, err
 		}
 		out := append([]ast.Stmt{}, value.stmts...)
+		if l.isVoidType(localType) || isVoidExpr(value.expr) {
+			if !isVoidExpr(value.expr) {
+				out = append(out, &ast.ExprStmt{X: value.expr})
+			}
+			return out, nil
+		}
 		out = append(out, &ast.AssignStmt{
 			Lhs: []ast.Expr{ast.NewIdent(localName(fn, stmt.Local))},
 			Tok: token.ASSIGN,
@@ -999,7 +1013,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			argExpr := loweredArg.expr
 			if i < len(target.Signature.Params) && target.Signature.Params[i].Mutable && validTypeID(l.program, target.Signature.Params[i].Type) {
 				paramType := l.program.Types[target.Signature.Params[i].Type-1]
-				if paramType.Kind == air.TypeStruct {
+				if paramType.Kind == air.TypeStruct && !l.localIsPointerParam(fn, arg) {
 					argExpr = &ast.UnaryExpr{Op: token.AND, X: argExpr}
 				}
 			}
@@ -1120,6 +1134,9 @@ func (l *lowerer) lowerValueBlock(fn air.Function, block air.Block, resultType a
 				stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{result.expr}})
 			}
 		} else {
+			if l.isVoidType(block.Result.Type) || isVoidExpr(result.expr) {
+				return stmts, nil
+			}
 			if target == nil {
 				return nil, fmt.Errorf("non-void block result missing target")
 			}
@@ -1141,6 +1158,9 @@ func (l *lowerer) lowerExprWithExpectedType(fn air.Function, expr air.Expr, expe
 func (l *lowerer) canOverrideExprType(expr air.Expr, expectedType air.TypeID) bool {
 	if !validTypeID(l.program, expr.Type) || !validTypeID(l.program, expectedType) {
 		return false
+	}
+	if inferred := l.inferTypeFromExprShape(&expr); inferred == expectedType {
+		return true
 	}
 	from := l.program.Types[expr.Type-1]
 	to := l.program.Types[expectedType-1]
@@ -1392,6 +1412,345 @@ func (l *lowerer) isVoidType(typeID air.TypeID) bool {
 	return validTypeID(l.program, typeID) && l.program.Types[typeID-1].Kind == air.TypeVoid
 }
 
+func (l *lowerer) resolvedLocalType(fn air.Function, local air.LocalID) air.TypeID {
+	if int(local) < 0 || int(local) >= len(fn.Locals) {
+		return air.NoType
+	}
+	typeID := fn.Locals[local].Type
+	if !l.isWeakContextType(typeID) && !l.isVoidType(typeID) {
+		return typeID
+	}
+	if inferred := l.inferLocalTypeFromBlock(fn, local, fn.Body); inferred != air.NoType {
+		return inferred
+	}
+	if initExpr := l.findLocalInitializerExpr(fn.Body, local); initExpr != nil {
+		if validTypeID(l.program, initExpr.Type) && !l.isVoidType(initExpr.Type) && !l.isWeakContextType(initExpr.Type) {
+			return initExpr.Type
+		}
+		if inferred := l.resolveExpectedTypeFromExpr(typeID, initExpr); inferred != air.NoType {
+			return inferred
+		}
+	}
+	if fn.Body.Result != nil && fn.Body.Result.Kind == air.ExprLoadLocal && fn.Body.Result.Local == local && !l.isWeakContextType(fn.Signature.Return) {
+		return fn.Signature.Return
+	}
+	return typeID
+}
+
+func (l *lowerer) findLocalInitializerExpr(block air.Block, local air.LocalID) *air.Expr {
+	for _, stmt := range block.Stmts {
+		switch stmt.Kind {
+		case air.StmtLet:
+			if stmt.Local == local {
+				return stmt.Value
+			}
+		case air.StmtWhile:
+			if expr := l.findLocalInitializerExpr(stmt.Body, local); expr != nil {
+				return expr
+			}
+		}
+		for _, expr := range []*air.Expr{stmt.Value, stmt.Expr, stmt.Target, stmt.Condition} {
+			if nested := l.findLocalInitializerExprInExpr(expr, local); nested != nil {
+				return nested
+			}
+		}
+	}
+	if nested := l.findLocalInitializerExprInExpr(block.Result, local); nested != nil {
+		return nested
+	}
+	return nil
+}
+
+func (l *lowerer) findLocalInitializerExprInExpr(expr *air.Expr, local air.LocalID) *air.Expr {
+	if expr == nil {
+		return nil
+	}
+	for _, block := range []air.Block{expr.Body, expr.Then, expr.Else, expr.CatchAll, expr.Some, expr.None, expr.Ok, expr.Err, expr.Catch} {
+		if nested := l.findLocalInitializerExpr(block, local); nested != nil {
+			return nested
+		}
+	}
+	for _, c := range expr.EnumCases {
+		if nested := l.findLocalInitializerExpr(c.Body, local); nested != nil {
+			return nested
+		}
+	}
+	for _, c := range expr.IntCases {
+		if nested := l.findLocalInitializerExpr(c.Body, local); nested != nil {
+			return nested
+		}
+	}
+	for _, c := range expr.RangeCases {
+		if nested := l.findLocalInitializerExpr(c.Body, local); nested != nil {
+			return nested
+		}
+	}
+	for _, c := range expr.UnionCases {
+		if nested := l.findLocalInitializerExpr(c.Body, local); nested != nil {
+			return nested
+		}
+	}
+	for _, child := range []*air.Expr{expr.Target, expr.Left, expr.Right} {
+		if nested := l.findLocalInitializerExprInExpr(child, local); nested != nil {
+			return nested
+		}
+	}
+	for i := range expr.Args {
+		if nested := l.findLocalInitializerExprInExpr(&expr.Args[i], local); nested != nil {
+			return nested
+		}
+	}
+	return nil
+}
+
+func (l *lowerer) inferLocalTypeFromBlock(fn air.Function, local air.LocalID, block air.Block) air.TypeID {
+	for _, stmt := range block.Stmts {
+		switch stmt.Kind {
+		case air.StmtLet, air.StmtAssign:
+			if stmt.Local == local && stmt.Value != nil && !l.isWeakContextType(stmt.Value.Type) {
+				return stmt.Value.Type
+			}
+		case air.StmtWhile:
+			if inferred := l.inferLocalTypeFromBlock(fn, local, stmt.Body); inferred != air.NoType {
+				return inferred
+			}
+		}
+		if stmt.Value != nil {
+			if inferred := l.inferLocalTypeFromExpr(fn, local, *stmt.Value); inferred != air.NoType {
+				return inferred
+			}
+		}
+		if stmt.Expr != nil {
+			if inferred := l.inferLocalTypeFromExpr(fn, local, *stmt.Expr); inferred != air.NoType {
+				return inferred
+			}
+		}
+		if stmt.Target != nil {
+			if inferred := l.inferLocalTypeFromExpr(fn, local, *stmt.Target); inferred != air.NoType {
+				return inferred
+			}
+		}
+		if stmt.Condition != nil {
+			if inferred := l.inferLocalTypeFromExpr(fn, local, *stmt.Condition); inferred != air.NoType {
+				return inferred
+			}
+		}
+	}
+	if block.Result != nil {
+		if inferred := l.inferLocalTypeFromExpr(fn, local, *block.Result); inferred != air.NoType {
+			return inferred
+		}
+	}
+	return air.NoType
+}
+
+func (l *lowerer) resolveExpectedTypeFromExpr(fallback air.TypeID, expr *air.Expr) air.TypeID {
+	if expr == nil || !validTypeID(l.program, fallback) {
+		return air.NoType
+	}
+	fallbackInfo := l.program.Types[fallback-1]
+	if inferred := l.inferTypeFromExprShape(expr); validTypeID(l.program, inferred) {
+		inferredInfo := l.program.Types[inferred-1]
+		if inferredInfo.Kind == fallbackInfo.Kind || l.isVoidType(fallback) {
+			return inferred
+		}
+	}
+	if validTypeID(l.program, expr.Type) {
+		exprInfo := l.program.Types[expr.Type-1]
+		if exprInfo.Kind == fallbackInfo.Kind && !l.isWeakContextType(expr.Type) {
+			return expr.Type
+		}
+	}
+	for _, block := range []air.Block{expr.Body, expr.Then, expr.Else, expr.CatchAll, expr.Some, expr.None, expr.Ok, expr.Err, expr.Catch} {
+		if block.Result != nil {
+			if inferred := l.resolveExpectedTypeFromExpr(fallback, block.Result); inferred != air.NoType {
+				return inferred
+			}
+		}
+	}
+	for _, c := range expr.EnumCases {
+		if c.Body.Result != nil {
+			if inferred := l.resolveExpectedTypeFromExpr(fallback, c.Body.Result); inferred != air.NoType {
+				return inferred
+			}
+		}
+	}
+	for _, c := range expr.IntCases {
+		if c.Body.Result != nil {
+			if inferred := l.resolveExpectedTypeFromExpr(fallback, c.Body.Result); inferred != air.NoType {
+				return inferred
+			}
+		}
+	}
+	for _, c := range expr.RangeCases {
+		if c.Body.Result != nil {
+			if inferred := l.resolveExpectedTypeFromExpr(fallback, c.Body.Result); inferred != air.NoType {
+				return inferred
+			}
+		}
+	}
+	for _, c := range expr.UnionCases {
+		if c.Body.Result != nil {
+			if inferred := l.resolveExpectedTypeFromExpr(fallback, c.Body.Result); inferred != air.NoType {
+				return inferred
+			}
+		}
+	}
+	if expr.Target != nil {
+		if inferred := l.resolveExpectedTypeFromExpr(fallback, expr.Target); inferred != air.NoType {
+			return inferred
+		}
+	}
+	if expr.Left != nil {
+		if inferred := l.resolveExpectedTypeFromExpr(fallback, expr.Left); inferred != air.NoType {
+			return inferred
+		}
+	}
+	if expr.Right != nil {
+		if inferred := l.resolveExpectedTypeFromExpr(fallback, expr.Right); inferred != air.NoType {
+			return inferred
+		}
+	}
+	for i := range expr.Args {
+		if inferred := l.resolveExpectedTypeFromExpr(fallback, &expr.Args[i]); inferred != air.NoType {
+			return inferred
+		}
+	}
+	return air.NoType
+}
+
+func (l *lowerer) inferTypeFromExprShape(expr *air.Expr) air.TypeID {
+	if expr == nil {
+		return air.NoType
+	}
+	switch expr.Kind {
+	case air.ExprMakeMaybeSome:
+		if expr.Target != nil {
+			return l.findMaybeTypeByElem(expr.Target.Type)
+		}
+	case air.ExprTryMaybe:
+		if expr.Target != nil && validTypeID(l.program, expr.Target.Type) {
+			targetType := l.program.Types[expr.Target.Type-1]
+			if targetType.Kind == air.TypeMaybe {
+				return targetType.Elem
+			}
+		}
+	case air.ExprTryResult:
+		if expr.Target != nil && validTypeID(l.program, expr.Target.Type) {
+			targetType := l.program.Types[expr.Target.Type-1]
+			if targetType.Kind == air.TypeResult {
+				return targetType.Value
+			}
+		}
+	}
+	return air.NoType
+}
+
+func (l *lowerer) findMaybeTypeByElem(elem air.TypeID) air.TypeID {
+	for _, info := range l.program.Types {
+		if info.Kind == air.TypeMaybe && info.Elem == elem {
+			return info.ID
+		}
+	}
+	if !validTypeID(l.program, elem) {
+		return air.NoType
+	}
+	id := air.TypeID(len(l.program.Types) + 1)
+	l.program.Types = append(l.program.Types, air.TypeInfo{ID: id, Kind: air.TypeMaybe, Name: fmt.Sprintf("Maybe<%d>", elem), Elem: elem})
+	return id
+}
+
+func (l *lowerer) inferLocalTypeFromExpr(fn air.Function, local air.LocalID, expr air.Expr) air.TypeID {
+	if expr.Target != nil {
+		if inferred := l.inferLocalTypeFromExpr(fn, local, *expr.Target); inferred != air.NoType {
+			return inferred
+		}
+	}
+	if expr.Left != nil {
+		if inferred := l.inferLocalTypeFromExpr(fn, local, *expr.Left); inferred != air.NoType {
+			return inferred
+		}
+	}
+	if expr.Right != nil {
+		if inferred := l.inferLocalTypeFromExpr(fn, local, *expr.Right); inferred != air.NoType {
+			return inferred
+		}
+	}
+	for _, arg := range expr.Args {
+		if inferred := l.inferLocalTypeFromExpr(fn, local, arg); inferred != air.NoType {
+			return inferred
+		}
+	}
+	for _, block := range []air.Block{expr.Body, expr.Then, expr.Else, expr.CatchAll, expr.Some, expr.None, expr.Ok, expr.Err, expr.Catch} {
+		if inferred := l.inferLocalTypeFromBlock(fn, local, block); inferred != air.NoType {
+			return inferred
+		}
+	}
+	for _, c := range expr.EnumCases {
+		if inferred := l.inferLocalTypeFromBlock(fn, local, c.Body); inferred != air.NoType {
+			return inferred
+		}
+	}
+	for _, c := range expr.IntCases {
+		if inferred := l.inferLocalTypeFromBlock(fn, local, c.Body); inferred != air.NoType {
+			return inferred
+		}
+	}
+	for _, c := range expr.RangeCases {
+		if inferred := l.inferLocalTypeFromBlock(fn, local, c.Body); inferred != air.NoType {
+			return inferred
+		}
+	}
+	for _, c := range expr.UnionCases {
+		if inferred := l.inferLocalTypeFromBlock(fn, local, c.Body); inferred != air.NoType {
+			return inferred
+		}
+	}
+	return air.NoType
+}
+
+func (l *lowerer) isWeakContextType(typeID air.TypeID) bool {
+	if !validTypeID(l.program, typeID) {
+		return false
+	}
+	info := l.program.Types[typeID-1]
+	switch info.Kind {
+	case air.TypeMaybe:
+		return !validTypeID(l.program, info.Elem) || l.program.Types[info.Elem-1].Kind == air.TypeVoid
+	case air.TypeResult:
+		return !validTypeID(l.program, info.Value) || !validTypeID(l.program, info.Error) || l.program.Types[info.Value-1].Kind == air.TypeVoid || l.program.Types[info.Error-1].Kind == air.TypeVoid
+	default:
+		return false
+	}
+}
+
+func (l *lowerer) resolvedExprType(fn air.Function, expr air.Expr) air.TypeID {
+	if expr.Kind == air.ExprLoadLocal {
+		if resolved := l.resolvedLocalType(fn, expr.Local); resolved != air.NoType {
+			return resolved
+		}
+	}
+	if inferred := l.inferTypeFromExprShape(&expr); inferred != air.NoType {
+		return inferred
+	}
+	return expr.Type
+}
+
+func (l *lowerer) localIsPointerParam(fn air.Function, expr air.Expr) bool {
+	if expr.Kind != air.ExprLoadLocal {
+		return false
+	}
+	local := int(expr.Local)
+	if local < 0 || local >= len(fn.Signature.Params) || !validTypeID(l.program, expr.Type) {
+		return false
+	}
+	param := fn.Signature.Params[local]
+	if !param.Mutable || !validTypeID(l.program, param.Type) {
+		return false
+	}
+	return l.program.Types[param.Type-1].Kind == air.TypeStruct
+}
+
 func (l *lowerer) qualified(alias string, importPath string, name string) ast.Expr {
 	l.currentImports[alias] = importPath
 	return &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name)}
@@ -1508,12 +1867,38 @@ func (l *lowerer) lowerMatchInt(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	resultTypeID := expr.Type
+	if l.isWeakContextType(resultTypeID) || l.isVoidType(resultTypeID) {
+		for _, intCase := range expr.IntCases {
+			if intCase.Body.Result != nil && intCase.Body.Result.Kind == air.ExprMakeMaybeSome && intCase.Body.Result.Target != nil {
+				if inferred := l.findMaybeTypeByElem(intCase.Body.Result.Target.Type); inferred != air.NoType {
+					resultTypeID = inferred
+					break
+				}
+			}
+		}
+		if resultTypeID == expr.Type {
+			for _, rangeCase := range expr.RangeCases {
+				if rangeCase.Body.Result != nil && rangeCase.Body.Result.Kind == air.ExprMakeMaybeSome && rangeCase.Body.Result.Target != nil {
+					if inferred := l.findMaybeTypeByElem(rangeCase.Body.Result.Target.Type); inferred != air.NoType {
+						resultTypeID = inferred
+						break
+					}
+				}
+			}
+		}
+		if resultTypeID == expr.Type {
+			if inferred := l.resolveExpectedTypeFromExpr(resultTypeID, &expr); inferred != air.NoType {
+				resultTypeID = inferred
+			}
+		}
+	}
 	resultExpr := ast.NewIdent("nil")
 	stmts := append([]ast.Stmt{}, target.stmts...)
 	var assignTarget ast.Expr
-	if !l.isVoidType(expr.Type) {
+	if !l.isVoidType(resultTypeID) {
 		temp := l.nextTemp()
-		decls, err := l.declareTemp(expr.Type, temp)
+		decls, err := l.declareTemp(resultTypeID, temp)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -1523,14 +1908,14 @@ func (l *lowerer) lowerMatchInt(fn air.Function, expr air.Expr) (loweredExpr, er
 	}
 	cases := make([]ast.Stmt, 0, len(expr.IntCases)+len(expr.RangeCases)+1)
 	for _, intCase := range expr.IntCases {
-		body, err := l.lowerValueBlock(fn, intCase.Body, expr.Type, assignTarget)
+		body, err := l.lowerValueBlock(fn, intCase.Body, resultTypeID, assignTarget)
 		if err != nil {
 			return loweredExpr{}, err
 		}
 		cases = append(cases, &ast.CaseClause{List: []ast.Expr{&ast.BinaryExpr{X: target.expr, Op: token.EQL, Y: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", intCase.Value)}}}, Body: body})
 	}
 	for _, rangeCase := range expr.RangeCases {
-		body, err := l.lowerValueBlock(fn, rangeCase.Body, expr.Type, assignTarget)
+		body, err := l.lowerValueBlock(fn, rangeCase.Body, resultTypeID, assignTarget)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -1538,7 +1923,7 @@ func (l *lowerer) lowerMatchInt(fn air.Function, expr air.Expr) (loweredExpr, er
 		cases = append(cases, &ast.CaseClause{List: []ast.Expr{cond}, Body: body})
 	}
 	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
-		body, err := l.lowerValueBlock(fn, expr.CatchAll, expr.Type, assignTarget)
+		body, err := l.lowerValueBlock(fn, expr.CatchAll, resultTypeID, assignTarget)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -1667,7 +2052,7 @@ func (l *lowerer) lowerMaybeOr(fn air.Function, expr air.Expr) (loweredExpr, err
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	defaultValue, err := l.lowerExpr(fn, expr.Args[0])
+	defaultValue, err := l.lowerExprWithExpectedType(fn, expr.Args[0], expr.Type)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -1703,7 +2088,7 @@ func (l *lowerer) lowerResultOr(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	defaultValue, err := l.lowerExpr(fn, expr.Args[0])
+	defaultValue, err := l.lowerExprWithExpectedType(fn, expr.Args[0], expr.Type)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -2205,19 +2590,26 @@ func (l *lowerer) lowerTryMaybe(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	targetTypeID := l.resolvedExprType(fn, *expr.Target)
 	targetTemp := l.nextTemp()
-	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+	targetDecls, err := l.declareTemp(targetTypeID, targetTemp)
 	if err != nil {
 		return loweredExpr{}, err
 	}
 	targetExpr := ast.NewIdent(targetTemp)
 	stmts := append(target.stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+	resultTypeID := expr.Type
+	if l.isVoidType(resultTypeID) {
+		if inferred := l.inferTypeFromExprShape(&expr); inferred != air.NoType {
+			resultTypeID = inferred
+		}
+	}
 	var resultExpr ast.Expr = ast.NewIdent("nil")
 	var assignTarget ast.Expr
-	if !l.isVoidType(expr.Type) {
+	if !l.isVoidType(resultTypeID) {
 		temp := l.nextTemp()
-		decls, err := l.declareTemp(expr.Type, temp)
+		decls, err := l.declareTemp(resultTypeID, temp)
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -2254,7 +2646,7 @@ func (l *lowerer) lowerTryMaybe(fn air.Function, expr air.Expr) (loweredExpr, er
 		}
 	} else {
 		returnExpr := ast.Expr(targetExpr)
-		if fn.Signature.Return != expr.Target.Type {
+		if fn.Signature.Return != targetTypeID {
 			returnType, err := l.goType(fn.Signature.Return)
 			if err != nil {
 				return loweredExpr{}, err
@@ -2275,8 +2667,9 @@ func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, 
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	targetTypeID := l.resolvedExprType(fn, *expr.Target)
 	targetTemp := l.nextTemp()
-	targetDecls, err := l.declareTemp(expr.Target.Type, targetTemp)
+	targetDecls, err := l.declareTemp(targetTypeID, targetTemp)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -2367,7 +2760,17 @@ func (l *lowerer) lowerSpawnFiber(fn air.Function, expr air.Expr) (loweredExpr, 
 			return loweredExpr{}, fmt.Errorf("invalid fiber function %d", expr.Function)
 		}
 		targetFn := l.program.Functions[expr.Function]
-		targetExpr = &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: mustTypeExpr(l, targetFn.Signature.Return)}}}}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, targetFn))}}}}}}
+		if l.isVoidType(targetFn.Signature.Return) {
+			targetExpr = &ast.FuncLit{
+				Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: voidTypeExpr()}}}},
+				Body: &ast.BlockStmt{List: []ast.Stmt{
+					&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, targetFn))}},
+					&ast.ReturnStmt{Results: []ast.Expr{voidValueExpr()}},
+				}},
+			}
+		} else {
+			targetExpr = &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: mustTypeExpr(l, targetFn.Signature.Return)}}}}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, targetFn))}}}}}}
+		}
 	}
 	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: ast.NewIdent("ardSpawnFiber"), Index: mustTypeExpr(l, l.program.Types[expr.Type-1].Elem)}, Args: []ast.Expr{targetExpr}}}, nil
 }

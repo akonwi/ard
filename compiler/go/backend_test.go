@@ -3,6 +3,7 @@ package gotarget
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -102,16 +103,16 @@ func TestGenerateSourcesSupportsStructsAndEnums(t *testing.T) {
 	for _, source := range sources {
 		combined += string(source)
 	}
-	if !strings.Contains(combined, "type type__Direction int") {
+	if !regexp.MustCompile(`type type_\d+__Direction int`).MatchString(combined) {
 		t.Fatalf("generated source missing enum type:\n%s", combined)
 	}
-	if !strings.Contains(combined, "type__Direction__Down") {
+	if !regexp.MustCompile(`type_\d+__Direction__Down`).MatchString(combined) {
 		t.Fatalf("generated source missing enum constants:\n%s", combined)
 	}
-	if !strings.Contains(combined, "type type__User struct") {
+	if !regexp.MustCompile(`type type_\d+__User struct`).MatchString(combined) {
 		t.Fatalf("generated source missing struct type:\n%s", combined)
 	}
-	if !strings.Contains(combined, "type__User{age: 41, name: \"Ada\"}") {
+	if !regexp.MustCompile(`type_\d+__User\{age: 41, name: "Ada"\}`).MatchString(combined) {
 		t.Fatalf("generated source missing struct literal lowering:\n%s", combined)
 	}
 	if !strings.Contains(combined, ".age + 1") {
@@ -211,6 +212,104 @@ func TestRunProgramSupportsCommonStdlibExterns(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesUsesExpectedLocalTypeForMaybeNone(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn main() Bool {
+			let found: Int? = maybe::none()
+			found.is_none()
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "runtime.Maybe[int]{}") {
+		t.Fatalf("generated source missing typed maybe none:\n%s", source)
+	}
+	if strings.Contains(source, "runtime.Maybe[struct {") {
+		t.Fatalf("generated source used untyped maybe none:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesUsesExpectedDefaultTypeForResultOr(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn fetch() Int?!Str {
+			let empty: Int? = maybe::none()
+			Result::ok(empty)
+		}
+
+		fn main() Bool {
+			let value = fetch().or(maybe::none())
+			value.is_none()
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if strings.Contains(source, "runtime.Maybe[struct {") {
+		t.Fatalf("generated source used untyped maybe default:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesSkipsVoidAssignmentForStatementMatchBranches(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn main() Bool {
+			match maybe::some(1) {
+				value => value == 1,
+				_ => (),
+			}
+			false
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if strings.Contains(source, "= nil") {
+		t.Fatalf("generated source assigned nil in statement match lowering:\n%s", source)
+	}
+}
+
+func TestRunProgramSupportsVoidFiberFunctions(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/async
+
+		fn job() Void {
+			()
+		}
+
+		fn main() Void {
+			async::start(job)
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestTypeNameUsesUniqueFallbackWhenModuleOwnershipIsMissing(t *testing.T) {
+	program := &air.Program{}
+	left := typeName(program, air.TypeInfo{ID: 1, Name: "Request"})
+	right := typeName(program, air.TypeInfo{ID: 2, Name: "Request"})
+	if left == right {
+		t.Fatalf("fallback type names should be unique, got %q", left)
+	}
+}
+
 func TestGenerateSourcesSupportsResultExpectAndStringPredicates(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io
@@ -299,7 +398,7 @@ func TestGenerateSourcesUsesPointersForMutableStructParams(t *testing.T) {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !strings.Contains(source, "func test_ard__set_body(res *type__Response)") {
+	if !regexp.MustCompile(`func test_ard__set_body\(res \*type_\d+__Response\)`).MatchString(source) {
 		t.Fatalf("generated source missing pointer mutable param lowering:\n%s", source)
 	}
 	if !strings.Contains(source, "test_ard__set_body(&res_0)") {

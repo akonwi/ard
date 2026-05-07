@@ -520,6 +520,67 @@ func TestLowerTraitObjectDispatch(t *testing.T) {
 	}
 }
 
+func TestLowerContextualMaybeTypesInNestedExpressions(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn pick(choices: [Dynamic]) Dynamic? {
+			let first_choice = match choices.size() {
+				0 => maybe::none(),
+				_ => maybe::some(choices.at(0)),
+			}
+			let choice = try first_choice -> _ { maybe::none() }
+			maybe::some(choice)
+		}
+	`)
+
+	pick := findFunction(t, program, "pick")
+	if got := testTypeInfo(t, program, pick.Locals[1].Type).Name; got != "Dynamic?" {
+		t.Fatalf("first_choice type = %q, want Dynamic?", got)
+	}
+	if got := testTypeInfo(t, program, pick.Locals[2].Type).Name; got != "Dynamic" {
+		t.Fatalf("choice type = %q, want Dynamic", got)
+	}
+	if got := testTypeInfo(t, program, pick.Body.Stmts[0].Value.Type).Name; got != "Dynamic?" {
+		t.Fatalf("first_choice expr type = %q, want Dynamic?", got)
+	}
+	if got := testTypeInfo(t, program, pick.Body.Stmts[1].Value.Type).Name; got != "Dynamic" {
+		t.Fatalf("choice expr type = %q, want Dynamic", got)
+	}
+	if pick.Body.Result == nil || pick.Body.Result.Target == nil {
+		t.Fatalf("result tree missing maybe::some target: %#v", pick.Body.Result)
+	}
+	if got := testTypeInfo(t, program, pick.Body.Result.Target.Type).Name; got != "Dynamic" {
+		t.Fatalf("result some target type = %q, want Dynamic", got)
+	}
+}
+
+func TestLowerContextualResultTypesInNestedExpressions(t *testing.T) {
+	program := lowerSource(t, `
+		fn pick(flag: Bool) Int!Str {
+			let value = match flag {
+				true => Result::ok(1),
+				false => Result::err("bad"),
+			}
+			value
+		}
+	`)
+
+	pick := findFunction(t, program, "pick")
+	if got := testTypeInfo(t, program, pick.Locals[1].Type).Name; got != "Int!Str" {
+		t.Fatalf("value local type = %q, want Int!Str", got)
+	}
+	if got := testTypeInfo(t, program, pick.Body.Stmts[0].Value.Type).Name; got != "Int!Str" {
+		t.Fatalf("value expr type = %q, want Int!Str", got)
+	}
+	if pick.Body.Result == nil {
+		t.Fatalf("result = nil")
+	}
+	if got := testTypeInfo(t, program, pick.Body.Result.Type).Name; got != "Int!Str" {
+		t.Fatalf("result type = %q, want Int!Str", got)
+	}
+}
+
 func TestLowerTryOps(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
