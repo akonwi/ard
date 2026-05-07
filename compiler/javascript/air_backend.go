@@ -504,6 +504,12 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		}
 		call := renderJSExpr(jsCallExprIR{Callee: callee, Args: args})
 		return l.adaptExternReturn(call, expr.Type)
+	case air.ExprSpawnFiber:
+		return l.lowerSpawnFiber(fn, expr)
+	case air.ExprFiberGet:
+		return l.lowerFiberGet(fn, expr)
+	case air.ExprFiberJoin:
+		return l.lowerFiberJoin(fn, expr)
 	case air.ExprMakeClosure:
 		return l.lowerMakeClosure(fn, expr)
 	case air.ExprCallClosure:
@@ -668,6 +674,41 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 	default:
 		return "", fmt.Errorf("unsupported AIR JS expression kind %d", expr.Kind)
 	}
+}
+
+func (l *airJSLowerer) lowerSpawnFiber(fn air.Function, expr air.Expr) (string, error) {
+	var call string
+	if expr.Target != nil {
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return "", err
+		}
+		call = renderJSExpr(jsCallExprIR{Callee: target})
+	} else {
+		call = renderJSExpr(jsCallExprIR{Callee: l.functionRef(fn.Module, expr.Function)})
+	}
+	return renderJSDoc(jsObjectDoc([]jsObjectField{{Key: "value", Value: call}, {Key: "done", Value: "true"}})), nil
+}
+
+func (l *airJSLowerer) lowerFiberGet(fn air.Function, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("fiber get missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return "", err
+	}
+	return target + ".value", nil
+}
+
+func (l *airJSLowerer) lowerFiberJoin(fn air.Function, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("fiber join missing target")
+	}
+	if _, err := l.lowerExpr(fn, *expr.Target); err != nil {
+		return "", err
+	}
+	return "undefined", nil
 }
 
 func (l *airJSLowerer) lowerTraitCall(fn air.Function, expr air.Expr) (string, error) {
@@ -1272,6 +1313,9 @@ func (l *airJSLowerer) externRef(id air.ExternID) (string, error) {
 	if binding == "" {
 		binding = ext.Bindings["js"]
 	}
+	if binding == "" && len(ext.Bindings) == 1 {
+		binding = ext.Bindings["go"]
+	}
 	if binding == "" {
 		return "", fmt.Errorf("extern %s has no JavaScript binding for %s", ext.Name, l.target)
 	}
@@ -1333,7 +1377,9 @@ func (l *airJSLowerer) collectFFIArtifacts() FFIArtifacts {
 		}
 		if _, ok := ext.Bindings[l.target]; !ok {
 			if _, hasJS := ext.Bindings["js"]; !hasJS {
-				continue
+				if _, singleGoFallback := ext.Bindings["go"]; !singleGoFallback || len(ext.Bindings) != 1 {
+					continue
+				}
 			}
 		}
 		if strings.HasPrefix(modulePath, "ard/") {

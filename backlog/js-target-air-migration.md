@@ -305,10 +305,10 @@ Once parity is acceptable:
 
 ### CLI integration
 
-- [x] Update `ard run --target js-server` to lower AIR before JS dispatch.
-- [x] Keep `ard run --target js-browser` rejected with a clear message.
-- [x] Update `ard build --target js-server` to lower AIR before JS dispatch.
-- [x] Update `ard build --target js-browser` to lower AIR before JS dispatch.
+- [ ] Update `ard run --target js-server` to lower AIR before JS dispatch.
+- [ ] Keep `ard run --target js-browser` rejected with a clear message.
+- [ ] Update `ard build --target js-server` to lower AIR before JS dispatch.
+- [ ] Update `ard build --target js-browser` to lower AIR before JS dispatch.
 - [x] Preserve project-info access for project FFI companion copying.
 
 ### Module/source generation
@@ -414,10 +414,10 @@ Once parity is acceptable:
 - [x] Lower trait upcasts.
 - [x] Lower trait method calls.
 - [x] Lower `Dynamic` conversions.
-- [ ] Lower spawn fiber.
-- [ ] Lower fiber get.
-- [ ] Lower fiber join.
-- [ ] Decide whether any async JS functions must be emitted as `async`.
+- [x] Lower spawn fiber.
+- [x] Lower fiber get.
+- [x] Lower fiber join.
+- [x] Decide whether any async JS functions must be emitted as `async`.
 
 ### Externs and FFI companions
 
@@ -481,4 +481,5 @@ Once parity is acceptable:
 - Added AIR closure/capture lowering and simple tagged-object union wrap/match lowering.
 - Added AIR try lowering for tail expressions and `let` bindings with Result/Maybe propagation.
 - Added AIR ToString trait call lowering and Maybe/Result extern return adapters.
-- Switched main CLI js-server/js-browser build paths and js-server run path to frontend → AIR → JS backend; browser run still rejects directly.
+- Added initial synchronous AIR fiber lowering (`spawn`, `get`, `join`) for JS; this preserves value semantics but not concurrency.
+- Trialed routing main CLI through AIR, but kept legacy CLI route active until AIR JS reaches stdlib/browser parity.

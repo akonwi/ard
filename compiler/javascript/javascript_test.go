@@ -2316,3 +2316,37 @@ let result = result_value()
 		}
 	}
 }
+
+func TestGenerateSourcesFromAIRFibers(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/async
+
+fn value() Int { 42 }
+
+let fiber = async::eval(fn() { value() })
+let out = fiber.get()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := string(files["main.mjs"])
+	if !strings.Contains(source, "done: true") || !strings.Contains(source, "const out = fiber.value;") {
+		t.Fatalf("expected synchronous fiber lowering in AIR JS output, got:\n%s", source)
+	}
+}

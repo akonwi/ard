@@ -881,6 +881,11 @@ func (l *lowerer) declareExtern(module ModuleID, def *checker.ExternalFunctionDe
 	for target, binding := range def.ExternalBindings {
 		bindings[target] = binding
 	}
+	if def.ExternalBindingTarget != "" && def.ExternalBinding != "" {
+		if _, ok := bindings[def.ExternalBindingTarget]; !ok {
+			bindings[def.ExternalBindingTarget] = def.ExternalBinding
+		}
+	}
 	if len(bindings) == 0 && def.ExternalBinding != "" {
 		bindings["go"] = def.ExternalBinding
 	}
