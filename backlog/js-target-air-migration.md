@@ -334,7 +334,7 @@ Once parity is acceptable:
 - [x] Lower result values.
 - [x] Lower list values.
 - [x] Lower map values.
-- [ ] Lower dynamic/extern opaque values.
+- [x] Lower dynamic/extern opaque values.
 
 ### Functions and locals
 
@@ -377,7 +377,7 @@ Once parity is acceptable:
 - [x] Lower map `set`.
 - [x] Lower map `drop`.
 - [x] Lower map `has`.
-- [ ] Lower map key/value indexed iteration helpers if needed by AIR loops.
+- [x] Lower map key/value indexed iteration helpers if needed by AIR loops.
 
 ### Control flow and matching
 
@@ -413,7 +413,7 @@ Once parity is acceptable:
 
 - [ ] Lower trait upcasts.
 - [ ] Lower trait method calls.
-- [ ] Lower `Dynamic` conversions.
+- [x] Lower `Dynamic` conversions.
 - [ ] Lower spawn fiber.
 - [ ] Lower fiber get.
 - [ ] Lower fiber join.
@@ -475,3 +475,4 @@ Once parity is acceptable:
 - Added AIR imported-function module dependency detection, basic extern call references, and struct field assignment lowering.
 - Added AIR enum/int/maybe/result match expression lowering using JavaScript IIFEs.
 - Added a primitive `js-server` AIR `RunProgram` smoke test.
+- Added AIR dynamic identity lowering and map key/value indexed helper lowering used by map iteration.

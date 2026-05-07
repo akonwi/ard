@@ -538,7 +538,7 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		return renderJSExpr(jsNewExprIR{Ctor: "Map", Args: []string{renderJSExpr(jsArrayExprIR{Items: entries})}}), nil
 	case air.ExprListAt, air.ExprListPrepend, air.ExprListPush, air.ExprListSet, air.ExprListSize, air.ExprListSort, air.ExprListSwap:
 		return l.lowerListOp(fn, expr)
-	case air.ExprMapKeys, air.ExprMapSize, air.ExprMapGet, air.ExprMapSet, air.ExprMapDrop, air.ExprMapHas:
+	case air.ExprMapKeys, air.ExprMapSize, air.ExprMapGet, air.ExprMapSet, air.ExprMapDrop, air.ExprMapHas, air.ExprMapKeyAt, air.ExprMapValueAt:
 		return l.lowerMapOp(fn, expr)
 	case air.ExprMakeMaybeSome, air.ExprMakeMaybeNone, air.ExprMaybeExpect, air.ExprMaybeIsNone, air.ExprMaybeIsSome, air.ExprMaybeOr, air.ExprMaybeMap, air.ExprMaybeAndThen:
 		return l.lowerMaybeOp(fn, expr)
@@ -628,6 +628,8 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 			return "", err
 		}
 		return renderJSExpr(jsCallExprIR{Callee: "ardToString", Args: []string{value}}), nil
+	case air.ExprToDynamic, air.ExprTraitUpcast:
+		return l.lowerExpr(fn, *expr.Target)
 	case air.ExprCopy:
 		return l.lowerExpr(fn, *expr.Target)
 	case air.ExprPanic:
@@ -831,6 +833,10 @@ func (l *airJSLowerer) lowerMapOp(fn air.Function, expr air.Expr) (string, error
 		return renderJSDoc(jsIIFEDoc("const __value = " + target + ";\n__value.delete(" + args[0] + ");\nreturn undefined;")), nil
 	case air.ExprMapHas:
 		return target + ".has(" + args[0] + ")", nil
+	case air.ExprMapKeyAt:
+		return "Array.from(" + target + ".keys())[" + args[0] + "]", nil
+	case air.ExprMapValueAt:
+		return "Array.from(" + target + ".values())[" + args[0] + "]", nil
 	default:
 		return "", fmt.Errorf("unsupported AIR JS map op %d", expr.Kind)
 	}
