@@ -351,9 +351,12 @@ func (l *airJSLowerer) lowerTypeDecl(typeID air.TypeID) (string, error) {
 }
 
 func (l *airJSLowerer) lowerFunction(fn air.Function) (string, error) {
-	params := make([]string, len(fn.Signature.Params))
-	for i, param := range fn.Signature.Params {
-		params[i] = jsName(param.Name)
+	params := make([]string, 0, len(fn.Captures)+len(fn.Signature.Params))
+	for _, capture := range fn.Captures {
+		params = append(params, jsName(capture.Name))
+	}
+	for _, param := range fn.Signature.Params {
+		params = append(params, jsName(param.Name))
 	}
 	body, err := l.lowerBlock(fn, fn.Body, true)
 	if err != nil {
@@ -469,6 +472,10 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		return strconv.Quote(expr.Str), nil
 	case air.ExprLoadLocal:
 		return l.localName(fn, expr.Local), nil
+	case air.ExprUnionWrap:
+		return l.lowerUnionWrap(fn, expr)
+	case air.ExprMatchUnion:
+		return l.lowerUnionMatch(fn, expr)
 	case air.ExprCall:
 		args, err := l.lowerArgs(fn, expr.Args)
 		if err != nil {
@@ -485,6 +492,10 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 			return "", err
 		}
 		return renderJSExpr(jsCallExprIR{Callee: callee, Args: args}), nil
+	case air.ExprMakeClosure:
+		return l.lowerMakeClosure(fn, expr)
+	case air.ExprCallClosure:
+		return l.lowerCallClosure(fn, expr)
 	case air.ExprMakeStruct:
 		args := make([]string, len(expr.Fields))
 		for i, field := range expr.Fields {
@@ -641,6 +652,85 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 	default:
 		return "", fmt.Errorf("unsupported AIR JS expression kind %d", expr.Kind)
 	}
+}
+
+func (l *airJSLowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("union wrap missing target")
+	}
+	value, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return "", err
+	}
+	return renderJSDoc(jsObjectDoc([]jsObjectField{{Key: "__ard_union_tag", Value: strconv.Itoa(int(expr.Tag))}, {Key: "value", Value: value}})), nil
+}
+
+func (l *airJSLowerer) lowerUnionMatch(fn air.Function, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("union match missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return "", err
+	}
+	matchVar := l.temp("match")
+	lines := []string{"const " + matchVar + " = " + target + ";"}
+	for _, unionCase := range expr.UnionCases {
+		bindings := []string{}
+		if unionCase.Local >= 0 {
+			bindings = append(bindings, "const "+l.localName(fn, unionCase.Local)+" = "+matchVar+".value;")
+		}
+		body, err := l.lowerBlockWithBindings(fn, unionCase.Body, bindings)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, "if ("+matchVar+".__ard_union_tag === "+strconv.Itoa(int(unionCase.Tag))+") "+renderJSDoc(jsBareBlockDoc(body)))
+	}
+	if !airBlockIsZero(expr.CatchAll) {
+		body, err := l.lowerBlock(fn, expr.CatchAll, true)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, renderJSDoc(jsBareBlockDoc(body)))
+	} else {
+		lines = append(lines, `throw makeArdError("panic", "match", "union", 0, "non-exhaustive union match");`)
+	}
+	return renderJSDoc(jsIIFEDoc(strings.Join(lines, "\n"))), nil
+}
+
+func (l *airJSLowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (string, error) {
+	if int(expr.Function) < 0 || int(expr.Function) >= len(l.program.Functions) {
+		return "", fmt.Errorf("invalid closure function %d", expr.Function)
+	}
+	closureFn := l.program.Functions[expr.Function]
+	params := make([]string, 0, len(closureFn.Signature.Params))
+	callArgs := make([]string, 0, len(expr.CaptureLocals)+len(closureFn.Signature.Params))
+	for _, local := range expr.CaptureLocals {
+		callArgs = append(callArgs, l.localName(fn, local))
+	}
+	for _, param := range closureFn.Signature.Params {
+		name := jsName(param.Name)
+		params = append(params, name)
+		callArgs = append(callArgs, name)
+	}
+	call := renderJSExpr(jsCallExprIR{Callee: l.functionRef(fn.Module, expr.Function), Args: callArgs})
+	body := "return " + call + ";"
+	return renderJSDoc(jsBlockDoc("function("+strings.Join(params, ", ")+")", body)), nil
+}
+
+func (l *airJSLowerer) lowerCallClosure(fn air.Function, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("call closure missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return "", err
+	}
+	args, err := l.lowerArgs(fn, expr.Args)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(jsCallExprIR{Callee: target, Args: args}), nil
 }
 
 func (l *airJSLowerer) lowerBlockWithBindings(fn air.Function, block air.Block, bindings []string) (string, error) {

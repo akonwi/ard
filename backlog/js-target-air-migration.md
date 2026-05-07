@@ -329,7 +329,7 @@ Once parity is acceptable:
 - [x] Lower struct field assignment.
 - [x] Lower enum declarations.
 - [x] Lower enum variants.
-- [ ] Lower union wrapping.
+- [x] Lower union wrapping.
 - [x] Lower maybe values.
 - [x] Lower result values.
 - [x] Lower list values.
@@ -345,9 +345,9 @@ Once parity is acceptable:
 - [x] Lower assignments.
 - [x] Lower direct function calls.
 - [x] Lower extern calls.
-- [ ] Lower closures.
-- [ ] Lower closure calls.
-- [ ] Lower captures.
+- [x] Lower closures.
+- [x] Lower closure calls.
+- [x] Lower captures.
 
 ### Expressions and operators
 
@@ -387,7 +387,7 @@ Once parity is acceptable:
 - [x] Lower break handling.
 - [x] Lower enum match.
 - [x] Lower int/range match.
-- [ ] Lower union match.
+- [x] Lower union match.
 - [x] Lower maybe match.
 - [x] Lower result match.
 - [ ] Lower result `try`.
@@ -440,6 +440,7 @@ Once parity is acceptable:
 - [x] Add `js-server` run parity tests for primitive programs.
 - [ ] Add parity tests for structs/enums/lists/maps.
   - [x] Added initial AIR source assertions for list/map values and methods.
+  - [x] Added initial AIR source assertions for union wrap/match.
 - [ ] Add parity tests for maybe/result/try/match.
   - [x] Added initial AIR source assertions for Maybe/Result constructors and `or`.
   - [x] Added initial AIR source assertions for enum/int/maybe/result matches.
@@ -476,3 +477,4 @@ Once parity is acceptable:
 - Added AIR enum/int/maybe/result match expression lowering using JavaScript IIFEs.
 - Added a primitive `js-server` AIR `RunProgram` smoke test.
 - Added AIR dynamic identity lowering and map key/value indexed helper lowering used by map iteration.
+- Added AIR closure/capture lowering and simple tagged-object union wrap/match lowering.

@@ -2150,3 +2150,82 @@ fn sum(values: [Str: Int]) Int {
 		t.Fatalf("expected map key/value index helpers in AIR JS output, got:\n%s", source)
 	}
 }
+
+func TestGenerateSourcesFromAIRClosures(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn create_adder(base: Int) fn(Int) Int {
+  fn(value: Int) Int { base + value }
+}
+
+let add_two = create_adder(2)
+let result = add_two(40)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := ""
+	for _, content := range files {
+		source += string(content)
+	}
+	if !strings.Contains(source, "function(value) {") || !strings.Contains(source, "return add_two(40);") && !strings.Contains(source, "const result = add_two(40);") {
+		t.Fatalf("expected closure literal and call in AIR JS output, got:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesFromAIRUnionMatch(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+type Printable = Str | Int | Bool
+
+fn print(p: Printable) Str {
+  match p {
+    Str(str) => str,
+    Int(num) => num.to_str(),
+    _ => "boolean value",
+  }
+}
+
+let value = print(20)
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := ""
+	for _, content := range files {
+		source += string(content)
+	}
+	if !strings.Contains(source, "__ard_union_tag") || !strings.Contains(source, ".value;") {
+		t.Fatalf("expected union wrap/match in AIR JS output, got:\n%s", source)
+	}
+}
