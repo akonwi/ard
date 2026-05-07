@@ -211,6 +211,104 @@ func TestRunProgramSupportsCommonStdlibExterns(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesUsesExpectedLocalTypeForMaybeNone(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn main() Bool {
+			let found: Int? = maybe::none()
+			found.is_none()
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "runtime.Maybe[int]{}") {
+		t.Fatalf("generated source missing typed maybe none:\n%s", source)
+	}
+	if strings.Contains(source, "runtime.Maybe[struct {") {
+		t.Fatalf("generated source used untyped maybe none:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesUsesExpectedDefaultTypeForResultOr(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn fetch() Int?!Str {
+			let empty: Int? = maybe::none()
+			Result::ok(empty)
+		}
+
+		fn main() Bool {
+			let value = fetch().or(maybe::none())
+			value.is_none()
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if strings.Contains(source, "runtime.Maybe[struct {") {
+		t.Fatalf("generated source used untyped maybe default:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesSkipsVoidAssignmentForStatementMatchBranches(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn main() Bool {
+			match maybe::some(1) {
+				value => value == 1,
+				_ => (),
+			}
+			false
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if strings.Contains(source, "= nil") {
+		t.Fatalf("generated source assigned nil in statement match lowering:\n%s", source)
+	}
+}
+
+func TestRunProgramSupportsVoidFiberFunctions(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/async
+
+		fn job() Void {
+			()
+		}
+
+		fn main() Void {
+			async::start(job)
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestTypeNameUsesUniqueFallbackWhenModuleOwnershipIsMissing(t *testing.T) {
+	program := &air.Program{}
+	left := typeName(program, air.TypeInfo{ID: 1, Name: "Request"})
+	right := typeName(program, air.TypeInfo{ID: 2, Name: "Request"})
+	if left == right {
+		t.Fatalf("fallback type names should be unique, got %q", left)
+	}
+}
+
 func TestGenerateSourcesSupportsResultExpectAndStringPredicates(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io
