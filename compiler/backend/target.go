@@ -3,20 +3,17 @@ package backend
 import "fmt"
 
 const (
-	TargetBytecode  = "bytecode"
 	TargetVMNext    = "vm_next"
 	TargetGo        = "go"
 	TargetJSBrowser = "js-browser"
 	TargetJSServer  = "js-server"
-	DefaultTarget   = TargetBytecode
+	DefaultTarget   = TargetVMNext
 )
 
 func ParseTarget(raw string) (string, error) {
 	switch raw {
 	case "", DefaultTarget:
 		return DefaultTarget, nil
-	case TargetVMNext:
-		return TargetVMNext, nil
 	case TargetGo:
 		return TargetGo, nil
 	case TargetJSBrowser:

@@ -4390,11 +4390,6 @@ func resolveExternalBindingForTarget(target string, bindings map[string]string) 
 	if binding := bindings[backend.TargetGo]; binding != "" {
 		return backend.TargetGo, binding
 	}
-	if target == backend.TargetGo || target == backend.TargetBytecode || target == "" {
-		if binding := bindings[backend.TargetBytecode]; binding != "" {
-			return backend.TargetBytecode, binding
-		}
-	}
 	return "", ""
 }
 

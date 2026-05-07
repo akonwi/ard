@@ -259,11 +259,14 @@ func (vm *VM) validateHostType(typeID air.TypeID, target reflect.Type, param boo
 	if err != nil {
 		return err
 	}
-	if target == anyInterface && typeInfo.Kind != air.TypeDynamic && typeInfo.Kind != air.TypeExtern && typeInfo.Kind != air.TypeUnion && !vm.isEncodableTraitObject(typeInfo) {
-		if param {
-			return fmt.Errorf("empty interface parameters are only supported for Dynamic, extern, union, and Encodable trait extern values, got %s", typeInfo.Name)
+	if target == anyInterface {
+		if !vm.canPassAsHostAny(typeInfo) {
+			if param {
+				return fmt.Errorf("empty interface parameters are not supported for AIR type %s", typeInfo.Name)
+			}
+			return fmt.Errorf("empty interface returns are not supported for AIR type %s", typeInfo.Name)
 		}
-		return fmt.Errorf("empty interface returns are only supported for Dynamic, extern, union, and Encodable trait extern values, got %s", typeInfo.Name)
+		return nil
 	}
 	switch typeInfo.Kind {
 	case air.TypeVoid:
@@ -462,7 +465,17 @@ func (vm *VM) valueToHost(value Value, target reflect.Type) (reflect.Value, erro
 		if err != nil {
 			return reflect.Value{}, err
 		}
-		return reflect.Value{}, fmt.Errorf("empty interface parameters are only supported for Dynamic, extern, union, and Encodable trait extern values, got %s", typeInfo.Name)
+		if vm.canPassAsHostAny(typeInfo) {
+			encoded, err := vm.hostAnyValue(value)
+			if err != nil {
+				return reflect.Value{}, err
+			}
+			if encoded == nil {
+				return reflect.Zero(target), nil
+			}
+			return reflect.ValueOf(encoded), nil
+		}
+		return reflect.Value{}, fmt.Errorf("empty interface parameters are not supported for AIR type %s", typeInfo.Name)
 	}
 	if target.Kind() == reflect.Pointer {
 		if value.Kind == ValueStruct {
@@ -750,27 +763,42 @@ func (vm *VM) traitObjectToHost(value Value, target reflect.Type) (reflect.Value
 	if !vm.isEncodableTraitObject(typeInfo) {
 		return reflect.Value{}, fmt.Errorf("trait object %s cannot be passed as host any", typeInfo.Name)
 	}
-	vm.recordRefAccess(refAccessTraitObject)
-	traitObject, err := value.traitObjectValue()
+	encoded, err := vm.hostAnyValue(value)
 	if err != nil {
 		return reflect.Value{}, err
 	}
-	switch traitObject.Value.Kind {
-	case ValueInt:
-		return reflect.ValueOf(traitObject.Value.Int), nil
-	case ValueFloat:
-		return reflect.ValueOf(traitObject.Value.Float), nil
-	case ValueBool:
-		return reflect.ValueOf(traitObject.Value.Bool), nil
-	case ValueStr:
-		return reflect.ValueOf(traitObject.Value.Str), nil
-	default:
-		memberInfo, err := vm.typeInfo(traitObject.Value.Type)
-		if err != nil {
-			return reflect.Value{}, err
-		}
-		return reflect.Value{}, fmt.Errorf("Encodable member %s cannot be passed as host any", memberInfo.Name)
+	if encoded == nil {
+		return reflect.Zero(target), nil
 	}
+	return reflect.ValueOf(encoded), nil
+}
+
+func (vm *VM) canPassAsHostAny(typeInfo air.TypeInfo) bool {
+	switch typeInfo.Kind {
+	case air.TypeVoid, air.TypeInt, air.TypeFloat, air.TypeBool, air.TypeStr, air.TypeEnum,
+		air.TypeDynamic, air.TypeExtern, air.TypeUnion, air.TypeMaybe, air.TypeList, air.TypeMap, air.TypeStruct:
+		return true
+	default:
+		return vm.isEncodableTraitObject(typeInfo)
+	}
+}
+
+func (vm *VM) isEncodableType(typeInfo air.TypeInfo) bool {
+	if vm.isEncodableTraitObject(typeInfo) {
+		return true
+	}
+	for _, impl := range vm.program.Impls {
+		if impl.ForType != typeInfo.ID {
+			continue
+		}
+		if impl.Trait < 0 || int(impl.Trait) >= len(vm.program.Traits) {
+			continue
+		}
+		if vm.program.Traits[impl.Trait].Name == "Encodable" {
+			return true
+		}
+	}
+	return false
 }
 
 func (vm *VM) isEncodableTraitObject(typeInfo air.TypeInfo) bool {
@@ -781,6 +809,152 @@ func (vm *VM) isEncodableTraitObject(typeInfo air.TypeInfo) bool {
 		return false
 	}
 	return vm.program.Traits[typeInfo.Trait].Name == "Encodable"
+}
+
+func (vm *VM) hostAnyValue(value Value) (any, error) {
+	typeInfo, err := vm.typeInfo(value.Type)
+	if err != nil {
+		return nil, err
+	}
+	return vm.hostAnyValueWithType(value, typeInfo)
+}
+
+func (vm *VM) encodableValueToHostAny(value Value, typeInfo air.TypeInfo) (any, error) {
+	return vm.hostAnyValueWithType(value, typeInfo)
+}
+
+func (vm *VM) hostAnyValueWithType(value Value, typeInfo air.TypeInfo) (any, error) {
+	switch value.Kind {
+	case ValueVoid:
+		return nil, nil
+	case ValueInt:
+		return value.Int, nil
+	case ValueFloat:
+		return value.Float, nil
+	case ValueBool:
+		return value.Bool, nil
+	case ValueStr:
+		return value.Str, nil
+	case ValueEnum:
+		return value.Int, nil
+	case ValueDynamic:
+		return value.Ref, nil
+	case ValueMaybe:
+		vm.recordRefAccess(refAccessMaybe)
+		maybeValue, err := value.maybeValue()
+		if err != nil {
+			return nil, err
+		}
+		vm.recordMaybeAccess(maybeValue)
+		if !maybeValue.Some {
+			return nil, nil
+		}
+		elemInfo, err := vm.typeInfo(typeInfo.Elem)
+		if err != nil {
+			return nil, err
+		}
+		return vm.encodableValueToHostAny(maybeValue.Value, elemInfo)
+	case ValueList:
+		vm.recordRefAccess(refAccessList)
+		listValue, err := value.listValue()
+		if err != nil {
+			return nil, err
+		}
+		out := make([]any, len(listValue.Items))
+		elemInfo, err := vm.typeInfo(typeInfo.Elem)
+		if err != nil {
+			return nil, err
+		}
+		for i, item := range listValue.Items {
+			converted, err := vm.encodableValueToHostAny(item, elemInfo)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = converted
+		}
+		return out, nil
+	case ValueMap:
+		vm.recordRefAccess(refAccessMap)
+		mapValue, err := value.mapValue()
+		if err != nil {
+			return nil, err
+		}
+		keyInfo, err := vm.typeInfo(typeInfo.Key)
+		if err != nil {
+			return nil, err
+		}
+		valueInfo, err := vm.typeInfo(typeInfo.Value)
+		if err != nil {
+			return nil, err
+		}
+		out := make(map[string]any, len(mapValue.Entries))
+		for _, entry := range mapValue.Entries {
+			keyAny, err := vm.encodableValueToHostAny(entry.Key, keyInfo)
+			if err != nil {
+				return nil, err
+			}
+			key, ok := keyAny.(string)
+			if !ok {
+				return nil, fmt.Errorf("Encodable map key %s must encode to Str", keyInfo.Name)
+			}
+			converted, err := vm.encodableValueToHostAny(entry.Value, valueInfo)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = converted
+		}
+		return out, nil
+	case ValueStruct:
+		vm.recordRefAccess(refAccessStruct)
+		structValue, err := value.structValue()
+		if err != nil {
+			return nil, err
+		}
+		out := make(map[string]any, len(typeInfo.Fields))
+		for i, field := range typeInfo.Fields {
+			fieldInfo, err := vm.typeInfo(field.Type)
+			if err != nil {
+				return nil, err
+			}
+			converted, err := vm.encodableValueToHostAny(structValue.Fields[i], fieldInfo)
+			if err != nil {
+				return nil, err
+			}
+			out[field.Name] = converted
+		}
+		return out, nil
+	case ValueTraitObject:
+		vm.recordRefAccess(refAccessTraitObject)
+		traitObject, err := value.traitObjectValue()
+		if err != nil {
+			return nil, err
+		}
+		memberInfo, err := vm.typeInfo(traitObject.Value.Type)
+		if err != nil {
+			return nil, err
+		}
+		return vm.encodableValueToHostAny(traitObject.Value, memberInfo)
+	case ValueUnion:
+		vm.recordRefAccess(refAccessUnion)
+		unionValue, err := value.unionValue()
+		if err != nil {
+			return nil, err
+		}
+		memberInfo, err := vm.typeInfo(unionValue.Value.Type)
+		if err != nil {
+			return nil, err
+		}
+		return vm.encodableValueToHostAny(unionValue.Value, memberInfo)
+	case ValueExtern:
+		vm.recordRefAccess(refAccessExtern)
+		externValue, err := value.externValue()
+		if err != nil {
+			return nil, err
+		}
+		return externValue.Handle, nil
+	default:
+		return nil, fmt.Errorf("Encodable value %s cannot be passed as host any", typeInfo.Name)
+	}
 }
 
 func (vm *VM) closureToHostCallback(value Value, target reflect.Type) (reflect.Value, error) {

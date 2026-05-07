@@ -36,5 +36,20 @@ func TestVMNextBytecodeParityEncodeJSONPrimitives(t *testing.T) {
 			`,
 			want: `true`,
 		},
+		{
+			name: "encoding struct with nullable field",
+			input: `
+				use ard/json
+				use ard/maybe
+
+				struct Person {
+					name: Str,
+					employed: Bool?,
+				}
+
+				json::encode(Person{name: "kit", employed: maybe::none()}).expect("encode failed")
+			`,
+			want: `{"employed":null,"name":"kit"}`,
+		},
 	})
 }

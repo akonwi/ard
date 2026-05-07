@@ -71,24 +71,6 @@ func main() {
 				os.Exit(1)
 			}
 			switch target {
-			case backend.TargetBytecode:
-				module, err := loadModule(inputPath, target)
-				if err != nil {
-					os.Exit(1)
-				}
-				program, err := bytecode.NewEmitter().EmitProgram(module)
-				if err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-				if err := bytecode.VerifyProgram(program); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-				if runErr := runBytecodeProgram(program, os.Args); runErr != nil {
-					fmt.Println(runErr)
-					os.Exit(1)
-				}
 			case backend.TargetVMNext:
 				profile := newPipelineProfile("run vm_next")
 				defer profile.Print()
@@ -161,8 +143,6 @@ func main() {
 			}
 			var builtPath string
 			switch target {
-			case backend.TargetBytecode:
-				builtPath, err = buildBytecodeBinary(inputPath, outputPath, target)
 			case backend.TargetVMNext:
 				builtPath, err = buildVMNextBinary(inputPath, outputPath)
 			case backend.TargetGo:
