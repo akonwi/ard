@@ -9,6 +9,8 @@ description: Generate release notes for a new Ard version tag. Compares the diff
 
 Write release notes for a new Ard compiler/language version. Notes target **end-users** of the language and compiler — not internal contributors.
 
+In this repo, releases are created by the GitHub Actions release workflow after pushing a `v*` git tag. This skill assumes the tag has already been pushed and the workflow-created GitHub release already exists.
+
 ## Workflow
 
 ### 1. Identify the version range
@@ -84,11 +86,13 @@ Update the existing GitHub release with the notes:
 gh release edit <tag> --notes "$(cat notes.md)"
 ```
 
-Or if no release exists yet:
+Do **not** normally run `gh release create` in this repo. The expected flow is:
 
-```bash
-gh release create <tag> --title "<tag>" --notes "$(cat notes.md)"
-```
+1. create and push a `v*` git tag
+2. let the `Release Binaries` GitHub Actions workflow create the release and upload assets
+3. update that workflow-created release with `gh release edit`
+
+Only use manual `gh release create` as an exceptional recovery step if the workflow failed to create the release and you are intentionally bypassing the normal process.
 
 ## Reference
 
