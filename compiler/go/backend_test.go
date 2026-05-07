@@ -3,6 +3,7 @@ package gotarget
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -102,16 +103,16 @@ func TestGenerateSourcesSupportsStructsAndEnums(t *testing.T) {
 	for _, source := range sources {
 		combined += string(source)
 	}
-	if !strings.Contains(combined, "type type__Direction int") {
+	if !regexp.MustCompile(`type type_\d+__Direction int`).MatchString(combined) {
 		t.Fatalf("generated source missing enum type:\n%s", combined)
 	}
-	if !strings.Contains(combined, "type__Direction__Down") {
+	if !regexp.MustCompile(`type_\d+__Direction__Down`).MatchString(combined) {
 		t.Fatalf("generated source missing enum constants:\n%s", combined)
 	}
-	if !strings.Contains(combined, "type type__User struct") {
+	if !regexp.MustCompile(`type type_\d+__User struct`).MatchString(combined) {
 		t.Fatalf("generated source missing struct type:\n%s", combined)
 	}
-	if !strings.Contains(combined, "type__User{age: 41, name: \"Ada\"}") {
+	if !regexp.MustCompile(`type_\d+__User\{age: 41, name: "Ada"\}`).MatchString(combined) {
 		t.Fatalf("generated source missing struct literal lowering:\n%s", combined)
 	}
 	if !strings.Contains(combined, ".age + 1") {
@@ -397,7 +398,7 @@ func TestGenerateSourcesUsesPointersForMutableStructParams(t *testing.T) {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !strings.Contains(source, "func test_ard__set_body(res *type__Response)") {
+	if !regexp.MustCompile(`func test_ard__set_body\(res \*type_\d+__Response\)`).MatchString(source) {
 		t.Fatalf("generated source missing pointer mutable param lowering:\n%s", source)
 	}
 	if !strings.Contains(source, "test_ard__set_body(&res_0)") {
