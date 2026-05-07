@@ -2478,3 +2478,38 @@ let person = models::Person{age: 42}
 		t.Fatalf("expected imported struct type declaration and constructor, got:\n%s", source)
 	}
 }
+
+func TestGenerateSourcesFromAIRSpecializedGenericNames(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+fn id<$T>(value: $T) $T { value }
+
+let a = id(1)
+let b = id("x")
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := string(files["main.mjs"])
+	if strings.Count(source, "function id(") != 0 || !strings.Contains(source, "function id__") {
+		t.Fatalf("expected specialized generic functions to be uniquely named, got:\n%s", source)
+	}
+	if !strings.Contains(source, "const a = id__") || !strings.Contains(source, "const b = id__") {
+		t.Fatalf("expected calls to specialized generic functions, got:\n%s", source)
+	}
+}

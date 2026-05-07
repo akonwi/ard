@@ -1378,7 +1378,21 @@ func (l *airJSLowerer) functionName(id air.FunctionID) string {
 	if fn.IsScript {
 		return "__ard_script"
 	}
-	return jsName(fn.Name)
+	name := jsName(fn.Name)
+	if l.functionNameIsAmbiguous(fn) {
+		return name + "__" + strconv.Itoa(int(id))
+	}
+	return name
+}
+
+func (l *airJSLowerer) functionNameIsAmbiguous(fn air.Function) bool {
+	count := 0
+	for _, other := range l.program.Functions {
+		if other.Module == fn.Module && other.Name == fn.Name && !other.IsScript {
+			count++
+		}
+	}
+	return count > 1
 }
 
 func (l *airJSLowerer) functionRef(from air.ModuleID, id air.FunctionID) string {

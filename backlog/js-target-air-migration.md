@@ -487,5 +487,6 @@ Once parity is acceptable:
 - Added AIR extern return adapters for structs, lists, maps, and nested Maybe/Result payloads.
 - Added AIR browser BuildProgram coverage for project FFI imports and companion copying.
 - AIR JS now emits struct/enum type declarations into each generated module so imported struct literals have constructors available.
+- Added deterministic unique JS names for same-module AIR function specializations to avoid duplicate function declarations.
 - Validation checkpoint: `cd compiler && go test ./air ./go ./backend` passed.
 - Trialed routing main CLI through AIR, but kept legacy CLI route active until AIR JS reaches stdlib/browser parity.
