@@ -1356,10 +1356,16 @@ func (l *airJSLowerer) lowerBinaryCall(fn air.Function, expr air.Expr, build fun
 }
 
 func (l *airJSLowerer) localName(fn air.Function, local air.LocalID) string {
-	if int(local) >= 0 && int(local) < len(fn.Locals) {
-		return jsName(fn.Locals[local].Name)
+	if int(local) < 0 || int(local) >= len(fn.Locals) {
+		return "__local" + strconv.Itoa(int(local))
 	}
-	return "__local" + strconv.Itoa(int(local))
+	base := jsName(fn.Locals[local].Name)
+	for id, candidate := range fn.Locals {
+		if air.LocalID(id) != local && jsName(candidate.Name) == base {
+			return base + "$" + strconv.Itoa(int(local))
+		}
+	}
+	return base
 }
 
 func (l *airJSLowerer) typeModule(typeID air.TypeID) (air.ModuleID, bool) {
