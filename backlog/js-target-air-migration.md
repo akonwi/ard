@@ -436,7 +436,7 @@ Once parity is acceptable:
 ### Tests and validation
 
 - [x] Add unit tests for minimal AIR JS source generation.
-- [ ] Port existing JS build tests to the AIR backend.
+- [x] Port existing JS build tests to the AIR backend.
 - [x] Add `js-server` run parity tests for primitive programs.
 - [x] Add parity tests for structs/enums/lists/maps.
   - [x] Added initial AIR source assertions for list/map values and methods.
@@ -457,7 +457,7 @@ Once parity is acceptable:
 - [x] Keep or update browser-output tests.
 - [x] Run `cd compiler && go test ./javascript`.
 - [x] Run `cd compiler && go test ./air ./go ./backend`.
-- [ ] Run `cd compiler && go generate ./std_lib/ffi && go test ./...` before final cleanup.
+- [x] Run `cd compiler && go generate ./std_lib/ffi && go test ./...` before final cleanup.
 
 ## Open Design Points
 
@@ -497,3 +497,5 @@ Once parity is acceptable:
 - Validation checkpoint: `cd compiler && go test ./air ./go ./backend` passed.
 - Trialed routing main CLI through AIR, but kept legacy CLI route active until AIR JS reaches stdlib/browser parity.
 - Routed JavaScript CLI run/build through frontend → AIR → AIR JS backend after adding runtime parity coverage.
+- Routed stdlib JS shared externs backed by `ard.prelude.mjs` to the prelude namespace under AIR, preserving decode/json/dynamic/promise/fetch behavior.
+- Validation checkpoint: `cd compiler && go generate ./std_lib/ffi && go test ./...` passed.

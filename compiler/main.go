@@ -656,7 +656,7 @@ func reportTestSummary(outcomes []testOutcome) {
 func runJSProgram(inputPath string, target string, args []string) error {
 	profile := newPipelineProfile("run javascript")
 	defer profile.Print()
-	var loaded frontend.LoadResult
+	var loaded *frontend.LoadResult
 	if err := profile.Time("frontend.load_module", func() error {
 		var loadErr error
 		loaded, loadErr = frontend.LoadModule(inputPath, target)
@@ -683,7 +683,7 @@ func runJSProgram(inputPath string, target string, args []string) error {
 func buildJSProgram(inputPath string, outputPath string, target string) (string, error) {
 	profile := newPipelineProfile("build javascript")
 	defer profile.Print()
-	var loaded frontend.LoadResult
+	var loaded *frontend.LoadResult
 	if err := profile.Time("frontend.load_module", func() error {
 		var loadErr error
 		loaded, loadErr = frontend.LoadModule(inputPath, target)

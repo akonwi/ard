@@ -1428,7 +1428,7 @@ func (l *airJSLowerer) externRef(id air.ExternID) (string, error) {
 	objectName := "project"
 	if int(ext.Module) >= 0 && int(ext.Module) < len(l.program.Modules) && strings.HasPrefix(l.program.Modules[ext.Module].Path, "ard/") {
 		objectName = "stdlib"
-		if _, ok := ext.Bindings["js"]; ok && ext.Bindings[l.target] == "" {
+		if isAIRJSPreludeExtern(binding) {
 			objectName = "prelude"
 		}
 	}
@@ -1436,6 +1436,21 @@ func (l *airJSLowerer) externRef(id air.ExternID) (string, error) {
 		return objectName + "." + binding, nil
 	}
 	return objectName + "[" + strconv.Quote(binding) + "]", nil
+}
+
+func isAIRJSPreludeExtern(binding string) bool {
+	switch binding {
+	case "JsonToDynamic", "DecodeString", "DecodeInt", "DecodeFloat", "DecodeBool", "IsNil",
+		"DynamicToList", "DynamicToMap", "ExtractField", "StrToDynamic", "IntToDynamic",
+		"FloatToDynamic", "BoolToDynamic", "VoidToDynamic", "ListToDynamic", "MapToDynamic",
+		"JsonEncode", "promiseResolve", "promiseReject", "promiseMap", "promiseThen",
+		"promiseRescue", "promiseInspect", "promiseInspectError", "promiseFinally",
+		"promiseAll", "promiseRace", "promiseDelay", "fetchNative", "fetchResponseUrl",
+		"fetchResponseStatus", "fetchResponseHeaders", "fetchResponseBody", "fetchErrorMessage":
+		return true
+	default:
+		return false
+	}
 }
 
 func (l *airJSLowerer) moduleExports(module air.Module) []string {
