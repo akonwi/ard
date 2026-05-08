@@ -1440,10 +1440,13 @@ func (l *airJSLowerer) externRef(id air.ExternID) (string, error) {
 
 func (l *airJSLowerer) moduleExports(module air.Module) []string {
 	exports := []string{}
-	for _, typeID := range module.Types {
-		t, ok := l.typeInfo(typeID)
-		if ok && (t.Kind == air.TypeStruct || t.Kind == air.TypeEnum) {
-			exports = append(exports, jsName(t.Name))
+	// lowerModule currently emits all struct/enum declarations into every generated
+	// module so imported constructors are available even when AIR does not retain
+	// a precise type-owner mapping. Keep exports aligned with the emitted
+	// declarations so browser/server integration code can import enum values too.
+	for _, typ := range l.program.Types {
+		if typ.Kind == air.TypeStruct || typ.Kind == air.TypeEnum {
+			exports = append(exports, jsName(typ.Name))
 		}
 	}
 	for _, functionID := range module.Functions {

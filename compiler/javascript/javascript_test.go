@@ -2479,6 +2479,77 @@ let person = models::Person{age: 42}
 	}
 }
 
+func TestBuildProgramFromAIRRunsStructEnumListMapParity(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+struct Person { age: Int }
+
+enum Status { active, inactive }
+
+fn person_age() Int {
+  let person = Person{age: 41}
+  person.age + 1
+}
+
+fn status_label(status: Status) Str {
+  match status {
+    Status::active => "active",
+    Status::inactive => "inactive",
+  }
+}
+
+fn list_score() Int {
+  mut values = [1, 2]
+  values.push(3)
+  values.at(0) + values.size()
+}
+
+fn map_score() Int {
+  ["a": 2].get("a").or(0)
+}
+
+let keep_person = person_age()
+let keep_status = status_label(Status::active)
+let keep_list = list_score()
+let keep_map = map_score()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := BuildProgram(program, outputPath, backend.TargetJSServer, loaded.ProjectInfo); err != nil {
+		t.Fatalf("build AIR JS program: %v", err)
+	}
+	script := `
+import { pathToFileURL } from 'node:url';
+const m = await import(pathToFileURL(process.argv[1]).href);
+const got = [m.person_age(), m.status_label(m.Status.active), m.list_score(), m.map_score()];
+console.log(JSON.stringify(got));
+`
+	cmd := exec.Command("node", "--input-type=module", "-e", script, outputPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run AIR JS module: %v\n%s", err, string(out))
+	}
+	if strings.TrimSpace(string(out)) != `[42,"active",4,2]` {
+		t.Fatalf("unexpected AIR JS runtime output: %s", string(out))
+	}
+}
+
 func TestGenerateSourcesFromAIRSpecializedGenericNames(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
