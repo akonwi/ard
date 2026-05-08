@@ -2652,6 +2652,79 @@ console.log(JSON.stringify(got));
 	}
 }
 
+func TestBuildProgramFromAIRRunsImportedModuleParity(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "utils.ard"), []byte(`
+struct Person { age: Int }
+
+fn add(a: Int, b: Int) Int {
+  a + b
+}
+
+fn make_person(age: Int) Person {
+  Person{age: age}
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write utils module: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/utils
+
+fn imported_call() Int {
+  utils::add(20, 22)
+}
+
+fn imported_struct_literal() Int {
+  let person = utils::Person{age: imported_call()}
+  person.age
+}
+
+fn imported_struct_return() Int {
+  let person = utils::make_person(9)
+  person.age
+}
+
+let keep_call = imported_call()
+let keep_literal = imported_struct_literal()
+let keep_return = imported_struct_return()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := BuildProgram(program, outputPath, backend.TargetJSServer, loaded.ProjectInfo); err != nil {
+		t.Fatalf("build AIR JS program: %v", err)
+	}
+	script := `
+import { pathToFileURL } from 'node:url';
+const m = await import(pathToFileURL(process.argv[1]).href);
+const got = [m.imported_call(), m.imported_struct_literal(), m.imported_struct_return()];
+console.log(JSON.stringify(got));
+`
+	cmd := exec.Command("node", "--input-type=module", "-e", script, outputPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run AIR JS module: %v\n%s", err, string(out))
+	}
+	if strings.TrimSpace(string(out)) != `[42,42,9]` {
+		t.Fatalf("unexpected AIR JS runtime output: %s", string(out))
+	}
+}
+
 func TestGenerateSourcesFromAIRSpecializedGenericNames(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
