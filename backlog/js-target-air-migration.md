@@ -436,7 +436,8 @@ Once parity is acceptable:
 ### Tests and validation
 
 - [x] Add unit tests for minimal AIR JS source generation.
-- [x] Port existing JS build tests to the AIR backend.
+- [ ] Port existing direct JS build/source-shape tests to the AIR backend or replace them with AIR parity/runtime tests.
+  - [x] Existing CLI-backed JS tests now exercise AIR through `main.go`.
 - [x] Add `js-server` run parity tests for primitive programs.
 - [x] Add parity tests for structs/enums/lists/maps.
   - [x] Added initial AIR source assertions for list/map values and methods.
