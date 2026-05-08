@@ -449,6 +449,9 @@ func (l *airJSLowerer) lowerStmt(fn air.Function, stmt air.Stmt) (string, error)
 		}
 		return target + "." + jsName(t.Fields[stmt.Field].Name) + " = " + value + ";", nil
 	case air.StmtExpr:
+		if stmt.Expr != nil && stmt.Expr.Kind == air.ExprIf {
+			return l.lowerIfStmt(fn, *stmt.Expr)
+		}
 		value, err := l.lowerExpr(fn, *stmt.Expr)
 		if err != nil {
 			return "", err
@@ -469,6 +472,22 @@ func (l *airJSLowerer) lowerStmt(fn air.Function, stmt air.Stmt) (string, error)
 	default:
 		return "", fmt.Errorf("unsupported AIR JS statement kind %d", stmt.Kind)
 	}
+}
+
+func (l *airJSLowerer) lowerIfStmt(fn air.Function, expr air.Expr) (string, error) {
+	condition, err := l.lowerExpr(fn, *expr.Condition)
+	if err != nil {
+		return "", err
+	}
+	thenBody, err := l.lowerBlock(fn, expr.Then, false)
+	if err != nil {
+		return "", err
+	}
+	elseBody, err := l.lowerBlock(fn, expr.Else, false)
+	if err != nil {
+		return "", err
+	}
+	return renderJSDoc(jsIfDoc(condition, thenBody, jsBareBlockDoc(elseBody))), nil
 }
 
 func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error) {

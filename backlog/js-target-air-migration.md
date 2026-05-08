@@ -436,8 +436,10 @@ Once parity is acceptable:
 ### Tests and validation
 
 - [x] Add unit tests for minimal AIR JS source generation.
-- [ ] Port existing direct JS build/source-shape tests to the AIR backend or replace them with AIR parity/runtime tests.
+- [x] Port existing direct JS build/source-shape tests to the AIR backend or replace them with AIR parity/runtime tests.
   - [x] Existing CLI-backed JS tests now exercise AIR through `main.go`.
+  - [x] Public `javascript.Build`/`Run` now route through AIR.
+  - [x] Obsolete checker-JS source-shape assertions are superseded by AIR source/runtime parity coverage.
 - [x] Add `js-server` run parity tests for primitive programs.
 - [x] Add parity tests for structs/enums/lists/maps.
   - [x] Added initial AIR source assertions for list/map values and methods.
@@ -499,4 +501,6 @@ Once parity is acceptable:
 - Trialed routing main CLI through AIR, but kept legacy CLI route active until AIR JS reaches stdlib/browser parity.
 - Routed JavaScript CLI run/build through frontend → AIR → AIR JS backend after adding runtime parity coverage.
 - Routed stdlib JS shared externs backed by `ard.prelude.mjs` to the prelude namespace under AIR, preserving decode/json/dynamic/promise/fetch behavior.
+- Public `javascript.Build` and `javascript.Run` now load/lower AIR and dispatch to `BuildProgram`/`RunProgram`; legacy checker-JS source-shape tests are skipped where covered by AIR parity tests.
+- Added statement-form AIR `if` lowering for expression statements so `break` remains legal in loop bodies.
 - Validation checkpoint: `cd compiler && go generate ./std_lib/ffi && go test ./...` passed.

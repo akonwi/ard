@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/frontend"
@@ -56,86 +56,34 @@ func loweredExprText(value loweredExpr) string {
 }
 
 func Build(inputPath, outputPath, target string) (string, error) {
-	module, projectInfo, err := loadModule(inputPath, target)
+	program, projectInfo, err := loadAIRProgram(inputPath, target)
 	if err != nil {
 		return "", err
 	}
-
-	resolvedOutputPath, err := filepath.Abs(outputPath)
-	if err != nil {
-		return "", err
-	}
-	outputDir := filepath.Dir(resolvedOutputPath)
-	rootFileName := filepath.Base(resolvedOutputPath)
-	files, ffi, err := emitBundle(module, target, emitOptions{}, rootFileName)
-	if err != nil {
-		return "", err
-	}
-
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return "", err
-	}
-	for relPath, source := range files {
-		absPath := filepath.Join(outputDir, filepath.FromSlash(relPath))
-		if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(absPath, source, 0o644); err != nil {
-			return "", err
-		}
-	}
-	if err := writeFFICompanions(outputDir, target, projectInfo, ffi); err != nil {
-		return "", err
-	}
-	return outputPath, nil
+	return BuildProgram(program, outputPath, target, projectInfo)
 }
 
-func Run(inputPath, target string, _ []string) error {
+func Run(inputPath, target string, args []string) error {
 	if target == backend.TargetJSBrowser {
 		return fmt.Errorf("js-browser cannot be run directly; build and serve the emitted module instead")
 	}
-	if target != backend.TargetJSServer {
-		return fmt.Errorf("unsupported JavaScript run target: %s", target)
-	}
-	if _, err := exec.LookPath("node"); err != nil {
-		return fmt.Errorf("node is required to run js-server output: %w", err)
-	}
-
-	module, projectInfo, err := loadModule(inputPath, target)
+	program, projectInfo, err := loadAIRProgram(inputPath, target)
 	if err != nil {
 		return err
 	}
+	return RunProgram(program, target, args, projectInfo)
+}
 
-	tmpDir, err := os.MkdirTemp("", "ard-js-run-*")
+func loadAIRProgram(inputPath, target string) (*air.Program, *checker.ProjectInfo, error) {
+	loaded, err := frontend.LoadModule(inputPath, target)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	defer os.RemoveAll(tmpDir)
-
-	files, ffi, err := emitBundle(module, target, emitOptions{invokeMain: true}, "main.mjs")
+	program, err := air.Lower(loaded.Module)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	for relPath, source := range files {
-		absPath := filepath.Join(tmpDir, filepath.FromSlash(relPath))
-		if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(absPath, source, 0o644); err != nil {
-			return err
-		}
-	}
-	if err := writeFFICompanions(tmpDir, target, projectInfo, ffi); err != nil {
-		return err
-	}
-	entryPath := filepath.Join(tmpDir, "main.mjs")
-
-	cmd := exec.Command("node", entryPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	cmd.Env = append([]string{}, os.Environ()...)
-	return cmd.Run()
+	return program, loaded.ProjectInfo, nil
 }
 
 func loadModule(inputPath string, target string) (checker.Module, *checker.ProjectInfo, error) {
