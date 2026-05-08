@@ -114,7 +114,7 @@ func main() {
 					os.Exit(1)
 				}
 			case backend.TargetJSBrowser, backend.TargetJSServer:
-				if err := javascript.Run(inputPath, target, os.Args); err != nil {
+				if err := runJSProgram(inputPath, target, os.Args); err != nil {
 					fmt.Println(err)
 					os.Exit(1)
 				}
@@ -142,7 +142,7 @@ func main() {
 			case backend.TargetGo:
 				builtPath, err = buildGoBinary(inputPath, outputPath, target)
 			case backend.TargetJSBrowser, backend.TargetJSServer:
-				builtPath, err = javascript.Build(inputPath, outputPath, target)
+				builtPath, err = buildJSProgram(inputPath, outputPath, target)
 			default:
 				err = fmt.Errorf("unknown target: %s", target)
 			}
@@ -651,6 +651,63 @@ func reportTestSummary(outcomes []testOutcome) {
 		}
 	}
 	fmt.Printf("\n%d passed; %d failed; %d panicked\n", passed, failed, panicked)
+}
+
+func runJSProgram(inputPath string, target string, args []string) error {
+	profile := newPipelineProfile("run javascript")
+	defer profile.Print()
+	var loaded frontend.LoadResult
+	if err := profile.Time("frontend.load_module", func() error {
+		var loadErr error
+		loaded, loadErr = frontend.LoadModule(inputPath, target)
+		return loadErr
+	}); err != nil {
+		return err
+	}
+	var program *air.Program
+	if err := profile.Time("air.lower", func() error {
+		var lowerErr error
+		program, lowerErr = air.Lower(loaded.Module)
+		return lowerErr
+	}); err != nil {
+		return err
+	}
+	if err := profile.Time("javascript.run", func() error {
+		return javascript.RunProgram(program, target, args, loaded.ProjectInfo)
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func buildJSProgram(inputPath string, outputPath string, target string) (string, error) {
+	profile := newPipelineProfile("build javascript")
+	defer profile.Print()
+	var loaded frontend.LoadResult
+	if err := profile.Time("frontend.load_module", func() error {
+		var loadErr error
+		loaded, loadErr = frontend.LoadModule(inputPath, target)
+		return loadErr
+	}); err != nil {
+		return "", err
+	}
+	var program *air.Program
+	if err := profile.Time("air.lower", func() error {
+		var lowerErr error
+		program, lowerErr = air.Lower(loaded.Module)
+		return lowerErr
+	}); err != nil {
+		return "", err
+	}
+	var builtPath string
+	if err := profile.Time("javascript.build", func() error {
+		var buildErr error
+		builtPath, buildErr = javascript.BuildProgram(program, outputPath, target, loaded.ProjectInfo)
+		return buildErr
+	}); err != nil {
+		return "", err
+	}
+	return builtPath, nil
 }
 
 func buildGoBinary(inputPath string, outputPath string, target string) (string, error) {

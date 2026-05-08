@@ -305,10 +305,10 @@ Once parity is acceptable:
 
 ### CLI integration
 
-- [ ] Update `ard run --target js-server` to lower AIR before JS dispatch.
-- [ ] Keep `ard run --target js-browser` rejected with a clear message.
-- [ ] Update `ard build --target js-server` to lower AIR before JS dispatch.
-- [ ] Update `ard build --target js-browser` to lower AIR before JS dispatch.
+- [x] Update `ard run --target js-server` to lower AIR before JS dispatch.
+- [x] Keep `ard run --target js-browser` rejected with a clear message.
+- [x] Update `ard build --target js-server` to lower AIR before JS dispatch.
+- [x] Update `ard build --target js-browser` to lower AIR before JS dispatch.
 - [x] Preserve project-info access for project FFI companion copying.
 
 ### Module/source generation
@@ -496,3 +496,4 @@ Once parity is acceptable:
 - Added AIR Node runtime parity tests for struct/enum/list/map behavior, Maybe/Result/try/match behavior, imported module behavior, and project extern adapters.
 - Validation checkpoint: `cd compiler && go test ./air ./go ./backend` passed.
 - Trialed routing main CLI through AIR, but kept legacy CLI route active until AIR JS reaches stdlib/browser parity.
+- Routed JavaScript CLI run/build through frontend → AIR → AIR JS backend after adding runtime parity coverage.
