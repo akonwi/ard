@@ -2725,6 +2725,78 @@ console.log(JSON.stringify(got));
 	}
 }
 
+func TestBuildProgramFromAIRRunsProjectExternParity(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.js-server.mjs"), []byte(`
+export function maybeValue() { return 6; }
+export function resultValue() { return { ok: 7 }; }
+export function getPerson() { return { age: 8 }; }
+export function getScores() { return { a: { age: 9 } }; }
+`), 0o644); err != nil {
+		t.Fatalf("failed to write project ffi: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+struct Person { age: Int }
+
+extern fn maybe_value() Int? = {
+  js-server = "maybeValue"
+}
+extern fn result_value() Int!Str = {
+  js-server = "resultValue"
+}
+extern fn get_person() Person = {
+  js-server = "getPerson"
+}
+extern fn get_scores() [Str: Person] = {
+  js-server = "getScores"
+}
+
+fn extern_score() Int {
+  let maybe = maybe_value().or(0)
+  let result = result_value().or(0)
+  let person = get_person()
+  let scores = get_scores()
+  maybe + result + person.age + scores.get("a").or(Person{age: 0}).age
+}
+
+let keep_extern = extern_score()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := BuildProgram(program, outputPath, backend.TargetJSServer, loaded.ProjectInfo); err != nil {
+		t.Fatalf("build AIR JS program: %v", err)
+	}
+	script := `
+import { pathToFileURL } from 'node:url';
+const m = await import(pathToFileURL(process.argv[1]).href);
+console.log(String(m.extern_score()));
+`
+	cmd := exec.Command("node", "--input-type=module", "-e", script, outputPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run AIR JS module: %v\n%s", err, string(out))
+	}
+	if strings.TrimSpace(string(out)) != `30` {
+		t.Fatalf("unexpected AIR JS runtime output: %s", string(out))
+	}
+}
+
 func TestGenerateSourcesFromAIRSpecializedGenericNames(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
