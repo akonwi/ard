@@ -2550,6 +2550,108 @@ console.log(JSON.stringify(got));
 	}
 }
 
+func TestBuildProgramFromAIRRunsMaybeResultTryMatchParity(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/maybe
+
+fn bucket(num: Int) Str {
+  match num {
+    0 => "zero",
+    1..3 => "few",
+    _ => "many",
+  }
+}
+
+fn maybe_some() Int {
+  match maybe::some(7) {
+    num => num,
+    _ => 0,
+  }
+}
+
+fn maybe_none() Int {
+  let empty: Int? = maybe::none()
+  match empty {
+    num => num,
+    _ => 11,
+  }
+}
+
+fn result_ok() Str {
+  let res: Int!Str = Result::ok(4)
+  match res {
+    ok(num) => num.to_str(),
+    err(msg) => msg,
+  }
+}
+
+fn result_err() Str {
+  let res: Int!Str = Result::err("no")
+  match res {
+    ok(num) => num.to_str(),
+    err(msg) => msg,
+  }
+}
+
+fn stringify(value: Int!Str) Str!Str {
+  let num = try value
+  Result::ok(num.to_str())
+}
+
+fn try_ok() Str {
+  stringify(Result::ok(5)).or("bad")
+}
+
+fn try_err() Str {
+  stringify(Result::err("boom")).or("fallback")
+}
+
+let keep_bucket = bucket(2)
+let keep_some = maybe_some()
+let keep_none = maybe_none()
+let keep_ok = result_ok()
+let keep_err = result_err()
+let keep_try_ok = try_ok()
+let keep_try_err = try_err()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := BuildProgram(program, outputPath, backend.TargetJSServer, loaded.ProjectInfo); err != nil {
+		t.Fatalf("build AIR JS program: %v", err)
+	}
+	script := `
+import { pathToFileURL } from 'node:url';
+const m = await import(pathToFileURL(process.argv[1]).href);
+const got = [m.bucket(0), m.bucket(2), m.bucket(9), m.maybe_some(), m.maybe_none(), m.result_ok(), m.result_err(), m.try_ok(), m.try_err()];
+console.log(JSON.stringify(got));
+`
+	cmd := exec.Command("node", "--input-type=module", "-e", script, outputPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run AIR JS module: %v\n%s", err, string(out))
+	}
+	if strings.TrimSpace(string(out)) != `["zero","few","many",7,11,"4","no","5","fallback"]` {
+		t.Fatalf("unexpected AIR JS runtime output: %s", string(out))
+	}
+}
+
 func TestGenerateSourcesFromAIRSpecializedGenericNames(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
