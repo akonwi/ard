@@ -10,6 +10,10 @@ function errorResult(error) {
   return { err: messageFromError(error) };
 }
 
+function maybeBool(value) {
+  return value && typeof value.isSome === "function" && value.isSome() ? Boolean(value.value) : false;
+}
+
 function fillStdinBuffer() {
   const chunk = Buffer.alloc(4096);
   const bytesRead = fs.readSync(0, chunk, 0, chunk.length, null);
@@ -18,6 +22,43 @@ function fillStdinBuffer() {
     return;
   }
   stdinBuffer += chunk.toString("utf8", 0, bytesRead);
+}
+
+export function Base64Encode(input, noPad) {
+  const encoded = Buffer.from(String(input), "utf8").toString("base64");
+  return maybeBool(noPad) ? encoded.replace(/=+$/g, "") : encoded;
+}
+
+export function Base64Decode(input, noPad) {
+  try {
+    let normalized = String(input);
+    if (maybeBool(noPad)) {
+      normalized += "=".repeat((4 - (normalized.length % 4)) % 4);
+    }
+    return { ok: Buffer.from(normalized, "base64").toString("utf8") };
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+export function Base64EncodeURL(input, noPad) {
+  let encoded = Buffer.from(String(input), "utf8").toString("base64url");
+  if (!maybeBool(noPad)) {
+    encoded += "=".repeat((4 - (encoded.length % 4)) % 4);
+  }
+  return encoded;
+}
+
+export function Base64DecodeURL(input, noPad) {
+  try {
+    let normalized = String(input);
+    if (maybeBool(noPad)) {
+      normalized += "=".repeat((4 - (normalized.length % 4)) % 4);
+    }
+    return { ok: Buffer.from(normalized, "base64url").toString("utf8") };
+  } catch (error) {
+    return errorResult(error);
+  }
 }
 
 export function printLine(value) {

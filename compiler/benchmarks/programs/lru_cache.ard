@@ -1,0 +1,79 @@
+use ard/io
+
+struct Entry {
+  key: Int,
+  value: Int,
+}
+
+struct Cache {
+  capacity: Int,
+  values: [Int: Int],
+  order: [Int],
+}
+
+fn remove_key(order: [Int], key: Int) [Int] {
+  mut out: [Int] = []
+  for item in order {
+    if item == key {
+      let ignored = false
+    } else {
+      let ignored = out.push(item)
+    }
+  }
+  out
+}
+
+fn cache_get(cache: Cache, key: Int) Int? {
+  cache.values.get(key)
+}
+
+fn cache_put(cache: Cache, key: Int, value: Int) Cache {
+  mut values = cache.values
+  mut order = remove_key(cache.order, key)
+
+  if values.get(key).is_none() {
+    if order.size() >= cache.capacity {
+      let evicted = order.at(0)
+      mut next: [Int] = []
+      for item, idx in order {
+        if idx > 0 {
+          next.push(item)
+        }
+      }
+      order = next
+      values.drop(evicted)
+    }
+  }
+
+  values.set(key, value)
+  order.push(key)
+  Cache{
+    capacity: cache.capacity,
+    values: values,
+    order: order,
+  }
+}
+
+fn run_cache(rounds: Int) Int {
+  mut cache = Cache{
+    capacity: 128,
+    values: [:],
+    order: [],
+  }
+  mut checksum = 0
+
+  for i in 0..rounds {
+    let key = (i * 37 + i / 3) % 257
+    match cache_get(cache, key) {
+      value => { checksum =+ value },
+      _ => { checksum =+ key },
+    }
+    cache = cache_put(cache, key, i * 11 + key)
+  }
+
+  checksum + cache.order.size() + cache.values.size()
+}
+
+fn main() {
+  io::print(run_cache(12000))
+}

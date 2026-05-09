@@ -11,16 +11,18 @@ The benchmarks are intentionally more realistic than tiny microbenchmarks, but s
 
 ## Benchmark programs
 
-- `sales_pipeline.ard`
-  - structs, enums, methods, lists, maps, sort, aggregation
-- `shape_catalog.ard`
-  - union types, pattern matching, structs, lists, maps
-- `decode_pipeline.ard`
-  - JSON decode, list/map decoders, result-heavy hot loop
-- `word_frequency_batch.ard`
-  - string-heavy list processing, map counting, sort
-- `async_batches.ard`
-  - async fibers, join, CPU-bound concurrent work
+- `numeric_kernel.ard`
+  - integer/float arithmetic, nested loops, numeric semantics
+- `binary_trees.ard`
+  - object allocation, structs, recursive traversal
+- `dna_frequency.ard`
+  - string-heavy generated DNA data, map counting, string predicates
+- `json_serde_roundtrip.ard`
+  - JSON encode/decode, dynamic values, Result-heavy hot loop
+- `lru_cache.ard`
+  - mutation-heavy map/list cache workload
+- `base64_batch.ard`
+  - base64/base64url encode/decode stdlib FFI workload
 - `fs_batch.ard`
   - directory lifecycle, repeated file write/read/copy/rename/delete
 - `sql_batch.ard`
@@ -81,10 +83,12 @@ Benchmarks the full `ard run` / `ard run --target go` / `ard run --target js-ser
 - `native-go:*` command names refer to the handwritten idiomatic Go variants; `go:*` command names refer to Ard's generated Go backend.
 - The runner verifies exact output equality for compiler backends. Native Go variants are sanity-checked for output, but are allowed to differ when idiomatic Go semantics better capture the benchmark's intent than Ard implementation quirks.
 - `js-server` is included automatically for the currently supported benchmark subset:
-  - `sales_pipeline`
-  - `shape_catalog`
-  - `decode_pipeline`
-  - `word_frequency_batch`
+  - `numeric_kernel`
+  - `binary_trees`
+  - `dna_frequency`
+  - `json_serde_roundtrip`
+  - `lru_cache`
+  - `base64_batch`
   - `fs_batch`
-- `async_batches` and `sql_batch` are currently skipped for `js-server` because `ard/async` and `ard/sql` are intentionally unsupported on JavaScript targets.
+- `sql_batch` is currently skipped for `js-server` because `ard/sql` is intentionally unsupported on JavaScript targets.
 - The runner builds the Ard CLI only once per invocation and reuses it across all benchmarks.

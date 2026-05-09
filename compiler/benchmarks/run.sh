@@ -10,11 +10,12 @@ WARMUP=2
 EXPORT_DIR=""
 
 BENCHMARKS=(
-  "sales_pipeline:benchmarks/programs/sales_pipeline.ard"
-  "shape_catalog:benchmarks/programs/shape_catalog.ard"
-  "decode_pipeline:benchmarks/programs/decode_pipeline.ard"
-  "word_frequency_batch:benchmarks/programs/word_frequency_batch.ard"
-  "async_batches:benchmarks/programs/async_batches.ard"
+  "numeric_kernel:benchmarks/programs/numeric_kernel.ard"
+  "binary_trees:benchmarks/programs/binary_trees.ard"
+  "dna_frequency:benchmarks/programs/dna_frequency.ard"
+  "json_serde_roundtrip:benchmarks/programs/json_serde_roundtrip.ard"
+  "lru_cache:benchmarks/programs/lru_cache.ard"
+  "base64_batch:benchmarks/programs/base64_batch.ard"
   "fs_batch:benchmarks/programs/fs_batch.ard"
   "sql_batch:benchmarks/programs/sql_batch.ard"
 )
@@ -33,11 +34,12 @@ Options:
   -h, --help           Show this help
 
 Available benchmarks:
-  sales_pipeline
-  shape_catalog
-  decode_pipeline
-  word_frequency_batch
-  async_batches
+  numeric_kernel
+  binary_trees
+  dna_frequency
+  json_serde_roundtrip
+  lru_cache
+  base64_batch
   fs_batch
   sql_batch
 EOF
@@ -71,7 +73,7 @@ lookup_program() {
 
 supports_js_server() {
   case "$1" in
-    sales_pipeline|shape_catalog|decode_pipeline|word_frequency_batch|fs_batch)
+    numeric_kernel|binary_trees|dna_frequency|json_serde_roundtrip|lru_cache|base64_batch|fs_batch)
       return 0
       ;;
     *)
