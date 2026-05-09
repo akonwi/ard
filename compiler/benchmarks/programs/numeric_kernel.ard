@@ -1,0 +1,27 @@
+use ard/io
+
+fn kernel(size: Int) Int {
+  mut checksum = 0
+  mut energy = 0.5
+
+  for i in 1..size {
+    mut row = 0
+    for j in 1..64 {
+      let a = i % 17
+      let b = j % 13
+      let value = (i * j + a * b) % 1009
+      row =+ value * (j % (7 + 1))
+      energy = energy + 1.25 / 2.5
+    }
+    checksum =+ row % 1000003
+  }
+  if energy > 0.0 {
+    checksum =+ 1
+  }
+
+  checksum
+}
+
+fn main() {
+  io::print(kernel(9000))
+}

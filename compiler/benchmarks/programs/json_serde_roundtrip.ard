@@ -1,0 +1,70 @@
+use ard/decode
+use ard/dynamic
+use ard/io
+use ard/json
+
+struct Packet {
+  id: Int,
+  name: Str,
+  active: Bool,
+  values: [Int],
+}
+
+fn is_active(i: Int) Bool {
+  if i % 3 == 0 {
+    false
+  } else {
+    true
+  }
+}
+
+fn make_packet(i: Int) Packet {
+  Packet{
+    id: i,
+    name: "packet-" + i.to_str(),
+    active: is_active(i),
+    values: [i, i * 2, i * 3, i % 17],
+  }
+}
+
+fn packet_to_dynamic(packet: Packet) Dynamic {
+  dynamic::object(
+    [
+      "id": dynamic::from_int(packet.id),
+      "name": dynamic::from_str(packet.name),
+      "active": dynamic::from_bool(packet.active),
+      "values": dynamic::list(
+        packet.values,
+        fn(value: Int) Dynamic {
+          dynamic::from_int(value)
+        },
+      ),
+    ],
+  )
+}
+
+fn score_packet(payload: Str) Int {
+  let raw = decode::from_json(payload).expect("valid json")
+  let id = decode::run(raw, decode::field("id", decode::int)).expect("id")
+  let name = decode::run(raw, decode::field("name", decode::string)).expect("name")
+  let active = decode::run(raw, decode::field("active", decode::bool)).expect("active")
+  let values = decode::run(raw, decode::field("values", decode::list(decode::int))).expect("values")
+
+  mut total = id + name.size()
+  if active {
+    total =+ 19
+  }
+  for value, idx in values {
+    total =+ value * (idx + 1)
+  }
+  total
+}
+
+fn main() {
+  mut checksum = 0
+  for i in 0..5000 {
+    let encoded = json::encode(packet_to_dynamic(make_packet(i))).expect("encoded")
+    checksum =+ score_packet(encoded)
+  }
+  io::print(checksum)
+}

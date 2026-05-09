@@ -1,0 +1,39 @@
+use ard/io
+
+fn build_dna(size: Int) [Str] {
+  let bases = ["A", "C", "G", "T", "G", "A", "T", "C", "A", "G", "G", "T", "C"]
+  mut dna: [Str] = []
+  for i in 0..size {
+    dna.push(bases.at((i * 7 + i / 3) % bases.size()))
+  }
+  dna
+}
+
+fn count_kmers(dna: [Str]) [Str: Int] {
+  mut counts: [Str: Int] = [:]
+  for i in 0..dna.size() - 3 {
+    let kmer = dna.at(i) + dna.at(i + 1) + dna.at(i + 2)
+    counts.set(kmer, counts.get(kmer).or(0) + 1)
+  }
+  counts
+}
+
+fn checksum(counts: [Str: Int]) Int {
+  mut total = 0
+  for kmer, count in counts {
+    total =+ kmer.size() * count
+    if kmer.contains("A") {
+      total =+ count * 7
+    }
+    if kmer.starts_with("G") {
+      total =+ count * 11
+    }
+  }
+  total
+}
+
+fn main() {
+  let dna = build_dna(80000)
+  let counts = count_kmers(dna)
+  io::print(checksum(counts))
+}
