@@ -61,6 +61,30 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 			`,
 		},
 		{
+			name: "if else if chain preserves all conditions",
+			input: `
+				fn classify(key: Str) Int {
+					mut result = 0
+					if key == "q" {
+						result = 1
+					} else if key == "up" {
+						result = 2
+					} else if key == "down" {
+						result = 3
+					} else if key == "r" {
+						result = 4
+					} else {
+						result = 5
+					}
+					result
+				}
+
+				fn main() Bool {
+					classify("q") == 1 and classify("up") == 2 and classify("down") == 3 and classify("r") == 4 and classify("?") == 5
+				}
+			`,
+		},
+		{
 			name: "inline block expression",
 			input: `
 				fn main() Int {

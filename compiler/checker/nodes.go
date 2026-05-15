@@ -844,15 +844,21 @@ func (b *Block) Type() Type {
 	return Void
 }
 
-type If struct {
+type IfBranch struct {
 	Condition Expression
 	Body      *Block
-	ElseIf    *If
-	Else      *Block
+}
+
+type If struct {
+	Branches []IfBranch
+	Else     *Block
 }
 
 func (i *If) Type() Type {
-	return i.Body.Type()
+	if len(i.Branches) == 0 || i.Branches[0].Body == nil {
+		return Void
+	}
+	return i.Branches[0].Body.Type()
 }
 
 type ForIntRange struct {

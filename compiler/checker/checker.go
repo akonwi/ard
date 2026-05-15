@@ -2142,6 +2142,49 @@ func (c *Checker) extractGenericBindingsFromSpecializedStruct(originalDef, speci
 	return bindings
 }
 
+func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
+	if s == nil || s.Condition == nil {
+		return nil
+	}
+	branches := []IfBranch{}
+	var elseBlock *Block
+	var referenceType Type
+	current := s
+	for current != nil {
+		if current.Condition == nil {
+			block := c.checkBlock(current.Body, nil)
+			if referenceType != nil && !block.Type().equal(referenceType) {
+				c.addError("All branches must have the same result type", current.GetLocation())
+				return nil
+			}
+			elseBlock = block
+			break
+		}
+		condition := c.checkExpr(current.Condition)
+		if condition == nil {
+			return nil
+		}
+		if condition.Type() != Bool {
+			c.addError("If conditions must be boolean expressions", current.GetLocation())
+			return nil
+		}
+		body := c.checkBlock(current.Body, nil)
+		if referenceType == nil {
+			referenceType = body.Type()
+		} else if !body.Type().equal(referenceType) {
+			c.addError("All branches must have the same result type", current.GetLocation())
+			return nil
+		}
+		branches = append(branches, IfBranch{Condition: condition, Body: body})
+		next, ok := current.Else.(*parse.IfStatement)
+		if !ok {
+			break
+		}
+		current = next
+	}
+	return &If{Branches: branches, Else: elseBlock}
+}
+
 func (c *Checker) checkExpr(expr parse.Expression) Expression {
 	if c.halted {
 		return nil
@@ -3022,65 +3065,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 		}
 	case *parse.IfStatement:
-		{
-			cond := c.checkExpr(s.Condition)
-			if cond == nil {
-				return nil
-			}
-			if cond.Type() != Bool {
-				c.addError("If conditions must be boolean expressions", s.GetLocation())
-				return nil
-			}
-
-			body := c.checkBlock(s.Body, nil)
-
-			var elseIf *If
-			var elseBody *Block
-
-			// does not recurse. reach into AST for each level since it's fixed
-			if s.Else != nil {
-				next := s.Else.(*parse.IfStatement)
-				if next.Condition != nil {
-					cond := c.checkExpr(next.Condition)
-					if cond == nil {
-						return nil
-					}
-					if cond.Type() != Bool {
-						c.addError("If conditions must be boolean expressions", next.GetLocation())
-						return nil
-					}
-
-					elseIfBody := c.checkBlock(next.Body, nil)
-					if elseIfBody.Type() != body.Type() {
-						c.addError("All branches must have the same result type", next.GetLocation())
-						return nil
-					}
-
-					elseIf = &If{
-						Condition: cond,
-						Body:      elseIfBody,
-					}
-
-					if next, ok := next.Else.(*parse.IfStatement); ok {
-						elseBody = c.checkBlock(next.Body, nil)
-					}
-				} else {
-					b := c.checkBlock(next.Body, nil)
-					if b.Type() != body.Type() {
-						c.addError("All branches must have the same result type", next.GetLocation())
-						return nil
-					}
-					elseBody = b
-				}
-			}
-
-			return &If{
-				Condition: cond,
-				Body:      body,
-				ElseIf:    elseIf,
-				Else:      elseBody,
-			}
-		}
+		return c.checkIfChain(s)
 	case *parse.FunctionDeclaration:
 		return c.checkFunction(s, nil)
 	case *parse.ExternalFunction:
