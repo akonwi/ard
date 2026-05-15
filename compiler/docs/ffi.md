@@ -338,6 +338,40 @@ struct Database {
 }
 ```
 
+For the Go target, project extern types can optionally bind to concrete Go type
+expressions. This keeps the Ard type opaque while allowing project FFI functions
+to use precise Go signatures instead of `any`:
+
+```ard
+extern type Vaxis = "*vaxis.Vaxis"
+
+extern fn tui_open() Vaxis!Str = "TuiOpen"
+extern fn tui_close(term: Vaxis) Void!Str = "TuiClose"
+```
+
+```go
+package main
+
+import "git.sr.ht/~rockorager/vaxis"
+
+func TuiOpen() (*vaxis.Vaxis, error) {
+    return vaxis.New(vaxis.Options{})
+}
+
+func TuiClose(vx *vaxis.Vaxis) error {
+    vx.Close()
+    return nil
+}
+```
+
+The binding may also use target-specific binding-block syntax when needed:
+
+```ard
+extern type Vaxis = {
+  go = "*vaxis.Vaxis"
+}
+```
+
 On the Go side, extern types map to `any`. The Go function receives/returns the raw
 Go value (e.g., a `*sqlConnection` pointer) and the runtime wraps it as a Dynamic object:
 

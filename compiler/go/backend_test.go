@@ -215,6 +215,57 @@ func TestRunProgramSupportsCommonStdlibExterns(t *testing.T) {
 	}
 }
 
+func TestBuildProgramSupportsProjectGoFFIWithTypedExternType(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+extern type Buffer = "*bytes.Buffer"
+
+extern fn new_buffer() Buffer!Str = "NewBuffer"
+extern fn buffer_len(buffer: Buffer) Int = "BufferLen"
+
+fn main() Bool {
+	let buffer = new_buffer().expect("buffer")
+	buffer_len(buffer) == 0
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package main
+
+import "bytes"
+
+func NewBuffer() (*bytes.Buffer, error) {
+	return &bytes.Buffer{}, nil
+}
+
+func BufferLen(buffer *bytes.Buffer) int {
+	return buffer.Len()
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	binaryPath := filepath.Join(dir, "app")
+	builtPath, err := BuildProgram(program, binaryPath, loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := exec.Command(builtPath).Run(); err != nil {
+		t.Fatalf("run built binary: %v", err)
+	}
+}
+
 func TestBuildProgramSupportsProjectGoFFI(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

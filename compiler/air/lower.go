@@ -1107,6 +1107,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 	case *checker.ExternType:
 		info.Kind = TypeExtern
+		info.ExternBinding = typ.ExternalBinding
 	case *checker.FunctionDef:
 		info.Kind = TypeFunction
 		for _, param := range typ.Parameters {

@@ -101,6 +101,8 @@ type TypeInfo struct {
 	Kind TypeKind
 	Name string
 
+	ExternBinding string
+
 	Elem  TypeID
 	Key   TypeID
 	Value TypeID

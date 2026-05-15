@@ -5,11 +5,13 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
 
 	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/checker"
 )
 
 type loweredExpr struct {
@@ -24,6 +26,7 @@ type lowerer struct {
 	currentImports map[string]string
 	declaredLocals map[air.LocalID]bool
 	runtimeHelpers map[string]bool
+	projectImports map[string]string
 }
 
 func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, error) {
@@ -33,7 +36,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if err := air.Validate(program); err != nil {
 		return nil, err
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, projectImports: collectProjectGoImports(options.ProjectInfo)}
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
 	modules := make([]air.Module, 0, len(program.Modules))
@@ -61,6 +64,44 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 		files[moduleFileName(module)] = file
 	}
 	return files, nil
+}
+
+func collectProjectGoImports(projectInfo *checker.ProjectInfo) map[string]string {
+	imports := map[string]string{}
+	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
+		return imports
+	}
+	paths := []string{filepath.Join(projectInfo.RootPath, "ffi.go")}
+	matches, err := filepath.Glob(filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
+	if err == nil {
+		paths = append(paths, matches...)
+	}
+	for _, path := range paths {
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			continue
+		}
+		for _, spec := range file.Imports {
+			if spec.Path == nil {
+				continue
+			}
+			importPath := strings.Trim(spec.Path.Value, "\"")
+			if importPath == "" || importPath == "C" {
+				continue
+			}
+			alias := ""
+			if spec.Name != nil {
+				if spec.Name.Name == "." || spec.Name.Name == "_" {
+					continue
+				}
+				alias = spec.Name.Name
+			} else {
+				alias = filepath.Base(importPath)
+			}
+			imports[alias] = importPath
+		}
+	}
+	return imports
 }
 
 func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
@@ -149,6 +190,23 @@ func (l *lowerer) usedImports(decls []ast.Decl) map[string]string {
 
 func (l *lowerer) markRuntimeHelper(name string) {
 	l.runtimeHelpers[name] = true
+}
+
+func (l *lowerer) registerProjectImportsForGoType(expr ast.Expr) {
+	ast.Inspect(expr, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := selector.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if path, ok := l.projectImports[ident.Name]; ok && path != "" {
+			l.currentImports[ident.Name] = path
+		}
+		return true
+	})
 }
 
 func (l *lowerer) runtimePreludeDecls() []ast.Decl {
@@ -1401,7 +1459,17 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return ast.NewIdent(typeName(l.program, info)), nil
 	case air.TypeUnion:
 		return ast.NewIdent(typeName(l.program, info)), nil
-	case air.TypeDynamic, air.TypeExtern, air.TypeTraitObject:
+	case air.TypeExtern:
+		if strings.TrimSpace(info.ExternBinding) != "" {
+			typ, err := parser.ParseExpr(info.ExternBinding)
+			if err != nil {
+				return nil, fmt.Errorf("invalid go extern type binding %q for %s: %w", info.ExternBinding, info.Name, err)
+			}
+			l.registerProjectImportsForGoType(typ)
+			return typ, nil
+		}
+		return ast.NewIdent("any"), nil
+	case air.TypeDynamic, air.TypeTraitObject:
 		return ast.NewIdent("any"), nil
 	default:
 		return nil, fmt.Errorf("unsupported Go type kind %d", info.Kind)

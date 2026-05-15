@@ -44,6 +44,20 @@ func TestExternTypeDeclaration(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "Extern type with Go binding",
+			input: `extern type Vaxis = "*vaxis.Vaxis"`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ExternTypeDeclaration{
+						Name:             "Vaxis",
+						ExternalBinding:  "*vaxis.Vaxis",
+						ExternalBindings: map[string]string{"go": "*vaxis.Vaxis"},
+					},
+				},
+			},
+		},
 	}
 	runTests(t, tests)
 }

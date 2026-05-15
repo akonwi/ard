@@ -281,7 +281,38 @@ func (p printer) renderExternTypeDeclaration(node *parse.ExternTypeDeclaration) 
 	if node.Private {
 		prefix = "private "
 	}
-	return prefix + "extern type " + node.Name + p.renderTypeParams(node.TypeParams)
+	header := prefix + "extern type " + node.Name + p.renderTypeParams(node.TypeParams)
+	if len(node.ExternalBindings) == 0 {
+		return header
+	}
+	if len(node.ExternalBindings) == 1 && node.ExternalBindings["go"] != "" {
+		binding := node.ExternalBinding
+		if binding == "" {
+			binding = node.ExternalBindings["go"]
+		}
+		return header + " = " + strconv.Quote(binding)
+	}
+
+	keys := make([]string, 0, len(node.ExternalBindings))
+	for key := range node.ExternalBindings {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return externBindingOrder(keys[i]) < externBindingOrder(keys[j]) || (externBindingOrder(keys[i]) == externBindingOrder(keys[j]) && keys[i] < keys[j])
+	})
+
+	var builder strings.Builder
+	builder.WriteString(header)
+	builder.WriteString(" = {\n")
+	for _, key := range keys {
+		builder.WriteString(strings.Repeat(" ", indentWidth))
+		builder.WriteString(key)
+		builder.WriteString(" = ")
+		builder.WriteString(strconv.Quote(node.ExternalBindings[key]))
+		builder.WriteString("\n")
+	}
+	builder.WriteString("}")
+	return builder.String()
 }
 
 func (p printer) renderExternTypeDeclarationDoc(node *parse.ExternTypeDeclaration) doc {
