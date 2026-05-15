@@ -1,6 +1,4 @@
 # TODO
-- [ ] try to improve FFI perf by autocasting args to externs
-- [ ] make duplicate FFI binding registration return an error
 - [ ] Dependency system
   * needs more thought
   * likely just a vendoring system
