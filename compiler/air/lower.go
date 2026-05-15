@@ -2741,53 +2741,39 @@ func (fl *functionLowerer) lowerConditionalCases(typeID TypeID, cases []checker.
 }
 
 func (fl *functionLowerer) lowerIf(typeID TypeID, expr *checker.If) (*Expr, error) {
-	condition, err := fl.lowerExpr(expr.Condition)
-	if err != nil {
-		return nil, err
+	if len(expr.Branches) == 0 {
+		return nil, fmt.Errorf("if expression missing branches")
 	}
-	thenBlock, err := fl.lowerBlockWithDefault(expr.Body.Stmts, typeID)
-	if err != nil {
-		return nil, err
-	}
-	elseBlock, err := fl.lowerElse(expr, typeID)
-	if err != nil {
-		return nil, err
-	}
-	return &Expr{Kind: ExprIf, Type: typeID, Condition: condition, Then: thenBlock, Else: elseBlock}, nil
+	return fl.lowerIfBranches(typeID, expr.Branches, expr.Else)
 }
 
-func (fl *functionLowerer) lowerElse(expr *checker.If, defaultType TypeID) (Block, error) {
-	if expr.ElseIf != nil {
-		condition, err := fl.lowerExpr(expr.ElseIf.Condition)
-		if err != nil {
-			return Block{}, err
-		}
-		thenBlock, err := fl.lowerBlockWithDefault(expr.ElseIf.Body.Stmts, defaultType)
-		if err != nil {
-			return Block{}, err
-		}
-		elseBlock, err := fl.lowerElse(expr.ElseIf, defaultType)
-		if err != nil {
-			return Block{}, err
-		}
-		if expr.Else != nil {
-			elseBlock, err = fl.lowerBlockWithDefault(expr.Else.Stmts, defaultType)
-			if err != nil {
-				return Block{}, err
-			}
-		}
-		return Block{Result: &Expr{
-			Kind:      ExprIf,
-			Type:      defaultType,
-			Condition: condition,
-			Then:      thenBlock,
-			Else:      elseBlock,
-		}}, nil
+func (fl *functionLowerer) lowerIfBranches(typeID TypeID, branches []checker.IfBranch, elseBlock *checker.Block) (*Expr, error) {
+	if len(branches) == 0 {
+		return nil, fmt.Errorf("if expression missing branches")
 	}
-	if expr.Else != nil {
-		return fl.lowerBlockWithDefault(expr.Else.Stmts, defaultType)
+	branch := branches[0]
+	condition, err := fl.lowerExpr(branch.Condition)
+	if err != nil {
+		return nil, err
 	}
-	return Block{}, nil
+	thenBlock, err := fl.lowerBlockWithDefault(branch.Body.Stmts, typeID)
+	if err != nil {
+		return nil, err
+	}
+	var airElse Block
+	if len(branches) > 1 {
+		nested, err := fl.lowerIfBranches(typeID, branches[1:], elseBlock)
+		if err != nil {
+			return nil, err
+		}
+		airElse = Block{Result: nested}
+	} else if elseBlock != nil {
+		airElse, err = fl.lowerBlockWithDefault(elseBlock.Stmts, typeID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &Expr{Kind: ExprIf, Type: typeID, Condition: condition, Then: thenBlock, Else: airElse}, nil
 }
 
 func (fl *functionLowerer) lowerResultConstructor(kind ExprKind, typeID TypeID, call *checker.ModuleFunctionCall) (*Expr, error) {

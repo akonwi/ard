@@ -1038,12 +1038,14 @@ func TestIfStatements(t *testing.T) {
 					},
 					{
 						Expr: &checker.If{
-							Condition: &checker.Variable{},
-							Body: &checker.Block{
-								Stmts: []checker.Statement{
-									{Expr: &checker.StrLiteral{"on"}},
+							Branches: []checker.IfBranch{{
+								Condition: &checker.Variable{},
+								Body: &checker.Block{
+									Stmts: []checker.Statement{
+										{Expr: &checker.StrLiteral{"on"}},
+									},
 								},
-							},
+							}},
 						},
 					},
 				},
@@ -1073,12 +1075,14 @@ func TestIfStatements(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.If{
-							Condition: &checker.BoolLiteral{true},
-							Body: &checker.Block{
-								Stmts: []checker.Statement{
-									{Expr: &checker.StrLiteral{"bar"}},
+							Branches: []checker.IfBranch{{
+								Condition: &checker.BoolLiteral{true},
+								Body: &checker.Block{
+									Stmts: []checker.Statement{
+										{Expr: &checker.StrLiteral{"bar"}},
+									},
 								},
-							},
+							}},
 							Else: &checker.Block{
 								Stmts: []checker.Statement{
 									{Expr: &checker.StrLiteral{"baz"}},
@@ -1104,17 +1108,21 @@ func TestIfStatements(t *testing.T) {
 				Statements: []checker.Statement{
 					{
 						Expr: &checker.If{
-							Condition: &checker.BoolLiteral{true},
-							Body: &checker.Block{
-								Stmts: []checker.Statement{
-									{Expr: &checker.StrLiteral{"bar"}},
+							Branches: []checker.IfBranch{
+								{
+									Condition: &checker.BoolLiteral{true},
+									Body: &checker.Block{
+										Stmts: []checker.Statement{
+											{Expr: &checker.StrLiteral{"bar"}},
+										},
+									},
 								},
-							},
-							ElseIf: &checker.If{
-								Condition: &checker.BoolLiteral{false},
-								Body: &checker.Block{
-									Stmts: []checker.Statement{
-										{Expr: &checker.StrLiteral{"baz"}},
+								{
+									Condition: &checker.BoolLiteral{false},
+									Body: &checker.Block{
+										Stmts: []checker.Statement{
+											{Expr: &checker.StrLiteral{"baz"}},
+										},
 									},
 								},
 							},
