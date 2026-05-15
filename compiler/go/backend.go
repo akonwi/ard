@@ -10,6 +10,7 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
+	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
 )
 
 type Options struct {
@@ -213,10 +214,30 @@ func programUsesProjectFFI(program *air.Program) bool {
 }
 
 func externModuleIsStdlib(program *air.Program, ext air.Extern) bool {
-	if program == nil || int(ext.Module) < 0 || int(ext.Module) >= len(program.Modules) {
-		return false
+	if program != nil && int(ext.Module) >= 0 && int(ext.Module) < len(program.Modules) && strings.HasPrefix(program.Modules[ext.Module].Path, "ard/") {
+		return true
 	}
-	return strings.HasPrefix(program.Modules[ext.Module].Path, "ard/")
+	return stdlibGoBinding(goExternBinding(ext))
+}
+
+func goExternBinding(ext air.Extern) string {
+	if binding := ext.Bindings["go"]; binding != "" {
+		return binding
+	}
+	return ext.Name
+}
+
+var stdlibGoBindings = func() map[string]struct{} {
+	bindings := map[string]struct{}{}
+	for binding := range stdlibffi.HostFunctions {
+		bindings[binding] = struct{}{}
+	}
+	return bindings
+}()
+
+func stdlibGoBinding(binding string) bool {
+	_, ok := stdlibGoBindings[binding]
+	return ok
 }
 
 func compilerModuleRoot() (string, bool) {

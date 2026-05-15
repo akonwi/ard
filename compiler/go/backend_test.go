@@ -344,6 +344,38 @@ func Select(input *string) string {
 	}
 }
 
+func TestWriteProgramDoesNotRequireProjectFFIForStdlibExternMethods(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/sql
+
+fn close(db: sql::Database) Void!Str {
+	db.close()
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	workspace := filepath.Join(dir, "workspace")
+	if err := os.Mkdir(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeProgram(workspace, program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo}); err != nil {
+		t.Fatalf("write program: %v", err)
+	}
+}
+
 func TestGenerateSourcesUsesExpectedLocalTypeForMaybeNone(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
