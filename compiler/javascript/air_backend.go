@@ -142,7 +142,7 @@ func generateSourcesFromAIR(program *air.Program, options Options) (map[string][
 
 func (l *airJSLowerer) planModuleFiles() {
 	rootModule := air.ModuleID(-1)
-	if rootID, ok := airJSRootFunction(l.program); ok {
+	if rootID, ok := airJSRootModuleFunction(l.program); ok {
 		rootModule = l.program.Functions[rootID].Module
 	} else if len(l.program.Modules) > 0 {
 		rootModule = l.program.Modules[len(l.program.Modules)-1].ID
@@ -210,7 +210,7 @@ func (l *airJSLowerer) lowerModule(module air.Module, invokeRoot bool) (string, 
 		b.WriteString(script)
 		b.WriteString("\n\n")
 	}
-	if invokeRoot {
+	if invokeRoot && l.program.Script == air.NoFunction {
 		if rootID, ok := airJSRootFunction(l.program); ok && l.program.Functions[rootID].Module == module.ID {
 			b.WriteString("await ")
 			b.WriteString(l.functionName(rootID))
@@ -371,11 +371,7 @@ func (l *airJSLowerer) lowerFunction(fn air.Function) (string, error) {
 }
 
 func (l *airJSLowerer) lowerScriptFunction(fn air.Function) (string, error) {
-	body, err := l.lowerBlock(fn, fn.Body, true)
-	if err != nil {
-		return "", err
-	}
-	return renderJSDoc(jsBlockDoc("function "+l.functionName(fn.ID)+"()", body)), nil
+	return l.lowerBlock(fn, fn.Body, false)
 }
 
 func (l *airJSLowerer) lowerBlock(fn air.Function, block air.Block, returns bool) (string, error) {
@@ -1466,7 +1462,8 @@ func (l *airJSLowerer) externRef(id air.ExternID) (string, error) {
 func isAIRJSPreludeExtern(binding string) bool {
 	switch binding {
 	case "JsonToDynamic", "DecodeString", "DecodeInt", "DecodeFloat", "DecodeBool", "IsNil",
-		"DynamicToList", "DynamicToMap", "ExtractField", "StrToDynamic", "IntToDynamic",
+		"DynamicToList", "DynamicToMap", "ExtractField", "IntFromStr", "FloatFromStr",
+		"FloatFromInt", "FloatFloor", "StrToDynamic", "IntToDynamic",
 		"FloatToDynamic", "BoolToDynamic", "VoidToDynamic", "ListToDynamic", "MapToDynamic",
 		"JsonEncode", "promiseResolve", "promiseReject", "promiseMap", "promiseThen",
 		"promiseRescue", "promiseInspect", "promiseInspectError", "promiseFinally",
@@ -1540,7 +1537,7 @@ func (l *airJSLowerer) collectFFIArtifacts() FFIArtifacts {
 	return ffi
 }
 
-func airJSRootFunction(program *air.Program) (air.FunctionID, bool) {
+func airJSRootModuleFunction(program *air.Program) (air.FunctionID, bool) {
 	if program == nil {
 		return air.NoFunction, false
 	}
@@ -1549,6 +1546,16 @@ func airJSRootFunction(program *air.Program) (air.FunctionID, bool) {
 	}
 	if program.Script != air.NoFunction {
 		return program.Script, true
+	}
+	return air.NoFunction, false
+}
+
+func airJSRootFunction(program *air.Program) (air.FunctionID, bool) {
+	if program == nil {
+		return air.NoFunction, false
+	}
+	if program.Entry != air.NoFunction {
+		return program.Entry, true
 	}
 	return air.NoFunction, false
 }

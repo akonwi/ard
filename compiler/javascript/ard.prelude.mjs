@@ -299,6 +299,26 @@ export function ExtractField(data, name) {
   return { ok: hasOwn(data, name) ? data[name] : null };
 }
 
+export function IntFromStr(value) {
+  if (typeof value !== "string" || !/^[+-]?\d+$/.test(value.trim())) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+export function FloatFromStr(value) {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function FloatFromInt(value) {
+  return value;
+}
+
+export function FloatFloor(value) {
+  return Math.floor(value);
+}
+
 export function StrToDynamic(val) {
   return val;
 }
