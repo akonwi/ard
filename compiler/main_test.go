@@ -559,6 +559,13 @@ func TestBuildJSProgramDefaultWritesArdOut(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(filepath.Dir(want), "ard.prelude.mjs")); err != nil {
 		t.Fatalf("expected generated prelude next to root module: %v", err)
 	}
+	out, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatalf("read generated root module: %v", err)
+	}
+	if !strings.Contains(string(out), "await main();") {
+		t.Fatalf("expected CLI build output to invoke root function, got:\n%s", string(out))
+	}
 }
 
 func TestParseFormatArgs(t *testing.T) {

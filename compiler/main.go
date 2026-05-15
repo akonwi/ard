@@ -703,7 +703,7 @@ func buildJSProgram(inputPath string, outputPath string, target string) (string,
 	var builtPath string
 	if err := profile.Time("javascript.build", func() error {
 		var buildErr error
-		builtPath, buildErr = javascript.BuildProgram(program, outputPath, target, loaded.ProjectInfo)
+		builtPath, buildErr = javascript.BuildExecutableProgram(program, outputPath, target, loaded.ProjectInfo)
 		return buildErr
 	}); err != nil {
 		return "", err
