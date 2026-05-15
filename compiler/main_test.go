@@ -549,7 +549,7 @@ func TestBuildJSProgramDefaultWritesArdOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildJSProgram error = %v", err)
 	}
-	want := filepath.Join(dir, "ard-out", "js", backend.TargetJSBrowser, "build", "main.mjs")
+	want := filepath.Join(dir, "ard-out", backend.TargetJSBrowser, "main.mjs")
 	if builtPath != want {
 		t.Fatalf("built path = %q, want %q", builtPath, want)
 	}
