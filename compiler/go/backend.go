@@ -14,6 +14,7 @@ import (
 
 type Options struct {
 	PackageName string
+	ProjectInfo *checker.ProjectInfo
 }
 
 func GenerateSources(program *air.Program, options Options) (map[string][]byte, error) {
@@ -32,12 +33,12 @@ func GenerateSources(program *air.Program, options Options) (map[string][]byte, 
 	return out, nil
 }
 
-func RunProgram(program *air.Program, args []string) error {
+func RunProgram(program *air.Program, args []string, projectInfo ...*checker.ProjectInfo) error {
 	workspaceDir, err := artifactWorkspace(inputPathFromCLIArgs(args), "run")
 	if err != nil {
 		return err
 	}
-	if err := writeProgram(workspaceDir, program, Options{PackageName: "main"}); err != nil {
+	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: optionalProjectInfo(projectInfo)}); err != nil {
 		return err
 	}
 	binaryPath := filepath.Join(workspaceDir, "ard-program")
@@ -54,12 +55,12 @@ func RunProgram(program *air.Program, args []string) error {
 	return nil
 }
 
-func BuildProgram(program *air.Program, outputPath string) (string, error) {
+func BuildProgram(program *air.Program, outputPath string, projectInfo ...*checker.ProjectInfo) (string, error) {
 	workspaceDir, err := artifactWorkspace(outputPath, "build")
 	if err != nil {
 		return "", err
 	}
-	if err := writeProgram(workspaceDir, program, Options{PackageName: "main"}); err != nil {
+	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: optionalProjectInfo(projectInfo)}); err != nil {
 		return "", err
 	}
 	if outputPath == "" {
@@ -86,6 +87,9 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 			return err
 		}
 	}
+	if err := writeProjectFFICompanions(dir, program, options.ProjectInfo); err != nil {
+		return err
+	}
 	goMod := "module generated\n\ngo 1.26.0\n"
 	if moduleRoot, ok := compilerModuleRoot(); ok {
 		goMod += "\nrequire github.com/akonwi/ard v0.0.0\n"
@@ -95,6 +99,13 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 		return err
 	}
 	return nil
+}
+
+func optionalProjectInfo(projectInfo []*checker.ProjectInfo) *checker.ProjectInfo {
+	if len(projectInfo) == 0 {
+		return nil
+	}
+	return projectInfo[0]
 }
 
 func inputPathFromCLIArgs(args []string) string {
@@ -138,6 +149,74 @@ func artifactRootDir(pathHint string) (string, error) {
 		return project.RootPath, nil
 	}
 	return candidate, nil
+}
+
+func writeProjectFFICompanions(dir string, program *air.Program, projectInfo *checker.ProjectInfo) error {
+	if !programUsesProjectFFI(program) {
+		return nil
+	}
+	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
+		return fmt.Errorf("go target uses project externs but project information is unavailable")
+	}
+	copied := false
+	if err := copyProjectFFIFile(filepath.Join(projectInfo.RootPath, "ffi.go"), filepath.Join(dir, "ffi.go")); err != nil {
+		return err
+	} else if fileExists(filepath.Join(projectInfo.RootPath, "ffi.go")) {
+		copied = true
+	}
+	matches, err := filepath.Glob(filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
+	if err != nil {
+		return err
+	}
+	for _, sourcePath := range matches {
+		name := "ffi_" + filepath.Base(sourcePath)
+		if err := copyProjectFFIFile(sourcePath, filepath.Join(dir, name)); err != nil {
+			return err
+		}
+		copied = true
+	}
+	if !copied {
+		return fmt.Errorf("go target uses project externs but no project Go FFI companion was found at %s or %s", filepath.Join(projectInfo.RootPath, "ffi.go"), filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
+	}
+	return nil
+}
+
+func copyProjectFFIFile(sourcePath, destPath string) error {
+	content, err := os.ReadFile(sourcePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read project Go FFI companion %s: %w", sourcePath, err)
+	}
+	if err := os.WriteFile(destPath, content, 0o644); err != nil {
+		return err
+	}
+	return nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func programUsesProjectFFI(program *air.Program) bool {
+	if program == nil {
+		return false
+	}
+	for _, ext := range program.Externs {
+		if !externModuleIsStdlib(program, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+func externModuleIsStdlib(program *air.Program, ext air.Extern) bool {
+	if program == nil || int(ext.Module) < 0 || int(ext.Module) >= len(program.Modules) {
+		return false
+	}
+	return strings.HasPrefix(program.Modules[ext.Module].Path, "ard/")
 }
 
 func compilerModuleRoot() (string, bool) {

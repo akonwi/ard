@@ -2,13 +2,16 @@ package gotarget
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/air"
+	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/frontend"
 	"github.com/akonwi/ard/parse"
 )
 
@@ -209,6 +212,84 @@ func TestRunProgramSupportsCommonStdlibExterns(t *testing.T) {
 
 	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
 		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestBuildProgramSupportsProjectGoFFI(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+extern fn lookup(flag: Bool) Str? = {
+	go = "Lookup"
+}
+
+extern fn read_value() Str!Str = {
+	go = "ReadValue"
+}
+
+extern fn mark() Void!Str = {
+	go = "Mark"
+}
+
+extern fn select(input: Str?) Str = {
+	go = "Select"
+}
+
+fn main() Bool {
+	let found = lookup(true)
+	let name = found.or("missing")
+	let value = read_value().expect("read")
+	mark().expect("mark")
+	name == "yes" and value == "ok" and select(found) == "yes"
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package main
+
+func Lookup(flag bool) *string {
+	if !flag {
+		return nil
+	}
+	value := "yes"
+	return &value
+}
+
+func ReadValue() (string, error) {
+	return "ok", nil
+}
+
+func Mark() error {
+	return nil
+}
+
+func Select(input *string) string {
+	if input == nil {
+		return "missing"
+	}
+	return *input
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	binaryPath := filepath.Join(dir, "app")
+	builtPath, err := BuildProgram(program, binaryPath, loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := exec.Command(builtPath).Run(); err != nil {
+		t.Fatalf("run built binary: %v", err)
 	}
 }
 

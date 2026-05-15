@@ -3287,6 +3287,38 @@ func (l *lowerer) goFieldName(typ air.TypeInfo, fieldName string) string {
 	return fieldName
 }
 
+func (l *lowerer) wrapProjectMaybeCall(maybeTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
+	if !validTypeID(l.program, maybeTypeID) {
+		return loweredExpr{}, fmt.Errorf("invalid maybe type id %d", maybeTypeID)
+	}
+	info := l.program.Types[maybeTypeID-1]
+	if info.Kind != air.TypeMaybe {
+		return loweredExpr{}, fmt.Errorf("expected maybe type, got kind %d", info.Kind)
+	}
+	elemType, err := l.goType(info.Elem)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	maybeType, err := l.goType(maybeTypeID)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	ptrTemp := l.nextTemp()
+	valueTemp := l.nextTemp()
+	stmts := []ast.Stmt{
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(ptrTemp)}, Type: &ast.StarExpr{X: elemType}}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(ptrTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(valueTemp)}, Type: elemType}}}},
+		&ast.IfStmt{Cond: &ast.BinaryExpr{X: ast.NewIdent(ptrTemp), Op: token.NEQ, Y: ast.NewIdent("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(valueTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.StarExpr{X: ast.NewIdent(ptrTemp)}}},
+		}}},
+	}
+	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: maybeType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: ast.NewIdent(valueTemp)},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: &ast.BinaryExpr{X: ast.NewIdent(ptrTemp), Op: token.NEQ, Y: ast.NewIdent("nil")}},
+	}}}, nil
+}
+
 func (l *lowerer) wrapStdlibMaybeCall(maybeTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
 	maybeType, err := l.goType(maybeTypeID)
 	if err != nil {
@@ -3639,6 +3671,9 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 	binding := ext.Name
 	if goBinding, ok := ext.Bindings["go"]; ok && goBinding != "" {
 		binding = goBinding
+	}
+	if !externModuleIsStdlib(l.program, ext) {
+		return l.lowerProjectExternCall(ext, binding, args, stmts, expr.Type)
 	}
 	switch binding {
 	case "Print":
@@ -4013,6 +4048,109 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 	default:
 		return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
 	}
+}
+
+func (l *lowerer) adaptProjectExternArgs(signature air.Signature, args []ast.Expr) ([]ast.Expr, []ast.Stmt, error) {
+	if len(signature.Params) != len(args) {
+		return nil, nil, fmt.Errorf("project extern argument count mismatch: signature has %d params, call has %d args", len(signature.Params), len(args))
+	}
+	adapted := append([]ast.Expr(nil), args...)
+	stmts := []ast.Stmt{}
+	for i, param := range signature.Params {
+		if !validTypeID(l.program, param.Type) {
+			continue
+		}
+		info := l.program.Types[param.Type-1]
+		if info.Kind != air.TypeMaybe {
+			continue
+		}
+		arg, err := l.projectMaybeArgPointer(param.Type, adapted[i])
+		if err != nil {
+			return nil, nil, err
+		}
+		stmts = append(stmts, arg.stmts...)
+		adapted[i] = arg.expr
+	}
+	return adapted, stmts, nil
+}
+
+func (l *lowerer) projectMaybeArgPointer(maybeTypeID air.TypeID, expr ast.Expr) (loweredExpr, error) {
+	info := l.program.Types[maybeTypeID-1]
+	elemType, err := l.goType(info.Elem)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	maybeType, err := l.goType(maybeTypeID)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	maybeTemp := l.nextTemp()
+	ptrTemp := l.nextTemp()
+	stmts := []ast.Stmt{
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(maybeTemp)}, Type: maybeType}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(maybeTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{expr}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(ptrTemp)}, Type: &ast.StarExpr{X: elemType}}}}},
+		&ast.IfStmt{Cond: &ast.SelectorExpr{X: ast.NewIdent(maybeTemp), Sel: ast.NewIdent("Some")}, Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(ptrTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.UnaryExpr{Op: token.AND, X: &ast.SelectorExpr{X: ast.NewIdent(maybeTemp), Sel: ast.NewIdent("Value")}}}},
+		}}},
+	}
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(ptrTemp)}, nil
+}
+
+func (l *lowerer) lowerProjectExternCall(ext air.Extern, binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
+	adaptedArgs, argStmts, err := l.adaptProjectExternArgs(ext.Signature, args)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts = append(stmts, argStmts...)
+	callee, err := goBindingExpr(binding)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	call := &ast.CallExpr{Fun: callee, Args: adaptedArgs}
+	if !validTypeID(l.program, returnTypeID) {
+		return loweredExpr{stmts: stmts, expr: call}, nil
+	}
+	returnType := l.program.Types[returnTypeID-1]
+	switch returnType.Kind {
+	case air.TypeVoid:
+		return loweredExpr{stmts: stmts, expr: call}, nil
+	case air.TypeMaybe:
+		wrapped, err := l.wrapProjectMaybeCall(returnTypeID, call)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case air.TypeResult:
+		if validTypeID(l.program, returnType.Value) && l.program.Types[returnType.Value-1].Kind == air.TypeVoid {
+			wrapped, err := l.wrapErrorCall(returnTypeID, call)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			wrapped.stmts = append(stmts, wrapped.stmts...)
+			return wrapped, nil
+		}
+		wrapped, err := l.wrapValueErrorCall(returnTypeID, call)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	default:
+		return loweredExpr{stmts: stmts, expr: call}, nil
+	}
+}
+
+func goBindingExpr(binding string) (ast.Expr, error) {
+	if strings.TrimSpace(binding) == "" {
+		return nil, fmt.Errorf("empty go extern binding")
+	}
+	expr, err := parser.ParseExpr(binding)
+	if err != nil {
+		return nil, fmt.Errorf("invalid go extern binding %q: %w", binding, err)
+	}
+	return expr, nil
 }
 
 func isVoidExpr(expr ast.Expr) bool {

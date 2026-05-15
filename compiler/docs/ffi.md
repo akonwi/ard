@@ -61,6 +61,45 @@ Examples:
 - `js-browser` prefers `js-browser`, then `js`, then `go`
 - `go` prefers `go`, then `bytecode`
 
+## Go project companions
+
+Project code can provide Go implementations for project-local externs when building with `--target go`.
+The compiler copies Go companion files into the generated Go workspace and calls the binding directly.
+
+Supported companion locations:
+- `ffi.go` at the project root
+- `ffi/*.go` under the project root
+
+Companion files must use `package main` because they are compiled into the generated application package.
+
+Example Ard declaration:
+
+```ard
+extern fn hostname() Str!Str = {
+  go = "Hostname"
+}
+```
+
+Example `ffi.go`:
+
+```go
+package main
+
+import "os"
+
+func Hostname() (string, error) {
+    return os.Hostname()
+}
+```
+
+Project Go FFI currently uses idiomatic direct-call adaptation:
+- scalar/list/map/function arguments pass as their generated Go values
+- `T?` arguments pass as `*T` (`nil` for `None`)
+- `T` returns directly as `T`
+- `T?` expects `*T` (`nil` becomes `None`, non-`nil` becomes `Some`)
+- `Void!Str` expects `error`
+- `T!Str` expects `(T, error)`
+
 ## JavaScript companion modules
 
 JavaScript externs are implemented through companion `.mjs` files rather than per-function module paths embedded in Ard source.

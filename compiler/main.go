@@ -92,10 +92,10 @@ func main() {
 			case backend.TargetGo:
 				profile := newPipelineProfile("run go")
 				defer profile.Print()
-				var module checker.Module
+				var loaded *frontend.LoadResult
 				if err := profile.Time("frontend.load_module", func() error {
 					var loadErr error
-					module, loadErr = loadModule(inputPath, target)
+					loaded, loadErr = frontend.LoadModule(inputPath, target)
 					return loadErr
 				}); err != nil {
 					os.Exit(1)
@@ -103,13 +103,13 @@ func main() {
 				var program *air.Program
 				if err := profile.Time("air.lower", func() error {
 					var lowerErr error
-					program, lowerErr = air.Lower(module)
+					program, lowerErr = air.Lower(loaded.Module)
 					return lowerErr
 				}); err != nil {
 					fmt.Println(err)
 					os.Exit(1)
 				}
-				if err := gotarget.RunProgram(program, os.Args); err != nil {
+				if err := gotarget.RunProgram(program, os.Args, loaded.ProjectInfo); err != nil {
 					fmt.Println(err)
 					os.Exit(1)
 				}
@@ -713,10 +713,10 @@ func buildJSProgram(inputPath string, outputPath string, target string) (string,
 func buildGoBinary(inputPath string, outputPath string, target string) (string, error) {
 	profile := newPipelineProfile("build go")
 	defer profile.Print()
-	var module checker.Module
+	var loaded *frontend.LoadResult
 	if err := profile.Time("frontend.load_module", func() error {
 		var loadErr error
-		module, loadErr = loadModule(inputPath, target)
+		loaded, loadErr = frontend.LoadModule(inputPath, target)
 		return loadErr
 	}); err != nil {
 		return "", err
@@ -724,7 +724,7 @@ func buildGoBinary(inputPath string, outputPath string, target string) (string, 
 	var program *air.Program
 	if err := profile.Time("air.lower", func() error {
 		var lowerErr error
-		program, lowerErr = air.Lower(module)
+		program, lowerErr = air.Lower(loaded.Module)
 		return lowerErr
 	}); err != nil {
 		return "", err
@@ -743,7 +743,7 @@ func buildGoBinary(inputPath string, outputPath string, target string) (string, 
 	var builtPath string
 	if err := profile.Time("go.build", func() error {
 		var buildErr error
-		builtPath, buildErr = gotarget.BuildProgram(program, outputPath)
+		builtPath, buildErr = gotarget.BuildProgram(program, outputPath, loaded.ProjectInfo)
 		return buildErr
 	}); err != nil {
 		return "", err
