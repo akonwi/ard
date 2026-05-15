@@ -1,6 +1,5 @@
 # TODO
 - [ ] try to improve FFI perf by autocasting args to externs
-- [ ] allow FFI in user land
 - [ ] make duplicate FFI binding registration return an error
 - [ ] Dependency system
   * needs more thought
