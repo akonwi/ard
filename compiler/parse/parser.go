@@ -2181,7 +2181,6 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			if p.check(string_) {
 				bindingToken := p.advance()
 				externalBinding = trimQuotedString(bindingToken.text)
-				externalBindings = map[string]string{"go": externalBinding}
 				endRow = bindingToken.line
 				endCol = bindingToken.column + len(bindingToken.text)
 			} else if p.match(left_brace) {
@@ -2351,11 +2350,10 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			}
 
 			externalBinding := ""
-			externalBindings := map[string]string{}
+			var externalBindings map[string]string
 			if p.check(string_) {
 				bindingToken := p.advance()
 				externalBinding = trimQuotedString(bindingToken.text)
-				externalBindings["go"] = externalBinding
 			} else if p.match(left_brace) {
 				bindings, err := p.parseExternalBindingBlock()
 				if err != nil {
