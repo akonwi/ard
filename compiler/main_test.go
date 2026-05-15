@@ -535,6 +535,32 @@ func TestParseBuildArgs(t *testing.T) {
 	}
 }
 
+func TestBuildJSProgramDefaultWritesArdOut(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(sourcePath, []byte(`fn main() { "ok" }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	builtPath, err := buildJSProgram(sourcePath, "main", backend.TargetJSBrowser)
+	if err != nil {
+		t.Fatalf("buildJSProgram error = %v", err)
+	}
+	want := filepath.Join(dir, "ard-out", "js", backend.TargetJSBrowser, "build", "main.mjs")
+	if builtPath != want {
+		t.Fatalf("built path = %q, want %q", builtPath, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("expected generated root module: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(want), "ard.prelude.mjs")); err != nil {
+		t.Fatalf("expected generated prelude next to root module: %v", err)
+	}
+}
+
 func TestParseFormatArgs(t *testing.T) {
 	tests := []struct {
 		name       string

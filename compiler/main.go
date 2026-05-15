@@ -699,6 +699,7 @@ func buildJSProgram(inputPath string, outputPath string, target string) (string,
 	}); err != nil {
 		return "", err
 	}
+	outputPath = resolveJSBuildOutputPath(inputPath, outputPath, target, loaded.ProjectInfo)
 	var builtPath string
 	if err := profile.Time("javascript.build", func() error {
 		var buildErr error
@@ -708,6 +709,27 @@ func buildJSProgram(inputPath string, outputPath string, target string) (string,
 		return "", err
 	}
 	return builtPath, nil
+}
+
+func resolveJSBuildOutputPath(inputPath string, outputPath string, target string, projectInfo *checker.ProjectInfo) string {
+	defaultOutput := filepath.Base(strings.TrimSuffix(inputPath, filepath.Ext(inputPath)))
+	if defaultOutput == "" || defaultOutput == "." || defaultOutput == string(filepath.Separator) {
+		defaultOutput = "main"
+	}
+	if outputPath != defaultOutput {
+		return outputPath
+	}
+	rootDir := ""
+	if projectInfo != nil {
+		rootDir = strings.TrimSpace(projectInfo.RootPath)
+	}
+	if rootDir == "" {
+		rootDir = filepath.Dir(inputPath)
+		if rootDir == "" || rootDir == "." {
+			rootDir = "."
+		}
+	}
+	return filepath.Join(rootDir, "ard-out", "js", target, "build", defaultOutput+".mjs")
 }
 
 func buildGoBinary(inputPath string, outputPath string, target string) (string, error) {
