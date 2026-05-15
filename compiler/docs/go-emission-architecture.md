@@ -229,4 +229,4 @@ The current Go backend should not:
 
 ## Related work
 
-Open rollout work for the Go target is tracked in `TODO.md`.
+Open rollout work for the Go target is tracked as GitHub issues in the Ard Backlog project; detailed design notes live under `/backlog` when needed.
