@@ -1,5 +1,4 @@
 # TODO
-- [ ] make duplicate FFI binding registration return an error
 - [ ] Dependency system
   * needs more thought
   * likely just a vendoring system

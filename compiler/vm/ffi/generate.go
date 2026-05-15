@@ -188,7 +188,7 @@ func loadContract(stdlibDir string) (contract, error) {
 				if existing.Type != fn.Type {
 					return contract{}, fmt.Errorf("binding %s has conflicting signatures: %s vs %s", binding, existing.Type, fn.Type)
 				}
-				continue
+				return contract{}, fmt.Errorf("duplicate extern binding %s", binding)
 			}
 			bindings[binding] = fn
 			c.Functions = append(c.Functions, fn)
