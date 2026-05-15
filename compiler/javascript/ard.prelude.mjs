@@ -34,6 +34,10 @@ export function isEnumOf(value, enumName) {
   return isArdEnum(value) && value.enum === enumName;
 }
 
+export function isVoid(value) {
+  return value === null || value === undefined;
+}
+
 export function ardEnumValue(value) {
   return isArdEnum(value) ? value.value : value;
 }
