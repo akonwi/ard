@@ -779,10 +779,13 @@ var Dynamic = &dynamicType{}
 // ExternType represents an opaque type whose values can only be created by FFI.
 // Identity is by name plus any instantiated type arguments.
 type ExternType struct {
-	Name_         string
-	GenericParams []string
-	TypeArgs      []Type
-	private       bool
+	Name_                 string
+	GenericParams         []string
+	TypeArgs              []Type
+	ExternalBinding       string
+	ExternalBindingTarget string
+	ExternalBindings      map[string]string
+	private               bool
 }
 
 func (e *ExternType) String() string {

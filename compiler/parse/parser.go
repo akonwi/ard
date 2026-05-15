@@ -2175,10 +2175,35 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			endRow = endToken.line
 			endCol = endToken.column + len(endToken.text)
 		}
+		externalBinding := ""
+		var externalBindings map[string]string
+		if p.match(equal) {
+			if p.check(string_) {
+				bindingToken := p.advance()
+				externalBinding = trimQuotedString(bindingToken.text)
+				externalBindings = map[string]string{"go": externalBinding}
+				endRow = bindingToken.line
+				endCol = bindingToken.column + len(bindingToken.text)
+			} else if p.match(left_brace) {
+				bindings, err := p.parseExternalBindingBlock()
+				if err != nil {
+					return nil, err
+				}
+				externalBindings = bindings
+				externalBinding = bindings["go"]
+				endToken := p.previous()
+				endRow = endToken.line
+				endCol = endToken.column + len(endToken.text)
+			} else {
+				return nil, p.makeError(p.peek(), "Expected string literal or binding block for extern type binding")
+			}
+		}
 		return &ExternTypeDeclaration{
-			Name:       nameToken.text,
-			TypeParams: typeParams,
-			Private:    private,
+			Name:             nameToken.text,
+			TypeParams:       typeParams,
+			ExternalBinding:  externalBinding,
+			ExternalBindings: externalBindings,
+			Private:          private,
 			Location: Location{
 				Start: Point{Row: keyword.line, Col: keyword.column},
 				End:   Point{Row: endRow, Col: endCol},

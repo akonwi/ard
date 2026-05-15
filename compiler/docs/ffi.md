@@ -61,6 +61,45 @@ Examples:
 - `js-browser` prefers `js-browser`, then `js`, then `go`
 - `go` prefers `go`, then `bytecode`
 
+## Go project companions
+
+Project code can provide Go implementations for project-local externs when building with `--target go`.
+The compiler copies Go companion files into the generated Go workspace and calls the binding directly.
+
+Supported companion locations:
+- `ffi.go` at the project root
+- `ffi/*.go` under the project root
+
+Companion files must use `package main` because they are compiled into the generated application package.
+
+Example Ard declaration:
+
+```ard
+extern fn hostname() Str!Str = {
+  go = "Hostname"
+}
+```
+
+Example `ffi.go`:
+
+```go
+package main
+
+import "os"
+
+func Hostname() (string, error) {
+    return os.Hostname()
+}
+```
+
+Project Go FFI currently uses idiomatic direct-call adaptation:
+- scalar/list/map/function arguments pass as their generated Go values
+- `T?` arguments pass as `*T` (`nil` for `None`)
+- `T` returns directly as `T`
+- `T?` expects `*T` (`nil` becomes `None`, non-`nil` becomes `Some`)
+- `Void!Str` expects `error`
+- `T!Str` expects `(T, error)`
+
 ## JavaScript companion modules
 
 JavaScript externs are implemented through companion `.mjs` files rather than per-function module paths embedded in Ard source.
@@ -296,6 +335,40 @@ private extern fn close(db: ConnectionPtr) Void!Str = "SqlClose"
 struct Database {
   _ptr: ConnectionPtr,
   path: Str,
+}
+```
+
+For the Go target, project extern types can optionally bind to concrete Go type
+expressions. This keeps the Ard type opaque while allowing project FFI functions
+to use precise Go signatures instead of `any`:
+
+```ard
+extern type Vaxis = "*vaxis.Vaxis"
+
+extern fn tui_open() Vaxis!Str = "TuiOpen"
+extern fn tui_close(term: Vaxis) Void!Str = "TuiClose"
+```
+
+```go
+package main
+
+import "git.sr.ht/~rockorager/vaxis"
+
+func TuiOpen() (*vaxis.Vaxis, error) {
+    return vaxis.New(vaxis.Options{})
+}
+
+func TuiClose(vx *vaxis.Vaxis) error {
+    vx.Close()
+    return nil
+}
+```
+
+The binding may also use target-specific binding-block syntax when needed:
+
+```ard
+extern type Vaxis = {
+  go = "*vaxis.Vaxis"
 }
 ```
 

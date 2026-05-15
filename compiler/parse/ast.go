@@ -317,12 +317,29 @@ func (f FunctionDeclaration) String() string {
 
 type ExternTypeDeclaration struct {
 	Location
-	Name       string
-	TypeParams []string
-	Private    bool
+	Name             string
+	TypeParams       []string
+	ExternalBinding  string
+	ExternalBindings map[string]string
+	Private          bool
 }
 
 func (e ExternTypeDeclaration) String() string {
+	if len(e.ExternalBindings) > 1 || (len(e.ExternalBindings) == 1 && e.ExternalBindings["go"] == "") {
+		keys := make([]string, 0, len(e.ExternalBindings))
+		for key := range e.ExternalBindings {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		parts := make([]string, 0, len(keys))
+		for _, key := range keys {
+			parts = append(parts, fmt.Sprintf("%s = %q", key, e.ExternalBindings[key]))
+		}
+		return fmt.Sprintf("extern type %s%s = { %s }", e.Name, renderTypeParams(e.TypeParams), strings.Join(parts, ", "))
+	}
+	if e.ExternalBinding != "" {
+		return fmt.Sprintf("extern type %s%s = %q", e.Name, renderTypeParams(e.TypeParams), e.ExternalBinding)
+	}
 	return fmt.Sprintf("extern type %s%s", e.Name, renderTypeParams(e.TypeParams))
 }
 

@@ -192,7 +192,7 @@ func derefType(t Type) Type {
 		if !changed {
 			return typ
 		}
-		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: newTypeArgs, private: typ.private}
+		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: newTypeArgs, ExternalBinding: typ.ExternalBinding, ExternalBindingTarget: typ.ExternalBindingTarget, ExternalBindings: cloneExternalBindings(typ.ExternalBindings), private: typ.private}
 	default:
 		return t
 	}
@@ -922,7 +922,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			for i, param := range s.TypeParams {
 				typeArgs[i] = &TypeVar{name: param}
 			}
-			externType := &ExternType{Name_: s.Name, GenericParams: append([]string(nil), s.TypeParams...), TypeArgs: typeArgs, private: s.Private}
+			bindings := cloneExternalBindings(s.ExternalBindings)
+			if len(bindings) == 0 && s.ExternalBinding != "" {
+				bindings = map[string]string{backend.TargetGo: s.ExternalBinding}
+			}
+			resolvedTarget, resolvedBinding := resolveExternalBindingForTarget(c.options.Target, bindings)
+			externType := &ExternType{Name_: s.Name, GenericParams: append([]string(nil), s.TypeParams...), TypeArgs: typeArgs, ExternalBinding: resolvedBinding, ExternalBindingTarget: resolvedTarget, ExternalBindings: bindings, private: s.Private}
 			c.scope.add(s.Name, externType, false)
 			return &Statement{Stmt: externType}
 		}
@@ -4634,7 +4639,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		for i, typeArg := range typ.TypeArgs {
 			substitutedArgs[i] = substituteType(typeArg, typeMap)
 		}
-		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: substitutedArgs, private: typ.private}
+		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: substitutedArgs, ExternalBinding: typ.ExternalBinding, ExternalBindingTarget: typ.ExternalBindingTarget, ExternalBindings: cloneExternalBindings(typ.ExternalBindings), private: typ.private}
 	// Handle other compound types
 	default:
 		return t
