@@ -563,8 +563,8 @@ func TestBuildJSProgramDefaultWritesArdOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated root module: %v", err)
 	}
-	if !strings.Contains(string(out), "await main();") {
-		t.Fatalf("expected CLI build output to invoke root function, got:\n%s", string(out))
+	if strings.Contains(string(out), "await main();") || strings.Contains(string(out), "await __ard_script();") {
+		t.Fatalf("expected build output to be importable without auto-invoking root, got:\n%s", string(out))
 	}
 }
 

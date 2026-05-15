@@ -63,21 +63,13 @@ func RunProgram(program *air.Program, target string, _ []string, projectInfo *ch
 }
 
 func BuildProgram(program *air.Program, outputPath string, target string, projectInfo *checker.ProjectInfo) (string, error) {
-	return buildProgram(program, outputPath, target, projectInfo, false)
-}
-
-func BuildExecutableProgram(program *air.Program, outputPath string, target string, projectInfo *checker.ProjectInfo) (string, error) {
-	return buildProgram(program, outputPath, target, projectInfo, true)
-}
-
-func buildProgram(program *air.Program, outputPath string, target string, projectInfo *checker.ProjectInfo, invokeRoot bool) (string, error) {
 	resolvedOutputPath, err := filepath.Abs(outputPath)
 	if err != nil {
 		return "", err
 	}
 	outputDir := filepath.Dir(resolvedOutputPath)
 	rootFileName := filepath.Base(resolvedOutputPath)
-	files, ffi, err := GenerateSources(program, Options{Target: target, RootFileName: rootFileName, InvokeMain: invokeRoot})
+	files, ffi, err := GenerateSources(program, Options{Target: target, RootFileName: rootFileName})
 	if err != nil {
 		return "", err
 	}
