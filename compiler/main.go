@@ -729,7 +729,7 @@ func resolveJSBuildOutputPath(inputPath string, outputPath string, target string
 			rootDir = "."
 		}
 	}
-	return filepath.Join(rootDir, "ard-out", "js", target, "build", defaultOutput+".mjs")
+	return filepath.Join(rootDir, "ard-out", target, defaultOutput+".mjs")
 }
 
 func buildGoBinary(inputPath string, outputPath string, target string) (string, error) {

@@ -105,6 +105,53 @@ let result = get_age()
 	}
 }
 
+func TestBuildLowersStructMethodsAsClassMethods(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+struct Counter { value: Int }
+
+impl Counter {
+  fn mut increment() {
+    self.value =+ 1
+  }
+
+  fn to_str() Str {
+    self.value.to_str()
+  }
+}
+
+fn main() Str {
+  mut counter = Counter{value: 1}
+  counter.increment()
+  counter.to_str()
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	outputPath := filepath.Join(dir, "main.mjs")
+	if _, err := Build(mainPath, outputPath, backend.TargetJSBrowser); err != nil {
+		t.Fatalf("did not expect error: %v", err)
+	}
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read generated module: %v", err)
+	}
+	source := string(out)
+	for _, expected := range []string{"increment() {", "to_str() {", "counter.increment();", "return counter.to_str();"} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("expected %q in generated module, got:\n%s", expected, source)
+		}
+	}
+	if strings.Contains(source, "function Counter_increment") || strings.Contains(source, "function Counter_to_str") || strings.Contains(source, "export { Counter_increment") {
+		t.Fatalf("expected struct methods to be emitted only as class methods, got:\n%s", source)
+	}
+}
+
 func TestRunExecutesCoreLoopProgram(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not installed")
@@ -762,6 +809,9 @@ let result = add(1, 2)
 	if !strings.Contains(source, "const result = add(1, 2);") {
 		t.Fatalf("expected script let in AIR JS output, got:\n%s", source)
 	}
+	if strings.Contains(source, "__ard_script") {
+		t.Fatalf("expected top-level script statements to emit directly, got:\n%s", source)
+	}
 	if !strings.Contains(source, "export { add };") {
 		t.Fatalf("expected function export in AIR JS output, got:\n%s", source)
 	}
@@ -850,6 +900,57 @@ let ok_value = ok.or(0)
 		if !strings.Contains(source, expected) {
 			t.Fatalf("expected %q in AIR JS output, got:\n%s", expected, source)
 		}
+	}
+}
+
+func TestGenerateSourcesFromAIRMaybeExpectUsesStatementGuards(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/maybe
+
+fn value() Int {
+  let count = maybe::some(1).expect("count")
+  count
+}
+
+fn tail() Int {
+  maybe::some(2).expect("tail")
+}
+
+maybe::some(()).expect("start")
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := string(files["main.mjs"])
+	for _, expected := range []string{
+		`if (__expect`,
+		`.isNone()) throw makeArdError("panic", "ard/maybe", "expect", 0, "count");`,
+		`const count = __expect`,
+		`.value;`,
+		`return __expect`,
+	} {
+		if !strings.Contains(source, expected) {
+			t.Fatalf("expected %q in AIR JS output, got:\n%s", expected, source)
+		}
+	}
+	if strings.Contains(source, `.expect("count")`) || strings.Contains(source, `.expect("tail")`) || strings.Contains(source, `.expect("start")`) {
+		t.Fatalf("expected direct Maybe.expect calls to be lowered to statement guards, got:\n%s", source)
 	}
 }
 
@@ -1069,8 +1170,11 @@ let result = add_two(40)
 	for _, content := range files {
 		source += string(content)
 	}
-	if !strings.Contains(source, "function(value) {") || !strings.Contains(source, "return add_two(40);") && !strings.Contains(source, "const result = add_two(40);") {
-		t.Fatalf("expected closure literal and call in AIR JS output, got:\n%s", source)
+	if !strings.Contains(source, "function(value) {") || !strings.Contains(source, "return (base + value);") || !strings.Contains(source, "const result = add_two(40);") {
+		t.Fatalf("expected inlined closure literal and call in AIR JS output, got:\n%s", source)
+	}
+	if strings.Contains(source, "anon_func") {
+		t.Fatalf("expected closure helper functions to be inlined, got:\n%s", source)
 	}
 }
 
@@ -1196,7 +1300,7 @@ let result = result_value()
 		t.Fatalf("expected project ffi artifact use")
 	}
 	source := string(files["main.mjs"])
-	for _, expected := range []string{"ardToString(42)", "Maybe.none()", "Maybe.some(__extern)", "Result.ok(__extern.ok)", "Result.err(__extern.error)"} {
+	for _, expected := range []string{"ardToString(42)", "!isVoid(__extern) ? Maybe.some(__extern) : Maybe.none()", "Result.ok(__extern.ok)", "Result.err(__extern.error)"} {
 		if !strings.Contains(source, expected) {
 			t.Fatalf("expected %q in AIR JS output, got:\n%s", expected, source)
 		}

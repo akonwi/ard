@@ -330,6 +330,35 @@ func TestExternalFunctionBindingsResolvePerTarget(t *testing.T) {
 	}
 }
 
+func TestExternalFunctionShorthandResolvesToEffectiveJSTarget(t *testing.T) {
+	source := `extern fn query_selector(selector: Str) Dynamic? = "querySelector"`
+
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("unexpected parse errors: %v", result.Errors)
+	}
+
+	jsChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetJSBrowser})
+	jsChecker.Check()
+	if jsChecker.HasErrors() {
+		t.Fatalf("unexpected js diagnostics: %v", jsChecker.Diagnostics())
+	}
+	jsFn := jsChecker.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
+	if jsFn.ExternalBinding != "querySelector" || jsFn.ExternalBindingTarget != backend.TargetJSBrowser || jsFn.ExternalBindings[backend.TargetJSBrowser] != "querySelector" {
+		t.Fatalf("unexpected js shorthand binding: %#v", jsFn)
+	}
+
+	goChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetGo})
+	goChecker.Check()
+	if goChecker.HasErrors() {
+		t.Fatalf("unexpected go diagnostics: %v", goChecker.Diagnostics())
+	}
+	goFn := goChecker.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
+	if goFn.ExternalBinding != "querySelector" || goFn.ExternalBindingTarget != backend.TargetGo || goFn.ExternalBindings[backend.TargetGo] != "querySelector" {
+		t.Fatalf("unexpected go shorthand binding: %#v", goFn)
+	}
+}
+
 func TestExternalFunctionBindingsResolveSharedJSFallback(t *testing.T) {
 	source := `extern fn delay(ms: Int) Void = {
   go = "Delay"

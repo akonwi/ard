@@ -99,11 +99,20 @@ func writeJSSources(outputDir string, files map[string][]byte) error {
 }
 
 type airJSLowerer struct {
-	program     *air.Program
-	target      string
-	rootFile    string
-	moduleFiles map[air.ModuleID]string
-	tempCounter int
+	program          *air.Program
+	target           string
+	rootFile         string
+	moduleFiles      map[air.ModuleID]string
+	closureFunctions map[air.FunctionID]bool
+	methodFunctions  map[air.FunctionID]jsMethodInfo
+	methodsByType    map[air.TypeID][]air.FunctionID
+	localOverrides   map[air.FunctionID]map[air.LocalID]string
+	tempCounter      int
+}
+
+type jsMethodInfo struct {
+	Owner  air.TypeID
+	Method string
 }
 
 func generateSourcesFromAIR(program *air.Program, options Options) (map[string][]byte, FFIArtifacts, error) {
@@ -121,8 +130,10 @@ func generateSourcesFromAIR(program *air.Program, options Options) (map[string][
 	if rootFile == "" {
 		rootFile = "main.mjs"
 	}
-	l := &airJSLowerer{program: program, target: target, rootFile: rootFile, moduleFiles: map[air.ModuleID]string{}}
+	l := &airJSLowerer{program: program, target: target, rootFile: rootFile, moduleFiles: map[air.ModuleID]string{}, localOverrides: map[air.FunctionID]map[air.LocalID]string{}}
 	l.planModuleFiles()
+	l.collectClosureFunctions()
+	l.collectMethodFunctions()
 	files := make(map[string][]byte, len(program.Modules))
 	moduleIDs := make([]int, 0, len(program.Modules))
 	for _, module := range program.Modules {
@@ -140,9 +151,129 @@ func generateSourcesFromAIR(program *air.Program, options Options) (map[string][
 	return files, l.collectFFIArtifacts(), nil
 }
 
+func (l *airJSLowerer) collectClosureFunctions() {
+	closures := map[air.FunctionID]bool{}
+	var visitBlock func(air.Block)
+	var visitExpr func(air.Expr)
+	visitBlock = func(block air.Block) {
+		for _, stmt := range block.Stmts {
+			if stmt.Value != nil {
+				visitExpr(*stmt.Value)
+			}
+			if stmt.Expr != nil {
+				visitExpr(*stmt.Expr)
+			}
+			if stmt.Target != nil {
+				visitExpr(*stmt.Target)
+			}
+			if stmt.Condition != nil {
+				visitExpr(*stmt.Condition)
+			}
+			visitBlock(stmt.Body)
+		}
+		if block.Result != nil {
+			visitExpr(*block.Result)
+		}
+	}
+	visitExpr = func(expr air.Expr) {
+		if expr.Kind == air.ExprMakeClosure && expr.Function != air.NoFunction {
+			closures[expr.Function] = true
+		}
+		for _, arg := range expr.Args {
+			visitExpr(arg)
+		}
+		for _, entry := range expr.Entries {
+			visitExpr(entry.Key)
+			visitExpr(entry.Value)
+		}
+		for _, field := range expr.Fields {
+			visitExpr(field.Value)
+		}
+		for _, matchCase := range expr.EnumCases {
+			visitBlock(matchCase.Body)
+		}
+		for _, matchCase := range expr.IntCases {
+			visitBlock(matchCase.Body)
+		}
+		for _, matchCase := range expr.RangeCases {
+			visitBlock(matchCase.Body)
+		}
+		for _, matchCase := range expr.UnionCases {
+			visitBlock(matchCase.Body)
+		}
+		if expr.Target != nil {
+			visitExpr(*expr.Target)
+		}
+		if expr.Left != nil {
+			visitExpr(*expr.Left)
+		}
+		if expr.Right != nil {
+			visitExpr(*expr.Right)
+		}
+		if expr.Condition != nil {
+			visitExpr(*expr.Condition)
+		}
+		visitBlock(expr.Body)
+		visitBlock(expr.Then)
+		visitBlock(expr.Else)
+		visitBlock(expr.CatchAll)
+		visitBlock(expr.Some)
+		visitBlock(expr.None)
+		visitBlock(expr.Ok)
+		visitBlock(expr.Err)
+		visitBlock(expr.Catch)
+	}
+	for _, fn := range l.program.Functions {
+		visitBlock(fn.Body)
+	}
+	l.closureFunctions = closures
+}
+
+func (l *airJSLowerer) collectMethodFunctions() {
+	methods := map[air.FunctionID]jsMethodInfo{}
+	byType := map[air.TypeID][]air.FunctionID{}
+	for _, fn := range l.program.Functions {
+		info, ok := l.structMethodInfo(fn)
+		if !ok {
+			continue
+		}
+		methods[fn.ID] = info
+		byType[info.Owner] = append(byType[info.Owner], fn.ID)
+	}
+	for typeID := range byType {
+		sort.Slice(byType[typeID], func(i, j int) bool { return byType[typeID][i] < byType[typeID][j] })
+	}
+	l.methodFunctions = methods
+	l.methodsByType = byType
+}
+
+func (l *airJSLowerer) structMethodInfo(fn air.Function) (jsMethodInfo, bool) {
+	if fn.IsScript || len(fn.Signature.Params) == 0 {
+		return jsMethodInfo{}, false
+	}
+	ownerType, ok := l.typeInfo(fn.Signature.Params[0].Type)
+	if !ok || ownerType.Kind != air.TypeStruct {
+		return jsMethodInfo{}, false
+	}
+	prefix := ownerType.Name + "."
+	if !strings.HasPrefix(fn.Name, prefix) {
+		return jsMethodInfo{}, false
+	}
+	rest := strings.TrimPrefix(fn.Name, prefix)
+	parts := strings.Split(rest, ".")
+	if len(parts) == 0 {
+		return jsMethodInfo{}, false
+	}
+	method := parts[len(parts)-1]
+	if method == "" {
+		return jsMethodInfo{}, false
+	}
+	return jsMethodInfo{Owner: ownerType.ID, Method: method}, true
+}
+
 func (l *airJSLowerer) planModuleFiles() {
 	rootModule := air.ModuleID(-1)
-	if rootID, ok := airJSRootFunction(l.program); ok {
+	if rootID, ok := airJSRootModuleFunction(l.program); ok {
 		rootModule = l.program.Functions[rootID].Module
 	} else if len(l.program.Modules) > 0 {
 		rootModule = l.program.Modules[len(l.program.Modules)-1].ID
@@ -161,7 +292,7 @@ func (l *airJSLowerer) lowerModule(module air.Module, invokeRoot bool) (string, 
 	outputPath := l.moduleFiles[module.ID]
 	preludeImport := relativeJSImport(outputPath, "ard.prelude.mjs")
 	imports := []string{
-		jsNamedImportLine([]string{"Maybe", "Result", "ardEq", "ardToString", "makeArdError", "makeEnum", "isEnumOf"}, preludeImport),
+		jsNamedImportLine([]string{"Maybe", "Result", "ardEq", "ardToString", "makeArdError", "makeEnum", "isEnumOf", "isVoid"}, preludeImport),
 		jsNamespaceImportLine("prelude", preludeImport),
 	}
 	ffi := l.collectFFIArtifacts()
@@ -192,7 +323,7 @@ func (l *airJSLowerer) lowerModule(module air.Module, invokeRoot bool) (string, 
 	sort.Slice(functionIDs, func(i, j int) bool { return functionIDs[i] < functionIDs[j] })
 	for _, functionID := range functionIDs {
 		fn := l.program.Functions[functionID]
-		if fn.IsScript {
+		if fn.IsScript || l.closureFunctions[fn.ID] || l.isMethodFunction(fn.ID) {
 			continue
 		}
 		decl, err := l.lowerFunction(fn)
@@ -210,7 +341,7 @@ func (l *airJSLowerer) lowerModule(module air.Module, invokeRoot bool) (string, 
 		b.WriteString(script)
 		b.WriteString("\n\n")
 	}
-	if invokeRoot {
+	if invokeRoot && l.program.Script == air.NoFunction {
 		if rootID, ok := airJSRootFunction(l.program); ok && l.program.Functions[rootID].Module == module.ID {
 			b.WriteString("await ")
 			b.WriteString(l.functionName(rootID))
@@ -342,8 +473,15 @@ func (l *airJSLowerer) lowerTypeDecl(typeID air.TypeID) (string, error) {
 			name := jsName(field.Name)
 			lines = append(lines, "this."+name+" = "+name+";")
 		}
-		ctor := renderJSDoc(jsBlockDoc("constructor("+strings.Join(params, ", ")+")", strings.Join(lines, "\n")))
-		return renderJSDoc(jsClassDoc(jsName(t.Name), []string{ctor})), nil
+		members := []string{renderJSDoc(jsBlockDoc("constructor("+strings.Join(params, ", ")+")", strings.Join(lines, "\n")))}
+		for _, methodID := range l.methodsByType[typeID] {
+			method, err := l.lowerClassMethod(l.program.Functions[methodID])
+			if err != nil {
+				return "", err
+			}
+			members = append(members, method)
+		}
+		return renderJSDoc(jsClassDoc(jsName(t.Name), members)), nil
 	case air.TypeEnum:
 		fields := make([]jsObjectField, 0, len(t.Variants))
 		for _, variant := range t.Variants {
@@ -353,6 +491,34 @@ func (l *airJSLowerer) lowerTypeDecl(typeID air.TypeID) (string, error) {
 	default:
 		return "", nil
 	}
+}
+
+func (l *airJSLowerer) lowerClassMethod(fn air.Function) (string, error) {
+	info, ok := l.methodFunctions[fn.ID]
+	if !ok {
+		return "", fmt.Errorf("function %s is not a class method", fn.Name)
+	}
+	params := make([]string, 0, len(fn.Signature.Params)-1)
+	for _, param := range fn.Signature.Params[1:] {
+		params = append(params, jsName(param.Name))
+	}
+	overrides := map[air.LocalID]string{}
+	if len(fn.Locals) > 0 {
+		overrides[fn.Locals[0].ID] = "this"
+	}
+	previous := l.localOverrides[fn.ID]
+	l.localOverrides[fn.ID] = overrides
+	body, err := l.lowerBlock(fn, fn.Body, true)
+	if previous != nil {
+		l.localOverrides[fn.ID] = previous
+	} else {
+		delete(l.localOverrides, fn.ID)
+	}
+	if err != nil {
+		return "", err
+	}
+	_ = info
+	return renderJSDoc(jsBlockDoc(jsName(info.Method)+"("+strings.Join(params, ", ")+")", body)), nil
 }
 
 func (l *airJSLowerer) lowerFunction(fn air.Function) (string, error) {
@@ -371,11 +537,7 @@ func (l *airJSLowerer) lowerFunction(fn air.Function) (string, error) {
 }
 
 func (l *airJSLowerer) lowerScriptFunction(fn air.Function) (string, error) {
-	body, err := l.lowerBlock(fn, fn.Body, true)
-	if err != nil {
-		return "", err
-	}
-	return renderJSDoc(jsBlockDoc("function "+l.functionName(fn.ID)+"()", body)), nil
+	return l.lowerBlock(fn, fn.Body, false)
 }
 
 func (l *airJSLowerer) lowerBlock(fn air.Function, block air.Block, returns bool) (string, error) {
@@ -398,17 +560,39 @@ func (l *airJSLowerer) lowerBlock(fn air.Function, block air.Block, returns bool
 			lines = append(lines, tryLines...)
 			return strings.Join(lines, "\n"), nil
 		}
+		if block.Result.Kind == air.ExprMaybeExpect {
+			expectLines, value, err := l.lowerMaybeExpectLines(fn, *block.Result)
+			if err != nil {
+				return "", err
+			}
+			lines = append(lines, expectLines...)
+			if returns {
+				if l.isVoidType(block.Result.Type) {
+					lines = append(lines, "return;")
+				} else {
+					lines = append(lines, "return "+value+";")
+				}
+			} else if !l.isVoidType(block.Result.Type) {
+				lines = append(lines, value+";")
+			}
+			return strings.Join(lines, "\n"), nil
+		}
 		expr, err := l.lowerExpr(fn, *block.Result)
 		if err != nil {
 			return "", err
 		}
 		if returns {
-			lines = append(lines, "return "+expr+";")
+			if l.isVoidType(block.Result.Type) {
+				lines = append(lines, expr+";")
+				lines = append(lines, "return;")
+			} else {
+				lines = append(lines, "return "+expr+";")
+			}
 		} else {
 			lines = append(lines, expr+";")
 		}
 	} else if returns {
-		lines = append(lines, "return undefined;")
+		lines = append(lines, "return;")
 	}
 	return strings.Join(lines, "\n"), nil
 }
@@ -418,6 +602,18 @@ func (l *airJSLowerer) lowerStmt(fn air.Function, stmt air.Stmt) (string, error)
 	case air.StmtLet:
 		if stmt.Value != nil && (stmt.Value.Kind == air.ExprTryResult || stmt.Value.Kind == air.ExprTryMaybe) {
 			return l.lowerTryLet(fn, stmt)
+		}
+		if stmt.Value != nil && stmt.Value.Kind == air.ExprMaybeExpect {
+			lines, value, err := l.lowerMaybeExpectLines(fn, *stmt.Value)
+			if err != nil {
+				return "", err
+			}
+			keyword := "const"
+			if stmt.Mutable {
+				keyword = "let"
+			}
+			lines = append(lines, keyword+" "+l.localName(fn, stmt.Local)+" = "+value+";")
+			return strings.Join(lines, "\n"), nil
 		}
 		value, err := l.lowerExpr(fn, *stmt.Value)
 		if err != nil {
@@ -429,6 +625,14 @@ func (l *airJSLowerer) lowerStmt(fn air.Function, stmt air.Stmt) (string, error)
 		}
 		return keyword + " " + l.localName(fn, stmt.Local) + " = " + value + ";", nil
 	case air.StmtAssign:
+		if stmt.Value != nil && stmt.Value.Kind == air.ExprMaybeExpect {
+			lines, value, err := l.lowerMaybeExpectLines(fn, *stmt.Value)
+			if err != nil {
+				return "", err
+			}
+			lines = append(lines, l.localName(fn, stmt.Local)+" = "+value+";")
+			return strings.Join(lines, "\n"), nil
+		}
 		value, err := l.lowerExpr(fn, *stmt.Value)
 		if err != nil {
 			return "", err
@@ -451,6 +655,16 @@ func (l *airJSLowerer) lowerStmt(fn air.Function, stmt air.Stmt) (string, error)
 	case air.StmtExpr:
 		if stmt.Expr != nil && stmt.Expr.Kind == air.ExprIf {
 			return l.lowerIfStmt(fn, *stmt.Expr)
+		}
+		if stmt.Expr != nil && stmt.Expr.Kind == air.ExprMaybeExpect {
+			lines, value, err := l.lowerMaybeExpectLines(fn, *stmt.Expr)
+			if err != nil {
+				return "", err
+			}
+			if !l.isVoidType(stmt.Expr.Type) {
+				lines = append(lines, value+";")
+			}
+			return strings.Join(lines, "\n"), nil
 		}
 		value, err := l.lowerExpr(fn, *stmt.Expr)
 		if err != nil {
@@ -493,7 +707,7 @@ func (l *airJSLowerer) lowerIfStmt(fn air.Function, expr air.Expr) (string, erro
 func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error) {
 	switch expr.Kind {
 	case air.ExprConstVoid:
-		return "undefined", nil
+		return "null", nil
 	case air.ExprConstInt:
 		return strconv.Itoa(expr.Int), nil
 	case air.ExprConstFloat:
@@ -512,21 +726,30 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 	case air.ExprMatchUnion:
 		return l.lowerUnionMatch(fn, expr)
 	case air.ExprCall:
+		if info, ok := l.methodFunctions[expr.Function]; ok {
+			if len(expr.Args) == 0 {
+				return "", fmt.Errorf("method call %s missing receiver", info.Method)
+			}
+			receiver, err := l.lowerExpr(fn, expr.Args[0])
+			if err != nil {
+				return "", err
+			}
+			args, err := l.lowerArgs(fn, expr.Args[1:])
+			if err != nil {
+				return "", err
+			}
+			return renderJSExpr(jsCallExprIR{Callee: receiver + "." + jsName(info.Method), Args: args}), nil
+		}
 		args, err := l.lowerArgs(fn, expr.Args)
 		if err != nil {
 			return "", err
 		}
 		return renderJSExpr(jsCallExprIR{Callee: l.functionRef(fn.Module, expr.Function), Args: args}), nil
 	case air.ExprCallExtern:
-		args, err := l.lowerArgs(fn, expr.Args)
+		call, err := l.lowerExternCallRaw(fn, expr)
 		if err != nil {
 			return "", err
 		}
-		callee, err := l.externRef(expr.Extern)
-		if err != nil {
-			return "", err
-		}
-		call := renderJSExpr(jsCallExprIR{Callee: callee, Args: args})
 		return l.adaptExternReturn(call, expr.Type)
 	case air.ExprSpawnFiber:
 		return l.lowerSpawnFiber(fn, expr)
@@ -731,7 +954,7 @@ func (l *airJSLowerer) lowerFiberJoin(fn air.Function, expr air.Expr) (string, e
 	if _, err := l.lowerExpr(fn, *expr.Target); err != nil {
 		return "", err
 	}
-	return "undefined", nil
+	return "null", nil
 }
 
 func (l *airJSLowerer) lowerTraitCall(fn air.Function, expr air.Expr) (string, error) {
@@ -756,6 +979,18 @@ func (l *airJSLowerer) lowerTraitCall(fn air.Function, expr air.Expr) (string, e
 	return "", fmt.Errorf("unsupported AIR JS trait call %s.%s", trait.Name, method.Name)
 }
 
+func (l *airJSLowerer) lowerExternCallRaw(fn air.Function, expr air.Expr) (string, error) {
+	args, err := l.lowerArgs(fn, expr.Args)
+	if err != nil {
+		return "", err
+	}
+	callee, err := l.externRef(expr.Extern)
+	if err != nil {
+		return "", err
+	}
+	return renderJSExpr(jsCallExprIR{Callee: callee, Args: args}), nil
+}
+
 func (l *airJSLowerer) adaptExternReturn(call string, typeID air.TypeID) (string, error) {
 	t, ok := l.typeInfo(typeID)
 	if !ok {
@@ -767,7 +1002,7 @@ func (l *airJSLowerer) adaptExternReturn(call string, typeID air.TypeID) (string
 		if err != nil {
 			return "", err
 		}
-		body := "const __extern = " + call + ";\nreturn (__extern === undefined || __extern === null) ? Maybe.none() : Maybe.some(" + adapted + ");"
+		body := "const __extern = " + call + ";\nreturn !isVoid(__extern) ? Maybe.some(" + adapted + ") : Maybe.none();"
 		return renderJSDoc(jsIIFEDoc(body)), nil
 	case air.TypeResult:
 		adaptedOk, err := l.adaptExternValue("__extern.ok", t.Value)
@@ -827,7 +1062,7 @@ func (l *airJSLowerer) adaptExternValue(value string, typeID air.TypeID) (string
 		if err != nil {
 			return "", err
 		}
-		body := "const __maybe = " + value + ";\nreturn (__maybe === undefined || __maybe === null) ? Maybe.none() : Maybe.some(" + adapted + ");"
+		body := "const __maybe = " + value + ";\nreturn !isVoid(__maybe) ? Maybe.some(" + adapted + ") : Maybe.none();"
 		return renderJSDoc(jsIIFEDoc(body)), nil
 	default:
 		return value, nil
@@ -977,17 +1212,27 @@ func (l *airJSLowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (string,
 	}
 	closureFn := l.program.Functions[expr.Function]
 	params := make([]string, 0, len(closureFn.Signature.Params))
-	callArgs := make([]string, 0, len(expr.CaptureLocals)+len(closureFn.Signature.Params))
-	for _, local := range expr.CaptureLocals {
-		callArgs = append(callArgs, l.localName(fn, local))
-	}
 	for _, param := range closureFn.Signature.Params {
-		name := jsName(param.Name)
-		params = append(params, name)
-		callArgs = append(callArgs, name)
+		params = append(params, jsName(param.Name))
 	}
-	call := renderJSExpr(jsCallExprIR{Callee: l.functionRef(fn.Module, expr.Function), Args: callArgs})
-	body := "return " + call + ";"
+	overrides := map[air.LocalID]string{}
+	for i, capture := range closureFn.Captures {
+		if i >= len(expr.CaptureLocals) {
+			return "", fmt.Errorf("closure %s capture mismatch", closureFn.Name)
+		}
+		overrides[capture.Local] = l.localName(fn, expr.CaptureLocals[i])
+	}
+	previous := l.localOverrides[closureFn.ID]
+	l.localOverrides[closureFn.ID] = overrides
+	body, err := l.lowerBlock(closureFn, closureFn.Body, true)
+	if previous != nil {
+		l.localOverrides[closureFn.ID] = previous
+	} else {
+		delete(l.localOverrides, closureFn.ID)
+	}
+	if err != nil {
+		return "", err
+	}
 	return renderJSDoc(jsBlockDoc("function("+strings.Join(params, ", ")+")", body)), nil
 }
 
@@ -1161,14 +1406,14 @@ func (l *airJSLowerer) lowerListOp(fn air.Function, expr air.Expr) (string, erro
 	case air.ExprListSet:
 		return renderJSDoc(jsIIFEDoc("const __value = " + target + ";\n__value[" + args[0] + "] = " + args[1] + ";\nreturn true;")), nil
 	case air.ExprListSwap:
-		body := "const __value = " + target + ";\nconst __tmp = __value[" + args[0] + "];\n__value[" + args[0] + "] = __value[" + args[1] + "];\n__value[" + args[1] + "] = __tmp;\nreturn undefined;"
+		body := "const __value = " + target + ";\nconst __tmp = __value[" + args[0] + "];\n__value[" + args[0] + "] = __value[" + args[1] + "];\n__value[" + args[1] + "] = __tmp;\nreturn null;"
 		return renderJSDoc(jsIIFEDoc(body)), nil
 	case air.ExprListSort:
 		if len(args) != 1 {
 			return "", fmt.Errorf("list sort expects comparator")
 		}
 		cmp := args[0]
-		return renderJSDoc(jsIIFEDoc("const __value = " + target + ";\n__value.sort((a, b) => " + cmp + "(a, b) ? -1 : (" + cmp + "(b, a) ? 1 : 0));\nreturn undefined;")), nil
+		return renderJSDoc(jsIIFEDoc("const __value = " + target + ";\n__value.sort((a, b) => " + cmp + "(a, b) ? -1 : (" + cmp + "(b, a) ? 1 : 0));\nreturn null;")), nil
 	default:
 		return "", fmt.Errorf("unsupported AIR JS list op %d", expr.Kind)
 	}
@@ -1193,7 +1438,7 @@ func (l *airJSLowerer) lowerMapOp(fn air.Function, expr air.Expr) (string, error
 	case air.ExprMapSet:
 		return renderJSDoc(jsIIFEDoc("const __value = " + target + ";\n__value.set(" + args[0] + ", " + args[1] + ");\nreturn true;")), nil
 	case air.ExprMapDrop:
-		return renderJSDoc(jsIIFEDoc("const __value = " + target + ";\n__value.delete(" + args[0] + ");\nreturn undefined;")), nil
+		return renderJSDoc(jsIIFEDoc("const __value = " + target + ";\n__value.delete(" + args[0] + ");\nreturn null;")), nil
 	case air.ExprMapHas:
 		return target + ".has(" + args[0] + ")", nil
 	case air.ExprMapKeyAt:
@@ -1203,6 +1448,48 @@ func (l *airJSLowerer) lowerMapOp(fn air.Function, expr air.Expr) (string, error
 	default:
 		return "", fmt.Errorf("unsupported AIR JS map op %d", expr.Kind)
 	}
+}
+
+func (l *airJSLowerer) lowerMaybeExpectLines(fn air.Function, expr air.Expr) ([]string, string, error) {
+	if expr.Target == nil {
+		return nil, "", fmt.Errorf("maybe expect missing target")
+	}
+	if len(expr.Args) != 1 {
+		return nil, "", fmt.Errorf("maybe expect expects one argument")
+	}
+	message, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return nil, "", err
+	}
+	expectVar := l.temp("expect")
+	if expr.Target.Kind == air.ExprCallExtern {
+		call, err := l.lowerExternCallRaw(fn, *expr.Target)
+		if err != nil {
+			return nil, "", err
+		}
+		maybeType, ok := l.typeInfo(expr.Target.Type)
+		if !ok || maybeType.Kind != air.TypeMaybe {
+			return nil, "", fmt.Errorf("maybe expect lowered with non-Maybe extern target %d", expr.Target.Type)
+		}
+		adapted, err := l.adaptExternValue(expectVar, maybeType.Elem)
+		if err != nil {
+			return nil, "", err
+		}
+		lines := []string{
+			"const " + expectVar + " = " + call + ";",
+			"if (isVoid(" + expectVar + ")) throw makeArdError(\"panic\", \"ard/maybe\", \"expect\", 0, " + message + ");",
+		}
+		return lines, adapted, nil
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return nil, "", err
+	}
+	lines := []string{
+		"const " + expectVar + " = " + target + ";",
+		"if (" + expectVar + ".isNone()) throw makeArdError(\"panic\", \"ard/maybe\", \"expect\", 0, " + message + ");",
+	}
+	return lines, expectVar + ".value", nil
 }
 
 func (l *airJSLowerer) lowerMaybeOp(fn air.Function, expr air.Expr) (string, error) {
@@ -1356,6 +1643,11 @@ func (l *airJSLowerer) lowerBinaryCall(fn air.Function, expr air.Expr, build fun
 }
 
 func (l *airJSLowerer) localName(fn air.Function, local air.LocalID) string {
+	if overrides := l.localOverrides[fn.ID]; overrides != nil {
+		if name, ok := overrides[local]; ok {
+			return name
+		}
+	}
 	if int(local) < 0 || int(local) >= len(fn.Locals) {
 		return "__local" + strconv.Itoa(int(local))
 	}
@@ -1466,7 +1758,8 @@ func (l *airJSLowerer) externRef(id air.ExternID) (string, error) {
 func isAIRJSPreludeExtern(binding string) bool {
 	switch binding {
 	case "JsonToDynamic", "DecodeString", "DecodeInt", "DecodeFloat", "DecodeBool", "IsNil",
-		"DynamicToList", "DynamicToMap", "ExtractField", "StrToDynamic", "IntToDynamic",
+		"DynamicToList", "DynamicToMap", "ExtractField", "IntFromStr", "FloatFromStr",
+		"FloatFromInt", "FloatFloor", "StrToDynamic", "IntToDynamic",
 		"FloatToDynamic", "BoolToDynamic", "VoidToDynamic", "ListToDynamic", "MapToDynamic",
 		"JsonEncode", "promiseResolve", "promiseReject", "promiseMap", "promiseThen",
 		"promiseRescue", "promiseInspect", "promiseInspectError", "promiseFinally",
@@ -1491,7 +1784,7 @@ func (l *airJSLowerer) moduleExports(module air.Module) []string {
 	}
 	for _, functionID := range module.Functions {
 		fn := l.program.Functions[functionID]
-		if fn.IsScript {
+		if fn.IsScript || l.closureFunctions[fn.ID] || l.isMethodFunction(fn.ID) {
 			continue
 		}
 		exports = append(exports, l.functionName(functionID))
@@ -1510,11 +1803,21 @@ func airBlockIsZero(block air.Block) bool {
 	return len(block.Stmts) == 0 && block.Result == nil
 }
 
+func (l *airJSLowerer) isMethodFunction(id air.FunctionID) bool {
+	_, ok := l.methodFunctions[id]
+	return ok
+}
+
 func (l *airJSLowerer) typeInfo(id air.TypeID) (air.TypeInfo, bool) {
 	if id <= 0 || int(id) > len(l.program.Types) {
 		return air.TypeInfo{}, false
 	}
 	return l.program.Types[id-1], true
+}
+
+func (l *airJSLowerer) isVoidType(id air.TypeID) bool {
+	info, ok := l.typeInfo(id)
+	return ok && info.Kind == air.TypeVoid
 }
 
 func (l *airJSLowerer) collectFFIArtifacts() FFIArtifacts {
@@ -1540,7 +1843,7 @@ func (l *airJSLowerer) collectFFIArtifacts() FFIArtifacts {
 	return ffi
 }
 
-func airJSRootFunction(program *air.Program) (air.FunctionID, bool) {
+func airJSRootModuleFunction(program *air.Program) (air.FunctionID, bool) {
 	if program == nil {
 		return air.NoFunction, false
 	}
@@ -1549,6 +1852,16 @@ func airJSRootFunction(program *air.Program) (air.FunctionID, bool) {
 	}
 	if program.Script != air.NoFunction {
 		return program.Script, true
+	}
+	return air.NoFunction, false
+}
+
+func airJSRootFunction(program *air.Program) (air.FunctionID, bool) {
+	if program == nil {
+		return air.NoFunction, false
+	}
+	if program.Entry != air.NoFunction {
+		return program.Entry, true
 	}
 	return air.NoFunction, false
 }

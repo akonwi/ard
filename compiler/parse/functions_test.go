@@ -51,9 +51,8 @@ func TestExternTypeDeclaration(t *testing.T) {
 				Imports: []Import{},
 				Statements: []Statement{
 					&ExternTypeDeclaration{
-						Name:             "Vaxis",
-						ExternalBinding:  "*vaxis.Vaxis",
-						ExternalBindings: map[string]string{"go": "*vaxis.Vaxis"},
+						Name:            "Vaxis",
+						ExternalBinding: "*vaxis.Vaxis",
 					},
 				},
 			},
@@ -78,9 +77,8 @@ func TestFunctionDeclaration(t *testing.T) {
 								Type: &GenericType{Name: "T"},
 							},
 						},
-						ReturnType:       &VoidType{},
-						ExternalBinding:  "runtime.go_print",
-						ExternalBindings: map[string]string{"go": "runtime.go_print"},
+						ReturnType:      &VoidType{},
+						ExternalBinding: "runtime.go_print",
 					},
 				},
 			},

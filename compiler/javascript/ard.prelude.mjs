@@ -34,6 +34,10 @@ export function isEnumOf(value, enumName) {
   return isArdEnum(value) && value.enum === enumName;
 }
 
+export function isVoid(value) {
+  return value === null || value === undefined;
+}
+
 export function ardEnumValue(value) {
   return isArdEnum(value) ? value.value : value;
 }
@@ -297,6 +301,26 @@ export function ExtractField(data, name) {
   if (data instanceof Map) return { ok: data.has(name) ? data.get(name) : null };
   if (!isPlainObject(data)) return { err: formatDynamicForError(data) };
   return { ok: hasOwn(data, name) ? data[name] : null };
+}
+
+export function IntFromStr(value) {
+  if (typeof value !== "string" || !/^[+-]?\d+$/.test(value.trim())) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+export function FloatFromStr(value) {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function FloatFromInt(value) {
+  return value;
+}
+
+export function FloatFloor(value) {
+  return Math.floor(value);
 }
 
 export function StrToDynamic(val) {

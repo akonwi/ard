@@ -549,7 +549,7 @@ func TestBuildJSProgramDefaultWritesArdOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildJSProgram error = %v", err)
 	}
-	want := filepath.Join(dir, "ard-out", "js", backend.TargetJSBrowser, "build", "main.mjs")
+	want := filepath.Join(dir, "ard-out", backend.TargetJSBrowser, "main.mjs")
 	if builtPath != want {
 		t.Fatalf("built path = %q, want %q", builtPath, want)
 	}
@@ -558,6 +558,13 @@ func TestBuildJSProgramDefaultWritesArdOut(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(want), "ard.prelude.mjs")); err != nil {
 		t.Fatalf("expected generated prelude next to root module: %v", err)
+	}
+	out, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatalf("read generated root module: %v", err)
+	}
+	if strings.Contains(string(out), "await main();") || strings.Contains(string(out), "await __ard_script();") {
+		t.Fatalf("expected build output to be importable without auto-invoking root, got:\n%s", string(out))
 	}
 }
 

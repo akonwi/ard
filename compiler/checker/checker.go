@@ -924,7 +924,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 			bindings := cloneExternalBindings(s.ExternalBindings)
 			if len(bindings) == 0 && s.ExternalBinding != "" {
-				bindings = map[string]string{backend.TargetGo: s.ExternalBinding}
+				bindings = map[string]string{shorthandExternalBindingTarget(c.options.Target): s.ExternalBinding}
 			}
 			resolvedTarget, resolvedBinding := resolveExternalBindingForTarget(c.options.Target, bindings)
 			externType := &ExternType{Name_: s.Name, GenericParams: append([]string(nil), s.TypeParams...), TypeArgs: typeArgs, ExternalBinding: resolvedBinding, ExternalBindingTarget: resolvedTarget, ExternalBindings: bindings, private: s.Private}
@@ -4363,6 +4363,15 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 	return checked
 }
 
+func shorthandExternalBindingTarget(target string) string {
+	switch target {
+	case backend.TargetJSBrowser, backend.TargetJSServer:
+		return target
+	default:
+		return backend.TargetGo
+	}
+}
+
 func resolveExternalBindingForTarget(target string, bindings map[string]string) (string, string) {
 	if len(bindings) == 0 {
 		return "", ""
@@ -4417,7 +4426,7 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 
 	bindings := cloneExternalBindings(def.ExternalBindings)
 	if len(bindings) == 0 && def.ExternalBinding != "" {
-		bindings = map[string]string{backend.TargetGo: def.ExternalBinding}
+		bindings = map[string]string{shorthandExternalBindingTarget(c.options.Target): def.ExternalBinding}
 	}
 	if len(bindings) == 0 {
 		c.addError("External binding cannot be empty", def.GetLocation())
