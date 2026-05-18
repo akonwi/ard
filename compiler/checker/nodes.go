@@ -221,6 +221,7 @@ const (
 	StrReplaceAll
 	StrSplit
 	StrStartsWith
+	StrEndsWith
 	StrToStr
 	StrToDyn
 	StrTrim
@@ -244,7 +245,7 @@ func (s *StrMethod) Type() Type {
 		return Str
 	case StrSplit:
 		return MakeList(Str)
-	case StrStartsWith:
+	case StrStartsWith, StrEndsWith:
 		return Bool
 	case StrToStr:
 		return Str

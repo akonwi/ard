@@ -68,6 +68,12 @@ func (vm *VM) execBytecodeStrOp(inst vmcode.Instruction, stack *[]Value) (Value,
 			return Value{}, err
 		}
 		out = Bool(air.TypeID(inst.A), strings.HasPrefix(targetStr, arg0))
+	case vmcode.OpStrEndsWith:
+		arg0, err := stringArg(args, 0)
+		if err != nil {
+			return Value{}, err
+		}
+		out = Bool(air.TypeID(inst.A), strings.HasSuffix(targetStr, arg0))
 	case vmcode.OpStrTrim:
 		out = Str(air.TypeID(inst.A), strings.Trim(targetStr, " "))
 	default:

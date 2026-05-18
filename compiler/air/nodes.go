@@ -91,6 +91,7 @@ const (
 	ExprStrReplaceAll
 	ExprStrSplit
 	ExprStrStartsWith
+	ExprStrEndsWith
 	ExprToDynamic
 	ExprStrTrim
 	ExprEq

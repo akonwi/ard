@@ -752,7 +752,7 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			return Value{}, fmt.Errorf("%s", value.GoValueString())
 		case vmcode.OpEnumVariant:
 			push(Enum(air.TypeID(inst.A), inst.Imm))
-		case vmcode.OpStrAt, vmcode.OpStrSize, vmcode.OpStrIsEmpty, vmcode.OpStrContains, vmcode.OpStrReplace, vmcode.OpStrReplaceAll, vmcode.OpStrSplit, vmcode.OpStrStartsWith, vmcode.OpStrTrim:
+		case vmcode.OpStrAt, vmcode.OpStrSize, vmcode.OpStrIsEmpty, vmcode.OpStrContains, vmcode.OpStrReplace, vmcode.OpStrReplaceAll, vmcode.OpStrSplit, vmcode.OpStrStartsWith, vmcode.OpStrEndsWith, vmcode.OpStrTrim:
 			value, err := vm.execBytecodeStrOp(inst, &stack)
 			if err != nil {
 				return Value{}, err

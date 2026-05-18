@@ -132,7 +132,7 @@ func (s str) get(name string) Type {
 			},
 			ReturnType: MakeList(Str),
 		}
-	case "starts_with":
+	case "starts_with", "ends_with":
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "str", Type: Str}},

@@ -819,7 +819,7 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		return l.lowerMaybeOp(fn, expr)
 	case air.ExprMakeResultOk, air.ExprMakeResultErr, air.ExprResultExpect, air.ExprResultOr, air.ExprResultIsOk, air.ExprResultIsErr, air.ExprResultMap, air.ExprResultMapErr, air.ExprResultAndThen:
 		return l.lowerResultOp(fn, expr)
-	case air.ExprStrAt, air.ExprStrSize, air.ExprStrIsEmpty, air.ExprStrContains, air.ExprStrReplace, air.ExprStrReplaceAll, air.ExprStrSplit, air.ExprStrStartsWith, air.ExprStrTrim:
+	case air.ExprStrAt, air.ExprStrSize, air.ExprStrIsEmpty, air.ExprStrContains, air.ExprStrReplace, air.ExprStrReplaceAll, air.ExprStrSplit, air.ExprStrStartsWith, air.ExprStrEndsWith, air.ExprStrTrim:
 		return l.lowerStrOp(fn, expr)
 	case air.ExprTryResult, air.ExprTryMaybe:
 		return l.lowerTryExpr(fn, expr)
@@ -1595,6 +1595,8 @@ func (l *airJSLowerer) lowerStrOp(fn air.Function, expr air.Expr) (string, error
 		return renderJSExpr(jsCallExprIR{Callee: target + ".split", Args: args}), nil
 	case air.ExprStrStartsWith:
 		return renderJSExpr(jsCallExprIR{Callee: target + ".startsWith", Args: args}), nil
+	case air.ExprStrEndsWith:
+		return renderJSExpr(jsCallExprIR{Callee: target + ".endsWith", Args: args}), nil
 	case air.ExprStrTrim:
 		return renderJSExpr(jsCallExprIR{Callee: target + ".trim"}), nil
 	default:
