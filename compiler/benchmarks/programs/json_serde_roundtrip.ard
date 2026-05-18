@@ -1,4 +1,3 @@
-use ard/dynamic
 use ard/io
 use ard/json
 
@@ -26,22 +25,6 @@ fn make_packet(i: Int) Packet {
   }
 }
 
-fn packet_to_dynamic(packet: Packet) Dynamic {
-  dynamic::object(
-    [
-      "id": dynamic::from_int(packet.id),
-      "name": dynamic::from_str(packet.name),
-      "active": dynamic::from_bool(packet.active),
-      "values": dynamic::list(
-        packet.values,
-        fn(value: Int) Dynamic {
-          dynamic::from_int(value)
-        },
-      ),
-    ],
-  )
-}
-
 fn score_packet(payload: Str) Int {
   let packet = json::parse<Packet>(payload).expect("valid json")
 
@@ -58,7 +41,7 @@ fn score_packet(payload: Str) Int {
 fn main() {
   mut checksum = 0
   for i in 0..5000 {
-    let encoded = json::encode(packet_to_dynamic(make_packet(i))).expect("encoded")
+    let encoded = json::encode(make_packet(i)).expect("encoded")
     checksum =+ score_packet(encoded)
   }
   io::print(checksum)

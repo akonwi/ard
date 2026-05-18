@@ -326,6 +326,13 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 		l.currentImports["runtime"] = "github.com/akonwi/ard/runtime"
 		parts = append(parts, l.jsonParsePreludeSource())
 	}
+	if l.runtimeHelpers["json_encode"] {
+		l.currentImports["bytes"] = "bytes"
+		l.currentImports["fmt"] = "fmt"
+		l.currentImports["json"] = "encoding/json/v2"
+		l.currentImports["jsontext"] = "encoding/json/jsontext"
+		parts = append(parts, l.jsonEncodePreludeSource())
+	}
 	src := strings.Join(parts, "\n")
 	file, err := parser.ParseFile(token.NewFileSet(), "prelude.go", src, 0)
 	if err != nil {
@@ -4015,7 +4022,11 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 	case "MapToDynamic":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "MapToDynamic"), Args: args}}, nil
 	case "JsonEncode":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "JsonEncode"), Args: args})
+		if len(args) != 1 || len(expr.Args) != 1 {
+			return loweredExpr{}, fmt.Errorf("JsonEncode expects 1 arg")
+		}
+		l.markRuntimeHelper("json_encode")
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: ast.NewIdent(l.jsonEncodeTopHelperName(expr.Args[0].Type)), Args: args})
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -4428,4 +4439,77 @@ func (l *lowerer) jsonParseGoTypeName(typeID air.TypeID) string {
 	default:
 		return "any"
 	}
+}
+
+func (l *lowerer) jsonEncodePreludeSource() string {
+	var b strings.Builder
+	for _, typ := range l.program.Types {
+		if typ.ID == air.NoType {
+			continue
+		}
+		l.writeJSONEncodeHelper(&b, typ.ID)
+	}
+	return b.String()
+}
+
+func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
+	if !validTypeID(l.program, typeID) {
+		return
+	}
+	info := l.program.Types[typeID-1]
+	typeName := l.jsonParseGoTypeName(typeID)
+	helper := l.jsonEncodeHelperName(typeID)
+	fmt.Fprintf(b, "\nfunc %s(enc *jsontext.Encoder, value %s) error {\n", helper, typeName)
+	switch info.Kind {
+	case air.TypeVoid:
+		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.Null)\n")
+	case air.TypeInt:
+		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.Int(int64(value)))\n")
+	case air.TypeFloat:
+		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.Float(value))\n")
+	case air.TypeBool:
+		fmt.Fprintf(b, "\tif value { return enc.WriteToken(jsontext.True) }\n\treturn enc.WriteToken(jsontext.False)\n")
+	case air.TypeStr:
+		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.String(value))\n")
+	case air.TypeDynamic, air.TypeExtern, air.TypeTraitObject:
+		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
+	case air.TypeMaybe:
+		fmt.Fprintf(b, "\tif !value.Some { return enc.WriteToken(jsontext.Null) }\n\treturn %s(enc, value.Value)\n", l.jsonEncodeHelperName(info.Elem))
+	case air.TypeResult:
+		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
+	case air.TypeList:
+		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginArray); err != nil { return err }\n\tfor _, item := range value {\n\t\tif err := %s(enc, item); err != nil { return err }\n\t}\n\treturn enc.WriteToken(jsontext.EndArray)\n", l.jsonEncodeHelperName(info.Elem))
+	case air.TypeMap:
+		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }\n\tfor key, item := range value {\n\t\tif err := enc.WriteToken(jsontext.String(fmt.Sprint(key))); err != nil { return err }\n\t\tif err := %s(enc, item); err != nil { return err }\n\t}\n\treturn enc.WriteToken(jsontext.EndObject)\n", l.jsonEncodeHelperName(info.Value))
+	case air.TypeStruct:
+		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }\n")
+		for _, field := range info.Fields {
+			fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.String(%q)); err != nil { return err }\n", field.Name)
+			fmt.Fprintf(b, "\tif err := %s(enc, value.%s); err != nil { return err }\n", l.jsonEncodeHelperName(field.Type), field.Name)
+		}
+		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.EndObject)\n")
+	case air.TypeEnum:
+		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.Int(int64(value)))\n")
+	case air.TypeUnion:
+		fmt.Fprintf(b, "\tswitch value.tag {\n")
+		for _, member := range info.Members {
+			fieldName := unionMemberFieldName(member)
+			fmt.Fprintf(b, "\tcase %d:\n\t\treturn %s(enc, value.%s)\n", member.Tag, l.jsonEncodeHelperName(member.Type), fieldName)
+		}
+		fmt.Fprintf(b, "\t}\n\treturn enc.WriteToken(jsontext.Null)\n")
+	case air.TypeFunction, air.TypeFiber:
+		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
+	default:
+		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
+	}
+	fmt.Fprintf(b, "}\n")
+	fmt.Fprintf(b, "\nfunc %s(value %s) (string, error) {\n\tvar buf bytes.Buffer\n\tenc := jsontext.NewEncoder(&buf)\n\tif err := %s(enc, value); err != nil { return \"\", err }\n\treturn string(bytes.TrimSuffix(buf.Bytes(), []byte(\"\\n\"))), nil\n}\n", l.jsonEncodeTopHelperName(typeID), typeName, helper)
+}
+
+func (l *lowerer) jsonEncodeHelperName(typeID air.TypeID) string {
+	return fmt.Sprintf("ardJSONEncode_%d", typeID)
+}
+
+func (l *lowerer) jsonEncodeTopHelperName(typeID air.TypeID) string {
+	return fmt.Sprintf("ardJSONEncodeTop_%d", typeID)
 }
