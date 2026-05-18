@@ -1,63 +1,125 @@
 ---
-title: JSON Encoding with ard/json
-description: Convert Ard values to JSON strings using the ard/json module.
+title: JSON Serialization with ard/json
+description: Parse JSON into typed Ard values and encode Ard values as JSON strings.
 ---
 
-The `ard/json` module provides functions for encoding Ard values into JSON format.
+The `ard/json` module provides typed JSON serialization for Ard values.
+
+Use `json::parse<T>` when you know the target type at compile time. It validates that the target type can be represented as JSON and returns either the typed value or a string error.
+
+Use `json::encode` to convert Ard values into JSON strings.
 
 :::note
-For new code that only needs primitives, prefer `ard/encode`. Use `ard/json` when you need to encode structs, lists, maps, or `Dynamic` values.
+For ad-hoc or partial decoding of dynamic data, `ard/decode` is still available. Prefer `ard/json` when you want to parse a complete JSON value directly into a struct, list, map, or scalar.
 :::
-
-The json module provides:
-- **Generic encoding** to convert any type to JSON
-- **Automatic handling** of structs, lists, maps, and nullable types
-- **Error handling** with Result types for encoding failures
 
 ```ard
 use ard/json
 
-fn main() {
-  let data = ["name": "Alice", "age": 30]
-  let json = json::encode(data).expect("Failed to encode")
-  io::print(json)
+struct Todo {
+  id: Int,
+  title: Str,
+}
+
+fn main() Str!Str {
+  let todo = try json::parse<Todo>("\{\"id\":1,\"title\":\"Ship docs\"\}")
+  json::encode(todo)
 }
 ```
 
 ## API
 
-### `fn encode(value: $T) Str!Str`
+### `fn parse(input: Str) $T!Str`
 
-Encode any value as a JSON string. Returns a result containing the JSON string or an error message if encoding fails.
+Parse a JSON string into the requested Ard type. Returns a result containing the typed value or an error string if the JSON is invalid or does not match the target type.
 
-The function automatically handles:
-- **Primitives**: Str, Int, Float, Bool
-- **Collections**: Lists and maps
-- **Structs**: Objects with named fields
-- **Enums**: Encoded as their numeric values
-- **Nullable types**: Encoded as null when none
-- **Results**: The ok or err value is encoded
+Supported target types:
+
+- **Primitives**: `Str`, `Int`, `Float`, `Bool`
+- **Collections**: lists and maps with `Str` keys, such as `[Todo]` and `[Str:Int]`
+- **Structs**: JSON objects with fields matching the struct field names
+- **Nullable types**: `T?`, where `null` and missing nullable struct fields decode as `none`
+- **Dynamic**: untyped JSON data
+
+Unsupported JSON shapes, such as non-`Str` map keys or functions, are rejected at compile time.
 
 ```ard
 use ard/json
 
-let json = json::encode(42).expect("Failed to encode")
+struct Person {
+  name: Str,
+  age: Int,
+}
+
+let person = json::parse<Person>("\{\"name\":\"Alice\",\"age\":30\}").expect("valid JSON")
+```
+
+### `fn encode(value: $T) Str!Str`
+
+Encode a JSON-compatible Ard value as a JSON string. Returns a result containing the JSON string or an error string if encoding fails.
+
+Supported values include:
+
+- **Primitives**: `Str`, `Int`, `Float`, `Bool`
+- **Collections**: lists and maps with `Str` keys
+- **Structs**: encoded as objects with named fields
+- **Nullable types**: encoded as `null` when `none`
+- **Dynamic**: encoded according to the contained value
+
+```ard
+use ard/json
+
+let json_text = json::encode(42).expect("encode")
 ```
 
 ## Examples
 
-### Encode Primitives
+### Parse a Struct
 
 ```ard
 use ard/json
 use ard/io
 
-fn main() {
-  io::print(json::encode("hello").expect(""))  // "hello"
-  io::print(json::encode(42).expect(""))       // 42
-  io::print(json::encode(3.14).expect(""))     // 3.14
-  io::print(json::encode(true).expect(""))     // true
+struct Person {
+  name: Str,
+  age: Int,
 }
+
+fn main() {
+  let person = json::parse<Person>("\{\"name\":\"Alice\",\"age\":30\}").expect("parse")
+  io::print("{person.name} is {person.age}")
+}
+```
+
+### Parse Lists
+
+```ard
+use ard/json
+
+let numbers = json::parse<[Int]>("[1,2,3]").expect("parse")
+```
+
+### Parse Maps
+
+```ard
+use ard/json
+
+let scores = json::parse<[Str:Int]>("\{\"Alice\":95,\"Bob\":87\}").expect("parse")
+```
+
+### Parse Nullable Fields
+
+```ard
+use ard/json
+use ard/maybe
+
+struct User {
+  name: Str,
+  email: Str?,
+}
+
+let user = json::parse<User>("\{\"name\":\"Alice\"\}").expect("parse")
+let fallback = user.email.or("unknown@example.com")
 ```
 
 ### Encode Structs
@@ -68,13 +130,13 @@ use ard/io
 
 struct Person {
   name: Str,
-  age: Int
+  age: Int,
 }
 
 fn main() {
-  let person = Person { name: "Alice", age: 30 }
-  let json = json::encode(person).expect("Failed to encode")
-  io::print(json)  // {"name":"Alice","age":30}
+  let person = Person{name: "Alice", age: 30}
+  let text = json::encode(person).expect("encode")
+  io::print(text) // {"age":30,"name":"Alice"}
 }
 ```
 
@@ -82,76 +144,31 @@ fn main() {
 
 ```ard
 use ard/json
-use ard/io
 
-fn main() {
-  let numbers = [1, 2, 3, 4, 5]
-  let json = json::encode(numbers).expect("Failed to encode")
-  io::print(json)  // [1,2,3,4,5]
-}
+let text = json::encode([1, 2, 3, 4, 5]).expect("encode") // [1,2,3,4,5]
 ```
 
 ### Encode Maps
 
 ```ard
 use ard/json
-use ard/io
 
-fn main() {
-  mut scores: [Str:Int] = [:]
-  scores.set("Alice", 95)
-  scores.set("Bob", 87)
-  
-  let json = json::encode(scores).expect("Failed to encode")
-  io::print(json)  // {"Alice":95,"Bob":87}
-}
+mut scores: [Str:Int] = [:]
+scores.set("Alice", 95)
+scores.set("Bob", 87)
+
+let text = json::encode(scores).expect("encode")
 ```
 
 ### Encode Nullable Values
 
 ```ard
 use ard/json
-use ard/io
 use ard/maybe
 
-fn main() {
-  let some_value: Int? = maybe::some(42)
-  let none_value: Int? = maybe::none()
-  
-  io::print(json::encode(some_value).expect(""))  // 42
-  io::print(json::encode(none_value).expect(""))  // null
-}
-```
+let some_value: Int? = maybe::some(42)
+let none_value: Int? = maybe::none()
 
-### Encode Complex Structures
-
-```ard
-use ard/json
-use ard/io
-use ard/maybe
-
-struct Address {
-  street: Str,
-  city: Str
-}
-
-struct User {
-  name: Str,
-  email: Str?,
-  address: Address?
-}
-
-fn main() {
-  let user = User {
-    name: "Alice",
-    email: maybe::some("alice@example.com"),
-    address: maybe::some(Address {
-      street: "123 Main St",
-      city: "Portland"
-    })
-  }
-  
-  let json = json::encode(user).expect("Failed to encode")
-  io::print(json)
-}
+let some_json = json::encode(some_value).expect("encode") // 42
+let none_json = json::encode(none_value).expect("encode") // null
 ```
