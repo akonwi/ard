@@ -929,6 +929,35 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		stmts := append(target.stmts, index.stmts...)
+		if validTypeID(l.program, expr.Type) && l.program.Types[expr.Type-1].Kind == air.TypeMaybe {
+			resultTemp := l.nextTemp()
+			decls, err := l.declareTemp(expr.Type, resultTemp)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			stmts = append(stmts, decls...)
+			runesTemp := l.nextTemp()
+			indexTemp := l.nextTemp()
+			stmts = append(stmts,
+				&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(runesTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.CallExpr{Fun: &ast.ArrayType{Elt: ast.NewIdent("rune")}, Args: []ast.Expr{target.expr}}}},
+				&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(indexTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{index.expr}},
+			)
+			cond := &ast.BinaryExpr{
+				X:  &ast.BinaryExpr{X: ast.NewIdent(indexTemp), Op: token.LSS, Y: &ast.BasicLit{Kind: token.INT, Value: "0"}},
+				Op: token.LOR,
+				Y:  &ast.BinaryExpr{X: ast.NewIdent(indexTemp), Op: token.GEQ, Y: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(runesTemp)}}},
+			}
+			strType := mustTypeExpr(l, l.program.Types[expr.Type-1].Elem)
+			noneCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "None"), Index: strType}}
+			someValue := &ast.CallExpr{Fun: ast.NewIdent("string"), Args: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(runesTemp), Index: ast.NewIdent(indexTemp)}}}
+			someCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "Some"), Index: strType}, Args: []ast.Expr{someValue}}
+			stmts = append(stmts, &ast.IfStmt{
+				Cond: cond,
+				Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneCall}}}},
+				Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{someCall}}}},
+			})
+			return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
+		}
 		byteExpr := &ast.IndexExpr{X: target.expr, Index: index.expr}
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("string"), Args: []ast.Expr{byteExpr}}}, nil
 	case air.ExprListSize:

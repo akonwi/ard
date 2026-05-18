@@ -1639,6 +1639,10 @@ func TestVMBytecodeParityTypeAPIs(t *testing.T) {
 		{name: "Str.ends_with true", input: `"hello".ends_with("lo")`, want: true},
 		{name: "Str.ends_with false", input: `"hello".ends_with("he")`, want: false},
 		{name: "Str.ends_with empty suffix", input: `"hello".ends_with("")`, want: true},
+		{name: "Str.at returns character", input: `"hello".at(1).expect("missing")`, want: "e"},
+		{name: "Str.at uses rune index", input: `"hé".at(1).expect("missing")`, want: "é"},
+		{name: "Str.at out of bounds returns none", input: `"hello".at(5).is_none()`, want: true},
+		{name: "Str.at negative returns none", input: `"hello".at(-1).is_none()`, want: true},
 	})
 }
 

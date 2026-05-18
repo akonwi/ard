@@ -1906,6 +1906,8 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 func (c *Checker) createStrMethod(subject Expression, methodName string, args []Expression) Expression {
 	var kind StrMethodKind
 	switch methodName {
+	case "at":
+		kind = StrAt
 	case "size":
 		kind = StrSize
 	case "is_empty":

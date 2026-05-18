@@ -215,6 +215,7 @@ type StrMethodKind uint8
 
 const (
 	StrSize StrMethodKind = iota
+	StrAt
 	StrIsEmpty
 	StrContains
 	StrReplace
@@ -237,6 +238,8 @@ func (s *StrMethod) Type() Type {
 	switch s.Kind {
 	case StrSize:
 		return Int
+	case StrAt:
+		return MakeMaybe(Str)
 	case StrIsEmpty:
 		return Bool
 	case StrContains:

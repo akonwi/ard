@@ -24,10 +24,25 @@ func (vm *VM) execBytecodeStrOp(inst vmcode.Instruction, stack *[]Value) (Value,
 			return Value{}, fmt.Errorf("string index must be Int")
 		}
 		runes := []rune(targetStr)
-		if args[0].Int < 0 || args[0].Int >= len(runes) {
+		index := args[0].Int
+		resultType := air.TypeID(inst.A)
+		if resultType > 0 && int(resultType) <= len(vm.program.Types) {
+			typeInfo := vm.program.Types[resultType-1]
+			if typeInfo.Kind == air.TypeMaybe {
+				if index < 0 || index >= len(runes) {
+					vm.recordMaybeAlloc(false)
+					out = Maybe(resultType, false, vm.zeroValue(typeInfo.Elem))
+					break
+				}
+				vm.recordMaybeAlloc(true)
+				out = Maybe(resultType, true, Str(typeInfo.Elem, string(runes[index])))
+				break
+			}
+		}
+		if index < 0 || index >= len(runes) {
 			return Value{}, fmt.Errorf("string index out of range")
 		}
-		out = Str(air.TypeID(inst.A), string(runes[args[0].Int]))
+		out = Str(resultType, string(runes[index]))
 	case vmcode.OpStrSize:
 		out = Int(air.TypeID(inst.A), len(targetStr))
 	case vmcode.OpStrIsEmpty:
