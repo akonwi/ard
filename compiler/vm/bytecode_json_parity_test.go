@@ -2,6 +2,103 @@ package vm
 
 import "testing"
 
+func TestVMBytecodeParityParseJSON(t *testing.T) {
+	runBytecodeParityCases(t, []bytecodeParityCase{
+		{
+			name: "parse struct",
+			input: `
+				use ard/json
+
+				struct Todo {
+					id: Int,
+					title: Str,
+				}
+
+				let todo = json::parse<Todo>("\{\"id\":1,\"title\":\"ship\"}").expect("parse")
+				"{todo.id}:{todo.title}"
+			`,
+			want: "1:ship",
+		},
+		{
+			name: "parse nested list",
+			input: `
+				use ard/json
+
+				struct Todo {
+					id: Int,
+					title: Str,
+				}
+				struct Payload {
+					items: [Todo],
+				}
+
+				let payload = json::parse<Payload>("\{\"items\":[\{\"id\":1,\"title\":\"ship\"}]}").expect("parse")
+				payload.items.at(0).title
+			`,
+			want: "ship",
+		},
+		{
+			name: "parse nullable missing field",
+			input: `
+				use ard/json
+
+				struct Todo {
+					id: Int,
+					title: Str?,
+				}
+
+				let todo = json::parse<Todo>("\{\"id\":1}").expect("parse")
+				todo.title.or("missing")
+			`,
+			want: "missing",
+		},
+		{
+			name: "parse map",
+			input: `
+				use ard/json
+
+				let counts = json::parse<[Str: Int]>("\{\"a\":1,\"b\":2}").expect("parse")
+				counts.get("b").or(0)
+			`,
+			want: 2,
+		},
+		{
+			name: "parse dynamic object",
+			input: `
+				use ard/decode
+				use ard/json
+
+				struct Todo {
+					id: Int,
+					title: Str,
+				}
+
+				let raw = decode::from_json("\{\"id\":1,\"title\":\"ship\"}").expect("dynamic")
+				let todo = json::parse<Todo>(raw).expect("parse")
+				todo.title
+			`,
+			want: "ship",
+		},
+		{
+			name: "parse error includes path in message",
+			input: `
+				use ard/json
+
+				struct Todo {
+					id: Int,
+					title: Str,
+				}
+
+				match json::parse<Todo>("\{\"id\":\"bad\",\"title\":\"ship\"}") {
+					ok(_) => "ok",
+					err(e) => e,
+				}
+			`,
+			want: "id: got Str, expected Int",
+		},
+	})
+}
+
 func TestVMBytecodeParityEncodeJSONPrimitives(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{

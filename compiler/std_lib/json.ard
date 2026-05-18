@@ -4,6 +4,13 @@ use ard/testing
 
 // Standard library JSON module implemented with FFI
 
+type Input = Str | Dynamic
+
+extern fn parse(input: Input) $T!Str = {
+  go = "JsonParse"
+  js = "JsonParse"
+}
+
 extern fn encode(value: $T) Str!Str = {
   go = "JsonEncode"
   js = "JsonEncode"
@@ -24,6 +31,32 @@ struct WinnerJSONTest {
 struct PredictionJSONTest {
   advice: Str?,
   winner: WinnerJSONTest?,
+}
+
+struct TodoJSONTest {
+  id: Int,
+  title: Str,
+  note: Str?,
+}
+
+test fn test_parse_struct() Void!Str {
+  let raw = "\{\"id\":1,\"title\":\"ship\"\}"
+  let todo = try parse<TodoJSONTest>(raw)
+  testing::assert(todo.id == 1 and todo.title == "ship", "Expected JSON to parse into struct")
+}
+
+test fn test_parse_nullable_missing_field() Void!Str {
+  let raw = "\{\"id\":1,\"title\":\"ship\"\}"
+  let todo = try parse<TodoJSONTest>(raw)
+  testing::assert(todo.note.is_none(), "Expected missing nullable field to parse as none")
+}
+
+test fn test_parse_error_message() Void!Str {
+  let raw = "\{\"id\":\"bad\",\"title\":\"ship\"\}"
+  match parse<TodoJSONTest>(raw) {
+    ok(_) => testing::assert(false, "Expected parse to fail"),
+    err(e) => testing::assert(e.contains("id"), "Expected parse error message to include path"),
+  }
 }
 
 test fn test_encode_int() Void!Str {
