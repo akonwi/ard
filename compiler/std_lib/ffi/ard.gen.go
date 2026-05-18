@@ -123,6 +123,12 @@ type Response struct {
 	Body    string
 }
 
+type TodoJSONTest struct {
+	Id    int
+	Title string
+	Note  Maybe[string]
+}
+
 type Transaction struct {
 	Tx Tx
 }
@@ -448,4 +454,5 @@ func (h Host) Functions() map[string]any {
 // Skipped extern AsyncEval: generic parameters are not generated yet.
 // Skipped extern GetResult: generic parameters are not generated yet.
 // Skipped extern JsonEncode: generic parameters are not generated yet.
+// Skipped extern JsonParse: generic returns are not generated yet.
 // Skipped extern NewList: generic returns are not generated yet.
