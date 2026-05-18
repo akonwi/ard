@@ -5,6 +5,10 @@ description: Parse and decode JSON data into Ard types using the decode module.
 
 The `ard/decode` module provides a composable system for decoding JSON and other data into Ard values with detailed error reporting.
 
+:::note
+For direct typed JSON parsing, prefer `ard/json` and `json::parse<T>(text)`. Use `ard/decode` when you need ad-hoc, partial, or custom decoding from `Dynamic` data.
+:::
+
 The decode module provides:
 - **Primitive decoders** for strings, integers, floats, and booleans
 - **Composable decoders** that can be combined for complex types
