@@ -1920,6 +1920,8 @@ func (c *Checker) createStrMethod(subject Expression, methodName string, args []
 		kind = StrSplit
 	case "starts_with":
 		kind = StrStartsWith
+	case "ends_with":
+		kind = StrEndsWith
 	case "to_str":
 		kind = StrToStr
 	case "to_dyn":

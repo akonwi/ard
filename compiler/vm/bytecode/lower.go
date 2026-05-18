@@ -448,7 +448,7 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 		fl.emit(Instruction{Op: unaryOpcode(expr.Kind), A: int(expr.Type)})
 	case air.ExprEnumVariant:
 		fl.emit(Instruction{Op: OpEnumVariant, A: int(expr.Type), Imm: expr.Discriminant})
-	case air.ExprStrAt, air.ExprStrSize, air.ExprStrIsEmpty, air.ExprStrContains, air.ExprStrReplace, air.ExprStrReplaceAll, air.ExprStrSplit, air.ExprStrStartsWith, air.ExprStrTrim:
+	case air.ExprStrAt, air.ExprStrSize, air.ExprStrIsEmpty, air.ExprStrContains, air.ExprStrReplace, air.ExprStrReplaceAll, air.ExprStrSplit, air.ExprStrStartsWith, air.ExprStrEndsWith, air.ExprStrTrim:
 		return fl.lowerStrOp(expr)
 	case air.ExprMakeList:
 		for i := range expr.Args {
@@ -911,6 +911,8 @@ func strOpcode(kind air.ExprKind) Opcode {
 		return OpStrSplit
 	case air.ExprStrStartsWith:
 		return OpStrStartsWith
+	case air.ExprStrEndsWith:
+		return OpStrEndsWith
 	case air.ExprStrTrim:
 		return OpStrTrim
 	default:

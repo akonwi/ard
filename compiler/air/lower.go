@@ -3151,6 +3151,9 @@ func (fl *functionLowerer) lowerStrMethod(typeID TypeID, method *checker.StrMeth
 	case checker.StrStartsWith:
 		kind = ExprStrStartsWith
 		expected = []TypeID{strType}
+	case checker.StrEndsWith:
+		kind = ExprStrEndsWith
+		expected = []TypeID{strType}
 	case checker.StrToStr:
 		kind = ExprToStr
 	case checker.StrToDyn:

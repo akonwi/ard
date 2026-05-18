@@ -107,6 +107,7 @@ const (
 	OpStrReplaceAll
 	OpStrSplit
 	OpStrStartsWith
+	OpStrEndsWith
 	OpStrTrim
 	OpMakeMaybeSome
 	OpMakeMaybeNone
@@ -346,6 +347,8 @@ func (op Opcode) String() string {
 		return "StrSplit"
 	case OpStrStartsWith:
 		return "StrStartsWith"
+	case OpStrEndsWith:
+		return "StrEndsWith"
 	case OpStrTrim:
 		return "StrTrim"
 	case OpMakeMaybeSome:

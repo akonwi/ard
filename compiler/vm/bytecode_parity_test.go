@@ -1634,6 +1634,11 @@ func TestVMBytecodeParityTypeAPIs(t *testing.T) {
 		{name: "Bool.to_str", input: `true.to_str()`, want: "true"},
 		{name: "Str.replace_all", input: `"hello world hello world".replace_all("world", "universe")`, want: "hello universe hello universe"},
 		{name: "Str.contains", input: `"hello".contains("ell")`, want: true},
+		{name: "Str.starts_with true", input: `"hello".starts_with("he")`, want: true},
+		{name: "Str.starts_with false", input: `"hello".starts_with("lo")`, want: false},
+		{name: "Str.ends_with true", input: `"hello".ends_with("lo")`, want: true},
+		{name: "Str.ends_with false", input: `"hello".ends_with("he")`, want: false},
+		{name: "Str.ends_with empty suffix", input: `"hello".ends_with("")`, want: true},
 	})
 }
 

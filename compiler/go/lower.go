@@ -867,6 +867,20 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		stmts := append(target.stmts, prefix.stmts...)
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "HasPrefix"), Args: []ast.Expr{target.expr, prefix.expr}}}, nil
+	case air.ExprStrEndsWith:
+		if expr.Target == nil || len(expr.Args) != 1 {
+			return loweredExpr{}, fmt.Errorf("str ends_with expects target and suffix")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		suffix, err := l.lowerExpr(fn, expr.Args[0])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts := append(target.stmts, suffix.stmts...)
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "HasSuffix"), Args: []ast.Expr{target.expr, suffix.expr}}}, nil
 	case air.ExprToDynamic:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("to dynamic missing target")

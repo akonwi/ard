@@ -12,6 +12,7 @@ The `ard/string` module is a prelude module. It is automatically imported and al
 The string module provides:
 - **ToString trait** for implementing custom string conversion
 - **Integration** with `io::print` and string interpolation
+- **Built-in string helper methods** for querying and transforming `Str` values
 
 ```ard
 use ard/string as Str
@@ -34,6 +35,42 @@ fn main() {
 ```
 
 ## API
+
+### Built-in `Str` methods
+
+Strings include common helper methods directly on `Str` values:
+
+```ard
+let path = "posts/hello.md"
+
+path.starts_with("posts/") // true
+path.ends_with(".md")      // true
+path.contains("hello")     // true
+path.is_empty()             // false
+path.size()                 // 14
+path.replace(".md", ".html")
+path.replace_all("/", "-")
+path.split("/")
+path.trim()
+```
+
+#### `starts_with(prefix: Str) Bool`
+
+Returns `true` when the string begins with `prefix`. An empty prefix always matches.
+
+```ard
+"hello".starts_with("he") // true
+"hello".starts_with("lo") // false
+```
+
+#### `ends_with(suffix: Str) Bool`
+
+Returns `true` when the string ends with `suffix`. An empty suffix always matches.
+
+```ard
+"hello".ends_with("lo") // true
+"hello".ends_with("he") // false
+```
 
 ### `trait ToString`
 

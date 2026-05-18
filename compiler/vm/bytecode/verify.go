@@ -354,7 +354,7 @@ func stackEffect(inst Instruction) (pop int, push int, err error) {
 		return inst.B, 1, nil
 	case OpMakeMap:
 		return inst.B * 2, 1, nil
-	case OpStrAt, OpStrSize, OpStrIsEmpty, OpStrContains, OpStrSplit, OpStrStartsWith, OpStrTrim,
+	case OpStrAt, OpStrSize, OpStrIsEmpty, OpStrContains, OpStrSplit, OpStrStartsWith, OpStrEndsWith, OpStrTrim,
 		OpMaybeExpect, OpMaybeIsNone, OpMaybeIsSome, OpMaybeOr, OpMaybeMap, OpMaybeAndThen,
 		OpResultExpect, OpResultErrValue, OpResultOr, OpResultIsOk, OpResultIsErr, OpResultMap, OpResultMapErr, OpResultAndThen,
 		OpListAt, OpListPrepend, OpListPush, OpListSize, OpListSort,
