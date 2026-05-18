@@ -1761,7 +1761,7 @@ func isAIRJSPreludeExtern(binding string) bool {
 		"DynamicToList", "DynamicToMap", "ExtractField", "IntFromStr", "FloatFromStr",
 		"FloatFromInt", "FloatFloor", "StrToDynamic", "IntToDynamic",
 		"FloatToDynamic", "BoolToDynamic", "VoidToDynamic", "ListToDynamic", "MapToDynamic",
-		"JsonEncode", "promiseResolve", "promiseReject", "promiseMap", "promiseThen",
+		"JsonEncode", "JsonParse", "promiseResolve", "promiseReject", "promiseMap", "promiseThen",
 		"promiseRescue", "promiseInspect", "promiseInspectError", "promiseFinally",
 		"promiseAll", "promiseRace", "promiseDelay", "fetchNative", "fetchResponseUrl",
 		"fetchResponseStatus", "fetchResponseHeaders", "fetchResponseBody", "fetchErrorMessage":

@@ -255,6 +255,14 @@ export function JsonToDynamic(jsonString) {
   }
 }
 
+export function JsonParse(input) {
+  try {
+    return { ok: JSON.parse(input) };
+  } catch (error) {
+    return { err: messageFromError(error) };
+  }
+}
+
 export function DecodeString(data) {
   if (data === null || data === undefined) return { err: makeDecodeError("Str", "null") };
   if (typeof data === "string") return { ok: data };

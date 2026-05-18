@@ -73,6 +73,12 @@ func (vm *VM) callExtern(id air.ExternID, args []Value) (value Value, err error)
 	}
 	extern := vm.program.Externs[id]
 	binding := goExternBinding(extern)
+	if binding == "JsonParse" {
+		return vm.callJSONParse(extern, args)
+	}
+	if binding == "JsonEncode" {
+		return vm.callJSONEncode(extern, args)
+	}
 	adapter, ok := vm.externs[id]
 	if !ok {
 		return Value{}, fmt.Errorf("extern binding %q is not registered", binding)

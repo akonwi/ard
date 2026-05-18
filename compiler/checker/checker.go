@@ -3058,6 +3058,18 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if mod.Path() == "ard/async" && s.Function.Name == "eval" {
 				return c.validateAsyncEval(s.Function.Args[0].Value)
 			}
+			if mod.Path() == "ard/json" && s.Function.Name == "parse" {
+				if err := validateJSONShape("json::parse", call.Type()); err != nil {
+					c.addError(err.Error(), s.GetLocation())
+					return nil
+				}
+			}
+			if mod.Path() == "ard/json" && s.Function.Name == "encode" && len(args) > 0 {
+				if err := validateJSONShape("json::encode", args[0].Type()); err != nil {
+					c.addError(err.Error(), s.GetLocation())
+					return nil
+				}
+			}
 
 			return &ModuleFunctionCall{
 				Module: mod.Path(),
@@ -5409,4 +5421,46 @@ func (c *Checker) wrapAccessorInMatch(subject Expression, prop *InstanceProperty
 		None:      noneBlock,
 		InnerType: innerType,
 	}
+}
+
+func validateJSONShape(api string, typ Type) error {
+	if result, ok := derefType(typ).(*Result); ok && api == "json::parse" {
+		typ = result.Val()
+	}
+	return validateJSONShapeType(api, derefType(typ), map[string]bool{})
+}
+
+func validateJSONShapeType(api string, typ Type, seen map[string]bool) error {
+	typ = derefType(typ)
+	if typ == Str || typ == Int || typ == Float || typ == Bool || typ == Dynamic {
+		return nil
+	}
+	switch t := typ.(type) {
+	case *List:
+		return validateJSONShapeType(api, t.Of(), seen)
+	case *Map:
+		if derefType(t.Key()) != Str {
+			return fmt.Errorf("%s only supports Str map keys, got %s", api, t.Key().String())
+		}
+		return validateJSONShapeType(api, t.Value(), seen)
+	case *Maybe:
+		return validateJSONShapeType(api, t.Of(), seen)
+	case *StructDef:
+		name := t.String()
+		if seen[name] {
+			return nil
+		}
+		seen[name] = true
+		for fieldName, fieldType := range t.Fields {
+			if err := validateJSONShapeType(api, fieldType, seen); err != nil {
+				return fmt.Errorf("%s field %s: %w", api, fieldName, err)
+			}
+		}
+		return nil
+	case *TypeVar:
+		if t.Actual() != nil {
+			return validateJSONShapeType(api, t.Actual(), seen)
+		}
+	}
+	return fmt.Errorf("%s does not support %s", api, typ.String())
 }

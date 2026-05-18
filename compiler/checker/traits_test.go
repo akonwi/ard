@@ -137,6 +137,28 @@ func TestTraitsAsTypes(t *testing.T) {
 				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of Encodable, got [Int]"},
 			},
 		},
+		{
+			name: "json parse validates supported target type",
+			input: `
+			use ard/json
+
+			json::parse<fn() Void>("null")
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "json::parse does not support fn <function>() Void"},
+			},
+		},
+		{
+			name: "json parse validates map keys",
+			input: `
+			use ard/json
+
+			json::parse<[Int: Str]>("{}")
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "json::parse only supports Str map keys, got Int"},
+			},
+		},
 		// {
 		// 	name: "functions with Trait return",
 		// 	input: `

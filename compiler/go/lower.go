@@ -321,6 +321,21 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	}
 `)
 	}
+	if l.runtimeHelpers["json_parse"] {
+		l.currentImports["fmt"] = "fmt"
+		l.currentImports["json"] = "encoding/json/v2"
+		l.currentImports["jsontext"] = "encoding/json/jsontext"
+		l.currentImports["runtime"] = "github.com/akonwi/ard/runtime"
+		l.currentImports["strconv"] = "strconv"
+		parts = append(parts, l.jsonParsePreludeSource())
+	}
+	if l.runtimeHelpers["json_encode"] {
+		l.currentImports["bytes"] = "bytes"
+		l.currentImports["fmt"] = "fmt"
+		l.currentImports["json"] = "encoding/json/v2"
+		l.currentImports["jsontext"] = "encoding/json/jsontext"
+		parts = append(parts, l.jsonEncodePreludeSource())
+	}
 	src := strings.Join(parts, "\n")
 	file, err := parser.ParseFile(token.NewFileSet(), "prelude.go", src, 0)
 	if err != nil {
@@ -4010,11 +4025,25 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 	case "MapToDynamic":
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "MapToDynamic"), Args: args}}, nil
 	case "JsonEncode":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "JsonEncode"), Args: args})
+		if len(args) != 1 || len(expr.Args) != 1 {
+			return loweredExpr{}, fmt.Errorf("JsonEncode expects 1 arg")
+		}
+		l.markRuntimeHelper("json_encode")
+		helper := l.jsonEncodeTopHelperName(expr.Args[0].Type)
+		if l.jsonNativeCodecSafe(expr.Args[0].Type, map[air.TypeID]bool{}) {
+			helper = l.jsonEncodeMarshalTopHelperName(expr.Args[0].Type)
+		}
+		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: ast.NewIdent(helper), Args: args})
 		if err != nil {
 			return loweredExpr{}, err
 		}
 		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, nil
+	case "JsonParse":
+		wrapped, err := l.lowerJSONParseExtern(expr, args, stmts)
+		if err != nil {
+			return loweredExpr{}, err
+		}
 		return wrapped, nil
 	case "VoidToDynamic":
 		return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
@@ -4232,4 +4261,343 @@ func validFunctionID(program *air.Program, id air.FunctionID) bool {
 
 func validTypeID(program *air.Program, id air.TypeID) bool {
 	return id > 0 && int(id) <= len(program.Types)
+}
+
+func (l *lowerer) lowerJSONParseExtern(expr air.Expr, args []ast.Expr, stmts []ast.Stmt) (loweredExpr, error) {
+	if len(args) != 1 || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("JsonParse expects 1 arg")
+	}
+	if !validTypeID(l.program, expr.Type) {
+		return loweredExpr{}, fmt.Errorf("invalid JsonParse result type %d", expr.Type)
+	}
+	resultInfo := l.program.Types[expr.Type-1]
+	if resultInfo.Kind != air.TypeResult {
+		return loweredExpr{}, fmt.Errorf("JsonParse expected result return, got %s", resultInfo.Name)
+	}
+	l.markRuntimeHelper("json_parse")
+	valueType, err := l.goType(resultInfo.Value)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	errTemp := l.nextTemp()
+	hostErrTemp := l.nextTemp()
+	outTemp := l.nextTemp()
+
+	allStmts := append([]ast.Stmt{}, stmts...)
+	allStmts = append(allStmts,
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(errTemp)}, Type: ast.NewIdent("string")}}}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(hostErrTemp)}, Type: ast.NewIdent("error")}}}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(outTemp)}, Type: valueType}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(hostErrTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.qualified("json", "encoding/json/v2", "Unmarshal"), Args: []ast.Expr{&ast.CallExpr{Fun: &ast.ArrayType{Elt: ast.NewIdent("byte")}, Args: []ast.Expr{args[0]}}, &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(outTemp)}}}}},
+		&ast.IfStmt{Cond: &ast.BinaryExpr{X: ast.NewIdent(hostErrTemp), Op: token.NEQ, Y: ast.NewIdent("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(hostErrTemp), Sel: ast.NewIdent("Error")}}}}}}},
+	)
+	resultExpr := &ast.CompositeLit{Type: mustTypeExpr(l, expr.Type), Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: ast.NewIdent(outTemp)},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: ast.NewIdent(errTemp)},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: &ast.BasicLit{Kind: token.STRING, Value: `""`}}},
+	}}
+	return loweredExpr{stmts: allStmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) jsonParsePreludeSource() string {
+	var b strings.Builder
+	b.WriteString(`
+func ardJSONPath(path string, segment string) string {
+	if path == "" {
+		return segment
+	}
+	if len(segment) > 0 && segment[0] == '[' {
+		return path + segment
+	}
+	return path + "." + segment
+}
+
+func ardJSONFound(raw any) string {
+	switch raw.(type) {
+	case nil:
+		return "null"
+	case string:
+		return "Str"
+	case bool:
+		return "Bool"
+	case float64, float32, int, int64, uint64:
+		return "Number"
+	case []any:
+		return "List"
+	case map[string]any:
+		return "Map"
+	default:
+		return fmt.Sprintf("%T", raw)
+	}
+}
+
+func ardJSONErr(path string, expected string, raw any) string {
+	message := "got " + ardJSONFound(raw) + ", expected " + expected
+	if path == "" {
+		return message
+	}
+	return path + ": " + message
+}
+
+func ardJSONMissing(path string, expected string) string {
+	if path == "" {
+		return "missing, expected " + expected
+	}
+	return path + ": missing, expected " + expected
+}
+`)
+	for _, typ := range l.program.Types {
+		if typ.ID == air.NoType {
+			continue
+		}
+		l.writeJSONParseHelper(&b, typ.ID)
+		l.writeJSONDecodeTextHelper(&b, typ.ID)
+	}
+	return b.String()
+}
+
+func (l *lowerer) writeJSONParseHelper(b *strings.Builder, typeID air.TypeID) {
+	if !validTypeID(l.program, typeID) {
+		return
+	}
+	info := l.program.Types[typeID-1]
+	typeName := l.jsonParseGoTypeName(typeID)
+	helper := l.jsonParseHelperName(typeID)
+	fmt.Fprintf(b, "\nfunc %s(raw any, path string) (%s, string) {\n", helper, typeName)
+	fmt.Fprintf(b, "\tvar out %s\n\t_ = out\n", typeName)
+	switch info.Kind {
+	case air.TypeInt:
+		fmt.Fprintf(b, "\tswitch value := raw.(type) {\n\tcase float64:\n\t\tparsed := int(value)\n\t\tif value == float64(parsed) { return parsed, \"\" }\n\tcase int:\n\t\treturn value, \"\"\n\t}\n\treturn out, ardJSONErr(path, \"Int\", raw)\n")
+	case air.TypeFloat:
+		fmt.Fprintf(b, "\tswitch value := raw.(type) {\n\tcase float64:\n\t\treturn value, \"\"\n\tcase int:\n\t\treturn float64(value), \"\"\n\t}\n\treturn out, ardJSONErr(path, \"Float\", raw)\n")
+	case air.TypeBool:
+		fmt.Fprintf(b, "\tif value, ok := raw.(bool); ok { return value, \"\" }\n\treturn out, ardJSONErr(path, \"Bool\", raw)\n")
+	case air.TypeStr:
+		fmt.Fprintf(b, "\tif value, ok := raw.(string); ok { return value, \"\" }\n\treturn out, ardJSONErr(path, \"Str\", raw)\n")
+	case air.TypeDynamic:
+		fmt.Fprintf(b, "\treturn raw, \"\"\n")
+	case air.TypeMaybe:
+		elemHelper := l.jsonParseHelperName(info.Elem)
+		fmt.Fprintf(b, "\tif raw == nil { return out, \"\" }\n\tvalue, err := %s(raw, path)\n\tif err != \"\" { return out, err }\n\tout.Value = value\n\tout.Some = true\n\treturn out, \"\"\n", elemHelper)
+	case air.TypeList:
+		elemHelper := l.jsonParseHelperName(info.Elem)
+		fmt.Fprintf(b, "\titems, ok := raw.([]any)\n\tif !ok { return out, ardJSONErr(path, \"%s\", raw) }\n\tout = make(%s, len(items))\n\tfor i, item := range items {\n\t\tvalue, err := %s(item, ardJSONPath(path, fmt.Sprintf(\"[%%d]\", i)))\n\t\tif err != \"\" { return out, err }\n\t\tout[i] = value\n\t}\n\treturn out, \"\"\n", info.Name, typeName, elemHelper)
+	case air.TypeMap:
+		valueHelper := l.jsonParseHelperName(info.Value)
+		fmt.Fprintf(b, "\titems, ok := raw.(map[string]any)\n\tif !ok { return out, ardJSONErr(path, \"%s\", raw) }\n\tout = make(%s, len(items))\n\tfor key, item := range items {\n\t\tvalue, err := %s(item, ardJSONPath(path, key))\n\t\tif err != \"\" { return out, err }\n\t\tout[key] = value\n\t}\n\treturn out, \"\"\n", info.Name, typeName, valueHelper)
+	case air.TypeStruct:
+		fmt.Fprintf(b, "\titems, ok := raw.(map[string]any)\n\tif !ok { return out, ardJSONErr(path, \"%s\", raw) }\n", info.Name)
+		for _, field := range info.Fields {
+			fieldInfo := l.program.Types[field.Type-1]
+			fieldHelper := l.jsonParseHelperName(field.Type)
+			fieldAccess := field.Name
+			if fieldInfo.Kind == air.TypeMaybe {
+				fmt.Fprintf(b, "\tif rawField, ok := items[%q]; ok {\n\t\tvalue, err := %s(rawField, ardJSONPath(path, %q))\n\t\tif err != \"\" { return out, err }\n\t\tout.%s = value\n\t}\n", field.Name, fieldHelper, field.Name, fieldAccess)
+			} else {
+				fmt.Fprintf(b, "\traw%s, ok := items[%q]\n\tif !ok { return out, ardJSONMissing(ardJSONPath(path, %q), \"%s\") }\n\tvalue%s, err := %s(raw%s, ardJSONPath(path, %q))\n\tif err != \"\" { return out, err }\n\tout.%s = value%s\n", exportedFieldName(field.Name), field.Name, field.Name, fieldInfo.Name, exportedFieldName(field.Name), fieldHelper, exportedFieldName(field.Name), field.Name, fieldAccess, exportedFieldName(field.Name))
+			}
+		}
+		fmt.Fprintf(b, "\treturn out, \"\"\n")
+	default:
+		fmt.Fprintf(b, "\treturn out, ardJSONErr(path, %q, raw)\n", info.Name)
+	}
+	fmt.Fprintf(b, "}\n")
+	if info.Kind == air.TypeStruct {
+		fmt.Fprintf(b, "\nfunc (out *%s) UnmarshalJSONFrom(dec *jsontext.Decoder) error {\n\tparsed, message := %s(dec, \"\")\n\tif message != \"\" { return fmt.Errorf(\"%%s\", message) }\n\t*out = parsed\n\treturn nil\n}\n", typeName, l.jsonDecodeTextHelperName(typeID))
+	}
+}
+
+func (l *lowerer) jsonParseHelperName(typeID air.TypeID) string {
+	return fmt.Sprintf("ardJSONParse_%d", typeID)
+}
+
+func (l *lowerer) jsonParseGoTypeName(typeID air.TypeID) string {
+	if !validTypeID(l.program, typeID) {
+		return "any"
+	}
+	info := l.program.Types[typeID-1]
+	switch info.Kind {
+	case air.TypeVoid:
+		return "struct{}"
+	case air.TypeInt:
+		return "int"
+	case air.TypeFloat:
+		return "float64"
+	case air.TypeBool:
+		return "bool"
+	case air.TypeStr:
+		return "string"
+	case air.TypeDynamic, air.TypeExtern, air.TypeTraitObject:
+		return "any"
+	case air.TypeMaybe:
+		return "runtime.Maybe[" + l.jsonParseGoTypeName(info.Elem) + "]"
+	case air.TypeList:
+		return "[]" + l.jsonParseGoTypeName(info.Elem)
+	case air.TypeMap:
+		return "map[" + l.jsonParseGoTypeName(info.Key) + "]" + l.jsonParseGoTypeName(info.Value)
+	case air.TypeStruct, air.TypeEnum, air.TypeUnion:
+		return typeName(l.program, info)
+	default:
+		return "any"
+	}
+}
+
+func (l *lowerer) jsonEncodePreludeSource() string {
+	var b strings.Builder
+	for _, typ := range l.program.Types {
+		if typ.ID == air.NoType {
+			continue
+		}
+		l.writeJSONEncodeHelper(&b, typ.ID)
+	}
+	return b.String()
+}
+
+func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
+	if !validTypeID(l.program, typeID) {
+		return
+	}
+	info := l.program.Types[typeID-1]
+	typeName := l.jsonParseGoTypeName(typeID)
+	helper := l.jsonEncodeHelperName(typeID)
+	fmt.Fprintf(b, "\nfunc %s(enc *jsontext.Encoder, value %s) error {\n", helper, typeName)
+	switch info.Kind {
+	case air.TypeVoid:
+		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.Null)\n")
+	case air.TypeInt:
+		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.Int(int64(value)))\n")
+	case air.TypeFloat:
+		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.Float(value))\n")
+	case air.TypeBool:
+		fmt.Fprintf(b, "\tif value { return enc.WriteToken(jsontext.True) }\n\treturn enc.WriteToken(jsontext.False)\n")
+	case air.TypeStr:
+		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.String(value))\n")
+	case air.TypeDynamic, air.TypeExtern, air.TypeTraitObject:
+		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
+	case air.TypeMaybe:
+		fmt.Fprintf(b, "\tif !value.Some { return enc.WriteToken(jsontext.Null) }\n\treturn %s(enc, value.Value)\n", l.jsonEncodeHelperName(info.Elem))
+	case air.TypeResult:
+		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
+	case air.TypeList:
+		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginArray); err != nil { return err }\n\tfor _, item := range value {\n\t\tif err := %s(enc, item); err != nil { return err }\n\t}\n\treturn enc.WriteToken(jsontext.EndArray)\n", l.jsonEncodeHelperName(info.Elem))
+	case air.TypeMap:
+		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }\n\tfor key, item := range value {\n\t\tif err := enc.WriteToken(jsontext.String(fmt.Sprint(key))); err != nil { return err }\n\t\tif err := %s(enc, item); err != nil { return err }\n\t}\n\treturn enc.WriteToken(jsontext.EndObject)\n", l.jsonEncodeHelperName(info.Value))
+	case air.TypeStruct:
+		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }\n")
+		for _, field := range info.Fields {
+			fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.String(%q)); err != nil { return err }\n", field.Name)
+			fmt.Fprintf(b, "\tif err := %s(enc, value.%s); err != nil { return err }\n", l.jsonEncodeHelperName(field.Type), field.Name)
+		}
+		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.EndObject)\n")
+	case air.TypeEnum:
+		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.Int(int64(value)))\n")
+	case air.TypeUnion:
+		fmt.Fprintf(b, "\tswitch value.tag {\n")
+		for _, member := range info.Members {
+			fieldName := unionMemberFieldName(member)
+			fmt.Fprintf(b, "\tcase %d:\n\t\treturn %s(enc, value.%s)\n", member.Tag, l.jsonEncodeHelperName(member.Type), fieldName)
+		}
+		fmt.Fprintf(b, "\t}\n\treturn enc.WriteToken(jsontext.Null)\n")
+	case air.TypeFunction, air.TypeFiber:
+		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
+	default:
+		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
+	}
+	fmt.Fprintf(b, "}\n")
+	if info.Kind == air.TypeStruct {
+		fmt.Fprintf(b, "\nfunc (value %s) MarshalJSONTo(enc *jsontext.Encoder) error {\n\treturn %s(enc, value)\n}\n", typeName, helper)
+	}
+	fmt.Fprintf(b, "\nfunc %s(value %s) (string, error) {\n\tvar buf bytes.Buffer\n\tenc := jsontext.NewEncoder(&buf)\n\tif err := %s(enc, value); err != nil { return \"\", err }\n\treturn string(bytes.TrimSuffix(buf.Bytes(), []byte(\"\\n\"))), nil\n}\n", l.jsonEncodeTopHelperName(typeID), typeName, helper)
+	fmt.Fprintf(b, "\nfunc %s(value %s) (string, error) {\n\tdata, err := json.Marshal(value)\n\tif err != nil { return \"\", err }\n\treturn string(data), nil\n}\n", l.jsonEncodeMarshalTopHelperName(typeID), typeName)
+}
+
+func (l *lowerer) jsonEncodeHelperName(typeID air.TypeID) string {
+	return fmt.Sprintf("ardJSONEncode_%d", typeID)
+}
+
+func (l *lowerer) jsonEncodeTopHelperName(typeID air.TypeID) string {
+	return fmt.Sprintf("ardJSONEncodeTop_%d", typeID)
+}
+
+func (l *lowerer) jsonEncodeMarshalTopHelperName(typeID air.TypeID) string {
+	return fmt.Sprintf("ardJSONMarshalTop_%d", typeID)
+}
+
+func (l *lowerer) jsonNativeCodecSafe(typeID air.TypeID, seen map[air.TypeID]bool) bool {
+	if !validTypeID(l.program, typeID) {
+		return false
+	}
+	if seen[typeID] {
+		return true
+	}
+	seen[typeID] = true
+	info := l.program.Types[typeID-1]
+	switch info.Kind {
+	case air.TypeVoid, air.TypeInt, air.TypeFloat, air.TypeBool, air.TypeStr, air.TypeEnum:
+		return true
+	case air.TypeList:
+		return l.jsonNativeCodecSafe(info.Elem, seen)
+	case air.TypeMap:
+		keyInfo := l.program.Types[info.Key-1]
+		return keyInfo.Kind == air.TypeStr && l.jsonNativeCodecSafe(info.Value, seen)
+	case air.TypeStruct:
+		for _, field := range info.Fields {
+			if !l.jsonNativeCodecSafe(field.Type, seen) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *lowerer) writeJSONDecodeTextHelper(b *strings.Builder, typeID air.TypeID) {
+	if !validTypeID(l.program, typeID) {
+		return
+	}
+	info := l.program.Types[typeID-1]
+	typeName := l.jsonParseGoTypeName(typeID)
+	helper := l.jsonDecodeTextHelperName(typeID)
+	fmt.Fprintf(b, "\nfunc %s(dec *jsontext.Decoder, path string) (%s, string) {\n", helper, typeName)
+	fmt.Fprintf(b, "\tvar out %s\n\t_ = out\n", typeName)
+	switch info.Kind {
+	case air.TypeInt:
+		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindNumber { return out, path + \": got \" + tok.Kind().String() + \", expected Int\" }\n\tparsed, err := strconv.ParseInt(tok.String(), 10, 0)\n\tif err != nil { return out, path + \": got Number, expected Int\" }\n\treturn int(parsed), \"\"\n")
+	case air.TypeFloat:
+		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindNumber { return out, path + \": got \" + tok.Kind().String() + \", expected Float\" }\n\tparsed, err := strconv.ParseFloat(tok.String(), 64)\n\tif err != nil { return out, path + \": got Number, expected Float\" }\n\treturn parsed, \"\"\n")
+	case air.TypeBool:
+		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() == jsontext.KindTrue { return true, \"\" }\n\tif tok.Kind() == jsontext.KindFalse { return false, \"\" }\n\treturn out, path + \": got \" + tok.Kind().String() + \", expected Bool\"\n")
+	case air.TypeStr:
+		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindString { return out, path + \": got \" + tok.Kind().String() + \", expected Str\" }\n\treturn tok.String(), \"\"\n")
+	case air.TypeDynamic:
+		fmt.Fprintf(b, "\tvalue, err := dec.ReadValue()\n\tif err != nil { return out, err.Error() }\n\tvar raw any\n\tif err := json.Unmarshal(value, &raw); err != nil { return out, err.Error() }\n\treturn raw, \"\"\n")
+	case air.TypeMaybe:
+		fmt.Fprintf(b, "\tif dec.PeekKind() == jsontext.KindNull { _, _ = dec.ReadToken(); return out, \"\" }\n\tvalue, message := %s(dec, path)\n\tif message != \"\" { return out, message }\n\tout.Value = value\n\tout.Some = true\n\treturn out, \"\"\n", l.jsonDecodeTextHelperName(info.Elem))
+	case air.TypeList:
+		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindBeginArray { return out, path + \": got \" + tok.Kind().String() + \", expected %s\" }\n\tfor i := 0; dec.PeekKind() != jsontext.KindEndArray; i++ {\n\t\tvalue, message := %s(dec, ardJSONPath(path, fmt.Sprintf(\"[%%d]\", i)))\n\t\tif message != \"\" { return out, message }\n\t\tout = append(out, value)\n\t}\n\t_, err = dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\treturn out, \"\"\n", info.Name, l.jsonDecodeTextHelperName(info.Elem))
+	case air.TypeMap:
+		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindBeginObject { return out, path + \": got \" + tok.Kind().String() + \", expected %s\" }\n\tout = make(%s)\n\tfor dec.PeekKind() != jsontext.KindEndObject {\n\t\tkeyTok, err := dec.ReadToken()\n\t\tif err != nil { return out, err.Error() }\n\t\tkey := keyTok.String()\n\t\tvalue, message := %s(dec, ardJSONPath(path, key))\n\t\tif message != \"\" { return out, message }\n\t\tout[key] = value\n\t}\n\t_, err = dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\treturn out, \"\"\n", info.Name, typeName, l.jsonDecodeTextHelperName(info.Value))
+	case air.TypeStruct:
+		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindBeginObject { return out, path + \": got \" + tok.Kind().String() + \", expected %s\" }\n", info.Name)
+		fmt.Fprintf(b, "\tseen := map[string]bool{}\n\tfor dec.PeekKind() != jsontext.KindEndObject {\n\t\tkeyTok, err := dec.ReadToken()\n\t\tif err != nil { return out, err.Error() }\n\t\tkey := keyTok.String()\n\t\tswitch key {\n")
+		for _, field := range info.Fields {
+			fmt.Fprintf(b, "\t\tcase %q:\n\t\t\tvalue, message := %s(dec, ardJSONPath(path, key))\n\t\t\tif message != \"\" { return out, message }\n\t\t\tout.%s = value\n\t\t\tseen[key] = true\n", field.Name, l.jsonDecodeTextHelperName(field.Type), field.Name)
+		}
+		fmt.Fprintf(b, "\t\tdefault:\n\t\t\tif err := dec.SkipValue(); err != nil { return out, err.Error() }\n\t\t}\n\t}\n\t_, err = dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n")
+		for _, field := range info.Fields {
+			fieldInfo := l.program.Types[field.Type-1]
+			if fieldInfo.Kind != air.TypeMaybe {
+				fmt.Fprintf(b, "\tif !seen[%q] { return out, ardJSONMissing(ardJSONPath(path, %q), %q) }\n", field.Name, field.Name, fieldInfo.Name)
+			}
+		}
+		fmt.Fprintf(b, "\treturn out, \"\"\n")
+	default:
+		fmt.Fprintf(b, "\treturn out, ardJSONErr(path, %q, nil)\n", info.Name)
+	}
+	fmt.Fprintf(b, "}\n")
+}
+
+func (l *lowerer) jsonDecodeTextHelperName(typeID air.TypeID) string {
+	return fmt.Sprintf("ardJSONDecodeText_%d", typeID)
 }
