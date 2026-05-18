@@ -1,4 +1,3 @@
-use ard/decode
 use ard/dynamic
 use ard/io
 use ard/json
@@ -44,17 +43,13 @@ fn packet_to_dynamic(packet: Packet) Dynamic {
 }
 
 fn score_packet(payload: Str) Int {
-  let raw = decode::from_json(payload).expect("valid json")
-  let id = decode::run(raw, decode::field("id", decode::int)).expect("id")
-  let name = decode::run(raw, decode::field("name", decode::string)).expect("name")
-  let active = decode::run(raw, decode::field("active", decode::bool)).expect("active")
-  let values = decode::run(raw, decode::field("values", decode::list(decode::int))).expect("values")
+  let packet = json::parse<Packet>(payload).expect("valid json")
 
-  mut total = id + name.size()
-  if active {
+  mut total = packet.id + packet.name.size()
+  if packet.active {
     total =+ 19
   }
-  for value, idx in values {
+  for value, idx in packet.values {
     total =+ value * (idx + 1)
   }
   total

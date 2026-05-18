@@ -1,9 +1,11 @@
 package vm
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"math"
+	"io"
+	"strconv"
 	"strings"
 
 	"github.com/akonwi/ard/air"
@@ -33,47 +35,31 @@ func (vm *VM) callJSONParse(extern air.Extern, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return Value{}, fmt.Errorf("JsonParse expects 1 arg, got %d", len(args))
 	}
-
-	raw, err := vm.jsonParseInput(args[0])
-	if err != nil {
-		return vm.jsonParseErr(extern.Signature.Return, returnInfo.Error, jsonDecodeError{expected: "JSON", found: err.Error()}), nil
+	if args[0].Kind != ValueStr {
+		return vm.jsonParseErr(extern.Signature.Return, jsonDecodeError{expected: "Str", found: args[0].GoValueString()}), nil
 	}
 
-	value, decodeErr := vm.jsonValueToValue(raw, returnInfo.Value, nil)
+	dec := jsontext.NewDecoder(strings.NewReader(args[0].Str))
+	value, decodeErr := vm.jsonDecodeValue(dec, returnInfo.Value, nil)
 	if decodeErr != nil {
-		return vm.jsonParseErr(extern.Signature.Return, returnInfo.Error, *decodeErr), nil
+		return vm.jsonParseErr(extern.Signature.Return, *decodeErr), nil
+	}
+	if kind := dec.PeekKind(); kind != jsontext.KindInvalid {
+		return vm.jsonParseErr(extern.Signature.Return, jsonDecodeError{expected: "end of JSON", found: kind.String()}), nil
 	}
 	return Result(extern.Signature.Return, true, value), nil
 }
 
-func (vm *VM) jsonParseInput(value Value) (any, error) {
-	if value.Kind == ValueUnion {
-		unionValue, err := value.unionValue()
-		if err != nil {
-			return nil, err
-		}
-		value = unionValue.Value
-	}
-	if value.Kind == ValueStr {
-		var raw any
-		if err := json.Unmarshal([]byte(value.Str), &raw); err != nil {
-			return nil, err
-		}
-		return raw, nil
-	}
-	if value.Kind == ValueDynamic {
-		return value.Ref, nil
-	}
-	return nil, fmt.Errorf("%s", value.GoValueString())
-}
-
-func (vm *VM) jsonValueToValue(raw any, typeID air.TypeID, path []string) (Value, *jsonDecodeError) {
+func (vm *VM) jsonDecodeValue(dec *jsontext.Decoder, typeID air.TypeID, path []string) (Value, *jsonDecodeError) {
 	typeInfo, err := vm.typeInfo(typeID)
 	if err != nil {
 		return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: err.Error(), path: path}
 	}
 
-	if raw == nil {
+	if dec.PeekKind() == jsontext.KindNull {
+		if _, err := dec.ReadToken(); err != nil {
+			return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: err.Error(), path: path}
+		}
 		if typeInfo.Kind == air.TypeMaybe {
 			vm.recordMaybeDetailAlloc(false)
 			return Maybe(typeID, false, vm.zeroValue(typeInfo.Elem)), nil
@@ -86,118 +72,194 @@ func (vm *VM) jsonValueToValue(raw any, typeID air.TypeID, path []string) (Value
 
 	switch typeInfo.Kind {
 	case air.TypeInt:
-		if n, ok := jsonNumber(raw); ok && math.Trunc(n) == n {
-			return Int(typeID, int(n)), nil
+		tok, err := dec.ReadToken()
+		if err != nil {
+			return Value{}, jsonTokenErr(typeInfo.Name, path, err)
 		}
+		if tok.Kind() != jsontext.KindNumber {
+			return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: jsonKindFound(tok.Kind()), path: path}
+		}
+		parsed, err := strconv.ParseInt(tok.String(), 10, 0)
+		if err != nil {
+			return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: "Number", path: path}
+		}
+		return Int(typeID, int(parsed)), nil
 	case air.TypeFloat:
-		if n, ok := jsonNumber(raw); ok {
-			return Float(typeID, n), nil
+		tok, err := dec.ReadToken()
+		if err != nil {
+			return Value{}, jsonTokenErr(typeInfo.Name, path, err)
 		}
+		if tok.Kind() != jsontext.KindNumber {
+			return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: jsonKindFound(tok.Kind()), path: path}
+		}
+		parsed, err := strconv.ParseFloat(tok.String(), 64)
+		if err != nil {
+			return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: "Number", path: path}
+		}
+		return Float(typeID, parsed), nil
 	case air.TypeBool:
-		if b, ok := raw.(bool); ok {
-			return Bool(typeID, b), nil
+		tok, err := dec.ReadToken()
+		if err != nil {
+			return Value{}, jsonTokenErr(typeInfo.Name, path, err)
+		}
+		switch tok.Kind() {
+		case jsontext.KindTrue:
+			return Bool(typeID, true), nil
+		case jsontext.KindFalse:
+			return Bool(typeID, false), nil
+		default:
+			return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: jsonKindFound(tok.Kind()), path: path}
 		}
 	case air.TypeStr:
-		if s, ok := raw.(string); ok {
-			return Str(typeID, s), nil
+		tok, err := dec.ReadToken()
+		if err != nil {
+			return Value{}, jsonTokenErr(typeInfo.Name, path, err)
 		}
+		if tok.Kind() != jsontext.KindString {
+			return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: jsonKindFound(tok.Kind()), path: path}
+		}
+		return Str(typeID, tok.String()), nil
 	case air.TypeDynamic:
+		raw, decodeErr := jsonDecodeDynamic(dec, path)
+		if decodeErr != nil {
+			return Value{}, decodeErr
+		}
 		return Dynamic(typeID, raw), nil
 	case air.TypeMaybe:
-		inner, decodeErr := vm.jsonValueToValue(raw, typeInfo.Elem, path)
+		inner, decodeErr := vm.jsonDecodeValue(dec, typeInfo.Elem, path)
 		if decodeErr != nil {
 			return Value{}, decodeErr
 		}
 		vm.recordMaybeDetailAlloc(true)
 		return Maybe(typeID, true, inner), nil
 	case air.TypeList:
-		items, ok := raw.([]any)
-		if !ok {
-			return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: jsonFound(raw), path: path}
+		if tok, err := dec.ReadToken(); err != nil {
+			return Value{}, jsonTokenErr(typeInfo.Name, path, err)
+		} else if tok.Kind() != jsontext.KindBeginArray {
+			return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: jsonKindFound(tok.Kind()), path: path}
 		}
-		out := make([]Value, len(items))
-		for i, item := range items {
-			converted, decodeErr := vm.jsonValueToValue(item, typeInfo.Elem, appendPath(path, fmt.Sprintf("[%d]", i)))
+		items := []Value{}
+		for dec.PeekKind() != jsontext.KindEndArray {
+			item, decodeErr := vm.jsonDecodeValue(dec, typeInfo.Elem, appendPath(path, fmt.Sprintf("[%d]", len(items))))
 			if decodeErr != nil {
 				return Value{}, decodeErr
 			}
-			out[i] = converted
+			items = append(items, item)
 		}
-		return List(typeID, out), nil
+		if _, err := dec.ReadToken(); err != nil {
+			return Value{}, jsonTokenErr(typeInfo.Name, path, err)
+		}
+		return List(typeID, items), nil
 	case air.TypeMap:
-		m, ok := raw.(map[string]any)
-		if !ok {
-			return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: jsonFound(raw), path: path}
-		}
 		keyInfo, err := vm.typeInfo(typeInfo.Key)
 		if err != nil || keyInfo.Kind != air.TypeStr {
 			return Value{}, &jsonDecodeError{expected: "Str map key", found: keyInfo.Name, path: path}
 		}
-		entries := make([]MapEntryValue, 0, len(m))
-		for k, item := range m {
-			converted, decodeErr := vm.jsonValueToValue(item, typeInfo.Value, appendPath(path, k))
+		if tok, err := dec.ReadToken(); err != nil {
+			return Value{}, jsonTokenErr(typeInfo.Name, path, err)
+		} else if tok.Kind() != jsontext.KindBeginObject {
+			return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: jsonKindFound(tok.Kind()), path: path}
+		}
+		entries := []MapEntryValue{}
+		for dec.PeekKind() != jsontext.KindEndObject {
+			keyTok, err := dec.ReadToken()
+			if err != nil {
+				return Value{}, jsonTokenErr("Str", path, err)
+			}
+			if keyTok.Kind() != jsontext.KindString {
+				return Value{}, &jsonDecodeError{expected: "Str", found: jsonKindFound(keyTok.Kind()), path: path}
+			}
+			key := keyTok.String()
+			item, decodeErr := vm.jsonDecodeValue(dec, typeInfo.Value, appendPath(path, key))
 			if decodeErr != nil {
 				return Value{}, decodeErr
 			}
-			entries = append(entries, MapEntryValue{Key: Str(typeInfo.Key, k), Value: converted})
+			entries = append(entries, MapEntryValue{Key: Str(typeInfo.Key, key), Value: item})
+		}
+		if _, err := dec.ReadToken(); err != nil {
+			return Value{}, jsonTokenErr(typeInfo.Name, path, err)
 		}
 		return Map(typeID, entries), nil
 	case air.TypeStruct:
-		m, ok := raw.(map[string]any)
-		if !ok {
-			return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: jsonFound(raw), path: path}
-		}
-		fields := make([]Value, len(typeInfo.Fields))
-		for _, field := range typeInfo.Fields {
-			fieldInfo, err := vm.typeInfo(field.Type)
-			if err != nil {
-				return Value{}, &jsonDecodeError{expected: field.Name, found: err.Error(), path: path}
-			}
-			item, exists := m[field.Name]
-			if !exists {
-				if fieldInfo.Kind == air.TypeMaybe {
-					vm.recordMaybeDetailAlloc(false)
-					fields[field.Index] = Maybe(field.Type, false, vm.zeroValue(fieldInfo.Elem))
-					continue
-				}
-				return Value{}, &jsonDecodeError{expected: fieldInfo.Name, found: "missing", path: appendPath(path, field.Name)}
-			}
-			converted, decodeErr := vm.jsonValueToValue(item, field.Type, appendPath(path, field.Name))
-			if decodeErr != nil {
-				return Value{}, decodeErr
-			}
-			fields[field.Index] = converted
-		}
-		return Struct(typeID, fields), nil
+		return vm.jsonDecodeStruct(dec, typeID, typeInfo, path)
 	}
 
-	return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: jsonFound(raw), path: path}
+	return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: jsonKindFound(dec.PeekKind()), path: path}
 }
 
-func (vm *VM) jsonParseErr(resultType, errorType air.TypeID, decodeErr jsonDecodeError) Value {
-	errorInfo, err := vm.typeInfo(errorType)
-	if err != nil || errorInfo.Kind != air.TypeStruct {
-		return Result(resultType, false, Str(errorType, decodeErr.Error()))
+func (vm *VM) jsonDecodeStruct(dec *jsontext.Decoder, typeID air.TypeID, typeInfo air.TypeInfo, path []string) (Value, *jsonDecodeError) {
+	if tok, err := dec.ReadToken(); err != nil {
+		return Value{}, jsonTokenErr(typeInfo.Name, path, err)
+	} else if tok.Kind() != jsontext.KindBeginObject {
+		return Value{}, &jsonDecodeError{expected: typeInfo.Name, found: jsonKindFound(tok.Kind()), path: path}
 	}
-	fields := make([]Value, len(errorInfo.Fields))
-	for _, field := range errorInfo.Fields {
-		switch field.Name {
-		case "expected":
-			fields[field.Index] = Str(field.Type, decodeErr.expected)
-		case "found":
-			fields[field.Index] = Str(field.Type, decodeErr.found)
-		case "path":
-			pathInfo, _ := vm.typeInfo(field.Type)
-			items := make([]Value, len(decodeErr.path))
-			for i, segment := range decodeErr.path {
-				items[i] = Str(pathInfo.Elem, segment)
-			}
-			fields[field.Index] = List(field.Type, items)
-		default:
-			fields[field.Index] = vm.zeroValue(field.Type)
+
+	fields := make([]Value, len(typeInfo.Fields))
+	seen := make([]bool, len(typeInfo.Fields))
+	fieldsByName := make(map[string]air.FieldInfo, len(typeInfo.Fields))
+	for _, field := range typeInfo.Fields {
+		fieldsByName[field.Name] = field
+	}
+
+	for dec.PeekKind() != jsontext.KindEndObject {
+		keyTok, err := dec.ReadToken()
+		if err != nil {
+			return Value{}, jsonTokenErr("Str", path, err)
 		}
+		if keyTok.Kind() != jsontext.KindString {
+			return Value{}, &jsonDecodeError{expected: "Str", found: jsonKindFound(keyTok.Kind()), path: path}
+		}
+		fieldName := keyTok.String()
+		field, ok := fieldsByName[fieldName]
+		if !ok {
+			if err := dec.SkipValue(); err != nil {
+				return Value{}, jsonTokenErr("Dynamic", appendPath(path, fieldName), err)
+			}
+			continue
+		}
+		converted, decodeErr := vm.jsonDecodeValue(dec, field.Type, appendPath(path, fieldName))
+		if decodeErr != nil {
+			return Value{}, decodeErr
+		}
+		fields[field.Index] = converted
+		seen[field.Index] = true
 	}
-	return Result(resultType, false, Struct(errorType, fields))
+	if _, err := dec.ReadToken(); err != nil {
+		return Value{}, jsonTokenErr(typeInfo.Name, path, err)
+	}
+
+	for _, field := range typeInfo.Fields {
+		if seen[field.Index] {
+			continue
+		}
+		fieldInfo, err := vm.typeInfo(field.Type)
+		if err != nil {
+			return Value{}, &jsonDecodeError{expected: field.Name, found: err.Error(), path: path}
+		}
+		if fieldInfo.Kind == air.TypeMaybe {
+			vm.recordMaybeDetailAlloc(false)
+			fields[field.Index] = Maybe(field.Type, false, vm.zeroValue(fieldInfo.Elem))
+			continue
+		}
+		return Value{}, &jsonDecodeError{expected: fieldInfo.Name, found: "missing", path: appendPath(path, field.Name)}
+	}
+	return Struct(typeID, fields), nil
+}
+
+func jsonDecodeDynamic(dec *jsontext.Decoder, path []string) (any, *jsonDecodeError) {
+	value, err := dec.ReadValue()
+	if err != nil {
+		return nil, jsonTokenErr("Dynamic", path, err)
+	}
+	var raw any
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return nil, &jsonDecodeError{expected: "Dynamic", found: err.Error(), path: path}
+	}
+	return raw, nil
+}
+
+func (vm *VM) jsonParseErr(resultType air.TypeID, decodeErr jsonDecodeError) Value {
+	return Result(resultType, false, Str(vm.program.Types[resultType-1].Error, decodeErr.Error()))
 }
 
 func appendPath(path []string, segment string) []string {
@@ -207,38 +269,32 @@ func appendPath(path []string, segment string) []string {
 	return out
 }
 
-func jsonNumber(raw any) (float64, bool) {
-	switch n := raw.(type) {
-	case float64:
-		return n, true
-	case float32:
-		return float64(n), true
-	case int:
-		return float64(n), true
-	case int64:
-		return float64(n), true
-	case uint64:
-		return float64(n), true
-	default:
-		return 0, false
+func jsonTokenErr(expected string, path []string, err error) *jsonDecodeError {
+	if err == io.EOF {
+		return &jsonDecodeError{expected: expected, found: "end of JSON", path: path}
 	}
+	return &jsonDecodeError{expected: expected, found: err.Error(), path: path}
 }
 
-func jsonFound(raw any) string {
-	switch raw.(type) {
-	case nil:
+func jsonKindFound(kind jsontext.Kind) string {
+	switch kind {
+	case jsontext.KindNull:
 		return "null"
-	case string:
+	case jsontext.KindString:
 		return "Str"
-	case bool:
+	case jsontext.KindTrue, jsontext.KindFalse:
 		return "Bool"
-	case float64, float32, int, int64, uint64:
+	case jsontext.KindNumber:
 		return "Number"
-	case []any:
+	case jsontext.KindBeginArray:
 		return "List"
-	case map[string]any:
+	case jsontext.KindBeginObject:
 		return "Map"
+	case jsontext.KindEndArray:
+		return "]"
+	case jsontext.KindEndObject:
+		return "}"
 	default:
-		return fmt.Sprintf("%T", raw)
+		return kind.String()
 	}
 }

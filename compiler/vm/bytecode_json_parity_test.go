@@ -63,23 +63,6 @@ func TestVMBytecodeParityParseJSON(t *testing.T) {
 			want: 2,
 		},
 		{
-			name: "parse dynamic object",
-			input: `
-				use ard/decode
-				use ard/json
-
-				struct Todo {
-					id: Int,
-					title: Str,
-				}
-
-				let raw = decode::from_json("\{\"id\":1,\"title\":\"ship\"}").expect("dynamic")
-				let todo = json::parse<Todo>(raw).expect("parse")
-				todo.title
-			`,
-			want: "ship",
-		},
-		{
 			name: "parse error includes path in message",
 			input: `
 				use ard/json

@@ -4,9 +4,7 @@ use ard/testing
 
 // Standard library JSON module implemented with FFI
 
-type Input = Str | Dynamic
-
-extern fn parse(input: Input) $T!Str = {
+extern fn parse(input: Str) $T!Str = {
   go = "JsonParse"
   js = "JsonParse"
 }

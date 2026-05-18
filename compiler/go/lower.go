@@ -321,6 +321,11 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	}
 `)
 	}
+	if l.runtimeHelpers["json_parse"] {
+		l.currentImports["fmt"] = "fmt"
+		l.currentImports["runtime"] = "github.com/akonwi/ard/runtime"
+		parts = append(parts, l.jsonParsePreludeSource())
+	}
 	src := strings.Join(parts, "\n")
 	file, err := parser.ParseFile(token.NewFileSet(), "prelude.go", src, 0)
 	if err != nil {
@@ -4016,6 +4021,12 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		}
 		wrapped.stmts = append(stmts, wrapped.stmts...)
 		return wrapped, nil
+	case "JsonParse":
+		wrapped, err := l.lowerJSONParseExtern(expr, args, stmts)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return wrapped, nil
 	case "VoidToDynamic":
 		return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 	case "JsonToDynamic":
@@ -4232,4 +4243,189 @@ func validFunctionID(program *air.Program, id air.FunctionID) bool {
 
 func validTypeID(program *air.Program, id air.TypeID) bool {
 	return id > 0 && int(id) <= len(program.Types)
+}
+
+func (l *lowerer) lowerJSONParseExtern(expr air.Expr, args []ast.Expr, stmts []ast.Stmt) (loweredExpr, error) {
+	if len(args) != 1 || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("JsonParse expects 1 arg")
+	}
+	if !validTypeID(l.program, expr.Type) {
+		return loweredExpr{}, fmt.Errorf("invalid JsonParse result type %d", expr.Type)
+	}
+	resultInfo := l.program.Types[expr.Type-1]
+	if resultInfo.Kind != air.TypeResult {
+		return loweredExpr{}, fmt.Errorf("JsonParse expected result return, got %s", resultInfo.Name)
+	}
+	l.markRuntimeHelper("json_parse")
+	valueType, err := l.goType(resultInfo.Value)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	rawTemp := l.nextTemp()
+	errTemp := l.nextTemp()
+	hostErrTemp := l.nextTemp()
+	outTemp := l.nextTemp()
+
+	allStmts := append([]ast.Stmt{}, stmts...)
+	allStmts = append(allStmts,
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(rawTemp)}, Type: ast.NewIdent("any")}}}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(errTemp)}, Type: ast.NewIdent("string")}}}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(hostErrTemp)}, Type: ast.NewIdent("error")}}}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(outTemp)}, Type: valueType}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(rawTemp), ast.NewIdent(hostErrTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "JsonToDynamic"), Args: []ast.Expr{args[0]}}}},
+		&ast.IfStmt{Cond: &ast.BinaryExpr{X: ast.NewIdent(hostErrTemp), Op: token.NEQ, Y: ast.NewIdent("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(hostErrTemp), Sel: ast.NewIdent("Error")}}}}}}},
+		&ast.IfStmt{
+			Cond: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: &ast.BasicLit{Kind: token.STRING, Value: `""`}},
+			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{
+				Lhs: []ast.Expr{ast.NewIdent(outTemp), ast.NewIdent(errTemp)},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent(l.jsonParseHelperName(resultInfo.Value)), Args: []ast.Expr{ast.NewIdent(rawTemp), &ast.BasicLit{Kind: token.STRING, Value: `""`}}}},
+			}}},
+		},
+	)
+	resultExpr := &ast.CompositeLit{Type: mustTypeExpr(l, expr.Type), Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: ast.NewIdent(outTemp)},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: ast.NewIdent(errTemp)},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: &ast.BasicLit{Kind: token.STRING, Value: `""`}}},
+	}}
+	return loweredExpr{stmts: allStmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) jsonParsePreludeSource() string {
+	var b strings.Builder
+	b.WriteString(`
+func ardJSONPath(path string, segment string) string {
+	if path == "" {
+		return segment
+	}
+	if len(segment) > 0 && segment[0] == '[' {
+		return path + segment
+	}
+	return path + "." + segment
+}
+
+func ardJSONFound(raw any) string {
+	switch raw.(type) {
+	case nil:
+		return "null"
+	case string:
+		return "Str"
+	case bool:
+		return "Bool"
+	case float64, float32, int, int64, uint64:
+		return "Number"
+	case []any:
+		return "List"
+	case map[string]any:
+		return "Map"
+	default:
+		return fmt.Sprintf("%T", raw)
+	}
+}
+
+func ardJSONErr(path string, expected string, raw any) string {
+	message := "got " + ardJSONFound(raw) + ", expected " + expected
+	if path == "" {
+		return message
+	}
+	return path + ": " + message
+}
+
+func ardJSONMissing(path string, expected string) string {
+	if path == "" {
+		return "missing, expected " + expected
+	}
+	return path + ": missing, expected " + expected
+}
+`)
+	for _, typ := range l.program.Types {
+		if typ.ID == air.NoType {
+			continue
+		}
+		l.writeJSONParseHelper(&b, typ.ID)
+	}
+	return b.String()
+}
+
+func (l *lowerer) writeJSONParseHelper(b *strings.Builder, typeID air.TypeID) {
+	if !validTypeID(l.program, typeID) {
+		return
+	}
+	info := l.program.Types[typeID-1]
+	typeName := l.jsonParseGoTypeName(typeID)
+	helper := l.jsonParseHelperName(typeID)
+	fmt.Fprintf(b, "\nfunc %s(raw any, path string) (%s, string) {\n", helper, typeName)
+	fmt.Fprintf(b, "\tvar out %s\n\t_ = out\n", typeName)
+	switch info.Kind {
+	case air.TypeInt:
+		fmt.Fprintf(b, "\tswitch value := raw.(type) {\n\tcase float64:\n\t\tparsed := int(value)\n\t\tif value == float64(parsed) { return parsed, \"\" }\n\tcase int:\n\t\treturn value, \"\"\n\t}\n\treturn out, ardJSONErr(path, \"Int\", raw)\n")
+	case air.TypeFloat:
+		fmt.Fprintf(b, "\tswitch value := raw.(type) {\n\tcase float64:\n\t\treturn value, \"\"\n\tcase int:\n\t\treturn float64(value), \"\"\n\t}\n\treturn out, ardJSONErr(path, \"Float\", raw)\n")
+	case air.TypeBool:
+		fmt.Fprintf(b, "\tif value, ok := raw.(bool); ok { return value, \"\" }\n\treturn out, ardJSONErr(path, \"Bool\", raw)\n")
+	case air.TypeStr:
+		fmt.Fprintf(b, "\tif value, ok := raw.(string); ok { return value, \"\" }\n\treturn out, ardJSONErr(path, \"Str\", raw)\n")
+	case air.TypeDynamic:
+		fmt.Fprintf(b, "\treturn raw, \"\"\n")
+	case air.TypeMaybe:
+		elemHelper := l.jsonParseHelperName(info.Elem)
+		fmt.Fprintf(b, "\tif raw == nil { return out, \"\" }\n\tvalue, err := %s(raw, path)\n\tif err != \"\" { return out, err }\n\tout.Value = value\n\tout.Some = true\n\treturn out, \"\"\n", elemHelper)
+	case air.TypeList:
+		elemHelper := l.jsonParseHelperName(info.Elem)
+		fmt.Fprintf(b, "\titems, ok := raw.([]any)\n\tif !ok { return out, ardJSONErr(path, \"%s\", raw) }\n\tout = make(%s, len(items))\n\tfor i, item := range items {\n\t\tvalue, err := %s(item, ardJSONPath(path, fmt.Sprintf(\"[%%d]\", i)))\n\t\tif err != \"\" { return out, err }\n\t\tout[i] = value\n\t}\n\treturn out, \"\"\n", info.Name, typeName, elemHelper)
+	case air.TypeMap:
+		valueHelper := l.jsonParseHelperName(info.Value)
+		fmt.Fprintf(b, "\titems, ok := raw.(map[string]any)\n\tif !ok { return out, ardJSONErr(path, \"%s\", raw) }\n\tout = make(%s, len(items))\n\tfor key, item := range items {\n\t\tvalue, err := %s(item, ardJSONPath(path, key))\n\t\tif err != \"\" { return out, err }\n\t\tout[key] = value\n\t}\n\treturn out, \"\"\n", info.Name, typeName, valueHelper)
+	case air.TypeStruct:
+		fmt.Fprintf(b, "\titems, ok := raw.(map[string]any)\n\tif !ok { return out, ardJSONErr(path, \"%s\", raw) }\n", info.Name)
+		for _, field := range info.Fields {
+			fieldInfo := l.program.Types[field.Type-1]
+			fieldHelper := l.jsonParseHelperName(field.Type)
+			fieldAccess := field.Name
+			if fieldInfo.Kind == air.TypeMaybe {
+				fmt.Fprintf(b, "\tif rawField, ok := items[%q]; ok {\n\t\tvalue, err := %s(rawField, ardJSONPath(path, %q))\n\t\tif err != \"\" { return out, err }\n\t\tout.%s = value\n\t}\n", field.Name, fieldHelper, field.Name, fieldAccess)
+			} else {
+				fmt.Fprintf(b, "\traw%s, ok := items[%q]\n\tif !ok { return out, ardJSONMissing(ardJSONPath(path, %q), \"%s\") }\n\tvalue%s, err := %s(raw%s, ardJSONPath(path, %q))\n\tif err != \"\" { return out, err }\n\tout.%s = value%s\n", exportedFieldName(field.Name), field.Name, field.Name, fieldInfo.Name, exportedFieldName(field.Name), fieldHelper, exportedFieldName(field.Name), field.Name, fieldAccess, exportedFieldName(field.Name))
+			}
+		}
+		fmt.Fprintf(b, "\treturn out, \"\"\n")
+	default:
+		fmt.Fprintf(b, "\treturn out, ardJSONErr(path, %q, raw)\n", info.Name)
+	}
+	fmt.Fprintf(b, "}\n")
+}
+
+func (l *lowerer) jsonParseHelperName(typeID air.TypeID) string {
+	return fmt.Sprintf("ardJSONParse_%d", typeID)
+}
+
+func (l *lowerer) jsonParseGoTypeName(typeID air.TypeID) string {
+	if !validTypeID(l.program, typeID) {
+		return "any"
+	}
+	info := l.program.Types[typeID-1]
+	switch info.Kind {
+	case air.TypeVoid:
+		return "struct{}"
+	case air.TypeInt:
+		return "int"
+	case air.TypeFloat:
+		return "float64"
+	case air.TypeBool:
+		return "bool"
+	case air.TypeStr:
+		return "string"
+	case air.TypeDynamic, air.TypeExtern, air.TypeTraitObject:
+		return "any"
+	case air.TypeMaybe:
+		return "runtime.Maybe[" + l.jsonParseGoTypeName(info.Elem) + "]"
+	case air.TypeList:
+		return "[]" + l.jsonParseGoTypeName(info.Elem)
+	case air.TypeMap:
+		return "map[" + l.jsonParseGoTypeName(info.Key) + "]" + l.jsonParseGoTypeName(info.Value)
+	case air.TypeStruct, air.TypeEnum, air.TypeUnion:
+		return typeName(l.program, info)
+	default:
+		return "any"
+	}
 }
