@@ -350,6 +350,45 @@ func TestRunGoTargetModulesSample(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsInvalidMainEntrypointSignature(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		wantErr string
+	}{
+		{
+			name: "main with args",
+			source: `fn main(name: Str) Void {
+			}`,
+			wantErr: "main entrypoint cannot have parameters",
+		},
+		{
+			name: "main with non-Void return",
+			source: `fn main() Int {
+			  1
+			}`,
+			wantErr: "main entrypoint must return Void, got Int",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			sourcePath := filepath.Join(tempDir, "main.ard")
+			if err := os.WriteFile(sourcePath, []byte(tt.source), 0o644); err != nil {
+				t.Fatalf("write source: %v", err)
+			}
+			_, err := buildGoBinary(sourcePath, filepath.Join(tempDir, "main-bin"), backend.TargetGo)
+			if err == nil {
+				t.Fatalf("buildGoBinary succeeded, want error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestBuildGoBinary(t *testing.T) {
 	tempDir := t.TempDir()
 	sourcePath := filepath.Join(tempDir, "main.ard")
@@ -541,7 +580,7 @@ func TestBuildJSProgramDefaultWritesArdOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	sourcePath := filepath.Join(dir, "main.ard")
-	if err := os.WriteFile(sourcePath, []byte(`fn main() { "ok" }`), 0o644); err != nil {
+	if err := os.WriteFile(sourcePath, []byte(`fn main() { () }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

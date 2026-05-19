@@ -85,6 +85,10 @@ func main() {
 					fmt.Println(err)
 					os.Exit(1)
 				}
+				if err := validateEntrypointSignature(profile, program); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
 				if err := runVMProgramProfile(program, os.Args, profile); err != nil {
 					fmt.Println(err)
 					os.Exit(1)
@@ -106,6 +110,10 @@ func main() {
 					program, lowerErr = air.Lower(loaded.Module)
 					return lowerErr
 				}); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				if err := validateEntrypointSignature(profile, program); err != nil {
 					fmt.Println(err)
 					os.Exit(1)
 				}
@@ -672,6 +680,9 @@ func runJSProgram(inputPath string, target string, args []string) error {
 	}); err != nil {
 		return err
 	}
+	if err := validateEntrypointSignature(profile, program); err != nil {
+		return err
+	}
 	if err := profile.Time("javascript.run", func() error {
 		return javascript.RunProgram(program, target, args, loaded.ProjectInfo)
 	}); err != nil {
@@ -697,6 +708,9 @@ func buildJSProgram(inputPath string, outputPath string, target string) (string,
 		program, lowerErr = air.Lower(loaded.Module)
 		return lowerErr
 	}); err != nil {
+		return "", err
+	}
+	if err := validateEntrypointSignature(profile, program); err != nil {
 		return "", err
 	}
 	outputPath = resolveJSBuildOutputPath(inputPath, outputPath, target, loaded.ProjectInfo)
@@ -756,6 +770,9 @@ func buildGoBinary(inputPath string, outputPath string, target string) (string, 
 	}); err != nil {
 		return "", err
 	}
+	if err := validateEntrypointSignature(profile, program); err != nil {
+		return "", err
+	}
 	if outputPath == "" {
 		outputPath = filepath.Base(strings.TrimSuffix(inputPath, filepath.Ext(inputPath)))
 		if outputPath == "" || outputPath == "." || outputPath == string(filepath.Separator) {
@@ -795,6 +812,9 @@ func buildVMBinary(inputPath string, outputPath string) (string, error) {
 	if err := profile.Time("air.validate", func() error {
 		return air.Validate(program)
 	}); err != nil {
+		return "", err
+	}
+	if err := validateEntrypointSignature(profile, program); err != nil {
 		return "", err
 	}
 	if program.Entry == air.NoFunction {
@@ -866,6 +886,12 @@ func maybeRunEmbedded() bool {
 
 func runVMProgram(program *air.Program, args []string) error {
 	return runVMProgramProfile(program, args, nil)
+}
+
+func validateEntrypointSignature(profile *pipelineProfile, program *air.Program) error {
+	return profile.Time("air.validate_entrypoint", func() error {
+		return air.ValidateEntrypointSignature(program)
+	})
 }
 
 func runVMProgramProfile(program *air.Program, args []string, profile *pipelineProfile) error {
