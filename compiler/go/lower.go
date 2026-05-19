@@ -3850,6 +3850,12 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		}
 		l.markRuntimeHelper("json_encode")
 		helper := l.jsonEncodeTopHelperName(expr.Args[0].Type)
+		// JsonEncode is lowered with type-specific helpers instead of the generic
+		// stdlib FFI call so the Go target can preserve Ard JSON semantics for
+		// maybe/union/dynamic-heavy values. When the static type is simple enough
+		// for native Go JSON encoding to match those semantics, prefer json.Marshal:
+		// it is noticeably faster on JSON-heavy benchmarks while keeping the
+		// Ard-aware streaming encoder as the universal fallback.
 		if l.jsonNativeCodecSafe(expr.Args[0].Type, map[air.TypeID]bool{}) {
 			helper = l.jsonEncodeMarshalTopHelperName(expr.Args[0].Type)
 		}
