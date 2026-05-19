@@ -493,6 +493,8 @@ func (fl *functionLowerer) lowerExpr(expr *air.Expr) error {
 		return fl.lowerEnumMatch(expr)
 	case air.ExprMatchInt:
 		return fl.lowerIntMatch(expr)
+	case air.ExprMatchStr:
+		return fl.lowerStrMatch(expr)
 	case air.ExprMatchMaybe:
 		return fl.lowerMaybeMatch(expr)
 	case air.ExprMatchUnion:
@@ -607,6 +609,36 @@ func (fl *functionLowerer) lowerDiscriminantMatch(expr *air.Expr, enum bool) err
 			endJumps = append(endJumps, fl.emit(Instruction{Op: OpJump}))
 			fl.patch(next, len(fl.code))
 		}
+	}
+	if expr.CatchAll.Result != nil || len(expr.CatchAll.Stmts) > 0 {
+		if err := fl.lowerBlock(expr.CatchAll, expr.Type); err != nil {
+			return err
+		}
+	} else if err := fl.emitZero(expr.Type); err != nil {
+		return err
+	}
+	end := len(fl.code)
+	for _, jump := range endJumps {
+		fl.patch(jump, end)
+	}
+	return nil
+}
+
+func (fl *functionLowerer) lowerStrMatch(expr *air.Expr) error {
+	subjectLocal := fl.tempLocal()
+	if err := fl.lowerExpr(expr.Target); err != nil {
+		return err
+	}
+	fl.emit(Instruction{Op: OpStoreLocal, A: subjectLocal})
+	endJumps := []int{}
+	for _, matchCase := range expr.StrCases {
+		constIndex := fl.addConst(Constant{Kind: ConstStr, Str: matchCase.Value})
+		next := fl.emit(Instruction{Op: OpMatchStr, B: subjectLocal, C: constIndex})
+		if err := fl.lowerBlock(matchCase.Body, expr.Type); err != nil {
+			return err
+		}
+		endJumps = append(endJumps, fl.emit(Instruction{Op: OpJump}))
+		fl.patch(next, len(fl.code))
 	}
 	if expr.CatchAll.Result != nil || len(expr.CatchAll.Stmts) > 0 {
 		if err := fl.lowerBlock(expr.CatchAll, expr.Type); err != nil {

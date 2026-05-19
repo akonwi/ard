@@ -348,7 +348,7 @@ func stackEffect(inst Instruction) (pop int, push int, err error) {
 		return 0, 1, nil
 	case OpMapIncrementIntLocalDrop:
 		return 0, 0, nil
-	case OpBlock:
+	case OpBlock, OpMatchStr:
 		return 0, 0, nil
 	case OpMakeList, OpMakeStruct, OpMakeClosure:
 		return inst.B, 1, nil

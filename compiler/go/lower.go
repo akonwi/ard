@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -785,6 +786,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMatchEnum(fn, expr)
 	case air.ExprMatchInt:
 		return l.lowerMatchInt(fn, expr)
+	case air.ExprMatchStr:
+		return l.lowerMatchStr(fn, expr)
 	case air.ExprMakeList:
 		return l.lowerMakeList(fn, expr)
 	case air.ExprStrContains:
@@ -1287,7 +1290,7 @@ func (l *lowerer) canOverrideExprType(expr air.Expr, expectedType air.TypeID) bo
 	case air.ExprMakeResultOk, air.ExprMakeResultErr,
 		air.ExprMakeMaybeSome, air.ExprMakeMaybeNone,
 		air.ExprBlock, air.ExprIf,
-		air.ExprMatchEnum, air.ExprMatchInt, air.ExprMatchMaybe, air.ExprMatchResult,
+		air.ExprMatchEnum, air.ExprMatchInt, air.ExprMatchStr, air.ExprMatchMaybe, air.ExprMatchResult,
 		air.ExprTryResult, air.ExprTryMaybe:
 		return from.Kind == air.TypeResult || from.Kind == air.TypeMaybe
 	default:
@@ -2056,6 +2059,45 @@ func (l *lowerer) lowerMatchInt(fn air.Function, expr air.Expr) (loweredExpr, er
 		cases = append(cases, &ast.CaseClause{Body: body})
 	}
 	stmts = append(stmts, &ast.SwitchStmt{Tag: ast.NewIdent("true"), Body: &ast.BlockStmt{List: cases}})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) lowerMatchStr(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("str match missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultTypeID := expr.Type
+	resultExpr := ast.NewIdent("nil")
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	var assignTarget ast.Expr
+	if !l.isVoidType(resultTypeID) {
+		temp := l.nextTemp()
+		decls, err := l.declareTemp(resultTypeID, temp)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, decls...)
+		assignTarget = ast.NewIdent(temp)
+		resultExpr = ast.NewIdent(temp)
+	}
+	cases := make([]ast.Stmt, 0, len(expr.StrCases)+1)
+	for _, strCase := range expr.StrCases {
+		body, err := l.lowerValueBlock(fn, strCase.Body, resultTypeID, assignTarget)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		cases = append(cases, &ast.CaseClause{List: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(strCase.Value)}}, Body: body})
+	}
+	body, err := l.lowerValueBlock(fn, expr.CatchAll, resultTypeID, assignTarget)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	cases = append(cases, &ast.CaseClause{Body: body})
+	stmts = append(stmts, &ast.SwitchStmt{Tag: target.expr, Body: &ast.BlockStmt{List: cases}})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
 

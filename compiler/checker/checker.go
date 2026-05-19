@@ -3581,6 +3581,54 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 		}
 
+		if subject.Type() == Str {
+			strCases := make(map[string]*Block)
+			var catchAll *Block
+			var referenceType Type
+
+			for _, matchCase := range s.Cases {
+				if id, ok := matchCase.Pattern.(*parse.Identifier); ok && id.Name == "_" {
+					if catchAll != nil {
+						c.addError("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+						return nil
+					}
+					catchAll = c.checkBlock(matchCase.Body, nil)
+					if referenceType == nil {
+						referenceType = catchAll.Type()
+					} else if !referenceType.equal(catchAll.Type()) {
+						c.addError(typeMismatch(referenceType, catchAll.Type()), matchCase.Pattern.GetLocation())
+						return nil
+					}
+					continue
+				}
+
+				literal, ok := matchCase.Pattern.(*parse.StrLiteral)
+				if !ok {
+					c.addError("Pattern in Str match must be a string literal or '_'", matchCase.Pattern.GetLocation())
+					return nil
+				}
+				if _, exists := strCases[literal.Value]; exists {
+					c.addError(fmt.Sprintf("Duplicate case: %q", literal.Value), matchCase.Pattern.GetLocation())
+					return nil
+				}
+				caseBlock := c.checkBlock(matchCase.Body, nil)
+				strCases[literal.Value] = caseBlock
+				if referenceType == nil {
+					referenceType = caseBlock.Type()
+				} else if !referenceType.equal(caseBlock.Type()) {
+					c.addError(typeMismatch(referenceType, caseBlock.Type()), matchCase.Pattern.GetLocation())
+					return nil
+				}
+			}
+
+			if catchAll == nil {
+				c.addError("Incomplete match: missing catch-all case for Str match", s.GetLocation())
+				return nil
+			}
+
+			return &StrMatch{Subject: subject, Cases: strCases, CatchAll: catchAll}
+		}
+
 		// Check for Int matching
 		if subject.Type() == Int {
 			intCases := make(map[int]*Block)

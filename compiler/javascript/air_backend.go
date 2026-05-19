@@ -827,6 +827,8 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		return l.lowerEnumMatch(fn, expr)
 	case air.ExprMatchInt:
 		return l.lowerIntMatch(fn, expr)
+	case air.ExprMatchStr:
+		return l.lowerStrMatch(fn, expr)
 	case air.ExprMatchMaybe:
 		return l.lowerMaybeMatch(fn, expr)
 	case air.ExprMatchResult:
@@ -1292,6 +1294,31 @@ func (l *airJSLowerer) lowerEnumMatch(fn air.Function, expr air.Expr) (string, e
 	} else {
 		lines = append(lines, `throw makeArdError("panic", "match", "enum", 0, "non-exhaustive enum match");`)
 	}
+	return renderJSDoc(jsIIFEDoc(strings.Join(lines, "\n"))), nil
+}
+
+func (l *airJSLowerer) lowerStrMatch(fn air.Function, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("str match missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return "", err
+	}
+	matchVar := l.temp("match")
+	lines := []string{"const " + matchVar + " = " + target + ";", "switch (" + matchVar + ") {"}
+	for _, matchCase := range expr.StrCases {
+		body, err := l.lowerBlock(fn, matchCase.Body, true)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, "case "+strconv.Quote(matchCase.Value)+": "+renderJSDoc(jsBareBlockDoc(body)))
+	}
+	body, err := l.lowerBlock(fn, expr.CatchAll, true)
+	if err != nil {
+		return "", err
+	}
+	lines = append(lines, "default: "+renderJSDoc(jsBareBlockDoc(body)), "}")
 	return renderJSDoc(jsIIFEDoc(strings.Join(lines, "\n"))), nil
 }
 
