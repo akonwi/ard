@@ -926,6 +926,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			if len(bindings) == 0 && s.ExternalBinding != "" {
 				bindings = map[string]string{shorthandExternalBindingTarget(c.options.Target): s.ExternalBinding}
 			}
+			if target, ok := validateExternalBindingTargets(bindings); !ok {
+				c.addError(fmt.Sprintf("Unsupported extern binding target %q; use go for VM host FFI", target), s.GetLocation())
+				return nil
+			}
 			resolvedTarget, resolvedBinding := resolveExternalBindingForTarget(c.options.Target, bindings)
 			externType := &ExternType{Name_: s.Name, GenericParams: append([]string(nil), s.TypeParams...), TypeArgs: typeArgs, ExternalBinding: resolvedBinding, ExternalBindingTarget: resolvedTarget, ExternalBindings: bindings, private: s.Private}
 			c.scope.add(s.Name, externType, false)
@@ -4436,9 +4440,24 @@ func shorthandExternalBindingTarget(target string) string {
 	}
 }
 
+func validateExternalBindingTargets(bindings map[string]string) (string, bool) {
+	for target := range bindings {
+		switch target {
+		case backend.TargetGo, "js", backend.TargetJSServer, backend.TargetJSBrowser:
+			continue
+		default:
+			return target, false
+		}
+	}
+	return "", true
+}
+
 func resolveExternalBindingForTarget(target string, bindings map[string]string) (string, string) {
 	if len(bindings) == 0 {
 		return "", ""
+	}
+	if target == backend.TargetVM {
+		target = backend.TargetGo
 	}
 	if target != "" {
 		if binding := bindings[target]; binding != "" {
@@ -4494,6 +4513,10 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 	}
 	if len(bindings) == 0 {
 		c.addError("External binding cannot be empty", def.GetLocation())
+		return nil
+	}
+	if target, ok := validateExternalBindingTargets(bindings); !ok {
+		c.addError(fmt.Sprintf("Unsupported extern binding target %q; use go for VM host FFI", target), def.GetLocation())
 		return nil
 	}
 
