@@ -670,6 +670,24 @@ type IntMatch struct {
 	CatchAll   *Block
 }
 
+type StrMatch struct {
+	Subject  Expression
+	Cases    map[string]*Block
+	CatchAll *Block
+}
+
+func (s *StrMatch) Type() Type {
+	for _, block := range s.Cases {
+		if block != nil {
+			return block.Type()
+		}
+	}
+	if s.CatchAll != nil {
+		return s.CatchAll.Type()
+	}
+	return Void
+}
+
 func (i *IntMatch) Type() Type {
 	// Find the first non-nil case and return its type
 	for _, block := range i.IntCases {

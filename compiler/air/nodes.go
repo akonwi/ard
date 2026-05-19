@@ -111,6 +111,7 @@ const (
 	ExprEnumVariant
 	ExprMatchEnum
 	ExprMatchInt
+	ExprMatchStr
 	ExprMakeMaybeSome
 	ExprMakeMaybeNone
 	ExprMatchMaybe
@@ -170,6 +171,7 @@ type Expr struct {
 
 	EnumCases  []EnumMatchCase
 	IntCases   []IntMatchCase
+	StrCases   []StrMatchCase
 	RangeCases []IntRangeMatchCase
 	UnionCases []UnionMatchCase
 	CatchAll   Block
@@ -207,6 +209,11 @@ type EnumMatchCase struct {
 
 type IntMatchCase struct {
 	Value int
+	Body  Block
+}
+
+type StrMatchCase struct {
+	Value string
 	Body  Block
 }
 

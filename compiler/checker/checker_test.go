@@ -2203,6 +2203,44 @@ func TestMatchingOnBooleans(t *testing.T) {
 	})
 }
 
+func TestMatchingOnStrings(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Matching on strings requires catch-all",
+			input: strings.Join([]string{
+				`let ext = "md"`,
+				`match ext {`,
+				`  "md" => "markdown",`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Incomplete match: missing catch-all case for Str match"}},
+		},
+		{
+			name: "Matching on strings rejects duplicate cases",
+			input: strings.Join([]string{
+				`let ext = "md"`,
+				`match ext {`,
+				`  "md" => "markdown",`,
+				`  "md" => "markdown again",`,
+				`  _ => "unknown",`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: `Duplicate case: "md"`}},
+		},
+		{
+			name: "Matching on strings rejects non-string patterns",
+			input: strings.Join([]string{
+				`let ext = "md"`,
+				`match ext {`,
+				`  1 => "one",`,
+				`  _ => "unknown",`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Pattern in Str match must be a string literal or '_'"}},
+		},
+	})
+}
+
 func TestMatchingOnInts(t *testing.T) {
 	run(t, []test{
 		{

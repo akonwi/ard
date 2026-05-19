@@ -1586,6 +1586,9 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 	if match, ok := expr.(*checker.IntMatch); ok {
 		return fl.lowerIntMatch(expected, match)
 	}
+	if match, ok := expr.(*checker.StrMatch); ok {
+		return fl.lowerStrMatch(expected, match)
+	}
 	if ifExpr, ok := expr.(*checker.If); ok {
 		return fl.lowerIf(expected, ifExpr)
 	}
@@ -1641,6 +1644,8 @@ func (fl *functionLowerer) inferValueType(expr *Expr) TypeID {
 		return fl.mergeValueTypes(fl.inferValueType(expr.Then.Result), fl.inferValueType(expr.Else.Result))
 	case ExprMatchInt:
 		return fl.inferValueTypeFromCases(expr.IntCases, expr.RangeCases, expr.CatchAll)
+	case ExprMatchStr:
+		return fl.inferValueTypeFromStrCases(expr.StrCases, expr.CatchAll)
 	case ExprMatchMaybe:
 		return fl.mergeValueTypes(fl.inferValueType(expr.Some.Result), fl.inferValueType(expr.None.Result))
 	case ExprMatchResult:
@@ -1679,6 +1684,8 @@ func (fl *functionLowerer) inferMaybeType(expr *Expr) TypeID {
 		return fl.mergeValueTypes(fl.inferMaybeType(expr.Then.Result), fl.inferMaybeType(expr.Else.Result))
 	case ExprMatchInt:
 		return fl.inferMaybeTypeFromCases(expr.IntCases, expr.RangeCases, expr.CatchAll)
+	case ExprMatchStr:
+		return fl.inferMaybeTypeFromStrCases(expr.StrCases, expr.CatchAll)
 	case ExprMatchMaybe:
 		return fl.mergeValueTypes(fl.inferMaybeType(expr.Some.Result), fl.inferMaybeType(expr.None.Result))
 	case ExprMatchResult:
@@ -1739,6 +1746,8 @@ func (fl *functionLowerer) inferResultParts(expr *Expr) (TypeID, TypeID) {
 		return fl.mergeResultParts(leftValue, leftErr, rightValue, rightErr)
 	case ExprMatchInt:
 		return fl.inferResultPartsFromCases(expr.IntCases, expr.RangeCases, expr.CatchAll)
+	case ExprMatchStr:
+		return fl.inferResultPartsFromStrCases(expr.StrCases, expr.CatchAll)
 	case ExprMatchMaybe:
 		leftValue, leftErr := fl.inferResultParts(expr.Some.Result)
 		rightValue, rightErr := fl.inferResultParts(expr.None.Result)
@@ -1778,6 +1787,14 @@ func (fl *functionLowerer) inferValueTypeFromCases(intCases []IntMatchCase, rang
 	return fl.mergeValueTypes(value, fl.inferValueType(catchAll.Result))
 }
 
+func (fl *functionLowerer) inferValueTypeFromStrCases(strCases []StrMatchCase, catchAll Block) TypeID {
+	value := NoType
+	for _, c := range strCases {
+		value = fl.mergeValueTypes(value, fl.inferValueType(c.Body.Result))
+	}
+	return fl.mergeValueTypes(value, fl.inferValueType(catchAll.Result))
+}
+
 func (fl *functionLowerer) inferMaybeTypeFromCases(intCases []IntMatchCase, rangeCases []IntRangeMatchCase, catchAll Block) TypeID {
 	value := NoType
 	for _, c := range intCases {
@@ -1787,6 +1804,24 @@ func (fl *functionLowerer) inferMaybeTypeFromCases(intCases []IntMatchCase, rang
 		value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
 	}
 	return fl.mergeValueTypes(value, fl.inferMaybeType(catchAll.Result))
+}
+
+func (fl *functionLowerer) inferMaybeTypeFromStrCases(strCases []StrMatchCase, catchAll Block) TypeID {
+	value := NoType
+	for _, c := range strCases {
+		value = fl.mergeValueTypes(value, fl.inferMaybeType(c.Body.Result))
+	}
+	return fl.mergeValueTypes(value, fl.inferMaybeType(catchAll.Result))
+}
+
+func (fl *functionLowerer) inferResultPartsFromStrCases(strCases []StrMatchCase, catchAll Block) (TypeID, TypeID) {
+	valueType, errType := NoType, NoType
+	for _, c := range strCases {
+		rightValue, rightErr := fl.inferResultParts(c.Body.Result)
+		valueType, errType = fl.mergeResultParts(valueType, errType, rightValue, rightErr)
+	}
+	rightValue, rightErr := fl.inferResultParts(catchAll.Result)
+	return fl.mergeResultParts(valueType, errType, rightValue, rightErr)
 }
 
 func (fl *functionLowerer) inferResultPartsFromCases(intCases []IntMatchCase, rangeCases []IntRangeMatchCase, catchAll Block) (TypeID, TypeID) {
@@ -2619,6 +2654,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerBoolMatch(typeID, e)
 	case *checker.IntMatch:
 		return fl.lowerIntMatch(typeID, e)
+	case *checker.StrMatch:
+		return fl.lowerStrMatch(typeID, e)
 	case *checker.EnumMatch:
 		return fl.lowerEnumMatch(typeID, e)
 	case *checker.UnionMatch:
@@ -3008,6 +3045,45 @@ func (fl *functionLowerer) lowerIntMatch(typeID TypeID, match *checker.IntMatch)
 		RangeCases: rangeCases,
 		CatchAll:   catchAll,
 	}, nil
+}
+
+func (fl *functionLowerer) lowerStrMatch(typeID TypeID, match *checker.StrMatch) (*Expr, error) {
+	subject, err := fl.lowerExpr(match.Subject)
+	if err != nil {
+		return nil, err
+	}
+	subjectType, ok := fl.l.typeInfo(subject.Type)
+	if !ok || subjectType.Kind != TypeStr {
+		return nil, fmt.Errorf("str match lowered with non-str subject %s", match.Subject.Type().String())
+	}
+
+	values := make([]string, 0, len(match.Cases))
+	for value := range match.Cases {
+		values = append(values, value)
+	}
+	sort.Strings(values)
+	strCases := make([]StrMatchCase, 0, len(values))
+	for _, value := range values {
+		block := match.Cases[value]
+		if block == nil {
+			continue
+		}
+		lowered, err := fl.lowerBlockWithDefault(block.Stmts, typeID)
+		if err != nil {
+			return nil, err
+		}
+		strCases = append(strCases, StrMatchCase{Value: value, Body: lowered})
+	}
+
+	var catchAll Block
+	if match.CatchAll != nil {
+		catchAll, err = fl.lowerBlockWithDefault(match.CatchAll.Stmts, typeID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &Expr{Kind: ExprMatchStr, Type: typeID, Target: subject, StrCases: strCases, CatchAll: catchAll}, nil
 }
 
 func (fl *functionLowerer) lowerUnionMatch(typeID TypeID, match *checker.UnionMatch) (*Expr, error) {

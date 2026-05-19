@@ -1628,6 +1628,32 @@ func TestVMBytecodeParityGenericEquality(t *testing.T) {
 	})
 }
 
+func TestVMBytecodeParityStringMatches(t *testing.T) {
+	runBytecodeParityCases(t, []bytecodeParityCase{
+		{name: "Str match first case", input: `
+			match "md" {
+			  "md" => "markdown",
+			  "html" => "html",
+			  _ => "unknown",
+			}
+		`, want: "markdown"},
+		{name: "Str match later case", input: `
+			match "html" {
+			  "md" => "markdown",
+			  "html" => "html",
+			  _ => "unknown",
+			}
+		`, want: "html"},
+		{name: "Str match fallback", input: `
+			match "txt" {
+			  "md" => "markdown",
+			  "html" => "html",
+			  _ => "unknown",
+			}
+		`, want: "unknown"},
+	})
+}
+
 func TestVMBytecodeParityTypeAPIs(t *testing.T) {
 	runBytecodeParityCases(t, []bytecodeParityCase{
 		{name: "Int.to_str", input: `100.to_str()`, want: "100"},

@@ -109,6 +109,7 @@ const (
 	OpStrStartsWith
 	OpStrEndsWith
 	OpStrTrim
+	OpMatchStr
 	OpMakeMaybeSome
 	OpMakeMaybeNone
 	OpMaybeExpect
@@ -351,6 +352,8 @@ func (op Opcode) String() string {
 		return "StrEndsWith"
 	case OpStrTrim:
 		return "StrTrim"
+	case OpMatchStr:
+		return "MatchStr"
 	case OpMakeMaybeSome:
 		return "MakeMaybeSome"
 	case OpMakeMaybeNone:

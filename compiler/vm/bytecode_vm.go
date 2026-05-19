@@ -324,6 +324,21 @@ func (vm *VM) runBytecodeFrameLoop(first bytecodeFrame) (Value, error) {
 			}
 		case vmcode.OpJump:
 			frame.ip = inst.A
+		case vmcode.OpMatchStr:
+			if inst.B < 0 || inst.B >= len(locals) {
+				return Value{}, fmt.Errorf("%s: str match local %d out of range", fn.Name, inst.B)
+			}
+			value := locals[inst.B]
+			if value.Kind != ValueStr {
+				return Value{}, fmt.Errorf("str match subject must be Str, got kind %d", value.Kind)
+			}
+			constant, err := vm.bytecodeConstant(inst.C, vmcode.ConstStr)
+			if err != nil {
+				return Value{}, err
+			}
+			if value.Str != constant.Str {
+				frame.ip = inst.A
+			}
 		case vmcode.OpJumpIfFalse:
 			condition, err := pop()
 			if err != nil {

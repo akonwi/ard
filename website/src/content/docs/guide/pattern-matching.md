@@ -83,6 +83,20 @@ match number {
 }
 ```
 
+## String Patterns
+
+Match `Str` values with string literal cases. Because strings are open-ended, string matches require a `_` catch-all case.
+
+```ard
+let kind = match extension {
+  ".md" => "markdown"
+  ".html" => "html"
+  _ => "unknown"
+}
+```
+
+String patterns use exact equality. Duplicate string cases are rejected.
+
 ## Boolean Patterns
 
 Boolean matches are like Ard's version of ternary expressions in other languages.

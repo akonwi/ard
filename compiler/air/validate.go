@@ -399,6 +399,26 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
+	if expr.Kind == ExprMatchStr {
+		if expr.Target == nil {
+			return fmt.Errorf("str match missing target")
+		}
+		targetType, err := typeInfo(program, expr.Target.Type)
+		if err != nil {
+			return err
+		}
+		if targetType.Kind != TypeStr {
+			return fmt.Errorf("str match target has type kind %d", targetType.Kind)
+		}
+		for _, matchCase := range expr.StrCases {
+			if err := validateBlock(program, fn, matchCase.Body); err != nil {
+				return err
+			}
+		}
+		if err := validateBlock(program, fn, expr.CatchAll); err != nil {
+			return err
+		}
+	}
 	if expr.Kind == ExprMatchInt {
 		if expr.Target == nil {
 			return fmt.Errorf("int match missing target")

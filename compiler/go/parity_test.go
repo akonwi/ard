@@ -1625,6 +1625,32 @@ func TestGoTargetParityStringHelpers(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityStringMatching(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{name: "str match first case", input: `fn main() Str {
+  match "md" {
+    "md" => "markdown",
+    "html" => "html",
+    _ => "unknown",
+  }
+}`},
+		{name: "str match later case", input: `fn main() Str {
+  match "html" {
+    "md" => "markdown",
+    "html" => "html",
+    _ => "unknown",
+  }
+}`},
+		{name: "str match fallback", input: `fn main() Str {
+  match "txt" {
+    "md" => "markdown",
+    "html" => "html",
+    _ => "unknown",
+  }
+}`},
+	})
+}
+
 func TestGoTargetParityMatching(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
