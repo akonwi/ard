@@ -289,6 +289,34 @@ func TestRunEntryEvaluatesResultExtern(t *testing.T) {
 	}
 }
 
+func TestNewWithExternsFailsEarlyForMissingHostFunction(t *testing.T) {
+	program := lowerSourceForVMTest(t, `
+		extern fn missing() Str = "Missing"
+
+		missing()
+	`)
+
+	_, err := NewWithExterns(program, nil)
+	if err == nil || !strings.Contains(err.Error(), `extern binding "Missing" is not registered`) {
+		t.Fatalf("NewWithExterns error = %v, want missing extern registration", err)
+	}
+}
+
+func TestNewWithExternsFailsEarlyForMissingGeneratedAdapter(t *testing.T) {
+	program := lowerSourceForVMTest(t, `
+		extern fn custom() Str = "Custom"
+
+		custom()
+	`)
+
+	_, err := NewWithExterns(program, HostFunctionRegistry{
+		"Custom": func() string { return "ok" },
+	})
+	if err == nil || !strings.Contains(err.Error(), `extern Custom has no generated vm adapter`) {
+		t.Fatalf("NewWithExterns error = %v, want missing generated adapter", err)
+	}
+}
+
 func TestRunEntryEvaluatesClosureCallWithCapture(t *testing.T) {
 	got := runSource(t, `
 		let offset = 2
@@ -1110,7 +1138,7 @@ func newVMFromSource(t *testing.T, input string) *VM {
 	return newVMFromSourceWithExterns(t, input, nil)
 }
 
-func newVMFromSourceWithExterns(t *testing.T, input string, externs HostFunctionRegistry) *VM {
+func lowerSourceForVMTest(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
 	if len(result.Errors) > 0 {
@@ -1125,6 +1153,12 @@ func newVMFromSourceWithExterns(t *testing.T, input string, externs HostFunction
 	if err != nil {
 		t.Fatalf("lower error: %v", err)
 	}
+	return program
+}
+
+func newVMFromSourceWithExterns(t *testing.T, input string, externs HostFunctionRegistry) *VM {
+	t.Helper()
+	program := lowerSourceForVMTest(t, input)
 	vm, err := NewWithExterns(program, externs)
 	if err != nil {
 		t.Fatalf("new vm: %v", err)

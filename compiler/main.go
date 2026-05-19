@@ -820,6 +820,15 @@ func buildVMBinary(inputPath string, outputPath string) (string, error) {
 	if program.Entry == air.NoFunction {
 		return "", fmt.Errorf("vm builds require fn main()")
 	}
+	if err := validatePlainVMExternsProfile(profile, program); err != nil {
+		return "", err
+	}
+	if err := profile.Time("vm.validate_host_support", func() error {
+		_, err := vm.NewWithOptions(program, vm.Options{})
+		return err
+	}); err != nil {
+		return "", err
+	}
 	var data []byte
 	if err := profile.Time("air.serialize", func() error {
 		var serializeErr error
@@ -888,6 +897,85 @@ func runVMProgram(program *air.Program, args []string) error {
 	return runVMProgramProfile(program, args, nil)
 }
 
+func validatePlainVMExternsProfile(profile *pipelineProfile, program *air.Program) error {
+	return profile.Time("vm.validate_externs", func() error {
+		return validatePlainVMExterns(program)
+	})
+}
+
+func validatePlainVMExterns(program *air.Program) error {
+	if program == nil {
+		return nil
+	}
+	usedExterns := reachableVMExterns(program)
+	for _, ext := range program.Externs {
+		if !usedExterns[ext.ID] || vmExternModuleIsStdlib(program, ext) {
+			continue
+		}
+		binding := ext.Name
+		if goBinding := ext.Bindings[backend.TargetGo]; goBinding != "" {
+			binding = goBinding
+		}
+		return fmt.Errorf("plain vm execution does not support project extern %s with Go binding %q; use --target go or an embedded VM host with generated adapters", ext.Name, binding)
+	}
+	return nil
+}
+
+func vmExternModuleIsStdlib(program *air.Program, ext air.Extern) bool {
+	return int(ext.Module) >= 0 && int(ext.Module) < len(program.Modules) && strings.HasPrefix(program.Modules[ext.Module].Path, "ard/")
+}
+
+func reachableVMExterns(program *air.Program) map[air.ExternID]bool {
+	used := map[air.ExternID]bool{}
+	seenFunctions := map[air.FunctionID]bool{}
+	var visitFunction func(air.FunctionID)
+	visitFunction = func(id air.FunctionID) {
+		if id < 0 || int(id) >= len(program.Functions) || seenFunctions[id] {
+			return
+		}
+		seenFunctions[id] = true
+		collectVMBlockExterns(program.Functions[id].Body, used, visitFunction)
+	}
+	visitFunction(program.Entry)
+	visitFunction(program.Script)
+	for _, test := range program.Tests {
+		visitFunction(test.Function)
+	}
+	return used
+}
+
+func collectVMBlockExterns(block air.Block, used map[air.ExternID]bool, visitFunction func(air.FunctionID)) {
+	for _, stmt := range block.Stmts {
+		collectVMExprExterns(stmt.Value, used, visitFunction)
+		collectVMExprExterns(stmt.Expr, used, visitFunction)
+		collectVMExprExterns(stmt.Target, used, visitFunction)
+		collectVMBlockExterns(stmt.Body, used, visitFunction)
+	}
+	collectVMExprExterns(block.Result, used, visitFunction)
+}
+
+func collectVMExprExterns(expr *air.Expr, used map[air.ExternID]bool, visitFunction func(air.FunctionID)) {
+	if expr == nil {
+		return
+	}
+	switch expr.Kind {
+	case air.ExprCallExtern:
+		used[expr.Extern] = true
+	case air.ExprCall, air.ExprMakeClosure, air.ExprSpawnFiber:
+		visitFunction(expr.Function)
+	}
+	for i := range expr.Args {
+		collectVMExprExterns(&expr.Args[i], used, visitFunction)
+	}
+	for i := range expr.Entries {
+		collectVMExprExterns(&expr.Entries[i].Key, used, visitFunction)
+		collectVMExprExterns(&expr.Entries[i].Value, used, visitFunction)
+	}
+	for i := range expr.Fields {
+		collectVMExprExterns(&expr.Fields[i].Value, used, visitFunction)
+	}
+}
+
 func validateEntrypointSignature(profile *pipelineProfile, program *air.Program) error {
 	return profile.Time("air.validate_entrypoint", func() error {
 		return air.ValidateEntrypointSignature(program)
@@ -895,6 +983,9 @@ func validateEntrypointSignature(profile *pipelineProfile, program *air.Program)
 }
 
 func runVMProgramProfile(program *air.Program, args []string, profile *pipelineProfile) error {
+	if err := validatePlainVMExternsProfile(profile, program); err != nil {
+		return err
+	}
 	var machine *vm.VM
 	if err := profile.Time("vm.init", func() error {
 		var initErr error

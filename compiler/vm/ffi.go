@@ -72,7 +72,7 @@ func (vm *VM) callExtern(id air.ExternID, args []Value) (value Value, err error)
 		return Value{}, fmt.Errorf("invalid extern id %d", id)
 	}
 	extern := vm.program.Externs[id]
-	binding := goExternBinding(extern)
+	binding := hostExternBinding(extern)
 	if binding == "JsonParse" {
 		return vm.callJSONParse(extern, args)
 	}
@@ -106,11 +106,18 @@ func (vm *VM) callExtern(id air.ExternID, args []Value) (value Value, err error)
 
 func (vm *VM) buildHostExternAdapters(registry HostFunctionRegistry) (hostExternAdapters, error) {
 	adapters := hostExternAdapters{}
+	usedExterns := vm.reachableExterns()
 	for _, extern := range vm.program.Externs {
-		binding := goExternBinding(extern)
+		if !usedExterns[extern.ID] {
+			continue
+		}
+		binding := hostExternBinding(extern)
+		if isVMNativeExtern(binding) {
+			continue
+		}
 		fn, ok := registry[binding]
 		if !ok {
-			continue
+			return nil, fmt.Errorf("extern binding %q is not registered", binding)
 		}
 		adapter, err := vm.newHostExternAdapter(extern, binding, fn)
 		if err != nil {
@@ -177,11 +184,99 @@ func (adapter hostExternAdapter) callDirect(bridge generatedHostBridge, args []V
 	return value, nil
 }
 
-func goExternBinding(extern air.Extern) string {
+func hostExternBinding(extern air.Extern) string {
 	if binding := extern.Bindings["go"]; binding != "" {
 		return binding
 	}
 	return extern.Name
+}
+
+func isVMNativeExtern(binding string) bool {
+	switch binding {
+	case "JsonParse", "JsonEncode":
+		return true
+	default:
+		return false
+	}
+}
+
+func (vm *VM) reachableExterns() map[air.ExternID]bool {
+	used := map[air.ExternID]bool{}
+	seenFunctions := map[air.FunctionID]bool{}
+	var visitFunction func(air.FunctionID)
+	visitFunction = func(id air.FunctionID) {
+		if id < 0 || int(id) >= len(vm.program.Functions) || seenFunctions[id] {
+			return
+		}
+		seenFunctions[id] = true
+		vm.collectBlockExterns(vm.program.Functions[id].Body, used, visitFunction)
+	}
+	visitFunction(vm.program.Entry)
+	visitFunction(vm.program.Script)
+	for _, test := range vm.program.Tests {
+		visitFunction(test.Function)
+	}
+	return used
+}
+
+func (vm *VM) collectBlockExterns(block air.Block, used map[air.ExternID]bool, visitFunction func(air.FunctionID)) {
+	for _, stmt := range block.Stmts {
+		vm.collectExprExterns(stmt.Value, used, visitFunction)
+		vm.collectExprExterns(stmt.Expr, used, visitFunction)
+		vm.collectExprExterns(stmt.Target, used, visitFunction)
+		vm.collectBlockExterns(stmt.Body, used, visitFunction)
+	}
+	vm.collectExprExterns(block.Result, used, visitFunction)
+}
+
+func (vm *VM) collectExprExterns(expr *air.Expr, used map[air.ExternID]bool, visitFunction func(air.FunctionID)) {
+	if expr == nil {
+		return
+	}
+	switch expr.Kind {
+	case air.ExprCallExtern:
+		used[expr.Extern] = true
+	case air.ExprCall, air.ExprMakeClosure, air.ExprSpawnFiber:
+		visitFunction(expr.Function)
+	}
+	for i := range expr.Args {
+		vm.collectExprExterns(&expr.Args[i], used, visitFunction)
+	}
+	for i := range expr.Entries {
+		vm.collectExprExterns(&expr.Entries[i].Key, used, visitFunction)
+		vm.collectExprExterns(&expr.Entries[i].Value, used, visitFunction)
+	}
+	for i := range expr.Fields {
+		vm.collectExprExterns(&expr.Fields[i].Value, used, visitFunction)
+	}
+	vm.collectExprExterns(expr.Target, used, visitFunction)
+	vm.collectExprExterns(expr.Left, used, visitFunction)
+	vm.collectExprExterns(expr.Right, used, visitFunction)
+	vm.collectExprExterns(expr.Condition, used, visitFunction)
+	vm.collectBlockExterns(expr.Body, used, visitFunction)
+	vm.collectBlockExterns(expr.Then, used, visitFunction)
+	vm.collectBlockExterns(expr.Else, used, visitFunction)
+	for i := range expr.EnumCases {
+		vm.collectBlockExterns(expr.EnumCases[i].Body, used, visitFunction)
+	}
+	for i := range expr.IntCases {
+		vm.collectBlockExterns(expr.IntCases[i].Body, used, visitFunction)
+	}
+	for i := range expr.StrCases {
+		vm.collectBlockExterns(expr.StrCases[i].Body, used, visitFunction)
+	}
+	for i := range expr.RangeCases {
+		vm.collectBlockExterns(expr.RangeCases[i].Body, used, visitFunction)
+	}
+	for i := range expr.UnionCases {
+		vm.collectBlockExterns(expr.UnionCases[i].Body, used, visitFunction)
+	}
+	vm.collectBlockExterns(expr.CatchAll, used, visitFunction)
+	vm.collectBlockExterns(expr.Some, used, visitFunction)
+	vm.collectBlockExterns(expr.None, used, visitFunction)
+	vm.collectBlockExterns(expr.Ok, used, visitFunction)
+	vm.collectBlockExterns(expr.Err, used, visitFunction)
+	vm.collectBlockExterns(expr.Catch, used, visitFunction)
 }
 
 func (vm *VM) validateHostParamType(typeID air.TypeID, target reflect.Type) error {

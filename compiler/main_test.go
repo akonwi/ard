@@ -137,6 +137,37 @@ func TestRunVMProgram(t *testing.T) {
 	}
 }
 
+func TestRunVMProgramRejectsProjectGoFFI(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "main.ard")
+	source := `
+		extern fn custom() Str = "Custom"
+
+		fn main() Str {
+			custom()
+		}
+	`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	module, err := loadModule(sourcePath, backend.TargetVM)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	err = runVMProgram(program, []string{"ard", "run", "--target", "vm", sourcePath})
+	if err == nil {
+		t.Fatal("runVMProgram succeeded, want project FFI rejection")
+	}
+	if !strings.Contains(err.Error(), "plain vm execution does not support project extern custom") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestRunGoProgram(t *testing.T) {
 	tempDir := t.TempDir()
 	sourcePath := filepath.Join(tempDir, "main.ard")
@@ -923,6 +954,28 @@ func TestReadEmbeddedPayloadFromPath(t *testing.T) {
 	}
 	if string(got) != string(payload) {
 		t.Fatalf("payload = %q, want %q", got, payload)
+	}
+}
+
+func TestBuildVMBinaryRejectsProjectGoFFI(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "main.ard")
+	source := `
+		extern fn custom() Void = "Custom"
+
+		fn main() {
+			custom()
+		}
+	`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	_, err := buildVMBinary(sourcePath, filepath.Join(t.TempDir(), "app"))
+	if err == nil {
+		t.Fatal("buildVMBinary succeeded, want project FFI rejection")
+	}
+	if !strings.Contains(err.Error(), "plain vm execution does not support project extern custom") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

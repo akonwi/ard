@@ -5,7 +5,7 @@
 Ard's extern/FFI system lets functions declared in Ard call target-specific implementations.
 
 Today that includes:
-- Go implementations inside `compiler/ffi/` for the bytecode VM and Go-oriented runtime paths
+- Go implementations for the VM host FFI and Go-oriented runtime paths
 - JavaScript companion modules for `js-server` and `js-browser`
 
 The system is intentionally narrow:
@@ -42,10 +42,11 @@ Binding blocks let one Ard declaration resolve differently per target.
 
 Current binding keys include:
 - `go`
-- `bytecode`
 - `js`
 - `js-server`
 - `js-browser`
+
+The VM does not have its own binding key. VM host FFI uses the `go` binding because VM externs are normal Go host functions invoked through generated Ard↔Go adapters. `vm` and `bytecode` are intentionally not valid binding targets.
 
 ### Resolution precedence
 
@@ -54,12 +55,12 @@ The checker resolves the active extern binding using this precedence:
 1. exact target binding, if present
 2. shared `js` binding for `js-server` and `js-browser`
 3. `go`
-4. `bytecode` for `go`, `bytecode`, or target-unspecified checking
 
 Examples:
 - `js-server` prefers `js-server`, then `js`, then `go`
 - `js-browser` prefers `js-browser`, then `js`, then `go`
-- `go` prefers `go`, then `bytecode`
+- `go` prefers `go`
+- `vm` uses `go` bindings for host FFI
 
 ## Go project companions
 
@@ -99,6 +100,28 @@ Project Go FFI currently uses idiomatic direct-call adaptation:
 - `T?` expects `*T` (`nil` becomes `None`, non-`nil` becomes `Some`)
 - `Void!Str` expects `error`
 - `T!Str` expects `(T, error)`
+
+## VM host FFI policy
+
+Decision record: the VM target intentionally uses `go` extern bindings rather than a separate `vm` or `bytecode` binding target.
+
+Rationale:
+- VM externs are Go host functions with generated adapters, not a distinct language-level FFI surface.
+- A separate VM binding key would duplicate the Go FFI path without a clear use case.
+- Shorthand externs should continue to work for VM by resolving to `go` bindings.
+- Unsupported binding keys such as `vm` and `bytecode` should be rejected instead of silently ignored.
+
+For the VM, every active extern should have explicit host support before execution:
+- the host function must be registered in the VM's host function registry
+- a generated adapter must exist for that binding/signature
+- missing functions or adapters should be reported early when targeting/constructing the VM, not discovered only at the call site
+
+Project Go FFI has different execution models:
+- `--target go` compiles project companion files (`ffi.go`, `ffi/*.go`) into the generated Go application and calls them directly
+- embedded VM hosts can provide project functions through the host function registry, but those functions still need generated adapters
+- plain VM execution should reject project Go FFI unless adapter generation/build support is available
+
+The Go target's current handwritten stdlib extern switch is separate technical debt. It can be refactored or generated from the same FFI contract later, but that is not required for the VM binding policy above.
 
 ## JavaScript companion modules
 
