@@ -97,6 +97,12 @@ type str struct{}
 func (s str) String() string { return "Str" }
 func (s str) get(name string) Type {
 	switch name {
+	case "at":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "index", Type: Int}},
+			ReturnType: MakeMaybe(Str),
+		}
 	case "contains":
 		return &FunctionDef{
 			Name:       name,

@@ -1580,6 +1580,9 @@ func (l *airJSLowerer) lowerStrOp(fn air.Function, expr air.Expr) (string, error
 	}
 	switch expr.Kind {
 	case air.ExprStrAt:
+		if expr.Type > 0 && int(expr.Type) <= len(l.program.Types) && l.program.Types[expr.Type-1].Kind == air.TypeMaybe {
+			return "((__chars, __idx) => (__idx >= 0 && __idx < __chars.length ? Maybe.some(__chars[__idx]) : Maybe.none()))(Array.from(" + target + "), " + args[0] + ")", nil
+		}
 		return target + "[" + args[0] + "]", nil
 	case air.ExprStrSize:
 		return target + ".length", nil

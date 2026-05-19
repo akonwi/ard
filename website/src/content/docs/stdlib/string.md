@@ -46,12 +46,23 @@ let path = "posts/hello.md"
 path.starts_with("posts/") // true
 path.ends_with(".md")      // true
 path.contains("hello")     // true
+path.at(0)                  // some("p")
 path.is_empty()             // false
 path.size()                 // 14
 path.replace(".md", ".html")
 path.replace_all("/", "-")
 path.split("/")
 path.trim()
+```
+
+#### `at(index: Int) Str?`
+
+Returns the character at the zero-based `index`, or `none` when the index is out of bounds. String indexing uses Unicode code points, not bytes.
+
+```ard
+"hello".at(0).expect("missing") // "h"
+"hé".at(1).expect("missing")    // "é"
+"hello".at(5).is_none()          // true
 ```
 
 #### `starts_with(prefix: Str) Bool`

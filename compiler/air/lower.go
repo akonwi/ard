@@ -3128,10 +3128,17 @@ func (fl *functionLowerer) lowerStrMethod(typeID TypeID, method *checker.StrMeth
 	if err != nil {
 		return nil, err
 	}
+	intType, err := fl.l.internType(checker.Int)
+	if err != nil {
+		return nil, err
+	}
 
 	var kind ExprKind
 	var expected []TypeID
 	switch method.Kind {
+	case checker.StrAt:
+		kind = ExprStrAt
+		expected = []TypeID{intType}
 	case checker.StrSize:
 		kind = ExprStrSize
 	case checker.StrIsEmpty:
