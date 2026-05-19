@@ -17,87 +17,120 @@ const (
 	generatedStdlibReturnResult
 )
 
+type generatedStdlibExternParamAdapter uint8
+
+const (
+	generatedStdlibParamDirect generatedStdlibExternParamAdapter = iota
+	generatedStdlibParamAny
+	generatedStdlibParamAnySlice
+)
+
 type generatedStdlibExternLowering struct {
 	function string
 	returns  generatedStdlibExternReturn
+	params   []generatedStdlibExternParamAdapter
 }
 
 var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
-	"Base64Decode":         {function: "Base64Decode", returns: generatedStdlibReturnValueError},
-	"Base64DecodeURL":      {function: "Base64DecodeURL", returns: generatedStdlibReturnValueError},
-	"Base64Encode":         {function: "Base64Encode", returns: generatedStdlibReturnDirect},
-	"Base64EncodeURL":      {function: "Base64EncodeURL", returns: generatedStdlibReturnDirect},
-	"BoolToDynamic":        {function: "BoolToDynamic", returns: generatedStdlibReturnDirect},
-	"CryptoHashPassword":   {function: "CryptoHashPassword", returns: generatedStdlibReturnValueError},
-	"CryptoMd5":            {function: "CryptoMd5", returns: generatedStdlibReturnDirect},
-	"CryptoScryptHash":     {function: "CryptoScryptHash", returns: generatedStdlibReturnValueError},
-	"CryptoScryptVerify":   {function: "CryptoScryptVerify", returns: generatedStdlibReturnValueError},
-	"CryptoSha256":         {function: "CryptoSha256", returns: generatedStdlibReturnDirect},
-	"CryptoSha512":         {function: "CryptoSha512", returns: generatedStdlibReturnDirect},
-	"CryptoUUID":           {function: "CryptoUUID", returns: generatedStdlibReturnDirect},
-	"CryptoVerifyPassword": {function: "CryptoVerifyPassword", returns: generatedStdlibReturnValueError},
-	"DecodeBool":           {function: "DecodeBool", returns: generatedStdlibReturnResult},
-	"DecodeFloat":          {function: "DecodeFloat", returns: generatedStdlibReturnResult},
-	"DecodeInt":            {function: "DecodeInt", returns: generatedStdlibReturnResult},
-	"DecodeString":         {function: "DecodeString", returns: generatedStdlibReturnResult},
-	"DynamicToList":        {function: "DynamicToList", returns: generatedStdlibReturnValueError},
-	"EnvGet":               {function: "EnvGet", returns: generatedStdlibReturnDirect},
-	"ExtractField":         {function: "ExtractField", returns: generatedStdlibReturnValueError},
-	"FS_Abs":               {function: "FSAbs", returns: generatedStdlibReturnValueError},
-	"FS_AppendFile":        {function: "FSAppendFile", returns: generatedStdlibReturnError},
-	"FS_Copy":              {function: "FSCopy", returns: generatedStdlibReturnError},
-	"FS_CreateDir":         {function: "FSCreateDir", returns: generatedStdlibReturnError},
-	"FS_CreateFile":        {function: "FSCreateFile", returns: generatedStdlibReturnValueError},
-	"FS_Cwd":               {function: "FSCwd", returns: generatedStdlibReturnValueError},
-	"FS_DeleteDir":         {function: "FSDeleteDir", returns: generatedStdlibReturnError},
-	"FS_DeleteFile":        {function: "FSDeleteFile", returns: generatedStdlibReturnError},
-	"FS_Exists":            {function: "FSExists", returns: generatedStdlibReturnDirect},
-	"FS_IsDir":             {function: "FSIsDir", returns: generatedStdlibReturnDirect},
-	"FS_IsFile":            {function: "FSIsFile", returns: generatedStdlibReturnDirect},
-	"FS_ListDir":           {function: "FSListDir", returns: generatedStdlibReturnValueError},
-	"FS_ReadFile":          {function: "FSReadFile", returns: generatedStdlibReturnValueError},
-	"FS_Rename":            {function: "FSRename", returns: generatedStdlibReturnError},
-	"FS_WriteFile":         {function: "FSWriteFile", returns: generatedStdlibReturnError},
-	"FloatFloor":           {function: "FloatFloor", returns: generatedStdlibReturnDirect},
-	"FloatFromInt":         {function: "FloatFromInt", returns: generatedStdlibReturnDirect},
-	"FloatFromStr":         {function: "FloatFromStr", returns: generatedStdlibReturnDirect},
-	"FloatToDynamic":       {function: "FloatToDynamic", returns: generatedStdlibReturnDirect},
-	"GetPathValue":         {function: "GetPathValue", returns: generatedStdlibReturnDirect},
-	"GetQueryParam":        {function: "GetQueryParam", returns: generatedStdlibReturnDirect},
-	"GetReqPath":           {function: "GetReqPath", returns: generatedStdlibReturnDirect},
-	"HTTP_Do":              {function: "HTTPDo", returns: generatedStdlibReturnValueError},
-	"HTTP_ResponseBody":    {function: "HTTPResponseBody", returns: generatedStdlibReturnValueError},
-	"HTTP_ResponseClose":   {function: "HTTPResponseClose", returns: generatedStdlibReturnDirect},
-	"HTTP_ResponseHeaders": {function: "HTTPResponseHeaders", returns: generatedStdlibReturnDirect},
-	"HTTP_ResponseStatus":  {function: "HTTPResponseStatus", returns: generatedStdlibReturnDirect},
-	"HexDecode":            {function: "HexDecode", returns: generatedStdlibReturnValueError},
-	"HexEncode":            {function: "HexEncode", returns: generatedStdlibReturnDirect},
-	"IntFromStr":           {function: "IntFromStr", returns: generatedStdlibReturnDirect},
-	"IntToDynamic":         {function: "IntToDynamic", returns: generatedStdlibReturnDirect},
-	"IsNil":                {function: "IsNil", returns: generatedStdlibReturnDirect},
-	"JsonToDynamic":        {function: "JsonToDynamic", returns: generatedStdlibReturnValueError},
-	"ListToDynamic":        {function: "ListToDynamic", returns: generatedStdlibReturnDirect},
-	"MapToDynamic":         {function: "MapToDynamic", returns: generatedStdlibReturnDirect},
-	"OsArgs":               {function: "OsArgs", returns: generatedStdlibReturnDirect},
-	"Print":                {function: "Print", returns: generatedStdlibReturnDirect},
-	"ReadLine":             {function: "ReadLine", returns: generatedStdlibReturnValueError},
-	"Sleep":                {function: "Sleep", returns: generatedStdlibReturnDirect},
-	"SqlBeginTx":           {function: "SqlBeginTx", returns: generatedStdlibReturnValueError},
-	"SqlClose":             {function: "SqlClose", returns: generatedStdlibReturnError},
-	"SqlCommit":            {function: "SqlCommit", returns: generatedStdlibReturnError},
-	"SqlCreateConnection":  {function: "SqlCreateConnection", returns: generatedStdlibReturnValueError},
-	"SqlExtractParams":     {function: "SqlExtractParams", returns: generatedStdlibReturnDirect},
-	"SqlRollback":          {function: "SqlRollback", returns: generatedStdlibReturnError},
-	"StrToDynamic":         {function: "StrToDynamic", returns: generatedStdlibReturnDirect},
-	"VoidToDynamic":        {function: "VoidToDynamic", returns: generatedStdlibReturnDirect},
+	"Base64Decode":         {function: "Base64Decode", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"Base64DecodeURL":      {function: "Base64DecodeURL", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"Base64Encode":         {function: "Base64Encode", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"Base64EncodeURL":      {function: "Base64EncodeURL", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"BoolToDynamic":        {function: "BoolToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"CryptoHashPassword":   {function: "CryptoHashPassword", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"CryptoMd5":            {function: "CryptoMd5", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"CryptoScryptHash":     {function: "CryptoScryptHash", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"CryptoScryptVerify":   {function: "CryptoScryptVerify", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"CryptoSha256":         {function: "CryptoSha256", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"CryptoSha512":         {function: "CryptoSha512", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"CryptoUUID":           {function: "CryptoUUID", returns: generatedStdlibReturnDirect, params: nil},
+	"CryptoVerifyPassword": {function: "CryptoVerifyPassword", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"DecodeBool":           {function: "DecodeBool", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
+	"DecodeFloat":          {function: "DecodeFloat", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
+	"DecodeInt":            {function: "DecodeInt", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
+	"DecodeString":         {function: "DecodeString", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
+	"DynamicToList":        {function: "DynamicToList", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
+	"EnvGet":               {function: "EnvGet", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"ExtractField":         {function: "ExtractField", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny, generatedStdlibParamDirect}},
+	"FS_Abs":               {function: "FSAbs", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FS_AppendFile":        {function: "FSAppendFile", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"FS_Copy":              {function: "FSCopy", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"FS_CreateDir":         {function: "FSCreateDir", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FS_CreateFile":        {function: "FSCreateFile", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FS_Cwd":               {function: "FSCwd", returns: generatedStdlibReturnValueError, params: nil},
+	"FS_DeleteDir":         {function: "FSDeleteDir", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FS_DeleteFile":        {function: "FSDeleteFile", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FS_Exists":            {function: "FSExists", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FS_IsDir":             {function: "FSIsDir", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FS_IsFile":            {function: "FSIsFile", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FS_ListDir":           {function: "FSListDir", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FS_ReadFile":          {function: "FSReadFile", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FS_Rename":            {function: "FSRename", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"FS_WriteFile":         {function: "FSWriteFile", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"FloatFloor":           {function: "FloatFloor", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FloatFromInt":         {function: "FloatFromInt", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FloatFromStr":         {function: "FloatFromStr", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FloatToDynamic":       {function: "FloatToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"GetPathValue":         {function: "GetPathValue", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"GetQueryParam":        {function: "GetQueryParam", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"GetReqPath":           {function: "GetReqPath", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"HTTP_Do":              {function: "HTTPDo", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamAny, generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"HTTP_ResponseBody":    {function: "HTTPResponseBody", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"HTTP_ResponseClose":   {function: "HTTPResponseClose", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"HTTP_ResponseHeaders": {function: "HTTPResponseHeaders", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"HTTP_ResponseStatus":  {function: "HTTPResponseStatus", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"HexDecode":            {function: "HexDecode", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"HexEncode":            {function: "HexEncode", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"IntFromStr":           {function: "IntFromStr", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"IntToDynamic":         {function: "IntToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"IsNil":                {function: "IsNil", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
+	"JsonToDynamic":        {function: "JsonToDynamic", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"ListToDynamic":        {function: "ListToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAnySlice}},
+	"MapToDynamic":         {function: "MapToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"OsArgs":               {function: "OsArgs", returns: generatedStdlibReturnDirect, params: nil},
+	"Print":                {function: "Print", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"ReadLine":             {function: "ReadLine", returns: generatedStdlibReturnValueError, params: nil},
+	"Sleep":                {function: "Sleep", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"SqlBeginTx":           {function: "SqlBeginTx", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"SqlClose":             {function: "SqlClose", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"SqlCommit":            {function: "SqlCommit", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"SqlCreateConnection":  {function: "SqlCreateConnection", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"SqlExecute":           {function: "SqlExecute", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny, generatedStdlibParamDirect, generatedStdlibParamAnySlice}},
+	"SqlExtractParams":     {function: "SqlExtractParams", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"SqlQuery":             {function: "SqlQuery", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny, generatedStdlibParamDirect, generatedStdlibParamAnySlice}},
+	"SqlRollback":          {function: "SqlRollback", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"StrToDynamic":         {function: "StrToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"VoidToDynamic":        {function: "VoidToDynamic", returns: generatedStdlibReturnDirect, params: nil},
 }
 
-func (l *lowerer) lowerGeneratedStdlibExtern(binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, bool, error) {
+func (l *lowerer) lowerGeneratedStdlibExtern(binding string, signature air.Signature, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, bool, error) {
 	lowering, ok := generatedStdlibExternLowerings[binding]
 	if !ok {
 		return loweredExpr{}, false, nil
 	}
-	call := &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", lowering.function), Args: args}
+	adaptedArgs := append([]ast.Expr(nil), args...)
+	for i, adapter := range lowering.params {
+		if i >= len(adaptedArgs) || i >= len(signature.Params) {
+			break
+		}
+		switch adapter {
+		case generatedStdlibParamAny:
+			arg, err := l.lowerUnionArgToAny(adaptedArgs[i], signature.Params[i].Type)
+			if err != nil {
+				return loweredExpr{}, true, err
+			}
+			stmts = append(stmts, arg.stmts...)
+			adaptedArgs[i] = arg.expr
+		case generatedStdlibParamAnySlice:
+			arg, err := l.lowerUnionSliceArgToAny(adaptedArgs[i], signature.Params[i].Type)
+			if err != nil {
+				return loweredExpr{}, true, err
+			}
+			stmts = append(stmts, arg.stmts...)
+			adaptedArgs[i] = arg.expr
+		}
+	}
+	call := &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", lowering.function), Args: adaptedArgs}
 	switch lowering.returns {
 	case generatedStdlibReturnError:
 		wrapped, err := l.wrapErrorCall(returnTypeID, call)

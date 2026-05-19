@@ -3844,52 +3844,6 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		return l.lowerProjectExternCall(ext, binding, args, stmts, expr.Type)
 	}
 	switch binding {
-	case "SqlExecute":
-		sqlArgs := append([]ast.Expr{}, args...)
-		if len(sqlArgs) != 3 {
-			return loweredExpr{}, fmt.Errorf("SqlExecute expects 3 args")
-		}
-		connArg, err := l.lowerUnionArgToAny(sqlArgs[0], expr.Args[0].Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, connArg.stmts...)
-		sqlArgs[0] = connArg.expr
-		valueArgs, err := l.lowerUnionSliceArgToAny(sqlArgs[2], expr.Args[2].Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, valueArgs.stmts...)
-		sqlArgs[2] = valueArgs.expr
-		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlExecute"), Args: sqlArgs})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "SqlQuery":
-		sqlArgs := append([]ast.Expr{}, args...)
-		if len(sqlArgs) != 3 {
-			return loweredExpr{}, fmt.Errorf("SqlQuery expects 3 args")
-		}
-		connArg, err := l.lowerUnionArgToAny(sqlArgs[0], expr.Args[0].Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, connArg.stmts...)
-		sqlArgs[0] = connArg.expr
-		valueArgs, err := l.lowerUnionSliceArgToAny(sqlArgs[2], expr.Args[2].Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, valueArgs.stmts...)
-		sqlArgs[2] = valueArgs.expr
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlQuery"), Args: sqlArgs})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
 	case "JsonEncode":
 		if len(args) != 1 || len(expr.Args) != 1 {
 			return loweredExpr{}, fmt.Errorf("JsonEncode expects 1 arg")
@@ -3927,7 +3881,7 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		wrapped.stmts = append(stmts, wrapped.stmts...)
 		return wrapped, nil
 	default:
-		generated, ok, err := l.lowerGeneratedStdlibExtern(binding, args, stmts, expr.Type)
+		generated, ok, err := l.lowerGeneratedStdlibExtern(binding, ext.Signature, args, stmts, expr.Type)
 		if err != nil {
 			return loweredExpr{}, err
 		}

@@ -549,24 +549,49 @@ func renderGoStdlibLowering(c contract, packageName string, implemented map[stri
 	out.WriteString("\tgeneratedStdlibReturnValueError\n")
 	out.WriteString("\tgeneratedStdlibReturnResult\n")
 	out.WriteString(")\n\n")
+	out.WriteString("type generatedStdlibExternParamAdapter uint8\n\n")
+	out.WriteString("const (\n")
+	out.WriteString("\tgeneratedStdlibParamDirect generatedStdlibExternParamAdapter = iota\n")
+	out.WriteString("\tgeneratedStdlibParamAny\n")
+	out.WriteString("\tgeneratedStdlibParamAnySlice\n")
+	out.WriteString(")\n\n")
 	out.WriteString("type generatedStdlibExternLowering struct {\n")
 	out.WriteString("\tfunction string\n")
 	out.WriteString("\treturns  generatedStdlibExternReturn\n")
+	out.WriteString("\tparams   []generatedStdlibExternParamAdapter\n")
 	out.WriteString("}\n\n")
 	out.WriteString("var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{\n")
 	for _, fn := range c.Functions {
 		if goTargetCustomStdlibBinding(fn.Binding) || !implemented[fn.Field] {
 			continue
 		}
-		fmt.Fprintf(&out, "\t%q: {function: %q, returns: %s},\n", fn.Binding, fn.Field, goStdlibReturnKind(fn))
+		fmt.Fprintf(&out, "\t%q: {function: %q, returns: %s, params: %s},\n", fn.Binding, fn.Field, goStdlibReturnKind(fn), goStdlibParamAdapters(fn))
 	}
 	out.WriteString("}\n\n")
-	out.WriteString("func (l *lowerer) lowerGeneratedStdlibExtern(binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, bool, error) {\n")
+	out.WriteString("func (l *lowerer) lowerGeneratedStdlibExtern(binding string, signature air.Signature, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, bool, error) {\n")
 	out.WriteString("\tlowering, ok := generatedStdlibExternLowerings[binding]\n")
 	out.WriteString("\tif !ok {\n")
 	out.WriteString("\t\treturn loweredExpr{}, false, nil\n")
 	out.WriteString("\t}\n")
-	out.WriteString("\tcall := &ast.CallExpr{Fun: l.qualified(\"stdlibffi\", \"github.com/akonwi/ard/std_lib/ffi\", lowering.function), Args: args}\n")
+	out.WriteString("\tadaptedArgs := append([]ast.Expr(nil), args...)\n")
+	out.WriteString("\tfor i, adapter := range lowering.params {\n")
+	out.WriteString("\t\tif i >= len(adaptedArgs) || i >= len(signature.Params) {\n")
+	out.WriteString("\t\t\tbreak\n")
+	out.WriteString("\t\t}\n")
+	out.WriteString("\t\tswitch adapter {\n")
+	out.WriteString("\t\tcase generatedStdlibParamAny:\n")
+	out.WriteString("\t\t\targ, err := l.lowerUnionArgToAny(adaptedArgs[i], signature.Params[i].Type)\n")
+	out.WriteString("\t\t\tif err != nil {\n\t\t\t\treturn loweredExpr{}, true, err\n\t\t\t}\n")
+	out.WriteString("\t\t\tstmts = append(stmts, arg.stmts...)\n")
+	out.WriteString("\t\t\tadaptedArgs[i] = arg.expr\n")
+	out.WriteString("\t\tcase generatedStdlibParamAnySlice:\n")
+	out.WriteString("\t\t\targ, err := l.lowerUnionSliceArgToAny(adaptedArgs[i], signature.Params[i].Type)\n")
+	out.WriteString("\t\t\tif err != nil {\n\t\t\t\treturn loweredExpr{}, true, err\n\t\t\t}\n")
+	out.WriteString("\t\t\tstmts = append(stmts, arg.stmts...)\n")
+	out.WriteString("\t\t\tadaptedArgs[i] = arg.expr\n")
+	out.WriteString("\t\t}\n")
+	out.WriteString("\t}\n")
+	out.WriteString("\tcall := &ast.CallExpr{Fun: l.qualified(\"stdlibffi\", \"github.com/akonwi/ard/std_lib/ffi\", lowering.function), Args: adaptedArgs}\n")
 	out.WriteString("\tswitch lowering.returns {\n")
 	out.WriteString("\tcase generatedStdlibReturnError:\n")
 	out.WriteString("\t\twrapped, err := l.wrapErrorCall(returnTypeID, call)\n")
@@ -588,6 +613,24 @@ func renderGoStdlibLowering(c contract, packageName string, implemented map[stri
 	out.WriteString("\t}\n")
 	out.WriteString("}\n")
 	return format.Source([]byte(out.String()))
+}
+
+func goStdlibParamAdapters(fn hostFunction) string {
+	if len(fn.Params) == 0 {
+		return "nil"
+	}
+	adapters := make([]string, len(fn.Params))
+	for i, param := range fn.Params {
+		switch param.Type {
+		case "any":
+			adapters[i] = "generatedStdlibParamAny"
+		case "[]any":
+			adapters[i] = "generatedStdlibParamAnySlice"
+		default:
+			adapters[i] = "generatedStdlibParamDirect"
+		}
+	}
+	return "[]generatedStdlibExternParamAdapter{" + strings.Join(adapters, ", ") + "}"
 }
 
 func goStdlibReturnKind(fn hostFunction) string {
@@ -613,7 +656,7 @@ func goStdlibReturnKind(fn hostFunction) string {
 
 func goTargetCustomStdlibBinding(binding string) bool {
 	switch binding {
-	case "DynamicToMap", "HTTP_Serve", "JsonEncode", "JsonParse", "SqlExecute", "SqlQuery":
+	case "DynamicToMap", "HTTP_Serve", "JsonEncode", "JsonParse":
 		return true
 	default:
 		return false
