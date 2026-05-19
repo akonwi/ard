@@ -3340,13 +3340,18 @@ func (p *parser) string() (Expression, error) {
 	}
 	if p.match(expr_open) {
 		chunks := []Expression{str}
-		for !p.match(expr_close) {
+		for !p.check(expr_close) {
+			if p.isAtEnd() {
+				p.addError(p.previous(), "Unterminated string interpolation")
+				break
+			}
 			expr, err := p.or()
 			if err != nil {
 				return nil, err
 			}
 			chunks = append(chunks, expr)
 		}
+		p.match(expr_close)
 		for p.match(string_) {
 			more, err := p.string()
 			if err != nil {

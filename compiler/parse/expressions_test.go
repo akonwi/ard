@@ -3,6 +3,7 @@ package parse
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestListLiterals(t *testing.T) {
@@ -589,7 +590,50 @@ func TestInterpolatedStrings(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "Interpolated string with function call string argument",
+			input: `"{wrap(\"arg\")}"`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&InterpolatedStr{
+						Chunks: []Expression{
+							&StrLiteral{Value: ""},
+							&FunctionCall{Name: "wrap", Args: []Argument{{Value: &StrLiteral{Value: "arg"}}}, Comments: []Comment{}},
+						},
+					},
+				},
+			},
+		},
 	})
+}
+
+func TestInterpolatedStringFunctionCallStringArgDoesNotHang(t *testing.T) {
+	assertParseCompletes(t, `"{wrap(\"arg\")}"`, false)
+}
+
+func TestUnescapedOpenBraceInStringDoesNotHang(t *testing.T) {
+	assertParseCompletes(t, `"hello {"`, true)
+}
+
+func assertParseCompletes(t *testing.T, input string, wantErr bool) {
+	t.Helper()
+	done := make(chan []ParseError, 1)
+	go func() {
+		done <- Parse([]byte(input), "test.ard").Errors
+	}()
+
+	select {
+	case errs := <-done:
+		if wantErr && len(errs) == 0 {
+			t.Fatal("expected parse error")
+		}
+		if !wantErr && len(errs) > 0 {
+			t.Fatalf("unexpected parse error: %s", errs[0].Message)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("parser hung while parsing %s", input)
+	}
 }
 
 func TestAndOrs(t *testing.T) {
