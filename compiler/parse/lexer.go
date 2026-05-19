@@ -128,9 +128,10 @@ type lexer struct {
 	// position of the current token to take
 	start int
 	// position in the source
-	line, column int
-	inString     bool
-	inTemplate   bool
+	line, column  int
+	inString      bool
+	inTemplate    bool
+	templateDepth int
 }
 
 func NewLexer(source []byte) *lexer {
@@ -260,11 +261,16 @@ func (l *lexer) take() (token, bool) {
 		return currentChar.asToken(right_paren), true
 	case '{':
 		if l.inTemplate {
-			return currentChar.asToken(expr_open), true
+			l.templateDepth++
 		}
 		return currentChar.asToken(left_brace), true
 	case '}':
 		if l.inTemplate {
+			if l.templateDepth > 0 {
+				l.templateDepth--
+				return currentChar.asToken(right_brace), true
+			}
+
 			// Add the expr_close token with correct position
 			l.tokens = append(l.tokens, currentChar.asToken(expr_close))
 
@@ -360,6 +366,11 @@ func (l *lexer) take() (token, bool) {
 		return currentChar.asToken(equal), true
 	case '"':
 		return l.takeString(*currentChar)
+	case '\\':
+		if l.inTemplate && l.hasMore() && l.peek().raw == '"' {
+			return l.takeEscapedTemplateString(*currentChar)
+		}
+		return token{}, false
 	default:
 		if currentChar.isAlpha() {
 			if path, ok := l.takePath(currentChar); ok {
@@ -452,8 +463,9 @@ func (l *lexer) takeString(start char) (token, bool) {
 			exprChar := l.advance() // Consume the '{'
 			l.tokens = append(l.tokens, exprChar.asToken(expr_open))
 
-			// Set template mode so the next } will be treated as expr_close
+			// Set template mode so the next unmatched } will be treated as expr_close
 			l.inTemplate = true
+			l.templateDepth = 0
 			return token{}, false
 		}
 
@@ -483,6 +495,65 @@ func (l *lexer) takeString(start char) (token, bool) {
 		column: start.col,
 		text:   sb.String(),
 	}, true
+}
+
+func (l *lexer) takeEscapedTemplateString(start char) (token, bool) {
+	// String literals inside interpolation are written with escaped quotes so
+	// they do not terminate the outer string, e.g. "{wrap(\"arg\")}".
+	// In template mode, treat \" as the delimiter for the nested string.
+	l.advance() // consume the opening quote after the backslash
+
+	sb := strings.Builder{}
+	for l.hasMore() {
+		currChar := l.peek()
+		if currChar == nil {
+			break
+		}
+
+		if currChar.raw == '\\' {
+			l.advance() // consume backslash
+			if !l.hasMore() {
+				sb.WriteByte('\\')
+				break
+			}
+			escChar := l.advance()
+			switch escChar.raw {
+			case '"':
+				return token{kind: string_, line: start.line, column: start.col, text: sb.String()}, true
+			case 'n':
+				sb.WriteByte('\n')
+			case 't':
+				sb.WriteByte('\t')
+			case 'r':
+				sb.WriteByte('\r')
+			case '\\':
+				sb.WriteByte('\\')
+			case 'b':
+				sb.WriteByte('\b')
+			case 'f':
+				sb.WriteByte('\f')
+			case 'v':
+				sb.WriteByte('\v')
+			default:
+				sb.WriteByte('\\')
+				sb.WriteByte(escChar.raw)
+			}
+			continue
+		}
+
+		if currChar.raw == '\n' {
+			sb.WriteByte(currChar.raw)
+			l.advance()
+			l.line++
+			l.column = 1
+			continue
+		}
+
+		sb.WriteByte(currChar.raw)
+		l.advance()
+	}
+
+	return token{kind: string_, line: start.line, column: start.col, text: sb.String()}, true
 }
 
 func (l *lexer) takePath(start *char) (token, bool) {
