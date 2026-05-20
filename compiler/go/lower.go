@@ -296,22 +296,6 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	}
 `)
 	}
-	if l.runtimeHelpers["dynamic_to_any_map"] {
-		l.currentImports["stdlibffi"] = "github.com/akonwi/ard/std_lib/ffi"
-		parts = append(parts, `
-	func ardDynamicToAnyMap(data any) (map[any]any, error) {
-		values, err := stdlibffi.DynamicToMap(data)
-		if err != nil {
-			return nil, err
-		}
-		out := make(map[any]any, len(values))
-		for key, value := range values {
-			out[key] = value
-		}
-		return out, nil
-	}
-`)
-	}
 	if l.runtimeHelpers["list_to_any_slice"] {
 		parts = append(parts, `
 	func ardListToAnySlice[T any](values []T) []any {
@@ -3861,14 +3845,6 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 			helper = l.jsonEncodeMarshalTopHelperName(expr.Args[0].Type)
 		}
 		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: ast.NewIdent(helper), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "DynamicToMap":
-		l.markRuntimeHelper("dynamic_to_any_map")
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: ast.NewIdent("ardDynamicToAnyMap"), Args: args})
 		if err != nil {
 			return loweredExpr{}, err
 		}

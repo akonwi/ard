@@ -373,9 +373,6 @@ func typeGoType(typ parse.DeclaredType, aliases map[string]string, definedTypes 
 		if err != nil {
 			return "", err
 		}
-		if customKey, ok := t.Key.(*parse.CustomType); ok && customKey.Name == "Dynamic" {
-			key = "string"
-		}
 		value, err := typeGoType(t.Value, aliases, definedTypes)
 		if err != nil {
 			return "", err
@@ -671,7 +668,7 @@ func goStdlibReturnKind(fn hostFunction) string {
 
 func goTargetCustomStdlibBinding(binding string) bool {
 	switch binding {
-	case "DynamicToMap", "HTTP_Serve", "JsonEncode":
+	case "HTTP_Serve", "JsonEncode":
 		return true
 	default:
 		return false

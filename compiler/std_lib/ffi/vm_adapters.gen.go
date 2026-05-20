@@ -390,7 +390,7 @@ func VMAdapter(binding string, fn any) (vmffi.ExternAdapter, bool) {
 			return bridge.HostReturnValueError(extern.Signature.Return, out0, out1)
 		}, true
 	case "DynamicToMap":
-		typed, ok := fn.(func(any) (map[string]any, error))
+		typed, ok := fn.(func(any) (map[any]any, error))
 		if !ok {
 			return nil, false
 		}
