@@ -970,7 +970,7 @@ func GetQueryParam(req RawRequest, name string) string {
 	return ""
 }
 
-func HTTPServe(port int, handlers map[string]func(Request, *Response) (struct{}, error)) error {
+func HTTPServe(port int, handlers map[string]func(Request, *Response)) error {
 	mux := http.NewServeMux()
 	for path, handler := range handlers {
 		path := path
@@ -987,10 +987,7 @@ func HTTPServe(port int, handlers map[string]func(Request, *Response) (struct{},
 				Status:  200,
 				Headers: map[string]string{},
 			}
-			if _, err := handler(ardReq, &ardRes); err != nil {
-				http.Error(writer, err.Error(), http.StatusInternalServerError)
-				return
-			}
+			handler(ardReq, &ardRes)
 			for key, value := range ardRes.Headers {
 				writer.Header().Set(key, value)
 			}

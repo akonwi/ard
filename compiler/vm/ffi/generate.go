@@ -434,10 +434,13 @@ func functionTypeGoType(fn *parse.FunctionType, aliases map[string]string, defin
 		}
 		args = append(args, paramType)
 	}
-	returnType := "struct{}"
+	returnTypes := []string{}
 	if fn.Return != nil {
+		if hasGeneric(fn.Return) {
+			return "", fmt.Errorf("generic function returns are not generated yet")
+		}
 		var err error
-		returnType, err = typeGoType(fn.Return, aliases, definedTypes)
+		returnTypes, err = functionReturnGoTypes(fn.Return, aliases, definedTypes)
 		if err != nil {
 			return "", err
 		}
@@ -446,7 +449,39 @@ func functionTypeGoType(fn *parse.FunctionType, aliases map[string]string, defin
 	if len(fn.Params) == 0 {
 		params = ""
 	}
-	return fmt.Sprintf("func(%s) (%s, error)", params, returnType), nil
+	if len(returnTypes) == 0 {
+		return fmt.Sprintf("func(%s)", params), nil
+	}
+	return fmt.Sprintf("func(%s) (%s)", params, strings.Join(returnTypes, ", ")), nil
+}
+
+func functionReturnGoTypes(typ parse.DeclaredType, aliases map[string]string, definedTypes map[string]struct{}) ([]string, error) {
+	if result, ok := typ.(*parse.ResultType); ok {
+		if !isStringType(result.Err) {
+			returnTypes, err := returnGoTypes(typ, aliases, definedTypes)
+			if err != nil {
+				return nil, err
+			}
+			return returnTypes, nil
+		}
+		valueType := "struct{}"
+		if !isVoidType(result.Val) {
+			var err error
+			valueType, err = typeGoType(result.Val, aliases, definedTypes)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return []string{valueType, "error"}, nil
+	}
+	if isVoidType(typ) {
+		return nil, nil
+	}
+	returnType, err := typeGoType(typ, aliases, definedTypes)
+	if err != nil {
+		return nil, err
+	}
+	return []string{returnType}, nil
 }
 
 func render(c contract, packageName string) ([]byte, error) {
@@ -668,7 +703,7 @@ func goStdlibReturnKind(fn hostFunction) string {
 
 func goTargetCustomStdlibBinding(binding string) bool {
 	switch binding {
-	case "HTTP_Serve", "JsonEncode":
+	case "JsonEncode":
 		return true
 	default:
 		return false

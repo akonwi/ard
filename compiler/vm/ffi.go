@@ -507,8 +507,18 @@ func (vm *VM) validateHostFunctionType(typeInfo air.TypeInfo, target reflect.Typ
 			return fmt.Errorf("callback arg %d: %w", i, err)
 		}
 	}
+	if callType.NumOut() == 0 {
+		returnInfo, err := vm.typeInfo(typeInfo.Return)
+		if err != nil {
+			return err
+		}
+		if returnInfo.Kind != air.TypeVoid {
+			return fmt.Errorf("callback %s with no returns requires Void return type, got %s", target, returnInfo.Name)
+		}
+		return nil
+	}
 	if callType.NumOut() != 2 {
-		return fmt.Errorf("callback %s Call must return (value, error), got %d returns", target, callType.NumOut())
+		return fmt.Errorf("callback %s Call must return no values or (value, error), got %d returns", target, callType.NumOut())
 	}
 	if !callType.Out(1).Implements(errorInterface) {
 		return fmt.Errorf("callback %s second return must be error, got %s", target, callType.Out(1))
@@ -1090,19 +1100,28 @@ func (vm *VM) closureToHostCallback(value Value, target reflect.Type) (reflect.V
 		return reflect.Value{}, fmt.Errorf("callback %s expects %d args, closure accepts %d", target, callType.NumIn(), len(fn.Signature.Params))
 	}
 	callback := reflect.MakeFunc(callType, func(inputs []reflect.Value) []reflect.Value {
-		zero := reflect.Zero(callType.Out(0))
+		var zero reflect.Value
+		if callType.NumOut() > 0 {
+			zero = reflect.Zero(callType.Out(0))
+		}
 		errorValue := reflect.Zero(errorInterface)
 		args := make([]Value, len(inputs))
+		callbackError := func(err error) []reflect.Value {
+			if callType.NumOut() == 0 {
+				panic(err)
+			}
+			return []reflect.Value{zero, reflect.ValueOf(err)}
+		}
 		for i, input := range inputs {
 			arg, err := vm.hostValueToValue(fn.Signature.Params[i].Type, input)
 			if err != nil {
-				return []reflect.Value{zero, reflect.ValueOf(err)}
+				return callbackError(err)
 			}
 			args[i] = arg
 		}
 		result, err := vm.callClosure(value, args)
 		if err != nil {
-			return []reflect.Value{zero, reflect.ValueOf(err)}
+			return callbackError(err)
 		}
 		for i, input := range inputs {
 			if i >= len(fn.Signature.Params) || !fn.Signature.Params[i].Mutable {
@@ -1113,16 +1132,19 @@ func (vm *VM) closureToHostCallback(value Value, target reflect.Type) (reflect.V
 			}
 			hostArg, err := vm.valueToHost(args[i], input.Type().Elem())
 			if err != nil {
-				return []reflect.Value{zero, reflect.ValueOf(err)}
+				return callbackError(err)
 			}
 			if !input.Elem().CanSet() {
-				return []reflect.Value{zero, reflect.ValueOf(fmt.Errorf("callback arg %d is not settable", i))}
+				return callbackError(fmt.Errorf("callback arg %d is not settable", i))
 			}
 			input.Elem().Set(hostArg)
 		}
+		if callType.NumOut() == 0 {
+			return nil
+		}
 		hostResult, err := vm.valueToHost(result, callType.Out(0))
 		if err != nil {
-			return []reflect.Value{zero, reflect.ValueOf(err)}
+			return callbackError(err)
 		}
 		return []reflect.Value{hostResult, errorValue}
 	})

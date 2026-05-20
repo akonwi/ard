@@ -562,7 +562,7 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		out := append([]ast.Stmt{}, target.stmts...)
 		out = append(out, value.stmts...)
 		out = append(out, &ast.AssignStmt{
-			Lhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(targetType.Fields[stmt.Field].Name)}},
+			Lhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, targetType.Fields[stmt.Field].Name))}},
 			Tok: token.ASSIGN,
 			Rhs: []ast.Expr{value.expr},
 		})
@@ -1388,6 +1388,9 @@ func (l *lowerer) goParamType(param air.Param) (ast.Expr, error) {
 }
 
 func (l *lowerer) modulePathForType(typeID air.TypeID) string {
+	if validTypeID(l.program, typeID) && l.program.Types[typeID-1].ModulePath != "" {
+		return l.program.Types[typeID-1].ModulePath
+	}
 	for _, module := range l.program.Modules {
 		for _, moduleTypeID := range module.Types {
 			if moduleTypeID == typeID {
@@ -1406,19 +1409,7 @@ func (l *lowerer) isStdlibFFIBackedType(info air.TypeInfo) bool {
 		return false
 	}
 	path := l.modulePathForType(info.ID)
-	return strings.HasPrefix(path, "ard/") && info.Name != ""
-}
-
-func (l *lowerer) isHTTPHandlerFunctionType(info air.TypeInfo) bool {
-	if info.Kind != air.TypeFunction || len(info.Params) != 2 || !l.isVoidType(info.Return) {
-		return false
-	}
-	if !validTypeID(l.program, info.Params[0]) || !validTypeID(l.program, info.Params[1]) {
-		return false
-	}
-	left := l.program.Types[info.Params[0]-1]
-	right := l.program.Types[info.Params[1]-1]
-	return left.Kind == air.TypeStruct && right.Kind == air.TypeStruct && left.Name == "Request" && right.Name == "Response"
+	return path == "ard/http" && (info.Name == "Method" || info.Name == "Request" || info.Name == "Response")
 }
 
 func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
@@ -1457,7 +1448,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			if err != nil {
 				return nil, err
 			}
-			if l.isHTTPHandlerFunctionType(info) && i == 1 {
+			if i < len(info.ParamMutable) && info.ParamMutable[i] {
 				paramType = &ast.StarExpr{X: paramType}
 			}
 			params = append(params, &ast.Field{Type: paramType})
@@ -3664,118 +3655,6 @@ func unionSliceCaseClauses(program *air.Program, unionInfo air.TypeInfo, outTemp
 	return cases
 }
 
-func (l *lowerer) lowerHTTPServeExtern(args []ast.Expr, handlerMapType air.TypeID, resultTypeID air.TypeID) (loweredExpr, error) {
-	if len(args) != 2 {
-		return loweredExpr{}, fmt.Errorf("HTTP_Serve expects 2 args")
-	}
-	if !validTypeID(l.program, handlerMapType) {
-		return loweredExpr{}, fmt.Errorf("invalid handler map type %d", handlerMapType)
-	}
-	mapInfo := l.program.Types[handlerMapType-1]
-	if mapInfo.Kind != air.TypeMap || !validTypeID(l.program, mapInfo.Value) {
-		return loweredExpr{}, fmt.Errorf("HTTP_Serve handlers must be a map of functions")
-	}
-	fnInfo := l.program.Types[mapInfo.Value-1]
-	if fnInfo.Kind != air.TypeFunction || len(fnInfo.Params) != 2 {
-		return loweredExpr{}, fmt.Errorf("HTTP_Serve handler signature mismatch")
-	}
-	reqType := l.program.Types[fnInfo.Params[0]-1]
-	resType := l.program.Types[fnInfo.Params[1]-1]
-
-	callbackType := &ast.FuncType{
-		Params: &ast.FieldList{List: []*ast.Field{
-			{Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Request")},
-			{Type: &ast.StarExpr{X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Response")}},
-		}},
-		Results: &ast.FieldList{List: []*ast.Field{{Type: voidTypeExpr()}, {Type: ast.NewIdent("error")}}},
-	}
-	adapterType := &ast.MapType{Key: ast.NewIdent("string"), Value: callbackType}
-	adapterName := l.nextTemp()
-	pathName := l.nextTemp()
-	handlerName := l.nextTemp()
-	reqName := l.nextTemp()
-	resName := l.nextTemp()
-	ardReqName := l.nextTemp()
-	ardResName := l.nextTemp()
-	errName := l.nextTemp()
-
-	requestMethodType := ast.NewIdent(typeName(l.program, l.program.Types[reqType.Fields[2].Type-1]))
-	requestType := ast.NewIdent(typeName(l.program, reqType))
-	responseType := ast.NewIdent(typeName(l.program, resType))
-
-	bodyMaybe := &ast.CompositeLit{Type: mustTypeExpr(l, reqType.Fields[0].Type), Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.SelectorExpr{X: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Body")}, Sel: ast.NewIdent("Value")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: &ast.SelectorExpr{X: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Body")}, Sel: ast.NewIdent("Some")}},
-	}}
-	rawMaybe := &ast.CompositeLit{Type: mustTypeExpr(l, reqType.Fields[3].Type), Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.SelectorExpr{X: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Raw")}, Sel: ast.NewIdent("Value")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: &ast.SelectorExpr{X: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Raw")}, Sel: ast.NewIdent("Some")}},
-	}}
-	timeoutMaybe := &ast.CompositeLit{Type: mustTypeExpr(l, reqType.Fields[4].Type), Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.SelectorExpr{X: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Timeout")}, Sel: ast.NewIdent("Value")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: &ast.SelectorExpr{X: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Timeout")}, Sel: ast.NewIdent("Some")}},
-	}}
-	ardReqLit := &ast.CompositeLit{Type: requestType, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent(reqType.Fields[0].Name), Value: bodyMaybe},
-		&ast.KeyValueExpr{Key: ast.NewIdent(reqType.Fields[1].Name), Value: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Headers")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent(reqType.Fields[2].Name), Value: &ast.CallExpr{Fun: requestMethodType, Args: []ast.Expr{&ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Method")}}}},
-		&ast.KeyValueExpr{Key: ast.NewIdent(reqType.Fields[3].Name), Value: rawMaybe},
-		&ast.KeyValueExpr{Key: ast.NewIdent(reqType.Fields[4].Name), Value: timeoutMaybe},
-		&ast.KeyValueExpr{Key: ast.NewIdent(reqType.Fields[5].Name), Value: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Url")}},
-	}}
-	ardResLit := &ast.CompositeLit{Type: responseType, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent(resType.Fields[0].Name), Value: &ast.SelectorExpr{X: ast.NewIdent(resName), Sel: ast.NewIdent("Body")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent(resType.Fields[1].Name), Value: &ast.SelectorExpr{X: ast.NewIdent(resName), Sel: ast.NewIdent("Headers")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent(resType.Fields[2].Name), Value: &ast.SelectorExpr{X: ast.NewIdent(resName), Sel: ast.NewIdent("Status")}},
-	}}
-	stdlibResLit := &ast.CompositeLit{Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Response"), Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Body"), Value: &ast.SelectorExpr{X: ast.NewIdent(ardResName), Sel: ast.NewIdent(resType.Fields[0].Name)}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Headers"), Value: &ast.SelectorExpr{X: ast.NewIdent(ardResName), Sel: ast.NewIdent(resType.Fields[1].Name)}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Status"), Value: &ast.SelectorExpr{X: ast.NewIdent(ardResName), Sel: ast.NewIdent(resType.Fields[2].Name)}},
-	}}
-	wrapperFunc := &ast.FuncLit{
-		Type: &ast.FuncType{
-			Params: &ast.FieldList{List: []*ast.Field{
-				{Names: []*ast.Ident{ast.NewIdent(reqName)}, Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Request")},
-				{Names: []*ast.Ident{ast.NewIdent(resName)}, Type: &ast.StarExpr{X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Response")}},
-			}},
-			Results: &ast.FieldList{List: []*ast.Field{{Type: voidTypeExpr()}, {Type: ast.NewIdent("error")}}},
-		},
-		Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(ardReqName)}, Tok: token.DEFINE, Rhs: []ast.Expr{ardReqLit}},
-			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(ardResName)}, Tok: token.DEFINE, Rhs: []ast.Expr{ardResLit}},
-			&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent(handlerName), Args: []ast.Expr{ast.NewIdent(ardReqName), &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(ardResName)}}}},
-			&ast.AssignStmt{Lhs: []ast.Expr{&ast.StarExpr{X: ast.NewIdent(resName)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{stdlibResLit}},
-			&ast.ReturnStmt{Results: []ast.Expr{voidValueExpr(), ast.NewIdent("nil")}},
-		}},
-	}
-
-	stmts := []ast.Stmt{
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(adapterName)}, Type: adapterType}}}},
-		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(adapterName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CompositeLit{Type: adapterType}}},
-		&ast.RangeStmt{
-			Key:   ast.NewIdent(pathName),
-			Value: ast.NewIdent(handlerName),
-			Tok:   token.DEFINE,
-			X:     args[1],
-			Body: &ast.BlockStmt{List: []ast.Stmt{
-				&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(adapterName), Index: ast.NewIdent(pathName)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{wrapperFunc}},
-			}},
-		},
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(errName)}, Type: ast.NewIdent("error")}}}},
-		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPServe"), Args: []ast.Expr{args[0], ast.NewIdent(adapterName)}}}},
-	}
-	resultType, err := l.goType(resultTypeID)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: voidValueExpr()},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{ast.NewIdent(errName)}}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errName), Op: token.EQL, Y: ast.NewIdent("nil")}},
-	}}}, nil
-}
-
 func (l *lowerer) wrapStdlibResultCall(resultTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
 	if !validTypeID(l.program, resultTypeID) {
 		return loweredExpr{}, fmt.Errorf("invalid result type id %d", resultTypeID)
@@ -3845,13 +3724,6 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 			helper = l.jsonEncodeMarshalTopHelperName(expr.Args[0].Type)
 		}
 		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: ast.NewIdent(helper), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "HTTP_Serve":
-		wrapped, err := l.lowerHTTPServeExtern(args, expr.Args[1].Type, expr.Type)
 		if err != nil {
 			return loweredExpr{}, err
 		}

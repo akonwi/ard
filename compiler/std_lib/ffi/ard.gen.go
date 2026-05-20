@@ -38,7 +38,7 @@ type Conn = any
 
 type Decoder = any
 
-type HandlerFn = func(Request, *Response) (struct{}, error)
+type HandlerFn = func(Request, *Response)
 
 type JsonInput = any
 
@@ -140,7 +140,7 @@ type WinnerJSONTest struct {
 }
 
 type Host struct {
-	AsyncStart           func(do func() (struct{}, error)) Fiber[struct{}]
+	AsyncStart           func(do func()) Fiber[struct{}]
 	Base64Decode         func(input string, no_pad Maybe[bool]) (string, error)
 	Base64DecodeURL      func(input string, no_pad Maybe[bool]) (string, error)
 	Base64Encode         func(input string, no_pad Maybe[bool]) string
@@ -190,7 +190,7 @@ type Host struct {
 	HTTPResponseClose    func(resp RawResponse)
 	HTTPResponseHeaders  func(resp RawResponse) map[string]string
 	HTTPResponseStatus   func(resp RawResponse) int
-	HTTPServe            func(port int, handlers map[string]func(Request, *Response) (struct{}, error)) error
+	HTTPServe            func(port int, handlers map[string]func(Request, *Response)) error
 	HexDecode            func(input string) (string, error)
 	HexEncode            func(bytes string) string
 	IntFromStr           func(str string) Maybe[int]

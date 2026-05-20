@@ -566,7 +566,11 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 			name += fl.l.typeName(param)
 		}
 		name += ") " + fl.l.typeName(returnType)
-		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeFunction, Params: params, Return: returnType})
+		mutable := make([]bool, len(typ.Parameters))
+		for i, param := range typ.Parameters {
+			mutable[i] = param.Mutable
+		}
+		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeFunction, Params: params, ParamMutable: mutable, Return: returnType})
 	default:
 		return fl.l.internType(t)
 	}
@@ -1116,6 +1120,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 				return NoType, err
 			}
 			info.Params = append(info.Params, paramType)
+			info.ParamMutable = append(info.ParamMutable, param.Mutable)
 		}
 		returnType, err := l.internType(typ.ReturnType)
 		if err != nil {
@@ -1130,6 +1135,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 				return NoType, err
 			}
 			info.Params = append(info.Params, paramType)
+			info.ParamMutable = append(info.ParamMutable, param.Mutable)
 		}
 		returnType, err := l.internType(typ.ReturnType)
 		if err != nil {
@@ -1162,6 +1168,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 	}
 
+	info.ModulePath = l.typeOwnerPath(t)
 	l.program.Types[idx] = info
 	return id, nil
 }
@@ -1176,6 +1183,28 @@ func (l *lowerer) internSyntheticType(name string, info TypeInfo) (TypeID, error
 	l.typeByKey[name] = id
 	l.program.Types = append(l.program.Types, info)
 	return id, nil
+}
+
+func (l *lowerer) typeOwnerPath(t checker.Type) string {
+	var name string
+	switch typ := t.(type) {
+	case *checker.StructDef:
+		name = typ.Name
+	case *checker.Enum:
+		name = typ.Name
+	case *checker.Union:
+		name = typ.Name
+	case *checker.ExternType:
+		name = typ.Name_
+	default:
+		return ""
+	}
+	for path, module := range l.moduleByName {
+		if module.Get(name).Type == t {
+			return path
+		}
+	}
+	return ""
 }
 
 func (l *lowerer) typeName(id TypeID) string {
@@ -1484,6 +1513,9 @@ func airFunctionTypeKey(params []checker.Parameter, returnType checker.Type) str
 	for i, param := range params {
 		if i > 0 {
 			key += ","
+		}
+		if param.Mutable {
+			key += "mut "
 		}
 		key += airTypeKey(param.Type)
 	}

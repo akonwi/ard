@@ -1,8 +1,8 @@
-use ard/http
 use ard/decode
+use ard/http
 
 fn main() {
-  let routes: [Str:http::HandlerFn] = [
+  let routes: [Str: http::HandlerFn] = [
     "/": fn(req: http::Request, mut res: http::Response) {
       res.body = "Hello, World!"
     },
