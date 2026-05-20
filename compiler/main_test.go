@@ -491,7 +491,7 @@ func TestParseTestArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path, filter, failFast, err := parseTestArgs(tt.args)
+			path, filter, failFast, _, err := parseTestArgs(tt.args)
 			if tt.expectErr {
 				if err == nil {
 					t.Fatalf("expected error %q, got nil", tt.errMessage)
@@ -858,6 +858,44 @@ test fn panics() Void!Str {
 			t.Fatalf("unexpected output:\n%s", output)
 		}
 	})
+}
+
+func TestTestCommandGoTargetSupportsProjectFFI(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "project")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "main.ard"), []byte(`use ard/testing
+
+extern fn lookup() Str = "Lookup"
+
+test fn ffi_passes() Void!Str {
+  testing::assert(lookup() == "ok", "project ffi should run on go target")
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi.go"), []byte(`package main
+
+func Lookup() string { return "ok" }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var ok bool
+	output := captureStdout(t, func() {
+		ok = runTests(projectDir, "", false, backend.TargetGo)
+	})
+	if !ok {
+		t.Fatalf("expected go target tests to pass\n%s", output)
+	}
+	if !strings.Contains(output, "✓") || !strings.Contains(output, "1 passed; 0 failed; 0 panicked") {
+		t.Fatalf("unexpected output:\n%s", output)
+	}
 }
 
 func TestTestCommandRespectsPrivateAccessInTestDir(t *testing.T) {

@@ -31,6 +31,7 @@ type lowerer struct {
 	runtimeHelpers map[string]bool
 	jsonParseTypes map[air.TypeID]bool
 	projectImports map[string]string
+	suppressMain   bool
 }
 
 func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, error) {
@@ -40,7 +41,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if err := air.Validate(program); err != nil {
 		return nil, err
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, projectImports: collectProjectGoImports(options.ProjectInfo)}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, projectImports: collectProjectGoImports(options.ProjectInfo), suppressMain: options.SuppressMain}
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
 	modules := make([]air.Module, 0, len(program.Modules))
@@ -137,16 +138,20 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 		}
 		decls = append(decls, decl)
 	}
-	if !hasRoot && module.ID == mainModuleID {
-		decls = append(l.runtimePreludeDecls(), decls...)
-		decls = append(decls, &ast.FuncDecl{Name: ast.NewIdent("main"), Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{}})
-	} else if hasRoot && module.ID == mainModuleID {
-		mainDecl, err := l.lowerMainWrapper(rootID)
-		if err != nil {
-			return nil, err
+	if module.ID == mainModuleID {
+		if l.suppressMain {
+			decls = append(l.runtimePreludeDecls(), decls...)
+		} else if !hasRoot {
+			decls = append(l.runtimePreludeDecls(), decls...)
+			decls = append(decls, &ast.FuncDecl{Name: ast.NewIdent("main"), Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{}})
+		} else {
+			mainDecl, err := l.lowerMainWrapper(rootID)
+			if err != nil {
+				return nil, err
+			}
+			decls = append(decls, mainDecl)
+			decls = append(l.runtimePreludeDecls(), decls...)
 		}
-		decls = append(decls, mainDecl)
-		decls = append(l.runtimePreludeDecls(), decls...)
 	}
 	if len(l.currentImports) > 0 {
 		usedImports := l.usedImports(decls)
