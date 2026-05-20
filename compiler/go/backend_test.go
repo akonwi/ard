@@ -49,6 +49,41 @@ func TestGenerateSourcesFormatsSimpleProgram(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesOmitsTestsUnlessIncluded(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn main() Int { 1 }
+		test fn check() Void!Str { Result::ok(()) }
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := air.LowerWithTests(c.Module())
+	if err != nil {
+		t.Fatalf("lower with tests: %v", err)
+	}
+
+	productionSources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources production error = %v", err)
+	}
+	if strings.Contains(string(productionSources["test.go"]), "__check") {
+		t.Fatalf("production source includes test function:\n%s", productionSources["test.go"])
+	}
+
+	testSources, err := GenerateSources(program, Options{PackageName: "main", IncludeTests: true, SuppressMain: true})
+	if err != nil {
+		t.Fatalf("GenerateSources tests error = %v", err)
+	}
+	if !strings.Contains(string(testSources["test.go"]), "__check") {
+		t.Fatalf("test source missing test function:\n%s", testSources["test.go"])
+	}
+}
+
 func TestRunProgramExecutesSimpleMain(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Void {

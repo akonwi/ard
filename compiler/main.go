@@ -505,7 +505,7 @@ func runTests(inputPath, filter string, failFast bool, target ...string) bool {
 			continue
 		}
 
-		program, err := air.Lower(module)
+		program, err := air.LowerWithTests(module)
 		if err != nil {
 			fmt.Println(err)
 			return false
@@ -563,7 +563,7 @@ func runGoTests(inputPath, filter string, failFast bool) bool {
 			continue
 		}
 
-		program, err := air.Lower(loaded.Module)
+		program, err := air.LowerWithTests(loaded.Module)
 		if err != nil {
 			fmt.Println(err)
 			return false

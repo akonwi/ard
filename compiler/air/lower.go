@@ -7,9 +7,21 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+type LowerOptions struct {
+	IncludeTests bool
+}
+
 func Lower(module checker.Module) (*Program, error) {
-	l := newLowerer()
-	if err := l.lowerModule(module, true); err != nil {
+	return LowerWithOptions(module, LowerOptions{})
+}
+
+func LowerWithTests(module checker.Module) (*Program, error) {
+	return LowerWithOptions(module, LowerOptions{IncludeTests: true})
+}
+
+func LowerWithOptions(module checker.Module, options LowerOptions) (*Program, error) {
+	l := newLowerer(options)
+	if err := l.lowerModule(module); err != nil {
 		return nil, err
 	}
 	if err := Validate(&l.program); err != nil {
@@ -33,6 +45,7 @@ type lowerer struct {
 	loweredModules  map[string]bool
 	loweringFuncs   map[FunctionID]bool
 	loweredFuncs    map[FunctionID]bool
+	includeTests    bool
 }
 
 type functionLowerer struct {
@@ -45,7 +58,7 @@ type functionLowerer struct {
 	typeVars      map[string]TypeID
 }
 
-func newLowerer() *lowerer {
+func newLowerer(options LowerOptions) *lowerer {
 	l := &lowerer{
 		program: Program{
 			Entry:  NoFunction,
@@ -63,6 +76,7 @@ func newLowerer() *lowerer {
 		loweredModules:  map[string]bool{},
 		loweringFuncs:   map[FunctionID]bool{},
 		loweredFuncs:    map[FunctionID]bool{},
+		includeTests:    options.IncludeTests,
 	}
 	l.mustIntern(checker.Void)
 	l.mustIntern(checker.Int)
@@ -81,7 +95,7 @@ func (l *lowerer) mustIntern(t checker.Type) TypeID {
 	return id
 }
 
-func (l *lowerer) lowerModule(module checker.Module, includeTests bool) error {
+func (l *lowerer) lowerModule(module checker.Module) error {
 	if module == nil {
 		return fmt.Errorf("cannot lower nil module")
 	}
@@ -141,10 +155,10 @@ func (l *lowerer) lowerModule(module checker.Module, includeTests bool) error {
 
 		switch expr := stmt.Expr.(type) {
 		case *checker.FunctionDef:
-			if functionHasUnresolvedTypeVar(expr) {
+			if functionHasUnresolvedTypeVar(expr) || (!l.includeTests && expr.IsTest) {
 				continue
 			}
-			if _, err := l.declareFunction(modID, expr, includeTests); err != nil {
+			if _, err := l.declareFunction(modID, expr); err != nil {
 				return err
 			}
 		case *checker.ExternalFunctionDef:
@@ -177,7 +191,7 @@ func (l *lowerer) lowerModule(module checker.Module, includeTests bool) error {
 	for i := range prog.Statements {
 		stmt := prog.Statements[i]
 		if def, ok := stmt.Expr.(*checker.FunctionDef); ok {
-			if functionHasUnresolvedTypeVar(def) {
+			if functionHasUnresolvedTypeVar(def) || (!l.includeTests && def.IsTest) {
 				continue
 			}
 			if err := l.lowerFunction(modID, def); err != nil {
@@ -221,7 +235,7 @@ func (l *lowerer) internModule(path string) ModuleID {
 	return id
 }
 
-func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef, includeTests bool) (FunctionID, error) {
+func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (FunctionID, error) {
 	if functionHasUnresolvedTypeVar(def) {
 		return NoFunction, fmt.Errorf("cannot declare unspecialized generic function %s", def.Name)
 	}
@@ -254,10 +268,10 @@ func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef, inc
 		IsTest: def.IsTest,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
-	if includeTests && def.Name == "main" {
+	if def.Name == "main" {
 		l.program.Entry = id
 	}
-	if includeTests && def.IsTest {
+	if l.includeTests && def.IsTest {
 		l.program.Tests = append(l.program.Tests, Test{Name: def.Name, Function: id})
 	}
 	return id, nil
@@ -3860,7 +3874,7 @@ func (fl *functionLowerer) lowerStaticTraitMethod(typeID TypeID, target *Expr, m
 	if module >= 0 && int(module) < len(fl.l.program.Modules) {
 		path := fl.l.program.Modules[module].Path
 		if mod, ok := fl.l.moduleByName[path]; ok && !fl.l.loweredModules[path] {
-			if err := fl.l.lowerModule(mod, false); err != nil {
+			if err := fl.l.lowerModule(mod); err != nil {
 				return nil, false, err
 			}
 		}
@@ -4018,7 +4032,7 @@ func (l *lowerer) resolveModuleFunction(modulePath, name string) (FunctionID, bo
 	if mod.Program() == nil {
 		return NoFunction, false, nil
 	}
-	if err := l.lowerModule(mod, false); err != nil {
+	if err := l.lowerModule(mod); err != nil {
 		return NoFunction, false, err
 	}
 	id, ok := l.lookupFunctionInModule(modulePath, name)
@@ -4136,7 +4150,7 @@ func (l *lowerer) resolveModuleExtern(modulePath, name string) (ExternID, bool, 
 	if mod.Program() == nil {
 		return 0, false, nil
 	}
-	if err := l.lowerModule(mod, false); err != nil {
+	if err := l.lowerModule(mod); err != nil {
 		return 0, false, err
 	}
 	id, ok := l.lookupExternInModule(modulePath, name)

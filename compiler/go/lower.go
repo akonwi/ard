@@ -32,6 +32,7 @@ type lowerer struct {
 	jsonParseTypes map[air.TypeID]bool
 	projectImports map[string]string
 	suppressMain   bool
+	includeTests   bool
 }
 
 func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, error) {
@@ -41,7 +42,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if err := air.Validate(program); err != nil {
 		return nil, err
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, projectImports: collectProjectGoImports(options.ProjectInfo), suppressMain: options.SuppressMain}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, projectImports: collectProjectGoImports(options.ProjectInfo), suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
 	modules := make([]air.Module, 0, len(program.Modules))
@@ -132,6 +133,9 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 	sort.Slice(functionIDs, func(i, j int) bool { return functionIDs[i] < functionIDs[j] })
 	for _, functionID := range functionIDs {
 		fn := l.program.Functions[functionID]
+		if fn.IsTest && !l.includeTests {
+			continue
+		}
 		decl, err := l.lowerFunction(fn)
 		if err != nil {
 			return nil, fmt.Errorf("module %s function %s: %w", module.Path, fn.Name, err)

@@ -19,6 +19,7 @@ type Options struct {
 	PackageName  string
 	ProjectInfo  *checker.ProjectInfo
 	SuppressMain bool
+	IncludeTests bool
 }
 
 type TestCase struct {
@@ -98,7 +99,7 @@ func RunTests(program *air.Program, args []string, tests []TestCase, failFast bo
 	if err != nil {
 		return nil, err
 	}
-	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: optionalProjectInfo(projectInfo), SuppressMain: true}); err != nil {
+	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: optionalProjectInfo(projectInfo), SuppressMain: true, IncludeTests: true}); err != nil {
 		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(workspaceDir, "ard_tests.go"), []byte(renderTestRunner(program, tests, failFast)), 0o644); err != nil {
