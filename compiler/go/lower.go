@@ -643,7 +643,11 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		stmts := append([]ast.Stmt{}, target.stmts...)
 		stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{target.expr}}})
-		return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
+		zero, err := l.zeroValueExpr(expr.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: stmts, expr: zero}, nil
 	case air.ExprLoadLocal:
 		return loweredExpr{expr: ast.NewIdent(localName(fn, expr.Local))}, nil
 	case air.ExprUnionWrap:
@@ -1271,6 +1275,9 @@ func (l *lowerer) lowerExprWithExpectedType(fn air.Function, expr air.Expr, expe
 }
 
 func (l *lowerer) canOverrideExprType(expr air.Expr, expectedType air.TypeID) bool {
+	if expr.Kind == air.ExprPanic {
+		return expectedType != air.NoType
+	}
 	if !validTypeID(l.program, expr.Type) || !validTypeID(l.program, expectedType) {
 		return false
 	}
@@ -1381,6 +1388,34 @@ func voidTypeExpr() ast.Expr {
 
 func voidValueExpr() ast.Expr {
 	return &ast.CompositeLit{Type: voidTypeExpr()}
+}
+
+func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
+	if l.isVoidType(typeID) {
+		return ast.NewIdent("nil"), nil
+	}
+	if !validTypeID(l.program, typeID) {
+		return ast.NewIdent("nil"), nil
+	}
+	info := l.program.Types[typeID-1]
+	switch info.Kind {
+	case air.TypeInt, air.TypeEnum:
+		return &ast.BasicLit{Kind: token.INT, Value: "0"}, nil
+	case air.TypeFloat:
+		return &ast.BasicLit{Kind: token.FLOAT, Value: "0"}, nil
+	case air.TypeBool:
+		return ast.NewIdent("false"), nil
+	case air.TypeStr:
+		return &ast.BasicLit{Kind: token.STRING, Value: "\"\""}, nil
+	case air.TypeDynamic, air.TypeExtern, air.TypeFunction, air.TypeTraitObject:
+		return ast.NewIdent("nil"), nil
+	default:
+		typ, err := l.goType(typeID)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.CompositeLit{Type: typ}, nil
+	}
 }
 
 func (l *lowerer) goParamType(param air.Param) (ast.Expr, error) {
