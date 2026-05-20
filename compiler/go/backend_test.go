@@ -215,6 +215,39 @@ func TestRunProgramSupportsCommonStdlibExterns(t *testing.T) {
 	}
 }
 
+func TestBuildProgramCompilesJSONPreludeForStdlibBackedHTTPTypes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/http
+use ard/json
+
+struct App {
+  routes: [Str: fn(http::Request, mut http::Response)]
+}
+
+fn main() Str {
+  json::encode(Dynamic::from("ok")).or("")
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(dir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+}
+
 func TestBuildProgramSupportsProjectGoFFIWithTypedExternType(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

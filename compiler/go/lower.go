@@ -1,8 +1,10 @@
 package gotarget
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"path/filepath"
@@ -4007,6 +4009,18 @@ func (l *lowerer) jsonParseGoTypeName(typeID air.TypeID) string {
 	}
 }
 
+func (l *lowerer) jsonEncodeGoTypeName(typeID air.TypeID) string {
+	typ, err := l.goType(typeID)
+	if err != nil {
+		return l.jsonParseGoTypeName(typeID)
+	}
+	var buf bytes.Buffer
+	if err := format.Node(&buf, token.NewFileSet(), typ); err != nil {
+		return l.jsonParseGoTypeName(typeID)
+	}
+	return buf.String()
+}
+
 func (l *lowerer) jsonEncodePreludeSource() string {
 	var b strings.Builder
 	for _, typ := range l.program.Types {
@@ -4023,7 +4037,7 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 		return
 	}
 	info := l.program.Types[typeID-1]
-	typeName := l.jsonParseGoTypeName(typeID)
+	typeName := l.jsonEncodeGoTypeName(typeID)
 	helper := l.jsonEncodeHelperName(typeID)
 	fmt.Fprintf(b, "\nfunc %s(enc *jsontext.Encoder, value %s) error {\n", helper, typeName)
 	switch info.Kind {
@@ -4051,7 +4065,7 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }\n")
 		for _, field := range info.Fields {
 			fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.String(%q)); err != nil { return err }\n", field.Name)
-			fmt.Fprintf(b, "\tif err := %s(enc, value.%s); err != nil { return err }\n", l.jsonEncodeHelperName(field.Type), field.Name)
+			fmt.Fprintf(b, "\tif err := %s(enc, value.%s); err != nil { return err }\n", l.jsonEncodeHelperName(field.Type), l.goFieldName(info, field.Name))
 		}
 		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.EndObject)\n")
 	case air.TypeEnum:
@@ -4069,7 +4083,7 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
 	}
 	fmt.Fprintf(b, "}\n")
-	if info.Kind == air.TypeStruct {
+	if info.Kind == air.TypeStruct && !l.isStdlibFFIBackedType(info) {
 		fmt.Fprintf(b, "\nfunc (value %s) MarshalJSONTo(enc *jsontext.Encoder) error {\n\treturn %s(enc, value)\n}\n", typeName, helper)
 	}
 	fmt.Fprintf(b, "\nfunc %s(value %s) (string, error) {\n\tvar buf bytes.Buffer\n\tenc := jsontext.NewEncoder(&buf)\n\tif err := %s(enc, value); err != nil { return \"\", err }\n\treturn string(bytes.TrimSuffix(buf.Bytes(), []byte(\"\\n\"))), nil\n}\n", l.jsonEncodeTopHelperName(typeID), typeName, helper)
@@ -4159,7 +4173,7 @@ func (l *lowerer) writeJSONDecodeTextHelper(b *strings.Builder, typeID air.TypeI
 		fmt.Fprintf(b, "\tfor dec.PeekKind() != jsontext.KindEndObject {\n\t\tkeyTok, err := dec.ReadToken()\n\t\tif err != nil { return out, err.Error() }\n\t\tkey := keyTok.String()\n\t\tswitch key {\n")
 		for _, field := range info.Fields {
 			fieldInfo := l.program.Types[field.Type-1]
-			fmt.Fprintf(b, "\t\tcase %q:\n\t\t\tfieldPath := key\n\t\t\tif path != \"\" { fieldPath = ardJSONPath(path, key) }\n\t\t\tvalue, message := %s(dec, fieldPath)\n\t\t\tif message != \"\" { return out, message }\n\t\t\tout.%s = value\n", field.Name, l.jsonDecodeTextHelperName(field.Type), field.Name)
+			fmt.Fprintf(b, "\t\tcase %q:\n\t\t\tfieldPath := key\n\t\t\tif path != \"\" { fieldPath = ardJSONPath(path, key) }\n\t\t\tvalue, message := %s(dec, fieldPath)\n\t\t\tif message != \"\" { return out, message }\n\t\t\tout.%s = value\n", field.Name, l.jsonDecodeTextHelperName(field.Type), l.goFieldName(info, field.Name))
 			if fieldInfo.Kind != air.TypeMaybe {
 				fmt.Fprintf(b, "\t\t\tseen%s = true\n", exportedFieldName(field.Name))
 			}
