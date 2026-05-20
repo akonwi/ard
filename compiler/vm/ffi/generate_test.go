@@ -18,6 +18,7 @@ func TestGenerateGoStdlibLoweringSkipsUnimplementedBindings(t *testing.T) {
 		`extern fn present(value: Str) Str = "Present"`,
 		`extern fn missing(value: Str) Str = "Missing"`,
 		`extern fn json_encode(value: Dynamic) Str!Str = "JsonEncode"`,
+		`extern fn parse(input: Str) $T!Str = "JsonParse"`,
 	}, "\n")), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func Present(value string) string { return value }
 	if strings.Contains(string(generated), `switch binding`) {
 		t.Fatalf("generated lowering should use contract metadata instead of a binding switch:\n%s", generated)
 	}
-	if !strings.Contains(string(generated), `"Present": {function: "Present"`) {
+	if !strings.Contains(string(generated), `"Present"`) || !strings.Contains(string(generated), `function: "Present"`) {
 		t.Fatalf("generated lowering missing Present metadata:\n%s", generated)
 	}
 	if strings.Contains(string(generated), `"Missing":`) {
@@ -59,6 +60,9 @@ func Present(value string) string { return value }
 	}
 	if strings.Contains(string(generated), `"JsonEncode":`) {
 		t.Fatalf("generated lowering includes custom JsonEncode case:\n%s", generated)
+	}
+	if !strings.Contains(string(generated), `"JsonParse"`) || !strings.Contains(string(generated), `generatedStdlibExternJSONParse`) {
+		t.Fatalf("generated lowering missing special JsonParse kind:\n%s", generated)
 	}
 }
 

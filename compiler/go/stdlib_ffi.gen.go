@@ -8,6 +8,13 @@ import (
 	"github.com/akonwi/ard/air"
 )
 
+type generatedStdlibExternKind uint8
+
+const (
+	generatedStdlibExternCall generatedStdlibExternKind = iota
+	generatedStdlibExternJSONParse
+)
+
 type generatedStdlibExternReturn uint8
 
 const (
@@ -26,6 +33,7 @@ const (
 )
 
 type generatedStdlibExternLowering struct {
+	kind     generatedStdlibExternKind
 	function string
 	returns  generatedStdlibExternReturn
 	params   []generatedStdlibExternParamAdapter
@@ -101,12 +109,17 @@ var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
 	"SqlRollback":          {function: "SqlRollback", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"StrToDynamic":         {function: "StrToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"VoidToDynamic":        {function: "VoidToDynamic", returns: generatedStdlibReturnDirect, params: nil},
+	"JsonParse":            {kind: generatedStdlibExternJSONParse},
 }
 
 func (l *lowerer) lowerGeneratedStdlibExtern(binding string, signature air.Signature, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, bool, error) {
 	lowering, ok := generatedStdlibExternLowerings[binding]
 	if !ok {
 		return loweredExpr{}, false, nil
+	}
+	if lowering.kind == generatedStdlibExternJSONParse {
+		wrapped, err := l.lowerJSONParseStdlibExtern(args, stmts, returnTypeID)
+		return wrapped, true, err
 	}
 	adaptedArgs := append([]ast.Expr(nil), args...)
 	for i, adapter := range lowering.params {
