@@ -1,11 +1,13 @@
 package gotarget
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 
 	"github.com/akonwi/ard/air"
@@ -14,8 +16,23 @@ import (
 )
 
 type Options struct {
-	PackageName string
-	ProjectInfo *checker.ProjectInfo
+	PackageName  string
+	ProjectInfo  *checker.ProjectInfo
+	SuppressMain bool
+	IncludeTests bool
+}
+
+type TestCase struct {
+	Name        string
+	DisplayName string
+	Function    air.FunctionID
+}
+
+type TestOutcome struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	Status      string `json:"status"`
+	Message     string `json:"message,omitempty"`
 }
 
 func GenerateSources(program *air.Program, options Options) (map[string][]byte, error) {
@@ -75,6 +92,89 @@ func BuildProgram(program *air.Program, outputPath string, projectInfo ...*check
 		return "", err
 	}
 	return absOutput, nil
+}
+
+func RunTests(program *air.Program, args []string, tests []TestCase, failFast bool, projectInfo ...*checker.ProjectInfo) ([]TestOutcome, error) {
+	workspaceDir, err := artifactWorkspace(inputPathFromCLIArgs(args), "test")
+	if err != nil {
+		return nil, err
+	}
+	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: optionalProjectInfo(projectInfo), SuppressMain: true, IncludeTests: true}); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, "ard_tests.go"), []byte(renderTestRunner(program, tests, failFast)), 0o644); err != nil {
+		return nil, err
+	}
+	binaryPath := filepath.Join(workspaceDir, "ard-tests")
+	if err := buildGeneratedProgram(workspaceDir, binaryPath); err != nil {
+		return nil, err
+	}
+	resultPath := filepath.Join(workspaceDir, "test-results.json")
+	cmd := exec.Command(binaryPath, programArgs(args)...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	cmd.Env = append(os.Environ(), "ARD_TEST_RESULTS="+resultPath)
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(resultPath)
+	if err != nil {
+		return nil, err
+	}
+	var outcomes []TestOutcome
+	if err := json.Unmarshal(data, &outcomes); err != nil {
+		return nil, err
+	}
+	return outcomes, nil
+}
+
+func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) string {
+	var b strings.Builder
+	b.WriteString("package main\n\n")
+	b.WriteString("import (\n")
+	b.WriteString("\t\"encoding/json\"\n")
+	b.WriteString("\t\"fmt\"\n")
+	b.WriteString("\t\"os\"\n")
+	b.WriteString("\truntime \"github.com/akonwi/ard/runtime\"\n")
+	b.WriteString(")\n\n")
+	b.WriteString("type ardTestOutcome struct {\n")
+	b.WriteString("\tName string `json:\"name\"`\n")
+	b.WriteString("\tDisplayName string `json:\"displayName\"`\n")
+	b.WriteString("\tStatus string `json:\"status\"`\n")
+	b.WriteString("\tMessage string `json:\"message,omitempty\"`\n")
+	b.WriteString("}\n\n")
+	b.WriteString("func ardRunTest(name string, displayName string, fn func() runtime.Result[struct{}, string]) (out ardTestOutcome) {\n")
+	b.WriteString("\tout = ardTestOutcome{Name: name, DisplayName: displayName, Status: \"panic\"}\n")
+	b.WriteString("\tdefer func() { if recovered := recover(); recovered != nil { out.Status = \"panic\"; out.Message = fmt.Sprint(recovered) } }()\n")
+	b.WriteString("\tresult := fn()\n")
+	b.WriteString("\tif result.Ok { out.Status = \"pass\"; out.Message = \"\" } else { out.Status = \"fail\"; out.Message = result.Err }\n")
+	b.WriteString("\treturn out\n")
+	b.WriteString("}\n\n")
+	b.WriteString("func main() {\n")
+	b.WriteString("\toutcomes := []ardTestOutcome{}\n")
+	for _, test := range tests {
+		if test.Function < 0 || int(test.Function) >= len(program.Functions) {
+			continue
+		}
+		fn := program.Functions[test.Function]
+		fmt.Fprintf(&b, "\toutcomes = append(outcomes, ardRunTest(%s, %s, %s))\n", strconv.Quote(test.Name), strconv.Quote(test.DisplayName), functionName(program, fn))
+		if failFast {
+			b.WriteString("\tif outcomes[len(outcomes)-1].Status != \"pass\" { goto done }\n")
+		}
+	}
+	if failFast {
+		b.WriteString("done:\n")
+	}
+	b.WriteString("\tdata, err := json.Marshal(outcomes)\n")
+	b.WriteString("\tif err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }\n")
+	b.WriteString("\tif path := os.Getenv(\"ARD_TEST_RESULTS\"); path != \"\" {\n")
+	b.WriteString("\t\tif err := os.WriteFile(path, data, 0o644); err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }\n")
+	b.WriteString("\t\treturn\n")
+	b.WriteString("\t}\n")
+	b.WriteString("\t_, _ = os.Stdout.Write(data)\n")
+	b.WriteString("}\n")
+	return b.String()
 }
 
 func writeProgram(dir string, program *air.Program, options Options) error {

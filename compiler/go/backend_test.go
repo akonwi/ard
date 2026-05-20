@@ -49,6 +49,41 @@ func TestGenerateSourcesFormatsSimpleProgram(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesOmitsTestsUnlessIncluded(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn main() Int { 1 }
+		test fn check() Void!Str { Result::ok(()) }
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := air.LowerWithTests(c.Module())
+	if err != nil {
+		t.Fatalf("lower with tests: %v", err)
+	}
+
+	productionSources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources production error = %v", err)
+	}
+	if strings.Contains(string(productionSources["test.go"]), "__check") {
+		t.Fatalf("production source includes test function:\n%s", productionSources["test.go"])
+	}
+
+	testSources, err := GenerateSources(program, Options{PackageName: "main", IncludeTests: true, SuppressMain: true})
+	if err != nil {
+		t.Fatalf("GenerateSources tests error = %v", err)
+	}
+	if !strings.Contains(string(testSources["test.go"]), "__check") {
+		t.Fatalf("test source missing test function:\n%s", testSources["test.go"])
+	}
+}
+
 func TestRunProgramExecutesSimpleMain(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Void {
@@ -212,6 +247,39 @@ func TestRunProgramSupportsCommonStdlibExterns(t *testing.T) {
 
 	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
 		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestBuildProgramCompilesJSONPreludeForStdlibBackedHTTPTypes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/http
+use ard/json
+
+struct App {
+  routes: [Str: fn(http::Request, mut http::Response)]
+}
+
+fn main() Str {
+  json::encode(Dynamic::from("ok")).or("")
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(dir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("build: %v", err)
 	}
 }
 

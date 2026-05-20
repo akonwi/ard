@@ -162,12 +162,12 @@ func main() {
 		}
 	case "test":
 		{
-			inputPath, filter, failFast, err := parseTestArgs(os.Args[2:])
+			inputPath, filter, failFast, target, err := parseTestArgs(os.Args[2:])
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			if !runTests(inputPath, filter, failFast) {
+			if !runTests(inputPath, filter, failFast, target) {
 				os.Exit(1)
 			}
 			os.Exit(0)
@@ -323,10 +323,11 @@ func parseFormatArgs(args []string) (string, bool, error) {
 	return inputPath, checkOnly, nil
 }
 
-func parseTestArgs(args []string) (string, string, bool, error) {
+func parseTestArgs(args []string) (string, string, bool, string, error) {
 	inputPath := "."
 	filter := ""
 	failFast := false
+	target := backend.TargetVM
 	seenPath := false
 
 	for i := 0; i < len(args); i++ {
@@ -336,23 +337,33 @@ func parseTestArgs(args []string) (string, string, bool, error) {
 			failFast = true
 		case "--filter":
 			if i+1 >= len(args) {
-				return "", "", false, fmt.Errorf("--filter requires a value")
+				return "", "", false, "", fmt.Errorf("--filter requires a value")
 			}
 			filter = args[i+1]
 			i++
+		case "--target":
+			if i+1 >= len(args) {
+				return "", "", false, "", fmt.Errorf("--target requires a value")
+			}
+			parsedTarget, err := backend.ParseTarget(args[i+1])
+			if err != nil {
+				return "", "", false, "", err
+			}
+			target = parsedTarget
+			i++
 		default:
 			if strings.HasPrefix(arg, "-") {
-				return "", "", false, fmt.Errorf("unknown flag: %s", arg)
+				return "", "", false, "", fmt.Errorf("unknown flag: %s", arg)
 			}
 			if seenPath {
-				return "", "", false, fmt.Errorf("unexpected argument: %s", arg)
+				return "", "", false, "", fmt.Errorf("unexpected argument: %s", arg)
 			}
 			inputPath = arg
 			seenPath = true
 		}
 	}
 
-	return inputPath, filter, failFast, nil
+	return inputPath, filter, failFast, target, nil
 }
 
 func formatPath(inputPath string, checkOnly bool) ([]string, error) {
@@ -465,7 +476,18 @@ type testOutcome struct {
 	message string
 }
 
-func runTests(inputPath, filter string, failFast bool) bool {
+func runTests(inputPath, filter string, failFast bool, target ...string) bool {
+	testTarget := backend.TargetVM
+	if len(target) > 0 && target[0] != "" {
+		testTarget = target[0]
+	}
+	if testTarget == backend.TargetGo {
+		return runGoTests(inputPath, filter, failFast)
+	}
+	if testTarget != backend.TargetVM {
+		fmt.Printf("unsupported test target: %s\n", testTarget)
+		return false
+	}
 	files, err := discoverTestFiles(inputPath)
 	if err != nil {
 		fmt.Println(err)
@@ -483,7 +505,7 @@ func runTests(inputPath, filter string, failFast bool) bool {
 			continue
 		}
 
-		program, err := air.Lower(module)
+		program, err := air.LowerWithTests(module)
 		if err != nil {
 			fmt.Println(err)
 			return false
@@ -514,6 +536,93 @@ func runTests(inputPath, filter string, failFast bool) bool {
 		return true
 	}
 
+	reportTestSummary(outcomes)
+	for _, outcome := range outcomes {
+		if outcome.status != testPass {
+			return false
+		}
+	}
+	return true
+}
+
+func runGoTests(inputPath, filter string, failFast bool) bool {
+	files, err := discoverTestFiles(inputPath)
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+
+	outcomes := make([]testOutcome, 0)
+	for _, path := range files {
+		loaded, err := frontend.LoadModule(path, backend.TargetGo)
+		if err != nil {
+			return false
+		}
+		tests := collectTests(loaded.Module, path, filter)
+		if len(tests) == 0 {
+			continue
+		}
+
+		program, err := air.LowerWithTests(loaded.Module)
+		if err != nil {
+			fmt.Println(err)
+			return false
+		}
+		if err := air.Validate(program); err != nil {
+			fmt.Println(err)
+			return false
+		}
+		goTests := make([]gotarget.TestCase, 0, len(tests))
+		for _, test := range tests {
+			fnID := air.NoFunction
+			for _, airTest := range program.Tests {
+				if airTest.Name == test.name {
+					fnID = airTest.Function
+					break
+				}
+			}
+			if fnID == air.NoFunction {
+				fmt.Printf("test not found: %s\n", test.displayName())
+				return false
+			}
+			goTests = append(goTests, gotarget.TestCase{Name: test.name, DisplayName: test.displayName(), Function: fnID})
+		}
+		goOutcomes, err := gotarget.RunTests(program, []string{"ard", "test", path}, goTests, failFast, loaded.ProjectInfo)
+		if err != nil {
+			fmt.Println(err)
+			return false
+		}
+		byName := map[string]discoveredTest{}
+		for _, test := range tests {
+			byName[test.displayName()] = test
+		}
+		for _, goOutcome := range goOutcomes {
+			test, ok := byName[goOutcome.DisplayName]
+			if !ok {
+				test = discoveredTest{filePath: path, displayPath: strings.TrimSuffix(filepath.Clean(path), filepath.Ext(path)), name: goOutcome.Name}
+			}
+			outcome := testOutcome{test: test, message: goOutcome.Message}
+			switch goOutcome.Status {
+			case "pass":
+				outcome.status = testPass
+			case "fail":
+				outcome.status = testFail
+			default:
+				outcome.status = testPanic
+			}
+			outcomes = append(outcomes, outcome)
+			reportTestOutcome(outcome)
+			if failFast && outcome.status != testPass {
+				reportTestSummary(outcomes)
+				return false
+			}
+		}
+	}
+
+	if len(outcomes) == 0 {
+		fmt.Println("No tests found")
+		return true
+	}
 	reportTestSummary(outcomes)
 	for _, outcome := range outcomes {
 		if outcome.status != testPass {

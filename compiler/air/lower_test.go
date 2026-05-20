@@ -51,6 +51,42 @@ func TestLowerTinyProgram(t *testing.T) {
 	}
 }
 
+func TestLowerOmitsTestsByDefault(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn main() Int { 1 }
+		test fn check() Void!Str { Result::ok(()) }
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+
+	production, err := Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower production: %v", err)
+	}
+	if len(production.Tests) != 0 {
+		t.Fatalf("production tests = %#v, want none", production.Tests)
+	}
+	for _, fn := range production.Functions {
+		if fn.IsTest || fn.Name == "check" {
+			t.Fatalf("production function includes test: %#v", fn)
+		}
+	}
+
+	withTests, err := LowerWithTests(c.Module())
+	if err != nil {
+		t.Fatalf("lower with tests: %v", err)
+	}
+	if len(withTests.Tests) != 1 || withTests.Tests[0].Name != "check" {
+		t.Fatalf("withTests tests = %#v, want check", withTests.Tests)
+	}
+}
+
 func TestLowerMainEntrypoint(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
@@ -680,7 +716,7 @@ func TestLowerImportedGenericModuleFunctionSpecialization(t *testing.T) {
 }
 
 func TestLowerTestsManifest(t *testing.T) {
-	program := lowerSource(t, `
+	program := lowerSourceWithTests(t, `
 		use ard/testing
 
 		test fn adds() Void!Str {
@@ -719,6 +755,24 @@ func lowerSource(t *testing.T, input string) *Program {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 	program, err := Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	return program
+}
+
+func lowerSourceWithTests(t *testing.T, input string) *Program {
+	t.Helper()
+	result := parse.Parse([]byte(input), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := LowerWithTests(c.Module())
 	if err != nil {
 		t.Fatalf("lower error: %v", err)
 	}

@@ -118,10 +118,13 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 		return ast.NewIdent("any"), nil
 	case TypeFunction:
 		params := make([]*ast.Field, 0, len(typ.Params))
-		for _, param := range typ.Params {
+		for i, param := range typ.Params {
 			paramType, err := goTypeExpr(program, param, runtimeQualifier)
 			if err != nil {
 				return nil, err
+			}
+			if i < len(typ.ParamMutable) && typ.ParamMutable[i] {
+				paramType = &ast.StarExpr{X: paramType}
 			}
 			params = append(params, &ast.Field{Type: paramType})
 		}

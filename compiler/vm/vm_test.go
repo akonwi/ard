@@ -1149,7 +1149,7 @@ func lowerSourceForVMTest(t *testing.T, input string) *air.Program {
 	if c.HasErrors() {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
-	program, err := air.Lower(c.Module())
+	program, err := air.LowerWithTests(c.Module())
 	if err != nil {
 		t.Fatalf("lower error: %v", err)
 	}

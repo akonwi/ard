@@ -1,8 +1,10 @@
 package gotarget
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"path/filepath"
@@ -27,7 +29,10 @@ type lowerer struct {
 	currentImports map[string]string
 	declaredLocals map[air.LocalID]bool
 	runtimeHelpers map[string]bool
+	jsonParseTypes map[air.TypeID]bool
 	projectImports map[string]string
+	suppressMain   bool
+	includeTests   bool
 }
 
 func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, error) {
@@ -37,7 +42,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if err := air.Validate(program); err != nil {
 		return nil, err
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, projectImports: collectProjectGoImports(options.ProjectInfo)}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, projectImports: collectProjectGoImports(options.ProjectInfo), suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
 	modules := make([]air.Module, 0, len(program.Modules))
@@ -128,22 +133,29 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 	sort.Slice(functionIDs, func(i, j int) bool { return functionIDs[i] < functionIDs[j] })
 	for _, functionID := range functionIDs {
 		fn := l.program.Functions[functionID]
+		if fn.IsTest && !l.includeTests {
+			continue
+		}
 		decl, err := l.lowerFunction(fn)
 		if err != nil {
 			return nil, fmt.Errorf("module %s function %s: %w", module.Path, fn.Name, err)
 		}
 		decls = append(decls, decl)
 	}
-	if !hasRoot && module.ID == mainModuleID {
-		decls = append(l.runtimePreludeDecls(), decls...)
-		decls = append(decls, &ast.FuncDecl{Name: ast.NewIdent("main"), Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{}})
-	} else if hasRoot && module.ID == mainModuleID {
-		mainDecl, err := l.lowerMainWrapper(rootID)
-		if err != nil {
-			return nil, err
+	if module.ID == mainModuleID {
+		if l.suppressMain {
+			decls = append(l.runtimePreludeDecls(), decls...)
+		} else if !hasRoot {
+			decls = append(l.runtimePreludeDecls(), decls...)
+			decls = append(decls, &ast.FuncDecl{Name: ast.NewIdent("main"), Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{}})
+		} else {
+			mainDecl, err := l.lowerMainWrapper(rootID)
+			if err != nil {
+				return nil, err
+			}
+			decls = append(decls, mainDecl)
+			decls = append(l.runtimePreludeDecls(), decls...)
 		}
-		decls = append(decls, mainDecl)
-		decls = append(l.runtimePreludeDecls(), decls...)
 	}
 	if len(l.currentImports) > 0 {
 		usedImports := l.usedImports(decls)
@@ -292,22 +304,6 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 			return 0
 		})
 		return keys
-	}
-`)
-	}
-	if l.runtimeHelpers["dynamic_to_any_map"] {
-		l.currentImports["stdlibffi"] = "github.com/akonwi/ard/std_lib/ffi"
-		parts = append(parts, `
-	func ardDynamicToAnyMap(data any) (map[any]any, error) {
-		values, err := stdlibffi.DynamicToMap(data)
-		if err != nil {
-			return nil, err
-		}
-		out := make(map[any]any, len(values))
-		for key, value := range values {
-			out[key] = value
-		}
-		return out, nil
 	}
 `)
 	}
@@ -577,7 +573,7 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		out := append([]ast.Stmt{}, target.stmts...)
 		out = append(out, value.stmts...)
 		out = append(out, &ast.AssignStmt{
-			Lhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(targetType.Fields[stmt.Field].Name)}},
+			Lhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, targetType.Fields[stmt.Field].Name))}},
 			Tok: token.ASSIGN,
 			Rhs: []ast.Expr{value.expr},
 		})
@@ -1403,6 +1399,9 @@ func (l *lowerer) goParamType(param air.Param) (ast.Expr, error) {
 }
 
 func (l *lowerer) modulePathForType(typeID air.TypeID) string {
+	if validTypeID(l.program, typeID) && l.program.Types[typeID-1].ModulePath != "" {
+		return l.program.Types[typeID-1].ModulePath
+	}
 	for _, module := range l.program.Modules {
 		for _, moduleTypeID := range module.Types {
 			if moduleTypeID == typeID {
@@ -1421,19 +1420,7 @@ func (l *lowerer) isStdlibFFIBackedType(info air.TypeInfo) bool {
 		return false
 	}
 	path := l.modulePathForType(info.ID)
-	return strings.HasPrefix(path, "ard/") && info.Name != ""
-}
-
-func (l *lowerer) isHTTPHandlerFunctionType(info air.TypeInfo) bool {
-	if info.Kind != air.TypeFunction || len(info.Params) != 2 || !l.isVoidType(info.Return) {
-		return false
-	}
-	if !validTypeID(l.program, info.Params[0]) || !validTypeID(l.program, info.Params[1]) {
-		return false
-	}
-	left := l.program.Types[info.Params[0]-1]
-	right := l.program.Types[info.Params[1]-1]
-	return left.Kind == air.TypeStruct && right.Kind == air.TypeStruct && left.Name == "Request" && right.Name == "Response"
+	return path == "ard/http" && (info.Name == "Method" || info.Name == "Request" || info.Name == "Response")
 }
 
 func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
@@ -1472,7 +1459,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			if err != nil {
 				return nil, err
 			}
-			if l.isHTTPHandlerFunctionType(info) && i == 1 {
+			if i < len(info.ParamMutable) && info.ParamMutable[i] {
 				paramType = &ast.StarExpr{X: paramType}
 			}
 			params = append(params, &ast.Field{Type: paramType})
@@ -3679,118 +3666,6 @@ func unionSliceCaseClauses(program *air.Program, unionInfo air.TypeInfo, outTemp
 	return cases
 }
 
-func (l *lowerer) lowerHTTPServeExtern(args []ast.Expr, handlerMapType air.TypeID, resultTypeID air.TypeID) (loweredExpr, error) {
-	if len(args) != 2 {
-		return loweredExpr{}, fmt.Errorf("HTTP_Serve expects 2 args")
-	}
-	if !validTypeID(l.program, handlerMapType) {
-		return loweredExpr{}, fmt.Errorf("invalid handler map type %d", handlerMapType)
-	}
-	mapInfo := l.program.Types[handlerMapType-1]
-	if mapInfo.Kind != air.TypeMap || !validTypeID(l.program, mapInfo.Value) {
-		return loweredExpr{}, fmt.Errorf("HTTP_Serve handlers must be a map of functions")
-	}
-	fnInfo := l.program.Types[mapInfo.Value-1]
-	if fnInfo.Kind != air.TypeFunction || len(fnInfo.Params) != 2 {
-		return loweredExpr{}, fmt.Errorf("HTTP_Serve handler signature mismatch")
-	}
-	reqType := l.program.Types[fnInfo.Params[0]-1]
-	resType := l.program.Types[fnInfo.Params[1]-1]
-
-	callbackType := &ast.FuncType{
-		Params: &ast.FieldList{List: []*ast.Field{
-			{Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Request")},
-			{Type: &ast.StarExpr{X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Response")}},
-		}},
-		Results: &ast.FieldList{List: []*ast.Field{{Type: voidTypeExpr()}, {Type: ast.NewIdent("error")}}},
-	}
-	adapterType := &ast.MapType{Key: ast.NewIdent("string"), Value: callbackType}
-	adapterName := l.nextTemp()
-	pathName := l.nextTemp()
-	handlerName := l.nextTemp()
-	reqName := l.nextTemp()
-	resName := l.nextTemp()
-	ardReqName := l.nextTemp()
-	ardResName := l.nextTemp()
-	errName := l.nextTemp()
-
-	requestMethodType := ast.NewIdent(typeName(l.program, l.program.Types[reqType.Fields[2].Type-1]))
-	requestType := ast.NewIdent(typeName(l.program, reqType))
-	responseType := ast.NewIdent(typeName(l.program, resType))
-
-	bodyMaybe := &ast.CompositeLit{Type: mustTypeExpr(l, reqType.Fields[0].Type), Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.SelectorExpr{X: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Body")}, Sel: ast.NewIdent("Value")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: &ast.SelectorExpr{X: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Body")}, Sel: ast.NewIdent("Some")}},
-	}}
-	rawMaybe := &ast.CompositeLit{Type: mustTypeExpr(l, reqType.Fields[3].Type), Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.SelectorExpr{X: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Raw")}, Sel: ast.NewIdent("Value")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: &ast.SelectorExpr{X: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Raw")}, Sel: ast.NewIdent("Some")}},
-	}}
-	timeoutMaybe := &ast.CompositeLit{Type: mustTypeExpr(l, reqType.Fields[4].Type), Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.SelectorExpr{X: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Timeout")}, Sel: ast.NewIdent("Value")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: &ast.SelectorExpr{X: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Timeout")}, Sel: ast.NewIdent("Some")}},
-	}}
-	ardReqLit := &ast.CompositeLit{Type: requestType, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent(reqType.Fields[0].Name), Value: bodyMaybe},
-		&ast.KeyValueExpr{Key: ast.NewIdent(reqType.Fields[1].Name), Value: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Headers")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent(reqType.Fields[2].Name), Value: &ast.CallExpr{Fun: requestMethodType, Args: []ast.Expr{&ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Method")}}}},
-		&ast.KeyValueExpr{Key: ast.NewIdent(reqType.Fields[3].Name), Value: rawMaybe},
-		&ast.KeyValueExpr{Key: ast.NewIdent(reqType.Fields[4].Name), Value: timeoutMaybe},
-		&ast.KeyValueExpr{Key: ast.NewIdent(reqType.Fields[5].Name), Value: &ast.SelectorExpr{X: ast.NewIdent(reqName), Sel: ast.NewIdent("Url")}},
-	}}
-	ardResLit := &ast.CompositeLit{Type: responseType, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent(resType.Fields[0].Name), Value: &ast.SelectorExpr{X: ast.NewIdent(resName), Sel: ast.NewIdent("Body")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent(resType.Fields[1].Name), Value: &ast.SelectorExpr{X: ast.NewIdent(resName), Sel: ast.NewIdent("Headers")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent(resType.Fields[2].Name), Value: &ast.SelectorExpr{X: ast.NewIdent(resName), Sel: ast.NewIdent("Status")}},
-	}}
-	stdlibResLit := &ast.CompositeLit{Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Response"), Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Body"), Value: &ast.SelectorExpr{X: ast.NewIdent(ardResName), Sel: ast.NewIdent(resType.Fields[0].Name)}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Headers"), Value: &ast.SelectorExpr{X: ast.NewIdent(ardResName), Sel: ast.NewIdent(resType.Fields[1].Name)}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Status"), Value: &ast.SelectorExpr{X: ast.NewIdent(ardResName), Sel: ast.NewIdent(resType.Fields[2].Name)}},
-	}}
-	wrapperFunc := &ast.FuncLit{
-		Type: &ast.FuncType{
-			Params: &ast.FieldList{List: []*ast.Field{
-				{Names: []*ast.Ident{ast.NewIdent(reqName)}, Type: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Request")},
-				{Names: []*ast.Ident{ast.NewIdent(resName)}, Type: &ast.StarExpr{X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Response")}},
-			}},
-			Results: &ast.FieldList{List: []*ast.Field{{Type: voidTypeExpr()}, {Type: ast.NewIdent("error")}}},
-		},
-		Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(ardReqName)}, Tok: token.DEFINE, Rhs: []ast.Expr{ardReqLit}},
-			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(ardResName)}, Tok: token.DEFINE, Rhs: []ast.Expr{ardResLit}},
-			&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent(handlerName), Args: []ast.Expr{ast.NewIdent(ardReqName), &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(ardResName)}}}},
-			&ast.AssignStmt{Lhs: []ast.Expr{&ast.StarExpr{X: ast.NewIdent(resName)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{stdlibResLit}},
-			&ast.ReturnStmt{Results: []ast.Expr{voidValueExpr(), ast.NewIdent("nil")}},
-		}},
-	}
-
-	stmts := []ast.Stmt{
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(adapterName)}, Type: adapterType}}}},
-		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(adapterName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CompositeLit{Type: adapterType}}},
-		&ast.RangeStmt{
-			Key:   ast.NewIdent(pathName),
-			Value: ast.NewIdent(handlerName),
-			Tok:   token.DEFINE,
-			X:     args[1],
-			Body: &ast.BlockStmt{List: []ast.Stmt{
-				&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(adapterName), Index: ast.NewIdent(pathName)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{wrapperFunc}},
-			}},
-		},
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(errName)}, Type: ast.NewIdent("error")}}}},
-		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPServe"), Args: []ast.Expr{args[0], ast.NewIdent(adapterName)}}}},
-	}
-	resultType, err := l.goType(resultTypeID)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: voidValueExpr()},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{ast.NewIdent(errName)}}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errName), Op: token.EQL, Y: ast.NewIdent("nil")}},
-	}}}, nil
-}
-
 func (l *lowerer) wrapStdlibResultCall(resultTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
 	if !validTypeID(l.program, resultTypeID) {
 		return loweredExpr{}, fmt.Errorf("invalid result type id %d", resultTypeID)
@@ -3843,393 +3718,14 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 	if !externModuleIsStdlib(l.program, ext) {
 		return l.lowerProjectExternCall(ext, binding, args, stmts, expr.Type)
 	}
-	switch binding {
-	case "Print":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Print"), Args: args}}, nil
-	case "FloatFromInt":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FloatFromInt"), Args: args}}, nil
-	case "ReadLine":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "ReadLine"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "FS_Exists":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSExists"), Args: args}}, nil
-	case "FS_IsFile":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSIsFile"), Args: args}}, nil
-	case "FS_IsDir":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSIsDir"), Args: args}}, nil
-	case "FS_CreateFile":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSCreateFile"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "FS_WriteFile":
-		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSWriteFile"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "FS_AppendFile":
-		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSAppendFile"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "FS_ReadFile":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSReadFile"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "FS_DeleteFile":
-		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSDeleteFile"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "FS_Copy":
-		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSCopy"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "FS_Rename":
-		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSRename"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "FS_Cwd":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSCwd"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "FS_Abs":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSAbs"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "FS_CreateDir":
-		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSCreateDir"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "FS_DeleteDir":
-		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSDeleteDir"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "FS_ListDir":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FSListDir"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "IntFromStr":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "IntFromStr"), Args: args}}, nil
-	case "Sleep":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Sleep"), Args: args}}, nil
-	case "FloatFromStr":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FloatFromStr"), Args: args}}, nil
-	case "FloatFloor":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "FloatFloor"), Args: args}}, nil
-	case "EnvGet":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "EnvGet"), Args: args}}, nil
-	case "OsArgs":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "OsArgs"), Args: args}}, nil
-	case "Base64Encode":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Base64Encode"), Args: args}}, nil
-	case "SqlCreateConnection":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlCreateConnection"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "SqlClose":
-		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlClose"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "SqlExecute":
-		sqlArgs := append([]ast.Expr{}, args...)
-		if len(sqlArgs) != 3 {
-			return loweredExpr{}, fmt.Errorf("SqlExecute expects 3 args")
-		}
-		connArg, err := l.lowerUnionArgToAny(sqlArgs[0], expr.Args[0].Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, connArg.stmts...)
-		sqlArgs[0] = connArg.expr
-		valueArgs, err := l.lowerUnionSliceArgToAny(sqlArgs[2], expr.Args[2].Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, valueArgs.stmts...)
-		sqlArgs[2] = valueArgs.expr
-		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlExecute"), Args: sqlArgs})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "SqlQuery":
-		sqlArgs := append([]ast.Expr{}, args...)
-		if len(sqlArgs) != 3 {
-			return loweredExpr{}, fmt.Errorf("SqlQuery expects 3 args")
-		}
-		connArg, err := l.lowerUnionArgToAny(sqlArgs[0], expr.Args[0].Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, connArg.stmts...)
-		sqlArgs[0] = connArg.expr
-		valueArgs, err := l.lowerUnionSliceArgToAny(sqlArgs[2], expr.Args[2].Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, valueArgs.stmts...)
-		sqlArgs[2] = valueArgs.expr
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlQuery"), Args: sqlArgs})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "SqlBeginTx":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlBeginTx"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "SqlCommit":
-		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlCommit"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "SqlRollback":
-		wrapped, err := l.wrapErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlRollback"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "SqlExtractParams":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "SqlExtractParams"), Args: args}}, nil
-	case "CryptoMd5":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoMd5"), Args: args}}, nil
-	case "CryptoSha256":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoSha256"), Args: args}}, nil
-	case "CryptoSha512":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoSha512"), Args: args}}, nil
-	case "CryptoUUID":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoUUID"), Args: args}}, nil
-	case "CryptoHashPassword":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoHashPassword"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "CryptoVerifyPassword":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoVerifyPassword"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "CryptoScryptHash":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoScryptHash"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "CryptoScryptVerify":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "CryptoScryptVerify"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "Base64Decode":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Base64Decode"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "Base64EncodeURL":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Base64EncodeURL"), Args: args}}, nil
-	case "Base64DecodeURL":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Base64DecodeURL"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "HexEncode":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HexEncode"), Args: args}}, nil
-	case "HexDecode":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HexDecode"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "StrToDynamic", "IntToDynamic", "FloatToDynamic", "BoolToDynamic":
-		return loweredExpr{stmts: stmts, expr: args[0]}, nil
-	case "ListToDynamic":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "ListToDynamic"), Args: args}}, nil
-	case "MapToDynamic":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "MapToDynamic"), Args: args}}, nil
-	case "JsonEncode":
-		if len(args) != 1 || len(expr.Args) != 1 {
-			return loweredExpr{}, fmt.Errorf("JsonEncode expects 1 arg")
-		}
-		l.markRuntimeHelper("json_encode")
-		helper := l.jsonEncodeTopHelperName(expr.Args[0].Type)
-		if l.jsonNativeCodecSafe(expr.Args[0].Type, map[air.TypeID]bool{}) {
-			helper = l.jsonEncodeMarshalTopHelperName(expr.Args[0].Type)
-		}
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: ast.NewIdent(helper), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "JsonParse":
-		wrapped, err := l.lowerJSONParseExtern(expr, args, stmts)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		return wrapped, nil
-	case "VoidToDynamic":
-		return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
-	case "JsonToDynamic":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "JsonToDynamic"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "IsNil":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "IsNil"), Args: args}}, nil
-	case "ExtractField":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "ExtractField"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "DecodeString":
-		wrapped, err := l.wrapStdlibResultCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "DecodeString"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "DecodeInt":
-		wrapped, err := l.wrapStdlibResultCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "DecodeInt"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "DecodeFloat":
-		wrapped, err := l.wrapStdlibResultCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "DecodeFloat"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "DecodeBool":
-		wrapped, err := l.wrapStdlibResultCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "DecodeBool"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "DynamicToList":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "DynamicToList"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "DynamicToMap":
-		l.markRuntimeHelper("dynamic_to_any_map")
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: ast.NewIdent("ardDynamicToAnyMap"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "HTTP_Do":
-		if len(args) != 5 {
-			return loweredExpr{}, fmt.Errorf("HTTP_Do expects 5 args")
-		}
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPDo"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "HTTP_ResponseStatus":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseStatus"), Args: args}}, nil
-	case "HTTP_ResponseHeaders":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseHeaders"), Args: args}}, nil
-	case "HTTP_ResponseBody":
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseBody"), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	case "HTTP_ResponseClose":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "HTTPResponseClose"), Args: args}}, nil
-	case "GetReqPath":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "GetReqPath"), Args: args}}, nil
-	case "GetPathValue":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "GetPathValue"), Args: args}}, nil
-	case "GetQueryParam":
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "GetQueryParam"), Args: args}}, nil
-	case "HTTP_Serve":
-		wrapped, err := l.lowerHTTPServeExtern(args, expr.Args[1].Type, expr.Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	default:
-		return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
+	generated, ok, err := l.lowerGeneratedStdlibExtern(binding, ext.Signature, args, stmts, expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
 	}
+	if ok {
+		return generated, nil
+	}
+	return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
 }
 
 func (l *lowerer) adaptProjectExternArgs(signature air.Signature, args []ast.Expr) ([]ast.Expr, []ast.Stmt, error) {
@@ -4348,18 +3844,69 @@ func validTypeID(program *air.Program, id air.TypeID) bool {
 	return id > 0 && int(id) <= len(program.Types)
 }
 
-func (l *lowerer) lowerJSONParseExtern(expr air.Expr, args []ast.Expr, stmts []ast.Stmt) (loweredExpr, error) {
-	if len(args) != 1 || len(expr.Args) != 1 {
+func (l *lowerer) markJSONParseType(typeID air.TypeID) {
+	if !validTypeID(l.program, typeID) || l.jsonParseTypes[typeID] {
+		return
+	}
+	l.jsonParseTypes[typeID] = true
+	info := l.program.Types[typeID-1]
+	switch info.Kind {
+	case air.TypeMaybe, air.TypeList:
+		l.markJSONParseType(info.Elem)
+	case air.TypeMap:
+		l.markJSONParseType(info.Key)
+		l.markJSONParseType(info.Value)
+	case air.TypeStruct:
+		for _, field := range info.Fields {
+			l.markJSONParseType(field.Type)
+		}
+	case air.TypeUnion:
+		for _, member := range info.Members {
+			l.markJSONParseType(member.Type)
+		}
+	case air.TypeResult:
+		l.markJSONParseType(info.Value)
+		l.markJSONParseType(info.Error)
+	}
+}
+
+func (l *lowerer) lowerJSONEncodeStdlibExtern(signature air.Signature, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
+	if len(args) != 1 || len(signature.Params) != 1 {
+		return loweredExpr{}, fmt.Errorf("JsonEncode expects 1 arg")
+	}
+	valueTypeID := signature.Params[0].Type
+	l.markRuntimeHelper("json_encode")
+	helper := l.jsonEncodeTopHelperName(valueTypeID)
+	// JsonEncode is lowered with type-specific helpers instead of the generic
+	// stdlib FFI call so the Go target can preserve Ard JSON semantics for
+	// maybe/union/dynamic-heavy values. When the static type is simple enough
+	// for native Go JSON encoding to match those semantics, prefer json.Marshal:
+	// it is noticeably faster on JSON-heavy benchmarks while keeping the
+	// Ard-aware streaming encoder as the universal fallback.
+	if l.jsonNativeCodecSafe(valueTypeID, map[air.TypeID]bool{}) {
+		helper = l.jsonEncodeMarshalTopHelperName(valueTypeID)
+	}
+	wrapped, err := l.wrapValueErrorCall(returnTypeID, &ast.CallExpr{Fun: ast.NewIdent(helper), Args: args})
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	wrapped.stmts = append(stmts, wrapped.stmts...)
+	return wrapped, nil
+}
+
+func (l *lowerer) lowerJSONParseStdlibExtern(args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
+	if len(args) != 1 {
 		return loweredExpr{}, fmt.Errorf("JsonParse expects 1 arg")
 	}
-	if !validTypeID(l.program, expr.Type) {
-		return loweredExpr{}, fmt.Errorf("invalid JsonParse result type %d", expr.Type)
+	if !validTypeID(l.program, returnTypeID) {
+		return loweredExpr{}, fmt.Errorf("invalid JsonParse result type %d", returnTypeID)
 	}
-	resultInfo := l.program.Types[expr.Type-1]
+	resultInfo := l.program.Types[returnTypeID-1]
 	if resultInfo.Kind != air.TypeResult {
 		return loweredExpr{}, fmt.Errorf("JsonParse expected result return, got %s", resultInfo.Name)
 	}
 	l.markRuntimeHelper("json_parse")
+	l.markJSONParseType(resultInfo.Value)
 	valueType, err := l.goType(resultInfo.Value)
 	if err != nil {
 		return loweredExpr{}, err
@@ -4376,7 +3923,7 @@ func (l *lowerer) lowerJSONParseExtern(expr air.Expr, args []ast.Expr, stmts []a
 		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(hostErrTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.qualified("json", "encoding/json/v2", "Unmarshal"), Args: []ast.Expr{&ast.CallExpr{Fun: &ast.ArrayType{Elt: ast.NewIdent("byte")}, Args: []ast.Expr{args[0]}}, &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(outTemp)}}}}},
 		&ast.IfStmt{Cond: &ast.BinaryExpr{X: ast.NewIdent(hostErrTemp), Op: token.NEQ, Y: ast.NewIdent("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(hostErrTemp), Sel: ast.NewIdent("Error")}}}}}}},
 	)
-	resultExpr := &ast.CompositeLit{Type: mustTypeExpr(l, expr.Type), Elts: []ast.Expr{
+	resultExpr := &ast.CompositeLit{Type: mustTypeExpr(l, returnTypeID), Elts: []ast.Expr{
 		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: ast.NewIdent(outTemp)},
 		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: ast.NewIdent(errTemp)},
 		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: &ast.BasicLit{Kind: token.STRING, Value: `""`}}},
@@ -4432,68 +3979,12 @@ func ardJSONMissing(path string, expected string) string {
 }
 `)
 	for _, typ := range l.program.Types {
-		if typ.ID == air.NoType {
+		if typ.ID == air.NoType || !l.jsonParseTypes[typ.ID] {
 			continue
 		}
-		l.writeJSONParseHelper(&b, typ.ID)
 		l.writeJSONDecodeTextHelper(&b, typ.ID)
 	}
 	return b.String()
-}
-
-func (l *lowerer) writeJSONParseHelper(b *strings.Builder, typeID air.TypeID) {
-	if !validTypeID(l.program, typeID) {
-		return
-	}
-	info := l.program.Types[typeID-1]
-	typeName := l.jsonParseGoTypeName(typeID)
-	helper := l.jsonParseHelperName(typeID)
-	fmt.Fprintf(b, "\nfunc %s(raw any, path string) (%s, string) {\n", helper, typeName)
-	fmt.Fprintf(b, "\tvar out %s\n\t_ = out\n", typeName)
-	switch info.Kind {
-	case air.TypeInt:
-		fmt.Fprintf(b, "\tswitch value := raw.(type) {\n\tcase float64:\n\t\tparsed := int(value)\n\t\tif value == float64(parsed) { return parsed, \"\" }\n\tcase int:\n\t\treturn value, \"\"\n\t}\n\treturn out, ardJSONErr(path, \"Int\", raw)\n")
-	case air.TypeFloat:
-		fmt.Fprintf(b, "\tswitch value := raw.(type) {\n\tcase float64:\n\t\treturn value, \"\"\n\tcase int:\n\t\treturn float64(value), \"\"\n\t}\n\treturn out, ardJSONErr(path, \"Float\", raw)\n")
-	case air.TypeBool:
-		fmt.Fprintf(b, "\tif value, ok := raw.(bool); ok { return value, \"\" }\n\treturn out, ardJSONErr(path, \"Bool\", raw)\n")
-	case air.TypeStr:
-		fmt.Fprintf(b, "\tif value, ok := raw.(string); ok { return value, \"\" }\n\treturn out, ardJSONErr(path, \"Str\", raw)\n")
-	case air.TypeDynamic:
-		fmt.Fprintf(b, "\treturn raw, \"\"\n")
-	case air.TypeMaybe:
-		elemHelper := l.jsonParseHelperName(info.Elem)
-		fmt.Fprintf(b, "\tif raw == nil { return out, \"\" }\n\tvalue, err := %s(raw, path)\n\tif err != \"\" { return out, err }\n\tout.Value = value\n\tout.Some = true\n\treturn out, \"\"\n", elemHelper)
-	case air.TypeList:
-		elemHelper := l.jsonParseHelperName(info.Elem)
-		fmt.Fprintf(b, "\titems, ok := raw.([]any)\n\tif !ok { return out, ardJSONErr(path, \"%s\", raw) }\n\tout = make(%s, len(items))\n\tfor i, item := range items {\n\t\tvalue, err := %s(item, ardJSONPath(path, fmt.Sprintf(\"[%%d]\", i)))\n\t\tif err != \"\" { return out, err }\n\t\tout[i] = value\n\t}\n\treturn out, \"\"\n", info.Name, typeName, elemHelper)
-	case air.TypeMap:
-		valueHelper := l.jsonParseHelperName(info.Value)
-		fmt.Fprintf(b, "\titems, ok := raw.(map[string]any)\n\tif !ok { return out, ardJSONErr(path, \"%s\", raw) }\n\tout = make(%s, len(items))\n\tfor key, item := range items {\n\t\tvalue, err := %s(item, ardJSONPath(path, key))\n\t\tif err != \"\" { return out, err }\n\t\tout[key] = value\n\t}\n\treturn out, \"\"\n", info.Name, typeName, valueHelper)
-	case air.TypeStruct:
-		fmt.Fprintf(b, "\titems, ok := raw.(map[string]any)\n\tif !ok { return out, ardJSONErr(path, \"%s\", raw) }\n", info.Name)
-		for _, field := range info.Fields {
-			fieldInfo := l.program.Types[field.Type-1]
-			fieldHelper := l.jsonParseHelperName(field.Type)
-			fieldAccess := field.Name
-			if fieldInfo.Kind == air.TypeMaybe {
-				fmt.Fprintf(b, "\tif rawField, ok := items[%q]; ok {\n\t\tvalue, err := %s(rawField, ardJSONPath(path, %q))\n\t\tif err != \"\" { return out, err }\n\t\tout.%s = value\n\t}\n", field.Name, fieldHelper, field.Name, fieldAccess)
-			} else {
-				fmt.Fprintf(b, "\traw%s, ok := items[%q]\n\tif !ok { return out, ardJSONMissing(ardJSONPath(path, %q), \"%s\") }\n\tvalue%s, err := %s(raw%s, ardJSONPath(path, %q))\n\tif err != \"\" { return out, err }\n\tout.%s = value%s\n", exportedFieldName(field.Name), field.Name, field.Name, fieldInfo.Name, exportedFieldName(field.Name), fieldHelper, exportedFieldName(field.Name), field.Name, fieldAccess, exportedFieldName(field.Name))
-			}
-		}
-		fmt.Fprintf(b, "\treturn out, \"\"\n")
-	default:
-		fmt.Fprintf(b, "\treturn out, ardJSONErr(path, %q, raw)\n", info.Name)
-	}
-	fmt.Fprintf(b, "}\n")
-	if info.Kind == air.TypeStruct {
-		fmt.Fprintf(b, "\nfunc (out *%s) UnmarshalJSONFrom(dec *jsontext.Decoder) error {\n\tparsed, message := %s(dec, \"\")\n\tif message != \"\" { return fmt.Errorf(\"%%s\", message) }\n\t*out = parsed\n\treturn nil\n}\n", typeName, l.jsonDecodeTextHelperName(typeID))
-	}
-}
-
-func (l *lowerer) jsonParseHelperName(typeID air.TypeID) string {
-	return fmt.Sprintf("ardJSONParse_%d", typeID)
 }
 
 func (l *lowerer) jsonParseGoTypeName(typeID air.TypeID) string {
@@ -4527,6 +4018,18 @@ func (l *lowerer) jsonParseGoTypeName(typeID air.TypeID) string {
 	}
 }
 
+func (l *lowerer) jsonEncodeGoTypeName(typeID air.TypeID) string {
+	typ, err := l.goType(typeID)
+	if err != nil {
+		return l.jsonParseGoTypeName(typeID)
+	}
+	var buf bytes.Buffer
+	if err := format.Node(&buf, token.NewFileSet(), typ); err != nil {
+		return l.jsonParseGoTypeName(typeID)
+	}
+	return buf.String()
+}
+
 func (l *lowerer) jsonEncodePreludeSource() string {
 	var b strings.Builder
 	for _, typ := range l.program.Types {
@@ -4543,7 +4046,7 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 		return
 	}
 	info := l.program.Types[typeID-1]
-	typeName := l.jsonParseGoTypeName(typeID)
+	typeName := l.jsonEncodeGoTypeName(typeID)
 	helper := l.jsonEncodeHelperName(typeID)
 	fmt.Fprintf(b, "\nfunc %s(enc *jsontext.Encoder, value %s) error {\n", helper, typeName)
 	switch info.Kind {
@@ -4571,7 +4074,7 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }\n")
 		for _, field := range info.Fields {
 			fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.String(%q)); err != nil { return err }\n", field.Name)
-			fmt.Fprintf(b, "\tif err := %s(enc, value.%s); err != nil { return err }\n", l.jsonEncodeHelperName(field.Type), field.Name)
+			fmt.Fprintf(b, "\tif err := %s(enc, value.%s); err != nil { return err }\n", l.jsonEncodeHelperName(field.Type), l.goFieldName(info, field.Name))
 		}
 		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.EndObject)\n")
 	case air.TypeEnum:
@@ -4589,7 +4092,7 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
 	}
 	fmt.Fprintf(b, "}\n")
-	if info.Kind == air.TypeStruct {
+	if info.Kind == air.TypeStruct && !l.isStdlibFFIBackedType(info) {
 		fmt.Fprintf(b, "\nfunc (value %s) MarshalJSONTo(enc *jsontext.Encoder) error {\n\treturn %s(enc, value)\n}\n", typeName, helper)
 	}
 	fmt.Fprintf(b, "\nfunc %s(value %s) (string, error) {\n\tvar buf bytes.Buffer\n\tenc := jsontext.NewEncoder(&buf)\n\tif err := %s(enc, value); err != nil { return \"\", err }\n\treturn string(bytes.TrimSuffix(buf.Bytes(), []byte(\"\\n\"))), nil\n}\n", l.jsonEncodeTopHelperName(typeID), typeName, helper)
@@ -4648,7 +4151,7 @@ func (l *lowerer) writeJSONDecodeTextHelper(b *strings.Builder, typeID air.TypeI
 	fmt.Fprintf(b, "\tvar out %s\n\t_ = out\n", typeName)
 	switch info.Kind {
 	case air.TypeInt:
-		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindNumber { return out, path + \": got \" + tok.Kind().String() + \", expected Int\" }\n\tparsed, err := strconv.ParseInt(tok.String(), 10, 0)\n\tif err != nil { return out, path + \": got Number, expected Int\" }\n\treturn int(parsed), \"\"\n")
+		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindNumber { return out, path + \": got \" + tok.Kind().String() + \", expected Int\" }\n\tparsed, err := strconv.Atoi(tok.String())\n\tif err != nil { return out, path + \": got Number, expected Int\" }\n\treturn parsed, \"\"\n")
 	case air.TypeFloat:
 		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindNumber { return out, path + \": got \" + tok.Kind().String() + \", expected Float\" }\n\tparsed, err := strconv.ParseFloat(tok.String(), 64)\n\tif err != nil { return out, path + \": got Number, expected Float\" }\n\treturn parsed, \"\"\n")
 	case air.TypeBool:
@@ -4660,20 +4163,35 @@ func (l *lowerer) writeJSONDecodeTextHelper(b *strings.Builder, typeID air.TypeI
 	case air.TypeMaybe:
 		fmt.Fprintf(b, "\tif dec.PeekKind() == jsontext.KindNull { _, _ = dec.ReadToken(); return out, \"\" }\n\tvalue, message := %s(dec, path)\n\tif message != \"\" { return out, message }\n\tout.Value = value\n\tout.Some = true\n\treturn out, \"\"\n", l.jsonDecodeTextHelperName(info.Elem))
 	case air.TypeList:
-		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindBeginArray { return out, path + \": got \" + tok.Kind().String() + \", expected %s\" }\n\tfor i := 0; dec.PeekKind() != jsontext.KindEndArray; i++ {\n\t\tvalue, message := %s(dec, ardJSONPath(path, fmt.Sprintf(\"[%%d]\", i)))\n\t\tif message != \"\" { return out, message }\n\t\tout = append(out, value)\n\t}\n\t_, err = dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\treturn out, \"\"\n", info.Name, l.jsonDecodeTextHelperName(info.Elem))
+		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindBeginArray { return out, path + \": got \" + tok.Kind().String() + \", expected %s\" }\n", info.Name)
+		if l.writeJSONDecodePrimitiveListLoop(b, info.Elem, typeName) {
+			fmt.Fprintf(b, "\t_, err = dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\treturn out, \"\"\n")
+		} else {
+			fmt.Fprintf(b, "\tfor i := 0; dec.PeekKind() != jsontext.KindEndArray; i++ {\n\t\tvalue, message := %s(dec, ardJSONPath(path, fmt.Sprintf(\"[%%d]\", i)))\n\t\tif message != \"\" { return out, message }\n\t\tout = append(out, value)\n\t}\n\t_, err = dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\treturn out, \"\"\n", l.jsonDecodeTextHelperName(info.Elem))
+		}
 	case air.TypeMap:
 		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindBeginObject { return out, path + \": got \" + tok.Kind().String() + \", expected %s\" }\n\tout = make(%s)\n\tfor dec.PeekKind() != jsontext.KindEndObject {\n\t\tkeyTok, err := dec.ReadToken()\n\t\tif err != nil { return out, err.Error() }\n\t\tkey := keyTok.String()\n\t\tvalue, message := %s(dec, ardJSONPath(path, key))\n\t\tif message != \"\" { return out, message }\n\t\tout[key] = value\n\t}\n\t_, err = dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\treturn out, \"\"\n", info.Name, typeName, l.jsonDecodeTextHelperName(info.Value))
 	case air.TypeStruct:
 		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindBeginObject { return out, path + \": got \" + tok.Kind().String() + \", expected %s\" }\n", info.Name)
-		fmt.Fprintf(b, "\tseen := map[string]bool{}\n\tfor dec.PeekKind() != jsontext.KindEndObject {\n\t\tkeyTok, err := dec.ReadToken()\n\t\tif err != nil { return out, err.Error() }\n\t\tkey := keyTok.String()\n\t\tswitch key {\n")
 		for _, field := range info.Fields {
-			fmt.Fprintf(b, "\t\tcase %q:\n\t\t\tvalue, message := %s(dec, ardJSONPath(path, key))\n\t\t\tif message != \"\" { return out, message }\n\t\t\tout.%s = value\n\t\t\tseen[key] = true\n", field.Name, l.jsonDecodeTextHelperName(field.Type), field.Name)
+			fieldInfo := l.program.Types[field.Type-1]
+			if fieldInfo.Kind != air.TypeMaybe {
+				fmt.Fprintf(b, "\tseen%s := false\n", exportedFieldName(field.Name))
+			}
+		}
+		fmt.Fprintf(b, "\tfor dec.PeekKind() != jsontext.KindEndObject {\n\t\tkeyTok, err := dec.ReadToken()\n\t\tif err != nil { return out, err.Error() }\n\t\tkey := keyTok.String()\n\t\tswitch key {\n")
+		for _, field := range info.Fields {
+			fieldInfo := l.program.Types[field.Type-1]
+			fmt.Fprintf(b, "\t\tcase %q:\n\t\t\tfieldPath := key\n\t\t\tif path != \"\" { fieldPath = ardJSONPath(path, key) }\n\t\t\tvalue, message := %s(dec, fieldPath)\n\t\t\tif message != \"\" { return out, message }\n\t\t\tout.%s = value\n", field.Name, l.jsonDecodeTextHelperName(field.Type), l.goFieldName(info, field.Name))
+			if fieldInfo.Kind != air.TypeMaybe {
+				fmt.Fprintf(b, "\t\t\tseen%s = true\n", exportedFieldName(field.Name))
+			}
 		}
 		fmt.Fprintf(b, "\t\tdefault:\n\t\t\tif err := dec.SkipValue(); err != nil { return out, err.Error() }\n\t\t}\n\t}\n\t_, err = dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n")
 		for _, field := range info.Fields {
 			fieldInfo := l.program.Types[field.Type-1]
 			if fieldInfo.Kind != air.TypeMaybe {
-				fmt.Fprintf(b, "\tif !seen[%q] { return out, ardJSONMissing(ardJSONPath(path, %q), %q) }\n", field.Name, field.Name, fieldInfo.Name)
+				fmt.Fprintf(b, "\tif !seen%s { return out, ardJSONMissing(ardJSONPath(path, %q), %q) }\n", exportedFieldName(field.Name), field.Name, fieldInfo.Name)
 			}
 		}
 		fmt.Fprintf(b, "\treturn out, \"\"\n")
@@ -4681,6 +4199,42 @@ func (l *lowerer) writeJSONDecodeTextHelper(b *strings.Builder, typeID air.TypeI
 		fmt.Fprintf(b, "\treturn out, ardJSONErr(path, %q, nil)\n", info.Name)
 	}
 	fmt.Fprintf(b, "}\n")
+	if info.Kind == air.TypeStruct {
+		fmt.Fprintf(b, "\nfunc (out *%s) UnmarshalJSONFrom(dec *jsontext.Decoder) error {\n\tparsed, message := %s(dec, \"\")\n\tif message != \"\" { return fmt.Errorf(\"%%s\", message) }\n\t*out = parsed\n\treturn nil\n}\n", typeName, helper)
+	}
+}
+
+// writeJSONDecodePrimitiveListLoop emits specialized loops for primitive JSON arrays.
+// The generic element-helper path eagerly constructs item paths with fmt.Sprintf
+// for every successful element. Primitive lists are common and can validate tokens
+// directly, keeping detailed item paths only on error. A small default capacity
+// avoids repeated growth for typical short JSON arrays while preserving [] for
+// empty arrays instead of a nil slice.
+func (l *lowerer) writeJSONDecodePrimitiveListLoop(b *strings.Builder, elemTypeID air.TypeID, listTypeName string) bool {
+	if !validTypeID(l.program, elemTypeID) {
+		return false
+	}
+	elemInfo := l.program.Types[elemTypeID-1]
+	switch elemInfo.Kind {
+	case air.TypeInt:
+		fmt.Fprintf(b, "\tout = make(%s, 0, 8)\n", listTypeName)
+		fmt.Fprintf(b, "\tfor i := 0; dec.PeekKind() != jsontext.KindEndArray; i++ {\n\t\ttok, err := dec.ReadToken()\n\t\tif err != nil { return out, err.Error() }\n\t\tif tok.Kind() != jsontext.KindNumber { itemPath := ardJSONPath(path, fmt.Sprintf(\"[%%d]\", i)); return out, itemPath + \": got \" + tok.Kind().String() + \", expected Int\" }\n\t\tparsed, err := strconv.Atoi(tok.String())\n\t\tif err != nil { itemPath := ardJSONPath(path, fmt.Sprintf(\"[%%d]\", i)); return out, itemPath + \": got Number, expected Int\" }\n\t\tout = append(out, parsed)\n\t}\n")
+		return true
+	case air.TypeFloat:
+		fmt.Fprintf(b, "\tout = make(%s, 0, 8)\n", listTypeName)
+		fmt.Fprintf(b, "\tfor i := 0; dec.PeekKind() != jsontext.KindEndArray; i++ {\n\t\ttok, err := dec.ReadToken()\n\t\tif err != nil { return out, err.Error() }\n\t\tif tok.Kind() != jsontext.KindNumber { itemPath := ardJSONPath(path, fmt.Sprintf(\"[%%d]\", i)); return out, itemPath + \": got \" + tok.Kind().String() + \", expected Float\" }\n\t\tparsed, err := strconv.ParseFloat(tok.String(), 64)\n\t\tif err != nil { itemPath := ardJSONPath(path, fmt.Sprintf(\"[%%d]\", i)); return out, itemPath + \": got Number, expected Float\" }\n\t\tout = append(out, parsed)\n\t}\n")
+		return true
+	case air.TypeBool:
+		fmt.Fprintf(b, "\tout = make(%s, 0, 8)\n", listTypeName)
+		fmt.Fprintf(b, "\tfor i := 0; dec.PeekKind() != jsontext.KindEndArray; i++ {\n\t\ttok, err := dec.ReadToken()\n\t\tif err != nil { return out, err.Error() }\n\t\tif tok.Kind() == jsontext.KindTrue { out = append(out, true); continue }\n\t\tif tok.Kind() == jsontext.KindFalse { out = append(out, false); continue }\n\t\titemPath := ardJSONPath(path, fmt.Sprintf(\"[%%d]\", i)); return out, itemPath + \": got \" + tok.Kind().String() + \", expected Bool\"\n\t}\n")
+		return true
+	case air.TypeStr:
+		fmt.Fprintf(b, "\tout = make(%s, 0, 8)\n", listTypeName)
+		fmt.Fprintf(b, "\tfor i := 0; dec.PeekKind() != jsontext.KindEndArray; i++ {\n\t\ttok, err := dec.ReadToken()\n\t\tif err != nil { return out, err.Error() }\n\t\tif tok.Kind() != jsontext.KindString { itemPath := ardJSONPath(path, fmt.Sprintf(\"[%%d]\", i)); return out, itemPath + \": got \" + tok.Kind().String() + \", expected Str\" }\n\t\tout = append(out, tok.String())\n\t}\n")
+		return true
+	default:
+		return false
+	}
 }
 
 func (l *lowerer) jsonDecodeTextHelperName(typeID air.TypeID) string {

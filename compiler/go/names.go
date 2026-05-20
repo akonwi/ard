@@ -15,6 +15,9 @@ func moduleFileName(module air.Module) string {
 	if name == "" {
 		name = fmt.Sprintf("module_%d", module.ID)
 	}
+	if strings.HasSuffix(name, "_test") {
+		name += "_ard"
+	}
 	return name + ".go"
 }
 

@@ -831,15 +831,19 @@ func DynamicToList(data any) ([]any, error) {
 	return nil, fmt.Errorf("%s", formatDynamicValueForError(data))
 }
 
-func DynamicToMap(data any) (map[string]any, error) {
+func DynamicToMap(data any) (map[any]any, error) {
 	if data == nil {
 		return nil, fmt.Errorf("Void")
 	}
 	if values, ok := data.(map[string]any); ok {
-		return values, nil
+		out := make(map[any]any, len(values))
+		for key, value := range values {
+			out[key] = value
+		}
+		return out, nil
 	}
 	if values, ok := data.(map[any]any); ok {
-		out := make(map[string]any, len(values))
+		out := make(map[any]any, len(values))
 		for key, value := range values {
 			keyString, ok := key.(string)
 			if !ok {
@@ -966,7 +970,7 @@ func GetQueryParam(req RawRequest, name string) string {
 	return ""
 }
 
-func HTTPServe(port int, handlers map[string]func(Request, *Response) (struct{}, error)) error {
+func HTTPServe(port int, handlers map[string]func(Request, *Response)) error {
 	mux := http.NewServeMux()
 	for path, handler := range handlers {
 		path := path
@@ -983,10 +987,7 @@ func HTTPServe(port int, handlers map[string]func(Request, *Response) (struct{},
 				Status:  200,
 				Headers: map[string]string{},
 			}
-			if _, err := handler(ardReq, &ardRes); err != nil {
-				http.Error(writer, err.Error(), http.StatusInternalServerError)
-				return
-			}
+			handler(ardReq, &ardRes)
 			for key, value := range ardRes.Headers {
 				writer.Header().Set(key, value)
 			}

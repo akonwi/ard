@@ -93,6 +93,9 @@ func validateTypeInfo(program *Program, typ TypeInfo) error {
 			}
 		}
 	case TypeFunction:
+		if len(typ.ParamMutable) > 0 && len(typ.ParamMutable) != len(typ.Params) {
+			return fmt.Errorf("type %s has %d function param mutability flags for %d params", typ.Name, len(typ.ParamMutable), len(typ.Params))
+		}
 		for _, param := range typ.Params {
 			if !validTypeID(program, param) {
 				return fmt.Errorf("type %s has invalid function param type %d", typ.Name, param)

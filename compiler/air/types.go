@@ -97,9 +97,10 @@ const (
 )
 
 type TypeInfo struct {
-	ID   TypeID
-	Kind TypeKind
-	Name string
+	ID         TypeID
+	Kind       TypeKind
+	Name       string
+	ModulePath string
 
 	ExternBinding string
 
@@ -112,9 +113,10 @@ type TypeInfo struct {
 	Variants []VariantInfo
 	Members  []UnionMember
 
-	Params []TypeID
-	Return TypeID
-	Trait  TraitID
+	Params       []TypeID
+	ParamMutable []bool
+	Return       TypeID
+	Trait        TraitID
 }
 
 type FieldInfo struct {
