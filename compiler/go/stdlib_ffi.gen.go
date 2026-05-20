@@ -12,6 +12,7 @@ type generatedStdlibExternKind uint8
 
 const (
 	generatedStdlibExternCall generatedStdlibExternKind = iota
+	generatedStdlibExternJSONEncode
 	generatedStdlibExternJSONParse
 )
 
@@ -111,6 +112,7 @@ var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
 	"SqlRollback":          {function: "SqlRollback", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"StrToDynamic":         {function: "StrToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"VoidToDynamic":        {function: "VoidToDynamic", returns: generatedStdlibReturnDirect, params: nil},
+	"JsonEncode":           {kind: generatedStdlibExternJSONEncode},
 	"JsonParse":            {kind: generatedStdlibExternJSONParse},
 }
 
@@ -119,7 +121,11 @@ func (l *lowerer) lowerGeneratedStdlibExtern(binding string, signature air.Signa
 	if !ok {
 		return loweredExpr{}, false, nil
 	}
-	if lowering.kind == generatedStdlibExternJSONParse {
+	switch lowering.kind {
+	case generatedStdlibExternJSONEncode:
+		wrapped, err := l.lowerJSONEncodeStdlibExtern(signature, args, stmts, returnTypeID)
+		return wrapped, true, err
+	case generatedStdlibExternJSONParse:
 		wrapped, err := l.lowerJSONParseStdlibExtern(args, stmts, returnTypeID)
 		return wrapped, true, err
 	}

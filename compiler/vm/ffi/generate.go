@@ -577,6 +577,7 @@ func renderGoStdlibLowering(c contract, packageName string, implemented map[stri
 	out.WriteString("type generatedStdlibExternKind uint8\n\n")
 	out.WriteString("const (\n")
 	out.WriteString("\tgeneratedStdlibExternCall generatedStdlibExternKind = iota\n")
+	out.WriteString("\tgeneratedStdlibExternJSONEncode\n")
 	out.WriteString("\tgeneratedStdlibExternJSONParse\n")
 	out.WriteString(")\n\n")
 	out.WriteString("type generatedStdlibExternReturn uint8\n\n")
@@ -598,15 +599,25 @@ func renderGoStdlibLowering(c contract, packageName string, implemented map[stri
 	out.WriteString("\treturns  generatedStdlibExternReturn\n")
 	out.WriteString("\tparams   []generatedStdlibExternParamAdapter\n")
 	out.WriteString("}\n\n")
+	specialBindings := map[string]bool{}
+	for _, skipped := range c.Skipped {
+		switch skipped.Binding {
+		case "JsonEncode", "JsonParse":
+			specialBindings[skipped.Binding] = true
+		}
+	}
 	out.WriteString("var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{\n")
 	for _, fn := range c.Functions {
-		if goTargetCustomStdlibBinding(fn.Binding) || !implemented[fn.Field] {
+		if specialBindings[fn.Binding] || !implemented[fn.Field] {
 			continue
 		}
 		fmt.Fprintf(&out, "\t%q: {function: %q, returns: %s, params: %s},\n", fn.Binding, fn.Field, goStdlibReturnKind(fn), goStdlibParamAdapters(fn))
 	}
 	for _, skipped := range c.Skipped {
-		if skipped.Binding == "JsonParse" {
+		switch skipped.Binding {
+		case "JsonEncode":
+			fmt.Fprintf(&out, "\t%q: {kind: generatedStdlibExternJSONEncode},\n", skipped.Binding)
+		case "JsonParse":
 			fmt.Fprintf(&out, "\t%q: {kind: generatedStdlibExternJSONParse},\n", skipped.Binding)
 		}
 	}
@@ -616,7 +627,11 @@ func renderGoStdlibLowering(c contract, packageName string, implemented map[stri
 	out.WriteString("\tif !ok {\n")
 	out.WriteString("\t\treturn loweredExpr{}, false, nil\n")
 	out.WriteString("\t}\n")
-	out.WriteString("\tif lowering.kind == generatedStdlibExternJSONParse {\n")
+	out.WriteString("\tswitch lowering.kind {\n")
+	out.WriteString("\tcase generatedStdlibExternJSONEncode:\n")
+	out.WriteString("\t\twrapped, err := l.lowerJSONEncodeStdlibExtern(signature, args, stmts, returnTypeID)\n")
+	out.WriteString("\t\treturn wrapped, true, err\n")
+	out.WriteString("\tcase generatedStdlibExternJSONParse:\n")
 	out.WriteString("\t\twrapped, err := l.lowerJSONParseStdlibExtern(args, stmts, returnTypeID)\n")
 	out.WriteString("\t\treturn wrapped, true, err\n")
 	out.WriteString("\t}\n")
@@ -698,15 +713,6 @@ func goStdlibReturnKind(fn hostFunction) string {
 		return "generatedStdlibReturnValueError"
 	default:
 		return "generatedStdlibReturnDirect"
-	}
-}
-
-func goTargetCustomStdlibBinding(binding string) bool {
-	switch binding {
-	case "JsonEncode":
-		return true
-	default:
-		return false
 	}
 }
 

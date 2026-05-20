@@ -3707,38 +3707,14 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 	if !externModuleIsStdlib(l.program, ext) {
 		return l.lowerProjectExternCall(ext, binding, args, stmts, expr.Type)
 	}
-	switch binding {
-	case "JsonEncode":
-		if len(args) != 1 || len(expr.Args) != 1 {
-			return loweredExpr{}, fmt.Errorf("JsonEncode expects 1 arg")
-		}
-		l.markRuntimeHelper("json_encode")
-		helper := l.jsonEncodeTopHelperName(expr.Args[0].Type)
-		// JsonEncode is lowered with type-specific helpers instead of the generic
-		// stdlib FFI call so the Go target can preserve Ard JSON semantics for
-		// maybe/union/dynamic-heavy values. When the static type is simple enough
-		// for native Go JSON encoding to match those semantics, prefer json.Marshal:
-		// it is noticeably faster on JSON-heavy benchmarks while keeping the
-		// Ard-aware streaming encoder as the universal fallback.
-		if l.jsonNativeCodecSafe(expr.Args[0].Type, map[air.TypeID]bool{}) {
-			helper = l.jsonEncodeMarshalTopHelperName(expr.Args[0].Type)
-		}
-		wrapped, err := l.wrapValueErrorCall(expr.Type, &ast.CallExpr{Fun: ast.NewIdent(helper), Args: args})
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	default:
-		generated, ok, err := l.lowerGeneratedStdlibExtern(binding, ext.Signature, args, stmts, expr.Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		if ok {
-			return generated, nil
-		}
-		return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
+	generated, ok, err := l.lowerGeneratedStdlibExtern(binding, ext.Signature, args, stmts, expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
 	}
+	if ok {
+		return generated, nil
+	}
+	return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
 }
 
 func (l *lowerer) adaptProjectExternArgs(signature air.Signature, args []ast.Expr) ([]ast.Expr, []ast.Stmt, error) {
@@ -3881,6 +3857,30 @@ func (l *lowerer) markJSONParseType(typeID air.TypeID) {
 		l.markJSONParseType(info.Value)
 		l.markJSONParseType(info.Error)
 	}
+}
+
+func (l *lowerer) lowerJSONEncodeStdlibExtern(signature air.Signature, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
+	if len(args) != 1 || len(signature.Params) != 1 {
+		return loweredExpr{}, fmt.Errorf("JsonEncode expects 1 arg")
+	}
+	valueTypeID := signature.Params[0].Type
+	l.markRuntimeHelper("json_encode")
+	helper := l.jsonEncodeTopHelperName(valueTypeID)
+	// JsonEncode is lowered with type-specific helpers instead of the generic
+	// stdlib FFI call so the Go target can preserve Ard JSON semantics for
+	// maybe/union/dynamic-heavy values. When the static type is simple enough
+	// for native Go JSON encoding to match those semantics, prefer json.Marshal:
+	// it is noticeably faster on JSON-heavy benchmarks while keeping the
+	// Ard-aware streaming encoder as the universal fallback.
+	if l.jsonNativeCodecSafe(valueTypeID, map[air.TypeID]bool{}) {
+		helper = l.jsonEncodeMarshalTopHelperName(valueTypeID)
+	}
+	wrapped, err := l.wrapValueErrorCall(returnTypeID, &ast.CallExpr{Fun: ast.NewIdent(helper), Args: args})
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	wrapped.stmts = append(stmts, wrapped.stmts...)
+	return wrapped, nil
 }
 
 func (l *lowerer) lowerJSONParseStdlibExtern(args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
