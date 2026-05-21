@@ -359,54 +359,18 @@ func TestExternalFunctionShorthandResolvesToEffectiveJSTarget(t *testing.T) {
 	}
 }
 
-func TestExternalFunctionBindingsResolveGoForVM(t *testing.T) {
-	source := `extern fn read_line() Str!Str = {
-  go = "ReadLine"
-  js-server = "readLine"
-}`
-
-	result := parse.Parse([]byte(source), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("unexpected parse errors: %v", result.Errors)
-	}
-
-	vmChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetVM})
-	vmChecker.Check()
-	if vmChecker.HasErrors() {
-		t.Fatalf("unexpected vm diagnostics: %v", vmChecker.Diagnostics())
-	}
-	vmFn := vmChecker.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
-	if vmFn.ExternalBinding != "ReadLine" || vmFn.ExternalBindingTarget != backend.TargetGo {
-		t.Fatalf("expected vm to use go binding, got %#v", vmFn)
-	}
-}
-
-func TestExternalFunctionRejectsVMAndBytecodeBindingTargets(t *testing.T) {
+func TestExternalFunctionRejectsUnsupportedBindingTargets(t *testing.T) {
 	cases := []struct {
 		name   string
 		source string
 		want   string
 	}{
 		{
-			name: "vm function binding",
-			source: `extern fn value() Str = {
-  vm = "Value"
-}`,
-			want: `Unsupported extern binding target "vm"`,
-		},
-		{
 			name: "bytecode function binding",
 			source: `extern fn value() Str = {
   bytecode = "Value"
 }`,
 			want: `Unsupported extern binding target "bytecode"`,
-		},
-		{
-			name: "vm extern type binding",
-			source: `extern type Handle = {
-  vm = "Handle"
-}`,
-			want: `Unsupported extern binding target "vm"`,
 		},
 	}
 
@@ -416,7 +380,7 @@ func TestExternalFunctionRejectsVMAndBytecodeBindingTargets(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("unexpected parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetVM})
+			c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetGo})
 			c.Check()
 			if !c.HasErrors() {
 				t.Fatal("expected checker diagnostics")

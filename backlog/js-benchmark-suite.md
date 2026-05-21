@@ -36,7 +36,7 @@ This file tracks only remaining benchmark and JS-target hardening work.
 
 ## Success criteria
 
-- Every default timing benchmark verifies identical output for VM, Go, and supported JS targets.
+- Every default timing benchmark verifies identical output for Go and supported JS targets.
 - Every isomorphic benchmark builds for both `js-server` and `js-browser`.
 - Browser-target output is imported/executed under a deterministic harness at least once in tests or benchmark smoke mode.
 - No benchmark depends on wall-clock time, network, random input, or machine-specific paths except isolated temp dirs.

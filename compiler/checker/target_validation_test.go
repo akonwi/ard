@@ -32,12 +32,7 @@ func TestStdlibImportTargetValidation(t *testing.T) {
 			name:        "env blocked on js-browser",
 			target:      backend.TargetJSBrowser,
 			source:      "use ard/env\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/env when targeting js-browser; allowed targets: vm, go, js-server",
-		},
-		{
-			name:   "env allowed on vm",
-			target: backend.TargetVM,
-			source: "use ard/env\nfn main() Int { 1 }",
+			wantErrPart: "Cannot import ard/env when targeting js-browser; allowed targets: go, js-server",
 		},
 		{
 			name:   "fs allowed on js-server",
@@ -48,29 +43,19 @@ func TestStdlibImportTargetValidation(t *testing.T) {
 			name:        "fs blocked on js-browser",
 			target:      backend.TargetJSBrowser,
 			source:      "use ard/fs\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/fs when targeting js-browser; allowed targets: vm, go, js-server",
-		},
-		{
-			name:   "fs allowed on vm",
-			target: backend.TargetVM,
-			source: "use ard/fs\nfn main() Int { 1 }",
+			wantErrPart: "Cannot import ard/fs when targeting js-browser; allowed targets: go, js-server",
 		},
 		{
 			name:        "sql blocked on js-browser",
 			target:      backend.TargetJSBrowser,
 			source:      "use ard/sql\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/sql when targeting js-browser; allowed targets: vm, go",
-		},
-		{
-			name:   "sql allowed on vm",
-			target: backend.TargetVM,
-			source: "use ard/sql\nfn main() Int { 1 }",
+			wantErrPart: "Cannot import ard/sql when targeting js-browser; allowed targets: go",
 		},
 		{
 			name:        "io blocked on js-browser",
 			target:      backend.TargetJSBrowser,
 			source:      "use ard/io\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/io when targeting js-browser; allowed targets: vm, go, js-server",
+			wantErrPart: "Cannot import ard/io when targeting js-browser; allowed targets: go, js-server",
 		},
 		{
 			name:   "js promise allowed on js-server",

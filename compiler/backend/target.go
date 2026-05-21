@@ -3,7 +3,6 @@ package backend
 import "fmt"
 
 const (
-	TargetVM        = "vm"
 	TargetGo        = "go"
 	TargetJSBrowser = "js-browser"
 	TargetJSServer  = "js-server"

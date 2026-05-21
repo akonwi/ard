@@ -242,8 +242,8 @@ func HTTP_Serve(args []*runtime.Object) *runtime.Object {
 			}
 			response := runtime.MakeStruct(responseType, responseMap)
 
-			// Call the Ard handler function with request and mutable response
-			// Create a copy of the closure with a new VM for isolation to prevent race conditions
+			// Call the Ard handler function with request and mutable response.
+			// Evaluate the closure in isolation to prevent race conditions.
 			handle.EvalIsolated(request, response)
 
 			// Get the final response values

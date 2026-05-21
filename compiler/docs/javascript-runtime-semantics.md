@@ -50,7 +50,7 @@ These rules apply transitively. If a user module imports a JS-incompatible stdli
 Restricted-import diagnostics use the form:
 
 ```text
-Cannot import ard/sql when targeting js-browser; allowed targets: bytecode, go
+Cannot import ard/sql when targeting js-browser; allowed targets: go
 ```
 
 Numeric union diagnostics use the form:
@@ -280,15 +280,15 @@ The current checker uses module-level allowlists for stdlib portability rules.
 
 Restricted modules currently behave as follows:
 
-| Module | bytecode | go | js-browser | js-server |
-|---|---|---|---|---|
-| `ard/fs` | yes | yes | no | yes |
-| `ard/sql` | yes | yes | no | no |
-| `ard/env` | yes | yes | no | yes |
-| `ard/io` | yes | yes | no | yes |
-| `ard/argv` | yes | yes | no | yes |
-| `ard/js/promise` | no | no | yes | yes |
-| `ard/js/fetch` | no | no | yes | yes |
+| Module | go | js-browser | js-server |
+|---|---|---|---|
+| `ard/fs` | yes | no | yes |
+| `ard/sql` | yes | no | no |
+| `ard/env` | yes | no | yes |
+| `ard/io` | yes | no | yes |
+| `ard/argv` | yes | no | yes |
+| `ard/js/promise` | no | yes | yes |
+| `ard/js/fetch` | no | yes | yes |
 
 Stdlib modules not listed in the checker allowlist are currently treated as unrestricted unless they hit some other JS-specific semantic limitation.
 

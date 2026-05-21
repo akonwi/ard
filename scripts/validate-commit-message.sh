@@ -55,7 +55,7 @@ Expected Conventional Commits format:
 
 Examples:
   feat(formatter): support inferred closure params
-  fix(vm): preserve generic return kinds
+  fix(go): preserve generic return kinds
   docs: document release flow
   refactor(parser)!: simplify function parsing
 

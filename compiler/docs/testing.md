@@ -306,15 +306,15 @@ Highest-likelihood files:
 
 Likely support files:
 - `compiler/formatter/printer.go`
-- `compiler/bytecode/emitter.go`
+- `compiler/go/*.go`
 - new runner/discovery files under `compiler/`
-- parser/checker/formatter/VM tests
+- parser/checker/formatter tests
 
 Possibly touched depending on implementation details:
 - `compiler/parse/lexer.go`
 - `compiler/checker/module_resolver.go`
 - `compiler/ffi/*`
-- `compiler/bytecode/vm/registry.gen.go`
+- `compiler/std_lib/ffi/*`
 
 ## Validation plan
 
@@ -323,7 +323,7 @@ Run from `compiler/`:
 ```bash
 go test ./parse
 go test ./checker
-go test ./bytecode/vm
+go test ./go
 go test ./formatter
 go test ./...
 go build
@@ -340,8 +340,8 @@ Manual validation should cover:
 If new FFI is added:
 
 ```bash
-go generate ./bytecode/vm
-go test ./bytecode/vm
+go generate ./std_lib/ffi
+go test ./go
 go test ./...
 ```
 

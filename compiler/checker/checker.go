@@ -822,7 +822,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Add the trait to the struct type's traits list
 				targetType.Traits = append(targetType.Traits, trait)
 
-				// Return the struct so VM can register the new trait methods
+				// Return the struct so downstream backends can register the new trait methods
 				return &Statement{Stmt: targetType}
 
 			case *Enum:
@@ -904,7 +904,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Add the trait to the enum type's traits list
 				targetType.Traits = append(targetType.Traits, trait)
 
-				// Return the enum so VM can register the new trait methods
+				// Return the enum so downstream backends can register the new trait methods
 				return &Statement{Stmt: targetType}
 
 			default:
@@ -927,7 +927,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				bindings = map[string]string{shorthandExternalBindingTarget(c.options.Target): s.ExternalBinding}
 			}
 			if target, ok := validateExternalBindingTargets(bindings); !ok {
-				c.addError(fmt.Sprintf("Unsupported extern binding target %q; use go for VM host FFI", target), s.GetLocation())
+				c.addError(fmt.Sprintf("Unsupported extern binding target %q", target), s.GetLocation())
 				return nil
 			}
 			resolvedTarget, resolvedBinding := resolveExternalBindingForTarget(c.options.Target, bindings)
@@ -4456,9 +4456,6 @@ func resolveExternalBindingForTarget(target string, bindings map[string]string) 
 	if len(bindings) == 0 {
 		return "", ""
 	}
-	if target == backend.TargetVM {
-		target = backend.TargetGo
-	}
 	if target != "" {
 		if binding := bindings[target]; binding != "" {
 			return target, binding
@@ -4516,7 +4513,7 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 		return nil
 	}
 	if target, ok := validateExternalBindingTargets(bindings); !ok {
-		c.addError(fmt.Sprintf("Unsupported extern binding target %q; use go for VM host FFI", target), def.GetLocation())
+		c.addError(fmt.Sprintf("Unsupported extern binding target %q", target), def.GetLocation())
 		return nil
 	}
 

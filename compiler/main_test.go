@@ -61,12 +61,6 @@ func TestParseRunArgs(t *testing.T) {
 			target: "go",
 		},
 		{
-			name:       "vm target",
-			args:       []string{"--target", "vm", "samples/main.ard"},
-			expectErr:  true,
-			errMessage: "unknown target: vm",
-		},
-		{
 			name:       "missing target value",
 			args:       []string{"--target"},
 			expectErr:  true,
@@ -492,12 +486,6 @@ func TestParseBuildArgs(t *testing.T) {
 			path:   "samples/main.ard",
 			out:    "demo",
 			target: "go",
-		},
-		{
-			name:       "vm target",
-			args:       []string{"samples/main.ard", "--out", "demo", "--target", "vm"},
-			expectErr:  true,
-			errMessage: "unknown target: vm",
 		},
 		{
 			name:       "missing target value",

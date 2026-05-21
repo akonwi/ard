@@ -441,7 +441,7 @@ The `ard/testing` module provides helpers: `pass()`, `fail(message)`, and `asser
 #### Compiler backend parity checks
 For Go backend IR work, these are the core parity/hardening regression gates (run from `/compiler`):
 - `go test -tags integration ./go_backend`
-- `go test ./go_backend ./checker ./bytecode/vm`
+- `go test ./go ./checker`
 - `go test ./...`
 
 ### Modules

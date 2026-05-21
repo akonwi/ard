@@ -101,4 +101,4 @@ if 200 <= status <= 300 && status != 250 {
 
 - **Parser**: Recognizes consecutive relative comparison operators and constructs a `ChainedComparison` AST node
 - **Checker**: Validates operator compatibility and transforms the chain into nested `BinaryExpression` nodes joined by `And` operators
-- **VM**: Evaluates the desugared logical expression; operand reuse is handled at the checker level
+- **Targets**: Evaluate the desugared logical expression; operand reuse is handled at the checker level
