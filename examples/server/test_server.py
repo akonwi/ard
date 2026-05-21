@@ -10,6 +10,7 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 ARD = os.environ.get("ARD", "ard")
+BIN = os.path.join(ROOT, "server")
 
 
 def free_port():
@@ -61,12 +62,17 @@ def assert_response(method, url, body, want_status, want_body):
         )
 
 
+def build():
+    subprocess.run([ARD, "build", "--out", "server", "main.ard"], cwd=ROOT, check=True)
+
+
 def main():
+    build()
     port = free_port()
     env = os.environ.copy()
     env["PORT"] = str(port)
     proc = subprocess.Popen(
-        [ARD, "run", "main.ard"],
+        [BIN],
         cwd=ROOT,
         env=env,
         stdout=subprocess.PIPE,
