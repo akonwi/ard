@@ -13,8 +13,7 @@ func TestParseTarget(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{name: "default empty", raw: "", want: backend.TargetVM},
-		{name: "vm", raw: backend.TargetVM, want: backend.TargetVM},
+		{name: "default empty", raw: "", want: backend.TargetGo},
 		{name: "go", raw: backend.TargetGo, want: backend.TargetGo},
 		{name: "js-browser", raw: backend.TargetJSBrowser, want: backend.TargetJSBrowser},
 		{name: "js-server", raw: backend.TargetJSServer, want: backend.TargetJSServer},

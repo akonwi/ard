@@ -2,7 +2,7 @@
 
 ## Motivation
 
-Enable multiple backends (bytecode VM, Go transpiler, WASM, etc.) by decoupling backend execution from checker type introspection.
+Enable multiple backends (Go, JavaScript, WASM, etc.) by decoupling target execution from checker type introspection.
 
 This makes it easier to:
 1. Generate different targets from the same checked program
@@ -18,7 +18,7 @@ The checker acts as an IR producer by enriching nodes with pre-computed metadata
 Source Code
     -> parse AST
     -> checker AST (enriched metadata)
-    -> backend (bytecode / Go / WASM)
+    -> backend (Go / JS / WASM)
     -> runtime artifact
 ```
 
@@ -80,7 +80,7 @@ Even when type assertions are not a hotspot, this improves:
 
 - Bytecode backend consumes lowered checker metadata.
 - Legacy interpreter runtime has been removed.
-- `ard run` executes through the bytecode backend.
+- `ard run` executes through the default Go backend.
 
 ## Current State
 

@@ -93,7 +93,7 @@ These rules are enforced at compile-time.
 3. Change `async::eval()` signature to return `Fiber<$T>`
 4. Add module-level `join()` function to `async::eval()` in std_lib.go
 5. Update checker validation for `async::eval()` to handle the new signature
-6. Update VM execution to store and return results properly
+6. Update target execution to store and return results properly
 7. Add tests for result retrieval and isolation rules
 8. Update documentation in `website/src/content/docs/advanced/async.md`
 

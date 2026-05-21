@@ -1,6 +1,6 @@
 # Userland FFI Workflow
 
-This backlog tracks the post-`vm` work for making Ard FFI generation
+This backlog tracks the work for making Ard FFI generation
 available to ordinary Ard projects, not only the compiler's internal stdlib
 project.
 
@@ -10,10 +10,9 @@ Pending
 
 ## Context
 
-The internal stdlib project now uses generated Go adapter shapes under
-`compiler/std_lib/ffi`. Userland projects should get the same signature-driven
-contract, with adapters generated from Ard `extern` declarations instead of
-discovered from handwritten Go.
+The internal stdlib project now uses generated Go host signatures and Go-target
+lowering metadata under `compiler/std_lib/ffi`. Userland projects should get the
+same signature-driven contract generated from Ard `extern` declarations.
 
 The intended project shape is:
 
@@ -42,7 +41,6 @@ project/
 
 ## Non-goals
 
-- Do not discover bindings from old bytecode VM FFI packages.
 - Do not generate `runtime.Object` based adapters.
 - Do not require projects without FFI to have a `go.mod` or `ffi/` package.
 - Do not support implicit structural matching against arbitrary host structs in
@@ -82,8 +80,8 @@ This is intended for CI.
   structs crossing FFI, aliases, enums, and callback signatures.
 - Output file is always `ffi/ard.gen.go`.
 - Generated package name is `ffi`.
-- `Maybe[T]` and `Result[T,E]` remain generated support types until there is a
-  shared public runtime package for generated Go bindings.
+- `Maybe[T]` and `Result[T,E]` should use Ard's public Go runtime support types
+  so generated project FFI matches stdlib FFI conventions.
 - Function bindings use explicit target bindings where present and otherwise
   follow the same fallback rules as the compiler.
 - Unsupported generic externs should be reported clearly instead of producing
@@ -93,8 +91,6 @@ This is intended for CI.
 
 - Whether `ard ffi init` should run `go mod tidy` automatically or leave that as
   an explicit user step.
-- How project FFI packages should be referenced by `ard run --target vm`
-  and other execution/build flows now that the Go target rewrite exists.
 - Whether generated project FFI should eventually share a package with generated
   Go target output or remain a stable companion package.
 

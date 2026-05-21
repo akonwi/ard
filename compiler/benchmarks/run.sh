@@ -139,8 +139,7 @@ run_runtime_benchmark() {
   local name="$1"
   local rel_path="$2"
   local tmp_dir="$3"
-  local vm_bin="$tmp_dir/${name}-vm"
-  local go_bin="$tmp_dir/${name}-go"
+  local ard_go_bin="$tmp_dir/${name}-ard-go"
   local js_out="$tmp_dir/${name}.mjs"
   local js_runner="$tmp_dir/${name}-runner.mjs"
   local native_go_src
@@ -150,8 +149,7 @@ run_runtime_benchmark() {
   cleanup_generated_program_dir "$rel_path"
 
   echo "==> building runtime binaries for $name"
-  (cd "$ROOT_DIR" && "$ARD_BIN" build "$rel_path" --out "$vm_bin")
-  (cd "$ROOT_DIR" && "$ARD_BIN" build "$rel_path" --target go --out "$go_bin")
+  (cd "$ROOT_DIR" && "$ARD_BIN" build "$rel_path" --out "$ard_go_bin")
   cleanup_generated_program_dir "$rel_path"
   (cd "$ROOT_DIR" && go build -o "$native_go_bin" "$native_go_src")
 
@@ -162,8 +160,7 @@ run_runtime_benchmark() {
   fi
 
   local commands=(
-    --command-name "vm:$name" "$vm_bin"
-    --command-name "go:$name" "$go_bin"
+    --command-name "ard-go:$name" "$ard_go_bin"
     --command-name "native-go:$name" "$native_go_bin"
   )
 
@@ -180,14 +177,12 @@ EOF
 
   echo "==> verifying outputs for $name"
   local expected actual
-  expected="$($vm_bin)"
-  actual="$($go_bin)"
-  assert_same_output "$name" "vm" "$expected" "go" "$actual"
+  expected="$($ard_go_bin)"
   actual="$($native_go_bin)"
   assert_printed_output "$name" "native-go" "$actual"
   if supports_js_server "$name"; then
     actual="$(node "$js_runner")"
-    assert_same_output "$name" "vm" "$expected" "js" "$actual"
+    assert_same_output "$name" "ard-go" "$expected" "js" "$actual"
   fi
 
   hyperfine \
@@ -217,20 +212,16 @@ run_cli_benchmark() {
   echo "==> verifying outputs for $name"
   local expected actual
   expected="$(cd "$ROOT_DIR" && "$ARD_BIN" run "$rel_path")"
-  actual="$(cd "$ROOT_DIR" && "$ARD_BIN" run --target go "$rel_path")"
-  assert_same_output "$name" "vm" "$expected" "go" "$actual"
-  cleanup_generated_program_dir "$rel_path"
   actual="$(cd "$ROOT_DIR" && go run "$native_go_src")"
   assert_printed_output "$name" "native-go" "$actual"
   if supports_js_server "$name"; then
     actual="$(cd "$ROOT_DIR" && "$ARD_BIN" run --target js-server "$rel_path")"
-    assert_same_output "$name" "vm" "$expected" "js" "$actual"
+    assert_same_output "$name" "ard-go" "$expected" "js" "$actual"
     cleanup_generated_program_dir "$rel_path"
   fi
 
   local commands=(
-    --command-name "vm:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run '$rel_path'"
-    --command-name "go:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run --target go '$rel_path'"
+    --command-name "ard-go:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run '$rel_path'"
     --command-name "native-go:$name" "cd '$ROOT_DIR' && go run '$native_go_src'"
   )
 

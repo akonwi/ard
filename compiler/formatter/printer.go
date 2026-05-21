@@ -365,14 +365,12 @@ func externBindingOrder(target string) int {
 	switch target {
 	case "go":
 		return 0
-	case "bytecode":
-		return 1
 	case "js":
-		return 2
+		return 1
 	case "js-server":
-		return 3
+		return 2
 	case "js-browser":
-		return 4
+		return 3
 	default:
 		return 100
 	}

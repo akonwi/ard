@@ -643,7 +643,11 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		stmts := append([]ast.Stmt{}, target.stmts...)
 		stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{target.expr}}})
-		return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
+		zero, err := l.zeroValueExpr(expr.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: stmts, expr: zero}, nil
 	case air.ExprLoadLocal:
 		return loweredExpr{expr: ast.NewIdent(localName(fn, expr.Local))}, nil
 	case air.ExprUnionWrap:
@@ -682,7 +686,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("copy missing target")
 		}
-		return l.lowerExpr(fn, *expr.Target)
+		return l.lowerExprWithExpectedType(fn, *expr.Target, expr.Type)
 	case air.ExprMakeMaybeSome:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("maybe some missing target")
@@ -1271,6 +1275,9 @@ func (l *lowerer) lowerExprWithExpectedType(fn air.Function, expr air.Expr, expe
 }
 
 func (l *lowerer) canOverrideExprType(expr air.Expr, expectedType air.TypeID) bool {
+	if expr.Kind == air.ExprPanic {
+		return expectedType != air.NoType
+	}
 	if !validTypeID(l.program, expr.Type) || !validTypeID(l.program, expectedType) {
 		return false
 	}
@@ -1283,6 +1290,10 @@ func (l *lowerer) canOverrideExprType(expr air.Expr, expectedType air.TypeID) bo
 		return false
 	}
 	switch expr.Kind {
+	case air.ExprCopy:
+		return expr.Target != nil && l.canOverrideExprType(*expr.Target, expectedType)
+	case air.ExprMakeList:
+		return len(expr.Args) == 0 && from.Kind == air.TypeList && to.Kind == air.TypeList
 	case air.ExprMakeResultOk, air.ExprMakeResultErr,
 		air.ExprMakeMaybeSome, air.ExprMakeMaybeNone,
 		air.ExprBlock, air.ExprIf,
@@ -1381,6 +1392,34 @@ func voidTypeExpr() ast.Expr {
 
 func voidValueExpr() ast.Expr {
 	return &ast.CompositeLit{Type: voidTypeExpr()}
+}
+
+func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
+	if l.isVoidType(typeID) {
+		return ast.NewIdent("nil"), nil
+	}
+	if !validTypeID(l.program, typeID) {
+		return ast.NewIdent("nil"), nil
+	}
+	info := l.program.Types[typeID-1]
+	switch info.Kind {
+	case air.TypeInt, air.TypeEnum:
+		return &ast.BasicLit{Kind: token.INT, Value: "0"}, nil
+	case air.TypeFloat:
+		return &ast.BasicLit{Kind: token.FLOAT, Value: "0"}, nil
+	case air.TypeBool:
+		return ast.NewIdent("false"), nil
+	case air.TypeStr:
+		return &ast.BasicLit{Kind: token.STRING, Value: "\"\""}, nil
+	case air.TypeDynamic, air.TypeExtern, air.TypeFunction, air.TypeTraitObject:
+		return ast.NewIdent("nil"), nil
+	default:
+		typ, err := l.goType(typeID)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.CompositeLit{Type: typ}, nil
+	}
 }
 
 func (l *lowerer) goParamType(param air.Param) (ast.Expr, error) {
@@ -1831,6 +1870,8 @@ func (l *lowerer) isWeakContextType(typeID air.TypeID) bool {
 	}
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
+	case air.TypeList:
+		return !validTypeID(l.program, info.Elem) || l.program.Types[info.Elem-1].Kind == air.TypeVoid
 	case air.TypeMaybe:
 		return !validTypeID(l.program, info.Elem) || l.program.Types[info.Elem-1].Kind == air.TypeVoid
 	case air.TypeResult:
@@ -3781,7 +3822,7 @@ func (l *lowerer) lowerProjectExternCall(ext air.Extern, binding string, args []
 		return loweredExpr{}, err
 	}
 	stmts = append(stmts, argStmts...)
-	callee, err := goBindingExpr(binding)
+	callee, err := l.projectFFIBindingExpr(binding)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -3820,15 +3861,14 @@ func (l *lowerer) lowerProjectExternCall(ext air.Extern, binding string, args []
 	}
 }
 
-func goBindingExpr(binding string) (ast.Expr, error) {
+func (l *lowerer) projectFFIBindingExpr(binding string) (ast.Expr, error) {
 	if strings.TrimSpace(binding) == "" {
 		return nil, fmt.Errorf("empty go extern binding")
 	}
-	expr, err := parser.ParseExpr(binding)
-	if err != nil {
-		return nil, fmt.Errorf("invalid go extern binding %q: %w", binding, err)
+	if !token.IsIdentifier(binding) {
+		return nil, fmt.Errorf("project go extern binding %q must be an unqualified function name in package ffi", binding)
 	}
-	return expr, nil
+	return l.qualified("projectffi", "generated/projectffi", binding), nil
 }
 
 func isVoidExpr(expr ast.Expr) bool {
@@ -4065,7 +4105,7 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 	case air.TypeMaybe:
 		fmt.Fprintf(b, "\tif !value.Some { return enc.WriteToken(jsontext.Null) }\n\treturn %s(enc, value.Value)\n", l.jsonEncodeHelperName(info.Elem))
 	case air.TypeResult:
-		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
+		fmt.Fprintf(b, "\tif value.Ok { return %s(enc, value.Value) }\n\treturn %s(enc, value.Err)\n", l.jsonEncodeHelperName(info.Value), l.jsonEncodeHelperName(info.Error))
 	case air.TypeList:
 		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginArray); err != nil { return err }\n\tfor _, item := range value {\n\t\tif err := %s(enc, item); err != nil { return err }\n\t}\n\treturn enc.WriteToken(jsontext.EndArray)\n", l.jsonEncodeHelperName(info.Elem))
 	case air.TypeMap:

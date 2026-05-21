@@ -61,12 +61,6 @@ func TestParseRunArgs(t *testing.T) {
 			target: "go",
 		},
 		{
-			name:   "vm target",
-			args:   []string{"--target", "vm", "samples/main.ard"},
-			path:   "samples/main.ard",
-			target: "vm",
-		},
-		{
 			name:       "missing target value",
 			args:       []string{"--target"},
 			expectErr:  true,
@@ -109,62 +103,6 @@ func TestParseRunArgs(t *testing.T) {
 				t.Fatalf("expected target %q, got %q", tt.target, target)
 			}
 		})
-	}
-}
-
-func TestRunVMProgram(t *testing.T) {
-	dir := t.TempDir()
-	sourcePath := filepath.Join(dir, "main.ard")
-	source := `
-		mut count = 40
-		count = count + 2
-		count
-	`
-	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
-		t.Fatalf("write source: %v", err)
-	}
-
-	module, err := loadModule(sourcePath, backend.TargetVM)
-	if err != nil {
-		t.Fatalf("load module: %v", err)
-	}
-	program, err := air.Lower(module)
-	if err != nil {
-		t.Fatalf("lower AIR: %v", err)
-	}
-	if err := runVMProgram(program, []string{"ard", "run", "--target", "vm", sourcePath}); err != nil {
-		t.Fatalf("run vm: %v", err)
-	}
-}
-
-func TestRunVMProgramRejectsProjectGoFFI(t *testing.T) {
-	dir := t.TempDir()
-	sourcePath := filepath.Join(dir, "main.ard")
-	source := `
-		extern fn custom() Str = "Custom"
-
-		fn main() Str {
-			custom()
-		}
-	`
-	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
-		t.Fatalf("write source: %v", err)
-	}
-
-	module, err := loadModule(sourcePath, backend.TargetVM)
-	if err != nil {
-		t.Fatalf("load module: %v", err)
-	}
-	program, err := air.Lower(module)
-	if err != nil {
-		t.Fatalf("lower AIR: %v", err)
-	}
-	err = runVMProgram(program, []string{"ard", "run", "--target", "vm", sourcePath})
-	if err == nil {
-		t.Fatal("runVMProgram succeeded, want project FFI rejection")
-	}
-	if !strings.Contains(err.Error(), "plain vm execution does not support project extern custom") {
-		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -550,13 +488,6 @@ func TestParseBuildArgs(t *testing.T) {
 			target: "go",
 		},
 		{
-			name:   "vm target",
-			args:   []string{"samples/main.ard", "--out", "demo", "--target", "vm"},
-			path:   "samples/main.ard",
-			out:    "demo",
-			target: "vm",
-		},
-		{
 			name:       "missing target value",
 			args:       []string{"samples/main.ard", "--target"},
 			expectErr:  true,
@@ -879,7 +810,7 @@ test fn ffi_passes() Void!Str {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "ffi.go"), []byte(`package main
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi.go"), []byte(`package ffi
 
 func Lookup() string { return "ok" }
 `), 0o644); err != nil {
@@ -938,96 +869,5 @@ test fn private_access() Void!Str {
 	}
 	if !strings.Contains(output, "Undefined: utils::private_helper") {
 		t.Fatalf("unexpected output:\n%s", output)
-	}
-}
-
-func TestArgsForEmbeddedProgram(t *testing.T) {
-	t.Run("strips run-embedded sentinel", func(t *testing.T) {
-		got := argsForEmbeddedProgram([]string{"ard", "run-embedded", "one", "two"})
-		want := []string{"ard", "one", "two"}
-		if strings.Join(got, ",") != strings.Join(want, ",") {
-			t.Fatalf("expected %v, got %v", want, got)
-		}
-	})
-
-	t.Run("returns copy for normal args", func(t *testing.T) {
-		input := []string{"ard", "run", "sample.ard"}
-		got := argsForEmbeddedProgram(input)
-		if strings.Join(got, ",") != strings.Join(input, ",") {
-			t.Fatalf("expected %v, got %v", input, got)
-		}
-		got[0] = "changed"
-		if input[0] != "ard" {
-			t.Fatalf("expected returned args to be copied")
-		}
-	})
-}
-
-func TestReadEmbeddedPayloadFromPath(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "embedded")
-	file, err := os.Create(path)
-	if err != nil {
-		t.Fatalf("create embedded fixture: %v", err)
-	}
-	if _, err := file.WriteString("binary-prefix"); err != nil {
-		t.Fatalf("write prefix: %v", err)
-	}
-	payload := []byte("serialized-air")
-	if _, err := file.Write(payload); err != nil {
-		t.Fatalf("write payload: %v", err)
-	}
-	if err := writeFooter(file, vmFooterMarker, uint64(len(payload))); err != nil {
-		t.Fatalf("write footer: %v", err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatalf("close fixture: %v", err)
-	}
-
-	marker, got, err := readEmbeddedPayloadFromPath(path)
-	if err != nil {
-		t.Fatalf("read embedded payload: %v", err)
-	}
-	if marker != vmFooterMarker {
-		t.Fatalf("marker = %q, want %q", marker, vmFooterMarker)
-	}
-	if string(got) != string(payload) {
-		t.Fatalf("payload = %q, want %q", got, payload)
-	}
-}
-
-func TestBuildVMBinaryRejectsProjectGoFFI(t *testing.T) {
-	sourcePath := filepath.Join(t.TempDir(), "main.ard")
-	source := `
-		extern fn custom() Void = "Custom"
-
-		fn main() {
-			custom()
-		}
-	`
-	if err := os.WriteFile(sourcePath, []byte(source), 0o644); err != nil {
-		t.Fatalf("write source: %v", err)
-	}
-
-	_, err := buildVMBinary(sourcePath, filepath.Join(t.TempDir(), "app"))
-	if err == nil {
-		t.Fatal("buildVMBinary succeeded, want project FFI rejection")
-	}
-	if !strings.Contains(err.Error(), "plain vm execution does not support project extern custom") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestBuildVMBinaryRequiresMain(t *testing.T) {
-	sourcePath := filepath.Join(t.TempDir(), "script.ard")
-	if err := os.WriteFile(sourcePath, []byte("1 + 1"), 0o644); err != nil {
-		t.Fatalf("write source: %v", err)
-	}
-
-	_, err := buildVMBinary(sourcePath, filepath.Join(t.TempDir(), "script"))
-	if err == nil {
-		t.Fatal("buildVMBinary succeeded, want missing main error")
-	}
-	if !strings.Contains(err.Error(), "vm builds require fn main()") {
-		t.Fatalf("error = %v", err)
 	}
 }

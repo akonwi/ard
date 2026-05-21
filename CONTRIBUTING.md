@@ -37,7 +37,7 @@ Allowed types:
 Use `!` after the type or scope when a commit introduces a breaking change:
 
 ```text
-feat!: change the VM module loading API
+feat!: change the module loading API
 fix(parser)!: reject legacy function syntax
 ```
 

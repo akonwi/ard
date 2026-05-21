@@ -45,8 +45,7 @@ It is responsible for:
 
 AIR is the backend input boundary.
 
-The Go backend does not lower from parse ASTs, checker nodes, legacy bytecode
-structures, or the deleted `compiler/go_backend` implementation.
+The Go backend does not lower from parse ASTs, checker nodes, or the deleted `compiler/go_backend` implementation.
 
 ### 2. AIR to Go lowering
 
@@ -173,8 +172,7 @@ as:
 - narrow dynamic conversion helpers used by host/decode paths
 - stdin parsing or similar execution support
 
-The backend should not regress toward a universal object runtime or VM-shaped
-value layer.
+The backend should not regress toward a universal object runtime or boxed value layer.
 
 ## Stdlib and FFI model
 
@@ -189,7 +187,7 @@ calls wherever possible. The preferred model is:
 - native Go closures for callback-shaped externs
 - opaque host values carried as `any`
 
-The Go target intentionally avoids VM-style concepts such as:
+The Go target intentionally avoids boxed-runtime concepts such as:
 
 - extern registration maps
 - dynamic binding registries
@@ -223,7 +221,7 @@ The current Go backend should not:
 - reintroduce the deleted `compiler/go_backend` architecture
 - introduce a universal `runtime.Object` representation for generated Go
 - model all Ard values as `any`
-- copy `vm`'s registry-driven host adapter model into generated Go
+- copy registry-driven host adapter models into generated Go
 - preserve Ard surface syntax at the expense of correct and maintainable Go
   lowering
 

@@ -2,9 +2,7 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,15 +17,9 @@ import (
 	gotarget "github.com/akonwi/ard/go"
 	"github.com/akonwi/ard/javascript"
 	"github.com/akonwi/ard/version"
-	vm "github.com/akonwi/ard/vm"
 )
 
-const vmFooterMarker = "ARDVMv001"
-
 func main() {
-	if maybeRunEmbedded() {
-		return
-	}
 	if len(os.Args) < 2 {
 		fmt.Println("Please provide a command")
 		os.Exit(1)
@@ -65,34 +57,6 @@ func main() {
 				os.Exit(1)
 			}
 			switch target {
-			case backend.TargetVM:
-				profile := newPipelineProfile("run vm")
-				defer profile.Print()
-				var module checker.Module
-				if err := profile.Time("frontend.load_module", func() error {
-					var loadErr error
-					module, loadErr = loadModule(inputPath, target)
-					return loadErr
-				}); err != nil {
-					os.Exit(1)
-				}
-				var program *air.Program
-				if err := profile.Time("air.lower", func() error {
-					var lowerErr error
-					program, lowerErr = air.Lower(module)
-					return lowerErr
-				}); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-				if err := validateEntrypointSignature(profile, program); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-				if err := runVMProgramProfile(program, os.Args, profile); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
 			case backend.TargetGo:
 				profile := newPipelineProfile("run go")
 				defer profile.Print()
@@ -145,8 +109,6 @@ func main() {
 			}
 			var builtPath string
 			switch target {
-			case backend.TargetVM:
-				builtPath, err = buildVMBinary(inputPath, outputPath)
 			case backend.TargetGo:
 				builtPath, err = buildGoBinary(inputPath, outputPath, target)
 			case backend.TargetJSBrowser, backend.TargetJSServer:
@@ -327,7 +289,7 @@ func parseTestArgs(args []string) (string, string, bool, string, error) {
 	inputPath := "."
 	filter := ""
 	failFast := false
-	target := backend.TargetVM
+	target := backend.DefaultTarget
 	seenPath := false
 
 	for i := 0; i < len(args); i++ {
@@ -477,72 +439,15 @@ type testOutcome struct {
 }
 
 func runTests(inputPath, filter string, failFast bool, target ...string) bool {
-	testTarget := backend.TargetVM
+	testTarget := backend.DefaultTarget
 	if len(target) > 0 && target[0] != "" {
 		testTarget = target[0]
 	}
-	if testTarget == backend.TargetGo {
-		return runGoTests(inputPath, filter, failFast)
-	}
-	if testTarget != backend.TargetVM {
+	if testTarget != backend.TargetGo {
 		fmt.Printf("unsupported test target: %s\n", testTarget)
 		return false
 	}
-	files, err := discoverTestFiles(inputPath)
-	if err != nil {
-		fmt.Println(err)
-		return false
-	}
-
-	outcomes := make([]testOutcome, 0)
-	for _, path := range files {
-		module, err := loadModule(path, "")
-		if err != nil {
-			return false
-		}
-		tests := collectTests(module, path, filter)
-		if len(tests) == 0 {
-			continue
-		}
-
-		program, err := air.LowerWithTests(module)
-		if err != nil {
-			fmt.Println(err)
-			return false
-		}
-		if err := air.Validate(program); err != nil {
-			fmt.Println(err)
-			return false
-		}
-		vm, err := vm.NewWithOptions(program, vm.Options{Args: os.Args})
-		if err != nil {
-			fmt.Println(err)
-			return false
-		}
-
-		for _, test := range tests {
-			outcome := runCompiledTest(vm, test)
-			outcomes = append(outcomes, outcome)
-			reportTestOutcome(outcome)
-			if failFast && outcome.status != testPass {
-				reportTestSummary(outcomes)
-				return false
-			}
-		}
-	}
-
-	if len(outcomes) == 0 {
-		fmt.Println("No tests found")
-		return true
-	}
-
-	reportTestSummary(outcomes)
-	for _, outcome := range outcomes {
-		if outcome.status != testPass {
-			return false
-		}
-	}
-	return true
+	return runGoTests(inputPath, filter, failFast)
 }
 
 func runGoTests(inputPath, filter string, failFast bool) bool {
@@ -727,25 +632,6 @@ func (t discoveredTest) displayName() string {
 	return fmt.Sprintf("%s::%s", t.displayPath, t.name)
 }
 
-func runCompiledTest(machine *vm.VM, test discoveredTest) testOutcome {
-	result := machine.RunNamedTest(test.name)
-	outcome := testOutcome{test: test, message: result.Message}
-	switch result.Status {
-	case vm.TestPass:
-		outcome.status = testPass
-	case vm.TestFail:
-		outcome.status = testFail
-	case vm.TestPanic:
-		outcome.status = testPanic
-	default:
-		outcome.status = testPanic
-		if outcome.message == "" {
-			outcome.message = fmt.Sprintf("unknown test status: %s", result.Status)
-		}
-	}
-	return outcome
-}
-
 func reportTestOutcome(outcome testOutcome) {
 	fmt.Printf("%s  %s\n", outcome.status.symbol(), outcome.test.displayName())
 	if outcome.message != "" && outcome.status != testPass {
@@ -899,308 +785,10 @@ func buildGoBinary(inputPath string, outputPath string, target string) (string, 
 	return builtPath, nil
 }
 
-func buildVMBinary(inputPath string, outputPath string) (string, error) {
-	profile := newPipelineProfile("build vm")
-	defer profile.Print()
-	var module checker.Module
-	if err := profile.Time("frontend.load_module", func() error {
-		var loadErr error
-		module, loadErr = loadModule(inputPath, backend.TargetVM)
-		return loadErr
-	}); err != nil {
-		return "", err
-	}
-	var program *air.Program
-	if err := profile.Time("air.lower", func() error {
-		var lowerErr error
-		program, lowerErr = air.Lower(module)
-		return lowerErr
-	}); err != nil {
-		return "", err
-	}
-	if err := profile.Time("air.validate", func() error {
-		return air.Validate(program)
-	}); err != nil {
-		return "", err
-	}
-	if err := validateEntrypointSignature(profile, program); err != nil {
-		return "", err
-	}
-	if program.Entry == air.NoFunction {
-		return "", fmt.Errorf("vm builds require fn main()")
-	}
-	if err := validatePlainVMExternsProfile(profile, program); err != nil {
-		return "", err
-	}
-	if err := profile.Time("vm.validate_host_support", func() error {
-		_, err := vm.NewWithOptions(program, vm.Options{})
-		return err
-	}); err != nil {
-		return "", err
-	}
-	var data []byte
-	if err := profile.Time("air.serialize", func() error {
-		var serializeErr error
-		data, serializeErr = air.SerializeProgram(program)
-		return serializeErr
-	}); err != nil {
-		return "", err
-	}
-	selfPath, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	if err := profile.Time("embed.write_binary", func() error {
-		return writeEmbeddedBinary(selfPath, outputPath, vmFooterMarker, data)
-	}); err != nil {
-		return "", err
-	}
-	return outputPath, nil
-}
-
-func argsForEmbeddedProgram(args []string) []string {
-	if len(args) > 1 && args[1] == "run-embedded" {
-		out := make([]string, 0, len(args)-1)
-		out = append(out, args[0])
-		out = append(out, args[2:]...)
-		return out
-	}
-	return append([]string(nil), args...)
-}
-
-func maybeRunEmbedded() bool {
-	marker, data, err := readEmbeddedPayload()
-	if err != nil || data == nil {
-		return false
-	}
-	switch marker {
-	case vmFooterMarker:
-		profile := newPipelineProfile("embedded vm")
-		defer profile.Print()
-		var program *air.Program
-		if err := profile.Time("air.deserialize", func() error {
-			var deserializeErr error
-			program, deserializeErr = air.DeserializeProgram(data)
-			return deserializeErr
-		}); err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to deserialize vm AIR:", err)
-			os.Exit(1)
-		}
-		if err := profile.Time("air.validate", func() error {
-			return air.Validate(program)
-		}); err != nil {
-			fmt.Fprintln(os.Stderr, "Invalid vm AIR:", err)
-			os.Exit(1)
-		}
-		if runErr := runVMProgramProfile(program, argsForEmbeddedProgram(os.Args), profile); runErr != nil {
-			fmt.Fprintln(os.Stderr, runErr)
-			os.Exit(1)
-		}
-	default:
-		return false
-	}
-	return true
-}
-
-func runVMProgram(program *air.Program, args []string) error {
-	return runVMProgramProfile(program, args, nil)
-}
-
-func validatePlainVMExternsProfile(profile *pipelineProfile, program *air.Program) error {
-	return profile.Time("vm.validate_externs", func() error {
-		return validatePlainVMExterns(program)
-	})
-}
-
-func validatePlainVMExterns(program *air.Program) error {
-	if program == nil {
-		return nil
-	}
-	usedExterns := reachableVMExterns(program)
-	for _, ext := range program.Externs {
-		if !usedExterns[ext.ID] || vmExternModuleIsStdlib(program, ext) {
-			continue
-		}
-		binding := ext.Name
-		if goBinding := ext.Bindings[backend.TargetGo]; goBinding != "" {
-			binding = goBinding
-		}
-		return fmt.Errorf("plain vm execution does not support project extern %s with Go binding %q; use --target go or an embedded VM host with generated adapters", ext.Name, binding)
-	}
-	return nil
-}
-
-func vmExternModuleIsStdlib(program *air.Program, ext air.Extern) bool {
-	return int(ext.Module) >= 0 && int(ext.Module) < len(program.Modules) && strings.HasPrefix(program.Modules[ext.Module].Path, "ard/")
-}
-
-func reachableVMExterns(program *air.Program) map[air.ExternID]bool {
-	used := map[air.ExternID]bool{}
-	seenFunctions := map[air.FunctionID]bool{}
-	var visitFunction func(air.FunctionID)
-	visitFunction = func(id air.FunctionID) {
-		if id < 0 || int(id) >= len(program.Functions) || seenFunctions[id] {
-			return
-		}
-		seenFunctions[id] = true
-		collectVMBlockExterns(program.Functions[id].Body, used, visitFunction)
-	}
-	visitFunction(program.Entry)
-	visitFunction(program.Script)
-	for _, test := range program.Tests {
-		visitFunction(test.Function)
-	}
-	return used
-}
-
-func collectVMBlockExterns(block air.Block, used map[air.ExternID]bool, visitFunction func(air.FunctionID)) {
-	for _, stmt := range block.Stmts {
-		collectVMExprExterns(stmt.Value, used, visitFunction)
-		collectVMExprExterns(stmt.Expr, used, visitFunction)
-		collectVMExprExterns(stmt.Target, used, visitFunction)
-		collectVMBlockExterns(stmt.Body, used, visitFunction)
-	}
-	collectVMExprExterns(block.Result, used, visitFunction)
-}
-
-func collectVMExprExterns(expr *air.Expr, used map[air.ExternID]bool, visitFunction func(air.FunctionID)) {
-	if expr == nil {
-		return
-	}
-	switch expr.Kind {
-	case air.ExprCallExtern:
-		used[expr.Extern] = true
-	case air.ExprCall, air.ExprMakeClosure, air.ExprSpawnFiber:
-		visitFunction(expr.Function)
-	}
-	for i := range expr.Args {
-		collectVMExprExterns(&expr.Args[i], used, visitFunction)
-	}
-	for i := range expr.Entries {
-		collectVMExprExterns(&expr.Entries[i].Key, used, visitFunction)
-		collectVMExprExterns(&expr.Entries[i].Value, used, visitFunction)
-	}
-	for i := range expr.Fields {
-		collectVMExprExterns(&expr.Fields[i].Value, used, visitFunction)
-	}
-}
-
 func validateEntrypointSignature(profile *pipelineProfile, program *air.Program) error {
 	return profile.Time("air.validate_entrypoint", func() error {
 		return air.ValidateEntrypointSignature(program)
 	})
-}
-
-func runVMProgramProfile(program *air.Program, args []string, profile *pipelineProfile) error {
-	if err := validatePlainVMExternsProfile(profile, program); err != nil {
-		return err
-	}
-	var machine *vm.VM
-	if err := profile.Time("vm.init", func() error {
-		var initErr error
-		machine, initErr = vm.NewWithOptions(program, vm.Options{Args: args})
-		return initErr
-	}); err != nil {
-		return err
-	}
-	var err error
-	runErr := profile.Time("vm.run", func() error {
-		if program.Entry != air.NoFunction {
-			_, err = machine.RunEntry()
-			return err
-		}
-		_, err = machine.RunScript()
-		return err
-	})
-	if report := machine.ProfileReport(); report != "" {
-		fmt.Fprintln(os.Stderr, report)
-	}
-	return runErr
-}
-
-func writeEmbeddedBinary(srcPath string, dstPath string, marker string, data []byte) error {
-	src, err := os.Open(srcPath)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-
-	dst, err := os.Create(dstPath)
-	if err != nil {
-		return err
-	}
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, src); err != nil {
-		return err
-	}
-	if _, err := dst.Write(data); err != nil {
-		return err
-	}
-	if err := writeFooter(dst, marker, uint64(len(data))); err != nil {
-		return err
-	}
-	return dst.Chmod(0o755)
-}
-
-func writeFooter(w io.Writer, marker string, length uint64) error {
-	if _, err := w.Write([]byte(marker)); err != nil {
-		return err
-	}
-	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, length)
-	_, err := w.Write(buf)
-	return err
-}
-
-func readEmbeddedPayload() (string, []byte, error) {
-	path, err := os.Executable()
-	if err != nil {
-		return "", nil, err
-	}
-	return readEmbeddedPayloadFromPath(path)
-}
-
-func readEmbeddedPayloadFromPath(path string) (string, []byte, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", nil, err
-	}
-	defer file.Close()
-
-	info, err := file.Stat()
-	if err != nil {
-		return "", nil, err
-	}
-	footerSize := int64(len(vmFooterMarker) + 8)
-	if info.Size() < footerSize {
-		return "", nil, nil
-	}
-	_, err = file.Seek(info.Size()-footerSize, io.SeekStart)
-	if err != nil {
-		return "", nil, err
-	}
-	footer := make([]byte, footerSize)
-	if _, err := io.ReadFull(file, footer); err != nil {
-		return "", nil, err
-	}
-	marker := string(footer[:len(vmFooterMarker)])
-	if marker != vmFooterMarker {
-		return "", nil, nil
-	}
-	length := binary.LittleEndian.Uint64(footer[len(vmFooterMarker):])
-	dataOffset := info.Size() - footerSize - int64(length)
-	if dataOffset < 0 {
-		return "", nil, fmt.Errorf("invalid embedded payload length")
-	}
-	if _, err := file.Seek(dataOffset, io.SeekStart); err != nil {
-		return "", nil, err
-	}
-	data := make([]byte, length)
-	if _, err := io.ReadFull(file, data); err != nil {
-		return "", nil, err
-	}
-	return marker, data, nil
 }
 
 const pipelineProfileEnvVar = "ARD_PIPELINE_PROFILE"

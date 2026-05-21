@@ -3,6 +3,8 @@ package gotarget
 import (
 	"encoding/json"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -259,36 +261,51 @@ func writeProjectFFICompanions(dir string, program *air.Program, projectInfo *ch
 	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
 		return fmt.Errorf("go target uses project externs but project information is unavailable")
 	}
-	copied := false
-	if err := copyProjectFFIFile(filepath.Join(projectInfo.RootPath, "ffi.go"), filepath.Join(dir, "ffi.go")); err != nil {
-		return err
-	} else if fileExists(filepath.Join(projectInfo.RootPath, "ffi.go")) {
-		copied = true
-	}
-	matches, err := filepath.Glob(filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
+	rootFile := filepath.Join(projectInfo.RootPath, "ffi.go")
+	dirMatches, err := filepath.Glob(filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
 	if err != nil {
 		return err
 	}
-	for _, sourcePath := range matches {
-		name := "ffi_" + filepath.Base(sourcePath)
-		if err := copyProjectFFIFile(sourcePath, filepath.Join(dir, name)); err != nil {
+	rootExists := fileExists(rootFile)
+	if rootExists && len(dirMatches) > 0 {
+		return fmt.Errorf("project Go FFI must use either %s or %s, not both", rootFile, filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
+	}
+	ffiDir := filepath.Join(dir, "projectffi")
+	if rootExists {
+		if err := copyProjectFFIFile(rootFile, filepath.Join(ffiDir, filepath.Base(rootFile))); err != nil {
 			return err
 		}
-		copied = true
+		return nil
 	}
-	if !copied {
-		return fmt.Errorf("go target uses project externs but no project Go FFI companion was found at %s or %s", filepath.Join(projectInfo.RootPath, "ffi.go"), filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
+	if len(dirMatches) > 0 {
+		for _, sourcePath := range dirMatches {
+			if err := copyProjectFFIFile(sourcePath, filepath.Join(ffiDir, filepath.Base(sourcePath))); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	return nil
+	return fmt.Errorf("go target uses project externs but no project Go FFI companion was found at %s or %s", rootFile, filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
 }
 
 func copyProjectFFIFile(sourcePath, destPath string) error {
 	content, err := os.ReadFile(sourcePath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
 		return fmt.Errorf("read project Go FFI companion %s: %w", sourcePath, err)
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), sourcePath, content, parser.PackageClauseOnly)
+	if err != nil {
+		return fmt.Errorf("parse project Go FFI companion %s: %w", sourcePath, err)
+	}
+	if file.Name == nil || file.Name.Name != "ffi" {
+		pkg := ""
+		if file.Name != nil {
+			pkg = file.Name.Name
+		}
+		return fmt.Errorf("project Go FFI companion %s must use package ffi, got package %s", sourcePath, pkg)
+	}
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		return err
 	}
 	if err := os.WriteFile(destPath, content, 0o644); err != nil {
 		return err
@@ -336,7 +353,10 @@ var stdlibGoBindings = func() map[string]struct{} {
 }()
 
 func stdlibGoBinding(binding string) bool {
-	_, ok := stdlibGoBindings[binding]
+	if _, ok := stdlibGoBindings[binding]; ok {
+		return true
+	}
+	_, ok := generatedStdlibExternLowerings[binding]
 	return ok
 }
 

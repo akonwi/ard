@@ -213,10 +213,12 @@ Recommended semantics:
 
 ## Execution model
 
+Tests run through the Go target by default so `ard test` exercises the same backend used by normal native `ard run` and `ard build` workflows.
+
 v1 should run tests:
 - sequentially
 - in isolation
-- in fresh VM executions
+- in fresh generated Go test runners
 - with continue-on-failure by default
 - with `--fail-fast` support
 
@@ -252,7 +254,7 @@ The summary should distinguish ordinary failures from panics.
 
 This design fits the current Ard architecture because:
 - Ard already has `Result`, `Maybe`, and `panic`
-- the VM can already run functions by name
+- the Go target can generate a lightweight test runner that calls Ard test functions directly
 - the module system is file-based, so a Rust/Gleam-style split maps better than a Go package merge model
 
 ## Implementation plan
@@ -278,8 +280,8 @@ This design fits the current Ard architecture because:
 7. **Enumerate tests from checked programs**
    - Expose stable checked metadata for the runner.
 
-8. **Reuse emitter/VM execution**
-   - Run discovered test functions by name and classify outcomes.
+8. **Reuse backend execution**
+   - Run discovered test functions through the selected backend and classify outcomes.
 
 9. **Add `ard/testing` stdlib module**
    - Implement assertion helpers returning `Void!Str`.
@@ -304,15 +306,15 @@ Highest-likelihood files:
 
 Likely support files:
 - `compiler/formatter/printer.go`
-- `compiler/bytecode/emitter.go`
+- `compiler/go/*.go`
 - new runner/discovery files under `compiler/`
-- parser/checker/formatter/VM tests
+- parser/checker/formatter tests
 
 Possibly touched depending on implementation details:
 - `compiler/parse/lexer.go`
 - `compiler/checker/module_resolver.go`
 - `compiler/ffi/*`
-- `compiler/bytecode/vm/registry.gen.go`
+- `compiler/std_lib/ffi/*`
 
 ## Validation plan
 
@@ -321,7 +323,7 @@ Run from `compiler/`:
 ```bash
 go test ./parse
 go test ./checker
-go test ./bytecode/vm
+go test ./go
 go test ./formatter
 go test ./...
 go build
@@ -338,8 +340,8 @@ Manual validation should cover:
 If new FFI is added:
 
 ```bash
-go generate ./bytecode/vm
-go test ./bytecode/vm
+go generate ./std_lib/ffi
+go test ./go
 go test ./...
 ```
 
