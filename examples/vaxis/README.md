@@ -1,13 +1,20 @@
-# vaxis-ard
+# Vaxis tic-tac-toe
 
-Userland Ard Go-FFI demos using [Vaxis](https://github.com/rockorager/vaxis).
+A userland Ard Go-FFI demo using [Vaxis](https://github.com/rockorager/vaxis).
 
-The examples intentionally keep Vaxis behind a small project-owned `ffi.go` layer. Ard owns the app state and behavior; Go owns the terminal capability boundary.
+The Ard program owns the tic-tac-toe game state and rules. `ffi.go` is the project-owned Go boundary for terminal rendering and input.
 
-## Examples
+## Run
 
-- `counter/` — smallest smoke test for project Go FFI + Vaxis rendering/input.
-- `todo/` — interactive todo list with add/delete/toggle/edit behavior.
-- `tic-tac-toe/` — richer version of Ard's sample tic-tac-toe game with Vaxis rendering.
+```sh
+cd tic-tac-toe
+ard run main.ard
+```
 
-Each example is a standalone Ard project.
+## Build
+
+```sh
+cd tic-tac-toe
+ard build --out ttt main.ard
+./ttt
+```
