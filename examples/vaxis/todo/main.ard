@@ -1,0 +1,342 @@
+extern type Terminal
+
+extern fn tui_open() Terminal!Str = "TuiOpen"
+
+extern fn tui_close(term: Terminal) Void!Str = "TuiClose"
+
+extern fn tui_clear(term: Terminal) Void = "TuiClear"
+
+extern fn tui_draw_text(term: Terminal, x: Int, y: Int, text: Str) Void = "TuiDrawText"
+
+extern fn tui_flush(term: Terminal) Void!Str = "TuiFlush"
+
+extern fn tui_read_key(term: Terminal) Str!Str = "TuiReadKey"
+
+extern fn text_backspace(text: Str) Str = "TextBackspace"
+
+struct Todo {
+  title: Str,
+  done: Bool,
+}
+
+fn initial_todos() [Todo] {
+  [
+    Todo{title: "Wire project Go FFI", done: true},
+    Todo{title: "Build a Vaxis counter", done: true},
+    Todo{title: "Try a Vaxis todo list", done: false},
+  ]
+}
+
+fn status(done: Bool) Str {
+  mut res = "[ ]"
+  if done {
+    res = "[x]"
+  }
+  res
+}
+
+fn selected_prefix(index: Int, selected: Int) Str {
+  mut res = "  "
+  if index == selected {
+    res = "> "
+  }
+  res
+}
+
+fn todo_title(todo: Todo) Str {
+  mut res = todo.title
+  if res.is_empty() {
+    res = "<untitled>"
+  }
+  res
+}
+
+fn todo_line(todo: Todo, index: Int, selected: Int, editing: Bool, editing_index: Int, draft: Str) Str {
+  mut title = todo_title(todo)
+  if editing {
+    if index == editing_index {
+      title = draft + "_"
+    }
+  }
+  selected_prefix(index, selected) + status(todo.done) + " " + title
+}
+
+fn done_count(todos: [Todo]) Int {
+  mut count = 0
+  for todo in todos {
+    if todo.done {
+      count = count + 1
+    }
+  }
+  count
+}
+
+fn clamp_selection(selected: Int, todos: [Todo]) Int {
+  mut res = selected
+  if todos.size() == 0 {
+    res = 0
+  }
+  if todos.size() > 0 {
+    if res < 0 {
+      res = 0
+    }
+    if res >= todos.size() {
+      res = todos.size() - 1
+    }
+  }
+  res
+}
+
+fn delete_at(todos: [Todo], selected: Int) [Todo] {
+  mut out: [Todo] = []
+  for todo, index in todos {
+    if not index == selected {
+      out.push(todo)
+    }
+  }
+  out
+}
+
+fn editable_key(key: Str) Bool {
+  mut res = false
+  if key.size() == 1 {
+    if not key == "\n" {
+      res = true
+    }
+  }
+  res
+}
+
+fn draw_list(
+  term: Terminal,
+  todos: [Todo],
+  selected: Int,
+  editing: Bool,
+  editing_index: Int,
+  draft: Str,
+) Void {
+  mut row = 6
+  if todos.size() == 0 {
+    tui_draw_text(term, 2, row, "  No todos. Press a to add one.")
+  }
+  if todos.size() > 0 {
+    for todo, index in todos {
+      tui_draw_text(term, 2, row, todo_line(todo, index, selected, editing, editing_index, draft))
+      row = row + 1
+    }
+  }
+}
+
+fn draw(
+  term: Terminal,
+  todos: [Todo],
+  selected: Int,
+  message: Str,
+  editing: Bool,
+  editing_index: Int,
+  draft: Str,
+) Void!Str {
+  tui_clear(term)
+  tui_draw_text(term, 2, 1, "Ard + Vaxis Todo")
+  tui_draw_text(term, 2, 2, "────────────────")
+  tui_draw_text(term, 2, 4, "Done: " + done_count(todos).to_str() + " / " + todos.size().to_str())
+  draw_list(term, todos, selected, editing, editing_index, draft)
+  tui_draw_text(term, 2, 15, message)
+  if editing {
+    tui_draw_text(term, 2, 17, "Editing: type title. Enter saves. Backspace deletes. q cancels.")
+  }
+  if editing == false {
+    tui_draw_text(term, 2, 17, "Move: ↑/↓ or k/j. Toggle: enter. Edit: e. a adds. d deletes.")
+    tui_draw_text(term, 2, 18, "r resets. q quits.")
+  }
+  tui_flush(term)
+}
+
+fn save_edit(todos: [Todo], editing_index: Int, draft: Str) [Todo] {
+  mut out = todos
+  if editing_index >= 0 and editing_index < out.size() {
+    let todo = out.at(editing_index)
+    let updated_title = draft.trim()
+    out.set(editing_index, Todo{title: updated_title, done: todo.done})
+  }
+  out
+}
+
+fn run_todo(term: Terminal) Void!Str {
+  mut todos = initial_todos()
+  mut selected = 0
+  mut message = "Toggle, add, delete, or edit todos."
+  mut running = true
+  mut editing = false
+  mut editing_index = 0
+  mut draft = ""
+
+  while running {
+    selected = clamp_selection(selected, todos)
+    try draw(term, todos, selected, message, editing, editing_index, draft)
+    let key = try tui_read_key(term)
+
+    mut handled = false
+
+    if editing {
+      if key == "select" {
+        todos = save_edit(todos, editing_index, draft)
+        selected = clamp_selection(editing_index, todos)
+        editing = false
+        message = "Saved todo."
+        handled = true
+      }
+
+      if handled == false {
+        if key == "q" {
+          editing = false
+          if editing_index >= 0 and editing_index < todos.size() {
+            if todos.at(editing_index).title.is_empty() {
+              todos = delete_at(todos, editing_index)
+              selected = clamp_selection(editing_index, todos)
+            }
+          }
+          message = "Canceled edit."
+          handled = true
+        }
+      }
+
+      if handled == false {
+        if key == "backspace" {
+          draft = text_backspace(draft)
+          message = "Editing todo title."
+          handled = true
+        }
+      }
+
+      if handled == false {
+        if key == "space" {
+          draft = draft + " "
+          message = "Editing todo title."
+          handled = true
+        }
+      }
+
+      if handled == false {
+        if editable_key(key) {
+          draft = draft + key
+          message = "Editing todo title."
+          handled = true
+        }
+      }
+
+      if handled == false {
+        if key == "redraw" {
+          handled = true
+        }
+      }
+    }
+
+    if editing == false {
+      if key == "q" {
+        running = false
+        handled = true
+      }
+
+      if handled == false {
+        if key == "up" {
+          selected = selected - 1
+          selected = clamp_selection(selected, todos)
+          message = "Moved up."
+          handled = true
+        }
+      }
+      if handled == false {
+        if key == "down" {
+          selected = selected + 1
+          selected = clamp_selection(selected, todos)
+          message = "Moved down."
+          handled = true
+        }
+      }
+
+      if handled == false {
+        if key == "select" {
+          if todos.size() == 0 {
+            message = "No todos to toggle. Press a to add one."
+          }
+          if todos.size() > 0 {
+            let todo = todos.at(selected)
+            todos.set(selected, Todo{title: todo.title, done: not todo.done})
+            message = "Toggled: " + todo_title(todo)
+          }
+          handled = true
+        }
+      }
+
+      if handled == false {
+        if key == "e" {
+          if todos.size() == 0 {
+            message = "No todos to edit. Press a to add one."
+          }
+          if todos.size() > 0 {
+            editing = true
+            editing_index = selected
+            draft = todos.at(selected).title
+            message = "Editing todo title."
+          }
+          handled = true
+        }
+      }
+
+      if handled == false {
+        if key == "a" {
+          todos.push(Todo{title: "", done: false})
+          selected = todos.size() - 1
+          editing = true
+          editing_index = selected
+          draft = ""
+          message = "Type a title for the new todo."
+          handled = true
+        }
+      }
+
+      if handled == false {
+        if key == "d" {
+          if todos.size() == 0 {
+            message = "No todos to delete."
+          }
+          if todos.size() > 0 {
+            let todo = todos.at(selected)
+            todos = delete_at(todos, selected)
+            selected = clamp_selection(selected, todos)
+            message = "Deleted: " + todo_title(todo)
+          }
+          handled = true
+        }
+      }
+
+      if handled == false {
+        if key == "r" {
+          todos = initial_todos()
+          selected = 0
+          message = "Reset todos."
+          handled = true
+        }
+      }
+
+      if handled == false {
+        if key == "redraw" {
+          handled = true
+        }
+      }
+    }
+
+    if handled == false {
+      message = "Unknown key: " + key
+    }
+  }
+
+  Result::ok(())
+}
+
+fn main() Void {
+  let term = tui_open().expect("open terminal")
+  run_todo(term).expect("run todo")
+  tui_close(term).expect("close terminal")
+}

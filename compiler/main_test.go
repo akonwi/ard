@@ -14,6 +14,7 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/backend"
+	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
 )
 
@@ -338,6 +339,18 @@ func TestRunGoTargetSampleStdoutConformance(t *testing.T) {
 	}
 }
 
+func TestBuildVaxisExamples(t *testing.T) {
+	for _, sourcePath := range []string{
+		filepath.Join("..", "examples", "vaxis", "counter", "main.ard"),
+		filepath.Join("..", "examples", "vaxis", "todo", "main.ard"),
+		filepath.Join("..", "examples", "vaxis", "tic-tac-toe", "main.ard"),
+	} {
+		t.Run(sourcePath, func(t *testing.T) {
+			_ = buildGoSampleBinary(t, sourcePath)
+		})
+	}
+}
+
 func TestRunGoTargetServerSampleRoutes(t *testing.T) {
 	sourcePath := filepath.Join("samples", "server.ard")
 	outputPath := buildGoSampleBinary(t, sourcePath)
@@ -368,16 +381,16 @@ func TestRunGoTargetServerSampleRoutes(t *testing.T) {
 
 func buildGoSampleBinary(t *testing.T, sourcePath string) string {
 	t.Helper()
-	module, err := loadModule(sourcePath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(sourcePath, backend.TargetGo)
 	if err != nil {
 		t.Fatalf("load module %s: %v", sourcePath, err)
 	}
-	program, err := air.Lower(module)
+	program, err := air.Lower(loaded.Module)
 	if err != nil {
 		t.Fatalf("lower AIR %s: %v", sourcePath, err)
 	}
 	outputPath := filepath.Join(t.TempDir(), filepath.Base(strings.TrimSuffix(sourcePath, filepath.Ext(sourcePath))))
-	if _, err := gotarget.BuildProgram(program, outputPath); err != nil {
+	if _, err := gotarget.BuildProgram(program, outputPath, loaded.ProjectInfo); err != nil {
 		t.Fatalf("build go sample %s: %v", sourcePath, err)
 	}
 	if _, err := os.Stat(outputPath); err != nil {

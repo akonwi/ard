@@ -1,0 +1,114 @@
+extern type Terminal
+
+extern fn tui_open() Terminal!Str = "TuiOpen"
+
+extern fn tui_close(term: Terminal) Void!Str = "TuiClose"
+
+extern fn tui_clear(term: Terminal) Void = "TuiClear"
+
+extern fn tui_draw_text(term: Terminal, x: Int, y: Int, text: Str) Void = "TuiDrawText"
+
+extern fn tui_flush(term: Terminal) Void!Str = "TuiFlush"
+
+extern fn tui_read_key(term: Terminal) Str!Str = "TuiReadKey"
+
+fn draw(term: Terminal, count: Int, message: Str) Void!Str {
+  tui_clear(term)
+  tui_draw_text(term, 2, 1, "Ard + Vaxis Counter")
+  tui_draw_text(term, 2, 2, "────────────────────")
+  tui_draw_text(term, 2, 4, "Count: " + count.to_str())
+  tui_draw_text(term, 2, 6, "↑/k/right/l/+ increments")
+  tui_draw_text(term, 2, 7, "↓/j/left/h/- decrements")
+  tui_draw_text(term, 2, 8, "r resets")
+  tui_draw_text(term, 2, 9, "q quits")
+  tui_draw_text(term, 2, 11, message)
+  tui_flush(term)
+}
+
+fn run_counter(term: Terminal) Void!Str {
+  mut count = 0
+  mut message = "Use the keyboard to change the counter."
+  mut running = true
+
+  while running {
+    try draw(term, count, message)
+    let key = try tui_read_key(term)
+
+    mut handled = false
+
+    if key == "q" {
+      running = false
+      handled = true
+    }
+
+    if handled == false {
+      if key == "up" {
+        count = count + 1
+        message = "Incremented."
+        handled = true
+      }
+    }
+    if handled == false {
+      if key == "right" {
+        count = count + 1
+        message = "Incremented."
+        handled = true
+      }
+    }
+    if handled == false {
+      if key == "+" {
+        count = count + 1
+        message = "Incremented."
+        handled = true
+      }
+    }
+
+    if handled == false {
+      if key == "down" {
+        count = count - 1
+        message = "Decremented."
+        handled = true
+      }
+    }
+    if handled == false {
+      if key == "left" {
+        count = count - 1
+        message = "Decremented."
+        handled = true
+      }
+    }
+    if handled == false {
+      if key == "-" {
+        count = count - 1
+        message = "Decremented."
+        handled = true
+      }
+    }
+
+    if handled == false {
+      if key == "r" {
+        count = 0
+        message = "Reset."
+        handled = true
+      }
+    }
+
+    if handled == false {
+      if key == "redraw" {
+        handled = true
+      }
+    }
+
+    if handled == false {
+      message = "Unknown key: " + key
+    }
+  }
+
+  Result::ok(())
+}
+
+fn main() Void {
+  let term = tui_open().expect("open terminal")
+  run_counter(term).expect("run counter")
+  tui_close(term).expect("close terminal")
+}
