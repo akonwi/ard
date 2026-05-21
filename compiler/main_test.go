@@ -245,68 +245,62 @@ func TestRunGoTargetLightsSample(t *testing.T) {
 	}
 }
 
-func TestRunGoTargetLoopsSample(t *testing.T) {
-	sourcePath := filepath.Join("samples", "loops.ard")
-	module, err := loadModule(sourcePath, backend.TargetGo)
-	if err != nil {
-		t.Fatalf("load module: %v", err)
+func TestRunGoTargetSampleStdoutConformance(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		stdin  string
+		stdout string
+	}{
+		{
+			name: "fizzbuzz",
+			path: filepath.Join("samples", "fizzbuzz.ard"),
+			stdout: strings.Join([]string{
+				"1", "2", "Fizz", "4", "Buzz", "Fizz", "7", "8", "Fizz", "Buzz", "",
+			}, "\n"),
+		},
+		{
+			name: "loops",
+			path: filepath.Join("samples", "loops.ard"),
+			stdout: strings.Join([]string{
+				"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "counting from 1 to 3", "1", "2", "3", "",
+			}, "\n"),
+		},
+		{
+			name: "collections",
+			path: filepath.Join("samples", "collections.ard"),
+			stdout: strings.Join([]string{
+				"numbers.size = 0", "adding numbers from 0 to 10", "numbers.size = 11", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "7th element = 6", "",
+			}, "\n"),
+		},
+		{
+			name: "maps",
+			path: filepath.Join("samples", "maps.ard"),
+			stdout: strings.Join([]string{
+				"size is 1", "entries:", "1 = one", "2 = 2", "3 = 3", "4 = 4", "5 = 5", "there is an entry for 2", "2 is not found", "entries:", "1 = one", "3 = 3", "4 = 4", "5 = 5", "",
+			}, "\n"),
+		},
+		{
+			name:   "word_frequency",
+			path:   filepath.Join("samples", "word_frequency.ard"),
+			stdin:  "ard ard lang\n",
+			stdout: "Enter some text to analyze:\n\nWord Frequency Analysis:\n------------------------\nTotal words: 3\nUnique words: 2\n\nMost frequent words:\n1. ard: 2\n2. lang: 1\n",
+		},
 	}
-	program, err := air.Lower(module)
-	if err != nil {
-		t.Fatalf("lower AIR: %v", err)
-	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
-		t.Fatalf("run go loops sample: %v", err)
-	}
-}
 
-func TestRunGoTargetCollectionsSample(t *testing.T) {
-	sourcePath := filepath.Join("samples", "collections.ard")
-	module, err := loadModule(sourcePath, backend.TargetGo)
-	if err != nil {
-		t.Fatalf("load module: %v", err)
-	}
-	program, err := air.Lower(module)
-	if err != nil {
-		t.Fatalf("lower AIR: %v", err)
-	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
-		t.Fatalf("run go collections sample: %v", err)
-	}
-}
-
-func TestRunGoTargetMapsSample(t *testing.T) {
-	sourcePath := filepath.Join("samples", "maps.ard")
-	module, err := loadModule(sourcePath, backend.TargetGo)
-	if err != nil {
-		t.Fatalf("load module: %v", err)
-	}
-	program, err := air.Lower(module)
-	if err != nil {
-		t.Fatalf("lower AIR: %v", err)
-	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
-		t.Fatalf("run go maps sample: %v", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := runGoSampleBinary(t, tc.path, tc.stdin)
+			if got != tc.stdout {
+				t.Fatalf("stdout mismatch for %s\ngot:\n%q\nwant:\n%q", tc.path, got, tc.stdout)
+			}
+		})
 	}
 }
 
 func TestRunGoTargetServerSampleRoutes(t *testing.T) {
 	sourcePath := filepath.Join("samples", "server.ard")
-	module, err := loadModule(sourcePath, backend.TargetGo)
-	if err != nil {
-		t.Fatalf("load module: %v", err)
-	}
-	program, err := air.Lower(module)
-	if err != nil {
-		t.Fatalf("lower AIR: %v", err)
-	}
-	outputPath := filepath.Join(t.TempDir(), "server-bin")
-	if _, err := gotarget.BuildProgram(program, outputPath); err != nil {
-		t.Fatalf("build go server sample: %v", err)
-	}
-	if _, err := os.Stat(outputPath); err != nil {
-		t.Fatalf("stat built server binary: %v", err)
-	}
+	outputPath := buildGoSampleBinary(t, sourcePath)
 
 	port := freeTCPPort(t)
 	cmd := exec.Command(outputPath)
@@ -330,6 +324,43 @@ func TestRunGoTargetServerSampleRoutes(t *testing.T) {
 	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", `{"email":"ard@example.com"}`, http.StatusCreated, "Created user with email ard@example.com")
 	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", "", http.StatusBadRequest, "Missing request body")
 	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", `{"name":"Ard"}`, http.StatusBadRequest, `Missing email: email: got Missing field "email", expected Field`)
+}
+
+func buildGoSampleBinary(t *testing.T, sourcePath string) string {
+	t.Helper()
+	module, err := loadModule(sourcePath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module %s: %v", sourcePath, err)
+	}
+	program, err := air.Lower(module)
+	if err != nil {
+		t.Fatalf("lower AIR %s: %v", sourcePath, err)
+	}
+	outputPath := filepath.Join(t.TempDir(), filepath.Base(strings.TrimSuffix(sourcePath, filepath.Ext(sourcePath))))
+	if _, err := gotarget.BuildProgram(program, outputPath); err != nil {
+		t.Fatalf("build go sample %s: %v", sourcePath, err)
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("stat built sample binary %s: %v", outputPath, err)
+	}
+	return outputPath
+}
+
+func runGoSampleBinary(t *testing.T, sourcePath, stdin string) string {
+	t.Helper()
+	binaryPath := buildGoSampleBinary(t, sourcePath)
+	cmd := exec.Command(binaryPath)
+	cmd.Stdin = strings.NewReader(stdin)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run go sample %s: %v\nstderr:\n%s", sourcePath, err, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Fatalf("run go sample %s wrote stderr:\n%s", sourcePath, stderr.String())
+	}
+	return stdout.String()
 }
 
 func freeTCPPort(t *testing.T) int {
