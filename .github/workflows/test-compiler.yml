@@ -70,6 +70,12 @@ jobs:
         working-directory: compiler
         run: go build -tags=goexperiment.jsonv2 -o "$RUNNER_TEMP/ard" .
 
+      - name: Run server smoke test
+        working-directory: examples/server
+        env:
+          ARD: ${{ runner.temp }}/ard
+        run: ./test_server.py
+
       - name: Run tic-tac-toe PTY smoke test
         working-directory: examples/tic-tac-toe
         env:

@@ -343,15 +343,14 @@ func TestBuildTicTacToeExample(t *testing.T) {
 	_ = buildGoSampleBinary(t, filepath.Join("..", "examples", "tic-tac-toe", "main.ard"))
 }
 
-func TestRunGoTargetServerSampleRoutes(t *testing.T) {
-	sourcePath := filepath.Join("samples", "server.ard")
-	outputPath := buildGoSampleBinary(t, sourcePath)
+func TestRunServerExampleRoutes(t *testing.T) {
+	outputPath := buildGoSampleBinary(t, filepath.Join("..", "examples", "server", "main.ard"))
 
 	port := freeTCPPort(t)
 	cmd := exec.Command(outputPath)
 	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", port))
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("start server sample: %v", err)
+		t.Fatalf("start server example: %v", err)
 	}
 	t.Cleanup(func() {
 		if cmd.Process != nil {
