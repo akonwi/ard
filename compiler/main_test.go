@@ -339,8 +339,8 @@ func TestRunGoTargetSampleStdoutConformance(t *testing.T) {
 	}
 }
 
-func TestBuildVaxisTicTacToeExample(t *testing.T) {
-	_ = buildGoSampleBinary(t, filepath.Join("..", "examples", "vaxis", "tic-tac-toe", "main.ard"))
+func TestBuildTicTacToeExample(t *testing.T) {
+	_ = buildGoSampleBinary(t, filepath.Join("..", "examples", "tic-tac-toe", "main.ard"))
 }
 
 func TestRunGoTargetServerSampleRoutes(t *testing.T) {

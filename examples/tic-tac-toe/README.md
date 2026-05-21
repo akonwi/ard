@@ -6,14 +6,7 @@ The Ard program owns the tic-tac-toe game state and rules. `ffi.go` is the white
 
 ## Run
 
-Requires an `ard` binary installed from the Go-FFI compiler branch:
-
-```sh
-cd /path/to/ard/compiler
-go install
-```
-
-Then from this directory:
+From this directory:
 
 ```sh
 ard run main.ard
@@ -48,10 +41,10 @@ Ard sees only this narrow API:
 
 ```ard
 extern type Terminal
-extern fn tui_open() Terminal!Str = { go = "TuiOpen" }
-extern fn tui_close(term: Terminal) Void!Str = { go = "TuiClose" }
-extern fn tui_clear(term: Terminal) Void = { go = "TuiClear" }
-extern fn tui_draw_text(term: Terminal, x: Int, y: Int, text: Str) Void = { go = "TuiDrawText" }
-extern fn tui_flush(term: Terminal) Void!Str = { go = "TuiFlush" }
-extern fn tui_read_key(term: Terminal) Str!Str = { go = "TuiReadKey" }
+extern fn tui_open() Terminal!Str = "TuiOpen"
+extern fn tui_close(term: Terminal) Void!Str = "TuiClose"
+extern fn tui_clear(term: Terminal) Void = "TuiClear"
+extern fn tui_draw_text(term: Terminal, x: Int, y: Int, text: Str) Void = "TuiDrawText"
+extern fn tui_flush(term: Terminal) Void!Str = "TuiFlush"
+extern fn tui_read_key(term: Terminal) Str!Str = "TuiReadKey"
 ```
