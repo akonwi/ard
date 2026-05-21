@@ -1,7 +1,16 @@
 use ard/decode
+use ard/env
 use ard/http
 
+fn configured_port() Int {
+  match env::get("PORT") {
+    value => Int::from_str(value).or(8000),
+    _ => 8000,
+  }
+}
+
 fn main() {
+  let port = configured_port()
   let routes: [Str: http::HandlerFn] = [
     "/": fn(req: http::Request, mut res: http::Response) {
       res.body = "Hello, World!"
@@ -39,5 +48,5 @@ fn main() {
     },
   ]
 
-  http::serve(8000, routes).expect("Error serving at 8000")
+  http::serve(port, routes).expect("Error serving at {port}")
 }

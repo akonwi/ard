@@ -1,11 +1,16 @@
 package main
 
 import (
+	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/backend"
@@ -285,7 +290,7 @@ func TestRunGoTargetMapsSample(t *testing.T) {
 	}
 }
 
-func TestBuildGoTargetServerSample(t *testing.T) {
+func TestRunGoTargetServerSampleRoutes(t *testing.T) {
 	sourcePath := filepath.Join("samples", "server.ard")
 	module, err := loadModule(sourcePath, backend.TargetGo)
 	if err != nil {
@@ -301,6 +306,78 @@ func TestBuildGoTargetServerSample(t *testing.T) {
 	}
 	if _, err := os.Stat(outputPath); err != nil {
 		t.Fatalf("stat built server binary: %v", err)
+	}
+
+	port := freeTCPPort(t)
+	cmd := exec.Command(outputPath)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", port))
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start server sample: %v", err)
+	}
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}
+	})
+
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+	waitForHTTPServer(t, baseURL)
+
+	assertHTTPResponse(t, http.MethodGet, baseURL+"/", "", http.StatusOK, "Hello, World!")
+	assertHTTPResponse(t, http.MethodGet, baseURL+"/me", "", http.StatusOK, "this is /me")
+	assertHTTPResponse(t, http.MethodGet, baseURL+"/error", "", http.StatusBadRequest, "Bad request")
+	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", `{"email":"ard@example.com"}`, http.StatusCreated, "Created user with email ard@example.com")
+	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", "", http.StatusBadRequest, "Missing request body")
+	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", `{"name":"Ard"}`, http.StatusBadRequest, `Missing email: email: got Missing field "email", expected Field`)
+}
+
+func freeTCPPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on free TCP port: %v", err)
+	}
+	defer listener.Close()
+	return listener.Addr().(*net.TCPAddr).Port
+}
+
+func waitForHTTPServer(t *testing.T, baseURL string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(baseURL + "/")
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("server at %s did not become ready", baseURL)
+}
+
+func assertHTTPResponse(t *testing.T, method, url, body string, wantStatus int, wantBody string) {
+	t.Helper()
+	req, err := http.NewRequest(method, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request %s %s: %v", method, url, err)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, url, err)
+	}
+	defer resp.Body.Close()
+	gotBodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	gotBody := strings.TrimRight(string(gotBodyBytes), "\n")
+	if resp.StatusCode != wantStatus || gotBody != wantBody {
+		t.Fatalf("%s %s = (%d, %q), want (%d, %q)", method, url, resp.StatusCode, gotBody, wantStatus, wantBody)
 	}
 }
 
