@@ -1,5 +1,9 @@
 # Ard Dependency System
 
+## Status
+
+Design sketch; not implemented.
+
 ## Summary
 
 Design a Zig-inspired dependency system for Ard that fetches directly from git into a global cache, supports transitive dependencies, and allows multiple versions of the same dependency when they do not create real conflicts.
@@ -26,7 +30,7 @@ Design a Zig-inspired dependency system for Ard that fetches directly from git i
 ```toml
 name = "my-project"
 version = "1.0.0"
-minimum_ard_version = "0.1.0"
+ard = ">= 0.1.0"
 
 [dependencies]
 json = { git = "https://github.com/ard/json.git", tag = "v1.0.0" }
@@ -235,6 +239,8 @@ json = { git = "https://github.com/ard/json.git", tag = "v2.1.0" }
 
 ### Phase 1: Basic Infrastructure (MVP)
 
+- [ ] Finalize `ard.toml` dependency schema and compatibility with current
+  project fields (`name`, `ard`, optional `target`)
 - [ ] Enhanced `ard.toml` parsing for dependencies
 - [ ] Global cache implementation (`~/.cache/ard/`)
 - [ ] Git integration (clone, fetch by tag/commit/branch)
