@@ -71,7 +71,9 @@ Supported companion locations:
 - `ffi.go` at the project root
 - `ffi/*.go` under the project root
 
-Companion files must use `package main` because they are compiled into the generated application package.
+Companion files must use `package ffi`. The Go target copies them into a generated `projectffi` package and imports that package from generated Ard code.
+
+Projects may provide either a single root `ffi.go` file or a multi-file `ffi/*.go` package directory. Using both forms at once is rejected to keep project FFI package layout unambiguous.
 
 Example Ard declaration:
 
@@ -84,7 +86,7 @@ extern fn hostname() Str!Str = {
 Example `ffi.go`:
 
 ```go
-package main
+package ffi
 
 import "os"
 

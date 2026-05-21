@@ -822,7 +822,7 @@ test fn ffi_passes() Void!Str {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "ffi.go"), []byte(`package main
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi.go"), []byte(`package ffi
 
 func Lookup() string { return "ok" }
 `), 0o644); err != nil {

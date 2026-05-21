@@ -3816,7 +3816,7 @@ func (l *lowerer) lowerProjectExternCall(ext air.Extern, binding string, args []
 		return loweredExpr{}, err
 	}
 	stmts = append(stmts, argStmts...)
-	callee, err := goBindingExpr(binding)
+	callee, err := l.projectFFIBindingExpr(binding)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -3855,15 +3855,14 @@ func (l *lowerer) lowerProjectExternCall(ext air.Extern, binding string, args []
 	}
 }
 
-func goBindingExpr(binding string) (ast.Expr, error) {
+func (l *lowerer) projectFFIBindingExpr(binding string) (ast.Expr, error) {
 	if strings.TrimSpace(binding) == "" {
 		return nil, fmt.Errorf("empty go extern binding")
 	}
-	expr, err := parser.ParseExpr(binding)
-	if err != nil {
-		return nil, fmt.Errorf("invalid go extern binding %q: %w", binding, err)
+	if !token.IsIdentifier(binding) {
+		return nil, fmt.Errorf("project go extern binding %q must be an unqualified function name in package ffi", binding)
 	}
-	return expr, nil
+	return l.qualified("projectffi", "generated/projectffi", binding), nil
 }
 
 func isVoidExpr(expr ast.Expr) bool {
@@ -4100,7 +4099,7 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 	case air.TypeMaybe:
 		fmt.Fprintf(b, "\tif !value.Some { return enc.WriteToken(jsontext.Null) }\n\treturn %s(enc, value.Value)\n", l.jsonEncodeHelperName(info.Elem))
 	case air.TypeResult:
-		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
+		fmt.Fprintf(b, "\tif value.Ok { return %s(enc, value.Value) }\n\treturn %s(enc, value.Err)\n", l.jsonEncodeHelperName(info.Value), l.jsonEncodeHelperName(info.Error))
 	case air.TypeList:
 		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginArray); err != nil { return err }\n\tfor _, item := range value {\n\t\tif err := %s(enc, item); err != nil { return err }\n\t}\n\treturn enc.WriteToken(jsontext.EndArray)\n", l.jsonEncodeHelperName(info.Elem))
 	case air.TypeMap:

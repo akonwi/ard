@@ -302,7 +302,7 @@ fn main() Bool {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package main
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
 
 import "bytes"
 
@@ -367,7 +367,7 @@ fn main() Bool {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package main
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
 
 func Lookup(flag bool) *string {
 	if !flag {
