@@ -686,7 +686,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("copy missing target")
 		}
-		return l.lowerExpr(fn, *expr.Target)
+		return l.lowerExprWithExpectedType(fn, *expr.Target, expr.Type)
 	case air.ExprMakeMaybeSome:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("maybe some missing target")
@@ -1290,6 +1290,10 @@ func (l *lowerer) canOverrideExprType(expr air.Expr, expectedType air.TypeID) bo
 		return false
 	}
 	switch expr.Kind {
+	case air.ExprCopy:
+		return expr.Target != nil && l.canOverrideExprType(*expr.Target, expectedType)
+	case air.ExprMakeList:
+		return len(expr.Args) == 0 && from.Kind == air.TypeList && to.Kind == air.TypeList
 	case air.ExprMakeResultOk, air.ExprMakeResultErr,
 		air.ExprMakeMaybeSome, air.ExprMakeMaybeNone,
 		air.ExprBlock, air.ExprIf,
@@ -1866,6 +1870,8 @@ func (l *lowerer) isWeakContextType(typeID air.TypeID) bool {
 	}
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
+	case air.TypeList:
+		return !validTypeID(l.program, info.Elem) || l.program.Types[info.Elem-1].Kind == air.TypeVoid
 	case air.TypeMaybe:
 		return !validTypeID(l.program, info.Elem) || l.program.Types[info.Elem-1].Kind == air.TypeVoid
 	case air.TypeResult:

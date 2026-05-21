@@ -96,6 +96,29 @@ func TestRunProgramExecutesSimpleMain(t *testing.T) {
 	}
 }
 
+func TestRunProgramSpecializesGenericEmptyListLocal(t *testing.T) {
+	program := lowerSource(t, `
+		fn drop(from: [$T], till: Int) [$T] {
+			mut out: [$T] = []
+			for item, idx in from {
+				if idx >= till {
+					out.push(item)
+				}
+			}
+			out
+		}
+
+		fn main() Bool {
+			let dropped = drop([1, 2, 3], 1)
+			dropped.size() == 2 and dropped.at(0) == 2
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramAllowsModuleWithoutEntry(t *testing.T) {
 	program := lowerSource(t, `
 		fn add(a: Int, b: Int) Int {
