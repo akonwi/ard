@@ -1,28 +1,32 @@
-# Async Eval with Result Types - Design
+# Async Eval with Result Types
+
+Status: implemented.
 
 ## Overview
 
-Enhance `async::eval()` to support concurrent operations that return results, with proper type safety through generic `Fiber<T>` types.
+`async::eval()` supports concurrent operations that return results, with type safety through generic `Fiber<T>` values.
 
-## Current State
+## Current API
 
-- `async::start(fn() Void) Fiber` - Spawns concurrent fiber, returns handle with `.join()` method
-- Fibers enforce isolation rules (no mutable variable capture)
+- `async::start(fn() Void) Fiber<Void>` spawns a concurrent fiber and returns a handle with `.join()`.
+- `async::eval(fn() $T) Fiber<$T>` spawns a concurrent fiber and stores the function result.
+- `Fiber<$T>.get() $T` waits for completion and returns the result.
+- Fibers enforce isolation rules (no mutable variable capture).
 
-## Proposed Changes
+## Implemented shape
 
-### 1. Update `Fiber` to be Generic
+### 1. Generic `Fiber`
 
-Define `Fiber<$T>` parameterized by the result type:
+`Fiber` carries a generic result field:
 
 ```ard
-struct Fiber<$T> {
-  wg: Dynamic
-  result: Dynamic  // Stores the computed result
+struct Fiber {
+  wg: WaitGroup,
+  result: $T,
 }
 ```
 
-### 2. Update `Fiber<T>` Methods
+### 2. `Fiber<T>` Methods
 
 ```ard
 impl Fiber<$T> {
@@ -34,12 +38,12 @@ impl Fiber<$T> {
   fn get() $T {
     // Wait for fiber to complete, return the result
     wait_for(self.wg)
-    self.result as $T
+    get_result(self.wg, self.result)
   }
 }
 ```
 
-### 3. New `async::eval()` Signature
+### 3. `async::eval()` Signature
 
 ```ard
 fn eval(do: fn() $T) Fiber<$T>
@@ -47,10 +51,10 @@ fn eval(do: fn() $T) Fiber<$T>
 
 Spawns a concurrent fiber that executes the closure and stores its result. Returns a `Fiber<T>` handle for synchronization and result retrieval.
 
-### 4. New Module-Level `join()` Function
+### 4. Module-Level `join()` Function
 
 ```ard
-fn join(fibers: [Fiber]) Void
+fn join(fibers: [Fiber<$T>]) Void
 ```
 
 Wait for multiple fibers to complete without individual `.join()` calls. Accepts a list of any fiber types.
@@ -86,19 +90,16 @@ Both `async::start()` and `async::eval()` enforce the same isolation rules:
 
 These rules are enforced at compile-time.
 
-## Implementation Plan
+## Completed implementation points
 
-1. Modify `Fiber` struct in `std_lib/async.ard` to support generic type parameter
-2. Update `Fiber` methods to include `get()` returning the generic type
-3. Change `async::eval()` signature to return `Fiber<$T>`
-4. Add module-level `join()` function to `async::eval()` in std_lib.go
-5. Update checker validation for `async::eval()` to handle the new signature
-6. Update target execution to store and return results properly
-7. Add tests for result retrieval and isolation rules
-8. Update documentation in `website/src/content/docs/advanced/async.md`
+- `std_lib/async.ard` defines `Fiber` with a generic result field.
+- `Fiber.get()` waits and returns `$T`.
+- `async::eval()` returns `Fiber<$T>`.
+- Module-level `async::join()` waits on a list of fibers.
+- Go FFI support stores and retrieves fiber results through the async runtime helpers.
+- Checker validation covers the fiber isolation rules.
 
 ## Notes
 
-- Result storage needs to be type-safe at runtime (likely using `Dynamic` internally with proper casting)
-- The `join()` function simplifies waiting on multiple fibers of different types
-- This design maintains backward compatibility with `async::start()` which returns `Fiber` (implicitly `Fiber<Void>`)
+- `join()` is intentionally for synchronization; use `.get()` when the result value is needed.
+- `async::start()` remains the `Void`-returning convenience API and returns `Fiber<Void>`.

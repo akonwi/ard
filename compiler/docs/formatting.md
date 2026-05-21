@@ -39,8 +39,8 @@ The formatter is AST-aware and enforces these rules:
    - trailing newline added for non-empty files
 12. Comments: conservatively preserved (re-indented as needed).
 
-## Rollout Recommendation
+## Adoption Notes
 
-1. Run `ard format` once across the repository and commit the result in a dedicated formatting commit.
-2. Enforce `ard format --check` in CI.
-3. Configure editor integration to run formatter on save.
+- Use `ard format <path>` for one-off formatting.
+- Use `ard format --check <path>` in CI or pre-submit checks when formatting drift should fail the job.
+- Configure editor integration to run the formatter on save where practical.

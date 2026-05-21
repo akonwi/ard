@@ -1,5 +1,7 @@
 # Checker Error Recovery Analysis
 
+Status: historical/research note. Some source line references are from the original audit and may have drifted; verify against current checker code before using this as an implementation checklist.
+
 ## Problem Statement
 
 When the checker encounters an error, it typically calls `addError()` and returns `nil`. This causes cascading failures where:

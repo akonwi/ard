@@ -1,6 +1,8 @@
 # Maybe and Generic Type Implementation for Ard
 
-This document outlines the specific implementation details for adding support for Maybe types and generic types (using `$T` syntax) in the Ard language.
+Status: historical implementation sketch. Maybe types and generics are now part of Ard; use this as background only and verify exact APIs against current `compiler/checker` and `compiler/std_lib` code before implementing changes.
+
+This document outlines the original implementation approach for adding support for Maybe types and generic types (using `$T` syntax) in the Ard language.
 
 ## Maybe Type Implementation
 
