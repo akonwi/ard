@@ -52,3 +52,32 @@ jobs:
       - name: Run Go backend integration tests
         working-directory: compiler
         run: go test -tags=goexperiment.jsonv2 ./go -count=1
+
+  test-examples:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Build Ard CLI for examples
+        working-directory: compiler
+        run: go build -tags=goexperiment.jsonv2 -o "$RUNNER_TEMP/ard" .
+
+      - name: Run server smoke test
+        working-directory: examples/server
+        env:
+          ARD: ${{ runner.temp }}/ard
+        run: ./test_server.py
+
+      - name: Run tic-tac-toe PTY smoke test
+        working-directory: examples/tic-tac-toe
+        env:
+          ARD: ${{ runner.temp }}/ard
+        run: ./test_tic_tac_toe.py

@@ -1,0 +1,321 @@
+use ard/maybe
+
+extern type Terminal
+
+extern fn tui_open() Terminal!Str = "TuiOpen"
+
+extern fn tui_close(term: Terminal) Void!Str = "TuiClose"
+
+extern fn tui_clear(term: Terminal) Void = "TuiClear"
+
+extern fn tui_draw_text(term: Terminal, x: Int, y: Int, text: Str) Void = "TuiDrawText"
+
+extern fn tui_flush(term: Terminal) Void!Str = "TuiFlush"
+
+extern fn tui_read_key(term: Terminal) Str!Str = "TuiReadKey"
+
+struct Board {
+  cells: [Str],
+}
+
+impl Board {
+  fn mut play(player: Str, pos: Int) {
+    self.cells.set(pos, player)
+  }
+
+  fn is_full() Bool {
+    mut full = true
+    for cell in self.cells {
+      if cell.is_empty() {
+        full = false
+        break
+      }
+    }
+    full
+  }
+
+  fn can_play(pos: Int) Bool {
+    match pos >= 0 and pos < self.cells.size() {
+      true => self.cells.at(pos).is_empty(),
+      false => false,
+    }
+  }
+
+  fn get_winner() Str? {
+    mut res: Str? = maybe::none()
+
+    if not self.cells.at(0).is_empty() {
+      if self.cells.at(0) == self.cells.at(1) and self.cells.at(0) == self.cells.at(2) {
+        res = maybe::some(self.cells.at(0))
+      }
+      if self.cells.at(0) == self.cells.at(3) and self.cells.at(0) == self.cells.at(6) {
+        res = maybe::some(self.cells.at(0))
+      }
+      if self.cells.at(0) == self.cells.at(4) and self.cells.at(0) == self.cells.at(8) {
+        res = maybe::some(self.cells.at(0))
+      }
+    }
+
+    if not self.cells.at(1).is_empty() {
+      if self.cells.at(1) == self.cells.at(4) and self.cells.at(1) == self.cells.at(7) {
+        res = maybe::some(self.cells.at(1))
+      }
+    }
+
+    if not self.cells.at(2).is_empty() {
+      if self.cells.at(2) == self.cells.at(5) and self.cells.at(2) == self.cells.at(8) {
+        res = maybe::some(self.cells.at(2))
+      }
+      if self.cells.at(2) == self.cells.at(4) and self.cells.at(2) == self.cells.at(6) {
+        res = maybe::some(self.cells.at(2))
+      }
+    }
+
+    if not self.cells.at(3).is_empty() {
+      if self.cells.at(3) == self.cells.at(4) and self.cells.at(3) == self.cells.at(5) {
+        res = maybe::some(self.cells.at(3))
+      }
+    }
+
+    if not self.cells.at(6).is_empty() {
+      if self.cells.at(6) == self.cells.at(7) and self.cells.at(6) == self.cells.at(8) {
+        res = maybe::some(self.cells.at(6))
+      }
+    }
+
+    res
+  }
+}
+
+fn cell_label(board: Board, pos: Int, selected: Int) Str {
+  let value = board.cells.at(pos)
+  mut label = value
+  if label.is_empty() {
+    label = " "
+  }
+  match pos == selected {
+    true => "[" + label + "]",
+    false => " " + label + " ",
+  }
+}
+
+fn draw_board(term: Terminal, board: Board, selected: Int, player: Str, message: Str) Void!Str {
+  tui_clear(term)
+  tui_draw_text(term, 2, 1, "Ard + Vaxis Tic-Tac-Toe")
+  tui_draw_text(
+    term,
+    2,
+    2,
+    "────────────────────────",
+  )
+  tui_draw_text(term, 2, 4, "Player " + player + " to move")
+  tui_draw_text(term, 2, 6, "┌───┬───┬───┐")
+  tui_draw_text(
+    term,
+    2,
+    7,
+    "│" + cell_label(board, 0, selected) + "│" + cell_label(board, 1, selected) + "│" + cell_label(board, 2, selected) + "│",
+  )
+  tui_draw_text(term, 2, 8, "├───┼───┼───┤")
+  tui_draw_text(
+    term,
+    2,
+    9,
+    "│" + cell_label(board, 3, selected) + "│" + cell_label(board, 4, selected) + "│" + cell_label(board, 5, selected) + "│",
+  )
+  tui_draw_text(term, 2, 10, "├───┼───┼───┤")
+  tui_draw_text(
+    term,
+    2,
+    11,
+    "│" + cell_label(board, 6, selected) + "│" + cell_label(board, 7, selected) + "│" + cell_label(board, 8, selected) + "│",
+  )
+  tui_draw_text(term, 2, 12, "└───┴───┴───┘")
+  tui_draw_text(term, 2, 14, message)
+  tui_draw_text(term, 2, 16, "Move: arrows/hjkl or 1-9. Select: enter/space. q quits. r restarts.")
+  tui_draw_text(term, 2, 17, "This TUI is rendered by Vaxis through project Go FFI.")
+  tui_flush(term)
+}
+
+fn selected_from_key(key: Str, selected: Int) Int {
+  mut res = selected
+  mut handled = false
+
+  if key == "1" {
+    res = 0
+    handled = true
+  }
+  if handled == false {
+    if key == "2" {
+      res = 1
+      handled = true
+    }
+  }
+  if handled == false {
+    if key == "3" {
+      res = 2
+      handled = true
+    }
+  }
+  if handled == false {
+    if key == "4" {
+      res = 3
+      handled = true
+    }
+  }
+  if handled == false {
+    if key == "5" {
+      res = 4
+      handled = true
+    }
+  }
+  if handled == false {
+    if key == "6" {
+      res = 5
+      handled = true
+    }
+  }
+  if handled == false {
+    if key == "7" {
+      res = 6
+      handled = true
+    }
+  }
+  if handled == false {
+    if key == "8" {
+      res = 7
+      handled = true
+    }
+  }
+  if handled == false {
+    if key == "9" {
+      res = 8
+      handled = true
+    }
+  }
+  if handled == false {
+    if key == "left" {
+      if not selected % 3 == 0 {
+        res = selected - 1
+      }
+      handled = true
+    }
+  }
+  if handled == false {
+    if key == "right" {
+      if not selected % 3 == 2 {
+        res = selected + 1
+      }
+      handled = true
+    }
+  }
+  if handled == false {
+    if key == "up" {
+      if selected >= 3 {
+        res = selected - 3
+      }
+      handled = true
+    }
+  }
+  if handled == false {
+    if key == "down" {
+      if selected <= 5 {
+        res = selected + 3
+      }
+      handled = true
+    }
+  }
+  res
+}
+
+fn next_player(player: Str) Str {
+  mut res = "X"
+  if player == "X" {
+    res = "O"
+  }
+  res
+}
+
+fn run_game(term: Terminal) Void!Str {
+  mut board = Board{cells: ["", "", "", "", "", "", "", "", ""]}
+  mut player = "X"
+  mut selected = 0
+  mut message = "Choose a square."
+  mut finished = false
+  mut running = true
+
+  while running {
+    try draw_board(term, board, selected, player, message)
+    let key = try tui_read_key(term)
+
+    mut handled = false
+
+    if key == "q" {
+      running = false
+      handled = true
+    }
+
+    if handled == false {
+      if key == "r" {
+        board = Board{cells: ["", "", "", "", "", "", "", "", ""]}
+        player = "X"
+        selected = 0
+        message = "New game. Choose a square."
+        finished = false
+        handled = true
+      }
+    }
+
+    if handled == false {
+      if key == "select" {
+        if finished {
+          message = "Game is over. Press r to restart or q to quit."
+        }
+        if finished == false {
+          mut played = false
+          if board.can_play(selected) {
+            board.play(player, selected)
+            played = true
+            match board.get_winner() {
+              winner => {
+                message = "Player " + winner + " wins! Press r to restart or q to quit."
+                finished = true
+              },
+              _ => {
+                if board.is_full() {
+                  message = "Game over: draw. Press r to restart or q to quit."
+                  finished = true
+                } else {
+                  player = next_player(player)
+                  message = "Player " + player + " to move."
+                }
+              },
+            }
+          }
+          if played == false {
+            message = "That square is already occupied."
+          }
+        }
+        handled = true
+      }
+    }
+
+    if handled == false {
+      if key == "redraw" {
+        handled = true
+      }
+    }
+
+    if handled == false {
+      selected = selected_from_key(key, selected)
+    }
+  }
+
+  Result::ok(())
+}
+
+fn main() Void {
+  let term = tui_open().expect("open terminal")
+  run_game(term).expect("run game")
+  tui_close(term).expect("close terminal")
+}
