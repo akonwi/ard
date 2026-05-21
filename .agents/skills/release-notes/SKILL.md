@@ -33,7 +33,7 @@ git diff <previous-tag>..<new-tag> --stat
 For detailed changes when needed:
 
 ```bash
-git diff <previous-tag>..<new-tag> -- compiler/std_lib compiler/ffi compiler/checker compiler/parse
+git diff <previous-tag>..<new-tag> -- compiler
 ```
 
 ### 3. Classify changes

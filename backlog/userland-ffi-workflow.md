@@ -10,10 +10,9 @@ Pending
 
 ## Context
 
-The internal stdlib project now uses generated Go adapter shapes under
-`compiler/std_lib/ffi`. Userland projects should get the same signature-driven
-contract, with adapters generated from Ard `extern` declarations instead of
-discovered from handwritten Go.
+The internal stdlib project now uses generated Go host signatures and Go-target
+lowering metadata under `compiler/std_lib/ffi`. Userland projects should get the
+same signature-driven contract generated from Ard `extern` declarations.
 
 The intended project shape is:
 
@@ -81,8 +80,8 @@ This is intended for CI.
   structs crossing FFI, aliases, enums, and callback signatures.
 - Output file is always `ffi/ard.gen.go`.
 - Generated package name is `ffi`.
-- `Maybe[T]` and `Result[T,E]` remain generated support types until there is a
-  shared public runtime package for generated Go bindings.
+- `Maybe[T]` and `Result[T,E]` should use Ard's public Go runtime support types
+  so generated project FFI matches stdlib FFI conventions.
 - Function bindings use explicit target bindings where present and otherwise
   follow the same fallback rules as the compiler.
 - Unsupported generic externs should be reported clearly instead of producing
@@ -92,7 +91,6 @@ This is intended for CI.
 
 - Whether `ard ffi init` should run `go mod tidy` automatically or leave that as
   an explicit user step.
-  and other execution/build flows now that the Go target rewrite exists.
 - Whether generated project FFI should eventually share a package with generated
   Go target output or remain a stable companion package.
 
