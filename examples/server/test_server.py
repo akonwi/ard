@@ -34,15 +34,23 @@ def request(method, url, body=None):
         return err.code, err.read().decode("utf-8").rstrip("\n")
 
 
-def wait_for_server(base_url, timeout=5.0):
+def wait_for_server(base_url, proc, timeout=30.0):
     deadline = time.time() + timeout
+    last_error = None
     while time.time() < deadline:
+        if proc.poll() is not None:
+            stdout, stderr = proc.communicate()
+            raise AssertionError(
+                f"server exited before becoming ready with status {proc.returncode}\n"
+                f"stdout:\n{stdout}\nstderr:\n{stderr}"
+            )
         try:
             request("GET", base_url + "/")
             return
-        except Exception:
-            time.sleep(0.05)
-    raise AssertionError(f"server at {base_url} did not become ready")
+        except Exception as err:
+            last_error = err
+            time.sleep(0.1)
+    raise AssertionError(f"server at {base_url} did not become ready; last error: {last_error}")
 
 
 def assert_response(method, url, body, want_status, want_body):
@@ -57,10 +65,17 @@ def main():
     port = free_port()
     env = os.environ.copy()
     env["PORT"] = str(port)
-    proc = subprocess.Popen([ARD, "run", "main.ard"], cwd=ROOT, env=env)
+    proc = subprocess.Popen(
+        [ARD, "run", "main.ard"],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
     try:
         base_url = f"http://127.0.0.1:{port}"
-        wait_for_server(base_url)
+        wait_for_server(base_url, proc)
         assert_response("GET", base_url + "/", None, 200, "Hello, World!")
         assert_response("GET", base_url + "/me", None, 200, "this is /me")
         assert_response("GET", base_url + "/error", None, 400, "Bad request")
