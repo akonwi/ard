@@ -7,6 +7,7 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -74,7 +75,10 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 }
 
 func collectFFIGoImports(projectInfo *checker.ProjectInfo) map[string]string {
-	imports := collectGoImportsFromPaths(stdlibFFIGoPaths())
+	imports := collectGoImportsFromEmbeddedArdModule()
+	for alias, path := range collectGoImportsFromPaths(stdlibFFIGoPaths()) {
+		imports[alias] = path
+	}
 	for alias, path := range collectGoImportsFromPaths(projectFFIGoPaths(projectInfo)) {
 		imports[alias] = path
 	}
@@ -109,34 +113,58 @@ func projectFFIGoPaths(projectInfo *checker.ProjectInfo) []string {
 func collectGoImportsFromPaths(paths []string) map[string]string {
 	imports := map[string]string{}
 	for _, path := range paths {
-		if strings.HasSuffix(path, ".gen.go") || strings.HasSuffix(path, "_test.go") || filepath.Base(path) == "generate.go" {
+		if skipFFIImportSource(path) {
 			continue
 		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
-		for _, spec := range file.Imports {
-			if spec.Path == nil {
-				continue
-			}
-			importPath := strings.Trim(spec.Path.Value, "\"")
-			if importPath == "" || importPath == "C" {
-				continue
-			}
-			alias := ""
-			if spec.Name != nil {
-				if spec.Name.Name == "." || spec.Name.Name == "_" {
-					continue
-				}
-				alias = spec.Name.Name
-			} else {
-				alias = filepath.Base(importPath)
-			}
-			imports[alias] = importPath
-		}
+		collectGoImportsFromSource(imports, path, data)
 	}
 	return imports
+}
+
+func collectGoImportsFromEmbeddedArdModule() map[string]string {
+	imports := map[string]string{}
+	for rel, content := range embeddedArdModuleFiles {
+		if !strings.HasPrefix(rel, "std_lib/ffi/") || skipFFIImportSource(rel) {
+			continue
+		}
+		collectGoImportsFromSource(imports, rel, []byte(content))
+	}
+	return imports
+}
+
+func skipFFIImportSource(path string) bool {
+	base := filepath.Base(path)
+	return strings.HasSuffix(base, ".gen.go") || strings.HasSuffix(base, "_test.go") || base == "generate.go"
+}
+
+func collectGoImportsFromSource(imports map[string]string, name string, data []byte) {
+	file, err := parser.ParseFile(token.NewFileSet(), name, data, parser.ImportsOnly)
+	if err != nil {
+		return
+	}
+	for _, spec := range file.Imports {
+		if spec.Path == nil {
+			continue
+		}
+		importPath := strings.Trim(spec.Path.Value, "\"")
+		if importPath == "" || importPath == "C" {
+			continue
+		}
+		alias := ""
+		if spec.Name != nil {
+			if spec.Name.Name == "." || spec.Name.Name == "_" {
+				continue
+			}
+			alias = spec.Name.Name
+		} else {
+			alias = filepath.Base(importPath)
+		}
+		imports[alias] = importPath
+	}
 }
 
 func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
