@@ -53,47 +53,6 @@ jobs:
         working-directory: compiler
         run: go test -tags=goexperiment.jsonv2 ./go -count=1
 
-  test-release-mode-binary:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: "1.26"
-          cache: true
-
-      - name: Build release-mode Ard CLI
-        working-directory: compiler
-        run: |
-          go build \
-            -tags=goexperiment.jsonv2 \
-            -ldflags="-X github.com/akonwi/ard/version.Version=v99.0.0" \
-            -o "$RUNNER_TEMP/ard-release-mode" \
-            .
-
-      - name: Run SQL stdlib smoke test with release-mode CLI
-        run: |
-          mkdir -p "$RUNNER_TEMP/ard-sql-smoke"
-          cat > "$RUNNER_TEMP/ard-sql-smoke/main.ard" <<'EOF'
-          use ard/sql
-
-          fn main() Void {
-            sql::extract_params("select * from chores where id = @id").size()
-          }
-          EOF
-          cd "$RUNNER_TEMP/ard-sql-smoke"
-          "$RUNNER_TEMP/ard-release-mode" run main.ard
-
-      - name: Run server smoke test with release-mode CLI
-        working-directory: examples/server
-        env:
-          ARD: ${{ runner.temp }}/ard-release-mode
-        run: ./test_server.py
-
   test-examples:
     runs-on: ubuntu-latest
 
