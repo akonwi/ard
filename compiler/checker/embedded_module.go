@@ -24,11 +24,7 @@ func (m EmbeddedModule) Get(name string) Symbol {
 	return m.publicSymbols[name]
 }
 
-// findEmbeddedModule loads a .ard standard library module from embedded files
-func FindEmbeddedModule(path string) (Module, bool) {
-	return FindEmbeddedModuleForTarget(path, "")
-}
-
+// FindEmbeddedModuleForTarget loads a .ard standard library module from embedded files.
 func FindEmbeddedModuleForTarget(path string, target string) (Module, bool) {
 	// Read the embedded file using std_lib.Find
 	content, err := std_lib.Find(path)
