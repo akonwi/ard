@@ -2,7 +2,11 @@
 
 package ffi
 
-import ardruntime "github.com/akonwi/ard/runtime"
+import (
+	"database/sql"
+	ardruntime "github.com/akonwi/ard/runtime"
+	"net/http"
+)
 
 type Maybe[T any] = ardruntime.Maybe[T]
 
@@ -23,14 +27,6 @@ func Ok[T, E any](value T) Result[T, E] {
 func Err[T, E any](err E) Result[T, E] {
 	return ardruntime.Err[T](err)
 }
-
-type Db = any
-
-type RawRequest = any
-
-type RawResponse = any
-
-type Tx = any
 
 type WaitGroup = any
 
@@ -56,8 +52,9 @@ type Argv struct {
 }
 
 type Database struct {
-	Db   Db
-	Path string
+	Db     *sql.DB
+	Driver string
+	Path   string
 }
 
 type DirEntry struct {
@@ -104,6 +101,7 @@ type PreparedQuery struct {
 
 type Query struct {
 	Conn   any
+	Driver string
 	String string
 	Params []string
 }
@@ -114,7 +112,7 @@ type Request struct {
 	Headers map[string]string
 	Body    Maybe[any]
 	Timeout Maybe[int]
-	Raw     Maybe[RawRequest]
+	Raw     Maybe[*http.Request]
 }
 
 type Response struct {
@@ -130,7 +128,8 @@ type TodoJSONTest struct {
 }
 
 type Transaction struct {
-	Tx Tx
+	Tx     *sql.Tx
+	Driver string
 }
 
 type WinnerJSONTest struct {
@@ -181,15 +180,15 @@ type Host struct {
 	FloatFromInt         func(int int) float64
 	FloatFromStr         func(string string) Maybe[float64]
 	FloatToDynamic       func(val float64) any
-	GetPathValue         func(req RawRequest, name string) string
-	GetQueryParam        func(req RawRequest, name string) string
-	GetReqPath           func(req RawRequest) string
+	GetPathValue         func(req *http.Request, name string) string
+	GetQueryParam        func(req *http.Request, name string) string
+	GetReqPath           func(req *http.Request) string
 	GetTodayString       func() string
-	HTTPDo               func(method string, url string, body any, headers map[string]string, timeout Maybe[int]) (RawResponse, error)
-	HTTPResponseBody     func(resp RawResponse) (string, error)
-	HTTPResponseClose    func(resp RawResponse)
-	HTTPResponseHeaders  func(resp RawResponse) map[string]string
-	HTTPResponseStatus   func(resp RawResponse) int
+	HTTPDo               func(method string, url string, body any, headers map[string]string, timeout Maybe[int]) (*http.Response, error)
+	HTTPResponseBody     func(resp *http.Response) (string, error)
+	HTTPResponseClose    func(resp *http.Response)
+	HTTPResponseHeaders  func(resp *http.Response) map[string]string
+	HTTPResponseStatus   func(resp *http.Response) int
 	HTTPServe            func(port int, handlers map[string]func(Request, *Response)) error
 	HexDecode            func(input string) (string, error)
 	HexEncode            func(bytes string) string
@@ -205,14 +204,15 @@ type Host struct {
 	Print                func(string string)
 	ReadLine             func() (string, error)
 	Sleep                func(ms int)
-	SqlBeginTx           func(db Db) (Tx, error)
-	SqlClose             func(db Db) error
-	SqlCommit            func(tx Tx) error
-	SqlCreateConnection  func(connection_string string) (Db, error)
-	SqlExecute           func(conn any, sql string, values []any) error
+	SqlBeginTx           func(db *sql.DB) (*sql.Tx, error)
+	SqlClose             func(db *sql.DB) error
+	SqlCommit            func(tx *sql.Tx) error
+	SqlCreateConnection  func(connection_string string) (*sql.DB, error)
+	SqlDetectDriver      func(connection_string string) string
+	SqlExecute           func(conn any, driver string, sql string, values []any) error
 	SqlExtractParams     func(sql string) []string
-	SqlQuery             func(conn any, sql string, values []any) ([]any, error)
-	SqlRollback          func(tx Tx) error
+	SqlQuery             func(conn any, driver string, sql string, values []any) ([]any, error)
+	SqlRollback          func(tx *sql.Tx) error
 	StrToDynamic         func(val string) any
 	VoidToDynamic        func() any
 	WaitFor              func(wg WaitGroup)
@@ -426,6 +426,9 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.SqlCreateConnection != nil {
 		functions["SqlCreateConnection"] = h.SqlCreateConnection
+	}
+	if h.SqlDetectDriver != nil {
+		functions["SqlDetectDriver"] = h.SqlDetectDriver
 	}
 	if h.SqlExecute != nil {
 		functions["SqlExecute"] = h.SqlExecute
