@@ -24,11 +24,8 @@ impl Str::ToString for Method {
   }
 }
 
-// Opaque pointer to Go's *http.Request for inbound requests
-private extern type RawRequest
-
-// Opaque pointer to Go's *http.Response for outbound responses
-private extern type RawResponse
+private extern type RawRequest = "*http.Request"
+private extern type RawResponse = "*http.Response"
 
 struct Request {
   method: Method,

@@ -8,6 +8,7 @@ import (
 	"go/parser"
 	"go/token"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,7 +31,7 @@ type lowerer struct {
 	declaredLocals map[air.LocalID]bool
 	runtimeHelpers map[string]bool
 	jsonParseTypes map[air.TypeID]bool
-	projectImports map[string]string
+	ffiImports     map[string]string
 	suppressMain   bool
 	includeTests   bool
 }
@@ -42,7 +43,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if err := air.Validate(program); err != nil {
 		return nil, err
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, projectImports: collectProjectGoImports(options.ProjectInfo), suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
 	modules := make([]air.Module, 0, len(program.Modules))
@@ -72,17 +73,45 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	return files, nil
 }
 
-func collectProjectGoImports(projectInfo *checker.ProjectInfo) map[string]string {
-	imports := map[string]string{}
+func collectFFIGoImports(projectInfo *checker.ProjectInfo) map[string]string {
+	imports := collectGoImportsFromPaths(stdlibFFIGoPaths())
+	for alias, path := range collectGoImportsFromPaths(projectFFIGoPaths(projectInfo)) {
+		imports[alias] = path
+	}
+	return imports
+}
+
+func stdlibFFIGoPaths() []string {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return nil
+	}
+	stdlibFFIDir := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "std_lib", "ffi"))
+	matches, err := filepath.Glob(filepath.Join(stdlibFFIDir, "*.go"))
+	if err != nil {
+		return nil
+	}
+	return matches
+}
+
+func projectFFIGoPaths(projectInfo *checker.ProjectInfo) []string {
 	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
-		return imports
+		return nil
 	}
 	paths := []string{filepath.Join(projectInfo.RootPath, "ffi.go")}
 	matches, err := filepath.Glob(filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
 	if err == nil {
 		paths = append(paths, matches...)
 	}
+	return paths
+}
+
+func collectGoImportsFromPaths(paths []string) map[string]string {
+	imports := map[string]string{}
 	for _, path := range paths {
+		if strings.HasSuffix(path, ".gen.go") || strings.HasSuffix(path, "_test.go") || filepath.Base(path) == "generate.go" {
+			continue
+		}
 		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
 		if err != nil {
 			continue
@@ -205,7 +234,11 @@ func (l *lowerer) markRuntimeHelper(name string) {
 	l.runtimeHelpers[name] = true
 }
 
-func (l *lowerer) registerProjectImportsForGoType(expr ast.Expr) {
+func (l *lowerer) registerFFIImportsForGoType(expr ast.Expr) {
+	l.registerImportsForGoType(expr, l.ffiImports)
+}
+
+func (l *lowerer) registerImportsForGoType(expr ast.Expr, imports map[string]string) {
 	ast.Inspect(expr, func(node ast.Node) bool {
 		selector, ok := node.(*ast.SelectorExpr)
 		if !ok {
@@ -215,7 +248,7 @@ func (l *lowerer) registerProjectImportsForGoType(expr ast.Expr) {
 		if !ok {
 			return true
 		}
-		if path, ok := l.projectImports[ident.Name]; ok && path != "" {
+		if path, ok := imports[ident.Name]; ok && path != "" {
 			l.currentImports[ident.Name] = path
 		}
 		return true
@@ -1552,7 +1585,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			if err != nil {
 				return nil, fmt.Errorf("invalid go extern type binding %q for %s: %w", info.ExternBinding, info.Name, err)
 			}
-			l.registerProjectImportsForGoType(typ)
+			l.registerFFIImportsForGoType(typ)
 			return typ, nil
 		}
 		return ast.NewIdent("any"), nil

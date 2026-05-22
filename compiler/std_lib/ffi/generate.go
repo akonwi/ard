@@ -29,6 +29,7 @@ type contract struct {
 
 type externType struct {
 	Name string
+	Type string
 }
 
 type typeAlias struct {
@@ -93,7 +94,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	source, err := render(c, opts.hostPackage)
+	goImports, err := collectGoImports(opts.goImplDir)
+	if err != nil {
+		panic(err)
+	}
+	source, err := render(c, opts.hostPackage, goImports)
 	if err != nil {
 		panic(err)
 	}
@@ -141,8 +146,13 @@ func loadContract(stdlibDir string) (contract, error) {
 			switch node := stmt.(type) {
 			case *parse.ExternTypeDeclaration:
 				name := goExportedName(node.Name)
+				goType := goExternTypeBinding(node)
+				if goType != "" {
+					aliases[node.Name] = goType
+					aliases[name] = goType
+				}
 				definedTypes[name] = struct{}{}
-				c.ExternTypes = append(c.ExternTypes, externType{Name: name})
+				c.ExternTypes = append(c.ExternTypes, externType{Name: name, Type: goType})
 			case *parse.TypeDeclaration:
 				name := goExportedName(node.Name.Name)
 				goType, ok := aliasGoType(node)
@@ -215,6 +225,13 @@ func goBinding(fn *parse.ExternalFunction) string {
 		return fn.ExternalBinding
 	}
 	return fn.ExternalBindings["go"]
+}
+
+func goExternTypeBinding(typ *parse.ExternTypeDeclaration) string {
+	if typ.ExternalBinding != "" {
+		return typ.ExternalBinding
+	}
+	return typ.ExternalBindings["go"]
 }
 
 func aliasGoType(alias *parse.TypeDeclaration) (string, bool) {
@@ -297,6 +314,43 @@ func lowerHostFunction(binding string, fn *parse.ExternalFunction, aliases map[s
 		Params:  hostParams,
 		Returns: returns,
 	}, nil
+}
+
+func collectGoImports(dir string) (map[string]string, error) {
+	matches, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		return nil, err
+	}
+	imports := map[string]string{}
+	for _, path := range matches {
+		if strings.HasSuffix(path, ".gen.go") || strings.HasSuffix(path, "_test.go") || filepath.Base(path) == "generate.go" {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			return nil, err
+		}
+		for _, spec := range file.Imports {
+			if spec.Path == nil {
+				continue
+			}
+			importPath := strings.Trim(spec.Path.Value, "\"")
+			if importPath == "" || importPath == "C" {
+				continue
+			}
+			alias := ""
+			if spec.Name != nil {
+				if spec.Name.Name == "." || spec.Name.Name == "_" {
+					continue
+				}
+				alias = spec.Name.Name
+			} else {
+				alias = filepath.Base(importPath)
+			}
+			imports[alias] = importPath
+		}
+	}
+	return imports, nil
 }
 
 func returnGoTypes(typ parse.DeclaredType, aliases map[string]string, definedTypes map[string]struct{}) ([]string, error) {
@@ -470,11 +524,83 @@ func functionReturnGoTypes(typ parse.DeclaredType, aliases map[string]string, de
 	return []string{returnType}, nil
 }
 
-func render(c contract, packageName string) ([]byte, error) {
+func externTypeImports(c contract, availableImports map[string]string) (map[string]string, error) {
+	imports := map[string]string{}
+	for _, typ := range c.ExternTypes {
+		if strings.TrimSpace(typ.Type) == "" {
+			continue
+		}
+		expr, err := parser.ParseExpr(typ.Type)
+		if err != nil {
+			return nil, fmt.Errorf("parse extern type binding %s = %q: %w", typ.Name, typ.Type, err)
+		}
+		missingAlias := ""
+		ast.Inspect(expr, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, ok := selector.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			if path := availableImports[ident.Name]; path != "" {
+				imports[ident.Name] = path
+				return true
+			}
+			missingAlias = ident.Name
+			return false
+		})
+		if missingAlias != "" {
+			return nil, fmt.Errorf("extern type binding %s = %q references Go package alias %q, but no matching import was found in stdlib FFI Go files", typ.Name, typ.Type, missingAlias)
+		}
+	}
+	return imports, nil
+}
+
+func importsForContract(c contract, availableImports map[string]string) (map[string]string, error) {
+	imports := map[string]string{"ardruntime": "github.com/akonwi/ard/runtime"}
+	externImports, err := externTypeImports(c, availableImports)
+	if err != nil {
+		return nil, err
+	}
+	for alias, path := range externImports {
+		imports[alias] = path
+	}
+	return imports, nil
+}
+
+func renderImports(out *strings.Builder, imports map[string]string) {
+	aliases := make([]string, 0, len(imports))
+	for alias := range imports {
+		aliases = append(aliases, alias)
+	}
+	slices.Sort(aliases)
+	if len(aliases) == 1 && aliases[0] == "ardruntime" {
+		out.WriteString("import ardruntime \"github.com/akonwi/ard/runtime\"\n\n")
+		return
+	}
+	out.WriteString("import (\n")
+	for _, alias := range aliases {
+		path := imports[alias]
+		if alias == filepath.Base(path) {
+			fmt.Fprintf(out, "\t%q\n", path)
+			continue
+		}
+		fmt.Fprintf(out, "\t%s %q\n", alias, path)
+	}
+	out.WriteString(")\n\n")
+}
+
+func render(c contract, packageName string, availableImports map[string]string) ([]byte, error) {
 	var out strings.Builder
 	out.WriteString("// Code generated by ard; DO NOT EDIT.\n\n")
 	fmt.Fprintf(&out, "package %s\n\n", packageName)
-	out.WriteString("import ardruntime \"github.com/akonwi/ard/runtime\"\n\n")
+	imports, err := importsForContract(c, availableImports)
+	if err != nil {
+		return nil, err
+	}
+	renderImports(&out, imports)
 	out.WriteString("type Maybe[T any] = ardruntime.Maybe[T]\n\n")
 	out.WriteString("func Some[T any](value T) Maybe[T] {\n\treturn ardruntime.Some(value)\n}\n\n")
 	out.WriteString("func None[T any]() Maybe[T] {\n\treturn ardruntime.None[T]()\n}\n\n")
@@ -482,6 +608,9 @@ func render(c contract, packageName string) ([]byte, error) {
 	out.WriteString("func Ok[T, E any](value T) Result[T, E] {\n\treturn ardruntime.Ok[T, E](value)\n}\n\n")
 	out.WriteString("func Err[T, E any](err E) Result[T, E] {\n\treturn ardruntime.Err[T](err)\n}\n\n")
 	for _, typ := range c.ExternTypes {
+		if strings.TrimSpace(typ.Type) != "" {
+			continue
+		}
 		fmt.Fprintf(&out, "type %s = any\n\n", typ.Name)
 	}
 	for _, alias := range c.Aliases {

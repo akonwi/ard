@@ -124,16 +124,6 @@ func NewHost(config HostConfig) Host {
 	}
 }
 
-type sqlConnection struct {
-	db     *sql.DB
-	driver string
-}
-
-type sqlTransaction struct {
-	tx     *sql.Tx
-	driver string
-}
-
 const (
 	defaultScryptN       = 16384
 	defaultScryptR       = 16
@@ -521,8 +511,8 @@ func CryptoUUID() string {
 	)
 }
 
-func SqlCreateConnection(connectionString string) (Db, error) {
-	driver := detectSQLDriver(connectionString)
+func SqlCreateConnection(connectionString string) (*sql.DB, error) {
+	driver := SqlDetectDriver(connectionString)
 	db, err := sql.Open(driver, connectionString)
 	if err != nil {
 		return nil, err
@@ -531,43 +521,39 @@ func SqlCreateConnection(connectionString string) (Db, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
-	return &sqlConnection{db: db, driver: driver}, nil
+	return db, nil
 }
 
-func SqlClose(db Db) error {
-	conn, ok := db.(*sqlConnection)
-	if !ok {
+func SqlClose(db *sql.DB) error {
+	if db == nil {
 		return fmt.Errorf("SQL Error: invalid connection object")
 	}
-	return conn.db.Close()
+	return db.Close()
 }
 
-func SqlBeginTx(db Db) (Tx, error) {
-	conn, ok := db.(*sqlConnection)
-	if !ok {
+func SqlBeginTx(db *sql.DB) (*sql.Tx, error) {
+	if db == nil {
 		return nil, fmt.Errorf("SQL Error: invalid connection object")
 	}
-	tx, err := conn.db.Begin()
+	tx, err := db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	return &sqlTransaction{tx: tx, driver: conn.driver}, nil
+	return tx, nil
 }
 
-func SqlCommit(tx Tx) error {
-	wrapped, ok := tx.(*sqlTransaction)
-	if !ok {
+func SqlCommit(tx *sql.Tx) error {
+	if tx == nil {
 		return fmt.Errorf("SQL Error: invalid transaction object")
 	}
-	return wrapped.tx.Commit()
+	return tx.Commit()
 }
 
-func SqlRollback(tx Tx) error {
-	wrapped, ok := tx.(*sqlTransaction)
-	if !ok {
+func SqlRollback(tx *sql.Tx) error {
+	if tx == nil {
 		return fmt.Errorf("SQL Error: invalid transaction object")
 	}
-	return wrapped.tx.Rollback()
+	return tx.Rollback()
 }
 
 func SqlExtractParams(sqlStr string) []string {
@@ -586,8 +572,8 @@ func SqlExtractParams(sqlStr string) []string {
 	return paramNames
 }
 
-func SqlQuery(conn any, sqlStr string, values []any) ([]any, error) {
-	runner, driver, ok := resolveSQLRunner(conn)
+func SqlQuery(conn any, driver string, sqlStr string, values []any) ([]any, error) {
+	runner, ok := resolveSQLRunner(conn)
 	if !ok {
 		return nil, fmt.Errorf("SQL Error: invalid connection object")
 	}
@@ -595,8 +581,8 @@ func SqlQuery(conn any, sqlStr string, values []any) ([]any, error) {
 	return executeSQLQuery(runner, sqlStr, values)
 }
 
-func SqlExecute(conn any, sqlStr string, values []any) error {
-	runner, driver, ok := resolveSQLRunner(conn)
+func SqlExecute(conn any, driver string, sqlStr string, values []any) error {
+	runner, ok := resolveSQLRunner(conn)
 	if !ok {
 		return fmt.Errorf("SQL Error: invalid connection object")
 	}
@@ -605,7 +591,7 @@ func SqlExecute(conn any, sqlStr string, values []any) error {
 	return err
 }
 
-func detectSQLDriver(connStr string) string {
+func SqlDetectDriver(connStr string) string {
 	connStr = strings.TrimSpace(connStr)
 	if strings.HasPrefix(connStr, "postgres://") || strings.HasPrefix(connStr, "postgresql://") {
 		return "pgx"
@@ -632,14 +618,14 @@ func splitSQLByMultipleDelimiters(s string, delimiters []string) []string {
 	return nonEmpty
 }
 
-func resolveSQLRunner(raw any) (sqlRunner, string, bool) {
-	if conn, ok := raw.(*sqlConnection); ok {
-		return conn.db, conn.driver, true
+func resolveSQLRunner(raw any) (sqlRunner, bool) {
+	if db, ok := raw.(*sql.DB); ok && db != nil {
+		return db, true
 	}
-	if tx, ok := raw.(*sqlTransaction); ok {
-		return tx.tx, tx.driver, true
+	if tx, ok := raw.(*sql.Tx); ok && tx != nil {
+		return tx, true
 	}
-	return nil, "", false
+	return nil, false
 }
 
 func normalizeSQLPlaceholders(sqlStr string, driver string) string {
@@ -874,7 +860,7 @@ func ExtractField(data any, name string) (any, error) {
 	return nil, fmt.Errorf("%s", formatDynamicValueForError(data))
 }
 
-func HTTPDo(method string, url string, body any, headers map[string]string, timeout Maybe[int]) (RawResponse, error) {
+func HTTPDo(method string, url string, body any, headers map[string]string, timeout Maybe[int]) (*http.Response, error) {
 	var bodyReader io.Reader = strings.NewReader("")
 	if body != nil {
 		switch value := body.(type) {
@@ -910,20 +896,19 @@ func HTTPDo(method string, url string, body any, headers map[string]string, time
 	return resp, nil
 }
 
-func HTTPResponseStatus(resp RawResponse) int {
-	if response, ok := resp.(*http.Response); ok {
-		return response.StatusCode
+func HTTPResponseStatus(resp *http.Response) int {
+	if resp == nil {
+		return 0
 	}
-	return 0
+	return resp.StatusCode
 }
 
-func HTTPResponseHeaders(resp RawResponse) map[string]string {
-	response, ok := resp.(*http.Response)
-	if !ok {
+func HTTPResponseHeaders(resp *http.Response) map[string]string {
+	if resp == nil {
 		return map[string]string{}
 	}
-	headers := make(map[string]string, len(response.Header))
-	for key, values := range response.Header {
+	headers := make(map[string]string, len(resp.Header))
+	for key, values := range resp.Header {
 		if len(values) > 0 {
 			headers[key] = values[0]
 		}
@@ -931,41 +916,40 @@ func HTTPResponseHeaders(resp RawResponse) map[string]string {
 	return headers
 }
 
-func HTTPResponseBody(resp RawResponse) (string, error) {
-	response, ok := resp.(*http.Response)
-	if !ok {
+func HTTPResponseBody(resp *http.Response) (string, error) {
+	if resp == nil {
 		return "", fmt.Errorf("invalid HTTP response handle")
 	}
-	body, err := io.ReadAll(response.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
 	return string(body), nil
 }
 
-func HTTPResponseClose(resp RawResponse) {
-	if response, ok := resp.(*http.Response); ok && response.Body != nil {
-		_ = response.Body.Close()
+func HTTPResponseClose(resp *http.Response) {
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
 	}
 }
 
-func GetReqPath(req RawRequest) string {
-	if request, ok := req.(*http.Request); ok && request.URL != nil {
-		return request.URL.Path
-	}
-	return ""
-}
-
-func GetPathValue(req RawRequest, name string) string {
-	if request, ok := req.(*http.Request); ok {
-		return request.PathValue(name)
+func GetReqPath(req *http.Request) string {
+	if req != nil && req.URL != nil {
+		return req.URL.Path
 	}
 	return ""
 }
 
-func GetQueryParam(req RawRequest, name string) string {
-	if request, ok := req.(*http.Request); ok && request.URL != nil {
-		return request.URL.Query().Get(name)
+func GetPathValue(req *http.Request, name string) string {
+	if req != nil {
+		return req.PathValue(name)
+	}
+	return ""
+}
+
+func GetQueryParam(req *http.Request, name string) string {
+	if req != nil && req.URL != nil {
+		return req.URL.Query().Get(name)
 	}
 	return ""
 }
@@ -981,7 +965,7 @@ func HTTPServe(port int, handlers map[string]func(Request, *Response)) error {
 				Url:     req.URL.String(),
 				Headers: requestHeaders(req),
 				Body:    requestBody(req),
-				Raw:     Some[any](req),
+				Raw:     Some[*http.Request](req),
 			}
 			ardRes := Response{
 				Status:  200,
