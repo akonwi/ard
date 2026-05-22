@@ -1,6 +1,6 @@
 use ard/maybe
 
-extern type Terminal
+extern type Terminal = "*vaxis.Vaxis"
 
 extern fn tui_open() Terminal!Str = "TuiOpen"
 

@@ -7,10 +7,6 @@ import (
 	"git.sr.ht/~rockorager/vaxis"
 )
 
-func mustVaxis(term any) *vaxis.Vaxis {
-	return term.(*vaxis.Vaxis)
-}
-
 func TuiOpen() (*vaxis.Vaxis, error) {
 	vx, err := vaxis.New(vaxis.Options{DisableKittyKeyboard: true})
 	if err != nil {
@@ -22,17 +18,17 @@ func TuiOpen() (*vaxis.Vaxis, error) {
 	return vx, nil
 }
 
-func TuiClose(term any) error {
-	mustVaxis(term).Close()
+func TuiClose(term *vaxis.Vaxis) error {
+	term.Close()
 	return nil
 }
 
-func TuiClear(term any) {
-	mustVaxis(term).Window().Clear()
+func TuiClear(term *vaxis.Vaxis) {
+	term.Window().Clear()
 }
 
-func TuiDrawText(term any, x int, y int, text string) {
-	root := mustVaxis(term).Window()
+func TuiDrawText(term *vaxis.Vaxis, x int, y int, text string) {
+	root := term.Window()
 	width, _ := root.Size()
 	if x < 0 || y < 0 || x >= width {
 		return
@@ -40,8 +36,8 @@ func TuiDrawText(term any, x int, y int, text string) {
 	root.New(x, y, width-x, 1).Print(vaxis.Segment{Text: text})
 }
 
-func TuiFlush(term any) error {
-	mustVaxis(term).Render()
+func TuiFlush(term *vaxis.Vaxis) error {
+	term.Render()
 	return nil
 }
 
@@ -61,8 +57,8 @@ func drainStartupEvents(vx *vaxis.Vaxis) {
 	}
 }
 
-func TuiReadKey(term any) (string, error) {
-	for ev := range mustVaxis(term).Events() {
+func TuiReadKey(term *vaxis.Vaxis) (string, error) {
+	for ev := range term.Events() {
 		switch ev := ev.(type) {
 		case vaxis.Key:
 			if ev.EventType != vaxis.EventPress {

@@ -80,6 +80,11 @@ func TestFormat(t *testing.T) {
 			output: "extern type ConnectionPtr\n",
 		},
 		{
+			name:   "preserves extern type Go binding",
+			input:  "extern type Terminal = \"*vaxis.Vaxis\"\n",
+			output: "extern type Terminal = \"*vaxis.Vaxis\"\n",
+		},
+		{
 			name:   "formats generic extern type declaration",
 			input:  "extern type Promise<$T>\n",
 			output: "extern type Promise<$T>\n",
