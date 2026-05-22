@@ -13,6 +13,7 @@ import (
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/frontend"
 	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/version"
 )
 
 func TestGenerateSourcesFormatsSimpleProgram(t *testing.T) {
@@ -821,6 +822,61 @@ func TestGenerateSourcesSupportsIfAndWhile(t *testing.T) {
 	}
 	if !strings.Contains(source, "var _tmp_0 int") {
 		t.Fatalf("generated source missing expression temp lowering:\n%s", source)
+	}
+}
+
+func TestWriteProgramUsesEmbeddedArdModuleForReleaseVersion(t *testing.T) {
+	original := version.Version
+	version.Version = "v0.19.1"
+	t.Cleanup(func() { version.Version = original })
+
+	program := lowerSource(t, `
+		fn main() Void {
+		}
+	`)
+	dir := t.TempDir()
+	if err := writeProgram(dir, program, Options{PackageName: "main"}); err != nil {
+		t.Fatalf("writeProgram error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		t.Fatalf("read go.mod: %v", err)
+	}
+	goMod := string(data)
+	if !strings.Contains(goMod, "require github.com/akonwi/ard v0.0.0") {
+		t.Fatalf("go.mod missing Ard module requirement:\n%s", goMod)
+	}
+	if !strings.Contains(goMod, "replace github.com/akonwi/ard => ./.ard/ard-module") {
+		t.Fatalf("release go.mod missing embedded module replace:\n%s", goMod)
+	}
+	if strings.Contains(goMod, "/home/runner") {
+		t.Fatalf("release go.mod must not contain CI source path:\n%s", goMod)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".ard", "ard-module", "runtime", "maybe.go")); err != nil {
+		t.Fatalf("embedded runtime module not written: %v", err)
+	}
+}
+
+func TestWriteProgramUsesLocalReplaceForDevVersion(t *testing.T) {
+	original := version.Version
+	version.Version = "dev"
+	t.Cleanup(func() { version.Version = original })
+
+	program := lowerSource(t, `
+		fn main() Void {
+		}
+	`)
+	dir := t.TempDir()
+	if err := writeProgram(dir, program, Options{PackageName: "main"}); err != nil {
+		t.Fatalf("writeProgram error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		t.Fatalf("read go.mod: %v", err)
+	}
+	goMod := string(data)
+	if !strings.Contains(goMod, "require github.com/akonwi/ard v0.0.0") || !strings.Contains(goMod, "replace github.com/akonwi/ard =>") {
+		t.Fatalf("dev go.mod missing local replace:\n%s", goMod)
 	}
 }
 

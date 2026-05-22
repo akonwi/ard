@@ -1,5 +1,7 @@
 package gotarget
 
+//go:generate go run generate_ard_module_files.go
+
 import (
 	"encoding/json"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
 	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
+	"github.com/akonwi/ard/version"
 )
 
 type Options struct {
@@ -194,10 +197,11 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 		return err
 	}
 	goMod := "module generated\n\ngo 1.26.0\n"
-	if moduleRoot, ok := compilerModuleRoot(); ok {
-		goMod += "\nrequire github.com/akonwi/ard v0.0.0\n"
-		goMod += fmt.Sprintf("replace github.com/akonwi/ard => %s\n", moduleRoot)
+	ardRequirement, err := writeArdModuleDependency(dir)
+	if err != nil {
+		return err
 	}
+	goMod += ardRequirement
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o644); err != nil {
 		return err
 	}
@@ -358,6 +362,33 @@ func stdlibGoBinding(binding string) bool {
 	}
 	_, ok := generatedStdlibExternLowerings[binding]
 	return ok
+}
+
+func writeArdModuleDependency(dir string) (string, error) {
+	if releaseVersion := strings.TrimSpace(version.Get()); releaseVersion != "" && releaseVersion != "dev" {
+		moduleDir := filepath.Join(dir, ".ard", "ard-module")
+		if err := writeEmbeddedArdModule(moduleDir); err != nil {
+			return "", err
+		}
+		return "\nrequire github.com/akonwi/ard v0.0.0\nreplace github.com/akonwi/ard => ./.ard/ard-module\n", nil
+	}
+	if moduleRoot, ok := compilerModuleRoot(); ok {
+		return fmt.Sprintf("\nrequire github.com/akonwi/ard v0.0.0\nreplace github.com/akonwi/ard => %s\n", moduleRoot), nil
+	}
+	return "", nil
+}
+
+func writeEmbeddedArdModule(dir string) error {
+	for rel, content := range embeddedArdModuleFiles {
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func compilerModuleRoot() (string, bool) {
