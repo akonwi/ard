@@ -18,7 +18,10 @@ similar signature-driven contract generated from Ard `extern` declarations.
 Current project Go FFI support copies user-authored companion files from
 `PROJECT_ROOT/ffi.go` and `PROJECT_ROOT/ffi/*.go`. These files must use
 `package ffi`; the generated Go target imports them as a project FFI package.
-The `examples/tic-tac-toe` project is the current real-world reference example.
+Project extern types can bind to concrete Go host types, e.g.
+`extern type Terminal = "*vaxis.Vaxis"`, so companion functions can use typed
+host values instead of `any` casts. The `examples/tic-tac-toe` project is the
+current real-world reference example.
 
 The intended project shape is:
 

@@ -40,7 +40,7 @@ The smoke test builds the Ard Go target, runs the TUI under a PTY, sends keys, a
 Ard sees only this narrow API:
 
 ```ard
-extern type Terminal
+extern type Terminal = "*vaxis.Vaxis"
 extern fn tui_open() Terminal!Str = "TuiOpen"
 extern fn tui_close(term: Terminal) Void!Str = "TuiClose"
 extern fn tui_clear(term: Terminal) Void = "TuiClear"

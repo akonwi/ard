@@ -283,6 +283,9 @@ func (p printer) renderExternTypeDeclaration(node *parse.ExternTypeDeclaration) 
 	}
 	header := prefix + "extern type " + node.Name + p.renderTypeParams(node.TypeParams)
 	if len(node.ExternalBindings) == 0 {
+		if node.ExternalBinding != "" {
+			return header + " = " + strconv.Quote(node.ExternalBinding)
+		}
 		return header
 	}
 	if len(node.ExternalBindings) == 1 && node.ExternalBindings["go"] != "" {
