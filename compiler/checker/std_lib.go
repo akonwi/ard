@@ -1,19 +1,21 @@
 package checker
 
+import "github.com/akonwi/ard/backend"
+
 var prelude = map[string]Module{
 	"Result": ResultPkg{},
 }
 
-func findInStdLib(path string) (Module, bool) {
-	return findInStdLibTarget(path, "")
-}
-
 func findInStdLibTarget(path string, target string) (Module, bool) {
+	if target == "" {
+		target = backend.DefaultTarget
+	}
+
 	// Provide minimal hardcoded definitions for special modules
 	// These provide the function signatures for type checking
 	switch path {
 	case "ard/async":
-		return AsyncPkg{}, true
+		return AsyncPkg{target: target}, true
 	case "ard/maybe":
 		return MaybePkg{}, true
 	case "ard/result":
@@ -29,7 +31,9 @@ func findInStdLibTarget(path string, target string) (Module, bool) {
 }
 
 /* ard/async */
-type AsyncPkg struct{}
+type AsyncPkg struct {
+	target string
+}
 
 func (pkg AsyncPkg) Path() string {
 	return "ard/async"
@@ -37,10 +41,14 @@ func (pkg AsyncPkg) Path() string {
 
 func (pkg AsyncPkg) Program() *Program {
 	// Return the embedded module's program so Fiber methods have access to wait_for
-	if embeddedMod, ok := FindEmbeddedModule("ard/async"); ok {
+	if embeddedMod, ok := pkg.embeddedModule(); ok {
 		return embeddedMod.Program()
 	}
 	return nil
+}
+
+func (pkg AsyncPkg) embeddedModule() (Module, bool) {
+	return FindEmbeddedModuleForTarget("ard/async", pkg.target)
 }
 
 func (pkg AsyncPkg) Get(name string) Symbol {
@@ -57,7 +65,7 @@ func (pkg AsyncPkg) Get(name string) Symbol {
 	case "start":
 		// Get the Fiber struct from the embedded module for consistency
 		var fiberType Type = &StructDef{Name: "Fiber"}
-		if embeddedMod, ok := FindEmbeddedModule("ard/async"); ok {
+		if embeddedMod, ok := pkg.embeddedModule(); ok {
 			if fiberSym := embeddedMod.Get("Fiber"); fiberSym.Type != nil {
 				fiberType = fiberSym.Type
 			}
@@ -80,7 +88,7 @@ func (pkg AsyncPkg) Get(name string) Symbol {
 	case "eval":
 		// Get the Fiber struct from the embedded module for consistency
 		var fiberType Type = &StructDef{Name: "Fiber"}
-		if embeddedMod, ok := FindEmbeddedModule("ard/async"); ok {
+		if embeddedMod, ok := pkg.embeddedModule(); ok {
 			if fiberSym := embeddedMod.Get("Fiber"); fiberSym.Type != nil {
 				fiberType = fiberSym.Type
 			}
@@ -104,7 +112,7 @@ func (pkg AsyncPkg) Get(name string) Symbol {
 	case "join":
 		// Get the Fiber struct from the embedded module for consistency
 		var fiberType Type = &StructDef{Name: "Fiber"}
-		if embeddedMod, ok := FindEmbeddedModule("ard/async"); ok {
+		if embeddedMod, ok := pkg.embeddedModule(); ok {
 			if fiberSym := embeddedMod.Get("Fiber"); fiberSym.Type != nil {
 				fiberType = fiberSym.Type
 			}
@@ -122,7 +130,7 @@ func (pkg AsyncPkg) Get(name string) Symbol {
 		}
 	case "Fiber":
 		// Return the Fiber struct from the embedded module
-		if embeddedMod, ok := FindEmbeddedModule("ard/async"); ok {
+		if embeddedMod, ok := pkg.embeddedModule(); ok {
 			return embeddedMod.Get("Fiber")
 		}
 		return Symbol{}
