@@ -14,10 +14,16 @@ Embedding target behavior directly into Ard declarations or compiler special cas
 
 Use target-aware extern bindings and companion modules/files for Ard FFI.
 
-Extern declarations may use a Go-oriented string shorthand:
+Extern function declarations may use a Go-oriented string shorthand:
 
 ```ard
 extern fn read_line() Str!Str = "ReadLine"
+```
+
+Extern type declarations may also bind directly to a Go type when project or stdlib FFI should use a concrete host type instead of the default opaque representation:
+
+```ard
+extern type Terminal = "*vaxis.Vaxis"
 ```
 
 or an explicit target binding block:
@@ -52,6 +58,7 @@ Companion files must use `package ffi`. The Go target copies project companion f
 
 Project Go companion adaptation should use idiomatic generated Go values rather than a universal dynamic object layer. At the project FFI boundary, the current direct-call convention is:
 
+- `extern type Name = "GoType"` values pass as the bound Go type
 - scalar/list/map/function arguments pass as generated Go values
 - `T?` arguments pass as `*T`, with `nil` for none
 - `T` returns directly as `T`
