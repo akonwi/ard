@@ -825,6 +825,16 @@ func TestGenerateSourcesSupportsIfAndWhile(t *testing.T) {
 	}
 }
 
+func TestCollectFFIGoImportsIncludesStdlibImportsWithoutSourceCheckout(t *testing.T) {
+	imports := collectGoImportsFromEmbeddedArdModule()
+	if imports["sql"] != "database/sql" {
+		t.Fatalf("embedded stdlib FFI imports missing sql: %#v", imports)
+	}
+	if imports["http"] != "net/http" {
+		t.Fatalf("embedded stdlib FFI imports missing http: %#v", imports)
+	}
+}
+
 func TestWriteProgramUsesEmbeddedArdModuleForReleaseVersion(t *testing.T) {
 	original := version.Version
 	version.Version = "v0.19.1"
