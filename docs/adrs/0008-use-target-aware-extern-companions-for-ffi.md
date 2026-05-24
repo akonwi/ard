@@ -83,6 +83,6 @@ Standard library Go FFI metadata should be generated from Ard standard library d
 
 ## Related
 
-- `backlog/userland-ffi-codegen.md`
+- `docs/adrs/0016-defer-project-ffi-codegen.md`
 - `docs/adrs/0002-use-air-as-backend-boundary.md`
 - `docs/adrs/0005-use-result-maybe-and-try-for-error-handling.md`

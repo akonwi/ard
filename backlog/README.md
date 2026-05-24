@@ -5,7 +5,6 @@ This directory holds design notes for larger work that is not currently being im
 ## Active notes
 
 - [`ard-dependency-system/`](./ard-dependency-system/) — design sketch for future git-backed dependency management.
-- [`userland-ffi-codegen.md`](./userland-ffi-codegen.md) — future CLI/codegen workflow for project Go FFI signatures.
 
 ## Recently completed
 
