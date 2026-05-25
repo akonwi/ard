@@ -1034,8 +1034,8 @@ func TestDependencyFromAddSpecGitHubCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dependencyFromAddSpec: %v", err)
 	}
-	if dep.Alias != "vaxis_ard" {
-		t.Fatalf("alias = %q, want vaxis_ard", dep.Alias)
+	if dep.Alias != "vaxis-ard" {
+		t.Fatalf("alias = %q, want vaxis-ard", dep.Alias)
 	}
 	if dep.Git != "git@github.com:akonwi/vaxis-ard.git" {
 		t.Fatalf("git = %q", dep.Git)
@@ -1050,8 +1050,20 @@ func TestDependencyFromAddSpecGitHubHyphenShorthand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dependencyFromAddSpec: %v", err)
 	}
-	if dep.Alias != "vaxis_ard" || dep.Git != "git@github.com:akonwi/vaxis-ard.git" {
+	if dep.Alias != "vaxis-ard" || dep.Git != "git@github.com:akonwi/vaxis-ard.git" {
 		t.Fatalf("dep = %#v", dep)
+	}
+}
+
+func TestParseManifestName(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "ard.toml")
+	if err := os.WriteFile(manifest, []byte("name = \"vaxis\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	name, ok := parseManifestName(manifest)
+	if !ok || name != "vaxis" {
+		t.Fatalf("parseManifestName = %q, %v", name, ok)
 	}
 }
 

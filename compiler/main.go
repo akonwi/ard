@@ -193,6 +193,11 @@ func runAddCommand(args []string) error {
 	if err != nil {
 		return err
 	}
+	alias, err := dependencyAliasFromGitManifest(dep)
+	if err != nil {
+		return err
+	}
+	dep.Alias = alias
 	project, err := checker.FindProjectRoot(".")
 	if err != nil {
 		return err
@@ -269,9 +274,65 @@ func normalizeGitSource(source string) (string, string, error) {
 }
 
 func dependencyAliasFromRepo(repo string) string {
-	repo = strings.TrimSuffix(repo, ".git")
-	repo = strings.ReplaceAll(repo, "-", "_")
-	return repo
+	return strings.TrimSuffix(repo, ".git")
+}
+
+func dependencyAliasFromGitManifest(dep checker.DependencyInfo) (string, error) {
+	checkout, cleanup, err := cloneDependencyForManifest(dep)
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+	if name, ok := parseManifestName(filepath.Join(checkout, "ard.toml")); ok {
+		return name, nil
+	}
+	return dep.Alias, nil
+}
+
+func cloneDependencyForManifest(dep checker.DependencyInfo) (string, func(), error) {
+	if dep.Git == "" {
+		return "", func() {}, nil
+	}
+	if dep.Tag == "" && dep.Commit == "" {
+		return "", func() {}, fmt.Errorf("git dependency must specify tag or commit")
+	}
+	tmp, err := os.MkdirTemp("", "ard-add-dep-*")
+	if err != nil {
+		return "", func() {}, err
+	}
+	cleanup := func() { _ = os.RemoveAll(tmp) }
+	cloneDir := filepath.Join(tmp, "repo")
+	args := []string{"clone"}
+	if dep.Tag != "" {
+		args = append(args, "--branch", dep.Tag, "--depth", "1")
+	}
+	args = append(args, dep.Git, cloneDir)
+	if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	if dep.Commit != "" {
+		cmd := exec.Command("git", "checkout", dep.Commit)
+		cmd.Dir = cloneDir
+		if output, err := cmd.CombinedOutput(); err != nil {
+			cleanup()
+			return "", func() {}, fmt.Errorf("git checkout %s: %w\n%s", dep.Commit, err, strings.TrimSpace(string(output)))
+		}
+	}
+	return cloneDir, cleanup, nil
+}
+
+func parseManifestName(path string) (string, bool) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	re := regexp.MustCompile(`(?m)^\s*name\s*=\s*["']([^"']+)["']`)
+	matches := re.FindStringSubmatch(string(content))
+	if len(matches) < 2 {
+		return "", false
+	}
+	return matches[1], true
 }
 
 func isGitCommitish(ref string) bool {
