@@ -1,18 +1,6 @@
 use ard/maybe
 
-extern type Terminal = "*vaxis.Vaxis"
-
-extern fn tui_open() Terminal!Str = "TuiOpen"
-
-extern fn tui_close(term: Terminal) Void!Str = "TuiClose"
-
-extern fn tui_clear(term: Terminal) Void = "TuiClear"
-
-extern fn tui_draw_text(term: Terminal, x: Int, y: Int, text: Str) Void = "TuiDrawText"
-
-extern fn tui_flush(term: Terminal) Void!Str = "TuiFlush"
-
-extern fn tui_read_key(term: Terminal) Str!Str = "TuiReadKey"
+use vaxis
 
 struct Board {
   cells: [Str],
@@ -99,42 +87,42 @@ fn cell_label(board: Board, pos: Int, selected: Int) Str {
   }
 }
 
-fn draw_board(term: Terminal, board: Board, selected: Int, player: Str, message: Str) Void!Str {
-  tui_clear(term)
-  tui_draw_text(term, 2, 1, "Ard + Vaxis Tic-Tac-Toe")
-  tui_draw_text(
+fn draw_board(term: vaxis::Vaxis, board: Board, selected: Int, player: Str, message: Str) Void!Str {
+  vaxis::clear(term)
+  vaxis::draw_text(term, 2, 1, "Ard + Vaxis Tic-Tac-Toe")
+  vaxis::draw_text(
     term,
     2,
     2,
     "────────────────────────",
   )
-  tui_draw_text(term, 2, 4, "Player " + player + " to move")
-  tui_draw_text(term, 2, 6, "┌───┬───┬───┐")
-  tui_draw_text(
+  vaxis::draw_text(term, 2, 4, "Player " + player + " to move")
+  vaxis::draw_text(term, 2, 6, "┌───┬───┬───┐")
+  vaxis::draw_text(
     term,
     2,
     7,
     "│" + cell_label(board, 0, selected) + "│" + cell_label(board, 1, selected) + "│" + cell_label(board, 2, selected) + "│",
   )
-  tui_draw_text(term, 2, 8, "├───┼───┼───┤")
-  tui_draw_text(
+  vaxis::draw_text(term, 2, 8, "├───┼───┼───┤")
+  vaxis::draw_text(
     term,
     2,
     9,
     "│" + cell_label(board, 3, selected) + "│" + cell_label(board, 4, selected) + "│" + cell_label(board, 5, selected) + "│",
   )
-  tui_draw_text(term, 2, 10, "├───┼───┼───┤")
-  tui_draw_text(
+  vaxis::draw_text(term, 2, 10, "├───┼───┼───┤")
+  vaxis::draw_text(
     term,
     2,
     11,
     "│" + cell_label(board, 6, selected) + "│" + cell_label(board, 7, selected) + "│" + cell_label(board, 8, selected) + "│",
   )
-  tui_draw_text(term, 2, 12, "└───┴───┴───┘")
-  tui_draw_text(term, 2, 14, message)
-  tui_draw_text(term, 2, 16, "Move: arrows/hjkl or 1-9. Select: enter/space. q quits. r restarts.")
-  tui_draw_text(term, 2, 17, "This TUI is rendered by Vaxis through project Go FFI.")
-  tui_flush(term)
+  vaxis::draw_text(term, 2, 12, "└───┴───┴───┘")
+  vaxis::draw_text(term, 2, 14, message)
+  vaxis::draw_text(term, 2, 16, "Move: arrows/hjkl or 1-9. Select: enter/space. q quits. r restarts.")
+  vaxis::draw_text(term, 2, 17, "This TUI is rendered by Vaxis through project Go FFI.")
+  vaxis::render(term)
 }
 
 fn selected_from_key(key: Str, selected: Int) Int {
@@ -236,7 +224,7 @@ fn next_player(player: Str) Str {
   res
 }
 
-fn run_game(term: Terminal) Void!Str {
+fn run_game(term: vaxis::Vaxis) Void!Str {
   mut board = Board{cells: ["", "", "", "", "", "", "", "", ""]}
   mut player = "X"
   mut selected = 0
@@ -246,7 +234,7 @@ fn run_game(term: Terminal) Void!Str {
 
   while running {
     try draw_board(term, board, selected, player, message)
-    let key = try tui_read_key(term)
+    let key = try vaxis::read_key(term)
 
     mut handled = false
 
@@ -315,7 +303,7 @@ fn run_game(term: Terminal) Void!Str {
 }
 
 fn main() Void {
-  let term = tui_open().expect("open terminal")
+  let term = vaxis::new("Ard Vaxis Tic-Tac-Toe").expect("open terminal")
   run_game(term).expect("run game")
-  tui_close(term).expect("close terminal")
+  vaxis::close(term).expect("close terminal")
 }

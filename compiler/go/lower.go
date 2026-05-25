@@ -33,6 +33,7 @@ type lowerer struct {
 	runtimeHelpers map[string]bool
 	jsonParseTypes map[air.TypeID]bool
 	ffiImports     map[string]string
+	projectInfo    *checker.ProjectInfo
 	suppressMain   bool
 	includeTests   bool
 }
@@ -44,7 +45,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if err := air.Validate(program); err != nil {
 		return nil, err
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
 	modules := make([]air.Module, 0, len(program.Modules))
@@ -82,6 +83,9 @@ func collectFFIGoImports(projectInfo *checker.ProjectInfo) map[string]string {
 	for alias, path := range collectGoImportsFromPaths(projectFFIGoPaths(projectInfo)) {
 		imports[alias] = path
 	}
+	for alias, path := range collectGoImportsFromPaths(dependencyFFIGoPaths(projectInfo)) {
+		imports[alias] = path
+	}
 	return imports
 }
 
@@ -96,6 +100,20 @@ func stdlibFFIGoPaths() []string {
 		return nil
 	}
 	return matches
+}
+
+func dependencyFFIGoPaths(projectInfo *checker.ProjectInfo) []string {
+	if projectInfo == nil {
+		return nil
+	}
+	paths := []string{}
+	for _, dep := range projectInfo.Dependencies {
+		matches, err := filepath.Glob(filepath.Join(dep.VendorPath, "ffi", "*.go"))
+		if err == nil {
+			paths = append(paths, matches...)
+		}
+	}
+	return paths
 }
 
 func projectFFIGoPaths(projectInfo *checker.ProjectInfo) []string {
@@ -3818,6 +3836,9 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		binding = goBinding
 	}
 	if !externModuleIsStdlib(l.program, ext) {
+		if alias, ok := dependencyAliasForModulePath(modulePathForExtern(l.program, ext), l.projectInfo); ok {
+			return l.lowerDependencyExternCall(ext, alias, binding, args, stmts, expr.Type)
+		}
 		return l.lowerProjectExternCall(ext, binding, args, stmts, expr.Type)
 	}
 	generated, ok, err := l.lowerGeneratedStdlibExtern(binding, ext.Signature, args, stmts, expr.Type)
@@ -3877,13 +3898,21 @@ func (l *lowerer) projectMaybeArgPointer(maybeTypeID air.TypeID, expr ast.Expr) 
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(ptrTemp)}, nil
 }
 
+func (l *lowerer) lowerDependencyExternCall(ext air.Extern, alias string, binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
+	return l.lowerDirectExternCall(ext, l.dependencyFFIBindingExpr, alias, binding, args, stmts, returnTypeID)
+}
+
 func (l *lowerer) lowerProjectExternCall(ext air.Extern, binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
+	return l.lowerDirectExternCall(ext, func(_ string, binding string) (ast.Expr, error) { return l.projectFFIBindingExpr(binding) }, "", binding, args, stmts, returnTypeID)
+}
+
+func (l *lowerer) lowerDirectExternCall(ext air.Extern, bindingExpr func(string, string) (ast.Expr, error), alias string, binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
 	adaptedArgs, argStmts, err := l.adaptProjectExternArgs(ext.Signature, args)
 	if err != nil {
 		return loweredExpr{}, err
 	}
 	stmts = append(stmts, argStmts...)
-	callee, err := l.projectFFIBindingExpr(binding)
+	callee, err := bindingExpr(alias, binding)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -3920,6 +3949,20 @@ func (l *lowerer) lowerProjectExternCall(ext air.Extern, binding string, args []
 	default:
 		return loweredExpr{stmts: stmts, expr: call}, nil
 	}
+}
+
+func (l *lowerer) dependencyFFIBindingExpr(alias string, binding string) (ast.Expr, error) {
+	if strings.TrimSpace(alias) == "" {
+		return nil, fmt.Errorf("empty dependency alias for go extern binding %q", binding)
+	}
+	if strings.TrimSpace(binding) == "" {
+		return nil, fmt.Errorf("empty go extern binding")
+	}
+	if !token.IsIdentifier(binding) {
+		return nil, fmt.Errorf("dependency go extern binding %q must be an unqualified function name in package ffi", binding)
+	}
+	packageAlias := sanitizeName(alias) + "ffi"
+	return l.qualified(packageAlias, "generated/depffi/"+sanitizeName(alias), binding), nil
 }
 
 func (l *lowerer) projectFFIBindingExpr(binding string) (ast.Expr, error) {

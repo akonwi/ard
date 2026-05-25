@@ -14,6 +14,7 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/backend"
+	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
 )
@@ -340,7 +341,11 @@ func TestRunGoTargetSampleStdoutConformance(t *testing.T) {
 }
 
 func TestBuildTicTacToeExample(t *testing.T) {
-	_ = buildGoSampleBinary(t, filepath.Join("..", "examples", "tic-tac-toe", "main.ard"))
+	projectDir := filepath.Join("..", "examples", "tic-tac-toe")
+	if _, err := checker.FetchDependencies(projectDir); err != nil {
+		t.Fatalf("fetch dependencies: %v", err)
+	}
+	_ = buildGoSampleBinary(t, filepath.Join(projectDir, "main.ard"))
 }
 
 func TestRunServerExampleRoutes(t *testing.T) {
@@ -1021,5 +1026,51 @@ test fn private_access() Void!Str {
 	}
 	if !strings.Contains(output, "Undefined: utils::private_helper") {
 		t.Fatalf("unexpected output:\n%s", output)
+	}
+}
+
+func TestDependencyFromAddSpecGitHubCommit(t *testing.T) {
+	dep, err := dependencyFromAddSpec("github.com/akonwi/vaxis-ard@76f7c1b")
+	if err != nil {
+		t.Fatalf("dependencyFromAddSpec: %v", err)
+	}
+	if dep.Alias != "vaxis_ard" {
+		t.Fatalf("alias = %q, want vaxis_ard", dep.Alias)
+	}
+	if dep.Git != "git@github.com:akonwi/vaxis-ard.git" {
+		t.Fatalf("git = %q", dep.Git)
+	}
+	if dep.Commit != "76f7c1b" || dep.Tag != "" {
+		t.Fatalf("commit/tag = %q/%q", dep.Commit, dep.Tag)
+	}
+}
+
+func TestDependencyFromAddSpecGitHubHyphenShorthand(t *testing.T) {
+	dep, err := dependencyFromAddSpec("github.com/akonwi-vaxis-ard@76f7c1b")
+	if err != nil {
+		t.Fatalf("dependencyFromAddSpec: %v", err)
+	}
+	if dep.Alias != "vaxis_ard" || dep.Git != "git@github.com:akonwi/vaxis-ard.git" {
+		t.Fatalf("dep = %#v", dep)
+	}
+}
+
+func TestAddDependencyToManifest(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "ard.toml")
+	if err := os.WriteFile(manifest, []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dep := checker.DependencyInfo{Alias: "vaxis", Git: "git@github.com:akonwi/vaxis-ard.git", Commit: "76f7c1b"}
+	if err := addDependencyToManifest(manifest, dep); err != nil {
+		t.Fatalf("addDependencyToManifest: %v", err)
+	}
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "[dependencies]") || !strings.Contains(got, `vaxis = { git = "git@github.com:akonwi/vaxis-ard.git", commit = "76f7c1b" }`) {
+		t.Fatalf("manifest missing dependency:\n%s", got)
 	}
 }

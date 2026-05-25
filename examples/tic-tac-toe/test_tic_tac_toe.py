@@ -94,6 +94,7 @@ class Screen:
 
 
 def build():
+    subprocess.run([*ARD_CMD, "deps", "fetch"], cwd=ROOT, check=True)
     subprocess.run([*ARD_CMD, "build", "--out", "ttt", "main.ard"], cwd=ROOT, check=True)
 
 
