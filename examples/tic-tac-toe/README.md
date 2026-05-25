@@ -43,7 +43,7 @@ The smoke test builds the Ard Go target, runs the TUI under a PTY, sends keys, a
 
 ```toml
 [dependencies]
-vaxis = { git = "git@github.com:akonwi/vaxis-ard.git", commit = "76f7c1b" }
+vaxis = { git = "https://github.com/akonwi/vaxis-ard.git", commit = "76f7c1b" }
 ```
 
 Ard code imports and calls the dependency directly:

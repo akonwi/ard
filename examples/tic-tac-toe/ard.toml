@@ -3,4 +3,4 @@ ard = ">= 0.1.0"
 target = "go"
 
 [dependencies]
-vaxis = { git = "git@github.com:akonwi/vaxis-ard.git", commit = "76f7c1b" }
+vaxis = { git = "https://github.com/akonwi/vaxis-ard.git", commit = "76f7c1b" }

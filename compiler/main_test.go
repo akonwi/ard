@@ -1037,7 +1037,7 @@ func TestDependencyFromAddSpecGitHubCommit(t *testing.T) {
 	if dep.Alias != "vaxis-ard" {
 		t.Fatalf("alias = %q, want vaxis-ard", dep.Alias)
 	}
-	if dep.Git != "git@github.com:akonwi/vaxis-ard.git" {
+	if dep.Git != "https://github.com/akonwi/vaxis-ard.git" {
 		t.Fatalf("git = %q", dep.Git)
 	}
 	if dep.Commit != "76f7c1b" || dep.Tag != "" {
@@ -1050,7 +1050,7 @@ func TestDependencyFromAddSpecGitHubHyphenShorthand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dependencyFromAddSpec: %v", err)
 	}
-	if dep.Alias != "vaxis-ard" || dep.Git != "git@github.com:akonwi/vaxis-ard.git" {
+	if dep.Alias != "vaxis-ard" || dep.Git != "https://github.com/akonwi/vaxis-ard.git" {
 		t.Fatalf("dep = %#v", dep)
 	}
 }
@@ -1073,7 +1073,7 @@ func TestAddDependencyToManifest(t *testing.T) {
 	if err := os.WriteFile(manifest, []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dep := checker.DependencyInfo{Alias: "vaxis", Git: "git@github.com:akonwi/vaxis-ard.git", Commit: "76f7c1b"}
+	dep := checker.DependencyInfo{Alias: "vaxis", Git: "https://github.com/akonwi/vaxis-ard.git", Commit: "76f7c1b"}
 	if err := addDependencyToManifest(manifest, dep); err != nil {
 		t.Fatalf("addDependencyToManifest: %v", err)
 	}
@@ -1082,7 +1082,7 @@ func TestAddDependencyToManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(data)
-	if !strings.Contains(got, "[dependencies]") || !strings.Contains(got, `vaxis = { git = "git@github.com:akonwi/vaxis-ard.git", commit = "76f7c1b" }`) {
+	if !strings.Contains(got, "[dependencies]") || !strings.Contains(got, `vaxis = { git = "https://github.com/akonwi/vaxis-ard.git", commit = "76f7c1b" }`) {
 		t.Fatalf("manifest missing dependency:\n%s", got)
 	}
 }
@@ -1090,7 +1090,7 @@ func TestAddDependencyToManifest(t *testing.T) {
 func TestRemoveDependencyFromManifest(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
-	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nvaxis = { git = \"git@github.com:akonwi/vaxis-ard.git\", commit = \"76f7c1b\" }\nother = { path = \"../other\" }\n"
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nvaxis = { git = \"https://github.com/akonwi/vaxis-ard.git\", commit = \"76f7c1b\" }\nother = { path = \"../other\" }\n"
 	if err := os.WriteFile(manifest, []byte(input), 0o644); err != nil {
 		t.Fatal(err)
 	}

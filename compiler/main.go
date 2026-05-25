@@ -307,7 +307,7 @@ func normalizeGitSource(source string) (string, string, error) {
 			return "", "", fmt.Errorf("github dependencies must be github.com/owner/repo@ref")
 		}
 		repo := strings.TrimSuffix(parts[1], ".git")
-		return fmt.Sprintf("git@github.com:%s/%s.git", parts[0], repo), repo, nil
+		return fmt.Sprintf("https://github.com/%s/%s.git", parts[0], repo), repo, nil
 	}
 	return "", "", fmt.Errorf("unsupported dependency source %q", source)
 }
