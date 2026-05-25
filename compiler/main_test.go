@@ -1086,3 +1086,53 @@ func TestAddDependencyToManifest(t *testing.T) {
 		t.Fatalf("manifest missing dependency:\n%s", got)
 	}
 }
+
+func TestRemoveDependencyFromManifest(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "ard.toml")
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nvaxis = { git = \"git@github.com:akonwi/vaxis-ard.git\", commit = \"76f7c1b\" }\nother = { path = \"../other\" }\n"
+	if err := os.WriteFile(manifest, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := removeDependencyFromManifest(manifest, "vaxis")
+	if err != nil {
+		t.Fatalf("removeDependencyFromManifest: %v", err)
+	}
+	if !removed {
+		t.Fatal("expected dependency to be removed")
+	}
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "vaxis =") {
+		t.Fatalf("manifest still contains removed dependency:\n%s", got)
+	}
+	if !strings.Contains(got, "other =") || !strings.Contains(got, "[dependencies]") {
+		t.Fatalf("manifest lost remaining dependencies:\n%s", got)
+	}
+}
+
+func TestRemoveDependencyFromManifestMissing(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "ard.toml")
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nother = { path = \"../other\" }\n"
+	if err := os.WriteFile(manifest, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := removeDependencyFromManifest(manifest, "vaxis")
+	if err != nil {
+		t.Fatalf("removeDependencyFromManifest: %v", err)
+	}
+	if removed {
+		t.Fatal("expected missing dependency to report removed=false")
+	}
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != input {
+		t.Fatalf("manifest changed unexpectedly:\n%s", data)
+	}
+}

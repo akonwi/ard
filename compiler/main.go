@@ -144,6 +144,14 @@ func main() {
 			}
 			os.Exit(0)
 		}
+	case "remove":
+		{
+			if err := runRemoveCommand(os.Args[2:]); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
 	case "deps":
 		{
 			if err := runDepsCommand(os.Args[2:]); err != nil {
@@ -219,6 +227,37 @@ func runAddCommand(args []string) error {
 			break
 		}
 	}
+	return nil
+}
+
+func runRemoveCommand(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: ard remove <dependency-alias>")
+	}
+	alias := strings.TrimSpace(args[0])
+	if alias == "" {
+		return fmt.Errorf("usage: ard remove <dependency-alias>")
+	}
+	project, err := checker.FindProjectRoot(".")
+	if err != nil {
+		return err
+	}
+	manifestPath := filepath.Join(project.RootPath, "ard.toml")
+	if _, err := os.Stat(manifestPath); err != nil {
+		return fmt.Errorf("ard remove requires an ard.toml project")
+	}
+	removed, err := removeDependencyFromManifest(manifestPath, alias)
+	if err != nil {
+		return err
+	}
+	if !removed {
+		return fmt.Errorf("dependency %q is not declared in ard.toml", alias)
+	}
+	vendorPath := filepath.Join(project.RootPath, ".ard", "vendor", alias)
+	if err := os.RemoveAll(vendorPath); err != nil {
+		return err
+	}
+	fmt.Printf("Removed %s\n", alias)
 	return nil
 }
 
@@ -390,6 +429,46 @@ func addDependencyToManifest(path string, dep checker.DependencyInfo) error {
 	updated = append(updated, entry)
 	updated = append(updated, lines[end:]...)
 	return os.WriteFile(path, []byte(strings.Join(updated, "\n")), 0o644)
+}
+
+func removeDependencyFromManifest(path string, alias string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	lines := strings.Split(string(data), "\n")
+	start := -1
+	end := len(lines)
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			if trimmed == "[dependencies]" {
+				start = i
+				continue
+			}
+			if start >= 0 {
+				end = i
+				break
+			}
+		}
+	}
+	if start < 0 {
+		return false, nil
+	}
+	aliasRe := regexp.MustCompile("^\\s*" + regexp.QuoteMeta(alias) + "\\s*=")
+	removed := false
+	updated := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if i > start && i < end && aliasRe.MatchString(line) {
+			removed = true
+			continue
+		}
+		updated = append(updated, line)
+	}
+	if !removed {
+		return false, nil
+	}
+	return true, os.WriteFile(path, []byte(strings.Join(updated, "\n")), 0o644)
 }
 
 func dependencyManifestEntry(dep checker.DependencyInfo) string {

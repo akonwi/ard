@@ -43,14 +43,15 @@ Dependencies are materialized under the project directory:
 
 Vendored dependencies are the source used by the module resolver for external packages. The initial model does not require a separate `ard.lock`: the pinned version is the source declared in `ard.toml`, and the actual build input is the vendored content in `.ard/vendor/`.
 
-Vendored dependencies should not auto-update during ordinary builds. `ard build` should use existing vendored dependencies and fail clearly when a required dependency is missing. Dependencies can be added with:
+Vendored dependencies should not auto-update during ordinary builds. `ard build` should use existing vendored dependencies and fail clearly when a required dependency is missing. Dependencies can be added and removed with:
 
 ```bash
 ard add github.com/akonwi/vaxis-ard@76f7c1b
 ard add github.com/akonwi/vaxis-ard@latest
+ard remove vaxis
 ```
 
-`ard add` writes a pinned dependency entry to `ard.toml` and materializes it into `.ard/vendor/`. By default, the dependency alias starts as the repository name and is overridden by the dependency's own `name` property in its `ard.toml` when present. `latest` is resolved to the current remote commit before writing the dependency; branch pins are not part of the model because vendored content should be tied to a stable commit or tag.
+`ard add` writes a pinned dependency entry to `ard.toml` and materializes it into `.ard/vendor/`. By default, the dependency alias starts as the repository name and is overridden by the dependency's own `name` property in its `ard.toml` when present. `latest` is resolved to the current remote commit before writing the dependency; branch pins are not part of the model because vendored content should be tied to a stable commit or tag. `ard remove` deletes the dependency entry and removes the matching `.ard/vendor/<alias>` directory.
 
 The explicit command for rematerializing existing dependencies is:
 
