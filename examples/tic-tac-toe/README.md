@@ -1,8 +1,8 @@
 # Vaxis tic-tac-toe
 
-A larger userland FFI demo for Ard's Go target using [Vaxis](https://github.com/rockorager/vaxis).
+A larger dependency + FFI demo for Ard's Go target using the reusable `vaxis` Ard package.
 
-The Ard program owns the tic-tac-toe game state and rules. `ffi.go` is the whitelisted Go capability layer that owns terminal rendering/input through Vaxis.
+The Ard program owns the tic-tac-toe game state and rules. Terminal rendering/input is provided by the `vaxis` dependency, which owns the Go FFI companion for [Vaxis](https://github.com/rockorager/vaxis).
 
 ## Run
 
@@ -35,16 +35,21 @@ The smoke test builds the Ard Go target, runs the TUI under a PTY, sends keys, a
 - `r`: restart
 - `q` or ctrl-c: quit
 
-## FFI surface
+## Dependency surface
 
-Ard sees only this narrow API:
+`ard.toml` declares the local path dependency used by this example:
+
+```toml
+[dependencies]
+vaxis = { git = "https://github.com/akonwi/vaxis-ard.git", commit = "76f7c1b" }
+```
+
+Ard code imports and calls the dependency directly:
 
 ```ard
-extern type Terminal = "*vaxis.Vaxis"
-extern fn tui_open() Terminal!Str = "TuiOpen"
-extern fn tui_close(term: Terminal) Void!Str = "TuiClose"
-extern fn tui_clear(term: Terminal) Void = "TuiClear"
-extern fn tui_draw_text(term: Terminal, x: Int, y: Int, text: Str) Void = "TuiDrawText"
-extern fn tui_flush(term: Terminal) Void!Str = "TuiFlush"
-extern fn tui_read_key(term: Terminal) Str!Str = "TuiReadKey"
+use vaxis
+
+let term = vaxis::new("Ard Vaxis Tic-Tac-Toe").expect("open terminal")
+vaxis::draw_text(term, 2, 1, "Hello")
+vaxis::close(term).expect("close terminal")
 ```

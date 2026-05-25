@@ -436,6 +436,63 @@ func Select(input *string) string {
 	}
 }
 
+func TestBuildProgramSupportsDependencyGoFFI(t *testing.T) {
+	workspace := t.TempDir()
+	depDir := filepath.Join(workspace, "dep")
+	appDir := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(filepath.Join(depDir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "dep.ard"), []byte(`extern fn answer() Int = "Answer"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ffi", "host.go"), []byte(`package ffi
+
+func Answer() int { return 42 }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use dep
+
+fn main() Int {
+	dep::answer()
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := checker.FetchDependency(appDir, "dep"); err != nil {
+		t.Fatalf("fetch dependency: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	binaryPath := filepath.Join(appDir, "app")
+	builtPath, err := BuildProgram(program, binaryPath, loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	cmd := exec.Command(builtPath)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run built binary: %v", err)
+	}
+}
+
 func TestWriteProgramDoesNotRequireProjectFFIForStdlibExternMethods(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

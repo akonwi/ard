@@ -253,3 +253,46 @@ func TestResolveImportPath(t *testing.T) {
 		})
 	}
 }
+func TestPathDependencyIsVendoredAndResolved(t *testing.T) {
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	depSrc := filepath.Join(workspace, "dep-src")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(depSrc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depSrc, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depSrc, "dep.ard"), []byte("fn answer() Int { 42 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep-src\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := checker.FetchDependency(root, "dep"); err != nil {
+		t.Fatalf("fetch dependency: %v", err)
+	}
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatalf("new resolver: %v", err)
+	}
+	project := resolver.GetProjectInfo()
+	dep := project.Dependencies["dep"]
+	if dep.VendorPath == "" {
+		t.Fatalf("dependency not parsed: %#v", project.Dependencies)
+	}
+	if _, err := os.Stat(filepath.Join(dep.VendorPath, "dep.ard")); err != nil {
+		t.Fatalf("dependency not vendored: %v", err)
+	}
+	path, err := resolver.ResolveImportPath("dep")
+	if err != nil {
+		t.Fatalf("resolve dep import: %v", err)
+	}
+	if path != filepath.Join(dep.VendorPath, "dep.ard") {
+		t.Fatalf("resolved path = %q, want %q", path, filepath.Join(dep.VendorPath, "dep.ard"))
+	}
+}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/backend"
+	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
 )
@@ -340,7 +341,8 @@ func TestRunGoTargetSampleStdoutConformance(t *testing.T) {
 }
 
 func TestBuildTicTacToeExample(t *testing.T) {
-	_ = buildGoSampleBinary(t, filepath.Join("..", "examples", "tic-tac-toe", "main.ard"))
+	projectDir := filepath.Join("..", "examples", "tic-tac-toe")
+	_ = buildGoSampleBinary(t, filepath.Join(projectDir, "main.ard"))
 }
 
 func TestRunServerExampleRoutes(t *testing.T) {
@@ -1021,5 +1023,113 @@ test fn private_access() Void!Str {
 	}
 	if !strings.Contains(output, "Undefined: utils::private_helper") {
 		t.Fatalf("unexpected output:\n%s", output)
+	}
+}
+
+func TestDependencyFromAddSpecGitHubCommit(t *testing.T) {
+	dep, err := dependencyFromAddSpec("github.com/akonwi/vaxis-ard@76f7c1b")
+	if err != nil {
+		t.Fatalf("dependencyFromAddSpec: %v", err)
+	}
+	if dep.Alias != "vaxis-ard" {
+		t.Fatalf("alias = %q, want vaxis-ard", dep.Alias)
+	}
+	if dep.Git != "https://github.com/akonwi/vaxis-ard.git" {
+		t.Fatalf("git = %q", dep.Git)
+	}
+	if dep.Commit != "76f7c1b" || dep.Tag != "" {
+		t.Fatalf("commit/tag = %q/%q", dep.Commit, dep.Tag)
+	}
+}
+
+func TestDependencyFromAddSpecGitHubHyphenShorthand(t *testing.T) {
+	dep, err := dependencyFromAddSpec("github.com/akonwi-vaxis-ard@76f7c1b")
+	if err != nil {
+		t.Fatalf("dependencyFromAddSpec: %v", err)
+	}
+	if dep.Alias != "vaxis-ard" || dep.Git != "https://github.com/akonwi/vaxis-ard.git" {
+		t.Fatalf("dep = %#v", dep)
+	}
+}
+
+func TestParseManifestName(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "ard.toml")
+	if err := os.WriteFile(manifest, []byte("name = \"vaxis\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	name, ok := parseManifestName(manifest)
+	if !ok || name != "vaxis" {
+		t.Fatalf("parseManifestName = %q, %v", name, ok)
+	}
+}
+
+func TestAddDependencyToManifest(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "ard.toml")
+	if err := os.WriteFile(manifest, []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dep := checker.DependencyInfo{Alias: "vaxis", Git: "https://github.com/akonwi/vaxis-ard.git", Commit: "76f7c1b"}
+	if err := addDependencyToManifest(manifest, dep); err != nil {
+		t.Fatalf("addDependencyToManifest: %v", err)
+	}
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "[dependencies]") || !strings.Contains(got, `vaxis = { git = "https://github.com/akonwi/vaxis-ard.git", commit = "76f7c1b" }`) {
+		t.Fatalf("manifest missing dependency:\n%s", got)
+	}
+}
+
+func TestRemoveDependencyFromManifest(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "ard.toml")
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nvaxis = { git = \"https://github.com/akonwi/vaxis-ard.git\", commit = \"76f7c1b\" }\nother = { path = \"../other\" }\n"
+	if err := os.WriteFile(manifest, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := removeDependencyFromManifest(manifest, "vaxis")
+	if err != nil {
+		t.Fatalf("removeDependencyFromManifest: %v", err)
+	}
+	if !removed {
+		t.Fatal("expected dependency to be removed")
+	}
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "vaxis =") {
+		t.Fatalf("manifest still contains removed dependency:\n%s", got)
+	}
+	if !strings.Contains(got, "other =") || !strings.Contains(got, "[dependencies]") {
+		t.Fatalf("manifest lost remaining dependencies:\n%s", got)
+	}
+}
+
+func TestRemoveDependencyFromManifestMissing(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "ard.toml")
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nother = { path = \"../other\" }\n"
+	if err := os.WriteFile(manifest, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := removeDependencyFromManifest(manifest, "vaxis")
+	if err != nil {
+		t.Fatalf("removeDependencyFromManifest: %v", err)
+	}
+	if removed {
+		t.Fatal("expected missing dependency to report removed=false")
+	}
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != input {
+		t.Fatalf("manifest changed unexpectedly:\n%s", data)
 	}
 }

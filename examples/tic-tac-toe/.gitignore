@@ -1,2 +1,6 @@
 ttt
 ard-out/
+
+.ard/*
+!.ard/vendor/
+!.ard/vendor/**

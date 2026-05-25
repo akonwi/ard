@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -134,6 +136,22 @@ func main() {
 			}
 			os.Exit(0)
 		}
+	case "add":
+		{
+			if err := runAddCommand(os.Args[2:]); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
+	case "remove":
+		{
+			if err := runRemoveCommand(os.Args[2:]); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
 	case "format":
 		{
 			inputPath, checkOnly, err := parseFormatArgs(os.Args[2:])
@@ -165,6 +183,286 @@ func main() {
 		fmt.Printf("Unknown command: %s\n", os.Args[1])
 		os.Exit(1)
 	}
+}
+
+func runAddCommand(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: ard add <github.com/owner/repo@tag|commit|latest>")
+	}
+	dep, err := dependencyFromAddSpec(args[0])
+	if err != nil {
+		return err
+	}
+	alias, err := dependencyAliasFromGitManifest(dep)
+	if err != nil {
+		return err
+	}
+	dep.Alias = alias
+	project, err := checker.FindProjectRoot(".")
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(project.RootPath, "ard.toml")); err != nil {
+		return fmt.Errorf("ard add requires an ard.toml project")
+	}
+	if err := addDependencyToManifest(filepath.Join(project.RootPath, "ard.toml"), dep); err != nil {
+		return err
+	}
+	fmt.Printf("Added %s\n", dep.Alias)
+	fetchedDep, err := checker.FetchDependency(project.RootPath, dep.Alias)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Vendored %s -> %s\n", fetchedDep.Alias, fetchedDep.VendorPath)
+	return nil
+}
+
+func runRemoveCommand(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: ard remove <dependency-alias>")
+	}
+	alias := strings.TrimSpace(args[0])
+	if alias == "" {
+		return fmt.Errorf("usage: ard remove <dependency-alias>")
+	}
+	project, err := checker.FindProjectRoot(".")
+	if err != nil {
+		return err
+	}
+	manifestPath := filepath.Join(project.RootPath, "ard.toml")
+	if _, err := os.Stat(manifestPath); err != nil {
+		return fmt.Errorf("ard remove requires an ard.toml project")
+	}
+	removed, err := removeDependencyFromManifest(manifestPath, alias)
+	if err != nil {
+		return err
+	}
+	if !removed {
+		return fmt.Errorf("dependency %q is not declared in ard.toml", alias)
+	}
+	vendorPath := filepath.Join(project.RootPath, ".ard", "vendor", alias)
+	if err := os.RemoveAll(vendorPath); err != nil {
+		return err
+	}
+	fmt.Printf("Removed %s\n", alias)
+	return nil
+}
+
+func dependencyFromAddSpec(raw string) (checker.DependencyInfo, error) {
+	source, ref, ok := strings.Cut(raw, "@")
+	if !ok || strings.TrimSpace(source) == "" || strings.TrimSpace(ref) == "" {
+		return checker.DependencyInfo{}, fmt.Errorf("dependency must be source@tag, source@commit, or source@latest")
+	}
+	gitURL, repo, err := normalizeGitSource(source)
+	if err != nil {
+		return checker.DependencyInfo{}, err
+	}
+	alias := dependencyAliasFromRepo(repo)
+	dep := checker.DependencyInfo{Alias: alias, Git: gitURL}
+	if ref == "latest" {
+		commit, err := resolveGitLatestCommit(gitURL)
+		if err != nil {
+			return checker.DependencyInfo{}, err
+		}
+		dep.Commit = commit
+		return dep, nil
+	}
+	if isGitCommitish(ref) {
+		dep.Commit = ref
+	} else {
+		dep.Tag = ref
+	}
+	return dep, nil
+}
+
+func normalizeGitSource(source string) (string, string, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "", "", fmt.Errorf("empty dependency source")
+	}
+	if strings.HasPrefix(source, "git@") || strings.HasPrefix(source, "https://") || strings.HasPrefix(source, "http://") {
+		repo := strings.TrimSuffix(filepath.Base(source), ".git")
+		return source, repo, nil
+	}
+	if rest, ok := strings.CutPrefix(source, "github.com/"); ok {
+		parts := strings.Split(rest, "/")
+		if len(parts) == 1 && strings.Contains(parts[0], "-") {
+			owner, repo, _ := strings.Cut(parts[0], "-")
+			parts = []string{owner, repo}
+		}
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return "", "", fmt.Errorf("github dependencies must be github.com/owner/repo@ref")
+		}
+		repo := strings.TrimSuffix(parts[1], ".git")
+		return fmt.Sprintf("https://github.com/%s/%s.git", parts[0], repo), repo, nil
+	}
+	return "", "", fmt.Errorf("unsupported dependency source %q", source)
+}
+
+func dependencyAliasFromRepo(repo string) string {
+	return strings.TrimSuffix(repo, ".git")
+}
+
+func dependencyAliasFromGitManifest(dep checker.DependencyInfo) (string, error) {
+	checkout, cleanup, err := cloneDependencyForManifest(dep)
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+	if name, ok := parseManifestName(filepath.Join(checkout, "ard.toml")); ok {
+		return name, nil
+	}
+	return dep.Alias, nil
+}
+
+func cloneDependencyForManifest(dep checker.DependencyInfo) (string, func(), error) {
+	if dep.Git == "" {
+		return "", func() {}, nil
+	}
+	if dep.Tag == "" && dep.Commit == "" {
+		return "", func() {}, fmt.Errorf("git dependency must specify tag or commit")
+	}
+	tmp, err := os.MkdirTemp("", "ard-add-dep-*")
+	if err != nil {
+		return "", func() {}, err
+	}
+	cleanup := func() { _ = os.RemoveAll(tmp) }
+	cloneDir := filepath.Join(tmp, "repo")
+	args := []string{"clone"}
+	if dep.Tag != "" {
+		args = append(args, "--branch", dep.Tag, "--depth", "1")
+	}
+	args = append(args, dep.Git, cloneDir)
+	if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	if dep.Commit != "" {
+		cmd := exec.Command("git", "checkout", dep.Commit)
+		cmd.Dir = cloneDir
+		if output, err := cmd.CombinedOutput(); err != nil {
+			cleanup()
+			return "", func() {}, fmt.Errorf("git checkout %s: %w\n%s", dep.Commit, err, strings.TrimSpace(string(output)))
+		}
+	}
+	return cloneDir, cleanup, nil
+}
+
+func parseManifestName(path string) (string, bool) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	re := regexp.MustCompile(`(?m)^\s*name\s*=\s*["']([^"']+)["']`)
+	matches := re.FindStringSubmatch(string(content))
+	if len(matches) < 2 {
+		return "", false
+	}
+	return matches[1], true
+}
+
+func isGitCommitish(ref string) bool {
+	matched, _ := regexp.MatchString("^[0-9a-fA-F]{7,40}$", ref)
+	return matched
+}
+
+func resolveGitLatestCommit(gitURL string) (string, error) {
+	cmd := exec.Command("git", "ls-remote", gitURL, "HEAD")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git ls-remote %s HEAD: %w\n%s", gitURL, err, strings.TrimSpace(string(output)))
+	}
+	fields := strings.Fields(string(output))
+	if len(fields) == 0 {
+		return "", fmt.Errorf("git ls-remote %s HEAD returned no commit", gitURL)
+	}
+	return fields[0], nil
+}
+
+func addDependencyToManifest(path string, dep checker.DependencyInfo) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	entry := dependencyManifestEntry(dep)
+	lines := strings.Split(string(data), "\n")
+	start := -1
+	end := len(lines)
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			if trimmed == "[dependencies]" {
+				start = i
+				continue
+			}
+			if start >= 0 {
+				end = i
+				break
+			}
+		}
+	}
+	if start < 0 {
+		text := strings.TrimRight(string(data), "\n") + "\n\n[dependencies]\n" + entry + "\n"
+		return os.WriteFile(path, []byte(text), 0o644)
+	}
+	aliasRe := regexp.MustCompile("^\\s*" + regexp.QuoteMeta(dep.Alias) + "\\s*=")
+	for i := start + 1; i < end; i++ {
+		if aliasRe.MatchString(lines[i]) {
+			lines[i] = entry
+			return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+		}
+	}
+	updated := append([]string{}, lines[:end]...)
+	updated = append(updated, entry)
+	updated = append(updated, lines[end:]...)
+	return os.WriteFile(path, []byte(strings.Join(updated, "\n")), 0o644)
+}
+
+func removeDependencyFromManifest(path string, alias string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	lines := strings.Split(string(data), "\n")
+	start := -1
+	end := len(lines)
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			if trimmed == "[dependencies]" {
+				start = i
+				continue
+			}
+			if start >= 0 {
+				end = i
+				break
+			}
+		}
+	}
+	if start < 0 {
+		return false, nil
+	}
+	aliasRe := regexp.MustCompile("^\\s*" + regexp.QuoteMeta(alias) + "\\s*=")
+	removed := false
+	updated := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if i > start && i < end && aliasRe.MatchString(line) {
+			removed = true
+			continue
+		}
+		updated = append(updated, line)
+	}
+	if !removed {
+		return false, nil
+	}
+	return true, os.WriteFile(path, []byte(strings.Join(updated, "\n")), 0o644)
+}
+
+func dependencyManifestEntry(dep checker.DependencyInfo) string {
+	if dep.Tag != "" {
+		return fmt.Sprintf("%s = { git = %q, tag = %q }", dep.Alias, dep.Git, dep.Tag)
+	}
+	return fmt.Sprintf("%s = { git = %q, commit = %q }", dep.Alias, dep.Git, dep.Commit)
 }
 
 func check(inputPath string) bool {

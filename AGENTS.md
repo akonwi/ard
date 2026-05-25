@@ -5,7 +5,6 @@ This is the source code for the Ard programming language.
 
 ### Repo structure
 This is a monorepo with the following top-level directories:
-- /backlog: research and documentation for ideas
 - /compiler: The Ard language compiler, parser, type checker, and native/JS targets
   - /compiler/docs: documentation about language syntax, feature design, and implementation decisions
   - /compiler/samples: runnable Ard program samples
@@ -19,7 +18,6 @@ This is a monorepo with the following top-level directories:
 - /tree-sitter-ard: tree-sitter grammar for Ard (used for the zed plugin and syntax highlighting)
 - /website: the documentation website built with Astro and Starlight as a static site
 - /zed-plugin: plugin for the Zed editor
-- /backlog: detailed research and design notes for larger ideas. Top-level backlog tickets are tracked as GitHub issues in the Ard Backlog project.
 
 ## Philosophy
 
@@ -61,7 +59,7 @@ All commands should be run from the `/compiler` directory:
   - When changing `.ard` files, include a formatter verification pass as part of validation. At minimum, run `ard format` on the touched file(s) or containing directory and make sure formatting does not introduce unintended semantic changes.
   - When changing formatter behavior or stdlib `.ard` files, also run the relevant formatter tests (at least `cd compiler && go test ./formatter`) and, for stdlib changes, prefer `cd compiler && go run main.go format std_lib` as a regression check.
 - **Project Structure**: Compiler follows parse → checker → AIR → target lowering
-- **Development Tracking**: Use GitHub issues / the Ard Backlog project for top-level work items; keep detailed research and design notes in `/backlog`
+- **Development Tracking**: Use GitHub issues for top-level work items
 - **Sample Programs**: Reference samples directory for example Ard programs
 - **FFI System**: Standard library modules use Foreign Function Interface (FFI)
   - Go target stdlib FFI metadata is generated from std_lib extern declarations and std_lib/ffi Go implementations
