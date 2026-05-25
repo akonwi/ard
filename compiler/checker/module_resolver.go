@@ -217,33 +217,37 @@ func NewModuleResolver(workingDir string) (*ModuleResolver, error) {
 	}, nil
 }
 
-func FetchDependencies(startPath string) ([]DependencyInfo, error) {
+func FetchDependency(startPath string, alias string) (DependencyInfo, error) {
 	project, err := FindProjectRoot(startPath)
 	if err != nil {
-		return nil, err
+		return DependencyInfo{}, err
 	}
-	fetched := make([]DependencyInfo, 0, len(project.Dependencies))
-	for _, dep := range project.Dependencies {
-		if dep.VendorPath == "" {
-			continue
-		}
-		if err := os.RemoveAll(dep.VendorPath); err != nil {
-			return fetched, err
-		}
-		if dep.SourcePath != "" {
-			if err := copyDir(dep.SourcePath, dep.VendorPath); err != nil {
-				return fetched, fmt.Errorf("vendor dependency %s: %w", dep.Alias, err)
-			}
-		} else if dep.Git != "" {
-			if err := fetchGitDependency(dep); err != nil {
-				return fetched, fmt.Errorf("vendor dependency %s: %w", dep.Alias, err)
-			}
-		} else {
-			continue
-		}
-		fetched = append(fetched, dep)
+	dep, ok := project.Dependencies[alias]
+	if !ok {
+		return DependencyInfo{}, fmt.Errorf("dependency %q is not declared in ard.toml", alias)
 	}
-	return fetched, nil
+	return fetchDependency(dep)
+}
+
+func fetchDependency(dep DependencyInfo) (DependencyInfo, error) {
+	if dep.VendorPath == "" {
+		return DependencyInfo{}, fmt.Errorf("dependency %q has no vendor path", dep.Alias)
+	}
+	if err := os.RemoveAll(dep.VendorPath); err != nil {
+		return DependencyInfo{}, err
+	}
+	if dep.SourcePath != "" {
+		if err := copyDir(dep.SourcePath, dep.VendorPath); err != nil {
+			return DependencyInfo{}, fmt.Errorf("vendor dependency %s: %w", dep.Alias, err)
+		}
+	} else if dep.Git != "" {
+		if err := fetchGitDependency(dep); err != nil {
+			return DependencyInfo{}, fmt.Errorf("vendor dependency %s: %w", dep.Alias, err)
+		}
+	} else {
+		return DependencyInfo{}, fmt.Errorf("dependency %q has no source", dep.Alias)
+	}
+	return dep, nil
 }
 
 func fetchGitDependency(dep DependencyInfo) error {
@@ -323,7 +327,7 @@ func (mr *ModuleResolver) ResolveImportPath(importPath string) (string, error) {
 
 	if dep, ok := mr.project.Dependencies[parts[0]]; ok {
 		if _, err := os.Stat(dep.VendorPath); os.IsNotExist(err) {
-			return "", fmt.Errorf("dependency %q is not vendored at %s; run `ard deps fetch`", dep.Alias, dep.VendorPath)
+			return "", fmt.Errorf("dependency %q is not vendored at %s; restore .ard/vendor or run `ard add`", dep.Alias, dep.VendorPath)
 		}
 		relativePath := strings.Join(parts[1:], "/")
 		if relativePath == "" {

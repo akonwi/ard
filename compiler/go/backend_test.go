@@ -471,8 +471,8 @@ fn main() Int {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := checker.FetchDependencies(appDir); err != nil {
-		t.Fatalf("fetch dependencies: %v", err)
+	if _, err := checker.FetchDependency(appDir, "dep"); err != nil {
+		t.Fatalf("fetch dependency: %v", err)
 	}
 	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
 	if err != nil {

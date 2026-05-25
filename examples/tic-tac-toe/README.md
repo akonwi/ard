@@ -6,17 +6,15 @@ The Ard program owns the tic-tac-toe game state and rules. Terminal rendering/in
 
 ## Run
 
-From this directory, materialize dependencies first:
+From this directory:
 
 ```sh
-ard deps fetch
 ard run main.ard
 ```
 
 Or build:
 
 ```sh
-ard deps fetch
 ard build --out ttt main.ard
 ./ttt
 ```

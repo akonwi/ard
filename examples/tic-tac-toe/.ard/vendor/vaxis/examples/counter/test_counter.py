@@ -12,12 +12,11 @@ import termios
 import time
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-BIN = os.path.join(ROOT, "ttt")
+BIN = os.path.join(ROOT, "counter")
 ARD_CMD = shlex.split(os.environ.get("ARD", "ard"))
 
-
 class Screen:
-    def __init__(self, rows=24, cols=100):
+    def __init__(self, rows=24, cols=80):
         self.rows = rows
         self.cols = cols
         self.row = 0
@@ -93,8 +92,10 @@ class Screen:
             self.col = 0
 
 
+
+
 def build():
-    subprocess.run([*ARD_CMD, "build", "--out", "ttt", "main.ard"], cwd=ROOT, check=True)
+    subprocess.run([*ARD_CMD, "build", "--out", "counter", "main.ard"], cwd=ROOT, check=True)
 
 
 def spawn():
@@ -103,7 +104,7 @@ def spawn():
         os.chdir(ROOT)
         os.environ.setdefault("TERM", "xterm-256color")
         os.execv(BIN, [BIN])
-    set_winsize(fd, 24, 100)
+    set_winsize(fd, 24, 80)
     return pid, fd
 
 
@@ -133,6 +134,9 @@ def read_for(fd, screen=None, seconds=0.15):
 
 
 def respond_to_terminal_queries(fd, data):
+    # Vaxis asks a real terminal a few capability questions during startup.
+    # A raw PTY has no terminal emulator on the other side, so answer the
+    # minimal queries needed for Vaxis to finish initialization and render.
     responses = []
     if b"\x1b[6n" in data:
         responses.append(b"\x1b[1;1R")
@@ -164,17 +168,22 @@ def main():
     pid, fd = spawn()
     screen = Screen()
     try:
-        wait_for_screen(fd, screen, "Player X to move")
-        wait_for_screen(fd, screen, "[ ]")
+        wait_for_screen(fd, screen, "Count: 0")
 
-        send(fd, "\r")
-        wait_for_screen(fd, screen, "Player O to move")
-        wait_for_screen(fd, screen, "[X]")
+        send(fd, "+")
+        wait_for_screen(fd, screen, "Count: 1")
+
+        send(fd, "+")
+        wait_for_screen(fd, screen, "Count: 2")
 
         send(fd, "r")
-        wait_for_screen(fd, screen, "New game. Choose a square.")
-        wait_for_screen(fd, screen, "Player X to move")
-        wait_for_screen(fd, screen, "[ ]")
+        wait_for_screen(fd, screen, "Count: 0")
+
+        send(fd, "-")
+        wait_for_screen(fd, screen, "Count: -1")
+
+        send(fd, "r")
+        wait_for_screen(fd, screen, "Count: 0")
 
         send(fd, "q")
         deadline = time.time() + 2.0
@@ -187,10 +196,10 @@ def main():
             read_for(fd, screen, 0.05)
         if status is None:
             send(fd, "\x03")
-            raise AssertionError("tic-tac-toe did not exit after q")
+            raise AssertionError("counter did not exit after q")
         if status != 0:
-            raise AssertionError(f"tic-tac-toe exited with status {status}")
-        print("tic-tac-toe smoke test passed")
+            raise AssertionError(f"counter exited with status {status}")
+        print("counter smoke test passed")
     finally:
         try:
             os.close(fd)

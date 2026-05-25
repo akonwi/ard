@@ -342,9 +342,6 @@ func TestRunGoTargetSampleStdoutConformance(t *testing.T) {
 
 func TestBuildTicTacToeExample(t *testing.T) {
 	projectDir := filepath.Join("..", "examples", "tic-tac-toe")
-	if _, err := checker.FetchDependencies(projectDir); err != nil {
-		t.Fatalf("fetch dependencies: %v", err)
-	}
 	_ = buildGoSampleBinary(t, filepath.Join(projectDir, "main.ard"))
 }
 

@@ -53,14 +53,6 @@ ard remove vaxis
 
 `ard add` writes a pinned dependency entry to `ard.toml` and materializes it into `.ard/vendor/`. By default, the dependency alias starts as the repository name and is overridden by the dependency's own `name` property in its `ard.toml` when present. `latest` is resolved to the current remote commit before writing the dependency; branch pins are not part of the model because vendored content should be tied to a stable commit or tag. `ard remove` deletes the dependency entry and removes the matching `.ard/vendor/<alias>` directory.
 
-The explicit command for rematerializing existing dependencies is:
-
-```bash
-ard deps fetch
-```
-
-This command reads `ard.toml`, fetches Git or local path dependencies, and writes the selected dependency contents into `.ard/vendor/`. Changing dependency versions is an explicit act: edit `ard.toml` or rerun `ard add`, then rerun `ard deps fetch`.
-
 A central registry is explicitly out of scope. The initial dependency system should support Git sources and local paths, not package publication, registry lookup, or registry trust policy.
 
 Transitive dependencies are resolved and vendored, but their aliases are private to the dependency that declared them. The root project can import only its direct dependency aliases unless it declares additional direct dependencies. This avoids flattening all transitive aliases into the root namespace.
@@ -83,8 +75,7 @@ The first implementation should prioritize:
 
 - parsing dependency declarations in `ard.toml`
 - adding Git dependencies through `ard add`
-- resolving Git and local path dependencies through an explicit fetch command
-- materializing dependencies into `.ard/vendor/`
+- materializing added dependencies into `.ard/vendor/`
 - resolving imports through direct manifest aliases
 - preserving dependency owner identity through module resolution and lowering
 - routing dependency-owned FFI companions separately from root project FFI
@@ -104,7 +95,7 @@ More advanced features, such as rich conflict analysis, update impact reports, p
 - Module resolution and AIR lowering must preserve whether a module belongs to the root project, stdlib, or a dependency alias.
 - Transitive dependencies remain implementation details unless promoted to direct dependencies by the root project.
 - Deferring multiple-version support keeps the initial resolver and type identity model simpler.
-- The compiler and tooling need new commands for fetching, verifying, listing, and updating dependencies.
+- The compiler and tooling may eventually need commands for verifying, listing, and updating dependencies.
 - Generated Go projects still need to interoperate with Go modules for Go runtime support and Go FFI companion dependencies, including dependency-owned FFI companions, but Go modules are not the source of truth for Ard package resolution.
 
 ## Related

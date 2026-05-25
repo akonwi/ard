@@ -152,14 +152,6 @@ func main() {
 			}
 			os.Exit(0)
 		}
-	case "deps":
-		{
-			if err := runDepsCommand(os.Args[2:]); err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
-			os.Exit(0)
-		}
 	case "format":
 		{
 			inputPath, checkOnly, err := parseFormatArgs(os.Args[2:])
@@ -217,16 +209,11 @@ func runAddCommand(args []string) error {
 		return err
 	}
 	fmt.Printf("Added %s\n", dep.Alias)
-	fetched, err := checker.FetchDependencies(project.RootPath)
+	fetchedDep, err := checker.FetchDependency(project.RootPath, dep.Alias)
 	if err != nil {
 		return err
 	}
-	for _, fetchedDep := range fetched {
-		if fetchedDep.Alias == dep.Alias {
-			fmt.Printf("Fetched %s -> %s\n", fetchedDep.Alias, fetchedDep.VendorPath)
-			break
-		}
-	}
+	fmt.Printf("Vendored %s -> %s\n", fetchedDep.Alias, fetchedDep.VendorPath)
 	return nil
 }
 
@@ -476,33 +463,6 @@ func dependencyManifestEntry(dep checker.DependencyInfo) string {
 		return fmt.Sprintf("%s = { git = %q, tag = %q }", dep.Alias, dep.Git, dep.Tag)
 	}
 	return fmt.Sprintf("%s = { git = %q, commit = %q }", dep.Alias, dep.Git, dep.Commit)
-}
-
-func runDepsCommand(args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("expected deps subcommand")
-	}
-	switch args[0] {
-	case "fetch":
-		path := "."
-		if len(args) > 1 {
-			path = args[1]
-		}
-		fetched, err := checker.FetchDependencies(path)
-		if err != nil {
-			return err
-		}
-		if len(fetched) == 0 {
-			fmt.Println("No dependencies to fetch")
-			return nil
-		}
-		for _, dep := range fetched {
-			fmt.Printf("Fetched %s -> %s\n", dep.Alias, dep.VendorPath)
-		}
-		return nil
-	default:
-		return fmt.Errorf("unknown deps subcommand: %s", args[0])
-	}
 }
 
 func check(inputPath string) bool {

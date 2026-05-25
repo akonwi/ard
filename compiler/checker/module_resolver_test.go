@@ -273,8 +273,8 @@ func TestPathDependencyIsVendoredAndResolved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := checker.FetchDependencies(root); err != nil {
-		t.Fatalf("fetch dependencies: %v", err)
+	if _, err := checker.FetchDependency(root, "dep"); err != nil {
+		t.Fatalf("fetch dependency: %v", err)
 	}
 	resolver, err := checker.NewModuleResolver(root)
 	if err != nil {
