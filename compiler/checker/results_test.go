@@ -78,6 +78,23 @@ func TestResults(t *testing.T) {
 			},
 		},
 		{
+			name: "match arms can return result ok values widened to function return union",
+			input: `
+			struct A { x: Int }
+			struct B { y: Int }
+
+			type X = A | B
+
+			fn make(kind: Str) X!Str {
+			  match kind {
+			    "a" => Result::ok(A{x: 1}),
+			    "b" => Result::ok(B{y: 2}),
+			    _ => Result::err("nope"),
+			  }
+			}`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
 			name: "Results must match declarations",
 			input: `
 			let result: Int!Str = Result::ok(true)

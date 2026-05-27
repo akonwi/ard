@@ -237,6 +237,7 @@ type Checker struct {
 	halted         bool
 	moduleResolver *ModuleResolver
 	options        CheckOptions
+	expectedExpr   Type
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -1525,6 +1526,10 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 }
 
 func (c *Checker) checkBlock(stmts []parse.Statement, setup func()) *Block {
+	return c.checkBlockWithExpected(stmts, setup, nil, false)
+}
+
+func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), expectedFinal Type, onlyMatchFinal bool) *Block {
 	if len(stmts) == 0 {
 		return &Block{Stmts: []Statement{}}
 	}
@@ -1540,9 +1545,23 @@ func (c *Checker) checkBlock(stmts []parse.Statement, setup func()) *Block {
 		setup()
 	}
 
+	lastExprIndex := -1
+	if expectedFinal != nil && expectedFinal != Void {
+		for i := range stmts {
+			if canCheckStatementAsExpectedExpression(stmts[i], onlyMatchFinal) {
+				lastExprIndex = i
+			}
+		}
+	}
+
 	block := &Block{Stmts: make([]Statement, len(stmts))}
 	for i := range stmts {
-		if stmt := c.checkStmt(&stmts[i]); stmt != nil {
+		if i == lastExprIndex {
+			expr := c.checkExprAs(stmts[i].(parse.Expression), expectedFinal)
+			if expr != nil {
+				block.Stmts[i] = Statement{Expr: expr}
+			}
+		} else if stmt := c.checkStmt(&stmts[i]); stmt != nil {
 			block.Stmts[i] = *stmt
 		}
 		if c.halted {
@@ -1550,6 +1569,33 @@ func (c *Checker) checkBlock(stmts []parse.Statement, setup func()) *Block {
 		}
 	}
 	return block
+}
+
+func canCheckStatementAsExpectedExpression(stmt parse.Statement, onlyMatchFinal bool) bool {
+	if onlyMatchFinal {
+		_, ok := stmt.(*parse.MatchExpression)
+		return ok
+	}
+
+	switch stmt.(type) {
+	case *parse.MatchExpression, *parse.StaticFunction, *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Checker) checkMatchArmBlock(stmts []parse.Statement, setup func()) *Block {
+	return c.checkBlockWithExpected(stmts, setup, c.expectedExpr, false)
+}
+
+func (c *Checker) withExpectedExpr(expected Type, check func() Expression) Expression {
+	previous := c.expectedExpr
+	c.expectedExpr = expected
+	defer func() {
+		c.expectedExpr = previous
+	}()
+	return check()
 }
 
 func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLiteral {
@@ -3107,12 +3153,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Check body (anonymous functions use equal, not areCompatible)
-			body := c.checkBlock(s.Body, func() {
+			body := c.checkBlockWithExpected(s.Body, func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					c.scope.add(param.Name, param.Type, param.Mutable)
 				}
-			})
+			}, returnType, true)
 
 			// Add function to scope after body is checked (for generic resolution support)
 			c.scope.add(uniqueName, fn, false)
@@ -3157,11 +3203,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				if id, ok := matchCase.Pattern.(*parse.Identifier); ok {
 					if id.Name == "_" {
 						// This is the None case
-						noneBody = c.checkBlock(matchCase.Body, nil)
+						noneBody = c.checkMatchArmBlock(matchCase.Body, nil)
 					} else {
 						// This is the Some case with a variable binding
 						// Create a new scope for the body with the pattern bound to the unwrapped value
-						someBody = c.checkBlock(matchCase.Body, func() {
+						someBody = c.checkMatchArmBlock(matchCase.Body, func() {
 							// Add the pattern name as a variable in the scope with the inner type
 							// For example, if the Maybe is Str?, the pattern should be a Str
 							c.scope.add(id.Name, maybeType.of, false)
@@ -3220,7 +3266,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						}
 
 						hasCatchAll = true
-						catchAllBody = c.checkBlock(matchCase.Body, nil)
+						catchAllBody = c.checkMatchArmBlock(matchCase.Body, nil)
 						continue
 					}
 				}
@@ -3259,7 +3305,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					seenVariants[variantName] = true
 
 					// Check the body for this case
-					body := c.checkBlock(matchCase.Body, nil)
+					body := c.checkMatchArmBlock(matchCase.Body, nil)
 					cases[variantIndex] = body
 				} else {
 					c.addError("Pattern in enum match must be an enum variant or wildcard", matchCase.Pattern.GetLocation())
@@ -3346,7 +3392,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 
 					// Process the body
-					body := c.checkBlock(matchCase.Body, nil)
+					body := c.checkMatchArmBlock(matchCase.Body, nil)
 
 					// Store the body in the appropriate field
 					if boolLit.Value {
@@ -3407,7 +3453,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						if catchAllBody != nil {
 							c.addWarning("Duplicate catch-all case", matchCase.Pattern.GetLocation())
 						} else {
-							catchAllBody = c.checkBlock(matchCase.Body, nil)
+							catchAllBody = c.checkMatchArmBlock(matchCase.Body, nil)
 						}
 						break
 					}
@@ -3421,7 +3467,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addWarning(fmt.Sprintf("Duplicate case: %s", p.Name), matchCase.Pattern.GetLocation())
 						break
 					}
-					body := c.checkBlock(matchCase.Body, func() {
+					body := c.checkMatchArmBlock(matchCase.Body, func() {
 						c.scope.add("it", matchedType, false)
 					})
 					matchNode := &Match{
@@ -3450,7 +3496,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						matchedType := unionTypeSet[typeName]
 
 						// Process the body with the matched type binding
-						body := c.checkBlock(matchCase.Body, func() {
+						body := c.checkMatchArmBlock(matchCase.Body, func() {
 							c.scope.add(varName, matchedType, false)
 						})
 						matchNode := &Match{
@@ -3526,14 +3572,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						case "ok":
 							okCase = &Match{
 								Pattern: &Identifier{Name: "ok"},
-								Body: c.checkBlock(node.Body, func() {
+								Body: c.checkMatchArmBlock(node.Body, func() {
 									c.scope.add("ok", resultType.Val(), false)
 								}),
 							}
 						case "err":
 							errCase = &Match{
 								Pattern: &Identifier{Name: "err"},
-								Body: c.checkBlock(node.Body, func() {
+								Body: c.checkMatchArmBlock(node.Body, func() {
 									c.scope.add("err", resultType.Err(), false)
 								}),
 							}
@@ -3549,14 +3595,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 							varName := p.Args[0].Value.(*parse.Identifier).Name
 							okCase = &Match{
 								Pattern: &Identifier{Name: varName},
-								Body: c.checkBlock(node.Body, func() {
+								Body: c.checkMatchArmBlock(node.Body, func() {
 									c.scope.add(varName, resultType.Val(), false)
 								}),
 							}
 						case "err":
 							errCase = &Match{
 								Pattern: &Identifier{Name: varName},
-								Body: c.checkBlock(node.Body, func() {
+								Body: c.checkMatchArmBlock(node.Body, func() {
 									c.scope.add(varName, resultType.Err(), false)
 								}),
 							}
@@ -3596,7 +3642,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError("Duplicate catch-all case", matchCase.Pattern.GetLocation())
 						return nil
 					}
-					catchAll = c.checkBlock(matchCase.Body, nil)
+					catchAll = c.checkMatchArmBlock(matchCase.Body, nil)
 					if referenceType == nil {
 						referenceType = catchAll.Type()
 					} else if !referenceType.equal(catchAll.Type()) {
@@ -3615,7 +3661,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					c.addError(fmt.Sprintf("Duplicate case: %q", literal.Value), matchCase.Pattern.GetLocation())
 					return nil
 				}
-				caseBlock := c.checkBlock(matchCase.Body, nil)
+				caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
 				strCases[literal.Value] = caseBlock
 				if referenceType == nil {
 					referenceType = caseBlock.Type()
@@ -3642,7 +3688,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			for _, matchCase := range s.Cases {
 				// Check if it's the default case (_)
 				if id, ok := matchCase.Pattern.(*parse.Identifier); ok && id.Name == "_" {
-					catchAll = c.checkBlock(matchCase.Body, nil)
+					catchAll = c.checkMatchArmBlock(matchCase.Body, nil)
 				} else if literal, ok := matchCase.Pattern.(*parse.NumLiteral); ok {
 					// Convert string to int
 					value, err := strconv.Atoi(literal.Value)
@@ -3650,7 +3696,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError(fmt.Sprintf("Invalid integer literal: %s", literal.Value), matchCase.Pattern.GetLocation())
 						return nil
 					}
-					caseBlock := c.checkBlock(matchCase.Body, nil)
+					caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
 					intCases[value] = caseBlock
 				} else if unaryExpr, ok := matchCase.Pattern.(*parse.UnaryExpression); ok && unaryExpr.Operator == parse.Minus {
 					// Handle negative numbers like -1, -5, etc.
@@ -3662,7 +3708,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 							return nil
 						}
 						negativeValue := -value
-						caseBlock := c.checkBlock(matchCase.Body, nil)
+						caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
 						intCases[negativeValue] = caseBlock
 					} else {
 						c.addError(fmt.Sprintf("Invalid pattern for Int match: %T", matchCase.Pattern), matchCase.Pattern.GetLocation())
@@ -3687,7 +3733,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					caseBlock := c.checkBlock(matchCase.Body, nil)
+					caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
 					rangeCases[IntRange{Start: startValue, End: endValue}] = caseBlock
 				} else if staticProp, ok := matchCase.Pattern.(*parse.StaticProperty); ok {
 					// Handle enum variant pattern like Status::active
@@ -3705,7 +3751,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 					// Extract the integer value from the enum variant's actual value (supports custom enum values)
 					value := enumVariant.enum.Values[enumVariant.Variant].Value
-					caseBlock := c.checkBlock(matchCase.Body, nil)
+					caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
 					intCases[value] = caseBlock
 				} else {
 					c.addError(fmt.Sprintf("Invalid pattern for Int match: %T", matchCase.Pattern), matchCase.Pattern.GetLocation())
@@ -3739,7 +3785,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				if catchAll != nil {
 					c.addError("Duplicate catch-all case", matchCase.GetLocation())
 				} else {
-					catchAll = c.checkBlock(matchCase.Body, nil)
+					catchAll = c.checkMatchArmBlock(matchCase.Body, nil)
 					if referenceType == nil {
 						referenceType = catchAll.Type()
 					} else if !referenceType.equal(catchAll.Type()) {
@@ -3754,7 +3800,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError(fmt.Sprintf("Condition must be of type Bool, got %s", condition.Type().String()), matchCase.Condition.GetLocation())
 					}
 
-					body := c.checkBlock(matchCase.Body, nil)
+					body := c.checkMatchArmBlock(matchCase.Body, nil)
 					if referenceType == nil {
 						referenceType = body.Type()
 					} else if !referenceType.equal(body.Type()) {
@@ -4259,6 +4305,10 @@ func bindInferredTypeVars(expected Type, actual Type) {
 
 func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expression {
 	switch s := (expr).(type) {
+	case *parse.MatchExpression:
+		return c.withExpectedExpr(expectedType, func() Expression {
+			return c.checkExpr(s)
+		})
 	case *parse.ListLiteral:
 		// Only use collection-specific inference when the expected type is a list.
 		if _, ok := expectedType.(*List); ok {
@@ -4306,12 +4356,12 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			}
 
 			// Check body
-			body := c.checkBlock(s.Body, func() {
+			body := c.checkBlockWithExpected(s.Body, func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					c.scope.add(param.Name, param.Type, param.Mutable)
 				}
-			})
+			}, returnType, true)
 
 			// Add function to scope after checking body
 			c.scope.add(uniqueName, fn, false)
@@ -4337,13 +4387,12 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 	case *parse.StaticFunction:
 		{
 			resultType, expectResult := expectedType.(*Result)
-			if !expectResult &&
-				s.Target.(*parse.Identifier).Name != "Result" &&
-				(s.Function.Name != "ok" && s.Function.Name != "err") {
-				return c.checkExpr(s)
+			target, ok := s.Target.(*parse.Identifier)
+			if !expectResult || !ok || target.Name != "Result" || (s.Function.Name != "ok" && s.Function.Name != "err") {
+				break
 			}
 
-			moduleName := s.Target.(*parse.Identifier).Name
+			moduleName := target.Name
 			mod := c.resolveModule(moduleName)
 			if mod == nil {
 				c.addError(fmt.Sprintf("Undefined: %s", moduleName), s.GetLocation())
@@ -4579,14 +4628,14 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 	c.scope.add(fn.Name, fn, false)
 
 	// Check function body
-	body := c.checkBlock(bodyStmts, func() {
+	body := c.checkBlockWithExpected(bodyStmts, func() {
 		// Set the expected return type to the scope
 		c.scope.expectReturn(returnType)
 		// Add parameters to scope
 		for _, param := range params {
 			c.scope.add(param.Name, param.Type, param.Mutable)
 		}
-	})
+	}, returnType, true)
 
 	// Check that the function's return type matches its body's type
 	if returnType != Void && !returnType.equal(body.Type()) {
@@ -4644,12 +4693,12 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func()) *Fu
 		c.scope.add(def.Name, fn, false)
 	}
 
-	body := c.checkBlock(def.Body, func() {
+	body := c.checkBlockWithExpected(def.Body, func() {
 		c.scope.expectReturn(returnType)
 		for _, param := range params {
 			c.scope.add(param.Name, param.Type, param.Mutable)
 		}
-	})
+	}, returnType, true)
 
 	// Validate return type - named functions use areCompatible, anonymous use equal
 	if returnType != Void && !areCompatible(returnType, body.Type()) {
