@@ -80,6 +80,9 @@ func collectFFIGoImports(projectInfo *checker.ProjectInfo) map[string]string {
 	for alias, path := range collectGoImportsFromPaths(stdlibFFIGoPaths()) {
 		imports[alias] = path
 	}
+	if projectHasFFICompanions(projectInfo) {
+		imports["projectffi"] = "generated/projectffi"
+	}
 	for alias, path := range collectGoImportsFromPaths(projectFFIGoPaths(projectInfo)) {
 		imports[alias] = path
 	}
@@ -299,6 +302,60 @@ func (l *lowerer) registerImportsForGoType(expr ast.Expr, imports map[string]str
 		}
 		return true
 	})
+}
+
+func (l *lowerer) qualifyProjectFFIExternType(expr ast.Expr) ast.Expr {
+	if !projectHasFFICompanions(l.projectInfo) {
+		return expr
+	}
+	return l.qualifyProjectFFIExternTypeExpr(expr)
+}
+
+func (l *lowerer) qualifyProjectFFIExternTypeExpr(expr ast.Expr) ast.Expr {
+	switch node := expr.(type) {
+	case *ast.Ident:
+		if ast.IsExported(node.Name) && !isPredeclaredGoTypeName(node.Name) {
+			l.currentImports["projectffi"] = "generated/projectffi"
+			return &ast.SelectorExpr{X: ast.NewIdent("projectffi"), Sel: ast.NewIdent(node.Name)}
+		}
+		return node
+	case *ast.StarExpr:
+		node.X = l.qualifyProjectFFIExternTypeExpr(node.X)
+		return node
+	case *ast.ArrayType:
+		node.Elt = l.qualifyProjectFFIExternTypeExpr(node.Elt)
+		return node
+	case *ast.MapType:
+		node.Key = l.qualifyProjectFFIExternTypeExpr(node.Key)
+		node.Value = l.qualifyProjectFFIExternTypeExpr(node.Value)
+		return node
+	case *ast.IndexExpr:
+		node.X = l.qualifyProjectFFIExternTypeExpr(node.X)
+		node.Index = l.qualifyProjectFFIExternTypeExpr(node.Index)
+		return node
+	case *ast.IndexListExpr:
+		node.X = l.qualifyProjectFFIExternTypeExpr(node.X)
+		for i := range node.Indices {
+			node.Indices[i] = l.qualifyProjectFFIExternTypeExpr(node.Indices[i])
+		}
+		return node
+	case *ast.ParenExpr:
+		node.X = l.qualifyProjectFFIExternTypeExpr(node.X)
+		return node
+	case *ast.SelectorExpr:
+		return node
+	default:
+		return node
+	}
+}
+
+func isPredeclaredGoTypeName(name string) bool {
+	switch name {
+	case "any", "bool", "byte", "comparable", "complex64", "complex128", "error", "float32", "float64", "int", "int8", "int16", "int32", "int64", "rune", "string", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr":
+		return true
+	default:
+		return false
+	}
 }
 
 func (l *lowerer) runtimePreludeDecls() []ast.Decl {
@@ -1631,6 +1688,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			if err != nil {
 				return nil, fmt.Errorf("invalid go extern type binding %q for %s: %w", info.ExternBinding, info.Name, err)
 			}
+			typ = l.qualifyProjectFFIExternType(typ)
 			l.registerFFIImportsForGoType(typ)
 			return typ, nil
 		}

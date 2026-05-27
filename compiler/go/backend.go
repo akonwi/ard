@@ -5,6 +5,7 @@ package gotarget
 import (
 	"encoding/json"
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -450,7 +451,68 @@ func programUsesProjectFFI(program *air.Program, projectInfo *checker.ProjectInf
 		}
 		return true
 	}
+	for _, typ := range program.Types {
+		if typ.Kind != air.TypeExtern || strings.HasPrefix(typ.ModulePath, "ard/") {
+			continue
+		}
+		if _, ok := dependencyAliasForModulePath(typ.ModulePath, projectInfo); ok {
+			continue
+		}
+		if strings.Contains(typ.ExternBinding, "projectffi.") || externBindingUsesUnqualifiedProjectFFIType(typ.ExternBinding) {
+			return true
+		}
+	}
 	return false
+}
+
+func externBindingUsesUnqualifiedProjectFFIType(binding string) bool {
+	expr, err := parser.ParseExpr(binding)
+	if err != nil {
+		return false
+	}
+	return exprUsesUnqualifiedProjectFFIType(expr)
+}
+
+func exprUsesUnqualifiedProjectFFIType(expr ast.Expr) bool {
+	switch node := expr.(type) {
+	case *ast.Ident:
+		return ast.IsExported(node.Name) && !isPredeclaredGoTypeName(node.Name)
+	case *ast.StarExpr:
+		return exprUsesUnqualifiedProjectFFIType(node.X)
+	case *ast.ArrayType:
+		return exprUsesUnqualifiedProjectFFIType(node.Elt)
+	case *ast.MapType:
+		return exprUsesUnqualifiedProjectFFIType(node.Key) || exprUsesUnqualifiedProjectFFIType(node.Value)
+	case *ast.IndexExpr:
+		return exprUsesUnqualifiedProjectFFIType(node.X) || exprUsesUnqualifiedProjectFFIType(node.Index)
+	case *ast.IndexListExpr:
+		if exprUsesUnqualifiedProjectFFIType(node.X) {
+			return true
+		}
+		for _, index := range node.Indices {
+			if exprUsesUnqualifiedProjectFFIType(index) {
+				return true
+			}
+		}
+		return false
+	case *ast.ParenExpr:
+		return exprUsesUnqualifiedProjectFFIType(node.X)
+	case *ast.SelectorExpr:
+		return false
+	default:
+		return false
+	}
+}
+
+func projectHasFFICompanions(projectInfo *checker.ProjectInfo) bool {
+	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
+		return false
+	}
+	if fileExists(filepath.Join(projectInfo.RootPath, "ffi.go")) {
+		return true
+	}
+	matches, err := filepath.Glob(filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
+	return err == nil && len(matches) > 0
 }
 
 func externModuleIsStdlib(program *air.Program, ext air.Extern) bool {
