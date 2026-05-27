@@ -490,6 +490,21 @@ func TestTypeUnion(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "Type union with leading pipe after equals new line",
+			input: `type X =
+  | A
+  | B`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&TypeDeclaration{
+						Name: Identifier{Name: "X"},
+						Type: []DeclaredType{&CustomType{Name: "A"}, &CustomType{Name: "B"}},
+					},
+				},
+			},
+		},
 	})
 }
 

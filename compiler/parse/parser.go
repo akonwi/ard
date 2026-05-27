@@ -715,7 +715,9 @@ func (p *parser) typeUnion(private bool) (Statement, error) {
 	p.advance()
 
 	if p.check(new_line) {
-		return nil, p.makeError(p.peek(), "Expected type definition after '='")
+		if !p.matchTypeUnionSeparator() {
+			return nil, p.makeError(p.peek(), "Expected type definition after '='")
+		}
 	}
 
 	hasMore := true
