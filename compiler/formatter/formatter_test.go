@@ -160,6 +160,16 @@ func TestFormat(t *testing.T) {
 			output: "type Value = Str | Int\n\nfn main() {}\n",
 		},
 		{
+			name:   "formats short multiline type union inline",
+			input:  "type Value =\n  | Str\n  | Int\n",
+			output: "type Value = Str | Int\n",
+		},
+		{
+			name:   "formats long type union with leading pipes",
+			input:  "type Event = KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | RedrawEvent | QuitEvent | WindowMoveEvent\n",
+			output: "type Event =\n  | KeyEvent\n  | MouseEvent\n  | ResizeEvent\n  | FocusEvent\n  | PasteEvent\n  | RedrawEvent\n  | QuitEvent\n  | WindowMoveEvent\n",
+		},
+		{
 			name:   "preserves blank line between enum and impl",
 			input:  "enum Method {\n  Get\n}\n\nimpl Str::ToString for Method {\n  fn to_str() Str {\n    \"GET\"\n  }\n}\n",
 			output: "enum Method {\n  Get,\n}\n\nimpl Str::ToString for Method {\n  fn to_str() Str {\n    \"GET\"\n  }\n}\n",

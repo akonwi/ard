@@ -588,7 +588,29 @@ func (p printer) renderTypeDeclaration(node *parse.TypeDeclaration) string {
 }
 
 func (p printer) renderTypeDeclarationDoc(node *parse.TypeDeclaration) doc {
-	return dText(p.renderTypeDeclaration(node))
+	prefix := ""
+	if node.Private {
+		prefix = "private "
+	}
+	header := fmt.Sprintf("%stype %s", prefix, node.Name.Name)
+	if len(node.Type) == 0 {
+		return dText(header + " =")
+	}
+
+	parts := make([]string, 0, len(node.Type))
+	brokenParts := make([]doc, 0, len(node.Type))
+	for _, item := range node.Type {
+		rendered := p.renderType(item)
+		parts = append(parts, rendered)
+		brokenParts = append(brokenParts, dText("| "+rendered))
+	}
+
+	flat := dText(" = " + strings.Join(parts, " | "))
+	broken := dConcat(
+		dText(" ="),
+		dIndent(dConcat(dLine(), dJoin(dLine(), brokenParts))),
+	)
+	return dGroup(dConcat(dText(header), dIfBreak(broken, flat)))
 }
 
 func (p printer) renderWhileLoopDoc(node *parse.WhileLoop) doc {

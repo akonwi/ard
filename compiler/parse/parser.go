@@ -715,14 +715,16 @@ func (p *parser) typeUnion(private bool) (Statement, error) {
 	p.advance()
 
 	if p.check(new_line) {
-		return nil, p.makeError(p.peek(), "Expected type definition after '='")
+		if !p.matchTypeUnionSeparator() {
+			return nil, p.makeError(p.peek(), "Expected type definition after '='")
+		}
 	}
 
 	hasMore := true
 	for hasMore {
 		declType := p.parseType()
 		decl.Type = append(decl.Type, declType)
-		hasMore = p.match(pipe)
+		hasMore = p.matchTypeUnionSeparator()
 	}
 
 	if len(decl.Type) > 0 {
@@ -732,6 +734,30 @@ func (p *parser) typeUnion(private bool) (Statement, error) {
 	}
 
 	return decl, nil
+}
+
+func (p *parser) matchTypeUnionSeparator() bool {
+	if p.match(pipe) {
+		p.skipNewlines()
+		return true
+	}
+
+	if !p.check(new_line) {
+		return false
+	}
+
+	index := p.index
+	for index < len(p.tokens) && p.tokens[index].kind == new_line {
+		index++
+	}
+	if index >= len(p.tokens) || p.tokens[index].kind != pipe {
+		return false
+	}
+
+	p.skipNewlines()
+	p.advance() // consume '|'
+	p.skipNewlines()
+	return true
 }
 
 func (p *parser) enumDef(private bool) Statement {
