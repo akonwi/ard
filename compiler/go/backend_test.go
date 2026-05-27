@@ -307,6 +307,87 @@ fn main() Str {
 	}
 }
 
+func TestBuildProgramImportsProjectFFIForExternTypesOnlyUsedAsTypes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module demo\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ffiDir := filepath.Join(dir, "ffi")
+	if err := os.MkdirAll(ffiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ffiDir, "host.go"), []byte(`package ffi
+
+type Handle struct {
+	Name string
+}
+
+func MakeHandle(name string) (*Handle, error) {
+	return &Handle{Name: name}, nil
+}
+
+func HandleName(h *Handle) string {
+	return h.Name
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "lib.ard"), []byte(`extern type Handle = "*Handle"
+
+extern fn make_handle_raw(name: Str) Handle!Str = "MakeHandle"
+extern fn handle_name(h: Handle) Str = "HandleName"
+
+struct KeyEvent { name: Str }
+struct QuitEvent {}
+
+type Event = KeyEvent | QuitEvent
+
+fn next_event(name: Str) Event!Str {
+  let h = try make_handle_raw(name)
+  let ev: Event = KeyEvent{name: handle_name(h)}
+  Result::ok(ev)
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use ard/io
+use ard/json
+use demo/lib
+
+fn main() {
+  match lib::next_event("hello").expect("ev") {
+    KeyEvent(k) => {
+      let s = json::encode(k).expect("enc")
+      io::print(s)
+    },
+    QuitEvent(_) => io::print("quit"),
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	builtPath, err := BuildProgram(program, filepath.Join(dir, "app"), loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := exec.Command(builtPath).Run(); err != nil {
+		t.Fatalf("run built binary: %v", err)
+	}
+}
+
 func TestBuildProgramSupportsProjectGoFFIWithTypedExternType(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
