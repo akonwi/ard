@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
 	"github.com/akonwi/ard/javascript"
+	"github.com/akonwi/ard/lsp"
 	"github.com/akonwi/ard/version"
 )
 
@@ -151,6 +153,16 @@ func main() {
 				os.Exit(1)
 			}
 			os.Exit(0)
+		}
+	case "lsp":
+		{
+			lsp.SetFormatter(formatter.Format)
+			ctx := context.Background()
+			server := lsp.NewServer()
+			if err := server.Run(ctx); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
 		}
 	case "format":
 		{

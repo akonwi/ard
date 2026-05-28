@@ -1,0 +1,323 @@
+package lsp
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"sync"
+
+	"go.lsp.dev/jsonrpc2"
+	"go.lsp.dev/protocol"
+)
+
+// stdio wraps os.Stdin and os.Stdout into a single io.ReadWriteCloser.
+type stdio struct {
+	io.ReadCloser
+	io.WriteCloser
+}
+
+func (s *stdio) Close() error {
+	err1 := s.ReadCloser.Close()
+	err2 := s.WriteCloser.Close()
+	if err1 != nil {
+		return err1
+	}
+	return err2
+}
+
+// Server is the Ard LSP server.
+type Server struct {
+	cache       *DocumentCache
+	mu          sync.Mutex
+	handlers    map[string]jsonrpc2.Handler
+	conn        jsonrpc2.Conn
+	projectRoot string
+}
+
+// NewServer creates a new Ard LSP server.
+func NewServer() *Server {
+	s := &Server{
+		cache:    NewDocumentCache(),
+		handlers: make(map[string]jsonrpc2.Handler),
+	}
+	s.registerHandlers()
+	return s
+}
+
+// Run starts the LSP server on stdin/stdout and blocks until the connection closes.
+func (s *Server) Run(ctx context.Context) error {
+	rwc := &stdio{
+		ReadCloser:  os.Stdin,
+		WriteCloser: os.Stdout,
+	}
+	stream := jsonrpc2.NewStream(rwc)
+	conn := jsonrpc2.NewConn(stream)
+	s.conn = conn
+
+	handler := protocol.Handlers(
+		jsonrpc2.Handler(s.dispatch),
+	)
+
+	conn.Go(ctx, handler)
+	<-conn.Done()
+	return conn.Err()
+}
+
+// dispatch routes incoming LSP requests and notifications to registered handlers.
+func (s *Server) dispatch(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	method := req.Method()
+
+	if handler, ok := s.handlers[method]; ok {
+		return handler(ctx, reply, req)
+	}
+
+	return jsonrpc2.MethodNotFoundHandler(ctx, reply, req)
+}
+
+// registerHandlers registers all LSP method handlers.
+func (s *Server) registerHandlers() {
+	// Lifecycle
+	s.handlers[protocol.MethodInitialize] = s.handleInitialize
+	s.handlers[protocol.MethodInitialized] = s.handleInitialized
+	s.handlers[protocol.MethodShutdown] = s.handleShutdown
+	s.handlers[protocol.MethodExit] = s.handleExit
+
+	// Document synchronization
+	s.handlers[protocol.MethodTextDocumentDidOpen] = s.handleDidOpen
+	s.handlers[protocol.MethodTextDocumentDidChange] = s.handleDidChange
+	s.handlers[protocol.MethodTextDocumentDidSave] = s.handleDidSave
+	s.handlers[protocol.MethodTextDocumentDidClose] = s.handleDidClose
+
+	// Language features
+	s.handlers[protocol.MethodTextDocumentHover] = s.handleHover
+	s.handlers[protocol.MethodTextDocumentDefinition] = s.handleDefinition
+	s.handlers[protocol.MethodTextDocumentReferences] = s.handleReferences
+	s.handlers[protocol.MethodTextDocumentDocumentSymbol] = s.handleDocumentSymbol
+	s.handlers[protocol.MethodTextDocumentCompletion] = s.handleCompletion
+	s.handlers[protocol.MethodTextDocumentFormatting] = s.handleFormatting
+	s.handlers[protocol.MethodTextDocumentSignatureHelp] = s.handleSignatureHelp
+	s.handlers[protocol.MethodTextDocumentDocumentHighlight] = s.handleDocumentHighlight
+}
+
+//-------------------------------------------------------------------------
+// Lifecycle handlers
+//-------------------------------------------------------------------------
+
+func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.InitializeParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+
+	// Detect project root from workspace folders or root URI
+	if len(params.WorkspaceFolders) > 0 {
+		s.projectRoot = string(params.WorkspaceFolders[0].URI)
+	} else if params.RootURI != "" {
+		s.projectRoot = string(params.RootURI)
+	}
+
+	result := &protocol.InitializeResult{
+		Capabilities: protocol.ServerCapabilities{
+			TextDocumentSync: protocol.TextDocumentSyncKindFull,
+			HoverProvider:    true,
+			DefinitionProvider: true,
+			ReferencesProvider: true,
+			DocumentSymbolProvider: true,
+			CompletionProvider: &protocol.CompletionOptions{
+				TriggerCharacters: []string{".", ":"},
+			},
+			SignatureHelpProvider: &protocol.SignatureHelpOptions{
+				TriggerCharacters: []string{"(", ","},
+			},
+			DocumentHighlightProvider: true,
+			DocumentFormattingProvider: true,
+		},
+		ServerInfo: &protocol.ServerInfo{
+			Name:    "ard-lsp",
+			Version: "0.1.0",
+		},
+	}
+
+	return reply(ctx, result, nil)
+}
+
+func (s *Server) handleInitialized(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	return reply(ctx, nil, nil)
+}
+
+func (s *Server) handleShutdown(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	return reply(ctx, nil, nil)
+}
+
+func (s *Server) handleExit(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	return reply(ctx, nil, nil)
+}
+
+//-------------------------------------------------------------------------
+// Document sync handlers
+//-------------------------------------------------------------------------
+
+func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.DidOpenTextDocumentParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+
+	s.cache.Open(
+		params.TextDocument.URI,
+		string(params.TextDocument.LanguageID),
+		1,
+		params.TextDocument.Text,
+	)
+	s.publishDiagnostics(ctx, params.TextDocument.URI)
+
+	return reply(ctx, nil, nil)
+}
+
+func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.DidChangeTextDocumentParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+
+	if len(params.ContentChanges) > 0 {
+		change := params.ContentChanges[len(params.ContentChanges)-1]
+		s.cache.Update(params.TextDocument.URI, params.TextDocument.Version, change.Text)
+	}
+
+	s.publishDiagnostics(ctx, params.TextDocument.URI)
+
+	return reply(ctx, nil, nil)
+}
+
+func (s *Server) handleDidSave(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	return reply(ctx, nil, nil)
+}
+
+func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.DidCloseTextDocumentParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+
+	s.cache.Close(params.TextDocument.URI)
+	s.publishDiagnostics(ctx, params.TextDocument.URI)
+
+	return reply(ctx, nil, nil)
+}
+
+//-------------------------------------------------------------------------
+// Language feature handlers (stubs)
+//-------------------------------------------------------------------------
+
+func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.HoverParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+	_ = params
+
+	return reply(ctx, nil, nil)
+}
+
+func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.DefinitionParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+	_ = params
+
+	return reply(ctx, nil, nil)
+}
+
+func (s *Server) handleReferences(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.ReferenceParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+	_ = params
+
+	return reply(ctx, []protocol.Location{}, nil)
+}
+
+func (s *Server) handleDocumentSymbol(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.DocumentSymbolParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+	_ = params
+
+	return reply(ctx, []protocol.SymbolInformation{}, nil)
+}
+
+func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.CompletionParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+	_ = params
+
+	return reply(ctx, &protocol.CompletionList{
+		IsIncomplete: false,
+		Items:        []protocol.CompletionItem{},
+	}, nil)
+}
+
+func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.DocumentFormattingParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+
+	doc := s.cache.Get(params.TextDocument.URI)
+	if doc == nil {
+		return reply(ctx, []protocol.TextEdit{}, nil)
+	}
+
+	filePath := doc.URI.Filename()
+	formatted, err := formatSource(doc.Text, filePath)
+	if err != nil || formatted == doc.Text {
+		return reply(ctx, []protocol.TextEdit{}, nil)
+	}
+
+	lines := strings.Count(doc.Text, "\n")
+	endChar := 0
+	if lastLineStart := strings.LastIndex(doc.Text, "\n"); lastLineStart >= 0 {
+		endChar = len(doc.Text) - lastLineStart - 1
+	} else {
+		endChar = len(doc.Text)
+	}
+
+	edit := protocol.TextEdit{
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 0, Character: 0},
+			End:   protocol.Position{Line: uint32(lines), Character: uint32(endChar)},
+		},
+		NewText: string(formatted),
+	}
+
+	return reply(ctx, []protocol.TextEdit{edit}, nil)
+}
+
+func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.SignatureHelpParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+	_ = params
+
+	return reply(ctx, nil, nil)
+}
+
+func (s *Server) handleDocumentHighlight(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.DocumentHighlightParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+	_ = params
+
+	return reply(ctx, []protocol.DocumentHighlight{}, nil)
+}

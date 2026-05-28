@@ -7,3 +7,6 @@ ard-out/
 
 zed-plugin/grammars/*
 .tmp/
+
+# Rust/WASM extension build artifacts
+zed-plugin/target/
