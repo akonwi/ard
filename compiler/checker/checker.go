@@ -1546,19 +1546,19 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 	}
 
 	lastExprIndex := -1
-	if expectedFinal != nil && expectedFinal != Void {
+	if expectedFinal != nil {
 		for i := len(stmts) - 1; i >= 0; i-- {
 			if _, ok := stmts[i].(*parse.Comment); ok {
 				continue
 			}
-			if canCheckStatementAsExpectedExpression(stmts[i], onlyMatchFinal) {
+			if canCheckStatementAsExpectedExpression(stmts[i], expectedFinal, onlyMatchFinal) {
 				lastExprIndex = i
 			}
 			break
 		}
 	}
 
-	block := &Block{Stmts: make([]Statement, len(stmts))}
+	block := &Block{Stmts: make([]Statement, len(stmts)), DiscardFinalValue: expectedFinal == Void}
 	for i := range stmts {
 		if i == lastExprIndex {
 			expr := c.checkExprAs(stmts[i].(parse.Expression), expectedFinal)
@@ -1575,14 +1575,27 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 	return block
 }
 
-func canCheckStatementAsExpectedExpression(stmt parse.Statement, onlyMatchFinal bool) bool {
-	if onlyMatchFinal {
+func canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal Type, onlyMatchFinal bool) bool {
+	if onlyMatchFinal && expectedFinal != Void {
 		_, ok := stmt.(*parse.MatchExpression)
 		return ok
 	}
+	if expectedFinal == Void {
+		switch stmt.(type) {
+		case *parse.StrLiteral, *parse.BoolLiteral, *parse.VoidLiteral, *parse.NumLiteral, *parse.InterpolatedStr,
+			*parse.Identifier, *parse.FunctionCall, *parse.InstanceProperty, *parse.InstanceMethod,
+			*parse.UnaryExpression, *parse.BinaryExpression, *parse.ChainedComparison, *parse.StaticFunction,
+			*parse.IfStatement, *parse.AnonymousFunction, *parse.ListLiteral, *parse.MapLiteral,
+			*parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.StaticProperty,
+			*parse.StructInstance, *parse.Try, *parse.BlockExpression:
+			return true
+		default:
+			return false
+		}
+	}
 
 	switch stmt.(type) {
-	case *parse.MatchExpression, *parse.StaticFunction, *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
+	case *parse.MatchExpression, *parse.IfStatement, *parse.StaticFunction, *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
 		return true
 	default:
 		return false
@@ -1590,7 +1603,11 @@ func canCheckStatementAsExpectedExpression(stmt parse.Statement, onlyMatchFinal 
 }
 
 func (c *Checker) checkMatchArmBlock(stmts []parse.Statement, setup func()) *Block {
-	return c.checkBlockWithExpected(stmts, setup, c.expectedExpr, false)
+	expectedType := c.expectedExpr
+	c.expectedExpr = nil
+	block := c.checkBlockWithExpected(stmts, setup, expectedType, false)
+	c.expectedExpr = expectedType
+	return block
 }
 
 func (c *Checker) withExpectedExpr(expected Type, check func() Expression) Expression {
@@ -2210,10 +2227,27 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 	current := s
 	for current != nil {
 		if current.Condition == nil {
-			block := c.checkBlock(current.Body, nil)
+			expectedType := c.expectedExpr
+			c.expectedExpr = nil
+			block := c.checkBlockWithExpected(current.Body, nil, expectedType, false)
+			c.expectedExpr = expectedType
 			if referenceType != nil && !block.Type().equal(referenceType) {
-				c.addError("All branches must have the same result type", current.GetLocation())
-				return nil
+				if referenceType == Void || block.Type() == Void {
+					if referenceType != Void {
+						for i := range branches {
+							if branches[i].Body != nil && branches[i].Body.Type() != Void {
+								branches[i].Body.DiscardFinalValue = true
+							}
+						}
+					}
+					if block.Type() != Void {
+						block.DiscardFinalValue = true
+					}
+					referenceType = Void
+				} else {
+					c.addError("All branches must have the same result type", current.GetLocation())
+					return nil
+				}
 			}
 			elseBlock = block
 			break
@@ -2226,12 +2260,29 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 			c.addError("If conditions must be boolean expressions", current.GetLocation())
 			return nil
 		}
-		body := c.checkBlock(current.Body, nil)
+		expectedType := c.expectedExpr
+		c.expectedExpr = nil
+		body := c.checkBlockWithExpected(current.Body, nil, expectedType, false)
+		c.expectedExpr = expectedType
 		if referenceType == nil {
 			referenceType = body.Type()
 		} else if !body.Type().equal(referenceType) {
-			c.addError("All branches must have the same result type", current.GetLocation())
-			return nil
+			if referenceType == Void || body.Type() == Void {
+				if referenceType != Void {
+					for i := range branches {
+						if branches[i].Body != nil && branches[i].Body.Type() != Void {
+							branches[i].Body.DiscardFinalValue = true
+						}
+					}
+				}
+				if body.Type() != Void {
+					body.DiscardFinalValue = true
+				}
+				referenceType = Void
+			} else {
+				c.addError("All branches must have the same result type", current.GetLocation())
+				return nil
+			}
 		}
 		branches = append(branches, IfBranch{Condition: condition, Body: body})
 		next, ok := current.Else.(*parse.IfStatement)
@@ -4313,6 +4364,10 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 		return c.withExpectedExpr(expectedType, func() Expression {
 			return c.checkExpr(s)
 		})
+	case *parse.IfStatement:
+		return c.withExpectedExpr(expectedType, func() Expression {
+			return c.checkExpr(s)
+		})
 	case *parse.ListLiteral:
 		// Only use collection-specific inference when the expected type is a list.
 		if _, ok := expectedType.(*List); ok {
@@ -4474,6 +4529,10 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 	checked := c.checkExpr(expr)
 	if checked == nil {
 		return nil
+	}
+
+	if expectedType == Void {
+		return checked
 	}
 
 	if !expectedType.equal(checked.Type()) {

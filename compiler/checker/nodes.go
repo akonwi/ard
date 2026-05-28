@@ -850,10 +850,14 @@ func (o *Or) Type() Type {
 }
 
 type Block struct {
-	Stmts []Statement
+	Stmts             []Statement
+	DiscardFinalValue bool
 }
 
 func (b *Block) Type() Type {
+	if b.DiscardFinalValue {
+		return Void
+	}
 	if len(b.Stmts) == 0 {
 		return Void
 	}
