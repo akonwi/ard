@@ -254,6 +254,20 @@ func TestTestFunctions(t *testing.T) {
 func TestCallingPackageFunctions(t *testing.T) {
 	run(t, []test{
 		{
+			name: "Non-final side-effect match is not checked against function return type",
+			input: strings.Join([]string{
+				`use ard/io`,
+				`fn run_up(applied_count: Int) Void!Str {`,
+				`  match applied_count {`,
+				`    0 => io::print("No pending migrations"),`,
+				`    _ => io::print("{applied_count} migration(s) applied"),`,
+				`  }`,
+				`  Result::ok(())`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
 			name: "Calling io::print",
 			input: strings.Join([]string{
 				`use ard/io`,

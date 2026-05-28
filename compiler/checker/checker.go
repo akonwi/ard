@@ -1547,10 +1547,14 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 
 	lastExprIndex := -1
 	if expectedFinal != nil && expectedFinal != Void {
-		for i := range stmts {
+		for i := len(stmts) - 1; i >= 0; i-- {
+			if _, ok := stmts[i].(*parse.Comment); ok {
+				continue
+			}
 			if canCheckStatementAsExpectedExpression(stmts[i], onlyMatchFinal) {
 				lastExprIndex = i
 			}
+			break
 		}
 	}
 
