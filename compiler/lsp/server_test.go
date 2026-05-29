@@ -253,7 +253,7 @@ func TestHoverPositions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(tt.source, pos)
+			info := computeHover(tt.source, "test.ard", pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil")
 			}
@@ -306,7 +306,7 @@ func TestHoverInsideFunction(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, pos)
+			info := computeHover(source, "test.ard", pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
 			}
@@ -455,7 +455,7 @@ fn main() {
 					t.Errorf("panic at %d:%d: %v", pos.line, pos.char, r)
 				}
 			}()
-			info := computeHover(source, pt)
+			info := computeHover(source, "test.ard", pt)
 			// info can be nil — that's ok as long as we don't panic
 			_ = info
 		})
@@ -525,7 +525,7 @@ func TestHoverInferredExpression(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(tt.source, pos)
+			info := computeHover(tt.source, "test.ard", pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil")
 			}

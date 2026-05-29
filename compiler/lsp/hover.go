@@ -2,11 +2,47 @@ package lsp
 
 import (
 	"fmt"
+	"log"
+	"path/filepath"
 	"strings"
 
+	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 	"go.lsp.dev/protocol"
 )
+
+// hoverInfo holds the content to display in the hover popup.
+type hoverInfo struct {
+	content string // Markdown content
+}
+
+// computeHover finds the expression at the given position and returns hover info.
+func computeHover(source string, filePath string, position protocol.Position) *hoverInfo {
+	target := lspPositionToParsePoint(position)
+
+	prog := parseAndCache(source, filePath)
+	if prog == nil {
+		return nil
+	}
+
+	expr := findInStmts(prog.Statements, target)
+	if expr == nil {
+		return nil
+	}
+
+	return describeExpr(expr, source, filePath, prog)
+}
+
+// parseAndCache caches the parsed program for type resolution.
+func parseAndCache(source string, filePath string) *parse.Program {
+	result := parse.Parse([]byte(source), filePath)
+	if result.Program != nil {
+		lastParseSource = source
+		lastParseProgram = result.Program
+		lastParseFilepath = filePath
+	}
+	return result.Program
+}
 
 // lspPositionToParsePoint converts an LSP position back to a parse Point.
 // LSP uses 0-based; parser uses 1-based.
@@ -20,7 +56,6 @@ func lspPositionToParsePoint(pos protocol.Position) parse.Point {
 // pointInRange checks if a point falls within a location range.
 // Returns false if the location has zero-value (unset by parser).
 func pointInRange(p parse.Point, loc parse.Location) bool {
-	// Reject zero-value locations — the parser didn't set them.
 	if loc.Start.Row == 0 && loc.Start.Col == 0 && loc.End.Row == 0 && loc.End.Col == 0 {
 		return false
 	}
@@ -45,50 +80,42 @@ func typeDeclString(t parse.DeclaredType) string {
 		return "?"
 	}
 	s := t.GetName()
+	// Map parser's canonical names to Ard surface names
+	switch s {
+	case "String":
+		s = "Str"
+	case "Boolean":
+		s = "Bool"
+	}
 	if t.IsNullable() {
 		s = "?" + s
 	}
 	return s
 }
 
-// bindingStrDecl returns "let" or "mut".
-func bindingStrDecl(mutable bool) string {
-	if mutable {
-		return "mut"
+// checkerTypeString converts a checker.Type to a readable Ard type string.
+func checkerTypeString(t checker.Type) string {
+	if t == nil {
+		return "?"
 	}
-	return "let"
-}
-
-// hoverInfo holds the content to display in the hover popup.
-type hoverInfo struct {
-	content string // Markdown content
-}
-
-// computeHover finds the expression at the given position and returns hover info.
-func computeHover(source string, position protocol.Position) *hoverInfo {
-	target := lspPositionToParsePoint(position)
-
-	// Walk the top-level program to find the expression at the cursor
-	expr := findTopLevelExpr(source, target)
-	if expr == nil {
-		return nil
+	// Use the checker's String() which produces canonical type names.
+	s := t.String()
+	// Map canonical names to Ard surface names
+	switch s {
+	case "String":
+		return "Str"
+	case "Boolean":
+		return "Bool"
 	}
-
-	return describeExpr(expr, source)
+	return s
 }
 
-// findTopLevelExpr parses the source and walks the AST to find the deepest
-// expression at the target point. It also persists the parsed program for type
-// resolution in inferExprType.
-func findTopLevelExpr(source string, target parse.Point) parse.Expression {
-	result := parse.Parse([]byte(source), "")
-	if result.Program == nil {
-		return nil
-	}
-	lastParseSource = source
-	lastParseProgram = result.Program
-	return findInStmts(result.Program.Statements, target)
+// simpleHover builds a hoverInfo from a label string.
+func simpleHover(label string) *hoverInfo {
+	return &hoverInfo{content: fmt.Sprintf("```ard\n%s\n```", label)}
 }
+
+
 
 // findInStmts walks a list of statements to find the expression at target.
 func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expression) {
@@ -110,15 +137,12 @@ func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expres
 		// but need special handling to recurse into their bodies).
 		switch s := stmt.(type) {
 		case *parse.VariableDeclaration:
-			// If cursor is on the variable name (which spans from after "let " to before ":" or "="),
-			// show the variable declaration as the match.
 			if s.Value != nil {
 				if inner := walkExpr(s.Value, target); inner != nil {
 					best = inner
 					continue
 				}
 			}
-			// Cursor is not on the value, so it's on the declaration itself (name/type)
 			best = s
 			continue
 		case *parse.VariableAssignment:
@@ -134,8 +158,6 @@ func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expres
 			}
 			continue
 		case *parse.FunctionDeclaration:
-			// Only show the function signature when cursor is on its first line
-			// (the fn keyword / name line), not when somewhere in the body.
 			if target.Row == s.Location.Start.Row {
 				best = s
 			}
@@ -271,7 +293,6 @@ func walkExpr(expr parse.Expression, target parse.Point) parse.Expression {
 		}
 	case *parse.InstanceProperty:
 		recurse(e.Target)
-		// If cursor is on the property name, show that
 		if pointInRange(target, e.Property.GetLocation()) {
 			return &e.Property
 		}
@@ -326,14 +347,14 @@ func walkExpr(expr parse.Expression, target parse.Point) parse.Expression {
 }
 
 // describeExpr returns hover text describing the expression's type/signature.
-func describeExpr(expr parse.Expression, source string) *hoverInfo {
+func describeExpr(expr parse.Expression, source string, filePath string, prog *parse.Program) *hoverInfo {
 	if expr == nil {
 		return nil
 	}
 
 	switch e := expr.(type) {
 	case *parse.Identifier:
-		return describeIdentifier(e, source)
+		return describeIdentifier(e, source, filePath, prog)
 	case *parse.StrLiteral:
 		return simpleHover("Str")
 	case *parse.NumLiteral:
@@ -347,11 +368,11 @@ func describeExpr(expr parse.Expression, source string) *hoverInfo {
 		return simpleHover("Void")
 	case *parse.Parameter:
 		if e.Type != nil {
-			return simpleHover(fmt.Sprintf("%s: %s", e.Name, typeDeclString(e.Type)))
+			return simpleHover(typeDeclString(e.Type))
 		}
-		return simpleHover(fmt.Sprintf("%s: ?", e.Name))
+		return simpleHover("?")
 	case *parse.FunctionCall:
-		return describeFunctionCall(e, source)
+		return describeFunctionCall(e, source, filePath, prog)
 	case *parse.InstanceProperty:
 		return simpleHover(fmt.Sprintf(".%s", e.Property.Name))
 	case *parse.InstanceMethod:
@@ -368,7 +389,14 @@ func describeExpr(expr parse.Expression, source string) *hoverInfo {
 	case *parse.FunctionDeclaration:
 		return describeFunctionDecl(e)
 	case *parse.ListLiteral:
-		return simpleHover("List")
+		if len(e.Items) == 0 {
+			return simpleHover("[?]")
+		}
+		itemType := inferExprType(e.Items[0])
+		if itemType == "" || itemType == "?" {
+			return simpleHover("List")
+		}
+		return simpleHover("[" + itemType + "]")
 	case *parse.MapLiteral:
 		return simpleHover("Map")
 	case *parse.MatchExpression:
@@ -376,20 +404,20 @@ func describeExpr(expr parse.Expression, source string) *hoverInfo {
 	case *parse.Try:
 		return simpleHover("try")
 	case *parse.BinaryExpression:
-		return simpleHover("Bool") // comparisons produce Bool
+		return simpleHover("Bool")
 	case *parse.UnaryExpression:
 		if e.Operator == parse.Bang || e.Operator == parse.Not {
 			return simpleHover("Bool")
 		}
-		return simpleHover("Int") // negation preserves numeric type
+		return simpleHover("Int")
 	case *parse.AnonymousFunction:
 		return describeAnonFunction(e)
 	case *parse.StructInstance:
 		return simpleHover(e.Name.Name)
 	case *parse.IfStatement:
 		if len(e.Body) > 0 {
-			if expr, ok := e.Body[len(e.Body)-1].(parse.Expression); ok {
-				return describeExpr(expr, source)
+			if lastExpr, ok := e.Body[len(e.Body)-1].(parse.Expression); ok {
+				return describeExpr(lastExpr, source, filePath, prog)
 			}
 		}
 		return simpleHover("Void")
@@ -398,31 +426,298 @@ func describeExpr(expr parse.Expression, source string) *hoverInfo {
 	return nil
 }
 
-// describeIdentifier looks up an identifier in the parse tree to find its type.
-func describeIdentifier(id *parse.Identifier, source string) *hoverInfo {
-	// Re-parse to scan variable declarations
-	result := parse.Parse([]byte(source), "")
-	if result.Program == nil {
+// describeIdentifier looks up an identifier's type using the checker first,
+// then falls back to parse-tree scanning.
+func describeIdentifier(id *parse.Identifier, source string, filePath string, prog *parse.Program) *hoverInfo {
+	if id == nil {
 		return nil
 	}
 
-	// Scan top-level statements for declarations
-	info := scanForType(id.Name, result.Program.Statements)
+	// Check builtins first (they're known without needing checker)
+	if info := builtinType(id.Name); info != nil {
+		return info
+	}
+
+	// Try the checker — it has fully resolved types.
+	if t := resolveFromChecker(id.Name, prog, filePath); t != "" && t != "?" {
+		return simpleHover(t)
+	}
+
+	// Fall back to parse-tree scanning
+	info := scanForType(id.Name, prog.Statements)
 	if info != nil {
 		return info
 	}
 
-	// Check if it's a known built-in
-	if builtinInfo := builtinType(id.Name); builtinInfo != nil {
-		return builtinInfo
-	}
-
-	return simpleHover("?")
+	return nil
 }
 
-// scanForType searches statements for a declaration matching name.
+// resolveFromChecker runs the checker on the parsed program and returns the
+// resolved type string for the given identifier name, or "" if not found.
+func resolveFromChecker(name string, prog *parse.Program, filePath string) string {
+	workingDir := filepath.Dir(filePath)
+	moduleResolver, err := checker.NewModuleResolver(workingDir)
+	if err != nil {
+		log.Printf("hover: module resolver error for %s: %v", filePath, err)
+		return ""
+	}
+
+	relPath, err := filepath.Rel(workingDir, filePath)
+	if err != nil {
+		relPath = filePath
+	}
+
+	c := checker.New(relPath, prog, moduleResolver, checker.CheckOptions{})
+	c.Check()
+
+	// Try module public symbols first
+	if sym := c.Module().Get(name); !sym.IsZero() {
+		return checkerTypeString(sym.Type)
+	}
+
+	// Walk the checker's program tree for local variables
+	checkerProg := c.Module().Program()
+	if checkerProg == nil {
+		return ""
+	}
+	return findTypeInCheckerProg(name, checkerProg.Statements)
+}
+
+// findTypeInCheckerProg walks checker statements to find a variable by name.
+func findTypeInCheckerProg(name string, stmts []checker.Statement) string {
+	for _, stmt := range stmts {
+		// Check NonProducing variants
+		if t := findTypeInNonProducing(name, stmt.Stmt); t != "" {
+			return t
+		}
+		// Check Expression variants (includes FunctionDef, If, Block, etc.)
+		if t := findTypeInExpr(name, stmt.Expr); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// findTypeInNonProducing handles the NonProducing side of checker.Statement.
+func findTypeInNonProducing(name string, stmt checker.NonProducing) string {
+	if stmt == nil {
+		return ""
+	}
+	switch s := stmt.(type) {
+	case *checker.VariableDef:
+		if s.Name == name {
+			return checkerTypeString(s.Type())
+		}
+	case *checker.Reassignment:
+		// Reassignment doesn't declare a new variable, skip
+	case *checker.ForIntRange:
+		if s.Cursor == name || s.Index == name {
+			return "Int"
+		}
+	case *checker.ForInStr:
+		if s.Cursor == name || s.Index == name {
+			return "Str"
+		}
+	case *checker.ForInList:
+		if s.Cursor == name || s.Index == name {
+			if lt, ok := s.List.Type().(*checker.List); ok {
+				return checkerTypeString(lt.Of())
+			}
+			return "?"
+		}
+	case *checker.ForInMap:
+		if s.Key == name || s.Val == name {
+			if mt, ok := s.Map.Type().(*checker.Map); ok {
+				if s.Key == name {
+					return checkerTypeString(mt.Key())
+				}
+				return checkerTypeString(mt.Value())
+			}
+			return "?"
+		}
+	case *checker.ForLoop:
+		if s.Init != nil && s.Init.Name == name {
+			return checkerTypeString(s.Init.Type())
+		}
+		if s.Body != nil {
+			if t := findTypeInCheckerBlock(name, s.Body); t != "" {
+				return t
+			}
+		}
+	case *checker.WhileLoop:
+		if s.Body != nil {
+			if t := findTypeInCheckerBlock(name, s.Body); t != "" {
+				return t
+			}
+		}
+	case *checker.Enum, *checker.Union, *checker.StructDef:
+		// Type definitions — skip
+	}
+	return ""
+}
+
+// findTypeInExpr handles the Expression side of checker.Statement.
+func findTypeInExpr(name string, expr checker.Expression) string {
+	if expr == nil {
+		return ""
+	}
+	switch e := expr.(type) {
+	case *checker.FunctionDef:
+		for _, p := range e.Parameters {
+			if p.Name == name {
+				return checkerTypeString(p.Type)
+			}
+		}
+		if e.Body != nil {
+			if t := findTypeInCheckerBlock(name, e.Body); t != "" {
+				return t
+			}
+		}
+	case *checker.Block:
+		return findTypeInCheckerBlock(name, e)
+	case *checker.If:
+		return findTypeInCheckerIf(name, e)
+	case *checker.BoolMatch:
+		if e.True != nil {
+			if t := findTypeInCheckerBlock(name, e.True); t != "" {
+				return t
+			}
+		}
+		if e.False != nil {
+			if t := findTypeInCheckerBlock(name, e.False); t != "" {
+				return t
+			}
+		}
+	case *checker.OptionMatch:
+		if e.Some != nil && e.Some.Body != nil {
+			if t := findTypeInCheckerBlock(name, e.Some.Body); t != "" {
+				return t
+			}
+		}
+		if e.None != nil {
+			if t := findTypeInCheckerBlock(name, e.None); t != "" {
+				return t
+			}
+		}
+	case *checker.EnumMatch:
+		for _, c := range e.Cases {
+			if c != nil {
+				if t := findTypeInCheckerBlock(name, c); t != "" {
+					return t
+				}
+			}
+		}
+		if e.CatchAll != nil {
+			if t := findTypeInCheckerBlock(name, e.CatchAll); t != "" {
+				return t
+			}
+		}
+	case *checker.IntMatch:
+		for _, b := range e.IntCases {
+			if t := findTypeInCheckerBlock(name, b); t != "" {
+				return t
+			}
+		}
+		for _, b := range e.RangeCases {
+			if t := findTypeInCheckerBlock(name, b); t != "" {
+				return t
+			}
+		}
+		if e.CatchAll != nil {
+			if t := findTypeInCheckerBlock(name, e.CatchAll); t != "" {
+				return t
+			}
+		}
+	case *checker.StrMatch:
+		for _, b := range e.Cases {
+			if t := findTypeInCheckerBlock(name, b); t != "" {
+				return t
+			}
+		}
+		if e.CatchAll != nil {
+			if t := findTypeInCheckerBlock(name, e.CatchAll); t != "" {
+				return t
+			}
+		}
+	case *checker.UnionMatch:
+		for _, m := range e.TypeCases {
+			if m != nil && m.Body != nil {
+				if t := findTypeInCheckerBlock(name, m.Body); t != "" {
+					return t
+				}
+			}
+		}
+		if e.CatchAll != nil {
+			if t := findTypeInCheckerBlock(name, e.CatchAll); t != "" {
+				return t
+			}
+		}
+	case *checker.ResultMatch:
+		if e.Ok != nil && e.Ok.Body != nil {
+			if t := findTypeInCheckerBlock(name, e.Ok.Body); t != "" {
+				return t
+			}
+		}
+		if e.Err != nil && e.Err.Body != nil {
+			if t := findTypeInCheckerBlock(name, e.Err.Body); t != "" {
+				return t
+			}
+		}
+	case *checker.ConditionalMatch:
+	case *checker.TryOp:
+		if e.CatchVar == name {
+			// Return the error type if known
+			if e.ErrType != nil {
+				return checkerTypeString(e.ErrType)
+			}
+			return "?"
+		}
+		if e.CatchBlock != nil {
+			if t := findTypeInCheckerBlock(name, e.CatchBlock); t != "" {
+				return t
+			}
+		}
+	}
+	return ""
+}
+
+// findTypeInCheckerBlock walks a checker Block for variable declarations.
+func findTypeInCheckerBlock(name string, block *checker.Block) string {
+	if block == nil {
+		return ""
+	}
+	for _, stmt := range block.Stmts {
+		if t := findTypeInNonProducing(name, stmt.Stmt); t != "" {
+			return t
+		}
+		if t := findTypeInExpr(name, stmt.Expr); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// findTypeInCheckerIf walks an If expression's branches.
+func findTypeInCheckerIf(name string, e *checker.If) string {
+	for _, branch := range e.Branches {
+		if branch.Body != nil {
+			if t := findTypeInCheckerBlock(name, branch.Body); t != "" {
+				return t
+			}
+		}
+	}
+	if e.Else != nil {
+		return findTypeInCheckerBlock(name, e.Else)
+	}
+	return ""
+}
+
+// scanForType searches parse-tree statements for a declaration matching name.
 func scanForType(name string, stmts []parse.Statement) *hoverInfo {
 	for _, stmt := range stmts {
+		if stmt == nil {
+			continue
+		}
 		switch s := stmt.(type) {
 		case *parse.VariableDeclaration:
 			if s.Name == name {
@@ -432,13 +727,11 @@ func scanForType(name string, stmts []parse.Statement) *hoverInfo {
 			if s.Name == name {
 				return describeFunctionDecl(s)
 			}
-			// Check parameters
 			for _, p := range s.Parameters {
 				if p.Name == name {
 					return describeParam(&p)
 				}
 			}
-			// Check body
 			if info := scanForType(name, s.Body); info != nil {
 				return info
 			}
@@ -473,7 +766,7 @@ func scanForType(name string, stmts []parse.Statement) *hoverInfo {
 			}
 		case *parse.Try:
 			if s.CatchVar != nil && s.CatchVar.Name == name {
-				return simpleHover("?") // catch variable, type unknown from parse alone
+				return simpleHover("?")
 			}
 		}
 	}
@@ -498,7 +791,6 @@ func describeVariableDecl(vd *parse.VariableDeclaration) *hoverInfo {
 	if vd.Type != nil {
 		return simpleHover(typeDeclString(vd.Type))
 	}
-	// Try to infer from the value using the full expression resolver
 	if vd.Value != nil {
 		inferred := inferExprType(vd.Value)
 		if inferred != "" && inferred != "?" {
@@ -533,7 +825,7 @@ func describeParam(p *parse.Parameter) *hoverInfo {
 	if p.Type != nil {
 		t = typeDeclString(p.Type)
 	}
-	return simpleHover(fmt.Sprintf("%s: %s", p.Name, t))
+	return simpleHover(t)
 }
 
 // describeAnonFunction returns hover info for an anonymous function.
@@ -556,26 +848,53 @@ func describeAnonFunction(af *parse.AnonymousFunction) *hoverInfo {
 }
 
 // describeFunctionCall returns hover info for a function call expression.
-func describeFunctionCall(fc *parse.FunctionCall, source string) *hoverInfo {
-	// Try to find the function declaration in the AST
-	result := parse.Parse([]byte(source), "")
-	if result.Program != nil {
-		if info := findFunctionDecl(fc.Name, result.Program.Statements); info != nil {
-			return info
-		}
+func describeFunctionCall(fc *parse.FunctionCall, source string, filePath string, prog *parse.Program) *hoverInfo {
+	// First try to get the resolved signature from the checker.
+	if info := resolveCallFromChecker(fc.Name, prog, filePath); info != nil {
+		return info
 	}
+
+	// Fall back to parse-tree scanning
+	if info := findFunctionDecl(fc.Name, prog.Statements); info != nil {
+		return info
+	}
+
 	return simpleHover(fmt.Sprintf("fn %s(...)", fc.Name))
+}
+
+// resolveCallFromChecker finds a function's signature via the checker.
+func resolveCallFromChecker(name string, prog *parse.Program, filePath string) *hoverInfo {
+	workingDir := filepath.Dir(filePath)
+	moduleResolver, err := checker.NewModuleResolver(workingDir)
+	if err != nil {
+		return nil // silent — diagnostics handles this
+	}
+
+	relPath, err := filepath.Rel(workingDir, filePath)
+	if err != nil {
+		relPath = filePath
+	}
+
+	c := checker.New(relPath, prog, moduleResolver, checker.CheckOptions{})
+	c.Check()
+
+	if sym := c.Module().Get(name); !sym.IsZero() {
+		return simpleHover(checkerTypeString(sym.Type))
+	}
+	return nil
 }
 
 // findFunctionDecl searches for a function declaration with the given name.
 func findFunctionDecl(name string, stmts []parse.Statement) *hoverInfo {
 	for _, stmt := range stmts {
+		if stmt == nil {
+			continue
+		}
 		switch s := stmt.(type) {
 		case *parse.FunctionDeclaration:
 			if s.Name == name {
 				return describeFunctionDecl(s)
 			}
-			// Check nested functions
 			if info := findFunctionDecl(name, s.Body); info != nil {
 				return info
 			}
@@ -606,7 +925,6 @@ func inferExprType(expr parse.Expression) string {
 		if len(e.Items) == 0 {
 			return "[?]"
 		}
-		// Infer element type from the first item
 		itemType := inferExprType(e.Items[0])
 		if itemType == "" || itemType == "?" {
 			return "List"
@@ -614,16 +932,11 @@ func inferExprType(expr parse.Expression) string {
 		return "[" + itemType + "]"
 	case *parse.MapLiteral:
 		return "Map"
-	case *parse.StructInstance:
-		return e.Name.Name
 	case *parse.Identifier:
-		// Look up identifiers — they might reference a variable or function
 		return resolveIdentType(e.Name)
 	case *parse.FunctionCall:
-		// Try to find the function declaration's return type
 		return resolveFunctionReturnType(e.Name)
 	case *parse.InstanceProperty:
-		// Try property access type: infer from the .Name
 		return resolveIdentType(e.Property.Name)
 	case *parse.StaticProperty:
 		if id, ok := e.Property.(*parse.Identifier); ok {
@@ -634,12 +947,10 @@ func inferExprType(expr parse.Expression) string {
 		if e.Operator == parse.Bang || e.Operator == parse.Not {
 			return "Bool"
 		}
-		// Negation/minus — same type as operand
 		return inferExprType(e.Operand)
 	case *parse.BinaryExpression:
 		return inferBinaryExprType(e)
 	case *parse.IfStatement:
-		// Return type of if is type of last expression in body/else
 		if len(e.Body) > 0 {
 			if last, ok := e.Body[len(e.Body)-1].(parse.Expression); ok {
 				return inferExprType(last)
@@ -651,21 +962,21 @@ func inferExprType(expr parse.Expression) string {
 			}
 		}
 		return "Void"
+	case *parse.StructInstance:
+		return e.Name.Name
 	}
 	return "?"
 }
 
 // resolveIdentType resolves an identifier's type by scanning the parse tree.
-// Uses a persisted parse from the last call to findTopLevelExpr.
 var lastParseSource string
+var lastParseFilepath string
 var lastParseProgram *parse.Program
 
 func resolveIdentType(name string) string {
 	if lastParseProgram == nil {
-		// Scan from the last-known top-level source — caller must set this.
 		return "?"
 	}
-	// Check builtins
 	switch name {
 	case "true", "false":
 		return "Bool"
@@ -674,11 +985,10 @@ func resolveIdentType(name string) string {
 	case "panic":
 		return "?"
 	}
-	// Scan top-level declarations
 	return scanIdentType(name, lastParseProgram.Statements)
 }
 
-// scanIdentType searches statements for a declaration matching name.
+// scanIdentType searches parse-tree statements for a declaration matching name.
 func scanIdentType(name string, stmts []parse.Statement) string {
 	for _, stmt := range stmts {
 		if stmt == nil {
@@ -693,13 +1003,11 @@ func scanIdentType(name string, stmts []parse.Statement) string {
 			if s.Name == name {
 				return funcReturnTypeString(s)
 			}
-			// Check parameters
 			for _, p := range s.Parameters {
 				if p.Name == name && p.Type != nil {
 					return typeDeclString(p.Type)
 				}
 			}
-			// Check body
 			if t := scanIdentType(name, s.Body); t != "" {
 				return t
 			}
@@ -726,7 +1034,7 @@ func scanIdentType(name string, stmts []parse.Statement) string {
 			}
 		case *parse.Try:
 			if s.CatchVar != nil && s.CatchVar.Name == name {
-				return "?" // catch variable type unknown from parse
+				return "?"
 			}
 		}
 	}
@@ -763,7 +1071,6 @@ func scanFunctionReturnType(name string, stmts []parse.Statement) string {
 			if s.Name == name {
 				return funcReturnTypeString(s)
 			}
-			// Check nested functions
 			if t := scanFunctionReturnType(name, s.Body); t != "" {
 				return t
 			}
@@ -787,7 +1094,6 @@ func inferBinaryExprType(e *parse.BinaryExpression) string {
 		parse.LessThan, parse.LessThanOrEqual, parse.And, parse.Or:
 		return "Bool"
 	case parse.Plus:
-		// Str + Str = Str, Int + Int = Int, Float + Float = Float
 		left := inferExprType(e.Left)
 		right := inferExprType(e.Right)
 		if left == right {
@@ -801,7 +1107,6 @@ func inferBinaryExprType(e *parse.BinaryExpression) string {
 		}
 		return "Int"
 	case parse.Minus, parse.Divide, parse.Multiply, parse.Modulo:
-		// Arithmetic: infer from left operand
 		left := inferExprType(e.Left)
 		if left != "" && left != "?" {
 			return left
@@ -812,7 +1117,4 @@ func inferBinaryExprType(e *parse.BinaryExpression) string {
 	}
 }
 
-// simpleHover builds a hoverInfo from a label string.
-func simpleHover(label string) *hoverInfo {
-	return &hoverInfo{content: fmt.Sprintf("```ard\n%s\n```", label)}
-}
+

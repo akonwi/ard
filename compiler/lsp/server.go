@@ -232,7 +232,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 				info = nil
 			}
 		}()
-		info = computeHover(doc.Text, params.Position)
+		info = computeHover(doc.Text, doc.URI.Filename(), params.Position)
 	}()
 
 	if info == nil || info.content == "" {
