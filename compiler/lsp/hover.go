@@ -29,6 +29,13 @@ type hoverMethodSignature struct {
 	Mutates    bool
 }
 
+type hoverStaticFunctionSignature struct {
+	Qualifier  string
+	Name       string
+	Params     []hoverParam
+	ReturnType string
+}
+
 // computeHover finds the expression at the given position and returns hover info.
 func computeHover(source string, filePath string, position protocol.Position) *hoverInfo {
 	target := lspPositionToParsePoint(position)
@@ -153,16 +160,19 @@ func simpleExprName(expr parse.Expression) string {
 	return ""
 }
 
-func formatMethodSignature(sig *hoverMethodSignature) string {
-	params := make([]string, len(sig.Params))
-	for i, p := range sig.Params {
+func formatHoverParams(params []hoverParam) string {
+	parts := make([]string, len(params))
+	for i, p := range params {
 		if p.Name == "" {
-			params[i] = p.Type
+			parts[i] = normalizeDisplayType(p.Type)
 			continue
 		}
-		params[i] = fmt.Sprintf("%s: %s", p.Name, p.Type)
+		parts[i] = fmt.Sprintf("%s: %s", p.Name, normalizeDisplayType(p.Type))
 	}
+	return strings.Join(parts, ", ")
+}
 
+func formatMethodSignature(sig *hoverMethodSignature) string {
 	prefix := "fn "
 	if sig.Mutates {
 		prefix += "mut "
@@ -171,11 +181,23 @@ func formatMethodSignature(sig *hoverMethodSignature) string {
 	if owner != "" {
 		owner += "."
 	}
-	ret := sig.ReturnType
+	ret := normalizeDisplayType(sig.ReturnType)
 	if ret == "" {
 		ret = "Void"
 	}
-	return fmt.Sprintf("%s%s%s(%s) %s", prefix, owner, sig.Name, strings.Join(params, ", "), ret)
+	return fmt.Sprintf("%s%s%s(%s) %s", prefix, owner, sig.Name, formatHoverParams(sig.Params), ret)
+}
+
+func formatStaticFunctionSignature(sig *hoverStaticFunctionSignature) string {
+	qualifier := sig.Qualifier
+	if qualifier != "" {
+		qualifier += "::"
+	}
+	ret := normalizeDisplayType(sig.ReturnType)
+	if ret == "" {
+		ret = "Void"
+	}
+	return fmt.Sprintf("fn %s%s(%s) %s", qualifier, sig.Name, formatHoverParams(sig.Params), ret)
 }
 
 func normalizeDisplayType(t string) string {
@@ -559,7 +581,7 @@ func describeExpr(expr parse.Expression, source string, filePath string, prog *p
 		}
 		return simpleHover(fmt.Sprintf("%v::?", e.Target))
 	case *parse.StaticFunction:
-		return simpleHover(fmt.Sprintf("%s::%s(...)", e.Target, e.Function.Name))
+		return describeStaticFunction(e, source, filePath, prog)
 	case *parse.VariableDeclaration:
 		return describeVariableDecl(e, source, filePath, prog)
 	case *parse.FunctionDeclaration:
@@ -1501,6 +1523,13 @@ func describeFunctionCall(fc *parse.FunctionCall, source string, filePath string
 	return simpleHover(fmt.Sprintf("fn %s(...)", fc.Name))
 }
 
+func describeStaticFunction(sf *parse.StaticFunction, source string, filePath string, prog *parse.Program) *hoverInfo {
+	if sig := resolveStaticFunctionSignature(sf, prog); sig != nil {
+		return simpleHover(formatStaticFunctionSignature(sig))
+	}
+	return simpleHover(fmt.Sprintf("%s::%s(...)", sf.Target, sf.Function.Name))
+}
+
 // resolveCallFromChecker finds a function's signature via the checker.
 func resolveCallFromChecker(name string, prog *parse.Program, filePath string) *hoverInfo {
 	workingDir := filepath.Dir(filePath)
@@ -1789,20 +1818,24 @@ func typeFromDecl(vd *parse.VariableDeclaration) string {
 }
 
 func resolveStaticFunctionReturnType(sf *parse.StaticFunction, prog *parse.Program) string {
-	if sf == nil {
-		return ""
-	}
-	target := simpleExprName(sf.Target)
-	if prog != nil {
-		if ret := importedStaticFunctionReturnType(target, sf.Function.Name, prog); ret != "" {
-			return ret
-		}
-		return scanStaticFunctionReturnType(target, sf.Function.Name, prog.Statements)
+	if sig := resolveStaticFunctionSignature(sf, prog); sig != nil {
+		return normalizeDisplayType(sig.ReturnType)
 	}
 	return ""
 }
 
-func importedStaticFunctionReturnType(alias string, name string, prog *parse.Program) string {
+func resolveStaticFunctionSignature(sf *parse.StaticFunction, prog *parse.Program) *hoverStaticFunctionSignature {
+	if sf == nil || prog == nil {
+		return nil
+	}
+	target := simpleExprName(sf.Target)
+	if sig := importedStaticFunctionSignature(target, sf.Function.Name, prog); sig != nil {
+		return sig
+	}
+	return scanStaticFunctionSignature(target, sf.Function.Name, prog.Statements)
+}
+
+func importedStaticFunctionSignature(alias string, name string, prog *parse.Program) *hoverStaticFunctionSignature {
 	path := ""
 	for _, imp := range prog.Imports {
 		if imp.Name == alias {
@@ -1814,18 +1847,18 @@ func importedStaticFunctionReturnType(alias string, name string, prog *parse.Pro
 		path = preludeModulePath(alias)
 	}
 	if path == "" || !strings.HasPrefix(path, "ard/") {
-		return ""
+		return nil
 	}
 
 	mod, ok := checker.FindEmbeddedModuleForTarget(path, "")
 	if !ok {
-		return ""
+		return nil
 	}
 	sym := mod.Get(name)
 	if sym.IsZero() {
-		return ""
+		return nil
 	}
-	return checkerFunctionReturnType(sym.Type)
+	return checkerStaticFunctionSignature(alias, name, sym.Type)
 }
 
 func preludeModulePath(alias string) string {
@@ -1846,17 +1879,30 @@ func preludeModulePath(alias string) string {
 	return ""
 }
 
-func checkerFunctionReturnType(t checker.Type) string {
+func checkerStaticFunctionSignature(alias string, name string, t checker.Type) *hoverStaticFunctionSignature {
+	sig := &hoverStaticFunctionSignature{Qualifier: alias, Name: name}
 	switch fn := t.(type) {
 	case *checker.FunctionDef:
-		return normalizeDisplayType(checkerTypeString(fn.ReturnType))
+		sig.Params = checkerHoverParams(fn.Parameters)
+		sig.ReturnType = checkerTypeString(fn.ReturnType)
+		return sig
 	case *checker.ExternalFunctionDef:
-		return normalizeDisplayType(checkerTypeString(fn.ReturnType))
+		sig.Params = checkerHoverParams(fn.Parameters)
+		sig.ReturnType = checkerTypeString(fn.ReturnType)
+		return sig
 	}
-	return ""
+	return nil
 }
 
-func scanStaticFunctionReturnType(target string, name string, stmts []parse.Statement) string {
+func checkerHoverParams(params []checker.Parameter) []hoverParam {
+	out := make([]hoverParam, len(params))
+	for i, p := range params {
+		out[i] = hoverParam{Name: p.Name, Type: checkerTypeString(p.Type)}
+	}
+	return out
+}
+
+func scanStaticFunctionSignature(target string, name string, stmts []parse.Statement) *hoverStaticFunctionSignature {
 	path := target + "::" + name
 	for _, stmt := range stmts {
 		s, ok := stmt.(*parse.StaticFunctionDeclaration)
@@ -1864,10 +1910,33 @@ func scanStaticFunctionReturnType(target string, name string, stmts []parse.Stat
 			continue
 		}
 		if simpleExprName(&s.Path) == path {
-			return funcReturnTypeString(&s.FunctionDeclaration)
+			return parseStaticFunctionSignature(target, &s.FunctionDeclaration)
 		}
 	}
-	return ""
+	return nil
+}
+
+func parseStaticFunctionSignature(target string, fd *parse.FunctionDeclaration) *hoverStaticFunctionSignature {
+	params := make([]hoverParam, len(fd.Parameters))
+	for i, p := range fd.Parameters {
+		paramType := "?"
+		if p.Type != nil {
+			paramType = typeDeclString(p.Type)
+		}
+		params[i] = hoverParam{Name: p.Name, Type: paramType}
+	}
+
+	retType := "Void"
+	if fd.ReturnType != nil {
+		retType = typeDeclString(fd.ReturnType)
+	}
+
+	return &hoverStaticFunctionSignature{
+		Qualifier:  target,
+		Name:       fd.Name,
+		Params:     params,
+		ReturnType: retType,
+	}
 }
 
 // resolveFunctionReturnType finds a function declaration and returns its return type.

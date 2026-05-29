@@ -655,6 +655,42 @@ fn main() {
 	}
 }
 
+// TestHoverStaticFunctionSignatures verifies static function hovers include qualifier, params, and return type.
+func TestHoverStaticFunctionSignatures(t *testing.T) {
+	source := `use ard/io
+
+fn main() {
+  io::print("hello")
+  let input_str = io::read_line().or("")
+  let input = Int::from_str(input_str).or(-1)
+}
+`
+
+	tests := []struct {
+		name string
+		line uint32
+		char uint32
+		want string
+	}{
+		{name: "imported function", line: 3, char: 7, want: "fn io::print(value: ToString) Void"},
+		{name: "imported extern function", line: 4, char: 24, want: "fn io::read_line() Str!Str"},
+		{name: "prelude static function", line: 5, char: 20, want: "fn Int::from_str(str: Str) Int?"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pos := protocol.Position{Line: tt.line, Character: tt.char}
+			info := computeHover(source, "test.ard", pos)
+			if info == nil {
+				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
+			}
+			if !strings.Contains(info.content, tt.want) {
+				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
+			}
+		})
+	}
+}
+
 // TestHoverImportedStaticResultMethod verifies instance method hovers after imported static calls.
 func TestHoverImportedStaticResultMethod(t *testing.T) {
 	source := `use ard/io
