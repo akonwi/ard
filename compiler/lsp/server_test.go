@@ -747,6 +747,8 @@ func TestHoverUserModuleFunctionSignature(t *testing.T) {
 	}
 	responsesSource := `use ard/http
 
+let api_name = "ranger"
+
 fn json_error(mut res: http::Response, status: Int, message: Str) {
   res.status = status
 }
@@ -759,6 +761,7 @@ use test_project/responses
 
 fn main(mut res: http::Response) {
   responses::json_error(res, 400, "Nope")
+  let name = responses::api_name
 }
 `
 	filePath := filepath.Join(root, "routes.ard")
@@ -766,14 +769,101 @@ fn main(mut res: http::Response) {
 		t.Fatal(err)
 	}
 
-	pos := protocol.Position{Line: 4, Character: 15}
-	info := computeHover(source, filePath, pos)
+	tests := []struct {
+		name string
+		line uint32
+		char uint32
+		want string
+	}{
+		{name: "module alias", line: 4, char: 4, want: "module responses: test_project/responses"},
+		{name: "imported function", line: 4, char: 15, want: "fn responses::json_error(mut res: http::Response, status: Int, message: Str) Void"},
+		{name: "module variable", line: 5, char: 25, want: "responses::api_name: Str"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pos := protocol.Position{Line: tt.line, Character: tt.char}
+			info := computeHover(source, filePath, pos)
+			if info == nil {
+				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
+			}
+			if !strings.Contains(info.content, tt.want) {
+				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
+			}
+		})
+	}
+}
+
+// TestHoverTraitMethodReference verifies trait-typed receiver method hovers.
+func TestHoverTraitMethodReference(t *testing.T) {
+	source := `fn render(value: Str::ToString) Str {
+  value.to_str()
+}
+`
+
+	pos := protocol.Position{Line: 1, Character: 9}
+	info := computeHover(source, "test.ard", pos)
 	if info == nil {
 		t.Fatalf("expected hover info, got nil")
 	}
-	want := "fn responses::json_error(mut res: http::Response, status: Int, message: Str) Void"
+	want := "fn Str::ToString.to_str() Str"
 	if !strings.Contains(info.content, want) {
 		t.Errorf("hover content = %q, want contains %q", info.content, want)
+	}
+}
+
+// TestHoverGenericImportedMembers verifies imported generic fields and methods substitute type args.
+func TestHoverGenericImportedMembers(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	boxesSource := `struct Box {
+  item: $T,
+}
+
+impl Box {
+  fn get() $T {
+    self.item
+  }
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "boxes.ard"), []byte(boxesSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use test_project/boxes
+
+fn main(box: boxes::Box<Int>) {
+  let item = box.item
+  box.get()
+}
+`
+	filePath := filepath.Join(root, "main.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		line uint32
+		char uint32
+		want string
+	}{
+		{name: "generic field", line: 3, char: 18, want: "boxes::Box<Int>.item: Int"},
+		{name: "generic method", line: 4, char: 7, want: "fn boxes::Box<Int>.get() Int"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pos := protocol.Position{Line: tt.line, Character: tt.char}
+			info := computeHover(source, filePath, pos)
+			if info == nil {
+				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
+			}
+			if !strings.Contains(info.content, tt.want) {
+				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
+			}
+		})
 	}
 }
 

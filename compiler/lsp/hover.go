@@ -107,6 +107,15 @@ func typeDeclString(t parse.DeclaredType) string {
 		s = "[" + typeDeclString(tt.Element) + "]"
 	case *parse.Map:
 		s = "[" + typeDeclString(tt.Key) + ":" + typeDeclString(tt.Value) + "]"
+	case *parse.CustomType:
+		s = tt.Name
+		if len(tt.TypeArgs) > 0 {
+			args := make([]string, len(tt.TypeArgs))
+			for i, arg := range tt.TypeArgs {
+				args[i] = typeDeclString(arg)
+			}
+			s += "<" + strings.Join(args, ", ") + ">"
+		}
 	default:
 		s = t.GetName()
 		// Map parser's canonical names to Ard surface names
@@ -357,6 +366,78 @@ func importedTypeDisplayParts(typeName string) (alias string, memberName string,
 	return parts[0], parts[1], true
 }
 
+func importedTypeGenericArgs(typeName string) []string {
+	typeName = strings.TrimSpace(normalizeDisplayType(typeName))
+	typeName = strings.TrimSuffix(typeName, "?")
+	start := strings.Index(typeName, "<")
+	if start < 0 || !strings.HasSuffix(typeName, ">") {
+		return nil
+	}
+	return splitTopLevel(typeName[start+1:len(typeName)-1], ',')
+}
+
+func splitTopLevel(s string, sep rune) []string {
+	parts := []string{}
+	start := 0
+	bracketDepth := 0
+	parenDepth := 0
+	angleDepth := 0
+	for i, r := range s {
+		switch r {
+		case '[':
+			bracketDepth++
+		case ']':
+			bracketDepth--
+		case '(':
+			parenDepth++
+		case ')':
+			parenDepth--
+		case '<':
+			angleDepth++
+		case '>':
+			angleDepth--
+		default:
+			if r == sep && bracketDepth == 0 && parenDepth == 0 && angleDepth == 0 {
+				parts = append(parts, strings.TrimSpace(s[start:i]))
+				start = i + len(string(r))
+			}
+		}
+	}
+	parts = append(parts, strings.TrimSpace(s[start:]))
+	return parts
+}
+
+func genericParamNames(t checker.Type) []string {
+	switch def := t.(type) {
+	case *checker.StructDef:
+		return def.GenericParams
+	case *checker.ExternType:
+		return def.GenericParams
+	}
+	return nil
+}
+
+func substituteImportedGenericDisplay(typeDisplay string, importedType checker.Type, ownerType string) string {
+	args := importedTypeGenericArgs(ownerType)
+	params := genericParamNames(importedType)
+	if len(args) == 0 || len(args) != len(params) {
+		return typeDisplay
+	}
+	out := typeDisplay
+	for i, param := range params {
+		out = strings.ReplaceAll(out, "$"+param, args[i])
+	}
+	return out
+}
+
+func substituteImportedGenericSignature(sig *hoverMethodSignature, importedType checker.Type, ownerType string) {
+	sig.OwnerType = ownerType
+	for i := range sig.Params {
+		sig.Params[i].Type = substituteImportedGenericDisplay(sig.Params[i].Type, importedType, ownerType)
+	}
+	sig.ReturnType = substituteImportedGenericDisplay(sig.ReturnType, importedType, ownerType)
+}
+
 func importedModuleForAlias(alias string, prog *parse.Program, filePath string) (checker.Module, bool) {
 	if prog == nil {
 		return nil, false
@@ -366,6 +447,9 @@ func importedModuleForAlias(alias string, prog *parse.Program, filePath string) 
 			continue
 		}
 		return moduleForImport(imp, filePath)
+	}
+	if path := preludeModulePath(alias); path != "" {
+		return checker.FindEmbeddedModuleForTarget(path, "")
 	}
 	return nil, false
 }
@@ -702,8 +786,14 @@ func walkExpr(expr parse.Expression, target parse.Point) parse.Expression {
 		}
 	case *parse.StaticProperty:
 		recurse(e.Target)
-		if inner := walkExpr(e.Property, target); inner != nil {
-			best = inner
+		if pointInRange(target, e.Property.GetLocation()) {
+			if _, ok := e.Property.(*parse.Identifier); ok {
+				best = e
+			} else if inner := walkExpr(e.Property, target); inner != nil {
+				best = inner
+			} else {
+				best = e
+			}
 		}
 	case *parse.StaticFunction:
 		recurse(e.Target)
@@ -796,10 +886,7 @@ func describeExpr(expr parse.Expression, source string, filePath string, prog *p
 	case *parse.InstanceMethod:
 		return describeInstanceMethod(e, source, filePath, prog)
 	case *parse.StaticProperty:
-		if id, ok := e.Property.(*parse.Identifier); ok {
-			return simpleHover(fmt.Sprintf("%s::%s", e.Target, id.Name))
-		}
-		return simpleHover(fmt.Sprintf("%v::?", e.Target))
+		return describeStaticProperty(e, source, filePath, prog)
 	case *parse.StaticFunction:
 		return describeStaticFunction(e, source, filePath, prog)
 	case *parse.VariableDeclaration:
@@ -864,6 +951,10 @@ func describeIdentifier(id *parse.Identifier, source string, filePath string, pr
 	// Fall back to parse-tree scanning
 	info := scanForType(id.Name, prog.Statements)
 	if info != nil {
+		return info
+	}
+
+	if info := describeModuleAlias(id.Name, prog); info != nil {
 		return info
 	}
 
@@ -1268,6 +1359,18 @@ func scanForType(name string, stmts []parse.Statement) *hoverInfo {
 	return nil
 }
 
+func describeModuleAlias(name string, prog *parse.Program) *hoverInfo {
+	if prog == nil {
+		return nil
+	}
+	for _, imp := range prog.Imports {
+		if imp.Name == name {
+			return simpleHover(fmt.Sprintf("module %s: %s", imp.Name, imp.Path))
+		}
+	}
+	return nil
+}
+
 // builtinType returns hover info for known built-in identifiers.
 func builtinType(name string) *hoverInfo {
 	switch name {
@@ -1367,7 +1470,7 @@ func findImportedStructFieldType(ownerType string, fieldName string, prog *parse
 	if fieldType == nil {
 		return ""
 	}
-	return checkerTypeString(fieldType)
+	return substituteImportedGenericDisplay(checkerTypeString(fieldType), importedType, ownerType)
 }
 
 // describeInstanceMethod returns hover info for an instance method call.
@@ -1440,11 +1543,21 @@ func findImportedInstanceMethodSignature(ownerType string, methodName string, pr
 		method = def.Methods[methodName]
 	case *checker.Enum:
 		method = def.Methods[methodName]
+	case *checker.Trait:
+		for _, traitMethod := range def.GetMethods() {
+			if traitMethod.Name == methodName {
+				m := traitMethod
+				method = &m
+				break
+			}
+		}
 	}
 	if method == nil {
 		return nil
 	}
-	return checkerMethodSignature(ownerType, method)
+	sig := checkerMethodSignature(ownerType, method)
+	substituteImportedGenericSignature(sig, importedType, ownerType)
+	return sig
 }
 
 func checkerMethodSignature(ownerType string, fd *checker.FunctionDef) *hoverMethodSignature {
@@ -1716,6 +1829,7 @@ func resultTypes(ownerType string) (string, string, bool) {
 func topLevelIndex(s string, sep rune) int {
 	bracketDepth := 0
 	parenDepth := 0
+	angleDepth := 0
 	for i, r := range s {
 		switch r {
 		case '[':
@@ -1726,8 +1840,12 @@ func topLevelIndex(s string, sep rune) int {
 			parenDepth++
 		case ')':
 			parenDepth--
+		case '<':
+			angleDepth++
+		case '>':
+			angleDepth--
 		default:
-			if r == sep && bracketDepth == 0 && parenDepth == 0 {
+			if r == sep && bracketDepth == 0 && parenDepth == 0 && angleDepth == 0 {
 				return i
 			}
 		}
@@ -1795,6 +1913,41 @@ func describeFunctionCall(fc *parse.FunctionCall, source string, filePath string
 	}
 
 	return simpleHover(fmt.Sprintf("fn %s(...)", fc.Name))
+}
+
+func describeStaticProperty(sp *parse.StaticProperty, source string, filePath string, prog *parse.Program) *hoverInfo {
+	target := simpleExprName(sp.Target)
+	property := simpleExprName(sp.Property)
+	if target == "" || property == "" {
+		return simpleHover(fmt.Sprintf("%v::?", sp.Target))
+	}
+	if info := importedStaticPropertyHover(target, property, prog, filePath); info != nil {
+		return info
+	}
+	return simpleHover(fmt.Sprintf("%s::%s", target, property))
+}
+
+func importedStaticPropertyHover(target string, property string, prog *parse.Program, filePath string) *hoverInfo {
+	mod, lookupName, ok := importedStaticLookup(target, property, prog, filePath)
+	if !ok {
+		return nil
+	}
+	if varType := checkerModuleVariableType(mod, lookupName); varType != nil {
+		return simpleHover(fmt.Sprintf("%s::%s: %s", target, property, qualifyTypeDisplay(checkerTypeString(varType), prog, filePath)))
+	}
+	return nil
+}
+
+func checkerModuleVariableType(mod checker.Module, name string) checker.Type {
+	if mod == nil || mod.Program() == nil {
+		return nil
+	}
+	for _, stmt := range mod.Program().Statements {
+		if v, ok := stmt.Stmt.(*checker.VariableDef); ok && v.Name == name {
+			return v.Type()
+		}
+	}
+	return nil
 }
 
 func describeStaticFunction(sf *parse.StaticFunction, source string, filePath string, prog *parse.Program) *hoverInfo {
@@ -2111,28 +2264,29 @@ func resolveStaticFunctionSignature(sf *parse.StaticFunction, prog *parse.Progra
 }
 
 func importedStaticFunctionSignature(target string, name string, prog *parse.Program, filePath string) *hoverStaticFunctionSignature {
-	alias, memberPrefix := splitStaticTarget(target)
-	mod, ok := importedModuleForAlias(alias, prog, filePath)
+	mod, lookupName, ok := importedStaticLookup(target, name, prog, filePath)
 	if !ok {
-		path := preludeModulePath(alias)
-		if path == "" {
-			return nil
-		}
-		mod, ok = checker.FindEmbeddedModuleForTarget(path, "")
-		if !ok {
-			return nil
-		}
-	}
-
-	lookupName := name
-	if memberPrefix != "" {
-		lookupName = memberPrefix + "::" + name
+		return nil
 	}
 	sym := mod.Get(lookupName)
 	if sym.IsZero() {
 		return nil
 	}
 	return checkerStaticFunctionSignature(target, name, sym.Type)
+}
+
+func importedStaticLookup(target string, name string, prog *parse.Program, filePath string) (checker.Module, string, bool) {
+	alias, memberPrefix := splitStaticTarget(target)
+	mod, ok := importedModuleForAlias(alias, prog, filePath)
+	if !ok {
+		return nil, "", false
+	}
+
+	lookupName := name
+	if memberPrefix != "" {
+		lookupName = memberPrefix + "::" + name
+	}
+	return mod, lookupName, true
 }
 
 func splitStaticTarget(target string) (alias string, memberPrefix string) {
