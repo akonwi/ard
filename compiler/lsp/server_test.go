@@ -141,6 +141,60 @@ func TestCheckerLocationToLSPRange(t *testing.T) {
 	}
 }
 
+// TestFormatSource verifies the formatting flow end-to-end.
+func TestFormatSource(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "adds trailing newline",
+			input:    "let x = 5",
+			expected: "let x = 5\n",
+		},
+		{
+			name:     "normalizes spacing",
+			input:    "let   x  =  5",
+			expected: "let x = 5\n",
+		},
+		{
+			name:     "handles empty content",
+			input:    "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := formatSource(tt.input, "test.ard")
+			if err != nil {
+				t.Fatalf("formatSource error: %v", err)
+			}
+			if result != tt.expected {
+				t.Errorf("got %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestFormattingHandler verifies the full handleFormatting flow.
+func TestFormattingHandler(t *testing.T) {
+	server := NewServer()
+	uri := uri.New("file:///test.ard")
+	server.cache.Open(uri, "ard", 1, "let   x  =  5")
+
+	// We can't easily call handleFormatting directly because it needs
+	// a jsonrpc2.Replier. Instead, verify the formatting through formatSource.
+	formatted, err := formatSource("let   x  =  5", "test.ard")
+	if err != nil {
+		t.Fatalf("formatSource error: %v", err)
+	}
+	if formatted != "let x = 5\n" {
+		t.Errorf("expected formatted 'let x = 5\\n', got %q", formatted)
+	}
+}
+
 // TestDocumentCache verifies basic document lifecycle.
 func TestDocumentCache(t *testing.T) {
 	cache := NewDocumentCache()

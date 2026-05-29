@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/parse"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -49,35 +50,12 @@ func parseAndCheck(source string, filePath string) ([]checker.Diagnostic, error)
 	return c.Diagnostics(), nil
 }
 
-// formatSource formats an Ard source file using the existing formatter.
 func formatSource(source string, filePath string) (string, error) {
-	formatted, err := formatArdSource([]byte(source), filePath)
+	formatted, err := formatter.Format([]byte(source), filePath)
 	if err != nil {
 		return source, err
 	}
 	return string(formatted), nil
-}
-
-// formatArdSource wraps the formatter package call.
-// This is a thin wrapper so we can test separately if needed.
-var formatArdSource = func(source []byte, filePath string) ([]byte, error) {
-	return formatViaFormatter(source, filePath)
-}
-
-// formatViaFormatter is the actual formatter call, separated for testability.
-func formatViaFormatter(source []byte, filePath string) ([]byte, error) {
-	if formatFn == nil {
-		return source, fmt.Errorf("formatter not initialized")
-	}
-	return formatFn(source, filePath)
-}
-
-// formatFn is set from main.go to point at the real formatter.
-var formatFn func(source []byte, filePath string) ([]byte, error)
-
-// SetFormatter wires the compiler's formatter into the LSP package.
-func SetFormatter(fn func(source []byte, filePath string) ([]byte, error)) {
-	formatFn = fn
 }
 
 // checkerDiagnosticsToLSP converts checker.Diagnostics to LSP Diagnostics.

@@ -156,7 +156,6 @@ func main() {
 		}
 	case "lsp":
 		{
-			lsp.SetFormatter(formatter.Format)
 			ctx := context.Background()
 			server := lsp.NewServer()
 			if err := server.Run(ctx); err != nil {
