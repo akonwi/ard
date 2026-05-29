@@ -207,6 +207,175 @@ func normalizeDisplayType(t string) string {
 	return t
 }
 
+func qualifyStaticFunctionSignature(sig *hoverStaticFunctionSignature, prog *parse.Program, filePath string) {
+	for i := range sig.Params {
+		sig.Params[i].Type = qualifyTypeDisplay(sig.Params[i].Type, prog, filePath)
+	}
+	sig.ReturnType = qualifyTypeDisplay(sig.ReturnType, prog, filePath)
+}
+
+func qualifyMethodSignature(sig *hoverMethodSignature, prog *parse.Program, filePath string) {
+	sig.OwnerType = qualifyTypeDisplay(sig.OwnerType, prog, filePath)
+	for i := range sig.Params {
+		sig.Params[i].Type = qualifyTypeDisplay(sig.Params[i].Type, prog, filePath)
+	}
+	sig.ReturnType = qualifyTypeDisplay(sig.ReturnType, prog, filePath)
+}
+
+func qualifyTypeDisplay(typeName string, prog *parse.Program, filePath string) string {
+	if typeName == "" || prog == nil {
+		return typeName
+	}
+	aliases := importedTypeAliases(prog, filePath)
+	if len(aliases) == 0 {
+		return normalizeDisplayType(typeName)
+	}
+	return qualifyTypeNames(normalizeDisplayType(typeName), aliases)
+}
+
+func qualifyTypeNames(typeName string, aliases map[string]string) string {
+	var out strings.Builder
+	for i := 0; i < len(typeName); {
+		ch := typeName[i]
+		if isTypeIdentStart(ch) {
+			start := i
+			i++
+			for i < len(typeName) && isTypeIdentPart(typeName[i]) {
+				i++
+			}
+			ident := typeName[start:i]
+			if qualified, ok := aliases[ident]; ok && !isAlreadyQualified(typeName, start) && !isGenericName(typeName, start) {
+				out.WriteString(qualified)
+			} else {
+				out.WriteString(ident)
+			}
+			continue
+		}
+		out.WriteByte(ch)
+		i++
+	}
+	return out.String()
+}
+
+func isTypeIdentStart(ch byte) bool {
+	return ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+}
+
+func isTypeIdentPart(ch byte) bool {
+	return isTypeIdentStart(ch) || (ch >= '0' && ch <= '9')
+}
+
+func isAlreadyQualified(s string, start int) bool {
+	return start >= 2 && s[start-2:start] == "::"
+}
+
+func isGenericName(s string, start int) bool {
+	return start > 0 && s[start-1] == '$'
+}
+
+func importedTypeAliases(prog *parse.Program, filePath string) map[string]string {
+	aliases := map[string]string{}
+	ambiguous := map[string]bool{}
+	localTypes := localTypeNames(prog.Statements)
+
+	for _, imp := range prog.Imports {
+		for _, name := range importedPublicTypeNames(imp, filePath) {
+			if localTypes[name] || ambiguous[name] {
+				continue
+			}
+			qualified := imp.Name + "::" + name
+			if existing, ok := aliases[name]; ok && existing != qualified {
+				delete(aliases, name)
+				ambiguous[name] = true
+				continue
+			}
+			aliases[name] = qualified
+		}
+	}
+
+	return aliases
+}
+
+func localTypeNames(stmts []parse.Statement) map[string]bool {
+	names := map[string]bool{}
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *parse.StructDefinition:
+			names[s.Name.Name] = true
+		case *parse.EnumDefinition:
+			names[s.Name] = true
+		case *parse.TypeDeclaration:
+			names[s.Name.Name] = true
+		case *parse.ExternTypeDeclaration:
+			names[s.Name] = true
+		case *parse.TraitDefinition:
+			names[s.Name.Name] = true
+		}
+	}
+	return names
+}
+
+func importedPublicTypeNames(imp parse.Import, filePath string) []string {
+	if strings.HasPrefix(imp.Path, "ard/") {
+		mod, ok := checker.FindEmbeddedModuleForTarget(imp.Path, "")
+		if !ok {
+			return nil
+		}
+		return checkerModuleTypeNames(mod)
+	}
+
+	if filePath == "" {
+		return nil
+	}
+	moduleResolver, err := checker.NewModuleResolver(filepath.Dir(filePath))
+	if err != nil {
+		return nil
+	}
+	importPath, err := moduleResolver.ResolveImportPath(imp.Path)
+	if err != nil {
+		return nil
+	}
+	ast, err := moduleResolver.LoadModule(imp.Path)
+	if err != nil {
+		return nil
+	}
+	c := checker.New(importPath, ast, moduleResolver, checker.CheckOptions{})
+	c.Check()
+	return checkerModuleTypeNames(c.Module())
+}
+
+func checkerModuleTypeNames(mod checker.Module) []string {
+	if mod == nil || mod.Program() == nil {
+		return nil
+	}
+	names := []string{}
+	for _, stmt := range mod.Program().Statements {
+		name := checkerStatementTypeName(stmt)
+		if name == "" {
+			continue
+		}
+		if sym := mod.Get(name); sym.IsZero() {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+func checkerStatementTypeName(stmt checker.Statement) string {
+	switch s := stmt.Stmt.(type) {
+	case *checker.StructDef:
+		return s.Name
+	case *checker.Enum:
+		return s.Name
+	case *checker.Union:
+		return s.Name
+	case *checker.ExternType:
+		return s.Name_
+	}
+	return ""
+}
+
 // findInStmts walks a list of statements to find the expression at target.
 func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expression) {
 	defer func() {
@@ -670,7 +839,7 @@ func resolveFromChecker(name string, prog *parse.Program, filePath string) strin
 
 	// Try module public symbols first
 	if sym := c.Module().Get(name); !sym.IsZero() {
-		return checkerTypeString(sym.Type)
+		return qualifyTypeDisplay(checkerTypeString(sym.Type), prog, filePath)
 	}
 
 	// Walk the checker's program tree for local variables
@@ -678,7 +847,7 @@ func resolveFromChecker(name string, prog *parse.Program, filePath string) strin
 	if checkerProg == nil {
 		return ""
 	}
-	return findTypeInCheckerProg(name, checkerProg.Statements)
+	return qualifyTypeDisplay(findTypeInCheckerProg(name, checkerProg.Statements), prog, filePath)
 }
 
 // findTypeInCheckerProg walks checker statements to find a variable by name.
@@ -1132,6 +1301,7 @@ func findStructFieldType(structName string, fieldName string, stmts []parse.Stat
 // describeInstanceMethod returns hover info for an instance method call.
 func describeInstanceMethod(im *parse.InstanceMethod, source string, filePath string, prog *parse.Program) *hoverInfo {
 	if sig := resolveInstanceMethodSignature(im, prog); sig != nil {
+		qualifyMethodSignature(sig, prog, filePath)
 		return simpleHover(formatMethodSignature(sig))
 	}
 	return simpleHover(fmt.Sprintf(".%s(...)", im.Method.Name))
@@ -1525,6 +1695,7 @@ func describeFunctionCall(fc *parse.FunctionCall, source string, filePath string
 
 func describeStaticFunction(sf *parse.StaticFunction, source string, filePath string, prog *parse.Program) *hoverInfo {
 	if sig := resolveStaticFunctionSignature(sf, prog); sig != nil {
+		qualifyStaticFunctionSignature(sig, prog, filePath)
 		return simpleHover(formatStaticFunctionSignature(sig))
 	}
 	return simpleHover(fmt.Sprintf("%s::%s(...)", sf.Target, sf.Function.Name))
@@ -1819,7 +1990,7 @@ func typeFromDecl(vd *parse.VariableDeclaration) string {
 
 func resolveStaticFunctionReturnType(sf *parse.StaticFunction, prog *parse.Program) string {
 	if sig := resolveStaticFunctionSignature(sf, prog); sig != nil {
-		return normalizeDisplayType(sig.ReturnType)
+		return qualifyTypeDisplay(sig.ReturnType, prog, lastParseFilepath)
 	}
 	return ""
 }
@@ -1835,7 +2006,8 @@ func resolveStaticFunctionSignature(sf *parse.StaticFunction, prog *parse.Progra
 	return scanStaticFunctionSignature(target, sf.Function.Name, prog.Statements)
 }
 
-func importedStaticFunctionSignature(alias string, name string, prog *parse.Program) *hoverStaticFunctionSignature {
+func importedStaticFunctionSignature(target string, name string, prog *parse.Program) *hoverStaticFunctionSignature {
+	alias, memberPrefix := splitStaticTarget(target)
 	path := ""
 	for _, imp := range prog.Imports {
 		if imp.Name == alias {
@@ -1854,11 +2026,23 @@ func importedStaticFunctionSignature(alias string, name string, prog *parse.Prog
 	if !ok {
 		return nil
 	}
-	sym := mod.Get(name)
+	lookupName := name
+	if memberPrefix != "" {
+		lookupName = memberPrefix + "::" + name
+	}
+	sym := mod.Get(lookupName)
 	if sym.IsZero() {
 		return nil
 	}
-	return checkerStaticFunctionSignature(alias, name, sym.Type)
+	return checkerStaticFunctionSignature(target, name, sym.Type)
+}
+
+func splitStaticTarget(target string) (alias string, memberPrefix string) {
+	parts := strings.SplitN(target, "::", 2)
+	if len(parts) == 1 {
+		return target, ""
+	}
+	return parts[0], parts[1]
 }
 
 func preludeModulePath(alias string) string {

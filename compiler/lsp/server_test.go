@@ -691,6 +691,41 @@ fn main() {
 	}
 }
 
+// TestHoverImportedModuleTypes verifies imported types use the source alias in hovers.
+func TestHoverImportedModuleTypes(t *testing.T) {
+	source := `use ard/http as web
+
+fn main() {
+  let response = web::Response::new(200, "ok")
+  let responses: [web::Response] = [response]
+}
+`
+
+	tests := []struct {
+		name string
+		line uint32
+		char uint32
+		want string
+	}{
+		{name: "inferred imported type", line: 3, char: 7, want: "web::Response"},
+		{name: "imported static constructor", line: 3, char: 33, want: "fn web::Response::new(status: Int, body: Str) web::Response"},
+		{name: "imported type in list", line: 4, char: 7, want: "[web::Response]"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pos := protocol.Position{Line: tt.line, Character: tt.char}
+			info := computeHover(source, "test.ard", pos)
+			if info == nil {
+				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
+			}
+			if !strings.Contains(info.content, tt.want) {
+				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
+			}
+		})
+	}
+}
+
 // TestHoverImportedStaticResultMethod verifies instance method hovers after imported static calls.
 func TestHoverImportedStaticResultMethod(t *testing.T) {
 	source := `use ard/io
