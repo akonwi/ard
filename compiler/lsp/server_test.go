@@ -1,6 +1,8 @@
 package lsp
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -192,6 +194,331 @@ func TestFormattingHandler(t *testing.T) {
 	}
 	if formatted != "let x = 5\n" {
 		t.Errorf("expected formatted 'let x = 5\\n', got %q", formatted)
+	}
+}
+
+// TestHoverPositions verifies hover returns correct type info.
+func TestHoverPositions(t *testing.T) {
+	tests := []struct {
+		name     string
+		source   string
+		line     uint32
+		char     uint32
+		want     string
+	}{
+		{
+			name:   "string literal",
+			source: `let x = "hello"` + "\n",
+			line:   0,
+			char:   8,
+			want:   "Str",
+		},
+		{
+			name:   "int literal",
+			source: `let y = 42` + "\n",
+			line:   0,
+			char:   8,
+			want:   "Int",
+		},
+		{
+			name:   "bool literal",
+			source: `let z = true` + "\n",
+			line:   0,
+			char:   8,
+			want:   "Bool",
+		},
+		{
+			name:   "float literal",
+			source: `let f = 3.14` + "\n",
+			line:   0,
+			char:   8,
+			want:   "Float",
+		},
+		{
+			name:   "variable declaration with type",
+			source: `let name: Str = "hello"` + "\n",
+			line:   0,
+			char:   4,
+			want:   "name: Str",
+		},
+		{
+			name:   "builtin true",
+			source: `let a = true` + "\n",
+			line:   0,
+			char:   8,
+			want:   "Bool",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pos := protocol.Position{Line: tt.line, Character: tt.char}
+			info := computeHover(tt.source, pos)
+			if info == nil {
+				t.Fatalf("expected hover info, got nil")
+			}
+			if !strings.Contains(info.content, tt.want) {
+				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
+			}
+		})
+	}
+}
+
+// TestHoverInsideFunction verifies we find inner expressions, not the outer function signature.
+func TestHoverInsideFunction(t *testing.T) {
+	source := `fn greet(name: Str) Str {
+    let msg = "Hello"
+    msg
+}` + "\n"
+
+	tests := []struct {
+		name string
+		line uint32
+		char uint32
+		want string
+	}{
+		{
+			name: "hover on string literal",
+			line: 1,
+			char: 14,
+			want: "Str",
+		},
+		{
+			name: "hover on variable name in body",
+			line: 2,
+			char: 4,
+			want: "msg: Str",
+		},
+		{
+			name: "hover on function name",
+			line: 0,
+			char: 3,
+			want: "fn greet",
+		},
+		{
+			name: "hover on parameter",
+			line: 0,
+			char: 11,
+			want: "name: Str",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pos := protocol.Position{Line: tt.line, Character: tt.char}
+			info := computeHover(source, pos)
+			if info == nil {
+				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
+			}
+			if !strings.Contains(info.content, tt.want) {
+				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
+			}
+		})
+	}
+}
+
+// TestHoverOnSampleFile verifies hover doesn't panic on a real source file.
+func TestHoverOnSampleFile(t *testing.T) {
+	source := `// samples/concurrent_stress.ard
+// Stress test for concurrent interpreter safety
+
+use ard/async
+use ard/io
+
+fn sum_items(items: [Int]) Int {
+  mut sum = 0
+  for item in items {
+    sum =+ item
+  }
+  sum
+}
+
+fn count_evens(items: [Int]) Int {
+  mut count = 0
+  for item in items {
+    if item % 2 == 0 {
+      count =+ 1
+    }
+  }
+  count
+}
+
+fn expensive_work(n: Int) Int {
+  async::sleep(10000000)
+  mut result = 0
+  for i in 1..n {
+    result =+ (i * i)
+  }
+  result
+}
+
+fn main() {
+  io::print("=== Concurrent Stress Test ===")
+
+  // Test 1: Multiple concurrent batch operations
+  io::print("Test 1: Concurrent batch processing")
+
+  let batch1 = [1, 2, 3, 4, 5]
+  let batch2 = [6, 7, 8, 9, 10]
+  let batch3 = [11, 12, 13, 14, 15]
+  let batch4 = [16, 17, 18, 19, 20]
+  let batch5 = [21, 22, 23, 24, 25]
+
+  mut fibers: [async::Fiber<Int>] = []
+  fibers.push(async::eval(fn() { sum_items(batch1) }))
+  fibers.push(async::eval(fn() { sum_items(batch2) }))
+  fibers.push(async::eval(fn() { sum_items(batch3) }))
+  fibers.push(async::eval(fn() { sum_items(batch4) }))
+  fibers.push(async::eval(fn() { sum_items(batch5) }))
+
+  async::join(fibers)
+
+  mut total_sum = 0
+  for f in fibers {
+    total_sum =+ f.get()
+  }
+
+  io::print("Sum results:")
+  io::print("Total: ")
+  io::print(total_sum.to_str())
+
+  // Test 2: Even counting in parallel
+  io::print("Test 2: Even counting")
+
+  mut even_fibers: [async::Fiber<Int>] = []
+  even_fibers.push(async::eval(fn() { count_evens(batch1) }))
+  even_fibers.push(async::eval(fn() { count_evens(batch2) }))
+  even_fibers.push(async::eval(fn() { count_evens(batch3) }))
+  even_fibers.push(async::eval(fn() { count_evens(batch4) }))
+  even_fibers.push(async::eval(fn() { count_evens(batch5) }))
+
+  async::join(even_fibers)
+
+  mut total_evens = 0
+  for f in even_fibers {
+    total_evens =+ f.get()
+  }
+
+  io::print("Even counts total: ")
+  io::print(total_evens.to_str())
+
+  // Test 3: Expensive computations
+  io::print("Test 3: Expensive work")
+
+  mut work_fibers: [async::Fiber<Int>] = []
+  for i in 0..100 {
+    work_fibers.push(async::eval(fn() { expensive_work(i) }))
+  }
+
+  async::join(work_fibers)
+
+  mut work_total = 0
+  for f in work_fibers {
+    work_total =+ f.get()
+  }
+
+  io::print("Work total: ")
+  io::print(work_total.to_str())
+
+  io::print("=== All concurrent tests completed ===")
+}
+`
+
+	// Test hover at several positions that are likely to be hovered
+	positions := []struct {
+		line uint32
+		char uint32
+	}{
+		{0, 15},   // comment
+		{5, 3},    // `fn sum_items` — function name
+		{6, 6},    // `mut sum` — variable declaration
+		{7, 13},   // `items` in for loop
+		{8, 4},    // `sum =+ item` — variable assignment
+		{10, 2},   // `sum` as return value
+		{22, 6},   // `main` function
+		{24, 4},   // `io::print(...)` — function call
+		{30, 6},   // `batch1` identifier
+		{33, 13},  // `fibers` identifier
+		{35, 20},  // `batch2` inside function call
+		{52, 12},  // `f.get()` — method call
+		{59, 6},   // `even_fibers` identifier
+		{80, 11},  // `i` in `for i in 0..100`
+		{105, 8},  // `===` string inside print
+	}
+
+	for _, pos := range positions {
+		t.Run(fmt.Sprintf("line_%d_col_%d", pos.line, pos.char), func(t *testing.T) {
+			pt := protocol.Position{Line: pos.line, Character: pos.char}
+			// Should not panic — recover if it does
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("panic at %d:%d: %v", pos.line, pos.char, r)
+				}
+			}()
+			info := computeHover(source, pt)
+			// info can be nil — that's ok as long as we don't panic
+			_ = info
+		})
+	}
+}
+
+// TestHoverInferredExpression verifies type inference from function calls and identifiers.
+func TestHoverInferredExpression(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		line   uint32
+		char   uint32
+		want   string
+	}{
+		{
+			name:   "variable from function call",
+			source: "fn get_value() Int { 42 }\nlet x = get_value()\n",
+			line:   1,
+			char:   6,
+			want:   "x: Int",
+		},
+		{
+			name:   "variable from another variable",
+			source: "let a: Str = \"hi\"\nlet b = a\n",
+			line:   1,
+			char:   6,
+			want:   "b: Str",
+		},
+		{
+			name:   "variable from binary expression",
+			source: "let x = 1 + 2\n",
+			line:   0,
+			char:   6,
+			want:   "x: Int",
+		},
+		{
+			name:   "variable from string concat",
+			source: "let x = \"hello\" + \"world\"\n",
+			line:   0,
+			char:   6,
+			want:   "x: Str",
+		},
+		{
+			name:   "variable from comparison",
+			source: "let x = 1 > 2\n",
+			line:   0,
+			char:   6,
+			want:   "x: Bool",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pos := protocol.Position{Line: tt.line, Character: tt.char}
+			info := computeHover(tt.source, pos)
+			if info == nil {
+				t.Fatalf("expected hover info, got nil")
+			}
+			if !strings.Contains(info.content, tt.want) {
+				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
+			}
+		})
 	}
 }
 

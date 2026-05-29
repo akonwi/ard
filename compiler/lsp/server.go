@@ -218,9 +218,35 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
-	_ = params
 
-	return reply(ctx, nil, nil)
+	doc := s.cache.Get(params.TextDocument.URI)
+	if doc == nil {
+		return reply(ctx, nil, nil)
+	}
+
+	// Recover from panics in hover computation so the LSP server stays alive.
+	var info *hoverInfo
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				info = nil
+			}
+		}()
+		info = computeHover(doc.Text, params.Position)
+	}()
+
+	if info == nil || info.content == "" {
+		return reply(ctx, nil, nil)
+	}
+
+	result := &protocol.Hover{
+		Contents: protocol.MarkupContent{
+			Kind:  protocol.Markdown,
+			Value: info.content,
+		},
+	}
+
+	return reply(ctx, result, nil)
 }
 
 func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {

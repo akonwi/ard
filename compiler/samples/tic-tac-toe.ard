@@ -2,7 +2,7 @@ use ard/io
 use ard/maybe
 
 struct Board {
-  cells: [Str]
+  cells: [Str],
 }
 
 impl Board {
@@ -32,7 +32,7 @@ impl Board {
   fn can_play(pos: Int) Bool {
     match pos < self.cells.size() {
       true => self.cells.at(pos).is_empty(),
-      false => false
+      false => false,
     }
   }
 
@@ -91,12 +91,12 @@ fn read_move(player: Str) Int {
   let input = Int::from_str(input_str).or(-1)
   match input >= 1 and input <= 9 {
     true => input - 1,
-    false => -1
+    false => -1,
   }
 }
 
 fn main() {
-  mut board = Board{ cells: ["","","","","","","","",""] }
+  mut board = Board{cells: ["", "", "", "", "", "", "", "", ""]}
 
   let players = ["X", "O"]
 
@@ -132,7 +132,7 @@ fn main() {
           finished = true
           break
         },
-        _ => {}
+        _ => (),
       }
     }
 
