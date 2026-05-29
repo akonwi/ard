@@ -332,6 +332,66 @@ func TestVariables(t *testing.T) {
 			},
 		},
 		{
+			name: "Match binding inherits mutability from mutable Maybe",
+			input: strings.Join([]string{
+				`use ard/maybe`,
+				`struct State { cursor: Int }`,
+				`fn main() {`,
+				`  mut s: State? = maybe::some(State{cursor: 0})`,
+				`  match s {`,
+				`    cur => { cur.cursor = cur.cursor + 1 },`,
+				`    _ => (),`,
+				`  }`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Match binding from immutable Maybe stays immutable",
+			input: strings.Join([]string{
+				`use ard/maybe`,
+				`struct State { cursor: Int }`,
+				`fn main() {`,
+				`  let s: State? = maybe::some(State{cursor: 0})`,
+				`  match s {`,
+				`    cur => { cur.cursor = cur.cursor + 1 },`,
+				`    _ => (),`,
+				`  }`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Immutable: cur.cursor"},
+			},
+		},
+		{
+			name: "For-in list binding inherits mutability from mutable list",
+			input: strings.Join([]string{
+				`struct Item { v: Int }`,
+				`fn main() {`,
+				`  mut items: [Item] = [Item{v: 0}]`,
+				`  for it in items {`,
+				`    it.v = 7`,
+				`  }`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "For-in list binding from immutable list stays immutable",
+			input: strings.Join([]string{
+				`struct Item { v: Int }`,
+				`fn main() {`,
+				`  let items: [Item] = [Item{v: 0}]`,
+				`  for it in items {`,
+				`    it.v = 7`,
+				`  }`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Immutable: it.v"},
+			},
+		},
+		{
 			name:  "Reassigning types must match",
 			input: strings.Join([]string{`mut name = "Bob"`, `name = 0`}, "\n"),
 			diagnostics: []checker.Diagnostic{
