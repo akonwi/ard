@@ -496,16 +496,16 @@ func builtinType(name string) *hoverInfo {
 // describeVariableDecl returns hover info for a variable declaration.
 func describeVariableDecl(vd *parse.VariableDeclaration) *hoverInfo {
 	if vd.Type != nil {
-		return simpleHover(fmt.Sprintf("%s: %s", vd.Name, typeDeclString(vd.Type)))
+		return simpleHover(typeDeclString(vd.Type))
 	}
 	// Try to infer from the value using the full expression resolver
 	if vd.Value != nil {
 		inferred := inferExprType(vd.Value)
 		if inferred != "" && inferred != "?" {
-			return simpleHover(fmt.Sprintf("%s: %s", vd.Name, inferred))
+			return simpleHover(inferred)
 		}
 	}
-	return simpleHover(fmt.Sprintf("%s: ?", vd.Name))
+	return simpleHover("?")
 }
 
 // describeFunctionDecl returns hover info for a function declaration.
