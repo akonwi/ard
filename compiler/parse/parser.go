@@ -2962,6 +2962,10 @@ func (p *parser) memberAccess() (Expression, error) {
 					if !p.check(right_paren) {
 						// Could not find ')', return partial function call
 						return &StaticFunction{
+							Location: Location{
+								Start: expr.GetLocation().Start,
+								End:   Point{Row: funcName.line, Col: funcName.column},
+							},
 							Target: expr,
 							Function: FunctionCall{
 								Name:     funcName.text,
@@ -2980,6 +2984,10 @@ func (p *parser) memberAccess() (Expression, error) {
 
 				// Create the StaticFunction with type arguments
 				expr = &StaticFunction{
+					Location: Location{
+						Start: expr.GetLocation().Start,
+						End:   Point{Row: p.previous().line, Col: p.previous().column},
+					},
 					Target: expr,
 					Function: FunctionCall{
 						Name:     funcName.text,
@@ -3001,11 +3009,19 @@ func (p *parser) memberAccess() (Expression, error) {
 				switch prop := call.(type) {
 				case *Identifier:
 					expr = &StaticProperty{
+						Location: Location{
+							Start: expr.GetLocation().Start,
+							End:   prop.GetLocation().End,
+						},
 						Target:   expr,
 						Property: prop,
 					}
 				case *FunctionCall:
 					expr = &StaticFunction{
+						Location: Location{
+							Start: expr.GetLocation().Start,
+							End:   prop.GetLocation().End,
+						},
 						Target:   expr,
 						Function: *prop,
 					}

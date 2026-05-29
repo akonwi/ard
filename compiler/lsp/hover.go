@@ -224,6 +224,28 @@ func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expres
 					best = inner
 				}
 			}
+			for _, matchCase := range s.Cases {
+				if matchCase.Pattern != nil {
+					if inner := walkExpr(matchCase.Pattern, target); inner != nil {
+						best = inner
+					}
+				}
+				if inner := findInStmts(matchCase.Body, target); inner != nil {
+					best = inner
+				}
+			}
+			continue
+		case *parse.ConditionalMatchExpression:
+			for _, matchCase := range s.Cases {
+				if matchCase.Condition != nil {
+					if inner := walkExpr(matchCase.Condition, target); inner != nil {
+						best = inner
+					}
+				}
+				if inner := findInStmts(matchCase.Body, target); inner != nil {
+					best = inner
+				}
+			}
 			continue
 		case *parse.Try:
 			if s.Expression != nil {
@@ -244,9 +266,30 @@ func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expres
 				}
 			}
 			continue
-		case *parse.StructDefinition, *parse.ImplBlock, *parse.EnumDefinition,
-			*parse.TraitDefinition, *parse.TraitImplementation, *parse.ExternTypeDeclaration,
-			*parse.ExternalFunction, *parse.TypeDeclaration, *parse.Comment,
+		case *parse.ImplBlock:
+			for _, m := range s.Methods {
+				if inner := findInStmts([]parse.Statement{&m}, target); inner != nil {
+					best = inner
+				}
+			}
+			continue
+		case *parse.TraitImplementation:
+			for _, m := range s.Methods {
+				if inner := findInStmts([]parse.Statement{&m}, target); inner != nil {
+					best = inner
+				}
+			}
+			continue
+		case *parse.TraitDefinition:
+			for _, m := range s.Methods {
+				if inner := findInStmts([]parse.Statement{&m}, target); inner != nil {
+					best = inner
+				}
+			}
+			continue
+		case *parse.StructDefinition, *parse.EnumDefinition,
+			*parse.ExternTypeDeclaration, *parse.ExternalFunction,
+			*parse.TypeDeclaration, *parse.Comment,
 			*parse.StaticFunctionDeclaration:
 			continue
 		}
@@ -298,6 +341,9 @@ func walkExpr(expr parse.Expression, target parse.Point) parse.Expression {
 		}
 	case *parse.InstanceMethod:
 		recurse(e.Target)
+		for _, arg := range e.Method.Args {
+			recurse(arg.Value)
+		}
 	case *parse.StaticProperty:
 		recurse(e.Target)
 		if inner := walkExpr(e.Property, target); inner != nil {
@@ -305,6 +351,9 @@ func walkExpr(expr parse.Expression, target parse.Point) parse.Expression {
 		}
 	case *parse.StaticFunction:
 		recurse(e.Target)
+		for _, arg := range e.Function.Args {
+			recurse(arg.Value)
+		}
 	case *parse.ListLiteral:
 		for _, item := range e.Items {
 			recurse(item)
@@ -316,6 +365,19 @@ func walkExpr(expr parse.Expression, target parse.Point) parse.Expression {
 		}
 	case *parse.MatchExpression:
 		recurse(e.Subject)
+		for _, matchCase := range e.Cases {
+			recurse(matchCase.Pattern)
+			if inner := findInStmts(matchCase.Body, target); inner != nil {
+				best = inner
+			}
+		}
+	case *parse.ConditionalMatchExpression:
+		for _, matchCase := range e.Cases {
+			recurse(matchCase.Condition)
+			if inner := findInStmts(matchCase.Body, target); inner != nil {
+				best = inner
+			}
+		}
 	case *parse.Try:
 		recurse(e.Expression)
 	case *parse.BlockExpression:
@@ -376,7 +438,7 @@ func describeExpr(expr parse.Expression, source string, filePath string, prog *p
 	case *parse.InstanceProperty:
 		return simpleHover(fmt.Sprintf(".%s", e.Property.Name))
 	case *parse.InstanceMethod:
-		return simpleHover(fmt.Sprintf(".%s(...)", e.Method.Name))
+		return describeInstanceMethod(e, source, filePath, prog)
 	case *parse.StaticProperty:
 		if id, ok := e.Property.(*parse.Identifier); ok {
 			return simpleHover(fmt.Sprintf("%s::%s", e.Target, id.Name))
@@ -385,7 +447,7 @@ func describeExpr(expr parse.Expression, source string, filePath string, prog *p
 	case *parse.StaticFunction:
 		return simpleHover(fmt.Sprintf("%s::%s(...)", e.Target, e.Function.Name))
 	case *parse.VariableDeclaration:
-		return describeVariableDecl(e)
+		return describeVariableDecl(e, source, filePath, prog)
 	case *parse.FunctionDeclaration:
 		return describeFunctionDecl(e)
 	case *parse.ListLiteral:
@@ -721,7 +783,7 @@ func scanForType(name string, stmts []parse.Statement) *hoverInfo {
 		switch s := stmt.(type) {
 		case *parse.VariableDeclaration:
 			if s.Name == name {
-				return describeVariableDecl(s)
+				return describeVariableDecl(s, "", "", nil)
 			}
 		case *parse.FunctionDeclaration:
 			if s.Name == name {
@@ -787,10 +849,19 @@ func builtinType(name string) *hoverInfo {
 }
 
 // describeVariableDecl returns hover info for a variable declaration.
-func describeVariableDecl(vd *parse.VariableDeclaration) *hoverInfo {
+func describeVariableDecl(vd *parse.VariableDeclaration, source string, filePath string, prog *parse.Program) *hoverInfo {
 	if vd.Type != nil {
 		return simpleHover(typeDeclString(vd.Type))
 	}
+
+	// Try the checker for resolved types (handles complex initializers)
+	if prog != nil {
+		if t := resolveFromChecker(vd.Name, prog, filePath); t != "" && t != "?" {
+			return simpleHover(t)
+		}
+	}
+
+	// Fall back to parse-tree inference
 	if vd.Value != nil {
 		inferred := inferExprType(vd.Value)
 		if inferred != "" && inferred != "?" {
@@ -798,6 +869,11 @@ func describeVariableDecl(vd *parse.VariableDeclaration) *hoverInfo {
 		}
 	}
 	return simpleHover("?")
+}
+
+// describeInstanceMethod returns hover info for an instance method call.
+func describeInstanceMethod(im *parse.InstanceMethod, source string, filePath string, prog *parse.Program) *hoverInfo {
+	return simpleHover(fmt.Sprintf(".%s(...)", im.Method.Name))
 }
 
 // describeFunctionDecl returns hover info for a function declaration.
@@ -938,6 +1014,9 @@ func inferExprType(expr parse.Expression) string {
 		return resolveFunctionReturnType(e.Name)
 	case *parse.InstanceProperty:
 		return resolveIdentType(e.Property.Name)
+	case *parse.InstanceMethod:
+		// Infer from the method call chain — try the function call fallback
+		return resolveFunctionReturnType(e.Method.Name)
 	case *parse.StaticProperty:
 		if id, ok := e.Property.(*parse.Identifier); ok {
 			return resolveIdentType(id.Name)

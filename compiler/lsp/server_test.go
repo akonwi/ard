@@ -520,6 +520,20 @@ func TestHoverInferredExpression(t *testing.T) {
 			char:   13,
 			want:   "Board",
 		},
+		{
+			name:   "variable from static method chain",
+			source: "fn main() {\n  let input = Int::from_str(\"9\").or(-1)\n  input\n}\n",
+			line:   1,
+			char:   6,
+			want:   "Int",
+		},
+		{
+			name: "variable in match case body",
+			source: "fn read_move() Int {\n  let input = Int::from_str(\"9\").or(-1)\n  match input >= 1 and input <= 9 {\n    true => input - 1,\n    false => -1,\n  }\n}\n",
+			line: 3,
+			char: 13,
+			want: "Int",
+		},
 	}
 
 	for _, tt := range tests {
