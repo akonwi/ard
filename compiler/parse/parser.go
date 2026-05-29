@@ -2868,11 +2868,19 @@ func (p *parser) memberAccess() (Expression, error) {
 				expr = &InstanceProperty{
 					Target:   expr,
 					Property: *prop,
+					Location: Location{
+						Start: expr.GetLocation().Start,
+						End:   prop.GetLocation().End,
+					},
 				}
 			case *FunctionCall:
 				expr = &InstanceMethod{
 					Target: expr,
 					Method: *prop,
+					Location: Location{
+						Start: expr.GetLocation().Start,
+						End:   prop.GetLocation().End,
+					},
 				}
 			}
 		} else {
