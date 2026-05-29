@@ -2822,6 +2822,10 @@ func (p *parser) unary() (Expression, error) {
 				return nil, err
 			}
 			return &UnaryExpression{
+				Location: Location{
+					Start: opToken.getLocation().Start,
+					End:   operand.GetLocation().End,
+				},
 				Operator: Not,
 				Operand:  operand,
 			}, nil
@@ -2831,6 +2835,10 @@ func (p *parser) unary() (Expression, error) {
 				return nil, err
 			}
 			return &UnaryExpression{
+				Location: Location{
+					Start: opToken.getLocation().Start,
+					End:   operand.GetLocation().End,
+				},
 				Operator: Minus,
 				Operand:  operand,
 			}, nil

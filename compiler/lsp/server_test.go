@@ -506,6 +506,20 @@ func TestHoverInferredExpression(t *testing.T) {
 			char:   6,
 			want:   "x: Bool",
 		},
+		{
+			name:   "variable from struct instance",
+			source: "struct Board { cells: [Str] }\nmut board = Board{cells: []}\n",
+			line:   1,
+			char:   10,
+			want:   "board: Board",
+		},
+		{
+			name:   "board in while loop method chain",
+			source: "struct Board {\n  cells: [Str]\n}\nimpl Board {\n  fn is_full() Bool { false }\n}\nfn main() {\n  mut board = Board{cells: []}\n  while not board.is_full() {\n    board.do_stuff()\n  }\n}\n",
+			line:   7,
+			char:   13,
+			want:   "board: Board",
+		},
 	}
 
 	for _, tt := range tests {

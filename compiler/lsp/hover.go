@@ -134,8 +134,11 @@ func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expres
 			}
 			continue
 		case *parse.FunctionDeclaration:
-			// Default: cursor is somewhere in the function declaration itself
-			best = s
+			// Only show the function signature when cursor is on its first line
+			// (the fn keyword / name line), not when somewhere in the body.
+			if target.Row == s.Location.Start.Row {
+				best = s
+			}
 			for _, p := range s.Parameters {
 				if inner := walkExpr(&p, target); inner != nil {
 					best = inner
@@ -603,6 +606,8 @@ func inferExprType(expr parse.Expression) string {
 		return "List"
 	case *parse.MapLiteral:
 		return "Map"
+	case *parse.StructInstance:
+		return e.Name.Name
 	case *parse.Identifier:
 		// Look up identifiers — they might reference a variable or function
 		return resolveIdentType(e.Name)
