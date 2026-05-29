@@ -316,32 +316,78 @@ func localTypeNames(stmts []parse.Statement) map[string]bool {
 }
 
 func importedPublicTypeNames(imp parse.Import, filePath string) []string {
-	if strings.HasPrefix(imp.Path, "ard/") {
-		mod, ok := checker.FindEmbeddedModuleForTarget(imp.Path, "")
-		if !ok {
-			return nil
+	mod, ok := moduleForImport(imp, filePath)
+	if !ok {
+		return nil
+	}
+	return checkerModuleTypeNames(mod)
+}
+
+func importedTypeForDisplay(typeName string, prog *parse.Program, filePath string) (checker.Type, bool) {
+	alias, memberName, ok := importedTypeDisplayParts(typeName)
+	if !ok {
+		return nil, false
+	}
+	mod, ok := importedModuleForAlias(alias, prog, filePath)
+	if !ok {
+		return nil, false
+	}
+	sym := mod.Get(memberName)
+	if sym.IsZero() {
+		return nil, false
+	}
+	return sym.Type, true
+}
+
+func importedTypeDisplayParts(typeName string) (alias string, memberName string, ok bool) {
+	typeName = strings.TrimSpace(normalizeDisplayType(typeName))
+	typeName = strings.TrimSuffix(typeName, "?")
+	if genericStart := strings.Index(typeName, "<"); genericStart >= 0 {
+		typeName = typeName[:genericStart]
+	}
+	parts := strings.SplitN(typeName, "::", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+func importedModuleForAlias(alias string, prog *parse.Program, filePath string) (checker.Module, bool) {
+	if prog == nil {
+		return nil, false
+	}
+	for _, imp := range prog.Imports {
+		if imp.Name != alias {
+			continue
 		}
-		return checkerModuleTypeNames(mod)
+		return moduleForImport(imp, filePath)
+	}
+	return nil, false
+}
+
+func moduleForImport(imp parse.Import, filePath string) (checker.Module, bool) {
+	if strings.HasPrefix(imp.Path, "ard/") {
+		return checker.FindEmbeddedModuleForTarget(imp.Path, "")
 	}
 
 	if filePath == "" {
-		return nil
+		return nil, false
 	}
 	moduleResolver, err := checker.NewModuleResolver(filepath.Dir(filePath))
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	importPath, err := moduleResolver.ResolveImportPath(imp.Path)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	ast, err := moduleResolver.LoadModule(imp.Path)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	c := checker.New(importPath, ast, moduleResolver, checker.CheckOptions{})
 	c.Check()
-	return checkerModuleTypeNames(c.Module())
+	return c.Module(), true
 }
 
 func checkerModuleTypeNames(mod checker.Module) []string {
@@ -1255,7 +1301,9 @@ func describeVariableDecl(vd *parse.VariableDeclaration, source string, filePath
 
 // describeInstanceProperty returns hover info for an instance field access.
 func describeInstanceProperty(ip *parse.InstanceProperty, source string, filePath string, prog *parse.Program) *hoverInfo {
-	ownerType, fieldType := resolveInstancePropertyType(ip, prog)
+	ownerType, fieldType := resolveInstancePropertyType(ip, prog, filePath)
+	ownerType = qualifyTypeDisplay(ownerType, prog, filePath)
+	fieldType = qualifyTypeDisplay(fieldType, prog, filePath)
 	if ownerType != "" && fieldType != "" && fieldType != "?" {
 		return simpleHover(fmt.Sprintf("%s.%s: %s", ownerType, ip.Property.Name, fieldType))
 	}
@@ -1266,18 +1314,21 @@ func describeInstanceProperty(ip *parse.InstanceProperty, source string, filePat
 }
 
 // resolveInstancePropertyType returns the receiver type and field type for a field access.
-func resolveInstancePropertyType(ip *parse.InstanceProperty, prog *parse.Program) (string, string) {
+func resolveInstancePropertyType(ip *parse.InstanceProperty, prog *parse.Program, filePath string) (string, string) {
 	if ip == nil || prog == nil {
 		return "", ""
 	}
 
-	ownerType := inferExprType(ip.Target)
-	ownerType = strings.TrimPrefix(ownerType, "?")
+	ownerType := normalizeDisplayType(inferExprType(ip.Target))
+	ownerType = strings.TrimSuffix(ownerType, "?")
 	if ownerType == "" || ownerType == "?" {
 		return "", ""
 	}
 
 	if fieldType := findStructFieldType(ownerType, ip.Property.Name, prog.Statements); fieldType != "" {
+		return ownerType, fieldType
+	}
+	if fieldType := findImportedStructFieldType(ownerType, ip.Property.Name, prog, filePath); fieldType != "" {
 		return ownerType, fieldType
 	}
 	return ownerType, ""
@@ -1298,16 +1349,32 @@ func findStructFieldType(structName string, fieldName string, stmts []parse.Stat
 	return ""
 }
 
+func findImportedStructFieldType(ownerType string, fieldName string, prog *parse.Program, filePath string) string {
+	importedType, ok := importedTypeForDisplay(ownerType, prog, filePath)
+	if !ok {
+		return ""
+	}
+	structDef, ok := importedType.(*checker.StructDef)
+	if !ok {
+		return ""
+	}
+	fieldType := structDef.Fields[fieldName]
+	if fieldType == nil {
+		return ""
+	}
+	return checkerTypeString(fieldType)
+}
+
 // describeInstanceMethod returns hover info for an instance method call.
 func describeInstanceMethod(im *parse.InstanceMethod, source string, filePath string, prog *parse.Program) *hoverInfo {
-	if sig := resolveInstanceMethodSignature(im, prog); sig != nil {
+	if sig := resolveInstanceMethodSignature(im, prog, filePath); sig != nil {
 		qualifyMethodSignature(sig, prog, filePath)
 		return simpleHover(formatMethodSignature(sig))
 	}
 	return simpleHover(fmt.Sprintf(".%s(...)", im.Method.Name))
 }
 
-func resolveInstanceMethodSignature(im *parse.InstanceMethod, prog *parse.Program) *hoverMethodSignature {
+func resolveInstanceMethodSignature(im *parse.InstanceMethod, prog *parse.Program, filePath string) *hoverMethodSignature {
 	if im == nil || prog == nil {
 		return nil
 	}
@@ -1321,7 +1388,10 @@ func resolveInstanceMethodSignature(im *parse.InstanceMethod, prog *parse.Progra
 	if sig := builtinMethodSignature(ownerType, im.Method.Name); sig != nil {
 		return sig
 	}
-	return findInstanceMethodSignature(ownerType, im.Method.Name, prog.Statements)
+	if sig := findInstanceMethodSignature(ownerType, im.Method.Name, prog.Statements); sig != nil {
+		return sig
+	}
+	return findImportedInstanceMethodSignature(ownerType, im.Method.Name, prog, filePath)
 }
 
 func findInstanceMethodSignature(ownerType string, methodName string, stmts []parse.Statement) *hoverMethodSignature {
@@ -1351,6 +1421,35 @@ func findInstanceMethodSignature(ownerType string, methodName string, stmts []pa
 		}
 	}
 	return nil
+}
+
+func findImportedInstanceMethodSignature(ownerType string, methodName string, prog *parse.Program, filePath string) *hoverMethodSignature {
+	importedType, ok := importedTypeForDisplay(ownerType, prog, filePath)
+	if !ok {
+		return nil
+	}
+
+	var method *checker.FunctionDef
+	switch def := importedType.(type) {
+	case *checker.StructDef:
+		method = def.Methods[methodName]
+	case *checker.Enum:
+		method = def.Methods[methodName]
+	}
+	if method == nil {
+		return nil
+	}
+	return checkerMethodSignature(ownerType, method)
+}
+
+func checkerMethodSignature(ownerType string, fd *checker.FunctionDef) *hoverMethodSignature {
+	return &hoverMethodSignature{
+		OwnerType:  ownerType,
+		Name:       fd.Name,
+		Params:     checkerHoverParams(fd.Parameters),
+		ReturnType: checkerTypeString(fd.ReturnType),
+		Mutates:    fd.Mutates,
+	}
 }
 
 func methodDeclSignature(ownerType string, fd *parse.FunctionDeclaration) *hoverMethodSignature {
@@ -1794,14 +1893,14 @@ func inferExprType(expr parse.Expression) string {
 	case *parse.FunctionCall:
 		return resolveFunctionReturnType(e.Name)
 	case *parse.InstanceProperty:
-		_, fieldType := resolveInstancePropertyType(e, lastParseProgram)
+		_, fieldType := resolveInstancePropertyType(e, lastParseProgram, lastParseFilepath)
 		if fieldType != "" {
-			return fieldType
+			return qualifyTypeDisplay(fieldType, lastParseProgram, lastParseFilepath)
 		}
 		return resolveIdentType(e.Property.Name)
 	case *parse.InstanceMethod:
-		if sig := resolveInstanceMethodSignature(e, lastParseProgram); sig != nil && sig.ReturnType != "" {
-			return sig.ReturnType
+		if sig := resolveInstanceMethodSignature(e, lastParseProgram, lastParseFilepath); sig != nil && sig.ReturnType != "" {
+			return qualifyTypeDisplay(sig.ReturnType, lastParseProgram, lastParseFilepath)
 		}
 		return resolveFunctionReturnType(e.Method.Name)
 	case *parse.StaticFunction:

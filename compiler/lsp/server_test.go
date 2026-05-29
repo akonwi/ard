@@ -695,6 +695,13 @@ fn main() {
 func TestHoverImportedModuleTypes(t *testing.T) {
 	source := `use ard/http as web
 
+fn inspect(req: web::Request, response: web::Response) {
+  let url = req.url
+  let method = req.method
+  response.is_ok()
+  req.method.to_str()
+}
+
 fn main() {
   let response = web::Response::new(200, "ok")
   let responses: [web::Response] = [response]
@@ -707,9 +714,13 @@ fn main() {
 		char uint32
 		want string
 	}{
-		{name: "inferred imported type", line: 3, char: 7, want: "web::Response"},
-		{name: "imported static constructor", line: 3, char: 33, want: "fn web::Response::new(status: Int, body: Str) web::Response"},
-		{name: "imported type in list", line: 4, char: 7, want: "[web::Response]"},
+		{name: "imported string field", line: 3, char: 17, want: "web::Request.url: Str"},
+		{name: "imported field type", line: 4, char: 21, want: "web::Request.method: web::Method"},
+		{name: "imported struct method", line: 5, char: 12, want: "fn web::Response.is_ok() Bool"},
+		{name: "imported enum method after field", line: 6, char: 14, want: "fn web::Method.to_str() Str"},
+		{name: "inferred imported type", line: 10, char: 7, want: "web::Response"},
+		{name: "imported static constructor", line: 10, char: 33, want: "fn web::Response::new(status: Int, body: Str) web::Response"},
+		{name: "imported type in list", line: 11, char: 7, want: "[web::Response]"},
 	}
 
 	for _, tt := range tests {
