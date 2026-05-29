@@ -199,6 +199,140 @@ func TestFormattingHandler(t *testing.T) {
 	}
 }
 
+func requireDefinition(t *testing.T, source string, filePath string, line uint32, char uint32) protocol.Location {
+	t.Helper()
+	locations := computeDefinition(source, filePath, protocol.Position{Line: line, Character: char})
+	if len(locations) != 1 {
+		t.Fatalf("expected 1 definition, got %d: %#v", len(locations), locations)
+	}
+	return locations[0]
+}
+
+func assertDefinitionStart(t *testing.T, loc protocol.Location, filePath string, line uint32, char uint32) {
+	t.Helper()
+	if got := loc.URI.Filename(); got != filePath {
+		t.Fatalf("definition file = %q, want %q", got, filePath)
+	}
+	if loc.Range.Start.Line != line || loc.Range.Start.Character != char {
+		t.Fatalf("definition start = %d:%d, want %d:%d", loc.Range.Start.Line, loc.Range.Start.Character, line, char)
+	}
+}
+
+// TestDefinitionLocalSymbols verifies go-to-definition for local symbols.
+func TestDefinitionLocalSymbols(t *testing.T) {
+	source := `fn add(left: Int, right: Int) Int {
+  left + right
+}
+
+fn main() Int {
+  let value = 40
+  let result = add(value, 2)
+  result
+}
+`
+	filePath := filepath.Join(t.TempDir(), "test.ard")
+
+	t.Run("function call", func(t *testing.T) {
+		loc := requireDefinition(t, source, filePath, 6, 16)
+		assertDefinitionStart(t, loc, filePath, 0, 0)
+	})
+	t.Run("local variable use", func(t *testing.T) {
+		loc := requireDefinition(t, source, filePath, 7, 3)
+		assertDefinitionStart(t, loc, filePath, 6, 2)
+	})
+	t.Run("argument local variable", func(t *testing.T) {
+		loc := requireDefinition(t, source, filePath, 6, 20)
+		assertDefinitionStart(t, loc, filePath, 5, 2)
+	})
+	t.Run("parameter", func(t *testing.T) {
+		loc := requireDefinition(t, source, filePath, 1, 3)
+		assertDefinitionStart(t, loc, filePath, 0, 7)
+	})
+}
+
+// TestDefinitionImportedModuleSymbols verifies go-to-definition across imported modules.
+func TestDefinitionImportedModuleSymbols(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	responsesSource := `use ard/http
+
+let api_name = "ranger"
+
+fn json_error(mut res: http::Response, status: Int, message: Str) {
+  res.status = status
+}
+`
+	responsesPath := filepath.Join(root, "responses.ard")
+	if err := os.WriteFile(responsesPath, []byte(responsesSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use ard/http
+use test_project/responses
+
+fn main(mut res: http::Response) {
+  responses::json_error(res, 400, "Nope")
+  let name = responses::api_name
+}
+`
+	filePath := filepath.Join(root, "routes.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("imported function", func(t *testing.T) {
+		loc := requireDefinition(t, source, filePath, 4, 15)
+		assertDefinitionStart(t, loc, responsesPath, 4, 0)
+	})
+	t.Run("module variable", func(t *testing.T) {
+		loc := requireDefinition(t, source, filePath, 5, 25)
+		assertDefinitionStart(t, loc, responsesPath, 2, 0)
+	})
+}
+
+// TestDefinitionImportedInstanceMembers verifies go-to-definition for imported fields and methods.
+func TestDefinitionImportedInstanceMembers(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	boxesSource := `struct Box {
+  item: $T,
+}
+
+impl Box {
+  fn get() $T {
+    self.item
+  }
+}
+`
+	boxesPath := filepath.Join(root, "boxes.ard")
+	if err := os.WriteFile(boxesPath, []byte(boxesSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use test_project/boxes
+
+fn main(box: boxes::Box<Int>) {
+  let item = box.item
+  box.get()
+}
+`
+	filePath := filepath.Join(root, "main.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("field", func(t *testing.T) {
+		loc := requireDefinition(t, source, filePath, 3, 18)
+		assertDefinitionStart(t, loc, boxesPath, 1, 2)
+	})
+	t.Run("method", func(t *testing.T) {
+		loc := requireDefinition(t, source, filePath, 4, 7)
+		assertDefinitionStart(t, loc, boxesPath, 5, 2)
+	})
+}
+
 // TestHoverPositions verifies hover returns correct type info.
 func TestHoverPositions(t *testing.T) {
 	tests := []struct {

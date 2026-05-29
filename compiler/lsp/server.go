@@ -121,10 +121,10 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 
 	result := &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
-			TextDocumentSync: protocol.TextDocumentSyncKindFull,
-			HoverProvider:    true,
-			DefinitionProvider: true,
-			ReferencesProvider: true,
+			TextDocumentSync:       protocol.TextDocumentSyncKindFull,
+			HoverProvider:          true,
+			DefinitionProvider:     true,
+			ReferencesProvider:     true,
 			DocumentSymbolProvider: true,
 			CompletionProvider: &protocol.CompletionOptions{
 				TriggerCharacters: []string{".", ":"},
@@ -132,7 +132,7 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 			SignatureHelpProvider: &protocol.SignatureHelpOptions{
 				TriggerCharacters: []string{"(", ","},
 			},
-			DocumentHighlightProvider: true,
+			DocumentHighlightProvider:  true,
 			DocumentFormattingProvider: true,
 		},
 		ServerInfo: &protocol.ServerInfo{
@@ -254,9 +254,26 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
-	_ = params
 
-	return reply(ctx, nil, nil)
+	doc := s.cache.Get(params.TextDocument.URI)
+	if doc == nil {
+		return reply(ctx, []protocol.Location{}, nil)
+	}
+
+	var locations []protocol.Location
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				locations = []protocol.Location{}
+			}
+		}()
+		locations = computeDefinition(doc.Text, doc.URI.Filename(), params.Position)
+	}()
+	if locations == nil {
+		locations = []protocol.Location{}
+	}
+
+	return reply(ctx, locations, nil)
 }
 
 func (s *Server) handleReferences(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
