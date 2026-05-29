@@ -359,6 +359,10 @@ func findFunctionDefinition(name string, stmts []parse.Statement, filePath strin
 			if s.Name == name {
 				return &definitionTarget{filePath: filePath, loc: s.Location}
 			}
+		case *parse.ExternalFunction:
+			if s.Name == name {
+				return &definitionTarget{filePath: filePath, loc: s.Location}
+			}
 		case *parse.StaticFunctionDeclaration:
 			if s.Name == name || simpleExprName(&s.Path) == name {
 				return &definitionTarget{filePath: filePath, loc: s.Location}

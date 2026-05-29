@@ -291,6 +291,35 @@ fn main(mut res: http::Response) {
 	})
 }
 
+// TestDefinitionImportedExternFunction verifies go-to-definition for imported extern functions.
+func TestDefinitionImportedExternFunction(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"linear_cli\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vaxisSource := `extern type Window = "Window"
+
+extern fn window_width(win: Window) Int = "WindowWidth"
+`
+	vaxisPath := filepath.Join(root, "vaxis.ard")
+	if err := os.WriteFile(vaxisPath, []byte(vaxisSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use linear_cli/vaxis
+
+fn main(win: vaxis::Window) Int {
+  vaxis::window_width(win)
+}
+`
+	filePath := filepath.Join(root, "issue_tab.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loc := requireDefinition(t, source, filePath, 3, 15)
+	assertDefinitionStart(t, loc, vaxisPath, 2, 7)
+}
+
 // TestDefinitionImportedInstanceMembers verifies go-to-definition for imported fields and methods.
 func TestDefinitionImportedInstanceMembers(t *testing.T) {
 	root := t.TempDir()
