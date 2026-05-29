@@ -1268,10 +1268,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					Index:  s.Cursor2.Name,
 					List:   iterValue,
 				}
+				cursorMutable := c.isMutable(iterValue)
 
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursor variable to the scope
-					c.scope.add(s.Cursor.Name, listType.of, false)
+					c.scope.add(s.Cursor.Name, listType.of, cursorMutable)
 					if loop.Index != "" {
 						c.scope.add(loop.Index, Int, false)
 					}
@@ -1293,10 +1294,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					Map: iterable,
 				}
 
+				valueMutable := c.isMutable(iterable)
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursors to the scope
 					c.scope.add(loop.Key, mapType.Key(), false)
-					c.scope.add(loop.Val, mapType.Value(), false)
+					c.scope.add(loop.Val, mapType.Value(), valueMutable)
 				})
 
 				loop.Body = body
@@ -3251,6 +3253,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			var patternIdent *Identifier
 			var someBody *Block
 			var noneBody *Block
+			bindingMutable := c.isMutable(subject)
 
 			// Process the cases
 			for _, matchCase := range s.Cases {
@@ -3265,7 +3268,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						someBody = c.checkMatchArmBlock(matchCase.Body, func() {
 							// Add the pattern name as a variable in the scope with the inner type
 							// For example, if the Maybe is Str?, the pattern should be a Str
-							c.scope.add(id.Name, maybeType.of, false)
+							c.scope.add(id.Name, maybeType.of, bindingMutable)
 						})
 
 						// Create an identifier to use in the Match struct
@@ -3489,6 +3492,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 		// For Union types, generate a UnionMatch
 		if unionType, ok := subject.Type().(*Union); ok {
+			bindingMutable := c.isMutable(subject)
 			// Track which union types we've seen and their corresponding bodies
 			typeCases := make(map[string]*Match)
 			typeCasesByType := make(map[Type]*Match)
@@ -3523,7 +3527,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						break
 					}
 					body := c.checkMatchArmBlock(matchCase.Body, func() {
-						c.scope.add("it", matchedType, false)
+						c.scope.add("it", matchedType, bindingMutable)
 					})
 					matchNode := &Match{
 						Pattern: &Identifier{Name: "it"},
@@ -3552,7 +3556,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 						// Process the body with the matched type binding
 						body := c.checkMatchArmBlock(matchCase.Body, func() {
-							c.scope.add(varName, matchedType, false)
+							c.scope.add(varName, matchedType, bindingMutable)
 						})
 						matchNode := &Match{
 							Pattern: &Identifier{Name: varName},
@@ -3612,6 +3616,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		}
 
 		if resultType, ok := subject.Type().(*Result); ok {
+			bindingMutable := c.isMutable(subject)
 			if len(s.Cases) > 2 {
 				c.addError("Too many cases in match", s.GetLocation())
 				return nil
@@ -3628,14 +3633,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 							okCase = &Match{
 								Pattern: &Identifier{Name: "ok"},
 								Body: c.checkMatchArmBlock(node.Body, func() {
-									c.scope.add("ok", resultType.Val(), false)
+									c.scope.add("ok", resultType.Val(), bindingMutable)
 								}),
 							}
 						case "err":
 							errCase = &Match{
 								Pattern: &Identifier{Name: "err"},
 								Body: c.checkMatchArmBlock(node.Body, func() {
-									c.scope.add("err", resultType.Err(), false)
+									c.scope.add("err", resultType.Err(), bindingMutable)
 								}),
 							}
 						default:
@@ -3651,14 +3656,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 							okCase = &Match{
 								Pattern: &Identifier{Name: varName},
 								Body: c.checkMatchArmBlock(node.Body, func() {
-									c.scope.add(varName, resultType.Val(), false)
+									c.scope.add(varName, resultType.Val(), bindingMutable)
 								}),
 							}
 						case "err":
 							errCase = &Match{
 								Pattern: &Identifier{Name: varName},
 								Body: c.checkMatchArmBlock(node.Body, func() {
-									c.scope.add(varName, resultType.Err(), false)
+									c.scope.add(varName, resultType.Err(), bindingMutable)
 								}),
 							}
 						default:
