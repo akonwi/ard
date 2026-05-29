@@ -603,7 +603,15 @@ func inferExprType(expr parse.Expression) string {
 	case *parse.VoidLiteral:
 		return "Void"
 	case *parse.ListLiteral:
-		return "List"
+		if len(e.Items) == 0 {
+			return "[?]"
+		}
+		// Infer element type from the first item
+		itemType := inferExprType(e.Items[0])
+		if itemType == "" || itemType == "?" {
+			return "List"
+		}
+		return "[" + itemType + "]"
 	case *parse.MapLiteral:
 		return "Map"
 	case *parse.StructInstance:
