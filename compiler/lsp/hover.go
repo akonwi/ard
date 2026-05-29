@@ -79,14 +79,24 @@ func typeDeclString(t parse.DeclaredType) string {
 	if t == nil {
 		return "?"
 	}
-	s := t.GetName()
-	// Map parser's canonical names to Ard surface names
-	switch s {
-	case "String":
-		s = "Str"
-	case "Boolean":
-		s = "Bool"
+
+	var s string
+	switch tt := t.(type) {
+	case *parse.List:
+		s = "[" + typeDeclString(tt.Element) + "]"
+	case *parse.Map:
+		s = "[" + typeDeclString(tt.Key) + ":" + typeDeclString(tt.Value) + "]"
+	default:
+		s = t.GetName()
+		// Map parser's canonical names to Ard surface names
+		switch s {
+		case "String":
+			s = "Str"
+		case "Boolean":
+			s = "Bool"
+		}
 	}
+
 	if t.IsNullable() {
 		s = "?" + s
 	}
@@ -396,7 +406,7 @@ func walkExpr(expr parse.Expression, target parse.Point) parse.Expression {
 	case *parse.InstanceProperty:
 		recurse(e.Target)
 		if pointInRange(target, e.Property.GetLocation()) {
-			return &e.Property
+			best = e
 		}
 	case *parse.InstanceMethod:
 		recurse(e.Target)
@@ -495,7 +505,7 @@ func describeExpr(expr parse.Expression, source string, filePath string, prog *p
 	case *parse.FunctionCall:
 		return describeFunctionCall(e, source, filePath, prog)
 	case *parse.InstanceProperty:
-		return simpleHover(fmt.Sprintf(".%s", e.Property.Name))
+		return describeInstanceProperty(e, source, filePath, prog)
 	case *parse.InstanceMethod:
 		return describeInstanceMethod(e, source, filePath, prog)
 	case *parse.StaticProperty:
@@ -1007,6 +1017,51 @@ func describeVariableDecl(vd *parse.VariableDeclaration, source string, filePath
 	return simpleHover("?")
 }
 
+// describeInstanceProperty returns hover info for an instance field access.
+func describeInstanceProperty(ip *parse.InstanceProperty, source string, filePath string, prog *parse.Program) *hoverInfo {
+	ownerType, fieldType := resolveInstancePropertyType(ip, prog)
+	if ownerType != "" && fieldType != "" && fieldType != "?" {
+		return simpleHover(fmt.Sprintf("%s.%s: %s", ownerType, ip.Property.Name, fieldType))
+	}
+	if fieldType != "" && fieldType != "?" {
+		return simpleHover(fmt.Sprintf(".%s: %s", ip.Property.Name, fieldType))
+	}
+	return simpleHover(fmt.Sprintf(".%s", ip.Property.Name))
+}
+
+// resolveInstancePropertyType returns the receiver type and field type for a field access.
+func resolveInstancePropertyType(ip *parse.InstanceProperty, prog *parse.Program) (string, string) {
+	if ip == nil || prog == nil {
+		return "", ""
+	}
+
+	ownerType := inferExprType(ip.Target)
+	ownerType = strings.TrimPrefix(ownerType, "?")
+	if ownerType == "" || ownerType == "?" {
+		return "", ""
+	}
+
+	if fieldType := findStructFieldType(ownerType, ip.Property.Name, prog.Statements); fieldType != "" {
+		return ownerType, fieldType
+	}
+	return ownerType, ""
+}
+
+func findStructFieldType(structName string, fieldName string, stmts []parse.Statement) string {
+	for _, stmt := range stmts {
+		s, ok := stmt.(*parse.StructDefinition)
+		if !ok || s.Name.Name != structName {
+			continue
+		}
+		for _, field := range s.Fields {
+			if field.Name.Name == fieldName {
+				return typeDeclString(field.Type)
+			}
+		}
+	}
+	return ""
+}
+
 // describeInstanceMethod returns hover info for an instance method call.
 func describeInstanceMethod(im *parse.InstanceMethod, source string, filePath string, prog *parse.Program) *hoverInfo {
 	return simpleHover(fmt.Sprintf(".%s(...)", im.Method.Name))
@@ -1167,6 +1222,10 @@ func inferExprType(expr parse.Expression) string {
 	case *parse.FunctionCall:
 		return resolveFunctionReturnType(e.Name)
 	case *parse.InstanceProperty:
+		_, fieldType := resolveInstancePropertyType(e, lastParseProgram)
+		if fieldType != "" {
+			return fieldType
+		}
 		return resolveIdentType(e.Property.Name)
 	case *parse.InstanceMethod:
 		// Infer from the method call chain — try the function call fallback
