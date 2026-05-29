@@ -2,6 +2,8 @@ package lsp
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -734,6 +736,44 @@ fn main() {
 				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
 			}
 		})
+	}
+}
+
+// TestHoverUserModuleFunctionSignature verifies static function hovers from user imports.
+func TestHoverUserModuleFunctionSignature(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	responsesSource := `use ard/http
+
+fn json_error(mut res: http::Response, status: Int, message: Str) {
+  res.status = status
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "responses.ard"), []byte(responsesSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use ard/http
+use test_project/responses
+
+fn main(mut res: http::Response) {
+  responses::json_error(res, 400, "Nope")
+}
+`
+	filePath := filepath.Join(root, "routes.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pos := protocol.Position{Line: 4, Character: 15}
+	info := computeHover(source, filePath, pos)
+	if info == nil {
+		t.Fatalf("expected hover info, got nil")
+	}
+	want := "fn responses::json_error(mut res: http::Response, status: Int, message: Str) Void"
+	if !strings.Contains(info.content, want) {
+		t.Errorf("hover content = %q, want contains %q", info.content, want)
 	}
 }
 

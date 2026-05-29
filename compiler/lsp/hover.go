@@ -17,8 +17,9 @@ type hoverInfo struct {
 }
 
 type hoverParam struct {
-	Name string
-	Type string
+	Name    string
+	Type    string
+	Mutable bool
 }
 
 type hoverMethodSignature struct {
@@ -163,11 +164,15 @@ func simpleExprName(expr parse.Expression) string {
 func formatHoverParams(params []hoverParam) string {
 	parts := make([]string, len(params))
 	for i, p := range params {
+		mut := ""
+		if p.Mutable {
+			mut = "mut "
+		}
 		if p.Name == "" {
-			parts[i] = normalizeDisplayType(p.Type)
+			parts[i] = mut + normalizeDisplayType(p.Type)
 			continue
 		}
-		parts[i] = fmt.Sprintf("%s: %s", p.Name, normalizeDisplayType(p.Type))
+		parts[i] = fmt.Sprintf("%s%s: %s", mut, p.Name, normalizeDisplayType(p.Type))
 	}
 	return strings.Join(parts, ", ")
 }
@@ -1459,7 +1464,7 @@ func methodDeclSignature(ownerType string, fd *parse.FunctionDeclaration) *hover
 		if p.Type != nil {
 			paramType = normalizeDisplayType(typeDeclString(p.Type))
 		}
-		params[i] = hoverParam{Name: p.Name, Type: paramType}
+		params[i] = hoverParam{Name: p.Name, Type: paramType, Mutable: p.Mutable}
 	}
 
 	retType := "Void"
@@ -1793,7 +1798,7 @@ func describeFunctionCall(fc *parse.FunctionCall, source string, filePath string
 }
 
 func describeStaticFunction(sf *parse.StaticFunction, source string, filePath string, prog *parse.Program) *hoverInfo {
-	if sig := resolveStaticFunctionSignature(sf, prog); sig != nil {
+	if sig := resolveStaticFunctionSignature(sf, prog, filePath); sig != nil {
 		qualifyStaticFunctionSignature(sig, prog, filePath)
 		return simpleHover(formatStaticFunctionSignature(sig))
 	}
@@ -2088,43 +2093,37 @@ func typeFromDecl(vd *parse.VariableDeclaration) string {
 }
 
 func resolveStaticFunctionReturnType(sf *parse.StaticFunction, prog *parse.Program) string {
-	if sig := resolveStaticFunctionSignature(sf, prog); sig != nil {
+	if sig := resolveStaticFunctionSignature(sf, prog, lastParseFilepath); sig != nil {
 		return qualifyTypeDisplay(sig.ReturnType, prog, lastParseFilepath)
 	}
 	return ""
 }
 
-func resolveStaticFunctionSignature(sf *parse.StaticFunction, prog *parse.Program) *hoverStaticFunctionSignature {
+func resolveStaticFunctionSignature(sf *parse.StaticFunction, prog *parse.Program, filePath string) *hoverStaticFunctionSignature {
 	if sf == nil || prog == nil {
 		return nil
 	}
 	target := simpleExprName(sf.Target)
-	if sig := importedStaticFunctionSignature(target, sf.Function.Name, prog); sig != nil {
+	if sig := importedStaticFunctionSignature(target, sf.Function.Name, prog, filePath); sig != nil {
 		return sig
 	}
 	return scanStaticFunctionSignature(target, sf.Function.Name, prog.Statements)
 }
 
-func importedStaticFunctionSignature(target string, name string, prog *parse.Program) *hoverStaticFunctionSignature {
+func importedStaticFunctionSignature(target string, name string, prog *parse.Program, filePath string) *hoverStaticFunctionSignature {
 	alias, memberPrefix := splitStaticTarget(target)
-	path := ""
-	for _, imp := range prog.Imports {
-		if imp.Name == alias {
-			path = imp.Path
-			break
+	mod, ok := importedModuleForAlias(alias, prog, filePath)
+	if !ok {
+		path := preludeModulePath(alias)
+		if path == "" {
+			return nil
+		}
+		mod, ok = checker.FindEmbeddedModuleForTarget(path, "")
+		if !ok {
+			return nil
 		}
 	}
-	if path == "" {
-		path = preludeModulePath(alias)
-	}
-	if path == "" || !strings.HasPrefix(path, "ard/") {
-		return nil
-	}
 
-	mod, ok := checker.FindEmbeddedModuleForTarget(path, "")
-	if !ok {
-		return nil
-	}
 	lookupName := name
 	if memberPrefix != "" {
 		lookupName = memberPrefix + "::" + name
@@ -2180,7 +2179,7 @@ func checkerStaticFunctionSignature(alias string, name string, t checker.Type) *
 func checkerHoverParams(params []checker.Parameter) []hoverParam {
 	out := make([]hoverParam, len(params))
 	for i, p := range params {
-		out[i] = hoverParam{Name: p.Name, Type: checkerTypeString(p.Type)}
+		out[i] = hoverParam{Name: p.Name, Type: checkerTypeString(p.Type), Mutable: p.Mutable}
 	}
 	return out
 }
@@ -2206,7 +2205,7 @@ func parseStaticFunctionSignature(target string, fd *parse.FunctionDeclaration) 
 		if p.Type != nil {
 			paramType = typeDeclString(p.Type)
 		}
-		params[i] = hoverParam{Name: p.Name, Type: paramType}
+		params[i] = hoverParam{Name: p.Name, Type: paramType, Mutable: p.Mutable}
 	}
 
 	retType := "Void"
