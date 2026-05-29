@@ -41,14 +41,18 @@ func TestServerInitializes(t *testing.T) {
 
 // TestCheckerDiagnosticsToLSP verifies the diagnostic conversion handles edge cases.
 func TestCheckerDiagnosticsToLSP(t *testing.T) {
-	// Nil input
-	if result := checkerDiagnosticsToLSP(nil); result != nil {
-		t.Errorf("expected nil for nil input, got %v", result)
+	// Nil input should produce empty slice (not nil) so JSON is [] not null
+	if result := checkerDiagnosticsToLSP(nil); result == nil {
+		t.Error("expected non-nil empty slice for nil input")
+	} else if len(result) != 0 {
+		t.Errorf("expected empty slice, got %v", result)
 	}
 
 	// Empty input
-	if result := checkerDiagnosticsToLSP([]checker.Diagnostic{}); result != nil {
-		t.Errorf("expected nil for empty input, got %v", result)
+	if result := checkerDiagnosticsToLSP([]checker.Diagnostic{}); result == nil {
+		t.Error("expected non-nil empty slice for empty input")
+	} else if len(result) != 0 {
+		t.Errorf("expected empty slice, got %v", result)
 	}
 
 	// Single error diagnostic

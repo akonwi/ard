@@ -81,9 +81,10 @@ func SetFormatter(fn func(source []byte, filePath string) ([]byte, error)) {
 }
 
 // checkerDiagnosticsToLSP converts checker.Diagnostics to LSP Diagnostics.
+// Always returns a non-nil slice so JSON serializes as [] not null.
 func checkerDiagnosticsToLSP(diagnostics []checker.Diagnostic) []protocol.Diagnostic {
 	if len(diagnostics) == 0 {
-		return nil
+		return []protocol.Diagnostic{}
 	}
 
 	result := make([]protocol.Diagnostic, 0, len(diagnostics))
@@ -171,9 +172,13 @@ func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
 }
 
 // sendDiagnostics sends a textDocument/publishDiagnostics notification to the client.
+// diags is converted to an empty slice if nil so JSON serializes as [] not null.
 func (s *Server) sendDiagnostics(ctx context.Context, docURI uri.URI, diags []protocol.Diagnostic) {
 	if s.conn == nil {
 		return
+	}
+	if diags == nil {
+		diags = []protocol.Diagnostic{}
 	}
 
 	params := &protocol.PublishDiagnosticsParams{
