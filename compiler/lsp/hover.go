@@ -16,6 +16,19 @@ type hoverInfo struct {
 	content string // Markdown content
 }
 
+type hoverParam struct {
+	Name string
+	Type string
+}
+
+type hoverMethodSignature struct {
+	OwnerType  string
+	Name       string
+	Params     []hoverParam
+	ReturnType string
+	Mutates    bool
+}
+
 // computeHover finds the expression at the given position and returns hover info.
 func computeHover(source string, filePath string, position protocol.Position) *hoverInfo {
 	target := lspPositionToParsePoint(position)
@@ -138,6 +151,38 @@ func simpleExprName(expr parse.Expression) string {
 		return right
 	}
 	return ""
+}
+
+func formatMethodSignature(sig *hoverMethodSignature) string {
+	params := make([]string, len(sig.Params))
+	for i, p := range sig.Params {
+		if p.Name == "" {
+			params[i] = p.Type
+			continue
+		}
+		params[i] = fmt.Sprintf("%s: %s", p.Name, p.Type)
+	}
+
+	prefix := "fn "
+	if sig.Mutates {
+		prefix += "mut "
+	}
+	owner := normalizeDisplayType(sig.OwnerType)
+	if owner != "" {
+		owner += "."
+	}
+	ret := sig.ReturnType
+	if ret == "" {
+		ret = "Void"
+	}
+	return fmt.Sprintf("%s%s%s(%s) %s", prefix, owner, sig.Name, strings.Join(params, ", "), ret)
+}
+
+func normalizeDisplayType(t string) string {
+	if strings.HasPrefix(t, "?") && len(t) > 1 {
+		return strings.TrimPrefix(t, "?") + "?"
+	}
+	return t
 }
 
 // findInStmts walks a list of statements to find the expression at target.
@@ -1064,7 +1109,334 @@ func findStructFieldType(structName string, fieldName string, stmts []parse.Stat
 
 // describeInstanceMethod returns hover info for an instance method call.
 func describeInstanceMethod(im *parse.InstanceMethod, source string, filePath string, prog *parse.Program) *hoverInfo {
+	if sig := resolveInstanceMethodSignature(im, prog); sig != nil {
+		return simpleHover(formatMethodSignature(sig))
+	}
 	return simpleHover(fmt.Sprintf(".%s(...)", im.Method.Name))
+}
+
+func resolveInstanceMethodSignature(im *parse.InstanceMethod, prog *parse.Program) *hoverMethodSignature {
+	if im == nil || prog == nil {
+		return nil
+	}
+
+	ownerType := inferExprType(im.Target)
+	if ownerType == "" || ownerType == "?" {
+		return nil
+	}
+	ownerType = normalizeDisplayType(ownerType)
+
+	if sig := builtinMethodSignature(ownerType, im.Method.Name); sig != nil {
+		return sig
+	}
+	return findInstanceMethodSignature(ownerType, im.Method.Name, prog.Statements)
+}
+
+func findInstanceMethodSignature(ownerType string, methodName string, stmts []parse.Statement) *hoverMethodSignature {
+	for _, stmt := range stmts {
+		if stmt == nil {
+			continue
+		}
+		switch s := stmt.(type) {
+		case *parse.ImplBlock:
+			if s.Target.Name != ownerType {
+				continue
+			}
+			for i := range s.Methods {
+				if s.Methods[i].Name == methodName {
+					return methodDeclSignature(ownerType, &s.Methods[i])
+				}
+			}
+		case *parse.TraitImplementation:
+			if s.ForType.Name != ownerType {
+				continue
+			}
+			for i := range s.Methods {
+				if s.Methods[i].Name == methodName {
+					return methodDeclSignature(ownerType, &s.Methods[i])
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func methodDeclSignature(ownerType string, fd *parse.FunctionDeclaration) *hoverMethodSignature {
+	params := make([]hoverParam, len(fd.Parameters))
+	for i, p := range fd.Parameters {
+		paramType := "?"
+		if p.Type != nil {
+			paramType = normalizeDisplayType(typeDeclString(p.Type))
+		}
+		params[i] = hoverParam{Name: p.Name, Type: paramType}
+	}
+
+	retType := "Void"
+	if fd.ReturnType != nil {
+		retType = normalizeDisplayType(typeDeclString(fd.ReturnType))
+	}
+
+	return &hoverMethodSignature{
+		OwnerType:  ownerType,
+		Name:       fd.Name,
+		Params:     params,
+		ReturnType: retType,
+		Mutates:    fd.Mutates,
+	}
+}
+
+func builtinMethodSignature(ownerType string, methodName string) *hoverMethodSignature {
+	ownerType = normalizeDisplayType(ownerType)
+	if sig := primitiveMethodSignature(ownerType, methodName); sig != nil {
+		return sig
+	}
+	if sig := listMethodSignature(ownerType, methodName); sig != nil {
+		return sig
+	}
+	if sig := mapMethodSignature(ownerType, methodName); sig != nil {
+		return sig
+	}
+	if sig := maybeMethodSignature(ownerType, methodName); sig != nil {
+		return sig
+	}
+	if sig := resultMethodSignature(ownerType, methodName); sig != nil {
+		return sig
+	}
+	return nil
+}
+
+func primitiveMethodSignature(ownerType string, methodName string) *hoverMethodSignature {
+	mk := func(ret string, params ...hoverParam) *hoverMethodSignature {
+		return &hoverMethodSignature{OwnerType: ownerType, Name: methodName, Params: params, ReturnType: ret}
+	}
+
+	switch ownerType {
+	case "Str":
+		switch methodName {
+		case "at":
+			return mk("Str?", hoverParam{Name: "index", Type: "Int"})
+		case "contains":
+			return mk("Bool", hoverParam{Name: "sub", Type: "Str"})
+		case "is_empty":
+			return mk("Bool")
+		case "replace", "replace_all":
+			return mk("Str", hoverParam{Name: "old", Type: "Str"}, hoverParam{Name: "new", Type: "Str"})
+		case "size":
+			return mk("Int")
+		case "split":
+			return mk("[Str]", hoverParam{Name: "delimeter", Type: "Str"})
+		case "starts_with", "ends_with":
+			return mk("Bool", hoverParam{Name: "str", Type: "Str"})
+		case "to_str":
+			return mk("Str")
+		case "to_dyn":
+			return mk("Dynamic")
+		case "trim":
+			return mk("Str")
+		}
+	case "Int":
+		switch methodName {
+		case "to_str":
+			return mk("Str")
+		case "to_dyn":
+			return mk("Dynamic")
+		}
+	case "Float":
+		switch methodName {
+		case "to_str":
+			return mk("Str")
+		case "to_dyn":
+			return mk("Dynamic")
+		case "to_int":
+			return mk("Int")
+		}
+	case "Bool":
+		switch methodName {
+		case "to_str":
+			return mk("Str")
+		case "to_dyn":
+			return mk("Dynamic")
+		}
+	}
+	return nil
+}
+
+func listMethodSignature(ownerType string, methodName string) *hoverMethodSignature {
+	elementType, ok := listElementType(ownerType)
+	if !ok {
+		return nil
+	}
+
+	mk := func(ret string, mutates bool, params ...hoverParam) *hoverMethodSignature {
+		return &hoverMethodSignature{OwnerType: ownerType, Name: methodName, Params: params, ReturnType: ret, Mutates: mutates}
+	}
+
+	switch methodName {
+	case "at":
+		return mk(elementType, false, hoverParam{Name: "index", Type: "Int"})
+	case "prepend", "push":
+		return mk("Int", true, hoverParam{Name: "value", Type: elementType})
+	case "set":
+		return mk("Bool", true, hoverParam{Name: "index", Type: "Int"}, hoverParam{Name: "value", Type: elementType})
+	case "size":
+		return mk("Int", false)
+	case "sort":
+		return mk("Void", true, hoverParam{Name: "cmp", Type: fmt.Sprintf("fn(%s, %s) Bool", elementType, elementType)})
+	case "swap":
+		return mk("Void", true, hoverParam{Name: "l", Type: "Int"}, hoverParam{Name: "r", Type: "Int"})
+	}
+	return nil
+}
+
+func mapMethodSignature(ownerType string, methodName string) *hoverMethodSignature {
+	keyType, valueType, ok := mapEntryTypes(ownerType)
+	if !ok {
+		return nil
+	}
+
+	mk := func(ret string, mutates bool, params ...hoverParam) *hoverMethodSignature {
+		return &hoverMethodSignature{OwnerType: ownerType, Name: methodName, Params: params, ReturnType: ret, Mutates: mutates}
+	}
+
+	switch methodName {
+	case "get":
+		return mk(valueType+"?", false, hoverParam{Name: "key", Type: keyType})
+	case "keys":
+		return mk("["+keyType+"]", false)
+	case "set":
+		return mk("Bool", true, hoverParam{Name: "key", Type: keyType}, hoverParam{Name: "value", Type: valueType})
+	case "drop":
+		return mk("Void", true, hoverParam{Name: "key", Type: keyType})
+	case "has":
+		return mk("Bool", false, hoverParam{Name: "key", Type: keyType})
+	case "size":
+		return mk("Int", false)
+	}
+	return nil
+}
+
+func maybeMethodSignature(ownerType string, methodName string) *hoverMethodSignature {
+	innerType, ok := maybeInnerType(ownerType)
+	if !ok {
+		return nil
+	}
+
+	ownerType = innerType + "?"
+	mk := func(ret string, params ...hoverParam) *hoverMethodSignature {
+		return &hoverMethodSignature{OwnerType: ownerType, Name: methodName, Params: params, ReturnType: ret}
+	}
+
+	switch methodName {
+	case "expect":
+		return mk(innerType, hoverParam{Name: "message", Type: "Str"})
+	case "is_none":
+		return mk("Bool")
+	case "is_some":
+		return mk("Bool")
+	case "or":
+		return mk(innerType, hoverParam{Name: "default", Type: innerType})
+	case "map":
+		return mk("$Mapped?", hoverParam{Name: "with", Type: fmt.Sprintf("fn(%s) $Mapped", innerType)})
+	case "and_then":
+		return mk("$Mapped?", hoverParam{Name: "with", Type: fmt.Sprintf("fn(%s) $Mapped?", innerType)})
+	}
+	return nil
+}
+
+func resultMethodSignature(ownerType string, methodName string) *hoverMethodSignature {
+	valType, errType, ok := resultTypes(ownerType)
+	if !ok {
+		return nil
+	}
+
+	mk := func(ret string, params ...hoverParam) *hoverMethodSignature {
+		return &hoverMethodSignature{OwnerType: ownerType, Name: methodName, Params: params, ReturnType: ret}
+	}
+
+	switch methodName {
+	case "expect":
+		return mk(valType, hoverParam{Name: "message", Type: "Str"})
+	case "or":
+		return mk(valType, hoverParam{Name: "default", Type: valType})
+	case "is_ok", "is_err":
+		return mk("Bool")
+	case "map":
+		return mk("$MappedVal!"+errType, hoverParam{Name: "with", Type: fmt.Sprintf("fn(%s) $MappedVal", valType)})
+	case "map_err":
+		return mk(valType+"!$MappedErr", hoverParam{Name: "with", Type: fmt.Sprintf("fn(%s) $MappedErr", errType)})
+	case "and_then":
+		return mk("$MappedVal!"+errType, hoverParam{Name: "with", Type: fmt.Sprintf("fn(%s) $MappedVal!%s", valType, errType)})
+	}
+	return nil
+}
+
+func listElementType(ownerType string) (string, bool) {
+	inner, ok := bracketedType(ownerType)
+	if !ok || topLevelIndex(inner, ':') >= 0 {
+		return "", false
+	}
+	return inner, true
+}
+
+func mapEntryTypes(ownerType string) (string, string, bool) {
+	inner, ok := bracketedType(ownerType)
+	if !ok {
+		return "", "", false
+	}
+	idx := topLevelIndex(inner, ':')
+	if idx < 0 {
+		return "", "", false
+	}
+	return strings.TrimSpace(inner[:idx]), strings.TrimSpace(inner[idx+1:]), true
+}
+
+func bracketedType(ownerType string) (string, bool) {
+	ownerType = strings.TrimSpace(ownerType)
+	if !strings.HasPrefix(ownerType, "[") || !strings.HasSuffix(ownerType, "]") {
+		return "", false
+	}
+	return strings.TrimSpace(ownerType[1 : len(ownerType)-1]), true
+}
+
+func maybeInnerType(ownerType string) (string, bool) {
+	ownerType = strings.TrimSpace(ownerType)
+	if strings.HasPrefix(ownerType, "?") && len(ownerType) > 1 {
+		return strings.TrimSpace(ownerType[1:]), true
+	}
+	if strings.HasSuffix(ownerType, "?") && len(ownerType) > 1 {
+		return strings.TrimSpace(ownerType[:len(ownerType)-1]), true
+	}
+	return "", false
+}
+
+func resultTypes(ownerType string) (string, string, bool) {
+	idx := topLevelIndex(ownerType, '!')
+	if idx < 0 {
+		return "", "", false
+	}
+	return strings.TrimSpace(ownerType[:idx]), strings.TrimSpace(ownerType[idx+1:]), true
+}
+
+func topLevelIndex(s string, sep rune) int {
+	bracketDepth := 0
+	parenDepth := 0
+	for i, r := range s {
+		switch r {
+		case '[':
+			bracketDepth++
+		case ']':
+			bracketDepth--
+		case '(':
+			parenDepth++
+		case ')':
+			parenDepth--
+		default:
+			if r == sep && bracketDepth == 0 && parenDepth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // describeFunctionDecl returns hover info for a function declaration.
@@ -1228,8 +1600,15 @@ func inferExprType(expr parse.Expression) string {
 		}
 		return resolveIdentType(e.Property.Name)
 	case *parse.InstanceMethod:
-		// Infer from the method call chain — try the function call fallback
+		if sig := resolveInstanceMethodSignature(e, lastParseProgram); sig != nil && sig.ReturnType != "" {
+			return sig.ReturnType
+		}
 		return resolveFunctionReturnType(e.Method.Name)
+	case *parse.StaticFunction:
+		if ret := resolveStaticFunctionReturnType(e, lastParseProgram); ret != "" {
+			return ret
+		}
+		return "?"
 	case *parse.StaticProperty:
 		if id, ok := e.Property.(*parse.Identifier); ok {
 			return resolveIdentType(id.Name)
@@ -1405,6 +1784,88 @@ func typeFromDecl(vd *parse.VariableDeclaration) string {
 	}
 	if vd.Value != nil {
 		return inferExprType(vd.Value)
+	}
+	return ""
+}
+
+func resolveStaticFunctionReturnType(sf *parse.StaticFunction, prog *parse.Program) string {
+	if sf == nil {
+		return ""
+	}
+	target := simpleExprName(sf.Target)
+	if prog != nil {
+		if ret := importedStaticFunctionReturnType(target, sf.Function.Name, prog); ret != "" {
+			return ret
+		}
+		return scanStaticFunctionReturnType(target, sf.Function.Name, prog.Statements)
+	}
+	return ""
+}
+
+func importedStaticFunctionReturnType(alias string, name string, prog *parse.Program) string {
+	path := ""
+	for _, imp := range prog.Imports {
+		if imp.Name == alias {
+			path = imp.Path
+			break
+		}
+	}
+	if path == "" {
+		path = preludeModulePath(alias)
+	}
+	if path == "" || !strings.HasPrefix(path, "ard/") {
+		return ""
+	}
+
+	mod, ok := checker.FindEmbeddedModuleForTarget(path, "")
+	if !ok {
+		return ""
+	}
+	sym := mod.Get(name)
+	if sym.IsZero() {
+		return ""
+	}
+	return checkerFunctionReturnType(sym.Type)
+}
+
+func preludeModulePath(alias string) string {
+	switch alias {
+	case "Dynamic":
+		return "ard/dynamic"
+	case "Float":
+		return "ard/float"
+	case "Int":
+		return "ard/int"
+	case "List":
+		return "ard/list"
+	case "Map":
+		return "ard/map"
+	case "Str":
+		return "ard/string"
+	}
+	return ""
+}
+
+func checkerFunctionReturnType(t checker.Type) string {
+	switch fn := t.(type) {
+	case *checker.FunctionDef:
+		return normalizeDisplayType(checkerTypeString(fn.ReturnType))
+	case *checker.ExternalFunctionDef:
+		return normalizeDisplayType(checkerTypeString(fn.ReturnType))
+	}
+	return ""
+}
+
+func scanStaticFunctionReturnType(target string, name string, stmts []parse.Statement) string {
+	path := target + "::" + name
+	for _, stmt := range stmts {
+		s, ok := stmt.(*parse.StaticFunctionDeclaration)
+		if !ok {
+			continue
+		}
+		if simpleExprName(&s.Path) == path {
+			return funcReturnTypeString(&s.FunctionDeclaration)
+		}
 	}
 	return ""
 }

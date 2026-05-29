@@ -581,6 +581,7 @@ impl Board {
 		{name: "method parameter pos", line: 4, char: 27, want: "Int"},
 		{name: "self receiver", line: 5, char: 5, want: "Board"},
 		{name: "field in method call", line: 5, char: 10, want: "Board.cells: [Str]"},
+		{name: "list method", line: 5, char: 15, want: "fn mut [Str].set(index: Int, value: Str) Bool"},
 		{name: "pos argument", line: 5, char: 19, want: "Int"},
 		{name: "player argument", line: 5, char: 24, want: "Str"},
 		{name: "local variable declaration", line: 8, char: 8, want: "Bool"},
@@ -588,6 +589,7 @@ impl Board {
 		{name: "self in loop iterable", line: 9, char: 16, want: "Board"},
 		{name: "field in loop iterable", line: 9, char: 22, want: "Board.cells: [Str]"},
 		{name: "for loop cursor in condition", line: 10, char: 9, want: "Str"},
+		{name: "string method", line: 10, char: 15, want: "fn Str.is_empty() Bool"},
 		{name: "local variable assignment", line: 11, char: 8, want: "Bool"},
 		{name: "local variable return", line: 14, char: 4, want: "Bool"},
 	}
@@ -603,6 +605,73 @@ impl Board {
 				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
 			}
 		})
+	}
+}
+
+// TestHoverInstanceMethodSignatures verifies instance method hovers include owner, params, and return type.
+func TestHoverInstanceMethodSignatures(t *testing.T) {
+	source := `struct Board {
+  cells: [Str]
+}
+impl Board {
+  fn mut play(player: Str, pos: Int) {
+    self.cells.set(pos, player)
+  }
+  fn can_play(pos: Int) Bool {
+    self.cells.at(pos).is_empty()
+  }
+}
+fn main() {
+  mut board = Board{cells: []}
+  board.can_play(0)
+  let parsed = Int::from_str("1").or(0)
+}
+`
+
+	tests := []struct {
+		name string
+		line uint32
+		char uint32
+		want string
+	}{
+		{name: "list mutating method", line: 5, char: 15, want: "fn mut [Str].set(index: Int, value: Str) Bool"},
+		{name: "list method in chain", line: 8, char: 15, want: "fn [Str].at(index: Int) Str"},
+		{name: "string method after chain", line: 8, char: 23, want: "fn Str.is_empty() Bool"},
+		{name: "struct method", line: 13, char: 9, want: "fn Board.can_play(pos: Int) Bool"},
+		{name: "maybe method after static call", line: 14, char: 34, want: "fn Int?.or(default: Int) Int"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pos := protocol.Position{Line: tt.line, Character: tt.char}
+			info := computeHover(source, "test.ard", pos)
+			if info == nil {
+				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
+			}
+			if !strings.Contains(info.content, tt.want) {
+				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
+			}
+		})
+	}
+}
+
+// TestHoverImportedStaticResultMethod verifies instance method hovers after imported static calls.
+func TestHoverImportedStaticResultMethod(t *testing.T) {
+	source := `use ard/io
+
+fn main() {
+  let input_str = io::read_line().or("")
+}
+`
+
+	pos := protocol.Position{Line: 3, Character: 34}
+	info := computeHover(source, "test.ard", pos)
+	if info == nil {
+		t.Fatalf("expected hover info, got nil")
+	}
+	want := "fn Str!Str.or(default: Str) Str"
+	if !strings.Contains(info.content, want) {
+		t.Errorf("hover content = %q, want contains %q", info.content, want)
 	}
 }
 
