@@ -200,11 +200,11 @@ func TestFormattingHandler(t *testing.T) {
 // TestHoverPositions verifies hover returns correct type info.
 func TestHoverPositions(t *testing.T) {
 	tests := []struct {
-		name     string
-		source   string
-		line     uint32
-		char     uint32
-		want     string
+		name   string
+		source string
+		line   uint32
+		char   uint32
+		want   string
 	}{
 		{
 			name:   "string literal",
@@ -299,7 +299,7 @@ func TestHoverInsideFunction(t *testing.T) {
 			name: "hover on parameter",
 			line: 0,
 			char: 11,
-			want: "name: Str",
+			want: "Str",
 		},
 	}
 
@@ -429,21 +429,21 @@ fn main() {
 		line uint32
 		char uint32
 	}{
-		{0, 15},   // comment
-		{5, 3},    // `fn sum_items` — function name
-		{6, 6},    // `mut sum` — variable declaration
-		{7, 13},   // `items` in for loop
-		{8, 4},    // `sum =+ item` — variable assignment
-		{10, 2},   // `sum` as return value
-		{22, 6},   // `main` function
-		{24, 4},   // `io::print(...)` — function call
-		{30, 6},   // `batch1` identifier
-		{33, 13},  // `fibers` identifier
-		{35, 20},  // `batch2` inside function call
-		{52, 12},  // `f.get()` — method call
-		{59, 6},   // `even_fibers` identifier
-		{80, 11},  // `i` in `for i in 0..100`
-		{105, 8},  // `===` string inside print
+		{0, 15},  // comment
+		{5, 3},   // `fn sum_items` — function name
+		{6, 6},   // `mut sum` — variable declaration
+		{7, 13},  // `items` in for loop
+		{8, 4},   // `sum =+ item` — variable assignment
+		{10, 2},  // `sum` as return value
+		{22, 6},  // `main` function
+		{24, 4},  // `io::print(...)` — function call
+		{30, 6},  // `batch1` identifier
+		{33, 13}, // `fibers` identifier
+		{35, 20}, // `batch2` inside function call
+		{52, 12}, // `f.get()` — method call
+		{59, 6},  // `even_fibers` identifier
+		{80, 11}, // `i` in `for i in 0..100`
+		{105, 8}, // `===` string inside print
 	}
 
 	for _, pos := range positions {
@@ -528,11 +528,11 @@ func TestHoverInferredExpression(t *testing.T) {
 			want:   "Int",
 		},
 		{
-			name: "variable in match case body",
+			name:   "variable in match case body",
 			source: "fn read_move() Int {\n  let input = Int::from_str(\"9\").or(-1)\n  match input >= 1 and input <= 9 {\n    true => input - 1,\n    false => -1,\n  }\n}\n",
-			line: 3,
-			char: 13,
-			want: "Int",
+			line:   3,
+			char:   13,
+			want:   "Int",
 		},
 	}
 
@@ -542,6 +542,60 @@ func TestHoverInferredExpression(t *testing.T) {
 			info := computeHover(tt.source, "test.ard", pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil")
+			}
+			if !strings.Contains(info.content, tt.want) {
+				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
+			}
+		})
+	}
+}
+
+// TestHoverInImplBlock verifies variables and parameters hover inside impl methods.
+func TestHoverInImplBlock(t *testing.T) {
+	source := `struct Board {
+  cells: [Str]
+}
+impl Board {
+  fn mut play(player: Str, pos: Int) {
+    self.cells.set(pos, player)
+  }
+  fn is_full() Bool {
+    mut full = true
+    for cell in self.cells {
+      if cell.is_empty() {
+        full = false
+      }
+    }
+    full
+  }
+}
+`
+
+	tests := []struct {
+		name string
+		line uint32
+		char uint32
+		want string
+	}{
+		{name: "method parameter player", line: 4, char: 14, want: "Str"},
+		{name: "method parameter pos", line: 4, char: 27, want: "Int"},
+		{name: "self receiver", line: 5, char: 5, want: "Board"},
+		{name: "pos argument", line: 5, char: 19, want: "Int"},
+		{name: "player argument", line: 5, char: 24, want: "Str"},
+		{name: "local variable declaration", line: 8, char: 8, want: "Bool"},
+		{name: "for loop cursor", line: 9, char: 8, want: "Str"},
+		{name: "self in loop iterable", line: 9, char: 16, want: "Board"},
+		{name: "for loop cursor in condition", line: 10, char: 9, want: "Str"},
+		{name: "local variable assignment", line: 11, char: 8, want: "Bool"},
+		{name: "local variable return", line: 14, char: 4, want: "Bool"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pos := protocol.Position{Line: tt.line, Character: tt.char}
+			info := computeHover(source, "test.ard", pos)
+			if info == nil {
+				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
 			}
 			if !strings.Contains(info.content, tt.want) {
 				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)

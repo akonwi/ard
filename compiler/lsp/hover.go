@@ -115,7 +115,20 @@ func simpleHover(label string) *hoverInfo {
 	return &hoverInfo{content: fmt.Sprintf("```ard\n%s\n```", label)}
 }
 
-
+func simpleExprName(expr parse.Expression) string {
+	switch e := expr.(type) {
+	case *parse.Identifier:
+		return e.Name
+	case *parse.StaticProperty:
+		left := simpleExprName(e.Target)
+		right := simpleExprName(e.Property)
+		if left != "" && right != "" {
+			return left + "::" + right
+		}
+		return right
+	}
+	return ""
+}
 
 // findInStmts walks a list of statements to find the expression at target.
 func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expression) {
@@ -196,6 +209,12 @@ func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expres
 			}
 			continue
 		case *parse.ForInLoop:
+			if pointInRange(target, s.Cursor.Location) {
+				best = &s.Cursor
+			}
+			if pointInRange(target, s.Cursor2.Location) {
+				best = &s.Cursor2
+			}
 			if inner := walkExpr(s.Iterable, target); inner != nil {
 				best = inner
 			}
@@ -204,18 +223,40 @@ func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expres
 			}
 			continue
 		case *parse.RangeLoop:
+			if pointInRange(target, s.Cursor.Location) {
+				best = &s.Cursor
+			}
+			if pointInRange(target, s.Cursor2.Location) {
+				best = &s.Cursor2
+			}
 			if inner := walkExpr(s.Start, target); inner != nil {
 				best = inner
 			}
 			if inner := walkExpr(s.End, target); inner != nil {
 				best = inner
 			}
+			if inner := findInStmts(s.Body, target); inner != nil {
+				best = inner
+			}
 			continue
 		case *parse.ForLoop:
+			if s.Init != nil {
+				if inner := findInStmts([]parse.Statement{s.Init}, target); inner != nil {
+					best = inner
+				}
+			}
 			if s.Condition != nil {
 				if inner := walkExpr(s.Condition, target); inner != nil {
 					best = inner
 				}
+			}
+			if s.Incrementer != nil {
+				if inner := findInStmts([]parse.Statement{s.Incrementer}, target); inner != nil {
+					best = inner
+				}
+			}
+			if inner := findInStmts(s.Body, target); inner != nil {
+				best = inner
 			}
 			continue
 		case *parse.MatchExpression:
@@ -267,22 +308,40 @@ func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expres
 			}
 			continue
 		case *parse.ImplBlock:
-			for _, m := range s.Methods {
-				if inner := findInStmts([]parse.Statement{&m}, target); inner != nil {
+			if pointInRange(target, s.Target.Location) {
+				best = &s.Target
+			}
+			if pointInRange(target, s.Receiver.Location) {
+				best = &s.Receiver
+			}
+			for i := range s.Methods {
+				if inner := findInStmts([]parse.Statement{&s.Methods[i]}, target); inner != nil {
 					best = inner
 				}
 			}
 			continue
 		case *parse.TraitImplementation:
-			for _, m := range s.Methods {
-				if inner := findInStmts([]parse.Statement{&m}, target); inner != nil {
+			if inner := walkExpr(s.Trait, target); inner != nil {
+				best = inner
+			}
+			if pointInRange(target, s.ForType.Location) {
+				best = &s.ForType
+			}
+			if pointInRange(target, s.Receiver.Location) {
+				best = &s.Receiver
+			}
+			for i := range s.Methods {
+				if inner := findInStmts([]parse.Statement{&s.Methods[i]}, target); inner != nil {
 					best = inner
 				}
 			}
 			continue
 		case *parse.TraitDefinition:
-			for _, m := range s.Methods {
-				if inner := findInStmts([]parse.Statement{&m}, target); inner != nil {
+			if pointInRange(target, s.Name.Location) {
+				best = &s.Name
+			}
+			for i := range s.Methods {
+				if inner := findInStmts([]parse.Statement{&s.Methods[i]}, target); inner != nil {
 					best = inner
 				}
 			}
@@ -576,9 +635,19 @@ func findTypeInNonProducing(name string, stmt checker.NonProducing) string {
 		if s.Cursor == name || s.Index == name {
 			return "Int"
 		}
+		if s.Body != nil {
+			if t := findTypeInCheckerBlock(name, s.Body); t != "" {
+				return t
+			}
+		}
 	case *checker.ForInStr:
 		if s.Cursor == name || s.Index == name {
 			return "Str"
+		}
+		if s.Body != nil {
+			if t := findTypeInCheckerBlock(name, s.Body); t != "" {
+				return t
+			}
 		}
 	case *checker.ForInList:
 		if s.Cursor == name || s.Index == name {
@@ -586,6 +655,11 @@ func findTypeInNonProducing(name string, stmt checker.NonProducing) string {
 				return checkerTypeString(lt.Of())
 			}
 			return "?"
+		}
+		if s.Body != nil {
+			if t := findTypeInCheckerBlock(name, s.Body); t != "" {
+				return t
+			}
 		}
 	case *checker.ForInMap:
 		if s.Key == name || s.Val == name {
@@ -596,6 +670,11 @@ func findTypeInNonProducing(name string, stmt checker.NonProducing) string {
 				return checkerTypeString(mt.Value())
 			}
 			return "?"
+		}
+		if s.Body != nil {
+			if t := findTypeInCheckerBlock(name, s.Body); t != "" {
+				return t
+			}
 		}
 	case *checker.ForLoop:
 		if s.Init != nil && s.Init.Name == name {
@@ -612,8 +691,26 @@ func findTypeInNonProducing(name string, stmt checker.NonProducing) string {
 				return t
 			}
 		}
-	case *checker.Enum, *checker.Union, *checker.StructDef:
-		// Type definitions — skip
+	case *checker.Enum:
+		if s.Name == name {
+			return checkerTypeString(s.Type())
+		}
+		for _, method := range s.Methods {
+			if t := findTypeInExpr(name, method); t != "" {
+				return t
+			}
+		}
+	case *checker.StructDef:
+		if s.Name == name {
+			return checkerTypeString(s)
+		}
+		for _, method := range s.Methods {
+			if t := findTypeInExpr(name, method); t != "" {
+				return t
+			}
+		}
+	case *checker.Union:
+		// Type definitions without method bodies — skip
 	}
 	return ""
 }
@@ -797,6 +894,36 @@ func scanForType(name string, stmts []parse.Statement) *hoverInfo {
 			if info := scanForType(name, s.Body); info != nil {
 				return info
 			}
+		case *parse.ImplBlock:
+			if s.Target.Name == name || s.Receiver.Name == name {
+				return simpleHover(s.Target.Name)
+			}
+			for i := range s.Methods {
+				if info := scanForType(name, []parse.Statement{&s.Methods[i]}); info != nil {
+					return info
+				}
+			}
+		case *parse.TraitImplementation:
+			if traitName := simpleExprName(s.Trait); traitName == name {
+				return simpleHover(traitName)
+			}
+			if s.ForType.Name == name || s.Receiver.Name == name {
+				return simpleHover(s.ForType.Name)
+			}
+			for i := range s.Methods {
+				if info := scanForType(name, []parse.Statement{&s.Methods[i]}); info != nil {
+					return info
+				}
+			}
+		case *parse.TraitDefinition:
+			if s.Name.Name == name {
+				return simpleHover(s.Name.Name)
+			}
+			for i := range s.Methods {
+				if info := scanForType(name, []parse.Statement{&s.Methods[i]}); info != nil {
+					return info
+				}
+			}
 		case *parse.IfStatement:
 			if info := scanForType(name, s.Body); info != nil {
 				return info
@@ -811,10 +938,19 @@ func scanForType(name string, stmts []parse.Statement) *hoverInfo {
 				return info
 			}
 		case *parse.ForInLoop:
+			if s.Cursor.Name == name {
+				return simpleHover(inferLoopCursorType(s.Iterable, false))
+			}
+			if s.Cursor2.Name == name {
+				return simpleHover(inferLoopCursorType(s.Iterable, true))
+			}
 			if info := scanForType(name, s.Body); info != nil {
 				return info
 			}
 		case *parse.RangeLoop:
+			if s.Cursor.Name == name || s.Cursor2.Name == name {
+				return simpleHover("Int")
+			}
 			if info := scanForType(name, s.Body); info != nil {
 				return info
 			}
@@ -974,6 +1110,24 @@ func findFunctionDecl(name string, stmts []parse.Statement) *hoverInfo {
 			if info := findFunctionDecl(name, s.Body); info != nil {
 				return info
 			}
+		case *parse.ImplBlock:
+			for i := range s.Methods {
+				if info := findFunctionDecl(name, []parse.Statement{&s.Methods[i]}); info != nil {
+					return info
+				}
+			}
+		case *parse.TraitImplementation:
+			for i := range s.Methods {
+				if info := findFunctionDecl(name, []parse.Statement{&s.Methods[i]}); info != nil {
+					return info
+				}
+			}
+		case *parse.TraitDefinition:
+			for i := range s.Methods {
+				if info := findFunctionDecl(name, []parse.Statement{&s.Methods[i]}); info != nil {
+					return info
+				}
+			}
 		}
 	}
 	return nil
@@ -1090,6 +1244,36 @@ func scanIdentType(name string, stmts []parse.Statement) string {
 			if t := scanIdentType(name, s.Body); t != "" {
 				return t
 			}
+		case *parse.ImplBlock:
+			if s.Target.Name == name || s.Receiver.Name == name {
+				return s.Target.Name
+			}
+			for i := range s.Methods {
+				if t := scanIdentType(name, []parse.Statement{&s.Methods[i]}); t != "" {
+					return t
+				}
+			}
+		case *parse.TraitImplementation:
+			if traitName := simpleExprName(s.Trait); traitName == name {
+				return traitName
+			}
+			if s.ForType.Name == name || s.Receiver.Name == name {
+				return s.ForType.Name
+			}
+			for i := range s.Methods {
+				if t := scanIdentType(name, []parse.Statement{&s.Methods[i]}); t != "" {
+					return t
+				}
+			}
+		case *parse.TraitDefinition:
+			if s.Name.Name == name {
+				return s.Name.Name
+			}
+			for i := range s.Methods {
+				if t := scanIdentType(name, []parse.Statement{&s.Methods[i]}); t != "" {
+					return t
+				}
+			}
 		case *parse.IfStatement:
 			if t := scanIdentType(name, s.Body); t != "" {
 				return t
@@ -1104,6 +1288,23 @@ func scanIdentType(name string, stmts []parse.Statement) string {
 				return t
 			}
 		case *parse.ForInLoop:
+			if s.Cursor.Name == name {
+				return inferLoopCursorType(s.Iterable, false)
+			}
+			if s.Cursor2.Name == name {
+				return inferLoopCursorType(s.Iterable, true)
+			}
+			if t := scanIdentType(name, s.Body); t != "" {
+				return t
+			}
+		case *parse.RangeLoop:
+			if s.Cursor.Name == name || s.Cursor2.Name == name {
+				return "Int"
+			}
+			if t := scanIdentType(name, s.Body); t != "" {
+				return t
+			}
+		case *parse.ForLoop:
 			if t := scanIdentType(name, s.Body); t != "" {
 				return t
 			}
@@ -1118,6 +1319,24 @@ func scanIdentType(name string, stmts []parse.Statement) string {
 		}
 	}
 	return ""
+}
+
+// inferLoopCursorType returns the parse-inferred item type for a for-in cursor.
+func inferLoopCursorType(iterable parse.Expression, index bool) string {
+	iterableType := inferExprType(iterable)
+	if index {
+		if iterableType == "Map" {
+			return "?"
+		}
+		return "Int"
+	}
+	if iterableType == "Str" {
+		return "Str"
+	}
+	if strings.HasPrefix(iterableType, "[") && strings.HasSuffix(iterableType, "]") && len(iterableType) > 2 {
+		return strings.TrimSuffix(strings.TrimPrefix(iterableType, "["), "]")
+	}
+	return "?"
 }
 
 // typeFromDecl returns the type string for a variable declaration.
@@ -1152,6 +1371,24 @@ func scanFunctionReturnType(name string, stmts []parse.Statement) string {
 			}
 			if t := scanFunctionReturnType(name, s.Body); t != "" {
 				return t
+			}
+		case *parse.ImplBlock:
+			for i := range s.Methods {
+				if t := scanFunctionReturnType(name, []parse.Statement{&s.Methods[i]}); t != "" {
+					return t
+				}
+			}
+		case *parse.TraitImplementation:
+			for i := range s.Methods {
+				if t := scanFunctionReturnType(name, []parse.Statement{&s.Methods[i]}); t != "" {
+					return t
+				}
+			}
+		case *parse.TraitDefinition:
+			for i := range s.Methods {
+				if t := scanFunctionReturnType(name, []parse.Statement{&s.Methods[i]}); t != "" {
+					return t
+				}
 			}
 		}
 	}
@@ -1195,5 +1432,3 @@ func inferBinaryExprType(e *parse.BinaryExpression) string {
 		return inferExprType(e.Left)
 	}
 }
-
-

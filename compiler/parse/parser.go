@@ -1121,8 +1121,9 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 
 			paramType := p.parseType()
 			params = append(params, Parameter{
-				Name: paramName.text,
-				Type: paramType,
+				Location: paramName.getLocation(),
+				Name:     paramName.text,
+				Type:     paramType,
 			})
 		}
 
@@ -2343,9 +2344,10 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			}
 
 			params = append(params, Parameter{
-				Mutable: isMutable,
-				Name:    nameToken.text,
-				Type:    paramType,
+				Location: nameToken.getLocation(),
+				Mutable:  isMutable,
+				Name:     nameToken.text,
+				Type:     paramType,
 			})
 
 			// Check for inline comment after parameter
