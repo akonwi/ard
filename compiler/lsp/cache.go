@@ -62,3 +62,18 @@ func (c *DocumentCache) Get(u uri.URI) *Doc {
 	defer c.mu.Unlock()
 	return c.docs[u]
 }
+
+// Snapshot returns copies of all cached documents.
+func (c *DocumentCache) Snapshot() []Doc {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	docs := make([]Doc, 0, len(c.docs))
+	for _, doc := range c.docs {
+		if doc == nil {
+			continue
+		}
+		docs = append(docs, *doc)
+	}
+	return docs
+}

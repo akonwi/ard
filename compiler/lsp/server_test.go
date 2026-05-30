@@ -248,6 +248,424 @@ func assertDefinitionStart(t *testing.T, loc protocol.Location, filePath string,
 	}
 }
 
+func requireReferences(t *testing.T, source string, filePath string, line uint32, char uint32, includeDeclaration bool) []protocol.Location {
+	t.Helper()
+	locations := computeReferences(source, filePath, protocol.Position{Line: line, Character: char}, includeDeclaration)
+	if len(locations) == 0 {
+		t.Fatalf("expected references at %d:%d, got none", line, char)
+	}
+	return locations
+}
+
+func assertLocationStart(t *testing.T, loc protocol.Location, filePath string, line uint32, char uint32) {
+	t.Helper()
+	if got := loc.URI.Filename(); got != filePath {
+		t.Fatalf("location file = %q, want %q", got, filePath)
+	}
+	if loc.Range.Start.Line != line || loc.Range.Start.Character != char {
+		t.Fatalf("location start = %d:%d, want %d:%d", loc.Range.Start.Line, loc.Range.Start.Character, line, char)
+	}
+}
+
+// TestReferencesLocalSymbols verifies find-references for local symbols.
+func TestReferencesLocalSymbols(t *testing.T) {
+	source := `fn add(left: Int, right: Int) Int {
+  left + right
+}
+
+fn main() Int {
+  let value = 40
+  let result = add(value, 2)
+  add(result, value)
+}
+`
+	filePath := filepath.Join(t.TempDir(), "test.ard")
+
+	t.Run("function", func(t *testing.T) {
+		refs := requireReferences(t, source, filePath, 6, 16, true)
+		if len(refs) != 3 {
+			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
+		}
+		assertLocationStart(t, refs[0], filePath, 0, 0)
+		assertLocationStart(t, refs[1], filePath, 6, 15)
+		assertLocationStart(t, refs[2], filePath, 7, 2)
+	})
+
+	t.Run("local variable without declaration", func(t *testing.T) {
+		refs := requireReferences(t, source, filePath, 6, 20, false)
+		if len(refs) != 2 {
+			t.Fatalf("expected 2 refs, got %d: %#v", len(refs), refs)
+		}
+		assertLocationStart(t, refs[0], filePath, 6, 19)
+		assertLocationStart(t, refs[1], filePath, 7, 14)
+	})
+
+	t.Run("parameter", func(t *testing.T) {
+		refs := requireReferences(t, source, filePath, 1, 3, true)
+		if len(refs) != 2 {
+			t.Fatalf("expected 2 refs, got %d: %#v", len(refs), refs)
+		}
+		assertLocationStart(t, refs[0], filePath, 0, 7)
+		assertLocationStart(t, refs[1], filePath, 1, 2)
+	})
+}
+
+// TestReferencesScopedLocalSymbols verifies same-named locals in different scopes stay separate.
+func TestReferencesScopedLocalSymbols(t *testing.T) {
+	source := `fn first() Int {
+  let value = 1
+  value
+}
+
+fn second() Int {
+  let value = 2
+  value
+}
+`
+	filePath := filepath.Join(t.TempDir(), "test.ard")
+
+	refs := requireReferences(t, source, filePath, 2, 3, true)
+	if len(refs) != 2 {
+		t.Fatalf("expected 2 refs, got %d: %#v", len(refs), refs)
+	}
+	assertLocationStart(t, refs[0], filePath, 1, 2)
+	assertLocationStart(t, refs[1], filePath, 2, 2)
+}
+
+// TestReferencesStructSymbols verifies find-references from struct declarations.
+func TestReferencesStructSymbols(t *testing.T) {
+	source := `struct Box {
+  item: Int,
+}
+
+impl Box {
+  fn get() Int {
+    self.item
+  }
+}
+
+fn main(box: Box) Int {
+  let made = Box { item: 1 }
+  box.item + made.item
+}
+`
+	filePath := filepath.Join(t.TempDir(), "test.ard")
+
+	t.Run("field declaration", func(t *testing.T) {
+		refs := requireReferences(t, source, filePath, 1, 4, true)
+		if len(refs) != 5 {
+			t.Fatalf("expected 5 refs, got %d: %#v", len(refs), refs)
+		}
+		assertLocationStart(t, refs[0], filePath, 1, 2)
+		assertLocationStart(t, refs[1], filePath, 6, 9)
+		assertLocationStart(t, refs[2], filePath, 11, 19)
+		assertLocationStart(t, refs[3], filePath, 12, 6)
+		assertLocationStart(t, refs[4], filePath, 12, 18)
+	})
+
+	assertBoxTypeRefs := func(t *testing.T, refs []protocol.Location) {
+		t.Helper()
+		if len(refs) != 4 {
+			t.Fatalf("expected 4 refs, got %d: %#v", len(refs), refs)
+		}
+		assertLocationStart(t, refs[0], filePath, 0, 7)
+		assertLocationStart(t, refs[1], filePath, 4, 5)
+		assertLocationStart(t, refs[2], filePath, 10, 13)
+		assertLocationStart(t, refs[3], filePath, 11, 13)
+	}
+
+	t.Run("type declaration", func(t *testing.T) {
+		assertBoxTypeRefs(t, requireReferences(t, source, filePath, 0, 8, true))
+	})
+
+	t.Run("type annotation", func(t *testing.T) {
+		assertBoxTypeRefs(t, requireReferences(t, source, filePath, 10, 14, true))
+	})
+}
+
+// TestReferencesImportedSymbols verifies find-references for imported members.
+func TestReferencesImportedSymbols(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	responsesSource := `use ard/http
+
+fn json_error(mut res: http::Response, status: Int, message: Str) {
+  res.status = status
+}
+`
+	responsesPath := filepath.Join(root, "responses.ard")
+	if err := os.WriteFile(responsesPath, []byte(responsesSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use ard/http
+use test_project/responses
+
+fn main(mut res: http::Response) {
+  responses::json_error(res, 400, "Nope")
+  responses::json_error(res, 500, "Oops")
+}
+`
+	filePath := filepath.Join(root, "routes.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	refs := requireReferences(t, source, filePath, 4, 15, true)
+	if len(refs) != 3 {
+		t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
+	}
+	assertLocationStart(t, refs[0], responsesPath, 2, 0)
+	assertLocationStart(t, refs[1], filePath, 4, 13)
+	assertLocationStart(t, refs[2], filePath, 5, 13)
+}
+
+// TestReferencesWorkspaceFiles verifies find-references across project files.
+func TestReferencesWorkspaceFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mathSource := `fn inc(value: Int) Int {
+  value + 1
+}
+`
+	mathPath := filepath.Join(root, "math.ard")
+	if err := os.WriteFile(mathPath, []byte(mathSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use test_project/math
+
+fn main() Int {
+  math::inc(1)
+}
+`
+	filePath := filepath.Join(root, "main.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	otherSource := `use test_project/math
+
+fn other() Int {
+  math::inc(2)
+}
+`
+	otherPath := filepath.Join(root, "other.ard")
+	if err := os.WriteFile(otherPath, []byte(otherSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("from call", func(t *testing.T) {
+		refs := requireReferences(t, source, filePath, 3, 9, true)
+		if len(refs) != 3 {
+			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
+		}
+		assertLocationStart(t, refs[0], mathPath, 0, 0)
+		assertLocationStart(t, refs[1], filePath, 3, 8)
+		assertLocationStart(t, refs[2], otherPath, 3, 8)
+	})
+
+	t.Run("from declaration", func(t *testing.T) {
+		refs := requireReferences(t, mathSource, mathPath, 0, 4, true)
+		if len(refs) != 3 {
+			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
+		}
+		assertLocationStart(t, refs[0], mathPath, 0, 0)
+		assertLocationStart(t, refs[1], filePath, 3, 8)
+		assertLocationStart(t, refs[2], otherPath, 3, 8)
+	})
+}
+
+// TestReferencesOpenDocumentOverlays verifies references use unsaved open-document content.
+func TestReferencesOpenDocumentOverlays(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mathSource := `fn inc(value: Int) Int {
+  value + 1
+}
+`
+	mathPath := filepath.Join(root, "math.ard")
+	if err := os.WriteFile(mathPath, []byte(mathSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use test_project/math
+
+fn main() Int {
+  math::inc(1)
+}
+`
+	filePath := filepath.Join(root, "main.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	otherPath := filepath.Join(root, "other.ard")
+	otherOverlay := `use test_project/math
+
+fn other() Int {
+  math::inc(2)
+}
+`
+
+	refs := computeReferencesWithOverlays(source, filePath, protocol.Position{Line: 3, Character: 9}, true, map[string]string{otherPath: otherOverlay})
+	if len(refs) != 3 {
+		t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
+	}
+	assertLocationStart(t, refs[0], mathPath, 0, 0)
+	assertLocationStart(t, refs[1], filePath, 3, 8)
+	assertLocationStart(t, refs[2], otherPath, 3, 8)
+}
+
+// TestReferencesImportedModuleLocalUses verifies imported symbols also include uses in their defining module.
+func TestReferencesImportedModuleLocalUses(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	responsesSource := `fn json_error(status: Int) Int {
+  status
+}
+
+fn retry() Int {
+  json_error(500)
+}
+`
+	responsesPath := filepath.Join(root, "responses.ard")
+	if err := os.WriteFile(responsesPath, []byte(responsesSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use test_project/responses
+
+fn main() Int {
+  responses::json_error(400)
+}
+`
+	filePath := filepath.Join(root, "routes.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	refs := requireReferences(t, source, filePath, 3, 15, true)
+	if len(refs) != 3 {
+		t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
+	}
+	assertLocationStart(t, refs[0], responsesPath, 0, 0)
+	assertLocationStart(t, refs[1], filePath, 3, 13)
+	assertLocationStart(t, refs[2], responsesPath, 5, 2)
+}
+
+// TestReferencesImportedVariableSkipsModuleAlias verifies module aliases are not reported as variable refs.
+func TestReferencesImportedVariableSkipsModuleAlias(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	responsesSource := `let api_name = "ranger"
+`
+	responsesPath := filepath.Join(root, "responses.ard")
+	if err := os.WriteFile(responsesPath, []byte(responsesSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use test_project/responses
+
+fn main() Str {
+  let a = responses::api_name
+  let b = responses::api_name
+  a
+}
+`
+	filePath := filepath.Join(root, "routes.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	refs := requireReferences(t, source, filePath, 3, 23, true)
+	if len(refs) != 3 {
+		t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
+	}
+	assertLocationStart(t, refs[0], responsesPath, 0, 0)
+	assertLocationStart(t, refs[1], filePath, 3, 21)
+	assertLocationStart(t, refs[2], filePath, 4, 21)
+}
+
+// TestReferencesImportedInstanceMembers verifies find-references for imported fields and methods.
+func TestReferencesImportedInstanceMembers(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	boxesSource := `struct Box {
+  item: Int,
+}
+
+impl Box {
+  fn get() Int {
+    self.item
+  }
+}
+`
+	boxesPath := filepath.Join(root, "boxes.ard")
+	if err := os.WriteFile(boxesPath, []byte(boxesSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use test_project/boxes
+
+fn main(box: boxes::Box) {
+  let a = box.item
+  let b = box.item
+  box.get()
+  box.get()
+}
+`
+	filePath := filepath.Join(root, "main.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("field", func(t *testing.T) {
+		refs := requireReferences(t, source, filePath, 3, 16, true)
+		if len(refs) != 4 {
+			t.Fatalf("expected 4 refs, got %d: %#v", len(refs), refs)
+		}
+		assertLocationStart(t, refs[0], boxesPath, 1, 2)
+		assertLocationStart(t, refs[1], filePath, 3, 14)
+		assertLocationStart(t, refs[2], filePath, 4, 14)
+		assertLocationStart(t, refs[3], boxesPath, 6, 9)
+	})
+
+	t.Run("method", func(t *testing.T) {
+		refs := requireReferences(t, source, filePath, 5, 7, true)
+		if len(refs) != 3 {
+			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
+		}
+		assertLocationStart(t, refs[0], boxesPath, 5, 2)
+		assertLocationStart(t, refs[1], filePath, 5, 6)
+		assertLocationStart(t, refs[2], filePath, 6, 6)
+	})
+
+	t.Run("imported type annotation", func(t *testing.T) {
+		refs := requireReferences(t, source, filePath, 2, 21, true)
+		if len(refs) != 3 {
+			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
+		}
+		assertLocationStart(t, refs[0], boxesPath, 0, 7)
+		assertLocationStart(t, refs[1], filePath, 2, 13)
+		assertLocationStart(t, refs[2], boxesPath, 4, 5)
+	})
+
+	t.Run("method declaration", func(t *testing.T) {
+		refs := requireReferences(t, boxesSource, boxesPath, 5, 6, true)
+		if len(refs) != 3 {
+			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
+		}
+		assertLocationStart(t, refs[0], boxesPath, 5, 2)
+		assertLocationStart(t, refs[1], filePath, 5, 6)
+		assertLocationStart(t, refs[2], filePath, 6, 6)
+	})
+}
+
 // TestDefinitionLocalSymbols verifies go-to-definition for local symbols.
 func TestDefinitionLocalSymbols(t *testing.T) {
 	source := `fn add(left: Int, right: Int) Int {

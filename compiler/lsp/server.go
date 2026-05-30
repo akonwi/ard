@@ -88,8 +88,8 @@ func (s *Server) dispatch(ctx context.Context, reply jsonrpc2.Replier, req jsonr
 	}()
 
 	// LSP clients may send feature requests concurrently. The current hover,
-	// definition, and signature-help paths share parse/type-resolution caches,
-	// so serialize handlers until those caches are request-scoped.
+	// definition, references, and signature-help paths share parse/type-resolution
+	// caches, so serialize handlers until those caches are request-scoped.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -305,9 +305,30 @@ func (s *Server) handleReferences(ctx context.Context, reply jsonrpc2.Replier, r
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
-	_ = params
 
-	return reply(ctx, []protocol.Location{}, nil)
+	doc := s.cache.Get(params.TextDocument.URI)
+	if doc == nil {
+		return reply(ctx, []protocol.Location{}, nil)
+	}
+
+	var locations []protocol.Location
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				locations = []protocol.Location{}
+			}
+		}()
+		overlays := map[string]string{}
+		for _, cached := range s.cache.Snapshot() {
+			overlays[cached.URI.Filename()] = cached.Text
+		}
+		locations = computeReferencesWithOverlays(doc.Text, doc.URI.Filename(), params.Position, params.Context.IncludeDeclaration, overlays)
+	}()
+	if locations == nil {
+		locations = []protocol.Location{}
+	}
+
+	return reply(ctx, locations, nil)
 }
 
 func (s *Server) handleDocumentSymbol(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {

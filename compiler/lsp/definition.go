@@ -46,7 +46,7 @@ func definitionLocation(filePath string, loc parse.Location) protocol.Location {
 func definitionForExpr(expr parse.Expression, prog *parse.Program, filePath string) *definitionTarget {
 	switch e := expr.(type) {
 	case *parse.Identifier:
-		return definitionForIdentifier(e.Name, prog, filePath)
+		return definitionForIdentifierAt(e.Name, e.Location, prog, filePath)
 	case *parse.Parameter:
 		return &definitionTarget{filePath: filePath, loc: e.Location}
 	case *parse.VariableDeclaration:
@@ -69,6 +69,22 @@ func definitionForExpr(expr parse.Expression, prog *parse.Program, filePath stri
 	return nil
 }
 
+func definitionForIdentifierAt(name string, loc parse.Location, prog *parse.Program, filePath string) *definitionTarget {
+	if def := findScopedValueDefinition(name, prog.Statements, loc.Start, filePath, nil); def != nil {
+		return def
+	}
+	if def := findFunctionDefinition(name, prog.Statements, filePath); def != nil {
+		return def
+	}
+	if def := findTypeDefinition(name, prog.Statements, filePath); def != nil {
+		return def
+	}
+	if def := definitionForModuleAlias(name, prog, filePath); def != nil {
+		return def
+	}
+	return nil
+}
+
 func definitionForIdentifier(name string, prog *parse.Program, filePath string) *definitionTarget {
 	if def := findIdentifierDefinition(name, prog.Statements, filePath); def != nil {
 		return def
@@ -77,6 +93,222 @@ func definitionForIdentifier(name string, prog *parse.Program, filePath string) 
 		return def
 	}
 	return nil
+}
+
+func findScopedValueDefinition(name string, stmts []parse.Statement, target parse.Point, filePath string, visible *definitionTarget) *definitionTarget {
+	if name == "" || target.Row == 0 || target.Col == 0 {
+		return nil
+	}
+	current := visible
+	for _, stmt := range stmts {
+		if stmt == nil {
+			continue
+		}
+		loc := stmt.GetLocation()
+		if locationStartsAfterPoint(loc, target) {
+			break
+		}
+		if pointInRange(target, loc) {
+			return findScopedValueDefinitionInStatement(name, stmt, target, filePath, current)
+		}
+		if def := statementIntroducedValueDefinition(name, stmt, filePath); def != nil {
+			current = def
+		}
+	}
+	return current
+}
+
+func findScopedValueDefinitionInStatement(name string, stmt parse.Statement, target parse.Point, filePath string, visible *definitionTarget) *definitionTarget {
+	switch s := stmt.(type) {
+	case *parse.VariableDeclaration:
+		if s.Value != nil {
+			if def := findScopedValueDefinitionInExpression(name, s.Value, target, filePath, visible); def != nil {
+				return def
+			}
+		}
+		return visible
+	case *parse.FunctionDeclaration:
+		current := visible
+		for _, p := range s.Parameters {
+			if pointInRange(target, p.Location) && p.Name == name {
+				return &definitionTarget{filePath: filePath, loc: p.Location}
+			}
+			if p.Name == name {
+				current = &definitionTarget{filePath: filePath, loc: p.Location}
+			}
+		}
+		if def := findScopedValueDefinition(name, s.Body, target, filePath, current); def != nil {
+			return def
+		}
+		return current
+	case *parse.StaticFunctionDeclaration:
+		return findScopedValueDefinitionInStatement(name, &s.FunctionDeclaration, target, filePath, visible)
+	case *parse.ImplBlock:
+		current := visible
+		if s.Receiver.Name == name {
+			current = &definitionTarget{filePath: filePath, loc: s.Receiver.Location}
+		}
+		for i := range s.Methods {
+			if pointInRange(target, s.Methods[i].Location) {
+				return findScopedValueDefinitionInStatement(name, &s.Methods[i], target, filePath, current)
+			}
+		}
+		return current
+	case *parse.TraitImplementation:
+		current := visible
+		if s.Receiver.Name == name {
+			current = &definitionTarget{filePath: filePath, loc: s.Receiver.Location}
+		}
+		for i := range s.Methods {
+			if pointInRange(target, s.Methods[i].Location) {
+				return findScopedValueDefinitionInStatement(name, &s.Methods[i], target, filePath, current)
+			}
+		}
+		return current
+	case *parse.TraitDefinition:
+		for i := range s.Methods {
+			if pointInRange(target, s.Methods[i].Location) {
+				return findScopedValueDefinitionInStatement(name, &s.Methods[i], target, filePath, visible)
+			}
+		}
+		return visible
+	case *parse.IfStatement:
+		if s.Condition != nil && pointInRange(target, s.Condition.GetLocation()) {
+			return findScopedValueDefinitionInExpression(name, s.Condition, target, filePath, visible)
+		}
+		if def := findScopedValueDefinition(name, s.Body, target, filePath, visible); def != nil {
+			return def
+		}
+		if s.Else != nil {
+			return findScopedValueDefinitionInStatement(name, s.Else, target, filePath, visible)
+		}
+		return visible
+	case *parse.WhileLoop:
+		if s.Condition != nil && pointInRange(target, s.Condition.GetLocation()) {
+			return findScopedValueDefinitionInExpression(name, s.Condition, target, filePath, visible)
+		}
+		return findScopedValueDefinition(name, s.Body, target, filePath, visible)
+	case *parse.ForInLoop:
+		if s.Iterable != nil && pointInRange(target, s.Iterable.GetLocation()) {
+			return findScopedValueDefinitionInExpression(name, s.Iterable, target, filePath, visible)
+		}
+		current := visible
+		if pointInRange(target, s.Cursor.Location) && s.Cursor.Name == name {
+			return &definitionTarget{filePath: filePath, loc: s.Cursor.Location}
+		}
+		if s.Cursor.Name == name {
+			current = &definitionTarget{filePath: filePath, loc: s.Cursor.Location}
+		}
+		if pointInRange(target, s.Cursor2.Location) && s.Cursor2.Name == name {
+			return &definitionTarget{filePath: filePath, loc: s.Cursor2.Location}
+		}
+		if s.Cursor2.Name == name {
+			current = &definitionTarget{filePath: filePath, loc: s.Cursor2.Location}
+		}
+		return findScopedValueDefinition(name, s.Body, target, filePath, current)
+	case *parse.RangeLoop:
+		current := visible
+		if pointInRange(target, s.Cursor.Location) && s.Cursor.Name == name {
+			return &definitionTarget{filePath: filePath, loc: s.Cursor.Location}
+		}
+		if s.Cursor.Name == name {
+			current = &definitionTarget{filePath: filePath, loc: s.Cursor.Location}
+		}
+		if pointInRange(target, s.Cursor2.Location) && s.Cursor2.Name == name {
+			return &definitionTarget{filePath: filePath, loc: s.Cursor2.Location}
+		}
+		if s.Cursor2.Name == name {
+			current = &definitionTarget{filePath: filePath, loc: s.Cursor2.Location}
+		}
+		return findScopedValueDefinition(name, s.Body, target, filePath, current)
+	case *parse.ForLoop:
+		current := visible
+		if s.Init != nil {
+			if pointInRange(target, s.Init.Location) {
+				return findScopedValueDefinitionInStatement(name, s.Init, target, filePath, visible)
+			}
+			if s.Init.Name == name {
+				current = &definitionTarget{filePath: filePath, loc: s.Init.Location}
+			}
+		}
+		if s.Condition != nil && pointInRange(target, s.Condition.GetLocation()) {
+			return findScopedValueDefinitionInExpression(name, s.Condition, target, filePath, current)
+		}
+		if s.Incrementer != nil && pointInRange(target, s.Incrementer.GetLocation()) {
+			return findScopedValueDefinitionInStatement(name, s.Incrementer, target, filePath, current)
+		}
+		return findScopedValueDefinition(name, s.Body, target, filePath, current)
+	case *parse.BlockExpression:
+		return findScopedValueDefinition(name, s.Statements, target, filePath, visible)
+	case *parse.Try:
+		if s.Expression != nil && pointInRange(target, s.Expression.GetLocation()) {
+			return findScopedValueDefinitionInExpression(name, s.Expression, target, filePath, visible)
+		}
+		current := visible
+		if s.CatchVar != nil {
+			if pointInRange(target, s.CatchVar.Location) && s.CatchVar.Name == name {
+				return &definitionTarget{filePath: filePath, loc: s.CatchVar.Location}
+			}
+			if s.CatchVar.Name == name {
+				current = &definitionTarget{filePath: filePath, loc: s.CatchVar.Location}
+			}
+		}
+		return findScopedValueDefinition(name, s.CatchBlock, target, filePath, current)
+	}
+	return visible
+}
+
+func findScopedValueDefinitionInExpression(name string, expr parse.Expression, target parse.Point, filePath string, visible *definitionTarget) *definitionTarget {
+	if expr == nil || !pointInRange(target, expr.GetLocation()) {
+		return visible
+	}
+	switch e := expr.(type) {
+	case *parse.BlockExpression:
+		return findScopedValueDefinition(name, e.Statements, target, filePath, visible)
+	case *parse.IfStatement:
+		return findScopedValueDefinitionInStatement(name, e, target, filePath, visible)
+	case *parse.MatchExpression:
+		for _, matchCase := range e.Cases {
+			if pointInRange(target, matchCase.Location) {
+				return findScopedValueDefinition(name, matchCase.Body, target, filePath, visible)
+			}
+		}
+	case *parse.ConditionalMatchExpression:
+		for _, matchCase := range e.Cases {
+			if pointInRange(target, matchCase.Location) {
+				return findScopedValueDefinition(name, matchCase.Body, target, filePath, visible)
+			}
+		}
+	case *parse.AnonymousFunction:
+		current := visible
+		for _, p := range e.Parameters {
+			if pointInRange(target, p.Location) && p.Name == name {
+				return &definitionTarget{filePath: filePath, loc: p.Location}
+			}
+			if p.Name == name {
+				current = &definitionTarget{filePath: filePath, loc: p.Location}
+			}
+		}
+		return findScopedValueDefinition(name, e.Body, target, filePath, current)
+	}
+	return visible
+}
+
+func statementIntroducedValueDefinition(name string, stmt parse.Statement, filePath string) *definitionTarget {
+	if s, ok := stmt.(*parse.VariableDeclaration); ok && s.Name == name {
+		return &definitionTarget{filePath: filePath, loc: s.Location}
+	}
+	return nil
+}
+
+func locationStartsAfterPoint(loc parse.Location, point parse.Point) bool {
+	if loc.Start.Row == 0 {
+		return false
+	}
+	if loc.Start.Row > point.Row {
+		return true
+	}
+	return loc.Start.Row == point.Row && loc.Start.Col > point.Col
 }
 
 func definitionForModuleAlias(alias string, prog *parse.Program, filePath string) *definitionTarget {
@@ -398,27 +630,36 @@ func findTypeDefinition(name string, stmts []parse.Statement, filePath string) *
 		switch s := stmt.(type) {
 		case *parse.StructDefinition:
 			if s.Name.Name == name {
-				return &definitionTarget{filePath: filePath, loc: s.Name.Location}
+				return &definitionTarget{filePath: filePath, loc: typeDefinitionNameLocation(stmt, s.Name.Location, s.Name.Name, len("struct "))}
 			}
 		case *parse.EnumDefinition:
 			if s.Name == name {
-				return &definitionTarget{filePath: filePath, loc: s.Location}
+				return &definitionTarget{filePath: filePath, loc: typeDefinitionNameLocation(stmt, parse.Location{}, s.Name, len("enum "))}
 			}
 		case *parse.TraitDefinition:
 			if s.Name.Name == name {
-				return &definitionTarget{filePath: filePath, loc: s.Name.Location}
+				return &definitionTarget{filePath: filePath, loc: typeDefinitionNameLocation(stmt, s.Name.Location, s.Name.Name, len("trait "))}
 			}
 		case *parse.TypeDeclaration:
 			if s.Name.Name == name {
-				return &definitionTarget{filePath: filePath, loc: s.Name.Location}
+				return &definitionTarget{filePath: filePath, loc: typeDefinitionNameLocation(stmt, s.Name.Location, s.Name.Name, len("type "))}
 			}
 		case *parse.ExternTypeDeclaration:
 			if s.Name == name {
-				return &definitionTarget{filePath: filePath, loc: s.Location}
+				return &definitionTarget{filePath: filePath, loc: typeDefinitionNameLocation(stmt, parse.Location{}, s.Name, len("extern type "))}
 			}
 		}
 	}
 	return nil
+}
+
+func typeDefinitionNameLocation(stmt parse.Statement, loc parse.Location, name string, prefixLen int) parse.Location {
+	if loc.Start.Row != 0 || loc.Start.Col != 0 || loc.End.Row != 0 || loc.End.Col != 0 {
+		return loc
+	}
+	stmtLoc := stmt.GetLocation()
+	start := parse.Point{Row: stmtLoc.Start.Row, Col: stmtLoc.Start.Col + prefixLen}
+	return parse.Location{Start: start, End: parse.Point{Row: start.Row, Col: start.Col + len(name)}}
 }
 
 func findParameterOrLoopDefinition(name string, stmts []parse.Statement, filePath string) *definitionTarget {
