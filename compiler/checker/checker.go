@@ -1118,6 +1118,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				condition = c.checkExpr(s.Condition)
 			}
 
+			if condition == nil {
+				return nil
+			}
+
 			// Condition must be a boolean expression
 			if condition.Type() != Bool {
 				c.addError("While loop condition must be a boolean expression", s.Condition.GetLocation())
@@ -2468,7 +2472,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			} else if len(resolvedExprs) > len(fnDef.Parameters) {
 				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
 					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
-				return nil
+				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
 			// Align mutability information with parameters
@@ -2583,7 +2587,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			} else if len(resolvedExprs) > len(fnDef.Parameters) {
 				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
 					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
-				return nil
+				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
 			// Align mutability information with parameters
@@ -3140,7 +3144,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			} else if len(resolvedExprs) > len(fnDef.Parameters) {
 				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
 					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
-				return nil
+				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
 			// Align mutability information with parameters
