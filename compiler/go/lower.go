@@ -3570,36 +3570,47 @@ func (l *lowerer) lowerTraitCall(fn air.Function, expr air.Expr) (loweredExpr, e
 		return loweredExpr{}, fmt.Errorf("invalid trait method %d for %s", expr.Method, trait.Name)
 	}
 	method := trait.Methods[expr.Method]
-	switch {
-	case trait.Name == "ToString" && method.Name == "to_str":
-		if validTypeID(l.program, expr.Target.Type) && l.program.Types[expr.Target.Type-1].Kind == air.TypeTraitObject {
-			return l.lowerTraitObjectToString(target, expr.Trait, expr.Method)
-		}
+	targetIsTraitObject := validTypeID(l.program, expr.Target.Type) && l.program.Types[expr.Target.Type-1].Kind == air.TypeTraitObject
+	if trait.Name == "ToString" && method.Name == "to_str" && !targetIsTraitObject {
 		return loweredExpr{stmts: target.stmts, expr: l.toStringExpr(expr.Target.Type, target.expr)}, nil
-	default:
+	}
+	if !targetIsTraitObject {
 		return loweredExpr{}, fmt.Errorf("unsupported trait call %s.%s", trait.Name, method.Name)
 	}
+	return l.lowerTraitObjectCall(fn, target, expr)
 }
 
-func (l *lowerer) lowerTraitObjectToString(target loweredExpr, traitID air.TraitID, methodIndex int) (loweredExpr, error) {
+func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr air.Expr) (loweredExpr, error) {
 	resultTemp := l.nextTemp()
 	stmts := append([]ast.Stmt{}, target.stmts...)
-	stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: ast.NewIdent("string")}}}})
+	resultType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: resultType}}}})
+
+	args := []ast.Expr{ast.NewIdent("typed")}
+	for _, arg := range expr.Args {
+		loweredArg, err := l.lowerExpr(fn, arg)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, loweredArg.stmts...)
+		args = append(args, loweredArg.expr)
+	}
+
 	cases := []ast.Stmt{}
 	for _, impl := range l.program.Impls {
-		if impl.Trait != traitID || methodIndex >= len(impl.Methods) || !validTypeID(l.program, impl.ForType) {
+		if impl.Trait != expr.Trait || expr.Method >= len(impl.Methods) || !validTypeID(l.program, impl.ForType) {
 			continue
 		}
-		methodFn := l.program.Functions[impl.Methods[methodIndex]]
+		methodFn := l.program.Functions[impl.Methods[expr.Method]]
 		cases = append(cases, &ast.CaseClause{
 			List: []ast.Expr{mustTypeExpr(l, impl.ForType)},
-			Body: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, methodFn)), Args: []ast.Expr{ast.NewIdent("typed")}}}}},
+			Body: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, methodFn)), Args: args}}}},
 		})
 	}
-	if len(cases) == 0 {
-		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{target.expr}}}, nil
-	}
-	cases = append(cases, &ast.CaseClause{Body: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{target.expr}}}}}})
+	cases = append(cases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: "\"unsupported trait object dispatch\""}}}}}})
 	stmts = append(stmts, &ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("typed")}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: target.expr}}}, Body: &ast.BlockStmt{List: cases}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
 }

@@ -899,6 +899,60 @@ func TestGenerateSourcesSupportsCapturedClosureSort(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesSupportsUserTraitObjectDispatch(t *testing.T) {
+	program := lowerSource(t, `
+		trait Renderable {
+			fn render() Str
+		}
+
+		struct Block {
+			title: Str,
+		}
+
+		struct Para {
+			body: Str,
+		}
+
+		impl Renderable for Block {
+			fn render() Str {
+				"[block:" + self.title + "]"
+			}
+		}
+
+		impl Renderable for Para {
+			fn render() Str {
+				"[para:" + self.body + "]"
+			}
+		}
+
+		fn draw(r: Renderable) Str {
+			r.render()
+		}
+
+		fn main() Str {
+			draw(Block{title: "hi"}) + draw(Para{body: "there"})
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "switch typed := r.(type)") {
+		t.Fatalf("generated source missing trait object dispatch lowering:\n%s", source)
+	}
+	if !strings.Contains(source, "Block_Renderable_render(typed)") {
+		t.Fatalf("generated source missing Block trait dispatch call:\n%s", source)
+	}
+	if !strings.Contains(source, "Para_Renderable_render(typed)") {
+		t.Fatalf("generated source missing Para trait dispatch call:\n%s", source)
+	}
+	if !strings.Contains(source, "panic(") {
+		t.Fatalf("generated source missing trait dispatch fallback panic:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesSupportsTraitObjectDispatch(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io
