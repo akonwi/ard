@@ -16,6 +16,26 @@ import (
 	"go.lsp.dev/uri"
 )
 
+func completionItemByLabel(items []protocol.CompletionItem, label string) (protocol.CompletionItem, bool) {
+	for _, item := range items {
+		if item.Label == label {
+			return item, true
+		}
+	}
+	return protocol.CompletionItem{}, false
+}
+
+func assertCompletion(t *testing.T, items []protocol.CompletionItem, label string, detail string) {
+	t.Helper()
+	item, ok := completionItemByLabel(items, label)
+	if !ok {
+		t.Fatalf("completion %q not found in %#v", label, items)
+	}
+	if detail != "" && !strings.Contains(item.Detail, detail) {
+		t.Fatalf("completion %q detail = %q, want contains %q", label, item.Detail, detail)
+	}
+}
+
 // TestServerInitializes verifies all expected LSP handlers are registered.
 func TestServerInitializes(t *testing.T) {
 	server := NewServer()
@@ -1132,6 +1152,154 @@ func TestTicTacToeLine42TypingDoesNotHang(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("typing line 42 in tic-tac-toe sample timed out")
 	}
+}
+
+// TestCompletionInstanceMembers verifies dot completions for fields and methods.
+func TestCompletionInstanceMembers(t *testing.T) {
+	source := `struct Board {
+  cells: [Str]
+}
+impl Board {
+  fn can_play(pos: Int) Bool { true }
+}
+fn main() {
+  mut board = Board{cells: []}
+  board.
+}
+`
+
+	items := computeCompletions(source, "test.ard", protocol.Position{Line: 8, Character: 8})
+	assertCompletion(t, items, "cells", "Board.cells: [Str]")
+	assertCompletion(t, items, "can_play", "fn Board.can_play(pos: Int) Bool")
+
+	prefixed := strings.Replace(source, "  board.\n", "  board.ca\n", 1)
+	prefixedItems := computeCompletions(prefixed, "test.ard", protocol.Position{Line: 8, Character: 10})
+	item, ok := completionItemByLabel(prefixedItems, "can_play")
+	if !ok || item.TextEdit == nil {
+		t.Fatalf("expected can_play completion with text edit, got %#v", item)
+	}
+	if item.TextEdit.NewText != "can_play" || item.TextEdit.Range.Start.Character != 8 || item.TextEdit.Range.End.Character != 10 {
+		t.Fatalf("can_play text edit = %#v, want replace typed prefix", item.TextEdit)
+	}
+}
+
+// TestCompletionImportedInstanceMembers verifies imported and generic instance completions.
+func TestCompletionImportedInstanceMembers(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	boxesSource := `struct Box {
+  item: $T,
+}
+
+impl Box {
+  fn get() $T { self.item }
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "boxes.ard"), []byte(boxesSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use ard/http as web
+use test_project/boxes
+
+fn inspect(req: web::Request, response: web::Response, box: boxes::Box<Int>) {
+  req.
+  response.
+  req.method.
+  box.
+}
+`
+	filePath := filepath.Join(root, "main.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reqItems := computeCompletions(source, filePath, protocol.Position{Line: 4, Character: 6})
+	assertCompletion(t, reqItems, "url", "web::Request.url: Str")
+	assertCompletion(t, reqItems, "method", "web::Request.method: web::Method")
+	assertCompletion(t, reqItems, "path", "fn web::Request.path() Str?")
+
+	responseItems := computeCompletions(source, filePath, protocol.Position{Line: 5, Character: 11})
+	assertCompletion(t, responseItems, "is_ok", "fn web::Response.is_ok() Bool")
+
+	methodItems := computeCompletions(source, filePath, protocol.Position{Line: 6, Character: 13})
+	assertCompletion(t, methodItems, "to_str", "fn web::Method.to_str() Str")
+
+	boxItems := computeCompletions(source, filePath, protocol.Position{Line: 7, Character: 6})
+	assertCompletion(t, boxItems, "item", "boxes::Box<Int>.item: Int")
+	assertCompletion(t, boxItems, "get", "fn boxes::Box<Int>.get() Int")
+}
+
+// TestCompletionStaticMembers verifies double-colon completions for modules and static type members.
+func TestCompletionStaticMembers(t *testing.T) {
+	source := `use ard/http as web
+
+fn main() {
+  web::
+  web::Response::
+  web::Method::
+  Int::
+}
+`
+
+	moduleItems := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 7})
+	assertCompletion(t, moduleItems, "Response", "web::Response")
+	assertCompletion(t, moduleItems, "send", "fn web::send(req: web::Request, timeout: Int?) web::Response!Str")
+
+	responseItems := computeCompletions(source, "test.ard", protocol.Position{Line: 4, Character: 17})
+	assertCompletion(t, responseItems, "new", "fn web::Response::new(status: Int, body: Str) web::Response")
+
+	methodItems := computeCompletions(source, "test.ard", protocol.Position{Line: 5, Character: 15})
+	assertCompletion(t, methodItems, "Get", "web::Method::Get: web::Method")
+
+	intItems := computeCompletions(source, "test.ard", protocol.Position{Line: 6, Character: 7})
+	assertCompletion(t, intItems, "from_str", "fn Int::from_str(str: Str) Int?")
+}
+
+// TestCompletionUserModuleStaticMembers verifies user module functions and variables complete after ::.
+func TestCompletionUserModuleStaticMembers(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	responsesSource := `use ard/http
+
+let api_name = "ranger"
+
+fn json_error(mut res: http::Response, status: Int, message: Str) {
+  res.status = status
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "responses.ard"), []byte(responsesSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use ard/http
+use test_project/responses
+
+fn main() {
+  responses::
+}
+`
+	filePath := filepath.Join(root, "routes.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	items := computeCompletions(source, filePath, protocol.Position{Line: 4, Character: 13})
+	assertCompletion(t, items, "json_error", "fn responses::json_error(mut res: http::Response, status: Int, message: Str) Void")
+	assertCompletion(t, items, "api_name", "responses::api_name: Str")
+}
+
+// TestCompletionTraitMethods verifies dot completions for trait-typed receivers.
+func TestCompletionTraitMethods(t *testing.T) {
+	source := `fn render(value: Str::ToString) Str {
+  value.
+}
+`
+
+	items := computeCompletions(source, "test.ard", protocol.Position{Line: 1, Character: 8})
+	assertCompletion(t, items, "to_str", "fn Str::ToString.to_str() Str")
 }
 
 // TestHoverPositions verifies hover returns correct type info.

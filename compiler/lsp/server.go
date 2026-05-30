@@ -346,11 +346,28 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
-	_ = params
+
+	doc := s.cache.Get(params.TextDocument.URI)
+	if doc == nil {
+		return reply(ctx, &protocol.CompletionList{IsIncomplete: false, Items: []protocol.CompletionItem{}}, nil)
+	}
+
+	items := []protocol.CompletionItem{}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				items = []protocol.CompletionItem{}
+			}
+		}()
+		items = computeCompletions(doc.Text, doc.URI.Filename(), params.Position)
+	}()
+	if items == nil {
+		items = []protocol.CompletionItem{}
+	}
 
 	return reply(ctx, &protocol.CompletionList{
 		IsIncomplete: false,
-		Items:        []protocol.CompletionItem{},
+		Items:        items,
 	}, nil)
 }
 
