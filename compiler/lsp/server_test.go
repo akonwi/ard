@@ -1,14 +1,17 @@
 package lsp
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
+	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -40,6 +43,33 @@ func TestServerInitializes(t *testing.T) {
 		if _, ok := server.handlers[method]; !ok {
 			t.Errorf("missing handler for %s", method)
 		}
+	}
+}
+
+// TestDispatchRecoversFromPanic verifies handler panics become request errors instead of killing the server.
+func TestDispatchRecoversFromPanic(t *testing.T) {
+	server := NewServer()
+	server.handlers["ard/testPanic"] = func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+		panic("boom")
+	}
+	req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), "ard/testPanic", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	replied := false
+	err = server.dispatch(context.Background(), func(ctx context.Context, result interface{}, replyErr error) error {
+		replied = true
+		if replyErr == nil {
+			t.Fatal("expected panic to be returned as an error")
+		}
+		return nil
+	}, req)
+	if err != nil {
+		t.Fatalf("dispatch returned error: %v", err)
+	}
+	if !replied {
+		t.Fatal("expected dispatch to reply")
 	}
 }
 
@@ -360,6 +390,297 @@ fn main(box: boxes::Box<Int>) {
 		loc := requireDefinition(t, source, filePath, 4, 7)
 		assertDefinitionStart(t, loc, boxesPath, 5, 2)
 	})
+}
+
+func requireSignatureHelp(t *testing.T, source string, filePath string, line uint32, char uint32) *protocol.SignatureHelp {
+	t.Helper()
+	help := computeSignatureHelp(source, filePath, protocol.Position{Line: line, Character: char})
+	if help == nil || len(help.Signatures) == 0 {
+		t.Fatalf("expected signature help at %d:%d, got %#v", line, char, help)
+	}
+	return help
+}
+
+func requireSignatureHelpAtMarker(t *testing.T, markedSource string, filePath string) (*protocol.SignatureHelp, string) {
+	t.Helper()
+	source, line, char := sourceMarkerPosition(t, markedSource)
+	return requireSignatureHelp(t, source, filePath, line, char), source
+}
+
+func sourceMarkerPosition(t *testing.T, markedSource string) (string, uint32, uint32) {
+	t.Helper()
+	idx := strings.Index(markedSource, "|")
+	if idx < 0 {
+		t.Fatalf("marked source must contain | cursor marker")
+	}
+	source := markedSource[:idx] + markedSource[idx+1:]
+	before := markedSource[:idx]
+	line := uint32(strings.Count(before, "\n"))
+	lineStart := strings.LastIndex(before, "\n")
+	char := idx
+	if lineStart >= 0 {
+		char = idx - lineStart - 1
+	}
+	return source, line, uint32(char)
+}
+
+func assertSignature(t *testing.T, help *protocol.SignatureHelp, want string, active uint32) {
+	t.Helper()
+	if got := help.Signatures[0].Label; got != want {
+		t.Fatalf("signature = %q, want %q", got, want)
+	}
+	if got := help.ActiveParameter; got != active {
+		t.Fatalf("active parameter = %d, want %d", got, active)
+	}
+}
+
+// TestSignatureHelpLocalFunction verifies signature help for local calls.
+func TestSignatureHelpLocalFunction(t *testing.T) {
+	source := `fn add(left: Int, right: Int) Int { left + right }
+fn main() {
+  let n = add(1, 2)
+}
+`
+	help := requireSignatureHelp(t, source, "test.ard", 2, 17)
+	assertSignature(t, help, "fn add(left: Int, right: Int) Int", 1)
+}
+
+// TestSignatureHelpInstanceMethod verifies signature help for instance methods.
+func TestSignatureHelpInstanceMethod(t *testing.T) {
+	source := `struct Board {
+  cells: [Str]
+}
+impl Board {
+  fn mut play(player: Str, pos: Int) {
+    self.cells.set(pos, player)
+  }
+}
+`
+	help := requireSignatureHelp(t, source, "test.ard", 5, 24)
+	assertSignature(t, help, "fn mut [Str].set(index: Int, value: Str) Bool", 1)
+}
+
+// TestSignatureHelpImportedGenericMethod verifies imported generic method signatures substitute type args.
+func TestSignatureHelpImportedGenericMethod(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	boxesSource := `struct Box {
+  item: $T,
+}
+
+impl Box {
+  fn replace(item: $T) $T {
+    item
+  }
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "boxes.ard"), []byte(boxesSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	marked := `use test_project/boxes
+
+fn main(box: boxes::Box<Int>) {
+  box.replace(1|)
+}
+`
+	source, line, char := sourceMarkerPosition(t, marked)
+	filePath := filepath.Join(root, "main.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	help := requireSignatureHelp(t, source, filePath, line, char)
+	assertSignature(t, help, "fn boxes::Box<Int>.replace(item: Int) Int", 0)
+}
+
+// TestSignatureHelpImportedStaticFunction verifies signature help for imported module calls.
+func TestSignatureHelpImportedStaticFunction(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	responsesSource := `use ard/http
+
+fn json_error(mut res: http::Response, status: Int, message: Str) {
+  res.status = status
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "responses.ard"), []byte(responsesSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use ard/http
+use test_project/responses
+
+fn main(mut res: http::Response) {
+  responses::json_error(res, 400, "Nope")
+}
+`
+	filePath := filepath.Join(root, "routes.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	help := requireSignatureHelp(t, source, filePath, 4, 31)
+	assertSignature(t, help, "fn responses::json_error(mut res: http::Response, status: Int, message: Str) Void", 1)
+}
+
+// TestSignatureHelpStaticPreludeFunction verifies signature help for prelude static calls.
+func TestSignatureHelpStaticPreludeFunction(t *testing.T) {
+	source := `fn main(input: Str) {
+  let parsed = Int::from_str(input).or(-1)
+}
+`
+	help := requireSignatureHelp(t, source, "test.ard", 1, 30)
+	assertSignature(t, help, "fn Int::from_str(str: Str) Int?", 0)
+}
+
+// TestSignatureHelpLocalExternFunction verifies signature help for extern calls declared in the same module.
+func TestSignatureHelpLocalExternFunction(t *testing.T) {
+	help, _ := requireSignatureHelpAtMarker(t, `extern fn window_width() Int = "WindowWidth"
+fn main() {
+  let width = window_width(|)
+}
+`, "test.ard")
+	assertSignature(t, help, "fn window_width() Int", 0)
+}
+
+// TestSignatureHelpNamedArguments maps named arguments back to the matching parameter.
+func TestSignatureHelpNamedArguments(t *testing.T) {
+	help, _ := requireSignatureHelpAtMarker(t, `fn configure(width: Int, height: Int, title: Str) {}
+fn main() {
+  configure(title: "Demo", width: 80|, height: 24)
+}
+`, "test.ard")
+	assertSignature(t, help, "fn configure(width: Int, height: Int, title: Str) Void", 0)
+}
+
+// TestSignatureHelpNestedCommas ignores commas inside nested calls when selecting the active parameter.
+func TestSignatureHelpNestedCommas(t *testing.T) {
+	help, _ := requireSignatureHelpAtMarker(t, `fn wrap(left: Int, right: Int) Int { left + right }
+fn outer(label: Str, value: Int, done: Bool) {}
+fn main() {
+  outer("x", wrap(1, 2), true|)
+}
+`, "test.ard")
+	assertSignature(t, help, "fn outer(label: Str, value: Int, done: Bool) Void", 2)
+}
+
+// TestSignatureHelpImportedExternFunction verifies signatures for stdlib extern functions.
+func TestSignatureHelpImportedExternFunction(t *testing.T) {
+	help, _ := requireSignatureHelpAtMarker(t, `use ard/io
+
+fn main() {
+  let input = io::read_line(|)
+}
+`, "test.ard")
+	assertSignature(t, help, "fn io::read_line() Str!Str", 0)
+}
+
+// TestSignatureHelpIncompleteCall verifies help while the user is still typing a call.
+func TestSignatureHelpIncompleteCall(t *testing.T) {
+	help, _ := requireSignatureHelpAtMarker(t, `fn add(left: Int, right: Int) Int { left + right }
+fn main() {
+  let n = add(1, |
+`, "test.ard")
+	assertSignature(t, help, "fn add(left: Int, right: Int) Int", 1)
+}
+
+// TestSignatureHelpIncompleteEmptyCall verifies help immediately after typing an opening paren.
+func TestSignatureHelpIncompleteEmptyCall(t *testing.T) {
+	help, _ := requireSignatureHelpAtMarker(t, `fn add(left: Int, right: Int) Int { left + right }
+fn main() {
+  let n = add(|
+`, "test.ard")
+	assertSignature(t, help, "fn add(left: Int, right: Int) Int", 0)
+}
+
+// TestSignatureHelpNestedIncompleteCall keeps the innermost active call when parent calls are unfinished.
+func TestSignatureHelpNestedIncompleteCall(t *testing.T) {
+	help, _ := requireSignatureHelpAtMarker(t, `fn add(left: Int, right: Int) Int { left + right }
+fn outer(value: Int) Int { value }
+fn main() {
+  let n = outer(add(1, |
+`, "test.ard")
+	assertSignature(t, help, "fn add(left: Int, right: Int) Int", 1)
+}
+
+// TestSignatureHelpIncompleteNamedArgument maps an unfinished named arg to its parameter.
+func TestSignatureHelpIncompleteNamedArgument(t *testing.T) {
+	help, _ := requireSignatureHelpAtMarker(t, `fn configure(width: Int, height: Int, title: Str) {}
+fn main() {
+  configure(title: |
+`, "test.ard")
+	assertSignature(t, help, "fn configure(width: Int, height: Int, title: Str) Void", 2)
+}
+
+// TestSignatureHelpTicTacToeLineDoesNotPanic covers the sample line that Zed requests while typing.
+func TestSignatureHelpTicTacToeLineDoesNotPanic(t *testing.T) {
+	filePath := filepath.Join("..", "samples", "tic-tac-toe.ard")
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(content)
+	lines := strings.Split(source, "\n")
+	if len(lines) < 42 {
+		t.Fatalf("expected tic-tac-toe sample to have at least 42 lines")
+	}
+	for char := 0; char <= len(lines[41]); char++ {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("signature help panicked at line 42 char %d: %v", char, r)
+				}
+			}()
+			_ = computeSignatureHelp(source, filePath, protocol.Position{Line: 41, Character: uint32(char)})
+		}()
+	}
+}
+
+// TestTicTacToeLine42TypingDoesNotHang covers incomplete call states produced while typing in Zed.
+func TestTicTacToeLine42TypingDoesNotHang(t *testing.T) {
+	filePath := filepath.Join("..", "samples", "tic-tac-toe.ard")
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseLines := strings.Split(string(content), "\n")
+	if len(baseLines) < 42 {
+		t.Fatalf("expected tic-tac-toe sample to have at least 42 lines")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("panic while typing line 42: %v", r)
+			}
+		}()
+
+		variants := []string{"", "i", "io", "io:", "io::", "io::p", "io::print", "io::print(", "io::print()", `io::print("`, `io::print("x`}
+		for _, variant := range variants {
+			lines := append([]string(nil), baseLines...)
+			lines[41] = "    " + variant
+			source := strings.Join(lines, "\n")
+			if _, err := parseAndCheck(source, filePath); err != nil {
+				done <- err
+				return
+			}
+			for char := 0; char <= len(lines[41]); char++ {
+				_ = computeSignatureHelp(source, filePath, protocol.Position{Line: 41, Character: uint32(char)})
+			}
+		}
+		done <- nil
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("typing line 42 in tic-tac-toe sample timed out")
+	}
 }
 
 // TestHoverPositions verifies hover returns correct type info.

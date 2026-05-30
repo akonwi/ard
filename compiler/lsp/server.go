@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -67,14 +68,36 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 // dispatch routes incoming LSP requests and notifications to registered handlers.
-func (s *Server) dispatch(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+func (s *Server) dispatch(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) (err error) {
 	method := req.Method()
-
-	if handler, ok := s.handlers[method]; ok {
-		return handler(ctx, reply, req)
+	replied := false
+	safeReply := func(ctx context.Context, result interface{}, replyErr error) error {
+		replied = true
+		return reply(ctx, result, replyErr)
 	}
 
-	return jsonrpc2.MethodNotFoundHandler(ctx, reply, req)
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "ard-lsp panic handling %s: %v\n%s", method, r, debug.Stack())
+			if !replied {
+				err = safeReply(ctx, nil, fmt.Errorf("internal server error handling %s: %v", method, r))
+				return
+			}
+			err = fmt.Errorf("internal server error after reply handling %s: %v", method, r)
+		}
+	}()
+
+	// LSP clients may send feature requests concurrently. The current hover,
+	// definition, and signature-help paths share parse/type-resolution caches,
+	// so serialize handlers until those caches are request-scoped.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if handler, ok := s.handlers[method]; ok {
+		return handler(ctx, safeReply, req)
+	}
+
+	return jsonrpc2.MethodNotFoundHandler(ctx, safeReply, req)
 }
 
 // registerHandlers registers all LSP method handlers.
@@ -130,7 +153,8 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 				TriggerCharacters: []string{".", ":"},
 			},
 			SignatureHelpProvider: &protocol.SignatureHelpOptions{
-				TriggerCharacters: []string{"(", ","},
+				TriggerCharacters:   []string{"(", ",", ":"},
+				RetriggerCharacters: []string{",", ":"},
 			},
 			DocumentHighlightProvider:  true,
 			DocumentFormattingProvider: true,
@@ -350,9 +374,23 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
-	_ = params
 
-	return reply(ctx, nil, nil)
+	doc := s.cache.Get(params.TextDocument.URI)
+	if doc == nil {
+		return reply(ctx, nil, nil)
+	}
+
+	var help *protocol.SignatureHelp
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				help = nil
+			}
+		}()
+		help = computeSignatureHelp(doc.Text, doc.URI.Filename(), params.Position)
+	}()
+
+	return reply(ctx, help, nil)
 }
 
 func (s *Server) handleDocumentHighlight(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {

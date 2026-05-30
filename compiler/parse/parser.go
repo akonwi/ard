@@ -168,6 +168,10 @@ func (p *parser) synchronizeToTokens(tokens ...kind) {
 	for !p.isAtEnd() {
 		current := p.peek().kind
 
+		if needsNesting && nestingLevel == 0 && current == right_brace && !slices.Contains(tokens, right_brace) {
+			return // Don't consume an enclosing block while recovering an inner delimiter.
+		}
+
 		if needsNesting {
 			// Track nesting for all bracket types
 			switch current {
@@ -3552,6 +3556,12 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 	hasNamedArgs := false
 
 	for !p.check(right_paren) {
+		if p.isAtEnd() || p.check(right_brace) {
+			p.addError(p.peek(), "Expected ')' to close function call")
+			break
+		}
+		iterationStart := p.index
+
 		// Parse and collect comments between arguments
 		if c := p.parseInlineComment(); c != nil {
 			comments = append(comments, *c)
@@ -3627,6 +3637,11 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 
 		p.match(comma)
 		p.match(new_line)
+
+		if p.index == iterationStart {
+			p.addError(p.peek(), "Could not parse function argument")
+			break
+		}
 	}
 
 	return args, comments, nil
