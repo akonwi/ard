@@ -6,7 +6,11 @@ import (
 	"strings"
 )
 
-//go:embed *.ard js/*.ard
+// embeddedFS contains Ard standard-library source files used by the checker and
+// targets to resolve imports such as ard/io, ard/js/promise, and ard/async/channel.
+// Keep these patterns in sync with nested std_lib module directories.
+//
+//go:embed *.ard js/*.ard async/*.ard
 var embeddedFS embed.FS
 
 // Find returns the content of an embedded .ard file by path

@@ -49,13 +49,13 @@ use ard/async/channel
 let ch = channel::new<Int>()
 let queue = channel::new<Int>(size: 16)
 
-let sender = async::eval(fn() Void!Str {
-  try ch.send(42)
+let sender = async::start(fn() {
+  ch.send(42)
   ch.close()
 })
 
 let value: Int? = ch.recv()
-let sent: Void!Str = sender.get()
+sender.join()
 ```
 
 Initial semantics:
@@ -63,20 +63,20 @@ Initial semantics:
 - `channel::new<$T>(size: Int?) Channel<$T>` creates a channel. Omitting `size` or passing `none` creates an unbuffered synchronous channel with no queue capacity. Passing `0` also creates an unbuffered channel, matching Go. Passing a positive size creates a buffered, FIFO, queue-backed channel. Passing a negative size falls back to `0` and creates an unbuffered channel.
 - For unbuffered channels, `send` and `recv` rendezvous directly: each operation blocks until the opposite side is ready.
 - For buffered channels, `send` blocks only when the buffer is full, and `recv` blocks only when the buffer is empty.
-- `Channel<$T>.send(value: $T) Void!Str` blocks until the value is accepted or buffered, and returns an error if the channel is closed before or during the send.
+- `Channel<$T>.send(value: $T) Bool` blocks until the value is accepted or buffered, and returns `false` if the channel is closed before or during the send.
 - `Channel<$T>.recv() $T?` blocks until a value is available or the channel is closed. It returns `some(value)` for received values and `none` after close and drain.
-- `Channel<$T>.close() Void!Str` closes the channel for sending. Closing is explicit and should be done by the sending side. Closing an already-closed channel returns an error.
+- `Channel<$T>.close() Bool` closes the channel for sending. Closing is explicit and should be done by the sending side. Closing an already-closed channel returns `false`.
 - Channel values are reference-like synchronization handles. Sending, receiving, and closing do not require a mutable channel binding. A read-only `Channel<$T>` binding may be captured by fiber closures and used for communication.
 
 The public channel methods can delegate to private extern functions implemented by Go FFI companion code that uses native Go channel operations for send, receive, and close:
 
 ```ard
-private extern fn chan_send(ch: Chan<$T>, value: $T) Void!Str = "ChannelSend"
+private extern fn chan_send(ch: Chan<$T>, value: $T) Bool = "ChannelSend"
 private extern fn chan_recv(ch: Chan<$T>) $T? = "ChannelRecv"
-private extern fn chan_close(ch: Chan<$T>) Void!Str = "ChannelClose"
+private extern fn chan_close(ch: Chan<$T>) Bool = "ChannelClose"
 
 impl Channel {
-  fn send(value: $T) Void!Str {
+  fn send(value: $T) Bool {
     chan_send(self.chan, value)
   }
 
@@ -84,15 +84,15 @@ impl Channel {
     chan_recv(self.chan)
   }
 
-  fn close() Void!Str {
+  fn close() Bool {
     chan_close(self.chan)
   }
 }
 ```
 
-The constructor remains the only intrinsic channel operation because it must produce the native `Chan<$T>` representation. Ordinary send, receive, and close operations should stay in the standard-library/FFI layer as private extern calls implemented in real Go code, not as direct compiler/backend lowering. Go FFI implementations for `send` and `close` should adapt closed-channel panics into `Void!Str` errors.
+The constructor remains the only intrinsic channel operation because it must produce the native `Chan<$T>` representation. Ordinary send, receive, and close operations should stay in the standard-library/FFI layer as private extern calls implemented in real Go code, not as direct compiler/backend lowering. Go FFI implementations for `send` and `close` should adapt closed-channel panics into `false` results.
 
-Do not add `Channel<$T>.is_open() Bool` to the initial API. Native Go channels do not provide a reliable open-state query. Any `is_open()` result would be immediately stale in concurrent code, and a wrapper-maintained flag could be bypassed by raw `Chan<$T>` values crossing Go FFI. Callers should attempt `send` or `close` and handle the returned `Result`; receivers should use `recv() == none` as the closed-and-drained signal.
+Do not add `Channel<$T>.is_open() Bool` to the initial API. Native Go channels do not provide a reliable open-state query. Any `is_open()` result would be immediately stale in concurrent code, and a wrapper-maintained flag could be bypassed by raw `Chan<$T>` values crossing Go FFI. Callers should attempt `send` or `close` and handle the returned `Bool`; receivers should use `recv() == none` as the closed-and-drained signal.
 
 Other targets must make support explicit. Since JavaScript targets do not currently support Ard's fiber model, `ard/async/channel` is Go-target-only until a separate target compatibility decision defines equivalent semantics.
 
@@ -119,11 +119,11 @@ These deferred features can be layered on later once the base channel representa
 - Go interop remains simple when signatures use `Chan<$T>`: Ard channels are represented as native Go channels instead of opaque handles.
 - The design avoids adding generic host-type templating to extern type bindings solely to express `chan T`.
 - The Go backend must lower `Chan<$T>` to the correct concrete `chan T` type and lower channel construction to Go `make`.
-- FFI remains the implementation boundary for blocking send/recv/close operations, keeping channel behavior in ordinary Go companion code where possible. Construction stays compiler-defined because it must create the native channel representation, and send/close panics must be adapted into `Result` errors.
+- FFI remains the implementation boundary for blocking send/recv/close operations, keeping channel behavior in ordinary Go companion code where possible. Construction stays compiler-defined because it must create the native channel representation, and send/close panics must be adapted into `false` results.
 - Blocking behavior is explicit through `send` and `recv` calls, which fits the existing std-lib function/method style.
-- `send()` and `close()` make closed-channel failures recoverable through Ard's `Result` model instead of exposing Go panics.
+- `send()` and `close()` make closed-channel state recoverable through a simple Boolean because the only expected failure is that the channel is already closed.
 - `recv() $T?` gives Ard a safe closed-and-drained signal without exposing Go's zero-value-plus-ok receive form.
-- Omitting `is_open()` avoids a race-prone state-check API; senders handle `Result` and receivers observe closure through `recv()` returning `none`.
+- Omitting `is_open()` avoids a race-prone state-check API; senders handle Boolean send/close results and receivers observe closure through `recv()` returning `none`.
 - Channels become part of the checker and backend's target-aware concurrency model; unsupported targets must reject them clearly.
 - The first version is intentionally small. Directional channel views, channel-aware `match` multiplexing, cancellation tokens, and more expressive coordination patterns require future design work rather than being implied by the existence of `Channel<$T>`.
 

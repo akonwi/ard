@@ -3,6 +3,7 @@ package air
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -506,6 +507,10 @@ func (fl *functionLowerer) bindTypeVars(pattern checker.Type, actual TypeID) {
 				}
 			}
 		}
+	case *checker.ExternType:
+		if actualInfo.Kind == TypeExtern && typ.Name_ == "Chan" && len(typ.TypeArgs) == 1 && actualInfo.Elem != NoType {
+			fl.bindTypeVars(typ.TypeArgs[0], actualInfo.Elem)
+		}
 	}
 }
 
@@ -559,6 +564,15 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 			return NoType, err
 		}
 		return fl.l.internSyntheticType(fl.l.typeName(value)+"!"+fl.l.typeName(errType), TypeInfo{Kind: TypeResult, Value: value, Error: errType})
+	case *checker.ExternType:
+		if typ.Name_ == "Chan" && len(typ.TypeArgs) == 1 {
+			elem, err := fl.internType(typ.TypeArgs[0])
+			if err != nil {
+				return NoType, err
+			}
+			return fl.l.internSyntheticType("Chan<"+fl.l.typeName(elem)+">", TypeInfo{Kind: TypeExtern, Elem: elem, ExternBinding: typ.ExternalBinding, ModulePath: fl.l.typeOwnerPath(typ)})
+		}
+		return fl.l.internType(t)
 	case *checker.FunctionDef:
 		params := make([]TypeID, len(typ.Parameters))
 		for i, param := range typ.Parameters {
@@ -961,6 +975,10 @@ func (l *lowerer) declareConcreteExternCall(module ModuleID, name string, call *
 	if err != nil {
 		return 0, err
 	}
+	return l.declareConcreteExternCallWithSignature(module, name, call, signature)
+}
+
+func (l *lowerer) declareConcreteExternCallWithSignature(module ModuleID, name string, call *checker.FunctionCall, signature Signature) (ExternID, error) {
 	key := functionKey(module, name)
 	if id, ok := l.externs[key]; ok {
 		if signaturesEqual(l.program.Externs[id].Signature, signature) {
@@ -988,9 +1006,17 @@ func (l *lowerer) declareConcreteExternCall(module ModuleID, name string, call *
 }
 
 func (l *lowerer) signatureForCall(call *checker.FunctionCall) (Signature, error) {
+	return signatureForCallWithInterner(call, l.internType)
+}
+
+func (fl *functionLowerer) signatureForCall(call *checker.FunctionCall) (Signature, error) {
+	return signatureForCallWithInterner(call, fl.internType)
+}
+
+func signatureForCallWithInterner(call *checker.FunctionCall, intern func(checker.Type) (TypeID, error)) (Signature, error) {
 	if def := call.Definition(); def != nil {
 		if !functionHasTypeVar(def) {
-			return l.signatureForFunction(def.Parameters, def.ReturnType)
+			return signatureForFunctionWithInterner(def.Parameters, def.ReturnType, intern)
 		}
 		params := make([]Param, len(def.Parameters))
 		for i, param := range def.Parameters {
@@ -998,13 +1024,13 @@ func (l *lowerer) signatureForCall(call *checker.FunctionCall) (Signature, error
 			if i < len(call.Args) {
 				paramType = call.Args[i].Type()
 			}
-			typeID, err := l.internType(paramType)
+			typeID, err := intern(paramType)
 			if err != nil {
 				return Signature{}, err
 			}
 			params[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable}
 		}
-		returnType, err := l.internType(call.Type())
+		returnType, err := intern(call.Type())
 		if err != nil {
 			return Signature{}, err
 		}
@@ -1012,13 +1038,13 @@ func (l *lowerer) signatureForCall(call *checker.FunctionCall) (Signature, error
 	}
 	params := make([]Param, len(call.Args))
 	for i, arg := range call.Args {
-		typeID, err := l.internType(arg.Type())
+		typeID, err := intern(arg.Type())
 		if err != nil {
 			return Signature{}, err
 		}
 		params[i] = Param{Name: fmt.Sprintf("arg%d", i), Type: typeID}
 	}
-	returnType, err := l.internType(call.Type())
+	returnType, err := intern(call.Type())
 	if err != nil {
 		return Signature{}, err
 	}
@@ -1126,6 +1152,13 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	case *checker.ExternType:
 		info.Kind = TypeExtern
 		info.ExternBinding = typ.ExternalBinding
+		if typ.Name_ == "Chan" && len(typ.TypeArgs) == 1 {
+			elem, err := l.internType(typ.TypeArgs[0])
+			if err != nil {
+				return NoType, err
+			}
+			info.Elem = elem
+		}
 	case *checker.FunctionDef:
 		info.Kind = TypeFunction
 		for _, param := range typ.Parameters {
@@ -1214,8 +1247,14 @@ func (l *lowerer) typeOwnerPath(t checker.Type) string {
 		return ""
 	}
 	for path, module := range l.moduleByName {
-		if module.Get(name).Type == t {
+		sym := module.Get(name)
+		if sym.Type == t {
 			return path
+		}
+		if original, ok := sym.Type.(*checker.ExternType); ok {
+			if typed, ok := t.(*checker.ExternType); ok && typed.Name_ == "Chan" && original.Name_ == typed.Name_ {
+				return path
+			}
 		}
 	}
 	return ""
@@ -1257,15 +1296,19 @@ func (l *lowerer) internTrait(trait *checker.Trait) (TraitID, error) {
 }
 
 func (l *lowerer) signatureForFunction(params []checker.Parameter, returnType checker.Type) (Signature, error) {
+	return signatureForFunctionWithInterner(params, returnType, l.internType)
+}
+
+func signatureForFunctionWithInterner(params []checker.Parameter, returnType checker.Type, intern func(checker.Type) (TypeID, error)) (Signature, error) {
 	loweredParams := make([]Param, len(params))
 	for i, param := range params {
-		typeID, err := l.internType(param.Type)
+		typeID, err := intern(param.Type)
 		if err != nil {
 			return Signature{}, err
 		}
 		loweredParams[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable}
 	}
-	returnID, err := l.internType(returnType)
+	returnID, err := intern(returnType)
 	if err != nil {
 		return Signature{}, err
 	}
@@ -1345,6 +1388,13 @@ func typeContainsTypeVar(t checker.Type) bool {
 			}
 		}
 		return typeContainsTypeVar(typ.ReturnType)
+	case *checker.ExternType:
+		for _, typeArg := range typ.TypeArgs {
+			if typeContainsTypeVar(typeArg) {
+				return true
+			}
+		}
+		return false
 	default:
 		return false
 	}
@@ -1458,6 +1508,15 @@ func airTypeKey(t checker.Type) string {
 		return airFunctionTypeKey(typ.Parameters, typ.ReturnType)
 	case *checker.ExternalFunctionDef:
 		return airFunctionTypeKey(typ.Parameters, typ.ReturnType)
+	case *checker.ExternType:
+		if len(typ.TypeArgs) == 0 {
+			return "extern " + typ.Name_
+		}
+		parts := make([]string, len(typ.TypeArgs))
+		for i, arg := range typ.TypeArgs {
+			parts[i] = airTypeKey(arg)
+		}
+		return "extern " + typ.Name_ + "<" + strings.Join(parts, ",") + ">"
 	default:
 		return t.String()
 	}
@@ -2531,7 +2590,11 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return &Expr{Kind: ExprCallClosure, Type: returnType, Target: target, Args: args}, nil
 		}
 		if e.ExternalBinding != "" {
-			id, err := fl.l.declareFunctionCallExtern(fl.fn.Module, e)
+			signature, err := fl.signatureForCall(e)
+			if err != nil {
+				return nil, err
+			}
+			id, err := fl.l.declareConcreteExternCallWithSignature(fl.fn.Module, e.Name, e, signature)
 			if err != nil {
 				return nil, err
 			}

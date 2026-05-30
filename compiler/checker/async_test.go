@@ -61,6 +61,37 @@ func TestFibers(t *testing.T) {
 	})
 }
 
+func TestAsyncChannels(t *testing.T) {
+	run(t, []test{
+		{
+			name: "channel constructor and methods type check",
+			input: `
+			use ard/async/channel
+
+			let ch = channel::new<Int>()
+			let queued = channel::new<Str>(size: 2)
+			let sent: Bool = ch.send(42)
+			let value: Int? = ch.recv()
+			let closed: Bool = ch.close()
+			queued.send("hello")
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "channel send enforces element type",
+			input: `
+			use ard/async/channel
+
+			let ch = channel::new<Int>()
+			ch.send("wrong")
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"},
+			},
+		},
+	})
+}
+
 func TestAsyncEvalIsolation(t *testing.T) {
 	run(t, []test{
 		{
