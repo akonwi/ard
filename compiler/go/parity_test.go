@@ -1065,6 +1065,86 @@ func TestGoTargetParityAsyncTiming(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityAsyncChannels(t *testing.T) {
+	t.Run("unbuffered channel communicates with fiber", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			use ard/async
+			use ard/async/channel
+
+			fn main() Int {
+				let ch = channel::new<Int>()
+				let sender = async::start(fn() {
+					ch.send(42).expect("send failed")
+					ch.close().expect("close failed")
+				})
+				let value = ch.recv().or(0)
+				sender.join()
+				value
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
+	})
+
+	t.Run("buffered channel drains before closed receive returns none", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			use ard/async/channel
+
+			fn main() Int!Str {
+				let ch = channel::new<Int>(size: 2)
+				try ch.send(20)
+				try ch.send(22)
+				try ch.close()
+				let total = ch.recv().or(0) + ch.recv().or(0)
+				match ch.recv() {
+					value => Result::err("expected channel to be closed")
+					_ => Result::ok(total)
+				}
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
+	})
+
+	t.Run("negative channel size falls back to unbuffered", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			use ard/async
+			use ard/async/channel
+
+			fn main() Int {
+				let ch = channel::new<Int>(size: -1)
+				let sender = async::start(fn() {
+					ch.send(9).expect("send")
+					ch.close().expect("close")
+				})
+				let value = ch.recv().or(0)
+				sender.join()
+				value
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "9" {
+			t.Fatalf("got %s, want 9", got)
+		}
+	})
+
+	t.Run("send and close report closed channel errors", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			use ard/async/channel
+
+			fn main() Bool {
+				let ch = channel::new<Int>(size: 1)
+				ch.close().expect("initial close failed")
+				ch.send(1).is_err() and ch.close().is_err()
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "true" {
+			t.Fatalf("got %s, want true", got)
+		}
+	})
+}
+
 func TestGoTargetParityPrinting(t *testing.T) {
 	got := runGoTargetSourceStdout(t, `
 		use ard/io

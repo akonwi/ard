@@ -58,6 +58,12 @@ func TestStdlibImportTargetValidation(t *testing.T) {
 			wantErrPart: "Cannot import ard/async when targeting js-server; allowed targets: go",
 		},
 		{
+			name:        "async channel blocked on js-server",
+			target:      backend.TargetJSServer,
+			source:      "use ard/async/channel\nfn main() Int { 1 }",
+			wantErrPart: "Cannot import ard/async/channel when targeting js-server; allowed targets: go",
+		},
+		{
 			name:        "io blocked on js-browser",
 			target:      backend.TargetJSBrowser,
 			source:      "use ard/io\nfn main() Int { 1 }",

@@ -12,6 +12,9 @@ var StdlibAllowedTargets = map[string]map[string]bool{
 	"ard/async": {
 		backend.TargetGo: true,
 	},
+	"ard/async/channel": {
+		backend.TargetGo: true,
+	},
 	"ard/fs": {
 		backend.TargetGo:       true,
 		backend.TargetJSServer: true,

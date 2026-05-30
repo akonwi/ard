@@ -181,6 +181,34 @@ func Sleep(ns int) {
 	time.Sleep(time.Duration(ns))
 }
 
+func ChannelSend[T any](ch chan T, value T) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("send on closed channel")
+		}
+	}()
+	ch <- value
+	return nil
+}
+
+func ChannelRecv[T any](ch chan T) Maybe[T] {
+	value, ok := <-ch
+	if !ok {
+		return None[T]()
+	}
+	return Some(value)
+}
+
+func ChannelClose[T any](ch chan T) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("close on closed channel")
+		}
+	}()
+	close(ch)
+	return nil
+}
+
 func Base64Encode(input string, noPad Maybe[bool]) string {
 	if noPad.Some && noPad.Value {
 		return base64.RawStdEncoding.EncodeToString([]byte(input))

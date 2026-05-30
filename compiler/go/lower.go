@@ -492,7 +492,7 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 			if err != nil {
 				return nil, err
 			}
-			fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(field.Name)}, Type: fieldType})
+			fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(l.goFieldName(typ, field.Name))}, Type: fieldType})
 		}
 		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
 	case air.TypeUnion:
@@ -1598,6 +1598,14 @@ func (l *lowerer) isStdlibFFIBackedType(info air.TypeInfo) bool {
 	return path == "ard/http" && (info.Name == "Method" || info.Name == "Request" || info.Name == "Response")
 }
 
+func (l *lowerer) isChannelExternType(info air.TypeInfo) bool {
+	if info.Kind != air.TypeExtern || info.Elem == air.NoType {
+		return false
+	}
+	path := l.modulePathForType(info.ID)
+	return path == "ard/async/channel" && (info.Name == "Chan" || strings.HasPrefix(info.Name, "Chan<"))
+}
+
 func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 	if !validTypeID(l.program, typeID) {
 		return nil, fmt.Errorf("invalid type id %d", typeID)
@@ -1683,6 +1691,13 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 	case air.TypeUnion:
 		return ast.NewIdent(typeName(l.program, info)), nil
 	case air.TypeExtern:
+		if l.isChannelExternType(info) {
+			elem, err := l.goType(info.Elem)
+			if err != nil {
+				return nil, err
+			}
+			return &ast.ChanType{Dir: ast.SEND | ast.RECV, Value: elem}, nil
+		}
 		if strings.TrimSpace(info.ExternBinding) != "" {
 			typ, err := parser.ParseExpr(info.ExternBinding)
 			if err != nil {
@@ -3628,7 +3643,14 @@ func (l *lowerer) goFieldName(typ air.TypeInfo, fieldName string) string {
 	if l.isStdlibFFIBackedType(typ) {
 		return exportedFieldName(fieldName)
 	}
-	return fieldName
+	name := sanitizeName(fieldName)
+	if name == "" {
+		return "field"
+	}
+	if token.Lookup(name).IsKeyword() {
+		return name + "_"
+	}
+	return name
 }
 
 func (l *lowerer) wrapProjectMaybeCall(maybeTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
@@ -3910,6 +3932,13 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		}
 		return l.lowerProjectExternCall(ext, binding, args, stmts, expr.Type)
 	}
+	channel, ok, err := l.lowerChannelStdlibExtern(binding, args, stmts, expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if ok {
+		return channel, nil
+	}
 	generated, ok, err := l.lowerGeneratedStdlibExtern(binding, ext.Signature, args, stmts, expr.Type)
 	if err != nil {
 		return loweredExpr{}, err
@@ -3918,6 +3947,101 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 		return generated, nil
 	}
 	return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
+}
+
+func (l *lowerer) lowerChannelStdlibExtern(binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, bool, error) {
+	switch binding {
+	case "ChannelNew":
+		out, err := l.lowerChannelNew(args, stmts, returnTypeID)
+		return out, true, err
+	case "ChannelSend":
+		call := &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "ChannelSend"), Args: args}
+		wrapped, err := l.wrapErrorCall(returnTypeID, call)
+		if err != nil {
+			return loweredExpr{}, true, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, true, nil
+	case "ChannelRecv":
+		call := &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "ChannelRecv"), Args: args}
+		return loweredExpr{stmts: stmts, expr: call}, true, nil
+	case "ChannelClose":
+		call := &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "ChannelClose"), Args: args}
+		wrapped, err := l.wrapErrorCall(returnTypeID, call)
+		if err != nil {
+			return loweredExpr{}, true, err
+		}
+		wrapped.stmts = append(stmts, wrapped.stmts...)
+		return wrapped, true, nil
+	default:
+		return loweredExpr{}, false, nil
+	}
+}
+
+func (l *lowerer) lowerChannelNew(args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
+	if !validTypeID(l.program, returnTypeID) {
+		return loweredExpr{}, fmt.Errorf("invalid channel type id %d", returnTypeID)
+	}
+	info := l.program.Types[returnTypeID-1]
+	if info.Kind != air.TypeStruct || info.Name != "Channel" && !strings.HasPrefix(info.Name, "Channel<") {
+		return loweredExpr{}, fmt.Errorf("ChannelNew returned non-Channel type %s", info.Name)
+	}
+	var rawField air.FieldInfo
+	foundRawField := false
+	for _, field := range info.Fields {
+		if field.Name == "chan" {
+			rawField = field
+			foundRawField = true
+			break
+		}
+	}
+	if !foundRawField || !validTypeID(l.program, rawField.Type) {
+		return loweredExpr{}, fmt.Errorf("ChannelNew result type %s has no raw channel field", info.Name)
+	}
+	rawInfo := l.program.Types[rawField.Type-1]
+	if !l.isChannelExternType(rawInfo) {
+		return loweredExpr{}, fmt.Errorf("ChannelNew raw field has non-channel type %s", rawInfo.Name)
+	}
+	elemType, err := l.goType(rawInfo.Elem)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	channelType := func() ast.Expr {
+		return &ast.ChanType{Dir: ast.SEND | ast.RECV, Value: elemType}
+	}
+	makeCall := func(capacity ast.Expr) ast.Expr {
+		call := &ast.CallExpr{Fun: ast.NewIdent("make"), Args: []ast.Expr{channelType()}}
+		if capacity != nil {
+			call.Args = append(call.Args, capacity)
+		}
+		return call
+	}
+	channelTemp := l.nextTemp()
+	stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
+		Names:  []*ast.Ident{ast.NewIdent(channelTemp)},
+		Type:   channelType(),
+		Values: []ast.Expr{makeCall(nil)},
+	}}}})
+	if len(args) > 0 {
+		sizeTemp := l.nextTemp()
+		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(sizeTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{args[0]}})
+		cond := &ast.BinaryExpr{
+			X:  &ast.SelectorExpr{X: ast.NewIdent(sizeTemp), Sel: ast.NewIdent("Some")},
+			Op: token.LAND,
+			Y: &ast.BinaryExpr{
+				X:  &ast.SelectorExpr{X: ast.NewIdent(sizeTemp), Sel: ast.NewIdent("Value")},
+				Op: token.GTR,
+				Y:  &ast.BasicLit{Kind: token.INT, Value: "0"},
+			},
+		}
+		stmts = append(stmts, &ast.IfStmt{Cond: cond, Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(channelTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{makeCall(&ast.SelectorExpr{X: ast.NewIdent(sizeTemp), Sel: ast.NewIdent("Value")})}},
+		}}})
+	}
+	result := &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, info)), Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(info, rawField.Name)), Value: ast.NewIdent(channelTemp)},
+	}}
+	return loweredExpr{stmts: stmts, expr: result}, nil
 }
 
 func (l *lowerer) adaptProjectExternArgs(signature air.Signature, args []ast.Expr) ([]ast.Expr, []ast.Stmt, error) {
