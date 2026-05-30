@@ -25,11 +25,22 @@ type referenceResolvedTarget struct {
 	def  *definitionTarget
 }
 
+type referenceModulePathEntry struct {
+	path string
+	ok   bool
+}
+
+var referenceModulePathCache map[string]referenceModulePathEntry
+
 func computeReferences(source string, filePath string, position protocol.Position, includeDeclaration bool) []protocol.Location {
 	return computeReferencesWithOverlays(source, filePath, position, includeDeclaration, nil)
 }
 
 func computeReferencesWithOverlays(source string, filePath string, position protocol.Position, includeDeclaration bool, overlays map[string]string) []protocol.Location {
+	previousModulePathCache := referenceModulePathCache
+	referenceModulePathCache = map[string]referenceModulePathEntry{}
+	defer func() { referenceModulePathCache = previousModulePathCache }()
+
 	target := lspPositionToParsePoint(position)
 	prog := parseAndCache(source, filePath)
 	if prog == nil {
@@ -74,6 +85,8 @@ func computeReferencesWithOverlays(source string, filePath string, position prot
 		seen[key] = true
 		refs = append(refs, protocol.Location{URI: uri.File(filePath), Range: rng})
 	}
+
+	targetName = referenceNameTail(targetName)
 
 	if includeDeclaration {
 		add(def.filePath, def.loc)
@@ -158,6 +171,12 @@ func findReferenceDeclarationTarget(stmts []parse.Statement, target parse.Point,
 				return resolved
 			}
 		case *parse.StaticFunctionDeclaration:
+			if s.Path.Target != nil && pointInRange(target, s.Path.Target.GetLocation()) {
+				name := simpleExprName(s.Path.Target)
+				if def := definitionForTypeName(name, prog, filePath); def != nil {
+					return &referenceResolvedTarget{kind: "type", name: name, def: def}
+				}
+			}
 			if resolved := findReferenceDeclarationTarget([]parse.Statement{&s.FunctionDeclaration}, target, filePath, prog); resolved != nil {
 				return resolved
 			}
@@ -441,6 +460,7 @@ func visitReferenceStatement(stmt parse.Statement, currentFile string, prog *par
 		visitReferenceDeclaredType(s.ReturnType, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
 		visitReferenceStatements(s.Body, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.StaticFunctionDeclaration:
+		visitReferenceExpr(s.Path.Target, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
 		visitReferenceStatement(&s.FunctionDeclaration, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.ImplBlock:
 		visitReferenceExpr(&s.Target, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
@@ -536,8 +556,9 @@ func visitReferenceExpr(expr parse.Expression, currentFile string, prog *parse.P
 	if expr == nil {
 		return
 	}
-	if referenceExprCompatible(targetKind, expr, currentFile, prog, targetDef) && referenceNamesMatch(targetName, referenceExprName(expr)) {
-		if def := definitionForExpr(expr, prog, rootFile); sameDefinitionTarget(def, targetDef) {
+	candidateName := referenceExprName(expr)
+	if referenceNamesMatch(targetName, candidateName) && referenceExprCompatible(targetKind, expr, currentFile, prog, targetDef) {
+		if def := definitionForReferenceCandidate(expr, targetKind, targetName, targetDef, prog, rootFile); sameDefinitionTarget(def, targetDef) {
 			add(currentFile, referenceExprLocation(expr))
 		}
 	}
@@ -625,6 +646,93 @@ func visitReferenceExpr(expr parse.Expression, currentFile string, prog *parse.P
 	}
 }
 
+func definitionForReferenceCandidate(expr parse.Expression, targetKind string, targetName string, targetDef *definitionTarget, prog *parse.Program, filePath string) *definitionTarget {
+	if targetKind == "type" {
+		switch e := expr.(type) {
+		case *parse.Identifier:
+			if !referenceNamesMatch(targetName, e.Name) {
+				return nil
+			}
+			return definitionForTypeName(e.Name, prog, filePath)
+		case *parse.StaticProperty:
+			if !referenceNamesMatch(targetName, referenceExprName(e.Property)) {
+				return nil
+			}
+			if staticPropertyReferencesTargetFile(e, targetDef, prog, filePath) {
+				return targetDef
+			}
+			return definitionForTypeName(simpleExprName(e), prog, filePath)
+		case *parse.StructInstance:
+			if !referenceNamesMatch(targetName, e.Name.Name) {
+				return nil
+			}
+			return definitionForTypeName(e.Name.Name, prog, filePath)
+		}
+	}
+	return definitionForExpr(expr, prog, filePath)
+}
+
+func staticPropertyReferencesTargetFile(sp *parse.StaticProperty, targetDef *definitionTarget, prog *parse.Program, filePath string) bool {
+	if sp == nil || targetDef == nil {
+		return false
+	}
+	alias := simpleExprName(sp.Target)
+	if alias == "" {
+		return false
+	}
+	modulePath, ok := modulePathForAlias(alias, prog, filePath)
+	return ok && cleanReferencePath(modulePath) == cleanReferencePath(targetDef.filePath)
+}
+
+func modulePathForAlias(alias string, prog *parse.Program, filePath string) (string, bool) {
+	if prog == nil {
+		return "", false
+	}
+	for _, imp := range prog.Imports {
+		if imp.Name != alias {
+			continue
+		}
+		return modulePathForImport(imp, filePath)
+	}
+	if path := preludeModulePath(alias); path != "" {
+		return stdLibSourcePath(path), true
+	}
+	return "", false
+}
+
+func modulePathForImport(imp parse.Import, filePath string) (string, bool) {
+	cacheKey := imp.Path
+	if referenceModulePathCache != nil {
+		if cached, ok := referenceModulePathCache[cacheKey]; ok {
+			return cached.path, cached.ok
+		}
+	}
+
+	path, ok := resolveModulePathForImport(imp, filePath)
+	if referenceModulePathCache != nil {
+		referenceModulePathCache[cacheKey] = referenceModulePathEntry{path: path, ok: ok}
+	}
+	return path, ok
+}
+
+func resolveModulePathForImport(imp parse.Import, filePath string) (string, bool) {
+	if strings.HasPrefix(imp.Path, "ard/") {
+		return stdLibSourcePath(imp.Path), true
+	}
+	if filePath == "" {
+		return "", false
+	}
+	moduleResolver, err := checker.NewModuleResolver(filepath.Dir(filePath))
+	if err != nil {
+		return "", false
+	}
+	moduleFile, err := moduleResolver.ResolveImportPath(imp.Path)
+	if err != nil {
+		return "", false
+	}
+	return moduleFile, true
+}
+
 func referenceExprName(expr parse.Expression) string {
 	switch e := expr.(type) {
 	case *parse.Identifier:
@@ -692,10 +800,19 @@ func declaredTypeReferenceName(declared parse.DeclaredType) string {
 }
 
 func referenceNamesMatch(targetName string, candidateName string) bool {
-	if targetName == "" || candidateName == "" {
+	if targetName == "" {
 		return true
 	}
-	return referenceNameTail(targetName) == referenceNameTail(candidateName)
+	if candidateName == "" {
+		return false
+	}
+	if candidateName == targetName {
+		return true
+	}
+	if !strings.ContainsAny(candidateName, ":?<> ") {
+		return false
+	}
+	return referenceNameTail(candidateName) == targetName
 }
 
 func referenceNameTail(name string) string {
@@ -835,13 +952,35 @@ func visitReferenceDeclaredType(declared parse.DeclaredType, currentFile string,
 		return
 	}
 	if targetKind == "type" && referenceNamesMatch(targetName, declaredTypeReferenceName(declared)) {
-		if def := definitionForDeclaredType(declared, prog, rootFile); sameDefinitionTarget(def, targetDef) {
+		if def := definitionForReferenceDeclaredType(declared, targetDef, prog, rootFile); sameDefinitionTarget(def, targetDef) {
 			add(currentFile, declared.GetLocation())
 		}
 	}
 	for _, child := range declaredTypeChildren(declared) {
 		visitReferenceDeclaredType(child, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
 	}
+}
+
+func definitionForReferenceDeclaredType(declared parse.DeclaredType, targetDef *definitionTarget, prog *parse.Program, filePath string) *definitionTarget {
+	switch t := declared.(type) {
+	case *parse.CustomType:
+		if customTypeReferencesTargetFile(t, targetDef, prog, filePath) {
+			return targetDef
+		}
+	}
+	return definitionForDeclaredType(declared, prog, filePath)
+}
+
+func customTypeReferencesTargetFile(t *parse.CustomType, targetDef *definitionTarget, prog *parse.Program, filePath string) bool {
+	if t == nil || targetDef == nil {
+		return false
+	}
+	alias, _, ok := importedTypeDisplayParts(t.Name)
+	if !ok {
+		return false
+	}
+	modulePath, ok := modulePathForAlias(alias, prog, filePath)
+	return ok && cleanReferencePath(modulePath) == cleanReferencePath(targetDef.filePath)
 }
 
 func definitionForDeclaredType(declared parse.DeclaredType, prog *parse.Program, filePath string) *definitionTarget {

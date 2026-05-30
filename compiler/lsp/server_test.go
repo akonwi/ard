@@ -383,6 +383,39 @@ fn main(box: Box) Int {
 	})
 }
 
+// TestReferencesStaticFunctionDeclarationTarget verifies references from the type target in `fn Type::name` declarations.
+func TestReferencesStaticFunctionDeclarationTarget(t *testing.T) {
+	source := `struct Scrollview {
+  scroll: Int,
+}
+
+fn Scrollview::new() Scrollview {
+  Scrollview{scroll: 0}
+}
+
+impl Scrollview {
+  fn draw() Void { () }
+}
+
+fn main() Scrollview {
+  Scrollview::new()
+}
+`
+	filePath := filepath.Join(t.TempDir(), "components.ard")
+
+	refs := requireReferences(t, source, filePath, 4, 4, true)
+	if len(refs) != 7 {
+		t.Fatalf("expected 7 refs, got %d: %#v", len(refs), refs)
+	}
+	assertLocationStart(t, refs[0], filePath, 0, 7)
+	assertLocationStart(t, refs[1], filePath, 4, 3)
+	assertLocationStart(t, refs[2], filePath, 4, 21)
+	assertLocationStart(t, refs[3], filePath, 5, 2)
+	assertLocationStart(t, refs[4], filePath, 8, 5)
+	assertLocationStart(t, refs[5], filePath, 12, 10)
+	assertLocationStart(t, refs[6], filePath, 13, 2)
+}
+
 // TestReferencesImportedSymbols verifies find-references for imported members.
 func TestReferencesImportedSymbols(t *testing.T) {
 	root := t.TempDir()
