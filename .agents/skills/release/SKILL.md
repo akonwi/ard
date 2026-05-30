@@ -9,7 +9,7 @@ description: Cut a new Ard version release end-to-end. Creates and pushes a new 
 
 Cut a new version of the Ard compiler and publish release notes. This skill handles the full flow: tag → CI → release notes. For notes-only updates to an existing release, use the `release-notes` skill instead.
 
-In this repo, the release process is driven by pushing a `v*` git tag. That tag triggers the `Release Binaries` GitHub Actions workflow, and the workflow creates the GitHub release plus uploaded binaries.
+In this repo, the release process is driven by pushing a `v*` git tag. That tag triggers the `Release Binaries` GitHub Actions workflow, and the workflow creates the GitHub release plus uploaded binaries. The workflow also updates `akonwi/homebrew-tap` with the new `Formula/ard.rb` using the `HOMEBREW_TAP_TOKEN` repository secret.
 
 ## Prerequisites
 
@@ -56,7 +56,7 @@ git push origin v<major>.<minor>.<patch>
 
 ### 3. Wait for the release workflow
 
-Pushing a `v*` tag triggers `.github/workflows/build.yml` ("Release Binaries"). It runs tests, builds darwin/linux (amd64/arm64) binaries, and creates a GitHub release with the assets attached.
+Pushing a `v*` tag triggers `.github/workflows/build.yml` ("Release Binaries"). It runs tests, builds darwin/linux (amd64/arm64) binaries, creates a GitHub release with the assets attached, and commits the updated Homebrew formula to `akonwi/homebrew-tap`.
 
 Wait for it to finish before drafting notes (otherwise `gh release edit` may race with the workflow's `gh release create`):
 
@@ -70,7 +70,7 @@ Or poll manually:
 gh run list --workflow "Release Binaries" --limit 1
 ```
 
-All jobs (`test`, `build (darwin/linux × amd64/arm64)`, `release`) must be green. If the workflow fails, stop and investigate — do not proceed to notes.
+All jobs (`test`, `build (darwin/linux × amd64/arm64)`, `release`, `update-homebrew-tap`) must be green. If the workflow fails, stop and investigate — do not proceed to notes.
 
 ### 4. Draft release notes
 
@@ -107,6 +107,7 @@ gh release view v<new>
 ## Notes
 
 - This skill assumes the workflow creates the release. Do not call `gh release create` — it will conflict with the CI job.
+- The Homebrew tap update requires the `HOMEBREW_TAP_TOKEN` secret to have push access to `akonwi/homebrew-tap`.
 - If the workflow races ahead and you need to rewrite notes later, that's what the `release-notes` skill is for.
 - If the tag was pushed but the workflow hasn't started yet, give GitHub a few seconds and re-query `gh run list`.
 - Do not tag from a feature branch. Always tag from `main`.
