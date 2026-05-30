@@ -168,6 +168,10 @@ func (p *parser) synchronizeToTokens(tokens ...kind) {
 	for !p.isAtEnd() {
 		current := p.peek().kind
 
+		if needsNesting && nestingLevel == 0 && current == right_brace && !slices.Contains(tokens, right_brace) {
+			return // Don't consume an enclosing block while recovering an inner delimiter.
+		}
+
 		if needsNesting {
 			// Track nesting for all bracket types
 			switch current {
@@ -1121,8 +1125,9 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 
 			paramType := p.parseType()
 			params = append(params, Parameter{
-				Name: paramName.text,
-				Type: paramType,
+				Location: paramName.getLocation(),
+				Name:     paramName.text,
+				Type:     paramType,
 			})
 		}
 
@@ -2343,9 +2348,10 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			}
 
 			params = append(params, Parameter{
-				Mutable: isMutable,
-				Name:    nameToken.text,
-				Type:    paramType,
+				Location: nameToken.getLocation(),
+				Mutable:  isMutable,
+				Name:     nameToken.text,
+				Type:     paramType,
 			})
 
 			// Check for inline comment after parameter
@@ -2822,6 +2828,10 @@ func (p *parser) unary() (Expression, error) {
 				return nil, err
 			}
 			return &UnaryExpression{
+				Location: Location{
+					Start: opToken.getLocation().Start,
+					End:   operand.GetLocation().End,
+				},
 				Operator: Not,
 				Operand:  operand,
 			}, nil
@@ -2831,6 +2841,10 @@ func (p *parser) unary() (Expression, error) {
 				return nil, err
 			}
 			return &UnaryExpression{
+				Location: Location{
+					Start: opToken.getLocation().Start,
+					End:   operand.GetLocation().End,
+				},
 				Operator: Minus,
 				Operand:  operand,
 			}, nil
@@ -2868,11 +2882,19 @@ func (p *parser) memberAccess() (Expression, error) {
 				expr = &InstanceProperty{
 					Target:   expr,
 					Property: *prop,
+					Location: Location{
+						Start: expr.GetLocation().Start,
+						End:   prop.GetLocation().End,
+					},
 				}
 			case *FunctionCall:
 				expr = &InstanceMethod{
 					Target: expr,
 					Method: *prop,
+					Location: Location{
+						Start: expr.GetLocation().Start,
+						End:   prop.GetLocation().End,
+					},
 				}
 			}
 		} else {
@@ -2946,6 +2968,10 @@ func (p *parser) memberAccess() (Expression, error) {
 					if !p.check(right_paren) {
 						// Could not find ')', return partial function call
 						return &StaticFunction{
+							Location: Location{
+								Start: expr.GetLocation().Start,
+								End:   Point{Row: funcName.line, Col: funcName.column},
+							},
 							Target: expr,
 							Function: FunctionCall{
 								Name:     funcName.text,
@@ -2964,6 +2990,10 @@ func (p *parser) memberAccess() (Expression, error) {
 
 				// Create the StaticFunction with type arguments
 				expr = &StaticFunction{
+					Location: Location{
+						Start: expr.GetLocation().Start,
+						End:   Point{Row: p.previous().line, Col: p.previous().column},
+					},
 					Target: expr,
 					Function: FunctionCall{
 						Name:     funcName.text,
@@ -2985,11 +3015,19 @@ func (p *parser) memberAccess() (Expression, error) {
 				switch prop := call.(type) {
 				case *Identifier:
 					expr = &StaticProperty{
+						Location: Location{
+							Start: expr.GetLocation().Start,
+							End:   prop.GetLocation().End,
+						},
 						Target:   expr,
 						Property: prop,
 					}
 				case *FunctionCall:
 					expr = &StaticFunction{
+						Location: Location{
+							Start: expr.GetLocation().Start,
+							End:   prop.GetLocation().End,
+						},
 						Target:   expr,
 						Function: *prop,
 					}
@@ -3518,6 +3556,12 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 	hasNamedArgs := false
 
 	for !p.check(right_paren) {
+		if p.isAtEnd() || p.check(right_brace) {
+			p.addError(p.peek(), "Expected ')' to close function call")
+			break
+		}
+		iterationStart := p.index
+
 		// Parse and collect comments between arguments
 		if c := p.parseInlineComment(); c != nil {
 			comments = append(comments, *c)
@@ -3593,6 +3637,11 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 
 		p.match(comma)
 		p.match(new_line)
+
+		if p.index == iterationStart {
+			p.addError(p.peek(), "Could not parse function argument")
+			break
+		}
 	}
 
 	return args, comments, nil

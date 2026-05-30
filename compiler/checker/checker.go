@@ -36,8 +36,25 @@ type Diagnostic struct {
 	location parse.Location
 }
 
+func NewDiagnostic(kind DiagnosticKind, message string, filePath string, location parse.Location) Diagnostic {
+	return Diagnostic{
+		Kind:     kind,
+		Message:  message,
+		filePath: filePath,
+		location: location,
+	}
+}
+
 func (d Diagnostic) String() string {
 	return fmt.Sprintf("%s %s %s", d.filePath, d.location.Start, d.Message)
+}
+
+func (d Diagnostic) FilePath() string {
+	return d.filePath
+}
+
+func (d Diagnostic) Location() parse.Location {
+	return d.location
 }
 
 // deref follows TypeVar bindings to find the concrete type.
@@ -1099,6 +1116,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				condition = &BoolLiteral{true}
 			} else {
 				condition = c.checkExpr(s.Condition)
+			}
+
+			if condition == nil {
+				return nil
 			}
 
 			// Condition must be a boolean expression
@@ -2451,7 +2472,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			} else if len(resolvedExprs) > len(fnDef.Parameters) {
 				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
 					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
-				return nil
+				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
 			// Align mutability information with parameters
@@ -2566,7 +2587,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			} else if len(resolvedExprs) > len(fnDef.Parameters) {
 				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
 					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
-				return nil
+				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
 			// Align mutability information with parameters
@@ -3123,7 +3144,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			} else if len(resolvedExprs) > len(fnDef.Parameters) {
 				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
 					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
-				return nil
+				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
 			// Align mutability information with parameters

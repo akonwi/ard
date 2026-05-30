@@ -775,3 +775,13 @@ func TestGenericFunctionDeclaration(t *testing.T) {
 
 	runTests(t, tests)
 }
+
+func TestIncompleteFunctionCallDoesNotHang(t *testing.T) {
+	result := Parse([]byte("fn main() {\n  io::print(\n}\n"), "test.ard")
+	if result.Program == nil {
+		t.Fatal("expected partial program for incomplete function call")
+	}
+	if len(result.Errors) == 0 {
+		t.Fatal("expected parse error for incomplete function call")
+	}
+}

@@ -165,6 +165,30 @@ func TestFunctions(t *testing.T) {
 				{Kind: checker.Error, Message: "missing argument for parameter: b"},
 			},
 		},
+		{
+			name: "Reports all callsites with too many arguments",
+			input: strings.Join(
+				[]string{
+					`fn read_move() Int { 1 }`,
+					`fn main() {`,
+					`  let player = "X"`,
+					`  mut move = read_move(player)`,
+					`  while move < 0 {`,
+					`    move = read_move(player)`,
+					`  }`,
+					`  while move < 9 {`,
+					`    move = read_move(player)`,
+					`  }`,
+					`}`,
+				},
+				"\n",
+			),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 0, got 1"},
+				{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 0, got 1"},
+				{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 0, got 1"},
+			},
+		},
 	})
 }
 
