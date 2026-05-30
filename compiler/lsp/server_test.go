@@ -1172,6 +1172,12 @@ fn main() {
 	assertCompletion(t, items, "cells", "[Str]")
 	assertCompletion(t, items, "can_play", "fn (pos: Int) Bool")
 
+	typeTarget := strings.Replace(source, "  board.\n", "  Board.\n", 1)
+	typeTargetItems := computeCompletions(typeTarget, "test.ard", protocol.Position{Line: 8, Character: 8})
+	if len(typeTargetItems) != 0 {
+		t.Fatalf("Board. completions = %#v, want none for type-only target", typeTargetItems)
+	}
+
 	prefixed := strings.Replace(source, "  board.\n", "  board.ca\n", 1)
 	prefixedItems := computeCompletions(prefixed, "test.ard", protocol.Position{Line: 8, Character: 10})
 	item, ok := completionItemByLabel(prefixedItems, "can_play")

@@ -2140,7 +2140,7 @@ func scanIdentType(name string, stmts []parse.Statement) string {
 				return t
 			}
 		case *parse.ImplBlock:
-			if s.Target.Name == name || s.Receiver.Name == name {
+			if s.Receiver.Name == name {
 				return s.Target.Name
 			}
 			for i := range s.Methods {
@@ -2152,7 +2152,7 @@ func scanIdentType(name string, stmts []parse.Statement) string {
 			if traitName := simpleExprName(s.Trait); traitName == name {
 				return traitName
 			}
-			if s.ForType.Name == name || s.Receiver.Name == name {
+			if s.Receiver.Name == name {
 				return s.ForType.Name
 			}
 			for i := range s.Methods {
