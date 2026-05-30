@@ -436,7 +436,15 @@ func (s *Server) handleDocumentHighlight(ctx context.Context, reply jsonrpc2.Rep
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
-	_ = params
 
-	return reply(ctx, []protocol.DocumentHighlight{}, nil)
+	doc := s.cache.Get(params.TextDocument.URI)
+	if doc == nil {
+		return reply(ctx, []protocol.DocumentHighlight{}, nil)
+	}
+
+	highlights := computeDocumentHighlights(doc.Text, doc.URI.Filename(), params.Position)
+	if highlights == nil {
+		highlights = []protocol.DocumentHighlight{}
+	}
+	return reply(ctx, highlights, nil)
 }

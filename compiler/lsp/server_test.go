@@ -287,6 +287,58 @@ func assertLocationStart(t *testing.T, loc protocol.Location, filePath string, l
 	}
 }
 
+func assertHighlightStart(t *testing.T, h protocol.DocumentHighlight, line uint32, char uint32) {
+	t.Helper()
+	if h.Range.Start.Line != line || h.Range.Start.Character != char {
+		t.Fatalf("highlight start = %d:%d, want %d:%d", h.Range.Start.Line, h.Range.Start.Character, line, char)
+	}
+}
+
+// TestDocumentHighlightLocalSymbols verifies current-file highlights for locals.
+func TestDocumentHighlightLocalSymbols(t *testing.T) {
+	source := `fn main() Int {
+  let value = 40
+  let result = value + 2
+  result + value
+}
+`
+	highlights := computeDocumentHighlights(source, "test.ard", protocol.Position{Line: 2, Character: 16})
+	if len(highlights) != 3 {
+		t.Fatalf("expected 3 highlights, got %d: %#v", len(highlights), highlights)
+	}
+	assertHighlightStart(t, highlights[0], 1, 6)
+	assertHighlightStart(t, highlights[1], 2, 15)
+	assertHighlightStart(t, highlights[2], 3, 11)
+	if highlights[0].Kind != protocol.DocumentHighlightKindWrite {
+		t.Fatalf("declaration highlight kind = %v, want Write", highlights[0].Kind)
+	}
+}
+
+// TestDocumentHighlightDoesNotCrossFiles verifies document highlights stay in the current file.
+func TestDocumentHighlightDoesNotCrossFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mathPath := filepath.Join(root, "math.ard")
+	if err := os.WriteFile(mathPath, []byte("fn add(left: Int, right: Int) Int { left + right }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use test_project/math
+
+fn main() Int {
+  math::add(1, 2) + math::add(3, 4)
+}
+`
+	filePath := filepath.Join(root, "main.ard")
+	highlights := computeDocumentHighlights(source, filePath, protocol.Position{Line: 3, Character: 9})
+	if len(highlights) != 2 {
+		t.Fatalf("expected 2 current-file highlights, got %d: %#v", len(highlights), highlights)
+	}
+	assertHighlightStart(t, highlights[0], 3, 8)
+	assertHighlightStart(t, highlights[1], 3, 26)
+}
+
 // TestReferencesLocalSymbols verifies find-references for local symbols.
 func TestReferencesLocalSymbols(t *testing.T) {
 	source := `fn add(left: Int, right: Int) Int {
