@@ -2080,3 +2080,88 @@ func TestDocumentCache(t *testing.T) {
 		t.Error("expected nil after close")
 	}
 }
+
+func TestRenameLocalVariable(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "main.ard")
+	source := `fn main() {
+  let count = 1
+  let next = count + 1
+  count
+}
+`
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	edit := computeRename(source, filePath, protocol.Position{Line: 1, Character: 7}, "total", nil)
+	assertRenameEdits(t, edit, filePath, []renameWant{{1, 6, 11}, {2, 13, 18}, {3, 2, 7}})
+}
+
+func TestRenameImportedFunction(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	modPath := filepath.Join(root, "responses.ard")
+	modSource := `fn json_error(status: Int) Int {
+  status
+}
+`
+	if err := os.WriteFile(modPath, []byte(modSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(root, "main.ard")
+	mainSource := `use test_project/responses
+
+fn main() {
+  responses::json_error(400)
+}
+`
+	if err := os.WriteFile(mainPath, []byte(mainSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	edit := computeRename(mainSource, mainPath, protocol.Position{Line: 3, Character: 15}, "error_json", nil)
+	assertRenameEdits(t, edit, modPath, []renameWant{{0, 3, 13}})
+	assertRenameEdits(t, edit, mainPath, []renameWant{{3, 13, 23}})
+}
+
+func TestRenameField(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "main.ard")
+	source := `struct Board {
+  cells: [Str],
+}
+
+fn main(board: Board) {
+  let cells = board.cells
+}
+`
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	edit := computeRename(source, filePath, protocol.Position{Line: 1, Character: 3}, "spaces", nil)
+	assertRenameEdits(t, edit, filePath, []renameWant{{1, 2, 7}, {5, 20, 25}})
+}
+
+type renameWant struct {
+	line  uint32
+	start uint32
+	end   uint32
+}
+
+func assertRenameEdits(t *testing.T, edit *protocol.WorkspaceEdit, filePath string, wants []renameWant) {
+	t.Helper()
+	if edit == nil {
+		t.Fatalf("expected workspace edit, got nil")
+	}
+	edits := edit.Changes[uri.File(filePath)]
+	if len(edits) != len(wants) {
+		t.Fatalf("got %d edits for %s, want %d: %#v", len(edits), filePath, len(wants), edits)
+	}
+	for i, want := range wants {
+		got := edits[i].Range
+		if got.Start.Line != want.line || got.End.Line != want.line || got.Start.Character != want.start || got.End.Character != want.end {
+			t.Fatalf("edit[%d] range = %#v, want line %d chars %d-%d", i, got, want.line, want.start, want.end)
+		}
+	}
+}

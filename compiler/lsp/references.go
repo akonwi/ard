@@ -181,6 +181,10 @@ func findReferenceDeclarationTarget(stmts []parse.Statement, target parse.Point,
 				return resolved
 			}
 		case *parse.VariableDeclaration:
+			nameLoc := documentHighlightNameLocation(lastParseSource, s.Location, s.Name)
+			if pointInRange(target, nameLoc) {
+				return &referenceResolvedTarget{kind: "name", name: s.Name, def: &definitionTarget{filePath: filePath, loc: s.Location}}
+			}
 			if resolved := findReferenceDeclaredTypeTarget(s.Type, target, filePath, prog); resolved != nil {
 				return resolved
 			}

@@ -123,6 +123,8 @@ func (s *Server) registerHandlers() {
 	s.handlers[protocol.MethodTextDocumentFormatting] = s.handleFormatting
 	s.handlers[protocol.MethodTextDocumentSignatureHelp] = s.handleSignatureHelp
 	s.handlers[protocol.MethodTextDocumentDocumentHighlight] = s.handleDocumentHighlight
+	s.handlers[protocol.MethodTextDocumentRename] = s.handleRename
+	s.handlers[protocol.MethodTextDocumentPrepareRename] = s.handlePrepareRename
 }
 
 //-------------------------------------------------------------------------
@@ -158,6 +160,7 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 			},
 			DocumentHighlightProvider:  true,
 			DocumentFormattingProvider: true,
+			RenameProvider:             &protocol.RenameOptions{PrepareProvider: true},
 		},
 		ServerInfo: &protocol.ServerInfo{
 			Name:    "ard-lsp",
@@ -447,4 +450,34 @@ func (s *Server) handleDocumentHighlight(ctx context.Context, reply jsonrpc2.Rep
 		highlights = []protocol.DocumentHighlight{}
 	}
 	return reply(ctx, highlights, nil)
+}
+
+func (s *Server) handlePrepareRename(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.PrepareRenameParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+	doc := s.cache.Get(params.TextDocument.URI)
+	if doc == nil {
+		return reply(ctx, nil, nil)
+	}
+	rng := prepareRename(doc.Text, doc.URI.Filename(), params.Position)
+	return reply(ctx, rng, nil)
+}
+
+func (s *Server) handleRename(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.RenameParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
+	}
+	doc := s.cache.Get(params.TextDocument.URI)
+	if doc == nil {
+		return reply(ctx, nil, nil)
+	}
+	overlays := map[string]string{}
+	for _, cached := range s.cache.Snapshot() {
+		overlays[cached.URI.Filename()] = cached.Text
+	}
+	edit := computeRename(doc.Text, doc.URI.Filename(), params.Position, params.NewName, overlays)
+	return reply(ctx, edit, nil)
 }
