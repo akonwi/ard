@@ -70,9 +70,9 @@ func TestAsyncChannels(t *testing.T) {
 
 			let ch = channel::new<Int>()
 			let queued = channel::new<Str>(size: 2)
-			ch.send(42)
+			let sent: Bool = ch.send(42)
 			let value: Int? = ch.recv()
-			ch.close()
+			let closed: Bool = ch.close()
 			queued.send("hello")
 			`,
 			diagnostics: []checker.Diagnostic{},

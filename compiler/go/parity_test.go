@@ -1074,8 +1074,8 @@ func TestGoTargetParityAsyncChannels(t *testing.T) {
 			fn main() Int {
 				let ch = channel::new<Int>()
 				let sender = async::start(fn() {
-					ch.send(42).expect("send failed")
-					ch.close().expect("close failed")
+					ch.send(42)
+					ch.close()
 				})
 				let value = ch.recv().or(0)
 				sender.join()
@@ -1091,15 +1091,18 @@ func TestGoTargetParityAsyncChannels(t *testing.T) {
 		program := lowerParitySource(t, `
 			use ard/async/channel
 
-			fn main() Int!Str {
+			fn main() Int {
 				let ch = channel::new<Int>(size: 2)
-				try ch.send(20)
-				try ch.send(22)
-				try ch.close()
+				let sent_a = ch.send(20)
+				let sent_b = ch.send(22)
+				let closed = ch.close()
 				let total = ch.recv().or(0) + ch.recv().or(0)
 				match ch.recv() {
-					value => Result::err("expected channel to be closed")
-					_ => Result::ok(total)
+					value => 0
+					_ => match sent_a and sent_b and closed {
+						true => total
+						false => -1
+					}
 				}
 			}
 		`)
@@ -1116,8 +1119,8 @@ func TestGoTargetParityAsyncChannels(t *testing.T) {
 			fn main() Int {
 				let ch = channel::new<Int>(size: -1)
 				let sender = async::start(fn() {
-					ch.send(9).expect("send")
-					ch.close().expect("close")
+					ch.send(9)
+					ch.close()
 				})
 				let value = ch.recv().or(0)
 				sender.join()
@@ -1129,14 +1132,13 @@ func TestGoTargetParityAsyncChannels(t *testing.T) {
 		}
 	})
 
-	t.Run("send and close report closed channel errors", func(t *testing.T) {
+	t.Run("send and close report closed channel state", func(t *testing.T) {
 		program := lowerParitySource(t, `
 			use ard/async/channel
 
 			fn main() Bool {
 				let ch = channel::new<Int>(size: 1)
-				ch.close().expect("initial close failed")
-				ch.send(1).is_err() and ch.close().is_err()
+				ch.close() and not ch.send(1) and not ch.close()
 			}
 		`)
 		if got := runGoTargetParityJSON(t, program); got != "true" {

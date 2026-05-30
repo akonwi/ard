@@ -523,8 +523,7 @@ extern fn observe(ch: channel::Chan<Int>) Int = "Observe"
 
 fn main() Bool {
 	let ch = channel::new<Int>(size: 1)
-	ch.send(7).expect("send")
-	observe(ch.chan) == 7
+	ch.send(7) and observe(ch.chan) == 7
 }
 `), 0o644); err != nil {
 		t.Fatal(err)

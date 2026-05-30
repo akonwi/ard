@@ -3956,23 +3956,13 @@ func (l *lowerer) lowerChannelStdlibExtern(binding string, args []ast.Expr, stmt
 		return out, true, err
 	case "ChannelSend":
 		call := &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "ChannelSend"), Args: args}
-		wrapped, err := l.wrapErrorCall(returnTypeID, call)
-		if err != nil {
-			return loweredExpr{}, true, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, true, nil
+		return loweredExpr{stmts: stmts, expr: call}, true, nil
 	case "ChannelRecv":
 		call := &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "ChannelRecv"), Args: args}
 		return loweredExpr{stmts: stmts, expr: call}, true, nil
 	case "ChannelClose":
 		call := &ast.CallExpr{Fun: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "ChannelClose"), Args: args}
-		wrapped, err := l.wrapErrorCall(returnTypeID, call)
-		if err != nil {
-			return loweredExpr{}, true, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, true, nil
+		return loweredExpr{stmts: stmts, expr: call}, true, nil
 	default:
 		return loweredExpr{}, false, nil
 	}

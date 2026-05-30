@@ -1,15 +1,15 @@
 extern type Chan<$T>
 
-private extern fn chan_send<$T>(ch: Chan<$T>, value: $T) Void!Str = "ChannelSend"
+private extern fn chan_send<$T>(ch: Chan<$T>, value: $T) Bool = "ChannelSend"
 private extern fn chan_recv<$T>(ch: Chan<$T>) $T? = "ChannelRecv"
-private extern fn chan_close<$T>(ch: Chan<$T>) Void!Str = "ChannelClose"
+private extern fn chan_close<$T>(ch: Chan<$T>) Bool = "ChannelClose"
 
 struct Channel {
   chan: Chan<$T>,
 }
 
 impl Channel {
-  fn send(value: $T) Void!Str {
+  fn send(value: $T) Bool {
     chan_send(self.chan, value)
   }
 
@@ -17,7 +17,7 @@ impl Channel {
     chan_recv(self.chan)
   }
 
-  fn close() Void!Str {
+  fn close() Bool {
     chan_close(self.chan)
   }
 }

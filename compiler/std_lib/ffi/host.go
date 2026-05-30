@@ -181,14 +181,14 @@ func Sleep(ns int) {
 	time.Sleep(time.Duration(ns))
 }
 
-func ChannelSend[T any](ch chan T, value T) (err error) {
+func ChannelSend[T any](ch chan T, value T) (sent bool) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("send on closed channel")
+			sent = false
 		}
 	}()
 	ch <- value
-	return nil
+	return true
 }
 
 func ChannelRecv[T any](ch chan T) Maybe[T] {
@@ -199,14 +199,14 @@ func ChannelRecv[T any](ch chan T) Maybe[T] {
 	return Some(value)
 }
 
-func ChannelClose[T any](ch chan T) (err error) {
+func ChannelClose[T any](ch chan T) (closed bool) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("close on closed channel")
+			closed = false
 		}
 	}()
 	close(ch)
-	return nil
+	return true
 }
 
 func Base64Encode(input string, noPad Maybe[bool]) string {
