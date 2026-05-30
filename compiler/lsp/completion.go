@@ -104,6 +104,26 @@ func withCompletionTextEdits(items []protocol.CompletionItem, ctx completionCont
 	return items
 }
 
+func formatCompletionMethodDetail(sig *hoverMethodSignature) string {
+	prefix := "fn"
+	if sig.Mutates {
+		prefix += " mut"
+	}
+	ret := normalizeDisplayType(sig.ReturnType)
+	if ret == "" {
+		ret = "Void"
+	}
+	return fmt.Sprintf("%s (%s) %s", prefix, formatHoverParams(sig.Params), ret)
+}
+
+func formatCompletionStaticFunctionDetail(sig *hoverStaticFunctionSignature) string {
+	ret := normalizeDisplayType(sig.ReturnType)
+	if ret == "" {
+		ret = "Void"
+	}
+	return fmt.Sprintf("fn (%s) %s", formatHoverParams(sig.Params), ret)
+}
+
 func offsetToParsePoint(source string, offset int) parse.Point {
 	if offset < 0 {
 		offset = 0
@@ -144,7 +164,7 @@ func instanceCompletionItems(target parse.Expression, prog *parse.Program, fileP
 			add(protocol.CompletionItem{
 				Label:      name,
 				Kind:       protocol.CompletionItemKindMethod,
-				Detail:     formatMethodSignature(sig),
+				Detail:     formatCompletionMethodDetail(sig),
 				InsertText: name,
 			})
 		}
@@ -177,7 +197,7 @@ func localInstanceCompletionItems(ownerType string, prog *parse.Program, filePat
 				items = append(items, protocol.CompletionItem{
 					Label:      field.Name.Name,
 					Kind:       protocol.CompletionItemKindField,
-					Detail:     fmt.Sprintf("%s.%s: %s", ownerType, field.Name.Name, fieldType),
+					Detail:     fieldType,
 					InsertText: field.Name.Name,
 				})
 			}
@@ -191,7 +211,7 @@ func localInstanceCompletionItems(ownerType string, prog *parse.Program, filePat
 				items = append(items, protocol.CompletionItem{
 					Label:      s.Methods[i].Name,
 					Kind:       protocol.CompletionItemKindMethod,
-					Detail:     formatMethodSignature(sig),
+					Detail:     formatCompletionMethodDetail(sig),
 					InsertText: s.Methods[i].Name,
 				})
 			}
@@ -205,7 +225,7 @@ func localInstanceCompletionItems(ownerType string, prog *parse.Program, filePat
 				items = append(items, protocol.CompletionItem{
 					Label:      s.Methods[i].Name,
 					Kind:       protocol.CompletionItemKindMethod,
-					Detail:     formatMethodSignature(sig),
+					Detail:     formatCompletionMethodDetail(sig),
 					InsertText: s.Methods[i].Name,
 				})
 			}
@@ -233,7 +253,7 @@ func importedInstanceCompletionItems(ownerType string, prog *parse.Program, file
 			items = append(items, protocol.CompletionItem{
 				Label:      name,
 				Kind:       protocol.CompletionItemKindField,
-				Detail:     fmt.Sprintf("%s.%s: %s", qualifyTypeDisplay(ownerType, prog, filePath), name, fieldType),
+				Detail:     fieldType,
 				InsertText: name,
 			})
 		}
@@ -249,7 +269,7 @@ func importedInstanceCompletionItems(ownerType string, prog *parse.Program, file
 			items = append(items, protocol.CompletionItem{
 				Label:      method.Name,
 				Kind:       protocol.CompletionItemKindMethod,
-				Detail:     formatMethodSignature(sig),
+				Detail:     formatCompletionMethodDetail(sig),
 				InsertText: method.Name,
 			})
 		}
@@ -271,7 +291,7 @@ func checkerMethodCompletionItems(ownerType string, methods map[string]*checker.
 		items = append(items, protocol.CompletionItem{
 			Label:      name,
 			Kind:       protocol.CompletionItemKindMethod,
-			Detail:     formatMethodSignature(sig),
+			Detail:     formatCompletionMethodDetail(sig),
 			InsertText: name,
 		})
 	}
@@ -337,7 +357,7 @@ func moduleCompletionItems(alias string, mod checker.Module, prog *parse.Program
 				items = append(items, protocol.CompletionItem{
 					Label:      s.Name,
 					Kind:       protocol.CompletionItemKindVariable,
-					Detail:     fmt.Sprintf("%s::%s: %s", alias, s.Name, typeLabel),
+					Detail:     typeLabel,
 					InsertText: s.Name,
 				})
 			case *checker.StructDef:
@@ -403,7 +423,7 @@ func importedTypeStaticCompletionItems(target string, prog *parse.Program, fileP
 			items = append(items, protocol.CompletionItem{
 				Label:      variant.Name,
 				Kind:       protocol.CompletionItemKindEnumMember,
-				Detail:     fmt.Sprintf("%s::%s: %s", target, variant.Name, qualifyTypeDisplay(target, prog, filePath)),
+				Detail:     qualifyTypeDisplay(target, prog, filePath),
 				InsertText: variant.Name,
 			})
 		}
@@ -434,7 +454,7 @@ func localStaticCompletionItems(target string, prog *parse.Program, filePath str
 				items = append(items, protocol.CompletionItem{
 					Label:      variant.Name,
 					Kind:       protocol.CompletionItemKindEnumMember,
-					Detail:     fmt.Sprintf("%s::%s: %s", target, variant.Name, target),
+					Detail:     target,
 					InsertText: variant.Name,
 				})
 			}
@@ -457,7 +477,7 @@ func staticFunctionCompletionItemForType(qualifier string, label string, fnType 
 		return protocol.CompletionItem{
 			Label:      label,
 			Kind:       protocol.CompletionItemKindFunction,
-			Detail:     formatStaticFunctionSignature(sig),
+			Detail:     formatCompletionStaticFunctionDetail(sig),
 			InsertText: label,
 		}
 	}
@@ -475,7 +495,7 @@ func staticParseFunctionCompletionItem(qualifier string, label string, fd *parse
 	sig := parseStaticFunctionSignature(qualifier, fd)
 	sig.Name = label
 	qualifyStaticFunctionSignature(sig, prog, filePath)
-	return protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindFunction, Detail: formatStaticFunctionSignature(sig), InsertText: label}
+	return protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindFunction, Detail: formatCompletionStaticFunctionDetail(sig), InsertText: label}
 }
 
 func sortedCompletionItems(items map[string]protocol.CompletionItem) []protocol.CompletionItem {

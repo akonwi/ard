@@ -31,8 +31,8 @@ func assertCompletion(t *testing.T, items []protocol.CompletionItem, label strin
 	if !ok {
 		t.Fatalf("completion %q not found in %#v", label, items)
 	}
-	if detail != "" && !strings.Contains(item.Detail, detail) {
-		t.Fatalf("completion %q detail = %q, want contains %q", label, item.Detail, detail)
+	if detail != "" && item.Detail != detail {
+		t.Fatalf("completion %q detail = %q, want %q", label, item.Detail, detail)
 	}
 }
 
@@ -1169,8 +1169,8 @@ fn main() {
 `
 
 	items := computeCompletions(source, "test.ard", protocol.Position{Line: 8, Character: 8})
-	assertCompletion(t, items, "cells", "Board.cells: [Str]")
-	assertCompletion(t, items, "can_play", "fn Board.can_play(pos: Int) Bool")
+	assertCompletion(t, items, "cells", "[Str]")
+	assertCompletion(t, items, "can_play", "fn (pos: Int) Bool")
 
 	prefixed := strings.Replace(source, "  board.\n", "  board.ca\n", 1)
 	prefixedItems := computeCompletions(prefixed, "test.ard", protocol.Position{Line: 8, Character: 10})
@@ -1216,19 +1216,19 @@ fn inspect(req: web::Request, response: web::Response, box: boxes::Box<Int>) {
 	}
 
 	reqItems := computeCompletions(source, filePath, protocol.Position{Line: 4, Character: 6})
-	assertCompletion(t, reqItems, "url", "web::Request.url: Str")
-	assertCompletion(t, reqItems, "method", "web::Request.method: web::Method")
-	assertCompletion(t, reqItems, "path", "fn web::Request.path() Str?")
+	assertCompletion(t, reqItems, "url", "Str")
+	assertCompletion(t, reqItems, "method", "web::Method")
+	assertCompletion(t, reqItems, "path", "fn () Str?")
 
 	responseItems := computeCompletions(source, filePath, protocol.Position{Line: 5, Character: 11})
-	assertCompletion(t, responseItems, "is_ok", "fn web::Response.is_ok() Bool")
+	assertCompletion(t, responseItems, "is_ok", "fn () Bool")
 
 	methodItems := computeCompletions(source, filePath, protocol.Position{Line: 6, Character: 13})
-	assertCompletion(t, methodItems, "to_str", "fn web::Method.to_str() Str")
+	assertCompletion(t, methodItems, "to_str", "fn () Str")
 
 	boxItems := computeCompletions(source, filePath, protocol.Position{Line: 7, Character: 6})
-	assertCompletion(t, boxItems, "item", "boxes::Box<Int>.item: Int")
-	assertCompletion(t, boxItems, "get", "fn boxes::Box<Int>.get() Int")
+	assertCompletion(t, boxItems, "item", "Int")
+	assertCompletion(t, boxItems, "get", "fn () Int")
 }
 
 // TestCompletionStaticMembers verifies double-colon completions for modules and static type members.
@@ -1245,16 +1245,16 @@ fn main() {
 
 	moduleItems := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 7})
 	assertCompletion(t, moduleItems, "Response", "web::Response")
-	assertCompletion(t, moduleItems, "send", "fn web::send(req: web::Request, timeout: Int?) web::Response!Str")
+	assertCompletion(t, moduleItems, "send", "fn (req: web::Request, timeout: Int?) web::Response!Str")
 
 	responseItems := computeCompletions(source, "test.ard", protocol.Position{Line: 4, Character: 17})
-	assertCompletion(t, responseItems, "new", "fn web::Response::new(status: Int, body: Str) web::Response")
+	assertCompletion(t, responseItems, "new", "fn (status: Int, body: Str) web::Response")
 
 	methodItems := computeCompletions(source, "test.ard", protocol.Position{Line: 5, Character: 15})
-	assertCompletion(t, methodItems, "Get", "web::Method::Get: web::Method")
+	assertCompletion(t, methodItems, "Get", "web::Method")
 
 	intItems := computeCompletions(source, "test.ard", protocol.Position{Line: 6, Character: 7})
-	assertCompletion(t, intItems, "from_str", "fn Int::from_str(str: Str) Int?")
+	assertCompletion(t, intItems, "from_str", "fn (str: Str) Int?")
 }
 
 // TestCompletionUserModuleStaticMembers verifies user module functions and variables complete after ::.
@@ -1287,8 +1287,8 @@ fn main() {
 	}
 
 	items := computeCompletions(source, filePath, protocol.Position{Line: 4, Character: 13})
-	assertCompletion(t, items, "json_error", "fn responses::json_error(mut res: http::Response, status: Int, message: Str) Void")
-	assertCompletion(t, items, "api_name", "responses::api_name: Str")
+	assertCompletion(t, items, "json_error", "fn (mut res: http::Response, status: Int, message: Str) Void")
+	assertCompletion(t, items, "api_name", "Str")
 }
 
 // TestCompletionTraitMethods verifies dot completions for trait-typed receivers.
@@ -1299,7 +1299,7 @@ func TestCompletionTraitMethods(t *testing.T) {
 `
 
 	items := computeCompletions(source, "test.ard", protocol.Position{Line: 1, Character: 8})
-	assertCompletion(t, items, "to_str", "fn Str::ToString.to_str() Str")
+	assertCompletion(t, items, "to_str", "fn () Str")
 }
 
 // TestHoverPositions verifies hover returns correct type info.
