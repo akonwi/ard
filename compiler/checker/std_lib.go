@@ -56,10 +56,13 @@ func (pkg AsyncPkg) Get(name string) Symbol {
 	case "sleep":
 		return Symbol{
 			Name: name,
-			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "ms", Type: Int}},
-				ReturnType: Void,
+			Type: &ExternalFunctionDef{
+				Name:                  name,
+				Parameters:            []Parameter{{Name: "ms", Type: Int}},
+				ReturnType:            Void,
+				ExternalBinding:       "Sleep",
+				ExternalBindingTarget: backend.TargetGo,
+				ExternalBindings:      map[string]string{backend.TargetGo: "Sleep"},
 			},
 		}
 	case "start":
