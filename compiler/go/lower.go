@@ -794,7 +794,13 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("trait upcast missing target")
 		}
-		return l.lowerExpr(fn, *expr.Target)
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		// Box the concrete value as a trait object (Go any) so that
+		// subsequent assignments and dispatches use the correct type.
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprCallTrait:
 		return l.lowerTraitCall(fn, expr)
 	case air.ExprToStr:
@@ -3596,13 +3602,18 @@ func (l *lowerer) lowerTraitCall(fn air.Function, expr air.Expr) (loweredExpr, e
 }
 
 func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr air.Expr) (loweredExpr, error) {
-	resultTemp := l.nextTemp()
+	isVoid := l.isVoidType(expr.Type)
 	stmts := append([]ast.Stmt{}, target.stmts...)
-	resultType, err := l.goType(expr.Type)
-	if err != nil {
-		return loweredExpr{}, err
+
+	var resultTemp string
+	if !isVoid {
+		resultTemp = l.nextTemp()
+		resultType, err := l.goType(expr.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: resultType}}}})
 	}
-	stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: resultType}}}})
 
 	args := []ast.Expr{ast.NewIdent("typed")}
 	for _, arg := range expr.Args {
@@ -3620,13 +3631,23 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 			continue
 		}
 		methodFn := l.program.Functions[impl.Methods[expr.Method]]
+		call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, methodFn)), Args: args}
+		var body ast.Stmt
+		if isVoid {
+			body = &ast.ExprStmt{X: call}
+		} else {
+			body = &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}}
+		}
 		cases = append(cases, &ast.CaseClause{
 			List: []ast.Expr{mustTypeExpr(l, impl.ForType)},
-			Body: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, methodFn)), Args: args}}}},
+			Body: []ast.Stmt{body},
 		})
 	}
 	cases = append(cases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: "\"unsupported trait object dispatch\""}}}}}})
 	stmts = append(stmts, &ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("typed")}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: target.expr}}}, Body: &ast.BlockStmt{List: cases}})
+	if isVoid {
+		return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
+	}
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
 }
 

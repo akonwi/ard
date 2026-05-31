@@ -175,5 +175,81 @@ func TestTraitsAsTypes(t *testing.T) {
 		// 		{Kind: checker.Error, Message: "Type mismatch: Expected ToString, got Foo"},
 		// 	},
 		// },
+		{
+			name: "let binding with explicit trait type (success)",
+			input: `
+			trait Drawable {
+			  fn draw() Str
+			}
+
+			struct Box { w: Int }
+
+			impl Drawable for Box {
+			  fn draw() Str { "box" }
+			}
+
+			fn main() {
+			  let d: Drawable = Box{w: 5}
+			}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "let binding with explicit trait type (failure)",
+			input: `
+			trait Drawable {
+			  fn draw() Str
+			}
+
+			struct Circle {}
+
+			fn main() {
+			  let d: Drawable = Circle{}
+			}
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of Drawable, got Circle"},
+			},
+		},
+		{
+			name: "struct field with trait type",
+			input: `
+			trait Drawable {
+			  fn draw() Str
+			}
+
+			struct Box { w: Int }
+
+			impl Drawable for Box {
+			  fn draw() Str { "box" }
+			}
+
+			struct Container { child: Drawable }
+
+			fn main() {
+			  let c = Container{child: Box{w: 5}}
+			}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "list with trait element type",
+			input: `
+			trait Drawable {
+			  fn draw() Str
+			}
+
+			struct Box { w: Int }
+
+			impl Drawable for Box {
+			  fn draw() Str { "box" }
+			}
+
+			fn main() {
+			  let items: [Drawable] = [Box{w: 5}, Box{w: 10}]
+			}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
 	})
 }
