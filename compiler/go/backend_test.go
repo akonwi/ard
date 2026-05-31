@@ -16,6 +16,41 @@ import (
 	"github.com/akonwi/ard/version"
 )
 
+func TestGenerateSourcesDereferencesMutParamForNonMutMethodCall(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box {
+			value: Int,
+		}
+
+		impl Box {
+			fn mut bump() {
+				self.value = self.value + 1
+			}
+
+			fn peek() Int {
+				self.value
+			}
+		}
+
+		fn process(mut b: Box) Int {
+			b.bump()
+			b.peek()
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "Box_bump(b)") {
+		t.Fatalf("generated source missing mut method pointer call:\n%s", source)
+	}
+	if !strings.Contains(source, "Box_peek(*b)") {
+		t.Fatalf("generated source missing deref for non-mut method call on mut param:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesFormatsSimpleProgram(t *testing.T) {
 	program := lowerSource(t, `
 		fn add(a: Int, b: Int) Int {

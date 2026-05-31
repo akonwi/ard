@@ -1272,10 +1272,17 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			}
 			stmts = append(stmts, loweredArg.stmts...)
 			argExpr := loweredArg.expr
-			if i < len(target.Signature.Params) && target.Signature.Params[i].Mutable && validTypeID(l.program, target.Signature.Params[i].Type) {
-				paramType := l.program.Types[target.Signature.Params[i].Type-1]
-				if paramType.Kind == air.TypeStruct && !l.localIsPointerParam(fn, arg) {
-					argExpr = &ast.UnaryExpr{Op: token.AND, X: argExpr}
+			if i < len(target.Signature.Params) && validTypeID(l.program, target.Signature.Params[i].Type) {
+				param := target.Signature.Params[i]
+				paramType := l.program.Types[param.Type-1]
+				if paramType.Kind == air.TypeStruct {
+					argIsPointer := l.localIsPointerParam(fn, arg)
+					switch {
+					case param.Mutable && !argIsPointer:
+						argExpr = &ast.UnaryExpr{Op: token.AND, X: argExpr}
+					case !param.Mutable && argIsPointer:
+						argExpr = &ast.StarExpr{X: argExpr}
+					}
 				}
 			}
 			args = append(args, argExpr)
