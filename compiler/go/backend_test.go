@@ -16,6 +16,45 @@ import (
 	"github.com/akonwi/ard/version"
 )
 
+func TestGenerateSourcesPassesMutTraitArgsByPointer(t *testing.T) {
+	program := lowerSource(t, `
+		struct Counter { value: Int }
+
+		impl Counter {
+			fn mut bump() { self.value = self.value + 1 }
+		}
+
+		trait Bumpable {
+			fn poke(mut c: Counter)
+		}
+
+		struct Doubler {}
+
+		impl Bumpable for Doubler {
+			fn poke(mut c: Counter) {
+				c.bump()
+				c.bump()
+			}
+		}
+
+		fn invoke(b: Bumpable, mut c: Counter) {
+			b.poke(c)
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "Doubler_Bumpable_poke(typed, c)") {
+		t.Fatalf("generated source missing pointer trait dispatch arg:\n%s", source)
+	}
+	if strings.Contains(source, "Doubler_Bumpable_poke(typed, *c)") {
+		t.Fatalf("generated source dereferences mutable trait dispatch arg:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesDereferencesMutParamForNonMutMethodCall(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box {

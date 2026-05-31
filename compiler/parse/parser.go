@@ -1106,6 +1106,8 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 				p.advance()
 			}
 
+			isMutable := p.match(mut)
+
 			// Use same logic as struct fields for parameter name parsing
 			current := p.peek()
 			if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
@@ -1126,6 +1128,7 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 			paramType := p.parseType()
 			params = append(params, Parameter{
 				Location: paramName.getLocation(),
+				Mutable:  isMutable,
 				Name:     paramName.text,
 				Type:     paramType,
 			})

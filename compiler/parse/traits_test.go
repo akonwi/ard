@@ -48,6 +48,11 @@ func TestTraitDefinitions(t *testing.T) {
 			wantErrs: []string{},
 		},
 		{
+			name:     "Valid trait method with mutable parameter",
+			input:    "trait MyTrait {\n    fn test(mut value: Counter)\n}",
+			wantErrs: []string{},
+		},
+		{
 			name:     "Empty trait works",
 			input:    "trait MyTrait {\n}",
 			wantErrs: []string{},

@@ -40,6 +40,39 @@ func TestTraitDefinitions(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
+			name: "Trait methods can declare mutable parameters",
+			input: `
+			struct Counter { value: Int }
+			trait Bumpable {
+				fn poke(mut c: Counter)
+			}
+			struct Doubler {}
+			impl Bumpable for Doubler {
+				fn poke(mut c: Counter) { () }
+			}
+			`,
+			output: &checker.Program{
+				Statements: []checker.Statement{},
+			},
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Trait impl parameter mutability must match",
+			input: `
+			struct Counter { value: Int }
+			trait Bumpable {
+				fn poke(mut c: Counter)
+			}
+			struct Doubler {}
+			impl Bumpable for Doubler {
+				fn poke(c: Counter) { () }
+			}
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Trait method 'poke' parameter 'c' mutability mismatch"},
+			},
+		},
+		{
 			name: "An invalid implementation",
 			input: `
 					use ard/io
