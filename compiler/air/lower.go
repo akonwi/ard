@@ -3888,6 +3888,9 @@ func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.In
 		return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
 	}
 	if typeInfo.Kind == TypeTraitObject {
+		if err := fl.l.ensureModuleImportTraitImplsDeclared(fl.fn.Module); err != nil {
+			return nil, err
+		}
 		if !validTraitID(&fl.l.program, typeInfo.Trait) {
 			return nil, fmt.Errorf("trait object %s references invalid trait %d", typeInfo.Name, typeInfo.Trait)
 		}
@@ -4089,6 +4092,24 @@ func (l *lowerer) lookupExternInModule(modulePath, name string) (ExternID, bool)
 	return id, ok
 }
 
+func (l *lowerer) ensureModuleImportTraitImplsDeclared(moduleID ModuleID) error {
+	if moduleID < 0 || int(moduleID) >= len(l.program.Modules) {
+		return nil
+	}
+	mod, ok := l.moduleByName[l.program.Modules[moduleID].Path]
+	if !ok || mod.Program() == nil {
+		return nil
+	}
+	for _, imported := range mod.Program().Imports {
+		importedID := l.internModule(imported.Path())
+		l.program.Modules[moduleID].Imports = appendUniqueModule(l.program.Modules[moduleID].Imports, importedID)
+		if err := l.ensureModuleTraitImplsDeclared(imported.Path()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (l *lowerer) ensureModuleTraitImplsDeclared(modulePath string) error {
 	mod, ok := l.moduleByName[modulePath]
 	if !ok || mod.Program() == nil {
@@ -4096,6 +4117,11 @@ func (l *lowerer) ensureModuleTraitImplsDeclared(modulePath string) error {
 	}
 	modID := l.internModule(modulePath)
 	prog := mod.Program()
+	for _, imported := range prog.Imports {
+		l.moduleByName[imported.Path()] = imported
+		importedID := l.internModule(imported.Path())
+		l.program.Modules[modID].Imports = appendUniqueModule(l.program.Modules[modID].Imports, importedID)
+	}
 	for _, stmt := range prog.Statements {
 		switch node := stmt.Stmt.(type) {
 		case *checker.StructDef:
@@ -4332,6 +4358,15 @@ func appendUniqueType(items []TypeID, id TypeID) []TypeID {
 }
 
 func appendUniqueFunction(items []FunctionID, id FunctionID) []FunctionID {
+	for _, item := range items {
+		if item == id {
+			return items
+		}
+	}
+	return append(items, id)
+}
+
+func appendUniqueModule(items []ModuleID, id ModuleID) []ModuleID {
 	for _, item := range items {
 		if item == id {
 			return items
