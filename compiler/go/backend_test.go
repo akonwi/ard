@@ -1178,6 +1178,115 @@ fn main() {
 	}
 }
 
+func TestGenerateSourcesUsesAliasOriginImportsForTraitObjectDispatch(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"aliasprobe\"\nard = \">= 0.13.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{filepath.Join(tempDir, "commands"), filepath.Join(tempDir, "widgets")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]string{
+		"widget.ard": `
+struct Frame { size: Int }
+
+trait Widget {
+  fn render(frame: Frame)
+}
+`,
+		"widgets/text.ard": `
+use aliasprobe/widget
+
+struct Text { content: Str }
+
+impl widget::Widget for Text {
+  fn render(frame: widget::Frame) { () }
+}
+
+fn new(content: Str) widget::Widget { Text{content: content} }
+`,
+		"widgets/box.ard": `
+use aliasprobe/widget
+
+struct Box { child: widget::Widget }
+
+impl widget::Widget for Box {
+  fn render(frame: widget::Frame) { self.child.render(frame) }
+}
+
+fn new(child: widget::Widget) widget::Widget { Box{child: child} }
+`,
+		"facade_let.ard": `
+use aliasprobe/widgets/text
+use aliasprobe/widgets/box
+
+let make_text = text::new
+let make_box = box::new
+`,
+		"commands/demo.ard": `
+use aliasprobe/widget
+use aliasprobe/facade_let as facade
+
+fn run() {
+  let f = widget::Frame{size: 10}
+  let w = facade::make_box(facade::make_text("hi"))
+  w.render(f)
+}
+`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(tempDir, filepath.FromSlash(name)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := parse.Parse([]byte(`
+use aliasprobe/widgets/text
+use aliasprobe/widgets/box
+use aliasprobe/commands/demo
+
+fn main() { demo::run() }
+`), filepath.Join(tempDir, "main.ard"))
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New(filepath.Join(tempDir, "main.ard"), result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := air.Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := ""
+	for _, data := range sources {
+		if strings.Contains(string(data), "switch typed := w_1.(type)") {
+			source = string(data)
+			break
+		}
+	}
+	if source == "" {
+		t.Fatalf("generated sources missing aliased-constructor trait dispatch: %#v", mapsKeys(sources))
+	}
+	if !strings.Contains(source, "case aliasprobe_widgets_box__Box:") {
+		t.Fatalf("generated source missing Box dispatch case through let alias:\n%s", source)
+	}
+	if !strings.Contains(source, "case aliasprobe_widgets_text__Text:") {
+		t.Fatalf("generated source missing Text dispatch case through let alias:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesSupportsVoidTraitObjectDispatch(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io

@@ -4103,7 +4103,27 @@ func (l *lowerer) ensureModuleImportTraitImplsDeclared(moduleID ModuleID) error 
 	for _, imported := range mod.Program().Imports {
 		importedID := l.internModule(imported.Path())
 		l.program.Modules[moduleID].Imports = appendUniqueModule(l.program.Modules[moduleID].Imports, importedID)
-		if err := l.ensureModuleTraitImplsDeclared(imported.Path()); err != nil {
+		if err := l.ensureModuleTraitImplsDeclaredRecursive(imported.Path(), map[string]bool{}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *lowerer) ensureModuleTraitImplsDeclaredRecursive(modulePath string, seen map[string]bool) error {
+	if seen[modulePath] {
+		return nil
+	}
+	seen[modulePath] = true
+	if err := l.ensureModuleTraitImplsDeclared(modulePath); err != nil {
+		return err
+	}
+	mod, ok := l.moduleByName[modulePath]
+	if !ok || mod.Program() == nil {
+		return nil
+	}
+	for _, imported := range mod.Program().Imports {
+		if err := l.ensureModuleTraitImplsDeclaredRecursive(imported.Path(), seen); err != nil {
 			return err
 		}
 	}
