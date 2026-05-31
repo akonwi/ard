@@ -183,6 +183,17 @@ func TestMethods(t *testing.T) {
 			},
 		},
 		{
+			name: "Impl method can return its receiver type",
+			input: fmt.Sprintf(
+				`%s
+				impl Shape {
+				  fn clone() Shape {
+						Shape{width: self.width, height: self.height}
+					}
+				}`, shapeCode),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
 			name: "The instance can't be mutated in a non-mutable impl block",
 			input: fmt.Sprintf(
 				`%s
