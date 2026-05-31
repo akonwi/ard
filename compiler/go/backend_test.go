@@ -997,6 +997,78 @@ func TestGenerateSourcesSupportsUserTraitObjectDispatch(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesSupportsCrossModuleTraitObjectDispatch(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"checkprobe\"\nard = \">= 0.13.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "widget.ard"), []byte(`
+struct Frame { size: Int }
+
+trait Widget {
+  fn render(frame: Frame)
+}
+
+struct Text { content: Str }
+
+impl Widget for Text {
+  fn render(frame: Frame) { () }
+}
+
+fn plain(content: Str) Widget {
+  Text{content: content}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := parse.Parse([]byte(`
+use checkprobe/widget
+
+fn main() {
+  let f = widget::Frame{size: 10}
+  let t = widget::plain("hi")
+  t.render(f)
+}
+`), filepath.Join(tempDir, "main.ard"))
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New(filepath.Join(tempDir, "main.ard"), result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := air.Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := ""
+	for _, data := range sources {
+		if strings.Contains(string(data), "switch typed := t_1.(type)") {
+			source = string(data)
+			break
+		}
+	}
+	if source == "" {
+		t.Fatalf("generated sources missing trait dispatch: %#v", mapsKeys(sources))
+	}
+	if !strings.Contains(source, "case checkprobe_widget__Text:") {
+		t.Fatalf("generated source missing cross-module trait dispatch case:\n%s", source)
+	}
+	if !strings.Contains(source, "checkprobe_widget__Text_Widget_render(typed, f_0)") {
+		t.Fatalf("generated source missing cross-module trait dispatch call:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesSupportsVoidTraitObjectDispatch(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io

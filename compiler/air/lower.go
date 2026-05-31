@@ -2664,6 +2664,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return &Expr{Kind: ExprMakeList, Type: typeID}, nil
 		}
 		moduleID := fl.l.internModule(e.Module)
+		if err := fl.l.ensureModuleTraitImplsDeclared(e.Module); err != nil {
+			return nil, err
+		}
 		if e.Call.ExternalBinding != "" {
 			id, err := fl.l.declareConcreteExternCall(moduleID, e.Call.Name, e.Call)
 			if err != nil {
@@ -3783,6 +3786,9 @@ func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.Modu
 	def, ok := fl.l.moduleFunctionDefinitionForSymbol(symbol)
 	if ok {
 		module := fl.l.internModule(symbol.Module)
+		if err := fl.l.ensureModuleTraitImplsDeclared(symbol.Module); err != nil {
+			return nil, err
+		}
 		id, err := fl.l.declareAndLowerFunction(module, def)
 		if err != nil {
 			return nil, err
@@ -4081,6 +4087,50 @@ func (l *lowerer) lookupExternInModule(modulePath, name string) (ExternID, bool)
 	}
 	id, ok := l.externs[functionKey(moduleID, name)]
 	return id, ok
+}
+
+func (l *lowerer) ensureModuleTraitImplsDeclared(modulePath string) error {
+	mod, ok := l.moduleByName[modulePath]
+	if !ok || mod.Program() == nil {
+		return nil
+	}
+	modID := l.internModule(modulePath)
+	prog := mod.Program()
+	for _, stmt := range prog.Statements {
+		switch node := stmt.Stmt.(type) {
+		case *checker.StructDef:
+			if typeHasUnresolvedTypeVar(node) {
+				continue
+			}
+			typeID, err := l.internType(node)
+			if err != nil {
+				return err
+			}
+			l.program.Modules[modID].Types = appendUniqueType(l.program.Modules[modID].Types, typeID)
+		case *checker.Enum:
+			typeID, err := l.internType(node)
+			if err != nil {
+				return err
+			}
+			l.program.Modules[modID].Types = appendUniqueType(l.program.Modules[modID].Types, typeID)
+		}
+	}
+	for _, stmt := range prog.Statements {
+		switch node := stmt.Stmt.(type) {
+		case *checker.StructDef:
+			if typeHasUnresolvedTypeVar(node) {
+				continue
+			}
+			if err := l.declareTraitImplsForType(modID, node); err != nil {
+				return err
+			}
+		case *checker.Enum:
+			if err := l.declareTraitImplsForType(modID, node); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (l *lowerer) resolveModuleFunction(modulePath, name string) (FunctionID, bool, error) {
