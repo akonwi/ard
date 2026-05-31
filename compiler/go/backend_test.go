@@ -1069,6 +1069,115 @@ fn main() {
 	}
 }
 
+func TestGenerateSourcesUsesCallSiteImportsForCrossModuleTraitObjectDispatch(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"nestprobe\"\nard = \">= 0.13.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{filepath.Join(tempDir, "commands"), filepath.Join(tempDir, "tui", "core")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]string{
+		"tui/core/widget.ard": `
+struct Frame { size: Int }
+
+trait Widget {
+  fn render(frame: Frame)
+}
+`,
+		"tui/core/text.ard": `
+use nestprobe/tui/core/widget
+
+struct Text { content: Str }
+
+impl widget::Widget for Text {
+  fn render(frame: widget::Frame) { () }
+}
+
+fn plain(content: Str) widget::Widget {
+  Text{content: content}
+}
+`,
+		"tui/core/box.ard": `
+use nestprobe/tui/core/widget
+
+struct Box { child: widget::Widget }
+
+impl widget::Widget for Box {
+  fn render(frame: widget::Frame) {
+    self.child.render(frame)
+  }
+}
+
+fn wrap(child: widget::Widget) widget::Widget {
+  Box{child: child}
+}
+`,
+		"commands/demo.ard": `
+use nestprobe/tui/core/widget
+use nestprobe/tui/core/text as textw
+use nestprobe/tui/core/box as boxw
+
+fn run() {
+  let f = widget::Frame{size: 10}
+  let demo = boxw::wrap(textw::plain("hi"))
+  demo.render(f)
+}
+`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(tempDir, filepath.FromSlash(name)), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := parse.Parse([]byte(`
+use nestprobe/commands/demo
+
+fn main() {
+  demo::run()
+}
+`), filepath.Join(tempDir, "main.ard"))
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New(filepath.Join(tempDir, "main.ard"), result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := air.Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := ""
+	for _, data := range sources {
+		if strings.Contains(string(data), "switch typed := demo_1.(type)") {
+			source = string(data)
+			break
+		}
+	}
+	if source == "" {
+		t.Fatalf("generated sources missing call-site trait dispatch: %#v", mapsKeys(sources))
+	}
+	if !strings.Contains(source, "case nestprobe_tui_core_box__Box:") {
+		t.Fatalf("generated source missing Box dispatch case from call-site imports:\n%s", source)
+	}
+	if !strings.Contains(source, "case nestprobe_tui_core_text__Text:") {
+		t.Fatalf("generated source missing Text dispatch case from call-site imports:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesSupportsVoidTraitObjectDispatch(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io
