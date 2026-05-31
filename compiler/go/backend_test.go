@@ -953,6 +953,115 @@ func TestGenerateSourcesSupportsUserTraitObjectDispatch(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesSupportsVoidTraitObjectDispatch(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/io
+
+		trait Greet {
+			fn say()
+		}
+
+		struct Cat {
+			name: Str,
+		}
+
+		impl Greet for Cat {
+			fn say() {
+				io::print("meow from {self.name}")
+			}
+		}
+
+		fn invoke(g: Greet) {
+			g.say()
+		}
+
+		fn main() {
+			invoke(Cat{name: "milo"})
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "switch typed := g.(type)") {
+		t.Fatalf("generated source missing void trait object dispatch lowering:\n%s", source)
+	}
+	if !strings.Contains(source, "Cat_Greet_say(typed)") {
+		t.Fatalf("generated source missing void trait dispatch call:\n%s", source)
+	}
+	if strings.Contains(source, "= test_ard__Cat_Greet_say(typed)") || strings.Contains(source, "= Cat_Greet_say(typed)") {
+		t.Fatalf("generated source assigns void trait dispatch result:\n%s", source)
+	}
+	if !strings.Contains(source, "invoke(any(") {
+		t.Fatalf("generated source missing trait upcast for call argument:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesSupportsStoredTraitObjectDispatch(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/io
+
+		trait Drawable {
+			fn draw() Str
+		}
+
+		struct Box {
+			w: Int,
+		}
+
+		impl Drawable for Box {
+			fn draw() Str {
+				"box[{self.w}]"
+			}
+		}
+
+		struct Container {
+			child: Drawable,
+		}
+
+		fn show(d: Drawable) {
+			io::print(d.draw())
+		}
+
+		fn main() {
+			let d: Drawable = Box{w: 1}
+			io::print(d.draw())
+
+			let c = Container{child: Box{w: 2}}
+			io::print(c.child.draw())
+
+			let items: [Drawable] = [Box{w: 3}]
+			show(items.at(0))
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "d_0 := any(") {
+		t.Fatalf("generated source missing local trait-object upcast:\n%s", source)
+	}
+	if !strings.Contains(source, "child: any(") {
+		t.Fatalf("generated source missing struct field trait-object upcast:\n%s", source)
+	}
+	if !strings.Contains(source, "[]any{any(") {
+		t.Fatalf("generated source missing list element trait-object upcast:\n%s", source)
+	}
+	if !strings.Contains(source, "switch typed := d_0.(type)") {
+		t.Fatalf("generated source missing local trait-object dispatch:\n%s", source)
+	}
+	if !strings.Contains(source, "switch typed := c_1.child.(type)") {
+		t.Fatalf("generated source missing struct field trait-object dispatch:\n%s", source)
+	}
+	if !strings.Contains(source, "show(items_2[0])") {
+		t.Fatalf("generated source missing list element trait-object use:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesSupportsTraitObjectDispatch(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io
