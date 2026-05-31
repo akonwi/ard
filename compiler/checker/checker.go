@@ -81,17 +81,32 @@ func deref(t Type) Type {
 // Example: If $T is bound to Int, derefType([$T]) returns [Int].
 // Ensures anonymous function parameters see fully resolved types.
 func derefType(t Type) Type {
+	return derefTypeSeen(t, map[Type]bool{})
+}
+
+// derefTypeSeen guards against cycles in named type graphs, such as a struct
+// with an impl method returning the same struct type. Longer term, methods
+// should probably live outside StructDef's type identity so value shape and
+// method namespace cannot recursively contain each other.
+func derefTypeSeen(t Type, seen map[Type]bool) Type {
 	t = deref(t) // First dereference at the top level
+	if t == nil {
+		return nil
+	}
+	if seen[t] {
+		return t
+	}
+	seen[t] = true
 	switch typ := t.(type) {
 	case *List:
-		derefInner := derefType(typ.of)
+		derefInner := derefTypeSeen(typ.of, seen)
 		if derefInner == typ.of {
 			return typ // No change, return original
 		}
 		return &List{of: derefInner}
 	case *Map:
-		derefKey := derefType(typ.key)
-		derefVal := derefType(typ.value)
+		derefKey := derefTypeSeen(typ.key, seen)
+		derefVal := derefTypeSeen(typ.value, seen)
 		if derefKey == typ.key && derefVal == typ.value {
 			return typ // No change, return original
 		}
@@ -100,14 +115,14 @@ func derefType(t Type) Type {
 			value: derefVal,
 		}
 	case *Maybe:
-		derefInner := derefType(typ.of)
+		derefInner := derefTypeSeen(typ.of, seen)
 		if derefInner == typ.of {
 			return typ // No change, return original
 		}
 		return &Maybe{of: derefInner}
 	case *Result:
-		derefVal := derefType(typ.val)
-		derefErr := derefType(typ.err)
+		derefVal := derefTypeSeen(typ.val, seen)
+		derefErr := derefTypeSeen(typ.err, seen)
 		if derefVal == typ.val && derefErr == typ.err {
 			return typ // No change, return original
 		}
@@ -119,7 +134,7 @@ func derefType(t Type) Type {
 		newTypes := make([]Type, len(typ.Types))
 		changed := false
 		for i, t := range typ.Types {
-			newTypes[i] = derefType(t)
+			newTypes[i] = derefTypeSeen(t, seen)
 			if newTypes[i] != typ.Types[i] {
 				changed = true
 			}
@@ -135,7 +150,7 @@ func derefType(t Type) Type {
 		fieldsChanged := false
 		newFields := make(map[string]Type, len(typ.Fields))
 		for name, fieldType := range typ.Fields {
-			derefFieldType := derefType(fieldType)
+			derefFieldType := derefTypeSeen(fieldType, seen)
 			newFields[name] = derefFieldType
 			if derefFieldType != fieldType {
 				fieldsChanged = true
@@ -144,7 +159,7 @@ func derefType(t Type) Type {
 		methodsChanged := false
 		newMethods := make(map[string]*FunctionDef, len(typ.Methods))
 		for name, method := range typ.Methods {
-			derefMethod, _ := derefType(method).(*FunctionDef)
+			derefMethod, _ := derefTypeSeen(method, seen).(*FunctionDef)
 			if derefMethod == nil {
 				derefMethod = method
 			}
@@ -169,7 +184,7 @@ func derefType(t Type) Type {
 		newParams := make([]Parameter, len(typ.Parameters))
 		paramsChanged := false
 		for i, param := range typ.Parameters {
-			derefParamType := derefType(param.Type)
+			derefParamType := derefTypeSeen(param.Type, seen)
 			newParams[i] = Parameter{
 				Name:    param.Name,
 				Type:    derefParamType,
@@ -179,7 +194,7 @@ func derefType(t Type) Type {
 				paramsChanged = true
 			}
 		}
-		derefReturnType := derefType(typ.ReturnType)
+		derefReturnType := derefTypeSeen(typ.ReturnType, seen)
 		returnChanged := derefReturnType != typ.ReturnType
 		if !paramsChanged && !returnChanged {
 			return typ // No change, return original
@@ -201,7 +216,7 @@ func derefType(t Type) Type {
 		newTypeArgs := make([]Type, len(typ.TypeArgs))
 		changed := false
 		for i, typeArg := range typ.TypeArgs {
-			newTypeArgs[i] = derefType(typeArg)
+			newTypeArgs[i] = derefTypeSeen(typeArg, seen)
 			if newTypeArgs[i] != typeArg {
 				changed = true
 			}
