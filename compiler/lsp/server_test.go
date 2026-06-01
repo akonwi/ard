@@ -232,6 +232,48 @@ func TestFormatSource(t *testing.T) {
 	}
 }
 
+func TestCodeActionRemoveUnusedImports(t *testing.T) {
+	server := NewServer()
+	docURI := uri.New("file:///test.ard")
+	server.cache.Open(docURI, "ard", 1, "use app/unused\nuse app/text\n\nlet label = text::new(\"hi\")\n")
+
+	req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), protocol.MethodTextDocumentCodeAction, protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Context:      protocol.CodeActionContext{Only: []protocol.CodeActionKind{protocol.SourceOrganizeImports}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actions []protocol.CodeAction
+	reply := jsonrpc2.Replier(func(ctx context.Context, result interface{}, err error) error {
+		if err != nil {
+			return err
+		}
+		var ok bool
+		actions, ok = result.([]protocol.CodeAction)
+		if !ok {
+			t.Fatalf("result = %T, want []protocol.CodeAction", result)
+		}
+		return nil
+	})
+	if err := server.handleCodeAction(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(actions))
+	}
+	if actions[0].Kind != protocol.SourceOrganizeImports {
+		t.Fatalf("action kind = %q, want %q", actions[0].Kind, protocol.SourceOrganizeImports)
+	}
+	edits := actions[0].Edit.Changes[protocol.DocumentURI(docURI)]
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 edit, got %d", len(edits))
+	}
+	if strings.Contains(edits[0].NewText, "app/unused") {
+		t.Fatalf("expected unused import to be removed, got:\n%s", edits[0].NewText)
+	}
+}
+
 // TestFormattingHandler verifies the full handleFormatting flow.
 func TestFormattingHandler(t *testing.T) {
 	server := NewServer()
