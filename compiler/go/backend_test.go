@@ -1131,6 +1131,40 @@ func TestGenerateSourcesSupportsCapturedClosureSort(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
+	program := lowerSource(t, `
+		trait Writer {
+			fn write(text: Str)
+		}
+
+		struct Buffer {
+			contents: Str,
+		}
+
+		impl Writer for Buffer {
+			fn mut write(text: Str) {
+				self.contents = self.contents + text
+			}
+		}
+
+		fn send(w: Writer) {
+			w.write("hi")
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "_Buffer_Writer_write(self *") {
+		t.Fatalf("generated source missing pointer receiver for mutating trait impl:\n%s", source)
+	}
+	if !strings.Contains(source, "_Buffer_Writer_write(&typed, \"hi\")") {
+		t.Fatalf("generated source missing address-of for mutating trait dispatch receiver:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesSupportsUserTraitObjectDispatch(t *testing.T) {
 	program := lowerSource(t, `
 		trait Renderable {

@@ -3647,7 +3647,14 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 			continue
 		}
 		methodFn := l.program.Functions[impl.Methods[expr.Method]]
-		args := []ast.Expr{ast.NewIdent("typed")}
+		receiver := ast.Expr(ast.NewIdent("typed"))
+		if len(methodFn.Signature.Params) > 0 {
+			receiverParam := methodFn.Signature.Params[0]
+			if receiverParam.Mutable && validTypeID(l.program, receiverParam.Type) && l.program.Types[receiverParam.Type-1].Kind == air.TypeStruct {
+				receiver = &ast.UnaryExpr{Op: token.AND, X: receiver}
+			}
+		}
+		args := []ast.Expr{receiver}
 		for i, loweredArg := range loweredArgs {
 			argExpr := loweredArg.expr
 			paramIndex := i + 1 // skip receiver
