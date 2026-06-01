@@ -336,7 +336,7 @@ func moduleCompletionItems(alias string, mod checker.Module, prog *parse.Program
 		if stmt.Expr != nil {
 			switch fn := stmt.Expr.(type) {
 			case *checker.FunctionDef:
-				if strings.Contains(fn.Name, "::") || mod.Get(fn.Name).IsZero() {
+				if fn.IsTest || strings.Contains(fn.Name, "::") || mod.Get(fn.Name).IsZero() {
 					continue
 				}
 				items = append(items, staticFunctionCompletionItem(alias, fn.Name, fn.Type(), prog, filePath))

@@ -1316,6 +1316,36 @@ fn main() {
 }
 
 // TestCompletionUserModuleStaticMembers verifies user module functions and variables complete after ::.
+func TestCompletionUserModuleStaticMembersExcludesTests(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolsSource := `fn helper() Int { 1 }
+
+test fn helper_test() Void!Str { Result::ok(()) }
+`
+	if err := os.WriteFile(filepath.Join(root, "tools.ard"), []byte(toolsSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use test_project/tools
+
+fn main() {
+  tools::
+}
+`
+	filePath := filepath.Join(root, "main.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	items := computeCompletions(source, filePath, protocol.Position{Line: 3, Character: 9})
+	assertCompletion(t, items, "helper", "fn () Int")
+	if _, ok := completionItemByLabel(items, "helper_test"); ok {
+		t.Fatalf("test function completion should be excluded: %#v", items)
+	}
+}
+
 func TestCompletionUserModuleStaticMembers(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
