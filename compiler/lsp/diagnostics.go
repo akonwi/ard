@@ -15,6 +15,10 @@ import (
 // parseAndCheck runs the Ard parser and checker on a source file.
 // It returns the parsed AST, the checked module, and any diagnostics.
 func parseAndCheck(source string, filePath string) ([]checker.Diagnostic, error) {
+	return parseAndCheckWithOverlays(source, filePath, nil)
+}
+
+func parseAndCheckWithOverlays(source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error) {
 	// Parse the source
 	result := parse.Parse([]byte(source), filePath)
 	if result.Program == nil {
@@ -37,6 +41,9 @@ func parseAndCheck(source string, filePath string) ([]checker.Diagnostic, error)
 	moduleResolver, err := checker.NewModuleResolver(workingDir)
 	if err != nil {
 		return nil, fmt.Errorf("error initializing module resolver: %w", err)
+	}
+	for overlayPath, overlaySource := range overlays {
+		moduleResolver.SetOverlay(overlayPath, overlaySource)
 	}
 
 	relPath, err := filepath.Rel(workingDir, filePath)
@@ -132,7 +139,11 @@ func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
 	}
 
 	filePath := doc.URI.Filename()
-	diags, err := parseAndCheck(doc.Text, filePath)
+	overlays := map[string]string{}
+	for _, cached := range s.cache.Snapshot() {
+		overlays[cached.URI.Filename()] = cached.Text
+	}
+	diags, err := parseAndCheckWithOverlays(doc.Text, filePath, overlays)
 	if err != nil {
 		// If we can't analyze, publish the error as a diagnostic
 		s.sendDiagnostics(ctx, docURI, []protocol.Diagnostic{
