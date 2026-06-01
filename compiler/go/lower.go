@@ -1272,18 +1272,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			}
 			stmts = append(stmts, loweredArg.stmts...)
 			argExpr := loweredArg.expr
-			if i < len(target.Signature.Params) && validTypeID(l.program, target.Signature.Params[i].Type) {
-				param := target.Signature.Params[i]
-				paramType := l.program.Types[param.Type-1]
-				if paramType.Kind == air.TypeStruct {
-					argIsPointer := l.localIsPointerParam(fn, arg)
-					switch {
-					case param.Mutable && !argIsPointer:
-						argExpr = &ast.UnaryExpr{Op: token.AND, X: argExpr}
-					case !param.Mutable && argIsPointer:
-						argExpr = &ast.StarExpr{X: argExpr}
-					}
-				}
+			if i < len(target.Signature.Params) {
+				argExpr = l.adaptCallArg(fn, arg, argExpr, target.Signature.Params[i])
 			}
 			args = append(args, argExpr)
 		}
@@ -2056,6 +2046,25 @@ func (l *lowerer) resolvedExprType(fn air.Function, expr air.Expr) air.TypeID {
 		return inferred
 	}
 	return expr.Type
+}
+
+func (l *lowerer) adaptCallArg(fn air.Function, arg air.Expr, argExpr ast.Expr, param air.Param) ast.Expr {
+	if !validTypeID(l.program, param.Type) {
+		return argExpr
+	}
+	paramType := l.program.Types[param.Type-1]
+	if paramType.Kind != air.TypeStruct {
+		return argExpr
+	}
+	argIsPointer := l.localIsPointerParam(fn, arg)
+	switch {
+	case param.Mutable && !argIsPointer:
+		return &ast.UnaryExpr{Op: token.AND, X: argExpr}
+	case !param.Mutable && argIsPointer:
+		return &ast.StarExpr{X: argExpr}
+	default:
+		return argExpr
+	}
 }
 
 func (l *lowerer) localIsPointerParam(fn air.Function, expr air.Expr) bool {
@@ -3622,14 +3631,14 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 		stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: resultType}}}})
 	}
 
-	args := []ast.Expr{ast.NewIdent("typed")}
-	for _, arg := range expr.Args {
+	loweredArgs := make([]loweredExpr, len(expr.Args))
+	for i, arg := range expr.Args {
 		loweredArg, err := l.lowerExpr(fn, arg)
 		if err != nil {
 			return loweredExpr{}, err
 		}
 		stmts = append(stmts, loweredArg.stmts...)
-		args = append(args, loweredArg.expr)
+		loweredArgs[i] = loweredArg
 	}
 
 	cases := []ast.Stmt{}
@@ -3638,6 +3647,15 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 			continue
 		}
 		methodFn := l.program.Functions[impl.Methods[expr.Method]]
+		args := []ast.Expr{ast.NewIdent("typed")}
+		for i, loweredArg := range loweredArgs {
+			argExpr := loweredArg.expr
+			paramIndex := i + 1 // skip receiver
+			if paramIndex < len(methodFn.Signature.Params) {
+				argExpr = l.adaptCallArg(fn, expr.Args[i], argExpr, methodFn.Signature.Params[paramIndex])
+			}
+			args = append(args, argExpr)
+		}
 		call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, methodFn)), Args: args}
 		var body ast.Stmt
 		if isVoid {

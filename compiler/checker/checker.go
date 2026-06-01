@@ -715,7 +715,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						c.addError(fmt.Sprintf("Unrecognized type: %s", param.Type.GetName()), param.Type.GetLocation())
 						continue
 					}
-					params[j] = Parameter{Name: param.Name, Type: paramType}
+					params[j] = Parameter{Name: param.Name, Type: paramType, Mutable: param.Mutable}
 				}
 
 				var returnType Type = Void
@@ -822,7 +822,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 							c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
 						}
 
-						params[i] = Parameter{Name: param.Name, Type: paramType}
+						if param.Mutable != traitMethod.Parameters[i].Mutable {
+							c.addError(fmt.Sprintf("Trait method '%s' parameter '%s' mutability mismatch", method.Name, param.Name), param.GetLocation())
+						}
+
+						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: param.Mutable}
 					}
 
 					// Check return type
@@ -895,7 +899,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 							c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
 						}
 
-						params[i] = Parameter{Name: param.Name, Type: paramType}
+						if param.Mutable != traitMethod.Parameters[i].Mutable {
+							c.addError(fmt.Sprintf("Trait method '%s' parameter '%s' mutability mismatch", method.Name, param.Name), param.GetLocation())
+						}
+
+						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: param.Mutable}
 					}
 
 					// Check return type
