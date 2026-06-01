@@ -17,19 +17,24 @@ type completionKind int
 const (
 	completionInstance completionKind = iota + 1
 	completionStatic
+	completionImport
 )
 
 type completionContext struct {
-	kind   completionKind
-	prefix string
-	sepEnd int
-	offset int
+	kind       completionKind
+	prefix     string
+	importPath string
+	sepEnd     int
+	offset     int
 }
 
 func computeCompletions(source string, filePath string, position protocol.Position) []protocol.CompletionItem {
 	ctx, ok := completionContextAt(source, position)
 	if !ok {
 		return []protocol.CompletionItem{}
+	}
+	if ctx.kind == completionImport {
+		return withCompletionTextEdits(importPathCompletionItems(ctx.importPath, filePath), ctx, position)
 	}
 
 	parseSource := source[:ctx.sepEnd] + completionPlaceholder + source[ctx.offset:]
@@ -70,6 +75,13 @@ func completionContextAt(source string, position protocol.Position) (completionC
 		identStart--
 	}
 	prefix := source[identStart:offset]
+	lineStart := strings.LastIndex(source[:offset], "\n") + 1
+	linePrefix := source[lineStart:offset]
+	if importPrefix, ok := importCompletionPrefix(linePrefix); ok {
+		segmentStart := strings.LastIndex(importPrefix, "/") + 1
+		return completionContext{kind: completionImport, prefix: importPrefix[segmentStart:], importPath: importPrefix, sepEnd: lineStart + len(linePrefix) - len(importPrefix) + segmentStart, offset: offset}, true
+	}
+
 	sepEnd := identStart
 	if sepEnd >= 1 && source[sepEnd-1] == '.' {
 		return completionContext{kind: completionInstance, prefix: prefix, sepEnd: sepEnd, offset: offset}, true
@@ -336,7 +348,7 @@ func moduleCompletionItems(alias string, mod checker.Module, prog *parse.Program
 		if stmt.Expr != nil {
 			switch fn := stmt.Expr.(type) {
 			case *checker.FunctionDef:
-				if strings.Contains(fn.Name, "::") || mod.Get(fn.Name).IsZero() {
+				if fn.IsTest || strings.Contains(fn.Name, "::") || mod.Get(fn.Name).IsZero() {
 					continue
 				}
 				items = append(items, staticFunctionCompletionItem(alias, fn.Name, fn.Type(), prog, filePath))

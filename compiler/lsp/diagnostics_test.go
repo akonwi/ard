@@ -2,6 +2,8 @@ package lsp
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -57,6 +59,32 @@ func TestParseAndCheckWithParseError(t *testing.T) {
 		t.Fatal("expected diagnostics for parse error, got none")
 	}
 	t.Logf("parse error diagnostics: %v", diags)
+}
+
+func TestParseAndCheckUsesOpenDocumentOverlaysForImports(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	modPath := filepath.Join(root, "tools.ard")
+	if err := os.WriteFile(modPath, []byte("fn old_name() Int { 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(root, "main.ard")
+	source := `use test_project/tools
+
+let value = tools::new_name()
+`
+
+	diags, err := parseAndCheckWithOverlays(source, mainPath, map[string]string{
+		modPath: "fn new_name() Int { 1 }\n",
+	})
+	if err != nil {
+		t.Fatalf("parseAndCheckWithOverlays failed: %v", err)
+	}
+	if len(diags) != 0 {
+		t.Fatalf("expected overlay import to clear stale diagnostics, got %v", diags)
+	}
 }
 
 // TestPublishDiagnosticsLifecycle verifies the full cycle doesn't panic.

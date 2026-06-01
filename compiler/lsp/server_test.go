@@ -55,6 +55,7 @@ func TestServerInitializes(t *testing.T) {
 		"textDocument/documentSymbol",
 		"textDocument/completion",
 		"textDocument/formatting",
+		"textDocument/codeAction",
 		"textDocument/signatureHelp",
 		"textDocument/documentHighlight",
 	}
@@ -229,6 +230,48 @@ func TestFormatSource(t *testing.T) {
 				t.Errorf("got %q, want %q", result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestCodeActionRemoveUnusedImports(t *testing.T) {
+	server := NewServer()
+	docURI := uri.New("file:///test.ard")
+	server.cache.Open(docURI, "ard", 1, "use app/unused\nuse app/text\n\nlet label = text::new(\"hi\")\n")
+
+	req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), protocol.MethodTextDocumentCodeAction, protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+		Context:      protocol.CodeActionContext{Only: []protocol.CodeActionKind{protocol.SourceOrganizeImports}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actions []protocol.CodeAction
+	reply := jsonrpc2.Replier(func(ctx context.Context, result interface{}, err error) error {
+		if err != nil {
+			return err
+		}
+		var ok bool
+		actions, ok = result.([]protocol.CodeAction)
+		if !ok {
+			t.Fatalf("result = %T, want []protocol.CodeAction", result)
+		}
+		return nil
+	})
+	if err := server.handleCodeAction(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(actions))
+	}
+	if actions[0].Kind != protocol.SourceOrganizeImports {
+		t.Fatalf("action kind = %q, want %q", actions[0].Kind, protocol.SourceOrganizeImports)
+	}
+	edits := actions[0].Edit.Changes[protocol.DocumentURI(docURI)]
+	if len(edits) != 1 {
+		t.Fatalf("expected 1 edit, got %d", len(edits))
+	}
+	if strings.Contains(edits[0].NewText, "app/unused") {
+		t.Fatalf("expected unused import to be removed, got:\n%s", edits[0].NewText)
 	}
 }
 
@@ -804,6 +847,38 @@ fn main() Int {
 }
 
 // TestDefinitionImportedModuleSymbols verifies go-to-definition across imported modules.
+func TestDefinitionNestedStaticFunctionUsesInnerModuleAlias(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "text.ard"), []byte(`fn new(label: Str) Str { label }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "stack.ard"), []byte(`fn hstack(children: [Str]) Str { "" }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use test_project/stack
+use test_project/text
+
+fn main() {
+  let tabs = stack::hstack([
+    text::new("Inbox"),
+  ])
+}
+`
+	filePath := filepath.Join(root, "main.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	textPath := filepath.Join(root, "text.ard")
+
+	loc := requireDefinition(t, source, filePath, 5, 5)
+	assertDefinitionStart(t, loc, textPath, 0, 0)
+}
+
 func TestDefinitionImportedModuleSymbols(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
@@ -1206,6 +1281,40 @@ func TestTicTacToeLine42TypingDoesNotHang(t *testing.T) {
 	}
 }
 
+func TestCompletionImportPaths(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "tui", "core"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tui", "core", "text.ard"), []byte("fn new() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tui", "core", "stack.ard"), []byte("fn hstack() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(root, "main.ard")
+
+	rootItems := computeCompletions("use ", filePath, protocol.Position{Line: 0, Character: 4})
+	assertCompletion(t, rootItems, "ard", "")
+	assertCompletion(t, rootItems, "test_project", "")
+
+	moduleItems := computeCompletions("use test_project/tui/core/", filePath, protocol.Position{Line: 0, Character: 26})
+	assertCompletion(t, moduleItems, "stack", "")
+	assertCompletion(t, moduleItems, "text", "")
+
+	prefixedItems := computeCompletions("use test_project/tui/core/st", filePath, protocol.Position{Line: 0, Character: 28})
+	item, ok := completionItemByLabel(prefixedItems, "stack")
+	if !ok || item.TextEdit == nil {
+		t.Fatalf("expected stack completion with text edit, got %#v", prefixedItems)
+	}
+	if item.TextEdit.NewText != "stack" {
+		t.Fatalf("completion edit text = %q, want stack", item.TextEdit.NewText)
+	}
+}
+
 // TestCompletionInstanceMembers verifies dot completions for fields and methods.
 func TestCompletionInstanceMembers(t *testing.T) {
 	source := `struct Board {
@@ -1316,6 +1425,36 @@ fn main() {
 }
 
 // TestCompletionUserModuleStaticMembers verifies user module functions and variables complete after ::.
+func TestCompletionUserModuleStaticMembersExcludesTests(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolsSource := `fn helper() Int { 1 }
+
+test fn helper_test() Void!Str { Result::ok(()) }
+`
+	if err := os.WriteFile(filepath.Join(root, "tools.ard"), []byte(toolsSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use test_project/tools
+
+fn main() {
+  tools::
+}
+`
+	filePath := filepath.Join(root, "main.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	items := computeCompletions(source, filePath, protocol.Position{Line: 3, Character: 9})
+	assertCompletion(t, items, "helper", "fn () Int")
+	if _, ok := completionItemByLabel(items, "helper_test"); ok {
+		t.Fatalf("test function completion should be excluded: %#v", items)
+	}
+}
+
 func TestCompletionUserModuleStaticMembers(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {

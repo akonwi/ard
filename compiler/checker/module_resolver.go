@@ -37,6 +37,7 @@ type ModuleResolver struct {
 	project      *ProjectInfo
 	moduleCache  map[string]Module         // cache loaded modules by file path
 	astCache     map[string]*parse.Program // cache parsed ASTs by file path
+	overlays     map[string]string         // unsaved source text by resolved file path
 	loadingChain []string                  // track import paths currently being loaded for circular dependency detection
 }
 
@@ -213,8 +214,24 @@ func NewModuleResolver(workingDir string) (*ModuleResolver, error) {
 		project:      project,
 		moduleCache:  make(map[string]Module),
 		astCache:     make(map[string]*parse.Program),
+		overlays:     make(map[string]string),
 		loadingChain: make([]string, 0),
 	}, nil
+}
+
+// SetOverlay provides unsaved source text for a resolved module file path.
+// The LSP uses this so imported open documents are checked from the editor
+// buffer instead of stale on-disk contents.
+func (mr *ModuleResolver) SetOverlay(filePath string, source string) {
+	if mr == nil || strings.TrimSpace(filePath) == "" {
+		return
+	}
+	if mr.overlays == nil {
+		mr.overlays = make(map[string]string)
+	}
+	clean := filepath.Clean(filePath)
+	mr.overlays[clean] = source
+	delete(mr.astCache, clean)
 }
 
 func FetchDependency(startPath string, alias string) (DependencyInfo, error) {
@@ -374,15 +391,23 @@ func (mr *ModuleResolver) LoadModule(importPath string) (*parse.Program, error) 
 		return nil, err
 	}
 
+	filePath = filepath.Clean(filePath)
+
 	// Check cache first
 	if cachedAST, exists := mr.astCache[filePath]; exists {
 		return cachedAST, nil
 	}
 
-	// Read the module file
-	sourceCode, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read module file %s: %w", filePath, err)
+	var sourceCode []byte
+	if overlay, ok := mr.overlays[filePath]; ok {
+		sourceCode = []byte(overlay)
+	} else {
+		var err error
+		// Read the module file
+		sourceCode, err = os.ReadFile(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read module file %s: %w", filePath, err)
+		}
 	}
 
 	// Parse the module

@@ -121,6 +121,7 @@ func (s *Server) registerHandlers() {
 	s.handlers[protocol.MethodTextDocumentDocumentSymbol] = s.handleDocumentSymbol
 	s.handlers[protocol.MethodTextDocumentCompletion] = s.handleCompletion
 	s.handlers[protocol.MethodTextDocumentFormatting] = s.handleFormatting
+	s.handlers[protocol.MethodTextDocumentCodeAction] = s.handleCodeAction
 	s.handlers[protocol.MethodTextDocumentSignatureHelp] = s.handleSignatureHelp
 	s.handlers[protocol.MethodTextDocumentDocumentHighlight] = s.handleDocumentHighlight
 	s.handlers[protocol.MethodTextDocumentRename] = s.handleRename
@@ -152,7 +153,7 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 			ReferencesProvider:     true,
 			DocumentSymbolProvider: true,
 			CompletionProvider: &protocol.CompletionOptions{
-				TriggerCharacters: []string{".", ":"},
+				TriggerCharacters: []string{".", ":", "/"},
 			},
 			SignatureHelpProvider: &protocol.SignatureHelpOptions{
 				TriggerCharacters:   []string{"(", ",", ":"},
@@ -160,6 +161,7 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 			},
 			DocumentHighlightProvider:  true,
 			DocumentFormattingProvider: true,
+			CodeActionProvider:         true,
 			RenameProvider:             &protocol.RenameOptions{PrepareProvider: true},
 		},
 		ServerInfo: &protocol.ServerInfo{
@@ -374,6 +376,23 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 	}, nil)
 }
 
+func fullDocumentEdit(oldText string, newText string) protocol.TextEdit {
+	lines := strings.Count(oldText, "\n")
+	endChar := 0
+	if lastLineStart := strings.LastIndex(oldText, "\n"); lastLineStart >= 0 {
+		endChar = len(oldText) - lastLineStart - 1
+	} else {
+		endChar = len(oldText)
+	}
+	return protocol.TextEdit{
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 0, Character: 0},
+			End:   protocol.Position{Line: uint32(lines), Character: uint32(endChar)},
+		},
+		NewText: newText,
+	}
+}
+
 func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.DocumentFormattingParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
@@ -391,23 +410,46 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}
 
-	lines := strings.Count(doc.Text, "\n")
-	endChar := 0
-	if lastLineStart := strings.LastIndex(doc.Text, "\n"); lastLineStart >= 0 {
-		endChar = len(doc.Text) - lastLineStart - 1
-	} else {
-		endChar = len(doc.Text)
+	return reply(ctx, []protocol.TextEdit{fullDocumentEdit(doc.Text, string(formatted))}, nil)
+}
+
+func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+	var params protocol.CodeActionParams
+	if err := json.Unmarshal(req.Params(), &params); err != nil {
+		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
 
-	edit := protocol.TextEdit{
-		Range: protocol.Range{
-			Start: protocol.Position{Line: 0, Character: 0},
-			End:   protocol.Position{Line: uint32(lines), Character: uint32(endChar)},
-		},
-		NewText: string(formatted),
+	if len(params.Context.Only) > 0 {
+		allowed := false
+		for _, kind := range params.Context.Only {
+			if kind == protocol.Source || kind == protocol.SourceOrganizeImports {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return reply(ctx, []protocol.CodeAction{}, nil)
+		}
 	}
 
-	return reply(ctx, []protocol.TextEdit{edit}, nil)
+	doc := s.cache.Get(params.TextDocument.URI)
+	if doc == nil {
+		return reply(ctx, []protocol.CodeAction{}, nil)
+	}
+	formatted, err := formatSource(doc.Text, doc.URI.Filename())
+	if err != nil || formatted == doc.Text {
+		return reply(ctx, []protocol.CodeAction{}, nil)
+	}
+
+	action := protocol.CodeAction{
+		Title:       "Remove unused imports",
+		Kind:        protocol.SourceOrganizeImports,
+		IsPreferred: true,
+		Edit: &protocol.WorkspaceEdit{Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+			params.TextDocument.URI: {fullDocumentEdit(doc.Text, string(formatted))},
+		}},
+	}
+	return reply(ctx, []protocol.CodeAction{action}, nil)
 }
 
 func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {

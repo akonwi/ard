@@ -36,8 +36,13 @@ func TestFormat(t *testing.T) {
 		},
 		{
 			name:   "sorts imports into groups",
-			input:  "use github.com/zeta/lib\nuse ard/io\nuse github.com/alpha/lib\n",
-			output: "use ard/io\n\nuse github.com/alpha/lib\nuse github.com/zeta/lib\n",
+			input:  "use github.com/zeta/lib\nuse ard/io\nuse github.com/alpha/lib\nlet _ = io::println(\"hi\")\nlet _ = lib::new()\n",
+			output: "use ard/io\n\nuse github.com/alpha/lib\nuse github.com/zeta/lib\n\nlet _ = io::println(\"hi\")\nlet _ = lib::new()\n",
+		},
+		{
+			name:   "removes unused imports",
+			input:  "use ard/io\nuse app/unused\nuse app/text\n\nlet label = text::new(\"hi\")\n",
+			output: "use app/text\n\nlet label = text::new(\"hi\")\n",
 		},
 		{
 			name:   "wraps long function parameters one per line with trailing comma",
