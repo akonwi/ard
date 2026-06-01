@@ -26,10 +26,11 @@ func (pr ParseResult) PrintErrors() {
 }
 
 type parser struct {
-	tokens   []token
-	index    int
-	fileName string
-	errors   []ParseError
+	tokens                 []token
+	index                  int
+	fileName               string
+	errors                 []ParseError
+	disallowStructInstance bool
 }
 
 func Parse(source []byte, fileName string) ParseResult {
@@ -2465,6 +2466,9 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 }
 
 func (p *parser) structInstance() (Expression, error) {
+	if p.disallowStructInstance {
+		return p.iterRange()
+	}
 	index := p.index
 	static := p.parseStaticPath()
 	if static != nil {
@@ -2826,7 +2830,10 @@ func (p *parser) unary() (Expression, error) {
 	if p.match(minus, not) {
 		opToken := p.previous()
 		if opToken.kind == not {
+			previousDisallowStructInstance := p.disallowStructInstance
+			p.disallowStructInstance = true
 			operand, err := p.parseExpression()
+			p.disallowStructInstance = previousDisallowStructInstance
 			if err != nil {
 				return nil, err
 			}
