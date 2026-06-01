@@ -153,7 +153,7 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 			ReferencesProvider:     true,
 			DocumentSymbolProvider: true,
 			CompletionProvider: &protocol.CompletionOptions{
-				TriggerCharacters: []string{".", ":"},
+				TriggerCharacters: []string{".", ":", "/"},
 			},
 			SignatureHelpProvider: &protocol.SignatureHelpOptions{
 				TriggerCharacters:   []string{"(", ",", ":"},

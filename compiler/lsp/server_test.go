@@ -55,6 +55,7 @@ func TestServerInitializes(t *testing.T) {
 		"textDocument/documentSymbol",
 		"textDocument/completion",
 		"textDocument/formatting",
+		"textDocument/codeAction",
 		"textDocument/signatureHelp",
 		"textDocument/documentHighlight",
 	}
@@ -1277,6 +1278,40 @@ func TestTicTacToeLine42TypingDoesNotHang(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("typing line 42 in tic-tac-toe sample timed out")
+	}
+}
+
+func TestCompletionImportPaths(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "tui", "core"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tui", "core", "text.ard"), []byte("fn new() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tui", "core", "stack.ard"), []byte("fn hstack() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(root, "main.ard")
+
+	rootItems := computeCompletions("use ", filePath, protocol.Position{Line: 0, Character: 4})
+	assertCompletion(t, rootItems, "ard", "")
+	assertCompletion(t, rootItems, "test_project", "")
+
+	moduleItems := computeCompletions("use test_project/tui/core/", filePath, protocol.Position{Line: 0, Character: 26})
+	assertCompletion(t, moduleItems, "stack", "")
+	assertCompletion(t, moduleItems, "text", "")
+
+	prefixedItems := computeCompletions("use test_project/tui/core/st", filePath, protocol.Position{Line: 0, Character: 28})
+	item, ok := completionItemByLabel(prefixedItems, "stack")
+	if !ok || item.TextEdit == nil {
+		t.Fatalf("expected stack completion with text edit, got %#v", prefixedItems)
+	}
+	if item.TextEdit.NewText != "stack" {
+		t.Fatalf("completion edit text = %q, want stack", item.TextEdit.NewText)
 	}
 }
 
