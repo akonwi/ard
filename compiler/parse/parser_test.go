@@ -245,6 +245,27 @@ func TestIfAndElse(t *testing.T) {
 			},
 		},
 		{
+			name: "Not condition with identifier and non-empty body",
+			input: `if not flag {
+				print("hi")
+			}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&IfStatement{
+						Condition: &UnaryExpression{
+							Operator: Not,
+							Operand:  &Identifier{Name: "flag"},
+						},
+						Body: []Statement{
+							&FunctionCall{Name: "print", Args: []Argument{{Value: &StrLiteral{Value: "hi"}}}, Comments: []Comment{}},
+						},
+						Else: nil,
+					},
+				},
+			},
+		},
+		{
 			name: "Valid if-else",
 			input: `
 					if true {}
