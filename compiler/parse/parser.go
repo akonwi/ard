@@ -3332,9 +3332,13 @@ func (p *parser) list() (Expression, error) {
 		p.match(comma)
 		p.match(new_line)
 	}
+	endToken := p.previous()
 	result := &ListLiteral{
-		Items:    items,
-		Location: startToken.getLocation(),
+		Items: items,
+		Location: Location{
+			Start: startToken.getLocation().Start,
+			End:   endToken.getLocation().End,
+		},
 	}
 	if len(comments) > 0 {
 		result.Comments = comments

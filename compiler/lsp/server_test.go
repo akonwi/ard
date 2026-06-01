@@ -804,6 +804,38 @@ fn main() Int {
 }
 
 // TestDefinitionImportedModuleSymbols verifies go-to-definition across imported modules.
+func TestDefinitionNestedStaticFunctionUsesInnerModuleAlias(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "text.ard"), []byte(`fn new(label: Str) Str { label }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "stack.ard"), []byte(`fn hstack(children: [Str]) Str { "" }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `use test_project/stack
+use test_project/text
+
+fn main() {
+  let tabs = stack::hstack([
+    text::new("Inbox"),
+  ])
+}
+`
+	filePath := filepath.Join(root, "main.ard")
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	textPath := filepath.Join(root, "text.ard")
+
+	loc := requireDefinition(t, source, filePath, 5, 5)
+	assertDefinitionStart(t, loc, textPath, 0, 0)
+}
+
 func TestDefinitionImportedModuleSymbols(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {

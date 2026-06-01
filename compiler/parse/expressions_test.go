@@ -33,6 +33,27 @@ func TestListLiterals(t *testing.T) {
 	})
 }
 
+func TestMultilineListLiteralLocationSpansClosingBracket(t *testing.T) {
+	result := Parse([]byte("let items = [\n  one::new(),\n]\n"), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	decl, ok := result.Program.Statements[0].(*VariableDeclaration)
+	if !ok {
+		t.Fatalf("statement = %T, want VariableDeclaration", result.Program.Statements[0])
+	}
+	list, ok := decl.Value.(*ListLiteral)
+	if !ok {
+		t.Fatalf("value = %T, want ListLiteral", decl.Value)
+	}
+	if got, want := list.Location.End.Row, 3; got != want {
+		t.Fatalf("list end row = %d, want %d", got, want)
+	}
+	if got, want := list.Location.End.Col, 0; got != want {
+		t.Fatalf("list end col = %d, want %d", got, want)
+	}
+}
+
 func TestMapLiterals(t *testing.T) {
 	runTests(t, []test{
 		{
