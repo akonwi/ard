@@ -16,6 +16,44 @@ import (
 	"github.com/akonwi/ard/version"
 )
 
+func TestGenerateSourcesTakesAddressOfLocalMutTraitArgs(t *testing.T) {
+	program := lowerSource(t, `
+		struct Counter { value: Int }
+
+		impl Counter {
+			fn mut bump() { self.value = self.value + 1 }
+		}
+
+		trait Bumpable {
+			fn poke(mut c: Counter)
+		}
+
+		struct Doubler {}
+
+		impl Bumpable for Doubler {
+			fn poke(mut c: Counter) {
+				c.bump()
+				c.bump()
+			}
+		}
+
+		fn main() {
+			mut c = Counter{value: 0}
+			let d: Bumpable = Doubler{}
+			d.poke(c)
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "Doubler_Bumpable_poke(typed, &c_0)") {
+		t.Fatalf("generated source missing address-of for local mutable trait dispatch arg:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesPassesMutTraitArgsByPointer(t *testing.T) {
 	program := lowerSource(t, `
 		struct Counter { value: Int }
