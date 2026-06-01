@@ -16,6 +16,82 @@ import (
 	"github.com/akonwi/ard/version"
 )
 
+func TestGenerateSourcesKeepsCrossModuleNestedStructLiteralFields(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"nestlit\"\nard = \">= 0.13.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, "inner"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "inner", "types.ard"), []byte(`
+struct Inner {
+  a: Int,
+  b: Int,
+  c: Int,
+  d: Int,
+}
+
+struct Outer {
+  border: Int,
+  padding: Inner?,
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := parse.Parse([]byte(`
+use ard/io
+use nestlit/inner/types
+
+fn main() {
+  let x = types::Outer{
+    border: 1,
+    padding: types::Inner{a: 0, b: 1, c: 0, d: 1},
+  }
+  io::print("border={x.border}")
+  io::print("after 1")
+  io::print("after 2")
+}
+`), filepath.Join(tempDir, "main.ard"))
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New(filepath.Join(tempDir, "main.ard"), result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := air.Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := ""
+	for _, data := range sources {
+		if strings.Contains(string(data), "x_0 :=") {
+			source = string(data)
+			break
+		}
+	}
+	if source == "" {
+		t.Fatalf("generated sources missing main body: %#v", mapsKeys(sources))
+	}
+	if !strings.Contains(source, "padding:") || !strings.Contains(source, "Some: true") {
+		t.Fatalf("generated source missing cross-module nested optional struct literal field:\n%s", source)
+	}
+	if !strings.Contains(source, `ard_io__print(any("after 2"))`) {
+		t.Fatalf("generated source truncated statements after nested struct literal:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesTakesAddressOfLocalMutTraitArgs(t *testing.T) {
 	program := lowerSource(t, `
 		struct Counter { value: Int }

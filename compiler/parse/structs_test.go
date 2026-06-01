@@ -273,6 +273,11 @@ func TestNestedStructInstantiation(t *testing.T) {
 			wantErrs: []string{},
 		},
 		{
+			name:     "Static nested struct instantiation as field value",
+			input:    `Outer{ padding: types::Inner{ a: 0, b: 1 } }`,
+			wantErrs: []string{},
+		},
+		{
 			name:     "Deeply nested structs",
 			input:    `Box{ item: Container { value: Point { x: 1 } } }`,
 			wantErrs: []string{},

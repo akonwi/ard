@@ -2559,7 +2559,7 @@ func (p *parser) parseStructFields(name *Identifier) (*StructInstance, error) {
 			p.advance() // consume the ':'
 		}
 
-		val, err := p.or()
+		val, err := p.parseExpression()
 		if err != nil {
 			return nil, err
 		}
