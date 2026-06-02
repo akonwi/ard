@@ -1065,6 +1065,37 @@ func TestGoTargetParityAsyncTiming(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityMapClosureCapturesOuterLocal(t *testing.T) {
+	t.Run("maybe map", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			use ard/maybe
+
+			fn main() Int {
+				let offset = 2
+				let result = maybe::some(40).map(fn(value) { value + offset })
+				result.or(0)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
+	})
+
+	t.Run("result map", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			fn main() Int {
+				let multiplier = 2
+				let res: Int!Str = Result::ok(21)
+				let mapped = res.map(fn(value) { value * multiplier })
+				mapped.or(0)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
+	})
+}
+
 func TestGoTargetParityAsyncChannels(t *testing.T) {
 	t.Run("unbuffered channel communicates with fiber", func(t *testing.T) {
 		program := lowerParitySource(t, `
