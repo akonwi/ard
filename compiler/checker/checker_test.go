@@ -96,6 +96,19 @@ func run(t *testing.T, tests []test) {
 	}
 }
 
+func TestGenericImportedTypeRequiresTypeArguments(t *testing.T) {
+	run(t, []test{
+		{
+			name: "generic imported struct without type args is an error",
+			input: `use ard/async/channel
+extern fn events() channel::Channel = "Events"`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Generic type channel::Channel requires type arguments"},
+			},
+		},
+	})
+}
+
 func TestImports(t *testing.T) {
 	run(t, []test{
 		{

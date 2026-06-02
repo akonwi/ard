@@ -831,3 +831,15 @@ func testTypeInfo(t *testing.T, program *Program, id TypeID) TypeInfo {
 	t.Fatalf("type id %d not found", id)
 	return TypeInfo{}
 }
+
+func TestLowerImportedGenericStructReturnTypeWithTypeArg(t *testing.T) {
+	lowerSource(t, `
+use ard/async/channel
+extern type RawEvent = "RawEvent"
+extern fn events() channel::Channel<RawEvent> = "Events"
+fn run() {
+  let ch = events()
+}
+fn main() { run() }
+`)
+}

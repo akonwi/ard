@@ -623,6 +623,9 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			if len(ty.TypeArgs) > 0 {
 				baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
 			} else {
+				if hasGenericsInType(sym.Type) {
+					c.addError(fmt.Sprintf("Generic type %s requires type arguments", t.GetName()), ty.GetLocation())
+				}
 				baseType = sym.Type
 			}
 			break
@@ -636,6 +639,9 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 					if len(ty.TypeArgs) > 0 {
 						baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
 					} else {
+						if hasGenericsInType(sym.Type) {
+							c.addError(fmt.Sprintf("Generic type %s::%s requires type arguments", ty.Type.Target, ty.Type.Property), ty.GetLocation())
+						}
 						baseType = sym.Type
 					}
 					break
