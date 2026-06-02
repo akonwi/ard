@@ -214,6 +214,7 @@ export default defineConfig({
           items: [
             { label: "ard/argv", slug: "stdlib/argv" },
             { label: "ard/async", slug: "stdlib/async" },
+            { label: "ard/async/channel", slug: "stdlib/async-channel" },
             { label: "ard/base64", slug: "stdlib/base64" },
             { label: "ard/chrono", slug: "stdlib/chrono" },
             { label: "ard/crypto", slug: "stdlib/crypto" },

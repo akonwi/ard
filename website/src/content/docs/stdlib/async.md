@@ -13,6 +13,8 @@ The async module provides:
 - **Result retrieval** via `.get()` method on fibers
 - **Compile-time isolation** to prevent data races
 
+For communication between fibers, see [`ard/async/channel`](/stdlib/async-channel/).
+
 ```ard
 use ard/async
 use ard/duration
