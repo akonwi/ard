@@ -4167,6 +4167,14 @@ func (l *lowerer) lowerDirectExternCall(ext air.Extern, bindingExpr func(string,
 		}
 		wrapped.stmts = append(stmts, wrapped.stmts...)
 		return wrapped, nil
+	case air.TypeStruct:
+		if rawField, ok := l.channelStructRawField(returnType); ok {
+			wrapped := &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, returnType)), Elts: []ast.Expr{
+				&ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(returnType, rawField.Name)), Value: call},
+			}}
+			return loweredExpr{stmts: stmts, expr: wrapped}, nil
+		}
+		return loweredExpr{stmts: stmts, expr: call}, nil
 	case air.TypeResult:
 		if validTypeID(l.program, returnType.Value) && l.program.Types[returnType.Value-1].Kind == air.TypeVoid {
 			wrapped, err := l.wrapErrorCall(returnTypeID, call)
@@ -4185,6 +4193,21 @@ func (l *lowerer) lowerDirectExternCall(ext air.Extern, bindingExpr func(string,
 	default:
 		return loweredExpr{stmts: stmts, expr: call}, nil
 	}
+}
+
+func (l *lowerer) channelStructRawField(info air.TypeInfo) (air.FieldInfo, bool) {
+	if info.Kind != air.TypeStruct || info.Name != "Channel" && !strings.HasPrefix(info.Name, "Channel<") {
+		return air.FieldInfo{}, false
+	}
+	for _, field := range info.Fields {
+		if field.Name != "chan" || !validTypeID(l.program, field.Type) {
+			continue
+		}
+		if l.isChannelExternType(l.program.Types[field.Type-1]) {
+			return field, true
+		}
+	}
+	return air.FieldInfo{}, false
 }
 
 func (l *lowerer) dependencyFFIBindingExpr(alias string, binding string) (ast.Expr, error) {

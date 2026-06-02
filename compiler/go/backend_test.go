@@ -698,6 +698,65 @@ func BufferLen(buffer *bytes.Buffer) int {
 	}
 }
 
+func TestBuildProgramWrapsProjectFFIRawChannelReturn(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/async/channel
+use ard/io
+
+extern type RawEvent = "Event"
+extern fn events() channel::Channel<RawEvent> = "Events"
+extern fn event_value(e: RawEvent) Int = "EventValue"
+
+fn main() {
+	let ch = events()
+	let raw = ch.recv().expect("event")
+	io::print(event_value(raw))
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+type Event struct{ Value int }
+
+func Events() chan Event {
+	ch := make(chan Event, 1)
+	ch <- Event{Value: 42}
+	close(ch)
+	return ch
+}
+
+func EventValue(e Event) int { return e.Value }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	binaryPath := filepath.Join(dir, "app")
+	builtPath, err := BuildProgram(program, binaryPath, loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	out, err := exec.Command(builtPath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run built binary: %v\n%s", err, out)
+	}
+	if got := string(out); got != "42\n" {
+		t.Fatalf("stdout = %q, want 42\\n", got)
+	}
+}
+
 func TestBuildProgramSupportsProjectGoFFIWithNativeChannel(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
