@@ -1096,6 +1096,73 @@ func TestGoTargetParityMapClosureCapturesOuterLocal(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
+	t.Run("returned closure captures two outer scopes", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			fn make_nested(a: Int) fn(Int) fn(Int) Int {
+				fn(b: Int) fn(Int) Int {
+					fn(c: Int) Int {
+						a + b + c
+					}
+				}
+			}
+
+			fn main() Int {
+				let add = make_nested(10)
+				let add_more = add(20)
+				add_more(12)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
+	})
+
+	t.Run("callback captures variable from returned closure", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			use ard/maybe
+
+			fn make_mapper(offset: Int) fn(Int) Int {
+				let bonus = 1
+				fn(value: Int) Int {
+					maybe::some(value).map(fn(inner) { inner + offset + bonus }).or(0)
+				}
+			}
+
+			fn main() Int {
+				let mapper = make_mapper(10)
+				mapper(31)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
+	})
+
+	t.Run("nested callback captures local and parent closure variables", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			use ard/maybe
+
+			fn make_calc(base: Int) fn(Int) Int {
+				fn(seed: Int) Int {
+					let local = 2
+					maybe::some(seed).map(fn(value) {
+						value + base + local
+					}).or(0)
+				}
+			}
+
+			fn main() Int {
+				let calc = make_calc(10)
+				calc(30)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
+	})
+}
+
 func TestGoTargetParityAsyncChannels(t *testing.T) {
 	t.Run("unbuffered channel communicates with fiber", func(t *testing.T) {
 		program := lowerParitySource(t, `
