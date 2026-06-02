@@ -1163,6 +1163,31 @@ func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityMethodClosureCapturesSelf(t *testing.T) {
+	program := lowerParitySource(t, `
+		struct Counter {
+			base: Int,
+		}
+
+		impl Counter {
+			fn make_adder() fn(Int) Int {
+				fn(value: Int) Int {
+					self.base + value
+				}
+			}
+		}
+
+		fn main() Int {
+			let counter = Counter{base: 32}
+			let add = counter.make_adder()
+			add(10)
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "42" {
+		t.Fatalf("got %s, want 42", got)
+	}
+}
+
 func TestGoTargetParityAsyncChannels(t *testing.T) {
 	t.Run("unbuffered channel communicates with fiber", func(t *testing.T) {
 		program := lowerParitySource(t, `
