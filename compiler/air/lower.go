@@ -4022,36 +4022,41 @@ func (fl *functionLowerer) resolveLocal(name string) (LocalID, bool, error) {
 	if fl.parent == nil {
 		return 0, false, nil
 	}
-	local, _, ok, err := fl.captureLocal(name)
+	local, _, _, ok, err := fl.captureLocal(name)
 	return local, ok, err
 }
 
 func (fl *functionLowerer) ensureLocalForNestedCapture(name string) (LocalID, TypeID, bool, error) {
+	local, typeID, _, ok, err := fl.ensureLocalForNestedCaptureWithMutability(name)
+	return local, typeID, ok, err
+}
+
+func (fl *functionLowerer) ensureLocalForNestedCaptureWithMutability(name string) (LocalID, TypeID, bool, bool, error) {
 	if local, ok := fl.locals[name]; ok {
-		return local, fl.fn.Locals[local].Type, true, nil
+		return local, fl.fn.Locals[local].Type, fl.fn.Locals[local].Mutable, true, nil
 	}
 	if fl.parent == nil {
-		return 0, NoType, false, nil
+		return 0, NoType, false, false, nil
 	}
 	return fl.captureLocal(name)
 }
 
-func (fl *functionLowerer) captureLocal(name string) (LocalID, TypeID, bool, error) {
+func (fl *functionLowerer) captureLocal(name string) (LocalID, TypeID, bool, bool, error) {
 	if fl.captureByName == nil {
 		fl.captureByName = map[string]LocalID{}
 	}
 	if local, ok := fl.captureByName[name]; ok {
-		return local, fl.fn.Locals[local].Type, true, nil
+		return local, fl.fn.Locals[local].Type, fl.fn.Locals[local].Mutable, true, nil
 	}
-	sourceLocal, typeID, ok, err := fl.parent.ensureLocalForNestedCapture(name)
+	sourceLocal, typeID, mutable, ok, err := fl.parent.ensureLocalForNestedCaptureWithMutability(name)
 	if err != nil || !ok {
-		return 0, NoType, ok, err
+		return 0, NoType, false, ok, err
 	}
-	local := fl.defineLocal(name, typeID, false)
+	local := fl.defineLocal(name, typeID, mutable)
 	fl.captureByName[name] = local
 	fl.captureLocals = append(fl.captureLocals, sourceLocal)
 	fl.fn.Captures = append(fl.fn.Captures, Capture{Name: name, Type: typeID, Local: local})
-	return local, typeID, true, nil
+	return local, typeID, mutable, true, nil
 }
 
 func (fl *functionLowerer) localKind(local LocalID) TypeKind {

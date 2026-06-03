@@ -549,7 +549,11 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 	l.declaredLocals = map[air.LocalID]bool{}
 	params := []*ast.Field{}
 	for _, capture := range fn.Captures {
-		captureType, err := l.goType(capture.Type)
+		captureParam := air.Param{Name: capture.Name, Type: capture.Type}
+		if int(capture.Local) >= 0 && int(capture.Local) < len(fn.Locals) {
+			captureParam.Mutable = fn.Locals[capture.Local].Mutable
+		}
+		captureType, err := l.goParamType(captureParam)
 		if err != nil {
 			return nil, err
 		}
@@ -3182,8 +3186,17 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	funcType, _ := closureType.(*ast.FuncType)
 	callArgs := make([]ast.Expr, 0, len(expr.CaptureLocals)+len(closureFn.Signature.Params))
 	stmts := []ast.Stmt{}
-	for _, local := range expr.CaptureLocals {
-		callArgs = append(callArgs, ast.NewIdent(localName(fn, local)))
+	for i, local := range expr.CaptureLocals {
+		argExpr := ast.Expr(ast.NewIdent(localName(fn, local)))
+		if i < len(closureFn.Captures) {
+			capture := closureFn.Captures[i]
+			captureParam := air.Param{Name: capture.Name, Type: capture.Type}
+			if int(capture.Local) >= 0 && int(capture.Local) < len(closureFn.Locals) {
+				captureParam.Mutable = closureFn.Locals[capture.Local].Mutable
+			}
+			argExpr = l.adaptCallArg(fn, air.Expr{Kind: air.ExprLoadLocal, Type: capture.Type, Local: local}, argExpr, captureParam)
+		}
+		callArgs = append(callArgs, argExpr)
 	}
 	params := []*ast.Field{}
 	for i, param := range closureFn.Signature.Params {

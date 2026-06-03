@@ -1163,6 +1163,34 @@ func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityMutMethodClosureCapturesSelf(t *testing.T) {
+	program := lowerParitySource(t, `
+		use ard/io
+
+		struct Box {
+			value: Int,
+		}
+
+		impl Box {
+			fn mut bump_with_closure() {
+				let bump = fn() {
+					self.value = self.value + 1
+				}
+				bump()
+			}
+		}
+
+		fn main() Int {
+			mut box = Box{value: 0}
+			box.bump_with_closure()
+			box.value
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "1" {
+		t.Fatalf("got %s, want 1", got)
+	}
+}
+
 func TestGoTargetParityMethodClosureCapturesSelf(t *testing.T) {
 	program := lowerParitySource(t, `
 		struct Counter {
