@@ -6,6 +6,130 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+func TestMatchAllowsConcreteTraitImplementationBranch(t *testing.T) {
+	traitFixture := `trait View {
+  fn render()
+}
+
+struct Screen {}
+
+impl View for Screen {
+  fn render() {}
+}
+
+fn make_view() View {
+  Screen{}
+}
+`
+	run(t, []test{
+		{
+			name: "bool match can return trait and implementing struct",
+			input: traitFixture + `
+fn main(flag: Bool) View {
+  match flag {
+    true => make_view(),
+    false => Screen{},
+  }
+}`,
+		},
+		{
+			name: "maybe match can return trait and implementing struct",
+			input: traitFixture + `
+fn main(flag: Bool?) View {
+  match flag {
+    value => make_view(),
+    _ => Screen{},
+  }
+}`,
+		},
+		{
+			name: "string match can return trait and implementing struct",
+			input: traitFixture + `
+fn main(name: Str) View {
+  match name {
+    "home" => Screen{},
+    _ => make_view(),
+  }
+}`,
+		},
+		{
+			name: "enum match can return trait and implementing struct",
+			input: traitFixture + `
+enum Route {
+  home
+  other
+}
+
+fn main(route: Route) View {
+  match route {
+    Route::home => Screen{},
+    Route::other => make_view(),
+  }
+}`,
+		},
+		{
+			name: "result match can return trait and implementing struct",
+			input: traitFixture + `
+fn main(res: Screen!Str) View {
+  match res {
+    ok(screen) => screen,
+    err(_message) => make_view(),
+  }
+}`,
+		},
+		{
+			name: "int match can return trait and implementing struct",
+			input: traitFixture + `
+fn main(n: Int) View {
+  match n {
+    1 => Screen{},
+    _ => make_view(),
+  }
+}`,
+		},
+		{
+			name: "conditional match can return trait and implementing struct",
+			input: traitFixture + `
+fn main(flag: Bool) View {
+  match {
+    flag => Screen{},
+    _ => make_view(),
+  }
+}`,
+		},
+		{
+			name: "union match can return trait and implementing struct",
+			input: traitFixture + `
+type ScreenOrInt = Screen | Int
+
+fn main(value: ScreenOrInt) View {
+  match value {
+    Screen(screen) => screen,
+    _ => make_view(),
+  }
+}`,
+		},
+		{
+			name: "conditional match uses expected result union type for result constructors",
+			input: traitFixture + `
+struct OtherScreen {}
+
+impl View for OtherScreen {
+  fn render() {}
+}
+
+type AnyScreen = Screen | OtherScreen
+
+fn main(flag: Bool) AnyScreen!Str {
+  match {
+    flag => Result::ok(Screen{}),
+    _ => Result::ok(OtherScreen{}),
+  }
+}`,
+		},
+	})
+}
+
 func TestTraitDefinitions(t *testing.T) {
 	run(t, []test{
 		{

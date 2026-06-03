@@ -14,6 +14,25 @@ func areCompatible(expected Type, actual Type) bool {
 	return expected.equal(actual)
 }
 
+func commonResultType(a Type, b Type) (Type, bool) {
+	if a == nil || b == nil {
+		return nil, false
+	}
+	if a.equal(b) {
+		return a, true
+	}
+	if a == Void || b == Void {
+		return Void, true
+	}
+	if areCompatible(a, b) {
+		return a, true
+	}
+	if areCompatible(b, a) {
+		return b, true
+	}
+	return nil, false
+}
+
 func HasTrait(t Type, trait *Trait) bool {
 	if t == nil || trait == nil {
 		return false
