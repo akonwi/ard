@@ -617,13 +617,17 @@ type Match struct {
 }
 
 type OptionMatch struct {
-	Subject   Expression
-	Some      *Match
-	None      *Block
-	InnerType Type // Pre-computed inner type of Maybe
+	Subject    Expression
+	Some       *Match
+	None       *Block
+	InnerType  Type // Pre-computed inner type of Maybe
+	ResultType Type
 }
 
 func (o *OptionMatch) Type() Type {
+	if o.ResultType != nil {
+		return o.ResultType
+	}
 	return o.Some.Body.Type()
 }
 
@@ -632,9 +636,13 @@ type EnumMatch struct {
 	Cases               []*Block
 	CatchAll            *Block
 	DiscriminantToIndex map[int]int8 // Pre-computed discriminant lookup
+	ResultType          Type
 }
 
 func (e *EnumMatch) Type() Type {
+	if e.ResultType != nil {
+		return e.ResultType
+	}
 	// Find the first non-nil case
 	for _, c := range e.Cases {
 		if c != nil {
@@ -649,12 +657,16 @@ func (e *EnumMatch) Type() Type {
 }
 
 type BoolMatch struct {
-	Subject Expression
-	True    *Block
-	False   *Block
+	Subject    Expression
+	True       *Block
+	False      *Block
+	ResultType Type
 }
 
 func (b *BoolMatch) Type() Type {
+	if b.ResultType != nil {
+		return b.ResultType
+	}
 	return b.True.Type()
 }
 
@@ -668,15 +680,20 @@ type IntMatch struct {
 	IntCases   map[int]*Block      // keys are integer values
 	RangeCases map[IntRange]*Block // keys are integer ranges
 	CatchAll   *Block
+	ResultType Type
 }
 
 type StrMatch struct {
-	Subject  Expression
-	Cases    map[string]*Block
-	CatchAll *Block
+	Subject    Expression
+	Cases      map[string]*Block
+	CatchAll   *Block
+	ResultType Type
 }
 
 func (s *StrMatch) Type() Type {
+	if s.ResultType != nil {
+		return s.ResultType
+	}
 	for _, block := range s.Cases {
 		if block != nil {
 			return block.Type()
@@ -689,6 +706,9 @@ func (s *StrMatch) Type() Type {
 }
 
 func (i *IntMatch) Type() Type {
+	if i.ResultType != nil {
+		return i.ResultType
+	}
 	// Find the first non-nil case and return its type
 	for _, block := range i.IntCases {
 		if block != nil {
@@ -715,9 +735,13 @@ type UnionMatch struct {
 	TypeCases       map[string]*Match
 	TypeCasesByType map[Type]*Match // Pre-computed type lookup
 	CatchAll        *Block
+	ResultType      Type
 }
 
 func (u *UnionMatch) Type() Type {
+	if u.ResultType != nil {
+		return u.ResultType
+	}
 	// Find the first non-nil case and return its type
 	for _, block := range u.TypeCases {
 		if block != nil {
@@ -734,11 +758,15 @@ func (u *UnionMatch) Type() Type {
 }
 
 type ConditionalMatch struct {
-	Cases    []ConditionalCase
-	CatchAll *Block
+	Cases      []ConditionalCase
+	CatchAll   *Block
+	ResultType Type
 }
 
 func (c *ConditionalMatch) Type() Type {
+	if c.ResultType != nil {
+		return c.ResultType
+	}
 	if len(c.Cases) > 0 {
 		return c.Cases[0].Body.Type()
 	}
@@ -1418,14 +1446,18 @@ func (s StructInstance) Type() Type {
 }
 
 type ResultMatch struct {
-	Subject Expression
-	Ok      *Match
-	Err     *Match
-	OkType  Type // Pre-computed ok type
-	ErrType Type // Pre-computed err type
+	Subject    Expression
+	Ok         *Match
+	Err        *Match
+	OkType     Type // Pre-computed ok type
+	ErrType    Type // Pre-computed err type
+	ResultType Type
 }
 
 func (r ResultMatch) Type() Type {
+	if r.ResultType != nil {
+		return r.ResultType
+	}
 	return r.Ok.Body.Type()
 }
 

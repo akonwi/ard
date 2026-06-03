@@ -19,7 +19,9 @@ type test struct {
 
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
-	cmpopts.IgnoreFields(checker.EnumMatch{}, "DiscriminantToIndex"),
+	cmpopts.IgnoreFields(checker.BoolMatch{}, "ResultType"),
+	cmpopts.IgnoreFields(checker.OptionMatch{}, "ResultType"),
+	cmpopts.IgnoreFields(checker.EnumMatch{}, "DiscriminantToIndex", "ResultType"),
 	cmpopts.IgnoreFields(checker.EnumVariant{}, "EnumType", "Discriminant"),
 	cmpopts.IgnoreFields(checker.ListLiteral{}, "ListType"),
 	cmpopts.IgnoreFields(checker.InstanceMethod{}, "ReceiverKind", "StructType", "EnumType", "TraitType"),
@@ -30,11 +32,14 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(checker.FunctionCall{}, "ExternalBinding"),
 	cmpopts.IgnoreFields(checker.MaybeMethod{}, "ReturnType"),
 	cmpopts.IgnoreFields(checker.ResultMethod{}, "ReturnType"),
-	cmpopts.IgnoreFields(checker.ResultMatch{}, "OkType", "ErrType"),
+	cmpopts.IgnoreFields(checker.ResultMatch{}, "OkType", "ErrType", "ResultType"),
 	cmpopts.IgnoreFields(checker.TryOp{}, "OkType", "ErrType"),
 	cmpopts.IgnoreFields(checker.StructInstance{}, "StructType"),
 	cmpopts.IgnoreFields(checker.TryOp{}, "OkType"),
-	cmpopts.IgnoreFields(checker.UnionMatch{}, "TypeCasesByType"),
+	cmpopts.IgnoreFields(checker.IntMatch{}, "ResultType"),
+	cmpopts.IgnoreFields(checker.StrMatch{}, "ResultType"),
+	cmpopts.IgnoreFields(checker.UnionMatch{}, "TypeCasesByType", "ResultType"),
+	cmpopts.IgnoreFields(checker.ConditionalMatch{}, "ResultType"),
 	cmpopts.IgnoreUnexported(
 		checker.TypeVar{},
 		checker.BoolMethod{},
