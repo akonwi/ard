@@ -243,7 +243,7 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 }
 
 func TestGoTargetParityLoops(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
+	runGoParityCases(t, []goParityCase{
 		{
 			name: "basic for loop",
 			input: `
@@ -347,7 +347,7 @@ func TestGoTargetParityLoops(t *testing.T) {
 }
 
 func TestGoTargetParityNullableArguments(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
+	runGoParityCases(t, []goParityCase{
 		{
 			name: "omitting nullable parameters",
 			input: `
@@ -481,7 +481,7 @@ func TestGoTargetParityAnonymousFunctionInference(t *testing.T) {
 }
 
 func TestGoTargetParityNullableStructFields(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
+	runGoParityCases(t, []goParityCase{
 		{
 			name: "implicit wrapping of non nullable value for nullable struct field",
 			input: `
@@ -573,7 +573,7 @@ func TestGoTargetParityNullableStructFields(t *testing.T) {
 }
 
 func TestGoTargetParityTryOnMaybe(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
+	runGoParityCases(t, []goParityCase{
 		{
 			name: "try on maybe some returns unwrapped value",
 			input: `
@@ -647,7 +647,7 @@ func TestGoTargetParityTryOnMaybe(t *testing.T) {
 }
 
 func TestGoTargetParityTry(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
+	runGoParityCases(t, []goParityCase{
 		{
 			name: "try early return with catch block",
 			input: `
@@ -1869,7 +1869,7 @@ fn main() Str { encode::json(true).expect("encode failed") }`},
 }
 
 func TestGoTargetParityStringHelpers(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
+	runGoParityCases(t, []goParityCase{
 		{name: "int to str", input: `fn main() Str { 100.to_str() }`},
 		{name: "bool to str", input: `fn main() Str { true.to_str() }`},
 		{name: "str replace all", input: `fn main() Str { "hello world hello world".replace_all("world", "universe") }`},
@@ -1887,7 +1887,7 @@ func TestGoTargetParityStringHelpers(t *testing.T) {
 }
 
 func TestGoTargetParityStringMatching(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
+	runGoParityCases(t, []goParityCase{
 		{name: "str match first case", input: `fn main() Str {
   match "md" {
     "md" => "markdown",
@@ -1913,7 +1913,7 @@ func TestGoTargetParityStringMatching(t *testing.T) {
 }
 
 func TestGoTargetParityMatching(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
+	runGoParityCases(t, []goParityCase{
 		{
 			name: "matching on booleans",
 			input: `
@@ -2045,7 +2045,7 @@ func TestGoTargetParityMatching(t *testing.T) {
 }
 
 func TestGoTargetParityCollectionsMutation(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
+	runGoParityCases(t, []goParityCase{
 		{
 			name: "list prepend grows list",
 			input: `
@@ -2333,28 +2333,6 @@ func runGoParityCases(t *testing.T, cases []goParityCase) {
 func runGoParityCasesSerial(t *testing.T, cases []goParityCase) {
 	t.Helper()
 	runGoParityCasesWithParallel(t, cases, false)
-}
-
-func runGoParityCodegenCases(t *testing.T, cases []goParityCase) {
-	t.Helper()
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			program := lowerParitySource(t, tc.input)
-			sources, err := GenerateSources(program, Options{PackageName: "main"})
-			if err != nil {
-				t.Fatalf("generate sources: %v", err)
-			}
-			if len(sources) == 0 {
-				t.Fatalf("generate sources returned no files")
-			}
-			for name, source := range sources {
-				if _, err := parser.ParseFile(token.NewFileSet(), name, source, parser.AllErrors); err != nil {
-					t.Fatalf("generated source %s is not valid Go syntax: %v\n%s", name, err, source)
-				}
-			}
-		})
-	}
 }
 
 func runGoParityCasesWithParallel(t *testing.T, cases []goParityCase, parallel bool) {
