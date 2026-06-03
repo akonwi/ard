@@ -1163,6 +1163,36 @@ func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
+	program := lowerParitySource(t, `
+		trait Initializer {
+			fn init()
+		}
+
+		struct Box {
+			value: Int,
+		}
+
+		impl Initializer for Box {
+			fn mut init() {
+				let bump = fn() {
+					self.value = self.value + 1
+				}
+				bump()
+			}
+		}
+
+		fn main() Int {
+			mut box = Box{value: 0}
+			box.init()
+			box.value
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "1" {
+		t.Fatalf("got %s, want 1", got)
+	}
+}
+
 func TestGoTargetParityMutMethodClosureCapturesSelf(t *testing.T) {
 	program := lowerParitySource(t, `
 		use ard/io

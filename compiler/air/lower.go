@@ -3763,6 +3763,14 @@ func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef)
 		return nil, err
 	}
 	fn := fl.l.program.Functions[id]
+	// Closure function declarations are keyed by their concrete signature and can be
+	// encountered more than once while lowering methods/trait impls. Re-lowering
+	// must start from declaration-only state; otherwise captures discovered during
+	// the previous pass accumulate on the function while the new closure value only
+	// carries captures from the current pass.
+	fn.Captures = nil
+	fn.Locals = nil
+	fn.Body = Block{}
 	child := fl.l.newFunctionLowerer(&fn, def, fl)
 	child.captureByName = map[string]LocalID{}
 	for _, param := range fn.Signature.Params {
