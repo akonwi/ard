@@ -1371,7 +1371,7 @@ func TestGoTargetParityFS(t *testing.T) {
 	file := filepath.Join(dir, "sample.txt")
 	copyFile := filepath.Join(dir, "copy.txt")
 	renamedFile := filepath.Join(dir, "renamed.txt")
-	runGoParityCases(t, []goParityCase{
+	runGoParityCasesSerial(t, []goParityCase{
 		{
 			name: "fs create dir exists and is dir",
 			input: fmt.Sprintf(`
@@ -1528,7 +1528,7 @@ func TestGoTargetParityHTTP(t *testing.T) {
 
 func TestGoTargetParitySQL(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "query.db")
-	runGoParityCases(t, []goParityCase{
+	runGoParityCasesSerial(t, []goParityCase{
 		{
 			name: "sql extract params in query order",
 			input: `
@@ -2327,8 +2327,21 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 
 func runGoParityCases(t *testing.T, cases []goParityCase) {
 	t.Helper()
+	runGoParityCasesWithParallel(t, cases, true)
+}
+
+func runGoParityCasesSerial(t *testing.T, cases []goParityCase) {
+	t.Helper()
+	runGoParityCasesWithParallel(t, cases, false)
+}
+
+func runGoParityCasesWithParallel(t *testing.T, cases []goParityCase, parallel bool) {
+	t.Helper()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if parallel {
+				t.Parallel()
+			}
 			program := lowerParitySource(t, tc.input)
 			gotGo := runGoTargetParityJSON(t, program)
 			if gotGo == "" {
