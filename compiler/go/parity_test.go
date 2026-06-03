@@ -29,7 +29,7 @@ type goParityCase struct {
 }
 
 func TestGoTargetParityCoreCorpus(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
+	runGoParityCases(t, []goParityCase{
 		{
 			name: "reassigning variables",
 			input: `
@@ -849,7 +849,7 @@ func TestGoTargetParityCryptoHashes(t *testing.T) {
 }
 
 func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
+	runGoParityCases(t, []goParityCase{
 		{
 			name: "enum to int comparison",
 			input: `
@@ -961,7 +961,8 @@ func TestGoTargetParityConcurrentMethodAccess(t *testing.T) {
 					}
 				`
 			}
-			runGoParityCodegenSource(t, input)
+			program := lowerParitySource(t, input)
+			_ = runGoTargetParityJSON(t, program)
 			errCh <- nil
 		}(i)
 	}
@@ -987,13 +988,17 @@ func TestGoTargetParityConcurrentModuleAccess(t *testing.T) {
 					errCh <- fmt.Errorf("panic: %v", r)
 				}
 			}()
-			runGoParityCodegenSource(t, `
+			program := lowerParitySource(t, `
 				use ard/decode
 				fn main() Int {
 					let d = decode::from_json("[1,2,3]").expect("")
 					decode::run(d, decode::list(decode::int)).expect("").size()
 				}
 			`)
+			if got := runGoTargetParityJSON(t, program); got != "3" {
+				errCh <- fmt.Errorf("got %s, want 3", got)
+				return
+			}
 			errCh <- nil
 		}()
 	}
@@ -1061,96 +1066,105 @@ func TestGoTargetParityAsyncTiming(t *testing.T) {
 }
 
 func TestGoTargetParityMapClosureCapturesOuterLocal(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
-		{
-			name: "maybe map",
-			input: `
-				use ard/maybe
+	t.Run("maybe map", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			use ard/maybe
 
-				fn main() Int {
-					let offset = 2
-					let result = maybe::some(40).map(fn(value) { value + offset })
-					result.or(0)
-				}
-			`,
-		},
-		{
-			name: "result map",
-			input: `
-				fn main() Int {
-					let multiplier = 2
-					let res: Int!Str = Result::ok(21)
-					let mapped = res.map(fn(value) { value * multiplier })
-					mapped.or(0)
-				}
-			`,
-		},
+			fn main() Int {
+				let offset = 2
+				let result = maybe::some(40).map(fn(value) { value + offset })
+				result.or(0)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
+	})
+
+	t.Run("result map", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			fn main() Int {
+				let multiplier = 2
+				let res: Int!Str = Result::ok(21)
+				let mapped = res.map(fn(value) { value * multiplier })
+				mapped.or(0)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
 	})
 }
 
 func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
-		{
-			name: "returned closure captures two outer scopes",
-			input: `
-				fn make_nested(a: Int) fn(Int) fn(Int) Int {
-					fn(b: Int) fn(Int) Int {
-						fn(c: Int) Int {
-							a + b + c
-						}
+	t.Run("returned closure captures two outer scopes", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			fn make_nested(a: Int) fn(Int) fn(Int) Int {
+				fn(b: Int) fn(Int) Int {
+					fn(c: Int) Int {
+						a + b + c
 					}
 				}
+			}
 
-				fn main() Int {
-					let add = make_nested(10)
-					let add_more = add(20)
-					add_more(12)
-				}
-			`,
-		},
-		{
-			name: "callback captures variable from returned closure",
-			input: `
-				use ard/maybe
+			fn main() Int {
+				let add = make_nested(10)
+				let add_more = add(20)
+				add_more(12)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
+	})
 
-				fn make_mapper(offset: Int) fn(Int) Int {
-					let bonus = 1
-					fn(value: Int) Int {
-						maybe::some(value).map(fn(inner) { inner + offset + bonus }).or(0)
-					}
-				}
+	t.Run("callback captures variable from returned closure", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			use ard/maybe
 
-				fn main() Int {
-					let mapper = make_mapper(10)
-					mapper(31)
+			fn make_mapper(offset: Int) fn(Int) Int {
+				let bonus = 1
+				fn(value: Int) Int {
+					maybe::some(value).map(fn(inner) { inner + offset + bonus }).or(0)
 				}
-			`,
-		},
-		{
-			name: "nested callback captures local and parent closure variables",
-			input: `
-				use ard/maybe
+			}
 
-				fn make_calc(base: Int) fn(Int) Int {
-					fn(seed: Int) Int {
-						let local = 2
-						maybe::some(seed).map(fn(value) {
-							value + base + local
-						}).or(0)
-					}
-				}
+			fn main() Int {
+				let mapper = make_mapper(10)
+				mapper(31)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
+	})
 
-				fn main() Int {
-					let calc = make_calc(10)
-					calc(30)
+	t.Run("nested callback captures local and parent closure variables", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			use ard/maybe
+
+			fn make_calc(base: Int) fn(Int) Int {
+				fn(seed: Int) Int {
+					let local = 2
+					maybe::some(seed).map(fn(value) {
+						value + base + local
+					}).or(0)
 				}
-			`,
-		},
+			}
+
+			fn main() Int {
+				let calc = make_calc(10)
+				calc(30)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
 	})
 }
 
 func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
-	runGoParityCodegenSource(t, `
+	program := lowerParitySource(t, `
 		trait Initializer {
 			fn init()
 		}
@@ -1174,10 +1188,13 @@ func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
 			box.value
 		}
 	`)
+	if got := runGoTargetParityJSON(t, program); got != "1" {
+		t.Fatalf("got %s, want 1", got)
+	}
 }
 
 func TestGoTargetParityMutMethodClosureCapturesSelf(t *testing.T) {
-	runGoParityCodegenSource(t, `
+	program := lowerParitySource(t, `
 		use ard/io
 
 		struct Box {
@@ -1199,10 +1216,13 @@ func TestGoTargetParityMutMethodClosureCapturesSelf(t *testing.T) {
 			box.value
 		}
 	`)
+	if got := runGoTargetParityJSON(t, program); got != "1" {
+		t.Fatalf("got %s, want 1", got)
+	}
 }
 
 func TestGoTargetParityMethodClosureCapturesSelf(t *testing.T) {
-	runGoParityCodegenSource(t, `
+	program := lowerParitySource(t, `
 		struct Counter {
 			base: Int,
 		}
@@ -1221,6 +1241,9 @@ func TestGoTargetParityMethodClosureCapturesSelf(t *testing.T) {
 			add(10)
 		}
 	`)
+	if got := runGoTargetParityJSON(t, program); got != "42" {
+		t.Fatalf("got %s, want 42", got)
+	}
 }
 
 func TestGoTargetParityAsyncChannels(t *testing.T) {
@@ -1644,7 +1667,7 @@ func TestGoTargetParityEnvGet(t *testing.T) {
 }
 
 func TestGoTargetParityDecodeHostFlows(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
+	runGoParityCases(t, []goParityCase{
 		{
 			name: "dynamic list decodes back to list",
 			input: `
@@ -2114,7 +2137,7 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 }
 
 func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
-	runGoParityCodegenCases(t, []goParityCase{
+	runGoParityCases(t, []goParityCase{
 		{
 			name: "maybe or fallback",
 			input: `
@@ -2317,25 +2340,20 @@ func runGoParityCodegenCases(t *testing.T, cases []goParityCase) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			runGoParityCodegenSource(t, tc.input)
+			program := lowerParitySource(t, tc.input)
+			sources, err := GenerateSources(program, Options{PackageName: "main"})
+			if err != nil {
+				t.Fatalf("generate sources: %v", err)
+			}
+			if len(sources) == 0 {
+				t.Fatalf("generate sources returned no files")
+			}
+			for name, source := range sources {
+				if _, err := parser.ParseFile(token.NewFileSet(), name, source, parser.AllErrors); err != nil {
+					t.Fatalf("generated source %s is not valid Go syntax: %v\n%s", name, err, source)
+				}
+			}
 		})
-	}
-}
-
-func runGoParityCodegenSource(t *testing.T, input string) {
-	t.Helper()
-	program := lowerParitySource(t, input)
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("generate sources: %v", err)
-	}
-	if len(sources) == 0 {
-		t.Fatalf("generate sources returned no files")
-	}
-	for name, source := range sources {
-		if _, err := parser.ParseFile(token.NewFileSet(), name, source, parser.AllErrors); err != nil {
-			t.Fatalf("generated source %s is not valid Go syntax: %v\n%s", name, err, source)
-		}
 	}
 }
 
