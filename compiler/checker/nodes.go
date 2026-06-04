@@ -1040,47 +1040,7 @@ func (e *ExternalFunctionDef) Type() Type {
 }
 
 func (e ExternalFunctionDef) equal(other Type) bool {
-	// Check if it's another ExternalFunctionDef
-	if otherE, ok := other.(*ExternalFunctionDef); ok {
-		if len(e.Parameters) != len(otherE.Parameters) {
-			return false
-		}
-
-		for i := range e.Parameters {
-			if !e.Parameters[i].Type.equal(otherE.Parameters[i].Type) {
-				return false
-			}
-		}
-		if !e.ReturnType.equal(otherE.ReturnType) || e.ExternalBinding != otherE.ExternalBinding {
-			return false
-		}
-		if len(e.ExternalBindings) != len(otherE.ExternalBindings) {
-			return false
-		}
-		for key, value := range e.ExternalBindings {
-			if otherE.ExternalBindings[key] != value {
-				return false
-			}
-		}
-		return true
-	}
-
-	// Also check if it's compatible with a regular FunctionDef (type-wise)
-	if otherF, ok := other.(*FunctionDef); ok {
-		if len(e.Parameters) != len(otherF.Parameters) {
-			return false
-		}
-
-		for i := range e.Parameters {
-			if !e.Parameters[i].Type.equal(otherF.Parameters[i].Type) {
-				return false
-			}
-		}
-
-		return e.ReturnType.equal(otherF.ReturnType)
-	}
-
-	return false
+	return equalTypes(e, other)
 }
 
 func (e ExternalFunctionDef) hasTrait(trait *Trait) bool {
@@ -1105,35 +1065,7 @@ func (f *FunctionDef) Type() Type {
 }
 
 func (f FunctionDef) equal(other Type) bool {
-	if otherF, ok := other.(*ExternalFunctionDef); ok {
-		if len(f.Parameters) != len(otherF.Parameters) {
-			return false
-		}
-
-		for i := range f.Parameters {
-			if !f.Parameters[i].Type.equal(otherF.Parameters[i].Type) {
-				return false
-			}
-		}
-		return true
-	}
-
-	otherF, ok := other.(*FunctionDef)
-	if !ok {
-		return false
-	}
-
-	if len(f.Parameters) != len(otherF.Parameters) {
-		return false
-	}
-
-	for i := range f.Parameters {
-		if !f.Parameters[i].Type.equal(otherF.Parameters[i].Type) {
-			return false
-		}
-	}
-
-	return f.Mutates == otherF.Mutates && f.ReturnType.equal(otherF.ReturnType)
+	return equalTypes(f, other)
 }
 
 func (f FunctionDef) hasTrait(trait *Trait) bool {
@@ -1317,29 +1249,7 @@ func (u Union) Type() Type {
 	return u
 }
 func (u Union) equal(other Type) bool {
-	if otherUnion, ok := other.(*Union); ok {
-		if len(u.Types) != len(otherUnion.Types) {
-			return false
-		}
-
-		// Check that all types in the union match
-		for _, uType := range u.Types {
-			found := slices.ContainsFunc(otherUnion.Types, uType.equal)
-			if !found {
-				return false
-			}
-		}
-		return true
-	}
-
-	// Check if the other type matches any type in this union
-	for _, t := range u.Types {
-		if t.equal(other) {
-			return true
-		}
-	}
-
-	return false
+	return equalTypes(u, other)
 }
 
 func (u Union) hasTrait(trait *Trait) bool {
@@ -1383,35 +1293,7 @@ func (def StructDef) get(name string) Type {
 	return nil
 }
 func (def StructDef) equal(other Type) bool {
-	if otherDef, ok := other.(*StructDef); ok {
-		if def.Name != otherDef.Name {
-			return false
-		}
-		if len(def.Fields) != len(otherDef.Fields) {
-			return false
-		}
-		for name, fieldType := range def.Fields {
-			if otherFieldType, ok := otherDef.Fields[name]; !ok || !fieldType.equal(otherFieldType) {
-				return false
-			}
-		}
-		if len(def.Methods) != len(otherDef.Methods) {
-			return false
-		}
-		for name, methodType := range def.Methods {
-			if otherMethodType, ok := otherDef.Methods[name]; !ok || !methodType.equal(otherMethodType) {
-				return false
-			}
-		}
-		return true
-	}
-	if o, ok := other.(*TypeVar); ok {
-		if o.actual == nil {
-			return true
-		}
-		return def.equal(o.actual)
-	}
-	return false
+	return equalTypes(def, other)
 }
 
 func (def StructDef) hasGenerics() bool {

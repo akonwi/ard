@@ -6,6 +6,28 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+func TestRecursiveTraitChildManagementTypeDoesNotOverflow(t *testing.T) {
+	run(t, []test{{
+		name: "struct method can accept list of trait that accepts struct",
+		input: `struct Children {}
+
+trait View {
+  fn init(mut children: Children)
+}
+
+impl Children {
+  fn mut set(children: [View]) {}
+}
+
+struct Leaf {}
+
+impl View for Leaf {
+  fn init(mut children: Children) {}
+}
+`,
+	}})
+}
+
 func TestMatchAllowsConcreteTraitImplementationBranch(t *testing.T) {
 	traitFixture := `trait View {
   fn render()

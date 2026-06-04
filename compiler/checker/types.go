@@ -85,22 +85,7 @@ func (t Trait) get(name string) Type {
 }
 
 func (t Trait) equal(other Type) bool {
-	o, ok := other.(*Trait)
-	if !ok {
-		return false
-	}
-	if t.Name != o.Name {
-		return false
-	}
-	if len(t.methods) != len(o.methods) {
-		return false
-	}
-	for i := range t.methods {
-		if !t.methods[i].equal(&o.methods[i]) {
-			return false
-		}
-	}
-	return true
+	return equalTypes(t, other)
 }
 
 func (t Trait) GetMethods() []FunctionDef {
@@ -431,20 +416,7 @@ func (l List) get(name string) Type {
 	}
 }
 func (l *List) equal(other Type) bool {
-	if o, ok := other.(*List); ok {
-		return l.of.equal(o.of)
-	}
-	if typeVar, ok := other.(*TypeVar); ok {
-		if typeVar.actual == nil {
-			return true
-		}
-		return l.equal(typeVar.actual)
-	}
-	if union, ok := other.(*Union); ok {
-		return union.equal(l)
-	}
-
-	return false
+	return equalTypes(l, other)
 }
 
 func (l *List) hasTrait(trait *Trait) bool {
@@ -467,20 +439,7 @@ func (m Map) String() string {
 	return fmt.Sprintf("[%s:%s]", m.key.String(), m.value.String())
 }
 func (m Map) equal(other Type) bool {
-	if o, ok := other.(*Map); ok {
-		return m.key.equal(o.key) && m.value.equal(o.value)
-	}
-	if typeVar, ok := other.(*TypeVar); ok {
-		if typeVar.actual == nil {
-			return true
-		}
-		return m.equal(typeVar.actual)
-	}
-
-	if union, ok := other.(*Union); ok {
-		return union.equal(m)
-	}
-	return false
+	return equalTypes(m, other)
 }
 
 func (m Map) hasTrait(trait *Trait) bool {
@@ -614,11 +573,7 @@ func (m *Maybe) get(name string) Type {
 	}
 }
 func (m *Maybe) equal(other Type) bool {
-	if o, ok := other.(*Maybe); ok {
-		return m.of.equal(o.of)
-	}
-
-	return false
+	return equalTypes(m, other)
 }
 
 func (m *Maybe) hasTrait(trait *Trait) bool {
@@ -656,13 +611,7 @@ func (a TypeVar) get(name string) Type {
 	panic(fmt.Errorf("Cannot look up symbols in unrefined %s", a.String()))
 }
 func (a *TypeVar) equal(other Type) bool {
-	if a == other {
-		return true
-	}
-	if a.actual == nil {
-		return true
-	}
-	return a.actual.equal(other)
+	return equalTypes(a, other)
 }
 
 func (a *TypeVar) hasTrait(trait *Trait) bool {
@@ -759,16 +708,7 @@ func (r Result) get(name string) Type {
 }
 
 func (r *Result) equal(other Type) bool {
-	if o, ok := other.(*Result); ok {
-		return r.val.equal(o.val) && r.err.equal(o.err)
-	}
-	if tv, ok := other.(*TypeVar); ok {
-		if tv.actual == nil {
-			return true
-		}
-		return r.equal(tv.actual)
-	}
-	return false
+	return equalTypes(r, other)
 }
 
 func (r *Result) hasTrait(trait *Trait) bool {
@@ -825,22 +765,7 @@ func (e *ExternType) String() string {
 }
 func (e *ExternType) get(name string) Type { return nil }
 func (e *ExternType) equal(other Type) bool {
-	if typeVar, ok := other.(*TypeVar); ok && typeVar.actual == nil {
-		return true
-	}
-	otherExtern, ok := other.(*ExternType)
-	if !ok {
-		return false
-	}
-	if e.Name_ != otherExtern.Name_ || len(e.TypeArgs) != len(otherExtern.TypeArgs) {
-		return false
-	}
-	for i := range e.TypeArgs {
-		if !e.TypeArgs[i].equal(otherExtern.TypeArgs[i]) {
-			return false
-		}
-	}
-	return true
+	return equalTypes(e, other)
 }
 func (e *ExternType) hasTrait(trait *Trait) bool { return false }
 func (e *ExternType) NonProducing()              {}
