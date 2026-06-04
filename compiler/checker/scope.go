@@ -221,36 +221,47 @@ func extractGenericNames(t Type, names map[string]bool) {
 // hasGenericsInType checks if a type contains any generic parameters.
 // Used for quick detection before generic handling.
 func hasGenericsInType(t Type) bool {
+	return hasGenericsInTypeSeen(t, map[Type]struct{}{})
+}
+
+func hasGenericsInTypeSeen(t Type, seen map[Type]struct{}) bool {
+	if t == nil {
+		return false
+	}
+	if _, ok := seen[t]; ok {
+		return false
+	}
+	seen[t] = struct{}{}
 	switch t := t.(type) {
 	case *TypeVar:
 		return true
 	case *List:
-		return hasGenericsInType(t.of)
+		return hasGenericsInTypeSeen(t.of, seen)
 	case *Map:
-		return hasGenericsInType(t.key) || hasGenericsInType(t.value)
+		return hasGenericsInTypeSeen(t.key, seen) || hasGenericsInTypeSeen(t.value, seen)
 	case *Maybe:
-		return hasGenericsInType(t.of)
+		return hasGenericsInTypeSeen(t.of, seen)
 	case *Result:
-		return hasGenericsInType(t.val) || hasGenericsInType(t.err)
+		return hasGenericsInTypeSeen(t.val, seen) || hasGenericsInTypeSeen(t.err, seen)
 	case *Union:
-		return slices.ContainsFunc(t.Types, hasGenericsInType)
+		return slices.ContainsFunc(t.Types, func(member Type) bool { return hasGenericsInTypeSeen(member, seen) })
 	case *StructDef:
 		for _, fieldType := range t.Fields {
-			if hasGenericsInType(fieldType) {
+			if hasGenericsInTypeSeen(fieldType, seen) {
 				return true
 			}
 		}
 		return false
 	case *FunctionDef:
 		for _, param := range t.Parameters {
-			if hasGenericsInType(param.Type) {
+			if hasGenericsInTypeSeen(param.Type, seen) {
 				return true
 			}
 		}
-		return hasGenericsInType(t.ReturnType)
+		return hasGenericsInTypeSeen(t.ReturnType, seen)
 	case *ExternType:
 		for _, typeArg := range t.TypeArgs {
-			if hasGenericsInType(typeArg) {
+			if hasGenericsInTypeSeen(typeArg, seen) {
 				return true
 			}
 		}

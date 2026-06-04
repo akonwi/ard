@@ -1451,6 +1451,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				Methods: make(map[string]*FunctionDef),
 				Private: s.Private,
 			}
+			c.scope.add(def.name(), def, false)
 			seenGenerics := make(map[string]bool)
 			for _, field := range s.Fields {
 				fieldType := c.resolveType(field.Type)
@@ -1462,10 +1463,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					c.addError(fmt.Sprintf("Duplicate field: %s", field.Name.Name), field.Name.GetLocation())
 					return nil
 				}
+				if recursiveFieldHasInfiniteSize(field.Type, def.Name, false) {
+					c.addError(fmt.Sprintf("Recursive field %s.%s has infinite size. Put the recursive reference behind a list, map, or nullable type.", def.Name, field.Name.Name), field.Name.GetLocation())
+				}
 				def.Fields[field.Name.Name] = fieldType
 				collectGenericsFromType(fieldType, &def.GenericParams, seenGenerics)
 			}
-			c.scope.add(def.name(), def, false)
 			return &Statement{Stmt: def}
 		}
 	case *parse.ImplBlock:

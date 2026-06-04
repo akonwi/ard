@@ -1127,11 +1127,12 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		fields := sortedFieldNames(typ.Fields)
 		info.Fields = make([]FieldInfo, len(fields))
 		for i, name := range fields {
-			fieldType, err := l.internType(typ.Fields[name])
+			fieldTypeValue := typ.Fields[name]
+			fieldType, err := l.internType(fieldTypeValue)
 			if err != nil {
 				return NoType, err
 			}
-			info.Fields[i] = FieldInfo{Name: name, Type: fieldType, Index: i}
+			info.Fields[i] = FieldInfo{Name: name, Type: fieldType, Index: i, RecursiveNullable: isRecursiveNullableStructField(typ, fieldTypeValue)}
 		}
 	case *checker.Enum:
 		info.Kind = TypeEnum
@@ -1401,32 +1402,41 @@ func typeContainsTypeVar(t checker.Type) bool {
 }
 
 func typeHasUnresolvedTypeVar(t checker.Type) bool {
-	switch typ := t.(type) {
-	case nil:
+	return typeHasUnresolvedTypeVarSeen(t, map[checker.Type]struct{}{})
+}
+
+func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}) bool {
+	if t == nil {
 		return false
+	}
+	if _, ok := seen[t]; ok {
+		return false
+	}
+	seen[t] = struct{}{}
+	switch typ := t.(type) {
 	case *checker.TypeVar:
 		if typ.Actual() == nil {
 			return true
 		}
-		return typeHasUnresolvedTypeVar(typ.Actual())
+		return typeHasUnresolvedTypeVarSeen(typ.Actual(), seen)
 	case *checker.List:
-		return typeHasUnresolvedTypeVar(typ.Of())
+		return typeHasUnresolvedTypeVarSeen(typ.Of(), seen)
 	case *checker.Map:
-		return typeHasUnresolvedTypeVar(typ.Key()) || typeHasUnresolvedTypeVar(typ.Value())
+		return typeHasUnresolvedTypeVarSeen(typ.Key(), seen) || typeHasUnresolvedTypeVarSeen(typ.Value(), seen)
 	case *checker.Maybe:
-		return typeHasUnresolvedTypeVar(typ.Of())
+		return typeHasUnresolvedTypeVarSeen(typ.Of(), seen)
 	case *checker.Result:
-		return typeHasUnresolvedTypeVar(typ.Val()) || typeHasUnresolvedTypeVar(typ.Err())
+		return typeHasUnresolvedTypeVarSeen(typ.Val(), seen) || typeHasUnresolvedTypeVarSeen(typ.Err(), seen)
 	case *checker.Union:
 		for _, member := range typ.Types {
-			if typeHasUnresolvedTypeVar(member) {
+			if typeHasUnresolvedTypeVarSeen(member, seen) {
 				return true
 			}
 		}
 		return false
 	case *checker.StructDef:
 		for _, fieldType := range typ.Fields {
-			if typeHasUnresolvedTypeVar(fieldType) {
+			if typeHasUnresolvedTypeVarSeen(fieldType, seen) {
 				return true
 			}
 		}
@@ -1437,7 +1447,7 @@ func typeHasUnresolvedTypeVar(t checker.Type) bool {
 		return externalFunctionHasUnresolvedTypeVar(typ)
 	case *checker.ExternType:
 		for _, typeArg := range typ.TypeArgs {
-			if typeHasUnresolvedTypeVar(typeArg) {
+			if typeHasUnresolvedTypeVarSeen(typeArg, seen) {
 				return true
 			}
 		}
@@ -1478,28 +1488,39 @@ func airTypeName(t checker.Type) string {
 }
 
 func airTypeKey(t checker.Type) string {
+	return airTypeKeySeen(t, map[checker.Type]struct{}{})
+}
+
+func airTypeKeySeen(t checker.Type, seen map[checker.Type]struct{}) string {
 	if t == nil {
 		return "<nil>"
 	}
 	if tv, ok := t.(*checker.TypeVar); ok && tv.Actual() != nil {
-		return airTypeKey(tv.Actual())
+		return airTypeKeySeen(tv.Actual(), seen)
 	}
+	if _, ok := seen[t]; ok {
+		return t.String()
+	}
+	seen[t] = struct{}{}
 	switch typ := t.(type) {
 	case *checker.List:
-		return "list<" + airTypeKey(typ.Of()) + ">"
+		return "list<" + airTypeKeySeen(typ.Of(), seen) + ">"
 	case *checker.Map:
-		return "map<" + airTypeKey(typ.Key()) + "," + airTypeKey(typ.Value()) + ">"
+		return "map<" + airTypeKeySeen(typ.Key(), seen) + "," + airTypeKeySeen(typ.Value(), seen) + ">"
 	case *checker.Maybe:
-		return "maybe<" + airTypeKey(typ.Of()) + ">"
+		return "maybe<" + airTypeKeySeen(typ.Of(), seen) + ">"
 	case *checker.Result:
-		return "result<" + airTypeKey(typ.Val()) + "," + airTypeKey(typ.Err()) + ">"
+		return "result<" + airTypeKeySeen(typ.Val(), seen) + "," + airTypeKeySeen(typ.Err(), seen) + ">"
 	case *checker.StructDef:
 		if typ.Name == "Fiber" {
 			if elem, ok := typ.Fields["result"]; ok {
 				return "fiber<" + airTypeKey(elem) + ">"
 			}
 		}
-		return airStructKey(typ)
+		if hasSelfReference(typ) {
+			return "recursive struct " + typ.Name
+		}
+		return airStructKeySeen(typ, seen)
 	case *checker.Enum:
 		return airEnumKey(typ)
 	case *checker.Union:
@@ -1514,7 +1535,7 @@ func airTypeKey(t checker.Type) string {
 		}
 		parts := make([]string, len(typ.TypeArgs))
 		for i, arg := range typ.TypeArgs {
-			parts[i] = airTypeKey(arg)
+			parts[i] = airTypeKeySeen(arg, seen)
 		}
 		return "extern " + typ.Name_ + "<" + strings.Join(parts, ",") + ">"
 	default:
@@ -1523,13 +1544,17 @@ func airTypeKey(t checker.Type) string {
 }
 
 func airStructKey(typ *checker.StructDef) string {
+	return airStructKeySeen(typ, map[checker.Type]struct{}{})
+}
+
+func airStructKeySeen(typ *checker.StructDef, seen map[checker.Type]struct{}) string {
 	fields := sortedFieldNames(typ.Fields)
 	key := "struct " + typ.Name + "{"
 	for i, name := range fields {
 		if i > 0 {
 			key += ","
 		}
-		key += name + ":" + airTypeKey(typ.Fields[name])
+		key += name + ":" + airTypeKeySeen(typ.Fields[name], seen)
 	}
 	key += "}"
 	if len(typ.Methods) == 0 {

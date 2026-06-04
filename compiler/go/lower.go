@@ -488,7 +488,17 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 		}
 		fields := make([]*ast.Field, 0, len(typ.Fields))
 		for _, field := range typ.Fields {
-			fieldType, err := l.goType(field.Type)
+			var fieldType ast.Expr
+			var err error
+			if field.RecursiveNullable {
+				maybeType := l.program.Types[field.Type-1]
+				fieldType, err = l.goType(maybeType.Elem)
+				if err == nil {
+					fieldType = &ast.StarExpr{X: fieldType}
+				}
+			} else {
+				fieldType, err = l.goType(field.Type)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -1195,7 +1205,11 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 				return loweredExpr{}, err
 			}
 			stmts = append(stmts, value.stmts...)
-			elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(typ, field.Name)), Value: value.expr})
+			fieldValue := value.expr
+			if fieldInfo, ok := structFieldByName(typ, field.Name); ok && fieldInfo.RecursiveNullable {
+				fieldValue = recursiveNullableValueAsPointer(l, fieldInfo.Type, fieldValue)
+			}
+			elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(typ, field.Name)), Value: fieldValue})
 		}
 		return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, typ)), Elts: elts}}, nil
 	case air.ExprGetField:
@@ -1237,7 +1251,9 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			stmts = append(stmts, resultDecls...)
 			fieldExpr := &ast.SelectorExpr{X: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}, Sel: ast.NewIdent(l.goFieldName(elemType, field.Name))}
 			assignValue := ast.Expr(fieldExpr)
-			if expr.Type != field.Type {
+			if field.RecursiveNullable {
+				assignValue = recursiveNullableFieldAsMaybe(l, field.Type, fieldExpr)
+			} else if expr.Type != field.Type {
 				resultInfo := l.program.Types[expr.Type-1]
 				if resultInfo.Kind == air.TypeMaybe && resultInfo.Elem == field.Type {
 					assignValue = &ast.CompositeLit{Type: mustTypeExpr(l, expr.Type), Elts: []ast.Expr{
@@ -1257,7 +1273,12 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if targetType.Kind != air.TypeStruct || expr.Field < 0 || expr.Field >= len(targetType.Fields) {
 			return loweredExpr{}, fmt.Errorf("invalid field index %d", expr.Field)
 		}
-		return loweredExpr{stmts: target.stmts, expr: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, targetType.Fields[expr.Field].Name))}}, nil
+		field := targetType.Fields[expr.Field]
+		fieldExpr := &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))}
+		if field.RecursiveNullable {
+			return loweredExpr{stmts: target.stmts, expr: recursiveNullableFieldAsMaybe(l, expr.Type, fieldExpr)}, nil
+		}
+		return loweredExpr{stmts: target.stmts, expr: fieldExpr}, nil
 	case air.ExprBlock:
 		return l.lowerBlockExpr(fn, expr)
 	case air.ExprIf:

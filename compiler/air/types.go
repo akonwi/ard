@@ -120,9 +120,10 @@ type TypeInfo struct {
 }
 
 type FieldInfo struct {
-	Name  string
-	Type  TypeID
-	Index int
+	Name              string
+	Type              TypeID
+	Index             int
+	RecursiveNullable bool
 }
 
 type VariantInfo struct {
