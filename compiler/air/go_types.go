@@ -48,7 +48,20 @@ func GenerateGoStructDeclarations(program *Program, options GoTypeOptions) ([]by
 func goStructDecl(program *Program, typ TypeInfo, runtimeQualifier string) (ast.Decl, error) {
 	fields := make([]*ast.Field, 0, len(typ.Fields))
 	for _, field := range typ.Fields {
-		fieldType, err := goTypeExpr(program, field.Type, runtimeQualifier)
+		var fieldType ast.Expr
+		var err error
+		if field.RecursiveNullable {
+			maybeType, maybeErr := goTypeInfo(program, field.Type)
+			if maybeErr != nil {
+				return nil, fmt.Errorf("field %s type: %w", field.Name, maybeErr)
+			}
+			fieldType, err = goTypeExpr(program, maybeType.Elem, runtimeQualifier)
+			if err == nil {
+				fieldType = &ast.StarExpr{X: fieldType}
+			}
+		} else {
+			fieldType, err = goTypeExpr(program, field.Type, runtimeQualifier)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("field %s type: %w", field.Name, err)
 		}

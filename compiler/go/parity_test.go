@@ -28,6 +28,55 @@ type goParityCase struct {
 	input string
 }
 
+func TestGoTargetParityRecursiveStructFields(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "list self reference",
+			input: `
+				struct Node { value: Int, children: [Node] }
+				fn main() Int {
+					let root = Node{value: 1, children: [Node{value: 2, children: []}]}
+					root.children.at(0).value
+				}
+			`,
+		},
+		{
+			name: "map value self reference",
+			input: `
+				struct Node { value: Int, children: [Str:Node] }
+				fn main() Int {
+					let root = Node{value: 1, children: ["leaf": Node{value: 3, children: [:]}]}
+					root.children.get("leaf").expect("").value
+				}
+			`,
+		},
+		{
+			name: "nullable self reference",
+			input: `
+				use ard/maybe
+				struct Node { value: Int, parent: Node? }
+				fn main() Bool {
+					let missing: Node? = maybe::none()
+					let root = Node{value: 1, parent: missing}
+					root.parent.is_none()
+				}
+			`,
+		},
+		{
+			name: "nullable self reference some value",
+			input: `
+				use ard/maybe
+				struct Node { value: Int, parent: Node? }
+				fn main() Int {
+					let root = Node{value: 1, parent: maybe::none()}
+					let child = Node{value: 2, parent: maybe::some(root)}
+					child.parent.expect("").value
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityCoreCorpus(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{

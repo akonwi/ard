@@ -53,6 +53,20 @@ func equalTypesSeen(left Type, right Type, seen map[typeEqualKey]struct{}) bool 
 			return equalTypesSeen(r, l, seen)
 		}
 		return false
+	case *Map:
+		if r, ok := right.(*Map); ok {
+			return equalTypesSeen(l.key, r.key, seen) && equalTypesSeen(l.value, r.value, seen)
+		}
+		if r, ok := right.(Map); ok {
+			return equalTypesSeen(l.key, r.key, seen) && equalTypesSeen(l.value, r.value, seen)
+		}
+		if r, ok := right.(*TypeVar); ok {
+			return r.actual == nil || equalTypesSeen(l, r.actual, seen)
+		}
+		if r, ok := right.(*Union); ok {
+			return equalTypesSeen(r, l, seen)
+		}
+		return false
 	case Map:
 		if r, ok := right.(*Map); ok {
 			return equalTypesSeen(l.key, r.key, seen) && equalTypesSeen(l.value, r.value, seen)
@@ -227,10 +241,14 @@ func typeEqualID(t Type) string {
 	switch v := t.(type) {
 	case *Trait:
 		return fmt.Sprintf("Trait:%p", v)
+	case Trait:
+		return fmt.Sprintf("Trait:%s", v.Name)
 	case *List:
 		return fmt.Sprintf("List:%p", v)
 	case *Map:
 		return fmt.Sprintf("Map:%p", v)
+	case Map:
+		return fmt.Sprintf("Map:%p", &v)
 	case *Maybe:
 		return fmt.Sprintf("Maybe:%p", v)
 	case *TypeVar:
@@ -241,12 +259,21 @@ func typeEqualID(t Type) string {
 		return fmt.Sprintf("Extern:%p", v)
 	case *FunctionDef:
 		return fmt.Sprintf("Function:%p", v)
+	case FunctionDef:
+		return fmt.Sprintf("Function:%s", v.Name)
 	case *ExternalFunctionDef:
 		return fmt.Sprintf("ExternalFunction:%p", v)
 	case *StructDef:
+		if v.Name != "" {
+			return fmt.Sprintf("Struct:%s", v.Name)
+		}
 		return fmt.Sprintf("Struct:%p", v)
+	case StructDef:
+		return fmt.Sprintf("Struct:%s", v.Name)
 	case *Union:
 		return fmt.Sprintf("Union:%p", v)
+	case Union:
+		return fmt.Sprintf("Union:%s", v.Name)
 	default:
 		return fmt.Sprintf("%T:%s", t, t.String())
 	}

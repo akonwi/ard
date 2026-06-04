@@ -6,6 +6,40 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+func TestSelfRecursiveStructFieldsThroughIndirection(t *testing.T) {
+	run(t, []test{
+		{
+			name: "list self reference",
+			input: `struct Node {
+  children: [Node],
+}
+`,
+		},
+		{
+			name: "map value self reference",
+			input: `struct Node {
+  children: [Str:Node],
+}
+`,
+		},
+		{
+			name: "nullable self reference",
+			input: `struct Node {
+  parent: Node?,
+}
+`,
+		},
+		{
+			name: "direct self reference is rejected",
+			input: `struct Node {
+  child: Node,
+}
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field Node.child has infinite size. Put the recursive reference behind a list, map, or nullable type."}},
+		},
+	})
+}
+
 func TestRecursiveTraitChildManagementTypeDoesNotOverflow(t *testing.T) {
 	run(t, []test{{
 		name: "struct method can accept list of trait that accepts struct",
