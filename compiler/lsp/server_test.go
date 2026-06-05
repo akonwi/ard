@@ -354,7 +354,7 @@ func assertDocumentSyncRepliesBeforeDiagnostics(t *testing.T, handle func(*Serve
 	}
 }
 
-func TestDispatchDoesNotSerializeIndependentHandlers(t *testing.T) {
+func TestJSONRPCHandlerDoesNotSerializeFeatureRequests(t *testing.T) {
 	server := NewServer()
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
@@ -364,32 +364,116 @@ func TestDispatchDoesNotSerializeIndependentHandlers(t *testing.T) {
 		return reply(ctx, nil, nil)
 	}
 
-	dispatch := func(id int32, done chan<- error) {
-		req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(id), "ard/block", nil)
-		if err != nil {
-			done <- err
-			return
-		}
-		done <- server.dispatch(context.Background(), func(ctx context.Context, result interface{}, replyErr error) error { return replyErr }, req)
+	handler := server.jsonRPCHandler()
+	replied := make(chan error, 2)
+	reply := func(ctx context.Context, result interface{}, replyErr error) error {
+		replied <- replyErr
+		return nil
 	}
 
-	done := make(chan error, 2)
-	go dispatch(1, done)
-	go dispatch(2, done)
+	for id := int32(1); id <= 2; id++ {
+		req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(id), "ard/block", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := handler(context.Background(), reply, req); err != nil {
+			t.Fatalf("handler returned error: %v", err)
+		}
+	}
 
 	for i := 0; i < 2; i++ {
 		select {
 		case <-entered:
 		case <-time.After(500 * time.Millisecond):
 			close(release)
-			t.Fatal("expected concurrent handlers to enter without waiting for each other")
+			t.Fatal("expected concurrent feature handlers to enter without waiting for each other")
 		}
 	}
 	close(release)
 	for i := 0; i < 2; i++ {
-		if err := <-done; err != nil {
-			t.Fatalf("dispatch error: %v", err)
+		select {
+		case err := <-replied:
+			if err != nil {
+				t.Fatalf("reply error: %v", err)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("expected feature handler reply")
 		}
+	}
+}
+
+func TestJSONRPCHandlerDoesNotBlockDocumentSyncBehindFeatureRequests(t *testing.T) {
+	server := NewServer()
+	server.diagnosticsDelay = 0
+	server.diagnosticsPublisher = func(context.Context, uri.URI) {}
+	docURI := uri.New("file:///main.ard")
+	server.cache.Open(docURI, "ard", 1, "let x = 1")
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	server.handlers["ard/block"] = func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+		close(entered)
+		<-release
+		return reply(ctx, nil, nil)
+	}
+
+	handler := server.jsonRPCHandler()
+	replied := make(chan error, 2)
+	reply := func(ctx context.Context, result interface{}, replyErr error) error {
+		replied <- replyErr
+		return nil
+	}
+
+	blockingReq, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), "ard/block", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler(context.Background(), reply, blockingReq); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("blocking feature request did not start")
+	}
+
+	changeReq, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(2), protocol.MethodTextDocumentDidChange, didChangeParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: docURI},
+			Version:                2,
+		},
+		ContentChanges: []documentContentChange{{Text: "let x = 2"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handler(context.Background(), reply, changeReq); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := server.cache.Get(docURI).Text; got != "let x = 2" {
+		close(release)
+		t.Fatalf("didChange was blocked behind feature request; text = %q", got)
+	}
+	select {
+	case err := <-replied:
+		if err != nil {
+			close(release)
+			t.Fatalf("didChange reply error: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		close(release)
+		t.Fatal("didChange did not reply while feature request was blocked")
+	}
+
+	close(release)
+	select {
+	case err := <-replied:
+		if err != nil {
+			t.Fatalf("feature reply error: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("feature request did not finish")
 	}
 }
 

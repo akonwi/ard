@@ -70,13 +70,48 @@ func (s *Server) Run(ctx context.Context) error {
 	conn := jsonrpc2.NewConn(stream)
 	s.conn = conn
 
-	handler := protocol.Handlers(
-		jsonrpc2.Handler(s.dispatch),
-	)
-
-	conn.Go(ctx, handler)
+	conn.Go(ctx, s.jsonRPCHandler())
 	<-conn.Done()
 	return conn.Err()
+}
+
+func (s *Server) jsonRPCHandler() jsonrpc2.Handler {
+	return protocol.CancelHandler(
+		concurrentRequestHandler(
+			jsonrpc2.ReplyHandler(jsonrpc2.Handler(s.dispatch)),
+		),
+	)
+}
+
+// concurrentRequestHandler runs feature requests concurrently while preserving
+// lifecycle and document-sync ordering on the reader goroutine.
+func concurrentRequestHandler(handler jsonrpc2.Handler) jsonrpc2.Handler {
+	return func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+		if handleRequestInline(req.Method()) {
+			return handler(ctx, reply, req)
+		}
+
+		go func() {
+			_ = handler(ctx, reply, req)
+		}()
+		return nil
+	}
+}
+
+func handleRequestInline(method string) bool {
+	switch method {
+	case protocol.MethodInitialize,
+		protocol.MethodInitialized,
+		protocol.MethodShutdown,
+		protocol.MethodExit,
+		protocol.MethodTextDocumentDidOpen,
+		protocol.MethodTextDocumentDidChange,
+		protocol.MethodTextDocumentDidSave,
+		protocol.MethodTextDocumentDidClose:
+		return true
+	default:
+		return false
+	}
 }
 
 // dispatch routes incoming LSP requests and notifications to registered handlers.
