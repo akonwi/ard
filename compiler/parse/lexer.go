@@ -391,7 +391,7 @@ func (l *lexer) comment(start *char) token {
 	var text strings.Builder
 	text.WriteString("//")
 	for l.hasMore() && !l.peekMatch(string('\n')) {
-		text.WriteString(string(l.peek().raw))
+		text.WriteByte(l.peek().raw)
 		l.advance()
 	}
 	return token{kind: comment, line: start.line, column: start.col, text: text.String()}

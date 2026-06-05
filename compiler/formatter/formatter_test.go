@@ -30,6 +30,11 @@ func TestFormat(t *testing.T) {
 			output: "let x = 1\n",
 		},
 		{
+			name:   "preserves utf8 in comments",
+			input:  "// pinned at the bottom — all expressed\nlet x = 1\n",
+			output: "// pinned at the bottom — all expressed\nlet x = 1\n",
+		},
+		{
 			name:   "normalizes spacing in expressions and declarations",
 			input:  "let value:Int=1+2\nif value>2{value}\n",
 			output: "let value: Int = 1 + 2\nif value > 2 {\n  value\n}\n",
