@@ -493,6 +493,64 @@ func TestFormatSource(t *testing.T) {
 	}
 }
 
+func TestFeatureHandlersIgnoreNonFileDocuments(t *testing.T) {
+	server := NewServer()
+	docURI := uri.URI("untitled:Untitled-1")
+	server.cache.Open(docURI, "ard", 1, "let   x  =  5")
+
+	formatReq, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), protocol.MethodTextDocumentFormatting, protocol.DocumentFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var edits []protocol.TextEdit
+	formatReply := jsonrpc2.Replier(func(ctx context.Context, result interface{}, err error) error {
+		if err != nil {
+			return err
+		}
+		var ok bool
+		edits, ok = result.([]protocol.TextEdit)
+		if !ok {
+			t.Fatalf("formatting result = %T, want []protocol.TextEdit", result)
+		}
+		return nil
+	})
+	if err := server.handleFormatting(context.Background(), formatReply, formatReq); err != nil {
+		t.Fatal(err)
+	}
+	if len(edits) != 0 {
+		t.Fatalf("expected no formatting edits for non-file URI, got %#v", edits)
+	}
+
+	hoverReq, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(2), protocol.MethodTextDocumentHover, protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+			Position:     protocol.Position{Line: 0, Character: 1},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replied := false
+	hoverReply := jsonrpc2.Replier(func(ctx context.Context, result interface{}, err error) error {
+		replied = true
+		if err != nil {
+			return err
+		}
+		if result != nil {
+			t.Fatalf("expected nil hover for non-file URI, got %#v", result)
+		}
+		return nil
+	})
+	if err := server.handleHover(context.Background(), hoverReply, hoverReq); err != nil {
+		t.Fatal(err)
+	}
+	if !replied {
+		t.Fatal("expected hover handler to reply")
+	}
+}
+
 func TestCodeActionRemoveUnusedImports(t *testing.T) {
 	server := NewServer()
 	docURI := uri.New("file:///test.ard")

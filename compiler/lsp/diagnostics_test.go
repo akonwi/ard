@@ -241,6 +241,44 @@ func TestPublishDiagnosticsDiscardsStaleOverlaySnapshot(t *testing.T) {
 	}
 }
 
+func TestPublishDiagnosticsHandlesNonFileURI(t *testing.T) {
+	server := NewServer()
+	conn := newRecordingConn()
+	server.conn = conn
+	docURI := uri.URI("untitled:Untitled-1")
+	server.cache.Open(docURI, "ard", 3, `let x = 5`)
+
+	server.publishDiagnostics(context.Background(), docURI)
+
+	params := conn.lastDiagnostics(t)
+	if params.Version != 3 {
+		t.Fatalf("diagnostic version = %d, want 3", params.Version)
+	}
+	if len(params.Diagnostics) != 1 {
+		t.Fatalf("expected one analysis diagnostic, got %#v", params.Diagnostics)
+	}
+	message := params.Diagnostics[0].Message
+	if !strings.Contains(message, "Analysis error") || !strings.Contains(message, "unsupported document URI") {
+		t.Fatalf("diagnostic message = %q", message)
+	}
+}
+
+func TestPublishDiagnosticsSkipsNonFileOverlays(t *testing.T) {
+	server := NewServer()
+	conn := newRecordingConn()
+	server.conn = conn
+	fileURI := uri.New("file:///tmp/test.ard")
+	server.cache.Open(fileURI, "ard", 1, `let x = 5`)
+	server.cache.Open(uri.URI("untitled:Untitled-1"), "ard", 1, `let y = 10`)
+
+	server.publishDiagnostics(context.Background(), fileURI)
+
+	params := conn.lastDiagnostics(t)
+	if len(params.Diagnostics) != 0 {
+		t.Fatalf("expected no diagnostics, got %#v", params.Diagnostics)
+	}
+}
+
 func TestPublishDiagnosticsReportsAnalysisPanic(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()

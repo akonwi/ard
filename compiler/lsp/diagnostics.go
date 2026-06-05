@@ -179,11 +179,11 @@ func (s *Server) analyzeDiagnostics(doc *Doc, docs []Doc) (diagnostics []checker
 		}
 	}()
 
-	filePath := doc.URI.Filename()
-	overlays := map[string]string{}
-	for _, cached := range docs {
-		overlays[cached.URI.Filename()] = cached.Text
+	filePath, err := filePathFromURI(doc.URI)
+	if err != nil {
+		return nil, err
 	}
+	overlays := overlaySources(docs)
 	analyzer := s.diagnosticsAnalyzer
 	if analyzer == nil {
 		analyzer = parseAndCheckWithOverlays

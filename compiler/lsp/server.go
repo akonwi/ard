@@ -330,7 +330,11 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 				info = nil
 			}
 		}()
-		info = computeHover(doc.Text, doc.URI.Filename(), params.Position)
+		filePath, ok := docFilePath(doc)
+		if !ok {
+			return
+		}
+		info = computeHover(doc.Text, filePath, params.Position)
 	}()
 
 	if info == nil || info.content == "" {
@@ -365,7 +369,11 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				locations = []protocol.Location{}
 			}
 		}()
-		locations = computeDefinition(doc.Text, doc.URI.Filename(), params.Position)
+		filePath, ok := docFilePath(doc)
+		if !ok {
+			return
+		}
+		locations = computeDefinition(doc.Text, filePath, params.Position)
 	}()
 	if locations == nil {
 		locations = []protocol.Location{}
@@ -392,11 +400,12 @@ func (s *Server) handleReferences(ctx context.Context, reply jsonrpc2.Replier, r
 				locations = []protocol.Location{}
 			}
 		}()
-		overlays := map[string]string{}
-		for _, cached := range s.cache.Snapshot() {
-			overlays[cached.URI.Filename()] = cached.Text
+		filePath, ok := docFilePath(doc)
+		if !ok {
+			return
 		}
-		locations = computeReferencesWithOverlays(doc.Text, doc.URI.Filename(), params.Position, params.Context.IncludeDeclaration, overlays)
+		overlays := overlaySources(s.cache.Snapshot())
+		locations = computeReferencesWithOverlays(doc.Text, filePath, params.Position, params.Context.IncludeDeclaration, overlays)
 	}()
 	if locations == nil {
 		locations = []protocol.Location{}
@@ -433,7 +442,11 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				items = []protocol.CompletionItem{}
 			}
 		}()
-		items = computeCompletions(doc.Text, doc.URI.Filename(), params.Position)
+		filePath, ok := docFilePath(doc)
+		if !ok {
+			return
+		}
+		items = computeCompletions(doc.Text, filePath, params.Position)
 	}()
 	if items == nil {
 		items = []protocol.CompletionItem{}
@@ -473,7 +486,10 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}
 
-	filePath := doc.URI.Filename()
+	filePath, ok := docFilePath(doc)
+	if !ok {
+		return reply(ctx, []protocol.TextEdit{}, nil)
+	}
 	formatted, err := formatSource(doc.Text, filePath)
 	if err != nil || formatted == doc.Text {
 		return reply(ctx, []protocol.TextEdit{}, nil)
@@ -505,7 +521,11 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 	if doc == nil {
 		return reply(ctx, []protocol.CodeAction{}, nil)
 	}
-	formatted, err := formatSource(doc.Text, doc.URI.Filename())
+	filePath, ok := docFilePath(doc)
+	if !ok {
+		return reply(ctx, []protocol.CodeAction{}, nil)
+	}
+	formatted, err := formatSource(doc.Text, filePath)
 	if err != nil || formatted == doc.Text {
 		return reply(ctx, []protocol.CodeAction{}, nil)
 	}
@@ -539,7 +559,11 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 				help = nil
 			}
 		}()
-		help = computeSignatureHelp(doc.Text, doc.URI.Filename(), params.Position)
+		filePath, ok := docFilePath(doc)
+		if !ok {
+			return
+		}
+		help = computeSignatureHelp(doc.Text, filePath, params.Position)
 	}()
 
 	return reply(ctx, help, nil)
@@ -556,7 +580,11 @@ func (s *Server) handleDocumentHighlight(ctx context.Context, reply jsonrpc2.Rep
 		return reply(ctx, []protocol.DocumentHighlight{}, nil)
 	}
 
-	highlights := computeDocumentHighlights(doc.Text, doc.URI.Filename(), params.Position)
+	filePath, ok := docFilePath(doc)
+	if !ok {
+		return reply(ctx, []protocol.DocumentHighlight{}, nil)
+	}
+	highlights := computeDocumentHighlights(doc.Text, filePath, params.Position)
 	if highlights == nil {
 		highlights = []protocol.DocumentHighlight{}
 	}
@@ -572,7 +600,11 @@ func (s *Server) handlePrepareRename(ctx context.Context, reply jsonrpc2.Replier
 	if doc == nil {
 		return reply(ctx, nil, nil)
 	}
-	rng := prepareRename(doc.Text, doc.URI.Filename(), params.Position)
+	filePath, ok := docFilePath(doc)
+	if !ok {
+		return reply(ctx, nil, nil)
+	}
+	rng := prepareRename(doc.Text, filePath, params.Position)
 	return reply(ctx, rng, nil)
 }
 
@@ -585,10 +617,11 @@ func (s *Server) handleRename(ctx context.Context, reply jsonrpc2.Replier, req j
 	if doc == nil {
 		return reply(ctx, nil, nil)
 	}
-	overlays := map[string]string{}
-	for _, cached := range s.cache.Snapshot() {
-		overlays[cached.URI.Filename()] = cached.Text
+	filePath, ok := docFilePath(doc)
+	if !ok {
+		return reply(ctx, nil, nil)
 	}
-	edit := computeRename(doc.Text, doc.URI.Filename(), params.Position, params.NewName, overlays)
+	overlays := overlaySources(s.cache.Snapshot())
+	edit := computeRename(doc.Text, filePath, params.Position, params.NewName, overlays)
 	return reply(ctx, edit, nil)
 }
