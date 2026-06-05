@@ -147,6 +147,10 @@ func collectImportUsesInStatement(stmt parse.Statement, used map[string]bool) {
 		collectImportUsesInStatement(s.Else, used)
 	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.Try, *parse.BlockExpression:
 		collectImportUsesInExpression(s, used)
+	default:
+		if expr, ok := stmt.(parse.Expression); ok {
+			collectImportUsesInExpression(expr, used)
+		}
 	}
 }
 
