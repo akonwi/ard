@@ -115,12 +115,12 @@ func TestDocumentSyncRepliesBeforeDiagnosticsComplete(t *testing.T) {
 	t.Run("didChange", func(t *testing.T) {
 		assertDocumentSyncRepliesBeforeDiagnostics(t, func(server *Server, docURI uri.URI, reply jsonrpc2.Replier) error {
 			server.cache.Open(docURI, "ard", 1, "let x = 1")
-			req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), protocol.MethodTextDocumentDidChange, protocol.DidChangeTextDocumentParams{
+			req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), protocol.MethodTextDocumentDidChange, didChangeParams{
 				TextDocument: protocol.VersionedTextDocumentIdentifier{
 					TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: docURI},
 					Version:                2,
 				},
-				ContentChanges: []protocol.TextDocumentContentChangeEvent{{Text: "let x = 2"}},
+				ContentChanges: []documentContentChange{{Text: "let x = 2"}},
 			})
 			if err != nil {
 				return err
@@ -128,6 +128,185 @@ func TestDocumentSyncRepliesBeforeDiagnosticsComplete(t *testing.T) {
 			return server.handleDidChange(context.Background(), reply, req)
 		})
 	})
+}
+
+func TestDidChangeAppliesFullAndIncrementalChanges(t *testing.T) {
+	t.Run("full document change", func(t *testing.T) {
+		server := NewServer()
+		server.diagnosticsDelay = 0
+		server.diagnosticsPublisher = func(context.Context, uri.URI) {}
+		docURI := uri.New("file:///main.ard")
+		server.cache.Open(docURI, "ard", 1, "let x = 1")
+
+		req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), protocol.MethodTextDocumentDidChange, didChangeParams{
+			TextDocument: protocol.VersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: docURI},
+				Version:                2,
+			},
+			ContentChanges: []documentContentChange{{Text: "let x = 2"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reply := jsonrpc2.Replier(func(ctx context.Context, result interface{}, err error) error { return err })
+		if err := server.handleDidChange(context.Background(), reply, req); err != nil {
+			t.Fatal(err)
+		}
+		if got := server.cache.Get(docURI).Text; got != "let x = 2" {
+			t.Fatalf("text = %q, want full replacement", got)
+		}
+	})
+
+	t.Run("incremental range change", func(t *testing.T) {
+		server := NewServer()
+		server.diagnosticsDelay = 0
+		server.diagnosticsPublisher = func(context.Context, uri.URI) {}
+		docURI := uri.New("file:///main.ard")
+		server.cache.Open(docURI, "ard", 1, "let x = 1\nlet y = 2\n")
+
+		req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), protocol.MethodTextDocumentDidChange, didChangeParams{
+			TextDocument: protocol.VersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: docURI},
+				Version:                2,
+			},
+			ContentChanges: []documentContentChange{{
+				Range: &protocol.Range{
+					Start: protocol.Position{Line: 0, Character: 8},
+					End:   protocol.Position{Line: 0, Character: 9},
+				},
+				Text: "3",
+			}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reply := jsonrpc2.Replier(func(ctx context.Context, result interface{}, err error) error { return err })
+		if err := server.handleDidChange(context.Background(), reply, req); err != nil {
+			t.Fatal(err)
+		}
+		if got := server.cache.Get(docURI).Text; got != "let x = 3\nlet y = 2\n" {
+			t.Fatalf("text = %q, want incremental replacement", got)
+		}
+	})
+}
+
+func TestApplyDocumentChangesHandlesUTF16AndClamping(t *testing.T) {
+	updated, err := applyDocumentChanges("a😀b", []documentContentChange{{
+		Range: &protocol.Range{
+			Start: protocol.Position{Line: 0, Character: 3},
+			End:   protocol.Position{Line: 0, Character: 4},
+		},
+		Text: "c",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated != "a😀c" {
+		t.Fatalf("updated = %q, want UTF-16 range replacement", updated)
+	}
+
+	updated, err = applyDocumentChanges("abc\n", []documentContentChange{{
+		Range: &protocol.Range{
+			Start: protocol.Position{Line: 0, Character: 99},
+			End:   protocol.Position{Line: 0, Character: 99},
+		},
+		Text: "!",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated != "abc!\n" {
+		t.Fatalf("updated = %q, want line-end clamped insertion", updated)
+	}
+
+	updated, err = applyDocumentChanges("abc", []documentContentChange{{
+		Range: &protocol.Range{
+			Start: protocol.Position{Line: 99, Character: 0},
+			End:   protocol.Position{Line: 99, Character: 0},
+		},
+		Text: "!",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated != "abc!" {
+		t.Fatalf("updated = %q, want EOF clamped insertion", updated)
+	}
+}
+
+func TestDocumentSyncSchedulesDiagnosticsForAllOpenDocuments(t *testing.T) {
+	t.Run("didChange", func(t *testing.T) {
+		server := NewServer()
+		server.diagnosticsDelay = 0
+		scheduled := make(chan uri.URI, 4)
+		server.diagnosticsPublisher = func(ctx context.Context, docURI uri.URI) {
+			scheduled <- docURI
+		}
+		mainURI := uri.New("file:///main.ard")
+		toolsURI := uri.New("file:///tools.ard")
+		server.cache.Open(mainURI, "ard", 1, "use app/tools\nlet x = tools::value()")
+		server.cache.Open(toolsURI, "ard", 1, "fn value() Int { 1 }")
+
+		req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), protocol.MethodTextDocumentDidChange, didChangeParams{
+			TextDocument: protocol.VersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: toolsURI},
+				Version:                2,
+			},
+			ContentChanges: []documentContentChange{{Text: "fn value() Int { 2 }"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reply := jsonrpc2.Replier(func(ctx context.Context, result interface{}, err error) error { return err })
+		if err := server.handleDidChange(context.Background(), reply, req); err != nil {
+			t.Fatal(err)
+		}
+
+		assertScheduledDiagnostics(t, scheduled, mainURI, toolsURI)
+	})
+
+	t.Run("didClose", func(t *testing.T) {
+		server := NewServer()
+		server.diagnosticsDelay = 0
+		scheduled := make(chan uri.URI, 4)
+		server.diagnosticsPublisher = func(ctx context.Context, docURI uri.URI) {
+			scheduled <- docURI
+		}
+		mainURI := uri.New("file:///main.ard")
+		toolsURI := uri.New("file:///tools.ard")
+		server.cache.Open(mainURI, "ard", 1, "use app/tools\nlet x = tools::value()")
+		server.cache.Open(toolsURI, "ard", 1, "fn value() Int { 1 }")
+
+		req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), protocol.MethodTextDocumentDidClose, protocol.DidCloseTextDocumentParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: toolsURI},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reply := jsonrpc2.Replier(func(ctx context.Context, result interface{}, err error) error { return err })
+		if err := server.handleDidClose(context.Background(), reply, req); err != nil {
+			t.Fatal(err)
+		}
+
+		assertScheduledDiagnostics(t, scheduled, mainURI, toolsURI)
+	})
+}
+
+func assertScheduledDiagnostics(t *testing.T, scheduled <-chan uri.URI, expected ...uri.URI) {
+	t.Helper()
+	remaining := map[uri.URI]bool{}
+	for _, docURI := range expected {
+		remaining[docURI] = true
+	}
+	deadline := time.After(time.Second)
+	for len(remaining) > 0 {
+		select {
+		case got := <-scheduled:
+			delete(remaining, got)
+		case <-deadline:
+			t.Fatalf("missing scheduled diagnostics for %#v", remaining)
+		}
+	}
 }
 
 func assertDocumentSyncRepliesBeforeDiagnostics(t *testing.T, handle func(*Server, uri.URI, jsonrpc2.Replier) error) {

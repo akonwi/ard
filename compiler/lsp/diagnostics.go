@@ -140,15 +140,16 @@ func diagnosticKindToLSPSeverity(kind checker.DiagnosticKind) protocol.Diagnosti
 
 // publishDiagnostics analyzes the document at the given URI and publishes diagnostics.
 func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
-	doc := s.cache.Get(docURI)
+	docs, revision := s.cache.SnapshotWithRevision()
+	doc := findDiagnosticDocument(docs, docURI)
 	if doc == nil {
 		// Document not in cache; clear diagnostics.
 		s.sendDiagnostics(ctx, docURI, -1, nil)
 		return
 	}
 
-	diags, err := s.analyzeDiagnostics(doc)
-	if !s.isDiagnosticSnapshotCurrent(docURI, doc.Version) {
+	diags, err := s.analyzeDiagnostics(doc, docs)
+	if !s.isDiagnosticSnapshotCurrent(docURI, doc.Version, revision) {
 		return
 	}
 	if err != nil {
@@ -161,7 +162,16 @@ func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
 	s.sendDiagnostics(ctx, docURI, doc.Version, checkerDiagnosticsToLSP(diags))
 }
 
-func (s *Server) analyzeDiagnostics(doc *Doc) (diagnostics []checker.Diagnostic, err error) {
+func findDiagnosticDocument(docs []Doc, docURI uri.URI) *Doc {
+	for i := range docs {
+		if docs[i].URI == docURI {
+			return &docs[i]
+		}
+	}
+	return nil
+}
+
+func (s *Server) analyzeDiagnostics(doc *Doc, docs []Doc) (diagnostics []checker.Diagnostic, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			diagnostics = nil
@@ -171,7 +181,7 @@ func (s *Server) analyzeDiagnostics(doc *Doc) (diagnostics []checker.Diagnostic,
 
 	filePath := doc.URI.Filename()
 	overlays := map[string]string{}
-	for _, cached := range s.cache.Snapshot() {
+	for _, cached := range docs {
 		overlays[cached.URI.Filename()] = cached.Text
 	}
 	analyzer := s.diagnosticsAnalyzer
@@ -190,9 +200,9 @@ func analysisErrorDiagnostic(err error) protocol.Diagnostic {
 	}
 }
 
-func (s *Server) isDiagnosticSnapshotCurrent(docURI uri.URI, version int32) bool {
+func (s *Server) isDiagnosticSnapshotCurrent(docURI uri.URI, version int32, revision uint64) bool {
 	current := s.cache.Get(docURI)
-	return current != nil && current.Version == version
+	return current != nil && current.Version == version && s.cache.Revision() == revision
 }
 
 // sendDiagnostics sends a textDocument/publishDiagnostics notification to the client.

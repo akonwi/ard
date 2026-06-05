@@ -160,7 +160,7 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 
 	result := &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
-			TextDocumentSync:       protocol.TextDocumentSyncKindFull,
+			TextDocumentSync:       protocol.TextDocumentSyncKindIncremental,
 			HoverProvider:          true,
 			DefinitionProvider:     true,
 			ReferencesProvider:     true,
@@ -217,6 +217,12 @@ func (s *Server) scheduleDiagnostics(docURI uri.URI) {
 	})
 }
 
+func (s *Server) scheduleDiagnosticsForOpenDocuments() {
+	for _, doc := range s.cache.Snapshot() {
+		s.scheduleDiagnostics(doc.URI)
+	}
+}
+
 func (s *Server) runDiagnostics(docURI uri.URI) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -234,6 +240,17 @@ func (s *Server) runDiagnostics(docURI uri.URI) {
 // Document sync handlers
 //-------------------------------------------------------------------------
 
+type didChangeParams struct {
+	TextDocument   protocol.VersionedTextDocumentIdentifier `json:"textDocument"`
+	ContentChanges []documentContentChange                  `json:"contentChanges"`
+}
+
+type documentContentChange struct {
+	Range       *protocol.Range `json:"range,omitempty"`
+	RangeLength *uint32         `json:"rangeLength,omitempty"`
+	Text        string          `json:"text"`
+}
+
 func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.DidOpenTextDocumentParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
@@ -246,23 +263,29 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		params.TextDocument.Version,
 		params.TextDocument.Text,
 	)
-	s.scheduleDiagnostics(params.TextDocument.URI)
+	s.scheduleDiagnosticsForOpenDocuments()
 
 	return reply(ctx, nil, nil)
 }
 
 func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
-	var params protocol.DidChangeTextDocumentParams
+	var params didChangeParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
 
 	if len(params.ContentChanges) > 0 {
-		change := params.ContentChanges[len(params.ContentChanges)-1]
-		s.cache.Update(params.TextDocument.URI, params.TextDocument.Version, change.Text)
+		doc := s.cache.Get(params.TextDocument.URI)
+		if doc != nil {
+			updated, err := applyDocumentChanges(doc.Text, params.ContentChanges)
+			if err != nil {
+				return reply(ctx, nil, fmt.Errorf("invalid document change: %w", err))
+			}
+			s.cache.Update(params.TextDocument.URI, params.TextDocument.Version, updated)
+		}
 	}
 
-	s.scheduleDiagnostics(params.TextDocument.URI)
+	s.scheduleDiagnosticsForOpenDocuments()
 
 	return reply(ctx, nil, nil)
 }
@@ -279,6 +302,7 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 
 	s.cache.Close(params.TextDocument.URI)
 	s.scheduleDiagnostics(params.TextDocument.URI)
+	s.scheduleDiagnosticsForOpenDocuments()
 
 	return reply(ctx, nil, nil)
 }

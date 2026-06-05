@@ -56,6 +56,12 @@ func (c *recordingConn) Close() error {
 func (c *recordingConn) Done() <-chan struct{} { return c.done }
 func (c *recordingConn) Err() error            { return nil }
 
+func (c *recordingConn) notificationCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.notifications)
+}
+
 func (c *recordingConn) lastDiagnostics(t *testing.T) *protocol.PublishDiagnosticsParams {
 	t.Helper()
 	c.mu.Lock()
@@ -199,6 +205,39 @@ func TestPublishDiagnosticsClearsClosedDocumentDiagnostics(t *testing.T) {
 	}
 	if len(params.Diagnostics) != 0 {
 		t.Fatalf("expected diagnostics to be cleared, got %#v", params.Diagnostics)
+	}
+}
+
+func TestPublishDiagnosticsDiscardsStaleOverlaySnapshot(t *testing.T) {
+	server := NewServer()
+	conn := newRecordingConn()
+	server.conn = conn
+	mainURI := uri.New("file:///tmp/main.ard")
+	toolsURI := uri.New("file:///tmp/tools.ard")
+	server.cache.Open(mainURI, "ard", 1, "use app/tools\nlet value = tools::value()\n")
+	server.cache.Open(toolsURI, "ard", 1, "fn value() Int { 1 }\n")
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server.diagnosticsAnalyzer = func(source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error) {
+		close(started)
+		<-release
+		return nil, nil
+	}
+
+	done := make(chan struct{})
+	go func() {
+		server.publishDiagnostics(context.Background(), mainURI)
+		close(done)
+	}()
+
+	<-started
+	server.cache.Update(toolsURI, 2, "fn value() Int { 2 }\n")
+	close(release)
+	<-done
+
+	if got := conn.notificationCount(); got != 0 {
+		t.Fatalf("published %d stale diagnostic notifications, want none", got)
 	}
 }
 
