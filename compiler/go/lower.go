@@ -207,6 +207,16 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 			decls = append(decls, typeDecls...)
 		}
 	}
+	globalIDs := append([]air.GlobalID(nil), module.Globals...)
+	sort.Slice(globalIDs, func(i, j int) bool { return globalIDs[i] < globalIDs[j] })
+	for _, globalID := range globalIDs {
+		global := l.program.Globals[globalID]
+		decl, err := l.lowerGlobal(global)
+		if err != nil {
+			return nil, fmt.Errorf("module %s global %s: %w", module.Path, global.Name, err)
+		}
+		decls = append(decls, decl)
+	}
 	functionIDs := append([]air.FunctionID(nil), module.Functions...)
 	sort.Slice(functionIDs, func(i, j int) bool { return functionIDs[i] < functionIDs[j] })
 	for _, functionID := range functionIDs {
@@ -555,6 +565,25 @@ func (l *lowerer) lowerMainWrapper(root air.FunctionID) (ast.Decl, error) {
 	}, nil
 }
 
+func (l *lowerer) lowerGlobal(global air.Global) (ast.Decl, error) {
+	globalType, err := l.goType(global.Type)
+	if err != nil {
+		return nil, err
+	}
+	value, err := l.lowerExprWithExpectedType(air.Function{Module: global.Module, Name: "<global>"}, global.Value, global.Type)
+	if err != nil {
+		return nil, err
+	}
+	if len(value.stmts) != 0 {
+		return nil, fmt.Errorf("global initializers with setup statements are not supported")
+	}
+	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
+		Names:  []*ast.Ident{ast.NewIdent(globalName(l.program, global))},
+		Type:   globalType,
+		Values: []ast.Expr{value.expr},
+	}}}, nil
+}
+
 func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 	l.declaredLocals = map[air.LocalID]bool{}
 	params := []*ast.Field{}
@@ -800,6 +829,11 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{stmts: stmts, expr: zero}, nil
 	case air.ExprLoadLocal:
 		return loweredExpr{expr: ast.NewIdent(localName(fn, expr.Local))}, nil
+	case air.ExprLoadGlobal:
+		if expr.Global < 0 || int(expr.Global) >= len(l.program.Globals) {
+			return loweredExpr{}, fmt.Errorf("unknown global %d", expr.Global)
+		}
+		return loweredExpr{expr: ast.NewIdent(globalName(l.program, l.program.Globals[expr.Global]))}, nil
 	case air.ExprUnionWrap:
 		return l.lowerUnionWrap(fn, expr)
 	case air.ExprMatchUnion:

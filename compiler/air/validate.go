@@ -22,6 +22,14 @@ func Validate(program *Program) error {
 			return err
 		}
 	}
+	for i, global := range program.Globals {
+		if global.ID != GlobalID(i) {
+			return fmt.Errorf("global table entry %d has id %d", i, global.ID)
+		}
+		if err := validateGlobal(program, global); err != nil {
+			return err
+		}
+	}
 	for i, fn := range program.Functions {
 		if fn.ID != FunctionID(i) {
 			return fmt.Errorf("function table entry %d has id %d", i, fn.ID)
@@ -157,6 +165,25 @@ func validateImpl(program *Program, impl Impl) error {
 	return nil
 }
 
+func validateGlobal(program *Program, global Global) error {
+	if int(global.Module) < 0 || int(global.Module) >= len(program.Modules) {
+		return fmt.Errorf("global %s has invalid module id %d", global.Name, global.Module)
+	}
+	if !validTypeID(program, global.Type) {
+		return fmt.Errorf("global %s has invalid type %d", global.Name, global.Type)
+	}
+	if global.Value.Type == NoType {
+		return fmt.Errorf("global %s has no initializer", global.Name)
+	}
+	if global.Value.Type != global.Type {
+		return fmt.Errorf("global %s initializer type %d does not match global type %d", global.Name, global.Value.Type, global.Type)
+	}
+	if err := validateExpr(program, Function{Module: global.Module, Name: "<global>"}, global.Value); err != nil {
+		return fmt.Errorf("global %s: %w", global.Name, err)
+	}
+	return nil
+}
+
 func validateFunction(program *Program, fn Function) error {
 	if int(fn.Module) < 0 || int(fn.Module) >= len(program.Modules) {
 		return fmt.Errorf("function %s has invalid module id %d", fn.Name, fn.Module)
@@ -264,6 +291,9 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	}
 	if expr.Kind == ExprLoadLocal && (expr.Local < 0 || int(expr.Local) >= len(fn.Locals)) {
 		return fmt.Errorf("expression loads invalid local %d", expr.Local)
+	}
+	if expr.Kind == ExprLoadGlobal && !validGlobalID(program, expr.Global) {
+		return fmt.Errorf("expression loads invalid global %d", expr.Global)
 	}
 	if expr.Kind == ExprCall && !validFunctionID(program, expr.Function) {
 		return fmt.Errorf("expression calls invalid function %d", expr.Function)
@@ -593,6 +623,10 @@ func validTypeID(program *Program, id TypeID) bool {
 
 func validFunctionID(program *Program, id FunctionID) bool {
 	return id >= 0 && int(id) < len(program.Functions)
+}
+
+func validGlobalID(program *Program, id GlobalID) bool {
+	return id >= 0 && int(id) < len(program.Globals)
 }
 
 func validTraitID(program *Program, id TraitID) bool {

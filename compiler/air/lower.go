@@ -41,6 +41,7 @@ type lowerer struct {
 	impls        map[string]ImplID
 	functions    map[string]FunctionID
 	externs      map[string]ExternID
+	globals      map[string]GlobalID
 
 	loweringModules map[string]bool
 	loweredModules  map[string]bool
@@ -72,6 +73,7 @@ func newLowerer(options LowerOptions) *lowerer {
 		impls:        map[string]ImplID{},
 		functions:    map[string]FunctionID{},
 		externs:      map[string]ExternID{},
+		globals:      map[string]GlobalID{},
 
 		loweringModules: map[string]bool{},
 		loweredModules:  map[string]bool{},
@@ -154,6 +156,15 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 			mod.Types = appendUniqueType(mod.Types, typeID)
 		}
 
+		switch node := stmt.Stmt.(type) {
+		case *checker.VariableDef:
+			if !node.Mutable {
+				if _, err := l.declareGlobal(modID, node); err != nil {
+					return err
+				}
+			}
+		}
+
 		switch expr := stmt.Expr.(type) {
 		case *checker.FunctionDef:
 			if functionHasUnresolvedTypeVar(expr) || (!l.includeTests && expr.IsTest) {
@@ -185,6 +196,15 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 		case *checker.Enum:
 			if err := l.declareTraitImplsForType(modID, node); err != nil {
 				return err
+			}
+		}
+	}
+
+	for i := range prog.Statements {
+		stmt := prog.Statements[i]
+		if def, ok := stmt.Stmt.(*checker.VariableDef); ok && !def.Mutable {
+			if err := l.lowerGlobal(modID, def); err != nil {
+				return fmt.Errorf("lower global %s: %w", def.Name, err)
 			}
 		}
 	}
@@ -234,6 +254,46 @@ func (l *lowerer) internModule(path string) ModuleID {
 		Path: path,
 	})
 	return id
+}
+
+func (l *lowerer) declareGlobal(module ModuleID, def *checker.VariableDef) (GlobalID, error) {
+	key := globalKey(module, def.Name)
+	if id, ok := l.globals[key]; ok {
+		return id, nil
+	}
+	typeID, err := l.internType(def.Type())
+	if err != nil {
+		return NoGlobal, err
+	}
+	id := GlobalID(len(l.program.Globals))
+	l.globals[key] = id
+	l.program.Globals = append(l.program.Globals, Global{
+		ID:      id,
+		Module:  module,
+		Name:    def.Name,
+		Type:    typeID,
+		Mutable: def.Mutable,
+	})
+	l.program.Modules[module].Globals = appendUniqueGlobal(l.program.Modules[module].Globals, id)
+	return id, nil
+}
+
+func (l *lowerer) lowerGlobal(module ModuleID, def *checker.VariableDef) error {
+	id, ok := l.globals[globalKey(module, def.Name)]
+	if !ok {
+		return fmt.Errorf("global was not declared before lowering: %s", def.Name)
+	}
+	global := l.program.Globals[id]
+	fn := Function{Module: module, Name: "<global>"}
+	fl := l.newFunctionLowerer(&fn, nil, nil)
+	value, actualType, err := fl.lowerContextualExpr(def.Value, global.Type)
+	if err != nil {
+		return err
+	}
+	global.Type = actualType
+	global.Value = *value
+	l.program.Globals[id] = global
+	return nil
 }
 
 func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (FunctionID, error) {
@@ -2502,6 +2562,21 @@ func (fl *functionLowerer) lowerForLoop(loop *checker.ForLoop) ([]Stmt, error) {
 	return []Stmt{*init, Stmt{Kind: StmtWhile, Condition: condition, Body: body}}, nil
 }
 
+func (fl *functionLowerer) lowerFunctionTypeCall(name string, args []checker.Expression, target *Expr) (*Expr, error) {
+	if target == nil {
+		return nil, fmt.Errorf("function value call %s missing target", name)
+	}
+	loweredArgs, err := fl.lowerArgsForFunctionType(args, target.Type)
+	if err != nil {
+		return nil, err
+	}
+	typeInfo, ok := fl.l.typeInfo(target.Type)
+	if !ok || typeInfo.Kind != TypeFunction {
+		return nil, fmt.Errorf("%s is not a function", name)
+	}
+	return &Expr{Kind: ExprCallClosure, Type: typeInfo.Return, Target: target, Args: loweredArgs}, nil
+}
+
 func (fl *functionLowerer) lowerNonProducingBlock(stmts []checker.Statement) (Block, error) {
 	var block Block
 	for _, stmt := range stmts {
@@ -2521,6 +2596,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		if !ok {
+			if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name); ok {
+				return &Expr{Kind: ExprLoadGlobal, Type: fl.l.program.Globals[global].Type, Global: global}, nil
+			}
 			return nil, fmt.Errorf("unknown local %s", e.Name)
 		}
 		return &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}, nil
@@ -2531,6 +2609,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		if !ok {
+			if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name()); ok {
+				return &Expr{Kind: ExprLoadGlobal, Type: fl.l.program.Globals[global].Type, Global: global}, nil
+			}
 			if def, ok := e.Type().(*checker.FunctionDef); ok {
 				functionType, err := fl.internType(e.Type())
 				if err != nil {
@@ -2553,15 +2634,14 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		if ok && fl.localKind(local) == TypeFunction {
 			target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
-			args, err := fl.lowerArgsForFunctionType(e.Args, target.Type)
-			if err != nil {
-				return nil, err
+			return fl.lowerFunctionTypeCall(e.Name, e.Args, target)
+		}
+		if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name); ok {
+			globalType := fl.l.program.Globals[global].Type
+			if typeInfo, ok := fl.l.typeInfo(globalType); ok && typeInfo.Kind == TypeFunction {
+				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Global: global}
+				return fl.lowerFunctionTypeCall(e.Name, e.Args, target)
 			}
-			typeInfo, ok := fl.l.typeInfo(target.Type)
-			if !ok || typeInfo.Kind != TypeFunction {
-				return nil, fmt.Errorf("local %s is not a function", e.Name)
-			}
-			return &Expr{Kind: ExprCallClosure, Type: typeInfo.Return, Target: target, Args: args}, nil
 		}
 	}
 	typeID, err := fl.internType(expr.Type())
@@ -2604,15 +2684,14 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.FunctionCall:
 		if local, ok := fl.locals[e.Name]; ok && fl.localKind(local) == TypeFunction {
 			target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
-			args, err := fl.lowerArgsForFunctionType(e.Args, target.Type)
-			if err != nil {
-				return nil, err
+			return fl.lowerFunctionTypeCall(e.Name, e.Args, target)
+		}
+		if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name); ok {
+			globalType := fl.l.program.Globals[global].Type
+			if typeInfo, ok := fl.l.typeInfo(globalType); ok && typeInfo.Kind == TypeFunction {
+				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Global: global}
+				return fl.lowerFunctionTypeCall(e.Name, e.Args, target)
 			}
-			returnType := typeID
-			if typeInfo, ok := fl.l.typeInfo(target.Type); ok && typeInfo.Kind == TypeFunction {
-				returnType = typeInfo.Return
-			}
-			return &Expr{Kind: ExprCallClosure, Type: returnType, Target: target, Args: args}, nil
 		}
 		if e.ExternalBinding != "" {
 			signature, err := fl.signatureForCall(e)
@@ -3837,6 +3916,12 @@ func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.Modu
 		return &Expr{Kind: ExprMakeClosure, Type: typeID, Function: id}, nil
 	}
 
+	if global, ok, err := fl.l.resolveModuleGlobal(symbol.Module, symbol.Symbol.Name); err != nil {
+		return nil, err
+	} else if ok {
+		return &Expr{Kind: ExprLoadGlobal, Type: fl.l.program.Globals[global].Type, Global: global}, nil
+	}
+
 	return nil, fmt.Errorf("unsupported AIR module symbol %s::%s of type %s", symbol.Module, symbol.Symbol.Name, symbol.Type().String())
 }
 
@@ -4112,6 +4197,11 @@ func (l *lowerer) lookupFunction(name string) (FunctionID, bool) {
 	return NoFunction, false
 }
 
+func (l *lowerer) lookupGlobalInModule(module ModuleID, name string) (GlobalID, bool) {
+	id, ok := l.globals[globalKey(module, name)]
+	return id, ok
+}
+
 func (l *lowerer) lookupFunctionInModule(modulePath, name string) (FunctionID, bool) {
 	moduleID, ok := l.moduleByPath[modulePath]
 	if !ok {
@@ -4215,6 +4305,32 @@ func (l *lowerer) ensureModuleTraitImplsDeclared(modulePath string) error {
 		}
 	}
 	return nil
+}
+
+func (l *lowerer) resolveModuleGlobal(modulePath, name string) (GlobalID, bool, error) {
+	moduleID, ok := l.moduleByPath[modulePath]
+	if ok {
+		if id, ok := l.lookupGlobalInModule(moduleID, name); ok {
+			return id, true, nil
+		}
+	}
+
+	mod, ok := l.moduleByName[modulePath]
+	if !ok {
+		return NoGlobal, false, nil
+	}
+	if mod.Program() == nil {
+		return NoGlobal, false, nil
+	}
+	if err := l.lowerModule(mod); err != nil {
+		return NoGlobal, false, err
+	}
+	moduleID, ok = l.moduleByPath[modulePath]
+	if !ok {
+		return NoGlobal, false, nil
+	}
+	id, ok := l.lookupGlobalInModule(moduleID, name)
+	return id, ok, nil
 }
 
 func (l *lowerer) resolveModuleFunction(modulePath, name string) (FunctionID, bool, error) {
@@ -4387,9 +4503,13 @@ func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement
 			continue
 		}
 		if stmt.Stmt != nil {
-			switch stmt.Stmt.(type) {
+			switch node := stmt.Stmt.(type) {
 			case *checker.StructDef, *checker.Enum, *checker.Union, *checker.ExternType:
 				continue
+			case *checker.VariableDef:
+				if !node.Mutable {
+					continue
+				}
 			}
 		}
 		filtered = append(filtered, stmt)
@@ -4407,6 +4527,15 @@ func sortedFieldNames(fields map[string]checker.Type) []string {
 }
 
 func appendUniqueType(items []TypeID, id TypeID) []TypeID {
+	for _, item := range items {
+		if item == id {
+			return items
+		}
+	}
+	return append(items, id)
+}
+
+func appendUniqueGlobal(items []GlobalID, id GlobalID) []GlobalID {
 	for _, item := range items {
 		if item == id {
 			return items
@@ -4435,6 +4564,10 @@ func appendUniqueModule(items []ModuleID, id ModuleID) []ModuleID {
 
 func functionKey(module ModuleID, name string) string {
 	return fmt.Sprintf("%d:%s", module, name)
+}
+
+func globalKey(module ModuleID, name string) string {
+	return fmt.Sprintf("%d:global:%s", module, name)
 }
 
 func concreteFunctionKey(module ModuleID, name string, signature Signature) string {

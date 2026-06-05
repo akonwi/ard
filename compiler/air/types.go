@@ -4,6 +4,7 @@ type ModuleID int
 type TypeID int
 type FunctionID int
 type ExternID int
+type GlobalID int
 type LocalID int
 type TraitID int
 type ImplID int
@@ -11,6 +12,7 @@ type ImplID int
 const (
 	NoType     TypeID     = 0
 	NoFunction FunctionID = -1
+	NoGlobal   GlobalID   = -1
 )
 
 type Program struct {
@@ -19,6 +21,7 @@ type Program struct {
 	Traits    []Trait
 	Impls     []Impl
 	Externs   []Extern
+	Globals   []Global
 	Tests     []Test
 	Functions []Function
 	Entry     FunctionID
@@ -30,7 +33,17 @@ type Module struct {
 	Path      string
 	Imports   []ModuleID
 	Types     []TypeID
+	Globals   []GlobalID
 	Functions []FunctionID
+}
+
+type Global struct {
+	ID      GlobalID
+	Module  ModuleID
+	Name    string
+	Type    TypeID
+	Mutable bool
+	Value   Expr
 }
 
 type Function struct {

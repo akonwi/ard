@@ -21,6 +21,18 @@ func moduleFileName(module air.Module) string {
 	return name + ".go"
 }
 
+func globalName(program *air.Program, global air.Global) string {
+	moduleName := sanitizeName(program.Modules[global.Module].Path)
+	name := sanitizeName(global.Name)
+	if moduleName == "" {
+		moduleName = fmt.Sprintf("module_%d", global.Module)
+	}
+	if name == "" {
+		name = fmt.Sprintf("global_%d", global.ID)
+	}
+	return moduleName + "__global_" + name
+}
+
 func functionName(program *air.Program, fn air.Function) string {
 	moduleName := sanitizeName(program.Modules[fn.Module].Path)
 	suffix := sanitizeName(fn.Name)

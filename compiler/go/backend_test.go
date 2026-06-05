@@ -285,6 +285,24 @@ func TestRunProgramExecutesSimpleMain(t *testing.T) {
 	}
 }
 
+func TestRunProgramSupportsModuleLevelLetCapturedByClosure(t *testing.T) {
+	program := lowerSource(t, `
+		let refresh_event = "inbox.refresh"
+
+		fn main() {
+			let event = refresh_event
+			let read: fn() Str = fn() { event }
+			if not read() == "inbox.refresh" {
+				panic("wrong event")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramSpecializesGenericEmptyListLocal(t *testing.T) {
 	program := lowerSource(t, `
 		fn drop(from: [$T], till: Int) [$T] {
