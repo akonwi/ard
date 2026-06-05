@@ -12,13 +12,22 @@ import (
 	"go.lsp.dev/uri"
 )
 
+type diagnosticAnalyzer func(source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error)
+
 // parseAndCheck runs the Ard parser and checker on a source file.
 // It returns the parsed AST, the checked module, and any diagnostics.
 func parseAndCheck(source string, filePath string) ([]checker.Diagnostic, error) {
 	return parseAndCheckWithOverlays(source, filePath, nil)
 }
 
-func parseAndCheckWithOverlays(source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error) {
+func parseAndCheckWithOverlays(source string, filePath string, overlays map[string]string) (diagnostics []checker.Diagnostic, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			diagnostics = nil
+			err = fmt.Errorf("analysis panic: %v", r)
+		}
+	}()
+
 	// Parse the source
 	result := parse.Parse([]byte(source), filePath)
 	if result.Program == nil {
@@ -138,29 +147,47 @@ func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
 		return
 	}
 
+	diags, err := s.analyzeDiagnostics(doc)
+	if !s.isDiagnosticSnapshotCurrent(docURI, doc.Version) {
+		return
+	}
+	if err != nil {
+		// If we can't analyze, publish the error as a diagnostic so stale diagnostics
+		// are replaced instead of lingering until the server is restarted.
+		s.sendDiagnostics(ctx, docURI, doc.Version, []protocol.Diagnostic{analysisErrorDiagnostic(err)})
+		return
+	}
+
+	s.sendDiagnostics(ctx, docURI, doc.Version, checkerDiagnosticsToLSP(diags))
+}
+
+func (s *Server) analyzeDiagnostics(doc *Doc) (diagnostics []checker.Diagnostic, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			diagnostics = nil
+			err = fmt.Errorf("analysis panic: %v", r)
+		}
+	}()
+
 	filePath := doc.URI.Filename()
 	overlays := map[string]string{}
 	for _, cached := range s.cache.Snapshot() {
 		overlays[cached.URI.Filename()] = cached.Text
 	}
-	diags, err := parseAndCheckWithOverlays(doc.Text, filePath, overlays)
-	if !s.isDiagnosticSnapshotCurrent(docURI, doc.Version) {
-		return
+	analyzer := s.diagnosticsAnalyzer
+	if analyzer == nil {
+		analyzer = parseAndCheckWithOverlays
 	}
-	if err != nil {
-		// If we can't analyze, publish the error as a diagnostic
-		s.sendDiagnostics(ctx, docURI, doc.Version, []protocol.Diagnostic{
-			{
-				Range:    protocol.Range{Start: protocol.Position{Line: 0, Character: 0}, End: protocol.Position{Line: 0, Character: 1}},
-				Severity: protocol.DiagnosticSeverityError,
-				Source:   "ard",
-				Message:  fmt.Sprintf("Analysis error: %v", err),
-			},
-		})
-		return
-	}
+	return analyzer(doc.Text, filePath, overlays)
+}
 
-	s.sendDiagnostics(ctx, docURI, doc.Version, checkerDiagnosticsToLSP(diags))
+func analysisErrorDiagnostic(err error) protocol.Diagnostic {
+	return protocol.Diagnostic{
+		Range:    protocol.Range{Start: protocol.Position{Line: 0, Character: 0}, End: protocol.Position{Line: 0, Character: 1}},
+		Severity: protocol.DiagnosticSeverityError,
+		Source:   "ard",
+		Message:  fmt.Sprintf("Analysis error: %v", err),
+	}
 }
 
 func (s *Server) isDiagnosticSnapshotCurrent(docURI uri.URI, version int32) bool {

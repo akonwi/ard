@@ -201,3 +201,28 @@ func TestPublishDiagnosticsClearsClosedDocumentDiagnostics(t *testing.T) {
 		t.Fatalf("expected diagnostics to be cleared, got %#v", params.Diagnostics)
 	}
 }
+
+func TestPublishDiagnosticsReportsAnalysisPanic(t *testing.T) {
+	server := NewServer()
+	conn := newRecordingConn()
+	server.conn = conn
+	server.diagnosticsAnalyzer = func(source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error) {
+		panic("checker exploded")
+	}
+	docURI := uri.New("file:///tmp/test.ard")
+	server.cache.Open(docURI, "ard", 9, `let x = 5`)
+
+	server.publishDiagnostics(context.Background(), docURI)
+
+	params := conn.lastDiagnostics(t)
+	if params.Version != 9 {
+		t.Fatalf("diagnostic version = %d, want 9", params.Version)
+	}
+	if len(params.Diagnostics) != 1 {
+		t.Fatalf("expected one analysis diagnostic, got %#v", params.Diagnostics)
+	}
+	message := params.Diagnostics[0].Message
+	if !strings.Contains(message, "Analysis error") || !strings.Contains(message, "checker exploded") {
+		t.Fatalf("diagnostic message = %q", message)
+	}
+}

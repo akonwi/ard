@@ -43,6 +43,7 @@ type Server struct {
 	diagnosticsTimers    map[uri.URI]*time.Timer
 	diagnosticsDelay     time.Duration
 	diagnosticsPublisher func(context.Context, uri.URI)
+	diagnosticsAnalyzer  diagnosticAnalyzer
 }
 
 // NewServer creates a new Ard LSP server.
@@ -53,6 +54,7 @@ func NewServer() *Server {
 		diagnosticsTimers:    make(map[uri.URI]*time.Timer),
 		diagnosticsDelay:     100 * time.Millisecond,
 		diagnosticsPublisher: nil,
+		diagnosticsAnalyzer:  parseAndCheckWithOverlays,
 	}
 	s.diagnosticsPublisher = s.publishDiagnostics
 	s.registerHandlers()
