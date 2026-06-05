@@ -34,7 +34,6 @@ func (s *stdio) Close() error {
 // Server is the Ard LSP server.
 type Server struct {
 	cache       *DocumentCache
-	mu          sync.Mutex
 	handlers    map[string]jsonrpc2.Handler
 	conn        jsonrpc2.Conn
 	projectRoot string
@@ -99,12 +98,6 @@ func (s *Server) dispatch(ctx context.Context, reply jsonrpc2.Replier, req jsonr
 			err = fmt.Errorf("internal server error after reply handling %s: %v", method, r)
 		}
 	}()
-
-	// LSP clients may send feature requests concurrently. The current hover,
-	// definition, references, and signature-help paths share parse/type-resolution
-	// caches, so serialize handlers until those caches are request-scoped.
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if handler, ok := s.handlers[method]; ok {
 		return handler(ctx, safeReply, req)

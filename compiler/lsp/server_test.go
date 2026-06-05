@@ -354,6 +354,45 @@ func assertDocumentSyncRepliesBeforeDiagnostics(t *testing.T, handle func(*Serve
 	}
 }
 
+func TestDispatchDoesNotSerializeIndependentHandlers(t *testing.T) {
+	server := NewServer()
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	server.handlers["ard/block"] = func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+		entered <- struct{}{}
+		<-release
+		return reply(ctx, nil, nil)
+	}
+
+	dispatch := func(id int32, done chan<- error) {
+		req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(id), "ard/block", nil)
+		if err != nil {
+			done <- err
+			return
+		}
+		done <- server.dispatch(context.Background(), func(ctx context.Context, result interface{}, replyErr error) error { return replyErr }, req)
+	}
+
+	done := make(chan error, 2)
+	go dispatch(1, done)
+	go dispatch(2, done)
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-entered:
+		case <-time.After(500 * time.Millisecond):
+			close(release)
+			t.Fatal("expected concurrent handlers to enter without waiting for each other")
+		}
+	}
+	close(release)
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil {
+			t.Fatalf("dispatch error: %v", err)
+		}
+	}
+}
+
 // TestCheckerDiagnosticsToLSP verifies the diagnostic conversion handles edge cases.
 func TestCheckerDiagnosticsToLSP(t *testing.T) {
 	// Nil input should produce empty slice (not nil) so JSON is [] not null
