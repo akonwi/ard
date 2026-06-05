@@ -94,6 +94,87 @@ func TestDispatchRecoversFromPanic(t *testing.T) {
 	}
 }
 
+func TestDocumentSyncRepliesBeforeDiagnosticsComplete(t *testing.T) {
+	t.Run("didOpen", func(t *testing.T) {
+		assertDocumentSyncRepliesBeforeDiagnostics(t, func(server *Server, docURI uri.URI, reply jsonrpc2.Replier) error {
+			req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), protocol.MethodTextDocumentDidOpen, protocol.DidOpenTextDocumentParams{
+				TextDocument: protocol.TextDocumentItem{
+					URI:        docURI,
+					LanguageID: protocol.LanguageIdentifier("ard"),
+					Version:    7,
+					Text:       "let x = 1",
+				},
+			})
+			if err != nil {
+				return err
+			}
+			return server.handleDidOpen(context.Background(), reply, req)
+		})
+	})
+
+	t.Run("didChange", func(t *testing.T) {
+		assertDocumentSyncRepliesBeforeDiagnostics(t, func(server *Server, docURI uri.URI, reply jsonrpc2.Replier) error {
+			server.cache.Open(docURI, "ard", 1, "let x = 1")
+			req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), protocol.MethodTextDocumentDidChange, protocol.DidChangeTextDocumentParams{
+				TextDocument: protocol.VersionedTextDocumentIdentifier{
+					TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: docURI},
+					Version:                2,
+				},
+				ContentChanges: []protocol.TextDocumentContentChangeEvent{{Text: "let x = 2"}},
+			})
+			if err != nil {
+				return err
+			}
+			return server.handleDidChange(context.Background(), reply, req)
+		})
+	})
+}
+
+func assertDocumentSyncRepliesBeforeDiagnostics(t *testing.T, handle func(*Server, uri.URI, jsonrpc2.Replier) error) {
+	t.Helper()
+	server := NewServer()
+	server.diagnosticsDelay = 0
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	defer close(release)
+	server.diagnosticsPublisher = func(context.Context, uri.URI) {
+		started <- struct{}{}
+		<-release
+	}
+
+	replied := make(chan struct{}, 1)
+	reply := jsonrpc2.Replier(func(ctx context.Context, result interface{}, err error) error {
+		replied <- struct{}{}
+		return nil
+	})
+	done := make(chan error, 1)
+	docURI := uri.New("file:///test.ard")
+	go func() {
+		done <- handle(server, docURI, reply)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("diagnostics were not scheduled")
+	}
+
+	select {
+	case <-replied:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("document sync handler waited for diagnostics before replying")
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("handler returned error: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("document sync handler did not return")
+	}
+}
+
 // TestCheckerDiagnosticsToLSP verifies the diagnostic conversion handles edge cases.
 func TestCheckerDiagnosticsToLSP(t *testing.T) {
 	// Nil input should produce empty slice (not nil) so JSON is [] not null

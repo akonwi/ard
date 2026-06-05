@@ -9,9 +9,11 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"time"
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 // stdio wraps os.Stdin and os.Stdout into a single io.ReadWriteCloser.
@@ -36,14 +38,23 @@ type Server struct {
 	handlers    map[string]jsonrpc2.Handler
 	conn        jsonrpc2.Conn
 	projectRoot string
+
+	diagnosticsMu        sync.Mutex
+	diagnosticsTimers    map[uri.URI]*time.Timer
+	diagnosticsDelay     time.Duration
+	diagnosticsPublisher func(context.Context, uri.URI)
 }
 
 // NewServer creates a new Ard LSP server.
 func NewServer() *Server {
 	s := &Server{
-		cache:    NewDocumentCache(),
-		handlers: make(map[string]jsonrpc2.Handler),
+		cache:                NewDocumentCache(),
+		handlers:             make(map[string]jsonrpc2.Handler),
+		diagnosticsTimers:    make(map[uri.URI]*time.Timer),
+		diagnosticsDelay:     100 * time.Millisecond,
+		diagnosticsPublisher: nil,
 	}
+	s.diagnosticsPublisher = s.publishDiagnostics
 	s.registerHandlers()
 	return s
 }
@@ -185,6 +196,38 @@ func (s *Server) handleExit(ctx context.Context, reply jsonrpc2.Replier, req jso
 	return reply(ctx, nil, nil)
 }
 
+func (s *Server) scheduleDiagnostics(docURI uri.URI) {
+	if s.diagnosticsDelay <= 0 {
+		go s.runDiagnostics(docURI)
+		return
+	}
+
+	s.diagnosticsMu.Lock()
+	defer s.diagnosticsMu.Unlock()
+	if timer := s.diagnosticsTimers[docURI]; timer != nil {
+		timer.Stop()
+	}
+	s.diagnosticsTimers[docURI] = time.AfterFunc(s.diagnosticsDelay, func() {
+		s.diagnosticsMu.Lock()
+		delete(s.diagnosticsTimers, docURI)
+		s.diagnosticsMu.Unlock()
+		s.runDiagnostics(docURI)
+	})
+}
+
+func (s *Server) runDiagnostics(docURI uri.URI) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "ard-lsp panic publishing diagnostics for %s: %v\n%s", docURI, r, debug.Stack())
+		}
+	}()
+	publisher := s.diagnosticsPublisher
+	if publisher == nil {
+		publisher = s.publishDiagnostics
+	}
+	publisher(context.Background(), docURI)
+}
+
 //-------------------------------------------------------------------------
 // Document sync handlers
 //-------------------------------------------------------------------------
@@ -198,10 +241,10 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	s.cache.Open(
 		params.TextDocument.URI,
 		string(params.TextDocument.LanguageID),
-		1,
+		params.TextDocument.Version,
 		params.TextDocument.Text,
 	)
-	s.publishDiagnostics(ctx, params.TextDocument.URI)
+	s.scheduleDiagnostics(params.TextDocument.URI)
 
 	return reply(ctx, nil, nil)
 }
@@ -217,7 +260,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		s.cache.Update(params.TextDocument.URI, params.TextDocument.Version, change.Text)
 	}
 
-	s.publishDiagnostics(ctx, params.TextDocument.URI)
+	s.scheduleDiagnostics(params.TextDocument.URI)
 
 	return reply(ctx, nil, nil)
 }
@@ -233,7 +276,7 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 	}
 
 	s.cache.Close(params.TextDocument.URI)
-	s.publishDiagnostics(ctx, params.TextDocument.URI)
+	s.scheduleDiagnostics(params.TextDocument.URI)
 
 	return reply(ctx, nil, nil)
 }
