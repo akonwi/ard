@@ -41,6 +41,7 @@ const (
 	ExprConstStr
 	ExprPanic
 	ExprLoadLocal
+	ExprLoadGlobal
 	ExprCall
 	ExprCallExtern
 	ExprMakeClosure
@@ -146,7 +147,8 @@ type Expr struct {
 	Discriminant int
 	Tag          uint32
 
-	Local LocalID
+	Local  LocalID
+	Global GlobalID
 
 	Function      FunctionID
 	Extern        ExternID

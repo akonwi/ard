@@ -276,7 +276,7 @@ func (l *airJSLowerer) planModuleFiles() {
 	if rootID, ok := airJSRootModuleFunction(l.program); ok {
 		rootModule = l.program.Functions[rootID].Module
 	} else if len(l.program.Modules) > 0 {
-		rootModule = l.program.Modules[len(l.program.Modules)-1].ID
+		rootModule = l.program.Modules[0].ID
 	}
 	for _, module := range l.program.Modules {
 		if module.ID == rootModule {
@@ -318,6 +318,17 @@ func (l *airJSLowerer) lowerModule(module air.Module, invokeRoot bool) (string, 
 			b.WriteString(decl)
 			b.WriteString("\n\n")
 		}
+	}
+	globalIDs := append([]air.GlobalID(nil), module.Globals...)
+	sort.Slice(globalIDs, func(i, j int) bool { return globalIDs[i] < globalIDs[j] })
+	for _, globalID := range globalIDs {
+		global := l.program.Globals[globalID]
+		decl, err := l.lowerGlobal(global)
+		if err != nil {
+			return "", fmt.Errorf("module %s global %s: %w", module.Path, global.Name, err)
+		}
+		b.WriteString(decl)
+		b.WriteString("\n\n")
 	}
 	functionIDs := append([]air.FunctionID(nil), module.Functions...)
 	sort.Slice(functionIDs, func(i, j int) bool { return functionIDs[i] < functionIDs[j] })
@@ -392,6 +403,9 @@ func (l *airJSLowerer) moduleDependencyIDs(module air.Module) []air.ModuleID {
 		if expr.Kind == air.ExprCall && int(expr.Function) >= 0 && int(expr.Function) < len(l.program.Functions) {
 			add(l.program.Functions[expr.Function].Module)
 		}
+		if expr.Kind == air.ExprLoadGlobal && int(expr.Global) >= 0 && int(expr.Global) < len(l.program.Globals) {
+			add(l.program.Globals[expr.Global].Module)
+		}
 		if expr.Kind == air.ExprMakeStruct || expr.Kind == air.ExprEnumVariant {
 			if owner, ok := l.typeModule(expr.Type); ok {
 				add(owner)
@@ -440,6 +454,11 @@ func (l *airJSLowerer) moduleDependencyIDs(module air.Module) []air.ModuleID {
 		visitBlock(expr.Ok)
 		visitBlock(expr.Err)
 		visitBlock(expr.Catch)
+	}
+	for _, globalID := range module.Globals {
+		if int(globalID) >= 0 && int(globalID) < len(l.program.Globals) {
+			visitExpr(l.program.Globals[globalID].Value)
+		}
 	}
 	for _, functionID := range module.Functions {
 		if int(functionID) >= 0 && int(functionID) < len(l.program.Functions) {
@@ -519,6 +538,18 @@ func (l *airJSLowerer) lowerClassMethod(fn air.Function) (string, error) {
 	}
 	_ = info
 	return renderJSDoc(jsBlockDoc(jsName(info.Method)+"("+strings.Join(params, ", ")+")", body)), nil
+}
+
+func (l *airJSLowerer) lowerGlobal(global air.Global) (string, error) {
+	value, err := l.lowerExpr(air.Function{Module: global.Module, Name: "<global>"}, global.Value)
+	if err != nil {
+		return "", err
+	}
+	keyword := "const"
+	if global.Mutable {
+		keyword = "let"
+	}
+	return keyword + " " + l.globalName(global.ID) + " = " + value + ";", nil
 }
 
 func (l *airJSLowerer) lowerFunction(fn air.Function) (string, error) {
@@ -721,6 +752,8 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		return strconv.Quote(expr.Str), nil
 	case air.ExprLoadLocal:
 		return l.localName(fn, expr.Local), nil
+	case air.ExprLoadGlobal:
+		return l.globalRef(fn.Module, expr.Global), nil
 	case air.ExprUnionWrap:
 		return l.lowerUnionWrap(fn, expr)
 	case air.ExprMatchUnion:
@@ -1719,6 +1752,13 @@ func (l *airJSLowerer) typeRef(from air.ModuleID, typeID air.TypeID) string {
 	return name
 }
 
+func (l *airJSLowerer) globalName(id air.GlobalID) string {
+	if id == air.NoGlobal || int(id) < 0 || int(id) >= len(l.program.Globals) {
+		return "__missing_global"
+	}
+	return jsName(l.program.Globals[id].Name)
+}
+
 func (l *airJSLowerer) functionName(id air.FunctionID) string {
 	if id == air.NoFunction || int(id) < 0 || int(id) >= len(l.program.Functions) {
 		return "__missing_function"
@@ -1742,6 +1782,21 @@ func (l *airJSLowerer) functionNameIsAmbiguous(fn air.Function) bool {
 		}
 	}
 	return count > 1
+}
+
+func (l *airJSLowerer) globalRef(from air.ModuleID, id air.GlobalID) string {
+	name := l.globalName(id)
+	if id == air.NoGlobal || int(id) < 0 || int(id) >= len(l.program.Globals) {
+		return name
+	}
+	global := l.program.Globals[id]
+	if global.Module == from {
+		return name
+	}
+	if int(global.Module) >= 0 && int(global.Module) < len(l.program.Modules) {
+		return moduleAlias(l.program.Modules[global.Module].Path) + "." + name
+	}
+	return name
 }
 
 func (l *airJSLowerer) functionRef(from air.ModuleID, id air.FunctionID) string {
@@ -1813,6 +1868,9 @@ func (l *airJSLowerer) moduleExports(module air.Module) []string {
 		if typ.Kind == air.TypeStruct || typ.Kind == air.TypeEnum {
 			exports = append(exports, jsName(typ.Name))
 		}
+	}
+	for _, globalID := range module.Globals {
+		exports = append(exports, l.globalName(globalID))
 	}
 	for _, functionID := range module.Functions {
 		fn := l.program.Functions[functionID]

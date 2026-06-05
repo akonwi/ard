@@ -812,8 +812,8 @@ let result = add(1, 2)
 	if strings.Contains(source, "__ard_script") {
 		t.Fatalf("expected top-level script statements to emit directly, got:\n%s", source)
 	}
-	if !strings.Contains(source, "export { add };") {
-		t.Fatalf("expected function export in AIR JS output, got:\n%s", source)
+	if !strings.Contains(source, "export { add, result };") {
+		t.Fatalf("expected function and global exports in AIR JS output, got:\n%s", source)
 	}
 }
 

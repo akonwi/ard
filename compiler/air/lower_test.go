@@ -51,6 +51,30 @@ func TestLowerTinyProgram(t *testing.T) {
 	}
 }
 
+func TestLowerFunctionCanReadModuleLevelLet(t *testing.T) {
+	program := lowerSource(t, `
+		let refresh_event = "inbox.refresh"
+
+		fn event_name() Str {
+			refresh_event
+		}
+	`)
+
+	if len(program.Globals) != 1 {
+		t.Fatalf("global count = %d, want 1", len(program.Globals))
+	}
+	if program.Globals[0].Name != "refresh_event" {
+		t.Fatalf("global name = %q, want refresh_event", program.Globals[0].Name)
+	}
+	eventName := findFunction(t, program, "event_name")
+	if eventName.Body.Result == nil || eventName.Body.Result.Kind != ExprLoadGlobal {
+		t.Fatalf("event_name result = %#v, want ExprLoadGlobal", eventName.Body.Result)
+	}
+	if eventName.Body.Result.Global != program.Globals[0].ID {
+		t.Fatalf("event_name loads global %d, want %d", eventName.Body.Result.Global, program.Globals[0].ID)
+	}
+}
+
 func TestLowerOmitsTestsByDefault(t *testing.T) {
 	result := parse.Parse([]byte(`
 		fn main() Int { 1 }
