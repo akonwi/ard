@@ -3675,13 +3675,15 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 		loweredArgs[i] = loweredArg
 	}
 
+	switchVar := l.nextTemp()
+	switchVarExpr := ast.NewIdent(switchVar)
 	cases := []ast.Stmt{}
 	for _, impl := range l.program.Impls {
 		if impl.Trait != expr.Trait || expr.Method >= len(impl.Methods) || !validTypeID(l.program, impl.ForType) {
 			continue
 		}
 		methodFn := l.program.Functions[impl.Methods[expr.Method]]
-		receiver := ast.Expr(ast.NewIdent("typed"))
+		receiver := ast.Expr(switchVarExpr)
 		if len(methodFn.Signature.Params) > 0 {
 			receiverParam := methodFn.Signature.Params[0]
 			if receiverParam.Mutable && validTypeID(l.program, receiverParam.Type) && l.program.Types[receiverParam.Type-1].Kind == air.TypeStruct {
@@ -3698,23 +3700,50 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 			args = append(args, argExpr)
 		}
 		call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, methodFn)), Args: args}
-		var body ast.Stmt
+		body := []ast.Stmt{}
 		if isVoid {
-			body = &ast.ExprStmt{X: call}
+			body = append(body, &ast.ExprStmt{X: call})
 		} else {
-			body = &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}}
+			body = append(body, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}})
+		}
+		if traitObjectWritebackAllowed(fn, *expr.Target) && len(methodFn.Signature.Params) > 0 {
+			receiverParam := methodFn.Signature.Params[0]
+			if receiverParam.Mutable && validTypeID(l.program, receiverParam.Type) && l.program.Types[receiverParam.Type-1].Kind == air.TypeStruct {
+				body = append(body, &ast.AssignStmt{
+					Lhs: []ast.Expr{target.expr},
+					Tok: token.ASSIGN,
+					Rhs: []ast.Expr{switchVarExpr},
+				})
+			}
 		}
 		cases = append(cases, &ast.CaseClause{
 			List: []ast.Expr{mustTypeExpr(l, impl.ForType)},
-			Body: []ast.Stmt{body},
+			Body: body,
 		})
 	}
 	cases = append(cases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: "\"unsupported trait object dispatch\""}}}}}})
-	stmts = append(stmts, &ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("typed")}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: target.expr}}}, Body: &ast.BlockStmt{List: cases}})
+	stmts = append(stmts, &ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{switchVarExpr}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: target.expr}}}, Body: &ast.BlockStmt{List: cases}})
 	if isVoid {
 		return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 	}
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
+}
+
+func traitObjectWritebackAllowed(fn air.Function, expr air.Expr) bool {
+	switch expr.Kind {
+	case air.ExprLoadLocal:
+		if int(expr.Local) < 0 || int(expr.Local) >= len(fn.Locals) {
+			return false
+		}
+		return fn.Locals[expr.Local].Mutable
+	case air.ExprGetField:
+		if expr.Target == nil {
+			return false
+		}
+		return traitObjectWritebackAllowed(fn, *expr.Target)
+	default:
+		return false
+	}
 }
 
 func exportedFieldName(name string) string {

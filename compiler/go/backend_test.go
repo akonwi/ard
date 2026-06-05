@@ -125,7 +125,7 @@ func TestGenerateSourcesTakesAddressOfLocalMutTraitArgs(t *testing.T) {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !strings.Contains(source, "Doubler_Bumpable_poke(typed, &c_0)") {
+	if !regexp.MustCompile(`Doubler_Bumpable_poke\(_tmp_[0-9]+, &c_0\)`).MatchString(source) {
 		t.Fatalf("generated source missing address-of for local mutable trait dispatch arg:\n%s", source)
 	}
 }
@@ -161,10 +161,10 @@ func TestGenerateSourcesPassesMutTraitArgsByPointer(t *testing.T) {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !strings.Contains(source, "Doubler_Bumpable_poke(typed, c)") {
+	if !regexp.MustCompile(`Doubler_Bumpable_poke\(_tmp_[0-9]+, c\)`).MatchString(source) {
 		t.Fatalf("generated source missing pointer trait dispatch arg:\n%s", source)
 	}
-	if strings.Contains(source, "Doubler_Bumpable_poke(typed, *c)") {
+	if regexp.MustCompile(`Doubler_Bumpable_poke\(_tmp_[0-9]+, \*c\)`).MatchString(source) {
 		t.Fatalf("generated source dereferences mutable trait dispatch arg:\n%s", source)
 	}
 }
@@ -1219,7 +1219,7 @@ func TestGenerateSourcesPassesPointerReceiverForMutatingTraitImpl(t *testing.T) 
 	if !strings.Contains(source, "_Buffer_Writer_write(self *") {
 		t.Fatalf("generated source missing pointer receiver for mutating trait impl:\n%s", source)
 	}
-	if !strings.Contains(source, "_Buffer_Writer_write(&typed, \"hi\")") {
+	if !regexp.MustCompile(`_Buffer_Writer_write\(&_tmp_[0-9]+, "hi"\)`).MatchString(source) {
 		t.Fatalf("generated source missing address-of for mutating trait dispatch receiver:\n%s", source)
 	}
 }
@@ -1264,13 +1264,13 @@ func TestGenerateSourcesSupportsUserTraitObjectDispatch(t *testing.T) {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !strings.Contains(source, "switch typed := r.(type)") {
+	if !regexp.MustCompile(`switch _tmp_[0-9]+ := r\.\(type\)`).MatchString(source) {
 		t.Fatalf("generated source missing trait object dispatch lowering:\n%s", source)
 	}
-	if !strings.Contains(source, "Block_Renderable_render(typed)") {
+	if !regexp.MustCompile(`Block_Renderable_render\(_tmp_[0-9]+\)`).MatchString(source) {
 		t.Fatalf("generated source missing Block trait dispatch call:\n%s", source)
 	}
-	if !strings.Contains(source, "Para_Renderable_render(typed)") {
+	if !regexp.MustCompile(`Para_Renderable_render\(_tmp_[0-9]+\)`).MatchString(source) {
 		t.Fatalf("generated source missing Para trait dispatch call:\n%s", source)
 	}
 	if !strings.Contains(source, "panic(") {
@@ -1334,7 +1334,7 @@ fn main() {
 	}
 	source := ""
 	for _, data := range sources {
-		if strings.Contains(string(data), "switch typed := t_1.(type)") {
+		if regexp.MustCompile(`switch _tmp_[0-9]+ := t_1\.\(type\)`).MatchString(string(data)) {
 			source = string(data)
 			break
 		}
@@ -1345,7 +1345,7 @@ fn main() {
 	if !strings.Contains(source, "case checkprobe_widget__Text:") {
 		t.Fatalf("generated source missing cross-module trait dispatch case:\n%s", source)
 	}
-	if !strings.Contains(source, "checkprobe_widget__Text_Widget_render(typed, f_0)") {
+	if !regexp.MustCompile(`checkprobe_widget__Text_Widget_render\(_tmp_[0-9]+, f_0\)`).MatchString(source) {
 		t.Fatalf("generated source missing cross-module trait dispatch call:\n%s", source)
 	}
 }
@@ -1443,7 +1443,7 @@ fn main() {
 	}
 	source := ""
 	for _, data := range sources {
-		if strings.Contains(string(data), "switch typed := demo_1.(type)") {
+		if regexp.MustCompile(`switch _tmp_[0-9]+ := demo_1\.\(type\)`).MatchString(string(data)) {
 			source = string(data)
 			break
 		}
@@ -1552,7 +1552,7 @@ fn main() { demo::run() }
 	}
 	source := ""
 	for _, data := range sources {
-		if strings.Contains(string(data), "switch typed := w_1.(type)") {
+		if regexp.MustCompile(`switch _tmp_[0-9]+ := w_1\.\(type\)`).MatchString(string(data)) {
 			source = string(data)
 			break
 		}
@@ -1600,13 +1600,13 @@ func TestGenerateSourcesSupportsVoidTraitObjectDispatch(t *testing.T) {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !strings.Contains(source, "switch typed := g.(type)") {
+	if !regexp.MustCompile(`switch _tmp_[0-9]+ := g\.\(type\)`).MatchString(source) {
 		t.Fatalf("generated source missing void trait object dispatch lowering:\n%s", source)
 	}
-	if !strings.Contains(source, "Cat_Greet_say(typed)") {
+	if !regexp.MustCompile(`Cat_Greet_say\(_tmp_[0-9]+\)`).MatchString(source) {
 		t.Fatalf("generated source missing void trait dispatch call:\n%s", source)
 	}
-	if strings.Contains(source, "= test_ard__Cat_Greet_say(typed)") || strings.Contains(source, "= Cat_Greet_say(typed)") {
+	if regexp.MustCompile(`= .*Cat_Greet_say\(_tmp_[0-9]+\)`).MatchString(source) {
 		t.Fatalf("generated source assigns void trait dispatch result:\n%s", source)
 	}
 	if !strings.Contains(source, "invoke(any(") {
@@ -1666,10 +1666,10 @@ func TestGenerateSourcesSupportsStoredTraitObjectDispatch(t *testing.T) {
 	if !strings.Contains(source, "[]any{any(") {
 		t.Fatalf("generated source missing list element trait-object upcast:\n%s", source)
 	}
-	if !strings.Contains(source, "switch typed := d_0.(type)") {
+	if !regexp.MustCompile(`switch _tmp_[0-9]+ := d_0\.\(type\)`).MatchString(source) {
 		t.Fatalf("generated source missing local trait-object dispatch:\n%s", source)
 	}
-	if !strings.Contains(source, "switch typed := c_1.child.(type)") {
+	if !regexp.MustCompile(`switch _tmp_[0-9]+ := c_1\.child\.\(type\)`).MatchString(source) {
 		t.Fatalf("generated source missing struct field trait-object dispatch:\n%s", source)
 	}
 	if !strings.Contains(source, "show(items_2[0])") {
@@ -1705,10 +1705,10 @@ func TestGenerateSourcesSupportsTraitObjectDispatch(t *testing.T) {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !strings.Contains(source, "type switch") && !strings.Contains(source, "switch typed := item.(type)") {
+	if !strings.Contains(source, "type switch") && !regexp.MustCompile(`switch _tmp_[0-9]+ := item\.\(type\)`).MatchString(source) {
 		t.Fatalf("generated source missing trait object dispatch lowering:\n%s", source)
 	}
-	if !strings.Contains(source, "Book_ToString_to_str(typed)") {
+	if !regexp.MustCompile(`Book_ToString_to_str\(_tmp_[0-9]+\)`).MatchString(source) {
 		t.Fatalf("generated source missing concrete trait dispatch call:\n%s", source)
 	}
 }

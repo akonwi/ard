@@ -1242,6 +1242,70 @@ func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
 	}
 }
 
+func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.T) {
+	program := lowerParitySource(t, `
+		trait View {
+			fn handle_event()
+			fn value() Int
+		}
+
+		struct CounterView {
+			count: Int,
+		}
+
+		impl View for CounterView {
+			fn mut handle_event() {
+				self.count = self.count + 1
+			}
+
+			fn value() Int {
+				self.count
+			}
+		}
+
+		struct AppRoot {
+			view: View,
+		}
+
+		impl AppRoot {
+			fn mut dispatch() {
+				self.view.handle_event()
+			}
+
+			fn current() Int {
+				self.view.value()
+			}
+		}
+
+		fn run_typed(mut typed: AppRoot) Int {
+			typed.view.handle_event()
+			typed.view.value()
+		}
+
+		fn run_any(mut any: AppRoot) Int {
+			any.view.handle_event()
+			any.view.value()
+		}
+
+		fn main() Int {
+			mut app = AppRoot{view: CounterView{count: 0}}
+			app.dispatch()
+			let field_result = app.current()
+
+			mut typed_app = AppRoot{view: CounterView{count: 0}}
+			let typed_result = run_typed(mut typed_app)
+
+			mut any_app = AppRoot{view: CounterView{count: 0}}
+			let any_result = run_any(mut any_app)
+
+			field_result + typed_result + any_result
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "3" {
+		t.Fatalf("got %s, want 3", got)
+	}
+}
+
 func TestGoTargetParityMutMethodClosureCapturesSelf(t *testing.T) {
 	program := lowerParitySource(t, `
 		use ard/io
