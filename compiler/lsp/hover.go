@@ -54,14 +54,9 @@ func computeHover(source string, filePath string, position protocol.Position) *h
 	return describeExpr(expr, source, filePath, prog)
 }
 
-// parseAndCache caches the parsed program for type resolution.
+// parseAndCache parses source and returns the parsed program.
 func parseAndCache(source string, filePath string) *parse.Program {
 	result := parse.Parse([]byte(source), filePath)
-	if result.Program != nil {
-		lastParseSource = source
-		lastParseProgram = result.Program
-		lastParseFilepath = filePath
-	}
 	return result.Program
 }
 
@@ -897,7 +892,7 @@ func describeExpr(expr parse.Expression, source string, filePath string, prog *p
 		if len(e.Items) == 0 {
 			return simpleHover("[?]")
 		}
-		itemType := inferExprType(e.Items[0])
+		itemType := inferExprType(e.Items[0], prog, filePath)
 		if itemType == "" || itemType == "?" {
 			return simpleHover("List")
 		}
@@ -949,7 +944,7 @@ func describeIdentifier(id *parse.Identifier, source string, filePath string, pr
 	}
 
 	// Fall back to parse-tree scanning
-	info := scanForType(id.Name, prog.Statements)
+	info := scanForType(id.Name, prog.Statements, prog, filePath)
 	if info != nil {
 		return info
 	}
@@ -1260,7 +1255,7 @@ func findTypeInCheckerIf(name string, e *checker.If) string {
 }
 
 // scanForType searches parse-tree statements for a declaration matching name.
-func scanForType(name string, stmts []parse.Statement) *hoverInfo {
+func scanForType(name string, stmts []parse.Statement, prog *parse.Program, filePath string) *hoverInfo {
 	for _, stmt := range stmts {
 		if stmt == nil {
 			continue
@@ -1268,7 +1263,7 @@ func scanForType(name string, stmts []parse.Statement) *hoverInfo {
 		switch s := stmt.(type) {
 		case *parse.VariableDeclaration:
 			if s.Name == name {
-				return describeVariableDecl(s, "", "", nil)
+				return describeVariableDecl(s, "", filePath, prog)
 			}
 		case *parse.FunctionDeclaration:
 			if s.Name == name {
@@ -1279,7 +1274,7 @@ func scanForType(name string, stmts []parse.Statement) *hoverInfo {
 					return describeParam(&p)
 				}
 			}
-			if info := scanForType(name, s.Body); info != nil {
+			if info := scanForType(name, s.Body, prog, filePath); info != nil {
 				return info
 			}
 		case *parse.ImplBlock:
@@ -1287,7 +1282,7 @@ func scanForType(name string, stmts []parse.Statement) *hoverInfo {
 				return simpleHover(s.Target.Name)
 			}
 			for i := range s.Methods {
-				if info := scanForType(name, []parse.Statement{&s.Methods[i]}); info != nil {
+				if info := scanForType(name, []parse.Statement{&s.Methods[i]}, prog, filePath); info != nil {
 					return info
 				}
 			}
@@ -1299,7 +1294,7 @@ func scanForType(name string, stmts []parse.Statement) *hoverInfo {
 				return simpleHover(s.ForType.Name)
 			}
 			for i := range s.Methods {
-				if info := scanForType(name, []parse.Statement{&s.Methods[i]}); info != nil {
+				if info := scanForType(name, []parse.Statement{&s.Methods[i]}, prog, filePath); info != nil {
 					return info
 				}
 			}
@@ -1308,46 +1303,46 @@ func scanForType(name string, stmts []parse.Statement) *hoverInfo {
 				return simpleHover(s.Name.Name)
 			}
 			for i := range s.Methods {
-				if info := scanForType(name, []parse.Statement{&s.Methods[i]}); info != nil {
+				if info := scanForType(name, []parse.Statement{&s.Methods[i]}, prog, filePath); info != nil {
 					return info
 				}
 			}
 		case *parse.IfStatement:
-			if info := scanForType(name, s.Body); info != nil {
+			if info := scanForType(name, s.Body, prog, filePath); info != nil {
 				return info
 			}
 			if s.Else != nil {
-				if info := scanForType(name, []parse.Statement{s.Else}); info != nil {
+				if info := scanForType(name, []parse.Statement{s.Else}, prog, filePath); info != nil {
 					return info
 				}
 			}
 		case *parse.WhileLoop:
-			if info := scanForType(name, s.Body); info != nil {
+			if info := scanForType(name, s.Body, prog, filePath); info != nil {
 				return info
 			}
 		case *parse.ForInLoop:
 			if s.Cursor.Name == name {
-				return simpleHover(inferLoopCursorType(s.Iterable, false))
+				return simpleHover(inferLoopCursorType(s.Iterable, false, prog, filePath))
 			}
 			if s.Cursor2.Name == name {
-				return simpleHover(inferLoopCursorType(s.Iterable, true))
+				return simpleHover(inferLoopCursorType(s.Iterable, true, prog, filePath))
 			}
-			if info := scanForType(name, s.Body); info != nil {
+			if info := scanForType(name, s.Body, prog, filePath); info != nil {
 				return info
 			}
 		case *parse.RangeLoop:
 			if s.Cursor.Name == name || s.Cursor2.Name == name {
 				return simpleHover("Int")
 			}
-			if info := scanForType(name, s.Body); info != nil {
+			if info := scanForType(name, s.Body, prog, filePath); info != nil {
 				return info
 			}
 		case *parse.ForLoop:
-			if info := scanForType(name, s.Body); info != nil {
+			if info := scanForType(name, s.Body, prog, filePath); info != nil {
 				return info
 			}
 		case *parse.BlockExpression:
-			if info := scanForType(name, s.Statements); info != nil {
+			if info := scanForType(name, s.Statements, prog, filePath); info != nil {
 				return info
 			}
 		case *parse.Try:
@@ -1399,7 +1394,7 @@ func describeVariableDecl(vd *parse.VariableDeclaration, source string, filePath
 
 	// Fall back to parse-tree inference
 	if vd.Value != nil {
-		inferred := inferExprType(vd.Value)
+		inferred := inferExprType(vd.Value, prog, filePath)
 		if inferred != "" && inferred != "?" {
 			return simpleHover(inferred)
 		}
@@ -1427,7 +1422,7 @@ func resolveInstancePropertyType(ip *parse.InstanceProperty, prog *parse.Program
 		return "", ""
 	}
 
-	ownerType := normalizeDisplayType(inferExprType(ip.Target))
+	ownerType := normalizeDisplayType(inferExprType(ip.Target, prog, filePath))
 	ownerType = strings.TrimSuffix(ownerType, "?")
 	if ownerType == "" || ownerType == "?" {
 		return "", ""
@@ -1487,7 +1482,7 @@ func resolveInstanceMethodSignature(im *parse.InstanceMethod, prog *parse.Progra
 		return nil
 	}
 
-	ownerType := inferExprType(im.Target)
+	ownerType := inferExprType(im.Target, prog, filePath)
 	if ownerType == "" || ownerType == "?" {
 		return nil
 	}
@@ -2018,7 +2013,7 @@ func findFunctionDecl(name string, stmts []parse.Statement) *hoverInfo {
 }
 
 // inferExprType returns a type name for an expression, scanning the AST for declarations.
-func inferExprType(expr parse.Expression) string {
+func inferExprType(expr parse.Expression, prog *parse.Program, filePath string) string {
 	if expr == nil {
 		return ""
 	}
@@ -2039,7 +2034,7 @@ func inferExprType(expr parse.Expression) string {
 		if len(e.Items) == 0 {
 			return "[?]"
 		}
-		itemType := inferExprType(e.Items[0])
+		itemType := inferExprType(e.Items[0], prog, filePath)
 		if itemType == "" || itemType == "?" {
 			return "List"
 		}
@@ -2047,46 +2042,46 @@ func inferExprType(expr parse.Expression) string {
 	case *parse.MapLiteral:
 		return "Map"
 	case *parse.Identifier:
-		return resolveIdentType(e.Name)
+		return resolveIdentType(e.Name, prog, filePath)
 	case *parse.FunctionCall:
-		return resolveFunctionReturnType(e.Name)
+		return resolveFunctionReturnType(e.Name, prog)
 	case *parse.InstanceProperty:
-		_, fieldType := resolveInstancePropertyType(e, lastParseProgram, lastParseFilepath)
+		_, fieldType := resolveInstancePropertyType(e, prog, filePath)
 		if fieldType != "" {
-			return qualifyTypeDisplay(fieldType, lastParseProgram, lastParseFilepath)
+			return qualifyTypeDisplay(fieldType, prog, filePath)
 		}
-		return resolveIdentType(e.Property.Name)
+		return resolveIdentType(e.Property.Name, prog, filePath)
 	case *parse.InstanceMethod:
-		if sig := resolveInstanceMethodSignature(e, lastParseProgram, lastParseFilepath); sig != nil && sig.ReturnType != "" {
-			return qualifyTypeDisplay(sig.ReturnType, lastParseProgram, lastParseFilepath)
+		if sig := resolveInstanceMethodSignature(e, prog, filePath); sig != nil && sig.ReturnType != "" {
+			return qualifyTypeDisplay(sig.ReturnType, prog, filePath)
 		}
-		return resolveFunctionReturnType(e.Method.Name)
+		return resolveFunctionReturnType(e.Method.Name, prog)
 	case *parse.StaticFunction:
-		if ret := resolveStaticFunctionReturnType(e, lastParseProgram); ret != "" {
+		if ret := resolveStaticFunctionReturnType(e, prog, filePath); ret != "" {
 			return ret
 		}
 		return "?"
 	case *parse.StaticProperty:
 		if id, ok := e.Property.(*parse.Identifier); ok {
-			return resolveIdentType(id.Name)
+			return resolveIdentType(id.Name, prog, filePath)
 		}
 		return "?"
 	case *parse.UnaryExpression:
 		if e.Operator == parse.Bang || e.Operator == parse.Not {
 			return "Bool"
 		}
-		return inferExprType(e.Operand)
+		return inferExprType(e.Operand, prog, filePath)
 	case *parse.BinaryExpression:
-		return inferBinaryExprType(e)
+		return inferBinaryExprType(e, prog, filePath)
 	case *parse.IfStatement:
 		if len(e.Body) > 0 {
 			if last, ok := e.Body[len(e.Body)-1].(parse.Expression); ok {
-				return inferExprType(last)
+				return inferExprType(last, prog, filePath)
 			}
 		}
 		if e.Else != nil {
 			if last, ok := e.Else.(parse.Expression); ok {
-				return inferExprType(last)
+				return inferExprType(last, prog, filePath)
 			}
 		}
 		return "Void"
@@ -2097,12 +2092,8 @@ func inferExprType(expr parse.Expression) string {
 }
 
 // resolveIdentType resolves an identifier's type by scanning the parse tree.
-var lastParseSource string
-var lastParseFilepath string
-var lastParseProgram *parse.Program
-
-func resolveIdentType(name string) string {
-	if lastParseProgram == nil {
+func resolveIdentType(name string, prog *parse.Program, filePath string) string {
+	if prog == nil {
 		return "?"
 	}
 	switch name {
@@ -2113,11 +2104,11 @@ func resolveIdentType(name string) string {
 	case "panic":
 		return "?"
 	}
-	return scanIdentType(name, lastParseProgram.Statements)
+	return scanIdentType(name, prog.Statements, prog, filePath)
 }
 
 // scanIdentType searches parse-tree statements for a declaration matching name.
-func scanIdentType(name string, stmts []parse.Statement) string {
+func scanIdentType(name string, stmts []parse.Statement, prog *parse.Program, filePath string) string {
 	for _, stmt := range stmts {
 		if stmt == nil {
 			continue
@@ -2125,7 +2116,7 @@ func scanIdentType(name string, stmts []parse.Statement) string {
 		switch s := stmt.(type) {
 		case *parse.VariableDeclaration:
 			if s.Name == name {
-				return typeFromDecl(s)
+				return typeFromDecl(s, prog, filePath)
 			}
 		case *parse.FunctionDeclaration:
 			if s.Name == name {
@@ -2136,7 +2127,7 @@ func scanIdentType(name string, stmts []parse.Statement) string {
 					return typeDeclString(p.Type)
 				}
 			}
-			if t := scanIdentType(name, s.Body); t != "" {
+			if t := scanIdentType(name, s.Body, prog, filePath); t != "" {
 				return t
 			}
 		case *parse.ImplBlock:
@@ -2144,7 +2135,7 @@ func scanIdentType(name string, stmts []parse.Statement) string {
 				return s.Target.Name
 			}
 			for i := range s.Methods {
-				if t := scanIdentType(name, []parse.Statement{&s.Methods[i]}); t != "" {
+				if t := scanIdentType(name, []parse.Statement{&s.Methods[i]}, prog, filePath); t != "" {
 					return t
 				}
 			}
@@ -2156,7 +2147,7 @@ func scanIdentType(name string, stmts []parse.Statement) string {
 				return s.ForType.Name
 			}
 			for i := range s.Methods {
-				if t := scanIdentType(name, []parse.Statement{&s.Methods[i]}); t != "" {
+				if t := scanIdentType(name, []parse.Statement{&s.Methods[i]}, prog, filePath); t != "" {
 					return t
 				}
 			}
@@ -2165,46 +2156,46 @@ func scanIdentType(name string, stmts []parse.Statement) string {
 				return s.Name.Name
 			}
 			for i := range s.Methods {
-				if t := scanIdentType(name, []parse.Statement{&s.Methods[i]}); t != "" {
+				if t := scanIdentType(name, []parse.Statement{&s.Methods[i]}, prog, filePath); t != "" {
 					return t
 				}
 			}
 		case *parse.IfStatement:
-			if t := scanIdentType(name, s.Body); t != "" {
+			if t := scanIdentType(name, s.Body, prog, filePath); t != "" {
 				return t
 			}
 			if s.Else != nil {
-				if t := scanIdentType(name, []parse.Statement{s.Else}); t != "" {
+				if t := scanIdentType(name, []parse.Statement{s.Else}, prog, filePath); t != "" {
 					return t
 				}
 			}
 		case *parse.WhileLoop:
-			if t := scanIdentType(name, s.Body); t != "" {
+			if t := scanIdentType(name, s.Body, prog, filePath); t != "" {
 				return t
 			}
 		case *parse.ForInLoop:
 			if s.Cursor.Name == name {
-				return inferLoopCursorType(s.Iterable, false)
+				return inferLoopCursorType(s.Iterable, false, prog, filePath)
 			}
 			if s.Cursor2.Name == name {
-				return inferLoopCursorType(s.Iterable, true)
+				return inferLoopCursorType(s.Iterable, true, prog, filePath)
 			}
-			if t := scanIdentType(name, s.Body); t != "" {
+			if t := scanIdentType(name, s.Body, prog, filePath); t != "" {
 				return t
 			}
 		case *parse.RangeLoop:
 			if s.Cursor.Name == name || s.Cursor2.Name == name {
 				return "Int"
 			}
-			if t := scanIdentType(name, s.Body); t != "" {
+			if t := scanIdentType(name, s.Body, prog, filePath); t != "" {
 				return t
 			}
 		case *parse.ForLoop:
-			if t := scanIdentType(name, s.Body); t != "" {
+			if t := scanIdentType(name, s.Body, prog, filePath); t != "" {
 				return t
 			}
 		case *parse.BlockExpression:
-			if t := scanIdentType(name, s.Statements); t != "" {
+			if t := scanIdentType(name, s.Statements, prog, filePath); t != "" {
 				return t
 			}
 		case *parse.Try:
@@ -2217,8 +2208,8 @@ func scanIdentType(name string, stmts []parse.Statement) string {
 }
 
 // inferLoopCursorType returns the parse-inferred item type for a for-in cursor.
-func inferLoopCursorType(iterable parse.Expression, index bool) string {
-	iterableType := inferExprType(iterable)
+func inferLoopCursorType(iterable parse.Expression, index bool, prog *parse.Program, filePath string) string {
+	iterableType := inferExprType(iterable, prog, filePath)
 	if index {
 		if iterableType == "Map" {
 			return "?"
@@ -2235,19 +2226,19 @@ func inferLoopCursorType(iterable parse.Expression, index bool) string {
 }
 
 // typeFromDecl returns the type string for a variable declaration.
-func typeFromDecl(vd *parse.VariableDeclaration) string {
+func typeFromDecl(vd *parse.VariableDeclaration, prog *parse.Program, filePath string) string {
 	if vd.Type != nil {
 		return typeDeclString(vd.Type)
 	}
 	if vd.Value != nil {
-		return inferExprType(vd.Value)
+		return inferExprType(vd.Value, prog, filePath)
 	}
 	return ""
 }
 
-func resolveStaticFunctionReturnType(sf *parse.StaticFunction, prog *parse.Program) string {
-	if sig := resolveStaticFunctionSignature(sf, prog, lastParseFilepath); sig != nil {
-		return qualifyTypeDisplay(sig.ReturnType, prog, lastParseFilepath)
+func resolveStaticFunctionReturnType(sf *parse.StaticFunction, prog *parse.Program, filePath string) string {
+	if sig := resolveStaticFunctionSignature(sf, prog, filePath); sig != nil {
+		return qualifyTypeDisplay(sig.ReturnType, prog, filePath)
 	}
 	return ""
 }
@@ -2376,11 +2367,11 @@ func parseStaticFunctionSignature(target string, fd *parse.FunctionDeclaration) 
 }
 
 // resolveFunctionReturnType finds a function declaration and returns its return type.
-func resolveFunctionReturnType(name string) string {
-	if lastParseProgram == nil {
+func resolveFunctionReturnType(name string, prog *parse.Program) string {
+	if prog == nil {
 		return "?"
 	}
-	return scanFunctionReturnType(name, lastParseProgram.Statements)
+	return scanFunctionReturnType(name, prog.Statements)
 }
 
 // scanFunctionReturnType searches for a function declaration and returns its return type.
@@ -2429,14 +2420,14 @@ func funcReturnTypeString(fd *parse.FunctionDeclaration) string {
 }
 
 // inferBinaryExprType returns the type of a binary expression.
-func inferBinaryExprType(e *parse.BinaryExpression) string {
+func inferBinaryExprType(e *parse.BinaryExpression, prog *parse.Program, filePath string) string {
 	switch e.Operator {
 	case parse.Equal, parse.NotEqual, parse.GreaterThan, parse.GreaterThanOrEqual,
 		parse.LessThan, parse.LessThanOrEqual, parse.And, parse.Or:
 		return "Bool"
 	case parse.Plus:
-		left := inferExprType(e.Left)
-		right := inferExprType(e.Right)
+		left := inferExprType(e.Left, prog, filePath)
+		right := inferExprType(e.Right, prog, filePath)
 		if left == right {
 			return left
 		}
@@ -2448,12 +2439,12 @@ func inferBinaryExprType(e *parse.BinaryExpression) string {
 		}
 		return "Int"
 	case parse.Minus, parse.Divide, parse.Multiply, parse.Modulo:
-		left := inferExprType(e.Left)
+		left := inferExprType(e.Left, prog, filePath)
 		if left != "" && left != "?" {
 			return left
 		}
 		return "Int"
 	default:
-		return inferExprType(e.Left)
+		return inferExprType(e.Left, prog, filePath)
 	}
 }

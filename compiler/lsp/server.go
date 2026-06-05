@@ -9,9 +9,11 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"time"
 
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 // stdio wraps os.Stdin and os.Stdout into a single io.ReadWriteCloser.
@@ -32,18 +34,28 @@ func (s *stdio) Close() error {
 // Server is the Ard LSP server.
 type Server struct {
 	cache       *DocumentCache
-	mu          sync.Mutex
 	handlers    map[string]jsonrpc2.Handler
 	conn        jsonrpc2.Conn
 	projectRoot string
+
+	diagnosticsMu        sync.Mutex
+	diagnosticsTimers    map[uri.URI]*time.Timer
+	diagnosticsDelay     time.Duration
+	diagnosticsPublisher func(context.Context, uri.URI)
+	diagnosticsAnalyzer  diagnosticAnalyzer
 }
 
 // NewServer creates a new Ard LSP server.
 func NewServer() *Server {
 	s := &Server{
-		cache:    NewDocumentCache(),
-		handlers: make(map[string]jsonrpc2.Handler),
+		cache:                NewDocumentCache(),
+		handlers:             make(map[string]jsonrpc2.Handler),
+		diagnosticsTimers:    make(map[uri.URI]*time.Timer),
+		diagnosticsDelay:     100 * time.Millisecond,
+		diagnosticsPublisher: nil,
+		diagnosticsAnalyzer:  parseAndCheckWithOverlays,
 	}
+	s.diagnosticsPublisher = s.publishDiagnostics
 	s.registerHandlers()
 	return s
 }
@@ -58,13 +70,48 @@ func (s *Server) Run(ctx context.Context) error {
 	conn := jsonrpc2.NewConn(stream)
 	s.conn = conn
 
-	handler := protocol.Handlers(
-		jsonrpc2.Handler(s.dispatch),
-	)
-
-	conn.Go(ctx, handler)
+	conn.Go(ctx, s.jsonRPCHandler())
 	<-conn.Done()
 	return conn.Err()
+}
+
+func (s *Server) jsonRPCHandler() jsonrpc2.Handler {
+	return protocol.CancelHandler(
+		concurrentRequestHandler(
+			jsonrpc2.ReplyHandler(jsonrpc2.Handler(s.dispatch)),
+		),
+	)
+}
+
+// concurrentRequestHandler runs feature requests concurrently while preserving
+// lifecycle and document-sync ordering on the reader goroutine.
+func concurrentRequestHandler(handler jsonrpc2.Handler) jsonrpc2.Handler {
+	return func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+		if handleRequestInline(req.Method()) {
+			return handler(ctx, reply, req)
+		}
+
+		go func() {
+			_ = handler(ctx, reply, req)
+		}()
+		return nil
+	}
+}
+
+func handleRequestInline(method string) bool {
+	switch method {
+	case protocol.MethodInitialize,
+		protocol.MethodInitialized,
+		protocol.MethodShutdown,
+		protocol.MethodExit,
+		protocol.MethodTextDocumentDidOpen,
+		protocol.MethodTextDocumentDidChange,
+		protocol.MethodTextDocumentDidSave,
+		protocol.MethodTextDocumentDidClose:
+		return true
+	default:
+		return false
+	}
 }
 
 // dispatch routes incoming LSP requests and notifications to registered handlers.
@@ -86,12 +133,6 @@ func (s *Server) dispatch(ctx context.Context, reply jsonrpc2.Replier, req jsonr
 			err = fmt.Errorf("internal server error after reply handling %s: %v", method, r)
 		}
 	}()
-
-	// LSP clients may send feature requests concurrently. The current hover,
-	// definition, references, and signature-help paths share parse/type-resolution
-	// caches, so serialize handlers until those caches are request-scoped.
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if handler, ok := s.handlers[method]; ok {
 		return handler(ctx, safeReply, req)
@@ -147,7 +188,7 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 
 	result := &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
-			TextDocumentSync:       protocol.TextDocumentSyncKindFull,
+			TextDocumentSync:       protocol.TextDocumentSyncKindIncremental,
 			HoverProvider:          true,
 			DefinitionProvider:     true,
 			ReferencesProvider:     true,
@@ -185,9 +226,58 @@ func (s *Server) handleExit(ctx context.Context, reply jsonrpc2.Replier, req jso
 	return reply(ctx, nil, nil)
 }
 
+func (s *Server) scheduleDiagnostics(docURI uri.URI) {
+	if s.diagnosticsDelay <= 0 {
+		go s.runDiagnostics(docURI)
+		return
+	}
+
+	s.diagnosticsMu.Lock()
+	defer s.diagnosticsMu.Unlock()
+	if timer := s.diagnosticsTimers[docURI]; timer != nil {
+		timer.Stop()
+	}
+	s.diagnosticsTimers[docURI] = time.AfterFunc(s.diagnosticsDelay, func() {
+		s.diagnosticsMu.Lock()
+		delete(s.diagnosticsTimers, docURI)
+		s.diagnosticsMu.Unlock()
+		s.runDiagnostics(docURI)
+	})
+}
+
+func (s *Server) scheduleDiagnosticsForOpenDocuments() {
+	for _, doc := range s.cache.Snapshot() {
+		s.scheduleDiagnostics(doc.URI)
+	}
+}
+
+func (s *Server) runDiagnostics(docURI uri.URI) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "ard-lsp panic publishing diagnostics for %s: %v\n%s", docURI, r, debug.Stack())
+		}
+	}()
+	publisher := s.diagnosticsPublisher
+	if publisher == nil {
+		publisher = s.publishDiagnostics
+	}
+	publisher(context.Background(), docURI)
+}
+
 //-------------------------------------------------------------------------
 // Document sync handlers
 //-------------------------------------------------------------------------
+
+type didChangeParams struct {
+	TextDocument   protocol.VersionedTextDocumentIdentifier `json:"textDocument"`
+	ContentChanges []documentContentChange                  `json:"contentChanges"`
+}
+
+type documentContentChange struct {
+	Range       *protocol.Range `json:"range,omitempty"`
+	RangeLength *uint32         `json:"rangeLength,omitempty"`
+	Text        string          `json:"text"`
+}
 
 func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	var params protocol.DidOpenTextDocumentParams
@@ -198,26 +288,32 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 	s.cache.Open(
 		params.TextDocument.URI,
 		string(params.TextDocument.LanguageID),
-		1,
+		params.TextDocument.Version,
 		params.TextDocument.Text,
 	)
-	s.publishDiagnostics(ctx, params.TextDocument.URI)
+	s.scheduleDiagnosticsForOpenDocuments()
 
 	return reply(ctx, nil, nil)
 }
 
 func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
-	var params protocol.DidChangeTextDocumentParams
+	var params didChangeParams
 	if err := json.Unmarshal(req.Params(), &params); err != nil {
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
 
 	if len(params.ContentChanges) > 0 {
-		change := params.ContentChanges[len(params.ContentChanges)-1]
-		s.cache.Update(params.TextDocument.URI, params.TextDocument.Version, change.Text)
+		doc := s.cache.Get(params.TextDocument.URI)
+		if doc != nil {
+			updated, err := applyDocumentChanges(doc.Text, params.ContentChanges)
+			if err != nil {
+				return reply(ctx, nil, fmt.Errorf("invalid document change: %w", err))
+			}
+			s.cache.Update(params.TextDocument.URI, params.TextDocument.Version, updated)
+		}
 	}
 
-	s.publishDiagnostics(ctx, params.TextDocument.URI)
+	s.scheduleDiagnosticsForOpenDocuments()
 
 	return reply(ctx, nil, nil)
 }
@@ -233,7 +329,8 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 	}
 
 	s.cache.Close(params.TextDocument.URI)
-	s.publishDiagnostics(ctx, params.TextDocument.URI)
+	s.scheduleDiagnostics(params.TextDocument.URI)
+	s.scheduleDiagnosticsForOpenDocuments()
 
 	return reply(ctx, nil, nil)
 }
@@ -261,7 +358,11 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 				info = nil
 			}
 		}()
-		info = computeHover(doc.Text, doc.URI.Filename(), params.Position)
+		filePath, ok := docFilePath(doc)
+		if !ok {
+			return
+		}
+		info = computeHover(doc.Text, filePath, params.Position)
 	}()
 
 	if info == nil || info.content == "" {
@@ -296,7 +397,11 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				locations = []protocol.Location{}
 			}
 		}()
-		locations = computeDefinition(doc.Text, doc.URI.Filename(), params.Position)
+		filePath, ok := docFilePath(doc)
+		if !ok {
+			return
+		}
+		locations = computeDefinition(doc.Text, filePath, params.Position)
 	}()
 	if locations == nil {
 		locations = []protocol.Location{}
@@ -323,11 +428,12 @@ func (s *Server) handleReferences(ctx context.Context, reply jsonrpc2.Replier, r
 				locations = []protocol.Location{}
 			}
 		}()
-		overlays := map[string]string{}
-		for _, cached := range s.cache.Snapshot() {
-			overlays[cached.URI.Filename()] = cached.Text
+		filePath, ok := docFilePath(doc)
+		if !ok {
+			return
 		}
-		locations = computeReferencesWithOverlays(doc.Text, doc.URI.Filename(), params.Position, params.Context.IncludeDeclaration, overlays)
+		overlays := overlaySources(s.cache.Snapshot())
+		locations = computeReferencesWithOverlays(doc.Text, filePath, params.Position, params.Context.IncludeDeclaration, overlays)
 	}()
 	if locations == nil {
 		locations = []protocol.Location{}
@@ -364,7 +470,11 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 				items = []protocol.CompletionItem{}
 			}
 		}()
-		items = computeCompletions(doc.Text, doc.URI.Filename(), params.Position)
+		filePath, ok := docFilePath(doc)
+		if !ok {
+			return
+		}
+		items = computeCompletions(doc.Text, filePath, params.Position)
 	}()
 	if items == nil {
 		items = []protocol.CompletionItem{}
@@ -404,7 +514,10 @@ func (s *Server) handleFormatting(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, []protocol.TextEdit{}, nil)
 	}
 
-	filePath := doc.URI.Filename()
+	filePath, ok := docFilePath(doc)
+	if !ok {
+		return reply(ctx, []protocol.TextEdit{}, nil)
+	}
 	formatted, err := formatSource(doc.Text, filePath)
 	if err != nil || formatted == doc.Text {
 		return reply(ctx, []protocol.TextEdit{}, nil)
@@ -436,7 +549,11 @@ func (s *Server) handleCodeAction(ctx context.Context, reply jsonrpc2.Replier, r
 	if doc == nil {
 		return reply(ctx, []protocol.CodeAction{}, nil)
 	}
-	formatted, err := formatSource(doc.Text, doc.URI.Filename())
+	filePath, ok := docFilePath(doc)
+	if !ok {
+		return reply(ctx, []protocol.CodeAction{}, nil)
+	}
+	formatted, err := formatSource(doc.Text, filePath)
 	if err != nil || formatted == doc.Text {
 		return reply(ctx, []protocol.CodeAction{}, nil)
 	}
@@ -470,7 +587,11 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 				help = nil
 			}
 		}()
-		help = computeSignatureHelp(doc.Text, doc.URI.Filename(), params.Position)
+		filePath, ok := docFilePath(doc)
+		if !ok {
+			return
+		}
+		help = computeSignatureHelp(doc.Text, filePath, params.Position)
 	}()
 
 	return reply(ctx, help, nil)
@@ -487,7 +608,11 @@ func (s *Server) handleDocumentHighlight(ctx context.Context, reply jsonrpc2.Rep
 		return reply(ctx, []protocol.DocumentHighlight{}, nil)
 	}
 
-	highlights := computeDocumentHighlights(doc.Text, doc.URI.Filename(), params.Position)
+	filePath, ok := docFilePath(doc)
+	if !ok {
+		return reply(ctx, []protocol.DocumentHighlight{}, nil)
+	}
+	highlights := computeDocumentHighlights(doc.Text, filePath, params.Position)
 	if highlights == nil {
 		highlights = []protocol.DocumentHighlight{}
 	}
@@ -503,7 +628,11 @@ func (s *Server) handlePrepareRename(ctx context.Context, reply jsonrpc2.Replier
 	if doc == nil {
 		return reply(ctx, nil, nil)
 	}
-	rng := prepareRename(doc.Text, doc.URI.Filename(), params.Position)
+	filePath, ok := docFilePath(doc)
+	if !ok {
+		return reply(ctx, nil, nil)
+	}
+	rng := prepareRename(doc.Text, filePath, params.Position)
 	return reply(ctx, rng, nil)
 }
 
@@ -516,10 +645,11 @@ func (s *Server) handleRename(ctx context.Context, reply jsonrpc2.Replier, req j
 	if doc == nil {
 		return reply(ctx, nil, nil)
 	}
-	overlays := map[string]string{}
-	for _, cached := range s.cache.Snapshot() {
-		overlays[cached.URI.Filename()] = cached.Text
+	filePath, ok := docFilePath(doc)
+	if !ok {
+		return reply(ctx, nil, nil)
 	}
-	edit := computeRename(doc.Text, doc.URI.Filename(), params.Position, params.NewName, overlays)
+	overlays := overlaySources(s.cache.Snapshot())
+	edit := computeRename(doc.Text, filePath, params.Position, params.NewName, overlays)
 	return reply(ctx, edit, nil)
 }

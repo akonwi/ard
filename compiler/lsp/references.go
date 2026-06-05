@@ -25,22 +25,11 @@ type referenceResolvedTarget struct {
 	def  *definitionTarget
 }
 
-type referenceModulePathEntry struct {
-	path string
-	ok   bool
-}
-
-var referenceModulePathCache map[string]referenceModulePathEntry
-
 func computeReferences(source string, filePath string, position protocol.Position, includeDeclaration bool) []protocol.Location {
 	return computeReferencesWithOverlays(source, filePath, position, includeDeclaration, nil)
 }
 
 func computeReferencesWithOverlays(source string, filePath string, position protocol.Position, includeDeclaration bool, overlays map[string]string) []protocol.Location {
-	previousModulePathCache := referenceModulePathCache
-	referenceModulePathCache = map[string]referenceModulePathEntry{}
-	defer func() { referenceModulePathCache = previousModulePathCache }()
-
 	target := lspPositionToParsePoint(position)
 	prog := parseAndCache(source, filePath)
 	if prog == nil {
@@ -50,7 +39,7 @@ func computeReferencesWithOverlays(source string, filePath string, position prot
 	var def *definitionTarget
 	var targetKind string
 	var targetName string
-	if resolved := findReferenceDeclarationTarget(prog.Statements, target, filePath, prog); resolved != nil {
+	if resolved := findReferenceDeclarationTarget(prog.Statements, target, filePath, source, prog); resolved != nil {
 		def = resolved.def
 		targetKind = resolved.kind
 		targetName = resolved.name
@@ -97,7 +86,7 @@ func computeReferencesWithOverlays(source string, filePath string, position prot
 	return refs
 }
 
-func findReferenceDeclarationTarget(stmts []parse.Statement, target parse.Point, filePath string, prog *parse.Program) *referenceResolvedTarget {
+func findReferenceDeclarationTarget(stmts []parse.Statement, target parse.Point, filePath string, source string, prog *parse.Program) *referenceResolvedTarget {
 	for _, stmt := range stmts {
 		if stmt == nil || !pointInRange(target, stmt.GetLocation()) {
 			continue
@@ -132,7 +121,7 @@ func findReferenceDeclarationTarget(stmts []parse.Statement, target parse.Point,
 				return &referenceResolvedTarget{kind: "type", name: s.Name.Name, def: &definitionTarget{filePath: filePath, loc: nameLoc}}
 			}
 			for i := range s.Methods {
-				if resolved := findReferenceDeclarationTarget([]parse.Statement{&s.Methods[i]}, target, filePath, prog); resolved != nil {
+				if resolved := findReferenceDeclarationTarget([]parse.Statement{&s.Methods[i]}, target, filePath, source, prog); resolved != nil {
 					return resolved
 				}
 			}
@@ -143,7 +132,7 @@ func findReferenceDeclarationTarget(stmts []parse.Statement, target parse.Point,
 				}
 			}
 			for i := range s.Methods {
-				if resolved := findReferenceDeclarationTarget([]parse.Statement{&s.Methods[i]}, target, filePath, prog); resolved != nil {
+				if resolved := findReferenceDeclarationTarget([]parse.Statement{&s.Methods[i]}, target, filePath, source, prog); resolved != nil {
 					return resolved
 				}
 			}
@@ -154,7 +143,7 @@ func findReferenceDeclarationTarget(stmts []parse.Statement, target parse.Point,
 				}
 			}
 			for i := range s.Methods {
-				if resolved := findReferenceDeclarationTarget([]parse.Statement{&s.Methods[i]}, target, filePath, prog); resolved != nil {
+				if resolved := findReferenceDeclarationTarget([]parse.Statement{&s.Methods[i]}, target, filePath, source, prog); resolved != nil {
 					return resolved
 				}
 			}
@@ -167,7 +156,7 @@ func findReferenceDeclarationTarget(stmts []parse.Statement, target parse.Point,
 			if resolved := findReferenceDeclaredTypeTarget(s.ReturnType, target, filePath, prog); resolved != nil {
 				return resolved
 			}
-			if resolved := findReferenceDeclarationTarget(s.Body, target, filePath, prog); resolved != nil {
+			if resolved := findReferenceDeclarationTarget(s.Body, target, filePath, source, prog); resolved != nil {
 				return resolved
 			}
 		case *parse.StaticFunctionDeclaration:
@@ -177,11 +166,11 @@ func findReferenceDeclarationTarget(stmts []parse.Statement, target parse.Point,
 					return &referenceResolvedTarget{kind: "type", name: name, def: def}
 				}
 			}
-			if resolved := findReferenceDeclarationTarget([]parse.Statement{&s.FunctionDeclaration}, target, filePath, prog); resolved != nil {
+			if resolved := findReferenceDeclarationTarget([]parse.Statement{&s.FunctionDeclaration}, target, filePath, source, prog); resolved != nil {
 				return resolved
 			}
 		case *parse.VariableDeclaration:
-			nameLoc := documentHighlightNameLocation(lastParseSource, s.Location, s.Name)
+			nameLoc := documentHighlightNameLocation(source, s.Location, s.Name)
 			if pointInRange(target, nameLoc) {
 				return &referenceResolvedTarget{kind: "name", name: s.Name, def: &definitionTarget{filePath: filePath, loc: s.Location}}
 			}
@@ -198,32 +187,32 @@ func findReferenceDeclarationTarget(stmts []parse.Statement, target parse.Point,
 				return resolved
 			}
 		case *parse.IfStatement:
-			if resolved := findReferenceDeclarationTarget(s.Body, target, filePath, prog); resolved != nil {
+			if resolved := findReferenceDeclarationTarget(s.Body, target, filePath, source, prog); resolved != nil {
 				return resolved
 			}
 			if s.Else != nil {
-				if resolved := findReferenceDeclarationTarget([]parse.Statement{s.Else}, target, filePath, prog); resolved != nil {
+				if resolved := findReferenceDeclarationTarget([]parse.Statement{s.Else}, target, filePath, source, prog); resolved != nil {
 					return resolved
 				}
 			}
 		case *parse.WhileLoop:
-			if resolved := findReferenceDeclarationTarget(s.Body, target, filePath, prog); resolved != nil {
+			if resolved := findReferenceDeclarationTarget(s.Body, target, filePath, source, prog); resolved != nil {
 				return resolved
 			}
 		case *parse.ForInLoop:
-			if resolved := findReferenceDeclarationTarget(s.Body, target, filePath, prog); resolved != nil {
+			if resolved := findReferenceDeclarationTarget(s.Body, target, filePath, source, prog); resolved != nil {
 				return resolved
 			}
 		case *parse.RangeLoop:
-			if resolved := findReferenceDeclarationTarget(s.Body, target, filePath, prog); resolved != nil {
+			if resolved := findReferenceDeclarationTarget(s.Body, target, filePath, source, prog); resolved != nil {
 				return resolved
 			}
 		case *parse.ForLoop:
-			if resolved := findReferenceDeclarationTarget(s.Body, target, filePath, prog); resolved != nil {
+			if resolved := findReferenceDeclarationTarget(s.Body, target, filePath, source, prog); resolved != nil {
 				return resolved
 			}
 		case *parse.BlockExpression:
-			if resolved := findReferenceDeclarationTarget(s.Statements, target, filePath, prog); resolved != nil {
+			if resolved := findReferenceDeclarationTarget(s.Statements, target, filePath, source, prog); resolved != nil {
 				return resolved
 			}
 		}
@@ -429,134 +418,131 @@ func scanReferenceDocument(doc referenceDocument, targetKind string, targetName 
 	if doc.prog == nil {
 		return
 	}
-	lastParseSource = doc.source
-	lastParseProgram = doc.prog
-	lastParseFilepath = doc.filePath
-	visitReferenceStatements(doc.prog.Statements, doc.filePath, doc.prog, doc.filePath, targetKind, targetName, targetDef, add)
+	visitReferenceStatements(doc.prog.Statements, doc.filePath, doc.source, doc.prog, doc.filePath, targetKind, targetName, targetDef, add)
 }
 
-func visitReferenceStatements(stmts []parse.Statement, currentFile string, prog *parse.Program, rootFile string, targetKind string, targetName string, targetDef *definitionTarget, add func(string, parse.Location)) {
+func visitReferenceStatements(stmts []parse.Statement, currentFile string, source string, prog *parse.Program, rootFile string, targetKind string, targetName string, targetDef *definitionTarget, add func(string, parse.Location)) {
 	for _, stmt := range stmts {
 		if stmt == nil {
 			continue
 		}
-		visitReferenceStatement(stmt, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatement(stmt, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	}
 }
 
-func visitReferenceStatement(stmt parse.Statement, currentFile string, prog *parse.Program, rootFile string, targetKind string, targetName string, targetDef *definitionTarget, add func(string, parse.Location)) {
+func visitReferenceStatement(stmt parse.Statement, currentFile string, source string, prog *parse.Program, rootFile string, targetKind string, targetName string, targetDef *definitionTarget, add func(string, parse.Location)) {
 	if expr, ok := stmt.(parse.Expression); ok {
-		visitReferenceExpr(expr, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(expr, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	}
 
 	switch s := stmt.(type) {
 	case *parse.VariableDeclaration:
-		visitReferenceDeclaredType(s.Type, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceExpr(s.Value, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceDeclaredType(s.Type, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(s.Value, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.VariableAssignment:
-		visitReferenceExpr(s.Target, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceExpr(s.Value, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(s.Target, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(s.Value, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.FunctionDeclaration:
 		for i := range s.Parameters {
-			visitReferenceExpr(&s.Parameters[i], currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-			visitReferenceDeclaredType(s.Parameters[i].Type, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(&s.Parameters[i], currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceDeclaredType(s.Parameters[i].Type, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
-		visitReferenceDeclaredType(s.ReturnType, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceStatements(s.Body, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceDeclaredType(s.ReturnType, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatements(s.Body, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.StaticFunctionDeclaration:
-		visitReferenceExpr(s.Path.Target, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceStatement(&s.FunctionDeclaration, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(s.Path.Target, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatement(&s.FunctionDeclaration, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.ImplBlock:
-		visitReferenceExpr(&s.Target, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceExpr(&s.Receiver, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(&s.Target, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(&s.Receiver, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		for i := range s.Methods {
-			visitReferenceStatement(&s.Methods[i], currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceStatement(&s.Methods[i], currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.TraitImplementation:
-		visitReferenceExpr(s.Trait, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceExpr(&s.ForType, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceExpr(&s.Receiver, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(s.Trait, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(&s.ForType, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(&s.Receiver, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		for i := range s.Methods {
-			visitReferenceStatement(&s.Methods[i], currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceStatement(&s.Methods[i], currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.TraitDefinition:
-		visitReferenceExpr(&s.Name, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(&s.Name, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		for i := range s.Methods {
-			visitReferenceStatement(&s.Methods[i], currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceStatement(&s.Methods[i], currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.StructDefinition:
-		visitReferenceExpr(&s.Name, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(&s.Name, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		for _, field := range s.Fields {
-			visitReferenceDeclaredType(field.Type, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceDeclaredType(field.Type, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.TypeDeclaration:
-		visitReferenceExpr(&s.Name, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(&s.Name, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		for _, declared := range s.Type {
-			visitReferenceDeclaredType(declared, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceDeclaredType(declared, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.ExternalFunction:
 		for i := range s.Parameters {
-			visitReferenceExpr(&s.Parameters[i], currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-			visitReferenceDeclaredType(s.Parameters[i].Type, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(&s.Parameters[i], currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceDeclaredType(s.Parameters[i].Type, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
-		visitReferenceDeclaredType(s.ReturnType, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceDeclaredType(s.ReturnType, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.IfStatement:
-		visitReferenceExpr(s.Condition, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceStatements(s.Body, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(s.Condition, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatements(s.Body, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		if s.Else != nil {
-			visitReferenceStatement(s.Else, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceStatement(s.Else, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.WhileLoop:
-		visitReferenceExpr(s.Condition, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceStatements(s.Body, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(s.Condition, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatements(s.Body, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.ForInLoop:
-		visitReferenceExpr(&s.Cursor, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceExpr(&s.Cursor2, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceExpr(s.Iterable, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceStatements(s.Body, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(&s.Cursor, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(&s.Cursor2, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(s.Iterable, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatements(s.Body, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.RangeLoop:
-		visitReferenceExpr(&s.Cursor, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceExpr(&s.Cursor2, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceExpr(s.Start, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceExpr(s.End, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceStatements(s.Body, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(&s.Cursor, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(&s.Cursor2, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(s.Start, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(s.End, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatements(s.Body, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.ForLoop:
 		if s.Init != nil {
-			visitReferenceStatement(s.Init, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceStatement(s.Init, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
-		visitReferenceExpr(s.Condition, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(s.Condition, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		if s.Incrementer != nil {
-			visitReferenceStatement(s.Incrementer, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceStatement(s.Incrementer, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
-		visitReferenceStatements(s.Body, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatements(s.Body, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.MatchExpression:
-		visitReferenceExpr(s.Subject, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(s.Subject, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		for _, matchCase := range s.Cases {
-			visitReferenceExpr(matchCase.Pattern, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-			visitReferenceStatements(matchCase.Body, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(matchCase.Pattern, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceStatements(matchCase.Body, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.ConditionalMatchExpression:
 		for _, matchCase := range s.Cases {
-			visitReferenceExpr(matchCase.Condition, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-			visitReferenceStatements(matchCase.Body, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(matchCase.Condition, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceStatements(matchCase.Body, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.BlockExpression:
-		visitReferenceStatements(s.Statements, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatements(s.Statements, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.Try:
-		visitReferenceExpr(s.Expression, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(s.Expression, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		if s.CatchVar != nil {
-			visitReferenceExpr(s.CatchVar, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(s.CatchVar, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
-		visitReferenceStatements(s.CatchBlock, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatements(s.CatchBlock, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.StructInstance:
-		visitReferenceExpr(&s.Name, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(&s.Name, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		for _, prop := range s.Properties {
-			visitReferenceExpr(prop.Value, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(prop.Value, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	}
 }
 
-func visitReferenceExpr(expr parse.Expression, currentFile string, prog *parse.Program, rootFile string, targetKind string, targetName string, targetDef *definitionTarget, add func(string, parse.Location)) {
+func visitReferenceExpr(expr parse.Expression, currentFile string, source string, prog *parse.Program, rootFile string, targetKind string, targetName string, targetDef *definitionTarget, add func(string, parse.Location)) {
 	if expr == nil {
 		return
 	}
@@ -569,84 +555,84 @@ func visitReferenceExpr(expr parse.Expression, currentFile string, prog *parse.P
 
 	switch e := expr.(type) {
 	case *parse.BinaryExpression:
-		visitReferenceExpr(e.Left, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceExpr(e.Right, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(e.Left, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(e.Right, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.UnaryExpression:
-		visitReferenceExpr(e.Operand, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(e.Operand, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.FunctionCall:
 		for _, arg := range e.Args {
-			visitReferenceExpr(arg.Value, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(arg.Value, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.InstanceProperty:
-		visitReferenceExpr(e.Target, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(e.Target, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.InstanceMethod:
-		visitReferenceExpr(e.Target, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(e.Target, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		for _, arg := range e.Method.Args {
-			visitReferenceExpr(arg.Value, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(arg.Value, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.StaticProperty:
-		visitReferenceExpr(e.Target, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceExpr(e.Property, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(e.Target, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(e.Property, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.StaticFunction:
-		visitReferenceExpr(e.Target, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(e.Target, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		for _, arg := range e.Function.Args {
-			visitReferenceExpr(arg.Value, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(arg.Value, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.ListLiteral:
 		for _, item := range e.Items {
-			visitReferenceExpr(item, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(item, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.MapLiteral:
 		for _, entry := range e.Entries {
-			visitReferenceExpr(entry.Key, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-			visitReferenceExpr(entry.Value, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(entry.Key, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(entry.Value, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.MatchExpression:
-		visitReferenceExpr(e.Subject, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(e.Subject, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		for _, matchCase := range e.Cases {
-			visitReferenceExpr(matchCase.Pattern, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-			visitReferenceStatements(matchCase.Body, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(matchCase.Pattern, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceStatements(matchCase.Body, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.ConditionalMatchExpression:
 		for _, matchCase := range e.Cases {
-			visitReferenceExpr(matchCase.Condition, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-			visitReferenceStatements(matchCase.Body, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(matchCase.Condition, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceStatements(matchCase.Body, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.Try:
-		visitReferenceExpr(e.Expression, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(e.Expression, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		if e.CatchVar != nil {
-			visitReferenceExpr(e.CatchVar, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(e.CatchVar, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
-		visitReferenceStatements(e.CatchBlock, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatements(e.CatchBlock, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.BlockExpression:
-		visitReferenceStatements(e.Statements, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatements(e.Statements, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.InterpolatedStr:
 		for _, chunk := range e.Chunks {
-			visitReferenceExpr(chunk, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(chunk, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.IfStatement:
-		visitReferenceExpr(e.Condition, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceStatements(e.Body, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(e.Condition, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatements(e.Body, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		if e.Else != nil {
-			visitReferenceStatement(e.Else, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceStatement(e.Else, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.StructInstance:
-		visitReferenceExpr(&e.Name, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceExpr(&e.Name, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		for _, prop := range e.Properties {
 			if targetKind == "instanceProperty" && referenceNamesMatch(targetName, prop.Name.Name) {
 				if def := definitionForStructValueField(e, prop.Name.Name, prog, rootFile); sameDefinitionTarget(def, targetDef) {
-					add(currentFile, structValueNameLocation(prop))
+					add(currentFile, structValueNameLocation(prop, source))
 				}
 			}
-			visitReferenceExpr(prop.Value, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(prop.Value, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
 	case *parse.AnonymousFunction:
 		for i := range e.Parameters {
-			visitReferenceExpr(&e.Parameters[i], currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-			visitReferenceDeclaredType(e.Parameters[i].Type, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceExpr(&e.Parameters[i], currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+			visitReferenceDeclaredType(e.Parameters[i].Type, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
-		visitReferenceDeclaredType(e.ReturnType, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
-		visitReferenceStatements(e.Body, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceDeclaredType(e.ReturnType, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceStatements(e.Body, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	}
 }
 
@@ -705,18 +691,7 @@ func modulePathForAlias(alias string, prog *parse.Program, filePath string) (str
 }
 
 func modulePathForImport(imp parse.Import, filePath string) (string, bool) {
-	cacheKey := imp.Path
-	if referenceModulePathCache != nil {
-		if cached, ok := referenceModulePathCache[cacheKey]; ok {
-			return cached.path, cached.ok
-		}
-	}
-
-	path, ok := resolveModulePathForImport(imp, filePath)
-	if referenceModulePathCache != nil {
-		referenceModulePathCache[cacheKey] = referenceModulePathEntry{path: path, ok: ok}
-	}
-	return path, ok
+	return resolveModulePathForImport(imp, filePath)
 }
 
 func resolveModulePathForImport(imp parse.Import, filePath string) (string, bool) {
@@ -895,18 +870,18 @@ func isModuleAliasName(name string, prog *parse.Program) bool {
 	return preludeModulePath(name) != ""
 }
 
-func structValueNameLocation(prop parse.StructValue) parse.Location {
+func structValueNameLocation(prop parse.StructValue, source string) parse.Location {
 	if prop.Name.Location.Start.Row != 0 || prop.Name.Location.Start.Col != 0 {
 		return prop.Name.Location
 	}
-	if prop.Value == nil || prop.Name.Name == "" || lastParseSource == "" {
+	if prop.Value == nil || prop.Name.Name == "" || source == "" {
 		return prop.Name.Location
 	}
 	valueLoc := prop.Value.GetLocation()
 	if valueLoc.Start.Row <= 0 || valueLoc.Start.Col <= 0 {
 		return prop.Name.Location
 	}
-	line := sourceLine(lastParseSource, valueLoc.Start.Row)
+	line := sourceLine(source, valueLoc.Start.Row)
 	limit := valueLoc.Start.Col - 1
 	if limit < 0 {
 		return prop.Name.Location
@@ -951,7 +926,7 @@ func sourceLine(source string, row int) string {
 	return ""
 }
 
-func visitReferenceDeclaredType(declared parse.DeclaredType, currentFile string, prog *parse.Program, rootFile string, targetKind string, targetName string, targetDef *definitionTarget, add func(string, parse.Location)) {
+func visitReferenceDeclaredType(declared parse.DeclaredType, currentFile string, source string, prog *parse.Program, rootFile string, targetKind string, targetName string, targetDef *definitionTarget, add func(string, parse.Location)) {
 	if declared == nil {
 		return
 	}
@@ -961,7 +936,7 @@ func visitReferenceDeclaredType(declared parse.DeclaredType, currentFile string,
 		}
 	}
 	for _, child := range declaredTypeChildren(declared) {
-		visitReferenceDeclaredType(child, currentFile, prog, rootFile, targetKind, targetName, targetDef, add)
+		visitReferenceDeclaredType(child, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	}
 }
 

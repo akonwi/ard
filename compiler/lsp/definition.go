@@ -386,7 +386,7 @@ func definitionForStaticProperty(sp *parse.StaticProperty, prog *parse.Program, 
 }
 
 func definitionForInstanceProperty(ip *parse.InstanceProperty, prog *parse.Program, filePath string) *definitionTarget {
-	ownerType := normalizeDisplayType(inferExprType(ip.Target))
+	ownerType := normalizeDisplayType(inferExprType(ip.Target, prog, filePath))
 	ownerType = strings.TrimSuffix(ownerType, "?")
 	if ownerType == "" || ownerType == "?" {
 		return nil
@@ -402,7 +402,7 @@ func definitionForInstanceProperty(ip *parse.InstanceProperty, prog *parse.Progr
 }
 
 func definitionForInstanceMethod(im *parse.InstanceMethod, prog *parse.Program, filePath string) *definitionTarget {
-	ownerType := normalizeDisplayType(inferExprType(im.Target))
+	ownerType := normalizeDisplayType(inferExprType(im.Target, prog, filePath))
 	ownerType = strings.TrimSuffix(ownerType, "?")
 	if ownerType == "" || ownerType == "?" {
 		return nil

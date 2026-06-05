@@ -9,10 +9,6 @@ import (
 )
 
 func computeDocumentHighlights(source string, filePath string, position protocol.Position) []protocol.DocumentHighlight {
-	previousModulePathCache := referenceModulePathCache
-	referenceModulePathCache = map[string]referenceModulePathEntry{}
-	defer func() { referenceModulePathCache = previousModulePathCache }()
-
 	target := lspPositionToParsePoint(position)
 	prog := parseAndCache(source, filePath)
 	if prog == nil {
@@ -22,7 +18,7 @@ func computeDocumentHighlights(source string, filePath string, position protocol
 	var def *definitionTarget
 	var targetKind string
 	var targetName string
-	if resolved := findReferenceDeclarationTarget(prog.Statements, target, filePath, prog); resolved != nil {
+	if resolved := findReferenceDeclarationTarget(prog.Statements, target, filePath, source, prog); resolved != nil {
 		def = resolved.def
 		targetKind = resolved.kind
 		targetName = resolved.name

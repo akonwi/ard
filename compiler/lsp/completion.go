@@ -155,7 +155,7 @@ func offsetToParsePoint(source string, offset int) parse.Point {
 }
 
 func instanceCompletionItems(target parse.Expression, prog *parse.Program, filePath string) []protocol.CompletionItem {
-	ownerType := normalizeDisplayType(inferExprType(target))
+	ownerType := normalizeDisplayType(inferExprType(target, prog, filePath))
 	if ownerType == "" || ownerType == "?" {
 		return []protocol.CompletionItem{}
 	}

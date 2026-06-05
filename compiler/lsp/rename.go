@@ -89,7 +89,7 @@ func resolveRenameTarget(source string, filePath string, position protocol.Posit
 	if prog == nil {
 		return nil
 	}
-	if resolved := findReferenceDeclarationTarget(prog.Statements, target, filePath, prog); resolved != nil {
+	if resolved := findReferenceDeclarationTarget(prog.Statements, target, filePath, source, prog); resolved != nil {
 		return resolved
 	}
 	expr := findInStmts(prog.Statements, target)

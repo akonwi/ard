@@ -12,13 +12,22 @@ import (
 	"go.lsp.dev/uri"
 )
 
+type diagnosticAnalyzer func(source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error)
+
 // parseAndCheck runs the Ard parser and checker on a source file.
 // It returns the parsed AST, the checked module, and any diagnostics.
 func parseAndCheck(source string, filePath string) ([]checker.Diagnostic, error) {
 	return parseAndCheckWithOverlays(source, filePath, nil)
 }
 
-func parseAndCheckWithOverlays(source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error) {
+func parseAndCheckWithOverlays(source string, filePath string, overlays map[string]string) (diagnostics []checker.Diagnostic, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			diagnostics = nil
+			err = fmt.Errorf("analysis panic: %v", r)
+		}
+	}()
+
 	// Parse the source
 	result := parse.Parse([]byte(source), filePath)
 	if result.Program == nil {
@@ -131,38 +140,74 @@ func diagnosticKindToLSPSeverity(kind checker.DiagnosticKind) protocol.Diagnosti
 
 // publishDiagnostics analyzes the document at the given URI and publishes diagnostics.
 func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
-	doc := s.cache.Get(docURI)
+	docs, revision := s.cache.SnapshotWithRevision()
+	doc := findDiagnosticDocument(docs, docURI)
 	if doc == nil {
 		// Document not in cache; clear diagnostics.
-		s.sendDiagnostics(ctx, docURI, nil)
+		s.sendDiagnostics(ctx, docURI, -1, nil)
 		return
 	}
 
-	filePath := doc.URI.Filename()
-	overlays := map[string]string{}
-	for _, cached := range s.cache.Snapshot() {
-		overlays[cached.URI.Filename()] = cached.Text
+	diags, err := s.analyzeDiagnostics(doc, docs)
+	if !s.isDiagnosticSnapshotCurrent(docURI, doc.Version, revision) {
+		return
 	}
-	diags, err := parseAndCheckWithOverlays(doc.Text, filePath, overlays)
 	if err != nil {
-		// If we can't analyze, publish the error as a diagnostic
-		s.sendDiagnostics(ctx, docURI, []protocol.Diagnostic{
-			{
-				Range:    protocol.Range{Start: protocol.Position{Line: 0, Character: 0}, End: protocol.Position{Line: 0, Character: 1}},
-				Severity: protocol.DiagnosticSeverityError,
-				Source:   "ard",
-				Message:  fmt.Sprintf("Analysis error: %v", err),
-			},
-		})
+		// If we can't analyze, publish the error as a diagnostic so stale diagnostics
+		// are replaced instead of lingering until the server is restarted.
+		s.sendDiagnostics(ctx, docURI, doc.Version, []protocol.Diagnostic{analysisErrorDiagnostic(err)})
 		return
 	}
 
-	s.sendDiagnostics(ctx, docURI, checkerDiagnosticsToLSP(diags))
+	s.sendDiagnostics(ctx, docURI, doc.Version, checkerDiagnosticsToLSP(diags))
+}
+
+func findDiagnosticDocument(docs []Doc, docURI uri.URI) *Doc {
+	for i := range docs {
+		if docs[i].URI == docURI {
+			return &docs[i]
+		}
+	}
+	return nil
+}
+
+func (s *Server) analyzeDiagnostics(doc *Doc, docs []Doc) (diagnostics []checker.Diagnostic, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			diagnostics = nil
+			err = fmt.Errorf("analysis panic: %v", r)
+		}
+	}()
+
+	filePath, err := filePathFromURI(doc.URI)
+	if err != nil {
+		return nil, err
+	}
+	overlays := overlaySources(docs)
+	analyzer := s.diagnosticsAnalyzer
+	if analyzer == nil {
+		analyzer = parseAndCheckWithOverlays
+	}
+	return analyzer(doc.Text, filePath, overlays)
+}
+
+func analysisErrorDiagnostic(err error) protocol.Diagnostic {
+	return protocol.Diagnostic{
+		Range:    protocol.Range{Start: protocol.Position{Line: 0, Character: 0}, End: protocol.Position{Line: 0, Character: 1}},
+		Severity: protocol.DiagnosticSeverityError,
+		Source:   "ard",
+		Message:  fmt.Sprintf("Analysis error: %v", err),
+	}
+}
+
+func (s *Server) isDiagnosticSnapshotCurrent(docURI uri.URI, version int32, revision uint64) bool {
+	current := s.cache.Get(docURI)
+	return current != nil && current.Version == version && s.cache.Revision() == revision
 }
 
 // sendDiagnostics sends a textDocument/publishDiagnostics notification to the client.
 // diags is converted to an empty slice if nil so JSON serializes as [] not null.
-func (s *Server) sendDiagnostics(ctx context.Context, docURI uri.URI, diags []protocol.Diagnostic) {
+func (s *Server) sendDiagnostics(ctx context.Context, docURI uri.URI, version int32, diags []protocol.Diagnostic) {
 	if s.conn == nil {
 		return
 	}
@@ -173,6 +218,9 @@ func (s *Server) sendDiagnostics(ctx context.Context, docURI uri.URI, diags []pr
 	params := &protocol.PublishDiagnosticsParams{
 		URI:         docURI,
 		Diagnostics: diags,
+	}
+	if version >= 0 {
+		params.Version = uint32(version)
 	}
 
 	// Ignore error — this is a notification; client may disconnect.
