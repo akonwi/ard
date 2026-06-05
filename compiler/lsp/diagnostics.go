@@ -134,7 +134,7 @@ func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
 	doc := s.cache.Get(docURI)
 	if doc == nil {
 		// Document not in cache; clear diagnostics.
-		s.sendDiagnostics(ctx, docURI, nil)
+		s.sendDiagnostics(ctx, docURI, -1, nil)
 		return
 	}
 
@@ -144,9 +144,12 @@ func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
 		overlays[cached.URI.Filename()] = cached.Text
 	}
 	diags, err := parseAndCheckWithOverlays(doc.Text, filePath, overlays)
+	if !s.isDiagnosticSnapshotCurrent(docURI, doc.Version) {
+		return
+	}
 	if err != nil {
 		// If we can't analyze, publish the error as a diagnostic
-		s.sendDiagnostics(ctx, docURI, []protocol.Diagnostic{
+		s.sendDiagnostics(ctx, docURI, doc.Version, []protocol.Diagnostic{
 			{
 				Range:    protocol.Range{Start: protocol.Position{Line: 0, Character: 0}, End: protocol.Position{Line: 0, Character: 1}},
 				Severity: protocol.DiagnosticSeverityError,
@@ -157,12 +160,17 @@ func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
 		return
 	}
 
-	s.sendDiagnostics(ctx, docURI, checkerDiagnosticsToLSP(diags))
+	s.sendDiagnostics(ctx, docURI, doc.Version, checkerDiagnosticsToLSP(diags))
+}
+
+func (s *Server) isDiagnosticSnapshotCurrent(docURI uri.URI, version int32) bool {
+	current := s.cache.Get(docURI)
+	return current != nil && current.Version == version
 }
 
 // sendDiagnostics sends a textDocument/publishDiagnostics notification to the client.
 // diags is converted to an empty slice if nil so JSON serializes as [] not null.
-func (s *Server) sendDiagnostics(ctx context.Context, docURI uri.URI, diags []protocol.Diagnostic) {
+func (s *Server) sendDiagnostics(ctx context.Context, docURI uri.URI, version int32, diags []protocol.Diagnostic) {
 	if s.conn == nil {
 		return
 	}
@@ -173,6 +181,9 @@ func (s *Server) sendDiagnostics(ctx context.Context, docURI uri.URI, diags []pr
 	params := &protocol.PublishDiagnosticsParams{
 		URI:         docURI,
 		Diagnostics: diags,
+	}
+	if version >= 0 {
+		params.Version = uint32(version)
 	}
 
 	// Ignore error — this is a notification; client may disconnect.

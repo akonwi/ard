@@ -56,11 +56,18 @@ func (c *DocumentCache) Close(u uri.URI) {
 	delete(c.docs, u)
 }
 
-// Get returns the document for the given URI, or nil if not open.
+// Get returns a snapshot copy of the document for the given URI, or nil if not open.
+// Returning a copy prevents async diagnostics and feature handlers from observing
+// partially-updated document state after the cache lock is released.
 func (c *DocumentCache) Get(u uri.URI) *Doc {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.docs[u]
+	doc := c.docs[u]
+	if doc == nil {
+		return nil
+	}
+	copy := *doc
+	return &copy
 }
 
 // Snapshot returns copies of all cached documents.
