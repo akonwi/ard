@@ -834,6 +834,11 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, fmt.Errorf("unknown global %d", expr.Global)
 		}
 		return loweredExpr{expr: ast.NewIdent(globalName(l.program, l.program.Globals[expr.Global]))}, nil
+	case air.ExprFunctionRef:
+		if !validFunctionID(l.program, expr.Function) {
+			return loweredExpr{}, fmt.Errorf("unknown function %d", expr.Function)
+		}
+		return loweredExpr{expr: ast.NewIdent(functionName(l.program, l.program.Functions[expr.Function]))}, nil
 	case air.ExprUnionWrap:
 		return l.lowerUnionWrap(fn, expr)
 	case air.ExprMatchUnion:

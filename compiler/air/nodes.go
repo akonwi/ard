@@ -42,6 +42,7 @@ const (
 	ExprPanic
 	ExprLoadLocal
 	ExprLoadGlobal
+	ExprFunctionRef
 	ExprCall
 	ExprCallExtern
 	ExprMakeClosure

@@ -303,6 +303,286 @@ func TestRunProgramSupportsModuleLevelLetCapturedByClosure(t *testing.T) {
 	}
 }
 
+func TestRunProgramSupportsImportedModuleLevelLetCapturedByClosure(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "feature.ard"), []byte(`
+let refresh_event = "inbox.refresh"
+
+fn run() {
+  let event = refresh_event
+  let read: fn() Str = fn() { event }
+  if not read() == "inbox.refresh" {
+    panic("wrong event")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(tempDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use app/feature
+
+fn main() {
+  feature::run()
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramSupportsModuleGlobalInitializerCallingInstanceMethod(t *testing.T) {
+	program := lowerSource(t, `
+		struct Source {}
+
+		impl Source {
+			fn value() Str { "ok" }
+		}
+
+		let source = Source{}
+		let saved = source.value()
+
+		fn main() {
+			if not saved == "ok" {
+				panic("wrong saved value")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramSupportsImportedTraitObjectModuleGlobal(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "feature.ard"), []byte(`
+trait Named {
+  fn name() Str
+}
+
+struct Item {}
+
+impl Named for Item {
+  fn name() Str { "item" }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(tempDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use app/feature
+
+let saved: feature::Named = feature::Item{}
+
+fn main() {
+  if not saved.name() == "item" {
+    panic("wrong saved trait")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramSupportsImportedFunctionSymbolReadingModuleLevelLet(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "feature.ard"), []byte(`
+let refresh_event = "inbox.refresh"
+
+fn event_name() Str {
+  refresh_event
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(tempDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use app/feature
+
+fn main() {
+  let event_name: fn() Str = feature::event_name
+  if not event_name() == "inbox.refresh" {
+    panic("wrong event")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramSupportsImportedFunctionValuedModuleLet(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "feature.ard"), []byte(`
+let handler: fn() Str = fn() { "ok" }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(tempDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use app/feature
+
+fn main() {
+  let handler: fn() Str = feature::handler
+  if not handler() == "ok" {
+    panic("wrong handler symbol")
+  }
+  if not feature::handler() == "ok" {
+    panic("wrong handler call")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramSupportsImportedTraitMethodReadingModuleLevelLet(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "feature.ard"), []byte(`
+let label = "imported"
+
+trait Named {
+  fn name() Str
+}
+
+struct Item {}
+
+impl Named for Item {
+  fn name() Str { label }
+}
+
+fn run() {
+  let item: Named = Item{}
+  if not item.name() == "imported" {
+    panic("wrong trait name")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(tempDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use app/feature
+
+fn main() { feature::run() }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramSupportsImportedInstanceMethodReadingModuleLevelLet(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "feature.ard"), []byte(`
+let label = "instance"
+
+struct Item {}
+
+impl Item {
+  fn name() Str { label }
+}
+
+fn make() Item { Item{} }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(tempDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use app/feature
+
+fn main() {
+  let item = feature::make()
+  if not item.name() == "instance" {
+    panic("wrong instance name")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramSpecializesGenericEmptyListLocal(t *testing.T) {
 	program := lowerSource(t, `
 		fn drop(from: [$T], till: Int) [$T] {

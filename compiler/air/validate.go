@@ -295,6 +295,9 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	if expr.Kind == ExprLoadGlobal && !validGlobalID(program, expr.Global) {
 		return fmt.Errorf("expression loads invalid global %d", expr.Global)
 	}
+	if expr.Kind == ExprFunctionRef && !validFunctionID(program, expr.Function) {
+		return fmt.Errorf("expression references invalid function %d", expr.Function)
+	}
 	if expr.Kind == ExprCall && !validFunctionID(program, expr.Function) {
 		return fmt.Errorf("expression calls invalid function %d", expr.Function)
 	}
