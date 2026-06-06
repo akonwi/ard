@@ -1,6 +1,8 @@
 package air
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -713,6 +715,52 @@ func TestLowerImportedModuleFunctionCall(t *testing.T) {
 		if test.Function == assert.ID || test.Name == "test_assert_true_passes" {
 			t.Fatalf("imported module tests should not be added to root manifest: %#v", program.Tests)
 		}
+	}
+}
+
+func TestLowerImportedModuleFunctionCanReadModuleLevelLet(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "feature.ard"), []byte(`
+let refresh_event = "inbox.refresh"
+
+fn event_name() Str {
+  refresh_event
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(tempDir, "main.ard")
+	result := parse.Parse([]byte(`
+use app/feature
+
+fn main() Str {
+  feature::event_name()
+}
+`), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+
+	program, err := Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+
+	featureFn := findFunction(t, program, "event_name")
+	if featureFn.Body.Result == nil || featureFn.Body.Result.Kind != ExprLoadGlobal {
+		t.Fatalf("event_name result = %#v, want ExprLoadGlobal", featureFn.Body.Result)
 	}
 }
 

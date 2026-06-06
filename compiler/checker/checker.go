@@ -3218,11 +3218,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				fnToUse = specialized
 			}
 
-			// Create function call
-			callName := fnDef.Name
-			if callName == "" {
-				callName = s.Function.Name
-			}
+			// Create function call. Keep the source member name so lowering can
+			// distinguish real module functions from function-typed module variables.
+			callName := name
 			call := &FunctionCall{
 				Name:       callName,
 				Args:       args,

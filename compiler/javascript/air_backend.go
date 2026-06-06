@@ -226,6 +226,9 @@ func (l *airJSLowerer) collectClosureFunctions() {
 	for _, fn := range l.program.Functions {
 		visitBlock(fn.Body)
 	}
+	for _, global := range l.program.Globals {
+		visitExpr(global.Value)
+	}
 	l.closureFunctions = closures
 }
 
@@ -403,6 +406,9 @@ func (l *airJSLowerer) moduleDependencyIDs(module air.Module) []air.ModuleID {
 		if expr.Kind == air.ExprCall && int(expr.Function) >= 0 && int(expr.Function) < len(l.program.Functions) {
 			add(l.program.Functions[expr.Function].Module)
 		}
+		if expr.Kind == air.ExprFunctionRef && int(expr.Function) >= 0 && int(expr.Function) < len(l.program.Functions) {
+			add(l.program.Functions[expr.Function].Module)
+		}
 		if expr.Kind == air.ExprLoadGlobal && int(expr.Global) >= 0 && int(expr.Global) < len(l.program.Globals) {
 			add(l.program.Globals[expr.Global].Module)
 		}
@@ -455,14 +461,14 @@ func (l *airJSLowerer) moduleDependencyIDs(module air.Module) []air.ModuleID {
 		visitBlock(expr.Err)
 		visitBlock(expr.Catch)
 	}
-	for _, globalID := range module.Globals {
-		if int(globalID) >= 0 && int(globalID) < len(l.program.Globals) {
-			visitExpr(l.program.Globals[globalID].Value)
-		}
-	}
 	for _, functionID := range module.Functions {
 		if int(functionID) >= 0 && int(functionID) < len(l.program.Functions) {
 			visitBlock(l.program.Functions[functionID].Body)
+		}
+	}
+	for _, globalID := range module.Globals {
+		if int(globalID) >= 0 && int(globalID) < len(l.program.Globals) {
+			visitExpr(l.program.Globals[globalID].Value)
 		}
 	}
 	if l.program.Script != air.NoFunction && int(l.program.Script) < len(l.program.Functions) && l.program.Functions[l.program.Script].Module == module.ID {
@@ -754,6 +760,8 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		return l.localName(fn, expr.Local), nil
 	case air.ExprLoadGlobal:
 		return l.globalRef(fn.Module, expr.Global), nil
+	case air.ExprFunctionRef:
+		return l.functionRef(fn.Module, expr.Function), nil
 	case air.ExprUnionWrap:
 		return l.lowerUnionWrap(fn, expr)
 	case air.ExprMatchUnion:
@@ -1729,6 +1737,13 @@ func (l *airJSLowerer) typeModule(typeID air.TypeID) (air.ModuleID, bool) {
 	for _, module := range l.program.Modules {
 		for _, moduleType := range module.Types {
 			if moduleType == typeID {
+				return module.ID, true
+			}
+		}
+	}
+	if typ, ok := l.typeInfo(typeID); ok && typ.ModulePath != "" {
+		for _, module := range l.program.Modules {
+			if module.Path == typ.ModulePath {
 				return module.ID, true
 			}
 		}

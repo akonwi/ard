@@ -25,6 +25,9 @@ func LowerWithOptions(module checker.Module, options LowerOptions) (*Program, er
 	if err := l.lowerModule(module); err != nil {
 		return nil, err
 	}
+	if err := l.lowerAllModuleGlobals(); err != nil {
+		return nil, err
+	}
 	if err := Validate(&l.program); err != nil {
 		return nil, err
 	}
@@ -47,6 +50,8 @@ type lowerer struct {
 	loweredModules  map[string]bool
 	loweringFuncs   map[FunctionID]bool
 	loweredFuncs    map[FunctionID]bool
+	loweringGlobals map[GlobalID]bool
+	loweredGlobals  map[GlobalID]bool
 	includeTests    bool
 }
 
@@ -79,6 +84,8 @@ func newLowerer(options LowerOptions) *lowerer {
 		loweredModules:  map[string]bool{},
 		loweringFuncs:   map[FunctionID]bool{},
 		loweredFuncs:    map[FunctionID]bool{},
+		loweringGlobals: map[GlobalID]bool{},
+		loweredGlobals:  map[GlobalID]bool{},
 		includeTests:    options.IncludeTests,
 	}
 	l.mustIntern(checker.Void)
@@ -283,8 +290,21 @@ func (l *lowerer) lowerGlobal(module ModuleID, def *checker.VariableDef) error {
 	if !ok {
 		return fmt.Errorf("global was not declared before lowering: %s", def.Name)
 	}
+	return l.lowerGlobalByID(id, def)
+}
+
+func (l *lowerer) lowerGlobalByID(id GlobalID, def *checker.VariableDef) error {
+	if l.loweredGlobals[id] {
+		return nil
+	}
+	if l.loweringGlobals[id] {
+		return fmt.Errorf("cyclic global initializer %s", def.Name)
+	}
+	l.loweringGlobals[id] = true
+	defer delete(l.loweringGlobals, id)
+
 	global := l.program.Globals[id]
-	fn := Function{Module: module, Name: "<global>"}
+	fn := Function{Module: global.Module, Name: "<global>"}
 	fl := l.newFunctionLowerer(&fn, nil, nil)
 	value, actualType, err := fl.lowerContextualExpr(def.Value, global.Type)
 	if err != nil {
@@ -293,6 +313,7 @@ func (l *lowerer) lowerGlobal(module ModuleID, def *checker.VariableDef) error {
 	global.Type = actualType
 	global.Value = *value
 	l.program.Globals[id] = global
+	l.loweredGlobals[id] = true
 	return nil
 }
 
@@ -2156,6 +2177,14 @@ func (fl *functionLowerer) lowerTraitUpcastIfNeeded(expr checker.Expression, exp
 	if actual == expected {
 		return nil, false, nil
 	}
+	if err := fl.l.ensureModuleImportTraitImplsDeclared(fl.fn.Module); err != nil {
+		return nil, false, err
+	}
+	if actualInfo, ok := fl.l.typeInfo(actual); ok && actualInfo.ModulePath != "" {
+		if err := fl.l.ensureModuleTraitImplsDeclared(actualInfo.ModulePath); err != nil {
+			return nil, false, err
+		}
+	}
 	impl, ok := fl.l.lookupImpl(expectedInfo.Trait, actual)
 	if !ok {
 		var err error
@@ -2621,7 +2650,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				if err != nil {
 					return nil, err
 				}
-				return &Expr{Kind: ExprMakeClosure, Type: functionType, Function: id}, nil
+				return &Expr{Kind: ExprFunctionRef, Type: functionType, Function: id}, nil
 			}
 			return nil, fmt.Errorf("unknown local %s", e.Name())
 		}
@@ -2768,8 +2797,18 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return &Expr{Kind: ExprMakeList, Type: typeID}, nil
 		}
 		moduleID := fl.l.internModule(e.Module)
+		if err := fl.l.ensureModuleGlobalsDeclared(e.Module); err != nil {
+			return nil, err
+		}
 		if err := fl.l.ensureModuleTraitImplsDeclared(e.Module); err != nil {
 			return nil, err
+		}
+		if global, ok := fl.l.lookupGlobalInModule(moduleID, e.Call.Name); ok {
+			globalType := fl.l.program.Globals[global].Type
+			if typeInfo, ok := fl.l.typeInfo(globalType); ok && typeInfo.Kind == TypeFunction {
+				target := &Expr{Kind: ExprLoadGlobal, Type: globalType, Global: global}
+				return fl.lowerFunctionTypeCall(e.Call.Name, e.Call.Args, target)
+			}
 		}
 		if e.Call.ExternalBinding != "" {
 			id, err := fl.l.declareConcreteExternCall(moduleID, e.Call.Name, e.Call)
@@ -2829,6 +2868,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.StructInstance:
 		return fl.lowerStructInstance(typeID, e)
 	case *checker.ModuleStructInstance:
+		if err := fl.l.ensureModuleTypesDeclared(e.Module); err != nil {
+			return nil, err
+		}
 		return fl.lowerStructInstance(typeID, e.Property)
 	case *checker.InstanceProperty:
 		return fl.lowerInstanceProperty(typeID, e)
@@ -3895,6 +3937,15 @@ func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef)
 }
 
 func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.ModuleSymbol) (*Expr, error) {
+	if global, ok, err := fl.l.resolveModuleGlobal(symbol.Module, symbol.Symbol.Name); err != nil {
+		return nil, err
+	} else if ok {
+		return &Expr{Kind: ExprLoadGlobal, Type: fl.l.program.Globals[global].Type, Global: global}, nil
+	}
+
+	if err := fl.l.ensureModuleGlobalsDeclared(symbol.Module); err != nil {
+		return nil, err
+	}
 	def, ok := fl.l.moduleFunctionDefinitionForSymbol(symbol)
 	if ok {
 		module := fl.l.internModule(symbol.Module)
@@ -3905,7 +3956,7 @@ func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.Modu
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprMakeClosure, Type: typeID, Function: id}, nil
+		return &Expr{Kind: ExprFunctionRef, Type: typeID, Function: id}, nil
 	}
 
 	if def, ok := symbol.Symbol.Type.(*checker.ExternalFunctionDef); ok {
@@ -3913,13 +3964,7 @@ func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.Modu
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprMakeClosure, Type: typeID, Function: id}, nil
-	}
-
-	if global, ok, err := fl.l.resolveModuleGlobal(symbol.Module, symbol.Symbol.Name); err != nil {
-		return nil, err
-	} else if ok {
-		return &Expr{Kind: ExprLoadGlobal, Type: fl.l.program.Globals[global].Type, Global: global}, nil
+		return &Expr{Kind: ExprFunctionRef, Type: typeID, Function: id}, nil
 	}
 
 	return nil, fmt.Errorf("unsupported AIR module symbol %s::%s of type %s", symbol.Module, symbol.Symbol.Name, symbol.Type().String())
@@ -4108,6 +4153,12 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 		return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
 	}
 	module := fl.l.moduleForInstanceMethod(method, fl.fn.Module)
+	if module >= 0 && int(module) < len(fl.l.program.Modules) {
+		fl.l.program.Modules[module].Types = appendUniqueType(fl.l.program.Modules[module].Types, target.Type)
+		if err := fl.l.ensureModuleGlobalsDeclared(fl.l.program.Modules[module].Path); err != nil {
+			return nil, err
+		}
+	}
 	id, err := fl.l.declareInstanceMethodFunction(module, typeInfo.Name, target.Type, def)
 	if err != nil {
 		return nil, err
@@ -4259,6 +4310,37 @@ func (l *lowerer) ensureModuleTraitImplsDeclaredRecursive(modulePath string, see
 }
 
 func (l *lowerer) ensureModuleTraitImplsDeclared(modulePath string) error {
+	if err := l.ensureModuleGlobalsDeclared(modulePath); err != nil {
+		return err
+	}
+	if err := l.ensureModuleTypesDeclared(modulePath); err != nil {
+		return err
+	}
+	mod, ok := l.moduleByName[modulePath]
+	if !ok || mod.Program() == nil {
+		return nil
+	}
+	modID := l.internModule(modulePath)
+	prog := mod.Program()
+	for _, stmt := range prog.Statements {
+		switch node := stmt.Stmt.(type) {
+		case *checker.StructDef:
+			if typeHasUnresolvedTypeVar(node) {
+				continue
+			}
+			if err := l.declareTraitImplsForType(modID, node); err != nil {
+				return err
+			}
+		case *checker.Enum:
+			if err := l.declareTraitImplsForType(modID, node); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (l *lowerer) ensureModuleTypesDeclared(modulePath string) error {
 	mod, ok := l.moduleByName[modulePath]
 	if !ok || mod.Program() == nil {
 		return nil
@@ -4287,21 +4369,70 @@ func (l *lowerer) ensureModuleTraitImplsDeclared(modulePath string) error {
 				return err
 			}
 			l.program.Modules[modID].Types = appendUniqueType(l.program.Modules[modID].Types, typeID)
-		}
-	}
-	for _, stmt := range prog.Statements {
-		switch node := stmt.Stmt.(type) {
-		case *checker.StructDef:
+		case *checker.Union:
 			if typeHasUnresolvedTypeVar(node) {
 				continue
 			}
-			if err := l.declareTraitImplsForType(modID, node); err != nil {
+			typeID, err := l.internType(node)
+			if err != nil {
 				return err
 			}
-		case *checker.Enum:
-			if err := l.declareTraitImplsForType(modID, node); err != nil {
-				return err
-			}
+			l.program.Modules[modID].Types = appendUniqueType(l.program.Modules[modID].Types, typeID)
+		}
+	}
+	return nil
+}
+
+func (l *lowerer) ensureModuleGlobalsDeclared(modulePath string) error {
+	mod, ok := l.moduleByName[modulePath]
+	if !ok || mod.Program() == nil {
+		return nil
+	}
+	modID := l.internModule(modulePath)
+	prog := mod.Program()
+	for _, imported := range prog.Imports {
+		l.moduleByName[imported.Path()] = imported
+		importedID := l.internModule(imported.Path())
+		l.program.Modules[modID].Imports = appendUniqueModule(l.program.Modules[modID].Imports, importedID)
+	}
+	for _, stmt := range prog.Statements {
+		def, ok := stmt.Stmt.(*checker.VariableDef)
+		if !ok || def.Mutable {
+			continue
+		}
+		if _, err := l.declareGlobal(modID, def); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *lowerer) lowerAllModuleGlobals() error {
+	for i := 0; i < len(l.program.Modules); i++ {
+		module := l.program.Modules[i]
+		if err := l.lowerModuleGlobals(module.Path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *lowerer) lowerModuleGlobals(modulePath string) error {
+	if err := l.ensureModuleGlobalsDeclared(modulePath); err != nil {
+		return err
+	}
+	mod, ok := l.moduleByName[modulePath]
+	if !ok || mod.Program() == nil {
+		return nil
+	}
+	modID := l.internModule(modulePath)
+	for _, stmt := range mod.Program().Statements {
+		def, ok := stmt.Stmt.(*checker.VariableDef)
+		if !ok || def.Mutable {
+			continue
+		}
+		if err := l.lowerGlobal(modID, def); err != nil {
+			return fmt.Errorf("lower global %s: %w", def.Name, err)
 		}
 	}
 	return nil
@@ -4315,14 +4446,7 @@ func (l *lowerer) resolveModuleGlobal(modulePath, name string) (GlobalID, bool, 
 		}
 	}
 
-	mod, ok := l.moduleByName[modulePath]
-	if !ok {
-		return NoGlobal, false, nil
-	}
-	if mod.Program() == nil {
-		return NoGlobal, false, nil
-	}
-	if err := l.lowerModule(mod); err != nil {
+	if err := l.ensureModuleGlobalsDeclared(modulePath); err != nil {
 		return NoGlobal, false, err
 	}
 	moduleID, ok = l.moduleByPath[modulePath]

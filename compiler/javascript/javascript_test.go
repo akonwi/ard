@@ -1430,8 +1430,8 @@ let person = models::Person{age: 42}
 		t.Fatalf("generate AIR JS sources: %v", err)
 	}
 	source := string(files["main.mjs"])
-	if !strings.Contains(source, "class Person") || !strings.Contains(source, "new Person(42)") {
-		t.Fatalf("expected imported struct type declaration and constructor, got:\n%s", source)
+	if !strings.Contains(source, "class Person") || !strings.Contains(source, "new demo_models.Person(42)") {
+		t.Fatalf("expected imported struct type declaration and qualified constructor, got:\n%s", source)
 	}
 }
 
@@ -1617,10 +1617,21 @@ func TestBuildProgramFromAIRRunsImportedModuleParity(t *testing.T) {
 		t.Fatalf("failed to write ard.toml: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "utils.ard"), []byte(`
+let label = "utils"
+let handler: fn() Str = fn() { label }
+
 struct Person { age: Int }
+
+impl Person {
+  fn label() Str { label }
+}
 
 fn add(a: Int, b: Int) Int {
   a + b
+}
+
+fn event_name() Str {
+  label
 }
 
 fn make_person(age: Int) Person {
@@ -1647,9 +1658,26 @@ fn imported_struct_return() Int {
   person.age
 }
 
+fn imported_function_symbol() Str {
+  let event_name: fn() Str = utils::event_name
+  event_name()
+}
+
+fn imported_function_valued_global() Str {
+  utils::handler()
+}
+
+fn imported_direct_struct_method() Str {
+  let person = utils::Person{age: 1}
+  person.label()
+}
+
 let keep_call = imported_call()
 let keep_literal = imported_struct_literal()
 let keep_return = imported_struct_return()
+let keep_symbol = imported_function_symbol()
+let keep_handler = imported_function_valued_global()
+let keep_method = imported_direct_struct_method()
 `), 0o644); err != nil {
 		t.Fatalf("failed to write source: %v", err)
 	}
@@ -1668,7 +1696,7 @@ let keep_return = imported_struct_return()
 	script := `
 import { pathToFileURL } from 'node:url';
 const m = await import(pathToFileURL(process.argv[1]).href);
-const got = [m.imported_call(), m.imported_struct_literal(), m.imported_struct_return()];
+const got = [m.imported_call(), m.imported_struct_literal(), m.imported_struct_return(), m.imported_function_symbol(), m.imported_function_valued_global(), m.imported_direct_struct_method()];
 console.log(JSON.stringify(got));
 `
 	cmd := exec.Command("node", "--input-type=module", "-e", script, outputPath)
@@ -1676,8 +1704,53 @@ console.log(JSON.stringify(got));
 	if err != nil {
 		t.Fatalf("run AIR JS module: %v\n%s", err, string(out))
 	}
-	if strings.TrimSpace(string(out)) != `[42,42,9]` {
+	if strings.TrimSpace(string(out)) != `[42,42,9,"utils","utils","utils"]` {
 		t.Fatalf("unexpected AIR JS runtime output: %s", string(out))
+	}
+}
+
+func TestBuildProgramFromAIRRunsImportedDirectStructMethodWithModuleLet(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skipf("node not available: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "feature.ard"), []byte(`
+let label = "instance"
+
+struct Item {}
+
+impl Item {
+  fn name() Str { label }
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write feature module: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/feature
+
+fn main() {
+  let item = feature::Item{}
+  if not item.name() == "instance" {
+    panic("wrong imported method")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	if err := RunProgram(program, backend.TargetJSServer, nil, loaded.ProjectInfo); err != nil {
+		t.Fatalf("run AIR JS program: %v", err)
 	}
 }
 
