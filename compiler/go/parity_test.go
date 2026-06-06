@@ -1293,10 +1293,10 @@ func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.
 			let field_result = app.current()
 
 			mut typed_app = AppRoot{view: CounterView{count: 0}}
-			let typed_result = run_typed(mut typed_app)
+			let typed_result = run_typed(typed_app)
 
 			mut any_app = AppRoot{view: CounterView{count: 0}}
-			let any_result = run_any(mut any_app)
+			let any_result = run_any(any_app)
 
 			field_result + typed_result + any_result
 		}
@@ -1304,6 +1304,63 @@ func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.
 	if got := runGoTargetParityJSON(t, program); got != "3" {
 		t.Fatalf("got %s, want 3", got)
 	}
+}
+
+func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
+	t.Run("struct", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			struct Counter {
+				value: Int,
+			}
+
+			fn bump(mut c: Counter) {
+				c.value = c.value + 1
+			}
+
+			fn main() Int {
+				mut counter = Counter{value: 0}
+				bump(counter)
+				counter.value
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "1" {
+			t.Fatalf("got %s, want 1", got)
+		}
+	})
+
+	t.Run("list", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			fn append_one(mut values: [Int]) {
+				values.push(1)
+			}
+
+			fn main() Int {
+				mut values: [Int] = []
+				append_one(values)
+				values.size()
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "1" {
+			t.Fatalf("got %s, want 1", got)
+		}
+	})
+
+	t.Run("primitive", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			fn bump(mut count: Int) {
+				count = count + 1
+			}
+
+			fn main() Int {
+				mut count = 0
+				bump(count)
+				count
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "1" {
+			t.Fatalf("got %s, want 1", got)
+		}
+	})
 }
 
 func TestGoTargetParityMutMethodClosureCapturesSelf(t *testing.T) {

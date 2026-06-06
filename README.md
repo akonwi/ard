@@ -36,32 +36,28 @@ let name: Str = "Alice"
 mut age = 30
 ```
 
-#### Copy Semantics
+#### Mutable References and Explicit Copies
 
-Ard uses explicit copy semantics to ensure data safety:
+Ard uses `mut` for mutable access. A mutable function parameter receives a mutable reference to caller-owned storage, so the caller must pass an addressable mutable value:
 
-**Function Parameters**: When a function parameter is mutable, you must use the `mut` keyword to create a copy:
 ```ard
 fn update_person(mut person: Person) {
-    person.age = 99  // Only affects the copy
+    person.age = 99  // Mutates the caller's value
 }
 
-let alice = Person { name: "Alice", age: 30 }
-update_person(mut alice)  // Explicitly request a copy with `mut`
-// alice.age is still 30 (original unchanged)
+mut alice = Person { name: "Alice", age: 30 }
+update_person(alice)
+// alice.age is now 99
 ```
 
-**Variable Assignment**: When assigning complex types (structs, lists, maps) to mutable variables, Ard creates copies:
+Immutable values cannot be passed where mutable access is required:
+
 ```ard
-let original = Person { name: "Alice", age: 30 }
-mut copy = original  // Creates a deep copy
-copy.age = 31
-// original.age is still 30, copy.age is 31
+let alice = Person { name: "Alice", age: 30 }
+update_person(alice) // Error: expected a mutable Person
 ```
 
-**Identity vs Equality**: Copied values are equal in content but not identical in memory. This prevents accidental mutation of shared data while maintaining value semantics.
-
-**Note**: Primitives (Int, Str, Bool, etc.) and functions are immutable, so they don't trigger copying for simple assignments. When passed to mutable parameters with the `mut` keyword, they are copied for consistency.
+Explicit copy support belongs in the standard library as `ard/core::copy(value)`. Use that when an independent deep copy is intended. Generic deep-copy coverage is still being defined.
 
 #### Increment/Decrement short hand
 

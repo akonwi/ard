@@ -242,15 +242,9 @@ func (c Checker) isMutable(expr Expression) bool {
 	return false
 }
 
-// isCopyable returns true if the type can be copied for mut parameters
-func (c Checker) isCopyable(_ Type) bool {
-	// In Ard, all types are copyable by default
-	// Future: might exclude external resources like file handles
-	return true
-}
-
-// shouldCopyForMutableAssignment determines if we should copy for mut variable assignments
-// This is more conservative than isCopyable to avoid unnecessary copying of primitives
+// shouldCopyForMutableAssignment determines if we should copy for mut variable assignments.
+// TODO: replace implicit copies with explicit ard/core::copy once generic deep-copy
+// semantics are implemented.
 func (c Checker) shouldCopyForMutableAssignment(t Type) bool {
 	switch t.(type) {
 	case *StructDef, *List, *Map:
@@ -2542,14 +2536,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
-			// Align mutability information with parameters
-			resolvedArgs := c.alignArgumentsWithParameters(s.Args, fnDef.Parameters)
-
 			// Setup generics if function has them
 			fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
 
 			// Check and process arguments (handles both generics and mutability)
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
 			if args == nil {
 				return nil
 			}
@@ -2657,9 +2648,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
-			// Align mutability information with parameters
-			resolvedArgs := c.alignArgumentsWithParameters(s.Method.Args, fnDef.Parameters)
-
 			// For methods on generic struct instances, bind struct generics to method parameters.
 			// When calling a method on a generic struct instance, the method's generic parameters
 			// should use the types that were resolved during struct instantiation.
@@ -2727,7 +2715,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Check and process arguments (handles both generics and mutability)
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
 			if args == nil {
 				return nil
 			}
@@ -3214,14 +3202,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
-			// Align mutability information with parameters
-			resolvedArgs := c.alignArgumentsWithParameters(s.Function.Args, fnDef.Parameters)
-
 			// Setup generics if function has them
 			fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
 
 			// Check and process arguments (handles both generics and mutability)
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
 			if args == nil {
 				return nil
 			}
@@ -4966,39 +4951,6 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 	}
 }
 
-// alignArgumentsWithParameters converts a list of (possibly named) arguments to positional form,
-// aligned with function parameters and preserving mutability information.
-func (c *Checker) alignArgumentsWithParameters(args []parse.Argument, params []Parameter) []parse.Argument {
-	resolvedArgs := make([]parse.Argument, len(params))
-
-	if len(args) == 0 {
-		return resolvedArgs
-	}
-
-	// If arguments have names, reorder them to match parameter positions
-	if args[0].Name != "" {
-		paramMap := make(map[string]int)
-		for i, param := range params {
-			paramMap[param.Name] = i
-		}
-		for _, arg := range args {
-			if index, exists := paramMap[arg.Name]; exists {
-				resolvedArgs[index] = parse.Argument{
-					Location: arg.Location,
-					Name:     "",
-					Value:    arg.Value,
-					Mutable:  arg.Mutable,
-				}
-			}
-		}
-	} else {
-		// Positional arguments - direct copy
-		copy(resolvedArgs, args)
-	}
-
-	return resolvedArgs
-}
-
 // setupFunctionGenerics sets up generic scope and function copy for generic functions.
 // Returns the function copy (with fresh TypeVar instances for generics) and the generic scope.
 // For non-generic functions, returns the original function and a nil scope.
@@ -5084,10 +5036,10 @@ func (c *Checker) synthesizeMaybeSome(value Expression, maybeType Type) Expressi
 
 // checkAndProcessArguments validates and type-checks function arguments with generic support.
 // Returns the processed arguments and the specialized function (with generics resolved if applicable).
-// Handles the `mut` keyword for explicit copy semantics on mutable parameters.
+// Mutable parameters require addressable mutable arguments.
 // Synthesizes maybe::none() calls for omitted nullable arguments.
 // If any error occurs, it's added to the checker's diagnostics.
-func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []parse.Argument, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int) ([]Expression, *FunctionDef) {
+func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int) ([]Expression, *FunctionDef) {
 	// Create the full argument list including synthesized maybe::none() calls for omitted arguments
 	// Need to maintain parameter order, so use indexed assignment instead of appending
 	totalArgs := len(fnDefCopy.Parameters)
@@ -5174,23 +5126,15 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 			}
 		}
 
-		// Check mutability constraints if needed
+		// Check mutable-reference constraints if needed. A mutable parameter
+		// requires an addressable mutable place; a call-site `mut` marker no longer
+		// requests a defensive copy.
 		if fnDefCopy.Parameters[i].Mutable {
-			if c.isMutable(checkedArg) {
-				// Argument is already mutable - use it directly
-				allExprs[i] = checkedArg
-			} else if i < len(resolvedArgs) && resolvedArgs[i].Mutable {
-				// User provided `mut` keyword - create a copy
-				// (omitted arguments won't have a resolvedArgs entry)
-				allExprs[i] = &CopyExpression{
-					Expr:  checkedArg,
-					Type_: checkedArg.Type(),
-				}
-			} else {
-				// Argument is not mutable and no `mut` keyword - error
+			if !c.isMutable(checkedArg) {
 				c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDefCopy.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
 				return nil, nil
 			}
+			allExprs[i] = checkedArg
 		} else {
 			allExprs[i] = checkedArg
 		}

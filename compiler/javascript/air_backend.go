@@ -729,14 +729,14 @@ func (l *airJSLowerer) lowerStmt(fn air.Function, stmt air.Stmt) (string, error)
 			if err != nil {
 				return "", err
 			}
-			lines = append(lines, l.localName(fn, stmt.Local)+" = "+value+";")
+			lines = append(lines, l.localAssignTarget(fn, stmt.Local)+" = "+value+";")
 			return strings.Join(lines, "\n"), nil
 		}
 		value, err := l.lowerExpr(fn, *stmt.Value)
 		if err != nil {
 			return "", err
 		}
-		return l.localName(fn, stmt.Local) + " = " + value + ";", nil
+		return l.localAssignTarget(fn, stmt.Local) + " = " + value + ";", nil
 	case air.StmtSetField:
 		target, err := l.lowerExpr(fn, *stmt.Target)
 		if err != nil {
@@ -819,7 +819,7 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 	case air.ExprConstStr:
 		return strconv.Quote(expr.Str), nil
 	case air.ExprLoadLocal:
-		return l.localName(fn, expr.Local), nil
+		return l.localValueName(fn, expr.Local), nil
 	case air.ExprLoadGlobal:
 		return l.globalRef(fn.Module, expr.Global), nil
 	case air.ExprFunctionRef:
@@ -843,11 +843,7 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 			}
 			return renderJSExpr(jsCallExprIR{Callee: receiver + "." + jsName(info.Method), Args: args}), nil
 		}
-		args, err := l.lowerArgs(fn, expr.Args)
-		if err != nil {
-			return "", err
-		}
-		return renderJSExpr(jsCallExprIR{Callee: l.functionRef(fn.Module, expr.Function), Args: args}), nil
+		return l.lowerFunctionCall(fn, expr)
 	case air.ExprCallExtern:
 		call, err := l.lowerExternCallRaw(fn, expr)
 		if err != nil {
@@ -1738,6 +1734,82 @@ func (l *airJSLowerer) lowerStrOp(fn air.Function, expr air.Expr) (string, error
 	}
 }
 
+func (l *airJSLowerer) lowerFunctionCall(fn air.Function, expr air.Expr) (string, error) {
+	if expr.Function < 0 || int(expr.Function) >= len(l.program.Functions) {
+		return "", fmt.Errorf("invalid function id %d", expr.Function)
+	}
+	target := l.program.Functions[expr.Function]
+	args := make([]string, len(expr.Args))
+	setup := []string{}
+	writeback := []string{}
+	for i, arg := range expr.Args {
+		value, err := l.lowerExpr(fn, arg)
+		if err != nil {
+			return "", err
+		}
+		if i < len(target.Signature.Params) && target.Signature.Params[i].Mutable {
+			refArg, refSetup, refWriteback, err := l.mutableArgRef(fn, arg, value)
+			if err != nil {
+				return "", err
+			}
+			args[i] = refArg
+			setup = append(setup, refSetup...)
+			writeback = append(writeback, refWriteback...)
+			continue
+		}
+		args[i] = value
+	}
+	call := renderJSExpr(jsCallExprIR{Callee: l.functionRef(fn.Module, expr.Function), Args: args})
+	if len(setup) == 0 && len(writeback) == 0 {
+		return call, nil
+	}
+	result := l.temp("call")
+	lines := append([]string{}, setup...)
+	lines = append(lines, "const "+result+" = "+call+";")
+	lines = append(lines, writeback...)
+	lines = append(lines, "return "+result+";")
+	return renderJSDoc(jsIIFEDoc(strings.Join(lines, "\n"))), nil
+}
+
+func (l *airJSLowerer) mutableArgRef(fn air.Function, arg air.Expr, value string) (string, []string, []string, error) {
+	if arg.Kind == air.ExprLoadLocal && l.localIsMutableParam(fn, arg.Local) {
+		return l.localName(fn, arg.Local), nil, nil, nil
+	}
+	place, ok, err := l.mutablePlace(fn, arg, value)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if !ok {
+		return "", nil, nil, fmt.Errorf("mutable argument is not an assignable place")
+	}
+	ref := l.temp("mut")
+	setup := []string{"const " + ref + " = { value: " + place + " };"}
+	writeback := []string{place + " = " + ref + ".value;"}
+	return ref, setup, writeback, nil
+}
+
+func (l *airJSLowerer) mutablePlace(fn air.Function, arg air.Expr, value string) (string, bool, error) {
+	switch arg.Kind {
+	case air.ExprLoadLocal:
+		return l.localAssignTarget(fn, arg.Local), true, nil
+	case air.ExprGetField:
+		if arg.Target == nil {
+			return "", false, fmt.Errorf("field place missing target")
+		}
+		target, err := l.lowerExpr(fn, *arg.Target)
+		if err != nil {
+			return "", false, err
+		}
+		t, ok := l.typeInfo(arg.Target.Type)
+		if !ok || arg.Field < 0 || arg.Field >= len(t.Fields) {
+			return "", false, fmt.Errorf("unknown field %d on type %d", arg.Field, arg.Target.Type)
+		}
+		return target + "." + jsName(t.Fields[arg.Field].Name), true, nil
+	default:
+		return value, false, nil
+	}
+}
+
 func (l *airJSLowerer) lowerArgs(fn air.Function, args []air.Expr) ([]string, error) {
 	out := make([]string, len(args))
 	for i, arg := range args {
@@ -1794,6 +1866,26 @@ func (l *airJSLowerer) localName(fn air.Function, local air.LocalID) string {
 		}
 	}
 	return base
+}
+
+func (l *airJSLowerer) localValueName(fn air.Function, local air.LocalID) string {
+	name := l.localName(fn, local)
+	if l.localIsMutableParam(fn, local) {
+		return name + ".value"
+	}
+	return name
+}
+
+func (l *airJSLowerer) localAssignTarget(fn air.Function, local air.LocalID) string {
+	return l.localValueName(fn, local)
+}
+
+func (l *airJSLowerer) localIsMutableParam(fn air.Function, local air.LocalID) bool {
+	idx := int(local)
+	if idx < 0 || idx >= len(fn.Signature.Params) {
+		return false
+	}
+	return fn.Signature.Params[idx].Mutable
 }
 
 func (l *airJSLowerer) typeModule(typeID air.TypeID) (air.ModuleID, bool) {

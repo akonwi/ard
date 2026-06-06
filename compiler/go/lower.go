@@ -719,7 +719,7 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			return out, nil
 		}
 		out = append(out, &ast.AssignStmt{
-			Lhs: []ast.Expr{ast.NewIdent(localName(fn, stmt.Local))},
+			Lhs: []ast.Expr{l.localAssignExpr(fn, stmt.Local)},
 			Tok: token.ASSIGN,
 			Rhs: []ast.Expr{value.expr},
 		})
@@ -828,7 +828,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		return loweredExpr{stmts: stmts, expr: zero}, nil
 	case air.ExprLoadLocal:
-		return loweredExpr{expr: ast.NewIdent(localName(fn, expr.Local))}, nil
+		return loweredExpr{expr: l.localValueExpr(fn, expr.Local)}, nil
 	case air.ExprLoadGlobal:
 		if expr.Global < 0 || int(expr.Global) >= len(l.program.Globals) {
 			return loweredExpr{}, fmt.Errorf("unknown global %d", expr.Global)
@@ -1630,11 +1630,7 @@ func (l *lowerer) goParamType(param air.Param) (ast.Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !param.Mutable || !validTypeID(l.program, param.Type) {
-		return typ, nil
-	}
-	info := l.program.Types[param.Type-1]
-	if info.Kind == air.TypeStruct {
+	if param.Mutable && validTypeID(l.program, param.Type) && !l.isVoidType(param.Type) {
 		return &ast.StarExpr{X: typ}, nil
 	}
 	return typ, nil
@@ -2113,37 +2109,34 @@ func (l *lowerer) resolvedExprType(fn air.Function, expr air.Expr) air.TypeID {
 }
 
 func (l *lowerer) adaptCallArg(fn air.Function, arg air.Expr, argExpr ast.Expr, param air.Param) ast.Expr {
-	if !validTypeID(l.program, param.Type) {
+	if !param.Mutable || !validTypeID(l.program, param.Type) || l.isVoidType(param.Type) {
 		return argExpr
 	}
-	paramType := l.program.Types[param.Type-1]
-	if paramType.Kind != air.TypeStruct {
-		return argExpr
+	if arg.Kind == air.ExprLoadLocal && l.localIsPointerParam(fn, arg.Local) {
+		return ast.NewIdent(localName(fn, arg.Local))
 	}
-	argIsPointer := l.localIsPointerParam(fn, arg)
-	switch {
-	case param.Mutable && !argIsPointer:
-		return &ast.UnaryExpr{Op: token.AND, X: argExpr}
-	case !param.Mutable && argIsPointer:
-		return &ast.StarExpr{X: argExpr}
-	default:
-		return argExpr
-	}
+	return &ast.UnaryExpr{Op: token.AND, X: argExpr}
 }
 
-func (l *lowerer) localIsPointerParam(fn air.Function, expr air.Expr) bool {
-	if expr.Kind != air.ExprLoadLocal {
+func (l *lowerer) localValueExpr(fn air.Function, local air.LocalID) ast.Expr {
+	name := ast.Expr(ast.NewIdent(localName(fn, local)))
+	if l.localIsPointerParam(fn, local) {
+		return &ast.StarExpr{X: name}
+	}
+	return name
+}
+
+func (l *lowerer) localAssignExpr(fn air.Function, local air.LocalID) ast.Expr {
+	return l.localValueExpr(fn, local)
+}
+
+func (l *lowerer) localIsPointerParam(fn air.Function, local air.LocalID) bool {
+	idx := int(local)
+	if idx < 0 || idx >= len(fn.Signature.Params) {
 		return false
 	}
-	local := int(expr.Local)
-	if local < 0 || local >= len(fn.Signature.Params) || !validTypeID(l.program, expr.Type) {
-		return false
-	}
-	param := fn.Signature.Params[local]
-	if !param.Mutable || !validTypeID(l.program, param.Type) {
-		return false
-	}
-	return l.program.Types[param.Type-1].Kind == air.TypeStruct
+	param := fn.Signature.Params[idx]
+	return param.Mutable && validTypeID(l.program, param.Type) && !l.isVoidType(param.Type)
 }
 
 func (l *lowerer) qualified(alias string, importPath string, name string) ast.Expr {
@@ -3387,11 +3380,11 @@ func (l *lowerer) lowerListPrepend(fn air.Function, expr air.Expr) (loweredExpr,
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	name := localName(fn, expr.Target.Local)
-	assign := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{&ast.CompositeLit{Type: &ast.ArrayType{Elt: elemType}, Elts: []ast.Expr{value.expr}}, ast.NewIdent(name)}, Ellipsis: 2}}}
+	target := l.localValueExpr(fn, expr.Target.Local)
+	assign := &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{&ast.CompositeLit{Type: &ast.ArrayType{Elt: elemType}, Elts: []ast.Expr{value.expr}}, target}, Ellipsis: 2}}}
 	stmts := append([]ast.Stmt{}, value.stmts...)
 	stmts = append(stmts, assign)
-	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(name)}}}, nil
+	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target}}}, nil
 }
 
 func (l *lowerer) lowerListSort(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -3441,15 +3434,15 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	name := localName(fn, expr.Target.Local)
+	target := l.localValueExpr(fn, expr.Target.Local)
 	assign := &ast.AssignStmt{
-		Lhs: []ast.Expr{ast.NewIdent(name)},
+		Lhs: []ast.Expr{target},
 		Tok: token.ASSIGN,
-		Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{ast.NewIdent(name), value.expr}}},
+		Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{target, value.expr}}},
 	}
 	stmts := append([]ast.Stmt{}, value.stmts...)
 	stmts = append(stmts, assign)
-	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(name)}}}, nil
+	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target}}}, nil
 }
 
 func (l *lowerer) lowerMakeMap(fn air.Function, expr air.Expr) (loweredExpr, error) {

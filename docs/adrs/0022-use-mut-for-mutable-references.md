@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -32,7 +32,7 @@ Ard still needs explicit copy semantics. If `mut` becomes reference-oriented, th
 
 ## Decision
 
-Explore changing `mut` from copy semantics to explicit mutable-reference semantics.
+Change `mut` from copy semantics to explicit mutable-reference semantics.
 
 Under this direction, a `mut` parameter, function-type parameter, receiver, closure capture, or field is a mutable reference to a value of the annotated type rather than an owned copied value. Call sites do not need a second `mut` marker when passing an already-mutable addressable place; the parameter type expresses the mutable-reference requirement and the checker enforces it:
 

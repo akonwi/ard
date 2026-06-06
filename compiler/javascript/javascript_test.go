@@ -384,6 +384,55 @@ fn main() {
 	}
 }
 
+func TestRunMutableReferenceParameterUpdatesCaller(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/io
+
+struct Counter {
+  value: Int,
+}
+
+fn bump(mut c: Counter) {
+  c.value = c.value + 1
+}
+
+fn bump_int(mut count: Int) {
+  count = count + 1
+}
+
+fn main() {
+  mut counter = Counter{value: 0}
+  bump(counter)
+  io::print(counter.value.to_str())
+
+  mut count = 0
+  bump_int(count)
+  io::print(count.to_str())
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", "-tags=goexperiment.jsonv2", ".", "run", "--target", "js-server", mainPath)
+	cmd.Dir = ".."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("did not expect js-server mutable reference run error: %v\n%s", err, string(out))
+	}
+	if string(out) != "1\n1\n" {
+		t.Fatalf("unexpected output: %q", string(out))
+	}
+}
+
 func TestRunExecutesDecodeAndJSONStdlibProgram(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not installed")

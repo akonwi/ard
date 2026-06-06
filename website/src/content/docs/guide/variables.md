@@ -87,42 +87,32 @@ if some_condition {
 
 Ard uses explicit copy semantics to ensure data safety and prevent accidental mutation of shared data.
 
-### Variable Assignment
+### Mutable References
 
-When assigning complex types (structs, lists, maps) to mutable variables, Ard creates deep copies:
+A `mut` binding creates mutable local storage. A function parameter marked `mut` receives mutable access to caller-owned storage, so the caller must pass an addressable mutable value:
 
 ```ard
 struct Person { name: Str, age: Int }
 
-let original = Person { name: "Alice", age: 30 }
-mut copy = original  // Creates a deep copy
-copy.age = 31
-// original.age is still 30, copy.age is 31
-```
-
-### Function Parameters
-
-When a function parameter is mutable, you must use the `mut` keyword to explicitly create a copy:
-
-```ard
 fn update_person(mut person: Person) {
-    person.age = 99  // Only affects the copy
+    person.age = 99  // Mutates the caller's value
 }
 
-let alice = Person { name: "Alice", age: 30 }
-update_person(mut alice)  // Explicitly request a copy with `mut`
-// alice.age is still 30 (original unchanged)
+mut alice = Person { name: "Alice", age: 30 }
+update_person(alice)
+// alice.age is now 99
 ```
 
-Without the `mut` keyword, passing an immutable value to a mutable parameter will result in a compile-time error.
+Passing an immutable value to a mutable parameter is a compile-time error:
 
-### Identity vs Equality
+```ard
+let bob = Person { name: "Bob", age: 30 }
+update_person(bob) // Error: expected a mutable Person
+```
 
-Copied values are equal in content but not identical in memory. This prevents accidental mutation of shared data while maintaining value semantics.
+### Explicit Copies
 
-### Primitives
-
-Primitives (Int, Str, Bool, etc.) and functions are immutable, so they don't trigger copying for simple assignments. When passed to mutable parameters with the `mut` keyword, they are copied for consistency.
+Copying should be explicit when independent identity is required. The standard library `ard/core::copy(value)` API is reserved for this purpose; generic deep-copy coverage is still being defined.
 
 ## Shadowing
 
