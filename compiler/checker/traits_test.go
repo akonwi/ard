@@ -30,6 +30,13 @@ func TestSelfRecursiveStructFieldsThroughIndirection(t *testing.T) {
 `,
 		},
 		{
+			name: "mutable reference self reference",
+			input: `struct Node {
+  parent: mut Node,
+}
+`,
+		},
+		{
 			name: "direct self reference is rejected",
 			input: `struct Node {
   child: Node,

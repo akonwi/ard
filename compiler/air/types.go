@@ -136,6 +136,7 @@ type FieldInfo struct {
 	Name              string
 	Type              TypeID
 	Index             int
+	Mutable           bool
 	RecursiveNullable bool
 }
 

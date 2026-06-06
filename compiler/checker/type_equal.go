@@ -97,6 +97,14 @@ func equalTypesSeen(left Type, right Type, seen map[typeEqualKey]struct{}) bool 
 			return r.actual == nil || equalTypesSeen(l, r.actual, seen)
 		}
 		return false
+	case *MutableRef:
+		if r, ok := right.(*MutableRef); ok {
+			return equalTypesSeen(l.of, r.of, seen)
+		}
+		if r, ok := right.(*TypeVar); ok {
+			return r.actual == nil || equalTypesSeen(l, r.actual, seen)
+		}
+		return false
 	case *ExternType:
 		if r, ok := right.(*TypeVar); ok && r.actual == nil {
 			return true
@@ -259,6 +267,8 @@ func typeEqualID(t Type) string {
 		return fmt.Sprintf("TypeVar:%p", v)
 	case *Result:
 		return fmt.Sprintf("Result:%p", v)
+	case *MutableRef:
+		return fmt.Sprintf("MutableRef:%p", v)
 	case *ExternType:
 		return fmt.Sprintf("Extern:%p", v)
 	case *FunctionDef:

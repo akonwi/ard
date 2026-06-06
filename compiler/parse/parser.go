@@ -1408,6 +1408,19 @@ func (p *parser) assignment() (Statement, error) {
 }
 
 func (p *parser) parseType() DeclaredType {
+	if p.match(mut) {
+		mutToken := p.previous()
+		inner := p.parseType()
+		end := mutToken.getLocation().End
+		if inner != nil {
+			end = inner.GetLocation().End
+		}
+		return &MutableType{
+			Location: Location{Start: mutToken.getLocation().Start, End: end},
+			Inner:    inner,
+		}
+	}
+
 	static := p.parseStaticPath()
 	if static != nil {
 		// Parse generic type arguments if present

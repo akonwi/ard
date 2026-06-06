@@ -402,6 +402,12 @@ func typeGoType(typ parse.DeclaredType, aliases map[string]string, definedTypes 
 		goType = "string"
 	case *parse.VoidType:
 		goType = "struct{}"
+	case *parse.MutableType:
+		inner, err := typeGoType(t.Inner, aliases, definedTypes)
+		if err != nil {
+			return "", err
+		}
+		goType = "*" + inner
 	case *parse.List:
 		elem, err := typeGoType(t.Element, aliases, definedTypes)
 		if err != nil {
@@ -835,6 +841,8 @@ func collectGenerics(typ parse.DeclaredType, out map[string]struct{}) {
 	switch t := typ.(type) {
 	case *parse.GenericType:
 		out[t.Name] = struct{}{}
+	case *parse.MutableType:
+		collectGenerics(t.Inner, out)
 	case *parse.List:
 		collectGenerics(t.Element, out)
 	case *parse.Map:

@@ -197,6 +197,8 @@ func extractGenericNames(t Type, names map[string]bool) {
 	case *Result:
 		extractGenericNames(t.val, names)
 		extractGenericNames(t.err, names)
+	case *MutableRef:
+		extractGenericNames(t.of, names)
 	case *Union:
 		for _, t := range t.Types {
 			extractGenericNames(t, names)
@@ -243,6 +245,8 @@ func hasGenericsInTypeSeen(t Type, seen map[Type]struct{}) bool {
 		return hasGenericsInTypeSeen(t.of, seen)
 	case *Result:
 		return hasGenericsInTypeSeen(t.val, seen) || hasGenericsInTypeSeen(t.err, seen)
+	case *MutableRef:
+		return hasGenericsInTypeSeen(t.of, seen)
 	case *Union:
 		return slices.ContainsFunc(t.Types, func(member Type) bool { return hasGenericsInTypeSeen(member, seen) })
 	case *StructDef:
@@ -312,6 +316,12 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			val: newVal,
 			err: newErr,
 		}
+	case *MutableRef:
+		newOf := replaceGeneric(t.of, genericName, concreteType)
+		if newOf == t.of {
+			return t
+		}
+		return MakeMutableRef(newOf)
 	case *FunctionDef:
 		newParams := make([]Parameter, len(t.Parameters))
 		for i, p := range t.Parameters {
@@ -398,6 +408,8 @@ func hasGeneric(t Type, genericName string) bool {
 		return hasGeneric(t.of, genericName)
 	case *Result:
 		return hasGeneric(t.val, genericName) || hasGeneric(t.err, genericName)
+	case *MutableRef:
+		return hasGeneric(t.of, genericName)
 	case *StructDef:
 		for _, fieldType := range t.Fields {
 			if hasGeneric(fieldType, genericName) {
@@ -475,6 +487,8 @@ func copyTypeWithTypeVarMap(t Type, typeVarMap map[string]*TypeVar) Type {
 			val: copyTypeWithTypeVarMap(typ.val, typeVarMap),
 			err: copyTypeWithTypeVarMap(typ.err, typeVarMap),
 		}
+	case *MutableRef:
+		return MakeMutableRef(copyTypeWithTypeVarMap(typ.of, typeVarMap))
 	case *Union:
 		newTypes := make([]Type, len(typ.Types))
 		for i, t := range typ.Types {

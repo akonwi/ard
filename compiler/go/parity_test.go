@@ -1306,6 +1306,46 @@ func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.
 	}
 }
 
+func TestGoTargetParityMutableReferenceFieldUpdatesSharedStorage(t *testing.T) {
+	program := lowerParitySource(t, `
+		struct Tree {
+			count: Int,
+		}
+
+		struct Context {
+			tree: mut Tree,
+		}
+
+		fn bump(mut tree: Tree) {
+			tree.count = tree.count + 1
+		}
+
+		struct Box {
+			value: mut Int,
+		}
+
+		fn set(mut value: Int) {
+			value = 3
+		}
+
+		fn main() Int {
+			mut tree = Tree{count: 0}
+			let ctx = Context{tree: tree}
+			bump(ctx.tree)
+			ctx.tree.count = 2
+
+			mut count = 0
+			let box = Box{value: count}
+			set(box.value)
+
+			ctx.tree.count + tree.count + box.value + count
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "10" {
+		t.Fatalf("got %s, want 10", got)
+	}
+}
+
 func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 	t.Run("struct", func(t *testing.T) {
 		program := lowerParitySource(t, `

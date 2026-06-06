@@ -175,7 +175,7 @@ type InstanceProperty struct {
 }
 
 func (i *InstanceProperty) Type() Type {
-	return i._type
+	return derefMutableRef(i._type)
 }
 
 // String returns a string representation of the instance property

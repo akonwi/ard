@@ -401,6 +401,14 @@ struct Counter {
   value: Int,
 }
 
+struct Context {
+  counter: mut Counter,
+}
+
+struct Box {
+  value: mut Int,
+}
+
 fn bump(mut c: Counter) {
   c.value = c.value + 1
 }
@@ -414,9 +422,20 @@ fn main() {
   bump(counter)
   io::print(counter.value.to_str())
 
+  mut shared = Counter{value: 0}
+  let ctx = Context{counter: shared}
+  bump(ctx.counter)
+  ctx.counter.value = 2
+  io::print((ctx.counter.value + shared.value).to_str())
+
   mut count = 0
   bump_int(count)
   io::print(count.to_str())
+
+  mut shared_count = 0
+  let box = Box{value: shared_count}
+  bump_int(box.value)
+  io::print((box.value + shared_count).to_str())
 }
 `), 0o644); err != nil {
 		t.Fatalf("failed to write source: %v", err)
@@ -428,7 +447,7 @@ fn main() {
 	if err != nil {
 		t.Fatalf("did not expect js-server mutable reference run error: %v\n%s", err, string(out))
 	}
-	if string(out) != "1\n1\n" {
+	if string(out) != "1\n4\n1\n2\n" {
 		t.Fatalf("unexpected output: %q", string(out))
 	}
 }

@@ -57,6 +57,19 @@ let alice = Person { name: "Alice", age: 30 }
 update_person(alice) // Error: expected a mutable Person
 ```
 
+Struct fields can also hold mutable references:
+
+```ard
+struct Context {
+    tree: mut ViewTree,
+}
+
+let ctx = Context { tree: tree }
+ctx.tree.add_child(child)
+```
+
+The `ctx` binding is immutable, but `ctx.tree` is mutable access to the referenced `ViewTree`. Field assignment writes through the reference; it does not rebind the field slot.
+
 Explicit copy support belongs in the standard library as `ard/core::copy(value)`. Use that when an independent deep copy is intended. Generic deep-copy coverage is still being defined.
 
 #### Increment/Decrement short hand

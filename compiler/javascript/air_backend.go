@@ -750,7 +750,12 @@ func (l *airJSLowerer) lowerStmt(fn air.Function, stmt air.Stmt) (string, error)
 		if !ok || stmt.Field < 0 || stmt.Field >= len(t.Fields) {
 			return "", fmt.Errorf("unknown field %d on type %d", stmt.Field, stmt.Target.Type)
 		}
-		return target + "." + jsName(t.Fields[stmt.Field].Name) + " = " + value + ";", nil
+		field := t.Fields[stmt.Field]
+		fieldTarget := target + "." + jsName(field.Name)
+		if field.Mutable {
+			fieldTarget += ".value"
+		}
+		return fieldTarget + " = " + value + ";", nil
 	case air.StmtExpr:
 		if stmt.Expr != nil && stmt.Expr.Kind == air.ExprIf {
 			return l.lowerIfStmt(fn, *stmt.Expr)
@@ -862,15 +867,26 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		return l.lowerCallClosure(fn, expr)
 	case air.ExprMakeStruct:
 		args := make([]string, len(expr.Fields))
+		typeInfo, ok := l.typeInfo(expr.Type)
+		if !ok {
+			return "", fmt.Errorf("unknown struct type %d", expr.Type)
+		}
+		fieldsByName := map[string]air.FieldInfo{}
+		for _, field := range typeInfo.Fields {
+			fieldsByName[field.Name] = field
+		}
 		for i, field := range expr.Fields {
 			value, err := l.lowerExpr(fn, field.Value)
 			if err != nil {
 				return "", err
 			}
+			if info, ok := fieldsByName[field.Name]; ok && info.Mutable {
+				value, err = l.mutableRefCellExpr(fn, field.Value, value)
+				if err != nil {
+					return "", err
+				}
+			}
 			args[i] = value
-		}
-		if _, ok := l.typeInfo(expr.Type); !ok {
-			return "", fmt.Errorf("unknown struct type %d", expr.Type)
 		}
 		return renderJSExpr(jsNewExprIR{Ctor: l.typeRef(fn.Module, expr.Type), Args: args}), nil
 	case air.ExprGetField:
@@ -883,7 +899,11 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 			return "", fmt.Errorf("unknown field %d on type %d", expr.Field, expr.Target.Type)
 		}
 		field := t.Fields[expr.Field]
-		return target + "." + jsName(field.Name), nil
+		fieldExpr := target + "." + jsName(field.Name)
+		if field.Mutable {
+			return fieldExpr + ".value", nil
+		}
+		return fieldExpr, nil
 	case air.ExprEnumVariant:
 		t, ok := l.typeInfo(expr.Type)
 		if !ok || expr.Variant < 0 || expr.Variant >= len(t.Variants) {
@@ -1775,6 +1795,11 @@ func (l *airJSLowerer) mutableArgRef(fn air.Function, arg air.Expr, value string
 	if arg.Kind == air.ExprLoadLocal && l.localIsMutableParam(fn, arg.Local) {
 		return l.localName(fn, arg.Local), nil, nil, nil
 	}
+	if cell, ok, err := l.mutableFieldCell(fn, arg); err != nil {
+		return "", nil, nil, err
+	} else if ok {
+		return cell, nil, nil, nil
+	}
 	place, ok, err := l.mutablePlace(fn, arg, value)
 	if err != nil {
 		return "", nil, nil, err
@@ -1786,6 +1811,44 @@ func (l *airJSLowerer) mutableArgRef(fn air.Function, arg air.Expr, value string
 	setup := []string{"const " + ref + " = { value: " + place + " };"}
 	writeback := []string{place + " = " + ref + ".value;"}
 	return ref, setup, writeback, nil
+}
+
+func (l *airJSLowerer) mutableRefCellExpr(fn air.Function, arg air.Expr, value string) (string, error) {
+	if arg.Kind == air.ExprLoadLocal && l.localIsMutableParam(fn, arg.Local) {
+		return l.localName(fn, arg.Local), nil
+	}
+	if cell, ok, err := l.mutableFieldCell(fn, arg); err != nil {
+		return "", err
+	} else if ok {
+		return cell, nil
+	}
+	place, ok, err := l.mutablePlace(fn, arg, value)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("mutable reference field value is not an assignable place")
+	}
+	return "({ get value() { return " + place + "; }, set value(__value) { " + place + " = __value; } })", nil
+}
+
+func (l *airJSLowerer) mutableFieldCell(fn air.Function, arg air.Expr) (string, bool, error) {
+	if arg.Kind != air.ExprGetField || arg.Target == nil {
+		return "", false, nil
+	}
+	target, err := l.lowerExpr(fn, *arg.Target)
+	if err != nil {
+		return "", false, err
+	}
+	t, ok := l.typeInfo(arg.Target.Type)
+	if !ok || arg.Field < 0 || arg.Field >= len(t.Fields) {
+		return "", false, fmt.Errorf("unknown field %d on type %d", arg.Field, arg.Target.Type)
+	}
+	field := t.Fields[arg.Field]
+	if !field.Mutable {
+		return "", false, nil
+	}
+	return target + "." + jsName(field.Name), true, nil
 }
 
 func (l *airJSLowerer) mutablePlace(fn air.Function, arg air.Expr, value string) (string, bool, error) {
@@ -1804,7 +1867,12 @@ func (l *airJSLowerer) mutablePlace(fn air.Function, arg air.Expr, value string)
 		if !ok || arg.Field < 0 || arg.Field >= len(t.Fields) {
 			return "", false, fmt.Errorf("unknown field %d on type %d", arg.Field, arg.Target.Type)
 		}
-		return target + "." + jsName(t.Fields[arg.Field].Name), true, nil
+		field := t.Fields[arg.Field]
+		place := target + "." + jsName(field.Name)
+		if field.Mutable {
+			place += ".value"
+		}
+		return place, true, nil
 	default:
 		return value, false, nil
 	}

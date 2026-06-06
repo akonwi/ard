@@ -130,6 +130,12 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			val: derefVal,
 			err: derefErr,
 		}
+	case *MutableRef:
+		derefInner := derefTypeSeen(typ.of, seen)
+		if derefInner == typ.of {
+			return typ
+		}
+		return MakeMutableRef(derefInner)
 	case *Union:
 		newTypes := make([]Type, len(typ.Types))
 		changed := false
@@ -237,6 +243,9 @@ func (c Checker) isMutable(expr Expression) bool {
 	case *Variable:
 		return e.sym.mutable
 	case *InstanceProperty:
+		if _, ok := mutableRefBase(e._type); ok {
+			return true
+		}
 		return c.isMutable(e.Subject)
 	}
 	return false
@@ -582,6 +591,10 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 	case *parse.VoidType:
 		baseType = Void
 
+	case *parse.MutableType:
+		baseType = MakeMutableRef(c.resolveType(ty.Inner))
+	case parse.MutableType:
+		baseType = MakeMutableRef(c.resolveType(ty.Inner))
 	case *parse.FunctionType:
 		// Convert each parameter type and return type
 		params := make([]Parameter, len(ty.Params))
@@ -1849,6 +1862,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	instance := &StructInstance{Name: structName, _type: structType}
 	fields := make(map[string]Expression)
 	fieldTypes := make(map[string]Type)
+	providedFields := make(map[string]bool)
 
 	// For generic structs, infer generics from provided field values
 	var structDefCopy *StructDef
@@ -1888,6 +1902,15 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		if !ok {
 			c.addError(fmt.Sprintf("Unknown field: %s", fieldName), property.GetLocation())
 		} else {
+			providedFields[fieldName] = true
+
+			fieldExpected := field
+			fieldIsMutableRef := false
+			if base, ok := mutableRefBase(field); ok {
+				fieldExpected = base
+				fieldIsMutableRef = true
+			}
+
 			// For generic structs, unify types to resolve generics
 			if genericScope != nil {
 				// Check expression without type context first (let it infer if possible)
@@ -1897,27 +1920,37 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				}
 
 				// Implicit Maybe wrapping: if field is Maybe<T> and value is T, wrap in maybe::some()
-				if maybeField, isMaybe := field.(*Maybe); isMaybe {
-					if valType := checkVal.Type(); !valType.equal(field) {
+				if maybeField, isMaybe := fieldExpected.(*Maybe); isMaybe {
+					if valType := checkVal.Type(); !valType.equal(fieldExpected) {
 						if areCompatible(maybeField.Of(), valType) {
-							checkVal = c.synthesizeMaybeSome(checkVal, field)
+							checkVal = c.synthesizeMaybeSome(checkVal, fieldExpected)
 						}
 					}
 				}
 
-				if err := c.unifyTypes(field, checkVal.Type(), genericScope); err != nil {
+				if fieldIsMutableRef && !c.isMutable(checkVal) {
+					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fieldExpected.String()), property.GetLocation())
+					continue
+				}
+
+				if err := c.unifyTypes(fieldExpected, checkVal.Type(), genericScope); err != nil {
 					c.addError(err.Error(), property.GetLocation())
 					continue
 				}
 				// After unification, dereference to get the actual type
-				field = derefType(field)
+				fieldExpected = derefType(fieldExpected)
+				if fieldIsMutableRef {
+					field = MakeMutableRef(fieldExpected)
+				} else {
+					field = fieldExpected
+				}
 
 				fields[fieldName] = checkVal
 				fieldTypes[fieldName] = field
 			} else {
 				// For non-generic structs, handle nullable fields with implicit wrapping
 				var val Expression
-				if maybeField, isMaybe := field.(*Maybe); isMaybe {
+				if maybeField, isMaybe := fieldExpected.(*Maybe); isMaybe {
 					// Preserve full Maybe<T> type context for expressions like maybe::some(...)
 					// and maybe::none(), but use the inner type for literals and anonymous
 					// functions so they can still infer their element/parameter types.
@@ -1929,15 +1962,15 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 						}
 					default:
 						diagnosticCount := len(c.diagnostics)
-						val = c.checkExprAs(property.Value, field)
+						val = c.checkExprAs(property.Value, fieldExpected)
 						if val == nil {
 							c.diagnostics = c.diagnostics[:diagnosticCount]
 							val = c.checkExpr(property.Value)
-							if val != nil && !val.Type().equal(field) {
+							if val != nil && !val.Type().equal(fieldExpected) {
 								if areCompatible(maybeField.Of(), val.Type()) {
-									val = c.synthesizeMaybeSome(val, field)
+									val = c.synthesizeMaybeSome(val, fieldExpected)
 								} else {
-									c.addError(typeMismatch(field, val.Type()), property.GetLocation())
+									c.addError(typeMismatch(fieldExpected, val.Type()), property.GetLocation())
 									val = nil
 								}
 							}
@@ -1945,9 +1978,13 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 					}
 				} else {
 					// Non-nullable fields use checkExprAs which provides type context
-					val = c.checkExprAs(property.Value, field)
+					val = c.checkExprAs(property.Value, fieldExpected)
 				}
 				if val != nil {
+					if fieldIsMutableRef && !c.isMutable(val) {
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fieldExpected.String()), property.GetLocation())
+						continue
+					}
 					fields[fieldName] = val
 					fieldTypes[fieldName] = field
 				}
@@ -1965,9 +2002,9 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	for name, t := range checkFieldsMap {
 		if _, exists := fields[name]; !exists {
 			if _, isMaybe := t.(*Maybe); !isMaybe {
-				// todo: distinguish between provided w/ error + missing to avoid creating 2 errors:
-				// missing field + invalid expression for field
-				missing = append(missing, name)
+				if !providedFields[name] {
+					missing = append(missing, name)
+				}
 			} else {
 				// For optional fields, include their type
 				fieldTypes[name] = t

@@ -135,7 +135,6 @@ func TestStructs(t *testing.T) {
 						p.age = 31`, personStructInput),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Undefined variable: is_employed"},
-				{Kind: checker.Error, Message: "Missing field: employed"},
 			},
 		},
 	})

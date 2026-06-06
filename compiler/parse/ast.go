@@ -109,6 +109,22 @@ func (s StringType) GetName() string {
 	return "String"
 }
 
+type MutableType struct {
+	Location
+	Inner DeclaredType
+}
+
+func (m MutableType) IsNullable() bool {
+	return false
+}
+
+func (m MutableType) GetName() string {
+	if m.Inner == nil {
+		return "mut"
+	}
+	return m.Inner.GetName()
+}
+
 type FunctionType struct {
 	Location
 	Nullable        bool

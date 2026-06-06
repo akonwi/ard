@@ -39,6 +39,8 @@ func typeReferencesStruct(t checker.Type, owner *checker.StructDef, seen map[che
 		return typeReferencesStruct(typ.Of(), owner, seen)
 	case *checker.Result:
 		return typeReferencesStruct(typ.Val(), owner, seen) || typeReferencesStruct(typ.Err(), owner, seen)
+	case *checker.MutableRef:
+		return typeReferencesStruct(typ.Of(), owner, seen)
 	case *checker.Union:
 		for _, member := range typ.Types {
 			if typeReferencesStruct(member, owner, seen) {

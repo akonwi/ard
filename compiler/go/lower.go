@@ -512,6 +512,9 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 			if err != nil {
 				return nil, err
 			}
+			if field.Mutable {
+				fieldType = &ast.StarExpr{X: fieldType}
+			}
 			fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(l.goFieldName(typ, field.Name))}, Type: fieldType})
 		}
 		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
@@ -751,8 +754,13 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		}
 		out := append([]ast.Stmt{}, target.stmts...)
 		out = append(out, value.stmts...)
+		field := targetType.Fields[stmt.Field]
+		fieldTarget := ast.Expr(&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))})
+		if field.Mutable {
+			fieldTarget = &ast.StarExpr{X: fieldTarget}
+		}
 		out = append(out, &ast.AssignStmt{
-			Lhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, targetType.Fields[stmt.Field].Name))}},
+			Lhs: []ast.Expr{fieldTarget},
 			Tok: token.ASSIGN,
 			Rhs: []ast.Expr{value.expr},
 		})
@@ -1245,8 +1253,13 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			}
 			stmts = append(stmts, value.stmts...)
 			fieldValue := value.expr
-			if fieldInfo, ok := structFieldByName(typ, field.Name); ok && fieldInfo.RecursiveNullable {
-				fieldValue = recursiveNullableValueAsPointer(l, fieldInfo.Type, fieldValue)
+			if fieldInfo, ok := structFieldByName(typ, field.Name); ok {
+				if fieldInfo.RecursiveNullable {
+					fieldValue = recursiveNullableValueAsPointer(l, fieldInfo.Type, fieldValue)
+				}
+				if fieldInfo.Mutable {
+					fieldValue = l.mutableReferenceArg(fn, field.Value, fieldValue)
+				}
 			}
 			elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(typ, field.Name)), Value: fieldValue})
 		}
@@ -1314,6 +1327,9 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		field := targetType.Fields[expr.Field]
 		fieldExpr := &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))}
+		if field.Mutable {
+			return loweredExpr{stmts: target.stmts, expr: &ast.StarExpr{X: fieldExpr}}, nil
+		}
 		if field.RecursiveNullable {
 			return loweredExpr{stmts: target.stmts, expr: recursiveNullableFieldAsMaybe(l, expr.Type, fieldExpr)}, nil
 		}
@@ -2112,10 +2128,38 @@ func (l *lowerer) adaptCallArg(fn air.Function, arg air.Expr, argExpr ast.Expr, 
 	if !param.Mutable || !validTypeID(l.program, param.Type) || l.isVoidType(param.Type) {
 		return argExpr
 	}
+	return l.mutableReferenceArg(fn, arg, argExpr)
+}
+
+func (l *lowerer) mutableReferenceArg(fn air.Function, arg air.Expr, argExpr ast.Expr) ast.Expr {
 	if arg.Kind == air.ExprLoadLocal && l.localIsPointerParam(fn, arg.Local) {
 		return ast.NewIdent(localName(fn, arg.Local))
 	}
+	if arg.Kind == air.ExprGetField {
+		if fieldExpr, ok := l.mutableFieldReferenceExpr(fn, arg); ok {
+			return fieldExpr
+		}
+	}
 	return &ast.UnaryExpr{Op: token.AND, X: argExpr}
+}
+
+func (l *lowerer) mutableFieldReferenceExpr(fn air.Function, arg air.Expr) (ast.Expr, bool) {
+	if arg.Target == nil || !validTypeID(l.program, arg.Target.Type) {
+		return nil, false
+	}
+	targetType := l.program.Types[arg.Target.Type-1]
+	if targetType.Kind != air.TypeStruct || arg.Field < 0 || arg.Field >= len(targetType.Fields) {
+		return nil, false
+	}
+	field := targetType.Fields[arg.Field]
+	if !field.Mutable {
+		return nil, false
+	}
+	target, err := l.lowerExpr(fn, *arg.Target)
+	if err != nil {
+		return nil, false
+	}
+	return &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))}, true
 }
 
 func (l *lowerer) localValueExpr(fn air.Function, local air.LocalID) ast.Expr {

@@ -10,6 +10,10 @@ func recursiveFieldHasInfiniteSize(t parse.DeclaredType, self string, indirect b
 		indirect = true
 	}
 	switch typ := t.(type) {
+	case *parse.MutableType:
+		return recursiveFieldHasInfiniteSize(typ.Inner, self, true)
+	case parse.MutableType:
+		return recursiveFieldHasInfiniteSize(typ.Inner, self, true)
 	case *parse.CustomType:
 		return typ.GetName() == self && !indirect
 	case parse.CustomType:
