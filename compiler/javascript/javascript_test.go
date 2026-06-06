@@ -413,8 +413,14 @@ fn bump(mut c: Counter) {
   c.value = c.value + 1
 }
 
+type MutIntFn = fn(mut Int)
+
 fn bump_int(mut count: Int) {
   count = count + 1
+}
+
+fn apply(f: MutIntFn, mut count: Int) {
+  f(count)
 }
 
 fn main() {
@@ -436,6 +442,10 @@ fn main() {
   let box = Box{value: shared_count}
   bump_int(box.value)
   io::print((box.value + shared_count).to_str())
+
+  mut closure_count = 0
+  apply(bump_int, closure_count)
+  io::print(closure_count.to_str())
 }
 `), 0o644); err != nil {
 		t.Fatalf("failed to write source: %v", err)
@@ -447,7 +457,7 @@ fn main() {
 	if err != nil {
 		t.Fatalf("did not expect js-server mutable reference run error: %v\n%s", err, string(out))
 	}
-	if string(out) != "1\n4\n1\n2\n" {
+	if string(out) != "1\n4\n1\n2\n1\n" {
 		t.Fatalf("unexpected output: %q", string(out))
 	}
 }

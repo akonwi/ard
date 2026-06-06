@@ -3339,15 +3339,32 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	var targetInfo air.TypeInfo
+	hasFunctionType := false
+	if validTypeID(l.program, expr.Target.Type) {
+		info := l.program.Types[expr.Target.Type-1]
+		if info.Kind == air.TypeFunction {
+			targetInfo = info
+			hasFunctionType = true
+		}
+	}
 	args := make([]ast.Expr, 0, len(expr.Args))
 	stmts := append([]ast.Stmt{}, target.stmts...)
-	for _, arg := range expr.Args {
+	for i, arg := range expr.Args {
 		loweredArg, err := l.lowerExpr(fn, arg)
 		if err != nil {
 			return loweredExpr{}, err
 		}
 		stmts = append(stmts, loweredArg.stmts...)
-		args = append(args, loweredArg.expr)
+		argExpr := loweredArg.expr
+		if hasFunctionType && i < len(targetInfo.Params) {
+			param := air.Param{Type: targetInfo.Params[i]}
+			if i < len(targetInfo.ParamMutable) {
+				param.Mutable = targetInfo.ParamMutable[i]
+			}
+			argExpr = l.adaptCallArg(fn, arg, argExpr, param)
+		}
+		args = append(args, argExpr)
 	}
 	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: target.expr, Args: args}}, nil
 }

@@ -1366,11 +1366,42 @@ func (l *airJSLowerer) lowerCallClosure(fn air.Function, expr air.Expr) (string,
 	if err != nil {
 		return "", err
 	}
-	args, err := l.lowerArgs(fn, expr.Args)
-	if err != nil {
-		return "", err
+	var targetInfo air.TypeInfo
+	hasFunctionType := false
+	if info, ok := l.typeInfo(expr.Target.Type); ok && info.Kind == air.TypeFunction {
+		targetInfo = info
+		hasFunctionType = true
 	}
-	return renderJSExpr(jsCallExprIR{Callee: target, Args: args}), nil
+	args := make([]string, len(expr.Args))
+	setup := []string{}
+	writeback := []string{}
+	for i, arg := range expr.Args {
+		value, err := l.lowerExpr(fn, arg)
+		if err != nil {
+			return "", err
+		}
+		if hasFunctionType && i < len(targetInfo.Params) && i < len(targetInfo.ParamMutable) && targetInfo.ParamMutable[i] {
+			refArg, refSetup, refWriteback, err := l.mutableArgRef(fn, arg, value)
+			if err != nil {
+				return "", err
+			}
+			args[i] = refArg
+			setup = append(setup, refSetup...)
+			writeback = append(writeback, refWriteback...)
+			continue
+		}
+		args[i] = value
+	}
+	call := renderJSExpr(jsCallExprIR{Callee: target, Args: args})
+	if len(setup) == 0 && len(writeback) == 0 {
+		return call, nil
+	}
+	result := l.temp("call")
+	lines := append([]string{}, setup...)
+	lines = append(lines, "const "+result+" = "+call+";")
+	lines = append(lines, writeback...)
+	lines = append(lines, "return "+result+";")
+	return renderJSDoc(jsIIFEDoc(strings.Join(lines, "\n"))), nil
 }
 
 func (l *airJSLowerer) lowerBlockWithBindings(fn air.Function, block air.Block, bindings []string) (string, error) {

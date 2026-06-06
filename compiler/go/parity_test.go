@@ -1401,6 +1401,29 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 			t.Fatalf("got %s, want 1", got)
 		}
 	})
+
+	t.Run("closure function type", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			type MutIntFn = fn(mut Int)
+
+			fn bump(mut count: Int) {
+				count = count + 1
+			}
+
+			fn apply(f: MutIntFn, mut count: Int) {
+				f(count)
+			}
+
+			fn main() Int {
+				mut count = 0
+				apply(bump, count)
+				count
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "1" {
+			t.Fatalf("got %s, want 1", got)
+		}
+	})
 }
 
 func TestGoTargetParityMutMethodClosureCapturesSelf(t *testing.T) {
