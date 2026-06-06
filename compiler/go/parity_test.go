@@ -1242,6 +1242,48 @@ func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
 	}
 }
 
+func TestGoTargetParityMutableTraitObjectParameterFromConcrete(t *testing.T) {
+	program := lowerParitySource(t, `
+		struct Context {
+			node_id: Int,
+		}
+
+		trait View {
+			fn init(ctx: Context)
+			fn node_id() Int
+		}
+
+		fn add_child(ctx: Context, mut child: View) {
+			child.init(Context{node_id: ctx.node_id + 1})
+		}
+
+		struct Leaf {
+			initialized: Bool,
+			node_id: Int,
+		}
+
+		impl View for Leaf {
+			fn mut init(ctx: Context) {
+				self.initialized = true
+				self.node_id = ctx.node_id
+			}
+
+			fn node_id() Int {
+				self.node_id
+			}
+		}
+
+		fn main() Int {
+			mut leaf = Leaf{initialized: false, node_id: 0}
+			add_child(Context{node_id: 41}, leaf)
+			if leaf.initialized { leaf.node_id } else { 0 }
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "42" {
+		t.Fatalf("got %s, want 42", got)
+	}
+}
+
 func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait View {
