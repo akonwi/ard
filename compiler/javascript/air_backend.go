@@ -312,10 +312,10 @@ func (l *airJSLowerer) lowerModule(module air.Module, invokeRoot bool) (string, 
 	}
 	b.WriteString(renderJSDoc(jsModulePreambleDoc(imports, l.target)))
 	b.WriteByte('\n')
-	for _, typ := range l.program.Types {
-		decl, err := l.lowerTypeDecl(typ.ID)
+	for _, typeID := range l.moduleTypeIDs(module) {
+		decl, err := l.lowerTypeDecl(typeID)
 		if err != nil {
-			return "", fmt.Errorf("module %s type %d: %w", module.Path, typ.ID, err)
+			return "", fmt.Errorf("module %s type %d: %w", module.Path, typeID, err)
 		}
 		if strings.TrimSpace(decl) != "" {
 			b.WriteString(decl)
@@ -370,6 +370,32 @@ func (l *airJSLowerer) lowerModule(module air.Module, invokeRoot bool) (string, 
 	return b.String(), nil
 }
 
+func (l *airJSLowerer) moduleTypeIDs(module air.Module) []air.TypeID {
+	ids := []air.TypeID{}
+	for _, typ := range l.program.Types {
+		if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum {
+			continue
+		}
+		if l.typeOwnedByModule(typ, module) {
+			ids = append(ids, typ.ID)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
+
+func (l *airJSLowerer) typeOwnedByModule(typ air.TypeInfo, module air.Module) bool {
+	if typ.ModulePath != "" {
+		return typ.ModulePath == module.Path
+	}
+	for _, typeID := range module.Types {
+		if typeID == typ.ID {
+			return true
+		}
+	}
+	return false
+}
+
 func (l *airJSLowerer) moduleDependencyIDs(module air.Module) []air.ModuleID {
 	seen := map[air.ModuleID]bool{}
 	add := func(id air.ModuleID) {
@@ -382,6 +408,41 @@ func (l *airJSLowerer) moduleDependencyIDs(module air.Module) []air.ModuleID {
 	}
 	var visitBlock func(air.Block)
 	var visitExpr func(air.Expr)
+	seenTypes := map[air.TypeID]bool{}
+	var visitType func(air.TypeID)
+	visitType = func(typeID air.TypeID) {
+		info, ok := l.typeInfo(typeID)
+		if !ok || seenTypes[typeID] {
+			return
+		}
+		seenTypes[typeID] = true
+		if owner, ok := l.typeModule(typeID); ok {
+			add(owner)
+		}
+		switch info.Kind {
+		case air.TypeList, air.TypeMaybe, air.TypeFiber:
+			visitType(info.Elem)
+		case air.TypeMap:
+			visitType(info.Key)
+			visitType(info.Value)
+		case air.TypeResult:
+			visitType(info.Value)
+			visitType(info.Error)
+		case air.TypeStruct:
+			for _, field := range info.Fields {
+				visitType(field.Type)
+			}
+		case air.TypeUnion:
+			for _, member := range info.Members {
+				visitType(member.Type)
+			}
+		case air.TypeFunction:
+			for _, param := range info.Params {
+				visitType(param)
+			}
+			visitType(info.Return)
+		}
+	}
 	visitBlock = func(block air.Block) {
 		for _, stmt := range block.Stmts {
 			if stmt.Value != nil {
@@ -403,6 +464,7 @@ func (l *airJSLowerer) moduleDependencyIDs(module air.Module) []air.ModuleID {
 		}
 	}
 	visitExpr = func(expr air.Expr) {
+		visitType(expr.Type)
 		if expr.Kind == air.ExprCall && int(expr.Function) >= 0 && int(expr.Function) < len(l.program.Functions) {
 			add(l.program.Functions[expr.Function].Module)
 		}
@@ -791,7 +853,7 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		if err != nil {
 			return "", err
 		}
-		return l.adaptExternReturn(call, expr.Type)
+		return l.adaptExternReturn(fn.Module, call, expr.Type)
 	case air.ExprSpawnFiber:
 		return l.lowerSpawnFiber(fn, expr)
 	case air.ExprFiberGet:
@@ -1034,40 +1096,40 @@ func (l *airJSLowerer) lowerExternCallRaw(fn air.Function, expr air.Expr) (strin
 	return renderJSExpr(jsCallExprIR{Callee: callee, Args: args}), nil
 }
 
-func (l *airJSLowerer) adaptExternReturn(call string, typeID air.TypeID) (string, error) {
+func (l *airJSLowerer) adaptExternReturn(from air.ModuleID, call string, typeID air.TypeID) (string, error) {
 	t, ok := l.typeInfo(typeID)
 	if !ok {
 		return call, nil
 	}
 	switch t.Kind {
 	case air.TypeMaybe:
-		adapted, err := l.adaptExternValue("__extern", t.Elem)
+		adapted, err := l.adaptExternValue(from, "__extern", t.Elem)
 		if err != nil {
 			return "", err
 		}
 		body := "const __extern = " + call + ";\nreturn !isVoid(__extern) ? Maybe.some(" + adapted + ") : Maybe.none();"
 		return renderJSDoc(jsIIFEDoc(body)), nil
 	case air.TypeResult:
-		adaptedOk, err := l.adaptExternValue("__extern.ok", t.Value)
+		adaptedOk, err := l.adaptExternValue(from, "__extern.ok", t.Value)
 		if err != nil {
 			return "", err
 		}
-		adaptedErr, err := l.adaptExternValue("__extern.error", t.Error)
+		adaptedErr, err := l.adaptExternValue(from, "__extern.error", t.Error)
 		if err != nil {
 			return "", err
 		}
-		adaptedAltErr, err := l.adaptExternValue("__extern.err", t.Error)
+		adaptedAltErr, err := l.adaptExternValue(from, "__extern.err", t.Error)
 		if err != nil {
 			return "", err
 		}
 		body := "const __extern = " + call + ";\nif (__extern && Object.prototype.hasOwnProperty.call(__extern, \"ok\")) return Result.ok(" + adaptedOk + ");\nif (__extern && Object.prototype.hasOwnProperty.call(__extern, \"error\")) return Result.err(" + adaptedErr + ");\nif (__extern && Object.prototype.hasOwnProperty.call(__extern, \"err\")) return Result.err(" + adaptedAltErr + ");\nreturn __extern;"
 		return renderJSDoc(jsIIFEDoc(body)), nil
 	default:
-		return l.adaptExternValue(call, typeID)
+		return l.adaptExternValue(from, call, typeID)
 	}
 }
 
-func (l *airJSLowerer) adaptExternValue(value string, typeID air.TypeID) (string, error) {
+func (l *airJSLowerer) adaptExternValue(from air.ModuleID, value string, typeID air.TypeID) (string, error) {
 	t, ok := l.typeInfo(typeID)
 	if !ok {
 		return value, nil
@@ -1076,32 +1138,33 @@ func (l *airJSLowerer) adaptExternValue(value string, typeID air.TypeID) (string
 	case air.TypeStruct:
 		args := make([]string, len(t.Fields))
 		for i, field := range t.Fields {
-			adapted, err := l.adaptExternValue(value+"["+strconv.Quote(field.Name)+"]", field.Type)
+			adapted, err := l.adaptExternValue(from, value+"["+strconv.Quote(field.Name)+"]", field.Type)
 			if err != nil {
 				return "", err
 			}
 			args[i] = adapted
 		}
-		return "(" + value + " instanceof " + jsName(t.Name) + " ? " + value + " : new " + jsName(t.Name) + "(" + strings.Join(args, ", ") + "))", nil
+		ctor := l.typeRef(from, typeID)
+		return "(" + value + " instanceof " + ctor + " ? " + value + " : new " + ctor + "(" + strings.Join(args, ", ") + "))", nil
 	case air.TypeList:
-		adapted, err := l.adaptExternValue("__item", t.Elem)
+		adapted, err := l.adaptExternValue(from, "__item", t.Elem)
 		if err != nil {
 			return "", err
 		}
 		return "Array.isArray(" + value + ") ? " + value + ".map((__item) => " + adapted + ") : []", nil
 	case air.TypeMap:
-		adaptedKey, err := l.adaptExternValue("__key", t.Key)
+		adaptedKey, err := l.adaptExternValue(from, "__key", t.Key)
 		if err != nil {
 			return "", err
 		}
-		adaptedValue, err := l.adaptExternValue("__value", t.Value)
+		adaptedValue, err := l.adaptExternValue(from, "__value", t.Value)
 		if err != nil {
 			return "", err
 		}
 		body := "const __map = " + value + ";\nif (__map instanceof Map) return new Map(Array.from(__map.entries(), ([__key, __value]) => [" + adaptedKey + ", " + adaptedValue + "]));\nreturn new Map(Object.entries(__map ?? {}).map(([__key, __value]) => [" + adaptedKey + ", " + adaptedValue + "]));"
 		return renderJSDoc(jsIIFEDoc(body)), nil
 	case air.TypeMaybe:
-		adapted, err := l.adaptExternValue("__maybe", t.Elem)
+		adapted, err := l.adaptExternValue(from, "__maybe", t.Elem)
 		if err != nil {
 			return "", err
 		}
@@ -1539,7 +1602,7 @@ func (l *airJSLowerer) lowerMaybeExpectLines(fn air.Function, expr air.Expr) ([]
 		if !ok || maybeType.Kind != air.TypeMaybe {
 			return nil, "", fmt.Errorf("maybe expect lowered with non-Maybe extern target %d", expr.Target.Type)
 		}
-		adapted, err := l.adaptExternValue(expectVar, maybeType.Elem)
+		adapted, err := l.adaptExternValue(fn.Module, expectVar, maybeType.Elem)
 		if err != nil {
 			return nil, "", err
 		}
@@ -1875,12 +1938,8 @@ func isAIRJSPreludeExtern(binding string) bool {
 
 func (l *airJSLowerer) moduleExports(module air.Module) []string {
 	exports := []string{}
-	// lowerModule currently emits all struct/enum declarations into every generated
-	// module so imported constructors are available even when AIR does not retain
-	// a precise type-owner mapping. Keep exports aligned with the emitted
-	// declarations so browser/server integration code can import enum values too.
-	for _, typ := range l.program.Types {
-		if typ.Kind == air.TypeStruct || typ.Kind == air.TypeEnum {
+	for _, typeID := range l.moduleTypeIDs(module) {
+		if typ, ok := l.typeInfo(typeID); ok {
 			exports = append(exports, jsName(typ.Name))
 		}
 	}

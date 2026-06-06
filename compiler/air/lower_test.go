@@ -718,6 +718,84 @@ func TestLowerImportedModuleFunctionCall(t *testing.T) {
 	}
 }
 
+func TestLowerKeepsSameNamedStructsFromDifferentModulesDistinct(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	modelsDir := filepath.Join(tempDir, "models")
+	if err := os.MkdirAll(modelsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modelsDir, "inbox.ard"), []byte(`
+struct Store {
+  item: Str,
+}
+
+fn new() Store {
+  Store{item: "inbox"}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modelsDir, "issues.ard"), []byte(`
+struct Store {
+  column: Str,
+}
+
+fn new() Store {
+  Store{column: "issues"}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(tempDir, "main.ard")
+	result := parse.Parse([]byte(`
+use app/models/inbox
+use app/models/issues
+
+fn main() Str {
+  let inbox_store = inbox::new()
+  let issues_store = issues::new()
+  inbox_store.item + issues_store.column
+}
+`), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+
+	program, err := Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+
+	var stores []TypeInfo
+	for _, typ := range program.Types {
+		if typ.Name == "Store" {
+			stores = append(stores, typ)
+		}
+	}
+	if len(stores) != 2 {
+		t.Fatalf("Store type count = %d, want 2: %#v", len(stores), program.Types)
+	}
+	paths := map[string]bool{}
+	for _, typ := range stores {
+		paths[typ.ModulePath] = true
+	}
+	if !paths["app/models/inbox"] || !paths["app/models/issues"] {
+		t.Fatalf("Store module paths = %#v, want inbox and issues", paths)
+	}
+}
+
 func TestLowerImportedModuleFunctionCanReadModuleLevelLet(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

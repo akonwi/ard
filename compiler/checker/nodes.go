@@ -1140,12 +1140,13 @@ type EnumValue struct {
 }
 
 type Enum struct {
-	Name     string
-	Private  bool
-	Values   []EnumValue // The discriminant values for each variant
-	Methods  map[string]*FunctionDef
-	Traits   []*Trait
-	Location parse.Location
+	Name       string
+	ModulePath string
+	Private    bool
+	Values     []EnumValue // The discriminant values for each variant
+	Methods    map[string]*FunctionDef
+	Traits     []*Trait
+	Location   parse.Location
 }
 
 func (e Enum) NonProducing() {}
@@ -1171,7 +1172,7 @@ func (e Enum) equal(other Type) bool {
 		}
 		return false
 	}
-	if e.Name != o.Name {
+	if e.Name != o.Name || namedTypeOwnersDiffer(e.ModulePath, o.ModulePath) {
 		return false
 	}
 	if len(e.Values) != len(o.Values) {
@@ -1228,8 +1229,9 @@ func (ev EnumVariant) String() string {
 }
 
 type Union struct {
-	Name  string
-	Types []Type
+	Name       string
+	ModulePath string
+	Types      []Type
 }
 
 func (u Union) NonProducing() {}
@@ -1264,6 +1266,7 @@ func (u Union) hasTrait(trait *Trait) bool {
 
 type StructDef struct {
 	Name          string
+	ModulePath    string
 	Fields        map[string]Type
 	Methods       map[string]*FunctionDef
 	Self          string
