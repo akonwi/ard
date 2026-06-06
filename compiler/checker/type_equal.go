@@ -192,7 +192,7 @@ func equalExternalFunctionDefSeen(left ExternalFunctionDef, right Type, seen map
 
 func equalStructDefSeen(left StructDef, right Type, seen map[typeEqualKey]struct{}) bool {
 	r, ok := right.(*StructDef)
-	if !ok || left.Name != r.Name || len(left.Fields) != len(r.Fields) || len(left.Methods) != len(r.Methods) {
+	if !ok || left.Name != r.Name || namedTypeOwnersDiffer(left.ModulePath, r.ModulePath) || len(left.Fields) != len(r.Fields) || len(left.Methods) != len(r.Methods) {
 		return false
 	}
 	for name, fieldType := range left.Fields {
@@ -210,9 +210,13 @@ func equalStructDefSeen(left StructDef, right Type, seen map[typeEqualKey]struct
 	return true
 }
 
+func namedTypeOwnersDiffer(left string, right string) bool {
+	return left != "" && right != "" && left != right
+}
+
 func equalUnionSeen(left Union, right Type, seen map[typeEqualKey]struct{}) bool {
 	if r, ok := right.(*Union); ok {
-		if len(left.Types) != len(r.Types) {
+		if namedTypeOwnersDiffer(left.ModulePath, r.ModulePath) || len(left.Types) != len(r.Types) {
 			return false
 		}
 		for _, leftType := range left.Types {
@@ -263,17 +267,24 @@ func typeEqualID(t Type) string {
 		return fmt.Sprintf("Function:%s", v.Name)
 	case *ExternalFunctionDef:
 		return fmt.Sprintf("ExternalFunction:%p", v)
+	case *Enum:
+		return fmt.Sprintf("Enum:%s:%s", v.ModulePath, v.Name)
+	case Enum:
+		return fmt.Sprintf("Enum:%s:%s", v.ModulePath, v.Name)
 	case *StructDef:
 		if v.Name != "" {
-			return fmt.Sprintf("Struct:%s", v.Name)
+			return fmt.Sprintf("Struct:%s:%s", v.ModulePath, v.Name)
 		}
 		return fmt.Sprintf("Struct:%p", v)
 	case StructDef:
-		return fmt.Sprintf("Struct:%s", v.Name)
+		return fmt.Sprintf("Struct:%s:%s", v.ModulePath, v.Name)
 	case *Union:
+		if v.Name != "" {
+			return fmt.Sprintf("Union:%s:%s", v.ModulePath, v.Name)
+		}
 		return fmt.Sprintf("Union:%p", v)
 	case Union:
-		return fmt.Sprintf("Union:%s", v.Name)
+		return fmt.Sprintf("Union:%s:%s", v.ModulePath, v.Name)
 	default:
 		return fmt.Sprintf("%T:%s", t, t.String())
 	}

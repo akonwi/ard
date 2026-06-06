@@ -356,12 +356,13 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			return t
 		}
 		return &StructDef{
-			Name:    t.Name,
-			Fields:  newFields,
-			Methods: newMethods,
-			Self:    t.Self,
-			Traits:  t.Traits,
-			Private: t.Private,
+			Name:       t.Name,
+			ModulePath: t.ModulePath,
+			Fields:     newFields,
+			Methods:    newMethods,
+			Self:       t.Self,
+			Traits:     t.Traits,
+			Private:    t.Private,
 		}
 	case *ExternType:
 		if len(t.TypeArgs) == 0 {
@@ -442,6 +443,7 @@ func copyStructWithTypeVarMap(structDef *StructDef, typeVarMap map[string]*TypeV
 
 	return &StructDef{
 		Name:          structDef.Name,
+		ModulePath:    structDef.ModulePath,
 		Fields:        newFields,
 		Methods:       structDef.Methods, // Methods are not copied; they're shared
 		Self:          structDef.Self,
@@ -479,8 +481,9 @@ func copyTypeWithTypeVarMap(t Type, typeVarMap map[string]*TypeVar) Type {
 			newTypes[i] = copyTypeWithTypeVarMap(t, typeVarMap)
 		}
 		return &Union{
-			Name:  typ.Name,
-			Types: newTypes,
+			Name:       typ.Name,
+			ModulePath: typ.ModulePath,
+			Types:      newTypes,
 		}
 	case *StructDef:
 		return copyStructWithTypeVarMap(typ, typeVarMap)

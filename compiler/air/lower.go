@@ -1318,10 +1318,19 @@ func (l *lowerer) typeOwnerPath(t checker.Type) string {
 	var name string
 	switch typ := t.(type) {
 	case *checker.StructDef:
+		if typ.ModulePath != "" {
+			return typ.ModulePath
+		}
 		name = typ.Name
 	case *checker.Enum:
+		if typ.ModulePath != "" {
+			return typ.ModulePath
+		}
 		name = typ.Name
 	case *checker.Union:
+		if typ.ModulePath != "" {
+			return typ.ModulePath
+		}
 		name = typ.Name
 	case *checker.ExternType:
 		name = typ.Name_
@@ -1599,7 +1608,7 @@ func airTypeKeySeen(t checker.Type, seen map[checker.Type]struct{}) string {
 			}
 		}
 		if hasSelfReference(typ) {
-			return "recursive struct " + typ.Name
+			return "recursive struct " + typ.ModulePath + "::" + typ.Name
 		}
 		return airStructKeySeen(typ, seen)
 	case *checker.Enum:
@@ -1630,7 +1639,7 @@ func airStructKey(typ *checker.StructDef) string {
 
 func airStructKeySeen(typ *checker.StructDef, seen map[checker.Type]struct{}) string {
 	fields := sortedFieldNames(typ.Fields)
-	key := "struct " + typ.Name + "{"
+	key := "struct " + typ.ModulePath + "::" + typ.Name + "{"
 	for i, name := range fields {
 		if i > 0 {
 			key += ","
@@ -1659,7 +1668,7 @@ func airStructKeySeen(typ *checker.StructDef, seen map[checker.Type]struct{}) st
 }
 
 func airEnumKey(typ *checker.Enum) string {
-	key := "enum " + typ.Name + "{"
+	key := "enum " + typ.ModulePath + "::" + typ.Name + "{"
 	for i, variant := range typ.Values {
 		if i > 0 {
 			key += ","
@@ -1676,7 +1685,7 @@ func airUnionKey(typ *checker.Union) string {
 		parts[i] = airTypeKey(member)
 	}
 	sort.Strings(parts)
-	key := "union " + typ.Name + "{"
+	key := "union " + typ.ModulePath + "::" + typ.Name + "{"
 	for i, part := range parts {
 		if i > 0 {
 			key += "|"
@@ -4547,13 +4556,19 @@ func (l *lowerer) moduleForInstanceMethod(method *checker.InstanceMethod, fallba
 		return fallback
 	}
 	ownerName := ""
+	ownerModulePath := ""
 	switch {
 	case method.StructType != nil:
 		ownerName = method.StructType.Name
+		ownerModulePath = method.StructType.ModulePath
 	case method.EnumType != nil:
 		ownerName = method.EnumType.Name
+		ownerModulePath = method.EnumType.ModulePath
 	default:
 		return fallback
+	}
+	if ownerModulePath != "" {
+		return l.internModule(ownerModulePath)
 	}
 	for modulePath, mod := range l.moduleByName {
 		if mod.Program() == nil {

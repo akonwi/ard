@@ -8,7 +8,7 @@ func isRecursiveNullableStructField(owner *checker.StructDef, field checker.Type
 		return false
 	}
 	structType, ok := maybe.Of().(*checker.StructDef)
-	return ok && structType.Name == owner.Name
+	return ok && sameStructIdentity(structType, owner)
 }
 
 func hasSelfReference(owner *checker.StructDef) bool {
@@ -30,7 +30,7 @@ func typeReferencesStruct(t checker.Type, owner *checker.StructDef, seen map[che
 	seen[t] = struct{}{}
 	switch typ := t.(type) {
 	case *checker.StructDef:
-		return typ == owner || typ.Name == owner.Name
+		return sameStructIdentity(typ, owner)
 	case *checker.List:
 		return typeReferencesStruct(typ.Of(), owner, seen)
 	case *checker.Map:
@@ -47,4 +47,17 @@ func typeReferencesStruct(t checker.Type, owner *checker.StructDef, seen map[che
 		}
 	}
 	return false
+}
+
+func sameStructIdentity(left *checker.StructDef, right *checker.StructDef) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if left == right {
+		return true
+	}
+	if left.ModulePath != "" && right.ModulePath != "" {
+		return left.ModulePath == right.ModulePath && left.Name == right.Name
+	}
+	return left.Name == right.Name
 }

@@ -1399,6 +1399,145 @@ let answer = value()
 	}
 }
 
+func TestGenerateSourcesFromAIRExternAdapterImportsNestedStructRefs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "left.ard"), []byte(`
+struct Store { item: Str }
+`), 0o644); err != nil {
+		t.Fatalf("failed to write left module: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "wrapper.ard"), []byte(`
+use demo/left
+struct Wrapper { store: left::Store }
+`), 0o644); err != nil {
+		t.Fatalf("failed to write wrapper module: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/wrapper
+
+extern fn get_wrapper() wrapper::Wrapper = {
+  js-server = "getWrapper"
+}
+
+let wrapper_value = get_wrapper()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := string(files["main.mjs"])
+	if !strings.Contains(source, `import * as demo_left from "./demo/left.mjs";`) || !strings.Contains(source, "new demo_left.Store") {
+		t.Fatalf("expected nested imported struct adapter dependency, got:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesFromAIRExternAdapterUsesImportedStructRef(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "models.ard"), []byte(`
+struct Person { age: Int }
+`), 0o644); err != nil {
+		t.Fatalf("failed to write models module: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/models
+
+extern fn get_person() models::Person = {
+  js-server = "getPerson"
+}
+
+let person = get_person()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	source := string(files["main.mjs"])
+	if !strings.Contains(source, "new demo_models.Person") || !strings.Contains(source, "instanceof demo_models.Person") {
+		t.Fatalf("expected imported struct adapter to use qualified type ref, got:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesFromAIRSameNamedImportedStructs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "left.ard"), []byte(`
+struct Store { item: Str }
+fn new() Store { Store{item: "left"} }
+`), 0o644); err != nil {
+		t.Fatalf("failed to write left module: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "right.ard"), []byte(`
+struct Store { column: Str }
+fn new() Store { Store{column: "right"} }
+`), 0o644); err != nil {
+		t.Fatalf("failed to write right module: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use demo/left
+use demo/right
+
+let left_store = left::new()
+let right_store = right::new()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	files, _, err := GenerateSources(program, Options{Target: backend.TargetJSServer, RootFileName: "main.mjs"})
+	if err != nil {
+		t.Fatalf("generate AIR JS sources: %v", err)
+	}
+	mainSource := string(files["main.mjs"])
+	leftSource := string(files["demo/left.mjs"])
+	rightSource := string(files["demo/right.mjs"])
+	if strings.Contains(mainSource, "class Store") {
+		t.Fatalf("root module should import same-named structs instead of redeclaring them:\n%s", mainSource)
+	}
+	if !strings.Contains(leftSource, "class Store") || !strings.Contains(leftSource, "constructor(item)") {
+		t.Fatalf("expected left Store declaration, got:\n%s", leftSource)
+	}
+	if !strings.Contains(rightSource, "class Store") || !strings.Contains(rightSource, "constructor(column)") {
+		t.Fatalf("expected right Store declaration, got:\n%s", rightSource)
+	}
+}
+
 func TestGenerateSourcesFromAIRImportedStructConstruction(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -1430,8 +1569,9 @@ let person = models::Person{age: 42}
 		t.Fatalf("generate AIR JS sources: %v", err)
 	}
 	source := string(files["main.mjs"])
-	if !strings.Contains(source, "class Person") || !strings.Contains(source, "new demo_models.Person(42)") {
-		t.Fatalf("expected imported struct type declaration and qualified constructor, got:\n%s", source)
+	modelSource := string(files["demo/models.mjs"])
+	if !strings.Contains(modelSource, "class Person") || !strings.Contains(source, "new demo_models.Person(42)") {
+		t.Fatalf("expected imported struct type declaration and qualified constructor, got main:\n%s\nmodels:\n%s", source, modelSource)
 	}
 }
 

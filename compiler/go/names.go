@@ -59,16 +59,26 @@ func functionName(program *air.Program, fn air.Function) string {
 }
 
 func typeName(program *air.Program, typ air.TypeInfo) string {
-	moduleName := ""
-	for _, module := range program.Modules {
-		for _, typeID := range module.Types {
-			if typeID == typ.ID {
-				moduleName = sanitizeName(module.Path)
+	base := typeNameBase(program, typ)
+	if typeNameCollides(program, typ, base) {
+		return fmt.Sprintf("%s_%d", base, typ.ID)
+	}
+	return base
+}
+
+func typeNameBase(program *air.Program, typ air.TypeInfo) string {
+	moduleName := sanitizeName(typ.ModulePath)
+	if moduleName == "" {
+		for _, module := range program.Modules {
+			for _, typeID := range module.Types {
+				if typeID == typ.ID {
+					moduleName = sanitizeName(module.Path)
+					break
+				}
+			}
+			if moduleName != "" {
 				break
 			}
-		}
-		if moduleName != "" {
-			break
 		}
 	}
 	name := sanitizeName(typ.Name)
@@ -79,6 +89,15 @@ func typeName(program *air.Program, typ air.TypeInfo) string {
 		name = fmt.Sprintf("type_%d", typ.ID)
 	}
 	return moduleName + "__" + name
+}
+
+func typeNameCollides(program *air.Program, typ air.TypeInfo, base string) bool {
+	for _, other := range program.Types {
+		if other.ID != typ.ID && typeNameBase(program, other) == base {
+			return true
+		}
+	}
+	return false
 }
 
 func enumVariantName(program *air.Program, typ air.TypeInfo, variant air.VariantInfo) string {

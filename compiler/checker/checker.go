@@ -143,8 +143,9 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			return typ // No change, return original
 		}
 		return &Union{
-			Name:  typ.Name,
-			Types: newTypes,
+			Name:       typ.Name,
+			ModulePath: typ.ModulePath,
+			Types:      newTypes,
 		}
 	case *StructDef:
 		fieldsChanged := false
@@ -173,6 +174,7 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 		}
 		return &StructDef{
 			Name:          typ.Name,
+			ModulePath:    typ.ModulePath,
 			Fields:        newFields,
 			Methods:       newMethods,
 			Self:          typ.Self,
@@ -265,6 +267,7 @@ type Checker struct {
 	input          *parse.Program
 	scope          *SymbolTable
 	filePath       string
+	modulePath     string
 	program        *Program
 	halted         bool
 	moduleResolver *ModuleResolver
@@ -278,6 +281,7 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 		diagnostics:    []Diagnostic{},
 		input:          input,
 		filePath:       filePath,
+		modulePath:     filePath,
 		moduleResolver: moduleResolver,
 		options:        normalizeCheckOptions(moduleResolver, options),
 		program: &Program{
@@ -288,6 +292,13 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 	}
 
 	return c
+}
+
+func (c *Checker) typeOwnerPath() string {
+	if c.moduleResolver == nil && !strings.HasPrefix(c.modulePath, "ard/") {
+		return ""
+	}
+	return c.modulePath
 }
 
 func (c *Checker) HasErrors() bool {
@@ -346,7 +357,7 @@ func (c *Checker) Check() {
 			}
 
 			// Type-check the imported module
-			userModule, diagnostics := check(ast, c.moduleResolver, imp.Path+".ard", c.options)
+			userModule, diagnostics := check(ast, c.moduleResolver, imp.Path+".ard", imp.Path, c.options)
 			if len(diagnostics) > 0 {
 				// Add all diagnostics from the imported module
 				for _, diag := range diagnostics {
@@ -425,13 +436,14 @@ func (c *Checker) scanForUnresolvedGenerics() {
 // This should only be called after .Check()
 // The returned module could be problematic if there are diagnostic errors.
 func (c *Checker) Module() Module {
-	return NewUserModule(c.filePath, c.program, c.scope)
+	return NewUserModule(c.modulePath, c.program, c.scope)
 }
 
 // check is an internal helper for recursive module checking.
 // Use New() + Check() + Module() for the public API.
-func check(input *parse.Program, moduleResolver *ModuleResolver, filePath string, options CheckOptions) (Module, []Diagnostic) {
+func check(input *parse.Program, moduleResolver *ModuleResolver, filePath string, modulePath string, options CheckOptions) (Module, []Diagnostic) {
 	c := New(filePath, input, moduleResolver, options)
+	c.modulePath = modulePath
 
 	c.Check()
 
@@ -1018,8 +1030,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 			// Create a union type (even if it only contains one type)
 			unionType := &Union{
-				Name:  s.Name.Name,
-				Types: types,
+				Name:       s.Name.Name,
+				ModulePath: c.typeOwnerPath(),
+				Types:      types,
 			}
 
 			// Register the type in the scope with the given name
@@ -1434,10 +1447,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			enum := &Enum{
-				Private: s.Private,
-				Name:    s.Name,
-				Values:  computedValues,
-				Methods: make(map[string]*FunctionDef),
+				Private:    s.Private,
+				Name:       s.Name,
+				ModulePath: c.typeOwnerPath(),
+				Values:     computedValues,
+				Methods:    make(map[string]*FunctionDef),
 			}
 
 			c.scope.add(enum.name(), enum, false)
@@ -1446,10 +1460,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 	case *parse.StructDefinition:
 		{
 			def := &StructDef{
-				Name:    s.Name.Name,
-				Fields:  make(map[string]Type),
-				Methods: make(map[string]*FunctionDef),
-				Private: s.Private,
+				Name:       s.Name.Name,
+				ModulePath: c.typeOwnerPath(),
+				Fields:     make(map[string]Type),
+				Methods:    make(map[string]*FunctionDef),
+				Private:    s.Private,
 			}
 			c.scope.add(def.name(), def, false)
 			seenGenerics := make(map[string]bool)
@@ -1977,6 +1992,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	// Store the refined struct definition (with resolved generics) as the instance's type
 	instance._type = &StructDef{
 		Name:          structDefCopy.Name,
+		ModulePath:    structDefCopy.ModulePath,
 		Fields:        fieldTypes,
 		Methods:       structDefCopy.Methods,
 		Self:          structDefCopy.Self,
@@ -4437,7 +4453,7 @@ func bindInferredTypeVars(expected Type, actual Type) {
 			bindInferredTypeVars(exp.Value(), act.Value())
 		}
 	case *StructDef:
-		if act, ok := actual.(*StructDef); ok && exp.Name == act.Name {
+		if act, ok := actual.(*StructDef); ok && exp.Name == act.Name && !namedTypeOwnersDiffer(exp.ModulePath, act.ModulePath) {
 			for fieldName, expectedField := range exp.Fields {
 				if actualField, ok := act.Fields[fieldName]; ok {
 					bindInferredTypeVars(expectedField, actualField)
@@ -4911,7 +4927,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		for i, member := range typ.Types {
 			types[i] = substituteType(member, typeMap)
 		}
-		return &Union{Name: typ.Name, Types: types}
+		return &Union{Name: typ.Name, ModulePath: typ.ModulePath, Types: types}
 	case *StructDef:
 		var out Type = typ
 		for genericName, concrete := range typeMap {
@@ -5380,7 +5396,7 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 		return fmt.Errorf("expected list type, got %T", actual)
 	case *StructDef:
 		actualStruct, ok := actual.(*StructDef)
-		if !ok || expectedType.Name != actualStruct.Name {
+		if !ok || expectedType.Name != actualStruct.Name || namedTypeOwnersDiffer(expectedType.ModulePath, actualStruct.ModulePath) {
 			return fmt.Errorf("type mismatch: expected %s, got %s", expected.String(), actual.String())
 		}
 		for fieldName, expectedField := range expectedType.Fields {

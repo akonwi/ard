@@ -1,6 +1,7 @@
 package gotarget
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -299,6 +300,216 @@ func TestRunProgramSupportsModuleLevelLetCapturedByClosure(t *testing.T) {
 	`)
 
 	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramSupportsTransitiveSameNamedStructsFromDifferentModules(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"models", "tui"} {
+		if err := os.MkdirAll(filepath.Join(tempDir, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]string{
+		"models/inbox.ard": `
+struct Store {
+  item: Str,
+}
+
+fn new() Store {
+  Store{item: "inbox"}
+}
+`,
+		"models/issues.ard": `
+struct Store {
+  column: Str,
+}
+
+fn new() Store {
+  Store{column: "issues"}
+}
+`,
+		"tui/inbox_screen.ard": `
+use app/models/inbox
+
+struct Screen {
+  store: inbox::Store,
+}
+
+fn new() Screen {
+  Screen{store: inbox::new()}
+}
+
+impl Screen {
+  fn item() Str { self.store.item }
+}
+`,
+		"tui/issues_screen.ard": `
+use app/models/issues
+
+struct Screen {
+  store: issues::Store,
+}
+
+fn new() Screen {
+  Screen{store: issues::new()}
+}
+
+impl Screen {
+  fn column() Str { self.store.column }
+}
+`,
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(tempDir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainPath := filepath.Join(tempDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use app/tui/inbox_screen
+use app/tui/issues_screen
+
+fn main() {
+  let inbox = inbox_screen::new()
+  let issues = issues_screen::new()
+  if not inbox.item() == "inbox" {
+    panic("wrong inbox screen")
+  }
+  if not issues.column() == "issues" {
+    panic("wrong issues screen")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramSupportsSameNamedStructMethodsFromDifferentModules(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, module := range []struct{ name, label string }{{"left", "left"}, {"right", "right"}} {
+		source := fmt.Sprintf(`
+struct Store {
+  label: Str,
+}
+
+fn new() Store {
+  Store{label: %q}
+}
+
+impl Store {
+  fn value() Str { self.label }
+}
+`, module.label)
+		if err := os.WriteFile(filepath.Join(tempDir, module.name+".ard"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainPath := filepath.Join(tempDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use app/left
+use app/right
+
+fn main() {
+  if not left::new().value() == "left" {
+    panic("wrong left value")
+  }
+  if not right::new().value() == "right" {
+    panic("wrong right value")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramSupportsSameNamedStructsFromDifferentModules(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	modelsDir := filepath.Join(tempDir, "models")
+	if err := os.MkdirAll(modelsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modelsDir, "inbox.ard"), []byte(`
+struct Store {
+  item: Str,
+}
+
+fn new() Store {
+  Store{item: "inbox"}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modelsDir, "issues.ard"), []byte(`
+struct Store {
+  column: Str,
+}
+
+fn new() Store {
+  Store{column: "issues"}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(tempDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use app/models/inbox
+use app/models/issues
+
+fn main() {
+  let inbox_store = inbox::new()
+  let issues_store = issues::new()
+  if not inbox_store.item == "inbox" {
+    panic("wrong inbox store")
+  }
+  if not issues_store.column == "issues" {
+    panic("wrong issues store")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}); err != nil {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
@@ -651,16 +862,16 @@ func TestGenerateSourcesSupportsStructsAndEnums(t *testing.T) {
 	for _, source := range sources {
 		combined += string(source)
 	}
-	if !regexp.MustCompile(`type type_\d+__Direction int`).MatchString(combined) {
+	if !strings.Contains(combined, `type test_ard__Direction int`) {
 		t.Fatalf("generated source missing enum type:\n%s", combined)
 	}
-	if !regexp.MustCompile(`type_\d+__Direction__Down`).MatchString(combined) {
+	if !strings.Contains(combined, `test_ard__Direction__Down`) {
 		t.Fatalf("generated source missing enum constants:\n%s", combined)
 	}
-	if !regexp.MustCompile(`type type_\d+__User struct`).MatchString(combined) {
+	if !strings.Contains(combined, `type test_ard__User struct`) {
 		t.Fatalf("generated source missing struct type:\n%s", combined)
 	}
-	if !regexp.MustCompile(`type_\d+__User\{age: 41, name: "Ada"\}`).MatchString(combined) {
+	if !strings.Contains(combined, `test_ard__User{age: 41, name: "Ada"}`) {
 		t.Fatalf("generated source missing struct literal lowering:\n%s", combined)
 	}
 	if !strings.Contains(combined, ".age + 1") {
@@ -1355,10 +1566,16 @@ func TestRunProgramSupportsVoidFiberFunctions(t *testing.T) {
 	}
 }
 
-func TestTypeNameUsesUniqueFallbackWhenModuleOwnershipIsMissing(t *testing.T) {
+func TestTypeNameUsesModulePathAndUniqueFallback(t *testing.T) {
 	program := &air.Program{}
-	left := typeName(program, air.TypeInfo{ID: 1, Name: "Request"})
-	right := typeName(program, air.TypeInfo{ID: 2, Name: "Request"})
+	inbox := typeName(program, air.TypeInfo{ID: 1, Name: "Store", ModulePath: "app/models/inbox"})
+	issues := typeName(program, air.TypeInfo{ID: 2, Name: "Store", ModulePath: "app/models/issues"})
+	if inbox != "app_models_inbox__Store" || issues != "app_models_issues__Store" {
+		t.Fatalf("module type names = %q, %q", inbox, issues)
+	}
+
+	left := typeName(program, air.TypeInfo{ID: 3, Name: "Request"})
+	right := typeName(program, air.TypeInfo{ID: 4, Name: "Request"})
 	if left == right {
 		t.Fatalf("fallback type names should be unique, got %q", left)
 	}
@@ -1452,7 +1669,7 @@ func TestGenerateSourcesUsesPointersForMutableStructParams(t *testing.T) {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !regexp.MustCompile(`func test_ard__set_body\(res \*type_\d+__Response\)`).MatchString(source) {
+	if !strings.Contains(source, `func test_ard__set_body(res *test_ard__Response)`) {
 		t.Fatalf("generated source missing pointer mutable param lowering:\n%s", source)
 	}
 	if !strings.Contains(source, "test_ard__set_body(&res_0)") {

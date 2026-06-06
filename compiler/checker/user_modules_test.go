@@ -146,6 +146,115 @@ fn main() Int {
 	}
 }
 
+func TestSameNamedGenericStructsFromDifferentModulesAreNominallyDistinct(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, module := range []string{"left", "right"} {
+		if err := os.WriteFile(filepath.Join(tempDir, module+".ard"), []byte(`
+struct Box {
+  value: $T,
+}
+
+fn boxed() Box<Int> {
+  Box{value: 1}
+}
+`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result := parse.Parse([]byte(`
+use app/left
+use app/right
+
+fn needs_left(box: left::Box<Int>) {}
+
+fn main() {
+  needs_left(right::boxed())
+}
+`), filepath.Join(tempDir, "main.ard"))
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New("main.ard", result.Program, resolver)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected same-named generic structs from different modules to be incompatible")
+	}
+	if !strings.Contains(strings.ToLower(diagnosticsString(c.Diagnostics())), "type mismatch") {
+		t.Fatalf("diagnostics = %v, want type mismatch", c.Diagnostics())
+	}
+}
+
+func TestSameNamedStructsFromDifferentModulesAreNominallyDistinct(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "left.ard"), []byte(`
+struct Store {
+  id: Int,
+}
+
+fn new() Store {
+  Store{id: 1}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "right.ard"), []byte(`
+struct Store {
+  id: Int,
+}
+
+fn new() Store {
+  Store{id: 2}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := parse.Parse([]byte(`
+use app/left
+use app/right
+
+fn needs_left(store: left::Store) {}
+
+fn main() {
+  needs_left(right::new())
+}
+`), filepath.Join(tempDir, "main.ard"))
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New("main.ard", result.Program, resolver)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected same-named structs from different modules to be incompatible")
+	}
+	if !strings.Contains(strings.ToLower(diagnosticsString(c.Diagnostics())), "type mismatch") {
+		t.Fatalf("diagnostics = %v, want type mismatch", c.Diagnostics())
+	}
+}
+
+func diagnosticsString(diags []checker.Diagnostic) string {
+	parts := make([]string, len(diags))
+	for i, diag := range diags {
+		parts[i] = diag.String()
+	}
+	return strings.Join(parts, "\n")
+}
+
 func TestUserModuleSymbolResolution(t *testing.T) {
 	// Create temporary directory structure
 	tempDir, err := os.MkdirTemp("", "ard_symbol_resolution_")
