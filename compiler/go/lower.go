@@ -4735,8 +4735,12 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 	case air.TypeStruct:
 		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }\n")
 		for _, field := range info.Fields {
+			fieldValue := "value." + l.goFieldName(info, field.Name)
+			if field.Mutable {
+				fieldValue = "*" + fieldValue
+			}
 			fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.String(%q)); err != nil { return err }\n", field.Name)
-			fmt.Fprintf(b, "\tif err := %s(enc, value.%s); err != nil { return err }\n", l.jsonEncodeHelperName(field.Type), l.goFieldName(info, field.Name))
+			fmt.Fprintf(b, "\tif err := %s(enc, %s); err != nil { return err }\n", l.jsonEncodeHelperName(field.Type), fieldValue)
 		}
 		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.EndObject)\n")
 	case air.TypeEnum:

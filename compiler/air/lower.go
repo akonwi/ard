@@ -1419,15 +1419,19 @@ func signatureForFunctionWithInterner(params []checker.Parameter, returnType che
 }
 
 func functionHasUnresolvedTypeVar(def *checker.FunctionDef) bool {
+	return typeHasUnresolvedTypeVarSeen(def, map[checker.Type]struct{}{})
+}
+
+func functionSignatureHasUnresolvedTypeVarSeen(def *checker.FunctionDef, seen map[checker.Type]struct{}) bool {
 	if def == nil {
 		return false
 	}
 	for _, param := range def.Parameters {
-		if typeHasUnresolvedTypeVar(param.Type) {
+		if typeHasUnresolvedTypeVarSeen(param.Type, seen) {
 			return true
 		}
 	}
-	return typeHasUnresolvedTypeVar(def.ReturnType)
+	return typeHasUnresolvedTypeVarSeen(def.ReturnType, seen)
 }
 
 func functionHasTypeVar(def *checker.FunctionDef) bool {
@@ -1443,15 +1447,19 @@ func functionHasTypeVar(def *checker.FunctionDef) bool {
 }
 
 func externalFunctionHasUnresolvedTypeVar(def *checker.ExternalFunctionDef) bool {
+	return typeHasUnresolvedTypeVarSeen(def, map[checker.Type]struct{}{})
+}
+
+func externalFunctionSignatureHasUnresolvedTypeVarSeen(def *checker.ExternalFunctionDef, seen map[checker.Type]struct{}) bool {
 	if def == nil {
 		return false
 	}
 	for _, param := range def.Parameters {
-		if typeHasUnresolvedTypeVar(param.Type) {
+		if typeHasUnresolvedTypeVarSeen(param.Type, seen) {
 			return true
 		}
 	}
-	return typeHasUnresolvedTypeVar(def.ReturnType)
+	return typeHasUnresolvedTypeVarSeen(def.ReturnType, seen)
 }
 
 func typeContainsTypeVar(t checker.Type) bool {
@@ -1562,9 +1570,9 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 		}
 		return false
 	case *checker.FunctionDef:
-		return functionHasUnresolvedTypeVar(typ)
+		return functionSignatureHasUnresolvedTypeVarSeen(typ, seen)
 	case *checker.ExternalFunctionDef:
-		return externalFunctionHasUnresolvedTypeVar(typ)
+		return externalFunctionSignatureHasUnresolvedTypeVarSeen(typ, seen)
 	case *checker.ExternType:
 		for _, typeArg := range typ.TypeArgs {
 			if typeHasUnresolvedTypeVarSeen(typeArg, seen) {
@@ -1646,11 +1654,11 @@ func airTypeKeySeen(t checker.Type, seen map[checker.Type]struct{}) string {
 	case *checker.Enum:
 		return airEnumKey(typ)
 	case *checker.Union:
-		return airUnionKey(typ)
+		return airUnionKeySeen(typ, seen)
 	case *checker.FunctionDef:
-		return airFunctionTypeKey(typ.Parameters, typ.ReturnType)
+		return airFunctionTypeKeySeen(typ.Parameters, typ.ReturnType, seen)
 	case *checker.ExternalFunctionDef:
-		return airFunctionTypeKey(typ.Parameters, typ.ReturnType)
+		return airFunctionTypeKeySeen(typ.Parameters, typ.ReturnType, seen)
 	case *checker.ExternType:
 		if len(typ.TypeArgs) == 0 {
 			return "extern " + typ.Name_
@@ -1693,7 +1701,7 @@ func airStructKeySeen(typ *checker.StructDef, seen map[checker.Type]struct{}) st
 			key += ","
 		}
 		method := typ.Methods[name]
-		key += name + ":" + airFunctionTypeKey(method.Parameters, method.ReturnType)
+		key += name + ":" + airFunctionTypeKeySeen(method.Parameters, method.ReturnType, seen)
 	}
 	key += "}"
 	return key
@@ -1712,9 +1720,13 @@ func airEnumKey(typ *checker.Enum) string {
 }
 
 func airUnionKey(typ *checker.Union) string {
+	return airUnionKeySeen(typ, map[checker.Type]struct{}{})
+}
+
+func airUnionKeySeen(typ *checker.Union, seen map[checker.Type]struct{}) string {
 	parts := make([]string, len(typ.Types))
 	for i, member := range typ.Types {
-		parts[i] = airTypeKey(member)
+		parts[i] = airTypeKeySeen(member, seen)
 	}
 	sort.Strings(parts)
 	key := "union " + typ.ModulePath + "::" + typ.Name + "{"
@@ -1729,6 +1741,10 @@ func airUnionKey(typ *checker.Union) string {
 }
 
 func airFunctionTypeKey(params []checker.Parameter, returnType checker.Type) string {
+	return airFunctionTypeKeySeen(params, returnType, map[checker.Type]struct{}{})
+}
+
+func airFunctionTypeKeySeen(params []checker.Parameter, returnType checker.Type, seen map[checker.Type]struct{}) string {
 	key := "fn("
 	for i, param := range params {
 		if i > 0 {
@@ -1737,9 +1753,9 @@ func airFunctionTypeKey(params []checker.Parameter, returnType checker.Type) str
 		if param.Mutable {
 			key += "mut "
 		}
-		key += airTypeKey(param.Type)
+		key += airTypeKeySeen(param.Type, seen)
 	}
-	key += ")->" + airTypeKey(returnType)
+	key += ")->" + airTypeKeySeen(returnType, seen)
 	return key
 }
 

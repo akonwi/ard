@@ -266,16 +266,23 @@ func (c Checker) shouldCopyForMutableAssignment(t Type) bool {
 }
 
 type Checker struct {
-	diagnostics    []Diagnostic
-	input          *parse.Program
-	scope          *SymbolTable
-	filePath       string
-	modulePath     string
-	program        *Program
-	halted         bool
-	moduleResolver *ModuleResolver
-	options        CheckOptions
-	expectedExpr   Type
+	diagnostics                       []Diagnostic
+	input                             *parse.Program
+	scope                             *SymbolTable
+	filePath                          string
+	modulePath                        string
+	program                           *Program
+	halted                            bool
+	moduleResolver                    *ModuleResolver
+	options                           CheckOptions
+	expectedExpr                      Type
+	duplicateTopLevelTypeDeclarations map[parse.Statement]bool
+	topLevelStructDeclarations        map[string]*parse.StructDefinition
+	topLevelTypeAliases               map[string]*parse.TypeDeclaration
+	resolvingTopLevelStructs          map[string]bool
+	resolvedTopLevelStructs           map[string]bool
+	resolvingTopLevelAliases          map[string]bool
+	resolvedTopLevelAliases           map[string]bool
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -402,7 +409,18 @@ func (c *Checker) Check() {
 		}
 	}
 
+	c.hoistTopLevelTypeDeclarations()
+	c.predeclareTopLevelTypeAliases()
+	c.populateTopLevelTypeDefinitions()
+
 	for i := range c.input.Statements {
+		if stmt := c.checkedTopLevelTypeStatement(c.input.Statements[i]); stmt != nil {
+			c.program.Statements = append(c.program.Statements, *stmt)
+			continue
+		}
+		if isTopLevelTypeDeclaration(c.input.Statements[i]) {
+			continue
+		}
 		if stmt := c.checkStmt(&c.input.Statements[i]); stmt != nil {
 			c.program.Statements = append(c.program.Statements, *stmt)
 		}
@@ -410,6 +428,9 @@ func (c *Checker) Check() {
 			break
 		}
 	}
+
+	c.validateTopLevelTypeAliases()
+	c.checkRecursiveStructLayouts()
 
 	// now that we're done with the aliases, use module paths for the import keys
 	for alias, mod := range c.program.Imports {
@@ -493,6 +514,17 @@ func (c *Checker) findModuleByPath(path string) Module {
 	return nil
 }
 
+func namedTypeRequiresTypeArguments(t Type) bool {
+	switch typ := t.(type) {
+	case *StructDef:
+		return len(typ.GenericParams) > 0 || hasGenericsInType(typ)
+	case *ExternType:
+		return len(typ.GenericParams) > 0 || hasGenericsInType(typ)
+	default:
+		return hasGenericsInType(typ)
+	}
+}
+
 func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 	switch t := t.(type) {
 	case *TypeVar:
@@ -554,6 +586,21 @@ func (c *Checker) specializeAliasedType(originalType Type, typeArgs []parse.Decl
 	}
 
 	if structDef, ok := originalType.(*StructDef); ok {
+		if c.isResolvingStructDefinition(structDef) {
+			c.addError(fmt.Sprintf("Recursive generic self-reference %s is not supported yet", structDef.Name), loc)
+			return structDef
+		}
+		c.ensureStructDefinitionResolved(structDef)
+		genericParams = []string{}
+		seenGenerics = make(map[string]bool)
+		collectGenericsFromType(originalType, &genericParams, seenGenerics)
+		if len(genericParams) == 0 && len(structDef.GenericParams) > 0 {
+			genericParams = append(genericParams, structDef.GenericParams...)
+		}
+		if len(typeArgs) != len(genericParams) {
+			c.addError(fmt.Sprintf("Incorrect number of type arguments: expected %d, got %d", len(genericParams), len(typeArgs)), loc)
+			return originalType
+		}
 		typeVarMap := make(map[string]*TypeVar, len(genericParams))
 		for i, typeArg := range typeArgs {
 			resolvedArgType := c.resolveType(typeArg)
@@ -637,12 +684,17 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			baseType = Dynamic
 			break
 		}
+		if ty.Type.Target == nil && c.topLevelTypeAliases != nil {
+			if _, ok := c.topLevelTypeAliases[t.GetName()]; ok {
+				c.resolveTopLevelTypeAlias(t.GetName())
+			}
+		}
 
 		if sym, ok := c.scope.get(t.GetName()); ok {
 			if len(ty.TypeArgs) > 0 {
 				baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
 			} else {
-				if hasGenericsInType(sym.Type) {
+				if namedTypeRequiresTypeArguments(sym.Type) {
 					c.addError(fmt.Sprintf("Generic type %s requires type arguments", t.GetName()), ty.GetLocation())
 				}
 				baseType = sym.Type
@@ -658,7 +710,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 					if len(ty.TypeArgs) > 0 {
 						baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
 					} else {
-						if hasGenericsInType(sym.Type) {
+						if namedTypeRequiresTypeArguments(sym.Type) {
 							c.addError(fmt.Sprintf("Generic type %s::%s requires type arguments", ty.Type.Target, ty.Type.Property), ty.GetLocation())
 						}
 						baseType = sym.Type
@@ -739,6 +791,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 	if c.halted {
 		return nil
 	}
+	if c.isDuplicateTopLevelTypeDeclaration(*stmt) {
+		return nil
+	}
 	switch s := (*stmt).(type) {
 	case *parse.Comment:
 		return nil
@@ -746,6 +801,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 		return &Statement{Break: true}
 	case *parse.TraitDefinition:
 		{
+			trait, ok := c.hoistedTrait(s.Name.Name)
+			if !ok {
+				return nil
+			}
 			methods := make([]FunctionDef, len(s.Methods))
 			for i, method := range s.Methods {
 				params := make([]Parameter, len(method.Parameters))
@@ -775,13 +834,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 			}
 
-			trait := Trait{
-				private: s.Private,
-				Name:    s.Name.Name,
-				methods: methods,
-			}
-
-			c.scope.add(trait.name(), &trait, false)
+			trait.private = s.Private
+			trait.Name = s.Name.Name
+			trait.methods = methods
 			return nil
 		}
 	case *parse.TraitImplementation:
@@ -995,8 +1050,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 		}
 	case *parse.ExternTypeDeclaration:
 		{
-			if _, dup := c.scope.get(s.Name); dup {
-				c.addError(fmt.Sprintf("Duplicate declaration: %s", s.Name), s.GetLocation())
+			externType, ok := c.hoistedExternType(s.Name)
+			if !ok {
 				return nil
 			}
 			typeArgs := make([]Type, len(s.TypeParams))
@@ -1012,12 +1067,22 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return nil
 			}
 			resolvedTarget, resolvedBinding := resolveExternalBindingForTarget(c.options.Target, bindings)
-			externType := &ExternType{Name_: s.Name, GenericParams: append([]string(nil), s.TypeParams...), TypeArgs: typeArgs, ExternalBinding: resolvedBinding, ExternalBindingTarget: resolvedTarget, ExternalBindings: bindings, private: s.Private}
-			c.scope.add(s.Name, externType, false)
+			externType.Name_ = s.Name
+			externType.GenericParams = append([]string(nil), s.TypeParams...)
+			externType.TypeArgs = typeArgs
+			externType.ExternalBinding = resolvedBinding
+			externType.ExternalBindingTarget = resolvedTarget
+			externType.ExternalBindings = bindings
+			externType.private = s.Private
 			return &Statement{Stmt: externType}
 		}
 	case *parse.TypeDeclaration:
 		{
+			if len(s.Type) == 1 {
+				if _, exists := c.scope.get(s.Name.Name); exists {
+					return nil
+				}
+			}
 			// Handle type declaration (type unions/aliases)
 			types := make([]Type, len(s.Type))
 			for i, declType := range s.Type {
@@ -1035,16 +1100,14 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return nil
 			}
 
-			// Create a union type (even if it only contains one type)
-			unionType := &Union{
-				Name:       s.Name.Name,
-				ModulePath: c.typeOwnerPath(),
-				Types:      types,
+			unionType, ok := c.hoistedUnion(s.Name.Name)
+			if !ok {
+				return nil
 			}
-
-			// Register the type in the scope with the given name
-			c.scope.add(unionType.name(), unionType, false)
-			return nil
+			unionType.Name = s.Name.Name
+			unionType.ModulePath = c.typeOwnerPath()
+			unionType.Types = types
+			return &Statement{Stmt: unionType}
 		}
 	case *parse.VariableDeclaration:
 		{
@@ -1396,6 +1459,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 		}
 	case *parse.EnumDefinition:
 		{
+			enum, ok := c.hoistedEnum(s.Name)
+			if !ok {
+				return nil
+			}
 			if len(s.Variants) == 0 {
 				c.addError("Enums must have at least one variant", s.GetLocation())
 				return nil
@@ -1453,44 +1520,22 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				})
 			}
 
-			enum := &Enum{
-				Private:    s.Private,
-				Name:       s.Name,
-				ModulePath: c.typeOwnerPath(),
-				Values:     computedValues,
-				Methods:    make(map[string]*FunctionDef),
+			enum.Private = s.Private
+			enum.Name = s.Name
+			enum.ModulePath = c.typeOwnerPath()
+			enum.Values = computedValues
+			if enum.Methods == nil {
+				enum.Methods = make(map[string]*FunctionDef)
 			}
-
-			c.scope.add(enum.name(), enum, false)
 			return nil
 		}
 	case *parse.StructDefinition:
 		{
-			def := &StructDef{
-				Name:       s.Name.Name,
-				ModulePath: c.typeOwnerPath(),
-				Fields:     make(map[string]Type),
-				Methods:    make(map[string]*FunctionDef),
-				Private:    s.Private,
+			def, ok := c.hoistedStruct(s.Name.Name)
+			if !ok {
+				return nil
 			}
-			c.scope.add(def.name(), def, false)
-			seenGenerics := make(map[string]bool)
-			for _, field := range s.Fields {
-				fieldType := c.resolveType(field.Type)
-				if fieldType == nil {
-					return nil
-				}
-
-				if _, dup := def.Fields[field.Name.Name]; dup {
-					c.addError(fmt.Sprintf("Duplicate field: %s", field.Name.Name), field.Name.GetLocation())
-					return nil
-				}
-				if recursiveFieldHasInfiniteSize(field.Type, def.Name, false) {
-					c.addError(fmt.Sprintf("Recursive field %s.%s has infinite size. Put the recursive reference behind a list, map, or nullable type.", def.Name, field.Name.Name), field.Name.GetLocation())
-				}
-				def.Fields[field.Name.Name] = fieldType
-				collectGenericsFromType(fieldType, &def.GenericParams, seenGenerics)
-			}
+			c.populateStructDefinition(def, s)
 			return &Statement{Stmt: def}
 		}
 	case *parse.ImplBlock:

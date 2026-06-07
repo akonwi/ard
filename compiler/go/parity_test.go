@@ -74,6 +74,97 @@ func TestGoTargetParityRecursiveStructFields(t *testing.T) {
 				}
 			`,
 		},
+		{
+			name: "mutual nullable reference",
+			input: `
+				use ard/maybe
+				struct A { b: B? }
+				struct B { a: A }
+				fn main() Int {
+					let a = A{b: maybe::none()}
+					let b = B{a: a}
+					if b.a.b.is_none() { 1 } else { 0 }
+				}
+			`,
+		},
+		{
+			name: "mutual nullable references",
+			input: `
+				use ard/maybe
+				struct A { b: B? }
+				struct B { a: A? }
+				fn main() Int {
+					let a = A{b: maybe::none()}
+					if a.b.is_none() { 1 } else { 0 }
+				}
+			`,
+		},
+		{
+			name: "generic nullable reference",
+			input: `
+				struct A { box: Box<A>? }
+				struct Box { value: $T }
+				fn main() Int { 1 }
+			`,
+		},
+		{
+			name: "nullable union reference",
+			input: `
+				use ard/maybe
+				type U = A | Int
+				struct A { u: U? }
+				fn main() Int {
+					let a = A{u: maybe::none()}
+					if a.u.is_none() { 1 } else { 0 }
+				}
+			`,
+		},
+		{
+			name: "function field self reference",
+			input: `
+				struct A { make: fn() A }
+				fn main() Int { 1 }
+			`,
+		},
+		{
+			name: "same module retained tree recursive type group",
+			input: `
+				struct Context {
+					tree: ViewTree,
+					node_id: Int,
+				}
+
+				struct ViewTree {
+					nodes: [TreeNode],
+				}
+
+				struct TreeNode {
+					view: View,
+					children: [Int],
+				}
+
+				trait View {
+					fn init(ctx: Context)
+					fn id() Int
+				}
+
+				struct Leaf {
+					value: Int,
+				}
+
+				impl View for Leaf {
+					fn init(ctx: Context) {}
+					fn id() Int { self.value }
+				}
+
+				fn main() Int {
+					let tree = ViewTree{nodes: []}
+					let ctx = Context{tree: tree, node_id: 1}
+					let node = TreeNode{view: Leaf{value: 41}, children: []}
+					node.view.id() + ctx.node_id
+				}
+			`,
+		},
 	})
 }
 
