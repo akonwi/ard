@@ -251,20 +251,6 @@ func (c Checker) isMutable(expr Expression) bool {
 	return false
 }
 
-// shouldCopyForMutableAssignment determines if we should copy for mut variable assignments.
-// TODO: replace implicit copies with explicit ard/core::copy once generic deep-copy
-// semantics are implemented.
-func (c Checker) shouldCopyForMutableAssignment(t Type) bool {
-	switch t.(type) {
-	case *StructDef, *List, *Map:
-		// Complex types that benefit from copy semantics
-		return true
-	default:
-		// Primitives (Int, Str, Bool, etc.) are immutable anyway, no need to copy
-		return false
-	}
-}
-
 type Checker struct {
 	diagnostics                       []Diagnostic
 	input                             *parse.Program
@@ -1161,15 +1147,6 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						return nil
 					}
 					__type = expected
-				}
-			}
-
-			// Apply copy semantics for mutable variable assignments
-			if s.Mutable && c.shouldCopyForMutableAssignment(val.Type()) {
-				// Always wrap in copy expression for mutable assignment of copyable types
-				val = &CopyExpression{
-					Expr:  val,
-					Type_: val.Type(),
 				}
 			}
 

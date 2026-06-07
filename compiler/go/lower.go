@@ -885,11 +885,6 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMakeClosure(fn, expr)
 	case air.ExprCallClosure:
 		return l.lowerCallClosure(fn, expr)
-	case air.ExprCopy:
-		if expr.Target == nil {
-			return loweredExpr{}, fmt.Errorf("copy missing target")
-		}
-		return l.lowerExprWithExpectedType(fn, *expr.Target, expr.Type)
 	case air.ExprMakeMaybeSome:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("maybe some missing target")
@@ -1500,8 +1495,6 @@ func (l *lowerer) canOverrideExprType(expr air.Expr, expectedType air.TypeID) bo
 		return false
 	}
 	switch expr.Kind {
-	case air.ExprCopy:
-		return expr.Target != nil && l.canOverrideExprType(*expr.Target, expectedType)
 	case air.ExprMakeList:
 		return len(expr.Args) == 0 && from.Kind == air.TypeList && to.Kind == air.TypeList
 	case air.ExprMakeResultOk, air.ExprMakeResultErr,

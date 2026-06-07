@@ -1030,8 +1030,6 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		return renderJSExpr(jsCallExprIR{Callee: "ardToString", Args: []string{value}}), nil
 	case air.ExprToDynamic, air.ExprTraitUpcast:
 		return l.lowerExpr(fn, *expr.Target)
-	case air.ExprCopy:
-		return l.lowerExpr(fn, *expr.Target)
 	case air.ExprPanic:
 		message, err := l.lowerExpr(fn, *expr.Target)
 		if err != nil {

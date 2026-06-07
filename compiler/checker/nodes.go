@@ -1386,12 +1386,3 @@ func (t TryOp) Expr() Expression {
 func (t TryOp) Type() Type {
 	return t.ok
 }
-
-type CopyExpression struct {
-	Expr  Expression
-	Type_ Type
-}
-
-func (c *CopyExpression) Type() Type {
-	return c.Type_
-}

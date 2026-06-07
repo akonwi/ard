@@ -2753,12 +2753,6 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprPanic, Type: typeID, Target: message}, nil
 	case *checker.TemplateStr:
 		return fl.lowerTemplateStr(typeID, e)
-	case *checker.CopyExpression:
-		value, err := fl.lowerExprWithExpected(e.Expr, typeID)
-		if err != nil {
-			return nil, err
-		}
-		return &Expr{Kind: ExprCopy, Type: typeID, Target: value}, nil
 	case *checker.FunctionDef:
 		return fl.lowerClosure(typeID, e)
 	case *checker.FiberStart:

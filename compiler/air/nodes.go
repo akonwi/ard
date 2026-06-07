@@ -54,7 +54,6 @@ const (
 	ExprMatchUnion
 	ExprTraitUpcast
 	ExprCallTrait
-	ExprCopy
 	ExprMakeList
 	ExprListAt
 	ExprListPrepend
