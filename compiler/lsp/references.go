@@ -365,22 +365,23 @@ func projectReferenceDocuments(currentFile string, overlays map[string]string) [
 
 func readReferenceDocument(filePath string, overlays map[string]string) (referenceDocument, bool) {
 	if source, ok := normalizedReferenceOverlays(overlays)[cleanReferencePath(filePath)]; ok {
-		result := parse.Parse([]byte(source), filePath)
-		if result.Program == nil {
+		prog := defaultAnalysisCache.Program(source, filePath)
+		if prog == nil {
 			return referenceDocument{}, false
 		}
-		return referenceDocument{filePath: filePath, source: source, prog: result.Program}, true
+		return referenceDocument{filePath: filePath, source: source, prog: prog}, true
 	}
 
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return referenceDocument{}, false
 	}
-	result := parse.Parse(data, filePath)
-	if result.Program == nil {
+	source := string(data)
+	prog := defaultAnalysisCache.Program(source, filePath)
+	if prog == nil {
 		return referenceDocument{}, false
 	}
-	return referenceDocument{filePath: filePath, source: string(data), prog: result.Program}, true
+	return referenceDocument{filePath: filePath, source: source, prog: prog}, true
 }
 
 func cleanReferencePath(filePath string) string {
