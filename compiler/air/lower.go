@@ -1380,6 +1380,7 @@ func (l *lowerer) internTrait(trait *checker.Trait) (TraitID, error) {
 	}
 	id := TraitID(len(l.program.Traits))
 	l.traits[trait.Name] = id
+	l.program.Traits = append(l.program.Traits, Trait{ID: id, Name: trait.Name})
 
 	methods := trait.GetMethods()
 	loweredMethods := make([]TraitMethod, len(methods))
@@ -1390,11 +1391,11 @@ func (l *lowerer) internTrait(trait *checker.Trait) (TraitID, error) {
 		}
 		loweredMethods[i] = TraitMethod{Name: method.Name, Signature: sig}
 	}
-	l.program.Traits = append(l.program.Traits, Trait{
+	l.program.Traits[id] = Trait{
 		ID:      id,
 		Name:    trait.Name,
 		Methods: loweredMethods,
-	})
+	}
 	return id, nil
 }
 
@@ -2286,7 +2287,10 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 	case *checker.Reassignment:
 		switch target := s.Target.(type) {
 		case *checker.Variable:
-			local, ok := fl.locals[target.Name()]
+			local, ok, err := fl.resolveLocal(target.Name())
+			if err != nil {
+				return nil, err
+			}
 			if !ok {
 				return nil, fmt.Errorf("assignment to unknown local %s", target.Name())
 			}

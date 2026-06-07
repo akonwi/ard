@@ -500,7 +500,9 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 		for _, field := range typ.Fields {
 			var fieldType ast.Expr
 			var err error
-			if field.RecursiveNullable {
+			if field.Mutable && l.isTraitObjectType(field.Type) {
+				fieldType, err = l.mutableTraitRefType(field.Type)
+			} else if field.RecursiveNullable {
 				maybeType := l.program.Types[field.Type-1]
 				fieldType, err = l.goType(maybeType.Elem)
 				if err == nil {
@@ -528,6 +530,8 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 			fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(unionMemberFieldName(member))}, Type: memberType})
 		}
 		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
+	case air.TypeTraitObject:
+		return l.lowerMutableTraitRefDecl(typ)
 	case air.TypeEnum:
 		typeSpec := &ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: ast.NewIdent("int")}
 		if l.isStdlibFFIBackedType(typ) {
@@ -546,6 +550,61 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 	default:
 		return nil, nil
 	}
+}
+
+func (l *lowerer) lowerMutableTraitRefDecl(typ air.TypeInfo) ([]ast.Decl, error) {
+	if !validTraitID(l.program, typ.Trait) {
+		return nil, fmt.Errorf("invalid trait id %d", typ.Trait)
+	}
+	trait := l.program.Traits[typ.Trait]
+	fields := []*ast.Field{
+		{Names: []*ast.Ident{ast.NewIdent(mutableTraitLoadFieldName(trait))}, Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: ast.NewIdent("any")}}}}},
+		{Names: []*ast.Ident{ast.NewIdent(mutableTraitAssignFieldName(trait))}, Type: &ast.FuncType{Params: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("value")}, Type: ast.NewIdent("any")}}}}},
+	}
+	for i, method := range trait.Methods {
+		fieldType, err := l.mutableTraitMethodFuncType(method)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(mutableTraitMethodFieldName(trait.ID, i))}, Type: fieldType})
+	}
+	return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(mutableTraitRefTypeName(trait)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
+}
+
+func (l *lowerer) mutableTraitMethodFuncType(method air.TraitMethod) (ast.Expr, error) {
+	params := make([]*ast.Field, 0, len(method.Signature.Params))
+	for i, param := range method.Signature.Params {
+		paramType, err := l.goParamType(param)
+		if err != nil {
+			return nil, err
+		}
+		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(fmt.Sprintf("arg%d", i))}, Type: paramType})
+	}
+	fnType := &ast.FuncType{Params: &ast.FieldList{List: params}}
+	if !l.isVoidType(method.Signature.Return) {
+		returnType, err := l.goType(method.Signature.Return)
+		if err != nil {
+			return nil, err
+		}
+		fnType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
+	}
+	return fnType, nil
+}
+
+func mutableTraitRefTypeName(trait air.Trait) string {
+	return fmt.Sprintf("ardMutTrait_%s_%d", sanitizeName(trait.Name), trait.ID)
+}
+
+func mutableTraitLoadFieldName(trait air.Trait) string {
+	return fmt.Sprintf("ardMutTraitLoad_%d", trait.ID)
+}
+
+func mutableTraitAssignFieldName(trait air.Trait) string {
+	return fmt.Sprintf("ardMutTraitAssign_%d", trait.ID)
+}
+
+func mutableTraitMethodFieldName(trait air.TraitID, methodIndex int) string {
+	return fmt.Sprintf("ardMutTraitMethod_%d_%d", trait, methodIndex)
 }
 
 func (l *lowerer) lowerMainWrapper(root air.FunctionID) (ast.Decl, error) {
@@ -710,7 +769,13 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			return nil, fmt.Errorf("assign statement missing value")
 		}
 		localType := l.resolvedLocalType(fn, stmt.Local)
-		value, err := l.lowerExprWithExpectedType(fn, *stmt.Value, localType)
+		var value loweredExpr
+		var err error
+		if l.localIsPointerParam(fn, stmt.Local) && l.isTraitObjectType(localType) {
+			value, err = l.lowerExpr(fn, *stmt.Value)
+		} else {
+			value, err = l.lowerExprWithExpectedType(fn, *stmt.Value, localType)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -719,6 +784,11 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			if !isVoidExpr(value.expr) {
 				out = append(out, &ast.ExprStmt{X: value.expr})
 			}
+			return out, nil
+		}
+		if l.localIsPointerParam(fn, stmt.Local) && l.isTraitObjectType(localType) {
+			assignValue := l.mutableTraitAssignValueExpr(fn, *stmt.Value, value.expr, localType)
+			out = append(out, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(localName(fn, stmt.Local)), Sel: ast.NewIdent(l.mutableTraitAssignFieldNameForType(localType))}, Args: []ast.Expr{assignValue}}})
 			return out, nil
 		}
 		out = append(out, &ast.AssignStmt{
@@ -748,14 +818,24 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		if stmt.Field < 0 || stmt.Field >= len(targetType.Fields) {
 			return nil, fmt.Errorf("invalid field set index %d", stmt.Field)
 		}
-		value, err := l.lowerExpr(fn, *stmt.Value)
+		field := targetType.Fields[stmt.Field]
+		var value loweredExpr
+		if field.Mutable && l.isTraitObjectType(field.Type) {
+			value, err = l.lowerExpr(fn, *stmt.Value)
+		} else {
+			value, err = l.lowerExprWithExpectedType(fn, *stmt.Value, field.Type)
+		}
 		if err != nil {
 			return nil, err
 		}
 		out := append([]ast.Stmt{}, target.stmts...)
 		out = append(out, value.stmts...)
-		field := targetType.Fields[stmt.Field]
 		fieldTarget := ast.Expr(&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))})
+		if field.Mutable && l.isTraitObjectType(field.Type) {
+			assignValue := l.mutableTraitAssignValueExpr(fn, *stmt.Value, value.expr, field.Type)
+			out = append(out, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: fieldTarget, Sel: ast.NewIdent(l.mutableTraitAssignFieldNameForType(field.Type))}, Args: []ast.Expr{assignValue}}})
+			return out, nil
+		}
 		if field.Mutable {
 			fieldTarget = &ast.StarExpr{X: fieldTarget}
 		}
@@ -889,7 +969,19 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("maybe some missing target")
 		}
-		target, err := l.lowerExpr(fn, *expr.Target)
+		expected := air.NoType
+		if validTypeID(l.program, expr.Type) {
+			if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeMaybe {
+				expected = info.Elem
+			}
+		}
+		var target loweredExpr
+		var err error
+		if expected != air.NoType {
+			target, err = l.lowerExprWithExpectedType(fn, *expr.Target, expected)
+		} else {
+			target, err = l.lowerExpr(fn, *expr.Target)
+		}
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -915,7 +1007,19 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("result ok missing target")
 		}
-		target, err := l.lowerExpr(fn, *expr.Target)
+		expected := air.NoType
+		if validTypeID(l.program, expr.Type) {
+			if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeResult {
+				expected = info.Value
+			}
+		}
+		var target loweredExpr
+		var err error
+		if expected != air.NoType {
+			target, err = l.lowerExprWithExpectedType(fn, *expr.Target, expected)
+		} else {
+			target, err = l.lowerExpr(fn, *expr.Target)
+		}
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -935,7 +1039,19 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("result err missing target")
 		}
-		target, err := l.lowerExpr(fn, *expr.Target)
+		expected := air.NoType
+		if validTypeID(l.program, expr.Type) {
+			if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeResult {
+				expected = info.Error
+			}
+		}
+		var target loweredExpr
+		var err error
+		if expected != air.NoType {
+			target, err = l.lowerExprWithExpectedType(fn, *expr.Target, expected)
+		} else {
+			target, err = l.lowerExpr(fn, *expr.Target)
+		}
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -1242,18 +1358,38 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		stmts := []ast.Stmt{}
 		elts := make([]ast.Expr, 0, len(expr.Fields))
 		for _, field := range expr.Fields {
-			value, err := l.lowerExpr(fn, field.Value)
+			fieldInfo, hasFieldInfo := structFieldByName(typ, field.Name)
+			var value loweredExpr
+			var err error
+			if hasFieldInfo && !fieldInfo.Mutable {
+				value, err = l.lowerExprWithExpectedType(fn, field.Value, fieldInfo.Type)
+			} else {
+				value, err = l.lowerExpr(fn, field.Value)
+			}
 			if err != nil {
 				return loweredExpr{}, err
 			}
 			stmts = append(stmts, value.stmts...)
 			fieldValue := value.expr
-			if fieldInfo, ok := structFieldByName(typ, field.Name); ok {
+			if hasFieldInfo {
 				if fieldInfo.RecursiveNullable {
 					fieldValue = recursiveNullableValueAsPointer(l, fieldInfo.Type, fieldValue)
 				}
 				if fieldInfo.Mutable {
-					fieldValue = l.mutableReferenceArg(fn, field.Value, fieldValue)
+					if l.isTraitObjectType(fieldInfo.Type) {
+						adapted, setup, _, ok, err := l.mutableTraitObjectArg(fn, field.Value, fieldValue, air.Param{Type: fieldInfo.Type, Mutable: true})
+						if err != nil {
+							return loweredExpr{}, err
+						}
+						if ok {
+							stmts = append(stmts, setup...)
+							fieldValue = adapted
+						} else {
+							fieldValue = l.mutableReferenceArg(fn, field.Value, fieldValue)
+						}
+					} else {
+						fieldValue = l.mutableReferenceArg(fn, field.Value, fieldValue)
+					}
 				}
 			}
 			elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(typ, field.Name)), Value: fieldValue})
@@ -1471,12 +1607,31 @@ func (l *lowerer) lowerValueBlock(fn air.Function, block air.Block, resultType a
 }
 
 func (l *lowerer) lowerExprWithExpectedType(fn air.Function, expr air.Expr, expectedType air.TypeID) (loweredExpr, error) {
+	if l.shouldLoadMutableTraitValue(fn, expr, expectedType) {
+		return l.lowerMutableTraitValue(fn, expr, expectedType)
+	}
 	if expectedType != air.NoType && expectedType != expr.Type && l.canOverrideExprType(expr, expectedType) {
 		cloned := expr
 		cloned.Type = expectedType
 		return l.lowerExpr(fn, cloned)
 	}
 	return l.lowerExpr(fn, expr)
+}
+
+func (l *lowerer) shouldLoadMutableTraitValue(fn air.Function, expr air.Expr, expectedType air.TypeID) bool {
+	return l.isTraitObjectType(expectedType) && l.isTraitObjectType(expr.Type) && l.exprIsMutableReference(fn, expr)
+}
+
+func (l *lowerer) lowerMutableTraitValue(fn air.Function, expr air.Expr, expectedType air.TypeID) (loweredExpr, error) {
+	value, err := l.lowerExpr(fn, expr)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	loadName := l.mutableTraitLoadFieldNameForType(expectedType)
+	if loadName == "" {
+		return loweredExpr{}, fmt.Errorf("invalid mutable trait value type %d", expectedType)
+	}
+	return loweredExpr{stmts: value.stmts, expr: &ast.CallExpr{Fun: &ast.SelectorExpr{X: value.expr, Sel: ast.NewIdent(loadName)}}}, nil
 }
 
 func (l *lowerer) canOverrideExprType(expr air.Expr, expectedType air.TypeID) bool {
@@ -1625,12 +1780,33 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 	}
 }
 
+func (l *lowerer) isTraitObjectType(typeID air.TypeID) bool {
+	return validTypeID(l.program, typeID) && l.program.Types[typeID-1].Kind == air.TypeTraitObject
+}
+
+func (l *lowerer) mutableTraitRefType(typeID air.TypeID) (ast.Expr, error) {
+	if !l.isTraitObjectType(typeID) {
+		return nil, fmt.Errorf("type %d is not a trait object", typeID)
+	}
+	traitID := l.program.Types[typeID-1].Trait
+	if !validTraitID(l.program, traitID) {
+		return nil, fmt.Errorf("invalid trait id %d", traitID)
+	}
+	return ast.NewIdent(mutableTraitRefTypeName(l.program.Traits[traitID])), nil
+}
+
 func (l *lowerer) goParamType(param air.Param) (ast.Expr, error) {
 	typ, err := l.goType(param.Type)
 	if err != nil {
 		return nil, err
 	}
 	if param.Mutable && validTypeID(l.program, param.Type) && !l.isVoidType(param.Type) {
+		if l.isTraitObjectType(param.Type) {
+			typ, err = l.mutableTraitRefType(param.Type)
+			if err != nil {
+				return nil, err
+			}
+		}
 		return &ast.StarExpr{X: typ}, nil
 	}
 	return typ, nil
@@ -1706,6 +1882,12 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 				return nil, err
 			}
 			if i < len(info.ParamMutable) && info.ParamMutable[i] {
+				if l.isTraitObjectType(paramTypeID) {
+					paramType, err = l.mutableTraitRefType(paramTypeID)
+					if err != nil {
+						return nil, err
+					}
+				}
 				paramType = &ast.StarExpr{X: paramType}
 			}
 			params = append(params, &ast.Field{Type: paramType})
@@ -2113,7 +2295,13 @@ func (l *lowerer) lowerCallArgs(fn air.Function, rawArgs []air.Expr, params []ai
 	stmts := []ast.Stmt{}
 	writeback := []ast.Stmt{}
 	for i, arg := range rawArgs {
-		loweredArg, err := l.lowerExpr(fn, arg)
+		var loweredArg loweredExpr
+		var err error
+		if i < len(params) && !params[i].Mutable {
+			loweredArg, err = l.lowerExprWithExpectedType(fn, arg, params[i].Type)
+		} else {
+			loweredArg, err = l.lowerExpr(fn, arg)
+		}
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -2174,35 +2362,318 @@ func (l *lowerer) adaptCallArgWithStmts(fn air.Function, arg air.Expr, argExpr a
 }
 
 func (l *lowerer) mutableTraitObjectArg(fn air.Function, arg air.Expr, argExpr ast.Expr, param air.Param) (ast.Expr, []ast.Stmt, []ast.Stmt, bool, error) {
-	if !validTypeID(l.program, param.Type) || l.program.Types[param.Type-1].Kind != air.TypeTraitObject {
+	if !l.isTraitObjectType(param.Type) {
 		return nil, nil, nil, false, nil
 	}
-	if arg.Kind != air.ExprTraitUpcast || arg.Target == nil {
-		return nil, nil, nil, false, nil
+	if ref, setup, ok, err := l.mutableTraitRefPointerExpr(fn, arg); ok || err != nil {
+		return ref, setup, nil, ok, err
 	}
-	writebackTarget, writebackSetup, ok, err := l.mutableTraitUpcastWritebackTarget(fn, *arg.Target)
-	if err != nil {
-		return nil, nil, nil, true, err
+	if arg.Kind == air.ExprTraitUpcast && arg.Target != nil {
+		place, setup, ok, err := l.mutableTraitUpcastPlace(fn, *arg.Target)
+		if err != nil {
+			return nil, nil, nil, true, err
+		}
+		if !ok {
+			return nil, nil, nil, true, fmt.Errorf("mutable trait object argument is not an assignable place")
+		}
+		ref, err := l.mutableTraitForwarderExpr(arg, place, param.Type)
+		if err != nil {
+			return nil, nil, nil, true, err
+		}
+		return &ast.UnaryExpr{Op: token.AND, X: ref}, setup, nil, true, nil
 	}
-	if !ok {
-		return nil, nil, nil, true, fmt.Errorf("mutable trait object argument is not an assignable place")
+	if l.isTraitObjectType(arg.Type) {
+		place, setup, ok, err := l.mutableTraitUpcastPlace(fn, arg)
+		if err != nil {
+			return nil, nil, nil, true, err
+		}
+		if !ok {
+			return nil, nil, nil, true, fmt.Errorf("mutable trait object argument is not an assignable place")
+		}
+		ref, err := l.mutableTraitDynamicForwarderExpr(place, param.Type)
+		if err != nil {
+			return nil, nil, nil, true, err
+		}
+		return &ast.UnaryExpr{Op: token.AND, X: ref}, setup, nil, true, nil
 	}
-	tmp := l.nextTemp()
-	setup := []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(tmp)}, Tok: token.DEFINE, Rhs: []ast.Expr{argExpr}}}
-	targetType, err := l.goType(arg.Target.Type)
-	if err != nil {
-		return nil, nil, nil, true, err
-	}
-	writeback := append([]ast.Stmt{}, writebackSetup...)
-	writeback = append(writeback, &ast.AssignStmt{
-		Lhs: []ast.Expr{writebackTarget},
-		Tok: token.ASSIGN,
-		Rhs: []ast.Expr{&ast.TypeAssertExpr{X: ast.NewIdent(tmp), Type: targetType}},
-	})
-	return &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(tmp)}, setup, writeback, true, nil
+	return nil, nil, nil, false, nil
 }
 
-func (l *lowerer) mutableTraitUpcastWritebackTarget(fn air.Function, arg air.Expr) (ast.Expr, []ast.Stmt, bool, error) {
+func (l *lowerer) mutableTraitRefPointerExpr(fn air.Function, arg air.Expr) (ast.Expr, []ast.Stmt, bool, error) {
+	if !l.isTraitObjectType(arg.Type) {
+		return nil, nil, false, nil
+	}
+	switch arg.Kind {
+	case air.ExprLoadLocal:
+		if l.localIsPointerParam(fn, arg.Local) {
+			return ast.NewIdent(localName(fn, arg.Local)), nil, true, nil
+		}
+	case air.ExprGetField:
+		if arg.Target == nil || !validTypeID(l.program, arg.Target.Type) {
+			return nil, nil, false, nil
+		}
+		targetType := l.program.Types[arg.Target.Type-1]
+		if targetType.Kind != air.TypeStruct || arg.Field < 0 || arg.Field >= len(targetType.Fields) {
+			return nil, nil, false, nil
+		}
+		field := targetType.Fields[arg.Field]
+		if !field.Mutable || !l.isTraitObjectType(field.Type) {
+			return nil, nil, false, nil
+		}
+		target, err := l.lowerExpr(fn, *arg.Target)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		return &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))}, target.stmts, true, nil
+	}
+	return nil, nil, false, nil
+}
+
+func (l *lowerer) mutableTraitAssignValueExpr(fn air.Function, arg air.Expr, argExpr ast.Expr, traitTypeID air.TypeID) ast.Expr {
+	if l.isTraitObjectType(arg.Type) && l.exprIsMutableReference(fn, arg) {
+		return &ast.CallExpr{Fun: &ast.SelectorExpr{X: argExpr, Sel: ast.NewIdent(l.mutableTraitLoadFieldNameForType(traitTypeID))}}
+	}
+	return argExpr
+}
+
+func (l *lowerer) mutableTraitLoadFieldNameForType(typeID air.TypeID) string {
+	if !l.isTraitObjectType(typeID) {
+		return ""
+	}
+	traitID := l.program.Types[typeID-1].Trait
+	if !validTraitID(l.program, traitID) {
+		return ""
+	}
+	return mutableTraitLoadFieldName(l.program.Traits[traitID])
+}
+
+func (l *lowerer) mutableTraitAssignFieldNameForType(typeID air.TypeID) string {
+	if !l.isTraitObjectType(typeID) {
+		return ""
+	}
+	traitID := l.program.Types[typeID-1].Trait
+	if !validTraitID(l.program, traitID) {
+		return ""
+	}
+	return mutableTraitAssignFieldName(l.program.Traits[traitID])
+}
+
+func (l *lowerer) mutableTraitForwarderExpr(upcast air.Expr, place ast.Expr, traitTypeID air.TypeID) (ast.Expr, error) {
+	if !l.isTraitObjectType(traitTypeID) {
+		return nil, fmt.Errorf("type %d is not a trait object", traitTypeID)
+	}
+	traitID := l.program.Types[traitTypeID-1].Trait
+	if !validTraitID(l.program, traitID) {
+		return nil, fmt.Errorf("invalid trait id %d", traitID)
+	}
+	if !validImplID(l.program, upcast.Impl) {
+		return nil, fmt.Errorf("invalid impl id %d", upcast.Impl)
+	}
+	if upcast.Target == nil || !validTypeID(l.program, upcast.Target.Type) {
+		return nil, fmt.Errorf("mutable trait forwarder missing concrete target")
+	}
+	trait := l.program.Traits[traitID]
+	impl := l.program.Impls[upcast.Impl]
+	if impl.Trait != traitID {
+		return nil, fmt.Errorf("trait upcast impl %d has trait %d, want %d", upcast.Impl, impl.Trait, traitID)
+	}
+	concreteType, err := l.goType(upcast.Target.Type)
+	if err != nil {
+		return nil, err
+	}
+	elts := []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitLoadFieldName(trait)), Value: mutableTraitLoadFuncLit(place)},
+		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitAssignFieldName(trait)), Value: mutableTraitAssignFuncLit(place, concreteType, trait)},
+	}
+	for i, traitMethod := range trait.Methods {
+		if i >= len(impl.Methods) || !validFunctionID(l.program, impl.Methods[i]) {
+			return nil, fmt.Errorf("impl %d missing method %d for trait %s", upcast.Impl, i, trait.Name)
+		}
+		fieldValue, err := l.mutableTraitForwarderMethodExpr(traitMethod, l.program.Functions[impl.Methods[i]], place)
+		if err != nil {
+			return nil, err
+		}
+		elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitMethodFieldName(trait.ID, i)), Value: fieldValue})
+	}
+	refType, err := l.mutableTraitRefType(traitTypeID)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CompositeLit{Type: refType, Elts: elts}, nil
+}
+
+func (l *lowerer) mutableTraitDynamicForwarderExpr(place ast.Expr, traitTypeID air.TypeID) (ast.Expr, error) {
+	if !l.isTraitObjectType(traitTypeID) {
+		return nil, fmt.Errorf("type %d is not a trait object", traitTypeID)
+	}
+	traitID := l.program.Types[traitTypeID-1].Trait
+	if !validTraitID(l.program, traitID) {
+		return nil, fmt.Errorf("invalid trait id %d", traitID)
+	}
+	trait := l.program.Traits[traitID]
+	elts := []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitLoadFieldName(trait)), Value: mutableTraitLoadFuncLit(place)},
+		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitAssignFieldName(trait)), Value: mutableTraitDynamicAssignFuncLit(place)},
+	}
+	for i, method := range trait.Methods {
+		fieldValue, err := l.mutableTraitDynamicForwarderMethodExpr(trait, i, method, place)
+		if err != nil {
+			return nil, err
+		}
+		elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitMethodFieldName(trait.ID, i)), Value: fieldValue})
+	}
+	refType, err := l.mutableTraitRefType(traitTypeID)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CompositeLit{Type: refType, Elts: elts}, nil
+}
+
+func (l *lowerer) mutableTraitDynamicForwarderMethodExpr(trait air.Trait, methodIndex int, traitMethod air.TraitMethod, place ast.Expr) (ast.Expr, error) {
+	fnTypeExpr, err := l.mutableTraitMethodFuncType(traitMethod)
+	if err != nil {
+		return nil, err
+	}
+	fnType := fnTypeExpr.(*ast.FuncType)
+	switchVar := l.nextTemp()
+	switchVarExpr := ast.NewIdent(switchVar)
+	cases := []ast.Stmt{
+		l.mutableTraitForwardingCase(traitMethod, mutableTraitMethodFieldName(trait.ID, methodIndex), switchVarExpr, ast.NewIdent(mutableTraitRefTypeName(trait))),
+		l.mutableTraitForwardingCase(traitMethod, mutableTraitMethodFieldName(trait.ID, methodIndex), switchVarExpr, &ast.StarExpr{X: ast.NewIdent(mutableTraitRefTypeName(trait))}),
+	}
+	for _, impl := range l.program.Impls {
+		if impl.Trait != trait.ID || methodIndex >= len(impl.Methods) || !validTypeID(l.program, impl.ForType) || !validFunctionID(l.program, impl.Methods[methodIndex]) {
+			continue
+		}
+		methodFn := l.program.Functions[impl.Methods[methodIndex]]
+		cases = append(cases, l.mutableTraitImplForwardingCase(traitMethod, methodFn, impl.ForType, switchVarExpr, place))
+	}
+	cases = append(cases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: "\"unsupported trait object dispatch\""}}}}}})
+	body := []ast.Stmt{&ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{switchVarExpr}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: place}}}, Body: &ast.BlockStmt{List: cases}}}
+	return &ast.FuncLit{Type: fnType, Body: &ast.BlockStmt{List: body}}, nil
+}
+
+func (l *lowerer) mutableTraitForwardingCase(traitMethod air.TraitMethod, methodField string, receiver ast.Expr, caseType ast.Expr) *ast.CaseClause {
+	args := make([]ast.Expr, 0, len(traitMethod.Signature.Params))
+	for i := range traitMethod.Signature.Params {
+		args = append(args, ast.NewIdent(fmt.Sprintf("arg%d", i)))
+	}
+	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent(methodField)}, Args: args}
+	body := []ast.Stmt{}
+	if l.isVoidType(traitMethod.Signature.Return) {
+		body = append(body, &ast.ExprStmt{X: call})
+	} else {
+		body = append(body, &ast.ReturnStmt{Results: []ast.Expr{call}})
+	}
+	return &ast.CaseClause{List: []ast.Expr{caseType}, Body: body}
+}
+
+func (l *lowerer) mutableTraitImplForwardingCase(traitMethod air.TraitMethod, methodFn air.Function, implType air.TypeID, receiver ast.Expr, place ast.Expr) *ast.CaseClause {
+	callReceiver := receiver
+	writeback := false
+	if len(methodFn.Signature.Params) > 0 {
+		receiverParam := methodFn.Signature.Params[0]
+		if receiverParam.Mutable && validTypeID(l.program, receiverParam.Type) && l.program.Types[receiverParam.Type-1].Kind == air.TypeStruct {
+			callReceiver = &ast.UnaryExpr{Op: token.AND, X: receiver}
+			writeback = true
+		}
+	}
+	args := []ast.Expr{callReceiver}
+	for i := range traitMethod.Signature.Params {
+		args = append(args, ast.NewIdent(fmt.Sprintf("arg%d", i)))
+	}
+	call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, methodFn)), Args: args}
+	body := []ast.Stmt{}
+	if l.isVoidType(traitMethod.Signature.Return) {
+		body = append(body, &ast.ExprStmt{X: call})
+		if writeback {
+			body = append(body, &ast.AssignStmt{Lhs: []ast.Expr{place}, Tok: token.ASSIGN, Rhs: []ast.Expr{receiver}})
+		}
+	} else if writeback {
+		resultTemp := l.nextTemp()
+		body = append(body,
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{call}},
+			&ast.AssignStmt{Lhs: []ast.Expr{place}, Tok: token.ASSIGN, Rhs: []ast.Expr{receiver}},
+			&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent(resultTemp)}},
+		)
+	} else {
+		body = append(body, &ast.ReturnStmt{Results: []ast.Expr{call}})
+	}
+	return &ast.CaseClause{List: []ast.Expr{mustTypeExpr(l, implType)}, Body: body}
+}
+
+func mutableTraitLoadFuncLit(place ast.Expr) ast.Expr {
+	return &ast.FuncLit{
+		Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: ast.NewIdent("any")}}}},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{place}}}},
+	}
+}
+
+func mutableTraitAssignFuncLit(place ast.Expr, targetType ast.Expr, trait air.Trait) ast.Expr {
+	forwarded := ast.NewIdent("forwarded")
+	loadAssignedValue := func(receiver ast.Expr) ast.Expr {
+		return &ast.TypeAssertExpr{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: receiver, Sel: ast.NewIdent(mutableTraitLoadFieldName(trait))}}, Type: targetType}
+	}
+	assignLoaded := func(receiver ast.Expr) []ast.Stmt {
+		return []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{place}, Tok: token.ASSIGN, Rhs: []ast.Expr{loadAssignedValue(receiver)}}}
+	}
+	assignValue := []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{place}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: ast.NewIdent("value"), Type: targetType}}}}
+	return &ast.FuncLit{
+		Type: &ast.FuncType{Params: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("value")}, Type: ast.NewIdent("any")}}}},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.TypeSwitchStmt{
+			Assign: &ast.AssignStmt{Lhs: []ast.Expr{forwarded}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: ast.NewIdent("value")}}},
+			Body: &ast.BlockStmt{List: []ast.Stmt{
+				&ast.CaseClause{List: []ast.Expr{ast.NewIdent(mutableTraitRefTypeName(trait))}, Body: assignLoaded(forwarded)},
+				&ast.CaseClause{List: []ast.Expr{&ast.StarExpr{X: ast.NewIdent(mutableTraitRefTypeName(trait))}}, Body: assignLoaded(forwarded)},
+				&ast.CaseClause{Body: assignValue},
+			}},
+		}}},
+	}
+}
+
+func mutableTraitDynamicAssignFuncLit(place ast.Expr) ast.Expr {
+	return &ast.FuncLit{
+		Type: &ast.FuncType{Params: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("value")}, Type: ast.NewIdent("any")}}}},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{place}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent("value")}}}},
+	}
+}
+
+func (l *lowerer) mutableTraitForwarderMethodExpr(traitMethod air.TraitMethod, methodFn air.Function, place ast.Expr) (ast.Expr, error) {
+	fnTypeExpr, err := l.mutableTraitMethodFuncType(traitMethod)
+	if err != nil {
+		return nil, err
+	}
+	fnType := fnTypeExpr.(*ast.FuncType)
+	args := []ast.Expr{}
+	if len(methodFn.Signature.Params) > 0 {
+		receiver := place
+		receiverParam := methodFn.Signature.Params[0]
+		if receiverParam.Mutable && validTypeID(l.program, receiverParam.Type) && l.program.Types[receiverParam.Type-1].Kind == air.TypeStruct {
+			receiver = addressOfPlace(place)
+		}
+		args = append(args, receiver)
+	}
+	for i := range traitMethod.Signature.Params {
+		args = append(args, ast.NewIdent(fmt.Sprintf("arg%d", i)))
+	}
+	call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, methodFn)), Args: args}
+	body := []ast.Stmt{}
+	if l.isVoidType(traitMethod.Signature.Return) {
+		body = append(body, &ast.ExprStmt{X: call})
+	} else {
+		body = append(body, &ast.ReturnStmt{Results: []ast.Expr{call}})
+	}
+	return &ast.FuncLit{Type: fnType, Body: &ast.BlockStmt{List: body}}, nil
+}
+
+func addressOfPlace(place ast.Expr) ast.Expr {
+	if star, ok := place.(*ast.StarExpr); ok {
+		return star.X
+	}
+	return &ast.UnaryExpr{Op: token.AND, X: place}
+}
+
+func (l *lowerer) mutableTraitUpcastPlace(fn air.Function, arg air.Expr) (ast.Expr, []ast.Stmt, bool, error) {
 	switch arg.Kind {
 	case air.ExprLoadLocal:
 		return l.localAssignExpr(fn, arg.Local), nil, true, nil
@@ -2274,11 +2745,18 @@ func (l *lowerer) localAssignExpr(fn air.Function, local air.LocalID) ast.Expr {
 
 func (l *lowerer) localIsPointerParam(fn air.Function, local air.LocalID) bool {
 	idx := int(local)
-	if idx < 0 || idx >= len(fn.Signature.Params) {
-		return false
+	if idx >= 0 && idx < len(fn.Signature.Params) {
+		param := fn.Signature.Params[idx]
+		return param.Mutable && validTypeID(l.program, param.Type) && !l.isVoidType(param.Type)
 	}
-	param := fn.Signature.Params[idx]
-	return param.Mutable && validTypeID(l.program, param.Type) && !l.isVoidType(param.Type)
+	for _, capture := range fn.Captures {
+		if capture.Local != local || idx < 0 || idx >= len(fn.Locals) {
+			continue
+		}
+		captured := fn.Locals[idx]
+		return captured.Mutable && validTypeID(l.program, captured.Type) && !l.isVoidType(captured.Type)
+	}
+	return false
 }
 
 func (l *lowerer) qualified(alias string, importPath string, name string) ast.Expr {
@@ -2297,10 +2775,6 @@ func (l *lowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (loweredExpr, e
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("union wrap missing target")
 	}
-	target, err := l.lowerExpr(fn, *expr.Target)
-	if err != nil {
-		return loweredExpr{}, err
-	}
 	if !validTypeID(l.program, expr.Type) {
 		return loweredExpr{}, fmt.Errorf("invalid union type id %d", expr.Type)
 	}
@@ -2309,21 +2783,30 @@ func (l *lowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (loweredExpr, e
 		return loweredExpr{}, fmt.Errorf("union wrap with non-union type %s", unionType.Name)
 	}
 	fieldName := ""
+	memberType := air.NoType
 	for _, member := range unionType.Members {
 		if member.Tag == expr.Tag {
 			fieldName = unionMemberFieldName(member)
+			memberType = member.Type
 			break
 		}
 	}
 	if fieldName == "" {
 		return loweredExpr{}, fmt.Errorf("invalid union tag %d for %s", expr.Tag, unionType.Name)
 	}
+	var target loweredExpr
+	var err error
+	if memberType != air.NoType {
+		target, err = l.lowerExprWithExpectedType(fn, *expr.Target, memberType)
+	} else {
+		target, err = l.lowerExpr(fn, *expr.Target)
+	}
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	fieldValue := target.expr
-	for _, member := range unionType.Members {
-		if member.Tag == expr.Tag && validTypeID(l.program, member.Type) && l.program.Types[member.Type-1].Kind == air.TypeVoid {
-			fieldValue = voidValueExpr()
-			break
-		}
+	if validTypeID(l.program, memberType) && l.program.Types[memberType-1].Kind == air.TypeVoid {
+		fieldValue = voidValueExpr()
 	}
 	return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, unionType)), Elts: []ast.Expr{
 		&ast.KeyValueExpr{Key: ast.NewIdent("tag"), Value: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", expr.Tag)}},
@@ -3290,8 +3773,19 @@ func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, er
 	}
 	elts := make([]ast.Expr, 0, len(expr.Args))
 	stmts := []ast.Stmt{}
+	elemType := air.NoType
+	if validTypeID(l.program, expr.Type) {
+		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeList {
+			elemType = info.Elem
+		}
+	}
 	for _, arg := range expr.Args {
-		loweredArg, err := l.lowerExpr(fn, arg)
+		var loweredArg loweredExpr
+		if elemType != air.NoType {
+			loweredArg, err = l.lowerExprWithExpectedType(fn, arg, elemType)
+		} else {
+			loweredArg, err = l.lowerExpr(fn, arg)
+		}
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -3389,7 +3883,14 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 			if int(capture.Local) >= 0 && int(capture.Local) < len(closureFn.Locals) {
 				captureParam.Mutable = closureFn.Locals[capture.Local].Mutable
 			}
-			argExpr = l.adaptCallArg(fn, air.Expr{Kind: air.ExprLoadLocal, Type: capture.Type, Local: local}, argExpr, captureParam)
+			var setup []ast.Stmt
+			var post []ast.Stmt
+			argExpr, setup, post, err = l.adaptCallArgWithStmts(fn, air.Expr{Kind: air.ExprLoadLocal, Type: capture.Type, Local: local}, argExpr, captureParam)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			stmts = append(stmts, setup...)
+			stmts = append(stmts, post...)
 		}
 		callArgs = append(callArgs, argExpr)
 	}
@@ -3477,7 +3978,18 @@ func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, err
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	value, err := l.lowerExpr(fn, expr.Args[1])
+	elemType := air.NoType
+	if validTypeID(l.program, expr.Target.Type) {
+		if info := l.program.Types[expr.Target.Type-1]; info.Kind == air.TypeList {
+			elemType = info.Elem
+		}
+	}
+	var value loweredExpr
+	if elemType != air.NoType {
+		value, err = l.lowerExprWithExpectedType(fn, expr.Args[1], elemType)
+	} else {
+		value, err = l.lowerExpr(fn, expr.Args[1])
+	}
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -3522,16 +4034,16 @@ func (l *lowerer) lowerListPrepend(fn air.Function, expr air.Expr) (loweredExpr,
 	if expr.Target.Kind != air.ExprLoadLocal {
 		return loweredExpr{}, fmt.Errorf("list prepend currently requires local target")
 	}
-	value, err := l.lowerExpr(fn, expr.Args[0])
-	if err != nil {
-		return loweredExpr{}, err
-	}
 	if !validTypeID(l.program, expr.Target.Type) {
 		return loweredExpr{}, fmt.Errorf("invalid list prepend target type")
 	}
 	listInfo := l.program.Types[expr.Target.Type-1]
 	if listInfo.Kind != air.TypeList {
 		return loweredExpr{}, fmt.Errorf("list prepend target type kind %d", listInfo.Kind)
+	}
+	value, err := l.lowerExprWithExpectedType(fn, expr.Args[0], listInfo.Elem)
+	if err != nil {
+		return loweredExpr{}, err
 	}
 	elemType, err := l.goType(listInfo.Elem)
 	if err != nil {
@@ -3587,7 +4099,17 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 	if len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("list push expects one arg")
 	}
-	value, err := l.lowerExpr(fn, expr.Args[0])
+	var value loweredExpr
+	var err error
+	if validTypeID(l.program, expr.Target.Type) {
+		if info := l.program.Types[expr.Target.Type-1]; info.Kind == air.TypeList {
+			value, err = l.lowerExprWithExpectedType(fn, expr.Args[0], info.Elem)
+		} else {
+			value, err = l.lowerExpr(fn, expr.Args[0])
+		}
+	} else {
+		value, err = l.lowerExpr(fn, expr.Args[0])
+	}
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -3609,12 +4131,30 @@ func (l *lowerer) lowerMakeMap(fn air.Function, expr air.Expr) (loweredExpr, err
 	}
 	elts := make([]ast.Expr, 0, len(expr.Entries))
 	stmts := []ast.Stmt{}
+	keyType := air.NoType
+	valueType := air.NoType
+	if validTypeID(l.program, expr.Type) {
+		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeMap {
+			keyType = info.Key
+			valueType = info.Value
+		}
+	}
 	for _, entry := range expr.Entries {
-		key, err := l.lowerExpr(fn, entry.Key)
+		var key loweredExpr
+		if keyType != air.NoType {
+			key, err = l.lowerExprWithExpectedType(fn, entry.Key, keyType)
+		} else {
+			key, err = l.lowerExpr(fn, entry.Key)
+		}
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		value, err := l.lowerExpr(fn, entry.Value)
+		var value loweredExpr
+		if valueType != air.NoType {
+			value, err = l.lowerExprWithExpectedType(fn, entry.Value, valueType)
+		} else {
+			value, err = l.lowerExpr(fn, entry.Value)
+		}
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -3694,11 +4234,29 @@ func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, erro
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	key, err := l.lowerExpr(fn, expr.Args[0])
+	keyType := air.NoType
+	valueType := air.NoType
+	if validTypeID(l.program, expr.Target.Type) {
+		if info := l.program.Types[expr.Target.Type-1]; info.Kind == air.TypeMap {
+			keyType = info.Key
+			valueType = info.Value
+		}
+	}
+	var key loweredExpr
+	if keyType != air.NoType {
+		key, err = l.lowerExprWithExpectedType(fn, expr.Args[0], keyType)
+	} else {
+		key, err = l.lowerExpr(fn, expr.Args[0])
+	}
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	value, err := l.lowerExpr(fn, expr.Args[1])
+	var value loweredExpr
+	if valueType != air.NoType {
+		value, err = l.lowerExprWithExpectedType(fn, expr.Args[1], valueType)
+	} else {
+		value, err = l.lowerExpr(fn, expr.Args[1])
+	}
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -3837,7 +4395,66 @@ func (l *lowerer) lowerTraitCall(fn air.Function, expr air.Expr) (loweredExpr, e
 	if !targetIsTraitObject {
 		return loweredExpr{}, fmt.Errorf("unsupported trait call %s.%s", trait.Name, method.Name)
 	}
+	if l.exprIsMutableReference(fn, *expr.Target) {
+		return l.lowerMutableTraitRefCall(fn, target, expr)
+	}
 	return l.lowerTraitObjectCall(fn, target, expr)
+}
+
+func (l *lowerer) exprIsMutableReference(fn air.Function, expr air.Expr) bool {
+	switch expr.Kind {
+	case air.ExprLoadLocal:
+		return l.localIsPointerParam(fn, expr.Local)
+	case air.ExprGetField:
+		if expr.Target == nil || !validTypeID(l.program, expr.Target.Type) {
+			return false
+		}
+		targetType := l.program.Types[expr.Target.Type-1]
+		return targetType.Kind == air.TypeStruct && expr.Field >= 0 && expr.Field < len(targetType.Fields) && targetType.Fields[expr.Field].Mutable
+	default:
+		return false
+	}
+}
+
+func (l *lowerer) lowerMutableTraitRefCall(fn air.Function, target loweredExpr, expr air.Expr) (loweredExpr, error) {
+	if expr.Trait < 0 || int(expr.Trait) >= len(l.program.Traits) {
+		return loweredExpr{}, fmt.Errorf("invalid trait id %d", expr.Trait)
+	}
+	trait := l.program.Traits[expr.Trait]
+	if expr.Method < 0 || expr.Method >= len(trait.Methods) {
+		return loweredExpr{}, fmt.Errorf("invalid trait method %d for %s", expr.Method, trait.Name)
+	}
+	method := trait.Methods[expr.Method]
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	args := make([]ast.Expr, 0, len(expr.Args))
+	writeback := []ast.Stmt{}
+	for i, arg := range expr.Args {
+		var loweredArg loweredExpr
+		var err error
+		if i < len(method.Signature.Params) && !method.Signature.Params[i].Mutable {
+			loweredArg, err = l.lowerExprWithExpectedType(fn, arg, method.Signature.Params[i].Type)
+		} else {
+			loweredArg, err = l.lowerExpr(fn, arg)
+		}
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, loweredArg.stmts...)
+		argExpr := loweredArg.expr
+		if i < len(method.Signature.Params) {
+			var setup []ast.Stmt
+			var post []ast.Stmt
+			argExpr, setup, post, err = l.adaptCallArgWithStmts(fn, arg, argExpr, method.Signature.Params[i])
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			stmts = append(stmts, setup...)
+			writeback = append(writeback, post...)
+		}
+		args = append(args, argExpr)
+	}
+	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(mutableTraitMethodFieldName(trait.ID, expr.Method))}, Args: args}
+	return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
 }
 
 func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr air.Expr) (loweredExpr, error) {
@@ -3854,9 +4471,16 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 		stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: resultType}}}})
 	}
 
+	traitMethod := l.program.Traits[expr.Trait].Methods[expr.Method]
 	loweredArgs := make([]loweredExpr, len(expr.Args))
 	for i, arg := range expr.Args {
-		loweredArg, err := l.lowerExpr(fn, arg)
+		var loweredArg loweredExpr
+		var err error
+		if i < len(traitMethod.Signature.Params) && !traitMethod.Signature.Params[i].Mutable {
+			loweredArg, err = l.lowerExprWithExpectedType(fn, arg, traitMethod.Signature.Params[i].Type)
+		} else {
+			loweredArg, err = l.lowerExpr(fn, arg)
+		}
 		if err != nil {
 			return loweredExpr{}, err
 		}
@@ -3867,6 +4491,38 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 	switchVar := l.nextTemp()
 	switchVarExpr := ast.NewIdent(switchVar)
 	cases := []ast.Stmt{}
+	if validTraitID(l.program, expr.Trait) && expr.Method >= 0 && expr.Method < len(l.program.Traits[expr.Trait].Methods) {
+		trait := l.program.Traits[expr.Trait]
+		method := trait.Methods[expr.Method]
+		for _, caseType := range []ast.Expr{ast.NewIdent(mutableTraitRefTypeName(trait)), &ast.StarExpr{X: ast.NewIdent(mutableTraitRefTypeName(trait))}} {
+			args := make([]ast.Expr, 0, len(loweredArgs))
+			body := []ast.Stmt{}
+			writeback := []ast.Stmt{}
+			for i, loweredArg := range loweredArgs {
+				argExpr := loweredArg.expr
+				if i < len(method.Signature.Params) {
+					var setup []ast.Stmt
+					var post []ast.Stmt
+					var adaptErr error
+					argExpr, setup, post, adaptErr = l.adaptCallArgWithStmts(fn, expr.Args[i], argExpr, method.Signature.Params[i])
+					if adaptErr != nil {
+						return loweredExpr{}, adaptErr
+					}
+					body = append(body, setup...)
+					writeback = append(writeback, post...)
+				}
+				args = append(args, argExpr)
+			}
+			call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: switchVarExpr, Sel: ast.NewIdent(mutableTraitMethodFieldName(trait.ID, expr.Method))}, Args: args}
+			if isVoid {
+				body = append(body, &ast.ExprStmt{X: call})
+			} else {
+				body = append(body, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}})
+			}
+			body = append(body, writeback...)
+			cases = append(cases, &ast.CaseClause{List: []ast.Expr{caseType}, Body: body})
+		}
+	}
 	for _, impl := range l.program.Impls {
 		if impl.Trait != expr.Trait || expr.Method >= len(impl.Methods) || !validTypeID(l.program, impl.ForType) {
 			continue
@@ -3880,21 +4536,31 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 			}
 		}
 		args := []ast.Expr{receiver}
+		body := []ast.Stmt{}
+		writeback := []ast.Stmt{}
 		for i, loweredArg := range loweredArgs {
 			argExpr := loweredArg.expr
 			paramIndex := i + 1 // skip receiver
 			if paramIndex < len(methodFn.Signature.Params) {
-				argExpr = l.adaptCallArg(fn, expr.Args[i], argExpr, methodFn.Signature.Params[paramIndex])
+				var setup []ast.Stmt
+				var post []ast.Stmt
+				var adaptErr error
+				argExpr, setup, post, adaptErr = l.adaptCallArgWithStmts(fn, expr.Args[i], argExpr, methodFn.Signature.Params[paramIndex])
+				if adaptErr != nil {
+					return loweredExpr{}, adaptErr
+				}
+				body = append(body, setup...)
+				writeback = append(writeback, post...)
 			}
 			args = append(args, argExpr)
 		}
 		call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, methodFn)), Args: args}
-		body := []ast.Stmt{}
 		if isVoid {
 			body = append(body, &ast.ExprStmt{X: call})
 		} else {
 			body = append(body, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}})
 		}
+		body = append(body, writeback...)
 		if traitObjectWritebackAllowed(fn, *expr.Target) && len(methodFn.Signature.Params) > 0 {
 			receiverParam := methodFn.Signature.Params[0]
 			if receiverParam.Mutable && validTypeID(l.program, receiverParam.Type) && l.program.Types[receiverParam.Type-1].Kind == air.TypeStruct {
@@ -4497,6 +5163,14 @@ func validFunctionID(program *air.Program, id air.FunctionID) bool {
 
 func validTypeID(program *air.Program, id air.TypeID) bool {
 	return id > 0 && int(id) <= len(program.Types)
+}
+
+func validTraitID(program *air.Program, id air.TraitID) bool {
+	return id >= 0 && int(id) < len(program.Traits)
+}
+
+func validImplID(program *air.Program, id air.ImplID) bool {
+	return id >= 0 && int(id) < len(program.Impls)
 }
 
 func (l *lowerer) markJSONParseType(typeID air.TypeID) {
