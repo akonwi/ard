@@ -175,7 +175,7 @@ type InstanceProperty struct {
 }
 
 func (i *InstanceProperty) Type() Type {
-	return i._type
+	return derefMutableRef(i._type)
 }
 
 // String returns a string representation of the instance property
@@ -1385,13 +1385,4 @@ func (t TryOp) Expr() Expression {
 
 func (t TryOp) Type() Type {
 	return t.ok
-}
-
-type CopyExpression struct {
-	Expr  Expression
-	Type_ Type
-}
-
-func (c *CopyExpression) Type() Type {
-	return c.Type_
 }

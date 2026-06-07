@@ -61,6 +61,23 @@ func TestStructDefinitions(t *testing.T) {
 			},
 		},
 		{
+			name: "A struct with mutable reference field",
+			input: `struct Context {
+					tree: mut ViewTree,
+				}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StructDefinition{
+						Name: Identifier{Name: "Context"},
+						Fields: []StructField{
+							{Identifier{Name: "tree"}, &MutableType{Inner: &CustomType{Name: "ViewTree"}}},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "Method definitions",
 			input: `
 					impl Shape {

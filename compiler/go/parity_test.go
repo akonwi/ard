@@ -74,6 +74,97 @@ func TestGoTargetParityRecursiveStructFields(t *testing.T) {
 				}
 			`,
 		},
+		{
+			name: "mutual nullable reference",
+			input: `
+				use ard/maybe
+				struct A { b: B? }
+				struct B { a: A }
+				fn main() Int {
+					let a = A{b: maybe::none()}
+					let b = B{a: a}
+					if b.a.b.is_none() { 1 } else { 0 }
+				}
+			`,
+		},
+		{
+			name: "mutual nullable references",
+			input: `
+				use ard/maybe
+				struct A { b: B? }
+				struct B { a: A? }
+				fn main() Int {
+					let a = A{b: maybe::none()}
+					if a.b.is_none() { 1 } else { 0 }
+				}
+			`,
+		},
+		{
+			name: "generic nullable reference",
+			input: `
+				struct A { box: Box<A>? }
+				struct Box { value: $T }
+				fn main() Int { 1 }
+			`,
+		},
+		{
+			name: "nullable union reference",
+			input: `
+				use ard/maybe
+				type U = A | Int
+				struct A { u: U? }
+				fn main() Int {
+					let a = A{u: maybe::none()}
+					if a.u.is_none() { 1 } else { 0 }
+				}
+			`,
+		},
+		{
+			name: "function field self reference",
+			input: `
+				struct A { make: fn() A }
+				fn main() Int { 1 }
+			`,
+		},
+		{
+			name: "same module retained tree recursive type group",
+			input: `
+				struct Context {
+					tree: ViewTree,
+					node_id: Int,
+				}
+
+				struct ViewTree {
+					nodes: [TreeNode],
+				}
+
+				struct TreeNode {
+					view: View,
+					children: [Int],
+				}
+
+				trait View {
+					fn init(ctx: Context)
+					fn id() Int
+				}
+
+				struct Leaf {
+					value: Int,
+				}
+
+				impl View for Leaf {
+					fn init(ctx: Context) {}
+					fn id() Int { self.value }
+				}
+
+				fn main() Int {
+					let tree = ViewTree{nodes: []}
+					let ctx = Context{tree: tree, node_id: 1}
+					let node = TreeNode{view: Leaf{value: 41}, children: []}
+					node.view.id() + ctx.node_id
+				}
+			`,
+		},
 	})
 }
 
@@ -1242,6 +1333,48 @@ func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
 	}
 }
 
+func TestGoTargetParityMutableTraitObjectParameterFromConcrete(t *testing.T) {
+	program := lowerParitySource(t, `
+		struct Context {
+			node_id: Int,
+		}
+
+		trait View {
+			fn init(ctx: Context)
+			fn node_id() Int
+		}
+
+		fn add_child(ctx: Context, mut child: View) {
+			child.init(Context{node_id: ctx.node_id + 1})
+		}
+
+		struct Leaf {
+			initialized: Bool,
+			node_id: Int,
+		}
+
+		impl View for Leaf {
+			fn mut init(ctx: Context) {
+				self.initialized = true
+				self.node_id = ctx.node_id
+			}
+
+			fn node_id() Int {
+				self.node_id
+			}
+		}
+
+		fn main() Int {
+			mut leaf = Leaf{initialized: false, node_id: 0}
+			add_child(Context{node_id: 41}, leaf)
+			if leaf.initialized { leaf.node_id } else { 0 }
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "42" {
+		t.Fatalf("got %s, want 42", got)
+	}
+}
+
 func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait View {
@@ -1293,10 +1426,10 @@ func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.
 			let field_result = app.current()
 
 			mut typed_app = AppRoot{view: CounterView{count: 0}}
-			let typed_result = run_typed(mut typed_app)
+			let typed_result = run_typed(typed_app)
 
 			mut any_app = AppRoot{view: CounterView{count: 0}}
-			let any_result = run_any(mut any_app)
+			let any_result = run_any(any_app)
 
 			field_result + typed_result + any_result
 		}
@@ -1304,6 +1437,126 @@ func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.
 	if got := runGoTargetParityJSON(t, program); got != "3" {
 		t.Fatalf("got %s, want 3", got)
 	}
+}
+
+func TestGoTargetParityMutableReferenceFieldUpdatesSharedStorage(t *testing.T) {
+	program := lowerParitySource(t, `
+		struct Tree {
+			count: Int,
+		}
+
+		struct Context {
+			tree: mut Tree,
+		}
+
+		fn bump(mut tree: Tree) {
+			tree.count = tree.count + 1
+		}
+
+		struct Box {
+			value: mut Int,
+		}
+
+		fn set(mut value: Int) {
+			value = 3
+		}
+
+		fn main() Int {
+			mut tree = Tree{count: 0}
+			let ctx = Context{tree: tree}
+			bump(ctx.tree)
+			ctx.tree.count = 2
+
+			mut count = 0
+			let box = Box{value: count}
+			set(box.value)
+
+			ctx.tree.count + tree.count + box.value + count
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "10" {
+		t.Fatalf("got %s, want 10", got)
+	}
+}
+
+func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
+	t.Run("struct", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			struct Counter {
+				value: Int,
+			}
+
+			fn bump(mut c: Counter) {
+				c.value = c.value + 1
+			}
+
+			fn main() Int {
+				mut counter = Counter{value: 0}
+				bump(counter)
+				counter.value
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "1" {
+			t.Fatalf("got %s, want 1", got)
+		}
+	})
+
+	t.Run("list", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			fn append_one(mut values: [Int]) {
+				values.push(1)
+			}
+
+			fn main() Int {
+				mut values: [Int] = []
+				append_one(values)
+				values.size()
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "1" {
+			t.Fatalf("got %s, want 1", got)
+		}
+	})
+
+	t.Run("primitive", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			fn bump(mut count: Int) {
+				count = count + 1
+			}
+
+			fn main() Int {
+				mut count = 0
+				bump(count)
+				count
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "1" {
+			t.Fatalf("got %s, want 1", got)
+		}
+	})
+
+	t.Run("closure function type", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			type MutIntFn = fn(mut Int)
+
+			fn bump(mut count: Int) {
+				count = count + 1
+			}
+
+			fn apply(f: MutIntFn, mut count: Int) {
+				f(count)
+			}
+
+			fn main() Int {
+				mut count = 0
+				apply(bump, count)
+				count
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "1" {
+			t.Fatalf("got %s, want 1", got)
+		}
+	})
 }
 
 func TestGoTargetParityMutMethodClosureCapturesSelf(t *testing.T) {

@@ -130,6 +130,12 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			val: derefVal,
 			err: derefErr,
 		}
+	case *MutableRef:
+		derefInner := derefTypeSeen(typ.of, seen)
+		if derefInner == typ.of {
+			return typ
+		}
+		return MakeMutableRef(derefInner)
 	case *Union:
 		newTypes := make([]Type, len(typ.Types))
 		changed := false
@@ -237,42 +243,32 @@ func (c Checker) isMutable(expr Expression) bool {
 	case *Variable:
 		return e.sym.mutable
 	case *InstanceProperty:
+		if _, ok := mutableRefBase(e._type); ok {
+			return true
+		}
 		return c.isMutable(e.Subject)
 	}
 	return false
 }
 
-// isCopyable returns true if the type can be copied for mut parameters
-func (c Checker) isCopyable(_ Type) bool {
-	// In Ard, all types are copyable by default
-	// Future: might exclude external resources like file handles
-	return true
-}
-
-// shouldCopyForMutableAssignment determines if we should copy for mut variable assignments
-// This is more conservative than isCopyable to avoid unnecessary copying of primitives
-func (c Checker) shouldCopyForMutableAssignment(t Type) bool {
-	switch t.(type) {
-	case *StructDef, *List, *Map:
-		// Complex types that benefit from copy semantics
-		return true
-	default:
-		// Primitives (Int, Str, Bool, etc.) are immutable anyway, no need to copy
-		return false
-	}
-}
-
 type Checker struct {
-	diagnostics    []Diagnostic
-	input          *parse.Program
-	scope          *SymbolTable
-	filePath       string
-	modulePath     string
-	program        *Program
-	halted         bool
-	moduleResolver *ModuleResolver
-	options        CheckOptions
-	expectedExpr   Type
+	diagnostics                       []Diagnostic
+	input                             *parse.Program
+	scope                             *SymbolTable
+	filePath                          string
+	modulePath                        string
+	program                           *Program
+	halted                            bool
+	moduleResolver                    *ModuleResolver
+	options                           CheckOptions
+	expectedExpr                      Type
+	duplicateTopLevelTypeDeclarations map[parse.Statement]bool
+	topLevelStructDeclarations        map[string]*parse.StructDefinition
+	topLevelTypeAliases               map[string]*parse.TypeDeclaration
+	resolvingTopLevelStructs          map[string]bool
+	resolvedTopLevelStructs           map[string]bool
+	resolvingTopLevelAliases          map[string]bool
+	resolvedTopLevelAliases           map[string]bool
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -399,7 +395,18 @@ func (c *Checker) Check() {
 		}
 	}
 
+	c.hoistTopLevelTypeDeclarations()
+	c.predeclareTopLevelTypeAliases()
+	c.populateTopLevelTypeDefinitions()
+
 	for i := range c.input.Statements {
+		if stmt := c.checkedTopLevelTypeStatement(c.input.Statements[i]); stmt != nil {
+			c.program.Statements = append(c.program.Statements, *stmt)
+			continue
+		}
+		if isTopLevelTypeDeclaration(c.input.Statements[i]) {
+			continue
+		}
 		if stmt := c.checkStmt(&c.input.Statements[i]); stmt != nil {
 			c.program.Statements = append(c.program.Statements, *stmt)
 		}
@@ -407,6 +414,9 @@ func (c *Checker) Check() {
 			break
 		}
 	}
+
+	c.validateTopLevelTypeAliases()
+	c.checkRecursiveStructLayouts()
 
 	// now that we're done with the aliases, use module paths for the import keys
 	for alias, mod := range c.program.Imports {
@@ -490,6 +500,17 @@ func (c *Checker) findModuleByPath(path string) Module {
 	return nil
 }
 
+func namedTypeRequiresTypeArguments(t Type) bool {
+	switch typ := t.(type) {
+	case *StructDef:
+		return len(typ.GenericParams) > 0 || hasGenericsInType(typ)
+	case *ExternType:
+		return len(typ.GenericParams) > 0 || hasGenericsInType(typ)
+	default:
+		return hasGenericsInType(typ)
+	}
+}
+
 func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 	switch t := t.(type) {
 	case *TypeVar:
@@ -551,6 +572,21 @@ func (c *Checker) specializeAliasedType(originalType Type, typeArgs []parse.Decl
 	}
 
 	if structDef, ok := originalType.(*StructDef); ok {
+		if c.isResolvingStructDefinition(structDef) {
+			c.addError(fmt.Sprintf("Recursive generic self-reference %s is not supported yet", structDef.Name), loc)
+			return structDef
+		}
+		c.ensureStructDefinitionResolved(structDef)
+		genericParams = []string{}
+		seenGenerics = make(map[string]bool)
+		collectGenericsFromType(originalType, &genericParams, seenGenerics)
+		if len(genericParams) == 0 && len(structDef.GenericParams) > 0 {
+			genericParams = append(genericParams, structDef.GenericParams...)
+		}
+		if len(typeArgs) != len(genericParams) {
+			c.addError(fmt.Sprintf("Incorrect number of type arguments: expected %d, got %d", len(genericParams), len(typeArgs)), loc)
+			return originalType
+		}
 		typeVarMap := make(map[string]*TypeVar, len(genericParams))
 		for i, typeArg := range typeArgs {
 			resolvedArgType := c.resolveType(typeArg)
@@ -588,6 +624,10 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 	case *parse.VoidType:
 		baseType = Void
 
+	case *parse.MutableType:
+		baseType = MakeMutableRef(c.resolveType(ty.Inner))
+	case parse.MutableType:
+		baseType = MakeMutableRef(c.resolveType(ty.Inner))
 	case *parse.FunctionType:
 		// Convert each parameter type and return type
 		params := make([]Parameter, len(ty.Params))
@@ -630,12 +670,17 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			baseType = Dynamic
 			break
 		}
+		if ty.Type.Target == nil && c.topLevelTypeAliases != nil {
+			if _, ok := c.topLevelTypeAliases[t.GetName()]; ok {
+				c.resolveTopLevelTypeAlias(t.GetName())
+			}
+		}
 
 		if sym, ok := c.scope.get(t.GetName()); ok {
 			if len(ty.TypeArgs) > 0 {
 				baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
 			} else {
-				if hasGenericsInType(sym.Type) {
+				if namedTypeRequiresTypeArguments(sym.Type) {
 					c.addError(fmt.Sprintf("Generic type %s requires type arguments", t.GetName()), ty.GetLocation())
 				}
 				baseType = sym.Type
@@ -651,7 +696,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 					if len(ty.TypeArgs) > 0 {
 						baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
 					} else {
-						if hasGenericsInType(sym.Type) {
+						if namedTypeRequiresTypeArguments(sym.Type) {
 							c.addError(fmt.Sprintf("Generic type %s::%s requires type arguments", ty.Type.Target, ty.Type.Property), ty.GetLocation())
 						}
 						baseType = sym.Type
@@ -732,6 +777,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 	if c.halted {
 		return nil
 	}
+	if c.isDuplicateTopLevelTypeDeclaration(*stmt) {
+		return nil
+	}
 	switch s := (*stmt).(type) {
 	case *parse.Comment:
 		return nil
@@ -739,6 +787,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 		return &Statement{Break: true}
 	case *parse.TraitDefinition:
 		{
+			trait, ok := c.hoistedTrait(s.Name.Name)
+			if !ok {
+				return nil
+			}
 			methods := make([]FunctionDef, len(s.Methods))
 			for i, method := range s.Methods {
 				params := make([]Parameter, len(method.Parameters))
@@ -768,13 +820,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 			}
 
-			trait := Trait{
-				private: s.Private,
-				Name:    s.Name.Name,
-				methods: methods,
-			}
-
-			c.scope.add(trait.name(), &trait, false)
+			trait.private = s.Private
+			trait.Name = s.Name.Name
+			trait.methods = methods
 			return nil
 		}
 	case *parse.TraitImplementation:
@@ -988,8 +1036,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 		}
 	case *parse.ExternTypeDeclaration:
 		{
-			if _, dup := c.scope.get(s.Name); dup {
-				c.addError(fmt.Sprintf("Duplicate declaration: %s", s.Name), s.GetLocation())
+			externType, ok := c.hoistedExternType(s.Name)
+			if !ok {
 				return nil
 			}
 			typeArgs := make([]Type, len(s.TypeParams))
@@ -1005,12 +1053,22 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return nil
 			}
 			resolvedTarget, resolvedBinding := resolveExternalBindingForTarget(c.options.Target, bindings)
-			externType := &ExternType{Name_: s.Name, GenericParams: append([]string(nil), s.TypeParams...), TypeArgs: typeArgs, ExternalBinding: resolvedBinding, ExternalBindingTarget: resolvedTarget, ExternalBindings: bindings, private: s.Private}
-			c.scope.add(s.Name, externType, false)
+			externType.Name_ = s.Name
+			externType.GenericParams = append([]string(nil), s.TypeParams...)
+			externType.TypeArgs = typeArgs
+			externType.ExternalBinding = resolvedBinding
+			externType.ExternalBindingTarget = resolvedTarget
+			externType.ExternalBindings = bindings
+			externType.private = s.Private
 			return &Statement{Stmt: externType}
 		}
 	case *parse.TypeDeclaration:
 		{
+			if len(s.Type) == 1 {
+				if _, exists := c.scope.get(s.Name.Name); exists {
+					return nil
+				}
+			}
 			// Handle type declaration (type unions/aliases)
 			types := make([]Type, len(s.Type))
 			for i, declType := range s.Type {
@@ -1028,16 +1086,14 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return nil
 			}
 
-			// Create a union type (even if it only contains one type)
-			unionType := &Union{
-				Name:       s.Name.Name,
-				ModulePath: c.typeOwnerPath(),
-				Types:      types,
+			unionType, ok := c.hoistedUnion(s.Name.Name)
+			if !ok {
+				return nil
 			}
-
-			// Register the type in the scope with the given name
-			c.scope.add(unionType.name(), unionType, false)
-			return nil
+			unionType.Name = s.Name.Name
+			unionType.ModulePath = c.typeOwnerPath()
+			unionType.Types = types
+			return &Statement{Stmt: unionType}
 		}
 	case *parse.VariableDeclaration:
 		{
@@ -1091,15 +1147,6 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						return nil
 					}
 					__type = expected
-				}
-			}
-
-			// Apply copy semantics for mutable variable assignments
-			if s.Mutable && c.shouldCopyForMutableAssignment(val.Type()) {
-				// Always wrap in copy expression for mutable assignment of copyable types
-				val = &CopyExpression{
-					Expr:  val,
-					Type_: val.Type(),
 				}
 			}
 
@@ -1389,6 +1436,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 		}
 	case *parse.EnumDefinition:
 		{
+			enum, ok := c.hoistedEnum(s.Name)
+			if !ok {
+				return nil
+			}
 			if len(s.Variants) == 0 {
 				c.addError("Enums must have at least one variant", s.GetLocation())
 				return nil
@@ -1446,44 +1497,22 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				})
 			}
 
-			enum := &Enum{
-				Private:    s.Private,
-				Name:       s.Name,
-				ModulePath: c.typeOwnerPath(),
-				Values:     computedValues,
-				Methods:    make(map[string]*FunctionDef),
+			enum.Private = s.Private
+			enum.Name = s.Name
+			enum.ModulePath = c.typeOwnerPath()
+			enum.Values = computedValues
+			if enum.Methods == nil {
+				enum.Methods = make(map[string]*FunctionDef)
 			}
-
-			c.scope.add(enum.name(), enum, false)
 			return nil
 		}
 	case *parse.StructDefinition:
 		{
-			def := &StructDef{
-				Name:       s.Name.Name,
-				ModulePath: c.typeOwnerPath(),
-				Fields:     make(map[string]Type),
-				Methods:    make(map[string]*FunctionDef),
-				Private:    s.Private,
+			def, ok := c.hoistedStruct(s.Name.Name)
+			if !ok {
+				return nil
 			}
-			c.scope.add(def.name(), def, false)
-			seenGenerics := make(map[string]bool)
-			for _, field := range s.Fields {
-				fieldType := c.resolveType(field.Type)
-				if fieldType == nil {
-					return nil
-				}
-
-				if _, dup := def.Fields[field.Name.Name]; dup {
-					c.addError(fmt.Sprintf("Duplicate field: %s", field.Name.Name), field.Name.GetLocation())
-					return nil
-				}
-				if recursiveFieldHasInfiniteSize(field.Type, def.Name, false) {
-					c.addError(fmt.Sprintf("Recursive field %s.%s has infinite size. Put the recursive reference behind a list, map, or nullable type.", def.Name, field.Name.Name), field.Name.GetLocation())
-				}
-				def.Fields[field.Name.Name] = fieldType
-				collectGenericsFromType(fieldType, &def.GenericParams, seenGenerics)
-			}
+			c.populateStructDefinition(def, s)
 			return &Statement{Stmt: def}
 		}
 	case *parse.ImplBlock:
@@ -1855,6 +1884,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	instance := &StructInstance{Name: structName, _type: structType}
 	fields := make(map[string]Expression)
 	fieldTypes := make(map[string]Type)
+	providedFields := make(map[string]bool)
 
 	// For generic structs, infer generics from provided field values
 	var structDefCopy *StructDef
@@ -1894,6 +1924,15 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		if !ok {
 			c.addError(fmt.Sprintf("Unknown field: %s", fieldName), property.GetLocation())
 		} else {
+			providedFields[fieldName] = true
+
+			fieldExpected := field
+			fieldIsMutableRef := false
+			if base, ok := mutableRefBase(field); ok {
+				fieldExpected = base
+				fieldIsMutableRef = true
+			}
+
 			// For generic structs, unify types to resolve generics
 			if genericScope != nil {
 				// Check expression without type context first (let it infer if possible)
@@ -1903,27 +1942,37 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				}
 
 				// Implicit Maybe wrapping: if field is Maybe<T> and value is T, wrap in maybe::some()
-				if maybeField, isMaybe := field.(*Maybe); isMaybe {
-					if valType := checkVal.Type(); !valType.equal(field) {
+				if maybeField, isMaybe := fieldExpected.(*Maybe); isMaybe {
+					if valType := checkVal.Type(); !valType.equal(fieldExpected) {
 						if areCompatible(maybeField.Of(), valType) {
-							checkVal = c.synthesizeMaybeSome(checkVal, field)
+							checkVal = c.synthesizeMaybeSome(checkVal, fieldExpected)
 						}
 					}
 				}
 
-				if err := c.unifyTypes(field, checkVal.Type(), genericScope); err != nil {
+				if fieldIsMutableRef && !c.isMutable(checkVal) {
+					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fieldExpected.String()), property.GetLocation())
+					continue
+				}
+
+				if err := c.unifyTypes(fieldExpected, checkVal.Type(), genericScope); err != nil {
 					c.addError(err.Error(), property.GetLocation())
 					continue
 				}
 				// After unification, dereference to get the actual type
-				field = derefType(field)
+				fieldExpected = derefType(fieldExpected)
+				if fieldIsMutableRef {
+					field = MakeMutableRef(fieldExpected)
+				} else {
+					field = fieldExpected
+				}
 
 				fields[fieldName] = checkVal
 				fieldTypes[fieldName] = field
 			} else {
 				// For non-generic structs, handle nullable fields with implicit wrapping
 				var val Expression
-				if maybeField, isMaybe := field.(*Maybe); isMaybe {
+				if maybeField, isMaybe := fieldExpected.(*Maybe); isMaybe {
 					// Preserve full Maybe<T> type context for expressions like maybe::some(...)
 					// and maybe::none(), but use the inner type for literals and anonymous
 					// functions so they can still infer their element/parameter types.
@@ -1935,15 +1984,15 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 						}
 					default:
 						diagnosticCount := len(c.diagnostics)
-						val = c.checkExprAs(property.Value, field)
+						val = c.checkExprAs(property.Value, fieldExpected)
 						if val == nil {
 							c.diagnostics = c.diagnostics[:diagnosticCount]
 							val = c.checkExpr(property.Value)
-							if val != nil && !val.Type().equal(field) {
+							if val != nil && !val.Type().equal(fieldExpected) {
 								if areCompatible(maybeField.Of(), val.Type()) {
-									val = c.synthesizeMaybeSome(val, field)
+									val = c.synthesizeMaybeSome(val, fieldExpected)
 								} else {
-									c.addError(typeMismatch(field, val.Type()), property.GetLocation())
+									c.addError(typeMismatch(fieldExpected, val.Type()), property.GetLocation())
 									val = nil
 								}
 							}
@@ -1951,9 +2000,13 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 					}
 				} else {
 					// Non-nullable fields use checkExprAs which provides type context
-					val = c.checkExprAs(property.Value, field)
+					val = c.checkExprAs(property.Value, fieldExpected)
 				}
 				if val != nil {
+					if fieldIsMutableRef && !c.isMutable(val) {
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fieldExpected.String()), property.GetLocation())
+						continue
+					}
 					fields[fieldName] = val
 					fieldTypes[fieldName] = field
 				}
@@ -1971,9 +2024,9 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	for name, t := range checkFieldsMap {
 		if _, exists := fields[name]; !exists {
 			if _, isMaybe := t.(*Maybe); !isMaybe {
-				// todo: distinguish between provided w/ error + missing to avoid creating 2 errors:
-				// missing field + invalid expression for field
-				missing = append(missing, name)
+				if !providedFields[name] {
+					missing = append(missing, name)
+				}
 			} else {
 				// For optional fields, include their type
 				fieldTypes[name] = t
@@ -2542,14 +2595,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
-			// Align mutability information with parameters
-			resolvedArgs := c.alignArgumentsWithParameters(s.Args, fnDef.Parameters)
-
 			// Setup generics if function has them
 			fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
 
 			// Check and process arguments (handles both generics and mutability)
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
 			if args == nil {
 				return nil
 			}
@@ -2657,9 +2707,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
-			// Align mutability information with parameters
-			resolvedArgs := c.alignArgumentsWithParameters(s.Method.Args, fnDef.Parameters)
-
 			// For methods on generic struct instances, bind struct generics to method parameters.
 			// When calling a method on a generic struct instance, the method's generic parameters
 			// should use the types that were resolved during struct instantiation.
@@ -2727,7 +2774,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Check and process arguments (handles both generics and mutability)
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
 			if args == nil {
 				return nil
 			}
@@ -3214,14 +3261,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
-			// Align mutability information with parameters
-			resolvedArgs := c.alignArgumentsWithParameters(s.Function.Args, fnDef.Parameters)
-
 			// Setup generics if function has them
 			fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
 
 			// Check and process arguments (handles both generics and mutability)
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedArgs, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
 			if args == nil {
 				return nil
 			}
@@ -4966,39 +5010,6 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 	}
 }
 
-// alignArgumentsWithParameters converts a list of (possibly named) arguments to positional form,
-// aligned with function parameters and preserving mutability information.
-func (c *Checker) alignArgumentsWithParameters(args []parse.Argument, params []Parameter) []parse.Argument {
-	resolvedArgs := make([]parse.Argument, len(params))
-
-	if len(args) == 0 {
-		return resolvedArgs
-	}
-
-	// If arguments have names, reorder them to match parameter positions
-	if args[0].Name != "" {
-		paramMap := make(map[string]int)
-		for i, param := range params {
-			paramMap[param.Name] = i
-		}
-		for _, arg := range args {
-			if index, exists := paramMap[arg.Name]; exists {
-				resolvedArgs[index] = parse.Argument{
-					Location: arg.Location,
-					Name:     "",
-					Value:    arg.Value,
-					Mutable:  arg.Mutable,
-				}
-			}
-		}
-	} else {
-		// Positional arguments - direct copy
-		copy(resolvedArgs, args)
-	}
-
-	return resolvedArgs
-}
-
 // setupFunctionGenerics sets up generic scope and function copy for generic functions.
 // Returns the function copy (with fresh TypeVar instances for generics) and the generic scope.
 // For non-generic functions, returns the original function and a nil scope.
@@ -5084,10 +5095,10 @@ func (c *Checker) synthesizeMaybeSome(value Expression, maybeType Type) Expressi
 
 // checkAndProcessArguments validates and type-checks function arguments with generic support.
 // Returns the processed arguments and the specialized function (with generics resolved if applicable).
-// Handles the `mut` keyword for explicit copy semantics on mutable parameters.
+// Mutable parameters require addressable mutable arguments.
 // Synthesizes maybe::none() calls for omitted nullable arguments.
 // If any error occurs, it's added to the checker's diagnostics.
-func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []parse.Argument, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int) ([]Expression, *FunctionDef) {
+func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int) ([]Expression, *FunctionDef) {
 	// Create the full argument list including synthesized maybe::none() calls for omitted arguments
 	// Need to maintain parameter order, so use indexed assignment instead of appending
 	totalArgs := len(fnDefCopy.Parameters)
@@ -5174,23 +5185,15 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedArgs []pa
 			}
 		}
 
-		// Check mutability constraints if needed
+		// Check mutable-reference constraints if needed. A mutable parameter
+		// requires an addressable mutable place; a call-site `mut` marker no longer
+		// requests a defensive copy.
 		if fnDefCopy.Parameters[i].Mutable {
-			if c.isMutable(checkedArg) {
-				// Argument is already mutable - use it directly
-				allExprs[i] = checkedArg
-			} else if i < len(resolvedArgs) && resolvedArgs[i].Mutable {
-				// User provided `mut` keyword - create a copy
-				// (omitted arguments won't have a resolvedArgs entry)
-				allExprs[i] = &CopyExpression{
-					Expr:  checkedArg,
-					Type_: checkedArg.Type(),
-				}
-			} else {
-				// Argument is not mutable and no `mut` keyword - error
+			if !c.isMutable(checkedArg) {
 				c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDefCopy.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
 				return nil, nil
 			}
+			allExprs[i] = checkedArg
 		} else {
 			allExprs[i] = checkedArg
 		}

@@ -112,11 +112,10 @@ func TestStructs(t *testing.T) {
 			},
 		},
 		{
-			name: "Can reassign to properties",
+			name: "Can reassign to properties of mutable structs",
 			input: fmt.Sprintf(`%s
 				mut p = Person{name: "Alice", age: 30, employed: true}
 				p.age = 31`, personStructInput),
-			// Copy semantics allow this to be valid, so no errors
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
@@ -135,13 +134,12 @@ func TestStructs(t *testing.T) {
 						p.age = 31`, personStructInput),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Undefined variable: is_employed"},
-				{Kind: checker.Error, Message: "Missing field: employed"},
 			},
 		},
 	})
 }
 
-func TestCopySemantics(t *testing.T) {
+func TestMutableAggregateInitialization(t *testing.T) {
 	personStructInput := strings.Join([]string{
 		"struct Person {",
 		"  name: Str,",
@@ -151,11 +149,10 @@ func TestCopySemantics(t *testing.T) {
 
 	run(t, []test{
 		{
-			name: "mut assignment should accept copy from immutable struct",
+			name: "mutable binding can be initialized from immutable struct value",
 			input: fmt.Sprintf(`%s
 				let alice = Person{name: "Alice", age: 30}
 				mut bob = alice`, personStructInput),
-			// For now, just check that it compiles without errors
 			diagnostics: []checker.Diagnostic{},
 		},
 	})

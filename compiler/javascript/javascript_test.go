@@ -384,6 +384,84 @@ fn main() {
 	}
 }
 
+func TestRunMutableReferenceParameterUpdatesCaller(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/io
+
+struct Counter {
+  value: Int,
+}
+
+struct Context {
+  counter: mut Counter,
+}
+
+struct Box {
+  value: mut Int,
+}
+
+fn bump(mut c: Counter) {
+  c.value = c.value + 1
+}
+
+type MutIntFn = fn(mut Int)
+
+fn bump_int(mut count: Int) {
+  count = count + 1
+}
+
+fn apply(f: MutIntFn, mut count: Int) {
+  f(count)
+}
+
+fn main() {
+  mut counter = Counter{value: 0}
+  bump(counter)
+  io::print(counter.value.to_str())
+
+  mut shared = Counter{value: 0}
+  let ctx = Context{counter: shared}
+  bump(ctx.counter)
+  ctx.counter.value = 2
+  io::print((ctx.counter.value + shared.value).to_str())
+
+  mut count = 0
+  bump_int(count)
+  io::print(count.to_str())
+
+  mut shared_count = 0
+  let box = Box{value: shared_count}
+  bump_int(box.value)
+  io::print((box.value + shared_count).to_str())
+
+  mut closure_count = 0
+  apply(bump_int, closure_count)
+  io::print(closure_count.to_str())
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", "-tags=goexperiment.jsonv2", ".", "run", "--target", "js-server", mainPath)
+	cmd.Dir = ".."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("did not expect js-server mutable reference run error: %v\n%s", err, string(out))
+	}
+	if string(out) != "1\n4\n1\n2\n1\n" {
+		t.Fatalf("unexpected output: %q", string(out))
+	}
+}
+
 func TestRunExecutesDecodeAndJSONStdlibProgram(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not installed")

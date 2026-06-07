@@ -197,6 +197,8 @@ func extractGenericNames(t Type, names map[string]bool) {
 	case *Result:
 		extractGenericNames(t.val, names)
 		extractGenericNames(t.err, names)
+	case *MutableRef:
+		extractGenericNames(t.of, names)
 	case *Union:
 		for _, t := range t.Types {
 			extractGenericNames(t, names)
@@ -234,6 +236,9 @@ func hasGenericsInTypeSeen(t Type, seen map[Type]struct{}) bool {
 	seen[t] = struct{}{}
 	switch t := t.(type) {
 	case *TypeVar:
+		if t.bound && t.actual != nil {
+			return hasGenericsInTypeSeen(t.actual, seen)
+		}
 		return true
 	case *List:
 		return hasGenericsInTypeSeen(t.of, seen)
@@ -243,6 +248,8 @@ func hasGenericsInTypeSeen(t Type, seen map[Type]struct{}) bool {
 		return hasGenericsInTypeSeen(t.of, seen)
 	case *Result:
 		return hasGenericsInTypeSeen(t.val, seen) || hasGenericsInTypeSeen(t.err, seen)
+	case *MutableRef:
+		return hasGenericsInTypeSeen(t.of, seen)
 	case *Union:
 		return slices.ContainsFunc(t.Types, func(member Type) bool { return hasGenericsInTypeSeen(member, seen) })
 	case *StructDef:
@@ -312,6 +319,12 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			val: newVal,
 			err: newErr,
 		}
+	case *MutableRef:
+		newOf := replaceGeneric(t.of, genericName, concreteType)
+		if newOf == t.of {
+			return t
+		}
+		return MakeMutableRef(newOf)
 	case *FunctionDef:
 		newParams := make([]Parameter, len(t.Parameters))
 		for i, p := range t.Parameters {
@@ -398,6 +411,8 @@ func hasGeneric(t Type, genericName string) bool {
 		return hasGeneric(t.of, genericName)
 	case *Result:
 		return hasGeneric(t.val, genericName) || hasGeneric(t.err, genericName)
+	case *MutableRef:
+		return hasGeneric(t.of, genericName)
 	case *StructDef:
 		for _, fieldType := range t.Fields {
 			if hasGeneric(fieldType, genericName) {
@@ -436,25 +451,95 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 // copyStructWithTypeVarMap creates a shallow copy of a StructDef with fresh TypeVar instances
 // for generic type parameters. This is used to create call-site-specific copies of generic structs.
 func copyStructWithTypeVarMap(structDef *StructDef, typeVarMap map[string]*TypeVar) *StructDef {
-	newFields := make(map[string]Type)
-	for name, fieldType := range structDef.Fields {
-		newFields[name] = copyTypeWithTypeVarMap(fieldType, typeVarMap)
-	}
+	return copyStructWithTypeVarMapSeen(structDef, typeVarMap, map[*StructDef]*StructDef{})
+}
 
-	return &StructDef{
-		Name:          structDef.Name,
-		ModulePath:    structDef.ModulePath,
-		Fields:        newFields,
-		Methods:       structDef.Methods, // Methods are not copied; they're shared
-		Self:          structDef.Self,
-		Traits:        structDef.Traits,
-		GenericParams: append([]string(nil), structDef.GenericParams...),
-		Private:       structDef.Private,
+func copyStructWithTypeVarMapSeen(structDef *StructDef, typeVarMap map[string]*TypeVar, seen map[*StructDef]*StructDef) *StructDef {
+	if structDef == nil {
+		return nil
+	}
+	if existing, ok := seen[structDef]; ok {
+		return existing
+	}
+	newFields := make(map[string]Type)
+	structCopy := &StructDef{
+		Name:       structDef.Name,
+		ModulePath: structDef.ModulePath,
+		Fields:     newFields,
+		Methods:    structDef.Methods, // Methods are not copied; they're shared
+		Self:       structDef.Self,
+		Traits:     structDef.Traits,
+		Private:    structDef.Private,
+	}
+	seen[structDef] = structCopy
+	for name, fieldType := range structDef.Fields {
+		newFields[name] = copyTypeWithTypeVarMapSeen(fieldType, typeVarMap, seen)
+	}
+	genericParams := []string{}
+	seenGenerics := map[string]bool{}
+	seenTypes := map[Type]bool{}
+	for _, fieldType := range newFields {
+		collectUnboundGenericsFromType(fieldType, &genericParams, seenGenerics, seenTypes)
+	}
+	structCopy.GenericParams = genericParams
+	return structCopy
+}
+
+func collectUnboundGenericsFromType(t Type, params *[]string, seenGenerics map[string]bool, seenTypes map[Type]bool) {
+	if t == nil {
+		return
+	}
+	if typeVar, ok := t.(*TypeVar); ok && typeVar.bound && typeVar.actual != nil {
+		t = typeVar.actual
+	}
+	if _, ok := seenTypes[t]; ok {
+		return
+	}
+	seenTypes[t] = true
+	switch typ := t.(type) {
+	case *TypeVar:
+		if !seenGenerics[typ.name] {
+			*params = append(*params, typ.name)
+			seenGenerics[typ.name] = true
+		}
+	case *List:
+		collectUnboundGenericsFromType(typ.of, params, seenGenerics, seenTypes)
+	case *Map:
+		collectUnboundGenericsFromType(typ.key, params, seenGenerics, seenTypes)
+		collectUnboundGenericsFromType(typ.value, params, seenGenerics, seenTypes)
+	case *Maybe:
+		collectUnboundGenericsFromType(typ.of, params, seenGenerics, seenTypes)
+	case *Result:
+		collectUnboundGenericsFromType(typ.val, params, seenGenerics, seenTypes)
+		collectUnboundGenericsFromType(typ.err, params, seenGenerics, seenTypes)
+	case *MutableRef:
+		collectUnboundGenericsFromType(typ.of, params, seenGenerics, seenTypes)
+	case *Union:
+		for _, member := range typ.Types {
+			collectUnboundGenericsFromType(member, params, seenGenerics, seenTypes)
+		}
+	case *StructDef:
+		for _, fieldType := range typ.Fields {
+			collectUnboundGenericsFromType(fieldType, params, seenGenerics, seenTypes)
+		}
+	case *FunctionDef:
+		for _, param := range typ.Parameters {
+			collectUnboundGenericsFromType(param.Type, params, seenGenerics, seenTypes)
+		}
+		collectUnboundGenericsFromType(typ.ReturnType, params, seenGenerics, seenTypes)
+	case *ExternType:
+		for _, typeArg := range typ.TypeArgs {
+			collectUnboundGenericsFromType(typeArg, params, seenGenerics, seenTypes)
+		}
 	}
 }
 
 // copyTypeWithTypeVarMap deep copies a type, replacing TypeVar instances with fresh ones
 func copyTypeWithTypeVarMap(t Type, typeVarMap map[string]*TypeVar) Type {
+	return copyTypeWithTypeVarMapSeen(t, typeVarMap, map[*StructDef]*StructDef{})
+}
+
+func copyTypeWithTypeVarMapSeen(t Type, typeVarMap map[string]*TypeVar, seenStructs map[*StructDef]*StructDef) Type {
 	switch typ := t.(type) {
 	case *TypeVar:
 		if fresh, exists := typeVarMap[typ.name]; exists {
@@ -462,23 +547,25 @@ func copyTypeWithTypeVarMap(t Type, typeVarMap map[string]*TypeVar) Type {
 		}
 		return typ // Keep as-is if not a generic parameter
 	case *List:
-		return &List{of: copyTypeWithTypeVarMap(typ.of, typeVarMap)}
+		return &List{of: copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs)}
 	case *Map:
 		return &Map{
-			key:   copyTypeWithTypeVarMap(typ.key, typeVarMap),
-			value: copyTypeWithTypeVarMap(typ.value, typeVarMap),
+			key:   copyTypeWithTypeVarMapSeen(typ.key, typeVarMap, seenStructs),
+			value: copyTypeWithTypeVarMapSeen(typ.value, typeVarMap, seenStructs),
 		}
 	case *Maybe:
-		return &Maybe{of: copyTypeWithTypeVarMap(typ.of, typeVarMap)}
+		return &Maybe{of: copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs)}
 	case *Result:
 		return &Result{
-			val: copyTypeWithTypeVarMap(typ.val, typeVarMap),
-			err: copyTypeWithTypeVarMap(typ.err, typeVarMap),
+			val: copyTypeWithTypeVarMapSeen(typ.val, typeVarMap, seenStructs),
+			err: copyTypeWithTypeVarMapSeen(typ.err, typeVarMap, seenStructs),
 		}
+	case *MutableRef:
+		return MakeMutableRef(copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs))
 	case *Union:
 		newTypes := make([]Type, len(typ.Types))
 		for i, t := range typ.Types {
-			newTypes[i] = copyTypeWithTypeVarMap(t, typeVarMap)
+			newTypes[i] = copyTypeWithTypeVarMapSeen(t, typeVarMap, seenStructs)
 		}
 		return &Union{
 			Name:       typ.Name,
@@ -486,13 +573,13 @@ func copyTypeWithTypeVarMap(t Type, typeVarMap map[string]*TypeVar) Type {
 			Types:      newTypes,
 		}
 	case *StructDef:
-		return copyStructWithTypeVarMap(typ, typeVarMap)
+		return copyStructWithTypeVarMapSeen(typ, typeVarMap, seenStructs)
 	case *FunctionDef:
 		return copyFunctionWithTypeVarMap(typ, typeVarMap)
 	case *ExternType:
 		newTypeArgs := make([]Type, len(typ.TypeArgs))
 		for i, typeArg := range typ.TypeArgs {
-			newTypeArgs[i] = copyTypeWithTypeVarMap(typeArg, typeVarMap)
+			newTypeArgs[i] = copyTypeWithTypeVarMapSeen(typeArg, typeVarMap, seenStructs)
 		}
 		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: newTypeArgs, ExternalBinding: typ.ExternalBinding, ExternalBindingTarget: typ.ExternalBindingTarget, ExternalBindings: cloneExternalBindings(typ.ExternalBindings), private: typ.private}
 	default:

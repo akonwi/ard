@@ -57,6 +57,47 @@ type Type interface {
 	hasTrait(trait *Trait) bool
 }
 
+type MutableRef struct {
+	of Type
+}
+
+func MakeMutableRef(of Type) *MutableRef {
+	return &MutableRef{of: of}
+}
+
+func (m *MutableRef) Of() Type { return m.of }
+func (m *MutableRef) String() string {
+	if m == nil || m.of == nil {
+		return "mut ?"
+	}
+	return "mut " + m.of.String()
+}
+func (m *MutableRef) get(name string) Type {
+	if m == nil || m.of == nil {
+		return nil
+	}
+	return m.of.get(name)
+}
+func (m *MutableRef) equal(other Type) bool {
+	r, ok := other.(*MutableRef)
+	return ok && equalTypes(m.of, r.of)
+}
+func (m *MutableRef) hasTrait(trait *Trait) bool {
+	return m != nil && m.of != nil && m.of.hasTrait(trait)
+}
+
+func mutableRefBase(t Type) (Type, bool) {
+	if ref, ok := t.(*MutableRef); ok {
+		return ref.of, true
+	}
+	return t, false
+}
+
+func derefMutableRef(t Type) Type {
+	base, _ := mutableRefBase(t)
+	return base
+}
+
 type Trait struct {
 	Name    string
 	methods []FunctionDef

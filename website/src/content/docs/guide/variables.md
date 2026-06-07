@@ -83,46 +83,49 @@ if some_condition {
 // 'inner' is out of scope
 ```
 
-## Copy Semantics
+## Mutable References
 
-Ard uses explicit copy semantics to ensure data safety and prevent accidental mutation of shared data.
+A `mut` binding creates mutable local storage. In type positions, `mut T` means mutable reference to a `T`.
 
-### Variable Assignment
-
-When assigning complex types (structs, lists, maps) to mutable variables, Ard creates deep copies:
+A function parameter marked `mut` receives mutable access to caller-owned storage, so the caller must pass an addressable mutable value. There is no extra `mut` marker at the call site:
 
 ```ard
 struct Person { name: Str, age: Int }
 
-let original = Person { name: "Alice", age: 30 }
-mut copy = original  // Creates a deep copy
-copy.age = 31
-// original.age is still 30, copy.age is 31
-```
-
-### Function Parameters
-
-When a function parameter is mutable, you must use the `mut` keyword to explicitly create a copy:
-
-```ard
 fn update_person(mut person: Person) {
-    person.age = 99  // Only affects the copy
+    person.age = 99  // Mutates the caller's value
 }
 
-let alice = Person { name: "Alice", age: 30 }
-update_person(mut alice)  // Explicitly request a copy with `mut`
-// alice.age is still 30 (original unchanged)
+mut alice = Person { name: "Alice", age: 30 }
+update_person(alice)
+// alice.age is now 99
 ```
 
-Without the `mut` keyword, passing an immutable value to a mutable parameter will result in a compile-time error.
+Passing an immutable value to a mutable parameter is a compile-time error:
 
-### Identity vs Equality
+```ard
+let bob = Person { name: "Bob", age: 30 }
+update_person(bob) // Error: expected a mutable Person
+```
 
-Copied values are equal in content but not identical in memory. This prevents accidental mutation of shared data while maintaining value semantics.
+Mutable references may alias. If two `mut T` references point at the same mutable storage, mutations through either reference are visible through the other.
 
-### Primitives
+### Mutable Reference Fields
 
-Primitives (Int, Str, Bool, etc.) and functions are immutable, so they don't trigger copying for simple assignments. When passed to mutable parameters with the `mut` keyword, they are copied for consistency.
+Struct fields can hold mutable references:
+
+```ard
+struct Context {
+  tree: mut ViewTree,
+}
+
+let ctx = Context{tree: tree}
+ctx.tree.add_child(child)
+```
+
+The `ctx` binding is immutable, but `ctx.tree` is mutable access to the referenced `ViewTree`. Field assignment writes through the reference; it does not rebind the field slot.
+
+`mut T` is also a representation boundary for recursive types, so it can be used to model linked structures and retained object graphs that require identity.
 
 ## Shadowing
 

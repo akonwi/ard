@@ -29,6 +29,19 @@ func removeUnusedImports(program *parse.Program) {
 
 func collectImportUsesInType(t parse.DeclaredType, used map[string]bool) {
 	switch v := t.(type) {
+	case *parse.MutableType:
+		collectImportUsesInType(v.Inner, used)
+	case parse.MutableType:
+		collectImportUsesInType(v.Inner, used)
+	case *parse.CustomType:
+		if v.Type.Target != nil {
+			if name := simpleImportUseName(v.Type.Target); name != "" {
+				used[name] = true
+			}
+		}
+		for _, arg := range v.TypeArgs {
+			collectImportUsesInType(arg, used)
+		}
 	case parse.CustomType:
 		if v.Type.Target != nil {
 			if name := simpleImportUseName(v.Type.Target); name != "" {
@@ -38,14 +51,27 @@ func collectImportUsesInType(t parse.DeclaredType, used map[string]bool) {
 		for _, arg := range v.TypeArgs {
 			collectImportUsesInType(arg, used)
 		}
+	case *parse.List:
+		collectImportUsesInType(v.Element, used)
 	case parse.List:
 		collectImportUsesInType(v.Element, used)
+	case *parse.Map:
+		collectImportUsesInType(v.Key, used)
+		collectImportUsesInType(v.Value, used)
 	case parse.Map:
 		collectImportUsesInType(v.Key, used)
 		collectImportUsesInType(v.Value, used)
+	case *parse.ResultType:
+		collectImportUsesInType(v.Val, used)
+		collectImportUsesInType(v.Err, used)
 	case parse.ResultType:
 		collectImportUsesInType(v.Val, used)
 		collectImportUsesInType(v.Err, used)
+	case *parse.FunctionType:
+		for _, p := range v.Params {
+			collectImportUsesInType(p, used)
+		}
+		collectImportUsesInType(v.Return, used)
 	case parse.FunctionType:
 		for _, p := range v.Params {
 			collectImportUsesInType(p, used)

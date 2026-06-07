@@ -754,6 +754,8 @@ func referenceExprName(expr parse.Expression) string {
 
 func declaredTypeReferenceName(declared parse.DeclaredType) string {
 	switch t := declared.(type) {
+	case *parse.MutableType:
+		return declaredTypeReferenceName(t.Inner)
 	case *parse.CustomType:
 		return t.Name
 	case *parse.List:
@@ -964,6 +966,8 @@ func customTypeReferencesTargetFile(t *parse.CustomType, targetDef *definitionTa
 
 func definitionForDeclaredType(declared parse.DeclaredType, prog *parse.Program, filePath string) *definitionTarget {
 	switch t := declared.(type) {
+	case *parse.MutableType:
+		return definitionForDeclaredType(t.Inner, prog, filePath)
 	case *parse.CustomType:
 		if t.Name == "" {
 			return nil
@@ -975,6 +979,8 @@ func definitionForDeclaredType(declared parse.DeclaredType, prog *parse.Program,
 
 func declaredTypeChildren(declared parse.DeclaredType) []parse.DeclaredType {
 	switch t := declared.(type) {
+	case *parse.MutableType:
+		return []parse.DeclaredType{t.Inner}
 	case *parse.List:
 		return []parse.DeclaredType{t.Element}
 	case *parse.Map:

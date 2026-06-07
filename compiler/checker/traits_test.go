@@ -30,12 +30,287 @@ func TestSelfRecursiveStructFieldsThroughIndirection(t *testing.T) {
 `,
 		},
 		{
+			name: "mutable reference self reference",
+			input: `struct Node {
+  parent: mut Node,
+}
+`,
+		},
+		{
 			name: "direct self reference is rejected",
 			input: `struct Node {
   child: Node,
 }
 `,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field Node.child has infinite size. Put the recursive reference behind a list, map, or nullable type."}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field Node.child has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
+		},
+	})
+}
+
+func TestSameModuleRecursiveTypeGroups(t *testing.T) {
+	run(t, []test{
+		{
+			name: "retained tree finite through list and trait object",
+			input: `struct Context {
+  tree: ViewTree,
+  node_id: Int,
+}
+
+struct ViewTree {
+  nodes: [TreeNode],
+}
+
+struct TreeNode {
+  view: View,
+  children: [Int],
+}
+
+trait View {
+  fn init(ctx: Context)
+}
+`,
+		},
+		{
+			name: "forward same module struct reference",
+			input: `struct A {
+  b: B,
+}
+
+struct B {
+  value: Int,
+}
+`,
+		},
+		{
+			name: "mut reference breaks recursive layout cycle",
+			input: `struct A {
+  b: mut B,
+}
+
+struct B {
+  a: A,
+}
+`,
+		},
+		{
+			name: "map value breaks recursive layout cycle",
+			input: `struct A {
+  values: [Str:B],
+}
+
+struct B {
+  a: A,
+}
+`,
+		},
+		{
+			name: "nullable breaks recursive layout cycle",
+			input: `struct A {
+  b: B?,
+}
+
+struct B {
+  a: A,
+}
+`,
+		},
+		{
+			name: "function type breaks recursive layout cycle",
+			input: `struct A {
+  make: fn() B,
+}
+
+struct B {
+  a: A,
+}
+`,
+		},
+		{
+			name: "forward generic struct reference with type arguments",
+			input: `struct Holder {
+  box: Box<Int>,
+}
+
+struct Box {
+  value: $T,
+}
+
+fn accept(holder: Holder) {}
+`,
+		},
+		{
+			name: "generic self specialization is rejected before partial types escape",
+			input: `struct Node {
+  next: Node<$T>?,
+  value: $T,
+}
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive generic self-reference Node is not supported yet"}},
+		},
+		{
+			name: "forward generic struct reference without type arguments is rejected",
+			input: `struct Holder {
+  box: Box,
+}
+
+struct Box {
+  value: $T,
+}
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Generic type Box requires type arguments"}},
+		},
+		{
+			name: "enum and extern type names are hoisted",
+			input: `struct Holder {
+  mode: Mode,
+  runtime: Runtime,
+}
+
+enum Mode {
+  Ready,
+}
+
+extern type Runtime
+`,
+		},
+		{
+			name: "alias to later type is available to earlier fields",
+			input: `struct Holder {
+  value: Item,
+}
+
+type Item = Leaf
+
+struct Leaf {
+  value: Int,
+}
+`,
+		},
+		{
+			name: "alias chain to later type is resolved before fields",
+			input: `struct Holder {
+  value: A,
+}
+
+type A = B
+type B = Leaf
+
+struct Leaf {
+  value: Int,
+}
+`,
+		},
+		{
+			name: "nested alias dependency is resolved before fields",
+			input: `struct Holder {
+  values: A,
+}
+
+type A = [B]
+type B = Leaf
+
+struct Leaf {
+  value: Int,
+}
+`,
+		},
+		{
+			name: "generic specialized inline cycle is rejected",
+			input: `struct A {
+  box: Box<A>,
+}
+
+struct Box {
+  value: $T,
+}
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field A.box has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
+		},
+		{
+			name: "map key recursive cycle is rejected",
+			input: `struct A {
+  values: [A:Int],
+}
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field A.values has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
+		},
+		{
+			name: "nested map key recursive cycle is rejected",
+			input: `struct A {
+  values: [[A:Int]],
+}
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field A.values has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
+		},
+		{
+			name: "mut indirection permits recursive map key",
+			input: `struct A {
+  box: mut Box,
+}
+
+struct Box {
+  values: [A:Int],
+}
+`,
+		},
+		{
+			name: "nullable nested in result does not break layout yet",
+			input: `struct A {
+  result: A?!Str,
+}
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field A.result has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
+		},
+		{
+			name: "nullable nested in union does not break layout yet",
+			input: `type U = A? | Int
+
+struct A {
+  value: U,
+}
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field A.value has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
+		},
+		{
+			name: "direct mutual struct value cycle is rejected",
+			input: `struct A {
+  b: B,
+}
+
+struct B {
+  a: A,
+}
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field A.b has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
+		},
+	})
+}
+
+func TestTopLevelTypeDetailsAreHoistedBeforeBodies(t *testing.T) {
+	run(t, []test{
+		{
+			name: "function before later struct can use fields",
+			input: `fn make() B {
+  B{value: 1}
+}
+
+struct B {
+  value: Int,
+}
+`,
+		},
+		{
+			name: "impl before later trait sees required methods",
+			input: `struct S {}
+
+impl T for S {
+}
+
+trait T {
+  fn id() Int
+}
+`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Missing method 'id' in trait 'T'"}},
 		},
 	})
 }

@@ -98,6 +98,8 @@ func typeDeclString(t parse.DeclaredType) string {
 
 	var s string
 	switch tt := t.(type) {
+	case *parse.MutableType:
+		s = "mut " + typeDeclString(tt.Inner)
 	case *parse.List:
 		s = "[" + typeDeclString(tt.Element) + "]"
 	case *parse.Map:
