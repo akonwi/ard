@@ -83,13 +83,11 @@ if some_condition {
 // 'inner' is out of scope
 ```
 
-## Copy Semantics
+## Mutable References
 
-Ard uses explicit copy semantics to ensure data safety and prevent accidental mutation of shared data.
+A `mut` binding creates mutable local storage. In type positions, `mut T` means mutable reference to a `T`.
 
-### Mutable References
-
-A `mut` binding creates mutable local storage. A function parameter marked `mut` receives mutable access to caller-owned storage, so the caller must pass an addressable mutable value:
+A function parameter marked `mut` receives mutable access to caller-owned storage, so the caller must pass an addressable mutable value. There is no extra `mut` marker at the call site:
 
 ```ard
 struct Person { name: Str, age: Int }
@@ -110,6 +108,8 @@ let bob = Person { name: "Bob", age: 30 }
 update_person(bob) // Error: expected a mutable Person
 ```
 
+Mutable references may alias. If two `mut T` references point at the same mutable storage, mutations through either reference are visible through the other.
+
 ### Mutable Reference Fields
 
 Struct fields can hold mutable references:
@@ -125,9 +125,7 @@ ctx.tree.add_child(child)
 
 The `ctx` binding is immutable, but `ctx.tree` is mutable access to the referenced `ViewTree`. Field assignment writes through the reference; it does not rebind the field slot.
 
-### Explicit Copies
-
-Copying should be explicit when independent identity is required. The standard library `ard/core::copy(value)` API is reserved for this purpose; generic deep-copy coverage is still being defined.
+`mut T` is also a representation boundary for recursive types, so it can be used to model linked structures and retained object graphs that require identity.
 
 ## Shadowing
 

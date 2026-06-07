@@ -36,7 +36,7 @@ let name: Str = "Alice"
 mut age = 30
 ```
 
-#### Mutable References and Explicit Copies
+#### Mutable References
 
 Ard uses `mut` for mutable access. A mutable function parameter receives a mutable reference to caller-owned storage, so the caller must pass an addressable mutable value:
 
@@ -69,8 +69,6 @@ ctx.tree.add_child(child)
 ```
 
 The `ctx` binding is immutable, but `ctx.tree` is mutable access to the referenced `ViewTree`. Field assignment writes through the reference; it does not rebind the field slot.
-
-Explicit copy support belongs in the standard library as `ard/core::copy(value)`. Use that when an independent deep copy is intended. Generic deep-copy coverage is still being defined.
 
 #### Increment/Decrement short hand
 
