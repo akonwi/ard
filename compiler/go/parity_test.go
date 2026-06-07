@@ -1375,6 +1375,250 @@ func TestGoTargetParityMutableTraitObjectParameterFromConcrete(t *testing.T) {
 	}
 }
 
+func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing.T) {
+	program := lowerParitySource(t, `
+		use ard/maybe
+
+		trait View {
+			fn set(value: Int)
+			fn value() Int
+		}
+
+		struct Leaf {
+			n: Int,
+		}
+
+		impl View for Leaf {
+			fn mut set(value: Int) {
+				self.n = value
+			}
+
+			fn value() Int {
+				self.n
+			}
+		}
+
+		struct Branch {
+			n: Int,
+		}
+
+		impl View for Branch {
+			fn mut set(value: Int) {
+				self.n = value
+			}
+
+			fn value() Int {
+				self.n
+			}
+		}
+
+		trait Sink {
+			fn take(mut child: View) Int
+		}
+
+		struct Holder {}
+
+		struct SinkNode {
+			sink: mut Sink,
+		}
+
+		impl Sink for Holder {
+			fn take(mut child: View) Int {
+				child.set(41)
+				child.value()
+			}
+		}
+
+		struct Node {
+			view: mut View,
+		}
+
+		struct Snapshot {
+			view: View,
+		}
+
+		type ViewOrInt = View | Int
+
+		fn store(mut child: View) Node {
+			Node{view: child}
+		}
+
+		fn make(value: Int) View {
+			Leaf{n: value}
+		}
+
+		struct Root {
+			view: mut View,
+		}
+
+		impl Root {
+			fn mut replace(value: Int) {
+				self.view = Leaf{n: value}
+			}
+		}
+
+		fn replace_param(mut child: View, value: Int) {
+			child = Leaf{n: value}
+		}
+
+		fn assign_param(mut child: View, next: View) {
+			child = next
+		}
+
+		fn make_reader(mut child: View) fn() Int {
+			fn() Int {
+				child.value()
+			}
+		}
+
+		fn make_setter(mut child: View) fn(Int) {
+			fn(value: Int) {
+				child = Leaf{n: value}
+			}
+		}
+
+		fn read(child: View) Int {
+			child.value()
+		}
+
+		fn main() Int {
+			mut stored_leaf = Leaf{n: 0}
+			let stored_node = store(stored_leaf)
+			stored_leaf.n = 7
+			let stored_observed = stored_node.view.value()
+			stored_node.view.set(11)
+
+			mut direct_leaf = Leaf{n: 0}
+			let direct_node = Node{view: direct_leaf}
+			direct_leaf.n = 5
+			let direct_observed = direct_node.view.value()
+			direct_node.view.set(13)
+			let immutable_observed = read(direct_node.view)
+			let via_ref: View = direct_node.view
+			let via_ref_observed = via_ref.value()
+			let snapshot = Snapshot{view: direct_node.view}
+			snapshot.view.set(59)
+			let snapshot_observed = direct_leaf.n
+			let view_list: [View] = [direct_node.view]
+			view_list.at(0).set(61)
+			let list_observed = direct_leaf.n
+			let view_map: [Str:View] = ["x": direct_node.view]
+			view_map.get("x").expect("missing").set(67)
+			let map_observed = direct_leaf.n
+			let maybe_view: View? = maybe::some(direct_node.view)
+			maybe_view.expect("missing").set(69)
+			let maybe_observed = direct_leaf.n
+			let result_view: View!Str = Result::ok(direct_node.view)
+			result_view.expect("missing").set(71)
+			let result_observed = direct_leaf.n
+			let union_view: ViewOrInt = direct_node.view
+			match union_view {
+				View(view) => view.set(73),
+				_ => (),
+			}
+			let union_observed = direct_leaf.n
+			mut push_views: [View] = []
+			push_views.push(direct_node.view)
+			push_views.at(0).set(75)
+			let push_observed = direct_leaf.n
+			mut prepend_views: [View] = []
+			prepend_views.prepend(direct_node.view)
+			prepend_views.at(0).set(77)
+			let prepend_observed = direct_leaf.n
+			mut set_views: [View] = [Leaf{n: 1}]
+			set_views.set(0, direct_node.view)
+			set_views.at(0).set(79)
+			let set_observed = direct_leaf.n
+			mut set_map: [Str:View] = [:]
+			set_map.set("x", direct_node.view)
+			set_map.get("x").expect("missing").set(81)
+			let set_map_observed = direct_leaf.n
+
+			mut dynamic_slot = make(2)
+			let dynamic_node = Node{view: dynamic_slot}
+			dynamic_slot = Branch{n: 17}
+			let dynamic_observed = dynamic_node.view.value()
+			dynamic_node.view.set(19)
+			let dynamic_slot_observed = read(dynamic_slot)
+
+			mut replace_slot = make(1)
+			mut root = Root{view: replace_slot}
+			root.replace(23)
+			let replaced_observed = read(replace_slot)
+
+			mut param_slot = make(3)
+			let param_node = store(param_slot)
+			param_slot = Leaf{n: 29}
+			let param_observed = param_node.view.value()
+
+			mut replaced_leaf = Leaf{n: 0}
+			replace_param(replaced_leaf, 31)
+
+			mut replaced_slot = make(4)
+			replace_param(replaced_slot, 37)
+			let replaced_slot_observed = read(replaced_slot)
+
+			assign_param(replaced_leaf, direct_node.view)
+			let forwarded_assign_observed = replaced_leaf.n
+
+			mut closure_leaf = Leaf{n: 43}
+			let reader = make_reader(closure_leaf)
+			closure_leaf.n = 47
+			let closure_observed = reader()
+
+			let sink: Sink = Holder{}
+			mut sink_leaf = Leaf{n: 0}
+			let sink_result = sink.take(sink_leaf)
+
+			mut holder = Holder{}
+			let sink_node = SinkNode{sink: holder}
+			mut node_sink_leaf = Leaf{n: 0}
+			let node_sink_result = sink_node.sink.take(node_sink_leaf)
+
+			mut setter_leaf = Leaf{n: 0}
+			let setter = make_setter(setter_leaf)
+			setter(53)
+			let setter_observed = setter_leaf.n
+
+			stored_observed + stored_leaf.n + direct_observed + direct_leaf.n + immutable_observed + via_ref_observed + snapshot_observed + list_observed + map_observed + maybe_observed + result_observed + union_observed + push_observed + prepend_observed + set_observed + set_map_observed + dynamic_observed + dynamic_slot_observed + replaced_observed + param_observed + replaced_leaf.n + replaced_slot_observed + forwarded_assign_observed + closure_observed + sink_result + sink_leaf.n + node_sink_result + node_sink_leaf.n + setter_observed
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "607" {
+		t.Fatalf("got %s, want 607", got)
+	}
+}
+
+func TestGoTargetParityMutableTraitMethodNamesDoNotCollideWithForwarderHooks(t *testing.T) {
+	program := lowerParitySource(t, `
+		trait Weird {
+			fn ardMutTraitLoad_0() Int
+		}
+
+		struct Box {
+			n: Int,
+		}
+
+		impl Weird for Box {
+			fn ardMutTraitLoad_0() Int {
+				self.n
+			}
+		}
+
+		struct Holder {
+			weird: mut Weird,
+		}
+
+		fn main() Int {
+			mut box = Box{n: 42}
+			let holder = Holder{weird: box}
+			holder.weird.ardMutTraitLoad_0()
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "42" {
+		t.Fatalf("got %s, want 42", got)
+	}
+}
+
 func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait View {
