@@ -591,6 +591,17 @@ func TestRunLoopSemantics(t *testing.T) {
 				}
 			}
 			io::print(count)
+
+			mut nested = 0
+			for outer in 0..2 {
+				for inner in 0..2 {
+					if inner == 1 {
+						break
+					}
+					nested = nested + outer + inner
+				}
+			}
+			io::print(nested)
 		}
 	`)
 	program := lowerFile(t, path)
@@ -608,6 +619,7 @@ func TestRunLoopSemantics(t *testing.T) {
 		"12",
 		"3",
 		"2",
+		"3",
 		"",
 	}, "\n")
 	if stdout != want {
