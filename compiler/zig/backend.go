@@ -221,7 +221,23 @@ func (l *lowerer) typeName(id air.TypeID) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return "[]const " + elem, nil
+		return "ard.List(" + elem + ")", nil
+	case air.TypeMap:
+		key, err := l.typeName(info.Key)
+		if err != nil {
+			return "", err
+		}
+		value, err := l.typeName(info.Value)
+		if err != nil {
+			return "", err
+		}
+		return "ard.Map(" + key + ", " + value + ")", nil
+	case air.TypeMaybe:
+		elem, err := l.typeName(info.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "ard.Maybe(" + elem + ")", nil
 	case air.TypeStruct:
 		return typeDeclName(info), nil
 	case air.TypeTraitObject:
@@ -235,9 +251,10 @@ func (l *lowerer) typeName(id air.TypeID) (string, error) {
 }
 
 type functionLowerer struct {
-	l      *lowerer
-	fn     air.Function
-	indent string
+	l           *lowerer
+	fn          air.Function
+	indent      string
+	tempCounter int
 }
 
 func (fl *functionLowerer) lowerBlock(b *strings.Builder, block air.Block, returnType air.TypeID) error {
@@ -249,6 +266,11 @@ func (fl *functionLowerer) lowerBlock(b *strings.Builder, block air.Block, retur
 	if block.Result != nil {
 		if block.Result.Kind == air.ExprIf {
 			if handled, err := fl.lowerIfResult(b, *block.Result, returnType); handled || err != nil {
+				return err
+			}
+		}
+		if block.Result.Kind == air.ExprMatchMaybe {
+			if handled, err := fl.lowerMatchMaybeResult(b, *block.Result, returnType); handled || err != nil {
 				return err
 			}
 		}
@@ -281,7 +303,7 @@ func (fl *functionLowerer) lowerIfResult(b *strings.Builder, expr air.Expr, retu
 	if expr.Condition == nil {
 		return true, fmt.Errorf("if expression missing condition")
 	}
-	if len(expr.Then.Stmts) == 0 && len(expr.Else.Stmts) == 0 {
+	if len(expr.Then.Stmts) == 0 && expr.Then.Result == nil && len(expr.Else.Stmts) == 0 && expr.Else.Result == nil {
 		return false, nil
 	}
 	condition, err := fl.lowerExpr(*expr.Condition)
@@ -301,6 +323,33 @@ func (fl *functionLowerer) lowerIfResult(b *strings.Builder, expr air.Expr, retu
 		if err := elseFl.lowerBlock(b, expr.Else, returnType); err != nil {
 			return true, err
 		}
+	}
+	fmt.Fprintf(b, "%s}\n", fl.indent)
+	return true, nil
+}
+
+func (fl *functionLowerer) lowerMatchMaybeResult(b *strings.Builder, expr air.Expr, returnType air.TypeID) (bool, error) {
+	if expr.Target == nil {
+		return true, fmt.Errorf("maybe match missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return true, err
+	}
+	if len(expr.Some.Stmts) == 0 && expr.Some.Result == nil && len(expr.None.Stmts) == 0 && expr.None.Result == nil {
+		return false, nil
+	}
+	fmt.Fprintf(b, "%sif (%s.some) |%s| {\n", fl.indent, target, localName(fl.fn, expr.SomeLocal))
+	someFl := *fl
+	someFl.indent += "    "
+	if err := someFl.lowerBlock(b, expr.Some, returnType); err != nil {
+		return true, err
+	}
+	fmt.Fprintf(b, "%s} else {\n", fl.indent)
+	noneFl := *fl
+	noneFl.indent += "    "
+	if err := noneFl.lowerBlock(b, expr.None, returnType); err != nil {
+		return true, err
 	}
 	fmt.Fprintf(b, "%s}\n", fl.indent)
 	return true, nil
@@ -340,6 +389,11 @@ func (fl *functionLowerer) lowerStmt(b *strings.Builder, stmt air.Stmt) error {
 		}
 		if stmt.Expr.Kind == air.ExprIf {
 			if handled, err := fl.lowerIfResult(b, *stmt.Expr, air.NoType); handled || err != nil {
+				return err
+			}
+		}
+		if stmt.Expr.Kind == air.ExprMatchMaybe {
+			if handled, err := fl.lowerMatchMaybeResult(b, *stmt.Expr, air.NoType); handled || err != nil {
 				return err
 			}
 		}
@@ -407,12 +461,32 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		return fl.lowerMakeList(expr)
 	case air.ExprListAt:
 		return fl.lowerListAt(expr)
+	case air.ExprListPush:
+		return fl.lowerListPush(expr)
 	case air.ExprListSize:
 		return fl.lowerListSize(expr)
 	case air.ExprMakeStruct:
 		return fl.lowerMakeStruct(expr)
 	case air.ExprGetField:
 		return fl.lowerGetField(expr)
+	case air.ExprMakeMap:
+		return fl.lowerMakeMap(expr)
+	case air.ExprMapSize:
+		return fl.lowerMapSize(expr)
+	case air.ExprMapSet:
+		return fl.lowerMapSet(expr)
+	case air.ExprMapHas:
+		return fl.lowerMapHas(expr)
+	case air.ExprMapDrop:
+		return fl.lowerMapDrop(expr)
+	case air.ExprMapGet:
+		return fl.lowerMapGet(expr)
+	case air.ExprMapKeyAt:
+		return fl.lowerMapKeyAt(expr)
+	case air.ExprMapValueAt:
+		return fl.lowerMapValueAt(expr)
+	case air.ExprMatchMaybe:
+		return fl.lowerMatchMaybeExpr(expr)
 	case air.ExprIntAdd, air.ExprIntSub, air.ExprIntMul, air.ExprIntDiv, air.ExprIntMod,
 		air.ExprFloatAdd, air.ExprFloatSub, air.ExprFloatMul, air.ExprFloatDiv,
 		air.ExprEq, air.ExprNotEq, air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte,
@@ -473,7 +547,7 @@ func (fl *functionLowerer) lowerMakeList(expr air.Expr) (string, error) {
 		}
 		items = append(items, item)
 	}
-	return fmt.Sprintf("&[_]%s{%s}", elemType, strings.Join(items, ", ")), nil
+	return fmt.Sprintf("try ard.List(%s).init(ctx.allocator, &[_]%s{%s})", elemType, elemType, strings.Join(items, ", ")), nil
 }
 
 func (fl *functionLowerer) lowerListAt(expr air.Expr) (string, error) {
@@ -488,7 +562,7 @@ func (fl *functionLowerer) lowerListAt(expr air.Expr) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s[@intCast(%s)]", target, index), nil
+	return fmt.Sprintf("%s.at(@intCast(%s))", target, index), nil
 }
 
 func (fl *functionLowerer) lowerListSize(expr air.Expr) (string, error) {
@@ -499,7 +573,22 @@ func (fl *functionLowerer) lowerListSize(expr air.Expr) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("@as(i64, @intCast(%s.len))", target), nil
+	return fmt.Sprintf("@as(i64, @intCast(%s.size()))", target), nil
+}
+
+func (fl *functionLowerer) lowerListPush(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("list push expects target and value")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	value, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("try %s.push(%s)", target, value), nil
 }
 
 func (fl *functionLowerer) lowerMakeStruct(expr air.Expr) (string, error) {
@@ -540,6 +629,146 @@ func (fl *functionLowerer) lowerGetField(expr air.Expr) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%s.%s", target, sanitizeIdentifier(targetType.Fields[expr.Field].Name)), nil
+}
+
+func (fl *functionLowerer) lowerMakeMap(expr air.Expr) (string, error) {
+	if expr.Type <= 0 || int(expr.Type) > len(fl.l.program.Types) {
+		return "", fmt.Errorf("map literal has invalid type %d", expr.Type)
+	}
+	mapType := fl.l.program.Types[expr.Type-1]
+	if mapType.Kind != air.TypeMap {
+		return "", fmt.Errorf("map literal has non-map type %s", mapType.Name)
+	}
+	keyType, err := fl.l.typeName(mapType.Key)
+	if err != nil {
+		return "", err
+	}
+	valueType, err := fl.l.typeName(mapType.Value)
+	if err != nil {
+		return "", err
+	}
+	entries := make([]string, 0, len(expr.Entries))
+	for _, entry := range expr.Entries {
+		key, err := fl.lowerExpr(entry.Key)
+		if err != nil {
+			return "", err
+		}
+		value, err := fl.lowerExpr(entry.Value)
+		if err != nil {
+			return "", err
+		}
+		entries = append(entries, fmt.Sprintf(".{ .key = %s, .value = %s }", key, value))
+	}
+	return fmt.Sprintf("try ard.Map(%s, %s).init(ctx.allocator, &[_]ard.Map(%s, %s).Entry{%s})", keyType, valueType, keyType, valueType, strings.Join(entries, ", ")), nil
+}
+
+func (fl *functionLowerer) lowerMapSize(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("map size missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("@as(i64, @intCast(%s.size()))", target), nil
+}
+
+func (fl *functionLowerer) lowerMapSet(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 2 {
+		return "", fmt.Errorf("map set expects target and two args")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	key, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	value, err := fl.lowerExpr(expr.Args[1])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("try %s.set(%s, %s)", target, key, value), nil
+}
+
+func (fl *functionLowerer) lowerMapHas(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("map has expects target and one arg")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	key, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s.has(%s)", target, key), nil
+}
+
+func (fl *functionLowerer) lowerMapDrop(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("map drop expects target and one arg")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	key, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s.drop(%s)", target, key), nil
+}
+
+func (fl *functionLowerer) lowerMapGet(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("map get expects target and one arg")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	key, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s.get(%s)", target, key), nil
+}
+
+func (fl *functionLowerer) lowerMapKeyAt(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("map key_at expects target and index")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	index, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s.keyAt(@intCast(%s))", target, index), nil
+}
+
+func (fl *functionLowerer) lowerMapValueAt(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("map value_at expects target and index")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	index, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s.valueAt(@intCast(%s))", target, index), nil
+}
+
+func (fl *functionLowerer) lowerMatchMaybeExpr(expr air.Expr) (string, error) {
+	return "", fmt.Errorf("unsupported expression-form maybe match")
 }
 
 func (fl *functionLowerer) lowerCall(expr air.Expr) (string, error) {
@@ -814,6 +1043,119 @@ pub const Stringable = union(enum) {
     float: f64,
     bool: bool,
 };
+
+pub fn Maybe(comptime T: type) type {
+    return struct {
+        some: ?T,
+    };
+}
+
+pub fn List(comptime T: type) type {
+    return struct {
+        allocator: std.mem.Allocator,
+        items: []T,
+
+        const Self = @This();
+
+        pub fn init(allocator: std.mem.Allocator, initial: []const T) !Self {
+            const items = try allocator.alloc(T, initial.len);
+            @memcpy(items, initial);
+            return .{ .allocator = allocator, .items = items };
+        }
+
+        pub fn size(self: Self) usize {
+            return self.items.len;
+        }
+
+        pub fn at(self: Self, index: usize) T {
+            return self.items[index];
+        }
+
+        pub fn push(self: *Self, value: T) !void {
+            const next = try self.allocator.alloc(T, self.items.len + 1);
+            @memcpy(next[0..self.items.len], self.items);
+            next[self.items.len] = value;
+            self.items = next;
+        }
+    };
+}
+
+pub fn Map(comptime K: type, comptime V: type) type {
+    return struct {
+        allocator: std.mem.Allocator,
+        entries: []Entry,
+
+        const Self = @This();
+
+        pub const Entry = struct {
+            key: K,
+            value: V,
+        };
+
+        pub fn init(allocator: std.mem.Allocator, initial: []const Entry) !Self {
+            const entries = try allocator.alloc(Entry, initial.len);
+            @memcpy(entries, initial);
+            return .{ .allocator = allocator, .entries = entries };
+        }
+
+        pub fn size(self: Self) usize {
+            return self.entries.len;
+        }
+
+        pub fn has(self: Self, key: K) bool {
+            return self.indexOf(key) != null;
+        }
+
+        pub fn get(self: Self, key: K) Maybe(V) {
+            if (self.indexOf(key)) |index| {
+                return .{ .some = self.entries[index].value };
+            }
+            return .{ .some = null };
+        }
+
+        pub fn set(self: *Self, key: K, value: V) !void {
+            if (self.indexOf(key)) |index| {
+                self.entries[index].value = value;
+                return;
+            }
+            const next = try self.allocator.alloc(Entry, self.entries.len + 1);
+            @memcpy(next[0..self.entries.len], self.entries);
+            next[self.entries.len] = .{ .key = key, .value = value };
+            self.entries = next;
+        }
+
+        pub fn drop(self: *Self, key: K) void {
+            const index = self.indexOf(key) orelse return;
+            var i = index;
+            while (i + 1 < self.entries.len) : (i += 1) {
+                self.entries[i] = self.entries[i + 1];
+            }
+            self.entries = self.entries[0 .. self.entries.len - 1];
+        }
+
+        pub fn keyAt(self: Self, index: usize) K {
+            return self.entries[index].key;
+        }
+
+        pub fn valueAt(self: Self, index: usize) V {
+            return self.entries[index].value;
+        }
+
+        fn indexOf(self: Self, key: K) ?usize {
+            for (self.entries, 0..) |entry, index| {
+                if (eql(K, entry.key, key)) return index;
+            }
+            return null;
+        }
+    };
+}
+
+fn eql(comptime T: type, left: T, right: T) bool {
+    return switch (T) {
+        []const u8 => std.mem.eql(u8, left, right),
+        else => left == right,
+    };
+}
 
 pub fn print(ctx: *Context, value: []const u8) !void {
     var stdout_buffer: [1024]u8 = undefined;

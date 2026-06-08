@@ -80,7 +80,7 @@ func TestGenerateSourcesIfExpression(t *testing.T) {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	main := string(sources["main.zig"])
-	if !strings.Contains(main, `return if (l0_flag) 1 else 2;`) {
+	if !strings.Contains(main, "if (l0_flag) {\n        return 1;\n    } else {\n        return 2;\n    }") {
 		t.Fatalf("generated source missing if expression:\n%s", main)
 	}
 }
@@ -237,6 +237,71 @@ func TestRunGradesSample(t *testing.T) {
 		"Bob got a 82",
 		"Charlie got a 88",
 		"Class average is 88",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestRunCollectionsSample(t *testing.T) {
+	if _, err := exec.LookPath("zig"); err != nil {
+		t.Skipf("zig not installed: %v", err)
+	}
+	program := lowerFile(t, filepath.Join("..", "samples", "collections.ard"))
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/collections.ard"})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"numbers.size = 0",
+		"adding numbers from 0 to 10",
+		"numbers.size = 11",
+		"0",
+		"1",
+		"2",
+		"3",
+		"4",
+		"5",
+		"6",
+		"7",
+		"8",
+		"9",
+		"10",
+		"7th element = 6",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestRunMapsSample(t *testing.T) {
+	if _, err := exec.LookPath("zig"); err != nil {
+		t.Skipf("zig not installed: %v", err)
+	}
+	program := lowerFile(t, filepath.Join("..", "samples", "maps.ard"))
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/maps.ard"})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"size is 1",
+		"entries:",
+		"1 = one",
+		"2 = 2",
+		"3 = 3",
+		"4 = 4",
+		"5 = 5",
+		"there is an entry for 2",
+		"2 is not found",
+		"entries:",
+		"1 = one",
+		"3 = 3",
+		"4 = 4",
+		"5 = 5",
 		"",
 	}, "\n")
 	if stdout != want {
