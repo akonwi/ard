@@ -438,6 +438,43 @@ func TestRunFloatMethodsAndStdlibFunctions(t *testing.T) {
 	}
 }
 
+func TestRunBoolMethodsAndOperators(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+
+		fn main() {
+			io::print(true.to_str())
+			io::print(false.to_str())
+			io::print(not false)
+			io::print(true and false)
+			io::print(true or false)
+			io::print(match true {
+				true => "yes",
+				false => "no"
+			})
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"true",
+		"false",
+		"true",
+		"false",
+		"true",
+		"yes",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
