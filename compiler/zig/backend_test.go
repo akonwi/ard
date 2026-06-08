@@ -15,6 +15,12 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+var zigPathErr error
+
+func init() {
+	_, zigPathErr = exec.LookPath("zig")
+}
+
 func TestGenerateSourcesPrimitiveProgram(t *testing.T) {
 	program := lowerSource(t, `
 		extern fn print(value: Str) Void = {
@@ -86,9 +92,7 @@ func TestGenerateSourcesIfExpression(t *testing.T) {
 }
 
 func TestBuildProgramPrimitiveProgramCompilesWithZig(t *testing.T) {
-	if _, err := exec.LookPath("zig"); err != nil {
-		t.Skipf("zig not installed: %v", err)
-	}
+	requireZig(t)
 	program := lowerSource(t, `
 		extern fn print(value: Str) Void = {
 			zig = "print"
@@ -111,9 +115,7 @@ func TestBuildProgramPrimitiveProgramCompilesWithZig(t *testing.T) {
 }
 
 func TestRunVariablesSample(t *testing.T) {
-	if _, err := exec.LookPath("zig"); err != nil {
-		t.Skipf("zig not installed: %v", err)
-	}
+	requireZig(t)
 	program := lowerFile(t, filepath.Join("..", "samples", "variables.ard"))
 
 	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/variables.ard"})
@@ -133,9 +135,7 @@ func TestRunVariablesSample(t *testing.T) {
 }
 
 func TestRunFizzbuzzSample(t *testing.T) {
-	if _, err := exec.LookPath("zig"); err != nil {
-		t.Skipf("zig not installed: %v", err)
-	}
+	requireZig(t)
 	program := lowerFile(t, filepath.Join("..", "samples", "fizzbuzz.ard"))
 
 	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/fizzbuzz.ard"})
@@ -161,9 +161,7 @@ func TestRunFizzbuzzSample(t *testing.T) {
 }
 
 func TestRunLoopsSample(t *testing.T) {
-	if _, err := exec.LookPath("zig"); err != nil {
-		t.Skipf("zig not installed: %v", err)
-	}
+	requireZig(t)
 	program := lowerFile(t, filepath.Join("..", "samples", "loops.ard"))
 
 	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/loops.ard"})
@@ -193,9 +191,7 @@ func TestRunLoopsSample(t *testing.T) {
 }
 
 func TestRunTemperaturesSample(t *testing.T) {
-	if _, err := exec.LookPath("zig"); err != nil {
-		t.Skipf("zig not installed: %v", err)
-	}
+	requireZig(t)
 	program := lowerFile(t, filepath.Join("..", "samples", "temperatures.ard"))
 
 	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/temperatures.ard"})
@@ -223,9 +219,7 @@ func TestRunTemperaturesSample(t *testing.T) {
 }
 
 func TestRunGradesSample(t *testing.T) {
-	if _, err := exec.LookPath("zig"); err != nil {
-		t.Skipf("zig not installed: %v", err)
-	}
+	requireZig(t)
 	program := lowerFile(t, filepath.Join("..", "samples", "grades.ard"))
 
 	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/grades.ard"})
@@ -245,9 +239,7 @@ func TestRunGradesSample(t *testing.T) {
 }
 
 func TestRunCollectionsSample(t *testing.T) {
-	if _, err := exec.LookPath("zig"); err != nil {
-		t.Skipf("zig not installed: %v", err)
-	}
+	requireZig(t)
 	program := lowerFile(t, filepath.Join("..", "samples", "collections.ard"))
 
 	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/collections.ard"})
@@ -278,9 +270,7 @@ func TestRunCollectionsSample(t *testing.T) {
 }
 
 func TestRunMapsSample(t *testing.T) {
-	if _, err := exec.LookPath("zig"); err != nil {
-		t.Skipf("zig not installed: %v", err)
-	}
+	requireZig(t)
 	program := lowerFile(t, filepath.Join("..", "samples", "maps.ard"))
 
 	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/maps.ard"})
@@ -310,9 +300,7 @@ func TestRunMapsSample(t *testing.T) {
 }
 
 func TestRunIntStdlibFunctions(t *testing.T) {
-	if _, err := exec.LookPath("zig"); err != nil {
-		t.Skipf("zig not installed: %v", err)
-	}
+	requireZig(t)
 	path := writeTempSource(t, `
 		use ard/int
 		use ard/io
@@ -347,9 +335,7 @@ func TestRunIntStdlibFunctions(t *testing.T) {
 }
 
 func TestRunStrMethods(t *testing.T) {
-	if _, err := exec.LookPath("zig"); err != nil {
-		t.Skipf("zig not installed: %v", err)
-	}
+	requireZig(t)
 	path := writeTempSource(t, `
 		use ard/io
 
@@ -410,6 +396,48 @@ func TestRunStrMethods(t *testing.T) {
 	}
 }
 
+func TestRunFloatMethodsAndStdlibFunctions(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/float
+		use ard/io
+
+		fn main() {
+			io::print(3.75.to_str())
+			io::print(3.75.to_int())
+			io::print(float::from_int(7))
+			io::print(float::floor(3.75))
+
+			match float::from_str("12.5") {
+				value => io::print(value),
+				_ => io::print("none")
+			}
+			match float::from_str("not a float") {
+				value => io::print(value),
+				_ => io::print("none")
+			}
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"3.75",
+		"3",
+		"7.00",
+		"3.00",
+		"12.50",
+		"none",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
@@ -460,6 +488,13 @@ func writeTempSource(t *testing.T, input string) string {
 		t.Fatalf("write temp source: %v", err)
 	}
 	return path
+}
+
+func requireZig(t *testing.T) {
+	t.Helper()
+	if zigPathErr != nil {
+		t.Skipf("zig not installed: %v", zigPathErr)
+	}
 }
 
 func lowerFile(t *testing.T, path string) *air.Program {

@@ -82,6 +82,7 @@ const (
 	ExprFloatSub
 	ExprFloatMul
 	ExprFloatDiv
+	ExprFloatToInt
 	ExprStrConcat
 	ExprToStr
 	ExprStrAt

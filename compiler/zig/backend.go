@@ -504,6 +504,12 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 			return "", err
 		}
 		return "-" + target, nil
+	case air.ExprFloatToInt:
+		target, err := fl.lowerExpr(*expr.Target)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("@as(i64, @intFromFloat(%s))", target), nil
 	case air.ExprStrConcat:
 		left, err := fl.lowerExpr(*expr.Left)
 		if err != nil {
@@ -904,6 +910,16 @@ func (fl *functionLowerer) lowerExternCall(expr air.Expr) (string, error) {
 			return "", fmt.Errorf("FloatFromInt extern expects 1 arg, got %d", len(args))
 		}
 		return fmt.Sprintf("@as(f64, @floatFromInt(%s))", args[0]), nil
+	case "FloatFromStr":
+		if len(args) != 1 {
+			return "", fmt.Errorf("FloatFromStr extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.floatFromStr(%s)", args[0]), nil
+	case "FloatFloor":
+		if len(args) != 1 {
+			return "", fmt.Errorf("FloatFloor extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("@floor(%s)", args[0]), nil
 	case "IntFromStr":
 		if len(args) != 1 {
 			return "", fmt.Errorf("IntFromStr extern expects 1 arg, got %d", len(args))
@@ -1349,6 +1365,11 @@ pub fn stringableToStr(ctx: *Context, value: Stringable) ![]const u8 {
 
 pub fn intFromStr(value: []const u8) Maybe(i64) {
     const parsed = std.fmt.parseInt(i64, value, 10) catch return .{ .some = null };
+    return .{ .some = parsed };
+}
+
+pub fn floatFromStr(value: []const u8) Maybe(f64) {
+    const parsed = std.fmt.parseFloat(f64, value) catch return .{ .some = null };
     return .{ .some = parsed };
 }
 `

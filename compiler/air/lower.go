@@ -2945,6 +2945,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if e.Kind == checker.FloatToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
 		}
+		if e.Kind == checker.FloatToInt {
+			return fl.lowerUnary(ExprFloatToInt, typeID, e.Subject)
+		}
 		if e.Kind == checker.FloatToDyn {
 			return fl.lowerUnary(ExprToDynamic, typeID, e.Subject)
 		}
