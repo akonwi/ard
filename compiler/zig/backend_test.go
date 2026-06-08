@@ -547,6 +547,74 @@ func TestRunStructMethodsAndMutation(t *testing.T) {
 	}
 }
 
+func TestRunLoopSemantics(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+
+		fn main() {
+			mut sum = 0
+			for value, index in [10, 20, 30] {
+				sum = sum + value + index
+			}
+			io::print(sum)
+
+			for char, index in "ab" {
+				io::print("{index}:{char}")
+			}
+
+			let map: [Str: Int] = ["a": 1, "b": 2]
+			for key, value in map {
+				io::print("{key}={value}")
+			}
+
+			mut range_sum = 0
+			for value, index in 2..4 {
+				range_sum = range_sum + value + index
+			}
+			io::print(range_sum)
+
+			mut c_for_sum = 0
+			for mut i = 0; i < 5; i = i + 1 {
+				if i == 3 {
+					break
+				}
+				c_for_sum = c_for_sum + i
+			}
+			io::print(c_for_sum)
+
+			mut count = 0
+			while true {
+				count = count + 1
+				if count == 2 {
+					break
+				}
+			}
+			io::print(count)
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"63",
+		"0:a",
+		"1:b",
+		"a=1",
+		"b=2",
+		"12",
+		"3",
+		"2",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
