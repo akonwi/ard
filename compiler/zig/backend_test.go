@@ -116,27 +116,7 @@ func TestRunVariablesSample(t *testing.T) {
 	}
 	program := lowerFile(t, filepath.Join("..", "samples", "variables.ard"))
 
-	var stdout bytes.Buffer
-	oldStdout := os.Stdout
-	readPipe, writePipe, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = writePipe
-	defer func() {
-		os.Stdout = oldStdout
-	}()
-
-	err = RunProgram(program, []string{"ard", "run", "--target", "zig", "samples/variables.ard"})
-	if closeErr := writePipe.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	if _, copyErr := stdout.ReadFrom(readPipe); copyErr != nil {
-		t.Fatal(copyErr)
-	}
-	if closeErr := readPipe.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/variables.ard"})
 	if err != nil {
 		t.Fatalf("RunProgram error = %v", err)
 	}
@@ -147,8 +127,36 @@ func TestRunVariablesSample(t *testing.T) {
 		"is_student = true",
 		"",
 	}, "\n")
-	if stdout.String() != want {
-		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestRunFizzbuzzSample(t *testing.T) {
+	if _, err := exec.LookPath("zig"); err != nil {
+		t.Skipf("zig not installed: %v", err)
+	}
+	program := lowerFile(t, filepath.Join("..", "samples", "fizzbuzz.ard"))
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/fizzbuzz.ard"})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"1",
+		"2",
+		"Fizz",
+		"4",
+		"Buzz",
+		"Fizz",
+		"7",
+		"8",
+		"Fizz",
+		"Buzz",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
 }
 
@@ -168,6 +176,31 @@ func lowerSource(t *testing.T, input string) *air.Program {
 		t.Fatalf("lower error: %v", err)
 	}
 	return program
+}
+
+func runProgramCaptureStdout(program *air.Program, args []string) (string, error) {
+	var stdout bytes.Buffer
+	oldStdout := os.Stdout
+	readPipe, writePipe, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	os.Stdout = writePipe
+	defer func() {
+		os.Stdout = oldStdout
+	}()
+
+	runErr := RunProgram(program, args)
+	if closeErr := writePipe.Close(); closeErr != nil {
+		return "", closeErr
+	}
+	if _, copyErr := stdout.ReadFrom(readPipe); copyErr != nil {
+		return "", copyErr
+	}
+	if closeErr := readPipe.Close(); closeErr != nil {
+		return "", closeErr
+	}
+	return stdout.String(), runErr
 }
 
 func lowerFile(t *testing.T, path string) *air.Program {
