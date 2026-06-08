@@ -514,6 +514,38 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf("try ard.concat(ctx, %s, %s)", left, right), nil
+	case air.ExprStrAt:
+		return fl.lowerStrAt(expr)
+	case air.ExprStrSize:
+		target, err := fl.lowerExpr(*expr.Target)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("@as(i64, @intCast(%s.len))", target), nil
+	case air.ExprStrIsEmpty:
+		target, err := fl.lowerExpr(*expr.Target)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("(%s.len == 0)", target), nil
+	case air.ExprStrContains:
+		return fl.lowerStrUnaryCall("std.mem.containsAtLeast(u8, %s, 1, %s)", expr)
+	case air.ExprStrReplace:
+		return fl.lowerStrBinaryCall("try ard.strReplace(ctx, %s, %s, %s)", expr)
+	case air.ExprStrReplaceAll:
+		return fl.lowerStrBinaryCall("try ard.strReplaceAll(ctx, %s, %s, %s)", expr)
+	case air.ExprStrSplit:
+		return fl.lowerStrUnaryCall("try ard.strSplit(ctx, %s, %s)", expr)
+	case air.ExprStrStartsWith:
+		return fl.lowerStrUnaryCall("std.mem.startsWith(u8, %s, %s)", expr)
+	case air.ExprStrEndsWith:
+		return fl.lowerStrUnaryCall("std.mem.endsWith(u8, %s, %s)", expr)
+	case air.ExprStrTrim:
+		target, err := fl.lowerExpr(*expr.Target)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("std.mem.trim(u8, %s, \" \")", target), nil
 	case air.ExprToStr:
 		target, err := fl.lowerExpr(*expr.Target)
 		if err != nil {
@@ -525,6 +557,67 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported expression kind %d", expr.Kind)
 	}
+}
+
+func (fl *functionLowerer) lowerStrAt(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("str at missing target")
+	}
+	if len(expr.Args) != 1 {
+		return "", fmt.Errorf("str at expects 1 arg, got %d", len(expr.Args))
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	index, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	if expr.Type > 0 && int(expr.Type) <= len(fl.l.program.Types) && fl.l.program.Types[expr.Type-1].Kind == air.TypeMaybe {
+		return fmt.Sprintf("ard.strAt(%s, %s)", target, index), nil
+	}
+	return fmt.Sprintf("ard.strAtByte(%s, %s)", target, index), nil
+}
+
+func (fl *functionLowerer) lowerStrUnaryCall(format string, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("str method missing target")
+	}
+	if len(expr.Args) != 1 {
+		return "", fmt.Errorf("str method expects 1 arg, got %d", len(expr.Args))
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	arg, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(format, target, arg), nil
+}
+
+func (fl *functionLowerer) lowerStrBinaryCall(format string, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("str method missing target")
+	}
+	if len(expr.Args) != 2 {
+		return "", fmt.Errorf("str method expects 2 args, got %d", len(expr.Args))
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	first, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	second, err := fl.lowerExpr(expr.Args[1])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(format, target, first, second), nil
 }
 
 func (fl *functionLowerer) lowerMakeList(expr air.Expr) (string, error) {
@@ -1160,6 +1253,69 @@ fn eql(comptime T: type, left: T, right: T) bool {
         []const u8 => std.mem.eql(u8, left, right),
         else => left == right,
     };
+}
+
+pub fn strAt(value: []const u8, index: i64) Maybe([]const u8) {
+    if (index < 0) return .{ .some = null };
+    var view = std.unicode.Utf8View.init(value) catch return .{ .some = null };
+    var iter = view.iterator();
+    var current: i64 = 0;
+    while (iter.nextCodepointSlice()) |slice| {
+        if (current == index) return .{ .some = slice };
+        current += 1;
+    }
+    return .{ .some = null };
+}
+
+pub fn strAtByte(value: []const u8, index: i64) []const u8 {
+    const byte_index: usize = @intCast(index);
+    return value[byte_index .. byte_index + 1];
+}
+
+pub fn strReplace(ctx: *Context, value: []const u8, old: []const u8, new: []const u8) ![]const u8 {
+    const index = std.mem.indexOf(u8, value, old) orelse return value;
+    const size = value.len - old.len + new.len;
+    const out = try ctx.allocator.alloc(u8, size);
+    @memcpy(out[0..index], value[0..index]);
+    @memcpy(out[index..][0..new.len], new);
+    @memcpy(out[index + new.len ..], value[index + old.len ..]);
+    return out;
+}
+
+pub fn strReplaceAll(ctx: *Context, value: []const u8, old: []const u8, new: []const u8) ![]const u8 {
+    return try std.mem.replaceOwned(u8, ctx.allocator, value, old, new);
+}
+
+pub fn strSplit(ctx: *Context, value: []const u8, delimiter: []const u8) !List([]const u8) {
+    if (delimiter.len == 0) return try strSplitCodepoints(ctx, value);
+
+    const count = std.mem.count(u8, value, delimiter) + 1;
+    var parts = try ctx.allocator.alloc([]const u8, count);
+    var iter = std.mem.splitSequence(u8, value, delimiter);
+    var index: usize = 0;
+    while (iter.next()) |part| {
+        parts[index] = part;
+        index += 1;
+    }
+    return try List([]const u8).init(ctx.allocator, parts);
+}
+
+fn strSplitCodepoints(ctx: *Context, value: []const u8) !List([]const u8) {
+    const count = std.unicode.utf8CountCodepoints(value) catch value.len;
+    var parts = try ctx.allocator.alloc([]const u8, count);
+    var view = std.unicode.Utf8View.init(value) catch {
+        for (value, 0..) |_, index| {
+            parts[index] = value[index .. index + 1];
+        }
+        return try List([]const u8).init(ctx.allocator, parts);
+    };
+    var iter = view.iterator();
+    var index: usize = 0;
+    while (iter.nextCodepointSlice()) |slice| {
+        parts[index] = slice;
+        index += 1;
+    }
+    return try List([]const u8).init(ctx.allocator, parts);
 }
 
 pub fn print(ctx: *Context, value: []const u8) !void {

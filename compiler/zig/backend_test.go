@@ -346,6 +346,70 @@ func TestRunIntStdlibFunctions(t *testing.T) {
 	}
 }
 
+func TestRunStrMethods(t *testing.T) {
+	if _, err := exec.LookPath("zig"); err != nil {
+		t.Skipf("zig not installed: %v", err)
+	}
+	path := writeTempSource(t, `
+		use ard/io
+
+		fn main() {
+			let text = " hello hello "
+			io::print(text.size())
+			io::print(text.is_empty())
+			io::print(text.contains("ell"))
+			io::print(text.starts_with(" he"))
+			io::print(text.ends_with("lo "))
+			io::print(text.replace("hello", "hi"))
+			io::print(text.replace_all("hello", "hi"))
+			io::print(text.trim())
+
+			let parts = "a,b,c".split(",")
+			io::print(parts.size())
+			io::print(parts.at(1))
+
+			match "abc".at(1) {
+				value => io::print(value),
+				_ => io::print("none")
+			}
+			match "abc".at(3) {
+				value => io::print(value),
+				_ => io::print("none")
+			}
+
+			for char in "ab" {
+				io::print(char)
+			}
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"13",
+		"false",
+		"true",
+		"true",
+		"true",
+		" hi hello ",
+		" hi hi ",
+		"hello hello",
+		"3",
+		"b",
+		"b",
+		"none",
+		"a",
+		"b",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
