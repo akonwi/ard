@@ -933,6 +933,16 @@ func TestIntMath(t *testing.T) {
 func TestEqualityComparisons(t *testing.T) {
 	run(t, []test{
 		{
+			name: "Mismatched Maybe equality reports an error",
+			input: strings.Join([]string{
+				`use ard/maybe`,
+				`maybe::some(1) == maybe::some("x")`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Invalid: Int? == Str?"},
+			},
+		},
+		{
 			name: "Equality between primitives",
 			input: strings.Join([]string{
 				"1 == 2",

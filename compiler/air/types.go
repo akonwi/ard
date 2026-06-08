@@ -133,11 +133,10 @@ type TypeInfo struct {
 }
 
 type FieldInfo struct {
-	Name              string
-	Type              TypeID
-	Index             int
-	Mutable           bool
-	RecursiveNullable bool
+	Name    string
+	Type    TypeID
+	Index   int
+	Mutable bool
 }
 
 type VariantInfo struct {

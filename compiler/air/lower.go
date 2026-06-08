@@ -1222,7 +1222,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 			if err != nil {
 				return NoType, err
 			}
-			info.Fields[i] = FieldInfo{Name: name, Type: fieldType, Index: i, Mutable: fieldMutable, RecursiveNullable: !fieldMutable && isRecursiveNullableStructField(typ, fieldTypeValue)}
+			info.Fields[i] = FieldInfo{Name: name, Type: fieldType, Index: i, Mutable: fieldMutable}
 		}
 	case *checker.Enum:
 		info.Kind = TypeEnum

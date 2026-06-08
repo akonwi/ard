@@ -86,7 +86,7 @@ The checker should produce a clear diagnostic explaining that the recursive fiel
 Recursive field Node.child has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection.
 ```
 
-Recursive nullable fields are part of the supported surface when the nullable value is directly stored as the recursive struct field. Backends must represent those fields with finite storage. For the Go target, recursive nullable struct fields should lower as pointer-backed optional fields, such as `*Node`, instead of inline `Maybe<Node>`. The backend must adapt source-level `Maybe` operations on those fields so `none` maps to `nil`, `some(value)` stores an allocated value, absence checks compare with `nil`, and unwrapping performs a nil check before dereferencing.
+Recursive nullable fields are part of the supported surface when the nullable value is directly stored as the recursive struct field. Backends must represent those fields with finite storage while preserving source-level `Maybe` semantics. For the Go target, ADR 0024 supersedes the earlier pointer-backed field strategy: recursive nullable fields should appear in generated Go as `runtime.Maybe<T>` with any necessary indirection hidden inside the runtime Maybe representation.
 
 Nested nullable references inside inline containers such as `Result` or union payloads are not accepted as layout-breaking until backends can represent those nested positions with finite storage.
 
@@ -101,7 +101,7 @@ Do not add user-visible forward declarations or a first-class `Box`/`Ref` type a
 - The checker must validate recursive type groups and reject inline cycles that do not pass through an accepted representation boundary.
 - `mut T` is a mutable-reference boundary for recursive layout, matching ADR 0022.
 - Backends must preserve finite representations for all accepted recursive shapes.
-- Direct nullable recursive struct fields require special care because a generic inline `Maybe<T>` representation would be infinitely recursive for `T == Node`.
+- Direct nullable recursive struct fields require special care because a fully inline `Maybe<T>` representation would be infinitely recursive for `T == Node`; ADR 0024 defines the Go runtime Maybe representation that preserves `Maybe<T>` while remaining finite.
 - Direct recursive value fields and boundary-free mutual cycles remain invalid, preserving soundness and avoiding target compiler failures.
 - User-visible forward declarations are unnecessary for same-module recursive type groups.
 
@@ -111,4 +111,5 @@ Do not add user-visible forward declarations or a first-class `Box`/`Ref` type a
 - `docs/adrs/0012-represent-optional-values-with-maybe.md`
 - `docs/adrs/0009-support-traits-for-shared-behavior.md`
 - `compiler/checker`
+- `docs/adrs/0024-preserve-maybe-semantics-in-go-lowering.md`
 - `compiler/go`

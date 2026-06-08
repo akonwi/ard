@@ -48,20 +48,7 @@ func GenerateGoStructDeclarations(program *Program, options GoTypeOptions) ([]by
 func goStructDecl(program *Program, typ TypeInfo, runtimeQualifier string) (ast.Decl, error) {
 	fields := make([]*ast.Field, 0, len(typ.Fields))
 	for _, field := range typ.Fields {
-		var fieldType ast.Expr
-		var err error
-		if field.RecursiveNullable {
-			maybeType, maybeErr := goTypeInfo(program, field.Type)
-			if maybeErr != nil {
-				return nil, fmt.Errorf("field %s type: %w", field.Name, maybeErr)
-			}
-			fieldType, err = goTypeExpr(program, maybeType.Elem, runtimeQualifier)
-			if err == nil {
-				fieldType = &ast.StarExpr{X: fieldType}
-			}
-		} else {
-			fieldType, err = goTypeExpr(program, field.Type, runtimeQualifier)
-		}
+		fieldType, err := goTypeExpr(program, field.Type, runtimeQualifier)
 		if err != nil {
 			return nil, fmt.Errorf("field %s type: %w", field.Name, err)
 		}
@@ -107,6 +94,9 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 		value, err := goTypeExpr(program, typ.Value, runtimeQualifier)
 		if err != nil {
 			return nil, err
+		}
+		if goTypeContainsMaybe(program, typ.Key, map[TypeID]bool{}) {
+			return goRuntimeGeneric(runtimeQualifier, "StructuralMap", key, value), nil
 		}
 		return &ast.MapType{Key: key, Value: value}, nil
 	case TypeStruct, TypeEnum, TypeUnion, TypeTraitObject:
@@ -182,6 +172,47 @@ func goRuntimeGeneric(runtimeQualifier, name string, args ...ast.Expr) ast.Expr 
 		return &ast.IndexExpr{X: base, Index: args[0]}
 	}
 	return &ast.IndexListExpr{X: base, Indices: args}
+}
+
+func goTypeContainsMaybe(program *Program, id TypeID, seen map[TypeID]bool) bool {
+	typ, err := goTypeInfo(program, id)
+	if err != nil {
+		return false
+	}
+	if seen[id] {
+		return false
+	}
+	seen[id] = true
+	switch typ.Kind {
+	case TypeMaybe:
+		return true
+	case TypeList, TypeFiber:
+		return goTypeContainsMaybe(program, typ.Elem, seen)
+	case TypeMap:
+		return goTypeContainsMaybe(program, typ.Key, seen) || goTypeContainsMaybe(program, typ.Value, seen)
+	case TypeStruct:
+		for _, field := range typ.Fields {
+			if goTypeContainsMaybe(program, field.Type, seen) {
+				return true
+			}
+		}
+	case TypeResult:
+		return goTypeContainsMaybe(program, typ.Value, seen) || goTypeContainsMaybe(program, typ.Error, seen)
+	case TypeUnion:
+		for _, member := range typ.Members {
+			if goTypeContainsMaybe(program, member.Type, seen) {
+				return true
+			}
+		}
+	case TypeFunction:
+		for _, param := range typ.Params {
+			if goTypeContainsMaybe(program, param, seen) {
+				return true
+			}
+		}
+		return goTypeContainsMaybe(program, typ.Return, seen)
+	}
+	return false
 }
 
 func goTypeInfo(program *Program, id TypeID) (TypeInfo, error) {

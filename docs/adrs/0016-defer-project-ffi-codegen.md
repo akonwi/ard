@@ -12,8 +12,8 @@ ADR 0008 defines this companion model and the current project FFI boundary conve
 
 - typed extern types can bind to concrete Go host types, such as `extern type Terminal = "*vaxis.Vaxis"`
 - scalar, list, map, function, and typed extern values pass as generated Go values
-- `T?` parameters cross the project FFI boundary as `*T`
-- `T?` returns cross back as `*T`
+- `T?` parameters cross the project FFI boundary as `runtime.Maybe[T]`
+- `T?` returns cross back as `runtime.Maybe[T]`
 - `Void!Str` maps to `error`
 - `T!Str` maps to `(T, error)`
 
@@ -61,3 +61,4 @@ The compiler should continue to validate and document the existing companion con
 - `docs/adrs/0008-use-target-aware-extern-companions-for-ffi.md`
 - `docs/adrs/0002-use-air-as-backend-boundary.md`
 - `docs/adrs/0005-use-result-maybe-and-try-for-error-handling.md`
+- `docs/adrs/0024-preserve-maybe-semantics-in-go-lowering.md`

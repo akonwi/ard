@@ -210,7 +210,7 @@ func ChannelClose[T any](ch chan T) (closed bool) {
 }
 
 func Base64Encode(input string, noPad Maybe[bool]) string {
-	if noPad.Some && noPad.Value {
+	if noPad.IsSome() && noPad.Value() {
 		return base64.RawStdEncoding.EncodeToString([]byte(input))
 	}
 	return base64.StdEncoding.EncodeToString([]byte(input))
@@ -218,7 +218,7 @@ func Base64Encode(input string, noPad Maybe[bool]) string {
 
 func Base64Decode(input string, noPad Maybe[bool]) (string, error) {
 	enc := base64.StdEncoding
-	if noPad.Some && noPad.Value {
+	if noPad.IsSome() && noPad.Value() {
 		enc = base64.RawStdEncoding
 	}
 	decoded, err := enc.DecodeString(input)
@@ -229,7 +229,7 @@ func Base64Decode(input string, noPad Maybe[bool]) (string, error) {
 }
 
 func Base64EncodeURL(input string, noPad Maybe[bool]) string {
-	if noPad.Some && noPad.Value {
+	if noPad.IsSome() && noPad.Value() {
 		return base64.RawURLEncoding.EncodeToString([]byte(input))
 	}
 	return base64.URLEncoding.EncodeToString([]byte(input))
@@ -237,7 +237,7 @@ func Base64EncodeURL(input string, noPad Maybe[bool]) string {
 
 func Base64DecodeURL(input string, noPad Maybe[bool]) (string, error) {
 	enc := base64.URLEncoding
-	if noPad.Some && noPad.Value {
+	if noPad.IsSome() && noPad.Value() {
 		enc = base64.RawURLEncoding
 	}
 	decoded, err := enc.DecodeString(input)
@@ -276,8 +276,8 @@ func CryptoSha512(input string) string {
 
 func CryptoHashPassword(password string, cost Maybe[int]) (string, error) {
 	hashCost := bcrypt.DefaultCost
-	if cost.Some {
-		hashCost = cost.Value
+	if cost.IsSome() {
+		hashCost = cost.Value()
 	}
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), hashCost)
 	if err != nil {
@@ -309,8 +309,8 @@ func CryptoScryptHash(password string, saltHex Maybe[string], n Maybe[int], r Ma
 	}
 
 	var saltHexValue string
-	if saltHex.Some {
-		saltHexValue = strings.TrimSpace(saltHex.Value)
+	if saltHex.IsSome() {
+		saltHexValue = strings.TrimSpace(saltHex.Value())
 		decoded, err := hex.DecodeString(saltHexValue)
 		if err != nil {
 			return "", fmt.Errorf("scrypt_runtime: invalid salt hex: %s", err.Error())
@@ -377,8 +377,8 @@ func CryptoScryptVerify(password, hash string, n Maybe[int], r Maybe[int], p May
 }
 
 func maybeOr(value Maybe[int], fallback int) int {
-	if value.Some {
-		return value.Value
+	if value.IsSome() {
+		return value.Value()
 	}
 	return fallback
 }
@@ -914,8 +914,8 @@ func HTTPDo(method string, url string, body any, headers map[string]string, time
 	}
 
 	client := &http.Client{}
-	if timeout.Some {
-		client.Timeout = time.Duration(timeout.Value) * time.Second
+	if timeout.IsSome() {
+		client.Timeout = time.Duration(timeout.Value()) * time.Second
 	}
 	resp, err := client.Do(req)
 	if err != nil {

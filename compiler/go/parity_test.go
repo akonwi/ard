@@ -2734,6 +2734,30 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 			`,
 		},
 		{
+			name: "map maybe keys use value semantics",
+			input: `
+				use ard/maybe
+
+				fn main() Str {
+					let key = maybe::some(1)
+					let values = [key: "one"]
+					values.get(maybe::some(1)).or("missing")
+				}
+			`,
+		},
+		{
+			name: "global map with maybe keys compiles",
+			input: `
+				use ard/maybe
+
+				let values: [Int?:Str] = [:]
+
+				fn main() Str {
+					values.get(maybe::some(1)).or("missing")
+				}
+			`,
+		},
+		{
 			name: "map drop removes key",
 			input: `
 				fn main() Bool {
@@ -2773,6 +2797,55 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 				use ard/maybe
 				fn main() Bool {
 					maybe::some(1).is_some()
+				}
+			`,
+		},
+		{
+			name: "maybe equality compares presence and value",
+			input: `
+				use ard/maybe
+				fn main() Bool {
+					maybe::some(1) == maybe::some(1) and not maybe::some(1) == maybe::some(2)
+				}
+			`,
+		},
+		{
+			name: "maybe equality distinguishes none from some",
+			input: `
+				use ard/maybe
+				fn main() Bool {
+					let none: Int? = maybe::none()
+					not maybe::some(0) == none and none == maybe::none()
+				}
+			`,
+		},
+		{
+			name: "maybe equality handles structural maps",
+			input: `
+				use ard/maybe
+
+				fn main() Bool {
+					let one = maybe::some(1)
+					let two = maybe::some(2)
+					let left = [one: "one", two: "two"]
+					let right = [two: "two", one: "one"]
+					maybe::some(left) == maybe::some(right)
+				}
+			`,
+		},
+		{
+			name: "maybe equality handles structs containing structural maps",
+			input: `
+				use ard/maybe
+
+				struct Box { values: [Int?:Str] }
+
+				fn main() Bool {
+					let one = maybe::some(1)
+					let two = maybe::some(2)
+					let left = Box{values: [one: "one", two: "two"]}
+					let right = Box{values: [two: "two", one: "one"]}
+					maybe::some(left) == maybe::some(right)
 				}
 			`,
 		},

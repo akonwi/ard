@@ -85,7 +85,7 @@ fn main() {
 	if source == "" {
 		t.Fatalf("generated sources missing main body: %#v", mapsKeys(sources))
 	}
-	if !strings.Contains(source, "padding:") || !strings.Contains(source, "Some: true") {
+	if !strings.Contains(source, "padding:") || !strings.Contains(source, "runtime.Some[nestlit_inner_types__Inner]") {
 		t.Fatalf("generated source missing cross-module nested optional struct literal field:\n%s", source)
 	}
 	if !strings.Contains(source, `ard_io__print(any("after 2"))`) {
@@ -1345,12 +1345,13 @@ fn main() Bool {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
 
-func Lookup(flag bool) *string {
+import ardruntime "github.com/akonwi/ard/runtime"
+
+func Lookup(flag bool) ardruntime.Maybe[string] {
 	if !flag {
-		return nil
+		return ardruntime.None[string]()
 	}
-	value := "yes"
-	return &value
+	return ardruntime.Some("yes")
 }
 
 func ReadValue() (string, error) {
@@ -1361,11 +1362,11 @@ func Mark() error {
 	return nil
 }
 
-func Select(input *string) string {
-	if input == nil {
+func Select(input ardruntime.Maybe[string]) string {
+	if input.IsNone() {
 		return "missing"
 	}
-	return *input
+	return input.Value()
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -1402,12 +1403,30 @@ func TestBuildProgramSupportsDependencyGoFFI(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(depDir, "dep.ard"), []byte(`extern fn answer() Int = "Answer"
+extern fn lookup(flag: Bool) Str? = "Lookup"
+extern fn select(input: Str?) Str = "Select"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(depDir, "ffi", "host.go"), []byte(`package ffi
 
+import ardruntime "github.com/akonwi/ard/runtime"
+
 func Answer() int { return 42 }
+
+func Lookup(flag bool) ardruntime.Maybe[string] {
+	if !flag {
+		return ardruntime.None[string]()
+	}
+	return ardruntime.Some("yes")
+}
+
+func Select(input ardruntime.Maybe[string]) string {
+	if input.IsNone() {
+		return "missing"
+	}
+	return input.Value()
+}
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1417,8 +1436,11 @@ func Answer() int { return 42 }
 	mainPath := filepath.Join(appDir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`use dep
 
-fn main() Int {
-	dep::answer()
+fn main() {
+	let found = dep::lookup(true)
+	if not dep::answer() == 42 or not dep::select(found) == "yes" or not dep::select(dep::lookup(false)) == "missing" {
+		panic("dependency ffi failed")
+	}
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -1477,6 +1499,32 @@ fn close(db: sql::Database) Void!Str {
 	}
 }
 
+func TestGenerateSourcesUsesRuntimeMaybeForRecursiveNullableFields(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		struct Node { value: Int, parent: Node? }
+
+		fn main() Int {
+			let root = Node{value: 1, parent: maybe::none()}
+			let child = Node{value: 2, parent: maybe::some(root)}
+			child.parent.expect("").value
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "parent runtime.Maybe[test_ard__Node]") {
+		t.Fatalf("generated source missing runtime Maybe recursive nullable field:\n%s", source)
+	}
+	if strings.Contains(source, "parent *test_ard__Node") {
+		t.Fatalf("generated source lowered recursive nullable field as pointer:\n%s", source)
+	}
+}
+
 func TestGenerateSourcesUsesExpectedLocalTypeForMaybeNone(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
@@ -1492,7 +1540,7 @@ func TestGenerateSourcesUsesExpectedLocalTypeForMaybeNone(t *testing.T) {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !strings.Contains(source, "runtime.Maybe[int]{}") {
+	if !strings.Contains(source, "runtime.None[int]()") {
 		t.Fatalf("generated source missing typed maybe none:\n%s", source)
 	}
 	if strings.Contains(source, "runtime.Maybe[struct {") {
