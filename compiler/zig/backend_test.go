@@ -160,6 +160,38 @@ func TestRunFizzbuzzSample(t *testing.T) {
 	}
 }
 
+func TestRunLoopsSample(t *testing.T) {
+	if _, err := exec.LookPath("zig"); err != nil {
+		t.Skipf("zig not installed: %v", err)
+	}
+	program := lowerFile(t, filepath.Join("..", "samples", "loops.ard"))
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/loops.ard"})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"1",
+		"2",
+		"3",
+		"4",
+		"5",
+		"6",
+		"7",
+		"8",
+		"9",
+		"10",
+		"counting from 1 to 3",
+		"1",
+		"2",
+		"3",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
