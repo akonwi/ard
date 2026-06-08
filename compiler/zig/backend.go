@@ -194,6 +194,11 @@ func (l *lowerer) typeName(id air.TypeID) (string, error) {
 		return "bool", nil
 	case air.TypeStr:
 		return "[]const u8", nil
+	case air.TypeTraitObject:
+		if info.Trait >= 0 && int(info.Trait) < len(l.program.Traits) && l.program.Traits[info.Trait].Name == "ToString" {
+			return "ard.Stringable", nil
+		}
+		return "", fmt.Errorf("unsupported Zig trait object type %s", info.Name)
 	default:
 		return "", fmt.Errorf("unsupported Zig type %s", info.Name)
 	}
@@ -318,6 +323,17 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		return fl.lowerCall(expr)
 	case air.ExprCallExtern:
 		return fl.lowerExternCall(expr)
+	case air.ExprTraitUpcast:
+		if expr.Target == nil {
+			return "", fmt.Errorf("trait upcast missing target")
+		}
+		target, err := fl.lowerExpr(*expr.Target)
+		if err != nil {
+			return "", err
+		}
+		return fl.lowerTraitUpcast(expr, target)
+	case air.ExprCallTrait:
+		return fl.lowerTraitCall(expr)
 	case air.ExprIntAdd, air.ExprIntSub, air.ExprIntMul, air.ExprIntDiv, air.ExprIntMod,
 		air.ExprFloatAdd, air.ExprFloatSub, air.ExprFloatMul, air.ExprFloatDiv,
 		air.ExprEq, air.ExprNotEq, air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte,
@@ -398,6 +414,60 @@ func (fl *functionLowerer) lowerExternCall(expr air.Expr) (string, error) {
 	}
 }
 
+func (fl *functionLowerer) lowerTraitUpcast(expr air.Expr, target string) (string, error) {
+	if expr.Trait < 0 || int(expr.Trait) >= len(fl.l.program.Traits) {
+		return "", fmt.Errorf("invalid trait id %d", expr.Trait)
+	}
+	trait := fl.l.program.Traits[expr.Trait]
+	if trait.Name != "ToString" {
+		return "", fmt.Errorf("unsupported zig trait upcast to %s", trait.Name)
+	}
+	if expr.Target == nil || expr.Target.Type <= 0 || int(expr.Target.Type) > len(fl.l.program.Types) {
+		return "", fmt.Errorf("trait upcast target has invalid type %d", expr.Target.Type)
+	}
+	targetType := fl.l.program.Types[expr.Target.Type-1]
+	switch targetType.Kind {
+	case air.TypeStr:
+		return fmt.Sprintf("ard.Stringable{ .str = %s }", target), nil
+	case air.TypeInt:
+		return fmt.Sprintf("ard.Stringable{ .int = %s }", target), nil
+	case air.TypeFloat:
+		return fmt.Sprintf("ard.Stringable{ .float = %s }", target), nil
+	case air.TypeBool:
+		return fmt.Sprintf("ard.Stringable{ .bool = %s }", target), nil
+	default:
+		return "", fmt.Errorf("unsupported ToString upcast from %s", targetType.Name)
+	}
+}
+
+func (fl *functionLowerer) lowerTraitCall(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("trait call missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	if expr.Trait < 0 || int(expr.Trait) >= len(fl.l.program.Traits) {
+		return "", fmt.Errorf("invalid trait id %d", expr.Trait)
+	}
+	trait := fl.l.program.Traits[expr.Trait]
+	if expr.Method < 0 || expr.Method >= len(trait.Methods) {
+		return "", fmt.Errorf("invalid trait method %d for %s", expr.Method, trait.Name)
+	}
+	method := trait.Methods[expr.Method]
+	if trait.Name == "ToString" && method.Name == "to_str" {
+		if expr.Target.Type > 0 && int(expr.Target.Type) <= len(fl.l.program.Types) {
+			targetType := fl.l.program.Types[expr.Target.Type-1]
+			if targetType.Kind == air.TypeTraitObject {
+				return fmt.Sprintf("try ard.stringableToStr(ctx, %s)", target), nil
+			}
+		}
+		return fmt.Sprintf("try ard.toStr(ctx, %s)", target), nil
+	}
+	return "", fmt.Errorf("unsupported zig trait call %s.%s", trait.Name, method.Name)
+}
+
 func (fl *functionLowerer) lowerBinary(expr air.Expr) (string, error) {
 	left, err := fl.lowerExpr(*expr.Left)
 	if err != nil {
@@ -467,7 +537,7 @@ func (fl *functionLowerer) blockUsesContext(block air.Block) bool {
 
 func (fl *functionLowerer) exprUsesContext(expr air.Expr) bool {
 	switch expr.Kind {
-	case air.ExprCall, air.ExprCallExtern, air.ExprStrConcat, air.ExprToStr:
+	case air.ExprCall, air.ExprCallExtern, air.ExprCallTrait, air.ExprStrConcat, air.ExprToStr:
 		return true
 	}
 	for _, arg := range expr.Args {
@@ -561,6 +631,13 @@ pub const Context = struct {
     io: std.Io,
 };
 
+pub const Stringable = union(enum) {
+    str: []const u8,
+    int: i64,
+    float: f64,
+    bool: bool,
+};
+
 pub fn print(ctx: *Context, value: []const u8) !void {
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(ctx.io, &stdout_buffer);
@@ -577,6 +654,15 @@ pub fn toStr(ctx: *Context, value: anytype) ![]const u8 {
     return switch (@TypeOf(value)) {
         []const u8 => value,
         else => try std.fmt.allocPrint(ctx.allocator, "{}", .{value}),
+    };
+}
+
+pub fn stringableToStr(ctx: *Context, value: Stringable) ![]const u8 {
+    return switch (value) {
+        .str => |v| v,
+        .int => |v| try toStr(ctx, v),
+        .float => |v| try toStr(ctx, v),
+        .bool => |v| try toStr(ctx, v),
     };
 }
 `

@@ -1,6 +1,8 @@
 package zig
 
 import (
+	"bytes"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/frontend"
 	"github.com/akonwi/ard/parse"
 )
 
@@ -107,6 +110,48 @@ func TestBuildProgramPrimitiveProgramCompilesWithZig(t *testing.T) {
 	}
 }
 
+func TestRunVariablesSample(t *testing.T) {
+	if _, err := exec.LookPath("zig"); err != nil {
+		t.Skipf("zig not installed: %v", err)
+	}
+	program := lowerFile(t, filepath.Join("..", "samples", "variables.ard"))
+
+	var stdout bytes.Buffer
+	oldStdout := os.Stdout
+	readPipe, writePipe, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = writePipe
+	defer func() {
+		os.Stdout = oldStdout
+	}()
+
+	err = RunProgram(program, []string{"ard", "run", "--target", "zig", "samples/variables.ard"})
+	if closeErr := writePipe.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if _, copyErr := stdout.ReadFrom(readPipe); copyErr != nil {
+		t.Fatal(copyErr)
+	}
+	if closeErr := readPipe.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"Hello, World!",
+		"name = Alice",
+		"age = 30",
+		"is_student = true",
+		"",
+	}, "\n")
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+	}
+}
+
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
@@ -119,6 +164,19 @@ func lowerSource(t *testing.T, input string) *air.Program {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 	program, err := air.Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	return program
+}
+
+func lowerFile(t *testing.T, path string) *air.Program {
+	t.Helper()
+	loaded, err := frontend.LoadModule(path, backend.TargetZig)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
 	if err != nil {
 		t.Fatalf("lower error: %v", err)
 	}
