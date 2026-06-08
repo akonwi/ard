@@ -21,6 +21,7 @@ import (
 	"github.com/akonwi/ard/javascript"
 	"github.com/akonwi/ard/lsp"
 	"github.com/akonwi/ard/version"
+	zigtarget "github.com/akonwi/ard/zig"
 )
 
 func main() {
@@ -85,12 +86,21 @@ func main() {
 					fmt.Println(err)
 					os.Exit(1)
 				}
+				if err := validateRunnableProgram(program); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
 				if err := gotarget.RunProgram(program, os.Args, loaded.ProjectInfo); err != nil {
 					fmt.Println(err)
 					os.Exit(1)
 				}
 			case backend.TargetJSBrowser, backend.TargetJSServer:
 				if err := runJSProgram(inputPath, target, os.Args); err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+			case backend.TargetZig:
+				if err := runZigProgram(inputPath, os.Args); err != nil {
 					fmt.Println(err)
 					os.Exit(1)
 				}
@@ -117,6 +127,8 @@ func main() {
 				builtPath, err = buildGoBinary(inputPath, outputPath, target)
 			case backend.TargetJSBrowser, backend.TargetJSServer:
 				builtPath, err = buildJSProgram(inputPath, outputPath, target)
+			case backend.TargetZig:
+				builtPath, err = buildZigBinary(inputPath, outputPath)
 			default:
 				err = fmt.Errorf("unknown target: %s", target)
 			}
@@ -987,6 +999,9 @@ func runJSProgram(inputPath string, target string, args []string) error {
 	if err := validateEntrypointSignature(profile, program); err != nil {
 		return err
 	}
+	if err := validateRunnableProgram(program); err != nil {
+		return err
+	}
 	if err := profile.Time("javascript.run", func() error {
 		return javascript.RunProgram(program, target, args, loaded.ProjectInfo)
 	}); err != nil {
@@ -1050,6 +1065,88 @@ func resolveJSBuildOutputPath(inputPath string, outputPath string, target string
 	return filepath.Join(rootDir, "ard-out", target, defaultOutput+".mjs")
 }
 
+func runZigProgram(inputPath string, args []string) error {
+	profile := newPipelineProfile("run zig")
+	defer profile.Print()
+	var loaded *frontend.LoadResult
+	if err := profile.Time("frontend.load_module", func() error {
+		var loadErr error
+		loaded, loadErr = frontend.LoadModule(inputPath, backend.TargetZig)
+		return loadErr
+	}); err != nil {
+		return err
+	}
+	var program *air.Program
+	if err := profile.Time("air.lower", func() error {
+		var lowerErr error
+		program, lowerErr = air.Lower(loaded.Module)
+		return lowerErr
+	}); err != nil {
+		return err
+	}
+	if err := profile.Time("air.validate", func() error {
+		return air.Validate(program)
+	}); err != nil {
+		return err
+	}
+	if err := validateEntrypointSignature(profile, program); err != nil {
+		return err
+	}
+	if err := validateRunnableProgram(program); err != nil {
+		return err
+	}
+	if err := profile.Time("zig.run", func() error {
+		return zigtarget.RunProgram(program, args)
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func buildZigBinary(inputPath string, outputPath string) (string, error) {
+	profile := newPipelineProfile("build zig")
+	defer profile.Print()
+	var loaded *frontend.LoadResult
+	if err := profile.Time("frontend.load_module", func() error {
+		var loadErr error
+		loaded, loadErr = frontend.LoadModule(inputPath, backend.TargetZig)
+		return loadErr
+	}); err != nil {
+		return "", err
+	}
+	var program *air.Program
+	if err := profile.Time("air.lower", func() error {
+		var lowerErr error
+		program, lowerErr = air.Lower(loaded.Module)
+		return lowerErr
+	}); err != nil {
+		return "", err
+	}
+	if err := profile.Time("air.validate", func() error {
+		return air.Validate(program)
+	}); err != nil {
+		return "", err
+	}
+	if err := validateEntrypointSignature(profile, program); err != nil {
+		return "", err
+	}
+	if outputPath == "" {
+		outputPath = filepath.Base(strings.TrimSuffix(inputPath, filepath.Ext(inputPath)))
+		if outputPath == "" || outputPath == "." || outputPath == string(filepath.Separator) {
+			outputPath = "main"
+		}
+	}
+	var builtPath string
+	if err := profile.Time("zig.build", func() error {
+		var buildErr error
+		builtPath, buildErr = zigtarget.BuildProgram(program, outputPath)
+		return buildErr
+	}); err != nil {
+		return "", err
+	}
+	return builtPath, nil
+}
+
 func buildGoBinary(inputPath string, outputPath string, target string) (string, error) {
 	profile := newPipelineProfile("build go")
 	defer profile.Print()
@@ -1098,6 +1195,13 @@ func validateEntrypointSignature(profile *pipelineProfile, program *air.Program)
 	return profile.Time("air.validate_entrypoint", func() error {
 		return air.ValidateEntrypointSignature(program)
 	})
+}
+
+func validateRunnableProgram(program *air.Program) error {
+	if program == nil || (program.Entry == air.NoFunction && program.Script == air.NoFunction) {
+		return fmt.Errorf("run requires a main function or top-level script statements")
+	}
+	return nil
 }
 
 const pipelineProfileEnvVar = "ARD_PIPELINE_PROFILE"

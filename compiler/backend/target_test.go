@@ -17,6 +17,7 @@ func TestParseTarget(t *testing.T) {
 		{name: "go", raw: backend.TargetGo, want: backend.TargetGo},
 		{name: "js-browser", raw: backend.TargetJSBrowser, want: backend.TargetJSBrowser},
 		{name: "js-server", raw: backend.TargetJSServer, want: backend.TargetJSServer},
+		{name: "zig", raw: backend.TargetZig, want: backend.TargetZig},
 		{name: "unknown", raw: "wasm", wantErr: true},
 	}
 

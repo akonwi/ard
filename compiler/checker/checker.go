@@ -4721,6 +4721,8 @@ func shorthandExternalBindingTarget(target string) string {
 	switch target {
 	case backend.TargetJSBrowser, backend.TargetJSServer:
 		return target
+	case backend.TargetZig:
+		return backend.TargetZig
 	default:
 		return backend.TargetGo
 	}
@@ -4729,7 +4731,7 @@ func shorthandExternalBindingTarget(target string) string {
 func validateExternalBindingTargets(bindings map[string]string) (string, bool) {
 	for target := range bindings {
 		switch target {
-		case backend.TargetGo, "js", backend.TargetJSServer, backend.TargetJSBrowser:
+		case backend.TargetGo, "js", backend.TargetJSServer, backend.TargetJSBrowser, backend.TargetZig:
 			continue
 		default:
 			return target, false

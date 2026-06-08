@@ -17,6 +17,7 @@ import (
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
+	"github.com/akonwi/ard/parse"
 )
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -139,6 +140,41 @@ func TestRunGoProgram(t *testing.T) {
 	}
 	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
 		t.Fatalf("run go target: %v", err)
+	}
+}
+
+func TestValidateRunnableProgramRejectsModuleOnlyProgram(t *testing.T) {
+	module := lowerModule(t, `
+		fn add(a: Int, b: Int) Int {
+			a + b
+		}
+	`, backend.TargetGo)
+	program, err := air.Lower(module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+
+	err = validateRunnableProgram(program)
+	if err == nil {
+		t.Fatal("validateRunnableProgram succeeded, want error")
+	}
+	if !strings.Contains(err.Error(), "run requires a main function or top-level script statements") {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
+func TestValidateRunnableProgramAllowsScriptOnlyProgram(t *testing.T) {
+	module := lowerModule(t, `
+		extern fn print(value: Str) Void = "Print"
+		print("hello")
+	`, backend.TargetGo)
+	program, err := air.Lower(module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+
+	if err := validateRunnableProgram(program); err != nil {
+		t.Fatalf("validateRunnableProgram error = %v", err)
 	}
 }
 
@@ -1132,4 +1168,18 @@ func TestRemoveDependencyFromManifestMissing(t *testing.T) {
 	if string(data) != input {
 		t.Fatalf("manifest changed unexpectedly:\n%s", data)
 	}
+}
+
+func lowerModule(t *testing.T, source string, target string) checker.Module {
+	t.Helper()
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: target})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	return c.Module()
 }

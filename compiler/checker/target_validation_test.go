@@ -24,15 +24,25 @@ func TestStdlibImportTargetValidation(t *testing.T) {
 			source: "use ard/env\nfn main() Int { 1 }",
 		},
 		{
+			name:   "env allowed on zig",
+			target: backend.TargetZig,
+			source: "use ard/env\nfn main() Int { 1 }",
+		},
+		{
 			name:   "argv allowed on js-server",
 			target: backend.TargetJSServer,
+			source: "use ard/argv\nfn main() Int { 1 }",
+		},
+		{
+			name:   "argv allowed on zig",
+			target: backend.TargetZig,
 			source: "use ard/argv\nfn main() Int { 1 }",
 		},
 		{
 			name:        "env blocked on js-browser",
 			target:      backend.TargetJSBrowser,
 			source:      "use ard/env\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/env when targeting js-browser; allowed targets: go, js-server",
+			wantErrPart: "Cannot import ard/env when targeting js-browser; allowed targets: go, zig, js-server",
 		},
 		{
 			name:   "fs allowed on js-server",
@@ -40,10 +50,15 @@ func TestStdlibImportTargetValidation(t *testing.T) {
 			source: "use ard/fs\nfn main() Int { 1 }",
 		},
 		{
+			name:   "fs allowed on zig",
+			target: backend.TargetZig,
+			source: "use ard/fs\nfn main() Int { 1 }",
+		},
+		{
 			name:        "fs blocked on js-browser",
 			target:      backend.TargetJSBrowser,
 			source:      "use ard/fs\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/fs when targeting js-browser; allowed targets: go, js-server",
+			wantErrPart: "Cannot import ard/fs when targeting js-browser; allowed targets: go, zig, js-server",
 		},
 		{
 			name:        "sql blocked on js-browser",
@@ -67,7 +82,12 @@ func TestStdlibImportTargetValidation(t *testing.T) {
 			name:        "io blocked on js-browser",
 			target:      backend.TargetJSBrowser,
 			source:      "use ard/io\nfn main() Int { 1 }",
-			wantErrPart: "Cannot import ard/io when targeting js-browser; allowed targets: go, js-server",
+			wantErrPart: "Cannot import ard/io when targeting js-browser; allowed targets: go, zig, js-server",
+		},
+		{
+			name:   "io allowed on zig",
+			target: backend.TargetZig,
+			source: "use ard/io\nfn main() Int { 1 }",
 		},
 		{
 			name:   "js promise allowed on js-server",

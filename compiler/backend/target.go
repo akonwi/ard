@@ -6,6 +6,7 @@ const (
 	TargetGo        = "go"
 	TargetJSBrowser = "js-browser"
 	TargetJSServer  = "js-server"
+	TargetZig       = "zig"
 	DefaultTarget   = TargetGo
 )
 
@@ -19,6 +20,8 @@ func ParseTarget(raw string) (string, error) {
 		return TargetJSBrowser, nil
 	case TargetJSServer:
 		return TargetJSServer, nil
+	case TargetZig:
+		return TargetZig, nil
 	default:
 		return "", fmt.Errorf("unknown target: %s", raw)
 	}

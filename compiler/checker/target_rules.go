@@ -18,6 +18,7 @@ var StdlibAllowedTargets = map[string]map[string]bool{
 	"ard/fs": {
 		backend.TargetGo:       true,
 		backend.TargetJSServer: true,
+		backend.TargetZig:      true,
 	},
 	"ard/sql": {
 		backend.TargetGo: true,
@@ -25,14 +26,17 @@ var StdlibAllowedTargets = map[string]map[string]bool{
 	"ard/env": {
 		backend.TargetGo:       true,
 		backend.TargetJSServer: true,
+		backend.TargetZig:      true,
 	},
 	"ard/io": {
 		backend.TargetGo:       true,
 		backend.TargetJSServer: true,
+		backend.TargetZig:      true,
 	},
 	"ard/argv": {
 		backend.TargetGo:       true,
 		backend.TargetJSServer: true,
+		backend.TargetZig:      true,
 	},
 	"ard/js/promise": {
 		backend.TargetJSServer:  true,
@@ -46,6 +50,7 @@ var StdlibAllowedTargets = map[string]map[string]bool{
 
 var targetDisplayOrder = []string{
 	backend.TargetGo,
+	backend.TargetZig,
 	backend.TargetJSBrowser,
 	backend.TargetJSServer,
 }
