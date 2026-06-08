@@ -192,6 +192,58 @@ func TestRunLoopsSample(t *testing.T) {
 	}
 }
 
+func TestRunTemperaturesSample(t *testing.T) {
+	if _, err := exec.LookPath("zig"); err != nil {
+		t.Skipf("zig not installed: %v", err)
+	}
+	program := lowerFile(t, filepath.Join("..", "samples", "temperatures.ard"))
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/temperatures.ard"})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"0 F = -17.78 C",
+		"20 F = -6.67 C",
+		"40 F = 4.44 C",
+		"60 F = 15.56 C",
+		"80 F = 26.67 C",
+		"100 F = 37.78 C",
+		"120 F = 48.89 C",
+		"140 F = 60.00 C",
+		"160 F = 71.11 C",
+		"180 F = 82.22 C",
+		"200 F = 93.33 C",
+		"220 F = 104.44 C",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestRunGradesSample(t *testing.T) {
+	if _, err := exec.LookPath("zig"); err != nil {
+		t.Skipf("zig not installed: %v", err)
+	}
+	program := lowerFile(t, filepath.Join("..", "samples", "grades.ard"))
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/grades.ard"})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"Alice got a 95",
+		"Bob got a 82",
+		"Charlie got a 88",
+		"Class average is 88",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")

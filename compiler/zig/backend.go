@@ -125,6 +125,15 @@ func (l *lowerer) lowerProgram() (string, error) {
 	var b strings.Builder
 	b.WriteString("const std = @import(\"std\");\n")
 	b.WriteString("const ard = @import(\"ard_runtime.zig\");\n\n")
+	for _, typ := range l.program.Types {
+		if typ.Kind != air.TypeStruct {
+			continue
+		}
+		if err := l.lowerStructType(&b, typ); err != nil {
+			return "", err
+		}
+		b.WriteString("\n")
+	}
 	for _, fn := range l.program.Functions {
 		if fn.IsTest {
 			continue
@@ -147,6 +156,19 @@ func (l *lowerer) lowerProgram() (string, error) {
 	}
 	b.WriteString("}\n")
 	return b.String(), nil
+}
+
+func (l *lowerer) lowerStructType(b *strings.Builder, typ air.TypeInfo) error {
+	fmt.Fprintf(b, "const %s = struct {\n", typeDeclName(typ))
+	for _, field := range typ.Fields {
+		fieldType, err := l.typeName(field.Type)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "    %s: %s,\n", sanitizeIdentifier(field.Name), fieldType)
+	}
+	b.WriteString("};\n")
+	return nil
 }
 
 func (l *lowerer) lowerFunction(b *strings.Builder, fn air.Function) error {
@@ -194,6 +216,14 @@ func (l *lowerer) typeName(id air.TypeID) (string, error) {
 		return "bool", nil
 	case air.TypeStr:
 		return "[]const u8", nil
+	case air.TypeList:
+		elem, err := l.typeName(info.Elem)
+		if err != nil {
+			return "", err
+		}
+		return "[]const " + elem, nil
+	case air.TypeStruct:
+		return typeDeclName(info), nil
 	case air.TypeTraitObject:
 		if info.Trait >= 0 && int(info.Trait) < len(l.program.Traits) && l.program.Traits[info.Trait].Name == "ToString" {
 			return "ard.Stringable", nil
@@ -217,6 +247,11 @@ func (fl *functionLowerer) lowerBlock(b *strings.Builder, block air.Block, retur
 		}
 	}
 	if block.Result != nil {
+		if block.Result.Kind == air.ExprIf {
+			if handled, err := fl.lowerIfResult(b, *block.Result, returnType); handled || err != nil {
+				return err
+			}
+		}
 		expr, err := fl.lowerExpr(*block.Result)
 		if err != nil {
 			return err
@@ -240,6 +275,35 @@ func (fl *functionLowerer) lowerBlock(b *strings.Builder, block air.Block, retur
 		return fmt.Errorf("non-void function has no result")
 	}
 	return nil
+}
+
+func (fl *functionLowerer) lowerIfResult(b *strings.Builder, expr air.Expr, returnType air.TypeID) (bool, error) {
+	if expr.Condition == nil {
+		return true, fmt.Errorf("if expression missing condition")
+	}
+	if len(expr.Then.Stmts) == 0 && len(expr.Else.Stmts) == 0 {
+		return false, nil
+	}
+	condition, err := fl.lowerExpr(*expr.Condition)
+	if err != nil {
+		return true, err
+	}
+	fmt.Fprintf(b, "%sif (%s) {\n", fl.indent, condition)
+	thenFl := *fl
+	thenFl.indent += "    "
+	if err := thenFl.lowerBlock(b, expr.Then, returnType); err != nil {
+		return true, err
+	}
+	if len(expr.Else.Stmts) > 0 || expr.Else.Result != nil {
+		fmt.Fprintf(b, "%s} else {\n", fl.indent)
+		elseFl := *fl
+		elseFl.indent += "    "
+		if err := elseFl.lowerBlock(b, expr.Else, returnType); err != nil {
+			return true, err
+		}
+	}
+	fmt.Fprintf(b, "%s}\n", fl.indent)
+	return true, nil
 }
 
 func (fl *functionLowerer) lowerStmt(b *strings.Builder, stmt air.Stmt) error {
@@ -273,6 +337,11 @@ func (fl *functionLowerer) lowerStmt(b *strings.Builder, stmt air.Stmt) error {
 	case air.StmtExpr:
 		if stmt.Expr == nil {
 			return fmt.Errorf("expression statement has no expression")
+		}
+		if stmt.Expr.Kind == air.ExprIf {
+			if handled, err := fl.lowerIfResult(b, *stmt.Expr, air.NoType); handled || err != nil {
+				return err
+			}
 		}
 		expr, err := fl.lowerExpr(*stmt.Expr)
 		if err != nil {
@@ -334,6 +403,16 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		return fl.lowerTraitUpcast(expr, target)
 	case air.ExprCallTrait:
 		return fl.lowerTraitCall(expr)
+	case air.ExprMakeList:
+		return fl.lowerMakeList(expr)
+	case air.ExprListAt:
+		return fl.lowerListAt(expr)
+	case air.ExprListSize:
+		return fl.lowerListSize(expr)
+	case air.ExprMakeStruct:
+		return fl.lowerMakeStruct(expr)
+	case air.ExprGetField:
+		return fl.lowerGetField(expr)
 	case air.ExprIntAdd, air.ExprIntSub, air.ExprIntMul, air.ExprIntDiv, air.ExprIntMod,
 		air.ExprFloatAdd, air.ExprFloatSub, air.ExprFloatMul, air.ExprFloatDiv,
 		air.ExprEq, air.ExprNotEq, air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte,
@@ -374,6 +453,95 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 	}
 }
 
+func (fl *functionLowerer) lowerMakeList(expr air.Expr) (string, error) {
+	if expr.Type <= 0 || int(expr.Type) > len(fl.l.program.Types) {
+		return "", fmt.Errorf("list literal has invalid type %d", expr.Type)
+	}
+	listType := fl.l.program.Types[expr.Type-1]
+	if listType.Kind != air.TypeList {
+		return "", fmt.Errorf("list literal has non-list type %s", listType.Name)
+	}
+	elemType, err := fl.l.typeName(listType.Elem)
+	if err != nil {
+		return "", err
+	}
+	items := make([]string, 0, len(expr.Args))
+	for _, arg := range expr.Args {
+		item, err := fl.lowerExpr(arg)
+		if err != nil {
+			return "", err
+		}
+		items = append(items, item)
+	}
+	return fmt.Sprintf("&[_]%s{%s}", elemType, strings.Join(items, ", ")), nil
+}
+
+func (fl *functionLowerer) lowerListAt(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("list at expects target and index")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	index, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s[@intCast(%s)]", target, index), nil
+}
+
+func (fl *functionLowerer) lowerListSize(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("list size missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("@as(i64, @intCast(%s.len))", target), nil
+}
+
+func (fl *functionLowerer) lowerMakeStruct(expr air.Expr) (string, error) {
+	if expr.Type <= 0 || int(expr.Type) > len(fl.l.program.Types) {
+		return "", fmt.Errorf("struct literal has invalid type %d", expr.Type)
+	}
+	structType := fl.l.program.Types[expr.Type-1]
+	if structType.Kind != air.TypeStruct {
+		return "", fmt.Errorf("struct literal has non-struct type %s", structType.Name)
+	}
+	fields := make([]string, 0, len(expr.Fields))
+	for _, field := range expr.Fields {
+		value, err := fl.lowerExpr(field.Value)
+		if err != nil {
+			return "", err
+		}
+		fields = append(fields, fmt.Sprintf(".%s = %s", sanitizeIdentifier(field.Name), value))
+	}
+	return fmt.Sprintf("%s{ %s }", typeDeclName(structType), strings.Join(fields, ", ")), nil
+}
+
+func (fl *functionLowerer) lowerGetField(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("field access missing target")
+	}
+	if expr.Target.Type <= 0 || int(expr.Target.Type) > len(fl.l.program.Types) {
+		return "", fmt.Errorf("field access target has invalid type %d", expr.Target.Type)
+	}
+	targetType := fl.l.program.Types[expr.Target.Type-1]
+	if targetType.Kind != air.TypeStruct {
+		return "", fmt.Errorf("field access on non-struct type %s", targetType.Name)
+	}
+	if expr.Field < 0 || expr.Field >= len(targetType.Fields) {
+		return "", fmt.Errorf("field index %d out of range for %s", expr.Field, targetType.Name)
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s.%s", target, sanitizeIdentifier(targetType.Fields[expr.Field].Name)), nil
+}
+
 func (fl *functionLowerer) lowerCall(expr air.Expr) (string, error) {
 	if int(expr.Function) < 0 || int(expr.Function) >= len(fl.l.program.Functions) {
 		return "", fmt.Errorf("function %d out of range", expr.Function)
@@ -409,6 +577,11 @@ func (fl *functionLowerer) lowerExternCall(expr air.Expr) (string, error) {
 			return "", fmt.Errorf("print extern expects 1 arg, got %d", len(args))
 		}
 		return fmt.Sprintf("try ard.print(ctx, %s)", args[0]), nil
+	case "FloatFromInt":
+		if len(args) != 1 {
+			return "", fmt.Errorf("FloatFromInt extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("@as(f64, @floatFromInt(%s))", args[0]), nil
 	default:
 		return "", fmt.Errorf("unsupported zig extern binding %q", binding)
 	}
@@ -582,6 +755,10 @@ func functionName(fn air.Function) string {
 	return fmt.Sprintf("ard_fn_%d_%s", fn.ID, sanitizeIdentifier(fn.Name))
 }
 
+func typeDeclName(typ air.TypeInfo) string {
+	return fmt.Sprintf("ArdType_%d_%s", typ.ID, sanitizeIdentifier(typ.Name))
+}
+
 func localName(fn air.Function, id air.LocalID) string {
 	name := "local"
 	if int(id) >= 0 && int(id) < len(fn.Locals) && fn.Locals[id].Name != "" {
@@ -653,6 +830,7 @@ pub fn concat(ctx: *Context, left: []const u8, right: []const u8) ![]const u8 {
 pub fn toStr(ctx: *Context, value: anytype) ![]const u8 {
     return switch (@TypeOf(value)) {
         []const u8 => value,
+        f64 => try std.fmt.allocPrint(ctx.allocator, "{d:.2}", .{value}),
         else => try std.fmt.allocPrint(ctx.allocator, "{}", .{value}),
     };
 }
