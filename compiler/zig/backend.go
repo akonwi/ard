@@ -811,6 +811,11 @@ func (fl *functionLowerer) lowerExternCall(expr air.Expr) (string, error) {
 			return "", fmt.Errorf("FloatFromInt extern expects 1 arg, got %d", len(args))
 		}
 		return fmt.Sprintf("@as(f64, @floatFromInt(%s))", args[0]), nil
+	case "IntFromStr":
+		if len(args) != 1 {
+			return "", fmt.Errorf("IntFromStr extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.intFromStr(%s)", args[0]), nil
 	default:
 		return "", fmt.Errorf("unsupported zig extern binding %q", binding)
 	}
@@ -1184,5 +1189,10 @@ pub fn stringableToStr(ctx: *Context, value: Stringable) ![]const u8 {
         .float => |v| try toStr(ctx, v),
         .bool => |v| try toStr(ctx, v),
     };
+}
+
+pub fn intFromStr(value: []const u8) Maybe(i64) {
+    const parsed = std.fmt.parseInt(i64, value, 10) catch return .{ .some = null };
+    return .{ .some = parsed };
 }
 `

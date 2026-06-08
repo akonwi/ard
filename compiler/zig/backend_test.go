@@ -309,6 +309,43 @@ func TestRunMapsSample(t *testing.T) {
 	}
 }
 
+func TestRunIntStdlibFunctions(t *testing.T) {
+	if _, err := exec.LookPath("zig"); err != nil {
+		t.Skipf("zig not installed: %v", err)
+	}
+	path := writeTempSource(t, `
+		use ard/int
+		use ard/io
+
+		fn main() {
+			io::print(42.to_str())
+			match int::from_str("123") {
+				value => io::print(value),
+				_ => io::print("none")
+			}
+			match int::from_str("not an int") {
+				value => io::print(value),
+				_ => io::print("none")
+			}
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"42",
+		"123",
+		"none",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
@@ -350,6 +387,15 @@ func runProgramCaptureStdout(program *air.Program, args []string) (string, error
 		return "", closeErr
 	}
 	return stdout.String(), runErr
+}
+
+func writeTempSource(t *testing.T, input string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "main.ard")
+	if err := os.WriteFile(path, []byte(input), 0o644); err != nil {
+		t.Fatalf("write temp source: %v", err)
+	}
+	return path
 }
 
 func lowerFile(t *testing.T, path string) *air.Program {
