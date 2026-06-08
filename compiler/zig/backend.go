@@ -161,7 +161,7 @@ func (l *lowerer) lowerProgram() (string, error) {
 func (l *lowerer) lowerStructType(b *strings.Builder, typ air.TypeInfo) error {
 	fmt.Fprintf(b, "const %s = struct {\n", typeDeclName(typ))
 	for _, field := range typ.Fields {
-		fieldType, err := l.typeName(field.Type)
+		fieldType, err := l.fieldTypeName(field)
 		if err != nil {
 			return err
 		}
@@ -171,12 +171,33 @@ func (l *lowerer) lowerStructType(b *strings.Builder, typ air.TypeInfo) error {
 	return nil
 }
 
+func (l *lowerer) fieldTypeName(field air.FieldInfo) (string, error) {
+	if !field.RecursiveNullable {
+		return l.typeName(field.Type)
+	}
+	if field.Type <= 0 || int(field.Type) > len(l.program.Types) {
+		return "", fmt.Errorf("recursive nullable field %s has invalid type %d", field.Name, field.Type)
+	}
+	maybeInfo := l.program.Types[field.Type-1]
+	if maybeInfo.Kind != air.TypeMaybe {
+		return "", fmt.Errorf("recursive nullable field %s has non-maybe type %s", field.Name, maybeInfo.Name)
+	}
+	elem, err := l.typeName(maybeInfo.Elem)
+	if err != nil {
+		return "", err
+	}
+	return "ard.Maybe(*" + elem + ")", nil
+}
+
 func (l *lowerer) lowerFunction(b *strings.Builder, fn air.Function) error {
 	fmt.Fprintf(b, "fn %s(ctx: *ard.Context", functionName(fn))
 	for i, param := range fn.Signature.Params {
 		paramType, err := l.typeName(param.Type)
 		if err != nil {
 			return err
+		}
+		if param.Mutable && paramType != "void" {
+			paramType = "*" + paramType
 		}
 		fmt.Fprintf(b, ", %s: %s", localName(fn, air.LocalID(i)), paramType)
 	}
@@ -382,7 +403,40 @@ func (fl *functionLowerer) lowerStmt(b *strings.Builder, stmt air.Stmt) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(b, "%s%s = %s;\n", fl.indent, localName(fl.fn, stmt.Local), value)
+		fmt.Fprintf(b, "%s%s = %s;\n", fl.indent, fl.lowerLocalAssignTarget(stmt.Local), value)
+	case air.StmtSetField:
+		if stmt.Target == nil {
+			return fmt.Errorf("field set statement missing target")
+		}
+		if stmt.Value == nil {
+			return fmt.Errorf("field set statement missing value")
+		}
+		if stmt.Target.Type <= 0 || int(stmt.Target.Type) > len(fl.l.program.Types) {
+			return fmt.Errorf("field set target has invalid type %d", stmt.Target.Type)
+		}
+		targetType := fl.l.program.Types[stmt.Target.Type-1]
+		if targetType.Kind != air.TypeStruct {
+			return fmt.Errorf("field set target must be struct, got %s", targetType.Name)
+		}
+		if stmt.Field < 0 || stmt.Field >= len(targetType.Fields) {
+			return fmt.Errorf("field index %d out of range for %s", stmt.Field, targetType.Name)
+		}
+		target, err := fl.lowerPlace(*stmt.Target)
+		if err != nil {
+			return err
+		}
+		value, err := fl.lowerExpr(*stmt.Value)
+		if err != nil {
+			return err
+		}
+		if targetType.Fields[stmt.Field].RecursiveNullable {
+			elem, err := fl.recursiveNullableElemName(targetType.Fields[stmt.Field])
+			if err != nil {
+				return err
+			}
+			value = fmt.Sprintf("try ard.boxMaybe(%s, ctx, %s)", elem, value)
+		}
+		fmt.Fprintf(b, "%s%s.%s = %s;\n", fl.indent, target, sanitizeIdentifier(targetType.Fields[stmt.Field].Name), value)
 	case air.StmtExpr:
 		if stmt.Expr == nil {
 			return fmt.Errorf("expression statement has no expression")
@@ -441,6 +495,9 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 	case air.ExprConstStr:
 		return strconv.Quote(expr.Str), nil
 	case air.ExprLoadLocal:
+		if fl.localIsMutablePointer(expr.Local) {
+			return localName(fl.fn, expr.Local) + ".*", nil
+		}
 		return localName(fl.fn, expr.Local), nil
 	case air.ExprCall:
 		return fl.lowerCall(expr)
@@ -471,6 +528,10 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		return fl.lowerGetField(expr)
 	case air.ExprMakeMap:
 		return fl.lowerMakeMap(expr)
+	case air.ExprMakeMaybeSome:
+		return fl.lowerMakeMaybeSome(expr)
+	case air.ExprMakeMaybeNone:
+		return fl.lowerMakeMaybeNone(expr)
 	case air.ExprMapSize:
 		return fl.lowerMapSize(expr)
 	case air.ExprMapSet:
@@ -704,6 +765,13 @@ func (fl *functionLowerer) lowerMakeStruct(expr air.Expr) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if field.Index >= 0 && field.Index < len(structType.Fields) && structType.Fields[field.Index].RecursiveNullable {
+			elem, err := fl.recursiveNullableElemName(structType.Fields[field.Index])
+			if err != nil {
+				return "", err
+			}
+			value = fmt.Sprintf("try ard.boxMaybe(%s, ctx, %s)", elem, value)
+		}
 		fields = append(fields, fmt.Sprintf(".%s = %s", sanitizeIdentifier(field.Name), value))
 	}
 	return fmt.Sprintf("%s{ %s }", typeDeclName(structType), strings.Join(fields, ", ")), nil
@@ -727,7 +795,66 @@ func (fl *functionLowerer) lowerGetField(expr air.Expr) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s.%s", target, sanitizeIdentifier(targetType.Fields[expr.Field].Name)), nil
+	field := targetType.Fields[expr.Field]
+	access := fmt.Sprintf("%s.%s", target, sanitizeIdentifier(field.Name))
+	if field.RecursiveNullable {
+		elem, err := fl.recursiveNullableElemName(field)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("ard.unboxMaybe(%s, %s)", elem, access), nil
+	}
+	return access, nil
+}
+
+func (fl *functionLowerer) lowerPlace(expr air.Expr) (string, error) {
+	switch expr.Kind {
+	case air.ExprLoadLocal:
+		return localName(fl.fn, expr.Local), nil
+	case air.ExprGetField:
+		if expr.Target == nil {
+			return "", fmt.Errorf("field place missing target")
+		}
+		if expr.Target.Type <= 0 || int(expr.Target.Type) > len(fl.l.program.Types) {
+			return "", fmt.Errorf("field place target has invalid type %d", expr.Target.Type)
+		}
+		targetType := fl.l.program.Types[expr.Target.Type-1]
+		if targetType.Kind != air.TypeStruct {
+			return "", fmt.Errorf("field place on non-struct type %s", targetType.Name)
+		}
+		if expr.Field < 0 || expr.Field >= len(targetType.Fields) {
+			return "", fmt.Errorf("field index %d out of range for %s", expr.Field, targetType.Name)
+		}
+		target, err := fl.lowerPlace(*expr.Target)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.%s", target, sanitizeIdentifier(targetType.Fields[expr.Field].Name)), nil
+	default:
+		return "", fmt.Errorf("expression kind %d is not addressable", expr.Kind)
+	}
+}
+
+func (fl *functionLowerer) lowerLocalAssignTarget(local air.LocalID) string {
+	if fl.localIsMutablePointer(local) {
+		return localName(fl.fn, local) + ".*"
+	}
+	return localName(fl.fn, local)
+}
+
+func (fl *functionLowerer) localIsMutablePointer(local air.LocalID) bool {
+	return int(local) >= 0 && int(local) < len(fl.fn.Signature.Params) && fl.fn.Signature.Params[local].Mutable
+}
+
+func (fl *functionLowerer) recursiveNullableElemName(field air.FieldInfo) (string, error) {
+	if field.Type <= 0 || int(field.Type) > len(fl.l.program.Types) {
+		return "", fmt.Errorf("recursive nullable field %s has invalid type %d", field.Name, field.Type)
+	}
+	maybeInfo := fl.l.program.Types[field.Type-1]
+	if maybeInfo.Kind != air.TypeMaybe {
+		return "", fmt.Errorf("recursive nullable field %s has non-maybe type %s", field.Name, maybeInfo.Name)
+	}
+	return fl.l.typeName(maybeInfo.Elem)
 }
 
 func (fl *functionLowerer) lowerMakeMap(expr air.Expr) (string, error) {
@@ -759,6 +886,43 @@ func (fl *functionLowerer) lowerMakeMap(expr air.Expr) (string, error) {
 		entries = append(entries, fmt.Sprintf(".{ .key = %s, .value = %s }", key, value))
 	}
 	return fmt.Sprintf("try ard.Map(%s, %s).init(ctx.allocator, &[_]ard.Map(%s, %s).Entry{%s})", keyType, valueType, keyType, valueType, strings.Join(entries, ", ")), nil
+}
+
+func (fl *functionLowerer) lowerMakeMaybeSome(expr air.Expr) (string, error) {
+	if expr.Type <= 0 || int(expr.Type) > len(fl.l.program.Types) {
+		return "", fmt.Errorf("maybe some has invalid type %d", expr.Type)
+	}
+	maybeType := fl.l.program.Types[expr.Type-1]
+	if maybeType.Kind != air.TypeMaybe {
+		return "", fmt.Errorf("maybe some has non-maybe type %s", maybeType.Name)
+	}
+	if expr.Target == nil {
+		return "", fmt.Errorf("maybe some missing target")
+	}
+	elemType, err := fl.l.typeName(maybeType.Elem)
+	if err != nil {
+		return "", err
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("ard.Maybe(%s){ .some = %s }", elemType, target), nil
+}
+
+func (fl *functionLowerer) lowerMakeMaybeNone(expr air.Expr) (string, error) {
+	if expr.Type <= 0 || int(expr.Type) > len(fl.l.program.Types) {
+		return "", fmt.Errorf("maybe none has invalid type %d", expr.Type)
+	}
+	maybeType := fl.l.program.Types[expr.Type-1]
+	if maybeType.Kind != air.TypeMaybe {
+		return "", fmt.Errorf("maybe none has non-maybe type %s", maybeType.Name)
+	}
+	elemType, err := fl.l.typeName(maybeType.Elem)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("ard.Maybe(%s){ .some = null }", elemType), nil
 }
 
 func (fl *functionLowerer) lowerMapSize(expr air.Expr) (string, error) {
@@ -874,15 +1038,33 @@ func (fl *functionLowerer) lowerCall(expr air.Expr) (string, error) {
 	if int(expr.Function) < 0 || int(expr.Function) >= len(fl.l.program.Functions) {
 		return "", fmt.Errorf("function %d out of range", expr.Function)
 	}
+	fn := fl.l.program.Functions[expr.Function]
 	args := []string{"ctx"}
-	for _, arg := range expr.Args {
-		lowered, err := fl.lowerExpr(arg)
+	for i, arg := range expr.Args {
+		var lowered string
+		var err error
+		if i < len(fn.Signature.Params) && fn.Signature.Params[i].Mutable {
+			lowered, err = fl.lowerMutableArg(arg)
+		} else {
+			lowered, err = fl.lowerExpr(arg)
+		}
 		if err != nil {
 			return "", err
 		}
 		args = append(args, lowered)
 	}
-	return fmt.Sprintf("try %s(%s)", functionName(fl.l.program.Functions[expr.Function]), strings.Join(args, ", ")), nil
+	return fmt.Sprintf("try %s(%s)", functionName(fn), strings.Join(args, ", ")), nil
+}
+
+func (fl *functionLowerer) lowerMutableArg(expr air.Expr) (string, error) {
+	if expr.Kind == air.ExprLoadLocal && fl.localIsMutablePointer(expr.Local) {
+		return localName(fl.fn, expr.Local), nil
+	}
+	place, err := fl.lowerPlace(expr)
+	if err != nil {
+		return "", err
+	}
+	return "&" + place, nil
 }
 
 func (fl *functionLowerer) lowerExternCall(expr air.Expr) (string, error) {
@@ -1162,6 +1344,22 @@ pub fn Maybe(comptime T: type) type {
     return struct {
         some: ?T,
     };
+}
+
+pub fn boxMaybe(comptime T: type, ctx: *Context, value: Maybe(T)) !Maybe(*T) {
+    if (value.some) |unboxed| {
+        const boxed = try ctx.allocator.create(T);
+        boxed.* = unboxed;
+        return .{ .some = boxed };
+    }
+    return .{ .some = null };
+}
+
+pub fn unboxMaybe(comptime T: type, value: Maybe(*T)) Maybe(T) {
+    if (value.some) |boxed| {
+        return .{ .some = boxed.* };
+    }
+    return .{ .some = null };
 }
 
 pub fn List(comptime T: type) type {

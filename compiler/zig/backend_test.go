@@ -475,6 +475,78 @@ func TestRunBoolMethodsAndOperators(t *testing.T) {
 	}
 }
 
+func TestRunStructMethodsAndMutation(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/maybe
+		use ard/io
+
+		struct Counter {
+			value: Int
+		}
+
+		struct Node {
+			value: Int,
+			parent: Node?
+		}
+
+		fn Counter::new(value: Int) Counter {
+			Counter{value: value}
+		}
+
+		impl Counter {
+			fn describe() Str {
+				"value={self.value}"
+			}
+
+			fn mut bump(n: Int) {
+				self.value = self.value + n
+			}
+		}
+
+		fn read(counter: Counter) Int {
+			counter.value
+		}
+
+		fn main() {
+			mut counter = Counter::new(1)
+			io::print(counter.describe())
+			counter.value = counter.value + 1
+			counter.bump(5)
+			io::print(counter.value)
+
+			let copied = counter
+			counter.bump(1)
+			io::print(copied.value)
+			io::print(read(counter))
+
+			let root = Node{value: 10, parent: maybe::none()}
+			let child = Node{value: 11, parent: maybe::some(root)}
+			match child.parent {
+				parent => io::print(parent.value),
+				_ => io::print("none")
+			}
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"value=1",
+		"7",
+		"7",
+		"8",
+		"10",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
