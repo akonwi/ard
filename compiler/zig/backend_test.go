@@ -988,6 +988,127 @@ func TestRunStructMethodsAndMutation(t *testing.T) {
 	}
 }
 
+func TestRunGenericFunctions(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+		use ard/maybe
+
+		fn identity(value: $T) $T {
+			value
+		}
+
+		fn singleton(value: $T) [$T] {
+			[value]
+		}
+
+		fn maybe_value(value: $T) $T? {
+			maybe::some(value)
+		}
+
+		fn ok_value(value: $T) $T!Str {
+			Result::ok(value)
+		}
+
+		fn main() {
+			io::print(identity<Int>(41) + 1)
+			io::print(identity("ard"))
+			io::print(singleton<Int>(7).at(0))
+			io::print(singleton("zig").at(0))
+
+			match maybe_value<Int>(5) {
+				value => io::print(value)
+				_ => io::print("none")
+			}
+
+			match ok_value<Str>("ok") {
+				ok(value) => io::print(value)
+				err(message) => io::print(message)
+			}
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"42",
+		"ard",
+		"7",
+		"zig",
+		"5",
+		"ok",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestRunGenericStructsAndMethods(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+
+		struct Box {
+			item: $T
+		}
+
+		struct Pair {
+			first: $T,
+			second: $U
+		}
+
+		impl Box {
+			fn get() $T {
+				self.item
+			}
+
+			fn replace(item: $T) Box<$T> {
+				Box{item: item}
+			}
+		}
+
+		fn unwrap(box: Box<$T>) $T {
+			box.item
+		}
+
+		fn main() {
+			let int_box = Box{item: 41}
+			io::print(int_box.get() + 1)
+			io::print(unwrap<Int>(int_box))
+
+			let str_box = Box{item: "ard"}
+			io::print(str_box.get())
+			io::print(str_box.replace("zig").item)
+
+			let pair = Pair{first: 7, second: "seven"}
+			io::print(pair.first)
+			io::print(pair.second)
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"42",
+		"41",
+		"ard",
+		"zig",
+		"7",
+		"seven",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func TestRunLoopSemantics(t *testing.T) {
 	requireZig(t)
 	path := writeTempSource(t, `

@@ -376,6 +376,17 @@ func (l *lowerer) lowerFunction(b *strings.Builder, fn air.Function) error {
 	if !fl.blockUsesContext(fn.Body) {
 		b.WriteString("    _ = ctx;\n")
 	}
+	for _, capture := range fn.Captures {
+		if !fl.blockUsesLocal(fn.Body, capture.Local) {
+			fmt.Fprintf(b, "    _ = %s;\n", localName(fn, capture.Local))
+		}
+	}
+	for i := range fn.Signature.Params {
+		local := air.LocalID(i)
+		if !fl.blockUsesLocal(fn.Body, local) {
+			fmt.Fprintf(b, "    _ = %s;\n", localName(fn, local))
+		}
+	}
 	if err := fl.lowerBlock(b, fn.Body, fn.Signature.Return); err != nil {
 		return fmt.Errorf("function %s: %w", fn.Name, err)
 	}
@@ -1139,7 +1150,7 @@ func (fl *functionLowerer) lowerListAt(expr air.Expr) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s.at(@intCast(%s))", target, index), nil
+	return fmt.Sprintf("(%s).at(@intCast(%s))", target, index), nil
 }
 
 func (fl *functionLowerer) lowerListSize(expr air.Expr) (string, error) {
@@ -1150,7 +1161,7 @@ func (fl *functionLowerer) lowerListSize(expr air.Expr) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("@as(i64, @intCast(%s.size()))", target), nil
+	return fmt.Sprintf("@as(i64, @intCast((%s).size()))", target), nil
 }
 
 func (fl *functionLowerer) lowerListPush(expr air.Expr) (string, error) {
@@ -1165,7 +1176,7 @@ func (fl *functionLowerer) lowerListPush(expr air.Expr) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("try %s.push(%s)", target, value), nil
+	return fmt.Sprintf("try (%s).push(%s)", target, value), nil
 }
 
 func (fl *functionLowerer) lowerMakeStruct(expr air.Expr) (string, error) {
@@ -1213,7 +1224,7 @@ func (fl *functionLowerer) lowerGetField(expr air.Expr) (string, error) {
 		return "", err
 	}
 	field := targetType.Fields[expr.Field]
-	access := fmt.Sprintf("%s.%s", target, sanitizeIdentifier(field.Name))
+	access := fmt.Sprintf("(%s).%s", target, sanitizeIdentifier(field.Name))
 	if field.RecursiveNullable {
 		elem, err := fl.recursiveNullableElemName(field)
 		if err != nil {
@@ -2176,6 +2187,74 @@ func (fl *functionLowerer) exprUsesContext(expr air.Expr) bool {
 		fl.blockUsesContext(expr.Ok) ||
 		fl.blockUsesContext(expr.Err) ||
 		fl.blockUsesContext(expr.Catch)
+}
+
+func (fl *functionLowerer) blockUsesLocal(block air.Block, local air.LocalID) bool {
+	for _, stmt := range block.Stmts {
+		if stmt.Value != nil && fl.exprUsesLocal(*stmt.Value, local) {
+			return true
+		}
+		if stmt.Expr != nil && fl.exprUsesLocal(*stmt.Expr, local) {
+			return true
+		}
+		if stmt.Target != nil && fl.exprUsesLocal(*stmt.Target, local) {
+			return true
+		}
+		if stmt.Condition != nil && fl.exprUsesLocal(*stmt.Condition, local) {
+			return true
+		}
+		if fl.blockUsesLocal(stmt.Body, local) {
+			return true
+		}
+	}
+	return block.Result != nil && fl.exprUsesLocal(*block.Result, local)
+}
+
+func (fl *functionLowerer) exprUsesLocal(expr air.Expr, local air.LocalID) bool {
+	if expr.Kind == air.ExprLoadLocal && expr.Local == local {
+		return true
+	}
+	for _, captured := range expr.CaptureLocals {
+		if captured == local {
+			return true
+		}
+	}
+	for _, arg := range expr.Args {
+		if fl.exprUsesLocal(arg, local) {
+			return true
+		}
+	}
+	for _, entry := range expr.Entries {
+		if fl.exprUsesLocal(entry.Key, local) || fl.exprUsesLocal(entry.Value, local) {
+			return true
+		}
+	}
+	for _, field := range expr.Fields {
+		if fl.exprUsesLocal(field.Value, local) {
+			return true
+		}
+	}
+	if expr.Target != nil && fl.exprUsesLocal(*expr.Target, local) {
+		return true
+	}
+	if expr.Left != nil && fl.exprUsesLocal(*expr.Left, local) {
+		return true
+	}
+	if expr.Right != nil && fl.exprUsesLocal(*expr.Right, local) {
+		return true
+	}
+	if expr.Condition != nil && fl.exprUsesLocal(*expr.Condition, local) {
+		return true
+	}
+	return fl.blockUsesLocal(expr.Body, local) ||
+		fl.blockUsesLocal(expr.Then, local) ||
+		fl.blockUsesLocal(expr.Else, local) ||
+		fl.blockUsesLocal(expr.CatchAll, local) ||
+		fl.blockUsesLocal(expr.Some, local) ||
+		fl.blockUsesLocal(expr.None, local) ||
+		fl.blockUsesLocal(expr.Ok, local) ||
+		fl.blockUsesLocal(expr.Err, local) ||
+		fl.blockUsesLocal(expr.Catch, local)
 }
 
 func functionName(fn air.Function) string {

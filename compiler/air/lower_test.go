@@ -890,6 +890,30 @@ func TestLowerImportedGenericStdlibFunctionBodyUsesConcreteBindings(t *testing.T
 	}
 }
 
+func TestLowerGenericStructMethodBodyUsesReceiverBindings(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box {
+			item: $T
+		}
+
+		impl Box {
+			fn get() $T {
+				self.item
+			}
+		}
+
+		fn main() Int {
+			let box: Box<Int> = Box{item: 42}
+			box.get()
+		}
+	`)
+
+	get := findFunction(t, program, "Box.get")
+	if typeKind(t, program, get.Signature.Return) != TypeInt {
+		t.Fatalf("get return kind = %v, want TypeInt", typeKind(t, program, get.Signature.Return))
+	}
+}
+
 func TestLowerTestsManifest(t *testing.T) {
 	program := lowerSourceWithTests(t, `
 		use ard/testing

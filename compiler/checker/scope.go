@@ -437,7 +437,7 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 		}
 	}
 
-	return &FunctionDef{
+	copy := &FunctionDef{
 		Name:                    fnDef.Name,
 		Parameters:              newParams,
 		ReturnType:              copyTypeWithTypeVarMap(fnDef.ReturnType, typeVarMap),
@@ -447,6 +447,10 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 		Private:                 fnDef.Private,
 		GenericBindings:         cloneTypeMap(fnDef.GenericBindings),
 	}
+	if bindings := concreteTypeVarBindings(typeVarMap); bindings != nil {
+		copy.GenericBindings = bindings
+	}
+	return copy
 }
 
 // copyStructWithTypeVarMap creates a shallow copy of a StructDef with fresh TypeVar instances

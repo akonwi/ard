@@ -530,9 +530,20 @@ func (l *lowerer) newFunctionLowerer(fn *Function, def *checker.FunctionDef, par
 				fl.typeVars[name] = typeID
 			}
 		}
+		paramOffset := 0
+		if len(fn.Signature.Params) == len(def.Parameters)+1 {
+			receiver := def.Receiver
+			if receiver == "" {
+				receiver = "self"
+			}
+			if fn.Signature.Params[0].Name == receiver {
+				paramOffset = 1
+			}
+		}
 		for i, param := range def.Parameters {
-			if i < len(fn.Signature.Params) {
-				fl.bindTypeVars(param.Type, fn.Signature.Params[i].Type)
+			signatureIndex := i + paramOffset
+			if signatureIndex < len(fn.Signature.Params) {
+				fl.bindTypeVars(param.Type, fn.Signature.Params[signatureIndex].Type)
 			}
 		}
 		fl.bindTypeVars(def.ReturnType, fn.Signature.Return)
@@ -1027,8 +1038,8 @@ func (l *lowerer) lowerMethodFunction(id FunctionID, def *checker.FunctionDef) e
 	return nil
 }
 
-func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName string, ownerType TypeID, def *checker.FunctionDef) (FunctionID, error) {
-	key := methodFunctionKey(module, ownerName, "instance", def.Name)
+func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName string, ownerType TypeID, def *checker.FunctionDef, args []checker.Expression, returnType TypeID) (FunctionID, error) {
+	key := methodFunctionKey(module, fmt.Sprintf("%s#%d", ownerName, ownerType), "instance", def.Name)
 	if id, ok := l.functions[key]; ok {
 		return id, nil
 	}
@@ -1039,16 +1050,25 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 	}
 	params := make([]Param, 0, len(def.Parameters)+1)
 	params = append(params, Param{Name: receiver, Type: ownerType, Mutable: def.Mutates})
-	for _, param := range def.Parameters {
-		typeID, err := l.internType(param.Type)
+	for i, param := range def.Parameters {
+		typeID := NoType
+		var err error
+		if i < len(args) {
+			typeID, err = l.internType(args[i].Type())
+		} else {
+			typeID, err = l.internType(param.Type)
+		}
 		if err != nil {
 			return NoFunction, err
 		}
 		params = append(params, Param{Name: param.Name, Type: typeID, Mutable: param.Mutable})
 	}
-	returnType, err := l.internType(def.ReturnType)
-	if err != nil {
-		return NoFunction, err
+	if !validTypeID(&l.program, returnType) {
+		var err error
+		returnType, err = l.internType(def.ReturnType)
+		if err != nil {
+			return NoFunction, err
+		}
 	}
 
 	id := FunctionID(len(l.program.Functions))
@@ -1788,23 +1808,6 @@ func airStructKeySeen(typ *checker.StructDef, seen map[checker.Type]struct{}) st
 		key += name + ":" + airTypeKeySeen(typ.Fields[name], seen)
 	}
 	key += "}"
-	if len(typ.Methods) == 0 {
-		return key
-	}
-	methodNames := make([]string, 0, len(typ.Methods))
-	for name := range typ.Methods {
-		methodNames = append(methodNames, name)
-	}
-	sort.Strings(methodNames)
-	key += " methods{"
-	for i, name := range methodNames {
-		if i > 0 {
-			key += ","
-		}
-		method := typ.Methods[name]
-		key += name + ":" + airFunctionTypeKeySeen(method.Parameters, method.ReturnType, seen)
-	}
-	key += "}"
 	return key
 }
 
@@ -1929,6 +1932,11 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 	if m, ok := expr.(*checker.MapLiteral); ok {
 		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeMap {
 			return fl.lowerMapLiteral(expected, m, expectedInfo.Key, expectedInfo.Value)
+		}
+	}
+	if inst, ok := expr.(*checker.StructInstance); ok {
+		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeStruct {
+			return fl.lowerStructInstance(expected, inst)
 		}
 	}
 	if closure, ok := expr.(*checker.FunctionDef); ok {
@@ -2842,6 +2850,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				return fl.lowerFunctionTypeCall(e.Name, e.Args, target)
 			}
 		}
+	}
+	if prop, ok := expr.(*checker.InstanceProperty); ok {
+		return fl.lowerInstanceProperty(NoType, prop)
 	}
 	typeID, err := fl.internType(expr.Type())
 	if err != nil {
@@ -4070,6 +4081,9 @@ func (fl *functionLowerer) lowerInstanceProperty(typeID TypeID, prop *checker.In
 	}
 	for _, field := range targetInfo.Fields {
 		if field.Name == prop.Property {
+			if !validTypeID(&fl.l.program, typeID) {
+				typeID = field.Type
+			}
 			return &Expr{Kind: ExprGetField, Type: typeID, Target: target, Field: field.Index}, nil
 		}
 	}
@@ -4354,7 +4368,7 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 			return nil, err
 		}
 	}
-	id, err := fl.l.declareInstanceMethodFunction(module, typeInfo.Name, target.Type, def)
+	id, err := fl.l.declareInstanceMethodFunction(module, typeInfo.Name, target.Type, def, method.Method.Args, typeID)
 	if err != nil {
 		return nil, err
 	}
