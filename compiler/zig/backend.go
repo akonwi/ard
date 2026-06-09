@@ -28,7 +28,11 @@ func GenerateSources(program *air.Program, options Options) (map[string][]byte, 
 	if rootFile == "" {
 		rootFile = "main.zig"
 	}
-	l := &lowerer{program: program}
+	l := &lowerer{
+		program:          program,
+		functionAdapters: map[string]functionAdapter{},
+		closureAdapters:  map[air.FunctionID]closureAdapter{},
+	}
 	mainSource, err := l.lowerProgram()
 	if err != nil {
 		return nil, err
@@ -118,7 +122,18 @@ func programArgs(args []string) []string {
 }
 
 type lowerer struct {
-	program *air.Program
+	program          *air.Program
+	functionAdapters map[string]functionAdapter
+	closureAdapters  map[air.FunctionID]closureAdapter
+}
+
+type functionAdapter struct {
+	Function air.FunctionID
+	Type     air.TypeID
+}
+
+type closureAdapter struct {
+	Function air.FunctionID
 }
 
 func (l *lowerer) lowerProgram() (string, error) {
@@ -142,6 +157,9 @@ func (l *lowerer) lowerProgram() (string, error) {
 			return "", err
 		}
 		b.WriteString("\n")
+	}
+	if err := l.lowerFunctionValueAdapters(&b); err != nil {
+		return "", err
 	}
 	b.WriteString("pub fn main(init: std.process.Init) !void {\n")
 	if l.program.Entry != air.NoFunction {
@@ -191,6 +209,123 @@ func (l *lowerer) lowerEnumType(b *strings.Builder, typ air.TypeInfo) error {
 	return nil
 }
 
+func (l *lowerer) lowerFunctionValueAdapters(b *strings.Builder) error {
+	for _, adapter := range l.closureAdapters {
+		if err := l.lowerClosureAdapter(b, adapter); err != nil {
+			return err
+		}
+		b.WriteString("\n")
+	}
+	for _, adapter := range l.functionAdapters {
+		if err := l.lowerFunctionAdapter(b, adapter); err != nil {
+			return err
+		}
+		b.WriteString("\n")
+	}
+	return nil
+}
+
+func (l *lowerer) lowerFunctionAdapter(b *strings.Builder, adapter functionAdapter) error {
+	if int(adapter.Function) < 0 || int(adapter.Function) >= len(l.program.Functions) {
+		return fmt.Errorf("function adapter %d out of range", adapter.Function)
+	}
+	fn := l.program.Functions[adapter.Function]
+	typeInfo, err := l.functionTypeInfo(adapter.Type)
+	if err != nil {
+		return err
+	}
+	ret, err := l.typeName(typeInfo.Return)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(b, "fn %s(ctx: *ard.Context, env: ?*anyopaque", functionAdapterName(adapter.Function, adapter.Type))
+	if err := l.writeFunctionValueParams(b, typeInfo); err != nil {
+		return err
+	}
+	if ret == "void" {
+		b.WriteString(") !void {\n")
+	} else {
+		fmt.Fprintf(b, ") !%s {\n", ret)
+	}
+	b.WriteString("    _ = env;\n")
+	args := []string{"ctx"}
+	for i := range typeInfo.Params {
+		args = append(args, fmt.Sprintf("a%d", i))
+	}
+	if ret == "void" {
+		fmt.Fprintf(b, "    try %s(%s);\n", functionName(fn), strings.Join(args, ", "))
+	} else {
+		fmt.Fprintf(b, "    return try %s(%s);\n", functionName(fn), strings.Join(args, ", "))
+	}
+	b.WriteString("}\n")
+	return nil
+}
+
+func (l *lowerer) lowerClosureAdapter(b *strings.Builder, adapter closureAdapter) error {
+	if int(adapter.Function) < 0 || int(adapter.Function) >= len(l.program.Functions) {
+		return fmt.Errorf("closure adapter %d out of range", adapter.Function)
+	}
+	fn := l.program.Functions[adapter.Function]
+	if len(fn.Captures) > 0 {
+		fmt.Fprintf(b, "const %s = struct {\n", closureEnvName(fn))
+		for i, capture := range fn.Captures {
+			captureType, err := l.typeName(capture.Type)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "    c%d: %s,\n", i, captureType)
+		}
+		b.WriteString("};\n\n")
+	}
+	typeInfo := air.TypeInfo{Kind: air.TypeFunction, Params: make([]air.TypeID, len(fn.Signature.Params)), Return: fn.Signature.Return}
+	for i, param := range fn.Signature.Params {
+		typeInfo.Params[i] = param.Type
+	}
+	ret, err := l.typeName(fn.Signature.Return)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(b, "fn %s(ctx: *ard.Context, env_ptr: ?*anyopaque", closureAdapterName(fn.ID))
+	if err := l.writeFunctionValueParams(b, typeInfo); err != nil {
+		return err
+	}
+	if ret == "void" {
+		b.WriteString(") !void {\n")
+	} else {
+		fmt.Fprintf(b, ") !%s {\n", ret)
+	}
+	args := []string{"ctx"}
+	if len(fn.Captures) > 0 {
+		fmt.Fprintf(b, "    const env: *%s = @ptrCast(@alignCast(env_ptr.?));\n", closureEnvName(fn))
+		for i := range fn.Captures {
+			args = append(args, fmt.Sprintf("env.c%d", i))
+		}
+	} else {
+		b.WriteString("    _ = env_ptr;\n")
+	}
+	for i := range fn.Signature.Params {
+		args = append(args, fmt.Sprintf("a%d", i))
+	}
+	if ret == "void" {
+		fmt.Fprintf(b, "    try %s(%s);\n", functionName(fn), strings.Join(args, ", "))
+	} else {
+		fmt.Fprintf(b, "    return try %s(%s);\n", functionName(fn), strings.Join(args, ", "))
+	}
+	b.WriteString("}\n")
+	return nil
+}
+
+func (l *lowerer) writeFunctionValueParams(b *strings.Builder, typeInfo air.TypeInfo) error {
+	for i, param := range typeInfo.Params {
+		paramType, err := l.typeName(param)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, ", a%d: %s", i, paramType)
+	}
+	return nil
+}
+
 func (l *lowerer) fieldTypeName(field air.FieldInfo) (string, error) {
 	if !field.RecursiveNullable {
 		return l.typeName(field.Type)
@@ -211,6 +346,13 @@ func (l *lowerer) fieldTypeName(field air.FieldInfo) (string, error) {
 
 func (l *lowerer) lowerFunction(b *strings.Builder, fn air.Function) error {
 	fmt.Fprintf(b, "fn %s(ctx: *ard.Context", functionName(fn))
+	for _, capture := range fn.Captures {
+		captureType, err := l.typeName(capture.Type)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, ", %s: %s", localName(fn, capture.Local), captureType)
+	}
 	for i, param := range fn.Signature.Params {
 		paramType, err := l.typeName(param.Type)
 		if err != nil {
@@ -289,6 +431,8 @@ func (l *lowerer) typeName(id air.TypeID) (string, error) {
 			return "", err
 		}
 		return "ard.Result(" + value + ", " + errType + ")", nil
+	case air.TypeFunction:
+		return l.functionTypeName(info)
 	case air.TypeStruct, air.TypeEnum:
 		return typeDeclName(info), nil
 	case air.TypeTraitObject:
@@ -299,6 +443,37 @@ func (l *lowerer) typeName(id air.TypeID) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported Zig type %s", info.Name)
 	}
+}
+
+func (l *lowerer) functionTypeName(info air.TypeInfo) (string, error) {
+	if len(info.Params) > 8 {
+		return "", fmt.Errorf("unsupported Zig function value arity %d; supported arity is 0..8", len(info.Params))
+	}
+	ret, err := l.typeName(info.Return)
+	if err != nil {
+		return "", err
+	}
+	args := make([]string, 0, len(info.Params)+1)
+	for _, param := range info.Params {
+		arg, err := l.typeName(param)
+		if err != nil {
+			return "", err
+		}
+		args = append(args, arg)
+	}
+	args = append(args, ret)
+	return fmt.Sprintf("ard.Fn%d(%s)", len(info.Params), strings.Join(args, ", ")), nil
+}
+
+func (l *lowerer) functionTypeInfo(id air.TypeID) (air.TypeInfo, error) {
+	if id <= 0 || int(id) > len(l.program.Types) {
+		return air.TypeInfo{}, fmt.Errorf("invalid function type id %d", id)
+	}
+	info := l.program.Types[id-1]
+	if info.Kind != air.TypeFunction {
+		return air.TypeInfo{}, fmt.Errorf("type %s is not a function type", info.Name)
+	}
+	return info, nil
 }
 
 type functionLowerer struct {
@@ -703,10 +878,16 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 			return localName(fl.fn, expr.Local) + ".*", nil
 		}
 		return localName(fl.fn, expr.Local), nil
+	case air.ExprFunctionRef:
+		return fl.lowerFunctionRef(expr)
 	case air.ExprCall:
 		return fl.lowerCall(expr)
 	case air.ExprCallExtern:
 		return fl.lowerExternCall(expr)
+	case air.ExprMakeClosure:
+		return fl.lowerMakeClosure(expr)
+	case air.ExprCallClosure:
+		return fl.lowerCallClosure(expr)
 	case air.ExprTraitUpcast:
 		if expr.Target == nil {
 			return "", fmt.Errorf("trait upcast missing target")
@@ -1545,6 +1726,65 @@ func (fl *functionLowerer) lowerMatchMaybeExpr(expr air.Expr) (string, error) {
 	return "", fmt.Errorf("unsupported expression-form maybe match")
 }
 
+func (fl *functionLowerer) lowerFunctionRef(expr air.Expr) (string, error) {
+	if int(expr.Function) < 0 || int(expr.Function) >= len(fl.l.program.Functions) {
+		return "", fmt.Errorf("function ref %d out of range", expr.Function)
+	}
+	fnType, err := fl.l.typeName(expr.Type)
+	if err != nil {
+		return "", err
+	}
+	adapter := fl.l.ensureFunctionAdapter(expr.Function, expr.Type)
+	return fmt.Sprintf("%s{ .ctx = ctx, .env = null, .call = %s }", fnType, adapter), nil
+}
+
+func (fl *functionLowerer) lowerMakeClosure(expr air.Expr) (string, error) {
+	if int(expr.Function) < 0 || int(expr.Function) >= len(fl.l.program.Functions) {
+		return "", fmt.Errorf("closure function %d out of range", expr.Function)
+	}
+	fn := fl.l.program.Functions[expr.Function]
+	fnType, err := fl.l.typeName(expr.Type)
+	if err != nil {
+		return "", err
+	}
+	adapter := fl.l.ensureClosureAdapter(expr.Function)
+	if len(fn.Captures) == 0 {
+		return fmt.Sprintf("%s{ .ctx = ctx, .env = null, .call = %s }", fnType, adapter), nil
+	}
+	envName := closureEnvName(fn)
+	values := make([]string, 0, len(fn.Captures))
+	for i, capture := range fn.Captures {
+		if i >= len(expr.CaptureLocals) {
+			return "", fmt.Errorf("closure %s expects capture %d", fn.Name, i)
+		}
+		captured, err := fl.lowerExpr(air.Expr{Kind: air.ExprLoadLocal, Type: capture.Type, Local: expr.CaptureLocals[i]})
+		if err != nil {
+			return "", err
+		}
+		values = append(values, fmt.Sprintf(".c%d = %s", i, captured))
+	}
+	return fmt.Sprintf("blk: {\nconst env = try ctx.allocator.create(%s);\nenv.* = .{ %s };\nbreak :blk %s{ .ctx = ctx, .env = env, .call = %s };\n}", envName, strings.Join(values, ", "), fnType, adapter), nil
+}
+
+func (fl *functionLowerer) lowerCallClosure(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("call closure missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	args := make([]string, 0, len(expr.Args))
+	for _, arg := range expr.Args {
+		lowered, err := fl.lowerExpr(arg)
+		if err != nil {
+			return "", err
+		}
+		args = append(args, lowered)
+	}
+	return fmt.Sprintf("try %s.invoke(%s)", target, strings.Join(args, ", ")), nil
+}
+
 func (fl *functionLowerer) lowerCall(expr air.Expr) (string, error) {
 	if int(expr.Function) < 0 || int(expr.Function) >= len(fl.l.program.Functions) {
 		return "", fmt.Errorf("function %d out of range", expr.Function)
@@ -1746,7 +1986,8 @@ func (fl *functionLowerer) blockUsesContext(block air.Block) bool {
 
 func (fl *functionLowerer) exprUsesContext(expr air.Expr) bool {
 	switch expr.Kind {
-	case air.ExprCall, air.ExprCallExtern, air.ExprCallTrait, air.ExprStrConcat, air.ExprToStr:
+	case air.ExprCall, air.ExprCallExtern, air.ExprCallTrait, air.ExprFunctionRef, air.ExprMakeClosure,
+		air.ExprStrConcat, air.ExprToStr:
 		return true
 	}
 	for _, arg := range expr.Args {
@@ -1797,6 +2038,29 @@ func typeDeclName(typ air.TypeInfo) string {
 
 func enumVariantName(typ air.TypeInfo, variant air.VariantInfo) string {
 	return fmt.Sprintf("%s_%s", typeDeclName(typ), sanitizeIdentifier(variant.Name))
+}
+
+func (l *lowerer) ensureFunctionAdapter(fn air.FunctionID, typ air.TypeID) string {
+	name := functionAdapterName(fn, typ)
+	l.functionAdapters[name] = functionAdapter{Function: fn, Type: typ}
+	return name
+}
+
+func (l *lowerer) ensureClosureAdapter(fn air.FunctionID) string {
+	l.closureAdapters[fn] = closureAdapter{Function: fn}
+	return closureAdapterName(fn)
+}
+
+func functionAdapterName(fn air.FunctionID, typ air.TypeID) string {
+	return fmt.Sprintf("ard_fn_adapter_%d_%d", fn, typ)
+}
+
+func closureAdapterName(fn air.FunctionID) string {
+	return fmt.Sprintf("ard_closure_adapter_%d", fn)
+}
+
+func closureEnvName(fn air.Function) string {
+	return fmt.Sprintf("ArdClosureEnv_%d_%s", fn.ID, sanitizeIdentifier(fn.Name))
 }
 
 func (fl *functionLowerer) nextTemp(prefix string) string {
@@ -1872,6 +2136,132 @@ pub fn Result(comptime Value: type, comptime Error: type) type {
         value: Value = undefined,
         err: Error = undefined,
         ok: bool = false,
+    };
+}
+
+pub fn Fn0(comptime R: type) type {
+    return struct {
+        ctx: *Context,
+        env: ?*anyopaque,
+        call: *const fn (*Context, ?*anyopaque) anyerror!R,
+
+        const Self = @This();
+
+        pub fn invoke(self: Self) !R {
+            return self.call(self.ctx, self.env);
+        }
+    };
+}
+
+pub fn Fn1(comptime A0: type, comptime R: type) type {
+    return struct {
+        ctx: *Context,
+        env: ?*anyopaque,
+        call: *const fn (*Context, ?*anyopaque, A0) anyerror!R,
+
+        const Self = @This();
+
+        pub fn invoke(self: Self, a0: A0) !R {
+            return self.call(self.ctx, self.env, a0);
+        }
+    };
+}
+
+pub fn Fn2(comptime A0: type, comptime A1: type, comptime R: type) type {
+    return struct {
+        ctx: *Context,
+        env: ?*anyopaque,
+        call: *const fn (*Context, ?*anyopaque, A0, A1) anyerror!R,
+
+        const Self = @This();
+
+        pub fn invoke(self: Self, a0: A0, a1: A1) !R {
+            return self.call(self.ctx, self.env, a0, a1);
+        }
+    };
+}
+
+pub fn Fn3(comptime A0: type, comptime A1: type, comptime A2: type, comptime R: type) type {
+    return struct {
+        ctx: *Context,
+        env: ?*anyopaque,
+        call: *const fn (*Context, ?*anyopaque, A0, A1, A2) anyerror!R,
+
+        const Self = @This();
+
+        pub fn invoke(self: Self, a0: A0, a1: A1, a2: A2) !R {
+            return self.call(self.ctx, self.env, a0, a1, a2);
+        }
+    };
+}
+
+pub fn Fn4(comptime A0: type, comptime A1: type, comptime A2: type, comptime A3: type, comptime R: type) type {
+    return struct {
+        ctx: *Context,
+        env: ?*anyopaque,
+        call: *const fn (*Context, ?*anyopaque, A0, A1, A2, A3) anyerror!R,
+
+        const Self = @This();
+
+        pub fn invoke(self: Self, a0: A0, a1: A1, a2: A2, a3: A3) !R {
+            return self.call(self.ctx, self.env, a0, a1, a2, a3);
+        }
+    };
+}
+
+pub fn Fn5(comptime A0: type, comptime A1: type, comptime A2: type, comptime A3: type, comptime A4: type, comptime R: type) type {
+    return struct {
+        ctx: *Context,
+        env: ?*anyopaque,
+        call: *const fn (*Context, ?*anyopaque, A0, A1, A2, A3, A4) anyerror!R,
+
+        const Self = @This();
+
+        pub fn invoke(self: Self, a0: A0, a1: A1, a2: A2, a3: A3, a4: A4) !R {
+            return self.call(self.ctx, self.env, a0, a1, a2, a3, a4);
+        }
+    };
+}
+
+pub fn Fn6(comptime A0: type, comptime A1: type, comptime A2: type, comptime A3: type, comptime A4: type, comptime A5: type, comptime R: type) type {
+    return struct {
+        ctx: *Context,
+        env: ?*anyopaque,
+        call: *const fn (*Context, ?*anyopaque, A0, A1, A2, A3, A4, A5) anyerror!R,
+
+        const Self = @This();
+
+        pub fn invoke(self: Self, a0: A0, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5) !R {
+            return self.call(self.ctx, self.env, a0, a1, a2, a3, a4, a5);
+        }
+    };
+}
+
+pub fn Fn7(comptime A0: type, comptime A1: type, comptime A2: type, comptime A3: type, comptime A4: type, comptime A5: type, comptime A6: type, comptime R: type) type {
+    return struct {
+        ctx: *Context,
+        env: ?*anyopaque,
+        call: *const fn (*Context, ?*anyopaque, A0, A1, A2, A3, A4, A5, A6) anyerror!R,
+
+        const Self = @This();
+
+        pub fn invoke(self: Self, a0: A0, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6) !R {
+            return self.call(self.ctx, self.env, a0, a1, a2, a3, a4, a5, a6);
+        }
+    };
+}
+
+pub fn Fn8(comptime A0: type, comptime A1: type, comptime A2: type, comptime A3: type, comptime A4: type, comptime A5: type, comptime A6: type, comptime A7: type, comptime R: type) type {
+    return struct {
+        ctx: *Context,
+        env: ?*anyopaque,
+        call: *const fn (*Context, ?*anyopaque, A0, A1, A2, A3, A4, A5, A6, A7) anyerror!R,
+
+        const Self = @This();
+
+        pub fn invoke(self: Self, a0: A0, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7) !R {
+            return self.call(self.ctx, self.env, a0, a1, a2, a3, a4, a5, a6, a7);
+        }
     };
 }
 

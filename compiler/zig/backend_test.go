@@ -91,6 +91,23 @@ func TestGenerateSourcesIfExpression(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesFunctionValueArityLimitError(t *testing.T) {
+	program := lowerSource(t, `
+		fn apply9(op: fn(Int, Int, Int, Int, Int, Int, Int, Int, Int) Int) Int {
+			op(1, 2, 3, 4, 5, 6, 7, 8, 9)
+		}
+	`)
+
+	_, err := GenerateSources(program, Options{})
+	if err == nil {
+		t.Fatal("GenerateSources error = nil, want arity error")
+	}
+	want := "unsupported Zig function value arity 9; supported arity is 0..8"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("GenerateSources error = %q, want to contain %q", err.Error(), want)
+	}
+}
+
 func TestBuildProgramPrimitiveProgramCompilesWithZig(t *testing.T) {
 	requireZig(t)
 	program := lowerSource(t, `
@@ -658,6 +675,70 @@ func TestRunResultSemantics(t *testing.T) {
 		"divide by zero",
 		"3",
 		"pass",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestRunFunctionValuesAndClosures(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+
+		fn subtract(a: Int, b: Int) Int {
+			a - b
+		}
+
+		fn apply(op: fn(Int, Int) Int, a: Int, b: Int) Int {
+			op(a, b)
+		}
+
+		fn apply8(op: fn(Int, Int, Int, Int, Int, Int, Int, Int) Int) Int {
+			op(1, 2, 3, 4, 5, 6, 7, 8)
+		}
+
+		fn make_adder(base: Int) fn(Int) Int {
+			fn(value: Int) Int {
+				base + value
+			}
+		}
+
+		fn make_label(prefix: Str) fn() Str {
+			fn() Str {
+				prefix + "!"
+			}
+		}
+
+		fn main() {
+			io::print(apply(subtract, 30, 8))
+			let add = fn(a: Int, b: Int) Int {
+				a + b
+			}
+			io::print(apply(add, 20, 22))
+			let add_five = make_adder(5)
+			io::print(add_five(10))
+			let label = make_label("go")
+			io::print(label())
+			let sum8 = fn(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) Int {
+				a + b + c + d + e + f + g + h
+			}
+			io::print(apply8(sum8))
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"22",
+		"42",
+		"15",
+		"go!",
+		"36",
 		"",
 	}, "\n")
 	if stdout != want {
