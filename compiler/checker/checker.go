@@ -4999,6 +4999,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			Mutates:                 typ.Mutates,
 			IsTest:                  typ.IsTest,
 			Private:                 typ.Private,
+			GenericBindings:         cloneTypeMap(typ.GenericBindings),
 		}
 	case *ExternType:
 		substitutedArgs := make([]Type, len(typ.TypeArgs))
@@ -5010,6 +5011,17 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 	default:
 		return t
 	}
+}
+
+func cloneTypeMap(in map[string]Type) map[string]Type {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]Type, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 // setupFunctionGenerics sets up generic scope and function copy for generic functions.
@@ -5230,6 +5242,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				Body:                    fnDefCopy.Body,
 				Mutates:                 fnDefCopy.Mutates,
 				Private:                 fnDefCopy.Private,
+				GenericBindings:         cloneTypeMap(bindings),
 			}
 
 			// Replace generics in parameters
@@ -5327,6 +5340,7 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 		Body:                    fnDefCopy.Body,
 		Mutates:                 fnDefCopy.Mutates,
 		Private:                 fnDefCopy.Private,
+		GenericBindings:         cloneTypeMap(bindings),
 	}
 
 	// Replace generics in parameters

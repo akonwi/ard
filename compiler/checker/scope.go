@@ -445,6 +445,7 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 		Body:                    fnDef.Body,
 		Mutates:                 fnDef.Mutates,
 		Private:                 fnDef.Private,
+		GenericBindings:         cloneTypeMap(fnDef.GenericBindings),
 	}
 }
 

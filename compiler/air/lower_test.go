@@ -865,6 +865,31 @@ func TestLowerImportedGenericModuleFunctionSpecialization(t *testing.T) {
 	}
 }
 
+func TestLowerImportedGenericStdlibFunctionBodyUsesConcreteBindings(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/list
+
+		fn main() [Int] {
+			list::keep([1, 2, 3], fn(value) { value > 1 })
+		}
+	`)
+
+	keep := findFunction(t, program, "keep")
+	if len(keep.Signature.Params) != 2 {
+		t.Fatalf("keep param count = %d, want 2", len(keep.Signature.Params))
+	}
+	returnType := testTypeInfo(t, program, keep.Signature.Return)
+	if returnType.Kind != TypeList || typeKind(t, program, returnType.Elem) != TypeInt {
+		t.Fatalf("keep return = %#v, want [Int]", returnType)
+	}
+	for _, local := range keep.Locals {
+		info := testTypeInfo(t, program, local.Type)
+		if info.Kind == TypeList && typeKind(t, program, info.Elem) == TypeVoid {
+			t.Fatalf("keep local %s has [Void], want concrete generic binding", local.Name)
+		}
+	}
+}
+
 func TestLowerTestsManifest(t *testing.T) {
 	program := lowerSourceWithTests(t, `
 		use ard/testing

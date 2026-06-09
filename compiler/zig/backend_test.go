@@ -801,6 +801,57 @@ func TestRunMaybeCallbackMethods(t *testing.T) {
 	}
 }
 
+func TestRunListStdlibCallbacks(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+		use ard/list
+
+		fn main() {
+			let values = [1, 2, 3, 4]
+			let doubled = list::map(values, fn(value) { value * 2 })
+			for value in doubled {
+				io::print(value)
+			}
+
+			let kept = list::keep(values, fn(value) { value % 2 == 0 })
+			for value in kept {
+				io::print(value)
+			}
+
+			match list::find(values, fn(value) { value > 2 }) {
+				found => io::print(found),
+				_ => io::print("none")
+			}
+
+			let partition = list::partition_int(values, fn(value) { value <= 2 })
+			io::print(partition.selected.size())
+			io::print(partition.others.size())
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"2",
+		"4",
+		"6",
+		"8",
+		"2",
+		"4",
+		"3",
+		"2",
+		"2",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func TestRunFunctionValuesAndClosures(t *testing.T) {
 	requireZig(t)
 	path := writeTempSource(t, `

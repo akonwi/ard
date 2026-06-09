@@ -683,7 +683,7 @@ func (fl *functionLowerer) lowerMatchMaybeResult(b *strings.Builder, expr air.Ex
 	if len(expr.Some.Stmts) == 0 && expr.Some.Result == nil && len(expr.None.Stmts) == 0 && expr.None.Result == nil {
 		return false, nil
 	}
-	fmt.Fprintf(b, "%sif (%s.some) |%s| {\n", fl.indent, target, localName(fl.fn, expr.SomeLocal))
+	fmt.Fprintf(b, "%sif ((%s).some) |%s| {\n", fl.indent, target, localName(fl.fn, expr.SomeLocal))
 	someFl := *fl
 	someFl.indent += "    "
 	if err := someFl.lowerBlock(b, expr.Some, returnType); err != nil {
@@ -1490,7 +1490,7 @@ func (fl *functionLowerer) lowerResultIsOk(expr air.Expr) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("(%s.ok)", target), nil
+	return fmt.Sprintf("((%s).ok)", target), nil
 }
 
 func (fl *functionLowerer) lowerResultIsErr(expr air.Expr) (string, error) {
@@ -1501,7 +1501,7 @@ func (fl *functionLowerer) lowerResultIsErr(expr air.Expr) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("(!%s.ok)", target), nil
+	return fmt.Sprintf("(!(%s).ok)", target), nil
 }
 
 func (fl *functionLowerer) lowerResultMap(expr air.Expr) (string, error) {
