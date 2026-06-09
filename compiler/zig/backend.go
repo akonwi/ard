@@ -283,9 +283,6 @@ func (l *lowerer) lowerTraitImplAdapters(b *strings.Builder) error {
 			return fmt.Errorf("impl %d has invalid trait id %d", impl.ID, impl.Trait)
 		}
 		trait := l.program.Traits[impl.Trait]
-		if trait.Name == "ToString" {
-			continue
-		}
 		if impl.ForType <= 0 || int(impl.ForType) > len(l.program.Types) {
 			return fmt.Errorf("impl %d has invalid for type %d", impl.ID, impl.ForType)
 		}
@@ -327,7 +324,7 @@ func (l *lowerer) lowerTraitImplAdapters(b *strings.Builder) error {
 			}
 			b.WriteString("}\n\n")
 		}
-		fmt.Fprintf(b, "const %s = %s.VTable{\n", traitImplVTableName(impl), traitObjectName(trait))
+		fmt.Fprintf(b, "const %s = %s.VTable{\n", traitImplVTableName(impl), traitObjectTypeName(trait))
 		for i, method := range trait.Methods {
 			fmt.Fprintf(b, "    .%s = %s,\n", traitMethodFieldName(method, i), traitImplAdapterName(impl, i))
 		}
@@ -666,7 +663,9 @@ func (fl *functionLowerer) lowerBlock(b *strings.Builder, block air.Block, retur
 			return err
 		}
 		if returnTypeName == "void" {
-			fmt.Fprintf(b, "%s%s;\n", fl.indent, expr)
+			if expr != "{}" {
+				fmt.Fprintf(b, "%s%s;\n", fl.indent, expr)
+			}
 		} else {
 			fmt.Fprintf(b, "%sreturn %s;\n", fl.indent, expr)
 		}
@@ -976,7 +975,9 @@ func (fl *functionLowerer) lowerStmt(b *strings.Builder, stmt air.Stmt) error {
 			fmt.Fprintf(b, "%s_ = %s;\n", fl.indent, expr)
 			return nil
 		}
-		fmt.Fprintf(b, "%s%s;\n", fl.indent, expr)
+		if expr != "{}" {
+			fmt.Fprintf(b, "%s%s;\n", fl.indent, expr)
+		}
 	case air.StmtWhile:
 		if stmt.Condition == nil {
 			return fmt.Errorf("while has no condition")
@@ -1014,7 +1015,7 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		}
 		return "false", nil
 	case air.ExprConstStr:
-		return strconv.Quote(expr.Str), nil
+		return zigStringLiteral(expr.Str), nil
 	case air.ExprLoadLocal:
 		if fl.localIsMutablePointer(expr.Local) {
 			return localName(fl.fn, expr.Local) + ".*", nil
@@ -1049,8 +1050,16 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		return fl.lowerMakeList(expr)
 	case air.ExprListAt:
 		return fl.lowerListAt(expr)
+	case air.ExprListPrepend:
+		return fl.lowerListPrepend(expr)
 	case air.ExprListPush:
 		return fl.lowerListPush(expr)
+	case air.ExprListSet:
+		return fl.lowerListSet(expr)
+	case air.ExprListSort:
+		return fl.lowerListSort(expr)
+	case air.ExprListSwap:
+		return fl.lowerListSwap(expr)
 	case air.ExprListSize:
 		return fl.lowerListSize(expr)
 	case air.ExprMakeStruct:
@@ -1063,6 +1072,14 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		return fl.lowerMakeMaybeSome(expr)
 	case air.ExprMakeMaybeNone:
 		return fl.lowerMakeMaybeNone(expr)
+	case air.ExprMaybeExpect:
+		return fl.lowerMaybeExpect(expr)
+	case air.ExprMaybeIsNone:
+		return fl.lowerMaybeIsNone(expr)
+	case air.ExprMaybeIsSome:
+		return fl.lowerMaybeIsSome(expr)
+	case air.ExprMaybeOr:
+		return fl.lowerMaybeOr(expr)
 	case air.ExprMaybeMap:
 		return fl.lowerMaybeMap(expr)
 	case air.ExprMaybeAndThen:
@@ -1303,6 +1320,21 @@ func (fl *functionLowerer) lowerListSize(expr air.Expr) (string, error) {
 	return fmt.Sprintf("@as(i64, @intCast((%s).size()))", target), nil
 }
 
+func (fl *functionLowerer) lowerListPrepend(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("list prepend expects target and value")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	value, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("try (%s).prepend(%s)", target, value), nil
+}
+
 func (fl *functionLowerer) lowerListPush(expr air.Expr) (string, error) {
 	if expr.Target == nil || len(expr.Args) != 1 {
 		return "", fmt.Errorf("list push expects target and value")
@@ -1316,6 +1348,59 @@ func (fl *functionLowerer) lowerListPush(expr air.Expr) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("try (%s).push(%s)", target, value), nil
+}
+
+func (fl *functionLowerer) lowerListSet(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 2 {
+		return "", fmt.Errorf("list set expects target, index, and value")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	index, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	value, err := fl.lowerExpr(expr.Args[1])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("(%s).set(@intCast(%s), %s)", target, index, value), nil
+}
+
+func (fl *functionLowerer) lowerListSort(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("list sort expects target and comparator")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	comparator, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("try (%s).sort(%s)", target, comparator), nil
+}
+
+func (fl *functionLowerer) lowerListSwap(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 2 {
+		return "", fmt.Errorf("list swap expects target and two indices")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	left, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	right, err := fl.lowerExpr(expr.Args[1])
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("(%s).swap(@intCast(%s), @intCast(%s))", target, left, right), nil
 }
 
 func (fl *functionLowerer) lowerMakeStruct(expr air.Expr) (string, error) {
@@ -1518,6 +1603,60 @@ func (fl *functionLowerer) lowerMakeMaybeNone(expr air.Expr) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("ard.Maybe(%s){ .some = null }", elemType), nil
+}
+
+func (fl *functionLowerer) lowerMaybeExpect(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("maybe expect expects target and message")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	message, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	temp := fl.nextTemp("maybe")
+	return fmt.Sprintf("blk: {\nconst %s = %s;\nif (%s.some) |value| break :blk value;\n@panic(%s);\n}", temp, target, temp, message), nil
+}
+
+func (fl *functionLowerer) lowerMaybeIsNone(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("maybe is_none missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("((%s).some == null)", target), nil
+}
+
+func (fl *functionLowerer) lowerMaybeIsSome(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("maybe is_some missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("((%s).some != null)", target), nil
+}
+
+func (fl *functionLowerer) lowerMaybeOr(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("maybe or expects target and default value")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	defaultValue, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	temp := fl.nextTemp("maybe")
+	return fmt.Sprintf("blk: {\nconst %s = %s;\nif (%s.some) |value| break :blk value;\nbreak :blk %s;\n}", temp, target, temp, defaultValue), nil
 }
 
 func (fl *functionLowerer) lowerMaybeMap(expr air.Expr) (string, error) {
@@ -2116,7 +2255,15 @@ func (fl *functionLowerer) lowerMatchUnionExpr(expr air.Expr) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(&b, ".%s => |%s| break :blk %s,\n", unionMemberName(member), localName(fl.fn, matchCase.Local), result)
+		capture := localName(fl.fn, matchCase.Local)
+		if fl.localNeedsDiscard(matchCase.Local) || !fl.blockUsesLocal(matchCase.Body, matchCase.Local) {
+			capture = "_"
+		}
+		if capture == "_" {
+			fmt.Fprintf(&b, ".%s => break :blk %s,\n", unionMemberName(member), result)
+		} else {
+			fmt.Fprintf(&b, ".%s => |%s| break :blk %s,\n", unionMemberName(member), capture, result)
+		}
 	}
 	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
 		result, err := blockResultExpr(fl, expr.CatchAll)
@@ -2124,7 +2271,7 @@ func (fl *functionLowerer) lowerMatchUnionExpr(expr air.Expr) (string, error) {
 			return "", err
 		}
 		fmt.Fprintf(&b, "else => break :blk %s,\n", result)
-	} else {
+	} else if len(expr.UnionCases) < len(unionType.Members) {
 		b.WriteString("else => unreachable,\n")
 	}
 	b.WriteString("}\n}")
@@ -2288,6 +2435,11 @@ func (fl *functionLowerer) lowerExternCall(expr air.Expr) (string, error) {
 			return "", fmt.Errorf("IntFromStr extern expects 1 arg, got %d", len(args))
 		}
 		return fmt.Sprintf("ard.intFromStr(%s)", args[0]), nil
+	case "ReadLine":
+		if len(args) != 0 {
+			return "", fmt.Errorf("ReadLine extern expects 0 args, got %d", len(args))
+		}
+		return "try ard.readLine(ctx)", nil
 	default:
 		return "", fmt.Errorf("unsupported zig extern binding %q", binding)
 	}
@@ -2302,7 +2454,7 @@ func (fl *functionLowerer) lowerTraitUpcast(expr air.Expr, target string) (strin
 		return "", fmt.Errorf("trait upcast target has invalid type %d", expr.Target.Type)
 	}
 	targetType := fl.l.program.Types[expr.Target.Type-1]
-	if trait.Name != "ToString" {
+	if trait.Name != "ToString" || !isPrimitiveToStringKind(targetType.Kind) {
 		if expr.Impl < 0 || int(expr.Impl) >= len(fl.l.program.Impls) {
 			return "", fmt.Errorf("trait upcast to %s has invalid impl id %d", trait.Name, expr.Impl)
 		}
@@ -2320,6 +2472,9 @@ func (fl *functionLowerer) lowerTraitUpcast(expr air.Expr, target string) (strin
 		traitType, err := fl.l.typeName(expr.Type)
 		if err != nil {
 			return "", err
+		}
+		if trait.Name == "ToString" {
+			return fmt.Sprintf("blk: {\nconst boxed = try ctx.allocator.create(%s);\nboxed.* = %s;\nbreak :blk %s{ .custom = .{ .ptr = boxed, .vtable = &%s } };\n}", concreteType, target, traitType, traitImplVTableName(impl)), nil
 		}
 		return fmt.Sprintf("blk: {\nconst boxed = try ctx.allocator.create(%s);\nboxed.* = %s;\nbreak :blk %s{ .ptr = boxed, .vtable = &%s };\n}", concreteType, target, traitType, traitImplVTableName(impl)), nil
 	}
@@ -2392,6 +2547,13 @@ func (fl *functionLowerer) lowerBinary(expr air.Expr) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if (expr.Kind == air.ExprEq || expr.Kind == air.ExprNotEq) && fl.exprTypeKind(expr.Left) == air.TypeStr && fl.exprTypeKind(expr.Right) == air.TypeStr {
+		comparison := fmt.Sprintf("std.mem.eql(u8, %s, %s)", left, right)
+		if expr.Kind == air.ExprNotEq {
+			return "!" + comparison, nil
+		}
+		return comparison, nil
+	}
 	op := map[air.ExprKind]string{
 		air.ExprIntAdd: "+", air.ExprIntSub: "-", air.ExprIntMul: "*", air.ExprIntDiv: "@divTrunc", air.ExprIntMod: "@mod",
 		air.ExprFloatAdd: "+", air.ExprFloatSub: "-", air.ExprFloatMul: "*", air.ExprFloatDiv: "/",
@@ -2404,6 +2566,13 @@ func (fl *functionLowerer) lowerBinary(expr air.Expr) (string, error) {
 	default:
 		return fmt.Sprintf("(%s %s %s)", left, op, right), nil
 	}
+}
+
+func (fl *functionLowerer) exprTypeKind(expr *air.Expr) air.TypeKind {
+	if expr == nil || expr.Type <= 0 || int(expr.Type) > len(fl.l.program.Types) {
+		return air.TypeVoid
+	}
+	return fl.l.program.Types[expr.Type-1].Kind
 }
 
 func (fl *functionLowerer) lowerIfExpr(expr air.Expr) (string, error) {
@@ -2642,6 +2811,13 @@ func traitObjectName(trait air.Trait) string {
 	return fmt.Sprintf("ArdTrait_%d_%s", trait.ID, sanitizeIdentifier(trait.Name))
 }
 
+func traitObjectTypeName(trait air.Trait) string {
+	if trait.Name == "ToString" {
+		return "ard.Stringable"
+	}
+	return traitObjectName(trait)
+}
+
 func traitMethodFieldName(method air.TraitMethod, index int) string {
 	return fmt.Sprintf("m%d_%s", index, sanitizeIdentifier(method.Name))
 }
@@ -2652,6 +2828,42 @@ func traitImplAdapterName(impl air.Impl, methodIndex int) string {
 
 func traitImplVTableName(impl air.Impl) string {
 	return fmt.Sprintf("ard_trait_impl_%d_vtable", impl.ID)
+}
+
+func isPrimitiveToStringKind(kind air.TypeKind) bool {
+	switch kind {
+	case air.TypeStr, air.TypeInt, air.TypeFloat, air.TypeBool:
+		return true
+	default:
+		return false
+	}
+}
+
+func zigStringLiteral(value string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range value {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if r < 0x20 || r == 0x7f {
+				fmt.Fprintf(&b, "\\x%02x", r)
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 func (l *lowerer) ensureFunctionAdapter(fn air.FunctionID, typ air.TypeID) string {
@@ -2730,6 +2942,7 @@ const runtimeSource = `const std = @import("std");
 pub const Context = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
+    stdin_reader: ?*std.Io.File.Reader = null,
 };
 
 pub const Stringable = union(enum) {
@@ -2737,6 +2950,16 @@ pub const Stringable = union(enum) {
     int: i64,
     float: f64,
     bool: bool,
+    custom: Custom,
+
+    pub const Custom = struct {
+        ptr: *anyopaque,
+        vtable: *const VTable,
+    };
+
+    pub const VTable = struct {
+        m0_to_str: *const fn (ctx: *Context, ptr: *anyopaque) anyerror![]const u8,
+    };
 };
 
 pub fn Maybe(comptime T: type) type {
@@ -2916,11 +3139,39 @@ pub fn List(comptime T: type) type {
             return self.items[index];
         }
 
+        pub fn prepend(self: *Self, value: T) !void {
+            const next = try self.allocator.alloc(T, self.items.len + 1);
+            next[0] = value;
+            @memcpy(next[1..], self.items);
+            self.items = next;
+        }
+
         pub fn push(self: *Self, value: T) !void {
             const next = try self.allocator.alloc(T, self.items.len + 1);
             @memcpy(next[0..self.items.len], self.items);
             next[self.items.len] = value;
             self.items = next;
+        }
+
+        pub fn set(self: *Self, index: usize, value: T) void {
+            self.items[index] = value;
+        }
+
+        pub fn swap(self: *Self, left: usize, right: usize) void {
+            const tmp = self.items[left];
+            self.items[left] = self.items[right];
+            self.items[right] = tmp;
+        }
+
+        pub fn sort(self: *Self, comparator: anytype) !void {
+            const SortContext = struct {
+                callback: @TypeOf(comparator),
+
+                pub fn less(ctx: @This(), left: T, right: T) bool {
+                    return ctx.callback.invoke(left, right) catch false;
+                }
+            };
+            std.mem.sort(T, self.items, SortContext{ .callback = comparator }, SortContext.less);
         }
     };
 }
@@ -3073,6 +3324,37 @@ pub fn print(ctx: *Context, value: []const u8) !void {
     try stdout.flush();
 }
 
+pub fn readLine(ctx: *Context) !Result([]const u8, []const u8) {
+    if (ctx.stdin_reader == null) {
+        const buffer = try ctx.allocator.alloc(u8, 4096);
+        const reader = try ctx.allocator.create(std.Io.File.Reader);
+        reader.* = std.Io.File.Reader.initStreaming(std.Io.File.stdin(), ctx.io, buffer);
+        ctx.stdin_reader = reader;
+    }
+    const stdin = &ctx.stdin_reader.?.interface;
+    const line = stdin.takeDelimiter('\n') catch |err| {
+        return Result([]const u8, []const u8){
+            .value = undefined,
+            .err = @errorName(err),
+            .ok = false,
+        };
+    };
+    const raw = line orelse {
+        return Result([]const u8, []const u8){
+            .value = undefined,
+            .err = "EndOfStream",
+            .ok = false,
+        };
+    };
+    const trimmed = std.mem.trimEnd(u8, raw, "\r");
+    const out = try ctx.allocator.dupe(u8, trimmed);
+    return Result([]const u8, []const u8){
+        .value = out,
+        .err = undefined,
+        .ok = true,
+    };
+}
+
 pub fn concat(ctx: *Context, left: []const u8, right: []const u8) ![]const u8 {
     return try std.fmt.allocPrint(ctx.allocator, "{s}{s}", .{ left, right });
 }
@@ -3091,6 +3373,7 @@ pub fn stringableToStr(ctx: *Context, value: Stringable) ![]const u8 {
         .int => |v| try toStr(ctx, v),
         .float => |v| try toStr(ctx, v),
         .bool => |v| try toStr(ctx, v),
+        .custom => |v| try v.vtable.m0_to_str(ctx, v.ptr),
     };
 }
 

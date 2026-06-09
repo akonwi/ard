@@ -1400,6 +1400,96 @@ func TestRunLoopSemantics(t *testing.T) {
 	}
 }
 
+func TestRunSampleGapRegressions(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+		use ard/maybe
+
+		struct Book {
+			title: Str,
+		}
+
+		impl Str::ToString for Book {
+			fn to_str() Str {
+				"Book: {self.title}"
+			}
+		}
+
+		struct Left {
+			value: Int,
+		}
+
+		struct Right {
+			value: Int,
+		}
+
+		type Side = Left | Right
+
+		fn side_name(side: Side) Str {
+			match side {
+				Left(_) => "left",
+				Right(_) => "right",
+			}
+		}
+
+		fn main() {
+			io::print("Bell\b")
+			io::print(Book{title: "Ard"})
+			io::print(side_name(Left{value: 1}))
+			io::print(maybe::some(3).or(9))
+
+			mut values = [3, 1, 2]
+			values.set(0, 4)
+			values.sort(fn(a: Int, b: Int) Bool { a < b })
+			for value in values {
+				io::print(value)
+			}
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"Bell\b",
+		"Book: Ard",
+		"left",
+		"3",
+		"1",
+		"2",
+		"4",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestRunReadLineStdlibFunction(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+
+		fn main() {
+			io::print(io::read_line().expect("first"))
+			io::print(io::read_line().expect("second"))
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdoutWithStdin(program, []string{"ard", "run", "--target", "zig", path}, "one\ntwo\n")
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{"one", "two", ""}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
@@ -1419,8 +1509,13 @@ func lowerSource(t *testing.T, input string) *air.Program {
 }
 
 func runProgramCaptureStdout(program *air.Program, args []string) (string, error) {
+	return runProgramCaptureStdoutWithStdin(program, args, "")
+}
+
+func runProgramCaptureStdoutWithStdin(program *air.Program, args []string, stdin string) (string, error) {
 	var stdout bytes.Buffer
 	oldStdout := os.Stdout
+	oldStdin := os.Stdin
 	readPipe, writePipe, err := os.Pipe()
 	if err != nil {
 		return "", err
@@ -1428,9 +1523,31 @@ func runProgramCaptureStdout(program *air.Program, args []string) (string, error
 	os.Stdout = writePipe
 	defer func() {
 		os.Stdout = oldStdout
+		os.Stdin = oldStdin
 	}()
 
+	var stdinRead *os.File
+	var stdinWrite *os.File
+	if stdin != "" {
+		stdinRead, stdinWrite, err = os.Pipe()
+		if err != nil {
+			return "", err
+		}
+		if _, err := stdinWrite.WriteString(stdin); err != nil {
+			return "", err
+		}
+		if err := stdinWrite.Close(); err != nil {
+			return "", err
+		}
+		os.Stdin = stdinRead
+	}
+
 	runErr := RunProgram(program, args)
+	if stdinRead != nil {
+		if closeErr := stdinRead.Close(); closeErr != nil {
+			return "", closeErr
+		}
+	}
 	if closeErr := writePipe.Close(); closeErr != nil {
 		return "", closeErr
 	}
