@@ -933,6 +933,12 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		return fl.lowerResultIsOk(expr)
 	case air.ExprResultIsErr:
 		return fl.lowerResultIsErr(expr)
+	case air.ExprResultMap:
+		return fl.lowerResultMap(expr)
+	case air.ExprResultMapErr:
+		return fl.lowerResultMapErr(expr)
+	case air.ExprResultAndThen:
+		return fl.lowerResultAndThen(expr)
 	case air.ExprMapSize:
 		return fl.lowerMapSize(expr)
 	case air.ExprMapSet:
@@ -1424,6 +1430,77 @@ func (fl *functionLowerer) lowerResultIsErr(expr air.Expr) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("(!%s.ok)", target), nil
+}
+
+func (fl *functionLowerer) lowerResultMap(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("result map expects target and callback")
+	}
+	resultType, valueType, _, err := fl.resultTypeNames(expr.Type)
+	if err != nil {
+		return "", err
+	}
+	target, callback, err := fl.lowerResultCallbackOperands(expr)
+	if err != nil {
+		return "", err
+	}
+	targetTemp := fl.nextTemp("result")
+	callbackTemp := fl.nextTemp("callback")
+	mapped := fmt.Sprintf("try %s.invoke(%s.value)", callbackTemp, targetTemp)
+	if valueType == "void" {
+		mapped = "{}"
+	}
+	return fmt.Sprintf("blk: {\nconst %s = %s;\nconst %s = %s;\nif (%s.ok) break :blk %s{ .value = %s, .err = undefined, .ok = true };\nbreak :blk %s{ .value = undefined, .err = %s.err, .ok = false };\n}", targetTemp, target, callbackTemp, callback, targetTemp, resultType, mapped, resultType, targetTemp), nil
+}
+
+func (fl *functionLowerer) lowerResultMapErr(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("result map_err expects target and callback")
+	}
+	resultType, _, errType, err := fl.resultTypeNames(expr.Type)
+	if err != nil {
+		return "", err
+	}
+	target, callback, err := fl.lowerResultCallbackOperands(expr)
+	if err != nil {
+		return "", err
+	}
+	targetTemp := fl.nextTemp("result")
+	callbackTemp := fl.nextTemp("callback")
+	mappedErr := fmt.Sprintf("try %s.invoke(%s.err)", callbackTemp, targetTemp)
+	if errType == "void" {
+		mappedErr = "{}"
+	}
+	return fmt.Sprintf("blk: {\nconst %s = %s;\nconst %s = %s;\nif (%s.ok) break :blk %s{ .value = %s.value, .err = undefined, .ok = true };\nbreak :blk %s{ .value = undefined, .err = %s, .ok = false };\n}", targetTemp, target, callbackTemp, callback, targetTemp, resultType, targetTemp, resultType, mappedErr), nil
+}
+
+func (fl *functionLowerer) lowerResultAndThen(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("result and_then expects target and callback")
+	}
+	resultType, _, _, err := fl.resultTypeNames(expr.Type)
+	if err != nil {
+		return "", err
+	}
+	target, callback, err := fl.lowerResultCallbackOperands(expr)
+	if err != nil {
+		return "", err
+	}
+	targetTemp := fl.nextTemp("result")
+	callbackTemp := fl.nextTemp("callback")
+	return fmt.Sprintf("blk: {\nconst %s = %s;\nconst %s = %s;\nif (%s.ok) break :blk try %s.invoke(%s.value);\nbreak :blk %s{ .value = undefined, .err = %s.err, .ok = false };\n}", targetTemp, target, callbackTemp, callback, targetTemp, callbackTemp, targetTemp, resultType, targetTemp), nil
+}
+
+func (fl *functionLowerer) lowerResultCallbackOperands(expr air.Expr) (target string, callback string, err error) {
+	target, err = fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", "", err
+	}
+	callback, err = fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", "", err
+	}
+	return target, callback, nil
 }
 
 func (fl *functionLowerer) lowerMatchResultExpr(expr air.Expr) (string, error) {

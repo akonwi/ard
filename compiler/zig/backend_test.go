@@ -620,6 +620,23 @@ func TestRunResultSemantics(t *testing.T) {
 			Result::ok(())
 		}
 
+		fn stringify(value: Int) Str {
+			"value={value}"
+		}
+
+		fn make_multiplier(multiplier: Int) fn(Int) Int {
+			fn(value: Int) Int {
+				value * multiplier
+			}
+		}
+
+		fn double_if_even(value: Int) Int!Str {
+			match value % 2 == 0 {
+				true => Result::ok(value * 2),
+				false => Result::err("odd")
+			}
+		}
+
 		fn main() {
 			let ok = divide(8, 2)
 			let err = divide(8, 0)
@@ -653,6 +670,36 @@ func TestRunResultSemantics(t *testing.T) {
 				ok(_) => io::print("pass"),
 				err(message) => io::print(message)
 			}
+
+			let multiplier = make_multiplier(3)
+			match ok.map(multiplier) {
+				ok(value) => io::print(value),
+				err(message) => io::print(message)
+			}
+			match err.map(multiplier) {
+				ok(value) => io::print(value),
+				err(message) => io::print(message)
+			}
+			match ok.map(stringify) {
+				ok(value) => io::print(value),
+				err(message) => io::print(message)
+			}
+			match err.map_err(fn(message) { message.size() }) {
+				ok(value) => io::print(value),
+				err(size) => io::print(size)
+			}
+			match ok.and_then(double_if_even) {
+				ok(value) => io::print(value),
+				err(message) => io::print(message)
+			}
+			match Result::ok(3).and_then(double_if_even) {
+				ok(value) => io::print(value),
+				err(message) => io::print(message)
+			}
+			match err.and_then(double_if_even) {
+				ok(value) => io::print(value),
+				err(message) => io::print(message)
+			}
 		}
 	`)
 	program := lowerFile(t, path)
@@ -675,6 +722,13 @@ func TestRunResultSemantics(t *testing.T) {
 		"divide by zero",
 		"3",
 		"pass",
+		"12",
+		"divide by zero",
+		"value=4",
+		"14",
+		"8",
+		"odd",
+		"divide by zero",
 		"",
 	}, "\n")
 	if stdout != want {
