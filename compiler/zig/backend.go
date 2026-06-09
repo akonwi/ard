@@ -174,7 +174,7 @@ func (l *lowerer) lowerProgram() (string, error) {
 	if l.program.Entry != air.NoFunction {
 		b.WriteString("    var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);\n")
 		b.WriteString("    defer arena_state.deinit();\n")
-		b.WriteString("    var ctx = ard.Context{ .allocator = arena_state.allocator(), .io = init.io };\n")
+		b.WriteString("    var ctx = ard.Context{ .allocator = arena_state.allocator(), .io = init.io, .args = init.minimal.args, .environ_map = init.environ_map };\n")
 		b.WriteString("    try ")
 		b.WriteString(functionName(l.program.Functions[l.program.Entry]))
 		b.WriteString("(&ctx);\n")
@@ -2440,6 +2440,136 @@ func (fl *functionLowerer) lowerExternCall(expr air.Expr) (string, error) {
 			return "", fmt.Errorf("ReadLine extern expects 0 args, got %d", len(args))
 		}
 		return "try ard.readLine(ctx)", nil
+	case "OsArgs":
+		if len(args) != 0 {
+			return "", fmt.Errorf("OsArgs extern expects 0 args, got %d", len(args))
+		}
+		return "try ard.osArgs(ctx)", nil
+	case "EnvGet":
+		if len(args) != 1 {
+			return "", fmt.Errorf("EnvGet extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.envGet(ctx, %s)", args[0]), nil
+	case "Now":
+		if len(args) != 0 {
+			return "", fmt.Errorf("Now extern expects 0 args, got %d", len(args))
+		}
+		return "ard.now()", nil
+	case "GetTodayString":
+		if len(args) != 0 {
+			return "", fmt.Errorf("GetTodayString extern expects 0 args, got %d", len(args))
+		}
+		return "try ard.todayString(ctx)", nil
+	case "Sleep":
+		if len(args) != 1 {
+			return "", fmt.Errorf("Sleep extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.sleep(%s)", args[0]), nil
+	case "HexEncode":
+		if len(args) != 1 {
+			return "", fmt.Errorf("HexEncode extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("try ard.hexEncode(ctx, %s)", args[0]), nil
+	case "HexDecode":
+		if len(args) != 1 {
+			return "", fmt.Errorf("HexDecode extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.hexDecode(ctx, %s)", args[0]), nil
+	case "Base64Encode":
+		if len(args) != 2 {
+			return "", fmt.Errorf("Base64Encode extern expects 2 args, got %d", len(args))
+		}
+		return fmt.Sprintf("try ard.base64Encode(ctx, %s, %s, false)", args[0], args[1]), nil
+	case "Base64Decode":
+		if len(args) != 2 {
+			return "", fmt.Errorf("Base64Decode extern expects 2 args, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.base64Decode(ctx, %s, %s, false)", args[0], args[1]), nil
+	case "Base64EncodeURL":
+		if len(args) != 2 {
+			return "", fmt.Errorf("Base64EncodeURL extern expects 2 args, got %d", len(args))
+		}
+		return fmt.Sprintf("try ard.base64Encode(ctx, %s, %s, true)", args[0], args[1]), nil
+	case "Base64DecodeURL":
+		if len(args) != 2 {
+			return "", fmt.Errorf("Base64DecodeURL extern expects 2 args, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.base64Decode(ctx, %s, %s, true)", args[0], args[1]), nil
+	case "FS_Exists":
+		if len(args) != 1 {
+			return "", fmt.Errorf("FS_Exists extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsExists(ctx, %s)", args[0]), nil
+	case "FS_IsFile":
+		if len(args) != 1 {
+			return "", fmt.Errorf("FS_IsFile extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsIsFile(ctx, %s)", args[0]), nil
+	case "FS_IsDir":
+		if len(args) != 1 {
+			return "", fmt.Errorf("FS_IsDir extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsIsDir(ctx, %s)", args[0]), nil
+	case "FS_CreateFile":
+		if len(args) != 1 {
+			return "", fmt.Errorf("FS_CreateFile extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsCreateFile(ctx, %s)", args[0]), nil
+	case "FS_WriteFile":
+		if len(args) != 2 {
+			return "", fmt.Errorf("FS_WriteFile extern expects 2 args, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsWriteFile(ctx, %s, %s)", args[0], args[1]), nil
+	case "FS_AppendFile":
+		if len(args) != 2 {
+			return "", fmt.Errorf("FS_AppendFile extern expects 2 args, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsAppendFile(ctx, %s, %s)", args[0], args[1]), nil
+	case "FS_ReadFile":
+		if len(args) != 1 {
+			return "", fmt.Errorf("FS_ReadFile extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsReadFile(ctx, %s)", args[0]), nil
+	case "FS_DeleteFile":
+		if len(args) != 1 {
+			return "", fmt.Errorf("FS_DeleteFile extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsDeleteFile(ctx, %s)", args[0]), nil
+	case "FS_Copy":
+		if len(args) != 2 {
+			return "", fmt.Errorf("FS_Copy extern expects 2 args, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsCopy(ctx, %s, %s)", args[0], args[1]), nil
+	case "FS_Rename":
+		if len(args) != 2 {
+			return "", fmt.Errorf("FS_Rename extern expects 2 args, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsRename(ctx, %s, %s)", args[0], args[1]), nil
+	case "FS_Cwd":
+		if len(args) != 0 {
+			return "", fmt.Errorf("FS_Cwd extern expects 0 args, got %d", len(args))
+		}
+		return "ard.fsCwd(ctx)", nil
+	case "FS_Abs":
+		if len(args) != 1 {
+			return "", fmt.Errorf("FS_Abs extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsAbs(ctx, %s)", args[0]), nil
+	case "FS_CreateDir":
+		if len(args) != 1 {
+			return "", fmt.Errorf("FS_CreateDir extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsCreateDir(ctx, %s)", args[0]), nil
+	case "FS_DeleteDir":
+		if len(args) != 1 {
+			return "", fmt.Errorf("FS_DeleteDir extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsDeleteDir(ctx, %s)", args[0]), nil
+	case "FS_ListDir":
+		if len(args) != 1 {
+			return "", fmt.Errorf("FS_ListDir extern expects 1 arg, got %d", len(args))
+		}
+		return fmt.Sprintf("ard.fsListDir(ctx, %s)", args[0]), nil
 	default:
 		return "", fmt.Errorf("unsupported zig extern binding %q", binding)
 	}
@@ -2942,6 +3072,8 @@ const runtimeSource = `const std = @import("std");
 pub const Context = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
+    args: std.process.Args,
+    environ_map: *std.process.Environ.Map,
     stdin_reader: ?*std.Io.File.Reader = null,
 };
 
@@ -3353,6 +3485,229 @@ pub fn readLine(ctx: *Context) !Result([]const u8, []const u8) {
         .err = undefined,
         .ok = true,
     };
+}
+
+pub fn osArgs(ctx: *Context) !List([]const u8) {
+    var iter = try std.process.Args.Iterator.initAllocator(ctx.args, ctx.allocator);
+    defer iter.deinit();
+    var out = try List([]const u8).init(ctx.allocator, &[_][]const u8{});
+    while (iter.next()) |arg| {
+        try out.push(try ctx.allocator.dupe(u8, arg));
+    }
+    return out;
+}
+
+pub fn envGet(ctx: *Context, key: []const u8) Maybe([]const u8) {
+    const value = ctx.environ_map.get(key) orelse return .{ .some = null };
+    return .{ .some = value };
+}
+
+pub fn now() i64 {
+    return unixTimestamp();
+}
+
+pub fn todayString(ctx: *Context) ![]const u8 {
+    const date = civilFromDays(@divFloor(unixTimestamp(), 86400));
+    return try std.fmt.allocPrint(ctx.allocator, "{d:0>4}-{d:0>2}-{d:0>2}", .{
+        @as(u64, @intCast(date.year)),
+        @as(u64, @intCast(date.month)),
+        @as(u64, @intCast(date.day)),
+    });
+}
+
+fn unixTimestamp() i64 {
+    var ts: std.posix.timespec = undefined;
+    switch (std.posix.errno(std.posix.system.clock_gettime(.REALTIME, &ts))) {
+        .SUCCESS => return @intCast(ts.sec),
+        else => return 0,
+    }
+}
+
+fn civilFromDays(days_since_epoch: i64) struct { year: i64, month: i64, day: i64 } {
+    const z = days_since_epoch + 719468;
+    const era = if (z >= 0) @divFloor(z, 146097) else @divFloor(z - 146096, 146097);
+    const doe = z - era * 146097;
+    const yoe = @divFloor(doe - @divFloor(doe, 1460) + @divFloor(doe, 36524) - @divFloor(doe, 146096), 365);
+    var year = yoe + era * 400;
+    const doy = doe - (365 * yoe + @divFloor(yoe, 4) - @divFloor(yoe, 100));
+    const mp = @divFloor(5 * doy + 2, 153);
+    const day = doy - @divFloor(153 * mp + 2, 5) + 1;
+    const month = if (mp < 10) mp + 3 else mp - 9;
+    if (month <= 2) year += 1;
+    return .{ .year = year, .month = month, .day = day };
+}
+
+pub fn sleep(ms: i64) void {
+    if (ms <= 0) return;
+    std.Thread.sleep(@intCast(ms * 1_000_000));
+}
+
+pub fn hexEncode(ctx: *Context, input: []const u8) ![]const u8 {
+    const alphabet = "0123456789abcdef";
+    const out = try ctx.allocator.alloc(u8, input.len * 2);
+    for (input, 0..) |byte, index| {
+        out[index * 2] = alphabet[byte >> 4];
+        out[index * 2 + 1] = alphabet[byte & 0x0f];
+    }
+    return out;
+}
+
+pub fn hexDecode(ctx: *Context, input: []const u8) Result([]const u8, []const u8) {
+    if (input.len % 2 != 0) return errStr([]const u8, "invalid hex length");
+    const out = ctx.allocator.alloc(u8, input.len / 2) catch |err| return errStr([]const u8, @errorName(err));
+    var index: usize = 0;
+    while (index < out.len) : (index += 1) {
+        const high = hexNibble(input[index * 2]) orelse return errStr([]const u8, "invalid hex digit");
+        const low = hexNibble(input[index * 2 + 1]) orelse return errStr([]const u8, "invalid hex digit");
+        out[index] = (high << 4) | low;
+    }
+    return ok([]const u8, out);
+}
+
+fn hexNibble(byte: u8) ?u8 {
+    return switch (byte) {
+        '0'...'9' => byte - '0',
+        'a'...'f' => byte - 'a' + 10,
+        'A'...'F' => byte - 'A' + 10,
+        else => null,
+    };
+}
+
+pub fn base64Encode(ctx: *Context, input: []const u8, no_pad_value: Maybe(bool), url: bool) ![]const u8 {
+    const no_pad = maybeBool(no_pad_value, false);
+    if (url) {
+        if (no_pad) return try encodeBase64With(ctx, std.base64.url_safe_no_pad.Encoder, input);
+        return try encodeBase64With(ctx, std.base64.url_safe.Encoder, input);
+    }
+    if (no_pad) return try encodeBase64With(ctx, std.base64.standard_no_pad.Encoder, input);
+    return try encodeBase64With(ctx, std.base64.standard.Encoder, input);
+}
+
+fn encodeBase64With(ctx: *Context, encoder: anytype, input: []const u8) ![]const u8 {
+    const out = try ctx.allocator.alloc(u8, encoder.calcSize(input.len));
+    _ = encoder.encode(out, input);
+    return out;
+}
+
+pub fn base64Decode(ctx: *Context, input: []const u8, no_pad_value: Maybe(bool), url: bool) Result([]const u8, []const u8) {
+    const no_pad = maybeBool(no_pad_value, false);
+    if (url) {
+        if (no_pad) return decodeBase64With(ctx, std.base64.url_safe_no_pad.Decoder, input);
+        return decodeBase64With(ctx, std.base64.url_safe.Decoder, input);
+    }
+    if (no_pad) return decodeBase64With(ctx, std.base64.standard_no_pad.Decoder, input);
+    return decodeBase64With(ctx, std.base64.standard.Decoder, input);
+}
+
+fn decodeBase64With(ctx: *Context, decoder: anytype, input: []const u8) Result([]const u8, []const u8) {
+    const size = decoder.calcSizeForSlice(input) catch |err| return errStr([]const u8, @errorName(err));
+    const out = ctx.allocator.alloc(u8, size) catch |err| return errStr([]const u8, @errorName(err));
+    decoder.decode(out, input) catch |err| return errStr([]const u8, @errorName(err));
+    return ok([]const u8, out);
+}
+
+fn maybeBool(value: Maybe(bool), fallback: bool) bool {
+    return value.some orelse fallback;
+}
+
+pub fn fsExists(ctx: *Context, path: []const u8) bool {
+    _ = std.Io.Dir.cwd().statFile(ctx.io, path, .{}) catch return false;
+    return true;
+}
+
+pub fn fsIsFile(ctx: *Context, path: []const u8) bool {
+    const stat = std.Io.Dir.cwd().statFile(ctx.io, path, .{}) catch return false;
+    return stat.kind == .file;
+}
+
+pub fn fsIsDir(ctx: *Context, path: []const u8) bool {
+    const stat = std.Io.Dir.cwd().statFile(ctx.io, path, .{}) catch return false;
+    return stat.kind == .directory;
+}
+
+pub fn fsCreateFile(ctx: *Context, path: []const u8) Result(bool, []const u8) {
+    var file = std.Io.Dir.cwd().createFile(ctx.io, path, .{}) catch |err| return errStr(bool, @errorName(err));
+    file.close(ctx.io);
+    return ok(bool, true);
+}
+
+pub fn fsWriteFile(ctx: *Context, path: []const u8, content: []const u8) Result(void, []const u8) {
+    std.Io.Dir.cwd().writeFile(ctx.io, .{ .sub_path = path, .data = content }) catch |err| return errStr(void, @errorName(err));
+    return ok(void, {});
+}
+
+pub fn fsAppendFile(ctx: *Context, path: []const u8, content: []const u8) Result(void, []const u8) {
+    const cwd = std.Io.Dir.cwd();
+    const old = cwd.readFileAlloc(ctx.io, path, ctx.allocator, .limited(10 * 1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => "",
+        else => return errStr(void, @errorName(err)),
+    };
+    const combined = ctx.allocator.alloc(u8, old.len + content.len) catch |err| return errStr(void, @errorName(err));
+    @memcpy(combined[0..old.len], old);
+    @memcpy(combined[old.len..], content);
+    cwd.writeFile(ctx.io, .{ .sub_path = path, .data = combined }) catch |err| return errStr(void, @errorName(err));
+    return ok(void, {});
+}
+
+pub fn fsReadFile(ctx: *Context, path: []const u8) Result([]const u8, []const u8) {
+    const content = std.Io.Dir.cwd().readFileAlloc(ctx.io, path, ctx.allocator, .limited(10 * 1024 * 1024)) catch |err| return errStr([]const u8, @errorName(err));
+    return ok([]const u8, content);
+}
+
+pub fn fsDeleteFile(ctx: *Context, path: []const u8) Result(void, []const u8) {
+    std.Io.Dir.cwd().deleteFile(ctx.io, path) catch |err| return errStr(void, @errorName(err));
+    return ok(void, {});
+}
+
+pub fn fsCopy(ctx: *Context, from: []const u8, to: []const u8) Result(void, []const u8) {
+    const cwd = std.Io.Dir.cwd();
+    cwd.copyFile(from, cwd, to, ctx.io, .{}) catch |err| return errStr(void, @errorName(err));
+    return ok(void, {});
+}
+
+pub fn fsRename(ctx: *Context, from: []const u8, to: []const u8) Result(void, []const u8) {
+    const cwd = std.Io.Dir.cwd();
+    cwd.rename(from, cwd, to, ctx.io) catch |err| return errStr(void, @errorName(err));
+    return ok(void, {});
+}
+
+pub fn fsCwd(ctx: *Context) Result([]const u8, []const u8) {
+    const path = std.process.currentPathAlloc(ctx.io, ctx.allocator) catch |err| return errStr([]const u8, @errorName(err));
+    return ok([]const u8, path);
+}
+
+pub fn fsAbs(ctx: *Context, path: []const u8) Result([]const u8, []const u8) {
+    const resolved = std.fs.path.resolve(ctx.allocator, &[_][]const u8{path}) catch |err| return errStr([]const u8, @errorName(err));
+    return ok([]const u8, resolved);
+}
+
+pub fn fsCreateDir(ctx: *Context, path: []const u8) Result(void, []const u8) {
+    std.Io.Dir.cwd().createDirPath(ctx.io, path) catch |err| return errStr(void, @errorName(err));
+    return ok(void, {});
+}
+
+pub fn fsDeleteDir(ctx: *Context, path: []const u8) Result(void, []const u8) {
+    std.Io.Dir.cwd().deleteTree(ctx.io, path) catch |err| return errStr(void, @errorName(err));
+    return ok(void, {});
+}
+
+pub fn fsListDir(ctx: *Context, path: []const u8) Result(Map([]const u8, bool), []const u8) {
+    var dir = std.Io.Dir.cwd().openDir(ctx.io, path, .{ .iterate = true }) catch |err| return errStr(Map([]const u8, bool), @errorName(err));
+    defer dir.close(ctx.io);
+    var out = Map([]const u8, bool).init(ctx.allocator, &[_]Map([]const u8, bool).Entry{}) catch |err| return errStr(Map([]const u8, bool), @errorName(err));
+    var iter = dir.iterate();
+    while (iter.next(ctx.io) catch |err| return errStr(Map([]const u8, bool), @errorName(err))) |entry| {
+        out.set(ctx.allocator.dupe(u8, entry.name) catch |err| return errStr(Map([]const u8, bool), @errorName(err)), entry.kind == .file) catch |err| return errStr(Map([]const u8, bool), @errorName(err));
+    }
+    return ok(Map([]const u8, bool), out);
+}
+
+fn ok(comptime T: type, value: T) Result(T, []const u8) {
+    return .{ .value = value, .err = undefined, .ok = true };
+}
+
+fn errStr(comptime T: type, err: []const u8) Result(T, []const u8) {
+    return .{ .value = undefined, .err = err, .ok = false };
 }
 
 pub fn concat(ctx: *Context, left: []const u8, right: []const u8) ![]const u8 {

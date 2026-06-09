@@ -1044,6 +1044,116 @@ func TestRunFunctionValuesAndClosures(t *testing.T) {
 	}
 }
 
+func TestRunStdlibRuntimeBindings(t *testing.T) {
+	requireZig(t)
+	t.Setenv("ARD_ZIG_STDLIB_TEST", "present")
+	path := writeTempSource(t, `
+		use ard/argv
+		use ard/base64
+		use ard/chrono
+		use ard/dates
+		use ard/env
+		use ard/fs
+		use ard/hex
+		use ard/io
+
+		fn run() Void!Str {
+			io::print(hex::encode("abc"))
+			io::print(try hex::decode("616263"))
+			io::print(base64::encode("hello"))
+			io::print(try base64::decode("aGVsbG8="))
+			io::print(base64::encode_url("subjects?"))
+			io::print(try base64::decode_url("c3ViamVjdHM_"))
+
+			match env::get("ARD_ZIG_STDLIB_TEST") {
+				value => io::print(value),
+				_ => io::print("missing")
+			}
+
+			let raw_args = argv::os_args()
+			io::print(raw_args.size() > 0)
+			io::print(chrono::now() > 0)
+			let today = dates::get_today()
+			io::print(today.size() == 10)
+
+			let file = "zig-stdlib-runtime-test.tmp"
+			let copy = "zig-stdlib-runtime-copy.tmp"
+			let moved = "zig-stdlib-runtime-moved.tmp"
+			let dir = "zig-stdlib-runtime-dir"
+
+			io::print(try fs::create_file(file))
+			try fs::write(file, "abc")
+			try fs::append(file, "def")
+			io::print(try fs::read(file))
+			io::print(fs::exists(file))
+			io::print(fs::is_file(file))
+			try fs::copy(file, copy)
+			try fs::rename(copy, moved)
+			io::print(fs::exists(moved))
+
+			try fs::create_dir(dir)
+			io::print(fs::is_dir(dir))
+			let entries = try fs::list_dir(".")
+			mut found_file = false
+			mut found_dir = false
+			for entry in entries {
+				if entry.name == file and entry.is_file {
+					found_file = true
+				}
+				if entry.name == dir and not entry.is_file {
+					found_dir = true
+				}
+			}
+			io::print(found_file)
+			io::print(found_dir)
+
+			try fs::delete(file)
+			try fs::delete(moved)
+			try fs::delete_dir(dir)
+			io::print(fs::exists(file))
+			Result::ok(())
+		}
+
+		fn main() {
+			match run() {
+				ok(_) => {},
+				err(message) => io::print(message)
+			}
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path, "extra"})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"616263",
+		"abc",
+		"aGVsbG8=",
+		"hello",
+		"c3ViamVjdHM_",
+		"subjects?",
+		"present",
+		"true",
+		"true",
+		"true",
+		"true",
+		"abcdef",
+		"true",
+		"true",
+		"true",
+		"true",
+		"true",
+		"true",
+		"false",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func TestRunStructMethodsAndMutation(t *testing.T) {
 	requireZig(t)
 	path := writeTempSource(t, `
