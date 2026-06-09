@@ -917,6 +917,10 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		return fl.lowerMakeMaybeSome(expr)
 	case air.ExprMakeMaybeNone:
 		return fl.lowerMakeMaybeNone(expr)
+	case air.ExprMaybeMap:
+		return fl.lowerMaybeMap(expr)
+	case air.ExprMaybeAndThen:
+		return fl.lowerMaybeAndThen(expr)
 	case air.ExprMakeResultOk:
 		return fl.lowerMakeResultOk(expr)
 	case air.ExprMakeResultErr:
@@ -1340,6 +1344,74 @@ func (fl *functionLowerer) lowerMakeMaybeNone(expr air.Expr) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("ard.Maybe(%s){ .some = null }", elemType), nil
+}
+
+func (fl *functionLowerer) lowerMaybeMap(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("maybe map expects target and callback")
+	}
+	maybeType, elemType, err := fl.maybeTypeNames(expr.Type)
+	if err != nil {
+		return "", err
+	}
+	target, callback, err := fl.lowerMaybeCallbackOperands(expr)
+	if err != nil {
+		return "", err
+	}
+	targetTemp := fl.nextTemp("maybe")
+	callbackTemp := fl.nextTemp("callback")
+	mapped := fmt.Sprintf("try %s.invoke(%s.some.?)", callbackTemp, targetTemp)
+	if elemType == "void" {
+		mapped = "{}"
+	}
+	return fmt.Sprintf("blk: {\nconst %s = %s;\nconst %s = %s;\nif (%s.some != null) break :blk %s{ .some = %s };\nbreak :blk %s{ .some = null };\n}", targetTemp, target, callbackTemp, callback, targetTemp, maybeType, mapped, maybeType), nil
+}
+
+func (fl *functionLowerer) lowerMaybeAndThen(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("maybe and_then expects target and callback")
+	}
+	maybeType, _, err := fl.maybeTypeNames(expr.Type)
+	if err != nil {
+		return "", err
+	}
+	target, callback, err := fl.lowerMaybeCallbackOperands(expr)
+	if err != nil {
+		return "", err
+	}
+	targetTemp := fl.nextTemp("maybe")
+	callbackTemp := fl.nextTemp("callback")
+	return fmt.Sprintf("blk: {\nconst %s = %s;\nconst %s = %s;\nif (%s.some != null) break :blk try %s.invoke(%s.some.?);\nbreak :blk %s{ .some = null };\n}", targetTemp, target, callbackTemp, callback, targetTemp, callbackTemp, targetTemp, maybeType), nil
+}
+
+func (fl *functionLowerer) lowerMaybeCallbackOperands(expr air.Expr) (target string, callback string, err error) {
+	target, err = fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", "", err
+	}
+	callback, err = fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", "", err
+	}
+	return target, callback, nil
+}
+
+func (fl *functionLowerer) maybeTypeNames(id air.TypeID) (maybeType, elemType string, err error) {
+	if id <= 0 || int(id) > len(fl.l.program.Types) {
+		err = fmt.Errorf("invalid maybe type id %d", id)
+		return
+	}
+	info := fl.l.program.Types[id-1]
+	if info.Kind != air.TypeMaybe {
+		err = fmt.Errorf("maybe expression with non-maybe type %s", info.Name)
+		return
+	}
+	maybeType, err = fl.l.typeName(id)
+	if err != nil {
+		return
+	}
+	elemType, err = fl.l.typeName(info.Elem)
+	return
 }
 
 func (fl *functionLowerer) lowerMakeResultOk(expr air.Expr) (string, error) {
@@ -2064,7 +2136,8 @@ func (fl *functionLowerer) blockUsesContext(block air.Block) bool {
 func (fl *functionLowerer) exprUsesContext(expr air.Expr) bool {
 	switch expr.Kind {
 	case air.ExprCall, air.ExprCallExtern, air.ExprCallTrait, air.ExprFunctionRef, air.ExprMakeClosure,
-		air.ExprStrConcat, air.ExprToStr:
+		air.ExprMakeList, air.ExprMakeMap, air.ExprStrConcat, air.ExprStrSplit, air.ExprStrReplace,
+		air.ExprStrReplaceAll, air.ExprToStr:
 		return true
 	}
 	for _, arg := range expr.Args {

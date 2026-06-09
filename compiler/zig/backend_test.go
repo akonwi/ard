@@ -736,6 +736,71 @@ func TestRunResultSemantics(t *testing.T) {
 	}
 }
 
+func TestRunMaybeCallbackMethods(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+		use ard/maybe
+
+		fn make_multiplier(multiplier: Int) fn(Int) Int {
+			fn(value: Int) Int {
+				value * multiplier
+			}
+		}
+
+		fn keep_even(value: Int) Int? {
+			match value % 2 == 0 {
+				true => maybe::some(value),
+				false => maybe::none()
+			}
+		}
+
+		fn main() {
+			let value = maybe::some(7)
+			let empty: Int? = maybe::none()
+			let multiplier = make_multiplier(3)
+
+			match value.map(multiplier) {
+				mapped => io::print(mapped),
+				_ => io::print("none")
+			}
+			match empty.map(multiplier) {
+				mapped => io::print(mapped),
+				_ => io::print("none")
+			}
+			match maybe::some(8).and_then(keep_even) {
+				mapped => io::print(mapped),
+				_ => io::print("none")
+			}
+			match value.and_then(keep_even) {
+				mapped => io::print(mapped),
+				_ => io::print("none")
+			}
+			match empty.and_then(keep_even) {
+				mapped => io::print(mapped),
+				_ => io::print("none")
+			}
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"21",
+		"none",
+		"8",
+		"none",
+		"none",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func TestRunFunctionValuesAndClosures(t *testing.T) {
 	requireZig(t)
 	path := writeTempSource(t, `
