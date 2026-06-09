@@ -140,6 +140,12 @@ func (l *lowerer) lowerProgram() (string, error) {
 	var b strings.Builder
 	b.WriteString("const std = @import(\"std\");\n")
 	b.WriteString("const ard = @import(\"ard_runtime.zig\");\n\n")
+	for _, trait := range l.program.Traits {
+		if err := l.lowerTraitObjectType(&b, trait); err != nil {
+			return "", err
+		}
+		b.WriteString("\n")
+	}
 	for _, typ := range l.program.Types {
 		if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum && typ.Kind != air.TypeUnion {
 			continue
@@ -159,6 +165,9 @@ func (l *lowerer) lowerProgram() (string, error) {
 		b.WriteString("\n")
 	}
 	if err := l.lowerFunctionValueAdapters(&b); err != nil {
+		return "", err
+	}
+	if err := l.lowerTraitImplAdapters(&b); err != nil {
 		return "", err
 	}
 	b.WriteString("pub fn main(init: std.process.Init) !void {\n")
@@ -224,6 +233,34 @@ func (l *lowerer) lowerUnionType(b *strings.Builder, typ air.TypeInfo) error {
 	return nil
 }
 
+func (l *lowerer) lowerTraitObjectType(b *strings.Builder, trait air.Trait) error {
+	if trait.Name == "ToString" {
+		return nil
+	}
+	fmt.Fprintf(b, "const %s = struct {\n", traitObjectName(trait))
+	b.WriteString("    ptr: *anyopaque,\n")
+	b.WriteString("    vtable: *const VTable,\n")
+	b.WriteString("    const VTable = struct {\n")
+	for i, method := range trait.Methods {
+		ret, err := l.typeName(method.Signature.Return)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "        %s: *const fn (ctx: *ard.Context, ptr: *anyopaque", traitMethodFieldName(method, i))
+		if err := l.writeTraitMethodParams(b, method.Signature); err != nil {
+			return err
+		}
+		if ret == "void" {
+			b.WriteString(") anyerror!void,\n")
+		} else {
+			fmt.Fprintf(b, ") anyerror!%s,\n", ret)
+		}
+	}
+	b.WriteString("    };\n")
+	b.WriteString("};\n")
+	return nil
+}
+
 func (l *lowerer) lowerFunctionValueAdapters(b *strings.Builder) error {
 	for _, adapter := range l.closureAdapters {
 		if err := l.lowerClosureAdapter(b, adapter); err != nil {
@@ -236,6 +273,65 @@ func (l *lowerer) lowerFunctionValueAdapters(b *strings.Builder) error {
 			return err
 		}
 		b.WriteString("\n")
+	}
+	return nil
+}
+
+func (l *lowerer) lowerTraitImplAdapters(b *strings.Builder) error {
+	for _, impl := range l.program.Impls {
+		if impl.Trait < 0 || int(impl.Trait) >= len(l.program.Traits) {
+			return fmt.Errorf("impl %d has invalid trait id %d", impl.ID, impl.Trait)
+		}
+		trait := l.program.Traits[impl.Trait]
+		if trait.Name == "ToString" {
+			continue
+		}
+		if impl.ForType <= 0 || int(impl.ForType) > len(l.program.Types) {
+			return fmt.Errorf("impl %d has invalid for type %d", impl.ID, impl.ForType)
+		}
+		forType, err := l.typeName(impl.ForType)
+		if err != nil {
+			return err
+		}
+		for i, methodID := range impl.Methods {
+			if methodID < 0 || int(methodID) >= len(l.program.Functions) {
+				return fmt.Errorf("impl %d has invalid method function %d", impl.ID, methodID)
+			}
+			if i >= len(trait.Methods) {
+				return fmt.Errorf("impl %d method index %d out of range for trait %s", impl.ID, i, trait.Name)
+			}
+			method := trait.Methods[i]
+			fn := l.program.Functions[methodID]
+			ret, err := l.typeName(method.Signature.Return)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(b, "fn %s(ctx: *ard.Context, ptr: *anyopaque", traitImplAdapterName(impl, i))
+			if err := l.writeTraitMethodParams(b, method.Signature); err != nil {
+				return err
+			}
+			if ret == "void" {
+				b.WriteString(") !void {\n")
+			} else {
+				fmt.Fprintf(b, ") !%s {\n", ret)
+			}
+			fmt.Fprintf(b, "    const self: *%s = @ptrCast(@alignCast(ptr));\n", forType)
+			args := []string{"ctx", "self.*"}
+			for arg := range method.Signature.Params {
+				args = append(args, fmt.Sprintf("a%d", arg))
+			}
+			if ret == "void" {
+				fmt.Fprintf(b, "    try %s(%s);\n", functionName(fn), strings.Join(args, ", "))
+			} else {
+				fmt.Fprintf(b, "    return try %s(%s);\n", functionName(fn), strings.Join(args, ", "))
+			}
+			b.WriteString("}\n\n")
+		}
+		fmt.Fprintf(b, "const %s = %s.VTable{\n", traitImplVTableName(impl), traitObjectName(trait))
+		for i, method := range trait.Methods {
+			fmt.Fprintf(b, "    .%s = %s,\n", traitMethodFieldName(method, i), traitImplAdapterName(impl, i))
+		}
+		b.WriteString("};\n\n")
 	}
 	return nil
 }
@@ -335,6 +431,20 @@ func (l *lowerer) writeFunctionValueParams(b *strings.Builder, typeInfo air.Type
 		paramType, err := l.typeName(param)
 		if err != nil {
 			return err
+		}
+		fmt.Fprintf(b, ", a%d: %s", i, paramType)
+	}
+	return nil
+}
+
+func (l *lowerer) writeTraitMethodParams(b *strings.Builder, sig air.Signature) error {
+	for i, param := range sig.Params {
+		paramType, err := l.typeName(param.Type)
+		if err != nil {
+			return err
+		}
+		if param.Mutable && paramType != "void" {
+			paramType = "*" + paramType
 		}
 		fmt.Fprintf(b, ", a%d: %s", i, paramType)
 	}
@@ -464,10 +574,14 @@ func (l *lowerer) typeName(id air.TypeID) (string, error) {
 	case air.TypeUnion:
 		return typeDeclName(info), nil
 	case air.TypeTraitObject:
-		if info.Trait >= 0 && int(info.Trait) < len(l.program.Traits) && l.program.Traits[info.Trait].Name == "ToString" {
+		if info.Trait < 0 || int(info.Trait) >= len(l.program.Traits) {
+			return "", fmt.Errorf("trait object type %s has invalid trait id %d", info.Name, info.Trait)
+		}
+		trait := l.program.Traits[info.Trait]
+		if trait.Name == "ToString" {
 			return "ard.Stringable", nil
 		}
-		return "", fmt.Errorf("unsupported Zig trait object type %s", info.Name)
+		return traitObjectName(trait), nil
 	default:
 		return "", fmt.Errorf("unsupported Zig type %s", info.Name)
 	}
@@ -2184,13 +2298,31 @@ func (fl *functionLowerer) lowerTraitUpcast(expr air.Expr, target string) (strin
 		return "", fmt.Errorf("invalid trait id %d", expr.Trait)
 	}
 	trait := fl.l.program.Traits[expr.Trait]
-	if trait.Name != "ToString" {
-		return "", fmt.Errorf("unsupported zig trait upcast to %s", trait.Name)
-	}
 	if expr.Target == nil || expr.Target.Type <= 0 || int(expr.Target.Type) > len(fl.l.program.Types) {
 		return "", fmt.Errorf("trait upcast target has invalid type %d", expr.Target.Type)
 	}
 	targetType := fl.l.program.Types[expr.Target.Type-1]
+	if trait.Name != "ToString" {
+		if expr.Impl < 0 || int(expr.Impl) >= len(fl.l.program.Impls) {
+			return "", fmt.Errorf("trait upcast to %s has invalid impl id %d", trait.Name, expr.Impl)
+		}
+		impl := fl.l.program.Impls[expr.Impl]
+		if impl.Trait != expr.Trait {
+			return "", fmt.Errorf("trait upcast impl %d has trait %d, want %d", expr.Impl, impl.Trait, expr.Trait)
+		}
+		if impl.ForType != expr.Target.Type {
+			return "", fmt.Errorf("trait upcast impl %d is for type %d, got target type %d", expr.Impl, impl.ForType, expr.Target.Type)
+		}
+		concreteType, err := fl.l.typeName(expr.Target.Type)
+		if err != nil {
+			return "", err
+		}
+		traitType, err := fl.l.typeName(expr.Type)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("blk: {\nconst boxed = try ctx.allocator.create(%s);\nboxed.* = %s;\nbreak :blk %s{ .ptr = boxed, .vtable = &%s };\n}", concreteType, target, traitType, traitImplVTableName(impl)), nil
+	}
 	switch targetType.Kind {
 	case air.TypeStr:
 		return fmt.Sprintf("ard.Stringable{ .str = %s }", target), nil
@@ -2230,7 +2362,25 @@ func (fl *functionLowerer) lowerTraitCall(expr air.Expr) (string, error) {
 		}
 		return fmt.Sprintf("try ard.toStr(ctx, %s)", target), nil
 	}
-	return "", fmt.Errorf("unsupported zig trait call %s.%s", trait.Name, method.Name)
+	targetTemp := fl.nextTemp("trait")
+	args := make([]string, 0, len(expr.Args))
+	for i, arg := range expr.Args {
+		var lowered string
+		var err error
+		if i < len(method.Signature.Params) && method.Signature.Params[i].Mutable {
+			lowered, err = fl.lowerMutableArg(arg)
+		} else {
+			lowered, err = fl.lowerExpr(arg)
+		}
+		if err != nil {
+			return "", err
+		}
+		args = append(args, lowered)
+	}
+	if len(args) > 0 {
+		return fmt.Sprintf("blk: {\nconst %s = %s;\nbreak :blk try %s.vtable.%s(ctx, %s.ptr, %s);\n}", targetTemp, target, targetTemp, traitMethodFieldName(method, expr.Method), targetTemp, strings.Join(args, ", ")), nil
+	}
+	return fmt.Sprintf("blk: {\nconst %s = %s;\nbreak :blk try %s.vtable.%s(ctx, %s.ptr);\n}", targetTemp, target, targetTemp, traitMethodFieldName(method, expr.Method), targetTemp), nil
 }
 
 func (fl *functionLowerer) lowerBinary(expr air.Expr) (string, error) {
@@ -2302,7 +2452,7 @@ func (fl *functionLowerer) blockUsesContext(block air.Block) bool {
 
 func (fl *functionLowerer) exprUsesContext(expr air.Expr) bool {
 	switch expr.Kind {
-	case air.ExprCall, air.ExprCallExtern, air.ExprCallTrait, air.ExprFunctionRef, air.ExprMakeClosure,
+	case air.ExprCall, air.ExprCallExtern, air.ExprCallTrait, air.ExprTraitUpcast, air.ExprFunctionRef, air.ExprMakeClosure,
 		air.ExprMakeList, air.ExprMakeMap, air.ExprStrConcat, air.ExprStrSplit, air.ExprStrReplace,
 		air.ExprStrReplaceAll, air.ExprToStr:
 		return true
@@ -2486,6 +2636,22 @@ func unionMemberByTag(typ air.TypeInfo, tag uint32) (air.UnionMember, bool) {
 		}
 	}
 	return air.UnionMember{}, false
+}
+
+func traitObjectName(trait air.Trait) string {
+	return fmt.Sprintf("ArdTrait_%d_%s", trait.ID, sanitizeIdentifier(trait.Name))
+}
+
+func traitMethodFieldName(method air.TraitMethod, index int) string {
+	return fmt.Sprintf("m%d_%s", index, sanitizeIdentifier(method.Name))
+}
+
+func traitImplAdapterName(impl air.Impl, methodIndex int) string {
+	return fmt.Sprintf("ard_trait_impl_%d_m%d", impl.ID, methodIndex)
+}
+
+func traitImplVTableName(impl air.Impl) string {
+	return fmt.Sprintf("ard_trait_impl_%d_vtable", impl.ID)
 }
 
 func (l *lowerer) ensureFunctionAdapter(fn air.FunctionID, typ air.TypeID) string {

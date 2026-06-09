@@ -1116,6 +1116,89 @@ func TestRunStructMethodsAndMutation(t *testing.T) {
 	}
 }
 
+func TestRunTraitObjectDispatch(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+
+		trait Speaks {
+			fn speak() Str
+			fn label(prefix: Str, count: Int) Str
+		}
+
+		struct Dog {
+			name: Str
+		}
+
+		struct Robot {
+			id: Int
+		}
+
+		struct Kennel {
+			resident: Speaks
+		}
+
+		impl Speaks for Dog {
+			fn speak() Str {
+				"{self.name} says hi"
+			}
+
+			fn label(prefix: Str, count: Int) Str {
+				"{prefix} {self.name} {count}"
+			}
+		}
+
+		impl Speaks for Robot {
+			fn speak() Str {
+				"unit {self.id}"
+			}
+
+			fn label(prefix: Str, count: Int) Str {
+				"{prefix} unit {self.id} {count}"
+			}
+		}
+
+		fn describe(speaker: Speaks) Str {
+			speaker.speak()
+		}
+
+		fn tagged(speaker: Speaks) Str {
+			speaker.label("tag", 2)
+		}
+
+		fn main() {
+			io::print(describe(Dog{name: "Ada"}))
+			io::print(describe(Robot{id: 7}))
+			io::print(tagged(Dog{name: "Ada"}))
+
+			let kennel = Kennel{resident: Dog{name: "Grace"}}
+			io::print(kennel.resident.speak())
+
+			let speakers: [Speaks] = [Dog{name: "Lin"}, Robot{id: 9}]
+			io::print(speakers.at(0).speak())
+			io::print(speakers.at(1).speak())
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"Ada says hi",
+		"unit 7",
+		"tag Ada 2",
+		"Grace says hi",
+		"Lin says hi",
+		"unit 9",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func TestRunGenericFunctions(t *testing.T) {
 	requireZig(t)
 	path := writeTempSource(t, `
