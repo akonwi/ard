@@ -2,54 +2,6 @@ package air
 
 import "github.com/akonwi/ard/checker"
 
-func isRecursiveNullableStructField(owner *checker.StructDef, field checker.Type) bool {
-	maybe, ok := field.(*checker.Maybe)
-	if !ok {
-		return false
-	}
-	return nullablePayloadReferencesStruct(maybe.Of(), owner, map[checker.Type]struct{}{})
-}
-
-func nullablePayloadReferencesStruct(t checker.Type, owner *checker.StructDef, seen map[checker.Type]struct{}) bool {
-	if t == nil {
-		return false
-	}
-	if typeVar, ok := t.(*checker.TypeVar); ok && typeVar.Actual() != nil {
-		t = typeVar.Actual()
-	}
-	if _, ok := seen[t]; ok {
-		return false
-	}
-	seen[t] = struct{}{}
-	switch typ := t.(type) {
-	case *checker.StructDef:
-		if sameStructIdentity(typ, owner) {
-			return true
-		}
-		for _, field := range typ.Fields {
-			if nullablePayloadReferencesStruct(field, owner, seen) {
-				return true
-			}
-		}
-		return false
-	case *checker.Result:
-		return nullablePayloadReferencesStruct(typ.Val(), owner, seen) || nullablePayloadReferencesStruct(typ.Err(), owner, seen)
-	case *checker.Union:
-		for _, member := range typ.Types {
-			if nullablePayloadReferencesStruct(member, owner, seen) {
-				return true
-			}
-		}
-		return false
-	case *checker.Maybe:
-		return nullablePayloadReferencesStruct(typ.Of(), owner, seen)
-	case *checker.MutableRef, *checker.List, *checker.Map, *checker.Trait, *checker.ExternType, *checker.FunctionDef, *checker.ExternalFunctionDef:
-		return false
-	default:
-		return false
-	}
-}
-
 func hasSelfReference(owner *checker.StructDef) bool {
 	for _, field := range owner.Fields {
 		if typeReferencesStruct(field, owner, map[checker.Type]struct{}{}) {

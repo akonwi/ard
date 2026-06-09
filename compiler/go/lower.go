@@ -502,12 +502,6 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 			var err error
 			if field.Mutable && l.isTraitObjectType(field.Type) {
 				fieldType, err = l.mutableTraitRefType(field.Type)
-			} else if field.RecursiveNullable {
-				maybeType := l.program.Types[field.Type-1]
-				fieldType, err = l.goType(maybeType.Elem)
-				if err == nil {
-					fieldType = &ast.StarExpr{X: fieldType}
-				}
 			} else {
 				fieldType, err = l.goType(field.Type)
 			}
@@ -985,24 +979,21 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		typ, err := l.goType(expr.Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
 		valueExpr := target.expr
 		if l.isVoidType(expr.Target.Type) || isVoidExpr(valueExpr) {
 			valueExpr = voidValueExpr()
 		}
-		return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: typ, Elts: []ast.Expr{
-			&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: valueExpr},
-			&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: ast.NewIdent("true")},
-		}}}, nil
-	case air.ExprMakeMaybeNone:
-		typ, err := l.goType(expr.Type)
+		someExpr, err := l.maybeSomeExpr(expr.Type, valueExpr)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		return loweredExpr{expr: &ast.CompositeLit{Type: typ}}, nil
+		return loweredExpr{stmts: target.stmts, expr: someExpr}, nil
+	case air.ExprMakeMaybeNone:
+		noneExpr, err := l.maybeNoneExpr(expr.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{expr: noneExpr}, nil
 	case air.ExprMakeResultOk:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("result ok missing target")
@@ -1323,6 +1314,9 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
+		if l.mapUsesStructuralKeys(expr.Target.Type) {
+			return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Len")}}}, nil
+		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprMapHas:
 		return l.lowerMapHas(fn, expr)
@@ -1372,9 +1366,6 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			stmts = append(stmts, value.stmts...)
 			fieldValue := value.expr
 			if hasFieldInfo {
-				if fieldInfo.RecursiveNullable {
-					fieldValue = recursiveNullableValueAsPointer(l, fieldInfo.Type, fieldValue)
-				}
 				if fieldInfo.Mutable {
 					if l.isTraitObjectType(fieldInfo.Type) {
 						adapted, setup, _, ok, err := l.mutableTraitObjectArg(fn, field.Value, fieldValue, air.Param{Type: fieldInfo.Type, Mutable: true})
@@ -1432,23 +1423,21 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			stmts = append(stmts, targetDecls...)
 			stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 			stmts = append(stmts, resultDecls...)
-			fieldExpr := &ast.SelectorExpr{X: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}, Sel: ast.NewIdent(l.goFieldName(elemType, field.Name))}
+			fieldExpr := &ast.SelectorExpr{X: l.maybeValueExpr(targetExpr), Sel: ast.NewIdent(l.goFieldName(elemType, field.Name))}
 			assignValue := ast.Expr(fieldExpr)
-			if field.RecursiveNullable {
-				assignValue = recursiveNullableFieldAsMaybe(l, field.Type, fieldExpr)
-			} else if expr.Type != field.Type {
+			if expr.Type != field.Type {
 				resultInfo := l.program.Types[expr.Type-1]
 				if resultInfo.Kind == air.TypeMaybe && resultInfo.Elem == field.Type {
-					assignValue = &ast.CompositeLit{Type: mustTypeExpr(l, expr.Type), Elts: []ast.Expr{
-						&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: fieldExpr},
-						&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: ast.NewIdent("true")},
-					}}
+					assignValue, err = l.maybeSomeExpr(expr.Type, fieldExpr)
+					if err != nil {
+						return loweredExpr{}, err
+					}
 				} else {
 					return loweredExpr{}, fmt.Errorf("unsupported maybe field projection from %s.%s to type %d", elemType.Name, field.Name, expr.Type)
 				}
 			}
 			stmts = append(stmts, &ast.IfStmt{
-				Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Some")},
+				Cond: l.maybeIsSomeExpr(targetExpr),
 				Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{assignValue}}}},
 			})
 			return loweredExpr{stmts: stmts, expr: resultExpr}, nil
@@ -1460,9 +1449,6 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		fieldExpr := &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))}
 		if field.Mutable {
 			return loweredExpr{stmts: target.stmts, expr: &ast.StarExpr{X: fieldExpr}}, nil
-		}
-		if field.RecursiveNullable {
-			return loweredExpr{stmts: target.stmts, expr: recursiveNullableFieldAsMaybe(l, expr.Type, fieldExpr)}, nil
 		}
 		return loweredExpr{stmts: target.stmts, expr: fieldExpr}, nil
 	case air.ExprBlock:
@@ -1480,9 +1466,39 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, target)), Args: args}
 		return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
+	case air.ExprEq, air.ExprNotEq:
+		leftTypeID := l.resolvedExprType(fn, *expr.Left)
+		rightTypeID := l.resolvedExprType(fn, *expr.Right)
+		var left loweredExpr
+		var err error
+		if l.isMaybeType(leftTypeID) && l.isWeakContextType(leftTypeID) && l.isMaybeType(rightTypeID) && !l.isWeakContextType(rightTypeID) {
+			left, err = l.lowerExprWithExpectedType(fn, *expr.Left, rightTypeID)
+		} else {
+			left, err = l.lowerExpr(fn, *expr.Left)
+		}
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		var right loweredExpr
+		if l.isMaybeType(rightTypeID) && l.isWeakContextType(rightTypeID) && l.isMaybeType(leftTypeID) && !l.isWeakContextType(leftTypeID) {
+			right, err = l.lowerExprWithExpectedType(fn, *expr.Right, leftTypeID)
+		} else {
+			right, err = l.lowerExpr(fn, *expr.Right)
+		}
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		var equality ast.Expr = &ast.BinaryExpr{X: left.expr, Op: l.binaryToken(expr.Kind), Y: right.expr}
+		if l.isMaybeType(leftTypeID) || l.isMaybeType(rightTypeID) {
+			equality = &ast.CallExpr{Fun: l.qualified("runtime", "github.com/akonwi/ard/runtime", "MaybeEqual"), Args: []ast.Expr{left.expr, right.expr}}
+			if expr.Kind == air.ExprNotEq {
+				equality = &ast.UnaryExpr{Op: token.NOT, X: equality}
+			}
+		}
+		return loweredExpr{stmts: append(left.stmts, right.stmts...), expr: equality}, nil
 	case air.ExprIntAdd, air.ExprIntSub, air.ExprIntMul, air.ExprIntDiv, air.ExprIntMod,
 		air.ExprFloatAdd, air.ExprFloatSub, air.ExprFloatMul, air.ExprFloatDiv,
-		air.ExprEq, air.ExprNotEq, air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte,
+		air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte,
 		air.ExprAnd, air.ExprOr, air.ExprStrConcat:
 		left, err := l.lowerExpr(fn, *expr.Left)
 		if err != nil {
@@ -1780,6 +1796,113 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 	}
 }
 
+func (l *lowerer) isMaybeType(typeID air.TypeID) bool {
+	return validTypeID(l.program, typeID) && l.program.Types[typeID-1].Kind == air.TypeMaybe
+}
+
+func (l *lowerer) typeContainsMaybe(typeID air.TypeID, seen map[air.TypeID]bool) bool {
+	if !validTypeID(l.program, typeID) {
+		return false
+	}
+	if seen[typeID] {
+		return false
+	}
+	seen[typeID] = true
+	info := l.program.Types[typeID-1]
+	switch info.Kind {
+	case air.TypeMaybe:
+		return true
+	case air.TypeList, air.TypeFiber:
+		return l.typeContainsMaybe(info.Elem, seen)
+	case air.TypeMap:
+		return l.typeContainsMaybe(info.Key, seen) || l.typeContainsMaybe(info.Value, seen)
+	case air.TypeStruct:
+		for _, field := range info.Fields {
+			if l.typeContainsMaybe(field.Type, seen) {
+				return true
+			}
+		}
+	case air.TypeResult:
+		return l.typeContainsMaybe(info.Value, seen) || l.typeContainsMaybe(info.Error, seen)
+	case air.TypeUnion:
+		for _, member := range info.Members {
+			if l.typeContainsMaybe(member.Type, seen) {
+				return true
+			}
+		}
+	case air.TypeFunction:
+		for _, param := range info.Params {
+			if l.typeContainsMaybe(param, seen) {
+				return true
+			}
+		}
+		return l.typeContainsMaybe(info.Return, seen)
+	}
+	return false
+}
+
+func (l *lowerer) mapUsesStructuralKeys(mapTypeID air.TypeID) bool {
+	if !validTypeID(l.program, mapTypeID) {
+		return false
+	}
+	info := l.program.Types[mapTypeID-1]
+	return info.Kind == air.TypeMap && l.typeContainsMaybe(info.Key, map[air.TypeID]bool{})
+}
+
+func (l *lowerer) structuralMapTypes(mapTypeID air.TypeID) (ast.Expr, ast.Expr, error) {
+	if !validTypeID(l.program, mapTypeID) {
+		return nil, nil, fmt.Errorf("invalid map type id %d", mapTypeID)
+	}
+	info := l.program.Types[mapTypeID-1]
+	if info.Kind != air.TypeMap {
+		return nil, nil, fmt.Errorf("type %s is not a map", info.Name)
+	}
+	keyType, err := l.goType(info.Key)
+	if err != nil {
+		return nil, nil, err
+	}
+	valueType, err := l.goType(info.Value)
+	if err != nil {
+		return nil, nil, err
+	}
+	return keyType, valueType, nil
+}
+
+func (l *lowerer) structuralMapEntryTypeExpr(mapTypeID air.TypeID) (ast.Expr, error) {
+	keyType, valueType, err := l.structuralMapTypes(mapTypeID)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.IndexListExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "StructuralMapEntry"), Indices: []ast.Expr{keyType, valueType}}, nil
+}
+
+func (l *lowerer) structuralMapWithEntriesExpr(mapTypeID air.TypeID, entries []ast.Expr) (ast.Expr, error) {
+	keyType, valueType, err := l.structuralMapTypes(mapTypeID)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CallExpr{Fun: &ast.IndexListExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "NewStructuralMapWithEntries"), Indices: []ast.Expr{keyType, valueType}}, Args: entries}, nil
+}
+
+func (l *lowerer) mapKeyValueTypes(mapTypeID air.TypeID) (air.TypeID, air.TypeID) {
+	if !validTypeID(l.program, mapTypeID) {
+		return air.NoType, air.NoType
+	}
+	info := l.program.Types[mapTypeID-1]
+	if info.Kind != air.TypeMap {
+		return air.NoType, air.NoType
+	}
+	return info.Key, info.Value
+}
+
+func (l *lowerer) lowerMapKeyArg(fn air.Function, mapTypeID air.TypeID, expr air.Expr) (loweredExpr, error) {
+	keyType, _ := l.mapKeyValueTypes(mapTypeID)
+	if keyType != air.NoType {
+		return l.lowerExprWithExpectedType(fn, expr, keyType)
+	}
+	return l.lowerExpr(fn, expr)
+}
+
 func (l *lowerer) isTraitObjectType(typeID air.TypeID) bool {
 	return validTypeID(l.program, typeID) && l.program.Types[typeID-1].Kind == air.TypeTraitObject
 }
@@ -1926,6 +2049,9 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		value, err := l.goType(info.Value)
 		if err != nil {
 			return nil, err
+		}
+		if l.typeContainsMaybe(info.Key, map[air.TypeID]bool{}) {
+			return &ast.IndexListExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "StructuralMap"), Indices: []ast.Expr{key, value}}, nil
 		}
 		return &ast.MapType{Key: key, Value: value}, nil
 	case air.TypeStruct, air.TypeEnum:
@@ -3054,7 +3180,7 @@ func (l *lowerer) lowerMaybeExpect(fn air.Function, expr air.Expr) (loweredExpr,
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	if l.isVoidType(expr.Type) {
 		stmts = append(stmts, &ast.IfStmt{
-			Cond: &ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("Some")},
+			Cond: l.maybeIsSomeExpr(resultExpr),
 			Body: &ast.BlockStmt{},
 			Else: &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{message.expr}}}}},
 		})
@@ -3067,8 +3193,8 @@ func (l *lowerer) lowerMaybeExpect(fn air.Function, expr air.Expr) (loweredExpr,
 	}
 	stmts = append(stmts, decls...)
 	stmts = append(stmts, &ast.IfStmt{
-		Cond: &ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("Some")},
-		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: resultExpr, Sel: ast.NewIdent("Value")}}}}},
+		Cond: l.maybeIsSomeExpr(resultExpr),
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.maybeValueExpr(resultExpr)}}}},
 		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{message.expr}}}}},
 	})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
@@ -3082,7 +3208,7 @@ func (l *lowerer) lowerMaybeIsNone(fn air.Function, expr air.Expr) (loweredExpr,
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	return loweredExpr{stmts: target.stmts, expr: &ast.UnaryExpr{Op: token.NOT, X: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Some")}}}, nil
+	return loweredExpr{stmts: target.stmts, expr: l.maybeIsNoneExpr(target.expr)}, nil
 }
 
 func (l *lowerer) lowerMaybeIsSome(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -3093,7 +3219,7 @@ func (l *lowerer) lowerMaybeIsSome(fn air.Function, expr air.Expr) (loweredExpr,
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	return loweredExpr{stmts: target.stmts, expr: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Some")}}, nil
+	return loweredExpr{stmts: target.stmts, expr: l.maybeIsSomeExpr(target.expr)}, nil
 }
 
 func (l *lowerer) lowerMaybeOr(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -3125,8 +3251,8 @@ func (l *lowerer) lowerMaybeOr(fn air.Function, expr air.Expr) (loweredExpr, err
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
 	stmts = append(stmts, &ast.IfStmt{
-		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Some")},
-		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}}},
+		Cond: l.maybeIsSomeExpr(targetExpr),
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.maybeValueExpr(targetExpr)}}}},
 		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{defaultValue.expr}}}},
 	})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
@@ -3196,29 +3322,26 @@ func (l *lowerer) lowerMaybeMap(fn air.Function, expr air.Expr) (loweredExpr, er
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
-	resultType, err := l.goType(expr.Type)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}
+	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{l.maybeValueExpr(targetExpr)}}
 	var valueExpr ast.Expr = call
 	if l.isVoidType(expr.Type) || isVoidExpr(call) {
 		valueExpr = voidValueExpr()
 	}
+	someExpr, err := l.maybeSomeExpr(expr.Type, valueExpr)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	noneExpr, err := l.maybeNoneExpr(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	stmts = append(stmts, &ast.IfStmt{
-		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Some")},
+		Cond: l.maybeIsSomeExpr(targetExpr),
 		Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{
-				Lhs: []ast.Expr{resultExpr},
-				Tok: token.ASSIGN,
-				Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
-					&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: valueExpr},
-					&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: ast.NewIdent("true")},
-				}}},
-			},
+			&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{someExpr}},
 		}},
 		Else: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType}}},
+			&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneExpr}},
 		}},
 	})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
@@ -3252,15 +3375,15 @@ func (l *lowerer) lowerMaybeAndThen(fn air.Function, expr air.Expr) (loweredExpr
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
-	resultType, err := l.goType(expr.Type)
+	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{l.maybeValueExpr(targetExpr)}}
+	noneExpr, err := l.maybeNoneExpr(expr.Type)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}
 	stmts = append(stmts, &ast.IfStmt{
-		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Some")},
+		Cond: l.maybeIsSomeExpr(targetExpr),
 		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}}}},
-		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType}}}}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneExpr}}}},
 	})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
@@ -3671,12 +3794,12 @@ func (l *lowerer) lowerTryMaybe(fn air.Function, expr air.Expr) (loweredExpr, er
 	}
 	someBody := []ast.Stmt{}
 	if assignTarget != nil {
-		someBody = append(someBody, &ast.AssignStmt{Lhs: []ast.Expr{assignTarget}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}})
+		someBody = append(someBody, &ast.AssignStmt{Lhs: []ast.Expr{assignTarget}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.maybeValueExpr(targetExpr)}})
 		if expr.HasCatch {
 			someBody = append(someBody, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{assignTarget}})
 		}
 	} else {
-		someBody = append(someBody, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}})
+		someBody = append(someBody, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.maybeValueExpr(targetExpr)}})
 	}
 	var noneBody []ast.Stmt
 	if expr.HasCatch {
@@ -3707,7 +3830,7 @@ func (l *lowerer) lowerTryMaybe(fn air.Function, expr air.Expr) (loweredExpr, er
 		}
 		noneBody = []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{returnExpr}}}
 	}
-	stmts = append(stmts, &ast.IfStmt{Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Some")}, Body: &ast.BlockStmt{List: someBody}, Else: &ast.BlockStmt{List: noneBody}})
+	stmts = append(stmts, &ast.IfStmt{Cond: l.maybeIsSomeExpr(targetExpr), Body: &ast.BlockStmt{List: someBody}, Else: &ast.BlockStmt{List: noneBody}})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
 
@@ -3743,7 +3866,7 @@ func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, 
 	}
 	someName := localName(fn, expr.SomeLocal)
 	l.declaredLocals[expr.SomeLocal] = true
-	someDecl := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(someName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}
+	someDecl := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(someName)}, Tok: token.DEFINE, Rhs: []ast.Expr{l.maybeValueExpr(targetExpr)}}
 	someBody, err := l.lowerValueBlock(fn, expr.Some, expr.Type, assignTarget)
 	if err != nil {
 		return loweredExpr{}, err
@@ -3759,7 +3882,7 @@ func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, 
 		}
 	}
 	stmts = append(stmts, &ast.IfStmt{
-		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Some")},
+		Cond: l.maybeIsSomeExpr(targetExpr),
 		Body: &ast.BlockStmt{List: someBody},
 		Else: &ast.BlockStmt{List: noneBody},
 	})
@@ -4125,20 +4248,16 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 }
 
 func (l *lowerer) lowerMakeMap(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	keyType, valueType := l.mapKeyValueTypes(expr.Type)
+	if l.mapUsesStructuralKeys(expr.Type) {
+		return l.lowerMakeStructuralMap(fn, expr, keyType, valueType)
+	}
 	typ, err := l.goType(expr.Type)
 	if err != nil {
 		return loweredExpr{}, err
 	}
 	elts := make([]ast.Expr, 0, len(expr.Entries))
 	stmts := []ast.Stmt{}
-	keyType := air.NoType
-	valueType := air.NoType
-	if validTypeID(l.program, expr.Type) {
-		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeMap {
-			keyType = info.Key
-			valueType = info.Value
-		}
-	}
 	for _, entry := range expr.Entries {
 		var key loweredExpr
 		if keyType != air.NoType {
@@ -4165,6 +4284,46 @@ func (l *lowerer) lowerMakeMap(fn air.Function, expr air.Expr) (loweredExpr, err
 	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
 }
 
+func (l *lowerer) lowerMakeStructuralMap(fn air.Function, expr air.Expr, keyType air.TypeID, valueType air.TypeID) (loweredExpr, error) {
+	entryType, err := l.structuralMapEntryTypeExpr(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	entries := make([]ast.Expr, 0, len(expr.Entries))
+	stmts := []ast.Stmt{}
+	for _, entry := range expr.Entries {
+		var key loweredExpr
+		if keyType != air.NoType {
+			key, err = l.lowerExprWithExpectedType(fn, entry.Key, keyType)
+		} else {
+			key, err = l.lowerExpr(fn, entry.Key)
+		}
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		var value loweredExpr
+		if valueType != air.NoType {
+			value, err = l.lowerExprWithExpectedType(fn, entry.Value, valueType)
+		} else {
+			value, err = l.lowerExpr(fn, entry.Value)
+		}
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, key.stmts...)
+		stmts = append(stmts, value.stmts...)
+		entries = append(entries, &ast.CompositeLit{Type: entryType, Elts: []ast.Expr{
+			&ast.KeyValueExpr{Key: ast.NewIdent("Key"), Value: key.expr},
+			&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: value.expr},
+		}})
+	}
+	mapExpr, err := l.structuralMapWithEntriesExpr(expr.Type, entries)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	return loweredExpr{stmts: stmts, expr: mapExpr}, nil
+}
+
 func (l *lowerer) lowerMapHas(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil || len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("map has expects target and one arg")
@@ -4173,9 +4332,12 @@ func (l *lowerer) lowerMapHas(fn air.Function, expr air.Expr) (loweredExpr, erro
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	key, err := l.lowerExpr(fn, expr.Args[0])
+	key, err := l.lowerMapKeyArg(fn, expr.Target.Type, expr.Args[0])
 	if err != nil {
 		return loweredExpr{}, err
+	}
+	if l.mapUsesStructuralKeys(expr.Target.Type) {
+		return loweredExpr{stmts: append(target.stmts, key.stmts...), expr: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Has")}, Args: []ast.Expr{key.expr}}}, nil
 	}
 	temp := l.nextTemp()
 	decls, err := l.declareTemp(expr.Type, temp)
@@ -4199,7 +4361,7 @@ func (l *lowerer) lowerMapGet(fn air.Function, expr air.Expr) (loweredExpr, erro
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	key, err := l.lowerExpr(fn, expr.Args[0])
+	key, err := l.lowerMapKeyArg(fn, expr.Target.Type, expr.Args[0])
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -4210,17 +4372,21 @@ func (l *lowerer) lowerMapGet(fn air.Function, expr air.Expr) (loweredExpr, erro
 	}
 	valueTemp := l.nextTemp()
 	okName := l.nextTemp()
-	lookup := &ast.IndexExpr{X: target.expr, Index: key.expr}
+	lookup := ast.Expr(&ast.IndexExpr{X: target.expr, Index: key.expr})
+	if l.mapUsesStructuralKeys(expr.Target.Type) {
+		lookup = &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Get")}, Args: []ast.Expr{key.expr}}
+	}
 	stmts := append(target.stmts, key.stmts...)
 	stmts = append(stmts, decls...)
+	someExpr, err := l.maybeSomeExpr(expr.Type, ast.NewIdent(valueTemp))
+	if err != nil {
+		return loweredExpr{}, err
+	}
 	stmts = append(stmts, &ast.IfStmt{
 		Init: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(valueTemp), ast.NewIdent(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{lookup}},
 		Cond: ast.NewIdent(okName),
 		Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CompositeLit{Type: mustTypeExpr(l, expr.Type), Elts: []ast.Expr{
-				&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: ast.NewIdent(valueTemp)},
-				&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: ast.NewIdent("true")},
-			}}}},
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{someExpr}},
 		}},
 	})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
@@ -4234,14 +4400,7 @@ func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, erro
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	keyType := air.NoType
-	valueType := air.NoType
-	if validTypeID(l.program, expr.Target.Type) {
-		if info := l.program.Types[expr.Target.Type-1]; info.Kind == air.TypeMap {
-			keyType = info.Key
-			valueType = info.Value
-		}
-	}
+	keyType, valueType := l.mapKeyValueTypes(expr.Target.Type)
 	var key loweredExpr
 	if keyType != air.NoType {
 		key, err = l.lowerExprWithExpectedType(fn, expr.Args[0], keyType)
@@ -4262,7 +4421,11 @@ func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, erro
 	}
 	stmts := append(target.stmts, key.stmts...)
 	stmts = append(stmts, value.stmts...)
-	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: key.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{value.expr}})
+	if l.mapUsesStructuralKeys(expr.Target.Type) {
+		stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Set")}, Args: []ast.Expr{key.expr, value.expr}}})
+	} else {
+		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: key.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{value.expr}})
+	}
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("true")}, nil
 }
 
@@ -4274,12 +4437,16 @@ func (l *lowerer) lowerMapDrop(fn air.Function, expr air.Expr) (loweredExpr, err
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	key, err := l.lowerExpr(fn, expr.Args[0])
+	key, err := l.lowerMapKeyArg(fn, expr.Target.Type, expr.Args[0])
 	if err != nil {
 		return loweredExpr{}, err
 	}
 	stmts := append(target.stmts, key.stmts...)
-	stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("delete"), Args: []ast.Expr{target.expr, key.expr}}})
+	if l.mapUsesStructuralKeys(expr.Target.Type) {
+		stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Drop")}, Args: []ast.Expr{key.expr}}})
+	} else {
+		stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("delete"), Args: []ast.Expr{target.expr, key.expr}}})
+	}
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 }
 
@@ -4290,6 +4457,9 @@ func (l *lowerer) lowerMapKeys(fn air.Function, expr air.Expr) (loweredExpr, err
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {
 		return loweredExpr{}, err
+	}
+	if l.mapUsesStructuralKeys(expr.Target.Type) {
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Keys")}}}, nil
 	}
 	helper, err := l.mapKeyHelper(expr.Target.Type)
 	if err != nil {
@@ -4310,12 +4480,15 @@ func (l *lowerer) lowerMapKeyAt(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	stmts := append(target.stmts, index.stmts...)
+	if l.mapUsesStructuralKeys(expr.Target.Type) {
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("KeyAt")}, Args: []ast.Expr{index.expr}}}, nil
+	}
 	helper, err := l.mapKeyHelper(expr.Target.Type)
 	if err != nil {
 		return loweredExpr{}, err
 	}
 	keys := &ast.CallExpr{Fun: ast.NewIdent(helper), Args: []ast.Expr{target.expr}}
-	stmts := append(target.stmts, index.stmts...)
 	return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: keys, Index: index.expr}}, nil
 }
 
@@ -4331,12 +4504,15 @@ func (l *lowerer) lowerMapValueAt(fn air.Function, expr air.Expr) (loweredExpr, 
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	stmts := append(target.stmts, index.stmts...)
+	if l.mapUsesStructuralKeys(expr.Target.Type) {
+		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("ValueAt")}, Args: []ast.Expr{index.expr}}}, nil
+	}
 	helper, err := l.mapKeyHelper(expr.Target.Type)
 	if err != nil {
 		return loweredExpr{}, err
 	}
 	keyExpr := &ast.IndexExpr{X: &ast.CallExpr{Fun: ast.NewIdent(helper), Args: []ast.Expr{target.expr}}, Index: index.expr}
-	stmts := append(target.stmts, index.stmts...)
 	return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: target.expr, Index: keyExpr}}, nil
 }
 
@@ -4622,79 +4798,6 @@ func (l *lowerer) goFieldName(typ air.TypeInfo, fieldName string) string {
 		return name + "_"
 	}
 	return name
-}
-
-func (l *lowerer) wrapProjectMaybeCall(maybeTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
-	if !validTypeID(l.program, maybeTypeID) {
-		return loweredExpr{}, fmt.Errorf("invalid maybe type id %d", maybeTypeID)
-	}
-	info := l.program.Types[maybeTypeID-1]
-	if info.Kind != air.TypeMaybe {
-		return loweredExpr{}, fmt.Errorf("expected maybe type, got kind %d", info.Kind)
-	}
-	elemType, err := l.goType(info.Elem)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	maybeType, err := l.goType(maybeTypeID)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	ptrTemp := l.nextTemp()
-	valueTemp := l.nextTemp()
-	stmts := []ast.Stmt{
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(ptrTemp)}, Type: &ast.StarExpr{X: elemType}}}}},
-		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(ptrTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}},
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(valueTemp)}, Type: elemType}}}},
-		&ast.IfStmt{Cond: &ast.BinaryExpr{X: ast.NewIdent(ptrTemp), Op: token.NEQ, Y: ast.NewIdent("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(valueTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.StarExpr{X: ast.NewIdent(ptrTemp)}}},
-		}}},
-	}
-	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: maybeType, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: ast.NewIdent(valueTemp)},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: &ast.BinaryExpr{X: ast.NewIdent(ptrTemp), Op: token.NEQ, Y: ast.NewIdent("nil")}},
-	}}}, nil
-}
-
-func (l *lowerer) wrapStdlibMaybeCall(maybeTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
-	maybeType, err := l.goType(maybeTypeID)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	info := l.program.Types[maybeTypeID-1]
-	elemType, err := l.goType(info.Elem)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	temp := l.nextTemp()
-	stdlibMaybeType := &ast.IndexExpr{X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Maybe"), Index: elemType}
-	stmts := []ast.Stmt{
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(temp)}, Type: stdlibMaybeType}}}},
-		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}},
-	}
-	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: maybeType, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.SelectorExpr{X: ast.NewIdent(temp), Sel: ast.NewIdent("Value")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: &ast.SelectorExpr{X: ast.NewIdent(temp), Sel: ast.NewIdent("Some")}},
-	}}}, nil
-}
-
-func (l *lowerer) stdlibMaybeExpr(typeID air.TypeID, expr ast.Expr) (ast.Expr, error) {
-	if !validTypeID(l.program, typeID) {
-		return nil, fmt.Errorf("invalid maybe type id %d", typeID)
-	}
-	info := l.program.Types[typeID-1]
-	if info.Kind != air.TypeMaybe {
-		return nil, fmt.Errorf("expected maybe type, got kind %d", info.Kind)
-	}
-	elemType, err := l.goType(info.Elem)
-	if err != nil {
-		return nil, err
-	}
-	stdlibMaybeType := &ast.IndexExpr{X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Maybe"), Index: elemType}
-	return &ast.CompositeLit{Type: stdlibMaybeType, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Value")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Some"), Value: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Some")}},
-	}}, nil
 }
 
 func (l *lowerer) convertStdlibError(typeID air.TypeID, expr ast.Expr) (ast.Expr, error) {
@@ -4986,17 +5089,18 @@ func (l *lowerer) lowerChannelNew(args []ast.Expr, stmts []ast.Stmt, returnTypeI
 	if len(args) > 0 {
 		sizeTemp := l.nextTemp()
 		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(sizeTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{args[0]}})
+		sizeExpr := ast.NewIdent(sizeTemp)
 		cond := &ast.BinaryExpr{
-			X:  &ast.SelectorExpr{X: ast.NewIdent(sizeTemp), Sel: ast.NewIdent("Some")},
+			X:  l.maybeIsSomeExpr(sizeExpr),
 			Op: token.LAND,
 			Y: &ast.BinaryExpr{
-				X:  &ast.SelectorExpr{X: ast.NewIdent(sizeTemp), Sel: ast.NewIdent("Value")},
+				X:  l.maybeValueExpr(sizeExpr),
 				Op: token.GTR,
 				Y:  &ast.BasicLit{Kind: token.INT, Value: "0"},
 			},
 		}
 		stmts = append(stmts, &ast.IfStmt{Cond: cond, Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(channelTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{makeCall(&ast.SelectorExpr{X: ast.NewIdent(sizeTemp), Sel: ast.NewIdent("Value")})}},
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(channelTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{makeCall(l.maybeValueExpr(sizeExpr))}},
 		}}})
 	}
 	result := &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, info)), Elts: []ast.Expr{
@@ -5009,47 +5113,7 @@ func (l *lowerer) adaptProjectExternArgs(signature air.Signature, args []ast.Exp
 	if len(signature.Params) != len(args) {
 		return nil, nil, fmt.Errorf("project extern argument count mismatch: signature has %d params, call has %d args", len(signature.Params), len(args))
 	}
-	adapted := append([]ast.Expr(nil), args...)
-	stmts := []ast.Stmt{}
-	for i, param := range signature.Params {
-		if !validTypeID(l.program, param.Type) {
-			continue
-		}
-		info := l.program.Types[param.Type-1]
-		if info.Kind != air.TypeMaybe {
-			continue
-		}
-		arg, err := l.projectMaybeArgPointer(param.Type, adapted[i])
-		if err != nil {
-			return nil, nil, err
-		}
-		stmts = append(stmts, arg.stmts...)
-		adapted[i] = arg.expr
-	}
-	return adapted, stmts, nil
-}
-
-func (l *lowerer) projectMaybeArgPointer(maybeTypeID air.TypeID, expr ast.Expr) (loweredExpr, error) {
-	info := l.program.Types[maybeTypeID-1]
-	elemType, err := l.goType(info.Elem)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	maybeType, err := l.goType(maybeTypeID)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	maybeTemp := l.nextTemp()
-	ptrTemp := l.nextTemp()
-	stmts := []ast.Stmt{
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(maybeTemp)}, Type: maybeType}}}},
-		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(maybeTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{expr}},
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(ptrTemp)}, Type: &ast.StarExpr{X: elemType}}}}},
-		&ast.IfStmt{Cond: &ast.SelectorExpr{X: ast.NewIdent(maybeTemp), Sel: ast.NewIdent("Some")}, Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(ptrTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.UnaryExpr{Op: token.AND, X: &ast.SelectorExpr{X: ast.NewIdent(maybeTemp), Sel: ast.NewIdent("Value")}}}},
-		}}},
-	}
-	return loweredExpr{stmts: stmts, expr: ast.NewIdent(ptrTemp)}, nil
+	return append([]ast.Expr(nil), args...), nil, nil
 }
 
 func (l *lowerer) lowerDependencyExternCall(ext air.Extern, alias string, binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
@@ -5079,12 +5143,7 @@ func (l *lowerer) lowerDirectExternCall(ext air.Extern, bindingExpr func(string,
 	case air.TypeVoid:
 		return loweredExpr{stmts: stmts, expr: call}, nil
 	case air.TypeMaybe:
-		wrapped, err := l.wrapProjectMaybeCall(returnTypeID, call)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
+		return loweredExpr{stmts: stmts, expr: call}, nil
 	case air.TypeStruct:
 		if rawField, ok := l.channelStructRawField(returnType); ok {
 			wrapped := &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, returnType)), Elts: []ast.Expr{
@@ -5155,6 +5214,45 @@ func (l *lowerer) projectFFIBindingExpr(binding string) (ast.Expr, error) {
 func isVoidExpr(expr ast.Expr) bool {
 	ident, ok := expr.(*ast.Ident)
 	return ok && ident.Name == "nil"
+}
+
+func (l *lowerer) maybeElemTypeExpr(maybeTypeID air.TypeID) (ast.Expr, error) {
+	if !validTypeID(l.program, maybeTypeID) {
+		return nil, fmt.Errorf("invalid maybe type id %d", maybeTypeID)
+	}
+	info := l.program.Types[maybeTypeID-1]
+	if info.Kind != air.TypeMaybe {
+		return nil, fmt.Errorf("expected maybe type, got kind %d", info.Kind)
+	}
+	return l.goType(info.Elem)
+}
+
+func (l *lowerer) maybeSomeExpr(maybeTypeID air.TypeID, value ast.Expr) (ast.Expr, error) {
+	elemType, err := l.maybeElemTypeExpr(maybeTypeID)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "Some"), Index: elemType}, Args: []ast.Expr{value}}, nil
+}
+
+func (l *lowerer) maybeNoneExpr(maybeTypeID air.TypeID) (ast.Expr, error) {
+	elemType, err := l.maybeElemTypeExpr(maybeTypeID)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "None"), Index: elemType}}, nil
+}
+
+func (l *lowerer) maybeIsSomeExpr(expr ast.Expr) ast.Expr {
+	return &ast.CallExpr{Fun: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("IsSome")}}
+}
+
+func (l *lowerer) maybeIsNoneExpr(expr ast.Expr) ast.Expr {
+	return &ast.CallExpr{Fun: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("IsNone")}}
+}
+
+func (l *lowerer) maybeValueExpr(expr ast.Expr) ast.Expr {
+	return &ast.CallExpr{Fun: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Value")}}
 }
 
 func validFunctionID(program *air.Program, id air.FunctionID) bool {
@@ -5392,13 +5490,17 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 	case air.TypeDynamic, air.TypeExtern, air.TypeTraitObject:
 		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
 	case air.TypeMaybe:
-		fmt.Fprintf(b, "\tif !value.Some { return enc.WriteToken(jsontext.Null) }\n\treturn %s(enc, value.Value)\n", l.jsonEncodeHelperName(info.Elem))
+		fmt.Fprintf(b, "\tif value.IsNone() { return enc.WriteToken(jsontext.Null) }\n\treturn %s(enc, value.Value())\n", l.jsonEncodeHelperName(info.Elem))
 	case air.TypeResult:
 		fmt.Fprintf(b, "\tif value.Ok { return %s(enc, value.Value) }\n\treturn %s(enc, value.Err)\n", l.jsonEncodeHelperName(info.Value), l.jsonEncodeHelperName(info.Error))
 	case air.TypeList:
 		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginArray); err != nil { return err }\n\tfor _, item := range value {\n\t\tif err := %s(enc, item); err != nil { return err }\n\t}\n\treturn enc.WriteToken(jsontext.EndArray)\n", l.jsonEncodeHelperName(info.Elem))
 	case air.TypeMap:
-		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }\n\tfor key, item := range value {\n\t\tif err := enc.WriteToken(jsontext.String(fmt.Sprint(key))); err != nil { return err }\n\t\tif err := %s(enc, item); err != nil { return err }\n\t}\n\treturn enc.WriteToken(jsontext.EndObject)\n", l.jsonEncodeHelperName(info.Value))
+		if l.mapUsesStructuralKeys(typeID) {
+			fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }\n\tfor _, key := range value.Keys() {\n\t\titem, _ := value.Get(key)\n\t\tif err := enc.WriteToken(jsontext.String(fmt.Sprint(key))); err != nil { return err }\n\t\tif err := %s(enc, item); err != nil { return err }\n\t}\n\treturn enc.WriteToken(jsontext.EndObject)\n", l.jsonEncodeHelperName(info.Value))
+		} else {
+			fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }\n\tfor key, item := range value {\n\t\tif err := enc.WriteToken(jsontext.String(fmt.Sprint(key))); err != nil { return err }\n\t\tif err := %s(enc, item); err != nil { return err }\n\t}\n\treturn enc.WriteToken(jsontext.EndObject)\n", l.jsonEncodeHelperName(info.Value))
+		}
 	case air.TypeStruct:
 		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }\n")
 		for _, field := range info.Fields {
@@ -5494,7 +5596,7 @@ func (l *lowerer) writeJSONDecodeTextHelper(b *strings.Builder, typeID air.TypeI
 	case air.TypeDynamic:
 		fmt.Fprintf(b, "\tvalue, err := dec.ReadValue()\n\tif err != nil { return out, err.Error() }\n\tvar raw any\n\tif err := json.Unmarshal(value, &raw); err != nil { return out, err.Error() }\n\treturn raw, \"\"\n")
 	case air.TypeMaybe:
-		fmt.Fprintf(b, "\tif dec.PeekKind() == jsontext.KindNull { _, _ = dec.ReadToken(); return out, \"\" }\n\tvalue, message := %s(dec, path)\n\tif message != \"\" { return out, message }\n\tout.Value = value\n\tout.Some = true\n\treturn out, \"\"\n", l.jsonDecodeTextHelperName(info.Elem))
+		fmt.Fprintf(b, "\tif dec.PeekKind() == jsontext.KindNull { _, _ = dec.ReadToken(); return out, \"\" }\n\tvalue, message := %s(dec, path)\n\tif message != \"\" { return out, message }\n\tout = runtime.Some(value)\n\treturn out, \"\"\n", l.jsonDecodeTextHelperName(info.Elem))
 	case air.TypeList:
 		fmt.Fprintf(b, "\ttok, err := dec.ReadToken()\n\tif err != nil { return out, err.Error() }\n\tif tok.Kind() != jsontext.KindBeginArray { return out, path + \": got \" + tok.Kind().String() + \", expected %s\" }\n", info.Name)
 		if l.writeJSONDecodePrimitiveListLoop(b, info.Elem, typeName) {

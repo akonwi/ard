@@ -3005,11 +3005,15 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					isMaybe := func(val Type) bool {
-						_, ok := val.(*Maybe)
-						return ok
-					}
-					if isMaybe(left.Type()) && isMaybe(right.Type()) {
+					leftMaybe, leftIsMaybe := left.Type().(*Maybe)
+					rightMaybe, rightIsMaybe := right.Type().(*Maybe)
+					if leftIsMaybe && rightIsMaybe {
+						leftInner := leftMaybe.Of()
+						rightInner := rightMaybe.Of()
+						if leftInner != Void && rightInner != Void && !areCompatible(leftInner, rightInner) && !areCompatible(rightInner, leftInner) {
+							c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
+							return nil
+						}
 						return &Equality{left, right}
 					}
 

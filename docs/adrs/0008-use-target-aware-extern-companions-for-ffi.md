@@ -60,13 +60,13 @@ Project Go companion adaptation should use idiomatic generated Go values rather 
 
 - `extern type Name = "GoType"` values pass as the bound Go type
 - scalar/list/map/function arguments pass as generated Go values
-- `T?` arguments pass as `*T`, with `nil` for none
+- `T?` arguments pass as `runtime.Maybe[T]`, preserving Ard's explicit nullable representation at the host boundary
 - `T` returns directly as `T`
-- `T?` returns as `*T`, with `nil` becoming none and non-`nil` becoming some
+- `T?` returns as `runtime.Maybe[T]`
 - `Void!Str` maps to `error`
 - `T!Str` maps to `(T, error)`
 
-This pointer/error convention is boundary-specific. Within generated Go code, Ard `Maybe` and `Result` values still lower to the runtime representations chosen by the Go backend. Standard-library Go FFI uses generated metadata and stdlib FFI wrapper types where needed, rather than requiring the same project companion pointer convention everywhere.
+This convention keeps nullable values explicit across FFI. Go pointers in companion signatures represent reference semantics (for example `mut T`) or explicit pointer-backed `extern type` bindings, not ordinary Ard `T?` values. If an underlying Go library uses `nil` pointers for optional values, companion code should adapt that library convention into or out of `runtime.Maybe[T]` itself. Standard-library Go FFI uses generated metadata and stdlib FFI wrapper types where needed, following the same semantic distinction.
 
 JavaScript externs should use target-specific `.mjs` companion modules. Generated JavaScript imports the companion module and calls the exported binding rather than embedding per-function module paths in Ard source.
 
@@ -86,3 +86,4 @@ Standard library Go FFI metadata should be generated from Ard standard library d
 - `docs/adrs/0016-defer-project-ffi-codegen.md`
 - `docs/adrs/0002-use-air-as-backend-boundary.md`
 - `docs/adrs/0005-use-result-maybe-and-try-for-error-handling.md`
+- `docs/adrs/0024-preserve-maybe-semantics-in-go-lowering.md`
