@@ -126,10 +126,10 @@ func (l *lowerer) lowerProgram() (string, error) {
 	b.WriteString("const std = @import(\"std\");\n")
 	b.WriteString("const ard = @import(\"ard_runtime.zig\");\n\n")
 	for _, typ := range l.program.Types {
-		if typ.Kind != air.TypeStruct {
+		if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum {
 			continue
 		}
-		if err := l.lowerStructType(&b, typ); err != nil {
+		if err := l.lowerTypeDecl(&b, typ); err != nil {
 			return "", err
 		}
 		b.WriteString("\n")
@@ -158,6 +158,17 @@ func (l *lowerer) lowerProgram() (string, error) {
 	return b.String(), nil
 }
 
+func (l *lowerer) lowerTypeDecl(b *strings.Builder, typ air.TypeInfo) error {
+	switch typ.Kind {
+	case air.TypeStruct:
+		return l.lowerStructType(b, typ)
+	case air.TypeEnum:
+		return l.lowerEnumType(b, typ)
+	default:
+		return fmt.Errorf("unsupported Zig type declaration %s", typ.Name)
+	}
+}
+
 func (l *lowerer) lowerStructType(b *strings.Builder, typ air.TypeInfo) error {
 	fmt.Fprintf(b, "const %s = struct {\n", typeDeclName(typ))
 	for _, field := range typ.Fields {
@@ -168,6 +179,15 @@ func (l *lowerer) lowerStructType(b *strings.Builder, typ air.TypeInfo) error {
 		fmt.Fprintf(b, "    %s: %s,\n", sanitizeIdentifier(field.Name), fieldType)
 	}
 	b.WriteString("};\n")
+	return nil
+}
+
+func (l *lowerer) lowerEnumType(b *strings.Builder, typ air.TypeInfo) error {
+	typeName := typeDeclName(typ)
+	fmt.Fprintf(b, "const %s = i64;\n", typeName)
+	for _, variant := range typ.Variants {
+		fmt.Fprintf(b, "const %s_%s: %s = %d;\n", typeName, sanitizeIdentifier(variant.Name), typeName, variant.Discriminant)
+	}
 	return nil
 }
 
@@ -259,7 +279,7 @@ func (l *lowerer) typeName(id air.TypeID) (string, error) {
 			return "", err
 		}
 		return "ard.Maybe(" + elem + ")", nil
-	case air.TypeStruct:
+	case air.TypeStruct, air.TypeEnum:
 		return typeDeclName(info), nil
 	case air.TypeTraitObject:
 		if info.Trait >= 0 && int(info.Trait) < len(l.program.Traits) && l.program.Traits[info.Trait].Name == "ToString" {
@@ -292,6 +312,16 @@ func (fl *functionLowerer) lowerBlock(b *strings.Builder, block air.Block, retur
 		}
 		if block.Result.Kind == air.ExprMatchMaybe {
 			if handled, err := fl.lowerMatchMaybeResult(b, *block.Result, returnType); handled || err != nil {
+				return err
+			}
+		}
+		if block.Result.Kind == air.ExprMatchEnum {
+			if handled, err := fl.lowerMatchEnumResult(b, *block.Result, returnType); handled || err != nil {
+				return err
+			}
+		}
+		if block.Result.Kind == air.ExprMatchInt {
+			if handled, err := fl.lowerMatchIntResult(b, *block.Result, returnType); handled || err != nil {
 				return err
 			}
 		}
@@ -344,6 +374,109 @@ func (fl *functionLowerer) lowerIfResult(b *strings.Builder, expr air.Expr, retu
 		if err := elseFl.lowerBlock(b, expr.Else, returnType); err != nil {
 			return true, err
 		}
+	}
+	fmt.Fprintf(b, "%s}\n", fl.indent)
+	return true, nil
+}
+
+func (fl *functionLowerer) lowerMatchIntResult(b *strings.Builder, expr air.Expr, returnType air.TypeID) (bool, error) {
+	if expr.Target == nil {
+		return true, fmt.Errorf("int match missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return true, err
+	}
+	if len(expr.IntCases) == 0 && len(expr.RangeCases) == 0 && len(expr.CatchAll.Stmts) == 0 && expr.CatchAll.Result == nil {
+		return false, nil
+	}
+	firstBranch := true
+	for _, matchCase := range expr.IntCases {
+		fl.writeIntMatchBranchHeader(b, firstBranch, "%s == %d", target, matchCase.Value)
+		firstBranch = false
+		caseFl := *fl
+		caseFl.indent += "    "
+		if err := caseFl.lowerBlock(b, matchCase.Body, returnType); err != nil {
+			return true, err
+		}
+		fmt.Fprintf(b, "%s}", fl.indent)
+	}
+	for _, matchCase := range expr.RangeCases {
+		fl.writeIntMatchBranchHeader(b, firstBranch, "%s >= %d and %s <= %d", target, matchCase.Start, target, matchCase.End)
+		firstBranch = false
+		caseFl := *fl
+		caseFl.indent += "    "
+		if err := caseFl.lowerBlock(b, matchCase.Body, returnType); err != nil {
+			return true, err
+		}
+		fmt.Fprintf(b, "%s}", fl.indent)
+	}
+	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
+		if firstBranch {
+			fmt.Fprintf(b, "%s{\n", fl.indent)
+		} else {
+			b.WriteString(" else {\n")
+		}
+		catchAllFl := *fl
+		catchAllFl.indent += "    "
+		if err := catchAllFl.lowerBlock(b, expr.CatchAll, returnType); err != nil {
+			return true, err
+		}
+		fmt.Fprintf(b, "%s}", fl.indent)
+	} else {
+		if firstBranch {
+			fmt.Fprintf(b, "%sunreachable;\n", fl.indent)
+			return true, nil
+		}
+		b.WriteString(" else {\n")
+		fmt.Fprintf(b, "%s    unreachable;\n", fl.indent)
+		fmt.Fprintf(b, "%s}", fl.indent)
+	}
+	b.WriteString("\n")
+	return true, nil
+}
+
+func (fl *functionLowerer) writeIntMatchBranchHeader(b *strings.Builder, firstBranch bool, condition string, args ...any) {
+	if firstBranch {
+		fmt.Fprintf(b, "%sif (", fl.indent)
+	} else {
+		b.WriteString(" else if (")
+	}
+	fmt.Fprintf(b, condition, args...)
+	b.WriteString(") {\n")
+}
+
+func (fl *functionLowerer) lowerMatchEnumResult(b *strings.Builder, expr air.Expr, returnType air.TypeID) (bool, error) {
+	if expr.Target == nil {
+		return true, fmt.Errorf("enum match missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return true, err
+	}
+	if len(expr.EnumCases) == 0 && len(expr.CatchAll.Stmts) == 0 && expr.CatchAll.Result == nil {
+		return false, nil
+	}
+	fmt.Fprintf(b, "%sswitch (%s) {\n", fl.indent, target)
+	for _, matchCase := range expr.EnumCases {
+		fmt.Fprintf(b, "%s    %d => {\n", fl.indent, matchCase.Discriminant)
+		caseFl := *fl
+		caseFl.indent += "        "
+		if err := caseFl.lowerBlock(b, matchCase.Body, returnType); err != nil {
+			return true, err
+		}
+		fmt.Fprintf(b, "%s    },\n", fl.indent)
+	}
+	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
+		fmt.Fprintf(b, "%s    else => {\n", fl.indent)
+		catchAllFl := *fl
+		catchAllFl.indent += "        "
+		if err := catchAllFl.lowerBlock(b, expr.CatchAll, returnType); err != nil {
+			return true, err
+		}
+		fmt.Fprintf(b, "%s    },\n", fl.indent)
+	} else {
+		fmt.Fprintf(b, "%s    else => unreachable,\n", fl.indent)
 	}
 	fmt.Fprintf(b, "%s}\n", fl.indent)
 	return true, nil
@@ -451,6 +584,16 @@ func (fl *functionLowerer) lowerStmt(b *strings.Builder, stmt air.Stmt) error {
 				return err
 			}
 		}
+		if stmt.Expr.Kind == air.ExprMatchEnum {
+			if handled, err := fl.lowerMatchEnumResult(b, *stmt.Expr, air.NoType); handled || err != nil {
+				return err
+			}
+		}
+		if stmt.Expr.Kind == air.ExprMatchInt {
+			if handled, err := fl.lowerMatchIntResult(b, *stmt.Expr, air.NoType); handled || err != nil {
+				return err
+			}
+		}
 		expr, err := fl.lowerExpr(*stmt.Expr)
 		if err != nil {
 			return err
@@ -546,6 +689,12 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		return fl.lowerMapKeyAt(expr)
 	case air.ExprMapValueAt:
 		return fl.lowerMapValueAt(expr)
+	case air.ExprEnumVariant:
+		return fl.lowerEnumVariant(expr)
+	case air.ExprMatchEnum:
+		return fl.lowerMatchEnumExpr(expr)
+	case air.ExprMatchInt:
+		return fl.lowerMatchIntExpr(expr)
 	case air.ExprMatchMaybe:
 		return fl.lowerMatchMaybeExpr(expr)
 	case air.ExprIntAdd, air.ExprIntSub, air.ExprIntMul, air.ExprIntDiv, air.ExprIntMod,
@@ -1030,6 +1179,117 @@ func (fl *functionLowerer) lowerMapValueAt(expr air.Expr) (string, error) {
 	return fmt.Sprintf("%s.valueAt(@intCast(%s))", target, index), nil
 }
 
+func (fl *functionLowerer) lowerEnumVariant(expr air.Expr) (string, error) {
+	if expr.Type <= 0 || int(expr.Type) > len(fl.l.program.Types) {
+		return "", fmt.Errorf("invalid enum type id %d", expr.Type)
+	}
+	typ := fl.l.program.Types[expr.Type-1]
+	if typ.Kind != air.TypeEnum {
+		return "", fmt.Errorf("enum variant with non-enum type %s", typ.Name)
+	}
+	if expr.Variant < 0 || expr.Variant >= len(typ.Variants) {
+		return "", fmt.Errorf("enum variant index %d out of range for %s", expr.Variant, typ.Name)
+	}
+	return enumVariantName(typ, typ.Variants[expr.Variant]), nil
+}
+
+func (fl *functionLowerer) lowerMatchIntExpr(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("int match missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString("blk: {\n")
+	firstBranch := true
+	for _, matchCase := range expr.IntCases {
+		result, err := blockResultExpr(fl, matchCase.Body)
+		if err != nil {
+			return "", err
+		}
+		writeIntMatchExprBranchHeader(&b, firstBranch, "%s == %d", target, matchCase.Value)
+		firstBranch = false
+		fmt.Fprintf(&b, "break :blk %s;\n", result)
+		b.WriteString("}")
+	}
+	for _, matchCase := range expr.RangeCases {
+		result, err := blockResultExpr(fl, matchCase.Body)
+		if err != nil {
+			return "", err
+		}
+		writeIntMatchExprBranchHeader(&b, firstBranch, "%s >= %d and %s <= %d", target, matchCase.Start, target, matchCase.End)
+		firstBranch = false
+		fmt.Fprintf(&b, "break :blk %s;\n", result)
+		b.WriteString("}")
+	}
+	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
+		result, err := blockResultExpr(fl, expr.CatchAll)
+		if err != nil {
+			return "", err
+		}
+		if firstBranch {
+			fmt.Fprintf(&b, "break :blk %s;\n", result)
+		} else {
+			fmt.Fprintf(&b, " else {\nbreak :blk %s;\n}", result)
+		}
+	} else {
+		if firstBranch {
+			b.WriteString("unreachable;\n")
+		} else {
+			b.WriteString(" else {\nunreachable;\n}")
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString("}")
+	return b.String(), nil
+}
+
+func writeIntMatchExprBranchHeader(b *strings.Builder, firstBranch bool, condition string, args ...any) {
+	if firstBranch {
+		b.WriteString("if (")
+	} else {
+		b.WriteString(" else if (")
+	}
+	fmt.Fprintf(b, condition, args...)
+	b.WriteString(") {\n")
+}
+
+func (fl *functionLowerer) lowerMatchEnumExpr(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("enum match missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString("blk: {\n")
+	b.WriteString("switch (")
+	b.WriteString(target)
+	b.WriteString(") {\n")
+	for _, matchCase := range expr.EnumCases {
+		result, err := blockResultExpr(fl, matchCase.Body)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "%d => break :blk %s,\n", matchCase.Discriminant, result)
+	}
+	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
+		result, err := blockResultExpr(fl, expr.CatchAll)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "else => break :blk %s,\n", result)
+	} else {
+		b.WriteString("else => unreachable,\n")
+	}
+	b.WriteString("}\n")
+	b.WriteString("}")
+	return b.String(), nil
+}
+
 func (fl *functionLowerer) lowerMatchMaybeExpr(expr air.Expr) (string, error) {
 	return "", fmt.Errorf("unsupported expression-form maybe match")
 }
@@ -1282,6 +1542,10 @@ func functionName(fn air.Function) string {
 
 func typeDeclName(typ air.TypeInfo) string {
 	return fmt.Sprintf("ArdType_%d_%s", typ.ID, sanitizeIdentifier(typ.Name))
+}
+
+func enumVariantName(typ air.TypeInfo, variant air.VariantInfo) string {
+	return fmt.Sprintf("%s_%s", typeDeclName(typ), sanitizeIdentifier(variant.Name))
 }
 
 func localName(fn air.Function, id air.LocalID) string {

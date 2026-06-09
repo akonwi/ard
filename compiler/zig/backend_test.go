@@ -299,6 +299,23 @@ func TestRunMapsSample(t *testing.T) {
 	}
 }
 
+func TestRunLightsSample(t *testing.T) {
+	requireZig(t)
+	program := lowerFile(t, filepath.Join("..", "samples", "lights.ard"))
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", "samples/lights.ard"})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"Yellow means Yield",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func TestRunIntStdlibFunctions(t *testing.T) {
 	requireZig(t)
 	path := writeTempSource(t, `
@@ -468,6 +485,84 @@ func TestRunBoolMethodsAndOperators(t *testing.T) {
 		"false",
 		"true",
 		"yes",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestRunEnumSemantics(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+
+		enum Status {
+			Pending,
+			Active = 10,
+			Archived
+		}
+
+		impl Status {
+			fn label() Str {
+				match self {
+					Status::Pending => "pending",
+					Status::Active => "active",
+					Status::Archived => "archived"
+				}
+			}
+		}
+
+		fn describe(status: Status) Str {
+			match status {
+				Status::Pending => "wait",
+				Status::Active => "go",
+				_ => "done"
+			}
+		}
+
+		fn code_label(code: Int) Str {
+			match code {
+				Status::Pending => "pending code",
+				Status::Active => "active code",
+				0..9 => "low code",
+				_ => "other code"
+			}
+		}
+
+		fn main() {
+			let status = Status::Active
+			io::print(status.label())
+			io::print(describe(Status::Pending))
+			io::print(describe(Status::Archived))
+			io::print(status == 10)
+			io::print(Status::Archived > Status::Active)
+			io::print(code_label(10))
+			io::print(code_label(3))
+			let statuses = [Status::Pending, Status::Archived]
+			io::print(statuses.at(1) == Status::Archived)
+			io::print(match Status::Pending {
+				Status::Pending => "direct",
+				_ => "other"
+			})
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"active",
+		"wait",
+		"done",
+		"true",
+		"true",
+		"active code",
+		"low code",
+		"true",
+		"direct",
 		"",
 	}, "\n")
 	if stdout != want {
