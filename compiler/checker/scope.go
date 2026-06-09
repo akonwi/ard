@@ -346,21 +346,13 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			Private:                 t.Private,
 		}
 	case *StructDef:
-		// Check if any fields or methods actually need specialization
+		// Struct value identity is fields/generics, not method signatures.
 		anyChanged := false
 		newFields := make(map[string]Type)
 		for fieldName, fieldType := range t.Fields {
 			newFieldType := replaceGeneric(fieldType, genericName, concreteType)
 			newFields[fieldName] = newFieldType
 			if newFieldType != fieldType {
-				anyChanged = true
-			}
-		}
-		newMethods := make(map[string]*FunctionDef)
-		for methodName, methodDef := range t.Methods {
-			newMethodDef := replaceGeneric(methodDef, genericName, concreteType).(*FunctionDef)
-			newMethods[methodName] = newMethodDef
-			if newMethodDef != methodDef {
 				anyChanged = true
 			}
 		}
@@ -372,7 +364,6 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			Name:       t.Name,
 			ModulePath: t.ModulePath,
 			Fields:     newFields,
-			Methods:    newMethods,
 			Self:       t.Self,
 			Traits:     t.Traits,
 			Private:    t.Private,
@@ -466,7 +457,6 @@ func copyStructWithTypeVarMapSeen(structDef *StructDef, typeVarMap map[string]*T
 		Name:       structDef.Name,
 		ModulePath: structDef.ModulePath,
 		Fields:     newFields,
-		Methods:    structDef.Methods, // Methods are not copied; they're shared
 		Self:       structDef.Self,
 		Traits:     structDef.Traits,
 		Private:    structDef.Private,

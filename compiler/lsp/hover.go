@@ -335,19 +335,45 @@ func importedPublicTypeNames(imp parse.Import, filePath string) []string {
 }
 
 func importedTypeForDisplay(typeName string, prog *parse.Program, filePath string) (checker.Type, bool) {
+	importedType, _, _, ok := importedTypeAndModuleForDisplay(typeName, prog, filePath)
+	return importedType, ok
+}
+
+func importedTypeAndModuleForDisplay(typeName string, prog *parse.Program, filePath string) (checker.Type, checker.Module, string, bool) {
 	alias, memberName, ok := importedTypeDisplayParts(typeName)
 	if !ok {
-		return nil, false
+		return nil, nil, "", false
 	}
 	mod, ok := importedModuleForAlias(alias, prog, filePath)
 	if !ok {
-		return nil, false
+		return nil, nil, "", false
 	}
 	sym := mod.Get(memberName)
 	if sym.IsZero() {
-		return nil, false
+		return nil, nil, "", false
 	}
-	return sym.Type, true
+	return sym.Type, mod, memberName, true
+}
+
+func importedStructMethodsForDisplay(ownerType string, def *checker.StructDef, prog *parse.Program, filePath string) map[string]*checker.FunctionDef {
+	if def == nil {
+		return nil
+	}
+	_, mod, memberName, ok := importedTypeAndModuleForDisplay(ownerType, prog, filePath)
+	if !ok || mod == nil || mod.Program() == nil {
+		return nil
+	}
+	owner := checker.StructMethodOwner(def)
+	if owner.ModulePath == "" {
+		owner.ModulePath = mod.Path()
+	}
+	if owner.TypeName == "" {
+		owner.TypeName = memberName
+	}
+	if methods := mod.Program().StructMethodsFor(owner); methods != nil {
+		return methods
+	}
+	return nil
 }
 
 func importedTypeDisplayParts(typeName string) (alias string, memberName string, ok bool) {
@@ -986,15 +1012,25 @@ func resolveFromChecker(name string, prog *parse.Program, filePath string) strin
 	if checkerProg == nil {
 		return ""
 	}
-	return qualifyTypeDisplay(findTypeInCheckerProg(name, checkerProg.Statements), prog, filePath)
+	return qualifyTypeDisplay(findTypeInCheckerProg(name, checkerProg), prog, filePath)
 }
 
 // findTypeInCheckerProg walks checker statements to find a variable by name.
-func findTypeInCheckerProg(name string, stmts []checker.Statement) string {
-	for _, stmt := range stmts {
+func findTypeInCheckerProg(name string, prog *checker.Program) string {
+	if prog == nil {
+		return ""
+	}
+	for _, stmt := range prog.Statements {
 		// Check NonProducing variants
 		if t := findTypeInNonProducing(name, stmt.Stmt); t != "" {
 			return t
+		}
+		if def, ok := stmt.Stmt.(*checker.StructDef); ok {
+			for _, method := range prog.StructMethodsFor(checker.StructMethodOwner(def)) {
+				if t := findTypeInExpr(name, method); t != "" {
+					return t
+				}
+			}
 		}
 		// Check Expression variants (includes FunctionDef, If, Block, etc.)
 		if t := findTypeInExpr(name, stmt.Expr); t != "" {
@@ -1088,11 +1124,6 @@ func findTypeInNonProducing(name string, stmt checker.NonProducing) string {
 	case *checker.StructDef:
 		if s.Name == name {
 			return checkerTypeString(s)
-		}
-		for _, method := range s.Methods {
-			if t := findTypeInExpr(name, method); t != "" {
-				return t
-			}
 		}
 	case *checker.Union:
 		// Type definitions without method bodies — skip
@@ -1537,7 +1568,7 @@ func findImportedInstanceMethodSignature(ownerType string, methodName string, pr
 	var method *checker.FunctionDef
 	switch def := importedType.(type) {
 	case *checker.StructDef:
-		method = def.Methods[methodName]
+		method = importedStructMethodsForDisplay(ownerType, def, prog, filePath)[methodName]
 	case *checker.Enum:
 		method = def.Methods[methodName]
 	case *checker.Trait:

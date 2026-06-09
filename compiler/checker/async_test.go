@@ -86,7 +86,7 @@ func TestAsyncChannels(t *testing.T) {
 			ch.send("wrong")
 			`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"},
+				{Kind: checker.Error, Message: "type mismatch: expected Int, got Str"},
 			},
 		},
 	})

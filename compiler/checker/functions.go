@@ -176,20 +176,14 @@ func (c *Checker) validateAsyncEval(fnNode parse.Expression) *FiberEval {
 					Name:          fiberStructDef.Name,
 					ModulePath:    fiberStructDef.ModulePath,
 					Fields:        make(map[string]Type),
-					Methods:       make(map[string]*FunctionDef),
 					GenericParams: append([]string(nil), fiberStructDef.GenericParams...),
 					Private:       fiberStructDef.Private,
 				}
 
-				// Copy fields, replacing $T with the closure's return type
+				// Copy fields, replacing $T with the closure's return type. Methods stay
+				// in the module method table and are specialized at call sites.
 				for fieldName, fieldType := range fiberStructDef.Fields {
 					fiberCopy.Fields[fieldName] = copyTypeWithTypeVarMap(fieldType, typeVarMap)
-				}
-
-				// Copy and specialize methods
-				for methodName, methodDef := range fiberStructDef.Methods {
-					methodCopy := copyFunctionWithTypeVarMap(methodDef, typeVarMap)
-					fiberCopy.Methods[methodName] = methodCopy
 				}
 
 				fiberType = fiberCopy

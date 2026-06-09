@@ -1268,7 +1268,6 @@ type StructDef struct {
 	Name          string
 	ModulePath    string
 	Fields        map[string]Type
-	Methods       map[string]*FunctionDef
 	Self          string
 	Traits        []*Trait
 	GenericParams []string
@@ -1285,13 +1284,10 @@ func (def StructDef) String() string {
 	return def.name()
 }
 func (def StructDef) get(name string) Type {
-	// Check data fields first
+	// Struct type identity describes value shape. Method namespaces live on the
+	// checked Program side table and are resolved by the checker with module context.
 	if field, ok := def.Fields[name]; ok {
 		return field
-	}
-	// Check methods
-	if method, ok := def.Methods[name]; ok {
-		return method
 	}
 	return nil
 }

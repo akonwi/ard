@@ -269,7 +269,7 @@ func importedInstanceCompletionItems(ownerType string, prog *parse.Program, file
 				InsertText: name,
 			})
 		}
-		items = append(items, checkerMethodCompletionItems(ownerType, def.Methods, importedType, prog, filePath)...)
+		items = append(items, checkerMethodCompletionItems(ownerType, importedStructMethodsForDisplay(ownerType, def, prog, filePath), importedType, prog, filePath)...)
 	case *checker.Enum:
 		items = append(items, checkerMethodCompletionItems(ownerType, def.Methods, importedType, prog, filePath)...)
 	case *checker.Trait:
