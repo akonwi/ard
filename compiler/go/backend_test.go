@@ -971,6 +971,41 @@ func TestRunProgramSupportsCommonStdlibExterns(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesReusesJSONGlueHelpers(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/json
+
+		struct Item { name: Str }
+		struct Payload { items: [Item], note: Str? }
+
+		fn main() Bool {
+			let parsed = json::parse<Payload>("\{\"items\":[\{\"name\":\"one\"\}],\"note\":null\}").expect("parse")
+			let encoded = json::encode(parsed).expect("encode")
+			encoded.size() > 0
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	for _, want := range []string{
+		"func ardJSONDecodeMaybe[T any]",
+		"return ardJSONDecodeMaybe(dec, path,",
+		"func ardJSONDecodeList[T any]",
+		"return ardJSONDecodeList(dec, path,",
+		"func ardJSONEncodeMaybe[T any]",
+		"return ardJSONEncodeMaybe(enc, value,",
+		"func ardJSONEncodeList[T any]",
+		"return ardJSONEncodeList(enc, value,",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("generated source missing reusable JSON glue %q:\n%s", want, source)
+		}
+	}
+}
+
 func TestBuildProgramCompilesJSONPreludeForStdlibBackedHTTPTypes(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -1139,6 +1174,52 @@ fn main() {
 		t.Fatal(err)
 	}
 
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	builtPath, err := BuildProgram(program, filepath.Join(dir, "app"), loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := exec.Command(builtPath).Run(); err != nil {
+		t.Fatalf("run built binary: %v", err)
+	}
+}
+
+func TestBuildProgramJSONEncodeDoesNotStealStdRuntimeImport(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/json
+
+extern type Stats = "runtime.MemStats"
+extern fn stats() Stats = "Stats"
+
+fn main() Bool {
+	let _stats = stats()
+	json::encode(1).expect("json") == "1"
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+import "runtime"
+
+func Stats() runtime.MemStats {
+	return runtime.MemStats{}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
