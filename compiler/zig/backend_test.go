@@ -587,6 +587,134 @@ func TestRunEnumSemantics(t *testing.T) {
 	}
 }
 
+func TestRunMatchExpressionSemantics(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+		use ard/maybe
+
+		fn describe_bool(flag: Bool) Str {
+			match flag {
+				true => "yes",
+				false => "no"
+			}
+		}
+
+		fn describe_int(value: Int) Str {
+			match value {
+				0 => "zero",
+				1..3 => "small",
+				_ => "large"
+			}
+		}
+
+		fn describe_str(value: Str) Str {
+			match value {
+				"ard" => "language",
+				"zig" => "target",
+				_ => "other"
+			}
+		}
+
+		fn describe_open(value: Int) Str {
+			match {
+				value < 0 => "negative",
+				value == 0 => "zero",
+				value < 10 => "small",
+				_ => "large"
+			}
+		}
+
+		fn describe_maybe(value: Int?) Str {
+			match value {
+				inner => "some {inner}",
+				_ => "none"
+			}
+		}
+
+		fn main() {
+			io::print(describe_bool(true))
+			io::print(describe_bool(false))
+			io::print(describe_int(0))
+			io::print(describe_int(2))
+			io::print(describe_int(9))
+			io::print(describe_str("ard"))
+			io::print(describe_str("zig"))
+			io::print(describe_str("go"))
+			io::print(describe_open(-1))
+			io::print(describe_open(0))
+			io::print(describe_open(4))
+			io::print(describe_open(12))
+			io::print(describe_maybe(maybe::some(5)))
+			io::print(describe_maybe(maybe::none()))
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"yes",
+		"no",
+		"zero",
+		"small",
+		"large",
+		"language",
+		"target",
+		"other",
+		"negative",
+		"zero",
+		"small",
+		"large",
+		"some 5",
+		"none",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestRunUnionMatchSemantics(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+
+		type Printable = Str | Int | Bool
+
+		fn describe(value: Printable) Str {
+			match value {
+				Str(text) => "str {text}",
+				Int(number) => "int {number}",
+				_ => "bool"
+			}
+		}
+
+		fn main() {
+			io::print(describe("ard"))
+			io::print(describe(42))
+			io::print(describe(true))
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"str ard",
+		"int 42",
+		"bool",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func TestRunResultSemantics(t *testing.T) {
 	requireZig(t)
 	path := writeTempSource(t, `

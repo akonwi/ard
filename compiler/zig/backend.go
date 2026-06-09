@@ -141,7 +141,7 @@ func (l *lowerer) lowerProgram() (string, error) {
 	b.WriteString("const std = @import(\"std\");\n")
 	b.WriteString("const ard = @import(\"ard_runtime.zig\");\n\n")
 	for _, typ := range l.program.Types {
-		if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum {
+		if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum && typ.Kind != air.TypeUnion {
 			continue
 		}
 		if err := l.lowerTypeDecl(&b, typ); err != nil {
@@ -182,6 +182,8 @@ func (l *lowerer) lowerTypeDecl(b *strings.Builder, typ air.TypeInfo) error {
 		return l.lowerStructType(b, typ)
 	case air.TypeEnum:
 		return l.lowerEnumType(b, typ)
+	case air.TypeUnion:
+		return l.lowerUnionType(b, typ)
 	default:
 		return fmt.Errorf("unsupported Zig type declaration %s", typ.Name)
 	}
@@ -206,6 +208,19 @@ func (l *lowerer) lowerEnumType(b *strings.Builder, typ air.TypeInfo) error {
 	for _, variant := range typ.Variants {
 		fmt.Fprintf(b, "const %s_%s: %s = %d;\n", typeName, sanitizeIdentifier(variant.Name), typeName, variant.Discriminant)
 	}
+	return nil
+}
+
+func (l *lowerer) lowerUnionType(b *strings.Builder, typ air.TypeInfo) error {
+	fmt.Fprintf(b, "const %s = union(enum) {\n", typeDeclName(typ))
+	for _, member := range typ.Members {
+		memberType, err := l.typeName(member.Type)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "    %s: %s,\n", unionMemberName(member), memberType)
+	}
+	b.WriteString("};\n")
 	return nil
 }
 
@@ -445,6 +460,8 @@ func (l *lowerer) typeName(id air.TypeID) (string, error) {
 	case air.TypeFunction:
 		return l.functionTypeName(info)
 	case air.TypeStruct, air.TypeEnum:
+		return typeDeclName(info), nil
+	case air.TypeUnion:
 		return typeDeclName(info), nil
 	case air.TypeTraitObject:
 		if info.Trait >= 0 && int(info.Trait) < len(l.program.Traits) && l.program.Traits[info.Trait].Name == "ToString" {
@@ -899,6 +916,10 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		return fl.lowerMakeClosure(expr)
 	case air.ExprCallClosure:
 		return fl.lowerCallClosure(expr)
+	case air.ExprUnionWrap:
+		return fl.lowerUnionWrap(expr)
+	case air.ExprMatchUnion:
+		return fl.lowerMatchUnionExpr(expr)
 	case air.ExprTraitUpcast:
 		if expr.Target == nil {
 			return "", fmt.Errorf("trait upcast missing target")
@@ -974,6 +995,8 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		return fl.lowerMatchEnumExpr(expr)
 	case air.ExprMatchInt:
 		return fl.lowerMatchIntExpr(expr)
+	case air.ExprMatchStr:
+		return fl.lowerMatchStrExpr(expr)
 	case air.ExprMatchMaybe:
 		return fl.lowerMatchMaybeExpr(expr)
 	case air.ExprIntAdd, air.ExprIntSub, air.ExprIntMul, air.ExprIntDiv, air.ExprIntMod,
@@ -1049,6 +1072,8 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		return fmt.Sprintf("try ard.toStr(ctx, %s)", target), nil
 	case air.ExprIf:
 		return fl.lowerIfExpr(expr)
+	case air.ExprBlock:
+		return blockResultExpr(fl, expr.Body)
 	default:
 		return "", fmt.Errorf("unsupported expression kind %d", expr.Kind)
 	}
@@ -1203,6 +1228,30 @@ func (fl *functionLowerer) lowerMakeStruct(expr air.Expr) (string, error) {
 		fields = append(fields, fmt.Sprintf(".%s = %s", sanitizeIdentifier(field.Name), value))
 	}
 	return fmt.Sprintf("%s{ %s }", typeDeclName(structType), strings.Join(fields, ", ")), nil
+}
+
+func (fl *functionLowerer) lowerUnionWrap(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("union wrap missing target")
+	}
+	if expr.Type <= 0 || int(expr.Type) > len(fl.l.program.Types) {
+		return "", fmt.Errorf("union wrap has invalid type %d", expr.Type)
+	}
+	unionType := fl.l.program.Types[expr.Type-1]
+	if unionType.Kind != air.TypeUnion {
+		return "", fmt.Errorf("union wrap on non-union type %s", unionType.Name)
+	}
+	for _, member := range unionType.Members {
+		if member.Tag != expr.Tag {
+			continue
+		}
+		target, err := fl.lowerExpr(*expr.Target)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s{ .%s = %s }", typeDeclName(unionType), unionMemberName(member), target), nil
+	}
+	return "", fmt.Errorf("union member tag %d not found on %s", expr.Tag, unionType.Name)
 }
 
 func (fl *functionLowerer) lowerGetField(expr air.Expr) (string, error) {
@@ -1838,6 +1887,50 @@ func (fl *functionLowerer) lowerMatchIntExpr(expr air.Expr) (string, error) {
 	return b.String(), nil
 }
 
+func (fl *functionLowerer) lowerMatchStrExpr(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("str match missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	targetTemp := fl.nextTemp("match_str")
+	var b strings.Builder
+	fmt.Fprintf(&b, "blk: {\nconst %s = %s;\n", targetTemp, target)
+	firstBranch := true
+	for _, matchCase := range expr.StrCases {
+		result, err := blockResultExpr(fl, matchCase.Body)
+		if err != nil {
+			return "", err
+		}
+		if firstBranch {
+			fmt.Fprintf(&b, "if (std.mem.eql(u8, %s, %s)) {\n", targetTemp, strconv.Quote(matchCase.Value))
+			firstBranch = false
+		} else {
+			fmt.Fprintf(&b, " else if (std.mem.eql(u8, %s, %s)) {\n", targetTemp, strconv.Quote(matchCase.Value))
+		}
+		fmt.Fprintf(&b, "break :blk %s;\n}", result)
+	}
+	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
+		result, err := blockResultExpr(fl, expr.CatchAll)
+		if err != nil {
+			return "", err
+		}
+		if firstBranch {
+			fmt.Fprintf(&b, "break :blk %s;\n", result)
+		} else {
+			fmt.Fprintf(&b, " else {\nbreak :blk %s;\n}", result)
+		}
+	} else if firstBranch {
+		b.WriteString("unreachable;\n")
+	} else {
+		b.WriteString(" else {\nunreachable;\n}")
+	}
+	b.WriteString("\n}")
+	return b.String(), nil
+}
+
 func writeIntMatchExprBranchHeader(b *strings.Builder, firstBranch bool, condition string, args ...any) {
 	if firstBranch {
 		b.WriteString("if (")
@@ -1882,8 +1975,71 @@ func (fl *functionLowerer) lowerMatchEnumExpr(expr air.Expr) (string, error) {
 	return b.String(), nil
 }
 
+func (fl *functionLowerer) lowerMatchUnionExpr(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("union match missing target")
+	}
+	if expr.Target.Type <= 0 || int(expr.Target.Type) > len(fl.l.program.Types) {
+		return "", fmt.Errorf("union match target has invalid type %d", expr.Target.Type)
+	}
+	unionType := fl.l.program.Types[expr.Target.Type-1]
+	if unionType.Kind != air.TypeUnion {
+		return "", fmt.Errorf("union match on non-union type %s", unionType.Name)
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	targetTemp := fl.nextTemp("union")
+	var b strings.Builder
+	fmt.Fprintf(&b, "blk: {\nconst %s = %s;\nswitch (%s) {\n", targetTemp, target, targetTemp)
+	for _, matchCase := range expr.UnionCases {
+		member, ok := unionMemberByTag(unionType, matchCase.Tag)
+		if !ok {
+			return "", fmt.Errorf("union member tag %d not found on %s", matchCase.Tag, unionType.Name)
+		}
+		result, err := blockResultExpr(fl, matchCase.Body)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, ".%s => |%s| break :blk %s,\n", unionMemberName(member), localName(fl.fn, matchCase.Local), result)
+	}
+	if len(expr.CatchAll.Stmts) > 0 || expr.CatchAll.Result != nil {
+		result, err := blockResultExpr(fl, expr.CatchAll)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "else => break :blk %s,\n", result)
+	} else {
+		b.WriteString("else => unreachable,\n")
+	}
+	b.WriteString("}\n}")
+	return b.String(), nil
+}
+
 func (fl *functionLowerer) lowerMatchMaybeExpr(expr air.Expr) (string, error) {
-	return "", fmt.Errorf("unsupported expression-form maybe match")
+	if expr.Target == nil {
+		return "", fmt.Errorf("maybe match missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	targetTemp := fl.nextTemp("maybe")
+	var b strings.Builder
+	fmt.Fprintf(&b, "blk: {\nconst %s = %s;\n", targetTemp, target)
+	fmt.Fprintf(&b, "if (%s.some) |%s| {\n", targetTemp, localName(fl.fn, expr.SomeLocal))
+	someResult, err := blockResultExpr(fl, expr.Some)
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintf(&b, "break :blk %s;\n} else {\n", someResult)
+	noneResult, err := blockResultExpr(fl, expr.None)
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintf(&b, "break :blk %s;\n}\n}", noneResult)
+	return b.String(), nil
 }
 
 func (fl *functionLowerer) lowerFunctionRef(expr air.Expr) (string, error) {
@@ -2166,6 +2322,31 @@ func (fl *functionLowerer) exprUsesContext(expr air.Expr) bool {
 			return true
 		}
 	}
+	for _, matchCase := range expr.EnumCases {
+		if fl.blockUsesContext(matchCase.Body) {
+			return true
+		}
+	}
+	for _, matchCase := range expr.IntCases {
+		if fl.blockUsesContext(matchCase.Body) {
+			return true
+		}
+	}
+	for _, matchCase := range expr.RangeCases {
+		if fl.blockUsesContext(matchCase.Body) {
+			return true
+		}
+	}
+	for _, matchCase := range expr.StrCases {
+		if fl.blockUsesContext(matchCase.Body) {
+			return true
+		}
+	}
+	for _, matchCase := range expr.UnionCases {
+		if fl.blockUsesContext(matchCase.Body) {
+			return true
+		}
+	}
 	if expr.Target != nil && fl.exprUsesContext(*expr.Target) {
 		return true
 	}
@@ -2234,6 +2415,31 @@ func (fl *functionLowerer) exprUsesLocal(expr air.Expr, local air.LocalID) bool 
 			return true
 		}
 	}
+	for _, matchCase := range expr.EnumCases {
+		if fl.blockUsesLocal(matchCase.Body, local) {
+			return true
+		}
+	}
+	for _, matchCase := range expr.IntCases {
+		if fl.blockUsesLocal(matchCase.Body, local) {
+			return true
+		}
+	}
+	for _, matchCase := range expr.RangeCases {
+		if fl.blockUsesLocal(matchCase.Body, local) {
+			return true
+		}
+	}
+	for _, matchCase := range expr.StrCases {
+		if fl.blockUsesLocal(matchCase.Body, local) {
+			return true
+		}
+	}
+	for _, matchCase := range expr.UnionCases {
+		if fl.blockUsesLocal(matchCase.Body, local) {
+			return true
+		}
+	}
 	if expr.Target != nil && fl.exprUsesLocal(*expr.Target, local) {
 		return true
 	}
@@ -2267,6 +2473,19 @@ func typeDeclName(typ air.TypeInfo) string {
 
 func enumVariantName(typ air.TypeInfo, variant air.VariantInfo) string {
 	return fmt.Sprintf("%s_%s", typeDeclName(typ), sanitizeIdentifier(variant.Name))
+}
+
+func unionMemberName(member air.UnionMember) string {
+	return sanitizeIdentifier(member.Name)
+}
+
+func unionMemberByTag(typ air.TypeInfo, tag uint32) (air.UnionMember, bool) {
+	for _, member := range typ.Members {
+		if member.Tag == tag {
+			return member, true
+		}
+	}
+	return air.UnionMember{}, false
 }
 
 func (l *lowerer) ensureFunctionAdapter(fn air.FunctionID, typ air.TypeID) string {
