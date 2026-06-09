@@ -2793,6 +2793,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 						// Copy the function with the struct's generic bindings applied
 						fnDefCopy = copyFunctionWithTypeVarMap(fnDef, *genericScope.genericContext)
+						fnDefCopy.GenericBindings = cloneTypeMap(genericBindings)
 					} else {
 						fnDefCopy = fnDef
 					}
@@ -5033,6 +5034,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			Mutates:                 typ.Mutates,
 			IsTest:                  typ.IsTest,
 			Private:                 typ.Private,
+			GenericBindings:         cloneTypeMap(typ.GenericBindings),
 		}
 	case *ExternType:
 		substitutedArgs := make([]Type, len(typ.TypeArgs))
@@ -5043,6 +5045,87 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 	// Handle other compound types
 	default:
 		return t
+	}
+}
+
+func cloneTypeMap(in map[string]Type) map[string]Type {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]Type, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func concreteTypeVarBindings(in map[string]*TypeVar) map[string]Type {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]Type, len(in))
+	for key, value := range in {
+		if value != nil && value.Actual() != nil {
+			out[key] = value.Actual()
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func inferGenericBindingsFromFunction(original, specialized *FunctionDef) map[string]Type {
+	if original == nil || specialized == nil {
+		return nil
+	}
+	bindings := map[string]Type{}
+	for i, param := range original.Parameters {
+		if i < len(specialized.Parameters) {
+			inferGenericBindingsFromTypes(param.Type, specialized.Parameters[i].Type, bindings)
+		}
+	}
+	inferGenericBindingsFromTypes(original.ReturnType, specialized.ReturnType, bindings)
+	if len(bindings) == 0 {
+		return nil
+	}
+	return bindings
+}
+
+func inferGenericBindingsFromTypes(original, specialized Type, bindings map[string]Type) {
+	specialized = derefType(specialized)
+	switch orig := original.(type) {
+	case *TypeVar:
+		if specialized != nil && !hasGenericsInType(specialized) {
+			bindings[orig.Name()] = specialized
+		}
+	case *Maybe:
+		if spec, ok := specialized.(*Maybe); ok {
+			inferGenericBindingsFromTypes(orig.Of(), spec.Of(), bindings)
+		}
+	case *Result:
+		if spec, ok := specialized.(*Result); ok {
+			inferGenericBindingsFromTypes(orig.Val(), spec.Val(), bindings)
+			inferGenericBindingsFromTypes(orig.Err(), spec.Err(), bindings)
+		}
+	case *List:
+		if spec, ok := specialized.(*List); ok {
+			inferGenericBindingsFromTypes(orig.Of(), spec.Of(), bindings)
+		}
+	case *Map:
+		if spec, ok := specialized.(*Map); ok {
+			inferGenericBindingsFromTypes(orig.Key(), spec.Key(), bindings)
+			inferGenericBindingsFromTypes(orig.Value(), spec.Value(), bindings)
+		}
+	case *FunctionDef:
+		if spec, ok := specialized.(*FunctionDef); ok {
+			for i, param := range orig.Parameters {
+				if i < len(spec.Parameters) {
+					inferGenericBindingsFromTypes(param.Type, spec.Parameters[i].Type, bindings)
+				}
+			}
+			inferGenericBindingsFromTypes(orig.ReturnType, spec.ReturnType, bindings)
+		}
 	}
 }
 
@@ -5252,8 +5335,16 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		bindings := genericScope.getGenericBindings()
 
 		if len(bindings) == 0 {
-			// No generics were bound, use original function
-			fnToUse = fnDef
+			// No generics were bound from arguments. A receiver specialization
+			// may still have pre-bound generics, as with Box<T>.get().
+			if len(fnDefCopy.GenericBindings) == 0 {
+				fnDefCopy.GenericBindings = inferGenericBindingsFromFunction(fnDef, fnDefCopy)
+			}
+			if len(fnDefCopy.GenericBindings) > 0 {
+				fnToUse = fnDefCopy
+			} else {
+				fnToUse = fnDef
+			}
 		} else {
 			// Create specialized function with resolved generics
 			fnToUse = &FunctionDef{
@@ -5264,6 +5355,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				Body:                    fnDefCopy.Body,
 				Mutates:                 fnDefCopy.Mutates,
 				Private:                 fnDefCopy.Private,
+				GenericBindings:         cloneTypeMap(bindings),
 			}
 
 			// Replace generics in parameters
@@ -5361,6 +5453,7 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 		Body:                    fnDefCopy.Body,
 		Mutates:                 fnDefCopy.Mutates,
 		Private:                 fnDefCopy.Private,
+		GenericBindings:         cloneTypeMap(bindings),
 	}
 
 	// Replace generics in parameters

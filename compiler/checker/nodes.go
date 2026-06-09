@@ -984,6 +984,7 @@ type FunctionDef struct {
 	IsTest                  bool
 	Body                    *Block
 	Private                 bool
+	GenericBindings         map[string]Type
 }
 
 func (f FunctionDef) String() string {
