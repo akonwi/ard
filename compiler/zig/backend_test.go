@@ -570,6 +570,101 @@ func TestRunEnumSemantics(t *testing.T) {
 	}
 }
 
+func TestRunResultSemantics(t *testing.T) {
+	requireZig(t)
+	path := writeTempSource(t, `
+		use ard/io
+
+		fn divide(a: Int, b: Int) Int!Str {
+			match b == 0 {
+				true => Result::err("divide by zero"),
+				false => Result::ok(a / b)
+			}
+		}
+
+		fn add_one(value: Int!Str) Int!Str {
+			let inner = try value
+			Result::ok(inner + 1)
+		}
+
+		fn catch_value(value: Int!Str) Int {
+			let inner = try value -> err {
+				err.size()
+			}
+			inner
+		}
+
+		fn pass() Void!Str {
+			Result::ok(())
+		}
+
+		fn require_pass() Void!Str {
+			try pass()
+			Result::ok(())
+		}
+
+		fn main() {
+			let ok = divide(8, 2)
+			let err = divide(8, 0)
+			io::print(ok.is_ok())
+			io::print(ok.is_err())
+			io::print(err.is_ok())
+			io::print(err.is_err())
+			io::print(ok.or(99))
+			io::print(err.or(99))
+			io::print(ok.expect("expected ok"))
+
+			match ok {
+				ok(value) => io::print(value),
+				err(message) => io::print(message)
+			}
+			match err {
+				ok(value) => io::print(value),
+				err(message) => io::print(message)
+			}
+
+			match add_one(ok) {
+				ok(value) => io::print(value),
+				err(message) => io::print(message)
+			}
+			match add_one(err) {
+				ok(value) => io::print(value),
+				err(message) => io::print(message)
+			}
+			io::print(catch_value(Result::err("bad")))
+			match require_pass() {
+				ok(_) => io::print("pass"),
+				err(message) => io::print(message)
+			}
+		}
+	`)
+	program := lowerFile(t, path)
+
+	stdout, err := runProgramCaptureStdout(program, []string{"ard", "run", "--target", "zig", path})
+	if err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+	want := strings.Join([]string{
+		"true",
+		"false",
+		"false",
+		"true",
+		"4",
+		"99",
+		"4",
+		"4",
+		"divide by zero",
+		"5",
+		"divide by zero",
+		"3",
+		"pass",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
 func TestRunStructMethodsAndMutation(t *testing.T) {
 	requireZig(t)
 	path := writeTempSource(t, `

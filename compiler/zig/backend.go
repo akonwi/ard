@@ -279,6 +279,16 @@ func (l *lowerer) typeName(id air.TypeID) (string, error) {
 			return "", err
 		}
 		return "ard.Maybe(" + elem + ")", nil
+	case air.TypeResult:
+		value, err := l.typeName(info.Value)
+		if err != nil {
+			return "", err
+		}
+		errType, err := l.typeName(info.Error)
+		if err != nil {
+			return "", err
+		}
+		return "ard.Result(" + value + ", " + errType + ")", nil
 	case air.TypeStruct, air.TypeEnum:
 		return typeDeclName(info), nil
 	case air.TypeTraitObject:
@@ -312,6 +322,11 @@ func (fl *functionLowerer) lowerBlock(b *strings.Builder, block air.Block, retur
 		}
 		if block.Result.Kind == air.ExprMatchMaybe {
 			if handled, err := fl.lowerMatchMaybeResult(b, *block.Result, returnType); handled || err != nil {
+				return err
+			}
+		}
+		if block.Result.Kind == air.ExprMatchResult {
+			if handled, err := fl.lowerMatchResultResult(b, *block.Result, returnType); handled || err != nil {
 				return err
 			}
 		}
@@ -509,6 +524,43 @@ func (fl *functionLowerer) lowerMatchMaybeResult(b *strings.Builder, expr air.Ex
 	return true, nil
 }
 
+func (fl *functionLowerer) lowerMatchResultResult(b *strings.Builder, expr air.Expr, returnType air.TypeID) (bool, error) {
+	if expr.Target == nil {
+		return true, fmt.Errorf("result match missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return true, err
+	}
+	if len(expr.Ok.Stmts) == 0 && expr.Ok.Result == nil && len(expr.Err.Stmts) == 0 && expr.Err.Result == nil {
+		return false, nil
+	}
+	temp := fl.nextTemp("result")
+	fmt.Fprintf(b, "%sconst %s = %s;\n", fl.indent, temp, target)
+	fmt.Fprintf(b, "%sif (%s.ok) {\n", fl.indent, temp)
+	okFl := *fl
+	okFl.indent += "    "
+	fmt.Fprintf(b, "%sconst %s = %s.value;\n", okFl.indent, localName(fl.fn, expr.OkLocal), temp)
+	if fl.localNeedsDiscard(expr.OkLocal) {
+		fmt.Fprintf(b, "%s_ = %s;\n", okFl.indent, localName(fl.fn, expr.OkLocal))
+	}
+	if err := okFl.lowerBlock(b, expr.Ok, returnType); err != nil {
+		return true, err
+	}
+	fmt.Fprintf(b, "%s} else {\n", fl.indent)
+	errFl := *fl
+	errFl.indent += "    "
+	fmt.Fprintf(b, "%sconst %s = %s.err;\n", errFl.indent, localName(fl.fn, expr.ErrLocal), temp)
+	if fl.localNeedsDiscard(expr.ErrLocal) {
+		fmt.Fprintf(b, "%s_ = %s;\n", errFl.indent, localName(fl.fn, expr.ErrLocal))
+	}
+	if err := errFl.lowerBlock(b, expr.Err, returnType); err != nil {
+		return true, err
+	}
+	fmt.Fprintf(b, "%s}\n", fl.indent)
+	return true, nil
+}
+
 func (fl *functionLowerer) lowerStmt(b *strings.Builder, stmt air.Stmt) error {
 	switch stmt.Kind {
 	case air.StmtLet:
@@ -584,6 +636,11 @@ func (fl *functionLowerer) lowerStmt(b *strings.Builder, stmt air.Stmt) error {
 				return err
 			}
 		}
+		if stmt.Expr.Kind == air.ExprMatchResult {
+			if handled, err := fl.lowerMatchResultResult(b, *stmt.Expr, air.NoType); handled || err != nil {
+				return err
+			}
+		}
 		if stmt.Expr.Kind == air.ExprMatchEnum {
 			if handled, err := fl.lowerMatchEnumResult(b, *stmt.Expr, air.NoType); handled || err != nil {
 				return err
@@ -597,6 +654,10 @@ func (fl *functionLowerer) lowerStmt(b *strings.Builder, stmt air.Stmt) error {
 		expr, err := fl.lowerExpr(*stmt.Expr)
 		if err != nil {
 			return err
+		}
+		if stmt.Expr.Kind == air.ExprTryResult {
+			fmt.Fprintf(b, "%s_ = %s;\n", fl.indent, expr)
+			return nil
 		}
 		fmt.Fprintf(b, "%s%s;\n", fl.indent, expr)
 	case air.StmtWhile:
@@ -675,6 +736,22 @@ func (fl *functionLowerer) lowerExpr(expr air.Expr) (string, error) {
 		return fl.lowerMakeMaybeSome(expr)
 	case air.ExprMakeMaybeNone:
 		return fl.lowerMakeMaybeNone(expr)
+	case air.ExprMakeResultOk:
+		return fl.lowerMakeResultOk(expr)
+	case air.ExprMakeResultErr:
+		return fl.lowerMakeResultErr(expr)
+	case air.ExprMatchResult:
+		return fl.lowerMatchResultExpr(expr)
+	case air.ExprTryResult:
+		return fl.lowerTryResult(expr)
+	case air.ExprResultOr:
+		return fl.lowerResultOr(expr)
+	case air.ExprResultExpect:
+		return fl.lowerResultExpect(expr)
+	case air.ExprResultIsOk:
+		return fl.lowerResultIsOk(expr)
+	case air.ExprResultIsErr:
+		return fl.lowerResultIsErr(expr)
 	case air.ExprMapSize:
 		return fl.lowerMapSize(expr)
 	case air.ExprMapSet:
@@ -995,6 +1072,10 @@ func (fl *functionLowerer) localIsMutablePointer(local air.LocalID) bool {
 	return int(local) >= 0 && int(local) < len(fl.fn.Signature.Params) && fl.fn.Signature.Params[local].Mutable
 }
 
+func (fl *functionLowerer) localNeedsDiscard(local air.LocalID) bool {
+	return int(local) < 0 || int(local) >= len(fl.fn.Locals) || fl.fn.Locals[local].Name == "" || fl.fn.Locals[local].Name == "_"
+}
+
 func (fl *functionLowerer) recursiveNullableElemName(field air.FieldInfo) (string, error) {
 	if field.Type <= 0 || int(field.Type) > len(fl.l.program.Types) {
 		return "", fmt.Errorf("recursive nullable field %s has invalid type %d", field.Name, field.Type)
@@ -1072,6 +1153,176 @@ func (fl *functionLowerer) lowerMakeMaybeNone(expr air.Expr) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("ard.Maybe(%s){ .some = null }", elemType), nil
+}
+
+func (fl *functionLowerer) lowerMakeResultOk(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("result ok missing target")
+	}
+	resultType, valueType, _, err := fl.resultTypeNames(expr.Type)
+	if err != nil {
+		return "", err
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	if valueType == "void" {
+		target = "{}"
+	}
+	return fmt.Sprintf("%s{ .value = %s, .err = undefined, .ok = true }", resultType, target), nil
+}
+
+func (fl *functionLowerer) lowerMakeResultErr(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("result err missing target")
+	}
+	resultType, _, errType, err := fl.resultTypeNames(expr.Type)
+	if err != nil {
+		return "", err
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	if errType == "void" {
+		target = "{}"
+	}
+	return fmt.Sprintf("%s{ .value = undefined, .err = %s, .ok = false }", resultType, target), nil
+}
+
+func (fl *functionLowerer) lowerResultOr(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("result or expects target and one arg")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	defaultValue, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	temp := fl.nextTemp("result")
+	return fmt.Sprintf("blk: {\nconst %s = %s;\nif (%s.ok) break :blk %s.value;\nbreak :blk %s;\n}", temp, target, temp, temp, defaultValue), nil
+}
+
+func (fl *functionLowerer) lowerResultExpect(expr air.Expr) (string, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return "", fmt.Errorf("result expect expects target and message")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	message, err := fl.lowerExpr(expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	temp := fl.nextTemp("result")
+	return fmt.Sprintf("blk: {\nconst %s = %s;\nif (%s.ok) break :blk %s.value;\n@panic(%s);\n}", temp, target, temp, temp, message), nil
+}
+
+func (fl *functionLowerer) lowerResultIsOk(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("result is_ok missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("(%s.ok)", target), nil
+}
+
+func (fl *functionLowerer) lowerResultIsErr(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("result is_err missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("(!%s.ok)", target), nil
+}
+
+func (fl *functionLowerer) lowerMatchResultExpr(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("result match missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	okResult, err := blockResultExpr(fl, expr.Ok)
+	if err != nil {
+		return "", err
+	}
+	errResult, err := blockResultExpr(fl, expr.Err)
+	if err != nil {
+		return "", err
+	}
+	temp := fl.nextTemp("result")
+	okLocal := localName(fl.fn, expr.OkLocal)
+	errLocal := localName(fl.fn, expr.ErrLocal)
+	okDiscard := ""
+	if fl.localNeedsDiscard(expr.OkLocal) {
+		okDiscard = fmt.Sprintf("_ = %s;\n", okLocal)
+	}
+	errDiscard := ""
+	if fl.localNeedsDiscard(expr.ErrLocal) {
+		errDiscard = fmt.Sprintf("_ = %s;\n", errLocal)
+	}
+	return fmt.Sprintf("blk: {\nconst %s = %s;\nif (%s.ok) {\nconst %s = %s.value;\n%sbreak :blk %s;\n} else {\nconst %s = %s.err;\n%sbreak :blk %s;\n}\n}", temp, target, temp, okLocal, temp, okDiscard, okResult, errLocal, temp, errDiscard, errResult), nil
+}
+
+func (fl *functionLowerer) lowerTryResult(expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("try result missing target")
+	}
+	target, err := fl.lowerExpr(*expr.Target)
+	if err != nil {
+		return "", err
+	}
+	temp := fl.nextTemp("result")
+	var b strings.Builder
+	fmt.Fprintf(&b, "blk: {\nconst %s = %s;\nif (%s.ok) break :blk %s.value;\n", temp, target, temp, temp)
+	if expr.HasCatch {
+		catchExpr, err := blockResultExpr(fl, expr.Catch)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "const %s = %s.err;\nbreak :blk %s;\n", localName(fl.fn, expr.CatchLocal), temp, catchExpr)
+	} else {
+		returnType, err := fl.l.typeName(fl.fn.Signature.Return)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "return %s{ .value = undefined, .err = %s.err, .ok = false };\n", returnType, temp)
+	}
+	b.WriteString("}")
+	return b.String(), nil
+}
+
+func (fl *functionLowerer) resultTypeNames(id air.TypeID) (resultType, valueType, errType string, err error) {
+	if id <= 0 || int(id) > len(fl.l.program.Types) {
+		err = fmt.Errorf("invalid result type id %d", id)
+		return
+	}
+	info := fl.l.program.Types[id-1]
+	if info.Kind != air.TypeResult {
+		err = fmt.Errorf("result expression with non-result type %s", info.Name)
+		return
+	}
+	resultType, err = fl.l.typeName(id)
+	if err != nil {
+		return
+	}
+	valueType, err = fl.l.typeName(info.Value)
+	if err != nil {
+		return
+	}
+	errType, err = fl.l.typeName(info.Error)
+	return
 }
 
 func (fl *functionLowerer) lowerMapSize(expr air.Expr) (string, error) {
@@ -1548,6 +1799,12 @@ func enumVariantName(typ air.TypeInfo, variant air.VariantInfo) string {
 	return fmt.Sprintf("%s_%s", typeDeclName(typ), sanitizeIdentifier(variant.Name))
 }
 
+func (fl *functionLowerer) nextTemp(prefix string) string {
+	name := fmt.Sprintf("tmp_%s_%d", sanitizeIdentifier(prefix), fl.tempCounter)
+	fl.tempCounter++
+	return name
+}
+
 func localName(fn air.Function, id air.LocalID) string {
 	name := "local"
 	if int(id) >= 0 && int(id) < len(fn.Locals) && fn.Locals[id].Name != "" {
@@ -1607,6 +1864,14 @@ pub const Stringable = union(enum) {
 pub fn Maybe(comptime T: type) type {
     return struct {
         some: ?T,
+    };
+}
+
+pub fn Result(comptime Value: type, comptime Error: type) type {
+    return struct {
+        value: Value = undefined,
+        err: Error = undefined,
+        ok: bool = false,
     };
 }
 
