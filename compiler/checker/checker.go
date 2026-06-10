@@ -197,6 +197,7 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 		}
 		return &FunctionDef{
 			Name:                    typ.Name,
+			GenericParams:           append([]string(nil), typ.GenericParams...),
 			Parameters:              newParams,
 			ReturnType:              derefReturnType,
 			InferReturnTypeFromBody: typ.InferReturnTypeFromBody,
@@ -257,6 +258,7 @@ type Checker struct {
 	resolvedTopLevelStructs           map[string]bool
 	resolvingTopLevelAliases          map[string]bool
 	resolvedTopLevelAliases           map[string]bool
+	genericContextStack               []map[string]bool
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -723,6 +725,130 @@ func (c *Checker) destructurePath(expr *parse.StaticFunction) (string, string) {
 	}
 }
 
+func (c *Checker) pushFunctionGenericContext(fnDef *FunctionDef, extraParams ...string) {
+	params := genericParamsForFunction(fnDef)
+	params = appendUniqueStrings(params, extraParams...)
+	if len(params) == 0 {
+		c.genericContextStack = append(c.genericContextStack, nil)
+		return
+	}
+	context := make(map[string]bool, len(params))
+	for _, param := range params {
+		context[param] = true
+	}
+	c.genericContextStack = append(c.genericContextStack, context)
+}
+
+func (c *Checker) popFunctionGenericContext() {
+	if len(c.genericContextStack) == 0 {
+		return
+	}
+	c.genericContextStack = c.genericContextStack[:len(c.genericContextStack)-1]
+}
+
+func (c *Checker) genericInCurrentContext(name string) bool {
+	if len(c.genericContextStack) == 0 {
+		return false
+	}
+	current := c.genericContextStack[len(c.genericContextStack)-1]
+	return current[name]
+}
+
+func (c *Checker) validateExplicitCallTypeArg(typeArg parse.DeclaredType) {
+	params := []string{}
+	seen := map[string]bool{}
+	collectGenericParamsFromDeclaredType(typeArg, &params, seen)
+	for _, param := range params {
+		if c.genericInCurrentContext(param) {
+			continue
+		}
+		c.addError(fmt.Sprintf("unbound generic type argument $%s", param), typeArg.GetLocation())
+	}
+}
+
+func (c *Checker) resolveCallTypeArgs(typeArgs []parse.DeclaredType) []Type {
+	if len(typeArgs) == 0 {
+		return nil
+	}
+	resolved := make([]Type, len(typeArgs))
+	for i, typeArg := range typeArgs {
+		resolved[i] = c.resolveType(typeArg)
+		c.validateExplicitCallTypeArg(typeArg)
+	}
+	return resolved
+}
+
+func appendUniqueStrings(values []string, additions ...string) []string {
+	seen := make(map[string]bool, len(values)+len(additions))
+	for _, value := range values {
+		seen[value] = true
+	}
+	for _, value := range additions {
+		if !seen[value] {
+			values = append(values, value)
+			seen[value] = true
+		}
+	}
+	return values
+}
+
+func genericParamsForType(typ Type) []string {
+	params := []string{}
+	seen := map[string]bool{}
+	collectGenericsFromType(typ, &params, seen)
+	return params
+}
+
+func genericParamsForFunction(fnDef *FunctionDef) []string {
+	if fnDef == nil {
+		return nil
+	}
+	genericParams := []string{}
+	seen := map[string]bool{}
+	for _, param := range fnDef.GenericParams {
+		if !seen[param] {
+			genericParams = append(genericParams, param)
+			seen[param] = true
+		}
+	}
+	for _, param := range fnDef.Parameters {
+		collectGenericsFromType(param.Type, &genericParams, seen)
+	}
+	if fnDef.ReturnType != nil {
+		collectGenericsFromType(fnDef.ReturnType, &genericParams, seen)
+	}
+	return genericParams
+}
+
+func (c *Checker) explicitMethodGenericParams(fnDef *FunctionDef, subject Type) []string {
+	if fnDef == nil {
+		return nil
+	}
+	if len(fnDef.GenericParams) > 0 {
+		return append([]string(nil), fnDef.GenericParams...)
+	}
+	params := genericParamsForFunction(fnDef)
+	structType, ok := subject.(*StructDef)
+	if !ok {
+		return params
+	}
+	originalDef := c.structDefinition(structType)
+	if originalDef == nil || len(originalDef.GenericParams) == 0 {
+		return params
+	}
+	receiverGenerics := make(map[string]bool, len(originalDef.GenericParams))
+	for _, param := range originalDef.GenericParams {
+		receiverGenerics[param] = true
+	}
+	out := make([]string, 0, len(params))
+	for _, param := range params {
+		if !receiverGenerics[param] {
+			out = append(out, param)
+		}
+	}
+	return out
+}
+
 func formatTypeForDisplay(t Type) string {
 	// For StructDef with generic fields, show type parameters
 	if structDef, ok := t.(*StructDef); ok {
@@ -907,7 +1033,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					// if we made it this far, it's a valid implementation
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add(s.Receiver.Name, targetType, method.Mutates)
-					})
+					}, genericParamsForType(targetType)...)
 					fnDef.Receiver = s.Receiver.Name
 					fnDef.Mutates = method.Mutates
 					// add the method to the struct method table
@@ -984,7 +1110,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					// if we made it this far, it's a valid implementation
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add(s.Receiver.Name, targetType, false) // Enums are immutable, so always false
-					})
+					}, genericParamsForType(targetType)...)
 					fnDef.Receiver = s.Receiver.Name
 					// Enums cannot have mutating methods
 					if method.Mutates {
@@ -1512,7 +1638,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				for _, method := range s.Methods {
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add(s.Receiver.Name, def, method.Mutates)
-					})
+					}, genericParamsForType(def)...)
 					if fnDef != nil {
 						fnDef.Receiver = s.Receiver.Name
 						fnDef.Mutates = method.Mutates
@@ -1530,7 +1656,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add(s.Receiver.Name, def, false)
-					})
+					}, genericParamsForType(def)...)
 					fnDef.Receiver = s.Receiver.Name
 					def.Methods[method.Name] = fnDef
 				}
@@ -2042,7 +2168,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 
 // createPrimitiveMethodNode creates type-specific method nodes for primitives and collections
 // Falls back to generic InstanceMethod for user-defined types (structs, enums)
-func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
+func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, typeArgs []Type) Expression {
 	// Determine subject type - emit specialized nodes for all built-in types
 	switch subject.Type() {
 	case Str:
@@ -2090,6 +2216,7 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 		Method: &FunctionCall{
 			Name:       methodName,
 			Args:       args,
+			TypeArgs:   typeArgs,
 			fn:         fnDef,
 			ReturnType: fnDef.ReturnType,
 		},
@@ -2524,7 +2651,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 					// For non-string types that satisfy ToString trait, wrap with to_str() call
 					toStrMethod := toStringTrait.methods[0]
-					methodNode := c.createPrimitiveMethodNode(cx, toStrMethod.Name, []Expression{}, &toStrMethod)
+					methodNode := c.createPrimitiveMethodNode(cx, toStrMethod.Name, []Expression{}, &toStrMethod, nil)
 					chunks[i] = methodNode
 				}
 			}
@@ -2540,6 +2667,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 	case *parse.FunctionCall:
 		{
 			if s.Name == "panic" {
+				if len(s.TypeArgs) > 0 {
+					c.addError("function panic does not take type arguments", s.GetLocation())
+					return nil
+				}
 				if len(s.Args) != 1 {
 					c.addError("Incorrect number of arguments: 'panic' requires a message", s.GetLocation())
 					return nil
@@ -2573,11 +2704,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				if extFnDef, ok := fnSym.Type.(*ExternalFunctionDef); ok {
 					// Convert ExternalFunctionDef to FunctionDef for type checking
 					fnDef = &FunctionDef{
-						Name:       extFnDef.Name,
-						Parameters: extFnDef.Parameters,
-						ReturnType: extFnDef.ReturnType,
-						Body:       nil, // External functions don't have bodies
-						Private:    extFnDef.Private,
+						Name:          extFnDef.Name,
+						GenericParams: append([]string(nil), extFnDef.GenericParams...),
+						Parameters:    extFnDef.Parameters,
+						ReturnType:    extFnDef.ReturnType,
+						Body:          nil, // External functions don't have bodies
+						Private:       extFnDef.Private,
 					}
 				} else {
 					//// technically, the below isn't possible anymore
@@ -2600,6 +2732,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					// }
 				}
 			}
+
+			callTypeArgs := c.resolveCallTypeArgs(s.TypeArgs)
 
 			// Resolve named arguments to positional arguments (for expressions only)
 			resolvedExprs, err := c.resolveArguments(s.Args, fnDef.Parameters)
@@ -2634,8 +2768,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if args == nil {
 				return nil
 			}
-			if fnDef.hasGenerics() && len(s.TypeArgs) > 0 {
-				specialized, err := c.resolveGenericFunction(fnDef, args, s.TypeArgs, s.GetLocation())
+			if len(callTypeArgs) > 0 {
+				specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, s.GetLocation())
 				if err != nil {
 					c.addError(err.Error(), s.GetLocation())
 					return nil
@@ -2646,6 +2780,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			call := &FunctionCall{
 				Name:       s.Name,
 				Args:       args,
+				TypeArgs:   callTypeArgs,
 				fn:         fnToUse,
 				ReturnType: fnToUse.ReturnType,
 			}
@@ -2761,19 +2896,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				// If the original definition has generics, the current structType might be
 				// a specialized version with concrete field types (e.g., item: Int instead of item: $T)
 				if originalDef != nil && originalDef.hasGenerics() {
-					// Extract generic parameter names used in the function
-					genericNames := make(map[string]bool)
-					for _, param := range fnDef.Parameters {
-						extractGenericNames(param.Type, genericNames)
-					}
-					extractGenericNames(fnDef.ReturnType, genericNames)
-
-					if len(genericNames) > 0 {
-						genericParams := make([]string, 0, len(genericNames))
-						for name := range genericNames {
-							genericParams = append(genericParams, name)
-						}
-
+					genericParams := genericParamsForFunction(fnDef)
+					genericParams = appendUniqueStrings(genericParams, originalDef.GenericParams...)
+					if len(genericParams) > 0 {
 						// Create generic scope with fresh TypeVar instances
 						genericScope = c.scope.createGenericScope(genericParams)
 
@@ -2806,22 +2931,36 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				fnDefCopy, genericScope = c.setupFunctionGenerics(fnDef)
 			}
 
+			callTypeArgs := c.resolveCallTypeArgs(s.Method.TypeArgs)
+			if len(callTypeArgs) > 0 {
+				methodGenericParams := c.explicitMethodGenericParams(fnDef, subj.Type())
+				if len(methodGenericParams) == 0 {
+					c.addError(fmt.Sprintf("function %s does not take type arguments", fnDef.Name), s.GetLocation())
+					return nil
+				}
+				if len(callTypeArgs) != len(methodGenericParams) {
+					c.addError(fmt.Sprintf("Expected %d type arguments, got %d", len(methodGenericParams), len(callTypeArgs)), s.GetLocation())
+					return nil
+				}
+				if genericScope == nil {
+					genericScope = c.scope.createGenericScope(genericParamsForFunction(fnDef))
+					fnDefCopy = copyFunctionWithTypeVarMap(fnDef, *genericScope.genericContext)
+				}
+				for i, actual := range callTypeArgs {
+					if err := genericScope.bindGeneric(methodGenericParams[i], actual); err != nil {
+						c.addError(err.Error(), s.GetLocation())
+						return nil
+					}
+				}
+			}
+
 			// Check and process arguments (handles both generics and mutability)
 			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
 			if args == nil {
 				return nil
 			}
-			if fnDef.hasGenerics() && len(s.Method.TypeArgs) > 0 {
-				specialized, err := c.resolveGenericFunction(fnDef, args, s.Method.TypeArgs, s.GetLocation())
-				if err != nil {
-					c.addError(err.Error(), s.GetLocation())
-					return nil
-				}
-				fnToUse = specialized
-			}
-
 			// Create function call
-			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse)
+			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs)
 		}
 	case *parse.UnaryExpression:
 		{
@@ -3150,6 +3289,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			absolutePath := s.Target.String() + "::" + s.Function.Name
 			if sym, ok := c.scope.get(absolutePath); ok {
 				fnDef := sym.Type.(*FunctionDef)
+				callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
 
 				// Resolve named and positional arguments to match parameters
 				resolvedExprs, err := c.resolveArguments(s.Function.Args, fnDef.Parameters)
@@ -3213,13 +3353,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				call := &FunctionCall{
 					Name:       absolutePath,
 					Args:       args,
+					TypeArgs:   callTypeArgs,
 					fn:         fnDef,
 					ReturnType: fnDef.ReturnType,
 				}
 
 				// Use new generic resolution system
-				if fnDef.hasGenerics() {
-					specialized, err := c.resolveGenericFunction(fnDef, args, s.Function.TypeArgs, s.GetLocation())
+				if fnDef.hasGenerics() || len(callTypeArgs) > 0 {
+					specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, s.GetLocation())
 					if err != nil {
 						c.addError(err.Error(), s.GetLocation())
 						return nil
@@ -3257,10 +3398,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			case *ExternalFunctionDef:
 				// Convert ExternalFunctionDef to FunctionDef for validation
 				fnDef = &FunctionDef{
-					Name:       fn.Name,
-					Parameters: fn.Parameters,
-					ReturnType: fn.ReturnType,
-					Private:    fn.Private,
+					Name:          fn.Name,
+					GenericParams: append([]string(nil), fn.GenericParams...),
+					Parameters:    fn.Parameters,
+					ReturnType:    fn.ReturnType,
+					Private:       fn.Private,
 				}
 				ok = true
 			default:
@@ -3272,6 +3414,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				c.addError(fmt.Sprintf("%s::%s is not a function", targetName, s.Function.Name), s.GetLocation())
 				return nil
 			}
+			callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
 
 			// Resolve named and positional arguments to match parameters
 			resolvedExprs, err := c.resolveArguments(s.Function.Args, fnDef.Parameters)
@@ -3306,8 +3449,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if args == nil {
 				return nil
 			}
-			if fnDef.hasGenerics() && len(s.Function.TypeArgs) > 0 {
-				specialized, err := c.resolveGenericFunction(fnDef, args, s.Function.TypeArgs, s.GetLocation())
+			if len(callTypeArgs) > 0 {
+				specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, s.GetLocation())
 				if err != nil {
 					c.addError(err.Error(), s.GetLocation())
 					return nil
@@ -3321,6 +3464,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			call := &FunctionCall{
 				Name:       callName,
 				Args:       args,
+				TypeArgs:   callTypeArgs,
 				fn:         fnToUse,
 				ReturnType: fnToUse.ReturnType,
 			}
@@ -3377,12 +3521,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Check body
+			c.pushFunctionGenericContext(fn)
 			body := c.checkBlockWithExpected(s.Body, func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					c.scope.add(param.Name, param.Type, param.Mutable)
 				}
 			}, returnType, true)
+			c.popFunctionGenericContext()
 
 			// Add function to scope after body is checked (for generic resolution support)
 			c.scope.add(uniqueName, fn, false)
@@ -4626,12 +4772,14 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			}
 
 			// Check body
+			c.pushFunctionGenericContext(fn)
 			body := c.checkBlockWithExpected(s.Body, func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					c.scope.add(param.Name, param.Type, param.Mutable)
 				}
 			}, returnType, true)
+			c.popFunctionGenericContext()
 
 			// Add function to scope after checking body
 			c.scope.add(uniqueName, fn, false)
@@ -4685,10 +4833,11 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			case *ExternalFunctionDef:
 				// Convert ExternalFunctionDef to FunctionDef for validation
 				fnDef = &FunctionDef{
-					Name:       fn.Name,
-					Parameters: fn.Parameters,
-					ReturnType: fn.ReturnType,
-					Private:    fn.Private,
+					Name:          fn.Name,
+					GenericParams: append([]string(nil), fn.GenericParams...),
+					Parameters:    fn.Parameters,
+					ReturnType:    fn.ReturnType,
+					Private:       fn.Private,
 				}
 				isFunc = true
 			default:
@@ -4845,6 +4994,7 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 	// Create external function definition
 	extFn := &ExternalFunctionDef{
 		Name:                  def.Name,
+		GenericParams:         append([]string(nil), def.TypeParams...),
 		Parameters:            params,
 		ReturnType:            returnType,
 		ExternalBinding:       resolvedBinding,
@@ -4902,6 +5052,7 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 	c.scope.add(fn.Name, fn, false)
 
 	// Check function body
+	c.pushFunctionGenericContext(fn)
 	body := c.checkBlockWithExpected(bodyStmts, func() {
 		// Set the expected return type to the scope
 		c.scope.expectReturn(returnType)
@@ -4910,6 +5061,7 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 			c.scope.add(param.Name, param.Type, param.Mutable)
 		}
 	}, returnType, true)
+	c.popFunctionGenericContext()
 
 	// Check that the function's return type matches its body's type
 	if returnType != Void && !areCompatible(returnType, body.Type()) {
@@ -4919,7 +5071,7 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 	return body
 }
 
-func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func()) *FunctionDef {
+func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func(), extraGenericParams ...string) *FunctionDef {
 	if init != nil {
 		init()
 	}
@@ -4937,12 +5089,13 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func()) *Fu
 
 	// Create function definition
 	fn := &FunctionDef{
-		Name:       def.Name,
-		Parameters: params,
-		ReturnType: returnType,
-		Body:       nil,
-		Private:    def.Private,
-		IsTest:     def.IsTest,
+		Name:          def.Name,
+		GenericParams: append([]string(nil), def.TypeParams...),
+		Parameters:    params,
+		ReturnType:    returnType,
+		Body:          nil,
+		Private:       def.Private,
+		IsTest:        def.IsTest,
 	}
 
 	if def.IsTest {
@@ -4967,12 +5120,14 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func()) *Fu
 		c.scope.add(def.Name, fn, false)
 	}
 
+	c.pushFunctionGenericContext(fn, extraGenericParams...)
 	body := c.checkBlockWithExpected(def.Body, func() {
 		c.scope.expectReturn(returnType)
 		for _, param := range params {
 			c.scope.add(param.Name, param.Type, param.Mutable)
 		}
 	}, returnType, true)
+	c.popFunctionGenericContext()
 
 	// Validate return type
 	if returnType != Void && !areCompatible(returnType, body.Type()) {
@@ -5027,6 +5182,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		}
 		return &FunctionDef{
 			Name:                    typ.Name,
+			GenericParams:           append([]string(nil), typ.GenericParams...),
 			Parameters:              substitutedParams,
 			ReturnType:              substituteType(typ.ReturnType, typeMap),
 			InferReturnTypeFromBody: typ.InferReturnTypeFromBody,
@@ -5137,17 +5293,7 @@ func (c *Checker) setupFunctionGenerics(fnDef *FunctionDef) (*FunctionDef, *Symb
 		return fnDef, nil
 	}
 
-	// Extract generic parameter names
-	genericNames := make(map[string]bool)
-	for _, param := range fnDef.Parameters {
-		extractGenericNames(param.Type, genericNames)
-	}
-	extractGenericNames(fnDef.ReturnType, genericNames)
-
-	genericParams := make([]string, 0, len(genericNames))
-	for name := range genericNames {
-		genericParams = append(genericParams, name)
-	}
+	genericParams := genericParamsForFunction(fnDef)
 
 	// Create generic scope and fresh function copy
 	genericScope := c.scope.createGenericScope(genericParams)
@@ -5331,7 +5477,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 
 	// Finalize generic resolution by creating the specialized function
 	var fnToUse *FunctionDef
-	if fnDef.hasGenerics() && genericScope != nil {
+	if genericScope != nil {
 		bindings := genericScope.getGenericBindings()
 
 		if len(bindings) == 0 {
@@ -5349,6 +5495,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			// Create specialized function with resolved generics
 			fnToUse = &FunctionDef{
 				Name:                    fnDefCopy.Name,
+				GenericParams:           append([]string(nil), fnDefCopy.GenericParams...),
 				Parameters:              make([]Parameter, len(fnDefCopy.Parameters)),
 				ReturnType:              substituteType(fnDefCopy.ReturnType, bindings),
 				InferReturnTypeFromBody: fnDefCopy.InferReturnTypeFromBody,
@@ -5381,21 +5528,13 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 }
 
 // New generic resolution using the enhanced symbol table
-func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, typeArgs []parse.DeclaredType, _ parse.Location) (*FunctionDef, error) {
-	if !fnDef.hasGenerics() {
+func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, typeArgs []Type, _ parse.Location) (*FunctionDef, error) {
+	genericParams := genericParamsForFunction(fnDef)
+	if !fnDef.hasGenerics() || len(genericParams) == 0 {
+		if len(typeArgs) > 0 {
+			return nil, fmt.Errorf("function %s does not take type arguments", fnDef.Name)
+		}
 		return fnDef, nil
-	}
-
-	// Extract generic parameter names (unique)
-	genericNames := make(map[string]bool)
-	for _, param := range fnDef.Parameters {
-		extractGenericNames(param.Type, genericNames)
-	}
-	extractGenericNames(fnDef.ReturnType, genericNames)
-
-	genericParams := make([]string, 0, len(genericNames))
-	for name := range genericNames {
-		genericParams = append(genericParams, name)
 	}
 
 	// Create a call-site-specific generic context scope
@@ -5411,10 +5550,9 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 			return nil, fmt.Errorf("Expected %d type arguments, got %d", len(genericParams), len(typeArgs))
 		}
 
-		for i, arg := range typeArgs {
-			actual := c.resolveType(arg)
+		for i, actual := range typeArgs {
 			if actual == nil {
-				return nil, fmt.Errorf("Could not resolve type argument")
+				return nil, fmt.Errorf("could not resolve type argument")
 			}
 
 			if err := genericScope.bindGeneric(genericParams[i], actual); err != nil {
@@ -5447,6 +5585,7 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 	// We now need to substitute the bindings to create the final specialized function.
 	specialized := &FunctionDef{
 		Name:                    fnDefCopy.Name,
+		GenericParams:           append([]string(nil), fnDefCopy.GenericParams...),
 		Parameters:              make([]Parameter, len(fnDefCopy.Parameters)),
 		ReturnType:              substituteType(fnDefCopy.ReturnType, bindings),
 		InferReturnTypeFromBody: fnDefCopy.InferReturnTypeFromBody,

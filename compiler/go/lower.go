@@ -5125,6 +5125,24 @@ func (l *lowerer) lowerProjectExternCall(ext air.Extern, binding string, args []
 	return l.lowerDirectExternCall(ext, func(_ string, binding string) (ast.Expr, error) { return l.projectFFIBindingExpr(binding) }, "", binding, args, stmts, returnTypeID)
 }
 
+func (l *lowerer) applyExplicitExternTypeArgs(callee ast.Expr, typeArgs []air.TypeID) (ast.Expr, error) {
+	if len(typeArgs) == 0 {
+		return callee, nil
+	}
+	indices := make([]ast.Expr, len(typeArgs))
+	for i, typeArg := range typeArgs {
+		goType, err := l.goType(typeArg)
+		if err != nil {
+			return nil, err
+		}
+		indices[i] = goType
+	}
+	if len(indices) == 1 {
+		return &ast.IndexExpr{X: callee, Index: indices[0]}, nil
+	}
+	return &ast.IndexListExpr{X: callee, Indices: indices}, nil
+}
+
 func (l *lowerer) lowerDirectExternCall(ext air.Extern, bindingExpr func(string, string) (ast.Expr, error), alias string, binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
 	adaptedArgs, argStmts, err := l.adaptProjectExternArgs(ext.Signature, args)
 	if err != nil {
@@ -5132,6 +5150,10 @@ func (l *lowerer) lowerDirectExternCall(ext air.Extern, bindingExpr func(string,
 	}
 	stmts = append(stmts, argStmts...)
 	callee, err := bindingExpr(alias, binding)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	callee, err = l.applyExplicitExternTypeArgs(callee, ext.TypeArgs)
 	if err != nil {
 		return loweredExpr{}, err
 	}

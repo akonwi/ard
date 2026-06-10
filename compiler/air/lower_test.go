@@ -3,6 +3,7 @@ package air
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -1302,6 +1303,35 @@ func testTypeInfo(t *testing.T, program *Program, id TypeID) TypeInfo {
 	return TypeInfo{}
 }
 
+func TestLowerRejectsUnboundReturnOnlyGenericWrapper(t *testing.T) {
+	result := parse.Parse([]byte(`
+		extern fn raw<$T>(key: Str) $T? = "Raw"
+
+		fn has<$T>(key: Str) Bool {
+			raw<$T>(key).is_some()
+		}
+
+		fn main() {
+			let a = has("int")
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	_, err := Lower(c.Module())
+	if err == nil {
+		t.Fatal("Lower succeeded; expected unbound return-only generic wrapper error")
+	}
+	if !strings.Contains(err.Error(), "cannot declare unspecialized generic function has") {
+		t.Fatalf("Lower error = %v, want unspecialized has", err)
+	}
+}
+
 func TestLowerImportedGenericStructReturnTypeWithTypeArg(t *testing.T) {
 	lowerSource(t, `
 use ard/async/channel
@@ -1312,4 +1342,72 @@ fn run() {
 }
 fn main() { run() }
 `)
+}
+func TestLowerInstanceMethodForwardedGenericTypeArg(t *testing.T) {
+	_ = lowerSource(t, `
+		struct Box {
+			item: $T
+		}
+
+		impl Box {
+			fn pick<$U>(value: $U) $T {
+				self.item
+			}
+		}
+
+		fn use_pick<$V>(box: Box<Int>, value: $V) Int {
+			box.pick<$V>(value)
+		}
+
+		fn main() Int {
+			let box = Box{item: 1}
+			use_pick<Str>(box, "x")
+		}
+	`)
+}
+func TestLowerForwardedGenericUsedOnlyInCalleeBody(t *testing.T) {
+	_ = lowerSource(t, `
+		extern fn raw<$T>(key: Str) $T? = "Raw"
+
+		fn has<$T>() Bool {
+			raw<$T>("x").is_some()
+		}
+
+		fn outer<$U>() Bool {
+			has<$U>()
+		}
+
+		fn main() Bool {
+			outer<Int>()
+		}
+	`)
+}
+func TestLowerReceiverGenericUsedOnlyInMethodBody(t *testing.T) {
+	program := lowerSource(t, `
+		extern fn raw<$T>(key: Str) $T? = "Raw"
+
+		struct Box {
+			item: $T
+		}
+
+		impl Box {
+			fn has_raw() Bool {
+				raw<$T>("x").is_some()
+			}
+		}
+
+		fn main() Bool {
+			let box = Box{item: 1}
+			box.has_raw()
+		}
+	`)
+	for _, ext := range program.Externs {
+		if ext.Name == "raw" && len(ext.TypeArgs) == 1 {
+			if got := typeKind(t, program, ext.TypeArgs[0]); got != TypeInt {
+				t.Fatalf("raw type arg kind = %v, want Int", got)
+			}
+			return
+		}
+	}
+	t.Fatalf("raw extern specialization with explicit type arg not found: %#v", program.Externs)
 }

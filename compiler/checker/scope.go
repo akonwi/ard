@@ -338,6 +338,7 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 		// Create a new FunctionDef, don't modify the original
 		return &FunctionDef{
 			Name:                    t.Name,
+			GenericParams:           append([]string(nil), t.GenericParams...),
 			Parameters:              newParams,
 			ReturnType:              newReturnType,
 			InferReturnTypeFromBody: t.InferReturnTypeFromBody,
@@ -430,6 +431,7 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 
 	copy := &FunctionDef{
 		Name:                    fnDef.Name,
+		GenericParams:           append([]string(nil), fnDef.GenericParams...),
 		Parameters:              newParams,
 		ReturnType:              copyTypeWithTypeVarMap(fnDef.ReturnType, typeVarMap),
 		InferReturnTypeFromBody: fnDef.InferReturnTypeFromBody,

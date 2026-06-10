@@ -30,6 +30,7 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(checker.ModuleStructInstance{}, "StructType"),
 	cmpopts.IgnoreFields(checker.FunctionCall{}, "ReturnType"),
 	cmpopts.IgnoreFields(checker.FunctionCall{}, "ExternalBinding"),
+	cmpopts.IgnoreFields(checker.FunctionCall{}, "TypeArgs"),
 	cmpopts.IgnoreFields(checker.MaybeMethod{}, "ReturnType"),
 	cmpopts.IgnoreFields(checker.ResultMethod{}, "ReturnType"),
 	cmpopts.IgnoreFields(checker.ResultMatch{}, "OkType", "ErrType", "ResultType"),

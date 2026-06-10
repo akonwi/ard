@@ -173,5 +173,6 @@ type Extern struct {
 	Module    ModuleID
 	Name      string
 	Signature Signature
+	TypeArgs  []TypeID
 	Bindings  map[string]string
 }

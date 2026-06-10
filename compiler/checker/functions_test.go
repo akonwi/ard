@@ -259,6 +259,23 @@ func TestTestFunctions(t *testing.T) {
 			},
 		},
 		{
+			name: "explicit type arguments on non-generic extern are rejected",
+			input: strings.Join([]string{
+				`extern fn foo() Int = "Foo"`,
+				`foo<Int>()`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "function foo does not take type arguments"},
+			},
+		},
+		{
+			name:  "explicit type arguments on panic are rejected",
+			input: `panic<Int>("boom")`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "function panic does not take type arguments"},
+			},
+		},
+		{
 			name:  "test functions returning wrong error type",
 			input: `test fn wrong_err() Void!Int { Result::ok(()) }`,
 			diagnostics: []checker.Diagnostic{

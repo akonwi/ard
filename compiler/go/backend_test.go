@@ -1288,6 +1288,136 @@ func BufferLen(buffer *bytes.Buffer) int {
 	}
 }
 
+func TestBuildProgramEmitsTypeArgsForReturnOnlyGenericProjectExtern(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+extern type RawState = "StateContext"
+extern fn new_raw_state() RawState = "NewRawState"
+extern fn get_raw<$T>(state: RawState, key: Str) $T? = "GetRaw"
+
+struct State {
+	raw: RawState,
+}
+
+fn state() State {
+	State{raw: new_raw_state()}
+}
+
+impl State {
+	fn get<$T>(key: Str) $T? {
+		get_raw<$T>(self.raw, key)
+	}
+}
+
+fn main() Bool {
+	state().get<Int>("count").or(0) == 42
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+import ardruntime "github.com/akonwi/ard/runtime"
+
+type StateContext struct{}
+
+func NewRawState() StateContext {
+	return StateContext{}
+}
+
+func GetRaw[T any](state StateContext, key string) ardruntime.Maybe[T] {
+	if key != "count" {
+		return ardruntime.None[T]()
+	}
+	return ardruntime.Some(any(42).(T))
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	binaryPath := filepath.Join(dir, "app")
+	builtPath, err := BuildProgram(program, binaryPath, loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := exec.Command(builtPath).Run(); err != nil {
+		t.Fatalf("run built binary: %v", err)
+	}
+}
+
+func TestBuildProgramKeepsReturnOnlyGenericWrapperSpecializations(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+extern fn get_raw<$T>(key: Str) $T? = "GetRaw"
+
+fn id<$T>(key: Str) $T? {
+	get_raw<$T>(key)
+}
+
+fn has<$T>(key: Str) Bool {
+	id<$T>(key).is_some()
+}
+
+fn outer<$U>(key: Str) Bool {
+	has<$U>(key)
+}
+
+fn main() Bool {
+	outer<Int>("int") and outer<Str>("str")
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+import ardruntime "github.com/akonwi/ard/runtime"
+
+func GetRaw[T any](key string) ardruntime.Maybe[T] {
+	switch key {
+	case "int":
+		return ardruntime.Some(any(1).(T))
+	case "str":
+		return ardruntime.Some(any("ok").(T))
+	default:
+		return ardruntime.None[T]()
+	}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	binaryPath := filepath.Join(dir, "app")
+	builtPath, err := BuildProgram(program, binaryPath, loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := exec.Command(builtPath).Run(); err != nil {
+		t.Fatalf("run built binary: %v", err)
+	}
+}
+
 func TestBuildProgramWrapsProjectFFIRawChannelReturn(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

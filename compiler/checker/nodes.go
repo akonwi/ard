@@ -977,6 +977,7 @@ type Parameter struct {
 type FunctionDef struct {
 	Name                    string
 	Receiver                string
+	GenericParams           []string
 	Parameters              []Parameter
 	ReturnType              Type
 	InferReturnTypeFromBody bool
@@ -1000,6 +1001,7 @@ func (f FunctionDef) get(name string) Type { return nil }
 
 type ExternalFunctionDef struct {
 	Name                  string
+	GenericParams         []string
 	Parameters            []Parameter
 	ReturnType            Type
 	ExternalBinding       string
@@ -1049,6 +1051,9 @@ func (e ExternalFunctionDef) hasTrait(trait *Trait) bool {
 }
 
 func (e *ExternalFunctionDef) hasGenerics() bool {
+	if len(e.GenericParams) > 0 {
+		return true
+	}
 	for i := range e.Parameters {
 		if strings.HasPrefix(e.Parameters[i].Type.String(), "$") {
 			return true
@@ -1073,6 +1078,9 @@ func (f FunctionDef) hasTrait(trait *Trait) bool {
 	return false
 }
 func (f *FunctionDef) hasGenerics() bool {
+	if len(f.GenericParams) > 0 {
+		return true
+	}
 	for _, param := range f.Parameters {
 		if hasGenericsInType(param.Type) {
 			return true
@@ -1084,6 +1092,7 @@ func (f *FunctionDef) hasGenerics() bool {
 type FunctionCall struct {
 	Name            string
 	Args            []Expression
+	TypeArgs        []Type
 	fn              *FunctionDef
 	ReturnType      Type // Pre-computed by checker
 	ExternalBinding string

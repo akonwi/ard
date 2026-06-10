@@ -167,3 +167,121 @@ func TestStructEqualityIndependentOfMethodSideTable(t *testing.T) {
 		t.Fatal("struct equality should ignore side-table method signatures")
 	}
 }
+func TestExplicitTypeArgsCannotOverrideReceiverGenericMethod(t *testing.T) {
+	result := parse.Parse([]byte(`
+		struct Box {
+			item: $T
+		}
+
+		impl Box {
+			fn get() $T {
+				self.item
+			}
+		}
+
+		let b = Box{item: 1}
+		let x = b.get<Str>()
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected explicit receiver-generic method type arg error")
+	}
+	if got := c.Diagnostics()[0].Message; got != "function get does not take type arguments" {
+		t.Fatalf("first diagnostic = %q, want explicit method type arg rejection", got)
+	}
+}
+
+func TestExplicitMethodTypeArgsPreserveReceiverGenericBindings(t *testing.T) {
+	result := parse.Parse([]byte(`
+		struct Box {
+			item: $T
+		}
+
+		impl Box {
+			fn pick<$U>(value: $U) $T {
+				self.item
+			}
+		}
+
+		let b = Box{item: 1}
+		let x: Int = b.pick<Str>("ok")
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestUnboundGenericExplicitCallTypeArgIsRejected(t *testing.T) {
+	result := parse.Parse([]byte(`
+		extern fn get_raw<$T>(key: Str) $T? = "GetRaw"
+		get_raw<$U>("count")
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected unbound explicit type arg error")
+	}
+	if got := c.Diagnostics()[0].Message; got != "unbound generic type argument $U" {
+		t.Fatalf("first diagnostic = %q, want unbound generic type arg", got)
+	}
+}
+
+func TestNestedFunctionCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
+	result := parse.Parse([]byte(`
+		extern fn raw<$T>(key: Str) $T? = "Raw"
+
+		fn outer<$T>() Bool {
+			fn inner() Bool {
+				raw<$T>("x").is_some()
+			}
+			inner()
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected outer generic type arg to be rejected in nested function")
+	}
+	if got := c.Diagnostics()[0].Message; got != "unbound generic type argument $T" {
+		t.Fatalf("first diagnostic = %q, want unbound generic type arg", got)
+	}
+}
+
+func TestClosureCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
+	result := parse.Parse([]byte(`
+		extern fn raw<$T>(key: Str) $T? = "Raw"
+
+		fn outer<$T>() Bool {
+			let inner = fn() Bool {
+				raw<$T>("x").is_some()
+			}
+			true
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected outer generic type arg to be rejected in closure")
+	}
+	if got := c.Diagnostics()[0].Message; got != "unbound generic type argument $T" {
+		t.Fatalf("first diagnostic = %q, want unbound generic type arg", got)
+	}
+}
