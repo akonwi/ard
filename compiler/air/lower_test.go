@@ -993,6 +993,46 @@ func TestLowerGenericStructMethodSpecializationsDoNotCollapse(t *testing.T) {
 	}
 }
 
+func TestLowerGenericStructMethodOwnGenericSpecializationsDoNotCollapse(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box {
+			item: Int
+		}
+
+		impl Box {
+			fn echo(value: $U) $U {
+				value
+			}
+		}
+
+		fn echo_int(box: Box) Int {
+			box.echo(1)
+		}
+
+		fn echo_str(box: Box) Str {
+			box.echo("x")
+		}
+	`)
+
+	intEcho := findFunction(t, program, "echo_int")
+	strEcho := findFunction(t, program, "echo_str")
+	if intEcho.Body.Result == nil || intEcho.Body.Result.Kind != ExprCall {
+		t.Fatalf("echo_int result = %#v, want method call", intEcho.Body.Result)
+	}
+	if strEcho.Body.Result == nil || strEcho.Body.Result.Kind != ExprCall {
+		t.Fatalf("echo_str result = %#v, want method call", strEcho.Body.Result)
+	}
+	if intEcho.Body.Result.Function == strEcho.Body.Result.Function {
+		t.Fatalf("method-local generic specializations collapsed to function %d", intEcho.Body.Result.Function)
+	}
+	if typeKind(t, program, program.Functions[intEcho.Body.Result.Function].Signature.Return) != TypeInt {
+		t.Fatalf("echo_int method return kind = %v, want Int", typeKind(t, program, program.Functions[intEcho.Body.Result.Function].Signature.Return))
+	}
+	if typeKind(t, program, program.Functions[strEcho.Body.Result.Function].Signature.Return) != TypeStr {
+		t.Fatalf("echo_str method return kind = %v, want Str", typeKind(t, program, program.Functions[strEcho.Body.Result.Function].Signature.Return))
+	}
+}
+
 func TestLowerSameShapeStructsWithDifferentMethodsStayDistinct(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

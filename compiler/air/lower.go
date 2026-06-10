@@ -1085,11 +1085,6 @@ func (l *lowerer) lowerMethodFunction(id FunctionID, def *checker.FunctionDef) e
 }
 
 func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName string, ownerType TypeID, def *checker.FunctionDef, args []checker.Expression, returnType TypeID) (FunctionID, error) {
-	key := methodFunctionKey(module, fmt.Sprintf("%s#%d", ownerName, ownerType), "instance", def.Name)
-	if id, ok := l.functions[key]; ok {
-		return id, nil
-	}
-
 	receiver := def.Receiver
 	if receiver == "" {
 		receiver = "self"
@@ -1115,6 +1110,12 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 		if err != nil {
 			return NoFunction, err
 		}
+	}
+
+	signature := Signature{Params: params, Return: returnType}
+	key := concreteFunctionKey(module, fmt.Sprintf("method/%s#%d/instance/%s", ownerName, ownerType, def.Name), signature)
+	if id, ok := l.functions[key]; ok {
+		return id, nil
 	}
 
 	id := FunctionID(len(l.program.Functions))
