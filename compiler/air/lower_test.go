@@ -1033,6 +1033,45 @@ func TestLowerGenericStructMethodOwnGenericSpecializationsDoNotCollapse(t *testi
 	}
 }
 
+func TestLowerInstanceMethodKeepsDeclaredTraitParameterType(t *testing.T) {
+	program := lowerSource(t, `
+		trait View {
+			fn render()
+		}
+
+		struct Node {
+			view: View
+		}
+
+		struct Context {}
+
+		impl Context {
+			fn add_child(child: View) {
+				let node = Node{view: child}
+			}
+		}
+
+		struct Child {}
+
+		impl View for Child {
+			fn render() {}
+		}
+
+		fn main() {
+			let ctx = Context{}
+			ctx.add_child(Child{})
+		}
+	`)
+
+	addChild := findFunction(t, program, "Context.add_child")
+	if len(addChild.Signature.Params) != 2 {
+		t.Fatalf("add_child param count = %d, want 2", len(addChild.Signature.Params))
+	}
+	if kind := typeKind(t, program, addChild.Signature.Params[1].Type); kind != TypeTraitObject {
+		t.Fatalf("add_child child param kind = %v, want trait object", kind)
+	}
+}
+
 func TestLowerSameShapeStructsWithDifferentMethodsStayDistinct(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
