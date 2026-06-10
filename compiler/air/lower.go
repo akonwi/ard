@@ -1092,13 +1092,11 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 	params := make([]Param, 0, len(def.Parameters)+1)
 	params = append(params, Param{Name: receiver, Type: ownerType, Mutable: def.Mutates})
 	for i, param := range def.Parameters {
-		typeID := NoType
-		var err error
-		if i < len(args) {
-			typeID, err = l.internType(args[i].Type())
-		} else {
-			typeID, err = l.internType(param.Type)
+		paramType := param.Type
+		if typeHasUnresolvedTypeVar(paramType) && i < len(args) {
+			paramType = args[i].Type()
 		}
+		typeID, err := l.internType(paramType)
 		if err != nil {
 			return NoFunction, err
 		}
