@@ -904,6 +904,226 @@ func TestLowerImportedGenericModuleFunctionSpecialization(t *testing.T) {
 	}
 }
 
+func TestLowerImportedGenericStdlibFunctionBodyUsesConcreteBindings(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/list
+
+		fn main() [Int] {
+			list::keep([1, 2, 3], fn(value) { value > 1 })
+		}
+	`)
+
+	keep := findFunction(t, program, "keep")
+	if len(keep.Signature.Params) != 2 {
+		t.Fatalf("keep param count = %d, want 2", len(keep.Signature.Params))
+	}
+	returnType := testTypeInfo(t, program, keep.Signature.Return)
+	if returnType.Kind != TypeList || typeKind(t, program, returnType.Elem) != TypeInt {
+		t.Fatalf("keep return = %#v, want [Int]", returnType)
+	}
+	for _, local := range keep.Locals {
+		info := testTypeInfo(t, program, local.Type)
+		if info.Kind == TypeList && typeKind(t, program, info.Elem) == TypeVoid {
+			t.Fatalf("keep local %s has [Void], want concrete generic binding", local.Name)
+		}
+	}
+}
+
+func TestLowerGenericStructMethodBodyUsesReceiverBindings(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box {
+			item: $T
+		}
+
+		impl Box {
+			fn get() $T {
+				self.item
+			}
+		}
+
+		fn main() Int {
+			let box: Box<Int> = Box{item: 42}
+			box.get()
+		}
+	`)
+
+	get := findFunction(t, program, "Box.get")
+	if typeKind(t, program, get.Signature.Return) != TypeInt {
+		t.Fatalf("get return kind = %v, want TypeInt", typeKind(t, program, get.Signature.Return))
+	}
+}
+
+func TestLowerGenericStructMethodSpecializationsDoNotCollapse(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box {
+			item: $T
+		}
+
+		impl Box {
+			fn get() $T {
+				self.item
+			}
+		}
+
+		fn get_int(box: Box<Int>) Int {
+			box.get()
+		}
+
+		fn get_str(box: Box<Str>) Str {
+			box.get()
+		}
+	`)
+
+	intGet := findFunction(t, program, "get_int")
+	strGet := findFunction(t, program, "get_str")
+	if intGet.Body.Result == nil || intGet.Body.Result.Kind != ExprCall {
+		t.Fatalf("get_int result = %#v, want method call", intGet.Body.Result)
+	}
+	if strGet.Body.Result == nil || strGet.Body.Result.Kind != ExprCall {
+		t.Fatalf("get_str result = %#v, want method call", strGet.Body.Result)
+	}
+	if intGet.Body.Result.Function == strGet.Body.Result.Function {
+		t.Fatalf("generic method specializations collapsed to function %d", intGet.Body.Result.Function)
+	}
+	if typeKind(t, program, program.Functions[intGet.Body.Result.Function].Signature.Return) != TypeInt {
+		t.Fatalf("get_int method return kind = %v, want Int", typeKind(t, program, program.Functions[intGet.Body.Result.Function].Signature.Return))
+	}
+	if typeKind(t, program, program.Functions[strGet.Body.Result.Function].Signature.Return) != TypeStr {
+		t.Fatalf("get_str method return kind = %v, want Str", typeKind(t, program, program.Functions[strGet.Body.Result.Function].Signature.Return))
+	}
+}
+
+func TestLowerGenericStructMethodOwnGenericSpecializationsDoNotCollapse(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box {
+			item: Int
+		}
+
+		impl Box {
+			fn echo(value: $U) $U {
+				value
+			}
+		}
+
+		fn echo_int(box: Box) Int {
+			box.echo(1)
+		}
+
+		fn echo_str(box: Box) Str {
+			box.echo("x")
+		}
+	`)
+
+	intEcho := findFunction(t, program, "echo_int")
+	strEcho := findFunction(t, program, "echo_str")
+	if intEcho.Body.Result == nil || intEcho.Body.Result.Kind != ExprCall {
+		t.Fatalf("echo_int result = %#v, want method call", intEcho.Body.Result)
+	}
+	if strEcho.Body.Result == nil || strEcho.Body.Result.Kind != ExprCall {
+		t.Fatalf("echo_str result = %#v, want method call", strEcho.Body.Result)
+	}
+	if intEcho.Body.Result.Function == strEcho.Body.Result.Function {
+		t.Fatalf("method-local generic specializations collapsed to function %d", intEcho.Body.Result.Function)
+	}
+	if typeKind(t, program, program.Functions[intEcho.Body.Result.Function].Signature.Return) != TypeInt {
+		t.Fatalf("echo_int method return kind = %v, want Int", typeKind(t, program, program.Functions[intEcho.Body.Result.Function].Signature.Return))
+	}
+	if typeKind(t, program, program.Functions[strEcho.Body.Result.Function].Signature.Return) != TypeStr {
+		t.Fatalf("echo_str method return kind = %v, want Str", typeKind(t, program, program.Functions[strEcho.Body.Result.Function].Signature.Return))
+	}
+}
+
+func TestLowerSameShapeStructsWithDifferentMethodsStayDistinct(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	firstPath := filepath.Join(root, "first.ard")
+	if err := os.WriteFile(firstPath, []byte(`
+		struct Item {
+			value: Int
+		}
+
+		impl Item {
+			fn value_plus_one() Int {
+				self.value + 1
+			}
+		}
+	`), 0o644); err != nil {
+		t.Fatalf("write first module: %v", err)
+	}
+	secondPath := filepath.Join(root, "second.ard")
+	if err := os.WriteFile(secondPath, []byte(`
+		struct Item {
+			value: Int
+		}
+
+		impl Item {
+			fn value_text() Str {
+				self.value.to_str()
+			}
+		}
+	`), 0o644); err != nil {
+		t.Fatalf("write second module: %v", err)
+	}
+
+	mainPath := filepath.Join(root, "main.ard")
+	result := parse.Parse([]byte(`
+		use app/first
+		use app/second
+
+		fn read_first(item: first::Item) Int {
+			item.value_plus_one()
+		}
+
+		fn read_second(item: second::Item) Str {
+			item.value_text()
+		}
+	`), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+
+	firstItem := findType(t, program, "Item")
+	var secondItem TypeInfo
+	for _, typ := range program.Types {
+		if typ.Name == "Item" && typ.ID != firstItem.ID {
+			secondItem = typ
+			break
+		}
+	}
+	if secondItem.ID == NoType {
+		t.Fatal("second Item type not found")
+	}
+	if firstItem.ID == secondItem.ID {
+		t.Fatalf("same-shape imported structs collapsed to type %d", firstItem.ID)
+	}
+	readFirst := findFunction(t, program, "read_first")
+	readSecond := findFunction(t, program, "read_second")
+	if typeKind(t, program, readFirst.Signature.Params[0].Type) != TypeStruct {
+		t.Fatalf("read_first param kind = %v, want struct", typeKind(t, program, readFirst.Signature.Params[0].Type))
+	}
+	if typeKind(t, program, readSecond.Signature.Params[0].Type) != TypeStruct {
+		t.Fatalf("read_second param kind = %v, want struct", typeKind(t, program, readSecond.Signature.Params[0].Type))
+	}
+	if readFirst.Signature.Params[0].Type == readSecond.Signature.Params[0].Type {
+		t.Fatalf("same-shape imported struct params collapsed to type %d", readFirst.Signature.Params[0].Type)
+	}
+}
+
 func TestLowerTestsManifest(t *testing.T) {
 	program := lowerSourceWithTests(t, `
 		use ard/testing
