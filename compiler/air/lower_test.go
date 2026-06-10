@@ -53,6 +53,45 @@ func TestLowerTinyProgram(t *testing.T) {
 	}
 }
 
+func TestLowerTransitiveStructMethodCanReadOwnerModuleGlobal(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "c.ard"), []byte(`
+		let SECRET = "ok"
+
+		struct C {}
+
+		impl C {
+			fn greet() Str {
+				SECRET
+			}
+		}
+	`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "b.ard"), []byte(`
+		use test_project/c
+
+		type C = c::C
+	`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	program := lowerProjectSource(t, tempDir, `
+		use test_project/b
+
+		fn use_c(value: b::C) Str {
+			value.greet()
+		}
+	`)
+	greet := findFunction(t, program, "C.greet")
+	if greet.Body.Result == nil || greet.Body.Result.Kind != ExprLoadGlobal {
+		t.Fatalf("greet result = %#v, want ExprLoadGlobal", greet.Body.Result)
+	}
+}
+
 func TestLowerFunctionCanReadModuleLevelLet(t *testing.T) {
 	program := lowerSource(t, `
 		let refresh_event = "inbox.refresh"
@@ -900,6 +939,28 @@ func lowerSource(t *testing.T, input string) *Program {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
 	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	return program
+}
+
+func lowerProjectSource(t *testing.T, root string, input string) *Program {
+	t.Helper()
+	result := parse.Parse([]byte(input), filepath.Join(root, "main.ard"))
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New("main.ard", result.Program, resolver)
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())

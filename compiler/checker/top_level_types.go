@@ -32,7 +32,6 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 				Name:          s.Name.Name,
 				ModulePath:    c.typeOwnerPath(),
 				Fields:        make(map[string]Type),
-				Methods:       make(map[string]*FunctionDef),
 				GenericParams: genericParams,
 				Private:       s.Private,
 			}, false)
@@ -248,9 +247,6 @@ func (c *Checker) populateStructDefinition(def *StructDef, decl *parse.StructDef
 	def.Name = decl.Name.Name
 	def.ModulePath = c.typeOwnerPath()
 	def.Fields = make(map[string]Type)
-	if def.Methods == nil {
-		def.Methods = make(map[string]*FunctionDef)
-	}
 	def.GenericParams = declaredGenericParams
 	def.Private = decl.Private
 	resolvedGenericParams := []string{}

@@ -105,6 +105,55 @@ func (l *lowerer) mustIntern(t checker.Type) TypeID {
 	return id
 }
 
+func (l *lowerer) structMethods(def *checker.StructDef) map[string]*checker.FunctionDef {
+	if def == nil {
+		return nil
+	}
+	return checker.StructMethodsInModules(l.moduleByName, checker.StructMethodOwner(def))
+}
+
+func (l *lowerer) findReachableModule(path string) checker.Module {
+	if mod, ok := l.moduleByName[path]; ok {
+		return mod
+	}
+	for _, mod := range l.moduleByName {
+		if found := findReachableModuleSeen(mod, path, map[string]bool{}); found != nil {
+			l.moduleByName[path] = found
+			return found
+		}
+	}
+	return nil
+}
+
+func findReachableModuleSeen(mod checker.Module, path string, seen map[string]bool) checker.Module {
+	if mod == nil {
+		return nil
+	}
+	modPath := mod.Path()
+	if modPath == path {
+		return mod
+	}
+	if seen[modPath] {
+		return nil
+	}
+	seen[modPath] = true
+	program := mod.Program()
+	if program == nil {
+		return nil
+	}
+	for _, imported := range program.Imports {
+		if found := findReachableModuleSeen(imported, path, seen); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func (l *lowerer) hasStructMethod(def *checker.StructDef, name string) bool {
+	methods := l.structMethods(def)
+	return methods != nil && methods[name] != nil
+}
+
 func (l *lowerer) lowerModule(module checker.Module) error {
 	if module == nil {
 		return fmt.Errorf("cannot lower nil module")
@@ -698,7 +747,7 @@ func (l *lowerer) declareTraitImplsForType(module ModuleID, typ checker.Type) er
 	switch typed := typ.(type) {
 	case *checker.StructDef:
 		traits = typed.Traits
-		methods = typed.Methods
+		methods = l.structMethods(typed)
 	case *checker.Enum:
 		traits = typed.Traits
 		methods = typed.Methods
@@ -1686,23 +1735,6 @@ func airStructKeySeen(typ *checker.StructDef, seen map[checker.Type]struct{}) st
 			key += ","
 		}
 		key += name + ":" + airTypeKeySeen(typ.Fields[name], seen)
-	}
-	key += "}"
-	if len(typ.Methods) == 0 {
-		return key
-	}
-	methodNames := make([]string, 0, len(typ.Methods))
-	for name := range typ.Methods {
-		methodNames = append(methodNames, name)
-	}
-	sort.Strings(methodNames)
-	key += " methods{"
-	for i, name := range methodNames {
-		if i > 0 {
-			key += ","
-		}
-		method := typ.Methods[name]
-		key += name + ":" + airFunctionTypeKeySeen(method.Parameters, method.ReturnType, seen)
 	}
 	key += "}"
 	return key
@@ -4614,6 +4646,7 @@ func (l *lowerer) moduleForInstanceMethod(method *checker.InstanceMethod, fallba
 		return fallback
 	}
 	if ownerModulePath != "" {
+		l.findReachableModule(ownerModulePath)
 		return l.internModule(ownerModulePath)
 	}
 	for modulePath, mod := range l.moduleByName {
@@ -4623,7 +4656,7 @@ func (l *lowerer) moduleForInstanceMethod(method *checker.InstanceMethod, fallba
 		for _, stmt := range mod.Program().Statements {
 			switch def := stmt.Stmt.(type) {
 			case *checker.StructDef:
-				if def.Name == ownerName && def.Methods[method.Method.Name] != nil {
+				if def.Name == ownerName && l.hasStructMethod(def, method.Method.Name) {
 					return l.internModule(modulePath)
 				}
 			case *checker.Enum:

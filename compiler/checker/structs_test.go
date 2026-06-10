@@ -51,7 +51,6 @@ func TestStructs(t *testing.T) {
 								"age":      checker.Int,
 								"employed": checker.Bool,
 							},
-							Methods: map[string]*checker.FunctionDef{},
 						},
 					},
 					{

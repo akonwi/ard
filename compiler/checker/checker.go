@@ -12,8 +12,9 @@ import (
 )
 
 type Program struct {
-	Imports    map[string]Module
-	Statements []Statement
+	Imports       map[string]Module
+	Statements    []Statement
+	StructMethods map[MethodOwner]map[string]*FunctionDef
 }
 
 type Module interface {
@@ -163,26 +164,13 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 				fieldsChanged = true
 			}
 		}
-		methodsChanged := false
-		newMethods := make(map[string]*FunctionDef, len(typ.Methods))
-		for name, method := range typ.Methods {
-			derefMethod, _ := derefTypeSeen(method, seen).(*FunctionDef)
-			if derefMethod == nil {
-				derefMethod = method
-			}
-			newMethods[name] = derefMethod
-			if derefMethod != method {
-				methodsChanged = true
-			}
-		}
-		if !fieldsChanged && !methodsChanged {
+		if !fieldsChanged {
 			return typ
 		}
 		return &StructDef{
 			Name:          typ.Name,
 			ModulePath:    typ.ModulePath,
 			Fields:        newFields,
-			Methods:       newMethods,
 			Self:          typ.Self,
 			Traits:        typ.Traits,
 			GenericParams: append([]string(nil), typ.GenericParams...),
@@ -281,8 +269,9 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 		moduleResolver: moduleResolver,
 		options:        normalizeCheckOptions(moduleResolver, options),
 		program: &Program{
-			Imports:    map[string]Module{},
-			Statements: []Statement{},
+			Imports:       map[string]Module{},
+			Statements:    []Statement{},
+			StructMethods: map[MethodOwner]map[string]*FunctionDef{},
 		},
 		scope: &rootScope,
 	}
@@ -592,12 +581,7 @@ func (c *Checker) specializeAliasedType(originalType Type, typeArgs []parse.Decl
 			resolvedArgType := c.resolveType(typeArg)
 			typeVarMap[genericParams[i]] = &TypeVar{name: genericParams[i], actual: resolvedArgType, bound: true}
 		}
-		structCopy := copyStructWithTypeVarMap(structDef, typeVarMap)
-		structCopy.Methods = make(map[string]*FunctionDef, len(structDef.Methods))
-		for methodName, methodDef := range structDef.Methods {
-			structCopy.Methods[methodName] = copyFunctionWithTypeVarMap(methodDef, typeVarMap)
-		}
-		return structCopy
+		return copyStructWithTypeVarMap(structDef, typeVarMap)
 	}
 
 	// 3. Replace generics
@@ -926,8 +910,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					})
 					fnDef.Receiver = s.Receiver.Name
 					fnDef.Mutates = method.Mutates
-					// add the method to the struct
-					targetType.Methods[method.Name] = fnDef
+					// add the method to the struct method table
+					c.addStructMethod(targetType, fnDef)
 				}
 
 				// Check if all required methods are implemented
@@ -1532,7 +1516,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					if fnDef != nil {
 						fnDef.Receiver = s.Receiver.Name
 						fnDef.Mutates = method.Mutates
-						def.Methods[method.Name] = fnDef
+						c.addStructMethod(def, fnDef)
 					}
 				}
 				return &Statement{Stmt: def}
@@ -2047,7 +2031,6 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		Name:          structDefCopy.Name,
 		ModulePath:    structDefCopy.ModulePath,
 		Fields:        fieldTypes,
-		Methods:       structDefCopy.Methods,
 		Self:          structDefCopy.Self,
 		Traits:        structDefCopy.Traits,
 		GenericParams: structDefCopy.GenericParams,
@@ -2344,20 +2327,68 @@ func (c *Checker) extractGenericBindingsFromSpecializedStruct(originalDef, speci
 			continue
 		}
 
-		// Extract generic names from the original field type
-		genericNames := make(map[string]bool)
-		extractGenericNames(originalFieldType, genericNames)
-
-		// For each generic found, bind it to the corresponding specialized type
-		for genericName := range genericNames {
-			if _, alreadyBound := bindings[genericName]; !alreadyBound {
-				// Bind this generic to the specialized field type
-				bindings[genericName] = specializedFieldType
-			}
-		}
+		bindGenericTypes(originalFieldType, specializedFieldType, bindings)
 	}
 
 	return bindings
+}
+
+func bindGenericTypes(original Type, specialized Type, bindings map[string]Type) {
+	original = deref(original)
+	specialized = deref(specialized)
+	switch orig := original.(type) {
+	case *TypeVar:
+		if orig.name != "" {
+			if _, alreadyBound := bindings[orig.name]; !alreadyBound {
+				bindings[orig.name] = specialized
+			}
+		}
+	case *List:
+		if spec, ok := specialized.(*List); ok {
+			bindGenericTypes(orig.of, spec.of, bindings)
+		}
+	case *Map:
+		if spec, ok := specialized.(*Map); ok {
+			bindGenericTypes(orig.key, spec.key, bindings)
+			bindGenericTypes(orig.value, spec.value, bindings)
+		}
+	case *Maybe:
+		if spec, ok := specialized.(*Maybe); ok {
+			bindGenericTypes(orig.of, spec.of, bindings)
+		}
+	case *Result:
+		if spec, ok := specialized.(*Result); ok {
+			bindGenericTypes(orig.val, spec.val, bindings)
+			bindGenericTypes(orig.err, spec.err, bindings)
+		}
+	case *ExternType:
+		if spec, ok := specialized.(*ExternType); ok {
+			for i := range orig.TypeArgs {
+				if i >= len(spec.TypeArgs) {
+					break
+				}
+				bindGenericTypes(orig.TypeArgs[i], spec.TypeArgs[i], bindings)
+			}
+		}
+	case *StructDef:
+		if spec, ok := specialized.(*StructDef); ok {
+			for name, originalField := range orig.Fields {
+				if specializedField, ok := spec.Fields[name]; ok {
+					bindGenericTypes(originalField, specializedField, bindings)
+				}
+			}
+		}
+	case *FunctionDef:
+		if spec, ok := specialized.(*FunctionDef); ok {
+			for i := range orig.Parameters {
+				if i >= len(spec.Parameters) {
+					break
+				}
+				bindGenericTypes(orig.Parameters[i].Type, spec.Parameters[i].Type, bindings)
+			}
+			bindGenericTypes(orig.ReturnType, spec.ReturnType, bindings)
+		}
+	}
 }
 
 func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
@@ -2665,7 +2696,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if subj.Type() == nil {
 				panic(fmt.Errorf("Cannot access %+v on nil: %s", subj.(*Variable).sym, s.Target))
 			}
-			sig := subj.Type().get(s.Method.Name)
+			var sig Type
+			if structDef, ok := subj.Type().(*StructDef); ok {
+				if method, ok := c.structMethod(structDef, s.Method.Name); ok {
+					sig = method
+				}
+			} else {
+				sig = subj.Type().get(s.Method.Name)
+			}
 			if sig == nil {
 				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Method.Name), s.Method.GetLocation())
 				return nil
@@ -2717,14 +2755,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			// Check if the subject is a struct and if the original struct definition has generics
 			structType, isStruct := subj.Type().(*StructDef)
 			if isStruct {
-				// Look up the original struct definition by name to check if it's generic
-				scopeSymbol, _ := c.scope.get(structType.Name)
-				var originalDef *StructDef
-				if scopeSymbol != nil {
-					if origType, ok := scopeSymbol.Type.(*StructDef); ok {
-						originalDef = origType
-					}
-				}
+				// Look up the original named struct definition by module/name to check if it's generic.
+				originalDef := c.structDefinition(structType)
 
 				// If the original definition has generics, the current structType might be
 				// a specialized version with concrete field types (e.g., item: Int instead of item: $T)
@@ -5663,7 +5695,14 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 			isMaybe = true
 		}
 
-		sig := innerType.get(p.Method.Name)
+		var sig Type
+		if structDef, ok := innerType.(*StructDef); ok {
+			if method, ok := c.structMethod(structDef, p.Method.Name); ok {
+				sig = method
+			}
+		} else {
+			sig = innerType.get(p.Method.Name)
+		}
 		if sig == nil {
 			c.addError(fmt.Sprintf("Undefined: %s.%s", innerType, p.Method.Name), p.Method.GetLocation())
 			return nil
