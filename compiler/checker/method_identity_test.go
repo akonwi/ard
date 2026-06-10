@@ -1,6 +1,8 @@
 package checker
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/akonwi/ard/parse"
@@ -67,6 +69,91 @@ func TestStructSideTableMethodUsesGenericBindingsFromNestedFields(t *testing.T) 
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestStructMethodLookupUsesOwnerModuleBeyondDirectImports(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "db.ard"), []byte(`
+		use ard/sql
+
+		fn init() sql::Database {
+			sql::open("postgres://example").expect("connect")
+		}
+	`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := parse.Parse([]byte(`
+		use test_project/db
+
+		let conn = db::init()
+		let query = conn.query("SELECT 1")
+	`), filepath.Join(tempDir, "main.ard"))
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	resolver, err := NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := New(filepath.Join(tempDir, "main.ard"), result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestTransitiveGenericStructMethodUsesOwnerDefinition(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "box.ard"), []byte(`
+		struct Box {
+			item: $T
+		}
+
+		impl Box {
+			fn put(value: $T) Bool {
+				true
+			}
+		}
+	`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "aliases.ard"), []byte(`
+		use test_project/box
+
+		type IntBox = box::Box<Int>
+	`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := parse.Parse([]byte(`
+		use test_project/aliases
+
+		fn save(box: aliases::IntBox) Bool {
+			box.put("oops")
+		}
+	`), filepath.Join(tempDir, "main.ard"))
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	resolver, err := NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := New(filepath.Join(tempDir, "main.ard"), result.Program, resolver)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected generic method argument error")
+	}
+	if got := c.Diagnostics()[0].Message; got != "type mismatch: expected Int, got Str" {
+		t.Fatalf("first diagnostic = %q, want generic method argument mismatch", got)
 	}
 }
 

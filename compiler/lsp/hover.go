@@ -370,10 +370,7 @@ func importedStructMethodsForDisplay(ownerType string, def *checker.StructDef, p
 	if owner.TypeName == "" {
 		owner.TypeName = memberName
 	}
-	if methods := mod.Program().StructMethodsFor(owner); methods != nil {
-		return methods
-	}
-	return nil
+	return checker.StructMethodsInModules(map[string]checker.Module{mod.Path(): mod}, owner)
 }
 
 func importedTypeDisplayParts(typeName string) (alias string, memberName string, ok bool) {

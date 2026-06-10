@@ -109,13 +109,41 @@ func (l *lowerer) structMethods(def *checker.StructDef) map[string]*checker.Func
 	if def == nil {
 		return nil
 	}
-	owner := checker.StructMethodOwner(def)
+	return checker.StructMethodsInModules(l.moduleByName, checker.StructMethodOwner(def))
+}
+
+func (l *lowerer) findReachableModule(path string) checker.Module {
+	if mod, ok := l.moduleByName[path]; ok {
+		return mod
+	}
 	for _, mod := range l.moduleByName {
-		if mod == nil || mod.Program() == nil {
-			continue
+		if found := findReachableModuleSeen(mod, path, map[string]bool{}); found != nil {
+			l.moduleByName[path] = found
+			return found
 		}
-		if methods := mod.Program().StructMethodsFor(owner); methods != nil {
-			return methods
+	}
+	return nil
+}
+
+func findReachableModuleSeen(mod checker.Module, path string, seen map[string]bool) checker.Module {
+	if mod == nil {
+		return nil
+	}
+	modPath := mod.Path()
+	if modPath == path {
+		return mod
+	}
+	if seen[modPath] {
+		return nil
+	}
+	seen[modPath] = true
+	program := mod.Program()
+	if program == nil {
+		return nil
+	}
+	for _, imported := range program.Imports {
+		if found := findReachableModuleSeen(imported, path, seen); found != nil {
+			return found
 		}
 	}
 	return nil
@@ -4618,6 +4646,7 @@ func (l *lowerer) moduleForInstanceMethod(method *checker.InstanceMethod, fallba
 		return fallback
 	}
 	if ownerModulePath != "" {
+		l.findReachableModule(ownerModulePath)
 		return l.internModule(ownerModulePath)
 	}
 	for modulePath, mod := range l.moduleByName {
