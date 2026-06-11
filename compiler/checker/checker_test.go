@@ -2467,6 +2467,16 @@ func TestGenerics(t *testing.T) {
 			},
 		},
 		{
+			name: "Explicit type arguments reject mismatched arguments",
+			input: `
+			  fn identity(of: $T) $T { of }
+				identity<Str>(1)
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "type mismatch: expected Str, got Int"},
+			},
+		},
+		{
 			name: "Providing type arguments to methods",
 			input: `
 				use ard/json

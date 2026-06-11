@@ -285,3 +285,205 @@ func TestClosureCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 		t.Fatalf("first diagnostic = %q, want unbound generic type arg", got)
 	}
 }
+
+func TestGenericStructReceiverBindingInExplicitCallbackParameter(t *testing.T) {
+	result := parse.Parse([]byte(`
+		struct State {
+			_type: fn($T) Void
+		}
+
+		struct Widget {}
+		struct Ctx {}
+
+		impl State {
+			fn value() $T {
+				panic("x")
+			}
+		}
+
+		fn make<$T>(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
+			Widget{}
+		}
+
+		struct Model { n: Int }
+
+		fn main() {
+			let _ = make<Model>(
+				init: fn(_ctx: Ctx, _state: State<Model>) Model { Model{n: 0} },
+				build: fn(_ctx: Ctx, state: State<Model>) Widget {
+					let m: Model = state.value()
+					Widget{}
+				},
+			)
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestGenericStructReceiverBindingInInferredCallbackParameter(t *testing.T) {
+	result := parse.Parse([]byte(`
+		struct State {
+			_type: fn($T) Void
+		}
+
+		struct Widget {}
+		struct Ctx {}
+
+		impl State {
+			fn value() $T {
+				panic("x")
+			}
+		}
+
+		fn make<$T>(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
+			Widget{}
+		}
+
+		struct Model { n: Int }
+
+		fn main() {
+			let _ = make<Model>(
+				init: fn(_ctx, _state) { Model{n: 0} },
+				build: fn(_ctx, state) {
+					let m: Model = state.value()
+					Widget{}
+				},
+			)
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestGenericStructReceiverBindingInCallbackParameterStillRejectsMismatch(t *testing.T) {
+	result := parse.Parse([]byte(`
+		struct State {
+			_type: fn($T) Void
+		}
+
+		struct Widget {}
+		struct Ctx {}
+
+		impl State {
+			fn value() $T {
+				panic("x")
+			}
+		}
+
+		fn make<$T>(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
+			Widget{}
+		}
+
+		struct Model { n: Int }
+		struct Other { s: Str }
+
+		fn main() {
+			let _ = make<Model>(
+				init: fn(_ctx: Ctx, _state: State<Model>) Model { Model{n: 0} },
+				build: fn(_ctx: Ctx, state: State<Other>) Widget {
+					Widget{}
+				},
+			)
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected callback state type mismatch")
+	}
+	if got := c.Diagnostics()[0].Message; got != "type mismatch: expected Model, got Other" {
+		t.Fatalf("first diagnostic = %q, want callback state type mismatch", got)
+	}
+}
+
+func TestExplicitGenericStructCanUseTypeParamOnlyInMethods(t *testing.T) {
+	result := parse.Parse([]byte(`
+		struct State<$T> {
+			handle: Int
+		}
+
+		struct Widget {}
+		struct Ctx {}
+
+		impl State {
+			fn value() $T {
+				panic("x")
+			}
+
+			fn set(mutate: fn(mut $T)) {
+			}
+		}
+
+		fn make<$T>(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
+			Widget{}
+		}
+
+		struct Model { n: Int }
+
+		fn main() {
+			let _ = make<Model>(
+				init: fn(_ctx: Ctx, _state: State<Model>) Model { Model{n: 0} },
+				build: fn(_ctx: Ctx, state: State<Model>) Widget {
+					let model = state.value()
+					state.set(fn(mut next: Model) {
+						next.n = model.n + 1
+					})
+					Widget{}
+				},
+			)
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestExplicitGenericStructTypeArgumentsRemainDistinctWithoutGenericFields(t *testing.T) {
+	result := parse.Parse([]byte(`
+		struct State<$T> {
+			handle: Int
+		}
+
+		struct Model { n: Int }
+		struct Other { s: Str }
+
+		fn consume(state: State<Model>) {}
+
+		fn main() {
+			let other: State<Other> = State{handle: 1}
+			consume(other)
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected distinct explicit struct type arguments to mismatch")
+	}
+	if got := c.Diagnostics()[0].Message; got != "Type mismatch: Expected State<Model>, got State<Other>" {
+		t.Fatalf("first diagnostic = %q, want State<Model>/State<Other> mismatch", got)
+	}
+}

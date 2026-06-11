@@ -412,10 +412,11 @@ func (a AnonymousFunction) String() string {
 
 type StructDefinition struct {
 	Location
-	Name     Identifier
-	Fields   []StructField
-	Private  bool
-	Comments []Comment // Comments found within the struct definition
+	Name       Identifier
+	TypeParams []string
+	Fields     []StructField
+	Private    bool
+	Comments   []Comment // Comments found within the struct definition
 }
 
 type StructField struct {

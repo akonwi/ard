@@ -388,7 +388,7 @@ func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
 	if node.Private {
 		prefix = "private "
 	}
-	header := prefix + "struct " + node.Name.Name
+	header := prefix + "struct " + node.Name.Name + p.renderTypeParams(node.TypeParams)
 	if len(node.Fields) == 0 && len(node.Comments) == 0 {
 		return dText(header + " {}")
 	}

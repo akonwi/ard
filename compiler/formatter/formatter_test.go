@@ -105,6 +105,11 @@ func TestFormat(t *testing.T) {
 			output: "extern type Promise<$T>\n",
 		},
 		{
+			name:   "formats generic struct declaration",
+			input:  "struct State<$T>{handle:Int}\n",
+			output: "struct State<$T> {\n  handle: Int,\n}\n",
+		},
+		{
 			name:   "formats private extern type declaration",
 			input:  "private extern type ConnectionPtr\n",
 			output: "private extern type ConnectionPtr\n",

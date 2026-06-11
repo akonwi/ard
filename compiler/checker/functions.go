@@ -177,6 +177,7 @@ func (c *Checker) validateAsyncEval(fnNode parse.Expression) *FiberEval {
 					ModulePath:    fiberStructDef.ModulePath,
 					Fields:        make(map[string]Type),
 					GenericParams: append([]string(nil), fiberStructDef.GenericParams...),
+					TypeArgs:      []Type{returnType},
 					Private:       fiberStructDef.Private,
 				}
 

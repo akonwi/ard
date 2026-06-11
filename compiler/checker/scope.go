@@ -1,8 +1,9 @@
 package checker
 
-import "slices"
-
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 type SymbolTable struct {
 	parent  *SymbolTable
@@ -253,6 +254,11 @@ func hasGenericsInTypeSeen(t Type, seen map[Type]struct{}) bool {
 	case *Union:
 		return slices.ContainsFunc(t.Types, func(member Type) bool { return hasGenericsInTypeSeen(member, seen) })
 	case *StructDef:
+		for _, typeArg := range t.TypeArgs {
+			if hasGenericsInTypeSeen(typeArg, seen) {
+				return true
+			}
+		}
 		for _, fieldType := range t.Fields {
 			if hasGenericsInTypeSeen(fieldType, seen) {
 				return true
@@ -361,13 +367,19 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 		if !anyChanged {
 			return t
 		}
+		newTypeArgs := make([]Type, len(t.TypeArgs))
+		for i, typeArg := range t.TypeArgs {
+			newTypeArgs[i] = replaceGeneric(typeArg, genericName, concreteType)
+		}
 		return &StructDef{
-			Name:       t.Name,
-			ModulePath: t.ModulePath,
-			Fields:     newFields,
-			Self:       t.Self,
-			Traits:     t.Traits,
-			Private:    t.Private,
+			Name:          t.Name,
+			ModulePath:    t.ModulePath,
+			Fields:        newFields,
+			Self:          t.Self,
+			Traits:        t.Traits,
+			GenericParams: append([]string(nil), t.GenericParams...),
+			TypeArgs:      newTypeArgs,
+			Private:       t.Private,
 		}
 	case *ExternType:
 		if len(t.TypeArgs) == 0 {
@@ -406,6 +418,11 @@ func hasGeneric(t Type, genericName string) bool {
 	case *MutableRef:
 		return hasGeneric(t.of, genericName)
 	case *StructDef:
+		for _, typeArg := range t.TypeArgs {
+			if hasGeneric(typeArg, genericName) {
+				return true
+			}
+		}
 		for _, fieldType := range t.Fields {
 			if hasGeneric(fieldType, genericName) {
 				return true
@@ -461,25 +478,39 @@ func copyStructWithTypeVarMapSeen(structDef *StructDef, typeVarMap map[string]*T
 	}
 	newFields := make(map[string]Type)
 	structCopy := &StructDef{
-		Name:       structDef.Name,
-		ModulePath: structDef.ModulePath,
-		Fields:     newFields,
-		Self:       structDef.Self,
-		Traits:     structDef.Traits,
-		Private:    structDef.Private,
+		Name:          structDef.Name,
+		ModulePath:    structDef.ModulePath,
+		Fields:        newFields,
+		Self:          structDef.Self,
+		Traits:        structDef.Traits,
+		GenericParams: append([]string(nil), structDef.GenericParams...),
+		Private:       structDef.Private,
 	}
 	seen[structDef] = structCopy
 	for name, fieldType := range structDef.Fields {
 		newFields[name] = copyTypeWithTypeVarMapSeen(fieldType, typeVarMap, seen)
 	}
-	genericParams := []string{}
-	seenGenerics := map[string]bool{}
-	seenTypes := map[Type]bool{}
-	for _, fieldType := range newFields {
-		collectUnboundGenericsFromType(fieldType, &genericParams, seenGenerics, seenTypes)
-	}
-	structCopy.GenericParams = genericParams
+	structCopy.TypeArgs = copyStructTypeArgsWithTypeVarMap(structDef, typeVarMap, seen)
 	return structCopy
+}
+
+func copyStructTypeArgsWithTypeVarMap(structDef *StructDef, typeVarMap map[string]*TypeVar, seenStructs map[*StructDef]*StructDef) []Type {
+	if len(structDef.GenericParams) == 0 {
+		return nil
+	}
+	out := make([]Type, len(structDef.GenericParams))
+	for i, param := range structDef.GenericParams {
+		if i < len(structDef.TypeArgs) {
+			out[i] = copyTypeWithTypeVarMapSeen(structDef.TypeArgs[i], typeVarMap, seenStructs)
+			continue
+		}
+		if typeVar, ok := typeVarMap[param]; ok {
+			out[i] = derefType(typeVar)
+		} else {
+			out[i] = &TypeVar{name: param}
+		}
+	}
+	return out
 }
 
 func collectUnboundGenericsFromType(t Type, params *[]string, seenGenerics map[string]bool, seenTypes map[Type]bool) {

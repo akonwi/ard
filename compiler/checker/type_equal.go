@@ -200,8 +200,13 @@ func equalExternalFunctionDefSeen(left ExternalFunctionDef, right Type, seen map
 
 func equalStructDefSeen(left StructDef, right Type, seen map[typeEqualKey]struct{}) bool {
 	r, ok := right.(*StructDef)
-	if !ok || left.Name != r.Name || namedTypeOwnersDiffer(left.ModulePath, r.ModulePath) || len(left.Fields) != len(r.Fields) {
+	if !ok || left.Name != r.Name || namedTypeOwnersDiffer(left.ModulePath, r.ModulePath) || len(left.Fields) != len(r.Fields) || len(left.TypeArgs) != len(r.TypeArgs) {
 		return false
+	}
+	for i := range left.TypeArgs {
+		if !equalTypesSeen(left.TypeArgs[i], r.TypeArgs[i], seen) {
+			return false
+		}
 	}
 	for name, fieldType := range left.Fields {
 		otherFieldType, ok := r.Fields[name]
