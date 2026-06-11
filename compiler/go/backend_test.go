@@ -2057,6 +2057,83 @@ func TestGenerateSourcesSupportsCapturedClosureSort(t *testing.T) {
 	if !strings.Contains(source, "bias") {
 		t.Fatalf("generated source missing closure capture usage:\n%s", source)
 	}
+	if strings.Contains(source, "anon_func") {
+		t.Fatalf("generated source should inline local closure body instead of emitting an anon helper:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesInlinesNestedImmediateClosures(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn main() Int {
+			let bias = 2
+			let result = maybe::some(40).map(fn(value) {
+				maybe::some(value).map(fn(inner) { inner + bias }).or(0)
+			})
+			result.or(0)
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if strings.Contains(source, "anon_func") {
+		t.Fatalf("generated source should inline nested immediate closures instead of emitting anon helpers:\n%s", source)
+	}
+	if count := strings.Count(source, "func(value int) int") + strings.Count(source, "func(inner int) int"); count < 2 {
+		t.Fatalf("generated source missing nested function literals:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesKeepsHelperForMutableCaptureClosure(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn main() Int {
+			mut total = 0
+			let result = maybe::some(1).map(fn(value) {
+				total = total + value
+				total
+			})
+			result.or(0)
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "anon_func") {
+		t.Fatalf("generated source should keep helper for mutable capture closure:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesKeepsHelperForRetainedClosure(t *testing.T) {
+	program := lowerSource(t, `
+		fn make_adder(offset: Int) fn(Int) Int {
+			fn(value: Int) Int {
+				value + offset
+			}
+		}
+
+		fn main() Int {
+			let add = make_adder(2)
+			add(3)
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !strings.Contains(source, "anon_func") {
+		t.Fatalf("generated source should keep helper for retained closure:\n%s", source)
+	}
 }
 
 func TestGenerateSourcesPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {

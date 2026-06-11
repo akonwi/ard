@@ -35,6 +35,7 @@ type lowerer struct {
 	jsonEncodeTypes map[air.TypeID]bool
 	ffiImports      map[string]string
 	projectInfo     *checker.ProjectInfo
+	inlineClosures  map[air.FunctionID]bool
 	suppressMain    bool
 	includeTests    bool
 }
@@ -47,6 +48,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 		return nil, err
 	}
 	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, jsonEncodeTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
+	l.inlineClosures = l.collectInlineClosureFunctions()
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
 	modules := make([]air.Module, 0, len(program.Modules))
@@ -222,6 +224,9 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 	sort.Slice(functionIDs, func(i, j int) bool { return functionIDs[i] < functionIDs[j] })
 	for _, functionID := range functionIDs {
 		fn := l.program.Functions[functionID]
+		if l.inlineClosures[functionID] {
+			continue
+		}
 		if fn.IsTest && !l.includeTests {
 			continue
 		}
@@ -4109,6 +4114,9 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 		return loweredExpr{}, fmt.Errorf("invalid closure function %d", expr.Function)
 	}
 	closureFn := l.program.Functions[expr.Function]
+	if l.inlineClosures[expr.Function] {
+		return l.lowerInlineClosure(fn, expr, closureFn)
+	}
 	closureType, err := l.goType(expr.Type)
 	if err != nil {
 		return loweredExpr{}, err
@@ -4169,6 +4177,77 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	}
 	funcLit := &ast.FuncLit{Type: funcType, Body: &ast.BlockStmt{List: bodyStmts}}
 	return loweredExpr{stmts: stmts, expr: funcLit}, nil
+}
+
+func (l *lowerer) lowerInlineClosure(parent air.Function, expr air.Expr, closureFn air.Function) (loweredExpr, error) {
+	closureType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	funcType, _ := closureType.(*ast.FuncType)
+	params := []*ast.Field{}
+	for i, param := range closureFn.Signature.Params {
+		paramType, err := l.goParamType(param)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		name := sanitizeName(param.Name)
+		if name == "" {
+			name = fmt.Sprintf("arg_%d", i)
+		}
+		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: paramType})
+	}
+	if funcType == nil {
+		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}}
+	} else {
+		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}, Results: funcType.Results}
+	}
+	returnTypeID := closureFn.Signature.Return
+	if (funcType.Results == nil || len(funcType.Results.List) == 0) && closureFn.Body.Result != nil && !l.isVoidType(closureFn.Body.Result.Type) {
+		returnType, err := l.goType(closureFn.Body.Result.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		funcType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
+		returnTypeID = closureFn.Body.Result.Type
+	}
+
+	inlineFn := closureFn
+	inlineFn.Captures = append([]air.Capture(nil), closureFn.Captures...)
+	inlineFn.Locals = append([]air.Local(nil), closureFn.Locals...)
+	for i := range inlineFn.Captures {
+		if i >= len(expr.CaptureLocals) {
+			break
+		}
+		capture := &inlineFn.Captures[i]
+		if int(capture.Local) < 0 || int(capture.Local) >= len(inlineFn.Locals) {
+			continue
+		}
+		outerName := localName(parent, expr.CaptureLocals[i])
+		capture.Name = outerName
+		inlineFn.Locals[capture.Local].Name = outerName
+		// Inline closures directly close over the outer Go local. Do not treat
+		// captures as pointer parameters; mutable argument lowering can still take
+		// the address of the outer local when a callee requires it.
+		inlineFn.Locals[capture.Local].Mutable = false
+	}
+
+	savedDeclared := l.declaredLocals
+	l.declaredLocals = map[air.LocalID]bool{}
+	defer func() { l.declaredLocals = savedDeclared }()
+	for _, capture := range inlineFn.Captures {
+		l.declaredLocals[capture.Local] = true
+	}
+	for _, local := range inlineFn.Locals {
+		if int(local.ID) < len(inlineFn.Signature.Params) {
+			l.declaredLocals[local.ID] = true
+		}
+	}
+	body, err := l.lowerBlock(inlineFn, inlineFn.Body, returnTypeID)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	return loweredExpr{expr: &ast.FuncLit{Type: funcType, Body: body}}, nil
 }
 
 func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -5449,6 +5528,251 @@ func (l *lowerer) maybeIsNoneExpr(expr ast.Expr) ast.Expr {
 
 func (l *lowerer) maybeValueExpr(expr ast.Expr) ast.Expr {
 	return &ast.CallExpr{Fun: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Value")}}
+}
+
+type closureUseInfo struct {
+	total    int
+	local    int
+	retained bool
+}
+
+func (l *lowerer) collectInlineClosureFunctions() map[air.FunctionID]bool {
+	uses := map[air.FunctionID]*closureUseInfo{}
+	directRefs := map[air.FunctionID]bool{}
+	for _, fn := range l.program.Functions {
+		l.collectClosureUsesInBlock(fn.Body, closureUseValue, uses, directRefs)
+	}
+	inline := map[air.FunctionID]bool{}
+	for _, fn := range l.program.Functions {
+		use := uses[fn.ID]
+		if use == nil || use.total != 1 || use.local != 1 || use.retained || directRefs[fn.ID] {
+			continue
+		}
+		if !l.canInlineClosureFunction(fn) {
+			continue
+		}
+		inline[fn.ID] = true
+	}
+	return inline
+}
+
+func (l *lowerer) canInlineClosureFunction(fn air.Function) bool {
+	if !strings.HasPrefix(fn.Name, "anon_func_") {
+		return false
+	}
+	for _, capture := range fn.Captures {
+		if int(capture.Local) >= 0 && int(capture.Local) < len(fn.Locals) && fn.Locals[capture.Local].Mutable {
+			return false
+		}
+	}
+	return !functionDirectlyReferences(fn.Body, fn.ID)
+}
+
+type closureUseContext uint8
+
+const (
+	closureUseValue closureUseContext = iota
+	closureUseLocal
+)
+
+func (l *lowerer) collectClosureUsesInBlock(block air.Block, context closureUseContext, uses map[air.FunctionID]*closureUseInfo, directRefs map[air.FunctionID]bool) {
+	for _, stmt := range block.Stmts {
+		if stmt.Value != nil {
+			l.collectClosureUsesInExpr(*stmt.Value, closureUseValue, uses, directRefs)
+		}
+		if stmt.Expr != nil {
+			l.collectClosureUsesInExpr(*stmt.Expr, closureUseValue, uses, directRefs)
+		}
+		if stmt.Target != nil {
+			l.collectClosureUsesInExpr(*stmt.Target, closureUseValue, uses, directRefs)
+		}
+		if stmt.Condition != nil {
+			l.collectClosureUsesInExpr(*stmt.Condition, closureUseValue, uses, directRefs)
+		}
+		l.collectClosureUsesInBlock(stmt.Body, closureUseValue, uses, directRefs)
+	}
+	if block.Result != nil {
+		l.collectClosureUsesInExpr(*block.Result, context, uses, directRefs)
+	}
+}
+
+func (l *lowerer) collectClosureUsesInExpr(expr air.Expr, context closureUseContext, uses map[air.FunctionID]*closureUseInfo, directRefs map[air.FunctionID]bool) {
+	switch expr.Kind {
+	case air.ExprMakeClosure:
+		use := uses[expr.Function]
+		if use == nil {
+			use = &closureUseInfo{}
+			uses[expr.Function] = use
+		}
+		use.total++
+		if context == closureUseLocal {
+			use.local++
+		} else {
+			use.retained = true
+		}
+	case air.ExprCall, air.ExprFunctionRef:
+		directRefs[expr.Function] = true
+	case air.ExprSpawnFiber:
+		if expr.Target == nil {
+			directRefs[expr.Function] = true
+		}
+	}
+
+	argContext := closureUseValue
+	if closureArgConsumedImmediately(expr.Kind) {
+		argContext = closureUseLocal
+	}
+	for i := range expr.Args {
+		l.collectClosureUsesInExpr(expr.Args[i], argContext, uses, directRefs)
+	}
+	for i := range expr.Entries {
+		l.collectClosureUsesInExpr(expr.Entries[i].Key, closureUseValue, uses, directRefs)
+		l.collectClosureUsesInExpr(expr.Entries[i].Value, closureUseValue, uses, directRefs)
+	}
+	for i := range expr.Fields {
+		l.collectClosureUsesInExpr(expr.Fields[i].Value, closureUseValue, uses, directRefs)
+	}
+	if expr.Target != nil {
+		targetContext := closureUseValue
+		if expr.Kind == air.ExprCallClosure {
+			targetContext = closureUseLocal
+		}
+		l.collectClosureUsesInExpr(*expr.Target, targetContext, uses, directRefs)
+	}
+	if expr.Left != nil {
+		l.collectClosureUsesInExpr(*expr.Left, closureUseValue, uses, directRefs)
+	}
+	if expr.Right != nil {
+		l.collectClosureUsesInExpr(*expr.Right, closureUseValue, uses, directRefs)
+	}
+	if expr.Condition != nil {
+		l.collectClosureUsesInExpr(*expr.Condition, closureUseValue, uses, directRefs)
+	}
+	l.collectClosureUsesInBlock(expr.Body, closureUseValue, uses, directRefs)
+	l.collectClosureUsesInBlock(expr.Then, closureUseValue, uses, directRefs)
+	l.collectClosureUsesInBlock(expr.Else, closureUseValue, uses, directRefs)
+	l.collectClosureUsesInBlock(expr.CatchAll, closureUseValue, uses, directRefs)
+	l.collectClosureUsesInBlock(expr.Some, closureUseValue, uses, directRefs)
+	l.collectClosureUsesInBlock(expr.None, closureUseValue, uses, directRefs)
+	l.collectClosureUsesInBlock(expr.Ok, closureUseValue, uses, directRefs)
+	l.collectClosureUsesInBlock(expr.Err, closureUseValue, uses, directRefs)
+	l.collectClosureUsesInBlock(expr.Catch, closureUseValue, uses, directRefs)
+	for i := range expr.EnumCases {
+		l.collectClosureUsesInBlock(expr.EnumCases[i].Body, closureUseValue, uses, directRefs)
+	}
+	for i := range expr.IntCases {
+		l.collectClosureUsesInBlock(expr.IntCases[i].Body, closureUseValue, uses, directRefs)
+	}
+	for i := range expr.StrCases {
+		l.collectClosureUsesInBlock(expr.StrCases[i].Body, closureUseValue, uses, directRefs)
+	}
+	for i := range expr.RangeCases {
+		l.collectClosureUsesInBlock(expr.RangeCases[i].Body, closureUseValue, uses, directRefs)
+	}
+	for i := range expr.UnionCases {
+		l.collectClosureUsesInBlock(expr.UnionCases[i].Body, closureUseValue, uses, directRefs)
+	}
+}
+
+func closureArgConsumedImmediately(kind air.ExprKind) bool {
+	switch kind {
+	case air.ExprListSort,
+		air.ExprMaybeMap,
+		air.ExprMaybeAndThen,
+		air.ExprResultMap,
+		air.ExprResultMapErr,
+		air.ExprResultAndThen:
+		return true
+	default:
+		return false
+	}
+}
+
+func functionDirectlyReferences(block air.Block, function air.FunctionID) bool {
+	found := false
+	walkBlockExprs(block, func(expr air.Expr) {
+		if found {
+			return
+		}
+		switch expr.Kind {
+		case air.ExprCall, air.ExprFunctionRef:
+			found = expr.Function == function
+		case air.ExprSpawnFiber:
+			found = expr.Target == nil && expr.Function == function
+		}
+	})
+	return found
+}
+
+func walkBlockExprs(block air.Block, visit func(air.Expr)) {
+	for _, stmt := range block.Stmts {
+		if stmt.Value != nil {
+			walkExpr(*stmt.Value, visit)
+		}
+		if stmt.Expr != nil {
+			walkExpr(*stmt.Expr, visit)
+		}
+		if stmt.Target != nil {
+			walkExpr(*stmt.Target, visit)
+		}
+		if stmt.Condition != nil {
+			walkExpr(*stmt.Condition, visit)
+		}
+		walkBlockExprs(stmt.Body, visit)
+	}
+	if block.Result != nil {
+		walkExpr(*block.Result, visit)
+	}
+}
+
+func walkExpr(expr air.Expr, visit func(air.Expr)) {
+	visit(expr)
+	for i := range expr.Args {
+		walkExpr(expr.Args[i], visit)
+	}
+	for i := range expr.Entries {
+		walkExpr(expr.Entries[i].Key, visit)
+		walkExpr(expr.Entries[i].Value, visit)
+	}
+	for i := range expr.Fields {
+		walkExpr(expr.Fields[i].Value, visit)
+	}
+	if expr.Target != nil {
+		walkExpr(*expr.Target, visit)
+	}
+	if expr.Left != nil {
+		walkExpr(*expr.Left, visit)
+	}
+	if expr.Right != nil {
+		walkExpr(*expr.Right, visit)
+	}
+	if expr.Condition != nil {
+		walkExpr(*expr.Condition, visit)
+	}
+	walkBlockExprs(expr.Body, visit)
+	walkBlockExprs(expr.Then, visit)
+	walkBlockExprs(expr.Else, visit)
+	walkBlockExprs(expr.CatchAll, visit)
+	walkBlockExprs(expr.Some, visit)
+	walkBlockExprs(expr.None, visit)
+	walkBlockExprs(expr.Ok, visit)
+	walkBlockExprs(expr.Err, visit)
+	walkBlockExprs(expr.Catch, visit)
+	for i := range expr.EnumCases {
+		walkBlockExprs(expr.EnumCases[i].Body, visit)
+	}
+	for i := range expr.IntCases {
+		walkBlockExprs(expr.IntCases[i].Body, visit)
+	}
+	for i := range expr.StrCases {
+		walkBlockExprs(expr.StrCases[i].Body, visit)
+	}
+	for i := range expr.RangeCases {
+		walkBlockExprs(expr.RangeCases[i].Body, visit)
+	}
+	for i := range expr.UnionCases {
+		walkBlockExprs(expr.UnionCases[i].Body, visit)
+	}
 }
 
 func validFunctionID(program *air.Program, id air.FunctionID) bool {
