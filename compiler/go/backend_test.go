@@ -274,6 +274,101 @@ func TestGenerateSourcesOmitsTestsUnlessIncluded(t *testing.T) {
 	}
 }
 
+func TestGenerateSourcesDiscardsFinalExprInVoidFunction(t *testing.T) {
+	program := lowerSource(t, `
+		fn main() {
+			"Hello"
+		}
+	`)
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !regexp.MustCompile(`func test_ard__main\(\) \{`).MatchString(source) {
+		t.Fatalf("generated source gives void main a return type:\n%s", source)
+	}
+	if !strings.Contains(source, `_ = "Hello"`) {
+		t.Fatalf("generated source does not discard final expression:\n%s", source)
+	}
+	if strings.Contains(source, `return "Hello"`) {
+		t.Fatalf("generated source returns final expression from void function:\n%s", source)
+	}
+	if strings.Contains(source, "struct{}") || strings.Contains(source, "struct {}") {
+		t.Fatalf("generated source still uses anonymous empty struct for Void:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesUsesRuntimeVoidForVoidResultValues(t *testing.T) {
+	program := lowerSource(t, `
+		fn ok() Void!Str {
+			Result::ok(())
+		}
+
+		fn main() Void {
+			ok()
+		}
+	`)
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if !regexp.MustCompile(`func test_ard__ok\(\) ardruntime\.Result\[ardruntime\.Void, string\]`).MatchString(source) {
+		t.Fatalf("generated source missing void result container return type using ardruntime.Void:\n%s", source)
+	}
+	if !strings.Contains(source, "Value: ardruntime.Void{}") {
+		t.Fatalf("generated source missing ardruntime.Void value:\n%s", source)
+	}
+	if strings.Contains(source, "struct{}") || strings.Contains(source, "struct {}") {
+		t.Fatalf("generated source still uses anonymous empty struct for Void:\n%s", source)
+	}
+}
+
+func TestGenerateSourcesMaterializesVoidGlobalInitializers(t *testing.T) {
+	program := lowerSource(t, `
+		fn touch() Void { () }
+		let saved = touch()
+		fn main() Void { saved }
+	`)
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	source := string(sources["test.go"])
+	if strings.Contains(source, "= test_ard__touch()") {
+		t.Fatalf("generated source uses no-value Void call as global initializer:\n%s", source)
+	}
+	if !strings.Contains(source, "test_ard__touch()") || !strings.Contains(source, "return ardruntime.Void{}") {
+		t.Fatalf("generated source does not materialize Void global initializer:\n%s", source)
+	}
+}
+
+func TestRenderTestRunnerUsesRuntimeVoidForVoidResult(t *testing.T) {
+	result := parse.Parse([]byte(`
+		test fn check() Void!Str { Result::ok(()) }
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := air.LowerWithTests(c.Module())
+	if err != nil {
+		t.Fatalf("lower with tests: %v", err)
+	}
+	runner := renderTestRunner(program, []TestCase{{Name: "check", DisplayName: "check", Function: program.Tests[0].Function}}, false)
+	if !strings.Contains(runner, "func() runtime.Result[runtime.Void, string]") {
+		t.Fatalf("test runner missing void result container using runtime.Void:\n%s", runner)
+	}
+	if strings.Contains(runner, "struct{}") || strings.Contains(runner, "struct {}") {
+		t.Fatalf("test runner still uses anonymous empty struct for Void:\n%s", runner)
+	}
+}
+
 func TestRunProgramExecutesSimpleMain(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Void {
@@ -937,7 +1032,7 @@ func TestGenerateSourcesPropagatesTryResultAcrossDifferentResultValueTypes(t *te
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !strings.Contains(source, "return runtime.Result[int, string]{Err: _tmp_") {
+	if !strings.Contains(source, "return ardruntime.Result[int, string]{Err: _tmp_") {
 		t.Fatalf("generated source missing result error propagation conversion:\n%s", source)
 	}
 }
@@ -1728,7 +1823,7 @@ func TestGenerateSourcesUsesRuntimeMaybeForRecursiveNullableFields(t *testing.T)
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if !strings.Contains(source, "parent runtime.Maybe[test_ard__Node]") {
+	if !strings.Contains(source, "parent ardruntime.Maybe[test_ard__Node]") {
 		t.Fatalf("generated source missing runtime Maybe recursive nullable field:\n%s", source)
 	}
 	if strings.Contains(source, "parent *test_ard__Node") {
@@ -1754,7 +1849,7 @@ func TestGenerateSourcesUsesExpectedLocalTypeForMaybeNone(t *testing.T) {
 	if !strings.Contains(source, "runtime.None[int]()") {
 		t.Fatalf("generated source missing typed maybe none:\n%s", source)
 	}
-	if strings.Contains(source, "runtime.Maybe[struct {") {
+	if strings.Contains(source, "ardruntime.Maybe[struct {") {
 		t.Fatalf("generated source used untyped maybe none:\n%s", source)
 	}
 }
@@ -1779,7 +1874,7 @@ func TestGenerateSourcesUsesExpectedDefaultTypeForResultOr(t *testing.T) {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
 	source := string(sources["test.go"])
-	if strings.Contains(source, "runtime.Maybe[struct {") {
+	if strings.Contains(source, "ardruntime.Maybe[struct {") {
 		t.Fatalf("generated source used untyped maybe default:\n%s", source)
 	}
 }
@@ -1858,7 +1953,7 @@ func TestGenerateSourcesSupportsResultExpectAndStringPredicates(t *testing.T) {
 	for _, source := range sources {
 		combined += string(source)
 	}
-	if !strings.Contains(combined, "runtime.Result[string, string]") {
+	if !strings.Contains(combined, "ardruntime.Result[string, string]") {
 		t.Fatalf("generated source missing runtime.Result usage:\n%s", combined)
 	}
 	if !strings.Contains(combined, "stdlibffi.ReadLine()") {

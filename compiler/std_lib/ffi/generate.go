@@ -361,7 +361,7 @@ func returnGoTypes(typ parse.DeclaredType, aliases map[string]string, definedTyp
 				if err != nil {
 					return nil, err
 				}
-				return []string{fmt.Sprintf("Result[struct{}, %s]", errType)}, nil
+				return []string{fmt.Sprintf("Result[Void, %s]", errType)}, nil
 			}
 			return []string{"error"}, nil
 		}
@@ -378,12 +378,12 @@ func returnGoTypes(typ parse.DeclaredType, aliases map[string]string, definedTyp
 		}
 		return []string{valueType, "error"}, nil
 	}
+	if isVoidType(typ) {
+		return nil, nil
+	}
 	goType, err := typeGoType(typ, aliases, definedTypes)
 	if err != nil {
 		return nil, err
-	}
-	if goType == "struct{}" {
-		return nil, nil
 	}
 	return []string{goType}, nil
 }
@@ -401,7 +401,7 @@ func typeGoType(typ parse.DeclaredType, aliases map[string]string, definedTypes 
 	case *parse.StringType:
 		goType = "string"
 	case *parse.VoidType:
-		goType = "struct{}"
+		goType = "Void"
 	case *parse.MutableType:
 		inner, err := typeGoType(t.Inner, aliases, definedTypes)
 		if err != nil {
@@ -510,7 +510,7 @@ func functionReturnGoTypes(typ parse.DeclaredType, aliases map[string]string, de
 			}
 			return returnTypes, nil
 		}
-		valueType := "struct{}"
+		valueType := "Void"
 		if !isVoidType(result.Val) {
 			var err error
 			valueType, err = typeGoType(result.Val, aliases, definedTypes)
@@ -607,6 +607,7 @@ func render(c contract, packageName string, availableImports map[string]string) 
 		return nil, err
 	}
 	renderImports(&out, imports)
+	out.WriteString("type Void = ardruntime.Void\n\n")
 	out.WriteString("type Maybe[T any] = ardruntime.Maybe[T]\n\n")
 	out.WriteString("func Some[T any](value T) Maybe[T] {\n\treturn ardruntime.Some(value)\n}\n\n")
 	out.WriteString("func None[T any]() Maybe[T] {\n\treturn ardruntime.None[T]()\n}\n\n")

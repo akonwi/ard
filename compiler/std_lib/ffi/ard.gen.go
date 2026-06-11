@@ -8,6 +8,8 @@ import (
 	"net/http"
 )
 
+type Void = ardruntime.Void
+
 type Maybe[T any] = ardruntime.Maybe[T]
 
 func Some[T any](value T) Maybe[T] {
@@ -139,7 +141,7 @@ type WinnerJSONTest struct {
 }
 
 type Host struct {
-	AsyncStart           func(do func()) Fiber[struct{}]
+	AsyncStart           func(do func()) Fiber[Void]
 	Base64Decode         func(input string, no_pad Maybe[bool]) (string, error)
 	Base64DecodeURL      func(input string, no_pad Maybe[bool]) (string, error)
 	Base64Encode         func(input string, no_pad Maybe[bool]) string

@@ -17,7 +17,7 @@ func TestObjectProfileTracksConstructorsAndAllocations(t *testing.T) {
 	_ = MakeBool(true)
 	_ = MakeDynamic("raw")
 	_ = MakeList(checker.Dynamic)
-	_ = Void()
+	_ = VoidObject()
 
 	snapshot := SnapshotObjectProfile()
 	if !snapshot.Enabled {

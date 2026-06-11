@@ -2904,6 +2904,31 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 				}
 			`,
 		},
+
+		{
+			name: "void local can be passed as value",
+			input: `
+				fn take(value: Void) Int { 1 }
+				fn main() Int {
+					let value = ()
+					take(value)
+				}
+			`,
+		},
+		{
+			name: "result ok preserves void side effects",
+			input: `
+				struct Counter { value: Int }
+				impl Counter {
+					fn mut bump() { self.value = self.value + 1 }
+				}
+				fn main() Int {
+					mut counter = Counter{value: 0}
+					let result: Void!Str = Result::ok(counter.bump())
+					counter.value
+				}
+			`,
+		},
 		{
 			name: "maybe map transforms some",
 			input: `
@@ -2911,6 +2936,27 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 				fn main() Int {
 					let result = maybe::some(41).map(fn(value) { value + 1 })
 					result.or(0)
+				}
+			`,
+		},
+		{
+			name: "maybe map supports void callback result",
+			input: `
+				use ard/maybe
+				fn main() Bool {
+					let mapped = maybe::some(1).map(fn(value) { () })
+					mapped.is_some()
+				}
+			`,
+		},
+		{
+			name: "maybe or supports void values",
+			input: `
+				use ard/maybe
+				fn main() Bool {
+					let value: Void? = maybe::none()
+					let fallback = value.or(())
+					true
 				}
 			`,
 		},
@@ -2955,6 +3001,40 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			`,
 		},
 		{
+			name: "result err preserves void side effects",
+			input: `
+				struct Counter { value: Int }
+				impl Counter {
+					fn mut bump() { self.value = self.value + 1 }
+				}
+				fn main() Int {
+					mut counter = Counter{value: 0}
+					let result: Int!Void = Result::err(counter.bump())
+					counter.value
+				}
+			`,
+		},
+		{
+			name: "result map supports void callback result",
+			input: `
+				fn main() Bool {
+					let res: Int!Str = Result::ok(21)
+					let mapped = res.map(fn(value) { () })
+					mapped.is_ok()
+				}
+			`,
+		},
+		{
+			name: "result or supports void values",
+			input: `
+				fn main() Bool {
+					let res: Void!Str = Result::err("bad")
+					let fallback = res.or(())
+					true
+				}
+			`,
+		},
+		{
 			name: "result map leaves err unchanged",
 			input: `
 				fn main() Str {
@@ -2977,6 +3057,16 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 						err(size) => size,
 						ok(value) => value,
 					}
+				}
+			`,
+		},
+		{
+			name: "result map err supports void callback result",
+			input: `
+				fn main() Bool {
+					let res: Int!Str = Result::err("bad")
+					let mapped = res.map_err(fn(err) { () })
+					mapped.is_err()
 				}
 			`,
 		},

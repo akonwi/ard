@@ -150,7 +150,7 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) str
 	b.WriteString("\tStatus string `json:\"status\"`\n")
 	b.WriteString("\tMessage string `json:\"message,omitempty\"`\n")
 	b.WriteString("}\n\n")
-	b.WriteString("func ardRunTest(name string, displayName string, fn func() runtime.Result[struct{}, string]) (out ardTestOutcome) {\n")
+	b.WriteString("func ardRunTest(name string, displayName string, fn func() runtime.Result[runtime.Void, string]) (out ardTestOutcome) {\n")
 	b.WriteString("\tout = ardTestOutcome{Name: name, DisplayName: displayName, Status: \"panic\"}\n")
 	b.WriteString("\tdefer func() { if recovered := recover(); recovered != nil { out.Status = \"panic\"; out.Message = fmt.Sprint(recovered) } }()\n")
 	b.WriteString("\tresult := fn()\n")

@@ -469,7 +469,7 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 		l.currentImports["fmt"] = "fmt"
 		l.currentImports["json"] = "encoding/json/v2"
 		l.currentImports["jsontext"] = "encoding/json/jsontext"
-		l.currentImports["runtime"] = "github.com/akonwi/ard/runtime"
+		l.currentImports["ardruntime"] = "github.com/akonwi/ard/runtime"
 		l.currentImports["strconv"] = "strconv"
 		parts = append(parts, l.jsonParsePreludeSource())
 	}
@@ -631,13 +631,26 @@ func (l *lowerer) lowerGlobal(global air.Global) (ast.Decl, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(value.stmts) != 0 {
+	valueExpr := value.expr
+	if l.isVoidType(global.Type) || isVoidExpr(valueExpr) {
+		if len(value.stmts) != 0 || !isVoidExpr(valueExpr) {
+			body := append([]ast.Stmt{}, value.stmts...)
+			body = l.appendVoidValueEval(body, valueExpr)
+			body = append(body, &ast.ReturnStmt{Results: []ast.Expr{l.voidValueExpr()}})
+			valueExpr = &ast.CallExpr{Fun: &ast.FuncLit{
+				Type: &ast.FuncType{Results: &ast.FieldList{List: []*ast.Field{{Type: globalType}}}},
+				Body: &ast.BlockStmt{List: body},
+			}}
+		} else {
+			valueExpr = l.voidValueExpr()
+		}
+	} else if len(value.stmts) != 0 {
 		return nil, fmt.Errorf("global initializers with setup statements are not supported")
 	}
 	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
 		Names:  []*ast.Ident{ast.NewIdent(globalName(l.program, global))},
 		Type:   globalType,
-		Values: []ast.Expr{value.expr},
+		Values: []ast.Expr{valueExpr},
 	}}}, nil
 }
 
@@ -714,9 +727,7 @@ func (l *lowerer) lowerBlock(fn air.Function, block air.Block, returnType air.Ty
 		stmts = append(stmts, result.stmts...)
 		if returnType == air.NoType || l.isVoidType(returnType) {
 			if l.isVoidType(block.Result.Type) || isVoidExpr(result.expr) {
-				if !isVoidExpr(result.expr) {
-					stmts = append(stmts, &ast.ExprStmt{X: result.expr})
-				}
+				stmts = l.appendVoidValueEval(stmts, result.expr)
 			} else {
 				stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{result.expr}})
 			}
@@ -739,18 +750,22 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			return nil, err
 		}
 		out := append([]ast.Stmt{}, value.stmts...)
-		if l.isVoidType(localType) || isVoidExpr(value.expr) {
-			if !isVoidExpr(value.expr) {
-				out = append(out, &ast.ExprStmt{X: value.expr})
-			}
-			return out, nil
-		}
 		name := localName(fn, stmt.Local)
 		tok := token.DEFINE
 		if l.declaredLocals[stmt.Local] {
 			tok = token.ASSIGN
 		} else {
 			l.declaredLocals[stmt.Local] = true
+		}
+		if l.isVoidType(localType) || isVoidExpr(value.expr) {
+			out = l.appendVoidValueEval(out, value.expr)
+			out = append(out, &ast.AssignStmt{
+				Lhs: []ast.Expr{ast.NewIdent(name)},
+				Tok: tok,
+				Rhs: []ast.Expr{l.voidValueExpr()},
+			})
+			out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(name)}})
+			return out, nil
 		}
 		out = append(out, &ast.AssignStmt{
 			Lhs: []ast.Expr{ast.NewIdent(name)},
@@ -776,9 +791,15 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		}
 		out := append([]ast.Stmt{}, value.stmts...)
 		if l.isVoidType(localType) || isVoidExpr(value.expr) {
-			if !isVoidExpr(value.expr) {
-				out = append(out, &ast.ExprStmt{X: value.expr})
+			out = l.appendVoidValueEval(out, value.expr)
+			name := localName(fn, stmt.Local)
+			tok := token.ASSIGN
+			if !l.declaredLocals[stmt.Local] {
+				tok = token.DEFINE
+				l.declaredLocals[stmt.Local] = true
 			}
+			out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(name)}, Tok: tok, Rhs: []ast.Expr{l.voidValueExpr()}})
+			out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(name)}})
 			return out, nil
 		}
 		if l.localIsPointerParam(fn, stmt.Local) && l.isTraitObjectType(localType) {
@@ -834,10 +855,15 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		if field.Mutable {
 			fieldTarget = &ast.StarExpr{X: fieldTarget}
 		}
+		valueExpr := value.expr
+		if l.isVoidType(field.Type) || isVoidExpr(valueExpr) {
+			out = l.appendVoidValueEval(out, valueExpr)
+			valueExpr = l.voidValueExpr()
+		}
 		out = append(out, &ast.AssignStmt{
 			Lhs: []ast.Expr{fieldTarget},
 			Tok: token.ASSIGN,
-			Rhs: []ast.Expr{value.expr},
+			Rhs: []ast.Expr{valueExpr},
 		})
 		return out, nil
 	case air.StmtExpr:
@@ -850,9 +876,7 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		}
 		out := append([]ast.Stmt{}, expr.stmts...)
 		if l.isVoidType(stmt.Expr.Type) || isVoidExpr(expr.expr) {
-			if !isVoidExpr(expr.expr) {
-				out = append(out, &ast.ExprStmt{X: expr.expr})
-			}
+			out = l.appendVoidValueEval(out, expr.expr)
 		} else {
 			out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{expr.expr}})
 		}
@@ -883,7 +907,7 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	switch expr.Kind {
 	case air.ExprConstVoid:
-		return loweredExpr{expr: ast.NewIdent("nil")}, nil
+		return loweredExpr{expr: l.voidValueExpr()}, nil
 	case air.ExprConstInt:
 		return loweredExpr{expr: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", expr.Int)}}, nil
 	case air.ExprConstFloat:
@@ -982,7 +1006,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		valueExpr := target.expr
 		if l.isVoidType(expr.Target.Type) || isVoidExpr(valueExpr) {
-			valueExpr = voidValueExpr()
+			target = l.materializeVoidValue(target)
+			valueExpr = target.expr
 		}
 		someExpr, err := l.maybeSomeExpr(expr.Type, valueExpr)
 		if err != nil {
@@ -1021,7 +1046,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		valueExpr := target.expr
 		if l.isVoidType(expr.Target.Type) || isVoidExpr(valueExpr) {
-			valueExpr = voidValueExpr()
+			target = l.materializeVoidValue(target)
+			valueExpr = target.expr
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: typ, Elts: []ast.Expr{
 			&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: valueExpr},
@@ -1051,8 +1077,13 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
+		errExpr := target.expr
+		if l.resultErrorIsVoid(expr.Type) || isVoidExpr(errExpr) {
+			target = l.materializeVoidValue(target)
+			errExpr = target.expr
+		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: typ, Elts: []ast.Expr{
-			&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: target.expr},
+			&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: errExpr},
 		}}}, nil
 	case air.ExprMatchMaybe:
 		return l.lowerMatchMaybe(fn, expr)
@@ -1257,9 +1288,9 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 				Y:  &ast.BinaryExpr{X: ast.NewIdent(indexTemp), Op: token.GEQ, Y: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(runesTemp)}}},
 			}
 			strType := mustTypeExpr(l, l.program.Types[expr.Type-1].Elem)
-			noneCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "None"), Index: strType}}
+			noneCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "None"), Index: strType}}
 			someValue := &ast.CallExpr{Fun: ast.NewIdent("string"), Args: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(runesTemp), Index: ast.NewIdent(indexTemp)}}}
-			someCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "Some"), Index: strType}, Args: []ast.Expr{someValue}}
+			someCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: strType}, Args: []ast.Expr{someValue}}
 			stmts = append(stmts, &ast.IfStmt{
 				Cond: cond,
 				Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneCall}}}},
@@ -1366,6 +1397,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			}
 			stmts = append(stmts, value.stmts...)
 			fieldValue := value.expr
+			if hasFieldInfo && l.isVoidType(fieldInfo.Type) {
+				stmts = l.appendVoidValueEval(stmts, fieldValue)
+				fieldValue = l.voidValueExpr()
+			}
 			if hasFieldInfo {
 				if fieldInfo.Mutable {
 					if l.isTraitObjectType(fieldInfo.Type) {
@@ -1491,7 +1526,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		var equality ast.Expr = &ast.BinaryExpr{X: left.expr, Op: l.binaryToken(expr.Kind), Y: right.expr}
 		if l.isMaybeType(leftTypeID) || l.isMaybeType(rightTypeID) {
-			equality = &ast.CallExpr{Fun: l.qualified("runtime", "github.com/akonwi/ard/runtime", "MaybeEqual"), Args: []ast.Expr{left.expr, right.expr}}
+			equality = &ast.CallExpr{Fun: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "MaybeEqual"), Args: []ast.Expr{left.expr, right.expr}}
 			if expr.Kind == air.ExprNotEq {
 				equality = &ast.UnaryExpr{Op: token.NOT, X: equality}
 			}
@@ -1604,9 +1639,7 @@ func (l *lowerer) lowerValueBlock(fn air.Function, block air.Block, resultType a
 		stmts = append(stmts, result.stmts...)
 		if l.isVoidType(resultType) {
 			if l.isVoidType(block.Result.Type) || isVoidExpr(result.expr) {
-				if !isVoidExpr(result.expr) {
-					stmts = append(stmts, &ast.ExprStmt{X: result.expr})
-				}
+				stmts = l.appendVoidValueEval(stmts, result.expr)
 			} else {
 				stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{result.expr}})
 			}
@@ -1712,9 +1745,6 @@ func sameAIRExpr(a air.Expr, b air.Expr) bool {
 }
 
 func (l *lowerer) declareTemp(typeID air.TypeID, name string) ([]ast.Stmt, error) {
-	if l.isVoidType(typeID) {
-		return nil, nil
-	}
 	typ, err := l.goType(typeID)
 	if err != nil {
 		return nil, err
@@ -1761,17 +1791,33 @@ func (l *lowerer) binaryToken(kind air.ExprKind) token.Token {
 	}
 }
 
-func voidTypeExpr() ast.Expr {
-	return &ast.StructType{Fields: &ast.FieldList{}}
+func (l *lowerer) voidTypeExpr() ast.Expr {
+	return l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Void")
 }
 
-func voidValueExpr() ast.Expr {
-	return &ast.CompositeLit{Type: voidTypeExpr()}
+func (l *lowerer) voidValueExpr() ast.Expr {
+	return &ast.CompositeLit{Type: l.voidTypeExpr()}
+}
+
+func (l *lowerer) appendVoidValueEval(stmts []ast.Stmt, expr ast.Expr) []ast.Stmt {
+	if isVoidExpr(expr) {
+		return stmts
+	}
+	if _, ok := expr.(*ast.CallExpr); ok {
+		return append(stmts, &ast.ExprStmt{X: expr})
+	}
+	return append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{expr}})
+}
+
+func (l *lowerer) materializeVoidValue(value loweredExpr) loweredExpr {
+	value.stmts = l.appendVoidValueEval(value.stmts, value.expr)
+	value.expr = l.voidValueExpr()
+	return value
 }
 
 func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 	if l.isVoidType(typeID) {
-		return ast.NewIdent("nil"), nil
+		return l.voidValueExpr(), nil
 	}
 	if !validTypeID(l.program, typeID) {
 		return ast.NewIdent("nil"), nil
@@ -1874,7 +1920,7 @@ func (l *lowerer) structuralMapEntryTypeExpr(mapTypeID air.TypeID) (ast.Expr, er
 	if err != nil {
 		return nil, err
 	}
-	return &ast.IndexListExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "StructuralMapEntry"), Indices: []ast.Expr{keyType, valueType}}, nil
+	return &ast.IndexListExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "StructuralMapEntry"), Indices: []ast.Expr{keyType, valueType}}, nil
 }
 
 func (l *lowerer) structuralMapWithEntriesExpr(mapTypeID air.TypeID, entries []ast.Expr) (ast.Expr, error) {
@@ -1882,7 +1928,7 @@ func (l *lowerer) structuralMapWithEntriesExpr(mapTypeID air.TypeID, entries []a
 	if err != nil {
 		return nil, err
 	}
-	return &ast.CallExpr{Fun: &ast.IndexListExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "NewStructuralMapWithEntries"), Indices: []ast.Expr{keyType, valueType}}, Args: entries}, nil
+	return &ast.CallExpr{Fun: &ast.IndexListExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "NewStructuralMapWithEntries"), Indices: []ast.Expr{keyType, valueType}}, Args: entries}, nil
 }
 
 func (l *lowerer) mapKeyValueTypes(mapTypeID air.TypeID) (air.TypeID, air.TypeID) {
@@ -1898,10 +1944,20 @@ func (l *lowerer) mapKeyValueTypes(mapTypeID air.TypeID) (air.TypeID, air.TypeID
 
 func (l *lowerer) lowerMapKeyArg(fn air.Function, mapTypeID air.TypeID, expr air.Expr) (loweredExpr, error) {
 	keyType, _ := l.mapKeyValueTypes(mapTypeID)
+	var key loweredExpr
+	var err error
 	if keyType != air.NoType {
-		return l.lowerExprWithExpectedType(fn, expr, keyType)
+		key, err = l.lowerExprWithExpectedType(fn, expr, keyType)
+	} else {
+		key, err = l.lowerExpr(fn, expr)
 	}
-	return l.lowerExpr(fn, expr)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if l.isVoidType(keyType) || isVoidExpr(key.expr) {
+		key = l.materializeVoidValue(key)
+	}
+	return key, nil
 }
 
 func (l *lowerer) isTraitObjectType(typeID air.TypeID) bool {
@@ -1976,7 +2032,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
 	case air.TypeVoid:
-		return voidTypeExpr(), nil
+		return l.voidTypeExpr(), nil
 	case air.TypeInt:
 		return ast.NewIdent("int"), nil
 	case air.TypeFloat:
@@ -1990,7 +2046,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &ast.IndexExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "Maybe"), Index: elem}, nil
+		return &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Maybe"), Index: elem}, nil
 	case air.TypeFiber:
 		l.markRuntimeHelper("fiber")
 		elem, err := l.goType(info.Elem)
@@ -2035,7 +2091,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &ast.IndexListExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "Result"), Indices: []ast.Expr{value, errType}}, nil
+		return &ast.IndexListExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Result"), Indices: []ast.Expr{value, errType}}, nil
 	case air.TypeList:
 		elem, err := l.goType(info.Elem)
 		if err != nil {
@@ -2052,7 +2108,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		if l.typeContainsMaybe(info.Key, map[air.TypeID]bool{}) {
-			return &ast.IndexListExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "StructuralMap"), Indices: []ast.Expr{key, value}}, nil
+			return &ast.IndexListExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "StructuralMap"), Indices: []ast.Expr{key, value}}, nil
 		}
 		return &ast.MapType{Key: key, Value: value}, nil
 	case air.TypeStruct, air.TypeEnum:
@@ -2089,6 +2145,30 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 
 func (l *lowerer) isVoidType(typeID air.TypeID) bool {
 	return validTypeID(l.program, typeID) && l.program.Types[typeID-1].Kind == air.TypeVoid
+}
+
+func (l *lowerer) maybeElemIsVoid(typeID air.TypeID) bool {
+	if !validTypeID(l.program, typeID) {
+		return false
+	}
+	info := l.program.Types[typeID-1]
+	return info.Kind == air.TypeMaybe && l.isVoidType(info.Elem)
+}
+
+func (l *lowerer) resultValueIsVoid(typeID air.TypeID) bool {
+	if !validTypeID(l.program, typeID) {
+		return false
+	}
+	info := l.program.Types[typeID-1]
+	return info.Kind == air.TypeResult && l.isVoidType(info.Value)
+}
+
+func (l *lowerer) resultErrorIsVoid(typeID air.TypeID) bool {
+	if !validTypeID(l.program, typeID) {
+		return false
+	}
+	info := l.program.Types[typeID-1]
+	return info.Kind == air.TypeResult && l.isVoidType(info.Error)
 }
 
 func (l *lowerer) resolvedLocalType(fn air.Function, local air.LocalID) air.TypeID {
@@ -2434,6 +2514,10 @@ func (l *lowerer) lowerCallArgs(fn air.Function, rawArgs []air.Expr, params []ai
 		}
 		stmts = append(stmts, loweredArg.stmts...)
 		argExpr := loweredArg.expr
+		if i < len(params) && l.isVoidType(params[i].Type) {
+			stmts = l.appendVoidValueEval(stmts, argExpr)
+			argExpr = l.voidValueExpr()
+		}
 		if i < len(params) {
 			var setup []ast.Stmt
 			var post []ast.Stmt
@@ -2933,7 +3017,8 @@ func (l *lowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (loweredExpr, e
 	}
 	fieldValue := target.expr
 	if validTypeID(l.program, memberType) && l.program.Types[memberType-1].Kind == air.TypeVoid {
-		fieldValue = voidValueExpr()
+		target = l.materializeVoidValue(target)
+		fieldValue = target.expr
 	}
 	return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, unionType)), Elts: []ast.Expr{
 		&ast.KeyValueExpr{Key: ast.NewIdent("tag"), Value: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", expr.Tag)}},
@@ -3248,13 +3333,18 @@ func (l *lowerer) lowerMaybeOr(fn air.Function, expr air.Expr) (loweredExpr, err
 	}
 	resultExpr := ast.NewIdent(resultTemp)
 	stmts := append(target.stmts, defaultValue.stmts...)
+	defaultExpr := defaultValue.expr
+	if l.isVoidType(expr.Type) || isVoidExpr(defaultExpr) {
+		stmts = l.appendVoidValueEval(stmts, defaultExpr)
+		defaultExpr = l.voidValueExpr()
+	}
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
 	stmts = append(stmts, &ast.IfStmt{
 		Cond: l.maybeIsSomeExpr(targetExpr),
 		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{l.maybeValueExpr(targetExpr)}}}},
-		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{defaultValue.expr}}}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{defaultExpr}}}},
 	})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
@@ -3284,13 +3374,18 @@ func (l *lowerer) lowerResultOr(fn air.Function, expr air.Expr) (loweredExpr, er
 	}
 	resultExpr := ast.NewIdent(resultTemp)
 	stmts := append(target.stmts, defaultValue.stmts...)
+	defaultExpr := defaultValue.expr
+	if l.isVoidType(expr.Type) || isVoidExpr(defaultExpr) {
+		stmts = l.appendVoidValueEval(stmts, defaultExpr)
+		defaultExpr = l.voidValueExpr()
+	}
 	stmts = append(stmts, targetDecls...)
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{targetExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
 	stmts = append(stmts, resultDecls...)
 	stmts = append(stmts, &ast.IfStmt{
 		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Ok")},
 		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}}},
-		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{defaultValue.expr}}}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{defaultExpr}}}},
 	})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
@@ -3325,22 +3420,23 @@ func (l *lowerer) lowerMaybeMap(fn air.Function, expr air.Expr) (loweredExpr, er
 	stmts = append(stmts, resultDecls...)
 	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{l.maybeValueExpr(targetExpr)}}
 	var valueExpr ast.Expr = call
-	if l.isVoidType(expr.Type) || isVoidExpr(call) {
-		valueExpr = voidValueExpr()
+	var someBody []ast.Stmt
+	if l.maybeElemIsVoid(expr.Type) || isVoidExpr(call) {
+		valueExpr = l.voidValueExpr()
+		someBody = l.appendVoidValueEval(someBody, call)
 	}
 	someExpr, err := l.maybeSomeExpr(expr.Type, valueExpr)
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	someBody = append(someBody, &ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{someExpr}})
 	noneExpr, err := l.maybeNoneExpr(expr.Type)
 	if err != nil {
 		return loweredExpr{}, err
 	}
 	stmts = append(stmts, &ast.IfStmt{
 		Cond: l.maybeIsSomeExpr(targetExpr),
-		Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{someExpr}},
-		}},
+		Body: &ast.BlockStmt{List: someBody},
 		Else: &ast.BlockStmt{List: []ast.Stmt{
 			&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneExpr}},
 		}},
@@ -3445,21 +3541,22 @@ func (l *lowerer) lowerResultMap(fn air.Function, expr air.Expr) (loweredExpr, e
 	}
 	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}
 	var valueExpr ast.Expr = call
-	if l.isVoidType(expr.Type) || isVoidExpr(call) {
-		valueExpr = voidValueExpr()
+	var okBody []ast.Stmt
+	if l.resultValueIsVoid(expr.Type) || isVoidExpr(call) {
+		valueExpr = l.voidValueExpr()
+		okBody = l.appendVoidValueEval(okBody, call)
 	}
+	okBody = append(okBody, &ast.AssignStmt{
+		Lhs: []ast.Expr{resultExpr},
+		Tok: token.ASSIGN,
+		Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+			&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: valueExpr},
+			&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: ast.NewIdent("true")},
+		}}},
+	})
 	stmts = append(stmts, &ast.IfStmt{
 		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Ok")},
-		Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{
-				Lhs: []ast.Expr{resultExpr},
-				Tok: token.ASSIGN,
-				Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
-					&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: valueExpr},
-					&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: ast.NewIdent("true")},
-				}}},
-			},
-		}},
+		Body: &ast.BlockStmt{List: okBody},
 		Else: &ast.BlockStmt{List: []ast.Stmt{
 			&ast.AssignStmt{
 				Lhs: []ast.Expr{resultExpr},
@@ -3506,6 +3603,19 @@ func (l *lowerer) lowerResultMapErr(fn air.Function, expr air.Expr) (loweredExpr
 		return loweredExpr{}, err
 	}
 	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Err")}}}
+	var errExpr ast.Expr = call
+	var errBody []ast.Stmt
+	if l.resultErrorIsVoid(expr.Type) || isVoidExpr(call) {
+		errExpr = l.voidValueExpr()
+		errBody = l.appendVoidValueEval(errBody, call)
+	}
+	errBody = append(errBody, &ast.AssignStmt{
+		Lhs: []ast.Expr{resultExpr},
+		Tok: token.ASSIGN,
+		Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+			&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: errExpr},
+		}}},
+	})
 	stmts = append(stmts, &ast.IfStmt{
 		Cond: &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Ok")},
 		Body: &ast.BlockStmt{List: []ast.Stmt{
@@ -3518,15 +3628,7 @@ func (l *lowerer) lowerResultMapErr(fn air.Function, expr air.Expr) (loweredExpr
 				}}},
 			},
 		}},
-		Else: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.AssignStmt{
-				Lhs: []ast.Expr{resultExpr},
-				Tok: token.ASSIGN,
-				Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
-					&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: call},
-				}}},
-			},
-		}},
+		Else: &ast.BlockStmt{List: errBody},
 	})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
@@ -3721,12 +3823,17 @@ func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, e
 	}
 	var elseBody []ast.Stmt
 	if expr.HasCatch {
-		catchTargetName := l.nextTemp()
-		catchDecls, err := l.declareTemp(fn.Signature.Return, catchTargetName)
-		if err != nil {
-			return loweredExpr{}, err
+		var catchDecls []ast.Stmt
+		var catchTarget ast.Expr
+		if !l.isVoidType(fn.Signature.Return) {
+			catchTargetName := l.nextTemp()
+			var err error
+			catchDecls, err = l.declareTemp(fn.Signature.Return, catchTargetName)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			catchTarget = ast.NewIdent(catchTargetName)
 		}
-		catchTarget := ast.NewIdent(catchTargetName)
 		errName := localName(fn, expr.CatchLocal)
 		l.declaredLocals[expr.CatchLocal] = true
 		errBind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Err")}}}
@@ -3804,12 +3911,17 @@ func (l *lowerer) lowerTryMaybe(fn air.Function, expr air.Expr) (loweredExpr, er
 	}
 	var noneBody []ast.Stmt
 	if expr.HasCatch {
-		catchTargetName := l.nextTemp()
-		catchDecls, err := l.declareTemp(fn.Signature.Return, catchTargetName)
-		if err != nil {
-			return loweredExpr{}, err
+		var catchDecls []ast.Stmt
+		var catchTarget ast.Expr
+		if !l.isVoidType(fn.Signature.Return) {
+			catchTargetName := l.nextTemp()
+			var err error
+			catchDecls, err = l.declareTemp(fn.Signature.Return, catchTargetName)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			catchTarget = ast.NewIdent(catchTargetName)
 		}
-		catchTarget := ast.NewIdent(catchTargetName)
 		catchBody, err := l.lowerValueBlock(fn, expr.Catch, fn.Signature.Return, catchTarget)
 		if err != nil {
 			return loweredExpr{}, err
@@ -3914,7 +4026,12 @@ func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, er
 			return loweredExpr{}, err
 		}
 		stmts = append(stmts, loweredArg.stmts...)
-		elts = append(elts, loweredArg.expr)
+		argExpr := loweredArg.expr
+		if l.isVoidType(elemType) || isVoidExpr(argExpr) {
+			stmts = l.appendVoidValueEval(stmts, argExpr)
+			argExpr = l.voidValueExpr()
+		}
+		elts = append(elts, argExpr)
 	}
 	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
 }
@@ -3934,10 +4051,10 @@ func (l *lowerer) lowerSpawnFiber(fn air.Function, expr air.Expr) (loweredExpr, 
 			fiberType := l.program.Types[expr.Type-1]
 			if validTypeID(l.program, fiberType.Elem) && l.program.Types[fiberType.Elem-1].Kind == air.TypeVoid {
 				targetExpr = &ast.FuncLit{
-					Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: voidTypeExpr()}}}},
+					Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: l.voidTypeExpr()}}}},
 					Body: &ast.BlockStmt{List: []ast.Stmt{
 						&ast.ExprStmt{X: &ast.CallExpr{Fun: target.expr}},
-						&ast.ReturnStmt{Results: []ast.Expr{voidValueExpr()}},
+						&ast.ReturnStmt{Results: []ast.Expr{l.voidValueExpr()}},
 					}},
 				}
 			}
@@ -3949,10 +4066,10 @@ func (l *lowerer) lowerSpawnFiber(fn air.Function, expr air.Expr) (loweredExpr, 
 		targetFn := l.program.Functions[expr.Function]
 		if l.isVoidType(targetFn.Signature.Return) {
 			targetExpr = &ast.FuncLit{
-				Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: voidTypeExpr()}}}},
+				Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: l.voidTypeExpr()}}}},
 				Body: &ast.BlockStmt{List: []ast.Stmt{
 					&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, targetFn))}},
-					&ast.ReturnStmt{Results: []ast.Expr{voidValueExpr()}},
+					&ast.ReturnStmt{Results: []ast.Expr{l.voidValueExpr()}},
 				}},
 			}
 		} else {
@@ -4119,7 +4236,12 @@ func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, err
 	}
 	stmts := append(target.stmts, index.stmts...)
 	stmts = append(stmts, value.stmts...)
-	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: index.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{value.expr}})
+	valueExpr := value.expr
+	if l.isVoidType(elemType) || isVoidExpr(valueExpr) {
+		stmts = l.appendVoidValueEval(stmts, valueExpr)
+		valueExpr = l.voidValueExpr()
+	}
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: index.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("true")}, nil
 }
 
@@ -4174,8 +4296,13 @@ func (l *lowerer) lowerListPrepend(fn air.Function, expr air.Expr) (loweredExpr,
 		return loweredExpr{}, err
 	}
 	target := l.localValueExpr(fn, expr.Target.Local)
-	assign := &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{&ast.CompositeLit{Type: &ast.ArrayType{Elt: elemType}, Elts: []ast.Expr{value.expr}}, target}, Ellipsis: 2}}}
+	valueExpr := value.expr
 	stmts := append([]ast.Stmt{}, value.stmts...)
+	if l.isVoidType(listInfo.Elem) || isVoidExpr(valueExpr) {
+		stmts = l.appendVoidValueEval(stmts, valueExpr)
+		valueExpr = l.voidValueExpr()
+	}
+	assign := &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{&ast.CompositeLit{Type: &ast.ArrayType{Elt: elemType}, Elts: []ast.Expr{valueExpr}}, target}, Ellipsis: 2}}}
 	stmts = append(stmts, assign)
 	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target}}}, nil
 }
@@ -4238,12 +4365,22 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 		return loweredExpr{}, err
 	}
 	target := l.localValueExpr(fn, expr.Target.Local)
+	valueExpr := value.expr
+	stmts := append([]ast.Stmt{}, value.stmts...)
+	if validTypeID(l.program, expr.Target.Type) {
+		if info := l.program.Types[expr.Target.Type-1]; info.Kind == air.TypeList && l.isVoidType(info.Elem) {
+			stmts = l.appendVoidValueEval(stmts, valueExpr)
+			valueExpr = l.voidValueExpr()
+		}
+	}
+	if isVoidExpr(valueExpr) {
+		valueExpr = l.voidValueExpr()
+	}
 	assign := &ast.AssignStmt{
 		Lhs: []ast.Expr{target},
 		Tok: token.ASSIGN,
-		Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{target, value.expr}}},
+		Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{target, valueExpr}}},
 	}
-	stmts := append([]ast.Stmt{}, value.stmts...)
 	stmts = append(stmts, assign)
 	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target}}}, nil
 }
@@ -4279,8 +4416,18 @@ func (l *lowerer) lowerMakeMap(fn air.Function, expr air.Expr) (loweredExpr, err
 			return loweredExpr{}, err
 		}
 		stmts = append(stmts, key.stmts...)
+		keyExpr := key.expr
+		if l.isVoidType(keyType) || isVoidExpr(keyExpr) {
+			stmts = l.appendVoidValueEval(stmts, keyExpr)
+			keyExpr = l.voidValueExpr()
+		}
 		stmts = append(stmts, value.stmts...)
-		elts = append(elts, &ast.KeyValueExpr{Key: key.expr, Value: value.expr})
+		valueExpr := value.expr
+		if l.isVoidType(valueType) || isVoidExpr(valueExpr) {
+			stmts = l.appendVoidValueEval(stmts, valueExpr)
+			valueExpr = l.voidValueExpr()
+		}
+		elts = append(elts, &ast.KeyValueExpr{Key: keyExpr, Value: valueExpr})
 	}
 	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
 }
@@ -4312,10 +4459,20 @@ func (l *lowerer) lowerMakeStructuralMap(fn air.Function, expr air.Expr, keyType
 			return loweredExpr{}, err
 		}
 		stmts = append(stmts, key.stmts...)
+		keyExpr := key.expr
+		if l.isVoidType(keyType) || isVoidExpr(keyExpr) {
+			stmts = l.appendVoidValueEval(stmts, keyExpr)
+			keyExpr = l.voidValueExpr()
+		}
 		stmts = append(stmts, value.stmts...)
+		valueExpr := value.expr
+		if l.isVoidType(valueType) || isVoidExpr(valueExpr) {
+			stmts = l.appendVoidValueEval(stmts, valueExpr)
+			valueExpr = l.voidValueExpr()
+		}
 		entries = append(entries, &ast.CompositeLit{Type: entryType, Elts: []ast.Expr{
-			&ast.KeyValueExpr{Key: ast.NewIdent("Key"), Value: key.expr},
-			&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: value.expr},
+			&ast.KeyValueExpr{Key: ast.NewIdent("Key"), Value: keyExpr},
+			&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: valueExpr},
 		}})
 	}
 	mapExpr, err := l.structuralMapWithEntriesExpr(expr.Type, entries)
@@ -4421,11 +4578,21 @@ func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, erro
 		return loweredExpr{}, err
 	}
 	stmts := append(target.stmts, key.stmts...)
+	keyExpr := key.expr
+	if l.isVoidType(keyType) || isVoidExpr(keyExpr) {
+		stmts = l.appendVoidValueEval(stmts, keyExpr)
+		keyExpr = l.voidValueExpr()
+	}
 	stmts = append(stmts, value.stmts...)
+	valueExpr := value.expr
+	if l.isVoidType(valueType) || isVoidExpr(valueExpr) {
+		stmts = l.appendVoidValueEval(stmts, valueExpr)
+		valueExpr = l.voidValueExpr()
+	}
 	if l.mapUsesStructuralKeys(expr.Target.Type) {
-		stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Set")}, Args: []ast.Expr{key.expr, value.expr}}})
+		stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Set")}, Args: []ast.Expr{keyExpr, valueExpr}}})
 	} else {
-		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: key.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{value.expr}})
+		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: keyExpr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}})
 	}
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("true")}, nil
 }
@@ -4602,34 +4769,12 @@ func (l *lowerer) lowerMutableTraitRefCall(fn air.Function, target loweredExpr, 
 		return loweredExpr{}, fmt.Errorf("invalid trait method %d for %s", expr.Method, trait.Name)
 	}
 	method := trait.Methods[expr.Method]
-	stmts := append([]ast.Stmt{}, target.stmts...)
-	args := make([]ast.Expr, 0, len(expr.Args))
-	writeback := []ast.Stmt{}
-	for i, arg := range expr.Args {
-		var loweredArg loweredExpr
-		var err error
-		if i < len(method.Signature.Params) && !method.Signature.Params[i].Mutable {
-			loweredArg, err = l.lowerExprWithExpectedType(fn, arg, method.Signature.Params[i].Type)
-		} else {
-			loweredArg, err = l.lowerExpr(fn, arg)
-		}
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, loweredArg.stmts...)
-		argExpr := loweredArg.expr
-		if i < len(method.Signature.Params) {
-			var setup []ast.Stmt
-			var post []ast.Stmt
-			argExpr, setup, post, err = l.adaptCallArgWithStmts(fn, arg, argExpr, method.Signature.Params[i])
-			if err != nil {
-				return loweredExpr{}, err
-			}
-			stmts = append(stmts, setup...)
-			writeback = append(writeback, post...)
-		}
-		args = append(args, argExpr)
+	args, argStmts, writeback, err := l.lowerCallArgs(fn, expr.Args, method.Signature.Params)
+	if err != nil {
+		return loweredExpr{}, err
 	}
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	stmts = append(stmts, argStmts...)
 	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(mutableTraitMethodFieldName(trait.ID, expr.Method))}, Args: args}
 	return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
 }
@@ -4662,6 +4807,10 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 			return loweredExpr{}, err
 		}
 		stmts = append(stmts, loweredArg.stmts...)
+		if i < len(traitMethod.Signature.Params) && l.isVoidType(traitMethod.Signature.Params[i].Type) {
+			stmts = l.appendVoidValueEval(stmts, loweredArg.expr)
+			loweredArg.expr = l.voidValueExpr()
+		}
 		loweredArgs[i] = loweredArg
 	}
 
@@ -4872,7 +5021,7 @@ func (l *lowerer) wrapErrorCall(resultTypeID air.TypeID, call ast.Expr) (lowered
 		return loweredExpr{}, err
 	}
 	resultExpr := &ast.CompositeLit{Type: mustTypeExpr(l, resultTypeID), Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: voidValueExpr()},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: l.voidValueExpr()},
 		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: errExpr},
 		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: ast.NewIdent("nil")}},
 	}}
@@ -4989,13 +5138,24 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 	ext := l.program.Externs[expr.Extern]
 	args := make([]ast.Expr, 0, len(expr.Args))
 	stmts := []ast.Stmt{}
-	for _, arg := range expr.Args {
-		loweredArg, err := l.lowerExpr(fn, arg)
+	for i, arg := range expr.Args {
+		var loweredArg loweredExpr
+		var err error
+		if i < len(ext.Signature.Params) && !ext.Signature.Params[i].Mutable {
+			loweredArg, err = l.lowerExprWithExpectedType(fn, arg, ext.Signature.Params[i].Type)
+		} else {
+			loweredArg, err = l.lowerExpr(fn, arg)
+		}
 		if err != nil {
 			return loweredExpr{}, err
 		}
 		stmts = append(stmts, loweredArg.stmts...)
-		args = append(args, loweredArg.expr)
+		argExpr := loweredArg.expr
+		if i < len(ext.Signature.Params) && l.isVoidType(ext.Signature.Params[i].Type) {
+			stmts = l.appendVoidValueEval(stmts, argExpr)
+			argExpr = l.voidValueExpr()
+		}
+		args = append(args, argExpr)
 	}
 	binding := ext.Name
 	if goBinding, ok := ext.Bindings["go"]; ok && goBinding != "" {
@@ -5235,8 +5395,21 @@ func (l *lowerer) projectFFIBindingExpr(binding string) (ast.Expr, error) {
 }
 
 func isVoidExpr(expr ast.Expr) bool {
-	ident, ok := expr.(*ast.Ident)
-	return ok && ident.Name == "nil"
+	if ident, ok := expr.(*ast.Ident); ok {
+		return ident.Name == "nil"
+	}
+	lit, ok := expr.(*ast.CompositeLit)
+	if !ok {
+		return false
+	}
+	switch typ := lit.Type.(type) {
+	case *ast.Ident:
+		return typ.Name == "Void"
+	case *ast.SelectorExpr:
+		return typ.Sel != nil && typ.Sel.Name == "Void"
+	default:
+		return false
+	}
 }
 
 func (l *lowerer) maybeElemTypeExpr(maybeTypeID air.TypeID) (ast.Expr, error) {
@@ -5255,7 +5428,7 @@ func (l *lowerer) maybeSomeExpr(maybeTypeID air.TypeID, value ast.Expr) (ast.Exp
 	if err != nil {
 		return nil, err
 	}
-	return &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "Some"), Index: elemType}, Args: []ast.Expr{value}}, nil
+	return &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: elemType}, Args: []ast.Expr{value}}, nil
 }
 
 func (l *lowerer) maybeNoneExpr(maybeTypeID air.TypeID) (ast.Expr, error) {
@@ -5263,7 +5436,7 @@ func (l *lowerer) maybeNoneExpr(maybeTypeID air.TypeID) (ast.Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("runtime", "github.com/akonwi/ard/runtime", "None"), Index: elemType}}, nil
+	return &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "None"), Index: elemType}}, nil
 }
 
 func (l *lowerer) maybeIsSomeExpr(expr ast.Expr) ast.Expr {
@@ -5509,12 +5682,12 @@ func ardJSONDecodeDynamic(dec *jsontext.Decoder, path string) (any, string) {
 	return raw, ""
 }
 
-func ardJSONDecodeMaybe[T any](dec *jsontext.Decoder, path string, decode func(*jsontext.Decoder, string) (T, string)) (runtime.Maybe[T], string) {
-	var out runtime.Maybe[T]
+func ardJSONDecodeMaybe[T any](dec *jsontext.Decoder, path string, decode func(*jsontext.Decoder, string) (T, string)) (ardruntime.Maybe[T], string) {
+	var out ardruntime.Maybe[T]
 	if dec.PeekKind() == jsontext.KindNull { _, _ = dec.ReadToken(); return out, "" }
 	value, message := decode(dec, path)
 	if message != "" { return out, message }
-	return runtime.Some(value), ""
+	return ardruntime.Some(value), ""
 }
 
 func ardJSONDecodeList[T any](dec *jsontext.Decoder, path string, expected string, decode func(*jsontext.Decoder, string) (T, string)) ([]T, string) {
@@ -5568,7 +5741,7 @@ func (l *lowerer) jsonParseGoTypeName(typeID air.TypeID) string {
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
 	case air.TypeVoid:
-		return "struct{}"
+		return "ardruntime.Void"
 	case air.TypeInt:
 		return "int"
 	case air.TypeFloat:
@@ -5580,7 +5753,7 @@ func (l *lowerer) jsonParseGoTypeName(typeID air.TypeID) string {
 	case air.TypeDynamic, air.TypeExtern, air.TypeTraitObject:
 		return "any"
 	case air.TypeMaybe:
-		return "runtime.Maybe[" + l.jsonParseGoTypeName(info.Elem) + "]"
+		return "ardruntime.Maybe[" + l.jsonParseGoTypeName(info.Elem) + "]"
 	case air.TypeList:
 		return "[]" + l.jsonParseGoTypeName(info.Elem)
 	case air.TypeMap:
@@ -5620,7 +5793,7 @@ func (l *lowerer) jsonEncodePreludeSource() string {
 		}
 	}
 	if needsMaybeHelper || needsStructuralMapHelper {
-		l.currentImports["runtime"] = "github.com/akonwi/ard/runtime"
+		l.currentImports["ardruntime"] = "github.com/akonwi/ard/runtime"
 	}
 	b.WriteString(`
 func ardJSONEncodeInt(enc *jsontext.Encoder, value int) error {
@@ -5648,7 +5821,7 @@ func ardJSONEncodeDynamic(enc *jsontext.Encoder, value any) error {
 `)
 	if needsMaybeHelper {
 		b.WriteString(`
-func ardJSONEncodeMaybe[T any](enc *jsontext.Encoder, value runtime.Maybe[T], encode func(*jsontext.Encoder, T) error) error {
+func ardJSONEncodeMaybe[T any](enc *jsontext.Encoder, value ardruntime.Maybe[T], encode func(*jsontext.Encoder, T) error) error {
 	if value.IsNone() { return enc.WriteToken(jsontext.Null) }
 	return encode(enc, value.Value())
 }
@@ -5674,7 +5847,7 @@ func ardJSONEncodeMap[K comparable, V any](enc *jsontext.Encoder, values map[K]V
 `)
 	if needsStructuralMapHelper {
 		b.WriteString(`
-func ardJSONEncodeStructuralMap[K any, V any](enc *jsontext.Encoder, values runtime.StructuralMap[K, V], encode func(*jsontext.Encoder, V) error) error {
+func ardJSONEncodeStructuralMap[K any, V any](enc *jsontext.Encoder, values ardruntime.StructuralMap[K, V], encode func(*jsontext.Encoder, V) error) error {
 	if err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }
 	for _, key := range values.Keys() {
 		item, _ := values.Get(key)

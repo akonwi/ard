@@ -781,7 +781,7 @@ var (
 	void = &Object{raw: nil, _type: checker.Void, kind: KindVoid, name: checker.Void.String()}
 )
 
-func Void() *Object {
+func VoidObject() *Object {
 	profiling := recordObjectConstructor(&objectProfile.voidCalls)
 	if profiling {
 		objectProfile.voidCacheHits.Add(1)
