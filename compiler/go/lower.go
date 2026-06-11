@@ -83,11 +83,11 @@ func collectFFIGoImports(projectInfo *checker.ProjectInfo) map[string]string {
 	for alias, path := range collectGoImportsFromPaths(stdlibFFIGoPaths()) {
 		imports[alias] = path
 	}
-	if projectHasFFICompanions(projectInfo) {
-		imports["projectffi"] = "generated/projectffi"
-	}
 	for alias, path := range collectGoImportsFromPaths(projectFFIGoPaths(projectInfo)) {
 		imports[alias] = path
+	}
+	if projectHasFFICompanions(projectInfo) {
+		registerProjectFFIImports(imports, projectInfo)
 	}
 	for alias, path := range collectGoImportsFromPaths(dependencyFFIGoPaths(projectInfo)) {
 		imports[alias] = path
@@ -331,8 +331,9 @@ func (l *lowerer) qualifyProjectFFIExternTypeExpr(expr ast.Expr) ast.Expr {
 	switch node := expr.(type) {
 	case *ast.Ident:
 		if ast.IsExported(node.Name) && !isPredeclaredGoTypeName(node.Name) {
-			l.currentImports["projectffi"] = "generated/projectffi"
-			return &ast.SelectorExpr{X: ast.NewIdent("projectffi"), Sel: ast.NewIdent(node.Name)}
+			alias := projectFFIPackageAlias(l.projectInfo)
+			l.currentImports[alias] = projectFFIImportPath(l.projectInfo)
+			return &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(node.Name)}
 		}
 		return node
 	case *ast.StarExpr:
@@ -5470,7 +5471,7 @@ func (l *lowerer) projectFFIBindingExpr(binding string) (ast.Expr, error) {
 	if !token.IsIdentifier(binding) {
 		return nil, fmt.Errorf("project go extern binding %q must be an unqualified function name in package ffi", binding)
 	}
-	return l.qualified("projectffi", "generated/projectffi", binding), nil
+	return l.qualified(projectFFIPackageAlias(l.projectInfo), projectFFIImportPath(l.projectInfo), binding), nil
 }
 
 func isVoidExpr(expr ast.Expr) bool {

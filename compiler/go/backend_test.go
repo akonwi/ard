@@ -1205,6 +1205,120 @@ fn main() {}
 	}
 }
 
+func TestGenerateSourcesUsesProjectNameForProjectFFI(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo_app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+type Handle struct{}
+
+func MakeHandle() Handle { return Handle{} }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`extern type Handle = "Handle"
+extern fn make_handle() Handle = "MakeHandle"
+
+struct Box {
+  handle: Handle,
+}
+
+fn main() {
+  let handle: Handle = make_handle()
+  let _ = Box{handle: handle}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	sources, err := GenerateSources(program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo})
+	if err != nil {
+		t.Fatalf("generate sources: %v", err)
+	}
+	combined := ""
+	for _, source := range sources {
+		combined += string(source)
+	}
+	if !strings.Contains(combined, `demo_app "generated/demo_app"`) {
+		t.Fatalf("generated source missing project-name FFI import:\n%s", combined)
+	}
+	if !strings.Contains(combined, "demo_app.Handle") || !strings.Contains(combined, "demo_app.MakeHandle") {
+		t.Fatalf("generated source did not qualify project FFI with project name:\n%s", combined)
+	}
+	if strings.Contains(combined, "projectffi") {
+		t.Fatalf("generated source still uses projectffi:\n%s", combined)
+	}
+
+	workspace := filepath.Join(dir, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeProgram(workspace, program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo}); err != nil {
+		t.Fatalf("write program: %v", err)
+	}
+	if !fileExists(filepath.Join(workspace, "demo_app", "ffi.go")) {
+		t.Fatalf("project FFI companion was not copied to project-named package")
+	}
+	if fileExists(filepath.Join(workspace, "projectffi", "ffi.go")) {
+		t.Fatalf("project FFI companion was copied to legacy projectffi package")
+	}
+}
+
+func TestWriteProgramCopiesProjectQualifiedExternTypeFFI(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+type Handle struct{}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`extern type Handle = "demo.Handle"
+
+struct Box {
+  handle: Handle,
+}
+
+fn main() {}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	workspace := filepath.Join(dir, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeProgram(workspace, program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo}); err != nil {
+		t.Fatalf("write program: %v", err)
+	}
+	if !fileExists(filepath.Join(workspace, "demo", "ffi.go")) {
+		t.Fatalf("project-qualified extern type did not cause project FFI companion copy")
+	}
+	if err := buildGeneratedProgram(workspace, filepath.Join(dir, "app")); err != nil {
+		t.Fatalf("build generated program: %v", err)
+	}
+}
+
 func TestBuildProgramImportsProjectFFIForExternTypesOnlyUsedAsTypes(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

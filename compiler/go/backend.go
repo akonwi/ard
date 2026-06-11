@@ -334,7 +334,7 @@ func writeProjectFFICompanions(dir string, program *air.Program, projectInfo *ch
 	if rootExists && len(dirMatches) > 0 {
 		return fmt.Errorf("project Go FFI must use either %s or %s, not both", rootFile, filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
 	}
-	ffiDir := filepath.Join(dir, "projectffi")
+	ffiDir := filepath.Join(dir, projectFFIPackageAlias(projectInfo))
 	if rootExists {
 		if err := copyProjectFFIFile(rootFile, filepath.Join(ffiDir, filepath.Base(rootFile))); err != nil {
 			return err
@@ -458,50 +458,70 @@ func programUsesProjectFFI(program *air.Program, projectInfo *checker.ProjectInf
 		if _, ok := dependencyAliasForModulePath(typ.ModulePath, projectInfo); ok {
 			continue
 		}
-		if strings.Contains(typ.ExternBinding, "projectffi.") || externBindingUsesUnqualifiedProjectFFIType(typ.ExternBinding) {
+		if externBindingUsesProjectFFIType(typ.ExternBinding, projectInfo) {
 			return true
 		}
 	}
 	return false
 }
 
-func externBindingUsesUnqualifiedProjectFFIType(binding string) bool {
+func externBindingUsesProjectFFIType(binding string, projectInfo *checker.ProjectInfo) bool {
 	expr, err := parser.ParseExpr(binding)
 	if err != nil {
 		return false
 	}
-	return exprUsesUnqualifiedProjectFFIType(expr)
+	return exprUsesProjectFFIType(expr, projectFFIPackageAlias(projectInfo))
 }
 
-func exprUsesUnqualifiedProjectFFIType(expr ast.Expr) bool {
+func exprUsesProjectFFIType(expr ast.Expr, projectAlias string) bool {
 	switch node := expr.(type) {
 	case *ast.Ident:
 		return ast.IsExported(node.Name) && !isPredeclaredGoTypeName(node.Name)
 	case *ast.StarExpr:
-		return exprUsesUnqualifiedProjectFFIType(node.X)
+		return exprUsesProjectFFIType(node.X, projectAlias)
 	case *ast.ArrayType:
-		return exprUsesUnqualifiedProjectFFIType(node.Elt)
+		return exprUsesProjectFFIType(node.Elt, projectAlias)
 	case *ast.MapType:
-		return exprUsesUnqualifiedProjectFFIType(node.Key) || exprUsesUnqualifiedProjectFFIType(node.Value)
+		return exprUsesProjectFFIType(node.Key, projectAlias) || exprUsesProjectFFIType(node.Value, projectAlias)
 	case *ast.IndexExpr:
-		return exprUsesUnqualifiedProjectFFIType(node.X) || exprUsesUnqualifiedProjectFFIType(node.Index)
+		return exprUsesProjectFFIType(node.X, projectAlias) || exprUsesProjectFFIType(node.Index, projectAlias)
 	case *ast.IndexListExpr:
-		if exprUsesUnqualifiedProjectFFIType(node.X) {
+		if exprUsesProjectFFIType(node.X, projectAlias) {
 			return true
 		}
 		for _, index := range node.Indices {
-			if exprUsesUnqualifiedProjectFFIType(index) {
+			if exprUsesProjectFFIType(index, projectAlias) {
 				return true
 			}
 		}
 		return false
 	case *ast.ParenExpr:
-		return exprUsesUnqualifiedProjectFFIType(node.X)
+		return exprUsesProjectFFIType(node.X, projectAlias)
 	case *ast.SelectorExpr:
-		return false
+		ident, ok := node.X.(*ast.Ident)
+		return ok && ident.Name == projectAlias
 	default:
 		return false
 	}
+}
+
+func projectFFIPackageAlias(projectInfo *checker.ProjectInfo) string {
+	name := "project"
+	if projectInfo != nil {
+		name = sanitizeName(projectInfo.ProjectName)
+	}
+	if !token.IsIdentifier(name) {
+		return "project"
+	}
+	return name
+}
+
+func projectFFIImportPath(projectInfo *checker.ProjectInfo) string {
+	return "generated/" + projectFFIPackageAlias(projectInfo)
+}
+
+func registerProjectFFIImports(imports map[string]string, projectInfo *checker.ProjectInfo) {
+	imports[projectFFIPackageAlias(projectInfo)] = projectFFIImportPath(projectInfo)
 }
 
 func projectHasFFICompanions(projectInfo *checker.ProjectInfo) bool {
