@@ -54,11 +54,11 @@ Go project companions may provide project-local extern implementations in either
 - root `ffi.go`
 - `ffi/*.go`
 
-Companion files must use `package ffi`. The Go target copies project companion files into the generated workspace as a generated project FFI package and calls bindings directly. A project should not use both root `ffi.go` and `ffi/*.go` at once, so the companion layout remains unambiguous.
+Companion files must use `package ffi`. The Go target copies project companion files into the generated workspace as a generated project FFI package named after the Ard project (sanitized for Go identifiers) and calls bindings directly. A project should not use both root `ffi.go` and `ffi/*.go` at once, so the companion layout remains unambiguous.
 
 Project Go companion adaptation should use idiomatic generated Go values rather than a universal dynamic object layer. At the project FFI boundary, the current direct-call convention is:
 
-- `extern type Name = "GoType"` values pass as the bound Go type
+- `extern type Name = "project_name.GoType"` values pass as the bound Go type; project FFI type bindings must be qualified with the generated project package name
 - scalar/list/map/function arguments pass as generated Go values
 - `T?` arguments pass as `runtime.Maybe[T]`, preserving Ard's explicit nullable representation at the host boundary
 - `T` returns directly as `T`

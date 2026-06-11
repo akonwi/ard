@@ -1219,7 +1219,7 @@ func MakeHandle() Handle { return Handle{} }
 		t.Fatal(err)
 	}
 	mainPath := filepath.Join(dir, "main.ard")
-	if err := os.WriteFile(mainPath, []byte(`extern type Handle = "Handle"
+	if err := os.WriteFile(mainPath, []byte(`extern type Handle = "demo_app.Handle"
 extern fn make_handle() Handle = "MakeHandle"
 
 struct Box {
@@ -1271,6 +1271,42 @@ fn main() {
 	}
 	if fileExists(filepath.Join(workspace, "projectffi", "ffi.go")) {
 		t.Fatalf("project FFI companion was copied to legacy projectffi package")
+	}
+}
+
+func TestGenerateSourcesRejectsUnqualifiedProjectFFIExternType(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+type Handle struct{}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`extern type Handle = "Handle"
+
+struct Box {
+  handle: Handle,
+}
+
+fn main() {}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	_, err = GenerateSources(program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo})
+	if err == nil || !strings.Contains(err.Error(), `must qualify Handle with package demo`) {
+		t.Fatalf("GenerateSources error = %v, want unqualified project FFI type rejection", err)
 	}
 }
 
@@ -1347,7 +1383,7 @@ func HandleName(h *Handle) string {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "lib.ard"), []byte(`extern type Handle = "*Handle"
+	if err := os.WriteFile(filepath.Join(dir, "lib.ard"), []byte(`extern type Handle = "*demo.Handle"
 
 extern fn make_handle_raw(name: Str) Handle!Str = "MakeHandle"
 extern fn handle_name(h: Handle) Str = "HandleName"
@@ -1504,7 +1540,7 @@ func TestBuildProgramEmitsTypeArgsForReturnOnlyGenericProjectExtern(t *testing.T
 	}
 	mainPath := filepath.Join(dir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`
-extern type RawState = "StateContext"
+extern type RawState = "demo.StateContext"
 extern fn new_raw_state() RawState = "NewRawState"
 extern fn get_raw<$T>(state: RawState, key: Str) $T? = "GetRaw"
 
@@ -1637,7 +1673,7 @@ func TestBuildProgramWrapsProjectFFIRawChannelReturn(t *testing.T) {
 use ard/async/channel
 use ard/io
 
-extern type RawEvent = "Event"
+extern type RawEvent = "demo.Event"
 extern fn events() channel::Channel<RawEvent> = "Events"
 extern fn event_value(e: RawEvent) Int = "EventValue"
 

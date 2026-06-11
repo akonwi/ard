@@ -476,7 +476,7 @@ func externBindingUsesProjectFFIType(binding string, projectInfo *checker.Projec
 func exprUsesProjectFFIType(expr ast.Expr, projectAlias string) bool {
 	switch node := expr.(type) {
 	case *ast.Ident:
-		return ast.IsExported(node.Name) && !isPredeclaredGoTypeName(node.Name)
+		return false
 	case *ast.StarExpr:
 		return exprUsesProjectFFIType(node.X, projectAlias)
 	case *ast.ArrayType:
