@@ -73,7 +73,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 		if err != nil {
 			return nil, err
 		}
-		files[moduleFileName(module)] = file
+		files[moduleFileName(program, module)] = file
 	}
 	return files, nil
 }
@@ -83,11 +83,11 @@ func collectFFIGoImports(projectInfo *checker.ProjectInfo) map[string]string {
 	for alias, path := range collectGoImportsFromPaths(stdlibFFIGoPaths()) {
 		imports[alias] = path
 	}
-	if projectHasFFICompanions(projectInfo) {
-		imports["projectffi"] = "generated/projectffi"
-	}
 	for alias, path := range collectGoImportsFromPaths(projectFFIGoPaths(projectInfo)) {
 		imports[alias] = path
+	}
+	if projectHasFFICompanions(projectInfo) {
+		registerProjectFFIImports(imports, projectInfo)
 	}
 	for alias, path := range collectGoImportsFromPaths(dependencyFFIGoPaths(projectInfo)) {
 		imports[alias] = path
@@ -320,48 +320,50 @@ func (l *lowerer) registerImportsForGoType(expr ast.Expr, imports map[string]str
 	})
 }
 
-func (l *lowerer) qualifyProjectFFIExternType(expr ast.Expr) ast.Expr {
+func (l *lowerer) validateProjectFFIExternTypeBinding(binding string, expr ast.Expr) error {
 	if !projectHasFFICompanions(l.projectInfo) {
-		return expr
+		return nil
 	}
-	return l.qualifyProjectFFIExternTypeExpr(expr)
+	if name, ok := unqualifiedExternTypeIdent(expr); ok {
+		return fmt.Errorf("project go extern type binding %q must qualify %s with package %s", binding, name, projectFFIPackageAlias(l.projectInfo))
+	}
+	return nil
 }
 
-func (l *lowerer) qualifyProjectFFIExternTypeExpr(expr ast.Expr) ast.Expr {
+func unqualifiedExternTypeIdent(expr ast.Expr) (string, bool) {
 	switch node := expr.(type) {
 	case *ast.Ident:
-		if ast.IsExported(node.Name) && !isPredeclaredGoTypeName(node.Name) {
-			l.currentImports["projectffi"] = "generated/projectffi"
-			return &ast.SelectorExpr{X: ast.NewIdent("projectffi"), Sel: ast.NewIdent(node.Name)}
-		}
-		return node
+		return node.Name, ast.IsExported(node.Name) && !isPredeclaredGoTypeName(node.Name)
 	case *ast.StarExpr:
-		node.X = l.qualifyProjectFFIExternTypeExpr(node.X)
-		return node
+		return unqualifiedExternTypeIdent(node.X)
 	case *ast.ArrayType:
-		node.Elt = l.qualifyProjectFFIExternTypeExpr(node.Elt)
-		return node
+		return unqualifiedExternTypeIdent(node.Elt)
 	case *ast.MapType:
-		node.Key = l.qualifyProjectFFIExternTypeExpr(node.Key)
-		node.Value = l.qualifyProjectFFIExternTypeExpr(node.Value)
-		return node
-	case *ast.IndexExpr:
-		node.X = l.qualifyProjectFFIExternTypeExpr(node.X)
-		node.Index = l.qualifyProjectFFIExternTypeExpr(node.Index)
-		return node
-	case *ast.IndexListExpr:
-		node.X = l.qualifyProjectFFIExternTypeExpr(node.X)
-		for i := range node.Indices {
-			node.Indices[i] = l.qualifyProjectFFIExternTypeExpr(node.Indices[i])
+		if name, ok := unqualifiedExternTypeIdent(node.Key); ok {
+			return name, true
 		}
-		return node
+		return unqualifiedExternTypeIdent(node.Value)
+	case *ast.IndexExpr:
+		if name, ok := unqualifiedExternTypeIdent(node.X); ok {
+			return name, true
+		}
+		return unqualifiedExternTypeIdent(node.Index)
+	case *ast.IndexListExpr:
+		if name, ok := unqualifiedExternTypeIdent(node.X); ok {
+			return name, true
+		}
+		for _, index := range node.Indices {
+			if name, ok := unqualifiedExternTypeIdent(index); ok {
+				return name, true
+			}
+		}
+		return "", false
 	case *ast.ParenExpr:
-		node.X = l.qualifyProjectFFIExternTypeExpr(node.X)
-		return node
+		return unqualifiedExternTypeIdent(node.X)
 	case *ast.SelectorExpr:
-		return node
+		return "", false
 	default:
-		return node
+		return "", false
 	}
 }
 
@@ -2136,7 +2138,9 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			if err != nil {
 				return nil, fmt.Errorf("invalid go extern type binding %q for %s: %w", info.ExternBinding, info.Name, err)
 			}
-			typ = l.qualifyProjectFFIExternType(typ)
+			if err := l.validateProjectFFIExternTypeBinding(info.ExternBinding, typ); err != nil {
+				return nil, err
+			}
 			l.registerFFIImportsForGoType(typ)
 			return typ, nil
 		}
@@ -5470,7 +5474,7 @@ func (l *lowerer) projectFFIBindingExpr(binding string) (ast.Expr, error) {
 	if !token.IsIdentifier(binding) {
 		return nil, fmt.Errorf("project go extern binding %q must be an unqualified function name in package ffi", binding)
 	}
-	return l.qualified("projectffi", "generated/projectffi", binding), nil
+	return l.qualified(projectFFIPackageAlias(l.projectInfo), projectFFIImportPath(l.projectInfo), binding), nil
 }
 
 func isVoidExpr(expr ast.Expr) bool {

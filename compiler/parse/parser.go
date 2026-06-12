@@ -842,10 +842,12 @@ func (p *parser) structDef(private bool) Statement {
 		return nil
 	}
 	nameToken := p.advance()
+	typeParams := p.parseGenericTypeParameters()
 	structDef := &StructDefinition{
-		Private: private,
-		Name:    Identifier{Name: nameToken.text},
-		Fields:  []StructField{},
+		Private:    private,
+		Name:       Identifier{Name: nameToken.text},
+		TypeParams: typeParams,
+		Fields:     []StructField{},
 		Location: Location{
 			Start: Point{Row: structToken.line, Col: structToken.column},
 		},

@@ -21,9 +21,19 @@ func LowerWithTests(module checker.Module) (*Program, error) {
 }
 
 func LowerWithOptions(module checker.Module, options LowerOptions) (*Program, error) {
+	return LowerModulesWithOptions([]checker.Module{module}, options)
+}
+
+func LowerModulesWithTests(modules []checker.Module) (*Program, error) {
+	return LowerModulesWithOptions(modules, LowerOptions{IncludeTests: true})
+}
+
+func LowerModulesWithOptions(modules []checker.Module, options LowerOptions) (*Program, error) {
 	l := newLowerer(options)
-	if err := l.lowerModule(module); err != nil {
-		return nil, err
+	for _, module := range modules {
+		if err := l.lowerModule(module); err != nil {
+			return nil, err
+		}
 	}
 	if err := l.lowerAllModuleGlobals(); err != nil {
 		return nil, err
@@ -507,7 +517,7 @@ func (fl *functionLowerer) declareAndLowerFunctionCall(module ModuleID, def *che
 	return id, nil
 }
 
-func (l *lowerer) declareClosureFunction(module ModuleID, def *checker.FunctionDef, typeID TypeID) (FunctionID, error) {
+func (l *lowerer) declareClosureFunction(module ModuleID, keyName string, def *checker.FunctionDef, typeID TypeID) (FunctionID, error) {
 	typeInfo, ok := l.typeInfo(typeID)
 	if !ok || typeInfo.Kind != TypeFunction {
 		return NoFunction, fmt.Errorf("closure %s lowered with non-function AIR type %d", def.Name, typeID)
@@ -520,7 +530,7 @@ func (l *lowerer) declareClosureFunction(module ModuleID, def *checker.FunctionD
 		params[i] = Param{Name: param.Name, Type: typeInfo.Params[i], Mutable: param.Mutable}
 	}
 	signature := Signature{Params: params, Return: typeInfo.Return}
-	key := concreteFunctionKey(module, def.Name, signature, "")
+	key := concreteFunctionKey(module, keyName, signature, "")
 	if id, ok := l.functions[key]; ok {
 		return id, nil
 	}
@@ -830,8 +840,62 @@ func (fl *functionLowerer) contextualType(typeID TypeID) (TypeID, error) {
 	}
 }
 
+func (fl *functionLowerer) internStructType(typ *checker.StructDef) (TypeID, error) {
+	return fl.internStructTypeWithInterner(typ, fl.internType)
+}
+
+func (fl *functionLowerer) internResolvedStructType(typ *checker.StructDef) (TypeID, error) {
+	return fl.internStructTypeWithInterner(typ, fl.internResolvedType)
+}
+
+func (fl *functionLowerer) internStructTypeWithInterner(typ *checker.StructDef, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
+	if typ.Name == "Fiber" {
+		return fl.l.internType(typ)
+	}
+	fields := sortedFieldNames(typ.Fields)
+	info := TypeInfo{Kind: TypeStruct, ModulePath: typ.ModulePath}
+	info.Fields = make([]FieldInfo, len(fields))
+	for i, name := range fields {
+		fieldTypeValue := typ.Fields[name]
+		fieldMutable := false
+		if ref, ok := fieldTypeValue.(*checker.MutableRef); ok {
+			fieldTypeValue = ref.Of()
+			fieldMutable = true
+		}
+		fieldType, err := intern(fieldTypeValue)
+		if err != nil {
+			return NoType, err
+		}
+		info.Fields[i] = FieldInfo{Name: name, Type: fieldType, Index: i, Mutable: fieldMutable}
+	}
+	name := typ.Name
+	if len(typ.TypeArgs) > 0 {
+		parts := make([]string, len(typ.TypeArgs))
+		for i, typeArg := range typ.TypeArgs {
+			typeID, err := intern(typeArg)
+			if err != nil {
+				return NoType, err
+			}
+			parts[i] = fl.l.typeName(typeID)
+		}
+		name += "<" + strings.Join(parts, ",") + ">"
+	}
+	key := "struct " + typ.ModulePath + "::" + name
+	if id, ok := fl.l.typeByKey[key]; ok {
+		return id, nil
+	}
+	id := TypeID(len(fl.l.program.Types) + 1)
+	info.ID = id
+	info.Name = name
+	fl.l.typeByKey[key] = id
+	fl.l.program.Types = append(fl.l.program.Types, info)
+	return id, nil
+}
+
 func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, error) {
 	switch typ := t.(type) {
+	case *checker.StructDef:
+		return fl.internResolvedStructType(typ)
 	case *checker.List:
 		elem, err := fl.internResolvedType(typ.Of())
 		if err != nil {
@@ -904,6 +968,8 @@ func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, 
 
 func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 	switch typ := t.(type) {
+	case *checker.StructDef:
+		return fl.internStructType(typ)
 	case *checker.List:
 		elem, err := fl.internType(typ.Of())
 		if err != nil {
@@ -1883,6 +1949,11 @@ func typeContainsTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}) boo
 		}
 		return false
 	case *checker.StructDef:
+		for _, typeArg := range typ.TypeArgs {
+			if typeContainsTypeVarSeen(typeArg, seen) {
+				return true
+			}
+		}
 		for _, fieldType := range typ.Fields {
 			if typeContainsTypeVarSeen(fieldType, seen) {
 				return true
@@ -1951,6 +2022,11 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 		}
 		return false
 	case *checker.StructDef:
+		for _, typeArg := range typ.TypeArgs {
+			if typeHasUnresolvedTypeVarSeen(typeArg, seen) {
+				return true
+			}
+		}
 		for _, fieldType := range typ.Fields {
 			if typeHasUnresolvedTypeVarSeen(fieldType, seen) {
 				return true
@@ -2067,7 +2143,18 @@ func airStructKey(typ *checker.StructDef) string {
 
 func airStructKeySeen(typ *checker.StructDef, seen map[checker.Type]struct{}) string {
 	fields := sortedFieldNames(typ.Fields)
-	key := "struct " + typ.ModulePath + "::" + typ.Name + "{"
+	key := "struct " + typ.ModulePath + "::" + typ.Name
+	if len(typ.TypeArgs) > 0 {
+		key += "<"
+		for i, typeArg := range typ.TypeArgs {
+			if i > 0 {
+				key += ","
+			}
+			key += airTypeKeySeen(typeArg, seen)
+		}
+		key += ">"
+	}
+	key += "{"
 	for i, name := range fields {
 		if i > 0 {
 			key += ","
@@ -4386,7 +4473,8 @@ func (fl *functionLowerer) lowerFieldAssignment(prop *checker.InstanceProperty, 
 }
 
 func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef) (*Expr, error) {
-	id, err := fl.l.declareClosureFunction(fl.fn.Module, def, typeID)
+	keyName := fmt.Sprintf("closure/%d/%s", fl.fn.ID, def.Name)
+	id, err := fl.l.declareClosureFunction(fl.fn.Module, keyName, def, typeID)
 	if err != nil {
 		return nil, err
 	}

@@ -123,6 +123,12 @@ func topLevelTypeDeclarationName(stmt parse.Statement) (string, parse.Location, 
 func genericParamsFromStructDeclaration(decl *parse.StructDefinition) []string {
 	params := []string{}
 	seen := map[string]bool{}
+	for _, param := range decl.TypeParams {
+		if !seen[param] {
+			params = append(params, param)
+			seen[param] = true
+		}
+	}
 	for _, field := range decl.Fields {
 		collectGenericParamsFromDeclaredType(field.Type, &params, seen)
 	}
@@ -264,10 +270,9 @@ func (c *Checker) populateStructDefinition(def *StructDef, decl *parse.StructDef
 		def.Fields[field.Name.Name] = fieldType
 		collectGenericsFromType(fieldType, &resolvedGenericParams, seenGenerics)
 	}
-	if len(resolvedGenericParams) == 0 {
+	def.GenericParams = appendUniqueStrings(declaredGenericParams, resolvedGenericParams...)
+	if len(def.GenericParams) == 0 {
 		def.GenericParams = nil
-	} else {
-		def.GenericParams = resolvedGenericParams
 	}
 	if c.resolvedTopLevelStructs == nil {
 		c.resolvedTopLevelStructs = map[string]bool{}

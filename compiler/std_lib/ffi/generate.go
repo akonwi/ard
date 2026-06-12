@@ -248,6 +248,9 @@ func aliasGoType(alias *parse.TypeDeclaration) (string, bool) {
 func lowerStruct(node *parse.StructDefinition, aliases map[string]string, definedTypes map[string]struct{}) structDecl {
 	decl := structDecl{Name: goExportedName(node.Name.Name)}
 	generics := map[string]struct{}{}
+	for _, param := range node.TypeParams {
+		generics[param] = struct{}{}
+	}
 	for _, field := range node.Fields {
 		collectGenerics(field.Type, generics)
 	}

@@ -1281,6 +1281,7 @@ type StructDef struct {
 	Self          string
 	Traits        []*Trait
 	GenericParams []string
+	TypeArgs      []Type
 	Private       bool
 }
 
@@ -1291,7 +1292,14 @@ func (def *StructDef) name() string {
 }
 
 func (def StructDef) String() string {
-	return def.name()
+	if len(def.TypeArgs) == 0 || strings.Contains(def.Name, "<") {
+		return def.name()
+	}
+	parts := make([]string, len(def.TypeArgs))
+	for i, arg := range def.TypeArgs {
+		parts[i] = arg.String()
+	}
+	return fmt.Sprintf("%s<%s>", def.name(), strings.Join(parts, ", "))
 }
 func (def StructDef) get(name string) Type {
 	// Struct type identity describes value shape. Method namespaces live on the
@@ -1306,6 +1314,14 @@ func (def StructDef) equal(other Type) bool {
 }
 
 func (def StructDef) hasGenerics() bool {
+	if len(def.GenericParams) > 0 {
+		return true
+	}
+	for _, typeArg := range def.TypeArgs {
+		if hasGenericsInType(typeArg) {
+			return true
+		}
+	}
 	for _, fieldType := range def.Fields {
 		if hasGenericsInType(fieldType) {
 			return true

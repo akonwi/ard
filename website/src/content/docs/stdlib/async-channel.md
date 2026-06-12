@@ -152,7 +152,9 @@ If you refer to the `Channel` type directly, include its type argument:
 ```ard
 use ard/async/channel
 
-extern type RawEvent = "Event"
+// If the Ard project is named `demo`, project Go FFI types are qualified
+// with the generated project package name.
+extern type RawEvent = "demo.Event"
 extern fn events() channel::Channel<RawEvent> = "Events"
 ```
 
@@ -163,7 +165,9 @@ When an Ard extern function is declared as returning `channel::Channel<T>`, the 
 ```ard
 use ard/async/channel
 
-extern type RawEvent = "Event"
+// If the Ard project is named `demo`, project Go FFI types are qualified
+// with the generated project package name.
+extern type RawEvent = "demo.Event"
 extern fn events() channel::Channel<RawEvent> = "Events"
 ```
 

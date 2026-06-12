@@ -20,6 +20,7 @@ import (
 	gotarget "github.com/akonwi/ard/go"
 	"github.com/akonwi/ard/javascript"
 	"github.com/akonwi/ard/lsp"
+	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/version"
 )
 
@@ -715,9 +716,14 @@ func formatFile(inputPath string, checkOnly bool) (bool, error) {
 }
 
 type discoveredTest struct {
-	filePath    string
 	displayPath string
+	modulePath  string
 	name        string
+}
+
+type loadedGoTestModule struct {
+	module checker.Module
+	tests  []discoveredTest
 }
 
 type testStatus string
@@ -766,77 +772,72 @@ func runGoTests(inputPath, filter string, failFast bool) bool {
 		return false
 	}
 
-	outcomes := make([]testOutcome, 0)
-	for _, path := range files {
-		loaded, err := frontend.LoadModule(path, backend.TargetGo)
-		if err != nil {
-			return false
-		}
-		tests := collectTests(loaded.Module, path, filter)
-		if len(tests) == 0 {
-			continue
-		}
-
-		program, err := air.LowerWithTests(loaded.Module)
-		if err != nil {
-			fmt.Println(err)
-			return false
-		}
-		if err := air.Validate(program); err != nil {
-			fmt.Println(err)
-			return false
-		}
-		goTests := make([]gotarget.TestCase, 0, len(tests))
-		for _, test := range tests {
-			fnID := air.NoFunction
-			for _, airTest := range program.Tests {
-				if airTest.Name == test.name {
-					fnID = airTest.Function
-					break
-				}
-			}
-			if fnID == air.NoFunction {
-				fmt.Printf("test not found: %s\n", test.displayName())
-				return false
-			}
-			goTests = append(goTests, gotarget.TestCase{Name: test.name, DisplayName: test.displayName(), Function: fnID})
-		}
-		goOutcomes, err := gotarget.RunTests(program, []string{"ard", "test", path}, goTests, failFast, loaded.ProjectInfo)
-		if err != nil {
-			fmt.Println(err)
-			return false
-		}
-		byName := map[string]discoveredTest{}
-		for _, test := range tests {
-			byName[test.displayName()] = test
-		}
-		for _, goOutcome := range goOutcomes {
-			test, ok := byName[goOutcome.DisplayName]
-			if !ok {
-				test = discoveredTest{filePath: path, displayPath: strings.TrimSuffix(filepath.Clean(path), filepath.Ext(path)), name: goOutcome.Name}
-			}
-			outcome := testOutcome{test: test, message: goOutcome.Message}
-			switch goOutcome.Status {
-			case "pass":
-				outcome.status = testPass
-			case "fail":
-				outcome.status = testFail
-			default:
-				outcome.status = testPanic
-			}
-			outcomes = append(outcomes, outcome)
-			reportTestOutcome(outcome)
-			if failFast && outcome.status != testPass {
-				reportTestSummary(outcomes)
-				return false
-			}
-		}
+	loadedModules, projectInfo, err := loadGoTestModules(inputPath, files, filter)
+	if err != nil {
+		return false
 	}
 
-	if len(outcomes) == 0 {
+	modules := make([]checker.Module, 0, len(loadedModules))
+	tests := make([]discoveredTest, 0)
+	for _, loaded := range loadedModules {
+		if len(loaded.tests) == 0 {
+			continue
+		}
+		modules = append(modules, loaded.module)
+		tests = append(tests, loaded.tests...)
+	}
+	if len(tests) == 0 {
 		fmt.Println("No tests found")
 		return true
 	}
+
+	program, err := air.LowerModulesWithTests(modules)
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+	if err := air.Validate(program); err != nil {
+		fmt.Println(err)
+		return false
+	}
+	goTests, err := goTestCasesForDiscovered(program, tests)
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+	goOutcomes, err := gotarget.RunTests(program, []string{"ard", "test", inputPath}, goTests, failFast, projectInfo)
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+
+	outcomes := make([]testOutcome, 0, len(goOutcomes))
+	byName := map[string]discoveredTest{}
+	for _, test := range tests {
+		byName[test.displayName()] = test
+	}
+	for _, goOutcome := range goOutcomes {
+		test, ok := byName[goOutcome.DisplayName]
+		if !ok {
+			test = discoveredTest{displayPath: strings.TrimSuffix(filepath.Clean(inputPath), filepath.Ext(inputPath)), name: goOutcome.Name}
+		}
+		outcome := testOutcome{test: test, message: goOutcome.Message}
+		switch goOutcome.Status {
+		case "pass":
+			outcome.status = testPass
+		case "fail":
+			outcome.status = testFail
+		default:
+			outcome.status = testPanic
+		}
+		outcomes = append(outcomes, outcome)
+		reportTestOutcome(outcome)
+		if failFast && outcome.status != testPass {
+			reportTestSummary(outcomes)
+			return false
+		}
+	}
+
 	reportTestSummary(outcomes)
 	for _, outcome := range outcomes {
 		if outcome.status != testPass {
@@ -844,6 +845,113 @@ func runGoTests(inputPath, filter string, failFast bool) bool {
 		}
 	}
 	return true
+}
+
+func loadGoTestModules(inputPath string, files []string, filter string) ([]loadedGoTestModule, *checker.ProjectInfo, error) {
+	startDir := inputPath
+	if info, err := os.Stat(inputPath); err != nil || !info.IsDir() {
+		startDir = filepath.Dir(inputPath)
+	}
+	resolver, err := checker.NewModuleResolver(startDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	projectInfo := resolver.GetProjectInfo()
+	loaded := make([]loadedGoTestModule, 0, len(files))
+	for _, path := range files {
+		module, err := loadGoTestModule(path, resolver, projectInfo)
+		if err != nil {
+			return nil, projectInfo, err
+		}
+		loaded = append(loaded, loadedGoTestModule{
+			module: module,
+			tests:  collectTests(module, path, filter),
+		})
+	}
+	return loaded, projectInfo, nil
+}
+
+func loadGoTestModule(path string, resolver *checker.ModuleResolver, projectInfo *checker.ProjectInfo) (checker.Module, error) {
+	sourceCode, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("error reading file %s - %v", path, err)
+	}
+
+	result := parse.Parse(sourceCode, path)
+	if len(result.Errors) > 0 {
+		result.PrintErrors()
+		return nil, fmt.Errorf("parse errors")
+	}
+	modulePath := goTestModulePath(projectInfo, path)
+	filePath := path
+	if projectInfo != nil && projectInfo.RootPath != "" {
+		absPath, err := filepath.Abs(path)
+		if err == nil {
+			if rel, err := filepath.Rel(projectInfo.RootPath, absPath); err == nil {
+				filePath = rel
+			}
+		}
+	}
+	c := checker.New(filePath, result.Program, resolver, checker.CheckOptions{Target: backend.TargetGo, ModulePath: modulePath})
+	c.Check()
+	if c.HasErrors() {
+		for _, diagnostic := range c.Diagnostics() {
+			fmt.Println(diagnostic)
+		}
+		return nil, fmt.Errorf("type errors")
+	}
+	return c.Module(), nil
+}
+
+func goTestModulePath(projectInfo *checker.ProjectInfo, filePath string) string {
+	cleaned, err := filepath.Abs(filepath.Clean(filePath))
+	if err != nil {
+		cleaned = filepath.Clean(filePath)
+	}
+	if projectInfo == nil || projectInfo.RootPath == "" {
+		return strings.TrimSuffix(cleaned, filepath.Ext(cleaned))
+	}
+	if modulePath, ok := stdlibModulePathForTestFile(projectInfo.RootPath, cleaned); ok {
+		return modulePath
+	}
+	rel, err := filepath.Rel(projectInfo.RootPath, cleaned)
+	if err != nil {
+		return strings.TrimSuffix(cleaned, filepath.Ext(cleaned))
+	}
+	rel = filepath.ToSlash(strings.TrimSuffix(rel, filepath.Ext(rel)))
+	if rel == "" || strings.HasPrefix(rel, "../") {
+		return strings.TrimSuffix(cleaned, filepath.Ext(cleaned))
+	}
+	return projectInfo.ProjectName + "/" + rel
+}
+
+func goTestCasesForDiscovered(program *air.Program, tests []discoveredTest) ([]gotarget.TestCase, error) {
+	byModuleAndName := map[string]air.FunctionID{}
+	for _, airTest := range program.Tests {
+		if airTest.Function < 0 || int(airTest.Function) >= len(program.Functions) {
+			continue
+		}
+		fn := program.Functions[airTest.Function]
+		if fn.Module < 0 || int(fn.Module) >= len(program.Modules) {
+			continue
+		}
+		modulePath := program.Modules[fn.Module].Path
+		byModuleAndName[testLookupKey(modulePath, airTest.Name)] = airTest.Function
+	}
+
+	goTests := make([]gotarget.TestCase, 0, len(tests))
+	for _, test := range tests {
+		fnID, ok := byModuleAndName[testLookupKey(test.modulePath, test.name)]
+		if !ok {
+			return nil, fmt.Errorf("test not found: %s", test.displayName())
+		}
+		goTests = append(goTests, gotarget.TestCase{Name: test.name, DisplayName: test.displayName(), Function: fnID})
+	}
+	return goTests, nil
+}
+
+func testLookupKey(modulePath string, name string) string {
+	return modulePath + "\x00" + name
 }
 
 func stdlibModulePathForTestFile(root, filePath string) (string, bool) {
@@ -925,8 +1033,8 @@ func collectTests(module checker.Module, filePath string, filter string) []disco
 			continue
 		}
 		test := discoveredTest{
-			filePath:    filePath,
 			displayPath: displayPath,
+			modulePath:  module.Path(),
 			name:        fn.Name,
 		}
 		if filter != "" && !strings.Contains(test.displayName(), filter) {

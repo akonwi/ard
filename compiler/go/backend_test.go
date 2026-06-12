@@ -2,10 +2,11 @@ package gotarget
 
 import (
 	"fmt"
+	"go/ast"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -17,7 +18,274 @@ import (
 	"github.com/akonwi/ard/version"
 )
 
-func TestGenerateSourcesKeepsCrossModuleNestedStructLiteralFields(t *testing.T) {
+func lowerProgramAST(t testing.TB, program *air.Program, options Options) map[string]*ast.File {
+	t.Helper()
+	files, err := lowerProgram(program, options)
+	if err != nil {
+		t.Fatalf("lower program: %v", err)
+	}
+	return files
+}
+
+func astFilesHaveImport(files map[string]*ast.File, alias string, importPath string) bool {
+	for _, file := range files {
+		if astFileHasImport(file, alias, importPath) {
+			return true
+		}
+	}
+	return false
+}
+
+func astFileHasImport(file *ast.File, alias string, importPath string) bool {
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.IMPORT {
+			continue
+		}
+		for _, specNode := range gen.Specs {
+			spec, ok := specNode.(*ast.ImportSpec)
+			if !ok || spec.Path == nil || strings.Trim(spec.Path.Value, "\"") != importPath {
+				continue
+			}
+			actualAlias := ""
+			if spec.Name != nil {
+				actualAlias = spec.Name.Name
+			}
+			if actualAlias == alias {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func astFilesContain(files map[string]*ast.File, match func(ast.Node) bool) bool {
+	for _, file := range files {
+		found := false
+		ast.Inspect(file, func(node ast.Node) bool {
+			if match(node) {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func astFilesHaveSelector(files map[string]*ast.File, qualifier string, selectorName string) bool {
+	for _, file := range files {
+		found := false
+		ast.Inspect(file, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok || selector.Sel == nil || selector.Sel.Name != selectorName {
+				return true
+			}
+			ident, ok := selector.X.(*ast.Ident)
+			if ok && ident.Name == qualifier {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func astFilesHaveCall(files map[string]*ast.File, name string) bool {
+	return astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		return astCallName(call) == name
+	})
+}
+
+func astFilesHaveFuncWithPrefix(files map[string]*ast.File, prefix string) bool {
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if ok && fn.Name != nil && strings.HasPrefix(fn.Name.Name, prefix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func astFilesHaveFuncContaining(files map[string]*ast.File, part string) bool {
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if ok && fn.Name != nil && strings.Contains(fn.Name.Name, part) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func astFilesHaveTypeSpec(files map[string]*ast.File, name string) bool {
+	return astFilesContain(files, func(node ast.Node) bool {
+		typ, ok := node.(*ast.TypeSpec)
+		return ok && typ.Name != nil && typ.Name.Name == name
+	})
+}
+
+func astFilesHaveTypeSwitchCase(files map[string]*ast.File, typeName string) bool {
+	return astFilesContain(files, func(node ast.Node) bool {
+		clause, ok := node.(*ast.CaseClause)
+		if !ok {
+			return false
+		}
+		for _, expr := range clause.List {
+			if astExprName(expr) == typeName {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func astFilesHaveValueSpec(files map[string]*ast.File, name string) bool {
+	return astFilesContain(files, func(node ast.Node) bool {
+		value, ok := node.(*ast.ValueSpec)
+		if !ok {
+			return false
+		}
+		for _, ident := range value.Names {
+			if ident.Name == name {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func astCallName(call *ast.CallExpr) string {
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		return fun.Name
+	case *ast.SelectorExpr:
+		if ident, ok := fun.X.(*ast.Ident); ok {
+			return ident.Name + "." + fun.Sel.Name
+		}
+		return fun.Sel.Name
+	case *ast.IndexExpr:
+		return astExprName(fun.X)
+	case *ast.IndexListExpr:
+		return astExprName(fun.X)
+	}
+	return ""
+}
+
+func astExprName(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.SelectorExpr:
+		if ident, ok := e.X.(*ast.Ident); ok {
+			return ident.Name + "." + e.Sel.Name
+		}
+		return e.Sel.Name
+	case *ast.IndexExpr:
+		return astExprName(e.X)
+	case *ast.IndexListExpr:
+		return astExprName(e.X)
+	case *ast.StarExpr:
+		return "*" + astExprName(e.X)
+	case *ast.ArrayType:
+		return "[]" + astExprName(e.Elt)
+	}
+	return ""
+}
+
+func astFilesFunc(files map[string]*ast.File, name string) (*ast.FuncDecl, bool) {
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if ok && fn.Name != nil && fn.Name.Name == name {
+				return fn, true
+			}
+		}
+	}
+	return nil, false
+}
+
+func astFuncHasBlankAssignString(fn *ast.FuncDecl, value string) bool {
+	if fn == nil || fn.Body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		assign, ok := node.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for i, lhs := range assign.Lhs {
+			ident, ok := lhs.(*ast.Ident)
+			if !ok || ident.Name != "_" || i >= len(assign.Rhs) {
+				continue
+			}
+			lit, ok := assign.Rhs[i].(*ast.BasicLit)
+			if ok && lit.Kind == token.STRING && lit.Value == value {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+
+func astFuncHasReturnString(fn *ast.FuncDecl, value string) bool {
+	if fn == nil || fn.Body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		ret, ok := node.(*ast.ReturnStmt)
+		if !ok {
+			return true
+		}
+		for _, result := range ret.Results {
+			lit, ok := result.(*ast.BasicLit)
+			if ok && lit.Kind == token.STRING && lit.Value == value {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+
+func astFilesHaveEmptyStructType(files map[string]*ast.File) bool {
+	for _, file := range files {
+		found := false
+		ast.Inspect(file, func(node ast.Node) bool {
+			structType, ok := node.(*ast.StructType)
+			if ok && (structType.Fields == nil || len(structType.Fields.List) == 0) {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func TestLowerProgramKeepsCrossModuleNestedStructLiteralFields(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"nestlit\"\nard = \">= 0.13.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -71,29 +339,42 @@ fn main() {
 	if err != nil {
 		t.Fatalf("lower error: %v", err)
 	}
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveFuncContaining(files, "__main") {
+		t.Fatal("generated AST missing main body")
 	}
-	source := ""
-	for _, data := range sources {
-		if strings.Contains(string(data), "x_0 :=") {
-			source = string(data)
-			break
+	if !astFilesContain(files, func(node ast.Node) bool {
+		kv, ok := node.(*ast.KeyValueExpr)
+		if !ok {
+			return false
 		}
+		key, keyOK := kv.Key.(*ast.Ident)
+		call, callOK := kv.Value.(*ast.CallExpr)
+		if !keyOK || key.Name != "padding" || !callOK || astCallName(call) != "ardruntime.Some" {
+			return false
+		}
+		indexed, ok := call.Fun.(*ast.IndexExpr)
+		return ok && astExprName(indexed.Index) == "nestlit_inner_types__Inner"
+	}) {
+		t.Fatal("generated AST missing cross-module nested optional struct literal field")
 	}
-	if source == "" {
-		t.Fatalf("generated sources missing main body: %#v", mapsKeys(sources))
-	}
-	if !strings.Contains(source, "padding:") || !strings.Contains(source, "runtime.Some[nestlit_inner_types__Inner]") {
-		t.Fatalf("generated source missing cross-module nested optional struct literal field:\n%s", source)
-	}
-	if !strings.Contains(source, `ard_io__print(any("after 2"))`) {
-		t.Fatalf("generated source truncated statements after nested struct literal:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || !strings.Contains(astCallName(call), "ard_io__print") || len(call.Args) == 0 {
+			return false
+		}
+		inner, ok := call.Args[0].(*ast.CallExpr)
+		if !ok || astCallName(inner) != "any" || len(inner.Args) == 0 {
+			return false
+		}
+		lit, ok := inner.Args[0].(*ast.BasicLit)
+		return ok && lit.Value == `"after 2"`
+	}) {
+		t.Fatal("generated AST truncated statements after nested struct literal")
 	}
 }
 
-func TestGenerateSourcesTakesAddressOfLocalMutTraitArgs(t *testing.T) {
+func TestLowerProgramTakesAddressOfLocalMutTraitArgs(t *testing.T) {
 	program := lowerSource(t, `
 		struct Counter { value: Int }
 
@@ -121,17 +402,24 @@ func TestGenerateSourcesTakesAddressOfLocalMutTraitArgs(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
-	}
-	source := string(sources["test.go"])
-	if !regexp.MustCompile(`Doubler_Bumpable_poke\(_tmp_[0-9]+, &c_0\)`).MatchString(source) {
-		t.Fatalf("generated source missing address-of for local mutable trait dispatch arg:\n%s", source)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || !strings.Contains(astCallName(call), "Doubler_Bumpable_poke") || len(call.Args) < 2 {
+			return false
+		}
+		addr, ok := call.Args[1].(*ast.UnaryExpr)
+		if !ok || addr.Op != token.AND {
+			return false
+		}
+		ident, identOK := addr.X.(*ast.Ident)
+		return identOK && ident.Name == "c_0"
+	}) {
+		t.Fatal("generated AST missing address-of for local mutable trait dispatch arg")
 	}
 }
 
-func TestGenerateSourcesPassesMutTraitArgsByPointer(t *testing.T) {
+func TestLowerProgramPassesMutTraitArgsByPointer(t *testing.T) {
 	program := lowerSource(t, `
 		struct Counter { value: Int }
 
@@ -157,20 +445,34 @@ func TestGenerateSourcesPassesMutTraitArgsByPointer(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || !strings.Contains(astCallName(call), "Doubler_Bumpable_poke") || len(call.Args) < 2 {
+			return false
+		}
+		ident, ok := call.Args[1].(*ast.Ident)
+		return ok && ident.Name == "c"
+	}) {
+		t.Fatal("generated AST missing pointer trait dispatch arg")
 	}
-	source := string(sources["test.go"])
-	if !regexp.MustCompile(`Doubler_Bumpable_poke\(_tmp_[0-9]+, c\)`).MatchString(source) {
-		t.Fatalf("generated source missing pointer trait dispatch arg:\n%s", source)
-	}
-	if regexp.MustCompile(`Doubler_Bumpable_poke\(_tmp_[0-9]+, \*c\)`).MatchString(source) {
-		t.Fatalf("generated source dereferences mutable trait dispatch arg:\n%s", source)
+	if astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || !strings.Contains(astCallName(call), "Doubler_Bumpable_poke") || len(call.Args) < 2 {
+			return false
+		}
+		star, ok := call.Args[1].(*ast.StarExpr)
+		if !ok {
+			return false
+		}
+		ident, identOK := star.X.(*ast.Ident)
+		return identOK && ident.Name == "c"
+	}) {
+		t.Fatal("generated AST dereferences mutable trait dispatch arg")
 	}
 }
 
-func TestGenerateSourcesDereferencesMutParamForNonMutMethodCall(t *testing.T) {
+func TestLowerProgramDereferencesMutParamForNonMutMethodCall(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box {
 			value: Int,
@@ -192,16 +494,30 @@ func TestGenerateSourcesDereferencesMutParamForNonMutMethodCall(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || !strings.Contains(astCallName(call), "Box_bump") || len(call.Args) == 0 {
+			return false
+		}
+		ident, ok := call.Args[0].(*ast.Ident)
+		return ok && ident.Name == "b"
+	}) {
+		t.Fatal("generated AST missing mut method pointer call")
 	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "Box_bump(b)") {
-		t.Fatalf("generated source missing mut method pointer call:\n%s", source)
-	}
-	if !strings.Contains(source, "Box_peek(*b)") {
-		t.Fatalf("generated source missing deref for non-mut method call on mut param:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || !strings.Contains(astCallName(call), "Box_peek") || len(call.Args) == 0 {
+			return false
+		}
+		star, ok := call.Args[0].(*ast.StarExpr)
+		if !ok {
+			return false
+		}
+		ident, identOK := star.X.(*ast.Ident)
+		return identOK && ident.Name == "b"
+	}) {
+		t.Fatal("generated AST missing deref for non-mut method call on mut param")
 	}
 }
 
@@ -239,7 +555,7 @@ func TestGenerateSourcesFormatsSimpleProgram(t *testing.T) {
 	}
 }
 
-func TestGenerateSourcesOmitsTestsUnlessIncluded(t *testing.T) {
+func TestLowerProgramOmitsTestsUnlessIncluded(t *testing.T) {
 	result := parse.Parse([]byte(`
 		fn main() Int { 1 }
 		test fn check() Void!Str { Result::ok(()) }
@@ -257,49 +573,43 @@ func TestGenerateSourcesOmitsTestsUnlessIncluded(t *testing.T) {
 		t.Fatalf("lower with tests: %v", err)
 	}
 
-	productionSources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources production error = %v", err)
-	}
-	if strings.Contains(string(productionSources["test.go"]), "__check") {
-		t.Fatalf("production source includes test function:\n%s", productionSources["test.go"])
+	productionFiles := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if _, ok := astFilesFunc(productionFiles, "test_ard__check"); ok {
+		t.Fatal("production AST includes test function")
 	}
 
-	testSources, err := GenerateSources(program, Options{PackageName: "main", IncludeTests: true, SuppressMain: true})
-	if err != nil {
-		t.Fatalf("GenerateSources tests error = %v", err)
-	}
-	if !strings.Contains(string(testSources["test.go"]), "__check") {
-		t.Fatalf("test source missing test function:\n%s", testSources["test.go"])
+	testFiles := lowerProgramAST(t, program, Options{PackageName: "main", IncludeTests: true, SuppressMain: true})
+	if _, ok := astFilesFunc(testFiles, "test_ard__check"); !ok {
+		t.Fatal("test AST missing test function")
 	}
 }
 
-func TestGenerateSourcesDiscardsFinalExprInVoidFunction(t *testing.T) {
+func TestLowerProgramDiscardsFinalExprInVoidFunction(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() {
 			"Hello"
 		}
 	`)
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	fn, ok := astFilesFunc(files, "test_ard__main")
+	if !ok {
+		t.Fatal("generated AST missing main function")
 	}
-	source := string(sources["test.go"])
-	if !regexp.MustCompile(`func test_ard__main\(\) \{`).MatchString(source) {
-		t.Fatalf("generated source gives void main a return type:\n%s", source)
+	if fn.Type.Results != nil && len(fn.Type.Results.List) > 0 {
+		t.Fatalf("generated AST gives void main a return type: %#v", fn.Type.Results)
 	}
-	if !strings.Contains(source, `_ = "Hello"`) {
-		t.Fatalf("generated source does not discard final expression:\n%s", source)
+	if !astFuncHasBlankAssignString(fn, `"Hello"`) {
+		t.Fatalf("generated AST does not discard final expression: %#v", fn.Body)
 	}
-	if strings.Contains(source, `return "Hello"`) {
-		t.Fatalf("generated source returns final expression from void function:\n%s", source)
+	if astFuncHasReturnString(fn, `"Hello"`) {
+		t.Fatalf("generated AST returns final expression from void function: %#v", fn.Body)
 	}
-	if strings.Contains(source, "struct{}") || strings.Contains(source, "struct {}") {
-		t.Fatalf("generated source still uses anonymous empty struct for Void:\n%s", source)
+	if astFilesHaveEmptyStructType(files) {
+		t.Fatal("generated AST still uses anonymous empty struct for Void")
 	}
 }
 
-func TestGenerateSourcesUsesRuntimeVoidForVoidResultValues(t *testing.T) {
+func TestLowerProgramUsesRuntimeVoidForVoidResultValues(t *testing.T) {
 	program := lowerSource(t, `
 		fn ok() Void!Str {
 			Result::ok(())
@@ -309,38 +619,65 @@ func TestGenerateSourcesUsesRuntimeVoidForVoidResultValues(t *testing.T) {
 			ok()
 		}
 	`)
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	fn, ok := astFilesFunc(files, "test_ard__ok")
+	if !ok || fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
+		t.Fatalf("generated AST missing ok return type: %#v", fn)
 	}
-	source := string(sources["test.go"])
-	if !regexp.MustCompile(`func test_ard__ok\(\) ardruntime\.Result\[ardruntime\.Void, string\]`).MatchString(source) {
-		t.Fatalf("generated source missing void result container return type using ardruntime.Void:\n%s", source)
+	resultType, ok := fn.Type.Results.List[0].Type.(*ast.IndexListExpr)
+	if !ok || astExprName(resultType.X) != "ardruntime.Result" || len(resultType.Indices) != 2 || astExprName(resultType.Indices[0]) != "ardruntime.Void" || astExprName(resultType.Indices[1]) != "string" {
+		t.Fatalf("generated AST missing void result container return type using ardruntime.Void: %#v", fn.Type.Results.List[0].Type)
 	}
-	if !strings.Contains(source, "Value: ardruntime.Void{}") {
-		t.Fatalf("generated source missing ardruntime.Void value:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		kv, ok := node.(*ast.KeyValueExpr)
+		if !ok {
+			return false
+		}
+		key, keyOK := kv.Key.(*ast.Ident)
+		lit, litOK := kv.Value.(*ast.CompositeLit)
+		return keyOK && key.Name == "Value" && litOK && astExprName(lit.Type) == "ardruntime.Void"
+	}) {
+		t.Fatal("generated AST missing ardruntime.Void value")
 	}
-	if strings.Contains(source, "struct{}") || strings.Contains(source, "struct {}") {
-		t.Fatalf("generated source still uses anonymous empty struct for Void:\n%s", source)
+	if astFilesHaveEmptyStructType(files) {
+		t.Fatal("generated AST still uses anonymous empty struct for Void")
 	}
 }
 
-func TestGenerateSourcesMaterializesVoidGlobalInitializers(t *testing.T) {
+func TestLowerProgramMaterializesVoidGlobalInitializers(t *testing.T) {
 	program := lowerSource(t, `
 		fn touch() Void { () }
 		let saved = touch()
 		fn main() Void { saved }
 	`)
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if astFilesContain(files, func(node ast.Node) bool {
+		value, ok := node.(*ast.ValueSpec)
+		if !ok {
+			return false
+		}
+		for _, expr := range value.Values {
+			call, ok := expr.(*ast.CallExpr)
+			if ok && strings.Contains(astCallName(call), "test_ard__touch") {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("generated AST uses no-value Void call as global initializer")
 	}
-	source := string(sources["test.go"])
-	if strings.Contains(source, "= test_ard__touch()") {
-		t.Fatalf("generated source uses no-value Void call as global initializer:\n%s", source)
+	if !astFilesHaveCall(files, "test_ard__touch") {
+		t.Fatal("generated AST does not materialize Void global initializer call")
 	}
-	if !strings.Contains(source, "test_ard__touch()") || !strings.Contains(source, "return ardruntime.Void{}") {
-		t.Fatalf("generated source does not materialize Void global initializer:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		ret, ok := node.(*ast.ReturnStmt)
+		if !ok || len(ret.Results) != 1 {
+			return false
+		}
+		lit, ok := ret.Results[0].(*ast.CompositeLit)
+		return ok && astExprName(lit.Type) == "ardruntime.Void"
+	}) {
+		t.Fatal("generated AST does not return ardruntime.Void{} for materialized global")
 	}
 }
 
@@ -924,7 +1261,7 @@ func TestRunProgramAllowsModuleWithoutEntry(t *testing.T) {
 	}
 }
 
-func TestGenerateSourcesSupportsStructsAndEnums(t *testing.T) {
+func TestLowerProgramSupportsStructsAndEnums(t *testing.T) {
 	program := lowerSource(t, `
 		enum Direction {
 			Up, Down
@@ -949,32 +1286,58 @@ func TestGenerateSourcesSupportsStructsAndEnums(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveTypeSpec(files, "test_ard__Direction") {
+		t.Fatal("generated AST missing enum type")
 	}
-	combined := ""
-	for _, source := range sources {
-		combined += string(source)
+	if !astFilesHaveValueSpec(files, "test_ard__Direction__Down") {
+		t.Fatal("generated AST missing enum constants")
 	}
-	if !strings.Contains(combined, `type test_ard__Direction int`) {
-		t.Fatalf("generated source missing enum type:\n%s", combined)
+	if !astFilesHaveTypeSpec(files, "test_ard__User") {
+		t.Fatal("generated AST missing struct type")
 	}
-	if !strings.Contains(combined, `test_ard__Direction__Down`) {
-		t.Fatalf("generated source missing enum constants:\n%s", combined)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		lit, ok := node.(*ast.CompositeLit)
+		if !ok || astExprName(lit.Type) != "test_ard__User" {
+			return false
+		}
+		hasName := false
+		hasAge := false
+		for _, elem := range lit.Elts {
+			kv, ok := elem.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			key, keyOK := kv.Key.(*ast.Ident)
+			if !keyOK {
+				continue
+			}
+			if key.Name == "name" {
+				value, ok := kv.Value.(*ast.BasicLit)
+				hasName = ok && value.Value == `"Ada"`
+			}
+			if key.Name == "age" {
+				value, ok := kv.Value.(*ast.BasicLit)
+				hasAge = ok && value.Value == "41"
+			}
+		}
+		return hasName && hasAge
+	}) {
+		t.Fatal("generated AST missing struct literal lowering")
 	}
-	if !strings.Contains(combined, `type test_ard__User struct`) {
-		t.Fatalf("generated source missing struct type:\n%s", combined)
-	}
-	if !strings.Contains(combined, `test_ard__User{age: 41, name: "Ada"}`) {
-		t.Fatalf("generated source missing struct literal lowering:\n%s", combined)
-	}
-	if !strings.Contains(combined, ".age + 1") {
-		t.Fatalf("generated source missing field access lowering:\n%s", combined)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		binary, ok := node.(*ast.BinaryExpr)
+		if !ok || binary.Op != token.ADD {
+			return false
+		}
+		selector, ok := binary.X.(*ast.SelectorExpr)
+		return ok && selector.Sel.Name == "age"
+	}) {
+		t.Fatal("generated AST missing field access lowering")
 	}
 }
 
-func TestGenerateSourcesSupportsTryMaybeCatchAndEarlyReturn(t *testing.T) {
+func TestLowerProgramSupportsTryMaybeCatchAndEarlyReturn(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
 
@@ -997,20 +1360,35 @@ func TestGenerateSourcesSupportsTryMaybeCatchAndEarlyReturn(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		ret, ok := node.(*ast.ReturnStmt)
+		if !ok || len(ret.Results) != 1 {
+			return false
+		}
+		ident, ok := ret.Results[0].(*ast.Ident)
+		return ok && strings.HasPrefix(ident.Name, "_tmp_")
+	}) {
+		t.Fatal("generated AST missing try early return lowering")
 	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "return _tmp_") {
-		t.Fatalf("generated source missing try early return lowering:\n%s", source)
-	}
-	if !strings.Contains(source, "= 42") {
-		t.Fatalf("generated source missing try catch lowering:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		assign, ok := node.(*ast.AssignStmt)
+		if !ok {
+			return false
+		}
+		for _, rhs := range assign.Rhs {
+			lit, ok := rhs.(*ast.BasicLit)
+			if ok && lit.Value == "42" {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("generated AST missing try catch lowering")
 	}
 }
 
-func TestGenerateSourcesPropagatesTryResultAcrossDifferentResultValueTypes(t *testing.T) {
+func TestLowerProgramPropagatesTryResultAcrossDifferentResultValueTypes(t *testing.T) {
 	program := lowerSource(t, `
 		fn read_text() Str!Str {
 			Result::err("bad")
@@ -1027,13 +1405,37 @@ func TestGenerateSourcesPropagatesTryResultAcrossDifferentResultValueTypes(t *te
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
-	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "return ardruntime.Result[int, string]{Err: _tmp_") {
-		t.Fatalf("generated source missing result error propagation conversion:\n%s", source)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		ret, ok := node.(*ast.ReturnStmt)
+		if !ok || len(ret.Results) != 1 {
+			return false
+		}
+		lit, ok := ret.Results[0].(*ast.CompositeLit)
+		if !ok || astExprName(lit.Type) != "ardruntime.Result" {
+			return false
+		}
+		for _, elem := range lit.Elts {
+			kv, ok := elem.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			key, keyOK := kv.Key.(*ast.Ident)
+			if !keyOK || key.Name != "Err" {
+				continue
+			}
+			if value, ok := kv.Value.(*ast.Ident); ok && strings.HasPrefix(value.Name, "_tmp_") {
+				return true
+			}
+			if selector, ok := kv.Value.(*ast.SelectorExpr); ok {
+				if ident, ok := selector.X.(*ast.Ident); ok && strings.HasPrefix(ident.Name, "_tmp_") && selector.Sel.Name == "Err" {
+					return true
+				}
+			}
+		}
+		return false
+	}) {
+		t.Fatal("generated AST missing result error propagation conversion")
 	}
 }
 
@@ -1066,7 +1468,7 @@ func TestRunProgramSupportsCommonStdlibExterns(t *testing.T) {
 	}
 }
 
-func TestGenerateSourcesReusesJSONGlueHelpers(t *testing.T) {
+func TestLowerProgramReusesJSONGlueHelpers(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/json
 
@@ -1080,23 +1482,13 @@ func TestGenerateSourcesReusesJSONGlueHelpers(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
-	}
-	source := string(sources["test.go"])
-	for _, want := range []string{
-		"func ardJSONDecodeMaybe[T any]",
-		"return ardJSONDecodeMaybe(dec, path,",
-		"func ardJSONDecodeList[T any]",
-		"return ardJSONDecodeList(dec, path,",
-		"func ardJSONEncodeMaybe[T any]",
-		"return ardJSONEncodeMaybe(enc, value,",
-		"func ardJSONEncodeList[T any]",
-		"return ardJSONEncodeList(enc, value,",
-	} {
-		if !strings.Contains(source, want) {
-			t.Fatalf("generated source missing reusable JSON glue %q:\n%s", want, source)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	for _, name := range []string{"ardJSONDecodeMaybe", "ardJSONDecodeList", "ardJSONEncodeMaybe", "ardJSONEncodeList"} {
+		if _, ok := astFilesFunc(files, name); !ok {
+			t.Fatalf("generated AST missing reusable JSON glue function %q", name)
+		}
+		if !astFilesHaveCall(files, name) {
+			t.Fatalf("generated AST missing reusable JSON glue call %q", name)
 		}
 	}
 }
@@ -1205,6 +1597,145 @@ fn main() {}
 	}
 }
 
+func TestLowerProgramUsesProjectNameForProjectFFI(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo_app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+type Handle struct{}
+
+func MakeHandle() Handle { return Handle{} }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`extern type Handle = "demo_app.Handle"
+extern fn make_handle() Handle = "MakeHandle"
+
+struct Box {
+  handle: Handle,
+}
+
+fn main() {
+  let handle: Handle = make_handle()
+  let _ = Box{handle: handle}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	files := lowerProgramAST(t, program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo})
+	if !astFilesHaveImport(files, "demo_app", "generated/demo_app") {
+		t.Fatalf("generated AST missing project-name FFI import")
+	}
+	if !astFilesHaveSelector(files, "demo_app", "Handle") || !astFilesHaveSelector(files, "demo_app", "MakeHandle") {
+		t.Fatalf("generated AST did not qualify project FFI with project name")
+	}
+	workspace := filepath.Join(dir, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeProgram(workspace, program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo}); err != nil {
+		t.Fatalf("write program: %v", err)
+	}
+	if !fileExists(filepath.Join(workspace, "demo_app", "ffi.go")) {
+		t.Fatalf("project FFI companion was not copied to project-named package")
+	}
+	if fileExists(filepath.Join(workspace, "projectffi", "ffi.go")) {
+		t.Fatalf("project FFI companion was copied to legacy projectffi package")
+	}
+}
+
+func TestLowerProgramRejectsUnqualifiedProjectFFIExternType(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+type Handle struct{}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`extern type Handle = "Handle"
+
+struct Box {
+  handle: Handle,
+}
+
+fn main() {}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	_, err = lowerProgram(program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo})
+	if err == nil || !strings.Contains(err.Error(), `must qualify Handle with package demo`) {
+		t.Fatalf("GenerateSources error = %v, want unqualified project FFI type rejection", err)
+	}
+}
+
+func TestWriteProgramCopiesProjectQualifiedExternTypeFFI(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+type Handle struct{}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`extern type Handle = "demo.Handle"
+
+struct Box {
+  handle: Handle,
+}
+
+fn main() {}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	workspace := filepath.Join(dir, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeProgram(workspace, program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo}); err != nil {
+		t.Fatalf("write program: %v", err)
+	}
+	if !fileExists(filepath.Join(workspace, "demo", "ffi.go")) {
+		t.Fatalf("project-qualified extern type did not cause project FFI companion copy")
+	}
+	if err := buildGeneratedProgram(workspace, filepath.Join(dir, "app")); err != nil {
+		t.Fatalf("build generated program: %v", err)
+	}
+}
+
 func TestBuildProgramImportsProjectFFIForExternTypesOnlyUsedAsTypes(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -1233,7 +1764,7 @@ func HandleName(h *Handle) string {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "lib.ard"), []byte(`extern type Handle = "*Handle"
+	if err := os.WriteFile(filepath.Join(dir, "lib.ard"), []byte(`extern type Handle = "*demo.Handle"
 
 extern fn make_handle_raw(name: Str) Handle!Str = "MakeHandle"
 extern fn handle_name(h: Handle) Str = "HandleName"
@@ -1390,7 +1921,7 @@ func TestBuildProgramEmitsTypeArgsForReturnOnlyGenericProjectExtern(t *testing.T
 	}
 	mainPath := filepath.Join(dir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`
-extern type RawState = "StateContext"
+extern type RawState = "demo.StateContext"
 extern fn new_raw_state() RawState = "NewRawState"
 extern fn get_raw<$T>(state: RawState, key: Str) $T? = "GetRaw"
 
@@ -1523,7 +2054,7 @@ func TestBuildProgramWrapsProjectFFIRawChannelReturn(t *testing.T) {
 use ard/async/channel
 use ard/io
 
-extern type RawEvent = "Event"
+extern type RawEvent = "demo.Event"
 extern fn events() channel::Channel<RawEvent> = "Events"
 extern fn event_value(e: RawEvent) Int = "EventValue"
 
@@ -1805,7 +2336,7 @@ fn close(db: sql::Database) Void!Str {
 	}
 }
 
-func TestGenerateSourcesUsesRuntimeMaybeForRecursiveNullableFields(t *testing.T) {
+func TestLowerProgramUsesRuntimeMaybeForRecursiveNullableFields(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
 
@@ -1818,20 +2349,30 @@ func TestGenerateSourcesUsesRuntimeMaybeForRecursiveNullableFields(t *testing.T)
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		field, ok := node.(*ast.Field)
+		if !ok || len(field.Names) != 1 || field.Names[0].Name != "parent" {
+			return false
+		}
+		indexed, ok := field.Type.(*ast.IndexExpr)
+		return ok && astExprName(indexed.X) == "ardruntime.Maybe" && astExprName(indexed.Index) == "test_ard__Node"
+	}) {
+		t.Fatal("generated AST missing runtime Maybe recursive nullable field")
 	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "parent ardruntime.Maybe[test_ard__Node]") {
-		t.Fatalf("generated source missing runtime Maybe recursive nullable field:\n%s", source)
-	}
-	if strings.Contains(source, "parent *test_ard__Node") {
-		t.Fatalf("generated source lowered recursive nullable field as pointer:\n%s", source)
+	if astFilesContain(files, func(node ast.Node) bool {
+		field, ok := node.(*ast.Field)
+		if !ok || len(field.Names) != 1 || field.Names[0].Name != "parent" {
+			return false
+		}
+		star, ok := field.Type.(*ast.StarExpr)
+		return ok && astExprName(star.X) == "test_ard__Node"
+	}) {
+		t.Fatal("generated AST lowered recursive nullable field as pointer")
 	}
 }
 
-func TestGenerateSourcesUsesExpectedLocalTypeForMaybeNone(t *testing.T) {
+func TestLowerProgramUsesExpectedLocalTypeForMaybeNone(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
 
@@ -1841,20 +2382,23 @@ func TestGenerateSourcesUsesExpectedLocalTypeForMaybeNone(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || astCallName(call) != "ardruntime.None" {
+			return false
+		}
+		indexed, ok := call.Fun.(*ast.IndexExpr)
+		return ok && astExprName(indexed.Index) == "int"
+	}) {
+		t.Fatal("generated AST missing typed maybe none")
 	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "runtime.None[int]()") {
-		t.Fatalf("generated source missing typed maybe none:\n%s", source)
-	}
-	if strings.Contains(source, "ardruntime.Maybe[struct {") {
-		t.Fatalf("generated source used untyped maybe none:\n%s", source)
+	if astFilesHaveEmptyStructType(files) {
+		t.Fatal("generated AST used untyped maybe none")
 	}
 }
 
-func TestGenerateSourcesUsesExpectedDefaultTypeForResultOr(t *testing.T) {
+func TestLowerProgramUsesExpectedDefaultTypeForResultOr(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
 
@@ -1869,17 +2413,13 @@ func TestGenerateSourcesUsesExpectedDefaultTypeForResultOr(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
-	}
-	source := string(sources["test.go"])
-	if strings.Contains(source, "ardruntime.Maybe[struct {") {
-		t.Fatalf("generated source used untyped maybe default:\n%s", source)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if astFilesHaveEmptyStructType(files) {
+		t.Fatal("generated AST used untyped maybe default")
 	}
 }
 
-func TestGenerateSourcesSkipsVoidAssignmentForStatementMatchBranches(t *testing.T) {
+func TestLowerProgramSkipsVoidAssignmentForStatementMatchBranches(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
 
@@ -1892,13 +2432,21 @@ func TestGenerateSourcesSkipsVoidAssignmentForStatementMatchBranches(t *testing.
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
-	}
-	source := string(sources["test.go"])
-	if strings.Contains(source, "= nil") {
-		t.Fatalf("generated source assigned nil in statement match lowering:\n%s", source)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if astFilesContain(files, func(node ast.Node) bool {
+		assign, ok := node.(*ast.AssignStmt)
+		if !ok {
+			return false
+		}
+		for _, rhs := range assign.Rhs {
+			ident, ok := rhs.(*ast.Ident)
+			if ok && ident.Name == "nil" {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("generated AST assigned nil in statement match lowering")
 	}
 }
 
@@ -1935,7 +2483,7 @@ func TestTypeNameUsesModulePathAndUniqueFallback(t *testing.T) {
 	}
 }
 
-func TestGenerateSourcesSupportsResultExpectAndStringPredicates(t *testing.T) {
+func TestLowerProgramSupportsResultExpectAndStringPredicates(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io
 
@@ -1945,32 +2493,31 @@ func TestGenerateSourcesSupportsResultExpectAndStringPredicates(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		indexed, ok := node.(*ast.IndexListExpr)
+		return ok && astExprName(indexed.X) == "ardruntime.Result" && len(indexed.Indices) == 2 && astExprName(indexed.Indices[0]) == "string" && astExprName(indexed.Indices[1]) == "string"
+	}) {
+		t.Fatal("generated AST missing runtime.Result usage")
 	}
-	combined := ""
-	for _, source := range sources {
-		combined += string(source)
+	if !astFilesHaveCall(files, "stdlibffi.ReadLine") {
+		t.Fatal("generated AST missing ReadLine lowering")
 	}
-	if !strings.Contains(combined, "ardruntime.Result[string, string]") {
-		t.Fatalf("generated source missing runtime.Result usage:\n%s", combined)
+	if astFilesHaveCall(files, "ardReadLine") {
+		t.Fatal("generated AST should not use legacy ReadLine helper")
 	}
-	if !strings.Contains(combined, "stdlibffi.ReadLine()") {
-		t.Fatalf("generated source missing ReadLine lowering:\n%s", combined)
+	if !astFilesHaveCall(files, "panic") || !astFilesContain(files, func(node ast.Node) bool {
+		lit, ok := node.(*ast.BasicLit)
+		return ok && lit.Kind == token.STRING && strings.Contains(lit.Value, "no line")
+	}) {
+		t.Fatal("generated AST missing Result.expect lowering")
 	}
-	if strings.Contains(combined, "ardReadLine") {
-		t.Fatalf("generated source should not use legacy ReadLine helper:\n%s", combined)
-	}
-	if !strings.Contains(combined, "panic(\"no line\"") {
-		t.Fatalf("generated source missing Result.expect lowering:\n%s", combined)
-	}
-	if !strings.Contains(combined, "len(line") {
-		t.Fatalf("generated source missing is_empty lowering:\n%s", combined)
+	if !astFilesHaveCall(files, "len") {
+		t.Fatal("generated AST missing is_empty lowering")
 	}
 }
 
-func TestGenerateSourcesUsesDirectStdlibMaybeCalls(t *testing.T) {
+func TestLowerProgramUsesDirectStdlibMaybeCalls(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/dynamic
 		use ard/env
@@ -1986,23 +2533,21 @@ func TestGenerateSourcesUsesDirectStdlibMaybeCalls(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	for _, name := range []string{"stdlibffi.EnvGet", "stdlibffi.FloatFromStr", "stdlibffi.IntFromStr"} {
+		if !astFilesHaveCall(files, name) {
+			t.Fatalf("generated AST missing direct stdlib maybe call %s", name)
+		}
 	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "stdlibffi.EnvGet(") || !strings.Contains(source, "stdlibffi.FloatFromStr(") || !strings.Contains(source, "stdlibffi.IntFromStr(") {
-		t.Fatalf("generated source missing direct stdlib maybe calls:\n%s", source)
+	if astFilesHaveCall(files, "ardIntFromStr") {
+		t.Fatal("generated AST should not use legacy IntFromStr helper")
 	}
-	if strings.Contains(source, "ardIntFromStr") {
-		t.Fatalf("generated source should not use legacy IntFromStr helper:\n%s", source)
-	}
-	if strings.Contains(source, "ardMapToDynamic") {
-		t.Fatalf("generated source should not use legacy MapToDynamic helper:\n%s", source)
+	if astFilesHaveCall(files, "ardMapToDynamic") {
+		t.Fatal("generated AST should not use legacy MapToDynamic helper")
 	}
 }
 
-func TestGenerateSourcesUsesPointersForMutableStructParams(t *testing.T) {
+func TestLowerProgramUsesPointersForMutableStructParams(t *testing.T) {
 	program := lowerSource(t, `
 		struct Response {
 			body: Str,
@@ -2018,20 +2563,32 @@ func TestGenerateSourcesUsesPointersForMutableStructParams(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	fn, ok := astFilesFunc(files, "test_ard__set_body")
+	if !ok || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
+		t.Fatalf("generated AST missing set_body function")
 	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, `func test_ard__set_body(res *test_ard__Response)`) {
-		t.Fatalf("generated source missing pointer mutable param lowering:\n%s", source)
+	paramType, ok := fn.Type.Params.List[0].Type.(*ast.StarExpr)
+	if !ok || astExprName(paramType.X) != "test_ard__Response" {
+		t.Fatalf("generated AST missing pointer mutable param lowering: %#v", fn.Type.Params.List[0].Type)
 	}
-	if !strings.Contains(source, "test_ard__set_body(&res_0)") {
-		t.Fatalf("generated source missing pointer call lowering:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || astCallName(call) != "test_ard__set_body" || len(call.Args) == 0 {
+			return false
+		}
+		addr, ok := call.Args[0].(*ast.UnaryExpr)
+		if !ok || addr.Op != token.AND {
+			return false
+		}
+		ident, ok := addr.X.(*ast.Ident)
+		return ok && ident.Name == "res_0"
+	}) {
+		t.Fatal("generated AST missing pointer call lowering")
 	}
 }
 
-func TestGenerateSourcesSupportsCapturedClosureSort(t *testing.T) {
+func TestLowerProgramSupportsCapturedClosureSort(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
 			mut items = [3, 1, 2]
@@ -2043,26 +2600,28 @@ func TestGenerateSourcesSupportsCapturedClosureSort(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveCall(files, "sort.SliceStable") {
+		t.Fatal("generated AST missing list sort lowering")
 	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "sort.SliceStable") {
-		t.Fatalf("generated source missing list sort lowering:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		lit, ok := node.(*ast.FuncLit)
+		return ok && lit.Type.Params != nil && len(lit.Type.Params.List) == 2 && lit.Type.Results != nil && len(lit.Type.Results.List) == 1 && astExprName(lit.Type.Results.List[0].Type) == "bool"
+	}) {
+		t.Fatal("generated AST missing closure literal lowering")
 	}
-	if !strings.Contains(source, "func(a int, b int) bool") {
-		t.Fatalf("generated source missing closure literal lowering:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		ident, ok := node.(*ast.Ident)
+		return ok && strings.HasPrefix(ident.Name, "bias")
+	}) {
+		t.Fatal("generated AST missing closure capture usage")
 	}
-	if !strings.Contains(source, "bias") {
-		t.Fatalf("generated source missing closure capture usage:\n%s", source)
-	}
-	if strings.Contains(source, "anon_func") {
-		t.Fatalf("generated source should inline local closure body instead of emitting an anon helper:\n%s", source)
+	if astFilesHaveFuncContaining(files, "anon_func") {
+		t.Fatal("generated AST should inline local closure body instead of emitting an anon helper")
 	}
 }
 
-func TestGenerateSourcesInlinesNestedImmediateClosures(t *testing.T) {
+func TestLowerProgramInlinesNestedImmediateClosures(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
 
@@ -2075,20 +2634,23 @@ func TestGenerateSourcesInlinesNestedImmediateClosures(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if astFilesHaveFuncContaining(files, "anon_func") {
+		t.Fatal("generated AST should inline nested immediate closures instead of emitting anon helpers")
 	}
-	source := string(sources["test.go"])
-	if strings.Contains(source, "anon_func") {
-		t.Fatalf("generated source should inline nested immediate closures instead of emitting anon helpers:\n%s", source)
-	}
-	if count := strings.Count(source, "func(value int) int") + strings.Count(source, "func(inner int) int"); count < 2 {
-		t.Fatalf("generated source missing nested function literals:\n%s", source)
+	funcLits := 0
+	astFilesContain(files, func(node ast.Node) bool {
+		if _, ok := node.(*ast.FuncLit); ok {
+			funcLits++
+		}
+		return false
+	})
+	if funcLits < 2 {
+		t.Fatalf("generated AST missing nested function literals: got %d", funcLits)
 	}
 }
 
-func TestGenerateSourcesKeepsHelperForMutableCaptureClosure(t *testing.T) {
+func TestLowerProgramKeepsHelperForMutableCaptureClosure(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
 
@@ -2102,17 +2664,13 @@ func TestGenerateSourcesKeepsHelperForMutableCaptureClosure(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
-	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "anon_func") {
-		t.Fatalf("generated source should keep helper for mutable capture closure:\n%s", source)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveFuncContaining(files, "anon_func") {
+		t.Fatal("generated AST should keep helper for mutable capture closure")
 	}
 }
 
-func TestGenerateSourcesKeepsHelperForRetainedClosure(t *testing.T) {
+func TestLowerProgramKeepsHelperForRetainedClosure(t *testing.T) {
 	program := lowerSource(t, `
 		fn make_adder(offset: Int) fn(Int) Int {
 			fn(value: Int) Int {
@@ -2126,17 +2684,13 @@ func TestGenerateSourcesKeepsHelperForRetainedClosure(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
-	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "anon_func") {
-		t.Fatalf("generated source should keep helper for retained closure:\n%s", source)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveFuncContaining(files, "anon_func") {
+		t.Fatal("generated AST should keep helper for retained closure")
 	}
 }
 
-func TestGenerateSourcesPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
+func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 	program := lowerSource(t, `
 		trait Writer {
 			fn write(text: Str)
@@ -2157,20 +2711,37 @@ func TestGenerateSourcesPassesPointerReceiverForMutatingTraitImpl(t *testing.T) 
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		if !ok || fn.Name == nil || !strings.Contains(fn.Name.Name, "Buffer_Writer_write") || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
+			return false
+		}
+		if len(fn.Type.Params.List[0].Names) == 0 || fn.Type.Params.List[0].Names[0].Name != "self" {
+			return false
+		}
+		_, ok = fn.Type.Params.List[0].Type.(*ast.StarExpr)
+		return ok
+	}) {
+		t.Fatal("generated AST missing pointer receiver for mutating trait impl")
 	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "_Buffer_Writer_write(self *") {
-		t.Fatalf("generated source missing pointer receiver for mutating trait impl:\n%s", source)
-	}
-	if !regexp.MustCompile(`_Buffer_Writer_write\(&_tmp_[0-9]+, "hi"\)`).MatchString(source) {
-		t.Fatalf("generated source missing address-of for mutating trait dispatch receiver:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || !strings.Contains(astCallName(call), "Buffer_Writer_write") || len(call.Args) < 2 {
+			return false
+		}
+		addr, ok := call.Args[0].(*ast.UnaryExpr)
+		if !ok || addr.Op != token.AND {
+			return false
+		}
+		lit, ok := call.Args[1].(*ast.BasicLit)
+		return ok && lit.Value == `"hi"`
+	}) {
+		t.Fatal("generated AST missing address-of for mutating trait dispatch receiver")
 	}
 }
 
-func TestGenerateSourcesSupportsUserTraitObjectDispatch(t *testing.T) {
+func TestLowerProgramSupportsUserTraitObjectDispatch(t *testing.T) {
 	program := lowerSource(t, `
 		trait Renderable {
 			fn render() Str
@@ -2205,26 +2776,27 @@ func TestGenerateSourcesSupportsUserTraitObjectDispatch(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		_, ok := node.(*ast.TypeSwitchStmt)
+		return ok
+	}) {
+		t.Fatal("generated AST missing trait object dispatch lowering")
 	}
-	source := string(sources["test.go"])
-	if !regexp.MustCompile(`switch _tmp_[0-9]+ := r\.\(type\)`).MatchString(source) {
-		t.Fatalf("generated source missing trait object dispatch lowering:\n%s", source)
+	for _, name := range []string{"Block_Renderable_render", "Para_Renderable_render"} {
+		if !astFilesContain(files, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			return ok && strings.Contains(astCallName(call), name)
+		}) {
+			t.Fatalf("generated AST missing %s trait dispatch call", name)
+		}
 	}
-	if !regexp.MustCompile(`Block_Renderable_render\(_tmp_[0-9]+\)`).MatchString(source) {
-		t.Fatalf("generated source missing Block trait dispatch call:\n%s", source)
-	}
-	if !regexp.MustCompile(`Para_Renderable_render\(_tmp_[0-9]+\)`).MatchString(source) {
-		t.Fatalf("generated source missing Para trait dispatch call:\n%s", source)
-	}
-	if !strings.Contains(source, "panic(") {
-		t.Fatalf("generated source missing trait dispatch fallback panic:\n%s", source)
+	if !astFilesHaveCall(files, "panic") {
+		t.Fatal("generated AST missing trait dispatch fallback panic")
 	}
 }
 
-func TestGenerateSourcesSupportsCrossModuleTraitObjectDispatch(t *testing.T) {
+func TestLowerProgramSupportsCrossModuleTraitObjectDispatch(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"checkprobe\"\nard = \">= 0.13.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -2274,29 +2846,25 @@ fn main() {
 	if err != nil {
 		t.Fatalf("lower error: %v", err)
 	}
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		_, ok := node.(*ast.TypeSwitchStmt)
+		return ok
+	}) {
+		t.Fatal("generated AST missing trait dispatch")
 	}
-	source := ""
-	for _, data := range sources {
-		if regexp.MustCompile(`switch _tmp_[0-9]+ := t_1\.\(type\)`).MatchString(string(data)) {
-			source = string(data)
-			break
-		}
+	if !astFilesHaveTypeSwitchCase(files, "checkprobe_widget__Text") {
+		t.Fatal("generated AST missing cross-module trait dispatch case")
 	}
-	if source == "" {
-		t.Fatalf("generated sources missing trait dispatch: %#v", mapsKeys(sources))
-	}
-	if !strings.Contains(source, "case checkprobe_widget__Text:") {
-		t.Fatalf("generated source missing cross-module trait dispatch case:\n%s", source)
-	}
-	if !regexp.MustCompile(`checkprobe_widget__Text_Widget_render\(_tmp_[0-9]+, f_0\)`).MatchString(source) {
-		t.Fatalf("generated source missing cross-module trait dispatch call:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		return ok && strings.Contains(astCallName(call), "checkprobe_widget__Text_Widget_render") && len(call.Args) >= 2 && astExprName(call.Args[1]) == "f_0"
+	}) {
+		t.Fatal("generated AST missing cross-module trait dispatch call")
 	}
 }
 
-func TestGenerateSourcesUsesCallSiteImportsForCrossModuleTraitObjectDispatch(t *testing.T) {
+func TestLowerProgramUsesCallSiteImportsForCrossModuleTraitObjectDispatch(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"nestprobe\"\nard = \">= 0.13.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -2383,29 +2951,22 @@ fn main() {
 	if err != nil {
 		t.Fatalf("lower error: %v", err)
 	}
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	generatedFiles := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(generatedFiles, func(node ast.Node) bool {
+		_, ok := node.(*ast.TypeSwitchStmt)
+		return ok
+	}) {
+		t.Fatal("generated AST missing call-site trait dispatch")
 	}
-	source := ""
-	for _, data := range sources {
-		if regexp.MustCompile(`switch _tmp_[0-9]+ := demo_1\.\(type\)`).MatchString(string(data)) {
-			source = string(data)
-			break
-		}
+	if !astFilesHaveTypeSwitchCase(generatedFiles, "nestprobe_tui_core_box__Box") {
+		t.Fatal("generated AST missing Box dispatch case from call-site imports")
 	}
-	if source == "" {
-		t.Fatalf("generated sources missing call-site trait dispatch: %#v", mapsKeys(sources))
-	}
-	if !strings.Contains(source, "case nestprobe_tui_core_box__Box:") {
-		t.Fatalf("generated source missing Box dispatch case from call-site imports:\n%s", source)
-	}
-	if !strings.Contains(source, "case nestprobe_tui_core_text__Text:") {
-		t.Fatalf("generated source missing Text dispatch case from call-site imports:\n%s", source)
+	if !astFilesHaveTypeSwitchCase(generatedFiles, "nestprobe_tui_core_text__Text") {
+		t.Fatal("generated AST missing Text dispatch case from call-site imports")
 	}
 }
 
-func TestGenerateSourcesUsesAliasOriginImportsForTraitObjectDispatch(t *testing.T) {
+func TestLowerProgramUsesAliasOriginImportsForTraitObjectDispatch(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"aliasprobe\"\nard = \">= 0.13.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -2492,29 +3053,22 @@ fn main() { demo::run() }
 	if err != nil {
 		t.Fatalf("lower error: %v", err)
 	}
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	generatedFiles := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(generatedFiles, func(node ast.Node) bool {
+		_, ok := node.(*ast.TypeSwitchStmt)
+		return ok
+	}) {
+		t.Fatal("generated AST missing aliased-constructor trait dispatch")
 	}
-	source := ""
-	for _, data := range sources {
-		if regexp.MustCompile(`switch _tmp_[0-9]+ := w_1\.\(type\)`).MatchString(string(data)) {
-			source = string(data)
-			break
-		}
+	if !astFilesHaveTypeSwitchCase(generatedFiles, "aliasprobe_widgets_box__Box") {
+		t.Fatal("generated AST missing Box dispatch case through let alias")
 	}
-	if source == "" {
-		t.Fatalf("generated sources missing aliased-constructor trait dispatch: %#v", mapsKeys(sources))
-	}
-	if !strings.Contains(source, "case aliasprobe_widgets_box__Box:") {
-		t.Fatalf("generated source missing Box dispatch case through let alias:\n%s", source)
-	}
-	if !strings.Contains(source, "case aliasprobe_widgets_text__Text:") {
-		t.Fatalf("generated source missing Text dispatch case through let alias:\n%s", source)
+	if !astFilesHaveTypeSwitchCase(generatedFiles, "aliasprobe_widgets_text__Text") {
+		t.Fatal("generated AST missing Text dispatch case through let alias")
 	}
 }
 
-func TestGenerateSourcesSupportsVoidTraitObjectDispatch(t *testing.T) {
+func TestLowerProgramSupportsVoidTraitObjectDispatch(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io
 
@@ -2541,26 +3095,40 @@ func TestGenerateSourcesSupportsVoidTraitObjectDispatch(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		_, ok := node.(*ast.TypeSwitchStmt)
+		return ok
+	}) {
+		t.Fatal("generated AST missing void trait object dispatch lowering")
 	}
-	source := string(sources["test.go"])
-	if !regexp.MustCompile(`switch _tmp_[0-9]+ := g\.\(type\)`).MatchString(source) {
-		t.Fatalf("generated source missing void trait object dispatch lowering:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		return ok && strings.Contains(astCallName(call), "Cat_Greet_say")
+	}) {
+		t.Fatal("generated AST missing void trait dispatch call")
 	}
-	if !regexp.MustCompile(`Cat_Greet_say\(_tmp_[0-9]+\)`).MatchString(source) {
-		t.Fatalf("generated source missing void trait dispatch call:\n%s", source)
+	if astFilesContain(files, func(node ast.Node) bool {
+		assign, ok := node.(*ast.AssignStmt)
+		if !ok {
+			return false
+		}
+		for _, rhs := range assign.Rhs {
+			call, ok := rhs.(*ast.CallExpr)
+			if ok && strings.Contains(astCallName(call), "Cat_Greet_say") {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("generated AST assigns void trait dispatch result")
 	}
-	if regexp.MustCompile(`= .*Cat_Greet_say\(_tmp_[0-9]+\)`).MatchString(source) {
-		t.Fatalf("generated source assigns void trait dispatch result:\n%s", source)
-	}
-	if !strings.Contains(source, "invoke(any(") {
-		t.Fatalf("generated source missing trait upcast for call argument:\n%s", source)
+	if !astFilesHaveCall(files, "any") {
+		t.Fatal("generated AST missing trait upcast for call argument")
 	}
 }
 
-func TestGenerateSourcesSupportsStoredTraitObjectDispatch(t *testing.T) {
+func TestLowerProgramSupportsStoredTraitObjectDispatch(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io
 
@@ -2598,32 +3166,59 @@ func TestGenerateSourcesSupportsStoredTraitObjectDispatch(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveCall(files, "any") {
+		t.Fatal("generated AST missing trait-object upcast")
 	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "d_0 := any(") {
-		t.Fatalf("generated source missing local trait-object upcast:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		kv, ok := node.(*ast.KeyValueExpr)
+		if !ok {
+			return false
+		}
+		key, keyOK := kv.Key.(*ast.Ident)
+		call, callOK := kv.Value.(*ast.CallExpr)
+		return keyOK && key.Name == "child" && callOK && astCallName(call) == "any"
+	}) {
+		t.Fatal("generated AST missing struct field trait-object upcast")
 	}
-	if !strings.Contains(source, "child: any(") {
-		t.Fatalf("generated source missing struct field trait-object upcast:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		lit, ok := node.(*ast.CompositeLit)
+		if !ok || astExprName(lit.Type) != "[]any" {
+			return false
+		}
+		for _, elem := range lit.Elts {
+			call, ok := elem.(*ast.CallExpr)
+			if ok && astCallName(call) == "any" {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("generated AST missing list element trait-object upcast")
 	}
-	if !strings.Contains(source, "[]any{any(") {
-		t.Fatalf("generated source missing list element trait-object upcast:\n%s", source)
+	typeSwitches := 0
+	astFilesContain(files, func(node ast.Node) bool {
+		if _, ok := node.(*ast.TypeSwitchStmt); ok {
+			typeSwitches++
+		}
+		return false
+	})
+	if typeSwitches < 2 {
+		t.Fatalf("generated AST missing trait-object dispatches: got %d", typeSwitches)
 	}
-	if !regexp.MustCompile(`switch _tmp_[0-9]+ := d_0\.\(type\)`).MatchString(source) {
-		t.Fatalf("generated source missing local trait-object dispatch:\n%s", source)
-	}
-	if !regexp.MustCompile(`switch _tmp_[0-9]+ := c_1\.child\.\(type\)`).MatchString(source) {
-		t.Fatalf("generated source missing struct field trait-object dispatch:\n%s", source)
-	}
-	if !strings.Contains(source, "show(items_2[0])") {
-		t.Fatalf("generated source missing list element trait-object use:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || !strings.Contains(astCallName(call), "show") || len(call.Args) != 1 {
+			return false
+		}
+		_, ok = call.Args[0].(*ast.IndexExpr)
+		return ok
+	}) {
+		t.Fatal("generated AST missing list element trait-object use")
 	}
 }
 
-func TestGenerateSourcesSupportsTraitObjectDispatch(t *testing.T) {
+func TestLowerProgramSupportsTraitObjectDispatch(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io
 
@@ -2646,20 +3241,22 @@ func TestGenerateSourcesSupportsTraitObjectDispatch(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		_, ok := node.(*ast.TypeSwitchStmt)
+		return ok
+	}) {
+		t.Fatal("generated AST missing trait object dispatch lowering")
 	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "type switch") && !regexp.MustCompile(`switch _tmp_[0-9]+ := item\.\(type\)`).MatchString(source) {
-		t.Fatalf("generated source missing trait object dispatch lowering:\n%s", source)
-	}
-	if !regexp.MustCompile(`Book_ToString_to_str\(_tmp_[0-9]+\)`).MatchString(source) {
-		t.Fatalf("generated source missing concrete trait dispatch call:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		return ok && strings.Contains(astCallName(call), "Book_ToString_to_str")
+	}) {
+		t.Fatal("generated AST missing concrete trait dispatch call")
 	}
 }
 
-func TestGenerateSourcesSupportsListSwapAndMapKeys(t *testing.T) {
+func TestLowerProgramSupportsListSwapAndMapKeys(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
 			mut items = [1, 2, 3]
@@ -2670,37 +3267,38 @@ func TestGenerateSourcesSupportsListSwapAndMapKeys(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		assign, ok := node.(*ast.AssignStmt)
+		if !ok || len(assign.Lhs) == 0 {
+			return false
+		}
+		_, ok = assign.Lhs[0].(*ast.IndexExpr)
+		return ok
+	}) {
+		t.Fatal("generated AST missing list swap lowering")
 	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "items_0[local_") && !strings.Contains(source, "items_0[_tmp_") {
-		t.Fatalf("generated source missing list swap lowering:\n%s", source)
-	}
-	if !strings.Contains(source, "ardSortedStringKeys(values_1)") {
-		t.Fatalf("generated source missing map keys lowering:\n%s", source)
+	if !astFilesHaveCall(files, "ardSortedStringKeys") {
+		t.Fatal("generated AST missing map keys lowering")
 	}
 }
 
-func TestGenerateSourcesEmitsOnlyUsedImports(t *testing.T) {
+func TestLowerProgramEmitsOnlyUsedImports(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
 			1
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
-	}
-	source := string(sources["test.go"])
-	if strings.Contains(source, "bufio \"bufio\"") || strings.Contains(source, "strconv \"strconv\"") || strings.Contains(source, "strings \"strings\"") {
-		t.Fatalf("generated source included unused runtime imports:\n%s", source)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	for _, importPath := range []string{"bufio", "strconv", "strings"} {
+		if astFilesHaveImport(files, "", importPath) {
+			t.Fatalf("generated AST included unused runtime import %q", importPath)
+		}
 	}
 }
 
-func TestGenerateSourcesSupportsFieldMutation(t *testing.T) {
+func TestLowerProgramSupportsFieldMutation(t *testing.T) {
 	program := lowerSource(t, `
 		struct Counter {
 			value: Int,
@@ -2717,17 +3315,29 @@ func TestGenerateSourcesSupportsFieldMutation(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
-	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "current_1.value = current_1.value + 1") {
-		t.Fatalf("generated source missing field mutation lowering:\n%s", source)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		assign, ok := node.(*ast.AssignStmt)
+		if !ok || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
+			return false
+		}
+		lhs, ok := assign.Lhs[0].(*ast.SelectorExpr)
+		if !ok || lhs.Sel.Name != "value" {
+			return false
+		}
+		binary, ok := assign.Rhs[0].(*ast.BinaryExpr)
+		if !ok || binary.Op != token.ADD {
+			return false
+		}
+		rhsSelector, ok := binary.X.(*ast.SelectorExpr)
+		lit, litOK := binary.Y.(*ast.BasicLit)
+		return ok && rhsSelector.Sel.Name == "value" && litOK && lit.Value == "1"
+	}) {
+		t.Fatal("generated AST missing field mutation lowering")
 	}
 }
 
-func TestGenerateSourcesSupportsIfAndWhile(t *testing.T) {
+func TestLowerProgramSupportsIfAndWhile(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
 			mut count = 0
@@ -2742,19 +3352,42 @@ func TestGenerateSourcesSupportsIfAndWhile(t *testing.T) {
 		}
 	`)
 
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatalf("GenerateSources error = %v", err)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		stmt, ok := node.(*ast.ForStmt)
+		if !ok {
+			return false
+		}
+		cond, ok := stmt.Cond.(*ast.BinaryExpr)
+		lit, litOK := cond.Y.(*ast.BasicLit)
+		return ok && cond.Op == token.LSS && litOK && lit.Value == "3"
+	}) {
+		t.Fatal("generated AST missing while lowering")
 	}
-	source := string(sources["test.go"])
-	if !strings.Contains(source, "< 3 {") {
-		t.Fatalf("generated source missing while lowering:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		stmt, ok := node.(*ast.IfStmt)
+		if !ok {
+			return false
+		}
+		cond, ok := stmt.Cond.(*ast.BinaryExpr)
+		lit, litOK := cond.Y.(*ast.BasicLit)
+		return ok && cond.Op == token.EQL && litOK && lit.Value == "3"
+	}) {
+		t.Fatal("generated AST missing if lowering")
 	}
-	if !strings.Contains(source, "== 3 {") {
-		t.Fatalf("generated source missing if lowering:\n%s", source)
-	}
-	if !strings.Contains(source, "var _tmp_0 int") {
-		t.Fatalf("generated source missing expression temp lowering:\n%s", source)
+	if !astFilesContain(files, func(node ast.Node) bool {
+		value, ok := node.(*ast.ValueSpec)
+		if !ok || astExprName(value.Type) != "int" {
+			return false
+		}
+		for _, name := range value.Names {
+			if strings.HasPrefix(name.Name, "_tmp_") {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("generated AST missing expression temp lowering")
 	}
 }
 

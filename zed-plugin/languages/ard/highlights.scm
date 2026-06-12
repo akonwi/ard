@@ -29,6 +29,7 @@
 ; Types
 (primitive_type) @type.builtin
 (type_parameter) @type.parameter
+(type_parameters "<" @punctuation.bracket ">" @punctuation.bracket)
 (type_arguments "<" @punctuation.bracket ">" @punctuation.bracket)
 (generic_type (qualified_identifier) @type)
 (generic_type (identifier) @type)

@@ -164,7 +164,15 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 				fieldsChanged = true
 			}
 		}
-		if !fieldsChanged {
+		newTypeArgs := make([]Type, len(typ.TypeArgs))
+		typeArgsChanged := false
+		for i, typeArg := range typ.TypeArgs {
+			newTypeArgs[i] = derefTypeSeen(typeArg, seen)
+			if newTypeArgs[i] != typeArg {
+				typeArgsChanged = true
+			}
+		}
+		if !fieldsChanged && !typeArgsChanged {
 			return typ
 		}
 		return &StructDef{
@@ -174,6 +182,7 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			Self:          typ.Self,
 			Traits:        typ.Traits,
 			GenericParams: append([]string(nil), typ.GenericParams...),
+			TypeArgs:      newTypeArgs,
 			Private:       typ.Private,
 		}
 	case *FunctionDef:
@@ -205,6 +214,7 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			Mutates:                 typ.Mutates,
 			IsTest:                  typ.IsTest,
 			Private:                 typ.Private,
+			GenericBindings:         cloneTypeMap(typ.GenericBindings),
 		}
 	case *ExternType:
 		if len(typ.TypeArgs) == 0 {
@@ -263,13 +273,18 @@ type Checker struct {
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
 	rootScope := makeScope(nil)
+	checkOptions := normalizeCheckOptions(moduleResolver, options)
+	modulePath := filePath
+	if checkOptions.ModulePath != "" {
+		modulePath = checkOptions.ModulePath
+	}
 	c := &Checker{
 		diagnostics:    []Diagnostic{},
 		input:          input,
 		filePath:       filePath,
-		modulePath:     filePath,
+		modulePath:     modulePath,
 		moduleResolver: moduleResolver,
-		options:        normalizeCheckOptions(moduleResolver, options),
+		options:        checkOptions,
 		program: &Program{
 			Imports:       map[string]Module{},
 			Statements:    []Statement{},
@@ -494,7 +509,7 @@ func (c *Checker) findModuleByPath(path string) Module {
 func namedTypeRequiresTypeArguments(t Type) bool {
 	switch typ := t.(type) {
 	case *StructDef:
-		return len(typ.GenericParams) > 0 || hasGenericsInType(typ)
+		return (len(typ.GenericParams) > 0 && len(typ.TypeArgs) == 0) || hasGenericsInType(typ)
 	case *ExternType:
 		return len(typ.GenericParams) > 0 || hasGenericsInType(typ)
 	default:
@@ -527,11 +542,16 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 		collectGenericsFromType(t.val, params, seen)
 		collectGenericsFromType(t.err, params, seen)
 	case *StructDef:
-		for _, genericName := range t.GenericParams {
-			if !seen[genericName] {
-				*params = append(*params, genericName)
-				seen[genericName] = true
+		if len(t.TypeArgs) == 0 {
+			for _, genericName := range t.GenericParams {
+				if !seen[genericName] {
+					*params = append(*params, genericName)
+					seen[genericName] = true
+				}
 			}
+		}
+		for _, typeArg := range t.TypeArgs {
+			collectGenericsFromType(typeArg, params, seen)
 		}
 	case *ExternType:
 		for _, genericName := range t.GenericParams {
@@ -852,6 +872,9 @@ func (c *Checker) explicitMethodGenericParams(fnDef *FunctionDef, subject Type) 
 func formatTypeForDisplay(t Type) string {
 	// For StructDef with generic fields, show type parameters
 	if structDef, ok := t.(*StructDef); ok {
+		if len(structDef.TypeArgs) > 0 {
+			return structDef.String()
+		}
 		if resultType, hasResult := structDef.Fields["result"]; hasResult {
 			// The result field's type indicates the generic parameter
 			return fmt.Sprintf("%s<%s>", structDef.String(), resultType.String())
@@ -2000,15 +2023,15 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	var structDefCopy *StructDef
 	var genericScope *SymbolTable
 	if structType.hasGenerics() {
-		// Extract generic parameter names from struct fields
-		genericNames := make(map[string]bool)
-		for _, fieldType := range structType.Fields {
-			extractGenericNames(fieldType, genericNames)
-		}
-
-		genericParams := make([]string, 0, len(genericNames))
-		for name := range genericNames {
-			genericParams = append(genericParams, name)
+		genericParams := append([]string(nil), structType.GenericParams...)
+		if len(genericParams) == 0 {
+			genericNames := make(map[string]bool)
+			for _, fieldType := range structType.Fields {
+				extractGenericNames(fieldType, genericNames)
+			}
+			for name := range genericNames {
+				genericParams = append(genericParams, name)
+			}
 		}
 
 		// Create generic scope and fresh struct copy
@@ -2153,13 +2176,22 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	instance.Fields = fields
 	instance.FieldTypes = fieldTypes
 	// Store the refined struct definition (with resolved generics) as the instance's type
+	typeArgs := make([]Type, len(structDefCopy.TypeArgs))
+	for i, typeArg := range structDefCopy.TypeArgs {
+		typeArgs[i] = derefType(typeArg)
+	}
+	genericParams := append([]string(nil), structDefCopy.GenericParams...)
+	if len(genericParams) == 0 {
+		genericParams = nil
+	}
 	instance._type = &StructDef{
 		Name:          structDefCopy.Name,
 		ModulePath:    structDefCopy.ModulePath,
 		Fields:        fieldTypes,
 		Self:          structDefCopy.Self,
 		Traits:        structDefCopy.Traits,
-		GenericParams: structDefCopy.GenericParams,
+		GenericParams: genericParams,
+		TypeArgs:      typeArgs,
 		Private:       structDefCopy.Private,
 	}
 	instance.StructType = instance._type
@@ -2446,6 +2478,12 @@ func (c *Checker) extractGenericBindingsFromSpecializedStruct(originalDef, speci
 		return bindings
 	}
 
+	for i, param := range originalDef.GenericParams {
+		if i < len(specializedDef.TypeArgs) {
+			bindings[param] = derefType(specializedDef.TypeArgs[i])
+		}
+	}
+
 	// Now compare original field types with specialized field types
 	// For each field that contains a generic in the original, extract its resolved type
 	for fieldName, originalFieldType := range originalDef.Fields {
@@ -2499,6 +2537,11 @@ func bindGenericTypes(original Type, specialized Type, bindings map[string]Type)
 		}
 	case *StructDef:
 		if spec, ok := specialized.(*StructDef); ok {
+			for i, originalArg := range orig.TypeArgs {
+				if i < len(spec.TypeArgs) {
+					bindGenericTypes(originalArg, spec.TypeArgs[i], bindings)
+				}
+			}
 			for name, originalField := range orig.Fields {
 				if specializedField, ok := spec.Fields[name]; ok {
 					bindGenericTypes(originalField, specializedField, bindings)
@@ -4681,6 +4724,13 @@ func bindInferredTypeVars(expected Type, actual Type) {
 		}
 	case *StructDef:
 		if act, ok := actual.(*StructDef); ok && exp.Name == act.Name && !namedTypeOwnersDiffer(exp.ModulePath, act.ModulePath) {
+			limit := len(exp.TypeArgs)
+			if len(act.TypeArgs) < limit {
+				limit = len(act.TypeArgs)
+			}
+			for i := 0; i < limit; i++ {
+				bindInferredTypeVars(exp.TypeArgs[i], act.TypeArgs[i])
+			}
 			for fieldName, expectedField := range exp.Fields {
 				if actualField, ok := act.Fields[fieldName]; ok {
 					bindInferredTypeVars(expectedField, actualField)
@@ -5273,6 +5323,19 @@ func inferGenericBindingsFromTypes(original, specialized Type, bindings map[stri
 			inferGenericBindingsFromTypes(orig.Key(), spec.Key(), bindings)
 			inferGenericBindingsFromTypes(orig.Value(), spec.Value(), bindings)
 		}
+	case *StructDef:
+		if spec, ok := specialized.(*StructDef); ok && orig.Name == spec.Name && !namedTypeOwnersDiffer(orig.ModulePath, spec.ModulePath) {
+			for i, typeArg := range orig.TypeArgs {
+				if i < len(spec.TypeArgs) {
+					inferGenericBindingsFromTypes(typeArg, spec.TypeArgs[i], bindings)
+				}
+			}
+			for fieldName, fieldType := range orig.Fields {
+				if specializedField, ok := spec.Fields[fieldName]; ok {
+					inferGenericBindingsFromTypes(fieldType, specializedField, bindings)
+				}
+			}
+		}
 	case *FunctionDef:
 		if spec, ok := specialized.(*FunctionDef); ok {
 			for i, param := range orig.Parameters {
@@ -5613,6 +5676,9 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 // with the concrete type, making the binding immediately visible to all callers.
 // This enables single-pass argument checking where later arguments see bindings from earlier ones.
 func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTable) error {
+	expected = deref(expected)
+	actual = deref(actual)
+
 	switch expectedType := expected.(type) {
 	case *TypeVar:
 		// Generic type - bind it to the actual type using in-place mutation.
@@ -5667,8 +5733,13 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 		return fmt.Errorf("expected list type, got %T", actual)
 	case *StructDef:
 		actualStruct, ok := actual.(*StructDef)
-		if !ok || expectedType.Name != actualStruct.Name || namedTypeOwnersDiffer(expectedType.ModulePath, actualStruct.ModulePath) {
+		if !ok || expectedType.Name != actualStruct.Name || namedTypeOwnersDiffer(expectedType.ModulePath, actualStruct.ModulePath) || len(expectedType.TypeArgs) != len(actualStruct.TypeArgs) {
 			return fmt.Errorf("type mismatch: expected %s, got %s", expected.String(), actual.String())
+		}
+		for i := range expectedType.TypeArgs {
+			if err := c.unifyTypes(expectedType.TypeArgs[i], actualStruct.TypeArgs[i], genericScope); err != nil {
+				return err
+			}
 		}
 		for fieldName, expectedField := range expectedType.Fields {
 			actualField, ok := actualStruct.Fields[fieldName]

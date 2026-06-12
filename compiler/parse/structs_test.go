@@ -61,6 +61,22 @@ func TestStructDefinitions(t *testing.T) {
 			},
 		},
 		{
+			name:  "A struct with explicit generic parameters",
+			input: `struct State<$T> { handle: StateHandle }`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StructDefinition{
+						Name:       Identifier{Name: "State"},
+						TypeParams: []string{"T"},
+						Fields: []StructField{
+							{Identifier{Name: "handle"}, &CustomType{Name: "StateHandle"}},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "A struct with mutable reference field",
 			input: `struct Context {
 					tree: mut ViewTree,

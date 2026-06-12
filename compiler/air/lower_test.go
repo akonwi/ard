@@ -153,6 +153,32 @@ func TestLowerOmitsTestsByDefault(t *testing.T) {
 	}
 }
 
+func TestLowerModulesWithTestsIncludesEachRootModuleTest(t *testing.T) {
+	left := checkedModuleWithPath(t, "demo/left", `
+		test fn same() Void!Str { Result::ok(()) }
+	`)
+	right := checkedModuleWithPath(t, "demo/right", `
+		test fn same() Void!Str { Result::ok(()) }
+	`)
+
+	program, err := LowerModulesWithTests([]checker.Module{left, right})
+	if err != nil {
+		t.Fatalf("lower modules with tests: %v", err)
+	}
+
+	seen := map[string]bool{}
+	for _, test := range program.Tests {
+		fn := program.Functions[test.Function]
+		module := program.Modules[fn.Module]
+		seen[module.Path+"::"+test.Name] = true
+	}
+	for _, want := range []string{"demo/left::same", "demo/right::same"} {
+		if !seen[want] {
+			t.Fatalf("lowered tests missing %s: %#v", want, seen)
+		}
+	}
+}
+
 func TestLowerMainEntrypoint(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
@@ -948,7 +974,7 @@ func TestLowerGenericStructMethodBodyUsesReceiverBindings(t *testing.T) {
 		}
 	`)
 
-	get := findFunction(t, program, "Box.get")
+	get := findFunction(t, program, "Box<Int>.get")
 	if typeKind(t, program, get.Signature.Return) != TypeInt {
 		t.Fatalf("get return kind = %v, want TypeInt", typeKind(t, program, get.Signature.Return))
 	}
@@ -1192,6 +1218,20 @@ func TestValidateRejectsBadTypeReference(t *testing.T) {
 	}
 }
 
+func checkedModuleWithPath(t *testing.T, modulePath string, input string) checker.Module {
+	t.Helper()
+	result := parse.Parse([]byte(input), modulePath+".ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New(modulePath+".ard", result.Program, nil, checker.CheckOptions{ModulePath: modulePath})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	return c.Module()
+}
+
 func lowerSource(t *testing.T, input string) *Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
@@ -1410,4 +1450,46 @@ func TestLowerReceiverGenericUsedOnlyInMethodBody(t *testing.T) {
 		}
 	}
 	t.Fatalf("raw extern specialization with explicit type arg not found: %#v", program.Externs)
+}
+func TestLowerGenericFunctionAdapterClosureCapturesSpecializedCallback(t *testing.T) {
+	_ = lowerSource(t, `
+		struct StateHandle { id: Int }
+		struct BuildContextHandle { id: Int }
+		struct BuildContext {}
+		struct Widget {}
+
+		struct State<$T> {
+			handle: StateHandle,
+		}
+
+		extern fn stateful_raw_init_key<$T>(key: Str, init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget = "StatefulRawInitKey"
+
+		fn stateful<$T>(key: Str, init: fn(BuildContext) $T, build: fn(BuildContext, State<$T>) Widget) Widget {
+			stateful_raw_init_key(
+				key: key,
+				init: fn(_build_ctx: BuildContextHandle, _state_handle: StateHandle) $T {
+					init(BuildContext{})
+				},
+				build: fn(_build_ctx: BuildContextHandle, state_handle: StateHandle) Widget {
+					build(BuildContext{}, State{handle: state_handle})
+				},
+			)
+		}
+
+		struct One { n: Int }
+		struct Two { s: Str }
+
+		fn main() {
+			let _ = stateful(
+				key: "one",
+				init: fn(_ctx: BuildContext) One { One{n: 1} },
+				build: fn(_ctx: BuildContext, _state: State<One>) Widget { Widget{} },
+			)
+			let _ = stateful(
+				key: "two",
+				init: fn(_ctx: BuildContext) Two { Two{s: "two"} },
+				build: fn(_ctx: BuildContext, _state: State<Two>) Widget { Widget{} },
+			)
+		}
+	`)
 }

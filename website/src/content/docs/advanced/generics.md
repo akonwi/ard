@@ -46,17 +46,39 @@ let ints = [1, 2, 3]
 let floats = map<Int, Float>(ints, Float::from_int)
 ```
 
-Type arguments correspond to the order of generics declared in the signature.
+Type arguments correspond to the order of generics introduced in the signature.
 
 ## Generic Structs
 
-Structs can also hold generics:
+Structs can also hold generics. If a generic type appears in a field, that field introduces the struct's generic parameter:
 
 ```ard
-struct Container<$T> {
-  value: $T
+struct Container {
+  value: $T,
 }
 
-let int_container = Container { value: 42 }
-let str_container = Container { value: "hello" }
+let int_container = Container{value: 42}
+let str_container = Container{value: "hello"}
+```
+
+When a generic parameter is used only by methods or other type-level behavior, declare it explicitly on the struct:
+
+```ard
+struct State<$T> {
+  handle: StateHandle,
+}
+
+impl State {
+  fn value() $T {
+    panic("not implemented")
+  }
+}
+```
+
+When referencing a generic struct as a type, provide concrete type arguments:
+
+```ard
+fn get_value(container: Container<Int>) Int {
+  container.value
+}
 ```

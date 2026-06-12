@@ -945,6 +945,93 @@ test fn panics() Void!Str {
 	})
 }
 
+func TestTestCommandDisambiguatesSameNamedTestsInSingleRun(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(projectDir, "test", "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, "test", "b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "test", "a", "case.ard"), []byte(`use ard/testing
+
+test fn same() Void!Str {
+  testing::pass()
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "test", "b", "case.ard"), []byte(`use ard/testing
+
+test fn same() Void!Str {
+  testing::fail("from b")
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var ok bool
+	output := captureStdout(t, func() {
+		ok = runTests(projectDir, "same", false)
+	})
+	if ok {
+		t.Fatalf("expected one same-named test to fail\n%s", output)
+	}
+	if !strings.Contains(output, "1 passed; 1 failed; 0 panicked") {
+		t.Fatalf("unexpected output:\n%s", output)
+	}
+	if !strings.Contains(output, filepath.Join(projectDir, "test", "a", "case")+"::same") || !strings.Contains(output, filepath.Join(projectDir, "test", "b", "case")+"::same") {
+		t.Fatalf("output missing same-named test display paths:\n%s", output)
+	}
+}
+
+func TestTestCommandSupportsImportedHelperWithCollidingGeneratedModuleName(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "project")
+	if err := os.MkdirAll(filepath.Join(projectDir, "ui"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ui", "test.ard"), []byte(`
+struct App { value: Int }
+
+fn app() App { App{value: 1} }
+
+impl App {
+  fn contains() Bool { self.value == 1 }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ui_test.ard"), []byte(`use ard/testing
+use demo/ui/test as uitest
+
+test fn helper_module() Void!Str {
+  let app = uitest::app()
+  testing::assert(app.contains(), "helper should be callable")
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var ok bool
+	output := captureStdout(t, func() {
+		ok = runTests(projectDir, "helper_module", false)
+	})
+	if !ok {
+		t.Fatalf("expected colliding generated module names to pass\n%s", output)
+	}
+	if !strings.Contains(output, "1 passed; 0 failed; 0 panicked") {
+		t.Fatalf("unexpected output:\n%s", output)
+	}
+}
+
 func TestTestCommandGoTargetSupportsProjectFFI(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")
