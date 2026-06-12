@@ -200,44 +200,109 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 	if err := writeDependencyFFICompanions(dir, program, options.ProjectInfo); err != nil {
 		return err
 	}
-	goMod := "module generated\n\ngo 1.26.0\n"
-	ardRequirement, err := writeArdModuleDependency(dir)
+	goMod, err := generatedGoMod(dir, program, options.ProjectInfo)
 	if err != nil {
 		return err
 	}
-	goMod += ardRequirement
-	goMod += dependencyGoModRequirements(options.ProjectInfo)
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		return err
+	}
+	if err := mergeGoSum(dir, program, options.ProjectInfo); err != nil {
 		return err
 	}
 	return nil
 }
 
-func dependencyGoModRequirements(projectInfo *checker.ProjectInfo) string {
+func generatedGoMod(dir string, program *air.Program, projectInfo *checker.ProjectInfo) (string, error) {
+	goMod := "module generated\n\ngo 1.26.0\n"
+	ardRequirement, err := writeArdModuleDependency(dir)
+	if err != nil {
+		return "", err
+	}
+	goMod += ardRequirement
+
+	requireSeen := requireKeys(goMod)
+	requires := make([]string, 0)
+	addDependencyGoModRequirements(&requires, requireSeen, projectInfo)
+	if programUsesProjectFFI(program, projectInfo) {
+		addProjectGoModRequirements(&requires, requireSeen, projectInfo)
+	}
+	addGoModRequirementsFromFile(&requires, requireSeen, filepath.Join(dir, "go.mod"))
+	goMod += formatRequireBlock(requires)
+
+	replaceSeen := replaceKeys(goMod)
+	replaces := make([]string, 0)
+	if programUsesProjectFFI(program, projectInfo) {
+		addProjectGoModReplaces(&replaces, replaceSeen, projectInfo)
+	}
+	addGoModReplacesFromFile(&replaces, replaceSeen, filepath.Join(dir, "go.mod"), dir)
+	goMod += formatReplaceBlock(replaces)
+	return goMod, nil
+}
+
+func addDependencyGoModRequirements(out *[]string, seen map[string]bool, projectInfo *checker.ProjectInfo) {
 	if projectInfo == nil || len(projectInfo.Dependencies) == 0 {
+		return
+	}
+	for _, dep := range projectInfo.Dependencies {
+		addGoModRequirementsFromFile(out, seen, filepath.Join(dep.VendorPath, "go.mod"))
+	}
+}
+
+func addProjectGoModRequirements(out *[]string, seen map[string]bool, projectInfo *checker.ProjectInfo) {
+	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
+		return
+	}
+	addGoModRequirementsFromFile(out, seen, filepath.Join(projectInfo.RootPath, "go.mod"))
+}
+
+func addGoModRequirementsFromFile(out *[]string, seen map[string]bool, path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	addGoModRequirements(out, seen, string(data))
+}
+
+func addGoModRequirements(out *[]string, seen map[string]bool, goMod string) {
+	for _, req := range extractRequireLines(goMod) {
+		key := requirementKey(req)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		*out = append(*out, req)
+	}
+}
+
+func requireKeys(goMod string) map[string]bool {
+	seen := map[string]bool{}
+	for _, req := range extractRequireLines(goMod) {
+		if key := requirementKey(req); key != "" {
+			seen[key] = true
+		}
+	}
+	return seen
+}
+
+func requirementKey(req string) string {
+	fields := strings.Fields(req)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+func formatRequireBlock(requires []string) string {
+	if len(requires) == 0 {
 		return ""
 	}
 	var out strings.Builder
-	seen := map[string]bool{}
-	for _, dep := range projectInfo.Dependencies {
-		data, err := os.ReadFile(filepath.Join(dep.VendorPath, "go.mod"))
-		if err != nil {
-			continue
-		}
-		for _, req := range extractRequireLines(string(data)) {
-			if seen[req] {
-				continue
-			}
-			seen[req] = true
-			if out.Len() == 0 {
-				out.WriteString("\nrequire (\n")
-			}
-			out.WriteString("\t" + req + "\n")
-		}
+	out.WriteString("\nrequire (\n")
+	for _, req := range requires {
+		out.WriteString("\t" + req + "\n")
 	}
-	if out.Len() > 0 {
-		out.WriteString(")\n")
-	}
+	out.WriteString(")\n")
 	return out.String()
 }
 
@@ -268,6 +333,156 @@ func extractRequireLines(goMod string) []string {
 	return lines
 }
 
+func addProjectGoModReplaces(out *[]string, seen map[string]bool, projectInfo *checker.ProjectInfo) {
+	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
+		return
+	}
+	addGoModReplacesFromFile(out, seen, filepath.Join(projectInfo.RootPath, "go.mod"), projectInfo.RootPath)
+}
+
+func addGoModReplacesFromFile(out *[]string, seen map[string]bool, path string, baseDir string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, replace := range extractReplaceLines(string(data)) {
+		normalized, ok := normalizeReplaceLine(replace, baseDir)
+		if !ok {
+			continue
+		}
+		key := replaceKey(normalized)
+		if key == "" || replacedModulePath(key) == "github.com/akonwi/ard" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		*out = append(*out, normalized)
+	}
+}
+
+func replaceKeys(goMod string) map[string]bool {
+	seen := map[string]bool{}
+	for _, replace := range extractReplaceLines(goMod) {
+		if key := replaceKey(replace); key != "" {
+			seen[key] = true
+		}
+	}
+	return seen
+}
+
+func extractReplaceLines(goMod string) []string {
+	lines := []string{}
+	inBlock := false
+	for _, line := range strings.Split(goMod, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		if inBlock {
+			if trimmed == ")" {
+				inBlock = false
+				continue
+			}
+			lines = append(lines, trimmed)
+			continue
+		}
+		if trimmed == "replace (" {
+			inBlock = true
+			continue
+		}
+		if strings.HasPrefix(trimmed, "replace ") {
+			lines = append(lines, strings.TrimSpace(strings.TrimPrefix(trimmed, "replace ")))
+		}
+	}
+	return lines
+}
+
+func normalizeReplaceLine(line string, baseDir string) (string, bool) {
+	parts := strings.SplitN(line, "=>", 2)
+	if len(parts) != 2 {
+		return "", false
+	}
+	lhs := strings.TrimSpace(parts[0])
+	rhs := strings.TrimSpace(parts[1])
+	rhsWithoutComment := strings.TrimSpace(strings.SplitN(rhs, "//", 2)[0])
+	fields := strings.Fields(rhsWithoutComment)
+	if len(fields) == 1 && baseDir != "" && isLocalReplacePath(fields[0]) {
+		path := fields[0]
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(baseDir, path)
+		}
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+		rhs = filepath.Clean(path)
+	}
+	if lhs == "" || rhs == "" {
+		return "", false
+	}
+	return lhs + " => " + rhs, true
+}
+
+func replaceKey(replace string) string {
+	parts := strings.SplitN(replace, "=>", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	return strings.TrimSpace(parts[0])
+}
+
+func replacedModulePath(key string) string {
+	fields := strings.Fields(key)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+func isLocalReplacePath(path string) bool {
+	return filepath.IsAbs(path) || strings.HasPrefix(path, "./") || strings.HasPrefix(path, "../")
+}
+
+func formatReplaceBlock(replaces []string) string {
+	if len(replaces) == 0 {
+		return ""
+	}
+	var out strings.Builder
+	out.WriteString("\nreplace (\n")
+	for _, replace := range replaces {
+		out.WriteString("\t" + replace + "\n")
+	}
+	out.WriteString(")\n")
+	return out.String()
+}
+
+func mergeGoSum(dir string, program *air.Program, projectInfo *checker.ProjectInfo) error {
+	goSumPath := filepath.Join(dir, "go.sum")
+	lines := make([]string, 0)
+	seen := map[string]bool{}
+	addGoSumLines(&lines, seen, goSumPath)
+	if programUsesProjectFFI(program, projectInfo) && projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
+		addGoSumLines(&lines, seen, filepath.Join(projectInfo.RootPath, "go.sum"))
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return os.WriteFile(goSumPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+}
+
+func addGoSumLines(out *[]string, seen map[string]bool, path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		*out = append(*out, trimmed)
+	}
+}
+
 func optionalProjectInfo(projectInfo []*checker.ProjectInfo) *checker.ProjectInfo {
 	if len(projectInfo) == 0 {
 		return nil
@@ -288,13 +503,64 @@ func artifactWorkspace(pathHint string, purpose string) (string, error) {
 		return "", err
 	}
 	base := filepath.Join(rootDir, "ard-out", "go", purpose)
+	preserved, err := readGoModuleFiles(base)
+	if err != nil {
+		return "", err
+	}
 	if err := os.RemoveAll(base); err != nil {
 		return "", err
 	}
 	if err := os.MkdirAll(base, 0o755); err != nil {
 		return "", err
 	}
+	if err := preserved.write(base); err != nil {
+		return "", err
+	}
 	return base, nil
+}
+
+type goModuleFiles struct {
+	goMod []byte
+	goSum []byte
+}
+
+func readGoModuleFiles(dir string) (goModuleFiles, error) {
+	var files goModuleFiles
+	var err error
+	files.goMod, err = readOptionalFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return files, err
+	}
+	files.goSum, err = readOptionalFile(filepath.Join(dir, "go.sum"))
+	if err != nil {
+		return files, err
+	}
+	return files, nil
+}
+
+func readOptionalFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err == nil {
+		return data, nil
+	}
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	return nil, err
+}
+
+func (files goModuleFiles) write(dir string) error {
+	if files.goMod != nil {
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), files.goMod, 0o644); err != nil {
+			return err
+		}
+	}
+	if files.goSum != nil {
+		if err := os.WriteFile(filepath.Join(dir, "go.sum"), files.goSum, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func artifactRootDir(pathHint string) (string, error) {
