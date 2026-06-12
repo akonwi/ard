@@ -273,13 +273,18 @@ type Checker struct {
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
 	rootScope := makeScope(nil)
+	checkOptions := normalizeCheckOptions(moduleResolver, options)
+	modulePath := filePath
+	if checkOptions.ModulePath != "" {
+		modulePath = checkOptions.ModulePath
+	}
 	c := &Checker{
 		diagnostics:    []Diagnostic{},
 		input:          input,
 		filePath:       filePath,
-		modulePath:     filePath,
+		modulePath:     modulePath,
 		moduleResolver: moduleResolver,
-		options:        normalizeCheckOptions(moduleResolver, options),
+		options:        checkOptions,
 		program: &Program{
 			Imports:       map[string]Module{},
 			Statements:    []Statement{},

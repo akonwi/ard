@@ -9,24 +9,50 @@ import (
 	"github.com/akonwi/ard/air"
 )
 
-func moduleFileName(module air.Module) string {
-	name := strings.TrimSuffix(module.Path, filepath.Ext(module.Path))
-	name = sanitizeName(name)
-	if name == "" {
-		name = fmt.Sprintf("module_%d", module.ID)
-	}
+func moduleFileName(program *air.Program, module air.Module) string {
+	name := moduleFileBaseName(program, module.ID)
 	if strings.HasSuffix(name, "_test") {
 		name += "_ard"
 	}
 	return name + ".go"
 }
 
-func globalName(program *air.Program, global air.Global) string {
-	moduleName := sanitizeName(program.Modules[global.Module].Path)
-	name := sanitizeName(global.Name)
-	if moduleName == "" {
-		moduleName = fmt.Sprintf("module_%d", global.Module)
+func moduleFileBaseName(program *air.Program, module air.ModuleID) string {
+	return moduleNameWithPath(program, module, func(path string) string {
+		return strings.TrimSuffix(path, filepath.Ext(path))
+	})
+}
+
+func moduleName(program *air.Program, module air.ModuleID) string {
+	return moduleNameWithPath(program, module, func(path string) string { return path })
+}
+
+func moduleNameWithPath(program *air.Program, module air.ModuleID, pathName func(string) string) string {
+	if program == nil || module < 0 || int(module) >= len(program.Modules) {
+		return fmt.Sprintf("module_%d", module)
 	}
+	base := sanitizeName(pathName(program.Modules[module].Path))
+	if base == "" {
+		base = fmt.Sprintf("module_%d", module)
+	}
+	for _, other := range program.Modules {
+		if other.ID == module {
+			continue
+		}
+		otherBase := sanitizeName(pathName(other.Path))
+		if otherBase == "" {
+			otherBase = fmt.Sprintf("module_%d", other.ID)
+		}
+		if otherBase == base {
+			return fmt.Sprintf("%s_m%d", base, module)
+		}
+	}
+	return base
+}
+
+func globalName(program *air.Program, global air.Global) string {
+	moduleName := moduleName(program, global.Module)
+	name := sanitizeName(global.Name)
 	if name == "" {
 		name = fmt.Sprintf("global_%d", global.ID)
 	}
@@ -34,13 +60,10 @@ func globalName(program *air.Program, global air.Global) string {
 }
 
 func functionName(program *air.Program, fn air.Function) string {
-	moduleName := sanitizeName(program.Modules[fn.Module].Path)
+	moduleName := moduleName(program, fn.Module)
 	suffix := sanitizeName(fn.Name)
 	if fn.IsScript {
 		suffix = "script"
-	}
-	if moduleName == "" {
-		moduleName = fmt.Sprintf("module_%d", fn.Module)
 	}
 	if suffix == "" {
 		suffix = fmt.Sprintf("fn_%d", fn.ID)

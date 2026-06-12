@@ -21,9 +21,19 @@ func LowerWithTests(module checker.Module) (*Program, error) {
 }
 
 func LowerWithOptions(module checker.Module, options LowerOptions) (*Program, error) {
+	return LowerModulesWithOptions([]checker.Module{module}, options)
+}
+
+func LowerModulesWithTests(modules []checker.Module) (*Program, error) {
+	return LowerModulesWithOptions(modules, LowerOptions{IncludeTests: true})
+}
+
+func LowerModulesWithOptions(modules []checker.Module, options LowerOptions) (*Program, error) {
 	l := newLowerer(options)
-	if err := l.lowerModule(module); err != nil {
-		return nil, err
+	for _, module := range modules {
+		if err := l.lowerModule(module); err != nil {
+			return nil, err
+		}
 	}
 	if err := l.lowerAllModuleGlobals(); err != nil {
 		return nil, err

@@ -73,7 +73,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 		if err != nil {
 			return nil, err
 		}
-		files[moduleFileName(module)] = file
+		files[moduleFileName(program, module)] = file
 	}
 	return files, nil
 }

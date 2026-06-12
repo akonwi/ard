@@ -153,6 +153,32 @@ func TestLowerOmitsTestsByDefault(t *testing.T) {
 	}
 }
 
+func TestLowerModulesWithTestsIncludesEachRootModuleTest(t *testing.T) {
+	left := checkedModuleWithPath(t, "demo/left", `
+		test fn same() Void!Str { Result::ok(()) }
+	`)
+	right := checkedModuleWithPath(t, "demo/right", `
+		test fn same() Void!Str { Result::ok(()) }
+	`)
+
+	program, err := LowerModulesWithTests([]checker.Module{left, right})
+	if err != nil {
+		t.Fatalf("lower modules with tests: %v", err)
+	}
+
+	seen := map[string]bool{}
+	for _, test := range program.Tests {
+		fn := program.Functions[test.Function]
+		module := program.Modules[fn.Module]
+		seen[module.Path+"::"+test.Name] = true
+	}
+	for _, want := range []string{"demo/left::same", "demo/right::same"} {
+		if !seen[want] {
+			t.Fatalf("lowered tests missing %s: %#v", want, seen)
+		}
+	}
+}
+
 func TestLowerMainEntrypoint(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
@@ -1190,6 +1216,20 @@ func TestValidateRejectsBadTypeReference(t *testing.T) {
 	if err := Validate(program); err == nil {
 		t.Fatalf("Validate succeeded, want invalid type error")
 	}
+}
+
+func checkedModuleWithPath(t *testing.T, modulePath string, input string) checker.Module {
+	t.Helper()
+	result := parse.Parse([]byte(input), modulePath+".ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New(modulePath+".ard", result.Program, nil, checker.CheckOptions{ModulePath: modulePath})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	return c.Module()
 }
 
 func lowerSource(t *testing.T, input string) *Program {

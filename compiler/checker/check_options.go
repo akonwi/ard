@@ -4,18 +4,27 @@ import "github.com/akonwi/ard/backend"
 
 type CheckOptions struct {
 	Target string
+	// ModulePath overrides the checked module identity while keeping filePath for diagnostics.
+	ModulePath string
 }
 
 func normalizeCheckOptions(moduleResolver *ModuleResolver, options []CheckOptions) CheckOptions {
-	if len(options) > 0 && options[0].Target != "" {
-		return options[0]
+	normalized := CheckOptions{}
+	if len(options) > 0 {
+		normalized = options[0]
+	}
+
+	if normalized.Target != "" {
+		return normalized
 	}
 
 	if moduleResolver != nil {
 		if project := moduleResolver.GetProjectInfo(); project != nil && project.Target != "" {
-			return CheckOptions{Target: project.Target}
+			normalized.Target = project.Target
+			return normalized
 		}
 	}
 
-	return CheckOptions{Target: backend.DefaultTarget}
+	normalized.Target = backend.DefaultTarget
+	return normalized
 }
