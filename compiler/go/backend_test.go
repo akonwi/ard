@@ -1612,7 +1612,7 @@ func MakeHandle() Handle { return Handle{} }
 	}
 	mainPath := filepath.Join(dir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`extern type Handle = "demo_app.Handle"
-extern fn make_handle() Handle = "MakeHandle"
+extern fn make_handle() Handle = "demo_app.MakeHandle"
 
 struct Box {
   handle: Handle,
@@ -1727,6 +1727,38 @@ func TestArtifactWorkspacePreservesGoModuleFiles(t *testing.T) {
 	}
 }
 
+func TestLowerProgramRejectsUnqualifiedProjectFFIExternFunction(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+func Lookup() string { return "ok" }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`extern fn lookup() Str = "Lookup"
+
+fn main() Str { lookup() }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	_, err = lowerProgram(program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo})
+	if err == nil || !strings.Contains(err.Error(), `must qualify Lookup with package demo`) {
+		t.Fatalf("GenerateSources error = %v, want unqualified project FFI function rejection", err)
+	}
+}
+
 func TestWriteProgramCarriesProjectAndGeneratedGoModuleState(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -1757,7 +1789,7 @@ func Lookup() string { return "ok" }
 		t.Fatal(err)
 	}
 	mainPath := filepath.Join(dir, "main.ard")
-	if err := os.WriteFile(mainPath, []byte(`extern fn lookup() Str = "Lookup"
+	if err := os.WriteFile(mainPath, []byte(`extern fn lookup() Str = "demo.Lookup"
 
 fn main() Str { lookup() }
 `), 0o644); err != nil {
@@ -1898,8 +1930,8 @@ func HandleName(h *Handle) string {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "lib.ard"), []byte(`extern type Handle = "*demo.Handle"
 
-extern fn make_handle_raw(name: Str) Handle!Str = "MakeHandle"
-extern fn handle_name(h: Handle) Str = "HandleName"
+extern fn make_handle_raw(name: Str) Handle!Str = "demo.MakeHandle"
+extern fn handle_name(h: Handle) Str = "demo.HandleName"
 
 struct KeyEvent { name: Str }
 struct QuitEvent {}
@@ -1959,7 +1991,7 @@ func TestBuildProgramJSONEncodeDoesNotStealStdRuntimeImport(t *testing.T) {
 use ard/json
 
 extern type Stats = "runtime.MemStats"
-extern fn stats() Stats = "Stats"
+extern fn stats() Stats = "demo.Stats"
 
 fn main() Bool {
 	let _stats = stats()
@@ -2004,8 +2036,8 @@ func TestBuildProgramSupportsProjectGoFFIWithTypedExternType(t *testing.T) {
 	if err := os.WriteFile(mainPath, []byte(`
 extern type Buffer = "*bytes.Buffer"
 
-extern fn new_buffer() Buffer!Str = "NewBuffer"
-extern fn buffer_len(buffer: Buffer) Int = "BufferLen"
+extern fn new_buffer() Buffer!Str = "demo.NewBuffer"
+extern fn buffer_len(buffer: Buffer) Int = "demo.BufferLen"
 
 fn main() Bool {
 	let buffer = new_buffer().expect("buffer")
@@ -2054,8 +2086,8 @@ func TestBuildProgramEmitsTypeArgsForReturnOnlyGenericProjectExtern(t *testing.T
 	mainPath := filepath.Join(dir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`
 extern type RawState = "demo.StateContext"
-extern fn new_raw_state() RawState = "NewRawState"
-extern fn get_raw<$T>(state: RawState, key: Str) $T? = "GetRaw"
+extern fn new_raw_state() RawState = "demo.NewRawState"
+extern fn get_raw<$T>(state: RawState, key: Str) $T? = "demo.GetRaw"
 
 struct State {
 	raw: RawState,
@@ -2121,7 +2153,7 @@ func TestBuildProgramKeepsReturnOnlyGenericWrapperSpecializations(t *testing.T) 
 	}
 	mainPath := filepath.Join(dir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`
-extern fn get_raw<$T>(key: Str) $T? = "GetRaw"
+extern fn get_raw<$T>(key: Str) $T? = "demo.GetRaw"
 
 fn id<$T>(key: Str) $T? {
 	get_raw<$T>(key)
@@ -2187,8 +2219,8 @@ use ard/async/channel
 use ard/io
 
 extern type RawEvent = "demo.Event"
-extern fn events() channel::Channel<RawEvent> = "Events"
-extern fn event_value(e: RawEvent) Int = "EventValue"
+extern fn events() channel::Channel<RawEvent> = "demo.Events"
+extern fn event_value(e: RawEvent) Int = "demo.EventValue"
 
 fn main() {
 	let ch = events()
@@ -2244,7 +2276,7 @@ func TestBuildProgramSupportsProjectGoFFIWithNativeChannel(t *testing.T) {
 	if err := os.WriteFile(mainPath, []byte(`
 use ard/async/channel
 
-extern fn observe(ch: channel::Chan<Int>) Int = "Observe"
+extern fn observe(ch: channel::Chan<Int>) Int = "demo.Observe"
 
 fn main() Bool {
 	let ch = channel::new<Int>(size: 1)
@@ -2287,19 +2319,19 @@ func TestBuildProgramSupportsProjectGoFFI(t *testing.T) {
 	mainPath := filepath.Join(dir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`
 extern fn lookup(flag: Bool) Str? = {
-	go = "Lookup"
+	go = "demo.Lookup"
 }
 
 extern fn read_value() Str!Str = {
-	go = "ReadValue"
+	go = "demo.ReadValue"
 }
 
 extern fn mark() Void!Str = {
-	go = "Mark"
+	go = "demo.Mark"
 }
 
 extern fn select(input: Str?) Str = {
-	go = "Select"
+	go = "demo.Select"
 }
 
 fn main() Bool {

@@ -1043,7 +1043,7 @@ func TestTestCommandGoTargetSupportsProjectFFI(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, "main.ard"), []byte(`use ard/testing
 
-extern fn lookup() Str = "Lookup"
+extern fn lookup() Str = "demo.Lookup"
 
 test fn ffi_passes() Void!Str {
   testing::assert(lookup() == "ok", "project ffi should run on go target")

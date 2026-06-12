@@ -5471,10 +5471,49 @@ func (l *lowerer) projectFFIBindingExpr(binding string) (ast.Expr, error) {
 	if strings.TrimSpace(binding) == "" {
 		return nil, fmt.Errorf("empty go extern binding")
 	}
-	if !token.IsIdentifier(binding) {
-		return nil, fmt.Errorf("project go extern binding %q must be an unqualified function name in package ffi", binding)
+	expr, err := parser.ParseExpr(binding)
+	if err != nil {
+		return nil, fmt.Errorf("invalid go extern binding %q: %w", binding, err)
 	}
-	return l.qualified(projectFFIPackageAlias(l.projectInfo), projectFFIImportPath(l.projectInfo), binding), nil
+	if name, ok := unqualifiedExternFunctionIdent(expr); ok {
+		return nil, fmt.Errorf("project go extern binding %q must qualify %s with package %s", binding, name, projectFFIPackageAlias(l.projectInfo))
+	}
+	if !isQualifiedExternFunctionExpr(expr) {
+		return nil, fmt.Errorf("project go extern binding %q must be a qualified function reference", binding)
+	}
+	l.registerFFIImportsForGoType(expr)
+	return expr, nil
+}
+
+func unqualifiedExternFunctionIdent(expr ast.Expr) (string, bool) {
+	switch node := expr.(type) {
+	case *ast.Ident:
+		return node.Name, true
+	case *ast.IndexExpr:
+		return unqualifiedExternFunctionIdent(node.X)
+	case *ast.IndexListExpr:
+		return unqualifiedExternFunctionIdent(node.X)
+	case *ast.ParenExpr:
+		return unqualifiedExternFunctionIdent(node.X)
+	default:
+		return "", false
+	}
+}
+
+func isQualifiedExternFunctionExpr(expr ast.Expr) bool {
+	switch node := expr.(type) {
+	case *ast.SelectorExpr:
+		_, ok := node.X.(*ast.Ident)
+		return ok && node.Sel != nil
+	case *ast.IndexExpr:
+		return isQualifiedExternFunctionExpr(node.X)
+	case *ast.IndexListExpr:
+		return isQualifiedExternFunctionExpr(node.X)
+	case *ast.ParenExpr:
+		return isQualifiedExternFunctionExpr(node.X)
+	default:
+		return false
+	}
 }
 
 func isVoidExpr(expr ast.Expr) bool {
