@@ -1691,6 +1691,138 @@ fn main() {}
 	}
 }
 
+func TestArtifactWorkspacePreservesGoModuleFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := artifactWorkspace(dir, "run")
+	if err != nil {
+		t.Fatalf("artifact workspace: %v", err)
+	}
+	goMod := []byte("module generated\n\nrequire example.com/cached v1.0.0\n")
+	goSum := []byte("example.com/cached v1.0.0 h1:abc\n")
+	if err := os.WriteFile(filepath.Join(workspace, "go.mod"), goMod, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "go.sum"), goSum, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "stale.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	workspace, err = artifactWorkspace(dir, "run")
+	if err != nil {
+		t.Fatalf("artifact workspace: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(workspace, "go.mod")); err != nil || string(got) != string(goMod) {
+		t.Fatalf("preserved go.mod = %q, %v", string(got), err)
+	}
+	if got, err := os.ReadFile(filepath.Join(workspace, "go.sum")); err != nil || string(got) != string(goSum) {
+		t.Fatalf("preserved go.sum = %q, %v", string(got), err)
+	}
+	if fileExists(filepath.Join(workspace, "stale.go")) {
+		t.Fatal("artifact workspace kept stale generated file")
+	}
+}
+
+func TestWriteProgramCarriesProjectAndGeneratedGoModuleState(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(`module demo
+
+go 1.26.0
+
+require (
+	example.com/direct v1.2.3
+	example.com/indirect v0.1.0 // indirect
+)
+
+replace example.com/direct => ../localdep
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.sum"), []byte("example.com/direct v1.2.3 h1:project\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+import _ "example.com/direct"
+
+func Lookup() string { return "ok" }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`extern fn lookup() Str = "Lookup"
+
+fn main() Str { lookup() }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	workspace := filepath.Join(dir, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "go.mod"), []byte(`module generated
+
+go 1.26.0
+
+require (
+	example.com/direct v0.0.1
+	example.com/inferred v0.9.0
+)
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "go.sum"), []byte("example.com/inferred v0.9.0 h1:generated\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeProgram(workspace, program, Options{PackageName: "main", ProjectInfo: loaded.ProjectInfo}); err != nil {
+		t.Fatalf("write program: %v", err)
+	}
+	goMod, err := os.ReadFile(filepath.Join(workspace, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	goModText := string(goMod)
+	for _, want := range []string{
+		"example.com/direct v1.2.3",
+		"example.com/indirect v0.1.0 // indirect",
+		"example.com/inferred v0.9.0",
+		"example.com/direct => " + filepath.Clean(filepath.Join(dir, "..", "localdep")),
+	} {
+		if !strings.Contains(goModText, want) {
+			t.Fatalf("generated go.mod missing %q:\n%s", want, goModText)
+		}
+	}
+	if strings.Contains(goModText, "example.com/direct v0.0.1") {
+		t.Fatalf("generated go.mod kept stale project requirement version:\n%s", goModText)
+	}
+	goSum, err := os.ReadFile(filepath.Join(workspace, "go.sum"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	goSumText := string(goSum)
+	for _, want := range []string{"example.com/direct v1.2.3 h1:project", "example.com/inferred v0.9.0 h1:generated"} {
+		if !strings.Contains(goSumText, want) {
+			t.Fatalf("generated go.sum missing %q:\n%s", want, goSumText)
+		}
+	}
+}
+
 func TestWriteProgramCopiesProjectQualifiedExternTypeFFI(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
