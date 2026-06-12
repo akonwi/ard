@@ -863,6 +863,41 @@ func (p printer) renderExpression(expression parse.Expression, parentPrecedence 
 	return p.printDoc(p.renderExpressionDoc(expression, parentPrecedence))
 }
 
+func renderableExpressionStatement(statement parse.Statement) (parse.Expression, bool) {
+	// parse.Expression currently has no marker method, so every Statement satisfies it.
+	// Keep formatter expression inlining limited to AST nodes renderExpressionDoc supports.
+	switch statement.(type) {
+	case *parse.Identifier, parse.Identifier,
+		*parse.StrLiteral, parse.StrLiteral,
+		*parse.InterpolatedStr, parse.InterpolatedStr,
+		*parse.NumLiteral, parse.NumLiteral,
+		*parse.BoolLiteral, parse.BoolLiteral,
+		*parse.VoidLiteral, parse.VoidLiteral,
+		*parse.UnaryExpression, parse.UnaryExpression,
+		*parse.BinaryExpression, parse.BinaryExpression,
+		*parse.ChainedComparison,
+		*parse.RangeExpression, parse.RangeExpression,
+		*parse.ListLiteral, parse.ListLiteral,
+		*parse.MapLiteral, parse.MapLiteral,
+		*parse.StructInstance, parse.StructInstance,
+		*parse.FunctionCall, parse.FunctionCall,
+		*parse.VariableAssignment, parse.VariableAssignment,
+		*parse.VariableDeclaration, parse.VariableDeclaration,
+		*parse.InstanceProperty, parse.InstanceProperty,
+		*parse.InstanceMethod, parse.InstanceMethod,
+		*parse.StaticProperty, parse.StaticProperty,
+		*parse.StaticFunction, parse.StaticFunction,
+		*parse.MatchExpression,
+		*parse.ConditionalMatchExpression,
+		*parse.AnonymousFunction,
+		*parse.Try,
+		*parse.BlockExpression:
+		return statement.(parse.Expression), true
+	default:
+		return nil, false
+	}
+}
+
 func (p printer) renderExpressionDoc(expression parse.Expression, parentPrecedence int) doc {
 	if expression == nil {
 		return dText("")
@@ -1014,7 +1049,7 @@ func (p printer) renderTryDoc(node *parse.Try) doc {
 		return dText(prefix + " {}")
 	}
 	if len(node.CatchBlock) == 1 {
-		if expr, ok := node.CatchBlock[0].(parse.Expression); ok {
+		if expr, ok := renderableExpressionStatement(node.CatchBlock[0]); ok {
 			rendered := p.renderExpression(expr, 0)
 			if !strings.Contains(rendered, "\n") {
 				oneLine := prefix + " { " + rendered + " }"
@@ -1305,7 +1340,7 @@ func (p printer) renderConditionalMatchCaseDoc(matchCase parse.ConditionalMatchC
 		return dText(pattern + " => ()")
 	}
 	if len(matchCase.Body) == 1 {
-		if expr, ok := matchCase.Body[0].(parse.Expression); ok {
+		if expr, ok := renderableExpressionStatement(matchCase.Body[0]); ok {
 			rendered := p.renderExpression(expr, 0)
 			if canInlineMatchBlockExpression(expr) && !strings.Contains(rendered, "\n") {
 				line := pattern + " => { " + rendered + " }"
@@ -1339,7 +1374,7 @@ func (p printer) renderMatchCaseDoc(matchCase parse.MatchCase) doc {
 		return dText(pattern + " => ()")
 	}
 	if len(matchCase.Body) == 1 {
-		if expr, ok := matchCase.Body[0].(parse.Expression); ok {
+		if expr, ok := renderableExpressionStatement(matchCase.Body[0]); ok {
 			rendered := p.renderExpression(expr, 0)
 			if canInlineMatchBlockExpression(expr) && !strings.Contains(rendered, "\n") {
 				line := pattern + " => { " + rendered + " }"

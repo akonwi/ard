@@ -165,9 +165,24 @@ func TestFormat(t *testing.T) {
 			output: "fn main() {\n  match x {\n    true => { total =+ 1 },\n    false => { total =- 1 },\n  }\n}\n",
 		},
 		{
+			name:   "keeps match arm with single if statement as block",
+			input:  "fn main() {\n  match result {\n    ok(_) => (),\n    err(e) => {\n      if not silent {\n        state.error = e\n      }\n    },\n  }\n}\n",
+			output: "fn main() {\n  match result {\n    ok(_) => (),\n    err(e) => {\n      if not silent {\n        state.error = e\n      }\n    },\n  }\n}\n",
+		},
+		{
+			name:   "keeps conditional match arm with single if statement as block",
+			input:  "fn main() {\n  match {\n    ready => {\n      if not silent {\n        state.error = message\n      }\n    },\n    _ => (),\n  }\n}\n",
+			output: "fn main() {\n  match {\n    ready => {\n      if not silent {\n        state.error = message\n      }\n    },\n    _ => (),\n  }\n}\n",
+		},
+		{
 			name:   "keeps single-expression try catch block inline when it fits",
 			input:  "fn main() {\n  let raw = try self.raw -> _ {\n    \"\"\n  }\n}\n",
 			output: "fn main() {\n  let raw = try self.raw -> _ { \"\" }\n}\n",
+		},
+		{
+			name:   "keeps try catch with single if statement as block",
+			input:  "fn main() {\n  let raw = try self.raw -> e {\n    if not silent {\n      state.error = e\n    }\n  }\n}\n",
+			output: "fn main() {\n  let raw = try self.raw -> e {\n    if not silent {\n      state.error = e\n    }\n  }\n}\n",
 		},
 		{
 			name:   "formats for loop header spacing",
