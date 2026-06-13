@@ -14,6 +14,7 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
@@ -65,7 +66,10 @@ func RunProgram(program *air.Program, args []string, projectInfo ...*checker.Pro
 	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: optionalProjectInfo(projectInfo)}); err != nil {
 		return err
 	}
-	binaryPath := filepath.Join(workspaceDir, "ard-program")
+	binaryPath := runBinaryPath(workspaceDir, optionalProjectInfo(projectInfo))
+	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
+		return err
+	}
 	if err := buildGeneratedProgram(workspaceDir, binaryPath); err != nil {
 		return err
 	}
@@ -488,6 +492,65 @@ func optionalProjectInfo(projectInfo []*checker.ProjectInfo) *checker.ProjectInf
 		return nil
 	}
 	return projectInfo[0]
+}
+
+func runBinaryPath(workspaceDir string, projectInfo *checker.ProjectInfo) string {
+	return filepath.Join(workspaceDir, ".bin", runBinaryName(projectInfo))
+}
+
+func runBinaryName(projectInfo *checker.ProjectInfo) string {
+	const fallback = "ard-program"
+	if projectInfo == nil {
+		return fallback
+	}
+	name := sanitizeRunBinaryName(projectInfo.ProjectName)
+	if name == "" {
+		return fallback
+	}
+	if isWindowsReservedFileName(name) {
+		return "ard-" + name
+	}
+	return name
+}
+
+func sanitizeRunBinaryName(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var out strings.Builder
+	hasNameChar := false
+	for _, r := range raw {
+		if r < 32 || r == 127 || strings.ContainsRune(`<>:"/\\|?*`, r) {
+			out.WriteByte('_')
+			continue
+		}
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			hasNameChar = true
+		}
+		out.WriteRune(r)
+	}
+	name := strings.Trim(out.String(), " .")
+	if !hasNameChar || name == "" {
+		return ""
+	}
+	return name
+}
+
+func isWindowsReservedFileName(name string) bool {
+	base := strings.TrimRight(name, " .")
+	if i := strings.IndexByte(base, '.'); i >= 0 {
+		base = base[:i]
+	}
+	base = strings.ToUpper(base)
+	switch base {
+	case "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$":
+		return true
+	}
+	if len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && base[3] >= '1' && base[3] <= '9' {
+		return true
+	}
+	return false
 }
 
 func inputPathFromCLIArgs(args []string) string {

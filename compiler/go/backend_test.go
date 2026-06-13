@@ -3668,6 +3668,80 @@ func TestRunProgramPreservesArtifactsUnderArdOut(t *testing.T) {
 	}
 }
 
+func TestRunBinaryNameSanitizesProjectName(t *testing.T) {
+	tests := []struct {
+		name        string
+		projectName string
+		want        string
+	}{
+		{name: "empty", projectName: "", want: "ard-program"},
+		{name: "dot dot", projectName: "..", want: "ard-program"},
+		{name: "plain", projectName: "tinear", want: "tinear"},
+		{name: "hyphen", projectName: "demo-app", want: "demo-app"},
+		{name: "path chars", projectName: `bad/name:with*chars?`, want: "bad_name_with_chars_"},
+		{name: "only invalid chars", projectName: `/**`, want: "ard-program"},
+		{name: "reserved windows name", projectName: "CON", want: "ard-CON"},
+		{name: "reserved windows name with extension", projectName: "nul.txt", want: "ard-nul.txt"},
+		{name: "trims spaces and dots", projectName: " team. ", want: "team"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := runBinaryName(&checker.ProjectInfo{ProjectName: tt.projectName})
+			if got != tt.want {
+				t.Fatalf("runBinaryName(%q) = %q, want %q", tt.projectName, got, tt.want)
+			}
+		})
+	}
+	if got := runBinaryName(nil); got != "ard-program" {
+		t.Fatalf("runBinaryName(nil) = %q, want ard-program", got)
+	}
+}
+
+func TestRunProgramNamesBinaryAfterProject(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"tinear\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi.go"), []byte(`package ffi
+
+func Lookup() int { return 1 }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`extern fn lookup() Int = "tinear.Lookup"
+
+fn main() Int { lookup() }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+
+	workspaceDir := filepath.Join(projectDir, "ard-out", "go", "run")
+	ffiDirInfo, err := os.Stat(filepath.Join(workspaceDir, "tinear"))
+	if err != nil || !ffiDirInfo.IsDir() {
+		t.Fatalf("project FFI dir stat = %v, info = %#v", err, ffiDirInfo)
+	}
+	binaryInfo, err := os.Stat(filepath.Join(workspaceDir, ".bin", "tinear"))
+	if err != nil || binaryInfo.IsDir() {
+		t.Fatalf("project-named binary stat = %v, info = %#v", err, binaryInfo)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceDir, "ard-program")); !os.IsNotExist(err) {
+		t.Fatalf("legacy ard-program binary should not exist, stat error = %v", err)
+	}
+}
+
 func TestArtifactWorkspaceUsesProjectLocalArdOut(t *testing.T) {
 	projectDir := t.TempDir()
 	mainPath := filepath.Join(projectDir, "main.ard")
