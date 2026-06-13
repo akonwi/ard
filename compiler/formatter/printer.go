@@ -881,6 +881,7 @@ func renderableExpressionStatement(statement parse.Statement) (parse.Expression,
 		*parse.MapLiteral, parse.MapLiteral,
 		*parse.StructInstance, parse.StructInstance,
 		*parse.FunctionCall, parse.FunctionCall,
+		*parse.FunctionValueCall, parse.FunctionValueCall,
 		*parse.VariableAssignment, parse.VariableAssignment,
 		*parse.VariableDeclaration, parse.VariableDeclaration,
 		*parse.InstanceProperty, parse.InstanceProperty,
@@ -978,6 +979,11 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 	case parse.FunctionCall:
 		copy := node
 		return p.renderFunctionCallDoc(&copy)
+	case *parse.FunctionValueCall:
+		return p.renderFunctionValueCallDoc(node)
+	case parse.FunctionValueCall:
+		copy := node
+		return p.renderFunctionValueCallDoc(&copy)
 	case *parse.VariableAssignment:
 		return p.renderVariableAssignmentDoc(node)
 	case parse.VariableAssignment:
@@ -1241,16 +1247,24 @@ func (p printer) renderStructInstanceDoc(node *parse.StructInstance) doc {
 }
 
 func (p printer) renderFunctionCallDoc(node *parse.FunctionCall) doc {
-	head := node.Name
-	if len(node.TypeArgs) > 0 {
-		types := make([]string, 0, len(node.TypeArgs))
-		for _, item := range node.TypeArgs {
+	return p.renderCallDoc(node.Name, node.TypeArgs, node.Args, node.Comments)
+}
+
+func (p printer) renderFunctionValueCallDoc(node *parse.FunctionValueCall) doc {
+	head := "(" + p.renderExpression(node.Callee, 0) + ")"
+	return p.renderCallDoc(head, node.TypeArgs, node.Args, node.Comments)
+}
+
+func (p printer) renderCallDoc(head string, typeArgs []parse.DeclaredType, args []parse.Argument, comments []parse.Comment) doc {
+	if len(typeArgs) > 0 {
+		types := make([]string, 0, len(typeArgs))
+		for _, item := range typeArgs {
 			types = append(types, p.renderType(item))
 		}
 		head += "<" + strings.Join(types, ", ") + ">"
 	}
-	argDocs := make([]doc, 0, len(node.Args))
-	for _, arg := range node.Args {
+	argDocs := make([]doc, 0, len(args))
+	for _, arg := range args {
 		prefix := ""
 		if arg.Name != "" {
 			prefix += arg.Name + ": "
@@ -1260,16 +1274,16 @@ func (p printer) renderFunctionCallDoc(node *parse.FunctionCall) doc {
 		}
 		argDocs = append(argDocs, dConcat(dText(prefix), p.renderExpressionValueDoc(arg.Value, 0)))
 	}
-	if len(argDocs) == 0 && len(node.Comments) == 0 {
+	if len(argDocs) == 0 && len(comments) == 0 {
 		return dText(head + "()")
 	}
 
 	body := dJoin(dConcat(dText(","), dLine()), argDocs)
 	body = dConcat(body, dIfBreak(dText(","), dText("")))
 
-	if len(node.Comments) > 0 {
-		commentDocs := make([]doc, 0, len(node.Comments))
-		for _, comment := range node.Comments {
+	if len(comments) > 0 {
+		commentDocs := make([]doc, 0, len(comments))
+		for _, comment := range comments {
 			commentDocs = append(commentDocs, dText(p.renderComment(comment.Value)))
 		}
 		if len(argDocs) > 0 {
@@ -1758,6 +1772,15 @@ func expressionStartRow(expression parse.Expression) int {
 				return expressionStartRow(arg.Value)
 			}
 		}
+	case *parse.FunctionValueCall:
+		if node.Callee != nil {
+			return expressionStartRow(node.Callee)
+		}
+		for _, arg := range node.Args {
+			if arg.Value != nil {
+				return expressionStartRow(arg.Value)
+			}
+		}
 	}
 	return 0
 }
@@ -1803,6 +1826,17 @@ func expressionEndRow(expression parse.Expression) int {
 					return row
 				}
 			}
+		}
+	case *parse.FunctionValueCall:
+		for i := len(node.Args) - 1; i >= 0; i-- {
+			if node.Args[i].Value != nil {
+				if row := expressionEndRow(node.Args[i].Value); row > 0 {
+					return row
+				}
+			}
+		}
+		if node.Callee != nil {
+			return expressionEndRow(node.Callee)
 		}
 	}
 	return 0

@@ -892,6 +892,87 @@ func TestTypeDoubleColonFunctionDefinition(t *testing.T) {
 	})
 }
 
+func TestCallingFunctionValuedStructFields(t *testing.T) {
+	run(t, []test{
+		{
+			name: "direct struct function field call",
+			input: `
+				struct EventContext {}
+				struct Option {}
+
+				struct Props {
+					on_confirm: fn(EventContext, Option),
+				}
+
+				fn confirm(ctx: EventContext, opt: Option) {}
+
+				fn main() {
+					let p = Props{on_confirm: confirm}
+					p.on_confirm(EventContext{}, Option{})
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "parenthesized struct function field call",
+			input: `
+				struct EventContext {}
+				struct Option {}
+
+				struct Props {
+					on_confirm: fn(EventContext, Option),
+				}
+
+				fn confirm(ctx: EventContext, opt: Option) {}
+
+				fn main() {
+					let p = Props{on_confirm: confirm}
+					(p.on_confirm)(EventContext{}, Option{})
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "try direct result-returning function field call",
+			input: `
+				struct Props {
+					cb: fn() Int!Str,
+				}
+
+				fn ok() Int!Str {
+					Result::ok(1)
+				}
+
+				fn main() Int!Str {
+					let p = Props{cb: ok}
+					let x = try p.cb()
+					Result::ok(x)
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "generic function field call",
+			input: `
+				struct Props {
+					cb: $F,
+				}
+
+				fn ok() Int!Str {
+					Result::ok(1)
+				}
+
+				fn main() Int!Str {
+					let p: Props<fn() Int!Str> = Props{cb: ok}
+					let x = try p.cb()
+					Result::ok(x)
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+	})
+}
+
 func TestInferringAnonymousFunctionTypes(t *testing.T) {
 	run(t, []test{
 		{

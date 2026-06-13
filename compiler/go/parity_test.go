@@ -620,6 +620,87 @@ func TestGoTargetParityAnonymousFunctionInference(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityFunctionValuedStructFields(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "direct function field call",
+			input: `
+				struct EventContext {}
+				struct Option {}
+
+				struct Props {
+					on_confirm: fn(EventContext, Option) Int,
+				}
+
+				fn confirm(ctx: EventContext, opt: Option) Int { 42 }
+
+				fn main() Int {
+					let p = Props{on_confirm: confirm}
+					p.on_confirm(EventContext{}, Option{})
+				}
+			`,
+		},
+		{
+			name: "parenthesized function field call",
+			input: `
+				struct EventContext {}
+				struct Option {}
+
+				struct Props {
+					on_confirm: fn(EventContext, Option) Int,
+				}
+
+				fn confirm(ctx: EventContext, opt: Option) Int { 42 }
+
+				fn main() Int {
+					let p = Props{on_confirm: confirm}
+					(p.on_confirm)(EventContext{}, Option{})
+				}
+			`,
+		},
+		{
+			name: "try direct result-returning function field call",
+			input: `
+				struct Props {
+					cb: fn() Int!Str,
+				}
+
+				fn ok() Int!Str { Result::ok(41) }
+
+				fn run() Int!Str {
+					let p = Props{cb: ok}
+					let x = try p.cb()
+					Result::ok(x + 1)
+				}
+
+				fn main() Int {
+					run().or(0)
+				}
+			`,
+		},
+		{
+			name: "generic function field call",
+			input: `
+				struct Props {
+					cb: $F,
+				}
+
+				fn ok() Int!Str { Result::ok(41) }
+
+				fn run() Int!Str {
+					let p: Props<fn() Int!Str> = Props{cb: ok}
+					let x = try p.cb()
+					Result::ok(x + 1)
+				}
+
+				fn main() Int {
+					run().or(0)
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityNullableStructFields(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{

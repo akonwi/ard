@@ -575,6 +575,18 @@ func (f FunctionCall) String() string {
 	return fmt.Sprintf("FunctionCall(%s)", f.Name)
 }
 
+type FunctionValueCall struct {
+	Location
+	Callee   Expression
+	TypeArgs []DeclaredType
+	Args     []Argument
+	Comments []Comment // Comments found within the function call
+}
+
+func (f FunctionValueCall) String() string {
+	return fmt.Sprintf("FunctionValueCall(%s)", f.Callee)
+}
+
 type InstanceProperty struct {
 	Location
 	Target   Expression

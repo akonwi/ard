@@ -3178,36 +3178,46 @@ func (p *parser) call() (Expression, error) {
 			return nil, err
 		}
 
+		callEnd := Point{Row: p.previous().line, Col: p.previous().column}
 		if !p.check(right_paren) {
 			p.addError(p.peek(), "Expected ')' to close function call")
 			p.synchronizeToTokens(right_paren)
 			if !p.check(right_paren) {
 				// Could not find ')', return partial function call
-				return &FunctionCall{
-					Name:     expr.(*Identifier).Name,
-					Args:     args,
-					Comments: argComments,
-					Location: Location{
-						Start: expr.GetLocation().Start,
-						End:   Point{Row: p.previous().line, Col: p.previous().column},
-					},
-				}, nil
+				return functionCallForCallee(expr, nil, args, argComments, Location{
+					Start: expr.GetLocation().Start,
+					End:   callEnd,
+				}), nil
 			}
 		}
 		p.advance() // consume the ')'
 
-		return &FunctionCall{
-			Name:     expr.(*Identifier).Name,
-			Args:     args,
-			Comments: argComments,
-			Location: Location{
-				Start: expr.GetLocation().Start,
-				End:   Point{Row: p.previous().line, Col: p.previous().column},
-			},
-		}, nil
+		return functionCallForCallee(expr, nil, args, argComments, Location{
+			Start: expr.GetLocation().Start,
+			End:   Point{Row: p.previous().line, Col: p.previous().column},
+		}), nil
 	}
 
 	return expr, nil
+}
+
+func functionCallForCallee(callee Expression, typeArgs []DeclaredType, args []Argument, comments []Comment, location Location) Expression {
+	if id, ok := callee.(*Identifier); ok {
+		return &FunctionCall{
+			Name:     id.Name,
+			TypeArgs: typeArgs,
+			Args:     args,
+			Comments: comments,
+			Location: location,
+		}
+	}
+	return &FunctionValueCall{
+		Callee:   callee,
+		TypeArgs: typeArgs,
+		Args:     args,
+		Comments: comments,
+		Location: location,
+	}
 }
 
 func (p *parser) primary() (Expression, error) {

@@ -3236,6 +3236,12 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerFiberSpawn(typeID, e.GetFn())
 	case *checker.FiberExecution:
 		return fl.lowerFiberExecution(typeID, e)
+	case *checker.FunctionValueCall:
+		target, err := fl.lowerExpr(e.Callee)
+		if err != nil {
+			return nil, err
+		}
+		return fl.lowerFunctionTypeCall("function value", e.Args, target)
 	case *checker.FunctionCall:
 		if local, ok := fl.locals[e.Name]; ok && fl.localKind(local) == TypeFunction {
 			target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}

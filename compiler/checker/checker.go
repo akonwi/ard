@@ -1834,7 +1834,7 @@ func canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal T
 	if expectedFinal == Void {
 		switch stmt.(type) {
 		case *parse.StrLiteral, *parse.BoolLiteral, *parse.VoidLiteral, *parse.NumLiteral, *parse.InterpolatedStr,
-			*parse.Identifier, *parse.FunctionCall, *parse.InstanceProperty, *parse.InstanceMethod,
+			*parse.Identifier, *parse.FunctionCall, *parse.FunctionValueCall, *parse.InstanceProperty, *parse.InstanceMethod,
 			*parse.UnaryExpression, *parse.BinaryExpression, *parse.ChainedComparison, *parse.StaticFunction,
 			*parse.IfStatement, *parse.AnonymousFunction, *parse.ListLiteral, *parse.MapLiteral,
 			*parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.StaticProperty,
@@ -1846,7 +1846,7 @@ func canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal T
 	}
 
 	switch stmt.(type) {
-	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.IfStatement, *parse.StaticFunction, *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
+	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.IfStatement, *parse.StaticFunction, *parse.FunctionValueCall, *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
 		return true
 	default:
 		return false
@@ -2638,6 +2638,95 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 	return &If{Branches: branches, Else: elseBlock}
 }
 
+func functionDefForCallableType(typ Type) (*FunctionDef, bool) {
+	typ = derefType(typ)
+	switch fn := typ.(type) {
+	case *FunctionDef:
+		return fn, true
+	case *ExternalFunctionDef:
+		return &FunctionDef{
+			Name:          fn.Name,
+			GenericParams: append([]string(nil), fn.GenericParams...),
+			Parameters:    fn.Parameters,
+			ReturnType:    fn.ReturnType,
+			Body:          nil,
+			Private:       fn.Private,
+		}, true
+	default:
+		return nil, false
+	}
+}
+
+func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Argument, typeArgs []parse.DeclaredType, location parse.Location, displayName string) Expression {
+	fnDef, ok := functionDefForCallableType(callee.Type())
+	if !ok {
+		c.addError(fmt.Sprintf("%s is not a function", displayName), location)
+		return nil
+	}
+
+	callTypeArgs := c.resolveCallTypeArgs(typeArgs)
+	resolvedExprs, err := c.resolveArguments(callArgs, fnDef.Parameters)
+	if err != nil {
+		c.addError(err.Error(), location)
+		return nil
+	}
+
+	numOmittedArgs := 0
+	if len(resolvedExprs) < len(fnDef.Parameters) {
+		for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
+			paramType := fnDef.Parameters[i].Type
+			if _, isMaybe := paramType.(*Maybe); !isMaybe {
+				c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), location)
+				return nil
+			}
+		}
+		numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
+	} else if len(resolvedExprs) > len(fnDef.Parameters) {
+		c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fnDef.Parameters), len(resolvedExprs)), location)
+		resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
+	}
+
+	fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
+	args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+	if args == nil {
+		return nil
+	}
+	if len(callTypeArgs) > 0 {
+		specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, location)
+		if err != nil {
+			c.addError(err.Error(), location)
+			return nil
+		}
+		fnToUse = specialized
+	}
+
+	return &FunctionValueCall{
+		Callee:       callee,
+		Args:         args,
+		FunctionType: fnToUse,
+		ReturnType:   fnToUse.ReturnType,
+	}
+}
+
+func (c *Checker) checkFunctionFieldCall(subject Expression, method parse.FunctionCall, location parse.Location) (Expression, bool) {
+	if subject == nil || subject.Type() == nil {
+		return nil, false
+	}
+	fieldType := subject.Type().get(method.Name)
+	if fieldType == nil {
+		return nil, false
+	}
+	field := &InstanceProperty{
+		Subject:  subject,
+		Property: method.Name,
+		_type:    fieldType,
+	}
+	if _, ok := subject.Type().(*StructDef); ok {
+		field.Kind = StructSubject
+	}
+	return c.checkFunctionValueCall(field, method.Args, method.TypeArgs, location, fmt.Sprintf("%s.%s", subject, method.Name)), true
+}
+
 func (c *Checker) checkExpr(expr parse.Expression) Expression {
 	if c.halted {
 		return nil
@@ -2707,6 +2796,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		c.addError(fmt.Sprintf("Undefined variable: %s", s.Name), s.GetLocation())
 		c.halted = true
 		return nil
+	case *parse.FunctionValueCall:
+		{
+			callee := c.checkExpr(s.Callee)
+			if callee == nil {
+				return nil
+			}
+			return c.checkFunctionValueCall(callee, s.Args, s.TypeArgs, s.GetLocation(), s.Callee.String())
+		}
 	case *parse.FunctionCall:
 		{
 			if s.Name == "panic" {
@@ -2883,6 +2980,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				sig = subj.Type().get(s.Method.Name)
 			}
 			if sig == nil {
+				if call, ok := c.checkFunctionFieldCall(subj, s.Method, s.GetLocation()); ok {
+					return call
+				}
 				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Method.Name), s.Method.GetLocation())
 				return nil
 			}
@@ -6007,6 +6107,11 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 			sig = innerType.get(p.Method.Name)
 		}
 		if sig == nil {
+			if !isMaybe {
+				if call, ok := c.checkFunctionFieldCall(target, p.Method, p.GetLocation()); ok {
+					return call
+				}
+			}
 			c.addError(fmt.Sprintf("Undefined: %s.%s", innerType, p.Method.Name), p.Method.GetLocation())
 			return nil
 		}

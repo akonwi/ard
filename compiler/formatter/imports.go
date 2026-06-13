@@ -202,6 +202,11 @@ func collectImportUsesInExpression(expr parse.Expression, used map[string]bool) 
 		for _, arg := range e.Args {
 			collectImportUsesInExpression(arg.Value, used)
 		}
+	case *parse.FunctionValueCall:
+		collectImportUsesInExpression(e.Callee, used)
+		for _, arg := range e.Args {
+			collectImportUsesInExpression(arg.Value, used)
+		}
 	case *parse.InstanceProperty:
 		collectImportUsesInExpression(e.Target, used)
 		collectImportUsesInExpression(e.Property, used)

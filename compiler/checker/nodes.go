@@ -1115,6 +1115,17 @@ func (f *FunctionCall) Definition() *FunctionDef {
 	return f.fn
 }
 
+type FunctionValueCall struct {
+	Callee       Expression
+	Args         []Expression
+	FunctionType *FunctionDef
+	ReturnType   Type
+}
+
+func (f *FunctionValueCall) Type() Type {
+	return f.ReturnType
+}
+
 type ModuleStructInstance struct {
 	Module     string
 	Property   *StructInstance
