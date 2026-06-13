@@ -36,6 +36,16 @@ refactor(parser)!: simplify function parsing
 - `style`
 - `test`
 
+## Issue references
+
+When a commit fully fixes a tracked GitHub issue, include a closing reference in the commit body, e.g.:
+
+```text
+Fixes #218
+```
+
+Use a non-closing reference such as `Refs #218` when the commit is related but does not fully resolve the issue.
+
 ## Validation
 
 Before pushing commits or creating/updating a PR title, validate the header with:
