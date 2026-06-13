@@ -340,6 +340,79 @@ fn main() Int {
 	}
 }
 
+func TestUserModulePrivateStructMethodAccessError(t *testing.T) {
+	tempDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"tmp_project\"\nard = \">= 0.1.0\""), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	moduleContent := `struct C {}
+
+impl C {
+  private fn secret() Str { "no" }
+}
+
+fn make() C { C{} }
+fn reveal(c: C) Str { c.secret() }`
+	if err := os.WriteFile(filepath.Join(tempDir, "c.ard"), []byte(moduleContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("reject imported private struct method", func(t *testing.T) {
+		mainContent := `use tmp_project/c
+
+let x = c::make().secret()`
+		result := parse.Parse([]byte(mainContent), filepath.Join(tempDir, "main.ard"))
+		if len(result.Errors) > 0 {
+			t.Fatal(result.Errors[0].Message)
+		}
+
+		c := checker.New(filepath.Join(tempDir, "main.ard"), result.Program, resolver)
+		c.Check()
+		diagnostics := c.Diagnostics()
+		if len(diagnostics) == 0 {
+			t.Fatal("expected error when accessing private struct method")
+		}
+		found := false
+		for _, diag := range diagnostics {
+			if strings.Contains(diag.Message, "Undefined:") && strings.Contains(diag.Message, ".secret") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected Undefined diagnostic for private method, got: %v", diagnostics)
+		}
+	})
+
+	t.Run("allow same module private struct method", func(t *testing.T) {
+		mainContent := `struct C {}
+
+impl C {
+  private fn secret() Str { "ok" }
+}
+
+let c = C{}
+let x = c.secret()`
+		result := parse.Parse([]byte(mainContent), filepath.Join(tempDir, "same.ard"))
+		if len(result.Errors) > 0 {
+			t.Fatal(result.Errors[0].Message)
+		}
+
+		c := checker.New(filepath.Join(tempDir, "same.ard"), result.Program, resolver)
+		c.Check()
+		if c.HasErrors() {
+			t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+		}
+	})
+}
+
 func TestUserModulePrivateAccessError(t *testing.T) {
 	// Create temporary directory structure
 	tempDir, err := os.MkdirTemp("", "ard_private_access_")

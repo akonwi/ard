@@ -162,7 +162,18 @@ func (c *Checker) structMethod(def *StructDef, name string) (*FunctionDef, bool)
 	if method, ok := c.program.StructMethod(owner, name); ok {
 		return method, true
 	}
-	return StructMethodInModules(c.program.Imports, owner, name)
+	method, ok := StructMethodInModules(c.program.Imports, owner, name)
+	if !ok || !c.canAccessStructMethod(owner, method) {
+		return nil, false
+	}
+	return method, true
+}
+
+func (c *Checker) canAccessStructMethod(owner MethodOwner, method *FunctionDef) bool {
+	if method == nil || !method.Private {
+		return true
+	}
+	return owner.ModulePath == c.typeOwnerPath()
 }
 
 func (c *Checker) structMethods(def *StructDef) map[string]*FunctionDef {
