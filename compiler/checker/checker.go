@@ -269,6 +269,8 @@ type Checker struct {
 	resolvingTopLevelAliases          map[string]bool
 	resolvedTopLevelAliases           map[string]bool
 	genericContextStack               []map[string]bool
+	discardExprContext                bool
+	matchArmDiscardContext            bool
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -883,9 +885,13 @@ func formatTypeForDisplay(t Type) string {
 	return t.String()
 }
 
-func mergeMatchResultType(c *Checker, current Type, next Type, loc parse.Location) (Type, bool) {
+func mergeMatchResultType(c *Checker, current Type, next Type, loc parse.Location, allowMixedVoid bool) (Type, bool) {
 	if current == nil {
 		return next, true
+	}
+	if expected, got, ok := mixedVoidMatchTypes(current, next); ok && !allowMixedVoid {
+		c.addError(matchBranchTypeMismatch(expected, got), loc)
+		return nil, false
 	}
 	merged, ok := commonResultType(current, next)
 	if ok {
@@ -896,6 +902,23 @@ func mergeMatchResultType(c *Checker, current Type, next Type, loc parse.Locatio
 	}
 	c.addError(typeMismatch(current, next), loc)
 	return nil, false
+}
+
+func mixedVoidMatchTypes(left Type, right Type) (Type, Type, bool) {
+	if left == nil || right == nil || left == right {
+		return nil, nil, false
+	}
+	if left == Void {
+		return right, left, true
+	}
+	if right == Void {
+		return left, right, true
+	}
+	return nil, nil, false
+}
+
+func matchBranchTypeMismatch(expected Type, got Type) string {
+	return fmt.Sprintf("Type mismatch in match branches: expected %s, got %s", formatTypeForDisplay(expected), formatTypeForDisplay(got))
 }
 
 func typeMismatch(expected, got Type) string {
@@ -1231,41 +1254,43 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 	case *parse.VariableDeclaration:
 		{
 			var val Expression
-			if s.Type == nil {
-				switch literal := s.Value.(type) {
-				case *parse.ListLiteral:
-					if expr := c.checkList(nil, literal); expr != nil {
-						val = expr
+			c.withValueExprContext(func() {
+				if s.Type == nil {
+					switch literal := s.Value.(type) {
+					case *parse.ListLiteral:
+						if expr := c.checkList(nil, literal); expr != nil {
+							val = expr
+						}
+					case *parse.MapLiteral:
+						if expr := c.checkMap(nil, literal); expr != nil {
+							val = expr
+						}
+					default:
+						val = c.checkExpr(s.Value)
 					}
-				case *parse.MapLiteral:
-					if expr := c.checkMap(nil, literal); expr != nil {
-						val = expr
+				} else {
+					expected := c.resolveType(s.Type)
+					if expected == Void {
+						c.addError("Cannot assign a void value", s.Value.GetLocation())
+						return
 					}
-				default:
-					val = c.checkExpr(s.Value)
-				}
-			} else {
-				expected := c.resolveType(s.Type)
-				if expected == Void {
-					c.addError("Cannot assign a void value", s.Value.GetLocation())
-					return nil
-				}
 
-				switch literal := s.Value.(type) {
-				case *parse.ListLiteral:
-					if expr := c.checkList(expected, literal); expr != nil {
-						val = expr
-					}
-				case *parse.MapLiteral:
-					if expr := c.checkMap(expected, literal); expr != nil {
-						val = expr
-					}
-				default:
-					if expected != nil {
-						val = c.checkExprAs(s.Value, expected)
+					switch literal := s.Value.(type) {
+					case *parse.ListLiteral:
+						if expr := c.checkList(expected, literal); expr != nil {
+							val = expr
+						}
+					case *parse.MapLiteral:
+						if expr := c.checkMap(expected, literal); expr != nil {
+							val = expr
+						}
+					default:
+						if expected != nil {
+							val = c.checkExprAs(s.Value, expected)
+						}
 					}
 				}
-			}
+			})
 
 			if val == nil {
 				return nil
@@ -1308,7 +1333,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 
-				value := c.checkExpr(s.Value)
+				var value Expression
+				c.withValueExprContext(func() {
+					value = c.checkExpr(s.Value)
+				})
 				if value == nil {
 					return nil
 				}
@@ -1328,7 +1356,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				if subject == nil {
 					return nil
 				}
-				value := c.checkExpr(s.Value)
+				var value Expression
+				c.withValueExprContext(func() {
+					value = c.checkExpr(s.Value)
+				})
 				if value == nil {
 					return nil
 				}
@@ -1692,7 +1723,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 	case nil:
 		return nil
 	default:
-		expr := c.checkExpr((parse.Expression)(*stmt))
+		expr := c.withDiscardExprContext(func() Expression {
+			return c.checkExpr((parse.Expression)(*stmt))
+		})
 		if expr == nil {
 			return nil
 		}
@@ -1855,19 +1888,105 @@ func canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal T
 
 func (c *Checker) checkMatchArmBlock(stmts []parse.Statement, setup func()) *Block {
 	expectedType := c.expectedExpr
+	discardFinal := c.matchArmDiscardContext || expectedType == Void
 	c.expectedExpr = nil
-	block := c.checkBlockWithExpected(stmts, setup, expectedType, false)
+	var block *Block
+	if expectedType == nil || expectedType == Void {
+		block = c.checkBlockWithInferredFinalValue(stmts, setup, discardFinal)
+	} else {
+		block = c.checkBlockWithExpected(stmts, setup, expectedType, false)
+	}
 	c.expectedExpr = expectedType
 	return block
 }
 
-func (c *Checker) withExpectedExpr(expected Type, check func() Expression) Expression {
-	previous := c.expectedExpr
-	c.expectedExpr = expected
+func (c *Checker) checkBlockWithInferredFinalValue(stmts []parse.Statement, setup func(), finalDiscardContext bool) *Block {
+	if len(stmts) == 0 {
+		return &Block{Stmts: []Statement{}}
+	}
+
+	parent := c.scope
+	newScope := makeScope(parent)
+	c.scope = &newScope
 	defer func() {
-		c.expectedExpr = previous
+		c.scope = parent
+	}()
+
+	if setup != nil {
+		setup()
+	}
+
+	lastExprIndex := -1
+	for i := len(stmts) - 1; i >= 0; i-- {
+		if _, ok := stmts[i].(*parse.Comment); ok {
+			continue
+		}
+		if canCheckStatementAsExpectedExpression(stmts[i], Void, false) {
+			lastExprIndex = i
+		}
+		break
+	}
+
+	block := &Block{Stmts: make([]Statement, len(stmts))}
+	for i := range stmts {
+		if i == lastExprIndex {
+			var expr Expression
+			if finalDiscardContext {
+				expr = c.withDiscardExprContext(func() Expression {
+					return c.checkExpr(stmts[i].(parse.Expression))
+				})
+			} else {
+				expr = c.checkValueExpr(stmts[i].(parse.Expression))
+			}
+			if expr != nil {
+				block.Stmts[i] = Statement{Expr: expr}
+			}
+		} else if stmt := c.checkStmt(&stmts[i]); stmt != nil {
+			block.Stmts[i] = *stmt
+		}
+		if c.halted {
+			break
+		}
+	}
+	return block
+}
+
+func (c *Checker) withExpectedExpr(expected Type, check func() Expression) Expression {
+	previousExpected := c.expectedExpr
+	previousDiscard := c.discardExprContext
+	c.expectedExpr = expected
+	c.discardExprContext = expected == Void
+	defer func() {
+		c.expectedExpr = previousExpected
+		c.discardExprContext = previousDiscard
 	}()
 	return check()
+}
+
+func (c *Checker) withDiscardExprContext(check func() Expression) Expression {
+	previous := c.discardExprContext
+	c.discardExprContext = true
+	defer func() {
+		c.discardExprContext = previous
+	}()
+	return check()
+}
+
+func (c *Checker) withValueExprContext(check func()) {
+	previous := c.discardExprContext
+	c.discardExprContext = false
+	defer func() {
+		c.discardExprContext = previous
+	}()
+	check()
+}
+
+func (c *Checker) checkValueExpr(expr parse.Expression) Expression {
+	var checked Expression
+	c.withValueExprContext(func() {
+		checked = c.checkExpr(expr)
+	})
+	return checked
 }
 
 func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLiteral {
@@ -2731,6 +2850,13 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 	if c.halted {
 		return nil
 	}
+	discardThisExpr := c.discardExprContext
+	previousDiscard := c.discardExprContext
+	c.discardExprContext = false
+	defer func() {
+		c.discardExprContext = previousDiscard
+	}()
+
 	switch s := (expr).(type) {
 	case *parse.StrLiteral:
 		return &StrLiteral{s.Value}
@@ -3698,6 +3824,13 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 	case *parse.MapLiteral:
 		return c.checkMap(nil, s)
 	case *parse.MatchExpression:
+		allowMixedVoid := discardThisExpr || c.expectedExpr == Void
+		previousArmDiscard := c.matchArmDiscardContext
+		c.matchArmDiscardContext = allowMixedVoid
+		defer func() {
+			c.matchArmDiscardContext = previousArmDiscard
+		}()
+
 		// Check the subject
 		subject := c.checkExpr(s.Subject)
 		if subject == nil {
@@ -3747,9 +3880,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 
-			resultType, ok := commonResultType(someBody.Type(), noneBody.Type())
+			resultType, ok := mergeMatchResultType(c, someBody.Type(), noneBody.Type(), s.GetLocation(), allowMixedVoid)
 			if !ok {
-				c.addError(typeMismatch(someBody.Type(), noneBody.Type()), s.GetLocation())
 				return nil
 			}
 
@@ -3850,14 +3982,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					continue
 				}
 				var ok bool
-				enumResultType, ok = mergeMatchResultType(c, enumResultType, caseBody.Type(), s.GetLocation())
+				enumResultType, ok = mergeMatchResultType(c, enumResultType, caseBody.Type(), s.GetLocation(), allowMixedVoid)
 				if !ok {
 					return nil
 				}
 			}
 			if catchAllBody != nil {
 				var ok bool
-				enumResultType, ok = mergeMatchResultType(c, enumResultType, catchAllBody.Type(), s.GetLocation())
+				enumResultType, ok = mergeMatchResultType(c, enumResultType, catchAllBody.Type(), s.GetLocation(), allowMixedVoid)
 				if !ok {
 					return nil
 				}
@@ -3936,9 +4068,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 			// Ensure both branches return compatible types. This allows one branch to
 			// return a trait object while the other returns a concrete implementation.
-			resultType, ok := commonResultType(trueBody.Type(), falseBody.Type())
+			resultType, ok := mergeMatchResultType(c, trueBody.Type(), falseBody.Type(), s.GetLocation(), allowMixedVoid)
 			if !ok {
-				c.addError(typeMismatch(trueBody.Type(), falseBody.Type()), s.GetLocation())
 				return nil
 			}
 
@@ -4046,14 +4177,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					continue
 				}
 				var ok bool
-				unionResultType, ok = mergeMatchResultType(c, unionResultType, caseBody.Body.Type(), s.GetLocation())
+				unionResultType, ok = mergeMatchResultType(c, unionResultType, caseBody.Body.Type(), s.GetLocation(), allowMixedVoid)
 				if !ok {
 					return nil
 				}
 			}
 			if catchAllBody != nil {
 				var ok bool
-				unionResultType, ok = mergeMatchResultType(c, unionResultType, catchAllBody.Type(), s.GetLocation())
+				unionResultType, ok = mergeMatchResultType(c, unionResultType, catchAllBody.Type(), s.GetLocation(), allowMixedVoid)
 				if !ok {
 					return nil
 				}
@@ -4141,9 +4272,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 
-			matchResultType, ok := commonResultType(okCase.Body.Type(), errCase.Body.Type())
+			matchResultType, ok := mergeMatchResultType(c, okCase.Body.Type(), errCase.Body.Type(), s.GetLocation(), allowMixedVoid)
 			if !ok {
-				c.addError(typeMismatch(okCase.Body.Type(), errCase.Body.Type()), s.GetLocation())
 				return nil
 			}
 			return &ResultMatch{
@@ -4169,7 +4299,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 					catchAll = c.checkMatchArmBlock(matchCase.Body, nil)
 					var ok bool
-					strResultType, ok = mergeMatchResultType(c, strResultType, catchAll.Type(), matchCase.Pattern.GetLocation())
+					strResultType, ok = mergeMatchResultType(c, strResultType, catchAll.Type(), matchCase.Pattern.GetLocation(), allowMixedVoid)
 					if !ok {
 						return nil
 					}
@@ -4188,7 +4318,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
 				strCases[literal.Value] = caseBlock
 				var mergeOK bool
-				strResultType, mergeOK = mergeMatchResultType(c, strResultType, caseBlock.Type(), matchCase.Pattern.GetLocation())
+				strResultType, mergeOK = mergeMatchResultType(c, strResultType, caseBlock.Type(), matchCase.Pattern.GetLocation(), allowMixedVoid)
 				if !mergeOK {
 					return nil
 				}
@@ -4214,7 +4344,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				if id, ok := matchCase.Pattern.(*parse.Identifier); ok && id.Name == "_" {
 					catchAll = c.checkMatchArmBlock(matchCase.Body, nil)
 					var ok bool
-					intResultType, ok = mergeMatchResultType(c, intResultType, catchAll.Type(), matchCase.Pattern.GetLocation())
+					intResultType, ok = mergeMatchResultType(c, intResultType, catchAll.Type(), matchCase.Pattern.GetLocation(), allowMixedVoid)
 					if !ok {
 						return nil
 					}
@@ -4228,7 +4358,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
 					intCases[value] = caseBlock
 					var ok bool
-					intResultType, ok = mergeMatchResultType(c, intResultType, caseBlock.Type(), matchCase.Pattern.GetLocation())
+					intResultType, ok = mergeMatchResultType(c, intResultType, caseBlock.Type(), matchCase.Pattern.GetLocation(), allowMixedVoid)
 					if !ok {
 						return nil
 					}
@@ -4245,7 +4375,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
 						intCases[negativeValue] = caseBlock
 						var ok bool
-						intResultType, ok = mergeMatchResultType(c, intResultType, caseBlock.Type(), matchCase.Pattern.GetLocation())
+						intResultType, ok = mergeMatchResultType(c, intResultType, caseBlock.Type(), matchCase.Pattern.GetLocation(), allowMixedVoid)
 						if !ok {
 							return nil
 						}
@@ -4275,7 +4405,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
 					rangeCases[IntRange{Start: startValue, End: endValue}] = caseBlock
 					var ok bool
-					intResultType, ok = mergeMatchResultType(c, intResultType, caseBlock.Type(), matchCase.Pattern.GetLocation())
+					intResultType, ok = mergeMatchResultType(c, intResultType, caseBlock.Type(), matchCase.Pattern.GetLocation(), allowMixedVoid)
 					if !ok {
 						return nil
 					}
@@ -4298,7 +4428,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
 					intCases[value] = caseBlock
 					var mergeOK bool
-					intResultType, mergeOK = mergeMatchResultType(c, intResultType, caseBlock.Type(), matchCase.Pattern.GetLocation())
+					intResultType, mergeOK = mergeMatchResultType(c, intResultType, caseBlock.Type(), matchCase.Pattern.GetLocation(), allowMixedVoid)
 					if !mergeOK {
 						return nil
 					}
@@ -4325,6 +4455,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		c.addError(fmt.Sprintf("Cannot match on %s", subject.Type()), s.GetLocation())
 		return nil
 	case *parse.ConditionalMatchExpression:
+		allowMixedVoid := discardThisExpr || c.expectedExpr == Void
+		previousArmDiscard := c.matchArmDiscardContext
+		c.matchArmDiscardContext = allowMixedVoid
+		defer func() {
+			c.matchArmDiscardContext = previousArmDiscard
+		}()
 		var cases []ConditionalCase
 		var catchAll *Block
 		var conditionalResultType Type
@@ -4337,7 +4473,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				} else {
 					catchAll = c.checkMatchArmBlock(matchCase.Body, nil)
 					var ok bool
-					conditionalResultType, ok = mergeMatchResultType(c, conditionalResultType, catchAll.Type(), matchCase.GetLocation())
+					conditionalResultType, ok = mergeMatchResultType(c, conditionalResultType, catchAll.Type(), matchCase.GetLocation(), allowMixedVoid)
 					if !ok {
 						return nil
 					}
@@ -4352,7 +4488,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 					body := c.checkMatchArmBlock(matchCase.Body, nil)
 					var ok bool
-					conditionalResultType, ok = mergeMatchResultType(c, conditionalResultType, body.Type(), matchCase.GetLocation())
+					conditionalResultType, ok = mergeMatchResultType(c, conditionalResultType, body.Type(), matchCase.GetLocation(), allowMixedVoid)
 					if !ok {
 						return nil
 					}
@@ -4732,8 +4868,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		}
 	case *parse.BlockExpression:
 		{
-			// Check block statements in the current scope
-			block := c.checkBlock(s.Statements, nil)
+			block := c.checkBlockWithInferredFinalValue(s.Statements, nil, discardThisExpr || c.expectedExpr == Void)
 			return block
 		}
 	default:
@@ -4872,6 +5007,10 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			return c.checkExpr(s)
 		})
 	case *parse.ConditionalMatchExpression:
+		return c.withExpectedExpr(expectedType, func() Expression {
+			return c.checkExpr(s)
+		})
+	case *parse.BlockExpression:
 		return c.withExpectedExpr(expectedType, func() Expression {
 			return c.checkExpr(s)
 		})
@@ -5200,6 +5339,12 @@ func (c *Checker) resolveReturnTypeWithContext(returnTypeNode parse.DeclaredType
 func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement, params []Parameter, returnType Type, location parse.Location) *Block {
 	// Add function to scope BEFORE checking body
 	c.scope.add(fn.Name, fn, false)
+
+	previousDiscard := c.discardExprContext
+	c.discardExprContext = false
+	defer func() {
+		c.discardExprContext = previousDiscard
+	}()
 
 	// Check function body
 	c.pushFunctionGenericContext(fn)
@@ -5567,18 +5712,20 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		}
 
 		var checkedArg Expression
-		switch resolvedExprs[i].(type) {
-		case *parse.ListLiteral, *parse.MapLiteral:
-			if hasGenericsInType(expectedType) {
-				checkedArg = c.checkExpr(resolvedExprs[i])
-			} else {
+		c.withValueExprContext(func() {
+			switch resolvedExprs[i].(type) {
+			case *parse.ListLiteral, *parse.MapLiteral:
+				if hasGenericsInType(expectedType) {
+					checkedArg = c.checkExpr(resolvedExprs[i])
+				} else {
+					checkedArg = c.checkExprAs(resolvedExprs[i], expectedType)
+				}
+			case *parse.AnonymousFunction:
 				checkedArg = c.checkExprAs(resolvedExprs[i], expectedType)
+			default:
+				checkedArg = c.checkExpr(resolvedExprs[i])
 			}
-		case *parse.AnonymousFunction:
-			checkedArg = c.checkExprAs(resolvedExprs[i], expectedType)
-		default:
-			checkedArg = c.checkExpr(resolvedExprs[i])
-		}
+		})
 
 		if checkedArg == nil {
 			return nil, nil

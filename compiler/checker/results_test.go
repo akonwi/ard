@@ -132,6 +132,22 @@ func TestResults(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
+			name: "value-producing result match rejects mixed Void and non-Void branches",
+			input: `
+				fn side_effect() {}
+				fn get() Str!Str { Result::ok("ok") }
+				fn main() {
+					let category = match get() {
+						ok(value) => value,
+						err(_) => side_effect(),
+					}
+				}
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch in match branches: expected Str, got Void"},
+			},
+		},
+		{
 			name: "Result.map() infers anonymous callback types",
 			input: `
 			fn foo() Int!Str {

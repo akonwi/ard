@@ -2277,6 +2277,97 @@ func TestMatchingOnBooleans(t *testing.T) {
 			},
 		},
 		{
+			name: "Value-producing match rejects mixed Void and non-Void branches",
+			input: strings.Join([]string{
+				`fn side_effect() {}`,
+				`let category = match true {`,
+				`  true => "explicit",`,
+				`  false => side_effect(),`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch in match branches: expected Str, got Void"},
+			},
+		},
+		{
+			name: "Nested value-producing match rejects mixed Void and non-Void branches",
+			input: strings.Join([]string{
+				`fn side_effect() {}`,
+				`let category = match true {`,
+				`  true => match true {`,
+				`    true => "explicit",`,
+				`    false => side_effect(),`,
+				`  },`,
+				`  false => side_effect(),`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch in match branches: expected Str, got Void"},
+			},
+		},
+		{
+			name: "Final discarded block expression can mix Void and non-Void match branches",
+			input: strings.Join([]string{
+				`fn side_effect() {}`,
+				`fn main() {`,
+				`  {`,
+				`    match true {`,
+				`      true => "ignored",`,
+				`      false => side_effect(),`,
+				`    }`,
+				`  }`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Block expression value rejects mixed Void and non-Void match",
+			input: strings.Join([]string{
+				`fn side_effect() {}`,
+				`let category = {`,
+				`  match true {`,
+				`    true => "explicit",`,
+				`    false => side_effect(),`,
+				`  }`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch in match branches: expected Str, got Void"},
+			},
+		},
+		{
+			name: "Discarded parent expression does not discard child value matches",
+			input: strings.Join([]string{
+				`struct Box { item: $T }`,
+				`fn side_effect() {}`,
+				`fn main() {`,
+				`  1 + (match true {`,
+				`    true => 1,`,
+				`    false => side_effect(),`,
+				`  })`,
+				`  Box{item: match true {`,
+				`    true => "x",`,
+				`    false => side_effect(),`,
+				`  }}`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch in match branches: expected Int, got Void"},
+				{Kind: checker.Error, Message: "Type mismatch in match branches: expected Str, got Void"},
+			},
+		},
+		{
+			name: "Discarded match can mix Void and non-Void branches",
+			input: strings.Join([]string{
+				`fn side_effect() {}`,
+				`match true {`,
+				`  true => "ignored",`,
+				`  false => side_effect(),`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
 			name: "Cannot use a catch-all case",
 			input: strings.Join([]string{
 				`let is_big = "foo".size() > 20`,
@@ -2287,6 +2378,48 @@ func TestMatchingOnBooleans(t *testing.T) {
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Catch-all case is not allowed for boolean matches"},
+			},
+		},
+	})
+}
+
+func TestMatchArmScope(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Match arm locals do not leak after inferred match expression",
+			input: strings.Join([]string{
+				`fn main() Int {`,
+				`  let x = match true {`,
+				`    true => {`,
+				`      let y = 1`,
+				`      y`,
+				`    },`,
+				`    false => 2,`,
+				`  }`,
+				`  y`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined variable: y"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
+			},
+		},
+		{
+			name: "Maybe match pattern binding does not leak after inferred match expression",
+			input: strings.Join([]string{
+				`use ard/maybe`,
+				`fn main() Int {`,
+				`  let maybe_value: Int? = maybe::some(1)`,
+				`  let x = match maybe_value {`,
+				`    value => value,`,
+				`    _ => 0,`,
+				`  }`,
+				`  value`,
+				`}`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined variable: value"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
 			},
 		},
 	})
