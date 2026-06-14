@@ -6,9 +6,10 @@ The Ard program owns the tic-tac-toe game state and rules. Terminal rendering/in
 
 ## Run
 
-From this directory:
+From this directory, restore the locked dependency cache first:
 
 ```sh
+ard deps fetch
 ard run main.ard
 ```
 
@@ -37,12 +38,14 @@ The smoke test builds the Ard Go target, runs the TUI under a PTY, sends keys, a
 
 ## Dependency surface
 
-`ard.toml` declares the local path dependency used by this example:
+`ard.toml` declares the direct Git dependency used by this example:
 
 ```toml
 [dependencies]
 vaxis = { git = "https://github.com/akonwi/vaxis-ard.git", commit = "76f7c1b" }
 ```
+
+`ard.lock` records the resolved commit, dependency graph, and cache integrity. `ard deps fetch` materializes the locked package in Ard's shared cache; the project no longer checks in `.ard/vendor`.
 
 Ard code imports and calls the dependency directly:
 

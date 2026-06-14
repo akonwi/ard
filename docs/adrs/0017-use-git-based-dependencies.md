@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by `docs/adrs/0025-use-lockfile-backed-dependency-cache.md`
 
 ## Context
 

@@ -1,3 +1,0 @@
-name = "vaxis"
-ard = ">= 0.19.2"
-target = "go"

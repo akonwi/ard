@@ -44,7 +44,7 @@ use ard/maybe       // Maybe type utilities
 
 ## Project Structure
 
-Import paths are always absolute from the project root, determined by the presence of an `ard.toml` file:
+Project import paths are absolute from the project root, determined by the presence of an `ard.toml` file. Dependency import paths are absolute from the package that declares the dependency; see the [Dependencies](/guide/dependencies/) guide for lockfile and cache workflow details.
 
 ```
 my_calculator/
@@ -61,6 +61,7 @@ The `ard.toml` file defines the project:
 
 ```toml
 name = "my_calculator"
+ard = ">= 0.13.0"
 ```
 
 If no `ard.toml` file is present, the project name defaults to the root directory name.

@@ -197,6 +197,7 @@ export default defineConfig({
             { label: "Error Handling", slug: "guide/error-handling" },
             { label: "Pattern Matching", slug: "guide/pattern-matching" },
             { label: "Modules", slug: "guide/modules" },
+            { label: "Dependencies", slug: "guide/dependencies" },
             { label: "Testing", slug: "guide/testing" },
           ],
         },

@@ -1,3 +1,0 @@
-name = "vaxis_counter"
-ard = ">= 0.1.0"
-target = "go"

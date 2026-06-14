@@ -227,7 +227,7 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 
 	requireSeen := requireKeys(goMod)
 	requires := make([]string, 0)
-	addDependencyGoModRequirements(&requires, requireSeen, projectInfo)
+	addDependencyGoModRequirements(&requires, requireSeen, program, projectInfo)
 	if programUsesProjectFFI(program, projectInfo) {
 		addProjectGoModRequirements(&requires, requireSeen, projectInfo)
 	}
@@ -239,17 +239,15 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 	if programUsesProjectFFI(program, projectInfo) {
 		addProjectGoModReplaces(&replaces, replaceSeen, projectInfo)
 	}
+	addDependencyGoModReplaces(&replaces, replaceSeen, program, projectInfo)
 	addGoModReplacesFromFile(&replaces, replaceSeen, filepath.Join(dir, "go.mod"), dir)
 	goMod += formatReplaceBlock(replaces)
 	return goMod, nil
 }
 
-func addDependencyGoModRequirements(out *[]string, seen map[string]bool, projectInfo *checker.ProjectInfo) {
-	if projectInfo == nil || len(projectInfo.Dependencies) == 0 {
-		return
-	}
-	for _, dep := range projectInfo.Dependencies {
-		addGoModRequirementsFromFile(out, seen, filepath.Join(dep.VendorPath, "go.mod"))
+func addDependencyGoModRequirements(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
+	for _, root := range dependencyFFIPackages(program, projectInfo) {
+		addGoModRequirementsFromFile(out, seen, filepath.Join(root, "go.mod"))
 	}
 }
 
@@ -342,6 +340,12 @@ func addProjectGoModReplaces(out *[]string, seen map[string]bool, projectInfo *c
 		return
 	}
 	addGoModReplacesFromFile(out, seen, filepath.Join(projectInfo.RootPath, "go.mod"), projectInfo.RootPath)
+}
+
+func addDependencyGoModReplaces(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
+	for _, root := range dependencyFFIPackages(program, projectInfo) {
+		addGoModReplacesFromFile(out, seen, filepath.Join(root, "go.mod"), root)
+	}
 }
 
 func addGoModReplacesFromFile(out *[]string, seen map[string]bool, path string, baseDir string) {
@@ -492,6 +496,13 @@ func optionalProjectInfo(projectInfo []*checker.ProjectInfo) *checker.ProjectInf
 		return nil
 	}
 	return projectInfo[0]
+}
+
+func dependencyRootPath(dep checker.DependencyInfo) string {
+	if dep.RootPath != "" {
+		return dep.RootPath
+	}
+	return dep.SourcePath
 }
 
 func runBinaryPath(workspaceDir string, projectInfo *checker.ProjectInfo) string {
@@ -712,23 +723,19 @@ func fileExists(path string) bool {
 }
 
 func writeDependencyFFICompanions(dir string, program *air.Program, projectInfo *checker.ProjectInfo) error {
-	if projectInfo == nil || len(projectInfo.Dependencies) == 0 {
+	if projectInfo == nil {
 		return nil
 	}
-	used := dependencyFFIAliases(program, projectInfo)
-	for alias := range used {
-		dep, ok := projectInfo.Dependencies[alias]
-		if !ok {
-			continue
-		}
-		matches, err := filepath.Glob(filepath.Join(dep.VendorPath, "ffi", "*.go"))
+	used := dependencyFFIPackages(program, projectInfo)
+	for key, root := range used {
+		matches, err := filepath.Glob(filepath.Join(root, "ffi", "*.go"))
 		if err != nil {
 			return err
 		}
 		if len(matches) == 0 {
-			return fmt.Errorf("go target uses dependency externs from %s but no Go FFI companion was found at %s", alias, filepath.Join(dep.VendorPath, "ffi", "*.go"))
+			return fmt.Errorf("go target uses dependency externs from %s but no Go FFI companion was found at %s", key, filepath.Join(root, "ffi", "*.go"))
 		}
-		ffiDir := filepath.Join(dir, "depffi", sanitizeName(alias))
+		ffiDir := filepath.Join(dir, "depffi", sanitizeName(key))
 		for _, sourcePath := range matches {
 			if err := copyProjectFFIFile(sourcePath, filepath.Join(ffiDir, filepath.Base(sourcePath))); err != nil {
 				return err
@@ -738,14 +745,22 @@ func writeDependencyFFICompanions(dir string, program *air.Program, projectInfo 
 	return nil
 }
 
-func dependencyFFIAliases(program *air.Program, projectInfo *checker.ProjectInfo) map[string]bool {
-	used := map[string]bool{}
+func dependencyFFIPackages(program *air.Program, projectInfo *checker.ProjectInfo) map[string]string {
+	used := map[string]string{}
 	if program == nil || projectInfo == nil {
 		return used
 	}
 	for _, ext := range program.Externs {
-		if alias, ok := dependencyAliasForModulePath(modulePathForExtern(program, ext), projectInfo); ok {
-			used[alias] = true
+		if key, root, ok := dependencyPackageForModulePath(modulePathForExtern(program, ext), projectInfo); ok {
+			used[key] = root
+		}
+	}
+	for _, typ := range program.Types {
+		if typ.Kind != air.TypeExtern || strings.TrimSpace(typ.ExternBinding) == "" {
+			continue
+		}
+		if key, root, ok := dependencyPackageForModulePath(typ.ModulePath, projectInfo); ok {
+			used[key] = root
 		}
 	}
 	return used
@@ -759,12 +774,35 @@ func modulePathForExtern(program *air.Program, ext air.Extern) string {
 }
 
 func dependencyAliasForModulePath(modulePath string, projectInfo *checker.ProjectInfo) (string, bool) {
+	key, _, ok := dependencyPackageForModulePath(modulePath, projectInfo)
+	return key, ok
+}
+
+func dependencyPackageForModulePath(modulePath string, projectInfo *checker.ProjectInfo) (string, string, bool) {
 	if projectInfo == nil || modulePath == "" {
-		return "", false
+		return "", "", false
 	}
 	first := strings.Split(modulePath, "/")[0]
-	_, ok := projectInfo.Dependencies[first]
-	return first, ok
+	for _, dep := range projectInfo.Dependencies {
+		packageID := dep.PackageID
+		if packageID == "" {
+			packageID = dep.Alias
+		}
+		key := checker.PackageModulePrefix(packageID)
+		if first == key || first == dep.Alias {
+			return key, dependencyRootPath(dep), true
+		}
+	}
+	for packageID, pkg := range projectInfo.Packages {
+		if packageID == projectInfo.RootPackageID || packageID == "" {
+			continue
+		}
+		key := checker.PackageModulePrefix(packageID)
+		if first == key {
+			return key, pkg.RootPath, true
+		}
+	}
+	return "", "", false
 }
 
 func programUsesProjectFFI(program *air.Program, projectInfo *checker.ProjectInfo) bool {

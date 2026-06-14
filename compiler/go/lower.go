@@ -113,11 +113,25 @@ func dependencyFFIGoPaths(projectInfo *checker.ProjectInfo) []string {
 		return nil
 	}
 	paths := []string{}
-	for _, dep := range projectInfo.Dependencies {
-		matches, err := filepath.Glob(filepath.Join(dep.VendorPath, "ffi", "*.go"))
+	seenRoots := map[string]bool{}
+	addRoot := func(root string) {
+		if root == "" || seenRoots[root] {
+			return
+		}
+		seenRoots[root] = true
+		matches, err := filepath.Glob(filepath.Join(root, "ffi", "*.go"))
 		if err == nil {
 			paths = append(paths, matches...)
 		}
+	}
+	for _, dep := range projectInfo.Dependencies {
+		addRoot(dependencyRootPath(dep))
+	}
+	for packageID, pkg := range projectInfo.Packages {
+		if packageID == projectInfo.RootPackageID {
+			continue
+		}
+		addRoot(pkg.RootPath)
 	}
 	return paths
 }
@@ -2134,6 +2148,9 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return &ast.ChanType{Dir: ast.SEND | ast.RECV, Value: elem}, nil
 		}
 		if strings.TrimSpace(info.ExternBinding) != "" {
+			if alias, ok := dependencyAliasForModulePath(info.ModulePath, l.projectInfo); ok {
+				return l.dependencyFFITypeExpr(alias, info.ExternBinding)
+			}
 			typ, err := parser.ParseExpr(info.ExternBinding)
 			if err != nil {
 				return nil, fmt.Errorf("invalid go extern type binding %q for %s: %w", info.ExternBinding, info.Name, err)
@@ -5362,6 +5379,138 @@ func (l *lowerer) adaptProjectExternArgs(signature air.Signature, args []ast.Exp
 
 func (l *lowerer) lowerDependencyExternCall(ext air.Extern, alias string, binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
 	return l.lowerDirectExternCall(ext, l.dependencyFFIBindingExpr, alias, binding, args, stmts, returnTypeID)
+}
+
+func (l *lowerer) dependencyFFITypeExpr(alias string, binding string) (ast.Expr, error) {
+	expr, err := parser.ParseExpr(binding)
+	if err != nil {
+		return nil, fmt.Errorf("invalid go extern type binding %q: %w", binding, err)
+	}
+	return l.rewriteDependencyFFITypeExpr(alias, binding, expr)
+}
+
+func (l *lowerer) rewriteDependencyFFITypeExpr(alias string, binding string, expr ast.Expr) (ast.Expr, error) {
+	switch node := expr.(type) {
+	case *ast.StarExpr:
+		x, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.X)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.StarExpr{X: x}, nil
+	case *ast.ArrayType:
+		elt, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.Elt)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ArrayType{Len: node.Len, Elt: elt}, nil
+	case *ast.MapType:
+		key, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.Key)
+		if err != nil {
+			return nil, err
+		}
+		value, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.MapType{Key: key, Value: value}, nil
+	case *ast.ChanType:
+		value, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ChanType{Dir: node.Dir, Value: value}, nil
+	case *ast.Ellipsis:
+		elt, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.Elt)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.Ellipsis{Elt: elt}, nil
+	case *ast.FuncType:
+		params, err := l.rewriteDependencyFFIFieldList(alias, binding, node.Params)
+		if err != nil {
+			return nil, err
+		}
+		results, err := l.rewriteDependencyFFIFieldList(alias, binding, node.Results)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.FuncType{Params: params, Results: results}, nil
+	case *ast.StructType:
+		fields, err := l.rewriteDependencyFFIFieldList(alias, binding, node.Fields)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.StructType{Fields: fields}, nil
+	case *ast.InterfaceType:
+		methods, err := l.rewriteDependencyFFIFieldList(alias, binding, node.Methods)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.InterfaceType{Methods: methods}, nil
+	case *ast.IndexExpr:
+		x, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.X)
+		if err != nil {
+			return nil, err
+		}
+		index, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.Index)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.IndexExpr{X: x, Index: index}, nil
+	case *ast.IndexListExpr:
+		x, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.X)
+		if err != nil {
+			return nil, err
+		}
+		indices := make([]ast.Expr, len(node.Indices))
+		for i := range node.Indices {
+			indices[i], err = l.rewriteDependencyFFITypeExpr(alias, binding, node.Indices[i])
+			if err != nil {
+				return nil, err
+			}
+		}
+		return &ast.IndexListExpr{X: x, Indices: indices}, nil
+	case *ast.ParenExpr:
+		x, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.X)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ParenExpr{X: x}, nil
+	case *ast.SelectorExpr:
+		if ident, ok := node.X.(*ast.Ident); ok && ident.Name == "ffi" {
+			packageAlias := sanitizeName(alias) + "ffi"
+			return l.qualified(packageAlias, "generated/depffi/"+sanitizeName(alias), node.Sel.Name), nil
+		}
+		l.registerFFIImportsForGoType(node)
+		return node, nil
+	case *ast.Ident:
+		if isPredeclaredGoTypeName(node.Name) {
+			return node, nil
+		}
+		return nil, fmt.Errorf("dependency go extern type binding %q must qualify %s with package ffi", binding, node.Name)
+	default:
+		l.registerFFIImportsForGoType(node)
+		return node, nil
+	}
+}
+
+func (l *lowerer) rewriteDependencyFFIFieldList(alias string, binding string, fields *ast.FieldList) (*ast.FieldList, error) {
+	if fields == nil {
+		return nil, nil
+	}
+	rewritten := &ast.FieldList{List: make([]*ast.Field, len(fields.List))}
+	for i, field := range fields.List {
+		copyField := *field
+		if field.Type != nil {
+			typ, err := l.rewriteDependencyFFITypeExpr(alias, binding, field.Type)
+			if err != nil {
+				return nil, err
+			}
+			copyField.Type = typ
+		}
+		rewritten.List[i] = &copyField
+	}
+	return rewritten, nil
 }
 
 func (l *lowerer) lowerProjectExternCall(ext air.Extern, binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {

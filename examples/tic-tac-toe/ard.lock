@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "root": "root",
+  "packages": [
+    {
+      "id": "root",
+      "name": "tic_tac_toe",
+      "path": ".",
+      "dependencies": {
+        "vaxis": "git:e5bd4a09be472f99:76f7c1bcb3a8243d2b569e8d9947b85b3ae64fae"
+      }
+    },
+    {
+      "id": "git:e5bd4a09be472f99:76f7c1bcb3a8243d2b569e8d9947b85b3ae64fae",
+      "name": "vaxis",
+      "git": "https://github.com/akonwi/vaxis-ard.git",
+      "commit": "76f7c1bcb3a8243d2b569e8d9947b85b3ae64fae",
+      "requested": "76f7c1b"
+    }
+  ]
+}

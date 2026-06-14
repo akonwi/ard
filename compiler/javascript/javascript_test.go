@@ -13,6 +13,7 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/backend"
+	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/frontend"
 )
 
@@ -1432,6 +1433,65 @@ let scores = get_scores()
 		if !strings.Contains(source, expected) {
 			t.Fatalf("expected %q in AIR JS output, got:\n%s", expected, source)
 		}
+	}
+}
+
+func TestBuildProgramFromAIRDependencyFFI(t *testing.T) {
+	workspace := t.TempDir()
+	depDir := filepath.Join(workspace, "dep")
+	appDir := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(depDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\ntarget = \"js-server\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "dep.ard"), []byte(`extern fn value() Int = { js-server = "value" }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ffi.js-server.mjs"), []byte("export function value() { return 42; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\ntarget = \"js-server\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use dep
+
+fn main() {
+	dep::value()
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetJSServer)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower AIR: %v", err)
+	}
+	outputPath := filepath.Join(appDir, "main.mjs")
+	if _, err := BuildProgram(program, outputPath, backend.TargetJSServer, loaded.ProjectInfo); err != nil {
+		t.Fatalf("build AIR JS program: %v", err)
+	}
+	out, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	depKey := checker.PackageModulePrefix("path:" + depDir)
+	depObject := sanitizeJSDependencyKey(depKey) + "FFI"
+	depFile := "ffi.dep." + sanitizeJSDependencyKey(depKey) + ".js-server.mjs"
+	if !strings.Contains(string(out), `import * as `+depObject+` from "./`+depFile+`";`) || !strings.Contains(string(out), depObject+".value()") {
+		t.Fatalf("expected dependency ffi import/call, got:\n%s", string(out))
+	}
+	if _, err := os.Stat(filepath.Join(appDir, depFile)); err != nil {
+		t.Fatalf("expected copied dependency ffi companion: %v", err)
 	}
 }
 

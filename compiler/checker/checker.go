@@ -3,7 +3,9 @@ package checker
 import (
 	"fmt"
 	"maps"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -341,27 +343,36 @@ func (c *Checker) Check() {
 				panic(fmt.Sprintf("No module resolver provided for user import: %s", imp.Path))
 			}
 
-			filePath, err := c.moduleResolver.ResolveImportPath(imp.Path)
+			resolved, err := c.moduleResolver.ResolveImport(c.modulePath, imp.Path)
 			if err != nil {
 				c.addError(fmt.Sprintf("Failed to resolve import '%s': %v", imp.Path, err), imp.GetLocation())
 				continue
 			}
+			filePath := filepath.Clean(resolved.FilePath)
 
 			// Check if module is already cached
 			if cachedModule, ok := c.moduleResolver.moduleCache[filePath]; ok {
 				c.program.Imports[imp.Name] = cachedModule
 				continue
 			}
+			if slices.Contains(c.moduleResolver.loadingChain, resolved.ModulePath) {
+				chain := append(append([]string{}, c.moduleResolver.loadingChain...), resolved.ModulePath)
+				c.addError(fmt.Sprintf("circular dependency detected: %s", strings.Join(chain, " -> ")), imp.GetLocation())
+				continue
+			}
+			c.moduleResolver.loadingChain = append(c.moduleResolver.loadingChain, resolved.ModulePath)
 
-			// Load and parse the module file using import path
-			ast, err := c.moduleResolver.LoadModule(imp.Path)
+			// Load and parse the module file using the resolved package context.
+			ast, err := c.moduleResolver.LoadModuleFile(filePath)
 			if err != nil {
+				c.moduleResolver.loadingChain = c.moduleResolver.loadingChain[:len(c.moduleResolver.loadingChain)-1]
 				c.addError(fmt.Sprintf("Failed to load module %s: %v", filePath, err), imp.GetLocation())
 				continue
 			}
 
 			// Type-check the imported module
-			userModule, diagnostics := check(ast, c.moduleResolver, imp.Path+".ard", imp.Path, c.options)
+			userModule, diagnostics := check(ast, c.moduleResolver, filePath, resolved.ModulePath, c.options)
+			c.moduleResolver.loadingChain = c.moduleResolver.loadingChain[:len(c.moduleResolver.loadingChain)-1]
 			if len(diagnostics) > 0 {
 				// Add all diagnostics from the imported module
 				for _, diag := range diagnostics {
@@ -370,9 +381,9 @@ func (c *Checker) Check() {
 				continue
 			}
 
-			// Set the correct file path for the module
+			// Set the correct module path for the module
 			if um, ok := userModule.(*UserModule); ok {
-				um.setFilePath(imp.Path)
+				um.setFilePath(resolved.ModulePath)
 			}
 
 			// Cache and add to imports

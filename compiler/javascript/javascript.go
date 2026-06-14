@@ -15,8 +15,9 @@ import (
 )
 
 type ffiArtifacts struct {
-	useStdlib  bool
-	useProject bool
+	useStdlib    bool
+	useProject   bool
+	dependencies map[string]string
 }
 
 func Build(inputPath, outputPath, target string) (string, error) {
@@ -113,7 +114,22 @@ func writeFFICompanions(outputDir string, target string, projectInfo *checker.Pr
 			return err
 		}
 	}
+	for key, root := range ffi.dependencies {
+		sourcePath := filepath.Join(root, "ffi."+target+".mjs")
+		content, err := os.ReadFile(sourcePath)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(outputDir, "ffi.dep."+sanitizeJSDependencyKey(key)+"."+target+".mjs"), content, 0o644); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func sanitizeJSDependencyKey(key string) string {
+	replacer := strings.NewReplacer("/", "_", "-", "_", ".", "_", ":", "_")
+	return jsName(replacer.Replace(key))
 }
 
 func moduleAlias(path string) string {

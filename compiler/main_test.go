@@ -341,8 +341,81 @@ func TestRunGoTargetSampleStdoutConformance(t *testing.T) {
 }
 
 func TestBuildTicTacToeExample(t *testing.T) {
-	projectDir := filepath.Join("..", "examples", "tic-tac-toe")
+	repoProjectDir := filepath.Join("..", "examples", "tic-tac-toe")
+	projectDir := prepareTicTacToeLockCacheProject(t, repoProjectDir)
 	_ = buildGoSampleBinary(t, filepath.Join(projectDir, "main.ard"))
+}
+
+func prepareTicTacToeLockCacheProject(t *testing.T, sourceProjectDir string) string {
+	t.Helper()
+	projectDir := t.TempDir()
+	for _, name := range []string{"main.ard"} {
+		copyFileForTest(t, filepath.Join(sourceProjectDir, name), filepath.Join(projectDir, name))
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"tic_tac_toe\"\nard = \">= 0.1.0\"\ntarget = \"go\"\n\n"), 0o644); err != nil {
+		t.Fatalf("write temp tic-tac-toe manifest: %v", err)
+	}
+
+	cacheRoot := t.TempDir()
+	t.Setenv("ARD_CACHE_DIR", cacheRoot)
+	vaxisGit, vaxisCommit := createTicTacToeVaxisGitDependency(t)
+	manifest := fmt.Sprintf("name = \"tic_tac_toe\"\nard = \">= 0.1.0\"\ntarget = \"go\"\n\n[dependencies]\nvaxis = { git = %q, commit = %q }\n", vaxisGit, vaxisCommit)
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write temp tic-tac-toe dependency manifest: %v", err)
+	}
+	lock, err := checker.LockDependencyGraph(projectDir, "tic_tac_toe", "vaxis", checker.DependencyInfo{Alias: "vaxis", Git: vaxisGit, Commit: vaxisCommit, Requested: vaxisCommit}, "vaxis", vaxisCommit)
+	if err != nil {
+		t.Fatalf("lock temp tic-tac-toe dependency graph: %v", err)
+	}
+	if err := checker.WriteDependencyLock(projectDir, lock); err != nil {
+		t.Fatalf("write temp tic-tac-toe lock: %v", err)
+	}
+	return projectDir
+}
+
+func createTicTacToeVaxisGitDependency(t *testing.T) (string, string) {
+	t.Helper()
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "ard.toml"), []byte("name = \"vaxis\"\nard = \">= 0.19.2\"\ntarget = \"go\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "vaxis.ard"), []byte(`extern type Vaxis = "ffi.Vaxis"
+
+extern fn new(title: Str) Vaxis!Str = "New"
+
+extern fn close(vx: Vaxis) Void!Str = "Close"
+
+extern fn clear(vx: Vaxis) Void = "Clear"
+
+extern fn draw_text(vx: Vaxis, x: Int, y: Int, text: Str) Void = "DrawText"
+
+extern fn render(vx: Vaxis) Void!Str = "Render"
+
+extern fn read_key(vx: Vaxis) Str!Str = "ReadKey"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "ffi", "host.go"), []byte(`package ffi
+
+type Vaxis struct{}
+
+func New(title string) (Vaxis, error) { return Vaxis{}, nil }
+func Close(vx Vaxis) error { return nil }
+func Clear(vx Vaxis) {}
+func DrawText(vx Vaxis, x int, y int, text string) {}
+func Render(vx Vaxis) error { return nil }
+func ReadKey(vx Vaxis) (string, error) { return "q", nil }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitForTest(t, repo, "init")
+	runGitForTest(t, repo, "add", ".")
+	runGitForTest(t, repo, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "init")
+	commit := strings.TrimSpace(runGitOutputForTest(t, repo, "rev-parse", "HEAD"))
+	return repo, commit
 }
 
 func TestRunServerExampleRoutes(t *testing.T) {
@@ -370,6 +443,36 @@ func TestRunServerExampleRoutes(t *testing.T) {
 	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", `{"email":"ard@example.com"}`, http.StatusCreated, "Created user with email ard@example.com")
 	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", "", http.StatusBadRequest, "Missing request body")
 	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", `{"name":"Ard"}`, http.StatusBadRequest, `Missing email: email: got Missing field "email", expected Field`)
+}
+
+func copyFileForTest(t *testing.T, src string, dst string) {
+	t.Helper()
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read %s: %v", src, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(dst), err)
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", dst, err)
+	}
+}
+
+func runGitForTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	_ = runGitOutputForTest(t, dir, args...)
+}
+
+func runGitOutputForTest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return string(output)
 }
 
 func buildGoSampleBinary(t *testing.T, sourcePath string) string {
@@ -1129,6 +1232,23 @@ func TestDependencyFromAddSpecGitHubCommit(t *testing.T) {
 	}
 }
 
+func TestDependencyFromAddSpecSSHTransport(t *testing.T) {
+	dep, err := dependencyFromAddSpec("git@github.com:akonwi/vaxis-ard.git@76f7c1b")
+	if err != nil {
+		t.Fatalf("dependencyFromAddSpec: %v", err)
+	}
+	if dep.Alias != "vaxis-ard" || dep.Git != "git@github.com:akonwi/vaxis-ard.git" || dep.Commit != "76f7c1b" {
+		t.Fatalf("dep = %#v", dep)
+	}
+	dep, err = dependencyFromAddSpec("ssh://git@github.com/akonwi/vaxis-ard.git@v1")
+	if err != nil {
+		t.Fatalf("dependencyFromAddSpec ssh url: %v", err)
+	}
+	if dep.Alias != "vaxis-ard" || dep.Git != "ssh://git@github.com/akonwi/vaxis-ard.git" || dep.Tag != "v1" {
+		t.Fatalf("dep = %#v", dep)
+	}
+}
+
 func TestDependencyFromAddSpecGitHubHyphenShorthand(t *testing.T) {
 	dep, err := dependencyFromAddSpec("github.com/akonwi-vaxis-ard@76f7c1b")
 	if err != nil {
@@ -1168,6 +1288,57 @@ func TestAddDependencyToManifest(t *testing.T) {
 	got := string(data)
 	if !strings.Contains(got, "[dependencies]") || !strings.Contains(got, `vaxis = { git = "https://github.com/akonwi/vaxis-ard.git", commit = "76f7c1b" }`) {
 		t.Fatalf("manifest missing dependency:\n%s", got)
+	}
+}
+
+func TestReplaceDependencyInManifestRemovesOldAlias(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "ard.toml")
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nold_vaxis = { git = \"https://github.com/akonwi/vaxis-ard\", commit = \"old\" }\nother = { path = \"../other\" }\n"
+	if err := os.WriteFile(manifest, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dep := checker.DependencyInfo{Alias: "vaxis", Git: "https://github.com/akonwi/vaxis-ard.git", Commit: "new"}
+	if err := replaceDependencyInManifest(manifest, []string{"old_vaxis"}, dep); err != nil {
+		t.Fatalf("replaceDependencyInManifest: %v", err)
+	}
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "old_vaxis =") {
+		t.Fatalf("manifest still has old alias:\n%s", got)
+	}
+	if !strings.Contains(got, `vaxis = { git = "https://github.com/akonwi/vaxis-ard.git", commit = "new" }`) || !strings.Contains(got, "other =") {
+		t.Fatalf("manifest missing replacement or existing dependency:\n%s", got)
+	}
+}
+
+func TestDependencyAliasesForGitInManifestCanonicalizesRawEntries(t *testing.T) {
+	dir := t.TempDir()
+	manifest := filepath.Join(dir, "ard.toml")
+	input := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[dependencies]\nold = { git = \"git@github.com:akonwi/vaxis-ard.git\", commit = \"old\" }\nother = { git = \"https://github.com/akonwi/other.git\", commit = \"other\" }\n"
+	if err := os.WriteFile(manifest, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	aliases, err := dependencyAliasesForGitInManifest(manifest, "https://github.com/akonwi/vaxis-ard", "vaxis")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(aliases) != 1 || aliases[0] != "old" {
+		t.Fatalf("aliases = %#v, want [old]", aliases)
+	}
+}
+
+func TestDependencyAliasesForGitCanonicalizesSource(t *testing.T) {
+	deps := map[string]checker.DependencyInfo{
+		"old":   {Alias: "old", Git: "https://github.com/akonwi/vaxis-ard"},
+		"other": {Alias: "other", Git: "https://github.com/akonwi/other.git"},
+	}
+	aliases := dependencyAliasesForGit(deps, "git@github.com:akonwi/vaxis-ard.git", "vaxis")
+	if len(aliases) != 1 || aliases[0] != "old" {
+		t.Fatalf("aliases = %#v, want [old]", aliases)
 	}
 }
 
