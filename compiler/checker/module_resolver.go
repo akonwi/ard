@@ -40,7 +40,6 @@ type DependencyInfo struct {
 	Commit     string
 	Requested  string
 	Integrity  string
-	VendorPath string // legacy project-local dependency path
 	RootPath   string // source root used by resolver: path dependency or locked cache checkout
 	PackageID  string
 	Name       string
@@ -236,7 +235,7 @@ func parseProjectDependencies(tomlPath string, projectRoot string) (map[string]D
 		}
 		alias := matches[1]
 		body := matches[2]
-		dep := DependencyInfo{Alias: alias, Name: alias, VendorPath: filepath.Join(projectRoot, ".ard", "vendor", alias)}
+		dep := DependencyInfo{Alias: alias, Name: alias}
 		if pathMatches := pathRe.FindStringSubmatch(body); len(pathMatches) >= 2 {
 			dep.SourcePath = pathMatches[1]
 			if !filepath.IsAbs(dep.SourcePath) {

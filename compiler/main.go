@@ -26,11 +26,14 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Please provide a command")
+		printUsage()
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
+	case "help", "--help", "-h":
+		printUsage()
+		os.Exit(0)
 	case "version":
 		fmt.Println(version.Get())
 		os.Exit(0)
@@ -200,9 +203,28 @@ func main() {
 			os.Exit(0)
 		}
 	default:
-		fmt.Printf("Unknown command: %s\n", os.Args[1])
+		fmt.Printf("Unknown command: %s\n\n", os.Args[1])
+		printUsage()
 		os.Exit(1)
 	}
+}
+
+func printUsage() {
+	fmt.Print(`Usage: ard <command> [args]
+
+Commands:
+  check <file.ard>                  Type-check a program
+  run [--target <target>] <file.ard> Run a program
+  build <file.ard> [--out <path>]    Build a program
+  test [path] [--filter <pattern>]   Run Ard tests
+  add <git-source@ref> [as alias]    Add or update a Git dependency and lock it
+  remove <alias>                     Remove a direct dependency
+  deps fetch                         Restore locked Git dependencies into the cache
+  deps verify                        Verify cached dependencies against ard.lock
+  format [--check] <path>            Format Ard source
+  lsp                                Start the language server
+  version                            Print compiler version
+`)
 }
 
 func runAddCommand(args []string) error {

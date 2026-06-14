@@ -349,25 +349,73 @@ func TestBuildTicTacToeExample(t *testing.T) {
 func prepareTicTacToeLockCacheProject(t *testing.T, sourceProjectDir string) string {
 	t.Helper()
 	projectDir := t.TempDir()
-	for _, name := range []string{"ard.toml", "ard.lock", "main.ard"} {
+	for _, name := range []string{"main.ard"} {
 		copyFileForTest(t, filepath.Join(sourceProjectDir, name), filepath.Join(projectDir, name))
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"tic_tac_toe\"\nard = \">= 0.1.0\"\ntarget = \"go\"\n\n"), 0o644); err != nil {
+		t.Fatalf("write temp tic-tac-toe manifest: %v", err)
 	}
 
 	cacheRoot := t.TempDir()
 	t.Setenv("ARD_CACHE_DIR", cacheRoot)
-	const vaxisGit = "https://github.com/akonwi/vaxis-ard.git"
-	const vaxisCommit = "76f7c1bcb3a8243d2b569e8d9947b85b3ae64fae"
-	cachePath := checker.DependencyCachePath(vaxisGit, vaxisCommit)
-	vendorPath := filepath.Join(sourceProjectDir, ".ard", "vendor", "vaxis")
-	if _, err := os.Stat(vendorPath); err == nil {
-		copyDirForTest(t, vendorPath, cachePath)
-		return projectDir
+	vaxisGit, vaxisCommit := createTicTacToeVaxisGitDependency(t)
+	manifest := fmt.Sprintf("name = \"tic_tac_toe\"\nard = \">= 0.1.0\"\ntarget = \"go\"\n\n[dependencies]\nvaxis = { git = %q, commit = %q }\n", vaxisGit, vaxisCommit)
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write temp tic-tac-toe dependency manifest: %v", err)
 	}
-
-	if _, err := checker.FetchDependencies(projectDir); err != nil {
-		t.Fatalf("fetch tic-tac-toe dependencies into cache: %v", err)
+	lock, err := checker.LockDependencyGraph(projectDir, "tic_tac_toe", "vaxis", checker.DependencyInfo{Alias: "vaxis", Git: vaxisGit, Commit: vaxisCommit, Requested: vaxisCommit}, "vaxis", vaxisCommit)
+	if err != nil {
+		t.Fatalf("lock temp tic-tac-toe dependency graph: %v", err)
+	}
+	if err := checker.WriteDependencyLock(projectDir, lock); err != nil {
+		t.Fatalf("write temp tic-tac-toe lock: %v", err)
 	}
 	return projectDir
+}
+
+func createTicTacToeVaxisGitDependency(t *testing.T) (string, string) {
+	t.Helper()
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "ard.toml"), []byte("name = \"vaxis\"\nard = \">= 0.19.2\"\ntarget = \"go\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "vaxis.ard"), []byte(`extern type Vaxis = "ffi.Vaxis"
+
+extern fn new(title: Str) Vaxis!Str = "New"
+
+extern fn close(vx: Vaxis) Void!Str = "Close"
+
+extern fn clear(vx: Vaxis) Void = "Clear"
+
+extern fn draw_text(vx: Vaxis, x: Int, y: Int, text: Str) Void = "DrawText"
+
+extern fn render(vx: Vaxis) Void!Str = "Render"
+
+extern fn read_key(vx: Vaxis) Str!Str = "ReadKey"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "ffi", "host.go"), []byte(`package ffi
+
+type Vaxis struct{}
+
+func New(title string) (Vaxis, error) { return Vaxis{}, nil }
+func Close(vx Vaxis) error { return nil }
+func Clear(vx Vaxis) {}
+func DrawText(vx Vaxis, x int, y int, text string) {}
+func Render(vx Vaxis) error { return nil }
+func ReadKey(vx Vaxis) (string, error) { return "q", nil }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitForTest(t, repo, "init")
+	runGitForTest(t, repo, "add", ".")
+	runGitForTest(t, repo, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "init")
+	commit := strings.TrimSpace(runGitOutputForTest(t, repo, "rev-parse", "HEAD"))
+	return repo, commit
 }
 
 func TestRunServerExampleRoutes(t *testing.T) {
@@ -411,35 +459,20 @@ func copyFileForTest(t *testing.T, src string, dst string) {
 	}
 }
 
-func copyDirForTest(t *testing.T, src string, dst string) {
+func runGitForTest(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	if err := filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return os.MkdirAll(dst, 0o755)
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, data, info.Mode())
-	}); err != nil {
-		t.Fatalf("copy dir %s to %s: %v", src, dst, err)
+	_ = runGitOutputForTest(t, dir, args...)
+}
+
+func runGitOutputForTest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
+	return string(output)
 }
 
 func buildGoSampleBinary(t *testing.T, sourcePath string) string {
