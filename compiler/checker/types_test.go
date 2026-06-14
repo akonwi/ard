@@ -2,6 +2,14 @@ package checker
 
 import "testing"
 
+func TestUnresolvedTypeVarGetReturnsNil(t *testing.T) {
+	unknown := &TypeVar{name: "unknown"}
+
+	if got := unknown.get("to_str"); got != nil {
+		t.Fatalf("unresolved TypeVar.get() = %v, want nil", got)
+	}
+}
+
 func TestTypeEquality(t *testing.T) {
 	var tests = []struct {
 		left   Type
