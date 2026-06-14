@@ -930,6 +930,9 @@ func loadGoTestModules(inputPath string, files []string, filter string) ([]loade
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := checker.VerifyDependencies(startDir); err != nil {
+		return nil, nil, err
+	}
 	projectInfo := resolver.GetProjectInfo()
 	loaded := make([]loadedGoTestModule, 0, len(files))
 	for _, path := range files {

@@ -22,6 +22,7 @@ type Options struct {
 	Target       string
 	RootFileName string
 	InvokeMain   bool
+	ProjectInfo  *checker.ProjectInfo
 }
 
 func GenerateSources(program *air.Program, options Options) (map[string][]byte, FFIArtifacts, error) {
@@ -44,7 +45,7 @@ func RunProgram(program *air.Program, target string, _ []string, projectInfo *ch
 		return err
 	}
 	defer os.RemoveAll(tmpDir)
-	files, ffi, err := GenerateSources(program, Options{Target: target, RootFileName: "main.mjs", InvokeMain: true})
+	files, ffi, err := GenerateSources(program, Options{Target: target, RootFileName: "main.mjs", InvokeMain: true, ProjectInfo: projectInfo})
 	if err != nil {
 		return err
 	}
@@ -69,7 +70,7 @@ func BuildProgram(program *air.Program, outputPath string, target string, projec
 	}
 	outputDir := filepath.Dir(resolvedOutputPath)
 	rootFileName := filepath.Base(resolvedOutputPath)
-	files, ffi, err := GenerateSources(program, Options{Target: target, RootFileName: rootFileName})
+	files, ffi, err := GenerateSources(program, Options{Target: target, RootFileName: rootFileName, ProjectInfo: projectInfo})
 	if err != nil {
 		return "", err
 	}
@@ -107,6 +108,7 @@ type airJSLowerer struct {
 	methodFunctions  map[air.FunctionID]jsMethodInfo
 	methodsByType    map[air.TypeID][]air.FunctionID
 	localOverrides   map[air.FunctionID]map[air.LocalID]string
+	projectInfo      *checker.ProjectInfo
 	tempCounter      int
 }
 
@@ -130,7 +132,7 @@ func generateSourcesFromAIR(program *air.Program, options Options) (map[string][
 	if rootFile == "" {
 		rootFile = "main.mjs"
 	}
-	l := &airJSLowerer{program: program, target: target, rootFile: rootFile, moduleFiles: map[air.ModuleID]string{}, localOverrides: map[air.FunctionID]map[air.LocalID]string{}}
+	l := &airJSLowerer{program: program, target: target, rootFile: rootFile, moduleFiles: map[air.ModuleID]string{}, localOverrides: map[air.FunctionID]map[air.LocalID]string{}, projectInfo: options.ProjectInfo}
 	l.planModuleFiles()
 	l.collectClosureFunctions()
 	l.collectMethodFunctions()
@@ -304,6 +306,14 @@ func (l *airJSLowerer) lowerModule(module air.Module, invokeRoot bool) (string, 
 	}
 	if ffi.useProject {
 		imports = append(imports, jsNamespaceImportLine("project", relativeJSImport(outputPath, "ffi.project."+l.target+".mjs")))
+	}
+	depKeys := make([]string, 0, len(ffi.dependencies))
+	for key := range ffi.dependencies {
+		depKeys = append(depKeys, key)
+	}
+	sort.Strings(depKeys)
+	for _, key := range depKeys {
+		imports = append(imports, jsNamespaceImportLine(jsDependencyFFIObjectName(key), relativeJSImport(outputPath, "ffi.dep."+sanitizeJSDependencyKey(key)+"."+l.target+".mjs")))
 	}
 	for _, importedID := range l.moduleDependencyIDs(module) {
 		if importPath, ok := l.moduleFiles[importedID]; ok {
@@ -2097,16 +2107,57 @@ func (l *airJSLowerer) externRef(id air.ExternID) (string, error) {
 		return "", fmt.Errorf("extern %s has no JavaScript binding for %s", ext.Name, l.target)
 	}
 	objectName := "project"
-	if int(ext.Module) >= 0 && int(ext.Module) < len(l.program.Modules) && strings.HasPrefix(l.program.Modules[ext.Module].Path, "ard/") {
+	modulePath := ""
+	if int(ext.Module) >= 0 && int(ext.Module) < len(l.program.Modules) {
+		modulePath = l.program.Modules[ext.Module].Path
+	}
+	if strings.HasPrefix(modulePath, "ard/") {
 		objectName = "stdlib"
 		if isAIRJSPreludeExtern(binding) {
 			objectName = "prelude"
 		}
+	} else if key, _, ok := jsDependencyPackageForModulePath(modulePath, l.projectInfo); ok {
+		objectName = jsDependencyFFIObjectName(key)
 	}
 	if isJSIdentifier(binding) {
 		return objectName + "." + binding, nil
 	}
 	return objectName + "[" + strconv.Quote(binding) + "]", nil
+}
+
+func jsDependencyPackageForModulePath(modulePath string, projectInfo *checker.ProjectInfo) (string, string, bool) {
+	if projectInfo == nil || modulePath == "" {
+		return "", "", false
+	}
+	first := strings.Split(modulePath, "/")[0]
+	for _, dep := range projectInfo.Dependencies {
+		packageID := dep.PackageID
+		if packageID == "" {
+			packageID = dep.Alias
+		}
+		key := checker.PackageModulePrefix(packageID)
+		if first == key || first == dep.Alias {
+			root := dep.RootPath
+			if root == "" {
+				root = dep.SourcePath
+			}
+			return key, root, true
+		}
+	}
+	for packageID, pkg := range projectInfo.Packages {
+		if packageID == projectInfo.RootPackageID || packageID == "" {
+			continue
+		}
+		key := checker.PackageModulePrefix(packageID)
+		if first == key {
+			return key, pkg.RootPath, true
+		}
+	}
+	return "", "", false
+}
+
+func jsDependencyFFIObjectName(key string) string {
+	return sanitizeJSDependencyKey(key) + "FFI"
 }
 
 func isAIRJSPreludeExtern(binding string) bool {
@@ -2174,7 +2225,7 @@ func (l *airJSLowerer) isVoidType(id air.TypeID) bool {
 }
 
 func (l *airJSLowerer) collectFFIArtifacts() FFIArtifacts {
-	ffi := FFIArtifacts{}
+	ffi := FFIArtifacts{dependencies: map[string]string{}}
 	for _, ext := range l.program.Externs {
 		modulePath := ""
 		if int(ext.Module) >= 0 && int(ext.Module) < len(l.program.Modules) {
@@ -2189,6 +2240,8 @@ func (l *airJSLowerer) collectFFIArtifacts() FFIArtifacts {
 		}
 		if strings.HasPrefix(modulePath, "ard/") {
 			ffi.useStdlib = true
+		} else if key, root, ok := jsDependencyPackageForModulePath(modulePath, l.projectInfo); ok {
+			ffi.dependencies[key] = root
 		} else {
 			ffi.useProject = true
 		}

@@ -2465,6 +2465,139 @@ fn main() {
 	}
 }
 
+func TestBuildProgramCopiesDependencyGoFFIForExternTypeOnly(t *testing.T) {
+	workspace := t.TempDir()
+	depDir := filepath.Join(workspace, "dep")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{filepath.Join(depDir, "ffi"), appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "dep.ard"), []byte(`extern type Callback = "func(map[string]ffi.Handle) error"
+extern type Handles = "chan ffi.Handle"
+struct Holder { callback: Callback, handles: Handles }
+fn noop() {}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ffi", "host.go"), []byte(`package ffi
+
+type Handle struct{}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use dep
+
+fn main() { dep::noop() }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+}
+
+func TestBuildProgramSupportsTransitiveDependencyGoFFI(t *testing.T) {
+	workspace := t.TempDir()
+	hostDir := filepath.Join(workspace, "host")
+	depDir := filepath.Join(workspace, "dep")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{filepath.Join(hostDir, "ffi"), depDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(hostDir, "ard.toml"), []byte("name = \"host\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hostDir, "host.ard"), []byte(`extern type Handle = "ffi.Handle"
+extern fn handle() Handle = "HandleValue"
+extern fn answer_from(handle: Handle) Int = "AnswerFrom"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hostDir, "ffi", "host.go"), []byte(`package ffi
+
+type Handle struct{ Value int }
+
+func HandleValue() Handle { return Handle{Value: 42} }
+
+func AnswerFrom(handle Handle) int { return handle.Value }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhost = { path = \"../host\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "dep.ard"), []byte(`use host
+
+fn answer() Int {
+	let handle = host::handle()
+	host::answer_from(handle)
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock := fmt.Sprintf(`{
+  "version": 1,
+  "root": "root",
+  "packages": [
+    {"id": "root", "name": "app", "path": ".", "dependencies": {"dep": "path:%s"}},
+    {"id": "path:%s", "name": "dep", "path": "%s", "dependencies": {"host": "path:%s"}},
+    {"id": "path:%s", "name": "host", "path": "%s"}
+  ]
+}
+`, depDir, depDir, depDir, hostDir, hostDir, hostDir)
+	if err := os.WriteFile(filepath.Join(appDir, "ard.lock"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use dep
+
+fn main() {
+	if not dep::answer() == 42 {
+		panic("transitive dependency ffi failed")
+	}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	builtPath, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := exec.Command(builtPath).Run(); err != nil {
+		t.Fatalf("run built binary: %v", err)
+	}
+}
+
 func TestWriteProgramDoesNotRequireProjectFFIForStdlibExternMethods(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

@@ -48,6 +48,9 @@ func LoadModule(inputPath string, target string) (*LoadResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error initializing module resolver: %w", err)
 	}
+	if err := checker.VerifyDependencies(workingDir); err != nil {
+		return nil, err
+	}
 
 	relPath, err := filepath.Rel(workingDir, inputPath)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 )
 
 func TestFindProjectRoot(t *testing.T) {
@@ -291,6 +292,161 @@ func TestPathDependencyIsResolvedFromSource(t *testing.T) {
 	if path != filepath.Join(depSrc, "dep.ard") {
 		t.Fatalf("resolved path = %q, want %q", path, filepath.Join(depSrc, "dep.ard"))
 	}
+}
+
+func TestLockedPathDependencyAliasUsesPackageNameForRootModule(t *testing.T) {
+	workspace := t.TempDir()
+	app := filepath.Join(workspace, "app")
+	dep := filepath.Join(workspace, "dep")
+	for _, dir := range []string{app, dep} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dep, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dep, "dep.ard"), []byte("fn answer() Int { 42 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nui = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "main.ard"), []byte("use ui\n\nlet answer = ui::answer()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock := fmt.Sprintf(`{
+  "version": 1,
+  "root": "root",
+  "packages": [
+    {"id": "root", "name": "app", "path": ".", "dependencies": {"ui": "path:%s"}},
+    {"id": "path:%s", "name": "dep", "path": "%s"}
+  ]
+}
+`, dep, dep, dep)
+	if err := os.WriteFile(filepath.Join(app, "ard.lock"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := parseSourceForResolverTest(t, filepath.Join(app, "main.ard"))
+	resolver, err := checker.NewModuleResolver(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(filepath.Join(app, "main.ard"), result, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDependencyUsesItsOwnTransitiveAliasFromLock(t *testing.T) {
+	workspace := t.TempDir()
+	app := filepath.Join(workspace, "app")
+	dep := filepath.Join(workspace, "dep")
+	helper := filepath.Join(workspace, "helper")
+	for _, dir := range []string{app, dep, helper} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(helper, "ard.toml"), []byte("name = \"helper\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helper, "helper.ard"), []byte("fn value() Int { 42 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dep, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { path = \"../helper\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dep, "dep.ard"), []byte("use helper\n\nfn answer() Int { helper::value() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "main.ard"), []byte("use dep\n\nlet answer = dep::answer()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock := fmt.Sprintf(`{
+  "version": 1,
+  "root": "root",
+  "packages": [
+    {"id": "root", "name": "app", "path": ".", "dependencies": {"dep": "path:%s"}},
+    {"id": "path:%s", "name": "dep", "path": "%s", "dependencies": {"helper": "path:%s"}},
+    {"id": "path:%s", "name": "helper", "path": "%s"}
+  ]
+}
+`, dep, dep, dep, helper, helper, helper)
+	if err := os.WriteFile(filepath.Join(app, "ard.lock"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := parseSourceForResolverTest(t, filepath.Join(app, "main.ard"))
+	resolver, err := checker.NewModuleResolver(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(filepath.Join(app, "main.ard"), result, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestRootCannotImportTransitiveDependencyAlias(t *testing.T) {
+	workspace := t.TempDir()
+	app := filepath.Join(workspace, "app")
+	dep := filepath.Join(workspace, "dep")
+	helper := filepath.Join(workspace, "helper")
+	for _, dir := range []string{app, dep, helper} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(app, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "main.ard"), []byte("use helper\n\nlet answer = helper::value()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock := fmt.Sprintf(`{
+  "version": 1,
+  "root": "root",
+  "packages": [
+    {"id": "root", "name": "app", "path": ".", "dependencies": {"dep": "path:%s"}},
+    {"id": "path:%s", "name": "dep", "path": "%s", "dependencies": {"helper": "path:%s"}},
+    {"id": "path:%s", "name": "helper", "path": "%s"}
+  ]
+}
+`, dep, dep, dep, helper, helper, helper)
+	if err := os.WriteFile(filepath.Join(app, "ard.lock"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := parseSourceForResolverTest(t, filepath.Join(app, "main.ard"))
+	resolver, err := checker.NewModuleResolver(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(filepath.Join(app, "main.ard"), result, resolver)
+	c.Check()
+	if !c.HasErrors() || !strings.Contains(c.Diagnostics()[0].Message, "unknown import root") {
+		t.Fatalf("diagnostics = %v, want unknown import root", c.Diagnostics())
+	}
+}
+
+func parseSourceForResolverTest(t *testing.T, path string) *parse.Program {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := parse.Parse(data, path)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	return result.Program
 }
 
 func TestGitDependencyResolvesFromLockCache(t *testing.T) {

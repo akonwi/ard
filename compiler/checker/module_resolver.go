@@ -68,11 +68,18 @@ type LockedPackage struct {
 
 // ModuleResolver handles finding and loading user modules
 type ModuleResolver struct {
-	project      *ProjectInfo
-	moduleCache  map[string]Module         // cache loaded modules by file path
-	astCache     map[string]*parse.Program // cache parsed ASTs by file path
-	overlays     map[string]string         // unsaved source text by resolved file path
-	loadingChain []string                  // track import paths currently being loaded for circular dependency detection
+	project        *ProjectInfo
+	moduleCache    map[string]Module         // cache loaded modules by file path
+	astCache       map[string]*parse.Program // cache parsed ASTs by file path
+	overlays       map[string]string         // unsaved source text by resolved file path
+	loadingChain   []string                  // track canonical module paths currently being loaded for circular dependency detection
+	modulePackages map[string]string         // canonical module path -> package ID
+}
+
+type ResolvedImport struct {
+	FilePath   string
+	ModulePath string
+	PackageID  string
 }
 
 // FindProjectRoot walks up the directory tree to find ard.toml or falls back to directory name
@@ -126,6 +133,7 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 			} else if ok {
 				rootPackageID, packages, dependencies = applyDependencyLock(current, projectName, dependencies, lock)
 			}
+			addPathDependencyPackages(packages, dependencies)
 
 			return &ProjectInfo{
 				RootPath:      current,
@@ -219,7 +227,7 @@ func parseProjectDependencies(tomlPath string, projectRoot string) (map[string]D
 		}
 		alias := matches[1]
 		body := matches[2]
-		dep := DependencyInfo{Alias: alias, VendorPath: filepath.Join(projectRoot, ".ard", "vendor", alias)}
+		dep := DependencyInfo{Alias: alias, Name: alias, VendorPath: filepath.Join(projectRoot, ".ard", "vendor", alias)}
 		if pathMatches := pathRe.FindStringSubmatch(body); len(pathMatches) >= 2 {
 			dep.SourcePath = pathMatches[1]
 			if !filepath.IsAbs(dep.SourcePath) {
@@ -239,11 +247,6 @@ func parseProjectDependencies(tomlPath string, projectRoot string) (map[string]D
 		}
 		if dep.SourcePath == "" && dep.Git == "" {
 			continue
-		}
-		if dep.RootPath == "" && dep.Git != "" {
-			if _, err := os.Stat(dep.VendorPath); err == nil {
-				dep.RootPath = dep.VendorPath
-			}
 		}
 		deps[alias] = dep
 	}
@@ -324,36 +327,68 @@ func applyDependencyLock(projectRoot string, projectName string, deps map[string
 	}
 	for alias, dep := range deps {
 		dep.Name = alias
+		packageID := rootPkg.Dependencies[alias]
+		if packageID != "" {
+			if pkg, ok := packages[packageID]; ok {
+				dep.PackageID = packageID
+				dep.Name = pkg.Name
+				dep.RootPath = pkg.RootPath
+				if pkg.Git != "" {
+					dep.Git = pkg.Git
+				}
+				if pkg.Commit != "" {
+					dep.Commit = pkg.Commit
+				}
+				deps[alias] = dep
+				continue
+			}
+		}
 		if dep.SourcePath != "" {
 			dep.RootPath = dep.SourcePath
 			if dep.PackageID == "" {
 				dep.PackageID = "path:" + dep.SourcePath
 			}
-			deps[alias] = dep
-			continue
-		}
-		packageID := rootPkg.Dependencies[alias]
-		if packageID == "" {
-			deps[alias] = dep
-			continue
-		}
-		pkg, ok := packages[packageID]
-		if !ok {
-			deps[alias] = dep
-			continue
-		}
-		dep.PackageID = packageID
-		dep.Name = pkg.Name
-		dep.RootPath = pkg.RootPath
-		if pkg.Git != "" {
-			dep.Git = pkg.Git
-		}
-		if pkg.Commit != "" {
-			dep.Commit = pkg.Commit
 		}
 		deps[alias] = dep
 	}
 	return rootPackageID, packages, deps
+}
+
+func addPathDependencyPackages(packages map[string]PackageInfo, deps map[string]DependencyInfo) {
+	for alias, dep := range deps {
+		addPathDependencyPackage(packages, dep, map[string]bool{})
+		if dep.PackageID != "" {
+			if pkg, ok := packages[dep.PackageID]; ok {
+				dep.Name = pkg.Name
+				dep.RootPath = pkg.RootPath
+				deps[alias] = dep
+			}
+		}
+	}
+}
+
+func addPathDependencyPackage(packages map[string]PackageInfo, dep DependencyInfo, seen map[string]bool) {
+	if dep.SourcePath == "" || dep.PackageID == "" || seen[dep.PackageID] {
+		return
+	}
+	if _, exists := packages[dep.PackageID]; exists {
+		return
+	}
+	seen[dep.PackageID] = true
+	name := dep.Name
+	manifestPath := filepath.Join(dep.SourcePath, "ard.toml")
+	if parsedName, err := parseProjectName(manifestPath); err == nil && parsedName != "" {
+		name = parsedName
+	}
+	childDeps, _ := parseProjectDependencies(manifestPath, dep.SourcePath)
+	depAliases := map[string]string{}
+	for alias, child := range childDeps {
+		if child.PackageID != "" {
+			depAliases[alias] = child.PackageID
+			addPathDependencyPackage(packages, child, seen)
+		}
+	}
+	packages[dep.PackageID] = PackageInfo{ID: dep.PackageID, Name: name, RootPath: dep.SourcePath, Path: dep.SourcePath, Dependencies: depAliases}
 }
 
 func copyStringMap(in map[string]string) map[string]string {
@@ -366,6 +401,10 @@ func copyStringMap(in map[string]string) map[string]string {
 
 func GitPackageID(git string, commit string) string {
 	return "git:" + cacheSourceHash(git) + ":" + commit
+}
+
+func PackageModulePrefix(packageID string) string {
+	return "_pkg_" + cacheSourceHash(packageID)
 }
 
 func DependencyCachePath(git string, commit string) string {
@@ -506,11 +545,12 @@ func NewModuleResolver(workingDir string) (*ModuleResolver, error) {
 	}
 
 	return &ModuleResolver{
-		project:      project,
-		moduleCache:  make(map[string]Module),
-		astCache:     make(map[string]*parse.Program),
-		overlays:     make(map[string]string),
-		loadingChain: make([]string, 0),
+		project:        project,
+		moduleCache:    make(map[string]Module),
+		astCache:       make(map[string]*parse.Program),
+		overlays:       make(map[string]string),
+		loadingChain:   make([]string, 0),
+		modulePackages: make(map[string]string),
 	}, nil
 }
 
@@ -546,18 +586,14 @@ func FetchDependencies(startPath string) ([]DependencyInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	aliases := make([]string, 0, len(project.Dependencies))
-	for alias := range project.Dependencies {
-		aliases = append(aliases, alias)
-	}
-	sort.Strings(aliases)
-	fetched := make([]DependencyInfo, 0, len(aliases))
-	for _, alias := range aliases {
-		dep, err := fetchDependency(project.Dependencies[alias])
+	deps := projectGitDependencies(project)
+	fetched := make([]DependencyInfo, 0, len(deps))
+	for _, dep := range deps {
+		fetchedDep, err := fetchDependency(dep)
 		if err != nil {
 			return fetched, err
 		}
-		fetched = append(fetched, dep)
+		fetched = append(fetched, fetchedDep)
 	}
 	return fetched, nil
 }
@@ -567,16 +603,7 @@ func VerifyDependencies(startPath string) error {
 	if err != nil {
 		return err
 	}
-	aliases := make([]string, 0, len(project.Dependencies))
-	for alias := range project.Dependencies {
-		aliases = append(aliases, alias)
-	}
-	sort.Strings(aliases)
-	for _, alias := range aliases {
-		dep := project.Dependencies[alias]
-		if dep.Git == "" {
-			continue
-		}
+	for _, dep := range projectGitDependencies(project) {
 		if dep.PackageID == "" || dep.Commit == "" || dep.RootPath == "" {
 			return fmt.Errorf("dependency %q is not locked; run `ard add` with a tag, commit, or latest", dep.Alias)
 		}
@@ -585,6 +612,49 @@ func VerifyDependencies(startPath string) error {
 		}
 	}
 	return nil
+}
+
+func projectGitDependencies(project *ProjectInfo) []DependencyInfo {
+	if project == nil {
+		return nil
+	}
+	byID := map[string]DependencyInfo{}
+	for alias, dep := range project.Dependencies {
+		if dep.Git == "" {
+			continue
+		}
+		if dep.Alias == "" {
+			dep.Alias = alias
+		}
+		if dep.PackageID != "" {
+			byID[dep.PackageID] = dep
+		} else {
+			byID[alias] = dep
+		}
+	}
+	for packageID, pkg := range project.Packages {
+		if packageID == project.RootPackageID || pkg.Git == "" {
+			continue
+		}
+		if _, exists := byID[packageID]; exists {
+			continue
+		}
+		alias := pkg.Name
+		if alias == "" {
+			alias = PackageModulePrefix(packageID)
+		}
+		byID[packageID] = DependencyInfo{Alias: alias, Name: pkg.Name, Git: pkg.Git, Commit: pkg.Commit, RootPath: pkg.RootPath, PackageID: packageID}
+	}
+	ids := make([]string, 0, len(byID))
+	for id := range byID {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	deps := make([]DependencyInfo, 0, len(ids))
+	for _, id := range ids {
+		deps = append(deps, byID[id])
+	}
+	return deps
 }
 
 func fetchDependency(dep DependencyInfo) (DependencyInfo, error) {
@@ -667,68 +737,168 @@ func copyDir(src, dst string) error {
 	})
 }
 
-// ResolveImportPath converts an import path to a file system path
+// ResolveImportPath converts an import path to a file system path from the root package context.
 // Example: "my_project/utils" -> "utils.ard"
 // Example: "my_project/math/operations" -> "math/operations.ard"
 func (mr *ModuleResolver) ResolveImportPath(importPath string) (string, error) {
-	// Check if this is a standard library import
+	resolved, err := mr.ResolveImport("", importPath)
+	if err != nil {
+		return "", err
+	}
+	return resolved.FilePath, nil
+}
+
+func (mr *ModuleResolver) ResolveImport(importerModulePath string, importPath string) (ResolvedImport, error) {
 	if strings.HasPrefix(importPath, "ard/") {
-		return "", fmt.Errorf("standard library imports should be handled separately")
+		return ResolvedImport{}, fmt.Errorf("standard library imports should be handled separately")
 	}
-
-	// Split the import path
 	parts := strings.Split(importPath, "/")
-	if len(parts) < 1 {
-		return "", fmt.Errorf("invalid import path: %s", importPath)
+	if len(parts) < 1 || parts[0] == "" {
+		return ResolvedImport{}, fmt.Errorf("invalid import path: %s", importPath)
 	}
-
-	if dep, ok := mr.project.Dependencies[parts[0]]; ok {
-		depRoot := dep.RootPath
-		if depRoot == "" && dep.SourcePath != "" {
-			depRoot = dep.SourcePath
+	importerPackageID := mr.packageIDForModule(importerModulePath)
+	pkg := mr.packageInfo(importerPackageID)
+	rootName := parts[0]
+	if rootName == pkg.Name {
+		if len(parts) == 1 {
+			return ResolvedImport{}, fmt.Errorf("invalid import path: %s (missing module name)", importPath)
 		}
-		if depRoot == "" && dep.Git != "" {
-			return "", fmt.Errorf("dependency %q is not locked; run `ard add` with a tag, commit, or latest", dep.Alias)
-		}
-		if depRoot == "" {
-			return "", fmt.Errorf("dependency %q has no source root", dep.Alias)
-		}
-		if _, err := os.Stat(depRoot); os.IsNotExist(err) {
-			if dep.Git != "" {
-				return "", fmt.Errorf("dependency %q is not available in Ard cache at %s; run `ard deps fetch`", dep.Alias, depRoot)
+		modulePath := strings.Join(parts[1:], "/")
+		return mr.resolvePackageModule(pkg.ID, modulePath)
+	}
+	if pkg.ID == mr.project.RootPackageID {
+		if dep, ok := mr.project.Dependencies[rootName]; ok {
+			modulePath := strings.Join(parts[1:], "/")
+			if modulePath == "" {
+				modulePath = dep.Name
+				if modulePath == "" {
+					modulePath = dep.Alias
+				}
 			}
-			return "", fmt.Errorf("dependency %q path does not exist: %s", dep.Alias, depRoot)
+			if dep.PackageID != "" {
+				if _, ok := mr.project.Packages[dep.PackageID]; ok {
+					return mr.resolvePackageModule(dep.PackageID, modulePath)
+				}
+			}
+			return mr.resolveDependencyModule(dep, modulePath)
 		}
-		relativePath := strings.Join(parts[1:], "/")
-		if relativePath == "" {
-			relativePath = parts[0]
+	} else if depPackageID := pkg.Dependencies[rootName]; depPackageID != "" {
+		depPkg := mr.packageInfo(depPackageID)
+		modulePath := strings.Join(parts[1:], "/")
+		if modulePath == "" {
+			modulePath = depPkg.Name
 		}
-		fullPath := filepath.Join(depRoot, relativePath+".ard")
-		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-			return "", fmt.Errorf("module file not found: %s", fullPath)
+		return mr.resolvePackageModule(depPkg.ID, modulePath)
+	}
+	if pkg.ID == mr.project.RootPackageID {
+		return ResolvedImport{}, fmt.Errorf("unknown import root %q for package %q; import path '%s' does not match project name '%s' or a dependency alias", rootName, pkg.Name, importPath, mr.project.ProjectName)
+	}
+	return ResolvedImport{}, fmt.Errorf("unknown import root %q for package %q", rootName, pkg.Name)
+}
+
+func (mr *ModuleResolver) packageIDForModule(modulePath string) string {
+	if mr == nil || mr.project == nil {
+		return "root"
+	}
+	if modulePath != "" {
+		if packageID, ok := mr.modulePackages[modulePath]; ok && packageID != "" {
+			return packageID
 		}
-		return fullPath, nil
+		if rootPkg, ok := mr.project.Packages[mr.project.RootPackageID]; ok {
+			if modulePath == rootPkg.Name || strings.HasPrefix(modulePath, rootPkg.Name+"/") {
+				return rootPkg.ID
+			}
+		}
+		for id := range mr.project.Packages {
+			if id == mr.project.RootPackageID {
+				continue
+			}
+			prefix := PackageModulePrefix(id)
+			if modulePath == prefix || strings.HasPrefix(modulePath, prefix+"/") {
+				return id
+			}
+		}
 	}
-
-	// First part should be the project name
-	if parts[0] != mr.project.ProjectName {
-		return "", fmt.Errorf("import path '%s' does not match project name '%s' or a dependency alias", importPath, mr.project.ProjectName)
+	if mr.project.RootPackageID != "" {
+		return mr.project.RootPackageID
 	}
+	return "root"
+}
 
-	// Remove project name and construct relative path
-	if len(parts) == 1 {
-		return "", fmt.Errorf("invalid import path: %s (missing module name)", importPath)
+func (mr *ModuleResolver) packageInfo(packageID string) PackageInfo {
+	if mr != nil && mr.project != nil {
+		if pkg, ok := mr.project.Packages[packageID]; ok {
+			if pkg.Dependencies == nil {
+				pkg.Dependencies = map[string]string{}
+			}
+			return pkg
+		}
+		if pkg, ok := mr.project.Packages[mr.project.RootPackageID]; ok {
+			if pkg.Dependencies == nil {
+				pkg.Dependencies = map[string]string{}
+			}
+			return pkg
+		}
+		return PackageInfo{ID: "root", Name: mr.project.ProjectName, RootPath: mr.project.RootPath, Dependencies: map[string]string{}}
 	}
+	return PackageInfo{ID: "root", Name: "", RootPath: ".", Dependencies: map[string]string{}}
+}
 
-	relativePath := strings.Join(parts[1:], "/") + ".ard"
-	fullPath := filepath.Join(mr.project.RootPath, relativePath)
+func (mr *ModuleResolver) resolvePackageModule(packageID string, modulePath string) (ResolvedImport, error) {
+	pkg, ok := mr.project.Packages[packageID]
+	if !ok {
+		return ResolvedImport{}, fmt.Errorf("unknown package ID %q", packageID)
+	}
+	if pkg.RootPath == "" {
+		return ResolvedImport{}, fmt.Errorf("package %q has no source root", pkg.Name)
+	}
+	dep := DependencyInfo{Alias: pkg.Name, Name: pkg.Name, RootPath: pkg.RootPath, Git: pkg.Git, Commit: pkg.Commit, PackageID: pkg.ID, SourcePath: pkg.Path}
+	if pkg.Git != "" {
+		dep.SourcePath = ""
+	}
+	return mr.resolveDependencyModule(dep, modulePath)
+}
 
-	// Validate file exists
+func (mr *ModuleResolver) resolveDependencyModule(dep DependencyInfo, modulePath string) (ResolvedImport, error) {
+	depRoot := dep.RootPath
+	if depRoot == "" && dep.SourcePath != "" {
+		depRoot = dep.SourcePath
+	}
+	if depRoot == "" && dep.Git != "" {
+		return ResolvedImport{}, fmt.Errorf("dependency %q is not locked; run `ard add` with a tag, commit, or latest", dep.Alias)
+	}
+	if depRoot == "" {
+		return ResolvedImport{}, fmt.Errorf("dependency %q has no source root", dep.Alias)
+	}
+	if _, err := os.Stat(depRoot); os.IsNotExist(err) {
+		if dep.Git != "" {
+			return ResolvedImport{}, fmt.Errorf("dependency %q is not available in Ard cache at %s; run `ard deps fetch`", dep.Alias, depRoot)
+		}
+		return ResolvedImport{}, fmt.Errorf("dependency %q path does not exist: %s", dep.Alias, depRoot)
+	}
+	fullPath := filepath.Join(depRoot, modulePath+".ard")
 	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-		return "", fmt.Errorf("module file not found: %s", fullPath)
+		return ResolvedImport{}, fmt.Errorf("module file not found: %s", fullPath)
 	}
+	packageID := dep.PackageID
+	if packageID == "" {
+		packageID = dep.Alias
+	}
+	canonicalModulePath := mr.canonicalModulePath(packageID, dep.Name, modulePath)
+	if mr.modulePackages != nil {
+		mr.modulePackages[canonicalModulePath] = packageID
+	}
+	return ResolvedImport{FilePath: fullPath, ModulePath: canonicalModulePath, PackageID: packageID}, nil
+}
 
-	return fullPath, nil
+func (mr *ModuleResolver) canonicalModulePath(packageID string, packageName string, modulePath string) string {
+	if packageID == "" || packageID == mr.project.RootPackageID {
+		if packageName != "" && modulePath != packageName && !strings.HasPrefix(modulePath, packageName+"/") {
+			return packageName + "/" + modulePath
+		}
+		return modulePath
+	}
+	return PackageModulePrefix(packageID) + "/" + modulePath
 }
 
 // GetProjectInfo returns the current project information
@@ -736,84 +906,76 @@ func (mr *ModuleResolver) GetProjectInfo() *ProjectInfo {
 	return mr.project
 }
 
-// LoadModule loads and parses a module file from the given import path
+// LoadModule loads and parses a module file from the given import path.
 func (mr *ModuleResolver) LoadModule(importPath string) (*parse.Program, error) {
-	// Resolve import path to filesystem path
 	filePath, err := mr.ResolveImportPath(importPath)
 	if err != nil {
 		return nil, err
 	}
+	return mr.LoadModuleFile(filePath)
+}
 
+func (mr *ModuleResolver) LoadModuleFile(filePath string) (*parse.Program, error) {
 	filePath = filepath.Clean(filePath)
-
-	// Check cache first
 	if cachedAST, exists := mr.astCache[filePath]; exists {
 		return cachedAST, nil
 	}
-
 	var sourceCode []byte
 	if overlay, ok := mr.overlays[filePath]; ok {
 		sourceCode = []byte(overlay)
 	} else {
 		var err error
-		// Read the module file
 		sourceCode, err = os.ReadFile(filePath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read module file %s: %w", filePath, err)
 		}
 	}
-
-	// Parse the module
 	result := parse.Parse(sourceCode, filePath)
 	if len(result.Errors) > 0 {
 		return nil, fmt.Errorf("failed to parse module %s: %s", filePath, result.Errors[0].Message)
 	}
 	program := result.Program
-
-	// Cache the parsed AST
 	mr.astCache[filePath] = program
-
 	return program, nil
 }
 
-// LoadModuleWithDependencies loads a module and all its dependencies, detecting circular dependencies
+// LoadModuleWithDependencies loads a module and all its dependencies, detecting circular dependencies.
 func (mr *ModuleResolver) LoadModuleWithDependencies(importPath string) (*parse.Program, error) {
-	return mr.loadModuleRecursive(importPath)
+	resolved, err := mr.ResolveImport("", importPath)
+	if err != nil {
+		return nil, err
+	}
+	return mr.loadModuleRecursive(resolved)
 }
 
-// loadModuleRecursive is the internal method that handles recursive loading with cycle detection
-func (mr *ModuleResolver) loadModuleRecursive(importPath string) (*parse.Program, error) {
-	// Check for circular dependency using import path (not file path)
-	if slices.Contains(mr.loadingChain, importPath) {
-		chain := append(mr.loadingChain, importPath)
+// loadModuleRecursive is the internal method that handles recursive loading with cycle detection.
+func (mr *ModuleResolver) loadModuleRecursive(resolved ResolvedImport) (*parse.Program, error) {
+	modulePath := resolved.ModulePath
+	if slices.Contains(mr.loadingChain, modulePath) {
+		chain := append(mr.loadingChain, modulePath)
 		return nil, fmt.Errorf("circular dependency detected: %s", strings.Join(chain, " -> "))
 	}
-
-	// Add to loading chain
-	mr.loadingChain = append(mr.loadingChain, importPath)
-
-	// Ensure we remove from loading chain when done
+	mr.loadingChain = append(mr.loadingChain, modulePath)
 	defer func() {
 		if len(mr.loadingChain) > 0 {
 			mr.loadingChain = mr.loadingChain[:len(mr.loadingChain)-1]
 		}
 	}()
 
-	// Load the module (this will use cache if available)
-	program, err := mr.LoadModule(importPath)
+	program, err := mr.LoadModuleFile(resolved.FilePath)
 	if err != nil {
 		return nil, err
 	}
 
-	// Now recursively load its dependencies
 	for _, imp := range program.Imports {
-		// Skip standard library imports
 		if strings.HasPrefix(imp.Path, "ard/") {
 			continue
 		}
-
-		// Load the imported module recursively
-		_, err := mr.loadModuleRecursive(imp.Path)
+		child, err := mr.ResolveImport(modulePath, imp.Path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load dependency %s: %w", imp.Path, err)
+		}
+		_, err = mr.loadModuleRecursive(child)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load dependency %s: %w", imp.Path, err)
 		}
