@@ -155,6 +155,14 @@ func main() {
 			}
 			os.Exit(0)
 		}
+	case "deps":
+		{
+			if err := runDepsCommand(os.Args[2:]); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
 	case "lsp":
 		{
 			ctx := context.Background()
@@ -198,18 +206,23 @@ func main() {
 }
 
 func runAddCommand(args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: ard add <github.com/owner/repo@tag|commit|latest>")
-	}
-	dep, err := dependencyFromAddSpec(args[0])
+	spec, aliasOverride, err := parseAddCommandArgs(args)
 	if err != nil {
 		return err
 	}
-	alias, err := dependencyAliasFromGitManifest(dep)
+	dep, err := dependencyFromAddSpec(spec)
 	if err != nil {
 		return err
 	}
-	dep.Alias = alias
+	manifestName, resolvedCommit, err := dependencyMetadataFromGitManifest(dep)
+	if err != nil {
+		return err
+	}
+	if aliasOverride != "" {
+		dep.Alias = aliasOverride
+	} else if manifestName != "" {
+		dep.Alias = manifestName
+	}
 	project, err := checker.FindProjectRoot(".")
 	if err != nil {
 		return err
@@ -220,13 +233,33 @@ func runAddCommand(args []string) error {
 	if err := addDependencyToManifest(filepath.Join(project.RootPath, "ard.toml"), dep); err != nil {
 		return err
 	}
+	lock, err := checker.LockWithDependency(project.RootPath, project.ProjectName, dep.Alias, dep, manifestName, resolvedCommit)
+	if err != nil {
+		return err
+	}
+	if err := checker.WriteDependencyLock(project.RootPath, lock); err != nil {
+		return err
+	}
 	fmt.Printf("Added %s\n", dep.Alias)
 	fetchedDep, err := checker.FetchDependency(project.RootPath, dep.Alias)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Vendored %s -> %s\n", fetchedDep.Alias, fetchedDep.VendorPath)
+	fmt.Printf("Fetched %s -> %s\n", fetchedDep.Alias, fetchedDep.RootPath)
 	return nil
+}
+
+func parseAddCommandArgs(args []string) (string, string, error) {
+	if len(args) < 1 {
+		return "", "", fmt.Errorf("usage: ard add <github.com/owner/repo@tag|commit|latest> [as alias]")
+	}
+	if len(args) == 1 {
+		return args[0], "", nil
+	}
+	if len(args) == 3 && args[1] == "as" && strings.TrimSpace(args[2]) != "" {
+		return args[0], strings.TrimSpace(args[2]), nil
+	}
+	return "", "", fmt.Errorf("usage: ard add <github.com/owner/repo@tag|commit|latest> [as alias]")
 }
 
 func runRemoveCommand(args []string) error {
@@ -252,12 +285,38 @@ func runRemoveCommand(args []string) error {
 	if !removed {
 		return fmt.Errorf("dependency %q is not declared in ard.toml", alias)
 	}
-	vendorPath := filepath.Join(project.RootPath, ".ard", "vendor", alias)
-	if err := os.RemoveAll(vendorPath); err != nil {
+	if err := checker.PruneLockDependency(project.RootPath, alias); err != nil {
 		return err
 	}
 	fmt.Printf("Removed %s\n", alias)
 	return nil
+}
+
+func runDepsCommand(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: ard deps <fetch|verify>")
+	}
+	switch args[0] {
+	case "fetch":
+		deps, err := checker.FetchDependencies(".")
+		if err != nil {
+			return err
+		}
+		for _, dep := range deps {
+			if dep.Git != "" {
+				fmt.Printf("Fetched %s -> %s\n", dep.Alias, dep.RootPath)
+			}
+		}
+		return nil
+	case "verify":
+		if err := checker.VerifyDependencies("."); err != nil {
+			return err
+		}
+		fmt.Println("Dependencies verified")
+		return nil
+	default:
+		return fmt.Errorf("usage: ard deps <fetch|verify>")
+	}
 }
 
 func dependencyFromAddSpec(raw string) (checker.DependencyInfo, error) {
@@ -315,16 +374,31 @@ func dependencyAliasFromRepo(repo string) string {
 	return strings.TrimSuffix(repo, ".git")
 }
 
-func dependencyAliasFromGitManifest(dep checker.DependencyInfo) (string, error) {
+func dependencyMetadataFromGitManifest(dep checker.DependencyInfo) (string, string, error) {
 	checkout, cleanup, err := cloneDependencyForManifest(dep)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer cleanup()
-	if name, ok := parseManifestName(filepath.Join(checkout, "ard.toml")); ok {
-		return name, nil
+	name := dep.Alias
+	if manifestName, ok := parseManifestName(filepath.Join(checkout, "ard.toml")); ok {
+		name = manifestName
 	}
-	return dep.Alias, nil
+	commit, err := gitRevParse(checkout, "HEAD")
+	if err != nil {
+		return "", "", err
+	}
+	return name, commit, nil
+}
+
+func gitRevParse(dir string, rev string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", rev)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse %s: %w\n%s", rev, err, strings.TrimSpace(string(output)))
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func cloneDependencyForManifest(dep checker.DependencyInfo) (string, func(), error) {

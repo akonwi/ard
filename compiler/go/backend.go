@@ -249,7 +249,9 @@ func addDependencyGoModRequirements(out *[]string, seen map[string]bool, project
 		return
 	}
 	for _, dep := range projectInfo.Dependencies {
-		addGoModRequirementsFromFile(out, seen, filepath.Join(dep.VendorPath, "go.mod"))
+		if root := dependencyRootPath(dep); root != "" {
+			addGoModRequirementsFromFile(out, seen, filepath.Join(root, "go.mod"))
+		}
 	}
 }
 
@@ -494,6 +496,16 @@ func optionalProjectInfo(projectInfo []*checker.ProjectInfo) *checker.ProjectInf
 	return projectInfo[0]
 }
 
+func dependencyRootPath(dep checker.DependencyInfo) string {
+	if dep.RootPath != "" {
+		return dep.RootPath
+	}
+	if dep.SourcePath != "" {
+		return dep.SourcePath
+	}
+	return dep.VendorPath
+}
+
 func runBinaryPath(workspaceDir string, projectInfo *checker.ProjectInfo) string {
 	return filepath.Join(workspaceDir, ".bin", runBinaryName(projectInfo))
 }
@@ -721,12 +733,13 @@ func writeDependencyFFICompanions(dir string, program *air.Program, projectInfo 
 		if !ok {
 			continue
 		}
-		matches, err := filepath.Glob(filepath.Join(dep.VendorPath, "ffi", "*.go"))
+		root := dependencyRootPath(dep)
+		matches, err := filepath.Glob(filepath.Join(root, "ffi", "*.go"))
 		if err != nil {
 			return err
 		}
 		if len(matches) == 0 {
-			return fmt.Errorf("go target uses dependency externs from %s but no Go FFI companion was found at %s", alias, filepath.Join(dep.VendorPath, "ffi", "*.go"))
+			return fmt.Errorf("go target uses dependency externs from %s but no Go FFI companion was found at %s", alias, filepath.Join(root, "ffi", "*.go"))
 		}
 		ffiDir := filepath.Join(dir, "depffi", sanitizeName(alias))
 		for _, sourcePath := range matches {

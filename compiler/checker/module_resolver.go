@@ -1,11 +1,15 @@
 package checker
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"slices"
@@ -17,10 +21,12 @@ import (
 
 // ProjectInfo holds information about the current project
 type ProjectInfo struct {
-	RootPath     string                    // absolute path to project root
-	ProjectName  string                    // project name from ard.toml or directory name
-	Target       string                    // default build target from ard.toml
-	Dependencies map[string]DependencyInfo // dependency aliases from ard.toml
+	RootPath      string                    // absolute path to project root
+	ProjectName   string                    // project name from ard.toml or directory name
+	Target        string                    // default build target from ard.toml
+	Dependencies  map[string]DependencyInfo // dependency aliases from ard.toml
+	RootPackageID string
+	Packages      map[string]PackageInfo
 }
 
 type DependencyInfo struct {
@@ -29,7 +35,35 @@ type DependencyInfo struct {
 	Git        string
 	Tag        string
 	Commit     string
-	VendorPath string // materialized project-local dependency path
+	VendorPath string // legacy project-local dependency path
+	RootPath   string // source root used by resolver: path dependency or locked cache checkout
+	PackageID  string
+	Name       string
+}
+
+type PackageInfo struct {
+	ID           string
+	Name         string
+	RootPath     string
+	Dependencies map[string]string
+	Git          string
+	Commit       string
+	Path         string
+}
+
+type LockFile struct {
+	Version  int             `json:"version"`
+	Root     string          `json:"root"`
+	Packages []LockedPackage `json:"packages"`
+}
+
+type LockedPackage struct {
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Path         string            `json:"path,omitempty"`
+	Git          string            `json:"git,omitempty"`
+	Commit       string            `json:"commit,omitempty"`
+	Dependencies map[string]string `json:"dependencies,omitempty"`
 }
 
 // ModuleResolver handles finding and loading user modules
@@ -77,12 +111,29 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse ard.toml: %w", err)
 			}
+			rootPackageID := "root"
+			packages := map[string]PackageInfo{
+				rootPackageID: {
+					ID:           rootPackageID,
+					Name:         projectName,
+					RootPath:     current,
+					Path:         ".",
+					Dependencies: map[string]string{},
+				},
+			}
+			if lock, ok, err := ReadDependencyLock(current); err != nil {
+				return nil, fmt.Errorf("failed to parse ard.lock: %w", err)
+			} else if ok {
+				rootPackageID, packages, dependencies = applyDependencyLock(current, projectName, dependencies, lock)
+			}
 
 			return &ProjectInfo{
-				RootPath:     current,
-				ProjectName:  projectName,
-				Target:       target,
-				Dependencies: dependencies,
+				RootPath:      current,
+				ProjectName:   projectName,
+				Target:        target,
+				Dependencies:  dependencies,
+				RootPackageID: rootPackageID,
+				Packages:      packages,
 			}, nil
 		}
 
@@ -92,10 +143,14 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 			// Reached filesystem root, use directory name as fallback
 			dirName := filepath.Base(absPath)
 			return &ProjectInfo{
-				RootPath:     absPath,
-				ProjectName:  dirName,
-				Target:       backend.DefaultTarget,
-				Dependencies: map[string]DependencyInfo{},
+				RootPath:      absPath,
+				ProjectName:   dirName,
+				Target:        backend.DefaultTarget,
+				Dependencies:  map[string]DependencyInfo{},
+				RootPackageID: "root",
+				Packages: map[string]PackageInfo{
+					"root": {ID: "root", Name: dirName, RootPath: absPath, Path: ".", Dependencies: map[string]string{}},
+				},
 			}, nil
 		}
 		current = parent
@@ -170,6 +225,8 @@ func parseProjectDependencies(tomlPath string, projectRoot string) (map[string]D
 			if !filepath.IsAbs(dep.SourcePath) {
 				dep.SourcePath = filepath.Clean(filepath.Join(projectRoot, dep.SourcePath))
 			}
+			dep.RootPath = dep.SourcePath
+			dep.PackageID = "path:" + dep.SourcePath
 		}
 		if gitMatches := gitRe.FindStringSubmatch(body); len(gitMatches) >= 2 {
 			dep.Git = gitMatches[1]
@@ -183,9 +240,247 @@ func parseProjectDependencies(tomlPath string, projectRoot string) (map[string]D
 		if dep.SourcePath == "" && dep.Git == "" {
 			continue
 		}
+		if dep.RootPath == "" && dep.Git != "" {
+			if _, err := os.Stat(dep.VendorPath); err == nil {
+				dep.RootPath = dep.VendorPath
+			}
+		}
 		deps[alias] = dep
 	}
 	return deps, nil
+}
+
+func ReadDependencyLock(projectRoot string) (LockFile, bool, error) {
+	path := filepath.Join(projectRoot, "ard.lock")
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return LockFile{}, false, nil
+	}
+	if err != nil {
+		return LockFile{}, false, err
+	}
+	var lock LockFile
+	if err := json.Unmarshal(data, &lock); err != nil {
+		return LockFile{}, false, err
+	}
+	if lock.Version == 0 {
+		lock.Version = 1
+	}
+	if lock.Root == "" {
+		lock.Root = "root"
+	}
+	return lock, true, nil
+}
+
+func WriteDependencyLock(projectRoot string, lock LockFile) error {
+	if lock.Version == 0 {
+		lock.Version = 1
+	}
+	if lock.Root == "" {
+		lock.Root = "root"
+	}
+	sort.Slice(lock.Packages, func(i, j int) bool {
+		return lock.Packages[i].ID < lock.Packages[j].ID
+	})
+	data, err := json.MarshalIndent(lock, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(filepath.Join(projectRoot, "ard.lock"), data, 0o644)
+}
+
+func applyDependencyLock(projectRoot string, projectName string, deps map[string]DependencyInfo, lock LockFile) (string, map[string]PackageInfo, map[string]DependencyInfo) {
+	packages := map[string]PackageInfo{}
+	for _, locked := range lock.Packages {
+		rootPath := locked.Path
+		if rootPath != "" && !filepath.IsAbs(rootPath) {
+			rootPath = filepath.Clean(filepath.Join(projectRoot, rootPath))
+		}
+		if locked.Git != "" && locked.Commit != "" {
+			rootPath = DependencyCachePath(locked.Git, locked.Commit)
+		}
+		packages[locked.ID] = PackageInfo{
+			ID:           locked.ID,
+			Name:         locked.Name,
+			RootPath:     rootPath,
+			Dependencies: copyStringMap(locked.Dependencies),
+			Git:          locked.Git,
+			Commit:       locked.Commit,
+			Path:         locked.Path,
+		}
+	}
+	rootPackageID := lock.Root
+	if rootPackageID == "" {
+		rootPackageID = "root"
+	}
+	rootPkg, ok := packages[rootPackageID]
+	if !ok {
+		rootPkg = PackageInfo{ID: rootPackageID, Name: projectName, RootPath: projectRoot, Path: ".", Dependencies: map[string]string{}}
+		packages[rootPackageID] = rootPkg
+	}
+	if rootPkg.Dependencies == nil {
+		rootPkg.Dependencies = map[string]string{}
+	}
+	for alias, dep := range deps {
+		dep.Name = alias
+		if dep.SourcePath != "" {
+			dep.RootPath = dep.SourcePath
+			if dep.PackageID == "" {
+				dep.PackageID = "path:" + dep.SourcePath
+			}
+			deps[alias] = dep
+			continue
+		}
+		packageID := rootPkg.Dependencies[alias]
+		if packageID == "" {
+			deps[alias] = dep
+			continue
+		}
+		pkg, ok := packages[packageID]
+		if !ok {
+			deps[alias] = dep
+			continue
+		}
+		dep.PackageID = packageID
+		dep.Name = pkg.Name
+		dep.RootPath = pkg.RootPath
+		if pkg.Git != "" {
+			dep.Git = pkg.Git
+		}
+		if pkg.Commit != "" {
+			dep.Commit = pkg.Commit
+		}
+		deps[alias] = dep
+	}
+	return rootPackageID, packages, deps
+}
+
+func copyStringMap(in map[string]string) map[string]string {
+	out := map[string]string{}
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func GitPackageID(git string, commit string) string {
+	return "git:" + cacheSourceHash(git) + ":" + commit
+}
+
+func DependencyCachePath(git string, commit string) string {
+	return filepath.Join(ArdCacheDir(), "git", cacheSourceHash(git), commit)
+}
+
+func ArdCacheDir() string {
+	if dir := strings.TrimSpace(os.Getenv("ARD_CACHE_DIR")); dir != "" {
+		return filepath.Clean(dir)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Clean(filepath.Join(".", ".ard", "cache"))
+	}
+	return filepath.Join(home, ".ard", "cache")
+}
+
+func cacheSourceHash(source string) string {
+	sum := sha256.Sum256([]byte(source))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func LockWithDependency(projectRoot string, projectName string, alias string, dep DependencyInfo, packageName string, commit string) (LockFile, error) {
+	lock, ok, err := ReadDependencyLock(projectRoot)
+	if err != nil {
+		return LockFile{}, err
+	}
+	if !ok {
+		lock = LockFile{Version: 1, Root: "root", Packages: []LockedPackage{{ID: "root", Name: projectName, Path: ".", Dependencies: map[string]string{}}}}
+	}
+	if lock.Version == 0 {
+		lock.Version = 1
+	}
+	if lock.Root == "" {
+		lock.Root = "root"
+	}
+	packages := map[string]LockedPackage{}
+	for _, pkg := range lock.Packages {
+		if pkg.Dependencies == nil {
+			pkg.Dependencies = map[string]string{}
+		}
+		packages[pkg.ID] = pkg
+	}
+	rootPkg, ok := packages[lock.Root]
+	if !ok {
+		rootPkg = LockedPackage{ID: lock.Root, Name: projectName, Path: ".", Dependencies: map[string]string{}}
+	}
+	if rootPkg.Dependencies == nil {
+		rootPkg.Dependencies = map[string]string{}
+	}
+	if packageName == "" {
+		packageName = alias
+	}
+	var pkg LockedPackage
+	if dep.SourcePath != "" {
+		path := dep.SourcePath
+		if rel, err := filepath.Rel(projectRoot, path); err == nil && !strings.HasPrefix(rel, "..") && rel != "." {
+			path = rel
+		}
+		pkg = LockedPackage{ID: "path:" + dep.SourcePath, Name: packageName, Path: path, Dependencies: map[string]string{}}
+	} else {
+		if commit == "" {
+			commit = dep.Commit
+		}
+		if commit == "" {
+			return LockFile{}, fmt.Errorf("dependency %q needs a resolved commit for ard.lock", alias)
+		}
+		pkg = LockedPackage{ID: GitPackageID(dep.Git, commit), Name: packageName, Git: dep.Git, Commit: commit, Dependencies: map[string]string{}}
+	}
+	packages[pkg.ID] = pkg
+	rootPkg.Dependencies[alias] = pkg.ID
+	packages[rootPkg.ID] = rootPkg
+	lock.Packages = make([]LockedPackage, 0, len(packages))
+	for _, pkg := range packages {
+		lock.Packages = append(lock.Packages, pkg)
+	}
+	return lock, nil
+}
+
+func PruneLockDependency(projectRoot string, alias string) error {
+	lock, ok, err := ReadDependencyLock(projectRoot)
+	if err != nil || !ok {
+		return err
+	}
+	packages := map[string]LockedPackage{}
+	for _, pkg := range lock.Packages {
+		if pkg.Dependencies == nil {
+			pkg.Dependencies = map[string]string{}
+		}
+		packages[pkg.ID] = pkg
+	}
+	rootPkg, ok := packages[lock.Root]
+	if ok {
+		delete(rootPkg.Dependencies, alias)
+		packages[rootPkg.ID] = rootPkg
+	}
+	reachable := map[string]bool{}
+	var visit func(string)
+	visit = func(id string) {
+		if id == "" || reachable[id] {
+			return
+		}
+		reachable[id] = true
+		for _, child := range packages[id].Dependencies {
+			visit(child)
+		}
+	}
+	visit(lock.Root)
+	lock.Packages = lock.Packages[:0]
+	for id, pkg := range packages {
+		if reachable[id] {
+			lock.Packages = append(lock.Packages, pkg)
+		}
+	}
+	return WriteDependencyLock(projectRoot, lock)
 }
 
 func parseProjectTarget(tomlPath string) (string, error) {
@@ -246,53 +541,98 @@ func FetchDependency(startPath string, alias string) (DependencyInfo, error) {
 	return fetchDependency(dep)
 }
 
+func FetchDependencies(startPath string) ([]DependencyInfo, error) {
+	project, err := FindProjectRoot(startPath)
+	if err != nil {
+		return nil, err
+	}
+	aliases := make([]string, 0, len(project.Dependencies))
+	for alias := range project.Dependencies {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	fetched := make([]DependencyInfo, 0, len(aliases))
+	for _, alias := range aliases {
+		dep, err := fetchDependency(project.Dependencies[alias])
+		if err != nil {
+			return fetched, err
+		}
+		fetched = append(fetched, dep)
+	}
+	return fetched, nil
+}
+
+func VerifyDependencies(startPath string) error {
+	project, err := FindProjectRoot(startPath)
+	if err != nil {
+		return err
+	}
+	aliases := make([]string, 0, len(project.Dependencies))
+	for alias := range project.Dependencies {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	for _, alias := range aliases {
+		dep := project.Dependencies[alias]
+		if dep.Git == "" {
+			continue
+		}
+		if dep.PackageID == "" || dep.Commit == "" || dep.RootPath == "" {
+			return fmt.Errorf("dependency %q is not locked; run `ard add` with a tag, commit, or latest", dep.Alias)
+		}
+		if _, err := os.Stat(filepath.Join(dep.RootPath, "ard.toml")); err != nil {
+			return fmt.Errorf("dependency %q is not available in Ard cache at %s; run `ard deps fetch`", dep.Alias, dep.RootPath)
+		}
+	}
+	return nil
+}
+
 func fetchDependency(dep DependencyInfo) (DependencyInfo, error) {
-	if dep.VendorPath == "" {
-		return DependencyInfo{}, fmt.Errorf("dependency %q has no vendor path", dep.Alias)
-	}
-	if err := os.RemoveAll(dep.VendorPath); err != nil {
-		return DependencyInfo{}, err
-	}
 	if dep.SourcePath != "" {
-		if err := copyDir(dep.SourcePath, dep.VendorPath); err != nil {
-			return DependencyInfo{}, fmt.Errorf("vendor dependency %s: %w", dep.Alias, err)
-		}
-	} else if dep.Git != "" {
-		if err := fetchGitDependency(dep); err != nil {
-			return DependencyInfo{}, fmt.Errorf("vendor dependency %s: %w", dep.Alias, err)
-		}
-	} else {
-		return DependencyInfo{}, fmt.Errorf("dependency %q has no source", dep.Alias)
+		dep.RootPath = dep.SourcePath
+		return dep, nil
 	}
-	return dep, nil
+	if dep.Git != "" {
+		if dep.PackageID == "" || dep.Commit == "" || dep.RootPath == "" {
+			return DependencyInfo{}, fmt.Errorf("dependency %q is not locked; run `ard add` with a tag, commit, or latest", dep.Alias)
+		}
+		if _, err := os.Stat(filepath.Join(dep.RootPath, "ard.toml")); err == nil {
+			return dep, nil
+		}
+		if err := fetchGitDependency(dep); err != nil {
+			return DependencyInfo{}, fmt.Errorf("fetch dependency %s: %w", dep.Alias, err)
+		}
+		return dep, nil
+	}
+	return DependencyInfo{}, fmt.Errorf("dependency %q has no source", dep.Alias)
 }
 
 func fetchGitDependency(dep DependencyInfo) error {
+	if dep.RootPath == "" {
+		return fmt.Errorf("dependency %q has no cache path", dep.Alias)
+	}
 	tmp, err := os.MkdirTemp("", "ard-dep-*")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(tmp)
-	if dep.Tag == "" && dep.Commit == "" {
-		return fmt.Errorf("git dependency must specify tag or commit")
-	}
-	args := []string{"clone"}
-	if dep.Tag != "" {
-		args = append(args, "--branch", dep.Tag, "--depth", "1")
+	if dep.Commit == "" {
+		return fmt.Errorf("git dependency must be locked to a commit")
 	}
 	cloneDir := filepath.Join(tmp, "repo")
-	args = append(args, dep.Git, cloneDir)
+	args := []string{"clone", dep.Git, cloneDir}
 	if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
-	if dep.Commit != "" {
-		cmd := exec.Command("git", "checkout", dep.Commit)
-		cmd.Dir = cloneDir
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git checkout %s: %w\n%s", dep.Commit, err, strings.TrimSpace(string(output)))
-		}
+	cmd := exec.Command("git", "checkout", dep.Commit)
+	cmd.Dir = cloneDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git checkout %s: %w\n%s", dep.Commit, err, strings.TrimSpace(string(output)))
 	}
-	return copyDir(cloneDir, dep.VendorPath)
+	if err := os.RemoveAll(dep.RootPath); err != nil {
+		return err
+	}
+	return copyDir(cloneDir, dep.RootPath)
 }
 
 func copyDir(src, dst string) error {
@@ -343,14 +683,27 @@ func (mr *ModuleResolver) ResolveImportPath(importPath string) (string, error) {
 	}
 
 	if dep, ok := mr.project.Dependencies[parts[0]]; ok {
-		if _, err := os.Stat(dep.VendorPath); os.IsNotExist(err) {
-			return "", fmt.Errorf("dependency %q is not vendored at %s; restore .ard/vendor or run `ard add`", dep.Alias, dep.VendorPath)
+		depRoot := dep.RootPath
+		if depRoot == "" && dep.SourcePath != "" {
+			depRoot = dep.SourcePath
+		}
+		if depRoot == "" && dep.Git != "" {
+			return "", fmt.Errorf("dependency %q is not locked; run `ard add` with a tag, commit, or latest", dep.Alias)
+		}
+		if depRoot == "" {
+			return "", fmt.Errorf("dependency %q has no source root", dep.Alias)
+		}
+		if _, err := os.Stat(depRoot); os.IsNotExist(err) {
+			if dep.Git != "" {
+				return "", fmt.Errorf("dependency %q is not available in Ard cache at %s; run `ard deps fetch`", dep.Alias, depRoot)
+			}
+			return "", fmt.Errorf("dependency %q path does not exist: %s", dep.Alias, depRoot)
 		}
 		relativePath := strings.Join(parts[1:], "/")
 		if relativePath == "" {
 			relativePath = parts[0]
 		}
-		fullPath := filepath.Join(dep.VendorPath, relativePath+".ard")
+		fullPath := filepath.Join(depRoot, relativePath+".ard")
 		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
 			return "", fmt.Errorf("module file not found: %s", fullPath)
 		}

@@ -114,7 +114,11 @@ func dependencyFFIGoPaths(projectInfo *checker.ProjectInfo) []string {
 	}
 	paths := []string{}
 	for _, dep := range projectInfo.Dependencies {
-		matches, err := filepath.Glob(filepath.Join(dep.VendorPath, "ffi", "*.go"))
+		root := dependencyRootPath(dep)
+		if root == "" {
+			continue
+		}
+		matches, err := filepath.Glob(filepath.Join(root, "ffi", "*.go"))
 		if err == nil {
 			paths = append(paths, matches...)
 		}

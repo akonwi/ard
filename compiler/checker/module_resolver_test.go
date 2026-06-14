@@ -1,7 +1,9 @@
 package checker_test
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -253,7 +255,7 @@ func TestResolveImportPath(t *testing.T) {
 		})
 	}
 }
-func TestPathDependencyIsVendoredAndResolved(t *testing.T) {
+func TestPathDependencyIsResolvedFromSource(t *testing.T) {
 	workspace := t.TempDir()
 	root := filepath.Join(workspace, "app")
 	depSrc := filepath.Join(workspace, "dep-src")
@@ -273,26 +275,154 @@ func TestPathDependencyIsVendoredAndResolved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := checker.FetchDependency(root, "dep"); err != nil {
-		t.Fatalf("fetch dependency: %v", err)
-	}
 	resolver, err := checker.NewModuleResolver(root)
 	if err != nil {
 		t.Fatalf("new resolver: %v", err)
 	}
 	project := resolver.GetProjectInfo()
 	dep := project.Dependencies["dep"]
-	if dep.VendorPath == "" {
-		t.Fatalf("dependency not parsed: %#v", project.Dependencies)
-	}
-	if _, err := os.Stat(filepath.Join(dep.VendorPath, "dep.ard")); err != nil {
-		t.Fatalf("dependency not vendored: %v", err)
+	if dep.RootPath != depSrc {
+		t.Fatalf("dependency root = %q, want %q", dep.RootPath, depSrc)
 	}
 	path, err := resolver.ResolveImportPath("dep")
 	if err != nil {
 		t.Fatalf("resolve dep import: %v", err)
 	}
-	if path != filepath.Join(dep.VendorPath, "dep.ard") {
-		t.Fatalf("resolved path = %q, want %q", path, filepath.Join(dep.VendorPath, "dep.ard"))
+	if path != filepath.Join(depSrc, "dep.ard") {
+		t.Fatalf("resolved path = %q, want %q", path, filepath.Join(depSrc, "dep.ard"))
 	}
+}
+
+func TestGitDependencyResolvesFromLockCache(t *testing.T) {
+	cacheRoot := t.TempDir()
+	t.Setenv("ARD_CACHE_DIR", cacheRoot)
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitSource := "https://example.invalid/dep.git"
+	commit := "0123456789abcdef0123456789abcdef01234567"
+	cachePath := checker.DependencyCachePath(gitSource, commit)
+	if err := os.MkdirAll(cachePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cachePath, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cachePath, "dep.ard"), []byte("fn answer() Int { 42 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { git = \""+gitSource+"\", commit = \""+commit+"\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock := fmt.Sprintf(`{
+  "version": 1,
+  "root": "root",
+  "packages": [
+    {"id": "root", "name": "app", "path": ".", "dependencies": {"dep": "%s"}},
+    {"id": "%s", "name": "dep", "git": "%s", "commit": "%s"}
+  ]
+}
+`, checker.GitPackageID(gitSource, commit), checker.GitPackageID(gitSource, commit), gitSource, commit)
+	if err := os.WriteFile(filepath.Join(root, "ard.lock"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatalf("new resolver: %v", err)
+	}
+	dep := resolver.GetProjectInfo().Dependencies["dep"]
+	if dep.RootPath != cachePath {
+		t.Fatalf("dependency root = %q, want %q", dep.RootPath, cachePath)
+	}
+	path, err := resolver.ResolveImportPath("dep")
+	if err != nil {
+		t.Fatalf("resolve dep import: %v", err)
+	}
+	if path != filepath.Join(cachePath, "dep.ard") {
+		t.Fatalf("resolved path = %q, want %q", path, filepath.Join(cachePath, "dep.ard"))
+	}
+}
+
+func TestGitDependencyWithoutLockFailsClearly(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { git = \"https://example.invalid/dep.git\", commit = \"0123456\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatalf("new resolver: %v", err)
+	}
+	_, err = resolver.ResolveImportPath("dep")
+	if err == nil || !strings.Contains(err.Error(), "not locked") {
+		t.Fatalf("ResolveImportPath error = %v, want not locked", err)
+	}
+}
+
+func TestFetchDependenciesRestoresGitCacheFromLock(t *testing.T) {
+	cacheRoot := t.TempDir()
+	t.Setenv("ARD_CACHE_DIR", cacheRoot)
+	workspace := t.TempDir()
+	gitRepo := filepath.Join(workspace, "dep-repo")
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(gitRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitRepo, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitRepo, "dep.ard"), []byte("fn answer() Int { 42 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, gitRepo, "init")
+	runGit(t, gitRepo, "add", ".")
+	runGit(t, gitRepo, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "init")
+	commit := strings.TrimSpace(runGitOutput(t, gitRepo, "rev-parse", "HEAD"))
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { git = \""+gitRepo+"\", commit = \""+commit+"\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock := fmt.Sprintf(`{
+  "version": 1,
+  "root": "root",
+  "packages": [
+    {"id": "root", "name": "app", "path": ".", "dependencies": {"dep": "%s"}},
+    {"id": "%s", "name": "dep", "git": "%s", "commit": "%s"}
+  ]
+}
+`, checker.GitPackageID(gitRepo, commit), checker.GitPackageID(gitRepo, commit), gitRepo, commit)
+	if err := os.WriteFile(filepath.Join(root, "ard.lock"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	deps, err := checker.FetchDependencies(root)
+	if err != nil {
+		t.Fatalf("fetch dependencies: %v", err)
+	}
+	if len(deps) != 1 {
+		t.Fatalf("fetched %d dependencies, want 1", len(deps))
+	}
+	if _, err := os.Stat(filepath.Join(checker.DependencyCachePath(gitRepo, commit), "dep.ard")); err != nil {
+		t.Fatalf("cache was not restored: %v", err)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	_ = runGitOutput(t, dir, args...)
+}
+
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return string(output)
 }

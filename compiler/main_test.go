@@ -341,8 +341,33 @@ func TestRunGoTargetSampleStdoutConformance(t *testing.T) {
 }
 
 func TestBuildTicTacToeExample(t *testing.T) {
-	projectDir := filepath.Join("..", "examples", "tic-tac-toe")
+	repoProjectDir := filepath.Join("..", "examples", "tic-tac-toe")
+	projectDir := prepareTicTacToeLockCacheProject(t, repoProjectDir)
 	_ = buildGoSampleBinary(t, filepath.Join(projectDir, "main.ard"))
+}
+
+func prepareTicTacToeLockCacheProject(t *testing.T, sourceProjectDir string) string {
+	t.Helper()
+	projectDir := t.TempDir()
+	for _, name := range []string{"ard.toml", "ard.lock", "main.ard"} {
+		copyFileForTest(t, filepath.Join(sourceProjectDir, name), filepath.Join(projectDir, name))
+	}
+
+	cacheRoot := t.TempDir()
+	t.Setenv("ARD_CACHE_DIR", cacheRoot)
+	const vaxisGit = "https://github.com/akonwi/vaxis-ard.git"
+	const vaxisCommit = "76f7c1bcb3a8243d2b569e8d9947b85b3ae64fae"
+	cachePath := checker.DependencyCachePath(vaxisGit, vaxisCommit)
+	vendorPath := filepath.Join(sourceProjectDir, ".ard", "vendor", "vaxis")
+	if _, err := os.Stat(vendorPath); err == nil {
+		copyDirForTest(t, vendorPath, cachePath)
+		return projectDir
+	}
+
+	if _, err := checker.FetchDependencies(projectDir); err != nil {
+		t.Fatalf("fetch tic-tac-toe dependencies into cache: %v", err)
+	}
+	return projectDir
 }
 
 func TestRunServerExampleRoutes(t *testing.T) {
@@ -370,6 +395,51 @@ func TestRunServerExampleRoutes(t *testing.T) {
 	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", `{"email":"ard@example.com"}`, http.StatusCreated, "Created user with email ard@example.com")
 	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", "", http.StatusBadRequest, "Missing request body")
 	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", `{"name":"Ard"}`, http.StatusBadRequest, `Missing email: email: got Missing field "email", expected Field`)
+}
+
+func copyFileForTest(t *testing.T, src string, dst string) {
+	t.Helper()
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read %s: %v", src, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(dst), err)
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", dst, err)
+	}
+}
+
+func copyDirForTest(t *testing.T, src string, dst string) {
+	t.Helper()
+	if err := filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return os.MkdirAll(dst, 0o755)
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode())
+	}); err != nil {
+		t.Fatalf("copy dir %s to %s: %v", src, dst, err)
+	}
 }
 
 func buildGoSampleBinary(t *testing.T, sourcePath string) string {

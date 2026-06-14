@@ -68,7 +68,10 @@ func importPathCompletionItems(pathPrefix string, filePath string) []protocol.Co
 		if rootName == project.ProjectName {
 			root = project.RootPath
 		} else if dep, ok := project.Dependencies[rootName]; ok {
-			root = dep.VendorPath
+			root = dep.RootPath
+			if root == "" {
+				root = dep.SourcePath
+			}
 		}
 		if root != "" {
 			rel := strings.TrimPrefix(base, rootName)
