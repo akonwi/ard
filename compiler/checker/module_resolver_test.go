@@ -449,6 +449,83 @@ func parseSourceForResolverTest(t *testing.T, path string) *parse.Program {
 	return result.Program
 }
 
+func TestReadDependencyLockMigratesCanonicalGitPackageIDs(t *testing.T) {
+	root := t.TempDir()
+	commit := "0123456789abcdef0123456789abcdef01234567"
+	oldID := "git:oldhash:" + commit
+	gitSource := "https://github.com/akonwi/vaxis-ard/"
+	lock := fmt.Sprintf(`{
+  "version": 1,
+  "root": "root",
+  "packages": [
+    {"id": "root", "name": "app", "path": ".", "dependencies": {"vaxis": "%s"}},
+    {"id": "%s", "name": "vaxis", "git": "%s", "commit": "%s"}
+  ]
+}
+`, oldID, oldID, gitSource, commit)
+	if err := os.WriteFile(filepath.Join(root, "ard.lock"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parsed, ok, err := checker.ReadDependencyLock(root)
+	if err != nil || !ok {
+		t.Fatalf("ReadDependencyLock = %v, %v", ok, err)
+	}
+	packages := lockedPackagesByID(parsed)
+	canonicalID := checker.GitPackageID(gitSource, commit)
+	if got := packages["root"].Dependencies["vaxis"]; got != canonicalID {
+		t.Fatalf("root dependency = %q, want %q", got, canonicalID)
+	}
+	if _, ok := packages[canonicalID]; !ok {
+		t.Fatalf("canonical package %s missing from %#v", canonicalID, packages)
+	}
+}
+
+func TestReadDependencyLockPrefersRootTransportWhenMigratingDuplicateGitIDs(t *testing.T) {
+	root := t.TempDir()
+	commit := "0123456789abcdef0123456789abcdef01234567"
+	httpsID := "git:https:" + commit
+	sshID := "git:ssh:" + commit
+	lock := fmt.Sprintf(`{
+  "version": 1,
+  "root": "root",
+  "packages": [
+    {"id": "root", "name": "app", "path": ".", "dependencies": {"dep": "%s"}},
+    {"id": "%s", "name": "dep", "git": "https://github.com/akonwi/private", "commit": "%s"},
+    {"id": "%s", "name": "dep", "git": "git@github.com:akonwi/private.git", "commit": "%s"}
+  ]
+}
+`, sshID, httpsID, commit, sshID, commit)
+	if err := os.WriteFile(filepath.Join(root, "ard.lock"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parsed, ok, err := checker.ReadDependencyLock(root)
+	if err != nil || !ok {
+		t.Fatalf("ReadDependencyLock = %v, %v", ok, err)
+	}
+	packages := lockedPackagesByID(parsed)
+	canonicalID := checker.GitPackageID("git@github.com:akonwi/private.git", commit)
+	if got := packages[canonicalID].Git; got != "git@github.com:akonwi/private.git" {
+		t.Fatalf("transport git = %q, want ssh", got)
+	}
+}
+
+func TestCanonicalGitSourceNormalizesGitHubVariants(t *testing.T) {
+	want := "https://github.com/akonwi/vaxis-ard.git"
+	for _, input := range []string{
+		"https://github.com/akonwi/vaxis-ard",
+		"https://github.com/akonwi/vaxis-ard/",
+		"https://github.com/akonwi/vaxis-ard.git",
+		"git@github.com:akonwi/vaxis-ard.git",
+		"ssh://git@github.com/akonwi/vaxis-ard.git",
+		"github.com/akonwi/vaxis-ard",
+		"HTTPS://github.com/Akonwi/Vaxis-Ard/",
+	} {
+		if got := checker.CanonicalGitSource(input); got != want {
+			t.Fatalf("CanonicalGitSource(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestGitDependencyResolvesFromLockCache(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("ARD_CACHE_DIR", cacheRoot)
@@ -517,6 +594,309 @@ func TestGitDependencyWithoutLockFailsClearly(t *testing.T) {
 	}
 }
 
+func TestLockDependencyGraphIncludesTransitiveGitDependencies(t *testing.T) {
+	cacheRoot := t.TempDir()
+	t.Setenv("ARD_CACHE_DIR", cacheRoot)
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	helperRepo, helperCommit := createGitPackageRepo(t, workspace, "helper", map[string]string{
+		"ard.toml":   "name = \"helper\"\nard = \">= 0.1.0\"\n",
+		"helper.ard": "fn value() Int { 42 }\n",
+	})
+	helperRequested := helperCommit[:7]
+	depManifest := "name = \"dep\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \"" + helperRepo + "\", commit = \"" + helperRequested + "\" }\n"
+	depRepo, depCommit := createGitPackageRepo(t, workspace, "dep", map[string]string{
+		"ard.toml": depManifest,
+		"dep.ard":  "use helper\n\nfn answer() Int { helper::value() }\n",
+	})
+
+	dep := checker.DependencyInfo{Alias: "dep", Name: "dep", Git: depRepo, Commit: depCommit, Requested: depCommit}
+	lock, err := checker.LockDependencyGraph(root, "app", "dep", dep, "dep", depCommit)
+	if err != nil {
+		t.Fatalf("lock dependency graph: %v", err)
+	}
+	packages := lockedPackagesByID(lock)
+	depID := checker.GitPackageID(depRepo, depCommit)
+	helperID := checker.GitPackageID(helperRepo, helperCommit)
+	if got := packages["root"].Dependencies["dep"]; got != depID {
+		t.Fatalf("root dep = %q, want %q", got, depID)
+	}
+	if got := packages[depID].Dependencies["helper"]; got != helperID {
+		t.Fatalf("dep helper = %q, want %q", got, helperID)
+	}
+	if got := packages[depID].Requested; got != depCommit {
+		t.Fatalf("dep requested = %q, want %q", got, depCommit)
+	}
+	if got := packages[helperID].Requested; got != helperRequested {
+		t.Fatalf("helper requested = %q, want %q", got, helperRequested)
+	}
+	if !strings.HasPrefix(packages[depID].Integrity, "sha256:") {
+		t.Fatalf("dep integrity = %q, want sha256", packages[depID].Integrity)
+	}
+	if !strings.HasPrefix(packages[helperID].Integrity, "sha256:") {
+		t.Fatalf("helper integrity = %q, want sha256", packages[helperID].Integrity)
+	}
+	if _, err := os.Stat(filepath.Join(checker.DependencyCachePath(depRepo, depCommit), "dep.ard")); err != nil {
+		t.Fatalf("dep cache missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(checker.DependencyCachePath(helperRepo, helperCommit), "helper.ard")); err != nil {
+		t.Fatalf("helper cache missing: %v", err)
+	}
+	if err := checker.WriteDependencyLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { git = \""+depRepo+"\", commit = \""+depCommit+"\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.ard"), []byte("use dep\n\nlet answer = dep::answer()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	program := parseSourceForResolverTest(t, filepath.Join(root, "main.ard"))
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(filepath.Join(root, "main.ard"), program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestLockDependencyGraphRejectsConflictingTransitiveGitVersions(t *testing.T) {
+	cacheRoot := t.TempDir()
+	t.Setenv("ARD_CACHE_DIR", cacheRoot)
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	helperRepo, helperCommit1 := createGitPackageRepo(t, workspace, "helper", map[string]string{
+		"ard.toml":   "name = \"helper\"\nard = \">= 0.1.0\"\n",
+		"helper.ard": "fn value() Int { 1 }\n",
+	})
+	if err := os.WriteFile(filepath.Join(helperRepo, "helper.ard"), []byte("fn value() Int { 2 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, helperRepo, "add", ".")
+	runGit(t, helperRepo, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "second")
+	helperCommit2 := strings.TrimSpace(runGitOutput(t, helperRepo, "rev-parse", "HEAD"))
+	depAManifest := "name = \"dep_a\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \"" + helperRepo + "\", commit = \"" + helperCommit1 + "\" }\n"
+	depARepo, depACommit := createGitPackageRepo(t, workspace, "dep-a", map[string]string{"ard.toml": depAManifest, "dep_a.ard": "fn a() Int { 1 }\n"})
+	depBManifest := "name = \"dep_b\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \"" + helperRepo + "\", commit = \"" + helperCommit2 + "\" }\n"
+	depBRepo, depBCommit := createGitPackageRepo(t, workspace, "dep-b", map[string]string{"ard.toml": depBManifest, "dep_b.ard": "fn b() Int { 2 }\n"})
+
+	lock, err := checker.LockDependencyGraph(root, "app", "dep_a", checker.DependencyInfo{Alias: "dep_a", Name: "dep_a", Git: depARepo, Commit: depACommit}, "dep_a", depACommit)
+	if err != nil {
+		t.Fatalf("lock dep_a: %v", err)
+	}
+	if err := checker.WriteDependencyLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+	_, err = checker.LockDependencyGraph(root, "app", "dep_b", checker.DependencyInfo{Alias: "dep_b", Name: "dep_b", Git: depBRepo, Commit: depBCommit}, "dep_b", depBCommit)
+	if err == nil || !strings.Contains(err.Error(), "dependency conflict") {
+		t.Fatalf("LockDependencyGraph error = %v, want dependency conflict", err)
+	}
+}
+
+func TestLockDependencyGraphResolvesTagsBeforeSameNamedBranches(t *testing.T) {
+	cacheRoot := t.TempDir()
+	t.Setenv("ARD_CACHE_DIR", cacheRoot)
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo, tagCommit := createGitPackageRepo(t, workspace, "tagged", map[string]string{
+		"ard.toml":   "name = \"tagged\"\nard = \">= 0.1.0\"\n",
+		"tagged.ard": "fn value() Int { 1 }\n",
+	})
+	runGit(t, repo, "tag", "v1")
+	if err := os.WriteFile(filepath.Join(repo, "tagged.ard"), []byte("fn value() Int { 2 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "branch commit")
+	runGit(t, repo, "branch", "v1")
+
+	lock, err := checker.LockDependencyGraph(root, "app", "tagged", checker.DependencyInfo{Alias: "tagged", Name: "tagged", Git: repo, Tag: "v1", Requested: "v1"}, "tagged", "")
+	if err != nil {
+		t.Fatalf("lock dependency graph: %v", err)
+	}
+	packages := lockedPackagesByID(lock)
+	packageID := checker.GitPackageID(repo, tagCommit)
+	if _, ok := packages[packageID]; !ok {
+		t.Fatalf("lock packages = %#v, want tag commit package %s", packages, packageID)
+	}
+	if got := packages[packageID].Requested; got != "v1" {
+		t.Fatalf("requested = %q, want v1", got)
+	}
+}
+
+func TestLockDependencyGraphPeelsAnnotatedTagObjectCommits(t *testing.T) {
+	cacheRoot := t.TempDir()
+	t.Setenv("ARD_CACHE_DIR", cacheRoot)
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo, commit := createGitPackageRepo(t, workspace, "annotated", map[string]string{
+		"ard.toml":      "name = \"annotated\"\nard = \">= 0.1.0\"\n",
+		"annotated.ard": "fn value() Int { 1 }\n",
+	})
+	runGit(t, repo, "-c", "user.email=test@example.com", "-c", "user.name=Test", "tag", "-a", "v1", "-m", "v1")
+	tagObject := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "v1"))
+	if tagObject == commit {
+		t.Fatal("annotated tag did not produce a distinct tag object")
+	}
+
+	lock, err := checker.LockDependencyGraph(root, "app", "annotated", checker.DependencyInfo{Alias: "annotated", Name: "annotated", Git: repo, Commit: tagObject, Requested: tagObject}, "annotated", "")
+	if err != nil {
+		t.Fatalf("lock dependency graph: %v", err)
+	}
+	packages := lockedPackagesByID(lock)
+	packageID := checker.GitPackageID(repo, commit)
+	if _, ok := packages[packageID]; !ok {
+		t.Fatalf("lock packages = %#v, want peeled commit package %s", packages, packageID)
+	}
+}
+
+func TestLockDependencyGraphPreservesExistingRequestedRef(t *testing.T) {
+	cacheRoot := t.TempDir()
+	t.Setenv("ARD_CACHE_DIR", cacheRoot)
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	helperRepo, helperCommit := createGitPackageRepo(t, workspace, "stable-helper", map[string]string{
+		"ard.toml":   "name = \"helper\"\nard = \">= 0.1.0\"\n",
+		"helper.ard": "fn value() Int { 1 }\n",
+	})
+	runGit(t, helperRepo, "tag", "stable")
+	lock, err := checker.LockDependencyGraph(root, "app", "helper", checker.DependencyInfo{Alias: "helper", Name: "helper", Git: helperRepo, Tag: "stable", Requested: "stable"}, "helper", "")
+	if err != nil {
+		t.Fatalf("lock helper: %v", err)
+	}
+	if err := checker.WriteDependencyLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+	depManifest := "name = \"dep\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \"" + helperRepo + "\", commit = \"" + helperCommit[:7] + "\" }\n"
+	depRepo, depCommit := createGitPackageRepo(t, workspace, "stable-dep", map[string]string{"ard.toml": depManifest, "dep.ard": "fn answer() Int { 1 }\n"})
+	lock, err = checker.LockDependencyGraph(root, "app", "dep", checker.DependencyInfo{Alias: "dep", Name: "dep", Git: depRepo, Commit: depCommit}, "dep", depCommit)
+	if err != nil {
+		t.Fatalf("lock dep: %v", err)
+	}
+	packages := lockedPackagesByID(lock)
+	helperID := checker.GitPackageID(helperRepo, helperCommit)
+	if got := packages[helperID].Requested; got != "stable" {
+		t.Fatalf("helper requested = %q, want stable", got)
+	}
+}
+
+func TestLockDependencyGraphRefetchesBeforeRecordingFirstIntegrity(t *testing.T) {
+	cacheRoot := t.TempDir()
+	t.Setenv("ARD_CACHE_DIR", cacheRoot)
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo, commit := createGitPackageRepo(t, workspace, "poisoned-cache-dep", map[string]string{
+		"ard.toml": "name = \"dep\"\nard = \">= 0.1.0\"\n",
+		"dep.ard":  "fn answer() Int { 42 }\n",
+	})
+	cachePath := checker.DependencyCachePath(repo, commit)
+	if err := os.MkdirAll(cachePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cachePath, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cachePath, "dep.ard"), []byte("fn answer() Int { 7 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lock, err := checker.LockDependencyGraph(root, "app", "dep", checker.DependencyInfo{Alias: "dep", Name: "dep", Git: repo, Commit: commit}, "dep", commit)
+	if err != nil {
+		t.Fatalf("lock dependency graph: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(cachePath, "dep.ard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "7") {
+		t.Fatalf("cache was not refetched before integrity was recorded:\n%s", data)
+	}
+	packages := lockedPackagesByID(lock)
+	packageID := checker.GitPackageID(repo, commit)
+	wantIntegrity, err := checker.PackageTreeIntegrity(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := packages[packageID].Integrity; got != wantIntegrity {
+		t.Fatalf("integrity = %q, want %q", got, wantIntegrity)
+	}
+}
+
+func TestVerifyDependenciesChecksGitCacheIntegrity(t *testing.T) {
+	cacheRoot := t.TempDir()
+	t.Setenv("ARD_CACHE_DIR", cacheRoot)
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo, commit := createGitPackageRepo(t, workspace, "integrity-dep", map[string]string{
+		"ard.toml": "name = \"dep\"\nard = \">= 0.1.0\"\n",
+		"dep.ard":  "fn answer() Int { 42 }\n",
+	})
+	lock, err := checker.LockDependencyGraph(root, "app", "dep", checker.DependencyInfo{Alias: "dep", Name: "dep", Git: repo, Commit: commit}, "dep", commit)
+	if err != nil {
+		t.Fatalf("lock dependency graph: %v", err)
+	}
+	if err := checker.WriteDependencyLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { git = \""+repo+"\", commit = \""+commit+"\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := checker.VerifyDependencies(root); err != nil {
+		t.Fatalf("verify dependencies: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(checker.DependencyCachePath(repo, commit), "dep.ard"), []byte("fn answer() Int { 7 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := checker.VerifyDependencies(root); err == nil || !strings.Contains(err.Error(), "integrity mismatch") {
+		t.Fatalf("VerifyDependencies error = %v, want integrity mismatch", err)
+	}
+}
+
 func TestFetchDependenciesRestoresGitCacheFromLock(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("ARD_CACHE_DIR", cacheRoot)
@@ -565,6 +945,36 @@ func TestFetchDependenciesRestoresGitCacheFromLock(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(checker.DependencyCachePath(gitRepo, commit), "dep.ard")); err != nil {
 		t.Fatalf("cache was not restored: %v", err)
 	}
+}
+
+func lockedPackagesByID(lock checker.LockFile) map[string]checker.LockedPackage {
+	packages := map[string]checker.LockedPackage{}
+	for _, pkg := range lock.Packages {
+		packages[pkg.ID] = pkg
+	}
+	return packages
+}
+
+func createGitPackageRepo(t *testing.T, workspace string, name string, files map[string]string) (string, string) {
+	t.Helper()
+	repo := filepath.Join(workspace, name)
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range files {
+		fullPath := filepath.Join(repo, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, repo, "init")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "init")
+	commit := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+	return repo, commit
 }
 
 func runGit(t *testing.T, dir string, args ...string) {

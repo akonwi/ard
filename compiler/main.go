@@ -230,11 +230,15 @@ func runAddCommand(args []string) error {
 	if _, err := os.Stat(filepath.Join(project.RootPath, "ard.toml")); err != nil {
 		return fmt.Errorf("ard add requires an ard.toml project")
 	}
-	if err := addDependencyToManifest(filepath.Join(project.RootPath, "ard.toml"), dep); err != nil {
+	replacedAliases, err := dependencyAliasesForGitInManifest(filepath.Join(project.RootPath, "ard.toml"), dep.Git, dep.Alias)
+	if err != nil {
 		return err
 	}
-	lock, err := checker.LockWithDependency(project.RootPath, project.ProjectName, dep.Alias, dep, manifestName, resolvedCommit)
+	lock, err := checker.LockDependencyGraphReplacingAliases(project.RootPath, project.ProjectName, dep.Alias, replacedAliases, dep, manifestName, resolvedCommit)
 	if err != nil {
+		return err
+	}
+	if err := replaceDependencyInManifest(filepath.Join(project.RootPath, "ard.toml"), replacedAliases, dep); err != nil {
 		return err
 	}
 	if err := checker.WriteDependencyLock(project.RootPath, lock); err != nil {
@@ -247,6 +251,57 @@ func runAddCommand(args []string) error {
 	}
 	fmt.Printf("Fetched %s -> %s\n", fetchedDep.Alias, fetchedDep.RootPath)
 	return nil
+}
+
+func dependencyAliasesForGitInManifest(path string, git string, keepAlias string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	git = checker.CanonicalGitSource(git)
+	aliases := []string{}
+	inDependencies := false
+	depRe := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*\{([^}]*)\}`)
+	gitRe := regexp.MustCompile(`\bgit\s*=\s*["']([^"']+)["']`)
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			inDependencies = trimmed == "[dependencies]"
+			continue
+		}
+		if !inDependencies {
+			continue
+		}
+		matches := depRe.FindStringSubmatch(line)
+		if len(matches) < 3 {
+			continue
+		}
+		alias := matches[1]
+		if alias == keepAlias {
+			continue
+		}
+		gitMatches := gitRe.FindStringSubmatch(matches[2])
+		if len(gitMatches) >= 2 && checker.CanonicalGitSource(gitMatches[1]) == git {
+			aliases = append(aliases, alias)
+		}
+	}
+	sort.Strings(aliases)
+	return aliases, nil
+}
+
+func dependencyAliasesForGit(deps map[string]checker.DependencyInfo, git string, keepAlias string) []string {
+	git = checker.CanonicalGitSource(git)
+	aliases := []string{}
+	for alias, dep := range deps {
+		if alias == keepAlias {
+			continue
+		}
+		if checker.CanonicalGitSource(dep.Git) == git {
+			aliases = append(aliases, alias)
+		}
+	}
+	sort.Strings(aliases)
+	return aliases
 }
 
 func parseAddCommandArgs(args []string) (string, string, error) {
@@ -320,8 +375,12 @@ func runDepsCommand(args []string) error {
 }
 
 func dependencyFromAddSpec(raw string) (checker.DependencyInfo, error) {
-	source, ref, ok := strings.Cut(raw, "@")
-	if !ok || strings.TrimSpace(source) == "" || strings.TrimSpace(ref) == "" {
+	at := strings.LastIndex(raw, "@")
+	if at < 0 {
+		return checker.DependencyInfo{}, fmt.Errorf("dependency must be source@tag, source@commit, or source@latest")
+	}
+	source, ref := raw[:at], raw[at+1:]
+	if strings.TrimSpace(source) == "" || strings.TrimSpace(ref) == "" {
 		return checker.DependencyInfo{}, fmt.Errorf("dependency must be source@tag, source@commit, or source@latest")
 	}
 	gitURL, repo, err := normalizeGitSource(source)
@@ -330,6 +389,7 @@ func dependencyFromAddSpec(raw string) (checker.DependencyInfo, error) {
 	}
 	alias := dependencyAliasFromRepo(repo)
 	dep := checker.DependencyInfo{Alias: alias, Git: gitURL}
+	dep.Requested = ref
 	if ref == "latest" {
 		commit, err := resolveGitLatestCommit(gitURL)
 		if err != nil {
@@ -351,8 +411,9 @@ func normalizeGitSource(source string) (string, string, error) {
 	if source == "" {
 		return "", "", fmt.Errorf("empty dependency source")
 	}
-	if strings.HasPrefix(source, "git@") || strings.HasPrefix(source, "https://") || strings.HasPrefix(source, "http://") {
-		repo := strings.TrimSuffix(filepath.Base(source), ".git")
+	lower := strings.ToLower(source)
+	if strings.HasPrefix(lower, "git@") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "ssh://") || strings.HasPrefix(lower, "git+ssh://") {
+		repo := strings.TrimSuffix(filepath.Base(strings.TrimRight(source, "/")), ".git")
 		return source, repo, nil
 	}
 	if rest, ok := strings.CutPrefix(source, "github.com/"); ok {
@@ -414,22 +475,25 @@ func cloneDependencyForManifest(dep checker.DependencyInfo) (string, func(), err
 	}
 	cleanup := func() { _ = os.RemoveAll(tmp) }
 	cloneDir := filepath.Join(tmp, "repo")
-	args := []string{"clone"}
-	if dep.Tag != "" {
-		args = append(args, "--branch", dep.Tag, "--depth", "1")
-	}
-	args = append(args, dep.Git, cloneDir)
+	args := []string{"clone", "--no-checkout", dep.Git, cloneDir}
 	if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 		cleanup()
 		return "", func() {}, fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
-	if dep.Commit != "" {
-		cmd := exec.Command("git", "checkout", dep.Commit)
-		cmd.Dir = cloneDir
-		if output, err := cmd.CombinedOutput(); err != nil {
-			cleanup()
-			return "", func() {}, fmt.Errorf("git checkout %s: %w\n%s", dep.Commit, err, strings.TrimSpace(string(output)))
-		}
+	checkoutRef := dep.Commit
+	if dep.Tag != "" {
+		checkoutRef = "refs/tags/" + dep.Tag
+	}
+	commit, err := gitRevParse(cloneDir, checkoutRef+"^{commit}")
+	if err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	cmd := exec.Command("git", "checkout", commit)
+	cmd.Dir = cloneDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("git checkout %s: %w\n%s", commit, err, strings.TrimSpace(string(output)))
 	}
 	return cloneDir, cleanup, nil
 }
@@ -466,6 +530,10 @@ func resolveGitLatestCommit(gitURL string) (string, error) {
 }
 
 func addDependencyToManifest(path string, dep checker.DependencyInfo) error {
+	return replaceDependencyInManifest(path, nil, dep)
+}
+
+func replaceDependencyInManifest(path string, removeAliases []string, dep checker.DependencyInfo) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -487,21 +555,44 @@ func addDependencyToManifest(path string, dep checker.DependencyInfo) error {
 			}
 		}
 	}
+	remove := map[string]bool{dep.Alias: true}
+	for _, alias := range removeAliases {
+		remove[alias] = true
+	}
 	if start < 0 {
 		text := strings.TrimRight(string(data), "\n") + "\n\n[dependencies]\n" + entry + "\n"
 		return os.WriteFile(path, []byte(text), 0o644)
 	}
-	aliasRe := regexp.MustCompile("^\\s*" + regexp.QuoteMeta(dep.Alias) + "\\s*=")
-	for i := start + 1; i < end; i++ {
-		if aliasRe.MatchString(lines[i]) {
-			lines[i] = entry
-			return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+	updated := make([]string, 0, len(lines)+1)
+	inserted := false
+	for i, line := range lines {
+		if i > start && i < end && manifestLineMatchesAnyAlias(line, remove) {
+			if !inserted {
+				updated = append(updated, entry)
+				inserted = true
+			}
+			continue
+		}
+		if i == end && !inserted {
+			updated = append(updated, entry)
+			inserted = true
+		}
+		updated = append(updated, line)
+	}
+	if !inserted {
+		updated = append(updated, entry)
+	}
+	return os.WriteFile(path, []byte(strings.Join(updated, "\n")), 0o644)
+}
+
+func manifestLineMatchesAnyAlias(line string, aliases map[string]bool) bool {
+	for alias := range aliases {
+		aliasRe := regexp.MustCompile("^\\s*" + regexp.QuoteMeta(alias) + "\\s*=")
+		if aliasRe.MatchString(line) {
+			return true
 		}
 	}
-	updated := append([]string{}, lines[:end]...)
-	updated = append(updated, entry)
-	updated = append(updated, lines[end:]...)
-	return os.WriteFile(path, []byte(strings.Join(updated, "\n")), 0o644)
+	return false
 }
 
 func removeDependencyFromManifest(path string, alias string) (bool, error) {
