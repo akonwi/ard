@@ -9,6 +9,33 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+func TestUnknownParameterTypeMethodLookupReportsDiagnostics(t *testing.T) {
+	result := parse.Parse([]byte(strings.Join([]string{
+		`fn stringify(x: Missing) Str {`,
+		`  x.to_str()`,
+		`}`,
+	}, "\n")), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("Parse errors: %v", result.Errors[0].Message)
+	}
+
+	c := checker.New("test.ard", result.Program, nil)
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("checker panicked for method lookup on unresolved type: %v", r)
+		}
+	}()
+	c.Check()
+
+	diagnostics := diagnosticsString(c.Diagnostics())
+	if !strings.Contains(diagnostics, "Unrecognized type: Missing") {
+		t.Fatalf("diagnostics = %v, want unrecognized type diagnostic", c.Diagnostics())
+	}
+	if !strings.Contains(diagnostics, "Undefined: x.to_str") {
+		t.Fatalf("diagnostics = %v, want undefined method diagnostic", c.Diagnostics())
+	}
+}
+
 func TestFunctions(t *testing.T) {
 	run(t, []test{
 		{

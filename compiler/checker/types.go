@@ -646,10 +646,10 @@ func (a *TypeVar) Actual() Type {
 }
 
 func (a TypeVar) get(name string) Type {
-	if a.actual != nil {
-		return a.actual.get(name)
+	if a.actual == nil {
+		return nil
 	}
-	panic(fmt.Errorf("Cannot look up symbols in unrefined %s", a.String()))
+	return a.actual.get(name)
 }
 func (a *TypeVar) equal(other Type) bool {
 	return equalTypes(a, other)
