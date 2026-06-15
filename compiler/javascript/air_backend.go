@@ -2310,7 +2310,7 @@ func isAIRJSPreludeExtern(binding string) bool {
 	switch binding {
 	case "JsonToDynamic", "DecodeString", "DecodeInt", "DecodeByte", "DecodeRune", "DecodeFloat", "DecodeBool", "IsNil",
 		"DynamicToList", "DynamicToMap", "ExtractField", "IntFromStr", "FloatFromStr",
-		"FloatFromInt", "FloatFloor", "FloatFormat", "ByteFromInt", "RuneFromInt", "RuneFromStr",
+		"FloatFromInt", "FloatFloor", "FloatCeil", "FloatFormat", "ByteFromInt", "RuneFromInt", "RuneFromStr",
 		"StrSplit", "StrFromUtf8", "StrFromRunes", "StrToDynamic", "IntToDynamic",
 		"FloatToDynamic", "BoolToDynamic", "BytesToDynamic", "VoidToDynamic", "ListToDynamic", "MapToDynamic",
 		"JsonEncode", "JsonParse", "promiseResolve", "promiseReject", "promiseMap", "promiseThen",

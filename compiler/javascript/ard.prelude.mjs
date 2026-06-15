@@ -371,6 +371,10 @@ export function FloatFloor(value) {
   return Math.floor(value);
 }
 
+export function FloatCeil(value) {
+  return Math.ceil(value);
+}
+
 function float64Parts(value) {
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, value, false);

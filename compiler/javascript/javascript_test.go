@@ -886,6 +886,8 @@ fn main() {
   io::print(Float::format(1.25, 1))
   io::print(Float::format(1.35, 1))
   io::print(Float::format(1.0, 101).size())
+  io::print(Float::format(Float::ceil(3.2), 1))
+  io::print(Float::format(Float::ceil(-2.5), 1))
 }
 `), 0o644); err != nil {
 		t.Fatalf("failed to write source: %v", err)
@@ -898,7 +900,7 @@ fn main() {
 		t.Fatalf("did not expect js-server float format run error: %v\n%s", err, string(jsOut))
 	}
 
-	want := "1.00\n3.142\n42\n43\n2\n4\n1.2\n1.4\n103\n"
+	want := "1.00\n3.142\n42\n43\n2\n4\n1.2\n1.4\n103\n4.0\n-2.0\n"
 	if string(jsOut) != want {
 		t.Fatalf("js-server output mismatch:\n got %q\nwant %q", string(jsOut), want)
 	}

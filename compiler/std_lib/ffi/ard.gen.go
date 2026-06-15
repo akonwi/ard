@@ -182,6 +182,7 @@ type Host struct {
 	FSReadFile           func(path string) (string, error)
 	FSRename             func(from string, to string) error
 	FSWriteFile          func(path string, content string) error
+	FloatCeil            func(float float64) float64
 	FloatFloor           func(float float64) float64
 	FloatFormat          func(value float64, decimals int) string
 	FloatFromInt         func(int int) float64
@@ -354,6 +355,9 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.FSWriteFile != nil {
 		functions["FS_WriteFile"] = h.FSWriteFile
+	}
+	if h.FloatCeil != nil {
+		functions["FloatCeil"] = h.FloatCeil
 	}
 	if h.FloatFloor != nil {
 		functions["FloatFloor"] = h.FloatFloor

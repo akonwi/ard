@@ -6,7 +6,7 @@ description: Convert and manipulate floating-point numbers using Ard's float mod
 The `ard/float` module provides functions for working with floating-point numbers, including conversion, formatting, and mathematical operations.
 
 :::note
-The `ard/float` module is a prelude module. It is automatically imported and aliased as `Float` in all programs, allowing methods to be accessed with the `Float::` namespace (e.g., `Float::from_str()`, `Float::floor()`).
+The `ard/float` module is a prelude module. It is automatically imported and aliased as `Float` in all programs, allowing methods to be accessed with the `Float::` namespace (e.g., `Float::from_str()`, `Float::floor()`, `Float::ceil()`).
 :::
 
 :::tip
@@ -17,7 +17,7 @@ The float module provides:
 - **String conversion** to parse floats from strings
 - **Formatting** with a portable fixed-decimal contract
 - **Type conversion** from integers to floats
-- **Mathematical operations** like floor
+- **Mathematical operations** like floor and ceil
 
 ```ard
 use ard/float
@@ -25,6 +25,7 @@ use ard/float
 fn main() {
   let f = Float::from_str("3.14").or(0.0)
   let floored = Float::floor(f)
+  let ceiled = Float::ceil(f)
   let label = Float::format(f, 2)  // "3.14"
 }
 ```
@@ -66,6 +67,18 @@ use ard/float
 Float::floor(3.7)  // 3.0
 Float::floor(3.2)  // 3.0
 Float::floor(-2.5)  // -3.0
+```
+
+### `fn ceil(float: Float) Float`
+
+Return the smallest integer greater than or equal to the given float.
+
+```ard
+use ard/float
+
+Float::ceil(3.7)  // 4.0
+Float::ceil(3.0)  // 3.0
+Float::ceil(-2.5)  // -2.0
 ```
 
 ### `fn format(value: Float, decimals: Int) Str`
@@ -111,20 +124,24 @@ fn main() {
   let x = Float::from_int(5)
   let y = Float::from_str("2.5").or(0.0)
   let result = Float::floor(x / y)
+  let rounded_up = Float::ceil(x / y)
   io::print(result.to_str())  // 2.0
+  io::print(rounded_up.to_str())  // 2.0
 }
 ```
 
-### Convert and Floor
+### Convert, Floor, and Ceil
 
 ```ard
 use ard/float
 
 fn main() {
   let temp_c = Float::from_int(25)
-  // Scale to Fahrenheit and floor
+  // Scale to Fahrenheit and round down/up
   let fahrenheit = (temp_c * 1.8) + 32.0
   let floored = Float::floor(fahrenheit)
+  let ceiled = Float::ceil(fahrenheit)
   io::print(floored.to_str())
+  io::print(ceiled.to_str())
 }
 ```
