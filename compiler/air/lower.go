@@ -3234,6 +3234,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprConstBool, Type: typeID, Bool: e.Value}, nil
 	case *checker.StrLiteral:
 		return &Expr{Kind: ExprConstStr, Type: typeID, Str: e.Value}, nil
+	case *checker.RuneLiteral:
+		return &Expr{Kind: ExprConstInt, Type: typeID, Int: int(e.Value)}, nil
 	case *checker.Panic:
 		message, err := fl.lowerExprWithExpected(e.Message, fl.l.mustIntern(checker.Str))
 		if err != nil {
@@ -3825,8 +3827,8 @@ func (fl *functionLowerer) lowerIntMatch(typeID TypeID, match *checker.IntMatch)
 		return nil, err
 	}
 	subjectType, ok := fl.l.typeInfo(subject.Type)
-	if !ok || subjectType.Kind != TypeInt {
-		return nil, fmt.Errorf("int match lowered with non-int subject %s", match.Subject.Type().String())
+	if !ok || (subjectType.Kind != TypeInt && subjectType.Kind != TypeByte && subjectType.Kind != TypeRune) {
+		return nil, fmt.Errorf("int match lowered with non-integer subject %s", match.Subject.Type().String())
 	}
 
 	intValues := make([]int, 0, len(match.IntCases))

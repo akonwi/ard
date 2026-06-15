@@ -13,10 +13,11 @@ let number: Int = 42
 let decimal: Float = 3.14
 let flag: Bool = true
 let byte: Byte = Byte::from_int(255).expect("byte")
-let rune: Rune = Rune::from_str("é").expect("rune")
+let rune: Rune = 'é'
+let newline: Rune = '\n'
 ```
 
-`Byte` represents an unsigned 8-bit value (`0..255`). `Rune` represents one Unicode scalar value. Convert text explicitly with `"text".bytes()`, `"text".runes()`, `Str::from_bytes(bytes)`, and `Str::from_runes(runes)`.
+`Byte` represents an unsigned 8-bit value (`0..255`). `Rune` represents one Unicode scalar value. Single-quoted rune literals make scalar comparisons concise, such as `ch == '/'` while iterating a string. Rune literals support escapes like `'\n'`, `'\x00'`, and `'\u0080'`. Convert text explicitly with `"text".bytes()`, `"text".runes()`, `Str::from_bytes(bytes)`, and `Str::from_runes(runes)`.
 
 ### Collection Types
 

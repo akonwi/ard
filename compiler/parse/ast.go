@@ -710,6 +710,15 @@ func (s StrLiteral) String() string {
 	return s.Value
 }
 
+type RuneLiteral struct {
+	Location
+	Value string
+}
+
+func (r RuneLiteral) String() string {
+	return r.Value
+}
+
 type InterpolatedStr struct {
 	Location
 	Chunks []Expression

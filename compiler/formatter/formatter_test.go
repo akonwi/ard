@@ -40,6 +40,11 @@ func TestFormat(t *testing.T) {
 			output: "let value: Int = 1 + 2\nif value > 2 {\n  value\n}\n",
 		},
 		{
+			name:   "formats rune literals",
+			input:  "let slash:Rune='/'\nlet newline='\\n'\nlet nul='\\x00'\nif slash=='/'{newline.to_int()}\n",
+			output: "let slash: Rune = '/'\nlet newline = '\\n'\nlet nul = '\\x00'\nif slash == '/' {\n  newline.to_int()\n}\n",
+		},
+		{
 			name:   "sorts imports into groups",
 			input:  "use github.com/zeta/lib\nuse ard/io\nuse github.com/alpha/lib\nlet _ = io::println(\"hi\")\nlet _ = lib::new()\n",
 			output: "use ard/io\n\nuse github.com/alpha/lib\nuse github.com/zeta/lib\n\nlet _ = io::println(\"hi\")\nlet _ = lib::new()\n",

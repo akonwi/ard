@@ -463,7 +463,7 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if err != nil {
 			return err
 		}
-		if targetType.Kind != TypeInt {
+		if targetType.Kind != TypeInt && targetType.Kind != TypeByte && targetType.Kind != TypeRune {
 			return fmt.Errorf("int match target has type kind %d", targetType.Kind)
 		}
 		for _, matchCase := range expr.IntCases {

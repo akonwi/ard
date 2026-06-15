@@ -809,3 +809,26 @@ func TestVoidLiteral(t *testing.T) {
 		},
 	})
 }
+
+func TestRuneLiterals(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "Rune literal",
+			input: `'/'`,
+			output: Program{
+				Imports:    []Import{},
+				Statements: []Statement{&RuneLiteral{Value: "/"}},
+			},
+		},
+		{
+			name:     "Unterminated rune literal",
+			input:    `let r = 'a`,
+			wantErrs: []string{"Unterminated rune literal"},
+		},
+		{
+			name:     "Multiline rune literal",
+			input:    "let r = 'a\nlet next = 1",
+			wantErrs: []string{"Unterminated rune literal"},
+		},
+	})
+}

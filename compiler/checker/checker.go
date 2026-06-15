@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/parse"
@@ -1892,7 +1893,7 @@ func canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal T
 	}
 	if expectedFinal == Void {
 		switch stmt.(type) {
-		case *parse.StrLiteral, *parse.BoolLiteral, *parse.VoidLiteral, *parse.NumLiteral, *parse.InterpolatedStr,
+		case *parse.StrLiteral, *parse.RuneLiteral, *parse.BoolLiteral, *parse.VoidLiteral, *parse.NumLiteral, *parse.InterpolatedStr,
 			*parse.Identifier, *parse.FunctionCall, *parse.FunctionValueCall, *parse.InstanceProperty, *parse.InstanceMethod,
 			*parse.UnaryExpression, *parse.BinaryExpression, *parse.ChainedComparison, *parse.StaticFunction,
 			*parse.IfStatement, *parse.AnonymousFunction, *parse.ListLiteral, *parse.MapLiteral,
@@ -2922,6 +2923,13 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 	switch s := (expr).(type) {
 	case *parse.StrLiteral:
 		return &StrLiteral{s.Value}
+	case *parse.RuneLiteral:
+		runes := []rune(s.Value)
+		if len(runes) != 1 || !utf8.ValidRune(runes[0]) {
+			c.addError("Rune literal must contain exactly one Unicode scalar value", s.GetLocation())
+			return &RuneLiteral{Value: 0}
+		}
+		return &RuneLiteral{Value: runes[0]}
 	case *parse.BoolLiteral:
 		return &BoolLiteral{s.Value}
 	case *parse.VoidLiteral:
@@ -4394,6 +4402,62 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			return &StrMatch{Subject: subject, Cases: strCases, CatchAll: catchAll, ResultType: strResultType}
 		}
 
+		if subject.Type() == Rune {
+			runeCases := make(map[int]*Block)
+			var catchAll *Block
+			var runeResultType Type
+
+			for _, matchCase := range s.Cases {
+				if id, ok := matchCase.Pattern.(*parse.Identifier); ok && id.Name == "_" {
+					if catchAll != nil {
+						c.addError("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+						return nil
+					}
+					catchAll = c.checkMatchArmBlock(matchCase.Body, nil)
+					var ok bool
+					runeResultType, ok = mergeMatchResultType(c, runeResultType, catchAll.Type(), matchCase.Pattern.GetLocation(), allowMixedVoid)
+					if !ok {
+						return nil
+					}
+					continue
+				}
+
+				literal, ok := matchCase.Pattern.(*parse.RuneLiteral)
+				if !ok {
+					c.addError("Pattern in Rune match must be a rune literal or '_'", matchCase.Pattern.GetLocation())
+					return nil
+				}
+				value, valid := c.parseRuneLiteralValue(literal)
+				if !valid {
+					return nil
+				}
+				intValue := int(value)
+				if _, exists := runeCases[intValue]; exists {
+					c.addError(fmt.Sprintf("Duplicate case: %s", strconv.QuoteRune(value)), matchCase.Pattern.GetLocation())
+					return nil
+				}
+				caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
+				runeCases[intValue] = caseBlock
+				var mergeOK bool
+				runeResultType, mergeOK = mergeMatchResultType(c, runeResultType, caseBlock.Type(), matchCase.Pattern.GetLocation(), allowMixedVoid)
+				if !mergeOK {
+					return nil
+				}
+			}
+
+			if catchAll == nil {
+				c.addError("Incomplete match: missing catch-all case for Rune match", s.GetLocation())
+			}
+
+			return &IntMatch{
+				Subject:    subject,
+				IntCases:   runeCases,
+				RangeCases: map[IntRange]*Block{},
+				CatchAll:   catchAll,
+				ResultType: runeResultType,
+			}
+		}
+
 		// Check for Int matching
 		if subject.Type() == Int {
 			intCases := make(map[int]*Block)
@@ -4936,6 +5000,15 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 	default:
 		panic(fmt.Errorf("Unexpected expression: %s", reflect.TypeOf(s)))
 	}
+}
+
+func (c *Checker) parseRuneLiteralValue(literal *parse.RuneLiteral) (rune, bool) {
+	runes := []rune(literal.Value)
+	if len(runes) != 1 || !utf8.ValidRune(runes[0]) {
+		c.addError("Rune literal must contain exactly one Unicode scalar value", literal.GetLocation())
+		return 0, false
+	}
+	return runes[0], true
 }
 
 // extractIntFromPattern extracts an integer value from a pattern that can be either

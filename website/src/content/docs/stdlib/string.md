@@ -47,7 +47,7 @@ let path = "posts/hello.md"
 path.starts_with("posts/") // true
 path.ends_with(".md")      // true
 path.contains("hello")     // true
-path.at(0)                  // some(Rune::from_str("p").expect("p"))
+path.at(0)                  // some('p')
 path.bytes()                // UTF-8 bytes as [Byte]
 path.runes()                // Unicode scalar values as [Rune]
 path.is_empty()             // false
@@ -76,6 +76,12 @@ Returns the Unicode scalar value at the zero-based rune `index`, or `none` when 
 "hé".bytes().size() // 3
 "hé".runes().size() // 2
 "hé".size()         // 3
+
+for ch in "a/b" {
+  if ch == '/' {
+    // ch is a Rune
+  }
+}
 ```
 
 #### `Str::split(input: Str, delimiter: Str) [Str]`

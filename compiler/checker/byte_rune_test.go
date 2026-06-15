@@ -29,6 +29,29 @@ let runes: [Rune] = "hé".runes()`,
 let r: Rune? = Rune::from_int(65)`,
 		},
 		{
+			name: "rune literals have Rune type",
+			input: `let slash: Rune = '/'
+let accent: Rune = 'é'
+let newline: Rune = '\n'
+let same = slash == '/'`,
+		},
+		{
+			name: "rune literal can match string iteration cursor",
+			input: `for ch in "a/b" {
+  let label = match ch {
+    '/' => "slash",
+    _ => "other",
+  }
+}`,
+		},
+		{
+			name:  "invalid rune literal reports diagnostic",
+			input: `let bad = 'ab'`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Rune literal must contain exactly one Unicode scalar value"},
+			},
+		},
+		{
 			name:  "byte and rune are not implicit ints",
 			input: `let b: Byte = 65`,
 			diagnostics: []checker.Diagnostic{

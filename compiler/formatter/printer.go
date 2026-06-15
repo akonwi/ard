@@ -869,6 +869,7 @@ func renderableExpressionStatement(statement parse.Statement) (parse.Expression,
 	switch statement.(type) {
 	case *parse.Identifier, parse.Identifier,
 		*parse.StrLiteral, parse.StrLiteral,
+		*parse.RuneLiteral, parse.RuneLiteral,
 		*parse.InterpolatedStr, parse.InterpolatedStr,
 		*parse.NumLiteral, parse.NumLiteral,
 		*parse.BoolLiteral, parse.BoolLiteral,
@@ -913,6 +914,10 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 		return dText(quoteArdString(node.Value))
 	case parse.StrLiteral:
 		return dText(quoteArdString(node.Value))
+	case *parse.RuneLiteral:
+		return dText(quoteArdRune(node.Value))
+	case parse.RuneLiteral:
+		return dText(quoteArdRune(node.Value))
 	case *parse.InterpolatedStr:
 		return p.renderInterpolatedStringDoc(node)
 	case parse.InterpolatedStr:
@@ -1123,6 +1128,20 @@ func quoteArdString(value string) string {
 	}
 	inner := quoted[1 : len(quoted)-1]
 	return `"` + escapeArdBraces(inner) + `"`
+}
+
+func quoteArdRune(value string) string {
+	runes := []rune(value)
+	if len(runes) == 1 {
+		return strconv.QuoteRune(runes[0])
+	}
+	quoted := strconv.Quote(value)
+	if len(quoted) < 2 {
+		return "'" + value + "'"
+	}
+	inner := quoted[1 : len(quoted)-1]
+	inner = strings.ReplaceAll(inner, `'`, `\'`)
+	return "'" + inner + "'"
 }
 
 func escapeArdBraces(value string) string {

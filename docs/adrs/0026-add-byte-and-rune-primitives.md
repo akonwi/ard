@@ -61,6 +61,26 @@ rune.to_str()          // Str, one-rune text
 
 Integer literals should not implicitly coerce to `Byte` or `Rune` in the initial implementation. Range-checked literal convenience can be added later if it proves ergonomic.
 
+### Rune literals
+
+Add single-quoted rune literals for ergonomic scalar comparisons and pattern matching:
+
+```ard
+let slash: Rune = '/'
+let accent: Rune = 'é'
+let newline: Rune = '\n'
+
+for ch in path {
+  if ch == '/' {
+    // ch is a Rune
+  }
+}
+```
+
+A rune literal has type `Rune` and must contain exactly one valid Unicode scalar value after escape processing. Empty literals (`''`), multi-rune literals (`'ab'`), raw multiline literals, surrogate code points, and unterminated literals are invalid. Rune literals support the same escape forms as strings: named escapes (`\n`, `\t`, `\r`, `\a`, `\b`, `\f`, `\v`), escaped delimiters/backslashes (`'\''`, `'\\'`), byte escapes (`\xNN`), short Unicode escapes (`\uNNNN`), and long Unicode escapes (`\UNNNNNNNN`).
+
+Rune literals do not introduce a separate `Char` type, and they do not imply any implicit conversion between `Rune`, `Int`, or one-rune `Str` values. Code that needs text still calls `rune.to_str()` explicitly.
+
 ### Primitive method set
 
 Keep the initial method set intentionally small.

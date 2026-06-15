@@ -844,6 +844,7 @@ func TestLexing(t *testing.T) {
 				`"carriage\rreturn"`,
 				`"backslash \\ and quote \" together"`,
 				`"bell\b, form feed\f, vertical tab\v"`,
+				`"alert\a, escape\x1b, unicode\u0080, max\U0010ffff"`,
 			}, "\n"),
 			want: []token{
 				{kind: string_, line: 1, column: 1, text: "line 1\nline 2"},
@@ -859,7 +860,42 @@ func TestLexing(t *testing.T) {
 				{kind: new_line, line: 4, column: 37},
 
 				{kind: string_, line: 5, column: 1, text: "bell\b, form feed\f, vertical tab\v"},
+				{kind: new_line, line: 5, column: 38},
 
+				{kind: string_, line: 6, column: 1, text: "alert\a, escape\x1b, unicode\u0080, max\U0010ffff"},
+
+				{kind: eof},
+			},
+		},
+
+		{
+			name: "rune literals",
+			input: strings.Join([]string{
+				`'/'`,
+				`'é'`,
+				`'\n'`,
+				`'\''`,
+				`'\a'`,
+				`'\x00'`,
+				`'\u0080'`,
+				`'\U0010ffff'`,
+			}, "\n"),
+			want: []token{
+				{kind: rune_, line: 1, column: 1, text: "/"},
+				{kind: new_line, line: 1, column: 4},
+				{kind: rune_, line: 2, column: 1, text: "é"},
+				{kind: new_line, line: 2, column: 5},
+				{kind: rune_, line: 3, column: 1, text: "\n"},
+				{kind: new_line, line: 3, column: 5},
+				{kind: rune_, line: 4, column: 1, text: "'"},
+				{kind: new_line, line: 4, column: 5},
+				{kind: rune_, line: 5, column: 1, text: "\a"},
+				{kind: new_line, line: 5, column: 5},
+				{kind: rune_, line: 6, column: 1, text: "\x00"},
+				{kind: new_line, line: 6, column: 7},
+				{kind: rune_, line: 7, column: 1, text: "\u0080"},
+				{kind: new_line, line: 7, column: 9},
+				{kind: rune_, line: 8, column: 1, text: "\U0010ffff"},
 				{kind: eof},
 			},
 		},

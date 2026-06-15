@@ -491,6 +491,18 @@ fn main() {
   io::print(Str::from_runes("hé".runes()).expect("runes"))
   io::print((Byte::from_int(1).expect("one") < Byte::from_int(2).expect("two")).to_str())
   io::print((Rune::from_str("a").expect("a") < Rune::from_str("b").expect("b")).to_str())
+  io::print('\n'.to_int().to_str())
+  io::print(match '/' {
+    '/' => "slash",
+    _ => "other",
+  })
+  mut saw_slash = false
+  for ch in "a/b" {
+    if ch == '/' {
+      saw_slash = true
+    }
+  }
+  io::print(saw_slash.to_str())
 }
 main()
 `), 0o644); err != nil {
@@ -503,7 +515,7 @@ main()
 	if err != nil {
 		t.Fatalf("did not expect js-server byte/rune run error: %v\n%s", err, string(out))
 	}
-	want := "255\né\n233\n3\n2\n337\nhé\nhé\ntrue\ntrue\n"
+	want := "255\né\n233\n3\n2\n337\nhé\nhé\ntrue\ntrue\n10\nslash\ntrue\n"
 	if string(out) != want {
 		t.Fatalf("unexpected byte/rune output: %q", string(out))
 	}

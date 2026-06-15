@@ -35,6 +35,17 @@ func (s *StrLiteral) Type() Type {
 	return Str
 }
 
+type RuneLiteral struct {
+	Value rune
+}
+
+func (r *RuneLiteral) String() string {
+	return strconv.QuoteRune(r.Value)
+}
+func (r *RuneLiteral) Type() Type {
+	return Rune
+}
+
 type TemplateStr struct {
 	Chunks []Expression
 }

@@ -73,6 +73,24 @@ func TestGoTargetParityByteRunePrimitives(t *testing.T) {
 			want: "true",
 		},
 		{
+			name: "rune literal comparisons and match",
+			input: `fn main() Bool {
+  let newline: Rune = '\n'
+  let matched = match '/' {
+    '/' => true,
+    _ => false,
+  }
+  mut saw_slash = false
+  for ch in "a/b" {
+    if ch == '/' {
+      saw_slash = true
+    }
+  }
+  newline.to_int() == 10 and matched and saw_slash
+}`,
+			want: "true",
+		},
+		{
 			name: "decode byte and rune dynamics",
 			input: `use ard/decode
 fn main() Bool {
