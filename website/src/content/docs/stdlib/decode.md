@@ -10,7 +10,7 @@ For direct typed JSON parsing, prefer `ard/json` and `json::parse<T>(text)`. Use
 :::
 
 The decode module provides:
-- **Primitive decoders** for strings, integers, floats, and booleans
+- **Primitive decoders** for strings, integers, bytes, runes, floats, and booleans
 - **Composable decoders** that can be combined for complex types
 - **Detailed error messages** with path information for debugging
 - **JSON parsing** with the `from_json` function
@@ -54,6 +54,24 @@ use ard/decode
 
 let data = Dynamic::from(42)
 let num = decode::run(data, decode::int).expect("Failed to decode")
+```
+
+#### `fn byte(data: Dynamic) Byte![Error]`
+
+Decode an integer in `0..255` as a `Byte`.
+
+```ard
+let data = Dynamic::from(255)
+let b = decode::run(data, decode::byte).expect("Failed to decode")
+```
+
+#### `fn rune(data: Dynamic) Rune![Error]`
+
+Decode a valid Unicode scalar integer as a `Rune`.
+
+```ard
+let data = Dynamic::from(233)
+let r = decode::run(data, decode::rune).expect("Failed to decode")
 ```
 
 #### `fn float(data: Dynamic) Float![Error]`

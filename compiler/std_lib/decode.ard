@@ -46,6 +46,14 @@ private extern fn _decode_int(data: Dynamic) Int!Error = {
   go = "DecodeInt"
   js = "DecodeInt"
 }
+private extern fn _decode_byte(data: Dynamic) Byte!Error = {
+  go = "DecodeByte"
+  js = "DecodeByte"
+}
+private extern fn _decode_rune(data: Dynamic) Rune!Error = {
+  go = "DecodeRune"
+  js = "DecodeRune"
+}
 private extern fn _decode_float(data: Dynamic) Float!Error = {
   go = "DecodeFloat"
   js = "DecodeFloat"
@@ -86,6 +94,16 @@ fn string(data: Dynamic) Str![Error] {
 
 fn int(data: Dynamic) Int![Error] {
   let val = try _decode_int(data) -> err { Result::err([err]) }
+  Result::ok(val)
+}
+
+fn byte(data: Dynamic) Byte![Error] {
+  let val = try _decode_byte(data) -> err { Result::err([err]) }
+  Result::ok(val)
+}
+
+fn rune(data: Dynamic) Rune![Error] {
+  let val = try _decode_rune(data) -> err { Result::err([err]) }
   Result::ok(val)
 }
 

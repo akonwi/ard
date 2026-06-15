@@ -13,6 +13,7 @@ The string module provides:
 - **ToString trait** for implementing custom string conversion
 - **Integration** with `io::print` and string interpolation
 - **Built-in string helper methods** for querying and transforming `Str` values
+- **UTF-8 byte and Unicode scalar views** through `[Byte]` and `[Rune]`
 
 ```ard
 use ard/string as Str
@@ -46,23 +47,50 @@ let path = "posts/hello.md"
 path.starts_with("posts/") // true
 path.ends_with(".md")      // true
 path.contains("hello")     // true
-path.at(0)                  // some("p")
+path.at(0)                  // some('p')
+path.bytes()                // UTF-8 bytes as [Byte]
+path.runes()                // Unicode scalar values as [Rune]
 path.is_empty()             // false
-path.size()                 // 14
+path.size()                 // 14 (UTF-8 byte length)
 path.replace(".md", ".html")
 path.replace_all("/", "-")
-path.split("/")
+Str::split(path, "/")
 path.trim()
 ```
 
-#### `at(index: Int) Str?`
+#### `at(index: Int) Rune?`
 
-Returns the character at the zero-based `index`, or `none` when the index is out of bounds. String indexing uses Unicode code points, not bytes.
+Returns the Unicode scalar value at the zero-based rune `index`, or `none` when the index is out of bounds. Call `to_str()` when you need a one-rune string.
 
 ```ard
-"hello".at(0).expect("missing") // "h"
-"hé".at(1).expect("missing")    // "é"
-"hello".at(5).is_none()          // true
+"hello".at(0).expect("missing").to_str() // "h"
+"hé".at(1).expect("missing").to_str()    // "é"
+"hello".at(5).is_none()                   // true
+```
+
+#### `bytes() [Byte]`, `runes() [Rune]`, and `size() Int`
+
+`bytes()` returns UTF-8 bytes, `runes()` returns Unicode scalar values, and `size()` returns UTF-8 byte length.
+
+```ard
+"hé".bytes().size() // 3
+"hé".runes().size() // 2
+"hé".size()         // 3
+
+for ch in "a/b" {
+  if ch == '/' {
+    // ch is a Rune
+  }
+}
+```
+
+#### `Str::split(input: Str, delimiter: Str) [Str]`
+
+Splits a string from the `ard/string` module. An empty delimiter returns one-rune strings.
+
+```ard
+Str::split("a,b", ",") // ["a", "b"]
+Str::split("hé", "")   // ["h", "é"]
 ```
 
 #### `starts_with(prefix: Str) Bool`

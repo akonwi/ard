@@ -1,6 +1,7 @@
 package parse
 
 import (
+	"strconv"
 	"strings"
 )
 
@@ -86,6 +87,7 @@ const (
 	identifier = "identifier"
 	number     = "number"
 	string_    = "string"
+	rune_      = "rune"
 	comment    = "comment"
 
 	eof = "eof"
@@ -96,6 +98,7 @@ type token struct {
 	line   int
 	column int
 	text   string
+	err    string
 }
 
 func (t token) getLocation() Location {
@@ -228,6 +231,24 @@ func (l *lexer) advance() *char {
 	l.cursor++
 	l.column++
 	return char
+}
+
+func (l *lexer) advanceN(count int) {
+	for i := 0; i < count; i++ {
+		l.advance()
+	}
+}
+
+func (l *lexer) takeEscape(quote byte) (rune, int, bool) {
+	if l.isAtEnd() || l.source[l.cursor] != '\\' {
+		return 0, 0, false
+	}
+	input := string(l.source[l.cursor:])
+	value, _, tail, err := strconv.UnquoteChar(input, quote)
+	if err != nil {
+		return 0, 0, false
+	}
+	return value, len(input) - len(tail), true
 }
 
 func (c char) isDigit() bool {
@@ -366,6 +387,8 @@ func (l *lexer) take() (token, bool) {
 		return currentChar.asToken(equal), true
 	case '"':
 		return l.takeString(*currentChar)
+	case '\'':
+		return l.takeRune(*currentChar)
 	case '\\':
 		if l.inTemplate && l.hasMore() && l.peek().raw == '"' {
 			return l.takeEscapedTemplateString(*currentChar)
@@ -411,26 +434,15 @@ func (l *lexer) takeString(start char) (token, bool) {
 
 		// Handle escape sequences
 		if currChar.raw == '\\' {
+			if escaped, consumed, ok := l.takeEscape('"'); ok {
+				sb.WriteRune(escaped)
+				l.advanceN(consumed)
+				continue
+			}
 			l.advance() // Consume the backslash
 			if l.hasMore() {
 				escChar := l.advance() // Get the escaped character
 				switch escChar.raw {
-				case 'n':
-					sb.WriteByte('\n')
-				case 't':
-					sb.WriteByte('\t')
-				case 'r':
-					sb.WriteByte('\r')
-				case '"':
-					sb.WriteByte('"')
-				case '\\':
-					sb.WriteByte('\\')
-				case 'b':
-					sb.WriteByte('\b')
-				case 'f':
-					sb.WriteByte('\f')
-				case 'v':
-					sb.WriteByte('\v')
 				case '{':
 					// Escaped opening brace - just add it literally
 					sb.WriteByte('{')
@@ -497,6 +509,52 @@ func (l *lexer) takeString(start char) (token, bool) {
 	}, true
 }
 
+func (l *lexer) takeRune(start char) (token, bool) {
+	var sb strings.Builder
+
+	for l.hasMore() {
+		currChar := l.peek()
+		if currChar == nil {
+			break
+		}
+
+		if currChar.raw == '\\' {
+			if escaped, consumed, ok := l.takeEscape('\''); ok {
+				sb.WriteRune(escaped)
+				l.advanceN(consumed)
+				continue
+			}
+			l.advance() // Consume the backslash.
+			if !l.hasMore() {
+				sb.WriteByte('\\')
+				break
+			}
+			escChar := l.advance()
+			if escChar.raw == '"' {
+				sb.WriteByte('"')
+			} else {
+				sb.WriteByte('\\')
+				sb.WriteByte(escChar.raw)
+			}
+			continue
+		}
+
+		if currChar.raw == '\'' {
+			l.advance() // Consume the closing quote.
+			return token{kind: rune_, line: start.line, column: start.col, text: sb.String()}, true
+		}
+
+		if currChar.raw == '\n' {
+			return token{kind: rune_, line: start.line, column: start.col, text: sb.String(), err: "Unterminated rune literal"}, true
+		}
+
+		sb.WriteByte(currChar.raw)
+		l.advance()
+	}
+
+	return token{kind: rune_, line: start.line, column: start.col, text: sb.String(), err: "Unterminated rune literal"}, true
+}
+
 func (l *lexer) takeEscapedTemplateString(start char) (token, bool) {
 	// String literals inside interpolation are written with escaped quotes so
 	// they do not terminate the outer string, e.g. "{wrap(\"arg\")}".
@@ -511,33 +569,23 @@ func (l *lexer) takeEscapedTemplateString(start char) (token, bool) {
 		}
 
 		if currChar.raw == '\\' {
+			if l.cursor+1 < len(l.source) && l.source[l.cursor+1] == '"' {
+				l.advanceN(2)
+				return token{kind: string_, line: start.line, column: start.col, text: sb.String()}, true
+			}
+			if escaped, consumed, ok := l.takeEscape('"'); ok {
+				sb.WriteRune(escaped)
+				l.advanceN(consumed)
+				continue
+			}
 			l.advance() // consume backslash
 			if !l.hasMore() {
 				sb.WriteByte('\\')
 				break
 			}
 			escChar := l.advance()
-			switch escChar.raw {
-			case '"':
-				return token{kind: string_, line: start.line, column: start.col, text: sb.String()}, true
-			case 'n':
-				sb.WriteByte('\n')
-			case 't':
-				sb.WriteByte('\t')
-			case 'r':
-				sb.WriteByte('\r')
-			case '\\':
-				sb.WriteByte('\\')
-			case 'b':
-				sb.WriteByte('\b')
-			case 'f':
-				sb.WriteByte('\f')
-			case 'v':
-				sb.WriteByte('\v')
-			default:
-				sb.WriteByte('\\')
-				sb.WriteByte(escChar.raw)
-			}
+			sb.WriteByte('\\')
+			sb.WriteByte(escChar.raw)
 			continue
 		}
 

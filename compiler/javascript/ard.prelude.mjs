@@ -13,6 +13,7 @@ export function makeBreakSignal() {
 }
 
 const ARD_ENUM = Symbol.for("ard.enum");
+const ARD_BYTES = Symbol.for("ard.bytes");
 
 export function hasOwn(value, key) {
   return Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
@@ -28,6 +29,10 @@ export function makeEnum(enumName, variantName, value) {
 
 export function isArdEnum(value) {
   return Boolean(value) && typeof value === "object" && value[ARD_ENUM] === true;
+}
+
+export function isArdBytes(value) {
+  return Boolean(value) && typeof value === "object" && value[ARD_BYTES] === true;
 }
 
 export function isEnumOf(value, enumName) {
@@ -134,6 +139,7 @@ export function formatDynamicForError(value) {
   if (value === null || value === undefined) return "null";
   if (typeof value === "string") return JSON.stringify(value);
   if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (isArdBytes(value)) return `[bytes with ${value.bytes.length} elements]`;
   if (Array.isArray(value)) {
     if (value.length === 0) return "[]";
     if (value.length <= 3) return `[${value.map((item) => formatDynamicForError(item)).join(", ")}]`;
@@ -180,9 +186,23 @@ export function toDynamicMap(value) {
   return {};
 }
 
+export function ardBytesToBase64(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+export function ardBase64ToBytes(value) {
+  const binary = atob(String(value));
+  const bytes = [];
+  for (let i = 0; i < binary.length; i++) bytes.push(binary.charCodeAt(i));
+  return bytes;
+}
+
 export function toJSONValue(value) {
   if (value === null || value === undefined) return null;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (isArdBytes(value)) return ardBytesToBase64(value.bytes);
   if (isArdEnum(value)) return value.value;
   if (isArdMaybe(value)) {
     return hasOwn(value, "value") ? toJSONValue(value.value) : null;
@@ -275,6 +295,26 @@ export function DecodeInt(data) {
   return { err: makeDecodeError("Int", formatDynamicForError(data)) };
 }
 
+export function DecodeByte(data) {
+  const decoded = DecodeInt(data);
+  if (Object.prototype.hasOwnProperty.call(decoded, "ok") && decoded.ok >= 0 && decoded.ok <= 255) return { ok: decoded.ok };
+  return { err: makeDecodeError("Byte", formatDynamicForError(data)) };
+}
+
+export function DecodeRune(data) {
+  const decoded = DecodeInt(data);
+  const value = decoded.ok;
+  if (
+    Object.prototype.hasOwnProperty.call(decoded, "ok") &&
+    value >= 0 &&
+    value <= 0x10ffff &&
+    !(value >= 0xd800 && value <= 0xdfff)
+  ) {
+    return { ok: value };
+  }
+  return { err: makeDecodeError("Rune", formatDynamicForError(data)) };
+}
+
 export function DecodeFloat(data) {
   if (data === null || data === undefined) return { err: makeDecodeError("Float", "null") };
   if (typeof data === "number") return { ok: data };
@@ -331,6 +371,81 @@ export function FloatFloor(value) {
   return Math.floor(value);
 }
 
+function isValidByte(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 255;
+}
+
+function isValidRune(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff);
+}
+
+export function ByteFromInt(value) {
+  return isValidByte(value) ? value : null;
+}
+
+export function RuneFromInt(value) {
+  return isValidRune(value) ? value : null;
+}
+
+export function RuneFromStr(value) {
+  const chars = Array.from(String(value));
+  if (chars.length !== 1) return null;
+  const rune = chars[0].codePointAt(0);
+  return isValidRune(rune) ? rune : null;
+}
+
+export function ardRuneToString(value) {
+  if (!isValidRune(value)) return "�";
+  return String.fromCodePoint(value);
+}
+
+export function ardStringRunes(value) {
+  return Array.from(String(value), (ch) => ch.codePointAt(0));
+}
+
+export function ardStringAt(value, index) {
+  const runes = ardStringRunes(value);
+  return index >= 0 && index < runes.length ? Maybe.some(runes[index]) : Maybe.none();
+}
+
+export function ardStringBytes(value) {
+  return Array.from(new TextEncoder().encode(String(value)));
+}
+
+export function ardUTF8ByteLength(value) {
+  return new TextEncoder().encode(String(value)).length;
+}
+
+export function StrSplit(input, delimiter) {
+  input = String(input);
+  delimiter = String(delimiter);
+  return delimiter === "" ? Array.from(input) : input.split(delimiter);
+}
+
+export function StrFromUtf8(bytes) {
+  if (!Array.isArray(bytes) || bytes.some((value) => !isValidByte(value))) {
+    return { err: "invalid UTF-8 bytes" };
+  }
+  try {
+    return { ok: new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes)) };
+  } catch (error) {
+    return { err: messageFromError(error) };
+  }
+}
+
+export function StrFromRunes(runes) {
+  if (!Array.isArray(runes) || runes.some((value) => !isValidRune(value))) {
+    return { err: "invalid Unicode scalar value" };
+  }
+  try {
+    let out = "";
+    for (const rune of runes) out += String.fromCodePoint(rune);
+    return { ok: out };
+  } catch (error) {
+    return { err: messageFromError(error) };
+  }
+}
+
 export function StrToDynamic(val) {
   return val;
 }
@@ -345,6 +460,10 @@ export function FloatToDynamic(val) {
 
 export function BoolToDynamic(val) {
   return val;
+}
+
+export function BytesToDynamic(val) {
+  return Object.freeze({ [ARD_BYTES]: true, bytes: Array.isArray(val) ? val.slice() : [] });
 }
 
 export function VoidToDynamic() {

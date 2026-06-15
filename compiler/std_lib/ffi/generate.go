@@ -432,6 +432,10 @@ func typeGoType(typ parse.DeclaredType, aliases map[string]string, definedTypes 
 		switch t.Name {
 		case "Dynamic", "Encodable":
 			goType = "any"
+		case "Byte":
+			goType = "byte"
+		case "Rune":
+			goType = "rune"
 		default:
 			if alias, ok := aliases[t.Name]; ok {
 				goType = alias

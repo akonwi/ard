@@ -1,5 +1,3 @@
-use ard/dynamic as Dynamic
-
 extern type Promise<$T>
 
 extern fn resolve<$T>(value: $T) Promise<$T> = {

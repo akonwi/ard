@@ -94,6 +94,8 @@ const (
 	TypeInt
 	TypeFloat
 	TypeBool
+	TypeByte
+	TypeRune
 	TypeStr
 	TypeList
 	TypeMap

@@ -1,37 +1,37 @@
+use ard/string as Str
 use ard/testing
 
 // Encode raw bytes to a lowercase hexadecimal string.
-//
-// Note: in Ard, byte buffers are represented as `Str`. Functions that
-// return binary data (like `crypto::sha256`) use this representation.
-extern fn encode(bytes: Str) Str = "HexEncode"
+extern fn encode(bytes: [Byte]) Str = "HexEncode"
 
 // Decode a hexadecimal string back into raw bytes.
 // Returns an error if `input` is not valid hex.
-extern fn decode(input: Str) Str!Str = "HexDecode"
+extern fn decode(input: Str) [Byte]!Str = "HexDecode"
 
 test fn test_encode_empty() Void!Str {
-  testing::assert(encode("") == "", "Expected empty input to encode to empty string")
+  testing::assert(encode("".bytes()) == "", "Expected empty input to encode to empty string")
 }
 
 test fn test_encode_ascii() Void!Str {
-  testing::assert(encode("abc") == "616263", "Expected 'abc' to encode as '616263'")
+  testing::assert(encode("abc".bytes()) == "616263", "Expected 'abc' to encode as '616263'")
 }
 
 test fn test_encode_uses_lowercase() Void!Str {
-  testing::assert(encode("hello") == "68656c6c6f", "Expected lowercase hex output")
+  testing::assert(encode("hello".bytes()) == "68656c6c6f", "Expected lowercase hex output")
 }
 
 test fn test_decode_roundtrip() Void!Str {
   let original = "hello world"
-  let encoded = encode(original)
+  let encoded = encode(original.bytes())
   let decoded = try decode(encoded)
-  testing::assert(decoded == original, "Expected encode/decode to roundtrip")
+  let decoded_text = try Str::from_bytes(decoded)
+  testing::assert(decoded_text == original, "Expected encode/decode to roundtrip")
 }
 
 test fn test_decode_empty() Void!Str {
   let decoded = try decode("")
-  testing::assert(decoded == "", "Expected empty hex to decode to empty string")
+  let decoded_text = try Str::from_bytes(decoded)
+  testing::assert(decoded_text == "", "Expected empty hex to decode to empty bytes")
 }
 
 test fn test_decode_rejects_odd_length() Void!Str {

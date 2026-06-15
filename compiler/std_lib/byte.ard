@@ -1,0 +1,1 @@
+extern fn from_int(value: Int) Byte? = "ByteFromInt"

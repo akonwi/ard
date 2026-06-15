@@ -303,7 +303,7 @@ Using maps for data storage and lookup:
 use ard/io
 
 fn word_count(text: Str) [Str:Int] {
-  let words = text.split(" ")
+  let words = Str::split(text, " ")
   let mut counts: [Str:Int] = [:]
   
   for word in words {

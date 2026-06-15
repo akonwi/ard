@@ -104,6 +104,8 @@ func newLowerer(options LowerOptions) *lowerer {
 	l.mustIntern(checker.Int)
 	l.mustIntern(checker.Float)
 	l.mustIntern(checker.Bool)
+	l.mustIntern(checker.Byte)
+	l.mustIntern(checker.Rune)
 	l.mustIntern(checker.Str)
 	l.mustIntern(checker.Dynamic)
 	return l
@@ -1130,7 +1132,7 @@ func (l *lowerer) declareBuiltinTraitImpl(module ModuleID, traitID TraitID, owne
 		return 0, false, fmt.Errorf("invalid builtin trait owner type %d", ownerType)
 	}
 	switch ownerInfo.Kind {
-	case TypeStr, TypeInt, TypeFloat, TypeBool:
+	case TypeStr, TypeInt, TypeFloat, TypeBool, TypeByte, TypeRune:
 	default:
 		return 0, false, nil
 	}
@@ -1742,6 +1744,10 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 			info.Kind = TypeFloat
 		case checker.Bool:
 			info.Kind = TypeBool
+		case checker.Byte:
+			info.Kind = TypeByte
+		case checker.Rune:
+			info.Kind = TypeRune
 		case checker.Str:
 			info.Kind = TypeStr
 		case checker.Dynamic:
@@ -2051,7 +2057,7 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 
 func canWrapAsDynamic(kind TypeKind) bool {
 	switch kind {
-	case TypeVoid, TypeInt, TypeFloat, TypeBool, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeDynamic:
+	case TypeVoid, TypeInt, TypeFloat, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeDynamic:
 		return true
 	default:
 		return false
@@ -2902,6 +2908,14 @@ func (fl *functionLowerer) lowerForInStr(loop *checker.ForInStr) ([]Stmt, error)
 	if err != nil {
 		return nil, err
 	}
+	runeType, err := fl.l.internType(checker.Rune)
+	if err != nil {
+		return nil, err
+	}
+	runeListType, err := fl.l.internType(checker.MakeList(checker.Rune))
+	if err != nil {
+		return nil, err
+	}
 	intType, err := fl.l.internType(checker.Int)
 	if err != nil {
 		return nil, err
@@ -2915,20 +2929,20 @@ func (fl *functionLowerer) lowerForInStr(loop *checker.ForInStr) ([]Stmt, error)
 		return nil, err
 	}
 
-	strLocal := fl.defineLocal(loop.Cursor+"$str", strType, false)
+	runesLocal := fl.defineLocal(loop.Cursor+"$runes", runeListType, false)
 	indexName := loop.Cursor + "$index"
 	if loop.Index != "" {
 		indexName = loop.Index + "$index"
 	}
 	index := fl.defineLocal(indexName, intType, true)
-	cursor := fl.defineLocal(loop.Cursor, strType, false)
+	cursor := fl.defineLocal(loop.Cursor, runeType, false)
 	var visibleIndex LocalID
 	if loop.Index != "" {
 		visibleIndex = fl.defineLocal(loop.Index, intType, false)
 	}
 
 	stmts := []Stmt{
-		{Kind: StmtLet, Local: strLocal, Name: loop.Cursor + "$str", Type: strType, Value: str},
+		{Kind: StmtLet, Local: runesLocal, Name: loop.Cursor + "$runes", Type: runeListType, Value: &Expr{Kind: ExprStrRunes, Type: runeListType, Target: str}},
 		{Kind: StmtLet, Local: index, Name: indexName, Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: 0}},
 	}
 
@@ -2940,8 +2954,8 @@ func (fl *functionLowerer) lowerForInStr(loop *checker.ForInStr) ([]Stmt, error)
 		Kind:  StmtLet,
 		Local: cursor,
 		Name:  loop.Cursor,
-		Type:  strType,
-		Value: &Expr{Kind: ExprStrAt, Type: strType, Target: loadLocal(strType, strLocal), Args: []Expr{*loadLocal(intType, index)}},
+		Type:  runeType,
+		Value: &Expr{Kind: ExprListAt, Type: runeType, Target: loadLocal(runeListType, runesLocal), Args: []Expr{*loadLocal(intType, index)}},
 	}}
 	if loop.Index != "" {
 		iterationLocals = append(iterationLocals, Stmt{
@@ -2961,7 +2975,7 @@ func (fl *functionLowerer) lowerForInStr(loop *checker.ForInStr) ([]Stmt, error)
 
 	stmts = append(stmts, Stmt{
 		Kind:      StmtWhile,
-		Condition: &Expr{Kind: ExprLt, Type: boolType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprStrSize, Type: intType, Target: loadLocal(strType, strLocal)}},
+		Condition: &Expr{Kind: ExprLt, Type: boolType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprListSize, Type: intType, Target: loadLocal(runeListType, runesLocal)}},
 		Body:      body,
 	})
 	return stmts, nil
@@ -3220,6 +3234,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprConstBool, Type: typeID, Bool: e.Value}, nil
 	case *checker.StrLiteral:
 		return &Expr{Kind: ExprConstStr, Type: typeID, Str: e.Value}, nil
+	case *checker.RuneLiteral:
+		return &Expr{Kind: ExprConstInt, Type: typeID, Int: int(e.Value)}, nil
 	case *checker.Panic:
 		message, err := fl.lowerExprWithExpected(e.Message, fl.l.mustIntern(checker.Str))
 		if err != nil {
@@ -3422,6 +3438,28 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerInstanceMethod(typeID, e)
 	case *checker.StrMethod:
 		return fl.lowerStrMethod(typeID, e)
+	case *checker.ByteMethod:
+		if e.Kind == checker.ByteToInt {
+			return fl.lowerUnary(ExprToInt, typeID, e.Subject)
+		}
+		if e.Kind == checker.ByteToStr {
+			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
+		}
+		if e.Kind == checker.ByteToDyn {
+			return fl.lowerUnary(ExprToDynamic, typeID, e.Subject)
+		}
+		return nil, fmt.Errorf("unsupported AIR Byte method %d", e.Kind)
+	case *checker.RuneMethod:
+		if e.Kind == checker.RuneToInt {
+			return fl.lowerUnary(ExprToInt, typeID, e.Subject)
+		}
+		if e.Kind == checker.RuneToStr {
+			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
+		}
+		if e.Kind == checker.RuneToDyn {
+			return fl.lowerUnary(ExprToDynamic, typeID, e.Subject)
+		}
+		return nil, fmt.Errorf("unsupported AIR Rune method %d", e.Kind)
 	case *checker.IntMethod:
 		if e.Kind == checker.IntToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
@@ -3433,6 +3471,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.FloatMethod:
 		if e.Kind == checker.FloatToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
+		}
+		if e.Kind == checker.FloatToInt {
+			return fl.lowerUnary(ExprToInt, typeID, e.Subject)
 		}
 		if e.Kind == checker.FloatToDyn {
 			return fl.lowerUnary(ExprToDynamic, typeID, e.Subject)
@@ -3786,8 +3827,8 @@ func (fl *functionLowerer) lowerIntMatch(typeID TypeID, match *checker.IntMatch)
 		return nil, err
 	}
 	subjectType, ok := fl.l.typeInfo(subject.Type)
-	if !ok || subjectType.Kind != TypeInt {
-		return nil, fmt.Errorf("int match lowered with non-int subject %s", match.Subject.Type().String())
+	if !ok || (subjectType.Kind != TypeInt && subjectType.Kind != TypeByte && subjectType.Kind != TypeRune) {
+		return nil, fmt.Errorf("int match lowered with non-integer subject %s", match.Subject.Type().String())
 	}
 
 	intValues := make([]int, 0, len(match.IntCases))
@@ -4017,6 +4058,10 @@ func (fl *functionLowerer) lowerStrMethod(typeID TypeID, method *checker.StrMeth
 	case checker.StrAt:
 		kind = ExprStrAt
 		expected = []TypeID{intType}
+	case checker.StrBytes:
+		kind = ExprStrBytes
+	case checker.StrRunes:
+		kind = ExprStrRunes
 	case checker.StrSize:
 		kind = ExprStrSize
 	case checker.StrIsEmpty:

@@ -59,6 +59,7 @@
 ; Literals
 (number) @number
 (string) @string
+(rune) @string
 (string_interpolation "{" @punctuation.bracket "}" @punctuation.bracket)
 (string_content) @string
 (escape_sequence) @string.escape

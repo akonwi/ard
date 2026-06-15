@@ -35,6 +35,17 @@ func (s *StrLiteral) Type() Type {
 	return Str
 }
 
+type RuneLiteral struct {
+	Value rune
+}
+
+func (r *RuneLiteral) String() string {
+	return strconv.QuoteRune(r.Value)
+}
+func (r *RuneLiteral) Type() Type {
+	return Rune
+}
+
 type TemplateStr struct {
 	Chunks []Expression
 }
@@ -216,6 +227,8 @@ type StrMethodKind uint8
 const (
 	StrSize StrMethodKind = iota
 	StrAt
+	StrBytes
+	StrRunes
 	StrIsEmpty
 	StrContains
 	StrReplace
@@ -239,15 +252,17 @@ func (s *StrMethod) Type() Type {
 	case StrSize:
 		return Int
 	case StrAt:
-		return MakeMaybe(Str)
+		return MakeMaybe(Rune)
+	case StrBytes:
+		return MakeList(Byte)
+	case StrRunes:
+		return MakeList(Rune)
 	case StrIsEmpty:
 		return Bool
 	case StrContains:
 		return Bool
 	case StrReplace, StrReplaceAll:
 		return Str
-	case StrSplit:
-		return MakeList(Str)
 	case StrStartsWith, StrEndsWith:
 		return Bool
 	case StrToStr:
@@ -256,6 +271,58 @@ func (s *StrMethod) Type() Type {
 		return Dynamic
 	case StrTrim:
 		return Str
+	default:
+		return Void
+	}
+}
+
+type ByteMethodKind uint8
+
+const (
+	ByteToInt ByteMethodKind = iota
+	ByteToStr
+	ByteToDyn
+)
+
+type ByteMethod struct {
+	Subject Expression
+	Kind    ByteMethodKind
+}
+
+func (m *ByteMethod) Type() Type {
+	switch m.Kind {
+	case ByteToInt:
+		return Int
+	case ByteToStr:
+		return Str
+	case ByteToDyn:
+		return Dynamic
+	default:
+		return Void
+	}
+}
+
+type RuneMethodKind uint8
+
+const (
+	RuneToInt RuneMethodKind = iota
+	RuneToStr
+	RuneToDyn
+)
+
+type RuneMethod struct {
+	Subject Expression
+	Kind    RuneMethodKind
+}
+
+func (m *RuneMethod) Type() Type {
+	switch m.Kind {
+	case RuneToInt:
+		return Int
+	case RuneToStr:
+		return Str
+	case RuneToDyn:
+		return Dynamic
 	default:
 		return Void
 	}

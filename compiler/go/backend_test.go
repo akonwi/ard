@@ -1449,17 +1449,18 @@ func TestRunProgramSupportsCommonStdlibExterns(t *testing.T) {
 		use ard/hex
 
 		fn main() Bool {
-			let encoded = base64::encode("hi", true)
+			let encoded = base64::encode("hi".bytes(), true)
 			let decoded = base64::decode(encoded, true).expect("decode")
 			let hexed = hex::encode(decoded)
 			let unhex = hex::decode(hexed).expect("hex")
+			let unhex_text = Str::from_bytes(unhex).expect("utf8")
 			let args = argv::os_args()
 			let _path = env::get("PATH")
 			let parsed = float::from_str("3.5").or(0.0)
 			let floored = float::floor(parsed)
-			let _dyn_list = dynamic::from_list([dynamic::from_str(unhex)])
+			let _dyn_list = dynamic::from_list([dynamic::from_str(unhex_text)])
 			let _dyn_map = dynamic::object(["value": dynamic::from_int(args.size())])
-			unhex == "hi" and floored == 3.0 and args.size() >= 0
+			unhex_text == "hi" and floored == 3.0 and args.size() >= 0
 		}
 	`)
 

@@ -142,22 +142,26 @@ type WinnerJSONTest struct {
 
 type Host struct {
 	AsyncStart           func(do func()) Fiber[Void]
-	Base64Decode         func(input string, no_pad Maybe[bool]) (string, error)
-	Base64DecodeURL      func(input string, no_pad Maybe[bool]) (string, error)
-	Base64Encode         func(input string, no_pad Maybe[bool]) string
-	Base64EncodeURL      func(input string, no_pad Maybe[bool]) string
+	Base64Decode         func(input string, no_pad Maybe[bool]) ([]byte, error)
+	Base64DecodeURL      func(input string, no_pad Maybe[bool]) ([]byte, error)
+	Base64Encode         func(input []byte, no_pad Maybe[bool]) string
+	Base64EncodeURL      func(input []byte, no_pad Maybe[bool]) string
 	BoolToDynamic        func(val bool) any
+	ByteFromInt          func(value int) Maybe[byte]
+	BytesToDynamic       func(bytes []byte) any
 	CryptoHashPassword   func(password string, cost Maybe[int]) (string, error)
-	CryptoMd5            func(input string) string
+	CryptoMd5            func(input []byte) []byte
 	CryptoScryptHash     func(password string, salt_hex Maybe[string], n Maybe[int], r Maybe[int], p Maybe[int], dk_len Maybe[int]) (string, error)
 	CryptoScryptVerify   func(password string, hash string, n Maybe[int], r Maybe[int], p Maybe[int], dk_len Maybe[int]) (bool, error)
-	CryptoSha256         func(input string) string
-	CryptoSha512         func(input string) string
+	CryptoSha256         func(input []byte) []byte
+	CryptoSha512         func(input []byte) []byte
 	CryptoUUID           func() string
 	CryptoVerifyPassword func(password string, hashed string) (bool, error)
 	DecodeBool           func(data any) Result[bool, Error]
+	DecodeByte           func(data any) Result[byte, Error]
 	DecodeFloat          func(data any) Result[float64, Error]
 	DecodeInt            func(data any) Result[int, Error]
+	DecodeRune           func(data any) Result[rune, Error]
 	DecodeString         func(data any) Result[string, Error]
 	DynamicToList        func(data any) ([]any, error)
 	DynamicToMap         func(data any) (map[any]any, error)
@@ -192,8 +196,8 @@ type Host struct {
 	HTTPResponseHeaders  func(resp *http.Response) map[string]string
 	HTTPResponseStatus   func(resp *http.Response) int
 	HTTPServe            func(port int, handlers map[string]func(Request, *Response)) error
-	HexDecode            func(input string) (string, error)
-	HexEncode            func(bytes string) string
+	HexDecode            func(input string) ([]byte, error)
+	HexEncode            func(bytes []byte) string
 	IntFromStr           func(str string) Maybe[int]
 	IntToDynamic         func(val int) any
 	IsNil                func(data any) bool
@@ -205,6 +209,8 @@ type Host struct {
 	OsArgs               func() []string
 	Print                func(string string)
 	ReadLine             func() (string, error)
+	RuneFromInt          func(value int) Maybe[rune]
+	RuneFromStr          func(value string) Maybe[rune]
 	Sleep                func(ms int)
 	SqlBeginTx           func(db *sql.DB) (*sql.Tx, error)
 	SqlClose             func(db *sql.DB) error
@@ -215,6 +221,9 @@ type Host struct {
 	SqlExtractParams     func(sql string) []string
 	SqlQuery             func(conn any, driver string, sql string, values []any) ([]any, error)
 	SqlRollback          func(tx *sql.Tx) error
+	StrFromRunes         func(runes []rune) (string, error)
+	StrFromUtf8          func(bytes []byte) (string, error)
+	StrSplit             func(input string, delimiter string) []string
 	StrToDynamic         func(val string) any
 	VoidToDynamic        func() any
 	WaitFor              func(wg WaitGroup)
@@ -239,6 +248,12 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.BoolToDynamic != nil {
 		functions["BoolToDynamic"] = h.BoolToDynamic
+	}
+	if h.ByteFromInt != nil {
+		functions["ByteFromInt"] = h.ByteFromInt
+	}
+	if h.BytesToDynamic != nil {
+		functions["BytesToDynamic"] = h.BytesToDynamic
 	}
 	if h.CryptoHashPassword != nil {
 		functions["CryptoHashPassword"] = h.CryptoHashPassword
@@ -267,11 +282,17 @@ func (h Host) Functions() map[string]any {
 	if h.DecodeBool != nil {
 		functions["DecodeBool"] = h.DecodeBool
 	}
+	if h.DecodeByte != nil {
+		functions["DecodeByte"] = h.DecodeByte
+	}
 	if h.DecodeFloat != nil {
 		functions["DecodeFloat"] = h.DecodeFloat
 	}
 	if h.DecodeInt != nil {
 		functions["DecodeInt"] = h.DecodeInt
+	}
+	if h.DecodeRune != nil {
+		functions["DecodeRune"] = h.DecodeRune
 	}
 	if h.DecodeString != nil {
 		functions["DecodeString"] = h.DecodeString
@@ -414,6 +435,12 @@ func (h Host) Functions() map[string]any {
 	if h.ReadLine != nil {
 		functions["ReadLine"] = h.ReadLine
 	}
+	if h.RuneFromInt != nil {
+		functions["RuneFromInt"] = h.RuneFromInt
+	}
+	if h.RuneFromStr != nil {
+		functions["RuneFromStr"] = h.RuneFromStr
+	}
 	if h.Sleep != nil {
 		functions["Sleep"] = h.Sleep
 	}
@@ -443,6 +470,15 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.SqlRollback != nil {
 		functions["SqlRollback"] = h.SqlRollback
+	}
+	if h.StrFromRunes != nil {
+		functions["StrFromRunes"] = h.StrFromRunes
+	}
+	if h.StrFromUtf8 != nil {
+		functions["StrFromUtf8"] = h.StrFromUtf8
+	}
+	if h.StrSplit != nil {
+		functions["StrSplit"] = h.StrSplit
 	}
 	if h.StrToDynamic != nil {
 		functions["StrToDynamic"] = h.StrToDynamic

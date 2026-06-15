@@ -860,6 +860,11 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		}
 		return l.lowerFunctionCall(fn, expr)
 	case air.ExprCallExtern:
+		if binding := l.externBindingName(expr.Extern); binding == "JsonEncode" {
+			return l.lowerJSONEncodeExtern(fn, expr)
+		} else if binding == "JsonParse" {
+			return l.lowerJSONParseExtern(fn, expr)
+		}
 		call, err := l.lowerExternCallRaw(fn, expr)
 		if err != nil {
 			return "", err
@@ -948,7 +953,7 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 		return l.lowerMaybeOp(fn, expr)
 	case air.ExprMakeResultOk, air.ExprMakeResultErr, air.ExprResultExpect, air.ExprResultOr, air.ExprResultIsOk, air.ExprResultIsErr, air.ExprResultMap, air.ExprResultMapErr, air.ExprResultAndThen:
 		return l.lowerResultOp(fn, expr)
-	case air.ExprStrAt, air.ExprStrSize, air.ExprStrIsEmpty, air.ExprStrContains, air.ExprStrReplace, air.ExprStrReplaceAll, air.ExprStrSplit, air.ExprStrStartsWith, air.ExprStrEndsWith, air.ExprStrTrim:
+	case air.ExprStrAt, air.ExprStrBytes, air.ExprStrRunes, air.ExprStrSize, air.ExprStrIsEmpty, air.ExprStrContains, air.ExprStrReplace, air.ExprStrReplaceAll, air.ExprStrSplit, air.ExprStrStartsWith, air.ExprStrEndsWith, air.ExprStrTrim:
 		return l.lowerStrOp(fn, expr)
 	case air.ExprTryResult, air.ExprTryMaybe:
 		return l.lowerTryExpr(fn, expr)
@@ -1033,11 +1038,19 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 	case air.ExprCallTrait:
 		return l.lowerTraitCall(fn, expr)
 	case air.ExprToStr:
+		return l.lowerToString(fn, expr)
+	case air.ExprToInt:
+		if expr.Target == nil {
+			return "", fmt.Errorf("to_int missing target")
+		}
 		value, err := l.lowerExpr(fn, *expr.Target)
 		if err != nil {
 			return "", err
 		}
-		return renderJSExpr(jsCallExprIR{Callee: "ardToString", Args: []string{value}}), nil
+		if l.typeKind(expr.Target.Type) == air.TypeFloat {
+			return renderJSExpr(jsCallExprIR{Callee: "Math.trunc", Args: []string{value}}), nil
+		}
+		return value, nil
 	case air.ExprToDynamic, air.ExprTraitUpcast:
 		return l.lowerExpr(fn, *expr.Target)
 	case air.ExprPanic:
@@ -1086,6 +1099,24 @@ func (l *airJSLowerer) lowerFiberJoin(fn air.Function, expr air.Expr) (string, e
 	return "null", nil
 }
 
+func (l *airJSLowerer) lowerToString(fn air.Function, expr air.Expr) (string, error) {
+	if expr.Target == nil {
+		return "", fmt.Errorf("to_str missing target")
+	}
+	value, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return "", err
+	}
+	return l.toStringValue(*expr.Target, value), nil
+}
+
+func (l *airJSLowerer) toStringValue(expr air.Expr, value string) string {
+	if info, ok := l.typeInfo(expr.Type); ok && info.Kind == air.TypeRune {
+		return renderJSExpr(jsCallExprIR{Callee: "prelude.ardRuneToString", Args: []string{value}})
+	}
+	return renderJSExpr(jsCallExprIR{Callee: "ardToString", Args: []string{value}})
+}
+
 func (l *airJSLowerer) lowerTraitCall(fn air.Function, expr air.Expr) (string, error) {
 	if expr.Target == nil {
 		return "", fmt.Errorf("trait call missing target")
@@ -1103,9 +1134,104 @@ func (l *airJSLowerer) lowerTraitCall(fn air.Function, expr air.Expr) (string, e
 	}
 	method := trait.Methods[expr.Method]
 	if trait.Name == "ToString" && method.Name == "to_str" {
-		return renderJSExpr(jsCallExprIR{Callee: "ardToString", Args: []string{target}}), nil
+		return l.toStringValue(*expr.Target, target), nil
 	}
 	return "", fmt.Errorf("unsupported AIR JS trait call %s.%s", trait.Name, method.Name)
+}
+
+func (l *airJSLowerer) lowerJSONEncodeExtern(fn air.Function, expr air.Expr) (string, error) {
+	if len(expr.Args) != 1 {
+		return "", fmt.Errorf("JsonEncode expects 1 arg")
+	}
+	value, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	jsonValue := l.jsonValueExpr(expr.Args[0].Type, "__value")
+	body := "try {\nconst __value = " + value + ";\nreturn Result.ok(JSON.stringify(" + jsonValue + "));\n} catch (__error) {\nreturn Result.err(prelude.messageFromError(__error));\n}"
+	return renderJSDoc(jsIIFEDoc(body)), nil
+}
+
+func (l *airJSLowerer) jsonValueExpr(typeID air.TypeID, value string) string {
+	info, ok := l.typeInfo(typeID)
+	if !ok {
+		return "prelude.toJSONValue(" + value + ")"
+	}
+	switch info.Kind {
+	case air.TypeVoid:
+		return "null"
+	case air.TypeList:
+		if l.typeKind(info.Elem) == air.TypeByte {
+			return "prelude.ardBytesToBase64(" + value + ")"
+		}
+		item := l.jsonValueExpr(info.Elem, "__item")
+		return "(Array.isArray(" + value + ") ? " + value + ".map((__item) => " + item + ") : [])"
+	case air.TypeMap:
+		item := l.jsonValueExpr(info.Value, "__value")
+		return "Object.fromEntries(Array.from(" + value + ".entries(), ([__key, __value]) => [String(__key), " + item + "]))"
+	case air.TypeStruct:
+		fields := make([]string, 0, len(info.Fields))
+		for _, field := range info.Fields {
+			fieldValue := value + "." + jsName(field.Name)
+			if field.Mutable {
+				fieldValue += ".value"
+			}
+			fields = append(fields, strconv.Quote(field.Name)+": "+l.jsonValueExpr(field.Type, fieldValue))
+		}
+		return "({" + strings.Join(fields, ", ") + "})"
+	case air.TypeMaybe:
+		inner := l.jsonValueExpr(info.Elem, value+".value")
+		return "(prelude.isArdMaybe(" + value + ") && " + value + ".isSome() ? " + inner + " : null)"
+	case air.TypeDynamic:
+		return "prelude.toJSONValue(" + value + ")"
+	default:
+		return "prelude.toJSONValue(" + value + ")"
+	}
+}
+
+func (l *airJSLowerer) lowerJSONParseExtern(fn air.Function, expr air.Expr) (string, error) {
+	if len(expr.Args) != 1 {
+		return "", fmt.Errorf("JsonParse expects 1 arg")
+	}
+	input, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return "", err
+	}
+	resultInfo, ok := l.typeInfo(expr.Type)
+	if !ok || resultInfo.Kind != air.TypeResult {
+		call := renderJSExpr(jsCallExprIR{Callee: "prelude.JsonParse", Args: []string{input}})
+		return l.adaptExternReturn(fn.Module, call, expr.Type)
+	}
+	switch {
+	case l.isByteListType(resultInfo.Value):
+		body := "try {\nconst __value = JSON.parse(" + input + ");\nif (typeof __value !== \"string\") return Result.err(\"expected base64 string for [Byte]\");\nreturn Result.ok(prelude.ardBase64ToBytes(__value));\n} catch (__error) {\nreturn Result.err(prelude.messageFromError(__error));\n}"
+		return renderJSDoc(jsIIFEDoc(body)), nil
+	case l.typeKind(resultInfo.Value) == air.TypeByte:
+		body := "try {\nconst __value = JSON.parse(" + input + ");\nif (Number.isInteger(__value) && __value >= 0 && __value <= 255) return Result.ok(__value);\nreturn Result.err(\"expected Byte\");\n} catch (__error) {\nreturn Result.err(prelude.messageFromError(__error));\n}"
+		return renderJSDoc(jsIIFEDoc(body)), nil
+	case l.typeKind(resultInfo.Value) == air.TypeRune:
+		body := "try {\nconst __value = JSON.parse(" + input + ");\nif (Number.isInteger(__value) && __value >= 0 && __value <= 0x10ffff && !(__value >= 0xd800 && __value <= 0xdfff)) return Result.ok(__value);\nreturn Result.err(\"expected Rune\");\n} catch (__error) {\nreturn Result.err(prelude.messageFromError(__error));\n}"
+		return renderJSDoc(jsIIFEDoc(body)), nil
+	default:
+		call := renderJSExpr(jsCallExprIR{Callee: "prelude.JsonParse", Args: []string{input}})
+		return l.adaptExternReturn(fn.Module, call, expr.Type)
+	}
+}
+
+func (l *airJSLowerer) isByteListType(typeID air.TypeID) bool {
+	info, ok := l.typeInfo(typeID)
+	if !ok || info.Kind != air.TypeList {
+		return false
+	}
+	return l.typeKind(info.Elem) == air.TypeByte
+}
+
+func (l *airJSLowerer) typeKind(typeID air.TypeID) air.TypeKind {
+	info, ok := l.typeInfo(typeID)
+	if !ok {
+		return air.TypeVoid
+	}
+	return info.Kind
 }
 
 func (l *airJSLowerer) lowerExternCallRaw(fn air.Function, expr air.Expr) (string, error) {
@@ -1159,6 +1285,10 @@ func (l *airJSLowerer) adaptExternValue(from air.ModuleID, value string, typeID 
 		return value, nil
 	}
 	switch t.Kind {
+	case air.TypeByte:
+		return "((__value) => { if (Number.isInteger(__value) && __value >= 0 && __value <= 255) return __value; throw makeArdError(\"panic\", \"ffi\", \"Byte\", 0, \"invalid Byte from extern\"); })(" + value + ")", nil
+	case air.TypeRune:
+		return "((__value) => { if (Number.isInteger(__value) && __value >= 0 && __value <= 0x10ffff && !(__value >= 0xd800 && __value <= 0xdfff)) return __value; throw makeArdError(\"panic\", \"ffi\", \"Rune\", 0, \"invalid Rune from extern\"); })(" + value + ")", nil
 	case air.TypeStruct:
 		args := make([]string, len(t.Fields))
 		for i, field := range t.Fields {
@@ -1174,6 +1304,9 @@ func (l *airJSLowerer) adaptExternValue(from air.ModuleID, value string, typeID 
 		adapted, err := l.adaptExternValue(from, "__item", t.Elem)
 		if err != nil {
 			return "", err
+		}
+		if l.typeKind(t.Elem) == air.TypeByte {
+			return "(typeof " + value + " === \"string\" ? prelude.ardBase64ToBytes(" + value + ") : (Array.isArray(" + value + ") ? " + value + ".map((__item) => " + adapted + ") : []))", nil
 		}
 		return "Array.isArray(" + value + ") ? " + value + ".map((__item) => " + adapted + ") : []", nil
 	case air.TypeMap:
@@ -1767,11 +1900,15 @@ func (l *airJSLowerer) lowerStrOp(fn air.Function, expr air.Expr) (string, error
 	switch expr.Kind {
 	case air.ExprStrAt:
 		if expr.Type > 0 && int(expr.Type) <= len(l.program.Types) && l.program.Types[expr.Type-1].Kind == air.TypeMaybe {
-			return "((__chars, __idx) => (__idx >= 0 && __idx < __chars.length ? Maybe.some(__chars[__idx]) : Maybe.none()))(Array.from(" + target + "), " + args[0] + ")", nil
+			return renderJSExpr(jsCallExprIR{Callee: "prelude.ardStringAt", Args: []string{target, args[0]}}), nil
 		}
-		return target + "[" + args[0] + "]", nil
+		return "prelude.ardStringRunes(" + target + ")[" + args[0] + "]", nil
+	case air.ExprStrBytes:
+		return renderJSExpr(jsCallExprIR{Callee: "prelude.ardStringBytes", Args: []string{target}}), nil
+	case air.ExprStrRunes:
+		return renderJSExpr(jsCallExprIR{Callee: "prelude.ardStringRunes", Args: []string{target}}), nil
 	case air.ExprStrSize:
-		return target + ".length", nil
+		return renderJSExpr(jsCallExprIR{Callee: "prelude.ardUTF8ByteLength", Args: []string{target}}), nil
 	case air.ExprStrIsEmpty:
 		return "(" + target + ".length === 0)", nil
 	case air.ExprStrContains:
@@ -1781,7 +1918,7 @@ func (l *airJSLowerer) lowerStrOp(fn air.Function, expr air.Expr) (string, error
 	case air.ExprStrReplaceAll:
 		return renderJSExpr(jsCallExprIR{Callee: target + ".replaceAll", Args: args}), nil
 	case air.ExprStrSplit:
-		return renderJSExpr(jsCallExprIR{Callee: target + ".split", Args: args}), nil
+		return renderJSExpr(jsCallExprIR{Callee: "prelude.StrSplit", Args: []string{target, args[0]}}), nil
 	case air.ExprStrStartsWith:
 		return renderJSExpr(jsCallExprIR{Callee: target + ".startsWith", Args: args}), nil
 	case air.ExprStrEndsWith:
@@ -2091,9 +2228,9 @@ func (l *airJSLowerer) functionRef(from air.ModuleID, id air.FunctionID) string 
 	return name
 }
 
-func (l *airJSLowerer) externRef(id air.ExternID) (string, error) {
+func (l *airJSLowerer) externBindingName(id air.ExternID) string {
 	if int(id) < 0 || int(id) >= len(l.program.Externs) {
-		return "", fmt.Errorf("unknown extern %d", id)
+		return ""
 	}
 	ext := l.program.Externs[id]
 	binding := ext.Bindings[l.target]
@@ -2103,6 +2240,15 @@ func (l *airJSLowerer) externRef(id air.ExternID) (string, error) {
 	if binding == "" && len(ext.Bindings) == 1 {
 		binding = ext.Bindings["go"]
 	}
+	return binding
+}
+
+func (l *airJSLowerer) externRef(id air.ExternID) (string, error) {
+	if int(id) < 0 || int(id) >= len(l.program.Externs) {
+		return "", fmt.Errorf("unknown extern %d", id)
+	}
+	ext := l.program.Externs[id]
+	binding := l.externBindingName(id)
 	if binding == "" {
 		return "", fmt.Errorf("extern %s has no JavaScript binding for %s", ext.Name, l.target)
 	}
@@ -2162,10 +2308,11 @@ func jsDependencyFFIObjectName(key string) string {
 
 func isAIRJSPreludeExtern(binding string) bool {
 	switch binding {
-	case "JsonToDynamic", "DecodeString", "DecodeInt", "DecodeFloat", "DecodeBool", "IsNil",
+	case "JsonToDynamic", "DecodeString", "DecodeInt", "DecodeByte", "DecodeRune", "DecodeFloat", "DecodeBool", "IsNil",
 		"DynamicToList", "DynamicToMap", "ExtractField", "IntFromStr", "FloatFromStr",
-		"FloatFromInt", "FloatFloor", "StrToDynamic", "IntToDynamic",
-		"FloatToDynamic", "BoolToDynamic", "VoidToDynamic", "ListToDynamic", "MapToDynamic",
+		"FloatFromInt", "FloatFloor", "ByteFromInt", "RuneFromInt", "RuneFromStr",
+		"StrSplit", "StrFromUtf8", "StrFromRunes", "StrToDynamic", "IntToDynamic",
+		"FloatToDynamic", "BoolToDynamic", "BytesToDynamic", "VoidToDynamic", "ListToDynamic", "MapToDynamic",
 		"JsonEncode", "JsonParse", "promiseResolve", "promiseReject", "promiseMap", "promiseThen",
 		"promiseRescue", "promiseInspect", "promiseInspectError", "promiseFinally",
 		"promiseAll", "promiseRace", "promiseDelay", "fetchNative", "fetchResponseUrl",

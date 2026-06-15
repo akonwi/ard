@@ -132,6 +132,7 @@ func collectImportUsesInStatement(stmt parse.Statement, used map[string]bool) {
 			collectImportUsesInStatement(&s.Methods[i], used)
 		}
 	case *parse.TraitImplementation:
+		collectImportUsesInExpression(s.Trait, used)
 		collectImportUsesInExpression(s.ForType, used)
 		for i := range s.Methods {
 			collectImportUsesInStatement(&s.Methods[i], used)
@@ -184,12 +185,14 @@ func collectImportUsesInExpression(expr parse.Expression, used map[string]bool) 
 	switch e := expr.(type) {
 	case nil:
 		return
-	case *parse.StaticProperty:
-		if name := simpleImportUseName(e.Target); name != "" {
-			used[name] = true
+	case *parse.Identifier:
+		if strings.Contains(e.Name, "::") {
+			used[strings.SplitN(e.Name, "::", 2)[0]] = true
 		}
-		collectImportUsesInExpression(e.Target, used)
-		collectImportUsesInExpression(e.Property, used)
+	case *parse.StaticProperty:
+		collectStaticPropertyImportUses(e.Target, e.Property, used)
+	case parse.StaticProperty:
+		collectStaticPropertyImportUses(e.Target, e.Property, used)
 	case *parse.StaticFunction:
 		if name := simpleImportUseName(e.Target); name != "" {
 			used[name] = true
@@ -286,6 +289,14 @@ func collectImportUsesInExpression(expr parse.Expression, used map[string]bool) 
 	case *parse.IfStatement:
 		collectImportUsesInStatement(e, used)
 	}
+}
+
+func collectStaticPropertyImportUses(target parse.Expression, property parse.Expression, used map[string]bool) {
+	if name := simpleImportUseName(target); name != "" {
+		used[name] = true
+	}
+	collectImportUsesInExpression(target, used)
+	collectImportUsesInExpression(property, used)
 }
 
 func simpleImportUseName(expr parse.Expression) string {

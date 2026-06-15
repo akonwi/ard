@@ -1002,8 +1002,9 @@ func TestGoTargetParityCryptoHashes(t *testing.T) {
 			name: "md5 hashes hello",
 			input: `
 				use ard/crypto
+				use ard/hex
 				fn main() Str {
-					crypto::md5("hello")
+					hex::encode(crypto::md5("hello".bytes()))
 				}
 			`,
 		},
@@ -1012,7 +1013,7 @@ func TestGoTargetParityCryptoHashes(t *testing.T) {
 			input: `
 				use ard/crypto
 				fn main() Int {
-					crypto::sha256("").size()
+					crypto::sha256("".bytes()).size()
 				}
 			`,
 		},
@@ -1022,7 +1023,7 @@ func TestGoTargetParityCryptoHashes(t *testing.T) {
 				use ard/crypto
 				use ard/hex
 				fn main() Str {
-					hex::encode(crypto::sha256(""))
+					hex::encode(crypto::sha256("".bytes()))
 				}
 			`,
 		},
@@ -1031,7 +1032,7 @@ func TestGoTargetParityCryptoHashes(t *testing.T) {
 			input: `
 				use ard/crypto
 				fn main() Int {
-					crypto::sha512("hello").size()
+					crypto::sha512("hello".bytes()).size()
 				}
 			`,
 		},
@@ -2567,11 +2568,11 @@ func TestGoTargetParityStringHelpers(t *testing.T) {
 		{name: "str contains", input: `fn main() Bool { "hello".contains("ell") }`},
 		{name: "str starts with", input: `fn main() Bool { "hello".starts_with("he") }`},
 		{name: "str ends with", input: `fn main() Bool { "hello".ends_with("lo") }`},
-		{name: "str at returns character", input: `fn main() Str { "hello".at(1).expect("missing") }`},
-		{name: "str at uses rune index", input: `fn main() Str { "hé".at(1).expect("missing") }`},
+		{name: "str at returns character", input: `fn main() Str { "hello".at(1).expect("missing").to_str() }`},
+		{name: "str at uses rune index", input: `fn main() Str { "hé".at(1).expect("missing").to_str() }`},
 		{name: "str at out of bounds returns none", input: `fn main() Bool { "hello".at(5).is_none() }`},
 		{name: "str at negative returns none", input: `fn main() Bool { "hello".at(-1).is_none() }`},
-		{name: "str split", input: `fn main() [Str] { "a,b,c".split(",") }`},
+		{name: "str split", input: `fn main() [Str] { Str::split("a,b,c", ",") }`},
 		{name: "str trim", input: `fn main() Str { "  hello \n".trim() }`},
 		{name: "str is empty", input: `fn main() Bool { "".is_empty() }`},
 	})

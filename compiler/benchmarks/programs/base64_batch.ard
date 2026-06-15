@@ -9,12 +9,13 @@ fn run_batch(count: Int) Int {
   mut checksum = 0
   for i in 0..count {
     let payload = build_payload(i)
-    let encoded = base64::encode(payload)
+    let encoded = base64::encode(payload.bytes())
     let decoded = base64::decode(encoded).expect("valid base64")
     let encoded_url = base64::encode_url(decoded, true)
     let decoded_url = base64::decode_url(encoded_url, true).expect("valid base64url")
+    let decoded_text = Str::from_bytes(decoded_url).expect("valid utf8")
     checksum =+ encoded.size() + decoded_url.size()
-    if decoded_url.contains("ard") {
+    if decoded_text.contains("ard") {
       checksum =+ i % 97
     }
   }

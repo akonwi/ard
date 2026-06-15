@@ -463,6 +463,64 @@ fn main() {
 	}
 }
 
+func TestRunExecutesByteRuneProgram(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/io
+
+fn main() {
+  io::print(Byte::from_int(255).expect("byte").to_int().to_str())
+  io::print(Rune::from_int(233).expect("rune").to_str())
+  io::print("hé".at(1).expect("rune").to_int().to_str())
+  io::print("hé".bytes().size().to_str())
+  io::print("hé".runes().size().to_str())
+  mut total = 0
+  for r in "hé" {
+    total = total + r.to_int()
+  }
+  io::print(total.to_str())
+  io::print(Str::from_bytes("hé".bytes()).expect("utf8"))
+  io::print(Str::from_runes("hé".runes()).expect("runes"))
+  io::print((Byte::from_int(1).expect("one") < Byte::from_int(2).expect("two")).to_str())
+  io::print((Rune::from_str("a").expect("a") < Rune::from_str("b").expect("b")).to_str())
+  io::print('\n'.to_int().to_str())
+  io::print(match '/' {
+    '/' => "slash",
+    _ => "other",
+  })
+  mut saw_slash = false
+  for ch in "a/b" {
+    if ch == '/' {
+      saw_slash = true
+    }
+  }
+  io::print(saw_slash.to_str())
+}
+main()
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	js := exec.Command("go", "run", "-tags=goexperiment.jsonv2", ".", "run", "--target", "js-server", mainPath)
+	js.Dir = ".."
+	out, err := js.CombinedOutput()
+	if err != nil {
+		t.Fatalf("did not expect js-server byte/rune run error: %v\n%s", err, string(out))
+	}
+	want := "255\né\n233\n3\n2\n337\nhé\nhé\ntrue\ntrue\n10\nslash\ntrue\n"
+	if string(out) != want {
+		t.Fatalf("unexpected byte/rune output: %q", string(out))
+	}
+}
+
 func TestRunExecutesDecodeAndJSONStdlibProgram(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not installed")
@@ -484,6 +542,10 @@ struct Person {
   employed: Bool?,
 }
 
+struct Blob {
+  bytes: [Byte],
+}
+
 fn main() {
   let raw = decode::from_json("\{\"name\":\"kit\",\"nums\":[1,2,3],\"counts\":\{\"a\":1\}\}").expect("parse")
   io::print(decode::run(raw, decode::field("name", decode::string)).expect("name"))
@@ -498,6 +560,19 @@ fn main() {
   let encoded = json::encode(person).expect("json")
   io::print(encoded.contains("\"name\":\"kit\"").to_str())
   io::print(encoded.contains("\"employed\":null").to_str())
+
+  let byte_json = json::encode("hi".bytes()).expect("json bytes")
+  io::print(byte_json)
+  let byte_text = Str::from_bytes(json::parse<[Byte]>(byte_json).expect("parse bytes")).expect("utf8")
+  io::print(byte_text)
+
+  let blob_json = json::encode(Blob{bytes: "hi".bytes()}).expect("json blob")
+  io::print(blob_json.contains("\"bytes\":\"aGk=\"").to_str())
+  let blob = json::parse<Blob>("\{\"bytes\":\"aGk=\"\}").expect("parse blob")
+  io::print(Str::from_bytes(blob.bytes).expect("utf8"))
+  io::print(json::parse<Byte>("255").expect("byte").to_int().to_str())
+  io::print(json::parse<Rune>("233").expect("rune").to_str())
+  io::print(json::parse<Byte>("256").is_err().to_str())
 }
 `), 0o644); err != nil {
 		t.Fatalf("failed to write source: %v", err)

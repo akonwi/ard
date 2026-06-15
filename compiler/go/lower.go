@@ -487,6 +487,7 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 `)
 	}
 	if l.runtimeHelpers["json_parse"] {
+		l.currentImports["bytes"] = "bytes"
 		l.currentImports["fmt"] = "fmt"
 		l.currentImports["json"] = "encoding/json/v2"
 		l.currentImports["jsontext"] = "encoding/json/jsontext"
@@ -993,6 +994,15 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		return loweredExpr{stmts: target.stmts, expr: l.toStringExpr(expr.Target.Type, target.expr)}, nil
+	case air.ExprToInt:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("to_int missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprCallExtern:
 		return l.lowerExternCall(fn, expr)
 	case air.ExprSpawnFiber:
@@ -1265,6 +1275,24 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.BinaryExpr{X: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target.expr}}, Op: token.EQL, Y: &ast.BasicLit{Kind: token.INT, Value: "0"}}}, nil
+	case air.ExprStrBytes:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("str bytes missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.ArrayType{Elt: ast.NewIdent("byte")}, Args: []ast.Expr{target.expr}}}, nil
+	case air.ExprStrRunes:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("str runes missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.ArrayType{Elt: ast.NewIdent("rune")}, Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprStrSize:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("str size missing target")
@@ -1308,10 +1336,14 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 				Op: token.LOR,
 				Y:  &ast.BinaryExpr{X: ast.NewIdent(indexTemp), Op: token.GEQ, Y: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(runesTemp)}}},
 			}
-			strType := mustTypeExpr(l, l.program.Types[expr.Type-1].Elem)
-			noneCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "None"), Index: strType}}
-			someValue := &ast.CallExpr{Fun: ast.NewIdent("string"), Args: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(runesTemp), Index: ast.NewIdent(indexTemp)}}}
-			someCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: strType}, Args: []ast.Expr{someValue}}
+			elemTypeID := l.program.Types[expr.Type-1].Elem
+			elemType := mustTypeExpr(l, elemTypeID)
+			noneCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "None"), Index: elemType}}
+			someValue := ast.Expr(&ast.IndexExpr{X: ast.NewIdent(runesTemp), Index: ast.NewIdent(indexTemp)})
+			if validTypeID(l.program, elemTypeID) && l.program.Types[elemTypeID-1].Kind == air.TypeStr {
+				someValue = &ast.CallExpr{Fun: ast.NewIdent("string"), Args: []ast.Expr{someValue}}
+			}
+			someCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: elemType}, Args: []ast.Expr{someValue}}
 			stmts = append(stmts, &ast.IfStmt{
 				Cond: cond,
 				Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneCall}}}},
@@ -1845,7 +1877,7 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 	}
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
-	case air.TypeInt, air.TypeEnum:
+	case air.TypeInt, air.TypeByte, air.TypeRune, air.TypeEnum:
 		return &ast.BasicLit{Kind: token.INT, Value: "0"}, nil
 	case air.TypeFloat:
 		return &ast.BasicLit{Kind: token.FLOAT, Value: "0"}, nil
@@ -2056,6 +2088,10 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return l.voidTypeExpr(), nil
 	case air.TypeInt:
 		return ast.NewIdent("int"), nil
+	case air.TypeByte:
+		return ast.NewIdent("byte"), nil
+	case air.TypeRune:
+		return ast.NewIdent("rune"), nil
 	case air.TypeFloat:
 		return ast.NewIdent("float64"), nil
 	case air.TypeBool:
@@ -2171,6 +2207,13 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 
 func (l *lowerer) isVoidType(typeID air.TypeID) bool {
 	return validTypeID(l.program, typeID) && l.program.Types[typeID-1].Kind == air.TypeVoid
+}
+
+func (l *lowerer) typeKind(typeID air.TypeID) air.TypeKind {
+	if !validTypeID(l.program, typeID) {
+		return air.TypeVoid
+	}
+	return l.program.Types[typeID-1].Kind
 }
 
 func (l *lowerer) maybeElemIsVoid(typeID air.TypeID) bool {
@@ -3002,8 +3045,13 @@ func (l *lowerer) qualified(alias string, importPath string, name string) ast.Ex
 }
 
 func (l *lowerer) toStringExpr(typeID air.TypeID, expr ast.Expr) ast.Expr {
-	if validTypeID(l.program, typeID) && l.program.Types[typeID-1].Kind == air.TypeFloat {
-		return &ast.CallExpr{Fun: l.qualified("strconv", "strconv", "FormatFloat"), Args: []ast.Expr{expr, &ast.BasicLit{Kind: token.CHAR, Value: "'f'"}, &ast.BasicLit{Kind: token.INT, Value: "2"}, &ast.BasicLit{Kind: token.INT, Value: "64"}}}
+	if validTypeID(l.program, typeID) {
+		switch l.program.Types[typeID-1].Kind {
+		case air.TypeFloat:
+			return &ast.CallExpr{Fun: l.qualified("strconv", "strconv", "FormatFloat"), Args: []ast.Expr{expr, &ast.BasicLit{Kind: token.CHAR, Value: "'f'"}, &ast.BasicLit{Kind: token.INT, Value: "2"}, &ast.BasicLit{Kind: token.INT, Value: "64"}}}
+		case air.TypeRune:
+			return &ast.CallExpr{Fun: ast.NewIdent("string"), Args: []ast.Expr{expr}}
+		}
 	}
 	return &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{expr}}
 }
@@ -6087,16 +6135,16 @@ func (l *lowerer) lowerJSONParseStdlibExtern(args []ast.Expr, stmts []ast.Stmt, 
 		return loweredExpr{}, err
 	}
 	errTemp := l.nextTemp()
-	hostErrTemp := l.nextTemp()
 	outTemp := l.nextTemp()
+	decoderTemp := l.nextTemp()
 
 	allStmts := append([]ast.Stmt{}, stmts...)
 	allStmts = append(allStmts,
 		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(errTemp)}, Type: ast.NewIdent("string")}}}},
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(hostErrTemp)}, Type: ast.NewIdent("error")}}}},
 		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(outTemp)}, Type: valueType}}}},
-		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(hostErrTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.qualified("json", "encoding/json/v2", "Unmarshal"), Args: []ast.Expr{&ast.CallExpr{Fun: &ast.ArrayType{Elt: ast.NewIdent("byte")}, Args: []ast.Expr{args[0]}}, &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(outTemp)}}}}},
-		&ast.IfStmt{Cond: &ast.BinaryExpr{X: ast.NewIdent(hostErrTemp), Op: token.NEQ, Y: ast.NewIdent("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(hostErrTemp), Sel: ast.NewIdent("Error")}}}}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(decoderTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.qualified("jsontext", "encoding/json/jsontext", "NewDecoder"), Args: []ast.Expr{&ast.CallExpr{Fun: l.qualified("bytes", "bytes", "NewReader"), Args: []ast.Expr{&ast.CallExpr{Fun: &ast.ArrayType{Elt: ast.NewIdent("byte")}, Args: []ast.Expr{args[0]}}}}}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(outTemp), ast.NewIdent(errTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent(l.jsonDecodeTextHelperName(resultInfo.Value)), Args: []ast.Expr{ast.NewIdent(decoderTemp), &ast.BasicLit{Kind: token.STRING, Value: `""`}}}}},
+		&ast.IfStmt{Cond: &ast.BinaryExpr{X: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: &ast.BasicLit{Kind: token.STRING, Value: `""`}}, Op: token.LAND, Y: &ast.BinaryExpr{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(decoderTemp), Sel: ast.NewIdent("PeekKind")}}, Op: token.NEQ, Y: l.qualified("jsontext", "encoding/json/jsontext", "KindInvalid")}}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"trailing JSON after value"`}}}}}},
 	)
 	resultExpr := &ast.CompositeLit{Type: mustTypeExpr(l, returnTypeID), Elts: []ast.Expr{
 		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: ast.NewIdent(outTemp)},
@@ -6198,6 +6246,19 @@ func ardJSONDecodeDynamic(dec *jsontext.Decoder, path string) (any, string) {
 	return raw, ""
 }
 
+func ardJSONDecodeByteList(dec *jsontext.Decoder, path string, expected string) ([]byte, string) {
+	var out []byte
+	if dec.PeekKind() != jsontext.KindString {
+		tok, err := dec.ReadToken()
+		if err != nil { return out, err.Error() }
+		return out, path + ": got " + tok.Kind().String() + ", expected " + expected
+	}
+	value, err := dec.ReadValue()
+	if err != nil { return out, err.Error() }
+	if err := json.Unmarshal(value, &out); err != nil { return out, path + ": got Str, expected " + expected }
+	return out, ""
+}
+
 func ardJSONDecodeMaybe[T any](dec *jsontext.Decoder, path string, decode func(*jsontext.Decoder, string) (T, string)) (ardruntime.Maybe[T], string) {
 	var out ardruntime.Maybe[T]
 	if dec.PeekKind() == jsontext.KindNull { _, _ = dec.ReadToken(); return out, "" }
@@ -6260,6 +6321,10 @@ func (l *lowerer) jsonParseGoTypeName(typeID air.TypeID) string {
 		return "ardruntime.Void"
 	case air.TypeInt:
 		return "int"
+	case air.TypeByte:
+		return "byte"
+	case air.TypeRune:
+		return "rune"
 	case air.TypeFloat:
 		return "float64"
 	case air.TypeBool:
@@ -6394,8 +6459,8 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 	switch info.Kind {
 	case air.TypeVoid:
 		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.Null)\n")
-	case air.TypeInt:
-		fmt.Fprintf(b, "\treturn ardJSONEncodeInt(enc, value)\n")
+	case air.TypeInt, air.TypeByte, air.TypeRune:
+		fmt.Fprintf(b, "\treturn ardJSONEncodeInt(enc, int(value))\n")
 	case air.TypeFloat:
 		fmt.Fprintf(b, "\treturn ardJSONEncodeFloat(enc, value)\n")
 	case air.TypeBool:
@@ -6409,7 +6474,11 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 	case air.TypeResult:
 		fmt.Fprintf(b, "\tif value.Ok { return %s(enc, value.Value) }\n\treturn %s(enc, value.Err)\n", l.jsonEncodeHelperName(info.Value), l.jsonEncodeHelperName(info.Error))
 	case air.TypeList:
-		fmt.Fprintf(b, "\treturn ardJSONEncodeList(enc, value, %s)\n", l.jsonEncodeHelperName(info.Elem))
+		if l.typeKind(info.Elem) == air.TypeByte {
+			fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
+		} else {
+			fmt.Fprintf(b, "\treturn ardJSONEncodeList(enc, value, %s)\n", l.jsonEncodeHelperName(info.Elem))
+		}
 	case air.TypeMap:
 		if l.mapUsesStructuralKeys(typeID) {
 			fmt.Fprintf(b, "\treturn ardJSONEncodeStructuralMap(enc, value, %s)\n", l.jsonEncodeHelperName(info.Value))
@@ -6471,7 +6540,7 @@ func (l *lowerer) jsonNativeCodecSafe(typeID air.TypeID, seen map[air.TypeID]boo
 	seen[typeID] = true
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
-	case air.TypeVoid, air.TypeInt, air.TypeFloat, air.TypeBool, air.TypeStr, air.TypeEnum:
+	case air.TypeVoid, air.TypeInt, air.TypeByte, air.TypeRune, air.TypeFloat, air.TypeBool, air.TypeStr, air.TypeEnum:
 		return true
 	case air.TypeList:
 		return l.jsonNativeCodecSafe(info.Elem, seen)
@@ -6502,6 +6571,10 @@ func (l *lowerer) writeJSONDecodeTextHelper(b *strings.Builder, typeID air.TypeI
 	switch info.Kind {
 	case air.TypeInt:
 		fmt.Fprintf(b, "\treturn ardJSONDecodeInt(dec, path)\n")
+	case air.TypeByte:
+		fmt.Fprintf(b, "\tparsed, message := ardJSONDecodeInt(dec, path)\n\tif message != \"\" { return out, message }\n\tif parsed < 0 || parsed > 255 { return out, path + \": got Number, expected Byte\" }\n\treturn byte(parsed), \"\"\n")
+	case air.TypeRune:
+		fmt.Fprintf(b, "\tparsed, message := ardJSONDecodeInt(dec, path)\n\tif message != \"\" { return out, message }\n\tif parsed < 0 || parsed > 0x10FFFF || (parsed >= 0xD800 && parsed <= 0xDFFF) { return out, path + \": got Number, expected Rune\" }\n\treturn rune(parsed), \"\"\n")
 	case air.TypeFloat:
 		fmt.Fprintf(b, "\treturn ardJSONDecodeFloat(dec, path)\n")
 	case air.TypeBool:
@@ -6513,7 +6586,11 @@ func (l *lowerer) writeJSONDecodeTextHelper(b *strings.Builder, typeID air.TypeI
 	case air.TypeMaybe:
 		fmt.Fprintf(b, "\treturn ardJSONDecodeMaybe(dec, path, %s)\n", l.jsonDecodeTextHelperName(info.Elem))
 	case air.TypeList:
-		fmt.Fprintf(b, "\treturn ardJSONDecodeList(dec, path, %q, %s)\n", info.Name, l.jsonDecodeTextHelperName(info.Elem))
+		if l.typeKind(info.Elem) == air.TypeByte {
+			fmt.Fprintf(b, "\treturn ardJSONDecodeByteList(dec, path, %q)\n", info.Name)
+		} else {
+			fmt.Fprintf(b, "\treturn ardJSONDecodeList(dec, path, %q, %s)\n", info.Name, l.jsonDecodeTextHelperName(info.Elem))
+		}
 	case air.TypeMap:
 		fmt.Fprintf(b, "\treturn ardJSONDecodeStringMap(dec, path, %q, %s)\n", info.Name, l.jsonDecodeTextHelperName(info.Value))
 	case air.TypeStruct:

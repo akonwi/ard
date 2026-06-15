@@ -44,6 +44,7 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreUnexported(
 		checker.TypeVar{},
 		checker.BoolMethod{},
+		checker.ByteMethod{},
 		checker.Diagnostic{},
 		checker.EnumVariant{},
 		checker.FloatMethod{},
@@ -55,6 +56,7 @@ var compareOptions = cmp.Options{
 		checker.MaybeMethod{},
 		checker.OptionMatch{},
 		checker.ResultMethod{},
+		checker.RuneMethod{},
 		checker.Statement{},
 		checker.StrMethod{},
 		checker.Variable{},

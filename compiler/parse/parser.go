@@ -3231,6 +3231,16 @@ func (p *parser) primary() (Expression, error) {
 	if p.match(string_) {
 		return p.string()
 	}
+	if p.match(rune_) {
+		tok := p.previous()
+		if tok.err != "" {
+			p.addError(tok, tok.err)
+		}
+		return &RuneLiteral{
+			Value:    tok.text,
+			Location: tok.getLocation(),
+		}, nil
+	}
 	if p.match(true_, false_) {
 		tok := p.previous()
 		return &BoolLiteral{
