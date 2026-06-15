@@ -1,5 +1,8 @@
+use ard/byte as Byte
 use ard/dynamic as Dynamic
 use ard/maybe
+use ard/rune as Rune
+use ard/string as Str
 use ard/testing
 
 // Standard library JSON module implemented with FFI
@@ -77,6 +80,22 @@ test fn test_encode_bool() Void!Str {
   testing::assert(out == "true", "Expected bool JSON encoding")
 }
 
+test fn test_encode_byte_and_rune() Void!Str {
+  let byte = Byte::from_int(255).expect("byte")
+  let rune = Rune::from_str("é").expect("rune")
+  let byte_out = try encode(byte)
+  let rune_out = try encode(rune)
+  testing::assert(
+    byte_out == "255" and rune_out == "233",
+    "Expected byte and rune to encode as JSON numbers",
+  )
+}
+
+test fn test_encode_byte_list_as_base64() Void!Str {
+  let out = try encode("hi".bytes())
+  testing::assert(out == "\"aGk=\"", "Expected byte list to encode as base64 JSON string")
+}
+
 test fn test_encode_none() Void!Str {
   let val: Str? = maybe::none()
   let out = try encode(val)
@@ -91,6 +110,12 @@ test fn test_encode_some_int() Void!Str {
 test fn test_encode_list() Void!Str {
   let out = try encode([1, 2, 3])
   testing::assert(out == "[1,2,3]", "Expected list JSON encoding")
+}
+
+test fn test_parse_byte_list_from_base64() Void!Str {
+  let decoded = try parse<[Byte]>("\"aGk=\"")
+  let text = try Str::from_bytes(decoded)
+  testing::assert(text == "hi", "Expected byte list to parse from base64 JSON string")
 }
 
 test fn test_encode_struct_with_nullable_field() Void!Str {
@@ -170,4 +195,9 @@ test fn test_encode_dynamic_object() Void!Str {
   let out = try encode(data)
   try testing::assert(out.contains("\"foo\":0"), "Expected encoded object to include foo")
   testing::assert(out.contains("\"baz\":1"), "Expected encoded object to include baz")
+}
+
+test fn test_encode_dynamic_bytes_as_base64() Void!Str {
+  let out = try encode(Dynamic::from_bytes("hi".bytes()))
+  testing::assert(out == "\"aGk=\"", "Expected dynamic bytes to encode as base64 JSON string")
 }

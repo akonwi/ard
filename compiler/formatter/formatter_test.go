@@ -50,6 +50,11 @@ func TestFormat(t *testing.T) {
 			output: "use app/text\n\nlet label = text::new(\"hi\")\n",
 		},
 		{
+			name:   "keeps imports used by static trait implementations",
+			input:  "use ard/string as Str\nuse app/unused\n\nstruct Error {}\nimpl Str::ToString for Error {\n  fn to_str() Str { \"error\" }\n}\n",
+			output: "use ard/string as Str\n\nstruct Error {}\nimpl Str::ToString for Error {\n  fn to_str() Str {\n    \"error\"\n  }\n}\n",
+		},
+		{
 			name:   "keeps imports used by expression statements",
 			input:  "use ard/io\nuse app/box\nuse app/style\nuse app/unused\n\nfn main() {\n  box::new(\n    style::Style{padding: 1},\n  ).render()\n  io::print(\"done\")\n}\n",
 			output: "use ard/io\n\nuse app/box\nuse app/style\n\nfn main() {\n  box::new(style::Style{padding: 1}).render()\n  io::print(\"done\")\n}\n",

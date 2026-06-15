@@ -12,7 +12,11 @@ let text: Str = "Hello, World!"
 let number: Int = 42
 let decimal: Float = 3.14
 let flag: Bool = true
+let byte: Byte = Byte::from_int(255).expect("byte")
+let rune: Rune = Rune::from_str("é").expect("rune")
 ```
+
+`Byte` represents an unsigned 8-bit value (`0..255`). `Rune` represents one Unicode scalar value. Convert text explicitly with `"text".bytes()`, `"text".runes()`, `Str::from_bytes(bytes)`, and `Str::from_runes(runes)`.
 
 ### Collection Types
 

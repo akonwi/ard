@@ -35,8 +35,9 @@ Parse a JSON string into the requested Ard type. Returns a result containing the
 
 Supported target types:
 
-- **Primitives**: `Str`, `Int`, `Float`, `Bool`
+- **Primitives**: `Str`, `Int`, `Float`, `Bool`, `Byte`, `Rune`
 - **Collections**: lists and maps with `Str` keys, such as `[Todo]` and `[Str:Int]`
+- **Byte buffers**: `[Byte]` parses from a base64 JSON string
 - **Structs**: JSON objects with fields matching the struct field names
 - **Nullable types**: `T?`, where `null` and missing nullable struct fields decode as `none`
 - **Dynamic**: untyped JSON data
@@ -60,8 +61,9 @@ Encode a JSON-compatible Ard value as a JSON string. Returns a result containing
 
 Supported values include:
 
-- **Primitives**: `Str`, `Int`, `Float`, `Bool`
+- **Primitives**: `Str`, `Int`, `Float`, `Bool`, `Byte`, `Rune`
 - **Collections**: lists and maps with `Str` keys
+- **Byte buffers**: `[Byte]` encodes as a base64 JSON string
 - **Structs**: encoded as objects with named fields
 - **Nullable types**: encoded as `null` when `none`
 - **Dynamic**: encoded according to the contained value
@@ -70,6 +72,7 @@ Supported values include:
 use ard/json
 
 let json_text = json::encode(42).expect("encode")
+let bytes_json = json::encode("hi".bytes()).expect("encode") // "\"aGk=\""
 ```
 
 ## Examples

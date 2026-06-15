@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -49,11 +50,18 @@ func NewHost(config HostConfig) Host {
 		args = append([]string(nil), args...)
 	}
 	return Host{
+		ByteFromInt:          ByteFromInt,
+		RuneFromInt:          RuneFromInt,
+		RuneFromStr:          RuneFromStr,
+		StrSplit:             StrSplit,
+		StrFromUtf8:          StrFromUtf8,
+		StrFromRunes:         StrFromRunes,
 		Base64Decode:         Base64Decode,
 		Base64DecodeURL:      Base64DecodeURL,
 		Base64Encode:         Base64Encode,
 		Base64EncodeURL:      Base64EncodeURL,
 		BoolToDynamic:        BoolToDynamic,
+		BytesToDynamic:       BytesToDynamic,
 		CryptoHashPassword:   CryptoHashPassword,
 		CryptoMd5:            CryptoMd5,
 		CryptoScryptHash:     CryptoScryptHash,
@@ -63,8 +71,10 @@ func NewHost(config HostConfig) Host {
 		CryptoUUID:           CryptoUUID,
 		CryptoVerifyPassword: CryptoVerifyPassword,
 		DecodeBool:           DecodeBool,
+		DecodeByte:           DecodeByte,
 		DecodeFloat:          DecodeFloat,
 		DecodeInt:            DecodeInt,
+		DecodeRune:           DecodeRune,
 		DecodeString:         DecodeString,
 		DynamicToList:        DynamicToList,
 		DynamicToMap:         DynamicToMap,
@@ -209,69 +219,115 @@ func ChannelClose[T any](ch chan T) (closed bool) {
 	return true
 }
 
-func Base64Encode(input string, noPad Maybe[bool]) string {
-	if noPad.IsSome() && noPad.Value() {
-		return base64.RawStdEncoding.EncodeToString([]byte(input))
+func ByteFromInt(value int) Maybe[byte] {
+	if value < 0 || value > 255 {
+		return None[byte]()
 	}
-	return base64.StdEncoding.EncodeToString([]byte(input))
+	return Some(byte(value))
 }
 
-func Base64Decode(input string, noPad Maybe[bool]) (string, error) {
+func RuneFromInt(value int) Maybe[rune] {
+	r := rune(value)
+	if !utf8.ValidRune(r) {
+		return None[rune]()
+	}
+	return Some(r)
+}
+
+func RuneFromStr(value string) Maybe[rune] {
+	if !utf8.ValidString(value) {
+		return None[rune]()
+	}
+	runes := []rune(value)
+	if len(runes) != 1 || !utf8.ValidRune(runes[0]) {
+		return None[rune]()
+	}
+	return Some(runes[0])
+}
+
+func StrSplit(input string, delimiter string) []string {
+	return strings.Split(input, delimiter)
+}
+
+func StrFromUtf8(bytes []byte) (string, error) {
+	if !utf8.Valid(bytes) {
+		return "", errors.New("invalid UTF-8")
+	}
+	return string(bytes), nil
+}
+
+func StrFromRunes(runes []rune) (string, error) {
+	for _, r := range runes {
+		if !utf8.ValidRune(r) {
+			return "", errors.New("invalid Unicode scalar value")
+		}
+	}
+	return string(runes), nil
+}
+
+func Base64Encode(input []byte, noPad Maybe[bool]) string {
+	if noPad.IsSome() && noPad.Value() {
+		return base64.RawStdEncoding.EncodeToString(input)
+	}
+	return base64.StdEncoding.EncodeToString(input)
+}
+
+func Base64Decode(input string, noPad Maybe[bool]) ([]byte, error) {
 	enc := base64.StdEncoding
 	if noPad.IsSome() && noPad.Value() {
 		enc = base64.RawStdEncoding
 	}
 	decoded, err := enc.DecodeString(input)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return string(decoded), nil
+	return decoded, nil
 }
 
-func Base64EncodeURL(input string, noPad Maybe[bool]) string {
+func Base64EncodeURL(input []byte, noPad Maybe[bool]) string {
 	if noPad.IsSome() && noPad.Value() {
-		return base64.RawURLEncoding.EncodeToString([]byte(input))
+		return base64.RawURLEncoding.EncodeToString(input)
 	}
-	return base64.URLEncoding.EncodeToString([]byte(input))
+	return base64.URLEncoding.EncodeToString(input)
 }
 
-func Base64DecodeURL(input string, noPad Maybe[bool]) (string, error) {
+func Base64DecodeURL(input string, noPad Maybe[bool]) ([]byte, error) {
 	enc := base64.URLEncoding
 	if noPad.IsSome() && noPad.Value() {
 		enc = base64.RawURLEncoding
 	}
 	decoded, err := enc.DecodeString(input)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return string(decoded), nil
+	return decoded, nil
 }
 
-func HexEncode(input string) string {
-	return hex.EncodeToString([]byte(input))
+func HexEncode(input []byte) string {
+	return hex.EncodeToString(input)
 }
 
-func HexDecode(input string) (string, error) {
+func HexDecode(input string) ([]byte, error) {
 	decoded, err := hex.DecodeString(input)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return string(decoded), nil
+	return decoded, nil
 }
 
-func CryptoMd5(input string) string {
-	sum := md5.Sum([]byte(input))
-	return hex.EncodeToString(sum[:])
+func CryptoMd5(input []byte) []byte {
+	sum := md5.Sum(input)
+	return sum[:]
 }
 
-func CryptoSha256(input string) string {
-	sum := sha256.Sum256([]byte(input))
-	return string(sum[:])
+func CryptoSha256(input []byte) []byte {
+	sum := sha256.Sum256(input)
+	return sum[:]
 }
 
-func CryptoSha512(input string) string {
-	sum := sha512.Sum512([]byte(input))
-	return string(sum[:])
+func CryptoSha512(input []byte) []byte {
+	sum := sha512.Sum512(input)
+	return sum[:]
 }
 
 func CryptoHashPassword(password string, cost Maybe[int]) (string, error) {
@@ -754,6 +810,10 @@ func BoolToDynamic(value bool) any {
 	return value
 }
 
+func BytesToDynamic(value []byte) any {
+	return value
+}
+
 func VoidToDynamic() any {
 	return nil
 }
@@ -794,22 +854,74 @@ func DecodeString(data any) Result[string, Error] {
 }
 
 func DecodeInt(data any) Result[int, Error] {
+	maxInt := int64(^uint(0) >> 1)
+	minInt := -maxInt - 1
+	maxUintInt := uint64(^uint(0) >> 1)
 	switch value := data.(type) {
 	case int:
 		return Ok[int, Error](value)
-	case int64:
+	case int8:
 		return Ok[int, Error](int(value))
+	case int16:
+		return Ok[int, Error](int(value))
+	case int32:
+		return Ok[int, Error](int(value))
+	case int64:
+		if value >= minInt && value <= maxInt {
+			return Ok[int, Error](int(value))
+		}
+	case uint:
+		if uint64(value) <= maxUintInt {
+			return Ok[int, Error](int(value))
+		}
+	case uint8:
+		return Ok[int, Error](int(value))
+	case uint16:
+		return Ok[int, Error](int(value))
+	case uint32:
+		if uint64(value) <= maxUintInt {
+			return Ok[int, Error](int(value))
+		}
+	case uint64:
+		if value <= maxUintInt {
+			return Ok[int, Error](int(value))
+		}
 	case float64:
 		parsed := int(value)
 		if value == float64(parsed) {
 			return Ok[int, Error](parsed)
 		}
 	case json.Number:
-		if parsed, err := value.Int64(); err == nil {
+		if parsed, err := value.Int64(); err == nil && parsed >= minInt && parsed <= maxInt {
 			return Ok[int, Error](int(parsed))
 		}
 	}
 	return Err[int](decodeError("Int", formatDynamicValueForError(data)))
+}
+
+func DecodeByte(data any) Result[byte, Error] {
+	decoded := DecodeInt(data)
+	if !decoded.Ok {
+		return Err[byte](decodeError("Byte", formatDynamicValueForError(data)))
+	}
+	value := decoded.Value
+	if value < 0 || value > 255 {
+		return Err[byte](decodeError("Byte", formatDynamicValueForError(data)))
+	}
+	return Ok[byte, Error](byte(value))
+}
+
+func DecodeRune(data any) Result[rune, Error] {
+	decoded := DecodeInt(data)
+	if !decoded.Ok {
+		return Err[rune](decodeError("Rune", formatDynamicValueForError(data)))
+	}
+	value := decoded.Value
+	r := rune(value)
+	if !utf8.ValidRune(r) {
+		return Err[rune](decodeError("Rune", formatDynamicValueForError(data)))
+	}
+	return Ok[rune, Error](r)
 }
 
 func DecodeFloat(data any) Result[float64, Error] {

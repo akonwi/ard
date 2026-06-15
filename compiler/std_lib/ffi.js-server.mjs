@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -14,6 +15,15 @@ function maybeBool(value) {
   return value && typeof value.isSome === "function" && value.isSome() ? Boolean(value.value) : false;
 }
 
+function bytesBuffer(input) {
+  return Buffer.from(Array.isArray(input) ? input : []);
+}
+
+function validBase64(input, url = false) {
+  const pattern = url ? /^[A-Za-z0-9_-]*={0,2}$/ : /^[A-Za-z0-9+/]*={0,2}$/;
+  return pattern.test(input) && input.length % 4 === 0;
+}
+
 function fillStdinBuffer() {
   const chunk = Buffer.alloc(4096);
   const bytesRead = fs.readSync(0, chunk, 0, chunk.length, null);
@@ -25,7 +35,7 @@ function fillStdinBuffer() {
 }
 
 export function Base64Encode(input, noPad) {
-  const encoded = Buffer.from(String(input), "utf8").toString("base64");
+  const encoded = bytesBuffer(input).toString("base64");
   return maybeBool(noPad) ? encoded.replace(/=+$/g, "") : encoded;
 }
 
@@ -35,14 +45,15 @@ export function Base64Decode(input, noPad) {
     if (maybeBool(noPad)) {
       normalized += "=".repeat((4 - (normalized.length % 4)) % 4);
     }
-    return { ok: Buffer.from(normalized, "base64").toString("utf8") };
+    if (!validBase64(normalized)) throw new Error("invalid base64");
+    return { ok: Array.from(Buffer.from(normalized, "base64")) };
   } catch (error) {
     return errorResult(error);
   }
 }
 
 export function Base64EncodeURL(input, noPad) {
-  let encoded = Buffer.from(String(input), "utf8").toString("base64url");
+  let encoded = bytesBuffer(input).toString("base64url");
   if (!maybeBool(noPad)) {
     encoded += "=".repeat((4 - (encoded.length % 4)) % 4);
   }
@@ -55,10 +66,37 @@ export function Base64DecodeURL(input, noPad) {
     if (maybeBool(noPad)) {
       normalized += "=".repeat((4 - (normalized.length % 4)) % 4);
     }
-    return { ok: Buffer.from(normalized, "base64url").toString("utf8") };
+    if (!validBase64(normalized, true)) throw new Error("invalid base64url");
+    return { ok: Array.from(Buffer.from(normalized, "base64url")) };
   } catch (error) {
     return errorResult(error);
   }
+}
+
+export function HexEncode(input) {
+  return bytesBuffer(input).toString("hex");
+}
+
+export function HexDecode(input) {
+  try {
+    input = String(input);
+    if (input.length % 2 !== 0 || /[^0-9a-fA-F]/.test(input)) throw new Error("invalid hex");
+    return { ok: Array.from(Buffer.from(input, "hex")) };
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+export function CryptoMd5(input) {
+  return Array.from(crypto.createHash("md5").update(bytesBuffer(input)).digest());
+}
+
+export function CryptoSha256(input) {
+  return Array.from(crypto.createHash("sha256").update(bytesBuffer(input)).digest());
+}
+
+export function CryptoSha512(input) {
+  return Array.from(crypto.createHash("sha512").update(bytesBuffer(input)).digest());
 }
 
 export function printLine(value) {

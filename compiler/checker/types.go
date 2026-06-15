@@ -146,7 +146,13 @@ func (s str) get(name string) Type {
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "index", Type: Int}},
-			ReturnType: MakeMaybe(Str),
+			ReturnType: MakeMaybe(Rune),
+		}
+	case "bytes":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: MakeList(Byte),
 		}
 	case "contains":
 		return &FunctionDef{
@@ -175,13 +181,11 @@ func (s str) get(name string) Type {
 			Parameters: []Parameter{},
 			ReturnType: Int,
 		}
-	case "split":
+	case "runes":
 		return &FunctionDef{
-			Name: name,
-			Parameters: []Parameter{
-				{Name: "delimeter", Type: Str},
-			},
-			ReturnType: MakeList(Str),
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: MakeList(Rune),
 		}
 	case "starts_with", "ends_with":
 		return &FunctionDef{
@@ -226,6 +230,108 @@ func (s *str) hasTrait(trait *Trait) bool {
 }
 
 var Str = &str{}
+
+type byteType struct{}
+
+func (b byteType) String() string { return "Byte" }
+func (b byteType) get(name string) Type {
+	switch name {
+	case "to_int":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Int,
+		}
+	case "to_str":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Str,
+		}
+	case "to_dyn":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Dynamic,
+		}
+	default:
+		return nil
+	}
+}
+func (b *byteType) equal(other Type) bool {
+	if b == other {
+		return true
+	}
+	if typeVar, ok := other.(*TypeVar); ok {
+		if typeVar.actual == nil {
+			return true
+		}
+		return b.equal(typeVar.actual)
+	}
+	if union, ok := other.(*Union); ok {
+		return union.equal(b)
+	}
+	if trait, ok := other.(*Trait); ok {
+		return b.hasTrait(trait)
+	}
+	return false
+}
+func (b *byteType) hasTrait(trait *Trait) bool {
+	return trait.name() == "ToString" || trait.name() == "Encodable"
+}
+
+var Byte = &byteType{}
+
+type runeType struct{}
+
+func (r runeType) String() string { return "Rune" }
+func (r runeType) get(name string) Type {
+	switch name {
+	case "to_int":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Int,
+		}
+	case "to_str":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Str,
+		}
+	case "to_dyn":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Dynamic,
+		}
+	default:
+		return nil
+	}
+}
+func (r *runeType) equal(other Type) bool {
+	if r == other {
+		return true
+	}
+	if typeVar, ok := other.(*TypeVar); ok {
+		if typeVar.actual == nil {
+			return true
+		}
+		return r.equal(typeVar.actual)
+	}
+	if union, ok := other.(*Union); ok {
+		return union.equal(r)
+	}
+	if trait, ok := other.(*Trait); ok {
+		return r.hasTrait(trait)
+	}
+	return false
+}
+func (r *runeType) hasTrait(trait *Trait) bool {
+	return trait.name() == "ToString" || trait.name() == "Encodable"
+}
+
+var Rune = &runeType{}
 
 type _int struct{}
 

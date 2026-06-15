@@ -84,7 +84,10 @@ const (
 	ExprFloatDiv
 	ExprStrConcat
 	ExprToStr
+	ExprToInt
 	ExprStrAt
+	ExprStrBytes
+	ExprStrRunes
 	ExprStrSize
 	ExprStrIsEmpty
 	ExprStrContains

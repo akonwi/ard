@@ -43,11 +43,11 @@ Add standard APIs for explicit conversion between text, runes, and bytes:
 ```ard
 let bytes: [Byte] = "hé".bytes()      // UTF-8 bytes
 let runes: [Rune] = "hé".runes()      // Unicode scalar values
-let text = Str::from_utf8(bytes)       // Str!Str
+let text = Str::from_bytes(bytes)       // Str!Str
 let text2 = Str::from_runes(runes)     // Str!Str
 ```
 
-`Str.bytes()` returns the UTF-8 encoding of the string. `Str.runes()` returns the Unicode scalar values in order. `Str::from_utf8` validates UTF-8 and returns `err` for invalid byte sequences. `Str::from_runes` validates scalar values and returns `err` if any rune is invalid.
+`Str.bytes()` returns the UTF-8 encoding of the string. `Str.runes()` returns the Unicode scalar values in order. `Str::from_bytes` validates UTF-8 and returns `err` for invalid byte sequences. `Str::from_runes` validates scalar values and returns `err` if any rune is invalid.
 
 Add primitive conversions for numeric interop:
 
@@ -74,7 +74,7 @@ byte.to_str() Str
 byte.to_dyn() Dynamic
 ```
 
-`Byte::from_int` returns `none` when `value` is outside `0..255`. `byte.to_str()` returns the decimal numeric representation, matching `Byte`'s role as binary data rather than text. To interpret bytes as text, use `Str::from_utf8([byte])` or `Str::from_utf8(bytes)`.
+`Byte::from_int` returns `none` when `value` is outside `0..255`. `byte.to_str()` returns the decimal numeric representation, matching `Byte`'s role as binary data rather than text. To interpret bytes as text, use `Str::from_bytes([byte])` or `Str::from_bytes(bytes)`.
 
 `Rune` has:
 
@@ -206,7 +206,7 @@ crypto::sha256(input: [Byte]) [Byte]
 crypto::sha512(input: [Byte]) [Byte]
 ```
 
-Do not add text convenience wrappers for these byte-oriented APIs. Callers should convert text to bytes explicitly with `.bytes()` and decode bytes explicitly with `Str::from_utf8` when they want text.
+Do not add text convenience wrappers for these byte-oriented APIs. Callers should convert text to bytes explicitly with `.bytes()` and decode bytes explicitly with `Str::from_bytes` when they want text.
 
 For example, text-based PKCE code should become:
 

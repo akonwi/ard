@@ -11,7 +11,7 @@ The `ard/dynamic` module is a prelude module. It is automatically imported and a
 
 The dynamic module provides:
 - **Primitive conversions** to wrap basic types as Dynamic
-- **Collection builders** for creating dynamic lists and objects
+- **Collection builders** for creating dynamic lists, byte buffers, and objects
 - **Generic transformation** with the `from()` function
 
 ```ard
@@ -97,6 +97,15 @@ let arr = Dynamic::from_list([
 ])
 ```
 
+#### `fn from_bytes(bytes: [Byte]) Dynamic`
+
+Create a Dynamic byte buffer. JSON encoding preserves byte-buffer identity and emits a base64 JSON string.
+
+```ard
+let dyn = Dynamic::from_bytes("hi".bytes())
+// json::encode(dyn).expect("json") == "\"aGk=\""
+```
+
 #### `fn object(from: [Str:Dynamic]) Dynamic`
 
 Create a Dynamic object from a map of string keys to Dynamic values.
@@ -113,7 +122,7 @@ let obj = Dynamic::object([
 
 #### `fn from(primitive: Primitive) Dynamic`
 
-Convert a primitive value (Str, Int, Float, Bool, or Void) to Dynamic. This function uses pattern matching to handle different types.
+Convert a primitive value (`Str`, `Int`, `Float`, `Bool`, `Byte`, `Rune`, or `Void`) to Dynamic. Byte and rune values become numeric dynamic values.
 
 ```ard
 use ard/dynamic

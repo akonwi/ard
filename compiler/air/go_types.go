@@ -78,6 +78,10 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 		return ast.NewIdent("float64"), nil
 	case TypeBool:
 		return ast.NewIdent("bool"), nil
+	case TypeByte:
+		return ast.NewIdent("byte"), nil
+	case TypeRune:
+		return ast.NewIdent("rune"), nil
 	case TypeStr:
 		return ast.NewIdent("string"), nil
 	case TypeList:

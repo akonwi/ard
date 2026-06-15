@@ -27,8 +27,12 @@ extern fn object(from: [Str: Dynamic]) Dynamic = {
   go = "MapToDynamic"
   js = "MapToDynamic"
 }
+extern fn from_bytes(bytes: [Byte]) Dynamic = {
+  go = "BytesToDynamic"
+  js = "BytesToDynamic"
+}
 
-type Primitive = Str | Bool | Int | Float | Void
+type Primitive = Str | Bool | Int | Float | Byte | Rune | Void
 
 fn from(primitive: Primitive) Dynamic {
   match primitive {
@@ -36,6 +40,8 @@ fn from(primitive: Primitive) Dynamic {
     Bool(b) => from_bool(b),
     Int(i) => from_int(i),
     Float(f) => from_float(f),
+    Byte(b) => from_int(b.to_int()),
+    Rune(r) => from_int(r.to_int()),
     _ => from_void(),
   }
 }

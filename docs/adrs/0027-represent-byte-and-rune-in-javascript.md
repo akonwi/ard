@@ -24,7 +24,7 @@ When `Byte` and `Rune` support reaches the JavaScript target, start with a seman
 - Convert `Rune` to text with `String.fromCodePoint`.
 - Decode `Str.runes()` with `Array.from(str, ch => ch.codePointAt(0))` or an equivalent helper.
 - Lower `Str.at(index)` through the same rune view and return `Maybe<Rune>`.
-- Encode `Str.bytes()` with `TextEncoder` and decode `Str::from_utf8` with `TextDecoder` in fatal/strict mode.
+- Encode `Str.bytes()` with `TextEncoder` and decode `Str::from_bytes` with `TextDecoder` in fatal/strict mode.
 - Implement `Str::split(input, delimiter)` in the `ard/string` module; for an empty delimiter, return one-rune strings with `Array.from(input)` or an equivalent helper.
 - Lower `Str.size()` to UTF-8 byte length, not JavaScript `.length`.
 - Initially lower `[Byte]` as `Array<number>` to fit the existing list model and minimize backend disruption.
