@@ -82,6 +82,7 @@ var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
 	"FS_Rename":            {function: "FSRename", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
 	"FS_WriteFile":         {function: "FSWriteFile", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
 	"FloatFloor":           {function: "FloatFloor", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FloatFormat":          {function: "FloatFormat", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
 	"FloatFromInt":         {function: "FloatFromInt", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"FloatFromStr":         {function: "FloatFromStr", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"FloatToDynamic":       {function: "FloatToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},

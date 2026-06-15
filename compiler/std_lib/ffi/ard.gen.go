@@ -183,6 +183,7 @@ type Host struct {
 	FSRename             func(from string, to string) error
 	FSWriteFile          func(path string, content string) error
 	FloatFloor           func(float float64) float64
+	FloatFormat          func(value float64, decimals int) string
 	FloatFromInt         func(int int) float64
 	FloatFromStr         func(string string) Maybe[float64]
 	FloatToDynamic       func(val float64) any
@@ -356,6 +357,9 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.FloatFloor != nil {
 		functions["FloatFloor"] = h.FloatFloor
+	}
+	if h.FloatFormat != nil {
+		functions["FloatFormat"] = h.FloatFormat
 	}
 	if h.FloatFromInt != nil {
 		functions["FloatFromInt"] = h.FloatFromInt

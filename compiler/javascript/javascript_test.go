@@ -863,6 +863,47 @@ await import(pathToFileURL(process.argv[1]).href);
 	}
 }
 
+func TestRunExecutesFloatFormatProgram(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatalf("failed to write ard.toml: %v", err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+use ard/io
+
+fn main() {
+  io::print(Float::format(1.0, 2))
+  io::print(Float::format(3.14159, 3))
+  io::print(Float::format(42.0, 0))
+  io::print(Float::format(42.7, -1))
+  io::print(Float::format(2.5, 0))
+  io::print(Float::format(3.5, 0))
+  io::print(Float::format(1.25, 1))
+  io::print(Float::format(1.35, 1))
+  io::print(Float::format(1.0, 101).size())
+}
+`), 0o644); err != nil {
+		t.Fatalf("failed to write source: %v", err)
+	}
+
+	js := exec.Command("go", "run", "-tags=goexperiment.jsonv2", ".", "run", "--target", "js-server", mainPath)
+	js.Dir = ".."
+	jsOut, err := js.CombinedOutput()
+	if err != nil {
+		t.Fatalf("did not expect js-server float format run error: %v\n%s", err, string(jsOut))
+	}
+
+	want := "1.00\n3.142\n42\n43\n2\n4\n1.2\n1.4\n103\n"
+	if string(jsOut) != want {
+		t.Fatalf("js-server output mismatch:\n got %q\nwant %q", string(jsOut), want)
+	}
+}
+
 func TestRunRejectsBrowserTarget(t *testing.T) {
 	err := Run("main.ard", backend.TargetJSBrowser, nil)
 	if err == nil {

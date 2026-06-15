@@ -3,14 +3,19 @@ title: Float Operations with ard/float
 description: Convert and manipulate floating-point numbers using Ard's float module.
 ---
 
-The `ard/float` module provides functions for working with floating-point numbers, including conversion and mathematical operations.
+The `ard/float` module provides functions for working with floating-point numbers, including conversion, formatting, and mathematical operations.
 
 :::note
 The `ard/float` module is a prelude module. It is automatically imported and aliased as `Float` in all programs, allowing methods to be accessed with the `Float::` namespace (e.g., `Float::from_str()`, `Float::floor()`).
 :::
 
+:::tip
+Use `Float::format(value, decimals)` when output must be stable across targets. The general `.to_str()` conversion is best for simple/debug output and may use backend-specific float formatting.
+:::
+
 The float module provides:
 - **String conversion** to parse floats from strings
+- **Formatting** with a portable fixed-decimal contract
 - **Type conversion** from integers to floats
 - **Mathematical operations** like floor
 
@@ -20,6 +25,7 @@ use ard/float
 fn main() {
   let f = Float::from_str("3.14").or(0.0)
   let floored = Float::floor(f)
+  let label = Float::format(f, 2)  // "3.14"
 }
 ```
 
@@ -61,6 +67,21 @@ Float::floor(3.7)  // 3.0
 Float::floor(3.2)  // 3.0
 Float::floor(-2.5)  // -3.0
 ```
+
+### `fn format(value: Float, decimals: Int) Str`
+
+Format a float as fixed-point decimal text with exactly `decimals` digits after the decimal point. Negative `decimals` values are treated as `0`.
+
+```ard
+use ard/float
+
+Float::format(1.0, 2)      // "1.00"
+Float::format(3.14159, 3)  // "3.142"
+Float::format(42.0, 0)     // "42"
+Float::format(42.7, -1)    // "43"
+```
+
+Halfway cases round to the nearest even final digit, so `Float::format(2.5, 0)` returns `"2"` and `Float::format(3.5, 0)` returns `"4"`.
 
 ## Examples
 

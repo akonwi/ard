@@ -1,6 +1,42 @@
+use ard/testing
+
 // Standard library Float module implemented with FFI
 // Provides float conversion and utility functions
 
 extern fn from_str(string: Str) Float? = "FloatFromStr"
 extern fn from_int(int: Int) Float = "FloatFromInt"
 extern fn floor(float: Float) Float = "FloatFloor"
+
+// Formats `value` with exactly `decimals` digits after the decimal point.
+// Negative `decimals` values are treated as `0`; halfway cases round to the nearest even digit.
+extern fn format(value: Float, decimals: Int) Str = "FloatFormat"
+
+test fn test_format_fixed_decimals_include_trailing_zeroes() Void!Str {
+  testing::assert(
+    format(1.0, 2) == "1.00",
+    "Expected fixed decimal output to include trailing zeroes",
+  )
+}
+
+test fn test_format_rounds_to_requested_decimals() Void!Str {
+  testing::assert(format(3.14159, 3) == "3.142", "Expected format to round to requested decimals")
+}
+
+test fn test_format_zero_decimals_omits_fraction() Void!Str {
+  testing::assert(format(42.0, 0) == "42", "Expected zero decimals to omit fractional digits")
+}
+
+test fn test_format_negative_decimals_clamp_to_zero() Void!Str {
+  testing::assert(format(42.7, -1) == "43", "Expected negative decimals to behave like zero decimals")
+}
+
+test fn test_format_ties_round_to_even() Void!Str {
+  try testing::assert(format(2.5, 0) == "2", "Expected 2.5 to round to even 2")
+  try testing::assert(format(3.5, 0) == "4", "Expected 3.5 to round to even 4")
+  try testing::assert(format(1.25, 1) == "1.2", "Expected 1.25 to round to even 1.2")
+  testing::assert(format(1.35, 1) == "1.4", "Expected 1.35 to round to even 1.4")
+}
+
+test fn test_format_allows_large_decimal_counts() Void!Str {
+  testing::assert(format(1.0, 101).size() == 103, "Expected large decimal counts to be supported")
+}

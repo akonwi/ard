@@ -96,6 +96,7 @@ func NewHost(config HostConfig) Host {
 		FSRename:             FSRename,
 		FSWriteFile:          FSWriteFile,
 		FloatFloor:           FloatFloor,
+		FloatFormat:          FloatFormat,
 		FloatFromInt:         FloatFromInt,
 		FloatFromStr:         FloatFromStr,
 		FloatToDynamic:       FloatToDynamic,
@@ -469,6 +470,13 @@ func FloatFromInt(value int) float64 {
 
 func FloatFloor(value float64) float64 {
 	return math.Floor(value)
+}
+
+func FloatFormat(value float64, decimals int) string {
+	if decimals < 0 {
+		decimals = 0
+	}
+	return strconv.FormatFloat(value, 'f', decimals, 64)
 }
 
 func IntFromStr(str string) Maybe[int] {

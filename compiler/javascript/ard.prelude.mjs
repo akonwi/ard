@@ -371,6 +371,57 @@ export function FloatFloor(value) {
   return Math.floor(value);
 }
 
+function float64Parts(value) {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, value, false);
+  const bits = view.getBigUint64(0, false);
+  const negative = (bits >> 63n) === 1n;
+  const exponentBits = Number((bits >> 52n) & 0x7ffn);
+  const fraction = bits & ((1n << 52n) - 1n);
+  if (exponentBits === 0) {
+    return { negative, mantissa: fraction, exponent: -1074 };
+  }
+  return { negative, mantissa: (1n << 52n) | fraction, exponent: exponentBits - 1075 };
+}
+
+function fixedDecimalString(scaled, decimals) {
+  let digits = scaled.toString();
+  if (decimals === 0) return digits;
+  if (digits.length <= decimals) digits = "0".repeat(decimals + 1 - digits.length) + digits;
+  const point = digits.length - decimals;
+  return digits.slice(0, point) + "." + digits.slice(point);
+}
+
+export function FloatFormat(value, decimals) {
+  value = Number(value);
+  decimals = Math.trunc(Number(decimals));
+  if (!Number.isFinite(decimals) || decimals < 0) decimals = 0;
+
+  if (Number.isNaN(value)) return "NaN";
+  if (!Number.isFinite(value)) return value < 0 ? "-Inf" : "+Inf";
+
+  const { negative, mantissa, exponent } = float64Parts(value);
+  const sign = negative ? "-" : "";
+  if (mantissa === 0n) return sign + fixedDecimalString(0n, decimals);
+
+  let numerator = mantissa * 10n ** BigInt(decimals);
+  let denominator = 1n;
+  if (exponent >= 0) {
+    numerator = numerator << BigInt(exponent);
+  } else {
+    denominator = denominator << BigInt(-exponent);
+  }
+
+  let scaled = numerator / denominator;
+  const remainder = numerator % denominator;
+  const twiceRemainder = remainder * 2n;
+  if (twiceRemainder > denominator || (twiceRemainder === denominator && scaled % 2n === 1n)) {
+    scaled += 1n;
+  }
+
+  return sign + fixedDecimalString(scaled, decimals);
+}
+
 function isValidByte(value) {
   return Number.isInteger(value) && value >= 0 && value <= 255;
 }
