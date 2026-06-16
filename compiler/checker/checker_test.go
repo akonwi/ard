@@ -127,6 +127,14 @@ func TestImports(t *testing.T) {
 			},
 		},
 		{
+			name: "direct Go imports are not resolved as Ard modules",
+			input: strings.Join([]string{
+				`use go:math`,
+				`extern fn floor(value: Float) Float = math::Floor`,
+			}, "\n"),
+			output: &checker.Program{},
+		},
+		{
 			name: "errors when importing unknowns from standard lib",
 			input: strings.Join([]string{
 				`use ard/foobar`,

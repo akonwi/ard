@@ -107,6 +107,47 @@ func TestFunctionDeclaration(t *testing.T) {
 			},
 		},
 		{
+			name:  "Extern function with direct Go namespace binding",
+			input: `extern fn floor(value: Float) Float = math::Floor`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ExternalFunction{
+						Name: "floor",
+						Parameters: []Parameter{{
+							Name: "value",
+							Type: &FloatType{},
+						}},
+						ReturnType:      &FloatType{},
+						ExternalBinding: "math::Floor",
+					},
+				},
+			},
+		},
+		{
+			name: "Extern function with direct Go namespace binding block",
+			input: `extern fn floor(value: Float) Float = {
+  go = math::Floor
+}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ExternalFunction{
+						Name: "floor",
+						Parameters: []Parameter{{
+							Name: "value",
+							Type: &FloatType{},
+						}},
+						ReturnType:      &FloatType{},
+						ExternalBinding: "math::Floor",
+						ExternalBindings: map[string]string{
+							"go": "math::Floor",
+						},
+					},
+				},
+			},
+		},
+		{
 			name:  "Empty function",
 			input: `fn empty() {}`,
 			output: Program{

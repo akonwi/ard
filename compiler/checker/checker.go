@@ -326,6 +326,11 @@ func (c *Checker) Check() {
 			continue
 		}
 
+		if imp.Kind == parse.ImportKindGo {
+			// Direct Go imports are resolved by the Go FFI resolver, not as Ard modules.
+			continue
+		}
+
 		if strings.HasPrefix(imp.Path, "ard/") {
 			// Handle standard library imports
 			if mod, ok := findInStdLib(imp.Path); ok {
