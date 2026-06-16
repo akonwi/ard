@@ -146,6 +146,32 @@ func goPackageFromTypes(importPath string, name string, pkg *types.Package) *GoP
 	return out
 }
 
+func (c *Checker) resolveDirectGoType(ty *parse.CustomType) Type {
+	if ty == nil || ty.Type.Target == nil {
+		return nil
+	}
+	alias, ok := ty.Type.Target.(*parse.Identifier)
+	if !ok {
+		return nil
+	}
+	property, ok := ty.Type.Property.(*parse.Identifier)
+	if !ok {
+		return nil
+	}
+	goImport, ok := c.directGoImports[alias.Name]
+	if !ok {
+		return nil
+	}
+	if goImport.pkg != nil {
+		if _, ok := goImport.pkg.Types[property.Name]; !ok {
+			c.addError(fmt.Sprintf("Go package %q has no exported type %q", goImport.importPath, property.Name), ty.GetLocation())
+			return &TypeVar{name: "unknown"}
+		}
+	}
+	binding := canonicalDirectGoBinding(goImport.importPath, []string{property.Name})
+	return &ExternType{Name_: ty.GetName(), ExternalBinding: binding, ExternalBindings: map[string]string{"go": binding}}
+}
+
 func (c *Checker) resolveDirectGoExternBinding(binding string, loc parse.Location) string {
 	parts, ok := directGoBindingParts(binding)
 	if !ok {

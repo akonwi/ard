@@ -741,6 +741,10 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			break
 		}
 		if ty.Type.Target != nil {
+			if goType := c.resolveDirectGoType(ty); goType != nil {
+				baseType = goType
+				break
+			}
 			mod := c.resolveModule(ty.Type.Target.(*parse.Identifier).Name)
 			if mod != nil {
 				// at some point, this will need to unwrap the property down to root for nested paths: `mod::sym::more`

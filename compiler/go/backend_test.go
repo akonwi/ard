@@ -3915,6 +3915,21 @@ fn main() Float { floor(1.2) }`)
 	}
 }
 
+func TestLowerDirectGoTypeReference(t *testing.T) {
+	program := lowerSource(t, `use go:time
+extern fn sleep(duration: time::Duration) Void = time::Sleep
+fn use_duration(duration: time::Duration) {
+  sleep(duration)
+}`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "time", "time") {
+		t.Fatal("generated AST missing time import")
+	}
+	if !astFilesHaveSelector(files, "time", "Duration") {
+		t.Fatal("generated AST missing time.Duration type reference")
+	}
+}
+
 func TestLowerDirectGoExternCoercesNamedScalarArguments(t *testing.T) {
 	program := lowerSource(t, `use go:time
 extern fn sleep(ms: Int) Void = time::Sleep

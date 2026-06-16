@@ -159,6 +159,18 @@ func (l *lowerer) directGoScalarNeedsConversion(ardType air.TypeID, goType check
 	}
 }
 
+func (l *lowerer) directGoExternTypeExpr(binding string) (ast.Expr, bool, error) {
+	direct, ok, err := parseDirectGoExternBinding(binding)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	if len(direct.Symbols) != 1 {
+		return nil, true, fmt.Errorf("direct Go extern type binding %q must be package::Type", binding)
+	}
+	alias := directGoImportAlias(direct.ImportPath)
+	return l.qualified(alias, direct.ImportPath, direct.Symbols[0]), true, nil
+}
+
 func (l *lowerer) directGoTypeExpr(goType checker.GoValueType) (ast.Expr, error) {
 	if goType.ImportPath != "" && goType.Package != "" {
 		l.currentImports[goType.Package] = goType.ImportPath

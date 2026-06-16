@@ -46,6 +46,34 @@ extern fn floor(value: Float) Float = math::Floor`), "main.ard")
 	}
 }
 
+func TestDirectGoTypeReferenceDoesNotRequireExternType(t *testing.T) {
+	result := parse.Parse([]byte(`use go:time
+extern fn sleep(duration: time::Duration) Void = time::Sleep`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"time": {
+			ImportPath: "time",
+			Name:       "time",
+			Functions:  map[string]GoFunction{"Sleep": {Name: "Sleep"}},
+			Types:      map[string]GoType{"Duration": {Name: "Duration"}},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+	fn := c.Module().Program().Statements[0].Expr.(*ExternalFunctionDef)
+	duration, ok := fn.Parameters[0].Type.(*ExternType)
+	if !ok {
+		t.Fatalf("param type = %#v, want ExternType", fn.Parameters[0].Type)
+	}
+	if duration.ExternalBinding != "go:time::Duration" {
+		t.Fatalf("duration binding = %q", duration.ExternalBinding)
+	}
+}
+
 func TestDirectGoExternBindingRequiresImportedAlias(t *testing.T) {
 	result := parse.Parse([]byte(`extern fn floor(value: Float) Float = math::Floor`), "main.ard")
 	if len(result.Errors) > 0 {

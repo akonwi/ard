@@ -2230,6 +2230,9 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return &ast.ChanType{Dir: ast.SEND | ast.RECV, Value: elem}, nil
 		}
 		if strings.TrimSpace(info.ExternBinding) != "" {
+			if typ, ok, err := l.directGoExternTypeExpr(info.ExternBinding); err != nil || ok {
+				return typ, err
+			}
 			if alias, ok := dependencyAliasForModulePath(info.ModulePath, l.projectInfo); ok {
 				return l.dependencyFFITypeExpr(alias, info.ExternBinding)
 			}
