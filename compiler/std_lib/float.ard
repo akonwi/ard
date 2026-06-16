@@ -1,15 +1,17 @@
 use ard/testing
 
+use go:math
+
 // Standard library Float module implemented with FFI
 // Provides float conversion and utility functions
 
 extern fn from_str(string: Str) Float? = "FloatFromStr"
 extern fn from_int(int: Int) Float = "FloatFromInt"
-extern fn floor(float: Float) Float = "FloatFloor"
-extern fn ceil(float: Float) Float = "FloatCeil"
+extern fn floor(float: Float) Float = math::Floor
+extern fn ceil(float: Float) Float = math::Ceil
 
 // Rounds to the nearest integer, with halfway cases rounded away from zero.
-extern fn round(float: Float) Float = "FloatRound"
+extern fn round(float: Float) Float = math::Round
 
 // Formats `value` with exactly `decimals` digits after the decimal point.
 // Negative `decimals` values are treated as `0`; halfway cases round to the nearest even digit.

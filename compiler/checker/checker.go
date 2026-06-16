@@ -285,6 +285,9 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 	}
 	if checkOptions.GoResolver == nil {
 		dir := filepath.Dir(filePath)
+		if strings.HasPrefix(modulePath, "ard/") {
+			dir = "."
+		}
 		if moduleResolver != nil && moduleResolver.project.RootPath != "" {
 			dir = moduleResolver.project.RootPath
 		}

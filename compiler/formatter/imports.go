@@ -27,6 +27,14 @@ func removeUnusedImports(program *parse.Program) {
 	program.Imports = imports
 }
 
+func collectImportUseInExternBinding(binding string, used map[string]bool) {
+	parts := strings.Split(binding, "::")
+	if len(parts) < 2 || strings.TrimSpace(parts[0]) == "" {
+		return
+	}
+	used[parts[0]] = true
+}
+
 func collectImportUsesInType(t parse.DeclaredType, used map[string]bool) {
 	switch v := t.(type) {
 	case *parse.MutableType:
@@ -106,6 +114,10 @@ func collectImportUsesInStatement(stmt parse.Statement, used map[string]bool) {
 		collectImportUsesInExpression(&s.Path, used)
 		collectImportUsesInStatement(&s.FunctionDeclaration, used)
 	case *parse.ExternalFunction:
+		collectImportUseInExternBinding(s.ExternalBinding, used)
+		for _, binding := range s.ExternalBindings {
+			collectImportUseInExternBinding(binding, used)
+		}
 		for _, p := range s.Parameters {
 			if p.Type != nil {
 				collectImportUsesInType(p.Type, used)

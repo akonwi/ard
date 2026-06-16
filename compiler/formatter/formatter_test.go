@@ -100,6 +100,11 @@ func TestFormat(t *testing.T) {
 			output: "extern fn floor(value: Float) Float = math::Floor\n",
 		},
 		{
+			name:   "keeps imports used only by extern bindings",
+			input:  "use go:math\nextern fn floor(value: Float) Float = math::Floor\n",
+			output: "use go:math\n\nextern fn floor(value: Float) Float = math::Floor\n",
+		},
+		{
 			name:   "formats extern type declaration",
 			input:  "extern type ConnectionPtr\n",
 			output: "extern type ConnectionPtr\n",

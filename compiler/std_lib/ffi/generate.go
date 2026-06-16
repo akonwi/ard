@@ -191,7 +191,7 @@ func loadContract(stdlibDir string) (contract, error) {
 				continue
 			}
 			binding := goBinding(node)
-			if binding == "" {
+			if binding == "" || directGoBinding(binding) {
 				continue
 			}
 			fn, err := lowerHostFunction(binding, node, aliases, definedTypes)
@@ -225,6 +225,10 @@ func goBinding(fn *parse.ExternalFunction) string {
 		return fn.ExternalBinding
 	}
 	return fn.ExternalBindings["go"]
+}
+
+func directGoBinding(binding string) bool {
+	return strings.Contains(binding, "::")
 }
 
 func goExternTypeBinding(typ *parse.ExternTypeDeclaration) string {
