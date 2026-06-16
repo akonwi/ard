@@ -870,6 +870,21 @@ func TestUsingValidTypesForUnionArguments(t *testing.T) {
 	})
 }
 
+func TestGroupedNullableFunctionTypes(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Grouped nullable function type supports Maybe APIs",
+			input: `
+				use ard/maybe
+
+				let f: (fn(Int) Void)? = maybe::none()
+				f.is_none()
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+	})
+}
+
 func TestTypeDoubleColonFunctionDefinition(t *testing.T) {
 	run(t, []test{
 		{

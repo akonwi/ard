@@ -31,6 +31,7 @@ type parser struct {
 	fileName               string
 	errors                 []ParseError
 	disallowStructInstance bool
+	inCallTypeArguments    bool
 }
 
 func Parse(source []byte, fileName string) ParseResult {
@@ -151,6 +152,17 @@ func (p *parser) synchronizeToBlockEnd() {
 	}
 }
 
+func adjacent(left Location, right *token) bool {
+	if right == nil || left.End.Row != right.line {
+		return false
+	}
+	endCol := left.End.Col
+	if endCol < left.Start.Col {
+		endCol = left.Start.Col
+	}
+	return endCol+1 == right.column
+}
+
 // synchronizeToTokens skips tokens until reaching one of the specified target tokens.
 // Automatically handles nesting when targeting closing brackets (}, ], ), >).
 func (p *parser) synchronizeToTokens(tokens ...kind) {
@@ -169,6 +181,13 @@ func (p *parser) synchronizeToTokens(tokens ...kind) {
 	for !p.isAtEnd() {
 		current := p.peek().kind
 
+		// Stop before consuming a requested top-level delimiter. Check this
+		// before decrementing nesting so an unmatched closer at the recovery
+		// boundary does not push nesting negative and skip past the delimiter.
+		if (!needsNesting || nestingLevel == 0) && slices.Contains(tokens, current) {
+			return
+		}
+
 		if needsNesting && nestingLevel == 0 && current == right_brace && !slices.Contains(tokens, right_brace) {
 			return // Don't consume an enclosing block while recovering an inner delimiter.
 		}
@@ -179,14 +198,9 @@ func (p *parser) synchronizeToTokens(tokens ...kind) {
 			case left_paren, left_bracket, left_brace, less_than:
 				nestingLevel++
 			case right_paren, right_bracket, right_brace, greater_than:
-				nestingLevel--
-			}
-		}
-
-		// Only stop at target tokens if nesting is balanced (or nesting not needed)
-		if !needsNesting || nestingLevel == 0 {
-			if slices.Contains(tokens, current) {
-				return // Found target token, stop here (don't consume it)
+				if nestingLevel > 0 {
+					nestingLevel--
+				}
 			}
 		}
 
@@ -1423,6 +1437,42 @@ func (p *parser) parseType() DeclaredType {
 		}
 	}
 
+	if p.match(left_paren) {
+		inner := p.parseType()
+		if inner == nil {
+			p.addError(p.peek(), "Expected type inside grouped type")
+			if p.match(right_paren) {
+				p.match(question_mark)
+			} else {
+				p.synchronizeToTokens(equal, new_line, right_paren)
+				if p.match(right_paren) {
+					p.match(question_mark)
+				}
+			}
+			return nil
+		}
+		if !p.match(right_paren) {
+			p.addError(p.peek(), "Expected ')' after grouped type")
+			p.synchronizeToTokens(equal, new_line, right_paren)
+			if p.match(right_paren) {
+				p.match(question_mark)
+			}
+			return inner
+		}
+		if p.match(question_mark) {
+			if inner.IsNullable() {
+				p.addError(p.previous(), "Grouped type is already nullable")
+				return inner
+			}
+			if _, ok := inner.(*MutableType); ok {
+				p.addError(p.previous(), "Mutable types cannot be nullable")
+				return inner
+			}
+			return nullableDeclaredType(inner)
+		}
+		return inner
+	}
+
 	static := p.parseStaticPath()
 	if static != nil {
 		// Parse generic type arguments if present
@@ -1506,8 +1556,12 @@ func (p *parser) parseType() DeclaredType {
 
 		// Expect closing paren (only if we had opening paren)
 		hasRightParen := false
+		var paramClose token
 		if hasLeftParen {
 			hasRightParen = p.match(right_paren)
+			if hasRightParen {
+				paramClose = *p.previous()
+			}
 			if !hasRightParen {
 				p.addError(p.peek(), "Expected ')' after function parameters")
 				// Skip until we find type boundaries
@@ -1518,8 +1572,13 @@ func (p *parser) parseType() DeclaredType {
 		// Parse return type directly (no arrow in Ard syntax)
 		// Return type is optional - if omitted, implicitly returns Void
 		var returnType DeclaredType
-		if !p.check(right_bracket) && !p.check(right_paren) && !p.check(comma) && !p.check(equal) && !p.check(new_line) {
+		returnStartsAdjacentCallArgs := p.startsAdjacentCallArgsAfterFunctionType(paramClose, hasRightParen)
+		if !p.check(right_bracket) && !p.check(right_paren) && !p.check(comma) && !p.check(equal) && !p.check(new_line) && !returnStartsAdjacentCallArgs {
 			returnType = p.parseType()
+		}
+
+		if isNullableVoidType(returnType) {
+			p.addError(p.previous(), "Function type return cannot be Void?; use (fn(...) Void)? for a nullable function")
 		}
 
 		// Check for nullable
@@ -1638,6 +1697,61 @@ func (p *parser) parseType() DeclaredType {
 	}
 
 	return nil
+}
+
+func (p *parser) startsAdjacentCallArgsAfterFunctionType(paramClose token, hasRightParen bool) bool {
+	if !p.inCallTypeArguments || !hasRightParen || !p.check(left_paren) || !adjacent(paramClose.getLocation(), p.peek()) {
+		return false
+	}
+
+	savedIndex := p.index
+	savedErrorCount := len(p.errors)
+	groupedReturn := p.parseType()
+	canBeGroupedReturn := groupedReturn != nil && len(p.errors) == savedErrorCount && p.isCallTypeArgumentDelimiter()
+	p.index = savedIndex
+	p.errors = p.errors[:savedErrorCount]
+
+	return !canBeGroupedReturn
+}
+
+func (p *parser) isCallTypeArgumentDelimiter() bool {
+	return p.check(greater_than) || p.check(comma) || p.check(right_bracket) || p.check(right_paren)
+}
+
+func isNullableVoidType(t DeclaredType) bool {
+	if t == nil || !t.IsNullable() {
+		return false
+	}
+	_, ok := t.(*VoidType)
+	return ok
+}
+
+func nullableDeclaredType(t DeclaredType) DeclaredType {
+	switch ty := t.(type) {
+	case *StringType:
+		ty.nullable = true
+	case *IntType:
+		ty.nullable = true
+	case *FloatType:
+		ty.nullable = true
+	case *BooleanType:
+		ty.nullable = true
+	case *VoidType:
+		ty.nullable = true
+	case *List:
+		ty.nullable = true
+	case *Map:
+		ty.nullable = true
+	case *CustomType:
+		ty.nullable = true
+	case *GenericType:
+		ty.nullable = true
+	case *ResultType:
+		ty.nullable = true
+	case *FunctionType:
+		ty.Nullable = true
+	}
+	return t
 }
 
 func (p *parser) parseNamedType() DeclaredType {
@@ -2923,114 +3037,10 @@ func (p *parser) memberAccess() (Expression, error) {
 				}
 			}
 		} else {
-			// Check for type arguments in static function calls
-			if p.check(identifier, less_than) {
-				// This is a static function call with type arguments
-				if !p.match(identifier) {
-					p.addError(p.peek(), "Expected function name")
-					p.synchronizeToTokens(left_paren)
-					return nil, nil
-				}
-
-				funcName := p.previous()
-
-				// Parse type arguments
-				if !p.check(less_than) {
-					p.addError(p.peek(), "Expected '<'")
-					p.synchronizeToTokens(less_than, left_paren)
-					if !p.check(less_than) {
-						// Could not find '<', skip type arguments and try regular function call
-						return nil, nil
-					}
-				}
-				p.advance() // consume the '<'
-
-				typeArgs := []DeclaredType{}
-
-				typeArg := p.parseType()
-				typeArgs = append(typeArgs, typeArg)
-
-				for p.match(comma) {
-					typeArg = p.parseType()
-					typeArgs = append(typeArgs, typeArg)
-				}
-
-				if !p.check(greater_than) {
-					p.addError(p.peek(), "Expected '>' after type arguments")
-					p.synchronizeToTokens(greater_than, left_paren)
-					if !p.check(greater_than) {
-						// Could not find '>', skip to function arguments or bail
-						if !p.check(left_paren) {
-							return nil, nil
-						}
-					} else {
-						p.advance() // consume the '>'
-					}
-				} else {
-					p.advance() // consume the '>'
-				}
-
-				// Parse arguments
-				if !p.check(left_paren) {
-					p.addError(p.peek(), "Expected '(' after type arguments")
-					p.synchronizeToTokens(left_paren)
-					if !p.check(left_paren) {
-						// Could not find '(', skip this function call
-						return nil, nil
-					}
-				}
-				p.advance() // consume the '('
-
-				p.match(new_line)
-				args, argComments, err := p.parseFunctionArguments()
-				if err != nil {
-					return nil, err
-				}
-
-				if !p.check(right_paren) {
-					p.addError(p.peek(), "Expected ')' to close function call")
-					p.synchronizeToTokens(right_paren)
-					if !p.check(right_paren) {
-						// Could not find ')', return partial function call
-						return &StaticFunction{
-							Location: Location{
-								Start: expr.GetLocation().Start,
-								End:   Point{Row: funcName.line, Col: funcName.column},
-							},
-							Target: expr,
-							Function: FunctionCall{
-								Name:     funcName.text,
-								TypeArgs: typeArgs,
-								Args:     args,
-								Comments: argComments,
-								Location: Location{
-									Start: expr.GetLocation().Start,
-									End:   Point{Row: funcName.line, Col: funcName.column},
-								},
-							},
-						}, nil
-					}
-				}
-				p.advance() // consume the ')'
-
-				// Create the StaticFunction with type arguments
-				expr = &StaticFunction{
-					Location: Location{
-						Start: expr.GetLocation().Start,
-						End:   Point{Row: p.previous().line, Col: p.previous().column},
-					},
-					Target: expr,
-					Function: FunctionCall{
-						Name:     funcName.text,
-						TypeArgs: typeArgs,
-						Args:     args,
-						Comments: argComments,
-						Location: Location{
-							Start: Point{Row: funcName.line, Col: funcName.column},
-							End:   Point{Row: p.previous().line, Col: p.previous().column},
-						},
-					},
-				}
+			if staticCall, ok, err := p.tryStaticGenericFunctionCall(expr); err != nil {
+				return nil, err
+			} else if ok {
+				expr = staticCall
 			} else {
 				call, err := p.call()
 				if err != nil {
@@ -3063,6 +3073,149 @@ func (p *parser) memberAccess() (Expression, error) {
 	return expr, nil
 }
 
+func (p *parser) tryStaticGenericFunctionCall(target Expression) (Expression, bool, error) {
+	if !p.check(identifier, less_than) || !adjacent(p.peek().getLocation(), &p.tokens[p.index+1]) {
+		return nil, false, nil
+	}
+
+	savedIndex := p.index
+	savedErrorCount := len(p.errors)
+
+	funcName := p.advance()
+	p.advance() // consume the '<'
+	typeArgs := p.parseCallTypeArguments()
+
+	hasTypeArgsOrErrors := len(typeArgs) > 0 || len(p.errors) > savedErrorCount
+	hasGreaterThenCall := p.check(greater_than) && p.index+1 < len(p.tokens) && p.tokens[p.index+1].kind == left_paren && hasTypeArgsOrErrors
+	missingGreaterBeforeCall := !p.check(greater_than) && p.check(left_paren) && (hasUnambiguousCallTypeArgs(typeArgs) || len(p.errors) > savedErrorCount)
+	if !hasGreaterThenCall && !missingGreaterBeforeCall {
+		p.index = savedIndex
+		p.errors = p.errors[:savedErrorCount]
+		return nil, false, nil
+	}
+
+	if hasGreaterThenCall {
+		p.advance() // consume the '>'
+	} else {
+		p.addError(p.peek(), "Expected '>' after type arguments")
+	}
+	p.advance() // consume the '('
+	p.match(new_line)
+	args, argComments, err := p.parseFunctionArguments()
+	if err != nil {
+		return nil, true, err
+	}
+
+	if !p.check(right_paren) {
+		p.addError(p.peek(), "Expected ')' to close function call")
+		p.synchronizeToTokens(right_paren)
+		if !p.check(right_paren) {
+			return &StaticFunction{
+				Location: Location{
+					Start: target.GetLocation().Start,
+					End:   Point{Row: funcName.line, Col: funcName.column},
+				},
+				Target: target,
+				Function: FunctionCall{
+					Name:     funcName.text,
+					TypeArgs: typeArgs,
+					Args:     args,
+					Comments: argComments,
+					Location: Location{
+						Start: target.GetLocation().Start,
+						End:   Point{Row: funcName.line, Col: funcName.column},
+					},
+				},
+			}, true, nil
+		}
+	}
+	p.advance() // consume the ')'
+
+	return &StaticFunction{
+		Location: Location{
+			Start: target.GetLocation().Start,
+			End:   Point{Row: p.previous().line, Col: p.previous().column},
+		},
+		Target: target,
+		Function: FunctionCall{
+			Name:     funcName.text,
+			TypeArgs: typeArgs,
+			Args:     args,
+			Comments: argComments,
+			Location: Location{
+				Start: Point{Row: funcName.line, Col: funcName.column},
+				End:   Point{Row: p.previous().line, Col: p.previous().column},
+			},
+		},
+	}, true, nil
+}
+
+func (p *parser) parseCallTypeArguments() []DeclaredType {
+	wasInCallTypeArguments := p.inCallTypeArguments
+	p.inCallTypeArguments = true
+	defer func() { p.inCallTypeArguments = wasInCallTypeArguments }()
+
+	typeArgs := []DeclaredType{}
+	if p.check(greater_than) {
+		p.addError(p.peek(), "Expected type argument")
+		return typeArgs
+	}
+
+	for {
+		if p.check(greater_than) {
+			p.addError(p.peek(), "Expected type argument")
+			break
+		}
+		typeArg := p.parseType()
+		if typeArg != nil {
+			typeArgs = append(typeArgs, typeArg)
+		}
+		if !p.match(comma) {
+			break
+		}
+	}
+	return typeArgs
+}
+
+func hasUnambiguousCallTypeArgs(typeArgs []DeclaredType) bool {
+	if len(typeArgs) == 0 {
+		return false
+	}
+	for _, typeArg := range typeArgs {
+		if !isUnambiguousCallTypeArg(typeArg) {
+			return false
+		}
+	}
+	return true
+}
+
+func hasFunctionTypeCallTypeArgs(typeArgs []DeclaredType) bool {
+	if len(typeArgs) == 0 {
+		return false
+	}
+	for _, typeArg := range typeArgs {
+		if _, ok := typeArg.(*FunctionType); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func isUnambiguousCallTypeArg(typeArg DeclaredType) bool {
+	switch ty := typeArg.(type) {
+	case *IntType, *FloatType, *StringType, *BooleanType, *VoidType, *GenericType, *FunctionType, *List, *Map, *ResultType, *MutableType:
+		return true
+	case *CustomType:
+		return strings.Contains(ty.Name, "::") || startsUppercase(ty.Name) || len(ty.TypeArgs) > 0
+	default:
+		return false
+	}
+}
+
+func startsUppercase(name string) bool {
+	return len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z'
+}
+
 func (p *parser) call() (Expression, error) {
 	expr, err := p.primary()
 	if err != nil {
@@ -3076,25 +3229,32 @@ func (p *parser) call() (Expression, error) {
 	// Only parse as type arguments if we have an identifier followed by <
 	_, isIdentifier := expr.(*Identifier)
 
-	if isIdentifier && p.check(less_than) && !p.check(less_than, number) && !p.check(less_than, identifier, less_than) {
+	if isIdentifier && p.check(less_than) && !p.check(less_than, number) && !p.check(less_than, identifier, less_than) && adjacent(expr.GetLocation(), p.peek()) {
 		// Look ahead to see if this is a type argument or a comparison
 		p.advance() // consume the '<'
 
-		// Save position so we can rewind if this isn't a type argument
+		// Save position and errors so we can rewind if this isn't a type argument
 		savedIndex := p.index
+		savedErrorCount := len(p.errors)
 
-		// Try to parse as a type
-		typeArg := p.parseType()
+		// Try to parse type arguments
+		typeArgs := p.parseCallTypeArguments()
 
-		// If we have a '>' after parsing the type, this is probably a type argument
-		if p.check(greater_than) {
-			p.advance() // consume the '>'
+		// If type arguments are followed by a call, this is a generic call. Keep
+		// type diagnostics when the call shape is otherwise clear, including recovery
+		// for a missing '>' before the argument list.
+		hasTypeArgsOrErrors := len(typeArgs) > 0 || len(p.errors) > savedErrorCount
+		hasGreaterThenCall := p.check(greater_than) && p.index+1 < len(p.tokens) && p.tokens[p.index+1].kind == left_paren && hasTypeArgsOrErrors
+		missingGreaterBeforeCall := !p.check(greater_than) && p.check(left_paren) && hasFunctionTypeCallTypeArgs(typeArgs)
+		if hasGreaterThenCall || missingGreaterBeforeCall {
+			if hasGreaterThenCall {
+				p.advance() // consume the '>'
+			} else {
+				p.addError(p.peek(), "Expected '>' after type arguments")
+			}
 
 			// If a left parenthesis follows, this is definitely a generic function call
 			if p.check(left_paren) {
-				// This is a function call with generic type arguments
-				typeArgs := []DeclaredType{typeArg}
-
 				// Parse arguments
 				if !p.check(left_paren) {
 					p.addError(p.peek(), "Expected '(' after type arguments")
@@ -3145,6 +3305,7 @@ func (p *parser) call() (Expression, error) {
 
 		// Rewind if this wasn't a type argument
 		p.index = savedIndex - 1 // go back to before the '<'
+		p.errors = p.errors[:savedErrorCount]
 	}
 
 	// Check for struct instantiation syntax: Name { field: value, ... }

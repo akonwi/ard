@@ -136,6 +136,113 @@ func TestFunctionTypes(t *testing.T) {
 			input:    "let f: fn(Int, String) Bool = test",
 			wantErrs: []string{},
 		},
+		{
+			name:  "Grouped nullable function type",
+			input: "let f: (fn(Int) Void)? = test",
+			output: Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name: "f",
+						Type: &FunctionType{
+							Params:   []DeclaredType{&IntType{}},
+							Return:   &VoidType{},
+							Nullable: true,
+						},
+						Value: &Identifier{Name: "test"},
+					},
+				},
+			},
+		},
+		{
+			name:     "Function type returning nullable void is rejected",
+			input:    "let f: fn(Int) Void? = test",
+			wantErrs: []string{"Function type return cannot be Void?; use (fn(...) Void)? for a nullable function"},
+		},
+		{
+			name:     "Empty grouped type is rejected",
+			input:    "let f: ()? = test",
+			wantErrs: []string{"Expected type inside grouped type"},
+		},
+		{
+			name:     "Grouped nullable mutable type is rejected",
+			input:    "let f: (mut Int)? = test",
+			wantErrs: []string{"Mutable types cannot be nullable"},
+		},
+		{
+			name:     "Already nullable grouped type is rejected",
+			input:    "let f: (Int?)? = test",
+			wantErrs: []string{"Grouped type is already nullable"},
+		},
+		{
+			name:     "Malformed grouped type recovers at closing paren",
+			input:    "let f: (Int String) = test",
+			wantErrs: []string{"Expected ')' after grouped type"},
+		},
+		{
+			name:     "Malformed grouped type recovers past comma",
+			input:    "let f: (Int, String) = test",
+			wantErrs: []string{"Expected ')' after grouped type"},
+		},
+		{
+			name:     "Malformed grouped nullable type consumes question mark during recovery",
+			input:    "let f: (Int, String)? = test",
+			wantErrs: []string{"Expected ')' after grouped type"},
+		},
+		{
+			name:     "Invalid grouped type recovers at closing paren",
+			input:    "let f: (@) = test",
+			wantErrs: []string{"Expected type inside grouped type"},
+		},
+	})
+}
+
+func TestGenericCallTypeArgumentDiagnostics(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:     "Invalid generic function type argument keeps type diagnostic",
+			input:    "foo<fn(Int) Void?>()",
+			wantErrs: []string{"Function type return cannot be Void?; use (fn(...) Void)? for a nullable function"},
+		},
+		{
+			name:     "Missing generic function type argument keeps type diagnostic",
+			input:    "foo<()>()",
+			wantErrs: []string{"Expected type inside grouped type"},
+		},
+		{
+			name:     "Empty static generic function type argument is rejected",
+			input:    "maybe::none<>()",
+			wantErrs: []string{"Expected type argument"},
+		},
+		{
+			name:     "Invalid static generic function type argument keeps type diagnostic",
+			input:    "maybe::none<()>()",
+			wantErrs: []string{"Expected type inside grouped type"},
+		},
+		{
+			name:     "Static generic function call missing greater than is diagnosed",
+			input:    `json::parse<Int("1")`,
+			wantErrs: []string{"Expected '>' after type arguments"},
+		},
+		{
+			name:     "Generic function call with implicit void function type argument missing greater than is diagnosed",
+			input:    "foo<fn(Int)()",
+			wantErrs: []string{"Expected '>' after type arguments"},
+		},
+		{
+			name:     "Static generic function call with implicit void function type argument missing greater than is diagnosed",
+			input:    "maybe::none<fn(Int)()",
+			wantErrs: []string{"Expected '>' after type arguments"},
+		},
+		{
+			name:     "Generic function call with implicit void function type argument and arguments missing greater than is diagnosed",
+			input:    "foo<fn(Int)(1)",
+			wantErrs: []string{"Expected '>' after type arguments"},
+		},
+		{
+			name:     "Static generic function call with implicit void function type argument and arguments missing greater than is diagnosed",
+			input:    "maybe::none<fn(Int)(1)",
+			wantErrs: []string{"Expected '>' after type arguments"},
+		},
 	})
 }
 

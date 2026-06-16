@@ -172,3 +172,13 @@ let operation: fn(Int, Int) Int = add
 let printer: fn(Str) = io::print
 let generator: fn() Int = get_random_number
 ```
+
+Use `?` after the function type for nullable function values. If the function type has an explicit return type, wrap the whole type in parentheses so the `?` applies to the function instead of the return type:
+
+```ard
+let optional_printer: fn(Str)? = maybe::none()          // nullable fn(Str) Void
+let optional_mapper: (fn(Int) Str)? = maybe::none()    // nullable fn(Int) Str
+let maybe_name: fn(Int) Str? = lookup_name             // non-null function returning Str?
+```
+
+`fn(Int) Void?` is rejected because it is ambiguous and usually means an optional callback. Use `fn(Int)?` or `(fn(Int) Void)?` instead.

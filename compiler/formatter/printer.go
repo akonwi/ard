@@ -832,7 +832,10 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 		return maybeNullable("["+p.renderType(node.Key)+": "+p.renderType(node.Value)+"]", node.IsNullable())
 	case *parse.ResultType:
 		name := p.renderType(node.Val) + "!" + p.renderType(node.Err)
-		return maybeNullable(name, node.IsNullable())
+		if node.IsNullable() {
+			return "(" + name + ")?"
+		}
+		return name
 	case *parse.FunctionType:
 		params := make([]string, 0, len(node.Params))
 		for i, item := range node.Params {
@@ -845,6 +848,9 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 		name := "fn(" + strings.Join(params, ", ") + ")"
 		if node.Return != nil {
 			name += " " + p.renderType(node.Return)
+		}
+		if node.IsNullable() && node.Return != nil {
+			return "(" + name + ")?"
 		}
 		return maybeNullable(name, node.IsNullable())
 	default:

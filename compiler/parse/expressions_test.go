@@ -6,6 +6,109 @@ import (
 	"time"
 )
 
+func TestGenericCallLookaheadDoesNotLeakTypeErrorsIntoComparisons(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "Comparison against parenthesized expression",
+			input: "a < (b + c)",
+		},
+		{
+			name:  "Generic function type argument with grouped return parses without spaces",
+			input: "foo<fn(Int)(fn() Void)>()",
+		},
+		{
+			name:  "Static generic function type argument with grouped return parses without spaces",
+			input: "maybe::none<fn(Int)(Str)>()",
+		},
+		{
+			name:  "Nested function type argument with grouped return parses without hanging",
+			input: "maybe::none<[fn(Int)(Str)]>()",
+		},
+		{
+			name:  "Chained comparison against parenthesized expressions",
+			input: "a < (b + c) > (d)",
+		},
+		{
+			name:  "Chained comparison against parenthesized identifiers",
+			input: "a < (b) > (d)",
+		},
+		{
+			name:  "No-space comparison against function call is not a generic call",
+			input: "a<foo(2)",
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: LessThan,
+						Left:     &Identifier{Name: "a"},
+						Right: &FunctionCall{
+							Name:     "foo",
+							Args:     []Argument{{Name: "", Value: &NumLiteral{Value: "2"}}},
+							Comments: []Comment{},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "No-space comparison against type-like function call is not a generic call",
+			input: "a<Int(2)",
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: LessThan,
+						Left:     &Identifier{Name: "a"},
+						Right: &FunctionCall{
+							Name:     "Int",
+							Args:     []Argument{{Name: "", Value: &NumLiteral{Value: "2"}}},
+							Comments: []Comment{},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "No-space comparison against static function call is not a generic call",
+			input: "a<Response::new(2)",
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: LessThan,
+						Left:     &Identifier{Name: "a"},
+						Right: &StaticFunction{
+							Target: &Identifier{Name: "Response"},
+							Function: FunctionCall{
+								Name:     "new",
+								Args:     []Argument{{Name: "", Value: &NumLiteral{Value: "2"}}},
+								Comments: []Comment{},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "Static property comparison is not a static generic call",
+			input: "foo::bar < baz",
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: LessThan,
+						Left: &StaticProperty{
+							Target:   &Identifier{Name: "foo"},
+							Property: &Identifier{Name: "bar"},
+						},
+						Right: &Identifier{Name: "baz"},
+					},
+				},
+			},
+		},
+	})
+}
+
 func TestListLiterals(t *testing.T) {
 	runTests(t, []test{
 		{

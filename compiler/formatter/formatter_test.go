@@ -225,6 +225,21 @@ func TestFormat(t *testing.T) {
 			output: "struct Request {\n  body: Dynamic?,\n\n  // inbound requests have the *http.Request\n  raw: Dynamic?,\n}\n",
 		},
 		{
+			name:   "formats nullable function type with explicit return using grouping",
+			input:  "let handler: (fn(Int) Void)? = maybe::none()\n",
+			output: "let handler: (fn(Int) Void)? = maybe::none()\n",
+		},
+		{
+			name:   "formats nullable function type with implicit void return",
+			input:  "let handler: fn(Int)? = maybe::none()\n",
+			output: "let handler: fn(Int)? = maybe::none()\n",
+		},
+		{
+			name:   "formats nullable result type with grouping",
+			input:  "let result: (Int!Str)? = maybe::none()\n",
+			output: "let result: (Int!Str)? = maybe::none()\n",
+		},
+		{
 			name:   "formats test function",
 			input:  "test fn my_test() Void!Str { Result::ok(()) }",
 			output: "test fn my_test() Void!Str {\n  Result::ok(())\n}\n",
