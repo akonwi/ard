@@ -297,7 +297,7 @@ func (l *airJSLowerer) lowerModule(module air.Module, invokeRoot bool) (string, 
 	outputPath := l.moduleFiles[module.ID]
 	preludeImport := relativeJSImport(outputPath, "ard.prelude.mjs")
 	imports := []string{
-		jsNamedImportLine([]string{"Maybe", "Result", "ardEq", "ardToString", "makeArdError", "makeEnum", "isEnumOf", "isVoid"}, preludeImport),
+		jsNamedImportLine([]string{"Maybe", "Result", "ardEq", "ardEnumValue", "ardToString", "makeArdError", "makeEnum", "isEnumOf", "isVoid"}, preludeImport),
 		jsNamespaceImportLine("prelude", preludeImport),
 	}
 	ffi := l.collectFFIArtifacts()
@@ -1000,13 +1000,13 @@ func (l *airJSLowerer) lowerExpr(fn air.Function, expr air.Expr) (string, error)
 	case air.ExprFloatDiv:
 		return l.lowerBinaryOp(fn, expr, "/")
 	case air.ExprLt:
-		return l.lowerBinaryOp(fn, expr, "<")
+		return l.lowerComparisonOp(fn, expr, "<")
 	case air.ExprLte:
-		return l.lowerBinaryOp(fn, expr, "<=")
+		return l.lowerComparisonOp(fn, expr, "<=")
 	case air.ExprGt:
-		return l.lowerBinaryOp(fn, expr, ">")
+		return l.lowerComparisonOp(fn, expr, ">")
 	case air.ExprGte:
-		return l.lowerBinaryOp(fn, expr, ">=")
+		return l.lowerComparisonOp(fn, expr, ">=")
 	case air.ExprEq:
 		left, right, err := l.lowerBinaryParts(fn, expr)
 		if err != nil {
@@ -2082,6 +2082,18 @@ func (l *airJSLowerer) lowerBinaryOp(fn air.Function, expr air.Expr, op string) 
 	left, right, err := l.lowerBinaryParts(fn, expr)
 	if err != nil {
 		return "", err
+	}
+	return renderJSExpr(jsBinaryExprIR{Left: rawJSExpr(left), Op: op, Right: rawJSExpr(right)}), nil
+}
+
+func (l *airJSLowerer) lowerComparisonOp(fn air.Function, expr air.Expr, op string) (string, error) {
+	left, right, err := l.lowerBinaryParts(fn, expr)
+	if err != nil {
+		return "", err
+	}
+	if expr.Left != nil && expr.Right != nil && (l.typeKind(expr.Left.Type) == air.TypeEnum || l.typeKind(expr.Right.Type) == air.TypeEnum) {
+		left = renderJSExpr(jsCallExprIR{Callee: "ardEnumValue", Args: []string{left}})
+		right = renderJSExpr(jsCallExprIR{Callee: "ardEnumValue", Args: []string{right}})
 	}
 	return renderJSExpr(jsBinaryExprIR{Left: rawJSExpr(left), Op: op, Right: rawJSExpr(right)}), nil
 }

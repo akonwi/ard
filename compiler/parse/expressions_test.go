@@ -413,6 +413,24 @@ func TestBinaryExpressions(t *testing.T) {
 			},
 		},
 		{
+			name:  "Valid number not equal checks",
+			input: `1 != 2`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&BinaryExpression{
+						Operator: NotEqual,
+						Left: &NumLiteral{
+							Value: `1`,
+						},
+						Right: &NumLiteral{
+							Value: `2`,
+						},
+					},
+				},
+			},
+		},
+		{
 			name:  "Valid boolean equality checks",
 			input: `true == false`,
 			output: Program{
@@ -891,6 +909,23 @@ func TestChainedComparisons(t *testing.T) {
 							&NumLiteral{Value: "1"},
 						},
 						Operators: []Operator{Equal, Equal},
+					},
+				},
+			},
+		},
+		{
+			name:  "Chained comparison with inequality operators",
+			input: `1 != x != 1`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&ChainedComparison{
+						Operands: []Expression{
+							&NumLiteral{Value: "1"},
+							&Identifier{Name: "x"},
+							&NumLiteral{Value: "1"},
+						},
+						Operators: []Operator{NotEqual, NotEqual},
 					},
 				},
 			},

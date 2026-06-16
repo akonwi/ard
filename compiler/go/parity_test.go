@@ -1107,6 +1107,41 @@ func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
 			`,
 		},
 		{
+			name: "primitive enum and int inequality",
+			input: `
+				enum Direction { Up, Down, Left, Right }
+				fn main() Bool {
+					let dir1 = Direction::Up
+					let dir2 = Direction::Down
+					let code: Int = 1
+					1 != 2 and "a" != "b" and dir1 != dir2 and dir1 != code and code != dir1
+				}
+			`,
+		},
+		{
+			name: "enum and int relational comparison",
+			input: `
+				enum Direction { Up, Down, Left, Right }
+				fn main() Bool {
+					let dir = Direction::Down
+					let code: Int = 2
+					dir < code and code >= dir
+				}
+			`,
+		},
+		{
+			name: "enum and int comparison with int parameter",
+			input: `
+				enum Direction { Up, Down, Left, Right }
+				fn differs(int: Int) Bool {
+					Direction::Up != int
+				}
+				fn main() Bool {
+					differs(1)
+				}
+			`,
+		},
+		{
 			name: "union matching",
 			input: `
 				type Printable = Str | Int | Bool

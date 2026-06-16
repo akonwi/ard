@@ -17,7 +17,7 @@ if temperature > 30 {
 }
 ```
 
-Conditions must be boolean expressions. There are no implicit truthy/falsy coercions.
+Conditions must be boolean expressions. There are no implicit truthy/falsy coercions. Comparison operators include `==`, `!=`, `<`, `<=`, `>`, and `>=`; combine boolean expressions with `and`, `or`, and `not`.
 
 ## Loops
 

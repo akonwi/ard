@@ -1577,6 +1577,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
+		l.castEnumIntComparisonOperands(&left, leftTypeID, &right, rightTypeID)
 		var equality ast.Expr = &ast.BinaryExpr{X: left.expr, Op: l.binaryToken(expr.Kind), Y: right.expr}
 		if l.isMaybeType(leftTypeID) || l.isMaybeType(rightTypeID) {
 			equality = &ast.CallExpr{Fun: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "MaybeEqual"), Args: []ast.Expr{left.expr, right.expr}}
@@ -1589,6 +1590,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		air.ExprFloatAdd, air.ExprFloatSub, air.ExprFloatMul, air.ExprFloatDiv,
 		air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte,
 		air.ExprAnd, air.ExprOr, air.ExprStrConcat:
+		leftTypeID := l.resolvedExprType(fn, *expr.Left)
+		rightTypeID := l.resolvedExprType(fn, *expr.Right)
 		left, err := l.lowerExpr(fn, *expr.Left)
 		if err != nil {
 			return loweredExpr{}, err
@@ -1596,6 +1599,9 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		right, err := l.lowerExpr(fn, *expr.Right)
 		if err != nil {
 			return loweredExpr{}, err
+		}
+		if isComparisonKind(expr.Kind) {
+			l.castEnumIntComparisonOperands(&left, leftTypeID, &right, rightTypeID)
 		}
 		return loweredExpr{
 			stmts: append(left.stmts, right.stmts...),
@@ -1842,6 +1848,41 @@ func (l *lowerer) binaryToken(kind air.ExprKind) token.Token {
 	default:
 		return token.ILLEGAL
 	}
+}
+
+func isComparisonKind(kind air.ExprKind) bool {
+	switch kind {
+	case air.ExprLt, air.ExprLte, air.ExprGt, air.ExprGte:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *lowerer) castEnumIntComparisonOperands(left *loweredExpr, leftTypeID air.TypeID, right *loweredExpr, rightTypeID air.TypeID) {
+	leftInfo, leftOK := l.typeInfo(leftTypeID)
+	rightInfo, rightOK := l.typeInfo(rightTypeID)
+	if !leftOK || !rightOK {
+		return
+	}
+
+	if leftInfo.Kind == air.TypeEnum && rightInfo.Kind == air.TypeInt {
+		right.expr = castGoExprToType(right.expr, typeName(l.program, leftInfo))
+	}
+	if leftInfo.Kind == air.TypeInt && rightInfo.Kind == air.TypeEnum {
+		left.expr = castGoExprToType(left.expr, typeName(l.program, rightInfo))
+	}
+}
+
+func castGoExprToType(expr ast.Expr, typ string) ast.Expr {
+	return &ast.CallExpr{Fun: ast.NewIdent(typ), Args: []ast.Expr{expr}}
+}
+
+func (l *lowerer) typeInfo(id air.TypeID) (air.TypeInfo, bool) {
+	if id <= 0 || int(id) > len(l.program.Types) {
+		return air.TypeInfo{}, false
+	}
+	return l.program.Types[id-1], true
 }
 
 func (l *lowerer) voidTypeExpr() ast.Expr {

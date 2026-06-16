@@ -2789,7 +2789,7 @@ func (p *parser) comparison() (Expression, error) {
 	}
 
 	// Check if first token is a comparison operator
-	if !p.match(greater_than, greater_than_equal, less_than, less_than_equal, equal_equal) {
+	if !p.match(greater_than, greater_than_equal, less_than, less_than_equal, equal_equal, bang_equal) {
 		return left, nil
 	}
 
@@ -2807,6 +2807,8 @@ func (p *parser) comparison() (Expression, error) {
 		operator = LessThanOrEqual
 	case equal_equal:
 		operator = Equal
+	case bang_equal:
+		operator = NotEqual
 	}
 
 	right, err := p.modulo()
@@ -2815,7 +2817,7 @@ func (p *parser) comparison() (Expression, error) {
 	}
 
 	// Check for chained comparisons (is the next token also a comparison operator?)
-	comparisonOps := []kind{greater_than, greater_than_equal, less_than, less_than_equal, equal_equal}
+	comparisonOps := []kind{greater_than, greater_than_equal, less_than, less_than_equal, equal_equal, bang_equal}
 	if slices.Contains(comparisonOps, p.peek().kind) {
 		// This is a chained comparison
 		operands := []Expression{left, right}
@@ -2824,7 +2826,7 @@ func (p *parser) comparison() (Expression, error) {
 
 		// Keep consuming comparison operators and operands
 		for slices.Contains(comparisonOps, p.peek().kind) {
-			if !p.match(greater_than, greater_than_equal, less_than, less_than_equal, equal_equal) {
+			if !p.match(greater_than, greater_than_equal, less_than, less_than_equal, equal_equal, bang_equal) {
 				break
 			}
 
@@ -2841,6 +2843,8 @@ func (p *parser) comparison() (Expression, error) {
 				op = LessThanOrEqual
 			case equal_equal:
 				op = Equal
+			case bang_equal:
+				op = NotEqual
 			}
 
 			nextRight, err := p.modulo()

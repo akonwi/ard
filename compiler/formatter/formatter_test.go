@@ -270,6 +270,11 @@ func TestFormat(t *testing.T) {
 			output: "fn is_valid(a: Bool, b: Bool, c: Bool, d: Bool) Bool {\n  a or b or c or d\n}\n",
 		},
 		{
+			name:   "formats not equal operator spacing",
+			input:  "fn is_new(status: Str) Bool {\n  status!=\"done\"\n}\n",
+			output: "fn is_new(status: Str) Bool {\n  status != \"done\"\n}\n",
+		},
+		{
 			name:   "keeps not with and expression unparenthesized",
 			input:  "fn should_assign(assigned: Bool, due: Bool) Bool {\n  not assigned and due\n}\n",
 			output: "fn should_assign(assigned: Bool, due: Bool) Bool {\n  not assigned and due\n}\n",
