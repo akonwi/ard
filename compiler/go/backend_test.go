@@ -3915,6 +3915,29 @@ fn main() Float { floor(1.2) }`)
 	}
 }
 
+func TestLowerDirectGoExternCoercesNamedScalarArguments(t *testing.T) {
+	program := lowerSource(t, `use go:time
+extern fn sleep(ms: Int) Void = time::Sleep
+fn main() {
+  let ms = 1
+  sleep(ms)
+}`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "time", "time") {
+		t.Fatal("generated AST missing time import")
+	}
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || astCallName(call) != "time.Sleep" || len(call.Args) != 1 {
+			return false
+		}
+		conversion, ok := call.Args[0].(*ast.CallExpr)
+		return ok && astCallName(conversion) == "time.Duration"
+	}) {
+		t.Fatal("generated AST missing time.Duration argument conversion")
+	}
+}
+
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")

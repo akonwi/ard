@@ -25,19 +25,20 @@ type loweredExpr struct {
 }
 
 type lowerer struct {
-	program         *air.Program
-	packageName     string
-	tempCounter     int
-	currentImports  map[string]string
-	declaredLocals  map[air.LocalID]bool
-	runtimeHelpers  map[string]bool
-	jsonParseTypes  map[air.TypeID]bool
-	jsonEncodeTypes map[air.TypeID]bool
-	ffiImports      map[string]string
-	projectInfo     *checker.ProjectInfo
-	inlineClosures  map[air.FunctionID]bool
-	suppressMain    bool
-	includeTests    bool
+	program          *air.Program
+	packageName      string
+	tempCounter      int
+	currentImports   map[string]string
+	declaredLocals   map[air.LocalID]bool
+	runtimeHelpers   map[string]bool
+	jsonParseTypes   map[air.TypeID]bool
+	jsonEncodeTypes  map[air.TypeID]bool
+	ffiImports       map[string]string
+	projectInfo      *checker.ProjectInfo
+	directGoResolver *checker.GoPackagesResolver
+	inlineClosures   map[air.FunctionID]bool
+	suppressMain     bool
+	includeTests     bool
 }
 
 func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, error) {
@@ -47,7 +48,11 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if err := air.Validate(program); err != nil {
 		return nil, err
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, jsonEncodeTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
+	directGoResolverDir := "."
+	if options.ProjectInfo != nil && options.ProjectInfo.RootPath != "" {
+		directGoResolverDir = options.ProjectInfo.RootPath
+	}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, jsonEncodeTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, directGoResolver: checker.NewGoPackagesResolver(directGoResolverDir), suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
 	l.inlineClosures = l.collectInlineClosureFunctions()
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
@@ -5350,7 +5355,7 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 	if goBinding, ok := ext.Bindings["go"]; ok && goBinding != "" {
 		binding = goBinding
 	}
-	if direct, ok, err := l.lowerDirectGoExternCall(binding, args, stmts); err != nil || ok {
+	if direct, ok, err := l.lowerDirectGoExternCall(ext, binding, args, stmts); err != nil || ok {
 		return direct, err
 	}
 	if !externModuleIsStdlib(l.program, ext) {

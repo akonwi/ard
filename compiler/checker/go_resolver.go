@@ -22,11 +22,41 @@ type GoPackage struct {
 }
 
 type GoFunction struct {
-	Name string
+	Name      string
+	Signature GoSignature
 }
 
 type GoMethod struct {
-	Name string
+	Name      string
+	Signature GoSignature
+}
+
+type GoSignature struct {
+	Params  []GoValueType
+	Results []GoValueType
+}
+
+type GoValueKind string
+
+const (
+	GoValueInvalid GoValueKind = ""
+	GoValueBool    GoValueKind = "bool"
+	GoValueString  GoValueKind = "string"
+	GoValueInt     GoValueKind = "int"
+	GoValueUint    GoValueKind = "uint"
+	GoValueFloat   GoValueKind = "float"
+	GoValueError   GoValueKind = "error"
+	GoValueOther   GoValueKind = "other"
+)
+
+type GoValueType struct {
+	Expr       string
+	Kind       GoValueKind
+	Bits       int
+	Named      bool
+	ImportPath string
+	Package    string
+	Name       string
 }
 
 type GoType struct {
@@ -106,7 +136,7 @@ func goPackageFromTypes(importPath string, name string, pkg *types.Package) *GoP
 		}
 		switch obj := obj.(type) {
 		case *types.Func:
-			out.Functions[name] = GoFunction{Name: name}
+			out.Functions[name] = GoFunction{Name: name, Signature: goSignature(obj.Type())}
 		case *types.TypeName:
 			out.Types[name] = GoType{Name: name, Methods: exportedMethods(obj.Type())}
 		case *types.Const:
@@ -164,6 +194,92 @@ func directGoBindingParts(binding string) ([]string, bool) {
 	return parts, true
 }
 
+func goSignature(typ types.Type) GoSignature {
+	sig, ok := typ.(*types.Signature)
+	if !ok || sig == nil {
+		return GoSignature{}
+	}
+	return GoSignature{Params: goTuple(sig.Params()), Results: goTuple(sig.Results())}
+}
+
+func goTuple(tuple *types.Tuple) []GoValueType {
+	if tuple == nil || tuple.Len() == 0 {
+		return nil
+	}
+	out := make([]GoValueType, tuple.Len())
+	for i := 0; i < tuple.Len(); i++ {
+		out[i] = goValueType(tuple.At(i).Type())
+	}
+	return out
+}
+
+func goValueType(typ types.Type) GoValueType {
+	if typ == nil {
+		return GoValueType{Kind: GoValueInvalid}
+	}
+	out := GoValueType{Expr: types.TypeString(typ, packageQualifier), Kind: GoValueOther}
+	if out.Expr == "error" {
+		out.Kind = GoValueError
+		return out
+	}
+	if named, ok := typ.(*types.Named); ok {
+		underlying := goValueType(named.Underlying())
+		underlying.Expr = types.TypeString(typ, packageQualifier)
+		underlying.Named = true
+		underlying.Name = named.Obj().Name()
+		if pkg := named.Obj().Pkg(); pkg != nil {
+			underlying.ImportPath = pkg.Path()
+			underlying.Package = pkg.Name()
+		}
+		return underlying
+	}
+	basic, ok := typ.Underlying().(*types.Basic)
+	if !ok {
+		return out
+	}
+	switch basic.Kind() {
+	case types.Bool:
+		out.Kind = GoValueBool
+	case types.String:
+		out.Kind = GoValueString
+	case types.Int, types.Int8, types.Int16, types.Int32, types.Int64:
+		out.Kind = GoValueInt
+		out.Bits = basicIntBits(basic.Kind())
+	case types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64, types.Uintptr:
+		out.Kind = GoValueUint
+		out.Bits = basicIntBits(basic.Kind())
+	case types.Float32:
+		out.Kind = GoValueFloat
+		out.Bits = 32
+	case types.Float64:
+		out.Kind = GoValueFloat
+		out.Bits = 64
+	}
+	return out
+}
+
+func packageQualifier(pkg *types.Package) string {
+	if pkg == nil {
+		return ""
+	}
+	return pkg.Name()
+}
+
+func basicIntBits(kind types.BasicKind) int {
+	switch kind {
+	case types.Int8, types.Uint8:
+		return 8
+	case types.Int16, types.Uint16:
+		return 16
+	case types.Int32, types.Uint32:
+		return 32
+	case types.Int64, types.Uint64:
+		return 64
+	default:
+		return 0
+	}
+}
+
 func exportedMethods(typ types.Type) map[string]GoMethod {
 	methods := map[string]GoMethod{}
 	addMethods := func(methodSet *types.MethodSet) {
@@ -176,7 +292,7 @@ func exportedMethods(typ types.Type) map[string]GoMethod {
 				continue
 			}
 			name := selection.Obj().Name()
-			methods[name] = GoMethod{Name: name}
+			methods[name] = GoMethod{Name: name, Signature: goSignature(selection.Obj().Type())}
 		}
 	}
 	addMethods(types.NewMethodSet(typ))
