@@ -986,6 +986,47 @@ func TestEqualityComparisons(t *testing.T) {
 				{Kind: checker.Error, Message: "Invalid: Int == Bool"},
 			},
 		},
+		{
+			name: "Inequality between primitives",
+			input: strings.Join([]string{
+				"1 != 2",
+				"10.2 != 21.4",
+				"true != false",
+				`"hello" != "world"`,
+				`1 != false`,
+			}, "\n"),
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{
+						Expr: &checker.Inequality{
+							&checker.IntLiteral{1},
+							&checker.IntLiteral{2},
+						},
+					},
+					{
+						Expr: &checker.Inequality{
+							&checker.FloatLiteral{10.2},
+							&checker.FloatLiteral{21.4},
+						},
+					},
+					{
+						Expr: &checker.Inequality{
+							&checker.BoolLiteral{true},
+							&checker.BoolLiteral{false},
+						},
+					},
+					{
+						Expr: &checker.Inequality{
+							&checker.StrLiteral{"hello"},
+							&checker.StrLiteral{"world"},
+						},
+					},
+				},
+			},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Invalid: Int != Bool"},
+			},
+		},
 	})
 }
 
@@ -1031,6 +1072,16 @@ func TestChainedComparisons(t *testing.T) {
 		{
 			name:  "Chained comparison with equality operators should error",
 			input: "1 < 2 == 1",
+			output: &checker.Program{
+				Statements: []checker.Statement{},
+			},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "equality operators cannot be chained"},
+			},
+		},
+		{
+			name:  "Chained comparison with inequality operators should error",
+			input: "1 < 2 != 1",
 			output: &checker.Program{
 				Statements: []checker.Statement{},
 			},

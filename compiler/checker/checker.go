@@ -3509,8 +3509,13 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					c.addError("Cannot compare different types", s.GetLocation())
 					return nil
 				}
-			case parse.Equal:
+			case parse.Equal, parse.NotEqual:
 				{
+					operator := "=="
+					if s.Operator == parse.NotEqual {
+						operator = "!="
+					}
+
 					left, right := c.checkExpr(s.Left), c.checkExpr(s.Right)
 					if left == nil || right == nil {
 						return nil
@@ -3522,15 +3527,18 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						leftInner := leftMaybe.Of()
 						rightInner := rightMaybe.Of()
 						if leftInner != Void && rightInner != Void && !areCompatible(leftInner, rightInner) && !areCompatible(rightInner, leftInner) {
-							c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
+							c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
 							return nil
+						}
+						if s.Operator == parse.NotEqual {
+							return &Inequality{left, right}
 						}
 						return &Equality{left, right}
 					}
 
 					// Allow Enum vs Int and Int vs Enum comparisons
 					if !c.areTypesComparable(left.Type(), right.Type()) {
-						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
+						c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
 						return nil
 					}
 
@@ -3545,8 +3553,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return isEnum
 					}
 					if !isAllowedType(left.Type()) || !isAllowedType(right.Type()) {
-						c.addError(fmt.Sprintf("Invalid: %s == %s", left.Type(), right.Type()), s.GetLocation())
+						c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
 						return nil
+					}
+					if s.Operator == parse.NotEqual {
+						return &Inequality{left, right}
 					}
 					return &Equality{left, right}
 				}

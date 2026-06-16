@@ -144,7 +144,7 @@ let same_rune = r1 == r2
 let earlier_rune = r1 < r2
 ```
 
-Equality operators (`==`, `not ==`) and relative comparison operators (`<`, `<=`, `>`, `>=`) should apply to `Byte` with unsigned byte ordering and to `Rune` with Unicode scalar-value ordering.
+Equality operators (`==`, `!=`) and relative comparison operators (`<`, `<=`, `>`, `>=`) should apply to `Byte` with unsigned byte ordering and to `Rune` with Unicode scalar-value ordering. The `not` keyword remains unary boolean negation for larger boolean expressions.
 
 These comparisons are not text collation, locale comparison, grapheme comparison, or display-width comparison. They only compare numeric byte values or numeric Unicode scalar values.
 

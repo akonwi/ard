@@ -3535,6 +3535,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerBinary(ExprStrConcat, typeID, e.Left, e.Right)
 	case *checker.Equality:
 		return fl.lowerBinary(ExprEq, typeID, e.Left, e.Right)
+	case *checker.Inequality:
+		return fl.lowerBinary(ExprNotEq, typeID, e.Left, e.Right)
 	case *checker.IntLess:
 		return fl.lowerBinary(ExprLt, typeID, e.Left, e.Right)
 	case *checker.IntLessEqual:

@@ -208,6 +208,18 @@ fn sum_map() Int {
   total
 }
 
+enum Direction { Up, Down, Left, Right }
+
+fn not_equal() Bool {
+  1 != 2 and "a" != "b"
+}
+
+fn enum_compare() Bool {
+  let dir = Direction::Down
+  let code: Int = 2
+  dir < code and code >= dir and Direction::Up != code
+}
+
 let a = countdown()
 let b = sum_range()
 let c = sum_list()
@@ -230,6 +242,8 @@ if (mod.sum_range() !== 6) throw new Error("range");
 if (mod.sum_list() !== 9) throw new Error("list");
 if (mod.sum_chars() !== 1) throw new Error("chars");
 if (mod.sum_map() !== 3) throw new Error("map");
+if (mod.not_equal() !== true) throw new Error("not equal");
+if (mod.enum_compare() !== true) throw new Error("enum compare");
 `, outputPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

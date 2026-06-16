@@ -928,6 +928,14 @@ func (n *Equality) Type() Type {
 	return Bool
 }
 
+type Inequality struct {
+	Left, Right Expression
+}
+
+func (n *Inequality) Type() Type {
+	return Bool
+}
+
 type And struct {
 	Left, Right Expression
 }
