@@ -300,9 +300,7 @@ func (p printer) renderExternTypeDeclaration(node *parse.ExternTypeDeclaration) 
 	for key := range node.ExternalBindings {
 		keys = append(keys, key)
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		return externBindingOrder(keys[i]) < externBindingOrder(keys[j]) || (externBindingOrder(keys[i]) == externBindingOrder(keys[j]) && keys[i] < keys[j])
-	})
+	sort.Strings(keys)
 
 	var builder strings.Builder
 	builder.WriteString(header)
@@ -346,9 +344,7 @@ func (p printer) renderExternalFunction(node *parse.ExternalFunction) string {
 	for key := range node.ExternalBindings {
 		keys = append(keys, key)
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		return externBindingOrder(keys[i]) < externBindingOrder(keys[j]) || (externBindingOrder(keys[i]) == externBindingOrder(keys[j]) && keys[i] < keys[j])
-	})
+	sort.Strings(keys)
 
 	var builder strings.Builder
 	builder.WriteString(header)
@@ -362,21 +358,6 @@ func (p printer) renderExternalFunction(node *parse.ExternalFunction) string {
 	}
 	builder.WriteString("}")
 	return builder.String()
-}
-
-func externBindingOrder(target string) int {
-	switch target {
-	case "go":
-		return 0
-	case "js":
-		return 1
-	case "js-server":
-		return 2
-	case "js-browser":
-		return 3
-	default:
-		return 100
-	}
 }
 
 func (p printer) renderExternalFunctionDoc(node *parse.ExternalFunction) doc {

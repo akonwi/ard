@@ -71,16 +71,6 @@ lookup_program() {
   return 1
 }
 
-supports_js_server() {
-  case "$1" in
-    numeric_kernel|binary_trees|dna_frequency|json_serde_roundtrip|lru_cache|base64_batch|fs_batch)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
 
 native_go_program() {
   printf './benchmarks/go/%s\n' "$1"
@@ -89,21 +79,6 @@ native_go_program() {
 cleanup_generated_program_dir() {
   local program_dir="${1%/*}"
   rm -rf "$ROOT_DIR/$program_dir/generated"
-}
-
-assert_same_output() {
-  local benchmark="$1"
-  local expected_name="$2"
-  local expected="$3"
-  local actual_name="$4"
-  local actual="$5"
-
-  if [[ "$actual" != "$expected" ]]; then
-    echo "error: output mismatch for $benchmark: $actual_name differs from $expected_name" >&2
-    echo "  $expected_name: $expected" >&2
-    echo "  $actual_name: $actual" >&2
-    exit 1
-  fi
 }
 
 assert_printed_output() {
@@ -140,8 +115,6 @@ run_runtime_benchmark() {
   local rel_path="$2"
   local tmp_dir="$3"
   local ard_go_bin="$tmp_dir/${name}-ard-go"
-  local js_out="$tmp_dir/${name}.mjs"
-  local js_runner="$tmp_dir/${name}-runner.mjs"
   local native_go_src
   native_go_src="$(native_go_program "$name")"
   local native_go_bin="$tmp_dir/${name}-native-go"
@@ -164,26 +137,12 @@ run_runtime_benchmark() {
     --command-name "native-go:$name" "$native_go_bin"
   )
 
-  if supports_js_server "$name"; then
-    (cd "$ROOT_DIR" && "$ARD_BIN" build "$rel_path" --target js-server --out "$js_out")
-    cat > "$js_runner" <<EOF
-import { main } from "./$(basename "$js_out")";
-main();
-EOF
-    commands+=(--command-name "js:$name" "node '$js_runner'")
-  else
-    echo "==> skipping js-server for $name (unsupported target/module set)"
-  fi
-
   echo "==> verifying outputs for $name"
   local expected actual
   expected="$($ard_go_bin)"
+  assert_printed_output "$name" "ard-go" "$expected"
   actual="$($native_go_bin)"
   assert_printed_output "$name" "native-go" "$actual"
-  if supports_js_server "$name"; then
-    actual="$(node "$js_runner")"
-    assert_same_output "$name" "ard-go" "$expected" "js" "$actual"
-  fi
 
   hyperfine \
     --warmup "$WARMUP" \
@@ -212,24 +171,14 @@ run_cli_benchmark() {
   echo "==> verifying outputs for $name"
   local expected actual
   expected="$(cd "$ROOT_DIR" && "$ARD_BIN" run "$rel_path")"
+  assert_printed_output "$name" "ard-go" "$expected"
   actual="$(cd "$ROOT_DIR" && go run "$native_go_src")"
   assert_printed_output "$name" "native-go" "$actual"
-  if supports_js_server "$name"; then
-    actual="$(cd "$ROOT_DIR" && "$ARD_BIN" run --target js-server "$rel_path")"
-    assert_same_output "$name" "ard-go" "$expected" "js" "$actual"
-    cleanup_generated_program_dir "$rel_path"
-  fi
 
   local commands=(
     --command-name "ard-go:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run '$rel_path'"
     --command-name "native-go:$name" "cd '$ROOT_DIR' && go run '$native_go_src'"
   )
-
-  if supports_js_server "$name"; then
-    commands+=(--command-name "js:$name" "cd '$ROOT_DIR' && '$ARD_BIN' run --target js-server '$rel_path'")
-  else
-    echo "==> skipping js-server for $name (unsupported target/module set)"
-  fi
 
   hyperfine \
     --warmup "$WARMUP" \

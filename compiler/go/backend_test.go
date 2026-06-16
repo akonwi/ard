@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/frontend"
 	"github.com/akonwi/ard/parse"
@@ -819,7 +818,7 @@ fn main() {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -871,7 +870,7 @@ fn main() {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -933,7 +932,7 @@ fn main() {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -974,7 +973,7 @@ fn main() {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1042,7 +1041,7 @@ fn main() {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1082,7 +1081,7 @@ fn main() {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1121,7 +1120,7 @@ fn main() {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1169,7 +1168,7 @@ fn main() { feature::run() }
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1213,7 +1212,7 @@ fn main() {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1514,7 +1513,7 @@ fn main() Str {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1550,7 +1549,7 @@ fn main() Void {
 		t.Fatal(err)
 	}
 
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1585,7 +1584,7 @@ fn main() {}
 		t.Fatal(err)
 	}
 
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1626,7 +1625,7 @@ fn main() {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1678,7 +1677,7 @@ fn main() {}
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1746,7 +1745,7 @@ fn main() Str { lookup() }
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1796,7 +1795,7 @@ fn main() Str { lookup() }
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1878,7 +1877,7 @@ fn main() {}
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -1965,7 +1964,7 @@ fn main() {
 		t.Fatal(err)
 	}
 
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -2011,7 +2010,7 @@ func Stats() runtime.MemStats {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -2061,7 +2060,7 @@ func BufferLen(buffer *bytes.Buffer) int {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -2129,7 +2128,7 @@ func GetRaw[T any](state StateContext, key string) ardruntime.Maybe[T] {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -2191,7 +2190,7 @@ func GetRaw[T any](key string) ardruntime.Maybe[T] {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -2246,7 +2245,7 @@ func EventValue(e Event) int { return e.Value }
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -2294,7 +2293,7 @@ func Observe(ch chan int) int {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -2373,7 +2372,7 @@ func Select(input ardruntime.Maybe[string]) string {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -2447,7 +2446,7 @@ fn main() {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -2501,7 +2500,7 @@ fn main() { dep::noop() }
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -2582,7 +2581,7 @@ fn main() {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -2614,7 +2613,7 @@ fn close(db: sql::Database) Void!Str {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -3846,7 +3845,7 @@ fn main() Int { lookup() }
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := frontend.LoadModule(mainPath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}

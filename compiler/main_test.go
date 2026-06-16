@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
@@ -51,33 +50,19 @@ func TestParseRunArgs(t *testing.T) {
 		name       string
 		args       []string
 		path       string
-		target     string
 		expectErr  bool
 		errMessage string
 	}{
 		{
-			name:   "input only",
-			args:   []string{"samples/main.ard"},
-			path:   "samples/main.ard",
-			target: "",
+			name: "input only",
+			args: []string{"samples/main.ard"},
+			path: "samples/main.ard",
 		},
 		{
-			name:   "explicit target",
-			args:   []string{"--target", "go", "samples/main.ard"},
-			path:   "samples/main.ard",
-			target: "go",
-		},
-		{
-			name:       "missing target value",
-			args:       []string{"--target"},
+			name:       "removed target flag",
+			args:       []string{"--target", "go", "samples/main.ard"},
 			expectErr:  true,
-			errMessage: "--target requires a value",
-		},
-		{
-			name:       "unknown target",
-			args:       []string{"--target", "wasm", "samples/main.ard"},
-			expectErr:  true,
-			errMessage: "unknown target: wasm",
+			errMessage: "unknown flag: --target",
 		},
 		{
 			name:       "unknown flag",
@@ -85,11 +70,16 @@ func TestParseRunArgs(t *testing.T) {
 			expectErr:  true,
 			errMessage: "unknown flag: --watch",
 		},
+		{
+			name: "program args after input",
+			args: []string{"samples/main.ard", "extra"},
+			path: "samples/main.ard",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path, target, err := parseRunArgs(tt.args)
+			path, err := parseRunArgs(tt.args)
 			if tt.expectErr {
 				if err == nil {
 					t.Fatalf("expected error %q, got nil", tt.errMessage)
@@ -105,9 +95,6 @@ func TestParseRunArgs(t *testing.T) {
 			}
 			if path != tt.path {
 				t.Fatalf("expected path %q, got %q", tt.path, path)
-			}
-			if target != tt.target {
-				t.Fatalf("expected target %q, got %q", tt.target, target)
 			}
 		})
 	}
@@ -129,7 +116,7 @@ func TestRunGoProgram(t *testing.T) {
 		t.Fatalf("write source: %v", err)
 	}
 
-	module, err := loadModule(sourcePath, backend.TargetGo)
+	module, err := loadModule(sourcePath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -137,14 +124,14 @@ func TestRunGoProgram(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lower AIR: %v", err)
 	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
-		t.Fatalf("run go target: %v", err)
+	if err := gotarget.RunProgram(program, []string{"ard", "run", sourcePath}); err != nil {
+		t.Fatalf("run go backend: %v", err)
 	}
 }
 
 func TestRunGoTargetVariablesSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "variables.ard")
-	module, err := loadModule(sourcePath, backend.TargetGo)
+	module, err := loadModule(sourcePath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -152,14 +139,14 @@ func TestRunGoTargetVariablesSample(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lower AIR: %v", err)
 	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
+	if err := gotarget.RunProgram(program, []string{"ard", "run", sourcePath}); err != nil {
 		t.Fatalf("run go variables sample: %v", err)
 	}
 }
 
 func TestRunGoTargetNullablesSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "nullables.ard")
-	module, err := loadModule(sourcePath, backend.TargetGo)
+	module, err := loadModule(sourcePath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -167,14 +154,14 @@ func TestRunGoTargetNullablesSample(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lower AIR: %v", err)
 	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
+	if err := gotarget.RunProgram(program, []string{"ard", "run", sourcePath}); err != nil {
 		t.Fatalf("run go nullables sample: %v", err)
 	}
 }
 
 func TestRunGoTargetTraitsSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "traits.ard")
-	module, err := loadModule(sourcePath, backend.TargetGo)
+	module, err := loadModule(sourcePath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -182,14 +169,14 @@ func TestRunGoTargetTraitsSample(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lower AIR: %v", err)
 	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
+	if err := gotarget.RunProgram(program, []string{"ard", "run", sourcePath}); err != nil {
 		t.Fatalf("run go traits sample: %v", err)
 	}
 }
 
 func TestRunGoTargetConcurrentStressSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "concurrent_stress.ard")
-	module, err := loadModule(sourcePath, backend.TargetGo)
+	module, err := loadModule(sourcePath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -197,14 +184,14 @@ func TestRunGoTargetConcurrentStressSample(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lower AIR: %v", err)
 	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
+	if err := gotarget.RunProgram(program, []string{"ard", "run", sourcePath}); err != nil {
 		t.Fatalf("run go concurrent stress sample: %v", err)
 	}
 }
 
 func TestRunGoTargetTypeUnionsSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "type-unions.ard")
-	module, err := loadModule(sourcePath, backend.TargetGo)
+	module, err := loadModule(sourcePath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -212,14 +199,14 @@ func TestRunGoTargetTypeUnionsSample(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lower AIR: %v", err)
 	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
+	if err := gotarget.RunProgram(program, []string{"ard", "run", sourcePath}); err != nil {
 		t.Fatalf("run go type-unions sample: %v", err)
 	}
 }
 
 func TestRunGoTargetTemperaturesSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "temperatures.ard")
-	module, err := loadModule(sourcePath, backend.TargetGo)
+	module, err := loadModule(sourcePath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -227,14 +214,14 @@ func TestRunGoTargetTemperaturesSample(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lower AIR: %v", err)
 	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
+	if err := gotarget.RunProgram(program, []string{"ard", "run", sourcePath}); err != nil {
 		t.Fatalf("run go temperatures sample: %v", err)
 	}
 }
 
 func TestRunGoTargetLightsSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "lights.ard")
-	module, err := loadModule(sourcePath, backend.TargetGo)
+	module, err := loadModule(sourcePath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -242,7 +229,7 @@ func TestRunGoTargetLightsSample(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lower AIR: %v", err)
 	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
+	if err := gotarget.RunProgram(program, []string{"ard", "run", sourcePath}); err != nil {
 		t.Fatalf("run go lights sample: %v", err)
 	}
 }
@@ -352,14 +339,14 @@ func prepareTicTacToeLockCacheProject(t *testing.T, sourceProjectDir string) str
 	for _, name := range []string{"main.ard"} {
 		copyFileForTest(t, filepath.Join(sourceProjectDir, name), filepath.Join(projectDir, name))
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"tic_tac_toe\"\nard = \">= 0.1.0\"\ntarget = \"go\"\n\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"tic_tac_toe\"\nard = \">= 0.1.0\"\n\n"), 0o644); err != nil {
 		t.Fatalf("write temp tic-tac-toe manifest: %v", err)
 	}
 
 	cacheRoot := t.TempDir()
 	t.Setenv("ARD_CACHE_DIR", cacheRoot)
 	vaxisGit, vaxisCommit := createTicTacToeVaxisGitDependency(t)
-	manifest := fmt.Sprintf("name = \"tic_tac_toe\"\nard = \">= 0.1.0\"\ntarget = \"go\"\n\n[dependencies]\nvaxis = { git = %q, commit = %q }\n", vaxisGit, vaxisCommit)
+	manifest := fmt.Sprintf("name = \"tic_tac_toe\"\nard = \">= 0.1.0\"\n\n[dependencies]\nvaxis = { git = %q, commit = %q }\n", vaxisGit, vaxisCommit)
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("write temp tic-tac-toe dependency manifest: %v", err)
 	}
@@ -379,7 +366,7 @@ func createTicTacToeVaxisGitDependency(t *testing.T) (string, string) {
 	if err := os.MkdirAll(filepath.Join(repo, "ffi"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "ard.toml"), []byte("name = \"vaxis\"\nard = \">= 0.19.2\"\ntarget = \"go\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "ard.toml"), []byte("name = \"vaxis\"\nard = \">= 0.19.2\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, "vaxis.ard"), []byte(`extern type Vaxis = "ffi.Vaxis"
@@ -477,7 +464,7 @@ func runGitOutputForTest(t *testing.T, dir string, args ...string) string {
 
 func buildGoSampleBinary(t *testing.T, sourcePath string) string {
 	t.Helper()
-	loaded, err := frontend.LoadModule(sourcePath, backend.TargetGo)
+	loaded, err := frontend.LoadModule(sourcePath)
 	if err != nil {
 		t.Fatalf("load module %s: %v", sourcePath, err)
 	}
@@ -563,7 +550,7 @@ func assertHTTPResponse(t *testing.T, method, url, body string, wantStatus int, 
 
 func TestRunGoTargetModulesSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "modules.ard")
-	module, err := loadModule(sourcePath, backend.TargetGo)
+	module, err := loadModule(sourcePath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
 	}
@@ -571,7 +558,7 @@ func TestRunGoTargetModulesSample(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lower AIR: %v", err)
 	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", "--target", "go", sourcePath}); err != nil {
+	if err := gotarget.RunProgram(program, []string{"ard", "run", sourcePath}); err != nil {
 		t.Fatalf("run go modules sample: %v", err)
 	}
 }
@@ -604,7 +591,7 @@ func TestBuildRejectsInvalidMainEntrypointSignature(t *testing.T) {
 			if err := os.WriteFile(sourcePath, []byte(tt.source), 0o644); err != nil {
 				t.Fatalf("write source: %v", err)
 			}
-			_, err := buildGoBinary(sourcePath, filepath.Join(tempDir, "main-bin"), backend.TargetGo)
+			_, err := buildGoBinary(sourcePath, filepath.Join(tempDir, "main-bin"))
 			if err == nil {
 				t.Fatalf("buildGoBinary succeeded, want error containing %q", tt.wantErr)
 			}
@@ -628,9 +615,9 @@ func TestBuildGoBinary(t *testing.T) {
 		t.Fatalf("write source: %v", err)
 	}
 
-	builtPath, err := buildGoBinary(sourcePath, outputPath, backend.TargetGo)
+	builtPath, err := buildGoBinary(sourcePath, outputPath)
 	if err != nil {
-		t.Fatalf("build go target: %v", err)
+		t.Fatalf("build go backend: %v", err)
 	}
 	if builtPath != outputPath {
 		t.Fatalf("built path = %q, want %q", builtPath, outputPath)
@@ -686,7 +673,7 @@ func TestParseTestArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path, filter, failFast, _, err := parseTestArgs(tt.args)
+			path, filter, failFast, err := parseTestArgs(tt.args)
 			if tt.expectErr {
 				if err == nil {
 					t.Fatalf("expected error %q, got nil", tt.errMessage)
@@ -719,42 +706,32 @@ func TestParseBuildArgs(t *testing.T) {
 		args       []string
 		path       string
 		out        string
-		target     string
 		expectErr  bool
 		errMessage string
 	}{
 		{
-			name:   "input only",
-			args:   []string{"demo.ard"},
-			path:   "demo.ard",
-			out:    "demo",
-			target: "",
+			name: "input only",
+			args: []string{"demo.ard"},
+			path: "demo.ard",
+			out:  "demo",
 		},
 		{
-			name:   "nested input defaults to file basename",
-			args:   []string{"samples/main.ard"},
-			path:   "samples/main.ard",
-			out:    "main",
-			target: "",
+			name: "nested input defaults to file basename",
+			args: []string{"samples/main.ard"},
+			path: "samples/main.ard",
+			out:  "main",
 		},
 		{
-			name:   "explicit output and target",
-			args:   []string{"samples/main.ard", "--out", "demo", "--target", "go"},
-			path:   "samples/main.ard",
-			out:    "demo",
-			target: "go",
+			name: "explicit output",
+			args: []string{"samples/main.ard", "--out", "demo"},
+			path: "samples/main.ard",
+			out:  "demo",
 		},
 		{
-			name:       "missing target value",
-			args:       []string{"samples/main.ard", "--target"},
+			name:       "removed target flag",
+			args:       []string{"samples/main.ard", "--target", "go"},
 			expectErr:  true,
-			errMessage: "--target requires a value",
-		},
-		{
-			name:       "unknown target",
-			args:       []string{"samples/main.ard", "--target", "wasm"},
-			expectErr:  true,
-			errMessage: "unknown target: wasm",
+			errMessage: "unknown flag: --target",
 		},
 		{
 			name:       "unknown flag",
@@ -766,7 +743,7 @@ func TestParseBuildArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path, out, target, err := parseBuildArgs(tt.args)
+			path, out, err := parseBuildArgs(tt.args)
 			if tt.expectErr {
 				if err == nil {
 					t.Fatalf("expected error %q, got nil", tt.errMessage)
@@ -786,43 +763,7 @@ func TestParseBuildArgs(t *testing.T) {
 			if out != tt.out {
 				t.Fatalf("expected output %q, got %q", tt.out, out)
 			}
-			if target != tt.target {
-				t.Fatalf("expected target %q, got %q", tt.target, target)
-			}
 		})
-	}
-}
-
-func TestBuildJSProgramDefaultWritesArdOut(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	sourcePath := filepath.Join(dir, "main.ard")
-	if err := os.WriteFile(sourcePath, []byte(`fn main() { () }`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	builtPath, err := buildJSProgram(sourcePath, "main", backend.TargetJSBrowser)
-	if err != nil {
-		t.Fatalf("buildJSProgram error = %v", err)
-	}
-	want := filepath.Join(dir, "ard-out", backend.TargetJSBrowser, "main.mjs")
-	if builtPath != want {
-		t.Fatalf("built path = %q, want %q", builtPath, want)
-	}
-	if _, err := os.Stat(want); err != nil {
-		t.Fatalf("expected generated root module: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(want), "ard.prelude.mjs")); err != nil {
-		t.Fatalf("expected generated prelude next to root module: %v", err)
-	}
-	out, err := os.ReadFile(want)
-	if err != nil {
-		t.Fatalf("read generated root module: %v", err)
-	}
-	if strings.Contains(string(out), "await main();") || strings.Contains(string(out), "await __ard_script();") {
-		t.Fatalf("expected build output to be importable without auto-invoking root, got:\n%s", string(out))
 	}
 }
 
@@ -1149,7 +1090,7 @@ func TestTestCommandGoTargetSupportsProjectFFI(t *testing.T) {
 extern fn lookup() Str = "demo.Lookup"
 
 test fn ffi_passes() Void!Str {
-  testing::assert(lookup() == "ok", "project ffi should run on go target")
+  testing::assert(lookup() == "ok", "project ffi should run on the Go backend")
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -1163,10 +1104,10 @@ func Lookup() string { return "ok" }
 
 	var ok bool
 	output := captureStdout(t, func() {
-		ok = runTests(projectDir, "", false, backend.TargetGo)
+		ok = runTests(projectDir, "", false)
 	})
 	if !ok {
-		t.Fatalf("expected go target tests to pass\n%s", output)
+		t.Fatalf("expected Go backend tests to pass\n%s", output)
 	}
 	if !strings.Contains(output, "✓") || !strings.Contains(output, "1 passed; 0 failed; 0 panicked") {
 		t.Fatalf("unexpected output:\n%s", output)

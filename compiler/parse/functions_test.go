@@ -84,10 +84,9 @@ func TestFunctionDeclaration(t *testing.T) {
 			},
 		},
 		{
-			name: "Extern function with binding block",
+			name: "Extern function with Go binding block",
 			input: `extern fn print(value: Str) Void = {
   go = "Print"
-  js-server = "printLine"
 }`,
 			output: Program{
 				Imports: []Import{},
@@ -101,33 +100,7 @@ func TestFunctionDeclaration(t *testing.T) {
 						ReturnType:      &VoidType{},
 						ExternalBinding: "Print",
 						ExternalBindings: map[string]string{
-							"go":        "Print",
-							"js-server": "printLine",
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "Extern function with shared js binding block",
-			input: `extern fn delay(value: Str) Void = {
-  js = "delay"
-  js-browser = "delayBrowser"
-}`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&ExternalFunction{
-						Name: "delay",
-						Parameters: []Parameter{{
-							Name: "value",
-							Type: &StringType{},
-						}},
-						ReturnType:      &VoidType{},
-						ExternalBinding: "",
-						ExternalBindings: map[string]string{
-							"js":         "delay",
-							"js-browser": "delayBrowser",
+							"go": "Print",
 						},
 					},
 				},

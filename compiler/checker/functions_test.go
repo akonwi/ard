@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/akonwi/ard/backend"
 	checker "github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 )
@@ -446,10 +445,9 @@ func TestCallingPackageFunctions(t *testing.T) {
 	})
 }
 
-func TestExternalFunctionBindingsResolvePerTarget(t *testing.T) {
+func TestExternalFunctionGoBindingBlock(t *testing.T) {
 	source := `extern fn read_line() Str!Str = {
   go = "ReadLine"
-  js-server = "readLine"
 }`
 
 	result := parse.Parse([]byte(source), "main.ard")
@@ -457,36 +455,22 @@ func TestExternalFunctionBindingsResolvePerTarget(t *testing.T) {
 		t.Fatalf("unexpected parse errors: %v", result.Errors)
 	}
 
-	goChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetGo})
-	goChecker.Check()
-	if goChecker.HasErrors() {
-		t.Fatalf("unexpected go diagnostics: %v", goChecker.Diagnostics())
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
 	}
-	goProgram := goChecker.Module().Program()
-	goFn, ok := goProgram.Statements[0].Expr.(*checker.ExternalFunctionDef)
+	program := c.Module().Program()
+	fn, ok := program.Statements[0].Expr.(*checker.ExternalFunctionDef)
 	if !ok {
-		t.Fatalf("expected external function def, got %#v", goProgram.Statements[0].Expr)
+		t.Fatalf("expected external function def, got %#v", program.Statements[0].Expr)
 	}
-	if goFn.ExternalBinding != "ReadLine" || goFn.ExternalBindings["js-server"] != "readLine" {
-		t.Fatalf("unexpected go extern bindings: %#v", goFn)
-	}
-
-	jsChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetJSServer})
-	jsChecker.Check()
-	if jsChecker.HasErrors() {
-		t.Fatalf("unexpected js diagnostics: %v", jsChecker.Diagnostics())
-	}
-	jsProgram := jsChecker.Module().Program()
-	jsFn, ok := jsProgram.Statements[0].Expr.(*checker.ExternalFunctionDef)
-	if !ok {
-		t.Fatalf("expected external function def, got %#v", jsProgram.Statements[0].Expr)
-	}
-	if jsFn.ExternalBinding != "readLine" || jsFn.ExternalBindings["go"] != "ReadLine" {
-		t.Fatalf("unexpected js extern bindings: %#v", jsFn)
+	if fn.ExternalBinding != "ReadLine" || fn.ExternalBindings["go"] != "ReadLine" {
+		t.Fatalf("unexpected extern bindings: %#v", fn)
 	}
 }
 
-func TestExternalFunctionShorthandResolvesToEffectiveJSTarget(t *testing.T) {
+func TestExternalFunctionShorthandResolvesToGo(t *testing.T) {
 	source := `extern fn query_selector(selector: Str) Dynamic? = "querySelector"`
 
 	result := parse.Parse([]byte(source), "main.ard")
@@ -494,24 +478,14 @@ func TestExternalFunctionShorthandResolvesToEffectiveJSTarget(t *testing.T) {
 		t.Fatalf("unexpected parse errors: %v", result.Errors)
 	}
 
-	jsChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetJSBrowser})
-	jsChecker.Check()
-	if jsChecker.HasErrors() {
-		t.Fatalf("unexpected js diagnostics: %v", jsChecker.Diagnostics())
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
 	}
-	jsFn := jsChecker.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
-	if jsFn.ExternalBinding != "querySelector" || jsFn.ExternalBindingTarget != backend.TargetJSBrowser || jsFn.ExternalBindings[backend.TargetJSBrowser] != "querySelector" {
-		t.Fatalf("unexpected js shorthand binding: %#v", jsFn)
-	}
-
-	goChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetGo})
-	goChecker.Check()
-	if goChecker.HasErrors() {
-		t.Fatalf("unexpected go diagnostics: %v", goChecker.Diagnostics())
-	}
-	goFn := goChecker.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
-	if goFn.ExternalBinding != "querySelector" || goFn.ExternalBindingTarget != backend.TargetGo || goFn.ExternalBindings[backend.TargetGo] != "querySelector" {
-		t.Fatalf("unexpected go shorthand binding: %#v", goFn)
+	fn := c.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
+	if fn.ExternalBinding != "querySelector" || fn.ExternalBindings["go"] != "querySelector" {
+		t.Fatalf("unexpected shorthand binding: %#v", fn)
 	}
 }
 
@@ -536,7 +510,7 @@ func TestExternalFunctionRejectsUnsupportedBindingTargets(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("unexpected parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetGo})
+			c := checker.New("main.ard", result.Program, nil)
 			c.Check()
 			if !c.HasErrors() {
 				t.Fatal("expected checker diagnostics")
@@ -549,49 +523,6 @@ func TestExternalFunctionRejectsUnsupportedBindingTargets(t *testing.T) {
 				t.Fatalf("diagnostics = %s, want %q", joined, tc.want)
 			}
 		})
-	}
-}
-
-func TestExternalFunctionBindingsResolveSharedJSFallback(t *testing.T) {
-	source := `extern fn delay(ms: Int) Void = {
-  go = "Delay"
-  js = "delay"
-  js-browser = "delayBrowser"
-}`
-
-	result := parse.Parse([]byte(source), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("unexpected parse errors: %v", result.Errors)
-	}
-
-	serverChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetJSServer})
-	serverChecker.Check()
-	if serverChecker.HasErrors() {
-		t.Fatalf("unexpected js-server diagnostics: %v", serverChecker.Diagnostics())
-	}
-	serverFn := serverChecker.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
-	if serverFn.ExternalBinding != "delay" {
-		t.Fatalf("expected shared js binding for js-server, got %#v", serverFn)
-	}
-
-	browserChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetJSBrowser})
-	browserChecker.Check()
-	if browserChecker.HasErrors() {
-		t.Fatalf("unexpected js-browser diagnostics: %v", browserChecker.Diagnostics())
-	}
-	browserFn := browserChecker.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
-	if browserFn.ExternalBinding != "delayBrowser" {
-		t.Fatalf("expected specific js-browser binding, got %#v", browserFn)
-	}
-
-	goChecker := checker.New("main.ard", result.Program, nil, checker.CheckOptions{Target: backend.TargetGo})
-	goChecker.Check()
-	if goChecker.HasErrors() {
-		t.Fatalf("unexpected go diagnostics: %v", goChecker.Diagnostics())
-	}
-	goFn := goChecker.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
-	if goFn.ExternalBinding != "Delay" {
-		t.Fatalf("expected go binding, got %#v", goFn)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 )
@@ -15,22 +14,7 @@ type LoadResult struct {
 	ProjectInfo *checker.ProjectInfo
 }
 
-func ResolveTarget(inputPath, requestedTarget string) (string, error) {
-	if requestedTarget != "" {
-		return requestedTarget, nil
-	}
-	inputDir := filepath.Dir(inputPath)
-	if inputDir == "" {
-		inputDir = "."
-	}
-	project, err := checker.FindProjectRoot(inputDir)
-	if err != nil {
-		return "", err
-	}
-	return backend.ParseTarget(project.Target)
-}
-
-func LoadModule(inputPath string, target string) (*LoadResult, error) {
+func LoadModule(inputPath string) (*LoadResult, error) {
 	sourceCode, err := os.ReadFile(inputPath)
 	if err != nil {
 		return nil, fmt.Errorf("error reading file %s - %v", inputPath, err)
@@ -57,7 +41,7 @@ func LoadModule(inputPath string, target string) (*LoadResult, error) {
 		relPath = inputPath
 	}
 
-	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{Target: target})
+	c := checker.New(relPath, program, moduleResolver)
 	c.Check()
 	if c.HasErrors() {
 		for _, diagnostic := range c.Diagnostics() {

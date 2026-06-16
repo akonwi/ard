@@ -1,21 +1,15 @@
 package checker
 
-import "github.com/akonwi/ard/backend"
-
 var prelude = map[string]Module{
 	"Result": ResultPkg{},
 }
 
-func findInStdLibTarget(path string, target string) (Module, bool) {
-	if target == "" {
-		target = backend.DefaultTarget
-	}
-
+func findInStdLib(path string) (Module, bool) {
 	// Provide minimal hardcoded definitions for special modules
 	// These provide the function signatures for type checking
 	switch path {
 	case "ard/async":
-		return AsyncPkg{target: target}, true
+		return AsyncPkg{}, true
 	case "ard/maybe":
 		return MaybePkg{}, true
 	case "ard/result":
@@ -23,7 +17,7 @@ func findInStdLibTarget(path string, target string) (Module, bool) {
 	}
 
 	// Check for embedded .ard modules for other modules
-	if mod, ok := FindEmbeddedModuleForTarget(path, target); ok {
+	if mod, ok := FindEmbeddedModule(path); ok {
 		return mod, true
 	}
 
@@ -31,9 +25,7 @@ func findInStdLibTarget(path string, target string) (Module, bool) {
 }
 
 /* ard/async */
-type AsyncPkg struct {
-	target string
-}
+type AsyncPkg struct{}
 
 func (pkg AsyncPkg) Path() string {
 	return "ard/async"
@@ -48,7 +40,7 @@ func (pkg AsyncPkg) Program() *Program {
 }
 
 func (pkg AsyncPkg) embeddedModule() (Module, bool) {
-	return FindEmbeddedModuleForTarget("ard/async", pkg.target)
+	return FindEmbeddedModule("ard/async")
 }
 
 func (pkg AsyncPkg) Get(name string) Symbol {
@@ -57,12 +49,11 @@ func (pkg AsyncPkg) Get(name string) Symbol {
 		return Symbol{
 			Name: name,
 			Type: &ExternalFunctionDef{
-				Name:                  name,
-				Parameters:            []Parameter{{Name: "ms", Type: Int}},
-				ReturnType:            Void,
-				ExternalBinding:       "Sleep",
-				ExternalBindingTarget: backend.TargetGo,
-				ExternalBindings:      map[string]string{backend.TargetGo: "Sleep"},
+				Name:             name,
+				Parameters:       []Parameter{{Name: "ms", Type: Int}},
+				ReturnType:       Void,
+				ExternalBinding:  "Sleep",
+				ExternalBindings: map[string]string{"go": "Sleep"},
 			},
 		}
 	case "start":

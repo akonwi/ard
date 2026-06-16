@@ -7,15 +7,9 @@ use ard/testing
 
 // Standard library JSON module implemented with FFI
 
-extern fn parse(input: Str) $T!Str = {
-  go = "JsonParse"
-  js = "JsonParse"
-}
+extern fn parse(input: Str) $T!Str = "JsonParse"
 
-extern fn encode(value: $T) Str!Str = {
-  go = "JsonEncode"
-  js = "JsonEncode"
-}
+extern fn encode(value: $T) Str!Str = "JsonEncode"
 
 struct PersonJSONTest {
   name: Str,

@@ -14,7 +14,7 @@ Use this workflow for Ard bug fixes and issue-driven implementation.
   - expected behavior
   - observed behavior
   - minimal repro shape
-  - affected layer: parser, checker, AIR, Go backend, JS backend, formatter, LSP, etc.
+  - affected layer: parser, checker, AIR, Go backend, formatter, LSP, etc.
 - Restate the suspected failure mode briefly before editing.
 
 ## 2. Triage by reproducing
@@ -26,7 +26,6 @@ Prefer a regression test over an ad-hoc sample.
   - type checking / semantic diagnostics: `compiler/checker`
   - AIR shape: `compiler/air`
   - Go output/runtime behavior: `compiler/go`
-  - JS output/runtime behavior: `compiler/javascript`
   - formatting: `compiler/formatter`
 - Run only the new test first and confirm it fails for the expected reason.
 - If a sample project is needed, create it in a temp dir and keep the command/output for the report.
