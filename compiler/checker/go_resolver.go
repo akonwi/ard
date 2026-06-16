@@ -116,37 +116,39 @@ func goPackageFromTypes(importPath string, name string, pkg *types.Package) *GoP
 	return out
 }
 
-func (c *Checker) validateDirectGoExternBinding(binding string, loc parse.Location) {
+func (c *Checker) resolveDirectGoExternBinding(binding string, loc parse.Location) string {
 	parts, ok := directGoBindingParts(binding)
 	if !ok {
-		return
+		return binding
 	}
 	if len(parts) != 2 && len(parts) != 3 {
 		c.addError(fmt.Sprintf("Direct Go extern binding %q must be package::Function or package::Type::Method", binding), loc)
-		return
+		return binding
 	}
 	goImport, ok := c.directGoImports[parts[0]]
 	if !ok {
 		c.addError(fmt.Sprintf("Unknown Go import alias %q in extern binding %q", parts[0], binding), loc)
-		return
+		return binding
 	}
-	if goImport.pkg == nil {
-		return
-	}
-	if len(parts) == 2 {
-		if _, ok := goImport.pkg.Functions[parts[1]]; !ok {
-			c.addError(fmt.Sprintf("Go package %q has no exported function %q", goImport.importPath, parts[1]), loc)
+	if goImport.pkg != nil {
+		if len(parts) == 2 {
+			if _, ok := goImport.pkg.Functions[parts[1]]; !ok {
+				c.addError(fmt.Sprintf("Go package %q has no exported function %q", goImport.importPath, parts[1]), loc)
+			}
+		} else {
+			typ, ok := goImport.pkg.Types[parts[1]]
+			if !ok {
+				c.addError(fmt.Sprintf("Go package %q has no exported type %q", goImport.importPath, parts[1]), loc)
+			} else if _, ok := typ.Methods[parts[2]]; !ok {
+				c.addError(fmt.Sprintf("Go type %q in package %q has no exported method %q", parts[1], goImport.importPath, parts[2]), loc)
+			}
 		}
-		return
 	}
-	typ, ok := goImport.pkg.Types[parts[1]]
-	if !ok {
-		c.addError(fmt.Sprintf("Go package %q has no exported type %q", goImport.importPath, parts[1]), loc)
-		return
-	}
-	if _, ok := typ.Methods[parts[2]]; !ok {
-		c.addError(fmt.Sprintf("Go type %q in package %q has no exported method %q", parts[1], goImport.importPath, parts[2]), loc)
-	}
+	return canonicalDirectGoBinding(goImport.importPath, parts[1:])
+}
+
+func canonicalDirectGoBinding(importPath string, symbolParts []string) string {
+	return "go:" + importPath + "::" + strings.Join(symbolParts, "::")
 }
 
 func directGoBindingParts(binding string) ([]string, bool) {

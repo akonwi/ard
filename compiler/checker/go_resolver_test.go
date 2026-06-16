@@ -37,6 +37,13 @@ extern fn floor(value: Float) Float = math::Floor`), "main.ard")
 	if c.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
 	}
+	fn, ok := c.Module().Program().Statements[0].Expr.(*ExternalFunctionDef)
+	if !ok {
+		t.Fatalf("expected external function, got %#v", c.Module().Program().Statements[0].Expr)
+	}
+	if fn.ExternalBinding != "go:math::Floor" || fn.ExternalBindings["go"] != "go:math::Floor" {
+		t.Fatalf("external binding = %q / %#v", fn.ExternalBinding, fn.ExternalBindings)
+	}
 }
 
 func TestDirectGoExternBindingRequiresImportedAlias(t *testing.T) {

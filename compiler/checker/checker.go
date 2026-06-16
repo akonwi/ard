@@ -5408,7 +5408,10 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 	}
 
 	resolvedBinding := resolveExternalBinding(bindings)
-	c.validateDirectGoExternBinding(resolvedBinding, def.GetLocation())
+	resolvedBinding = c.resolveDirectGoExternBinding(resolvedBinding, def.GetLocation())
+	if _, ok := bindings["go"]; ok {
+		bindings["go"] = resolvedBinding
+	}
 
 	// Create external function definition
 	extFn := &ExternalFunctionDef{

@@ -3902,6 +3902,19 @@ func mapsKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+func TestLowerDirectGoExternFunctionCall(t *testing.T) {
+	program := lowerSource(t, `use go:math
+extern fn floor(value: Float) Float = math::Floor
+fn main() Float { floor(1.2) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "math", "math") {
+		t.Fatal("generated AST missing math import")
+	}
+	if !astFilesHaveCall(files, "math.Floor") {
+		t.Fatal("generated AST missing math.Floor call")
+	}
+}
+
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")

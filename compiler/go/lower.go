@@ -5350,6 +5350,9 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 	if goBinding, ok := ext.Bindings["go"]; ok && goBinding != "" {
 		binding = goBinding
 	}
+	if direct, ok, err := l.lowerDirectGoExternCall(binding, args, stmts); err != nil || ok {
+		return direct, err
+	}
 	if !externModuleIsStdlib(l.program, ext) {
 		if alias, ok := dependencyAliasForModulePath(modulePathForExtern(l.program, ext), l.projectInfo); ok {
 			return l.lowerDependencyExternCall(ext, alias, binding, args, stmts, expr.Type)
