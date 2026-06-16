@@ -375,6 +375,11 @@ export function FloatCeil(value) {
   return Math.ceil(value);
 }
 
+export function FloatRound(value) {
+  value = Number(value);
+  return value < 0 ? -Math.round(-value) : Math.round(value);
+}
+
 function float64Parts(value) {
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, value, false);

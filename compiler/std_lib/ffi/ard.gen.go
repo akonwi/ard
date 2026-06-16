@@ -187,6 +187,7 @@ type Host struct {
 	FloatFormat          func(value float64, decimals int) string
 	FloatFromInt         func(int int) float64
 	FloatFromStr         func(string string) Maybe[float64]
+	FloatRound           func(float float64) float64
 	FloatToDynamic       func(val float64) any
 	GetPathValue         func(req *http.Request, name string) string
 	GetQueryParam        func(req *http.Request, name string) string
@@ -370,6 +371,9 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.FloatFromStr != nil {
 		functions["FloatFromStr"] = h.FloatFromStr
+	}
+	if h.FloatRound != nil {
+		functions["FloatRound"] = h.FloatRound
 	}
 	if h.FloatToDynamic != nil {
 		functions["FloatToDynamic"] = h.FloatToDynamic

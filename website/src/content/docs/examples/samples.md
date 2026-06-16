@@ -137,8 +137,8 @@ fn get_name(shape: Shape) Str {
 
 fn calculate_area(shape: Shape) Float {
   match shape {
-    Square => (it.size * it.size).to_float()
-    Circle => 3.14159 * (it.radius * it.radius).to_float()
+    Square => Float::from_int(it.size * it.size)
+    Circle => 3.14159 * Float::from_int(it.radius * it.radius)
   }
 }
 
@@ -239,7 +239,7 @@ fn calculate_percentage(text1: Str, text2: Str) Float!Str {
   
   match num2 == 0 {
     true => Result::err("Cannot divide by zero")
-    false => Result::ok((num1.to_float() / num2.to_float()) * 100.0)
+    false => Result::ok((Float::from_int(num1) / Float::from_int(num2)) * 100.0)
   }
 }
 

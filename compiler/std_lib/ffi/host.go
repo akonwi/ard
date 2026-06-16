@@ -97,6 +97,7 @@ func NewHost(config HostConfig) Host {
 		FSWriteFile:          FSWriteFile,
 		FloatCeil:            FloatCeil,
 		FloatFloor:           FloatFloor,
+		FloatRound:           FloatRound,
 		FloatFormat:          FloatFormat,
 		FloatFromInt:         FloatFromInt,
 		FloatFromStr:         FloatFromStr,
@@ -475,6 +476,10 @@ func FloatFloor(value float64) float64 {
 
 func FloatCeil(value float64) float64 {
 	return math.Ceil(value)
+}
+
+func FloatRound(value float64) float64 {
+	return math.Round(value)
 }
 
 func FloatFormat(value float64, decimals int) string {

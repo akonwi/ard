@@ -86,6 +86,7 @@ var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
 	"FloatFormat":          {function: "FloatFormat", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
 	"FloatFromInt":         {function: "FloatFromInt", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"FloatFromStr":         {function: "FloatFromStr", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
+	"FloatRound":           {function: "FloatRound", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"FloatToDynamic":       {function: "FloatToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"GetPathValue":         {function: "GetPathValue", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
 	"GetQueryParam":        {function: "GetQueryParam", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
