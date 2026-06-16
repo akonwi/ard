@@ -10,6 +10,42 @@ func TestUnresolvedTypeVarGetReturnsNil(t *testing.T) {
 	}
 }
 
+func TestMaybeStringParenthesizesCompositeTypes(t *testing.T) {
+	functionType := &FunctionDef{
+		Name: "<function>",
+		Parameters: []Parameter{
+			{Name: "arg0", Type: Int},
+		},
+		ReturnType: Void,
+	}
+	if got, want := MakeMaybe(functionType).String(), "(fn(Int) Void)?"; got != want {
+		t.Fatalf("function maybe string = %q, want %q", got, want)
+	}
+
+	if got, want := MakeMaybe(MakeResult(Int, Str)).String(), "(Int!Str)?"; got != want {
+		t.Fatalf("result maybe string = %q, want %q", got, want)
+	}
+	if got, want := MakeMaybe(MakeResult(functionType, Str)).String(), "((fn(Int) Void)!Str)?"; got != want {
+		t.Fatalf("function result maybe string = %q, want %q", got, want)
+	}
+	externalFunctionType := &ExternalFunctionDef{
+		Parameters: []Parameter{{Name: "arg0", Type: Int}},
+		ReturnType: Void,
+	}
+	if got, want := MakeMaybe(externalFunctionType).String(), "(fn(Int) Void)?"; got != want {
+		t.Fatalf("external function maybe string = %q, want %q", got, want)
+	}
+
+	nestedFunctionType := &FunctionDef{
+		Name:       "<function>",
+		Parameters: []Parameter{{Name: "callback", Type: functionType, Mutable: true}},
+		ReturnType: functionType,
+	}
+	if got, want := MakeMaybe(nestedFunctionType).String(), "(fn(mut fn(Int) Void) fn(Int) Void)?"; got != want {
+		t.Fatalf("nested function maybe string = %q, want %q", got, want)
+	}
+}
+
 func TestTypeEquality(t *testing.T) {
 	var tests = []struct {
 		left   Type

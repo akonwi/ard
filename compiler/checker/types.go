@@ -659,7 +659,64 @@ func MakeMaybe(of Type) *Maybe {
 }
 
 func (m *Maybe) String() string {
-	return m.of.String() + "?"
+	switch m.of.(type) {
+	case *FunctionDef, FunctionDef, *ExternalFunctionDef, ExternalFunctionDef, *Result:
+		return "(" + typeSyntaxString(m.of) + ")?"
+	default:
+		return typeSyntaxString(m.of) + "?"
+	}
+}
+
+func typeSyntaxString(t Type) string {
+	switch typ := t.(type) {
+	case *FunctionDef:
+		return functionTypeString(*typ)
+	case FunctionDef:
+		return functionTypeString(typ)
+	case *ExternalFunctionDef:
+		return externalFunctionTypeString(*typ)
+	case ExternalFunctionDef:
+		return externalFunctionTypeString(typ)
+	case *Maybe:
+		return typ.String()
+	case *Result:
+		return resultOperandSyntax(typ.val) + "!" + resultOperandSyntax(typ.err)
+	case *List:
+		return "[" + typeSyntaxString(typ.of) + "]"
+	case *Map:
+		return "[" + typeSyntaxString(typ.key) + ":" + typeSyntaxString(typ.value) + "]"
+	default:
+		return t.String()
+	}
+}
+
+func resultOperandSyntax(t Type) string {
+	value := typeSyntaxString(t)
+	switch t.(type) {
+	case *FunctionDef, FunctionDef, *ExternalFunctionDef, ExternalFunctionDef, *Result:
+		return "(" + value + ")"
+	default:
+		return value
+	}
+}
+
+func functionTypeString(f FunctionDef) string {
+	return callableTypeString(f.Parameters, f.ReturnType)
+}
+
+func externalFunctionTypeString(f ExternalFunctionDef) string {
+	return callableTypeString(f.Parameters, f.ReturnType)
+}
+
+func callableTypeString(params []Parameter, returnType Type) string {
+	paramStrs := make([]string, len(params))
+	for i := range params {
+		paramStrs[i] = typeSyntaxString(params[i].Type)
+		if params[i].Mutable {
+			paramStrs[i] = "mut " + paramStrs[i]
+		}
+	}
+	return fmt.Sprintf("fn(%s) %s", strings.Join(paramStrs, ","), typeSyntaxString(returnType))
 }
 func (m *Maybe) get(name string) Type {
 	switch name {
