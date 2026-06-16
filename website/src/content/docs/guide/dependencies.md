@@ -93,7 +93,7 @@ They are resolved from the path in `ard.toml` and are not copied into the cache.
 
 ## FFI companions
 
-Dependency packages may own target-specific FFI companions, such as `ffi/*.go` for the Go target or JavaScript companion modules. The compiler routes extern calls to the package that declares them, so a dependency can provide both its Ard API and host-language implementation.
+Dependency packages may own Go FFI companions, such as `ffi/*.go`. The compiler routes extern calls to the package that declares them, so a dependency can provide both its Ard API and host-language implementation.
 
 ## No default vendoring
 

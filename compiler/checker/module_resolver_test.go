@@ -45,43 +45,8 @@ func TestFindProjectRoot(t *testing.T) {
 	if project.ProjectName != "test_project" {
 		t.Errorf("Expected project name 'test_project', got '%s'", project.ProjectName)
 	}
-	if project.Target != "go" {
-		t.Errorf("Expected default target 'go', got '%s'", project.Target)
-	}
-
 	if project.RootPath != tempDir {
 		t.Errorf("Expected root path '%s', got '%s'", tempDir, project.RootPath)
-	}
-}
-
-func TestFindProjectRootReadsTarget(t *testing.T) {
-	tests := []struct {
-		name   string
-		target string
-	}{
-		{name: "go", target: "go"},
-		{name: "js-browser", target: "js-browser"},
-		{name: "js-server", target: "js-server"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			tomlContent := "name = \"test_project\"\nard = \">= 0.1.0\"\ntarget = \"" + tt.target + "\"\n"
-			if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte(tomlContent), 0o644); err != nil {
-				t.Fatal(err)
-			}
-
-			resolver, err := checker.NewModuleResolver(dir)
-			if err != nil {
-				t.Fatalf("Failed to create module resolver: %v", err)
-			}
-
-			project := resolver.GetProjectInfo()
-			if project.Target != tt.target {
-				t.Fatalf("Expected target '%s', got '%s'", tt.target, project.Target)
-			}
-		})
 	}
 }
 
@@ -139,19 +104,6 @@ func TestArdVersionConstraint(t *testing.T) {
 		_, err := checker.NewModuleResolver(dir)
 		if err != nil {
 			t.Fatalf("dev version should skip even invalid constraints, got: %v", err)
-		}
-	})
-
-	t.Run("invalid target is rejected", func(t *testing.T) {
-		dir := t.TempDir()
-		os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\ntarget = \"wasm\"\n"), 0o644)
-
-		_, err := checker.NewModuleResolver(dir)
-		if err == nil {
-			t.Fatal("expected invalid target error")
-		}
-		if !strings.Contains(err.Error(), "unknown target: wasm") {
-			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 }

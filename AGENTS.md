@@ -5,13 +5,12 @@ This is the source code for the Ard programming language.
 
 ### Repo structure
 This is a monorepo with the following top-level directories:
-- /compiler: The Ard language compiler, parser, type checker, and native/JS targets
+- /compiler: The Ard language compiler, parser, type checker, and Go target
   - /compiler/docs: documentation about language syntax, feature design, and implementation decisions
   - /compiler/samples: runnable Ard program samples
   - /compiler/parse: parser implementation
   - /compiler/checker: type checker and semantic analysis
   - /compiler/go: Go target implementation
-  - /compiler/javascript: JavaScript target implementation
   - /compiler/std_lib: standard library definitions
   - /compiler/main.go: compiler CLI entry point
   - /compiler/go.mod & go.sum: Go module dependencies for the compiler

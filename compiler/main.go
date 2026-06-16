@@ -13,12 +13,10 @@ import (
 	"time"
 
 	"github.com/akonwi/ard/air"
-	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
-	"github.com/akonwi/ard/javascript"
 	"github.com/akonwi/ard/lsp"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/version"
@@ -54,76 +52,47 @@ func main() {
 		}
 	case "run":
 		{
-			inputPath, requestedTarget, err := parseRunArgs(os.Args[2:])
+			inputPath, err := parseRunArgs(os.Args[2:])
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			target, err := resolveTarget(inputPath, requestedTarget)
-			if err != nil {
+			profile := newPipelineProfile("run go")
+			defer profile.Print()
+			var loaded *frontend.LoadResult
+			if err := profile.Time("frontend.load_module", func() error {
+				var loadErr error
+				loaded, loadErr = frontend.LoadModule(inputPath)
+				return loadErr
+			}); err != nil {
+				os.Exit(1)
+			}
+			var program *air.Program
+			if err := profile.Time("air.lower", func() error {
+				var lowerErr error
+				program, lowerErr = air.Lower(loaded.Module)
+				return lowerErr
+			}); err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			switch target {
-			case backend.TargetGo:
-				profile := newPipelineProfile("run go")
-				defer profile.Print()
-				var loaded *frontend.LoadResult
-				if err := profile.Time("frontend.load_module", func() error {
-					var loadErr error
-					loaded, loadErr = frontend.LoadModule(inputPath, target)
-					return loadErr
-				}); err != nil {
-					os.Exit(1)
-				}
-				var program *air.Program
-				if err := profile.Time("air.lower", func() error {
-					var lowerErr error
-					program, lowerErr = air.Lower(loaded.Module)
-					return lowerErr
-				}); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-				if err := validateEntrypointSignature(profile, program); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-				if err := gotarget.RunProgram(program, os.Args, loaded.ProjectInfo); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-			case backend.TargetJSBrowser, backend.TargetJSServer:
-				if err := runJSProgram(inputPath, target, os.Args); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-			default:
-				fmt.Printf("unknown target: %s\n", target)
+			if err := validateEntrypointSignature(profile, program); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			if err := gotarget.RunProgram(program, os.Args, loaded.ProjectInfo); err != nil {
+				fmt.Println(err)
 				os.Exit(1)
 			}
 		}
 	case "build":
 		{
-			inputPath, outputPath, requestedTarget, err := parseBuildArgs(os.Args[2:])
+			inputPath, outputPath, err := parseBuildArgs(os.Args[2:])
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			target, err := resolveTarget(inputPath, requestedTarget)
-			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
-			}
-			var builtPath string
-			switch target {
-			case backend.TargetGo:
-				builtPath, err = buildGoBinary(inputPath, outputPath, target)
-			case backend.TargetJSBrowser, backend.TargetJSServer:
-				builtPath, err = buildJSProgram(inputPath, outputPath, target)
-			default:
-				err = fmt.Errorf("unknown target: %s", target)
-			}
+			builtPath, err := buildGoBinary(inputPath, outputPath)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
@@ -132,12 +101,12 @@ func main() {
 		}
 	case "test":
 		{
-			inputPath, filter, failFast, target, err := parseTestArgs(os.Args[2:])
+			inputPath, filter, failFast, err := parseTestArgs(os.Args[2:])
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			if !runTests(inputPath, filter, failFast, target) {
+			if !runTests(inputPath, filter, failFast) {
 				os.Exit(1)
 			}
 			os.Exit(0)
@@ -214,7 +183,7 @@ func printUsage() {
 
 Commands:
   check <file.ard>                  Type-check a program
-  run [--target <target>] <file.ard> Run a program
+  run <file.ard>                    Run a program
   build <file.ard> [--out <path>]    Build a program
   test [path] [--filter <pattern>]   Run Ard tests
   add <git-source@ref> [as alias]    Add or update a Git dependency and lock it
@@ -665,32 +634,45 @@ func dependencyManifestEntry(dep checker.DependencyInfo) string {
 }
 
 func check(inputPath string) bool {
-	_, err := loadModule(inputPath, "")
+	_, err := loadModule(inputPath)
 	return err == nil
 }
 
-func loadModule(inputPath string, target string) (checker.Module, error) {
-	result, err := frontend.LoadModule(inputPath, target)
+func loadModule(inputPath string) (checker.Module, error) {
+	result, err := frontend.LoadModule(inputPath)
 	if err != nil {
 		return nil, err
 	}
 	return result.Module, nil
 }
 
-func parseRunArgs(args []string) (string, string, error) {
+func parseRunArgs(args []string) (string, error) {
 	inputPath := ""
-	target := ""
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			return "", fmt.Errorf("unknown flag: %s", arg)
+		}
+		if inputPath == "" {
+			inputPath = arg
+			continue
+		}
+	}
+	if inputPath == "" {
+		return "", fmt.Errorf("expected filepath argument")
+	}
+	return inputPath, nil
+}
+
+func parseBuildArgs(args []string) (string, string, error) {
+	inputPath := ""
+	outputPath := ""
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "--target" {
+		if arg == "--out" {
 			if i+1 >= len(args) {
-				return "", "", fmt.Errorf("--target requires a value")
+				return "", "", fmt.Errorf("--out requires a path")
 			}
-			parsedTarget, err := backend.ParseTarget(args[i+1])
-			if err != nil {
-				return "", "", err
-			}
-			target = parsedTarget
+			outputPath = args[i+1]
 			i++
 			continue
 		}
@@ -701,49 +683,10 @@ func parseRunArgs(args []string) (string, string, error) {
 			inputPath = arg
 			continue
 		}
+		return "", "", fmt.Errorf("unexpected argument: %s", arg)
 	}
 	if inputPath == "" {
 		return "", "", fmt.Errorf("expected filepath argument")
-	}
-	return inputPath, target, nil
-}
-
-func parseBuildArgs(args []string) (string, string, string, error) {
-	inputPath := ""
-	outputPath := ""
-	target := ""
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--out" {
-			if i+1 >= len(args) {
-				return "", "", "", fmt.Errorf("--out requires a path")
-			}
-			outputPath = args[i+1]
-			i++
-			continue
-		}
-		if arg == "--target" {
-			if i+1 >= len(args) {
-				return "", "", "", fmt.Errorf("--target requires a value")
-			}
-			parsedTarget, err := backend.ParseTarget(args[i+1])
-			if err != nil {
-				return "", "", "", err
-			}
-			target = parsedTarget
-			i++
-			continue
-		}
-		if strings.HasPrefix(arg, "-") {
-			return "", "", "", fmt.Errorf("unknown flag: %s", arg)
-		}
-		if inputPath == "" {
-			inputPath = arg
-			continue
-		}
-	}
-	if inputPath == "" {
-		return "", "", "", fmt.Errorf("expected filepath argument")
 	}
 	if outputPath == "" {
 		outputPath = filepath.Base(strings.TrimSuffix(inputPath, filepath.Ext(inputPath)))
@@ -751,11 +694,7 @@ func parseBuildArgs(args []string) (string, string, string, error) {
 			outputPath = "main"
 		}
 	}
-	return inputPath, outputPath, target, nil
-}
-
-func resolveTarget(inputPath, requestedTarget string) (string, error) {
-	return frontend.ResolveTarget(inputPath, requestedTarget)
+	return inputPath, outputPath, nil
 }
 
 func parseFormatArgs(args []string) (string, bool, error) {
@@ -782,11 +721,10 @@ func parseFormatArgs(args []string) (string, bool, error) {
 	return inputPath, checkOnly, nil
 }
 
-func parseTestArgs(args []string) (string, string, bool, string, error) {
+func parseTestArgs(args []string) (string, string, bool, error) {
 	inputPath := "."
 	filter := ""
 	failFast := false
-	target := backend.DefaultTarget
 	seenPath := false
 
 	for i := 0; i < len(args); i++ {
@@ -796,33 +734,23 @@ func parseTestArgs(args []string) (string, string, bool, string, error) {
 			failFast = true
 		case "--filter":
 			if i+1 >= len(args) {
-				return "", "", false, "", fmt.Errorf("--filter requires a value")
+				return "", "", false, fmt.Errorf("--filter requires a value")
 			}
 			filter = args[i+1]
 			i++
-		case "--target":
-			if i+1 >= len(args) {
-				return "", "", false, "", fmt.Errorf("--target requires a value")
-			}
-			parsedTarget, err := backend.ParseTarget(args[i+1])
-			if err != nil {
-				return "", "", false, "", err
-			}
-			target = parsedTarget
-			i++
 		default:
 			if strings.HasPrefix(arg, "-") {
-				return "", "", false, "", fmt.Errorf("unknown flag: %s", arg)
+				return "", "", false, fmt.Errorf("unknown flag: %s", arg)
 			}
 			if seenPath {
-				return "", "", false, "", fmt.Errorf("unexpected argument: %s", arg)
+				return "", "", false, fmt.Errorf("unexpected argument: %s", arg)
 			}
 			inputPath = arg
 			seenPath = true
 		}
 	}
 
-	return inputPath, filter, failFast, target, nil
+	return inputPath, filter, failFast, nil
 }
 
 func formatPath(inputPath string, checkOnly bool) ([]string, error) {
@@ -940,15 +868,7 @@ type testOutcome struct {
 	message string
 }
 
-func runTests(inputPath, filter string, failFast bool, target ...string) bool {
-	testTarget := backend.DefaultTarget
-	if len(target) > 0 && target[0] != "" {
-		testTarget = target[0]
-	}
-	if testTarget != backend.TargetGo {
-		fmt.Printf("unsupported test target: %s\n", testTarget)
-		return false
-	}
+func runTests(inputPath, filter string, failFast bool) bool {
 	return runGoTests(inputPath, filter, failFast)
 }
 
@@ -1082,7 +1002,7 @@ func loadGoTestModule(path string, resolver *checker.ModuleResolver, projectInfo
 			}
 		}
 	}
-	c := checker.New(filePath, result.Program, resolver, checker.CheckOptions{Target: backend.TargetGo, ModulePath: modulePath})
+	c := checker.New(filePath, result.Program, resolver, checker.CheckOptions{ModulePath: modulePath})
 	c.Check()
 	if c.HasErrors() {
 		for _, diagnostic := range c.Diagnostics() {
@@ -1189,11 +1109,6 @@ func discoverTestFiles(inputPath string) ([]string, error) {
 		if filepath.Ext(path) != ".ard" {
 			return nil
 		}
-		if modulePath, ok := stdlibModulePathForTestFile(inputPath, path); ok {
-			if err := checker.ValidateStdlibImportTarget(modulePath, backend.DefaultTarget); err != nil {
-				return nil
-			}
-		}
 		cleaned := filepath.Clean(path)
 		if _, ok := seen[cleaned]; ok {
 			return nil
@@ -1263,98 +1178,13 @@ func reportTestSummary(outcomes []testOutcome) {
 	fmt.Printf("\n%d passed; %d failed; %d panicked\n", passed, failed, panicked)
 }
 
-func runJSProgram(inputPath string, target string, args []string) error {
-	profile := newPipelineProfile("run javascript")
-	defer profile.Print()
-	var loaded *frontend.LoadResult
-	if err := profile.Time("frontend.load_module", func() error {
-		var loadErr error
-		loaded, loadErr = frontend.LoadModule(inputPath, target)
-		return loadErr
-	}); err != nil {
-		return err
-	}
-	var program *air.Program
-	if err := profile.Time("air.lower", func() error {
-		var lowerErr error
-		program, lowerErr = air.Lower(loaded.Module)
-		return lowerErr
-	}); err != nil {
-		return err
-	}
-	if err := validateEntrypointSignature(profile, program); err != nil {
-		return err
-	}
-	if err := profile.Time("javascript.run", func() error {
-		return javascript.RunProgram(program, target, args, loaded.ProjectInfo)
-	}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func buildJSProgram(inputPath string, outputPath string, target string) (string, error) {
-	profile := newPipelineProfile("build javascript")
-	defer profile.Print()
-	var loaded *frontend.LoadResult
-	if err := profile.Time("frontend.load_module", func() error {
-		var loadErr error
-		loaded, loadErr = frontend.LoadModule(inputPath, target)
-		return loadErr
-	}); err != nil {
-		return "", err
-	}
-	var program *air.Program
-	if err := profile.Time("air.lower", func() error {
-		var lowerErr error
-		program, lowerErr = air.Lower(loaded.Module)
-		return lowerErr
-	}); err != nil {
-		return "", err
-	}
-	if err := validateEntrypointSignature(profile, program); err != nil {
-		return "", err
-	}
-	outputPath = resolveJSBuildOutputPath(inputPath, outputPath, target, loaded.ProjectInfo)
-	var builtPath string
-	if err := profile.Time("javascript.build", func() error {
-		var buildErr error
-		builtPath, buildErr = javascript.BuildProgram(program, outputPath, target, loaded.ProjectInfo)
-		return buildErr
-	}); err != nil {
-		return "", err
-	}
-	return builtPath, nil
-}
-
-func resolveJSBuildOutputPath(inputPath string, outputPath string, target string, projectInfo *checker.ProjectInfo) string {
-	defaultOutput := filepath.Base(strings.TrimSuffix(inputPath, filepath.Ext(inputPath)))
-	if defaultOutput == "" || defaultOutput == "." || defaultOutput == string(filepath.Separator) {
-		defaultOutput = "main"
-	}
-	if outputPath != defaultOutput {
-		return outputPath
-	}
-	rootDir := ""
-	if projectInfo != nil {
-		rootDir = strings.TrimSpace(projectInfo.RootPath)
-	}
-	if rootDir == "" {
-		rootDir = filepath.Dir(inputPath)
-		if rootDir == "" || rootDir == "." {
-			rootDir = "."
-		}
-	}
-	return filepath.Join(rootDir, "ard-out", target, defaultOutput+".mjs")
-}
-
-func buildGoBinary(inputPath string, outputPath string, target string) (string, error) {
+func buildGoBinary(inputPath string, outputPath string) (string, error) {
 	profile := newPipelineProfile("build go")
 	defer profile.Print()
 	var loaded *frontend.LoadResult
 	if err := profile.Time("frontend.load_module", func() error {
 		var loadErr error
-		loaded, loadErr = frontend.LoadModule(inputPath, target)
+		loaded, loadErr = frontend.LoadModule(inputPath)
 		return loadErr
 	}); err != nil {
 		return "", err

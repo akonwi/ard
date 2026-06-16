@@ -469,14 +469,14 @@ func importedModuleForAlias(alias string, prog *parse.Program, filePath string) 
 		return moduleForImport(imp, filePath)
 	}
 	if path := preludeModulePath(alias); path != "" {
-		return checker.FindEmbeddedModuleForTarget(path, "")
+		return checker.FindEmbeddedModule(path)
 	}
 	return nil, false
 }
 
 func moduleForImport(imp parse.Import, filePath string) (checker.Module, bool) {
 	if strings.HasPrefix(imp.Path, "ard/") {
-		return checker.FindEmbeddedModuleForTarget(imp.Path, "")
+		return checker.FindEmbeddedModule(imp.Path)
 	}
 
 	if filePath == "" {

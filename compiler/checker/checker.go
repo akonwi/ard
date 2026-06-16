@@ -10,7 +10,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/akonwi/ard/backend"
 	"github.com/akonwi/ard/parse"
 )
 
@@ -234,7 +233,7 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 		if !changed {
 			return typ
 		}
-		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: newTypeArgs, ExternalBinding: typ.ExternalBinding, ExternalBindingTarget: typ.ExternalBindingTarget, ExternalBindings: cloneExternalBindings(typ.ExternalBindings), private: typ.private}
+		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: newTypeArgs, ExternalBinding: typ.ExternalBinding, ExternalBindings: cloneExternalBindings(typ.ExternalBindings), private: typ.private}
 	default:
 		return t
 	}
@@ -278,7 +277,7 @@ type Checker struct {
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
 	rootScope := makeScope(nil)
-	checkOptions := normalizeCheckOptions(moduleResolver, options)
+	checkOptions := normalizeCheckOptions(options)
 	modulePath := filePath
 	if checkOptions.ModulePath != "" {
 		modulePath = checkOptions.ModulePath
@@ -329,11 +328,7 @@ func (c *Checker) Check() {
 
 		if strings.HasPrefix(imp.Path, "ard/") {
 			// Handle standard library imports
-			if err := ValidateStdlibImportTarget(imp.Path, c.options.Target); err != nil {
-				c.addError(err.Error(), imp.GetLocation())
-				continue
-			}
-			if mod, ok := findInStdLibTarget(imp.Path, c.options.Target); ok {
+			if mod, ok := findInStdLib(imp.Path); ok {
 				c.program.Imports[imp.Name] = mod
 			} else {
 				c.addError(fmt.Sprintf("Unknown module: %s", imp.Path), imp.GetLocation())
@@ -395,28 +390,28 @@ func (c *Checker) Check() {
 
 	// Auto-import prelude modules (only for non-std lib)
 	if !strings.HasPrefix(c.filePath, "ard/") {
-		if mod, ok := findInStdLibTarget("ard/dynamic", c.options.Target); ok {
+		if mod, ok := findInStdLib("ard/dynamic"); ok {
 			c.program.Imports["Dynamic"] = mod
 		}
-		if mod, ok := findInStdLibTarget("ard/float", c.options.Target); ok {
+		if mod, ok := findInStdLib("ard/float"); ok {
 			c.program.Imports["Float"] = mod
 		}
-		if mod, ok := findInStdLibTarget("ard/int", c.options.Target); ok {
+		if mod, ok := findInStdLib("ard/int"); ok {
 			c.program.Imports["Int"] = mod
 		}
-		if mod, ok := findInStdLibTarget("ard/byte", c.options.Target); ok {
+		if mod, ok := findInStdLib("ard/byte"); ok {
 			c.program.Imports["Byte"] = mod
 		}
-		if mod, ok := findInStdLibTarget("ard/rune", c.options.Target); ok {
+		if mod, ok := findInStdLib("ard/rune"); ok {
 			c.program.Imports["Rune"] = mod
 		}
-		if mod, ok := findInStdLibTarget("ard/list", c.options.Target); ok {
+		if mod, ok := findInStdLib("ard/list"); ok {
 			c.program.Imports["List"] = mod
 		}
-		if mod, ok := findInStdLibTarget("ard/map", c.options.Target); ok {
+		if mod, ok := findInStdLib("ard/map"); ok {
 			c.program.Imports["Map"] = mod
 		}
-		if mod, ok := findInStdLibTarget("ard/string", c.options.Target); ok {
+		if mod, ok := findInStdLib("ard/string"); ok {
 			c.program.Imports["Str"] = mod
 		}
 	}
@@ -1230,18 +1225,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 			bindings := cloneExternalBindings(s.ExternalBindings)
 			if len(bindings) == 0 && s.ExternalBinding != "" {
-				bindings = map[string]string{shorthandExternalBindingTarget(c.options.Target): s.ExternalBinding}
+				bindings = map[string]string{"go": s.ExternalBinding}
 			}
 			if target, ok := validateExternalBindingTargets(bindings); !ok {
 				c.addError(fmt.Sprintf("Unsupported extern binding target %q", target), s.GetLocation())
 				return nil
 			}
-			resolvedTarget, resolvedBinding := resolveExternalBindingForTarget(c.options.Target, bindings)
+			resolvedBinding := resolveExternalBinding(bindings)
 			externType.Name_ = s.Name
 			externType.GenericParams = append([]string(nil), s.TypeParams...)
 			externType.TypeArgs = typeArgs
 			externType.ExternalBinding = resolvedBinding
-			externType.ExternalBindingTarget = resolvedTarget
 			externType.ExternalBindings = bindings
 			externType.private = s.Private
 			return &Statement{Stmt: externType}
@@ -4271,11 +4265,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				}
 			}
 
-			if err := ValidateUnionMatchTarget(c.options.Target, unionType, typeCases); err != nil {
-				c.addError(err.Error(), s.GetLocation())
-				return nil
-			}
-
 			// Create and return the UnionMatch
 			return &UnionMatch{
 				Subject:         subject,
@@ -5338,45 +5327,17 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 	return checked
 }
 
-func shorthandExternalBindingTarget(target string) string {
-	switch target {
-	case backend.TargetJSBrowser, backend.TargetJSServer:
-		return target
-	default:
-		return backend.TargetGo
-	}
-}
-
 func validateExternalBindingTargets(bindings map[string]string) (string, bool) {
 	for target := range bindings {
-		switch target {
-		case backend.TargetGo, "js", backend.TargetJSServer, backend.TargetJSBrowser:
-			continue
-		default:
+		if target != "go" {
 			return target, false
 		}
 	}
 	return "", true
 }
 
-func resolveExternalBindingForTarget(target string, bindings map[string]string) (string, string) {
-	if len(bindings) == 0 {
-		return "", ""
-	}
-	if target != "" {
-		if binding := bindings[target]; binding != "" {
-			return target, binding
-		}
-	}
-	if target == backend.TargetJSServer || target == backend.TargetJSBrowser {
-		if binding := bindings["js"]; binding != "" {
-			return "js", binding
-		}
-	}
-	if binding := bindings[backend.TargetGo]; binding != "" {
-		return backend.TargetGo, binding
-	}
-	return "", ""
+func resolveExternalBinding(bindings map[string]string) string {
+	return bindings["go"]
 }
 
 func cloneExternalBindings(bindings map[string]string) map[string]string {
@@ -5413,7 +5374,7 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 
 	bindings := cloneExternalBindings(def.ExternalBindings)
 	if len(bindings) == 0 && def.ExternalBinding != "" {
-		bindings = map[string]string{shorthandExternalBindingTarget(c.options.Target): def.ExternalBinding}
+		bindings = map[string]string{"go": def.ExternalBinding}
 	}
 	if len(bindings) == 0 {
 		c.addError("External binding cannot be empty", def.GetLocation())
@@ -5424,18 +5385,17 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 		return nil
 	}
 
-	resolvedTarget, resolvedBinding := resolveExternalBindingForTarget(c.options.Target, bindings)
+	resolvedBinding := resolveExternalBinding(bindings)
 
 	// Create external function definition
 	extFn := &ExternalFunctionDef{
-		Name:                  def.Name,
-		GenericParams:         append([]string(nil), def.TypeParams...),
-		Parameters:            params,
-		ReturnType:            returnType,
-		ExternalBinding:       resolvedBinding,
-		ExternalBindingTarget: resolvedTarget,
-		ExternalBindings:      bindings,
-		Private:               def.Private,
+		Name:             def.Name,
+		GenericParams:    append([]string(nil), def.TypeParams...),
+		Parameters:       params,
+		ReturnType:       returnType,
+		ExternalBinding:  resolvedBinding,
+		ExternalBindings: bindings,
+		Private:          def.Private,
 	}
 
 	// Add to scope
@@ -5638,7 +5598,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		for i, typeArg := range typ.TypeArgs {
 			substitutedArgs[i] = substituteType(typeArg, typeMap)
 		}
-		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: substitutedArgs, ExternalBinding: typ.ExternalBinding, ExternalBindingTarget: typ.ExternalBindingTarget, ExternalBindings: cloneExternalBindings(typ.ExternalBindings), private: typ.private}
+		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: substitutedArgs, ExternalBinding: typ.ExternalBinding, ExternalBindings: cloneExternalBindings(typ.ExternalBindings), private: typ.private}
 	// Handle other compound types
 	default:
 		return t

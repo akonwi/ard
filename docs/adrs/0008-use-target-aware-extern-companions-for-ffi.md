@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0029](0029-remove-javascript-targets.md)
 
 ## Context
 

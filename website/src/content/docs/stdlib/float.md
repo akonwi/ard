@@ -10,7 +10,7 @@ The `ard/float` module is a prelude module. It is automatically imported and ali
 :::
 
 :::tip
-Use `Float::format(value, decimals)` when output must be stable across targets. The general `.to_str()` conversion is best for simple/debug output and may use backend-specific float formatting.
+Use `Float::format(value, decimals)` when output needs a fixed number of decimal places. The general `.to_str()` conversion is best for simple/debug output.
 :::
 
 The float module provides:
