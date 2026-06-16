@@ -262,6 +262,7 @@ type Checker struct {
 	halted                            bool
 	moduleResolver                    *ModuleResolver
 	options                           CheckOptions
+	directGoImports                   map[string]directGoImport
 	expectedExpr                      Type
 	duplicateTopLevelTypeDeclarations map[parse.Statement]bool
 	topLevelStructDeclarations        map[string]*parse.StructDefinition
@@ -282,13 +283,21 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 	if checkOptions.ModulePath != "" {
 		modulePath = checkOptions.ModulePath
 	}
+	if checkOptions.GoResolver == nil {
+		dir := filepath.Dir(filePath)
+		if moduleResolver != nil && moduleResolver.project.RootPath != "" {
+			dir = moduleResolver.project.RootPath
+		}
+		checkOptions.GoResolver = NewGoPackagesResolver(dir)
+	}
 	c := &Checker{
-		diagnostics:    []Diagnostic{},
-		input:          input,
-		filePath:       filePath,
-		modulePath:     modulePath,
-		moduleResolver: moduleResolver,
-		options:        checkOptions,
+		diagnostics:     []Diagnostic{},
+		input:           input,
+		filePath:        filePath,
+		modulePath:      modulePath,
+		moduleResolver:  moduleResolver,
+		options:         checkOptions,
+		directGoImports: map[string]directGoImport{},
 		program: &Program{
 			Imports:       map[string]Module{},
 			Statements:    []Statement{},
@@ -316,18 +325,26 @@ func (c *Checker) Diagnostics() []Diagnostic {
 }
 
 func (c *Checker) Check() {
+	seenImportAliases := map[string]struct{}{}
 	for _, imp := range c.input.Imports {
-		if _, dup := c.program.Imports[imp.Name]; dup {
+		if _, dup := seenImportAliases[imp.Name]; dup {
 			c.addWarning(fmt.Sprintf("%s Duplicate import: %s", imp.GetStart(), imp.Name), imp.GetLocation())
 			continue
 		}
-		if _, dup := c.program.Imports[imp.Name]; dup {
-			c.addWarning(fmt.Sprintf("%s Duplicate import: %s", imp.GetStart(), imp.Name), imp.GetLocation())
-			continue
-		}
+		seenImportAliases[imp.Name] = struct{}{}
 
 		if imp.Kind == parse.ImportKindGo {
-			// Direct Go imports are resolved by the Go FFI resolver, not as Ard modules.
+			goImport := directGoImport{alias: imp.Name, importPath: imp.Path}
+			if c.options.GoResolver != nil {
+				pkg, err := c.options.GoResolver.LoadPackage(imp.Path)
+				if err != nil {
+					c.addError(fmt.Sprintf("Failed to load Go package '%s': %v", imp.Path, err), imp.GetLocation())
+					c.directGoImports[imp.Name] = goImport
+					continue
+				}
+				goImport.pkg = pkg
+			}
+			c.directGoImports[imp.Name] = goImport
 			continue
 		}
 
@@ -5391,6 +5408,7 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 	}
 
 	resolvedBinding := resolveExternalBinding(bindings)
+	c.validateDirectGoExternBinding(resolvedBinding, def.GetLocation())
 
 	// Create external function definition
 	extFn := &ExternalFunctionDef{
