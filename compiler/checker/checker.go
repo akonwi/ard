@@ -337,6 +337,10 @@ func (c *Checker) Check() {
 		seenImportAliases[imp.Name] = struct{}{}
 
 		if imp.Kind == parse.ImportKindGo {
+			if !validDirectGoImportAlias(imp.Name) {
+				c.addError(fmt.Sprintf("Go import alias %q cannot be used as a Go selector; use `as` with a valid Go identifier", imp.Name), imp.GetLocation())
+				continue
+			}
 			goImport := directGoImport{alias: imp.Name, importPath: imp.Path}
 			if c.options.GoResolver != nil {
 				pkg, err := c.options.GoResolver.LoadPackage(imp.Path)

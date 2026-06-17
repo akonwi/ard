@@ -68,8 +68,45 @@ extern fn floor(value: Float) Float = math::Floor`), "main.ard")
 	if !ok {
 		t.Fatalf("expected external function, got %#v", c.Module().Program().Statements[0].Expr)
 	}
-	if fn.ExternalBinding != "go:math::Floor" || fn.ExternalBindings["go"] != "go:math::Floor" {
+	if fn.ExternalBinding != "go:math as math::Floor" || fn.ExternalBindings["go"] != "go:math as math::Floor" {
 		t.Fatalf("external binding = %q / %#v", fn.ExternalBinding, fn.ExternalBindings)
+	}
+}
+
+func TestDirectGoImportAliasMustBeUsableAsGoSelector(t *testing.T) {
+	for _, alias := range []string{"go", "init"} {
+		t.Run(alias, func(t *testing.T) {
+			result := parse.Parse([]byte(`use go:math as `+alias), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{}}})
+			c.Check()
+			if !c.HasErrors() {
+				t.Fatal("expected invalid Go import alias diagnostic")
+			}
+			if got := c.Diagnostics()[0].Message; !strings.Contains(got, `Go import alias "`+alias+`" cannot be used as a Go selector`) {
+				t.Fatalf("diagnostic = %q", got)
+			}
+		})
+	}
+}
+
+func TestDirectGoImportsRequireUniqueAliases(t *testing.T) {
+	result := parse.Parse([]byte(`use go:crypto/rand
+use go:math/rand`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"crypto/rand": {ImportPath: "crypto/rand", Name: "rand"},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected duplicate import alias diagnostic")
+	}
+	if got := c.Diagnostics()[0]; got.Kind != Warn || !strings.Contains(got.Message, "Duplicate import: rand") {
+		t.Fatalf("diagnostic = %#v, want duplicate rand warning", got)
 	}
 }
 
@@ -98,7 +135,7 @@ extern fn sleep(duration: time::Duration) Void = time::Sleep`), "main.ard")
 	if !ok {
 		t.Fatalf("param type = %#v, want ExternType", fn.Parameters[0].Type)
 	}
-	if duration.ExternalBinding != "go:time::Duration" {
+	if duration.ExternalBinding != "go:time as time::Duration" {
 		t.Fatalf("duration binding = %q", duration.ExternalBinding)
 	}
 }
@@ -129,7 +166,7 @@ fn active(status: vaxis::AnimationStatus) Bool {
 		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
 	}
 	fn := c.Module().Program().Statements[0].Expr.(*ExternalFunctionDef)
-	if enum, ok := fn.Parameters[0].Type.(*Enum); !ok || enum.ExternalBinding != "go:git.sr.ht/~rockorager/vaxis::AnimationStatus" || len(enum.Values) != 3 {
+	if enum, ok := fn.Parameters[0].Type.(*Enum); !ok || enum.ExternalBinding != "go:git.sr.ht/~rockorager/vaxis as vaxis::AnimationStatus" || len(enum.Values) != 3 {
 		t.Fatalf("param type = %#v, want direct Go enum-like AnimationStatus", fn.Parameters[0].Type)
 	}
 }

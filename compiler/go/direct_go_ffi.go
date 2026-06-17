@@ -14,6 +14,7 @@ import (
 
 type directGoExternBinding struct {
 	ImportPath string
+	Alias      string
 	Symbols    []string
 }
 
@@ -31,7 +32,34 @@ func parseDirectGoExternBinding(binding string) (directGoExternBinding, bool, er
 			return directGoExternBinding{}, true, fmt.Errorf("direct Go extern binding %q contains an empty segment", binding)
 		}
 	}
-	return directGoExternBinding{ImportPath: parts[0], Symbols: parts[1:]}, true, nil
+	importPath, alias := parseDirectGoImportHead(parts[0])
+	if importPath == "" {
+		return directGoExternBinding{}, true, fmt.Errorf("direct Go extern binding %q has invalid import path", binding)
+	}
+	return directGoExternBinding{ImportPath: importPath, Alias: alias, Symbols: parts[1:]}, true, nil
+}
+
+func parseDirectGoImportHead(head string) (string, string) {
+	parts := strings.Split(head, " as ")
+	if len(parts) == 1 {
+		return strings.TrimSpace(head), ""
+	}
+	if len(parts) != 2 {
+		return "", ""
+	}
+	importPath := strings.TrimSpace(parts[0])
+	alias := strings.TrimSpace(parts[1])
+	if importPath == "" || alias == "" {
+		return "", ""
+	}
+	return importPath, alias
+}
+
+func (binding directGoExternBinding) importAlias() string {
+	if binding.Alias != "" {
+		return binding.Alias
+	}
+	return directGoImportAlias(binding.ImportPath)
 }
 
 func directGoImportAlias(importPath string) string {
@@ -40,6 +68,98 @@ func directGoImportAlias(importPath string) string {
 		return "goffi"
 	}
 	return alias
+}
+
+func (l *lowerer) directGoBindingAlias(binding directGoExternBinding) string {
+	return l.generatedGoImportAlias(binding.ImportPath, binding.importAlias())
+}
+
+func (l *lowerer) generatedGoImportAlias(importPath string, preferred string) string {
+	if l.directGoAliases == nil {
+		l.directGoAliases = map[string]string{}
+	}
+	if l.reservedGoIdentifiers == nil {
+		l.reservedGoIdentifiers = collectReservedGoIdentifiers(l.program)
+	}
+	base := sanitizeName(preferred)
+	if strings.HasPrefix(preferred, "_tmp_") || !validGeneratedGoImportAlias(base) {
+		base = "ardgo"
+	}
+	key := importPath + "\x00" + preferred
+	if alias, ok := l.directGoAliases[key]; ok {
+		return alias
+	}
+	alias := base
+	for i := 1; l.reservedGoIdentifiers[alias]; i++ {
+		alias = fmt.Sprintf("%s_%d", base, i)
+	}
+	l.reservedGoIdentifiers[alias] = true
+	l.directGoAliases[key] = alias
+	return alias
+}
+
+func validGeneratedGoImportAlias(alias string) bool {
+	return alias != "_" && alias != "init" && !strings.HasPrefix(alias, "_tmp_") && token.IsIdentifier(alias) && token.Lookup(alias) == token.IDENT
+}
+
+func collectReservedGoIdentifiers(program *air.Program) map[string]bool {
+	reserved := map[string]bool{"main": true}
+	for _, name := range predeclaredGoIdentifiers() {
+		reserved[name] = true
+	}
+	for _, name := range runtimePreludeTopLevelNames() {
+		reserved[name] = true
+	}
+	if program == nil {
+		return reserved
+	}
+	for _, typ := range program.Types {
+		reserved[typeName(program, typ)] = true
+		reserved[fmt.Sprintf("ardJSONEncode_%d", typ.ID)] = true
+		reserved[fmt.Sprintf("ardJSONEncodeTop_%d", typ.ID)] = true
+		reserved[fmt.Sprintf("ardJSONMarshalTop_%d", typ.ID)] = true
+		reserved[fmt.Sprintf("ardJSONDecodeText_%d", typ.ID)] = true
+		for _, variant := range typ.Variants {
+			reserved[enumVariantName(program, typ, variant)] = true
+		}
+	}
+	for _, global := range program.Globals {
+		reserved[globalName(program, global)] = true
+	}
+	for _, fn := range program.Functions {
+		reserved[functionName(program, fn)] = true
+		for _, local := range fn.Locals {
+			reserved[localName(fn, local.ID)] = true
+		}
+	}
+	return reserved
+}
+
+func predeclaredGoIdentifiers() []string {
+	return []string{
+		"any", "bool", "byte", "comparable", "complex64", "complex128", "error", "float32", "float64",
+		"int", "int8", "int16", "int32", "int64", "rune", "string",
+		"uint", "uint8", "uint16", "uint32", "uint64", "uintptr",
+		"true", "false", "iota", "nil",
+		"append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len", "make",
+		"max", "min", "new", "panic", "print", "println", "real", "recover", "init",
+		// Generated sort comparator parameters. Direct Go selectors can be nested inside those closures.
+		"i", "j",
+	}
+}
+
+func runtimePreludeTopLevelNames() []string {
+	return []string{
+		"ardFiberState", "ardFiber", "ardSpawnFiber", "ardJoinFiber", "ardGetFiber",
+		"ardSortedIntKeys", "ardSortedStringKeys", "ardSortedAnyKeys", "ardListToAnySlice",
+		"ardDirectGoCheckSignedIntRange", "ardDirectGoCheckUintIntRange", "ardDirectGoCheckNonNegativeInt",
+		"ardDirectGoCheckFloat32Range", "ardDirectGoCheckRune",
+		"ardJSONPath", "ardJSONFound", "ardJSONErr", "ardJSONMissing",
+		"ardJSONDecodeInt", "ardJSONDecodeFloat", "ardJSONDecodeBool", "ardJSONDecodeString",
+		"ardJSONDecodeDynamic", "ardJSONDecodeByteList", "ardJSONDecodeMaybe", "ardJSONDecodeList", "ardJSONDecodeStringMap",
+		"ardJSONEncodeInt", "ardJSONEncodeFloat", "ardJSONEncodeBool", "ardJSONEncodeString", "ardJSONEncodeDynamic",
+		"ardJSONEncodeMaybe", "ardJSONEncodeList", "ardJSONEncodeMap", "ardJSONEncodeStructuralMap",
+	}
 }
 
 func (l *lowerer) lowerDirectGoExternCall(ext air.Extern, binding string, args []ast.Expr, stmts []ast.Stmt) (loweredExpr, bool, error) {
@@ -53,11 +173,11 @@ func (l *lowerer) lowerDirectGoExternCall(ext air.Extern, binding string, args [
 	}
 	switch len(direct.Symbols) {
 	case 1:
-		coercedArgs, err := l.coerceDirectGoArgs(ext.Signature, args, signature, 0)
+		coercedArgs, err := l.coerceDirectGoArgs(ext.Signature, args, signature, direct, 0)
 		if err != nil {
 			return loweredExpr{}, true, err
 		}
-		alias := directGoImportAlias(direct.ImportPath)
+		alias := l.directGoBindingAlias(direct)
 		call := &ast.CallExpr{Fun: l.qualified(alias, direct.ImportPath, direct.Symbols[0]), Args: coercedArgs}
 		adapted, err := l.adaptDirectGoReturn(ext.Signature.Return, call, signature.Results)
 		if err != nil {
@@ -69,7 +189,7 @@ func (l *lowerer) lowerDirectGoExternCall(ext air.Extern, binding string, args [
 		if len(args) == 0 {
 			return loweredExpr{}, true, fmt.Errorf("direct Go method binding %q requires a receiver argument", binding)
 		}
-		coercedArgs, err := l.coerceDirectGoArgs(ext.Signature, args, signature, 1)
+		coercedArgs, err := l.coerceDirectGoArgs(ext.Signature, args, signature, direct, 1)
 		if err != nil {
 			return loweredExpr{}, true, err
 		}
@@ -323,7 +443,7 @@ func (l *lowerer) wrapValueBoolMaybeCall(maybeTypeID air.TypeID, call ast.Expr) 
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
 }
 
-func (l *lowerer) coerceDirectGoArgs(signature air.Signature, args []ast.Expr, goSignature checker.GoSignature, argOffset int) ([]ast.Expr, error) {
+func (l *lowerer) coerceDirectGoArgs(signature air.Signature, args []ast.Expr, goSignature checker.GoSignature, binding directGoExternBinding, argOffset int) ([]ast.Expr, error) {
 	if len(goSignature.Params) == 0 {
 		return args, nil
 	}
@@ -333,7 +453,7 @@ func (l *lowerer) coerceDirectGoArgs(signature air.Signature, args []ast.Expr, g
 		if i >= len(signature.Params) || goParam >= len(goSignature.Params) {
 			break
 		}
-		arg, err := l.coerceDirectGoArg(signature.Params[i].Type, coerced[i], goSignature.Params[goParam])
+		arg, err := l.coerceDirectGoArg(signature.Params[i].Type, coerced[i], goSignature.Params[goParam], binding)
 		if err != nil {
 			return nil, err
 		}
@@ -342,11 +462,11 @@ func (l *lowerer) coerceDirectGoArgs(signature air.Signature, args []ast.Expr, g
 	return coerced, nil
 }
 
-func (l *lowerer) coerceDirectGoArg(ardType air.TypeID, arg ast.Expr, goType checker.GoValueType) (ast.Expr, error) {
+func (l *lowerer) coerceDirectGoArg(ardType air.TypeID, arg ast.Expr, goType checker.GoValueType, binding directGoExternBinding) (ast.Expr, error) {
 	if !l.directGoScalarNeedsConversion(ardType, goType) {
 		return arg, nil
 	}
-	conversion, err := l.directGoTypeExpr(goType)
+	conversion, err := l.directGoTypeExpr(goType, binding)
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +571,7 @@ func (l *lowerer) directGoEnumConstantExpr(typeBinding string, constantName stri
 	if len(direct.Symbols) != 1 || strings.HasPrefix(direct.Symbols[0], "*") {
 		return nil, true, fmt.Errorf("direct Go enum type binding %q must be package::Type", typeBinding)
 	}
-	return l.qualified(directGoImportAlias(direct.ImportPath), direct.ImportPath, constantName), true, nil
+	return l.qualified(l.directGoBindingAlias(direct), direct.ImportPath, constantName), true, nil
 }
 
 func (l *lowerer) directGoExternTypeExpr(binding string) (ast.Expr, bool, error) {
@@ -462,7 +582,7 @@ func (l *lowerer) directGoExternTypeExpr(binding string) (ast.Expr, bool, error)
 	if len(direct.Symbols) != 1 {
 		return nil, true, fmt.Errorf("direct Go extern type binding %q must be package::Type", binding)
 	}
-	alias := directGoImportAlias(direct.ImportPath)
+	alias := l.directGoBindingAlias(direct)
 	symbol := direct.Symbols[0]
 	if strings.HasPrefix(symbol, "*") {
 		typeName := strings.TrimPrefix(symbol, "*")
@@ -474,11 +594,25 @@ func (l *lowerer) directGoExternTypeExpr(binding string) (ast.Expr, bool, error)
 	return l.qualified(alias, direct.ImportPath, symbol), true, nil
 }
 
-func (l *lowerer) directGoTypeExpr(goType checker.GoValueType) (ast.Expr, error) {
-	if goType.ImportPath != "" && goType.Package != "" {
-		l.currentImports[goType.Package] = goType.ImportPath
+func rewriteQualifiedGoTypeExpr(expr string, pkg string, alias string) string {
+	if pkg == "" || alias == "" || pkg == alias {
+		return expr
 	}
-	expr, err := parser.ParseExpr(goType.Expr)
+	return strings.ReplaceAll(expr, pkg+".", alias+".")
+}
+
+func (l *lowerer) directGoTypeExpr(goType checker.GoValueType, binding directGoExternBinding) (ast.Expr, error) {
+	typeExpr := goType.Expr
+	if goType.ImportPath != "" && goType.Package != "" {
+		preferred := goType.Package
+		if binding.ImportPath == goType.ImportPath && binding.Alias != "" {
+			preferred = binding.importAlias()
+		}
+		alias := l.generatedGoImportAlias(goType.ImportPath, preferred)
+		typeExpr = rewriteQualifiedGoTypeExpr(typeExpr, goType.Package, alias)
+		l.registerImport(alias, goType.ImportPath)
+	}
+	expr, err := parser.ParseExpr(typeExpr)
 	if err != nil {
 		return nil, fmt.Errorf("parse Go scalar conversion type %q: %w", goType.Expr, err)
 	}

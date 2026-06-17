@@ -25,20 +25,23 @@ type loweredExpr struct {
 }
 
 type lowerer struct {
-	program          *air.Program
-	packageName      string
-	tempCounter      int
-	currentImports   map[string]string
-	declaredLocals   map[air.LocalID]bool
-	runtimeHelpers   map[string]bool
-	jsonParseTypes   map[air.TypeID]bool
-	jsonEncodeTypes  map[air.TypeID]bool
-	ffiImports       map[string]string
-	projectInfo      *checker.ProjectInfo
-	directGoResolver *checker.GoPackagesResolver
-	inlineClosures   map[air.FunctionID]bool
-	suppressMain     bool
-	includeTests     bool
+	program               *air.Program
+	packageName           string
+	tempCounter           int
+	currentImports        map[string]string
+	importErr             error
+	directGoAliases       map[string]string
+	reservedGoIdentifiers map[string]bool
+	declaredLocals        map[air.LocalID]bool
+	runtimeHelpers        map[string]bool
+	jsonParseTypes        map[air.TypeID]bool
+	jsonEncodeTypes       map[air.TypeID]bool
+	ffiImports            map[string]string
+	projectInfo           *checker.ProjectInfo
+	directGoResolver      *checker.GoPackagesResolver
+	inlineClosures        map[air.FunctionID]bool
+	suppressMain          bool
+	includeTests          bool
 }
 
 func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, error) {
@@ -52,7 +55,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if options.ProjectInfo != nil && options.ProjectInfo.RootPath != "" {
 		directGoResolverDir = options.ProjectInfo.RootPath
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, jsonEncodeTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, directGoResolver: checker.NewGoPackagesResolver(directGoResolverDir), suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, jsonEncodeTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, directGoResolver: checker.NewGoPackagesResolver(directGoResolverDir), directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(program), suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
 	l.inlineClosures = l.collectInlineClosureFunctions()
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
@@ -212,6 +215,7 @@ func collectGoImportsFromSource(imports map[string]string, name string, data []b
 
 func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 	l.currentImports = map[string]string{}
+	l.importErr = nil
 	decls := []ast.Decl{}
 	rootID, hasRoot := findRootFunction(l.program)
 	mainModuleID := air.ModuleID(0)
@@ -269,6 +273,9 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 			decls = append(decls, mainDecl)
 			decls = append(l.runtimePreludeDecls(), decls...)
 		}
+	}
+	if l.importErr != nil {
+		return nil, l.importErr
 	}
 	if len(l.currentImports) > 0 {
 		usedImports := l.usedImports(decls)
@@ -333,7 +340,7 @@ func (l *lowerer) registerImportsForGoType(expr ast.Expr, imports map[string]str
 			return true
 		}
 		if path, ok := imports[ident.Name]; ok && path != "" {
-			l.currentImports[ident.Name] = path
+			l.registerImport(ident.Name, path)
 		}
 		return true
 	})
@@ -431,7 +438,7 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 `)
 	}
 	if l.runtimeHelpers["sorted_int_keys"] {
-		l.currentImports["slices"] = "slices"
+		l.registerImport("slices", "slices")
 		parts = append(parts, `
 	func ardSortedIntKeys[V any](m map[int]V) []int {
 		keys := make([]int, 0, len(m))
@@ -444,7 +451,7 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 `)
 	}
 	if l.runtimeHelpers["sorted_string_keys"] {
-		l.currentImports["slices"] = "slices"
+		l.registerImport("slices", "slices")
 		parts = append(parts, `
 	func ardSortedStringKeys[V any](m map[string]V) []string {
 		keys := make([]string, 0, len(m))
@@ -457,8 +464,8 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 `)
 	}
 	if l.runtimeHelpers["sorted_any_keys"] {
-		l.currentImports["fmt"] = "fmt"
-		l.currentImports["slices"] = "slices"
+		l.registerImport("fmt", "fmt")
+		l.registerImport("slices", "slices")
 		parts = append(parts, `
 	func ardSortedAnyKeys[V any](m map[any]V) []any {
 		keys := make([]any, 0, len(m))
@@ -523,7 +530,7 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 `)
 	}
 	if l.runtimeHelpers["direct_go_float32_range"] {
-		l.currentImports["ardmath"] = "math"
+		l.registerImport("ardmath", "math")
 		parts = append(parts, `
 	func ardDirectGoCheckFloat32Range(value float64, target string) float64 {
 		if value > ardmath.MaxFloat32 || value < -ardmath.MaxFloat32 {
@@ -534,7 +541,7 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 `)
 	}
 	if l.runtimeHelpers["direct_go_valid_rune"] {
-		l.currentImports["ardutf8"] = "unicode/utf8"
+		l.registerImport("ardutf8", "unicode/utf8")
 		parts = append(parts, `
 	func ardDirectGoCheckRune(value rune) rune {
 		if !ardutf8.ValidRune(value) {
@@ -545,19 +552,19 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 `)
 	}
 	if l.runtimeHelpers["json_parse"] {
-		l.currentImports["bytes"] = "bytes"
-		l.currentImports["fmt"] = "fmt"
-		l.currentImports["json"] = "encoding/json/v2"
-		l.currentImports["jsontext"] = "encoding/json/jsontext"
-		l.currentImports["ardruntime"] = "github.com/akonwi/ard/runtime"
-		l.currentImports["strconv"] = "strconv"
+		l.registerImport("bytes", "bytes")
+		l.registerImport("fmt", "fmt")
+		l.registerImport("json", "encoding/json/v2")
+		l.registerImport("jsontext", "encoding/json/jsontext")
+		l.registerImport("ardruntime", "github.com/akonwi/ard/runtime")
+		l.registerImport("strconv", "strconv")
 		parts = append(parts, l.jsonParsePreludeSource())
 	}
 	if l.runtimeHelpers["json_encode"] {
-		l.currentImports["bytes"] = "bytes"
-		l.currentImports["fmt"] = "fmt"
-		l.currentImports["json"] = "encoding/json/v2"
-		l.currentImports["jsontext"] = "encoding/json/jsontext"
+		l.registerImport("bytes", "bytes")
+		l.registerImport("fmt", "fmt")
+		l.registerImport("json", "encoding/json/v2")
+		l.registerImport("jsontext", "encoding/json/jsontext")
 		parts = append(parts, l.jsonEncodePreludeSource())
 	}
 	src := strings.Join(parts, "\n")
@@ -3162,8 +3169,21 @@ func (l *lowerer) localIsPointerParam(fn air.Function, local air.LocalID) bool {
 }
 
 func (l *lowerer) qualified(alias string, importPath string, name string) ast.Expr {
-	l.currentImports[alias] = importPath
+	l.registerImport(alias, importPath)
 	return &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name)}
+}
+
+func (l *lowerer) registerImport(alias string, importPath string) {
+	if alias == "" || importPath == "" {
+		return
+	}
+	if existing, ok := l.currentImports[alias]; ok && existing != importPath {
+		if l.importErr == nil {
+			l.importErr = fmt.Errorf("Go import alias %q used for both %q and %q", alias, existing, importPath)
+		}
+		return
+	}
+	l.currentImports[alias] = importPath
 }
 
 func (l *lowerer) toStringExpr(typeID air.TypeID, expr ast.Expr) ast.Expr {
@@ -4589,7 +4609,7 @@ func (l *lowerer) lowerListSort(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	l.currentImports["sort"] = "sort"
+	l.registerImport("sort", "sort")
 	lessFunc := &ast.FuncLit{
 		Type: &ast.FuncType{
 			Params: &ast.FieldList{List: []*ast.Field{
@@ -6499,7 +6519,7 @@ func (l *lowerer) jsonEncodePreludeSource() string {
 		}
 	}
 	if needsMaybeHelper || needsStructuralMapHelper {
-		l.currentImports["ardruntime"] = "github.com/akonwi/ard/runtime"
+		l.registerImport("ardruntime", "github.com/akonwi/ard/runtime")
 	}
 	b.WriteString(`
 func ardJSONEncodeInt(enc *jsontext.Encoder, value int) error {

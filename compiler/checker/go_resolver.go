@@ -3,6 +3,7 @@ package checker
 import (
 	"fmt"
 	"go/constant"
+	gotoken "go/token"
 	"go/types"
 	"sort"
 	"strconv"
@@ -89,6 +90,10 @@ type directGoImport struct {
 	alias      string
 	importPath string
 	pkg        *GoPackage
+}
+
+func validDirectGoImportAlias(alias string) bool {
+	return alias != "_" && alias != "init" && gotoken.IsIdentifier(alias) && gotoken.Lookup(alias) == gotoken.IDENT
 }
 
 type GoPackagesResolver struct {
@@ -284,7 +289,7 @@ func (c *Checker) resolveDirectGoType(ty *parse.CustomType) Type {
 			return enum
 		}
 	}
-	binding := canonicalDirectGoBinding(goImport.importPath, []string{property.Name})
+	binding := canonicalDirectGoBinding(goImport.importPath, goImport.alias, []string{property.Name})
 	return &ExternType{Name_: ty.GetName(), ExternalBinding: binding, ExternalBindings: map[string]string{"go": binding}}
 }
 
@@ -344,7 +349,7 @@ func (c *Checker) directGoEnumType(goImport directGoImport, goType GoType, loc p
 	if len(values) == 0 {
 		return nil
 	}
-	binding := canonicalDirectGoBinding(goImport.importPath, []string{goType.Name})
+	binding := canonicalDirectGoBinding(goImport.importPath, goImport.alias, []string{goType.Name})
 	return &Enum{Name: goType.Name, ModulePath: "go:" + goImport.importPath, Values: values, Methods: map[string]*FunctionDef{}, Location: loc, ExternalBinding: binding, ExternalBindings: map[string]string{"go": binding}, Open: !goType.ClosedEnum}
 }
 
@@ -376,11 +381,15 @@ func (c *Checker) resolveDirectGoExternBinding(binding string, loc parse.Locatio
 			}
 		}
 	}
-	return canonicalDirectGoBinding(goImport.importPath, parts[1:])
+	return canonicalDirectGoBinding(goImport.importPath, goImport.alias, parts[1:])
 }
 
-func canonicalDirectGoBinding(importPath string, symbolParts []string) string {
-	return "go:" + importPath + "::" + strings.Join(symbolParts, "::")
+func canonicalDirectGoBinding(importPath string, alias string, symbolParts []string) string {
+	head := importPath
+	if strings.TrimSpace(alias) != "" {
+		head += " as " + alias
+	}
+	return "go:" + head + "::" + strings.Join(symbolParts, "::")
 }
 
 func directGoBindingParts(binding string) ([]string, bool) {
@@ -398,6 +407,7 @@ func directGoBindingParts(binding string) ([]string, bool) {
 
 type canonicalDirectGoBindingInfo struct {
 	ImportPath string
+	Alias      string
 	Symbols    []string
 }
 
@@ -414,7 +424,27 @@ func parseCanonicalDirectGoBinding(binding string) (canonicalDirectGoBindingInfo
 			return canonicalDirectGoBindingInfo{}, false
 		}
 	}
-	return canonicalDirectGoBindingInfo{ImportPath: parts[0], Symbols: parts[1:]}, true
+	importPath, alias := parseCanonicalDirectGoImportHead(parts[0])
+	if importPath == "" {
+		return canonicalDirectGoBindingInfo{}, false
+	}
+	return canonicalDirectGoBindingInfo{ImportPath: importPath, Alias: alias, Symbols: parts[1:]}, true
+}
+
+func parseCanonicalDirectGoImportHead(head string) (string, string) {
+	parts := strings.Split(head, " as ")
+	if len(parts) == 1 {
+		return strings.TrimSpace(head), ""
+	}
+	if len(parts) != 2 {
+		return "", ""
+	}
+	importPath := strings.TrimSpace(parts[0])
+	alias := strings.TrimSpace(parts[1])
+	if importPath == "" || alias == "" {
+		return "", ""
+	}
+	return importPath, alias
 }
 
 type directGoSignatureTarget struct {
@@ -730,14 +760,18 @@ func directGoNamedTypeMatches(ard Type, goType GoValueType) bool {
 	if !goType.Named || goType.ImportPath == "" || goType.Name == "" {
 		return false
 	}
-	binding := canonicalDirectGoBinding(goType.ImportPath, []string{goType.Name})
 	if extern, ok := ard.(*ExternType); ok {
-		return extern.ExternalBinding == binding
+		return directGoBindingMatchesNamedType(extern.ExternalBinding, goType)
 	}
 	if enum, ok := ard.(*Enum); ok {
-		return enum.ExternalBinding == binding
+		return directGoBindingMatchesNamedType(enum.ExternalBinding, goType)
 	}
 	return false
+}
+
+func directGoBindingMatchesNamedType(binding string, goType GoValueType) bool {
+	info, ok := parseCanonicalDirectGoBinding(binding)
+	return ok && info.ImportPath == goType.ImportPath && len(info.Symbols) == 1 && info.Symbols[0] == goType.Name
 }
 
 func directGoPointerToEnumLike(ard Type, goType GoValueType) bool {

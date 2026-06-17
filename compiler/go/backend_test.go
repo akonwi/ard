@@ -3915,18 +3915,129 @@ fn main() Float { floor(1.2) }`)
 	}
 }
 
+func TestLowererDetectsImportAliasPathConflicts(t *testing.T) {
+	l := &lowerer{currentImports: map[string]string{}}
+	l.registerImport("fmt", "example.com/fmt")
+	l.registerImport("fmt", "fmt")
+	if l.importErr == nil || !strings.Contains(l.importErr.Error(), `Go import alias "fmt" used for both`) {
+		t.Fatalf("importErr = %v, want alias conflict", l.importErr)
+	}
+}
+
+func TestLowerDirectGoExternUsesImportAlias(t *testing.T) {
+	program := lowerSource(t, `use go:math/rand as mathrand
+extern fn intn(max: Int) Int = mathrand::Intn
+fn main() Int { intn(10) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "mathrand", "math/rand") {
+		t.Fatal("generated AST missing mathrand import alias")
+	}
+	if !astFilesHaveCall(files, "mathrand.Intn") {
+		t.Fatal("generated AST missing mathrand.Intn call")
+	}
+}
+
+func TestLowerDirectGoExternAliasAvoidsPredeclaredIdentifiers(t *testing.T) {
+	program := lowerSource(t, `use go:math as int
+extern fn floor(value: Float) Float = int::Floor
+fn use_floor() Float { floor(1.2) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "int_1", "math") {
+		t.Fatal("generated AST missing collision-free int_1 import alias")
+	}
+	if !astFilesHaveCall(files, "int_1.Floor") {
+		t.Fatal("generated AST missing int_1.Floor call")
+	}
+}
+
+func TestGeneratedGoImportAliasAvoidsTempPrefix(t *testing.T) {
+	l := &lowerer{directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(nil)}
+	alias := l.generatedGoImportAlias("math", "_tmp_0")
+	if alias != "ardgo" {
+		t.Fatalf("alias = %q, want ardgo", alias)
+	}
+}
+
+func TestDirectGoTypeExprAllocatesAliasesForSecondaryPackages(t *testing.T) {
+	l := &lowerer{currentImports: map[string]string{}, directGoAliases: map[string]string{}, reservedGoIdentifiers: map[string]bool{"b": true}}
+	expr, err := l.directGoTypeExpr(checker.GoValueType{Expr: "b.MyInt", ImportPath: "example.com/cross/b", Package: "b", Name: "MyInt", Named: true, Kind: checker.GoValueInt}, directGoExternBinding{ImportPath: "example.com/cross/a", Alias: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := astExprName(expr); got != "b_1.MyInt" {
+		t.Fatalf("type expr = %q, want b_1.MyInt", got)
+	}
+	if got := l.currentImports["b_1"]; got != "example.com/cross/b" {
+		t.Fatalf("registered import = %q, want example.com/cross/b", got)
+	}
+}
+
+func TestDirectGoExternAliasAvoidsTypeSpecificJSONHelperNames(t *testing.T) {
+	program := &air.Program{Types: []air.TypeInfo{{ID: 2, Kind: air.TypeInt, Name: "Int"}}}
+	l := &lowerer{program: program, directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(program)}
+	alias := l.directGoBindingAlias(directGoExternBinding{ImportPath: "math", Alias: "ardJSONEncode_2"})
+	if alias != "ardJSONEncode_2_1" {
+		t.Fatalf("alias = %q, want ardJSONEncode_2_1", alias)
+	}
+}
+
+func TestLowerDirectGoExternAliasAvoidsRuntimeHelperNames(t *testing.T) {
+	program := lowerSource(t, `use go:unicode/utf8 as ardDirectGoCheckSignedIntRange
+extern fn rune_len(value: Int) Int = ardDirectGoCheckSignedIntRange::RuneLen
+fn main() Int { rune_len(65) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "ardDirectGoCheckSignedIntRange_1", "unicode/utf8") {
+		t.Fatal("generated AST missing collision-free runtime-helper import alias")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoCheckSignedIntRange_1.RuneLen") {
+		t.Fatal("generated AST missing suffixed RuneLen call")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoCheckSignedIntRange") {
+		t.Fatal("generated AST missing signed range helper call")
+	}
+}
+
+func TestLowerDirectGoExternAliasAvoidsSortComparatorParams(t *testing.T) {
+	program := lowerSource(t, `use go:strings as i
+extern fn eq(a: Str, b: Str) Bool = i::EqualFold
+fn main() {
+  mut values = ["a", "B"]
+  values.sort(fn(a: Str, b: Str) Bool { eq(a, b) })
+}`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "i_1", "strings") {
+		t.Fatal("generated AST missing collision-free i_1 import alias")
+	}
+	if !astFilesHaveCall(files, "i_1.EqualFold") {
+		t.Fatal("generated AST missing i_1.EqualFold call")
+	}
+}
+
+func TestLowerDirectGoExternAliasAvoidsLocalShadowing(t *testing.T) {
+	program := lowerSource(t, `use go:math as m
+extern fn floor(value: Float) Float = m::Floor
+fn use_floor(m: Int) Float { floor(1.2) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "m_1", "math") {
+		t.Fatal("generated AST missing collision-free m_1 import alias")
+	}
+	if !astFilesHaveCall(files, "m_1.Floor") {
+		t.Fatal("generated AST missing m_1.Floor call")
+	}
+}
+
 func TestLowerDirectGoTypeReference(t *testing.T) {
-	program := lowerSource(t, `use go:time
-extern fn sleep(duration: time::Duration) Void = time::Sleep
-fn use_duration(duration: time::Duration) {
+	program := lowerSource(t, `use go:time as tm
+extern fn sleep(duration: tm::Duration) Void = tm::Sleep
+fn use_duration(duration: tm::Duration) {
   sleep(duration)
 }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesHaveImport(files, "time", "time") {
-		t.Fatal("generated AST missing time import")
+	if !astFilesHaveImport(files, "tm", "time") {
+		t.Fatal("generated AST missing tm import")
 	}
-	if !astFilesHaveSelector(files, "time", "Duration") {
-		t.Fatal("generated AST missing time.Duration type reference")
+	if !astFilesHaveSelector(files, "tm", "Duration") {
+		t.Fatal("generated AST missing tm.Duration type reference")
 	}
 }
 
@@ -4057,25 +4168,25 @@ fn main() Void!Str {
 }
 
 func TestLowerDirectGoExternCoercesNamedScalarArguments(t *testing.T) {
-	program := lowerSource(t, `use go:time
-extern fn sleep(ms: Int) Void = time::Sleep
+	program := lowerSource(t, `use go:time as tm
+extern fn sleep(ms: Int) Void = tm::Sleep
 fn main() {
   let ms = 1
   sleep(ms)
 }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesHaveImport(files, "time", "time") {
-		t.Fatal("generated AST missing time import")
+	if !astFilesHaveImport(files, "tm", "time") {
+		t.Fatal("generated AST missing tm import")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || astCallName(call) != "time.Sleep" || len(call.Args) != 1 {
+		if !ok || astCallName(call) != "tm.Sleep" || len(call.Args) != 1 {
 			return false
 		}
 		conversion, ok := call.Args[0].(*ast.CallExpr)
-		return ok && astCallName(conversion) == "time.Duration"
+		return ok && astCallName(conversion) == "tm.Duration"
 	}) {
-		t.Fatal("generated AST missing time.Duration argument conversion")
+		t.Fatal("generated AST missing tm.Duration argument conversion")
 	}
 }
 
