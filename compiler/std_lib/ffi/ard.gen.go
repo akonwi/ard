@@ -166,20 +166,15 @@ type Host struct {
 	DynamicToList        func(data any) ([]any, error)
 	DynamicToMap         func(data any) (map[any]any, error)
 	ExtractField         func(data any, name string) (any, error)
-	FSAbs                func(path string) (string, error)
 	FSAppendFile         func(path string, content string) error
 	FSCopy               func(from string, to string) error
 	FSCreateDir          func(path string) error
 	FSCreateFile         func(path string) (bool, error)
-	FSCwd                func() (string, error)
-	FSDeleteDir          func(path string) error
-	FSDeleteFile         func(path string) error
 	FSExists             func(path string) bool
 	FSIsDir              func(path string) bool
 	FSIsFile             func(path string) bool
 	FSListDir            func(path string) (map[string]bool, error)
 	FSReadFile           func(path string) (string, error)
-	FSRename             func(from string, to string) error
 	FSWriteFile          func(path string, content string) error
 	FloatFormat          func(value float64, decimals int) string
 	FloatFromInt         func(int int) float64
@@ -301,9 +296,6 @@ func (h Host) Functions() map[string]any {
 	if h.ExtractField != nil {
 		functions["ExtractField"] = h.ExtractField
 	}
-	if h.FSAbs != nil {
-		functions["FS_Abs"] = h.FSAbs
-	}
 	if h.FSAppendFile != nil {
 		functions["FS_AppendFile"] = h.FSAppendFile
 	}
@@ -315,15 +307,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.FSCreateFile != nil {
 		functions["FS_CreateFile"] = h.FSCreateFile
-	}
-	if h.FSCwd != nil {
-		functions["FS_Cwd"] = h.FSCwd
-	}
-	if h.FSDeleteDir != nil {
-		functions["FS_DeleteDir"] = h.FSDeleteDir
-	}
-	if h.FSDeleteFile != nil {
-		functions["FS_DeleteFile"] = h.FSDeleteFile
 	}
 	if h.FSExists != nil {
 		functions["FS_Exists"] = h.FSExists
@@ -339,9 +322,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.FSReadFile != nil {
 		functions["FS_ReadFile"] = h.FSReadFile
-	}
-	if h.FSRename != nil {
-		functions["FS_Rename"] = h.FSRename
 	}
 	if h.FSWriteFile != nil {
 		functions["FS_WriteFile"] = h.FSWriteFile

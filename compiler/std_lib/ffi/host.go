@@ -18,7 +18,6 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -78,20 +77,15 @@ func NewHost(config HostConfig) Host {
 		DynamicToList:        DynamicToList,
 		DynamicToMap:         DynamicToMap,
 		ExtractField:         ExtractField,
-		FSAbs:                FSAbs,
 		FSAppendFile:         FSAppendFile,
 		FSCopy:               FSCopy,
 		FSCreateDir:          FSCreateDir,
 		FSCreateFile:         FSCreateFile,
-		FSCwd:                FSCwd,
-		FSDeleteDir:          FSDeleteDir,
-		FSDeleteFile:         FSDeleteFile,
 		FSExists:             FSExists,
 		FSIsDir:              FSIsDir,
 		FSIsFile:             FSIsFile,
 		FSListDir:            FSListDir,
 		FSReadFile:           FSReadFile,
-		FSRename:             FSRename,
 		FSWriteFile:          FSWriteFile,
 		FloatFormat:          FloatFormat,
 		FloatFromInt:         FloatFromInt,
@@ -517,10 +511,6 @@ func FSReadFile(path string) (string, error) {
 	return string(content), nil
 }
 
-func FSDeleteFile(path string) error {
-	return os.Remove(path)
-}
-
 func FSCopy(from string, to string) error {
 	content, err := os.ReadFile(from)
 	if err != nil {
@@ -529,24 +519,8 @@ func FSCopy(from string, to string) error {
 	return os.WriteFile(to, content, 0o644)
 }
 
-func FSRename(from string, to string) error {
-	return os.Rename(from, to)
-}
-
-func FSCwd() (string, error) {
-	return os.Getwd()
-}
-
-func FSAbs(path string) (string, error) {
-	return filepath.Abs(path)
-}
-
 func FSCreateDir(path string) error {
 	return os.MkdirAll(path, 0o755)
-}
-
-func FSDeleteDir(path string) error {
-	return os.RemoveAll(path)
 }
 
 func FSListDir(path string) (map[string]bool, error) {

@@ -1,3 +1,6 @@
+use go:os
+use go:path/filepath
+
 extern fn exists(path: Str) Bool = "FS_Exists"
 
 extern fn is_file(path: Str) Bool = "FS_IsFile"
@@ -12,15 +15,15 @@ extern fn append(path: Str, content: Str) Void!Str = "FS_AppendFile"
 
 extern fn read(path: Str) Str!Str = "FS_ReadFile"
 
-extern fn delete(path: Str) Void!Str = "FS_DeleteFile"
+extern fn delete(path: Str) Void!Str = os::Remove
 
 extern fn copy(from: Str, to: Str) Void!Str = "FS_Copy"
 
-extern fn rename(from: Str, to: Str) Void!Str = "FS_Rename"
+extern fn rename(from: Str, to: Str) Void!Str = os::Rename
 
-extern fn cwd() Str!Str = "FS_Cwd"
+extern fn cwd() Str!Str = os::Getwd
 
-extern fn abs(path: Str) Str!Str = "FS_Abs"
+extern fn abs(path: Str) Str!Str = filepath::Abs
 
 struct DirEntry {
   name: Str,
@@ -29,7 +32,7 @@ struct DirEntry {
 
 extern fn create_dir(path: Str) Void!Str = "FS_CreateDir"
 
-extern fn delete_dir(path: Str) Void!Str = "FS_DeleteDir"
+extern fn delete_dir(path: Str) Void!Str = os::RemoveAll
 
 // Private FFI returns map of name -> is_file
 private extern fn _list_dir_map(path: Str) [Str: Bool]!Str = "FS_ListDir"
