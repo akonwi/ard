@@ -223,7 +223,6 @@ type Host struct {
 	SqlRollback          func(tx *sql.Tx) error
 	StrFromRunes         func(runes []rune) (string, error)
 	StrFromUtf8          func(bytes []byte) (string, error)
-	StrSplit             func(input string, delimiter string) []string
 	StrToDynamic         func(val string) any
 	VoidToDynamic        func() any
 	WaitFor              func(wg WaitGroup)
@@ -476,9 +475,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.StrFromUtf8 != nil {
 		functions["StrFromUtf8"] = h.StrFromUtf8
-	}
-	if h.StrSplit != nil {
-		functions["StrSplit"] = h.StrSplit
 	}
 	if h.StrToDynamic != nil {
 		functions["StrToDynamic"] = h.StrToDynamic

@@ -53,7 +53,6 @@ func NewHost(config HostConfig) Host {
 		ByteFromInt:          ByteFromInt,
 		RuneFromInt:          RuneFromInt,
 		RuneFromStr:          RuneFromStr,
-		StrSplit:             StrSplit,
 		StrFromUtf8:          StrFromUtf8,
 		StrFromRunes:         StrFromRunes,
 		Base64Decode:         Base64Decode,
@@ -243,10 +242,6 @@ func RuneFromStr(value string) Maybe[rune] {
 		return None[rune]()
 	}
 	return Some(runes[0])
-}
-
-func StrSplit(input string, delimiter string) []string {
-	return strings.Split(input, delimiter)
 }
 
 func StrFromUtf8(bytes []byte) (string, error) {

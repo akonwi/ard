@@ -119,7 +119,6 @@ var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
 	"SqlRollback":          {function: "SqlRollback", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"StrFromRunes":         {function: "StrFromRunes", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"StrFromUtf8":          {function: "StrFromUtf8", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"StrSplit":             {function: "StrSplit", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
 	"StrToDynamic":         {function: "StrToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"VoidToDynamic":        {function: "VoidToDynamic", returns: generatedStdlibReturnDirect, params: nil},
 	"JsonEncode":           {kind: generatedStdlibExternJSONEncode},
