@@ -12,6 +12,7 @@
 (try_expression "try" @keyword)
 (import_statement "use" @keyword)
 (import_statement "as" @keyword)
+(import_statement path: (module_path) @string.special)
 (variable_declaration "let" @keyword)
 (variable_declaration "mut" @keyword)
 (mutable_type "mut" @keyword)
@@ -42,6 +43,8 @@
 (function_declaration name: (identifier) @function.definition)
 (function_declaration name: (qualified_identifier) @function.definition)
 (extern_function name: (identifier) @function.definition)
+(extern_binding (qualified_identifier) @function)
+(extern_binding_entry target: (extern_binding_target) @variable.builtin)
 (enum_variant name: (identifier) @constant)
 
 ; Parameters

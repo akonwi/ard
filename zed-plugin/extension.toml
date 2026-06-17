@@ -8,7 +8,7 @@ repository = "https://github.com/akonwi/ard"
 
 [grammars.ard]
 repository = "file:///Users/akonwi/Developer/agent/ard/tree-sitter-ard"
-commit = "415750d7af4d4d1783e4eb0a5c4358efbfc9cecc"
+commit = "c8018f97d43ee6640cac50f3bb33db99fbf6d713"
 
 [language_servers.ard-lsp]
 name = "Ard Language Server"
