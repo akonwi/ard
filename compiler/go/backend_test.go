@@ -2831,10 +2831,11 @@ func TestLowerProgramUsesDirectStdlibMaybeCalls(t *testing.T) {
 	if !astFilesHaveCall(files, "os.LookupEnv") {
 		t.Fatal("generated AST missing direct Go env lookup")
 	}
-	for _, name := range []string{"stdlibffi.FloatFromStr", "stdlibffi.IntFromStr"} {
-		if !astFilesHaveCall(files, name) {
-			t.Fatalf("generated AST missing direct stdlib maybe call %s", name)
-		}
+	if !astFilesHaveCall(files, "stdlibffi.FloatFromStr") {
+		t.Fatal("generated AST missing direct stdlib maybe call stdlibffi.FloatFromStr")
+	}
+	if !astFilesHaveCall(files, "strconv.Atoi") {
+		t.Fatal("generated AST missing direct Go int parsing call")
 	}
 	if astFilesHaveCall(files, "ardIntFromStr") {
 		t.Fatal("generated AST should not use legacy IntFromStr helper")

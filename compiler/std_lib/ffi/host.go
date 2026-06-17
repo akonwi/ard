@@ -100,7 +100,6 @@ func NewHost(config HostConfig) Host {
 		HTTPResponseHeaders:  HTTPResponseHeaders,
 		HTTPResponseStatus:   HTTPResponseStatus,
 		HTTPServe:            HTTPServe,
-		IntFromStr:           IntFromStr,
 		IntToDynamic:         IntToDynamic,
 		IsNil:                IsNil,
 		JsonEncode:           JsonEncode,
@@ -453,14 +452,6 @@ func FloatFormat(value float64, decimals int) string {
 		decimals = 0
 	}
 	return strconv.FormatFloat(value, 'f', decimals, 64)
-}
-
-func IntFromStr(str string) Maybe[int] {
-	value, err := strconv.Atoi(str)
-	if err != nil {
-		return None[int]()
-	}
-	return Some(value)
 }
 
 func FSExists(path string) bool {
