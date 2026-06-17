@@ -1538,6 +1538,29 @@ func typeArgsForCallWithInterner(call *checker.FunctionCall, intern func(checker
 	return typeArgs, nil
 }
 
+func directGoPointerExternBinding(t checker.Type) (string, bool) {
+	ext, ok := t.(*checker.ExternType)
+	if !ok {
+		return "", false
+	}
+	importPath, typeName, ok := directGoExternTypeBindingParts(ext.ExternalBinding)
+	if !ok {
+		return "", false
+	}
+	return "go:" + importPath + "::*" + typeName, true
+}
+
+func directGoExternTypeBindingParts(binding string) (string, string, bool) {
+	if !strings.HasPrefix(binding, "go:") {
+		return "", "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(binding, "go:"), "::")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" || strings.HasPrefix(parts[1], "*") {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
 func signatureForCallWithInterner(call *checker.FunctionCall, intern func(checker.Type) (TypeID, error)) (Signature, error) {
 	if def := call.Definition(); def != nil {
 		if !functionHasTypeVar(def) {
@@ -1582,6 +1605,12 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	}
 	if tv, ok := t.(*checker.TypeVar); ok && tv.Actual() != nil {
 		return l.internType(tv.Actual())
+	}
+	if ref, ok := t.(*checker.MutableRef); ok {
+		if binding, ok := directGoPointerExternBinding(ref.Of()); ok {
+			return l.internSyntheticType(ref.String(), TypeInfo{Kind: TypeExtern, ExternBinding: binding})
+		}
+		return l.internType(ref.Of())
 	}
 	key := airTypeKey(t)
 	name := airTypeName(t)

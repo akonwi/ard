@@ -827,7 +827,12 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 	case *parse.Map:
 		return maybeNullable("["+p.renderType(node.Key)+": "+p.renderType(node.Value)+"]", node.IsNullable())
 	case *parse.ResultType:
-		name := p.renderType(node.Val) + "!" + p.renderType(node.Err)
+		value := p.renderType(node.Val)
+		switch node.Val.(type) {
+		case *parse.MutableType, parse.MutableType:
+			value = "(" + value + ")"
+		}
+		name := value + "!" + p.renderType(node.Err)
 		if node.IsNullable() {
 			return "(" + name + ")?"
 		}

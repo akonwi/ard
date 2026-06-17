@@ -169,6 +169,22 @@ func TestFunctionTypes(t *testing.T) {
 			wantErrs: []string{"Mutable types cannot be nullable"},
 		},
 		{
+			name:  "Grouped mutable value result type",
+			input: "let f: (mut File)!Str = test",
+			output: Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name: "f",
+						Type: &ResultType{
+							Val: &MutableType{Inner: &CustomType{Name: "File"}},
+							Err: &StringType{},
+						},
+						Value: &Identifier{Name: "test"},
+					},
+				},
+			},
+		},
+		{
 			name:     "Already nullable grouped type is rejected",
 			input:    "let f: (Int?)? = test",
 			wantErrs: []string{"Grouped type is already nullable"},

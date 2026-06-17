@@ -3930,6 +3930,47 @@ fn use_duration(duration: time::Duration) {
 	}
 }
 
+func TestDirectGoPointerReturnAndMethodBuilds(t *testing.T) {
+	program := lowerSource(t, `use go:os
+extern fn create_temp(dir: Str, pattern: Str) (mut os::File)!Str = os::CreateTemp
+extern fn name(file: mut os::File) Str = os::File::Name
+extern fn close(file: mut os::File) Void!Str = os::File::Close
+extern fn remove(path: Str) Void!Str = os::Remove
+fn main() Void!Str {
+  let file = try create_temp("", "ard-direct-go-pointer-*")
+  let path = name(file)
+  try close(file)
+  remove(path)
+}`)
+	tempDir := t.TempDir()
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("generate sources: %v", err)
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
+			t.Fatalf("write source %s: %v", name, err)
+		}
+	}
+	goMod, err := generatedGoMod(tempDir, program, nil)
+	if err != nil {
+		t.Fatalf("generate go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	binaryPath := filepath.Join(tempDir, "direct-go-pointer")
+	if err := buildGeneratedProgram(tempDir, binaryPath); err != nil {
+		t.Fatalf("build generated program: %v", err)
+	}
+	cmd := exec.Command(binaryPath)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("generated program failed: %v\nstderr: %s", err, stderr.String())
+	}
+}
+
 func TestLowerDirectGoExternCoercesNamedScalarArguments(t *testing.T) {
 	program := lowerSource(t, `use go:time
 extern fn sleep(ms: Int) Void = time::Sleep

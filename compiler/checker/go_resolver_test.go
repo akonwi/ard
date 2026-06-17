@@ -316,9 +316,9 @@ extern fn counts(value: [Str]) [Str:Int] = collections::Counts`), "main.ard")
 	}
 }
 
-func TestDirectGoExternSignatureRejectsPointerTypesForNow(t *testing.T) {
+func TestDirectGoExternSignatureAcceptsMutableDirectGoPointerReceiver(t *testing.T) {
 	result := parse.Parse([]byte(`use go:database/sql as sql
-extern fn ping(db: sql::DB) Void = sql::DB::Ping`), "main.ard")
+extern fn ping(db: mut sql::DB) Void!Str = sql::DB::Ping`), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
@@ -326,14 +326,52 @@ extern fn ping(db: sql::DB) Void = sql::DB::Ping`), "main.ard")
 	ptrDB := GoValueType{Kind: GoValuePointer, Expr: "*sql.DB", Elem: &db}
 	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
 		"database/sql": {ImportPath: "database/sql", Name: "sql", Types: map[string]GoType{
-			"DB": {Name: "DB", Methods: map[string]GoMethod{"Ping": {Name: "Ping", Signature: GoSignature{Receiver: &ptrDB}}}},
+			"DB": {Name: "DB", Methods: map[string]GoMethod{"Ping": {Name: "Ping", Signature: GoSignature{Receiver: &ptrDB, Results: []GoValueType{goParam(GoValueError, "error")}}}}},
+		}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoExternSignatureAcceptsMutableDirectGoPointerReturn(t *testing.T) {
+	result := parse.Parse([]byte(`use go:os
+extern fn create_temp(dir: Str, pattern: Str) (mut os::File)!Str = os::CreateTemp`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	file := goNamed(GoValueOther, "os.File", "os", "File")
+	ptrFile := GoValueType{Kind: GoValuePointer, Expr: "*os.File", Elem: &file}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"os": {ImportPath: "os", Name: "os", Functions: map[string]GoFunction{
+			"CreateTemp": {Name: "CreateTemp", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string"), goParam(GoValueString, "string")}, Results: []GoValueType{ptrFile, goParam(GoValueError, "error")}}},
+		}, Types: map[string]GoType{"File": {Name: "File"}}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoExternSignatureRejectsPlainValueForPointerReceiver(t *testing.T) {
+	result := parse.Parse([]byte(`use go:database/sql as sql
+extern fn ping(db: sql::DB) Void!Str = sql::DB::Ping`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	db := goNamed(GoValueOther, "sql.DB", "database/sql", "DB")
+	ptrDB := GoValueType{Kind: GoValuePointer, Expr: "*sql.DB", Elem: &db}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"database/sql": {ImportPath: "database/sql", Name: "sql", Types: map[string]GoType{
+			"DB": {Name: "DB", Methods: map[string]GoMethod{"Ping": {Name: "Ping", Signature: GoSignature{Receiver: &ptrDB, Results: []GoValueType{goParam(GoValueError, "error")}}}}},
 		}},
 	}}})
 	c.Check()
 	if !c.HasErrors() {
 		t.Fatal("expected pointer diagnostic")
 	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "direct Go pointer bindings are not supported yet") {
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "requires Ard type mut sql::DB") {
 		t.Fatalf("diagnostic = %q", got)
 	}
 }

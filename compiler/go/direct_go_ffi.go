@@ -403,7 +403,15 @@ func (l *lowerer) directGoExternTypeExpr(binding string) (ast.Expr, bool, error)
 		return nil, true, fmt.Errorf("direct Go extern type binding %q must be package::Type", binding)
 	}
 	alias := directGoImportAlias(direct.ImportPath)
-	return l.qualified(alias, direct.ImportPath, direct.Symbols[0]), true, nil
+	symbol := direct.Symbols[0]
+	if strings.HasPrefix(symbol, "*") {
+		typeName := strings.TrimPrefix(symbol, "*")
+		if strings.TrimSpace(typeName) == "" {
+			return nil, true, fmt.Errorf("direct Go extern type binding %q has empty pointer type", binding)
+		}
+		return &ast.StarExpr{X: l.qualified(alias, direct.ImportPath, typeName)}, true, nil
+	}
+	return l.qualified(alias, direct.ImportPath, symbol), true, nil
 }
 
 func (l *lowerer) directGoTypeExpr(goType checker.GoValueType) (ast.Expr, error) {

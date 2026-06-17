@@ -1481,6 +1481,21 @@ func (p *parser) parseType() DeclaredType {
 			}
 			return inner
 		}
+		if p.match(bang) {
+			bangToken := p.previous()
+			errType := p.parseType()
+			nullable := p.match(question_mark)
+			end := bangToken.getLocation().End
+			if errType != nil {
+				end = errType.GetLocation().End
+			}
+			return &ResultType{
+				Location: Location{Start: inner.GetLocation().Start, End: end},
+				Val:      inner,
+				Err:      errType,
+				nullable: nullable,
+			}
+		}
 		if p.match(question_mark) {
 			if inner.IsNullable() {
 				p.addError(p.previous(), "Grouped type is already nullable")

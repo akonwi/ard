@@ -410,7 +410,13 @@ func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel
 		return true, ""
 	}
 	if goType.Kind == GoValuePointer {
-		return false, fmt.Sprintf("Go type %s is a pointer; direct Go pointer bindings are not supported yet", goType.String())
+		if goType.Named {
+			return false, fmt.Sprintf("Go named pointer type %s is not supported by direct Go pointer bindings yet", goType.String())
+		}
+		if directGoPointerCompatible(ard, goType) {
+			return true, ""
+		}
+		return false, fmt.Sprintf("Go type %s requires Ard type %s", goType.String(), directGoPointerArdTypeString(goType))
 	}
 	if topLevel && directGoScalarCompatible(ard, goType) {
 		return true, ""
@@ -459,7 +465,13 @@ func (c *Checker) directGoAssignableCompatible(ard Type, goType GoValueType) (bo
 		return true, ""
 	}
 	if goType.Kind == GoValuePointer {
-		return false, fmt.Sprintf("Go type %s is a pointer; direct Go pointer bindings are not supported yet", goType.String())
+		if goType.Named {
+			return false, fmt.Sprintf("Go named pointer type %s is not supported by direct Go pointer bindings yet", goType.String())
+		}
+		if directGoPointerCompatible(ard, goType) {
+			return true, ""
+		}
+		return false, fmt.Sprintf("Go type %s requires Ard type %s", goType.String(), directGoPointerArdTypeString(goType))
 	}
 	if goType.Named {
 		return false, fmt.Sprintf("Ard type %s is not compatible with Go named type %s", typeSyntaxString(ard), goType.String())
@@ -542,6 +554,49 @@ func directGoNamedTypeMatches(ard Type, goType GoValueType) bool {
 		return false
 	}
 	return extern.ExternalBinding == canonicalDirectGoBinding(goType.ImportPath, []string{goType.Name})
+}
+
+func directGoPointerCompatible(ard Type, goType GoValueType) bool {
+	if goType.Kind != GoValuePointer || goType.Elem == nil {
+		return false
+	}
+	ref, ok := ard.(*MutableRef)
+	if !ok {
+		return false
+	}
+	return directGoNamedTypeMatches(ref.Of(), *goType.Elem)
+}
+
+func directGoPointerArdTypeString(goType GoValueType) string {
+	if goType.Elem == nil {
+		return "mut ?"
+	}
+	return "mut " + directGoArdTypeString(*goType.Elem)
+}
+
+func directGoArdTypeString(goType GoValueType) string {
+	if goType.Named && goType.Name != "" {
+		if strings.Contains(goType.Expr, ".") {
+			return strings.ReplaceAll(goType.Expr, ".", "::")
+		}
+		qualifier := goType.Package
+		if qualifier == "" || strings.Contains(qualifier, "/") {
+			qualifier = pathBase(goType.ImportPath)
+		}
+		if qualifier != "" {
+			return qualifier + "::" + goType.Name
+		}
+		return goType.Name
+	}
+	return goType.String()
+}
+
+func pathBase(value string) string {
+	idx := strings.LastIndex(value, "/")
+	if idx >= 0 {
+		return value[idx+1:]
+	}
+	return value
 }
 
 func (t GoValueType) String() string {

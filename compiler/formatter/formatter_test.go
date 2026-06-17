@@ -245,6 +245,11 @@ func TestFormat(t *testing.T) {
 			output: "let result: (Int!Str)? = maybe::none()\n",
 		},
 		{
+			name:   "formats mutable result value type with grouping",
+			input:  "let result: (mut File)!Str = test\n",
+			output: "let result: (mut File)!Str = test\n",
+		},
+		{
 			name:   "formats test function",
 			input:  "test fn my_test() Void!Str { Result::ok(()) }",
 			output: "test fn my_test() Void!Str {\n  Result::ok(())\n}\n",
