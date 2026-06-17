@@ -183,7 +183,6 @@ type Host struct {
 	GetPathValue         func(req *http.Request, name string) string
 	GetQueryParam        func(req *http.Request, name string) string
 	GetReqPath           func(req *http.Request) string
-	GetTodayString       func() string
 	HTTPDo               func(method string, url string, body any, headers map[string]string, timeout Maybe[int]) (*http.Response, error)
 	HTTPResponseBody     func(resp *http.Response) (string, error)
 	HTTPResponseClose    func(resp *http.Response)
@@ -346,9 +345,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.GetReqPath != nil {
 		functions["GetReqPath"] = h.GetReqPath
-	}
-	if h.GetTodayString != nil {
-		functions["GetTodayString"] = h.GetTodayString
 	}
 	if h.HTTPDo != nil {
 		functions["HTTP_Do"] = h.HTTPDo
