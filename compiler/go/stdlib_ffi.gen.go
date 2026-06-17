@@ -64,7 +64,6 @@ var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
 	"DecodeString":         {function: "DecodeString", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
 	"DynamicToList":        {function: "DynamicToList", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
 	"DynamicToMap":         {function: "DynamicToMap", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
-	"EnvGet":               {function: "EnvGet", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"ExtractField":         {function: "ExtractField", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny, generatedStdlibParamDirect}},
 	"FS_Abs":               {function: "FSAbs", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"FS_AppendFile":        {function: "FSAppendFile", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},

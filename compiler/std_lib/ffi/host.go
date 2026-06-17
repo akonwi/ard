@@ -77,7 +77,6 @@ func NewHost(config HostConfig) Host {
 		DecodeString:         DecodeString,
 		DynamicToList:        DynamicToList,
 		DynamicToMap:         DynamicToMap,
-		EnvGet:               EnvGet,
 		ExtractField:         ExtractField,
 		FSAbs:                FSAbs,
 		FSAppendFile:         FSAppendFile,
@@ -471,14 +470,6 @@ func IntFromStr(str string) Maybe[int] {
 	value, err := strconv.Atoi(str)
 	if err != nil {
 		return None[int]()
-	}
-	return Some(value)
-}
-
-func EnvGet(key string) Maybe[string] {
-	value, ok := os.LookupEnv(key)
-	if !ok {
-		return None[string]()
 	}
 	return Some(value)
 }

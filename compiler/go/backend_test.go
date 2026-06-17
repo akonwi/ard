@@ -2828,7 +2828,10 @@ func TestLowerProgramUsesDirectStdlibMaybeCalls(t *testing.T) {
 	`)
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	for _, name := range []string{"stdlibffi.EnvGet", "stdlibffi.FloatFromStr", "stdlibffi.IntFromStr"} {
+	if !astFilesHaveCall(files, "os.LookupEnv") {
+		t.Fatal("generated AST missing direct Go env lookup")
+	}
+	for _, name := range []string{"stdlibffi.FloatFromStr", "stdlibffi.IntFromStr"} {
 		if !astFilesHaveCall(files, name) {
 			t.Fatalf("generated AST missing direct stdlib maybe call %s", name)
 		}

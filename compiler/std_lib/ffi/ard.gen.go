@@ -165,7 +165,6 @@ type Host struct {
 	DecodeString         func(data any) Result[string, Error]
 	DynamicToList        func(data any) ([]any, error)
 	DynamicToMap         func(data any) (map[any]any, error)
-	EnvGet               func(key string) Maybe[string]
 	ExtractField         func(data any, name string) (any, error)
 	FSAbs                func(path string) (string, error)
 	FSAppendFile         func(path string, content string) error
@@ -299,9 +298,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.DynamicToMap != nil {
 		functions["DynamicToMap"] = h.DynamicToMap
-	}
-	if h.EnvGet != nil {
-		functions["EnvGet"] = h.EnvGet
 	}
 	if h.ExtractField != nil {
 		functions["ExtractField"] = h.ExtractField
