@@ -116,7 +116,6 @@ func NewHost(config HostConfig) Host {
 		OsArgs:               func() []string { return hostOSArgs(args) },
 		Print:                Print,
 		ReadLine:             ReadLine,
-		Sleep:                Sleep,
 		SqlBeginTx:           SqlBeginTx,
 		SqlClose:             SqlClose,
 		SqlCommit:            SqlCommit,
@@ -181,10 +180,6 @@ func ReadLine() (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(line, "\r\n"), nil
-}
-
-func Sleep(ns int) {
-	time.Sleep(time.Duration(ns))
 }
 
 func ChannelSend[T any](ch chan T, value T) (sent bool) {

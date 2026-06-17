@@ -1,4 +1,7 @@
-extern fn sleep(ms: Int) Void = "Sleep"
+use go:time
+
+// Deprecated: use direct Go FFI with `time::Sleep` instead.
+extern fn sleep(ms: Int) Void = time::Sleep
 
 // Opaque pointer to Go's *sync.WaitGroup
 private extern type WaitGroup
