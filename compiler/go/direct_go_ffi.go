@@ -226,11 +226,60 @@ func (l *lowerer) wrapDirectGoValueBoolMaybeCall(maybeTypeID air.TypeID, call as
 }
 
 func (l *lowerer) validateDirectGoReturnValue(ardType air.TypeID, value ast.Expr, goType checker.GoValueType) (ast.Expr, bool, error) {
+	if checked, ok, err := l.validateDirectGoEnumReturnValue(ardType, value, goType); err != nil || ok {
+		return checked, ok, err
+	}
 	if l.typeKind(ardType) == air.TypeRune && goType.Kind == checker.GoValueInt && goType.Bits == 32 {
 		l.markRuntimeHelper("direct_go_valid_rune")
 		return &ast.CallExpr{Fun: ast.NewIdent("ardDirectGoCheckRune"), Args: []ast.Expr{value}}, true, nil
 	}
 	return value, false, nil
+}
+
+func (l *lowerer) validateDirectGoEnumReturnValue(ardType air.TypeID, value ast.Expr, goType checker.GoValueType) (ast.Expr, bool, error) {
+	if !validTypeID(l.program, ardType) || !goType.Named {
+		return value, false, nil
+	}
+	typ := l.program.Types[ardType-1]
+	if typ.Kind != air.TypeEnum || typ.EnumOpen || strings.TrimSpace(typ.ExternBinding) == "" {
+		return value, false, nil
+	}
+	direct, ok, err := parseDirectGoExternBinding(typ.ExternBinding)
+	if err != nil || !ok {
+		return value, ok, err
+	}
+	if len(direct.Symbols) != 1 || direct.ImportPath != goType.ImportPath || direct.Symbols[0] != goType.Name {
+		return value, false, nil
+	}
+	checked, err := l.directGoEnumValidationCall(ardType, typ, value)
+	return checked, true, err
+}
+
+func (l *lowerer) directGoEnumValidationCall(typeID air.TypeID, typ air.TypeInfo, value ast.Expr) (ast.Expr, error) {
+	goType, err := l.goType(typeID)
+	if err != nil {
+		return nil, err
+	}
+	valueIdent := ast.NewIdent("value")
+	cases := make([]ast.Stmt, 0, len(typ.Variants)+1)
+	seen := map[int]bool{}
+	for _, variant := range typ.Variants {
+		if seen[variant.Discriminant] {
+			continue
+		}
+		seen[variant.Discriminant] = true
+		cases = append(cases, &ast.CaseClause{List: []ast.Expr{ast.NewIdent(enumVariantName(l.program, typ, variant))}, Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{valueIdent}}}})
+	}
+	message := fmt.Sprintf("Ard direct Go FFI: Go returned invalid %s", typ.Name)
+	cases = append(cases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{stringLit(message)}}}}})
+	fun := &ast.FuncLit{
+		Type: &ast.FuncType{
+			Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{valueIdent}, Type: goType}}},
+			Results: &ast.FieldList{List: []*ast.Field{{Type: goType}}},
+		},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.SwitchStmt{Tag: valueIdent, Body: &ast.BlockStmt{List: cases}}}},
+	}
+	return &ast.CallExpr{Fun: fun, Args: []ast.Expr{value}}, nil
 }
 
 func (l *lowerer) wrapValueBoolMaybeCall(maybeTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
@@ -392,6 +441,17 @@ func (l *lowerer) directGoScalarNeedsConversion(ardType air.TypeID, goType check
 	default:
 		return false
 	}
+}
+
+func (l *lowerer) directGoEnumConstantExpr(typeBinding string, constantName string) (ast.Expr, bool, error) {
+	direct, ok, err := parseDirectGoExternBinding(typeBinding)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	if len(direct.Symbols) != 1 || strings.HasPrefix(direct.Symbols[0], "*") {
+		return nil, true, fmt.Errorf("direct Go enum type binding %q must be package::Type", typeBinding)
+	}
+	return l.qualified(directGoImportAlias(direct.ImportPath), direct.ImportPath, constantName), true, nil
 }
 
 func (l *lowerer) directGoExternTypeExpr(binding string) (ast.Expr, bool, error) {

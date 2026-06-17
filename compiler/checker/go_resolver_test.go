@@ -103,6 +103,112 @@ extern fn sleep(duration: time::Duration) Void = time::Sleep`), "main.ard")
 	}
 }
 
+func TestDirectGoEnumLikeConstantsResolveAsClosedEnum(t *testing.T) {
+	result := parse.Parse([]byte(`use go:git.sr.ht/~rockorager/vaxis as vaxis
+extern fn next(status: vaxis::AnimationStatus) vaxis::AnimationStatus = vaxis::Next
+fn active(status: vaxis::AnimationStatus) Bool {
+  match status {
+    vaxis::AnimationIdle => false
+    vaxis::AnimationForward => true
+    vaxis::AnimationCompleted => false
+  }
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	status := goNamed(GoValueInt, "vaxis.AnimationStatus", "git.sr.ht/~rockorager/vaxis", "AnimationStatus")
+	pkg := fakeEnumLikePackage("git.sr.ht/~rockorager/vaxis", "vaxis", status, []GoConstant{
+		goEnumConstant("AnimationIdle", status, 0),
+		goEnumConstant("AnimationForward", status, 1),
+		goEnumConstant("AnimationCompleted", status, 2),
+	})
+	pkg.Functions = map[string]GoFunction{"Next": {Name: "Next", Signature: GoSignature{Params: []GoValueType{status}, Results: []GoValueType{status}}}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{pkg.ImportPath: pkg}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+	fn := c.Module().Program().Statements[0].Expr.(*ExternalFunctionDef)
+	if enum, ok := fn.Parameters[0].Type.(*Enum); !ok || enum.ExternalBinding != "go:git.sr.ht/~rockorager/vaxis::AnimationStatus" || len(enum.Values) != 3 {
+		t.Fatalf("param type = %#v, want direct Go enum-like AnimationStatus", fn.Parameters[0].Type)
+	}
+}
+
+func TestOpenDirectGoEnumLikeConstantsRequireCatchAll(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/status as status
+fn describe(value: status::State) Str {
+  match value {
+    status::StateReady => "ready"
+    status::StateDone => "done"
+  }
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	state := goNamed(GoValueInt, "status.State", "example.com/status", "State")
+	pkg := fakeEnumLikePackage("example.com/status", "status", state, []GoConstant{
+		goEnumConstant("StateReady", state, 0),
+		goEnumConstant("StateDone", state, 1),
+	})
+	typ := pkg.Types["State"]
+	typ.ClosedEnum = false
+	pkg.Types["State"] = typ
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{pkg.ImportPath: pkg}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected open enum-like catch-all diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "requires a catch-all") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoEnumLikeConstantAliasesDuplicateMatchByValue(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/status as status
+fn describe(value: status::State) Str {
+  match value {
+    status::StateReady => "ready"
+    status::StateAlsoReady => "alias"
+    _ => "other"
+  }
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	state := goNamed(GoValueInt, "status.State", "example.com/status", "State")
+	pkg := fakeEnumLikePackage("example.com/status", "status", state, []GoConstant{
+		goEnumConstant("StateReady", state, 1),
+		goEnumConstant("StateAlsoReady", state, 1),
+		goEnumConstant("StateDone", state, 2),
+	})
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{pkg.ImportPath: pkg}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected duplicate enum alias match diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "has same value as State::StateReady") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func fakeEnumLikePackage(importPath string, name string, typ GoValueType, constants []GoConstant) *GoPackage {
+	pkg := &GoPackage{
+		ImportPath: importPath,
+		Name:       name,
+		Functions:  map[string]GoFunction{},
+		Types:      map[string]GoType{typ.Name: {Name: typ.Name, EnumConstants: constants, ClosedEnum: true}},
+		Constants:  map[string]GoConstant{},
+	}
+	for _, constant := range constants {
+		pkg.Constants[constant.Name] = constant
+	}
+	return pkg
+}
+
+func goEnumConstant(name string, typ GoValueType, value int) GoConstant {
+	return GoConstant{Name: name, Type: typ, IntValue: value, HasIntValue: true}
+}
+
 func TestDirectGoExternBindingRequiresImportedAlias(t *testing.T) {
 	result := parse.Parse([]byte(`extern fn floor(value: Float) Float = math::Floor`), "main.ard")
 	if len(result.Errors) > 0 {
@@ -354,6 +460,29 @@ extern fn create_temp(dir: Str, pattern: Str) (mut os::File)!Str = os::CreateTem
 	}
 }
 
+func TestDirectGoExternSignatureRejectsMutableEnumPointerReturn(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/status as status
+extern fn current() (mut status::State)!Str = status::Current`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	state := goNamed(GoValueInt, "status.State", "example.com/status", "State")
+	ptrState := GoValueType{Kind: GoValuePointer, Expr: "*status.State", Elem: &state}
+	pkg := fakeEnumLikePackage("example.com/status", "status", state, []GoConstant{
+		goEnumConstant("StateReady", state, 0),
+		goEnumConstant("StateDone", state, 1),
+	})
+	pkg.Functions = map[string]GoFunction{"Current": {Name: "Current", Signature: GoSignature{Results: []GoValueType{ptrState, goParam(GoValueError, "error")}}}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{pkg.ImportPath: pkg}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected enum pointer diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "pointer to enum-like type") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
 func TestDirectGoExternSignatureRejectsPlainValueForPointerReceiver(t *testing.T) {
 	result := parse.Parse([]byte(`use go:database/sql as sql
 extern fn ping(db: sql::DB) Void!Str = sql::DB::Ping`), "main.ard")
@@ -415,6 +544,46 @@ func TestGoValueTypeHandlesRecursiveNamedTypes(t *testing.T) {
 	}
 }
 
+func TestGoPackageFromTypesDiscoversEnumLikeTypedConstants(t *testing.T) {
+	fset := gotoken.NewFileSet()
+	file, err := goparser.ParseFile(fset, "enumlike.go", `package enumlike
+
+type AnimationStatus int
+const (
+	AnimationIdle AnimationStatus = iota
+	AnimationForward
+	AnimationCompleted
+	AnimationAlias = AnimationForward
+	Untyped = 42
+)
+
+type Label string
+const LabelName Label = "name"
+`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := new(gotypes.Config).Check("example.com/enumlike", fset, []*ast.File{file}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goPkg := goPackageFromTypes("example.com/enumlike", "enumlike", pkg)
+	status := goPkg.Types["AnimationStatus"]
+	if len(status.EnumConstants) != 4 {
+		t.Fatalf("enum constants = %#v, want 4", status.EnumConstants)
+	}
+	values := map[string]int{}
+	for _, constant := range status.EnumConstants {
+		values[constant.Name] = constant.IntValue
+	}
+	if values["AnimationIdle"] != 0 || values["AnimationForward"] != 1 || values["AnimationCompleted"] != 2 || values["AnimationAlias"] != 1 {
+		t.Fatalf("enum constant values = %#v", values)
+	}
+	if len(goPkg.Types["Label"].EnumConstants) != 0 {
+		t.Fatalf("string typed constants should not become enum-like: %#v", goPkg.Types["Label"].EnumConstants)
+	}
+}
+
 func TestGoPackageFromTypesSkipsPromotedMethods(t *testing.T) {
 	fset := gotoken.NewFileSet()
 	file, err := goparser.ParseFile(fset, "promoted.go", `package promoted
@@ -460,5 +629,39 @@ func TestGoPackagesResolverLoadsStdlibFunctionsAndMethods(t *testing.T) {
 	}
 	if _, ok := db.Methods["Close"]; !ok {
 		t.Fatalf("database/sql DB methods missing Close: %#v", db.Methods)
+	}
+
+	timePkg, err := resolver.LoadPackage("time")
+	if err != nil {
+		t.Fatalf("load time: %v", err)
+	}
+	month, ok := timePkg.Types["Month"]
+	if !ok {
+		t.Fatalf("time types missing Month")
+	}
+	if len(month.EnumConstants) < 12 {
+		t.Fatalf("time.Month enum constants = %#v, want months", month.EnumConstants)
+	}
+	if month.ClosedEnum {
+		t.Fatal("inferred Go enum-like constants should remain open without explicit closed metadata")
+	}
+	duration, ok := timePkg.Types["Duration"]
+	if !ok {
+		t.Fatalf("time types missing Duration")
+	}
+	if len(duration.EnumConstants) != 0 {
+		t.Fatalf("time.Duration should remain an open named scalar, got enum constants %#v", duration.EnumConstants)
+	}
+
+	reflectPkg, err := resolver.LoadPackage("reflect")
+	if err != nil {
+		t.Fatalf("load reflect: %v", err)
+	}
+	kind, ok := reflectPkg.Types["Kind"]
+	if !ok {
+		t.Fatalf("reflect types missing Kind")
+	}
+	if len(kind.EnumConstants) != 0 {
+		t.Fatalf("reflect.Kind has unsigned backing and should not become enum-like yet: %#v", kind.EnumConstants)
 	}
 }

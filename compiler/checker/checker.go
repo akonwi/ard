@@ -4004,8 +4004,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 		// For Enum types, generate an EnumMatch
 		if enumType, ok := subject.Type().(*Enum); ok {
-			// Map to track which variants we've seen
-			seenVariants := make(map[string]bool)
+			// Map to track which discriminant values we've seen. Imported Go enum-like
+			// constants may have multiple exported aliases for the same value.
+			seenDiscriminants := make(map[int]string)
 			// Track whether we've seen a catch-all case
 			hasCatchAll := false
 			// Cases in the match statement mapped to enum variants
@@ -4054,12 +4055,20 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					variantName := enumType.Values[enumVariant.Variant].Name
 					variantIndex := int(enumVariant.Variant)
 
-					// Check for duplicate cases
-					if seenVariants[variantName] {
-						c.addError(fmt.Sprintf("Duplicate case: %s::%s", enumType.Name, variantName), staticProp.GetLocation())
+					// Check for duplicate cases by value, not just by name. This lets Go
+					// enum-like constants import aliases while preserving closed enum
+					// exhaustiveness over distinct values.
+					discriminant := enumType.Values[enumVariant.Variant].Value
+					current := fmt.Sprintf("%s::%s", enumType.Name, variantName)
+					if previous, found := seenDiscriminants[discriminant]; found {
+						if previous == current {
+							c.addError(fmt.Sprintf("Duplicate case: %s", current), staticProp.GetLocation())
+						} else {
+							c.addError(fmt.Sprintf("Duplicate case: %s has same value as %s", current, previous), staticProp.GetLocation())
+						}
 						continue
 					}
-					seenVariants[variantName] = true
+					seenDiscriminants[discriminant] = current
 
 					// Check the body for this case
 					body := c.checkMatchArmBlock(matchCase.Body, nil)
@@ -4070,11 +4079,22 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				}
 			}
 
-			// Check if the match is exhaustive
+			// Check if the match is exhaustive over distinct values. Aliases do not
+			// require separate arms. Imported open Go enum-like types always require
+			// a wildcard because Go may produce values outside exported constants.
 			if !hasCatchAll {
-				for i, value := range enumType.Values {
-					if cases[i] == nil {
-						c.addError(fmt.Sprintf("Incomplete match: missing case for '%s::%s'", enumType.Name, value.Name), s.GetLocation())
+				if enumType.Open {
+					c.addError(fmt.Sprintf("Open enum-like Go type %s requires a catch-all (_) match case", enumType.Name), s.GetLocation())
+				} else {
+					missingValues := map[int]bool{}
+					for i, value := range enumType.Values {
+						if _, covered := seenDiscriminants[value.Value]; covered {
+							continue
+						}
+						if cases[i] == nil && !missingValues[value.Value] {
+							c.addError(fmt.Sprintf("Incomplete match: missing case for '%s::%s'", enumType.Name, value.Name), s.GetLocation())
+							missingValues[value.Value] = true
+						}
 					}
 				}
 			}
@@ -4100,9 +4120,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Create the EnumMatch
-			discriminantToIndex := make(map[int]int8, len(enumType.Values))
+			discriminantToIndex := make(map[int]int, len(enumType.Values))
 			for i, value := range enumType.Values {
-				discriminantToIndex[value.Value] = int8(i)
+				if _, ok := discriminantToIndex[value.Value]; !ok {
+					discriminantToIndex[value.Value] = i
+				}
 			}
 			enumMatch := &EnumMatch{
 				Subject:             subject,
@@ -4715,6 +4737,15 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 				}
 
+				if _, ok := c.directGoImports[id.Name]; ok {
+					propIdent, ok := s.Property.(*parse.Identifier)
+					if !ok {
+						c.addError(fmt.Sprintf("Unsupported property type in Go import %s::%s", id.Name, s.Property), s.Property.GetLocation())
+						return nil
+					}
+					return c.resolveDirectGoConstant(id.Name, propIdent.Name, propIdent.GetLocation())
+				}
+
 				// Handle local enum variants or static functions (not from modules)
 				sym, ok := c.scope.get(id.Name)
 				if !ok {
@@ -4740,10 +4771,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					return nil
 				}
 
-				var variant int8 = -1
+				variant := -1
 				for i := range enum.Values {
 					if enum.Values[i].Name == s.Property.(*parse.Identifier).Name {
-						variant = int8(i)
+						variant = i
 						break
 					}
 				}
@@ -4770,10 +4801,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				// Check if it's an enum type
 				if enum, ok := nestedSym.Type().(*Enum); ok {
 					// Find the variant
-					var variant int8 = -1
+					variant := -1
 					for i := range enum.Values {
 						if enum.Values[i].Name == s.Property.(*parse.Identifier).Name {
-							variant = int8(i)
+							variant = i
 							break
 						}
 					}

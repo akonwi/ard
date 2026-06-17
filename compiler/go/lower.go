@@ -609,13 +609,33 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 		return l.lowerMutableTraitRefDecl(typ)
 	case air.TypeEnum:
 		typeSpec := &ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: ast.NewIdent("int")}
-		if l.isStdlibFFIBackedType(typ) {
+		directGoEnum := false
+		if strings.TrimSpace(typ.ExternBinding) != "" {
+			if typeExpr, ok, err := l.directGoExternTypeExpr(typ.ExternBinding); err != nil || ok {
+				if err != nil {
+					return nil, err
+				}
+				directGoEnum = true
+				typeSpec.Assign = token.Pos(1)
+				typeSpec.Type = typeExpr
+			}
+		} else if l.isStdlibFFIBackedType(typ) {
 			typeSpec.Assign = token.Pos(1)
 			typeSpec.Type = l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", typ.Name)
 		}
 		specs := []ast.Spec{typeSpec}
 		for _, variant := range typ.Variants {
-			specs = append(specs, &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(enumVariantName(l.program, typ, variant))}, Type: ast.NewIdent(typeName(l.program, typ)), Values: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", variant.Discriminant)}}})
+			value := ast.Expr(&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", variant.Discriminant)})
+			if directGoEnum {
+				constant, ok, err := l.directGoEnumConstantExpr(typ.ExternBinding, variant.Name)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					value = constant
+				}
+			}
+			specs = append(specs, &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(enumVariantName(l.program, typ, variant))}, Type: ast.NewIdent(typeName(l.program, typ)), Values: []ast.Expr{value}})
 		}
 		decls := []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: specs[:1]}}
 		if len(specs) > 1 {

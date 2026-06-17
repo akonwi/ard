@@ -1697,6 +1697,8 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 	case *checker.Enum:
 		info.Kind = TypeEnum
+		info.ExternBinding = typ.ExternalBinding
+		info.EnumOpen = typ.Open
 		info.Variants = make([]VariantInfo, len(typ.Values))
 		for i, variant := range typ.Values {
 			info.Variants[i] = VariantInfo{Name: variant.Name, Discriminant: variant.Value}

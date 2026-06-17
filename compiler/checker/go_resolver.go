@@ -2,7 +2,10 @@ package checker
 
 import (
 	"fmt"
+	"go/constant"
 	"go/types"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/akonwi/ard/parse"
@@ -69,12 +72,17 @@ type GoValueType struct {
 }
 
 type GoType struct {
-	Name    string
-	Methods map[string]GoMethod
+	Name          string
+	Methods       map[string]GoMethod
+	EnumConstants []GoConstant
+	ClosedEnum    bool
 }
 
 type GoConstant struct {
-	Name string
+	Name        string
+	Type        GoValueType
+	IntValue    int
+	HasIntValue bool
 }
 
 type directGoImport struct {
@@ -149,10 +157,103 @@ func goPackageFromTypes(importPath string, name string, pkg *types.Package) *GoP
 		case *types.TypeName:
 			out.Types[name] = GoType{Name: name, Methods: exportedMethods(obj.Type())}
 		case *types.Const:
-			out.Constants[name] = GoConstant{Name: name}
+			out.Constants[name] = goConstant(obj)
 		}
 	}
+	attachEnumLikeConstants(out)
 	return out
+}
+
+func goConstant(obj *types.Const) GoConstant {
+	constantType := goValueType(obj.Type())
+	intValue, ok := goConstantIntValue(obj.Val())
+	return GoConstant{Name: obj.Name(), Type: constantType, IntValue: intValue, HasIntValue: ok}
+}
+
+func goConstantIntValue(value constant.Value) (int, bool) {
+	if value == nil || value.Kind() != constant.Int {
+		return 0, false
+	}
+	if signed, ok := constant.Int64Val(value); ok {
+		if strconv.IntSize == 32 && (signed < -1<<31 || signed > 1<<31-1) {
+			return 0, false
+		}
+		return int(signed), true
+	}
+	if unsigned, ok := constant.Uint64Val(value); ok {
+		maxInt := uint64(1<<(strconv.IntSize-1) - 1)
+		if unsigned <= maxInt {
+			return int(unsigned), true
+		}
+	}
+	return 0, false
+}
+
+func attachEnumLikeConstants(pkg *GoPackage) {
+	if pkg == nil {
+		return
+	}
+	names := make([]string, 0, len(pkg.Constants))
+	for name := range pkg.Constants {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	byType := map[string][]GoConstant{}
+	for _, name := range names {
+		constant := pkg.Constants[name]
+		if !goConstantIsEnumCandidate(pkg.ImportPath, constant) {
+			continue
+		}
+		if _, ok := pkg.Types[constant.Type.Name]; !ok {
+			continue
+		}
+		byType[constant.Type.Name] = append(byType[constant.Type.Name], constant)
+	}
+	for typeName, constants := range byType {
+		if !goConstantsLookClosedEnum(constants) {
+			continue
+		}
+		typ := pkg.Types[typeName]
+		typ.EnumConstants = constants
+		pkg.Types[typeName] = typ
+	}
+}
+
+func goConstantIsEnumCandidate(importPath string, constant GoConstant) bool {
+	if !constant.Type.Named || constant.Type.ImportPath != importPath || constant.Type.Name == "" {
+		return false
+	}
+	return constant.Type.Kind == GoValueInt && constant.Type.Bits == 0
+}
+
+func goConstantsLookClosedEnum(constants []GoConstant) bool {
+	if len(constants) == 0 {
+		return false
+	}
+	values := map[int]struct{}{}
+	for _, constant := range constants {
+		if !constant.HasIntValue {
+			return false
+		}
+		values[constant.IntValue] = struct{}{}
+	}
+	distinct := make([]int, 0, len(values))
+	for value := range values {
+		distinct = append(distinct, value)
+	}
+	sort.Ints(distinct)
+	min := distinct[0]
+	max := distinct[len(distinct)-1]
+	return (min == 0 || min == 1) && max-min+1 == len(distinct)
+}
+
+func goTypeHasEnumConstant(typ GoType, name string) bool {
+	for _, constant := range typ.EnumConstants {
+		if constant.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Checker) resolveDirectGoType(ty *parse.CustomType) Type {
@@ -171,14 +272,80 @@ func (c *Checker) resolveDirectGoType(ty *parse.CustomType) Type {
 	if !ok {
 		return nil
 	}
+	var goType GoType
 	if goImport.pkg != nil {
-		if _, ok := goImport.pkg.Types[property.Name]; !ok {
+		var ok bool
+		goType, ok = goImport.pkg.Types[property.Name]
+		if !ok {
 			c.addError(fmt.Sprintf("Go package %q has no exported type %q", goImport.importPath, property.Name), ty.GetLocation())
 			return &TypeVar{name: "unknown"}
+		}
+		if enum := c.directGoEnumType(goImport, goType, ty.GetLocation()); enum != nil {
+			return enum
 		}
 	}
 	binding := canonicalDirectGoBinding(goImport.importPath, []string{property.Name})
 	return &ExternType{Name_: ty.GetName(), ExternalBinding: binding, ExternalBindings: map[string]string{"go": binding}}
+}
+
+func (c *Checker) resolveDirectGoConstant(alias string, name string, loc parse.Location) Expression {
+	goImport, ok := c.directGoImports[alias]
+	if !ok || goImport.pkg == nil {
+		return nil
+	}
+	constant, ok := goImport.pkg.Constants[name]
+	if !ok {
+		c.addError(fmt.Sprintf("Go package %q has no exported enum-like constant %q", goImport.importPath, name), loc)
+		return nil
+	}
+	if !goConstantIsEnumCandidate(goImport.importPath, constant) {
+		c.addError(fmt.Sprintf("Go constant %s.%s is not an exported typed integer enum-like constant", goImport.pkg.Name, name), loc)
+		return nil
+	}
+	goType, ok := goImport.pkg.Types[constant.Type.Name]
+	if ok && !goTypeHasEnumConstant(goType, name) {
+		c.addError(fmt.Sprintf("Go constant %s.%s is not part of a closed enum-like type", goImport.pkg.Name, name), loc)
+		return nil
+	}
+	if !ok {
+		c.addError(fmt.Sprintf("Go package %q has no exported type %q", goImport.importPath, constant.Type.Name), loc)
+		return nil
+	}
+	enum := c.directGoEnumType(goImport, goType, loc)
+	if enum == nil {
+		return nil
+	}
+	for i := range enum.Values {
+		if enum.Values[i].Name == name {
+			return &EnumVariant{enum: enum, Variant: i, EnumType: enum, Discriminant: enum.Values[i].Value}
+		}
+	}
+	c.addError(fmt.Sprintf("Go constant %s.%s is not part of enum-like type %s", goImport.pkg.Name, name, goType.Name), loc)
+	return nil
+}
+
+func (c *Checker) directGoEnumType(goImport directGoImport, goType GoType, loc parse.Location) *Enum {
+	if len(goType.EnumConstants) == 0 {
+		return nil
+	}
+	values := make([]EnumValue, 0, len(goType.EnumConstants))
+	seenNames := map[string]struct{}{}
+	for _, constant := range goType.EnumConstants {
+		if _, dup := seenNames[constant.Name]; dup {
+			continue
+		}
+		seenNames[constant.Name] = struct{}{}
+		if !constant.HasIntValue {
+			c.addError(fmt.Sprintf("Go constant %s.%s has a value that cannot be represented as an Ard enum discriminant", goImport.pkg.Name, constant.Name), loc)
+			continue
+		}
+		values = append(values, EnumValue{Name: constant.Name, Value: constant.IntValue})
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	binding := canonicalDirectGoBinding(goImport.importPath, []string{goType.Name})
+	return &Enum{Name: goType.Name, ModulePath: "go:" + goImport.importPath, Values: values, Methods: map[string]*FunctionDef{}, Location: loc, ExternalBinding: binding, ExternalBindings: map[string]string{"go": binding}, Open: !goType.ClosedEnum}
 }
 
 func (c *Checker) resolveDirectGoExternBinding(binding string, loc parse.Location) string {
@@ -351,6 +518,14 @@ func (c *Checker) validateDirectGoExternReturn(name string, returnType Type, tar
 	if c.directGoResultAdapterCompatible(returnType, results) {
 		return
 	}
+	if len(results) == 2 && results[1].Kind == GoValueError {
+		if result, ok := derefType(returnType).(*Result); ok && equalTypes(result.Err(), Str) {
+			if ok, reason := c.directGoAssignableCompatible(result.Val(), results[0]); !ok {
+				c.addError(fmt.Sprintf("return value for %s: %s", target.Name, reason), loc)
+				return
+			}
+		}
+	}
 	if len(results) != 1 {
 		c.addError(fmt.Sprintf("return for %s: Go returns %s; no supported adapter matches extern %s return %s", target.Name, goSignatureResultsString(results), name, typeSyntaxString(returnType)), loc)
 		return
@@ -413,6 +588,9 @@ func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel
 		if goType.Named {
 			return false, fmt.Sprintf("Go named pointer type %s is not supported by direct Go pointer bindings yet", goType.String())
 		}
+		if directGoPointerToEnumLike(ard, goType) {
+			return false, fmt.Sprintf("Go pointer to enum-like type %s is not supported by direct Go pointer bindings yet", goType.String())
+		}
 		if directGoPointerCompatible(ard, goType) {
 			return true, ""
 		}
@@ -467,6 +645,9 @@ func (c *Checker) directGoAssignableCompatible(ard Type, goType GoValueType) (bo
 	if goType.Kind == GoValuePointer {
 		if goType.Named {
 			return false, fmt.Sprintf("Go named pointer type %s is not supported by direct Go pointer bindings yet", goType.String())
+		}
+		if directGoPointerToEnumLike(ard, goType) {
+			return false, fmt.Sprintf("Go pointer to enum-like type %s is not supported by direct Go pointer bindings yet", goType.String())
 		}
 		if directGoPointerCompatible(ard, goType) {
 			return true, ""
@@ -549,11 +730,28 @@ func directGoNamedTypeMatches(ard Type, goType GoValueType) bool {
 	if !goType.Named || goType.ImportPath == "" || goType.Name == "" {
 		return false
 	}
-	extern, ok := ard.(*ExternType)
+	binding := canonicalDirectGoBinding(goType.ImportPath, []string{goType.Name})
+	if extern, ok := ard.(*ExternType); ok {
+		return extern.ExternalBinding == binding
+	}
+	if enum, ok := ard.(*Enum); ok {
+		return enum.ExternalBinding == binding
+	}
+	return false
+}
+
+func directGoPointerToEnumLike(ard Type, goType GoValueType) bool {
+	if goType.Kind != GoValuePointer || goType.Elem == nil {
+		return false
+	}
+	ref, ok := ard.(*MutableRef)
 	if !ok {
 		return false
 	}
-	return extern.ExternalBinding == canonicalDirectGoBinding(goType.ImportPath, []string{goType.Name})
+	if _, ok := ref.Of().(*Enum); !ok {
+		return false
+	}
+	return directGoNamedTypeMatches(ref.Of(), *goType.Elem)
 }
 
 func directGoPointerCompatible(ard Type, goType GoValueType) bool {
@@ -562,6 +760,9 @@ func directGoPointerCompatible(ard Type, goType GoValueType) bool {
 	}
 	ref, ok := ard.(*MutableRef)
 	if !ok {
+		return false
+	}
+	if _, ok := ref.Of().(*ExternType); !ok {
 		return false
 	}
 	return directGoNamedTypeMatches(ref.Of(), *goType.Elem)

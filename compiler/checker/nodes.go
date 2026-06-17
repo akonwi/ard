@@ -702,7 +702,7 @@ type EnumMatch struct {
 	Subject             Expression
 	Cases               []*Block
 	CatchAll            *Block
-	DiscriminantToIndex map[int]int8 // Pre-computed discriminant lookup
+	DiscriminantToIndex map[int]int // Pre-computed discriminant lookup
 	ResultType          Type
 }
 
@@ -1235,13 +1235,16 @@ type EnumValue struct {
 }
 
 type Enum struct {
-	Name       string
-	ModulePath string
-	Private    bool
-	Values     []EnumValue // The discriminant values for each variant
-	Methods    map[string]*FunctionDef
-	Traits     []*Trait
-	Location   parse.Location
+	Name             string
+	ModulePath       string
+	Private          bool
+	Values           []EnumValue // The discriminant values for each variant
+	Methods          map[string]*FunctionDef
+	Traits           []*Trait
+	Location         parse.Location
+	ExternalBinding  string
+	ExternalBindings map[string]string
+	Open             bool // Open enum-like values require wildcard matches and skip FFI closed-set validation.
 }
 
 func (e Enum) NonProducing() {}
@@ -1306,7 +1309,7 @@ func (e Enum) hasTrait(trait *Trait) bool {
 
 type EnumVariant struct {
 	enum         *Enum
-	Variant      int8
+	Variant      int
 	EnumType     Type // Pre-computed by checker
 	Discriminant int  // Pre-computed by checker
 }

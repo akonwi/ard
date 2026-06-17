@@ -3930,6 +3930,91 @@ fn use_duration(duration: time::Duration) {
 	}
 }
 
+func TestLowerDirectGoEnumLikeConstants(t *testing.T) {
+	program := lowerSource(t, `use go:time
+extern fn now() time::Time = time::Now
+extern fn month(value: time::Time) time::Month = time::Time::Month
+fn month_number(value: time::Month) Int {
+  match value {
+    time::January => 1
+    _ => 0
+  }
+}
+fn main() Int { month_number(month(now())) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "time", "time") {
+		t.Fatal("generated AST missing time import")
+	}
+	if !astFilesHaveSelector(files, "time", "Month") {
+		t.Fatal("generated AST missing time.Month type alias")
+	}
+	if !astFilesHaveSelector(files, "time", "January") {
+		t.Fatal("generated AST missing time.January enum constant")
+	}
+}
+
+func TestLowerDirectGoClosedEnumReturnValidation(t *testing.T) {
+	program := &air.Program{Types: []air.TypeInfo{{
+		ID:            1,
+		Kind:          air.TypeEnum,
+		Name:          "State",
+		ExternBinding: "go:example.com/status::State",
+		Variants:      []air.VariantInfo{{Name: "StateReady", Discriminant: 0}, {Name: "StateDone", Discriminant: 1}},
+	}}}
+	l := &lowerer{program: program}
+	checked, ok, err := l.validateDirectGoReturnValue(1, ast.NewIdent("value"), checker.GoValueType{Kind: checker.GoValueInt, Expr: "status.State", Named: true, ImportPath: "example.com/status", Name: "State"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected closed enum return validation")
+	}
+	foundPanic := false
+	ast.Inspect(checked, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if ok && astCallName(call) == "panic" {
+			foundPanic = true
+			return false
+		}
+		return true
+	})
+	if !foundPanic {
+		t.Fatalf("validation expression = %#v, want panic path", checked)
+	}
+}
+
+func TestDirectGoEnumLikeConstantsBuild(t *testing.T) {
+	program := lowerSource(t, `use go:time
+extern fn now() time::Time = time::Now
+extern fn month(value: time::Time) time::Month = time::Time::Month
+fn main() Int {
+  match month(now()) {
+    time::January => 1
+    _ => 0
+  }
+}`)
+	tempDir := t.TempDir()
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("generate sources: %v", err)
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
+			t.Fatalf("write source %s: %v", name, err)
+		}
+	}
+	goMod, err := generatedGoMod(tempDir, program, nil)
+	if err != nil {
+		t.Fatalf("generate go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := buildGeneratedProgram(tempDir, filepath.Join(tempDir, "direct-go-enum")); err != nil {
+		t.Fatalf("build generated program: %v", err)
+	}
+}
+
 func TestDirectGoPointerReturnAndMethodBuilds(t *testing.T) {
 	program := lowerSource(t, `use go:os
 extern fn create_temp(dir: Str, pattern: Str) (mut os::File)!Str = os::CreateTemp
