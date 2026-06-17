@@ -196,7 +196,6 @@ type Host struct {
 	JsonToDynamic        func(json string) (any, error)
 	ListToDynamic        func(list []any) any
 	MapToDynamic         func(from map[string]any) any
-	Now                  func() int
 	OsArgs               func() []string
 	Print                func(string string)
 	ReadLine             func() (string, error)
@@ -384,9 +383,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.MapToDynamic != nil {
 		functions["MapToDynamic"] = h.MapToDynamic
-	}
-	if h.Now != nil {
-		functions["Now"] = h.Now
 	}
 	if h.OsArgs != nil {
 		functions["OsArgs"] = h.OsArgs
