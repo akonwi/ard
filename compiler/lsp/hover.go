@@ -475,6 +475,9 @@ func importedModuleForAlias(alias string, prog *parse.Program, filePath string) 
 }
 
 func moduleForImport(imp parse.Import, filePath string) (checker.Module, bool) {
+	if imp.Kind == parse.ImportKindGo {
+		return nil, false
+	}
 	if strings.HasPrefix(imp.Path, "ard/") {
 		return checker.FindEmbeddedModule(imp.Path)
 	}
@@ -1557,6 +1560,9 @@ func findInstanceMethodSignature(ownerType string, methodName string, stmts []pa
 }
 
 func findImportedInstanceMethodSignature(ownerType string, methodName string, prog *parse.Program, filePath string) *hoverMethodSignature {
+	if sig := directGoInstanceMethodSignature(ownerType, methodName, prog, filePath); sig != nil {
+		return sig
+	}
 	importedType, ok := importedTypeForDisplay(ownerType, prog, filePath)
 	if !ok {
 		return nil
@@ -1583,6 +1589,61 @@ func findImportedInstanceMethodSignature(ownerType string, methodName string, pr
 	sig := checkerMethodSignature(ownerType, method)
 	substituteImportedGenericSignature(sig, importedType, ownerType)
 	return sig
+}
+
+func directGoInstanceMethodSignature(ownerType string, methodName string, prog *parse.Program, filePath string) *hoverMethodSignature {
+	normalizedOwner := normalizeDisplayType(ownerType)
+	mutableOwner := strings.HasPrefix(normalizedOwner, "mut ")
+	displayOwner := strings.TrimPrefix(normalizedOwner, "mut ")
+	alias, typeName, ok := importedTypeDisplayParts(displayOwner)
+	if !ok {
+		return nil
+	}
+	imp, ok := directGoImportForAlias(alias, prog)
+	if !ok {
+		return nil
+	}
+	pkg, ok := loadDirectGoPackage(imp, filePath)
+	if !ok {
+		return nil
+	}
+	typ, ok := pkg.Types[typeName]
+	if !ok {
+		return nil
+	}
+	method, ok := typ.Methods[methodName]
+	if !ok || method.Signature.Variadic {
+		return nil
+	}
+	ctx := directGoHoverContextForImport(imp, prog)
+	mutates := false
+	if method.Signature.Receiver != nil {
+		receiverType, ok := directGoHoverReturnType(*method.Signature.Receiver, ctx)
+		if !ok {
+			return nil
+		}
+		mutates = strings.HasPrefix(receiverType, "mut ")
+		if mutates && !mutableOwner {
+			return nil
+		}
+	}
+	params := make([]hoverParam, len(method.Signature.Params))
+	for i, param := range method.Signature.Params {
+		paramType, ok := directGoHoverParamType(param, ctx, true)
+		if !ok {
+			return nil
+		}
+		paramName := param.ParamName
+		if paramName == "" || paramName == "_" {
+			paramName = fmt.Sprintf("arg%d", i)
+		}
+		params[i] = hoverParam{Name: paramName, Type: paramType}
+	}
+	returnType, ok := directGoHoverReturn(method.Signature.Results, ctx)
+	if !ok {
+		return nil
+	}
+	return &hoverMethodSignature{OwnerType: displayOwner, Name: methodName, Params: params, ReturnType: returnType, Mutates: mutates}
 }
 
 func checkerMethodSignature(ownerType string, fd *checker.FunctionDef) *hoverMethodSignature {
@@ -2285,6 +2346,9 @@ func resolveStaticFunctionSignature(sf *parse.StaticFunction, prog *parse.Progra
 }
 
 func importedStaticFunctionSignature(target string, name string, prog *parse.Program, filePath string) *hoverStaticFunctionSignature {
+	if sig := importedDirectGoFunctionSignature(target, name, prog, filePath); sig != nil {
+		return sig
+	}
 	mod, lookupName, ok := importedStaticLookup(target, name, prog, filePath)
 	if !ok {
 		return nil
@@ -2294,6 +2358,283 @@ func importedStaticFunctionSignature(target string, name string, prog *parse.Pro
 		return nil
 	}
 	return checkerStaticFunctionSignature(target, name, sym.Type)
+}
+
+func importedDirectGoFunctionSignature(target string, name string, prog *parse.Program, filePath string) *hoverStaticFunctionSignature {
+	alias, memberPrefix := splitStaticTarget(target)
+	imp, ok := directGoImportForAlias(alias, prog)
+	if !ok {
+		return nil
+	}
+	pkg, ok := loadDirectGoPackage(imp, filePath)
+	if !ok {
+		return nil
+	}
+	ctx := directGoHoverContextForImport(imp, prog)
+	if memberPrefix == "" {
+		fn, ok := pkg.Functions[name]
+		if !ok || fn.Signature.Variadic {
+			return nil
+		}
+		return directGoFunctionHoverSignature(target, name, fn.Signature, false, ctx)
+	}
+	if strings.Contains(memberPrefix, "::") {
+		return nil
+	}
+	typ, ok := pkg.Types[memberPrefix]
+	if !ok {
+		return nil
+	}
+	method, ok := typ.Methods[name]
+	if !ok || method.Signature.Variadic {
+		return nil
+	}
+	return directGoFunctionHoverSignature(target, name, method.Signature, true, ctx)
+}
+
+func directGoImportForAlias(alias string, prog *parse.Program) (parse.Import, bool) {
+	if prog == nil {
+		return parse.Import{}, false
+	}
+	for _, imp := range prog.Imports {
+		if imp.Kind == parse.ImportKindGo && imp.Name == alias {
+			return imp, true
+		}
+	}
+	return parse.Import{}, false
+}
+
+func loadDirectGoPackage(imp parse.Import, filePath string) (*checker.GoPackage, bool) {
+	dir := "."
+	if filePath != "" {
+		dir = filepath.Dir(filePath)
+	}
+	pkg, err := checker.NewGoPackagesResolver(dir).LoadPackage(imp.Path)
+	if err != nil {
+		log.Printf("hover: direct Go package %s load error: %v", imp.Path, err)
+		return nil, false
+	}
+	return pkg, true
+}
+
+type directGoHoverContext struct {
+	currentImportPath string
+	currentAlias      string
+	aliasesByPath     map[string]string
+}
+
+func directGoHoverContextForImport(imp parse.Import, prog *parse.Program) directGoHoverContext {
+	ctx := directGoHoverContext{currentImportPath: imp.Path, currentAlias: imp.Name, aliasesByPath: map[string]string{}}
+	if prog != nil {
+		for _, imported := range prog.Imports {
+			if imported.Kind == parse.ImportKindGo {
+				ctx.aliasesByPath[imported.Path] = imported.Name
+			}
+		}
+	}
+	return ctx
+}
+
+func directGoFunctionHoverSignature(qualifier string, name string, signature checker.GoSignature, includeReceiver bool, ctx directGoHoverContext) *hoverStaticFunctionSignature {
+	params := make([]hoverParam, 0, len(signature.Params)+1)
+	if includeReceiver && signature.Receiver != nil {
+		receiverType, ok := directGoHoverReturnType(*signature.Receiver, ctx)
+		if !ok {
+			return nil
+		}
+		params = append(params, hoverParam{Name: "receiver", Type: receiverType})
+	}
+	for i, param := range signature.Params {
+		paramType, ok := directGoHoverParamType(param, ctx, true)
+		if !ok {
+			return nil
+		}
+		paramName := param.ParamName
+		if paramName == "" || paramName == "_" {
+			paramName = fmt.Sprintf("arg%d", i)
+		}
+		params = append(params, hoverParam{Name: paramName, Type: paramType})
+	}
+	returnType, ok := directGoHoverReturn(signature.Results, ctx)
+	if !ok {
+		return nil
+	}
+	return &hoverStaticFunctionSignature{Qualifier: qualifier, Name: name, Params: params, ReturnType: returnType}
+}
+
+func directGoHoverReturn(results []checker.GoValueType, ctx directGoHoverContext) (string, bool) {
+	switch len(results) {
+	case 0:
+		return "Void", true
+	case 1:
+		if results[0].Kind == checker.GoValueError {
+			return "Void!Str", true
+		}
+		return directGoHoverReturnType(results[0], ctx)
+	case 2:
+		value, ok := directGoHoverReturnType(results[0], ctx)
+		if !ok {
+			return "", false
+		}
+		switch results[1].Kind {
+		case checker.GoValueError:
+			return directGoHoverPostfixBase(value) + "!Str", true
+		case checker.GoValueBool:
+			if !results[1].Named {
+				return directGoHoverPostfixBase(value) + "?", true
+			}
+		}
+	}
+	return "", false
+}
+
+func directGoHoverPostfixBase(value string) string {
+	if strings.HasPrefix(value, "mut ") {
+		return "(" + value + ")"
+	}
+	return value
+}
+
+func directGoHoverParamType(goType checker.GoValueType, ctx directGoHoverContext, topLevel bool) (string, bool) {
+	if goType.Kind == checker.GoValuePointer {
+		return directGoHoverPointerType(goType, ctx)
+	}
+	if goType.Named && goType.Name != "" {
+		return directGoHoverNamedType(goType, ctx), true
+	}
+	switch goType.Kind {
+	case checker.GoValueBool:
+		return "Bool", true
+	case checker.GoValueString:
+		return "Str", true
+	case checker.GoValueInt:
+		if goType.Bits == 32 {
+			return "Rune", true
+		}
+		if topLevel || goType.Bits == 0 {
+			return "Int", true
+		}
+	case checker.GoValueUint:
+		if goType.Bits == 8 {
+			return "Byte", true
+		}
+		if topLevel {
+			return "Int", true
+		}
+	case checker.GoValueFloat:
+		if topLevel || goType.Bits == 64 {
+			return "Float", true
+		}
+	case checker.GoValueAny:
+		return "Dynamic", true
+	case checker.GoValueSlice:
+		if goType.Elem == nil {
+			return "", false
+		}
+		elem, ok := directGoHoverParamType(*goType.Elem, ctx, false)
+		if !ok {
+			return "", false
+		}
+		return "[" + elem + "]", true
+	case checker.GoValueMap:
+		if goType.Key == nil || goType.Value == nil {
+			return "", false
+		}
+		key, keyOK := directGoHoverParamType(*goType.Key, ctx, false)
+		value, valueOK := directGoHoverParamType(*goType.Value, ctx, false)
+		if !keyOK || !valueOK {
+			return "", false
+		}
+		return "[" + key + ": " + value + "]", true
+	}
+	return "", false
+}
+
+func directGoHoverReturnType(goType checker.GoValueType, ctx directGoHoverContext) (string, bool) {
+	if goType.Kind == checker.GoValuePointer {
+		return directGoHoverPointerType(goType, ctx)
+	}
+	if goType.Named && goType.Name != "" {
+		return directGoHoverNamedType(goType, ctx), true
+	}
+	switch goType.Kind {
+	case checker.GoValueBool:
+		return "Bool", true
+	case checker.GoValueString:
+		return "Str", true
+	case checker.GoValueInt:
+		if goType.Bits == 0 {
+			return "Int", true
+		}
+		if goType.Bits == 32 {
+			return "Rune", true
+		}
+	case checker.GoValueUint:
+		if goType.Bits == 8 {
+			return "Byte", true
+		}
+	case checker.GoValueFloat:
+		if goType.Bits == 64 {
+			return "Float", true
+		}
+	case checker.GoValueAny:
+		return "Dynamic", true
+	case checker.GoValueSlice:
+		if goType.Elem == nil {
+			return "", false
+		}
+		elem, ok := directGoHoverReturnType(*goType.Elem, ctx)
+		if !ok {
+			return "", false
+		}
+		return "[" + elem + "]", true
+	case checker.GoValueMap:
+		if goType.Key == nil || goType.Value == nil {
+			return "", false
+		}
+		key, keyOK := directGoHoverReturnType(*goType.Key, ctx)
+		value, valueOK := directGoHoverReturnType(*goType.Value, ctx)
+		if !keyOK || !valueOK {
+			return "", false
+		}
+		return "[" + key + ": " + value + "]", true
+	}
+	return "", false
+}
+
+func directGoHoverPointerType(goType checker.GoValueType, ctx directGoHoverContext) (string, bool) {
+	if goType.Named || goType.Elem == nil || !goType.Elem.Named || goType.Elem.Kind != checker.GoValueOther {
+		return "", false
+	}
+	elem := directGoHoverNamedType(*goType.Elem, ctx)
+	if elem == "" {
+		return "", false
+	}
+	return "mut " + elem, true
+}
+
+func directGoHoverNamedType(goType checker.GoValueType, ctx directGoHoverContext) string {
+	qualifier := ""
+	if goType.ImportPath == ctx.currentImportPath {
+		qualifier = ctx.currentAlias
+	} else if alias := ctx.aliasesByPath[goType.ImportPath]; alias != "" {
+		qualifier = alias
+	} else if goType.Package != "" {
+		qualifier = goType.Package
+	} else {
+		qualifier = directGoImportPathBase(goType.ImportPath)
+	}
+	if qualifier != "" {
+		return qualifier + "::" + goType.Name
+	}
+	return goType.Name
+}
+
+func directGoImportPathBase(importPath string) string {
+	if idx := strings.LastIndex(importPath, "/"); idx >= 0 {
+		return importPath[idx+1:]
+	}
+	return importPath
 }
 
 func importedStaticLookup(target string, name string, prog *parse.Program, filePath string) (checker.Module, string, bool) {

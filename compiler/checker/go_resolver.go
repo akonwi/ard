@@ -69,6 +69,7 @@ type GoValueType struct {
 	ImportPath string
 	Package    string
 	Name       string
+	ParamName  string
 	Elem       *GoValueType
 	Key        *GoValueType
 	Value      *GoValueType
@@ -1256,6 +1257,7 @@ func goTuple(tuple *types.Tuple) []GoValueType {
 	out := make([]GoValueType, tuple.Len())
 	for i := 0; i < tuple.Len(); i++ {
 		out[i] = goValueType(tuple.At(i).Type())
+		out[i].ParamName = tuple.At(i).Name()
 	}
 	return out
 }
