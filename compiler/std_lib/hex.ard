@@ -1,12 +1,16 @@
 use ard/string as Str
 use ard/testing
 
-// Encode raw bytes to a lowercase hexadecimal string.
-extern fn encode(bytes: [Byte]) Str = "HexEncode"
+use go:encoding/hex
 
+// Deprecated: use direct Go FFI with `encoding/hex::EncodeToString` instead.
+// Encode raw bytes to a lowercase hexadecimal string.
+extern fn encode(bytes: [Byte]) Str = hex::EncodeToString
+
+// Deprecated: use direct Go FFI with `encoding/hex::DecodeString` instead.
 // Decode a hexadecimal string back into raw bytes.
 // Returns an error if `input` is not valid hex.
-extern fn decode(input: Str) [Byte]!Str = "HexDecode"
+extern fn decode(input: Str) [Byte]!Str = hex::DecodeString
 
 test fn test_encode_empty() Void!Str {
   testing::assert(encode("".bytes()) == "", "Expected empty input to encode to empty string")

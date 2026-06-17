@@ -196,8 +196,6 @@ type Host struct {
 	HTTPResponseHeaders  func(resp *http.Response) map[string]string
 	HTTPResponseStatus   func(resp *http.Response) int
 	HTTPServe            func(port int, handlers map[string]func(Request, *Response)) error
-	HexDecode            func(input string) ([]byte, error)
-	HexEncode            func(bytes []byte) string
 	IntFromStr           func(str string) Maybe[int]
 	IntToDynamic         func(val int) any
 	IsNil                func(data any) bool
@@ -394,12 +392,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.HTTPServe != nil {
 		functions["HTTP_Serve"] = h.HTTPServe
-	}
-	if h.HexDecode != nil {
-		functions["HexDecode"] = h.HexDecode
-	}
-	if h.HexEncode != nil {
-		functions["HexEncode"] = h.HexEncode
 	}
 	if h.IntFromStr != nil {
 		functions["IntFromStr"] = h.IntFromStr

@@ -107,8 +107,6 @@ func NewHost(config HostConfig) Host {
 		HTTPResponseHeaders:  HTTPResponseHeaders,
 		HTTPResponseStatus:   HTTPResponseStatus,
 		HTTPServe:            HTTPServe,
-		HexDecode:            HexDecode,
-		HexEncode:            HexEncode,
 		IntFromStr:           IntFromStr,
 		IntToDynamic:         IntToDynamic,
 		IsNil:                IsNil,
@@ -292,18 +290,6 @@ func Base64DecodeURL(input string, noPad Maybe[bool]) ([]byte, error) {
 		enc = base64.RawURLEncoding
 	}
 	decoded, err := enc.DecodeString(input)
-	if err != nil {
-		return nil, err
-	}
-	return decoded, nil
-}
-
-func HexEncode(input []byte) string {
-	return hex.EncodeToString(input)
-}
-
-func HexDecode(input string) ([]byte, error) {
-	decoded, err := hex.DecodeString(input)
 	if err != nil {
 		return nil, err
 	}

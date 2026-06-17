@@ -94,8 +94,6 @@ var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
 	"HTTP_ResponseHeaders": {function: "HTTPResponseHeaders", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"HTTP_ResponseStatus":  {function: "HTTPResponseStatus", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"HTTP_Serve":           {function: "HTTPServe", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
-	"HexDecode":            {function: "HexDecode", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"HexEncode":            {function: "HexEncode", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"IntFromStr":           {function: "IntFromStr", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"IntToDynamic":         {function: "IntToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"IsNil":                {function: "IsNil", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
