@@ -3953,6 +3953,96 @@ fn main() {
 	}
 }
 
+func TestLowerDirectGoExternChecksUnsignedArgumentRange(t *testing.T) {
+	program := lowerSource(t, `use go:strings
+extern fn index_byte(value: Str, byte: Int) Int = strings::IndexByte
+fn main() Int { index_byte("abc", 98) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveCall(files, "strings.IndexByte") {
+		t.Fatal("generated AST missing strings.IndexByte call")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoCheckUintIntRange") {
+		t.Fatal("generated AST missing uint range check")
+	}
+}
+
+func TestDirectGoExternRangeCheckPanicsBeforeUnsignedWrap(t *testing.T) {
+	program := lowerSource(t, `use go:strings
+extern fn index_byte(value: Str, byte: Int) Int = strings::IndexByte
+fn main() Int { index_byte("abc", 300) }`)
+	tempDir := t.TempDir()
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("generate sources: %v", err)
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
+			t.Fatalf("write source %s: %v", name, err)
+		}
+	}
+	goMod, err := generatedGoMod(tempDir, program, nil)
+	if err != nil {
+		t.Fatalf("generate go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	binaryPath := filepath.Join(tempDir, "range-check")
+	if err := buildGeneratedProgram(tempDir, binaryPath); err != nil {
+		t.Fatalf("build generated program: %v", err)
+	}
+	cmd := exec.Command(binaryPath)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil {
+		t.Fatal("generated program succeeded; expected range check panic")
+	}
+	if !strings.Contains(stderr.String(), "int value out of range for byte") {
+		t.Fatalf("stderr = %q, want range check panic", stderr.String())
+	}
+}
+
+func TestLowerDirectGoExternChecksSignedArgumentRange(t *testing.T) {
+	program := lowerSource(t, `use go:unicode/utf8 as utf8
+extern fn rune_len(value: Int) Int = utf8::RuneLen
+fn main() Int { rune_len(65) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveCall(files, "utf8.RuneLen") {
+		t.Fatal("generated AST missing utf8.RuneLen call")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoCheckSignedIntRange") {
+		t.Fatal("generated AST missing signed range check")
+	}
+}
+
+func TestLowerDirectGoExternChecksFloat32ArgumentRange(t *testing.T) {
+	l := &lowerer{program: &air.Program{Types: []air.TypeInfo{{ID: 1, Kind: air.TypeFloat}}}, runtimeHelpers: map[string]bool{}}
+	checked := l.checkedDirectGoArg(1, ast.NewIdent("value"), checker.GoValueType{Kind: checker.GoValueFloat, Bits: 32, Expr: "float32"})
+	call, ok := checked.(*ast.CallExpr)
+	if !ok || astCallName(call) != "ardDirectGoCheckFloat32Range" {
+		t.Fatalf("checked arg = %#v, want ardDirectGoCheckFloat32Range call", checked)
+	}
+	if !l.runtimeHelpers["direct_go_float32_range"] {
+		t.Fatal("float32 range helper was not marked")
+	}
+}
+
+func TestLowerDirectGoExternValidatesRuneReturn(t *testing.T) {
+	program := lowerSource(t, `use go:unicode
+extern fn upper(value: Rune) Rune = unicode::ToUpper
+fn main() Rune { upper('a') }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveCall(files, "unicode.ToUpper") {
+		t.Fatal("generated AST missing unicode.ToUpper call")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoCheckRune") {
+		t.Fatal("generated AST missing rune validation")
+	}
+	if !astFilesHaveImport(files, "ardutf8", "unicode/utf8") {
+		t.Fatal("generated AST missing private unicode/utf8 import for rune validation")
+	}
+}
+
 func TestLowerDirectGoExternAdaptsErrorReturnToResult(t *testing.T) {
 	program := lowerSource(t, `use go:os
 extern fn remove(path: Str) Void!Str = os::Remove

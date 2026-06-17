@@ -491,6 +491,59 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	}
 `)
 	}
+	if l.runtimeHelpers["direct_go_signed_int_range"] {
+		parts = append(parts, `
+	func ardDirectGoCheckSignedIntRange(value int, min int64, max int64, target string) int {
+		v := int64(value)
+		if v < min || v > max {
+			panic("Ard direct Go FFI: int value out of range for " + target)
+		}
+		return value
+	}
+`)
+	}
+	if l.runtimeHelpers["direct_go_uint_int_range"] {
+		parts = append(parts, `
+	func ardDirectGoCheckUintIntRange(value int, max uint64, target string) int {
+		if value < 0 || uint64(value) > max {
+			panic("Ard direct Go FFI: int value out of range for " + target)
+		}
+		return value
+	}
+`)
+	}
+	if l.runtimeHelpers["direct_go_nonnegative_int"] {
+		parts = append(parts, `
+	func ardDirectGoCheckNonNegativeInt(value int, target string) int {
+		if value < 0 {
+			panic("Ard direct Go FFI: negative int value out of range for " + target)
+		}
+		return value
+	}
+`)
+	}
+	if l.runtimeHelpers["direct_go_float32_range"] {
+		l.currentImports["ardmath"] = "math"
+		parts = append(parts, `
+	func ardDirectGoCheckFloat32Range(value float64, target string) float64 {
+		if value > ardmath.MaxFloat32 || value < -ardmath.MaxFloat32 {
+			panic("Ard direct Go FFI: float value out of range for " + target)
+		}
+		return value
+	}
+`)
+	}
+	if l.runtimeHelpers["direct_go_valid_rune"] {
+		l.currentImports["ardutf8"] = "unicode/utf8"
+		parts = append(parts, `
+	func ardDirectGoCheckRune(value rune) rune {
+		if !ardutf8.ValidRune(value) {
+			panic("Ard direct Go FFI: Go returned invalid Rune")
+		}
+		return value
+	}
+`)
+	}
 	if l.runtimeHelpers["json_parse"] {
 		l.currentImports["bytes"] = "bytes"
 		l.currentImports["fmt"] = "fmt"
