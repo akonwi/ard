@@ -2,6 +2,10 @@ package checker
 
 import (
 	"fmt"
+	"go/ast"
+	goparser "go/parser"
+	gotoken "go/token"
+	gotypes "go/types"
 	"strings"
 	"testing"
 
@@ -25,7 +29,22 @@ func (r fakeGoResolver) LoadPackage(importPath string) (*GoPackage, error) {
 }
 
 func goParam(kind GoValueKind, expr string) GoValueType {
-	return GoValueType{Kind: kind, Expr: expr}
+	value := GoValueType{Kind: kind, Expr: expr}
+	switch expr {
+	case "int8", "uint8":
+		value.Bits = 8
+	case "int16", "uint16":
+		value.Bits = 16
+	case "int32", "uint32":
+		value.Bits = 32
+	case "int64", "uint64":
+		value.Bits = 64
+	case "float32":
+		value.Bits = 32
+	case "float64":
+		value.Bits = 64
+	}
+	return value
 }
 
 func goNamed(kind GoValueKind, expr string, importPath string, name string) GoValueType {
@@ -271,6 +290,70 @@ extern fn ping(db: sql::DB) Void = sql::DB::Ping`), "main.ard")
 	}
 	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "direct Go pointer bindings are not supported yet") {
 		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoExternSignatureRejectsNamedScalarReturnsUntilReturnCoercionExists(t *testing.T) {
+	result := parse.Parse([]byte(`use go:time
+extern fn since(value: time::Time) Int = time::Since`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	timeType := goNamed(GoValueOther, "time.Time", "time", "Time")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"time": {ImportPath: "time", Name: "time", Functions: map[string]GoFunction{
+			"Since": {Name: "Since", Signature: GoSignature{Params: []GoValueType{timeType}, Results: []GoValueType{goNamed(GoValueInt, "time.Duration", "time", "Duration")}}},
+		}, Types: map[string]GoType{"Time": {Name: "Time"}, "Duration": {Name: "Duration"}}},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected named scalar return diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Ard type Int is not compatible with Go named type time.Duration") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestGoValueTypeHandlesRecursiveNamedTypes(t *testing.T) {
+	pkg := gotypes.NewPackage("example.com/recursive", "recursive")
+	obj := gotypes.NewTypeName(gotoken.NoPos, pkg, "Loop", nil)
+	named := gotypes.NewNamed(obj, nil, nil)
+	named.SetUnderlying(gotypes.NewSlice(named))
+
+	value := goValueType(named)
+	if !value.Named || value.Name != "Loop" || value.ImportPath != "example.com/recursive" {
+		t.Fatalf("recursive named metadata = %#v", value)
+	}
+	if value.Kind != GoValueSlice || value.Elem == nil {
+		t.Fatalf("recursive named kind = %#v, want slice with opaque element", value)
+	}
+	if !value.Elem.Named || value.Elem.Name != "Loop" || value.Elem.Kind != GoValueOther {
+		t.Fatalf("recursive element = %#v, want opaque named Loop", value.Elem)
+	}
+}
+
+func TestGoPackageFromTypesSkipsPromotedMethods(t *testing.T) {
+	fset := gotoken.NewFileSet()
+	file, err := goparser.ParseFile(fset, "promoted.go", `package promoted
+
+type Inner struct{}
+func (Inner) M() {}
+
+type Outer struct{ Inner }
+`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := new(gotypes.Config).Check("example.com/promoted", fset, []*ast.File{file}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goPkg := goPackageFromTypes("example.com/promoted", "promoted", pkg)
+	if _, ok := goPkg.Types["Inner"].Methods["M"]; !ok {
+		t.Fatalf("direct method Inner.M missing: %#v", goPkg.Types["Inner"].Methods)
+	}
+	if _, ok := goPkg.Types["Outer"].Methods["M"]; ok {
+		t.Fatalf("promoted method Outer.M should be skipped")
 	}
 }
 

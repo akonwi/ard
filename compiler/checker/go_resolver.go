@@ -276,13 +276,13 @@ func (c *Checker) validateDirectGoExternSignature(name string, params []Paramete
 		return
 	}
 	if target.Method && target.Signature.Receiver != nil {
-		if ok, reason := c.directGoTypesCompatible(params[0].Type, *target.Signature.Receiver); !ok {
+		if ok, reason := c.directGoAssignableCompatible(params[0].Type, *target.Signature.Receiver); !ok {
 			c.addError(fmt.Sprintf("receiver for %s: %s", target.Name, reason), loc)
 		}
 	}
 	for i, goParam := range target.Signature.Params {
 		ardParam := params[i+paramOffset]
-		if ok, reason := c.directGoTypesCompatible(ardParam.Type, goParam); !ok {
+		if ok, reason := c.directGoParamCompatible(ardParam.Type, goParam, true); !ok {
 			c.addError(fmt.Sprintf("parameter %d for %s: %s", i+1+paramOffset, target.Name, reason), loc)
 		}
 	}
@@ -356,7 +356,7 @@ func (c *Checker) validateDirectGoExternReturn(name string, returnType Type, tar
 		c.addError(fmt.Sprintf("return for %s: Go return error requires an adapter; direct Go error adapters are not supported yet", target.Name), loc)
 		return
 	}
-	if ok, reason := c.directGoTypesCompatible(returnType, results[0]); !ok {
+	if ok, reason := c.directGoAssignableCompatible(returnType, results[0]); !ok {
 		c.addError(fmt.Sprintf("return for %s: %s", target.Name, reason), loc)
 	}
 }
@@ -369,7 +369,7 @@ func goSignatureResultsString(results []GoValueType) string {
 	return "(" + strings.Join(parts, ", ") + ")"
 }
 
-func (c *Checker) directGoTypesCompatible(ard Type, goType GoValueType) (bool, string) {
+func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel bool) (bool, string) {
 	ard = derefType(ard)
 	if directGoNamedTypeMatches(ard, goType) {
 		return true, ""
@@ -377,28 +377,15 @@ func (c *Checker) directGoTypesCompatible(ard Type, goType GoValueType) (bool, s
 	if goType.Kind == GoValuePointer {
 		return false, fmt.Sprintf("Go type %s is a pointer; direct Go pointer bindings are not supported yet", goType.String())
 	}
-	if goType.Named && (goType.Kind == GoValueSlice || goType.Kind == GoValueMap || goType.Kind == GoValueOther || goType.Kind == GoValueAny) {
+	if topLevel && directGoScalarCompatible(ard, goType) {
+		return true, ""
+	}
+	if goType.Named {
 		return false, fmt.Sprintf("Ard type %s is not compatible with Go named type %s", typeSyntaxString(ard), goType.String())
 	}
 	switch goType.Kind {
-	case GoValueBool:
-		if equalTypes(ard, Bool) {
-			return true, ""
-		}
-	case GoValueString:
-		if equalTypes(ard, Str) {
-			return true, ""
-		}
-	case GoValueInt:
-		if equalTypes(ard, Int) || (goType.Bits == 32 && equalTypes(ard, Rune)) {
-			return true, ""
-		}
-	case GoValueUint:
-		if equalTypes(ard, Int) || (goType.Bits == 8 && equalTypes(ard, Byte)) {
-			return true, ""
-		}
-	case GoValueFloat:
-		if equalTypes(ard, Float) {
+	case GoValueBool, GoValueString, GoValueInt, GoValueUint, GoValueFloat:
+		if directGoAssignableScalarCompatible(ard, goType) {
 			return true, ""
 		}
 	case GoValueAny:
@@ -408,7 +395,7 @@ func (c *Checker) directGoTypesCompatible(ard Type, goType GoValueType) (bool, s
 	case GoValueSlice:
 		list, ok := ard.(*List)
 		if ok && goType.Elem != nil {
-			if compatible, reason := c.directGoTypesCompatible(list.Of(), *goType.Elem); compatible {
+			if compatible, reason := c.directGoParamCompatible(list.Of(), *goType.Elem, false); compatible {
 				return true, ""
 			} else {
 				return false, "list element: " + reason
@@ -417,10 +404,10 @@ func (c *Checker) directGoTypesCompatible(ard Type, goType GoValueType) (bool, s
 	case GoValueMap:
 		m, ok := ard.(*Map)
 		if ok && goType.Key != nil && goType.Value != nil {
-			if compatible, reason := c.directGoTypesCompatible(m.Key(), *goType.Key); !compatible {
+			if compatible, reason := c.directGoParamCompatible(m.Key(), *goType.Key, false); !compatible {
 				return false, "map key: " + reason
 			}
-			if compatible, reason := c.directGoTypesCompatible(m.Value(), *goType.Value); !compatible {
+			if compatible, reason := c.directGoParamCompatible(m.Value(), *goType.Value, false); !compatible {
 				return false, "map value: " + reason
 			}
 			return true, ""
@@ -429,6 +416,86 @@ func (c *Checker) directGoTypesCompatible(ard Type, goType GoValueType) (bool, s
 		return false, "Go error values require an adapter; direct Go error adapters are not supported yet"
 	}
 	return false, fmt.Sprintf("Ard type %s is not compatible with Go type %s", typeSyntaxString(ard), goType.String())
+}
+
+func (c *Checker) directGoAssignableCompatible(ard Type, goType GoValueType) (bool, string) {
+	ard = derefType(ard)
+	if directGoNamedTypeMatches(ard, goType) {
+		return true, ""
+	}
+	if goType.Kind == GoValuePointer {
+		return false, fmt.Sprintf("Go type %s is a pointer; direct Go pointer bindings are not supported yet", goType.String())
+	}
+	if goType.Named {
+		return false, fmt.Sprintf("Ard type %s is not compatible with Go named type %s", typeSyntaxString(ard), goType.String())
+	}
+	switch goType.Kind {
+	case GoValueBool, GoValueString, GoValueInt, GoValueUint, GoValueFloat:
+		if directGoAssignableScalarCompatible(ard, goType) {
+			return true, ""
+		}
+	case GoValueAny:
+		if equalTypes(ard, Dynamic) {
+			return true, ""
+		}
+	case GoValueSlice:
+		list, ok := ard.(*List)
+		if ok && goType.Elem != nil {
+			if compatible, reason := c.directGoAssignableCompatible(list.Of(), *goType.Elem); compatible {
+				return true, ""
+			} else {
+				return false, "list element: " + reason
+			}
+		}
+	case GoValueMap:
+		m, ok := ard.(*Map)
+		if ok && goType.Key != nil && goType.Value != nil {
+			if compatible, reason := c.directGoAssignableCompatible(m.Key(), *goType.Key); !compatible {
+				return false, "map key: " + reason
+			}
+			if compatible, reason := c.directGoAssignableCompatible(m.Value(), *goType.Value); !compatible {
+				return false, "map value: " + reason
+			}
+			return true, ""
+		}
+	case GoValueError:
+		return false, "Go error values require an adapter; direct Go error adapters are not supported yet"
+	}
+	return false, fmt.Sprintf("Ard type %s is not compatible with Go type %s", typeSyntaxString(ard), goType.String())
+}
+
+func directGoScalarCompatible(ard Type, goType GoValueType) bool {
+	switch goType.Kind {
+	case GoValueBool:
+		return equalTypes(ard, Bool)
+	case GoValueString:
+		return equalTypes(ard, Str)
+	case GoValueInt:
+		return equalTypes(ard, Int) || (goType.Bits == 32 && equalTypes(ard, Rune))
+	case GoValueUint:
+		return equalTypes(ard, Int) || (goType.Bits == 8 && equalTypes(ard, Byte))
+	case GoValueFloat:
+		return equalTypes(ard, Float)
+	default:
+		return false
+	}
+}
+
+func directGoAssignableScalarCompatible(ard Type, goType GoValueType) bool {
+	switch goType.Kind {
+	case GoValueBool:
+		return equalTypes(ard, Bool)
+	case GoValueString:
+		return equalTypes(ard, Str)
+	case GoValueInt:
+		return equalTypes(ard, Int) && goType.Bits == 0 || equalTypes(ard, Rune) && goType.Bits == 32
+	case GoValueUint:
+		return equalTypes(ard, Byte) && goType.Bits == 8
+	case GoValueFloat:
+		return equalTypes(ard, Float) && goType.Bits == 64
+	default:
+		return false
+	}
 }
 
 func directGoNamedTypeMatches(ard Type, goType GoValueType) bool {
@@ -515,17 +582,27 @@ func goTuple(tuple *types.Tuple) []GoValueType {
 }
 
 func goValueType(typ types.Type) GoValueType {
+	return goValueTypeSeen(typ, map[types.Type]bool{})
+}
+
+func goValueTypeSeen(typ types.Type, seen map[types.Type]bool) GoValueType {
 	if typ == nil {
 		return GoValueType{Kind: GoValueInvalid}
 	}
-	out := GoValueType{Expr: types.TypeString(typ, packageQualifier), Kind: GoValueOther}
+	if seen[typ] {
+		return goOpaqueType(typ)
+	}
+	seen[typ] = true
+	defer delete(seen, typ)
+
+	out := GoValueType{Expr: goTypeExpr(typ), Kind: GoValueOther}
 	if out.Expr == "error" {
 		out.Kind = GoValueError
 		return out
 	}
 	if named, ok := typ.(*types.Named); ok {
-		underlying := goValueType(named.Underlying())
-		underlying.Expr = types.TypeString(typ, packageQualifier)
+		underlying := goValueTypeSeen(named.Underlying(), seen)
+		underlying.Expr = goTypeExpr(typ)
 		underlying.Named = true
 		underlying.Name = named.Obj().Name()
 		if pkg := named.Obj().Pkg(); pkg != nil {
@@ -555,16 +632,16 @@ func goValueType(typ types.Type) GoValueType {
 			out.Bits = 64
 		}
 	case *types.Pointer:
-		elem := goValueType(underlying.Elem())
+		elem := goValueTypeSeen(underlying.Elem(), seen)
 		out.Kind = GoValuePointer
 		out.Elem = &elem
 	case *types.Slice:
-		elem := goValueType(underlying.Elem())
+		elem := goValueTypeSeen(underlying.Elem(), seen)
 		out.Kind = GoValueSlice
 		out.Elem = &elem
 	case *types.Map:
-		key := goValueType(underlying.Key())
-		value := goValueType(underlying.Elem())
+		key := goValueTypeSeen(underlying.Key(), seen)
+		value := goValueTypeSeen(underlying.Elem(), seen)
 		out.Kind = GoValueMap
 		out.Key = &key
 		out.Value = &value
@@ -574,6 +651,30 @@ func goValueType(typ types.Type) GoValueType {
 		}
 	}
 	return out
+}
+
+func goOpaqueType(typ types.Type) GoValueType {
+	out := GoValueType{Expr: goTypeExpr(typ), Kind: GoValueOther}
+	if named, ok := typ.(*types.Named); ok {
+		out.Named = true
+		out.Name = named.Obj().Name()
+		if pkg := named.Obj().Pkg(); pkg != nil {
+			out.ImportPath = pkg.Path()
+			out.Package = pkg.Name()
+		}
+	}
+	return out
+}
+
+func goTypeExpr(typ types.Type) string {
+	if named, ok := typ.(*types.Named); ok && named.Obj() != nil {
+		name := named.Obj().Name()
+		if pkg := named.Obj().Pkg(); pkg != nil && pkg.Name() != "" {
+			return pkg.Name() + "." + name
+		}
+		return name
+	}
+	return types.TypeString(typ, packageQualifier)
 }
 
 func packageQualifier(pkg *types.Package) string {
@@ -607,6 +708,12 @@ func exportedMethods(typ types.Type) map[string]GoMethod {
 		for i := 0; i < methodSet.Len(); i++ {
 			selection := methodSet.At(i)
 			if selection == nil || selection.Obj() == nil || !selection.Obj().Exported() {
+				continue
+			}
+			// A promoted method's signature keeps the embedded type as its receiver,
+			// while Ard names the outer type in bindings like pkg::Outer::Method.
+			// Skip promoted methods until direct Go FFI can model promotion explicitly.
+			if len(selection.Index()) != 1 {
 				continue
 			}
 			name := selection.Obj().Name()
