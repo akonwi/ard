@@ -396,7 +396,14 @@ func (c *Checker) Check() {
 			}
 
 			// Type-check the imported module
-			userModule, diagnostics := check(ast, c.moduleResolver, filePath, resolved.ModulePath, c.options)
+			importOptions := c.options
+			if resolved.PackageID != "" {
+				pkg := c.moduleResolver.packageInfo(resolved.PackageID)
+				if pkg.RootPath != "" {
+					importOptions.GoResolver = NewGoPackagesResolver(pkg.RootPath)
+				}
+			}
+			userModule, diagnostics := check(ast, c.moduleResolver, filePath, resolved.ModulePath, importOptions)
 			c.moduleResolver.loadingChain = c.moduleResolver.loadingChain[:len(c.moduleResolver.loadingChain)-1]
 			if len(diagnostics) > 0 {
 				// Add all diagnostics from the imported module
@@ -3194,6 +3201,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if subj.Type() == nil {
 				panic(fmt.Errorf("Cannot access %+v on nil: %s", subj.(*Variable).sym, s.Target))
 			}
+			if call, handled := c.checkDirectGoInstanceMethod(subj, s.Method, s.GetLocation()); handled {
+				return call
+			}
 			var sig Type
 			if structDef, ok := subj.Type().(*StructDef); ok {
 				if method, ok := c.structMethod(structDef, s.Method.Name); ok {
@@ -3747,6 +3757,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					call.ReturnType = specialized.ReturnType
 				}
 
+				return call
+			}
+
+			if call, handled := c.checkDirectGoStaticFunction(s); handled {
 				return call
 			}
 

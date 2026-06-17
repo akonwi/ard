@@ -1,8 +1,5 @@
 use go:time
 
-private extern fn now_time() time::Time = time::Now
-private extern fn format_time(value: time::Time, layout: Str) Str = time::Time::Format
-
 fn get_today() Str {
-  format_time(now_time(), "2006-01-02")
+  time::Now().Format("2006-01-02")
 }

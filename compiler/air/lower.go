@@ -2156,17 +2156,39 @@ func airTypeKeySeen(t checker.Type, seen map[checker.Type]struct{}) string {
 	case *checker.ExternalFunctionDef:
 		return airFunctionTypeKeySeen(typ.Parameters, typ.ReturnType, seen)
 	case *checker.ExternType:
+		name := typ.Name_
+		if key, ok := directGoExternTypeKey(typ.ExternalBinding); ok {
+			name = key
+		}
 		if len(typ.TypeArgs) == 0 {
-			return "extern " + typ.Name_
+			return "extern " + name
 		}
 		parts := make([]string, len(typ.TypeArgs))
 		for i, arg := range typ.TypeArgs {
 			parts[i] = airTypeKeySeen(arg, seen)
 		}
-		return "extern " + typ.Name_ + "<" + strings.Join(parts, ",") + ">"
+		return "extern " + name + "<" + strings.Join(parts, ",") + ">"
 	default:
 		return t.String()
 	}
+}
+
+func directGoExternTypeKey(binding string) (string, bool) {
+	if !strings.HasPrefix(binding, "go:") {
+		return "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(binding, "go:"), "::")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", false
+	}
+	importPath := strings.TrimSpace(parts[0])
+	if aliasParts := strings.Split(importPath, " as "); len(aliasParts) == 2 {
+		importPath = strings.TrimSpace(aliasParts[0])
+	}
+	if importPath == "" {
+		return "", false
+	}
+	return "go:" + importPath + "::" + strings.TrimSpace(parts[1]), true
 }
 
 func airStructKey(typ *checker.StructDef) string {

@@ -228,7 +228,7 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 	requireSeen := requireKeys(goMod)
 	requires := make([]string, 0)
 	addDependencyGoModRequirements(&requires, requireSeen, program, projectInfo)
-	if programUsesProjectFFI(program, projectInfo) {
+	if programUsesProjectFFI(program, projectInfo) || projectUsesDirectGo(program, projectInfo) {
 		addProjectGoModRequirements(&requires, requireSeen, projectInfo)
 	}
 	addGoModRequirementsFromFile(&requires, requireSeen, filepath.Join(dir, "go.mod"))
@@ -236,7 +236,7 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 
 	replaceSeen := replaceKeys(goMod)
 	replaces := make([]string, 0)
-	if programUsesProjectFFI(program, projectInfo) {
+	if programUsesProjectFFI(program, projectInfo) || projectUsesDirectGo(program, projectInfo) {
 		addProjectGoModReplaces(&replaces, replaceSeen, projectInfo)
 	}
 	addDependencyGoModReplaces(&replaces, replaceSeen, program, projectInfo)
@@ -246,7 +246,7 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 }
 
 func addDependencyGoModRequirements(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
-	for _, root := range dependencyFFIPackages(program, projectInfo) {
+	for _, root := range dependencyGoModPackages(program, projectInfo) {
 		addGoModRequirementsFromFile(out, seen, filepath.Join(root, "go.mod"))
 	}
 }
@@ -343,7 +343,7 @@ func addProjectGoModReplaces(out *[]string, seen map[string]bool, projectInfo *c
 }
 
 func addDependencyGoModReplaces(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
-	for _, root := range dependencyFFIPackages(program, projectInfo) {
+	for _, root := range dependencyGoModPackages(program, projectInfo) {
 		addGoModReplacesFromFile(out, seen, filepath.Join(root, "go.mod"), root)
 	}
 }
@@ -467,8 +467,11 @@ func mergeGoSum(dir string, program *air.Program, projectInfo *checker.ProjectIn
 	lines := make([]string, 0)
 	seen := map[string]bool{}
 	addGoSumLines(&lines, seen, goSumPath)
-	if programUsesProjectFFI(program, projectInfo) && projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
+	if (programUsesProjectFFI(program, projectInfo) || projectUsesDirectGo(program, projectInfo)) && projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
 		addGoSumLines(&lines, seen, filepath.Join(projectInfo.RootPath, "go.sum"))
+	}
+	for _, root := range dependencyGoModPackages(program, projectInfo) {
+		addGoSumLines(&lines, seen, filepath.Join(root, "go.sum"))
 	}
 	if len(lines) == 0 {
 		return nil
@@ -745,18 +748,50 @@ func writeDependencyFFICompanions(dir string, program *air.Program, projectInfo 
 	return nil
 }
 
+func dependencyGoModPackages(program *air.Program, projectInfo *checker.ProjectInfo) map[string]string {
+	used := dependencyFFIPackages(program, projectInfo)
+	for key, root := range dependencyDirectGoPackages(program, projectInfo) {
+		used[key] = root
+	}
+	return used
+}
+
+func dependencyDirectGoPackages(program *air.Program, projectInfo *checker.ProjectInfo) map[string]string {
+	used := map[string]string{}
+	if program == nil || projectInfo == nil {
+		return used
+	}
+	for _, ext := range program.Externs {
+		if !externHasDirectGoBinding(ext) {
+			continue
+		}
+		if key, root, ok := dependencyPackageForModulePath(modulePathForExtern(program, ext), projectInfo); ok {
+			used[key] = root
+		}
+	}
+	for _, module := range program.Modules {
+		if key, root, ok := dependencyPackageForModulePath(module.Path, projectInfo); ok && moduleUsesDirectGoTypes(program, module) {
+			used[key] = root
+		}
+	}
+	return used
+}
+
 func dependencyFFIPackages(program *air.Program, projectInfo *checker.ProjectInfo) map[string]string {
 	used := map[string]string{}
 	if program == nil || projectInfo == nil {
 		return used
 	}
 	for _, ext := range program.Externs {
+		if externHasDirectGoBinding(ext) {
+			continue
+		}
 		if key, root, ok := dependencyPackageForModulePath(modulePathForExtern(program, ext), projectInfo); ok {
 			used[key] = root
 		}
 	}
 	for _, typ := range program.Types {
-		if typ.Kind != air.TypeExtern || strings.TrimSpace(typ.ExternBinding) == "" {
+		if typ.Kind != air.TypeExtern || strings.TrimSpace(typ.ExternBinding) == "" || typeHasDirectGoBinding(typ) {
 			continue
 		}
 		if key, root, ok := dependencyPackageForModulePath(typ.ModulePath, projectInfo); ok {
@@ -813,6 +848,9 @@ func programUsesProjectFFI(program *air.Program, projectInfo *checker.ProjectInf
 		if externModuleIsStdlib(program, ext) {
 			continue
 		}
+		if externHasDirectGoBinding(ext) {
+			continue
+		}
 		if _, ok := dependencyAliasForModulePath(modulePathForExtern(program, ext), projectInfo); ok {
 			continue
 		}
@@ -830,6 +868,229 @@ func programUsesProjectFFI(program *air.Program, projectInfo *checker.ProjectInf
 		}
 	}
 	return false
+}
+
+func externHasDirectGoBinding(ext air.Extern) bool {
+	if binding := strings.TrimSpace(ext.Bindings["go"]); strings.HasPrefix(binding, "go:") {
+		return true
+	}
+	return false
+}
+
+func typeHasDirectGoBinding(typ air.TypeInfo) bool {
+	return (typ.Kind == air.TypeExtern || typ.Kind == air.TypeEnum) && strings.HasPrefix(strings.TrimSpace(typ.ExternBinding), "go:")
+}
+
+func projectUsesDirectGo(program *air.Program, projectInfo *checker.ProjectInfo) bool {
+	if program == nil {
+		return false
+	}
+	for _, ext := range program.Externs {
+		if !externHasDirectGoBinding(ext) {
+			continue
+		}
+		modulePath := modulePathForExtern(program, ext)
+		if strings.HasPrefix(modulePath, "ard/") {
+			continue
+		}
+		if _, ok := dependencyAliasForModulePath(modulePath, projectInfo); ok {
+			continue
+		}
+		return true
+	}
+	for _, module := range program.Modules {
+		if strings.HasPrefix(module.Path, "ard/") {
+			continue
+		}
+		if _, ok := dependencyAliasForModulePath(module.Path, projectInfo); ok {
+			continue
+		}
+		if moduleInterfaceUsesDirectGoTypes(program, module) {
+			return true
+		}
+	}
+	return false
+}
+
+func moduleInterfaceUsesDirectGoTypes(program *air.Program, module air.Module) bool {
+	for _, typeID := range module.Types {
+		if typeUsesDirectGo(program, typeID, map[air.TypeID]bool{}) {
+			return true
+		}
+	}
+	for _, globalID := range module.Globals {
+		if int(globalID) < 0 || int(globalID) >= len(program.Globals) {
+			continue
+		}
+		if exprUsesDirectGoDirectly(program, &program.Globals[globalID].Value) {
+			return true
+		}
+	}
+	for _, functionID := range module.Functions {
+		if int(functionID) < 0 || int(functionID) >= len(program.Functions) {
+			continue
+		}
+		if signatureUsesDirectGo(program, program.Functions[functionID].Signature) {
+			return true
+		}
+	}
+	return false
+}
+
+func moduleUsesDirectGoTypes(program *air.Program, module air.Module) bool {
+	for _, typeID := range module.Types {
+		if typeUsesDirectGo(program, typeID, map[air.TypeID]bool{}) {
+			return true
+		}
+	}
+	for _, globalID := range module.Globals {
+		if int(globalID) < 0 || int(globalID) >= len(program.Globals) {
+			continue
+		}
+		if typeUsesDirectGo(program, program.Globals[globalID].Type, map[air.TypeID]bool{}) {
+			return true
+		}
+	}
+	for _, functionID := range module.Functions {
+		if int(functionID) < 0 || int(functionID) >= len(program.Functions) {
+			continue
+		}
+		fn := program.Functions[functionID]
+		if signatureUsesDirectGo(program, fn.Signature) {
+			return true
+		}
+		for _, local := range fn.Locals {
+			if typeUsesDirectGo(program, local.Type, map[air.TypeID]bool{}) {
+				return true
+			}
+		}
+		for _, capture := range fn.Captures {
+			if typeUsesDirectGo(program, capture.Type, map[air.TypeID]bool{}) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func signatureUsesDirectGo(program *air.Program, signature air.Signature) bool {
+	for _, param := range signature.Params {
+		if typeUsesDirectGo(program, param.Type, map[air.TypeID]bool{}) {
+			return true
+		}
+	}
+	return typeUsesDirectGo(program, signature.Return, map[air.TypeID]bool{})
+}
+
+func typeUsesDirectGo(program *air.Program, typeID air.TypeID, seen map[air.TypeID]bool) bool {
+	if program == nil || typeID == air.NoType || int(typeID) < 1 || int(typeID) > len(program.Types) {
+		return false
+	}
+	if seen[typeID] {
+		return false
+	}
+	seen[typeID] = true
+	typ := program.Types[typeID-1]
+	if typeHasDirectGoBinding(typ) {
+		return true
+	}
+	switch typ.Kind {
+	case air.TypeList, air.TypeMaybe:
+		return typeUsesDirectGo(program, typ.Elem, seen)
+	case air.TypeMap:
+		return typeUsesDirectGo(program, typ.Key, seen) || typeUsesDirectGo(program, typ.Value, seen)
+	case air.TypeResult:
+		return typeUsesDirectGo(program, typ.Value, seen) || typeUsesDirectGo(program, typ.Error, seen)
+	case air.TypeStruct:
+		for _, field := range typ.Fields {
+			if typeUsesDirectGo(program, field.Type, seen) {
+				return true
+			}
+		}
+	case air.TypeUnion:
+		for _, member := range typ.Members {
+			if typeUsesDirectGo(program, member.Type, seen) {
+				return true
+			}
+		}
+	case air.TypeFunction:
+		for _, param := range typ.Params {
+			if typeUsesDirectGo(program, param, seen) {
+				return true
+			}
+		}
+		return typeUsesDirectGo(program, typ.Return, seen)
+	}
+	return false
+}
+
+func exprUsesDirectGoDirectly(program *air.Program, expr *air.Expr) bool {
+	if program == nil || expr == nil {
+		return false
+	}
+	if expr.Kind == air.ExprCallExtern && int(expr.Extern) >= 0 && int(expr.Extern) < len(program.Externs) && externHasDirectGoBinding(program.Externs[expr.Extern]) {
+		return true
+	}
+	if expr.Kind == air.ExprEnumVariant && typeUsesDirectGo(program, expr.Type, map[air.TypeID]bool{}) {
+		return true
+	}
+	for i := range expr.Args {
+		if exprUsesDirectGoDirectly(program, &expr.Args[i]) {
+			return true
+		}
+	}
+	for i := range expr.Entries {
+		if exprUsesDirectGoDirectly(program, &expr.Entries[i].Key) || exprUsesDirectGoDirectly(program, &expr.Entries[i].Value) {
+			return true
+		}
+	}
+	for i := range expr.Fields {
+		if exprUsesDirectGoDirectly(program, &expr.Fields[i].Value) {
+			return true
+		}
+	}
+	if exprUsesDirectGoDirectly(program, expr.Target) || exprUsesDirectGoDirectly(program, expr.Left) || exprUsesDirectGoDirectly(program, expr.Right) || exprUsesDirectGoDirectly(program, expr.Condition) {
+		return true
+	}
+	if blockUsesDirectGoDirectly(program, expr.Body) || blockUsesDirectGoDirectly(program, expr.Then) || blockUsesDirectGoDirectly(program, expr.Else) || blockUsesDirectGoDirectly(program, expr.CatchAll) || blockUsesDirectGoDirectly(program, expr.Some) || blockUsesDirectGoDirectly(program, expr.None) || blockUsesDirectGoDirectly(program, expr.Ok) || blockUsesDirectGoDirectly(program, expr.Err) || blockUsesDirectGoDirectly(program, expr.Catch) {
+		return true
+	}
+	for i := range expr.EnumCases {
+		if blockUsesDirectGoDirectly(program, expr.EnumCases[i].Body) {
+			return true
+		}
+	}
+	for i := range expr.IntCases {
+		if blockUsesDirectGoDirectly(program, expr.IntCases[i].Body) {
+			return true
+		}
+	}
+	for i := range expr.StrCases {
+		if blockUsesDirectGoDirectly(program, expr.StrCases[i].Body) {
+			return true
+		}
+	}
+	for i := range expr.RangeCases {
+		if blockUsesDirectGoDirectly(program, expr.RangeCases[i].Body) {
+			return true
+		}
+	}
+	for i := range expr.UnionCases {
+		if blockUsesDirectGoDirectly(program, expr.UnionCases[i].Body) {
+			return true
+		}
+	}
+	return false
+}
+
+func blockUsesDirectGoDirectly(program *air.Program, block air.Block) bool {
+	for i := range block.Stmts {
+		stmt := &block.Stmts[i]
+		if exprUsesDirectGoDirectly(program, stmt.Value) || exprUsesDirectGoDirectly(program, stmt.Expr) || exprUsesDirectGoDirectly(program, stmt.Target) || exprUsesDirectGoDirectly(program, stmt.Condition) || blockUsesDirectGoDirectly(program, stmt.Body) {
+			return true
+		}
+	}
+	return exprUsesDirectGoDirectly(program, block.Result)
 }
 
 func externBindingUsesProjectFFIType(binding string, projectInfo *checker.ProjectInfo) bool {

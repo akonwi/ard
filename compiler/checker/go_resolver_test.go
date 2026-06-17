@@ -73,6 +73,100 @@ extern fn floor(value: Float) Float = math::Floor`), "main.ard")
 	}
 }
 
+func TestDirectGoStaticFunctionCallInfersResultReturn(t *testing.T) {
+	result := parse.Parse([]byte(`use go:strconv
+fn parse(value: Str) Int!Str { strconv::Atoi(value) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"strconv": {ImportPath: "strconv", Name: "strconv", Functions: map[string]GoFunction{"Atoi": {Name: "Atoi", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueInt, "int"), goParam(GoValueError, "error")}}}}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoExternTypeEqualityUsesBindingBeforeDisplayName(t *testing.T) {
+	left := &ExternType{Name_: "p::T", ExternalBinding: "go:example.com/a as p::T"}
+	right := &ExternType{Name_: "p::T", ExternalBinding: "go:example.com/b as p::T"}
+	if equalTypes(left, right) {
+		t.Fatal("direct Go extern types with different import paths should not be equal")
+	}
+	alias := &ExternType{Name_: "other::T", ExternalBinding: "go:example.com/a as other::T"}
+	if !equalTypes(left, alias) {
+		t.Fatal("direct Go extern types with same import path and symbol should be equal despite aliases")
+	}
+}
+
+func TestDirectGoCallReturnMatchesExplicitDirectGoType(t *testing.T) {
+	result := parse.Parse([]byte(`use go:time
+fn now() time::Time { time::Now() }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	timeType := goNamed(GoValueOther, "time.Time", "time", "Time")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"time": {ImportPath: "time", Name: "time", Functions: map[string]GoFunction{"Now": {Name: "Now", Signature: GoSignature{Results: []GoValueType{timeType}}}}, Types: map[string]GoType{"Time": {Name: "Time"}}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoStaticMethodExpressionRejectsCoercedReceiver(t *testing.T) {
+	result := parse.Parse([]byte(`use go:time
+fn bad() Str { time::Duration::String(42) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	duration := goNamed(GoValueInt, "time.Duration", "time", "Duration")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"time": {ImportPath: "time", Name: "time", Types: map[string]GoType{"Duration": {Name: "Duration", Methods: map[string]GoMethod{"String": {Name: "String", Signature: GoSignature{Receiver: &duration, Results: []GoValueType{goParam(GoValueString, "string")}}}}}}},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected receiver mismatch diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "receiver for time.Duration.String") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoStaticMethodExpressionCall(t *testing.T) {
+	result := parse.Parse([]byte(`use go:time
+fn format(value: time::Time) Str { time::Time::Format(value, "2006-01-02") }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	timeType := goNamed(GoValueOther, "time.Time", "time", "Time")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"time": {ImportPath: "time", Name: "time", Types: map[string]GoType{"Time": {Name: "Time", Methods: map[string]GoMethod{"Format": {Name: "Format", Signature: GoSignature{Receiver: &timeType, Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueString, "string")}}}}}}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoInstanceMethodCall(t *testing.T) {
+	result := parse.Parse([]byte(`use go:time
+fn format() Str { time::Now().Format("2006-01-02") }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	timeType := goNamed(GoValueOther, "time.Time", "time", "Time")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"time": {ImportPath: "time", Name: "time", Functions: map[string]GoFunction{"Now": {Name: "Now", Signature: GoSignature{Results: []GoValueType{timeType}}}}, Types: map[string]GoType{"Time": {Name: "Time", Methods: map[string]GoMethod{"Format": {Name: "Format", Signature: GoSignature{Receiver: &timeType, Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueString, "string")}}}}}}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
 func TestDirectGoImportAliasMustBeUsableAsGoSelector(t *testing.T) {
 	for _, alias := range []string{"go", "init"} {
 		t.Run(alias, func(t *testing.T) {

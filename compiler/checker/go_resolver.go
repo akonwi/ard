@@ -5,9 +5,11 @@ import (
 	"go/constant"
 	gotoken "go/token"
 	"go/types"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/akonwi/ard/parse"
 	"golang.org/x/tools/go/packages"
@@ -101,6 +103,8 @@ type GoPackagesResolver struct {
 	cache map[string]*GoPackage
 }
 
+var sharedStdlibGoPackageCache sync.Map
+
 func NewGoPackagesResolver(dir string) *GoPackagesResolver {
 	return &GoPackagesResolver{Dir: dir, cache: map[string]*GoPackage{}}
 }
@@ -111,6 +115,14 @@ func (r *GoPackagesResolver) LoadPackage(importPath string) (*GoPackage, error) 
 	}
 	if cached, ok := r.cache[importPath]; ok {
 		return cached, nil
+	}
+	sharedCacheKey, useSharedCache := stdlibGoPackageCacheKey(r.Dir, importPath)
+	if useSharedCache {
+		if cached, ok := sharedStdlibGoPackageCache.Load(sharedCacheKey); ok {
+			pkg := cached.(*GoPackage)
+			r.cache[importPath] = pkg
+			return pkg, nil
+		}
 	}
 	cfg := &packages.Config{
 		Dir:        r.Dir,
@@ -137,7 +149,17 @@ func (r *GoPackagesResolver) LoadPackage(importPath string) (*GoPackage, error) 
 	}
 	resolved := goPackageFromTypes(importPath, pkg.Name, pkg.Types)
 	r.cache[importPath] = resolved
+	if useSharedCache {
+		sharedStdlibGoPackageCache.Store(sharedCacheKey, resolved)
+	}
 	return resolved, nil
+}
+
+func stdlibGoPackageCacheKey(dir string, importPath string) (string, bool) {
+	if filepath.Clean(dir) != "." {
+		return "", false
+	}
+	return importPath, true
 }
 
 func goPackageFromTypes(importPath string, name string, pkg *types.Package) *GoPackage {
@@ -449,8 +471,340 @@ func parseCanonicalDirectGoImportHead(head string) (string, string) {
 
 type directGoSignatureTarget struct {
 	Name      string
+	Binding   string
 	Signature GoSignature
 	Method    bool
+}
+
+func (c *Checker) checkDirectGoStaticFunction(call *parse.StaticFunction) (Expression, bool) {
+	parts := strings.Split(call.Target.String()+"::"+call.Function.Name, "::")
+	if len(parts) < 2 {
+		return nil, false
+	}
+	goImport, ok := c.directGoImports[parts[0]]
+	if !ok {
+		return nil, false
+	}
+	if len(call.Function.TypeArgs) > 0 {
+		c.addError(fmt.Sprintf("Go function %s does not take Ard type arguments", strings.Join(parts, "::")), call.GetLocation())
+		return nil, true
+	}
+	target, ok := c.directGoCallTarget(goImport, parts[1:], call.GetLocation())
+	if !ok {
+		return nil, true
+	}
+	if target.Signature.Variadic {
+		c.addError(fmt.Sprintf("Go function %s is variadic; variadic direct Go calls are not supported yet", target.Name), call.GetLocation())
+		return nil, true
+	}
+	goParams, ok := directGoCallSourceParams(target, call.GetLocation(), func(message string, loc parse.Location) { c.addError(message, loc) })
+	if !ok {
+		return nil, true
+	}
+	args, params, ok := c.checkDirectGoCallArguments(call.Function.Args, goParams, call.GetLocation())
+	if !ok {
+		return nil, true
+	}
+	if target.Method && target.Signature.Receiver != nil {
+		if ok, reason := c.directGoAssignableCompatible(args[0].Type(), *target.Signature.Receiver); !ok {
+			c.addError(fmt.Sprintf("receiver for %s: %s", target.Name, reason), call.Function.Args[0].Value.GetLocation())
+			return nil, true
+		}
+	}
+	returnType, ok := c.directGoReturnType(target.Signature.Results, call.GetLocation())
+	if !ok {
+		return nil, true
+	}
+	return c.directGoFunctionCall(strings.Join(parts, "::"), args, params, returnType, target.Binding), true
+}
+
+func (c *Checker) checkDirectGoInstanceMethod(subject Expression, call parse.FunctionCall, loc parse.Location) (Expression, bool) {
+	importPath, typeName, ok := directGoNamedTypeBinding(subject.Type())
+	if !ok {
+		return nil, false
+	}
+	goImport, ok := c.directGoImportForPath(importPath)
+	if !ok {
+		return nil, false
+	}
+	if len(call.TypeArgs) > 0 {
+		c.addError(fmt.Sprintf("Go method %s::%s does not take Ard type arguments", typeName, call.Name), loc)
+		return nil, true
+	}
+	target, ok := c.directGoCallTarget(goImport, []string{typeName, call.Name}, loc)
+	if !ok {
+		return nil, true
+	}
+	if target.Signature.Variadic {
+		c.addError(fmt.Sprintf("Go method %s is variadic; variadic direct Go calls are not supported yet", target.Name), loc)
+		return nil, true
+	}
+	if target.Signature.Receiver == nil {
+		c.addError(fmt.Sprintf("Go method %s has no receiver metadata", target.Name), loc)
+		return nil, true
+	}
+	if ok, reason := c.directGoAssignableCompatible(subject.Type(), *target.Signature.Receiver); !ok {
+		c.addError(fmt.Sprintf("receiver for %s: %s", target.Name, reason), loc)
+		return nil, true
+	}
+	args, params, ok := c.checkDirectGoCallArguments(call.Args, target.Signature.Params, loc)
+	if !ok {
+		return nil, true
+	}
+	args = append([]Expression{subject}, args...)
+	params = append([]Parameter{{Name: "receiver", Type: subject.Type()}}, params...)
+	returnType, ok := c.directGoReturnType(target.Signature.Results, loc)
+	if !ok {
+		return nil, true
+	}
+	callName := goImport.alias
+	if callName == "" {
+		callName = goImport.importPath
+	}
+	callName += "::" + typeName + "::" + call.Name
+	return c.directGoFunctionCall(callName, args, params, returnType, target.Binding), true
+}
+
+func directGoNamedTypeBinding(typ Type) (string, string, bool) {
+	typ = deref(typ)
+	if ref, ok := typ.(*MutableRef); ok {
+		typ = deref(ref.Of())
+	}
+	var binding string
+	switch typed := typ.(type) {
+	case *ExternType:
+		binding = typed.ExternalBinding
+	case *Enum:
+		binding = typed.ExternalBinding
+	default:
+		return "", "", false
+	}
+	info, ok := parseCanonicalDirectGoBinding(binding)
+	if !ok || len(info.Symbols) != 1 {
+		return "", "", false
+	}
+	return info.ImportPath, info.Symbols[0], true
+}
+
+func (c *Checker) directGoImportForPath(importPath string) (directGoImport, bool) {
+	for _, goImport := range c.directGoImports {
+		if goImport.importPath == importPath {
+			return goImport, true
+		}
+	}
+	return directGoImport{}, false
+}
+
+func (c *Checker) directGoCallTarget(goImport directGoImport, symbols []string, loc parse.Location) (directGoSignatureTarget, bool) {
+	binding := canonicalDirectGoBinding(goImport.importPath, goImport.alias, symbols)
+	if goImport.pkg == nil {
+		return directGoSignatureTarget{Binding: binding}, false
+	}
+	switch len(symbols) {
+	case 1:
+		fn, ok := goImport.pkg.Functions[symbols[0]]
+		if !ok {
+			c.addError(fmt.Sprintf("Go package %q has no exported function %q", goImport.importPath, symbols[0]), loc)
+			return directGoSignatureTarget{}, false
+		}
+		return directGoSignatureTarget{Name: pkgQualifiedName(goImport.pkg, symbols), Binding: binding, Signature: fn.Signature}, true
+	case 2:
+		typ, ok := goImport.pkg.Types[symbols[0]]
+		if !ok {
+			c.addError(fmt.Sprintf("Go package %q has no exported type %q", goImport.importPath, symbols[0]), loc)
+			return directGoSignatureTarget{}, false
+		}
+		method, ok := typ.Methods[symbols[1]]
+		if !ok {
+			c.addError(fmt.Sprintf("Go type %q in package %q has no exported method %q", symbols[0], goImport.importPath, symbols[1]), loc)
+			return directGoSignatureTarget{}, false
+		}
+		return directGoSignatureTarget{Name: pkgQualifiedName(goImport.pkg, symbols), Binding: binding, Signature: method.Signature, Method: true}, true
+	default:
+		c.addError(fmt.Sprintf("Direct Go function call %q must be package::Function or package::Type::Method", strings.Join(append([]string{goImport.alias}, symbols...), "::")), loc)
+		return directGoSignatureTarget{}, false
+	}
+}
+
+func directGoCallSourceParams(target directGoSignatureTarget, loc parse.Location, addError func(string, parse.Location)) ([]GoValueType, bool) {
+	if !target.Method {
+		return target.Signature.Params, true
+	}
+	if target.Signature.Receiver == nil {
+		addError(fmt.Sprintf("Go method %s has no receiver metadata", target.Name), loc)
+		return nil, false
+	}
+	params := make([]GoValueType, 0, len(target.Signature.Params)+1)
+	params = append(params, *target.Signature.Receiver)
+	params = append(params, target.Signature.Params...)
+	return params, true
+}
+
+func (c *Checker) checkDirectGoCallArguments(rawArgs []parse.Argument, goParams []GoValueType, loc parse.Location) ([]Expression, []Parameter, bool) {
+	for _, arg := range rawArgs {
+		if arg.Name != "" {
+			c.addError("Direct Go calls do not support named arguments", arg.GetLocation())
+			return nil, nil, false
+		}
+	}
+	if len(rawArgs) != len(goParams) {
+		c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(goParams), len(rawArgs)), loc)
+		return nil, nil, false
+	}
+	args := make([]Expression, len(rawArgs))
+	params := make([]Parameter, len(rawArgs))
+	for i, arg := range rawArgs {
+		checkedArg := c.checkExpr(arg.Value)
+		if checkedArg == nil {
+			return nil, nil, false
+		}
+		if ok, reason := c.directGoParamCompatible(checkedArg.Type(), goParams[i], true); !ok {
+			c.addError(fmt.Sprintf("parameter %d: %s", i+1, reason), arg.Value.GetLocation())
+			return nil, nil, false
+		}
+		args[i] = checkedArg
+		params[i] = Parameter{Name: fmt.Sprintf("arg%d", i), Type: checkedArg.Type()}
+	}
+	return args, params, true
+}
+
+func (c *Checker) directGoFunctionCall(name string, args []Expression, params []Parameter, returnType Type, binding string) *FunctionCall {
+	fn := &FunctionDef{Name: name, Parameters: params, ReturnType: returnType}
+	return &FunctionCall{Name: name, Args: args, fn: fn, ReturnType: returnType, ExternalBinding: binding}
+}
+
+func (c *Checker) directGoReturnType(results []GoValueType, loc parse.Location) (Type, bool) {
+	switch len(results) {
+	case 0:
+		return Void, true
+	case 1:
+		if results[0].Kind == GoValueError {
+			return MakeResult(Void, Str), true
+		}
+		return c.directGoValueArdType(results[0], loc)
+	case 2:
+		valueType, ok := c.directGoValueArdType(results[0], loc)
+		if !ok {
+			return nil, false
+		}
+		switch results[1].Kind {
+		case GoValueError:
+			return MakeResult(valueType, Str), true
+		case GoValueBool:
+			if results[1].Named {
+				c.addError(fmt.Sprintf("direct Go maybe adapter requires bool, got named bool %s", results[1].String()), loc)
+				return nil, false
+			}
+			return MakeMaybe(valueType), true
+		}
+	}
+	c.addError(fmt.Sprintf("Go returns %s; no supported direct call adapter matches", goSignatureResultsString(results)), loc)
+	return nil, false
+}
+
+func (c *Checker) directGoValueArdType(goType GoValueType, loc parse.Location) (Type, bool) {
+	if goType.Kind == GoValuePointer {
+		if goType.Named {
+			c.addError(fmt.Sprintf("Go named pointer type %s is not supported by direct Go pointer bindings yet", goType.String()), loc)
+			return nil, false
+		}
+		if goType.Elem == nil {
+			c.addError("Go pointer type is missing element metadata", loc)
+			return nil, false
+		}
+		elem, ok := c.directGoValueArdType(*goType.Elem, loc)
+		if !ok {
+			return nil, false
+		}
+		if _, ok := elem.(*Enum); ok {
+			c.addError(fmt.Sprintf("Go pointer to enum-like type %s is not supported by direct Go pointer bindings yet", goType.String()), loc)
+			return nil, false
+		}
+		if _, ok := elem.(*ExternType); !ok {
+			c.addError(fmt.Sprintf("Go pointer type %s is not supported by direct Go pointer bindings yet", goType.String()), loc)
+			return nil, false
+		}
+		return MakeMutableRef(elem), true
+	}
+	if goType.Named {
+		return c.directGoNamedArdType(goType, loc)
+	}
+	switch goType.Kind {
+	case GoValueBool:
+		return Bool, true
+	case GoValueString:
+		return Str, true
+	case GoValueInt:
+		if goType.Bits == 0 {
+			return Int, true
+		}
+		if goType.Bits == 32 {
+			return Rune, true
+		}
+	case GoValueUint:
+		if goType.Bits == 8 {
+			return Byte, true
+		}
+	case GoValueFloat:
+		if goType.Bits == 64 {
+			return Float, true
+		}
+	case GoValueAny:
+		return Dynamic, true
+	case GoValueSlice:
+		if goType.Elem != nil {
+			elem, ok := c.directGoValueArdType(*goType.Elem, loc)
+			if ok {
+				return MakeList(elem), true
+			}
+			return nil, false
+		}
+	case GoValueMap:
+		if goType.Key != nil && goType.Value != nil {
+			key, ok := c.directGoValueArdType(*goType.Key, loc)
+			if !ok {
+				return nil, false
+			}
+			value, ok := c.directGoValueArdType(*goType.Value, loc)
+			if !ok {
+				return nil, false
+			}
+			return MakeMap(key, value), true
+		}
+	case GoValueError:
+		c.addError("Go error values require a Result adapter", loc)
+		return nil, false
+	}
+	c.addError(fmt.Sprintf("Go type %s cannot be represented as an inferred Ard direct Go call type", goType.String()), loc)
+	return nil, false
+}
+
+func (c *Checker) directGoNamedArdType(goType GoValueType, loc parse.Location) (Type, bool) {
+	if goType.ImportPath == "" || goType.Name == "" {
+		c.addError(fmt.Sprintf("Go named type %s is missing package metadata", goType.String()), loc)
+		return nil, false
+	}
+	if goImport, ok := c.directGoImportForPath(goType.ImportPath); ok && goImport.pkg != nil {
+		if typ, ok := goImport.pkg.Types[goType.Name]; ok {
+			if enum := c.directGoEnumType(goImport, typ, loc); enum != nil {
+				return enum, true
+			}
+		}
+	}
+	alias := ""
+	if goImport, ok := c.directGoImportForPath(goType.ImportPath); ok {
+		alias = goImport.alias
+	}
+	binding := canonicalDirectGoBinding(goType.ImportPath, alias, []string{goType.Name})
+	name := goType.Name
+	qualifier := alias
+	if qualifier == "" {
+		qualifier = goType.Package
+	}
+	if qualifier != "" {
+		name = qualifier + "::" + goType.Name
+	}
+	return &ExternType{Name_: name, ExternalBinding: binding, ExternalBindings: map[string]string{"go": binding}}, true
 }
 
 func (c *Checker) validateDirectGoExternSignature(name string, params []Parameter, returnType Type, binding string, loc parse.Location) {

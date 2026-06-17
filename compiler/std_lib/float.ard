@@ -7,20 +7,25 @@ use go:strconv
 // Standard library Float module implemented with FFI
 // Provides float conversion and utility functions
 
-private extern fn parse_float(input: Str, bit_size: Int) Float!Str = strconv::ParseFloat
-private extern fn format_float(value: Float, fmt: Int, precision: Int, bit_size: Int) Str = strconv::FormatFloat
-
 fn from_str(input: Str) Float? {
-  let value = try parse_float(input, 64) -> _ { maybe::none() }
+  let value = try strconv::ParseFloat(input, 64) -> _ { maybe::none() }
   maybe::some(value)
 }
 
 extern fn from_int(int: Int) Float = "FloatFromInt"
-extern fn floor(float: Float) Float = math::Floor
-extern fn ceil(float: Float) Float = math::Ceil
+
+fn floor(float: Float) Float {
+  math::Floor(float)
+}
+
+fn ceil(float: Float) Float {
+  math::Ceil(float)
+}
 
 // Rounds to the nearest integer, with halfway cases rounded away from zero.
-extern fn round(float: Float) Float = math::Round
+fn round(float: Float) Float {
+  math::Round(float)
+}
 
 // Formats `value` with exactly `decimals` digits after the decimal point.
 // Negative `decimals` values are treated as `0`; halfway cases round to the nearest even digit.
@@ -29,7 +34,7 @@ fn format(value: Float, decimals: Int) Str {
     true => 0,
     false => decimals,
   }
-  format_float(value, 102, precision, 64)
+  strconv::FormatFloat(value, 102, precision, 64)
 }
 
 test fn test_from_str_parses_valid_float() Void!Str {

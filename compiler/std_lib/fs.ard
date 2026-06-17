@@ -15,15 +15,23 @@ extern fn append(path: Str, content: Str) Void!Str = "FS_AppendFile"
 
 extern fn read(path: Str) Str!Str = "FS_ReadFile"
 
-extern fn delete(path: Str) Void!Str = os::Remove
+fn delete(path: Str) Void!Str {
+  os::Remove(path)
+}
 
 extern fn copy(from: Str, to: Str) Void!Str = "FS_Copy"
 
-extern fn rename(from: Str, to: Str) Void!Str = os::Rename
+fn rename(from: Str, to: Str) Void!Str {
+  os::Rename(from, to)
+}
 
-extern fn cwd() Str!Str = os::Getwd
+fn cwd() Str!Str {
+  os::Getwd()
+}
 
-extern fn abs(path: Str) Str!Str = filepath::Abs
+fn abs(path: Str) Str!Str {
+  filepath::Abs(path)
+}
 
 struct DirEntry {
   name: Str,
@@ -32,7 +40,9 @@ struct DirEntry {
 
 extern fn create_dir(path: Str) Void!Str = "FS_CreateDir"
 
-extern fn delete_dir(path: Str) Void!Str = os::RemoveAll
+fn delete_dir(path: Str) Void!Str {
+  os::RemoveAll(path)
+}
 
 // Private FFI returns map of name -> is_file
 private extern fn _list_dir_map(path: Str) [Str: Bool]!Str = "FS_ListDir"

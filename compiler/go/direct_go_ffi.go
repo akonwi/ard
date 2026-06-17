@@ -167,7 +167,7 @@ func (l *lowerer) lowerDirectGoExternCall(ext air.Extern, binding string, args [
 	if err != nil || !ok {
 		return loweredExpr{}, ok, err
 	}
-	signature, err := l.directGoSignature(direct)
+	signature, err := l.directGoSignature(ext, direct)
 	if err != nil {
 		return loweredExpr{}, true, err
 	}
@@ -205,11 +205,12 @@ func (l *lowerer) lowerDirectGoExternCall(ext air.Extern, binding string, args [
 	}
 }
 
-func (l *lowerer) directGoSignature(binding directGoExternBinding) (checker.GoSignature, error) {
-	if l.directGoResolver == nil {
+func (l *lowerer) directGoSignature(ext air.Extern, binding directGoExternBinding) (checker.GoSignature, error) {
+	resolver := l.directGoResolverForExtern(ext)
+	if resolver == nil {
 		return checker.GoSignature{}, nil
 	}
-	pkg, err := l.directGoResolver.LoadPackage(binding.ImportPath)
+	pkg, err := resolver.LoadPackage(binding.ImportPath)
 	if err != nil {
 		return checker.GoSignature{}, fmt.Errorf("load Go package %q: %w", binding.ImportPath, err)
 	}
@@ -233,6 +234,17 @@ func (l *lowerer) directGoSignature(binding directGoExternBinding) (checker.GoSi
 	default:
 		return checker.GoSignature{}, nil
 	}
+}
+
+func (l *lowerer) directGoResolverForExtern(ext air.Extern) *checker.GoPackagesResolver {
+	if l.projectInfo == nil {
+		return l.directGoResolver
+	}
+	modulePath := modulePathForExtern(l.program, ext)
+	if _, root, ok := dependencyPackageForModulePath(modulePath, l.projectInfo); ok && root != "" {
+		return checker.NewGoPackagesResolver(root)
+	}
+	return l.directGoResolver
 }
 
 func (l *lowerer) adaptDirectGoReturn(returnTypeID air.TypeID, call ast.Expr, results []checker.GoValueType) (loweredExpr, error) {

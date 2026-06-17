@@ -2390,6 +2390,206 @@ func Select(input ardruntime.Maybe[string]) string {
 	}
 }
 
+func TestBuildProgramDoesNotRequireDependencyFFIForDirectGoCall(t *testing.T) {
+	workspace := t.TempDir()
+	depDir := filepath.Join(workspace, "dep")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{depDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "dep.ard"), []byte(`use go:strconv
+
+fn parse(value: Str) Int!Str {
+  strconv::Atoi(value)
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use dep
+
+fn main() Int!Str {
+  dep::parse("42")
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+}
+
+func TestBuildProgramIncludesDependencyGoModForDirectGoCall(t *testing.T) {
+	workspace := t.TempDir()
+	helperDir := filepath.Join(workspace, "helper")
+	badHelperDir := filepath.Join(workspace, "bad-helper")
+	depDir := filepath.Join(workspace, "dep")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{helperDir, badHelperDir, depDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "go.mod"), []byte("module example.com/helper\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "helper.go"), []byte(`package helper
+
+type Thing struct{ Value int }
+
+func Make() Thing { return Thing{Value: 21} }
+func Value(thing Thing) int { return thing.Value }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badHelperDir, "go.mod"), []byte("module example.com/helper\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badHelperDir, "helper.go"), []byte(`package helper
+
+type Thing struct{}
+
+func Other() Thing { return Thing{} }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	depGoMod := fmt.Sprintf("module dep\n\ngo 1.26.0\n\nrequire example.com/helper v0.0.0\nreplace example.com/helper => %s\n", helperDir)
+	if err := os.WriteFile(filepath.Join(depDir, "go.mod"), []byte(depGoMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "dep.ard"), []byte(`use go:example.com/helper as helper
+
+fn make() helper::Thing {
+  helper::Make()
+}
+
+fn value(thing: helper::Thing) Int {
+  helper::Value(thing)
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	appGoMod := fmt.Sprintf("module app\n\ngo 1.26.0\n\nreplace example.com/helper => %s\n", badHelperDir)
+	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(appGoMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use dep
+
+let thing = dep::make()
+
+fn main() Int {
+  dep::value(thing)
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+}
+
+func TestBuildProgramIncludesDependencyGoModForDirectGoEnumType(t *testing.T) {
+	workspace := t.TempDir()
+	statusDir := filepath.Join(workspace, "status")
+	depDir := filepath.Join(workspace, "dep")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{statusDir, depDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(statusDir, "go.mod"), []byte("module example.com/status\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(statusDir, "status.go"), []byte(`package status
+
+type State int
+
+const (
+	StateReady State = iota
+	StateDone
+)
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	depGoMod := fmt.Sprintf("module dep\n\ngo 1.26.0\n\nrequire example.com/status v0.0.0\nreplace example.com/status => %s\n", statusDir)
+	if err := os.WriteFile(filepath.Join(depDir, "go.mod"), []byte(depGoMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "dep.ard"), []byte(`use go:example.com/status as status
+
+fn ready() status::State {
+  status::StateReady
+}
+
+fn id(state: status::State) status::State {
+  state
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use dep
+
+fn main() {
+  let state = dep::id(dep::ready())
+  if not state == dep::ready() {
+    panic("dependency direct Go enum failed")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+}
+
 func TestBuildProgramSupportsDependencyGoFFI(t *testing.T) {
 	workspace := t.TempDir()
 	depDir := filepath.Join(workspace, "dep")
@@ -3904,6 +4104,151 @@ func mapsKeys[V any](m map[string]V) []string {
 		keys = append(keys, key)
 	}
 	return keys
+}
+
+func TestBuildProgramWithDirectGoCallDoesNotRequireProjectFFICompanion(t *testing.T) {
+	program := lowerSource(t, `use go:strconv
+fn main() Int!Str { strconv::Atoi("42") }`)
+	tempDir := t.TempDir()
+	if _, err := BuildProgram(program, filepath.Join(tempDir, "direct-go-call")); err != nil {
+		t.Fatalf("BuildProgram error = %v", err)
+	}
+}
+
+func TestBuildProgramIncludesProjectGoModForDirectGoCall(t *testing.T) {
+	workspace := t.TempDir()
+	helperDir := filepath.Join(workspace, "helper")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{helperDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "go.mod"), []byte("module example.com/helper\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "helper.go"), []byte(`package helper
+
+func Double(value int) int { return value * 2 }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goMod := fmt.Sprintf("module app\n\ngo 1.26.0\n\nrequire example.com/helper v0.0.0\nreplace example.com/helper => %s\n", helperDir)
+	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use go:example.com/helper as helper
+
+fn main() Int {
+  helper::Double(21)
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("BuildProgram error = %v", err)
+	}
+}
+
+func TestBuildProgramIncludesProjectGoModForDirectGoEnumGlobal(t *testing.T) {
+	workspace := t.TempDir()
+	statusDir := filepath.Join(workspace, "status")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{statusDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(statusDir, "go.mod"), []byte("module example.com/status\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(statusDir, "status.go"), []byte(`package status
+
+type State int
+
+const (
+	StateReady State = iota
+	StateDone
+)
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goMod := fmt.Sprintf("module app\n\ngo 1.26.0\n\nrequire example.com/status v0.0.0\nreplace example.com/status => %s\n", statusDir)
+	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use go:example.com/status as status
+
+let ready = status::StateReady
+
+fn main() {
+  if not ready == status::StateReady {
+    panic("project direct Go enum global failed")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("BuildProgram error = %v", err)
+	}
+}
+
+func TestLowerDirectGoFunctionCallWithoutExtern(t *testing.T) {
+	program := lowerSource(t, `use go:strconv
+fn main() Int!Str { strconv::Atoi("42") }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "strconv", "strconv") {
+		t.Fatal("generated AST missing strconv import")
+	}
+	if !astFilesHaveCall(files, "strconv.Atoi") {
+		t.Fatal("generated AST missing strconv.Atoi call")
+	}
+	if !astFilesHaveCall(files, "fmt.Sprint") {
+		t.Fatal("generated AST missing fmt.Sprint error conversion")
+	}
+}
+
+func TestLowerDirectGoInstanceMethodCallWithoutExtern(t *testing.T) {
+	program := lowerSource(t, `use go:time
+fn main() Str { time::Now().Format("2006-01-02") }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "time", "time") {
+		t.Fatal("generated AST missing time import")
+	}
+	if !astFilesHaveCall(files, "time.Now") {
+		t.Fatal("generated AST missing time.Now call")
+	}
+	if !astFilesContain(files, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		return ok && selector.Sel != nil && selector.Sel.Name == "Format"
+	}) {
+		t.Fatal("generated AST missing Format method call")
+	}
 }
 
 func TestLowerDirectGoExternFunctionCall(t *testing.T) {

@@ -3,10 +3,8 @@ use ard/testing
 
 use go:strconv
 
-private extern fn parse_int(str: Str) Int!Str = strconv::Atoi
-
 fn from_str(str: Str) Int? {
-  let value = try parse_int(str) -> _ { maybe::none() }
+  let value = try strconv::Atoi(str) -> _ { maybe::none() }
   maybe::some(value)
 }
 
