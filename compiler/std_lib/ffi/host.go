@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"os"
 	"sort"
@@ -89,7 +88,6 @@ func NewHost(config HostConfig) Host {
 		FSWriteFile:          FSWriteFile,
 		FloatFormat:          FloatFormat,
 		FloatFromInt:         FloatFromInt,
-		FloatFromStr:         FloatFromStr,
 		FloatToDynamic:       FloatToDynamic,
 		GetPathValue:         GetPathValue,
 		GetQueryParam:        GetQueryParam,
@@ -423,28 +421,8 @@ func validateScryptParams(n, r, p, dkLen int) error {
 	return nil
 }
 
-func FloatFromStr(str string) Maybe[float64] {
-	value, err := strconv.ParseFloat(str, 64)
-	if err != nil {
-		return None[float64]()
-	}
-	return Some(value)
-}
-
 func FloatFromInt(value int) float64 {
 	return float64(value)
-}
-
-func FloatFloor(value float64) float64 {
-	return math.Floor(value)
-}
-
-func FloatCeil(value float64) float64 {
-	return math.Ceil(value)
-}
-
-func FloatRound(value float64) float64 {
-	return math.Round(value)
 }
 
 func FloatFormat(value float64, decimals int) string {

@@ -2831,8 +2831,8 @@ func TestLowerProgramUsesDirectStdlibMaybeCalls(t *testing.T) {
 	if !astFilesHaveCall(files, "os.LookupEnv") {
 		t.Fatal("generated AST missing direct Go env lookup")
 	}
-	if !astFilesHaveCall(files, "stdlibffi.FloatFromStr") {
-		t.Fatal("generated AST missing direct stdlib maybe call stdlibffi.FloatFromStr")
+	if !astFilesHaveCall(files, "strconv.ParseFloat") {
+		t.Fatal("generated AST missing direct Go float parsing call")
 	}
 	if !astFilesHaveCall(files, "strconv.Atoi") {
 		t.Fatal("generated AST missing direct Go int parsing call")

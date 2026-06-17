@@ -178,7 +178,6 @@ type Host struct {
 	FSWriteFile          func(path string, content string) error
 	FloatFormat          func(value float64, decimals int) string
 	FloatFromInt         func(int int) float64
-	FloatFromStr         func(string string) Maybe[float64]
 	FloatToDynamic       func(val float64) any
 	GetPathValue         func(req *http.Request, name string) string
 	GetQueryParam        func(req *http.Request, name string) string
@@ -328,9 +327,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.FloatFromInt != nil {
 		functions["FloatFromInt"] = h.FloatFromInt
-	}
-	if h.FloatFromStr != nil {
-		functions["FloatFromStr"] = h.FloatFromStr
 	}
 	if h.FloatToDynamic != nil {
 		functions["FloatToDynamic"] = h.FloatToDynamic
