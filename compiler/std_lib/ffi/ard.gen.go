@@ -176,7 +176,6 @@ type Host struct {
 	FSListDir            func(path string) (map[string]bool, error)
 	FSReadFile           func(path string) (string, error)
 	FSWriteFile          func(path string, content string) error
-	FloatFormat          func(value float64, decimals int) string
 	FloatFromInt         func(int int) float64
 	FloatToDynamic       func(val float64) any
 	GetPathValue         func(req *http.Request, name string) string
@@ -321,9 +320,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.FSWriteFile != nil {
 		functions["FS_WriteFile"] = h.FSWriteFile
-	}
-	if h.FloatFormat != nil {
-		functions["FloatFormat"] = h.FloatFormat
 	}
 	if h.FloatFromInt != nil {
 		functions["FloatFromInt"] = h.FloatFromInt

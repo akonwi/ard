@@ -86,7 +86,6 @@ func NewHost(config HostConfig) Host {
 		FSListDir:            FSListDir,
 		FSReadFile:           FSReadFile,
 		FSWriteFile:          FSWriteFile,
-		FloatFormat:          FloatFormat,
 		FloatFromInt:         FloatFromInt,
 		FloatToDynamic:       FloatToDynamic,
 		GetPathValue:         GetPathValue,
@@ -423,13 +422,6 @@ func validateScryptParams(n, r, p, dkLen int) error {
 
 func FloatFromInt(value int) float64 {
 	return float64(value)
-}
-
-func FloatFormat(value float64, decimals int) string {
-	if decimals < 0 {
-		decimals = 0
-	}
-	return strconv.FormatFloat(value, 'f', decimals, 64)
 }
 
 func FSExists(path string) bool {
