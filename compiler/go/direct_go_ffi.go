@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/token"
 	"path"
 	"strings"
 
@@ -58,7 +59,12 @@ func (l *lowerer) lowerDirectGoExternCall(ext air.Extern, binding string, args [
 		}
 		alias := directGoImportAlias(direct.ImportPath)
 		call := &ast.CallExpr{Fun: l.qualified(alias, direct.ImportPath, direct.Symbols[0]), Args: coercedArgs}
-		return loweredExpr{stmts: stmts, expr: call}, true, nil
+		adapted, err := l.adaptDirectGoReturn(ext.Signature.Return, call, signature.Results)
+		if err != nil {
+			return loweredExpr{}, true, err
+		}
+		adapted.stmts = append(stmts, adapted.stmts...)
+		return adapted, true, nil
 	case 2:
 		if len(args) == 0 {
 			return loweredExpr{}, true, fmt.Errorf("direct Go method binding %q requires a receiver argument", binding)
@@ -68,7 +74,12 @@ func (l *lowerer) lowerDirectGoExternCall(ext air.Extern, binding string, args [
 			return loweredExpr{}, true, err
 		}
 		call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: coercedArgs[0], Sel: ast.NewIdent(direct.Symbols[1])}, Args: coercedArgs[1:]}
-		return loweredExpr{stmts: stmts, expr: call}, true, nil
+		adapted, err := l.adaptDirectGoReturn(ext.Signature.Return, call, signature.Results)
+		if err != nil {
+			return loweredExpr{}, true, err
+		}
+		adapted.stmts = append(stmts, adapted.stmts...)
+		return adapted, true, nil
 	default:
 		return loweredExpr{}, true, fmt.Errorf("direct Go extern binding %q must be package::Function or package::Type::Method", binding)
 	}
@@ -102,6 +113,65 @@ func (l *lowerer) directGoSignature(binding directGoExternBinding) (checker.GoSi
 	default:
 		return checker.GoSignature{}, nil
 	}
+}
+
+func (l *lowerer) adaptDirectGoReturn(returnTypeID air.TypeID, call ast.Expr, results []checker.GoValueType) (loweredExpr, error) {
+	if len(results) == 1 && results[0].Kind == checker.GoValueError {
+		return l.wrapErrorCall(returnTypeID, call)
+	}
+	if len(results) == 2 {
+		switch results[1].Kind {
+		case checker.GoValueError:
+			return l.wrapValueErrorCall(returnTypeID, call)
+		case checker.GoValueBool:
+			if results[1].Named {
+				return loweredExpr{}, fmt.Errorf("direct Go maybe adapter requires bool, got named bool %s", results[1].String())
+			}
+			return l.wrapValueBoolMaybeCall(returnTypeID, call)
+		}
+	}
+	return loweredExpr{expr: call}, nil
+}
+
+func (l *lowerer) wrapValueBoolMaybeCall(maybeTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
+	if !validTypeID(l.program, maybeTypeID) {
+		return loweredExpr{}, fmt.Errorf("invalid maybe type id %d", maybeTypeID)
+	}
+	maybeType := l.program.Types[maybeTypeID-1]
+	if maybeType.Kind != air.TypeMaybe {
+		return loweredExpr{}, fmt.Errorf("expected maybe type, got kind %d", maybeType.Kind)
+	}
+	valueType, err := l.goType(maybeType.Elem)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	valueTemp := l.nextTemp()
+	okTemp := l.nextTemp()
+	resultTemp := l.nextTemp()
+	someExpr, err := l.maybeSomeExpr(maybeTypeID, ast.NewIdent(valueTemp))
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	noneExpr, err := l.maybeNoneExpr(maybeTypeID)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	maybeTypeExpr, err := l.goType(maybeTypeID)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := []ast.Stmt{
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(valueTemp)}, Type: valueType}}}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(okTemp)}, Type: ast.NewIdent("bool")}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(valueTemp), ast.NewIdent(okTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: maybeTypeExpr}}}},
+		&ast.IfStmt{Cond: ast.NewIdent(okTemp), Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{someExpr}},
+		}}, Else: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneExpr}},
+		}}},
+	}
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
 }
 
 func (l *lowerer) coerceDirectGoArgs(signature air.Signature, args []ast.Expr, goSignature checker.GoSignature, argOffset int) ([]ast.Expr, error) {

@@ -212,7 +212,7 @@ extern fn floor(value: Float) Str = math::Floor`), "main.ard")
 	}
 }
 
-func TestDirectGoExternSignatureRejectsErrorAdapterShapeForNow(t *testing.T) {
+func TestDirectGoExternSignatureAcceptsErrorToVoidResultAdapter(t *testing.T) {
 	result := parse.Parse([]byte(`use go:os
 extern fn chdir(dir: Str) Void!Str = os::Chdir`), "main.ard")
 	if len(result.Errors) > 0 {
@@ -222,15 +222,12 @@ extern fn chdir(dir: Str) Void!Str = os::Chdir`), "main.ard")
 		"os": {ImportPath: "os", Name: "os", Functions: map[string]GoFunction{"Chdir": {Name: "Chdir", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueError, "error")}}}}},
 	}}})
 	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("expected error adapter diagnostic")
-	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Go return error requires an adapter") {
-		t.Fatalf("diagnostic = %q", got)
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
 	}
 }
 
-func TestDirectGoExternSignatureRejectsMultipleReturnAdaptersForNow(t *testing.T) {
+func TestDirectGoExternSignatureAcceptsValueErrorToResultAdapter(t *testing.T) {
 	result := parse.Parse([]byte(`use go:strconv
 extern fn atoi(value: Str) Int!Str = strconv::Atoi`), "main.ard")
 	if len(result.Errors) > 0 {
@@ -240,10 +237,58 @@ extern fn atoi(value: Str) Int!Str = strconv::Atoi`), "main.ard")
 		"strconv": {ImportPath: "strconv", Name: "strconv", Functions: map[string]GoFunction{"Atoi": {Name: "Atoi", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueInt, "int"), goParam(GoValueError, "error")}}}}},
 	}}})
 	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("expected multiple-return adapter diagnostic")
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
 	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "multiple-return direct Go adapters are not supported yet") {
+}
+
+func TestDirectGoExternSignatureAcceptsValueBoolToMaybeAdapter(t *testing.T) {
+	result := parse.Parse([]byte(`use go:os
+extern fn lookup_env(key: Str) Str? = os::LookupEnv`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"os": {ImportPath: "os", Name: "os", Functions: map[string]GoFunction{"LookupEnv": {Name: "LookupEnv", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueString, "string"), goParam(GoValueBool, "bool")}}}}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoExternSignatureRejectsNamedBoolMaybeAdapter(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/lookup as lookup
+extern fn lookup_value(key: Str) Str? = lookup::Value`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/lookup": {ImportPath: "example.com/lookup", Name: "lookup", Functions: map[string]GoFunction{"Value": {Name: "Value", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueString, "string"), goNamed(GoValueBool, "lookup.Found", "example.com/lookup", "Found")}}}}},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected unsupported named bool adapter diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "no supported adapter matches") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoExternSignatureRejectsUnsupportedMultipleReturnAdapters(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/unsupported as unsupported
+extern fn pair(value: Str) Int = unsupported::Pair`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/unsupported": {ImportPath: "example.com/unsupported", Name: "unsupported", Functions: map[string]GoFunction{"Pair": {Name: "Pair", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueInt, "int"), goParam(GoValueString, "string")}}}}},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected unsupported multiple-return adapter diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "no supported adapter matches") {
 		t.Fatalf("diagnostic = %q", got)
 	}
 }

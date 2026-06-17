@@ -348,17 +348,52 @@ func (c *Checker) validateDirectGoExternReturn(name string, returnType Type, tar
 		}
 		return
 	}
+	if c.directGoResultAdapterCompatible(returnType, results) {
+		return
+	}
 	if len(results) != 1 {
-		c.addError(fmt.Sprintf("return for %s: Go returns %s; multiple-return direct Go adapters are not supported yet", target.Name, goSignatureResultsString(results)), loc)
+		c.addError(fmt.Sprintf("return for %s: Go returns %s; no supported adapter matches extern %s return %s", target.Name, goSignatureResultsString(results), name, typeSyntaxString(returnType)), loc)
 		return
 	}
 	if results[0].Kind == GoValueError {
-		c.addError(fmt.Sprintf("return for %s: Go return error requires an adapter; direct Go error adapters are not supported yet", target.Name), loc)
+		c.addError(fmt.Sprintf("return for %s: Go return error can only adapt to Void!Str", target.Name), loc)
 		return
 	}
 	if ok, reason := c.directGoAssignableCompatible(returnType, results[0]); !ok {
 		c.addError(fmt.Sprintf("return for %s: %s", target.Name, reason), loc)
 	}
+}
+
+func (c *Checker) directGoResultAdapterCompatible(returnType Type, results []GoValueType) bool {
+	returnType = derefType(returnType)
+	if len(results) == 1 && results[0].Kind == GoValueError {
+		return directGoVoidStrResult(returnType)
+	}
+	if len(results) != 2 {
+		return false
+	}
+	if results[1].Kind == GoValueError {
+		result, ok := returnType.(*Result)
+		if !ok || !equalTypes(result.Err(), Str) {
+			return false
+		}
+		ok, _ = c.directGoAssignableCompatible(result.Val(), results[0])
+		return ok
+	}
+	if results[1].Kind == GoValueBool && !results[1].Named {
+		maybe, ok := returnType.(*Maybe)
+		if !ok {
+			return false
+		}
+		ok, _ = c.directGoAssignableCompatible(maybe.Of(), results[0])
+		return ok
+	}
+	return false
+}
+
+func directGoVoidStrResult(returnType Type) bool {
+	result, ok := returnType.(*Result)
+	return ok && equalTypes(result.Val(), Void) && equalTypes(result.Err(), Str)
 }
 
 func goSignatureResultsString(results []GoValueType) string {

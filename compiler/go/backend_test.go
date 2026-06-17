@@ -3953,6 +3953,57 @@ fn main() {
 	}
 }
 
+func TestLowerDirectGoExternAdaptsErrorReturnToResult(t *testing.T) {
+	program := lowerSource(t, `use go:os
+extern fn remove(path: Str) Void!Str = os::Remove
+fn main() Void!Str { remove("missing") }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "os", "os") {
+		t.Fatal("generated AST missing os import")
+	}
+	if !astFilesHaveCall(files, "os.Remove") {
+		t.Fatal("generated AST missing os.Remove call")
+	}
+	if !astFilesHaveCall(files, "fmt.Sprint") {
+		t.Fatal("generated AST missing fmt.Sprint error conversion")
+	}
+}
+
+func TestLowerDirectGoExternAdaptsValueErrorReturnToResult(t *testing.T) {
+	program := lowerSource(t, `use go:strconv
+extern fn atoi(value: Str) Int!Str = strconv::Atoi
+fn main() Int!Str { atoi("42") }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "strconv", "strconv") {
+		t.Fatal("generated AST missing strconv import")
+	}
+	if !astFilesHaveCall(files, "strconv.Atoi") {
+		t.Fatal("generated AST missing strconv.Atoi call")
+	}
+	if !astFilesHaveCall(files, "fmt.Sprint") {
+		t.Fatal("generated AST missing fmt.Sprint error conversion")
+	}
+}
+
+func TestLowerDirectGoExternAdaptsValueBoolReturnToMaybe(t *testing.T) {
+	program := lowerSource(t, `use go:os
+extern fn lookup_env(key: Str) Str? = os::LookupEnv
+fn main() Str? { lookup_env("PATH") }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "os", "os") {
+		t.Fatal("generated AST missing os import")
+	}
+	if !astFilesHaveCall(files, "os.LookupEnv") {
+		t.Fatal("generated AST missing os.LookupEnv call")
+	}
+	if !astFilesHaveCall(files, "ardruntime.Some") {
+		t.Fatal("generated AST missing ardruntime.Some maybe adapter")
+	}
+	if !astFilesHaveCall(files, "ardruntime.None") {
+		t.Fatal("generated AST missing ardruntime.None maybe adapter")
+	}
+}
+
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
