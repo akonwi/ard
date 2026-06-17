@@ -32,8 +32,10 @@ type GoMethod struct {
 }
 
 type GoSignature struct {
-	Params  []GoValueType
-	Results []GoValueType
+	Receiver *GoValueType
+	Params   []GoValueType
+	Results  []GoValueType
+	Variadic bool
 }
 
 type GoValueKind string
@@ -45,6 +47,10 @@ const (
 	GoValueInt     GoValueKind = "int"
 	GoValueUint    GoValueKind = "uint"
 	GoValueFloat   GoValueKind = "float"
+	GoValueAny     GoValueKind = "any"
+	GoValueSlice   GoValueKind = "slice"
+	GoValueMap     GoValueKind = "map"
+	GoValuePointer GoValueKind = "pointer"
 	GoValueError   GoValueKind = "error"
 	GoValueOther   GoValueKind = "other"
 )
@@ -57,6 +63,9 @@ type GoValueType struct {
 	ImportPath string
 	Package    string
 	Name       string
+	Elem       *GoValueType
+	Key        *GoValueType
+	Value      *GoValueType
 }
 
 type GoType struct {
@@ -220,12 +229,278 @@ func directGoBindingParts(binding string) ([]string, bool) {
 	return parts, true
 }
 
+type canonicalDirectGoBindingInfo struct {
+	ImportPath string
+	Symbols    []string
+}
+
+func parseCanonicalDirectGoBinding(binding string) (canonicalDirectGoBindingInfo, bool) {
+	if !strings.HasPrefix(binding, "go:") {
+		return canonicalDirectGoBindingInfo{}, false
+	}
+	parts := strings.Split(strings.TrimPrefix(binding, "go:"), "::")
+	if len(parts) != 2 && len(parts) != 3 {
+		return canonicalDirectGoBindingInfo{}, false
+	}
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			return canonicalDirectGoBindingInfo{}, false
+		}
+	}
+	return canonicalDirectGoBindingInfo{ImportPath: parts[0], Symbols: parts[1:]}, true
+}
+
+type directGoSignatureTarget struct {
+	Name      string
+	Signature GoSignature
+	Method    bool
+}
+
+func (c *Checker) validateDirectGoExternSignature(name string, params []Parameter, returnType Type, binding string, loc parse.Location) {
+	target, ok := c.directGoSignatureTarget(binding)
+	if !ok {
+		return
+	}
+	if target.Signature.Variadic {
+		c.addError(fmt.Sprintf("Go function %s is variadic; variadic direct Go externs are not supported yet", target.Name), loc)
+		return
+	}
+	expectedParams := len(target.Signature.Params)
+	paramOffset := 0
+	if target.Method {
+		expectedParams++
+		paramOffset = 1
+	}
+	if len(params) != expectedParams {
+		c.addError(fmt.Sprintf("Go function %s expects %d parameter(s), extern %s declares %d", target.Name, expectedParams, name, len(params)), loc)
+		return
+	}
+	if target.Method && target.Signature.Receiver != nil {
+		if ok, reason := c.directGoTypesCompatible(params[0].Type, *target.Signature.Receiver); !ok {
+			c.addError(fmt.Sprintf("receiver for %s: %s", target.Name, reason), loc)
+		}
+	}
+	for i, goParam := range target.Signature.Params {
+		ardParam := params[i+paramOffset]
+		if ok, reason := c.directGoTypesCompatible(ardParam.Type, goParam); !ok {
+			c.addError(fmt.Sprintf("parameter %d for %s: %s", i+1+paramOffset, target.Name, reason), loc)
+		}
+	}
+	c.validateDirectGoExternReturn(name, returnType, target, loc)
+}
+
+func (c *Checker) directGoSignatureTarget(binding string) (directGoSignatureTarget, bool) {
+	info, ok := parseCanonicalDirectGoBinding(binding)
+	if !ok {
+		return directGoSignatureTarget{}, false
+	}
+	var pkg *GoPackage
+	for _, imp := range c.directGoImports {
+		if imp.importPath == info.ImportPath {
+			pkg = imp.pkg
+			break
+		}
+	}
+	if pkg == nil {
+		return directGoSignatureTarget{}, false
+	}
+	switch len(info.Symbols) {
+	case 1:
+		fn, ok := pkg.Functions[info.Symbols[0]]
+		if !ok {
+			return directGoSignatureTarget{}, false
+		}
+		return directGoSignatureTarget{Name: pkgQualifiedName(pkg, info.Symbols), Signature: fn.Signature}, true
+	case 2:
+		typ, ok := pkg.Types[info.Symbols[0]]
+		if !ok {
+			return directGoSignatureTarget{}, false
+		}
+		method, ok := typ.Methods[info.Symbols[1]]
+		if !ok {
+			return directGoSignatureTarget{}, false
+		}
+		return directGoSignatureTarget{Name: pkgQualifiedName(pkg, info.Symbols), Signature: method.Signature, Method: true}, true
+	default:
+		return directGoSignatureTarget{}, false
+	}
+}
+
+func pkgQualifiedName(pkg *GoPackage, symbols []string) string {
+	qualifier := ""
+	if pkg != nil {
+		qualifier = pkg.Name
+		if qualifier == "" {
+			qualifier = pkg.ImportPath
+		}
+	}
+	if qualifier == "" {
+		return strings.Join(symbols, ".")
+	}
+	return qualifier + "." + strings.Join(symbols, ".")
+}
+
+func (c *Checker) validateDirectGoExternReturn(name string, returnType Type, target directGoSignatureTarget, loc parse.Location) {
+	results := target.Signature.Results
+	if len(results) == 0 {
+		if !equalTypes(returnType, Void) {
+			c.addError(fmt.Sprintf("return for %s: Go returns nothing, extern %s declares %s", target.Name, name, returnType.String()), loc)
+		}
+		return
+	}
+	if len(results) != 1 {
+		c.addError(fmt.Sprintf("return for %s: Go returns %s; multiple-return direct Go adapters are not supported yet", target.Name, goSignatureResultsString(results)), loc)
+		return
+	}
+	if results[0].Kind == GoValueError {
+		c.addError(fmt.Sprintf("return for %s: Go return error requires an adapter; direct Go error adapters are not supported yet", target.Name), loc)
+		return
+	}
+	if ok, reason := c.directGoTypesCompatible(returnType, results[0]); !ok {
+		c.addError(fmt.Sprintf("return for %s: %s", target.Name, reason), loc)
+	}
+}
+
+func goSignatureResultsString(results []GoValueType) string {
+	parts := make([]string, len(results))
+	for i, result := range results {
+		parts[i] = result.String()
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+func (c *Checker) directGoTypesCompatible(ard Type, goType GoValueType) (bool, string) {
+	ard = derefType(ard)
+	if directGoNamedTypeMatches(ard, goType) {
+		return true, ""
+	}
+	if goType.Kind == GoValuePointer {
+		return false, fmt.Sprintf("Go type %s is a pointer; direct Go pointer bindings are not supported yet", goType.String())
+	}
+	if goType.Named && (goType.Kind == GoValueSlice || goType.Kind == GoValueMap || goType.Kind == GoValueOther || goType.Kind == GoValueAny) {
+		return false, fmt.Sprintf("Ard type %s is not compatible with Go named type %s", typeSyntaxString(ard), goType.String())
+	}
+	switch goType.Kind {
+	case GoValueBool:
+		if equalTypes(ard, Bool) {
+			return true, ""
+		}
+	case GoValueString:
+		if equalTypes(ard, Str) {
+			return true, ""
+		}
+	case GoValueInt:
+		if equalTypes(ard, Int) || (goType.Bits == 32 && equalTypes(ard, Rune)) {
+			return true, ""
+		}
+	case GoValueUint:
+		if equalTypes(ard, Int) || (goType.Bits == 8 && equalTypes(ard, Byte)) {
+			return true, ""
+		}
+	case GoValueFloat:
+		if equalTypes(ard, Float) {
+			return true, ""
+		}
+	case GoValueAny:
+		if equalTypes(ard, Dynamic) {
+			return true, ""
+		}
+	case GoValueSlice:
+		list, ok := ard.(*List)
+		if ok && goType.Elem != nil {
+			if compatible, reason := c.directGoTypesCompatible(list.Of(), *goType.Elem); compatible {
+				return true, ""
+			} else {
+				return false, "list element: " + reason
+			}
+		}
+	case GoValueMap:
+		m, ok := ard.(*Map)
+		if ok && goType.Key != nil && goType.Value != nil {
+			if compatible, reason := c.directGoTypesCompatible(m.Key(), *goType.Key); !compatible {
+				return false, "map key: " + reason
+			}
+			if compatible, reason := c.directGoTypesCompatible(m.Value(), *goType.Value); !compatible {
+				return false, "map value: " + reason
+			}
+			return true, ""
+		}
+	case GoValueError:
+		return false, "Go error values require an adapter; direct Go error adapters are not supported yet"
+	}
+	return false, fmt.Sprintf("Ard type %s is not compatible with Go type %s", typeSyntaxString(ard), goType.String())
+}
+
+func directGoNamedTypeMatches(ard Type, goType GoValueType) bool {
+	if !goType.Named || goType.ImportPath == "" || goType.Name == "" {
+		return false
+	}
+	extern, ok := ard.(*ExternType)
+	if !ok {
+		return false
+	}
+	return extern.ExternalBinding == canonicalDirectGoBinding(goType.ImportPath, []string{goType.Name})
+}
+
+func (t GoValueType) String() string {
+	if t.Expr != "" {
+		return t.Expr
+	}
+	switch t.Kind {
+	case GoValueBool:
+		return "bool"
+	case GoValueString:
+		return "string"
+	case GoValueInt:
+		if t.Bits > 0 {
+			return fmt.Sprintf("int%d", t.Bits)
+		}
+		return "int"
+	case GoValueUint:
+		if t.Bits > 0 {
+			return fmt.Sprintf("uint%d", t.Bits)
+		}
+		return "uint"
+	case GoValueFloat:
+		if t.Bits == 32 {
+			return "float32"
+		}
+		return "float64"
+	case GoValueAny:
+		return "any"
+	case GoValueSlice:
+		if t.Elem != nil {
+			return "[]" + t.Elem.String()
+		}
+		return "[]?"
+	case GoValueMap:
+		if t.Key != nil && t.Value != nil {
+			return "map[" + t.Key.String() + "]" + t.Value.String()
+		}
+		return "map[?]?"
+	case GoValuePointer:
+		if t.Elem != nil {
+			return "*" + t.Elem.String()
+		}
+		return "*?"
+	case GoValueError:
+		return "error"
+	default:
+		return "?"
+	}
+}
+
 func goSignature(typ types.Type) GoSignature {
 	sig, ok := typ.(*types.Signature)
 	if !ok || sig == nil {
 		return GoSignature{}
 	}
-	return GoSignature{Params: goTuple(sig.Params()), Results: goTuple(sig.Results())}
+	out := GoSignature{Params: goTuple(sig.Params()), Results: goTuple(sig.Results()), Variadic: sig.Variadic()}
+	if recv := sig.Recv(); recv != nil {
+		receiver := goValueType(recv.Type())
+		out.Receiver = &receiver
+	}
+	return out
 }
 
 func goTuple(tuple *types.Tuple) []GoValueType {
@@ -259,27 +534,44 @@ func goValueType(typ types.Type) GoValueType {
 		}
 		return underlying
 	}
-	basic, ok := typ.Underlying().(*types.Basic)
-	if !ok {
-		return out
-	}
-	switch basic.Kind() {
-	case types.Bool:
-		out.Kind = GoValueBool
-	case types.String:
-		out.Kind = GoValueString
-	case types.Int, types.Int8, types.Int16, types.Int32, types.Int64:
-		out.Kind = GoValueInt
-		out.Bits = basicIntBits(basic.Kind())
-	case types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64, types.Uintptr:
-		out.Kind = GoValueUint
-		out.Bits = basicIntBits(basic.Kind())
-	case types.Float32:
-		out.Kind = GoValueFloat
-		out.Bits = 32
-	case types.Float64:
-		out.Kind = GoValueFloat
-		out.Bits = 64
+	switch underlying := typ.Underlying().(type) {
+	case *types.Basic:
+		switch underlying.Kind() {
+		case types.Bool:
+			out.Kind = GoValueBool
+		case types.String:
+			out.Kind = GoValueString
+		case types.Int, types.Int8, types.Int16, types.Int32, types.Int64:
+			out.Kind = GoValueInt
+			out.Bits = basicIntBits(underlying.Kind())
+		case types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64, types.Uintptr:
+			out.Kind = GoValueUint
+			out.Bits = basicIntBits(underlying.Kind())
+		case types.Float32:
+			out.Kind = GoValueFloat
+			out.Bits = 32
+		case types.Float64:
+			out.Kind = GoValueFloat
+			out.Bits = 64
+		}
+	case *types.Pointer:
+		elem := goValueType(underlying.Elem())
+		out.Kind = GoValuePointer
+		out.Elem = &elem
+	case *types.Slice:
+		elem := goValueType(underlying.Elem())
+		out.Kind = GoValueSlice
+		out.Elem = &elem
+	case *types.Map:
+		key := goValueType(underlying.Key())
+		value := goValueType(underlying.Elem())
+		out.Kind = GoValueMap
+		out.Key = &key
+		out.Value = &value
+	case *types.Interface:
+		if underlying.Empty() {
+			out.Kind = GoValueAny
+		}
 	}
 	return out
 }

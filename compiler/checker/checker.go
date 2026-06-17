@@ -5419,6 +5419,7 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 	if _, ok := bindings["go"]; ok {
 		bindings["go"] = resolvedBinding
 	}
+	c.validateDirectGoExternSignature(def.Name, params, returnType, resolvedBinding, def.GetLocation())
 
 	// Create external function definition
 	extFn := &ExternalFunctionDef{
