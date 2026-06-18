@@ -151,13 +151,16 @@ This means direct Go imports reduce stdlib FFI ceremony but do not eliminate `co
 
 Do not adapt Go `(T, error)` returns to Ard `T?`. A non-nil Go `error` is failure information, not absence; converting it to `none` would discard error semantics and misrepresent the Go signature. Use `T!Str` for direct `(T, error)` bindings, or keep a companion wrapper when an API intentionally maps specific errors to missingness.
 
-The standard-library migration exposes implementation gaps that should be addressed before broad conversion:
+The standard-library migration should be incremental. The current stdlib audit is captured in `docs/standard-library-ffi-audit.md` and uses this order:
 
-- method-expression bindings for exported Go methods, such as `sql::DB::Close` or `http::Request::PathValue`;
-- boundary adapters for `error -> Void!Str`, `(T, error) -> T!Str`, and `(T, bool) -> T?`;
-- boundary scalar coercions inside compound values, such as slices or maps whose element types do not exactly match Ard's primitive Go representations;
-- a way to represent direct Go packages used by embedded stdlib code with compiler-module metadata rather than a user project `go.mod`;
-- clear diagnostics when a direct Go function's required parameters cannot be expressed by the Ard extern signature.
+1. remove legacy forwarding externs that can be pure Ard now, such as `list::new` and primitive `dynamic` boxing;
+2. refactor filesystem helpers that can be Ard functions over direct Go calls;
+3. move small SQL string/parameter helpers into Ard;
+4. treat broader direct-Go capability work as an ongoing backlog, not as a requirement for this branch.
+
+The fourth step includes package variables/globals, explicit Go conversions, fixed-array adapters, variadic calls or slice spread, Go struct field access, interface alias assignability, callback/interface bridging, and blank-import/dependency registration. These gaps gate larger migrations such as `base64`, crypto hash wrappers, more `fs`, and significant parts of `http` and `sql`.
+
+Remaining companion FFI is expected where Ard's public API intentionally adapts Go semantics, manages state/lifecycles, or bridges dynamic values and callbacks. Companion code should represent real semantic adaptation rather than mandatory forwarding.
 
 ## Consequences
 
@@ -180,5 +183,6 @@ The standard-library migration exposes implementation gaps that should be addres
 - `docs/adrs/0016-defer-project-ffi-codegen.md`
 - `docs/adrs/0022-use-mut-for-mutable-references.md`
 - `docs/adrs/0029-remove-javascript-targets.md`
+- `docs/standard-library-ffi-audit.md`
 - `compiler/go`
 - `compiler/checker`
