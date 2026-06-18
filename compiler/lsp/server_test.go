@@ -1876,6 +1876,44 @@ fn main() {
 }
 
 // TestCompletionUserModuleStaticMembers verifies user module functions and variables complete after ::.
+func TestCompletionDirectGoPackageSymbols(t *testing.T) {
+	source := `use go:math
+
+fn main() {
+  math::
+}
+`
+
+	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 8})
+	assertCompletion(t, items, "Floor", "fn (x: Float) Float")
+}
+
+func TestCompletionDirectGoPackageTypesAndEnumConstants(t *testing.T) {
+	source := `use go:time
+
+fn main() {
+  time::
+}
+`
+
+	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 8})
+	assertCompletion(t, items, "Time", "time::Time")
+	assertCompletion(t, items, "January", "time::Month")
+	assertCompletion(t, items, "Now", "fn () time::Time")
+}
+
+func TestCompletionDirectGoTypeStaticMethods(t *testing.T) {
+	source := `use go:time
+
+fn main(value: time::Time) {
+  time::Time::
+}
+`
+
+	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 14})
+	assertCompletion(t, items, "Format", "fn (receiver: time::Time, layout: Str) Str")
+}
+
 func TestCompletionUserModuleStaticMembersExcludesTests(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
