@@ -150,7 +150,7 @@ The standard-library migration exposes implementation gaps that should be addres
 
 - method-expression bindings for exported Go methods, such as `sql::DB::Close` or `http::Request::PathValue`;
 - boundary adapters for `error -> Void!Str`, `(T, error) -> T!Str`, and `(T, bool) -> T?`;
-- boundary scalar coercions for direct Go signatures whose scalar types do not exactly match Ard's primitive Go representations;
+- boundary scalar coercions inside compound values, such as slices or maps whose element types do not exactly match Ard's primitive Go representations;
 - a way to represent direct Go packages used by embedded stdlib code with compiler-module metadata rather than a user project `go.mod`;
 - clear diagnostics when a direct Go function's required parameters cannot be expressed by the Ard extern signature.
 

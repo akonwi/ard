@@ -636,24 +636,40 @@ extern fn ping(db: sql::DB) Void!Str = sql::DB::Ping`), "main.ard")
 	}
 }
 
-func TestDirectGoExternSignatureRejectsNamedScalarReturnsUntilReturnCoercionExists(t *testing.T) {
+func TestDirectGoCallUsesExpectedResultForWidthScalarReturn(t *testing.T) {
+	result := parse.Parse([]byte(`use go:strconv
+fn main() Int!Str { strconv::ParseInt("42", 10, 64) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"strconv": {ImportPath: "strconv", Name: "strconv", Functions: map[string]GoFunction{
+			"ParseInt": {Name: "ParseInt", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string"), goParam(GoValueInt, "int"), goParam(GoValueInt, "int")}, Results: []GoValueType{goParam(GoValueInt, "int64"), goParam(GoValueError, "error")}}},
+		}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoExternSignatureAllowsNamedScalarReturnCoercion(t *testing.T) {
 	result := parse.Parse([]byte(`use go:time
 extern fn since(value: time::Time) Int = time::Since`), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
 	timeType := goNamed(GoValueOther, "time.Time", "time", "Time")
+	duration := goNamed(GoValueInt, "time.Duration", "time", "Duration")
+	duration.Bits = 64
 	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
 		"time": {ImportPath: "time", Name: "time", Functions: map[string]GoFunction{
-			"Since": {Name: "Since", Signature: GoSignature{Params: []GoValueType{timeType}, Results: []GoValueType{goNamed(GoValueInt, "time.Duration", "time", "Duration")}}},
+			"Since": {Name: "Since", Signature: GoSignature{Params: []GoValueType{timeType}, Results: []GoValueType{duration}}},
 		}, Types: map[string]GoType{"Time": {Name: "Time"}, "Duration": {Name: "Duration"}}},
 	}}})
 	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("expected named scalar return diagnostic")
-	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Ard type Int is not compatible with Go named type time.Duration") {
-		t.Fatalf("diagnostic = %q", got)
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
 	}
 }
 

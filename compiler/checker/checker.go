@@ -1892,7 +1892,7 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 			if _, ok := stmts[i].(*parse.Comment); ok {
 				continue
 			}
-			if canCheckStatementAsExpectedExpression(stmts[i], expectedFinal, onlyMatchFinal) {
+			if c.canCheckStatementAsExpectedExpression(stmts[i], expectedFinal, onlyMatchFinal) {
 				lastExprIndex = i
 			}
 			break
@@ -1916,11 +1916,13 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 	return block
 }
 
-func canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal Type, onlyMatchFinal bool) bool {
+func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal Type, onlyMatchFinal bool) bool {
 	if onlyMatchFinal && expectedFinal != Void {
-		switch stmt.(type) {
-		case *parse.MatchExpression, *parse.ConditionalMatchExpression:
+		switch s := stmt.(type) {
+		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.InstanceMethod:
 			return true
+		case *parse.StaticFunction:
+			return c.isDirectGoStaticFunction(s)
 		default:
 			return false
 		}
@@ -1982,7 +1984,7 @@ func (c *Checker) checkBlockWithInferredFinalValue(stmts []parse.Statement, setu
 		if _, ok := stmts[i].(*parse.Comment); ok {
 			continue
 		}
-		if canCheckStatementAsExpectedExpression(stmts[i], Void, false) {
+		if c.canCheckStatementAsExpectedExpression(stmts[i], Void, false) {
 			lastExprIndex = i
 		}
 		break
@@ -5304,8 +5306,22 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			fn.Body = body
 			return fn
 		}
+	case *parse.InstanceMethod:
+		{
+			subj := c.checkExpr(s.Target)
+			if subj == nil {
+				c.addError(fmt.Sprintf("Cannot access %s on Void", s.Method.Name), s.Method.GetLocation())
+				return nil
+			}
+			if call, handled := c.checkDirectGoInstanceMethodAs(subj, s.Method, s.GetLocation(), expectedType); handled {
+				return call
+			}
+		}
 	case *parse.StaticFunction:
 		{
+			if call, handled := c.checkDirectGoStaticFunctionAs(s, expectedType); handled {
+				return call
+			}
 			resultType, expectResult := expectedType.(*Result)
 			target, ok := s.Target.(*parse.Identifier)
 			if !expectResult || !ok || target.Name != "Result" || (s.Function.Name != "ok" && s.Function.Name != "err") {

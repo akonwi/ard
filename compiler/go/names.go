@@ -140,7 +140,7 @@ func localName(fn air.Function, local air.LocalID) string {
 		if capture.Local == local {
 			name := sanitizeName(capture.Name)
 			if name != "" {
-				return name
+				return safeLocalName(name, local)
 			}
 		}
 	}
@@ -148,12 +148,58 @@ func localName(fn air.Function, local air.LocalID) string {
 		name := sanitizeName(fn.Locals[local].Name)
 		if name != "" {
 			if int(local) < len(fn.Signature.Params) {
-				return name
+				return paramLocalName(fn, local, name)
 			}
 			return fmt.Sprintf("%s_%d", name, local)
 		}
 	}
 	return fmt.Sprintf("local_%d", local)
+}
+
+func paramLocalName(fn air.Function, local air.LocalID, name string) string {
+	base := fmt.Sprintf("%s_%d", name, local)
+	candidate := base
+	for i := 1; localNameCollidesWithCapture(fn, local, candidate); i++ {
+		candidate = fmt.Sprintf("%s_%d", base, i)
+	}
+	return candidate
+}
+
+func localNameCollidesWithCapture(fn air.Function, local air.LocalID, candidate string) bool {
+	for _, capture := range fn.Captures {
+		if capture.Local == local {
+			continue
+		}
+		name := sanitizeName(capture.Name)
+		if name != "" && safeLocalName(name, capture.Local) == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func safeLocalName(name string, local air.LocalID) string {
+	if isReservedLocalName(name) {
+		return fmt.Sprintf("%s_%d", name, local)
+	}
+	return name
+}
+
+func isReservedLocalName(name string) bool {
+	if name == "main" {
+		return true
+	}
+	for _, reserved := range predeclaredGoIdentifiers() {
+		if name == reserved {
+			return true
+		}
+	}
+	for _, reserved := range runtimePreludeTopLevelNames() {
+		if name == reserved {
+			return true
+		}
+	}
+	return false
 }
 
 func sanitizeName(raw string) string {

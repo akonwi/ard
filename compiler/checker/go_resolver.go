@@ -477,7 +477,20 @@ type directGoSignatureTarget struct {
 	Method    bool
 }
 
+func (c *Checker) isDirectGoStaticFunction(call *parse.StaticFunction) bool {
+	parts := strings.Split(call.Target.String()+"::"+call.Function.Name, "::")
+	if len(parts) < 2 {
+		return false
+	}
+	_, ok := c.directGoImports[parts[0]]
+	return ok
+}
+
 func (c *Checker) checkDirectGoStaticFunction(call *parse.StaticFunction) (Expression, bool) {
+	return c.checkDirectGoStaticFunctionAs(call, nil)
+}
+
+func (c *Checker) checkDirectGoStaticFunctionAs(call *parse.StaticFunction, expected Type) (Expression, bool) {
 	parts := strings.Split(call.Target.String()+"::"+call.Function.Name, "::")
 	if len(parts) < 2 {
 		return nil, false
@@ -512,14 +525,22 @@ func (c *Checker) checkDirectGoStaticFunction(call *parse.StaticFunction) (Expre
 			return nil, true
 		}
 	}
-	returnType, ok := c.directGoReturnType(target.Signature.Results, call.GetLocation())
+	returnType, ok := c.directGoReturnType(target.Signature.Results, call.GetLocation(), expected)
 	if !ok {
+		return nil, true
+	}
+	if expected != nil && expected != Void && !areCompatible(expected, returnType) {
+		c.addError(typeMismatch(expected, returnType), call.GetLocation())
 		return nil, true
 	}
 	return c.directGoFunctionCall(strings.Join(parts, "::"), args, params, returnType, target.Binding), true
 }
 
 func (c *Checker) checkDirectGoInstanceMethod(subject Expression, call parse.FunctionCall, loc parse.Location) (Expression, bool) {
+	return c.checkDirectGoInstanceMethodAs(subject, call, loc, nil)
+}
+
+func (c *Checker) checkDirectGoInstanceMethodAs(subject Expression, call parse.FunctionCall, loc parse.Location, expected Type) (Expression, bool) {
 	importPath, typeName, ok := directGoNamedTypeBinding(subject.Type())
 	if !ok {
 		return nil, false
@@ -554,8 +575,12 @@ func (c *Checker) checkDirectGoInstanceMethod(subject Expression, call parse.Fun
 	}
 	args = append([]Expression{subject}, args...)
 	params = append([]Parameter{{Name: "receiver", Type: subject.Type()}}, params...)
-	returnType, ok := c.directGoReturnType(target.Signature.Results, loc)
+	returnType, ok := c.directGoReturnType(target.Signature.Results, loc, expected)
 	if !ok {
+		return nil, true
+	}
+	if expected != nil && expected != Void && !areCompatible(expected, returnType) {
+		c.addError(typeMismatch(expected, returnType), loc)
 		return nil, true
 	}
 	callName := goImport.alias
@@ -674,7 +699,10 @@ func (c *Checker) directGoFunctionCall(name string, args []Expression, params []
 	return &FunctionCall{Name: name, Args: args, fn: fn, ReturnType: returnType, ExternalBinding: binding}
 }
 
-func (c *Checker) directGoReturnType(results []GoValueType, loc parse.Location) (Type, bool) {
+func (c *Checker) directGoReturnType(results []GoValueType, loc parse.Location, expected Type) (Type, bool) {
+	if expected != nil && expected != Void && c.directGoResultAdapterCompatible(expected, results) {
+		return expected, true
+	}
 	switch len(results) {
 	case 0:
 		return Void, true
@@ -905,7 +933,7 @@ func (c *Checker) validateDirectGoExternReturn(name string, returnType Type, tar
 	}
 	if len(results) == 2 && results[1].Kind == GoValueError {
 		if result, ok := derefType(returnType).(*Result); ok && equalTypes(result.Err(), Str) {
-			if ok, reason := c.directGoAssignableCompatible(result.Val(), results[0]); !ok {
+			if ok, reason := c.directGoReturnValueCompatible(result.Val(), results[0]); !ok {
 				c.addError(fmt.Sprintf("return value for %s: %s", target.Name, reason), loc)
 				return
 			}
@@ -919,15 +947,19 @@ func (c *Checker) validateDirectGoExternReturn(name string, returnType Type, tar
 		c.addError(fmt.Sprintf("return for %s: Go return error can only adapt to Void!Str", target.Name), loc)
 		return
 	}
-	if ok, reason := c.directGoAssignableCompatible(returnType, results[0]); !ok {
+	if ok, reason := c.directGoReturnValueCompatible(returnType, results[0]); !ok {
 		c.addError(fmt.Sprintf("return for %s: %s", target.Name, reason), loc)
 	}
 }
 
 func (c *Checker) directGoResultAdapterCompatible(returnType Type, results []GoValueType) bool {
 	returnType = derefType(returnType)
-	if len(results) == 1 && results[0].Kind == GoValueError {
-		return directGoVoidStrResult(returnType)
+	if len(results) == 1 {
+		if results[0].Kind == GoValueError {
+			return directGoVoidStrResult(returnType)
+		}
+		ok, _ := c.directGoReturnValueCompatible(returnType, results[0])
+		return ok
 	}
 	if len(results) != 2 {
 		return false
@@ -937,7 +969,7 @@ func (c *Checker) directGoResultAdapterCompatible(returnType Type, results []GoV
 		if !ok || !equalTypes(result.Err(), Str) {
 			return false
 		}
-		ok, _ = c.directGoAssignableCompatible(result.Val(), results[0])
+		ok, _ = c.directGoReturnValueCompatible(result.Val(), results[0])
 		return ok
 	}
 	if results[1].Kind == GoValueBool && !results[1].Named {
@@ -945,7 +977,7 @@ func (c *Checker) directGoResultAdapterCompatible(returnType Type, results []GoV
 		if !ok {
 			return false
 		}
-		ok, _ = c.directGoAssignableCompatible(maybe.Of(), results[0])
+		ok, _ = c.directGoReturnValueCompatible(maybe.Of(), results[0])
 		return ok
 	}
 	return false
@@ -962,6 +994,10 @@ func goSignatureResultsString(results []GoValueType) string {
 		parts[i] = result.String()
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+func (c *Checker) directGoReturnValueCompatible(ard Type, goType GoValueType) (bool, string) {
+	return c.directGoParamCompatible(ard, goType, true)
 }
 
 func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel bool) (bool, string) {

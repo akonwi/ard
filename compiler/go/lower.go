@@ -529,6 +529,29 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	}
 `)
 	}
+	if l.runtimeHelpers["direct_go_signed_to_int"] {
+		parts = append(parts, `
+	func ardDirectGoIntFromSigned(value int64, target string) int {
+		max := int64(^uint(0) >> 1)
+		min := -max - 1
+		if value < min || value > max {
+			panic("Ard direct Go FFI: signed integer value out of range for Int from " + target)
+		}
+		return int(value)
+	}
+`)
+	}
+	if l.runtimeHelpers["direct_go_unsigned_to_int"] {
+		parts = append(parts, `
+	func ardDirectGoIntFromUnsigned(value uint64, target string) int {
+		max := uint64(^uint(0) >> 1)
+		if value > max {
+			panic("Ard direct Go FFI: unsigned integer value out of range for Int from " + target)
+		}
+		return int(value)
+	}
+`)
+	}
 	if l.runtimeHelpers["direct_go_float32_range"] {
 		l.registerImport("ardmath", "math")
 		parts = append(parts, `
@@ -774,18 +797,18 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 			return nil, err
 		}
 		params = append(params, &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(sanitizeName(capture.Name))},
+			Names: []*ast.Ident{ast.NewIdent(localName(fn, capture.Local))},
 			Type:  captureType,
 		})
 		l.declaredLocals[capture.Local] = true
 	}
-	for _, param := range fn.Signature.Params {
+	for i, param := range fn.Signature.Params {
 		paramType, err := l.goParamType(param)
 		if err != nil {
 			return nil, err
 		}
 		params = append(params, &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(sanitizeName(param.Name))},
+			Names: []*ast.Ident{ast.NewIdent(localName(fn, air.LocalID(i)))},
 			Type:  paramType,
 		})
 	}
@@ -4360,10 +4383,7 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		name := sanitizeName(param.Name)
-		if name == "" {
-			name = fmt.Sprintf("arg_%d", i)
-		}
+		name := localName(closureFn, air.LocalID(i))
 		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: paramType})
 		callArgs = append(callArgs, ast.NewIdent(name))
 	}
@@ -4391,38 +4411,6 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 }
 
 func (l *lowerer) lowerInlineClosure(parent air.Function, expr air.Expr, closureFn air.Function) (loweredExpr, error) {
-	closureType, err := l.goType(expr.Type)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	funcType, _ := closureType.(*ast.FuncType)
-	params := []*ast.Field{}
-	for i, param := range closureFn.Signature.Params {
-		paramType, err := l.goParamType(param)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		name := sanitizeName(param.Name)
-		if name == "" {
-			name = fmt.Sprintf("arg_%d", i)
-		}
-		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: paramType})
-	}
-	if funcType == nil {
-		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}}
-	} else {
-		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}, Results: funcType.Results}
-	}
-	returnTypeID := closureFn.Signature.Return
-	if (funcType.Results == nil || len(funcType.Results.List) == 0) && closureFn.Body.Result != nil && !l.isVoidType(closureFn.Body.Result.Type) {
-		returnType, err := l.goType(closureFn.Body.Result.Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		funcType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
-		returnTypeID = closureFn.Body.Result.Type
-	}
-
 	inlineFn := closureFn
 	inlineFn.Captures = append([]air.Capture(nil), closureFn.Captures...)
 	inlineFn.Locals = append([]air.Local(nil), closureFn.Locals...)
@@ -4441,6 +4429,35 @@ func (l *lowerer) lowerInlineClosure(parent air.Function, expr air.Expr, closure
 		// captures as pointer parameters; mutable argument lowering can still take
 		// the address of the outer local when a callee requires it.
 		inlineFn.Locals[capture.Local].Mutable = false
+	}
+
+	closureType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	funcType, _ := closureType.(*ast.FuncType)
+	params := []*ast.Field{}
+	for i, param := range inlineFn.Signature.Params {
+		paramType, err := l.goParamType(param)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		name := localName(inlineFn, air.LocalID(i))
+		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: paramType})
+	}
+	if funcType == nil {
+		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}}
+	} else {
+		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}, Results: funcType.Results}
+	}
+	returnTypeID := inlineFn.Signature.Return
+	if (funcType.Results == nil || len(funcType.Results.List) == 0) && inlineFn.Body.Result != nil && !l.isVoidType(inlineFn.Body.Result.Type) {
+		returnType, err := l.goType(inlineFn.Body.Result.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		funcType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
+		returnTypeID = inlineFn.Body.Result.Type
 	}
 
 	savedDeclared := l.declaredLocals
