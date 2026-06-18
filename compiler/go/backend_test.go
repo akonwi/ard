@@ -3198,6 +3198,45 @@ func TestLowerProgramUsesDirectStdlibMaybeCalls(t *testing.T) {
 	}
 }
 
+func TestLowerProgramUsesDirectGoPackageConstantSelector(t *testing.T) {
+	program := lowerSource(t, `
+		use go:os
+
+		fn flags() Int {
+			os::O_WRONLY
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		return ok && selector.Sel != nil && selector.Sel.Name == "O_WRONLY" && astExprName(selector.X) == "os"
+	}) {
+		t.Fatal("generated AST missing os.O_WRONLY selector")
+	}
+}
+
+func TestLowerProgramConvertsTypedDirectGoPackageConstants(t *testing.T) {
+	program := lowerSource(t, `
+		use go:time
+
+		fn duration() Int {
+			time::Nanosecond
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || astCallName(call) != "int" || len(call.Args) != 1 {
+			return false
+		}
+		return astExprName(call.Args[0]) == "time.Nanosecond"
+	}) {
+		t.Fatal("generated AST missing int(time.Nanosecond) conversion")
+	}
+}
+
 func TestLowerProgramUsesDirectGoPackageVariableSelector(t *testing.T) {
 	program := lowerSource(t, `
 		use go:encoding/base64 as base64

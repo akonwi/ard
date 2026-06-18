@@ -206,7 +206,7 @@ func (l *lowerer) lowerDirectGoExternCall(ext air.Extern, binding string, args [
 	}
 }
 
-func (l *lowerer) lowerDirectGoPackageValue(binding string) (loweredExpr, error) {
+func (l *lowerer) lowerDirectGoPackageValue(binding string, typeID air.TypeID) (loweredExpr, error) {
 	direct, ok, err := parseDirectGoExternBinding(binding)
 	if err != nil {
 		return loweredExpr{}, err
@@ -218,7 +218,30 @@ func (l *lowerer) lowerDirectGoPackageValue(binding string) (loweredExpr, error)
 		return loweredExpr{}, fmt.Errorf("direct Go package value binding %q must be package::Variable", binding)
 	}
 	alias := l.directGoBindingAlias(direct)
-	return loweredExpr{expr: l.qualified(alias, direct.ImportPath, direct.Symbols[0])}, nil
+	expr := l.qualified(alias, direct.ImportPath, direct.Symbols[0])
+	return loweredExpr{expr: l.directGoPackageValueConversion(typeID, expr)}, nil
+}
+
+func (l *lowerer) directGoPackageValueConversion(typeID air.TypeID, expr ast.Expr) ast.Expr {
+	if !validTypeID(l.program, typeID) {
+		return expr
+	}
+	switch l.program.Types[typeID-1].Kind {
+	case air.TypeInt:
+		return directGoConversionCall("int", expr)
+	case air.TypeFloat:
+		return directGoConversionCall("float64", expr)
+	case air.TypeBool:
+		return directGoConversionCall("bool", expr)
+	case air.TypeStr:
+		return directGoConversionCall("string", expr)
+	case air.TypeByte:
+		return directGoConversionCall("byte", expr)
+	case air.TypeRune:
+		return directGoConversionCall("rune", expr)
+	default:
+		return expr
+	}
 }
 
 func (l *lowerer) directGoSignature(ext air.Extern, binding directGoExternBinding) (checker.GoSignature, error) {

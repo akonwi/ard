@@ -2023,8 +2023,8 @@ func describeStaticProperty(sp *parse.StaticProperty, source string, filePath st
 }
 
 func directGoStaticPropertyHover(target string, property string, prog *parse.Program, filePath string) *hoverInfo {
-	if varType, ok := directGoPackageVariableDisplayType(target, property, prog, filePath); ok {
-		return simpleHover(fmt.Sprintf("%s::%s: %s", target, property, varType))
+	if valueType, ok := directGoPackageValueDisplayType(target, property, prog, filePath); ok {
+		return simpleHover(fmt.Sprintf("%s::%s: %s", target, property, valueType))
 	}
 	return nil
 }
@@ -2171,8 +2171,8 @@ func inferExprType(expr parse.Expression, prog *parse.Program, filePath string) 
 	case *parse.StaticProperty:
 		if id, ok := e.Property.(*parse.Identifier); ok {
 			if target := simpleExprName(e.Target); target != "" {
-				if varType, ok := directGoPackageVariableDisplayType(target, id.Name, prog, filePath); ok {
-					return qualifyTypeDisplay(varType, prog, filePath)
+				if valueType, ok := directGoPackageValueDisplayType(target, id.Name, prog, filePath); ok {
+					return qualifyTypeDisplay(valueType, prog, filePath)
 				}
 			}
 			return resolveIdentType(id.Name, prog, filePath)
@@ -2381,7 +2381,7 @@ func importedStaticFunctionSignature(target string, name string, prog *parse.Pro
 	return checkerStaticFunctionSignature(target, name, sym.Type)
 }
 
-func directGoPackageVariableDisplayType(target string, name string, prog *parse.Program, filePath string) (string, bool) {
+func directGoPackageValueDisplayType(target string, name string, prog *parse.Program, filePath string) (string, bool) {
 	alias, memberPrefix := splitStaticTarget(target)
 	if memberPrefix != "" {
 		return "", false
@@ -2394,11 +2394,46 @@ func directGoPackageVariableDisplayType(target string, name string, prog *parse.
 	if !ok {
 		return "", false
 	}
-	variable, ok := pkg.Variables[name]
-	if !ok {
-		return "", false
+	ctx := directGoHoverContextForImport(imp, prog)
+	if constant, ok := pkg.Constants[name]; ok {
+		return directGoConstantDisplayType(alias, constant, pkg, ctx)
 	}
-	return directGoHoverReturnType(variable.Type, directGoHoverContextForImport(imp, prog))
+	if variable, ok := pkg.Variables[name]; ok {
+		return directGoHoverReturnType(variable.Type, ctx)
+	}
+	return "", false
+}
+
+func directGoConstantDisplayType(alias string, constant checker.GoConstant, pkg *checker.GoPackage, ctx directGoHoverContext) (string, bool) {
+	if pkg != nil && directGoConstantIsEnumCandidate(pkg.ImportPath, constant) {
+		if typ, ok := pkg.Types[constant.Type.Name]; ok && directGoTypeHasEnumConstant(typ, constant.Name) {
+			return alias + "::" + typ.Name, true
+		}
+	}
+	switch {
+	case constant.HasBoolValue:
+		return "Bool", true
+	case constant.HasStringValue:
+		return "Str", true
+	case constant.HasIntValue:
+		return "Int", true
+	case constant.HasFloatValue:
+		return "Float", true
+	}
+	return directGoHoverReturnType(constant.Type, ctx)
+}
+
+func directGoConstantIsEnumCandidate(importPath string, constant checker.GoConstant) bool {
+	return constant.Type.Named && constant.Type.ImportPath == importPath && constant.Type.Name != "" && constant.Type.Kind == checker.GoValueInt && constant.Type.Bits == 0
+}
+
+func directGoTypeHasEnumConstant(typ checker.GoType, name string) bool {
+	for _, constant := range typ.EnumConstants {
+		if constant.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func importedDirectGoFunctionSignature(target string, name string, prog *parse.Program, filePath string) *hoverStaticFunctionSignature {

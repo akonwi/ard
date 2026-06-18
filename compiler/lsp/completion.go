@@ -405,6 +405,11 @@ func directGoPackageCompletionItems(alias string, prog *parse.Program, filePath 
 			items = append(items, protocol.CompletionItem{Label: constant.Name, Kind: protocol.CompletionItemKindEnumMember, Detail: alias + "::" + typ.Name, InsertText: constant.Name})
 		}
 	}
+	for name, constant := range pkg.Constants {
+		if detail, ok := directGoConstantDisplayType(alias, constant, pkg, ctx); ok {
+			items = append(items, protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindConstant, Detail: detail, InsertText: name})
+		}
+	}
 	for name, variable := range pkg.Variables {
 		if detail, ok := directGoHoverReturnType(variable.Type, ctx); ok {
 			items = append(items, protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindVariable, Detail: detail, InsertText: name})

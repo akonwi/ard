@@ -1445,12 +1445,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 							return nil
 						}
 						kind := "value"
+						reason := "direct Go package values are read-only"
 						if goImport.pkg != nil {
-							if _, ok := goImport.pkg.Variables[propIdent.Name]; ok {
+							if _, ok := goImport.pkg.Constants[propIdent.Name]; ok {
+								kind = "constant"
+								reason = "Go constants cannot be assigned"
+							} else if _, ok := goImport.pkg.Variables[propIdent.Name]; ok {
 								kind = "variable"
+								reason = "direct Go package variables are read-only"
 							}
 						}
-						c.addError(fmt.Sprintf("Cannot assign to Go package %s %s::%s; direct Go package variables are read-only", kind, id.Name, propIdent.Name), s.Target.GetLocation())
+						c.addError(fmt.Sprintf("Cannot assign to Go package %s %s::%s; %s", kind, id.Name, propIdent.Name, reason), s.Target.GetLocation())
 						return nil
 					}
 				}

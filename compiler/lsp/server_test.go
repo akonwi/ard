@@ -1886,6 +1886,7 @@ fn main() {
 
 	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 8})
 	assertCompletion(t, items, "Floor", "fn (x: Float) Float")
+	assertCompletion(t, items, "Pi", "Float")
 }
 
 func TestCompletionDirectGoPackageTypesAndEnumConstants(t *testing.T) {
@@ -2508,6 +2509,23 @@ fn main() {
 				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
 			}
 		})
+	}
+}
+
+func TestHoverDirectGoPackageConstant(t *testing.T) {
+	source := `use go:os
+
+fn main() {
+  os::O_WRONLY
+}
+`
+
+	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 7})
+	if info == nil {
+		t.Fatal("expected hover info, got nil")
+	}
+	if !strings.Contains(info.content, "os::O_WRONLY: Int") {
+		t.Fatalf("hover = %q", info.content)
 	}
 }
 

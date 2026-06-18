@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	gotoken "go/token"
 	"go/types"
+	"math"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -84,10 +85,16 @@ type GoType struct {
 }
 
 type GoConstant struct {
-	Name        string
-	Type        GoValueType
-	IntValue    int
-	HasIntValue bool
+	Name           string
+	Type           GoValueType
+	IntValue       int
+	HasIntValue    bool
+	BoolValue      bool
+	HasBoolValue   bool
+	StringValue    string
+	HasStringValue bool
+	FloatValue     float64
+	HasFloatValue  bool
 }
 
 type GoVariable struct {
@@ -203,8 +210,11 @@ func goPackageFromTypes(importPath string, name string, pkg *types.Package) *GoP
 
 func goConstant(obj *types.Const) GoConstant {
 	constantType := goValueType(obj.Type())
-	intValue, ok := goConstantIntValue(obj.Val())
-	return GoConstant{Name: obj.Name(), Type: constantType, IntValue: intValue, HasIntValue: ok}
+	intValue, intOK := goConstantIntValue(obj.Val())
+	boolValue, boolOK := goConstantBoolValue(obj.Val())
+	stringValue, stringOK := goConstantStringValue(obj.Val())
+	floatValue, floatOK := goConstantFloatValue(obj.Val())
+	return GoConstant{Name: obj.Name(), Type: constantType, IntValue: intValue, HasIntValue: intOK, BoolValue: boolValue, HasBoolValue: boolOK, StringValue: stringValue, HasStringValue: stringOK, FloatValue: floatValue, HasFloatValue: floatOK}
 }
 
 func goVariable(obj *types.Var) GoVariable {
@@ -228,6 +238,31 @@ func goConstantIntValue(value constant.Value) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+func goConstantBoolValue(value constant.Value) (bool, bool) {
+	if value == nil || value.Kind() != constant.Bool {
+		return false, false
+	}
+	return constant.BoolVal(value), true
+}
+
+func goConstantStringValue(value constant.Value) (string, bool) {
+	if value == nil || value.Kind() != constant.String {
+		return "", false
+	}
+	return constant.StringVal(value), true
+}
+
+func goConstantFloatValue(value constant.Value) (float64, bool) {
+	if value == nil || value.Kind() != constant.Float {
+		return 0, false
+	}
+	floatValue, _ := constant.Float64Val(value)
+	if math.IsInf(floatValue, 0) || math.IsNaN(floatValue) {
+		return 0, false
+	}
+	return floatValue, true
 }
 
 func attachEnumLikeConstants(pkg *GoPackage) {
@@ -334,8 +369,8 @@ func (c *Checker) resolveDirectGoPackageValue(alias string, name string, loc par
 	if !ok || goImport.pkg == nil {
 		return nil
 	}
-	if _, ok := goImport.pkg.Constants[name]; ok {
-		return c.resolveDirectGoConstant(alias, name, loc)
+	if constant, ok := goImport.pkg.Constants[name]; ok {
+		return c.resolveDirectGoConstantValue(goImport, constant, loc)
 	}
 	if variable, ok := goImport.pkg.Variables[name]; ok {
 		return c.resolveDirectGoVariable(goImport, variable, loc)
@@ -368,33 +403,49 @@ func (c *Checker) resolveDirectGoConstant(alias string, name string, loc parse.L
 	}
 	constant, ok := goImport.pkg.Constants[name]
 	if !ok {
-		c.addError(fmt.Sprintf("Go package %q has no exported enum-like constant %q", goImport.importPath, name), loc)
+		c.addError(fmt.Sprintf("Go package %q has no exported constant %q", goImport.importPath, name), loc)
 		return nil
 	}
-	if !goConstantIsEnumCandidate(goImport.importPath, constant) {
-		c.addError(fmt.Sprintf("Go constant %s.%s is not an exported typed integer enum-like constant", goImport.pkg.Name, name), loc)
-		return nil
-	}
-	goType, ok := goImport.pkg.Types[constant.Type.Name]
-	if ok && !goTypeHasEnumConstant(goType, name) {
-		c.addError(fmt.Sprintf("Go constant %s.%s is not part of a closed enum-like type", goImport.pkg.Name, name), loc)
-		return nil
-	}
-	if !ok {
-		c.addError(fmt.Sprintf("Go package %q has no exported type %q", goImport.importPath, constant.Type.Name), loc)
-		return nil
-	}
-	enum := c.directGoEnumType(goImport, goType, loc)
-	if enum == nil {
-		return nil
-	}
-	for i := range enum.Values {
-		if enum.Values[i].Name == name {
-			return &EnumVariant{enum: enum, Variant: i, EnumType: enum, Discriminant: enum.Values[i].Value}
+	return c.resolveDirectGoConstantValue(goImport, constant, loc)
+}
+
+func (c *Checker) resolveDirectGoConstantValue(goImport directGoImport, constant GoConstant, loc parse.Location) Expression {
+	if goConstantIsEnumCandidate(goImport.importPath, constant) {
+		if goType, ok := goImport.pkg.Types[constant.Type.Name]; ok && goTypeHasEnumConstant(goType, constant.Name) {
+			enum := c.directGoEnumType(goImport, goType, loc)
+			if enum == nil {
+				return nil
+			}
+			for i := range enum.Values {
+				if enum.Values[i].Name == constant.Name {
+					return &EnumVariant{enum: enum, Variant: i, EnumType: enum, Discriminant: enum.Values[i].Value}
+				}
+			}
+			c.addError(fmt.Sprintf("Go constant %s.%s is not part of enum-like type %s", goImport.pkg.Name, constant.Name, goType.Name), loc)
+			return nil
 		}
 	}
-	c.addError(fmt.Sprintf("Go constant %s.%s is not part of enum-like type %s", goImport.pkg.Name, name, goType.Name), loc)
-	return nil
+	valueType, ok := c.directGoConstantArdType(goImport, constant, loc)
+	if !ok {
+		return nil
+	}
+	binding := canonicalDirectGoBinding(goImport.importPath, goImport.alias, []string{constant.Name})
+	return &DirectGoPackageValue{ImportPath: goImport.importPath, Alias: goImport.alias, PackageName: goImport.pkg.Name, Name: constant.Name, Binding: binding, ValueType: valueType}
+}
+
+func (c *Checker) directGoConstantArdType(goImport directGoImport, constant GoConstant, loc parse.Location) (Type, bool) {
+	switch {
+	case constant.HasBoolValue:
+		return Bool, true
+	case constant.HasStringValue:
+		return Str, true
+	case constant.HasIntValue:
+		return Int, true
+	case constant.HasFloatValue:
+		return Float, true
+	}
+	c.addError(fmt.Sprintf("Go constant %s.%s has unsupported type %s", goImport.pkg.Name, constant.Name, constant.Type.String()), loc)
+	return nil, false
 }
 
 func (c *Checker) directGoEnumType(goImport directGoImport, goType GoType, loc parse.Location) *Enum {
@@ -1376,20 +1427,25 @@ func goValueTypeSeen(typ types.Type, seen map[types.Type]bool) GoValueType {
 	switch underlying := typ.Underlying().(type) {
 	case *types.Basic:
 		switch underlying.Kind() {
-		case types.Bool:
+		case types.Bool, types.UntypedBool:
 			out.Kind = GoValueBool
-		case types.String:
+		case types.String, types.UntypedString:
 			out.Kind = GoValueString
 		case types.Int, types.Int8, types.Int16, types.Int32, types.Int64:
 			out.Kind = GoValueInt
 			out.Bits = basicIntBits(underlying.Kind())
+		case types.UntypedInt:
+			out.Kind = GoValueInt
+		case types.UntypedRune:
+			out.Kind = GoValueInt
+			out.Bits = 32
 		case types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64, types.Uintptr:
 			out.Kind = GoValueUint
 			out.Bits = basicIntBits(underlying.Kind())
 		case types.Float32:
 			out.Kind = GoValueFloat
 			out.Bits = 32
-		case types.Float64:
+		case types.Float64, types.UntypedFloat:
 			out.Kind = GoValueFloat
 			out.Bits = 64
 		}
