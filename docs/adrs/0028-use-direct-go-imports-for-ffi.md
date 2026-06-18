@@ -93,15 +93,20 @@ fn active(status: vaxis::AnimationStatus) Bool {
     vaxis::AnimationIdle => false
     vaxis::AnimationForward => true
     vaxis::AnimationCompleted => false
+    _ => false
   }
 }
 ```
 
 Do not require or add an `extern enum` declaration. Do not strip prefixes or rename constants. The Ard names are the exported Go constant names exactly as imported through the Go namespace.
 
-Within Ard, a Go enum-like type is treated as closed over the discovered exported typed constants. Exhaustiveness checking may use that discovered set. To preserve Ard's closed-enum semantics at the FFI boundary, values of imported enum-like types returned from Go extern calls should be validated before entering ordinary Ard code. If Go returns a value outside the discovered set, the generated Go boundary code should fail loudly rather than manufacture an impossible Ard enum value.
+Within Ard, inferred Go enum-like types are treated as open. The discovered constants define known named values, but they are not assumed to be the complete value set because Go named integer types can still be constructed from arbitrary numeric values. A `match` over an imported Go enum-like type must include a catch-all arm even when it lists every discovered constant.
 
-Go permits multiple exported typed constants to have the same value. Ard should import those constants as aliases rather than rejecting the package. Exhaustiveness for imported enum-like types is based on the set of distinct constant values, so matching any alias covers that value. If a `match` includes multiple aliases for the same value, later arms for that value are unreachable and should be diagnosed as unreachable or duplicate patterns.
+Because inferred Go enum-like types are open, direct Go FFI returns of those types are not validated against the discovered constants. Code that needs closed-enum semantics should introduce an Ard wrapper enum or companion adapter that performs domain-specific validation before returning an Ard enum.
+
+The initial implementation imports enum-like constants only for exported named Go `int` types whose constant values fit Ard enum discriminants. Unsigned and narrower/wider integer-backed enum-like constants are deferred until their range and representation rules are explicit.
+
+Go permits multiple exported typed constants to have the same value. Ard should import those constants as aliases rather than rejecting the package. Duplicate-pattern checking for imported enum-like values is based on the set of distinct constant values, so matching any alias covers that value. If a `match` includes multiple aliases for the same value, later arms for that value are unreachable and should be diagnosed as unreachable or duplicate patterns.
 
 Do not add `extern const` as part of this decision. Direct imported Go constants are only promoted into Ard values through the enum-like typed constant rule above.
 
@@ -165,7 +170,7 @@ The standard-library migration exposes implementation gaps that should be addres
 - The loader should be hidden behind an internal resolver interface so checker code does not depend directly on Go tooling details.
 - Generated Go code must import directly referenced Go packages and lower namespace references to Go selectors.
 - Generated Go code must also emit scalar conversions and range checks at direct Go FFI boundaries.
-- Runtime validation for imported enum-like values protects Ard's closed-enum assumptions, but adds boundary code for Go returns of those types.
+- Inferred Go enum-like values remain open: matches require catch-all arms, and generated direct Go boundaries do not validate returns against the discovered constants.
 - Go constant aliases are supported, but they are value aliases: matching one alias makes other aliases for the same value unreachable in the same `match`.
 - Existing string extern bindings remain supported, so migration can be incremental.
 
