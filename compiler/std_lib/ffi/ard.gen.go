@@ -169,7 +169,6 @@ type Host struct {
 	FSIsDir              func(path string) bool
 	FSIsFile             func(path string) bool
 	FSListDir            func(path string) (map[string]bool, error)
-	FSReadFile           func(path string) (string, error)
 	FloatFromInt         func(int int) float64
 	GetPathValue         func(req *http.Request, name string) string
 	GetQueryParam        func(req *http.Request, name string) string
@@ -290,9 +289,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.FSListDir != nil {
 		functions["FS_ListDir"] = h.FSListDir
-	}
-	if h.FSReadFile != nil {
-		functions["FS_ReadFile"] = h.FSReadFile
 	}
 	if h.FloatFromInt != nil {
 		functions["FloatFromInt"] = h.FloatFromInt

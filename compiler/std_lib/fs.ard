@@ -1,3 +1,5 @@
+use ard/byte as Byte
+use ard/string as Str
 use ard/testing
 
 use go:os
@@ -47,7 +49,14 @@ fn append(path: Str, content: Str) Void!Str {
   }
 }
 
-extern fn read(path: Str) Str!Str = "FS_ReadFile"
+fn read_bytes(path: Str) [Byte]!Str {
+  os::ReadFile(path)
+}
+
+fn read(path: Str) Str!Str {
+  let bytes = try read_bytes(path)
+  Str::from_bytes(bytes)
+}
 
 fn delete(path: Str) Void!Str {
   os::Remove(path)
@@ -113,6 +122,9 @@ test fn test_direct_file_helpers() Void!Str {
   let content = try read(file)
   try testing::assert(content == "hello world", "Expected append to add content")
 
+  let bytes = try read_bytes(file)
+  try testing::assert(bytes.size() == 11, "Expected read_bytes to return raw bytes")
+
   try copy(file, copy_path)
   let copied = try read(copy_path)
   try testing::assert(copied == "hello world", "Expected copy to preserve content")
@@ -124,5 +136,21 @@ test fn test_direct_file_helpers() Void!Str {
   delete(copy_path)
   delete_dir(dir)
 
+  testing::pass()
+}
+
+test fn test_read_rejects_invalid_utf8() Void!Str {
+  let file = "/tmp/ard_stdlib_fs_invalid_utf8.bin"
+  delete(file)
+
+  let invalid = Byte::from_int(255).expect("byte")
+  try os::WriteFile(file, [invalid], FILE_MODE)
+
+  try testing::assert(read(file).is_err(), "Expected read to reject invalid UTF-8")
+
+  let bytes = try read_bytes(file)
+  try testing::assert(bytes.size() == 1, "Expected read_bytes to preserve invalid UTF-8 bytes")
+
+  delete(file)
   testing::pass()
 }

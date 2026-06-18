@@ -9,8 +9,8 @@ This audit tracks the remaining Ard standard-library bindings that still use com
    - `ard/dynamic::{from_str, from_int, from_float, from_bool}` now use built-in `.to_dyn()` calls.
 
 2. **Partially completed filesystem migration**
-   - `fs::{write, copy, create_dir, create_file, append}` now use Ard functions over direct Go calls.
-   - Decide separately whether `fs::read` should preserve today's raw byte-to-string behavior or become UTF-8-validating via `Str::from_bytes`.
+   - `fs::{write, copy, create_dir, create_file, append, read, read_bytes}` now use Ard functions over direct Go calls.
+   - `fs::read` is now a UTF-8-validating text reader; `fs::read_bytes` preserves raw bytes for binary data.
 
 3. **Small SQL pure-Ard cleanup**
    - Move `sql::detect_driver` and `sql::extract_params` into Ard.
@@ -115,15 +115,15 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 
 ### `ard/fs`
 
-- Current adapters: exists/is-file/is-dir/read/list-dir.
+- Current adapters: exists/is-file/is-dir/list-dir.
 - Refactored to Ard + direct Go:
   - `write`: `os::WriteFile(path, content.bytes(), FILE_MODE)` using the current `0644` permission value.
   - `copy`: `os::ReadFile` then `os::WriteFile` with the current `0644` permission value.
   - `create_dir`: `os::MkdirAll(path, DIR_MODE)` using the current `0755` permission value.
   - `create_file`: `os::Create` then `os::File::Close`.
   - `append`: create-if-missing, `os::OpenFile` write-only, seek-to-end, `os::File::WriteString`, and `Close`.
-- Needs decision:
-  - `read` can become `os::ReadFile` plus `Str::from_bytes`, but that changes semantics from raw byte-to-string conversion to UTF-8 validation.
+  - `read`: `read_bytes` plus `Str::from_bytes`, making `read` a UTF-8-validating text reader.
+  - `read_bytes`: `os::ReadFile` for raw bytes and binary data.
 - Still necessary today:
   - `exists`, `is_file`, `is_dir` because `os.Stat` returns `os.FileInfo`, an interface type not currently representable as direct Ard type.
   - `list_dir` because `os.ReadDir` returns `[]os.DirEntry`, also an interface type surface, and the stdlib returns a stable Ard `DirEntry` struct.

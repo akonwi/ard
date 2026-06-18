@@ -79,7 +79,6 @@ func NewHost(config HostConfig) Host {
 		FSIsDir:              FSIsDir,
 		FSIsFile:             FSIsFile,
 		FSListDir:            FSListDir,
-		FSReadFile:           FSReadFile,
 		FloatFromInt:         FloatFromInt,
 		GetPathValue:         GetPathValue,
 		GetQueryParam:        GetQueryParam,
@@ -428,14 +427,6 @@ func FSIsFile(path string) bool {
 func FSIsDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
-}
-
-func FSReadFile(path string) (string, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(content), nil
 }
 
 func FSListDir(path string) (map[string]bool, error) {

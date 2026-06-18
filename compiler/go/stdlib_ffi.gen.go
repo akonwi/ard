@@ -68,7 +68,6 @@ var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
 	"FS_IsDir":             {function: "FSIsDir", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"FS_IsFile":            {function: "FSIsFile", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"FS_ListDir":           {function: "FSListDir", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"FS_ReadFile":          {function: "FSReadFile", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"FloatFromInt":         {function: "FloatFromInt", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"GetPathValue":         {function: "GetPathValue", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
 	"GetQueryParam":        {function: "GetQueryParam", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
