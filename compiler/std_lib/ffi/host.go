@@ -8,7 +8,6 @@ import (
 	"crypto/sha512"
 	"crypto/subtle"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
@@ -53,10 +52,6 @@ func NewHost(config HostConfig) Host {
 		RuneFromStr:          RuneFromStr,
 		StrFromUtf8:          StrFromUtf8,
 		StrFromRunes:         StrFromRunes,
-		Base64Decode:         Base64Decode,
-		Base64DecodeURL:      Base64DecodeURL,
-		Base64Encode:         Base64Encode,
-		Base64EncodeURL:      Base64EncodeURL,
 		BytesToDynamic:       BytesToDynamic,
 		CryptoHashPassword:   CryptoHashPassword,
 		CryptoMd5:            CryptoMd5,
@@ -229,44 +224,6 @@ func StrFromRunes(runes []rune) (string, error) {
 		}
 	}
 	return string(runes), nil
-}
-
-func Base64Encode(input []byte, noPad Maybe[bool]) string {
-	if noPad.IsSome() && noPad.Value() {
-		return base64.RawStdEncoding.EncodeToString(input)
-	}
-	return base64.StdEncoding.EncodeToString(input)
-}
-
-func Base64Decode(input string, noPad Maybe[bool]) ([]byte, error) {
-	enc := base64.StdEncoding
-	if noPad.IsSome() && noPad.Value() {
-		enc = base64.RawStdEncoding
-	}
-	decoded, err := enc.DecodeString(input)
-	if err != nil {
-		return nil, err
-	}
-	return decoded, nil
-}
-
-func Base64EncodeURL(input []byte, noPad Maybe[bool]) string {
-	if noPad.IsSome() && noPad.Value() {
-		return base64.RawURLEncoding.EncodeToString(input)
-	}
-	return base64.URLEncoding.EncodeToString(input)
-}
-
-func Base64DecodeURL(input string, noPad Maybe[bool]) ([]byte, error) {
-	enc := base64.URLEncoding
-	if noPad.IsSome() && noPad.Value() {
-		enc = base64.RawURLEncoding
-	}
-	decoded, err := enc.DecodeString(input)
-	if err != nil {
-		return nil, err
-	}
-	return decoded, nil
 }
 
 func CryptoMd5(input []byte) []byte {
