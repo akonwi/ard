@@ -75,16 +75,11 @@ func NewHost(config HostConfig) Host {
 		DynamicToList:        DynamicToList,
 		DynamicToMap:         DynamicToMap,
 		ExtractField:         ExtractField,
-		FSAppendFile:         FSAppendFile,
-		FSCopy:               FSCopy,
-		FSCreateDir:          FSCreateDir,
-		FSCreateFile:         FSCreateFile,
 		FSExists:             FSExists,
 		FSIsDir:              FSIsDir,
 		FSIsFile:             FSIsFile,
 		FSListDir:            FSListDir,
 		FSReadFile:           FSReadFile,
-		FSWriteFile:          FSWriteFile,
 		FloatFromInt:         FloatFromInt,
 		GetPathValue:         GetPathValue,
 		GetQueryParam:        GetQueryParam,
@@ -435,49 +430,12 @@ func FSIsDir(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-func FSCreateFile(path string) (bool, error) {
-	file, err := os.Create(path)
-	if err != nil {
-		return false, err
-	}
-	if err := file.Close(); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func FSWriteFile(path string, content string) error {
-	return os.WriteFile(path, []byte(content), 0o644)
-}
-
-func FSAppendFile(path string, content string) error {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	_, err = file.WriteString(content)
-	return err
-}
-
 func FSReadFile(path string) (string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
 	return string(content), nil
-}
-
-func FSCopy(from string, to string) error {
-	content, err := os.ReadFile(from)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(to, content, 0o644)
-}
-
-func FSCreateDir(path string) error {
-	return os.MkdirAll(path, 0o755)
 }
 
 func FSListDir(path string) (map[string]bool, error) {

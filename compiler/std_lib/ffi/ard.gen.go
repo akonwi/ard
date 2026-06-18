@@ -165,16 +165,11 @@ type Host struct {
 	DynamicToList        func(data any) ([]any, error)
 	DynamicToMap         func(data any) (map[any]any, error)
 	ExtractField         func(data any, name string) (any, error)
-	FSAppendFile         func(path string, content string) error
-	FSCopy               func(from string, to string) error
-	FSCreateDir          func(path string) error
-	FSCreateFile         func(path string) (bool, error)
 	FSExists             func(path string) bool
 	FSIsDir              func(path string) bool
 	FSIsFile             func(path string) bool
 	FSListDir            func(path string) (map[string]bool, error)
 	FSReadFile           func(path string) (string, error)
-	FSWriteFile          func(path string, content string) error
 	FloatFromInt         func(int int) float64
 	GetPathValue         func(req *http.Request, name string) string
 	GetQueryParam        func(req *http.Request, name string) string
@@ -284,18 +279,6 @@ func (h Host) Functions() map[string]any {
 	if h.ExtractField != nil {
 		functions["ExtractField"] = h.ExtractField
 	}
-	if h.FSAppendFile != nil {
-		functions["FS_AppendFile"] = h.FSAppendFile
-	}
-	if h.FSCopy != nil {
-		functions["FS_Copy"] = h.FSCopy
-	}
-	if h.FSCreateDir != nil {
-		functions["FS_CreateDir"] = h.FSCreateDir
-	}
-	if h.FSCreateFile != nil {
-		functions["FS_CreateFile"] = h.FSCreateFile
-	}
 	if h.FSExists != nil {
 		functions["FS_Exists"] = h.FSExists
 	}
@@ -310,9 +293,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.FSReadFile != nil {
 		functions["FS_ReadFile"] = h.FSReadFile
-	}
-	if h.FSWriteFile != nil {
-		functions["FS_WriteFile"] = h.FSWriteFile
 	}
 	if h.FloatFromInt != nil {
 		functions["FloatFromInt"] = h.FloatFromInt

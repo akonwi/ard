@@ -8,8 +8,8 @@ This audit tracks the remaining Ard standard-library bindings that still use com
    - `ard/list::new` now returns a typed empty-list literal.
    - `ard/dynamic::{from_str, from_int, from_float, from_bool}` now use built-in `.to_dyn()` calls.
 
-2. **Useful filesystem migration**
-   - Refactor `fs::{write, copy, create_dir, create_file, append}` to Ard functions over direct Go calls.
+2. **Partially completed filesystem migration**
+   - `fs::{write, copy, create_dir, create_file, append}` now use Ard functions over direct Go calls.
    - Decide separately whether `fs::read` should preserve today's raw byte-to-string behavior or become UTF-8-validating via `Str::from_bytes`.
 
 3. **Small SQL pure-Ard cleanup**
@@ -115,13 +115,13 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 
 ### `ard/fs`
 
-- Current adapters: exists/is-file/is-dir/create-file/write/append/read/copy/create-dir/list-dir.
-- Can refactor now with Ard + direct Go:
-  - `write`: `os::WriteFile(path, content.bytes(), 420)` using the current `0644` permission value.
+- Current adapters: exists/is-file/is-dir/read/list-dir.
+- Refactored to Ard + direct Go:
+  - `write`: `os::WriteFile(path, content.bytes(), FILE_MODE)` using the current `0644` permission value.
   - `copy`: `os::ReadFile` then `os::WriteFile` with the current `0644` permission value.
-  - `create_dir`: `os::MkdirAll(path, 493)` using the current `0755` permission value.
-  - `create_file`: `os::Create` then `os::File::Close`
-  - `append`: `os::OpenFile` with flags plus `os::File::WriteString` and `Close`
+  - `create_dir`: `os::MkdirAll(path, DIR_MODE)` using the current `0755` permission value.
+  - `create_file`: `os::Create` then `os::File::Close`.
+  - `append`: create-if-missing, `os::OpenFile` write-only, seek-to-end, `os::File::WriteString`, and `Close`.
 - Needs decision:
   - `read` can become `os::ReadFile` plus `Str::from_bytes`, but that changes semantics from raw byte-to-string conversion to UTF-8 validation.
 - Still necessary today:
