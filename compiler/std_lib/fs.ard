@@ -2,6 +2,7 @@ use ard/byte as Byte
 use ard/string as Str
 use ard/testing
 
+use go:io
 use go:os
 use go:path/filepath
 
@@ -33,7 +34,7 @@ fn append(path: Str, content: Str) Void!Str {
   }
 
   let file = try os::OpenFile(path, os::O_WRONLY, FILE_MODE)
-  let seek_result: Int!Str = os::File::Seek(file, 0, 2)
+  let seek_result: Int!Str = os::File::Seek(file, 0, io::SeekEnd)
   let write_result = match seek_result {
     ok(_) => os::File::WriteString(file, content),
     err(e) => Result::err(e),
