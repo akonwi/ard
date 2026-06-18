@@ -15,10 +15,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -53,14 +51,12 @@ func NewHost(config HostConfig) Host {
 		ByteFromInt:          ByteFromInt,
 		RuneFromInt:          RuneFromInt,
 		RuneFromStr:          RuneFromStr,
-		StrSplit:             StrSplit,
 		StrFromUtf8:          StrFromUtf8,
 		StrFromRunes:         StrFromRunes,
 		Base64Decode:         Base64Decode,
 		Base64DecodeURL:      Base64DecodeURL,
 		Base64Encode:         Base64Encode,
 		Base64EncodeURL:      Base64EncodeURL,
-		BoolToDynamic:        BoolToDynamic,
 		BytesToDynamic:       BytesToDynamic,
 		CryptoHashPassword:   CryptoHashPassword,
 		CryptoMd5:            CryptoMd5,
@@ -78,30 +74,12 @@ func NewHost(config HostConfig) Host {
 		DecodeString:         DecodeString,
 		DynamicToList:        DynamicToList,
 		DynamicToMap:         DynamicToMap,
-		EnvGet:               EnvGet,
 		ExtractField:         ExtractField,
-		FSAbs:                FSAbs,
-		FSAppendFile:         FSAppendFile,
-		FSCopy:               FSCopy,
-		FSCreateDir:          FSCreateDir,
-		FSCreateFile:         FSCreateFile,
-		FSCwd:                FSCwd,
-		FSDeleteDir:          FSDeleteDir,
-		FSDeleteFile:         FSDeleteFile,
 		FSExists:             FSExists,
 		FSIsDir:              FSIsDir,
 		FSIsFile:             FSIsFile,
 		FSListDir:            FSListDir,
-		FSReadFile:           FSReadFile,
-		FSRename:             FSRename,
-		FSWriteFile:          FSWriteFile,
-		FloatCeil:            FloatCeil,
-		FloatFloor:           FloatFloor,
-		FloatRound:           FloatRound,
-		FloatFormat:          FloatFormat,
 		FloatFromInt:         FloatFromInt,
-		FloatFromStr:         FloatFromStr,
-		FloatToDynamic:       FloatToDynamic,
 		GetPathValue:         GetPathValue,
 		GetQueryParam:        GetQueryParam,
 		GetReqPath:           GetReqPath,
@@ -111,10 +89,6 @@ func NewHost(config HostConfig) Host {
 		HTTPResponseHeaders:  HTTPResponseHeaders,
 		HTTPResponseStatus:   HTTPResponseStatus,
 		HTTPServe:            HTTPServe,
-		HexDecode:            HexDecode,
-		HexEncode:            HexEncode,
-		IntFromStr:           IntFromStr,
-		IntToDynamic:         IntToDynamic,
 		IsNil:                IsNil,
 		JsonEncode:           JsonEncode,
 		JsonToDynamic:        JsonToDynamic,
@@ -123,16 +97,13 @@ func NewHost(config HostConfig) Host {
 		OsArgs:               func() []string { return hostOSArgs(args) },
 		Print:                Print,
 		ReadLine:             ReadLine,
-		Sleep:                Sleep,
 		SqlBeginTx:           SqlBeginTx,
 		SqlClose:             SqlClose,
 		SqlCommit:            SqlCommit,
 		SqlCreateConnection:  SqlCreateConnection,
 		SqlExecute:           SqlExecute,
-		SqlExtractParams:     SqlExtractParams,
 		SqlQuery:             SqlQuery,
 		SqlRollback:          SqlRollback,
-		StrToDynamic:         StrToDynamic,
 		VoidToDynamic:        VoidToDynamic,
 	}
 }
@@ -190,10 +161,6 @@ func ReadLine() (string, error) {
 	return strings.TrimRight(line, "\r\n"), nil
 }
 
-func Sleep(ns int) {
-	time.Sleep(time.Duration(ns))
-}
-
 func ChannelSend[T any](ch chan T, value T) (sent bool) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -248,10 +215,6 @@ func RuneFromStr(value string) Maybe[rune] {
 	return Some(runes[0])
 }
 
-func StrSplit(input string, delimiter string) []string {
-	return strings.Split(input, delimiter)
-}
-
 func StrFromUtf8(bytes []byte) (string, error) {
 	if !utf8.Valid(bytes) {
 		return "", errors.New("invalid UTF-8")
@@ -300,18 +263,6 @@ func Base64DecodeURL(input string, noPad Maybe[bool]) ([]byte, error) {
 		enc = base64.RawURLEncoding
 	}
 	decoded, err := enc.DecodeString(input)
-	if err != nil {
-		return nil, err
-	}
-	return decoded, nil
-}
-
-func HexEncode(input []byte) string {
-	return hex.EncodeToString(input)
-}
-
-func HexDecode(input string) ([]byte, error) {
-	decoded, err := hex.DecodeString(input)
 	if err != nil {
 		return nil, err
 	}
@@ -458,51 +409,8 @@ func validateScryptParams(n, r, p, dkLen int) error {
 	return nil
 }
 
-func FloatFromStr(str string) Maybe[float64] {
-	value, err := strconv.ParseFloat(str, 64)
-	if err != nil {
-		return None[float64]()
-	}
-	return Some(value)
-}
-
 func FloatFromInt(value int) float64 {
 	return float64(value)
-}
-
-func FloatFloor(value float64) float64 {
-	return math.Floor(value)
-}
-
-func FloatCeil(value float64) float64 {
-	return math.Ceil(value)
-}
-
-func FloatRound(value float64) float64 {
-	return math.Round(value)
-}
-
-func FloatFormat(value float64, decimals int) string {
-	if decimals < 0 {
-		decimals = 0
-	}
-	return strconv.FormatFloat(value, 'f', decimals, 64)
-}
-
-func IntFromStr(str string) Maybe[int] {
-	value, err := strconv.Atoi(str)
-	if err != nil {
-		return None[int]()
-	}
-	return Some(value)
-}
-
-func EnvGet(key string) Maybe[string] {
-	value, ok := os.LookupEnv(key)
-	if !ok {
-		return None[string]()
-	}
-	return Some(value)
 }
 
 func FSExists(path string) bool {
@@ -518,71 +426,6 @@ func FSIsFile(path string) bool {
 func FSIsDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
-}
-
-func FSCreateFile(path string) (bool, error) {
-	file, err := os.Create(path)
-	if err != nil {
-		return false, err
-	}
-	if err := file.Close(); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func FSWriteFile(path string, content string) error {
-	return os.WriteFile(path, []byte(content), 0o644)
-}
-
-func FSAppendFile(path string, content string) error {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	_, err = file.WriteString(content)
-	return err
-}
-
-func FSReadFile(path string) (string, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(content), nil
-}
-
-func FSDeleteFile(path string) error {
-	return os.Remove(path)
-}
-
-func FSCopy(from string, to string) error {
-	content, err := os.ReadFile(from)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(to, content, 0o644)
-}
-
-func FSRename(from string, to string) error {
-	return os.Rename(from, to)
-}
-
-func FSCwd() (string, error) {
-	return os.Getwd()
-}
-
-func FSAbs(path string) (string, error) {
-	return filepath.Abs(path)
-}
-
-func FSCreateDir(path string) error {
-	return os.MkdirAll(path, 0o755)
-}
-
-func FSDeleteDir(path string) error {
-	return os.RemoveAll(path)
 }
 
 func FSListDir(path string) (map[string]bool, error) {
@@ -613,8 +456,7 @@ func CryptoUUID() string {
 	)
 }
 
-func SqlCreateConnection(connectionString string) (*sql.DB, error) {
-	driver := SqlDetectDriver(connectionString)
+func SqlCreateConnection(driver string, connectionString string) (*sql.DB, error) {
 	db, err := sql.Open(driver, connectionString)
 	if err != nil {
 		return nil, err
@@ -658,22 +500,6 @@ func SqlRollback(tx *sql.Tx) error {
 	return tx.Rollback()
 }
 
-func SqlExtractParams(sqlStr string) []string {
-	delimiters := []string{" ", "(", ")", ",", ";", "=", "<", ">", "!", "\t", "\n", "\r"}
-	tokens := splitSQLByMultipleDelimiters(sqlStr, delimiters)
-	var paramNames []string
-	for _, token := range tokens {
-		if strings.HasPrefix(token, "@") && len(token) > 1 {
-			paramName := strings.TrimLeft(token[1:], "@")
-			paramName = strings.TrimRight(paramName, ".,;:!?")
-			if paramName != "" {
-				paramNames = append(paramNames, paramName)
-			}
-		}
-	}
-	return paramNames
-}
-
 func SqlQuery(conn any, driver string, sqlStr string, values []any) ([]any, error) {
 	runner, ok := resolveSQLRunner(conn)
 	if !ok {
@@ -691,33 +517,6 @@ func SqlExecute(conn any, driver string, sqlStr string, values []any) error {
 	sqlStr = normalizeSQLPlaceholders(sqlStr, driver)
 	_, err := runner.Exec(sqlStr, values...)
 	return err
-}
-
-func SqlDetectDriver(connStr string) string {
-	connStr = strings.TrimSpace(connStr)
-	if strings.HasPrefix(connStr, "postgres://") || strings.HasPrefix(connStr, "postgresql://") {
-		return "pgx"
-	}
-	if strings.Contains(connStr, "@tcp(") || strings.Contains(connStr, "@unix(") {
-		return "mysql"
-	}
-	return "sqlite3"
-}
-
-func splitSQLByMultipleDelimiters(s string, delimiters []string) []string {
-	result := s
-	for _, delimiter := range delimiters {
-		result = strings.ReplaceAll(result, delimiter, " ")
-	}
-	tokens := strings.Split(result, " ")
-	nonEmpty := make([]string, 0, len(tokens))
-	for _, token := range tokens {
-		token = strings.TrimSpace(token)
-		if token != "" {
-			nonEmpty = append(nonEmpty, token)
-		}
-	}
-	return nonEmpty
 }
 
 func resolveSQLRunner(raw any) (sqlRunner, bool) {
@@ -810,22 +609,6 @@ func normalizeSQLDynamicValue(value any) any {
 	default:
 		return value
 	}
-}
-
-func StrToDynamic(value string) any {
-	return value
-}
-
-func IntToDynamic(value int) any {
-	return value
-}
-
-func FloatToDynamic(value float64) any {
-	return value
-}
-
-func BoolToDynamic(value bool) any {
-	return value
 }
 
 func BytesToDynamic(value []byte) any {

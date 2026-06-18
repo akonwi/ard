@@ -129,7 +129,9 @@ func TestImportStatements(t *testing.T) {
 				`use ard/fs`,
 				`use github.com/google/go-cmp/cmp`,
 				`use github.com/tree-sitter/go-tree-sitter as ts`,
+				`use go:git.sr.ht/~rockorager/vaxis as vaxis`,
 				`// comment`,
+				`use go:math`,
 				`use github.com/tree-sitter/tree-sitter`,
 			}, "\n"),
 			output: Program{
@@ -145,6 +147,16 @@ func TestImportStatements(t *testing.T) {
 					{
 						Path: "github.com/tree-sitter/go-tree-sitter",
 						Name: "ts",
+					},
+					{
+						Path: "git.sr.ht/~rockorager/vaxis",
+						Name: "vaxis",
+						Kind: ImportKindGo,
+					},
+					{
+						Path: "math",
+						Name: "math",
+						Kind: ImportKindGo,
 					},
 					{
 						Path: "github.com/tree-sitter/tree-sitter",

@@ -52,9 +52,17 @@ func (l Location) GetStart() Point {
 	return l.Start
 }
 
+type ImportKind string
+
+const (
+	ImportKindModule ImportKind = ""
+	ImportKindGo     ImportKind = "go"
+)
+
 type Import struct {
 	Path string
 	Name string
+	Kind ImportKind
 	Location
 }
 

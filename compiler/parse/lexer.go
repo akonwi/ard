@@ -611,7 +611,7 @@ func (l *lexer) takePath(start *char) (token, bool) {
 	}
 	for l.hasMore() {
 		peek := l.peek()
-		if peek.isAlphaNumeric() || peek.raw == '/' || peek.raw == '.' || peek.raw == '-' {
+		if peek.isAlphaNumeric() || peek.raw == '/' || peek.raw == '.' || peek.raw == '-' || peek.raw == ':' || peek.raw == '~' {
 			l.advance()
 		} else {
 			break

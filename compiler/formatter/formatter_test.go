@@ -50,6 +50,11 @@ func TestFormat(t *testing.T) {
 			output: "use ard/io\n\nuse github.com/alpha/lib\nuse github.com/zeta/lib\n\nlet _ = io::println(\"hi\")\nlet _ = lib::new()\n",
 		},
 		{
+			name:   "preserves direct Go imports",
+			input:  "use go:math\nuse go:git.sr.ht/~rockorager/vaxis as vaxis\nlet _ = math::Floor\nlet _ = vaxis::New\n",
+			output: "use go:git.sr.ht/~rockorager/vaxis\nuse go:math\n\nlet _ = math::Floor\nlet _ = vaxis::New\n",
+		},
+		{
 			name:   "removes unused imports",
 			input:  "use ard/io\nuse app/unused\nuse app/text\n\nlet label = text::new(\"hi\")\n",
 			output: "use app/text\n\nlet label = text::new(\"hi\")\n",
@@ -88,6 +93,16 @@ func TestFormat(t *testing.T) {
 			name:   "formats go extern binding blocks as shorthand",
 			input:  "extern fn read_line() Str!Str = {\n  go = \"ReadLine\"\n}\n",
 			output: "extern fn read_line() Str!Str = \"ReadLine\"\n",
+		},
+		{
+			name:   "formats direct Go extern binding as namespace path",
+			input:  "extern fn floor(value: Float) Float = {\n  go = math::Floor\n}\n",
+			output: "extern fn floor(value: Float) Float = math::Floor\n",
+		},
+		{
+			name:   "keeps imports used only by extern bindings",
+			input:  "use go:math\nextern fn floor(value: Float) Float = math::Floor\n",
+			output: "use go:math\n\nextern fn floor(value: Float) Float = math::Floor\n",
 		},
 		{
 			name:   "formats extern type declaration",
@@ -228,6 +243,11 @@ func TestFormat(t *testing.T) {
 			name:   "formats nullable result type with grouping",
 			input:  "let result: (Int!Str)? = maybe::none()\n",
 			output: "let result: (Int!Str)? = maybe::none()\n",
+		},
+		{
+			name:   "formats mutable result value type with grouping",
+			input:  "let result: (mut File)!Str = test\n",
+			output: "let result: (mut File)!Str = test\n",
 		},
 		{
 			name:   "formats test function",

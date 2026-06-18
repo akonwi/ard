@@ -324,6 +324,9 @@ func staticCompletionItems(target string, prog *parse.Program, filePath string) 
 		}
 	}
 
+	for _, item := range directGoPackageCompletionItems(target, prog, filePath) {
+		add(item)
+	}
 	if mod, ok := importedModuleForAlias(target, prog, filePath); ok {
 		for _, item := range moduleCompletionItems(target, mod, prog, filePath) {
 			add(item)
@@ -335,8 +338,75 @@ func staticCompletionItems(target string, prog *parse.Program, filePath string) 
 	for _, item := range importedTypeStaticCompletionItems(target, prog, filePath) {
 		add(item)
 	}
+	for _, item := range directGoTypeStaticCompletionItems(target, prog, filePath) {
+		add(item)
+	}
 
 	return sortedCompletionItems(items)
+}
+
+func directGoPackageCompletionItems(alias string, prog *parse.Program, filePath string) []protocol.CompletionItem {
+	imp, ok := directGoImportForAlias(alias, prog)
+	if !ok {
+		return nil
+	}
+	pkg, ok := loadDirectGoPackage(imp, filePath)
+	if !ok {
+		return nil
+	}
+	ctx := directGoHoverContextForImport(imp, prog)
+	items := []protocol.CompletionItem{}
+	for name, fn := range pkg.Functions {
+		if item, ok := directGoFunctionCompletionItem(alias, name, fn.Signature, false, ctx); ok {
+			items = append(items, item)
+		}
+	}
+	for name, typ := range pkg.Types {
+		kind := protocol.CompletionItemKindClass
+		if len(typ.EnumConstants) > 0 {
+			kind = protocol.CompletionItemKindEnum
+		}
+		items = append(items, protocol.CompletionItem{Label: name, Kind: kind, Detail: alias + "::" + name, InsertText: name})
+		for _, constant := range typ.EnumConstants {
+			items = append(items, protocol.CompletionItem{Label: constant.Name, Kind: protocol.CompletionItemKindEnumMember, Detail: alias + "::" + typ.Name, InsertText: constant.Name})
+		}
+	}
+	return items
+}
+
+func directGoTypeStaticCompletionItems(target string, prog *parse.Program, filePath string) []protocol.CompletionItem {
+	alias, typeName, ok := importedTypeDisplayParts(target)
+	if !ok {
+		return nil
+	}
+	imp, ok := directGoImportForAlias(alias, prog)
+	if !ok {
+		return nil
+	}
+	pkg, ok := loadDirectGoPackage(imp, filePath)
+	if !ok {
+		return nil
+	}
+	typ, ok := pkg.Types[typeName]
+	if !ok {
+		return nil
+	}
+	ctx := directGoHoverContextForImport(imp, prog)
+	items := []protocol.CompletionItem{}
+	for name, method := range typ.Methods {
+		if item, ok := directGoFunctionCompletionItem(target, name, method.Signature, true, ctx); ok {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func directGoFunctionCompletionItem(qualifier string, label string, signature checker.GoSignature, includeReceiver bool, ctx directGoHoverContext) (protocol.CompletionItem, bool) {
+	sig := directGoFunctionHoverSignature(qualifier, label, signature, includeReceiver, ctx)
+	if sig == nil {
+		return protocol.CompletionItem{}, false
+	}
+	return protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindFunction, Detail: formatCompletionStaticFunctionDetail(sig), InsertText: label}, true
 }
 
 func moduleCompletionItems(alias string, mod checker.Module, prog *parse.Program, filePath string) []protocol.CompletionItem {

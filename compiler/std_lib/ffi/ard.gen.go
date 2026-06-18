@@ -146,7 +146,6 @@ type Host struct {
 	Base64DecodeURL      func(input string, no_pad Maybe[bool]) ([]byte, error)
 	Base64Encode         func(input []byte, no_pad Maybe[bool]) string
 	Base64EncodeURL      func(input []byte, no_pad Maybe[bool]) string
-	BoolToDynamic        func(val bool) any
 	ByteFromInt          func(value int) Maybe[byte]
 	BytesToDynamic       func(bytes []byte) any
 	CryptoHashPassword   func(password string, cost Maybe[int]) (string, error)
@@ -165,69 +164,40 @@ type Host struct {
 	DecodeString         func(data any) Result[string, Error]
 	DynamicToList        func(data any) ([]any, error)
 	DynamicToMap         func(data any) (map[any]any, error)
-	EnvGet               func(key string) Maybe[string]
 	ExtractField         func(data any, name string) (any, error)
-	FSAbs                func(path string) (string, error)
-	FSAppendFile         func(path string, content string) error
-	FSCopy               func(from string, to string) error
-	FSCreateDir          func(path string) error
-	FSCreateFile         func(path string) (bool, error)
-	FSCwd                func() (string, error)
-	FSDeleteDir          func(path string) error
-	FSDeleteFile         func(path string) error
 	FSExists             func(path string) bool
 	FSIsDir              func(path string) bool
 	FSIsFile             func(path string) bool
 	FSListDir            func(path string) (map[string]bool, error)
-	FSReadFile           func(path string) (string, error)
-	FSRename             func(from string, to string) error
-	FSWriteFile          func(path string, content string) error
-	FloatCeil            func(float float64) float64
-	FloatFloor           func(float float64) float64
-	FloatFormat          func(value float64, decimals int) string
 	FloatFromInt         func(int int) float64
-	FloatFromStr         func(string string) Maybe[float64]
-	FloatRound           func(float float64) float64
-	FloatToDynamic       func(val float64) any
 	GetPathValue         func(req *http.Request, name string) string
 	GetQueryParam        func(req *http.Request, name string) string
 	GetReqPath           func(req *http.Request) string
-	GetTodayString       func() string
 	HTTPDo               func(method string, url string, body any, headers map[string]string, timeout Maybe[int]) (*http.Response, error)
 	HTTPResponseBody     func(resp *http.Response) (string, error)
 	HTTPResponseClose    func(resp *http.Response)
 	HTTPResponseHeaders  func(resp *http.Response) map[string]string
 	HTTPResponseStatus   func(resp *http.Response) int
 	HTTPServe            func(port int, handlers map[string]func(Request, *Response)) error
-	HexDecode            func(input string) ([]byte, error)
-	HexEncode            func(bytes []byte) string
-	IntFromStr           func(str string) Maybe[int]
-	IntToDynamic         func(val int) any
 	IsNil                func(data any) bool
 	JsonEncode           func(value any) (string, error)
 	JsonToDynamic        func(json string) (any, error)
 	ListToDynamic        func(list []any) any
 	MapToDynamic         func(from map[string]any) any
-	Now                  func() int
 	OsArgs               func() []string
 	Print                func(string string)
 	ReadLine             func() (string, error)
 	RuneFromInt          func(value int) Maybe[rune]
 	RuneFromStr          func(value string) Maybe[rune]
-	Sleep                func(ms int)
 	SqlBeginTx           func(db *sql.DB) (*sql.Tx, error)
 	SqlClose             func(db *sql.DB) error
 	SqlCommit            func(tx *sql.Tx) error
-	SqlCreateConnection  func(connection_string string) (*sql.DB, error)
-	SqlDetectDriver      func(connection_string string) string
+	SqlCreateConnection  func(driver string, connection_string string) (*sql.DB, error)
 	SqlExecute           func(conn any, driver string, sql string, values []any) error
-	SqlExtractParams     func(sql string) []string
 	SqlQuery             func(conn any, driver string, sql string, values []any) ([]any, error)
 	SqlRollback          func(tx *sql.Tx) error
 	StrFromRunes         func(runes []rune) (string, error)
 	StrFromUtf8          func(bytes []byte) (string, error)
-	StrSplit             func(input string, delimiter string) []string
-	StrToDynamic         func(val string) any
 	VoidToDynamic        func() any
 	WaitFor              func(wg WaitGroup)
 }
@@ -248,9 +218,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.Base64EncodeURL != nil {
 		functions["Base64EncodeURL"] = h.Base64EncodeURL
-	}
-	if h.BoolToDynamic != nil {
-		functions["BoolToDynamic"] = h.BoolToDynamic
 	}
 	if h.ByteFromInt != nil {
 		functions["ByteFromInt"] = h.ByteFromInt
@@ -306,35 +273,8 @@ func (h Host) Functions() map[string]any {
 	if h.DynamicToMap != nil {
 		functions["DynamicToMap"] = h.DynamicToMap
 	}
-	if h.EnvGet != nil {
-		functions["EnvGet"] = h.EnvGet
-	}
 	if h.ExtractField != nil {
 		functions["ExtractField"] = h.ExtractField
-	}
-	if h.FSAbs != nil {
-		functions["FS_Abs"] = h.FSAbs
-	}
-	if h.FSAppendFile != nil {
-		functions["FS_AppendFile"] = h.FSAppendFile
-	}
-	if h.FSCopy != nil {
-		functions["FS_Copy"] = h.FSCopy
-	}
-	if h.FSCreateDir != nil {
-		functions["FS_CreateDir"] = h.FSCreateDir
-	}
-	if h.FSCreateFile != nil {
-		functions["FS_CreateFile"] = h.FSCreateFile
-	}
-	if h.FSCwd != nil {
-		functions["FS_Cwd"] = h.FSCwd
-	}
-	if h.FSDeleteDir != nil {
-		functions["FS_DeleteDir"] = h.FSDeleteDir
-	}
-	if h.FSDeleteFile != nil {
-		functions["FS_DeleteFile"] = h.FSDeleteFile
 	}
 	if h.FSExists != nil {
 		functions["FS_Exists"] = h.FSExists
@@ -348,35 +288,8 @@ func (h Host) Functions() map[string]any {
 	if h.FSListDir != nil {
 		functions["FS_ListDir"] = h.FSListDir
 	}
-	if h.FSReadFile != nil {
-		functions["FS_ReadFile"] = h.FSReadFile
-	}
-	if h.FSRename != nil {
-		functions["FS_Rename"] = h.FSRename
-	}
-	if h.FSWriteFile != nil {
-		functions["FS_WriteFile"] = h.FSWriteFile
-	}
-	if h.FloatCeil != nil {
-		functions["FloatCeil"] = h.FloatCeil
-	}
-	if h.FloatFloor != nil {
-		functions["FloatFloor"] = h.FloatFloor
-	}
-	if h.FloatFormat != nil {
-		functions["FloatFormat"] = h.FloatFormat
-	}
 	if h.FloatFromInt != nil {
 		functions["FloatFromInt"] = h.FloatFromInt
-	}
-	if h.FloatFromStr != nil {
-		functions["FloatFromStr"] = h.FloatFromStr
-	}
-	if h.FloatRound != nil {
-		functions["FloatRound"] = h.FloatRound
-	}
-	if h.FloatToDynamic != nil {
-		functions["FloatToDynamic"] = h.FloatToDynamic
 	}
 	if h.GetPathValue != nil {
 		functions["GetPathValue"] = h.GetPathValue
@@ -386,9 +299,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.GetReqPath != nil {
 		functions["GetReqPath"] = h.GetReqPath
-	}
-	if h.GetTodayString != nil {
-		functions["GetTodayString"] = h.GetTodayString
 	}
 	if h.HTTPDo != nil {
 		functions["HTTP_Do"] = h.HTTPDo
@@ -408,18 +318,6 @@ func (h Host) Functions() map[string]any {
 	if h.HTTPServe != nil {
 		functions["HTTP_Serve"] = h.HTTPServe
 	}
-	if h.HexDecode != nil {
-		functions["HexDecode"] = h.HexDecode
-	}
-	if h.HexEncode != nil {
-		functions["HexEncode"] = h.HexEncode
-	}
-	if h.IntFromStr != nil {
-		functions["IntFromStr"] = h.IntFromStr
-	}
-	if h.IntToDynamic != nil {
-		functions["IntToDynamic"] = h.IntToDynamic
-	}
 	if h.IsNil != nil {
 		functions["IsNil"] = h.IsNil
 	}
@@ -434,9 +332,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.MapToDynamic != nil {
 		functions["MapToDynamic"] = h.MapToDynamic
-	}
-	if h.Now != nil {
-		functions["Now"] = h.Now
 	}
 	if h.OsArgs != nil {
 		functions["OsArgs"] = h.OsArgs
@@ -453,9 +348,6 @@ func (h Host) Functions() map[string]any {
 	if h.RuneFromStr != nil {
 		functions["RuneFromStr"] = h.RuneFromStr
 	}
-	if h.Sleep != nil {
-		functions["Sleep"] = h.Sleep
-	}
 	if h.SqlBeginTx != nil {
 		functions["SqlBeginTx"] = h.SqlBeginTx
 	}
@@ -468,14 +360,8 @@ func (h Host) Functions() map[string]any {
 	if h.SqlCreateConnection != nil {
 		functions["SqlCreateConnection"] = h.SqlCreateConnection
 	}
-	if h.SqlDetectDriver != nil {
-		functions["SqlDetectDriver"] = h.SqlDetectDriver
-	}
 	if h.SqlExecute != nil {
 		functions["SqlExecute"] = h.SqlExecute
-	}
-	if h.SqlExtractParams != nil {
-		functions["SqlExtractParams"] = h.SqlExtractParams
 	}
 	if h.SqlQuery != nil {
 		functions["SqlQuery"] = h.SqlQuery
@@ -488,12 +374,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.StrFromUtf8 != nil {
 		functions["StrFromUtf8"] = h.StrFromUtf8
-	}
-	if h.StrSplit != nil {
-		functions["StrSplit"] = h.StrSplit
-	}
-	if h.StrToDynamic != nil {
-		functions["StrToDynamic"] = h.StrToDynamic
 	}
 	if h.VoidToDynamic != nil {
 		functions["VoidToDynamic"] = h.VoidToDynamic
@@ -508,4 +388,3 @@ func (h Host) Functions() map[string]any {
 // Skipped extern GetResult: generic parameters are not generated yet.
 // Skipped extern JsonEncode: generic parameters are not generated yet.
 // Skipped extern JsonParse: generic returns are not generated yet.
-// Skipped extern NewList: generic returns are not generated yet.

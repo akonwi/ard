@@ -262,6 +262,7 @@ type Checker struct {
 	halted                            bool
 	moduleResolver                    *ModuleResolver
 	options                           CheckOptions
+	directGoImports                   map[string]directGoImport
 	expectedExpr                      Type
 	duplicateTopLevelTypeDeclarations map[parse.Statement]bool
 	topLevelStructDeclarations        map[string]*parse.StructDefinition
@@ -282,13 +283,24 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 	if checkOptions.ModulePath != "" {
 		modulePath = checkOptions.ModulePath
 	}
+	if checkOptions.GoResolver == nil {
+		dir := filepath.Dir(filePath)
+		if strings.HasPrefix(modulePath, "ard/") {
+			dir = "."
+		}
+		if moduleResolver != nil && moduleResolver.project.RootPath != "" {
+			dir = moduleResolver.project.RootPath
+		}
+		checkOptions.GoResolver = NewGoPackagesResolver(dir)
+	}
 	c := &Checker{
-		diagnostics:    []Diagnostic{},
-		input:          input,
-		filePath:       filePath,
-		modulePath:     modulePath,
-		moduleResolver: moduleResolver,
-		options:        checkOptions,
+		diagnostics:     []Diagnostic{},
+		input:           input,
+		filePath:        filePath,
+		modulePath:      modulePath,
+		moduleResolver:  moduleResolver,
+		options:         checkOptions,
+		directGoImports: map[string]directGoImport{},
 		program: &Program{
 			Imports:       map[string]Module{},
 			Statements:    []Statement{},
@@ -316,13 +328,30 @@ func (c *Checker) Diagnostics() []Diagnostic {
 }
 
 func (c *Checker) Check() {
+	seenImportAliases := map[string]struct{}{}
 	for _, imp := range c.input.Imports {
-		if _, dup := c.program.Imports[imp.Name]; dup {
+		if _, dup := seenImportAliases[imp.Name]; dup {
 			c.addWarning(fmt.Sprintf("%s Duplicate import: %s", imp.GetStart(), imp.Name), imp.GetLocation())
 			continue
 		}
-		if _, dup := c.program.Imports[imp.Name]; dup {
-			c.addWarning(fmt.Sprintf("%s Duplicate import: %s", imp.GetStart(), imp.Name), imp.GetLocation())
+		seenImportAliases[imp.Name] = struct{}{}
+
+		if imp.Kind == parse.ImportKindGo {
+			if !validDirectGoImportAlias(imp.Name) {
+				c.addError(fmt.Sprintf("Go import alias %q cannot be used as a Go selector; use `as` with a valid Go identifier", imp.Name), imp.GetLocation())
+				continue
+			}
+			goImport := directGoImport{alias: imp.Name, importPath: imp.Path}
+			if c.options.GoResolver != nil {
+				pkg, err := c.options.GoResolver.LoadPackage(imp.Path)
+				if err != nil {
+					c.addError(fmt.Sprintf("Failed to load Go package '%s': %v", imp.Path, err), imp.GetLocation())
+					c.directGoImports[imp.Name] = goImport
+					continue
+				}
+				goImport.pkg = pkg
+			}
+			c.directGoImports[imp.Name] = goImport
 			continue
 		}
 
@@ -367,7 +396,14 @@ func (c *Checker) Check() {
 			}
 
 			// Type-check the imported module
-			userModule, diagnostics := check(ast, c.moduleResolver, filePath, resolved.ModulePath, c.options)
+			importOptions := c.options
+			if resolved.PackageID != "" {
+				pkg := c.moduleResolver.packageInfo(resolved.PackageID)
+				if pkg.RootPath != "" {
+					importOptions.GoResolver = NewGoPackagesResolver(pkg.RootPath)
+				}
+			}
+			userModule, diagnostics := check(ast, c.moduleResolver, filePath, resolved.ModulePath, importOptions)
 			c.moduleResolver.loadingChain = c.moduleResolver.loadingChain[:len(c.moduleResolver.loadingChain)-1]
 			if len(diagnostics) > 0 {
 				// Add all diagnostics from the imported module
@@ -719,6 +755,10 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			break
 		}
 		if ty.Type.Target != nil {
+			if goType := c.resolveDirectGoType(ty); goType != nil {
+				baseType = goType
+				break
+			}
 			mod := c.resolveModule(ty.Type.Target.(*parse.Identifier).Name)
 			if mod != nil {
 				// at some point, this will need to unwrap the property down to root for nested paths: `mod::sym::more`
@@ -1852,7 +1892,7 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 			if _, ok := stmts[i].(*parse.Comment); ok {
 				continue
 			}
-			if canCheckStatementAsExpectedExpression(stmts[i], expectedFinal, onlyMatchFinal) {
+			if c.canCheckStatementAsExpectedExpression(stmts[i], expectedFinal, onlyMatchFinal) {
 				lastExprIndex = i
 			}
 			break
@@ -1876,11 +1916,13 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 	return block
 }
 
-func canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal Type, onlyMatchFinal bool) bool {
+func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal Type, onlyMatchFinal bool) bool {
 	if onlyMatchFinal && expectedFinal != Void {
-		switch stmt.(type) {
-		case *parse.MatchExpression, *parse.ConditionalMatchExpression:
+		switch s := stmt.(type) {
+		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.InstanceMethod:
 			return true
+		case *parse.StaticFunction:
+			return c.isDirectGoStaticFunction(s)
 		default:
 			return false
 		}
@@ -1942,7 +1984,7 @@ func (c *Checker) checkBlockWithInferredFinalValue(stmts []parse.Statement, setu
 		if _, ok := stmts[i].(*parse.Comment); ok {
 			continue
 		}
-		if canCheckStatementAsExpectedExpression(stmts[i], Void, false) {
+		if c.canCheckStatementAsExpectedExpression(stmts[i], Void, false) {
 			lastExprIndex = i
 		}
 		break
@@ -3161,6 +3203,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if subj.Type() == nil {
 				panic(fmt.Errorf("Cannot access %+v on nil: %s", subj.(*Variable).sym, s.Target))
 			}
+			if call, handled := c.checkDirectGoInstanceMethod(subj, s.Method, s.GetLocation()); handled {
+				return call
+			}
 			var sig Type
 			if structDef, ok := subj.Type().(*StructDef); ok {
 				if method, ok := c.structMethod(structDef, s.Method.Name); ok {
@@ -3717,6 +3762,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return call
 			}
 
+			if call, handled := c.checkDirectGoStaticFunction(s); handled {
+				return call
+			}
+
 			// find the function in a module
 			modName, name := c.destructurePath(s)
 			var fnDef *FunctionDef
@@ -3975,8 +4024,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 		// For Enum types, generate an EnumMatch
 		if enumType, ok := subject.Type().(*Enum); ok {
-			// Map to track which variants we've seen
-			seenVariants := make(map[string]bool)
+			// Map to track which discriminant values we've seen. Imported Go enum-like
+			// constants may have multiple exported aliases for the same value.
+			seenDiscriminants := make(map[int]string)
 			// Track whether we've seen a catch-all case
 			hasCatchAll := false
 			// Cases in the match statement mapped to enum variants
@@ -4025,12 +4075,20 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					variantName := enumType.Values[enumVariant.Variant].Name
 					variantIndex := int(enumVariant.Variant)
 
-					// Check for duplicate cases
-					if seenVariants[variantName] {
-						c.addError(fmt.Sprintf("Duplicate case: %s::%s", enumType.Name, variantName), staticProp.GetLocation())
+					// Check for duplicate cases by value, not just by name. This lets Go
+					// enum-like constants import aliases while preserving closed enum
+					// exhaustiveness over distinct values.
+					discriminant := enumType.Values[enumVariant.Variant].Value
+					current := fmt.Sprintf("%s::%s", enumType.Name, variantName)
+					if previous, found := seenDiscriminants[discriminant]; found {
+						if previous == current {
+							c.addError(fmt.Sprintf("Duplicate case: %s", current), staticProp.GetLocation())
+						} else {
+							c.addError(fmt.Sprintf("Duplicate case: %s has same value as %s", current, previous), staticProp.GetLocation())
+						}
 						continue
 					}
-					seenVariants[variantName] = true
+					seenDiscriminants[discriminant] = current
 
 					// Check the body for this case
 					body := c.checkMatchArmBlock(matchCase.Body, nil)
@@ -4041,11 +4099,22 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				}
 			}
 
-			// Check if the match is exhaustive
+			// Check if the match is exhaustive over distinct values. Aliases do not
+			// require separate arms. Imported open Go enum-like types always require
+			// a wildcard because Go may produce values outside exported constants.
 			if !hasCatchAll {
-				for i, value := range enumType.Values {
-					if cases[i] == nil {
-						c.addError(fmt.Sprintf("Incomplete match: missing case for '%s::%s'", enumType.Name, value.Name), s.GetLocation())
+				if enumType.Open {
+					c.addError(fmt.Sprintf("Open enum-like Go type %s requires a catch-all (_) match case", enumType.Name), s.GetLocation())
+				} else {
+					missingValues := map[int]bool{}
+					for i, value := range enumType.Values {
+						if _, covered := seenDiscriminants[value.Value]; covered {
+							continue
+						}
+						if cases[i] == nil && !missingValues[value.Value] {
+							c.addError(fmt.Sprintf("Incomplete match: missing case for '%s::%s'", enumType.Name, value.Name), s.GetLocation())
+							missingValues[value.Value] = true
+						}
 					}
 				}
 			}
@@ -4071,9 +4140,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Create the EnumMatch
-			discriminantToIndex := make(map[int]int8, len(enumType.Values))
+			discriminantToIndex := make(map[int]int, len(enumType.Values))
 			for i, value := range enumType.Values {
-				discriminantToIndex[value.Value] = int8(i)
+				if _, ok := discriminantToIndex[value.Value]; !ok {
+					discriminantToIndex[value.Value] = i
+				}
 			}
 			enumMatch := &EnumMatch{
 				Subject:             subject,
@@ -4686,6 +4757,15 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 				}
 
+				if _, ok := c.directGoImports[id.Name]; ok {
+					propIdent, ok := s.Property.(*parse.Identifier)
+					if !ok {
+						c.addError(fmt.Sprintf("Unsupported property type in Go import %s::%s", id.Name, s.Property), s.Property.GetLocation())
+						return nil
+					}
+					return c.resolveDirectGoConstant(id.Name, propIdent.Name, propIdent.GetLocation())
+				}
+
 				// Handle local enum variants or static functions (not from modules)
 				sym, ok := c.scope.get(id.Name)
 				if !ok {
@@ -4711,10 +4791,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					return nil
 				}
 
-				var variant int8 = -1
+				variant := -1
 				for i := range enum.Values {
 					if enum.Values[i].Name == s.Property.(*parse.Identifier).Name {
-						variant = int8(i)
+						variant = i
 						break
 					}
 				}
@@ -4741,10 +4821,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				// Check if it's an enum type
 				if enum, ok := nestedSym.Type().(*Enum); ok {
 					// Find the variant
-					var variant int8 = -1
+					variant := -1
 					for i := range enum.Values {
 						if enum.Values[i].Name == s.Property.(*parse.Identifier).Name {
-							variant = int8(i)
+							variant = i
 							break
 						}
 					}
@@ -5226,8 +5306,22 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			fn.Body = body
 			return fn
 		}
+	case *parse.InstanceMethod:
+		{
+			subj := c.checkExpr(s.Target)
+			if subj == nil {
+				c.addError(fmt.Sprintf("Cannot access %s on Void", s.Method.Name), s.Method.GetLocation())
+				return nil
+			}
+			if call, handled := c.checkDirectGoInstanceMethodAs(subj, s.Method, s.GetLocation(), expectedType); handled {
+				return call
+			}
+		}
 	case *parse.StaticFunction:
 		{
+			if call, handled := c.checkDirectGoStaticFunctionAs(s, expectedType); handled {
+				return call
+			}
 			resultType, expectResult := expectedType.(*Result)
 			target, ok := s.Target.(*parse.Identifier)
 			if !expectResult || !ok || target.Name != "Result" || (s.Function.Name != "ok" && s.Function.Name != "err") {
@@ -5386,6 +5480,11 @@ func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFu
 	}
 
 	resolvedBinding := resolveExternalBinding(bindings)
+	resolvedBinding = c.resolveDirectGoExternBinding(resolvedBinding, def.GetLocation())
+	if _, ok := bindings["go"]; ok {
+		bindings["go"] = resolvedBinding
+	}
+	c.validateDirectGoExternSignature(def.Name, params, returnType, resolvedBinding, def.GetLocation())
 
 	// Create external function definition
 	extFn := &ExternalFunctionDef{

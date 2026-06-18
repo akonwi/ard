@@ -110,7 +110,7 @@ func equalTypesSeen(left Type, right Type, seen map[typeEqualKey]struct{}) bool 
 			return true
 		}
 		r, ok := right.(*ExternType)
-		if !ok || l.Name_ != r.Name_ || len(l.TypeArgs) != len(r.TypeArgs) {
+		if !ok || !externTypeNamesMatch(l, r) || len(l.TypeArgs) != len(r.TypeArgs) {
 			return false
 		}
 		for i := range l.TypeArgs {
@@ -162,6 +162,15 @@ func equalFunctionDefSeen(left FunctionDef, right Type, seen map[typeEqualKey]st
 		}
 	}
 	return left.Mutates == r.Mutates && equalTypesSeen(left.ReturnType, r.ReturnType, seen)
+}
+
+func externTypeNamesMatch(left *ExternType, right *ExternType) bool {
+	leftBinding, leftOK := parseCanonicalDirectGoBinding(left.ExternalBinding)
+	rightBinding, rightOK := parseCanonicalDirectGoBinding(right.ExternalBinding)
+	if leftOK || rightOK {
+		return leftOK && rightOK && len(leftBinding.Symbols) == 1 && len(rightBinding.Symbols) == 1 && leftBinding.ImportPath == rightBinding.ImportPath && leftBinding.Symbols[0] == rightBinding.Symbols[0]
+	}
+	return left.Name_ == right.Name_
 }
 
 func equalExternalFunctionDefSeen(left ExternalFunctionDef, right Type, seen map[typeEqualKey]struct{}) bool {

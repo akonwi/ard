@@ -372,6 +372,7 @@ func TestLexing(t *testing.T) {
 			input: strings.Join([]string{
 				"use ard/io",
 				"use github.com/foo/bar",
+				"use go:git.sr.ht/~rockorager/vaxis as vaxis",
 				"use maybe as option",
 			}, "\n"),
 			want: []token{
@@ -384,9 +385,15 @@ func TestLexing(t *testing.T) {
 				{kind: new_line, line: 2, column: 23},
 
 				{kind: use, line: 3, column: 1},
-				{kind: path, line: 3, column: 5, text: "maybe"},
-				{kind: as, line: 3, column: 11},
-				{kind: identifier, line: 3, column: 14, text: "option"},
+				{kind: path, line: 3, column: 5, text: "go:git.sr.ht/~rockorager/vaxis"},
+				{kind: as, line: 3, column: 36},
+				{kind: identifier, line: 3, column: 39, text: "vaxis"},
+				{kind: new_line, line: 3, column: 44},
+
+				{kind: use, line: 4, column: 1},
+				{kind: path, line: 4, column: 5, text: "maybe"},
+				{kind: as, line: 4, column: 11},
+				{kind: identifier, line: 4, column: 14, text: "option"},
 
 				{kind: eof},
 			},

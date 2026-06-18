@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -2885,6 +2886,44 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 			`,
 		},
 	})
+}
+
+func TestGoTargetParityDirectGoReturnAdapters(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name: "value error to result",
+			input: `use go:strconv
+extern fn atoi(value: Str) Int!Str = strconv::Atoi
+fn main() Int { atoi("42").expect("parse") }`,
+			want: "42",
+		},
+		{
+			name: "error to void result",
+			input: `use go:os
+extern fn chdir(path: Str) Void!Str = os::Chdir
+fn main() Bool { chdir(".").is_ok() }`,
+			want: "true",
+		},
+		{
+			name: "value bool to maybe",
+			input: `use go:os
+extern fn lookup_env(key: Str) Str? = os::LookupEnv
+fn main() Bool { lookup_env("__ARD_MISSING_DIRECT_GO_ADAPTER__").is_none() }`,
+			want: "true",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			program := lowerParitySource(t, tc.input)
+			if got := strings.TrimSpace(runGoTargetParityJSON(t, program)); got != tc.want {
+				t.Fatalf("go output = %s, want %s", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestGoTargetParityMaybeResultCombinators(t *testing.T) {

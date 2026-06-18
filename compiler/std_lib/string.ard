@@ -1,8 +1,12 @@
+use go:strings
+
 // defines converting to a string
 trait ToString {
   fn to_str() Str
 }
 
-extern fn split(input: Str, delimiter: Str) [Str] = "StrSplit"
+fn split(input: Str, delimiter: Str) [Str] {
+  strings::Split(input, delimiter)
+}
 extern fn from_bytes(bytes: [Byte]) Str!Str = "StrFromUtf8"
 extern fn from_runes(runes: [Rune]) Str!Str = "StrFromRunes"

@@ -1538,6 +1538,29 @@ func typeArgsForCallWithInterner(call *checker.FunctionCall, intern func(checker
 	return typeArgs, nil
 }
 
+func directGoPointerExternBinding(t checker.Type) (string, bool) {
+	ext, ok := t.(*checker.ExternType)
+	if !ok {
+		return "", false
+	}
+	importPath, typeName, ok := directGoExternTypeBindingParts(ext.ExternalBinding)
+	if !ok {
+		return "", false
+	}
+	return "go:" + importPath + "::*" + typeName, true
+}
+
+func directGoExternTypeBindingParts(binding string) (string, string, bool) {
+	if !strings.HasPrefix(binding, "go:") {
+		return "", "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(binding, "go:"), "::")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" || strings.HasPrefix(parts[1], "*") {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
 func signatureForCallWithInterner(call *checker.FunctionCall, intern func(checker.Type) (TypeID, error)) (Signature, error) {
 	if def := call.Definition(); def != nil {
 		if !functionHasTypeVar(def) {
@@ -1582,6 +1605,12 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	}
 	if tv, ok := t.(*checker.TypeVar); ok && tv.Actual() != nil {
 		return l.internType(tv.Actual())
+	}
+	if ref, ok := t.(*checker.MutableRef); ok {
+		if binding, ok := directGoPointerExternBinding(ref.Of()); ok {
+			return l.internSyntheticType(ref.String(), TypeInfo{Kind: TypeExtern, ExternBinding: binding})
+		}
+		return l.internType(ref.Of())
 	}
 	key := airTypeKey(t)
 	name := airTypeName(t)
@@ -1668,6 +1697,8 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 	case *checker.Enum:
 		info.Kind = TypeEnum
+		info.ExternBinding = typ.ExternalBinding
+		info.EnumOpen = typ.Open
 		info.Variants = make([]VariantInfo, len(typ.Values))
 		for i, variant := range typ.Values {
 			info.Variants[i] = VariantInfo{Name: variant.Name, Discriminant: variant.Value}
@@ -2125,17 +2156,39 @@ func airTypeKeySeen(t checker.Type, seen map[checker.Type]struct{}) string {
 	case *checker.ExternalFunctionDef:
 		return airFunctionTypeKeySeen(typ.Parameters, typ.ReturnType, seen)
 	case *checker.ExternType:
+		name := typ.Name_
+		if key, ok := directGoExternTypeKey(typ.ExternalBinding); ok {
+			name = key
+		}
 		if len(typ.TypeArgs) == 0 {
-			return "extern " + typ.Name_
+			return "extern " + name
 		}
 		parts := make([]string, len(typ.TypeArgs))
 		for i, arg := range typ.TypeArgs {
 			parts[i] = airTypeKeySeen(arg, seen)
 		}
-		return "extern " + typ.Name_ + "<" + strings.Join(parts, ",") + ">"
+		return "extern " + name + "<" + strings.Join(parts, ",") + ">"
 	default:
 		return t.String()
 	}
+}
+
+func directGoExternTypeKey(binding string) (string, bool) {
+	if !strings.HasPrefix(binding, "go:") {
+		return "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(binding, "go:"), "::")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", false
+	}
+	importPath := strings.TrimSpace(parts[0])
+	if aliasParts := strings.Split(importPath, " as "); len(aliasParts) == 2 {
+		importPath = strings.TrimSpace(aliasParts[0])
+	}
+	if importPath == "" {
+		return "", false
+	}
+	return "go:" + importPath + "::" + strings.TrimSpace(parts[1]), true
 }
 
 func airStructKey(typ *checker.StructDef) string {

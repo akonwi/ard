@@ -217,7 +217,6 @@ export default defineConfig({
             { label: "ard/async", slug: "stdlib/async" },
             { label: "ard/async/channel", slug: "stdlib/async-channel" },
             { label: "ard/base64", slug: "stdlib/base64" },
-            { label: "ard/chrono", slug: "stdlib/chrono" },
             { label: "ard/crypto", slug: "stdlib/crypto" },
             { label: "ard/dates", slug: "stdlib/dates" },
             { label: "ard/decode", slug: "stdlib/decode" },

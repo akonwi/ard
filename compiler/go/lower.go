@@ -25,19 +25,23 @@ type loweredExpr struct {
 }
 
 type lowerer struct {
-	program         *air.Program
-	packageName     string
-	tempCounter     int
-	currentImports  map[string]string
-	declaredLocals  map[air.LocalID]bool
-	runtimeHelpers  map[string]bool
-	jsonParseTypes  map[air.TypeID]bool
-	jsonEncodeTypes map[air.TypeID]bool
-	ffiImports      map[string]string
-	projectInfo     *checker.ProjectInfo
-	inlineClosures  map[air.FunctionID]bool
-	suppressMain    bool
-	includeTests    bool
+	program               *air.Program
+	packageName           string
+	tempCounter           int
+	currentImports        map[string]string
+	importErr             error
+	directGoAliases       map[string]string
+	reservedGoIdentifiers map[string]bool
+	declaredLocals        map[air.LocalID]bool
+	runtimeHelpers        map[string]bool
+	jsonParseTypes        map[air.TypeID]bool
+	jsonEncodeTypes       map[air.TypeID]bool
+	ffiImports            map[string]string
+	projectInfo           *checker.ProjectInfo
+	directGoResolver      *checker.GoPackagesResolver
+	inlineClosures        map[air.FunctionID]bool
+	suppressMain          bool
+	includeTests          bool
 }
 
 func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, error) {
@@ -47,7 +51,11 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if err := air.Validate(program); err != nil {
 		return nil, err
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, jsonEncodeTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
+	directGoResolverDir := "."
+	if options.ProjectInfo != nil && options.ProjectInfo.RootPath != "" {
+		directGoResolverDir = options.ProjectInfo.RootPath
+	}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, jsonEncodeTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, directGoResolver: checker.NewGoPackagesResolver(directGoResolverDir), directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(program), suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
 	l.inlineClosures = l.collectInlineClosureFunctions()
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
@@ -207,6 +215,7 @@ func collectGoImportsFromSource(imports map[string]string, name string, data []b
 
 func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 	l.currentImports = map[string]string{}
+	l.importErr = nil
 	decls := []ast.Decl{}
 	rootID, hasRoot := findRootFunction(l.program)
 	mainModuleID := air.ModuleID(0)
@@ -264,6 +273,9 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 			decls = append(decls, mainDecl)
 			decls = append(l.runtimePreludeDecls(), decls...)
 		}
+	}
+	if l.importErr != nil {
+		return nil, l.importErr
 	}
 	if len(l.currentImports) > 0 {
 		usedImports := l.usedImports(decls)
@@ -328,7 +340,7 @@ func (l *lowerer) registerImportsForGoType(expr ast.Expr, imports map[string]str
 			return true
 		}
 		if path, ok := imports[ident.Name]; ok && path != "" {
-			l.currentImports[ident.Name] = path
+			l.registerImport(ident.Name, path)
 		}
 		return true
 	})
@@ -426,7 +438,7 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 `)
 	}
 	if l.runtimeHelpers["sorted_int_keys"] {
-		l.currentImports["slices"] = "slices"
+		l.registerImport("slices", "slices")
 		parts = append(parts, `
 	func ardSortedIntKeys[V any](m map[int]V) []int {
 		keys := make([]int, 0, len(m))
@@ -439,7 +451,7 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 `)
 	}
 	if l.runtimeHelpers["sorted_string_keys"] {
-		l.currentImports["slices"] = "slices"
+		l.registerImport("slices", "slices")
 		parts = append(parts, `
 	func ardSortedStringKeys[V any](m map[string]V) []string {
 		keys := make([]string, 0, len(m))
@@ -452,8 +464,8 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 `)
 	}
 	if l.runtimeHelpers["sorted_any_keys"] {
-		l.currentImports["fmt"] = "fmt"
-		l.currentImports["slices"] = "slices"
+		l.registerImport("fmt", "fmt")
+		l.registerImport("slices", "slices")
 		parts = append(parts, `
 	func ardSortedAnyKeys[V any](m map[any]V) []any {
 		keys := make([]any, 0, len(m))
@@ -486,20 +498,96 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	}
 `)
 	}
+	if l.runtimeHelpers["direct_go_signed_int_range"] {
+		parts = append(parts, `
+	func ardDirectGoCheckSignedIntRange(value int, min int64, max int64, target string) int {
+		v := int64(value)
+		if v < min || v > max {
+			panic("Ard direct Go FFI: int value out of range for " + target)
+		}
+		return value
+	}
+`)
+	}
+	if l.runtimeHelpers["direct_go_uint_int_range"] {
+		parts = append(parts, `
+	func ardDirectGoCheckUintIntRange(value int, max uint64, target string) int {
+		if value < 0 || uint64(value) > max {
+			panic("Ard direct Go FFI: int value out of range for " + target)
+		}
+		return value
+	}
+`)
+	}
+	if l.runtimeHelpers["direct_go_nonnegative_int"] {
+		parts = append(parts, `
+	func ardDirectGoCheckNonNegativeInt(value int, target string) int {
+		if value < 0 {
+			panic("Ard direct Go FFI: negative int value out of range for " + target)
+		}
+		return value
+	}
+`)
+	}
+	if l.runtimeHelpers["direct_go_signed_to_int"] {
+		parts = append(parts, `
+	func ardDirectGoIntFromSigned(value int64, target string) int {
+		max := int64(^uint(0) >> 1)
+		min := -max - 1
+		if value < min || value > max {
+			panic("Ard direct Go FFI: signed integer value out of range for Int from " + target)
+		}
+		return int(value)
+	}
+`)
+	}
+	if l.runtimeHelpers["direct_go_unsigned_to_int"] {
+		parts = append(parts, `
+	func ardDirectGoIntFromUnsigned(value uint64, target string) int {
+		max := uint64(^uint(0) >> 1)
+		if value > max {
+			panic("Ard direct Go FFI: unsigned integer value out of range for Int from " + target)
+		}
+		return int(value)
+	}
+`)
+	}
+	if l.runtimeHelpers["direct_go_float32_range"] {
+		l.registerImport("ardmath", "math")
+		parts = append(parts, `
+	func ardDirectGoCheckFloat32Range(value float64, target string) float64 {
+		if value > ardmath.MaxFloat32 || value < -ardmath.MaxFloat32 {
+			panic("Ard direct Go FFI: float value out of range for " + target)
+		}
+		return value
+	}
+`)
+	}
+	if l.runtimeHelpers["direct_go_valid_rune"] {
+		l.registerImport("ardutf8", "unicode/utf8")
+		parts = append(parts, `
+	func ardDirectGoCheckRune(value rune) rune {
+		if !ardutf8.ValidRune(value) {
+			panic("Ard direct Go FFI: Go returned invalid Rune")
+		}
+		return value
+	}
+`)
+	}
 	if l.runtimeHelpers["json_parse"] {
-		l.currentImports["bytes"] = "bytes"
-		l.currentImports["fmt"] = "fmt"
-		l.currentImports["json"] = "encoding/json/v2"
-		l.currentImports["jsontext"] = "encoding/json/jsontext"
-		l.currentImports["ardruntime"] = "github.com/akonwi/ard/runtime"
-		l.currentImports["strconv"] = "strconv"
+		l.registerImport("bytes", "bytes")
+		l.registerImport("fmt", "fmt")
+		l.registerImport("json", "encoding/json/v2")
+		l.registerImport("jsontext", "encoding/json/jsontext")
+		l.registerImport("ardruntime", "github.com/akonwi/ard/runtime")
+		l.registerImport("strconv", "strconv")
 		parts = append(parts, l.jsonParsePreludeSource())
 	}
 	if l.runtimeHelpers["json_encode"] {
-		l.currentImports["bytes"] = "bytes"
-		l.currentImports["fmt"] = "fmt"
-		l.currentImports["json"] = "encoding/json/v2"
-		l.currentImports["jsontext"] = "encoding/json/jsontext"
+		l.registerImport("bytes", "bytes")
+		l.registerImport("fmt", "fmt")
+		l.registerImport("json", "encoding/json/v2")
+		l.registerImport("jsontext", "encoding/json/jsontext")
 		parts = append(parts, l.jsonEncodePreludeSource())
 	}
 	src := strings.Join(parts, "\n")
@@ -551,13 +639,33 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 		return l.lowerMutableTraitRefDecl(typ)
 	case air.TypeEnum:
 		typeSpec := &ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: ast.NewIdent("int")}
-		if l.isStdlibFFIBackedType(typ) {
+		directGoEnum := false
+		if strings.TrimSpace(typ.ExternBinding) != "" {
+			if typeExpr, ok, err := l.directGoExternTypeExpr(typ.ExternBinding); err != nil || ok {
+				if err != nil {
+					return nil, err
+				}
+				directGoEnum = true
+				typeSpec.Assign = token.Pos(1)
+				typeSpec.Type = typeExpr
+			}
+		} else if l.isStdlibFFIBackedType(typ) {
 			typeSpec.Assign = token.Pos(1)
 			typeSpec.Type = l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", typ.Name)
 		}
 		specs := []ast.Spec{typeSpec}
 		for _, variant := range typ.Variants {
-			specs = append(specs, &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(enumVariantName(l.program, typ, variant))}, Type: ast.NewIdent(typeName(l.program, typ)), Values: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", variant.Discriminant)}}})
+			value := ast.Expr(&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", variant.Discriminant)})
+			if directGoEnum {
+				constant, ok, err := l.directGoEnumConstantExpr(typ.ExternBinding, variant.Name)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					value = constant
+				}
+			}
+			specs = append(specs, &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(enumVariantName(l.program, typ, variant))}, Type: ast.NewIdent(typeName(l.program, typ)), Values: []ast.Expr{value}})
 		}
 		decls := []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: specs[:1]}}
 		if len(specs) > 1 {
@@ -689,18 +797,18 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 			return nil, err
 		}
 		params = append(params, &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(sanitizeName(capture.Name))},
+			Names: []*ast.Ident{ast.NewIdent(localName(fn, capture.Local))},
 			Type:  captureType,
 		})
 		l.declaredLocals[capture.Local] = true
 	}
-	for _, param := range fn.Signature.Params {
+	for i, param := range fn.Signature.Params {
 		paramType, err := l.goParamType(param)
 		if err != nil {
 			return nil, err
 		}
 		params = append(params, &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(sanitizeName(param.Name))},
+			Names: []*ast.Ident{ast.NewIdent(localName(fn, air.LocalID(i)))},
 			Type:  paramType,
 		})
 	}
@@ -2225,6 +2333,9 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return &ast.ChanType{Dir: ast.SEND | ast.RECV, Value: elem}, nil
 		}
 		if strings.TrimSpace(info.ExternBinding) != "" {
+			if typ, ok, err := l.directGoExternTypeExpr(info.ExternBinding); err != nil || ok {
+				return typ, err
+			}
 			if alias, ok := dependencyAliasForModulePath(info.ModulePath, l.projectInfo); ok {
 				return l.dependencyFFITypeExpr(alias, info.ExternBinding)
 			}
@@ -3081,8 +3192,21 @@ func (l *lowerer) localIsPointerParam(fn air.Function, local air.LocalID) bool {
 }
 
 func (l *lowerer) qualified(alias string, importPath string, name string) ast.Expr {
-	l.currentImports[alias] = importPath
+	l.registerImport(alias, importPath)
 	return &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name)}
+}
+
+func (l *lowerer) registerImport(alias string, importPath string) {
+	if alias == "" || importPath == "" {
+		return
+	}
+	if existing, ok := l.currentImports[alias]; ok && existing != importPath {
+		if l.importErr == nil {
+			l.importErr = fmt.Errorf("Go import alias %q used for both %q and %q", alias, existing, importPath)
+		}
+		return
+	}
+	l.currentImports[alias] = importPath
 }
 
 func (l *lowerer) toStringExpr(typeID air.TypeID, expr ast.Expr) ast.Expr {
@@ -4259,10 +4383,7 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		name := sanitizeName(param.Name)
-		if name == "" {
-			name = fmt.Sprintf("arg_%d", i)
-		}
+		name := localName(closureFn, air.LocalID(i))
 		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: paramType})
 		callArgs = append(callArgs, ast.NewIdent(name))
 	}
@@ -4290,38 +4411,6 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 }
 
 func (l *lowerer) lowerInlineClosure(parent air.Function, expr air.Expr, closureFn air.Function) (loweredExpr, error) {
-	closureType, err := l.goType(expr.Type)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	funcType, _ := closureType.(*ast.FuncType)
-	params := []*ast.Field{}
-	for i, param := range closureFn.Signature.Params {
-		paramType, err := l.goParamType(param)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		name := sanitizeName(param.Name)
-		if name == "" {
-			name = fmt.Sprintf("arg_%d", i)
-		}
-		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: paramType})
-	}
-	if funcType == nil {
-		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}}
-	} else {
-		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}, Results: funcType.Results}
-	}
-	returnTypeID := closureFn.Signature.Return
-	if (funcType.Results == nil || len(funcType.Results.List) == 0) && closureFn.Body.Result != nil && !l.isVoidType(closureFn.Body.Result.Type) {
-		returnType, err := l.goType(closureFn.Body.Result.Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		funcType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
-		returnTypeID = closureFn.Body.Result.Type
-	}
-
 	inlineFn := closureFn
 	inlineFn.Captures = append([]air.Capture(nil), closureFn.Captures...)
 	inlineFn.Locals = append([]air.Local(nil), closureFn.Locals...)
@@ -4340,6 +4429,35 @@ func (l *lowerer) lowerInlineClosure(parent air.Function, expr air.Expr, closure
 		// captures as pointer parameters; mutable argument lowering can still take
 		// the address of the outer local when a callee requires it.
 		inlineFn.Locals[capture.Local].Mutable = false
+	}
+
+	closureType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	funcType, _ := closureType.(*ast.FuncType)
+	params := []*ast.Field{}
+	for i, param := range inlineFn.Signature.Params {
+		paramType, err := l.goParamType(param)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		name := localName(inlineFn, air.LocalID(i))
+		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: paramType})
+	}
+	if funcType == nil {
+		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}}
+	} else {
+		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}, Results: funcType.Results}
+	}
+	returnTypeID := inlineFn.Signature.Return
+	if (funcType.Results == nil || len(funcType.Results.List) == 0) && inlineFn.Body.Result != nil && !l.isVoidType(inlineFn.Body.Result.Type) {
+		returnType, err := l.goType(inlineFn.Body.Result.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		funcType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
+		returnTypeID = inlineFn.Body.Result.Type
 	}
 
 	savedDeclared := l.declaredLocals
@@ -4508,7 +4626,7 @@ func (l *lowerer) lowerListSort(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	l.currentImports["sort"] = "sort"
+	l.registerImport("sort", "sort")
 	lessFunc := &ast.FuncLit{
 		Type: &ast.FuncType{
 			Params: &ast.FieldList{List: []*ast.Field{
@@ -5349,6 +5467,9 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 	binding := ext.Name
 	if goBinding, ok := ext.Bindings["go"]; ok && goBinding != "" {
 		binding = goBinding
+	}
+	if direct, ok, err := l.lowerDirectGoExternCall(ext, binding, args, stmts); err != nil || ok {
+		return direct, err
 	}
 	if !externModuleIsStdlib(l.program, ext) {
 		if alias, ok := dependencyAliasForModulePath(modulePathForExtern(l.program, ext), l.projectInfo); ok {
@@ -6415,7 +6536,7 @@ func (l *lowerer) jsonEncodePreludeSource() string {
 		}
 	}
 	if needsMaybeHelper || needsStructuralMapHelper {
-		l.currentImports["ardruntime"] = "github.com/akonwi/ard/runtime"
+		l.registerImport("ardruntime", "github.com/akonwi/ard/runtime")
 	}
 	b.WriteString(`
 func ardJSONEncodeInt(enc *jsontext.Encoder, value int) error {

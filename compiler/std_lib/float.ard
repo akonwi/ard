@@ -1,19 +1,49 @@
+use ard/maybe
 use ard/testing
+
+use go:math
+use go:strconv
 
 // Standard library Float module implemented with FFI
 // Provides float conversion and utility functions
 
-extern fn from_str(string: Str) Float? = "FloatFromStr"
+fn from_str(input: Str) Float? {
+  let value = try strconv::ParseFloat(input, 64) -> _ { maybe::none() }
+  maybe::some(value)
+}
+
 extern fn from_int(int: Int) Float = "FloatFromInt"
-extern fn floor(float: Float) Float = "FloatFloor"
-extern fn ceil(float: Float) Float = "FloatCeil"
+
+fn floor(float: Float) Float {
+  math::Floor(float)
+}
+
+fn ceil(float: Float) Float {
+  math::Ceil(float)
+}
 
 // Rounds to the nearest integer, with halfway cases rounded away from zero.
-extern fn round(float: Float) Float = "FloatRound"
+fn round(float: Float) Float {
+  math::Round(float)
+}
 
 // Formats `value` with exactly `decimals` digits after the decimal point.
 // Negative `decimals` values are treated as `0`; halfway cases round to the nearest even digit.
-extern fn format(value: Float, decimals: Int) Str = "FloatFormat"
+fn format(value: Float, decimals: Int) Str {
+  let precision = match decimals < 0 {
+    true => 0,
+    false => decimals,
+  }
+  strconv::FormatFloat(value, 102, precision, 64)
+}
+
+test fn test_from_str_parses_valid_float() Void!Str {
+  testing::assert(from_str("1.5").or(0.0) == 1.5, "from_str should parse valid floats")
+}
+
+test fn test_from_str_invalid_float_returns_none() Void!Str {
+  testing::assert(from_str("not a float").is_none(), "from_str should return none for invalid floats")
+}
 
 test fn test_format_fixed_decimals_include_trailing_zeroes() Void!Str {
   testing::assert(

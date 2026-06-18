@@ -60,7 +60,7 @@ func (p printer) renderImports(imports []parse.Import) []string {
 
 	groups := map[int][]parse.Import{0: {}, 1: {}, 2: {}}
 	for _, item := range imports {
-		groups[importGroup(item.Path)] = append(groups[importGroup(item.Path)], item)
+		groups[importGroup(item)] = append(groups[importGroup(item)], item)
 	}
 	for _, key := range []int{0, 1, 2} {
 		sort.Slice(groups[key], func(i, j int) bool {
@@ -85,18 +85,26 @@ func (p printer) renderImports(imports []parse.Import) []string {
 }
 
 func (p printer) renderImport(item parse.Import) string {
+	path := renderImportPath(item)
 	defaultName := defaultImportName(item.Path)
 	if item.Name != "" && item.Name != defaultName {
-		return fmt.Sprintf("use %s as %s", item.Path, item.Name)
+		return fmt.Sprintf("use %s as %s", path, item.Name)
 	}
-	return fmt.Sprintf("use %s", item.Path)
+	return fmt.Sprintf("use %s", path)
 }
 
-func importGroup(importPath string) int {
-	if strings.HasPrefix(importPath, "ard/") {
+func renderImportPath(item parse.Import) string {
+	if item.Kind == parse.ImportKindGo {
+		return "go:" + item.Path
+	}
+	return item.Path
+}
+
+func importGroup(item parse.Import) int {
+	if strings.HasPrefix(item.Path, "ard/") {
 		return 0
 	}
-	if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
+	if strings.HasPrefix(item.Path, "./") || strings.HasPrefix(item.Path, "../") {
 		return 2
 	}
 	return 1
@@ -336,7 +344,7 @@ func (p printer) renderExternalFunction(node *parse.ExternalFunction) string {
 		if binding == "" && len(node.ExternalBindings) == 1 {
 			binding = node.ExternalBindings["go"]
 		}
-		header += " = " + strconv.Quote(binding)
+		header += " = " + renderExternFunctionBindingValue(binding)
 		return header
 	}
 
@@ -353,7 +361,7 @@ func (p printer) renderExternalFunction(node *parse.ExternalFunction) string {
 		builder.WriteString(strings.Repeat(" ", indentWidth))
 		builder.WriteString(key)
 		builder.WriteString(" = ")
-		builder.WriteString(strconv.Quote(node.ExternalBindings[key]))
+		builder.WriteString(renderExternFunctionBindingValue(node.ExternalBindings[key]))
 		builder.WriteString("\n")
 	}
 	builder.WriteString("}")
@@ -362,6 +370,13 @@ func (p printer) renderExternalFunction(node *parse.ExternalFunction) string {
 
 func (p printer) renderExternalFunctionDoc(node *parse.ExternalFunction) doc {
 	return dText(p.renderExternalFunction(node))
+}
+
+func renderExternFunctionBindingValue(binding string) string {
+	if strings.Contains(binding, "::") {
+		return binding
+	}
+	return strconv.Quote(binding)
 }
 
 func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
@@ -812,7 +827,12 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 	case *parse.Map:
 		return maybeNullable("["+p.renderType(node.Key)+": "+p.renderType(node.Value)+"]", node.IsNullable())
 	case *parse.ResultType:
-		name := p.renderType(node.Val) + "!" + p.renderType(node.Err)
+		value := p.renderType(node.Val)
+		switch node.Val.(type) {
+		case *parse.MutableType, parse.MutableType:
+			value = "(" + value + ")"
+		}
+		name := value + "!" + p.renderType(node.Err)
 		if node.IsNullable() {
 			return "(" + name + ")?"
 		}

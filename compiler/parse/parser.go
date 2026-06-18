@@ -88,6 +88,16 @@ func trimQuotedString(value string) string {
 	return value
 }
 
+func (p *parser) parseExternalBindingValue() (string, error) {
+	if p.check(string_) {
+		return trimQuotedString(p.advance().text), nil
+	}
+	if path := p.parseStaticPath(); path != nil {
+		return path.String(), nil
+	}
+	return "", p.makeError(p.peek(), "Expected string literal or Go namespace path for external binding")
+}
+
 func (p *parser) parseExternalBindingBlock() (map[string]string, error) {
 	bindings := map[string]string{}
 	p.skipNewlines()
@@ -99,10 +109,10 @@ func (p *parser) parseExternalBindingBlock() (map[string]string, error) {
 		if !p.match(equal) {
 			return nil, p.makeError(p.peek(), "Expected '=' after extern binding target")
 		}
-		if !p.check(string_) {
-			return nil, p.makeError(p.peek(), "Expected string literal for external binding")
+		binding, err := p.parseExternalBindingValue()
+		if err != nil {
+			return nil, err
 		}
-		binding := trimQuotedString(p.advance().text)
 		bindings[target] = binding
 		p.match(comma)
 		p.skipNewlines()
@@ -307,6 +317,17 @@ func (p *parser) parseImport() *Import {
 	}
 
 	pathToken := p.advance()
+	importKind := ImportKindModule
+	importPath := pathToken.text
+	if strings.HasPrefix(importPath, "go:") {
+		importKind = ImportKindGo
+		importPath = strings.TrimPrefix(importPath, "go:")
+		if importPath == "" {
+			p.addError(&pathToken, "Expected Go import path after 'go:'")
+			p.synchronize()
+			return nil
+		}
+	}
 
 	// Parse optional alias
 	var name string
@@ -320,7 +341,7 @@ func (p *parser) parseImport() *Import {
 		}
 	} else {
 		// Default alias is last part of path
-		parts := strings.Split(pathToken.text, "/")
+		parts := strings.Split(importPath, "/")
 		if len(parts) == 1 {
 			name = parts[0]
 		} else {
@@ -336,8 +357,9 @@ func (p *parser) parseImport() *Import {
 	end := Point{Row: pathToken.line, Col: endCol}
 
 	return &Import{
-		Path: pathToken.text,
+		Path: importPath,
 		Name: name,
+		Kind: importKind,
 		Location: Location{
 			Start: start,
 			End:   end,
@@ -1459,6 +1481,21 @@ func (p *parser) parseType() DeclaredType {
 			}
 			return inner
 		}
+		if p.match(bang) {
+			bangToken := p.previous()
+			errType := p.parseType()
+			nullable := p.match(question_mark)
+			end := bangToken.getLocation().End
+			if errType != nil {
+				end = errType.GetLocation().End
+			}
+			return &ResultType{
+				Location: Location{Start: inner.GetLocation().Start, End: end},
+				Val:      inner,
+				Err:      errType,
+				nullable: nullable,
+			}
+		}
 		if p.match(question_mark) {
 			if inner.IsNullable() {
 				p.addError(p.previous(), "Grouped type is already nullable")
@@ -2516,10 +2553,7 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 
 			externalBinding := ""
 			var externalBindings map[string]string
-			if p.check(string_) {
-				bindingToken := p.advance()
-				externalBinding = trimQuotedString(bindingToken.text)
-			} else if p.match(left_brace) {
+			if p.match(left_brace) {
 				bindings, err := p.parseExternalBindingBlock()
 				if err != nil {
 					return nil, err
@@ -2527,7 +2561,11 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 				externalBindings = bindings
 				externalBinding = bindings["go"]
 			} else {
-				return nil, p.makeError(p.peek(), "Expected string literal or binding block for external binding")
+				binding, err := p.parseExternalBindingValue()
+				if err != nil {
+					return nil, err
+				}
+				externalBinding = binding
 			}
 
 			extFn := &ExternalFunction{

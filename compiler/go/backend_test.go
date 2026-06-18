@@ -451,7 +451,7 @@ func TestLowerProgramPassesMutTraitArgsByPointer(t *testing.T) {
 			return false
 		}
 		ident, ok := call.Args[1].(*ast.Ident)
-		return ok && ident.Name == "c"
+		return ok && ident.Name == "c_1"
 	}) {
 		t.Fatal("generated AST missing pointer trait dispatch arg")
 	}
@@ -465,7 +465,7 @@ func TestLowerProgramPassesMutTraitArgsByPointer(t *testing.T) {
 			return false
 		}
 		ident, identOK := star.X.(*ast.Ident)
-		return identOK && ident.Name == "c"
+		return identOK && ident.Name == "c_1"
 	}) {
 		t.Fatal("generated AST dereferences mutable trait dispatch arg")
 	}
@@ -500,7 +500,7 @@ func TestLowerProgramDereferencesMutParamForNonMutMethodCall(t *testing.T) {
 			return false
 		}
 		ident, ok := call.Args[0].(*ast.Ident)
-		return ok && ident.Name == "b"
+		return ok && ident.Name == "b_0"
 	}) {
 		t.Fatal("generated AST missing mut method pointer call")
 	}
@@ -514,7 +514,7 @@ func TestLowerProgramDereferencesMutParamForNonMutMethodCall(t *testing.T) {
 			return false
 		}
 		ident, identOK := star.X.(*ast.Ident)
-		return identOK && ident.Name == "b"
+		return identOK && ident.Name == "b_0"
 	}) {
 		t.Fatal("generated AST missing deref for non-mut method call on mut param")
 	}
@@ -543,10 +543,10 @@ func TestGenerateSourcesFormatsSimpleProgram(t *testing.T) {
 	if !strings.Contains(got, "package main") {
 		t.Fatalf("generated source missing package declaration:\n%s", got)
 	}
-	if !strings.Contains(got, "func test_ard__add(a int, b int) int") {
+	if !strings.Contains(got, "func test_ard__add(a_0 int, b_1 int) int") {
 		t.Fatalf("generated source missing lowered add function:\n%s", got)
 	}
-	if !strings.Contains(got, "return a + b") {
+	if !strings.Contains(got, "return a_0 + b_1") {
 		t.Fatalf("generated source missing arithmetic return:\n%s", got)
 	}
 	if !strings.Contains(got, "func main()") {
@@ -2390,6 +2390,206 @@ func Select(input ardruntime.Maybe[string]) string {
 	}
 }
 
+func TestBuildProgramDoesNotRequireDependencyFFIForDirectGoCall(t *testing.T) {
+	workspace := t.TempDir()
+	depDir := filepath.Join(workspace, "dep")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{depDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "dep.ard"), []byte(`use go:strconv
+
+fn parse(value: Str) Int!Str {
+  strconv::Atoi(value)
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use dep
+
+fn main() Int!Str {
+  dep::parse("42")
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+}
+
+func TestBuildProgramIncludesDependencyGoModForDirectGoCall(t *testing.T) {
+	workspace := t.TempDir()
+	helperDir := filepath.Join(workspace, "helper")
+	badHelperDir := filepath.Join(workspace, "bad-helper")
+	depDir := filepath.Join(workspace, "dep")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{helperDir, badHelperDir, depDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "go.mod"), []byte("module example.com/helper\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "helper.go"), []byte(`package helper
+
+type Thing struct{ Value int }
+
+func Make() Thing { return Thing{Value: 21} }
+func Value(thing Thing) int { return thing.Value }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badHelperDir, "go.mod"), []byte("module example.com/helper\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(badHelperDir, "helper.go"), []byte(`package helper
+
+type Thing struct{}
+
+func Other() Thing { return Thing{} }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	depGoMod := fmt.Sprintf("module dep\n\ngo 1.26.0\n\nrequire example.com/helper v0.0.0\nreplace example.com/helper => %s\n", helperDir)
+	if err := os.WriteFile(filepath.Join(depDir, "go.mod"), []byte(depGoMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "dep.ard"), []byte(`use go:example.com/helper as helper
+
+fn make() helper::Thing {
+  helper::Make()
+}
+
+fn value(thing: helper::Thing) Int {
+  helper::Value(thing)
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	appGoMod := fmt.Sprintf("module app\n\ngo 1.26.0\n\nreplace example.com/helper => %s\n", badHelperDir)
+	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(appGoMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use dep
+
+let thing = dep::make()
+
+fn main() Int {
+  dep::value(thing)
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+}
+
+func TestBuildProgramIncludesDependencyGoModForDirectGoEnumType(t *testing.T) {
+	workspace := t.TempDir()
+	statusDir := filepath.Join(workspace, "status")
+	depDir := filepath.Join(workspace, "dep")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{statusDir, depDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(statusDir, "go.mod"), []byte("module example.com/status\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(statusDir, "status.go"), []byte(`package status
+
+type State int
+
+const (
+	StateReady State = iota
+	StateDone
+)
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	depGoMod := fmt.Sprintf("module dep\n\ngo 1.26.0\n\nrequire example.com/status v0.0.0\nreplace example.com/status => %s\n", statusDir)
+	if err := os.WriteFile(filepath.Join(depDir, "go.mod"), []byte(depGoMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "dep.ard"), []byte(`use go:example.com/status as status
+
+fn ready() status::State {
+  status::StateReady
+}
+
+fn id(state: status::State) status::State {
+  state
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use dep
+
+fn main() {
+  let state = dep::id(dep::ready())
+  if not state == dep::ready() {
+    panic("dependency direct Go enum failed")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+}
+
 func TestBuildProgramSupportsDependencyGoFFI(t *testing.T) {
 	workspace := t.TempDir()
 	depDir := filepath.Join(workspace, "dep")
@@ -2828,10 +3028,14 @@ func TestLowerProgramUsesDirectStdlibMaybeCalls(t *testing.T) {
 	`)
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	for _, name := range []string{"stdlibffi.EnvGet", "stdlibffi.FloatFromStr", "stdlibffi.IntFromStr"} {
-		if !astFilesHaveCall(files, name) {
-			t.Fatalf("generated AST missing direct stdlib maybe call %s", name)
-		}
+	if !astFilesHaveCall(files, "os.LookupEnv") {
+		t.Fatal("generated AST missing direct Go env lookup")
+	}
+	if !astFilesHaveCall(files, "strconv.ParseFloat") {
+		t.Fatal("generated AST missing direct Go float parsing call")
+	}
+	if !astFilesHaveCall(files, "strconv.Atoi") {
+		t.Fatal("generated AST missing direct Go int parsing call")
 	}
 	if astFilesHaveCall(files, "ardIntFromStr") {
 		t.Fatal("generated AST should not use legacy IntFromStr helper")
@@ -3011,7 +3215,7 @@ func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 		if !ok || fn.Name == nil || !strings.Contains(fn.Name.Name, "Buffer_Writer_write") || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
 			return false
 		}
-		if len(fn.Type.Params.List[0].Names) == 0 || fn.Type.Params.List[0].Names[0].Name != "self" {
+		if len(fn.Type.Params.List[0].Names) == 0 || fn.Type.Params.List[0].Names[0].Name != "self_0" {
 			return false
 		}
 		_, ok = fn.Type.Params.List[0].Type.(*ast.StarExpr)
@@ -3900,6 +4104,776 @@ func mapsKeys[V any](m map[string]V) []string {
 		keys = append(keys, key)
 	}
 	return keys
+}
+
+func TestBuildProgramWithDirectGoCallDoesNotRequireProjectFFICompanion(t *testing.T) {
+	program := lowerSource(t, `use go:strconv
+fn main() Int!Str { strconv::Atoi("42") }`)
+	tempDir := t.TempDir()
+	if _, err := BuildProgram(program, filepath.Join(tempDir, "direct-go-call")); err != nil {
+		t.Fatalf("BuildProgram error = %v", err)
+	}
+}
+
+func TestBuildProgramIncludesProjectGoModForDirectGoCall(t *testing.T) {
+	workspace := t.TempDir()
+	helperDir := filepath.Join(workspace, "helper")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{helperDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "go.mod"), []byte("module example.com/helper\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "helper.go"), []byte(`package helper
+
+func Double(value int) int { return value * 2 }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goMod := fmt.Sprintf("module app\n\ngo 1.26.0\n\nrequire example.com/helper v0.0.0\nreplace example.com/helper => %s\n", helperDir)
+	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use go:example.com/helper as helper
+
+fn main() Int {
+  helper::Double(21)
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("BuildProgram error = %v", err)
+	}
+}
+
+func TestBuildProgramCoercesUnexportedNamedScalarResult(t *testing.T) {
+	workspace := t.TempDir()
+	helperDir := filepath.Join(workspace, "helper")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{helperDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "go.mod"), []byte("module example.com/helper\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "helper.go"), []byte(`package helper
+
+import "errors"
+
+type hidden int64
+
+func Hidden(ok bool) (hidden, error) {
+	if !ok {
+		return 0, errors.New("missing")
+	}
+	return 42, nil
+}
+
+func HiddenMaybe(ok bool) (hidden, bool) {
+	return 42, ok
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goMod := fmt.Sprintf("module app\n\ngo 1.26.0\n\nrequire example.com/helper v0.0.0\nreplace example.com/helper => %s\n", helperDir)
+	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use go:example.com/helper as helper
+
+extern fn hidden(ok: Bool) Int!Str = helper::Hidden
+extern fn hidden_maybe(ok: Bool) Int? = helper::HiddenMaybe
+
+fn main() Int!Str {
+  if not hidden_maybe(true).or(0) == 42 {
+    panic("hidden maybe failed")
+  }
+  hidden(true)
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("BuildProgram error = %v", err)
+	}
+}
+
+func TestBuildProgramIncludesProjectGoModForDirectGoEnumGlobal(t *testing.T) {
+	workspace := t.TempDir()
+	statusDir := filepath.Join(workspace, "status")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{statusDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(statusDir, "go.mod"), []byte("module example.com/status\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(statusDir, "status.go"), []byte(`package status
+
+type State int
+
+const (
+	StateReady State = iota
+	StateDone
+)
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goMod := fmt.Sprintf("module app\n\ngo 1.26.0\n\nrequire example.com/status v0.0.0\nreplace example.com/status => %s\n", statusDir)
+	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use go:example.com/status as status
+
+let ready = status::StateReady
+
+fn main() {
+  if not ready == status::StateReady {
+    panic("project direct Go enum global failed")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("BuildProgram error = %v", err)
+	}
+}
+
+func TestLowerDirectGoFunctionCallWithoutExtern(t *testing.T) {
+	program := lowerSource(t, `use go:strconv
+fn main() Int!Str { strconv::Atoi("42") }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "strconv", "strconv") {
+		t.Fatal("generated AST missing strconv import")
+	}
+	if !astFilesHaveCall(files, "strconv.Atoi") {
+		t.Fatal("generated AST missing strconv.Atoi call")
+	}
+	if !astFilesHaveCall(files, "fmt.Sprint") {
+		t.Fatal("generated AST missing fmt.Sprint error conversion")
+	}
+}
+
+func TestLowerDirectGoFunctionCallWithoutExternUsesExpectedScalarResult(t *testing.T) {
+	program := lowerSource(t, `use go:strconv
+fn main() Int!Str { strconv::ParseInt("42", 10, 64) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveCall(files, "strconv.ParseInt") {
+		t.Fatal("generated AST missing strconv.ParseInt call")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoIntFromSigned") {
+		t.Fatal("generated AST missing int64 return coercion")
+	}
+}
+
+func TestLowerDirectGoFunctionCallWithoutExternCoercesNamedScalarReturn(t *testing.T) {
+	program := lowerSource(t, `use go:time as tm
+fn main() Int { tm::Since(tm::Now()) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveCall(files, "tm.Since") {
+		t.Fatal("generated AST missing tm.Since call")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoIntFromSigned") {
+		t.Fatal("generated AST missing named scalar return coercion")
+	}
+}
+
+func buildProgramFromGeneratedSources(t *testing.T, program *air.Program, outputName string) {
+	t.Helper()
+	tempDir := t.TempDir()
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("generate sources: %v", err)
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
+			t.Fatalf("write source %s: %v", name, err)
+		}
+	}
+	goMod, err := generatedGoMod(tempDir, program, nil)
+	if err != nil {
+		t.Fatalf("generate go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := buildGeneratedProgram(tempDir, filepath.Join(tempDir, outputName)); err != nil {
+		t.Fatalf("build generated program: %v", err)
+	}
+}
+
+func TestDirectGoScalarReturnBuildsWithPredeclaredNameParameter(t *testing.T) {
+	program := lowerSource(t, `use go:math/rand as rand
+fn foo(int64: Int) Int { rand::Int63() }
+fn main() { foo(0) }`)
+	buildProgramFromGeneratedSources(t, program, "direct-go-predeclared-param")
+}
+
+func TestInlineClosureBuildsWithPredeclaredNameParameter(t *testing.T) {
+	program := lowerSource(t, `use ard/maybe
+fn main() {
+  maybe::some(1).map(fn(int64) { int64 + 1 }).or(0)
+}`)
+	buildProgramFromGeneratedSources(t, program, "inline-closure-predeclared-param")
+}
+
+func TestInlineClosureBuildsWhenParamCollidesWithCaptureRewrite(t *testing.T) {
+	program := lowerSource(t, `use ard/maybe
+fn main() {
+  let x_0 = 10
+  maybe::some(1).map(fn(x) { x + x_0 }).or(0)
+}`)
+	buildProgramFromGeneratedSources(t, program, "inline-closure-capture-param-collision")
+}
+
+func TestFunctionBuildsWithReservedAndSuffixedParameterNames(t *testing.T) {
+	program := lowerSource(t, `fn foo(int64: Int, int64_0: Int) Int { int64_0 }
+fn main() { foo(0, 1) }`)
+	buildProgramFromGeneratedSources(t, program, "reserved-suffixed-params")
+}
+
+func TestLowerDirectGoInstanceMethodCallWithoutExtern(t *testing.T) {
+	program := lowerSource(t, `use go:time
+fn main() Str { time::Now().Format("2006-01-02") }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "time", "time") {
+		t.Fatal("generated AST missing time import")
+	}
+	if !astFilesHaveCall(files, "time.Now") {
+		t.Fatal("generated AST missing time.Now call")
+	}
+	if !astFilesContain(files, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		return ok && selector.Sel != nil && selector.Sel.Name == "Format"
+	}) {
+		t.Fatal("generated AST missing Format method call")
+	}
+}
+
+func TestLowerDirectGoInstanceMethodCallWithoutExternUsesExpectedScalarResult(t *testing.T) {
+	program := lowerSource(t, `use go:time
+fn main() Int { time::Now().UnixNano() }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveCall(files, "time.Now") {
+		t.Fatal("generated AST missing time.Now call")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoIntFromSigned") {
+		t.Fatal("generated AST missing int64 method return coercion")
+	}
+}
+
+func TestLowerDirectGoExternFunctionCall(t *testing.T) {
+	program := lowerSource(t, `use go:math
+extern fn floor(value: Float) Float = math::Floor
+fn main() Float { floor(1.2) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "math", "math") {
+		t.Fatal("generated AST missing math import")
+	}
+	if !astFilesHaveCall(files, "math.Floor") {
+		t.Fatal("generated AST missing math.Floor call")
+	}
+}
+
+func TestLowererDetectsImportAliasPathConflicts(t *testing.T) {
+	l := &lowerer{currentImports: map[string]string{}}
+	l.registerImport("fmt", "example.com/fmt")
+	l.registerImport("fmt", "fmt")
+	if l.importErr == nil || !strings.Contains(l.importErr.Error(), `Go import alias "fmt" used for both`) {
+		t.Fatalf("importErr = %v, want alias conflict", l.importErr)
+	}
+}
+
+func TestLowerDirectGoExternUsesImportAlias(t *testing.T) {
+	program := lowerSource(t, `use go:math/rand as mathrand
+extern fn intn(max: Int) Int = mathrand::Intn
+fn main() Int { intn(10) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "mathrand", "math/rand") {
+		t.Fatal("generated AST missing mathrand import alias")
+	}
+	if !astFilesHaveCall(files, "mathrand.Intn") {
+		t.Fatal("generated AST missing mathrand.Intn call")
+	}
+}
+
+func TestLowerDirectGoExternAliasAvoidsPredeclaredIdentifiers(t *testing.T) {
+	program := lowerSource(t, `use go:math as int
+extern fn floor(value: Float) Float = int::Floor
+fn use_floor() Float { floor(1.2) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "int_1", "math") {
+		t.Fatal("generated AST missing collision-free int_1 import alias")
+	}
+	if !astFilesHaveCall(files, "int_1.Floor") {
+		t.Fatal("generated AST missing int_1.Floor call")
+	}
+}
+
+func TestGeneratedGoImportAliasAvoidsTempPrefix(t *testing.T) {
+	l := &lowerer{directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(nil)}
+	alias := l.generatedGoImportAlias("math", "_tmp_0")
+	if alias != "ardgo" {
+		t.Fatalf("alias = %q, want ardgo", alias)
+	}
+}
+
+func TestDirectGoTypeExprAllocatesAliasesForSecondaryPackages(t *testing.T) {
+	l := &lowerer{currentImports: map[string]string{}, directGoAliases: map[string]string{}, reservedGoIdentifiers: map[string]bool{"b": true}}
+	expr, err := l.directGoTypeExpr(checker.GoValueType{Expr: "b.MyInt", ImportPath: "example.com/cross/b", Package: "b", Name: "MyInt", Named: true, Kind: checker.GoValueInt}, directGoExternBinding{ImportPath: "example.com/cross/a", Alias: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := astExprName(expr); got != "b_1.MyInt" {
+		t.Fatalf("type expr = %q, want b_1.MyInt", got)
+	}
+	if got := l.currentImports["b_1"]; got != "example.com/cross/b" {
+		t.Fatalf("registered import = %q, want example.com/cross/b", got)
+	}
+}
+
+func TestDirectGoExternAliasAvoidsTypeSpecificJSONHelperNames(t *testing.T) {
+	program := &air.Program{Types: []air.TypeInfo{{ID: 2, Kind: air.TypeInt, Name: "Int"}}}
+	l := &lowerer{program: program, directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(program)}
+	alias := l.directGoBindingAlias(directGoExternBinding{ImportPath: "math", Alias: "ardJSONEncode_2"})
+	if alias != "ardJSONEncode_2_1" {
+		t.Fatalf("alias = %q, want ardJSONEncode_2_1", alias)
+	}
+}
+
+func TestLowerDirectGoExternAliasAvoidsRuntimeHelperNames(t *testing.T) {
+	program := lowerSource(t, `use go:unicode/utf8 as ardDirectGoCheckSignedIntRange
+extern fn rune_len(value: Int) Int = ardDirectGoCheckSignedIntRange::RuneLen
+fn main() Int { rune_len(65) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "ardDirectGoCheckSignedIntRange_1", "unicode/utf8") {
+		t.Fatal("generated AST missing collision-free runtime-helper import alias")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoCheckSignedIntRange_1.RuneLen") {
+		t.Fatal("generated AST missing suffixed RuneLen call")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoCheckSignedIntRange") {
+		t.Fatal("generated AST missing signed range helper call")
+	}
+}
+
+func TestLowerDirectGoExternAliasAvoidsSortComparatorParams(t *testing.T) {
+	program := lowerSource(t, `use go:strings as i
+extern fn eq(a: Str, b: Str) Bool = i::EqualFold
+fn main() {
+  mut values = ["a", "B"]
+  values.sort(fn(a: Str, b: Str) Bool { eq(a, b) })
+}`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "i_1", "strings") {
+		t.Fatal("generated AST missing collision-free i_1 import alias")
+	}
+	if !astFilesHaveCall(files, "i_1.EqualFold") {
+		t.Fatal("generated AST missing i_1.EqualFold call")
+	}
+}
+
+func TestLowerDirectGoExternAliasAvoidsLocalShadowing(t *testing.T) {
+	program := lowerSource(t, `use go:math as m
+extern fn floor(value: Float) Float = m::Floor
+fn use_floor(m: Int) Float { floor(1.2) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "m", "math") {
+		t.Fatal("generated AST missing m import alias")
+	}
+	if !astFilesHaveCall(files, "m.Floor") {
+		t.Fatal("generated AST missing m.Floor call")
+	}
+}
+
+func TestLowerDirectGoTypeReference(t *testing.T) {
+	program := lowerSource(t, `use go:time as tm
+extern fn sleep(duration: tm::Duration) Void = tm::Sleep
+fn use_duration(duration: tm::Duration) {
+  sleep(duration)
+}`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "tm", "time") {
+		t.Fatal("generated AST missing tm import")
+	}
+	if !astFilesHaveSelector(files, "tm", "Duration") {
+		t.Fatal("generated AST missing tm.Duration type reference")
+	}
+}
+
+func TestLowerDirectGoEnumLikeConstants(t *testing.T) {
+	program := lowerSource(t, `use go:time
+extern fn now() time::Time = time::Now
+extern fn month(value: time::Time) time::Month = time::Time::Month
+fn month_number(value: time::Month) Int {
+  match value {
+    time::January => 1
+    _ => 0
+  }
+}
+fn main() Int { month_number(month(now())) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "time", "time") {
+		t.Fatal("generated AST missing time import")
+	}
+	if !astFilesHaveSelector(files, "time", "Month") {
+		t.Fatal("generated AST missing time.Month type alias")
+	}
+	if !astFilesHaveSelector(files, "time", "January") {
+		t.Fatal("generated AST missing time.January enum constant")
+	}
+}
+
+func TestLowerDirectGoClosedEnumReturnValidation(t *testing.T) {
+	program := &air.Program{Types: []air.TypeInfo{{
+		ID:            1,
+		Kind:          air.TypeEnum,
+		Name:          "State",
+		ExternBinding: "go:example.com/status::State",
+		Variants:      []air.VariantInfo{{Name: "StateReady", Discriminant: 0}, {Name: "StateDone", Discriminant: 1}},
+	}}}
+	l := &lowerer{program: program}
+	checked, ok, err := l.validateDirectGoReturnValue(1, ast.NewIdent("value"), checker.GoValueType{Kind: checker.GoValueInt, Expr: "status.State", Named: true, ImportPath: "example.com/status", Name: "State"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected closed enum return validation")
+	}
+	foundPanic := false
+	ast.Inspect(checked, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if ok && astCallName(call) == "panic" {
+			foundPanic = true
+			return false
+		}
+		return true
+	})
+	if !foundPanic {
+		t.Fatalf("validation expression = %#v, want panic path", checked)
+	}
+}
+
+func TestDirectGoEnumLikeConstantsBuild(t *testing.T) {
+	program := lowerSource(t, `use go:time
+extern fn now() time::Time = time::Now
+extern fn month(value: time::Time) time::Month = time::Time::Month
+fn main() Int {
+  match month(now()) {
+    time::January => 1
+    _ => 0
+  }
+}`)
+	tempDir := t.TempDir()
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("generate sources: %v", err)
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
+			t.Fatalf("write source %s: %v", name, err)
+		}
+	}
+	goMod, err := generatedGoMod(tempDir, program, nil)
+	if err != nil {
+		t.Fatalf("generate go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := buildGeneratedProgram(tempDir, filepath.Join(tempDir, "direct-go-enum")); err != nil {
+		t.Fatalf("build generated program: %v", err)
+	}
+}
+
+func TestDirectGoPointerReturnAndMethodBuilds(t *testing.T) {
+	program := lowerSource(t, `use go:os
+extern fn create_temp(dir: Str, pattern: Str) (mut os::File)!Str = os::CreateTemp
+extern fn name(file: mut os::File) Str = os::File::Name
+extern fn close(file: mut os::File) Void!Str = os::File::Close
+extern fn remove(path: Str) Void!Str = os::Remove
+fn main() Void!Str {
+  let file = try create_temp("", "ard-direct-go-pointer-*")
+  let path = name(file)
+  try close(file)
+  remove(path)
+}`)
+	tempDir := t.TempDir()
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("generate sources: %v", err)
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
+			t.Fatalf("write source %s: %v", name, err)
+		}
+	}
+	goMod, err := generatedGoMod(tempDir, program, nil)
+	if err != nil {
+		t.Fatalf("generate go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	binaryPath := filepath.Join(tempDir, "direct-go-pointer")
+	if err := buildGeneratedProgram(tempDir, binaryPath); err != nil {
+		t.Fatalf("build generated program: %v", err)
+	}
+	cmd := exec.Command(binaryPath)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("generated program failed: %v\nstderr: %s", err, stderr.String())
+	}
+}
+
+func TestLowerDirectGoExternCoercesNamedScalarArguments(t *testing.T) {
+	program := lowerSource(t, `use go:time as tm
+extern fn sleep(ms: Int) Void = tm::Sleep
+fn main() {
+  let ms = 1
+  sleep(ms)
+}`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "tm", "time") {
+		t.Fatal("generated AST missing tm import")
+	}
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || astCallName(call) != "tm.Sleep" || len(call.Args) != 1 {
+			return false
+		}
+		conversion, ok := call.Args[0].(*ast.CallExpr)
+		return ok && astCallName(conversion) == "tm.Duration"
+	}) {
+		t.Fatal("generated AST missing tm.Duration argument conversion")
+	}
+}
+
+func TestLowerDirectGoExternCoercesNamedScalarReturn(t *testing.T) {
+	program := lowerSource(t, `use go:time as tm
+extern fn now() tm::Time = tm::Now
+extern fn since(value: tm::Time) Int = tm::Since
+fn main() Int { since(now()) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveCall(files, "tm.Since") {
+		t.Fatal("generated AST missing tm.Since call")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoIntFromSigned") {
+		t.Fatal("generated AST missing signed return-to-int helper")
+	}
+}
+
+func TestLowerDirectGoExternChecksUnsignedArgumentRange(t *testing.T) {
+	program := lowerSource(t, `use go:strings
+extern fn index_byte(value: Str, byte: Int) Int = strings::IndexByte
+fn main() Int { index_byte("abc", 98) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveCall(files, "strings.IndexByte") {
+		t.Fatal("generated AST missing strings.IndexByte call")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoCheckUintIntRange") {
+		t.Fatal("generated AST missing uint range check")
+	}
+}
+
+func TestDirectGoExternRangeCheckPanicsBeforeUnsignedWrap(t *testing.T) {
+	program := lowerSource(t, `use go:strings
+extern fn index_byte(value: Str, byte: Int) Int = strings::IndexByte
+fn main() Int { index_byte("abc", 300) }`)
+	tempDir := t.TempDir()
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("generate sources: %v", err)
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
+			t.Fatalf("write source %s: %v", name, err)
+		}
+	}
+	goMod, err := generatedGoMod(tempDir, program, nil)
+	if err != nil {
+		t.Fatalf("generate go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	binaryPath := filepath.Join(tempDir, "range-check")
+	if err := buildGeneratedProgram(tempDir, binaryPath); err != nil {
+		t.Fatalf("build generated program: %v", err)
+	}
+	cmd := exec.Command(binaryPath)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil {
+		t.Fatal("generated program succeeded; expected range check panic")
+	}
+	if !strings.Contains(stderr.String(), "int value out of range for byte") {
+		t.Fatalf("stderr = %q, want range check panic", stderr.String())
+	}
+}
+
+func TestLowerDirectGoExternChecksSignedArgumentRange(t *testing.T) {
+	program := lowerSource(t, `use go:unicode/utf8 as utf8
+extern fn rune_len(value: Int) Int = utf8::RuneLen
+fn main() Int { rune_len(65) }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveCall(files, "utf8.RuneLen") {
+		t.Fatal("generated AST missing utf8.RuneLen call")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoCheckSignedIntRange") {
+		t.Fatal("generated AST missing signed range check")
+	}
+}
+
+func TestLowerDirectGoExternChecksFloat32ArgumentRange(t *testing.T) {
+	l := &lowerer{program: &air.Program{Types: []air.TypeInfo{{ID: 1, Kind: air.TypeFloat}}}, runtimeHelpers: map[string]bool{}}
+	checked := l.checkedDirectGoArg(1, ast.NewIdent("value"), checker.GoValueType{Kind: checker.GoValueFloat, Bits: 32, Expr: "float32"})
+	call, ok := checked.(*ast.CallExpr)
+	if !ok || astCallName(call) != "ardDirectGoCheckFloat32Range" {
+		t.Fatalf("checked arg = %#v, want ardDirectGoCheckFloat32Range call", checked)
+	}
+	if !l.runtimeHelpers["direct_go_float32_range"] {
+		t.Fatal("float32 range helper was not marked")
+	}
+}
+
+func TestLowerDirectGoExternValidatesRuneReturn(t *testing.T) {
+	program := lowerSource(t, `use go:unicode
+extern fn upper(value: Rune) Rune = unicode::ToUpper
+fn main() Rune { upper('a') }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveCall(files, "unicode.ToUpper") {
+		t.Fatal("generated AST missing unicode.ToUpper call")
+	}
+	if !astFilesHaveCall(files, "ardDirectGoCheckRune") {
+		t.Fatal("generated AST missing rune validation")
+	}
+	if !astFilesHaveImport(files, "ardutf8", "unicode/utf8") {
+		t.Fatal("generated AST missing private unicode/utf8 import for rune validation")
+	}
+}
+
+func TestLowerDirectGoExternAdaptsErrorReturnToResult(t *testing.T) {
+	program := lowerSource(t, `use go:os
+extern fn remove(path: Str) Void!Str = os::Remove
+fn main() Void!Str { remove("missing") }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "os", "os") {
+		t.Fatal("generated AST missing os import")
+	}
+	if !astFilesHaveCall(files, "os.Remove") {
+		t.Fatal("generated AST missing os.Remove call")
+	}
+	if !astFilesHaveCall(files, "fmt.Sprint") {
+		t.Fatal("generated AST missing fmt.Sprint error conversion")
+	}
+}
+
+func TestLowerDirectGoExternAdaptsValueErrorReturnToResult(t *testing.T) {
+	program := lowerSource(t, `use go:strconv
+extern fn atoi(value: Str) Int!Str = strconv::Atoi
+fn main() Int!Str { atoi("42") }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "strconv", "strconv") {
+		t.Fatal("generated AST missing strconv import")
+	}
+	if !astFilesHaveCall(files, "strconv.Atoi") {
+		t.Fatal("generated AST missing strconv.Atoi call")
+	}
+	if !astFilesHaveCall(files, "fmt.Sprint") {
+		t.Fatal("generated AST missing fmt.Sprint error conversion")
+	}
+}
+
+func TestDirectGoExternAdaptsInt64ErrorReturnToIntResultBuild(t *testing.T) {
+	program := lowerSource(t, `use go:strconv
+extern fn parse_int(value: Str, base: Int, bits: Int) Int!Str = strconv::ParseInt
+fn main() Int!Str { parse_int("42", 10, 64) }`)
+	tempDir := t.TempDir()
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("generate sources: %v", err)
+	}
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
+			t.Fatalf("write source %s: %v", name, err)
+		}
+	}
+	goMod, err := generatedGoMod(tempDir, program, nil)
+	if err != nil {
+		t.Fatalf("generate go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := buildGeneratedProgram(tempDir, filepath.Join(tempDir, "direct-go-int64-result")); err != nil {
+		t.Fatalf("build generated program: %v", err)
+	}
+}
+
+func TestLowerDirectGoExternAdaptsValueBoolReturnToMaybe(t *testing.T) {
+	program := lowerSource(t, `use go:os
+extern fn lookup_env(key: Str) Str? = os::LookupEnv
+fn main() Str? { lookup_env("PATH") }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesHaveImport(files, "os", "os") {
+		t.Fatal("generated AST missing os import")
+	}
+	if !astFilesHaveCall(files, "os.LookupEnv") {
+		t.Fatal("generated AST missing os.LookupEnv call")
+	}
+	if !astFilesHaveCall(files, "ardruntime.Some") {
+		t.Fatal("generated AST missing ardruntime.Some maybe adapter")
+	}
+	if !astFilesHaveCall(files, "ardruntime.None") {
+		t.Fatal("generated AST missing ardruntime.None maybe adapter")
+	}
 }
 
 func lowerSource(t *testing.T, input string) *air.Program {

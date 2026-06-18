@@ -126,6 +126,7 @@ type TypeInfo struct {
 
 	Fields   []FieldInfo
 	Variants []VariantInfo
+	EnumOpen bool
 	Members  []UnionMember
 
 	Params       []TypeID

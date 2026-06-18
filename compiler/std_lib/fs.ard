@@ -1,35 +1,96 @@
+use ard/byte as Byte
+use ard/string as Str
+use ard/testing
+
+use go:os
+use go:path/filepath
+
+// 0644 file permissions.
+let FILE_MODE = 420
+
+// 0755 directory permissions.
+let DIR_MODE = 493
+
+// os.O_WRONLY.
+let WRITE_ONLY_FLAGS = 1
+
 extern fn exists(path: Str) Bool = "FS_Exists"
 
 extern fn is_file(path: Str) Bool = "FS_IsFile"
 
 extern fn is_dir(path: Str) Bool = "FS_IsDir"
 
-extern fn create_file(path: Str) Bool!Str = "FS_CreateFile"
+fn create_file(path: Str) Bool!Str {
+  let file = try os::Create(path)
+  try os::File::Close(file)
+  Result::ok(true)
+}
 
-extern fn write(path: Str, content: Str) Void!Str = "FS_WriteFile"
+fn write(path: Str, content: Str) Void!Str {
+  os::WriteFile(path, content.bytes(), FILE_MODE)
+}
 
-extern fn append(path: Str, content: Str) Void!Str = "FS_AppendFile"
+fn append(path: Str, content: Str) Void!Str {
+  if not exists(path) {
+    try create_file(path)
+  }
 
-extern fn read(path: Str) Str!Str = "FS_ReadFile"
+  let file = try os::OpenFile(path, WRITE_ONLY_FLAGS, FILE_MODE)
+  let seek_result: Int!Str = os::File::Seek(file, 0, 2)
+  let write_result = match seek_result {
+    ok(_) => os::File::WriteString(file, content),
+    err(e) => Result::err(e),
+  }
+  let close_result = os::File::Close(file)
 
-extern fn delete(path: Str) Void!Str = "FS_DeleteFile"
+  match write_result {
+    ok(_) => close_result,
+    err(e) => Result::err(e),
+  }
+}
 
-extern fn copy(from: Str, to: Str) Void!Str = "FS_Copy"
+fn read_bytes(path: Str) [Byte]!Str {
+  os::ReadFile(path)
+}
 
-extern fn rename(from: Str, to: Str) Void!Str = "FS_Rename"
+fn read(path: Str) Str!Str {
+  let bytes = try read_bytes(path)
+  Str::from_bytes(bytes)
+}
 
-extern fn cwd() Str!Str = "FS_Cwd"
+fn delete(path: Str) Void!Str {
+  os::Remove(path)
+}
 
-extern fn abs(path: Str) Str!Str = "FS_Abs"
+fn copy(from: Str, to: Str) Void!Str {
+  let content = try os::ReadFile(from)
+  os::WriteFile(to, content, FILE_MODE)
+}
+
+fn rename(from: Str, to: Str) Void!Str {
+  os::Rename(from, to)
+}
+
+fn cwd() Str!Str {
+  os::Getwd()
+}
+
+fn abs(path: Str) Str!Str {
+  filepath::Abs(path)
+}
 
 struct DirEntry {
   name: Str,
   is_file: Bool,
 }
 
-extern fn create_dir(path: Str) Void!Str = "FS_CreateDir"
+fn create_dir(path: Str) Void!Str {
+  os::MkdirAll(path, DIR_MODE)
+}
 
-extern fn delete_dir(path: Str) Void!Str = "FS_DeleteDir"
+fn delete_dir(path: Str) Void!Str {
+  os::RemoveAll(path)
+}
 
 // Private FFI returns map of name -> is_file
 private extern fn _list_dir_map(path: Str) [Str: Bool]!Str = "FS_ListDir"
@@ -41,4 +102,55 @@ fn list_dir(path: Str) [DirEntry]!Str {
     entries.push(DirEntry{name: name, is_file: is_file})
   }
   Result::ok(entries)
+}
+
+test fn test_direct_file_helpers() Void!Str {
+  let file = "/tmp/ard_stdlib_fs_direct_helpers.txt"
+  let copy_path = "/tmp/ard_stdlib_fs_direct_helpers.copy.txt"
+  let dir = "/tmp/ard_stdlib_fs_direct_helpers_dir"
+
+  delete(file)
+  delete(copy_path)
+  delete_dir(dir)
+
+  let created = try create_file(file)
+  try testing::assert(created, "Expected create_file to return true")
+
+  try write(file, "hello")
+  try append(file, " world")
+
+  let content = try read(file)
+  try testing::assert(content == "hello world", "Expected append to add content")
+
+  let bytes = try read_bytes(file)
+  try testing::assert(bytes.size() == 11, "Expected read_bytes to return raw bytes")
+
+  try copy(file, copy_path)
+  let copied = try read(copy_path)
+  try testing::assert(copied == "hello world", "Expected copy to preserve content")
+
+  try create_dir(dir)
+  try testing::assert(is_dir(dir), "Expected create_dir to create a directory")
+
+  delete(file)
+  delete(copy_path)
+  delete_dir(dir)
+
+  testing::pass()
+}
+
+test fn test_read_rejects_invalid_utf8() Void!Str {
+  let file = "/tmp/ard_stdlib_fs_invalid_utf8.bin"
+  delete(file)
+
+  let invalid = Byte::from_int(255).expect("byte")
+  try os::WriteFile(file, [invalid], FILE_MODE)
+
+  try testing::assert(read(file).is_err(), "Expected read to reject invalid UTF-8")
+
+  let bytes = try read_bytes(file)
+  try testing::assert(bytes.size() == 1, "Expected read_bytes to preserve invalid UTF-8 bytes")
+
+  delete(file)
+  testing::pass()
 }

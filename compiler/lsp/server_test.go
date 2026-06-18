@@ -1563,6 +1563,16 @@ fn main(mut res: http::Response) {
 	assertSignature(t, help, "fn responses::json_error(mut res: http::Response, status: Int, message: Str) Void", 1)
 }
 
+func TestSignatureHelpDirectGoFunction(t *testing.T) {
+	help, _ := requireSignatureHelpAtMarker(t, `use go:strconv
+
+fn main() Float!Str {
+  strconv::ParseFloat("1.5", |)
+}
+`, "test.ard")
+	assertSignature(t, help, "fn strconv::ParseFloat(s: Str, bitSize: Int) Float!Str", 1)
+}
+
 // TestSignatureHelpStaticPreludeFunction verifies signature help for prelude static calls.
 func TestSignatureHelpStaticPreludeFunction(t *testing.T) {
 	source := `fn main(input: Str) {
@@ -1866,6 +1876,44 @@ fn main() {
 }
 
 // TestCompletionUserModuleStaticMembers verifies user module functions and variables complete after ::.
+func TestCompletionDirectGoPackageSymbols(t *testing.T) {
+	source := `use go:math
+
+fn main() {
+  math::
+}
+`
+
+	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 8})
+	assertCompletion(t, items, "Floor", "fn (x: Float) Float")
+}
+
+func TestCompletionDirectGoPackageTypesAndEnumConstants(t *testing.T) {
+	source := `use go:time
+
+fn main() {
+  time::
+}
+`
+
+	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 8})
+	assertCompletion(t, items, "Time", "time::Time")
+	assertCompletion(t, items, "January", "time::Month")
+	assertCompletion(t, items, "Now", "fn () time::Time")
+}
+
+func TestCompletionDirectGoTypeStaticMethods(t *testing.T) {
+	source := `use go:time
+
+fn main(value: time::Time) {
+  time::Time::
+}
+`
+
+	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 14})
+	assertCompletion(t, items, "Format", "fn (receiver: time::Time, layout: Str) Str")
+}
+
 func TestCompletionUserModuleStaticMembersExcludesTests(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
@@ -2431,6 +2479,131 @@ fn main() {
 				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
 			}
 		})
+	}
+}
+
+func TestHoverDirectGoFunctionSignature(t *testing.T) {
+	source := `use go:strconv
+
+fn parse() Float!Str {
+  strconv::ParseFloat("1.5", 64)
+}
+`
+
+	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 14})
+	if info == nil {
+		t.Fatal("expected hover info, got nil")
+	}
+	want := "fn strconv::ParseFloat(s: Str, bitSize: Int) Float!Str"
+	if !strings.Contains(info.content, want) {
+		t.Fatalf("hover content = %q, want contains %q", info.content, want)
+	}
+}
+
+func TestHoverDirectGoInstanceMethodSignature(t *testing.T) {
+	source := `use go:time
+
+fn today() Str {
+  time::Now().Format("2006-01-02")
+}
+`
+
+	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 16})
+	if info == nil {
+		t.Fatal("expected hover info, got nil")
+	}
+	want := "fn time::Time.Format(layout: Str) Str"
+	if !strings.Contains(info.content, want) {
+		t.Fatalf("hover content = %q, want contains %q", info.content, want)
+	}
+}
+
+func TestHoverDirectGoCrossPackageTypeSignature(t *testing.T) {
+	source := `use go:io
+use go:net/http as http
+
+fn request(body: io::Reader) (mut http::Request)!Str {
+  http::NewRequest("GET", "https://example.com", body)
+}
+`
+
+	info := computeHover(source, "test.ard", protocol.Position{Line: 4, Character: 10})
+	if info == nil {
+		t.Fatal("expected hover info, got nil")
+	}
+	want := "fn http::NewRequest(method: Str, url: Str, body: io::Reader) (mut http::Request)!Str"
+	if !strings.Contains(info.content, want) {
+		t.Fatalf("hover content = %q, want contains %q", info.content, want)
+	}
+}
+
+func TestHoverDirectGoPointerReceiverMethodSignature(t *testing.T) {
+	source := `use go:os
+
+fn close(file: mut os::File) Void!Str {
+  file.Close()
+}
+`
+
+	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 8})
+	if info == nil {
+		t.Fatal("expected hover info, got nil")
+	}
+	want := "fn mut os::File.Close() Void!Str"
+	if !strings.Contains(info.content, want) {
+		t.Fatalf("hover content = %q, want contains %q", info.content, want)
+	}
+}
+
+func TestDirectGoHoverRejectsNamedPointerReturn(t *testing.T) {
+	client := checker.GoValueType{Kind: checker.GoValueOther, Expr: "pkg.Client", Named: true, ImportPath: "example.com/pkg", Package: "pkg", Name: "Client"}
+	namedPointer := checker.GoValueType{Kind: checker.GoValuePointer, Expr: "pkg.Handle", Named: true, ImportPath: "example.com/pkg", Package: "pkg", Name: "Handle", Elem: &client}
+	if got, ok := directGoHoverReturn([]checker.GoValueType{namedPointer}, directGoHoverContext{currentImportPath: "example.com/pkg", currentAlias: "pkg"}); ok {
+		t.Fatalf("named pointer return displayed as %q; expected unsupported", got)
+	}
+}
+
+func TestHoverDirectGoRejectsUnsupportedPointerReceiver(t *testing.T) {
+	root := t.TempDir()
+	statusDir := filepath.Join(root, "status")
+	appDir := filepath.Join(root, "app")
+	for _, dir := range []string{statusDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(statusDir, "go.mod"), []byte("module example.com/status\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(statusDir, "status.go"), []byte(`package status
+
+type State int
+
+const (
+	StateReady State = iota
+	StateDone
+)
+
+func (s *State) Mutate() {}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(fmt.Sprintf("module app\n\ngo 1.26.0\n\nrequire example.com/status v0.0.0\nreplace example.com/status => %s\n", statusDir)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(appDir, "main.ard")
+	source := `use go:example.com/status as status
+
+fn bad(state: mut status::State) {
+  state.Mutate()
+}
+`
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info := computeHover(source, filePath, protocol.Position{Line: 3, Character: 9})
+	if info != nil && strings.Contains(info.content, "fn mut status::State.Mutate") {
+		t.Fatalf("hover content = %q; unsupported enum pointer receiver should not be advertised", info.content)
 	}
 }
 

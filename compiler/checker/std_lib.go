@@ -52,8 +52,8 @@ func (pkg AsyncPkg) Get(name string) Symbol {
 				Name:             name,
 				Parameters:       []Parameter{{Name: "ms", Type: Int}},
 				ReturnType:       Void,
-				ExternalBinding:  "Sleep",
-				ExternalBindings: map[string]string{"go": "Sleep"},
+				ExternalBinding:  "go:time::Sleep",
+				ExternalBindings: map[string]string{"go": "go:time::Sleep"},
 			},
 		}
 	case "start":
