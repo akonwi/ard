@@ -1,21 +1,23 @@
 use ard/testing
 
+use go:time
+
 // converters to nanoseconds
 
 fn from_hours(h: Int) Int {
-  h * 3600 * 1000000000
+  h * time::Hour
 }
 
 fn from_seconds(s: Int) Int {
-  s * 1000000000
+  s * time::Second
 }
 
 fn from_minutes(m: Int) Int {
-  m * 60 * 1000000000
+  m * time::Minute
 }
 
 fn from_millis(ms: Int) Int {
-  ms * 1000000
+  ms * time::Millisecond
 }
 
 test fn test_from_seconds() Void!Str {
