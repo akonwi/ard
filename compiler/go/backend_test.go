@@ -1248,6 +1248,98 @@ func TestRunProgramSpecializesGenericEmptyListLocal(t *testing.T) {
 	}
 }
 
+func TestBuildProgramSpecializesNestedGenericLambdasPerOuterBinding(t *testing.T) {
+	workspace := t.TempDir()
+	sharedDir := filepath.Join(workspace, "state-shared")
+	appDir := filepath.Join(workspace, "state-app")
+	for _, dir := range []string{sharedDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(sharedDir, "ard.toml"), []byte("name = \"state-shared\"\nard = \">= 0.23.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedDir, "shared.ard"), []byte(`struct State<$T> { handle: Int }
+
+fn _stateful<$T>(
+  init: fn(Int) $T,
+  build: fn(Int) Int,
+) Int {
+  let _ = init(0)
+  build(0)
+}
+
+fn stateful<$T>(
+  init: fn() $T,
+  build: fn(State<$T>) Int,
+) Int {
+  _stateful(
+    init: fn(h: Int) $T {
+      init()
+    },
+    build: fn(h: Int) Int {
+      build(State{handle: h})
+    },
+  )
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"state-app\"\nard = \">= 0.23.0\"\n\n[dependencies]\nstate-shared = { path = \"../state-shared\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"main.ard": `use state-app/a
+use state-app/b
+
+fn main() Void {
+  a::go()
+  b::go()
+}
+`,
+		"a.ard": `use state-shared/shared
+
+struct State { x: Int }
+
+fn go() Void {
+  let _ = shared::stateful(
+    fn() State { State{x: 1} },
+    fn(s: shared::State<State>) Int { 0 },
+  )
+}
+`,
+		"b.ard": `use state-shared/shared
+
+struct State { y: Str }
+
+fn go() Void {
+  let _ = shared::stateful(
+    fn() State { State{y: "hi"} },
+    fn(s: shared::State<State>) Int { 0 },
+  )
+}
+`,
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(appDir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+}
+
 func TestRunProgramAllowsModuleWithoutEntry(t *testing.T) {
 	program := lowerSource(t, `
 		fn add(a: Int, b: Int) Int {

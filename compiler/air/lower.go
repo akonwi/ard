@@ -616,6 +616,11 @@ func (l *lowerer) newFunctionLowerer(fn *Function, def *checker.FunctionDef, par
 		parent:   parent,
 		typeVars: map[string]TypeID{},
 	}
+	if parent != nil {
+		for name, typeID := range parent.typeVars {
+			fl.typeVars[name] = typeID
+		}
+	}
 	if def != nil {
 		paramOffset := 0
 		if len(fn.Signature.Params) == len(def.Parameters)+1 {
@@ -655,11 +660,9 @@ func (fl *functionLowerer) bindTypeVars(pattern checker.Type, actual TypeID) {
 		return
 	}
 	if tv, ok := pattern.(*checker.TypeVar); ok {
-		if tv.Actual() == nil {
+		if _, ok := fl.typeVars[tv.Name()]; !ok {
 			fl.typeVars[tv.Name()] = actual
-			return
 		}
-		fl.bindTypeVars(tv.Actual(), actual)
 		return
 	}
 	actualInfo, ok := fl.l.typeInfo(actual)
@@ -722,15 +725,15 @@ func (fl *functionLowerer) bindTypeVars(pattern checker.Type, actual TypeID) {
 
 func (fl *functionLowerer) internType(t checker.Type) (TypeID, error) {
 	if tv, ok := t.(*checker.TypeVar); ok {
-		if tv.Actual() != nil {
-			return fl.internType(tv.Actual())
-		}
 		if id, ok := fl.typeVars[tv.Name()]; ok {
 			return id, nil
 		}
+		if tv.Actual() != nil {
+			return fl.internType(tv.Actual())
+		}
 		return fl.l.internType(checker.Void)
 	}
-	if !typeHasUnresolvedTypeVar(t) {
+	if !typeContainsTypeVar(t) {
 		return fl.l.internType(t)
 	}
 	return fl.internCompositeType(t)
@@ -741,15 +744,15 @@ func (fl *functionLowerer) internResolvedType(t checker.Type) (TypeID, error) {
 		return NoType, fmt.Errorf("cannot intern nil type")
 	}
 	if tv, ok := t.(*checker.TypeVar); ok {
-		if tv.Actual() != nil {
-			return fl.internResolvedType(tv.Actual())
-		}
 		if id, ok := fl.typeVars[tv.Name()]; ok {
 			return id, nil
 		}
+		if tv.Actual() != nil {
+			return fl.internResolvedType(tv.Actual())
+		}
 		return NoType, fmt.Errorf("unresolved generic type variable $%s", tv.Name())
 	}
-	if !typeHasUnresolvedTypeVar(t) {
+	if !typeContainsTypeVar(t) {
 		return fl.l.internType(t)
 	}
 	return fl.internResolvedCompositeType(t)
@@ -769,6 +772,9 @@ func (fl *functionLowerer) internContextualCheckerType(t checker.Type) (TypeID, 
 func (fl *functionLowerer) internWeakContextType(t checker.Type) (TypeID, error) {
 	switch typ := t.(type) {
 	case *checker.TypeVar:
+		if id, ok := fl.typeVars[typ.Name()]; ok {
+			return id, nil
+		}
 		if typ.Actual() != nil {
 			return fl.internWeakContextType(typ.Actual())
 		}
@@ -1789,15 +1795,43 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 }
 
 func (l *lowerer) internSyntheticType(name string, info TypeInfo) (TypeID, error) {
-	if id, ok := l.typeByKey[name]; ok {
+	key := syntheticTypeKey(name, info)
+	if id, ok := l.typeByKey[key]; ok {
 		return id, nil
 	}
 	id := TypeID(len(l.program.Types) + 1)
 	info.ID = id
 	info.Name = name
-	l.typeByKey[name] = id
+	l.typeByKey[key] = id
 	l.program.Types = append(l.program.Types, info)
 	return id, nil
+}
+
+func syntheticTypeKey(name string, info TypeInfo) string {
+	switch info.Kind {
+	case TypeList:
+		return fmt.Sprintf("list:%d", info.Elem)
+	case TypeMap:
+		return fmt.Sprintf("map:%d:%d", info.Key, info.Value)
+	case TypeMaybe:
+		return fmt.Sprintf("maybe:%d", info.Elem)
+	case TypeResult:
+		return fmt.Sprintf("result:%d:%d", info.Value, info.Error)
+	case TypeFunction:
+		parts := make([]string, len(info.Params))
+		for i, param := range info.Params {
+			mut := ""
+			if i < len(info.ParamMutable) && info.ParamMutable[i] {
+				mut = "mut "
+			}
+			parts[i] = fmt.Sprintf("%s%d", mut, param)
+		}
+		return fmt.Sprintf("fn:(%s)->%d", strings.Join(parts, ","), info.Return)
+	case TypeExtern:
+		return fmt.Sprintf("extern:%s:%s:%d", info.ModulePath, info.ExternBinding, info.Elem)
+	default:
+		return "synthetic:" + name
+	}
 }
 
 func (l *lowerer) typeOwnerPath(t checker.Type) string {
