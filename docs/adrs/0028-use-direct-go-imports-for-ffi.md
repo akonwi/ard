@@ -136,7 +136,7 @@ private type RawResponse = mut http::Response
 Keep companion FFI wrappers where Ard's public API intentionally differs from the Go function shape. Direct imports do not replace adapters that need to:
 
 - choose defaults or add missing Go arguments, such as file permissions, open flags, timeouts, hash costs, or scrypt parameters;
-- convert Go `(T, error)` or `(T, bool)` conventions into Ard `Result` or `Maybe` semantics beyond the basic boundary adapters;
+- convert Go `(T, error)` conventions into Ard `Result`, or `(T, bool)` conventions into Ard `Maybe` semantics beyond the basic boundary adapters;
 - normalize values, such as SQL placeholders, password text, dynamic values, JSON values, HTTP request/response structs, or file-system entry maps;
 - manage state, such as buffered stdin or configured host arguments;
 - adapt callbacks and handlers between Ard function types and Go callback signatures;
@@ -144,10 +144,12 @@ Keep companion FFI wrappers where Ard's public API intentionally differs from th
 
 This means direct Go imports reduce stdlib FFI ceremony but do not eliminate `compiler/std_lib/ffi` entirely. The remaining companion code should become clearer because it represents real semantic adaptation rather than mandatory forwarding.
 
+Do not adapt Go `(T, error)` returns to Ard `T?`. A non-nil Go `error` is failure information, not absence; converting it to `none` would discard error semantics and misrepresent the Go signature. Use `T!Str` for direct `(T, error)` bindings, or keep a companion wrapper when an API intentionally maps specific errors to missingness.
+
 The standard-library migration exposes implementation gaps that should be addressed before broad conversion:
 
 - method-expression bindings for exported Go methods, such as `sql::DB::Close` or `http::Request::PathValue`;
-- boundary adapters for `error -> Void!Str`, `(T, error) -> T!Str`, `(T, error) -> T?`, and `(T, bool) -> T?`;
+- boundary adapters for `error -> Void!Str`, `(T, error) -> T!Str`, and `(T, bool) -> T?`;
 - boundary scalar coercions for direct Go signatures whose scalar types do not exactly match Ard's primitive Go representations;
 - a way to represent direct Go packages used by embedded stdlib code with compiler-module metadata rather than a user project `go.mod`;
 - clear diagnostics when a direct Go function's required parameters cannot be expressed by the Ard extern signature.
