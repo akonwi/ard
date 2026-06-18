@@ -12,8 +12,8 @@ This audit tracks the remaining Ard standard-library bindings that still use com
    - `fs::{write, copy, create_dir, create_file, append, read, read_bytes}` now use Ard functions over direct Go calls.
    - `fs::read` is now a UTF-8-validating text reader; `fs::read_bytes` preserves raw bytes for binary data.
 
-3. **Small SQL pure-Ard cleanup**
-   - Move `sql::detect_driver` and `sql::extract_params` into Ard.
+3. **Completed small SQL pure-Ard cleanup**
+   - `sql::detect_driver` and `sql::extract_params` now live in Ard.
    - Consider moving pgx placeholder normalization into Ard if the SQL execution adapter remains in Go.
 
 4. **Ongoing direct-Go capability backlog**
@@ -156,8 +156,8 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 
 ### `ard/sql`
 
-- Current adapters: driver detection, open/close, exec/query, begin/commit/rollback, parameter extraction.
-- Can refactor now to pure Ard:
+- Current adapters: open/close, exec/query, begin/commit/rollback.
+- Refactored to pure Ard:
   - `detect_driver`
   - `extract_params`
 - Could later move to direct Go after type cleanup:

@@ -192,10 +192,8 @@ type Host struct {
 	SqlBeginTx           func(db *sql.DB) (*sql.Tx, error)
 	SqlClose             func(db *sql.DB) error
 	SqlCommit            func(tx *sql.Tx) error
-	SqlCreateConnection  func(connection_string string) (*sql.DB, error)
-	SqlDetectDriver      func(connection_string string) string
+	SqlCreateConnection  func(driver string, connection_string string) (*sql.DB, error)
 	SqlExecute           func(conn any, driver string, sql string, values []any) error
-	SqlExtractParams     func(sql string) []string
 	SqlQuery             func(conn any, driver string, sql string, values []any) ([]any, error)
 	SqlRollback          func(tx *sql.Tx) error
 	StrFromRunes         func(runes []rune) (string, error)
@@ -362,14 +360,8 @@ func (h Host) Functions() map[string]any {
 	if h.SqlCreateConnection != nil {
 		functions["SqlCreateConnection"] = h.SqlCreateConnection
 	}
-	if h.SqlDetectDriver != nil {
-		functions["SqlDetectDriver"] = h.SqlDetectDriver
-	}
 	if h.SqlExecute != nil {
 		functions["SqlExecute"] = h.SqlExecute
-	}
-	if h.SqlExtractParams != nil {
-		functions["SqlExtractParams"] = h.SqlExtractParams
 	}
 	if h.SqlQuery != nil {
 		functions["SqlQuery"] = h.SqlQuery

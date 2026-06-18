@@ -102,7 +102,6 @@ func NewHost(config HostConfig) Host {
 		SqlCommit:            SqlCommit,
 		SqlCreateConnection:  SqlCreateConnection,
 		SqlExecute:           SqlExecute,
-		SqlExtractParams:     SqlExtractParams,
 		SqlQuery:             SqlQuery,
 		SqlRollback:          SqlRollback,
 		VoidToDynamic:        VoidToDynamic,
@@ -457,8 +456,7 @@ func CryptoUUID() string {
 	)
 }
 
-func SqlCreateConnection(connectionString string) (*sql.DB, error) {
-	driver := SqlDetectDriver(connectionString)
+func SqlCreateConnection(driver string, connectionString string) (*sql.DB, error) {
 	db, err := sql.Open(driver, connectionString)
 	if err != nil {
 		return nil, err
@@ -502,22 +500,6 @@ func SqlRollback(tx *sql.Tx) error {
 	return tx.Rollback()
 }
 
-func SqlExtractParams(sqlStr string) []string {
-	delimiters := []string{" ", "(", ")", ",", ";", "=", "<", ">", "!", "\t", "\n", "\r"}
-	tokens := splitSQLByMultipleDelimiters(sqlStr, delimiters)
-	var paramNames []string
-	for _, token := range tokens {
-		if strings.HasPrefix(token, "@") && len(token) > 1 {
-			paramName := strings.TrimLeft(token[1:], "@")
-			paramName = strings.TrimRight(paramName, ".,;:!?")
-			if paramName != "" {
-				paramNames = append(paramNames, paramName)
-			}
-		}
-	}
-	return paramNames
-}
-
 func SqlQuery(conn any, driver string, sqlStr string, values []any) ([]any, error) {
 	runner, ok := resolveSQLRunner(conn)
 	if !ok {
@@ -535,33 +517,6 @@ func SqlExecute(conn any, driver string, sqlStr string, values []any) error {
 	sqlStr = normalizeSQLPlaceholders(sqlStr, driver)
 	_, err := runner.Exec(sqlStr, values...)
 	return err
-}
-
-func SqlDetectDriver(connStr string) string {
-	connStr = strings.TrimSpace(connStr)
-	if strings.HasPrefix(connStr, "postgres://") || strings.HasPrefix(connStr, "postgresql://") {
-		return "pgx"
-	}
-	if strings.Contains(connStr, "@tcp(") || strings.Contains(connStr, "@unix(") {
-		return "mysql"
-	}
-	return "sqlite3"
-}
-
-func splitSQLByMultipleDelimiters(s string, delimiters []string) []string {
-	result := s
-	for _, delimiter := range delimiters {
-		result = strings.ReplaceAll(result, delimiter, " ")
-	}
-	tokens := strings.Split(result, " ")
-	nonEmpty := make([]string, 0, len(tokens))
-	for _, token := range tokens {
-		token = strings.TrimSpace(token)
-		if token != "" {
-			nonEmpty = append(nonEmpty, token)
-		}
-	}
-	return nonEmpty
 }
 
 func resolveSQLRunner(raw any) (sqlRunner, bool) {
