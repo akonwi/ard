@@ -930,7 +930,8 @@ func moduleInterfaceUsesDirectGoTypes(program *air.Program, module air.Module) b
 		if int(functionID) < 0 || int(functionID) >= len(program.Functions) {
 			continue
 		}
-		if signatureUsesDirectGo(program, program.Functions[functionID].Signature) {
+		fn := program.Functions[functionID]
+		if signatureUsesDirectGo(program, fn.Signature) || blockUsesDirectGoDirectly(program, fn.Body) {
 			return true
 		}
 	}
@@ -947,7 +948,8 @@ func moduleUsesDirectGoTypes(program *air.Program, module air.Module) bool {
 		if int(globalID) < 0 || int(globalID) >= len(program.Globals) {
 			continue
 		}
-		if typeUsesDirectGo(program, program.Globals[globalID].Type, map[air.TypeID]bool{}) {
+		global := program.Globals[globalID]
+		if typeUsesDirectGo(program, global.Type, map[air.TypeID]bool{}) || exprUsesDirectGoDirectly(program, &global.Value) {
 			return true
 		}
 	}
@@ -956,7 +958,7 @@ func moduleUsesDirectGoTypes(program *air.Program, module air.Module) bool {
 			continue
 		}
 		fn := program.Functions[functionID]
-		if signatureUsesDirectGo(program, fn.Signature) {
+		if signatureUsesDirectGo(program, fn.Signature) || blockUsesDirectGoDirectly(program, fn.Body) {
 			return true
 		}
 		for _, local := range fn.Locals {
@@ -1029,6 +1031,9 @@ func exprUsesDirectGoDirectly(program *air.Program, expr *air.Expr) bool {
 		return false
 	}
 	if expr.Kind == air.ExprCallExtern && int(expr.Extern) >= 0 && int(expr.Extern) < len(program.Externs) && externHasDirectGoBinding(program.Externs[expr.Extern]) {
+		return true
+	}
+	if expr.Kind == air.ExprDirectGoPackageValue {
 		return true
 	}
 	if expr.Kind == air.ExprEnumVariant && typeUsesDirectGo(program, expr.Type, map[air.TypeID]bool{}) {

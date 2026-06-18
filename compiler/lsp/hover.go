@@ -1615,10 +1615,16 @@ func directGoInstanceMethodSignature(ownerType string, methodName string, prog *
 	if !ok || method.Signature.Variadic {
 		return nil
 	}
-	ctx := directGoHoverContextForImport(imp, prog)
+	return directGoInstanceMethodSignatureFromGoSignature(displayOwner, mutableOwner, methodName, method.Signature, directGoHoverContextForImport(imp, prog))
+}
+
+func directGoInstanceMethodSignatureFromGoSignature(displayOwner string, mutableOwner bool, methodName string, signature checker.GoSignature, ctx directGoHoverContext) *hoverMethodSignature {
+	if signature.Variadic {
+		return nil
+	}
 	mutates := false
-	if method.Signature.Receiver != nil {
-		receiverType, ok := directGoHoverReturnType(*method.Signature.Receiver, ctx)
+	if signature.Receiver != nil {
+		receiverType, ok := directGoHoverReturnType(*signature.Receiver, ctx)
 		if !ok {
 			return nil
 		}
@@ -1627,8 +1633,8 @@ func directGoInstanceMethodSignature(ownerType string, methodName string, prog *
 			return nil
 		}
 	}
-	params := make([]hoverParam, len(method.Signature.Params))
-	for i, param := range method.Signature.Params {
+	params := make([]hoverParam, len(signature.Params))
+	for i, param := range signature.Params {
 		paramType, ok := directGoHoverParamType(param, ctx, true)
 		if !ok {
 			return nil
@@ -1639,7 +1645,7 @@ func directGoInstanceMethodSignature(ownerType string, methodName string, prog *
 		}
 		params[i] = hoverParam{Name: paramName, Type: paramType}
 	}
-	returnType, ok := directGoHoverReturn(method.Signature.Results, ctx)
+	returnType, ok := directGoHoverReturn(signature.Results, ctx)
 	if !ok {
 		return nil
 	}
@@ -2007,10 +2013,20 @@ func describeStaticProperty(sp *parse.StaticProperty, source string, filePath st
 	if target == "" || property == "" {
 		return simpleHover(fmt.Sprintf("%v::?", sp.Target))
 	}
+	if info := directGoStaticPropertyHover(target, property, prog, filePath); info != nil {
+		return info
+	}
 	if info := importedStaticPropertyHover(target, property, prog, filePath); info != nil {
 		return info
 	}
 	return simpleHover(fmt.Sprintf("%s::%s", target, property))
+}
+
+func directGoStaticPropertyHover(target string, property string, prog *parse.Program, filePath string) *hoverInfo {
+	if varType, ok := directGoPackageVariableDisplayType(target, property, prog, filePath); ok {
+		return simpleHover(fmt.Sprintf("%s::%s: %s", target, property, varType))
+	}
+	return nil
 }
 
 func importedStaticPropertyHover(target string, property string, prog *parse.Program, filePath string) *hoverInfo {
@@ -2154,6 +2170,11 @@ func inferExprType(expr parse.Expression, prog *parse.Program, filePath string) 
 		return "?"
 	case *parse.StaticProperty:
 		if id, ok := e.Property.(*parse.Identifier); ok {
+			if target := simpleExprName(e.Target); target != "" {
+				if varType, ok := directGoPackageVariableDisplayType(target, id.Name, prog, filePath); ok {
+					return qualifyTypeDisplay(varType, prog, filePath)
+				}
+			}
 			return resolveIdentType(id.Name, prog, filePath)
 		}
 		return "?"
@@ -2358,6 +2379,26 @@ func importedStaticFunctionSignature(target string, name string, prog *parse.Pro
 		return nil
 	}
 	return checkerStaticFunctionSignature(target, name, sym.Type)
+}
+
+func directGoPackageVariableDisplayType(target string, name string, prog *parse.Program, filePath string) (string, bool) {
+	alias, memberPrefix := splitStaticTarget(target)
+	if memberPrefix != "" {
+		return "", false
+	}
+	imp, ok := directGoImportForAlias(alias, prog)
+	if !ok {
+		return "", false
+	}
+	pkg, ok := loadDirectGoPackage(imp, filePath)
+	if !ok {
+		return "", false
+	}
+	variable, ok := pkg.Variables[name]
+	if !ok {
+		return "", false
+	}
+	return directGoHoverReturnType(variable.Type, directGoHoverContextForImport(imp, prog))
 }
 
 func importedDirectGoFunctionSignature(target string, name string, prog *parse.Program, filePath string) *hoverStaticFunctionSignature {

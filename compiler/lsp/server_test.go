@@ -1902,6 +1902,35 @@ fn main() {
 	assertCompletion(t, items, "Now", "fn () time::Time")
 }
 
+func TestCompletionDirectGoPackageVariables(t *testing.T) {
+	source := `use go:os
+use go:encoding/base64 as base64
+
+fn main() {
+  os::
+  base64::
+}
+`
+
+	osItems := computeCompletions(source, "test.ard", protocol.Position{Line: 4, Character: 6})
+	assertCompletion(t, osItems, "Args", "[Str]")
+
+	base64Items := computeCompletions(source, "test.ard", protocol.Position{Line: 5, Character: 10})
+	assertCompletion(t, base64Items, "StdEncoding", "mut base64::Encoding")
+}
+
+func TestCompletionDirectGoPackageVariableInstanceMethods(t *testing.T) {
+	source := `use go:encoding/base64 as base64
+
+fn main() {
+  base64::StdEncoding.
+}
+`
+
+	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 22})
+	assertCompletion(t, items, "EncodeToString", "fn mut (src: [Byte]) Str")
+}
+
 func TestCompletionDirectGoTypeStaticMethods(t *testing.T) {
 	source := `use go:time
 
@@ -2479,6 +2508,23 @@ fn main() {
 				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
 			}
 		})
+	}
+}
+
+func TestHoverDirectGoPackageVariable(t *testing.T) {
+	source := `use go:os
+
+fn main() {
+  os::Args
+}
+`
+
+	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 7})
+	if info == nil {
+		t.Fatal("expected hover info, got nil")
+	}
+	if !strings.Contains(info.content, "os::Args: [Str]") {
+		t.Fatalf("hover = %q", info.content)
 	}
 }
 

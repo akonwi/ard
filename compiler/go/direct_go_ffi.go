@@ -206,6 +206,21 @@ func (l *lowerer) lowerDirectGoExternCall(ext air.Extern, binding string, args [
 	}
 }
 
+func (l *lowerer) lowerDirectGoPackageValue(binding string) (loweredExpr, error) {
+	direct, ok, err := parseDirectGoExternBinding(binding)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if !ok {
+		return loweredExpr{}, fmt.Errorf("direct Go package value binding %q must use a go: binding", binding)
+	}
+	if len(direct.Symbols) != 1 || strings.HasPrefix(direct.Symbols[0], "*") {
+		return loweredExpr{}, fmt.Errorf("direct Go package value binding %q must be package::Variable", binding)
+	}
+	alias := l.directGoBindingAlias(direct)
+	return loweredExpr{expr: l.qualified(alias, direct.ImportPath, direct.Symbols[0])}, nil
+}
+
 func (l *lowerer) directGoSignature(ext air.Extern, binding directGoExternBinding) (checker.GoSignature, error) {
 	resolver := l.directGoResolverForExtern(ext)
 	if resolver == nil {

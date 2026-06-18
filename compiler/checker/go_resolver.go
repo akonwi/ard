@@ -25,6 +25,7 @@ type GoPackage struct {
 	Functions  map[string]GoFunction
 	Types      map[string]GoType
 	Constants  map[string]GoConstant
+	Variables  map[string]GoVariable
 }
 
 type GoFunction struct {
@@ -87,6 +88,11 @@ type GoConstant struct {
 	Type        GoValueType
 	IntValue    int
 	HasIntValue bool
+}
+
+type GoVariable struct {
+	Name string
+	Type GoValueType
 }
 
 type directGoImport struct {
@@ -170,6 +176,7 @@ func goPackageFromTypes(importPath string, name string, pkg *types.Package) *GoP
 		Functions:  map[string]GoFunction{},
 		Types:      map[string]GoType{},
 		Constants:  map[string]GoConstant{},
+		Variables:  map[string]GoVariable{},
 	}
 	if pkg == nil || pkg.Scope() == nil {
 		return out
@@ -186,6 +193,8 @@ func goPackageFromTypes(importPath string, name string, pkg *types.Package) *GoP
 			out.Types[name] = GoType{Name: name, Methods: exportedMethods(obj.Type())}
 		case *types.Const:
 			out.Constants[name] = goConstant(obj)
+		case *types.Var:
+			out.Variables[name] = goVariable(obj)
 		}
 	}
 	attachEnumLikeConstants(out)
@@ -196,6 +205,10 @@ func goConstant(obj *types.Const) GoConstant {
 	constantType := goValueType(obj.Type())
 	intValue, ok := goConstantIntValue(obj.Val())
 	return GoConstant{Name: obj.Name(), Type: constantType, IntValue: intValue, HasIntValue: ok}
+}
+
+func goVariable(obj *types.Var) GoVariable {
+	return GoVariable{Name: obj.Name(), Type: goValueType(obj.Type())}
 }
 
 func goConstantIntValue(value constant.Value) (int, bool) {
@@ -314,6 +327,38 @@ func (c *Checker) resolveDirectGoType(ty *parse.CustomType) Type {
 	}
 	binding := canonicalDirectGoBinding(goImport.importPath, goImport.alias, []string{property.Name})
 	return &ExternType{Name_: ty.GetName(), ExternalBinding: binding, ExternalBindings: map[string]string{"go": binding}}
+}
+
+func (c *Checker) resolveDirectGoPackageValue(alias string, name string, loc parse.Location) Expression {
+	goImport, ok := c.directGoImports[alias]
+	if !ok || goImport.pkg == nil {
+		return nil
+	}
+	if _, ok := goImport.pkg.Constants[name]; ok {
+		return c.resolveDirectGoConstant(alias, name, loc)
+	}
+	if variable, ok := goImport.pkg.Variables[name]; ok {
+		return c.resolveDirectGoVariable(goImport, variable, loc)
+	}
+	c.addError(fmt.Sprintf("Go package %q has no exported enum-like constant or variable %q", goImport.importPath, name), loc)
+	return nil
+}
+
+func (c *Checker) resolveDirectGoVariable(goImport directGoImport, variable GoVariable, loc parse.Location) Expression {
+	beforeDiagnostics := len(c.diagnostics)
+	valueType, ok := c.directGoValueArdType(variable.Type, loc)
+	if !ok {
+		message := fmt.Sprintf("Go variable %s.%s has unsupported type %s", goImport.pkg.Name, variable.Name, variable.Type.String())
+		if len(c.diagnostics) > beforeDiagnostics {
+			last := len(c.diagnostics) - 1
+			c.diagnostics[last].Message = message + ": " + c.diagnostics[last].Message
+		} else {
+			c.addError(message, loc)
+		}
+		return nil
+	}
+	binding := canonicalDirectGoBinding(goImport.importPath, goImport.alias, []string{variable.Name})
+	return &DirectGoPackageValue{ImportPath: goImport.importPath, Alias: goImport.alias, PackageName: goImport.pkg.Name, Name: variable.Name, Binding: binding, ValueType: valueType}
 }
 
 func (c *Checker) resolveDirectGoConstant(alias string, name string, loc parse.Location) Expression {
@@ -804,7 +849,7 @@ func (c *Checker) directGoValueArdType(goType GoValueType, loc parse.Location) (
 		c.addError("Go error values require a Result adapter", loc)
 		return nil, false
 	}
-	c.addError(fmt.Sprintf("Go type %s cannot be represented as an inferred Ard direct Go call type", goType.String()), loc)
+	c.addError(fmt.Sprintf("Go type %s cannot be represented as an inferred Ard direct Go value type", goType.String()), loc)
 	return nil, false
 }
 
