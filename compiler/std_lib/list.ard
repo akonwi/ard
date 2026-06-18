@@ -1,7 +1,10 @@
 use ard/maybe
 use ard/testing
 
-extern fn new() [$T] = "NewList"
+fn new() [$T] {
+  let list: [$T] = []
+  list
+}
 
 fn concat(a: [$T], b: [$T]) [$T] {
   mut res = a

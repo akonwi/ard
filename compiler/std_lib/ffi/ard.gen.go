@@ -146,7 +146,6 @@ type Host struct {
 	Base64DecodeURL      func(input string, no_pad Maybe[bool]) ([]byte, error)
 	Base64Encode         func(input []byte, no_pad Maybe[bool]) string
 	Base64EncodeURL      func(input []byte, no_pad Maybe[bool]) string
-	BoolToDynamic        func(val bool) any
 	ByteFromInt          func(value int) Maybe[byte]
 	BytesToDynamic       func(bytes []byte) any
 	CryptoHashPassword   func(password string, cost Maybe[int]) (string, error)
@@ -177,7 +176,6 @@ type Host struct {
 	FSReadFile           func(path string) (string, error)
 	FSWriteFile          func(path string, content string) error
 	FloatFromInt         func(int int) float64
-	FloatToDynamic       func(val float64) any
 	GetPathValue         func(req *http.Request, name string) string
 	GetQueryParam        func(req *http.Request, name string) string
 	GetReqPath           func(req *http.Request) string
@@ -187,7 +185,6 @@ type Host struct {
 	HTTPResponseHeaders  func(resp *http.Response) map[string]string
 	HTTPResponseStatus   func(resp *http.Response) int
 	HTTPServe            func(port int, handlers map[string]func(Request, *Response)) error
-	IntToDynamic         func(val int) any
 	IsNil                func(data any) bool
 	JsonEncode           func(value any) (string, error)
 	JsonToDynamic        func(json string) (any, error)
@@ -209,7 +206,6 @@ type Host struct {
 	SqlRollback          func(tx *sql.Tx) error
 	StrFromRunes         func(runes []rune) (string, error)
 	StrFromUtf8          func(bytes []byte) (string, error)
-	StrToDynamic         func(val string) any
 	VoidToDynamic        func() any
 	WaitFor              func(wg WaitGroup)
 }
@@ -230,9 +226,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.Base64EncodeURL != nil {
 		functions["Base64EncodeURL"] = h.Base64EncodeURL
-	}
-	if h.BoolToDynamic != nil {
-		functions["BoolToDynamic"] = h.BoolToDynamic
 	}
 	if h.ByteFromInt != nil {
 		functions["ByteFromInt"] = h.ByteFromInt
@@ -324,9 +317,6 @@ func (h Host) Functions() map[string]any {
 	if h.FloatFromInt != nil {
 		functions["FloatFromInt"] = h.FloatFromInt
 	}
-	if h.FloatToDynamic != nil {
-		functions["FloatToDynamic"] = h.FloatToDynamic
-	}
 	if h.GetPathValue != nil {
 		functions["GetPathValue"] = h.GetPathValue
 	}
@@ -353,9 +343,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.HTTPServe != nil {
 		functions["HTTP_Serve"] = h.HTTPServe
-	}
-	if h.IntToDynamic != nil {
-		functions["IntToDynamic"] = h.IntToDynamic
 	}
 	if h.IsNil != nil {
 		functions["IsNil"] = h.IsNil
@@ -420,9 +407,6 @@ func (h Host) Functions() map[string]any {
 	if h.StrFromUtf8 != nil {
 		functions["StrFromUtf8"] = h.StrFromUtf8
 	}
-	if h.StrToDynamic != nil {
-		functions["StrToDynamic"] = h.StrToDynamic
-	}
 	if h.VoidToDynamic != nil {
 		functions["VoidToDynamic"] = h.VoidToDynamic
 	}
@@ -436,4 +420,3 @@ func (h Host) Functions() map[string]any {
 // Skipped extern GetResult: generic parameters are not generated yet.
 // Skipped extern JsonEncode: generic parameters are not generated yet.
 // Skipped extern JsonParse: generic returns are not generated yet.
-// Skipped extern NewList: generic returns are not generated yet.

@@ -4,9 +4,9 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 
 ## Migration order
 
-1. **Easy pure-Ard cleanup**
-   - Replace `ard/list::new` with a typed empty-list literal.
-   - Replace `ard/dynamic::{from_str, from_int, from_float, from_bool}` with built-in `.to_dyn()` calls.
+1. **Completed easy pure-Ard cleanup**
+   - `ard/list::new` now returns a typed empty-list literal.
+   - `ard/dynamic::{from_str, from_int, from_float, from_bool}` now use built-in `.to_dyn()` calls.
 
 2. **Useful filesystem migration**
    - Refactor `fs::{write, copy, create_dir, create_file, append}` to Ard functions over direct Go calls.
@@ -81,7 +81,7 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 ### `ard/dynamic`
 
 - Current adapters: primitive boxing, `Void` boxing, list/map boxing, bytes boxing.
-- Can refactor now:
+- Refactored to pure Ard:
   - `from_str`
   - `from_int`
   - `from_float`
@@ -148,6 +148,11 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 - Reasons:
   - `fmt.Println` is variadic.
   - `read_line` keeps buffered stdin state and trims EOF/newline behavior.
+
+### `ard/list`
+
+- `new` has been refactored to pure Ard using a typed empty-list literal.
+- No companion FFI remains for this module.
 
 ### `ard/sql`
 

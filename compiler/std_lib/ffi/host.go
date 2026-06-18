@@ -57,7 +57,6 @@ func NewHost(config HostConfig) Host {
 		Base64DecodeURL:      Base64DecodeURL,
 		Base64Encode:         Base64Encode,
 		Base64EncodeURL:      Base64EncodeURL,
-		BoolToDynamic:        BoolToDynamic,
 		BytesToDynamic:       BytesToDynamic,
 		CryptoHashPassword:   CryptoHashPassword,
 		CryptoMd5:            CryptoMd5,
@@ -87,7 +86,6 @@ func NewHost(config HostConfig) Host {
 		FSReadFile:           FSReadFile,
 		FSWriteFile:          FSWriteFile,
 		FloatFromInt:         FloatFromInt,
-		FloatToDynamic:       FloatToDynamic,
 		GetPathValue:         GetPathValue,
 		GetQueryParam:        GetQueryParam,
 		GetReqPath:           GetReqPath,
@@ -97,7 +95,6 @@ func NewHost(config HostConfig) Host {
 		HTTPResponseHeaders:  HTTPResponseHeaders,
 		HTTPResponseStatus:   HTTPResponseStatus,
 		HTTPServe:            HTTPServe,
-		IntToDynamic:         IntToDynamic,
 		IsNil:                IsNil,
 		JsonEncode:           JsonEncode,
 		JsonToDynamic:        JsonToDynamic,
@@ -114,7 +111,6 @@ func NewHost(config HostConfig) Host {
 		SqlExtractParams:     SqlExtractParams,
 		SqlQuery:             SqlQuery,
 		SqlRollback:          SqlRollback,
-		StrToDynamic:         StrToDynamic,
 		VoidToDynamic:        VoidToDynamic,
 	}
 }
@@ -709,22 +705,6 @@ func normalizeSQLDynamicValue(value any) any {
 	default:
 		return value
 	}
-}
-
-func StrToDynamic(value string) any {
-	return value
-}
-
-func IntToDynamic(value int) any {
-	return value
-}
-
-func FloatToDynamic(value float64) any {
-	return value
-}
-
-func BoolToDynamic(value bool) any {
-	return value
 }
 
 func BytesToDynamic(value []byte) any {
