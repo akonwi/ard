@@ -1113,6 +1113,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprCallExtern:
 		return l.lowerExternCall(fn, expr)
+	case air.ExprDirectGoPackageValue:
+		return l.lowerDirectGoPackageValue(expr.Str, expr.Type)
 	case air.ExprSpawnFiber:
 		return l.lowerSpawnFiber(fn, expr)
 	case air.ExprFiberGet:

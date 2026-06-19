@@ -2,6 +2,7 @@ use ard/byte as Byte
 use ard/string as Str
 use ard/testing
 
+use go:io
 use go:os
 use go:path/filepath
 
@@ -10,9 +11,6 @@ let FILE_MODE = 420
 
 // 0755 directory permissions.
 let DIR_MODE = 493
-
-// os.O_WRONLY.
-let WRITE_ONLY_FLAGS = 1
 
 extern fn exists(path: Str) Bool = "FS_Exists"
 
@@ -35,8 +33,8 @@ fn append(path: Str, content: Str) Void!Str {
     try create_file(path)
   }
 
-  let file = try os::OpenFile(path, WRITE_ONLY_FLAGS, FILE_MODE)
-  let seek_result: Int!Str = os::File::Seek(file, 0, 2)
+  let file = try os::OpenFile(path, os::O_WRONLY, FILE_MODE)
+  let seek_result: Int!Str = os::File::Seek(file, 0, io::SeekEnd)
   let write_result = match seek_result {
     ok(_) => os::File::WriteString(file, content),
     err(e) => Result::err(e),

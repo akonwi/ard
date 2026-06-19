@@ -1229,6 +1229,30 @@ func (p *ModuleSymbol) Type() Type {
 	return p.Symbol.Type
 }
 
+type DirectGoPackageValue struct {
+	ImportPath  string
+	Alias       string
+	PackageName string
+	Name        string
+	Binding     string
+	ValueType   Type
+}
+
+func (v *DirectGoPackageValue) Type() Type {
+	return v.ValueType
+}
+
+func (v *DirectGoPackageValue) String() string {
+	qualifier := v.Alias
+	if qualifier == "" {
+		qualifier = v.PackageName
+	}
+	if qualifier == "" {
+		qualifier = v.ImportPath
+	}
+	return qualifier + "::" + v.Name
+}
+
 type EnumValue struct {
 	Name  string
 	Value int // The computed integer discriminant

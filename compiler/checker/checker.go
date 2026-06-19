@@ -1436,6 +1436,31 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 			}
 
+			if sp, ok := s.Target.(*parse.StaticProperty); ok {
+				if id, ok := sp.Target.(*parse.Identifier); ok {
+					if goImport, ok := c.directGoImports[id.Name]; ok {
+						propIdent, ok := sp.Property.(*parse.Identifier)
+						if !ok {
+							c.addError(fmt.Sprintf("Cannot assign to Go package value %s::%s", id.Name, sp.Property), sp.Property.GetLocation())
+							return nil
+						}
+						kind := "value"
+						reason := "direct Go package values are read-only"
+						if goImport.pkg != nil {
+							if _, ok := goImport.pkg.Constants[propIdent.Name]; ok {
+								kind = "constant"
+								reason = "Go constants cannot be assigned"
+							} else if _, ok := goImport.pkg.Variables[propIdent.Name]; ok {
+								kind = "variable"
+								reason = "direct Go package variables are read-only"
+							}
+						}
+						c.addError(fmt.Sprintf("Cannot assign to Go package %s %s::%s; %s", kind, id.Name, propIdent.Name, reason), s.Target.GetLocation())
+						return nil
+					}
+				}
+			}
+
 			panic(fmt.Sprintf("Unsupported reassignment target: %T", s.Target))
 		}
 	case *parse.WhileLoop:
@@ -4763,7 +4788,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError(fmt.Sprintf("Unsupported property type in Go import %s::%s", id.Name, s.Property), s.Property.GetLocation())
 						return nil
 					}
-					return c.resolveDirectGoConstant(id.Name, propIdent.Name, propIdent.GetLocation())
+					return c.resolveDirectGoPackageValue(id.Name, propIdent.Name, propIdent.GetLocation())
 				}
 
 				// Handle local enum variants or static functions (not from modules)

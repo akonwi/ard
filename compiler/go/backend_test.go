@@ -2611,6 +2611,67 @@ fn main() Int {
 	}
 }
 
+func TestBuildProgramIncludesDependencyGoModForDirectGoPackageVariable(t *testing.T) {
+	workspace := t.TempDir()
+	helperDir := filepath.Join(workspace, "helper")
+	depDir := filepath.Join(workspace, "dep")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{helperDir, depDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "go.mod"), []byte("module example.com/directvar\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "directvar.go"), []byte(`package directvar
+
+var Value = 7
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	depGoMod := fmt.Sprintf("module dep\n\ngo 1.26.0\n\nrequire example.com/directvar v0.0.0\nreplace example.com/directvar => %s\n", helperDir)
+	if err := os.WriteFile(filepath.Join(depDir, "go.mod"), []byte(depGoMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "dep.ard"), []byte(`use go:example.com/directvar as directvar
+
+fn answer() Int {
+  directvar::Value
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use dep
+
+fn main() {
+  if not dep::answer() == 7 {
+    panic("dependency direct Go package variable failed")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+}
+
 func TestBuildProgramIncludesDependencyGoModForDirectGoEnumType(t *testing.T) {
 	workspace := t.TempDir()
 	statusDir := filepath.Join(workspace, "status")
@@ -3134,6 +3195,66 @@ func TestLowerProgramUsesDirectStdlibMaybeCalls(t *testing.T) {
 	}
 	if astFilesHaveCall(files, "ardMapToDynamic") {
 		t.Fatal("generated AST should not use legacy MapToDynamic helper")
+	}
+}
+
+func TestLowerProgramUsesDirectGoPackageConstantSelector(t *testing.T) {
+	program := lowerSource(t, `
+		use go:os
+
+		fn flags() Int {
+			os::O_WRONLY
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		return ok && selector.Sel != nil && selector.Sel.Name == "O_WRONLY" && astExprName(selector.X) == "os"
+	}) {
+		t.Fatal("generated AST missing os.O_WRONLY selector")
+	}
+}
+
+func TestLowerProgramConvertsTypedDirectGoPackageConstants(t *testing.T) {
+	program := lowerSource(t, `
+		use go:time
+
+		fn duration() Int {
+			time::Nanosecond
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || astCallName(call) != "int" || len(call.Args) != 1 {
+			return false
+		}
+		return astExprName(call.Args[0]) == "time.Nanosecond"
+	}) {
+		t.Fatal("generated AST missing int(time.Nanosecond) conversion")
+	}
+}
+
+func TestLowerProgramUsesDirectGoPackageVariableSelector(t *testing.T) {
+	program := lowerSource(t, `
+		use go:encoding/base64 as base64
+
+		fn encode(bytes: [Byte]) Str {
+			base64::StdEncoding.EncodeToString(bytes)
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok || selector.Sel == nil || selector.Sel.Name != "EncodeToString" {
+			return false
+		}
+		return astExprName(selector.X) == "base64.StdEncoding"
+	}) {
+		t.Fatal("generated AST missing base64.StdEncoding.EncodeToString selector")
 	}
 }
 
@@ -4237,6 +4358,59 @@ func Double(value int) int { return value * 2 }
 
 fn main() Int {
   helper::Double(21)
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("BuildProgram error = %v", err)
+	}
+}
+
+func TestBuildProgramIncludesProjectGoModForDirectGoPackageVariable(t *testing.T) {
+	workspace := t.TempDir()
+	helperDir := filepath.Join(workspace, "helper")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{helperDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "go.mod"), []byte("module example.com/directvar\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "directvar.go"), []byte(`package directvar
+
+var Value = 7
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goMod := fmt.Sprintf("module app\n\ngo 1.26.0\n\nrequire example.com/directvar v0.0.0\nreplace example.com/directvar => %s\n", helperDir)
+	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use go:example.com/directvar as directvar
+
+fn answer() Int {
+  directvar::Value
+}
+
+fn main() {
+  if not answer() == 7 {
+    panic("project direct Go package variable failed")
+  }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)

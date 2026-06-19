@@ -41,10 +41,6 @@ type generatedStdlibExternLowering struct {
 }
 
 var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
-	"Base64Decode":         {function: "Base64Decode", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
-	"Base64DecodeURL":      {function: "Base64DecodeURL", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
-	"Base64Encode":         {function: "Base64Encode", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
-	"Base64EncodeURL":      {function: "Base64EncodeURL", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
 	"ByteFromInt":          {function: "ByteFromInt", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"BytesToDynamic":       {function: "BytesToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"CryptoHashPassword":   {function: "CryptoHashPassword", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},

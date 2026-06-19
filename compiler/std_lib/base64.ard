@@ -1,22 +1,48 @@
 use ard/string as Str
 use ard/testing
 
+use go:encoding/base64
+
 // Standard base64 encoding. Uses the alphabet A-Z, a-z, 0-9, +, /.
 //
 // Output includes `=` padding by default. Pass `no_pad: true` to strip
 // padding from the output.
-extern fn encode(input: [Byte], no_pad: Bool?) Str = "Base64Encode"
+fn encode(input: [Byte], no_pad: Bool?) Str {
+  if no_pad.or(false) {
+    base64::RawStdEncoding.EncodeToString(input)
+  } else {
+    base64::StdEncoding.EncodeToString(input)
+  }
+}
 
-extern fn decode(input: Str, no_pad: Bool?) [Byte]!Str = "Base64Decode"
+fn decode(input: Str, no_pad: Bool?) [Byte]!Str {
+  if no_pad.or(false) {
+    base64::RawStdEncoding.DecodeString(input)
+  } else {
+    base64::StdEncoding.DecodeString(input)
+  }
+}
 
 // URL-safe base64 (base64url). Uses the alphabet A-Z, a-z, 0-9, -, _.
 //
 // Output includes `=` padding by default. Pass `no_pad: true` to opt out
 // of padding - this is the form required by JWT headers/payloads and by
 // PKCE (OAuth 2.1) code challenges.
-extern fn encode_url(input: [Byte], no_pad: Bool?) Str = "Base64EncodeURL"
+fn encode_url(input: [Byte], no_pad: Bool?) Str {
+  if no_pad.or(false) {
+    base64::RawURLEncoding.EncodeToString(input)
+  } else {
+    base64::URLEncoding.EncodeToString(input)
+  }
+}
 
-extern fn decode_url(input: Str, no_pad: Bool?) [Byte]!Str = "Base64DecodeURL"
+fn decode_url(input: Str, no_pad: Bool?) [Byte]!Str {
+  if no_pad.or(false) {
+    base64::RawURLEncoding.DecodeString(input)
+  } else {
+    base64::URLEncoding.DecodeString(input)
+  }
+}
 
 test fn test_encode_standard() Void!Str {
   testing::assert(

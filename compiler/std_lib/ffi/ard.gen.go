@@ -142,10 +142,6 @@ type WinnerJSONTest struct {
 
 type Host struct {
 	AsyncStart           func(do func()) Fiber[Void]
-	Base64Decode         func(input string, no_pad Maybe[bool]) ([]byte, error)
-	Base64DecodeURL      func(input string, no_pad Maybe[bool]) ([]byte, error)
-	Base64Encode         func(input []byte, no_pad Maybe[bool]) string
-	Base64EncodeURL      func(input []byte, no_pad Maybe[bool]) string
 	ByteFromInt          func(value int) Maybe[byte]
 	BytesToDynamic       func(bytes []byte) any
 	CryptoHashPassword   func(password string, cost Maybe[int]) (string, error)
@@ -206,18 +202,6 @@ func (h Host) Functions() map[string]any {
 	functions := map[string]any{}
 	if h.AsyncStart != nil {
 		functions["AsyncStart"] = h.AsyncStart
-	}
-	if h.Base64Decode != nil {
-		functions["Base64Decode"] = h.Base64Decode
-	}
-	if h.Base64DecodeURL != nil {
-		functions["Base64DecodeURL"] = h.Base64DecodeURL
-	}
-	if h.Base64Encode != nil {
-		functions["Base64Encode"] = h.Base64Encode
-	}
-	if h.Base64EncodeURL != nil {
-		functions["Base64EncodeURL"] = h.Base64EncodeURL
 	}
 	if h.ByteFromInt != nil {
 		functions["ByteFromInt"] = h.ByteFromInt

@@ -3503,6 +3503,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprCallExtern, Type: fl.l.program.Externs[extern].Signature.Return, Extern: extern, Args: args}, nil
 	case *checker.ModuleSymbol:
 		return fl.lowerModuleSymbol(typeID, e)
+	case *checker.DirectGoPackageValue:
+		return &Expr{Kind: ExprDirectGoPackageValue, Type: typeID, Str: e.Binding}, nil
 	case *checker.ListLiteral:
 		return fl.lowerListLiteral(typeID, e, NoType)
 	case *checker.MapLiteral:

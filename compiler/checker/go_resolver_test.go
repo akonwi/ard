@@ -88,6 +88,122 @@ fn parse(value: Str) Int!Str { strconv::Atoi(value) }`), "main.ard")
 	}
 }
 
+func TestDirectGoPackageConstantResolvesAsScalarValue(t *testing.T) {
+	result := parse.Parse([]byte(`use go:os
+fn flags() Int { os::O_WRONLY }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"os": {ImportPath: "os", Name: "os", Constants: map[string]GoConstant{"O_WRONLY": {Name: "O_WRONLY", Type: goParam(GoValueInt, "int"), IntValue: 1, HasIntValue: true}}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoPackageConstantRejectsUnsupportedValue(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/complex as complex
+fn bad() Float { complex::Value }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/complex": {ImportPath: "example.com/complex", Name: "complex", Constants: map[string]GoConstant{"Value": {Name: "Value", Type: GoValueType{Kind: GoValueOther, Expr: "untyped complex"}}}},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected unsupported constant diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Go constant complex.Value has unsupported type untyped complex") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoPackageVariableResolvesAsValue(t *testing.T) {
+	result := parse.Parse([]byte(`use go:os
+fn args() [Str] { os::Args }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	str := goParam(GoValueString, "string")
+	args := GoValueType{Kind: GoValueSlice, Expr: "[]string", Elem: &str}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"os": {ImportPath: "os", Name: "os", Variables: map[string]GoVariable{"Args": {Name: "Args", Type: args}}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoPackageVariableSupportsInstanceMethods(t *testing.T) {
+	result := parse.Parse([]byte(`use go:encoding/base64 as base64
+fn encode(bytes: [Byte]) Str { base64::StdEncoding.EncodeToString(bytes) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	byteType := goParam(GoValueUint, "uint8")
+	byteSlice := GoValueType{Kind: GoValueSlice, Expr: "[]byte", Elem: &byteType}
+	encoding := goNamed(GoValueOther, "base64.Encoding", "encoding/base64", "Encoding")
+	ptrEncoding := GoValueType{Kind: GoValuePointer, Expr: "*base64.Encoding", Elem: &encoding}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"encoding/base64": {
+			ImportPath: "encoding/base64",
+			Name:       "base64",
+			Variables:  map[string]GoVariable{"StdEncoding": {Name: "StdEncoding", Type: ptrEncoding}},
+			Types: map[string]GoType{"Encoding": {Name: "Encoding", Methods: map[string]GoMethod{
+				"EncodeToString": {Name: "EncodeToString", Signature: GoSignature{Receiver: &ptrEncoding, Params: []GoValueType{byteSlice}, Results: []GoValueType{goParam(GoValueString, "string")}}},
+			}}},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoPackageVariableRejectsUnsupportedType(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/unsupported as unsupported
+fn bad() Int { unsupported::Callback }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/unsupported": {ImportPath: "example.com/unsupported", Name: "unsupported", Variables: map[string]GoVariable{"Callback": {Name: "Callback", Type: GoValueType{Kind: GoValueOther, Expr: "func()"}}}},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected unsupported variable type diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Go variable unsupported.Callback has unsupported type func()") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoPackageVariableAssignmentIsRejected(t *testing.T) {
+	result := parse.Parse([]byte(`use go:os
+fn main() {
+  os::Args = ["ard"]
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	str := goParam(GoValueString, "string")
+	args := GoValueType{Kind: GoValueSlice, Expr: "[]string", Elem: &str}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"os": {ImportPath: "os", Name: "os", Variables: map[string]GoVariable{"Args": {Name: "Args", Type: args}}},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected read-only Go package variable diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Cannot assign to Go package variable os::Args") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
 func TestDirectGoExternTypeEqualityUsesBindingBeforeDisplayName(t *testing.T) {
 	left := &ExternType{Name_: "p::T", ExternalBinding: "go:example.com/a as p::T"}
 	right := &ExternType{Name_: "p::T", ExternalBinding: "go:example.com/b as p::T"}
@@ -688,6 +804,78 @@ func TestGoValueTypeHandlesRecursiveNamedTypes(t *testing.T) {
 	}
 	if !value.Elem.Named || value.Elem.Name != "Loop" || value.Elem.Kind != GoValueOther {
 		t.Fatalf("recursive element = %#v, want opaque named Loop", value.Elem)
+	}
+}
+
+func TestGoPackageFromTypesDiscoversScalarConstants(t *testing.T) {
+	fset := gotoken.NewFileSet()
+	file, err := goparser.ParseFile(fset, "consts.go", `package consts
+
+const Flag int = 1
+const Name = "ard"
+const Enabled = true
+const Ratio = 1.5
+const TooComplex = 1 + 2i
+`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := new(gotypes.Config).Check("example.com/consts", fset, []*ast.File{file}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goPkg := goPackageFromTypes("example.com/consts", "consts", pkg)
+	if flag := goPkg.Constants["Flag"]; !flag.HasIntValue || flag.IntValue != 1 || flag.Type.Kind != GoValueInt {
+		t.Fatalf("Flag = %#v", flag)
+	}
+	if name := goPkg.Constants["Name"]; !name.HasStringValue || name.StringValue != "ard" || name.Type.Kind != GoValueString {
+		t.Fatalf("Name = %#v", name)
+	}
+	if enabled := goPkg.Constants["Enabled"]; !enabled.HasBoolValue || !enabled.BoolValue || enabled.Type.Kind != GoValueBool {
+		t.Fatalf("Enabled = %#v", enabled)
+	}
+	if ratio := goPkg.Constants["Ratio"]; !ratio.HasFloatValue || ratio.FloatValue != 1.5 || ratio.Type.Kind != GoValueFloat {
+		t.Fatalf("Ratio = %#v", ratio)
+	}
+	if complex := goPkg.Constants["TooComplex"]; complex.HasIntValue || complex.HasFloatValue || complex.HasBoolValue || complex.HasStringValue {
+		t.Fatalf("TooComplex should not have a scalar Ard value: %#v", complex)
+	}
+}
+
+func TestGoPackageFromTypesDiscoversExportedVariables(t *testing.T) {
+	fset := gotoken.NewFileSet()
+	file, err := goparser.ParseFile(fset, "vars.go", `package vars
+
+var Args []string
+var unexported int
+
+type Encoding struct{}
+var StdEncoding *Encoding
+`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := new(gotypes.Config).Check("example.com/vars", fset, []*ast.File{file}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goPkg := goPackageFromTypes("example.com/vars", "vars", pkg)
+	args, ok := goPkg.Variables["Args"]
+	if !ok {
+		t.Fatalf("exported Args variable missing: %#v", goPkg.Variables)
+	}
+	if args.Type.Kind != GoValueSlice || args.Type.Elem == nil || args.Type.Elem.Kind != GoValueString {
+		t.Fatalf("Args type = %#v, want []string", args.Type)
+	}
+	std, ok := goPkg.Variables["StdEncoding"]
+	if !ok {
+		t.Fatalf("exported StdEncoding variable missing: %#v", goPkg.Variables)
+	}
+	if std.Type.Kind != GoValuePointer || std.Type.Elem == nil || !std.Type.Elem.Named || std.Type.Elem.Name != "Encoding" {
+		t.Fatalf("StdEncoding type = %#v, want *Encoding", std.Type)
+	}
+	if _, ok := goPkg.Variables["unexported"]; ok {
+		t.Fatalf("unexported variable should be skipped: %#v", goPkg.Variables)
 	}
 }
 

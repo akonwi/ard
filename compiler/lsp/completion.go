@@ -188,6 +188,9 @@ func instanceCompletionItems(target parse.Expression, prog *parse.Program, fileP
 	for _, item := range importedInstanceCompletionItems(ownerType, prog, filePath) {
 		add(item)
 	}
+	for _, item := range directGoInstanceCompletionItems(ownerType, prog, filePath) {
+		add(item)
+	}
 
 	return sortedCompletionItems(items)
 }
@@ -242,6 +245,37 @@ func localInstanceCompletionItems(ownerType string, prog *parse.Program, filePat
 				})
 			}
 		}
+	}
+	return items
+}
+
+func directGoInstanceCompletionItems(ownerType string, prog *parse.Program, filePath string) []protocol.CompletionItem {
+	displayOwner := strings.TrimPrefix(normalizeDisplayType(ownerType), "mut ")
+	alias, typeName, ok := importedTypeDisplayParts(displayOwner)
+	if !ok {
+		return nil
+	}
+	imp, ok := directGoImportForAlias(alias, prog)
+	if !ok {
+		return nil
+	}
+	pkg, ok := loadDirectGoPackage(imp, filePath)
+	if !ok {
+		return nil
+	}
+	typ, ok := pkg.Types[typeName]
+	if !ok {
+		return nil
+	}
+	ctx := directGoHoverContextForImport(imp, prog)
+	mutableOwner := strings.HasPrefix(normalizeDisplayType(ownerType), "mut ")
+	items := []protocol.CompletionItem{}
+	for name, method := range typ.Methods {
+		sig := directGoInstanceMethodSignatureFromGoSignature(displayOwner, mutableOwner, name, method.Signature, ctx)
+		if sig == nil {
+			continue
+		}
+		items = append(items, protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindMethod, Detail: formatCompletionMethodDetail(sig), InsertText: name})
 	}
 	return items
 }
@@ -369,6 +403,16 @@ func directGoPackageCompletionItems(alias string, prog *parse.Program, filePath 
 		items = append(items, protocol.CompletionItem{Label: name, Kind: kind, Detail: alias + "::" + name, InsertText: name})
 		for _, constant := range typ.EnumConstants {
 			items = append(items, protocol.CompletionItem{Label: constant.Name, Kind: protocol.CompletionItemKindEnumMember, Detail: alias + "::" + typ.Name, InsertText: constant.Name})
+		}
+	}
+	for name, constant := range pkg.Constants {
+		if detail, ok := directGoConstantDisplayType(alias, constant, pkg, ctx); ok {
+			items = append(items, protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindConstant, Detail: detail, InsertText: name})
+		}
+	}
+	for name, variable := range pkg.Variables {
+		if detail, ok := directGoHoverReturnType(variable.Type, ctx); ok {
+			items = append(items, protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindVariable, Detail: detail, InsertText: name})
 		}
 	}
 	return items

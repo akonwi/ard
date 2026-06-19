@@ -2,6 +2,8 @@ use ard/dynamic
 use ard/maybe
 use ard/string as Str
 
+use go:net/http as gohttp
+
 enum Method {
   Get,
   Post,
@@ -14,12 +16,12 @@ enum Method {
 impl Str::ToString for Method {
   fn to_str() Str {
     match self {
-      Method::Get => "GET",
-      Method::Post => "POST",
-      Method::Put => "PUT",
-      Method::Del => "DELETE",
-      Method::Patch => "PATCH",
-      Method::Options => "OPTIONS",
+      Method::Get => gohttp::MethodGet,
+      Method::Post => gohttp::MethodPost,
+      Method::Put => gohttp::MethodPut,
+      Method::Del => gohttp::MethodDelete,
+      Method::Patch => gohttp::MethodPatch,
+      Method::Options => gohttp::MethodOptions,
     }
   }
 }
@@ -75,7 +77,7 @@ fn Response::new(status: Int, body: Str) Response {
 
 impl Response {
   fn is_ok() Bool {
-    self.status >= 200 and self.status <= 300
+    self.status >= gohttp::StatusOK and self.status < gohttp::StatusMultipleChoices
   }
 }
 
