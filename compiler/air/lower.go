@@ -3505,6 +3505,12 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerModuleSymbol(typeID, e)
 	case *checker.DirectGoPackageValue:
 		return &Expr{Kind: ExprDirectGoPackageValue, Type: typeID, Str: e.Binding}, nil
+	case *checker.DirectGoFieldAccess:
+		target, err := fl.lowerExpr(e.Subject)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprDirectGoFieldAccess, Type: typeID, Target: target, Str: e.Field}, nil
 	case *checker.ListLiteral:
 		return fl.lowerListLiteral(typeID, e, NoType)
 	case *checker.MapLiteral:

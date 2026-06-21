@@ -1253,6 +1253,20 @@ func (v *DirectGoPackageValue) String() string {
 	return qualifier + "::" + v.Name
 }
 
+type DirectGoFieldAccess struct {
+	Subject   Expression
+	Field     string
+	FieldType Type
+}
+
+func (f *DirectGoFieldAccess) Type() Type {
+	return f.FieldType
+}
+
+func (f *DirectGoFieldAccess) String() string {
+	return fmt.Sprintf("%s.%s", f.Subject, f.Field)
+}
+
 type EnumValue struct {
 	Name  string
 	Value int // The computed integer discriminant

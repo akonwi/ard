@@ -1033,7 +1033,7 @@ func exprUsesDirectGoDirectly(program *air.Program, expr *air.Expr) bool {
 	if expr.Kind == air.ExprCallExtern && int(expr.Extern) >= 0 && int(expr.Extern) < len(program.Externs) && externHasDirectGoBinding(program.Externs[expr.Extern]) {
 		return true
 	}
-	if expr.Kind == air.ExprDirectGoPackageValue {
+	if expr.Kind == air.ExprDirectGoPackageValue || expr.Kind == air.ExprDirectGoFieldAccess {
 		return true
 	}
 	if expr.Kind == air.ExprEnumVariant && typeUsesDirectGo(program, expr.Type, map[air.TypeID]bool{}) {

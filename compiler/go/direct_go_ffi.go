@@ -222,6 +222,21 @@ func (l *lowerer) lowerDirectGoPackageValue(binding string, typeID air.TypeID) (
 	return loweredExpr{expr: l.directGoPackageValueConversion(typeID, expr)}, nil
 }
 
+func (l *lowerer) lowerDirectGoFieldAccess(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("direct Go field access missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if strings.TrimSpace(expr.Str) == "" {
+		return loweredExpr{}, fmt.Errorf("direct Go field access missing field name")
+	}
+	selector := &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(expr.Str)}
+	return loweredExpr{stmts: target.stmts, expr: l.directGoPackageValueConversion(expr.Type, selector)}, nil
+}
+
 func (l *lowerer) directGoPackageValueConversion(typeID air.TypeID, expr ast.Expr) ast.Expr {
 	if !validTypeID(l.program, typeID) {
 		return expr

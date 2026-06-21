@@ -164,6 +164,85 @@ fn encode(bytes: [Byte]) Str { base64::StdEncoding.EncodeToString(bytes) }`), "m
 	}
 }
 
+func TestDirectGoStructFieldRead(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/http as http
+fn status() Int { http::DefaultResponse.StatusCode }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	response := goNamed(GoValueOther, "http.Response", "example.com/http", "Response")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/http": {
+			ImportPath: "example.com/http",
+			Name:       "http",
+			Variables:  map[string]GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
+			Types: map[string]GoType{"Response": {Name: "Response", Fields: map[string]GoField{
+				"StatusCode": {Name: "StatusCode", Type: goParam(GoValueInt, "int")},
+			}}},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoStructFieldReadLoadsNestedFieldPackage(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/http as http
+fn path(req: mut http::Request) Str { req.URL.Path }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	url := goNamed(GoValueOther, "url.URL", "example.com/url", "URL")
+	ptrURL := GoValueType{Kind: GoValuePointer, Expr: "*url.URL", Elem: &url}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/http": {
+			ImportPath: "example.com/http",
+			Name:       "http",
+			Types: map[string]GoType{"Request": {Name: "Request", Fields: map[string]GoField{
+				"URL": {Name: "URL", Type: ptrURL},
+			}}},
+		},
+		"example.com/url": {
+			ImportPath: "example.com/url",
+			Name:       "url",
+			Types: map[string]GoType{"URL": {Name: "URL", Fields: map[string]GoField{
+				"Path": {Name: "Path", Type: goParam(GoValueString, "string")},
+			}}},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoStructFieldReadReportsUnsupportedFieldType(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/http as http
+fn callback() { http::DefaultResponse.Callback }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	response := goNamed(GoValueOther, "http.Response", "example.com/http", "Response")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/http": {
+			ImportPath: "example.com/http",
+			Name:       "http",
+			Variables:  map[string]GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
+			Types: map[string]GoType{"Response": {Name: "Response", Fields: map[string]GoField{
+				"Callback": {Name: "Callback", Type: GoValueType{Kind: GoValueOther, Expr: "func()"}},
+			}}},
+		},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected unsupported field diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Go field http.Response.Callback has unsupported type func()") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
 func TestDirectGoPackageVariableRejectsUnsupportedType(t *testing.T) {
 	result := parse.Parse([]byte(`use go:example.com/unsupported as unsupported
 fn bad() Int { unsupported::Callback }`), "main.ard")
@@ -879,6 +958,52 @@ var StdEncoding *Encoding
 	}
 }
 
+func TestGoPackageFromTypesDiscoversExportedStructFields(t *testing.T) {
+	fset := gotoken.NewFileSet()
+	file, err := goparser.ParseFile(fset, "fields.go", `package fields
+
+type Header map[string][]string
+
+type Embedded struct { Name string }
+
+type Response struct {
+	StatusCode int
+	Header Header
+	unexported string
+	Embedded
+}
+`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := new(gotypes.Config).Check("example.com/fields", fset, []*ast.File{file}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goPkg := goPackageFromTypes("example.com/fields", "fields", pkg)
+	response := goPkg.Types["Response"]
+	status, ok := response.Fields["StatusCode"]
+	if !ok {
+		t.Fatalf("exported StatusCode field missing: %#v", response.Fields)
+	}
+	if status.Type.Kind != GoValueInt || status.Type.Bits != 0 {
+		t.Fatalf("StatusCode type = %#v, want int", status.Type)
+	}
+	header, ok := response.Fields["Header"]
+	if !ok {
+		t.Fatalf("exported Header field missing: %#v", response.Fields)
+	}
+	if !header.Type.Named || header.Type.Name != "Header" || header.Type.ImportPath != "example.com/fields" || header.Type.Kind != GoValueMap {
+		t.Fatalf("Header type = %#v, want named Header map", header.Type)
+	}
+	if _, ok := response.Fields["unexported"]; ok {
+		t.Fatalf("unexported field should be skipped: %#v", response.Fields)
+	}
+	if _, ok := response.Fields["Embedded"]; ok {
+		t.Fatalf("embedded fields should be deferred for now: %#v", response.Fields)
+	}
+}
+
 func TestGoPackageFromTypesDiscoversEnumLikeTypedConstants(t *testing.T) {
 	fset := gotoken.NewFileSet()
 	file, err := goparser.ParseFile(fset, "enumlike.go", `package enumlike
@@ -986,6 +1111,26 @@ func TestGoPackagesResolverLoadsStdlibFunctionsAndMethods(t *testing.T) {
 	}
 	if len(duration.EnumConstants) != 0 {
 		t.Fatalf("time.Duration should remain an open named scalar, got enum constants %#v", duration.EnumConstants)
+	}
+
+	httpPkg, err := resolver.LoadPackage("net/http")
+	if err != nil {
+		t.Fatalf("load net/http: %v", err)
+	}
+	response, ok := httpPkg.Types["Response"]
+	if !ok {
+		t.Fatalf("net/http types missing Response")
+	}
+	if status := response.Fields["StatusCode"]; status.Type.Kind != GoValueInt || status.Type.Bits != 0 {
+		t.Fatalf("http.Response.StatusCode = %#v, want int", status.Type)
+	}
+	request, ok := httpPkg.Types["Request"]
+	if !ok {
+		t.Fatalf("net/http types missing Request")
+	}
+	urlField := request.Fields["URL"]
+	if urlField.Type.Kind != GoValuePointer || urlField.Type.Elem == nil || !urlField.Type.Elem.Named || urlField.Type.Elem.ImportPath != "net/url" || urlField.Type.Elem.Name != "URL" {
+		t.Fatalf("http.Request.URL = %#v, want *net/url.URL", urlField.Type)
 	}
 
 	reflectPkg, err := resolver.LoadPackage("reflect")

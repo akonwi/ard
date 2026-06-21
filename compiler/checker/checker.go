@@ -3194,6 +3194,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 
+			if field, handled := c.checkDirectGoInstanceProperty(subj, s.Property.Name, s.Property.GetLocation()); handled {
+				return field
+			}
+
 			propType := subj.Type().get(s.Property.Name)
 			if propType == nil {
 				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Property.Name), s.Property.GetLocation())
@@ -6438,6 +6442,12 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 		if maybeType, ok := innerType.(*Maybe); ok {
 			innerType = maybeType.of
 			isMaybe = true
+		}
+
+		if !isMaybe {
+			if field, handled := c.checkDirectGoInstanceProperty(target, p.Property.Name, p.Property.GetLocation()); handled {
+				return field
+			}
 		}
 
 		propType := innerType.get(p.Property.Name)

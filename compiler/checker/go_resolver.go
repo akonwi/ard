@@ -80,8 +80,14 @@ type GoValueType struct {
 type GoType struct {
 	Name          string
 	Methods       map[string]GoMethod
+	Fields        map[string]GoField
 	EnumConstants []GoConstant
 	ClosedEnum    bool
+}
+
+type GoField struct {
+	Name string
+	Type GoValueType
 }
 
 type GoConstant struct {
@@ -197,7 +203,7 @@ func goPackageFromTypes(importPath string, name string, pkg *types.Package) *GoP
 		case *types.Func:
 			out.Functions[name] = GoFunction{Name: name, Signature: goSignature(obj.Type())}
 		case *types.TypeName:
-			out.Types[name] = GoType{Name: name, Methods: exportedMethods(obj.Type())}
+			out.Types[name] = GoType{Name: name, Methods: exportedMethods(obj.Type()), Fields: exportedStructFields(obj.Type())}
 		case *types.Const:
 			out.Constants[name] = goConstant(obj)
 		case *types.Var:
@@ -632,6 +638,40 @@ func (c *Checker) checkDirectGoStaticFunctionAs(call *parse.StaticFunction, expe
 	return c.directGoFunctionCall(strings.Join(parts, "::"), args, params, returnType, target.Binding), true
 }
 
+func (c *Checker) checkDirectGoInstanceProperty(subject Expression, fieldName string, loc parse.Location) (Expression, bool) {
+	importPath, typeName, ok := directGoNamedTypeBinding(subject.Type())
+	if !ok {
+		return nil, false
+	}
+	goImport, ok := c.directGoImportForPathOrLoad(importPath, loc)
+	if !ok || goImport.pkg == nil {
+		return nil, false
+	}
+	typ, ok := goImport.pkg.Types[typeName]
+	if !ok {
+		c.addError(fmt.Sprintf("Go package %q has no exported type %q", importPath, typeName), loc)
+		return nil, true
+	}
+	field, ok := typ.Fields[fieldName]
+	if !ok {
+		c.addError(fmt.Sprintf("Go type %q in package %q has no exported field %q", typeName, importPath, fieldName), loc)
+		return nil, true
+	}
+	beforeDiagnostics := len(c.diagnostics)
+	fieldType, ok := c.directGoValueArdType(field.Type, loc)
+	if !ok {
+		message := fmt.Sprintf("Go field %s.%s has unsupported type %s", pkgQualifiedName(goImport.pkg, []string{typeName}), field.Name, field.Type.String())
+		if len(c.diagnostics) > beforeDiagnostics {
+			last := len(c.diagnostics) - 1
+			c.diagnostics[last].Message = message + ": " + c.diagnostics[last].Message
+		} else {
+			c.addError(message, loc)
+		}
+		return nil, true
+	}
+	return &DirectGoFieldAccess{Subject: subject, Field: field.Name, FieldType: fieldType}, true
+}
+
 func (c *Checker) checkDirectGoInstanceMethod(subject Expression, call parse.FunctionCall, loc parse.Location) (Expression, bool) {
 	return c.checkDirectGoInstanceMethodAs(subject, call, loc, nil)
 }
@@ -641,7 +681,7 @@ func (c *Checker) checkDirectGoInstanceMethodAs(subject Expression, call parse.F
 	if !ok {
 		return nil, false
 	}
-	goImport, ok := c.directGoImportForPath(importPath)
+	goImport, ok := c.directGoImportForPathOrLoad(importPath, loc)
 	if !ok {
 		return nil, false
 	}
@@ -715,6 +755,27 @@ func (c *Checker) directGoImportForPath(importPath string) (directGoImport, bool
 		}
 	}
 	return directGoImport{}, false
+}
+
+func (c *Checker) directGoImportForPathOrLoad(importPath string, loc parse.Location) (directGoImport, bool) {
+	if goImport, ok := c.directGoImportForPath(importPath); ok {
+		return goImport, true
+	}
+	if c.options.GoResolver == nil {
+		return directGoImport{}, false
+	}
+	pkg, err := c.options.GoResolver.LoadPackage(importPath)
+	if err != nil {
+		c.addError(fmt.Sprintf("Failed to load Go package '%s': %v", importPath, err), loc)
+		return directGoImport{}, false
+	}
+	alias := ""
+	if pkg != nil && validDirectGoImportAlias(pkg.Name) {
+		alias = pkg.Name
+	}
+	goImport := directGoImport{alias: alias, importPath: importPath, pkg: pkg}
+	c.directGoImports["go:"+importPath] = goImport
+	return goImport, true
 }
 
 func (c *Checker) directGoCallTarget(goImport directGoImport, symbols []string, loc parse.Location) (directGoSignatureTarget, bool) {
@@ -919,6 +980,8 @@ func (c *Checker) directGoNamedArdType(goType GoValueType, loc parse.Location) (
 	alias := ""
 	if goImport, ok := c.directGoImportForPath(goType.ImportPath); ok {
 		alias = goImport.alias
+	} else if validDirectGoImportAlias(goType.Package) {
+		alias = goType.Package
 	}
 	binding := canonicalDirectGoBinding(goType.ImportPath, alias, []string{goType.Name})
 	name := goType.Name
@@ -1515,6 +1578,27 @@ func basicIntBits(kind types.BasicKind) int {
 	default:
 		return 0
 	}
+}
+
+func exportedStructFields(typ types.Type) map[string]GoField {
+	fields := map[string]GoField{}
+	if typ == nil {
+		return fields
+	}
+	underlying := typ.Underlying()
+	structType, ok := underlying.(*types.Struct)
+	if !ok {
+		return fields
+	}
+	for i := 0; i < structType.NumFields(); i++ {
+		field := structType.Field(i)
+		if field == nil || !field.Exported() || field.Embedded() {
+			continue
+		}
+		name := field.Name()
+		fields[name] = GoField{Name: name, Type: goValueType(field.Type())}
+	}
+	return fields
 }
 
 func exportedMethods(typ types.Type) map[string]GoMethod {

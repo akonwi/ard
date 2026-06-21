@@ -1115,6 +1115,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerExternCall(fn, expr)
 	case air.ExprDirectGoPackageValue:
 		return l.lowerDirectGoPackageValue(expr.Str, expr.Type)
+	case air.ExprDirectGoFieldAccess:
+		return l.lowerDirectGoFieldAccess(fn, expr)
 	case air.ExprSpawnFiber:
 		return l.lowerSpawnFiber(fn, expr)
 	case air.ExprFiberGet:

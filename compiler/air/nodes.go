@@ -46,6 +46,7 @@ const (
 	ExprCall
 	ExprCallExtern
 	ExprDirectGoPackageValue
+	ExprDirectGoFieldAccess
 	ExprMakeClosure
 	ExprCallClosure
 	ExprSpawnFiber

@@ -35,6 +35,18 @@ func astFilesHaveImport(files map[string]*ast.File, alias string, importPath str
 	return false
 }
 
+type testGoResolver struct {
+	packages map[string]*checker.GoPackage
+}
+
+func (r testGoResolver) LoadPackage(importPath string) (*checker.GoPackage, error) {
+	pkg, ok := r.packages[importPath]
+	if !ok {
+		return nil, fmt.Errorf("package %q not found", importPath)
+	}
+	return pkg, nil
+}
+
 func astFileHasImport(file *ast.File, alias string, importPath string) bool {
 	for _, decl := range file.Decls {
 		gen, ok := decl.(*ast.GenDecl)
@@ -3258,6 +3270,37 @@ func TestLowerProgramUsesDirectGoPackageVariableSelector(t *testing.T) {
 	}
 }
 
+func TestLowerProgramUsesDirectGoStructFieldSelector(t *testing.T) {
+	response := checker.GoValueType{Kind: checker.GoValueOther, Expr: "http.Response", Named: true, ImportPath: "example.com/http", Package: "http", Name: "Response"}
+	program := lowerSourceWithCheckOptions(t, `
+		use go:example.com/http as http
+
+		fn status() Int {
+			http::DefaultResponse.StatusCode
+		}
+	`, checker.CheckOptions{GoResolver: testGoResolver{packages: map[string]*checker.GoPackage{
+		"example.com/http": {
+			ImportPath: "example.com/http",
+			Name:       "http",
+			Variables:  map[string]checker.GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
+			Types: map[string]checker.GoType{"Response": {Name: "Response", Fields: map[string]checker.GoField{
+				"StatusCode": {Name: "StatusCode", Type: checker.GoValueType{Kind: checker.GoValueInt, Expr: "int"}},
+			}}},
+		},
+	}}})
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok || selector.Sel == nil || selector.Sel.Name != "StatusCode" {
+			return false
+		}
+		return astExprName(selector.X) == "http.DefaultResponse"
+	}) {
+		t.Fatal("generated AST missing http.DefaultResponse.StatusCode selector")
+	}
+}
+
 func TestLowerProgramUsesPointersForMutableStructParams(t *testing.T) {
 	program := lowerSource(t, `
 		struct Response {
@@ -4428,6 +4471,60 @@ fn main() {
 	}
 }
 
+func TestBuildProgramIncludesProjectGoModForDirectGoStructField(t *testing.T) {
+	workspace := t.TempDir()
+	helperDir := filepath.Join(workspace, "helper")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{helperDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "go.mod"), []byte("module example.com/directfield\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "directfield.go"), []byte(`package directfield
+
+type Response struct { StatusCode int }
+var DefaultResponse = Response{StatusCode: 204}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goMod := fmt.Sprintf("module app\n\ngo 1.26.0\n\nrequire example.com/directfield v0.0.0\nreplace example.com/directfield => %s\n", helperDir)
+	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use go:example.com/directfield as directfield
+
+fn status() Int {
+  directfield::DefaultResponse.StatusCode
+}
+
+fn main() {
+  if not status() == 204 {
+    panic("project direct Go struct field failed")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if _, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo); err != nil {
+		t.Fatalf("BuildProgram error = %v", err)
+	}
+}
+
 func TestBuildProgramCoercesUnexportedNamedScalarResult(t *testing.T) {
 	workspace := t.TempDir()
 	helperDir := filepath.Join(workspace, "helper")
@@ -5144,11 +5241,16 @@ fn main() Str? { lookup_env("PATH") }`)
 
 func lowerSource(t *testing.T, input string) *air.Program {
 	t.Helper()
+	return lowerSourceWithCheckOptions(t, input, checker.CheckOptions{})
+}
+
+func lowerSourceWithCheckOptions(t *testing.T, input string, options checker.CheckOptions) *air.Program {
+	t.Helper()
 	result := parse.Parse([]byte(input), "test.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
-	c := checker.New("test.ard", result.Program, nil)
+	c := checker.New("test.ard", result.Program, nil, options)
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
