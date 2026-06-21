@@ -252,6 +252,30 @@ func (c Checker) isMutable(expr Expression) bool {
 	return false
 }
 
+func (c *Checker) checkDirectGoFieldAssignmentTarget(ip *parse.InstanceProperty) (*DirectGoFieldAccess, bool) {
+	if ip == nil {
+		return nil, false
+	}
+	subject := c.checkExpr(ip.Target)
+	if subject == nil {
+		return nil, true
+	}
+	return c.checkDirectGoInstancePropertyAssignmentTarget(subject, ip.Property.Name, ip.Property.GetLocation())
+}
+
+func (c Checker) isDirectGoFieldAssignable(field *DirectGoFieldAccess) bool {
+	if field == nil || field.Subject == nil {
+		return false
+	}
+	if _, ok := mutableRefBase(field.Subject.Type()); ok {
+		return true
+	}
+	if subjectField, ok := field.Subject.(*DirectGoFieldAccess); ok {
+		return c.isDirectGoFieldAssignable(subjectField)
+	}
+	return c.isMutable(field.Subject)
+}
+
 type Checker struct {
 	diagnostics                       []Diagnostic
 	input                             *parse.Program
@@ -1414,6 +1438,47 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			if ip, ok := s.Target.(*parse.InstanceProperty); ok {
+				if target, handled := c.checkDirectGoFieldAssignmentTarget(ip); handled {
+					if target == nil {
+						return nil
+					}
+					var expectedClosedEnum *Enum
+					if enum, required := c.directGoClosedEnumAssignmentType(target.FieldGoType, s.Value.GetLocation()); required {
+						if enum == nil {
+							return nil
+						}
+						expectedClosedEnum = enum
+					}
+
+					var value Expression
+					c.withValueExprContext(func() {
+						if expectedClosedEnum != nil {
+							value = c.checkExprAs(s.Value, expectedClosedEnum)
+						} else {
+							value = c.checkExpr(s.Value)
+						}
+					})
+					if value == nil {
+						return nil
+					}
+					if !c.isDirectGoFieldAssignable(target) {
+						c.addError(fmt.Sprintf("Immutable: %s", ip), s.Target.GetLocation())
+						return nil
+					}
+					if expectedClosedEnum != nil {
+						if !directGoEnumTypeMatches(value.Type(), target.FieldGoType) {
+							c.addError(fmt.Sprintf("field %s: %s", target.Field, typeMismatch(expectedClosedEnum, value.Type())), s.Value.GetLocation())
+							return nil
+						}
+					} else if ok, reason := c.directGoParamCompatible(value.Type(), target.FieldGoType, true); !ok {
+						c.addError(fmt.Sprintf("field %s: %s", target.Field, reason), s.Value.GetLocation())
+						return nil
+					}
+					return &Statement{
+						Stmt: &Reassignment{Target: target, Value: value},
+					}
+				}
+
 				subject := c.checkExpr(ip)
 				if subject == nil {
 					return nil

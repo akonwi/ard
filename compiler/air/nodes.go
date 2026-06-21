@@ -1,5 +1,7 @@
 package air
 
+import "github.com/akonwi/ard/checker"
+
 type Block struct {
 	Stmts  []Stmt
 	Result *Expr
@@ -14,18 +16,21 @@ const (
 	StmtExpr
 	StmtWhile
 	StmtBreak
+	StmtSetDirectGoField
 )
 
 type Stmt struct {
-	Kind    StmtKind
-	Local   LocalID
-	Name    string
-	Type    TypeID
-	Mutable bool
-	Value   *Expr
-	Expr    *Expr
-	Target  *Expr
-	Field   int
+	Kind              StmtKind
+	Local             LocalID
+	Name              string
+	Type              TypeID
+	Mutable           bool
+	Value             *Expr
+	Expr              *Expr
+	Target            *Expr
+	Field             int
+	FieldName         string
+	DirectGoFieldType checker.GoValueType
 
 	Condition *Expr
 	Body      Block

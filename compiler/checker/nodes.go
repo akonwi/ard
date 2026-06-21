@@ -1254,9 +1254,10 @@ func (v *DirectGoPackageValue) String() string {
 }
 
 type DirectGoFieldAccess struct {
-	Subject   Expression
-	Field     string
-	FieldType Type
+	Subject     Expression
+	Field       string
+	FieldType   Type
+	FieldGoType GoValueType
 }
 
 func (f *DirectGoFieldAccess) Type() Type {

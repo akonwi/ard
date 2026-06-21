@@ -217,6 +217,308 @@ fn path(req: mut http::Request) Str { req.URL.Path }`), "main.ard")
 	}
 }
 
+func TestDirectGoStructFieldWriteAllowsMutableLocal(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/http as http
+fn status() Int {
+  mut res = http::DefaultResponse
+  res.StatusCode = 201
+  res.StatusCode
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	response := goNamed(GoValueOther, "http.Response", "example.com/http", "Response")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/http": {
+			ImportPath: "example.com/http",
+			Name:       "http",
+			Variables:  map[string]GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
+			Types: map[string]GoType{"Response": {Name: "Response", Fields: map[string]GoField{
+				"StatusCode": {Name: "StatusCode", Type: goParam(GoValueInt, "int")},
+			}}},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoStructFieldWriteRejectsImmutableSubject(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/http as http
+fn status() {
+  let res = http::DefaultResponse
+  res.StatusCode = 201
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	response := goNamed(GoValueOther, "http.Response", "example.com/http", "Response")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/http": {
+			ImportPath: "example.com/http",
+			Name:       "http",
+			Variables:  map[string]GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
+			Types: map[string]GoType{"Response": {Name: "Response", Fields: map[string]GoField{
+				"StatusCode": {Name: "StatusCode", Type: goParam(GoValueInt, "int")},
+			}}},
+		},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected immutable direct Go field diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; got != "Immutable: res.StatusCode" {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoStructFieldWriteChecksValueCompatibility(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/http as http
+fn status() {
+  mut res = http::DefaultResponse
+  res.StatusCode = "ok"
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	response := goNamed(GoValueOther, "http.Response", "example.com/http", "Response")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/http": {
+			ImportPath: "example.com/http",
+			Name:       "http",
+			Variables:  map[string]GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
+			Types: map[string]GoType{"Response": {Name: "Response", Fields: map[string]GoField{
+				"StatusCode": {Name: "StatusCode", Type: goParam(GoValueInt, "int")},
+			}}},
+		},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected direct Go field assignment type diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "field StatusCode: Ard type Str is not compatible with Go type int") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoStructFieldWriteAllowsNestedPointerField(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/http as http
+fn set_path(req: mut http::Request) {
+  req.URL.Path = "/ready"
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	url := goNamed(GoValueOther, "url.URL", "example.com/url", "URL")
+	ptrURL := GoValueType{Kind: GoValuePointer, Expr: "*url.URL", Elem: &url}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/http": {
+			ImportPath: "example.com/http",
+			Name:       "http",
+			Types: map[string]GoType{"Request": {Name: "Request", Fields: map[string]GoField{
+				"URL": {Name: "URL", Type: ptrURL},
+			}}},
+		},
+		"example.com/url": {
+			ImportPath: "example.com/url",
+			Name:       "url",
+			Types: map[string]GoType{"URL": {Name: "URL", Fields: map[string]GoField{
+				"Path": {Name: "Path", Type: goParam(GoValueString, "string")},
+			}}},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoStructFieldWriteAllowsNestedValueFieldOnMutableRoot(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/nested as nested
+fn set_count() {
+  mut outer = nested::DefaultOuter
+  outer.Inner.Count = 7
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	inner := goNamed(GoValueOther, "nested.Inner", "example.com/nested", "Inner")
+	outer := goNamed(GoValueOther, "nested.Outer", "example.com/nested", "Outer")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/nested": {
+			ImportPath: "example.com/nested",
+			Name:       "nested",
+			Variables:  map[string]GoVariable{"DefaultOuter": {Name: "DefaultOuter", Type: outer}},
+			Types: map[string]GoType{
+				"Outer": {Name: "Outer", Fields: map[string]GoField{
+					"Inner": {Name: "Inner", Type: inner},
+				}},
+				"Inner": {Name: "Inner", Fields: map[string]GoField{
+					"Count": {Name: "Count", Type: goParam(GoValueInt, "int")},
+				}},
+			},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoStructFieldWriteRejectsIntForClosedEnumField(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/status as status
+fn set_state() {
+  mut box = status::DefaultBox
+  box.State = 999
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	state := goNamed(GoValueInt, "status.State", "example.com/status", "State")
+	box := goNamed(GoValueOther, "status.Box", "example.com/status", "Box")
+	pkg := fakeEnumLikePackage("example.com/status", "status", state, []GoConstant{
+		goEnumConstant("StateReady", state, 0),
+		goEnumConstant("StateDone", state, 1),
+	})
+	pkg.Variables = map[string]GoVariable{"DefaultBox": {Name: "DefaultBox", Type: box}}
+	pkg.Types["Box"] = GoType{Name: "Box", Fields: map[string]GoField{
+		"State": {Name: "State", Type: state},
+	}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{pkg.ImportPath: pkg}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected closed enum field assignment diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Type mismatch: Expected State, got Int") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoStructFieldWriteRejectsExternValueForClosedEnumField(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/outer as outer
+fn set_state() {
+  let current = outer::Current()
+  mut box = outer::DefaultBox
+  box.State = current
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	state := goNamed(GoValueInt, "status.State", "example.com/status", "State")
+	box := goNamed(GoValueOther, "outer.Box", "example.com/outer", "Box")
+	statusPkg := fakeEnumLikePackage("example.com/status", "status", state, []GoConstant{
+		goEnumConstant("StateReady", state, 0),
+		goEnumConstant("StateDone", state, 1),
+	})
+	outerPkg := &GoPackage{
+		ImportPath: "example.com/outer",
+		Name:       "outer",
+		Functions:  map[string]GoFunction{"Current": {Name: "Current", Signature: GoSignature{Results: []GoValueType{state}}}},
+		Variables:  map[string]GoVariable{"DefaultBox": {Name: "DefaultBox", Type: box}},
+		Types: map[string]GoType{"Box": {Name: "Box", Fields: map[string]GoField{
+			"State": {Name: "State", Type: state},
+		}}},
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		statusPkg.ImportPath: statusPkg,
+		outerPkg.ImportPath:  outerPkg,
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected closed enum field extern-value diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Type mismatch: Expected State, got example.com/status::State") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoStructFieldWriteUsesClosedEnumExpectedTypeForDirectGoCall(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/outer as outer
+fn set_state() {
+  mut box = outer::DefaultBox
+  box.State = outer::Current()
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	state := goNamed(GoValueInt, "status.State", "example.com/status", "State")
+	box := goNamed(GoValueOther, "outer.Box", "example.com/outer", "Box")
+	statusPkg := fakeEnumLikePackage("example.com/status", "status", state, []GoConstant{
+		goEnumConstant("StateReady", state, 0),
+		goEnumConstant("StateDone", state, 1),
+	})
+	outerPkg := &GoPackage{
+		ImportPath: "example.com/outer",
+		Name:       "outer",
+		Functions:  map[string]GoFunction{"Current": {Name: "Current", Signature: GoSignature{Results: []GoValueType{state}}}},
+		Variables:  map[string]GoVariable{"DefaultBox": {Name: "DefaultBox", Type: box}},
+		Types: map[string]GoType{"Box": {Name: "Box", Fields: map[string]GoField{
+			"State": {Name: "State", Type: state},
+		}}},
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		statusPkg.ImportPath: statusPkg,
+		outerPkg.ImportPath:  outerPkg,
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoStructFieldWriteAllowsClosedEnumValue(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/status as status
+fn set_state() {
+  mut box = status::DefaultBox
+  box.State = status::StateReady
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	state := goNamed(GoValueInt, "status.State", "example.com/status", "State")
+	box := goNamed(GoValueOther, "status.Box", "example.com/status", "Box")
+	pkg := fakeEnumLikePackage("example.com/status", "status", state, []GoConstant{
+		goEnumConstant("StateReady", state, 0),
+		goEnumConstant("StateDone", state, 1),
+	})
+	pkg.Variables = map[string]GoVariable{"DefaultBox": {Name: "DefaultBox", Type: box}}
+	pkg.Types["Box"] = GoType{Name: "Box", Fields: map[string]GoField{
+		"State": {Name: "State", Type: state},
+	}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{pkg.ImportPath: pkg}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoStructFieldWriteAllowsNarrowScalarConversion(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/narrow as narrow
+fn set_code() {
+  mut res = narrow::DefaultResponse
+  res.Code = 7
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	response := goNamed(GoValueOther, "narrow.Response", "example.com/narrow", "Response")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/narrow": {
+			ImportPath: "example.com/narrow",
+			Name:       "narrow",
+			Variables:  map[string]GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
+			Types: map[string]GoType{"Response": {Name: "Response", Fields: map[string]GoField{
+				"Code": {Name: "Code", Type: goParam(GoValueInt, "int8")},
+			}}},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
 func TestDirectGoStructFieldReadReportsUnsupportedFieldType(t *testing.T) {
 	result := parse.Parse([]byte(`use go:example.com/http as http
 fn callback() { http::DefaultResponse.Callback }`), "main.ard")

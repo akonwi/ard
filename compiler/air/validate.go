@@ -1,6 +1,9 @@
 package air
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 func Validate(program *Program) error {
 	if program == nil {
@@ -266,6 +269,27 @@ func validateBlock(program *Program, fn Function, block Block) error {
 			}
 			if targetType.Fields[stmt.Field].Type != stmt.Type {
 				return fmt.Errorf("field set type %d does not match field type %d", stmt.Type, targetType.Fields[stmt.Field].Type)
+			}
+		}
+		if stmt.Kind == StmtSetDirectGoField {
+			if stmt.Target == nil {
+				return fmt.Errorf("direct Go field set statement missing target")
+			}
+			if stmt.Value == nil {
+				return fmt.Errorf("direct Go field set statement missing value")
+			}
+			if strings.TrimSpace(stmt.FieldName) == "" {
+				return fmt.Errorf("direct Go field set statement missing field name")
+			}
+			if stmt.DirectGoFieldType.Kind == "" {
+				return fmt.Errorf("direct Go field set statement missing Go field type")
+			}
+			targetType, err := typeInfo(program, stmt.Target.Type)
+			if err != nil {
+				return err
+			}
+			if targetType.Kind != TypeExtern {
+				return fmt.Errorf("direct Go field set target has type kind %d", targetType.Kind)
 			}
 		}
 		if stmt.Kind == StmtWhile {

@@ -2857,6 +2857,8 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 			return &Stmt{Kind: StmtAssign, Local: local, Value: value}, nil
 		case *checker.InstanceProperty:
 			return fl.lowerFieldAssignment(target, s.Value)
+		case *checker.DirectGoFieldAccess:
+			return fl.lowerDirectGoFieldAssignment(target, s.Value)
 		default:
 			return nil, fmt.Errorf("unsupported AIR assignment target %T", s.Target)
 		}
@@ -4613,6 +4615,18 @@ func (fl *functionLowerer) lowerFieldAssignment(prop *checker.InstanceProperty, 
 		return &Stmt{Kind: StmtSetField, Target: target, Field: field.Index, Type: field.Type, Value: value}, nil
 	}
 	return nil, fmt.Errorf("field %s not found on %s", prop.Property, targetInfo.Name)
+}
+
+func (fl *functionLowerer) lowerDirectGoFieldAssignment(field *checker.DirectGoFieldAccess, valueExpr checker.Expression) (*Stmt, error) {
+	target, err := fl.lowerExpr(field.Subject)
+	if err != nil {
+		return nil, err
+	}
+	value, err := fl.lowerExpr(valueExpr)
+	if err != nil {
+		return nil, err
+	}
+	return &Stmt{Kind: StmtSetDirectGoField, Target: target, FieldName: field.Field, DirectGoFieldType: field.FieldGoType, Value: value}, nil
 }
 
 func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef) (*Expr, error) {

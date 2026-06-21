@@ -639,22 +639,11 @@ func (c *Checker) checkDirectGoStaticFunctionAs(call *parse.StaticFunction, expe
 }
 
 func (c *Checker) checkDirectGoInstanceProperty(subject Expression, fieldName string, loc parse.Location) (Expression, bool) {
-	importPath, typeName, ok := directGoNamedTypeBinding(subject.Type())
-	if !ok {
+	goImport, typeName, field, ok, handled := c.directGoStructField(subject, fieldName, loc)
+	if !handled {
 		return nil, false
 	}
-	goImport, ok := c.directGoImportForPathOrLoad(importPath, loc)
-	if !ok || goImport.pkg == nil {
-		return nil, false
-	}
-	typ, ok := goImport.pkg.Types[typeName]
 	if !ok {
-		c.addError(fmt.Sprintf("Go package %q has no exported type %q", importPath, typeName), loc)
-		return nil, true
-	}
-	field, ok := typ.Fields[fieldName]
-	if !ok {
-		c.addError(fmt.Sprintf("Go type %q in package %q has no exported field %q", typeName, importPath, fieldName), loc)
 		return nil, true
 	}
 	beforeDiagnostics := len(c.diagnostics)
@@ -669,7 +658,55 @@ func (c *Checker) checkDirectGoInstanceProperty(subject Expression, fieldName st
 		}
 		return nil, true
 	}
-	return &DirectGoFieldAccess{Subject: subject, Field: field.Name, FieldType: fieldType}, true
+	return &DirectGoFieldAccess{Subject: subject, Field: field.Name, FieldType: fieldType, FieldGoType: field.Type}, true
+}
+
+func (c *Checker) checkDirectGoInstancePropertyAssignmentTarget(subject Expression, fieldName string, loc parse.Location) (*DirectGoFieldAccess, bool) {
+	_, _, field, ok, handled := c.directGoStructField(subject, fieldName, loc)
+	if !handled {
+		return nil, false
+	}
+	if !ok {
+		return nil, true
+	}
+	return &DirectGoFieldAccess{Subject: subject, Field: field.Name, FieldType: Void, FieldGoType: field.Type}, true
+}
+
+func (c *Checker) directGoStructField(subject Expression, fieldName string, loc parse.Location) (directGoImport, string, GoField, bool, bool) {
+	importPath, typeName, ok := directGoNamedTypeBinding(subject.Type())
+	if !ok {
+		return directGoImport{}, "", GoField{}, false, false
+	}
+	goImport, ok := c.directGoImportForPathOrLoad(importPath, loc)
+	if !ok || goImport.pkg == nil {
+		return directGoImport{}, "", GoField{}, false, false
+	}
+	typ, ok := goImport.pkg.Types[typeName]
+	if !ok {
+		c.addError(fmt.Sprintf("Go package %q has no exported type %q", importPath, typeName), loc)
+		return goImport, typeName, GoField{}, false, true
+	}
+	field, ok := typ.Fields[fieldName]
+	if !ok {
+		c.addError(fmt.Sprintf("Go type %q in package %q has no exported field %q", typeName, importPath, fieldName), loc)
+		return goImport, typeName, GoField{}, false, true
+	}
+	return goImport, typeName, field, true, true
+}
+
+func (c *Checker) directGoClosedEnumAssignmentType(goType GoValueType, loc parse.Location) (*Enum, bool) {
+	if !goType.Named || goType.ImportPath == "" || goType.Name == "" {
+		return nil, false
+	}
+	goImport, ok := c.directGoImportForPathOrLoad(goType.ImportPath, loc)
+	if !ok || goImport.pkg == nil {
+		return nil, false
+	}
+	typ, ok := goImport.pkg.Types[goType.Name]
+	if !ok || len(typ.EnumConstants) == 0 || !typ.ClosedEnum {
+		return nil, false
+	}
+	return c.directGoEnumType(goImport, typ, loc), true
 }
 
 func (c *Checker) checkDirectGoInstanceMethod(subject Expression, call parse.FunctionCall, loc parse.Location) (Expression, bool) {
@@ -1317,6 +1354,14 @@ func directGoNamedTypeMatches(ard Type, goType GoValueType) bool {
 		return directGoBindingMatchesNamedType(enum.ExternalBinding, goType)
 	}
 	return false
+}
+
+func directGoEnumTypeMatches(ard Type, goType GoValueType) bool {
+	if !goType.Named || goType.ImportPath == "" || goType.Name == "" {
+		return false
+	}
+	enum, ok := derefType(ard).(*Enum)
+	return ok && directGoBindingMatchesNamedType(enum.ExternalBinding, goType)
 }
 
 func directGoBindingMatchesNamedType(binding string, goType GoValueType) bool {

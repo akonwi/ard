@@ -996,6 +996,36 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			Rhs: []ast.Expr{valueExpr},
 		})
 		return out, nil
+	case air.StmtSetDirectGoField:
+		if stmt.Target == nil {
+			return nil, fmt.Errorf("direct Go field set statement missing target")
+		}
+		if stmt.Value == nil {
+			return nil, fmt.Errorf("direct Go field set statement missing value")
+		}
+		if strings.TrimSpace(stmt.FieldName) == "" {
+			return nil, fmt.Errorf("direct Go field set statement missing field name")
+		}
+		target, err := l.lowerExpr(fn, *stmt.Target)
+		if err != nil {
+			return nil, err
+		}
+		value, err := l.lowerExpr(fn, *stmt.Value)
+		if err != nil {
+			return nil, err
+		}
+		valueExpr, err := l.coerceDirectGoArg(stmt.Value.Type, value.expr, stmt.DirectGoFieldType, directGoExternBinding{})
+		if err != nil {
+			return nil, err
+		}
+		out := append([]ast.Stmt{}, target.stmts...)
+		out = append(out, value.stmts...)
+		out = append(out, &ast.AssignStmt{
+			Lhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(stmt.FieldName)}},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{valueExpr},
+		})
+		return out, nil
 	case air.StmtExpr:
 		if stmt.Expr == nil {
 			return nil, fmt.Errorf("expr statement missing expression")
