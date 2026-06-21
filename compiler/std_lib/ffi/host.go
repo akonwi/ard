@@ -76,14 +76,10 @@ func NewHost(config HostConfig) Host {
 		FSIsFile:             FSIsFile,
 		FSListDir:            FSListDir,
 		FloatFromInt:         FloatFromInt,
-		GetPathValue:         GetPathValue,
-		GetQueryParam:        GetQueryParam,
-		GetReqPath:           GetReqPath,
 		HTTPDo:               HTTPDo,
 		HTTPResponseBody:     HTTPResponseBody,
 		HTTPResponseClose:    HTTPResponseClose,
 		HTTPResponseHeaders:  HTTPResponseHeaders,
-		HTTPResponseStatus:   HTTPResponseStatus,
 		HTTPServe:            HTTPServe,
 		IsNil:                IsNil,
 		JsonEncode:           JsonEncode,
@@ -804,13 +800,6 @@ func HTTPDo(method string, url string, body any, headers map[string]string, time
 	return resp, nil
 }
 
-func HTTPResponseStatus(resp *http.Response) int {
-	if resp == nil {
-		return 0
-	}
-	return resp.StatusCode
-}
-
 func HTTPResponseHeaders(resp *http.Response) map[string]string {
 	if resp == nil {
 		return map[string]string{}
@@ -839,27 +828,6 @@ func HTTPResponseClose(resp *http.Response) {
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
-}
-
-func GetReqPath(req *http.Request) string {
-	if req != nil && req.URL != nil {
-		return req.URL.Path
-	}
-	return ""
-}
-
-func GetPathValue(req *http.Request, name string) string {
-	if req != nil {
-		return req.PathValue(name)
-	}
-	return ""
-}
-
-func GetQueryParam(req *http.Request, name string) string {
-	if req != nil && req.URL != nil {
-		return req.URL.Query().Get(name)
-	}
-	return ""
 }
 
 func HTTPServe(port int, handlers map[string]func(Request, *Response)) error {

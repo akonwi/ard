@@ -16,8 +16,12 @@ This audit tracks the remaining Ard standard-library bindings that still use com
    - `sql::detect_driver` and `sql::extract_params` now live in Ard.
    - Consider moving pgx placeholder normalization into Ard if the SQL execution adapter remains in Go.
 
-4. **Ongoing direct-Go capability backlog**
-   - Add direct-Go support for package variables/globals, conversions, fixed arrays, variadic calls or slice spread, struct fields, interface alias assignability, and callback/interface bridging.
+4. **Completed first direct-Go struct-field stdlib cleanup**
+   - `http::Request::{path,path_param,query_param}` now use direct `*http.Request` methods/fields plus `ffi::is_nil`.
+   - `http::send` now reads `http.Response.StatusCode` directly instead of through an FFI wrapper.
+
+5. **Ongoing direct-Go capability backlog**
+   - Add direct-Go support for package variables/globals, conversions, fixed arrays, variadic calls or slice spread, keyed struct construction/embedded fields, interface alias assignability, and callback/interface bridging.
    - This is not required to finish the current stdlib polish branch; it unlocks larger future migrations.
 
 ## Module audit
@@ -97,6 +101,7 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 - Current adapters: primitive dynamic decoders, `is_void`, JSON-to-dynamic, dynamic list/map extraction, field extraction.
 - Still necessary today.
 - Reason: this module is mostly runtime `any` introspection and type assertions. Ard cannot inspect `Dynamic` payload shapes directly without Go helpers.
+- Interim note: `is_void` still declares a concrete `IsNil` extern so the generated stdlib host contract includes the nil helper while generic host-contract generation remains limited.
 - Pure Ard opportunity: the higher-level decoder composition (`nullable`, `list`, `map`, `field`, `path`, `one_of`, `flatten`) is already Ard.
 
 ### `ard/encode` and `ard/json`
@@ -125,21 +130,22 @@ This audit tracks the remaining Ard standard-library bindings that still use com
   - `read`: `read_bytes` plus `Str::from_bytes`, making `read` a UTF-8-validating text reader.
   - `read_bytes`: `os::ReadFile` for raw bytes and binary data.
 - Still necessary today:
-  - `exists`, `is_file`, `is_dir` because `os.Stat` returns `os.FileInfo`, an interface type not currently representable as direct Ard type.
+  - `exists`, `is_file`, `is_dir` because `os.Stat` returns `os.FileInfo`, a Go interface. Direct-Go return inference currently supports representable concrete shapes (scalars, lists/maps, and named concrete pointer values), but not Go interface values/method sets or their nil semantics, so `os.FileInfo` cannot yet become a direct Ard return value.
   - `list_dir` because `os.ReadDir` returns `[]os.DirEntry`, also an interface type surface, and the stdlib returns a stable Ard `DirEntry` struct.
 
 ### `ard/http`
 
-- Current adapters: opaque raw request/response handles, request path/query helpers, client request execution, response extraction/close, server callback bridge.
+- Current adapters: client request execution, response header/body extraction/close, server callback bridge.
+- Refactored to Ard + direct Go:
+  - raw request/response aliases now use direct `mut gohttp::{Request,Response}` types;
+  - inbound `Request::{path,path_param,query_param}` use direct `*http.Request` field/method access;
+  - client response status uses direct `http.Response.StatusCode` access.
 - Still necessary today.
 - Reasons:
-  - needs Go struct field access (`req.URL`, `resp.Body`, `resp.StatusCode`, `resp.Header`);
-  - constructs `http.Client` with timeout;
-  - adapts `Dynamic` request bodies to `io.Reader`, including JSON encoding;
-  - reads and closes response bodies;
-  - converts Go headers to `[Str: Str]`;
-  - bridges Ard handlers to `http.HandlerFunc` and `http.ResponseWriter`.
-- Future unlock: struct fields, package globals/functions with interface params, callback/interface bridging, and lifecycle helpers.
+  - `http_do` constructs `http.Client` with timeout and adapts `Dynamic` request bodies to `io.Reader`, including JSON encoding;
+  - response body/header helpers read/close interface-backed fields and convert Go headers to `[Str: Str]`;
+  - `serve` bridges Ard handlers to `http.HandlerFunc` and `http.ResponseWriter`.
+- Future unlock: interface assignability/method access, callback/interface bridging, and lifecycle helpers.
 
 ### `ard/io`
 
@@ -176,7 +182,7 @@ These capabilities would let future branches remove more companion FFI:
 - Explicit Go conversions in Ard or at direct-call boundaries (`[]byte -> string`, `int -> byte`, `int -> rune`, `int -> float64`).
 - Fixed array to slice/list adaptation for crypto hashes.
 - Variadic Go calls and/or Ard slice spread for APIs like `fmt.Println`, `fmt.Sprintf`, SQL `Exec`/`Query`.
-- Struct field access for Go values (`http.Response.StatusCode`, `Request.URL`, headers/body fields).
-- Interface alias assignability and method access for Go interface surfaces such as `os.FileInfo` and `os.DirEntry`.
+- Broader struct interop such as keyed construction and remaining lifecycle/interface-backed fields.
+- Interface alias assignability and method access for Go interface surfaces such as `os.FileInfo`, `os.DirEntry`, `http.Response.Body`, and `http.ResponseWriter`.
 - Callback/interface bridging for HTTP server handlers and `http.ResponseWriter`.
 - Controlled blank-import/dependency registration for database drivers.

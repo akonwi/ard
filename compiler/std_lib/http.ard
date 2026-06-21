@@ -1,4 +1,5 @@
 use ard/dynamic
+use ard/ffi
 use ard/maybe
 use ard/string as Str
 
@@ -26,8 +27,8 @@ impl Str::ToString for Method {
   }
 }
 
-private extern type RawRequest = "*http.Request"
-private extern type RawResponse = "*http.Response"
+private type RawRequest = mut gohttp::Request
+private type RawResponse = mut gohttp::Response
 
 struct Request {
   method: Method,
@@ -40,24 +41,39 @@ struct Request {
   raw: RawRequest?,
 }
 
-private extern fn get_req_path(req: RawRequest) Str = "GetReqPath"
-private extern fn get_path_value(req: RawRequest, name: Str) Str = "GetPathValue"
-private extern fn get_query_param(req: RawRequest, name: Str) Str = "GetQueryParam"
-
 impl Request {
   fn path() Str? {
     let raw = try self.raw
-    maybe::some(get_req_path(raw))
+    match ffi::is_nil(raw) {
+      true => maybe::some(""),
+      false => {
+        match ffi::is_nil(raw.URL) {
+          true => maybe::some(""),
+          false => maybe::some(raw.URL.Path),
+        }
+      },
+    }
   }
 
   fn path_param(name: Str) Str {
     let raw = try self.raw -> _ { "" }
-    get_path_value(raw, name)
+    match ffi::is_nil(raw) {
+      true => "",
+      false => raw.PathValue(name),
+    }
   }
 
   fn query_param(name: Str) Str {
     let raw = try self.raw -> _ { "" }
-    get_query_param(raw, name)
+    match ffi::is_nil(raw) {
+      true => "",
+      false => {
+        match ffi::is_nil(raw.URL) {
+          true => "",
+          false => raw.URL.Query().Get(name),
+        }
+      },
+    }
   }
 }
 
@@ -84,7 +100,6 @@ impl Response {
 // HTTP client FFI functions - operate on opaque RawResponse handle
 // body is Dynamic (nil means no body)
 private extern fn http_do(method: Str, url: Str, body: Dynamic, headers: [Str: Str], timeout: Int?) RawResponse!Str = "HTTP_Do"
-private extern fn http_response_status(resp: RawResponse) Int = "HTTP_ResponseStatus"
 private extern fn http_response_headers(resp: RawResponse) [Str: Str] = "HTTP_ResponseHeaders"
 private extern fn http_response_body(resp: RawResponse) Str!Str = "HTTP_ResponseBody"
 private extern fn http_response_close(resp: RawResponse) Void = "HTTP_ResponseClose"
@@ -106,7 +121,10 @@ fn send(req: Request, timeout: Int?) Response!Str {
   let resp = try http_do(method, req.url, request_body, req.headers, effective_timeout)
 
   // Extract response data
-  let status = http_response_status(resp)
+  let status = match ffi::is_nil(resp) {
+    true => 0,
+    false => resp.StatusCode,
+  }
   let headers = http_response_headers(resp)
   let body_result = http_response_body(resp)
 

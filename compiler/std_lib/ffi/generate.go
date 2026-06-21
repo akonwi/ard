@@ -19,12 +19,13 @@ import (
 )
 
 type contract struct {
-	ExternTypes []externType
-	Aliases     []typeAlias
-	Enums       []enumDecl
-	Structs     []structDecl
-	Functions   []hostFunction
-	Skipped     []skippedExtern
+	ExternTypes     []externType
+	Aliases         []typeAlias
+	Enums           []enumDecl
+	Structs         []structDecl
+	Functions       []hostFunction
+	Skipped         []skippedExtern
+	DirectGoImports map[string]string
 }
 
 type externType struct {
@@ -127,7 +128,7 @@ func loadContract(stdlibDir string) (contract, error) {
 	}
 	slices.Sort(files)
 
-	c := contract{}
+	c := contract{DirectGoImports: map[string]string{}}
 	aliases := map[string]string{}
 	definedTypes := map[string]struct{}{}
 	bindings := map[string]hostFunction{}
@@ -140,6 +141,20 @@ func loadContract(stdlibDir string) (contract, error) {
 		result := parse.Parse(source, file)
 		if len(result.Errors) > 0 {
 			return contract{}, fmt.Errorf("%s: %s", file, result.Errors[0].Message)
+		}
+
+		for _, imp := range result.Program.Imports {
+			if imp.Kind != parse.ImportKindGo {
+				continue
+			}
+			alias := imp.Name
+			if alias == "" {
+				alias = filepath.Base(imp.Path)
+			}
+			if existing := c.DirectGoImports[alias]; existing != "" && existing != imp.Path {
+				return contract{}, fmt.Errorf("direct Go import alias %q is used for both %q and %q", alias, existing, imp.Path)
+			}
+			c.DirectGoImports[alias] = imp.Path
 		}
 
 		for _, stmt := range result.Program.Statements {
@@ -155,7 +170,7 @@ func loadContract(stdlibDir string) (contract, error) {
 				c.ExternTypes = append(c.ExternTypes, externType{Name: name, Type: goType})
 			case *parse.TypeDeclaration:
 				name := goExportedName(node.Name.Name)
-				goType, ok := aliasGoType(node)
+				goType, ok := aliasGoType(node, c.DirectGoImports)
 				if !ok {
 					goType = "any"
 				}
@@ -238,15 +253,45 @@ func goExternTypeBinding(typ *parse.ExternTypeDeclaration) string {
 	return typ.ExternalBindings["go"]
 }
 
-func aliasGoType(alias *parse.TypeDeclaration) (string, bool) {
+func aliasGoType(alias *parse.TypeDeclaration, directGoImports map[string]string) (string, bool) {
 	if len(alias.Type) != 1 {
 		return "any", true
+	}
+	if goType, ok := directGoAliasGoType(alias.Type[0], directGoImports); ok {
+		return goType, true
 	}
 	if fn, ok := alias.Type[0].(*parse.FunctionType); ok {
 		goType, err := functionTypeGoType(fn, nil, nil)
 		return goType, err == nil
 	}
 	return "any", true
+}
+
+func directGoAliasGoType(typ parse.DeclaredType, directGoImports map[string]string) (string, bool) {
+	switch t := typ.(type) {
+	case *parse.MutableType:
+		inner, ok := directGoAliasGoType(t.Inner, directGoImports)
+		if !ok {
+			return "", false
+		}
+		return "*" + inner, true
+	case *parse.CustomType:
+		parts := strings.Split(t.Name, "::")
+		if len(parts) != 2 || len(t.TypeArgs) > 0 {
+			return "", false
+		}
+		alias := parts[0]
+		if directGoImports[alias] == "" {
+			return "", false
+		}
+		goType := alias + "." + parts[1]
+		if t.IsNullable() {
+			return "Maybe[" + goType + "]", true
+		}
+		return goType, true
+	default:
+		return "", false
+	}
 }
 
 func lowerStruct(node *parse.StructDefinition, aliases map[string]string, definedTypes map[string]struct{}) structDecl {
@@ -541,47 +586,75 @@ func functionReturnGoTypes(typ parse.DeclaredType, aliases map[string]string, de
 	return []string{returnType}, nil
 }
 
-func externTypeImports(c contract, availableImports map[string]string) (map[string]string, error) {
+func contractTypeImports(c contract, availableImports map[string]string) (map[string]string, error) {
 	imports := map[string]string{}
 	for _, typ := range c.ExternTypes {
 		if strings.TrimSpace(typ.Type) == "" {
 			continue
 		}
-		expr, err := parser.ParseExpr(typ.Type)
+		found, err := typeExpressionImports("extern type binding "+typ.Name, typ.Type, availableImports, c.DirectGoImports)
 		if err != nil {
-			return nil, fmt.Errorf("parse extern type binding %s = %q: %w", typ.Name, typ.Type, err)
+			return nil, err
 		}
-		missingAlias := ""
-		ast.Inspect(expr, func(node ast.Node) bool {
-			selector, ok := node.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			ident, ok := selector.X.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			if path := availableImports[ident.Name]; path != "" {
-				imports[ident.Name] = path
-				return true
-			}
-			missingAlias = ident.Name
-			return false
-		})
-		if missingAlias != "" {
-			return nil, fmt.Errorf("extern type binding %s = %q references Go package alias %q, but no matching import was found in stdlib FFI Go files", typ.Name, typ.Type, missingAlias)
+		for alias, path := range found {
+			imports[alias] = path
 		}
+	}
+	for _, alias := range c.Aliases {
+		if strings.TrimSpace(alias.Type) == "" {
+			continue
+		}
+		found, err := typeExpressionImports("type alias "+alias.Name, alias.Type, availableImports, c.DirectGoImports)
+		if err != nil {
+			return nil, err
+		}
+		for alias, path := range found {
+			imports[alias] = path
+		}
+	}
+	return imports, nil
+}
+
+func typeExpressionImports(label string, typeExpr string, availableImports map[string]string, directGoImports map[string]string) (map[string]string, error) {
+	imports := map[string]string{}
+	expr, err := parser.ParseExpr(typeExpr)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s = %q: %w", label, typeExpr, err)
+	}
+	missingAlias := ""
+	ast.Inspect(expr, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := selector.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if path := directGoImports[ident.Name]; path != "" {
+			imports[ident.Name] = path
+			return true
+		}
+		if path := availableImports[ident.Name]; path != "" {
+			imports[ident.Name] = path
+			return true
+		}
+		missingAlias = ident.Name
+		return false
+	})
+	if missingAlias != "" {
+		return nil, fmt.Errorf("%s = %q references Go package alias %q, but no matching import was found", label, typeExpr, missingAlias)
 	}
 	return imports, nil
 }
 
 func importsForContract(c contract, availableImports map[string]string) (map[string]string, error) {
 	imports := map[string]string{"ardruntime": "github.com/akonwi/ard/runtime"}
-	externImports, err := externTypeImports(c, availableImports)
+	contractImports, err := contractTypeImports(c, availableImports)
 	if err != nil {
 		return nil, err
 	}
-	for alias, path := range externImports {
+	for alias, path := range contractImports {
 		imports[alias] = path
 	}
 	return imports, nil
