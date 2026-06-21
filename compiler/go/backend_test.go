@@ -3283,7 +3283,7 @@ func TestLowerProgramUsesDirectGoStructFieldSelector(t *testing.T) {
 			ImportPath: "example.com/http",
 			Name:       "http",
 			Variables:  map[string]checker.GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
-			Types: map[string]checker.GoType{"Response": {Name: "Response", Fields: map[string]checker.GoField{
+			Types: map[string]checker.GoType{"Response": {Name: "Response", Struct: true, Fields: map[string]checker.GoField{
 				"StatusCode": {Name: "StatusCode", Type: checker.GoValueType{Kind: checker.GoValueInt, Expr: "int"}},
 			}}},
 		},
@@ -3316,7 +3316,7 @@ func TestLowerProgramUsesDirectGoStructFieldAssignmentSelector(t *testing.T) {
 			ImportPath: "example.com/http",
 			Name:       "http",
 			Variables:  map[string]checker.GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
-			Types: map[string]checker.GoType{"Response": {Name: "Response", Fields: map[string]checker.GoField{
+			Types: map[string]checker.GoType{"Response": {Name: "Response", Struct: true, Fields: map[string]checker.GoField{
 				"StatusCode": {Name: "StatusCode", Type: checker.GoValueType{Kind: checker.GoValueInt, Expr: "int"}},
 			}}},
 		},
@@ -3353,7 +3353,7 @@ func TestLowerProgramRangeChecksDirectGoStructFieldAssignment(t *testing.T) {
 			ImportPath: "example.com/narrow",
 			Name:       "narrow",
 			Variables:  map[string]checker.GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
-			Types: map[string]checker.GoType{"Response": {Name: "Response", Fields: map[string]checker.GoField{
+			Types: map[string]checker.GoType{"Response": {Name: "Response", Struct: true, Fields: map[string]checker.GoField{
 				"Code": {Name: "Code", Type: checker.GoValueType{Kind: checker.GoValueInt, Expr: "int8", Bits: 8}},
 			}}},
 		},
@@ -3365,6 +3365,76 @@ func TestLowerProgramRangeChecksDirectGoStructFieldAssignment(t *testing.T) {
 		return ok && astCallName(call) == "ardDirectGoCheckSignedIntRange"
 	}) {
 		t.Fatal("generated AST missing direct Go field assignment range check")
+	}
+}
+
+func TestLowerProgramUsesDirectGoStructCompositeLiteral(t *testing.T) {
+	program := lowerSourceWithCheckOptions(t, `
+		use go:example.com/image as image
+
+		fn point() image::Point {
+			image::Point{X: 10, Y: 20}
+		}
+	`, checker.CheckOptions{GoResolver: testGoResolver{packages: map[string]*checker.GoPackage{
+		"example.com/image": {
+			ImportPath: "example.com/image",
+			Name:       "image",
+			Types: map[string]checker.GoType{"Point": {Name: "Point", Struct: true, Fields: map[string]checker.GoField{
+				"X": {Name: "X", Type: checker.GoValueType{Kind: checker.GoValueInt, Expr: "int"}},
+				"Y": {Name: "Y", Type: checker.GoValueType{Kind: checker.GoValueInt, Expr: "int"}},
+			}}},
+		},
+	}}})
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		lit, ok := node.(*ast.CompositeLit)
+		if !ok || astExprName(lit.Type) != "image.Point" {
+			return false
+		}
+		fields := map[string]string{}
+		for _, elt := range lit.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			key, ok := kv.Key.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			if basic, ok := kv.Value.(*ast.BasicLit); ok {
+				fields[key.Name] = basic.Value
+			}
+		}
+		return fields["X"] == "10" && fields["Y"] == "20"
+	}) {
+		t.Fatal("generated AST missing image.Point keyed composite literal")
+	}
+}
+
+func TestLowerProgramRangeChecksDirectGoStructConstruction(t *testing.T) {
+	program := lowerSourceWithCheckOptions(t, `
+		use go:example.com/narrow as narrow
+
+		fn response() narrow::Response {
+			narrow::Response{Code: 7}
+		}
+	`, checker.CheckOptions{GoResolver: testGoResolver{packages: map[string]*checker.GoPackage{
+		"example.com/narrow": {
+			ImportPath: "example.com/narrow",
+			Name:       "narrow",
+			Types: map[string]checker.GoType{"Response": {Name: "Response", Struct: true, Fields: map[string]checker.GoField{
+				"Code": {Name: "Code", Type: checker.GoValueType{Kind: checker.GoValueInt, Expr: "int8", Bits: 8}},
+			}}},
+		},
+	}}})
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		return ok && astCallName(call) == "ardDirectGoCheckSignedIntRange"
+	}) {
+		t.Fatal("generated AST missing direct Go struct construction range check")
 	}
 }
 

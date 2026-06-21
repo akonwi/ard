@@ -4851,13 +4851,16 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 				}
 
-				if _, ok := c.directGoImports[id.Name]; ok {
-					propIdent, ok := s.Property.(*parse.Identifier)
-					if !ok {
+				if goImport, ok := c.directGoImports[id.Name]; ok {
+					switch prop := s.Property.(type) {
+					case *parse.Identifier:
+						return c.resolveDirectGoPackageValue(id.Name, prop.Name, prop.GetLocation())
+					case *parse.StructInstance:
+						return c.resolveDirectGoStructInstance(goImport, prop)
+					default:
 						c.addError(fmt.Sprintf("Unsupported property type in Go import %s::%s", id.Name, s.Property), s.Property.GetLocation())
 						return nil
 					}
-					return c.resolveDirectGoPackageValue(id.Name, propIdent.Name, propIdent.GetLocation())
 				}
 
 				// Handle local enum variants or static functions (not from modules)

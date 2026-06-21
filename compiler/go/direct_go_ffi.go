@@ -237,6 +237,48 @@ func (l *lowerer) lowerDirectGoFieldAccess(fn air.Function, expr air.Expr) (lowe
 	return loweredExpr{stmts: target.stmts, expr: l.directGoPackageValueConversion(expr.Type, selector)}, nil
 }
 
+func (l *lowerer) lowerDirectGoStructLiteral(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if !validTypeID(l.program, expr.Type) {
+		return loweredExpr{}, fmt.Errorf("invalid direct Go struct literal type id %d", expr.Type)
+	}
+	typeInfo := l.program.Types[expr.Type-1]
+	if typeInfo.Kind != air.TypeExtern {
+		return loweredExpr{}, fmt.Errorf("direct Go struct literal with non-extern type %s", typeInfo.Name)
+	}
+	direct, ok, err := parseDirectGoExternBinding(typeInfo.ExternBinding)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if !ok || len(direct.Symbols) != 1 || strings.HasPrefix(direct.Symbols[0], "*") {
+		return loweredExpr{}, fmt.Errorf("direct Go struct literal binding %q must be package::Type", typeInfo.ExternBinding)
+	}
+	typeExpr, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := []ast.Stmt{}
+	elts := make([]ast.Expr, 0, len(expr.Fields))
+	for _, field := range expr.Fields {
+		if strings.TrimSpace(field.Name) == "" {
+			return loweredExpr{}, fmt.Errorf("direct Go struct literal field missing name")
+		}
+		if field.DirectGoFieldType.Kind == "" {
+			return loweredExpr{}, fmt.Errorf("direct Go struct literal field %s missing Go type", field.Name)
+		}
+		value, err := l.lowerExpr(fn, field.Value)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, value.stmts...)
+		fieldValue, err := l.coerceDirectGoArg(field.Value.Type, value.expr, field.DirectGoFieldType, direct)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(field.Name), Value: fieldValue})
+	}
+	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typeExpr, Elts: elts}}, nil
+}
+
 func (l *lowerer) directGoPackageValueConversion(typeID air.TypeID, expr ast.Expr) ast.Expr {
 	if !validTypeID(l.program, typeID) {
 		return expr

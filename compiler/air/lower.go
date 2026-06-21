@@ -3513,6 +3513,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		return &Expr{Kind: ExprDirectGoFieldAccess, Type: typeID, Target: target, Str: e.Field}, nil
+	case *checker.DirectGoStructInstance:
+		return fl.lowerDirectGoStructInstance(typeID, e)
 	case *checker.ListLiteral:
 		return fl.lowerListLiteral(typeID, e, NoType)
 	case *checker.MapLiteral:
@@ -4573,6 +4575,31 @@ func (fl *functionLowerer) lowerStructInstance(typeID TypeID, inst *checker.Stru
 		fields = append(fields, StructFieldValue{Index: field.Index, Name: field.Name, Value: *value})
 	}
 	return &Expr{Kind: ExprMakeStruct, Type: typeID, Fields: fields}, nil
+}
+
+func (fl *functionLowerer) lowerDirectGoStructInstance(typeID TypeID, inst *checker.DirectGoStructInstance) (*Expr, error) {
+	typeInfo, ok := fl.l.typeInfo(typeID)
+	if !ok || typeInfo.Kind != TypeExtern {
+		return nil, fmt.Errorf("direct Go struct instance lowered with non-extern type %s", inst.Type().String())
+	}
+	fieldNames := make([]string, 0, len(inst.FieldGoTypes))
+	for name := range inst.FieldGoTypes {
+		fieldNames = append(fieldNames, name)
+	}
+	sort.Strings(fieldNames)
+	fields := make([]StructFieldValue, 0, len(fieldNames))
+	for _, fieldName := range fieldNames {
+		fieldExpr, ok := inst.Fields[fieldName]
+		if !ok {
+			return nil, fmt.Errorf("direct Go struct instance missing checked field %s", fieldName)
+		}
+		value, err := fl.lowerExpr(fieldExpr)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, StructFieldValue{Name: fieldName, Value: *value, DirectGoFieldType: inst.FieldGoTypes[fieldName]})
+	}
+	return &Expr{Kind: ExprDirectGoStructLiteral, Type: typeID, Fields: fields}, nil
 }
 
 func (fl *functionLowerer) lowerInstanceProperty(typeID TypeID, prop *checker.InstanceProperty) (*Expr, error) {

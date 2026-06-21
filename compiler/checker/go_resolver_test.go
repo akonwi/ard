@@ -176,7 +176,7 @@ fn status() Int { http::DefaultResponse.StatusCode }`), "main.ard")
 			ImportPath: "example.com/http",
 			Name:       "http",
 			Variables:  map[string]GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
-			Types: map[string]GoType{"Response": {Name: "Response", Fields: map[string]GoField{
+			Types: map[string]GoType{"Response": {Name: "Response", Struct: true, Fields: map[string]GoField{
 				"StatusCode": {Name: "StatusCode", Type: goParam(GoValueInt, "int")},
 			}}},
 		},
@@ -233,7 +233,7 @@ fn status() Int {
 			ImportPath: "example.com/http",
 			Name:       "http",
 			Variables:  map[string]GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
-			Types: map[string]GoType{"Response": {Name: "Response", Fields: map[string]GoField{
+			Types: map[string]GoType{"Response": {Name: "Response", Struct: true, Fields: map[string]GoField{
 				"StatusCode": {Name: "StatusCode", Type: goParam(GoValueInt, "int")},
 			}}},
 		},
@@ -259,7 +259,7 @@ fn status() {
 			ImportPath: "example.com/http",
 			Name:       "http",
 			Variables:  map[string]GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
-			Types: map[string]GoType{"Response": {Name: "Response", Fields: map[string]GoField{
+			Types: map[string]GoType{"Response": {Name: "Response", Struct: true, Fields: map[string]GoField{
 				"StatusCode": {Name: "StatusCode", Type: goParam(GoValueInt, "int")},
 			}}},
 		},
@@ -288,7 +288,7 @@ fn status() {
 			ImportPath: "example.com/http",
 			Name:       "http",
 			Variables:  map[string]GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
-			Types: map[string]GoType{"Response": {Name: "Response", Fields: map[string]GoField{
+			Types: map[string]GoType{"Response": {Name: "Response", Struct: true, Fields: map[string]GoField{
 				"StatusCode": {Name: "StatusCode", Type: goParam(GoValueInt, "int")},
 			}}},
 		},
@@ -508,7 +508,7 @@ fn set_code() {
 			ImportPath: "example.com/narrow",
 			Name:       "narrow",
 			Variables:  map[string]GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
-			Types: map[string]GoType{"Response": {Name: "Response", Fields: map[string]GoField{
+			Types: map[string]GoType{"Response": {Name: "Response", Struct: true, Fields: map[string]GoField{
 				"Code": {Name: "Code", Type: goParam(GoValueInt, "int8")},
 			}}},
 		},
@@ -516,6 +516,206 @@ fn set_code() {
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoStructConstructionAllowsKeyedLiteral(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/image as image
+fn sum() Int {
+  let p = image::Point{X: 10, Y: 20}
+  p.X + p.Y
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	point := GoType{Name: "Point", Struct: true, Fields: map[string]GoField{
+		"X": {Name: "X", Type: goParam(GoValueInt, "int")},
+		"Y": {Name: "Y", Type: goParam(GoValueInt, "int")},
+	}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/image": {ImportPath: "example.com/image", Name: "image", Types: map[string]GoType{"Point": point}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoStructConstructionAllowsNestedLiteral(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/image as image
+fn width() Int {
+  let rect = image::Rectangle{
+    Min: image::Point{X: 1, Y: 2},
+    Max: image::Point{X: 5, Y: 6},
+  }
+  rect.Max.X - rect.Min.X
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	pointType := goNamed(GoValueOther, "image.Point", "example.com/image", "Point")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/image": {
+			ImportPath: "example.com/image",
+			Name:       "image",
+			Types: map[string]GoType{
+				"Point": {Name: "Point", Struct: true, Fields: map[string]GoField{
+					"X": {Name: "X", Type: goParam(GoValueInt, "int")},
+					"Y": {Name: "Y", Type: goParam(GoValueInt, "int")},
+				}},
+				"Rectangle": {Name: "Rectangle", Struct: true, Fields: map[string]GoField{
+					"Min": {Name: "Min", Type: pointType},
+					"Max": {Name: "Max", Type: pointType},
+				}},
+			},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoStructConstructionRequiresAllVisibleFields(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/image as image
+fn point() image::Point {
+  image::Point{X: 10}
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/image": {ImportPath: "example.com/image", Name: "image", Types: map[string]GoType{"Point": {Name: "Point", Struct: true, Fields: map[string]GoField{
+			"X": {Name: "X", Type: goParam(GoValueInt, "int")},
+			"Y": {Name: "Y", Type: goParam(GoValueInt, "int")},
+		}}}},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected missing direct Go struct field diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Missing Go field: Y") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoStructConstructionRejectsUnknownField(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/image as image
+fn point() image::Point {
+  image::Point{X: 10, Y: 20, Z: 30}
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/image": {ImportPath: "example.com/image", Name: "image", Types: map[string]GoType{"Point": {Name: "Point", Struct: true, Fields: map[string]GoField{
+			"X": {Name: "X", Type: goParam(GoValueInt, "int")},
+			"Y": {Name: "Y", Type: goParam(GoValueInt, "int")},
+		}}}},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected unknown direct Go struct field diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, `Go type "Point" in package "example.com/image" has no exported field "Z"`) {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoStructConstructionRejectsUnsupportedVisibleField(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/http as http
+fn response() http::Response {
+  http::Response{StatusCode: 200}
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/http": {ImportPath: "example.com/http", Name: "http", Types: map[string]GoType{"Response": {Name: "Response", Struct: true, Fields: map[string]GoField{
+			"StatusCode": {Name: "StatusCode", Type: goParam(GoValueInt, "int")},
+			"Callback":   {Name: "Callback", Type: GoValueType{Kind: GoValueOther, Expr: "func()"}},
+		}}}},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected unsupported direct Go struct field diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Go field http.Response.Callback has unsupported type func()") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoStructConstructionAllowsNarrowScalarConversion(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/narrow as narrow
+fn response() narrow::Response {
+  narrow::Response{Code: 7}
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/narrow": {ImportPath: "example.com/narrow", Name: "narrow", Types: map[string]GoType{"Response": {Name: "Response", Struct: true, Fields: map[string]GoField{
+			"Code": {Name: "Code", Type: goParam(GoValueInt, "int8")},
+		}}}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoStructConstructionRejectsGenericGoStruct(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/generic as generic
+fn box() generic::Box {
+  generic::Box{Value: 1}
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/generic": {ImportPath: "example.com/generic", Name: "generic", Types: map[string]GoType{"Box": {Name: "Box", Struct: true, TypeParams: 1, Fields: map[string]GoField{
+			"Value": {Name: "Value", Type: goParam(GoValueInt, "int")},
+		}}}},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected generic direct Go struct diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, `Go generic struct type "Box" in package "example.com/generic" cannot be constructed directly`) {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoStructConstructionRejectsGenericGoFieldType(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/generic as generic
+fn holder() generic::Holder {
+  generic::Holder{Box: generic::IntBox}
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	box := goNamed(GoValueOther, "generic.Box", "example.com/generic", "Box")
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/generic": {
+			ImportPath: "example.com/generic",
+			Name:       "generic",
+			Variables:  map[string]GoVariable{"IntBox": {Name: "IntBox", Type: box}},
+			Types: map[string]GoType{
+				"Box": {Name: "Box", Struct: true, TypeParams: 1, Fields: map[string]GoField{
+					"Value": {Name: "Value", Type: goParam(GoValueAny, "any")},
+				}},
+				"Holder": {Name: "Holder", Struct: true, Fields: map[string]GoField{
+					"Box": {Name: "Box", Type: box},
+				}},
+			},
+		},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected generic direct Go field diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Go field generic.Holder.Box has unsupported type generic.Box") {
+		t.Fatalf("diagnostic = %q", got)
 	}
 }
 
@@ -531,7 +731,7 @@ fn callback() { http::DefaultResponse.Callback }`), "main.ard")
 			ImportPath: "example.com/http",
 			Name:       "http",
 			Variables:  map[string]GoVariable{"DefaultResponse": {Name: "DefaultResponse", Type: response}},
-			Types: map[string]GoType{"Response": {Name: "Response", Fields: map[string]GoField{
+			Types: map[string]GoType{"Response": {Name: "Response", Struct: true, Fields: map[string]GoField{
 				"Callback": {Name: "Callback", Type: GoValueType{Kind: GoValueOther, Expr: "func()"}},
 			}}},
 		},
@@ -1265,8 +1465,22 @@ func TestGoPackageFromTypesDiscoversExportedStructFields(t *testing.T) {
 	file, err := goparser.ParseFile(fset, "fields.go", `package fields
 
 type Header map[string][]string
+type MyInt = int
 
 type Embedded struct { Name string }
+
+type Empty struct{}
+
+type HasAny struct { Value any }
+type HasAlias struct { Value MyInt }
+
+type Generic[T any] struct { Value T }
+type GenericAlias[T any] = Generic[T]
+
+type UsesGeneric struct {
+	Box Generic[int]
+	Alias GenericAlias[int]
+}
 
 type Response struct {
 	StatusCode int
@@ -1283,7 +1497,37 @@ type Response struct {
 		t.Fatal(err)
 	}
 	goPkg := goPackageFromTypes("example.com/fields", "fields", pkg)
+	if goPkg.Types["Header"].Struct {
+		t.Fatalf("named map Header should not be marked as a struct: %#v", goPkg.Types["Header"])
+	}
+	if empty := goPkg.Types["Empty"]; !empty.Struct || len(empty.Fields) != 0 {
+		t.Fatalf("Empty type = %#v, want zero-field struct", empty)
+	}
+	anyField := goPkg.Types["HasAny"].Fields["Value"].Type
+	if anyField.Kind != GoValueAny || anyField.Named {
+		t.Fatalf("HasAny.Value type = %#v, want non-named any", anyField)
+	}
+	aliasField := goPkg.Types["HasAlias"].Fields["Value"].Type
+	if aliasField.Kind != GoValueInt || aliasField.Named {
+		t.Fatalf("HasAlias.Value type = %#v, want non-named int", aliasField)
+	}
+	if generic := goPkg.Types["Generic"]; !generic.Struct || generic.TypeParams != 1 {
+		t.Fatalf("Generic type = %#v, want one type parameter", generic)
+	}
+	if alias := goPkg.Types["GenericAlias"]; !alias.Struct || alias.TypeParams != 1 {
+		t.Fatalf("GenericAlias type = %#v, want one type parameter", alias)
+	}
+	usesGeneric := goPkg.Types["UsesGeneric"]
+	if usesGeneric.Fields["Box"].Type.TypeParams != 1 {
+		t.Fatalf("UsesGeneric.Box type = %#v, want one generic type argument", usesGeneric.Fields["Box"].Type)
+	}
+	if usesGeneric.Fields["Alias"].Type.TypeParams != 1 {
+		t.Fatalf("UsesGeneric.Alias type = %#v, want one generic type argument", usesGeneric.Fields["Alias"].Type)
+	}
 	response := goPkg.Types["Response"]
+	if !response.Struct {
+		t.Fatalf("Response should be marked as a struct: %#v", response)
+	}
 	status, ok := response.Fields["StatusCode"]
 	if !ok {
 		t.Fatalf("exported StatusCode field missing: %#v", response.Fields)

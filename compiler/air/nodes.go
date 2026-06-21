@@ -52,6 +52,7 @@ const (
 	ExprCallExtern
 	ExprDirectGoPackageValue
 	ExprDirectGoFieldAccess
+	ExprDirectGoStructLiteral
 	ExprMakeClosure
 	ExprCallClosure
 	ExprSpawnFiber
@@ -203,9 +204,10 @@ type Expr struct {
 }
 
 type StructFieldValue struct {
-	Index int
-	Name  string
-	Value Expr
+	Index             int
+	Name              string
+	Value             Expr
+	DirectGoFieldType checker.GoValueType
 }
 
 type MapEntry struct {

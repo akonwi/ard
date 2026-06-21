@@ -1268,6 +1268,32 @@ func (f *DirectGoFieldAccess) String() string {
 	return fmt.Sprintf("%s.%s", f.Subject, f.Field)
 }
 
+type DirectGoStructInstance struct {
+	ImportPath   string
+	Alias        string
+	PackageName  string
+	Name         string
+	Binding      string
+	Fields       map[string]Expression
+	FieldGoTypes map[string]GoValueType
+	ValueType    Type
+}
+
+func (s *DirectGoStructInstance) Type() Type {
+	return s.ValueType
+}
+
+func (s *DirectGoStructInstance) String() string {
+	qualifier := s.Alias
+	if qualifier == "" {
+		qualifier = s.PackageName
+	}
+	if qualifier == "" {
+		qualifier = s.ImportPath
+	}
+	return qualifier + "::" + s.Name
+}
+
 type EnumValue struct {
 	Name  string
 	Value int // The computed integer discriminant

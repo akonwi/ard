@@ -436,6 +436,26 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
+	if expr.Kind == ExprDirectGoStructLiteral {
+		typeInfo, err := typeInfo(program, expr.Type)
+		if err != nil {
+			return err
+		}
+		if typeInfo.Kind != TypeExtern {
+			return fmt.Errorf("direct Go struct literal has type kind %d", typeInfo.Kind)
+		}
+		for _, field := range expr.Fields {
+			if strings.TrimSpace(field.Name) == "" {
+				return fmt.Errorf("direct Go struct literal field missing name")
+			}
+			if field.DirectGoFieldType.Kind == "" {
+				return fmt.Errorf("direct Go struct literal field %s missing Go field type", field.Name)
+			}
+			if err := validateExpr(program, fn, field.Value); err != nil {
+				return err
+			}
+		}
+	}
 	if expr.Kind == ExprBlock {
 		if err := validateBlock(program, fn, expr.Body); err != nil {
 			return err

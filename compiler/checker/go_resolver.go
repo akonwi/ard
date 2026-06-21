@@ -72,6 +72,7 @@ type GoValueType struct {
 	Package    string
 	Name       string
 	ParamName  string
+	TypeParams int
 	Elem       *GoValueType
 	Key        *GoValueType
 	Value      *GoValueType
@@ -81,6 +82,8 @@ type GoType struct {
 	Name          string
 	Methods       map[string]GoMethod
 	Fields        map[string]GoField
+	Struct        bool
+	TypeParams    int
 	EnumConstants []GoConstant
 	ClosedEnum    bool
 }
@@ -203,7 +206,8 @@ func goPackageFromTypes(importPath string, name string, pkg *types.Package) *GoP
 		case *types.Func:
 			out.Functions[name] = GoFunction{Name: name, Signature: goSignature(obj.Type())}
 		case *types.TypeName:
-			out.Types[name] = GoType{Name: name, Methods: exportedMethods(obj.Type()), Fields: exportedStructFields(obj.Type())}
+			fields, isStruct := exportedStructFields(obj.Type())
+			out.Types[name] = GoType{Name: name, Methods: exportedMethods(obj.Type()), Fields: fields, Struct: isStruct, TypeParams: goTypeParamCount(obj.Type())}
 		case *types.Const:
 			out.Constants[name] = goConstant(obj)
 		case *types.Var:
@@ -383,6 +387,201 @@ func (c *Checker) resolveDirectGoPackageValue(alias string, name string, loc par
 	}
 	c.addError(fmt.Sprintf("Go package %q has no exported enum-like constant or variable %q", goImport.importPath, name), loc)
 	return nil
+}
+
+func (c *Checker) resolveDirectGoStructInstance(goImport directGoImport, inst *parse.StructInstance) Expression {
+	if inst == nil {
+		return nil
+	}
+	if goImport.pkg == nil {
+		c.addError(fmt.Sprintf("Go package %q is not loaded; cannot construct Go struct %q", goImport.importPath, inst.Name.Name), inst.GetLocation())
+		return nil
+	}
+	typeName := inst.Name.Name
+	goType, ok := goImport.pkg.Types[typeName]
+	if !ok {
+		c.addError(fmt.Sprintf("Go package %q has no exported type %q", goImport.importPath, typeName), inst.Name.GetLocation())
+		return nil
+	}
+	if !goType.Struct {
+		c.addError(fmt.Sprintf("Go type %q in package %q is not an exported struct type", typeName, goImport.importPath), inst.Name.GetLocation())
+		return nil
+	}
+	if goType.TypeParams > 0 {
+		c.addError(fmt.Sprintf("Go generic struct type %q in package %q cannot be constructed directly", typeName, goImport.importPath), inst.Name.GetLocation())
+		return nil
+	}
+
+	valid := true
+	unsupportedFields := map[string]bool{}
+	for _, fieldName := range sortedGoFieldNames(goType.Fields) {
+		field := goType.Fields[fieldName]
+		if !c.directGoAssignableShapeSupported(field.Type, inst.GetLocation(), true) {
+			c.addError(fmt.Sprintf("Go field %s.%s has unsupported type %s", pkgQualifiedName(goImport.pkg, []string{typeName}), field.Name, field.Type.String()), inst.GetLocation())
+			unsupportedFields[fieldName] = true
+			valid = false
+		}
+	}
+
+	fields := make(map[string]Expression, len(inst.Properties))
+	fieldGoTypes := make(map[string]GoValueType, len(goType.Fields))
+	providedFields := map[string]bool{}
+	for _, property := range inst.Properties {
+		fieldName := property.Name.Name
+		field, ok := goType.Fields[fieldName]
+		if !ok {
+			c.addError(fmt.Sprintf("Go type %q in package %q has no exported field %q", typeName, goImport.importPath, fieldName), property.Value.GetLocation())
+			valid = false
+			continue
+		}
+		if providedFields[fieldName] {
+			c.addError(fmt.Sprintf("Duplicate Go field: %s", fieldName), property.Value.GetLocation())
+			valid = false
+			continue
+		}
+		providedFields[fieldName] = true
+		if unsupportedFields[fieldName] {
+			continue
+		}
+
+		var expectedClosedEnum *Enum
+		if enum, required := c.directGoClosedEnumAssignmentType(field.Type, property.Value.GetLocation()); required {
+			if enum == nil {
+				valid = false
+				continue
+			}
+			expectedClosedEnum = enum
+		}
+
+		var value Expression
+		c.withValueExprContext(func() {
+			if expectedClosedEnum != nil {
+				value = c.checkExprAs(property.Value, expectedClosedEnum)
+			} else {
+				value = c.checkExpr(property.Value)
+			}
+		})
+		if value == nil {
+			valid = false
+			continue
+		}
+		if expectedClosedEnum != nil {
+			if !directGoEnumTypeMatches(value.Type(), field.Type) {
+				c.addError(fmt.Sprintf("field %s: %s", field.Name, typeMismatch(expectedClosedEnum, value.Type())), property.Value.GetLocation())
+				valid = false
+				continue
+			}
+		} else if ok, reason := c.directGoParamCompatible(value.Type(), field.Type, true); !ok {
+			c.addError(fmt.Sprintf("field %s: %s", field.Name, reason), property.Value.GetLocation())
+			valid = false
+			continue
+		}
+		fields[fieldName] = value
+		fieldGoTypes[fieldName] = field.Type
+	}
+
+	missing := []string{}
+	for _, fieldName := range sortedGoFieldNames(goType.Fields) {
+		if unsupportedFields[fieldName] {
+			continue
+		}
+		if !providedFields[fieldName] {
+			missing = append(missing, fieldName)
+		}
+	}
+	if len(missing) > 0 {
+		c.addError(fmt.Sprintf("Missing Go field: %s", strings.Join(missing, ", ")), inst.GetLocation())
+		valid = false
+	}
+	if !valid {
+		return nil
+	}
+
+	binding := canonicalDirectGoBinding(goImport.importPath, goImport.alias, []string{typeName})
+	name := typeName
+	if goImport.alias != "" {
+		name = goImport.alias + "::" + typeName
+	}
+	valueType := &ExternType{Name_: name, ExternalBinding: binding, ExternalBindings: map[string]string{"go": binding}}
+	return &DirectGoStructInstance{ImportPath: goImport.importPath, Alias: goImport.alias, PackageName: goImport.pkg.Name, Name: typeName, Binding: binding, Fields: fields, FieldGoTypes: fieldGoTypes, ValueType: valueType}
+}
+
+func sortedGoFieldNames(fields map[string]GoField) []string {
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (c *Checker) directGoAssignableShapeSupported(goType GoValueType, loc parse.Location, topLevel bool) bool {
+	if goType.Named && goType.Kind != GoValuePointer {
+		return goType.ImportPath != "" && goType.Name != "" && !c.directGoNamedTypeHasTypeParamsOrLoad(goType, loc)
+	}
+	switch goType.Kind {
+	case GoValueBool, GoValueString, GoValueAny:
+		return true
+	case GoValueInt:
+		return topLevel || goType.Bits == 0 || goType.Bits == 32
+	case GoValueUint:
+		return topLevel || goType.Bits == 8
+	case GoValueFloat:
+		return topLevel || goType.Bits == 64
+	case GoValuePointer:
+		if goType.Named || goType.Elem == nil || !goType.Elem.Named {
+			return false
+		}
+		return goType.Elem.ImportPath != "" && goType.Elem.Name != "" && !c.directGoNamedTypeHasTypeParamsOrLoad(*goType.Elem, loc) && !c.directGoNamedTypeIsEnumLike(*goType.Elem, loc)
+	case GoValueSlice:
+		return goType.Elem != nil && c.directGoAssignableShapeSupported(*goType.Elem, loc, false)
+	case GoValueMap:
+		return goType.Key != nil && goType.Value != nil && c.directGoAssignableShapeSupported(*goType.Key, loc, false) && c.directGoAssignableShapeSupported(*goType.Value, loc, false)
+	default:
+		return false
+	}
+}
+
+func (c *Checker) directGoNamedTypeHasTypeParams(goType GoValueType) bool {
+	if goType.TypeParams > 0 {
+		return true
+	}
+	if !goType.Named || goType.ImportPath == "" || goType.Name == "" {
+		return false
+	}
+	goImport, ok := c.directGoImportForPath(goType.ImportPath)
+	if !ok || goImport.pkg == nil {
+		return false
+	}
+	typ, ok := goImport.pkg.Types[goType.Name]
+	return ok && typ.TypeParams > 0
+}
+
+func (c *Checker) directGoNamedTypeHasTypeParamsOrLoad(goType GoValueType, loc parse.Location) bool {
+	if goType.TypeParams > 0 {
+		return true
+	}
+	if !goType.Named || goType.ImportPath == "" || goType.Name == "" {
+		return false
+	}
+	goImport, ok := c.directGoImportForPathOrLoad(goType.ImportPath, loc)
+	if !ok || goImport.pkg == nil {
+		return false
+	}
+	typ, ok := goImport.pkg.Types[goType.Name]
+	return ok && typ.TypeParams > 0
+}
+
+func (c *Checker) directGoNamedTypeIsEnumLike(goType GoValueType, loc parse.Location) bool {
+	if !goType.Named || goType.ImportPath == "" || goType.Name == "" {
+		return false
+	}
+	goImport, ok := c.directGoImportForPathOrLoad(goType.ImportPath, loc)
+	if !ok || goImport.pkg == nil {
+		return false
+	}
+	typ, ok := goImport.pkg.Types[goType.Name]
+	return ok && len(typ.EnumConstants) > 0
 }
 
 func (c *Checker) resolveDirectGoVariable(goImport directGoImport, variable GoVariable, loc parse.Location) Expression {
@@ -1007,6 +1206,10 @@ func (c *Checker) directGoNamedArdType(goType GoValueType, loc parse.Location) (
 		c.addError(fmt.Sprintf("Go named type %s is missing package metadata", goType.String()), loc)
 		return nil, false
 	}
+	if c.directGoNamedTypeHasTypeParams(goType) {
+		c.addError(fmt.Sprintf("Go generic type %s is not supported by direct Go bindings yet", goType.String()), loc)
+		return nil, false
+	}
 	if goImport, ok := c.directGoImportForPath(goType.ImportPath); ok && goImport.pkg != nil {
 		if typ, ok := goImport.pkg.Types[goType.Name]; ok {
 			if enum := c.directGoEnumType(goImport, typ, loc); enum != nil {
@@ -1198,12 +1401,18 @@ func (c *Checker) directGoReturnValueCompatible(ard Type, goType GoValueType) (b
 
 func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel bool) (bool, string) {
 	ard = derefType(ard)
+	if goType.Named && c.directGoNamedTypeHasTypeParams(goType) {
+		return false, fmt.Sprintf("Go generic type %s is not supported by direct Go bindings yet", goType.String())
+	}
 	if directGoNamedTypeMatches(ard, goType) {
 		return true, ""
 	}
 	if goType.Kind == GoValuePointer {
 		if goType.Named {
 			return false, fmt.Sprintf("Go named pointer type %s is not supported by direct Go pointer bindings yet", goType.String())
+		}
+		if goType.Elem != nil && goType.Elem.Named && c.directGoNamedTypeHasTypeParams(*goType.Elem) {
+			return false, fmt.Sprintf("Go generic pointer element type %s is not supported by direct Go bindings yet", goType.Elem.String())
 		}
 		if directGoPointerToEnumLike(ard, goType) {
 			return false, fmt.Sprintf("Go pointer to enum-like type %s is not supported by direct Go pointer bindings yet", goType.String())
@@ -1256,12 +1465,18 @@ func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel
 
 func (c *Checker) directGoAssignableCompatible(ard Type, goType GoValueType) (bool, string) {
 	ard = derefType(ard)
+	if goType.Named && c.directGoNamedTypeHasTypeParams(goType) {
+		return false, fmt.Sprintf("Go generic type %s is not supported by direct Go bindings yet", goType.String())
+	}
 	if directGoNamedTypeMatches(ard, goType) {
 		return true, ""
 	}
 	if goType.Kind == GoValuePointer {
 		if goType.Named {
 			return false, fmt.Sprintf("Go named pointer type %s is not supported by direct Go pointer bindings yet", goType.String())
+		}
+		if goType.Elem != nil && goType.Elem.Named && c.directGoNamedTypeHasTypeParams(*goType.Elem) {
+			return false, fmt.Sprintf("Go generic pointer element type %s is not supported by direct Go bindings yet", goType.Elem.String())
 		}
 		if directGoPointerToEnumLike(ard, goType) {
 			return false, fmt.Sprintf("Go pointer to enum-like type %s is not supported by direct Go pointer bindings yet", goType.String())
@@ -1526,7 +1741,24 @@ func goValueTypeSeen(typ types.Type, seen map[types.Type]bool) GoValueType {
 		underlying.Expr = goTypeExpr(typ)
 		underlying.Named = true
 		underlying.Name = named.Obj().Name()
+		underlying.TypeParams = goTypeParamCount(typ)
 		if pkg := named.Obj().Pkg(); pkg != nil {
+			underlying.ImportPath = pkg.Path()
+			underlying.Package = pkg.Name()
+		}
+		return underlying
+	}
+	if alias, ok := typ.(*types.Alias); ok {
+		underlying := goValueTypeSeen(alias.Rhs(), seen)
+		aliasTypeParams := goTypeParamCount(typ)
+		if alias.Obj().Pkg() == nil || aliasTypeParams == 0 && underlying.TypeParams == 0 {
+			return underlying
+		}
+		underlying.Expr = goTypeExpr(typ)
+		underlying.Named = true
+		underlying.Name = alias.Obj().Name()
+		underlying.TypeParams = max(aliasTypeParams, underlying.TypeParams)
+		if pkg := alias.Obj().Pkg(); pkg != nil {
 			underlying.ImportPath = pkg.Path()
 			underlying.Package = pkg.Name()
 		}
@@ -1581,10 +1813,24 @@ func goValueTypeSeen(typ types.Type, seen map[types.Type]bool) GoValueType {
 
 func goOpaqueType(typ types.Type) GoValueType {
 	out := GoValueType{Expr: goTypeExpr(typ), Kind: GoValueOther}
-	if named, ok := typ.(*types.Named); ok {
+	switch typ := typ.(type) {
+	case *types.Named:
 		out.Named = true
-		out.Name = named.Obj().Name()
-		if pkg := named.Obj().Pkg(); pkg != nil {
+		out.Name = typ.Obj().Name()
+		out.TypeParams = goTypeParamCount(typ)
+		if pkg := typ.Obj().Pkg(); pkg != nil {
+			out.ImportPath = pkg.Path()
+			out.Package = pkg.Name()
+		}
+	case *types.Alias:
+		typeParams := goTypeParamCount(typ)
+		if typ.Obj().Pkg() == nil || typeParams == 0 {
+			return out
+		}
+		out.Named = true
+		out.Name = typ.Obj().Name()
+		out.TypeParams = typeParams
+		if pkg := typ.Obj().Pkg(); pkg != nil {
 			out.ImportPath = pkg.Path()
 			out.Package = pkg.Name()
 		}
@@ -1596,6 +1842,13 @@ func goTypeExpr(typ types.Type) string {
 	if named, ok := typ.(*types.Named); ok && named.Obj() != nil {
 		name := named.Obj().Name()
 		if pkg := named.Obj().Pkg(); pkg != nil && pkg.Name() != "" {
+			return pkg.Name() + "." + name
+		}
+		return name
+	}
+	if alias, ok := typ.(*types.Alias); ok && alias.Obj() != nil {
+		name := alias.Obj().Name()
+		if pkg := alias.Obj().Pkg(); pkg != nil && pkg.Name() != "" {
 			return pkg.Name() + "." + name
 		}
 		return name
@@ -1625,16 +1878,16 @@ func basicIntBits(kind types.BasicKind) int {
 	}
 }
 
-func exportedStructFields(typ types.Type) map[string]GoField {
-	fields := map[string]GoField{}
+func exportedStructFields(typ types.Type) (map[string]GoField, bool) {
 	if typ == nil {
-		return fields
+		return nil, false
 	}
 	underlying := typ.Underlying()
 	structType, ok := underlying.(*types.Struct)
 	if !ok {
-		return fields
+		return nil, false
 	}
+	fields := map[string]GoField{}
 	for i := 0; i < structType.NumFields(); i++ {
 		field := structType.Field(i)
 		if field == nil || !field.Exported() || field.Embedded() {
@@ -1643,7 +1896,27 @@ func exportedStructFields(typ types.Type) map[string]GoField {
 		name := field.Name()
 		fields[name] = GoField{Name: name, Type: goValueType(field.Type())}
 	}
-	return fields
+	return fields, true
+}
+
+func goTypeParamCount(typ types.Type) int {
+	switch typ := typ.(type) {
+	case *types.Named:
+		if typ.TypeParams() != nil && typ.TypeParams().Len() > 0 {
+			return typ.TypeParams().Len()
+		}
+		if typ.TypeArgs() != nil {
+			return typ.TypeArgs().Len()
+		}
+	case *types.Alias:
+		if typ.TypeParams() != nil && typ.TypeParams().Len() > 0 {
+			return typ.TypeParams().Len()
+		}
+		if typ.TypeArgs() != nil {
+			return typ.TypeArgs().Len()
+		}
+	}
+	return 0
 }
 
 func exportedMethods(typ types.Type) map[string]GoMethod {
