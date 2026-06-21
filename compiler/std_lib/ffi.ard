@@ -1,0 +1,2 @@
+// FFI helpers for direct host interop.
+extern fn is_nil(value: $T) Bool = "IsNil"

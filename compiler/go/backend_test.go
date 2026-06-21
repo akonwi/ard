@@ -4592,6 +4592,71 @@ fn main() {
 	}
 }
 
+func TestBuildProgramSupportsFFIIsNilForDirectGoPointers(t *testing.T) {
+	workspace := t.TempDir()
+	helperDir := filepath.Join(workspace, "helper")
+	appDir := filepath.Join(workspace, "app")
+	for _, dir := range []string{helperDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "go.mod"), []byte("module example.com/nilcheck\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "nilcheck.go"), []byte(`package nilcheck
+
+type Thing struct { Name string }
+
+func Missing() *Thing { return nil }
+func Present() *Thing { return &Thing{Name: "ok"} }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goMod := fmt.Sprintf("module app\n\ngo 1.26.0\n\nrequire example.com/nilcheck v0.0.0\nreplace example.com/nilcheck => %s\n", helperDir)
+	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(goMod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(appDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use ard/ffi
+use go:example.com/nilcheck as nilcheck
+
+fn main() {
+  let missing = nilcheck::Missing()
+  if not ffi::is_nil(missing) {
+    panic("typed nil pointer was not nil")
+  }
+  let present = nilcheck::Present()
+  if ffi::is_nil(present) {
+    panic("non-nil pointer was nil")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	binaryPath, err := BuildProgram(program, filepath.Join(appDir, "app"), loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("BuildProgram error = %v", err)
+	}
+	cmd := exec.Command(binaryPath)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("generated program failed: %v\nstderr: %s", err, stderr.String())
+	}
+}
+
 func TestBuildProgramCoercesUnexportedNamedScalarResult(t *testing.T) {
 	workspace := t.TempDir()
 	helperDir := filepath.Join(workspace, "helper")
