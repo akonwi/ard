@@ -27,9 +27,6 @@ impl Str::ToString for Method {
   }
 }
 
-private type RawRequest = mut gohttp::Request
-private type RawResponse = mut gohttp::Response
-
 struct Request {
   method: Method,
   url: Str,
@@ -38,7 +35,7 @@ struct Request {
   timeout: Int?,
 
   // inbound requests have the *http.Request
-  raw: RawRequest?,
+  raw: (mut gohttp::Request)?,
 }
 
 impl Request {
@@ -97,12 +94,12 @@ impl Response {
   }
 }
 
-// HTTP client FFI functions - operate on opaque RawResponse handle
+// HTTP client FFI functions - operate on opaque Go response handles
 // body is Dynamic (nil means no body)
-private extern fn http_do(method: Str, url: Str, body: Dynamic, headers: [Str: Str], timeout: Int?) RawResponse!Str = "HTTP_Do"
-private extern fn http_response_headers(resp: RawResponse) [Str: Str] = "HTTP_ResponseHeaders"
-private extern fn http_response_body(resp: RawResponse) Str!Str = "HTTP_ResponseBody"
-private extern fn http_response_close(resp: RawResponse) Void = "HTTP_ResponseClose"
+private extern fn http_do(method: Str, url: Str, body: Dynamic, headers: [Str: Str], timeout: Int?) (mut gohttp::Response)!Str = "HTTP_Do"
+private extern fn http_response_headers(resp: mut gohttp::Response) [Str: Str] = "HTTP_ResponseHeaders"
+private extern fn http_response_body(resp: mut gohttp::Response) Str!Str = "HTTP_ResponseBody"
+private extern fn http_response_close(resp: mut gohttp::Response) Void = "HTTP_ResponseClose"
 
 fn send(req: Request, timeout: Int?) Response!Str {
   let method = req.method.to_str()

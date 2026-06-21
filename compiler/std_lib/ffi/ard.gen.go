@@ -44,10 +44,6 @@ type PathSegment = any
 
 type Primitive = any
 
-type RawRequest = *gohttp.Request
-
-type RawResponse = *gohttp.Response
-
 type Value = any
 
 type Method int

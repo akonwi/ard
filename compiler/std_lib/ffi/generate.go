@@ -183,7 +183,7 @@ func loadContract(stdlibDir string) (contract, error) {
 				definedTypes[name] = struct{}{}
 				c.Enums = append(c.Enums, enumDecl{Name: name})
 			case *parse.StructDefinition:
-				decl := lowerStruct(node, aliases, definedTypes)
+				decl := lowerStruct(node, aliases, definedTypes, c.DirectGoImports)
 				definedTypes[decl.Name] = struct{}{}
 				c.Structs = append(c.Structs, decl)
 			}
@@ -209,7 +209,7 @@ func loadContract(stdlibDir string) (contract, error) {
 			if binding == "" || directGoBinding(binding) {
 				continue
 			}
-			fn, err := lowerHostFunction(binding, node, aliases, definedTypes)
+			fn, err := lowerHostFunction(binding, node, aliases, definedTypes, c.DirectGoImports)
 			if err != nil {
 				c.Skipped = append(c.Skipped, skippedExtern{Binding: binding, Reason: err.Error()})
 				continue
@@ -261,7 +261,7 @@ func aliasGoType(alias *parse.TypeDeclaration, directGoImports map[string]string
 		return goType, true
 	}
 	if fn, ok := alias.Type[0].(*parse.FunctionType); ok {
-		goType, err := functionTypeGoType(fn, nil, nil)
+		goType, err := functionTypeGoType(fn, nil, nil, directGoImports)
 		return goType, err == nil
 	}
 	return "any", true
@@ -276,15 +276,10 @@ func directGoAliasGoType(typ parse.DeclaredType, directGoImports map[string]stri
 		}
 		return "*" + inner, true
 	case *parse.CustomType:
-		parts := strings.Split(t.Name, "::")
-		if len(parts) != 2 || len(t.TypeArgs) > 0 {
+		goType, ok := directGoCustomTypeGoType(t, directGoImports)
+		if !ok {
 			return "", false
 		}
-		alias := parts[0]
-		if directGoImports[alias] == "" {
-			return "", false
-		}
-		goType := alias + "." + parts[1]
 		if t.IsNullable() {
 			return "Maybe[" + goType + "]", true
 		}
@@ -294,7 +289,19 @@ func directGoAliasGoType(typ parse.DeclaredType, directGoImports map[string]stri
 	}
 }
 
-func lowerStruct(node *parse.StructDefinition, aliases map[string]string, definedTypes map[string]struct{}) structDecl {
+func directGoCustomTypeGoType(t *parse.CustomType, directGoImports map[string]string) (string, bool) {
+	parts := strings.Split(t.Name, "::")
+	if len(parts) != 2 || len(t.TypeArgs) > 0 {
+		return "", false
+	}
+	alias := parts[0]
+	if directGoImports[alias] == "" {
+		return "", false
+	}
+	return alias + "." + parts[1], true
+}
+
+func lowerStruct(node *parse.StructDefinition, aliases map[string]string, definedTypes map[string]struct{}, directGoImports map[string]string) structDecl {
 	decl := structDecl{Name: goExportedName(node.Name.Name)}
 	generics := map[string]struct{}{}
 	for _, param := range node.TypeParams {
@@ -313,7 +320,7 @@ func lowerStruct(node *parse.StructDefinition, aliases map[string]string, define
 		}
 	}
 	for _, field := range node.Fields {
-		goType, err := typeGoType(field.Type, aliases, definedTypes)
+		goType, err := typeGoType(field.Type, aliases, definedTypes, directGoImports)
 		if err != nil {
 			decl.Unsupported = err.Error()
 			return decl
@@ -326,7 +333,7 @@ func lowerStruct(node *parse.StructDefinition, aliases map[string]string, define
 	return decl
 }
 
-func lowerHostFunction(binding string, fn *parse.ExternalFunction, aliases map[string]string, definedTypes map[string]struct{}) (hostFunction, error) {
+func lowerHostFunction(binding string, fn *parse.ExternalFunction, aliases map[string]string, definedTypes map[string]struct{}, directGoImports map[string]string) (hostFunction, error) {
 	for _, param := range fn.Parameters {
 		if hasGeneric(param.Type) {
 			return hostFunction{}, fmt.Errorf("generic parameters are not generated yet")
@@ -339,7 +346,7 @@ func lowerHostFunction(binding string, fn *parse.ExternalFunction, aliases map[s
 	params := make([]string, 0, len(fn.Parameters))
 	hostParams := make([]hostParam, 0, len(fn.Parameters))
 	for _, param := range fn.Parameters {
-		goType, err := typeGoType(param.Type, aliases, definedTypes)
+		goType, err := typeGoType(param.Type, aliases, definedTypes, directGoImports)
 		if err != nil {
 			return hostFunction{}, fmt.Errorf("parameter %s: %w", param.Name, err)
 		}
@@ -347,7 +354,7 @@ func lowerHostFunction(binding string, fn *parse.ExternalFunction, aliases map[s
 		hostParams = append(hostParams, hostParam{Name: goIdentifier(param.Name), Type: goType})
 	}
 
-	returns, err := returnGoTypes(fn.ReturnType, aliases, definedTypes)
+	returns, err := returnGoTypes(fn.ReturnType, aliases, definedTypes, directGoImports)
 	if err != nil {
 		return hostFunction{}, err
 	}
@@ -405,11 +412,11 @@ func collectGoImports(dir string) (map[string]string, error) {
 	return imports, nil
 }
 
-func returnGoTypes(typ parse.DeclaredType, aliases map[string]string, definedTypes map[string]struct{}) ([]string, error) {
+func returnGoTypes(typ parse.DeclaredType, aliases map[string]string, definedTypes map[string]struct{}, directGoImports map[string]string) ([]string, error) {
 	if result, ok := typ.(*parse.ResultType); ok {
 		if isVoidType(result.Val) {
 			if !isStringType(result.Err) {
-				errType, err := typeGoType(result.Err, aliases, definedTypes)
+				errType, err := typeGoType(result.Err, aliases, definedTypes, directGoImports)
 				if err != nil {
 					return nil, err
 				}
@@ -417,12 +424,12 @@ func returnGoTypes(typ parse.DeclaredType, aliases map[string]string, definedTyp
 			}
 			return []string{"error"}, nil
 		}
-		valueType, err := typeGoType(result.Val, aliases, definedTypes)
+		valueType, err := typeGoType(result.Val, aliases, definedTypes, directGoImports)
 		if err != nil {
 			return nil, err
 		}
 		if !isStringType(result.Err) {
-			errType, err := typeGoType(result.Err, aliases, definedTypes)
+			errType, err := typeGoType(result.Err, aliases, definedTypes, directGoImports)
 			if err != nil {
 				return nil, err
 			}
@@ -433,14 +440,14 @@ func returnGoTypes(typ parse.DeclaredType, aliases map[string]string, definedTyp
 	if isVoidType(typ) {
 		return nil, nil
 	}
-	goType, err := typeGoType(typ, aliases, definedTypes)
+	goType, err := typeGoType(typ, aliases, definedTypes, directGoImports)
 	if err != nil {
 		return nil, err
 	}
 	return []string{goType}, nil
 }
 
-func typeGoType(typ parse.DeclaredType, aliases map[string]string, definedTypes map[string]struct{}) (string, error) {
+func typeGoType(typ parse.DeclaredType, aliases map[string]string, definedTypes map[string]struct{}, directGoImports map[string]string) (string, error) {
 	nullable := typ.IsNullable()
 	var goType string
 	switch t := typ.(type) {
@@ -455,23 +462,23 @@ func typeGoType(typ parse.DeclaredType, aliases map[string]string, definedTypes 
 	case *parse.VoidType:
 		goType = "Void"
 	case *parse.MutableType:
-		inner, err := typeGoType(t.Inner, aliases, definedTypes)
+		inner, err := typeGoType(t.Inner, aliases, definedTypes, directGoImports)
 		if err != nil {
 			return "", err
 		}
 		goType = "*" + inner
 	case *parse.List:
-		elem, err := typeGoType(t.Element, aliases, definedTypes)
+		elem, err := typeGoType(t.Element, aliases, definedTypes, directGoImports)
 		if err != nil {
 			return "", err
 		}
 		goType = "[]" + elem
 	case *parse.Map:
-		key, err := typeGoType(t.Key, aliases, definedTypes)
+		key, err := typeGoType(t.Key, aliases, definedTypes, directGoImports)
 		if err != nil {
 			return "", err
 		}
-		value, err := typeGoType(t.Value, aliases, definedTypes)
+		value, err := typeGoType(t.Value, aliases, definedTypes, directGoImports)
 		if err != nil {
 			return "", err
 		}
@@ -486,7 +493,9 @@ func typeGoType(typ parse.DeclaredType, aliases map[string]string, definedTypes 
 		case "Rune":
 			goType = "rune"
 		default:
-			if alias, ok := aliases[t.Name]; ok {
+			if directGoType, ok := directGoCustomTypeGoType(t, directGoImports); ok {
+				goType = directGoType
+			} else if alias, ok := aliases[t.Name]; ok {
 				goType = alias
 			} else if _, ok := definedTypes[name]; ok {
 				goType = name
@@ -496,7 +505,7 @@ func typeGoType(typ parse.DeclaredType, aliases map[string]string, definedTypes 
 			if len(t.TypeArgs) > 0 {
 				args := make([]string, 0, len(t.TypeArgs))
 				for _, arg := range t.TypeArgs {
-					argType, err := typeGoType(arg, aliases, definedTypes)
+					argType, err := typeGoType(arg, aliases, definedTypes, directGoImports)
 					if err != nil {
 						return "", err
 					}
@@ -509,7 +518,7 @@ func typeGoType(typ parse.DeclaredType, aliases map[string]string, definedTypes 
 		goType = t.Name
 	case *parse.FunctionType:
 		var err error
-		goType, err = functionTypeGoType(t, aliases, definedTypes)
+		goType, err = functionTypeGoType(t, aliases, definedTypes, directGoImports)
 		if err != nil {
 			return "", err
 		}
@@ -524,10 +533,10 @@ func typeGoType(typ parse.DeclaredType, aliases map[string]string, definedTypes 
 	return goType, nil
 }
 
-func functionTypeGoType(fn *parse.FunctionType, aliases map[string]string, definedTypes map[string]struct{}) (string, error) {
+func functionTypeGoType(fn *parse.FunctionType, aliases map[string]string, definedTypes map[string]struct{}, directGoImports map[string]string) (string, error) {
 	args := make([]string, 0, len(fn.Params)+1)
 	for i, param := range fn.Params {
-		paramType, err := typeGoType(param, aliases, definedTypes)
+		paramType, err := typeGoType(param, aliases, definedTypes, directGoImports)
 		if err != nil {
 			return "", err
 		}
@@ -542,7 +551,7 @@ func functionTypeGoType(fn *parse.FunctionType, aliases map[string]string, defin
 			return "", fmt.Errorf("generic function returns are not generated yet")
 		}
 		var err error
-		returnTypes, err = functionReturnGoTypes(fn.Return, aliases, definedTypes)
+		returnTypes, err = functionReturnGoTypes(fn.Return, aliases, definedTypes, directGoImports)
 		if err != nil {
 			return "", err
 		}
@@ -557,10 +566,10 @@ func functionTypeGoType(fn *parse.FunctionType, aliases map[string]string, defin
 	return fmt.Sprintf("func(%s) (%s)", params, strings.Join(returnTypes, ", ")), nil
 }
 
-func functionReturnGoTypes(typ parse.DeclaredType, aliases map[string]string, definedTypes map[string]struct{}) ([]string, error) {
+func functionReturnGoTypes(typ parse.DeclaredType, aliases map[string]string, definedTypes map[string]struct{}, directGoImports map[string]string) ([]string, error) {
 	if result, ok := typ.(*parse.ResultType); ok {
 		if !isStringType(result.Err) {
-			returnTypes, err := returnGoTypes(typ, aliases, definedTypes)
+			returnTypes, err := returnGoTypes(typ, aliases, definedTypes, directGoImports)
 			if err != nil {
 				return nil, err
 			}
@@ -569,7 +578,7 @@ func functionReturnGoTypes(typ parse.DeclaredType, aliases map[string]string, de
 		valueType := "Void"
 		if !isVoidType(result.Val) {
 			var err error
-			valueType, err = typeGoType(result.Val, aliases, definedTypes)
+			valueType, err = typeGoType(result.Val, aliases, definedTypes, directGoImports)
 			if err != nil {
 				return nil, err
 			}
@@ -579,7 +588,7 @@ func functionReturnGoTypes(typ parse.DeclaredType, aliases map[string]string, de
 	if isVoidType(typ) {
 		return nil, nil
 	}
-	returnType, err := typeGoType(typ, aliases, definedTypes)
+	returnType, err := typeGoType(typ, aliases, definedTypes, directGoImports)
 	if err != nil {
 		return nil, err
 	}
@@ -588,28 +597,39 @@ func functionReturnGoTypes(typ parse.DeclaredType, aliases map[string]string, de
 
 func contractTypeImports(c contract, availableImports map[string]string) (map[string]string, error) {
 	imports := map[string]string{}
-	for _, typ := range c.ExternTypes {
-		if strings.TrimSpace(typ.Type) == "" {
-			continue
+	collect := func(label string, typeExpr string) error {
+		if strings.TrimSpace(typeExpr) == "" {
+			return nil
 		}
-		found, err := typeExpressionImports("extern type binding "+typ.Name, typ.Type, availableImports, c.DirectGoImports)
+		found, err := typeExpressionImports(label, typeExpr, availableImports, c.DirectGoImports)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for alias, path := range found {
 			imports[alias] = path
+		}
+		return nil
+	}
+	for _, typ := range c.ExternTypes {
+		if err := collect("extern type binding "+typ.Name, typ.Type); err != nil {
+			return nil, err
 		}
 	}
 	for _, alias := range c.Aliases {
-		if strings.TrimSpace(alias.Type) == "" {
-			continue
-		}
-		found, err := typeExpressionImports("type alias "+alias.Name, alias.Type, availableImports, c.DirectGoImports)
-		if err != nil {
+		if err := collect("type alias "+alias.Name, alias.Type); err != nil {
 			return nil, err
 		}
-		for alias, path := range found {
-			imports[alias] = path
+	}
+	for _, strct := range c.Structs {
+		for _, field := range strct.Fields {
+			if err := collect("struct field "+strct.Name+"."+field.Name, field.Type); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, fn := range c.Functions {
+		if err := collect("host function "+fn.Binding, fn.Type); err != nil {
+			return nil, err
 		}
 	}
 	return imports, nil

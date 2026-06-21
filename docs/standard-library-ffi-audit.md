@@ -151,7 +151,7 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 
 - Current adapters: client request execution, response header/body extraction/close, server callback bridge.
 - Refactored to Ard + direct Go:
-  - raw request/response aliases now use direct `mut gohttp::{Request,Response}` types;
+  - raw request/response host FFI signatures now use direct `mut gohttp::{Request,Response}` types without private aliases;
   - inbound `Request::{path,path_param,query_param}` use direct `*http.Request` field/method access;
   - client response status uses direct `http.Response.StatusCode` access.
 - Still necessary today.
