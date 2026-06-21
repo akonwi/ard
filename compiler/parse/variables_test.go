@@ -164,9 +164,17 @@ func TestFunctionTypes(t *testing.T) {
 			wantErrs: []string{"Expected type inside grouped type"},
 		},
 		{
-			name:     "Grouped nullable mutable type is rejected",
-			input:    "let f: (mut Int)? = test",
-			wantErrs: []string{"Mutable types cannot be nullable"},
+			name:  "Grouped nullable mutable type",
+			input: "let f: (mut Int)? = test",
+			output: Program{
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name:  "f",
+						Type:  &MutableType{Inner: &IntType{}, nullable: true},
+						Value: &Identifier{Name: "test"},
+					},
+				},
+			},
 		},
 		{
 			name:  "Grouped mutable value result type",

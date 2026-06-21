@@ -10,6 +10,7 @@ import (
 
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
+	cmp.AllowUnexported(MutableType{}),
 	cmpopts.IgnoreUnexported(
 		Identifier{},
 		IntType{},

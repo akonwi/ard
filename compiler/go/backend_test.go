@@ -4680,6 +4680,12 @@ type Thing struct { Name string }
 
 func Missing() *Thing { return nil }
 func Present() *Thing { return &Thing{Name: "ok"} }
+func MaybeThing(ok bool) (*Thing, bool) {
+	if !ok {
+		return nil, false
+	}
+	return &Thing{Name: "ok"}, true
+}
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4702,6 +4708,14 @@ fn main() {
   let present = nilcheck::Present()
   if ffi::is_nil(present) {
     panic("non-nil pointer was nil")
+  }
+  let maybe_missing: (mut nilcheck::Thing)? = nilcheck::MaybeThing(false)
+  if maybe_missing.is_some() {
+    panic("missing maybe pointer was present")
+  }
+  let maybe_present: (mut nilcheck::Thing)? = nilcheck::MaybeThing(true)
+  if maybe_present.is_none() {
+    panic("present maybe pointer was missing")
   }
 }
 `), 0o644); err != nil {

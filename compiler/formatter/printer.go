@@ -808,7 +808,11 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 	case *parse.GenericType:
 		return maybeNullable("$"+node.Name, node.IsNullable())
 	case *parse.MutableType:
-		return "mut " + p.renderType(node.Inner)
+		name := "mut " + p.renderType(node.Inner)
+		if node.IsNullable() {
+			return "(" + name + ")?"
+		}
+		return name
 	case *parse.CustomType:
 		name := node.Name
 		if node.Type.Target != nil {

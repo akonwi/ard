@@ -1501,10 +1501,6 @@ func (p *parser) parseType() DeclaredType {
 				p.addError(p.previous(), "Grouped type is already nullable")
 				return inner
 			}
-			if _, ok := inner.(*MutableType); ok {
-				p.addError(p.previous(), "Mutable types cannot be nullable")
-				return inner
-			}
 			return nullableDeclaredType(inner)
 		}
 		return inner
@@ -1787,6 +1783,8 @@ func nullableDeclaredType(t DeclaredType) DeclaredType {
 		ty.nullable = true
 	case *FunctionType:
 		ty.Nullable = true
+	case *MutableType:
+		ty.nullable = true
 	}
 	return t
 }

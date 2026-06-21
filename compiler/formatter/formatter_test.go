@@ -250,6 +250,11 @@ func TestFormat(t *testing.T) {
 			output: "let result: (mut File)!Str = test\n",
 		},
 		{
+			name:   "formats nullable mutable reference type with grouping",
+			input:  "let value: (mut File)? = maybe::none()\n",
+			output: "let value: (mut File)? = maybe::none()\n",
+		},
+		{
 			name:   "formats test function",
 			input:  "test fn my_test() Void!Str { Result::ok(()) }",
 			output: "test fn my_test() Void!Str {\n  Result::ok(())\n}\n",

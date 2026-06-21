@@ -25,6 +25,9 @@ func TestMaybeStringParenthesizesCompositeTypes(t *testing.T) {
 	if got, want := MakeMaybe(MakeResult(Int, Str)).String(), "(Int!Str)?"; got != want {
 		t.Fatalf("result maybe string = %q, want %q", got, want)
 	}
+	if got, want := MakeMaybe(MakeMutableRef(Int)).String(), "(mut Int)?"; got != want {
+		t.Fatalf("mutable reference maybe string = %q, want %q", got, want)
+	}
 	if got, want := MakeMaybe(MakeResult(functionType, Str)).String(), "((fn(Int) Void)!Str)?"; got != want {
 		t.Fatalf("function result maybe string = %q, want %q", got, want)
 	}
