@@ -2857,6 +2857,8 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 			return &Stmt{Kind: StmtAssign, Local: local, Value: value}, nil
 		case *checker.InstanceProperty:
 			return fl.lowerFieldAssignment(target, s.Value)
+		case *checker.DirectGoFieldAccess:
+			return fl.lowerDirectGoFieldAssignment(target, s.Value)
 		default:
 			return nil, fmt.Errorf("unsupported AIR assignment target %T", s.Target)
 		}
@@ -3505,6 +3507,14 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerModuleSymbol(typeID, e)
 	case *checker.DirectGoPackageValue:
 		return &Expr{Kind: ExprDirectGoPackageValue, Type: typeID, Str: e.Binding}, nil
+	case *checker.DirectGoFieldAccess:
+		target, err := fl.lowerExpr(e.Subject)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprDirectGoFieldAccess, Type: typeID, Target: target, Str: e.Field}, nil
+	case *checker.DirectGoStructInstance:
+		return fl.lowerDirectGoStructInstance(typeID, e)
 	case *checker.ListLiteral:
 		return fl.lowerListLiteral(typeID, e, NoType)
 	case *checker.MapLiteral:
@@ -3659,6 +3669,28 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		return &Expr{Kind: ExprBlock, Type: typeID, Body: body}, nil
+	case *checker.UnsafeBlock:
+		resultType := typeID
+		resultInfo, ok := fl.l.typeInfo(resultType)
+		if !ok || resultInfo.Kind != TypeResult {
+			var err error
+			resultType, err = fl.internType(e.Type())
+			if err != nil {
+				return nil, err
+			}
+			resultInfo, ok = fl.l.typeInfo(resultType)
+			if !ok || resultInfo.Kind != TypeResult {
+				return nil, fmt.Errorf("unsafe block lowered with non-Result type %s", e.Type().String())
+			}
+		}
+		previousReturn := fl.fn.Signature.Return
+		fl.fn.Signature.Return = resultType
+		body, err := fl.lowerBlockWithDefault(e.Body.Stmts, resultInfo.Value)
+		fl.fn.Signature.Return = previousReturn
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprUnsafeBlock, Type: resultType, Body: body}, nil
 	case *checker.If:
 		return fl.lowerIf(typeID, e)
 	case *checker.ConditionalMatch:
@@ -4567,6 +4599,31 @@ func (fl *functionLowerer) lowerStructInstance(typeID TypeID, inst *checker.Stru
 	return &Expr{Kind: ExprMakeStruct, Type: typeID, Fields: fields}, nil
 }
 
+func (fl *functionLowerer) lowerDirectGoStructInstance(typeID TypeID, inst *checker.DirectGoStructInstance) (*Expr, error) {
+	typeInfo, ok := fl.l.typeInfo(typeID)
+	if !ok || typeInfo.Kind != TypeExtern {
+		return nil, fmt.Errorf("direct Go struct instance lowered with non-extern type %s", inst.Type().String())
+	}
+	fieldNames := make([]string, 0, len(inst.FieldGoTypes))
+	for name := range inst.FieldGoTypes {
+		fieldNames = append(fieldNames, name)
+	}
+	sort.Strings(fieldNames)
+	fields := make([]StructFieldValue, 0, len(fieldNames))
+	for _, fieldName := range fieldNames {
+		fieldExpr, ok := inst.Fields[fieldName]
+		if !ok {
+			return nil, fmt.Errorf("direct Go struct instance missing checked field %s", fieldName)
+		}
+		value, err := fl.lowerExpr(fieldExpr)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, StructFieldValue{Name: fieldName, Value: *value, DirectGoFieldType: inst.FieldGoTypes[fieldName]})
+	}
+	return &Expr{Kind: ExprDirectGoStructLiteral, Type: typeID, Fields: fields}, nil
+}
+
 func (fl *functionLowerer) lowerInstanceProperty(typeID TypeID, prop *checker.InstanceProperty) (*Expr, error) {
 	target, err := fl.lowerExpr(prop.Subject)
 	if err != nil {
@@ -4607,6 +4664,18 @@ func (fl *functionLowerer) lowerFieldAssignment(prop *checker.InstanceProperty, 
 		return &Stmt{Kind: StmtSetField, Target: target, Field: field.Index, Type: field.Type, Value: value}, nil
 	}
 	return nil, fmt.Errorf("field %s not found on %s", prop.Property, targetInfo.Name)
+}
+
+func (fl *functionLowerer) lowerDirectGoFieldAssignment(field *checker.DirectGoFieldAccess, valueExpr checker.Expression) (*Stmt, error) {
+	target, err := fl.lowerExpr(field.Subject)
+	if err != nil {
+		return nil, err
+	}
+	value, err := fl.lowerExpr(valueExpr)
+	if err != nil {
+		return nil, err
+	}
+	return &Stmt{Kind: StmtSetDirectGoField, Target: target, FieldName: field.Field, DirectGoFieldType: field.FieldGoType, Value: value}, nil
 }
 
 func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef) (*Expr, error) {

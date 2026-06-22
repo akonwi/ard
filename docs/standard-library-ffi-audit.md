@@ -16,8 +16,24 @@ This audit tracks the remaining Ard standard-library bindings that still use com
    - `sql::detect_driver` and `sql::extract_params` now live in Ard.
    - Consider moving pgx placeholder normalization into Ard if the SQL execution adapter remains in Go.
 
-4. **Ongoing direct-Go capability backlog**
-   - Add direct-Go support for package variables/globals, conversions, fixed arrays, variadic calls or slice spread, struct fields, interface alias assignability, and callback/interface bridging.
+4. **Completed first direct-Go struct-field stdlib cleanup**
+   - `http::Request::{path,path_param,query_param}` now use direct `*http.Request` methods/fields plus `ffi::is_nil`.
+   - `http::send` now reads `http.Response.StatusCode` directly instead of through an FFI wrapper.
+
+5. **Completed direct-Go package value and construction audit**
+   - `ard/base64` now uses direct Go package variables plus method calls for the standard encodings.
+   - Direct-Go keyed struct construction is available, but this audit did not find an existing stdlib companion wrapper that is only constructing a simple Go struct and can now be deleted.
+   - The constructible structs in currently imported Go packages are either not exposed by Ard's stdlib yet (`http.Cookie`, simple Go error structs), require unsafe zero values over unexported state (`time.Time`, `base64.Encoding`, `strings.Builder`), or still depend on unsupported field shapes (`http.Client`, `http.Request`, `http.Response`, `http.Server`, `os.ProcAttr`, `io.LimitedReader`).
+
+6. **Completed unsafe/recovering interop block**
+   - `unsafe { ... }` now converts same-goroutine Go/runtime panics into `T!Str` results and can be used with `try` around direct-Go nil/panic risks.
+   - `break` remains rejected inside unsafe blocks until explicit control-flow semantics are designed.
+
+7. **Completed final small pure-Ard cleanup**
+   - `rune::from_str` now uses Ard string rune views and `Maybe`; only checked `Int -> Rune?` remains in companion FFI.
+
+8. **Ongoing direct-Go capability backlog**
+   - Add direct-Go support for explicit conversions, fixed arrays, variadic calls or slice spread, named map/slice alias assignment, zero/nil construction policy, embedded/promoted fields, interface alias assignability, and callback/interface bridging.
    - This is not required to finish the current stdlib polish branch; it unlocks larger future migrations.
 
 ## Module audit
@@ -26,8 +42,8 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 
 - Current adapter: `OsArgs`.
 - Still necessary today.
-- Reason: `os.Args` is a Go package global and the stdlib host can inject configured args for tests/embedding through `HostConfig.Args`.
-- Pure Ard opportunity: `load()` is already Ard; no further action until package-global binding exists.
+- Reason: direct Go package variables are available, but `ard/argv` intentionally supports test/embedding injection through `HostConfig.Args`; reading `os::Args` directly would bypass that host configuration.
+- Pure Ard opportunity: `load()` is already Ard; no construction-related action.
 
 ### `ard/async`
 
@@ -44,10 +60,18 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 
 ### `ard/base64`
 
-- Current adapters: standard and URL-safe encode/decode with optional padding.
-- Still necessary today.
-- Reason: Go's API is method calls on package variables such as `base64.StdEncoding`, `RawStdEncoding`, `URLEncoding`, and `RawURLEncoding`; direct-Go imports do not expose package variables/globals yet.
-- Future unlock: direct package-global values plus method calls on those values.
+- No companion FFI remains for the public encode/decode helpers.
+- Refactored to Ard + direct Go package values:
+  - `base64::StdEncoding`, `RawStdEncoding`, `URLEncoding`, and `RawURLEncoding` are direct Go package variables.
+  - Encoding/decoding lowers to method calls on those Go values.
+- Construction audit note: `encoding/base64.Encoding{}` is syntactically constructible because it has no exported fields, but it relies on unexported state; stdlib should continue using Go's exported package variables/constructors instead of direct zero-value construction.
+
+### Direct-Go-only utility modules
+
+- `ard/dates` and `ard/duration` use `time` functions/constants directly; struct construction does not remove any companion FFI. Zero-field Go structs such as `time.Time`/`time.Location` should not be introduced as a refactor unless the API intentionally wants Go zero values.
+- `ard/env` uses `os::LookupEnv` directly; no construction-related opportunity.
+- `ard/hex` uses `encoding/hex` functions directly; no construction-related opportunity.
+- `ard/string::split` uses `strings::Split` directly. `strings.Builder`, `Reader`, and `Replacer` are zero-exported-field structs with unexported state/invariants; use Go constructors/functions rather than direct zero-value literals.
 
 ### `ard/byte`
 
@@ -57,9 +81,9 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 
 ### `ard/rune`
 
-- Current adapters: `RuneFromInt`, `RuneFromStr`.
+- Current adapter: `RuneFromInt`.
 - `RuneFromInt` still needs an adapter for checked `Int -> Rune?`.
-- `RuneFromStr` could be pure Ard by checking `value.runes().size() == 1`, assuming Ard `Str` values are always valid UTF-8. The current adapter also rejects invalid UTF-8 Go strings, so changing it would slightly narrow the validation surface.
+- `RuneFromStr` has been refactored to pure Ard by checking `value.runes().size() == 1` and returning that sole rune. This assumes Ard `Str` values are valid UTF-8 at the source/runtime boundary; invalid byte sequences should be rejected when constructing a `Str`, for example by `Str::from_bytes`.
 
 ### `ard/string`
 
@@ -97,6 +121,7 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 - Current adapters: primitive dynamic decoders, `is_void`, JSON-to-dynamic, dynamic list/map extraction, field extraction.
 - Still necessary today.
 - Reason: this module is mostly runtime `any` introspection and type assertions. Ard cannot inspect `Dynamic` payload shapes directly without Go helpers.
+- Interim note: `is_void` still declares a concrete `IsNil` extern so the generated stdlib host contract includes the nil helper while generic host-contract generation remains limited.
 - Pure Ard opportunity: the higher-level decoder composition (`nullable`, `list`, `map`, `field`, `path`, `one_of`, `flatten`) is already Ard.
 
 ### `ard/encode` and `ard/json`
@@ -125,21 +150,27 @@ This audit tracks the remaining Ard standard-library bindings that still use com
   - `read`: `read_bytes` plus `Str::from_bytes`, making `read` a UTF-8-validating text reader.
   - `read_bytes`: `os::ReadFile` for raw bytes and binary data.
 - Still necessary today:
-  - `exists`, `is_file`, `is_dir` because `os.Stat` returns `os.FileInfo`, an interface type not currently representable as direct Ard type.
+  - `exists`, `is_file`, `is_dir` because `os.Stat` returns `os.FileInfo`, a Go interface. Direct-Go return inference currently supports representable concrete shapes (scalars, lists/maps, and named concrete pointer values), but not Go interface values/method sets or their nil semantics, so `os.FileInfo` cannot yet become a direct Ard return value.
   - `list_dir` because `os.ReadDir` returns `[]os.DirEntry`, also an interface type surface, and the stdlib returns a stable Ard `DirEntry` struct.
+- Construction audit note: `os.Process{Pid: ...}` is constructible, and some Go error structs are close except for `error` fields, but none map to current `ard/fs` APIs. `os.ProcAttr` still has pointer/slice fields that are awkward without nil/zero construction policy and process-start APIs.
 
 ### `ard/http`
 
-- Current adapters: opaque raw request/response handles, request path/query helpers, client request execution, response extraction/close, server callback bridge.
+- Current adapters: client request execution, response header/body extraction/close, server callback bridge.
+- Refactored to Ard + direct Go:
+  - raw request/response host FFI signatures now use direct `mut gohttp::{Request,Response}` types without private aliases;
+  - inbound `Request::{path,path_param,query_param}` use direct `*http.Request` field/method access;
+  - client response status uses direct `http.Response.StatusCode` access.
 - Still necessary today.
 - Reasons:
-  - needs Go struct field access (`req.URL`, `resp.Body`, `resp.StatusCode`, `resp.Header`);
-  - constructs `http.Client` with timeout;
-  - adapts `Dynamic` request bodies to `io.Reader`, including JSON encoding;
-  - reads and closes response bodies;
-  - converts Go headers to `[Str: Str]`;
-  - bridges Ard handlers to `http.HandlerFunc` and `http.ResponseWriter`.
-- Future unlock: struct fields, package globals/functions with interface params, callback/interface bridging, and lifecycle helpers.
+  - `http_do` constructs `http.Client` with timeout and adapts `Dynamic` request bodies to `io.Reader`, including JSON encoding;
+  - response body/header helpers read/close interface-backed fields and convert Go headers to `[Str: Str]`;
+  - `serve` bridges Ard handlers to `http.HandlerFunc` and `http.ResponseWriter`.
+- Construction audit note:
+  - `http.Cookie` is the best new direct-construction candidate (`Cookie{...}` with scalar/list/time fields), but `ard/http` does not expose cookies yet, so this is a new API opportunity rather than a refactor.
+  - `http.Client`, `Request`, `Response`, `Server`, and `Transport` remain poor direct-construction targets because their exported fields include interfaces, function callbacks, typed nil pointers, named map aliases, and lifecycle-sensitive bodies.
+  - `http.MaxBytesError` and `http.ProtocolError` are constructible/simple, but not currently used by stdlib APIs.
+- Future unlock: interface assignability/method access, callback/interface bridging, named `http.Header` map adaptation, nil/zero construction policy, and lifecycle helpers.
 
 ### `ard/io`
 
@@ -163,6 +194,7 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 - Could later move to direct Go after type cleanup:
   - `connect` mostly maps to `sql.Open` plus `Ping`, but driver blank imports still need Go-side registration.
   - `close_db`, `begin_tx`, `commit_tx`, and `rollback_tx` can use direct Go pointer method calls once the Ard aliases are changed to direct Go types.
+- Construction audit note: the SQL stdlib does not currently wrap construction of Go config structs. The blockers are method/variadic/dynamic row adaptation and driver registration, not struct literals.
 - Still necessary today:
   - `execute` and `run_query` because `Exec`/`Query` are variadic, values need `[]Value -> []any`, rows need dynamic scanning, and SQL byte values are normalized to strings.
   - blank imports for sqlite/mysql/postgres drivers.
@@ -172,11 +204,12 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 
 These capabilities would let future branches remove more companion FFI:
 
-- Package variables/globals as values (`os.Args`, `base64.StdEncoding`).
 - Explicit Go conversions in Ard or at direct-call boundaries (`[]byte -> string`, `int -> byte`, `int -> rune`, `int -> float64`).
 - Fixed array to slice/list adaptation for crypto hashes.
 - Variadic Go calls and/or Ard slice spread for APIs like `fmt.Println`, `fmt.Sprintf`, SQL `Exec`/`Query`.
-- Struct field access for Go values (`http.Response.StatusCode`, `Request.URL`, headers/body fields).
-- Interface alias assignability and method access for Go interface surfaces such as `os.FileInfo` and `os.DirEntry`.
+- Named Go map/slice alias adaptation, especially `http.Header` and `url.Values`.
+- Direct nil/zero-value construction policy for Go pointer/interface/function fields, where safe.
+- Embedded/promoted fields.
+- Interface alias assignability and method access for Go interface surfaces such as `os.FileInfo`, `os.DirEntry`, `http.Response.Body`, and `http.ResponseWriter`.
 - Callback/interface bridging for HTTP server handlers and `http.ResponseWriter`.
 - Controlled blank-import/dependency registration for database drivers.

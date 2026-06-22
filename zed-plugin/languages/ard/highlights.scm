@@ -10,6 +10,7 @@
 (for_in_loop (for_binding) @variable.parameter)
 (match_expression "match" @keyword)
 (try_expression "try" @keyword)
+(unsafe_block "unsafe" @keyword)
 (import_statement "use" @keyword)
 (import_statement "as" @keyword)
 (import_statement path: (module_path) @string.special)

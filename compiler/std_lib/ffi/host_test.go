@@ -2,6 +2,19 @@ package ffi
 
 import "testing"
 
+type isNilTestValue struct{}
+
+func TestIsNilDetectsTypedNilValues(t *testing.T) {
+	var ptr *isNilTestValue
+	if !IsNil(ptr) {
+		t.Fatal("IsNil returned false for a typed nil pointer")
+	}
+
+	if IsNil(&isNilTestValue{}) {
+		t.Fatal("IsNil returned true for a non-nil pointer")
+	}
+}
+
 func TestDynamicToMapReturnsDynamicKeyMap(t *testing.T) {
 	got, err := DynamicToMap(map[string]any{"name": "ard", "count": 2})
 	if err != nil {

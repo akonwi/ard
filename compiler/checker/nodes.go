@@ -973,6 +973,36 @@ func (b *Block) Type() Type {
 	return Void
 }
 
+type UnsafeBlock struct {
+	Body       *Block
+	ValueType  Type
+	ResultType *Result
+}
+
+func (u *UnsafeBlock) Type() Type {
+	if u.ResultType != nil {
+		return u.ResultType
+	}
+	valueType := u.ValueType
+	if valueType == nil && u.Body != nil {
+		valueType = u.Body.Type()
+	}
+	if valueType == nil {
+		valueType = Void
+	}
+	return MakeResult(valueType, Str)
+}
+
+func (u *UnsafeBlock) OkType() Type {
+	if u.ValueType != nil {
+		return u.ValueType
+	}
+	if u.Body != nil {
+		return u.Body.Type()
+	}
+	return Void
+}
+
 type IfBranch struct {
 	Condition Expression
 	Body      *Block
@@ -1251,6 +1281,47 @@ func (v *DirectGoPackageValue) String() string {
 		qualifier = v.ImportPath
 	}
 	return qualifier + "::" + v.Name
+}
+
+type DirectGoFieldAccess struct {
+	Subject     Expression
+	Field       string
+	FieldType   Type
+	FieldGoType GoValueType
+}
+
+func (f *DirectGoFieldAccess) Type() Type {
+	return f.FieldType
+}
+
+func (f *DirectGoFieldAccess) String() string {
+	return fmt.Sprintf("%s.%s", f.Subject, f.Field)
+}
+
+type DirectGoStructInstance struct {
+	ImportPath   string
+	Alias        string
+	PackageName  string
+	Name         string
+	Binding      string
+	Fields       map[string]Expression
+	FieldGoTypes map[string]GoValueType
+	ValueType    Type
+}
+
+func (s *DirectGoStructInstance) Type() Type {
+	return s.ValueType
+}
+
+func (s *DirectGoStructInstance) String() string {
+	qualifier := s.Alias
+	if qualifier == "" {
+		qualifier = s.PackageName
+	}
+	if qualifier == "" {
+		qualifier = s.ImportPath
+	}
+	return qualifier + "::" + s.Name
 }
 
 type EnumValue struct {

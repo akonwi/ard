@@ -660,7 +660,7 @@ func MakeMaybe(of Type) *Maybe {
 
 func (m *Maybe) String() string {
 	switch m.of.(type) {
-	case *FunctionDef, FunctionDef, *ExternalFunctionDef, ExternalFunctionDef, *Result:
+	case *FunctionDef, FunctionDef, *ExternalFunctionDef, ExternalFunctionDef, *Result, *MutableRef:
 		return "(" + typeSyntaxString(m.of) + ")?"
 	default:
 		return typeSyntaxString(m.of) + "?"

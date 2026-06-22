@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,7 +50,6 @@ func NewHost(config HostConfig) Host {
 	return Host{
 		ByteFromInt:          ByteFromInt,
 		RuneFromInt:          RuneFromInt,
-		RuneFromStr:          RuneFromStr,
 		StrFromUtf8:          StrFromUtf8,
 		StrFromRunes:         StrFromRunes,
 		BytesToDynamic:       BytesToDynamic,
@@ -75,14 +75,10 @@ func NewHost(config HostConfig) Host {
 		FSIsFile:             FSIsFile,
 		FSListDir:            FSListDir,
 		FloatFromInt:         FloatFromInt,
-		GetPathValue:         GetPathValue,
-		GetQueryParam:        GetQueryParam,
-		GetReqPath:           GetReqPath,
 		HTTPDo:               HTTPDo,
 		HTTPResponseBody:     HTTPResponseBody,
 		HTTPResponseClose:    HTTPResponseClose,
 		HTTPResponseHeaders:  HTTPResponseHeaders,
-		HTTPResponseStatus:   HTTPResponseStatus,
 		HTTPServe:            HTTPServe,
 		IsNil:                IsNil,
 		JsonEncode:           JsonEncode,
@@ -197,17 +193,6 @@ func RuneFromInt(value int) Maybe[rune] {
 		return None[rune]()
 	}
 	return Some(r)
-}
-
-func RuneFromStr(value string) Maybe[rune] {
-	if !utf8.ValidString(value) {
-		return None[rune]()
-	}
-	runes := []rune(value)
-	if len(runes) != 1 || !utf8.ValidRune(runes[0]) {
-		return None[rune]()
-	}
-	return Some(runes[0])
 }
 
 func StrFromUtf8(bytes []byte) (string, error) {
@@ -585,7 +570,16 @@ func MapToDynamic(from map[string]any) any {
 }
 
 func IsNil(data any) bool {
-	return data == nil
+	if data == nil {
+		return true
+	}
+	value := reflect.ValueOf(data)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func JsonToDynamic(input string) (any, error) {
@@ -794,13 +788,6 @@ func HTTPDo(method string, url string, body any, headers map[string]string, time
 	return resp, nil
 }
 
-func HTTPResponseStatus(resp *http.Response) int {
-	if resp == nil {
-		return 0
-	}
-	return resp.StatusCode
-}
-
 func HTTPResponseHeaders(resp *http.Response) map[string]string {
 	if resp == nil {
 		return map[string]string{}
@@ -829,27 +816,6 @@ func HTTPResponseClose(resp *http.Response) {
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
-}
-
-func GetReqPath(req *http.Request) string {
-	if req != nil && req.URL != nil {
-		return req.URL.Path
-	}
-	return ""
-}
-
-func GetPathValue(req *http.Request, name string) string {
-	if req != nil {
-		return req.PathValue(name)
-	}
-	return ""
-}
-
-func GetQueryParam(req *http.Request, name string) string {
-	if req != nil && req.URL != nil {
-		return req.URL.Query().Get(name)
-	}
-	return ""
 }
 
 func HTTPServe(port int, handlers map[string]func(Request, *Response)) error {

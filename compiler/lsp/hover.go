@@ -704,6 +704,11 @@ func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expres
 				best = inner
 			}
 			continue
+		case *parse.UnsafeBlock:
+			if inner := findInStmts(s.Statements, target); inner != nil {
+				best = inner
+			}
+			continue
 		case *parse.StructInstance:
 			for _, prop := range s.Properties {
 				if inner := walkExpr(prop.Value, target); inner != nil {
@@ -850,6 +855,10 @@ func walkExpr(expr parse.Expression, target parse.Point) parse.Expression {
 	case *parse.Try:
 		recurse(e.Expression)
 	case *parse.BlockExpression:
+		if inner := findInStmts(e.Statements, target); inner != nil {
+			best = inner
+		}
+	case *parse.UnsafeBlock:
 		if inner := findInStmts(e.Statements, target); inner != nil {
 			best = inner
 		}
@@ -1375,6 +1384,10 @@ func scanForType(name string, stmts []parse.Statement, prog *parse.Program, file
 				return info
 			}
 		case *parse.BlockExpression:
+			if info := scanForType(name, s.Statements, prog, filePath); info != nil {
+				return info
+			}
+		case *parse.UnsafeBlock:
 			if info := scanForType(name, s.Statements, prog, filePath); info != nil {
 				return info
 			}
@@ -2307,6 +2320,10 @@ func scanIdentType(name string, stmts []parse.Statement, prog *parse.Program, fi
 				return t
 			}
 		case *parse.BlockExpression:
+			if t := scanIdentType(name, s.Statements, prog, filePath); t != "" {
+				return t
+			}
+		case *parse.UnsafeBlock:
 			if t := scanIdentType(name, s.Statements, prog, filePath); t != "" {
 				return t
 			}

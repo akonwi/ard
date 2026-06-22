@@ -1,2 +1,11 @@
+use ard/maybe
+
 extern fn from_int(value: Int) Rune? = "RuneFromInt"
-extern fn from_str(value: Str) Rune? = "RuneFromStr"
+
+fn from_str(value: Str) Rune? {
+  let runes = value.runes()
+  match runes.size() {
+    1 => maybe::some(runes.at(0)),
+    _ => maybe::none(),
+  }
+}

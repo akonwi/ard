@@ -5,7 +5,7 @@ package ffi
 import (
 	"database/sql"
 	ardruntime "github.com/akonwi/ard/runtime"
-	"net/http"
+	gohttp "net/http"
 )
 
 type Void = ardruntime.Void
@@ -114,7 +114,7 @@ type Request struct {
 	Headers map[string]string
 	Body    Maybe[any]
 	Timeout Maybe[int]
-	Raw     Maybe[*http.Request]
+	Raw     Maybe[*gohttp.Request]
 }
 
 type Response struct {
@@ -166,14 +166,10 @@ type Host struct {
 	FSIsFile             func(path string) bool
 	FSListDir            func(path string) (map[string]bool, error)
 	FloatFromInt         func(int int) float64
-	GetPathValue         func(req *http.Request, name string) string
-	GetQueryParam        func(req *http.Request, name string) string
-	GetReqPath           func(req *http.Request) string
-	HTTPDo               func(method string, url string, body any, headers map[string]string, timeout Maybe[int]) (*http.Response, error)
-	HTTPResponseBody     func(resp *http.Response) (string, error)
-	HTTPResponseClose    func(resp *http.Response)
-	HTTPResponseHeaders  func(resp *http.Response) map[string]string
-	HTTPResponseStatus   func(resp *http.Response) int
+	HTTPDo               func(method string, url string, body any, headers map[string]string, timeout Maybe[int]) (*gohttp.Response, error)
+	HTTPResponseBody     func(resp *gohttp.Response) (string, error)
+	HTTPResponseClose    func(resp *gohttp.Response)
+	HTTPResponseHeaders  func(resp *gohttp.Response) map[string]string
 	HTTPServe            func(port int, handlers map[string]func(Request, *Response)) error
 	IsNil                func(data any) bool
 	JsonEncode           func(value any) (string, error)
@@ -184,7 +180,6 @@ type Host struct {
 	Print                func(string string)
 	ReadLine             func() (string, error)
 	RuneFromInt          func(value int) Maybe[rune]
-	RuneFromStr          func(value string) Maybe[rune]
 	SqlBeginTx           func(db *sql.DB) (*sql.Tx, error)
 	SqlClose             func(db *sql.DB) error
 	SqlCommit            func(tx *sql.Tx) error
@@ -275,15 +270,6 @@ func (h Host) Functions() map[string]any {
 	if h.FloatFromInt != nil {
 		functions["FloatFromInt"] = h.FloatFromInt
 	}
-	if h.GetPathValue != nil {
-		functions["GetPathValue"] = h.GetPathValue
-	}
-	if h.GetQueryParam != nil {
-		functions["GetQueryParam"] = h.GetQueryParam
-	}
-	if h.GetReqPath != nil {
-		functions["GetReqPath"] = h.GetReqPath
-	}
 	if h.HTTPDo != nil {
 		functions["HTTP_Do"] = h.HTTPDo
 	}
@@ -295,9 +281,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.HTTPResponseHeaders != nil {
 		functions["HTTP_ResponseHeaders"] = h.HTTPResponseHeaders
-	}
-	if h.HTTPResponseStatus != nil {
-		functions["HTTP_ResponseStatus"] = h.HTTPResponseStatus
 	}
 	if h.HTTPServe != nil {
 		functions["HTTP_Serve"] = h.HTTPServe
@@ -328,9 +311,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.RuneFromInt != nil {
 		functions["RuneFromInt"] = h.RuneFromInt
-	}
-	if h.RuneFromStr != nil {
-		functions["RuneFromStr"] = h.RuneFromStr
 	}
 	if h.SqlBeginTx != nil {
 		functions["SqlBeginTx"] = h.SqlBeginTx
@@ -370,5 +350,6 @@ func (h Host) Functions() map[string]any {
 
 // Skipped extern AsyncEval: generic parameters are not generated yet.
 // Skipped extern GetResult: generic parameters are not generated yet.
+// Skipped extern IsNil: generic parameters are not generated yet.
 // Skipped extern JsonEncode: generic parameters are not generated yet.
 // Skipped extern JsonParse: generic returns are not generated yet.

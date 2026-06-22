@@ -208,6 +208,7 @@ export default defineConfig({
             { label: "Generics", slug: "advanced/generics" },
             { label: "Async Programming", slug: "advanced/async" },
             { label: "Using External Data", slug: "advanced/data-decoding" },
+            { label: "Direct Go Interop", slug: "advanced/go-interop" },
           ],
         },
         {
@@ -224,6 +225,7 @@ export default defineConfig({
             { label: "ard/dynamic", slug: "stdlib/dynamic" },
             { label: "ard/encode", slug: "stdlib/encode" },
             { label: "ard/env", slug: "stdlib/env" },
+            { label: "ard/ffi", slug: "stdlib/ffi" },
             { label: "ard/float", slug: "stdlib/float" },
             { label: "ard/fs", slug: "stdlib/fs" },
             { label: "ard/hex", slug: "stdlib/hex" },

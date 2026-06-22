@@ -91,6 +91,14 @@ mut maybe_name: Str? = maybe::none()
 maybe_name = maybe::some("Alice")
 ```
 
+When the wrapped type starts with `mut`, group it before adding `?`:
+
+```ard
+use ard/maybe
+
+let maybe_ref: (mut Widget)? = maybe::none()
+```
+
 ### Working with Maybe Types
 
 ```ard

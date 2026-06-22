@@ -252,6 +252,30 @@ func (c Checker) isMutable(expr Expression) bool {
 	return false
 }
 
+func (c *Checker) checkDirectGoFieldAssignmentTarget(ip *parse.InstanceProperty) (*DirectGoFieldAccess, bool) {
+	if ip == nil {
+		return nil, false
+	}
+	subject := c.checkExpr(ip.Target)
+	if subject == nil {
+		return nil, true
+	}
+	return c.checkDirectGoInstancePropertyAssignmentTarget(subject, ip.Property.Name, ip.Property.GetLocation())
+}
+
+func (c Checker) isDirectGoFieldAssignable(field *DirectGoFieldAccess) bool {
+	if field == nil || field.Subject == nil {
+		return false
+	}
+	if _, ok := mutableRefBase(field.Subject.Type()); ok {
+		return true
+	}
+	if subjectField, ok := field.Subject.(*DirectGoFieldAccess); ok {
+		return c.isDirectGoFieldAssignable(subjectField)
+	}
+	return c.isMutable(field.Subject)
+}
+
 type Checker struct {
 	diagnostics                       []Diagnostic
 	input                             *parse.Program
@@ -1414,6 +1438,47 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			if ip, ok := s.Target.(*parse.InstanceProperty); ok {
+				if target, handled := c.checkDirectGoFieldAssignmentTarget(ip); handled {
+					if target == nil {
+						return nil
+					}
+					var expectedClosedEnum *Enum
+					if enum, required := c.directGoClosedEnumAssignmentType(target.FieldGoType, s.Value.GetLocation()); required {
+						if enum == nil {
+							return nil
+						}
+						expectedClosedEnum = enum
+					}
+
+					var value Expression
+					c.withValueExprContext(func() {
+						if expectedClosedEnum != nil {
+							value = c.checkExprAs(s.Value, expectedClosedEnum)
+						} else {
+							value = c.checkExpr(s.Value)
+						}
+					})
+					if value == nil {
+						return nil
+					}
+					if !c.isDirectGoFieldAssignable(target) {
+						c.addError(fmt.Sprintf("Immutable: %s", ip), s.Target.GetLocation())
+						return nil
+					}
+					if expectedClosedEnum != nil {
+						if !directGoEnumTypeMatches(value.Type(), target.FieldGoType) {
+							c.addError(fmt.Sprintf("field %s: %s", target.Field, typeMismatch(expectedClosedEnum, value.Type())), s.Value.GetLocation())
+							return nil
+						}
+					} else if ok, reason := c.directGoParamCompatible(value.Type(), target.FieldGoType, true); !ok {
+						c.addError(fmt.Sprintf("field %s: %s", target.Field, reason), s.Value.GetLocation())
+						return nil
+					}
+					return &Statement{
+						Stmt: &Reassignment{Target: target, Value: value},
+					}
+				}
+
 				subject := c.checkExpr(ip)
 				if subject == nil {
 					return nil
@@ -1944,7 +2009,7 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal Type, onlyMatchFinal bool) bool {
 	if onlyMatchFinal && expectedFinal != Void {
 		switch s := stmt.(type) {
-		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.InstanceMethod:
+		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.InstanceMethod, *parse.UnsafeBlock:
 			return true
 		case *parse.StaticFunction:
 			return c.isDirectGoStaticFunction(s)
@@ -1959,7 +2024,7 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 			*parse.UnaryExpression, *parse.BinaryExpression, *parse.ChainedComparison, *parse.StaticFunction,
 			*parse.IfStatement, *parse.AnonymousFunction, *parse.ListLiteral, *parse.MapLiteral,
 			*parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.StaticProperty,
-			*parse.StructInstance, *parse.Try, *parse.BlockExpression:
+			*parse.StructInstance, *parse.Try, *parse.BlockExpression, *parse.UnsafeBlock:
 			return true
 		default:
 			return false
@@ -1967,10 +2032,834 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 	}
 
 	switch stmt.(type) {
-	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.IfStatement, *parse.StaticFunction, *parse.FunctionValueCall, *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
+	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.IfStatement, *parse.StaticFunction, *parse.FunctionValueCall, *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction, *parse.UnsafeBlock:
 		return true
 	default:
 		return false
+	}
+}
+
+func parseStatementsContainBreak(stmts []parse.Statement) bool {
+	for _, stmt := range stmts {
+		if parseStatementContainsBreak(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseStatementContainsBreak(stmt parse.Statement) bool {
+	switch s := stmt.(type) {
+	case nil:
+		return false
+	case *parse.Break:
+		return true
+	case *parse.WhileLoop:
+		return parseExpressionContainsBreak(s.Condition) || parseStatementsContainBreak(s.Body)
+	case *parse.RangeLoop:
+		return parseExpressionContainsBreak(s.Start) || parseExpressionContainsBreak(s.End) || parseStatementsContainBreak(s.Body)
+	case *parse.ForInLoop:
+		return parseExpressionContainsBreak(s.Iterable) || parseStatementsContainBreak(s.Body)
+	case *parse.ForLoop:
+		return parseStatementContainsBreak(s.Init) || parseExpressionContainsBreak(s.Condition) || parseStatementContainsBreak(s.Incrementer) || parseStatementsContainBreak(s.Body)
+	case *parse.IfStatement:
+		return parseExpressionContainsBreak(s.Condition) || parseStatementsContainBreak(s.Body) || parseStatementContainsBreak(s.Else)
+	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.Try, *parse.BlockExpression, *parse.UnsafeBlock, *parse.AnonymousFunction:
+		return parseExpressionContainsBreak(s.(parse.Expression))
+	default:
+		if expr, ok := stmt.(parse.Expression); ok {
+			return parseExpressionContainsBreak(expr)
+		}
+		return false
+	}
+}
+
+func parseExpressionContainsBreak(expr parse.Expression) bool {
+	switch e := expr.(type) {
+	case nil:
+		return false
+	case *parse.UnaryExpression:
+		return parseExpressionContainsBreak(e.Operand)
+	case *parse.BinaryExpression:
+		return parseExpressionContainsBreak(e.Left) || parseExpressionContainsBreak(e.Right)
+	case *parse.ChainedComparison:
+		for _, operand := range e.Operands {
+			if parseExpressionContainsBreak(operand) {
+				return true
+			}
+		}
+	case *parse.RangeExpression:
+		return parseExpressionContainsBreak(e.Start) || parseExpressionContainsBreak(e.End)
+	case *parse.InterpolatedStr:
+		for _, chunk := range e.Chunks {
+			if parseExpressionContainsBreak(chunk) {
+				return true
+			}
+		}
+	case *parse.FunctionCall:
+		for _, arg := range e.Args {
+			if parseExpressionContainsBreak(arg.Value) {
+				return true
+			}
+		}
+	case *parse.FunctionValueCall:
+		if parseExpressionContainsBreak(e.Callee) {
+			return true
+		}
+		for _, arg := range e.Args {
+			if parseExpressionContainsBreak(arg.Value) {
+				return true
+			}
+		}
+	case *parse.InstanceProperty:
+		return parseExpressionContainsBreak(e.Target) || parseExpressionContainsBreak(e.Property)
+	case *parse.InstanceMethod:
+		if parseExpressionContainsBreak(e.Target) {
+			return true
+		}
+		for _, arg := range e.Method.Args {
+			if parseExpressionContainsBreak(arg.Value) {
+				return true
+			}
+		}
+	case *parse.StaticProperty:
+		return parseExpressionContainsBreak(e.Target) || parseExpressionContainsBreak(e.Property)
+	case *parse.StaticFunction:
+		if parseExpressionContainsBreak(e.Target) {
+			return true
+		}
+		for _, arg := range e.Function.Args {
+			if parseExpressionContainsBreak(arg.Value) {
+				return true
+			}
+		}
+	case *parse.ListLiteral:
+		for _, item := range e.Items {
+			if parseExpressionContainsBreak(item) {
+				return true
+			}
+		}
+	case *parse.MapLiteral:
+		for _, entry := range e.Entries {
+			if parseExpressionContainsBreak(entry.Key) || parseExpressionContainsBreak(entry.Value) {
+				return true
+			}
+		}
+	case *parse.StructInstance:
+		for _, prop := range e.Properties {
+			if parseExpressionContainsBreak(prop.Value) {
+				return true
+			}
+		}
+	case *parse.MatchExpression:
+		if parseExpressionContainsBreak(e.Subject) {
+			return true
+		}
+		for _, matchCase := range e.Cases {
+			if parseExpressionContainsBreak(matchCase.Pattern) || parseStatementsContainBreak(matchCase.Body) {
+				return true
+			}
+		}
+	case *parse.ConditionalMatchExpression:
+		for _, matchCase := range e.Cases {
+			if parseExpressionContainsBreak(matchCase.Condition) || parseStatementsContainBreak(matchCase.Body) {
+				return true
+			}
+		}
+	case *parse.Try:
+		return parseExpressionContainsBreak(e.Expression) || parseStatementsContainBreak(e.CatchBlock)
+	case *parse.BlockExpression:
+		return parseStatementsContainBreak(e.Statements)
+	case *parse.UnsafeBlock:
+		return parseStatementsContainBreak(e.Statements)
+	case *parse.AnonymousFunction:
+		return false
+	case *parse.VariableAssignment:
+		return parseExpressionContainsBreak(e.Target) || parseExpressionContainsBreak(e.Value)
+	case *parse.VariableDeclaration:
+		return parseExpressionContainsBreak(e.Value)
+	}
+	return false
+}
+
+func unsafeCatchOkValueTypes(block *Block) []Type {
+	return unsafeCatchOkValueTypesInBlock(block, nil)
+}
+
+func unsafeCatchOkValueTypesInBlock(block *Block, aliases map[string][]Type) []Type {
+	if block == nil {
+		return nil
+	}
+	finalExprIndex := -1
+	for i := len(block.Stmts) - 1; i >= 0; i-- {
+		if block.Stmts[i].Expr != nil {
+			finalExprIndex = i
+			break
+		}
+	}
+	if finalExprIndex == -1 {
+		return nil
+	}
+	aliases = cloneUnsafeCatchTypeAliases(aliases)
+	for _, stmt := range block.Stmts[:finalExprIndex] {
+		if stmt.Expr != nil {
+			continue
+		}
+		if stmt.Break {
+			aliases = map[string][]Type{}
+			continue
+		}
+		switch s := stmt.Stmt.(type) {
+		case nil:
+			continue
+		case *VariableDef:
+			aliases[s.Name] = unsafeCatchOkValueTypesFromExpression(s.Value, aliases)
+		case *Reassignment:
+			if target, ok := s.Target.(*Variable); ok {
+				aliases[target.Name()] = unsafeCatchOkValueTypesFromExpression(s.Value, aliases)
+			} else {
+				aliases = map[string][]Type{}
+			}
+		default:
+			aliases = map[string][]Type{}
+		}
+	}
+	return unsafeCatchOkValueTypesFromExpression(block.Stmts[finalExprIndex].Expr, aliases)
+}
+
+func unsafeCatchOkValueTypesFromExpression(expr Expression, aliases map[string][]Type) []Type {
+	if expr == nil {
+		return nil
+	}
+	switch e := expr.(type) {
+	case *Variable:
+		if types, ok := aliases[e.Name()]; ok {
+			return types
+		}
+	case *ModuleFunctionCall:
+		if (e.Module == "Result" || e.Module == "ard/result") && e.Call != nil {
+			switch e.Call.Name {
+			case "ok":
+				if len(e.Call.Args) == 1 {
+					return []Type{e.Call.Args[0].Type()}
+				}
+				return nil
+			case "err":
+				return nil
+			}
+		}
+	case *Block:
+		return unsafeCatchOkValueTypesInBlock(e, aliases)
+	case *If:
+		var out []Type
+		for _, branch := range e.Branches {
+			out = append(out, unsafeCatchOkValueTypesInBlock(branch.Body, aliases)...)
+		}
+		out = append(out, unsafeCatchOkValueTypesInBlock(e.Else, aliases)...)
+		return out
+	case *BoolMatch:
+		out := unsafeCatchOkValueTypesInBlock(e.True, aliases)
+		out = append(out, unsafeCatchOkValueTypesInBlock(e.False, aliases)...)
+		return out
+	case *IntMatch:
+		var out []Type
+		for _, block := range e.IntCases {
+			out = append(out, unsafeCatchOkValueTypesInBlock(block, aliases)...)
+		}
+		for _, block := range e.RangeCases {
+			out = append(out, unsafeCatchOkValueTypesInBlock(block, aliases)...)
+		}
+		out = append(out, unsafeCatchOkValueTypesInBlock(e.CatchAll, aliases)...)
+		return out
+	case *StrMatch:
+		var out []Type
+		for _, block := range e.Cases {
+			out = append(out, unsafeCatchOkValueTypesInBlock(block, aliases)...)
+		}
+		out = append(out, unsafeCatchOkValueTypesInBlock(e.CatchAll, aliases)...)
+		return out
+	case *EnumMatch:
+		var out []Type
+		for _, block := range e.Cases {
+			out = append(out, unsafeCatchOkValueTypesInBlock(block, aliases)...)
+		}
+		out = append(out, unsafeCatchOkValueTypesInBlock(e.CatchAll, aliases)...)
+		return out
+	case *UnionMatch:
+		var out []Type
+		for _, match := range e.TypeCases {
+			if match != nil {
+				out = append(out, unsafeCatchOkValueTypesInBlock(match.Body, aliases)...)
+			}
+		}
+		out = append(out, unsafeCatchOkValueTypesInBlock(e.CatchAll, aliases)...)
+		return out
+	case *ConditionalMatch:
+		var out []Type
+		for _, matchCase := range e.Cases {
+			out = append(out, unsafeCatchOkValueTypesInBlock(matchCase.Body, aliases)...)
+		}
+		out = append(out, unsafeCatchOkValueTypesInBlock(e.CatchAll, aliases)...)
+		return out
+	case *OptionMatch:
+		var out []Type
+		if e.Some != nil {
+			out = append(out, unsafeCatchOkValueTypesInBlock(e.Some.Body, aliases)...)
+		}
+		out = append(out, unsafeCatchOkValueTypesInBlock(e.None, aliases)...)
+		return out
+	case *ResultMatch:
+		var out []Type
+		if e.Ok != nil {
+			out = append(out, unsafeCatchOkValueTypesInBlock(e.Ok.Body, aliases)...)
+		}
+		if e.Err != nil {
+			out = append(out, unsafeCatchOkValueTypesInBlock(e.Err.Body, aliases)...)
+		}
+		return out
+	}
+	if result, ok := expr.Type().(*Result); ok {
+		return []Type{result.val}
+	}
+	return nil
+}
+
+func unsafeCatchErrValueTypes(block *Block) []Type {
+	return unsafeCatchErrValueTypesInBlock(block, nil)
+}
+
+func unsafeCatchErrValueTypesInBlock(block *Block, aliases map[string][]Type) []Type {
+	if block == nil {
+		return nil
+	}
+	finalExprIndex := -1
+	for i := len(block.Stmts) - 1; i >= 0; i-- {
+		if block.Stmts[i].Expr != nil {
+			finalExprIndex = i
+			break
+		}
+	}
+	if finalExprIndex == -1 {
+		return nil
+	}
+	aliases = cloneUnsafeCatchTypeAliases(aliases)
+	for _, stmt := range block.Stmts[:finalExprIndex] {
+		if stmt.Expr != nil {
+			continue
+		}
+		if stmt.Break {
+			aliases = map[string][]Type{}
+			continue
+		}
+		switch s := stmt.Stmt.(type) {
+		case nil:
+			continue
+		case *VariableDef:
+			aliases[s.Name] = unsafeCatchErrValueTypesFromExpression(s.Value, aliases)
+		case *Reassignment:
+			if target, ok := s.Target.(*Variable); ok {
+				aliases[target.Name()] = unsafeCatchErrValueTypesFromExpression(s.Value, aliases)
+			} else {
+				aliases = map[string][]Type{}
+			}
+		default:
+			aliases = map[string][]Type{}
+		}
+	}
+	return unsafeCatchErrValueTypesFromExpression(block.Stmts[finalExprIndex].Expr, aliases)
+}
+
+func unsafeCatchErrValueTypesFromExpression(expr Expression, aliases map[string][]Type) []Type {
+	if expr == nil {
+		return nil
+	}
+	switch e := expr.(type) {
+	case *Variable:
+		if types, ok := aliases[e.Name()]; ok {
+			return types
+		}
+	case *ModuleFunctionCall:
+		if (e.Module == "Result" || e.Module == "ard/result") && e.Call != nil {
+			switch e.Call.Name {
+			case "ok":
+				return nil
+			case "err":
+				if len(e.Call.Args) == 1 {
+					return []Type{e.Call.Args[0].Type()}
+				}
+				return nil
+			}
+		}
+	case *Block:
+		return unsafeCatchErrValueTypesInBlock(e, aliases)
+	case *If:
+		var out []Type
+		for _, branch := range e.Branches {
+			out = append(out, unsafeCatchErrValueTypesInBlock(branch.Body, aliases)...)
+		}
+		out = append(out, unsafeCatchErrValueTypesInBlock(e.Else, aliases)...)
+		return out
+	case *BoolMatch:
+		out := unsafeCatchErrValueTypesInBlock(e.True, aliases)
+		out = append(out, unsafeCatchErrValueTypesInBlock(e.False, aliases)...)
+		return out
+	case *IntMatch:
+		var out []Type
+		for _, block := range e.IntCases {
+			out = append(out, unsafeCatchErrValueTypesInBlock(block, aliases)...)
+		}
+		for _, block := range e.RangeCases {
+			out = append(out, unsafeCatchErrValueTypesInBlock(block, aliases)...)
+		}
+		out = append(out, unsafeCatchErrValueTypesInBlock(e.CatchAll, aliases)...)
+		return out
+	case *StrMatch:
+		var out []Type
+		for _, block := range e.Cases {
+			out = append(out, unsafeCatchErrValueTypesInBlock(block, aliases)...)
+		}
+		out = append(out, unsafeCatchErrValueTypesInBlock(e.CatchAll, aliases)...)
+		return out
+	case *EnumMatch:
+		var out []Type
+		for _, block := range e.Cases {
+			out = append(out, unsafeCatchErrValueTypesInBlock(block, aliases)...)
+		}
+		out = append(out, unsafeCatchErrValueTypesInBlock(e.CatchAll, aliases)...)
+		return out
+	case *UnionMatch:
+		var out []Type
+		for _, match := range e.TypeCases {
+			if match != nil {
+				out = append(out, unsafeCatchErrValueTypesInBlock(match.Body, aliases)...)
+			}
+		}
+		out = append(out, unsafeCatchErrValueTypesInBlock(e.CatchAll, aliases)...)
+		return out
+	case *ConditionalMatch:
+		var out []Type
+		for _, matchCase := range e.Cases {
+			out = append(out, unsafeCatchErrValueTypesInBlock(matchCase.Body, aliases)...)
+		}
+		out = append(out, unsafeCatchErrValueTypesInBlock(e.CatchAll, aliases)...)
+		return out
+	case *OptionMatch:
+		var out []Type
+		if e.Some != nil {
+			out = append(out, unsafeCatchErrValueTypesInBlock(e.Some.Body, aliases)...)
+		}
+		out = append(out, unsafeCatchErrValueTypesInBlock(e.None, aliases)...)
+		return out
+	case *ResultMatch:
+		var out []Type
+		if e.Ok != nil {
+			out = append(out, unsafeCatchErrValueTypesInBlock(e.Ok.Body, aliases)...)
+		}
+		if e.Err != nil {
+			out = append(out, unsafeCatchErrValueTypesInBlock(e.Err.Body, aliases)...)
+		}
+		return out
+	}
+	if result, ok := expr.Type().(*Result); ok {
+		return []Type{result.err}
+	}
+	return nil
+}
+
+func cloneUnsafeCatchTypeAliases(aliases map[string][]Type) map[string][]Type {
+	if len(aliases) == 0 {
+		return map[string][]Type{}
+	}
+	cloned := make(map[string][]Type, len(aliases))
+	for name, types := range aliases {
+		cloned[name] = types
+	}
+	return cloned
+}
+
+func unsafeResultOkValueCompatible(expected Type, actual Type) bool {
+	expected = deref(expected)
+	actual = deref(actual)
+	if expectedVar, ok := expected.(*TypeVar); ok {
+		if expectedVar.bound && expectedVar.actual != nil {
+			return unsafeResultOkValueCompatible(expectedVar.actual, actual)
+		}
+		actualVar, ok := actual.(*TypeVar)
+		if !ok {
+			return false
+		}
+		if actualVar.bound && actualVar.actual != nil {
+			return unsafeResultOkValueCompatible(expected, actualVar.actual)
+		}
+		return expectedVar.name == actualVar.name
+	}
+	if actualVar, ok := actual.(*TypeVar); ok {
+		if actualVar.bound && actualVar.actual != nil {
+			return unsafeResultOkValueCompatible(expected, actualVar.actual)
+		}
+		return false
+	}
+	if !hasGenericsInType(expected) && !hasGenericsInType(actual) {
+		return expected.equal(actual)
+	}
+
+	switch expectedType := expected.(type) {
+	case *List:
+		actualType, ok := actual.(*List)
+		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
+	case *Map:
+		actualType, ok := actual.(*Map)
+		return ok && unsafeResultOkValueCompatible(expectedType.key, actualType.key) && unsafeResultOkValueCompatible(expectedType.value, actualType.value)
+	case *Maybe:
+		actualType, ok := actual.(*Maybe)
+		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
+	case *Result:
+		actualType, ok := actual.(*Result)
+		return ok && unsafeResultOkValueCompatible(expectedType.val, actualType.val) && unsafeResultOkValueCompatible(expectedType.err, actualType.err)
+	case *MutableRef:
+		actualType, ok := actual.(*MutableRef)
+		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
+	case *ExternType:
+		actualType, ok := actual.(*ExternType)
+		if !ok || !externTypeNamesMatch(expectedType, actualType) || len(expectedType.TypeArgs) != len(actualType.TypeArgs) {
+			return false
+		}
+		for i := range expectedType.TypeArgs {
+			if !unsafeResultOkValueCompatible(expectedType.TypeArgs[i], actualType.TypeArgs[i]) {
+				return false
+			}
+		}
+		return true
+	case *StructDef:
+		actualType, ok := actual.(*StructDef)
+		if !ok || expectedType.Name != actualType.Name || expectedType.ModulePath != actualType.ModulePath || len(expectedType.TypeArgs) != len(actualType.TypeArgs) {
+			return false
+		}
+		for i := range expectedType.TypeArgs {
+			if !unsafeResultOkValueCompatible(expectedType.TypeArgs[i], actualType.TypeArgs[i]) {
+				return false
+			}
+		}
+		return true
+	case *FunctionDef:
+		actualType, ok := actual.(*FunctionDef)
+		if !ok || len(expectedType.Parameters) != len(actualType.Parameters) {
+			return false
+		}
+		for i := range expectedType.Parameters {
+			if expectedType.Parameters[i].Mutable != actualType.Parameters[i].Mutable || !unsafeResultOkValueCompatible(expectedType.Parameters[i].Type, actualType.Parameters[i].Type) {
+				return false
+			}
+		}
+		return unsafeResultOkValueCompatible(expectedType.ReturnType, actualType.ReturnType)
+	}
+
+	if hasGenericsInType(expected) || hasGenericsInType(actual) {
+		return false
+	}
+	return expected.equal(actual)
+}
+
+func (c *Checker) validateUnsafeCatchResults(block *Block, resultType *Result, loc parse.Location) {
+	if block == nil || resultType == nil {
+		return
+	}
+	for _, stmt := range block.Stmts {
+		c.validateUnsafeCatchResultsInStatement(stmt, resultType, loc)
+	}
+}
+
+func (c *Checker) validateUnsafeCatchResultsInStatement(stmt Statement, resultType *Result, loc parse.Location) {
+	if stmt.Expr != nil {
+		c.validateUnsafeCatchResultsInExpression(stmt.Expr, resultType, loc)
+	}
+	if stmt.Stmt == nil {
+		return
+	}
+	switch s := stmt.Stmt.(type) {
+	case *VariableDef:
+		c.validateUnsafeCatchResultsInExpression(s.Value, resultType, loc)
+	case *Reassignment:
+		c.validateUnsafeCatchResultsInExpression(s.Target, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(s.Value, resultType, loc)
+	case *WhileLoop:
+		c.validateUnsafeCatchResultsInExpression(s.Condition, resultType, loc)
+		c.validateUnsafeCatchResults(s.Body, resultType, loc)
+	case *ForIntRange:
+		c.validateUnsafeCatchResultsInExpression(s.Start, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(s.End, resultType, loc)
+		c.validateUnsafeCatchResults(s.Body, resultType, loc)
+	case *ForInStr:
+		c.validateUnsafeCatchResultsInExpression(s.Value, resultType, loc)
+		c.validateUnsafeCatchResults(s.Body, resultType, loc)
+	case *ForInList:
+		c.validateUnsafeCatchResultsInExpression(s.List, resultType, loc)
+		c.validateUnsafeCatchResults(s.Body, resultType, loc)
+	case *ForInMap:
+		c.validateUnsafeCatchResultsInExpression(s.Map, resultType, loc)
+		c.validateUnsafeCatchResults(s.Body, resultType, loc)
+	case *ForLoop:
+		if s.Init != nil {
+			c.validateUnsafeCatchResultsInExpression(s.Init.Value, resultType, loc)
+		}
+		c.validateUnsafeCatchResultsInExpression(s.Condition, resultType, loc)
+		if s.Update != nil {
+			c.validateUnsafeCatchResultsInExpression(s.Update.Target, resultType, loc)
+			c.validateUnsafeCatchResultsInExpression(s.Update.Value, resultType, loc)
+		}
+		c.validateUnsafeCatchResults(s.Body, resultType, loc)
+	}
+}
+
+func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, resultType *Result, loc parse.Location) {
+	if expr == nil {
+		return
+	}
+	switch e := expr.(type) {
+	case *TryOp:
+		c.validateUnsafeCatchResultsInExpression(e.Expr(), resultType, loc)
+		if e.CatchBlock != nil {
+			if catchResult, ok := e.CatchBlock.Type().(*Result); ok && catchResult.err.equal(resultType.err) {
+				for _, okType := range unsafeCatchOkValueTypes(e.CatchBlock) {
+					if !unsafeResultOkValueCompatible(resultType.val, okType) {
+						c.addError(typeMismatch(resultType, MakeResult(okType, catchResult.err)), loc)
+					}
+				}
+				for _, errType := range unsafeCatchErrValueTypes(e.CatchBlock) {
+					if !unsafeResultOkValueCompatible(resultType.err, errType) {
+						c.addError(typeMismatch(resultType, MakeResult(catchResult.val, errType)), loc)
+					}
+				}
+			}
+			c.validateUnsafeCatchResults(e.CatchBlock, resultType, loc)
+		}
+	case *Block:
+		c.validateUnsafeCatchResults(e, resultType, loc)
+	case *UnsafeBlock:
+		if nestedResult, ok := e.Type().(*Result); ok {
+			c.validateUnsafeCatchResults(e.Body, nestedResult, loc)
+		}
+	case *If:
+		for _, branch := range e.Branches {
+			c.validateUnsafeCatchResultsInExpression(branch.Condition, resultType, loc)
+			c.validateUnsafeCatchResults(branch.Body, resultType, loc)
+		}
+		c.validateUnsafeCatchResults(e.Else, resultType, loc)
+	case *BoolMatch:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+		c.validateUnsafeCatchResults(e.True, resultType, loc)
+		c.validateUnsafeCatchResults(e.False, resultType, loc)
+	case *IntMatch:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+		for _, block := range e.IntCases {
+			c.validateUnsafeCatchResults(block, resultType, loc)
+		}
+		for _, block := range e.RangeCases {
+			c.validateUnsafeCatchResults(block, resultType, loc)
+		}
+		c.validateUnsafeCatchResults(e.CatchAll, resultType, loc)
+	case *StrMatch:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+		for _, block := range e.Cases {
+			c.validateUnsafeCatchResults(block, resultType, loc)
+		}
+		c.validateUnsafeCatchResults(e.CatchAll, resultType, loc)
+	case *EnumMatch:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+		for _, block := range e.Cases {
+			c.validateUnsafeCatchResults(block, resultType, loc)
+		}
+		c.validateUnsafeCatchResults(e.CatchAll, resultType, loc)
+	case *UnionMatch:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+		for _, match := range e.TypeCases {
+			if match != nil {
+				c.validateUnsafeCatchResults(match.Body, resultType, loc)
+			}
+		}
+		c.validateUnsafeCatchResults(e.CatchAll, resultType, loc)
+	case *ConditionalMatch:
+		for _, matchCase := range e.Cases {
+			c.validateUnsafeCatchResultsInExpression(matchCase.Condition, resultType, loc)
+			c.validateUnsafeCatchResults(matchCase.Body, resultType, loc)
+		}
+		c.validateUnsafeCatchResults(e.CatchAll, resultType, loc)
+	case *OptionMatch:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+		if e.Some != nil {
+			c.validateUnsafeCatchResults(e.Some.Body, resultType, loc)
+		}
+		c.validateUnsafeCatchResults(e.None, resultType, loc)
+	case *ResultMatch:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+		if e.Ok != nil {
+			c.validateUnsafeCatchResults(e.Ok.Body, resultType, loc)
+		}
+		if e.Err != nil {
+			c.validateUnsafeCatchResults(e.Err.Body, resultType, loc)
+		}
+	case *Negation:
+		c.validateUnsafeCatchResultsInExpression(e.Value, resultType, loc)
+	case *Not:
+		c.validateUnsafeCatchResultsInExpression(e.Value, resultType, loc)
+	case *IntAddition:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *IntSubtraction:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *IntMultiplication:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *IntDivision:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *IntModulo:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *IntGreater:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *IntGreaterEqual:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *IntLess:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *IntLessEqual:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *FloatAddition:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *FloatSubtraction:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *FloatMultiplication:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *FloatDivision:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *FloatGreater:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *FloatGreaterEqual:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *FloatLess:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *FloatLessEqual:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *StrAddition:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *Equality:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *Inequality:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *And:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *Or:
+		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
+		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
+	case *StrMethod:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+		for _, arg := range e.Args {
+			c.validateUnsafeCatchResultsInExpression(arg, resultType, loc)
+		}
+	case *ByteMethod:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+	case *RuneMethod:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+	case *IntMethod:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+	case *FloatMethod:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+	case *BoolMethod:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+	case *ListMethod:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+		for _, arg := range e.Args {
+			c.validateUnsafeCatchResultsInExpression(arg, resultType, loc)
+		}
+	case *MapMethod:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+		for _, arg := range e.Args {
+			c.validateUnsafeCatchResultsInExpression(arg, resultType, loc)
+		}
+	case *MaybeMethod:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+		for _, arg := range e.Args {
+			c.validateUnsafeCatchResultsInExpression(arg, resultType, loc)
+		}
+	case *ResultMethod:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+		for _, arg := range e.Args {
+			c.validateUnsafeCatchResultsInExpression(arg, resultType, loc)
+		}
+	case *ListLiteral:
+		for _, item := range e.Elements {
+			c.validateUnsafeCatchResultsInExpression(item, resultType, loc)
+		}
+	case *MapLiteral:
+		for _, key := range e.Keys {
+			c.validateUnsafeCatchResultsInExpression(key, resultType, loc)
+		}
+		for _, value := range e.Values {
+			c.validateUnsafeCatchResultsInExpression(value, resultType, loc)
+		}
+	case *StructInstance:
+		for _, field := range e.Fields {
+			c.validateUnsafeCatchResultsInExpression(field, resultType, loc)
+		}
+	case *FunctionCall:
+		for _, arg := range e.Args {
+			c.validateUnsafeCatchResultsInExpression(arg, resultType, loc)
+		}
+	case *FunctionValueCall:
+		c.validateUnsafeCatchResultsInExpression(e.Callee, resultType, loc)
+		for _, arg := range e.Args {
+			c.validateUnsafeCatchResultsInExpression(arg, resultType, loc)
+		}
+	case *InstanceProperty:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+	case *InstanceMethod:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+		if e.Method != nil {
+			for _, arg := range e.Method.Args {
+				c.validateUnsafeCatchResultsInExpression(arg, resultType, loc)
+			}
+		}
+	case *ModuleFunctionCall:
+		if e.Call != nil {
+			for _, arg := range e.Call.Args {
+				c.validateUnsafeCatchResultsInExpression(arg, resultType, loc)
+			}
+		}
+	case *ModuleStructInstance:
+		if e.Property != nil {
+			for _, field := range e.Property.Fields {
+				c.validateUnsafeCatchResultsInExpression(field, resultType, loc)
+			}
+		}
+	case *DirectGoFieldAccess:
+		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
+	case *DirectGoStructInstance:
+		for _, field := range e.Fields {
+			c.validateUnsafeCatchResultsInExpression(field, resultType, loc)
+		}
+	case *TemplateStr:
+		for _, chunk := range e.Chunks {
+			c.validateUnsafeCatchResultsInExpression(chunk, resultType, loc)
+		}
+	case *Panic:
+		c.validateUnsafeCatchResultsInExpression(e.Message, resultType, loc)
 	}
 }
 
@@ -3192,6 +4081,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if subj == nil {
 				// panic(fmt.Errorf("Cannot access %s on nil", s.Property))
 				return nil
+			}
+
+			if field, handled := c.checkDirectGoInstanceProperty(subj, s.Property.Name, s.Property.GetLocation()); handled {
+				return field
 			}
 
 			propType := subj.Type().get(s.Property.Name)
@@ -4782,13 +5675,16 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 				}
 
-				if _, ok := c.directGoImports[id.Name]; ok {
-					propIdent, ok := s.Property.(*parse.Identifier)
-					if !ok {
+				if goImport, ok := c.directGoImports[id.Name]; ok {
+					switch prop := s.Property.(type) {
+					case *parse.Identifier:
+						return c.resolveDirectGoPackageValue(id.Name, prop.Name, prop.GetLocation())
+					case *parse.StructInstance:
+						return c.resolveDirectGoStructInstance(goImport, prop)
+					default:
 						c.addError(fmt.Sprintf("Unsupported property type in Go import %s::%s", id.Name, s.Property), s.Property.GetLocation())
 						return nil
 					}
-					return c.resolveDirectGoPackageValue(id.Name, propIdent.Name, propIdent.GetLocation())
 				}
 
 				// Handle local enum variants or static functions (not from modules)
@@ -5097,6 +5993,31 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				}
 			}
 		}
+	case *parse.UnsafeBlock:
+		{
+			if parseStatementsContainBreak(s.Statements) {
+				c.addError("break is not allowed inside unsafe blocks", s.GetLocation())
+			}
+			var expectedValue Type
+			if expectedResult, ok := c.expectedExpr.(*Result); ok {
+				expectedValue = expectedResult.val
+			}
+			unsafeReturnType := MakeResult(&TypeVar{name: "Unsafe"}, Str)
+			var block *Block
+			if expectedValue != nil {
+				block = c.checkBlockWithExpected(s.Statements, func() {
+					c.scope.expectReturn(unsafeReturnType)
+				}, expectedValue, false)
+			} else {
+				block = c.checkBlockWithInferredFinalValue(s.Statements, func() {
+					c.scope.expectReturn(unsafeReturnType)
+				}, discardThisExpr || c.expectedExpr == Void)
+			}
+			valueType := block.Type()
+			resultType := MakeResult(valueType, Str)
+			c.validateUnsafeCatchResults(block, resultType, s.GetLocation())
+			return &UnsafeBlock{Body: block, ValueType: valueType, ResultType: resultType}
+		}
 	case *parse.BlockExpression:
 		{
 			block := c.checkBlockWithInferredFinalValue(s.Statements, nil, discardThisExpr || c.expectedExpr == Void)
@@ -5251,6 +6172,10 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			return c.checkExpr(s)
 		})
 	case *parse.BlockExpression:
+		return c.withExpectedExpr(expectedType, func() Expression {
+			return c.checkExpr(s)
+		})
+	case *parse.UnsafeBlock:
 		return c.withExpectedExpr(expectedType, func() Expression {
 			return c.checkExpr(s)
 		})
@@ -6438,6 +7363,12 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 		if maybeType, ok := innerType.(*Maybe); ok {
 			innerType = maybeType.of
 			isMaybe = true
+		}
+
+		if !isMaybe {
+			if field, handled := c.checkDirectGoInstanceProperty(target, p.Property.Name, p.Property.GetLocation()); handled {
+				return field
+			}
 		}
 
 		propType := innerType.get(p.Property.Name)

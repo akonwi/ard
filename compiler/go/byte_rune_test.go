@@ -73,6 +73,13 @@ func TestGoTargetParityByteRunePrimitives(t *testing.T) {
 			want: "true",
 		},
 		{
+			name: "rune from str rejects empty and multi rune strings",
+			input: `fn main() Bool {
+  Rune::from_str("").is_none() and Rune::from_str("ab").is_none()
+}`,
+			want: "true",
+		},
+		{
 			name: "rune literal comparisons and match",
 			input: `fn main() Bool {
   let newline: Rune = '\n'

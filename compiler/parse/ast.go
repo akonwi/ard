@@ -119,11 +119,12 @@ func (s StringType) GetName() string {
 
 type MutableType struct {
 	Location
-	Inner DeclaredType
+	Inner    DeclaredType
+	nullable bool
 }
 
 func (m MutableType) IsNullable() bool {
-	return false
+	return m.nullable
 }
 
 func (m MutableType) GetName() string {
@@ -854,4 +855,13 @@ type BlockExpression struct {
 
 func (b BlockExpression) String() string {
 	return "BlockExpression"
+}
+
+type UnsafeBlock struct {
+	Location
+	Statements []Statement
+}
+
+func (u UnsafeBlock) String() string {
+	return "unsafe { ... }"
 }

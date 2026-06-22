@@ -184,7 +184,7 @@ func collectImportUsesInStatement(stmt parse.Statement, used map[string]bool) {
 			collectImportUsesInStatement(body, used)
 		}
 		collectImportUsesInStatement(s.Else, used)
-	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.Try, *parse.BlockExpression:
+	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.Try, *parse.BlockExpression, *parse.UnsafeBlock:
 		collectImportUsesInExpression(s, used)
 	default:
 		if expr, ok := stmt.(parse.Expression); ok {
@@ -295,6 +295,10 @@ func collectImportUsesInExpression(expr parse.Expression, used map[string]bool) 
 			collectImportUsesInStatement(body, used)
 		}
 	case *parse.BlockExpression:
+		for _, body := range e.Statements {
+			collectImportUsesInStatement(body, used)
+		}
+	case *parse.UnsafeBlock:
 		for _, body := range e.Statements {
 			collectImportUsesInStatement(body, used)
 		}
