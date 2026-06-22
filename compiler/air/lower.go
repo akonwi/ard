@@ -1182,9 +1182,11 @@ func (l *lowerer) declareBuiltinToStringMethod(module ModuleID, ownerInfo TypeIn
 	l.functions[key] = id
 	receiver := Param{Name: "self", Type: ownerInfo.ID}
 	l.program.Functions = append(l.program.Functions, Function{
-		ID:     id,
-		Module: module,
-		Name:   ownerInfo.Name + ".ToString.to_str",
+		ID:         id,
+		Module:     module,
+		Name:       ownerInfo.Name + ".ToString.to_str",
+		Receiver:   ownerInfo.ID,
+		MethodName: "to_str",
 		Signature: Signature{
 			Params: []Param{receiver},
 			Return: strType,
@@ -1213,9 +1215,11 @@ func (l *lowerer) declareBuiltinToDynamicMethod(module ModuleID, ownerInfo TypeI
 	l.functions[key] = id
 	receiver := Param{Name: "self", Type: ownerInfo.ID}
 	l.program.Functions = append(l.program.Functions, Function{
-		ID:     id,
-		Module: module,
-		Name:   ownerInfo.Name + ".Encodable.to_dyn",
+		ID:         id,
+		Module:     module,
+		Name:       ownerInfo.Name + ".Encodable.to_dyn",
+		Receiver:   ownerInfo.ID,
+		MethodName: "to_dyn",
 		Signature: Signature{
 			Params: []Param{receiver},
 			Return: dynamicType,
@@ -1258,9 +1262,11 @@ func (l *lowerer) declareMethodFunction(module ModuleID, owner checker.Type, tra
 	id := FunctionID(len(l.program.Functions))
 	l.functions[key] = id
 	l.program.Functions = append(l.program.Functions, Function{
-		ID:     id,
-		Module: module,
-		Name:   owner.String() + "." + traitName + "." + def.Name,
+		ID:         id,
+		Module:     module,
+		Name:       owner.String() + "." + traitName + "." + def.Name,
+		Receiver:   ownerType,
+		MethodName: def.Name,
 		Signature: Signature{
 			Params: params,
 			Return: returnType,
@@ -1329,9 +1335,11 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 	id := FunctionID(len(l.program.Functions))
 	l.functions[key] = id
 	l.program.Functions = append(l.program.Functions, Function{
-		ID:     id,
-		Module: module,
-		Name:   ownerName + "." + def.Name,
+		ID:         id,
+		Module:     module,
+		Name:       ownerName + "." + def.Name,
+		Receiver:   ownerType,
+		MethodName: def.Name,
 		Signature: Signature{
 			Params: params,
 			Return: returnType,
@@ -1382,9 +1390,11 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 	fl.l.functions[key] = id
 	fl.l.setFunctionTypeVars(id, typeVars)
 	fl.l.program.Functions = append(fl.l.program.Functions, Function{
-		ID:     id,
-		Module: module,
-		Name:   ownerName + "." + def.Name,
+		ID:         id,
+		Module:     module,
+		Name:       ownerName + "." + def.Name,
+		Receiver:   ownerType,
+		MethodName: def.Name,
 		Signature: Signature{
 			Params: params,
 			Return: returnType,

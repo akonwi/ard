@@ -3581,6 +3581,146 @@ func TestLowerProgramKeepsHelperForRetainedClosure(t *testing.T) {
 	}
 }
 
+func TestLowerProgramEmitsGoMethodWrapperForInherentImpl(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box {
+			value: Int,
+		}
+
+		impl Box {
+			fn Value() Int {
+				self.value
+			}
+		}
+
+		fn main() Int {
+			let box = Box{value: 7}
+			box.Value()
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil || fn.Name == nil || fn.Name.Name != "Value" || len(fn.Recv.List) != 1 {
+			return false
+		}
+		foundCall := false
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if ok && strings.Contains(astCallName(call), "Box_Value") {
+				foundCall = true
+				return false
+			}
+			return true
+		})
+		return foundCall
+	}) {
+		t.Fatal("generated AST missing Go method wrapper for inherent impl")
+	}
+}
+
+func TestLowerProgramEmitsGoMethodWrapperForTraitImpl(t *testing.T) {
+	program := lowerSource(t, `
+		trait Labeled {
+			fn Label() Str
+		}
+
+		struct Button {
+			text: Str,
+		}
+
+		impl Labeled for Button {
+			fn Label() Str {
+				self.text
+			}
+		}
+
+		fn label(value: Labeled) Str {
+			value.Label()
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil || fn.Name == nil || fn.Name.Name != "Label" || len(fn.Recv.List) != 1 {
+			return false
+		}
+		foundCall := false
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if ok && strings.Contains(astCallName(call), "Button_Labeled_Label") {
+				foundCall = true
+				return false
+			}
+			return true
+		})
+		return foundCall
+	}) {
+		t.Fatal("generated AST missing Go method wrapper for trait impl")
+	}
+}
+
+func TestLowerProgramSkipsGoMethodWrapperWhenStructFieldCollides(t *testing.T) {
+	program := lowerSource(t, `
+		trait Named {
+			fn name() Str
+		}
+
+		struct User {
+			name: Str,
+		}
+
+		impl Named for User {
+			fn name() Str {
+				self.name
+			}
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if astFilesContain(files, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		return ok && fn.Recv != nil && fn.Name != nil && fn.Name.Name == "name"
+	}) {
+		t.Fatal("generated AST should not emit Go method wrapper that collides with a struct field")
+	}
+}
+
+func TestLowerProgramSkipsGoMethodWrapperForReservedStructReceiverMethods(t *testing.T) {
+	program := lowerSource(t, `
+		struct Payload {
+			value: Int,
+		}
+
+		impl Payload {
+			fn MarshalJSONTo() Int {
+				self.value
+			}
+
+			fn UnmarshalJSONFrom() Int {
+				self.value
+			}
+		}
+
+		fn main() Int {
+			let payload = Payload{value: 1}
+			payload.MarshalJSONTo() + payload.UnmarshalJSONFrom()
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	for _, reserved := range []string{"MarshalJSONTo", "UnmarshalJSONFrom"} {
+		if astFilesContain(files, func(node ast.Node) bool {
+			fn, ok := node.(*ast.FuncDecl)
+			return ok && fn.Recv != nil && fn.Name != nil && fn.Name.Name == reserved
+		}) {
+			t.Fatalf("generated AST should not emit Go method wrapper %s reserved for generated JSON helpers", reserved)
+		}
+	}
+}
+
 func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 	program := lowerSource(t, `
 		trait Writer {
@@ -3615,6 +3755,16 @@ func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 		return ok
 	}) {
 		t.Fatal("generated AST missing pointer receiver for mutating trait impl")
+	}
+	if !astFilesContain(files, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil || fn.Name == nil || fn.Name.Name != "write" || len(fn.Recv.List) != 1 {
+			return false
+		}
+		_, ok = fn.Recv.List[0].Type.(*ast.StarExpr)
+		return ok
+	}) {
+		t.Fatal("generated AST missing pointer Go method wrapper for mutating trait impl")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)

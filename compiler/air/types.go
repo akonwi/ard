@@ -56,6 +56,12 @@ type Function struct {
 	Body      Block
 	IsTest    bool
 	IsScript  bool
+
+	// Receiver and MethodName are set for Ard impl methods. They let targets
+	// optionally expose a host-language method shape while preserving the
+	// standalone function lowering used by AIR calls.
+	Receiver   TypeID
+	MethodName string
 }
 
 type Signature struct {

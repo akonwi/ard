@@ -40,6 +40,8 @@ type lowerer struct {
 	projectInfo           *checker.ProjectInfo
 	directGoResolver      *checker.GoPackagesResolver
 	inlineClosures        map[air.FunctionID]bool
+	goMethodCollisions    map[string]bool
+	emittedGoMethods      map[string]bool
 	suppressMain          bool
 	includeTests          bool
 }
@@ -57,6 +59,8 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	}
 	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, jsonEncodeTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, directGoResolver: checker.NewGoPackagesResolver(directGoResolverDir), directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(program), suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
 	l.inlineClosures = l.collectInlineClosureFunctions()
+	l.goMethodCollisions = l.collectGoMethodCollisions()
+	l.emittedGoMethods = map[string]bool{}
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
 	modules := make([]air.Module, 0, len(program.Modules))
@@ -258,6 +262,13 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 			return nil, fmt.Errorf("module %s function %s: %w", module.Path, fn.Name, err)
 		}
 		decls = append(decls, decl)
+		methodDecl, ok, err := l.lowerGoMethodWrapper(fn)
+		if err != nil {
+			return nil, fmt.Errorf("module %s function %s Go method wrapper: %w", module.Path, fn.Name, err)
+		}
+		if ok {
+			decls = append(decls, methodDecl)
+		}
 	}
 	if module.ID == mainModuleID {
 		if l.suppressMain {
@@ -838,6 +849,166 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 		Type: funcType,
 		Body: body,
 	}, nil
+}
+
+func (l *lowerer) lowerGoMethodWrapper(fn air.Function) (*ast.FuncDecl, bool, error) {
+	key, methodName, ok := l.goMethodKey(fn)
+	if !ok || l.goMethodCollisions[key] || l.emittedGoMethods[key] {
+		return nil, false, nil
+	}
+	if len(fn.Signature.Params) == 0 {
+		return nil, false, nil
+	}
+	receiverTypeID := fn.Receiver
+	if receiverTypeID == air.NoType {
+		receiverTypeID = fn.Signature.Params[0].Type
+	}
+	receiverType, err := l.goType(receiverTypeID)
+	if err != nil {
+		return nil, false, err
+	}
+	if fn.Signature.Params[0].Mutable {
+		receiverType = &ast.StarExpr{X: receiverType}
+	}
+
+	params := make([]*ast.Field, 0, len(fn.Signature.Params)-1)
+	callArgs := []ast.Expr{ast.NewIdent(localName(fn, 0))}
+	for i, param := range fn.Signature.Params[1:] {
+		paramType, err := l.goParamType(param)
+		if err != nil {
+			return nil, false, err
+		}
+		localID := air.LocalID(i + 1)
+		name := localName(fn, localID)
+		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: paramType})
+		callArgs = append(callArgs, ast.NewIdent(name))
+	}
+
+	call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, fn)), Args: callArgs}
+	body := []ast.Stmt{}
+	if l.isVoidType(fn.Signature.Return) {
+		body = append(body, &ast.ExprStmt{X: call})
+	} else {
+		body = append(body, &ast.ReturnStmt{Results: []ast.Expr{call}})
+	}
+	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
+	if !l.isVoidType(fn.Signature.Return) {
+		returnType, err := l.goType(fn.Signature.Return)
+		if err != nil {
+			return nil, false, err
+		}
+		funcType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
+	}
+
+	l.emittedGoMethods[key] = true
+	return &ast.FuncDecl{
+		Recv: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(localName(fn, 0))}, Type: receiverType}}},
+		Name: ast.NewIdent(methodName),
+		Type: funcType,
+		Body: &ast.BlockStmt{List: body},
+	}, true, nil
+}
+
+func (l *lowerer) collectGoMethodCollisions() map[string]bool {
+	counts := map[string]int{}
+	for _, fn := range l.program.Functions {
+		key, _, ok := l.goMethodKey(fn)
+		if ok {
+			counts[key]++
+		}
+	}
+	collisions := map[string]bool{}
+	for key, count := range counts {
+		if count > 1 {
+			collisions[key] = true
+		}
+	}
+	return collisions
+}
+
+func (l *lowerer) goMethodKey(fn air.Function) (string, string, bool) {
+	if strings.TrimSpace(fn.MethodName) == "" || len(fn.Signature.Params) == 0 {
+		return "", "", false
+	}
+	receiverTypeID := fn.Receiver
+	if receiverTypeID == air.NoType {
+		receiverTypeID = fn.Signature.Params[0].Type
+	}
+	if !l.canEmitGoMethodOnType(receiverTypeID) {
+		return "", "", false
+	}
+	methodName, ok := goMethodName(fn.MethodName)
+	if !ok || l.goMethodNameUnavailableOnType(receiverTypeID, methodName) {
+		return "", "", false
+	}
+	return fmt.Sprintf("%d:%s", receiverTypeID, methodName), methodName, true
+}
+
+func (l *lowerer) canEmitGoMethodOnType(typeID air.TypeID) bool {
+	if !validTypeID(l.program, typeID) {
+		return false
+	}
+	info := l.program.Types[typeID-1]
+	if l.isStdlibFFIBackedType(info) || strings.TrimSpace(info.ExternBinding) != "" {
+		return false
+	}
+	switch info.Kind {
+	case air.TypeStruct, air.TypeEnum, air.TypeUnion:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *lowerer) goMethodNameUnavailableOnType(typeID air.TypeID, methodName string) bool {
+	if !validTypeID(l.program, typeID) {
+		return false
+	}
+	info := l.program.Types[typeID-1]
+	switch info.Kind {
+	case air.TypeStruct:
+		if generatedStructReceiverMethodName(methodName) {
+			return true
+		}
+		for _, field := range info.Fields {
+			if l.goFieldName(info, field.Name) == methodName {
+				return true
+			}
+		}
+	case air.TypeUnion:
+		if methodName == "tag" {
+			return true
+		}
+		for _, member := range info.Members {
+			if unionMemberFieldName(member) == methodName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func generatedStructReceiverMethodName(name string) bool {
+	switch name {
+	case "MarshalJSONTo", "UnmarshalJSONFrom":
+		return true
+	default:
+		return false
+	}
+}
+
+func goMethodName(raw string) (string, bool) {
+	name := sanitizeName(raw)
+	if name == "" || name == "_" {
+		return "", false
+	}
+	if token.Lookup(name).IsKeyword() {
+		name += "_"
+	}
+	if !token.IsIdentifier(name) {
+		return "", false
+	}
+	return name, true
 }
 
 func (l *lowerer) lowerBlock(fn air.Function, block air.Block, returnType air.TypeID) (*ast.BlockStmt, error) {
