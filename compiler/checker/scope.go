@@ -397,7 +397,7 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 		if !changed {
 			return t
 		}
-		return &ExternType{Name_: t.Name_, GenericParams: append([]string(nil), t.GenericParams...), TypeArgs: newTypeArgs, ExternalBinding: t.ExternalBinding, ExternalBindings: cloneExternalBindings(t.ExternalBindings), private: t.private}
+		return cloneExternTypeWithTypeArgs(t, newTypeArgs)
 	default:
 		return t
 	}
@@ -609,7 +609,7 @@ func copyTypeWithTypeVarMapSeen(t Type, typeVarMap map[string]*TypeVar, seenStru
 		for i, typeArg := range typ.TypeArgs {
 			newTypeArgs[i] = copyTypeWithTypeVarMapSeen(typeArg, typeVarMap, seenStructs)
 		}
-		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: newTypeArgs, ExternalBinding: typ.ExternalBinding, ExternalBindings: cloneExternalBindings(typ.ExternalBindings), private: typ.private}
+		return cloneExternTypeWithTypeArgs(typ, newTypeArgs)
 	default:
 		return t
 	}

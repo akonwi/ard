@@ -233,7 +233,7 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 		if !changed {
 			return typ
 		}
-		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: newTypeArgs, ExternalBinding: typ.ExternalBinding, ExternalBindings: cloneExternalBindings(typ.ExternalBindings), private: typ.private}
+		return cloneExternTypeWithTypeArgs(typ, newTypeArgs)
 	default:
 		return t
 	}
@@ -6647,7 +6647,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		for i, typeArg := range typ.TypeArgs {
 			substitutedArgs[i] = substituteType(typeArg, typeMap)
 		}
-		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: substitutedArgs, ExternalBinding: typ.ExternalBinding, ExternalBindings: cloneExternalBindings(typ.ExternalBindings), private: typ.private}
+		return cloneExternTypeWithTypeArgs(typ, substitutedArgs)
 	// Handle other compound types
 	default:
 		return t

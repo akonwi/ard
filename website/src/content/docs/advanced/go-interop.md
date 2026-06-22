@@ -41,6 +41,25 @@ Raw Go pointer syntax does not appear in Ard source. Use Ard's mutable-reference
 - `gohttp::Response` lowers to `http.Response`
 - `mut gohttp::Response` lowers to `*http.Response`
 
+## Go Interfaces
+
+Named Go interfaces can be used as direct Go types. Ard checks assignability with Go's interface rules for direct-Go values, similar to Ard trait compatibility, while generated code keeps native Go interface values.
+
+```ard
+use go:io
+use go:strings
+
+fn read_all(reader: io::Reader) [Byte]!Str {
+  io::ReadAll(reader)
+}
+
+let bytes = read_all(strings::NewReader("hello")).expect("read")
+```
+
+Interface-to-interface assignability also follows Go's rules, so a value such as `io::ReadCloser` can be used where `io::Reader` or `io::Closer` is expected when the required methods match. Go slices and maps remain invariant: `[mut strings::Reader]` is not automatically converted to `[]io.Reader`.
+
+Ard-defined structs and functions cannot implement Go interfaces directly yet; use companion FFI adapters for that direction.
+
 ## Struct Field Reads
 
 Exported Go struct fields use ordinary dot syntax. Field names match Go exactly, including casing.
@@ -158,6 +177,6 @@ fn request_path_or_default(req: mut gohttp::Request) Str {
 Direct Go interop is intentionally incremental. Current limitations include:
 
 - embedded/promoted Go fields are not resolved through promotion;
-- Go interfaces are not generally modeled as Ard traits;
+- Ard-defined types and functions cannot implement Go interfaces directly yet;
 - callbacks, variadics, and many compound Go shapes still need companion wrappers;
 - generic Go struct construction is not supported yet.

@@ -28,6 +28,20 @@ func (r fakeGoResolver) LoadPackage(importPath string) (*GoPackage, error) {
 	return pkg, nil
 }
 
+func goPackageFromSource(t *testing.T, importPath string, name string, source string) *GoPackage {
+	t.Helper()
+	fset := gotoken.NewFileSet()
+	file, err := goparser.ParseFile(fset, name+".go", source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := new(gotypes.Config).Check(importPath, fset, []*ast.File{file}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return goPackageFromTypes(importPath, name, pkg)
+}
+
 func goParam(kind GoValueKind, expr string) GoValueType {
 	value := GoValueType{Kind: kind, Expr: expr}
 	switch expr {
@@ -158,6 +172,281 @@ fn encode(bytes: [Byte]) Str { base64::StdEncoding.EncodeToString(bytes) }`), "m
 			}}},
 		},
 	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoFunctionCallAcceptsConcreteTypeImplementingInterface(t *testing.T) {
+	result := parse.Parse([]byte(`use go:io
+use go:strings
+fn read_all() [Byte]!Str { io::ReadAll(strings::NewReader("hello")) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	byteType := goParam(GoValueUint, "uint8")
+	byteSlice := GoValueType{Kind: GoValueSlice, Expr: "[]byte", Elem: &byteType}
+	reader := goNamed(GoValueOther, "io.Reader", "io", "Reader")
+	stringsReader := goNamed(GoValueOther, "strings.Reader", "strings", "Reader")
+	ptrStringsReader := GoValueType{Kind: GoValuePointer, Expr: "*strings.Reader", Elem: &stringsReader}
+	readMethod := GoMethod{Name: "Read", Signature: GoSignature{Params: []GoValueType{byteSlice}, Results: []GoValueType{goParam(GoValueInt, "int"), goParam(GoValueError, "error")}}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"io": {
+			ImportPath: "io",
+			Name:       "io",
+			Functions:  map[string]GoFunction{"ReadAll": {Name: "ReadAll", Signature: GoSignature{Params: []GoValueType{reader}, Results: []GoValueType{byteSlice, goParam(GoValueError, "error")}}}},
+			Types:      map[string]GoType{"Reader": {Name: "Reader", Interface: true, Methods: map[string]GoMethod{"Read": readMethod}}},
+		},
+		"strings": {
+			ImportPath: "strings",
+			Name:       "strings",
+			Functions:  map[string]GoFunction{"NewReader": {Name: "NewReader", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{ptrStringsReader}}}},
+			Types:      map[string]GoType{"Reader": {Name: "Reader", PointerMethods: map[string]GoMethod{"Read": readMethod}}},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoInterfaceTypeAcceptsConcreteImplementerInArdCall(t *testing.T) {
+	result := parse.Parse([]byte(`use go:io
+use go:strings
+fn takes_reader(r: io::Reader) Int { 1 }
+fn main() Int { takes_reader(strings::NewReader("hello")) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	byteType := goParam(GoValueUint, "uint8")
+	byteSlice := GoValueType{Kind: GoValueSlice, Expr: "[]byte", Elem: &byteType}
+	stringsReader := goNamed(GoValueOther, "strings.Reader", "strings", "Reader")
+	ptrStringsReader := GoValueType{Kind: GoValuePointer, Expr: "*strings.Reader", Elem: &stringsReader}
+	readMethod := GoMethod{Name: "Read", Signature: GoSignature{Params: []GoValueType{byteSlice}, Results: []GoValueType{goParam(GoValueInt, "int"), goParam(GoValueError, "error")}}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"io": {
+			ImportPath: "io",
+			Name:       "io",
+			Types:      map[string]GoType{"Reader": {Name: "Reader", Interface: true, Methods: map[string]GoMethod{"Read": readMethod}}},
+		},
+		"strings": {
+			ImportPath: "strings",
+			Name:       "strings",
+			Functions:  map[string]GoFunction{"NewReader": {Name: "NewReader", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{ptrStringsReader}}}},
+			Types:      map[string]GoType{"Reader": {Name: "Reader", PointerMethods: map[string]GoMethod{"Read": readMethod}}},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoInterfaceTypeRejectsConcreteNonImplementerInArdCall(t *testing.T) {
+	result := parse.Parse([]byte(`use go:io
+use go:strings
+fn takes_writer(w: io::Writer) Int { 1 }
+fn main() Int { takes_writer(strings::NewReader("hello")) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	byteType := goParam(GoValueUint, "uint8")
+	byteSlice := GoValueType{Kind: GoValueSlice, Expr: "[]byte", Elem: &byteType}
+	stringsReader := goNamed(GoValueOther, "strings.Reader", "strings", "Reader")
+	ptrStringsReader := GoValueType{Kind: GoValuePointer, Expr: "*strings.Reader", Elem: &stringsReader}
+	readMethod := GoMethod{Name: "Read", Signature: GoSignature{Params: []GoValueType{byteSlice}, Results: []GoValueType{goParam(GoValueInt, "int"), goParam(GoValueError, "error")}}}
+	writeMethod := GoMethod{Name: "Write", Signature: GoSignature{Params: []GoValueType{byteSlice}, Results: []GoValueType{goParam(GoValueInt, "int"), goParam(GoValueError, "error")}}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"io": {
+			ImportPath: "io",
+			Name:       "io",
+			Types:      map[string]GoType{"Writer": {Name: "Writer", Interface: true, Methods: map[string]GoMethod{"Write": writeMethod}}},
+		},
+		"strings": {
+			ImportPath: "strings",
+			Name:       "strings",
+			Functions:  map[string]GoFunction{"NewReader": {Name: "NewReader", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{ptrStringsReader}}}},
+			Types:      map[string]GoType{"Reader": {Name: "Reader", PointerMethods: map[string]GoMethod{"Read": readMethod}}},
+		},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected non-implementer diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Expected io::Writer, got mut strings::Reader") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoInterfaceReceiverAcceptsLargerInterface(t *testing.T) {
+	result := parse.Parse([]byte(`use go:net/http as http
+fn close_body(resp: mut http::Response) Void!Str { resp.Body.Close() }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	closer := goNamed(GoValueOther, "io.Closer", "io", "Closer")
+	readCloser := goNamed(GoValueOther, "io.ReadCloser", "io", "ReadCloser")
+	closeMethod := GoMethod{Name: "Close", Signature: GoSignature{Receiver: &closer, Results: []GoValueType{goParam(GoValueError, "error")}}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"net/http": {
+			ImportPath: "net/http",
+			Name:       "http",
+			Types: map[string]GoType{"Response": {Name: "Response", Struct: true, Fields: map[string]GoField{
+				"Body": {Name: "Body", Type: readCloser},
+			}}},
+		},
+		"io": {
+			ImportPath: "io",
+			Name:       "io",
+			Types: map[string]GoType{
+				"Closer":     {Name: "Closer", Interface: true, Methods: map[string]GoMethod{"Close": closeMethod}},
+				"ReadCloser": {Name: "ReadCloser", Interface: true, Methods: map[string]GoMethod{"Close": closeMethod}},
+			},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoInterfaceTypeRejectsMutableReferenceToInterface(t *testing.T) {
+	pkg := goPackageFromSource(t, "example.com/iface", "iface", `package iface
+
+type Reader interface { Read([]byte) (int, error) }
+`)
+	result := parse.Parse([]byte(`use go:example.com/iface as iface
+fn takes_reader(r: iface::Reader) Int { 1 }
+fn wrap(r: mut iface::Reader) Int { takes_reader(r) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{pkg.ImportPath: pkg}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected pointer-to-interface diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Expected iface::Reader, got mut iface::Reader") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoFunctionCallRejectsSliceOfConcreteForSliceOfInterface(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/io as io
+use go:strings
+fn main() { io::UseReaders([strings::NewReader("hello")]) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	byteType := goParam(GoValueUint, "uint8")
+	byteSlice := GoValueType{Kind: GoValueSlice, Expr: "[]byte", Elem: &byteType}
+	reader := goNamed(GoValueOther, "io.Reader", "example.com/io", "Reader")
+	readers := GoValueType{Kind: GoValueSlice, Expr: "[]io.Reader", Elem: &reader}
+	stringsReader := goNamed(GoValueOther, "strings.Reader", "strings", "Reader")
+	ptrStringsReader := GoValueType{Kind: GoValuePointer, Expr: "*strings.Reader", Elem: &stringsReader}
+	readMethod := GoMethod{Name: "Read", Signature: GoSignature{Params: []GoValueType{byteSlice}, Results: []GoValueType{goParam(GoValueInt, "int"), goParam(GoValueError, "error")}}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/io": {
+			ImportPath: "example.com/io",
+			Name:       "io",
+			Functions:  map[string]GoFunction{"UseReaders": {Name: "UseReaders", Signature: GoSignature{Params: []GoValueType{readers}}}},
+			Types:      map[string]GoType{"Reader": {Name: "Reader", Interface: true, Methods: map[string]GoMethod{"Read": readMethod}}},
+		},
+		"strings": {
+			ImportPath: "strings",
+			Name:       "strings",
+			Functions:  map[string]GoFunction{"NewReader": {Name: "NewReader", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{ptrStringsReader}}}},
+			Types:      map[string]GoType{"Reader": {Name: "Reader", PointerMethods: map[string]GoMethod{"Read": readMethod}}},
+		},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected slice invariance diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "list element") || !strings.Contains(got, "Go named type io.Reader") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoFunctionCallRejectsMapOfConcreteForMapOfInterface(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/io as io
+use go:strings
+fn main() { io::UseReaderMap(["a": strings::NewReader("hello")]) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	byteType := goParam(GoValueUint, "uint8")
+	byteSlice := GoValueType{Kind: GoValueSlice, Expr: "[]byte", Elem: &byteType}
+	strType := goParam(GoValueString, "string")
+	reader := goNamed(GoValueOther, "io.Reader", "example.com/io", "Reader")
+	readerMap := GoValueType{Kind: GoValueMap, Expr: "map[string]io.Reader", Key: &strType, Value: &reader}
+	stringsReader := goNamed(GoValueOther, "strings.Reader", "strings", "Reader")
+	ptrStringsReader := GoValueType{Kind: GoValuePointer, Expr: "*strings.Reader", Elem: &stringsReader}
+	readMethod := GoMethod{Name: "Read", Signature: GoSignature{Params: []GoValueType{byteSlice}, Results: []GoValueType{goParam(GoValueInt, "int"), goParam(GoValueError, "error")}}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/io": {
+			ImportPath: "example.com/io",
+			Name:       "io",
+			Functions:  map[string]GoFunction{"UseReaderMap": {Name: "UseReaderMap", Signature: GoSignature{Params: []GoValueType{readerMap}}}},
+			Types:      map[string]GoType{"Reader": {Name: "Reader", Interface: true, Methods: map[string]GoMethod{"Read": readMethod}}},
+		},
+		"strings": {
+			ImportPath: "strings",
+			Name:       "strings",
+			Functions:  map[string]GoFunction{"NewReader": {Name: "NewReader", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{ptrStringsReader}}}},
+			Types:      map[string]GoType{"Reader": {Name: "Reader", PointerMethods: map[string]GoMethod{"Read": readMethod}}},
+		},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected map invariance diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "map value") || !strings.Contains(got, "Go named type io.Reader") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoInterfaceAssignabilityUsesFullGoMethodSet(t *testing.T) {
+	pkg := goPackageFromSource(t, "example.com/sealed", "sealed", `package sealed
+
+type Sealed interface { seal(); Read([]byte) (int, error) }
+type Reader struct{}
+func NewReader() *Reader { return nil }
+func Use(Sealed) {}
+func (*Reader) Read([]byte) (int, error) { return 0, nil }
+`)
+	result := parse.Parse([]byte(`use go:example.com/sealed as sealed
+fn main() { sealed::Use(sealed::NewReader()) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{pkg.ImportPath: pkg}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected sealed-interface diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Go named type sealed.Sealed") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoInterfaceAssignabilityAllowsPromotedImplementer(t *testing.T) {
+	pkg := goPackageFromSource(t, "example.com/promotediface", "promotediface", `package promotediface
+
+type Reader interface { Read([]byte) (int, error) }
+type Base struct{}
+func (*Base) Read([]byte) (int, error) { return 0, nil }
+type Wrapper struct{ *Base }
+func NewWrapper() *Wrapper { return nil }
+func Use(Reader) {}
+`)
+	result := parse.Parse([]byte(`use go:example.com/promotediface as promotediface
+fn main() { promotediface::Use(promotediface::NewWrapper()) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{pkg.ImportPath: pkg}}})
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
@@ -1612,6 +1901,67 @@ type Outer struct{ Inner }
 	}
 	if _, ok := goPkg.Types["Outer"].Methods["M"]; ok {
 		t.Fatalf("promoted method Outer.M should be skipped")
+	}
+}
+
+func TestGoPackageFromTypesMarksInterfacesAndReceiverMethodSets(t *testing.T) {
+	goPkg := goPackageFromSource(t, "example.com/interfaces", "interfaces", `package interfaces
+
+type Reader interface { Read([]byte) (int, error) }
+type ReadCloser interface { Reader; Close() error }
+
+type ValueReader struct{}
+func (ValueReader) Read([]byte) (int, error) { return 0, nil }
+
+type PointerReader struct{}
+func (*PointerReader) Read([]byte) (int, error) { return 0, nil }
+`)
+	reader := goPkg.Types["Reader"]
+	if !reader.Interface || reader.Methods["Read"].Name != "Read" {
+		t.Fatalf("Reader metadata = %#v, want interface with Read", reader)
+	}
+	readCloser := goPkg.Types["ReadCloser"]
+	if !readCloser.Interface || readCloser.Methods["Read"].Name != "Read" || readCloser.Methods["Close"].Name != "Close" {
+		t.Fatalf("ReadCloser metadata = %#v, want embedded interface methods", readCloser)
+	}
+	valueReader := goPkg.Types["ValueReader"]
+	if _, ok := valueReader.ValueMethods["Read"]; !ok {
+		t.Fatalf("ValueReader value methods = %#v, want Read", valueReader.ValueMethods)
+	}
+	pointerReader := goPkg.Types["PointerReader"]
+	if _, ok := pointerReader.ValueMethods["Read"]; ok {
+		t.Fatalf("PointerReader value methods = %#v, should not include pointer receiver", pointerReader.ValueMethods)
+	}
+	if _, ok := pointerReader.PointerMethods["Read"]; !ok {
+		t.Fatalf("PointerReader pointer methods = %#v, want Read", pointerReader.PointerMethods)
+	}
+}
+
+func TestGoValueTypesMatchRejectsDistinctUnmodeledTypes(t *testing.T) {
+	if goValueTypesMatch(GoValueType{Kind: GoValueOther, Expr: "func()"}, GoValueType{Kind: GoValueOther, Expr: "chan int"}) {
+		t.Fatal("distinct unmodeled Go types should not match")
+	}
+}
+
+func TestCloneExternTypePreservesDirectGoMetadata(t *testing.T) {
+	method := GoMethod{Name: "Read"}
+	ext := &ExternType{
+		Name_:                  "io::Reader",
+		ExternalBinding:        "go:io as io::Reader",
+		ExternalBindings:       map[string]string{"go": "go:io as io::Reader"},
+		DirectGoInterface:      true,
+		DirectGoMethods:        map[string]GoMethod{"Read": method},
+		DirectGoValueMethods:   map[string]GoMethod{"Read": method},
+		DirectGoPointerMethods: map[string]GoMethod{"Read": method},
+		DirectGoType:           gotypes.Typ[gotypes.Int],
+	}
+	cloned := cloneExternTypeWithTypeArgs(ext, []Type{Str})
+	if !cloned.DirectGoInterface || cloned.DirectGoType != ext.DirectGoType || cloned.DirectGoMethods["Read"].Name != "Read" || len(cloned.TypeArgs) != 1 {
+		t.Fatalf("cloned extern metadata = %#v", cloned)
+	}
+	cloned.DirectGoMethods["Other"] = GoMethod{Name: "Other"}
+	if _, ok := ext.DirectGoMethods["Other"]; ok {
+		t.Fatal("cloned method map aliases original")
 	}
 }
 

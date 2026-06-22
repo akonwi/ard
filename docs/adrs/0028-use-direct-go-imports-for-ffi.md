@@ -158,7 +158,7 @@ The standard-library migration should be incremental. The current stdlib audit i
 3. move small SQL string/parameter helpers into Ard;
 4. treat broader direct-Go capability work as an ongoing backlog, not as a requirement for this branch.
 
-The fourth step includes package variables/globals, explicit Go conversions, fixed-array adapters, variadic calls or slice spread, Go struct field access, interface alias assignability, callback/interface bridging, and blank-import/dependency registration. These gaps gate larger migrations such as `base64`, crypto hash wrappers, more `fs`, and significant parts of `http` and `sql`.
+The fourth step includes package variables/globals, explicit Go conversions, fixed-array adapters, variadic calls or slice spread, Go struct field access, Go interface assignability/usage, callback/interface bridging, and blank-import/dependency registration. As these capabilities land, the remaining gaps continue to gate larger migrations such as crypto hash wrappers, more `fs`, and significant parts of `http` and `sql`.
 
 Remaining companion FFI is expected where Ard's public API intentionally adapts Go semantics, manages state/lifecycles, or bridges dynamic values and callbacks. Companion code should represent real semantic adaptation rather than mandatory forwarding.
 

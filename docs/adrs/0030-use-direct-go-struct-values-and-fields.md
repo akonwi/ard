@@ -257,7 +257,7 @@ This work was implemented in phases while keeping the feature scope intact:
 - `unsafe { ... }` provides an escape hatch and mitigation path by making panic recovery explicit in Ard control flow.
 - `ffi::is_nil` can cover broader nil-able Go values as those representations become available through direct Go interop.
 - Embedded/promoted fields are not part of the initial lookup model; #249 remains the place to expand that behavior.
-- Interfaces, callback bridges, wider pointer shapes, variadics, and compound conversion gaps still constrain how far stdlib cleanup can go.
+- Callback bridges, Ard-side implementations of Go interfaces, wider pointer shapes, variadics, and compound conversion gaps still constrain how far stdlib cleanup can go.
 
 ## Related
 

@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	"go/types"
 	"strings"
 )
 
@@ -9,6 +10,9 @@ import (
 func areCompatible(expected Type, actual Type) bool {
 	if trait, ok := expected.(*Trait); ok {
 		return actual.hasTrait(trait)
+	}
+	if directGoInterfaceCompatible(expected, actual) {
+		return true
 	}
 
 	return expected.equal(actual)
@@ -953,7 +957,36 @@ type ExternType struct {
 	TypeArgs         []Type
 	ExternalBinding  string
 	ExternalBindings map[string]string
-	private          bool
+
+	// Direct Go metadata is populated for `use go:` named types when available.
+	// Interface metadata lets named Go interfaces participate in Ard assignment
+	// compatibility similarly to traits while still lowering as native Go types.
+	DirectGoInterface      bool
+	DirectGoMethods        map[string]GoMethod
+	DirectGoValueMethods   map[string]GoMethod
+	DirectGoPointerMethods map[string]GoMethod
+	DirectGoType           types.Type
+
+	private bool
+}
+
+func cloneExternTypeWithTypeArgs(e *ExternType, typeArgs []Type) *ExternType {
+	if e == nil {
+		return nil
+	}
+	return &ExternType{
+		Name_:                  e.Name_,
+		GenericParams:          append([]string(nil), e.GenericParams...),
+		TypeArgs:               typeArgs,
+		ExternalBinding:        e.ExternalBinding,
+		ExternalBindings:       cloneExternalBindings(e.ExternalBindings),
+		DirectGoInterface:      e.DirectGoInterface,
+		DirectGoMethods:        cloneGoMethodMap(e.DirectGoMethods),
+		DirectGoValueMethods:   cloneGoMethodMap(e.DirectGoValueMethods),
+		DirectGoPointerMethods: cloneGoMethodMap(e.DirectGoPointerMethods),
+		DirectGoType:           e.DirectGoType,
+		private:                e.private,
+	}
 }
 
 func (e *ExternType) String() string {

@@ -5251,6 +5251,28 @@ fn main() Void!Str {
 	}
 }
 
+func TestDirectGoInterfaceAssignabilityBuilds(t *testing.T) {
+	program := lowerSource(t, `use go:io
+use go:net/http as http
+use go:strings
+
+fn read_all(reader: io::Reader) [Byte]!Str {
+  io::ReadAll(reader)
+}
+
+fn close_body(resp: mut http::Response) Void!Str {
+  resp.Body.Close()
+}
+
+fn main() {
+  let bytes = read_all(strings::NewReader("hello")).expect("read")
+  if not Str::from_bytes(bytes).expect("utf8") == "hello" {
+    panic("bad read")
+  }
+}`)
+	buildProgramFromGeneratedSources(t, program, "direct-go-interface-assignability")
+}
+
 func TestLowerDirectGoExternCoercesNamedScalarArguments(t *testing.T) {
 	program := lowerSource(t, `use go:time as tm
 extern fn sleep(ms: Int) Void = tm::Sleep

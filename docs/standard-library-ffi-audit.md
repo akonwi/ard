@@ -33,7 +33,7 @@ This audit tracks the remaining Ard standard-library bindings that still use com
    - `rune::from_str` now uses Ard string rune views and `Maybe`; only checked `Int -> Rune?` remains in companion FFI.
 
 8. **Ongoing direct-Go capability backlog**
-   - Add direct-Go support for explicit conversions, fixed arrays, variadic calls or slice spread, named map/slice alias assignment, zero/nil construction policy, embedded/promoted fields, interface alias assignability, and callback/interface bridging.
+   - Add direct-Go support for explicit conversions, fixed arrays, variadic calls or slice spread, named map/slice alias assignment, zero/nil construction policy, embedded/promoted fields, Ard-defined Go-interface implementations, and callback/interface bridging.
    - This is not required to finish the current stdlib polish branch; it unlocks larger future migrations.
 
 ## Module audit
@@ -149,9 +149,9 @@ This audit tracks the remaining Ard standard-library bindings that still use com
   - `append`: create-if-missing, `os::OpenFile` write-only, seek-to-end, `os::File::WriteString`, and `Close`.
   - `read`: `read_bytes` plus `Str::from_bytes`, making `read` a UTF-8-validating text reader.
   - `read_bytes`: `os::ReadFile` for raw bytes and binary data.
-- Still necessary today:
-  - `exists`, `is_file`, `is_dir` because `os.Stat` returns `os.FileInfo`, a Go interface. Direct-Go return inference currently supports representable concrete shapes (scalars, lists/maps, and named concrete pointer values), but not Go interface values/method sets or their nil semantics, so `os.FileInfo` cannot yet become a direct Ard return value.
-  - `list_dir` because `os.ReadDir` returns `[]os.DirEntry`, also an interface type surface, and the stdlib returns a stable Ard `DirEntry` struct.
+- Retained for now, but direct-Go interface assignability/method access now unblocks pure Ard replacements:
+  - `exists`, `is_file`, and `is_dir` can be expressed over `os::Stat` plus `os.FileInfo` methods.
+  - `list_dir` can be expressed over `os::ReadDir` plus `os.DirEntry` methods while preserving the stable Ard `DirEntry` struct.
 - Construction audit note: `os.Process{Pid: ...}` is constructible, and some Go error structs are close except for `error` fields, but none map to current `ard/fs` APIs. `os.ProcAttr` still has pointer/slice fields that are awkward without nil/zero construction policy and process-start APIs.
 
 ### `ard/http`
@@ -164,13 +164,13 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 - Still necessary today.
 - Reasons:
   - `http_do` constructs `http.Client` with timeout and adapts `Dynamic` request bodies to `io.Reader`, including JSON encoding;
-  - response body/header helpers read/close interface-backed fields and convert Go headers to `[Str: Str]`;
+  - response body/header helpers convert Go headers/bodies to Ard values and manage response body lifecycle;
   - `serve` bridges Ard handlers to `http.HandlerFunc` and `http.ResponseWriter`.
 - Construction audit note:
   - `http.Cookie` is the best new direct-construction candidate (`Cookie{...}` with scalar/list/time fields), but `ard/http` does not expose cookies yet, so this is a new API opportunity rather than a refactor.
   - `http.Client`, `Request`, `Response`, `Server`, and `Transport` remain poor direct-construction targets because their exported fields include interfaces, function callbacks, typed nil pointers, named map aliases, and lifecycle-sensitive bodies.
   - `http.MaxBytesError` and `http.ProtocolError` are constructible/simple, but not currently used by stdlib APIs.
-- Future unlock: interface assignability/method access, callback/interface bridging, named `http.Header` map adaptation, nil/zero construction policy, and lifecycle helpers.
+- Future unlock: callback/interface bridging, named `http.Header` map adaptation, nil/zero construction policy, and lifecycle helpers.
 
 ### `ard/io`
 
@@ -210,6 +210,6 @@ These capabilities would let future branches remove more companion FFI:
 - Named Go map/slice alias adaptation, especially `http.Header` and `url.Values`.
 - Direct nil/zero-value construction policy for Go pointer/interface/function fields, where safe.
 - Embedded/promoted fields.
-- Interface alias assignability and method access for Go interface surfaces such as `os.FileInfo`, `os.DirEntry`, `http.Response.Body`, and `http.ResponseWriter`.
-- Callback/interface bridging for HTTP server handlers and `http.ResponseWriter`.
+- Ard-defined type/function adapters for implementing Go interfaces such as `http.HandlerFunc` and `http.ResponseWriter`.
+- Callback/interface bridging for HTTP server handlers and other Go callback-shaped APIs.
 - Controlled blank-import/dependency registration for database drivers.
