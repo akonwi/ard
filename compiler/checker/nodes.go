@@ -973,6 +973,36 @@ func (b *Block) Type() Type {
 	return Void
 }
 
+type UnsafeBlock struct {
+	Body       *Block
+	ValueType  Type
+	ResultType *Result
+}
+
+func (u *UnsafeBlock) Type() Type {
+	if u.ResultType != nil {
+		return u.ResultType
+	}
+	valueType := u.ValueType
+	if valueType == nil && u.Body != nil {
+		valueType = u.Body.Type()
+	}
+	if valueType == nil {
+		valueType = Void
+	}
+	return MakeResult(valueType, Str)
+}
+
+func (u *UnsafeBlock) OkType() Type {
+	if u.ValueType != nil {
+		return u.ValueType
+	}
+	if u.Body != nil {
+		return u.Body.Type()
+	}
+	return Void
+}
+
 type IfBranch struct {
 	Condition Expression
 	Body      *Block

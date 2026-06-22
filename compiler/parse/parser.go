@@ -2642,6 +2642,10 @@ func (p *parser) structInstance() (Expression, error) {
 	}
 
 	if p.check(identifier, left_brace) {
+		if p.peek().text == "unsafe" {
+			p.index = index
+			return p.iterRange()
+		}
 		if !p.check(identifier) {
 			p.addError(p.peek(), "Expected struct name")
 			// No anonymous structs - skip this struct instantiation attempt
@@ -3422,6 +3426,24 @@ func functionCallForCallee(callee Expression, typeArgs []DeclaredType, args []Ar
 }
 
 func (p *parser) primary() (Expression, error) {
+	if p.check(identifier, left_brace) && p.peek().text == "unsafe" {
+		startToken := p.advance()
+		statements, err := p.block()
+		if err != nil {
+			return nil, err
+		}
+		end := startToken.getLocation().End
+		if previous := p.previous(); previous != nil {
+			end = previous.getLocation().End
+		}
+		return &UnsafeBlock{
+			Location: Location{
+				Start: startToken.getLocation().Start,
+				End:   end,
+			},
+			Statements: statements,
+		}, nil
+	}
 	if p.match(number) {
 		tok := p.previous()
 		return &NumLiteral{

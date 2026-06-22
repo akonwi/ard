@@ -117,6 +117,7 @@ const (
 	ExprNot
 	ExprNeg
 	ExprBlock
+	ExprUnsafeBlock
 	ExprIf
 	ExprMakeResultOk
 	ExprMakeResultErr

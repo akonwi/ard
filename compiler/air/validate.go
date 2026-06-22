@@ -461,6 +461,20 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
+	if expr.Kind == ExprUnsafeBlock {
+		typeInfo, err := typeInfo(program, expr.Type)
+		if err != nil {
+			return err
+		}
+		if typeInfo.Kind != TypeResult {
+			return fmt.Errorf("unsafe block has type kind %d", typeInfo.Kind)
+		}
+		helperFn := fn
+		helperFn.Signature.Return = expr.Type
+		if err := validateBlock(program, helperFn, expr.Body); err != nil {
+			return err
+		}
+	}
 	if expr.Kind == ExprIf {
 		if err := validateBlock(program, fn, expr.Then); err != nil {
 			return err

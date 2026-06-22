@@ -273,6 +273,8 @@ func findSignatureCallInStmts(stmts []parse.Statement, target parse.Point, prog 
 			best = betterSignatureCall(best, findSignatureCallInStmts(s.CatchBlock, target, prog, filePath))
 		case *parse.BlockExpression:
 			best = betterSignatureCall(best, findSignatureCallInStmts(s.Statements, target, prog, filePath))
+		case *parse.UnsafeBlock:
+			best = betterSignatureCall(best, findSignatureCallInStmts(s.Statements, target, prog, filePath))
 		case *parse.StructInstance:
 			for _, prop := range s.Properties {
 				best = betterSignatureCall(best, findSignatureCallInExpr(prop.Value, target, prog, filePath))
@@ -376,6 +378,8 @@ func findSignatureCallInExpr(expr parse.Expression, target parse.Point, prog *pa
 		recurse(e.Expression)
 		consider(findSignatureCallInStmts(e.CatchBlock, target, prog, filePath))
 	case *parse.BlockExpression:
+		consider(findSignatureCallInStmts(e.Statements, target, prog, filePath))
+	case *parse.UnsafeBlock:
 		consider(findSignatureCallInStmts(e.Statements, target, prog, filePath))
 	case *parse.InterpolatedStr:
 		for _, chunk := range e.Chunks {

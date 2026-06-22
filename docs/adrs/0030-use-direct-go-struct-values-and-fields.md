@@ -191,16 +191,16 @@ The predicate only tests the value passed to it. For example, `ffi::is_nil(req.U
 Add an explicit unsafe interop block as the final phase of this work. The block can recover Go panics and expose them through Ard's `try` flow:
 
 ```ard
-fn do_go_stuff(resp: mut gohttp::Request) Int {
+fn request_path(req: mut gohttp::Request) Str {
   try unsafe {
-    resp.URL.Path
-  } -> err { 500 }
+    req.URL.Path
+  } -> err { "" }
 }
 ```
 
-One possible model is for `unsafe { expr }` to type as `T!Str`, lowering to a small Go function/defer/recover wrapper around the block. That would let Ard code intentionally cross a trusted Go boundary while keeping panic recovery visible at the call site. The unsafe block does not change direct-Go field typing; it only marks a region where Go panics are expected interop risks and are converted into Ard error flow.
+`unsafe { expr }` types as `T!Str` when the block's final value has type `T`. It lowers to a small Go function/defer/recover wrapper around the block. That lets Ard code intentionally cross a trusted Go boundary while keeping panic recovery visible at the call site. The unsafe block does not change direct-Go field typing; it only marks a region where Go panics are expected interop risks and are converted into Ard error flow.
 
-The block has important limits: recovery only catches panics in the same goroutine, it cannot roll back partial mutation, and it may also catch ordinary Ard runtime panics inside the block. Initial implementation should reject `break` inside `unsafe` blocks. A likely Go lowering uses an inner function with `defer`/`recover`, and Go cannot directly `break` an outer Ard loop from inside that nested function. Supporting that later would require a control-flow signal from the unsafe helper back to the outer lowered loop. Treat `unsafe` as a mitigation tool for direct Go interop, not as a guarantee that arbitrary Go APIs are safe.
+The block has important limits: recovery only catches panics in the same goroutine, it cannot roll back partial mutation, and it may also catch ordinary Ard runtime panics inside the block. The initial implementation rejects `break` inside `unsafe` blocks. The Go lowering uses an inner function with `defer`/`recover`, and Go cannot directly `break` an outer Ard loop from inside that nested function. Supporting that later would require a control-flow signal from the unsafe helper back to the outer lowered loop. Treat `unsafe` as a mitigation tool for direct Go interop, not as a guarantee that arbitrary Go APIs are safe.
 
 ### Phased implementation
 

@@ -70,6 +70,11 @@ func TestFormat(t *testing.T) {
 			output: "use ard/io\n\nuse app/box\nuse app/style\n\nfn main() {\n  box::new(style::Style{padding: 1}).render()\n  io::print(\"done\")\n}\n",
 		},
 		{
+			name:   "formats unsafe block and keeps imports used inside",
+			input:  "use ard/io\nuse app/unused\n\nfn main() Str { unsafe{io::print(\"hi\")\n\"ok\"}.expect(\"unsafe\") }\n",
+			output: "use ard/io\n\nfn main() Str {\n  unsafe {\n    io::print(\"hi\")\n    \"ok\"\n  }.expect(\"unsafe\")\n}\n",
+		},
+		{
 			name:   "wraps long function parameters one per line with trailing comma",
 			input:  "fn super_long_function_name(first_name: Str, second_name: Str, third_name: Str, fourth_name: Str, fifth_name: Str, sixth_name: Str) Str { first_name }\n",
 			output: "fn super_long_function_name(\n  first_name: Str,\n  second_name: Str,\n  third_name: Str,\n  fourth_name: Str,\n  fifth_name: Str,\n  sixth_name: Str,\n) Str {\n  first_name\n}\n",

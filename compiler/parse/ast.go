@@ -856,3 +856,12 @@ type BlockExpression struct {
 func (b BlockExpression) String() string {
 	return "BlockExpression"
 }
+
+type UnsafeBlock struct {
+	Location
+	Statements []Statement
+}
+
+func (u UnsafeBlock) String() string {
+	return "unsafe { ... }"
+}

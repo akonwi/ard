@@ -1686,6 +1686,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{stmts: target.stmts, expr: fieldExpr}, nil
 	case air.ExprBlock:
 		return l.lowerBlockExpr(fn, expr)
+	case air.ExprUnsafeBlock:
+		return l.lowerUnsafeBlockExpr(fn, expr)
 	case air.ExprIf:
 		return l.lowerIfExpr(fn, expr)
 	case air.ExprCall:
@@ -1786,6 +1788,72 @@ func (l *lowerer) lowerBlockExpr(fn air.Function, expr air.Expr) (loweredExpr, e
 		return loweredExpr{}, err
 	}
 	return loweredExpr{stmts: append(decls, body...), expr: ast.NewIdent(temp)}, nil
+}
+
+func (l *lowerer) lowerUnsafeBlockExpr(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	resultInfo, ok := l.typeInfo(expr.Type)
+	if !ok || resultInfo.Kind != air.TypeResult {
+		return loweredExpr{}, fmt.Errorf("unsafe block lowered with non-Result type %d", expr.Type)
+	}
+	resultType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+
+	resultName := l.nextTemp()
+	recoveredName := l.nextTemp()
+	recoverAssign := &ast.AssignStmt{
+		Lhs: []ast.Expr{ast.NewIdent(recoveredName)},
+		Tok: token.DEFINE,
+		Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("recover")}},
+	}
+	recoverCond := &ast.BinaryExpr{X: ast.NewIdent(recoveredName), Op: token.NEQ, Y: ast.NewIdent("nil")}
+	recoverResult := &ast.AssignStmt{
+		Lhs: []ast.Expr{ast.NewIdent(resultName)},
+		Tok: token.ASSIGN,
+		Rhs: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+			&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Sprint"), Args: []ast.Expr{ast.NewIdent(recoveredName)}}},
+		}}},
+	}
+	deferRecover := &ast.DeferStmt{Call: &ast.CallExpr{Fun: &ast.FuncLit{
+		Type: &ast.FuncType{Params: &ast.FieldList{}},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.IfStmt{Init: recoverAssign, Cond: recoverCond, Body: &ast.BlockStmt{List: []ast.Stmt{recoverResult}}}}},
+	}}}
+
+	helperFn := fn
+	helperFn.Signature.Return = expr.Type
+	body := []ast.Stmt{deferRecover}
+	var valueExpr ast.Expr
+	if l.isVoidType(resultInfo.Value) {
+		loweredBody, err := l.lowerValueBlock(helperFn, expr.Body, resultInfo.Value, nil)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		body = append(body, loweredBody...)
+		valueExpr = l.voidValueExpr()
+	} else {
+		valueName := l.nextTemp()
+		decls, err := l.declareTemp(resultInfo.Value, valueName)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		body = append(body, decls...)
+		loweredBody, err := l.lowerValueBlock(helperFn, expr.Body, resultInfo.Value, ast.NewIdent(valueName))
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		body = append(body, loweredBody...)
+		valueExpr = ast.NewIdent(valueName)
+	}
+	body = append(body, &ast.ReturnStmt{Results: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: valueExpr},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: ast.NewIdent("true")},
+	}}}})
+
+	return loweredExpr{expr: &ast.CallExpr{Fun: &ast.FuncLit{
+		Type: &ast.FuncType{Results: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(resultName)}, Type: resultType}}}},
+		Body: &ast.BlockStmt{List: body},
+	}}}, nil
 }
 
 func (l *lowerer) lowerIfExpr(fn air.Function, expr air.Expr) (loweredExpr, error) {

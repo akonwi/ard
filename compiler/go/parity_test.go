@@ -1269,6 +1269,90 @@ func TestGoTargetParityConcurrentModuleAccess(t *testing.T) {
 	}
 }
 
+func TestGoTargetParityUnsafeBlocks(t *testing.T) {
+	t.Run("success result can be unwrapped", func(t *testing.T) {
+		program := lowerParitySource(t, `
+fn main() Int {
+  unsafe {
+    42
+  }.expect("unsafe")
+}`)
+		if got := runGoTargetParityJSON(t, program); got != "42" {
+			t.Fatalf("got %s, want 42", got)
+		}
+	})
+
+	t.Run("panic is recovered as result error", func(t *testing.T) {
+		program := lowerParitySource(t, `
+fn main() Str {
+  match unsafe {
+    panic("boom")
+    "ok"
+  } {
+    ok(value) => value,
+    err(message) => message,
+  }
+}`)
+		if got := runGoTargetParityJSON(t, program); got != `"boom"` {
+			t.Fatalf("got %s, want boom", got)
+		}
+	})
+
+	t.Run("try catches unsafe panic", func(t *testing.T) {
+		program := lowerParitySource(t, `
+fn main() Int {
+  try unsafe {
+    panic("boom")
+    1
+  } -> err { 7 }
+  0
+}`)
+		if got := runGoTargetParityJSON(t, program); got != "7" {
+			t.Fatalf("got %s, want 7", got)
+		}
+	})
+
+	t.Run("try inside unsafe returns unsafe error", func(t *testing.T) {
+		program := lowerParitySource(t, `
+fn inner() Int!Str {
+  Result::err("inner")
+}
+
+fn main() Str {
+  match unsafe {
+    let value = try inner()
+    value.to_str()
+  } {
+    ok(value) => value,
+    err(message) => message,
+  }
+}`)
+		if got := runGoTargetParityJSON(t, program); got != `"inner"` {
+			t.Fatalf("got %s, want inner", got)
+		}
+	})
+
+	t.Run("try catch inside unsafe uses unsafe return type", func(t *testing.T) {
+		program := lowerParitySource(t, `
+fn inner() Int!Str {
+  Result::err("inner")
+}
+
+fn main() Str {
+  match unsafe {
+    let value = try inner() -> err { Result::err("caught: {err}") }
+    value.to_str()
+  } {
+    ok(value) => value,
+    err(message) => message,
+  }
+}`)
+		if got := runGoTargetParityJSON(t, program); got != `"caught: inner"` {
+			t.Fatalf("got %s, want caught: inner", got)
+		}
+	})
+}
+
 func TestGoTargetParityAsyncTiming(t *testing.T) {
 	t.Run("async sleep waits requested duration", func(t *testing.T) {
 		start := time.Now()

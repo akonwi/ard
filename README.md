@@ -417,6 +417,16 @@ fn do_math(a Int, b Int) Int!Str {
 
 The `try` keyword will unwrap the result and if the result is an error, it will act as an early return to pass on the failure result.
 
+`unsafe { ... }` marks an interop block where Go/runtime panics are converted into `Str` errors. If the block's final value has type `T`, the unsafe block has type `T!Str`, so it can be handled with normal `Result` methods or `try`:
+
+```ard
+let path = try unsafe {
+  request.URL.Path
+}
+```
+
+`unsafe` only recovers panics in the same goroutine, does not undo partial mutation, and currently rejects `break` inside the block.
+
 ### Testing
 
 Ard has a built-in test framework. Tests are declared with `test fn` and must return `Void!Str`:

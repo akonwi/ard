@@ -200,6 +200,8 @@ func (p printer) renderExpressionValueDoc(expression parse.Expression, parentPre
 		return p.renderTryDoc(node)
 	case *parse.BlockExpression:
 		return p.renderBlockExpressionDoc(node)
+	case *parse.UnsafeBlock:
+		return p.renderUnsafeBlockDoc(node)
 	default:
 		return dText(p.renderExpression(expression, parentPrecedence))
 	}
@@ -904,7 +906,8 @@ func renderableExpressionStatement(statement parse.Statement) (parse.Expression,
 		*parse.ConditionalMatchExpression,
 		*parse.AnonymousFunction,
 		*parse.Try,
-		*parse.BlockExpression:
+		*parse.BlockExpression,
+		*parse.UnsafeBlock:
 		return statement.(parse.Expression), true
 	default:
 		return nil, false
@@ -1040,6 +1043,8 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 		return p.renderTryDoc(node)
 	case *parse.BlockExpression:
 		return p.renderBlockExpressionDoc(node)
+	case *parse.UnsafeBlock:
+		return p.renderUnsafeBlockDoc(node)
 	default:
 		return dText(expression.String())
 	}
@@ -1095,6 +1100,18 @@ func (p printer) renderBlockExpressionDoc(node *parse.BlockExpression) doc {
 	}
 	return dGroup(dConcat(
 		dText("{"),
+		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(node.Statements))),
+		dHardLine(),
+		dText("}"),
+	))
+}
+
+func (p printer) renderUnsafeBlockDoc(node *parse.UnsafeBlock) doc {
+	if len(node.Statements) == 0 {
+		return dText("unsafe {}")
+	}
+	return dGroup(dConcat(
+		dText("unsafe {"),
 		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(node.Statements))),
 		dHardLine(),
 		dText("}"),

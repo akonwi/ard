@@ -25,7 +25,11 @@ This audit tracks the remaining Ard standard-library bindings that still use com
    - Direct-Go keyed struct construction is available, but this audit did not find an existing stdlib companion wrapper that is only constructing a simple Go struct and can now be deleted.
    - The constructible structs in currently imported Go packages are either not exposed by Ard's stdlib yet (`http.Cookie`, simple Go error structs), require unsafe zero values over unexported state (`time.Time`, `base64.Encoding`, `strings.Builder`), or still depend on unsupported field shapes (`http.Client`, `http.Request`, `http.Response`, `http.Server`, `os.ProcAttr`, `io.LimitedReader`).
 
-6. **Ongoing direct-Go capability backlog**
+6. **Completed unsafe/recovering interop block**
+   - `unsafe { ... }` now converts same-goroutine Go/runtime panics into `T!Str` results and can be used with `try` around direct-Go nil/panic risks.
+   - `break` remains rejected inside unsafe blocks until explicit control-flow semantics are designed.
+
+7. **Ongoing direct-Go capability backlog**
    - Add direct-Go support for explicit conversions, fixed arrays, variadic calls or slice spread, named map/slice alias assignment, zero/nil construction policy, embedded/promoted fields, interface alias assignability, and callback/interface bridging.
    - This is not required to finish the current stdlib polish branch; it unlocks larger future migrations.
 

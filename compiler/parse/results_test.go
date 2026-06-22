@@ -222,6 +222,33 @@ func TestResultTypeInSignature(t *testing.T) {
 	})
 }
 
+func TestUnsafeBlock(t *testing.T) {
+	runTests(t, []test{
+		{
+			name: "unsafe block expression",
+			input: `unsafe {
+  panic("boom")
+  42
+}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&UnsafeBlock{
+						Statements: []Statement{
+							&FunctionCall{
+								Name:     "panic",
+								Args:     []Argument{{Value: &StrLiteral{Value: "boom"}}},
+								Comments: []Comment{},
+							},
+							&NumLiteral{Value: "42"},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
 func TestTryKeyword(t *testing.T) {
 	runTests(t, []test{
 		{

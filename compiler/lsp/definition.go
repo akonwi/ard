@@ -240,6 +240,8 @@ func findScopedValueDefinitionInStatement(name string, stmt parse.Statement, tar
 		return findScopedValueDefinition(name, s.Body, target, filePath, current)
 	case *parse.BlockExpression:
 		return findScopedValueDefinition(name, s.Statements, target, filePath, visible)
+	case *parse.UnsafeBlock:
+		return findScopedValueDefinition(name, s.Statements, target, filePath, visible)
 	case *parse.Try:
 		if s.Expression != nil && pointInRange(target, s.Expression.GetLocation()) {
 			return findScopedValueDefinitionInExpression(name, s.Expression, target, filePath, visible)
@@ -264,6 +266,8 @@ func findScopedValueDefinitionInExpression(name string, expr parse.Expression, t
 	}
 	switch e := expr.(type) {
 	case *parse.BlockExpression:
+		return findScopedValueDefinition(name, e.Statements, target, filePath, visible)
+	case *parse.UnsafeBlock:
 		return findScopedValueDefinition(name, e.Statements, target, filePath, visible)
 	case *parse.IfStatement:
 		return findScopedValueDefinitionInStatement(name, e, target, filePath, visible)
@@ -576,6 +580,10 @@ func findVariableDefinition(name string, stmts []parse.Statement, filePath strin
 			if def := findVariableDefinition(name, s.Statements, filePath); def != nil {
 				return def
 			}
+		case *parse.UnsafeBlock:
+			if def := findVariableDefinition(name, s.Statements, filePath); def != nil {
+				return def
+			}
 		}
 	}
 	return nil
@@ -729,6 +737,10 @@ func findParameterOrLoopDefinition(name string, stmts []parse.Statement, filePat
 				return def
 			}
 		case *parse.BlockExpression:
+			if def := findParameterOrLoopDefinition(name, s.Statements, filePath); def != nil {
+				return def
+			}
+		case *parse.UnsafeBlock:
 			if def := findParameterOrLoopDefinition(name, s.Statements, filePath); def != nil {
 				return def
 			}

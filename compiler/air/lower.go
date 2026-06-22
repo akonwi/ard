@@ -3669,6 +3669,28 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		return &Expr{Kind: ExprBlock, Type: typeID, Body: body}, nil
+	case *checker.UnsafeBlock:
+		resultType := typeID
+		resultInfo, ok := fl.l.typeInfo(resultType)
+		if !ok || resultInfo.Kind != TypeResult {
+			var err error
+			resultType, err = fl.internType(e.Type())
+			if err != nil {
+				return nil, err
+			}
+			resultInfo, ok = fl.l.typeInfo(resultType)
+			if !ok || resultInfo.Kind != TypeResult {
+				return nil, fmt.Errorf("unsafe block lowered with non-Result type %s", e.Type().String())
+			}
+		}
+		previousReturn := fl.fn.Signature.Return
+		fl.fn.Signature.Return = resultType
+		body, err := fl.lowerBlockWithDefault(e.Body.Stmts, resultInfo.Value)
+		fl.fn.Signature.Return = previousReturn
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprUnsafeBlock, Type: resultType, Body: body}, nil
 	case *checker.If:
 		return fl.lowerIf(typeID, e)
 	case *checker.ConditionalMatch:

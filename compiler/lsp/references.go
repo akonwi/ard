@@ -215,6 +215,10 @@ func findReferenceDeclarationTarget(stmts []parse.Statement, target parse.Point,
 			if resolved := findReferenceDeclarationTarget(s.Statements, target, filePath, source, prog); resolved != nil {
 				return resolved
 			}
+		case *parse.UnsafeBlock:
+			if resolved := findReferenceDeclarationTarget(s.Statements, target, filePath, source, prog); resolved != nil {
+				return resolved
+			}
 		}
 	}
 	return nil
@@ -528,6 +532,8 @@ func visitReferenceStatement(stmt parse.Statement, currentFile string, source st
 		}
 	case *parse.BlockExpression:
 		visitReferenceStatements(s.Statements, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+	case *parse.UnsafeBlock:
+		visitReferenceStatements(s.Statements, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.Try:
 		visitReferenceExpr(s.Expression, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		if s.CatchVar != nil {
@@ -605,6 +611,8 @@ func visitReferenceExpr(expr parse.Expression, currentFile string, source string
 		}
 		visitReferenceStatements(e.CatchBlock, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.BlockExpression:
+		visitReferenceStatements(e.Statements, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
+	case *parse.UnsafeBlock:
 		visitReferenceStatements(e.Statements, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.InterpolatedStr:
 		for _, chunk := range e.Chunks {
