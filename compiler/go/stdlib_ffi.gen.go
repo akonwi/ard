@@ -78,7 +78,6 @@ var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
 	"Print":                {function: "Print", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"ReadLine":             {function: "ReadLine", returns: generatedStdlibReturnValueError, params: nil},
 	"RuneFromInt":          {function: "RuneFromInt", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"RuneFromStr":          {function: "RuneFromStr", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"SqlBeginTx":           {function: "SqlBeginTx", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"SqlClose":             {function: "SqlClose", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"SqlCommit":            {function: "SqlCommit", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},

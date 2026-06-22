@@ -50,7 +50,6 @@ func NewHost(config HostConfig) Host {
 	return Host{
 		ByteFromInt:          ByteFromInt,
 		RuneFromInt:          RuneFromInt,
-		RuneFromStr:          RuneFromStr,
 		StrFromUtf8:          StrFromUtf8,
 		StrFromRunes:         StrFromRunes,
 		BytesToDynamic:       BytesToDynamic,
@@ -194,17 +193,6 @@ func RuneFromInt(value int) Maybe[rune] {
 		return None[rune]()
 	}
 	return Some(r)
-}
-
-func RuneFromStr(value string) Maybe[rune] {
-	if !utf8.ValidString(value) {
-		return None[rune]()
-	}
-	runes := []rune(value)
-	if len(runes) != 1 || !utf8.ValidRune(runes[0]) {
-		return None[rune]()
-	}
-	return Some(runes[0])
 }
 
 func StrFromUtf8(bytes []byte) (string, error) {

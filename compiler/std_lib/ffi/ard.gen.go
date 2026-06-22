@@ -180,7 +180,6 @@ type Host struct {
 	Print                func(string string)
 	ReadLine             func() (string, error)
 	RuneFromInt          func(value int) Maybe[rune]
-	RuneFromStr          func(value string) Maybe[rune]
 	SqlBeginTx           func(db *sql.DB) (*sql.Tx, error)
 	SqlClose             func(db *sql.DB) error
 	SqlCommit            func(tx *sql.Tx) error
@@ -312,9 +311,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.RuneFromInt != nil {
 		functions["RuneFromInt"] = h.RuneFromInt
-	}
-	if h.RuneFromStr != nil {
-		functions["RuneFromStr"] = h.RuneFromStr
 	}
 	if h.SqlBeginTx != nil {
 		functions["SqlBeginTx"] = h.SqlBeginTx

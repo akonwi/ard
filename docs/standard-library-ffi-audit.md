@@ -29,7 +29,10 @@ This audit tracks the remaining Ard standard-library bindings that still use com
    - `unsafe { ... }` now converts same-goroutine Go/runtime panics into `T!Str` results and can be used with `try` around direct-Go nil/panic risks.
    - `break` remains rejected inside unsafe blocks until explicit control-flow semantics are designed.
 
-7. **Ongoing direct-Go capability backlog**
+7. **Completed final small pure-Ard cleanup**
+   - `rune::from_str` now uses Ard string rune views and `Maybe`; only checked `Int -> Rune?` remains in companion FFI.
+
+8. **Ongoing direct-Go capability backlog**
    - Add direct-Go support for explicit conversions, fixed arrays, variadic calls or slice spread, named map/slice alias assignment, zero/nil construction policy, embedded/promoted fields, interface alias assignability, and callback/interface bridging.
    - This is not required to finish the current stdlib polish branch; it unlocks larger future migrations.
 
@@ -78,9 +81,9 @@ This audit tracks the remaining Ard standard-library bindings that still use com
 
 ### `ard/rune`
 
-- Current adapters: `RuneFromInt`, `RuneFromStr`.
+- Current adapter: `RuneFromInt`.
 - `RuneFromInt` still needs an adapter for checked `Int -> Rune?`.
-- `RuneFromStr` could be pure Ard by checking `value.runes().size() == 1`, assuming Ard `Str` values are always valid UTF-8. The current adapter also rejects invalid UTF-8 Go strings, so changing it would slightly narrow the validation surface.
+- `RuneFromStr` has been refactored to pure Ard by checking `value.runes().size() == 1` and returning that sole rune. This assumes Ard `Str` values are valid UTF-8 at the source/runtime boundary; invalid byte sequences should be rejected when constructing a `Str`, for example by `Str::from_bytes`.
 
 ### `ard/string`
 
