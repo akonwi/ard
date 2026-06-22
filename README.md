@@ -70,6 +70,14 @@ ctx.tree.add_child(child)
 
 The `ctx` binding is immutable, but `ctx.tree` is mutable access to the referenced `ViewTree`. Field assignment writes through the reference; it does not rebind the field slot.
 
+Nullable mutable references use grouping before `?`:
+
+```ard
+use ard/maybe
+
+let maybe_tree: (mut ViewTree)? = maybe::none()
+```
+
 #### Increment/Decrement short hand
 
 The syntax for this is slightly different from other languages.
@@ -367,6 +375,25 @@ Integer ranges are inclusive (`1..10` includes both 1 and 10). When patterns ove
 A static path is a sequence of `name::thing`. Ard has a preference for simple paths where possible, i.e. only one `::`.
 In order to reach further into a package for something, make that import explicit with `use name/thing/nested`,
 so that deeply nested access can be simply called with `nested::thing`.
+
+### Direct Go interop
+Ard can import Go packages directly with `use go:`. Exported Go struct fields use normal Ard field syntax for reads, writes, and keyed construction:
+
+```ard
+use go:image as image
+use go:net/http as gohttp
+
+let rect = image::Rectangle{
+  Min: image::Point{X: 0, Y: 0},
+  Max: image::Point{X: 80, Y: 24},
+}
+
+fn mark_ok(resp: mut gohttp::Response) {
+  resp.StatusCode = gohttp::StatusOK
+}
+```
+
+Go pointer nil behavior is preserved. Use `ard/ffi::is_nil(value)` for explicit host nil checks, or `unsafe { ... }` when a trusted interop block may panic and should return `T!Str`.
 
 ### Errors
 Ard does not have exceptions. Instead, errors are represented as values. The built-in `Result<$Val, $Err>` type can be used as a special type union of a success value and an error value.

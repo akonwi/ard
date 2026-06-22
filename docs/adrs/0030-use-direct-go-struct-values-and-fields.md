@@ -43,7 +43,7 @@ Go struct interop raises more decisions than field reads alone:
 
 Support direct-Go named struct values as host struct values with field metadata loaded from `go/packages`.
 
-The compiler should discover exported, non-promoted fields for exported Go named struct types. Field names in Ard are the exported Go field names exactly, including casing. Unexported Go fields are not visible in Ard.
+The compiler should discover exported, non-embedded/non-promoted fields for exported Go named struct types. Field names in Ard are the exported Go field names exactly, including casing. Unexported and embedded Go fields are not visible in Ard in the initial implementation.
 
 ### Field reads
 
@@ -104,13 +104,13 @@ let rect = image::Rectangle{
 Construction rules:
 
 - Only keyed struct literals are supported. Do not support Go-style positional struct literals.
-- Keys must name exported, non-promoted Go fields exactly.
-- Every exported, non-promoted field in the Ard-visible shape must be supplied. Direct-Go struct literals do not use Go zero values as defaults for omitted fields.
+- Keys must name exported, non-embedded/non-promoted Go fields exactly.
+- Every exported, non-embedded/non-promoted field in the Ard-visible shape must be supplied. Direct-Go struct literals do not use Go zero values as defaults for omitted fields.
 - Ard's existing omission rule only applies to Ard nullable fields. Because Go does not mark pointer, slice, map, interface, channel, or function fields as semantically optional, the compiler must not infer optional fields from Go zero or nil-able types.
 - Field values are checked with the same direct-Go assignment compatibility used for field writes.
-- If any exported field's Go type is unsupported by the current direct-Go type mapping, construction is rejected rather than allowing the field to be omitted.
+- If any exported, non-embedded field's Go type is unsupported by the current direct-Go type mapping, construction is rejected rather than allowing the field to be omitted.
 - Unexported fields cannot be set. They are not part of the Ard-visible shape; if a Go type relies on unexported state or constructor invariants, use an exported Go constructor or companion wrapper instead of a direct struct literal.
-- Embedded fields can be set only by their explicit exported field name in the initial implementation; promoted-field lookup remains deferred to ADR/follow-up work for #249.
+- Embedded fields are not part of the initial Ard-visible shape, even by explicit field name. Embedded/promoted-field lookup remains deferred to ADR/follow-up work for #249.
 
 A direct Go struct literal creates a Go value, not a pointer. If Ard needs `mut go::T`, it should follow normal mutable-reference rules: bind the value to mutable storage or pass an addressable mutable value where a `mut go::T` is required. Do not add special pointer-literal syntax as part of this decision.
 
@@ -133,6 +133,8 @@ fn path(req: mut gohttp::Request) Str {
 If `req` or `req.URL` is nil at runtime, the generated Go code may panic. Public Ard APIs that want safer domain semantics should adapt those Go conventions explicitly, using Ard wrappers, companion FFI, or the unsafe/recovering block described below.
 
 Go `nil` is a host value-state rather than Ard `Maybe` absence. In some APIs it means default behavior, uninitialized storage, or a sentinel understood only by the Go package; in that sense it is often closer to Ard's no-payload `Void` idea than to semantic optionality. This ADR does not add a general `nil` literal or convert `Void` to Go nil. Direct-Go struct construction still requires every exported Ard-visible field to be supplied; if a Go pointer field must be nil and Ard has no value to express that safely, users should call an exported Go constructor or use a companion wrapper.
+
+Optional mutable references are valid Ard types when written with grouping, such as `(mut gohttp::Request)?`. They are useful when an Ard API intentionally models optional reference presence, but direct-Go pointer fields are not automatically wrapped this way. A wrapper can choose `(mut go::T)?` explicitly when that is the Ard-facing contract.
 
 Nil-able Go slices, maps, interfaces, functions, and channels likewise preserve Go semantics when their types become representable. They should not be silently mapped to Ard `Maybe` unless a later ADR accepts that broader interop rule.
 
@@ -202,9 +204,9 @@ fn request_path(req: mut gohttp::Request) Str {
 
 The block has important limits: recovery only catches panics in the same goroutine, it cannot roll back partial mutation, and it may also catch ordinary Ard runtime panics inside the block. The initial implementation rejects `break` inside `unsafe` blocks. The Go lowering uses an inner function with `defer`/`recover`, and Go cannot directly `break` an outer Ard loop from inside that nested function. Supporting that later would require a control-flow signal from the unsafe helper back to the outer lowered loop. Treat `unsafe` as a mitigation tool for direct Go interop, not as a guarantee that arbitrary Go APIs are safe.
 
-### Phased implementation
+### Implementation phases
 
-Implement this ADR in phases while keeping the feature scope intact:
+This work was implemented in phases while keeping the feature scope intact:
 
 1. **Field metadata and reads**
    - Load exported struct fields from Go package metadata.
@@ -226,7 +228,7 @@ Implement this ADR in phases while keeping the feature scope intact:
 
 4. **Keyed struct construction**
    - Type-check module-qualified direct-Go struct literals.
-   - Reject literals that omit any exported, non-promoted Ard-visible field.
+   - Reject literals that omit any exported, non-embedded/non-promoted Ard-visible field.
    - Lower to keyed Go composite literals once all visible fields are supplied.
    - Reject fields whose Go type is not representable by current direct-Go assignment compatibility.
 
