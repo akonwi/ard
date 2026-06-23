@@ -771,7 +771,7 @@ func (l *lowerer) lowerTraitInterfaceDecl(trait air.Trait) (ast.Decl, bool, erro
 		}
 		methods = append(methods, &ast.Field{Names: []*ast.Ident{ast.NewIdent(methodName)}, Type: methodType})
 	}
-	return &ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(traitInterfaceTypeName(trait)), Type: &ast.InterfaceType{Methods: &ast.FieldList{List: methods}}}}}, true, nil
+	return &ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(l.traitInterfaceTypeName(trait)), Type: &ast.InterfaceType{Methods: &ast.FieldList{List: methods}}}}}, true, nil
 }
 
 func (l *lowerer) traitInterfaceAvailable(traitID air.TraitID) bool {
@@ -904,7 +904,25 @@ func (l *lowerer) mutableTraitMethodFuncType(method air.TraitMethod) (ast.Expr, 
 	return fnType, nil
 }
 
-func traitInterfaceTypeName(trait air.Trait) string {
+func (l *lowerer) traitInterfaceTypeName(trait air.Trait) string {
+	if name, ok := l.naturalTraitInterfaceTypeName(trait); ok {
+		return name
+	}
+	return legacyTraitInterfaceTypeName(trait)
+}
+
+func (l *lowerer) naturalTraitInterfaceTypeName(trait air.Trait) (string, bool) {
+	if trait.Name == "" {
+		return "", false
+	}
+	name := naturalGoIdentifier(trait.Name, !trait.Private)
+	if name == "" || name == "_" {
+		return "", false
+	}
+	return name, true
+}
+
+func legacyTraitInterfaceTypeName(trait air.Trait) string {
 	return fmt.Sprintf("ardTrait_%s_%d", sanitizeName(trait.Name), trait.ID)
 }
 
@@ -2896,7 +2914,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return ast.NewIdent("any"), nil
 	case air.TypeTraitObject:
 		if l.usesNativeTraitInterface(typeID) {
-			return ast.NewIdent(traitInterfaceTypeName(l.program.Traits[info.Trait])), nil
+			return ast.NewIdent(l.traitInterfaceTypeName(l.program.Traits[info.Trait])), nil
 		}
 		return ast.NewIdent("any"), nil
 	default:

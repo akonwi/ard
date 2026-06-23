@@ -50,6 +50,23 @@ func typeNames(types []air.TypeInfo) []string {
 	return out
 }
 
+func TestTraitInterfaceTypeNameUsesNaturalVisibility(t *testing.T) {
+	l := &lowerer{program: &air.Program{Traits: []air.Trait{
+		{ID: 0, Name: "Renderable", ModulePath: "view.ard"},
+		{ID: 1, Name: "internal_drawable", ModulePath: "view.ard", Private: true},
+		{ID: 2, Name: "ToString", ModulePath: "ard/string"},
+	}}}
+	if got := l.traitInterfaceTypeName(l.program.Traits[0]); got != "Renderable" {
+		t.Fatalf("public trait interface name = %q, want Renderable", got)
+	}
+	if got := l.traitInterfaceTypeName(l.program.Traits[1]); got != "internalDrawable" {
+		t.Fatalf("private trait interface name = %q, want internalDrawable", got)
+	}
+	if got := l.traitInterfaceTypeName(l.program.Traits[2]); got != "ToString" {
+		t.Fatalf("stdlib trait interface name = %q, want ToString", got)
+	}
+}
+
 func lowerProgramAST(t testing.TB, program *air.Program, options Options) map[string]*ast.File {
 	t.Helper()
 	files, err := lowerProgram(program, options)
@@ -3914,7 +3931,7 @@ func TestLowerProgramEmitsGoInterfaceForTraitObject(t *testing.T) {
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
 		typeSpec, ok := node.(*ast.TypeSpec)
-		if !ok || typeSpec.Name == nil || !strings.HasPrefix(typeSpec.Name.Name, "ardTrait_Renderable_") {
+		if !ok || typeSpec.Name == nil || typeSpec.Name.Name != "Renderable" {
 			return false
 		}
 		iface, ok := typeSpec.Type.(*ast.InterfaceType)
@@ -4034,7 +4051,7 @@ func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
 		typeSpec, ok := node.(*ast.TypeSpec)
-		if !ok || typeSpec.Name == nil || !strings.HasPrefix(typeSpec.Name.Name, "ardTrait_Writer_") {
+		if !ok || typeSpec.Name == nil || typeSpec.Name.Name != "Writer" {
 			return false
 		}
 		_, ok = typeSpec.Type.(*ast.InterfaceType)
@@ -4071,7 +4088,7 @@ func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 			return false
 		}
 		conversion, ok := call.Args[0].(*ast.CallExpr)
-		if !ok || !strings.HasPrefix(astCallName(conversion), "ardTrait_Writer_") || len(conversion.Args) != 1 {
+		if !ok || astCallName(conversion) != "Writer" || len(conversion.Args) != 1 {
 			return false
 		}
 		addr, ok := conversion.Args[0].(*ast.UnaryExpr)
@@ -4119,7 +4136,7 @@ func TestLowerProgramSupportsUserTraitObjectDispatch(t *testing.T) {
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
 		typeSpec, ok := node.(*ast.TypeSpec)
-		if !ok || typeSpec.Name == nil || !strings.HasPrefix(typeSpec.Name.Name, "ardTrait_Renderable_") {
+		if !ok || typeSpec.Name == nil || typeSpec.Name.Name != "Renderable" {
 			return false
 		}
 		_, ok = typeSpec.Type.(*ast.InterfaceType)
@@ -4505,7 +4522,7 @@ func TestLowerProgramSupportsStoredTraitObjectDispatch(t *testing.T) {
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		return ok && strings.HasPrefix(astCallName(call), "ardTrait_Drawable_")
+		return ok && astCallName(call) == "Drawable"
 	}) {
 		t.Fatal("generated AST missing native interface trait-object conversion")
 	}
@@ -4516,18 +4533,18 @@ func TestLowerProgramSupportsStoredTraitObjectDispatch(t *testing.T) {
 		}
 		key, keyOK := kv.Key.(*ast.Ident)
 		call, callOK := kv.Value.(*ast.CallExpr)
-		return keyOK && key.Name == "Child" && callOK && strings.HasPrefix(astCallName(call), "ardTrait_Drawable_")
+		return keyOK && key.Name == "Child" && callOK && astCallName(call) == "Drawable"
 	}) {
 		t.Fatal("generated AST missing struct field native trait-object conversion")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		lit, ok := node.(*ast.CompositeLit)
-		if !ok || !strings.HasPrefix(astExprName(lit.Type), "[]ardTrait_Drawable_") {
+		if !ok || astExprName(lit.Type) != "[]Drawable" {
 			return false
 		}
 		for _, elem := range lit.Elts {
 			call, ok := elem.(*ast.CallExpr)
-			if ok && strings.HasPrefix(astCallName(call), "ardTrait_Drawable_") {
+			if ok && astCallName(call) == "Drawable" {
 				return true
 			}
 		}
