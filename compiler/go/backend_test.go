@@ -191,6 +191,63 @@ func TestNamedTypeExprKeepsSinglePackageModeUnqualified(t *testing.T) {
 	}
 }
 
+func TestFunctionExprQualifiesCrossModuleInModulePackageMode(t *testing.T) {
+	program := &air.Program{Modules: []air.Module{
+		{ID: 0, Path: "service.ard"},
+		{ID: 1, Path: "consumer.ard"},
+	}}
+	fn := air.Function{ID: 0, Module: 0, Name: "make_user"}
+	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}, useModulePackages: true}
+	if got := astExprName(l.functionExpr(fn)); got != "service.service_ard__make_user" {
+		t.Fatalf("cross-module function expr = %q, want service.service_ard__make_user", got)
+	}
+	if got := l.currentImports["service"]; got != "generated/service" {
+		t.Fatalf("registered import = %q, want generated/service", got)
+	}
+}
+
+func TestFunctionExprKeepsSinglePackageModeUnqualified(t *testing.T) {
+	program := &air.Program{Modules: []air.Module{
+		{ID: 0, Path: "service.ard"},
+		{ID: 1, Path: "consumer.ard"},
+	}}
+	fn := air.Function{ID: 0, Module: 0, Name: "make_user"}
+	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}}
+	if got := astExprName(l.functionExpr(fn)); got != "service_ard__make_user" {
+		t.Fatalf("single-package function expr = %q, want service_ard__make_user", got)
+	}
+	if len(l.currentImports) != 0 {
+		t.Fatalf("single-package function expr registered imports: %#v", l.currentImports)
+	}
+}
+
+func TestGlobalExprQualifiesCrossModuleInModulePackageMode(t *testing.T) {
+	program := &air.Program{Modules: []air.Module{
+		{ID: 0, Path: "config.ard"},
+		{ID: 1, Path: "consumer.ard"},
+	}}
+	global := air.Global{ID: 0, Module: 0, Name: "default_name"}
+	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}, useModulePackages: true}
+	if got := astExprName(l.globalExpr(global)); got != "config.config_ard__global_default_name" {
+		t.Fatalf("cross-module global expr = %q, want config.config_ard__global_default_name", got)
+	}
+	if got := l.currentImports["config"]; got != "generated/config" {
+		t.Fatalf("registered import = %q, want generated/config", got)
+	}
+}
+
+func TestGlobalExprKeepsSameModuleUnqualifiedInModulePackageMode(t *testing.T) {
+	program := &air.Program{Modules: []air.Module{{ID: 0, Path: "config.ard"}}}
+	global := air.Global{ID: 0, Module: 0, Name: "default_name"}
+	l := &lowerer{program: program, currentModule: 0, currentImports: map[string]string{}, useModulePackages: true}
+	if got := astExprName(l.globalExpr(global)); got != "config_ard__global_default_name" {
+		t.Fatalf("same-module global expr = %q, want config_ard__global_default_name", got)
+	}
+	if len(l.currentImports) != 0 {
+		t.Fatalf("same-module global expr registered imports: %#v", l.currentImports)
+	}
+}
+
 func lowerProgramAST(t testing.TB, program *air.Program, options Options) map[string]*ast.File {
 	t.Helper()
 	files, err := lowerProgram(program, options)

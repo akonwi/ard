@@ -977,6 +977,22 @@ func (l *lowerer) namedTypeExpr(info air.TypeInfo) ast.Expr {
 	return l.moduleQualified(owner, name)
 }
 
+func (l *lowerer) functionExpr(fn air.Function) ast.Expr {
+	name := functionName(l.program, fn)
+	if !l.useModulePackages || fn.Module == l.currentModule {
+		return ast.NewIdent(name)
+	}
+	return l.moduleQualified(fn.Module, name)
+}
+
+func (l *lowerer) globalExpr(global air.Global) ast.Expr {
+	name := globalName(l.program, global)
+	if !l.useModulePackages || global.Module == l.currentModule {
+		return ast.NewIdent(name)
+	}
+	return l.moduleQualified(global.Module, name)
+}
+
 func (l *lowerer) moduleQualified(module air.ModuleID, name string) ast.Expr {
 	return l.qualified(l.moduleImportAlias(module), moduleImportPath(l.program, module), name)
 }
@@ -1020,7 +1036,7 @@ func mutableTraitMethodFieldName(trait air.TraitID, methodIndex int) string {
 
 func (l *lowerer) lowerMainWrapper(root air.FunctionID) (ast.Decl, error) {
 	fn := l.program.Functions[root]
-	call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, fn))}
+	call := &ast.CallExpr{Fun: l.functionExpr(fn)}
 	body := []ast.Stmt{}
 	for _, param := range fn.Signature.Params {
 		_ = param
@@ -1159,7 +1175,7 @@ func (l *lowerer) lowerGoMethodWrapper(fn air.Function) (*ast.FuncDecl, bool, er
 		callArgs = append(callArgs, ast.NewIdent(name))
 	}
 
-	call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, fn)), Args: callArgs}
+	call := &ast.CallExpr{Fun: l.functionExpr(fn), Args: callArgs}
 	body := []ast.Stmt{}
 	if l.isVoidType(fn.Signature.Return) {
 		body = append(body, &ast.ExprStmt{X: call})
@@ -1591,12 +1607,12 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if expr.Global < 0 || int(expr.Global) >= len(l.program.Globals) {
 			return loweredExpr{}, fmt.Errorf("unknown global %d", expr.Global)
 		}
-		return loweredExpr{expr: ast.NewIdent(globalName(l.program, l.program.Globals[expr.Global]))}, nil
+		return loweredExpr{expr: l.globalExpr(l.program.Globals[expr.Global])}, nil
 	case air.ExprFunctionRef:
 		if !validFunctionID(l.program, expr.Function) {
 			return loweredExpr{}, fmt.Errorf("unknown function %d", expr.Function)
 		}
-		return loweredExpr{expr: ast.NewIdent(functionName(l.program, l.program.Functions[expr.Function]))}, nil
+		return loweredExpr{expr: l.functionExpr(l.program.Functions[expr.Function])}, nil
 	case air.ExprUnionWrap:
 		return l.lowerUnionWrap(fn, expr)
 	case air.ExprMatchUnion:
@@ -2223,7 +2239,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, target)), Args: args}
+		call := &ast.CallExpr{Fun: l.functionExpr(target), Args: args}
 		return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
 	case air.ExprEq, air.ExprNotEq:
 		leftTypeID := l.resolvedExprType(fn, *expr.Left)
@@ -3679,7 +3695,7 @@ func (l *lowerer) mutableTraitImplForwardingCase(traitMethod air.TraitMethod, me
 	for i := range traitMethod.Signature.Params {
 		args = append(args, ast.NewIdent(fmt.Sprintf("arg%d", i)))
 	}
-	call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, methodFn)), Args: args}
+	call := &ast.CallExpr{Fun: l.functionExpr(methodFn), Args: args}
 	body := []ast.Stmt{}
 	if l.isVoidType(traitMethod.Signature.Return) {
 		body = append(body, &ast.ExprStmt{X: call})
@@ -3761,7 +3777,7 @@ func (l *lowerer) mutableTraitForwarderMethodExpr(traitMethod air.TraitMethod, m
 	for i := range traitMethod.Signature.Params {
 		args = append(args, ast.NewIdent(fmt.Sprintf("arg%d", i)))
 	}
-	call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, methodFn)), Args: args}
+	call := &ast.CallExpr{Fun: l.functionExpr(methodFn), Args: args}
 	body := []ast.Stmt{}
 	if l.isVoidType(traitMethod.Signature.Return) {
 		body = append(body, &ast.ExprStmt{X: call})
@@ -4983,12 +4999,12 @@ func (l *lowerer) lowerSpawnFiber(fn air.Function, expr air.Expr) (loweredExpr, 
 			targetExpr = &ast.FuncLit{
 				Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: l.voidTypeExpr()}}}},
 				Body: &ast.BlockStmt{List: []ast.Stmt{
-					&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, targetFn))}},
+					&ast.ExprStmt{X: &ast.CallExpr{Fun: l.functionExpr(targetFn)}},
 					&ast.ReturnStmt{Results: []ast.Expr{l.voidValueExpr()}},
 				}},
 			}
 		} else {
-			targetExpr = &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: mustTypeExpr(l, targetFn.Signature.Return)}}}}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, targetFn))}}}}}}
+			targetExpr = &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: mustTypeExpr(l, targetFn.Signature.Return)}}}}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: l.functionExpr(targetFn)}}}}}}
 		}
 	}
 	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: ast.NewIdent("ardSpawnFiber"), Index: mustTypeExpr(l, l.program.Types[expr.Type-1].Elem)}, Args: []ast.Expr{targetExpr}}}, nil
@@ -5064,7 +5080,7 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 		callArgs = append(callArgs, ast.NewIdent(name))
 	}
 	bodyStmts := []ast.Stmt{}
-	call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, closureFn)), Args: callArgs}
+	call := &ast.CallExpr{Fun: l.functionExpr(closureFn), Args: callArgs}
 	if funcType == nil {
 		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}}
 	} else {
@@ -5889,7 +5905,7 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 			}
 			args = append(args, argExpr)
 		}
-		call := &ast.CallExpr{Fun: ast.NewIdent(functionName(l.program, methodFn)), Args: args}
+		call := &ast.CallExpr{Fun: l.functionExpr(methodFn), Args: args}
 		if isVoid {
 			body = append(body, &ast.ExprStmt{X: call})
 		} else {
