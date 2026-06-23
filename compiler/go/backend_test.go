@@ -361,7 +361,7 @@ fn main() {
 		}
 		key, keyOK := kv.Key.(*ast.Ident)
 		call, callOK := kv.Value.(*ast.CallExpr)
-		if !keyOK || key.Name != "padding" || !callOK || astCallName(call) != "ardruntime.Some" {
+		if !keyOK || key.Name != "Padding" || !callOK || astCallName(call) != "ardruntime.Some" {
 			return false
 		}
 		indexed, ok := call.Fun.(*ast.IndexExpr)
@@ -1420,11 +1420,11 @@ func TestLowerProgramSupportsStructsAndEnums(t *testing.T) {
 			if !keyOK {
 				continue
 			}
-			if key.Name == "name" {
+			if key.Name == "Name" {
 				value, ok := kv.Value.(*ast.BasicLit)
 				hasName = ok && value.Value == `"Ada"`
 			}
-			if key.Name == "age" {
+			if key.Name == "Age" {
 				value, ok := kv.Value.(*ast.BasicLit)
 				hasAge = ok && value.Value == "41"
 			}
@@ -1439,7 +1439,7 @@ func TestLowerProgramSupportsStructsAndEnums(t *testing.T) {
 			return false
 		}
 		selector, ok := binary.X.(*ast.SelectorExpr)
-		return ok && selector.Sel.Name == "age"
+		return ok && selector.Sel.Name == "Age"
 	}) {
 		t.Fatal("generated AST missing field access lowering")
 	}
@@ -3201,7 +3201,7 @@ func TestLowerProgramUsesRuntimeMaybeForRecursiveNullableFields(t *testing.T) {
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
 		field, ok := node.(*ast.Field)
-		if !ok || len(field.Names) != 1 || field.Names[0].Name != "parent" {
+		if !ok || len(field.Names) != 1 || field.Names[0].Name != "Parent" {
 			return false
 		}
 		indexed, ok := field.Type.(*ast.IndexExpr)
@@ -3211,7 +3211,7 @@ func TestLowerProgramUsesRuntimeMaybeForRecursiveNullableFields(t *testing.T) {
 	}
 	if astFilesContain(files, func(node ast.Node) bool {
 		field, ok := node.(*ast.Field)
-		if !ok || len(field.Names) != 1 || field.Names[0].Name != "parent" {
+		if !ok || len(field.Names) != 1 || field.Names[0].Name != "Parent" {
 			return false
 		}
 		star, ok := field.Type.(*ast.StarExpr)
@@ -3778,27 +3778,27 @@ func TestLowerProgramEmitsGoMethodWrapperForInherentImpl(t *testing.T) {
 		}
 
 		impl Box {
-			fn Value() Int {
+			fn Count() Int {
 				self.value
 			}
 		}
 
 		fn main() Int {
 			let box = Box{value: 7}
-			box.Value()
+			box.Count()
 		}
 	`)
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
 		fn, ok := node.(*ast.FuncDecl)
-		if !ok || fn.Recv == nil || fn.Name == nil || fn.Name.Name != "Value" || len(fn.Recv.List) != 1 {
+		if !ok || fn.Recv == nil || fn.Name == nil || fn.Name.Name != "Count" || len(fn.Recv.List) != 1 {
 			return false
 		}
 		foundCall := false
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
-			if ok && strings.Contains(astCallName(call), "Box_Value") {
+			if ok && strings.Contains(astCallName(call), "Box_Count") {
 				foundCall = true
 				return false
 			}
@@ -3916,7 +3916,7 @@ func TestLowerProgramEmitsGoInterfaceForTraitObject(t *testing.T) {
 func TestLowerProgramSkipsGoMethodWrapperWhenStructFieldCollides(t *testing.T) {
 	program := lowerSource(t, `
 		trait Named {
-			fn name() Str
+			fn Name() Str
 		}
 
 		struct User {
@@ -3924,7 +3924,7 @@ func TestLowerProgramSkipsGoMethodWrapperWhenStructFieldCollides(t *testing.T) {
 		}
 
 		impl Named for User {
-			fn name() Str {
+			fn Name() Str {
 				self.name
 			}
 		}
@@ -3933,7 +3933,7 @@ func TestLowerProgramSkipsGoMethodWrapperWhenStructFieldCollides(t *testing.T) {
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if astFilesContain(files, func(node ast.Node) bool {
 		fn, ok := node.(*ast.FuncDecl)
-		return ok && fn.Recv != nil && fn.Name != nil && fn.Name.Name == "name"
+		return ok && fn.Recv != nil && fn.Name != nil && fn.Name.Name == "Name"
 	}) {
 		t.Fatal("generated AST should not emit Go method wrapper that collides with a struct field")
 	}
@@ -4483,7 +4483,7 @@ func TestLowerProgramSupportsStoredTraitObjectDispatch(t *testing.T) {
 		}
 		key, keyOK := kv.Key.(*ast.Ident)
 		call, callOK := kv.Value.(*ast.CallExpr)
-		return keyOK && key.Name == "child" && callOK && strings.HasPrefix(astCallName(call), "ardTrait_Drawable_")
+		return keyOK && key.Name == "Child" && callOK && strings.HasPrefix(astCallName(call), "ardTrait_Drawable_")
 	}) {
 		t.Fatal("generated AST missing struct field native trait-object conversion")
 	}
@@ -4632,7 +4632,7 @@ func TestLowerProgramSupportsFieldMutation(t *testing.T) {
 			return false
 		}
 		lhs, ok := assign.Lhs[0].(*ast.SelectorExpr)
-		if !ok || lhs.Sel.Name != "value" {
+		if !ok || lhs.Sel.Name != "Value" {
 			return false
 		}
 		binary, ok := assign.Rhs[0].(*ast.BinaryExpr)
@@ -4641,7 +4641,7 @@ func TestLowerProgramSupportsFieldMutation(t *testing.T) {
 		}
 		rhsSelector, ok := binary.X.(*ast.SelectorExpr)
 		lit, litOK := binary.Y.(*ast.BasicLit)
-		return ok && rhsSelector.Sel.Name == "value" && litOK && lit.Value == "1"
+		return ok && rhsSelector.Sel.Name == "Value" && litOK && lit.Value == "1"
 	}) {
 		t.Fatal("generated AST missing field mutation lowering")
 	}
@@ -5959,6 +5959,50 @@ fn main() Str? { lookup_env("PATH") }`)
 	if !astFilesHaveCall(files, "ardruntime.None") {
 		t.Fatal("generated AST missing ardruntime.None maybe adapter")
 	}
+}
+
+func TestLowerStructFieldsUseNaturalVisibilityNames(t *testing.T) {
+	program := lowerSource(t, `struct User {
+  first_name: Str
+  type: Int
+}
+
+private struct internal_config {
+  secret_key: Str
+}
+
+fn make_user() User { User{first_name: "Ada", type: 1} }
+fn main() internal_config { internal_config{secret_key: "s"} }`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	for _, field := range []string{"FirstName", "Type"} {
+		if !astFilesHaveStructField(files, "test_ard__User", field) {
+			t.Fatalf("generated public User missing exported field %s", field)
+		}
+	}
+	if !astFilesHaveStructField(files, "type_10__internal_config", "secretKey") {
+		t.Fatal("generated private internal_config missing unexported natural field secretKey")
+	}
+}
+
+func astFilesHaveStructField(files map[string]*ast.File, typeName string, fieldName string) bool {
+	return astFilesContain(files, func(node ast.Node) bool {
+		typeSpec, ok := node.(*ast.TypeSpec)
+		if !ok || typeSpec.Name.Name != typeName {
+			return false
+		}
+		structType, ok := typeSpec.Type.(*ast.StructType)
+		if !ok || structType.Fields == nil {
+			return false
+		}
+		for _, field := range structType.Fields.List {
+			for _, name := range field.Names {
+				if name.Name == fieldName {
+					return true
+				}
+			}
+		}
+		return false
+	})
 }
 
 func lowerSource(t *testing.T, input string) *air.Program {

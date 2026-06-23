@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
@@ -5720,26 +5719,24 @@ func traitObjectWritebackAllowed(fn air.Function, expr air.Expr) bool {
 }
 
 func exportedFieldName(name string) string {
-	if name == "" {
-		return ""
-	}
-	runes := []rune(name)
-	runes[0] = unicode.ToUpper(runes[0])
-	return string(runes)
+	return naturalGoIdentifier(name, true)
 }
 
 func (l *lowerer) goFieldName(typ air.TypeInfo, fieldName string) string {
 	if l.isStdlibFFIBackedType(typ) {
 		return exportedFieldName(fieldName)
 	}
-	name := sanitizeName(fieldName)
-	if name == "" {
-		return "field"
+	if strings.HasPrefix(typ.ModulePath, "ard/") {
+		name := sanitizeName(fieldName)
+		if name == "" {
+			return "field"
+		}
+		if token.Lookup(name).IsKeyword() {
+			return name + "_"
+		}
+		return name
 	}
-	if token.Lookup(name).IsKeyword() {
-		return name + "_"
-	}
-	return name
+	return naturalGoIdentifier(fieldName, !typ.Private)
 }
 
 func (l *lowerer) convertStdlibError(typeID air.TypeID, expr ast.Expr) (ast.Expr, error) {
