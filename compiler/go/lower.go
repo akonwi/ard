@@ -25,25 +25,26 @@ type loweredExpr struct {
 }
 
 type lowerer struct {
-	program               *air.Program
-	packageName           string
-	tempCounter           int
-	currentImports        map[string]string
-	importErr             error
-	directGoAliases       map[string]string
-	reservedGoIdentifiers map[string]bool
-	declaredLocals        map[air.LocalID]bool
-	runtimeHelpers        map[string]bool
-	jsonParseTypes        map[air.TypeID]bool
-	jsonEncodeTypes       map[air.TypeID]bool
-	ffiImports            map[string]string
-	projectInfo           *checker.ProjectInfo
-	directGoResolver      *checker.GoPackagesResolver
-	inlineClosures        map[air.FunctionID]bool
-	goMethodCollisions    map[string]bool
-	emittedGoMethods      map[string]bool
-	suppressMain          bool
-	includeTests          bool
+	program                 *air.Program
+	packageName             string
+	tempCounter             int
+	currentImports          map[string]string
+	importErr               error
+	directGoAliases         map[string]string
+	reservedGoIdentifiers   map[string]bool
+	declaredLocals          map[air.LocalID]bool
+	runtimeHelpers          map[string]bool
+	jsonParseTypes          map[air.TypeID]bool
+	jsonEncodeTypes         map[air.TypeID]bool
+	ffiImports              map[string]string
+	projectInfo             *checker.ProjectInfo
+	directGoResolver        *checker.GoPackagesResolver
+	inlineClosures          map[air.FunctionID]bool
+	goMethodCollisions      map[string]bool
+	emittedGoMethods        map[string]bool
+	ffiNativeTraitFallbacks map[air.TraitID]bool
+	suppressMain            bool
+	includeTests            bool
 }
 
 func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, error) {
@@ -61,6 +62,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	l.inlineClosures = l.collectInlineClosureFunctions()
 	l.goMethodCollisions = l.collectGoMethodCollisions()
 	l.emittedGoMethods = map[string]bool{}
+	l.ffiNativeTraitFallbacks = collectFFINativeTraitFallbacks(program)
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
 	modules := make([]air.Module, 0, len(program.Modules))
@@ -647,7 +649,7 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 		}
 		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
 	case air.TypeTraitObject:
-		return l.lowerMutableTraitRefDecl(typ)
+		return l.lowerTraitObjectDecls(typ)
 	case air.TypeEnum:
 		typeSpec := &ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: ast.NewIdent("int")}
 		directGoEnum := false
@@ -688,11 +690,108 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 	}
 }
 
-func (l *lowerer) lowerMutableTraitRefDecl(typ air.TypeInfo) ([]ast.Decl, error) {
+func (l *lowerer) lowerTraitObjectDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 	if !validTraitID(l.program, typ.Trait) {
 		return nil, fmt.Errorf("invalid trait id %d", typ.Trait)
 	}
 	trait := l.program.Traits[typ.Trait]
+	decls := []ast.Decl{}
+	interfaceDecl, ok, err := l.lowerTraitInterfaceDecl(trait)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		decls = append(decls, interfaceDecl)
+	}
+	mutableDecl, err := l.lowerMutableTraitRefDecl(trait)
+	if err != nil {
+		return nil, err
+	}
+	decls = append(decls, mutableDecl)
+	return decls, nil
+}
+
+func (l *lowerer) lowerTraitInterfaceDecl(trait air.Trait) (ast.Decl, bool, error) {
+	if !l.traitInterfaceAvailable(trait.ID) {
+		return nil, false, nil
+	}
+	methods := make([]*ast.Field, 0, len(trait.Methods))
+	for _, method := range trait.Methods {
+		methodName, _ := goMethodName(method.Name)
+		methodType, err := l.traitInterfaceMethodType(method)
+		if err != nil {
+			return nil, false, err
+		}
+		methods = append(methods, &ast.Field{Names: []*ast.Ident{ast.NewIdent(methodName)}, Type: methodType})
+	}
+	return &ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(traitInterfaceTypeName(trait)), Type: &ast.InterfaceType{Methods: &ast.FieldList{List: methods}}}}}, true, nil
+}
+
+func (l *lowerer) traitInterfaceAvailable(traitID air.TraitID) bool {
+	if !validTraitID(l.program, traitID) {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, method := range l.program.Traits[traitID].Methods {
+		methodName, ok := goMethodName(method.Name)
+		if !ok || seen[methodName] {
+			return false
+		}
+		seen[methodName] = true
+	}
+	return true
+}
+
+func (l *lowerer) usesNativeTraitInterface(typeID air.TypeID) bool {
+	if !l.isTraitObjectType(typeID) {
+		return false
+	}
+	traitID := l.program.Types[typeID-1].Trait
+	if !l.traitInterfaceAvailable(traitID) || l.ffiNativeTraitFallbacks[traitID] {
+		return false
+	}
+	for _, impl := range l.program.Impls {
+		if impl.Trait != traitID {
+			continue
+		}
+		for _, methodID := range impl.Methods {
+			if !validFunctionID(l.program, methodID) {
+				return false
+			}
+			methodFn := l.program.Functions[methodID]
+			if len(methodFn.Signature.Params) == 0 || methodFn.Signature.Params[0].Mutable {
+				return false
+			}
+			key, _, ok := l.goMethodKey(methodFn)
+			if !ok || l.goMethodCollisions[key] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (l *lowerer) traitInterfaceMethodType(method air.TraitMethod) (*ast.FuncType, error) {
+	params := make([]*ast.Field, 0, len(method.Signature.Params))
+	for _, param := range method.Signature.Params {
+		paramType, err := l.goParamType(param)
+		if err != nil {
+			return nil, err
+		}
+		params = append(params, &ast.Field{Type: paramType})
+	}
+	fnType := &ast.FuncType{Params: &ast.FieldList{List: params}}
+	if !l.isVoidType(method.Signature.Return) {
+		returnType, err := l.goType(method.Signature.Return)
+		if err != nil {
+			return nil, err
+		}
+		fnType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
+	}
+	return fnType, nil
+}
+
+func (l *lowerer) lowerMutableTraitRefDecl(trait air.Trait) (ast.Decl, error) {
 	fields := []*ast.Field{
 		{Names: []*ast.Ident{ast.NewIdent(mutableTraitLoadFieldName(trait))}, Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: ast.NewIdent("any")}}}}},
 		{Names: []*ast.Ident{ast.NewIdent(mutableTraitAssignFieldName(trait))}, Type: &ast.FuncType{Params: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("value")}, Type: ast.NewIdent("any")}}}}},
@@ -704,7 +803,7 @@ func (l *lowerer) lowerMutableTraitRefDecl(typ air.TypeInfo) ([]ast.Decl, error)
 		}
 		fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(mutableTraitMethodFieldName(trait.ID, i))}, Type: fieldType})
 	}
-	return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(mutableTraitRefTypeName(trait)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
+	return &ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(mutableTraitRefTypeName(trait)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}, nil
 }
 
 func (l *lowerer) mutableTraitMethodFuncType(method air.TraitMethod) (ast.Expr, error) {
@@ -725,6 +824,10 @@ func (l *lowerer) mutableTraitMethodFuncType(method air.TraitMethod) (ast.Expr, 
 		fnType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
 	}
 	return fnType, nil
+}
+
+func traitInterfaceTypeName(trait air.Trait) string {
+	return fmt.Sprintf("ardTrait_%s_%d", sanitizeName(trait.Name), trait.ID)
 }
 
 func mutableTraitRefTypeName(trait air.Trait) string {
@@ -907,6 +1010,51 @@ func (l *lowerer) lowerGoMethodWrapper(fn air.Function) (*ast.FuncDecl, bool, er
 		Type: funcType,
 		Body: &ast.BlockStmt{List: body},
 	}, true, nil
+}
+
+func collectFFINativeTraitFallbacks(program *air.Program) map[air.TraitID]bool {
+	// Project/dependency FFI companions historically see Ard trait objects as any.
+	// Keep that ABI for container-shaped signatures we do not adapt at the
+	// boundary; top-level return Trait, Trait?, and Trait!E are adapted below.
+	fallbacks := map[air.TraitID]bool{}
+	if program == nil {
+		return fallbacks
+	}
+	var scan func(air.TypeID, bool, int, bool)
+	scan = func(typeID air.TypeID, unsupportedContainer bool, wrapperDepth int, allowDirectWrapper bool) {
+		if !validTypeID(program, typeID) {
+			return
+		}
+		info := program.Types[typeID-1]
+		switch info.Kind {
+		case air.TypeTraitObject:
+			if validTraitID(program, info.Trait) && (unsupportedContainer || wrapperDepth > 1 || wrapperDepth == 1 && !allowDirectWrapper) {
+				fallbacks[info.Trait] = true
+			}
+		case air.TypeList:
+			scan(info.Elem, true, wrapperDepth, allowDirectWrapper)
+		case air.TypeMap:
+			scan(info.Key, true, wrapperDepth, allowDirectWrapper)
+			scan(info.Value, true, wrapperDepth, allowDirectWrapper)
+		case air.TypeFunction:
+			for _, param := range info.Params {
+				scan(param, true, wrapperDepth, allowDirectWrapper)
+			}
+			scan(info.Return, true, wrapperDepth, allowDirectWrapper)
+		case air.TypeMaybe:
+			scan(info.Elem, unsupportedContainer, wrapperDepth+1, allowDirectWrapper)
+		case air.TypeResult:
+			scan(info.Value, unsupportedContainer, wrapperDepth+1, allowDirectWrapper)
+			scan(info.Error, unsupportedContainer, wrapperDepth+1, allowDirectWrapper)
+		}
+	}
+	for _, ext := range program.Externs {
+		for _, param := range ext.Signature.Params {
+			scan(param.Type, false, 0, false)
+		}
+		scan(ext.Signature.Return, false, 0, true)
+	}
+	return fallbacks
 }
 
 func (l *lowerer) collectGoMethodCollisions() map[string]bool {
@@ -1289,8 +1437,15 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		// Box the concrete value as a trait object (Go any) so that
+		// Convert the concrete value to the trait-object representation so
 		// subsequent assignments and dispatches use the correct type.
+		if l.usesNativeTraitInterface(expr.Type) {
+			traitType, err := l.goType(expr.Type)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: traitType, Args: []ast.Expr{target.expr}}}, nil
+		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprCallTrait:
 		return l.lowerTraitCall(fn, expr)
@@ -2123,7 +2278,15 @@ func (l *lowerer) lowerMutableTraitValue(fn air.Function, expr air.Expr, expecte
 	if loadName == "" {
 		return loweredExpr{}, fmt.Errorf("invalid mutable trait value type %d", expectedType)
 	}
-	return loweredExpr{stmts: value.stmts, expr: &ast.CallExpr{Fun: &ast.SelectorExpr{X: value.expr, Sel: ast.NewIdent(loadName)}}}, nil
+	loaded := ast.Expr(&ast.CallExpr{Fun: &ast.SelectorExpr{X: value.expr, Sel: ast.NewIdent(loadName)}})
+	if l.usesNativeTraitInterface(expectedType) {
+		traitType, err := l.goType(expectedType)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		loaded = &ast.TypeAssertExpr{X: loaded, Type: traitType}
+	}
+	return loweredExpr{stmts: value.stmts, expr: loaded}, nil
 }
 
 func (l *lowerer) canOverrideExprType(expr air.Expr, expectedType air.TypeID) bool {
@@ -2625,7 +2788,12 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return typ, nil
 		}
 		return ast.NewIdent("any"), nil
-	case air.TypeDynamic, air.TypeTraitObject:
+	case air.TypeDynamic:
+		return ast.NewIdent("any"), nil
+	case air.TypeTraitObject:
+		if l.usesNativeTraitInterface(typeID) {
+			return ast.NewIdent(traitInterfaceTypeName(l.program.Traits[info.Trait])), nil
+		}
 		return ast.NewIdent("any"), nil
 	default:
 		return nil, fmt.Errorf("unsupported Go type kind %d", info.Kind)
@@ -3218,12 +3386,16 @@ func (l *lowerer) mutableTraitDynamicForwarderExpr(place ast.Expr, traitTypeID a
 		return nil, fmt.Errorf("invalid trait id %d", traitID)
 	}
 	trait := l.program.Traits[traitID]
+	assignFunc, err := l.mutableTraitDynamicAssignFuncLit(place, traitTypeID)
+	if err != nil {
+		return nil, err
+	}
 	elts := []ast.Expr{
 		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitLoadFieldName(trait)), Value: mutableTraitLoadFuncLit(place)},
-		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitAssignFieldName(trait)), Value: mutableTraitDynamicAssignFuncLit(place)},
+		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitAssignFieldName(trait)), Value: assignFunc},
 	}
 	for i, method := range trait.Methods {
-		fieldValue, err := l.mutableTraitDynamicForwarderMethodExpr(trait, i, method, place)
+		fieldValue, err := l.mutableTraitDynamicForwarderMethodExpr(trait, i, method, place, traitTypeID)
 		if err != nil {
 			return nil, err
 		}
@@ -3236,7 +3408,7 @@ func (l *lowerer) mutableTraitDynamicForwarderExpr(place ast.Expr, traitTypeID a
 	return &ast.CompositeLit{Type: refType, Elts: elts}, nil
 }
 
-func (l *lowerer) mutableTraitDynamicForwarderMethodExpr(trait air.Trait, methodIndex int, traitMethod air.TraitMethod, place ast.Expr) (ast.Expr, error) {
+func (l *lowerer) mutableTraitDynamicForwarderMethodExpr(trait air.Trait, methodIndex int, traitMethod air.TraitMethod, place ast.Expr, traitTypeID air.TypeID) (ast.Expr, error) {
 	fnTypeExpr, err := l.mutableTraitMethodFuncType(traitMethod)
 	if err != nil {
 		return nil, err
@@ -3256,7 +3428,11 @@ func (l *lowerer) mutableTraitDynamicForwarderMethodExpr(trait air.Trait, method
 		cases = append(cases, l.mutableTraitImplForwardingCase(traitMethod, methodFn, impl.ForType, switchVarExpr, place))
 	}
 	cases = append(cases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: "\"unsupported trait object dispatch\""}}}}}})
-	body := []ast.Stmt{&ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{switchVarExpr}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: place}}}, Body: &ast.BlockStmt{List: cases}}}
+	switchTarget := place
+	if l.usesNativeTraitInterface(traitTypeID) {
+		switchTarget = &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{place}}
+	}
+	body := []ast.Stmt{&ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{switchVarExpr}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: switchTarget}}}, Body: &ast.BlockStmt{List: cases}}}
 	return &ast.FuncLit{Type: fnType, Body: &ast.BlockStmt{List: body}}, nil
 }
 
@@ -3338,11 +3514,19 @@ func mutableTraitAssignFuncLit(place ast.Expr, targetType ast.Expr, trait air.Tr
 	}
 }
 
-func mutableTraitDynamicAssignFuncLit(place ast.Expr) ast.Expr {
+func (l *lowerer) mutableTraitDynamicAssignFuncLit(place ast.Expr, traitTypeID air.TypeID) (ast.Expr, error) {
+	value := ast.Expr(ast.NewIdent("value"))
+	if l.usesNativeTraitInterface(traitTypeID) {
+		traitType, err := l.goType(traitTypeID)
+		if err != nil {
+			return nil, err
+		}
+		value = &ast.TypeAssertExpr{X: value, Type: traitType}
+	}
 	return &ast.FuncLit{
 		Type: &ast.FuncType{Params: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("value")}, Type: ast.NewIdent("any")}}}},
-		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{place}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent("value")}}}},
-	}
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{place}, Tok: token.ASSIGN, Rhs: []ast.Expr{value}}}},
+	}, nil
 }
 
 func (l *lowerer) mutableTraitForwarderMethodExpr(traitMethod air.TraitMethod, methodFn air.Function, place ast.Expr) (ast.Expr, error) {
@@ -5324,7 +5508,33 @@ func (l *lowerer) lowerTraitCall(fn air.Function, expr air.Expr) (loweredExpr, e
 	if l.exprIsMutableReference(fn, *expr.Target) {
 		return l.lowerMutableTraitRefCall(fn, target, expr)
 	}
+	if l.usesNativeTraitInterface(expr.Target.Type) {
+		return l.lowerNativeTraitInterfaceCall(fn, target, expr)
+	}
 	return l.lowerTraitObjectCall(fn, target, expr)
+}
+
+func (l *lowerer) lowerNativeTraitInterfaceCall(fn air.Function, target loweredExpr, expr air.Expr) (loweredExpr, error) {
+	if expr.Trait < 0 || int(expr.Trait) >= len(l.program.Traits) {
+		return loweredExpr{}, fmt.Errorf("invalid trait id %d", expr.Trait)
+	}
+	trait := l.program.Traits[expr.Trait]
+	if expr.Method < 0 || expr.Method >= len(trait.Methods) {
+		return loweredExpr{}, fmt.Errorf("invalid trait method %d for %s", expr.Method, trait.Name)
+	}
+	method := trait.Methods[expr.Method]
+	methodName, ok := goMethodName(method.Name)
+	if !ok {
+		return loweredExpr{}, fmt.Errorf("trait method %s cannot be lowered as a Go method", method.Name)
+	}
+	args, argStmts, writeback, err := l.lowerCallArgs(fn, expr.Args, method.Signature.Params)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	stmts = append(stmts, argStmts...)
+	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(methodName)}, Args: args}
+	return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
 }
 
 func (l *lowerer) exprIsMutableReference(fn air.Function, expr air.Expr) bool {
@@ -5550,6 +5760,40 @@ func (l *lowerer) convertStdlibError(typeID air.TypeID, expr ast.Expr) (ast.Expr
 	return &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, info)), Elts: elts}, nil
 }
 
+func (l *lowerer) wrapMaybeNativeTraitExternCall(maybeTypeID air.TypeID, call ast.Expr, stmts []ast.Stmt) (loweredExpr, bool, error) {
+	if !validTypeID(l.program, maybeTypeID) {
+		return loweredExpr{}, false, fmt.Errorf("invalid maybe type id %d", maybeTypeID)
+	}
+	maybeType := l.program.Types[maybeTypeID-1]
+	if maybeType.Kind != air.TypeMaybe || !l.usesNativeTraitInterface(maybeType.Elem) {
+		return loweredExpr{}, false, nil
+	}
+	maybeGoType, err := l.goType(maybeTypeID)
+	if err != nil {
+		return loweredExpr{}, false, err
+	}
+	elemGoType, err := l.goType(maybeType.Elem)
+	if err != nil {
+		return loweredExpr{}, false, err
+	}
+	rawTemp := l.nextTemp()
+	resultTemp := l.nextTemp()
+	coercedValue, err := l.nativeTraitInterfaceAssertion(maybeType.Elem, &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(rawTemp), Sel: ast.NewIdent("Value")}})
+	if err != nil {
+		return loweredExpr{}, false, err
+	}
+	stmts = append(stmts,
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(rawTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{call}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: maybeGoType}}}},
+		&ast.IfStmt{
+			Cond: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(rawTemp), Sel: ast.NewIdent("IsSome")}},
+			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: elemGoType}, Args: []ast.Expr{coercedValue}}}}}},
+			Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "None"), Index: elemGoType}}}}}},
+		},
+	)
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, true, nil
+}
+
 func (l *lowerer) wrapValueErrorCall(resultTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
 	if !validTypeID(l.program, resultTypeID) {
 		return loweredExpr{}, fmt.Errorf("invalid result type id %d", resultTypeID)
@@ -5564,8 +5808,18 @@ func (l *lowerer) wrapValueErrorCall(resultTypeID air.TypeID, call ast.Expr) (lo
 	}
 	valueTemp := l.nextTemp()
 	errTemp := l.nextTemp()
+	nativeTraitValue := l.usesNativeTraitInterface(resultType.Value)
+	valueDeclType := valueType
+	valueExpr := ast.Expr(ast.NewIdent(valueTemp))
+	if nativeTraitValue {
+		valueDeclType = ast.NewIdent("any")
+		valueExpr, err = l.nativeTraitInterfaceAssertion(resultType.Value, ast.NewIdent(valueTemp))
+		if err != nil {
+			return loweredExpr{}, err
+		}
+	}
 	decls := []ast.Stmt{
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(valueTemp)}, Type: valueType}}}},
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(valueTemp)}, Type: valueDeclType}}}},
 		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(errTemp)}, Type: ast.NewIdent("error")}}}},
 	}
 	stmts := append([]ast.Stmt{}, decls...)
@@ -5574,8 +5828,29 @@ func (l *lowerer) wrapValueErrorCall(resultTypeID air.TypeID, call ast.Expr) (lo
 	if err != nil {
 		return loweredExpr{}, err
 	}
+	if nativeTraitValue {
+		resultTemp := l.nextTemp()
+		resultTypeExpr, err := l.goType(resultTypeID)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts,
+			&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: resultTypeExpr}}}},
+			&ast.IfStmt{
+				Cond: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: ast.NewIdent("nil")},
+				Body: &ast.BlockStmt{List: []ast.Stmt{
+					&ast.AssignStmt{Lhs: []ast.Expr{&ast.SelectorExpr{X: ast.NewIdent(resultTemp), Sel: ast.NewIdent("Value")}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}},
+					&ast.AssignStmt{Lhs: []ast.Expr{&ast.SelectorExpr{X: ast.NewIdent(resultTemp), Sel: ast.NewIdent("Ok")}}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent("true")}},
+				}},
+				Else: &ast.BlockStmt{List: []ast.Stmt{
+					&ast.AssignStmt{Lhs: []ast.Expr{&ast.SelectorExpr{X: ast.NewIdent(resultTemp), Sel: ast.NewIdent("Err")}}, Tok: token.ASSIGN, Rhs: []ast.Expr{errExpr}},
+				}},
+			},
+		)
+		return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
+	}
 	resultExpr := &ast.CompositeLit{Type: mustTypeExpr(l, resultTypeID), Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: ast.NewIdent(valueTemp)},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: valueExpr},
 		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: errExpr},
 		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: ast.NewIdent("nil")}},
 	}}
@@ -6043,6 +6318,9 @@ func (l *lowerer) lowerDirectExternCall(ext air.Extern, bindingExpr func(string,
 	case air.TypeVoid:
 		return loweredExpr{stmts: stmts, expr: call}, nil
 	case air.TypeMaybe:
+		if wrapped, ok, err := l.wrapMaybeNativeTraitExternCall(returnTypeID, call, stmts); ok || err != nil {
+			return wrapped, err
+		}
 		return loweredExpr{stmts: stmts, expr: call}, nil
 	case air.TypeStruct:
 		if rawField, ok := l.channelStructRawField(returnType); ok {
@@ -6068,8 +6346,23 @@ func (l *lowerer) lowerDirectExternCall(ext air.Extern, bindingExpr func(string,
 		wrapped.stmts = append(stmts, wrapped.stmts...)
 		return wrapped, nil
 	default:
+		if l.usesNativeTraitInterface(returnTypeID) {
+			coerced, err := l.nativeTraitInterfaceAssertion(returnTypeID, call)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			return loweredExpr{stmts: stmts, expr: coerced}, nil
+		}
 		return loweredExpr{stmts: stmts, expr: call}, nil
 	}
+}
+
+func (l *lowerer) nativeTraitInterfaceAssertion(typeID air.TypeID, value ast.Expr) (ast.Expr, error) {
+	traitType, err := l.goType(typeID)
+	if err != nil {
+		return nil, err
+	}
+	return &ast.TypeAssertExpr{X: &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{value}}, Type: traitType}, nil
 }
 
 func (l *lowerer) channelStructRawField(info air.TypeInfo) (air.FieldInfo, bool) {

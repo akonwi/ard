@@ -1535,6 +1535,36 @@ func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
 	}
 }
 
+func TestGoTargetParityNativeTraitObjectMutableParameterFromTraitLocal(t *testing.T) {
+	program := lowerParitySource(t, `
+		trait Draw {
+			fn draw() Int
+		}
+
+		struct Box {
+			value: Int,
+		}
+
+		impl Draw for Box {
+			fn draw() Int {
+				self.value
+			}
+		}
+
+		fn apply(mut d: Draw) Int {
+			d.draw()
+		}
+
+		fn main() Int {
+			mut d: Draw = Box{value: 1}
+			apply(d)
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "1" {
+		t.Fatalf("got %s, want 1", got)
+	}
+}
+
 func TestGoTargetParityMutableTraitObjectParameterFromConcrete(t *testing.T) {
 	program := lowerParitySource(t, `
 		struct Context {

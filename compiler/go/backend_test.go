@@ -416,15 +416,20 @@ func TestLowerProgramTakesAddressOfLocalMutTraitArgs(t *testing.T) {
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || !strings.Contains(astCallName(call), "Doubler_Bumpable_poke") || len(call.Args) < 2 {
+		if !ok || !strings.Contains(astCallName(call), "poke") {
 			return false
 		}
-		addr, ok := call.Args[1].(*ast.UnaryExpr)
-		if !ok || addr.Op != token.AND {
-			return false
+		for _, arg := range call.Args {
+			addr, ok := arg.(*ast.UnaryExpr)
+			if !ok || addr.Op != token.AND {
+				continue
+			}
+			ident, identOK := addr.X.(*ast.Ident)
+			if identOK && ident.Name == "c_0" {
+				return true
+			}
 		}
-		ident, identOK := addr.X.(*ast.Ident)
-		return identOK && ident.Name == "c_0"
+		return false
 	}) {
 		t.Fatal("generated AST missing address-of for local mutable trait dispatch arg")
 	}
@@ -2494,6 +2499,191 @@ func Select(input ardruntime.Maybe[string]) string {
 	}
 }
 
+func TestBuildProgramCoercesProjectExternNativeTraitReturn(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+trait Draw {
+	fn draw() Int
+}
+
+struct Box {
+	value: Int,
+}
+
+impl Draw for Box {
+	fn draw() Int {
+		self.value
+	}
+}
+
+extern fn identity(value: Draw) Draw = "demo.Identity"
+extern fn ok_draw(value: Draw) Draw!Str = "demo.OkDraw"
+extern fn fail_draw() Draw!Str = "demo.FailDraw"
+extern fn some_draw(value: Draw) Draw? = "demo.SomeDraw"
+
+fn main() {
+	let d: Draw = Box{value: 5}
+	let ok = ok_draw(d).expect("ok")
+	let failed = fail_draw().or(d)
+	let some = some_draw(d).expect("some")
+	if identity(d).draw() + ok.draw() + failed.draw() + some.draw() != 20 {
+		panic("bad identity")
+	}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+import (
+	"errors"
+
+	ardruntime "github.com/akonwi/ard/runtime"
+)
+
+func Identity(value any) any { return value }
+func OkDraw(value any) (any, error) { return value, nil }
+func FailDraw() (any, error) { return nil, errors.New("boom") }
+func SomeDraw(value any) ardruntime.Maybe[any] { return ardruntime.Some(value) }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	builtPath, err := BuildProgram(program, filepath.Join(dir, "app"), loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := exec.Command(builtPath).Run(); err != nil {
+		t.Fatalf("run built binary: %v", err)
+	}
+}
+
+func TestBuildProgramKeepsAnyTraitRepresentationForNestedFFIWrappers(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+trait Draw {
+	fn draw() Int
+}
+
+struct Box {
+	value: Int,
+}
+
+impl Draw for Box {
+	fn draw() Int {
+		self.value
+	}
+}
+
+extern fn maybe_ok_draw(value: Draw) (Draw!Str)? = "demo.MaybeOkDraw"
+
+fn main() {
+	let d: Draw = Box{value: 9}
+	let ok = maybe_ok_draw(d).expect("some").expect("ok")
+	if ok.draw() != 9 {
+		panic("bad nested wrapper")
+	}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+import ardruntime "github.com/akonwi/ard/runtime"
+
+func MaybeOkDraw(value any) ardruntime.Maybe[ardruntime.Result[any, string]] {
+	return ardruntime.Some(ardruntime.Ok[any, string](value))
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	builtPath, err := BuildProgram(program, filepath.Join(dir, "app"), loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := exec.Command(builtPath).Run(); err != nil {
+		t.Fatalf("run built binary: %v", err)
+	}
+}
+
+func TestBuildProgramKeepsAnyTraitRepresentationForFFIContainers(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`
+trait Draw {
+	fn draw() Int
+}
+
+struct Box {
+	value: Int,
+}
+
+impl Draw for Box {
+	fn draw() Int {
+		self.value
+	}
+}
+
+extern fn identity_list(values: [Draw]) [Draw] = "demo.IdentityList"
+
+fn main() {
+	let values: [Draw] = [Box{value: 7}]
+	if identity_list(values).at(0).draw() != 7 {
+		panic("bad list")
+	}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
+
+func IdentityList(values []any) []any { return values }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	builtPath, err := BuildProgram(program, filepath.Join(dir, "app"), loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if err := exec.Command(builtPath).Run(); err != nil {
+		t.Fatalf("run built binary: %v", err)
+	}
+}
+
 func TestBuildProgramDoesNotRequireDependencyFFIForDirectGoCall(t *testing.T) {
 	workspace := t.TempDir()
 	depDir := filepath.Join(workspace, "dep")
@@ -3662,6 +3852,67 @@ func TestLowerProgramEmitsGoMethodWrapperForTraitImpl(t *testing.T) {
 	}
 }
 
+func TestLowerProgramEmitsGoInterfaceForTraitObject(t *testing.T) {
+	program := lowerSource(t, `
+		trait Renderable {
+			fn render() Str
+			fn area(scale: Int) Int
+		}
+
+		struct Block {
+			title: Str,
+		}
+
+		impl Renderable for Block {
+			fn render() Str {
+				self.title
+			}
+
+			fn area(scale: Int) Int {
+				scale
+			}
+		}
+
+		fn draw(value: Renderable) Str {
+			value.render()
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		typeSpec, ok := node.(*ast.TypeSpec)
+		if !ok || typeSpec.Name == nil || !strings.HasPrefix(typeSpec.Name.Name, "ardTrait_Renderable_") {
+			return false
+		}
+		iface, ok := typeSpec.Type.(*ast.InterfaceType)
+		if !ok || iface.Methods == nil || len(iface.Methods.List) != 2 {
+			return false
+		}
+		methods := map[string]*ast.FuncType{}
+		for _, method := range iface.Methods.List {
+			if len(method.Names) != 1 {
+				return false
+			}
+			fnType, ok := method.Type.(*ast.FuncType)
+			if !ok {
+				return false
+			}
+			methods[method.Names[0].Name] = fnType
+		}
+		render, ok := methods["render"]
+		if !ok || render.Params == nil || len(render.Params.List) != 0 || render.Results == nil || len(render.Results.List) != 1 || astExprName(render.Results.List[0].Type) != "string" {
+			return false
+		}
+		area, ok := methods["area"]
+		return ok && area.Params != nil && len(area.Params.List) == 1 && astExprName(area.Params.List[0].Type) == "int" && area.Results != nil && len(area.Results.List) == 1 && astExprName(area.Results.List[0].Type) == "int"
+	}) {
+		t.Fatal("generated AST missing Go interface for Ard trait")
+	}
+	if !astFilesHaveTypeSpec(files, "ardMutTrait_Renderable_0") {
+		t.Fatal("generated AST should keep mutable trait reference type")
+	}
+}
+
 func TestLowerProgramSkipsGoMethodWrapperWhenStructFieldCollides(t *testing.T) {
 	program := lowerSource(t, `
 		trait Named {
@@ -3819,21 +4070,32 @@ func TestLowerProgramSupportsUserTraitObjectDispatch(t *testing.T) {
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
-		_, ok := node.(*ast.TypeSwitchStmt)
+		typeSpec, ok := node.(*ast.TypeSpec)
+		if !ok || typeSpec.Name == nil || !strings.HasPrefix(typeSpec.Name.Name, "ardTrait_Renderable_") {
+			return false
+		}
+		_, ok = typeSpec.Type.(*ast.InterfaceType)
 		return ok
 	}) {
-		t.Fatal("generated AST missing trait object dispatch lowering")
+		t.Fatal("generated AST missing native Go interface for trait object")
+	}
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		name := astCallName(call)
+		return name == "render" || strings.HasSuffix(name, ".render")
+	}) {
+		t.Fatal("generated AST missing native interface trait method call")
 	}
 	for _, name := range []string{"Block_Renderable_render", "Para_Renderable_render"} {
 		if !astFilesContain(files, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
 			return ok && strings.Contains(astCallName(call), name)
 		}) {
-			t.Fatalf("generated AST missing %s trait dispatch call", name)
+			t.Fatalf("generated AST missing %s Go method wrapper call", name)
 		}
-	}
-	if !astFilesHaveCall(files, "panic") {
-		t.Fatal("generated AST missing trait dispatch fallback panic")
 	}
 }
 
@@ -3852,7 +4114,7 @@ trait Widget {
 struct Text { content: Str }
 
 impl Widget for Text {
-  fn render(frame: Frame) { () }
+  fn mut render(frame: Frame) { () }
 }
 
 fn plain(content: Str) Widget {
@@ -3929,7 +4191,7 @@ use nestprobe/tui/core/widget
 struct Text { content: Str }
 
 impl widget::Widget for Text {
-  fn render(frame: widget::Frame) { () }
+  fn mut render(frame: widget::Frame) { () }
 }
 
 fn plain(content: Str) widget::Widget {
@@ -3942,7 +4204,7 @@ use nestprobe/tui/core/widget
 struct Box { child: widget::Widget }
 
 impl widget::Widget for Box {
-  fn render(frame: widget::Frame) {
+  fn mut render(frame: widget::Frame) {
     self.child.render(frame)
   }
 }
@@ -4031,7 +4293,7 @@ use aliasprobe/widget
 struct Text { content: Str }
 
 impl widget::Widget for Text {
-  fn render(frame: widget::Frame) { () }
+  fn mut render(frame: widget::Frame) { () }
 }
 
 fn new(content: Str) widget::Widget { Text{content: content} }
@@ -4042,7 +4304,7 @@ use aliasprobe/widget
 struct Box { child: widget::Widget }
 
 impl widget::Widget for Box {
-  fn render(frame: widget::Frame) { self.child.render(frame) }
+  fn mut render(frame: widget::Frame) { self.child.render(frame) }
 }
 
 fn new(child: widget::Widget) widget::Widget { Box{child: child} }
@@ -4208,8 +4470,11 @@ func TestLowerProgramSupportsStoredTraitObjectDispatch(t *testing.T) {
 	`)
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesHaveCall(files, "any") {
-		t.Fatal("generated AST missing trait-object upcast")
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		return ok && strings.HasPrefix(astCallName(call), "ardTrait_Drawable_")
+	}) {
+		t.Fatal("generated AST missing native interface trait-object conversion")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		kv, ok := node.(*ast.KeyValueExpr)
@@ -4218,34 +4483,34 @@ func TestLowerProgramSupportsStoredTraitObjectDispatch(t *testing.T) {
 		}
 		key, keyOK := kv.Key.(*ast.Ident)
 		call, callOK := kv.Value.(*ast.CallExpr)
-		return keyOK && key.Name == "child" && callOK && astCallName(call) == "any"
+		return keyOK && key.Name == "child" && callOK && strings.HasPrefix(astCallName(call), "ardTrait_Drawable_")
 	}) {
-		t.Fatal("generated AST missing struct field trait-object upcast")
+		t.Fatal("generated AST missing struct field native trait-object conversion")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		lit, ok := node.(*ast.CompositeLit)
-		if !ok || astExprName(lit.Type) != "[]any" {
+		if !ok || !strings.HasPrefix(astExprName(lit.Type), "[]ardTrait_Drawable_") {
 			return false
 		}
 		for _, elem := range lit.Elts {
 			call, ok := elem.(*ast.CallExpr)
-			if ok && astCallName(call) == "any" {
+			if ok && strings.HasPrefix(astCallName(call), "ardTrait_Drawable_") {
 				return true
 			}
 		}
 		return false
 	}) {
-		t.Fatal("generated AST missing list element trait-object upcast")
+		t.Fatal("generated AST missing list element native trait-object conversion")
 	}
-	typeSwitches := 0
-	astFilesContain(files, func(node ast.Node) bool {
-		if _, ok := node.(*ast.TypeSwitchStmt); ok {
-			typeSwitches++
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return false
 		}
-		return false
-	})
-	if typeSwitches < 2 {
-		t.Fatalf("generated AST missing trait-object dispatches: got %d", typeSwitches)
+		name := astCallName(call)
+		return name == "draw" || strings.HasSuffix(name, ".draw")
+	}) {
+		t.Fatal("generated AST missing native interface trait-object dispatch")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
@@ -4284,16 +4549,20 @@ func TestLowerProgramSupportsTraitObjectDispatch(t *testing.T) {
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
-		_, ok := node.(*ast.TypeSwitchStmt)
-		return ok
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		name := astCallName(call)
+		return name == "to_str" || strings.HasSuffix(name, ".to_str")
 	}) {
-		t.Fatal("generated AST missing trait object dispatch lowering")
+		t.Fatal("generated AST missing native interface trait dispatch")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
 		return ok && strings.Contains(astCallName(call), "Book_ToString_to_str")
 	}) {
-		t.Fatal("generated AST missing concrete trait dispatch call")
+		t.Fatal("generated AST missing concrete trait method wrapper call")
 	}
 }
 
