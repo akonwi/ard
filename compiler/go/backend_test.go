@@ -365,7 +365,7 @@ fn main() {
 			return false
 		}
 		indexed, ok := call.Fun.(*ast.IndexExpr)
-		return ok && astExprName(indexed.Index) == "nestlit_inner_types__Inner"
+		return ok && astExprName(indexed.Index) == "Inner"
 	}) {
 		t.Fatal("generated AST missing cross-module nested optional struct literal field")
 	}
@@ -1395,18 +1395,18 @@ func TestLowerProgramSupportsStructsAndEnums(t *testing.T) {
 	`)
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesHaveTypeSpec(files, "test_ard__Direction") {
+	if !astFilesHaveTypeSpec(files, "Direction") {
 		t.Fatal("generated AST missing enum type")
 	}
-	if !astFilesHaveValueSpec(files, "test_ard__Direction__Down") {
+	if !astFilesHaveValueSpec(files, "Direction__Down") {
 		t.Fatal("generated AST missing enum constants")
 	}
-	if !astFilesHaveTypeSpec(files, "test_ard__User") {
+	if !astFilesHaveTypeSpec(files, "User") {
 		t.Fatal("generated AST missing struct type")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		lit, ok := node.(*ast.CompositeLit)
-		if !ok || astExprName(lit.Type) != "test_ard__User" {
+		if !ok || astExprName(lit.Type) != "User" {
 			return false
 		}
 		hasName := false
@@ -3205,7 +3205,7 @@ func TestLowerProgramUsesRuntimeMaybeForRecursiveNullableFields(t *testing.T) {
 			return false
 		}
 		indexed, ok := field.Type.(*ast.IndexExpr)
-		return ok && astExprName(indexed.X) == "ardruntime.Maybe" && astExprName(indexed.Index) == "test_ard__Node"
+		return ok && astExprName(indexed.X) == "ardruntime.Maybe" && astExprName(indexed.Index) == "Node"
 	}) {
 		t.Fatal("generated AST missing runtime Maybe recursive nullable field")
 	}
@@ -3215,7 +3215,7 @@ func TestLowerProgramUsesRuntimeMaybeForRecursiveNullableFields(t *testing.T) {
 			return false
 		}
 		star, ok := field.Type.(*ast.StarExpr)
-		return ok && astExprName(star.X) == "test_ard__Node"
+		return ok && astExprName(star.X) == "Node"
 	}) {
 		t.Fatal("generated AST lowered recursive nullable field as pointer")
 	}
@@ -3650,7 +3650,7 @@ func TestLowerProgramUsesPointersForMutableStructParams(t *testing.T) {
 		t.Fatalf("generated AST missing set_body function")
 	}
 	paramType, ok := fn.Type.Params.List[0].Type.(*ast.StarExpr)
-	if !ok || astExprName(paramType.X) != "test_ard__Response" {
+	if !ok || astExprName(paramType.X) != "Response" {
 		t.Fatalf("generated AST missing pointer mutable param lowering: %#v", fn.Type.Params.List[0].Type)
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
@@ -4156,7 +4156,7 @@ fn main() {
 	}) {
 		t.Fatal("generated AST missing trait dispatch")
 	}
-	if !astFilesHaveTypeSwitchCase(files, "checkprobe_widget__Text") {
+	if !astFilesHaveTypeSwitchCase(files, "Text") {
 		t.Fatal("generated AST missing cross-module trait dispatch case")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
@@ -4261,10 +4261,10 @@ fn main() {
 	}) {
 		t.Fatal("generated AST missing call-site trait dispatch")
 	}
-	if !astFilesHaveTypeSwitchCase(generatedFiles, "nestprobe_tui_core_box__Box") {
+	if !astFilesHaveTypeSwitchCase(generatedFiles, "Box") {
 		t.Fatal("generated AST missing Box dispatch case from call-site imports")
 	}
-	if !astFilesHaveTypeSwitchCase(generatedFiles, "nestprobe_tui_core_text__Text") {
+	if !astFilesHaveTypeSwitchCase(generatedFiles, "Text") {
 		t.Fatal("generated AST missing Text dispatch case from call-site imports")
 	}
 }
@@ -4363,10 +4363,10 @@ fn main() { demo::run() }
 	}) {
 		t.Fatal("generated AST missing aliased-constructor trait dispatch")
 	}
-	if !astFilesHaveTypeSwitchCase(generatedFiles, "aliasprobe_widgets_box__Box") {
+	if !astFilesHaveTypeSwitchCase(generatedFiles, "Box") {
 		t.Fatal("generated AST missing Box dispatch case through let alias")
 	}
-	if !astFilesHaveTypeSwitchCase(generatedFiles, "aliasprobe_widgets_text__Text") {
+	if !astFilesHaveTypeSwitchCase(generatedFiles, "Text") {
 		t.Fatal("generated AST missing Text dispatch case through let alias")
 	}
 }
@@ -5975,11 +5975,11 @@ fn make_user() User { User{first_name: "Ada", type: 1} }
 fn main() internal_config { internal_config{secret_key: "s"} }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	for _, field := range []string{"FirstName", "Type"} {
-		if !astFilesHaveStructField(files, "test_ard__User", field) {
+		if !astFilesHaveStructField(files, "User", field) {
 			t.Fatalf("generated public User missing exported field %s", field)
 		}
 	}
-	if !astFilesHaveStructField(files, "type_10__internal_config", "secretKey") {
+	if !astFilesHaveStructField(files, "internalConfig", "secretKey") {
 		t.Fatal("generated private internal_config missing unexported natural field secretKey")
 	}
 }

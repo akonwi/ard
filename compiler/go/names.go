@@ -83,11 +83,43 @@ func functionName(program *air.Program, fn air.Function) string {
 }
 
 func typeName(program *air.Program, typ air.TypeInfo) string {
+	if name, ok := naturalTypeName(program, typ); ok {
+		return name
+	}
 	base := typeNameBase(program, typ)
 	if typeNameCollides(program, typ, base) {
 		return fmt.Sprintf("%s_%d", base, typ.ID)
 	}
 	return base
+}
+
+func naturalTypeName(program *air.Program, typ air.TypeInfo) (string, bool) {
+	if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum {
+		return "", false
+	}
+	if typ.Name == "" || strings.ContainsAny(typ.Name, "<>[]?:!") || strings.HasPrefix(typ.ModulePath, "ard/") || typ.ExternBinding != "" {
+		return "", false
+	}
+	name := naturalGoIdentifier(typ.Name, !typ.Private)
+	if name == "" || name == "_" {
+		return "", false
+	}
+	for _, other := range program.Types {
+		if other.ID == typ.ID || !naturalTypeNameEligible(other) {
+			continue
+		}
+		if naturalGoIdentifier(other.Name, !other.Private) == name {
+			return "", false
+		}
+	}
+	return name, true
+}
+
+func naturalTypeNameEligible(typ air.TypeInfo) bool {
+	if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum {
+		return false
+	}
+	return typ.Name != "" && !strings.ContainsAny(typ.Name, "<>[]?:!") && !strings.HasPrefix(typ.ModulePath, "ard/") && typ.ExternBinding == ""
 }
 
 func typeNameBase(program *air.Program, typ air.TypeInfo) string {

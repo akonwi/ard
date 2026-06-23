@@ -1,6 +1,10 @@
 package gotarget
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/akonwi/ard/air"
+)
 
 func TestGoPackageNameFromModulePathSanitizesInvalidNames(t *testing.T) {
 	tests := []struct {
@@ -18,6 +22,49 @@ func TestGoPackageNameFromModulePathSanitizesInvalidNames(t *testing.T) {
 		if got := goPackageNameFromModulePath(tt.path); got != tt.want {
 			t.Fatalf("goPackageNameFromModulePath(%q) = %q, want %q", tt.path, got, tt.want)
 		}
+	}
+}
+
+func TestNaturalTypeNameUsesVisibilityForUserTypes(t *testing.T) {
+	program := &air.Program{Types: []air.TypeInfo{
+		{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "user.ard"},
+		{ID: 2, Kind: air.TypeStruct, Name: "internal_config", ModulePath: "config.ard", Private: true},
+		{ID: 3, Kind: air.TypeStruct, Name: "Std", ModulePath: "ard/std"},
+	}}
+	if got := typeName(program, program.Types[0]); got != "User" {
+		t.Fatalf("public user type = %q, want User", got)
+	}
+	if got := typeName(program, program.Types[1]); got != "internalConfig" {
+		t.Fatalf("private user type = %q, want internalConfig", got)
+	}
+	if got := typeName(program, program.Types[2]); got != "ard_std__Std" {
+		t.Fatalf("stdlib type = %q, want legacy artifact name", got)
+	}
+}
+
+func TestNaturalTypeNameFallsBackOnCollisions(t *testing.T) {
+	program := &air.Program{Types: []air.TypeInfo{
+		{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "a.ard"},
+		{ID: 2, Kind: air.TypeStruct, Name: "User", ModulePath: "b.ard"},
+	}}
+	if got := typeName(program, program.Types[0]); got != "a_ard__User" {
+		t.Fatalf("first colliding type = %q, want a_ard__User", got)
+	}
+	if got := typeName(program, program.Types[1]); got != "b_ard__User" {
+		t.Fatalf("second colliding type = %q, want b_ard__User", got)
+	}
+}
+
+func TestNaturalTypeNameFallsBackOnCrossKindCollisions(t *testing.T) {
+	program := &air.Program{Types: []air.TypeInfo{
+		{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "a.ard"},
+		{ID: 2, Kind: air.TypeEnum, Name: "User", ModulePath: "b.ard"},
+	}}
+	if got := typeName(program, program.Types[0]); got != "a_ard__User" {
+		t.Fatalf("struct colliding with enum = %q, want a_ard__User", got)
+	}
+	if got := typeName(program, program.Types[1]); got != "b_ard__User" {
+		t.Fatalf("enum colliding with struct = %q, want b_ard__User", got)
 	}
 }
 

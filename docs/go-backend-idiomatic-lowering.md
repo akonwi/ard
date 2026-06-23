@@ -101,6 +101,7 @@ If Go-facing adapters are needed later, they should be wrappers at the boundary,
    - Initial implementation notes:
      - AIR now carries declaration privacy for globals, functions, and named types so the Go backend can distinguish exported and unexported API names.
      - The Go backend has shared helpers for deterministic Go package-name sanitization and Ard-to-Go identifier conversion; package names like `foo_bar` are preserved, invalid characters become `_`, leading digits are prefixed, and Go keywords get a trailing `_`.
+     - Public user-defined type names now lower directly to natural exported Go identifiers, e.g. `struct User` -> `type User`; private type names lower to unexported natural identifiers, e.g. `private struct internal_config` -> `type internalConfig`. Colliding user type names conservatively fall back to the legacy artifact-style names until public API collision diagnostics are added.
      - Public user-defined struct fields now lower to exported natural Go field names such as `first_name` -> `FirstName`; private structs keep unexported natural field names such as `secret_key` -> `secretKey`. Standard-library generated structs temporarily keep their existing field names to avoid breaking FFI companion code while the natural naming work is rolled out incrementally.
 
 5. **Add boundary adapters only where semantics differ.**
