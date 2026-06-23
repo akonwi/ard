@@ -961,11 +961,12 @@ type ExternType struct {
 	// Direct Go metadata is populated for `use go:` named types when available.
 	// Interface metadata lets named Go interfaces participate in Ard assignment
 	// compatibility similarly to traits while still lowering as native Go types.
-	DirectGoInterface      bool
-	DirectGoMethods        map[string]GoMethod
-	DirectGoValueMethods   map[string]GoMethod
-	DirectGoPointerMethods map[string]GoMethod
-	DirectGoType           types.Type
+	DirectGoInterface            bool
+	DirectGoHasUnexportedMethods bool
+	DirectGoMethods              map[string]GoMethod
+	DirectGoValueMethods         map[string]GoMethod
+	DirectGoPointerMethods       map[string]GoMethod
+	DirectGoType                 types.Type
 
 	private bool
 }
@@ -975,17 +976,18 @@ func cloneExternTypeWithTypeArgs(e *ExternType, typeArgs []Type) *ExternType {
 		return nil
 	}
 	return &ExternType{
-		Name_:                  e.Name_,
-		GenericParams:          append([]string(nil), e.GenericParams...),
-		TypeArgs:               typeArgs,
-		ExternalBinding:        e.ExternalBinding,
-		ExternalBindings:       cloneExternalBindings(e.ExternalBindings),
-		DirectGoInterface:      e.DirectGoInterface,
-		DirectGoMethods:        cloneGoMethodMap(e.DirectGoMethods),
-		DirectGoValueMethods:   cloneGoMethodMap(e.DirectGoValueMethods),
-		DirectGoPointerMethods: cloneGoMethodMap(e.DirectGoPointerMethods),
-		DirectGoType:           e.DirectGoType,
-		private:                e.private,
+		Name_:                        e.Name_,
+		GenericParams:                append([]string(nil), e.GenericParams...),
+		TypeArgs:                     typeArgs,
+		ExternalBinding:              e.ExternalBinding,
+		ExternalBindings:             cloneExternalBindings(e.ExternalBindings),
+		DirectGoInterface:            e.DirectGoInterface,
+		DirectGoHasUnexportedMethods: e.DirectGoHasUnexportedMethods,
+		DirectGoMethods:              cloneGoMethodMap(e.DirectGoMethods),
+		DirectGoValueMethods:         cloneGoMethodMap(e.DirectGoValueMethods),
+		DirectGoPointerMethods:       cloneGoMethodMap(e.DirectGoPointerMethods),
+		DirectGoType:                 e.DirectGoType,
+		private:                      e.private,
 	}
 }
 

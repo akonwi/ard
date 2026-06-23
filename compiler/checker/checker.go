@@ -984,7 +984,7 @@ func mergeMatchResultType(c *Checker, current Type, next Type, loc parse.Locatio
 	if ok {
 		return merged, true
 	}
-	if c.expectedExpr != nil && areCompatible(c.expectedExpr, current) && areCompatible(c.expectedExpr, next) {
+	if c.expectedExpr != nil && c.areCompatible(c.expectedExpr, current) && c.areCompatible(c.expectedExpr, next) {
 		return c.expectedExpr, true
 	}
 	c.addError(typeMismatch(current, next), loc)
@@ -1014,6 +1014,16 @@ func typeMismatch(expected, got Type) string {
 		exMsg = "implementation of " + exMsg
 	}
 	return fmt.Sprintf("Type mismatch: Expected %s, got %s", exMsg, formatTypeForDisplay(got))
+}
+
+func (c *Checker) areCompatible(expected Type, actual Type) bool {
+	if trait, ok := expected.(*Trait); ok {
+		return actual.hasTrait(trait)
+	}
+	if c.directGoInterfaceCompatible(expected, actual) {
+		return true
+	}
+	return expected.equal(actual)
 }
 
 func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
@@ -1386,7 +1396,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 			if s.Type != nil {
 				if expected := c.resolveType(s.Type); expected != nil {
-					if !areCompatible(expected, val.Type()) {
+					if !c.areCompatible(expected, val.Type()) {
 						c.addError(typeMismatch(expected, val.Type()), s.Value.GetLocation())
 						return nil
 					}
@@ -1427,7 +1437,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 
-				if !areCompatible(target.Type, value.Type()) {
+				if !c.areCompatible(target.Type, value.Type()) {
 					c.addError(typeMismatch(target.Type, value.Type()), s.Value.GetLocation())
 					return nil
 				}
@@ -1896,7 +1906,7 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 				hasError = true
 				continue
 			}
-			if !areCompatible(expectedElementType, element.Type()) {
+			if !c.areCompatible(expectedElementType, element.Type()) {
 				c.addError(typeMismatch(expectedElementType, element.Type()), item.GetLocation())
 				hasError = true
 				continue
@@ -3021,7 +3031,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 				hasError = true
 				continue
 			}
-			if !areCompatible(expectedKeyType, key.Type()) {
+			if !c.areCompatible(expectedKeyType, key.Type()) {
 				c.addError(typeMismatch(expectedKeyType, key.Type()), entry.Key.GetLocation())
 				hasError = true
 				continue
@@ -3034,7 +3044,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 				hasError = true
 				continue
 			}
-			if !areCompatible(expectedValueType, value.Type()) {
+			if !c.areCompatible(expectedValueType, value.Type()) {
 				c.addError(typeMismatch(expectedValueType, value.Type()), entry.Value.GetLocation())
 				hasError = true
 				continue
@@ -3173,7 +3183,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				// Implicit Maybe wrapping: if field is Maybe<T> and value is T, wrap in maybe::some()
 				if maybeField, isMaybe := fieldExpected.(*Maybe); isMaybe {
 					if valType := checkVal.Type(); !valType.equal(fieldExpected) {
-						if areCompatible(maybeField.Of(), valType) {
+						if c.areCompatible(maybeField.Of(), valType) {
 							checkVal = c.synthesizeMaybeSome(checkVal, fieldExpected)
 						}
 					}
@@ -3218,7 +3228,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 							c.diagnostics = c.diagnostics[:diagnosticCount]
 							val = c.checkExpr(property.Value)
 							if val != nil && !val.Type().equal(fieldExpected) {
-								if areCompatible(maybeField.Of(), val.Type()) {
+								if c.areCompatible(maybeField.Of(), val.Type()) {
 									val = c.synthesizeMaybeSome(val, fieldExpected)
 								} else {
 									c.addError(typeMismatch(fieldExpected, val.Type()), property.GetLocation())
@@ -4483,7 +4493,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					if leftIsMaybe && rightIsMaybe {
 						leftInner := leftMaybe.Of()
 						rightInner := rightMaybe.Of()
-						if leftInner != Void && rightInner != Void && !areCompatible(leftInner, rightInner) && !areCompatible(rightInner, leftInner) {
+						if leftInner != Void && rightInner != Void && !c.areCompatible(leftInner, rightInner) && !c.areCompatible(rightInner, leftInner) {
 							c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
 							return nil
 						}
@@ -4644,7 +4654,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 
 					// Type check the argument against the parameter type
-					if !areCompatible(paramType, checkedArg.Type()) {
+					if !c.areCompatible(paramType, checkedArg.Type()) {
 						c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
 						return nil
 					}
@@ -4845,7 +4855,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			c.scope.add(uniqueName, fn, false)
 
 			// Validate return type
-			if returnType != Void && !areCompatible(returnType, body.Type()) {
+			if returnType != Void && !c.areCompatible(returnType, body.Type()) {
 				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
 				return nil
 			}
@@ -6248,7 +6258,7 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			bindInferredTypeVars(returnType, body.Type())
 
 			// Validate return type
-			if returnType != Void && !areCompatible(returnType, body.Type()) {
+			if returnType != Void && !c.areCompatible(returnType, body.Type()) {
 				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
 				return nil
 			}
@@ -6363,7 +6373,7 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 		return checked
 	}
 
-	if !areCompatible(expectedType, checked.Type()) {
+	if !c.areCompatible(expectedType, checked.Type()) {
 		c.addError(typeMismatch(expectedType, checked.Type()), expr.GetLocation())
 		return nil
 	}
@@ -6514,7 +6524,7 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 	c.popFunctionGenericContext()
 
 	// Check that the function's return type matches its body's type
-	if returnType != Void && !areCompatible(returnType, body.Type()) {
+	if returnType != Void && !c.areCompatible(returnType, body.Type()) {
 		c.addError(typeMismatch(returnType, body.Type()), location)
 	}
 
@@ -6580,7 +6590,7 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func(), ext
 	c.popFunctionGenericContext()
 
 	// Validate return type
-	if returnType != Void && !areCompatible(returnType, body.Type()) {
+	if returnType != Void && !c.areCompatible(returnType, body.Type()) {
 		c.addError(typeMismatch(returnType, body.Type()), def.GetLocation())
 	}
 
@@ -6891,7 +6901,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		if maybeParam, isMaybe := paramType.(*Maybe); isMaybe {
 			if argType := checkedArg.Type(); !argType.equal(paramType) {
 				// Check if argument type matches the inner Maybe type
-				if areCompatible(maybeParam.Of(), argType) {
+				if c.areCompatible(maybeParam.Of(), argType) {
 					// Wrap non-Maybe value in maybe::some()
 					checkedArg = c.synthesizeMaybeSome(checkedArg, paramType)
 				}
@@ -6909,7 +6919,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			}
 		} else {
 			// For non-generic functions, do regular type compatibility check
-			if !areCompatible(paramType, checkedArg.Type()) {
+			if !c.areCompatible(paramType, checkedArg.Type()) {
 				c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
 				return nil, nil
 			}

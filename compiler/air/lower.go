@@ -263,6 +263,9 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 			if err := l.declareTraitImplsForType(modID, node); err != nil {
 				return err
 			}
+			if err := l.declareInherentImplMethodsForStruct(modID, node); err != nil {
+				return err
+			}
 		case *checker.Enum:
 			if err := l.declareTraitImplsForType(modID, node); err != nil {
 				return err
@@ -1048,6 +1051,42 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 	default:
 		return fl.l.internType(t)
 	}
+}
+
+func (l *lowerer) declareInherentImplMethodsForStruct(module ModuleID, def *checker.StructDef) error {
+	if def == nil {
+		return nil
+	}
+	ownerType, err := l.internType(def)
+	if err != nil {
+		return err
+	}
+	ownerInfo, ok := l.typeInfo(ownerType)
+	if !ok {
+		return fmt.Errorf("invalid struct method owner type %d", ownerType)
+	}
+	traitMethodNames := map[string]bool{}
+	for _, trait := range def.Traits {
+		if trait == nil {
+			continue
+		}
+		for _, method := range trait.GetMethods() {
+			traitMethodNames[method.Name] = true
+		}
+	}
+	for name, method := range l.structMethods(def) {
+		if traitMethodNames[name] || method == nil || functionHasUnresolvedTypeVar(method) {
+			continue
+		}
+		id, err := l.declareInstanceMethodFunction(module, ownerInfo.Name, ownerType, method, nil, NoType)
+		if err != nil {
+			return err
+		}
+		if err := l.lowerInstanceMethodFunction(id, method); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (l *lowerer) declareTraitImplsForType(module ModuleID, typ checker.Type) error {
@@ -5115,6 +5154,9 @@ func (l *lowerer) ensureModuleTraitImplsDeclared(modulePath string) error {
 				continue
 			}
 			if err := l.declareTraitImplsForType(modID, node); err != nil {
+				return err
+			}
+			if err := l.declareInherentImplMethodsForStruct(modID, node); err != nil {
 				return err
 			}
 		case *checker.Enum:

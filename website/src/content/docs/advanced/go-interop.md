@@ -58,7 +58,7 @@ let bytes = read_all(strings::NewReader("hello")).expect("read")
 
 Interface-to-interface assignability also follows Go's rules, so a value such as `io::ReadCloser` can be used where `io::Reader` or `io::Closer` is expected when the required methods match. Go slices and maps remain invariant: `[mut strings::Reader]` is not automatically converted to `[]io.Reader`.
 
-Ard-defined structs and functions cannot implement Go interfaces directly yet; use companion FFI adapters for that direction.
+Ard-defined structs can satisfy Go interfaces when their `impl` methods have Go-compatible method names and signatures. The Go backend emits receiver methods for those impls, including methods that are only needed by Go interface dispatch. Functions and closure adapters still need companion FFI wrappers.
 
 ## Struct Field Reads
 
@@ -177,6 +177,6 @@ fn request_path_or_default(req: mut gohttp::Request) Str {
 Direct Go interop is intentionally incremental. Current limitations include:
 
 - embedded/promoted Go fields are not resolved through promotion;
-- Ard-defined types and functions cannot implement Go interfaces directly yet;
+- Ard functions and closures cannot implement Go callback-shaped interfaces directly yet;
 - callbacks, variadics, and many compound Go shapes still need companion wrappers;
 - generic Go struct construction is not supported yet.

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/akonwi/ard/parse"
 	"golang.org/x/tools/go/packages"
@@ -80,17 +81,18 @@ type GoValueType struct {
 }
 
 type GoType struct {
-	Name           string
-	Methods        map[string]GoMethod
-	ValueMethods   map[string]GoMethod
-	PointerMethods map[string]GoMethod
-	Fields         map[string]GoField
-	Struct         bool
-	Interface      bool
-	TypeParams     int
-	EnumConstants  []GoConstant
-	ClosedEnum     bool
-	Type           types.Type
+	Name                 string
+	Methods              map[string]GoMethod
+	ValueMethods         map[string]GoMethod
+	PointerMethods       map[string]GoMethod
+	Fields               map[string]GoField
+	Struct               bool
+	Interface            bool
+	HasUnexportedMethods bool
+	TypeParams           int
+	EnumConstants        []GoConstant
+	ClosedEnum           bool
+	Type                 types.Type
 }
 
 type GoField struct {
@@ -213,7 +215,7 @@ func goPackageFromTypes(importPath string, name string, pkg *types.Package) *GoP
 		case *types.TypeName:
 			fields, isStruct := exportedStructFields(obj.Type())
 			valueMethods, pointerMethods := exportedMethodSets(obj.Type())
-			out.Types[name] = GoType{Name: name, Methods: mergeGoMethods(valueMethods, pointerMethods), ValueMethods: valueMethods, PointerMethods: pointerMethods, Fields: fields, Struct: isStruct, Interface: isGoInterfaceType(obj.Type()), TypeParams: goTypeParamCount(obj.Type()), Type: obj.Type()}
+			out.Types[name] = GoType{Name: name, Methods: mergeGoMethods(valueMethods, pointerMethods), ValueMethods: valueMethods, PointerMethods: pointerMethods, Fields: fields, Struct: isStruct, Interface: isGoInterfaceType(obj.Type()), HasUnexportedMethods: hasUnexportedMethods(obj.Type()), TypeParams: goTypeParamCount(obj.Type()), Type: obj.Type()}
 		case *types.Const:
 			out.Constants[name] = goConstant(obj)
 		case *types.Var:
@@ -1595,6 +1597,7 @@ func directGoExternTypeWithMetadata(name string, binding string, metadata *GoTyp
 		return ext
 	}
 	ext.DirectGoInterface = metadata.Interface
+	ext.DirectGoHasUnexportedMethods = metadata.HasUnexportedMethods
 	ext.DirectGoMethods = cloneGoMethodMap(metadata.Methods)
 	ext.DirectGoValueMethods = cloneGoMethodMap(metadata.ValueMethods)
 	ext.DirectGoPointerMethods = cloneGoMethodMap(metadata.PointerMethods)
@@ -1685,6 +1688,28 @@ func directGoInterfaceCompatible(expected Type, actual Type) bool {
 	return ok && goMethodSetImplements(actualMethods, required)
 }
 
+func (c *Checker) directGoInterfaceCompatible(expected Type, actual Type) bool {
+	expected = derefType(expected)
+	expectedExtern, ok := expected.(*ExternType)
+	if !ok || !expectedExtern.DirectGoInterface {
+		return false
+	}
+	if expectedExtern.DirectGoType != nil {
+		if actualGoType, ok := c.directGoGoTypeForArdType(actual); ok {
+			return types.AssignableTo(actualGoType, expectedExtern.DirectGoType)
+		}
+		if expectedExtern.DirectGoHasUnexportedMethods {
+			return false
+		}
+	}
+	required := directGoExternInterfaceMethods(expectedExtern)
+	if required == nil {
+		return false
+	}
+	actualMethods, ok := c.directGoMethodSetForArdType(actual)
+	return ok && goMethodSetImplements(actualMethods, required)
+}
+
 func directGoExternGoTypeForType(typ Type) (types.Type, bool) {
 	typ = derefType(typ)
 	pointer := false
@@ -1757,8 +1782,12 @@ func (c *Checker) directGoInterfaceAssignable(ard Type, goType GoValueType) bool
 		return false
 	}
 	if expected.Type != nil {
-		actualType, ok := c.directGoGoTypeForArdType(ard)
-		return ok && types.AssignableTo(actualType, expected.Type)
+		if actualType, ok := c.directGoGoTypeForArdType(ard); ok {
+			return types.AssignableTo(actualType, expected.Type)
+		}
+		if expected.HasUnexportedMethods {
+			return false
+		}
 	}
 	required := expected.Methods
 	if required == nil {
@@ -1812,11 +1841,15 @@ func (c *Checker) directGoMethodSetForArdType(typ Type) (map[string]GoMethod, bo
 	if methods, ok := directGoExternMethodSetForType(typ); ok {
 		return methods, true
 	}
+	original := typ
 	typ = derefType(typ)
 	pointer := false
 	if ref, ok := typ.(*MutableRef); ok {
 		pointer = true
 		typ = derefType(ref.Of())
+	}
+	if methods, ok := c.ardDefinedGoMethodSetForType(original, pointer); ok {
+		return methods, true
 	}
 	importPath, typeName, ok := directGoNamedTypeBinding(typ)
 	if !ok {
@@ -1846,6 +1879,194 @@ func (c *Checker) directGoMethodSetForArdType(typ Type) (map[string]GoMethod, bo
 		return goType.ValueMethods, true
 	}
 	return goType.Methods, true
+}
+
+func (c *Checker) ardDefinedGoMethodSetForType(typ Type, pointer bool) (map[string]GoMethod, bool) {
+	if ref, ok := typ.(*MutableRef); ok {
+		pointer = true
+		typ = derefType(ref.Of())
+	} else {
+		typ = derefType(typ)
+	}
+	def, ok := typ.(*StructDef)
+	if !ok {
+		return nil, false
+	}
+	methods := c.structMethods(def)
+	if methods == nil {
+		return nil, true
+	}
+	goNameCounts := map[string]int{}
+	for name := range methods {
+		if goName, ok := ardGoMethodName(name); ok {
+			goNameCounts[goName]++
+		}
+	}
+	out := map[string]GoMethod{}
+	for name, method := range methods {
+		if method == nil || method.hasGenerics() {
+			continue
+		}
+		goName, ok := ardGoMethodName(name)
+		if !ok || goNameCounts[goName] > 1 || ardGoMethodNameUnavailableOnStruct(def, goName) {
+			continue
+		}
+		if method.Mutates && !pointer {
+			continue
+		}
+		signature, ok := c.goSignatureForArdMethod(method)
+		if !ok {
+			continue
+		}
+		out[goName] = GoMethod{Name: goName, Signature: signature}
+	}
+	return out, true
+}
+
+func (c *Checker) goSignatureForArdMethod(method *FunctionDef) (GoSignature, bool) {
+	params := make([]GoValueType, 0, len(method.Parameters))
+	for _, param := range method.Parameters {
+		goType, ok := c.goValueTypeForArdType(param.Type, param.Mutable)
+		if !ok {
+			return GoSignature{}, false
+		}
+		params = append(params, goType)
+	}
+	results := []GoValueType{}
+	if !equalTypes(derefType(method.ReturnType), Void) {
+		goType, ok := c.goValueTypeForArdType(method.ReturnType, false)
+		if !ok {
+			return GoSignature{}, false
+		}
+		results = append(results, goType)
+	}
+	return GoSignature{Params: params, Results: results}, true
+}
+
+func (c *Checker) goValueTypeForArdType(typ Type, mutable bool) (GoValueType, bool) {
+	if mutable {
+		inner, ok := c.goValueTypeForArdType(typ, false)
+		if !ok {
+			return GoValueType{}, false
+		}
+		return GoValueType{Kind: GoValuePointer, Expr: "*" + inner.String(), Elem: &inner}, true
+	}
+	typ = derefType(typ)
+	if ext, ok := typ.(*ExternType); ok {
+		if ext.DirectGoType != nil {
+			return goValueType(ext.DirectGoType), true
+		}
+		if ext.ExternalBinding != "" {
+			if binding, ok := parseCanonicalDirectGoBinding(ext.ExternalBinding); ok && len(binding.Symbols) == 1 {
+				if goImport, ok := c.directGoImportForPathOrLoad(binding.ImportPath, parse.Location{}); ok && goImport.pkg != nil {
+					if goType, ok := goImport.pkg.Types[binding.Symbols[0]]; ok {
+						if goType.Type != nil {
+							return goValueType(goType.Type), true
+						}
+						return GoValueType{Expr: goType.Name, Kind: GoValueOther, Named: true, ImportPath: binding.ImportPath, Package: goImport.pkg.Name, Name: goType.Name}, true
+					}
+				}
+			}
+		}
+	}
+	switch typ {
+	case Int:
+		return GoValueType{Kind: GoValueInt, Expr: "int"}, true
+	case Float:
+		return GoValueType{Kind: GoValueFloat, Expr: "float64", Bits: 64}, true
+	case Bool:
+		return GoValueType{Kind: GoValueBool, Expr: "bool"}, true
+	case Byte:
+		return GoValueType{Kind: GoValueUint, Expr: "byte", Bits: 8}, true
+	case Rune:
+		return GoValueType{Kind: GoValueInt, Expr: "rune", Bits: 32}, true
+	case Str:
+		return GoValueType{Kind: GoValueString, Expr: "string"}, true
+	}
+	switch typed := typ.(type) {
+	case *List:
+		elem, ok := c.goValueTypeForArdType(typed.Of(), false)
+		if !ok {
+			return GoValueType{}, false
+		}
+		return GoValueType{Kind: GoValueSlice, Expr: "[]" + elem.String(), Elem: &elem}, true
+	case *Map:
+		key, ok := c.goValueTypeForArdType(typed.Key(), false)
+		if !ok {
+			return GoValueType{}, false
+		}
+		value, ok := c.goValueTypeForArdType(typed.Value(), false)
+		if !ok {
+			return GoValueType{}, false
+		}
+		return GoValueType{Kind: GoValueMap, Expr: "map[" + key.String() + "]" + value.String(), Key: &key, Value: &value}, true
+	}
+	return GoValueType{}, false
+}
+
+func ardGoMethodName(raw string) (string, bool) {
+	name := ardSanitizeGoName(raw)
+	if name == "" || name == "_" {
+		return "", false
+	}
+	if gotoken.Lookup(name).IsKeyword() {
+		name += "_"
+	}
+	if !gotoken.IsIdentifier(name) {
+		return "", false
+	}
+	return name, true
+}
+
+func ardGoMethodNameUnavailableOnStruct(def *StructDef, methodName string) bool {
+	if def == nil {
+		return false
+	}
+	for field := range def.Fields {
+		if ardGoFieldName(field) == methodName {
+			return true
+		}
+	}
+	switch methodName {
+	case "MarshalJSONTo", "UnmarshalJSONFrom":
+		return true
+	default:
+		return false
+	}
+}
+
+func ardGoFieldName(raw string) string {
+	name := ardSanitizeGoName(raw)
+	if name == "" {
+		return "field"
+	}
+	if gotoken.Lookup(name).IsKeyword() {
+		return name + "_"
+	}
+	return name
+}
+
+func ardSanitizeGoName(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	var out []rune
+	for _, r := range raw {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			out = append(out, r)
+			continue
+		}
+		out = append(out, '_')
+	}
+	name := strings.Trim(string(out), "_")
+	if name == "" {
+		return ""
+	}
+	runes := []rune(name)
+	if len(runes) > 0 && unicode.IsDigit(runes[0]) {
+		return "_" + name
+	}
+	return name
 }
 
 func goMethodSetImplements(actual map[string]GoMethod, required map[string]GoMethod) bool {
@@ -2222,6 +2443,21 @@ func exportedMethods(typ types.Type) map[string]GoMethod {
 
 func exportedMethodSets(typ types.Type) (map[string]GoMethod, map[string]GoMethod) {
 	return exportedMethodSet(types.NewMethodSet(typ)), exportedMethodSet(types.NewMethodSet(types.NewPointer(typ)))
+}
+
+func hasUnexportedMethods(typ types.Type) bool {
+	methodSet := types.NewMethodSet(typ)
+	for i := 0; i < methodSet.Len(); i++ {
+		selection := methodSet.At(i)
+		if selection == nil {
+			continue
+		}
+		fn, ok := selection.Obj().(*types.Func)
+		if ok && !fn.Exported() {
+			return true
+		}
+	}
+	return false
 }
 
 func exportedMethodSet(methodSet *types.MethodSet) map[string]GoMethod {

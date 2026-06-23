@@ -243,6 +243,157 @@ fn main() Int { takes_reader(strings::NewReader("hello")) }`), "main.ard")
 	}
 }
 
+func TestDirectGoInterfaceTypeAcceptsArdStructImplementer(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/iface as iface
+
+struct Handler { prefix: Str }
+
+impl Handler {
+  fn Handle(value: Str) Int { value.size() }
+}
+
+fn main() Int { iface::Use(Handler{prefix: "ok"}) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	handler := goNamed(GoValueOther, "iface.Handler", "example.com/iface", "Handler")
+	handleMethod := GoMethod{Name: "Handle", Signature: GoSignature{Receiver: &handler, Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueInt, "int")}}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/iface": {
+			ImportPath: "example.com/iface",
+			Name:       "iface",
+			Functions:  map[string]GoFunction{"Use": {Name: "Use", Signature: GoSignature{Params: []GoValueType{handler}, Results: []GoValueType{goParam(GoValueInt, "int")}}}},
+			Types:      map[string]GoType{"Handler": {Name: "Handler", Interface: true, Methods: map[string]GoMethod{"Handle": handleMethod}}},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoInterfaceTypeAcceptsArdStructImplementerInArdCall(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/iface as iface
+
+struct Handler { prefix: Str }
+
+impl Handler {
+  fn Handle(value: Str) Int { value.size() }
+}
+
+fn apply(handler: iface::Handler) Int { 1 }
+fn main() Int { apply(Handler{prefix: "ok"}) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	handler := goNamed(GoValueOther, "iface.Handler", "example.com/iface", "Handler")
+	handleMethod := GoMethod{Name: "Handle", Signature: GoSignature{Receiver: &handler, Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueInt, "int")}}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/iface": {
+			ImportPath: "example.com/iface",
+			Name:       "iface",
+			Types:      map[string]GoType{"Handler": {Name: "Handler", Interface: true, Methods: map[string]GoMethod{"Handle": handleMethod}}},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoInterfaceTypeRejectsArdStructWhenMethodWrappersCollide(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/iface as iface
+
+struct Handler { prefix: Str }
+
+impl Handler {
+  fn Handle(value: Str) Int { value.size() }
+  fn Handle_(value: Str) Int { value.size() }
+}
+
+fn main() Int { iface::Use(Handler{prefix: "no"}) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	handler := goNamed(GoValueOther, "iface.Handler", "example.com/iface", "Handler")
+	handleMethod := GoMethod{Name: "Handle", Signature: GoSignature{Receiver: &handler, Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueInt, "int")}}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/iface": {
+			ImportPath: "example.com/iface",
+			Name:       "iface",
+			Functions:  map[string]GoFunction{"Use": {Name: "Use", Signature: GoSignature{Params: []GoValueType{handler}, Results: []GoValueType{goParam(GoValueInt, "int")}}}},
+			Types:      map[string]GoType{"Handler": {Name: "Handler", Interface: true, Methods: map[string]GoMethod{"Handle": handleMethod}}},
+		},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected method collision diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Ard type Handler is not compatible with Go named type iface.Handler") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoInterfaceTypeRejectsArdStructForSealedInterface(t *testing.T) {
+	pkg := goPackageFromSource(t, "example.com/sealedard", "sealedard", `package sealedard
+
+type Handler interface { Handle(string) int; seal() }
+func Use(Handler) int { return 0 }
+`)
+	result := parse.Parse([]byte(`use go:example.com/sealedard as sealedard
+
+struct Handler { prefix: Str }
+
+impl Handler {
+  fn Handle(value: Str) Int { value.size() }
+}
+
+fn main() Int { sealedard::Use(Handler{prefix: "no"}) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{pkg.ImportPath: pkg}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected sealed interface diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Ard type Handler is not compatible with Go named type sealedard.Handler") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
+func TestDirectGoInterfaceTypeRejectsArdStructNonImplementer(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/iface as iface
+
+struct Handler { prefix: Str }
+
+impl Handler {
+  fn Wrong(value: Str) Int { value.size() }
+}
+
+fn main() Int { iface::Use(Handler{prefix: "no"}) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	handler := goNamed(GoValueOther, "iface.Handler", "example.com/iface", "Handler")
+	handleMethod := GoMethod{Name: "Handle", Signature: GoSignature{Receiver: &handler, Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueInt, "int")}}}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/iface": {
+			ImportPath: "example.com/iface",
+			Name:       "iface",
+			Functions:  map[string]GoFunction{"Use": {Name: "Use", Signature: GoSignature{Params: []GoValueType{handler}, Results: []GoValueType{goParam(GoValueInt, "int")}}}},
+			Types:      map[string]GoType{"Handler": {Name: "Handler", Interface: true, Methods: map[string]GoMethod{"Handle": handleMethod}}},
+		},
+	}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected non-implementer diagnostic")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Ard type Handler is not compatible with Go named type iface.Handler") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
 func TestDirectGoInterfaceTypeRejectsConcreteNonImplementerInArdCall(t *testing.T) {
 	result := parse.Parse([]byte(`use go:io
 use go:strings
