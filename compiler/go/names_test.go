@@ -25,6 +25,26 @@ func TestGoPackageNameFromModulePathSanitizesInvalidNames(t *testing.T) {
 	}
 }
 
+func TestModulePackageHelpersSanitizePaths(t *testing.T) {
+	program := &air.Program{Modules: []air.Module{
+		{ID: 0, Path: "accounts/foo_bar.ard"},
+		{ID: 1, Path: "123-api/type.ard"},
+		{ID: 2, Path: "v1.0/foo.ard"},
+	}}
+	if got := modulePackageName(program, 0); got != "foo_bar" {
+		t.Fatalf("modulePackageName = %q, want foo_bar", got)
+	}
+	if got := modulePackageDir(program, 1); got != "_123_api/type_" {
+		t.Fatalf("modulePackageDir = %q, want _123_api/type_", got)
+	}
+	if got := moduleImportPath(program, 1); got != "generated/_123_api/type_" {
+		t.Fatalf("moduleImportPath = %q, want generated/_123_api/type_", got)
+	}
+	if got := modulePackageDir(program, 2); got != "v1_0/foo" {
+		t.Fatalf("modulePackageDir dotted directory = %q, want v1_0/foo", got)
+	}
+}
+
 func TestNaturalTypeNameUsesVisibilityForUserTypes(t *testing.T) {
 	program := &air.Program{Types: []air.TypeInfo{
 		{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "user.ard"},

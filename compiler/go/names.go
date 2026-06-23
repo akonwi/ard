@@ -3,6 +3,7 @@ package gotarget
 import (
 	"fmt"
 	"go/token"
+	"path"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -16,6 +17,40 @@ func moduleFileName(program *air.Program, module air.Module) string {
 		name += "_ard"
 	}
 	return name + ".go"
+}
+
+func modulePackageName(program *air.Program, module air.ModuleID) string {
+	if program == nil || module < 0 || int(module) >= len(program.Modules) {
+		return "module"
+	}
+	return goPackageNameFromModulePath(program.Modules[module].Path)
+}
+
+func modulePackageDir(program *air.Program, module air.ModuleID) string {
+	if program == nil || module < 0 || int(module) >= len(program.Modules) {
+		return "module"
+	}
+	pathNoExt := strings.TrimSuffix(program.Modules[module].Path, filepath.Ext(program.Modules[module].Path))
+	parts := strings.FieldsFunc(pathNoExt, func(r rune) bool { return r == '/' || r == '\\' })
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		name := sanitizeGoPackageIdentifier(part)
+		if name != "" {
+			out = append(out, name)
+		}
+	}
+	if len(out) == 0 {
+		return modulePackageName(program, module)
+	}
+	return filepath.Join(out...)
+}
+
+func moduleImportPath(program *air.Program, module air.ModuleID) string {
+	dir := modulePackageDir(program, module)
+	if dir == "" || dir == "." {
+		return "generated"
+	}
+	return path.Join("generated", filepath.ToSlash(dir))
 }
 
 func moduleFileBaseName(program *air.Program, module air.ModuleID) string {
@@ -260,7 +295,11 @@ func sanitizeName(raw string) string {
 
 func goPackageNameFromModulePath(modulePath string) string {
 	base := strings.TrimSuffix(filepath.Base(modulePath), filepath.Ext(modulePath))
-	name := sanitizeGoIdentifier(base)
+	return sanitizeGoPackageIdentifier(base)
+}
+
+func sanitizeGoPackageIdentifier(raw string) string {
+	name := sanitizeGoIdentifier(raw)
 	if name == "" || name == "_" {
 		return "module"
 	}
