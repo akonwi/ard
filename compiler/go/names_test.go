@@ -45,7 +45,7 @@ func TestModulePackageHelpersSanitizePaths(t *testing.T) {
 	}
 }
 
-func TestNaturalTypeNameUsesVisibilityForUserTypes(t *testing.T) {
+func TestNaturalTypeNameUsesVisibilityForArdTypes(t *testing.T) {
 	program := &air.Program{Types: []air.TypeInfo{
 		{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "user.ard"},
 		{ID: 2, Kind: air.TypeStruct, Name: "internal_config", ModulePath: "config.ard", Private: true},
@@ -57,8 +57,8 @@ func TestNaturalTypeNameUsesVisibilityForUserTypes(t *testing.T) {
 	if got := typeName(program, program.Types[1]); got != "internalConfig" {
 		t.Fatalf("private user type = %q, want internalConfig", got)
 	}
-	if got := typeName(program, program.Types[2]); got != "ard_std__Std" {
-		t.Fatalf("stdlib type = %q, want legacy artifact name", got)
+	if got := typeName(program, program.Types[2]); got != "Std" {
+		t.Fatalf("stdlib type = %q, want Std", got)
 	}
 }
 

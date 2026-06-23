@@ -132,7 +132,7 @@ func naturalTypeName(program *air.Program, typ air.TypeInfo) (string, bool) {
 	if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum {
 		return "", false
 	}
-	if typ.Name == "" || strings.ContainsAny(typ.Name, "<>[]?:!") || strings.HasPrefix(typ.ModulePath, "ard/") || typ.ExternBinding != "" {
+	if typ.Name == "" || strings.ContainsAny(typ.Name, "<>[]?:!") || typ.ExternBinding != "" {
 		return "", false
 	}
 	name := naturalGoIdentifier(typ.Name, !typ.Private)
@@ -154,7 +154,7 @@ func naturalTypeNameEligible(typ air.TypeInfo) bool {
 	if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum {
 		return false
 	}
-	return typ.Name != "" && !strings.ContainsAny(typ.Name, "<>[]?:!") && !strings.HasPrefix(typ.ModulePath, "ard/") && typ.ExternBinding == ""
+	return typ.Name != "" && !strings.ContainsAny(typ.Name, "<>[]?:!") && typ.ExternBinding == ""
 }
 
 func typeNameBase(program *air.Program, typ air.TypeInfo) string {
