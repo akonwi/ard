@@ -919,6 +919,22 @@ func (l *lowerer) naturalTraitInterfaceTypeName(trait air.Trait) (string, bool) 
 	if name == "" || name == "_" {
 		return "", false
 	}
+	for _, other := range l.program.Traits {
+		if other.ID == trait.ID || other.Name == "" {
+			continue
+		}
+		if naturalGoIdentifier(other.Name, !other.Private) == name {
+			return "", false
+		}
+	}
+	for _, typ := range l.program.Types {
+		if !naturalTypeNameEligible(typ) {
+			continue
+		}
+		if naturalGoIdentifier(typ.Name, !typ.Private) == name {
+			return "", false
+		}
+	}
 	return name, true
 }
 

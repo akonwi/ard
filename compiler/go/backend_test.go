@@ -67,6 +67,29 @@ func TestTraitInterfaceTypeNameUsesNaturalVisibility(t *testing.T) {
 	}
 }
 
+func TestTraitInterfaceTypeNameFallsBackOnCrossModuleTraitCollision(t *testing.T) {
+	l := &lowerer{program: &air.Program{Traits: []air.Trait{
+		{ID: 0, Name: "Drawable", ModulePath: "ui/drawable.ard"},
+		{ID: 1, Name: "Drawable", ModulePath: "svg/drawable.ard"},
+	}}}
+	if got := l.traitInterfaceTypeName(l.program.Traits[0]); got != "ardTrait_Drawable_0" {
+		t.Fatalf("first colliding trait interface name = %q, want legacy fallback", got)
+	}
+	if got := l.traitInterfaceTypeName(l.program.Traits[1]); got != "ardTrait_Drawable_1" {
+		t.Fatalf("second colliding trait interface name = %q, want legacy fallback", got)
+	}
+}
+
+func TestTraitInterfaceTypeNameFallsBackOnTypeCollision(t *testing.T) {
+	l := &lowerer{program: &air.Program{
+		Traits: []air.Trait{{ID: 0, Name: "Drawable", ModulePath: "traits.ard"}},
+		Types:  []air.TypeInfo{{ID: 1, Kind: air.TypeStruct, Name: "Drawable", ModulePath: "types.ard"}},
+	}}
+	if got := l.traitInterfaceTypeName(l.program.Traits[0]); got != "ardTrait_Drawable_0" {
+		t.Fatalf("trait colliding with type = %q, want legacy fallback", got)
+	}
+}
+
 func lowerProgramAST(t testing.TB, program *air.Program, options Options) map[string]*ast.File {
 	t.Helper()
 	files, err := lowerProgram(program, options)
