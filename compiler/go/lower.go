@@ -769,7 +769,7 @@ func (l *lowerer) usesNativeTraitInterface(typeID air.TypeID) bool {
 		return false
 	}
 	traitID := l.program.Types[typeID-1].Trait
-	if !l.traitInterfaceAvailable(traitID) || l.ffiNativeTraitFallbacks[traitID] {
+	if !l.traitInterfaceAvailable(traitID) || l.ffiNativeTraitFallbacks[traitID] || l.traitHasMutableTraitUse(traitID) {
 		return false
 	}
 	for _, impl := range l.program.Impls {
@@ -781,7 +781,7 @@ func (l *lowerer) usesNativeTraitInterface(typeID air.TypeID) bool {
 				return false
 			}
 			methodFn := l.program.Functions[methodID]
-			if len(methodFn.Signature.Params) == 0 || methodFn.Signature.Params[0].Mutable {
+			if len(methodFn.Signature.Params) == 0 {
 				return false
 			}
 			key, _, ok := l.goMethodKey(methodFn)
@@ -791,6 +791,37 @@ func (l *lowerer) usesNativeTraitInterface(typeID air.TypeID) bool {
 		}
 	}
 	return true
+}
+
+func (l *lowerer) traitHasMutableTraitUse(traitID air.TraitID) bool {
+	for _, fn := range l.program.Functions {
+		for _, param := range fn.Signature.Params {
+			if param.Mutable && l.paramIsTrait(param, traitID) {
+				return true
+			}
+		}
+	}
+	for _, typ := range l.program.Types {
+		for _, field := range typ.Fields {
+			if field.Mutable && l.typeIDIsTrait(field.Type, traitID) {
+				return true
+			}
+		}
+		for i, paramTypeID := range typ.Params {
+			if i < len(typ.ParamMutable) && typ.ParamMutable[i] && l.typeIDIsTrait(paramTypeID, traitID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (l *lowerer) paramIsTrait(param air.Param, traitID air.TraitID) bool {
+	return l.typeIDIsTrait(param.Type, traitID)
+}
+
+func (l *lowerer) typeIDIsTrait(typeID air.TypeID, traitID air.TraitID) bool {
+	return validTypeID(l.program, typeID) && l.program.Types[typeID-1].Kind == air.TypeTraitObject && l.program.Types[typeID-1].Trait == traitID
 }
 
 func (l *lowerer) traitInterfaceMethodType(method air.TraitMethod) (*ast.FuncType, error) {
@@ -1455,10 +1486,6 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("trait upcast missing target")
 		}
-		target, err := l.lowerExpr(fn, *expr.Target)
-		if err != nil {
-			return loweredExpr{}, err
-		}
 		// Convert the concrete value to the trait-object representation so
 		// subsequent assignments and dispatches use the correct type.
 		if l.usesNativeTraitInterface(expr.Type) {
@@ -1466,7 +1493,37 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			if err != nil {
 				return loweredExpr{}, err
 			}
+			if l.implRequiresPointerReceiver(expr.Impl) {
+				place, setup, ok, err := l.mutableTraitUpcastPlace(fn, *expr.Target)
+				if err != nil {
+					return loweredExpr{}, err
+				}
+				if ok {
+					return loweredExpr{stmts: setup, expr: &ast.CallExpr{Fun: traitType, Args: []ast.Expr{addressOfPlace(place)}}}, nil
+				}
+				target, err := l.lowerExpr(fn, *expr.Target)
+				if err != nil {
+					return loweredExpr{}, err
+				}
+				temp := l.nextTemp()
+				tempType, err := l.goType(expr.Target.Type)
+				if err != nil {
+					return loweredExpr{}, err
+				}
+				stmts := append([]ast.Stmt{}, target.stmts...)
+				stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(temp)}, Type: tempType}}}})
+				stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{target.expr}})
+				return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: traitType, Args: []ast.Expr{&ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(temp)}}}}, nil
+			}
+			target, err := l.lowerExpr(fn, *expr.Target)
+			if err != nil {
+				return loweredExpr{}, err
+			}
 			return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: traitType, Args: []ast.Expr{target.expr}}}, nil
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprCallTrait:
@@ -3296,6 +3353,22 @@ func (l *lowerer) mutableTraitObjectArg(fn air.Function, arg air.Expr, argExpr a
 	return nil, nil, nil, false, nil
 }
 
+func (l *lowerer) implRequiresPointerReceiver(implID air.ImplID) bool {
+	if implID < 0 || int(implID) >= len(l.program.Impls) {
+		return false
+	}
+	for _, methodID := range l.program.Impls[implID].Methods {
+		if !validFunctionID(l.program, methodID) {
+			continue
+		}
+		methodFn := l.program.Functions[methodID]
+		if len(methodFn.Signature.Params) > 0 && methodFn.Signature.Params[0].Mutable {
+			return true
+		}
+	}
+	return false
+}
+
 func (l *lowerer) mutableTraitRefPointerExpr(fn air.Function, arg air.Expr) (ast.Expr, []ast.Stmt, bool, error) {
 	if !l.isTraitObjectType(arg.Type) {
 		return nil, nil, false, nil
@@ -3594,20 +3667,20 @@ func (l *lowerer) mutableTraitUpcastPlace(fn air.Function, arg air.Expr) (ast.Ex
 		if arg.Target == nil || !validTypeID(l.program, arg.Target.Type) {
 			return nil, nil, false, nil
 		}
-		target, err := l.lowerExpr(fn, *arg.Target)
-		if err != nil {
-			return nil, nil, false, err
+		targetPlace, setup, ok, err := l.mutableTraitUpcastPlace(fn, *arg.Target)
+		if err != nil || !ok {
+			return nil, nil, ok, err
 		}
 		targetType := l.program.Types[arg.Target.Type-1]
 		if targetType.Kind != air.TypeStruct || arg.Field < 0 || arg.Field >= len(targetType.Fields) {
 			return nil, nil, false, nil
 		}
 		field := targetType.Fields[arg.Field]
-		fieldTarget := ast.Expr(&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))})
+		fieldTarget := ast.Expr(&ast.SelectorExpr{X: targetPlace, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))})
 		if field.Mutable {
 			fieldTarget = &ast.StarExpr{X: fieldTarget}
 		}
-		return fieldTarget, target.stmts, true, nil
+		return fieldTarget, setup, true, nil
 	default:
 		return nil, nil, false, nil
 	}

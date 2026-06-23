@@ -4022,9 +4022,24 @@ func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 		fn send(w: Writer) {
 			w.write("hi")
 		}
+
+		fn main() {
+			mut buffer = Buffer{contents: ""}
+			send(buffer)
+		}
 	`)
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		typeSpec, ok := node.(*ast.TypeSpec)
+		if !ok || typeSpec.Name == nil || !strings.HasPrefix(typeSpec.Name.Name, "ardTrait_Writer_") {
+			return false
+		}
+		_, ok = typeSpec.Type.(*ast.InterfaceType)
+		return ok
+	}) {
+		t.Fatal("generated AST missing native Go interface for trait with mutating impl")
+	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		fn, ok := node.(*ast.FuncDecl)
 		if !ok || fn.Name == nil || !strings.Contains(fn.Name.Name, "Buffer_Writer_write") || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
@@ -4050,17 +4065,17 @@ func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || !strings.Contains(astCallName(call), "Buffer_Writer_write") || len(call.Args) < 2 {
+		if !ok || astCallName(call) != "test_ard__send" || len(call.Args) != 1 {
 			return false
 		}
-		addr, ok := call.Args[0].(*ast.UnaryExpr)
-		if !ok || addr.Op != token.AND {
+		conversion, ok := call.Args[0].(*ast.CallExpr)
+		if !ok || !strings.HasPrefix(astCallName(conversion), "ardTrait_Writer_") || len(conversion.Args) != 1 {
 			return false
 		}
-		lit, ok := call.Args[1].(*ast.BasicLit)
-		return ok && lit.Value == `"hi"`
+		addr, ok := conversion.Args[0].(*ast.UnaryExpr)
+		return ok && addr.Op == token.AND
 	}) {
-		t.Fatal("generated AST missing address-of for mutating trait dispatch receiver")
+		t.Fatal("generated AST missing address-of when passing mutating impl to native trait interface")
 	}
 }
 
@@ -4181,20 +4196,17 @@ fn main() {
 		t.Fatalf("lower error: %v", err)
 	}
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesContain(files, func(node ast.Node) bool {
+	if astFilesContain(files, func(node ast.Node) bool {
 		_, ok := node.(*ast.TypeSwitchStmt)
 		return ok
 	}) {
-		t.Fatal("generated AST missing trait dispatch")
-	}
-	if !astFilesHaveTypeSwitchCase(files, "Text") {
-		t.Fatal("generated AST missing cross-module trait dispatch case")
+		t.Fatal("generated AST should use native interface dispatch for mutating trait impl")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		return ok && strings.Contains(astCallName(call), "checkprobe_widget__Text_Widget_render") && len(call.Args) >= 2 && astExprName(call.Args[1]) == "f_0"
+		return ok && (astCallName(call) == "render" || strings.HasSuffix(astCallName(call), ".render"))
 	}) {
-		t.Fatal("generated AST missing cross-module trait dispatch call")
+		t.Fatal("generated AST missing native cross-module trait dispatch call")
 	}
 }
 
@@ -4286,17 +4298,11 @@ fn main() {
 		t.Fatalf("lower error: %v", err)
 	}
 	generatedFiles := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesContain(generatedFiles, func(node ast.Node) bool {
+	if astFilesContain(generatedFiles, func(node ast.Node) bool {
 		_, ok := node.(*ast.TypeSwitchStmt)
 		return ok
 	}) {
-		t.Fatal("generated AST missing call-site trait dispatch")
-	}
-	if !astFilesHaveTypeSwitchCase(generatedFiles, "Box") {
-		t.Fatal("generated AST missing Box dispatch case from call-site imports")
-	}
-	if !astFilesHaveTypeSwitchCase(generatedFiles, "Text") {
-		t.Fatal("generated AST missing Text dispatch case from call-site imports")
+		t.Fatal("generated AST should use native interface dispatch for call-site trait dispatch")
 	}
 }
 
@@ -4388,17 +4394,11 @@ fn main() { demo::run() }
 		t.Fatalf("lower error: %v", err)
 	}
 	generatedFiles := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesContain(generatedFiles, func(node ast.Node) bool {
+	if astFilesContain(generatedFiles, func(node ast.Node) bool {
 		_, ok := node.(*ast.TypeSwitchStmt)
 		return ok
 	}) {
-		t.Fatal("generated AST missing aliased-constructor trait dispatch")
-	}
-	if !astFilesHaveTypeSwitchCase(generatedFiles, "Box") {
-		t.Fatal("generated AST missing Box dispatch case through let alias")
-	}
-	if !astFilesHaveTypeSwitchCase(generatedFiles, "Text") {
-		t.Fatal("generated AST missing Text dispatch case through let alias")
+		t.Fatal("generated AST should use native interface dispatch for aliased-constructor trait dispatch")
 	}
 }
 

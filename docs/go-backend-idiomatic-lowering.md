@@ -29,7 +29,7 @@ Current direction: when an Ard impl method has a Go-representable receiver and s
 
 Plain Ard trait objects currently rely on `any`, generated dispatch, and special forwarding tables for mutable trait references. This is workable internally, but it does not line up with Go's interface model.
 
-Desired direction: generate Go interfaces for traits whose methods can be represented as Go methods. Mutable trait references may still need forwarding-table machinery because they model Ard aliasing semantics, but immutable trait values should move toward Go interface dispatch where possible.
+Desired direction: generate one canonical Go interface for each Go-representable Ard trait in the package that defines the trait. Ard traits define required methods only; whether an implementation mutates should be represented by ordinary Go receiver choice (`T` vs `*T`), not by a distinct trait object shape. A source-level `mut Trait` position remains valid and means the value used for that trait position must be mutable/addressable when required, but it should not lower to a separate forwarding-table runtime representation long term.
 
 ### Generated names and packages are artifact-oriented
 
@@ -70,15 +70,18 @@ If Go-facing adapters are needed later, they should be wrappers at the boundary,
      - Internal Ard calls and trait dispatch still use the existing standalone helper functions.
 
 2. **Generate Go interfaces for Go-representable Ard traits.**
-   - Start with immutable trait values.
-   - Keep mutable trait-reference forwarding tables for alias-preserving `mut Trait` semantics.
+   - Emit the canonical interface in the package that defines the Ard trait.
+   - Treat trait definitions as method requirements only; do not encode implementation mutability in the trait interface.
+   - Represent mutating implementations with pointer receiver methods, so `*T` satisfies the same interface when mutation is required.
+   - Keep `mut Trait` valid at use sites as an addressability/mutability requirement for the instance being used.
+   - Retire the Go-target-specific mutable trait-reference forwarding-table representation once pointer receiver interface dispatch covers the semantics.
    - Avoid changing traits whose method signatures need Ard-only runtime adaptation.
    - Initial implementation notes:
      - The Go target now emits a native Go interface declaration for each Go-representable Ard trait object type.
      - Immutable trait object types use that interface when every known implementation can satisfy it with generated Go method wrappers.
-     - Traits with mutating receiver implementations, wrapper name collisions, or non-emittable wrappers keep the existing `any` plus type-switch dispatch path.
+     - Traits with mutating receiver implementations now remain eligible for native interface lowering when there are no `mut Trait` use sites that still require the transitional forwarding-table representation; pointer receiver method wrappers let `*T` satisfy the same trait interface.
      - Project/dependency FFI boundaries adapt top-level `Trait`, `Trait?`, and `Trait!E` returns where practical, but fall back to the old `any` representation for container-shaped FFI signatures that are not recursively adapted yet.
-     - `mut Trait` positions continue to use the forwarding-table representation from ADR 0023.
+     - ADR 0023's forwarding-table design is now considered a transitional Go-target implementation detail to retire, not the desired long-term trait representation.
 
 3. **Let Ard structs satisfy Go interfaces naturally.**
    - Once methods are real Go methods, direct-Go interface assignability can rely on Go method sets.
