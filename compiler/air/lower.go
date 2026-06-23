@@ -346,6 +346,7 @@ func (l *lowerer) declareGlobal(module ModuleID, def *checker.VariableDef) (Glob
 		Name:    def.Name,
 		Type:    typeID,
 		Mutable: def.Mutable,
+		Private: def.Mutable,
 	})
 	l.program.Modules[module].Globals = appendUniqueGlobal(l.program.Modules[module].Globals, id)
 	return id, nil
@@ -417,7 +418,8 @@ func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (Fu
 			Params: params,
 			Return: returnType,
 		},
-		IsTest: def.IsTest,
+		IsTest:  def.IsTest,
+		Private: def.Private,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	if def.Name == "main" {
@@ -468,6 +470,7 @@ func (l *lowerer) declareFunctionSpecializationWithSignatureAndGenericKey(module
 		Name:      def.Name,
 		Signature: signature,
 		IsTest:    def.IsTest,
+		Private:   def.Private,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	return id, nil
@@ -864,7 +867,7 @@ func (fl *functionLowerer) internStructTypeWithInterner(typ *checker.StructDef, 
 		return fl.l.internType(typ)
 	}
 	fields := sortedFieldNames(typ.Fields)
-	info := TypeInfo{Kind: TypeStruct, ModulePath: typ.ModulePath}
+	info := TypeInfo{Kind: TypeStruct, ModulePath: typ.ModulePath, Private: typ.Private}
 	info.Fields = make([]FieldInfo, len(fields))
 	for i, name := range fields {
 		fieldTypeValue := typ.Fields[name]
@@ -1721,6 +1724,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		info.Value = value
 		info.Error = errType
 	case *checker.StructDef:
+		info.Private = typ.Private
 		if typ.Name == "Fiber" {
 			elemType, ok := typ.Fields["result"]
 			if !ok {
@@ -1752,6 +1756,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 	case *checker.Enum:
 		info.Kind = TypeEnum
+		info.Private = typ.Private
 		info.ExternBinding = typ.ExternalBinding
 		info.EnumOpen = typ.Open
 		info.Variants = make([]VariantInfo, len(typ.Values))

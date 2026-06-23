@@ -2,6 +2,7 @@ package gotarget
 
 import (
 	"fmt"
+	"go/token"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -223,4 +224,111 @@ func sanitizeName(raw string) string {
 		return "_" + name
 	}
 	return name
+}
+
+func goPackageNameFromModulePath(modulePath string) string {
+	base := strings.TrimSuffix(filepath.Base(modulePath), filepath.Ext(modulePath))
+	name := sanitizeGoIdentifier(base)
+	if name == "" || name == "_" {
+		return "module"
+	}
+	if token.Lookup(name) != token.IDENT {
+		name += "_"
+	}
+	return name
+}
+
+func naturalGoIdentifier(raw string, exported bool) string {
+	parts := goIdentifierParts(raw)
+	if len(parts) == 0 {
+		if exported {
+			return "Exported"
+		}
+		return "name"
+	}
+	var b strings.Builder
+	for i, part := range parts {
+		if i == 0 && !exported {
+			b.WriteString(lowerFirst(part))
+			continue
+		}
+		b.WriteString(upperFirst(part))
+	}
+	name := b.String()
+	if name == "" {
+		if exported {
+			return "Exported"
+		}
+		return "name"
+	}
+	if !exported && token.Lookup(name) != token.IDENT {
+		name += "_"
+	}
+	return name
+}
+
+func sanitizeGoIdentifier(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	var out []rune
+	lastUnderscore := false
+	for _, r := range raw {
+		valid := unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
+		if !valid {
+			r = '_'
+		}
+		if r == '_' {
+			if lastUnderscore {
+				continue
+			}
+			lastUnderscore = true
+		} else {
+			lastUnderscore = false
+		}
+		out = append(out, r)
+	}
+	name := string(out)
+	if name == "" {
+		return ""
+	}
+	runes := []rune(name)
+	if unicode.IsDigit(runes[0]) {
+		name = "_" + name
+	}
+	return name
+}
+
+func goIdentifierParts(raw string) []string {
+	sanitized := sanitizeGoIdentifier(raw)
+	if sanitized == "" {
+		return nil
+	}
+	chunks := strings.Split(sanitized, "_")
+	parts := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		chunk = strings.TrimSpace(chunk)
+		if chunk != "" {
+			parts = append(parts, chunk)
+		}
+	}
+	return parts
+}
+
+func upperFirst(s string) string {
+	if s == "" {
+		return ""
+	}
+	runes := []rune(s)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
+}
+
+func lowerFirst(s string) string {
+	if s == "" {
+		return ""
+	}
+	runes := []rune(s)
+	runes[0] = unicode.ToLower(runes[0])
+	return string(runes)
 }

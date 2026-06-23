@@ -43,6 +43,7 @@ type Global struct {
 	Name    string
 	Type    TypeID
 	Mutable bool
+	Private bool
 	Value   Expr
 }
 
@@ -56,6 +57,7 @@ type Function struct {
 	Body      Block
 	IsTest    bool
 	IsScript  bool
+	Private   bool
 
 	// Receiver and MethodName are set for Ard impl methods. They let targets
 	// optionally expose a host-language method shape while preserving the
@@ -122,6 +124,7 @@ type TypeInfo struct {
 	Kind       TypeKind
 	Name       string
 	ModulePath string
+	Private    bool
 
 	ExternBinding string
 

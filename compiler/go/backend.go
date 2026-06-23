@@ -1278,7 +1278,14 @@ func defaultPackageName(name string) string {
 	if name == "" {
 		return "main"
 	}
-	return name
+	sanitized := sanitizeGoIdentifier(name)
+	if sanitized == "" || sanitized == "_" {
+		return "main"
+	}
+	if token.Lookup(sanitized) != token.IDENT {
+		return sanitized + "_"
+	}
+	return sanitized
 }
 
 func rootFunction(program *air.Program) (air.FunctionID, error) {
