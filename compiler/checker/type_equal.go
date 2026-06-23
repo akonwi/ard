@@ -31,7 +31,7 @@ func equalTypesSeen(left Type, right Type, seen map[typeEqualKey]struct{}) bool 
 	switch l := left.(type) {
 	case *Trait:
 		r, ok := right.(*Trait)
-		if !ok || l.Name != r.Name || len(l.methods) != len(r.methods) {
+		if !ok || l.Name != r.Name || l.ModulePath != r.ModulePath || len(l.methods) != len(r.methods) {
 			return false
 		}
 		for i := range l.methods {
@@ -262,7 +262,7 @@ func typeEqualID(t Type) string {
 	case *Trait:
 		return fmt.Sprintf("Trait:%p", v)
 	case Trait:
-		return fmt.Sprintf("Trait:%s", v.Name)
+		return fmt.Sprintf("Trait:%s:%s", v.ModulePath, v.Name)
 	case *List:
 		return fmt.Sprintf("List:%p", v)
 	case *Map:

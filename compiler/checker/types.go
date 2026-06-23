@@ -103,13 +103,18 @@ func derefMutableRef(t Type) Type {
 }
 
 type Trait struct {
-	Name    string
-	methods []FunctionDef
-	private bool
+	Name       string
+	ModulePath string
+	methods    []FunctionDef
+	private    bool
 }
 
 func (t Trait) String() string {
 	return t.Name
+}
+
+func (t Trait) IsPrivate() bool {
+	return t.private
 }
 
 func (t Trait) name() string {

@@ -1123,7 +1123,7 @@ func (l *lowerer) declareTraitImplsForType(module ModuleID, typ checker.Type) er
 }
 
 func (l *lowerer) declareImpl(module ModuleID, trait *checker.Trait, owner checker.Type, ownerType TypeID, methods map[string]*checker.FunctionDef) (ImplID, error) {
-	key := implKey(module, trait.Name, owner.String())
+	key := implKey(module, checkerTraitKey(trait), owner.String())
 	if id, ok := l.impls[key]; ok {
 		return id, nil
 	}
@@ -1940,12 +1940,13 @@ func (l *lowerer) internTrait(trait *checker.Trait) (TraitID, error) {
 	if trait == nil {
 		return 0, fmt.Errorf("cannot intern nil trait")
 	}
-	if id, ok := l.traits[trait.Name]; ok {
+	key := checkerTraitKey(trait)
+	if id, ok := l.traits[key]; ok {
 		return id, nil
 	}
 	id := TraitID(len(l.program.Traits))
-	l.traits[trait.Name] = id
-	l.program.Traits = append(l.program.Traits, Trait{ID: id, Name: trait.Name})
+	l.traits[key] = id
+	l.program.Traits = append(l.program.Traits, Trait{ID: id, Name: trait.Name, ModulePath: trait.ModulePath})
 
 	methods := trait.GetMethods()
 	loweredMethods := make([]TraitMethod, len(methods))
@@ -1957,9 +1958,11 @@ func (l *lowerer) internTrait(trait *checker.Trait) (TraitID, error) {
 		loweredMethods[i] = TraitMethod{Name: method.Name, Signature: sig}
 	}
 	l.program.Traits[id] = Trait{
-		ID:      id,
-		Name:    trait.Name,
-		Methods: loweredMethods,
+		ID:         id,
+		Name:       trait.Name,
+		ModulePath: trait.ModulePath,
+		Private:    trait.IsPrivate(),
+		Methods:    loweredMethods,
 	}
 	return id, nil
 }
@@ -2243,6 +2246,8 @@ func airTypeKeySeen(t checker.Type, seen map[checker.Type]struct{}) string {
 		return airFunctionTypeKeySeen(typ.Parameters, typ.ReturnType, seen)
 	case *checker.ExternalFunctionDef:
 		return airFunctionTypeKeySeen(typ.Parameters, typ.ReturnType, seen)
+	case *checker.Trait:
+		return "trait " + checkerTraitKey(typ)
 	case *checker.ExternType:
 		name := typ.Name_
 		if key, ok := directGoExternTypeKey(typ.ExternalBinding); ok {
@@ -5642,6 +5647,13 @@ func signatureKey(signature Signature) string {
 	}
 	key += fmt.Sprintf(")->%d", signature.Return)
 	return key
+}
+
+func checkerTraitKey(trait *checker.Trait) string {
+	if trait == nil {
+		return "<nil>"
+	}
+	return trait.ModulePath + "::" + trait.Name
 }
 
 func implKey(module ModuleID, traitName, typeName string) string {

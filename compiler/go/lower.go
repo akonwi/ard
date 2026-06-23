@@ -323,14 +323,39 @@ func (l *lowerer) typesForModule(moduleID air.ModuleID, mainModuleID air.ModuleI
 			}
 		}
 	}
-	if moduleID == mainModuleID {
-		for _, typ := range l.program.Types {
-			if !declaredInAnyModule[typ.ID] {
-				out = append(out, typ)
+	for _, typ := range l.program.Types {
+		if declaredInAnyModule[typ.ID] {
+			continue
+		}
+		if typ.Kind == air.TypeTraitObject {
+			if owner, ok := l.ownerModuleForTrait(typ.Trait); ok {
+				if owner == moduleID {
+					out = append(out, typ)
+				}
+				continue
 			}
+		}
+		if moduleID == mainModuleID {
+			out = append(out, typ)
 		}
 	}
 	return out
+}
+
+func (l *lowerer) ownerModuleForTrait(traitID air.TraitID) (air.ModuleID, bool) {
+	if !validTraitID(l.program, traitID) {
+		return 0, false
+	}
+	path := l.program.Traits[traitID].ModulePath
+	if path == "" {
+		return 0, false
+	}
+	for _, module := range l.program.Modules {
+		if module.Path == path {
+			return module.ID, true
+		}
+	}
+	return 0, false
 }
 
 func (l *lowerer) usedImports(decls []ast.Decl) map[string]string {

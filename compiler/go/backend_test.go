@@ -26,13 +26,15 @@ func TestTypesForModuleKeepsOwnedTypesWithOwningModule(t *testing.T) {
 		Types: []air.TypeInfo{
 			{ID: 1, Kind: air.TypeStruct, Name: "A"},
 			{ID: 2, Kind: air.TypeStruct, Name: "B"},
-			{ID: 3, Kind: air.TypeTraitObject, Name: "Synthetic"},
+			{ID: 3, Kind: air.TypeTraitObject, Name: "OwnedTraitObject", Trait: 0},
+			{ID: 4, Kind: air.TypeTraitObject, Name: "Synthetic", Trait: 99},
 		},
+		Traits: []air.Trait{{ID: 0, Name: "Owned", ModulePath: "a.ard"}},
 	}
 	l := &lowerer{program: program}
 	moduleA := l.typesForModule(0, 1)
-	if len(moduleA) != 1 || moduleA[0].Name != "A" {
-		t.Fatalf("module A types = %#v, want only A", moduleA)
+	if got := typeNames(moduleA); strings.Join(got, ",") != "A,OwnedTraitObject" {
+		t.Fatalf("module A types = %v, want A,OwnedTraitObject", got)
 	}
 	moduleB := l.typesForModule(1, 1)
 	if got := typeNames(moduleB); strings.Join(got, ",") != "B,Synthetic" {

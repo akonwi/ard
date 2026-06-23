@@ -2,6 +2,14 @@ package checker
 
 import "testing"
 
+func TestTraitEqualityIncludesModulePath(t *testing.T) {
+	left := &Trait{Name: "Drawable", ModulePath: "ui/drawable.ard"}
+	right := &Trait{Name: "Drawable", ModulePath: "svg/drawable.ard"}
+	if equalTypes(left, right) {
+		t.Fatal("same-named traits from different modules should not be equal")
+	}
+}
+
 func TestUnresolvedTypeVarGetReturnsNil(t *testing.T) {
 	unknown := &TypeVar{name: "unknown"}
 

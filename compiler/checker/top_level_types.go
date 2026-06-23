@@ -36,7 +36,7 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 				Private:       s.Private,
 			}, false)
 		case *parse.TraitDefinition:
-			c.scope.add(name, &Trait{Name: s.Name.Name, private: s.Private}, false)
+			c.scope.add(name, &Trait{Name: s.Name.Name, ModulePath: c.typeOwnerPath(), private: s.Private}, false)
 		case *parse.EnumDefinition:
 			c.scope.add(name, &Enum{Name: s.Name, ModulePath: c.typeOwnerPath(), Private: s.Private, Methods: make(map[string]*FunctionDef), Location: s.GetLocation()}, false)
 		case *parse.ExternTypeDeclaration:
