@@ -17,6 +17,37 @@ import (
 	"github.com/akonwi/ard/version"
 )
 
+func TestTypesForModuleKeepsOwnedTypesWithOwningModule(t *testing.T) {
+	program := &air.Program{
+		Modules: []air.Module{
+			{ID: 0, Path: "a.ard", Types: []air.TypeID{1}},
+			{ID: 1, Path: "b.ard", Types: []air.TypeID{2}},
+		},
+		Types: []air.TypeInfo{
+			{ID: 1, Kind: air.TypeStruct, Name: "A"},
+			{ID: 2, Kind: air.TypeStruct, Name: "B"},
+			{ID: 3, Kind: air.TypeTraitObject, Name: "Synthetic"},
+		},
+	}
+	l := &lowerer{program: program}
+	moduleA := l.typesForModule(0, 1)
+	if len(moduleA) != 1 || moduleA[0].Name != "A" {
+		t.Fatalf("module A types = %#v, want only A", moduleA)
+	}
+	moduleB := l.typesForModule(1, 1)
+	if got := typeNames(moduleB); strings.Join(got, ",") != "B,Synthetic" {
+		t.Fatalf("module B types = %v, want B,Synthetic", got)
+	}
+}
+
+func typeNames(types []air.TypeInfo) []string {
+	out := make([]string, len(types))
+	for i, typ := range types {
+		out[i] = typ.Name
+	}
+	return out
+}
+
 func lowerProgramAST(t testing.TB, program *air.Program, options Options) map[string]*ast.File {
 	t.Helper()
 	files, err := lowerProgram(program, options)

@@ -229,14 +229,12 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 	} else if len(l.program.Modules) > 0 {
 		mainModuleID = l.program.Modules[len(l.program.Modules)-1].ID
 	}
-	if module.ID == mainModuleID {
-		for _, typ := range l.program.Types {
-			typeDecls, err := l.lowerTypeDecls(typ)
-			if err != nil {
-				return nil, fmt.Errorf("module %s type %s: %w", module.Path, typ.Name, err)
-			}
-			decls = append(decls, typeDecls...)
+	for _, typ := range l.typesForModule(module.ID, mainModuleID) {
+		typeDecls, err := l.lowerTypeDecls(typ)
+		if err != nil {
+			return nil, fmt.Errorf("module %s type %s: %w", module.Path, typ.Name, err)
 		}
+		decls = append(decls, typeDecls...)
 	}
 	globalIDs := append([]air.GlobalID(nil), module.Globals...)
 	sort.Slice(globalIDs, func(i, j int) bool { return globalIDs[i] < globalIDs[j] })
@@ -308,6 +306,31 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 		}
 	}
 	return &ast.File{Name: ast.NewIdent(l.packageName), Decls: decls}, nil
+}
+
+func (l *lowerer) typesForModule(moduleID air.ModuleID, mainModuleID air.ModuleID) []air.TypeInfo {
+	declaredInAnyModule := map[air.TypeID]bool{}
+	for _, module := range l.program.Modules {
+		for _, typeID := range module.Types {
+			declaredInAnyModule[typeID] = true
+		}
+	}
+	out := []air.TypeInfo{}
+	if int(moduleID) >= 0 && int(moduleID) < len(l.program.Modules) {
+		for _, typeID := range l.program.Modules[moduleID].Types {
+			if validTypeID(l.program, typeID) {
+				out = append(out, l.program.Types[typeID-1])
+			}
+		}
+	}
+	if moduleID == mainModuleID {
+		for _, typ := range l.program.Types {
+			if !declaredInAnyModule[typ.ID] {
+				out = append(out, typ)
+			}
+		}
+	}
+	return out
 }
 
 func (l *lowerer) usedImports(decls []ast.Decl) map[string]string {
