@@ -131,6 +131,66 @@ func TestTraitInterfaceTypeExprKeepsSameModuleUnqualifiedInModulePackageMode(t *
 	}
 }
 
+func TestNamedTypeExprQualifiesCrossModuleInModulePackageMode(t *testing.T) {
+	program := &air.Program{
+		Modules: []air.Module{
+			{ID: 0, Path: "models/user.ard"},
+			{ID: 1, Path: "consumer.ard"},
+		},
+		Types: []air.TypeInfo{{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "models/user.ard"}},
+	}
+	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}, useModulePackages: true}
+	typ, err := l.goType(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := astExprName(typ); got != "user.User" {
+		t.Fatalf("cross-module named type = %q, want user.User", got)
+	}
+	if got := l.currentImports["user"]; got != "generated/models/user" {
+		t.Fatalf("registered import = %q, want generated/models/user", got)
+	}
+}
+
+func TestNamedTypeExprKeepsSameModuleUnqualifiedInModulePackageMode(t *testing.T) {
+	program := &air.Program{
+		Modules: []air.Module{{ID: 0, Path: "models/user.ard"}},
+		Types:   []air.TypeInfo{{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "models/user.ard"}},
+	}
+	l := &lowerer{program: program, currentModule: 0, currentImports: map[string]string{}, useModulePackages: true}
+	typ, err := l.goType(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := astExprName(typ); got != "User" {
+		t.Fatalf("same-module named type = %q, want User", got)
+	}
+	if len(l.currentImports) != 0 {
+		t.Fatalf("same-module named type registered imports: %#v", l.currentImports)
+	}
+}
+
+func TestNamedTypeExprKeepsSinglePackageModeUnqualified(t *testing.T) {
+	program := &air.Program{
+		Modules: []air.Module{
+			{ID: 0, Path: "models/user.ard"},
+			{ID: 1, Path: "consumer.ard"},
+		},
+		Types: []air.TypeInfo{{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "models/user.ard"}},
+	}
+	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}}
+	typ, err := l.goType(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := astExprName(typ); got != "User" {
+		t.Fatalf("single-package named type = %q, want User", got)
+	}
+	if len(l.currentImports) != 0 {
+		t.Fatalf("single-package named type registered imports: %#v", l.currentImports)
+	}
+}
+
 func lowerProgramAST(t testing.TB, program *air.Program, options Options) map[string]*ast.File {
 	t.Helper()
 	files, err := lowerProgram(program, options)

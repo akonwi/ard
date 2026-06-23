@@ -351,12 +351,22 @@ func (l *lowerer) ownerModuleForTrait(traitID air.TraitID) (air.ModuleID, bool) 
 	if !validTraitID(l.program, traitID) {
 		return 0, false
 	}
-	path := l.program.Traits[traitID].ModulePath
-	if path == "" {
+	return l.moduleForPath(l.program.Traits[traitID].ModulePath)
+}
+
+func (l *lowerer) ownerModuleForType(typeID air.TypeID) (air.ModuleID, bool) {
+	if !validTypeID(l.program, typeID) {
+		return 0, false
+	}
+	return l.moduleForPath(l.modulePathForType(typeID))
+}
+
+func (l *lowerer) moduleForPath(modulePath string) (air.ModuleID, bool) {
+	if modulePath == "" {
 		return 0, false
 	}
 	for _, module := range l.program.Modules {
-		if module.Path == path {
+		if module.Path == modulePath {
 			return module.ID, true
 		}
 	}
@@ -952,7 +962,23 @@ func (l *lowerer) traitInterfaceTypeExpr(trait air.Trait) ast.Expr {
 	if !ok || owner == l.currentModule {
 		return ast.NewIdent(name)
 	}
-	return l.qualified(l.moduleImportAlias(owner), moduleImportPath(l.program, owner), name)
+	return l.moduleQualified(owner, name)
+}
+
+func (l *lowerer) namedTypeExpr(info air.TypeInfo) ast.Expr {
+	name := typeName(l.program, info)
+	if !l.useModulePackages {
+		return ast.NewIdent(name)
+	}
+	owner, ok := l.ownerModuleForType(info.ID)
+	if !ok || owner == l.currentModule {
+		return ast.NewIdent(name)
+	}
+	return l.moduleQualified(owner, name)
+}
+
+func (l *lowerer) moduleQualified(module air.ModuleID, name string) ast.Expr {
+	return l.qualified(l.moduleImportAlias(module), moduleImportPath(l.program, module), name)
 }
 
 func (l *lowerer) moduleImportAlias(module air.ModuleID) string {
@@ -2931,9 +2957,9 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		if l.isStdlibFFIBackedType(info) {
 			return l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", info.Name), nil
 		}
-		return ast.NewIdent(typeName(l.program, info)), nil
+		return l.namedTypeExpr(info), nil
 	case air.TypeUnion:
-		return ast.NewIdent(typeName(l.program, info)), nil
+		return l.namedTypeExpr(info), nil
 	case air.TypeExtern:
 		if l.isChannelExternType(info) {
 			elem, err := l.goType(info.Elem)
