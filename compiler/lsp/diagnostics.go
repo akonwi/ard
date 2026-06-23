@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
@@ -27,43 +26,7 @@ func parseAndCheckWithOverlays(source string, filePath string, overlays map[stri
 			err = fmt.Errorf("analysis panic: %v", r)
 		}
 	}()
-
-	// Parse the source
-	result := parse.Parse([]byte(source), filePath)
-	if result.Program == nil {
-		return nil, fmt.Errorf("failed to parse: no program returned")
-	}
-
-	if len(result.Errors) > 0 {
-		// Convert parse errors to checker-style diagnostics
-		diags := make([]checker.Diagnostic, 0, len(result.Errors))
-		for _, err := range result.Errors {
-			diags = append(diags, checker.NewDiagnostic(checker.Error, err.Message, filePath, err.Location))
-		}
-		return diags, nil
-	}
-
-	program := result.Program
-
-	// Initialize the module resolver
-	workingDir := filepath.Dir(filePath)
-	moduleResolver, err := checker.NewModuleResolver(workingDir)
-	if err != nil {
-		return nil, fmt.Errorf("error initializing module resolver: %w", err)
-	}
-	for overlayPath, overlaySource := range overlays {
-		moduleResolver.SetOverlay(overlayPath, overlaySource)
-	}
-
-	relPath, err := filepath.Rel(workingDir, filePath)
-	if err != nil {
-		relPath = filePath
-	}
-
-	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{})
-	c.Check()
-
-	return c.Diagnostics(), nil
+	return analyzeDiagnosticsUncached(source, filePath, overlays)
 }
 
 func formatSource(source string, filePath string) (string, error) {
@@ -185,10 +148,10 @@ func (s *Server) analyzeDiagnostics(doc *Doc, docs []Doc) (diagnostics []checker
 	}
 	overlays := overlaySources(docs)
 	analyzer := s.diagnosticsAnalyzer
-	if analyzer == nil {
-		analyzer = parseAndCheckWithOverlays
+	if analyzer != nil {
+		return analyzer(doc.Text, filePath, overlays)
 	}
-	return analyzer(doc.Text, filePath, overlays)
+	return s.analysisCache.Diagnostics(doc.Text, filePath, overlays)
 }
 
 func analysisErrorDiagnostic(err error) protocol.Diagnostic {

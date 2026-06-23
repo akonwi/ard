@@ -33,10 +33,11 @@ func (s *stdio) Close() error {
 
 // Server is the Ard LSP server.
 type Server struct {
-	cache       *DocumentCache
-	handlers    map[string]jsonrpc2.Handler
-	conn        jsonrpc2.Conn
-	projectRoot string
+	cache         *DocumentCache
+	analysisCache *AnalysisCache
+	handlers      map[string]jsonrpc2.Handler
+	conn          jsonrpc2.Conn
+	projectRoot   string
 
 	diagnosticsMu        sync.Mutex
 	diagnosticsTimers    map[uri.URI]*time.Timer
@@ -49,11 +50,11 @@ type Server struct {
 func NewServer() *Server {
 	s := &Server{
 		cache:                NewDocumentCache(),
+		analysisCache:        NewAnalysisCache(),
 		handlers:             make(map[string]jsonrpc2.Handler),
 		diagnosticsTimers:    make(map[uri.URI]*time.Timer),
 		diagnosticsDelay:     100 * time.Millisecond,
 		diagnosticsPublisher: nil,
-		diagnosticsAnalyzer:  parseAndCheckWithOverlays,
 	}
 	s.diagnosticsPublisher = s.publishDiagnostics
 	s.registerHandlers()
@@ -291,6 +292,9 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		params.TextDocument.Version,
 		params.TextDocument.Text,
 	)
+	if filePath, err := filePathFromURI(params.TextDocument.URI); err == nil {
+		s.analysisCache.Invalidate(filePath)
+	}
 	s.scheduleDiagnosticsForOpenDocuments()
 
 	return reply(ctx, nil, nil)
@@ -310,6 +314,9 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 				return reply(ctx, nil, fmt.Errorf("invalid document change: %w", err))
 			}
 			s.cache.Update(params.TextDocument.URI, params.TextDocument.Version, updated)
+			if filePath, err := filePathFromURI(params.TextDocument.URI); err == nil {
+				s.analysisCache.Invalidate(filePath)
+			}
 		}
 	}
 
@@ -329,6 +336,9 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 	}
 
 	s.cache.Close(params.TextDocument.URI)
+	if filePath, err := filePathFromURI(params.TextDocument.URI); err == nil {
+		s.analysisCache.Invalidate(filePath)
+	}
 	s.scheduleDiagnostics(params.TextDocument.URI)
 	s.scheduleDiagnosticsForOpenDocuments()
 

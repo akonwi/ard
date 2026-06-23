@@ -154,6 +154,104 @@ let value = tools::new_name()
 	}
 }
 
+func TestAnalysisCacheReusesDiagnosticsForUnchangedInputs(t *testing.T) {
+	cache := NewAnalysisCache()
+	source := `let x = 5`
+	filePath := filepath.Join(t.TempDir(), "main.ard")
+
+	first, err := cache.Diagnostics(source, filePath, nil)
+	if err != nil {
+		t.Fatalf("first diagnostics failed: %v", err)
+	}
+	second, err := cache.Diagnostics(source, filePath, nil)
+	if err != nil {
+		t.Fatalf("second diagnostics failed: %v", err)
+	}
+	if len(first) != 0 || len(second) != 0 {
+		t.Fatalf("expected no diagnostics, got first=%v second=%v", first, second)
+	}
+	if got := cache.CheckCount(); got != 1 {
+		t.Fatalf("check count = %d, want 1", got)
+	}
+}
+
+func TestAnalysisCacheInvalidatesDiagnosticsWhenOverlayChanges(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	modPath := filepath.Join(root, "tools.ard")
+	if err := os.WriteFile(modPath, []byte("fn value() Int { 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(root, "main.ard")
+	source := `use test_project/tools
+
+let value = tools::value()
+`
+	cache := NewAnalysisCache()
+
+	first, err := cache.Diagnostics(source, mainPath, map[string]string{
+		modPath: "fn value() Int { 1 }\n",
+	})
+	if err != nil {
+		t.Fatalf("first diagnostics failed: %v", err)
+	}
+	second, err := cache.Diagnostics(source, mainPath, map[string]string{
+		modPath: "fn renamed() Int { 1 }\n",
+	})
+	if err != nil {
+		t.Fatalf("second diagnostics failed: %v", err)
+	}
+	if len(first) != 0 {
+		t.Fatalf("expected first diagnostics to be clean, got %v", first)
+	}
+	if len(second) == 0 {
+		t.Fatal("expected changed overlay to invalidate cached diagnostics")
+	}
+	if got := cache.CheckCount(); got != 2 {
+		t.Fatalf("check count = %d, want 2", got)
+	}
+}
+
+func TestAnalysisCacheInvalidatesDiagnosticsWhenWorkspaceFileChanges(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	modPath := filepath.Join(root, "tools.ard")
+	if err := os.WriteFile(modPath, []byte("fn value() Int { 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(root, "main.ard")
+	source := `use test_project/tools
+
+let value = tools::value()
+`
+	cache := NewAnalysisCache()
+
+	first, err := cache.Diagnostics(source, mainPath, nil)
+	if err != nil {
+		t.Fatalf("first diagnostics failed: %v", err)
+	}
+	if err := os.WriteFile(modPath, []byte("fn renamed() Int { 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := cache.Diagnostics(source, mainPath, nil)
+	if err != nil {
+		t.Fatalf("second diagnostics failed: %v", err)
+	}
+	if len(first) != 0 {
+		t.Fatalf("expected first diagnostics to be clean, got %v", first)
+	}
+	if len(second) == 0 {
+		t.Fatal("expected workspace file change to invalidate cached diagnostics")
+	}
+	if got := cache.CheckCount(); got != 2 {
+		t.Fatalf("check count = %d, want 2", got)
+	}
+}
+
 // TestPublishDiagnosticsLifecycle verifies the full cycle doesn't panic.
 func TestPublishDiagnosticsLifecycle(t *testing.T) {
 	server := NewServer()

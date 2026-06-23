@@ -54,10 +54,9 @@ func computeHover(source string, filePath string, position protocol.Position) *h
 	return describeExpr(expr, source, filePath, prog)
 }
 
-// parseAndCache parses source and returns the parsed program.
+// parseAndCache parses source and returns the cached parsed program.
 func parseAndCache(source string, filePath string) *parse.Program {
-	result := parse.Parse([]byte(source), filePath)
-	return result.Program
+	return defaultAnalysisCache.Program(source, filePath)
 }
 
 // lspPositionToParsePoint converts an LSP position back to a parse Point.
