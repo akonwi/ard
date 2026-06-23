@@ -90,6 +90,47 @@ func TestTraitInterfaceTypeNameFallsBackOnTypeCollision(t *testing.T) {
 	}
 }
 
+func TestTraitInterfaceTypeExprQualifiesCrossModuleInModulePackageMode(t *testing.T) {
+	program := &air.Program{
+		Modules: []air.Module{
+			{ID: 0, Path: "traits.ard"},
+			{ID: 1, Path: "consumer.ard"},
+		},
+		Traits: []air.Trait{{ID: 0, Name: "Drawable", ModulePath: "traits.ard"}},
+		Types:  []air.TypeInfo{{ID: 1, Kind: air.TypeTraitObject, Name: "Drawable", Trait: 0}},
+	}
+	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}, useModulePackages: true}
+	typ, err := l.goType(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := astExprName(typ); got != "traits.Drawable" {
+		t.Fatalf("cross-module trait type = %q, want traits.Drawable", got)
+	}
+	if got := l.currentImports["traits"]; got != "generated/traits" {
+		t.Fatalf("registered import = %q, want generated/traits", got)
+	}
+}
+
+func TestTraitInterfaceTypeExprKeepsSameModuleUnqualifiedInModulePackageMode(t *testing.T) {
+	program := &air.Program{
+		Modules: []air.Module{{ID: 0, Path: "traits.ard"}},
+		Traits:  []air.Trait{{ID: 0, Name: "Drawable", ModulePath: "traits.ard"}},
+		Types:   []air.TypeInfo{{ID: 1, Kind: air.TypeTraitObject, Name: "Drawable", Trait: 0}},
+	}
+	l := &lowerer{program: program, currentModule: 0, currentImports: map[string]string{}, useModulePackages: true}
+	typ, err := l.goType(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := astExprName(typ); got != "Drawable" {
+		t.Fatalf("same-module trait type = %q, want Drawable", got)
+	}
+	if len(l.currentImports) != 0 {
+		t.Fatalf("same-module trait type registered imports: %#v", l.currentImports)
+	}
+}
+
 func lowerProgramAST(t testing.TB, program *air.Program, options Options) map[string]*ast.File {
 	t.Helper()
 	files, err := lowerProgram(program, options)

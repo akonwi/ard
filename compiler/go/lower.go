@@ -28,6 +28,7 @@ type lowerer struct {
 	packageName             string
 	tempCounter             int
 	currentImports          map[string]string
+	currentModule           air.ModuleID
 	importErr               error
 	directGoAliases         map[string]string
 	reservedGoIdentifiers   map[string]bool
@@ -44,6 +45,7 @@ type lowerer struct {
 	ffiNativeTraitFallbacks map[air.TraitID]bool
 	suppressMain            bool
 	includeTests            bool
+	useModulePackages       bool
 }
 
 func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, error) {
@@ -219,6 +221,9 @@ func collectGoImportsFromSource(imports map[string]string, name string, data []b
 }
 
 func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
+	previousModule := l.currentModule
+	l.currentModule = module.ID
+	defer func() { l.currentModule = previousModule }()
 	l.currentImports = map[string]string{}
 	l.importErr = nil
 	decls := []ast.Decl{}
@@ -936,6 +941,35 @@ func (l *lowerer) naturalTraitInterfaceTypeName(trait air.Trait) (string, bool) 
 		}
 	}
 	return name, true
+}
+
+func (l *lowerer) traitInterfaceTypeExpr(trait air.Trait) ast.Expr {
+	name := l.traitInterfaceTypeName(trait)
+	if !l.useModulePackages {
+		return ast.NewIdent(name)
+	}
+	owner, ok := l.ownerModuleForTrait(trait.ID)
+	if !ok || owner == l.currentModule {
+		return ast.NewIdent(name)
+	}
+	return l.qualified(l.moduleImportAlias(owner), moduleImportPath(l.program, owner), name)
+}
+
+func (l *lowerer) moduleImportAlias(module air.ModuleID) string {
+	base := modulePackageName(l.program, module)
+	importPath := moduleImportPath(l.program, module)
+	if l.currentImports == nil {
+		return base
+	}
+	if existing, ok := l.currentImports[base]; !ok || existing == importPath {
+		return base
+	}
+	for i := 2; ; i++ {
+		alias := fmt.Sprintf("%s%d", base, i)
+		if existing, ok := l.currentImports[alias]; !ok || existing == importPath {
+			return alias
+		}
+	}
 }
 
 func legacyTraitInterfaceTypeName(trait air.Trait) string {
@@ -2930,7 +2964,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return ast.NewIdent("any"), nil
 	case air.TypeTraitObject:
 		if l.usesNativeTraitInterface(typeID) {
-			return ast.NewIdent(l.traitInterfaceTypeName(l.program.Traits[info.Trait])), nil
+			return l.traitInterfaceTypeExpr(l.program.Traits[info.Trait]), nil
 		}
 		return ast.NewIdent("any"), nil
 	default:
@@ -3812,6 +3846,9 @@ func (l *lowerer) qualified(alias string, importPath string, name string) ast.Ex
 func (l *lowerer) registerImport(alias string, importPath string) {
 	if alias == "" || importPath == "" {
 		return
+	}
+	if l.currentImports == nil {
+		l.currentImports = map[string]string{}
 	}
 	if existing, ok := l.currentImports[alias]; ok && existing != importPath {
 		if l.importErr == nil {
