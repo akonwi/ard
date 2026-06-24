@@ -229,6 +229,18 @@ func TestNaturalTypeNameFallsBackOnCrossKindCollisions(t *testing.T) {
 	}
 }
 
+func TestGoFieldNameUsesNaturalRulesForStdlibStructs(t *testing.T) {
+	l := &lowerer{}
+	publicStdlib := air.TypeInfo{Kind: air.TypeStruct, Name: "Error", ModulePath: "ard/decode"}
+	if got := l.goFieldName(publicStdlib, "expected_value"); got != "ExpectedValue" {
+		t.Fatalf("public stdlib field = %q, want ExpectedValue", got)
+	}
+	privateStdlib := air.TypeInfo{Kind: air.TypeStruct, Name: "internal", ModulePath: "ard/decode", Private: true}
+	if got := l.goFieldName(privateStdlib, "secret_key"); got != "secretKey" {
+		t.Fatalf("private stdlib field = %q, want secretKey", got)
+	}
+}
+
 func TestNaturalGoIdentifierUsesVisibility(t *testing.T) {
 	tests := []struct {
 		raw      string

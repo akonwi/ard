@@ -6078,19 +6078,6 @@ func exportedFieldName(name string) string {
 }
 
 func (l *lowerer) goFieldName(typ air.TypeInfo, fieldName string) string {
-	if l.isStdlibFFIBackedType(typ) {
-		return exportedFieldName(fieldName)
-	}
-	if strings.HasPrefix(typ.ModulePath, "ard/") {
-		name := sanitizeName(fieldName)
-		if name == "" {
-			return "field"
-		}
-		if token.Lookup(name).IsKeyword() {
-			return name + "_"
-		}
-		return name
-	}
 	return naturalGoIdentifier(fieldName, !typ.Private)
 }
 
@@ -6107,7 +6094,7 @@ func (l *lowerer) convertStdlibError(typeID air.TypeID, expr ast.Expr) (ast.Expr
 	}
 	elts := make([]ast.Expr, 0, len(info.Fields))
 	for _, field := range info.Fields {
-		elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(field.Name), Value: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent(exportedFieldName(field.Name))}})
+		elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(info, field.Name)), Value: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent(exportedFieldName(field.Name))}})
 	}
 	return &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, info)), Elts: elts}, nil
 }
