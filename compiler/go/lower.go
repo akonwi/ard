@@ -400,6 +400,16 @@ func (l *lowerer) markRuntimeHelper(name string) {
 	l.runtimeHelpers[name] = true
 }
 
+func rewritePreludeSourceImports(source string, aliases map[string]string) string {
+	for original, alias := range aliases {
+		if alias == "" || alias == original {
+			continue
+		}
+		source = strings.ReplaceAll(source, original+".", alias+".")
+	}
+	return source
+}
+
 func (l *lowerer) registerFFIImportsForGoType(expr ast.Expr) {
 	l.registerImportsForGoType(expr, l.ffiImports)
 }
@@ -415,7 +425,7 @@ func (l *lowerer) registerImportsForGoType(expr ast.Expr, imports map[string]str
 			return true
 		}
 		if path, ok := imports[ident.Name]; ok && path != "" {
-			l.registerImport(ident.Name, path)
+			ident.Name = l.registerImport(ident.Name, path)
 		}
 		return true
 	})
@@ -513,43 +523,43 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 `)
 	}
 	if l.runtimeHelpers["sorted_int_keys"] {
-		l.registerImport("slices", "slices")
-		parts = append(parts, `
+		slicesAlias := l.registerImport("slices", "slices")
+		parts = append(parts, fmt.Sprintf(`
 	func ardSortedIntKeys[V any](m map[int]V) []int {
 		keys := make([]int, 0, len(m))
 		for k := range m {
 			keys = append(keys, k)
 		}
-		slices.Sort(keys)
+		%s.Sort(keys)
 		return keys
 	}
-`)
+`, slicesAlias))
 	}
 	if l.runtimeHelpers["sorted_string_keys"] {
-		l.registerImport("slices", "slices")
-		parts = append(parts, `
+		slicesAlias := l.registerImport("slices", "slices")
+		parts = append(parts, fmt.Sprintf(`
 	func ardSortedStringKeys[V any](m map[string]V) []string {
 		keys := make([]string, 0, len(m))
 		for k := range m {
 			keys = append(keys, k)
 		}
-		slices.Sort(keys)
+		%s.Sort(keys)
 		return keys
 	}
-`)
+`, slicesAlias))
 	}
 	if l.runtimeHelpers["sorted_any_keys"] {
-		l.registerImport("fmt", "fmt")
-		l.registerImport("slices", "slices")
-		parts = append(parts, `
+		fmtAlias := l.registerImport("fmt", "fmt")
+		slicesAlias := l.registerImport("slices", "slices")
+		parts = append(parts, fmt.Sprintf(`
 	func ardSortedAnyKeys[V any](m map[any]V) []any {
 		keys := make([]any, 0, len(m))
 		for k := range m {
 			keys = append(keys, k)
 		}
-		slices.SortFunc(keys, func(a any, b any) int {
-			as := fmt.Sprint(a)
-			bs := fmt.Sprint(b)
+		%s.SortFunc(keys, func(a any, b any) int {
+			as := %s.Sprint(a)
+			bs := %s.Sprint(b)
 			if as < bs {
 				return -1
 			}
@@ -560,7 +570,7 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 		})
 		return keys
 	}
-`)
+`, slicesAlias, fmtAlias, fmtAlias))
 	}
 	if l.runtimeHelpers["list_to_any_slice"] {
 		parts = append(parts, `
@@ -628,42 +638,47 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 `)
 	}
 	if l.runtimeHelpers["direct_go_float32_range"] {
-		l.registerImport("ardmath", "math")
-		parts = append(parts, `
+		mathAlias := l.registerImport("ardmath", "math")
+		parts = append(parts, fmt.Sprintf(`
 	func ardDirectGoCheckFloat32Range(value float64, target string) float64 {
-		if value > ardmath.MaxFloat32 || value < -ardmath.MaxFloat32 {
+		if value > %s.MaxFloat32 || value < -%s.MaxFloat32 {
 			panic("Ard direct Go FFI: float value out of range for " + target)
 		}
 		return value
 	}
-`)
+`, mathAlias, mathAlias))
 	}
 	if l.runtimeHelpers["direct_go_valid_rune"] {
-		l.registerImport("ardutf8", "unicode/utf8")
-		parts = append(parts, `
+		utf8Alias := l.registerImport("ardutf8", "unicode/utf8")
+		parts = append(parts, fmt.Sprintf(`
 	func ardDirectGoCheckRune(value rune) rune {
-		if !ardutf8.ValidRune(value) {
+		if !%s.ValidRune(value) {
 			panic("Ard direct Go FFI: Go returned invalid Rune")
 		}
 		return value
 	}
-`)
+`, utf8Alias))
 	}
 	if l.runtimeHelpers["json_parse"] {
-		l.registerImport("bytes", "bytes")
-		l.registerImport("fmt", "fmt")
-		l.registerImport("json", "encoding/json/v2")
-		l.registerImport("jsontext", "encoding/json/jsontext")
-		l.registerImport("ardruntime", "github.com/akonwi/ard/runtime")
-		l.registerImport("strconv", "strconv")
-		parts = append(parts, l.jsonParsePreludeSource())
+		aliases := map[string]string{
+			"bytes":      l.registerImport("bytes", "bytes"),
+			"fmt":        l.registerImport("fmt", "fmt"),
+			"json":       l.registerImport("json", "encoding/json/v2"),
+			"jsontext":   l.registerImport("jsontext", "encoding/json/jsontext"),
+			"ardruntime": l.registerImport("ardruntime", "github.com/akonwi/ard/runtime"),
+			"strconv":    l.registerImport("strconv", "strconv"),
+		}
+		parts = append(parts, rewritePreludeSourceImports(l.jsonParsePreludeSource(), aliases))
 	}
 	if l.runtimeHelpers["json_encode"] {
-		l.registerImport("bytes", "bytes")
-		l.registerImport("fmt", "fmt")
-		l.registerImport("json", "encoding/json/v2")
-		l.registerImport("jsontext", "encoding/json/jsontext")
-		parts = append(parts, l.jsonEncodePreludeSource())
+		aliases := map[string]string{
+			"bytes":      l.registerImport("bytes", "bytes"),
+			"fmt":        l.registerImport("fmt", "fmt"),
+			"json":       l.registerImport("json", "encoding/json/v2"),
+			"jsontext":   l.registerImport("jsontext", "encoding/json/jsontext"),
+			"ardruntime": l.registerImport("ardruntime", "github.com/akonwi/ard/runtime"),
+		}
+		parts = append(parts, rewritePreludeSourceImports(l.jsonEncodePreludeSource(), aliases))
 	}
 	src := strings.Join(parts, "\n")
 	file, err := parser.ParseFile(token.NewFileSet(), "prelude.go", src, 0)
@@ -931,24 +946,8 @@ func (l *lowerer) naturalTraitInterfaceTypeName(trait air.Trait) (string, bool) 
 		return "", false
 	}
 	name := naturalGoIdentifier(trait.Name, !trait.Private)
-	if name == "" || name == "_" {
+	if name == "" || name == "_" || isReservedTopLevelName(name) || topLevelNaturalNameCollides(l.program, topLevelNameTrait, int(trait.ID), name) {
 		return "", false
-	}
-	for _, other := range l.program.Traits {
-		if other.ID == trait.ID || other.Name == "" {
-			continue
-		}
-		if naturalGoIdentifier(other.Name, !other.Private) == name {
-			return "", false
-		}
-	}
-	for _, typ := range l.program.Types {
-		if !naturalTypeNameEligible(typ) {
-			continue
-		}
-		if naturalGoIdentifier(typ.Name, !typ.Private) == name {
-			return "", false
-		}
 	}
 	return name, true
 }
@@ -3881,24 +3880,146 @@ func (l *lowerer) localIsPointerParam(fn air.Function, local air.LocalID) bool {
 }
 
 func (l *lowerer) qualified(alias string, importPath string, name string) ast.Expr {
-	l.registerImport(alias, importPath)
+	alias = l.registerImport(alias, importPath)
 	return &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(name)}
 }
 
-func (l *lowerer) registerImport(alias string, importPath string) {
+func (l *lowerer) registerImport(alias string, importPath string) string {
 	if alias == "" || importPath == "" {
-		return
+		return alias
 	}
 	if l.currentImports == nil {
 		l.currentImports = map[string]string{}
 	}
-	if existing, ok := l.currentImports[alias]; ok && existing != importPath {
-		if l.importErr == nil {
-			l.importErr = fmt.Errorf("Go import alias %q used for both %q and %q", alias, existing, importPath)
-		}
-		return
+	if existing, ok := l.currentImports[alias]; ok && existing == importPath {
+		return alias
 	}
-	l.currentImports[alias] = importPath
+	chosen := alias
+	for i := 1; ; i++ {
+		if l.importAliasAvailable(chosen, importPath) {
+			l.currentImports[chosen] = importPath
+			if chosen != alias {
+				l.updateDirectGoAliasReservation(alias, chosen, importPath)
+			}
+			if l.reservedGoIdentifiers != nil {
+				l.reservedGoIdentifiers[chosen] = true
+			}
+			return chosen
+		}
+		chosen = fmt.Sprintf("%s_%d", alias, i)
+	}
+}
+
+func (l *lowerer) importAliasAvailable(alias string, importPath string) bool {
+	if existing, ok := l.currentImports[alias]; ok {
+		return existing == importPath
+	}
+	if fixedPath, ok := generatedImportAliasPath(alias); ok && fixedPath != importPath {
+		return false
+	}
+	if l.reservedGoIdentifiers == nil && l.program != nil {
+		l.reservedGoIdentifiers = collectReservedGoIdentifiers(l.program)
+	}
+	if l.reservedGoIdentifiers[alias] && !l.aliasReservedForImport(alias, importPath) {
+		return false
+	}
+	return !l.importAliasCollidesWithTopLevel(alias)
+}
+
+func (l *lowerer) updateDirectGoAliasReservation(oldAlias string, newAlias string, importPath string) {
+	updated := false
+	for key, reservedAlias := range l.directGoAliases {
+		if reservedAlias == oldAlias && strings.HasPrefix(key, importPath+"\x00") {
+			l.directGoAliases[key] = newAlias
+			updated = true
+		}
+	}
+	if updated && l.reservedGoIdentifiers != nil {
+		delete(l.reservedGoIdentifiers, oldAlias)
+	}
+}
+
+func (l *lowerer) aliasReservedForImport(alias string, importPath string) bool {
+	for key, reservedAlias := range l.directGoAliases {
+		if reservedAlias == alias && strings.HasPrefix(key, importPath+"\x00") {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *lowerer) importAliasCollidesWithTopLevel(alias string) bool {
+	if l.program == nil {
+		return false
+	}
+	if !l.useModulePackages {
+		return l.importAliasCollidesWithProgramTopLevel(alias)
+	}
+	if l.currentModule < 0 || int(l.currentModule) >= len(l.program.Modules) {
+		return false
+	}
+	return l.importAliasCollidesWithModuleTopLevel(alias, l.currentModule)
+}
+
+func (l *lowerer) importAliasCollidesWithProgramTopLevel(alias string) bool {
+	for _, typ := range l.program.Types {
+		if l.typeTopLevelNameCollidesWithImportAlias(typ, alias) {
+			return true
+		}
+	}
+	for _, global := range l.program.Globals {
+		if globalName(l.program, global) == alias {
+			return true
+		}
+	}
+	for _, fn := range l.program.Functions {
+		if functionName(l.program, fn) == alias {
+			return true
+		}
+	}
+	for _, trait := range l.program.Traits {
+		if l.traitInterfaceTypeName(trait) == alias {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *lowerer) importAliasCollidesWithModuleTopLevel(alias string, moduleID air.ModuleID) bool {
+	for _, typ := range l.typesForModule(moduleID, moduleID) {
+		if l.typeTopLevelNameCollidesWithImportAlias(typ, alias) {
+			return true
+		}
+	}
+	for _, globalID := range l.program.Modules[moduleID].Globals {
+		if globalID >= 0 && int(globalID) < len(l.program.Globals) && globalName(l.program, l.program.Globals[globalID]) == alias {
+			return true
+		}
+	}
+	for _, functionID := range l.program.Modules[moduleID].Functions {
+		if validFunctionID(l.program, functionID) && functionName(l.program, l.program.Functions[functionID]) == alias {
+			return true
+		}
+	}
+	for _, trait := range l.program.Traits {
+		owner, ok := l.ownerModuleForTrait(trait.ID)
+		if ok && owner == moduleID && l.traitInterfaceTypeName(trait) == alias {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *lowerer) typeTopLevelNameCollidesWithImportAlias(typ air.TypeInfo, alias string) bool {
+	if typeName(l.program, typ) == alias {
+		return true
+	}
+	for _, variant := range typ.Variants {
+		if enumVariantName(l.program, typ, variant) == alias {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *lowerer) toStringExpr(typeID air.TypeID, expr ast.Expr) ast.Expr {
@@ -5318,7 +5439,7 @@ func (l *lowerer) lowerListSort(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	l.registerImport("sort", "sort")
+	sortAlias := l.registerImport("sort", "sort")
 	lessFunc := &ast.FuncLit{
 		Type: &ast.FuncType{
 			Params: &ast.FieldList{List: []*ast.Field{
@@ -5335,7 +5456,7 @@ func (l *lowerer) lowerListSort(fn air.Function, expr air.Expr) (loweredExpr, er
 		}},
 	}
 	stmts := append(target.stmts, cmp.stmts...)
-	stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent("sort"), Sel: ast.NewIdent("SliceStable")}, Args: []ast.Expr{target.expr, lessFunc}}})
+	stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(sortAlias), Sel: ast.NewIdent("SliceStable")}, Args: []ast.Expr{target.expr, lessFunc}}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 }
 

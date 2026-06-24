@@ -75,6 +75,92 @@ func TestNaturalTypeNameFallsBackOnCollisions(t *testing.T) {
 	}
 }
 
+func TestNaturalFunctionAndGlobalNamesUseVisibility(t *testing.T) {
+	program := &air.Program{
+		Functions: []air.Function{
+			{ID: 0, Module: 0, Name: "make_user"},
+			{ID: 1, Module: 0, Name: "format_name", Private: true},
+		},
+		Globals: []air.Global{
+			{ID: 0, Module: 0, Name: "default_name"},
+			{ID: 1, Module: 0, Name: "cache_key", Private: true},
+		},
+	}
+	if got := functionName(program, program.Functions[0]); got != "MakeUser" {
+		t.Fatalf("public function = %q, want MakeUser", got)
+	}
+	if got := functionName(program, program.Functions[1]); got != "formatName" {
+		t.Fatalf("private function = %q, want formatName", got)
+	}
+	if got := globalName(program, program.Globals[0]); got != "DefaultName" {
+		t.Fatalf("public global = %q, want DefaultName", got)
+	}
+	if got := globalName(program, program.Globals[1]); got != "cacheKey" {
+		t.Fatalf("private global = %q, want cacheKey", got)
+	}
+}
+
+func TestNaturalFunctionNameFallsBackForSyntheticFunctions(t *testing.T) {
+	program := &air.Program{Functions: []air.Function{
+		{ID: 0, Module: 0, Name: "main", IsScript: true},
+		{ID: 1, Module: 0, Name: "User.ToString.to_str", Receiver: 1},
+		{ID: 2, Module: 0, Name: "anon_func_2"},
+	}}
+	if got := functionName(program, program.Functions[0]); got != "module_0__script" {
+		t.Fatalf("script function = %q, want module_0__script", got)
+	}
+	if got := functionName(program, program.Functions[1]); got != "module_0__User_ToString_to_str" {
+		t.Fatalf("method helper function = %q, want module_0__User_ToString_to_str", got)
+	}
+	if got := functionName(program, program.Functions[2]); got != "module_0__anon_func_2" {
+		t.Fatalf("closure helper function = %q, want module_0__anon_func_2", got)
+	}
+}
+
+func TestNaturalTopLevelNamesAliasSpecialGoNames(t *testing.T) {
+	program := &air.Program{
+		Types: []air.TypeInfo{{ID: 1, Kind: air.TypeStruct, Name: "len", ModulePath: "types.ard", Private: true}},
+		Functions: []air.Function{
+			{ID: 0, Module: 0, Name: "main", Private: true},
+			{ID: 1, Module: 0, Name: "len", Private: true},
+		},
+		Globals: []air.Global{{ID: 0, Module: 0, Name: "main", Private: true}},
+	}
+	if got := typeName(program, program.Types[0]); got != "types_ard__len" {
+		t.Fatalf("type with special Go name alias = %q, want types_ard__len", got)
+	}
+	if got := functionName(program, program.Functions[0]); got != "main_1" {
+		t.Fatalf("private main function alias = %q, want main_1", got)
+	}
+	if got := functionName(program, program.Functions[1]); got != "len_1" {
+		t.Fatalf("private len function alias = %q, want len_1", got)
+	}
+	if got := globalName(program, program.Globals[0]); got != "main_2" {
+		t.Fatalf("private main global alias = %q, want main_2", got)
+	}
+}
+
+func TestNaturalTopLevelNamesFallBackOnCollisions(t *testing.T) {
+	program := &air.Program{
+		Types:     []air.TypeInfo{{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "types.ard"}},
+		Traits:    []air.Trait{{ID: 0, Name: "Renderable", ModulePath: "traits.ard"}},
+		Functions: []air.Function{{ID: 0, Module: 0, Name: "user"}, {ID: 1, Module: 0, Name: "renderable"}},
+		Globals:   []air.Global{{ID: 0, Module: 0, Name: "user"}},
+	}
+	if got := typeName(program, program.Types[0]); got != "User" {
+		t.Fatalf("type name should take precedence over function/global collisions = %q, want User", got)
+	}
+	if got := functionName(program, program.Functions[0]); got != "User_1" {
+		t.Fatalf("function colliding with type/global = %q, want User_1", got)
+	}
+	if got := functionName(program, program.Functions[1]); got != "Renderable_1" {
+		t.Fatalf("function colliding with trait = %q, want Renderable_1", got)
+	}
+	if got := globalName(program, program.Globals[0]); got != "User_2" {
+		t.Fatalf("global colliding with type/function = %q, want User_2", got)
+	}
+}
+
 func TestNaturalTypeNameFallsBackOnCrossKindCollisions(t *testing.T) {
 	program := &air.Program{Types: []air.TypeInfo{
 		{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "a.ard"},

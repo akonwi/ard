@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -80,13 +81,18 @@ func TestTraitInterfaceTypeNameFallsBackOnCrossModuleTraitCollision(t *testing.T
 	}
 }
 
-func TestTraitInterfaceTypeNameFallsBackOnTypeCollision(t *testing.T) {
+func TestTraitInterfaceTypeNameFallsBackOnTopLevelCollision(t *testing.T) {
 	l := &lowerer{program: &air.Program{
-		Traits: []air.Trait{{ID: 0, Name: "Drawable", ModulePath: "traits.ard"}},
-		Types:  []air.TypeInfo{{ID: 1, Kind: air.TypeStruct, Name: "Drawable", ModulePath: "types.ard"}},
+		Traits:    []air.Trait{{ID: 0, Name: "Drawable", ModulePath: "traits.ard"}, {ID: 1, Name: "Encodable", ModulePath: "encoding.ard"}},
+		Types:     []air.TypeInfo{{ID: 1, Kind: air.TypeStruct, Name: "Drawable", ModulePath: "types.ard"}},
+		Functions: []air.Function{{ID: 0, Module: 0, Name: "encodable"}},
+		Globals:   []air.Global{{ID: 0, Module: 0, Name: "configured"}},
 	}}
 	if got := l.traitInterfaceTypeName(l.program.Traits[0]); got != "ardTrait_Drawable_0" {
 		t.Fatalf("trait colliding with type = %q, want legacy fallback", got)
+	}
+	if got := l.traitInterfaceTypeName(l.program.Traits[1]); got != "Encodable" {
+		t.Fatalf("trait name should take precedence over function collisions = %q, want Encodable", got)
 	}
 }
 
@@ -191,6 +197,87 @@ func TestNamedTypeExprKeepsSinglePackageModeUnqualified(t *testing.T) {
 	}
 }
 
+func TestLowerProgramAliasesJSONHelperImportsAfterDirectGoAliasConflict(t *testing.T) {
+	program := lowerSource(t, `
+		use go:strings as fmt
+		use ard/json
+
+		extern fn eq(a: Str, b: Str) Bool = fmt::EqualFold
+
+		fn main() {
+			let _same = eq("a", "A")
+			let _encoded = json::encode(1).expect("json")
+		}
+	`)
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := joinGeneratedSources(sources)
+	if !strings.Contains(joined, "\"fmt\"") || !strings.Contains(joined, "fmt_1 \"strings\"") {
+		t.Fatalf("generated source missing expected import aliases:\n%s", joined)
+	}
+	if !strings.Contains(joined, "fmt.Sprint") || !strings.Contains(joined, "fmt_1.EqualFold") {
+		t.Fatalf("generated source did not keep helper/direct Go aliases distinct:\n%s", joined)
+	}
+}
+
+func TestLowerProgramUsesRegisteredDirectGoTypeAlias(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/json
+		use go:time as fmt
+
+		extern fn sleep(duration: Int) Void = fmt::Sleep
+
+		fn main() {
+			let _encoded = json::encode(1).expect("json")
+			sleep(1)
+		}
+	`)
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := joinGeneratedSources(sources)
+	if !strings.Contains(joined, "\"fmt\"") || !strings.Contains(joined, "fmt_1 \"time\"") {
+		t.Fatalf("generated source missing expected import aliases:\n%s", joined)
+	}
+	if !strings.Contains(joined, "fmt_1.Sleep(fmt_1.Duration(1))") {
+		t.Fatalf("generated direct Go conversion did not use registered time alias:\n%s", joined)
+	}
+}
+
+func TestLowerProgramAliasesNaturalFunctionConflictingWithGeneratedImport(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/io
+
+		private fn fmt() {
+			io::print(1)
+		}
+
+		fn main() {
+			fmt()
+		}
+	`)
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	for _, source := range sources {
+		if strings.Contains(string(source), "func fmt_1()") {
+			got = string(source)
+			break
+		}
+	}
+	if got == "" {
+		t.Fatalf("generated sources missing aliased fmt function: %#v", mapsKeys(sources))
+	}
+	if !strings.Contains(got, "\"fmt\"") || strings.Contains(got, "fmt_1 \"fmt\"") {
+		t.Fatalf("generated source should keep fmt import unaliased and alias the Ard function:\n%s", got)
+	}
+}
+
 func TestFunctionExprQualifiesCrossModuleInModulePackageMode(t *testing.T) {
 	program := &air.Program{Modules: []air.Module{
 		{ID: 0, Path: "service.ard"},
@@ -198,8 +285,8 @@ func TestFunctionExprQualifiesCrossModuleInModulePackageMode(t *testing.T) {
 	}}
 	fn := air.Function{ID: 0, Module: 0, Name: "make_user"}
 	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}, useModulePackages: true}
-	if got := astExprName(l.functionExpr(fn)); got != "service.service_ard__make_user" {
-		t.Fatalf("cross-module function expr = %q, want service.service_ard__make_user", got)
+	if got := astExprName(l.functionExpr(fn)); got != "service.MakeUser" {
+		t.Fatalf("cross-module function expr = %q, want service.MakeUser", got)
 	}
 	if got := l.currentImports["service"]; got != "generated/service" {
 		t.Fatalf("registered import = %q, want generated/service", got)
@@ -213,8 +300,8 @@ func TestFunctionExprKeepsSinglePackageModeUnqualified(t *testing.T) {
 	}}
 	fn := air.Function{ID: 0, Module: 0, Name: "make_user"}
 	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}}
-	if got := astExprName(l.functionExpr(fn)); got != "service_ard__make_user" {
-		t.Fatalf("single-package function expr = %q, want service_ard__make_user", got)
+	if got := astExprName(l.functionExpr(fn)); got != "MakeUser" {
+		t.Fatalf("single-package function expr = %q, want MakeUser", got)
 	}
 	if len(l.currentImports) != 0 {
 		t.Fatalf("single-package function expr registered imports: %#v", l.currentImports)
@@ -228,8 +315,8 @@ func TestGlobalExprQualifiesCrossModuleInModulePackageMode(t *testing.T) {
 	}}
 	global := air.Global{ID: 0, Module: 0, Name: "default_name"}
 	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}, useModulePackages: true}
-	if got := astExprName(l.globalExpr(global)); got != "config.config_ard__global_default_name" {
-		t.Fatalf("cross-module global expr = %q, want config.config_ard__global_default_name", got)
+	if got := astExprName(l.globalExpr(global)); got != "config.DefaultName" {
+		t.Fatalf("cross-module global expr = %q, want config.DefaultName", got)
 	}
 	if got := l.currentImports["config"]; got != "generated/config" {
 		t.Fatalf("registered import = %q, want generated/config", got)
@@ -240,8 +327,8 @@ func TestGlobalExprKeepsSameModuleUnqualifiedInModulePackageMode(t *testing.T) {
 	program := &air.Program{Modules: []air.Module{{ID: 0, Path: "config.ard"}}}
 	global := air.Global{ID: 0, Module: 0, Name: "default_name"}
 	l := &lowerer{program: program, currentModule: 0, currentImports: map[string]string{}, useModulePackages: true}
-	if got := astExprName(l.globalExpr(global)); got != "config_ard__global_default_name" {
-		t.Fatalf("same-module global expr = %q, want config_ard__global_default_name", got)
+	if got := astExprName(l.globalExpr(global)); got != "DefaultName" {
+		t.Fatalf("same-module global expr = %q, want DefaultName", got)
 	}
 	if len(l.currentImports) != 0 {
 		t.Fatalf("same-module global expr registered imports: %#v", l.currentImports)
@@ -582,7 +669,7 @@ fn main() {
 		t.Fatalf("lower error: %v", err)
 	}
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesHaveFuncContaining(files, "__main") {
+	if !astFilesHaveFuncContaining(files, "Main") {
 		t.Fatal("generated AST missing main body")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
@@ -592,7 +679,7 @@ fn main() {
 		}
 		key, keyOK := kv.Key.(*ast.Ident)
 		call, callOK := kv.Value.(*ast.CallExpr)
-		if !keyOK || key.Name != "Padding" || !callOK || astCallName(call) != "ardruntime.Some" {
+		if !keyOK || key.Name != "Padding" || !callOK || !strings.HasSuffix(astCallName(call), ".Some") {
 			return false
 		}
 		indexed, ok := call.Fun.(*ast.IndexExpr)
@@ -602,7 +689,7 @@ fn main() {
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || !strings.Contains(astCallName(call), "ard_io__print") || len(call.Args) == 0 {
+		if !ok || !(strings.Contains(astCallName(call), "ard_io__print") || astCallName(call) == "Print") || len(call.Args) == 0 {
 			return false
 		}
 		inner, ok := call.Args[0].(*ast.CallExpr)
@@ -791,7 +878,7 @@ func TestGenerateSourcesFormatsSimpleProgram(t *testing.T) {
 	if !strings.Contains(got, "package main") {
 		t.Fatalf("generated source missing package declaration:\n%s", got)
 	}
-	if !strings.Contains(got, "func test_ard__add(a_0 int, b_1 int) int") {
+	if !strings.Contains(got, "func Add(a_0 int, b_1 int) int") {
 		t.Fatalf("generated source missing lowered add function:\n%s", got)
 	}
 	if !strings.Contains(got, "return a_0 + b_1") {
@@ -821,12 +908,12 @@ func TestLowerProgramOmitsTestsUnlessIncluded(t *testing.T) {
 	}
 
 	productionFiles := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if _, ok := astFilesFunc(productionFiles, "test_ard__check"); ok {
+	if _, ok := astFilesFunc(productionFiles, "Check"); ok {
 		t.Fatal("production AST includes test function")
 	}
 
 	testFiles := lowerProgramAST(t, program, Options{PackageName: "main", IncludeTests: true, SuppressMain: true})
-	if _, ok := astFilesFunc(testFiles, "test_ard__check"); !ok {
+	if _, ok := astFilesFunc(testFiles, "Check"); !ok {
 		t.Fatal("test AST missing test function")
 	}
 }
@@ -838,7 +925,7 @@ func TestLowerProgramDiscardsFinalExprInVoidFunction(t *testing.T) {
 		}
 	`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	fn, ok := astFilesFunc(files, "test_ard__main")
+	fn, ok := astFilesFunc(files, "Main")
 	if !ok {
 		t.Fatal("generated AST missing main function")
 	}
@@ -867,7 +954,7 @@ func TestLowerProgramUsesRuntimeVoidForVoidResultValues(t *testing.T) {
 		}
 	`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	fn, ok := astFilesFunc(files, "test_ard__ok")
+	fn, ok := astFilesFunc(files, "Ok")
 	if !ok || fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
 		t.Fatalf("generated AST missing ok return type: %#v", fn)
 	}
@@ -905,7 +992,7 @@ func TestLowerProgramMaterializesVoidGlobalInitializers(t *testing.T) {
 		}
 		for _, expr := range value.Values {
 			call, ok := expr.(*ast.CallExpr)
-			if ok && strings.Contains(astCallName(call), "test_ard__touch") {
+			if ok && strings.Contains(astCallName(call), "Touch") {
 				return true
 			}
 		}
@@ -913,7 +1000,7 @@ func TestLowerProgramMaterializesVoidGlobalInitializers(t *testing.T) {
 	}) {
 		t.Fatal("generated AST uses no-value Void call as global initializer")
 	}
-	if !astFilesHaveCall(files, "test_ard__touch") {
+	if !astFilesHaveCall(files, "Touch") {
 		t.Fatal("generated AST does not materialize Void global initializer call")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
@@ -3876,7 +3963,7 @@ func TestLowerProgramUsesPointersForMutableStructParams(t *testing.T) {
 	`)
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	fn, ok := astFilesFunc(files, "test_ard__set_body")
+	fn, ok := astFilesFunc(files, "SetBody")
 	if !ok || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
 		t.Fatalf("generated AST missing set_body function")
 	}
@@ -3886,7 +3973,7 @@ func TestLowerProgramUsesPointersForMutableStructParams(t *testing.T) {
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || astCallName(call) != "test_ard__set_body" || len(call.Args) == 0 {
+		if !ok || astCallName(call) != "SetBody" || len(call.Args) == 0 {
 			return false
 		}
 		addr, ok := call.Args[0].(*ast.UnaryExpr)
@@ -4265,7 +4352,7 @@ func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || astCallName(call) != "test_ard__send" || len(call.Args) != 1 {
+		if !ok || astCallName(call) != "Send" || len(call.Args) != 1 {
 			return false
 		}
 		conversion, ok := call.Args[0].(*ast.CallExpr)
@@ -4745,7 +4832,7 @@ func TestLowerProgramSupportsStoredTraitObjectDispatch(t *testing.T) {
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || !strings.Contains(astCallName(call), "show") || len(call.Args) != 1 {
+		if !ok || !(strings.Contains(astCallName(call), "show") || strings.Contains(astCallName(call), "Show")) || len(call.Args) != 1 {
 			return false
 		}
 		_, ok = call.Args[0].(*ast.IndexExpr)
@@ -5147,6 +5234,17 @@ func mapsKeys[V any](m map[string]V) []string {
 		keys = append(keys, key)
 	}
 	return keys
+}
+
+func joinGeneratedSources(sources map[string][]byte) string {
+	keys := mapsKeys(sources)
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, key := range keys {
+		b.Write(sources[key])
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 func TestBuildProgramWithDirectGoCallDoesNotRequireProjectFFICompanion(t *testing.T) {
@@ -5714,12 +5812,66 @@ fn main() Float { floor(1.2) }`)
 	}
 }
 
-func TestLowererDetectsImportAliasPathConflicts(t *testing.T) {
+func TestLowererRenamesImportAliasPathConflicts(t *testing.T) {
 	l := &lowerer{currentImports: map[string]string{}}
-	l.registerImport("fmt", "example.com/fmt")
-	l.registerImport("fmt", "fmt")
-	if l.importErr == nil || !strings.Contains(l.importErr.Error(), `Go import alias "fmt" used for both`) {
-		t.Fatalf("importErr = %v, want alias conflict", l.importErr)
+	first := l.registerImport("fmt", "example.com/fmt")
+	second := l.registerImport("fmt", "fmt")
+	if first != "fmt_1" || second != "fmt" {
+		t.Fatalf("aliases = %q, %q; want fmt_1, fmt", first, second)
+	}
+	if l.importErr != nil {
+		t.Fatalf("importErr = %v, want nil", l.importErr)
+	}
+}
+
+func TestLowerProgramImportAliasAvoidsLocalNames(t *testing.T) {
+	program := lowerSource(t, `
+		use go:strings as fmt
+
+		extern fn eq(a: Str, b: Str) Bool = fmt::EqualFold
+
+		fn main() Bool {
+			let x = 1
+			let fmt = 2
+			let same = eq("a", "A")
+			same and x == 1 and fmt == 2
+		}
+	`)
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := joinGeneratedSources(sources)
+	if !strings.Contains(joined, "fmt_2 \"strings\"") || !strings.Contains(joined, "fmt_2.EqualFold") {
+		t.Fatalf("generated source did not avoid local fmt alias:\n%s", joined)
+	}
+}
+
+func TestRenderTestRunnerAliasesImportsAroundTopLevelNames(t *testing.T) {
+	program := &air.Program{Functions: []air.Function{
+		{ID: 0, Module: 0, Name: "os", Private: true},
+		{ID: 1, Module: 0, Name: "runtime", Private: true},
+	}}
+	runner := renderTestRunner(program, nil, false)
+	if !strings.Contains(runner, "os_1 \"os\"") || !strings.Contains(runner, "runtime_1 \"github.com/akonwi/ard/runtime\"") {
+		t.Fatalf("test runner did not alias conflicting imports:\n%s", runner)
+	}
+	if !strings.Contains(runner, "os_1.Stderr") || !strings.Contains(runner, "runtime_1.Result") {
+		t.Fatalf("test runner did not use aliased imports:\n%s", runner)
+	}
+}
+
+func TestLowererImportAliasAvoidsSinglePackageTopLevelNamesAcrossModules(t *testing.T) {
+	program := &air.Program{
+		Modules: []air.Module{
+			{ID: 0, Path: "a.ard"},
+			{ID: 1, Path: "b.ard", Functions: []air.FunctionID{0}},
+		},
+		Functions: []air.Function{{ID: 0, Module: 1, Name: "fmt", Private: true}},
+	}
+	l := &lowerer{program: program, currentModule: 0, currentImports: map[string]string{}}
+	if got := l.registerImport("fmt", "strings"); got != "fmt_2" {
+		t.Fatalf("single-package conflicting import alias = %q, want fmt_2", got)
 	}
 }
 

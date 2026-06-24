@@ -87,6 +87,24 @@ func moduleNameWithPath(program *air.Program, module air.ModuleID, pathName func
 }
 
 func globalName(program *air.Program, global air.Global) string {
+	if name, ok := naturalGlobalName(program, global); ok {
+		return name
+	}
+	return legacyGlobalName(program, global)
+}
+
+func naturalGlobalName(program *air.Program, global air.Global) (string, bool) {
+	if global.Name == "" {
+		return "", false
+	}
+	name := naturalGoIdentifier(global.Name, !global.Private)
+	if name == "" || name == "_" {
+		return "", false
+	}
+	return topLevelValueNameAlias(program, topLevelNameGlobal, int(global.ID), name), true
+}
+
+func legacyGlobalName(program *air.Program, global air.Global) string {
 	moduleName := moduleName(program, global.Module)
 	name := sanitizeName(global.Name)
 	if name == "" {
@@ -96,6 +114,28 @@ func globalName(program *air.Program, global air.Global) string {
 }
 
 func functionName(program *air.Program, fn air.Function) string {
+	if name, ok := naturalFunctionName(program, fn); ok {
+		return name
+	}
+	return legacyFunctionName(program, fn)
+}
+
+func naturalFunctionName(program *air.Program, fn air.Function) (string, bool) {
+	if !naturalFunctionNameEligible(fn) {
+		return "", false
+	}
+	name := naturalGoIdentifier(fn.Name, !fn.Private)
+	if name == "" || name == "_" {
+		return "", false
+	}
+	return topLevelValueNameAlias(program, topLevelNameFunction, int(fn.ID), name), true
+}
+
+func naturalFunctionNameEligible(fn air.Function) bool {
+	return fn.Name != "" && !fn.IsScript && fn.Receiver == air.NoType && len(fn.Captures) == 0 && !strings.HasPrefix(fn.Name, "anon_func_")
+}
+
+func legacyFunctionName(program *air.Program, fn air.Function) string {
 	moduleName := moduleName(program, fn.Module)
 	suffix := sanitizeName(fn.Name)
 	if fn.IsScript {
@@ -117,6 +157,15 @@ func functionName(program *air.Program, fn air.Function) string {
 	return moduleName + "__" + suffix
 }
 
+type topLevelNameKind int
+
+const (
+	topLevelNameType topLevelNameKind = iota
+	topLevelNameTrait
+	topLevelNameFunction
+	topLevelNameGlobal
+)
+
 func typeName(program *air.Program, typ air.TypeInfo) string {
 	if name, ok := naturalTypeName(program, typ); ok {
 		return name
@@ -136,16 +185,11 @@ func naturalTypeName(program *air.Program, typ air.TypeInfo) (string, bool) {
 		return "", false
 	}
 	name := naturalGoIdentifier(typ.Name, !typ.Private)
-	if name == "" || name == "_" {
+	if name == "" || name == "_" || isReservedTopLevelName(name) {
 		return "", false
 	}
-	for _, other := range program.Types {
-		if other.ID == typ.ID || !naturalTypeNameEligible(other) {
-			continue
-		}
-		if naturalGoIdentifier(other.Name, !other.Private) == name {
-			return "", false
-		}
+	if topLevelNaturalNameCollides(program, topLevelNameType, int(typ.ID), name) {
+		return "", false
 	}
 	return name, true
 }
@@ -155,6 +199,152 @@ func naturalTypeNameEligible(typ air.TypeInfo) bool {
 		return false
 	}
 	return typ.Name != "" && !strings.ContainsAny(typ.Name, "<>[]?:!") && typ.ExternBinding == ""
+}
+
+func topLevelValueNameAlias(program *air.Program, selfKind topLevelNameKind, selfID int, base string) string {
+	suffix := 0
+	if isSpecialGoTopLevelName(base) || topLevelNaturalNameCollides(program, selfKind, selfID, base) {
+		suffix = 1 + earlierAliasedValueCount(program, selfKind, selfID, base)
+	}
+	for {
+		name := base
+		if suffix > 0 {
+			name = fmt.Sprintf("%s_%d", base, suffix)
+		}
+		if !isSpecialGoTopLevelName(name) && !topLevelNaturalNameCollides(program, selfKind, selfID, name) {
+			return name
+		}
+		suffix++
+	}
+}
+
+func earlierAliasedValueCount(program *air.Program, selfKind topLevelNameKind, selfID int, base string) int {
+	if program == nil {
+		return 0
+	}
+	count := 0
+	for _, fn := range program.Functions {
+		if selfKind == topLevelNameFunction && int(fn.ID) == selfID {
+			continue
+		}
+		if naturalFunctionNameEligible(fn) && naturalGoIdentifier(fn.Name, !fn.Private) == base && topLevelValuePrecedes(topLevelNameFunction, int(fn.ID), selfKind, selfID) && (isSpecialGoTopLevelName(base) || topLevelNaturalNameCollides(program, topLevelNameFunction, int(fn.ID), base)) {
+			count++
+		}
+	}
+	for _, global := range program.Globals {
+		if selfKind == topLevelNameGlobal && int(global.ID) == selfID {
+			continue
+		}
+		if global.Name != "" && naturalGoIdentifier(global.Name, !global.Private) == base && topLevelValuePrecedes(topLevelNameGlobal, int(global.ID), selfKind, selfID) && (isSpecialGoTopLevelName(base) || topLevelNaturalNameCollides(program, topLevelNameGlobal, int(global.ID), base)) {
+			count++
+		}
+	}
+	return count
+}
+
+func topLevelValuePrecedes(leftKind topLevelNameKind, leftID int, rightKind topLevelNameKind, rightID int) bool {
+	if leftKind != rightKind {
+		return leftKind < rightKind
+	}
+	return leftID < rightID
+}
+
+func isReservedTopLevelName(name string) bool {
+	return isSpecialGoTopLevelName(name)
+}
+
+func isSpecialGoTopLevelName(name string) bool {
+	if name == "main" || name == "ardRunTest" || name == "ardTestOutcome" {
+		return true
+	}
+	for _, reserved := range predeclaredGoIdentifiers() {
+		if name == reserved {
+			return true
+		}
+	}
+	for _, reserved := range runtimePreludeTopLevelNames() {
+		if name == reserved {
+			return true
+		}
+	}
+	for _, reserved := range generatedImportAliases() {
+		if name == reserved {
+			return true
+		}
+	}
+	return false
+}
+
+func generatedImportAliases() []string {
+	aliases := make([]string, 0, len(generatedImportAliasPaths()))
+	for alias := range generatedImportAliasPaths() {
+		aliases = append(aliases, alias)
+	}
+	return aliases
+}
+
+func generatedImportAliasPath(alias string) (string, bool) {
+	path, ok := generatedImportAliasPaths()[alias]
+	return path, ok
+}
+
+func generatedImportAliasPaths() map[string]string {
+	return map[string]string{
+		"ardmath":    "math",
+		"ardruntime": "github.com/akonwi/ard/runtime",
+		"ardutf8":    "unicode/utf8",
+		"bytes":      "bytes",
+		"fmt":        "fmt",
+		"json":       "encoding/json/v2",
+		"jsontext":   "encoding/json/jsontext",
+		"slices":     "slices",
+		"sort":       "sort",
+		"strconv":    "strconv",
+		"stdlibffi":  "github.com/akonwi/ard/std_lib/ffi",
+		"strings":    "strings",
+	}
+}
+
+func topLevelNaturalNameCollides(program *air.Program, selfKind topLevelNameKind, selfID int, name string) bool {
+	if program == nil {
+		return false
+	}
+	for _, typ := range program.Types {
+		if selfKind == topLevelNameType && int(typ.ID) == selfID {
+			continue
+		}
+		if naturalTypeNameEligible(typ) && naturalGoIdentifier(typ.Name, !typ.Private) == name {
+			return true
+		}
+	}
+	for _, trait := range program.Traits {
+		if selfKind == topLevelNameTrait && int(trait.ID) == selfID {
+			continue
+		}
+		if trait.Name != "" && naturalGoIdentifier(trait.Name, !trait.Private) == name {
+			return true
+		}
+	}
+	if selfKind == topLevelNameType || selfKind == topLevelNameTrait {
+		return false
+	}
+	for _, fn := range program.Functions {
+		if selfKind == topLevelNameFunction && int(fn.ID) == selfID {
+			continue
+		}
+		if naturalFunctionNameEligible(fn) && naturalGoIdentifier(fn.Name, !fn.Private) == name {
+			return true
+		}
+	}
+	for _, global := range program.Globals {
+		if selfKind == topLevelNameGlobal && int(global.ID) == selfID {
+			continue
+		}
+		if global.Name != "" && naturalGoIdentifier(global.Name, !global.Private) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func typeNameBase(program *air.Program, typ air.TypeInfo) string {

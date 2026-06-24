@@ -139,14 +139,64 @@ func RunTests(program *air.Program, args []string, tests []TestCase, failFast bo
 	return outcomes, nil
 }
 
+func writeImportSpec(b *strings.Builder, alias string, defaultAlias string, importPath string) {
+	if alias == "" {
+		alias = defaultAlias
+	}
+	if alias == defaultAlias {
+		fmt.Fprintf(b, "\t%q\n", importPath)
+		return
+	}
+	fmt.Fprintf(b, "\t%s %q\n", alias, importPath)
+}
+
+func testRunnerImportAliases(program *air.Program) map[string]string {
+	aliases := map[string]string{}
+	used := testRunnerReservedTopLevelNames(program)
+	for _, base := range []string{"json", "fmt", "os", "runtime"} {
+		alias := base
+		for i := 1; used[alias]; i++ {
+			alias = fmt.Sprintf("%s_%d", base, i)
+		}
+		aliases[base] = alias
+		used[alias] = true
+	}
+	return aliases
+}
+
+func testRunnerReservedTopLevelNames(program *air.Program) map[string]bool {
+	reserved := map[string]bool{"main": true, "ardRunTest": true, "ardTestOutcome": true}
+	if program == nil {
+		return reserved
+	}
+	traitLowerer := &lowerer{program: program}
+	for _, typ := range program.Types {
+		reserved[typeName(program, typ)] = true
+		for _, variant := range typ.Variants {
+			reserved[enumVariantName(program, typ, variant)] = true
+		}
+	}
+	for _, trait := range program.Traits {
+		reserved[traitLowerer.traitInterfaceTypeName(trait)] = true
+	}
+	for _, global := range program.Globals {
+		reserved[globalName(program, global)] = true
+	}
+	for _, fn := range program.Functions {
+		reserved[functionName(program, fn)] = true
+	}
+	return reserved
+}
+
 func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) string {
+	aliases := testRunnerImportAliases(program)
 	var b strings.Builder
 	b.WriteString("package main\n\n")
 	b.WriteString("import (\n")
-	b.WriteString("\t\"encoding/json\"\n")
-	b.WriteString("\t\"fmt\"\n")
-	b.WriteString("\t\"os\"\n")
-	b.WriteString("\truntime \"github.com/akonwi/ard/runtime\"\n")
+	writeImportSpec(&b, aliases["json"], "json", "encoding/json")
+	writeImportSpec(&b, aliases["fmt"], "fmt", "fmt")
+	writeImportSpec(&b, aliases["os"], "os", "os")
+	writeImportSpec(&b, aliases["runtime"], "runtime", "github.com/akonwi/ard/runtime")
 	b.WriteString(")\n\n")
 	b.WriteString("type ardTestOutcome struct {\n")
 	b.WriteString("\tName string `json:\"name\"`\n")
@@ -154,9 +204,9 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) str
 	b.WriteString("\tStatus string `json:\"status\"`\n")
 	b.WriteString("\tMessage string `json:\"message,omitempty\"`\n")
 	b.WriteString("}\n\n")
-	b.WriteString("func ardRunTest(name string, displayName string, fn func() runtime.Result[runtime.Void, string]) (out ardTestOutcome) {\n")
+	fmt.Fprintf(&b, "func ardRunTest(name string, displayName string, fn func() %s.Result[%s.Void, string]) (out ardTestOutcome) {\n", aliases["runtime"], aliases["runtime"])
 	b.WriteString("\tout = ardTestOutcome{Name: name, DisplayName: displayName, Status: \"panic\"}\n")
-	b.WriteString("\tdefer func() { if recovered := recover(); recovered != nil { out.Status = \"panic\"; out.Message = fmt.Sprint(recovered) } }()\n")
+	fmt.Fprintf(&b, "\tdefer func() { if recovered := recover(); recovered != nil { out.Status = \"panic\"; out.Message = %s.Sprint(recovered) } }()\n", aliases["fmt"])
 	b.WriteString("\tresult := fn()\n")
 	b.WriteString("\tif result.Ok { out.Status = \"pass\"; out.Message = \"\" } else { out.Status = \"fail\"; out.Message = result.Err }\n")
 	b.WriteString("\treturn out\n")
@@ -176,13 +226,13 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) str
 	if failFast {
 		b.WriteString("done:\n")
 	}
-	b.WriteString("\tdata, err := json.Marshal(outcomes)\n")
-	b.WriteString("\tif err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }\n")
-	b.WriteString("\tif path := os.Getenv(\"ARD_TEST_RESULTS\"); path != \"\" {\n")
-	b.WriteString("\t\tif err := os.WriteFile(path, data, 0o644); err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }\n")
+	fmt.Fprintf(&b, "\tdata, err := %s.Marshal(outcomes)\n", aliases["json"])
+	fmt.Fprintf(&b, "\tif err != nil { %s.Fprintln(%s.Stderr, err); %s.Exit(1) }\n", aliases["fmt"], aliases["os"], aliases["os"])
+	fmt.Fprintf(&b, "\tif path := %s.Getenv(\"ARD_TEST_RESULTS\"); path != \"\" {\n", aliases["os"])
+	fmt.Fprintf(&b, "\t\tif err := %s.WriteFile(path, data, 0o644); err != nil { %s.Fprintln(%s.Stderr, err); %s.Exit(1) }\n", aliases["os"], aliases["fmt"], aliases["os"], aliases["os"])
 	b.WriteString("\t\treturn\n")
 	b.WriteString("\t}\n")
-	b.WriteString("\t_, _ = os.Stdout.Write(data)\n")
+	fmt.Fprintf(&b, "\t_, _ = %s.Stdout.Write(data)\n", aliases["os"])
 	b.WriteString("}\n")
 	return b.String()
 }

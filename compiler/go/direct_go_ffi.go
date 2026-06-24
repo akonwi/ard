@@ -765,8 +765,8 @@ func (l *lowerer) directGoTypeExpr(goType checker.GoValueType, binding directGoE
 			preferred = binding.importAlias()
 		}
 		alias := l.generatedGoImportAlias(goType.ImportPath, preferred)
+		alias = l.registerImport(alias, goType.ImportPath)
 		typeExpr = rewriteQualifiedGoTypeExpr(typeExpr, goType.Package, alias)
-		l.registerImport(alias, goType.ImportPath)
 	}
 	expr, err := parser.ParseExpr(typeExpr)
 	if err != nil {
