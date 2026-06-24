@@ -1716,7 +1716,7 @@ func TestLowerProgramSupportsStructsAndEnums(t *testing.T) {
 	if !astFilesHaveTypeSpec(files, "Direction") {
 		t.Fatal("generated AST missing enum type")
 	}
-	if !astFilesHaveValueSpec(files, "Direction__Down") {
+	if !astFilesHaveValueSpec(files, "DirectionDown") {
 		t.Fatal("generated AST missing enum constants")
 	}
 	if !astFilesHaveTypeSpec(files, "User") {

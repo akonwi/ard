@@ -382,7 +382,109 @@ func typeNameCollides(program *air.Program, typ air.TypeInfo, base string) bool 
 }
 
 func enumVariantName(program *air.Program, typ air.TypeInfo, variant air.VariantInfo) string {
-	return typeName(program, typ) + "__" + sanitizeName(variant.Name)
+	if name, ok := naturalEnumVariantName(program, typ, variant); ok {
+		return name
+	}
+	return legacyEnumVariantName(program, typ, variant)
+}
+
+func naturalEnumVariantName(program *air.Program, typ air.TypeInfo, variant air.VariantInfo) (string, bool) {
+	if typ.Kind != air.TypeEnum || variant.Name == "" || len(goIdentifierParts(variant.Name)) == 0 || typ.ExternBinding != "" {
+		return "", false
+	}
+	typePart, ok := naturalTypeName(program, typ)
+	if !ok {
+		return "", false
+	}
+	variantPart := naturalGoIdentifier(variant.Name, true)
+	if variantPart == "" || variantPart == "_" {
+		return "", false
+	}
+	base := typePart + variantPart
+	return enumVariantNameAlias(program, typ, variant, base), true
+}
+
+func enumVariantNameAlias(program *air.Program, typ air.TypeInfo, variant air.VariantInfo, base string) string {
+	candidate := base
+	for i := 1; enumVariantNameCollides(program, typ, variant, candidate); i++ {
+		candidate = fmt.Sprintf("%s_%d", base, i)
+	}
+	return candidate
+}
+
+func enumVariantNameCollides(program *air.Program, typ air.TypeInfo, variant air.VariantInfo, candidate string) bool {
+	if isSpecialGoTopLevelName(candidate) || topLevelActualNameCollides(program, candidate) {
+		return true
+	}
+	if program == nil {
+		return false
+	}
+	for _, other := range program.Types {
+		if other.Kind != air.TypeEnum {
+			continue
+		}
+		for _, otherVariant := range other.Variants {
+			if !enumVariantPrecedes(other, otherVariant, typ, variant) {
+				continue
+			}
+			if enumVariantName(program, other, otherVariant) == candidate {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func topLevelActualNameCollides(program *air.Program, candidate string) bool {
+	if program == nil {
+		return false
+	}
+	for _, typ := range program.Types {
+		if typeName(program, typ) == candidate {
+			return true
+		}
+	}
+	traitLowerer := &lowerer{program: program}
+	for _, trait := range program.Traits {
+		if traitLowerer.traitInterfaceTypeName(trait) == candidate {
+			return true
+		}
+	}
+	for _, fn := range program.Functions {
+		if functionName(program, fn) == candidate {
+			return true
+		}
+	}
+	for _, global := range program.Globals {
+		if globalName(program, global) == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func enumVariantPrecedes(leftType air.TypeInfo, left air.VariantInfo, rightType air.TypeInfo, right air.VariantInfo) bool {
+	if leftType.ID != rightType.ID {
+		return leftType.ID < rightType.ID
+	}
+	return enumVariantIndex(leftType, left) < enumVariantIndex(rightType, right)
+}
+
+func enumVariantIndex(typ air.TypeInfo, variant air.VariantInfo) int {
+	for i, candidate := range typ.Variants {
+		if candidate.Name == variant.Name && candidate.Discriminant == variant.Discriminant {
+			return i
+		}
+	}
+	return len(typ.Variants)
+}
+
+func legacyEnumVariantName(program *air.Program, typ air.TypeInfo, variant air.VariantInfo) string {
+	name := sanitizeName(variant.Name)
+	if name == "" {
+		name = fmt.Sprintf("variant_%d", variant.Discriminant)
+	}
+	return typeName(program, typ) + "__" + name
 }
 
 func unionMemberFieldName(member air.UnionMember) string {

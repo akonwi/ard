@@ -75,6 +75,61 @@ func TestNaturalTypeNameFallsBackOnCollisions(t *testing.T) {
 	}
 }
 
+func TestNaturalEnumVariantNameUsesEnumVisibility(t *testing.T) {
+	program := &air.Program{Types: []air.TypeInfo{
+		{ID: 1, Kind: air.TypeEnum, Name: "Direction", ModulePath: "direction.ard", Variants: []air.VariantInfo{{Name: "Down", Discriminant: 0}}},
+		{ID: 2, Kind: air.TypeEnum, Name: "internal_state", ModulePath: "state.ard", Private: true, Variants: []air.VariantInfo{{Name: "Ready", Discriminant: 0}}},
+	}}
+	if got := enumVariantName(program, program.Types[0], program.Types[0].Variants[0]); got != "DirectionDown" {
+		t.Fatalf("public enum variant = %q, want DirectionDown", got)
+	}
+	if got := enumVariantName(program, program.Types[1], program.Types[1].Variants[0]); got != "internalStateReady" {
+		t.Fatalf("private enum variant = %q, want internalStateReady", got)
+	}
+}
+
+func TestNaturalEnumVariantNameAliasesCollisions(t *testing.T) {
+	program := &air.Program{Types: []air.TypeInfo{
+		{ID: 1, Kind: air.TypeStruct, Name: "DirectionDown", ModulePath: "other.ard"},
+		{ID: 2, Kind: air.TypeEnum, Name: "Direction", ModulePath: "direction.ard", Variants: []air.VariantInfo{{Name: "Down", Discriminant: 0}}},
+		{ID: 3, Kind: air.TypeEnum, Name: "Direction", ModulePath: "direction2.ard", Variants: []air.VariantInfo{{Name: "Down", Discriminant: 0}}},
+	}}
+	if got := enumVariantName(program, program.Types[1], program.Types[1].Variants[0]); got != "direction_ard__Direction__Down" {
+		t.Fatalf("variant on enum with colliding type name = %q, want legacy name", got)
+	}
+	// Give the second enum a non-colliding type name but colliding variant name.
+	program.Types[2].Name = "DirectionDown"
+	program.Types[2].Variants[0].Name = ""
+	// Empty variant names keep the legacy spelling.
+	if got := enumVariantName(program, program.Types[2], program.Types[2].Variants[0]); got != "direction2_ard__DirectionDown__variant_0" {
+		t.Fatalf("empty variant = %q, want legacy fallback", got)
+	}
+	program.Types[2].Variants[0].Name = "__"
+	if got := enumVariantName(program, program.Types[2], program.Types[2].Variants[0]); got != "direction2_ard__DirectionDown__variant_0" {
+		t.Fatalf("underscore-only variant = %q, want legacy fallback", got)
+	}
+}
+
+func TestNaturalEnumVariantNameAliasesDuplicateVariantNames(t *testing.T) {
+	program := &air.Program{Types: []air.TypeInfo{{ID: 1, Kind: air.TypeEnum, Name: "Direction", ModulePath: "direction.ard", Variants: []air.VariantInfo{{Name: "Down", Discriminant: 0}, {Name: "Down", Discriminant: 1}}}}}
+	if got := enumVariantName(program, program.Types[0], program.Types[0].Variants[0]); got != "DirectionDown" {
+		t.Fatalf("first duplicate variant = %q, want DirectionDown", got)
+	}
+	if got := enumVariantName(program, program.Types[0], program.Types[0].Variants[1]); got != "DirectionDown_1" {
+		t.Fatalf("second duplicate variant = %q, want DirectionDown_1", got)
+	}
+}
+
+func TestNaturalEnumVariantNameAliasesValueCollisions(t *testing.T) {
+	program := &air.Program{
+		Types:     []air.TypeInfo{{ID: 1, Kind: air.TypeEnum, Name: "Direction", ModulePath: "direction.ard", Variants: []air.VariantInfo{{Name: "Down", Discriminant: 0}}}},
+		Functions: []air.Function{{ID: 0, Module: 0, Name: "DirectionDown"}},
+	}
+	if got := enumVariantName(program, program.Types[0], program.Types[0].Variants[0]); got != "DirectionDown_1" {
+		t.Fatalf("variant colliding with function = %q, want DirectionDown_1", got)
+	}
+}
+
 func TestNaturalFunctionAndGlobalNamesUseVisibility(t *testing.T) {
 	program := &air.Program{
 		Functions: []air.Function{
