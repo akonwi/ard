@@ -851,13 +851,17 @@ fn main() {
 			return false
 		}
 		indexed, ok := call.Fun.(*ast.IndexExpr)
-		return ok && astExprName(indexed.Index) == "Inner"
+		return ok && strings.HasSuffix(astExprName(indexed.Index), "Inner")
 	}) {
 		t.Fatal("generated AST missing cross-module nested optional struct literal field")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || !(strings.Contains(astCallName(call), "ard_io__print") || astCallName(call) == "Print") || len(call.Args) == 0 {
+		if !ok {
+			return false
+		}
+		callName := astCallName(call)
+		if !(strings.Contains(callName, "ard_io__print") || callName == "Print" || strings.HasSuffix(callName, ".Print")) || len(call.Args) == 0 {
 			return false
 		}
 		inner, ok := call.Args[0].(*ast.CallExpr)
@@ -902,7 +906,7 @@ func TestLowerProgramTakesAddressOfLocalMutTraitArgs(t *testing.T) {
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || !strings.Contains(astCallName(call), "poke") {
+		if !ok || !strings.Contains(strings.ToLower(astCallName(call)), "poke") {
 			return false
 		}
 		for _, arg := range call.Args {
@@ -3807,7 +3811,7 @@ func TestTypeNameUsesModulePathAndUniqueFallback(t *testing.T) {
 	program := &air.Program{}
 	inbox := typeName(program, air.TypeInfo{ID: 1, Name: "Store", ModulePath: "app/models/inbox"})
 	issues := typeName(program, air.TypeInfo{ID: 2, Name: "Store", ModulePath: "app/models/issues"})
-	if inbox != "app_models_inbox__Store" || issues != "app_models_issues__Store" {
+	if inbox != "App_models_inbox__Store" || issues != "App_models_issues__Store" {
 		t.Fatalf("module type names = %q, %q", inbox, issues)
 	}
 
@@ -4385,11 +4389,11 @@ func TestLowerProgramEmitsGoInterfaceForTraitObject(t *testing.T) {
 			}
 			methods[method.Names[0].Name] = fnType
 		}
-		render, ok := methods["render"]
+		render, ok := methods["Render"]
 		if !ok || render.Params == nil || len(render.Params.List) != 0 || render.Results == nil || len(render.Results.List) != 1 || astExprName(render.Results.List[0].Type) != "string" {
 			return false
 		}
-		area, ok := methods["area"]
+		area, ok := methods["Area"]
 		return ok && area.Params != nil && len(area.Params.List) == 1 && astExprName(area.Params.List[0].Type) == "int" && area.Results != nil && len(area.Results.List) == 1 && astExprName(area.Results.List[0].Type) == "int"
 	}) {
 		t.Fatal("generated AST missing Go interface for Ard trait")
@@ -4510,7 +4514,7 @@ func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		fn, ok := node.(*ast.FuncDecl)
-		if !ok || fn.Recv == nil || fn.Name == nil || fn.Name.Name != "write" || len(fn.Recv.List) != 1 {
+		if !ok || fn.Recv == nil || fn.Name == nil || fn.Name.Name != "Write" || len(fn.Recv.List) != 1 {
 			return false
 		}
 		_, ok = fn.Recv.List[0].Type.(*ast.StarExpr)
@@ -4586,7 +4590,7 @@ func TestLowerProgramSupportsUserTraitObjectDispatch(t *testing.T) {
 			return false
 		}
 		name := astCallName(call)
-		return name == "render" || strings.HasSuffix(name, ".render")
+		return name == "Render" || strings.HasSuffix(name, ".Render")
 	}) {
 		t.Fatal("generated AST missing native interface trait method call")
 	}
@@ -4659,7 +4663,7 @@ fn main() {
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		return ok && (astCallName(call) == "render" || strings.HasSuffix(astCallName(call), ".render"))
+		return ok && (astCallName(call) == "Render" || strings.HasSuffix(astCallName(call), ".Render"))
 	}) {
 		t.Fatal("generated AST missing native cross-module trait dispatch call")
 	}
@@ -4994,7 +4998,7 @@ func TestLowerProgramSupportsStoredTraitObjectDispatch(t *testing.T) {
 			return false
 		}
 		name := astCallName(call)
-		return name == "draw" || strings.HasSuffix(name, ".draw")
+		return name == "Draw" || strings.HasSuffix(name, ".Draw")
 	}) {
 		t.Fatal("generated AST missing native interface trait-object dispatch")
 	}
@@ -5040,7 +5044,7 @@ func TestLowerProgramSupportsTraitObjectDispatch(t *testing.T) {
 			return false
 		}
 		name := astCallName(call)
-		return name == "to_str" || strings.HasSuffix(name, ".to_str")
+		return name == "ToStr" || strings.HasSuffix(name, ".ToStr")
 	}) {
 		t.Fatal("generated AST missing native interface trait dispatch")
 	}
@@ -5883,6 +5887,19 @@ fn main() Int { tm::Since(tm::Now()) }`)
 	}
 }
 
+func writeGeneratedSourcesForTest(t testing.TB, dir string, sources map[string][]byte) {
+	t.Helper()
+	for name, source := range sources {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create source dir for %s: %v", name, err)
+		}
+		if err := os.WriteFile(path, source, 0o644); err != nil {
+			t.Fatalf("write source %s: %v", name, err)
+		}
+	}
+}
+
 func buildProgramFromGeneratedSources(t *testing.T, program *air.Program, outputName string) {
 	t.Helper()
 	tempDir := t.TempDir()
@@ -5890,11 +5907,7 @@ func buildProgramFromGeneratedSources(t *testing.T, program *air.Program, output
 	if err != nil {
 		t.Fatalf("generate sources: %v", err)
 	}
-	for name, source := range sources {
-		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
-			t.Fatalf("write source %s: %v", name, err)
-		}
-	}
+	writeGeneratedSourcesForTest(t, tempDir, sources)
 	goMod, err := generatedGoMod(tempDir, program, nil)
 	if err != nil {
 		t.Fatalf("generate go.mod: %v", err)
@@ -6228,11 +6241,7 @@ fn main() Int {
 	if err != nil {
 		t.Fatalf("generate sources: %v", err)
 	}
-	for name, source := range sources {
-		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
-			t.Fatalf("write source %s: %v", name, err)
-		}
-	}
+	writeGeneratedSourcesForTest(t, tempDir, sources)
 	goMod, err := generatedGoMod(tempDir, program, nil)
 	if err != nil {
 		t.Fatalf("generate go.mod: %v", err)
@@ -6262,11 +6271,7 @@ fn main() Void!Str {
 	if err != nil {
 		t.Fatalf("generate sources: %v", err)
 	}
-	for name, source := range sources {
-		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
-			t.Fatalf("write source %s: %v", name, err)
-		}
-	}
+	writeGeneratedSourcesForTest(t, tempDir, sources)
 	goMod, err := generatedGoMod(tempDir, program, nil)
 	if err != nil {
 		t.Fatalf("generate go.mod: %v", err)
@@ -6367,11 +6372,7 @@ fn main() Int { index_byte("abc", 300) }`)
 	if err != nil {
 		t.Fatalf("generate sources: %v", err)
 	}
-	for name, source := range sources {
-		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
-			t.Fatalf("write source %s: %v", name, err)
-		}
-	}
+	writeGeneratedSourcesForTest(t, tempDir, sources)
 	goMod, err := generatedGoMod(tempDir, program, nil)
 	if err != nil {
 		t.Fatalf("generate go.mod: %v", err)
@@ -6476,11 +6477,7 @@ fn main() Int!Str { parse_int("42", 10, 64) }`)
 	if err != nil {
 		t.Fatalf("generate sources: %v", err)
 	}
-	for name, source := range sources {
-		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
-			t.Fatalf("write source %s: %v", name, err)
-		}
-	}
+	writeGeneratedSourcesForTest(t, tempDir, sources)
 	goMod, err := generatedGoMod(tempDir, program, nil)
 	if err != nil {
 		t.Fatalf("generate go.mod: %v", err)

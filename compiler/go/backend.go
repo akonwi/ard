@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -150,18 +151,47 @@ func writeImportSpec(b *strings.Builder, alias string, defaultAlias string, impo
 	fmt.Fprintf(b, "\t%s %q\n", alias, importPath)
 }
 
-func testRunnerImportAliases(program *air.Program) map[string]string {
-	aliases := map[string]string{}
+type testRunnerImports struct {
+	std     map[string]string
+	modules map[air.ModuleID]string
+}
+
+func testRunnerImportAliases(program *air.Program, tests []TestCase) testRunnerImports {
+	imports := testRunnerImports{std: map[string]string{}, modules: map[air.ModuleID]string{}}
 	used := testRunnerReservedTopLevelNames(program)
 	for _, base := range []string{"json", "fmt", "os", "runtime"} {
 		alias := base
 		for i := 1; used[alias]; i++ {
 			alias = fmt.Sprintf("%s_%d", base, i)
 		}
-		aliases[base] = alias
+		imports.std[base] = alias
 		used[alias] = true
 	}
-	return aliases
+	if program == nil {
+		return imports
+	}
+	rootID, hasRoot := findRootFunction(program)
+	mainModuleID := (&lowerer{program: program}).mainModuleID(rootID, hasRoot)
+	for _, test := range tests {
+		if test.Function < 0 || int(test.Function) >= len(program.Functions) {
+			continue
+		}
+		moduleID := program.Functions[test.Function].Module
+		if moduleID == mainModuleID {
+			continue
+		}
+		if _, ok := imports.modules[moduleID]; ok {
+			continue
+		}
+		base := modulePackageName(program, moduleID)
+		alias := base
+		for i := 1; used[alias]; i++ {
+			alias = fmt.Sprintf("%s_%d", base, i)
+		}
+		imports.modules[moduleID] = alias
+		used[alias] = true
+	}
+	return imports
 }
 
 func testRunnerReservedTopLevelNames(program *air.Program) map[string]bool {
@@ -189,7 +219,8 @@ func testRunnerReservedTopLevelNames(program *air.Program) map[string]bool {
 }
 
 func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) string {
-	aliases := testRunnerImportAliases(program)
+	imports := testRunnerImportAliases(program, tests)
+	aliases := imports.std
 	var b strings.Builder
 	b.WriteString("package main\n\n")
 	b.WriteString("import (\n")
@@ -197,6 +228,15 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) str
 	writeImportSpec(&b, aliases["fmt"], "fmt", "fmt")
 	writeImportSpec(&b, aliases["os"], "os", "os")
 	writeImportSpec(&b, aliases["runtime"], "runtime", "github.com/akonwi/ard/runtime")
+	moduleIDs := make([]int, 0, len(imports.modules))
+	for moduleID := range imports.modules {
+		moduleIDs = append(moduleIDs, int(moduleID))
+	}
+	sort.Ints(moduleIDs)
+	for _, moduleID := range moduleIDs {
+		id := air.ModuleID(moduleID)
+		writeImportSpec(&b, imports.modules[id], modulePackageName(program, id), moduleImportPath(program, id))
+	}
 	b.WriteString(")\n\n")
 	b.WriteString("type ardTestOutcome struct {\n")
 	b.WriteString("\tName string `json:\"name\"`\n")
@@ -218,7 +258,11 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) str
 			continue
 		}
 		fn := program.Functions[test.Function]
-		fmt.Fprintf(&b, "\toutcomes = append(outcomes, ardRunTest(%s, %s, %s))\n", strconv.Quote(test.Name), strconv.Quote(test.DisplayName), functionName(program, fn))
+		fnName := functionName(program, fn)
+		if alias := imports.modules[fn.Module]; alias != "" {
+			fnName = alias + "." + fnName
+		}
+		fmt.Fprintf(&b, "\toutcomes = append(outcomes, ardRunTest(%s, %s, %s))\n", strconv.Quote(test.Name), strconv.Quote(test.DisplayName), fnName)
 		if failFast {
 			b.WriteString("\tif outcomes[len(outcomes)-1].Status != \"pass\" { goto done }\n")
 		}

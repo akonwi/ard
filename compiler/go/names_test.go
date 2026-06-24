@@ -67,11 +67,11 @@ func TestNaturalTypeNameFallsBackOnCollisions(t *testing.T) {
 		{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "a.ard"},
 		{ID: 2, Kind: air.TypeStruct, Name: "User", ModulePath: "b.ard"},
 	}}
-	if got := typeName(program, program.Types[0]); got != "a_ard__User" {
-		t.Fatalf("first colliding type = %q, want a_ard__User", got)
+	if got := typeName(program, program.Types[0]); got != "A_ard__User" {
+		t.Fatalf("first colliding type = %q, want A_ard__User", got)
 	}
-	if got := typeName(program, program.Types[1]); got != "b_ard__User" {
-		t.Fatalf("second colliding type = %q, want b_ard__User", got)
+	if got := typeName(program, program.Types[1]); got != "B_ard__User" {
+		t.Fatalf("second colliding type = %q, want B_ard__User", got)
 	}
 }
 
@@ -94,18 +94,18 @@ func TestNaturalEnumVariantNameAliasesCollisions(t *testing.T) {
 		{ID: 2, Kind: air.TypeEnum, Name: "Direction", ModulePath: "direction.ard", Variants: []air.VariantInfo{{Name: "Down", Discriminant: 0}}},
 		{ID: 3, Kind: air.TypeEnum, Name: "Direction", ModulePath: "direction2.ard", Variants: []air.VariantInfo{{Name: "Down", Discriminant: 0}}},
 	}}
-	if got := enumVariantName(program, program.Types[1], program.Types[1].Variants[0]); got != "direction_ard__Direction__Down" {
+	if got := enumVariantName(program, program.Types[1], program.Types[1].Variants[0]); got != "Direction_ard__Direction__Down" {
 		t.Fatalf("variant on enum with colliding type name = %q, want legacy name", got)
 	}
 	// Give the second enum a non-colliding type name but colliding variant name.
 	program.Types[2].Name = "DirectionDown"
 	program.Types[2].Variants[0].Name = ""
 	// Empty variant names keep the legacy spelling.
-	if got := enumVariantName(program, program.Types[2], program.Types[2].Variants[0]); got != "direction2_ard__DirectionDown__variant_0" {
+	if got := enumVariantName(program, program.Types[2], program.Types[2].Variants[0]); got != "Direction2_ard__DirectionDown__variant_0" {
 		t.Fatalf("empty variant = %q, want legacy fallback", got)
 	}
 	program.Types[2].Variants[0].Name = "__"
-	if got := enumVariantName(program, program.Types[2], program.Types[2].Variants[0]); got != "direction2_ard__DirectionDown__variant_0" {
+	if got := enumVariantName(program, program.Types[2], program.Types[2].Variants[0]); got != "Direction2_ard__DirectionDown__variant_0" {
 		t.Fatalf("underscore-only variant = %q, want legacy fallback", got)
 	}
 }
@@ -164,8 +164,8 @@ func TestNaturalFunctionNameFallsBackForSyntheticFunctions(t *testing.T) {
 	if got := functionName(program, program.Functions[0]); got != "module_0__script" {
 		t.Fatalf("script function = %q, want module_0__script", got)
 	}
-	if got := functionName(program, program.Functions[1]); got != "module_0__User_ToString_to_str" {
-		t.Fatalf("method helper function = %q, want module_0__User_ToString_to_str", got)
+	if got := functionName(program, program.Functions[1]); got != "Module_0__User_ToString_to_str" {
+		t.Fatalf("method helper function = %q, want Module_0__User_ToString_to_str", got)
 	}
 	if got := functionName(program, program.Functions[2]); got != "module_0__anon_func_2" {
 		t.Fatalf("closure helper function = %q, want module_0__anon_func_2", got)
@@ -221,11 +221,11 @@ func TestNaturalTypeNameFallsBackOnCrossKindCollisions(t *testing.T) {
 		{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "a.ard"},
 		{ID: 2, Kind: air.TypeEnum, Name: "User", ModulePath: "b.ard"},
 	}}
-	if got := typeName(program, program.Types[0]); got != "a_ard__User" {
-		t.Fatalf("struct colliding with enum = %q, want a_ard__User", got)
+	if got := typeName(program, program.Types[0]); got != "A_ard__User" {
+		t.Fatalf("struct colliding with enum = %q, want A_ard__User", got)
 	}
-	if got := typeName(program, program.Types[1]); got != "b_ard__User" {
-		t.Fatalf("enum colliding with struct = %q, want b_ard__User", got)
+	if got := typeName(program, program.Types[1]); got != "B_ard__User" {
+		t.Fatalf("enum colliding with struct = %q, want B_ard__User", got)
 	}
 }
 

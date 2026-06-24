@@ -3434,15 +3434,15 @@ func runGoTargetParityJSON(t *testing.T, program *air.Program) string {
 	if err != nil {
 		t.Fatalf("generate sources: %v", err)
 	}
+	trimmedSources := make(map[string][]byte, len(sources))
 	for name, source := range sources {
 		trimmed, err := stripGeneratedMain(source)
 		if err != nil {
 			t.Fatalf("strip main from %s: %v", name, err)
 		}
-		if err := os.WriteFile(filepath.Join(tempDir, name), trimmed, 0o644); err != nil {
-			t.Fatalf("write source %s: %v", name, err)
-		}
+		trimmedSources[name] = trimmed
 	}
+	writeGeneratedSourcesForTest(t, tempDir, trimmedSources)
 	rootID, err := rootFunction(program)
 	if err != nil {
 		t.Fatalf("root function: %v", err)
@@ -3550,11 +3550,7 @@ func runGoTargetSourceStdout(t *testing.T, input string) string {
 	if err != nil {
 		t.Fatalf("generate sources: %v", err)
 	}
-	for name, source := range sources {
-		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
-			t.Fatalf("write source %s: %v", name, err)
-		}
-	}
+	writeGeneratedSourcesForTest(t, tempDir, sources)
 	goMod := "module generated\n\ngo 1.26.0\n"
 	if moduleRoot, ok := compilerModuleRoot(); ok {
 		goMod += "\nrequire github.com/akonwi/ard v0.0.0\n"

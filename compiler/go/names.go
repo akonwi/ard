@@ -110,7 +110,11 @@ func legacyGlobalName(program *air.Program, global air.Global) string {
 	if name == "" {
 		name = fmt.Sprintf("global_%d", global.ID)
 	}
-	return moduleName + "__global_" + name
+	out := moduleName + "__global_" + name
+	if !global.Private {
+		out = upperFirst(out)
+	}
+	return out
 }
 
 func functionName(program *air.Program, fn air.Function) string {
@@ -151,10 +155,14 @@ func legacyFunctionName(program *air.Program, fn air.Function) string {
 			break
 		}
 	}
+	out := moduleName + "__" + suffix
 	if duplicate {
-		return fmt.Sprintf("%s__%s_%d", moduleName, suffix, fn.ID)
+		out = fmt.Sprintf("%s__%s_%d", moduleName, suffix, fn.ID)
 	}
-	return moduleName + "__" + suffix
+	if !fn.Private && fn.Receiver != air.NoType {
+		out = upperFirst(out)
+	}
+	return out
 }
 
 type topLevelNameKind int
@@ -172,7 +180,10 @@ func typeName(program *air.Program, typ air.TypeInfo) string {
 	}
 	base := typeNameBase(program, typ)
 	if typeNameCollides(program, typ, base) {
-		return fmt.Sprintf("%s_%d", base, typ.ID)
+		base = fmt.Sprintf("%s_%d", base, typ.ID)
+	}
+	if !typ.Private {
+		base = upperFirst(base)
 	}
 	return base
 }
@@ -309,8 +320,12 @@ func topLevelNaturalNameCollides(program *air.Program, selfKind topLevelNameKind
 	if program == nil {
 		return false
 	}
+	selfModule, selfHasModule := topLevelNameModule(program, selfKind, selfID)
 	for _, typ := range program.Types {
 		if selfKind == topLevelNameType && int(typ.ID) == selfID {
+			continue
+		}
+		if !sameTopLevelPackage(program, selfModule, selfHasModule, topLevelNameType, int(typ.ID)) {
 			continue
 		}
 		if naturalTypeNameEligible(typ) && naturalGoIdentifier(typ.Name, !typ.Private) == name {
@@ -319,6 +334,9 @@ func topLevelNaturalNameCollides(program *air.Program, selfKind topLevelNameKind
 	}
 	for _, trait := range program.Traits {
 		if selfKind == topLevelNameTrait && int(trait.ID) == selfID {
+			continue
+		}
+		if !sameTopLevelPackage(program, selfModule, selfHasModule, topLevelNameTrait, int(trait.ID)) {
 			continue
 		}
 		if trait.Name != "" && naturalGoIdentifier(trait.Name, !trait.Private) == name {
@@ -332,6 +350,9 @@ func topLevelNaturalNameCollides(program *air.Program, selfKind topLevelNameKind
 		if selfKind == topLevelNameFunction && int(fn.ID) == selfID {
 			continue
 		}
+		if !sameTopLevelPackage(program, selfModule, selfHasModule, topLevelNameFunction, int(fn.ID)) {
+			continue
+		}
 		if naturalFunctionNameEligible(fn) && naturalGoIdentifier(fn.Name, !fn.Private) == name {
 			return true
 		}
@@ -340,11 +361,75 @@ func topLevelNaturalNameCollides(program *air.Program, selfKind topLevelNameKind
 		if selfKind == topLevelNameGlobal && int(global.ID) == selfID {
 			continue
 		}
+		if !sameTopLevelPackage(program, selfModule, selfHasModule, topLevelNameGlobal, int(global.ID)) {
+			continue
+		}
 		if global.Name != "" && naturalGoIdentifier(global.Name, !global.Private) == name {
 			return true
 		}
 	}
 	return false
+}
+
+func sameTopLevelPackage(program *air.Program, selfModule air.ModuleID, selfHasModule bool, otherKind topLevelNameKind, otherID int) bool {
+	otherModule, otherHasModule := topLevelNameModule(program, otherKind, otherID)
+	if selfHasModule && otherHasModule && selfModule != otherModule {
+		return false
+	}
+	return true
+}
+
+func topLevelNameModule(program *air.Program, kind topLevelNameKind, id int) (air.ModuleID, bool) {
+	if program == nil {
+		return 0, false
+	}
+	switch kind {
+	case topLevelNameType:
+		for _, typ := range program.Types {
+			if int(typ.ID) != id {
+				continue
+			}
+			if typ.ModulePath != "" {
+				return moduleIDForPath(program, typ.ModulePath)
+			}
+			for _, module := range program.Modules {
+				for _, typeID := range module.Types {
+					if typeID == typ.ID {
+						return module.ID, true
+					}
+				}
+			}
+			return 0, false
+		}
+	case topLevelNameTrait:
+		for _, trait := range program.Traits {
+			if int(trait.ID) == id && trait.ModulePath != "" {
+				return moduleIDForPath(program, trait.ModulePath)
+			}
+		}
+	case topLevelNameFunction:
+		for _, fn := range program.Functions {
+			if int(fn.ID) == id {
+				return fn.Module, true
+			}
+		}
+	case topLevelNameGlobal:
+		for _, global := range program.Globals {
+			if int(global.ID) == id {
+				return global.Module, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func moduleIDForPath(program *air.Program, modulePath string) (air.ModuleID, bool) {
+	for _, module := range program.Modules {
+		if module.Path == modulePath {
+			return module.ID, true
+		}
+	}
+	return 0, false
 }
 
 func typeNameBase(program *air.Program, typ air.TypeInfo) string {
@@ -413,14 +498,15 @@ func enumVariantNameAlias(program *air.Program, typ air.TypeInfo, variant air.Va
 }
 
 func enumVariantNameCollides(program *air.Program, typ air.TypeInfo, variant air.VariantInfo, candidate string) bool {
-	if isSpecialGoTopLevelName(candidate) || topLevelActualNameCollides(program, candidate) {
+	owner, hasOwner := topLevelNameModule(program, topLevelNameType, int(typ.ID))
+	if isSpecialGoTopLevelName(candidate) || topLevelActualNameCollides(program, owner, hasOwner, candidate) {
 		return true
 	}
 	if program == nil {
 		return false
 	}
 	for _, other := range program.Types {
-		if other.Kind != air.TypeEnum {
+		if other.Kind != air.TypeEnum || !sameTopLevelPackage(program, owner, hasOwner, topLevelNameType, int(other.ID)) {
 			continue
 		}
 		for _, otherVariant := range other.Variants {
@@ -435,27 +521,39 @@ func enumVariantNameCollides(program *air.Program, typ air.TypeInfo, variant air
 	return false
 }
 
-func topLevelActualNameCollides(program *air.Program, candidate string) bool {
+func topLevelActualNameCollides(program *air.Program, owner air.ModuleID, hasOwner bool, candidate string) bool {
 	if program == nil {
 		return false
 	}
 	for _, typ := range program.Types {
+		if !sameTopLevelPackage(program, owner, hasOwner, topLevelNameType, int(typ.ID)) {
+			continue
+		}
 		if typeName(program, typ) == candidate {
 			return true
 		}
 	}
 	traitLowerer := &lowerer{program: program}
 	for _, trait := range program.Traits {
+		if !sameTopLevelPackage(program, owner, hasOwner, topLevelNameTrait, int(trait.ID)) {
+			continue
+		}
 		if traitLowerer.traitInterfaceTypeName(trait) == candidate {
 			return true
 		}
 	}
 	for _, fn := range program.Functions {
+		if !sameTopLevelPackage(program, owner, hasOwner, topLevelNameFunction, int(fn.ID)) {
+			continue
+		}
 		if functionName(program, fn) == candidate {
 			return true
 		}
 	}
 	for _, global := range program.Globals {
+		if !sameTopLevelPackage(program, owner, hasOwner, topLevelNameGlobal, int(global.ID)) {
+			continue
+		}
 		if globalName(program, global) == candidate {
 			return true
 		}
@@ -643,7 +741,7 @@ func sanitizeGoPackageIdentifier(raw string) string {
 	if name == "" || name == "_" {
 		return "module"
 	}
-	if token.Lookup(name) != token.IDENT {
+	if token.Lookup(name) != token.IDENT || name == "main" {
 		name += "_"
 	}
 	return name

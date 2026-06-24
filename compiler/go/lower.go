@@ -43,6 +43,9 @@ type lowerer struct {
 	goMethodCollisions      map[string]bool
 	emittedGoMethods        map[string]bool
 	ffiNativeTraitFallbacks map[air.TraitID]bool
+	functionModules         map[air.FunctionID]air.ModuleID
+	mutableTraitRefs        map[air.TraitID]bool
+	emittedMutableTraitRefs map[air.TraitID]bool
 	suppressMain            bool
 	includeTests            bool
 	useModulePackages       bool
@@ -59,13 +62,15 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if options.ProjectInfo != nil && options.ProjectInfo.RootPath != "" {
 		directGoResolverDir = options.ProjectInfo.RootPath
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, jsonEncodeTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, directGoResolver: checker.NewGoPackagesResolver(directGoResolverDir), directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(program), suppressMain: options.SuppressMain, includeTests: options.IncludeTests}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonParseTypes: map[air.TypeID]bool{}, jsonEncodeTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, directGoResolver: checker.NewGoPackagesResolver(directGoResolverDir), directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(program), suppressMain: options.SuppressMain, includeTests: options.IncludeTests, useModulePackages: true}
 	l.inlineClosures = l.collectInlineClosureFunctions()
 	l.goMethodCollisions = l.collectGoMethodCollisions()
 	l.emittedGoMethods = map[string]bool{}
 	l.ffiNativeTraitFallbacks = collectFFINativeTraitFallbacks(program)
+	l.functionModules = l.collectFunctionEmitModules()
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
+	mainModuleID := l.mainModuleID(rootID, hasRoot)
 	modules := make([]air.Module, 0, len(program.Modules))
 	if hasRoot {
 		rootModuleID := program.Functions[rootID].Module
@@ -88,7 +93,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 		if err != nil {
 			return nil, err
 		}
-		files[moduleFileName(program, module)] = file
+		files[l.moduleOutputFileName(module, mainModuleID)] = file
 	}
 	return files, nil
 }
@@ -226,14 +231,14 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 	defer func() { l.currentModule = previousModule }()
 	l.currentImports = map[string]string{}
 	l.importErr = nil
+	l.runtimeHelpers = map[string]bool{}
+	l.jsonParseTypes = map[air.TypeID]bool{}
+	l.jsonEncodeTypes = map[air.TypeID]bool{}
+	l.mutableTraitRefs = map[air.TraitID]bool{}
+	l.emittedMutableTraitRefs = map[air.TraitID]bool{}
 	decls := []ast.Decl{}
 	rootID, hasRoot := findRootFunction(l.program)
-	mainModuleID := air.ModuleID(0)
-	if hasRoot {
-		mainModuleID = l.program.Functions[rootID].Module
-	} else if len(l.program.Modules) > 0 {
-		mainModuleID = l.program.Modules[len(l.program.Modules)-1].ID
-	}
+	mainModuleID := l.mainModuleID(rootID, hasRoot)
 	for _, typ := range l.typesForModule(module.ID, mainModuleID) {
 		typeDecls, err := l.lowerTypeDecls(typ)
 		if err != nil {
@@ -251,7 +256,7 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 		}
 		decls = append(decls, decl)
 	}
-	functionIDs := append([]air.FunctionID(nil), module.Functions...)
+	functionIDs := l.functionsForModule(module.ID)
 	sort.Slice(functionIDs, func(i, j int) bool { return functionIDs[i] < functionIDs[j] })
 	for _, functionID := range functionIDs {
 		fn := l.program.Functions[functionID]
@@ -274,21 +279,23 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 			decls = append(decls, methodDecl)
 		}
 	}
+	mutableDecls, err := l.markedMutableTraitRefDecls()
+	if err != nil {
+		return nil, err
+	}
+	decls = append(mutableDecls, decls...)
 	if module.ID == mainModuleID {
-		if l.suppressMain {
-			decls = append(l.runtimePreludeDecls(), decls...)
-		} else if !hasRoot {
-			decls = append(l.runtimePreludeDecls(), decls...)
+		if !l.suppressMain && !hasRoot {
 			decls = append(decls, &ast.FuncDecl{Name: ast.NewIdent("main"), Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{}})
-		} else {
+		} else if !l.suppressMain {
 			mainDecl, err := l.lowerMainWrapper(rootID)
 			if err != nil {
 				return nil, err
 			}
 			decls = append(decls, mainDecl)
-			decls = append(l.runtimePreludeDecls(), decls...)
 		}
 	}
+	decls = append(l.runtimePreludeDecls(), decls...)
 	if l.importErr != nil {
 		return nil, l.importErr
 	}
@@ -310,7 +317,166 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 			decls = append([]ast.Decl{importDecl}, decls...)
 		}
 	}
-	return &ast.File{Name: ast.NewIdent(l.packageName), Decls: decls}, nil
+	return &ast.File{Name: ast.NewIdent(l.modulePackageName(module.ID, mainModuleID)), Decls: decls}, nil
+}
+
+func (l *lowerer) collectFunctionEmitModules() map[air.FunctionID]air.ModuleID {
+	modules := map[air.FunctionID]air.ModuleID{}
+	for _, fn := range l.program.Functions {
+		modules[fn.ID] = fn.Module
+	}
+	for _, fn := range l.program.Functions {
+		owners := map[air.ModuleID]bool{}
+		for _, param := range fn.Signature.Params {
+			l.collectExternalTypeOwnerModules(param.Type, fn.Module, owners)
+		}
+		l.collectExternalTypeOwnerModules(fn.Signature.Return, fn.Module, owners)
+		for _, capture := range fn.Captures {
+			l.collectExternalTypeOwnerModules(capture.Type, fn.Module, owners)
+		}
+		for _, local := range fn.Locals {
+			l.collectExternalTypeOwnerModules(local.Type, fn.Module, owners)
+		}
+		candidateOwners := make([]air.ModuleID, 0, len(owners))
+		for owner := range owners {
+			if l.moduleImports(owner, fn.Module, map[air.ModuleID]bool{}) {
+				candidateOwners = append(candidateOwners, owner)
+			}
+		}
+		if len(candidateOwners) == 1 {
+			modules[fn.ID] = candidateOwners[0]
+		}
+	}
+	changed := true
+	for changed {
+		changed = false
+		for _, fn := range l.program.Functions {
+			emitModule := modules[fn.ID]
+			if emitModule == fn.Module {
+				continue
+			}
+			for _, ref := range functionRefsInBlock(fn.Body) {
+				if !validFunctionID(l.program, ref) {
+					continue
+				}
+				target := l.program.Functions[ref]
+				if target.Module != fn.Module || modules[target.ID] == emitModule {
+					continue
+				}
+				modules[target.ID] = emitModule
+				changed = true
+			}
+		}
+	}
+	return modules
+}
+
+func (l *lowerer) moduleImports(moduleID air.ModuleID, target air.ModuleID, seen map[air.ModuleID]bool) bool {
+	if moduleID == target {
+		return true
+	}
+	if seen[moduleID] || moduleID < 0 || int(moduleID) >= len(l.program.Modules) {
+		return false
+	}
+	seen[moduleID] = true
+	for _, imported := range l.program.Modules[moduleID].Imports {
+		if imported == target || l.moduleImports(imported, target, seen) {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *lowerer) collectExternalTypeOwnerModules(typeID air.TypeID, self air.ModuleID, out map[air.ModuleID]bool) {
+	if !validTypeID(l.program, typeID) {
+		return
+	}
+	info := l.program.Types[typeID-1]
+	switch info.Kind {
+	case air.TypeList, air.TypeMaybe, air.TypeFiber:
+		l.collectExternalTypeOwnerModules(info.Elem, self, out)
+	case air.TypeMap:
+		l.collectExternalTypeOwnerModules(info.Key, self, out)
+		l.collectExternalTypeOwnerModules(info.Value, self, out)
+	case air.TypeResult:
+		l.collectExternalTypeOwnerModules(info.Value, self, out)
+		l.collectExternalTypeOwnerModules(info.Error, self, out)
+	case air.TypeFunction:
+		for _, param := range info.Params {
+			l.collectExternalTypeOwnerModules(param, self, out)
+		}
+		l.collectExternalTypeOwnerModules(info.Return, self, out)
+	case air.TypeStruct, air.TypeEnum, air.TypeUnion:
+		if owner, ok := l.ownerModuleForType(typeID); ok && owner != self {
+			out[owner] = true
+		}
+	case air.TypeTraitObject:
+		if owner, ok := l.ownerModuleForTrait(info.Trait); ok && owner != self {
+			out[owner] = true
+		}
+	}
+}
+
+func functionRefsInBlock(block air.Block) []air.FunctionID {
+	refs := []air.FunctionID{}
+	walkBlockExprs(block, func(expr air.Expr) {
+		switch expr.Kind {
+		case air.ExprCall, air.ExprFunctionRef, air.ExprMakeClosure, air.ExprSpawnFiber:
+			refs = append(refs, expr.Function)
+		}
+	})
+	return refs
+}
+
+func (l *lowerer) functionsForModule(moduleID air.ModuleID) []air.FunctionID {
+	out := []air.FunctionID{}
+	for _, fn := range l.program.Functions {
+		if l.functionModule(fn) == moduleID {
+			out = append(out, fn.ID)
+		}
+	}
+	return out
+}
+
+func (l *lowerer) functionModule(fn air.Function) air.ModuleID {
+	if l.functionModules != nil {
+		if module, ok := l.functionModules[fn.ID]; ok {
+			return module
+		}
+	}
+	return fn.Module
+}
+
+func (l *lowerer) mainModuleID(rootID air.FunctionID, hasRoot bool) air.ModuleID {
+	if hasRoot {
+		return l.program.Functions[rootID].Module
+	}
+	if len(l.program.Modules) > 0 {
+		return l.program.Modules[len(l.program.Modules)-1].ID
+	}
+	return air.ModuleID(-1)
+}
+
+func (l *lowerer) modulePackageName(moduleID air.ModuleID, mainModuleID air.ModuleID) string {
+	if l.useModulePackages && moduleID != mainModuleID {
+		return modulePackageName(l.program, moduleID)
+	}
+	return l.packageName
+}
+
+func (l *lowerer) moduleOutputFileName(module air.Module, mainModuleID air.ModuleID) string {
+	if l.useModulePackages && module.ID != mainModuleID {
+		return filepath.Join(modulePackageDir(l.program, module.ID), modulePackageFileName(l.program, module.ID))
+	}
+	return moduleFileName(l.program, module)
+}
+
+func modulePackageFileName(program *air.Program, module air.ModuleID) string {
+	name := modulePackageName(program, module)
+	if strings.HasSuffix(name, "_test") {
+		name += "_ard"
+	}
+	return name + ".go"
 }
 
 func (l *lowerer) typesForModule(moduleID air.ModuleID, mainModuleID air.ModuleID) []air.TypeInfo {
@@ -339,6 +505,16 @@ func (l *lowerer) typesForModule(moduleID air.ModuleID, mainModuleID air.ModuleI
 				}
 				continue
 			}
+		}
+		if owner, ok := l.ownerModuleForType(typ.ID); ok {
+			if owner == moduleID {
+				out = append(out, typ)
+			}
+			continue
+		}
+		if strings.TrimSpace(typ.ExternBinding) != "" {
+			out = append(out, typ)
+			continue
 		}
 		if moduleID == mainModuleID {
 			out = append(out, typ)
@@ -489,39 +665,6 @@ func isPredeclaredGoTypeName(name string) bool {
 
 func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	parts := []string{"package main\n"}
-	if l.runtimeHelpers["fiber"] {
-		parts = append(parts, `
-	type ardFiberState[T any] struct {
-		ch    chan T
-		value T
-		done  bool
-	}
-
-	type ardFiber[T any] struct {
-		state *ardFiberState[T]
-	}
-
-	func ardSpawnFiber[T any](do func() T) ardFiber[T] {
-		state := &ardFiberState[T]{ch: make(chan T, 1)}
-		go func() {
-			state.ch <- do()
-		}()
-		return ardFiber[T]{state: state}
-	}
-
-	func ardJoinFiber[T any](fiber ardFiber[T]) {
-		if !fiber.state.done {
-			fiber.state.value = <-fiber.state.ch
-			fiber.state.done = true
-		}
-	}
-
-	func ardGetFiber[T any](fiber ardFiber[T]) T {
-		ardJoinFiber(fiber)
-		return fiber.state.value
-	}
-`)
-	}
 	if l.runtimeHelpers["sorted_int_keys"] {
 		slicesAlias := l.registerImport("slices", "slices")
 		parts = append(parts, fmt.Sprintf(`
@@ -767,6 +910,31 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 	}
 }
 
+func (l *lowerer) markedMutableTraitRefDecls() ([]ast.Decl, error) {
+	traitIDs := make([]int, 0, len(l.mutableTraitRefs))
+	for traitID := range l.mutableTraitRefs {
+		if l.emittedMutableTraitRefs[traitID] {
+			continue
+		}
+		traitIDs = append(traitIDs, int(traitID))
+	}
+	sort.Ints(traitIDs)
+	decls := make([]ast.Decl, 0, len(traitIDs))
+	for _, raw := range traitIDs {
+		traitID := air.TraitID(raw)
+		if !validTraitID(l.program, traitID) {
+			continue
+		}
+		decl, err := l.lowerMutableTraitRefDecl(l.program.Traits[traitID])
+		if err != nil {
+			return nil, err
+		}
+		decls = append(decls, decl)
+		l.emittedMutableTraitRefs[traitID] = true
+	}
+	return decls, nil
+}
+
 func (l *lowerer) lowerTraitObjectDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 	if !validTraitID(l.program, typ.Trait) {
 		return nil, fmt.Errorf("invalid trait id %d", typ.Trait)
@@ -785,6 +953,9 @@ func (l *lowerer) lowerTraitObjectDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 		return nil, err
 	}
 	decls = append(decls, mutableDecl)
+	if l.emittedMutableTraitRefs != nil {
+		l.emittedMutableTraitRefs[trait.ID] = true
+	}
 	return decls, nil
 }
 
@@ -994,10 +1165,11 @@ func (l *lowerer) enumVariantExpr(typ air.TypeInfo, variant air.VariantInfo) ast
 
 func (l *lowerer) functionExpr(fn air.Function) ast.Expr {
 	name := functionName(l.program, fn)
-	if !l.useModulePackages || fn.Module == l.currentModule {
+	module := l.functionModule(fn)
+	if !l.useModulePackages || module == l.currentModule {
 		return ast.NewIdent(name)
 	}
-	return l.moduleQualified(fn.Module, name)
+	return l.moduleQualified(module, name)
 }
 
 func (l *lowerer) globalExpr(global air.Global) ast.Expr {
@@ -1349,14 +1521,11 @@ func generatedStructReceiverMethodName(name string) bool {
 }
 
 func goMethodName(raw string) (string, bool) {
-	name := sanitizeName(raw)
-	if name == "" || name == "_" {
+	if len(goIdentifierParts(raw)) == 0 {
 		return "", false
 	}
-	if token.Lookup(name).IsKeyword() {
-		name += "_"
-	}
-	if !token.IsIdentifier(name) {
+	name := naturalGoIdentifier(raw, true)
+	if name == "" || name == "_" || !token.IsIdentifier(name) {
 		return "", false
 	}
 	return name, true
@@ -2841,6 +3010,9 @@ func (l *lowerer) mutableTraitRefType(typeID air.TypeID) (ast.Expr, error) {
 	if !validTraitID(l.program, traitID) {
 		return nil, fmt.Errorf("invalid trait id %d", traitID)
 	}
+	if l.mutableTraitRefs != nil {
+		l.mutableTraitRefs[traitID] = true
+	}
 	return ast.NewIdent(mutableTraitRefTypeName(l.program.Traits[traitID])), nil
 }
 
@@ -2921,12 +3093,11 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		}
 		return &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Maybe"), Index: elem}, nil
 	case air.TypeFiber:
-		l.markRuntimeHelper("fiber")
 		elem, err := l.goType(info.Elem)
 		if err != nil {
 			return nil, err
 		}
-		return &ast.IndexExpr{X: ast.NewIdent("ardFiber"), Index: elem}, nil
+		return &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Fiber"), Index: elem}, nil
 	case air.TypeFunction:
 		params := make([]*ast.Field, 0, len(info.Params))
 		for i, paramTypeID := range info.Params {
@@ -4012,7 +4183,7 @@ func (l *lowerer) importAliasCollidesWithModuleTopLevel(alias string, moduleID a
 			return true
 		}
 	}
-	for _, functionID := range l.program.Modules[moduleID].Functions {
+	for _, functionID := range l.functionsForModule(moduleID) {
 		if validFunctionID(l.program, functionID) && functionName(l.program, l.program.Functions[functionID]) == alias {
 			return true
 		}
@@ -5105,7 +5276,6 @@ func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, er
 }
 
 func (l *lowerer) lowerSpawnFiber(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	l.markRuntimeHelper("fiber")
 	var targetExpr ast.Expr
 	stmts := []ast.Stmt{}
 	if expr.Target != nil {
@@ -5144,11 +5314,10 @@ func (l *lowerer) lowerSpawnFiber(fn air.Function, expr air.Expr) (loweredExpr, 
 			targetExpr = &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: mustTypeExpr(l, targetFn.Signature.Return)}}}}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: l.functionExpr(targetFn)}}}}}}
 		}
 	}
-	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: ast.NewIdent("ardSpawnFiber"), Index: mustTypeExpr(l, l.program.Types[expr.Type-1].Elem)}, Args: []ast.Expr{targetExpr}}}, nil
+	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "SpawnFiber"), Index: mustTypeExpr(l, l.program.Types[expr.Type-1].Elem)}, Args: []ast.Expr{targetExpr}}}, nil
 }
 
 func (l *lowerer) lowerFiberGet(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	l.markRuntimeHelper("fiber")
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("fiber get missing target")
 	}
@@ -5156,11 +5325,10 @@ func (l *lowerer) lowerFiberGet(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: ast.NewIdent("ardGetFiber"), Index: mustTypeExpr(l, expr.Type)}, Args: []ast.Expr{target.expr}}}, nil
+	return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "GetFiber"), Index: mustTypeExpr(l, expr.Type)}, Args: []ast.Expr{target.expr}}}, nil
 }
 
 func (l *lowerer) lowerFiberJoin(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	l.markRuntimeHelper("fiber")
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("fiber join missing target")
 	}
@@ -5169,7 +5337,7 @@ func (l *lowerer) lowerFiberJoin(fn air.Function, expr air.Expr) (loweredExpr, e
 		return loweredExpr{}, err
 	}
 	fiberType := l.program.Types[expr.Target.Type-1]
-	return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: ast.NewIdent("ardJoinFiber"), Index: mustTypeExpr(l, fiberType.Elem)}, Args: []ast.Expr{target.expr}}}, nil
+	return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "JoinFiber"), Index: mustTypeExpr(l, fiberType.Elem)}, Args: []ast.Expr{target.expr}}}, nil
 }
 
 func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -5980,6 +6148,9 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 	switchVarExpr := ast.NewIdent(switchVar)
 	cases := []ast.Stmt{}
 	if validTraitID(l.program, expr.Trait) && expr.Method >= 0 && expr.Method < len(l.program.Traits[expr.Trait].Methods) {
+		if l.mutableTraitRefs != nil {
+			l.mutableTraitRefs[expr.Trait] = true
+		}
 		trait := l.program.Traits[expr.Trait]
 		method := trait.Methods[expr.Method]
 		for _, caseType := range []ast.Expr{ast.NewIdent(mutableTraitRefTypeName(trait)), &ast.StarExpr{X: ast.NewIdent(mutableTraitRefTypeName(trait))}} {
@@ -6042,11 +6213,14 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 			}
 			args = append(args, argExpr)
 		}
-		call := &ast.CallExpr{Fun: l.functionExpr(methodFn), Args: args}
+		callResult := ast.Expr(&ast.CallExpr{Fun: l.functionExpr(methodFn), Args: args})
+		if l.isBuiltinToStringTraitCall(expr, impl.ForType) && len(args) == 1 {
+			callResult = l.toStringExpr(impl.ForType, args[0])
+		}
 		if isVoid {
-			body = append(body, &ast.ExprStmt{X: call})
+			body = append(body, &ast.ExprStmt{X: callResult})
 		} else {
-			body = append(body, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}})
+			body = append(body, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{callResult}})
 		}
 		body = append(body, writeback...)
 		if traitObjectWritebackAllowed(fn, *expr.Target) && len(methodFn.Signature.Params) > 0 {
@@ -6070,6 +6244,25 @@ func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr
 		return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 	}
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
+}
+
+func (l *lowerer) isBuiltinToStringTraitCall(expr air.Expr, typeID air.TypeID) bool {
+	if expr.Trait < 0 || int(expr.Trait) >= len(l.program.Traits) || expr.Method < 0 {
+		return false
+	}
+	trait := l.program.Traits[expr.Trait]
+	if expr.Method >= len(trait.Methods) || trait.Name != "ToString" || trait.Methods[expr.Method].Name != "to_str" {
+		return false
+	}
+	if !validTypeID(l.program, typeID) {
+		return false
+	}
+	switch l.program.Types[typeID-1].Kind {
+	case air.TypeInt, air.TypeFloat, air.TypeBool, air.TypeByte, air.TypeRune, air.TypeStr:
+		return true
+	default:
+		return false
+	}
 }
 
 func traitObjectWritebackAllowed(fn air.Function, expr air.Expr) bool {
@@ -7596,7 +7789,7 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
 	}
 	fmt.Fprintf(b, "}\n")
-	if info.Kind == air.TypeStruct && !l.isStdlibFFIBackedType(info) {
+	if info.Kind == air.TypeStruct && !l.isStdlibFFIBackedType(info) && l.canDefineMethodsOnType(info) {
 		fmt.Fprintf(b, "\nfunc (value %s) MarshalJSONTo(enc *jsontext.Encoder) error {\n\treturn %s(enc, value)\n}\n", typeName, helper)
 	}
 	fmt.Fprintf(b, "\nfunc %s(value %s) (string, error) {\n\tvar buf bytes.Buffer\n\tenc := jsontext.NewEncoder(&buf)\n\tif err := %s(enc, value); err != nil { return \"\", err }\n\treturn string(bytes.TrimSuffix(buf.Bytes(), []byte(\"\\n\"))), nil\n}\n", l.jsonEncodeTopHelperName(typeID), typeName, helper)
@@ -7706,9 +7899,17 @@ func (l *lowerer) writeJSONDecodeTextHelper(b *strings.Builder, typeID air.TypeI
 		fmt.Fprintf(b, "\treturn out, ardJSONErr(path, %q, nil)\n", info.Name)
 	}
 	fmt.Fprintf(b, "}\n")
-	if info.Kind == air.TypeStruct {
+	if info.Kind == air.TypeStruct && l.canDefineMethodsOnType(info) {
 		fmt.Fprintf(b, "\nfunc (out *%s) UnmarshalJSONFrom(dec *jsontext.Decoder) error {\n\tparsed, message := %s(dec, \"\")\n\tif message != \"\" { return fmt.Errorf(\"%%s\", message) }\n\t*out = parsed\n\treturn nil\n}\n", typeName, helper)
 	}
+}
+
+func (l *lowerer) canDefineMethodsOnType(info air.TypeInfo) bool {
+	if !l.useModulePackages {
+		return true
+	}
+	owner, ok := l.ownerModuleForType(info.ID)
+	return !ok || owner == l.currentModule
 }
 
 // writeJSONDecodePrimitiveListLoop emits specialized loops for primitive JSON arrays.
