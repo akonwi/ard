@@ -229,6 +229,27 @@ func TestNaturalTypeNameFallsBackOnCrossKindCollisions(t *testing.T) {
 	}
 }
 
+func TestUnionNamesUseExportedNaturalNamesWithAliases(t *testing.T) {
+	typ := air.TypeInfo{Kind: air.TypeUnion, Name: "value", Members: []air.UnionMember{
+		{Type: 1, Tag: 0, Name: "FooBar"},
+		{Type: 2, Tag: 1, Name: "foo_bar"},
+		{Type: 3, Tag: 2, Name: "ArdTag"},
+	}}
+	program := &air.Program{Types: []air.TypeInfo{typ}}
+	if got := typeName(program, typ); got != "Value" {
+		t.Fatalf("union type name = %q, want Value", got)
+	}
+	if got := unionMemberFieldName(typ, typ.Members[0]); got != "FooBar" {
+		t.Fatalf("first union member field = %q, want FooBar", got)
+	}
+	if got := unionMemberFieldName(typ, typ.Members[1]); got != "FooBar1" {
+		t.Fatalf("aliased union member field = %q, want FooBar1", got)
+	}
+	if got := unionTagFieldName(typ); got != "ArdTag1" {
+		t.Fatalf("union tag field = %q, want ArdTag1", got)
+	}
+}
+
 func TestGoFieldNameUsesNaturalRulesForStdlibStructs(t *testing.T) {
 	l := &lowerer{}
 	publicStdlib := air.TypeInfo{Kind: air.TypeStruct, Name: "Error", ModulePath: "ard/decode"}

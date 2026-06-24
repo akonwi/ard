@@ -1765,6 +1765,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 	case *checker.Union:
 		info.Kind = TypeUnion
+		info.Private = typ.Private
 		info.Members = make([]UnionMember, len(typ.Types))
 		for i, member := range typ.Types {
 			memberID, err := l.internType(member)

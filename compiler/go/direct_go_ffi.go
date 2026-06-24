@@ -541,7 +541,7 @@ func (l *lowerer) directGoEnumValidationCall(typeID air.TypeID, typ air.TypeInfo
 			continue
 		}
 		seen[variant.Discriminant] = true
-		cases = append(cases, &ast.CaseClause{List: []ast.Expr{ast.NewIdent(enumVariantName(l.program, typ, variant))}, Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{valueIdent}}}})
+		cases = append(cases, &ast.CaseClause{List: []ast.Expr{l.enumVariantExpr(typ, variant)}, Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{valueIdent}}}})
 	}
 	message := fmt.Sprintf("Ard direct Go FFI: Go returned invalid %s", typ.Name)
 	cases = append(cases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{stringLit(message)}}}}})

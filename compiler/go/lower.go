@@ -716,13 +716,13 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 		}
 		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
 	case air.TypeUnion:
-		fields := []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("tag")}, Type: ast.NewIdent("uint32")}}
+		fields := []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(unionTagFieldName(typ))}, Type: ast.NewIdent("uint32")}}
 		for _, member := range typ.Members {
 			memberType, err := l.goType(member.Type)
 			if err != nil {
 				return nil, err
 			}
-			fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(unionMemberFieldName(member))}, Type: memberType})
+			fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(unionMemberFieldName(typ, member))}, Type: memberType})
 		}
 		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
 	case air.TypeTraitObject:
@@ -970,6 +970,22 @@ func (l *lowerer) namedTypeExpr(info air.TypeInfo) ast.Expr {
 		return ast.NewIdent(name)
 	}
 	owner, ok := l.ownerModuleForType(info.ID)
+	if !ok || owner == l.currentModule {
+		return ast.NewIdent(name)
+	}
+	return l.moduleQualified(owner, name)
+}
+
+func (l *lowerer) compositeTypeExpr(info air.TypeInfo) ast.Expr {
+	return l.namedTypeExpr(info)
+}
+
+func (l *lowerer) enumVariantExpr(typ air.TypeInfo, variant air.VariantInfo) ast.Expr {
+	name := enumVariantName(l.program, typ, variant)
+	if !l.useModulePackages {
+		return ast.NewIdent(name)
+	}
+	owner, ok := l.ownerModuleForType(typ.ID)
 	if !ok || owner == l.currentModule {
 		return ast.NewIdent(name)
 	}
@@ -1311,11 +1327,11 @@ func (l *lowerer) goMethodNameUnavailableOnType(typeID air.TypeID, methodName st
 			}
 		}
 	case air.TypeUnion:
-		if methodName == "tag" {
+		if methodName == unionTagFieldName(info) {
 			return true
 		}
 		for _, member := range info.Members {
-			if unionMemberFieldName(member) == methodName {
+			if unionMemberFieldName(info, member) == methodName {
 				return true
 			}
 		}
@@ -2108,7 +2124,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if typ.Kind != air.TypeEnum || expr.Variant < 0 || expr.Variant >= len(typ.Variants) {
 			return loweredExpr{}, fmt.Errorf("invalid enum variant %d for type %s", expr.Variant, typ.Name)
 		}
-		return loweredExpr{expr: ast.NewIdent(enumVariantName(l.program, typ, typ.Variants[expr.Variant]))}, nil
+		return loweredExpr{expr: l.enumVariantExpr(typ, typ.Variants[expr.Variant])}, nil
 	case air.ExprMakeStruct:
 		if !validTypeID(l.program, expr.Type) {
 			return loweredExpr{}, fmt.Errorf("invalid struct type id %d", expr.Type)
@@ -2157,7 +2173,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			}
 			elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(typ, field.Name)), Value: fieldValue})
 		}
-		return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, typ)), Elts: elts}}, nil
+		return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: l.compositeTypeExpr(typ), Elts: elts}}, nil
 	case air.ExprGetField:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("get field missing target")
@@ -2626,15 +2642,15 @@ func (l *lowerer) castEnumIntComparisonOperands(left *loweredExpr, leftTypeID ai
 	}
 
 	if leftInfo.Kind == air.TypeEnum && rightInfo.Kind == air.TypeInt {
-		right.expr = castGoExprToType(right.expr, typeName(l.program, leftInfo))
+		right.expr = castGoExprToType(right.expr, l.namedTypeExpr(leftInfo))
 	}
 	if leftInfo.Kind == air.TypeInt && rightInfo.Kind == air.TypeEnum {
-		left.expr = castGoExprToType(left.expr, typeName(l.program, rightInfo))
+		left.expr = castGoExprToType(left.expr, l.namedTypeExpr(rightInfo))
 	}
 }
 
-func castGoExprToType(expr ast.Expr, typ string) ast.Expr {
-	return &ast.CallExpr{Fun: ast.NewIdent(typ), Args: []ast.Expr{expr}}
+func castGoExprToType(expr ast.Expr, typ ast.Expr) ast.Expr {
+	return &ast.CallExpr{Fun: typ, Args: []ast.Expr{expr}}
 }
 
 func (l *lowerer) typeInfo(id air.TypeID) (air.TypeInfo, bool) {
@@ -4049,7 +4065,7 @@ func (l *lowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (loweredExpr, e
 	memberType := air.NoType
 	for _, member := range unionType.Members {
 		if member.Tag == expr.Tag {
-			fieldName = unionMemberFieldName(member)
+			fieldName = unionMemberFieldName(unionType, member)
 			memberType = member.Type
 			break
 		}
@@ -4072,8 +4088,8 @@ func (l *lowerer) lowerUnionWrap(fn air.Function, expr air.Expr) (loweredExpr, e
 		target = l.materializeVoidValue(target)
 		fieldValue = target.expr
 	}
-	return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, unionType)), Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("tag"), Value: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", expr.Tag)}},
+	return loweredExpr{stmts: target.stmts, expr: &ast.CompositeLit{Type: l.compositeTypeExpr(unionType), Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent(unionTagFieldName(unionType)), Value: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", expr.Tag)}},
 		&ast.KeyValueExpr{Key: ast.NewIdent(fieldName), Value: fieldValue},
 	}}}, nil
 }
@@ -4108,7 +4124,7 @@ func (l *lowerer) lowerMatchUnion(fn air.Function, expr air.Expr) (loweredExpr, 
 		fieldName := ""
 		for _, member := range unionType.Members {
 			if member.Tag == unionCase.Tag {
-				fieldName = unionMemberFieldName(member)
+				fieldName = unionMemberFieldName(unionType, member)
 				break
 			}
 		}
@@ -4132,7 +4148,7 @@ func (l *lowerer) lowerMatchUnion(fn air.Function, expr air.Expr) (loweredExpr, 
 		}
 		cases = append(cases, &ast.CaseClause{Body: body})
 	}
-	stmts = append(stmts, &ast.SwitchStmt{Tag: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("tag")}, Body: &ast.BlockStmt{List: cases}})
+	stmts = append(stmts, &ast.SwitchStmt{Tag: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(unionTagFieldName(unionType))}, Body: &ast.BlockStmt{List: cases}})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
 
@@ -6096,7 +6112,7 @@ func (l *lowerer) convertStdlibError(typeID air.TypeID, expr ast.Expr) (ast.Expr
 	for _, field := range info.Fields {
 		elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(info, field.Name)), Value: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent(exportedFieldName(field.Name))}})
 	}
-	return &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, info)), Elts: elts}, nil
+	return &ast.CompositeLit{Type: l.compositeTypeExpr(info), Elts: elts}, nil
 }
 
 func (l *lowerer) wrapMaybeNativeTraitExternCall(maybeTypeID air.TypeID, call ast.Expr, stmts []ast.Stmt) (loweredExpr, bool, error) {
@@ -6242,7 +6258,7 @@ func (l *lowerer) lowerUnionArgToAny(expr ast.Expr, typeID air.TypeID) (loweredE
 	}
 	cases := make([]ast.Stmt, 0, len(info.Members))
 	for _, member := range info.Members {
-		fieldName := unionMemberFieldName(member)
+		fieldName := unionMemberFieldName(info, member)
 		valueExpr := ast.Expr(&ast.SelectorExpr{X: wrappedExpr, Sel: ast.NewIdent(fieldName)})
 		if validTypeID(l.program, member.Type) && l.program.Types[member.Type-1].Kind == air.TypeVoid {
 			valueExpr = ast.NewIdent("nil")
@@ -6252,7 +6268,7 @@ func (l *lowerer) lowerUnionArgToAny(expr ast.Expr, typeID air.TypeID) (loweredE
 			Body: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}}},
 		})
 	}
-	stmts = append(stmts, &ast.SwitchStmt{Tag: &ast.SelectorExpr{X: wrappedExpr, Sel: ast.NewIdent("tag")}, Body: &ast.BlockStmt{List: cases}})
+	stmts = append(stmts, &ast.SwitchStmt{Tag: &ast.SelectorExpr{X: wrappedExpr, Sel: ast.NewIdent(unionTagFieldName(info))}, Body: &ast.BlockStmt{List: cases}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
 }
 
@@ -6276,7 +6292,7 @@ func (l *lowerer) lowerUnionSliceArgToAny(expr ast.Expr, typeID air.TypeID) (low
 		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(outTemp)}, Type: &ast.ArrayType{Elt: ast.NewIdent("any")}}}}},
 		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(outTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("make"), Args: []ast.Expr{&ast.ArrayType{Elt: ast.NewIdent("any")}, &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{expr}}}}}},
 		&ast.RangeStmt{Key: ast.NewIdent(indexTemp), Value: ast.NewIdent(valueTemp), Tok: token.DEFINE, X: expr, Body: &ast.BlockStmt{List: []ast.Stmt{
-			&ast.SwitchStmt{Tag: &ast.SelectorExpr{X: ast.NewIdent(valueTemp), Sel: ast.NewIdent("tag")}, Body: &ast.BlockStmt{List: unionSliceCaseClauses(l.program, elemInfo, outTemp, indexTemp, valueTemp)}},
+			&ast.SwitchStmt{Tag: &ast.SelectorExpr{X: ast.NewIdent(valueTemp), Sel: ast.NewIdent(unionTagFieldName(elemInfo))}, Body: &ast.BlockStmt{List: unionSliceCaseClauses(l.program, elemInfo, outTemp, indexTemp, valueTemp)}},
 		}}},
 	}
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(outTemp)}, nil
@@ -6285,7 +6301,7 @@ func (l *lowerer) lowerUnionSliceArgToAny(expr ast.Expr, typeID air.TypeID) (low
 func unionSliceCaseClauses(program *air.Program, unionInfo air.TypeInfo, outTemp string, indexTemp string, valueTemp string) []ast.Stmt {
 	cases := make([]ast.Stmt, 0, len(unionInfo.Members))
 	for _, member := range unionInfo.Members {
-		valueExpr := ast.Expr(&ast.SelectorExpr{X: ast.NewIdent(valueTemp), Sel: ast.NewIdent(unionMemberFieldName(member))})
+		valueExpr := ast.Expr(&ast.SelectorExpr{X: ast.NewIdent(valueTemp), Sel: ast.NewIdent(unionMemberFieldName(unionInfo, member))})
 		if validTypeID(program, member.Type) && program.Types[member.Type-1].Kind == air.TypeVoid {
 			valueExpr = ast.NewIdent("nil")
 		}
@@ -6463,7 +6479,7 @@ func (l *lowerer) lowerChannelNew(args []ast.Expr, stmts []ast.Stmt, returnTypeI
 			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(channelTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{makeCall(l.maybeValueExpr(sizeExpr))}},
 		}}})
 	}
-	result := &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, info)), Elts: []ast.Expr{
+	result := &ast.CompositeLit{Type: l.compositeTypeExpr(info), Elts: []ast.Expr{
 		&ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(info, rawField.Name)), Value: ast.NewIdent(channelTemp)},
 	}}
 	return loweredExpr{stmts: stmts, expr: result}, nil
@@ -6663,7 +6679,7 @@ func (l *lowerer) lowerDirectExternCall(ext air.Extern, bindingExpr func(string,
 		return loweredExpr{stmts: stmts, expr: call}, nil
 	case air.TypeStruct:
 		if rawField, ok := l.channelStructRawField(returnType); ok {
-			wrapped := &ast.CompositeLit{Type: ast.NewIdent(typeName(l.program, returnType)), Elts: []ast.Expr{
+			wrapped := &ast.CompositeLit{Type: l.compositeTypeExpr(returnType), Elts: []ast.Expr{
 				&ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(returnType, rawField.Name)), Value: call},
 			}}
 			return loweredExpr{stmts: stmts, expr: wrapped}, nil
@@ -7568,9 +7584,9 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 	case air.TypeEnum:
 		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.Int(int64(value)))\n")
 	case air.TypeUnion:
-		fmt.Fprintf(b, "\tswitch value.tag {\n")
+		fmt.Fprintf(b, "\tswitch value.%s {\n", unionTagFieldName(info))
 		for _, member := range info.Members {
-			fieldName := unionMemberFieldName(member)
+			fieldName := unionMemberFieldName(info, member)
 			fmt.Fprintf(b, "\tcase %d:\n\t\treturn %s(enc, value.%s)\n", member.Tag, l.jsonEncodeHelperName(member.Type), fieldName)
 		}
 		fmt.Fprintf(b, "\t}\n\treturn enc.WriteToken(jsontext.Null)\n")

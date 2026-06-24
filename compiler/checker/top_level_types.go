@@ -52,7 +52,7 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 				}
 				c.topLevelTypeAliases[name] = s
 			} else {
-				c.scope.add(name, &Union{Name: s.Name.Name, ModulePath: c.typeOwnerPath()}, false)
+				c.scope.add(name, &Union{Name: s.Name.Name, ModulePath: c.typeOwnerPath(), Private: s.Private}, false)
 			}
 		}
 	}

@@ -155,6 +155,7 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			Name:       typ.Name,
 			ModulePath: typ.ModulePath,
 			Types:      newTypes,
+			Private:    typ.Private,
 		}
 	case *StructDef:
 		fieldsChanged := false
@@ -1345,6 +1346,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			unionType.Name = s.Name.Name
 			unionType.ModulePath = c.typeOwnerPath()
 			unionType.Types = types
+			unionType.Private = s.Private
 			return &Statement{Stmt: unionType}
 		}
 	case *parse.VariableDeclaration:
@@ -6623,7 +6625,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		for i, member := range typ.Types {
 			types[i] = substituteType(member, typeMap)
 		}
-		return &Union{Name: typ.Name, ModulePath: typ.ModulePath, Types: types}
+		return &Union{Name: typ.Name, ModulePath: typ.ModulePath, Types: types, Private: typ.Private}
 	case *StructDef:
 		var out Type = typ
 		for genericName, concrete := range typeMap {

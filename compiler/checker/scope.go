@@ -599,6 +599,7 @@ func copyTypeWithTypeVarMapSeen(t Type, typeVarMap map[string]*TypeVar, seenStru
 			Name:       typ.Name,
 			ModulePath: typ.ModulePath,
 			Types:      newTypes,
+			Private:    typ.Private,
 		}
 	case *StructDef:
 		return copyStructWithTypeVarMapSeen(typ, typeVarMap, seenStructs)

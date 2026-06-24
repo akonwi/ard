@@ -1425,6 +1425,7 @@ type Union struct {
 	Name       string
 	ModulePath string
 	Types      []Type
+	Private    bool
 }
 
 func (u Union) NonProducing() {}

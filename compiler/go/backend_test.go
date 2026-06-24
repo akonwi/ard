@@ -197,6 +197,143 @@ func TestNamedTypeExprKeepsSinglePackageModeUnqualified(t *testing.T) {
 	}
 }
 
+func TestPrivateUnionLowersToUnexportedNaturalTypeName(t *testing.T) {
+	program := lowerSource(t, `
+		private type internal_value = Int | Str
+
+		private fn make_value() internal_value {
+			1
+		}
+	`)
+	for _, typ := range program.Types {
+		if typ.Kind != air.TypeUnion || typ.Name != "internal_value" {
+			continue
+		}
+		if !typ.Private {
+			t.Fatal("private union did not preserve privacy in AIR")
+		}
+		if got := typeName(program, typ); got != "internalValue" {
+			t.Fatalf("private union type name = %q, want internalValue", got)
+		}
+		return
+	}
+	t.Fatal("lowered program missing private union type")
+}
+
+func TestEnumVariantExprQualifiesCrossModuleInModulePackageMode(t *testing.T) {
+	program := &air.Program{
+		Modules: []air.Module{
+			{ID: 0, Path: "models/direction.ard", Types: []air.TypeID{1}},
+			{ID: 1, Path: "consumer.ard"},
+		},
+		Types: []air.TypeInfo{{ID: 1, Kind: air.TypeEnum, Name: "Direction", ModulePath: "models/direction.ard", Variants: []air.VariantInfo{{Name: "Down", Discriminant: 0}}}},
+	}
+	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}, useModulePackages: true}
+	if got := astExprName(l.enumVariantExpr(program.Types[0], program.Types[0].Variants[0])); got != "direction.DirectionDown" {
+		t.Fatalf("cross-module enum variant expr = %q, want direction.DirectionDown", got)
+	}
+	if got := l.currentImports["direction"]; got != "generated/models/direction" {
+		t.Fatalf("registered import = %q, want generated/models/direction", got)
+	}
+}
+
+func TestLowerExprQualifiesCrossModuleCompositeLiteralsAndEnumCastsInModulePackageMode(t *testing.T) {
+	program := &air.Program{
+		Modules: []air.Module{
+			{ID: 0, Path: "models/user.ard", Types: []air.TypeID{1, 2}},
+			{ID: 1, Path: "consumer.ard"},
+		},
+		Types: []air.TypeInfo{
+			{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "models/user.ard"},
+			{ID: 2, Kind: air.TypeEnum, Name: "Direction", ModulePath: "models/user.ard", Variants: []air.VariantInfo{{Name: "Down", Discriminant: 0}}},
+			{ID: 3, Kind: air.TypeInt, Name: "Int"},
+		},
+	}
+	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}, useModulePackages: true}
+	makeStruct, err := l.lowerExpr(air.Function{Module: 1}, air.Expr{Kind: air.ExprMakeStruct, Type: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lit, ok := makeStruct.expr.(*ast.CompositeLit)
+	if !ok {
+		t.Fatalf("make struct lowered to %T, want *ast.CompositeLit", makeStruct.expr)
+	}
+	if got := astExprName(lit.Type); got != "user.User" {
+		t.Fatalf("cross-module composite literal type = %q, want user.User", got)
+	}
+	enumVariant, err := l.lowerExpr(air.Function{Module: 1}, air.Expr{Kind: air.ExprEnumVariant, Type: 2, Variant: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := astExprName(enumVariant.expr); got != "user.DirectionDown" {
+		t.Fatalf("cross-module enum variant = %q, want user.DirectionDown", got)
+	}
+	left := loweredExpr{expr: ast.NewIdent("value")}
+	right := loweredExpr{expr: &ast.BasicLit{Kind: token.INT, Value: "1"}}
+	l.castEnumIntComparisonOperands(&left, 2, &right, 3)
+	call, ok := right.expr.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("enum/int comparison cast lowered to %T, want *ast.CallExpr", right.expr)
+	}
+	if got := astExprName(call.Fun); got != "user.Direction" {
+		t.Fatalf("cross-module enum/int cast type = %q, want user.Direction", got)
+	}
+	if got := l.currentImports["user"]; got != "generated/models/user" {
+		t.Fatalf("registered import = %q, want generated/models/user", got)
+	}
+}
+
+func TestLowerExprQualifiesCrossModuleUnionWrapAndMatchInModulePackageMode(t *testing.T) {
+	program := &air.Program{
+		Modules: []air.Module{
+			{ID: 0, Path: "models/value.ard", Types: []air.TypeID{3}},
+			{ID: 1, Path: "consumer.ard"},
+		},
+		Types: []air.TypeInfo{
+			{ID: 1, Kind: air.TypeInt, Name: "Int"},
+			{ID: 2, Kind: air.TypeStr, Name: "Str"},
+			{ID: 3, Kind: air.TypeUnion, Name: "Value", ModulePath: "models/value.ard", Members: []air.UnionMember{{Type: 1, Tag: 0, Name: "Int"}, {Type: 2, Tag: 1, Name: "Str"}}},
+		},
+	}
+	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}, useModulePackages: true, declaredLocals: map[air.LocalID]bool{}}
+	wrap, err := l.lowerExpr(air.Function{Module: 1}, air.Expr{Kind: air.ExprUnionWrap, Type: 3, Tag: 0, Target: &air.Expr{Kind: air.ExprConstInt, Type: 1, Int: 7}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lit, ok := wrap.expr.(*ast.CompositeLit)
+	if !ok {
+		t.Fatalf("union wrap lowered to %T, want *ast.CompositeLit", wrap.expr)
+	}
+	if got := astExprName(lit.Type); got != "value.Value" {
+		t.Fatalf("cross-module union wrap type = %q, want value.Value", got)
+	}
+	if !compositeLitHasKey(lit, "ArdTag") || !compositeLitHasKey(lit, "Int") {
+		t.Fatalf("union wrap literal missing exported keys ArdTag/Int: %#v", lit.Elts)
+	}
+
+	fn := air.Function{Module: 1, Locals: []air.Local{{ID: 0, Name: "input", Type: 3}, {ID: 1, Name: "value", Type: 1}}}
+	match, err := l.lowerExpr(fn, air.Expr{
+		Kind:   air.ExprMatchUnion,
+		Type:   1,
+		Target: &air.Expr{Kind: air.ExprLoadLocal, Type: 3, Local: 0},
+		UnionCases: []air.UnionMatchCase{{
+			Tag:   0,
+			Local: 1,
+			Body:  air.Block{Result: &air.Expr{Kind: air.ExprLoadLocal, Type: 1, Local: 1}},
+		}},
+		CatchAll: air.Block{Result: &air.Expr{Kind: air.ExprConstInt, Type: 1, Int: 0}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stmtsHaveSelector(match.stmts, "ArdTag") || !stmtsHaveSelector(match.stmts, "Int") {
+		t.Fatalf("union match did not use exported selectors ArdTag/Int: %#v", match.stmts)
+	}
+	if got := l.currentImports["value"]; got != "generated/models/value" {
+		t.Fatalf("registered import = %q, want generated/models/value", got)
+	}
+}
+
 func TestLowerProgramAliasesJSONHelperImportsAfterDirectGoAliasConflict(t *testing.T) {
 	program := lowerSource(t, `
 		use go:strings as fmt
@@ -513,6 +650,37 @@ func astCallName(call *ast.CallExpr) string {
 		return astExprName(fun.X)
 	}
 	return ""
+}
+
+func compositeLitHasKey(lit *ast.CompositeLit, key string) bool {
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		if ident, ok := kv.Key.(*ast.Ident); ok && ident.Name == key {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtsHaveSelector(stmts []ast.Stmt, selectorName string) bool {
+	for _, stmt := range stmts {
+		found := false
+		ast.Inspect(stmt, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if ok && selector.Sel.Name == selectorName {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
 }
 
 func astExprName(expr ast.Expr) string {

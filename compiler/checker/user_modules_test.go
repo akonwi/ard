@@ -472,6 +472,76 @@ fn main() Int {
 	}
 }
 
+func TestUserModulePrivateUnionAccessError(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	utilsContent := `private type Secret = Int | Str
+
+type Public = Int | Str
+`
+	if err := os.WriteFile(filepath.Join(tempDir, "utils.ard"), []byte(utilsContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicMain := `use test_project/utils
+
+fn main() utils::Public {
+  1
+}
+`
+	publicResult := parse.Parse([]byte(publicMain), "main.ard")
+	if len(publicResult.Errors) > 0 {
+		t.Fatal(publicResult.Errors[0].Message)
+	}
+	publicChecker := checker.New("main.ard", publicResult.Program, resolver)
+	publicChecker.Check()
+	if publicChecker.HasErrors() {
+		t.Fatalf("unexpected public union diagnostics: %v", publicChecker.Diagnostics())
+	}
+	utilsModule, ok := publicChecker.Module().Program().Imports["test_project/utils"]
+	if !ok {
+		t.Fatal("expected test_project/utils import")
+	}
+	userModule, ok := utilsModule.(*checker.UserModule)
+	if !ok {
+		t.Fatal("expected utils module to be a UserModule")
+	}
+	if secret := userModule.Get("Secret"); !secret.IsZero() {
+		t.Fatalf("private union Secret was exported: %#v", secret)
+	}
+	if public := userModule.Get("Public"); public.IsZero() {
+		t.Fatal("public union Public was not exported")
+	}
+
+	privateMain := `use test_project/utils
+
+fn main() utils::Secret {
+  1
+}
+`
+	result := parse.Parse([]byte(privateMain), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	c := checker.New("main.ard", result.Program, resolver)
+	c.Check()
+	diagnostics := c.Diagnostics()
+	if len(diagnostics) == 0 {
+		t.Fatal("expected error when accessing private union")
+	}
+	for _, diag := range diagnostics {
+		if strings.Contains(diag.Message, "utils::Secret") {
+			return
+		}
+	}
+	t.Fatalf("expected private union diagnostic for utils::Secret, got: %v", diagnostics)
+}
+
 func TestUserModuleCaching(t *testing.T) {
 	// Create temporary directory structure
 	tempDir, err := os.MkdirTemp("", "ard_caching_")

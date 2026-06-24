@@ -178,7 +178,7 @@ func typeName(program *air.Program, typ air.TypeInfo) string {
 }
 
 func naturalTypeName(program *air.Program, typ air.TypeInfo) (string, bool) {
-	if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum {
+	if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum && typ.Kind != air.TypeUnion {
 		return "", false
 	}
 	if typ.Name == "" || strings.ContainsAny(typ.Name, "<>[]?:!") || typ.ExternBinding != "" {
@@ -195,7 +195,7 @@ func naturalTypeName(program *air.Program, typ air.TypeInfo) (string, bool) {
 }
 
 func naturalTypeNameEligible(typ air.TypeInfo) bool {
-	if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum {
+	if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum && typ.Kind != air.TypeUnion {
 		return false
 	}
 	return typ.Name != "" && !strings.ContainsAny(typ.Name, "<>[]?:!") && typ.ExternBinding == ""
@@ -487,12 +487,60 @@ func legacyEnumVariantName(program *air.Program, typ air.TypeInfo, variant air.V
 	return typeName(program, typ) + "__" + name
 }
 
-func unionMemberFieldName(member air.UnionMember) string {
-	name := sanitizeName(member.Name)
-	if name == "" {
-		return fmt.Sprintf("member_%d", member.Tag)
+func unionTagFieldName(typ air.TypeInfo) string {
+	base := "ArdTag"
+	candidate := base
+	for i := 1; unionTagFieldNameCollides(typ, candidate); i++ {
+		candidate = fmt.Sprintf("%s%d", base, i)
 	}
-	return name
+	return candidate
+}
+
+func unionTagFieldNameCollides(typ air.TypeInfo, candidate string) bool {
+	for _, member := range typ.Members {
+		if unionMemberFieldName(typ, member) == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func unionMemberFieldName(typ air.TypeInfo, member air.UnionMember) string {
+	base := unionMemberFieldNameBase(member)
+	candidate := base
+	for i := 1; unionMemberFieldNameCollidesEarlier(typ, member, candidate); i++ {
+		candidate = fmt.Sprintf("%s%d", base, i)
+	}
+	return candidate
+}
+
+func unionMemberFieldNameBase(member air.UnionMember) string {
+	if len(goIdentifierParts(member.Name)) == 0 {
+		return fmt.Sprintf("Member%d", member.Tag)
+	}
+	return naturalGoIdentifier(member.Name, true)
+}
+
+func unionMemberFieldNameCollidesEarlier(typ air.TypeInfo, member air.UnionMember, candidate string) bool {
+	self := unionMemberIndex(typ, member)
+	for i, other := range typ.Members {
+		if i >= self {
+			break
+		}
+		if unionMemberFieldName(typ, other) == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func unionMemberIndex(typ air.TypeInfo, member air.UnionMember) int {
+	for i, candidate := range typ.Members {
+		if candidate.Type == member.Type && candidate.Tag == member.Tag && candidate.Name == member.Name {
+			return i
+		}
+	}
+	return len(typ.Members)
 }
 
 func localName(fn air.Function, local air.LocalID) string {
