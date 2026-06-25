@@ -159,7 +159,7 @@ type Host struct {
 	DecodeRune           func(data any) Result[rune, Error]
 	DecodeString         func(data any) Result[string, Error]
 	DynamicToList        func(data any) ([]any, error)
-	DynamicToMap         func(data any) (map[any]any, error)
+	DynamicToMap         func(data any) (map[string]any, error)
 	ExtractField         func(data any, name string) (any, error)
 	FSExists             func(path string) bool
 	FSIsDir              func(path string) bool

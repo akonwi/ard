@@ -181,7 +181,7 @@ fn at(index: Int, with: Decoder<$T>) fn(Dynamic) $T![Error] {
   }
 }
 
-extern fn to_map(data: Dynamic) [Dynamic: Dynamic]!Str = "DynamicToMap"
+extern fn to_map(data: Dynamic) [Str: Dynamic]!Str = "DynamicToMap"
 
 fn map(key: Decoder<$Key>, value: Decoder<$Value>) Decoder<[$Key: $Value]> {
   fn(data: Dynamic) [$Key: $Value]![Error] {
@@ -198,7 +198,7 @@ fn map(key: Decoder<$Key>, value: Decoder<$Value>) Decoder<[$Key: $Value]> {
     mut out: [$Key: $Value] = [:]
 
     for k, v in raw {
-      match key(k) {
+      match key(k.to_dyn()) {
         ok(decoded_key) => {
           match value(v) {
             ok(decoded_val) => out.set(decoded_key, decoded_val),

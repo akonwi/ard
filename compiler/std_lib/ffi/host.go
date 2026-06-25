@@ -708,19 +708,15 @@ func JsonEncode(value any) (string, error) {
 	return string(encoded), nil
 }
 
-func DynamicToMap(data any) (map[any]any, error) {
+func DynamicToMap(data any) (map[string]any, error) {
 	if data == nil {
 		return nil, fmt.Errorf("Void")
 	}
 	if values, ok := data.(map[string]any); ok {
-		out := make(map[any]any, len(values))
-		for key, value := range values {
-			out[key] = value
-		}
-		return out, nil
+		return values, nil
 	}
 	if values, ok := data.(map[any]any); ok {
-		out := make(map[any]any, len(values))
+		out := make(map[string]any, len(values))
 		for key, value := range values {
 			keyString, ok := key.(string)
 			if !ok {
