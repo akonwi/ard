@@ -117,6 +117,10 @@ const (
 	TypeFunction
 	TypeFiber
 	TypeTraitObject
+	// TypeParam is a reference to a generic type parameter inside a generic
+	// definition (e.g. the `T` in `struct Partition<$T>`). It only appears in
+	// the fields/signature of a generic definition, never in a concrete value.
+	TypeParam
 )
 
 type TypeInfo struct {
@@ -142,6 +146,16 @@ type TypeInfo struct {
 	ParamMutable []bool
 	Return       TypeID
 	Trait        TraitID
+
+	// Generic representation (ADR 0031). A generic definition sets TypeParams
+	// (the parameter names) and references them via TypeParam-kind fields. A
+	// concrete instantiation keeps its concrete Fields for AIR typing but also
+	// records Generic (the definition's TypeID) and GenericArgs (the type
+	// arguments), so the backend can emit it as `Def[args...]`.
+	TypeParams  []string
+	ParamIndex  int
+	Generic     TypeID
+	GenericArgs []TypeID
 }
 
 type FieldInfo struct {

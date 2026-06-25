@@ -820,6 +820,12 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 }
 
 func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
+	// A concrete instantiation of a generic type is emitted at use sites as
+	// `Def[args...]`; only the generic definition gets a type declaration.
+	// TypeParam references never produce a declaration of their own.
+	if typ.Generic != air.NoType || typ.Kind == air.TypeParam {
+		return nil, nil
+	}
 	switch typ.Kind {
 	case air.TypeStruct:
 		if l.isStdlibFFIBackedType(typ) {
@@ -849,7 +855,7 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 				Tag:   &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("`json:%q`", field.Name)},
 			})
 		}
-		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
+		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), TypeParams: l.goTypeParamList(typ), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
 	case air.TypeUnion:
 		fields := []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(unionTagFieldName(typ))}, Type: ast.NewIdent("uint32")}}
 		for _, member := range typ.Members {
@@ -1154,7 +1160,38 @@ func (l *lowerer) traitInterfaceTypeExpr(trait air.Trait) ast.Expr {
 	return l.moduleQualified(owner, name)
 }
 
+// goTypeParamList renders the Go type-parameter list `[T any, ...]` for a
+// generic definition, or nil for a non-generic type.
+func (l *lowerer) goTypeParamList(typ air.TypeInfo) *ast.FieldList {
+	if len(typ.TypeParams) == 0 {
+		return nil
+	}
+	names := make([]*ast.Ident, len(typ.TypeParams))
+	for i, p := range typ.TypeParams {
+		names[i] = ast.NewIdent(p)
+	}
+	return &ast.FieldList{List: []*ast.Field{{Names: names, Type: ast.NewIdent("any")}}}
+}
+
 func (l *lowerer) namedTypeExpr(info air.TypeInfo) ast.Expr {
+	// A generic type parameter lowers to its Go identifier inside the generic
+	// definition's scope (ADR 0031).
+	if info.Kind == air.TypeParam {
+		return ast.NewIdent(info.Name)
+	}
+	// A generic instantiation lowers to `Def[args...]`.
+	if info.Generic != air.NoType && validTypeID(l.program, info.Generic) {
+		defInfo := l.program.Types[info.Generic-1]
+		base := l.namedTypeExpr(defInfo)
+		args := make([]ast.Expr, len(info.GenericArgs))
+		for i, argID := range info.GenericArgs {
+			args[i] = mustTypeExpr(l, argID)
+		}
+		if len(args) == 1 {
+			return &ast.IndexExpr{X: base, Index: args[0]}
+		}
+		return &ast.IndexListExpr{X: base, Indices: args}
+	}
 	name := typeName(l.program, info)
 	if !l.useModulePackages {
 		return ast.NewIdent(name)
@@ -1339,6 +1376,14 @@ func (l *lowerer) lowerGoMethodWrapper(fn air.Function) (*ast.FuncDecl, bool, er
 	receiverTypeID := fn.Receiver
 	if receiverTypeID == air.NoType {
 		receiverTypeID = fn.Signature.Params[0].Type
+	}
+	// A Go method on a concrete instantiation of a generic type is not valid Go
+	// (the receiver `Foo[int]` would bind a fresh type parameter named `int`).
+	// Generic struct methods would need generic method receivers, which is the
+	// generic-functions phase; for now skip the wrapper. Ard method dispatch uses
+	// the standalone function, so behavior is unaffected.
+	if validTypeID(l.program, receiverTypeID) && l.program.Types[receiverTypeID-1].Generic != air.NoType {
+		return nil, false, nil
 	}
 	receiverType, err := l.goType(receiverTypeID)
 	if err != nil {
@@ -3064,6 +3109,8 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		return &ast.MapType{Key: key, Value: value}, nil
+	case air.TypeParam:
+		return ast.NewIdent(info.Name), nil
 	case air.TypeStruct, air.TypeEnum:
 		if l.isStdlibFFIBackedType(info) {
 			return l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", info.Name), nil

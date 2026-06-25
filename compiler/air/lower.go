@@ -56,14 +56,16 @@ type lowerer struct {
 	externs      map[string]ExternID
 	globals      map[string]GlobalID
 
-	loweringModules  map[string]bool
-	loweredModules   map[string]bool
-	loweringFuncs    map[FunctionID]bool
-	loweredFuncs     map[FunctionID]bool
-	loweringGlobals  map[GlobalID]bool
-	loweredGlobals   map[GlobalID]bool
-	functionTypeVars map[FunctionID]map[string]TypeID
-	includeTests     bool
+	loweringModules   map[string]bool
+	loweredModules    map[string]bool
+	loweringFuncs     map[FunctionID]bool
+	loweredFuncs      map[FunctionID]bool
+	loweringGlobals   map[GlobalID]bool
+	loweredGlobals    map[GlobalID]bool
+	functionTypeVars  map[FunctionID]map[string]TypeID
+	genericStructDefs map[string]TypeID
+	defParams         map[string]int
+	includeTests      bool
 }
 
 type functionLowerer struct {
@@ -91,14 +93,15 @@ func newLowerer(options LowerOptions) *lowerer {
 		externs:      map[string]ExternID{},
 		globals:      map[string]GlobalID{},
 
-		loweringModules:  map[string]bool{},
-		loweredModules:   map[string]bool{},
-		loweringFuncs:    map[FunctionID]bool{},
-		loweredFuncs:     map[FunctionID]bool{},
-		loweringGlobals:  map[GlobalID]bool{},
-		loweredGlobals:   map[GlobalID]bool{},
-		functionTypeVars: map[FunctionID]map[string]TypeID{},
-		includeTests:     options.IncludeTests,
+		loweringModules:   map[string]bool{},
+		loweredModules:    map[string]bool{},
+		loweringFuncs:     map[FunctionID]bool{},
+		loweredFuncs:      map[FunctionID]bool{},
+		loweringGlobals:   map[GlobalID]bool{},
+		loweredGlobals:    map[GlobalID]bool{},
+		functionTypeVars:  map[FunctionID]map[string]TypeID{},
+		genericStructDefs: map[string]TypeID{},
+		includeTests:      options.IncludeTests,
 	}
 	l.mustIntern(checker.Void)
 	l.mustIntern(checker.Int)
@@ -201,6 +204,12 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 		stmt := prog.Statements[i]
 		switch node := stmt.Stmt.(type) {
 		case *checker.StructDef:
+			if len(node.GenericParams) > 0 {
+				if _, err := l.internGenericStructDef(node); err != nil {
+					return err
+				}
+				continue
+			}
 			if typeHasUnresolvedTypeVar(node) {
 				continue
 			}
@@ -1622,12 +1631,100 @@ func signatureForCallWithInterner(call *checker.FunctionCall, intern func(checke
 	return Signature{Params: params, Return: returnType}, nil
 }
 
+func genericStructDefKey(modulePath, name string) string {
+	return "genericdef:" + modulePath + ":" + name
+}
+
+func goifyTypeParamName(name string) string {
+	name = strings.TrimPrefix(name, "$")
+	if name == "" {
+		return "T"
+	}
+	return name
+}
+
+func (l *lowerer) internTypeParam(name string, idx int) (TypeID, error) {
+	key := "typeparam:" + name
+	if id, ok := l.typeByKey[key]; ok {
+		return id, nil
+	}
+	id := TypeID(len(l.program.Types) + 1)
+	l.typeByKey[key] = id
+	l.program.Types = append(l.program.Types, TypeInfo{ID: id, Kind: TypeParam, Name: goifyTypeParamName(name), ParamIndex: idx})
+	return id, nil
+}
+
+// internGenericStructDef interns the generic definition of a struct (fields
+// reference TypeParam; TypeParams names the parameters) and registers it with
+// its declaring module so the backend emits and qualifies it (ADR 0031).
+func (l *lowerer) internGenericStructDef(typ *checker.StructDef) (TypeID, error) {
+	key := genericStructDefKey(typ.ModulePath, typ.Name)
+	if id, ok := l.genericStructDefs[key]; ok {
+		return id, nil
+	}
+	id := TypeID(len(l.program.Types) + 1)
+	idx := len(l.program.Types)
+	l.program.Types = append(l.program.Types, TypeInfo{ID: id, Name: typ.Name})
+	l.genericStructDefs[key] = id
+	goParams := make([]string, len(typ.GenericParams))
+	params := map[string]int{}
+	for i, p := range typ.GenericParams {
+		params[p] = i
+		goParams[i] = goifyTypeParamName(p)
+	}
+	info := TypeInfo{ID: id, Kind: TypeStruct, Name: typ.Name, ModulePath: typ.ModulePath, Private: typ.Private, TypeParams: goParams}
+	prev := l.defParams
+	l.defParams = params
+	fieldNames := sortedFieldNames(typ.Fields)
+	info.Fields = make([]FieldInfo, len(fieldNames))
+	for i, name := range fieldNames {
+		ft := typ.Fields[name]
+		mut := false
+		if ref, ok := ft.(*checker.MutableRef); ok {
+			ft = ref.Of()
+			mut = true
+		}
+		ftid, err := l.internType(ft)
+		if err != nil {
+			l.defParams = prev
+			return NoType, err
+		}
+		info.Fields[i] = FieldInfo{Name: name, Type: ftid, Index: i, Mutable: mut}
+	}
+	l.defParams = prev
+	l.program.Types[idx] = info
+	if modID, ok := l.moduleByPath[typ.ModulePath]; ok {
+		l.program.Modules[modID].Types = appendUniqueType(l.program.Modules[modID].Types, id)
+	}
+	return id, nil
+}
+
+// lookupGenericStructDef finds the generic definition of a struct from the
+// checker module scope (its fields still reference the type variables).
+func (l *lowerer) lookupGenericStructDef(modulePath, name string) *checker.StructDef {
+	mod, ok := l.moduleByName[modulePath]
+	if !ok {
+		return nil
+	}
+	if sd, ok := mod.Get(name).Type.(*checker.StructDef); ok && len(sd.GenericParams) > 0 {
+		return sd
+	}
+	return nil
+}
+
 func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	if t == nil {
 		return NoType, fmt.Errorf("cannot intern nil type")
 	}
-	if tv, ok := t.(*checker.TypeVar); ok && tv.Actual() != nil {
-		return l.internType(tv.Actual())
+	if tv, ok := t.(*checker.TypeVar); ok {
+		if l.defParams != nil && tv.Actual() == nil {
+			if idx, ok := l.defParams[tv.Name()]; ok {
+				return l.internTypeParam(tv.Name(), idx)
+			}
+		}
+		if tv.Actual() != nil {
+			return l.internType(tv.Actual())
+		}
 	}
 	if ref, ok := t.(*checker.MutableRef); ok {
 		if binding, ok := directGoPointerExternBinding(ref.Of()); ok {
@@ -1636,6 +1733,9 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		return l.internType(ref.Of())
 	}
 	key := airTypeKey(t)
+	if l.defParams != nil {
+		key = "gdef:" + key
+	}
 	name := airTypeName(t)
 	if id, ok := l.typeByKey[key]; ok {
 		return id, nil
@@ -1718,6 +1818,32 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 				return NoType, err
 			}
 			info.Fields[i] = FieldInfo{Name: name, Type: fieldType, Index: i, Mutable: fieldMutable}
+		}
+		// Tag concrete instantiations of a generic struct (ADR 0031). The
+		// generic definition is interned lazily from the checker module scope,
+		// since the declaring module's type loop may not have run.
+		if len(typ.GenericParams) > 0 && l.defParams == nil {
+			defID, ok := l.genericStructDefs[genericStructDefKey(typ.ModulePath, typ.Name)]
+			if !ok {
+				if genDef := l.lookupGenericStructDef(typ.ModulePath, typ.Name); genDef != nil {
+					interned, err := l.internGenericStructDef(genDef)
+					if err != nil {
+						return NoType, err
+					}
+					defID, ok = interned, true
+				}
+			}
+			if ok {
+				info.Generic = defID
+				info.GenericArgs = make([]TypeID, 0, len(typ.TypeArgs))
+				for _, arg := range typ.TypeArgs {
+					argID, err := l.internType(arg)
+					if err != nil {
+						return NoType, err
+					}
+					info.GenericArgs = append(info.GenericArgs, argID)
+				}
+			}
 		}
 	case *checker.Enum:
 		info.Kind = TypeEnum

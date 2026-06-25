@@ -6616,3 +6616,35 @@ func lowerSourceWithCheckOptions(t *testing.T, input string, options checker.Che
 	}
 	return program
 }
+
+func TestLowerGenericStructEmitsGoGeneric(t *testing.T) {
+	program := lowerSource(t, `struct Box {
+  value: [$T]
+}
+
+fn wrap(items: [$T]) Box<$T> { Box{value: items} }
+
+fn main() Int {
+  let b = wrap([1, 2, 3])
+  b.value.size()
+}`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	// The generic definition is one Go generic type `type Box[T any]`.
+	if !astFilesContain(files, func(node ast.Node) bool {
+		spec, ok := node.(*ast.TypeSpec)
+		return ok && spec.Name.Name == "Box" && spec.TypeParams != nil && len(spec.TypeParams.List) == 1
+	}) {
+		t.Fatal("generated AST missing generic type def Box[T any]")
+	}
+	// The instantiation is referenced as Box[int].
+	if !astFilesContain(files, func(node ast.Node) bool {
+		idx, ok := node.(*ast.IndexExpr)
+		if !ok {
+			return false
+		}
+		base, ok := idx.X.(*ast.Ident)
+		return ok && base.Name == "Box"
+	}) {
+		t.Fatal("generated AST missing Box[int] instantiation")
+	}
+}
