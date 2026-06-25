@@ -944,6 +944,24 @@ func TestIntMath(t *testing.T) {
 func TestEqualityComparisons(t *testing.T) {
 	run(t, []test{
 		{
+			name: "nullable primitive equality is allowed",
+			input: strings.Join([]string{
+				`use ard/maybe`,
+				`maybe::some(1) == maybe::none()`,
+			}, "\n"),
+		},
+		{
+			name: "nullable list equality is rejected",
+			input: strings.Join([]string{
+				`use ard/maybe`,
+				`let a: [Int] = [1]`,
+				`maybe::some(a) == maybe::some(a)`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Invalid: [Int]? == [Int]?"},
+			},
+		},
+		{
 			name: "Mismatched Maybe equality reports an error",
 			input: strings.Join([]string{
 				`use ard/maybe`,

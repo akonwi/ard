@@ -713,6 +713,21 @@ func (c *Checker) validateMapKeyType(key Type, loc parse.Location) {
 	c.addError(fmt.Sprintf("Invalid map key type %s: map keys must be comparable (primitives, enums, or structs)", formatTypeForDisplay(key)), loc)
 }
 
+// isComparableValueType reports whether a type can be compared with == / != per
+// ADR 0031: only primitives and enums (and, via the caller, their nullable
+// forms). There is no structural equality over lists, maps, structs, unions, or
+// Dynamic.
+func isComparableValueType(t Type) bool {
+	if t == nil {
+		return false
+	}
+	if t.equal(Int) || t.equal(Float) || t.equal(Str) || t.equal(Bool) || t.equal(Byte) || t.equal(Rune) {
+		return true
+	}
+	_, isEnum := t.(*Enum)
+	return isEnum
+}
+
 func isValidMapKeyType(t Type) bool {
 	switch ty := t.(type) {
 	case *TypeVar:
@@ -4536,6 +4551,17 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 							c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
 							return nil
 						}
+						// Equality is only supported on nullable primitives. The
+						// inner type (the non-Void side when one is `none`) must be a
+						// comparable value type.
+						inner := leftInner
+						if inner == Void {
+							inner = rightInner
+						}
+						if inner != Void && !isComparableValueType(inner) {
+							c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
+							return nil
+						}
 						if s.Operator == parse.NotEqual {
 							return &Inequality{left, right}
 						}
@@ -4548,17 +4574,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					// Check if types are allowed for equality (use equal() not pointer equality)
-					isAllowedType := func(t Type) bool {
-						// Primitives are allowed for equality
-						if t.equal(Int) || t.equal(Float) || t.equal(Str) || t.equal(Bool) || t.equal(Byte) || t.equal(Rune) {
-							return true
-						}
-						// Enums are allowed (they are just integers with semantic meaning)
-						_, isEnum := t.(*Enum)
-						return isEnum
-					}
-					if !isAllowedType(left.Type()) || !isAllowedType(right.Type()) {
+					if !isComparableValueType(left.Type()) || !isComparableValueType(right.Type()) {
 						c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
 						return nil
 					}

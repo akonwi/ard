@@ -3059,14 +3059,12 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			name: "json empty list decodes as empty list",
 			input: `
 				use ard/json
-				use ard/maybe
 
 				struct Payload { items: [Int] }
 
 				fn main() Bool {
 					let parsed = json::parse<Payload>("\{\"items\":[]\}").expect("parse")
-					let empty: [Int] = []
-					maybe::some(parsed.items) == maybe::some(empty)
+					parsed.items.size() == 0
 				}
 			`,
 		},
