@@ -855,7 +855,11 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 			if field.Mutable {
 				fieldType = &ast.StarExpr{X: fieldType}
 			}
-			fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(l.goFieldName(typ, field.Name))}, Type: fieldType})
+			fields = append(fields, &ast.Field{
+				Names: []*ast.Ident{ast.NewIdent(l.goFieldName(typ, field.Name))},
+				Type:  fieldType,
+				Tag:   &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("`json:%q`", field.Name)},
+			})
 		}
 		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
 	case air.TypeUnion:
@@ -6121,7 +6125,10 @@ func exportedFieldName(name string) string {
 }
 
 func (l *lowerer) goFieldName(typ air.TypeInfo, fieldName string) string {
-	return naturalGoIdentifier(fieldName, !typ.Private)
+	// Struct fields are always exported so every struct is serializable through
+	// encoding/json regardless of the struct's visibility (ADR 0031). The JSON
+	// wire name is pinned to the Ard field name via a struct tag.
+	return naturalGoIdentifier(fieldName, true)
 }
 
 func (l *lowerer) convertStdlibError(typeID air.TypeID, expr ast.Expr) (ast.Expr, error) {

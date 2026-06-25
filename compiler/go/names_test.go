@@ -250,15 +250,16 @@ func TestUnionNamesUseExportedNaturalNamesWithAliases(t *testing.T) {
 	}
 }
 
-func TestGoFieldNameUsesNaturalRulesForStdlibStructs(t *testing.T) {
+func TestGoFieldNamesAreAlwaysExported(t *testing.T) {
 	l := &lowerer{}
-	publicStdlib := air.TypeInfo{Kind: air.TypeStruct, Name: "Error", ModulePath: "ard/decode"}
-	if got := l.goFieldName(publicStdlib, "expected_value"); got != "ExpectedValue" {
-		t.Fatalf("public stdlib field = %q, want ExpectedValue", got)
+	publicStruct := air.TypeInfo{Kind: air.TypeStruct, Name: "Error", ModulePath: "ard/decode"}
+	if got := l.goFieldName(publicStruct, "expected_value"); got != "ExpectedValue" {
+		t.Fatalf("public field = %q, want ExpectedValue", got)
 	}
-	privateStdlib := air.TypeInfo{Kind: air.TypeStruct, Name: "internal", ModulePath: "ard/decode", Private: true}
-	if got := l.goFieldName(privateStdlib, "secret_key"); got != "secretKey" {
-		t.Fatalf("private stdlib field = %q, want secretKey", got)
+	// Fields are always exported so every struct is serializable, even private ones.
+	privateStruct := air.TypeInfo{Kind: air.TypeStruct, Name: "internal", ModulePath: "ard/decode", Private: true}
+	if got := l.goFieldName(privateStruct, "secret_key"); got != "SecretKey" {
+		t.Fatalf("private struct field = %q, want SecretKey (always exported)", got)
 	}
 }
 

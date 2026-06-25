@@ -6509,7 +6509,7 @@ fn main() Str? { lookup_env("PATH") }`)
 	}
 }
 
-func TestLowerStructFieldsUseNaturalVisibilityNames(t *testing.T) {
+func TestLowerStructFieldsAreAlwaysExportedWithJSONTags(t *testing.T) {
 	program := lowerSource(t, `struct User {
   first_name: Str
   type: Int
@@ -6527,9 +6527,38 @@ fn main() internal_config { internal_config{secret_key: "s"} }`)
 			t.Fatalf("generated public User missing exported field %s", field)
 		}
 	}
-	if !astFilesHaveStructField(files, "internalConfig", "secretKey") {
-		t.Fatal("generated private internal_config missing unexported natural field secretKey")
+	// Fields are always exported, even on private structs, so the struct is
+	// serializable; the wire name is pinned via a json tag to the Ard name.
+	if !astFilesHaveStructField(files, "internalConfig", "SecretKey") {
+		t.Fatal("generated private internal_config missing exported field SecretKey")
 	}
+	if !astFilesHaveStructFieldTag(files, "User", "FirstName", "`json:\"first_name\"`") {
+		t.Fatal("generated User.FirstName missing json tag pinned to the Ard field name")
+	}
+	if !astFilesHaveStructFieldTag(files, "internalConfig", "SecretKey", "`json:\"secret_key\"`") {
+		t.Fatal("generated internal_config.SecretKey missing json tag pinned to the Ard field name")
+	}
+}
+
+func astFilesHaveStructFieldTag(files map[string]*ast.File, typeName string, fieldName string, tag string) bool {
+	return astFilesContain(files, func(node ast.Node) bool {
+		typeSpec, ok := node.(*ast.TypeSpec)
+		if !ok || typeSpec.Name.Name != typeName {
+			return false
+		}
+		structType, ok := typeSpec.Type.(*ast.StructType)
+		if !ok || structType.Fields == nil {
+			return false
+		}
+		for _, field := range structType.Fields.List {
+			for _, name := range field.Names {
+				if name.Name == fieldName {
+					return field.Tag != nil && field.Tag.Value == tag
+				}
+			}
+		}
+		return false
+	})
 }
 
 func astFilesHaveStructField(files map[string]*ast.File, typeName string, fieldName string) bool {
