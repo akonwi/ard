@@ -590,22 +590,9 @@ func (l *lowerer) declareAndLowerFunction(module ModuleID, def *checker.Function
 	return id, nil
 }
 
-func (l *lowerer) declareAndLowerFunctionCall(module ModuleID, def *checker.FunctionDef, call *checker.FunctionCall) (FunctionID, error) {
-	signature, err := l.signatureForCall(call)
-	if err != nil {
-		return NoFunction, err
-	}
-	id, err := l.declareFunctionSpecializationWithSignature(module, def, signature)
-	if err != nil {
-		return NoFunction, err
-	}
-	if err := l.lowerFunctionByID(id, def); err != nil {
-		return NoFunction, err
-	}
-	return id, nil
-}
-
 func (fl *functionLowerer) declareAndLowerFunctionCall(module ModuleID, def *checker.FunctionDef, call *checker.FunctionCall) (FunctionID, error) {
+	// Generic functions are lowered once as a Go generic definition (ADR 0031,
+	// Phase 2) rather than monomorphized per call.
 	if len(def.GenericBindings) > 0 {
 		return fl.l.declareGenericFunctionDef(module, def)
 	}
