@@ -6108,12 +6108,12 @@ func TestDirectGoTypeExprAllocatesAliasesForSecondaryPackages(t *testing.T) {
 	}
 }
 
-func TestDirectGoExternAliasAvoidsTypeSpecificJSONHelperNames(t *testing.T) {
+func TestDirectGoExternAliasAvoidsReservedRuntimeHelperNames(t *testing.T) {
 	program := &air.Program{Types: []air.TypeInfo{{ID: 2, Kind: air.TypeInt, Name: "Int"}}}
 	l := &lowerer{program: program, directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(program)}
-	alias := l.directGoBindingAlias(directGoExternBinding{ImportPath: "math", Alias: "ardJSONEncode_2"})
-	if alias != "ardJSONEncode_2_1" {
-		t.Fatalf("alias = %q, want ardJSONEncode_2_1", alias)
+	alias := l.directGoBindingAlias(directGoExternBinding{ImportPath: "math", Alias: "ardSortedIntKeys"})
+	if alias != "ardSortedIntKeys_1" {
+		t.Fatalf("alias = %q, want ardSortedIntKeys_1", alias)
 	}
 }
 

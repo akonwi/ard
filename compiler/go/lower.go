@@ -34,7 +34,6 @@ type lowerer struct {
 	reservedGoIdentifiers   map[string]bool
 	declaredLocals          map[air.LocalID]bool
 	runtimeHelpers          map[string]bool
-	jsonEncodeTypes         map[air.TypeID]bool
 	ffiImports              map[string]string
 	projectInfo             *checker.ProjectInfo
 	directGoResolver        *checker.GoPackagesResolver
@@ -61,7 +60,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if options.ProjectInfo != nil && options.ProjectInfo.RootPath != "" {
 		directGoResolverDir = options.ProjectInfo.RootPath
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, jsonEncodeTypes: map[air.TypeID]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, directGoResolver: checker.NewGoPackagesResolver(directGoResolverDir), directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(program), suppressMain: options.SuppressMain, includeTests: options.IncludeTests, useModulePackages: true}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, directGoResolver: checker.NewGoPackagesResolver(directGoResolverDir), directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(program), suppressMain: options.SuppressMain, includeTests: options.IncludeTests, useModulePackages: true}
 	l.inlineClosures = l.collectInlineClosureFunctions()
 	l.goMethodCollisions = l.collectGoMethodCollisions()
 	l.emittedGoMethods = map[string]bool{}
@@ -231,7 +230,6 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 	l.currentImports = map[string]string{}
 	l.importErr = nil
 	l.runtimeHelpers = map[string]bool{}
-	l.jsonEncodeTypes = map[air.TypeID]bool{}
 	l.mutableTraitRefs = map[air.TraitID]bool{}
 	l.emittedMutableTraitRefs = map[air.TraitID]bool{}
 	decls := []ast.Decl{}
@@ -574,16 +572,6 @@ func (l *lowerer) markRuntimeHelper(name string) {
 	l.runtimeHelpers[name] = true
 }
 
-func rewritePreludeSourceImports(source string, aliases map[string]string) string {
-	for original, alias := range aliases {
-		if alias == "" || alias == original {
-			continue
-		}
-		source = strings.ReplaceAll(source, original+".", alias+".")
-	}
-	return source
-}
-
 func (l *lowerer) registerFFIImportsForGoType(expr ast.Expr) {
 	l.registerImportsForGoType(expr, l.ffiImports)
 }
@@ -800,16 +788,6 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	}
 `, utf8Alias))
 	}
-	if l.runtimeHelpers["json_encode"] {
-		aliases := map[string]string{
-			"bytes":      l.registerImport("bytes", "bytes"),
-			"fmt":        l.registerImport("fmt", "fmt"),
-			"json":       l.registerImport("json", "encoding/json/v2"),
-			"jsontext":   l.registerImport("jsontext", "encoding/json/jsontext"),
-			"ardruntime": l.registerImport("ardruntime", "github.com/akonwi/ard/runtime"),
-		}
-		parts = append(parts, rewritePreludeSourceImports(l.jsonEncodePreludeSource(), aliases))
-	}
 	src := strings.Join(parts, "\n")
 	file, err := parser.ParseFile(token.NewFileSet(), "prelude.go", src, 0)
 	if err != nil {
@@ -858,7 +836,8 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 			}
 			fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(unionMemberFieldName(typ, member))}, Type: memberType})
 		}
-		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
+		unionDecl := &ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}
+		return []ast.Decl{unionDecl, l.unionMarshalJSONDecl(typ)}, nil
 	case air.TypeTraitObject:
 		return l.lowerTraitObjectDecls(typ)
 	case air.TypeEnum:
@@ -924,6 +903,32 @@ func (l *lowerer) markedMutableTraitRefDecls() ([]ast.Decl, error) {
 		l.emittedMutableTraitRefs[traitID] = true
 	}
 	return decls, nil
+}
+
+// unionMarshalJSONDecl generates a MarshalJSON method that encodes a union as
+// its active member's value, unwrapped (ADR 0031).
+func (l *lowerer) unionMarshalJSONDecl(typ air.TypeInfo) *ast.FuncDecl {
+	recv := "u"
+	cases := make([]ast.Stmt, 0, len(typ.Members))
+	for _, member := range typ.Members {
+		cases = append(cases, &ast.CaseClause{
+			List: []ast.Expr{&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", member.Tag)}},
+			Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{
+				Fun:  l.qualified("json", "encoding/json/v2", "Marshal"),
+				Args: []ast.Expr{&ast.SelectorExpr{X: ast.NewIdent(recv), Sel: ast.NewIdent(unionMemberFieldName(typ, member))}},
+			}}}},
+		})
+	}
+	body := &ast.BlockStmt{List: []ast.Stmt{
+		&ast.SwitchStmt{Tag: &ast.SelectorExpr{X: ast.NewIdent(recv), Sel: ast.NewIdent(unionTagFieldName(typ))}, Body: &ast.BlockStmt{List: cases}},
+		&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("nil"), &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Errorf"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"invalid union tag"`}}}}},
+	}}
+	return &ast.FuncDecl{
+		Recv: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(recv)}, Type: ast.NewIdent(typeName(l.program, typ))}}},
+		Name: ast.NewIdent("MarshalJSON"),
+		Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: &ast.ArrayType{Elt: ast.NewIdent("byte")}}, {Type: ast.NewIdent("error")}}}},
+		Body: body,
+	}
 }
 
 func (l *lowerer) lowerTraitObjectDecls(typ air.TypeInfo) ([]ast.Decl, error) {
@@ -7137,64 +7142,32 @@ func validImplID(program *air.Program, id air.ImplID) bool {
 	return id >= 0 && int(id) < len(program.Impls)
 }
 
-func (l *lowerer) markJSONEncodeType(typeID air.TypeID) {
-	if !validTypeID(l.program, typeID) || l.jsonEncodeTypes[typeID] {
-		return
-	}
-	l.jsonEncodeTypes[typeID] = true
-	info := l.program.Types[typeID-1]
-	switch info.Kind {
-	case air.TypeMaybe, air.TypeList, air.TypeFiber:
-		l.markJSONEncodeType(info.Elem)
-	case air.TypeMap:
-		l.markJSONEncodeType(info.Key)
-		l.markJSONEncodeType(info.Value)
-	case air.TypeStruct:
-		for _, field := range info.Fields {
-			l.markJSONEncodeType(field.Type)
-		}
-	case air.TypeUnion:
-		for _, member := range info.Members {
-			l.markJSONEncodeType(member.Type)
-		}
-	case air.TypeResult:
-		l.markJSONEncodeType(info.Value)
-		l.markJSONEncodeType(info.Error)
-	case air.TypeFunction:
-		for _, param := range info.Params {
-			l.markJSONEncodeType(param)
-		}
-		l.markJSONEncodeType(info.Return)
-	case air.TypeExtern:
-		if info.Elem != air.NoType {
-			l.markJSONEncodeType(info.Elem)
-		}
-	}
-}
-
 func (l *lowerer) lowerJSONEncodeStdlibExtern(signature air.Signature, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
 	if len(args) != 1 || len(signature.Params) != 1 {
 		return loweredExpr{}, fmt.Errorf("JsonEncode expects 1 arg")
 	}
-	valueTypeID := signature.Params[0].Type
-	l.markRuntimeHelper("json_encode")
-	l.markJSONEncodeType(valueTypeID)
-	helper := l.jsonEncodeTopHelperName(valueTypeID)
-	// JsonEncode is lowered with type-specific helpers instead of the generic
-	// stdlib FFI call so the Go target can preserve Ard JSON semantics for
-	// maybe/union/dynamic-heavy values. When the static type is simple enough
-	// for native Go JSON encoding to match those semantics, prefer json.Marshal:
-	// it is noticeably faster on JSON-heavy benchmarks while keeping the
-	// Ard-aware streaming encoder as the universal fallback.
-	if l.jsonNativeCodecSafe(valueTypeID, map[air.TypeID]bool{}) {
-		helper = l.jsonEncodeMarshalTopHelperName(valueTypeID)
-	}
-	wrapped, err := l.wrapValueErrorCall(returnTypeID, &ast.CallExpr{Fun: ast.NewIdent(helper), Args: args})
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	wrapped.stmts = append(stmts, wrapped.stmts...)
-	return wrapped, nil
+	// json::encode lowers to a native encoding/json/v2 Marshal. Struct json tags,
+	// the runtime.Maybe/Result marshalers, generated union MarshalJSON methods,
+	// and enums-as-int give the Ard JSON shape without a generated encoder
+	// (ADR 0031).
+	dataTemp := l.nextTemp()
+	mErrTemp := l.nextTemp()
+	errTemp := l.nextTemp()
+	allStmts := append([]ast.Stmt{}, stmts...)
+	allStmts = append(allStmts,
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(dataTemp), ast.NewIdent(mErrTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.qualified("json", "encoding/json/v2", "Marshal"), Args: args}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `""`}}},
+		&ast.IfStmt{
+			Cond: &ast.BinaryExpr{X: ast.NewIdent(mErrTemp), Op: token.NEQ, Y: ast.NewIdent("nil")},
+			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(mErrTemp), Sel: ast.NewIdent("Error")}}}}}},
+		},
+	)
+	resultExpr := &ast.CompositeLit{Type: mustTypeExpr(l, returnTypeID), Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.CallExpr{Fun: ast.NewIdent("string"), Args: []ast.Expr{ast.NewIdent(dataTemp)}}},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: ast.NewIdent(errTemp)},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: &ast.BasicLit{Kind: token.STRING, Value: `""`}}},
+	}}
+	return loweredExpr{stmts: allStmts, expr: resultExpr}, nil
 }
 
 func (l *lowerer) lowerJSONParseStdlibExtern(args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
@@ -7284,195 +7257,6 @@ func (l *lowerer) jsonEncodeGoTypeName(typeID air.TypeID) string {
 		return l.jsonParseGoTypeName(typeID)
 	}
 	return buf.String()
-}
-
-func (l *lowerer) jsonEncodePreludeSource() string {
-	var b strings.Builder
-	needsMaybeHelper := false
-	for _, typ := range l.program.Types {
-		if typ.ID == air.NoType || !l.jsonEncodeTypes[typ.ID] {
-			continue
-		}
-		if typ.Kind == air.TypeMaybe {
-			needsMaybeHelper = true
-		}
-	}
-	if needsMaybeHelper {
-		l.registerImport("ardruntime", "github.com/akonwi/ard/runtime")
-	}
-	b.WriteString(`
-func ardJSONEncodeInt(enc *jsontext.Encoder, value int) error {
-	return enc.WriteToken(jsontext.Int(int64(value)))
-}
-
-func ardJSONEncodeFloat(enc *jsontext.Encoder, value float64) error {
-	return enc.WriteToken(jsontext.Float(value))
-}
-
-func ardJSONEncodeBool(enc *jsontext.Encoder, value bool) error {
-	if value { return enc.WriteToken(jsontext.True) }
-	return enc.WriteToken(jsontext.False)
-}
-
-func ardJSONEncodeString(enc *jsontext.Encoder, value string) error {
-	return enc.WriteToken(jsontext.String(value))
-}
-
-func ardJSONEncodeDynamic(enc *jsontext.Encoder, value any) error {
-	data, err := json.Marshal(value)
-	if err != nil { return err }
-	return enc.WriteValue(jsontext.Value(data))
-}
-`)
-	if needsMaybeHelper {
-		b.WriteString(`
-func ardJSONEncodeMaybe[T any](enc *jsontext.Encoder, value ardruntime.Maybe[T], encode func(*jsontext.Encoder, T) error) error {
-	if value.IsNone() { return enc.WriteToken(jsontext.Null) }
-	return encode(enc, value.Value())
-}
-`)
-	}
-	b.WriteString(`
-func ardJSONEncodeList[T any](enc *jsontext.Encoder, values []T, encode func(*jsontext.Encoder, T) error) error {
-	if err := enc.WriteToken(jsontext.BeginArray); err != nil { return err }
-	for _, item := range values {
-		if err := encode(enc, item); err != nil { return err }
-	}
-	return enc.WriteToken(jsontext.EndArray)
-}
-
-func ardJSONEncodeMap[K comparable, V any](enc *jsontext.Encoder, values map[K]V, encode func(*jsontext.Encoder, V) error) error {
-	if err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }
-	for key, item := range values {
-		if err := enc.WriteToken(jsontext.String(fmt.Sprint(key))); err != nil { return err }
-		if err := encode(enc, item); err != nil { return err }
-	}
-	return enc.WriteToken(jsontext.EndObject)
-}
-`)
-	for _, typ := range l.program.Types {
-		if typ.ID == air.NoType || !l.jsonEncodeTypes[typ.ID] {
-			continue
-		}
-		l.writeJSONEncodeHelper(&b, typ.ID)
-	}
-	return b.String()
-}
-
-func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
-	if !validTypeID(l.program, typeID) {
-		return
-	}
-	info := l.program.Types[typeID-1]
-	typeName := l.jsonEncodeGoTypeName(typeID)
-	helper := l.jsonEncodeHelperName(typeID)
-	fmt.Fprintf(b, "\nfunc %s(enc *jsontext.Encoder, value %s) error {\n", helper, typeName)
-	switch info.Kind {
-	case air.TypeVoid:
-		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.Null)\n")
-	case air.TypeInt, air.TypeByte, air.TypeRune:
-		fmt.Fprintf(b, "\treturn ardJSONEncodeInt(enc, int(value))\n")
-	case air.TypeFloat:
-		fmt.Fprintf(b, "\treturn ardJSONEncodeFloat(enc, value)\n")
-	case air.TypeBool:
-		fmt.Fprintf(b, "\treturn ardJSONEncodeBool(enc, value)\n")
-	case air.TypeStr:
-		fmt.Fprintf(b, "\treturn ardJSONEncodeString(enc, value)\n")
-	case air.TypeDynamic, air.TypeExtern, air.TypeTraitObject:
-		fmt.Fprintf(b, "\treturn ardJSONEncodeDynamic(enc, value)\n")
-	case air.TypeMaybe:
-		fmt.Fprintf(b, "\treturn ardJSONEncodeMaybe(enc, value, %s)\n", l.jsonEncodeHelperName(info.Elem))
-	case air.TypeResult:
-		fmt.Fprintf(b, "\tif value.Ok { return %s(enc, value.Value) }\n\treturn %s(enc, value.Err)\n", l.jsonEncodeHelperName(info.Value), l.jsonEncodeHelperName(info.Error))
-	case air.TypeList:
-		if l.typeKind(info.Elem) == air.TypeByte {
-			fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
-		} else {
-			fmt.Fprintf(b, "\treturn ardJSONEncodeList(enc, value, %s)\n", l.jsonEncodeHelperName(info.Elem))
-		}
-	case air.TypeMap:
-		fmt.Fprintf(b, "\treturn ardJSONEncodeMap(enc, value, %s)\n", l.jsonEncodeHelperName(info.Value))
-	case air.TypeStruct:
-		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }\n")
-		for _, field := range info.Fields {
-			fieldValue := "value." + l.goFieldName(info, field.Name)
-			if field.Mutable {
-				fieldValue = "*" + fieldValue
-			}
-			fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.String(%q)); err != nil { return err }\n", field.Name)
-			fmt.Fprintf(b, "\tif err := %s(enc, %s); err != nil { return err }\n", l.jsonEncodeHelperName(field.Type), fieldValue)
-		}
-		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.EndObject)\n")
-	case air.TypeEnum:
-		fmt.Fprintf(b, "\treturn enc.WriteToken(jsontext.Int(int64(value)))\n")
-	case air.TypeUnion:
-		fmt.Fprintf(b, "\tswitch value.%s {\n", unionTagFieldName(info))
-		for _, member := range info.Members {
-			fieldName := unionMemberFieldName(info, member)
-			fmt.Fprintf(b, "\tcase %d:\n\t\treturn %s(enc, value.%s)\n", member.Tag, l.jsonEncodeHelperName(member.Type), fieldName)
-		}
-		fmt.Fprintf(b, "\t}\n\treturn enc.WriteToken(jsontext.Null)\n")
-	case air.TypeFunction, air.TypeFiber:
-		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
-	default:
-		fmt.Fprintf(b, "\tdata, err := json.Marshal(value)\n\tif err != nil { return err }\n\treturn enc.WriteValue(jsontext.Value(data))\n")
-	}
-	fmt.Fprintf(b, "}\n")
-	if info.Kind == air.TypeStruct && !l.isStdlibFFIBackedType(info) && l.canDefineMethodsOnType(info) {
-		fmt.Fprintf(b, "\nfunc (value %s) MarshalJSONTo(enc *jsontext.Encoder) error {\n\treturn %s(enc, value)\n}\n", typeName, helper)
-	}
-	fmt.Fprintf(b, "\nfunc %s(value %s) (string, error) {\n\tvar buf bytes.Buffer\n\tenc := jsontext.NewEncoder(&buf)\n\tif err := %s(enc, value); err != nil { return \"\", err }\n\treturn string(bytes.TrimSuffix(buf.Bytes(), []byte(\"\\n\"))), nil\n}\n", l.jsonEncodeTopHelperName(typeID), typeName, helper)
-	fmt.Fprintf(b, "\nfunc %s(value %s) (string, error) {\n\tdata, err := json.Marshal(value)\n\tif err != nil { return \"\", err }\n\treturn string(data), nil\n}\n", l.jsonEncodeMarshalTopHelperName(typeID), typeName)
-}
-
-func (l *lowerer) jsonEncodeHelperName(typeID air.TypeID) string {
-	return fmt.Sprintf("ardJSONEncode_%d", typeID)
-}
-
-func (l *lowerer) jsonEncodeTopHelperName(typeID air.TypeID) string {
-	return fmt.Sprintf("ardJSONEncodeTop_%d", typeID)
-}
-
-func (l *lowerer) jsonEncodeMarshalTopHelperName(typeID air.TypeID) string {
-	return fmt.Sprintf("ardJSONMarshalTop_%d", typeID)
-}
-
-func (l *lowerer) jsonNativeCodecSafe(typeID air.TypeID, seen map[air.TypeID]bool) bool {
-	if !validTypeID(l.program, typeID) {
-		return false
-	}
-	if seen[typeID] {
-		return true
-	}
-	seen[typeID] = true
-	info := l.program.Types[typeID-1]
-	switch info.Kind {
-	case air.TypeVoid, air.TypeInt, air.TypeByte, air.TypeRune, air.TypeFloat, air.TypeBool, air.TypeStr, air.TypeEnum:
-		return true
-	case air.TypeList:
-		return l.jsonNativeCodecSafe(info.Elem, seen)
-	case air.TypeMap:
-		keyInfo := l.program.Types[info.Key-1]
-		return keyInfo.Kind == air.TypeStr && l.jsonNativeCodecSafe(info.Value, seen)
-	case air.TypeMaybe:
-		// runtime.Maybe implements json.Marshaler (none -> null, some -> unwrapped).
-		return l.jsonNativeCodecSafe(info.Elem, seen)
-	case air.TypeResult:
-		// runtime.Result implements json.Marshaler (ok -> value, err -> error).
-		return l.jsonNativeCodecSafe(info.Value, seen) && l.jsonNativeCodecSafe(info.Error, seen)
-	case air.TypeDynamic:
-		// Dynamic lowers to any; json.Marshal handles it directly.
-		return true
-	case air.TypeStruct:
-		for _, field := range info.Fields {
-			if !l.jsonNativeCodecSafe(field.Type, seen) {
-				return false
-			}
-		}
-		return true
-	default:
-		return false
-	}
 }
 
 func (l *lowerer) canDefineMethodsOnType(info air.TypeInfo) bool {

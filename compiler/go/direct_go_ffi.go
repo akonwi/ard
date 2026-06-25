@@ -115,10 +115,6 @@ func collectReservedGoIdentifiers(program *air.Program) map[string]bool {
 	}
 	for _, typ := range program.Types {
 		reserved[typeName(program, typ)] = true
-		reserved[fmt.Sprintf("ardJSONEncode_%d", typ.ID)] = true
-		reserved[fmt.Sprintf("ardJSONEncodeTop_%d", typ.ID)] = true
-		reserved[fmt.Sprintf("ardJSONMarshalTop_%d", typ.ID)] = true
-		reserved[fmt.Sprintf("ardJSONDecodeText_%d", typ.ID)] = true
 		for _, variant := range typ.Variants {
 			reserved[enumVariantName(program, typ, variant)] = true
 		}
@@ -155,8 +151,6 @@ func runtimePreludeTopLevelNames() []string {
 		"ardDirectGoCheckSignedIntRange", "ardDirectGoCheckUintIntRange", "ardDirectGoCheckNonNegativeInt",
 		"ardDirectGoIntFromSigned", "ardDirectGoIntFromUnsigned",
 		"ardDirectGoCheckFloat32Range", "ardDirectGoCheckRune",
-		"ardJSONEncodeInt", "ardJSONEncodeFloat", "ardJSONEncodeBool", "ardJSONEncodeString", "ardJSONEncodeDynamic",
-		"ardJSONEncodeMaybe", "ardJSONEncodeList", "ardJSONEncodeMap",
 	}
 }
 
