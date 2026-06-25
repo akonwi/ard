@@ -56,16 +56,18 @@ type lowerer struct {
 	externs      map[string]ExternID
 	globals      map[string]GlobalID
 
-	loweringModules   map[string]bool
-	loweredModules    map[string]bool
-	loweringFuncs     map[FunctionID]bool
-	loweredFuncs      map[FunctionID]bool
-	loweringGlobals   map[GlobalID]bool
-	loweredGlobals    map[GlobalID]bool
-	functionTypeVars  map[FunctionID]map[string]TypeID
-	genericStructDefs map[string]TypeID
-	defParams         map[string]int
-	includeTests      bool
+	loweringModules          map[string]bool
+	loweredModules           map[string]bool
+	loweringFuncs            map[FunctionID]bool
+	loweredFuncs             map[FunctionID]bool
+	loweringGlobals          map[GlobalID]bool
+	loweredGlobals           map[GlobalID]bool
+	functionTypeVars         map[FunctionID]map[string]TypeID
+	genericStructDefs        map[string]TypeID
+	genericFunctionDefs      map[string]FunctionID
+	genericFunctionOriginals map[string]*checker.FunctionDef
+	defParams                map[string]int
+	includeTests             bool
 }
 
 type functionLowerer struct {
@@ -93,15 +95,17 @@ func newLowerer(options LowerOptions) *lowerer {
 		externs:      map[string]ExternID{},
 		globals:      map[string]GlobalID{},
 
-		loweringModules:   map[string]bool{},
-		loweredModules:    map[string]bool{},
-		loweringFuncs:     map[FunctionID]bool{},
-		loweredFuncs:      map[FunctionID]bool{},
-		loweringGlobals:   map[GlobalID]bool{},
-		loweredGlobals:    map[GlobalID]bool{},
-		functionTypeVars:  map[FunctionID]map[string]TypeID{},
-		genericStructDefs: map[string]TypeID{},
-		includeTests:      options.IncludeTests,
+		loweringModules:          map[string]bool{},
+		loweredModules:           map[string]bool{},
+		loweringFuncs:            map[FunctionID]bool{},
+		loweredFuncs:             map[FunctionID]bool{},
+		loweringGlobals:          map[GlobalID]bool{},
+		loweredGlobals:           map[GlobalID]bool{},
+		functionTypeVars:         map[FunctionID]map[string]TypeID{},
+		genericStructDefs:        map[string]TypeID{},
+		genericFunctionDefs:      map[string]FunctionID{},
+		genericFunctionOriginals: map[string]*checker.FunctionDef{},
+		includeTests:             options.IncludeTests,
 	}
 	l.mustIntern(checker.Void)
 	l.mustIntern(checker.Int)
@@ -247,6 +251,12 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 		switch expr := stmt.Expr.(type) {
 		case *checker.FunctionDef:
 			if functionHasUnresolvedTypeVar(expr) || (!l.includeTests && expr.IsTest) {
+				// Register generic function definitions (with their $T parameters
+				// intact) so call sites can recover the generic shape even for
+				// private functions not exposed in the module's public symbols.
+				if functionHasUnresolvedTypeVar(expr) {
+					l.genericFunctionOriginals[functionKey(modID, expr.Name)] = expr
+				}
 				continue
 			}
 			if _, err := l.declareFunction(modID, expr); err != nil {
@@ -485,6 +495,90 @@ func (l *lowerer) declareFunctionSpecializationWithSignatureAndGenericKey(module
 	return id, nil
 }
 
+// declareGenericFunctionDef lowers a generic function exactly once as a Go
+// generic definition (ADR 0031, Phase 2). Its signature and body reference
+// TypeParam-kind types; call sites reference this single definition and supply
+// concrete type arguments via Expr.TypeArgs.
+// genericParamNames returns the ordered generic parameter names of a function
+// definition. At call sites the checker leaves GenericParams empty but records
+// the resolved type variables in GenericBindings, so fall back to the sorted
+// binding keys to keep a stable ordering across call sites.
+func genericParamNames(def *checker.FunctionDef) []string {
+	if len(def.GenericParams) > 0 {
+		return def.GenericParams
+	}
+	keys := make([]string, 0, len(def.GenericBindings))
+	for k := range def.GenericBindings {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// originalGenericFunctionDef returns the unsubstituted generic definition (with
+// $T parameters) for a call-site definition. Call sites carry a derefed clone
+// whose parameters are already concrete, so recover the original from the
+// registry (covers private/same-module) or the module's public symbols.
+func (l *lowerer) originalGenericFunctionDef(module ModuleID, callDef *checker.FunctionDef) *checker.FunctionDef {
+	if orig, ok := l.genericFunctionOriginals[functionKey(module, callDef.Name)]; ok {
+		return orig
+	}
+	if mod, ok := l.moduleByName[l.program.Modules[module].Path]; ok {
+		if orig, ok := mod.Get(callDef.Name).Type.(*checker.FunctionDef); ok {
+			return orig
+		}
+	}
+	return callDef
+}
+
+func (l *lowerer) declareGenericFunctionDef(module ModuleID, callDef *checker.FunctionDef) (FunctionID, error) {
+	key := functionKey(module, callDef.Name)
+	if id, ok := l.genericFunctionDefs[key]; ok {
+		return id, nil
+	}
+	def := l.originalGenericFunctionDef(module, callDef)
+	paramNames := genericParamNames(callDef)
+	params := map[string]int{}
+	goParams := make([]string, len(paramNames))
+	for i, p := range paramNames {
+		params[p] = i
+		goParams[i] = goifyTypeParamName(p)
+	}
+	prev := l.defParams
+	l.defParams = params
+	signature, err := l.signatureForFunction(def.Parameters, def.ReturnType)
+	l.defParams = prev
+	if err != nil {
+		return NoFunction, err
+	}
+	id := FunctionID(len(l.program.Functions))
+	l.functions[concreteFunctionKey(module, def.Name, signature, "genericdef")] = id
+	l.genericFunctionDefs[key] = id
+	l.program.Functions = append(l.program.Functions, Function{
+		ID:         id,
+		Module:     module,
+		Name:       def.Name,
+		Signature:  signature,
+		TypeParams: goParams,
+		IsTest:     def.IsTest,
+		Private:    def.Private,
+	})
+	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
+	typeVars := make(map[string]TypeID, len(params))
+	for p, idx := range params {
+		tp, err := l.internTypeParam(p, idx)
+		if err != nil {
+			return NoFunction, err
+		}
+		typeVars[p] = tp
+	}
+	l.setFunctionTypeVars(id, typeVars)
+	if err := l.lowerFunctionByID(id, def); err != nil {
+		return NoFunction, err
+	}
+	return id, nil
+}
+
 func (l *lowerer) declareAndLowerFunction(module ModuleID, def *checker.FunctionDef) (FunctionID, error) {
 	id, err := l.declareFunctionSpecialization(module, def)
 	if err != nil {
@@ -512,6 +606,9 @@ func (l *lowerer) declareAndLowerFunctionCall(module ModuleID, def *checker.Func
 }
 
 func (fl *functionLowerer) declareAndLowerFunctionCall(module ModuleID, def *checker.FunctionDef, call *checker.FunctionCall) (FunctionID, error) {
+	if len(def.GenericBindings) > 0 {
+		return fl.l.declareGenericFunctionDef(module, def)
+	}
 	if functionHasUnresolvedTypeVar(def) && len(def.GenericBindings) == 0 {
 		return NoFunction, fmt.Errorf("cannot declare unspecialized generic function %s", def.Name)
 	}
@@ -906,6 +1003,32 @@ func (fl *functionLowerer) internStructTypeWithInterner(typ *checker.StructDef, 
 	key := "struct " + typ.ModulePath + "::" + name
 	if id, ok := fl.l.typeByKey[key]; ok {
 		return id, nil
+	}
+	// Tag instantiations of a generic struct so the backend emits `Def[args...]`
+	// (ADR 0031). Interning the definition appends types, so resolve it before
+	// reserving this instance's id.
+	if len(typ.GenericParams) > 0 {
+		defID, ok := fl.l.genericStructDefs[genericStructDefKey(typ.ModulePath, typ.Name)]
+		if !ok {
+			if genDef := fl.l.lookupGenericStructDef(typ.ModulePath, typ.Name); genDef != nil {
+				if interned, err := fl.l.internGenericStructDef(genDef); err == nil {
+					defID, ok = interned, true
+				} else {
+					return NoType, err
+				}
+			}
+		}
+		if ok {
+			info.Generic = defID
+			info.GenericArgs = make([]TypeID, 0, len(typ.TypeArgs))
+			for _, typeArg := range typ.TypeArgs {
+				argID, err := intern(typeArg)
+				if err != nil {
+					return NoType, err
+				}
+				info.GenericArgs = append(info.GenericArgs, argID)
+			}
+		}
 	}
 	id := TypeID(len(fl.l.program.Types) + 1)
 	info.ID = id
@@ -1717,7 +1840,10 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		return NoType, fmt.Errorf("cannot intern nil type")
 	}
 	if tv, ok := t.(*checker.TypeVar); ok {
-		if l.defParams != nil && tv.Actual() == nil {
+		// Inside a generic definition, a type variable naming one of the
+		// definition's parameters lowers to a TypeParam reference (ADR 0031),
+		// even when resolved to a concrete type by the triggering call site.
+		if l.defParams != nil {
 			if idx, ok := l.defParams[tv.Name()]; ok {
 				return l.internTypeParam(tv.Name(), idx)
 			}
@@ -1733,7 +1859,10 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		return l.internType(ref.Of())
 	}
 	key := airTypeKey(t)
-	if l.defParams != nil {
+	// Within a generic definition, only types that actually reference a type
+	// parameter need a distinct key; non-generic types (e.g. a plain struct used
+	// in the body) must continue to share their concrete interned entry.
+	if l.defParams != nil && typeContainsTypeVar(t) {
 		key = "gdef:" + key
 	}
 	name := airTypeName(t)
@@ -1822,7 +1951,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		// Tag concrete instantiations of a generic struct (ADR 0031). The
 		// generic definition is interned lazily from the checker module scope,
 		// since the declaring module's type loop may not have run.
-		if len(typ.GenericParams) > 0 && l.defParams == nil {
+		if len(typ.GenericParams) > 0 {
 			defID, ok := l.genericStructDefs[genericStructDefKey(typ.ModulePath, typ.Name)]
 			if !ok {
 				if genDef := l.lookupGenericStructDef(typ.ModulePath, typ.Name); genDef != nil {
@@ -3530,11 +3659,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				if err != nil {
 					return nil, err
 				}
-				args, err := fl.lowerArgsWithSignature(e.Args, fl.l.program.Functions[id].Signature)
-				if err != nil {
-					return nil, err
-				}
-				return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Function: id, Args: args}, nil
+				return fl.buildResolvedCallExpr(id, def, e, e.Args)
 			}
 			id, ok := fl.l.lookupFunction(def.Name)
 			if !ok {
@@ -3621,11 +3746,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			if err != nil {
 				return nil, err
 			}
-			args, err := fl.lowerArgsWithSignature(e.Call.Args, fl.l.program.Functions[id].Signature)
-			if err != nil {
-				return nil, err
-			}
-			return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Function: id, Args: args}, nil
+			return fl.buildResolvedCallExpr(id, def, e.Call, e.Call.Args)
 		}
 		if id, ok, err := fl.l.resolveModuleFunction(e.Module, e.Call.Name); err != nil {
 			return nil, err
@@ -4818,6 +4939,12 @@ func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef)
 	if err != nil {
 		return nil, err
 	}
+	// A closure created inside a generic definition is lifted to a top-level Go
+	// function whose body references the enclosing type parameters, so it must
+	// inherit them and be instantiated with them at its creation site (ADR 0031).
+	if len(fl.fn.TypeParams) > 0 {
+		fl.l.program.Functions[id].TypeParams = fl.fn.TypeParams
+	}
 	fn := fl.l.program.Functions[id]
 	// Closure function declarations are keyed by their concrete signature and can be
 	// encountered more than once while lowering methods/trait impls. Re-lowering
@@ -5649,6 +5776,53 @@ func (fl *functionLowerer) genericBindingsKey(def *checker.FunctionDef) (string,
 
 func (fl *functionLowerer) genericBindingsKeyAndTypeVars(def *checker.FunctionDef) (string, map[string]TypeID, error) {
 	return fl.l.genericBindingsKeyWithInterner(def, fl.internResolvedType)
+}
+
+// genericCallTypeArgs returns the concrete type arguments for a call to a
+// generic function, ordered by the definition's generic parameters.
+func (fl *functionLowerer) genericCallTypeArgs(def *checker.FunctionDef) ([]TypeID, error) {
+	paramNames := genericParamNames(def)
+	if len(paramNames) == 0 {
+		return nil, nil
+	}
+	args := make([]TypeID, len(paramNames))
+	for i, p := range paramNames {
+		binding, ok := def.GenericBindings[p]
+		if !ok {
+			return nil, fmt.Errorf("missing generic binding for %s in call to %s", p, def.Name)
+		}
+		id, err := fl.internResolvedType(binding)
+		if err != nil {
+			return nil, err
+		}
+		args[i] = id
+	}
+	return args, nil
+}
+
+// buildResolvedCallExpr builds an ExprCall for a resolved function definition.
+// For a generic definition the call carries concrete type arguments and is
+// typed/argument-lowered against the call's concrete signature, while the
+// referenced function remains the single generic definition.
+func (fl *functionLowerer) buildResolvedCallExpr(id FunctionID, def *checker.FunctionDef, call *checker.FunctionCall, callArgs []checker.Expression) (*Expr, error) {
+	signature := fl.l.program.Functions[id].Signature
+	var typeArgs []TypeID
+	if len(fl.l.program.Functions[id].TypeParams) > 0 {
+		concrete, err := fl.signatureForCall(call)
+		if err != nil {
+			return nil, err
+		}
+		signature = concrete
+		typeArgs, err = fl.genericCallTypeArgs(def)
+		if err != nil {
+			return nil, err
+		}
+	}
+	args, err := fl.lowerArgsWithSignature(callArgs, signature)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: ExprCall, Type: signature.Return, Function: id, Args: args, TypeArgs: typeArgs}, nil
 }
 
 func (l *lowerer) genericBindingsKeyWithInterner(def *checker.FunctionDef, intern func(checker.Type) (TypeID, error)) (string, map[string]TypeID, error) {

@@ -163,6 +163,7 @@ type Expr struct {
 	Global GlobalID
 
 	Function      FunctionID
+	TypeArgs      []TypeID
 	Extern        ExternID
 	Impl          ImplID
 	Trait         TraitID

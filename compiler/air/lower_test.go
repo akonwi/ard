@@ -931,7 +931,10 @@ func TestLowerImportedGenericModuleFunctionSpecialization(t *testing.T) {
 	}
 }
 
-func TestLowerImportedGenericStdlibFunctionBodyUsesConcreteBindings(t *testing.T) {
+func TestLowerImportedGenericStdlibFunctionLowersAsGoGeneric(t *testing.T) {
+	// A generic stdlib function is lowered once as a generic definition (ADR
+	// 0031, Phase 2): its signature and body reference type parameters rather
+	// than concrete monomorphized types.
 	program := lowerSource(t, `
 		use ard/list
 
@@ -944,14 +947,19 @@ func TestLowerImportedGenericStdlibFunctionBodyUsesConcreteBindings(t *testing.T
 	if len(keep.Signature.Params) != 2 {
 		t.Fatalf("keep param count = %d, want 2", len(keep.Signature.Params))
 	}
-	returnType := testTypeInfo(t, program, keep.Signature.Return)
-	if returnType.Kind != TypeList || typeKind(t, program, returnType.Elem) != TypeInt {
-		t.Fatalf("keep return = %#v, want [Int]", returnType)
+	if len(keep.TypeParams) == 0 {
+		t.Fatalf("keep should be a generic definition with type parameters")
 	}
+	returnType := testTypeInfo(t, program, keep.Signature.Return)
+	if returnType.Kind != TypeList || typeKind(t, program, returnType.Elem) != TypeParam {
+		t.Fatalf("keep return = %#v, want [TypeParam]", returnType)
+	}
+	// The body must reference type parameters, never lower unresolved type
+	// variables to Void.
 	for _, local := range keep.Locals {
 		info := testTypeInfo(t, program, local.Type)
 		if info.Kind == TypeList && typeKind(t, program, info.Elem) == TypeVoid {
-			t.Fatalf("keep local %s has [Void], want concrete generic binding", local.Name)
+			t.Fatalf("keep local %s has [Void], want type parameter", local.Name)
 		}
 	}
 }

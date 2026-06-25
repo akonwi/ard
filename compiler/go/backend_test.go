@@ -6648,3 +6648,44 @@ fn main() Int {
 		t.Fatal("generated AST missing Box[int] instantiation")
 	}
 }
+
+func TestLowerGenericFunctionEmitsGoGeneric(t *testing.T) {
+	program := lowerSource(t, `fn pair(a: $T, b: $T) [$T] {
+  [a, b]
+}
+
+fn main() Int {
+  let xs = pair(1, 2)
+  let ys = pair("a", "b")
+  xs.size() + ys.size()
+}`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	// One generic Go function `func Pair[T any](...) []T`.
+	if !astFilesContain(files, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		return ok && fn.Name.Name == "Pair" && fn.Type.TypeParams != nil && len(fn.Type.TypeParams.List) == 1
+	}) {
+		t.Fatal("generated AST missing generic func Pair[T any]")
+	}
+	// Calls are instantiated, e.g. Pair[int](...).
+	count := 0
+	for _, file := range files {
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			idx, ok := call.Fun.(*ast.IndexExpr)
+			if !ok {
+				return true
+			}
+			if base, ok := idx.X.(*ast.Ident); ok && base.Name == "Pair" {
+				count++
+			}
+			return true
+		})
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 instantiated Pair[...] calls, found %d", count)
+	}
+}

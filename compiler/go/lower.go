@@ -1166,11 +1166,12 @@ func (l *lowerer) goTypeParamList(typ air.TypeInfo) *ast.FieldList {
 	if len(typ.TypeParams) == 0 {
 		return nil
 	}
-	names := make([]*ast.Ident, len(typ.TypeParams))
-	for i, p := range typ.TypeParams {
-		names[i] = ast.NewIdent(p)
+	fields := make([]air.Param, len(typ.Fields))
+	for i, f := range typ.Fields {
+		fields[i] = air.Param{Type: f.Type}
 	}
-	return &ast.FieldList{List: []*ast.Field{{Names: names, Type: ast.NewIdent("any")}}}
+	comparable := l.comparableTypeParams(air.Signature{Params: fields}, nil)
+	return l.typeParamFieldList(typ.TypeParams, comparable)
 }
 
 func (l *lowerer) namedTypeExpr(info air.TypeInfo) ast.Expr {
@@ -1350,7 +1351,7 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 	if err != nil {
 		return nil, err
 	}
-	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
+	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}, TypeParams: l.goFuncTypeParamList(fn)}
 	if !l.isVoidType(returnTypeID) {
 		returnType, err := l.goType(returnTypeID)
 		if err != nil {
@@ -1363,6 +1364,106 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 		Type: funcType,
 		Body: body,
 	}, nil
+}
+
+// goFuncTypeParamList renders `[T any, ...]` for a generic function definition,
+// or nil for a non-generic function.
+// indexWithTypeArgs renders `fun[arg]` or `fun[arg, ...]` for a generic call.
+// indexWithTypeParamNames renders `fun[T, ...]` using the in-scope type
+// parameter identifiers, used when instantiating a lifted closure inside its
+// enclosing generic definition.
+func (l *lowerer) indexWithTypeParamNames(fun ast.Expr, names []string) ast.Expr {
+	if len(names) == 1 {
+		return &ast.IndexExpr{X: fun, Index: ast.NewIdent(names[0])}
+	}
+	indices := make([]ast.Expr, len(names))
+	for i, n := range names {
+		indices[i] = ast.NewIdent(n)
+	}
+	return &ast.IndexListExpr{X: fun, Indices: indices}
+}
+
+func (l *lowerer) indexWithTypeArgs(fun ast.Expr, typeArgs []air.TypeID) ast.Expr {
+	if len(typeArgs) == 1 {
+		return &ast.IndexExpr{X: fun, Index: mustTypeExpr(l, typeArgs[0])}
+	}
+	indices := make([]ast.Expr, len(typeArgs))
+	for i, ta := range typeArgs {
+		indices[i] = mustTypeExpr(l, ta)
+	}
+	return &ast.IndexListExpr{X: fun, Indices: indices}
+}
+
+func (l *lowerer) goFuncTypeParamList(fn air.Function) *ast.FieldList {
+	if len(fn.TypeParams) == 0 {
+		return nil
+	}
+	comparable := l.comparableTypeParams(fn.Signature, fn.Locals)
+	return l.typeParamFieldList(fn.TypeParams, comparable)
+}
+
+// typeParamFieldList renders `[T any, K comparable, ...]`, constraining a
+// parameter to `comparable` when it is used as a Go map key (Go requires map
+// keys to be comparable).
+func (l *lowerer) typeParamFieldList(typeParams []string, comparable map[string]bool) *ast.FieldList {
+	fields := make([]*ast.Field, len(typeParams))
+	for i, p := range typeParams {
+		constraint := "any"
+		if comparable[p] {
+			constraint = "comparable"
+		}
+		fields[i] = &ast.Field{Names: []*ast.Ident{ast.NewIdent(p)}, Type: ast.NewIdent(constraint)}
+	}
+	return &ast.FieldList{List: fields}
+}
+
+// comparableTypeParams returns the set of type parameter names that appear as a
+// map key within the given signature and locals, and therefore require the
+// `comparable` constraint.
+func (l *lowerer) comparableTypeParams(signature air.Signature, locals []air.Local) map[string]bool {
+	result := map[string]bool{}
+	seen := map[air.TypeID]bool{}
+	var walk func(id air.TypeID)
+	walk = func(id air.TypeID) {
+		if id == air.NoType || seen[id] {
+			return
+		}
+		seen[id] = true
+		info, ok := l.typeInfo(id)
+		if !ok {
+			return
+		}
+		if info.Kind == air.TypeMap {
+			if key, ok := l.typeInfo(info.Key); ok && key.Kind == air.TypeParam {
+				result[key.Name] = true
+			}
+		}
+		walk(info.Elem)
+		walk(info.Key)
+		walk(info.Value)
+		walk(info.Return)
+		walk(info.Error)
+		for _, p := range info.Params {
+			walk(p)
+		}
+		for _, f := range info.Fields {
+			walk(f.Type)
+		}
+		for _, m := range info.Members {
+			walk(m.Type)
+		}
+		for _, ga := range info.GenericArgs {
+			walk(ga)
+		}
+	}
+	for _, p := range signature.Params {
+		walk(p.Type)
+	}
+	walk(signature.Return)
+	for _, loc := range locals {
+		walk(loc.Type)
+	}
+	return result
 }
 
 func (l *lowerer) lowerGoMethodWrapper(fn air.Function) (*ast.FuncDecl, bool, error) {
@@ -2464,7 +2565,11 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		call := &ast.CallExpr{Fun: l.functionExpr(target), Args: args}
+		fun := l.functionExpr(target)
+		if len(expr.TypeArgs) > 0 {
+			fun = l.indexWithTypeArgs(fun, expr.TypeArgs)
+		}
+		call := &ast.CallExpr{Fun: fun, Args: args}
 		return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
 	case air.ExprEq, air.ExprNotEq:
 		leftTypeID := l.resolvedExprType(fn, *expr.Left)
@@ -5341,7 +5446,11 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 		callArgs = append(callArgs, ast.NewIdent(name))
 	}
 	bodyStmts := []ast.Stmt{}
-	call := &ast.CallExpr{Fun: l.functionExpr(closureFn), Args: callArgs}
+	closureFun := l.functionExpr(closureFn)
+	if len(closureFn.TypeParams) > 0 {
+		closureFun = l.indexWithTypeParamNames(closureFun, closureFn.TypeParams)
+	}
+	call := &ast.CallExpr{Fun: closureFun, Args: callArgs}
 	if funcType == nil {
 		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}}
 	} else {
