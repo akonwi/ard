@@ -1,10 +1,8 @@
 package gotarget
 
 import (
-	"bytes"
 	"fmt"
 	"go/ast"
-	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -2823,7 +2821,7 @@ func (l *lowerer) typeInfo(id air.TypeID) (air.TypeInfo, bool) {
 }
 
 func (l *lowerer) voidTypeExpr() ast.Expr {
-	return l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Void")
+	return &ast.StructType{Fields: &ast.FieldList{}}
 }
 
 func (l *lowerer) voidValueExpr() ast.Expr {
@@ -6837,6 +6835,8 @@ func isVoidExpr(expr ast.Expr) bool {
 		return typ.Name == "Void"
 	case *ast.SelectorExpr:
 		return typ.Sel != nil && typ.Sel.Name == "Void"
+	case *ast.StructType:
+		return typ.Fields == nil || len(typ.Fields.List) == 0
 	default:
 		return false
 	}
@@ -7210,53 +7210,6 @@ func (l *lowerer) lowerJSONParseStdlibExtern(args []ast.Expr, stmts []ast.Stmt, 
 		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: &ast.BasicLit{Kind: token.STRING, Value: `""`}}},
 	}}
 	return loweredExpr{stmts: allStmts, expr: resultExpr}, nil
-}
-
-func (l *lowerer) jsonParseGoTypeName(typeID air.TypeID) string {
-	if !validTypeID(l.program, typeID) {
-		return "any"
-	}
-	info := l.program.Types[typeID-1]
-	switch info.Kind {
-	case air.TypeVoid:
-		return "ardruntime.Void"
-	case air.TypeInt:
-		return "int"
-	case air.TypeByte:
-		return "byte"
-	case air.TypeRune:
-		return "rune"
-	case air.TypeFloat:
-		return "float64"
-	case air.TypeBool:
-		return "bool"
-	case air.TypeStr:
-		return "string"
-	case air.TypeDynamic, air.TypeExtern, air.TypeTraitObject:
-		return "any"
-	case air.TypeMaybe:
-		return "ardruntime.Maybe[" + l.jsonParseGoTypeName(info.Elem) + "]"
-	case air.TypeList:
-		return "[]" + l.jsonParseGoTypeName(info.Elem)
-	case air.TypeMap:
-		return "map[" + l.jsonParseGoTypeName(info.Key) + "]" + l.jsonParseGoTypeName(info.Value)
-	case air.TypeStruct, air.TypeEnum, air.TypeUnion:
-		return typeName(l.program, info)
-	default:
-		return "any"
-	}
-}
-
-func (l *lowerer) jsonEncodeGoTypeName(typeID air.TypeID) string {
-	typ, err := l.goType(typeID)
-	if err != nil {
-		return l.jsonParseGoTypeName(typeID)
-	}
-	var buf bytes.Buffer
-	if err := format.Node(&buf, token.NewFileSet(), typ); err != nil {
-		return l.jsonParseGoTypeName(typeID)
-	}
-	return buf.String()
 }
 
 func (l *lowerer) canDefineMethodsOnType(info air.TypeInfo) bool {

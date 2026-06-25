@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	paths := []string{"go.mod", "go.sum", "runtime/maybe.go", "runtime/result.go", "runtime/void.go"}
+	paths := []string{"go.mod", "go.sum", "runtime/maybe.go", "runtime/result.go"}
 	for _, dir := range []string{filepath.Join("std_lib", "ffi")} {
 		matches, err := filepath.Glob(filepath.Join("..", dir, "*.go"))
 		if err != nil {

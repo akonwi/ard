@@ -244,7 +244,7 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) str
 	b.WriteString("\tStatus string `json:\"status\"`\n")
 	b.WriteString("\tMessage string `json:\"message,omitempty\"`\n")
 	b.WriteString("}\n\n")
-	fmt.Fprintf(&b, "func ardRunTest(name string, displayName string, fn func() %s.Result[%s.Void, string]) (out ardTestOutcome) {\n", aliases["runtime"], aliases["runtime"])
+	fmt.Fprintf(&b, "func ardRunTest(name string, displayName string, fn func() %s.Result[struct{}, string]) (out ardTestOutcome) {\n", aliases["runtime"])
 	b.WriteString("\tout = ardTestOutcome{Name: name, DisplayName: displayName, Status: \"panic\"}\n")
 	fmt.Fprintf(&b, "\tdefer func() { if recovered := recover(); recovered != nil { out.Status = \"panic\"; out.Message = %s.Sprint(recovered) } }()\n", aliases["fmt"])
 	b.WriteString("\tresult := fn()\n")

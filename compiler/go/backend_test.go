@@ -1115,7 +1115,7 @@ func TestLowerProgramDiscardsFinalExprInVoidFunction(t *testing.T) {
 	}
 }
 
-func TestLowerProgramUsesRuntimeVoidForVoidResultValues(t *testing.T) {
+func TestLowerProgramUsesStructForVoidResultValues(t *testing.T) {
 	program := lowerSource(t, `
 		fn ok() Void!Str {
 			Result::ok(())
@@ -1131,8 +1131,8 @@ func TestLowerProgramUsesRuntimeVoidForVoidResultValues(t *testing.T) {
 		t.Fatalf("generated AST missing ok return type: %#v", fn)
 	}
 	resultType, ok := fn.Type.Results.List[0].Type.(*ast.IndexListExpr)
-	if !ok || astExprName(resultType.X) != "ardruntime.Result" || len(resultType.Indices) != 2 || astExprName(resultType.Indices[0]) != "ardruntime.Void" || astExprName(resultType.Indices[1]) != "string" {
-		t.Fatalf("generated AST missing void result container return type using ardruntime.Void: %#v", fn.Type.Results.List[0].Type)
+	if !ok || astExprName(resultType.X) != "ardruntime.Result" || len(resultType.Indices) != 2 || !isEmptyStructType(resultType.Indices[0]) || astExprName(resultType.Indices[1]) != "string" {
+		t.Fatalf("generated AST missing void result container return type using struct{}: %#v", fn.Type.Results.List[0].Type)
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
 		kv, ok := node.(*ast.KeyValueExpr)
@@ -1141,13 +1141,15 @@ func TestLowerProgramUsesRuntimeVoidForVoidResultValues(t *testing.T) {
 		}
 		key, keyOK := kv.Key.(*ast.Ident)
 		lit, litOK := kv.Value.(*ast.CompositeLit)
-		return keyOK && key.Name == "Value" && litOK && astExprName(lit.Type) == "ardruntime.Void"
+		return keyOK && key.Name == "Value" && litOK && isEmptyStructType(lit.Type)
 	}) {
-		t.Fatal("generated AST missing ardruntime.Void value")
+		t.Fatal("generated AST missing struct{}{} Void value")
 	}
-	if astFilesHaveEmptyStructType(files) {
-		t.Fatal("generated AST still uses anonymous empty struct for Void")
-	}
+}
+
+func isEmptyStructType(expr ast.Expr) bool {
+	st, ok := expr.(*ast.StructType)
+	return ok && (st.Fields == nil || len(st.Fields.List) == 0)
 }
 
 func TestLowerProgramMaterializesVoidGlobalInitializers(t *testing.T) {
@@ -1181,13 +1183,13 @@ func TestLowerProgramMaterializesVoidGlobalInitializers(t *testing.T) {
 			return false
 		}
 		lit, ok := ret.Results[0].(*ast.CompositeLit)
-		return ok && astExprName(lit.Type) == "ardruntime.Void"
+		return ok && isEmptyStructType(lit.Type)
 	}) {
-		t.Fatal("generated AST does not return ardruntime.Void{} for materialized global")
+		t.Fatal("generated AST does not return struct{}{} for materialized global")
 	}
 }
 
-func TestRenderTestRunnerUsesRuntimeVoidForVoidResult(t *testing.T) {
+func TestRenderTestRunnerUsesStructForVoidResult(t *testing.T) {
 	result := parse.Parse([]byte(`
 		test fn check() Void!Str { Result::ok(()) }
 	`), "test.ard")
@@ -1204,11 +1206,8 @@ func TestRenderTestRunnerUsesRuntimeVoidForVoidResult(t *testing.T) {
 		t.Fatalf("lower with tests: %v", err)
 	}
 	runner := renderTestRunner(program, []TestCase{{Name: "check", DisplayName: "check", Function: program.Tests[0].Function}}, false)
-	if !strings.Contains(runner, "func() runtime.Result[runtime.Void, string]") {
-		t.Fatalf("test runner missing void result container using runtime.Void:\n%s", runner)
-	}
-	if strings.Contains(runner, "struct{}") || strings.Contains(runner, "struct {}") {
-		t.Fatalf("test runner still uses anonymous empty struct for Void:\n%s", runner)
+	if !strings.Contains(runner, "func() runtime.Result[struct{}, string]") {
+		t.Fatalf("test runner missing void result container using struct{}:\n%s", runner)
 	}
 }
 

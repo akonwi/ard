@@ -711,7 +711,7 @@ func render(c contract, packageName string, availableImports map[string]string) 
 		return nil, err
 	}
 	renderImports(&out, imports)
-	out.WriteString("type Void = ardruntime.Void\n\n")
+	out.WriteString("type Void = struct{}\n\n")
 	out.WriteString("type Maybe[T any] = ardruntime.Maybe[T]\n\n")
 	out.WriteString("func Some[T any](value T) Maybe[T] {\n\treturn ardruntime.Some(value)\n}\n\n")
 	out.WriteString("func None[T any]() Maybe[T] {\n\treturn ardruntime.None[T]()\n}\n\n")

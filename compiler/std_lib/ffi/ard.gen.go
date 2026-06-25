@@ -8,7 +8,7 @@ import (
 	gohttp "net/http"
 )
 
-type Void = ardruntime.Void
+type Void = struct{}
 
 type Maybe[T any] = ardruntime.Maybe[T]
 
