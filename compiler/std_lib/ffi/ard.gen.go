@@ -172,7 +172,6 @@ type Host struct {
 	HTTPResponseHeaders  func(resp *gohttp.Response) map[string]string
 	HTTPServe            func(port int, handlers map[string]func(Request, *Response)) error
 	IsNil                func(data any) bool
-	JsonEncode           func(value any) (string, error)
 	JsonToDynamic        func(json string) (any, error)
 	ListToDynamic        func(list []any) any
 	MapToDynamic         func(from map[string]any) any
@@ -287,9 +286,6 @@ func (h Host) Functions() map[string]any {
 	}
 	if h.IsNil != nil {
 		functions["IsNil"] = h.IsNil
-	}
-	if h.JsonEncode != nil {
-		functions["JsonEncode"] = h.JsonEncode
 	}
 	if h.JsonToDynamic != nil {
 		functions["JsonToDynamic"] = h.JsonToDynamic

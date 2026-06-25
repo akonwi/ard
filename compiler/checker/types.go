@@ -235,7 +235,7 @@ func (s *str) equal(other Type) bool {
 }
 
 func (s *str) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString" || trait.name() == "Encodable"
+	return trait.name() == "ToString"
 }
 
 var Str = &str{}
@@ -286,7 +286,7 @@ func (b *byteType) equal(other Type) bool {
 	return false
 }
 func (b *byteType) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString" || trait.name() == "Encodable"
+	return trait.name() == "ToString"
 }
 
 var Byte = &byteType{}
@@ -337,7 +337,7 @@ func (r *runeType) equal(other Type) bool {
 	return false
 }
 func (r *runeType) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString" || trait.name() == "Encodable"
+	return trait.name() == "ToString"
 }
 
 var Rune = &runeType{}
@@ -384,7 +384,7 @@ func (i *_int) equal(other Type) bool {
 }
 
 func (i *_int) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString" || trait.name() == "Encodable"
+	return trait.name() == "ToString"
 }
 
 var Int = &_int{}
@@ -433,7 +433,7 @@ func (f *float) equal(other Type) bool {
 }
 
 func (f *float) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString" || trait.name() == "Encodable"
+	return trait.name() == "ToString"
 }
 
 var Float = &float{}
@@ -476,7 +476,7 @@ func (b *_bool) equal(other Type) bool {
 }
 
 func (b *_bool) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString" || trait.name() == "Encodable"
+	return trait.name() == "ToString"
 }
 
 var Bool = &_bool{}

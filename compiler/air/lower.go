@@ -1193,8 +1193,6 @@ func (l *lowerer) declareBuiltinTraitImpl(module ModuleID, traitID TraitID, owne
 	switch {
 	case trait.Name == "ToString" && trait.Methods[0].Name == "to_str":
 		methodID, err = l.declareBuiltinToStringMethod(module, ownerInfo)
-	case trait.Name == "Encodable" && trait.Methods[0].Name == "to_dyn":
-		methodID, err = l.declareBuiltinToDynamicMethod(module, ownerInfo)
 	default:
 		return 0, false, nil
 	}
@@ -1237,39 +1235,6 @@ func (l *lowerer) declareBuiltinToStringMethod(module ModuleID, ownerInfo TypeIn
 		Body: Block{Result: &Expr{
 			Kind:   ExprToStr,
 			Type:   strType,
-			Target: &Expr{Kind: ExprLoadLocal, Type: ownerInfo.ID, Local: 0},
-		}},
-	})
-	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
-	return id, nil
-}
-
-func (l *lowerer) declareBuiltinToDynamicMethod(module ModuleID, ownerInfo TypeInfo) (FunctionID, error) {
-	key := methodFunctionKey(module, ownerInfo.Name, "Encodable", "to_dyn")
-	if id, ok := l.functions[key]; ok {
-		return id, nil
-	}
-	dynamicType, err := l.internType(checker.Dynamic)
-	if err != nil {
-		return NoFunction, err
-	}
-	id := FunctionID(len(l.program.Functions))
-	l.functions[key] = id
-	receiver := Param{Name: "self", Type: ownerInfo.ID}
-	l.program.Functions = append(l.program.Functions, Function{
-		ID:         id,
-		Module:     module,
-		Name:       ownerInfo.Name + ".Encodable.to_dyn",
-		Receiver:   ownerInfo.ID,
-		MethodName: "to_dyn",
-		Signature: Signature{
-			Params: []Param{receiver},
-			Return: dynamicType,
-		},
-		Locals: []Local{{ID: 0, Name: "self", Type: ownerInfo.ID}},
-		Body: Block{Result: &Expr{
-			Kind:   ExprToDynamic,
-			Type:   dynamicType,
 			Target: &Expr{Kind: ExprLoadLocal, Type: ownerInfo.ID, Local: 0},
 		}},
 	})

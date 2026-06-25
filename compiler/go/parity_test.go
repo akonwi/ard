@@ -2697,18 +2697,8 @@ func TestGoTargetParityDecodeHostFlows(t *testing.T) {
 	})
 }
 
-func TestGoTargetParityEncodeJSONPrimitives(t *testing.T) {
-	runGoParityCases(t, []goParityCase{
-		{name: "encoding str", input: `use ard/encode
-fn main() Str { encode::json("hello").expect("encode failed") }`},
-		{name: "encoding int", input: `use ard/encode
-fn main() Str { encode::json(200).expect("encode failed") }`},
-		{name: "encoding float", input: `use ard/encode
-fn main() Str { encode::json(98.6).expect("encode failed") }`},
-		{name: "encoding bool", input: `use ard/encode
-fn main() Str { encode::json(true).expect("encode failed") }`},
-	})
-}
+// JSON encoding of primitives is exercised through ard/json. The legacy
+// ard/encode module and its Encodable trait were removed (ADR 0031).
 
 func TestGoTargetParityStringHelpers(t *testing.T) {
 	runGoParityCases(t, []goParityCase{

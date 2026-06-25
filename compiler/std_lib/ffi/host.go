@@ -81,7 +81,6 @@ func NewHost(config HostConfig) Host {
 		HTTPResponseHeaders:  HTTPResponseHeaders,
 		HTTPServe:            HTTPServe,
 		IsNil:                IsNil,
-		JsonEncode:           JsonEncode,
 		JsonToDynamic:        JsonToDynamic,
 		ListToDynamic:        ListToDynamic,
 		MapToDynamic:         MapToDynamic,
@@ -590,14 +589,6 @@ func JsonToDynamic(input string) (any, error) {
 	return out, nil
 }
 
-func JsonEncode(value any) (string, error) {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return "", err
-	}
-	return string(encoded), nil
-}
-
 func DecodeString(data any) Result[string, Error] {
 	if value, ok := data.(string); ok {
 		return Ok[string, Error](value)
@@ -707,6 +698,14 @@ func DynamicToList(data any) ([]any, error) {
 		return values, nil
 	}
 	return nil, fmt.Errorf("%s", formatDynamicValueForError(data))
+}
+
+func JsonEncode(value any) (string, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 func DynamicToMap(data any) (map[any]any, error) {
