@@ -299,6 +299,7 @@ type Checker struct {
 	genericContextStack               []map[string]bool
 	discardExprContext                bool
 	matchArmDiscardContext            bool
+	reportedMapKeyErrors              map[parse.Location]bool
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -692,6 +693,40 @@ func (c *Checker) specializeAliasedType(originalType Type, typeArgs []parse.Decl
 	return specializedType
 }
 
+// validateMapKeyType reports a diagnostic when a map key type is not a valid Go
+// map key. Map keys must be Go strictly-comparable so every Ard map lowers to a
+// plain Go map (ADR 0031). Unresolved generic parameters are allowed; the
+// constraint applies when they are instantiated.
+func (c *Checker) validateMapKeyType(key Type, loc parse.Location) {
+	if key == nil || isValidMapKeyType(key) {
+		return
+	}
+	// Type annotations are resolved more than once, so dedupe by location to
+	// avoid emitting the same map-key diagnostic multiple times.
+	if c.reportedMapKeyErrors == nil {
+		c.reportedMapKeyErrors = map[parse.Location]bool{}
+	}
+	if c.reportedMapKeyErrors[loc] {
+		return
+	}
+	c.reportedMapKeyErrors[loc] = true
+	c.addError(fmt.Sprintf("Invalid map key type %s: map keys must be comparable (primitives, enums, or structs)", formatTypeForDisplay(key)), loc)
+}
+
+func isValidMapKeyType(t Type) bool {
+	switch ty := t.(type) {
+	case *TypeVar:
+		if ty.actual != nil {
+			return isValidMapKeyType(ty.actual)
+		}
+		return true
+	case *Maybe, *List, *Map, *Result, *Union, *FunctionDef, *ExternalFunctionDef, *Trait, *dynamicType:
+		return false
+	default:
+		return true
+	}
+}
+
 func (c *Checker) resolveType(t parse.DeclaredType) Type {
 	var baseType Type
 	switch ty := t.(type) {
@@ -742,6 +777,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 	case *parse.Map:
 		key := c.resolveType(ty.Key)
 		value := c.resolveType(ty.Value)
+		c.validateMapKeyType(key, ty.Key.GetLocation())
 		baseType = MakeMap(key, value)
 	case *parse.ResultType:
 		val := c.resolveType(ty.Val)
@@ -3110,6 +3146,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 	}
 
 	// Create and return the map
+	c.validateMapKeyType(keyType, expr.Entries[0].Key.GetLocation())
 	mapType := MakeMap(keyType, valueType)
 	return &MapLiteral{
 		Keys:      keys,

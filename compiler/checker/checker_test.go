@@ -1905,6 +1905,29 @@ func TestLists(t *testing.T) {
 	})
 }
 
+func TestMapKeyTypeConstraint(t *testing.T) {
+	run(t, []test{
+		{
+			name:  "nullable key is rejected",
+			input: `let m: [Str?: Int] = [:]`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Invalid map key type Str?: map keys must be comparable (primitives, enums, or structs)"},
+			},
+		},
+		{
+			name:  "list key is rejected",
+			input: `let m: [[Int]: Int] = [:]`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Invalid map key type [Int]: map keys must be comparable (primitives, enums, or structs)"},
+			},
+		},
+		{
+			name:  "primitive and enum keys are allowed",
+			input: `let ages: [Str: Int] = ["ard": 0]`,
+		},
+	})
+}
+
 func TestMaps(t *testing.T) {
 	run(t, []test{
 		{
