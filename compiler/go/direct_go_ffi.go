@@ -155,9 +155,6 @@ func runtimePreludeTopLevelNames() []string {
 		"ardDirectGoCheckSignedIntRange", "ardDirectGoCheckUintIntRange", "ardDirectGoCheckNonNegativeInt",
 		"ardDirectGoIntFromSigned", "ardDirectGoIntFromUnsigned",
 		"ardDirectGoCheckFloat32Range", "ardDirectGoCheckRune",
-		"ardJSONPath", "ardJSONFound", "ardJSONErr", "ardJSONMissing",
-		"ardJSONDecodeInt", "ardJSONDecodeFloat", "ardJSONDecodeBool", "ardJSONDecodeString",
-		"ardJSONDecodeDynamic", "ardJSONDecodeByteList", "ardJSONDecodeMaybe", "ardJSONDecodeList", "ardJSONDecodeStringMap",
 		"ardJSONEncodeInt", "ardJSONEncodeFloat", "ardJSONEncodeBool", "ardJSONEncodeString", "ardJSONEncodeDynamic",
 		"ardJSONEncodeMaybe", "ardJSONEncodeList", "ardJSONEncodeMap",
 	}

@@ -2067,7 +2067,7 @@ func TestRunProgramSupportsCommonStdlibExterns(t *testing.T) {
 	}
 }
 
-func TestLowerProgramReusesJSONGlueHelpers(t *testing.T) {
+func TestLowerProgramUsesNativeJSONCodec(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/json
 
@@ -2082,12 +2082,16 @@ func TestLowerProgramReusesJSONGlueHelpers(t *testing.T) {
 	`)
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	for _, name := range []string{"ardJSONDecodeMaybe", "ardJSONDecodeList", "ardJSONEncodeMaybe", "ardJSONEncodeList"} {
-		if _, ok := astFilesFunc(files, name); !ok {
-			t.Fatalf("generated AST missing reusable JSON glue function %q", name)
-		}
-		if !astFilesHaveCall(files, name) {
-			t.Fatalf("generated AST missing reusable JSON glue call %q", name)
+	// json::parse and json::encode lower onto encoding/json/v2, not a generated codec.
+	if !astFilesHaveImport(files, "json", "encoding/json/v2") {
+		t.Fatal("generated AST missing encoding/json/v2 import for native JSON codec")
+	}
+	if !astFilesHaveCall(files, "json.Unmarshal") || !astFilesHaveCall(files, "json.Marshal") {
+		t.Fatal("generated AST missing native json.Unmarshal/json.Marshal calls")
+	}
+	for _, name := range []string{"ardJSONDecodeMaybe", "ardJSONDecodeList", "ardJSONDecodeString", "ardJSONDecodeStringMap"} {
+		if _, ok := astFilesFunc(files, name); ok {
+			t.Fatalf("generated AST should not emit the removed custom JSON decode glue %q", name)
 		}
 	}
 }
