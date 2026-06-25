@@ -2267,9 +2267,6 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		if l.mapUsesStructuralKeys(expr.Target.Type) {
-			return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Len")}}}, nil
-		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprMapHas:
 		return l.lowerMapHas(fn, expr)
@@ -2883,89 +2880,6 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 
 func (l *lowerer) isMaybeType(typeID air.TypeID) bool {
 	return validTypeID(l.program, typeID) && l.program.Types[typeID-1].Kind == air.TypeMaybe
-}
-
-func (l *lowerer) typeContainsMaybe(typeID air.TypeID, seen map[air.TypeID]bool) bool {
-	if !validTypeID(l.program, typeID) {
-		return false
-	}
-	if seen[typeID] {
-		return false
-	}
-	seen[typeID] = true
-	info := l.program.Types[typeID-1]
-	switch info.Kind {
-	case air.TypeMaybe:
-		return true
-	case air.TypeList, air.TypeFiber:
-		return l.typeContainsMaybe(info.Elem, seen)
-	case air.TypeMap:
-		return l.typeContainsMaybe(info.Key, seen) || l.typeContainsMaybe(info.Value, seen)
-	case air.TypeStruct:
-		for _, field := range info.Fields {
-			if l.typeContainsMaybe(field.Type, seen) {
-				return true
-			}
-		}
-	case air.TypeResult:
-		return l.typeContainsMaybe(info.Value, seen) || l.typeContainsMaybe(info.Error, seen)
-	case air.TypeUnion:
-		for _, member := range info.Members {
-			if l.typeContainsMaybe(member.Type, seen) {
-				return true
-			}
-		}
-	case air.TypeFunction:
-		for _, param := range info.Params {
-			if l.typeContainsMaybe(param, seen) {
-				return true
-			}
-		}
-		return l.typeContainsMaybe(info.Return, seen)
-	}
-	return false
-}
-
-// mapUsesStructuralKeys always reports false: map keys are constrained by the
-// checker to Go-comparable types (ADR 0031), so every Ard map lowers to a plain
-// Go map and no structural-map representation is generated.
-func (l *lowerer) mapUsesStructuralKeys(air.TypeID) bool {
-	return false
-}
-
-func (l *lowerer) structuralMapTypes(mapTypeID air.TypeID) (ast.Expr, ast.Expr, error) {
-	if !validTypeID(l.program, mapTypeID) {
-		return nil, nil, fmt.Errorf("invalid map type id %d", mapTypeID)
-	}
-	info := l.program.Types[mapTypeID-1]
-	if info.Kind != air.TypeMap {
-		return nil, nil, fmt.Errorf("type %s is not a map", info.Name)
-	}
-	keyType, err := l.goType(info.Key)
-	if err != nil {
-		return nil, nil, err
-	}
-	valueType, err := l.goType(info.Value)
-	if err != nil {
-		return nil, nil, err
-	}
-	return keyType, valueType, nil
-}
-
-func (l *lowerer) structuralMapEntryTypeExpr(mapTypeID air.TypeID) (ast.Expr, error) {
-	keyType, valueType, err := l.structuralMapTypes(mapTypeID)
-	if err != nil {
-		return nil, err
-	}
-	return &ast.IndexListExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "StructuralMapEntry"), Indices: []ast.Expr{keyType, valueType}}, nil
-}
-
-func (l *lowerer) structuralMapWithEntriesExpr(mapTypeID air.TypeID, entries []ast.Expr) (ast.Expr, error) {
-	keyType, valueType, err := l.structuralMapTypes(mapTypeID)
-	if err != nil {
-		return nil, err
-	}
-	return &ast.CallExpr{Fun: &ast.IndexListExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "NewStructuralMapWithEntries"), Indices: []ast.Expr{keyType, valueType}}, Args: entries}, nil
 }
 
 func (l *lowerer) mapKeyValueTypes(mapTypeID air.TypeID) (air.TypeID, air.TypeID) {
@@ -5687,9 +5601,6 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 
 func (l *lowerer) lowerMakeMap(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	keyType, valueType := l.mapKeyValueTypes(expr.Type)
-	if l.mapUsesStructuralKeys(expr.Type) {
-		return l.lowerMakeStructuralMap(fn, expr, keyType, valueType)
-	}
 	typ, err := l.goType(expr.Type)
 	if err != nil {
 		return loweredExpr{}, err
@@ -5732,56 +5643,6 @@ func (l *lowerer) lowerMakeMap(fn air.Function, expr air.Expr) (loweredExpr, err
 	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
 }
 
-func (l *lowerer) lowerMakeStructuralMap(fn air.Function, expr air.Expr, keyType air.TypeID, valueType air.TypeID) (loweredExpr, error) {
-	entryType, err := l.structuralMapEntryTypeExpr(expr.Type)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	entries := make([]ast.Expr, 0, len(expr.Entries))
-	stmts := []ast.Stmt{}
-	for _, entry := range expr.Entries {
-		var key loweredExpr
-		if keyType != air.NoType {
-			key, err = l.lowerExprWithExpectedType(fn, entry.Key, keyType)
-		} else {
-			key, err = l.lowerExpr(fn, entry.Key)
-		}
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		var value loweredExpr
-		if valueType != air.NoType {
-			value, err = l.lowerExprWithExpectedType(fn, entry.Value, valueType)
-		} else {
-			value, err = l.lowerExpr(fn, entry.Value)
-		}
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, key.stmts...)
-		keyExpr := key.expr
-		if l.isVoidType(keyType) || isVoidExpr(keyExpr) {
-			stmts = l.appendVoidValueEval(stmts, keyExpr)
-			keyExpr = l.voidValueExpr()
-		}
-		stmts = append(stmts, value.stmts...)
-		valueExpr := value.expr
-		if l.isVoidType(valueType) || isVoidExpr(valueExpr) {
-			stmts = l.appendVoidValueEval(stmts, valueExpr)
-			valueExpr = l.voidValueExpr()
-		}
-		entries = append(entries, &ast.CompositeLit{Type: entryType, Elts: []ast.Expr{
-			&ast.KeyValueExpr{Key: ast.NewIdent("Key"), Value: keyExpr},
-			&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: valueExpr},
-		}})
-	}
-	mapExpr, err := l.structuralMapWithEntriesExpr(expr.Type, entries)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	return loweredExpr{stmts: stmts, expr: mapExpr}, nil
-}
-
 func (l *lowerer) lowerMapHas(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil || len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("map has expects target and one arg")
@@ -5793,9 +5654,6 @@ func (l *lowerer) lowerMapHas(fn air.Function, expr air.Expr) (loweredExpr, erro
 	key, err := l.lowerMapKeyArg(fn, expr.Target.Type, expr.Args[0])
 	if err != nil {
 		return loweredExpr{}, err
-	}
-	if l.mapUsesStructuralKeys(expr.Target.Type) {
-		return loweredExpr{stmts: append(target.stmts, key.stmts...), expr: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Has")}, Args: []ast.Expr{key.expr}}}, nil
 	}
 	temp := l.nextTemp()
 	decls, err := l.declareTemp(expr.Type, temp)
@@ -5831,9 +5689,6 @@ func (l *lowerer) lowerMapGet(fn air.Function, expr air.Expr) (loweredExpr, erro
 	valueTemp := l.nextTemp()
 	okName := l.nextTemp()
 	lookup := ast.Expr(&ast.IndexExpr{X: target.expr, Index: key.expr})
-	if l.mapUsesStructuralKeys(expr.Target.Type) {
-		lookup = &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Get")}, Args: []ast.Expr{key.expr}}
-	}
 	stmts := append(target.stmts, key.stmts...)
 	stmts = append(stmts, decls...)
 	someExpr, err := l.maybeSomeExpr(expr.Type, ast.NewIdent(valueTemp))
@@ -5889,11 +5744,7 @@ func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, erro
 		stmts = l.appendVoidValueEval(stmts, valueExpr)
 		valueExpr = l.voidValueExpr()
 	}
-	if l.mapUsesStructuralKeys(expr.Target.Type) {
-		stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Set")}, Args: []ast.Expr{keyExpr, valueExpr}}})
-	} else {
-		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: keyExpr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}})
-	}
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: keyExpr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("true")}, nil
 }
 
@@ -5910,11 +5761,7 @@ func (l *lowerer) lowerMapDrop(fn air.Function, expr air.Expr) (loweredExpr, err
 		return loweredExpr{}, err
 	}
 	stmts := append(target.stmts, key.stmts...)
-	if l.mapUsesStructuralKeys(expr.Target.Type) {
-		stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Drop")}, Args: []ast.Expr{key.expr}}})
-	} else {
-		stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("delete"), Args: []ast.Expr{target.expr, key.expr}}})
-	}
+	stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("delete"), Args: []ast.Expr{target.expr, key.expr}}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 }
 
@@ -5925,9 +5772,6 @@ func (l *lowerer) lowerMapKeys(fn air.Function, expr air.Expr) (loweredExpr, err
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {
 		return loweredExpr{}, err
-	}
-	if l.mapUsesStructuralKeys(expr.Target.Type) {
-		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("Keys")}}}, nil
 	}
 	helper, err := l.mapKeyHelper(expr.Target.Type)
 	if err != nil {
@@ -5949,9 +5793,6 @@ func (l *lowerer) lowerMapKeyAt(fn air.Function, expr air.Expr) (loweredExpr, er
 		return loweredExpr{}, err
 	}
 	stmts := append(target.stmts, index.stmts...)
-	if l.mapUsesStructuralKeys(expr.Target.Type) {
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("KeyAt")}, Args: []ast.Expr{index.expr}}}, nil
-	}
 	helper, err := l.mapKeyHelper(expr.Target.Type)
 	if err != nil {
 		return loweredExpr{}, err
@@ -5973,9 +5814,6 @@ func (l *lowerer) lowerMapValueAt(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{}, err
 	}
 	stmts := append(target.stmts, index.stmts...)
-	if l.mapUsesStructuralKeys(expr.Target.Type) {
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent("ValueAt")}, Args: []ast.Expr{index.expr}}}, nil
-	}
 	helper, err := l.mapKeyHelper(expr.Target.Type)
 	if err != nil {
 		return loweredExpr{}, err
@@ -7635,7 +7473,6 @@ func (l *lowerer) jsonEncodeGoTypeName(typeID air.TypeID) string {
 func (l *lowerer) jsonEncodePreludeSource() string {
 	var b strings.Builder
 	needsMaybeHelper := false
-	needsStructuralMapHelper := false
 	for _, typ := range l.program.Types {
 		if typ.ID == air.NoType || !l.jsonEncodeTypes[typ.ID] {
 			continue
@@ -7643,11 +7480,8 @@ func (l *lowerer) jsonEncodePreludeSource() string {
 		if typ.Kind == air.TypeMaybe {
 			needsMaybeHelper = true
 		}
-		if typ.Kind == air.TypeMap && l.mapUsesStructuralKeys(typ.ID) {
-			needsStructuralMapHelper = true
-		}
 	}
-	if needsMaybeHelper || needsStructuralMapHelper {
+	if needsMaybeHelper {
 		l.registerImport("ardruntime", "github.com/akonwi/ard/runtime")
 	}
 	b.WriteString(`
@@ -7700,19 +7534,6 @@ func ardJSONEncodeMap[K comparable, V any](enc *jsontext.Encoder, values map[K]V
 	return enc.WriteToken(jsontext.EndObject)
 }
 `)
-	if needsStructuralMapHelper {
-		b.WriteString(`
-func ardJSONEncodeStructuralMap[K any, V any](enc *jsontext.Encoder, values ardruntime.StructuralMap[K, V], encode func(*jsontext.Encoder, V) error) error {
-	if err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }
-	for _, key := range values.Keys() {
-		item, _ := values.Get(key)
-		if err := enc.WriteToken(jsontext.String(fmt.Sprint(key))); err != nil { return err }
-		if err := encode(enc, item); err != nil { return err }
-	}
-	return enc.WriteToken(jsontext.EndObject)
-}
-`)
-	}
 	for _, typ := range l.program.Types {
 		if typ.ID == air.NoType || !l.jsonEncodeTypes[typ.ID] {
 			continue
@@ -7754,11 +7575,7 @@ func (l *lowerer) writeJSONEncodeHelper(b *strings.Builder, typeID air.TypeID) {
 			fmt.Fprintf(b, "\treturn ardJSONEncodeList(enc, value, %s)\n", l.jsonEncodeHelperName(info.Elem))
 		}
 	case air.TypeMap:
-		if l.mapUsesStructuralKeys(typeID) {
-			fmt.Fprintf(b, "\treturn ardJSONEncodeStructuralMap(enc, value, %s)\n", l.jsonEncodeHelperName(info.Value))
-		} else {
-			fmt.Fprintf(b, "\treturn ardJSONEncodeMap(enc, value, %s)\n", l.jsonEncodeHelperName(info.Value))
-		}
+		fmt.Fprintf(b, "\treturn ardJSONEncodeMap(enc, value, %s)\n", l.jsonEncodeHelperName(info.Value))
 	case air.TypeStruct:
 		fmt.Fprintf(b, "\tif err := enc.WriteToken(jsontext.BeginObject); err != nil { return err }\n")
 		for _, field := range info.Fields {

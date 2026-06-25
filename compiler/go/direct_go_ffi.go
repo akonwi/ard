@@ -159,7 +159,7 @@ func runtimePreludeTopLevelNames() []string {
 		"ardJSONDecodeInt", "ardJSONDecodeFloat", "ardJSONDecodeBool", "ardJSONDecodeString",
 		"ardJSONDecodeDynamic", "ardJSONDecodeByteList", "ardJSONDecodeMaybe", "ardJSONDecodeList", "ardJSONDecodeStringMap",
 		"ardJSONEncodeInt", "ardJSONEncodeFloat", "ardJSONEncodeBool", "ardJSONEncodeString", "ardJSONEncodeDynamic",
-		"ardJSONEncodeMaybe", "ardJSONEncodeList", "ardJSONEncodeMap", "ardJSONEncodeStructuralMap",
+		"ardJSONEncodeMaybe", "ardJSONEncodeList", "ardJSONEncodeMap",
 	}
 }
 
