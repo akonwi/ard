@@ -7651,6 +7651,9 @@ func (l *lowerer) jsonNativeCodecSafe(typeID air.TypeID, seen map[air.TypeID]boo
 	case air.TypeResult:
 		// runtime.Result implements json.Marshaler (ok -> value, err -> error).
 		return l.jsonNativeCodecSafe(info.Value, seen) && l.jsonNativeCodecSafe(info.Error, seen)
+	case air.TypeDynamic:
+		// Dynamic lowers to any; json.Marshal handles it directly.
+		return true
 	case air.TypeStruct:
 		for _, field := range info.Fields {
 			if !l.jsonNativeCodecSafe(field.Type, seen) {
