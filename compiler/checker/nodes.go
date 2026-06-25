@@ -237,7 +237,6 @@ const (
 	StrStartsWith
 	StrEndsWith
 	StrToStr
-	StrToDyn
 	StrTrim
 )
 
@@ -267,8 +266,6 @@ func (s *StrMethod) Type() Type {
 		return Bool
 	case StrToStr:
 		return Str
-	case StrToDyn:
-		return Dynamic
 	case StrTrim:
 		return Str
 	default:
@@ -281,7 +278,6 @@ type ByteMethodKind uint8
 const (
 	ByteToInt ByteMethodKind = iota
 	ByteToStr
-	ByteToDyn
 )
 
 type ByteMethod struct {
@@ -295,8 +291,6 @@ func (m *ByteMethod) Type() Type {
 		return Int
 	case ByteToStr:
 		return Str
-	case ByteToDyn:
-		return Dynamic
 	default:
 		return Void
 	}
@@ -307,7 +301,6 @@ type RuneMethodKind uint8
 const (
 	RuneToInt RuneMethodKind = iota
 	RuneToStr
-	RuneToDyn
 )
 
 type RuneMethod struct {
@@ -321,8 +314,6 @@ func (m *RuneMethod) Type() Type {
 		return Int
 	case RuneToStr:
 		return Str
-	case RuneToDyn:
-		return Dynamic
 	default:
 		return Void
 	}
@@ -332,7 +323,6 @@ type IntMethodKind uint8
 
 const (
 	IntToStr IntMethodKind = iota
-	IntToDyn
 )
 
 type IntMethod struct {
@@ -344,8 +334,6 @@ func (m *IntMethod) Type() Type {
 	switch m.Kind {
 	case IntToStr:
 		return Str
-	case IntToDyn:
-		return Dynamic
 	default:
 		return Void
 	}
@@ -356,7 +344,6 @@ type FloatMethodKind uint8
 const (
 	FloatToStr FloatMethodKind = iota
 	FloatToInt
-	FloatToDyn
 )
 
 type FloatMethod struct {
@@ -370,8 +357,6 @@ func (m *FloatMethod) Type() Type {
 		return Str
 	case FloatToInt:
 		return Int
-	case FloatToDyn:
-		return Dynamic
 	default:
 		return Void
 	}
@@ -381,7 +366,6 @@ type BoolMethodKind uint8
 
 const (
 	BoolToStr BoolMethodKind = iota
-	BoolToDyn
 )
 
 type BoolMethod struct {
@@ -393,8 +377,6 @@ func (m *BoolMethod) Type() Type {
 	switch m.Kind {
 	case BoolToStr:
 		return Str
-	case BoolToDyn:
-		return Dynamic
 	default:
 		return Void
 	}

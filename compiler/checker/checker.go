@@ -3448,8 +3448,6 @@ func (c *Checker) createStrMethod(subject Expression, methodName string, args []
 		kind = StrEndsWith
 	case "to_str":
 		kind = StrToStr
-	case "to_dyn":
-		kind = StrToDyn
 	case "trim":
 		kind = StrTrim
 	default:
@@ -3470,8 +3468,6 @@ func (c *Checker) createByteMethod(subject Expression, methodName string) Expres
 		kind = ByteToInt
 	case "to_str":
 		kind = ByteToStr
-	case "to_dyn":
-		kind = ByteToDyn
 	default:
 		panic(fmt.Sprintf("Unknown Byte method: %s", methodName))
 	}
@@ -3485,8 +3481,6 @@ func (c *Checker) createRuneMethod(subject Expression, methodName string) Expres
 		kind = RuneToInt
 	case "to_str":
 		kind = RuneToStr
-	case "to_dyn":
-		kind = RuneToDyn
 	default:
 		panic(fmt.Sprintf("Unknown Rune method: %s", methodName))
 	}
@@ -3498,8 +3492,6 @@ func (c *Checker) createIntMethod(subject Expression, methodName string) Express
 	switch methodName {
 	case "to_str":
 		kind = IntToStr
-	case "to_dyn":
-		kind = IntToDyn
 	default:
 		panic(fmt.Sprintf("Unknown Int method: %s", methodName))
 	}
@@ -3516,8 +3508,6 @@ func (c *Checker) createFloatMethod(subject Expression, methodName string) Expre
 		kind = FloatToStr
 	case "to_int":
 		kind = FloatToInt
-	case "to_dyn":
-		kind = FloatToDyn
 	default:
 		panic(fmt.Sprintf("Unknown Float method: %s", methodName))
 	}
@@ -3532,8 +3522,6 @@ func (c *Checker) createBoolMethod(subject Expression, methodName string) Expres
 	switch methodName {
 	case "to_str":
 		kind = BoolToStr
-	case "to_dyn":
-		kind = BoolToDyn
 	default:
 		panic(fmt.Sprintf("Unknown Bool method: %s", methodName))
 	}

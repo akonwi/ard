@@ -3564,9 +3564,6 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if e.Kind == checker.ByteToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
 		}
-		if e.Kind == checker.ByteToDyn {
-			return fl.lowerUnary(ExprToDynamic, typeID, e.Subject)
-		}
 		return nil, fmt.Errorf("unsupported AIR Byte method %d", e.Kind)
 	case *checker.RuneMethod:
 		if e.Kind == checker.RuneToInt {
@@ -3575,16 +3572,10 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if e.Kind == checker.RuneToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
 		}
-		if e.Kind == checker.RuneToDyn {
-			return fl.lowerUnary(ExprToDynamic, typeID, e.Subject)
-		}
 		return nil, fmt.Errorf("unsupported AIR Rune method %d", e.Kind)
 	case *checker.IntMethod:
 		if e.Kind == checker.IntToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
-		}
-		if e.Kind == checker.IntToDyn {
-			return fl.lowerUnary(ExprToDynamic, typeID, e.Subject)
 		}
 		return nil, fmt.Errorf("unsupported AIR Int method %d", e.Kind)
 	case *checker.FloatMethod:
@@ -3594,16 +3585,10 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if e.Kind == checker.FloatToInt {
 			return fl.lowerUnary(ExprToInt, typeID, e.Subject)
 		}
-		if e.Kind == checker.FloatToDyn {
-			return fl.lowerUnary(ExprToDynamic, typeID, e.Subject)
-		}
 		return nil, fmt.Errorf("unsupported AIR Float method %d", e.Kind)
 	case *checker.BoolMethod:
 		if e.Kind == checker.BoolToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
-		}
-		if e.Kind == checker.BoolToDyn {
-			return fl.lowerUnary(ExprToDynamic, typeID, e.Subject)
 		}
 		return nil, fmt.Errorf("unsupported AIR Bool method %d", e.Kind)
 	case *checker.ListMethod:
@@ -4229,8 +4214,6 @@ func (fl *functionLowerer) lowerStrMethod(typeID TypeID, method *checker.StrMeth
 		expected = []TypeID{strType}
 	case checker.StrToStr:
 		kind = ExprToStr
-	case checker.StrToDyn:
-		kind = ExprToDynamic
 	case checker.StrTrim:
 		kind = ExprStrTrim
 	default:
