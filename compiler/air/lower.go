@@ -66,6 +66,7 @@ type lowerer struct {
 	genericStructDefs        map[string]TypeID
 	genericFunctionDefs      map[string]FunctionID
 	genericFunctionOriginals map[string]*checker.FunctionDef
+	genericMethodDefs        map[string]FunctionID
 	defParams                map[string]int
 	includeTests             bool
 }
@@ -105,6 +106,7 @@ func newLowerer(options LowerOptions) *lowerer {
 		genericStructDefs:        map[string]TypeID{},
 		genericFunctionDefs:      map[string]FunctionID{},
 		genericFunctionOriginals: map[string]*checker.FunctionDef{},
+		genericMethodDefs:        map[string]FunctionID{},
 		includeTests:             options.IncludeTests,
 	}
 	l.mustIntern(checker.Void)
@@ -1532,6 +1534,138 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 
 func (l *lowerer) lowerInstanceMethodFunction(id FunctionID, def *checker.FunctionDef) error {
 	return l.lowerFunctionByID(id, def)
+}
+
+// genericSelfInstance returns the TypeID of a generic struct instantiated at its
+// own type parameters (e.g. `Channel[T]`), used as the receiver type of a
+// generic method definition (ADR 0031).
+func (l *lowerer) genericSelfInstance(defID TypeID) (TypeID, error) {
+	if !validTypeID(&l.program, defID) {
+		return NoType, fmt.Errorf("invalid generic struct definition %d", defID)
+	}
+	def := l.program.Types[defID-1]
+	args := make([]TypeID, len(def.TypeParams))
+	for i, name := range def.TypeParams {
+		tp, err := l.internTypeParam(name, i)
+		if err != nil {
+			return NoType, err
+		}
+		args[i] = tp
+	}
+	info := TypeInfo{
+		Kind:        TypeStruct,
+		ModulePath:  def.ModulePath,
+		Private:     def.Private,
+		Fields:      def.Fields,
+		Generic:     defID,
+		GenericArgs: args,
+	}
+	return l.internSyntheticType(def.Name+"<self>", info)
+}
+
+// declareGenericInstanceMethodFunction lowers a method on a generic struct once
+// as a generic definition whose receiver is `Owner[T...]` and whose parameters,
+// return type, and body reference the struct's type parameters (ADR 0031). It
+// returns the function id and the concrete type arguments for the call site.
+// methodUsesOnlyStructTypeParams reports whether a method's type variables are
+// exactly the owning struct's type parameters (no method-introduced generics),
+// which is the condition for lowering it as a Go generic-receiver method.
+func methodUsesOnlyStructTypeParams(def *checker.FunctionDef, structParams []string) bool {
+	if len(def.GenericBindings) == 0 {
+		return true
+	}
+	allowed := make(map[string]bool, len(structParams))
+	for _, p := range structParams {
+		allowed[p] = true
+	}
+	for name := range def.GenericBindings {
+		if !allowed[name] {
+			return false
+		}
+	}
+	return true
+}
+
+func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID, instanceType TypeID, structType *checker.StructDef, callDef *checker.FunctionDef) (FunctionID, []TypeID, error) {
+	info, ok := fl.l.typeInfo(instanceType)
+	if !ok || info.Generic == NoType {
+		return NoFunction, nil, fmt.Errorf("generic method receiver %d is not a generic instantiation", instanceType)
+	}
+	defID := info.Generic
+	structDef := fl.l.program.Types[defID-1]
+	paramNames := structDef.TypeParams
+	typeArgs := info.GenericArgs
+
+	key := "genericmethod:" + structDef.ModulePath + ":" + structDef.Name + ":" + callDef.Name
+	if id, ok := fl.l.genericMethodDefs[key]; ok {
+		return id, typeArgs, nil
+	}
+
+	orig := callDef
+	if methods := fl.l.structMethods(structType); methods != nil {
+		if m, ok := methods[callDef.Name]; ok && m != nil {
+			orig = m
+		}
+	}
+
+	recvType, err := fl.l.genericSelfInstance(defID)
+	if err != nil {
+		return NoFunction, nil, err
+	}
+	receiver := orig.Receiver
+	if receiver == "" {
+		receiver = "self"
+	}
+
+	params := map[string]int{}
+	for i, p := range paramNames {
+		params[p] = i
+	}
+	prev := fl.l.defParams
+	fl.l.defParams = params
+	methodParams := make([]Param, 0, len(orig.Parameters)+1)
+	methodParams = append(methodParams, Param{Name: receiver, Type: recvType, Mutable: orig.Mutates})
+	for _, p := range orig.Parameters {
+		tid, err := fl.l.internType(p.Type)
+		if err != nil {
+			fl.l.defParams = prev
+			return NoFunction, nil, err
+		}
+		methodParams = append(methodParams, Param{Name: p.Name, Type: tid, Mutable: p.Mutable})
+	}
+	returnType, err := fl.l.internType(orig.ReturnType)
+	fl.l.defParams = prev
+	if err != nil {
+		return NoFunction, nil, err
+	}
+
+	signature := Signature{Params: methodParams, Return: returnType}
+	id := FunctionID(len(fl.l.program.Functions))
+	fl.l.genericMethodDefs[key] = id
+	fl.l.functions[concreteFunctionKey(module, structDef.Name+"."+callDef.Name, signature, "genericmethod")] = id
+	fl.l.program.Functions = append(fl.l.program.Functions, Function{
+		ID:         id,
+		Module:     module,
+		Name:       structDef.Name + "." + callDef.Name,
+		Receiver:   recvType,
+		MethodName: callDef.Name,
+		Signature:  signature,
+		TypeParams: paramNames,
+	})
+	fl.l.program.Modules[module].Functions = appendUniqueFunction(fl.l.program.Modules[module].Functions, id)
+	typeVars := make(map[string]TypeID, len(paramNames))
+	for p, idx := range params {
+		tp, err := fl.l.internTypeParam(p, idx)
+		if err != nil {
+			return NoFunction, nil, err
+		}
+		typeVars[p] = tp
+	}
+	fl.l.setFunctionTypeVars(id, typeVars)
+	if err := fl.l.lowerFunctionByID(id, orig); err != nil {
+		return NoFunction, nil, err
+	}
+	return id, typeArgs, nil
 }
 
 func (l *lowerer) declareExtern(module ModuleID, def *checker.ExternalFunctionDef) (ExternID, error) {
@@ -5182,6 +5316,34 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 		if err := fl.l.ensureModuleGlobalsDeclared(fl.l.program.Modules[module].Path); err != nil {
 			return nil, err
 		}
+	}
+	// A method on a generic struct lowers once as a generic method definition
+	// (ADR 0031), provided it only uses the struct's type parameters: Go method
+	// receivers cannot introduce additional type parameters, so a method with
+	// its own generic parameters keeps the monomorphization fallback. The call
+	// references the definition with the receiver's concrete type arguments and
+	// lowers its arguments against their concrete types.
+	if typeInfo.Generic != NoType && methodUsesOnlyStructTypeParams(def, fl.l.program.Types[typeInfo.Generic-1].TypeParams) {
+		id, typeArgs, err := fl.declareGenericInstanceMethodFunction(module, target.Type, method.StructType, def)
+		if err != nil {
+			return nil, err
+		}
+		args := make([]Expr, 0, len(method.Method.Args)+1)
+		args = append(args, *target)
+		concreteParams := make([]Param, len(method.Method.Args))
+		for i, arg := range method.Method.Args {
+			tid, err := fl.internType(arg.Type())
+			if err != nil {
+				return nil, err
+			}
+			concreteParams[i] = Param{Type: tid}
+		}
+		loweredArgs, err := fl.lowerArgsWithSignature(method.Method.Args, Signature{Params: concreteParams, Return: typeID})
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, loweredArgs...)
+		return &Expr{Kind: ExprCall, Type: typeID, Function: id, Args: args, TypeArgs: typeArgs}, nil
 	}
 	id, err := fl.declareInstanceMethodFunction(module, typeInfo.Name, target.Type, def, method.Method.Args, typeID)
 	if err != nil {

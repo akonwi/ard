@@ -6689,3 +6689,36 @@ fn main() Int {
 		t.Fatalf("expected 2 instantiated Pair[...] calls, found %d", count)
 	}
 }
+
+func TestLowerGenericStructMethodEmitsGoGenericReceiver(t *testing.T) {
+	program := lowerSource(t, `struct Box {
+  item: $T
+}
+
+impl Box {
+  fn get() $T {
+    self.item
+  }
+}
+
+fn main() Int {
+  let b: Box<Int> = Box{item: 42}
+  b.get()
+}`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	// A real Go generic-receiver method `func (self Box[T]) Get() T`.
+	if !astFilesContain(files, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil || len(fn.Recv.List) != 1 || fn.Name.Name != "Get" {
+			return false
+		}
+		idx, ok := fn.Recv.List[0].Type.(*ast.IndexExpr)
+		if !ok {
+			return false
+		}
+		base, ok := idx.X.(*ast.Ident)
+		return ok && base.Name == "Box"
+	}) {
+		t.Fatal("generated AST missing generic-receiver method func (self Box[T]) Get()")
+	}
+}

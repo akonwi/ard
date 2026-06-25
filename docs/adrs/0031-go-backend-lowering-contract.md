@@ -310,6 +310,8 @@ A reference to a top-level function as a value lowers to the Go function identif
 
 Ard generic functions and methods lower to Go generics: a generic Ard function becomes a single generic Go function with its natural name, and Ard trait bounds map to Go type constraints (interfaces). This keeps the public Go API natural and the output small, rather than emitting many mangled monomorphized specializations.
 
+A method on a generic struct lowers to a real Go generic-receiver method (`func (self Foo[T]) M(...)`), where the receiver binds the struct's type parameters. Because Go method receivers cannot introduce *additional* type parameters, a method that declares its own generic parameters beyond the struct's keeps the monomorphization fallback.
+
 Where a generic cannot be expressed with Go type constraints, the backend falls back to monomorphization, emitting a concrete specialized Go function per instantiation. Monomorphization is the fallback, not the default.
 
 A type parameter used as a map key emits a Go `comparable` constraint, since `map[K]V` requires it. When such a parameter also has a trait bound, the emitted constraint is an interface embedding both `comparable` and the trait's interface. The checker infers the comparability requirement from map-key usage and enforces it at instantiation using the same map-key rule as concrete maps; in particular it is stricter than Go `comparable` in one case, rejecting a `Maybe` type argument for a key parameter even though Go would accept it. On the monomorphization fallback path the key type is concrete and already checked, so no constraint is emitted.

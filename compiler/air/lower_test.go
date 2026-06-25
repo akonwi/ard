@@ -982,13 +982,18 @@ func TestLowerGenericStructMethodBodyUsesReceiverBindings(t *testing.T) {
 		}
 	`)
 
-	get := findFunction(t, program, "Box<Int>.get")
-	if typeKind(t, program, get.Signature.Return) != TypeInt {
-		t.Fatalf("get return kind = %v, want TypeInt", typeKind(t, program, get.Signature.Return))
+	// The method is lowered once as a generic definition whose return type is
+	// the struct's type parameter (ADR 0031, Phase 3).
+	get := findFunction(t, program, "Box.get")
+	if len(get.TypeParams) == 0 {
+		t.Fatalf("Box.get should be a generic method definition")
+	}
+	if typeKind(t, program, get.Signature.Return) != TypeParam {
+		t.Fatalf("get return kind = %v, want TypeParam", typeKind(t, program, get.Signature.Return))
 	}
 }
 
-func TestLowerGenericStructMethodSpecializationsDoNotCollapse(t *testing.T) {
+func TestLowerGenericStructMethodLowersOnceAsGeneric(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box {
 			item: $T
@@ -1017,14 +1022,20 @@ func TestLowerGenericStructMethodSpecializationsDoNotCollapse(t *testing.T) {
 	if strGet.Body.Result == nil || strGet.Body.Result.Kind != ExprCall {
 		t.Fatalf("get_str result = %#v, want method call", strGet.Body.Result)
 	}
-	if intGet.Body.Result.Function == strGet.Body.Result.Function {
-		t.Fatalf("generic method specializations collapsed to function %d", intGet.Body.Result.Function)
+	// Both calls resolve to the single generic method definition (no
+	// monomorphized specializations), each supplying its own type argument.
+	if intGet.Body.Result.Function != strGet.Body.Result.Function {
+		t.Fatalf("generic method should lower once, got functions %d and %d", intGet.Body.Result.Function, strGet.Body.Result.Function)
 	}
-	if typeKind(t, program, program.Functions[intGet.Body.Result.Function].Signature.Return) != TypeInt {
-		t.Fatalf("get_int method return kind = %v, want Int", typeKind(t, program, program.Functions[intGet.Body.Result.Function].Signature.Return))
+	method := program.Functions[intGet.Body.Result.Function]
+	if len(method.TypeParams) == 0 || typeKind(t, program, method.Signature.Return) != TypeParam {
+		t.Fatalf("method should be generic with a TypeParam return, got %#v", method.Signature)
 	}
-	if typeKind(t, program, program.Functions[strGet.Body.Result.Function].Signature.Return) != TypeStr {
-		t.Fatalf("get_str method return kind = %v, want Str", typeKind(t, program, program.Functions[strGet.Body.Result.Function].Signature.Return))
+	if len(intGet.Body.Result.TypeArgs) != 1 || typeKind(t, program, intGet.Body.Result.TypeArgs[0]) != TypeInt {
+		t.Fatalf("get_int call type args = %v, want [Int]", intGet.Body.Result.TypeArgs)
+	}
+	if len(strGet.Body.Result.TypeArgs) != 1 || typeKind(t, program, strGet.Body.Result.TypeArgs[0]) != TypeStr {
+		t.Fatalf("get_str call type args = %v, want [Str]", strGet.Body.Result.TypeArgs)
 	}
 }
 
@@ -1449,15 +1460,17 @@ func TestLowerReceiverGenericUsedOnlyInMethodBody(t *testing.T) {
 			box.has_raw()
 		}
 	`)
+	// Inside the generic method body the struct's type parameter stays abstract,
+	// so the generic extern call is instantiated at the type parameter.
 	for _, ext := range program.Externs {
 		if ext.Name == "raw" && len(ext.TypeArgs) == 1 {
-			if got := typeKind(t, program, ext.TypeArgs[0]); got != TypeInt {
-				t.Fatalf("raw type arg kind = %v, want Int", got)
+			if got := typeKind(t, program, ext.TypeArgs[0]); got != TypeParam {
+				t.Fatalf("raw type arg kind = %v, want TypeParam", got)
 			}
 			return
 		}
 	}
-	t.Fatalf("raw extern specialization with explicit type arg not found: %#v", program.Externs)
+	t.Fatalf("raw extern specialization with type arg not found: %#v", program.Externs)
 }
 func TestLowerGenericFunctionAdapterClosureCapturesSpecializedCallback(t *testing.T) {
 	_ = lowerSource(t, `

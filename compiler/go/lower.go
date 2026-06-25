@@ -1478,12 +1478,12 @@ func (l *lowerer) lowerGoMethodWrapper(fn air.Function) (*ast.FuncDecl, bool, er
 	if receiverTypeID == air.NoType {
 		receiverTypeID = fn.Signature.Params[0].Type
 	}
-	// A Go method on a concrete instantiation of a generic type is not valid Go
-	// (the receiver `Foo[int]` would bind a fresh type parameter named `int`).
-	// Generic struct methods would need generic method receivers, which is the
-	// generic-functions phase; for now skip the wrapper. Ard method dispatch uses
-	// the standalone function, so behavior is unaffected.
-	if validTypeID(l.program, receiverTypeID) && l.program.Types[receiverTypeID-1].Generic != air.NoType {
+	// A method on a generic struct is a real Go generic-receiver method
+	// (`func (self Foo[T]) M(...)`), where the receiver binds the type
+	// parameters. A method on a *concrete* instantiation cannot be expressed in
+	// Go (the receiver `Foo[int]` would bind a fresh type parameter named
+	// `int`); skip its wrapper and rely on the standalone function instead.
+	if validTypeID(l.program, receiverTypeID) && l.program.Types[receiverTypeID-1].Generic != air.NoType && len(fn.TypeParams) == 0 {
 		return nil, false, nil
 	}
 	receiverType, err := l.goType(receiverTypeID)
@@ -1507,7 +1507,13 @@ func (l *lowerer) lowerGoMethodWrapper(fn air.Function) (*ast.FuncDecl, bool, er
 		callArgs = append(callArgs, ast.NewIdent(name))
 	}
 
-	call := &ast.CallExpr{Fun: l.functionExpr(fn), Args: callArgs}
+	callFun := l.functionExpr(fn)
+	if len(fn.TypeParams) > 0 {
+		// Instantiate the standalone generic method function with the receiver's
+		// type parameters, which the receiver `Foo[T]` brings into scope.
+		callFun = l.indexWithTypeParamNames(callFun, fn.TypeParams)
+	}
+	call := &ast.CallExpr{Fun: callFun, Args: callArgs}
 	body := []ast.Stmt{}
 	if l.isVoidType(fn.Signature.Return) {
 		body = append(body, &ast.ExprStmt{X: call})
