@@ -7586,6 +7586,23 @@ func validateJSONShapeType(api string, typ Type, seen map[string]bool) error {
 		return validateJSONShapeType(api, t.Value(), seen)
 	case *Maybe:
 		return validateJSONShapeType(api, t.Of(), seen)
+	case *Enum:
+		return nil
+	case *Result:
+		if err := validateJSONShapeType(api, t.Val(), seen); err != nil {
+			return err
+		}
+		return validateJSONShapeType(api, t.Err(), seen)
+	case *Union:
+		if api == "json::parse" {
+			return fmt.Errorf("%s does not support %s: parsing into a union is ambiguous", api, typ.String())
+		}
+		for _, member := range t.Types {
+			if err := validateJSONShapeType(api, member, seen); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *StructDef:
 		name := t.String()
 		if seen[name] {

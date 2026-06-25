@@ -2508,6 +2508,33 @@ func TestGoTargetParityEnvGet(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityEncodeUnion(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "union encodes active string member",
+			input: `
+				use ard/json
+				type Val = Str | Int
+				fn main() Str {
+					let v: Val = "hi"
+					json::encode(v).expect("encode")
+				}
+			`,
+		},
+		{
+			name: "union encodes active int member",
+			input: `
+				use ard/json
+				type Val = Str | Int
+				fn main() Str {
+					let v: Val = 5
+					json::encode(v).expect("encode")
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityDecodeHostFlows(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
