@@ -42,8 +42,6 @@ type JsonInput = any
 
 type PathSegment = any
 
-type Primitive = any
-
 type Value = any
 
 type Method int

@@ -1,3 +1,4 @@
+use ard/dynamic as Dynamic
 use ard/list as List
 use ard/maybe
 use ard/string as Str
@@ -198,7 +199,7 @@ fn map(key: Decoder<$Key>, value: Decoder<$Value>) Decoder<[$Key: $Value]> {
     mut out: [$Key: $Value] = [:]
 
     for k, v in raw {
-      match key(k.to_dyn()) {
+      match key(Dynamic::from(k)) {
         ok(decoded_key) => {
           match value(v) {
             ok(decoded_val) => out.set(decoded_key, decoded_val),

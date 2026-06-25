@@ -1,38 +1,30 @@
 // functions to create Dynamic values
+
+// Explicit conversion of any value into a Dynamic.
+fn from(value: $T) Dynamic {
+  value
+}
+
 fn from_str(val: Str) Dynamic {
-  val.to_dyn()
+  from(val)
 }
 
 fn from_int(val: Int) Dynamic {
-  val.to_dyn()
+  from(val)
 }
 
 fn from_float(val: Float) Dynamic {
-  val.to_dyn()
+  from(val)
 }
 
 fn from_bool(val: Bool) Dynamic {
-  val.to_dyn()
+  from(val)
 }
 
 extern fn from_void() Dynamic = "VoidToDynamic"
 extern fn from_list(list: [Dynamic]) Dynamic = "ListToDynamic"
 extern fn object(from: [Str: Dynamic]) Dynamic = "MapToDynamic"
 extern fn from_bytes(bytes: [Byte]) Dynamic = "BytesToDynamic"
-
-type Primitive = Str | Bool | Int | Float | Byte | Rune | Void
-
-fn from(primitive: Primitive) Dynamic {
-  match primitive {
-    Str(s) => from_str(s),
-    Bool(b) => from_bool(b),
-    Int(i) => from_int(i),
-    Float(f) => from_float(f),
-    Byte(b) => from_int(b.to_int()),
-    Rune(r) => from_int(r.to_int()),
-    _ => from_void(),
-  }
-}
 
 fn list(from: [$T], of: fn($T) Dynamic) Dynamic {
   mut array: [Dynamic] = []

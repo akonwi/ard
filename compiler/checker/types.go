@@ -208,12 +208,6 @@ func (s str) get(name string) Type {
 			Parameters: []Parameter{},
 			ReturnType: Str,
 		}
-	case "to_dyn":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Dynamic,
-		}
 	case "trim":
 		return &FunctionDef{
 			Name:       name,
@@ -256,12 +250,6 @@ func (b byteType) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: Str,
-		}
-	case "to_dyn":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Dynamic,
 		}
 	default:
 		return nil
@@ -308,12 +296,6 @@ func (r runeType) get(name string) Type {
 			Parameters: []Parameter{},
 			ReturnType: Str,
 		}
-	case "to_dyn":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Dynamic,
-		}
 	default:
 		return nil
 	}
@@ -352,12 +334,6 @@ func (i _int) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: Str,
-		}
-	case "to_dyn":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Dynamic,
 		}
 	default:
 		return nil
@@ -399,12 +375,6 @@ func (f float) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: Str,
-		}
-	case "to_dyn":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Dynamic,
 		}
 	case "to_int":
 		return &FunctionDef{
@@ -448,12 +418,6 @@ func (b _bool) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: Str,
-		}
-	case "to_dyn":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Dynamic,
 		}
 	default:
 		return nil

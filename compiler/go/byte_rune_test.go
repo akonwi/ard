@@ -100,10 +100,11 @@ func TestGoTargetParityByteRunePrimitives(t *testing.T) {
 		{
 			name: "decode byte and rune dynamics",
 			input: `use ard/decode
+use ard/dynamic as Dynamic
 fn main() Bool {
   let b = Byte::from_int(7).expect("byte")
   let r = Rune::from_str("é").expect("rune")
-  decode::byte(b.to_dyn()).expect("byte").to_int() == 7 and decode::rune(r.to_dyn()).expect("rune").to_str() == "é" and decode::int(b.to_dyn()).expect("int") == 7
+  decode::byte(Dynamic::from(b)).expect("byte").to_int() == 7 and decode::rune(Dynamic::from(r)).expect("rune").to_str() == "é" and decode::int(Dynamic::from(b)).expect("int") == 7
 }`,
 			want: "true",
 		},
