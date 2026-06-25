@@ -7645,6 +7645,12 @@ func (l *lowerer) jsonNativeCodecSafe(typeID air.TypeID, seen map[air.TypeID]boo
 	case air.TypeMap:
 		keyInfo := l.program.Types[info.Key-1]
 		return keyInfo.Kind == air.TypeStr && l.jsonNativeCodecSafe(info.Value, seen)
+	case air.TypeMaybe:
+		// runtime.Maybe implements json.Marshaler (none -> null, some -> unwrapped).
+		return l.jsonNativeCodecSafe(info.Elem, seen)
+	case air.TypeResult:
+		// runtime.Result implements json.Marshaler (ok -> value, err -> error).
+		return l.jsonNativeCodecSafe(info.Value, seen) && l.jsonNativeCodecSafe(info.Error, seen)
 	case air.TypeStruct:
 		for _, field := range info.Fields {
 			if !l.jsonNativeCodecSafe(field.Type, seen) {
