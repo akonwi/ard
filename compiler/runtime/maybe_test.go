@@ -54,24 +54,6 @@ func TestMaybeJSON(t *testing.T) {
 	}
 }
 
-func TestMaybeEqualHandlesStructuralMaps(t *testing.T) {
-	one := Some(1)
-	two := Some(2)
-	left := NewStructuralMapWithEntries(
-		StructuralMapEntry[Maybe[int], string]{Key: one, Value: "one"},
-		StructuralMapEntry[Maybe[int], string]{Key: two, Value: "two"},
-	)
-	right := NewStructuralMapWithEntries(
-		StructuralMapEntry[Maybe[int], string]{Key: two, Value: "two"},
-		StructuralMapEntry[Maybe[int], string]{Key: one, Value: "one"},
-	)
-	if !MaybeEqual(Some(left), Some(right)) {
-		t.Fatal("MaybeEqual reported structurally equal maps as different")
-	}
-	if got, ok := left.Get(Some(1)); !ok || got != "one" {
-		t.Fatalf("structural map lookup = %q, %v; want one, true", got, ok)
-	}
-}
 
 func TestMaybeSomeNilPointerIsDistinctFromNone(t *testing.T) {
 	type Item struct{ Value int }

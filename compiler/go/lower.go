@@ -2926,12 +2926,11 @@ func (l *lowerer) typeContainsMaybe(typeID air.TypeID, seen map[air.TypeID]bool)
 	return false
 }
 
-func (l *lowerer) mapUsesStructuralKeys(mapTypeID air.TypeID) bool {
-	if !validTypeID(l.program, mapTypeID) {
-		return false
-	}
-	info := l.program.Types[mapTypeID-1]
-	return info.Kind == air.TypeMap && l.typeContainsMaybe(info.Key, map[air.TypeID]bool{})
+// mapUsesStructuralKeys always reports false: map keys are constrained by the
+// checker to Go-comparable types (ADR 0031), so every Ard map lowers to a plain
+// Go map and no structural-map representation is generated.
+func (l *lowerer) mapUsesStructuralKeys(air.TypeID) bool {
+	return false
 }
 
 func (l *lowerer) structuralMapTypes(mapTypeID air.TypeID) (ast.Expr, ast.Expr, error) {
@@ -3150,9 +3149,6 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		value, err := l.goType(info.Value)
 		if err != nil {
 			return nil, err
-		}
-		if l.typeContainsMaybe(info.Key, map[air.TypeID]bool{}) {
-			return &ast.IndexListExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "StructuralMap"), Indices: []ast.Expr{key, value}}, nil
 		}
 		return &ast.MapType{Key: key, Value: value}, nil
 	case air.TypeStruct, air.TypeEnum:
