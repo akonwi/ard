@@ -1042,13 +1042,13 @@ func TestGenerateSourcesFormatsSimpleProgram(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateSources error = %v", err)
 	}
-	source, ok := sources["test.go"]
+	source, ok := sources["test/test.go"]
 	if !ok {
-		t.Fatalf("generated sources missing test.go: %#v", mapsKeys(sources))
+		t.Fatalf("generated sources missing test/test.go: %#v", mapsKeys(sources))
 	}
 	got := string(source)
-	if !strings.Contains(got, "package main") {
-		t.Fatalf("generated source missing package declaration:\n%s", got)
+	if !strings.Contains(got, "package test") {
+		t.Fatalf("generated entry module missing package declaration:\n%s", got)
 	}
 	if !strings.Contains(got, "func Add(a_0 int, b_1 int) int") {
 		t.Fatalf("generated source missing lowered add function:\n%s", got)
@@ -1056,8 +1056,17 @@ func TestGenerateSourcesFormatsSimpleProgram(t *testing.T) {
 	if !strings.Contains(got, "return a_0 + b_1") {
 		t.Fatalf("generated source missing arithmetic return:\n%s", got)
 	}
-	if !strings.Contains(got, "func main()") {
-		t.Fatalf("generated source missing Go main wrapper:\n%s", got)
+	// `main` is a separate synthetic package that calls the entry module's Main.
+	mainSource, ok := sources["main.go"]
+	if !ok {
+		t.Fatalf("generated sources missing synthetic main.go: %#v", mapsKeys(sources))
+	}
+	mainGot := string(mainSource)
+	if !strings.Contains(mainGot, "package main") || !strings.Contains(mainGot, "func main()") {
+		t.Fatalf("synthetic main missing package/func main:\n%s", mainGot)
+	}
+	if !strings.Contains(mainGot, ".Main()") {
+		t.Fatalf("synthetic main does not call the entry Main:\n%s", mainGot)
 	}
 }
 

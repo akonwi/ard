@@ -170,16 +170,13 @@ func testRunnerImportAliases(program *air.Program, tests []TestCase) testRunnerI
 	if program == nil {
 		return imports
 	}
-	rootID, hasRoot := findRootFunction(program)
-	mainModuleID := (&lowerer{program: program}).mainModuleID(rootID, hasRoot)
 	for _, test := range tests {
 		if test.Function < 0 || int(test.Function) >= len(program.Functions) {
 			continue
 		}
+		// Every module is its own package now, so the test runner (the sole
+		// `package main`) imports and qualifies all test functions (ADR 0031).
 		moduleID := program.Functions[test.Function].Module
-		if moduleID == mainModuleID {
-			continue
-		}
 		if _, ok := imports.modules[moduleID]; ok {
 			continue
 		}

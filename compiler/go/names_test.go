@@ -161,8 +161,8 @@ func TestNaturalFunctionNameFallsBackForSyntheticFunctions(t *testing.T) {
 		{ID: 1, Module: 0, Name: "User.ToString.to_str", Receiver: 1},
 		{ID: 2, Module: 0, Name: "anon_func_2"},
 	}}
-	if got := functionName(program, program.Functions[0]); got != "module_0__script" {
-		t.Fatalf("script function = %q, want module_0__script", got)
+	if got := functionName(program, program.Functions[0]); got != "ArdScript_0" {
+		t.Fatalf("script function = %q, want ArdScript_0", got)
 	}
 	if got := functionName(program, program.Functions[1]); got != "Module_0__User_ToString_to_str" {
 		t.Fatalf("method helper function = %q, want Module_0__User_ToString_to_str", got)

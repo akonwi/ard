@@ -3397,24 +3397,28 @@ func runGoTargetParityJSON(t *testing.T, program *air.Program) string {
 	}
 	trimmedSources := make(map[string][]byte, len(sources))
 	for name, source := range sources {
-		trimmed, err := stripGeneratedMain(source)
-		if err != nil {
-			t.Fatalf("strip main from %s: %v", name, err)
+		// The synthetic main package is replaced by the parity runner below.
+		if name == "main.go" {
+			continue
 		}
-		trimmedSources[name] = trimmed
+		trimmedSources[name] = source
 	}
 	writeGeneratedSourcesForTest(t, tempDir, trimmedSources)
 	rootID, err := rootFunction(program)
 	if err != nil {
 		t.Fatalf("root function: %v", err)
 	}
-	scriptFn := functionName(program, program.Functions[rootID])
+	entryModuleID := program.Functions[rootID].Module
+	entryAlias := modulePackageName(program, entryModuleID)
+	entryImportPath := moduleImportPath(program, entryModuleID)
+	scriptFn := entryAlias + "." + functionName(program, program.Functions[rootID])
 	runner := fmt.Sprintf(`package main
 
 import (
 	"fmt"
 	"reflect"
 	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
+	%s %q
 )
 
 func main() {
@@ -3475,7 +3479,7 @@ func normalizeReflectValue(v reflect.Value) any {
 		return v.Interface()
 	}
 }
-`, scriptFn)
+`, entryAlias, entryImportPath, scriptFn)
 	if err := os.WriteFile(filepath.Join(tempDir, "runner.go"), []byte(runner), 0o644); err != nil {
 		t.Fatalf("write runner: %v", err)
 	}

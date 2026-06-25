@@ -23,7 +23,13 @@ func modulePackageName(program *air.Program, module air.ModuleID) string {
 	if program == nil || module < 0 || int(module) >= len(program.Modules) {
 		return "module"
 	}
-	return goPackageNameFromModulePath(program.Modules[module].Path)
+	name := goPackageNameFromModulePath(program.Modules[module].Path)
+	// `main` is reserved for the synthetic entry package, which is generated
+	// separately and never a transpiled Ard module (ADR 0031).
+	if name == "main" {
+		return "main_"
+	}
+	return name
 }
 
 func modulePackageDir(program *air.Program, module air.ModuleID) string {
@@ -118,6 +124,11 @@ func legacyGlobalName(program *air.Program, global air.Global) string {
 }
 
 func functionName(program *air.Program, fn air.Function) string {
+	// Script roots (top-level statement programs) are exported so the synthetic
+	// main package can call them across the package boundary.
+	if fn.IsScript {
+		return fmt.Sprintf("ArdScript_%d", fn.ID)
+	}
 	if name, ok := naturalFunctionName(program, fn); ok {
 		return name
 	}

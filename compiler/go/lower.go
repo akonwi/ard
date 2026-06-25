@@ -91,7 +91,47 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 		}
 		files[l.moduleOutputFileName(module, mainModuleID)] = file
 	}
+	if !l.suppressMain {
+		if hasRoot {
+			mainFile, err := l.synthesizeEntryMain(rootID, mainModuleID)
+			if err != nil {
+				return nil, err
+			}
+			files["main.go"] = mainFile
+		} else {
+			// A program with no entry or script root still emits an empty main so
+			// the workspace builds and runs as a no-op.
+			files["main.go"] = &ast.File{Name: ast.NewIdent("main"), Decls: []ast.Decl{
+				&ast.FuncDecl{Name: ast.NewIdent("main"), Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{}},
+			}}
+		}
+	}
 	return files, nil
+}
+
+// synthesizeEntryMain builds the synthetic `package main` that imports the entry
+// module's package and calls its entry function. The entry module itself lowers
+// as an ordinary package; `main` is never a transpiled Ard module (ADR 0031).
+func (l *lowerer) synthesizeEntryMain(rootID air.FunctionID, entryModuleID air.ModuleID) (*ast.File, error) {
+	fn := l.program.Functions[rootID]
+	if len(fn.Signature.Params) != 0 {
+		return nil, fmt.Errorf("entry function parameters are not supported yet")
+	}
+	alias := modulePackageName(l.program, entryModuleID)
+	importPath := moduleImportPath(l.program, entryModuleID)
+	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(functionName(l.program, fn))}}
+	var stmt ast.Stmt
+	if l.isVoidType(fn.Signature.Return) {
+		stmt = &ast.ExprStmt{X: call}
+	} else {
+		stmt = &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}}
+	}
+	importDecl := &ast.GenDecl{Tok: token.IMPORT, Specs: []ast.Spec{&ast.ImportSpec{
+		Name: ast.NewIdent(alias),
+		Path: &ast.BasicLit{Kind: token.STRING, Value: strconv.Quote(importPath)},
+	}}}
+	mainDecl := &ast.FuncDecl{Name: ast.NewIdent("main"), Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{List: []ast.Stmt{stmt}}}
+	return &ast.File{Name: ast.NewIdent("main"), Decls: []ast.Decl{importDecl, mainDecl}}, nil
 }
 
 func collectFFIGoImports(projectInfo *checker.ProjectInfo) map[string]string {
@@ -278,17 +318,6 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 		return nil, err
 	}
 	decls = append(mutableDecls, decls...)
-	if module.ID == mainModuleID {
-		if !l.suppressMain && !hasRoot {
-			decls = append(decls, &ast.FuncDecl{Name: ast.NewIdent("main"), Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{}})
-		} else if !l.suppressMain {
-			mainDecl, err := l.lowerMainWrapper(rootID)
-			if err != nil {
-				return nil, err
-			}
-			decls = append(decls, mainDecl)
-		}
-	}
 	decls = append(l.runtimePreludeDecls(), decls...)
 	if l.importErr != nil {
 		return nil, l.importErr
@@ -452,17 +481,13 @@ func (l *lowerer) mainModuleID(rootID air.FunctionID, hasRoot bool) air.ModuleID
 }
 
 func (l *lowerer) modulePackageName(moduleID air.ModuleID, mainModuleID air.ModuleID) string {
-	if l.useModulePackages && moduleID != mainModuleID {
-		return modulePackageName(l.program, moduleID)
-	}
-	return l.packageName
+	// Every Ard module lowers to its own Go package; `package main` is always
+	// synthetic and never a transpiled module (ADR 0031).
+	return modulePackageName(l.program, moduleID)
 }
 
 func (l *lowerer) moduleOutputFileName(module air.Module, mainModuleID air.ModuleID) string {
-	if l.useModulePackages && module.ID != mainModuleID {
-		return filepath.Join(modulePackageDir(l.program, module.ID), modulePackageFileName(l.program, module.ID))
-	}
-	return moduleFileName(l.program, module)
+	return filepath.Join(modulePackageDir(l.program, module.ID), modulePackageFileName(l.program, module.ID))
 }
 
 func modulePackageFileName(program *air.Program, module air.ModuleID) string {
@@ -1213,26 +1238,6 @@ func mutableTraitAssignFieldName(trait air.Trait) string {
 
 func mutableTraitMethodFieldName(trait air.TraitID, methodIndex int) string {
 	return fmt.Sprintf("ardMutTraitMethod_%d_%d", trait, methodIndex)
-}
-
-func (l *lowerer) lowerMainWrapper(root air.FunctionID) (ast.Decl, error) {
-	fn := l.program.Functions[root]
-	call := &ast.CallExpr{Fun: l.functionExpr(fn)}
-	body := []ast.Stmt{}
-	for _, param := range fn.Signature.Params {
-		_ = param
-		return nil, fmt.Errorf("entry function parameters are not supported yet")
-	}
-	if l.isVoidType(fn.Signature.Return) {
-		body = append(body, &ast.ExprStmt{X: call})
-	} else {
-		body = append(body, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}})
-	}
-	return &ast.FuncDecl{
-		Name: ast.NewIdent("main"),
-		Type: &ast.FuncType{Params: &ast.FieldList{}},
-		Body: &ast.BlockStmt{List: body},
-	}, nil
 }
 
 func (l *lowerer) lowerGlobal(global air.Global) (ast.Decl, error) {
