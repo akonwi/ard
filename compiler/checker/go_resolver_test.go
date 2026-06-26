@@ -65,28 +65,6 @@ func goNamed(kind GoValueKind, expr string, importPath string, name string) GoVa
 	return GoValueType{Kind: kind, Expr: expr, Named: true, ImportPath: importPath, Package: importPath, Name: name}
 }
 
-func TestDirectGoExternBindingValidatesImportedFunction(t *testing.T) {
-	result := parse.Parse([]byte(`use go:math
-extern fn floor(value: Float) Float = math::Floor`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"math": {ImportPath: "math", Name: "math", Functions: map[string]GoFunction{"Floor": {Name: "Floor", Signature: GoSignature{Params: []GoValueType{goParam(GoValueFloat, "float64")}, Results: []GoValueType{goParam(GoValueFloat, "float64")}}}}},
-	}}})
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
-	}
-	fn, ok := c.Module().Program().Statements[0].Expr.(*ExternalFunctionDef)
-	if !ok {
-		t.Fatalf("expected external function, got %#v", c.Module().Program().Statements[0].Expr)
-	}
-	if fn.ExternalBinding != "go:math as math::Floor" || fn.ExternalBindings["go"] != "go:math as math::Floor" {
-		t.Fatalf("external binding = %q / %#v", fn.ExternalBinding, fn.ExternalBindings)
-	}
-}
-
 func TestDirectGoStaticFunctionCallInfersResultReturn(t *testing.T) {
 	result := parse.Parse([]byte(`use go:strconv
 fn parse(value: Str) Int!Str { strconv::Atoi(value) }`), "main.ard")
@@ -1343,7 +1321,7 @@ use go:math/rand`), "main.ard")
 
 func TestDirectGoTypeReferenceDoesNotRequireExternType(t *testing.T) {
 	result := parse.Parse([]byte(`use go:time
-extern fn sleep(duration: time::Duration) Void = time::Sleep`), "main.ard")
+fn sleep(duration: time::Duration) { time::Sleep(duration) }`), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
@@ -1361,7 +1339,7 @@ extern fn sleep(duration: time::Duration) Void = time::Sleep`), "main.ard")
 	if c.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
 	}
-	fn := c.Module().Program().Statements[0].Expr.(*ExternalFunctionDef)
+	fn := c.Module().Program().Statements[0].Expr.(*FunctionDef)
 	duration, ok := fn.Parameters[0].Type.(*ExternType)
 	if !ok {
 		t.Fatalf("param type = %#v, want ExternType", fn.Parameters[0].Type)
@@ -1373,7 +1351,6 @@ extern fn sleep(duration: time::Duration) Void = time::Sleep`), "main.ard")
 
 func TestDirectGoEnumLikeConstantsResolveAsClosedEnum(t *testing.T) {
 	result := parse.Parse([]byte(`use go:git.sr.ht/~rockorager/vaxis as vaxis
-extern fn next(status: vaxis::AnimationStatus) vaxis::AnimationStatus = vaxis::Next
 fn active(status: vaxis::AnimationStatus) Bool {
   match status {
     vaxis::AnimationIdle => false
@@ -1390,13 +1367,12 @@ fn active(status: vaxis::AnimationStatus) Bool {
 		goEnumConstant("AnimationForward", status, 1),
 		goEnumConstant("AnimationCompleted", status, 2),
 	})
-	pkg.Functions = map[string]GoFunction{"Next": {Name: "Next", Signature: GoSignature{Params: []GoValueType{status}, Results: []GoValueType{status}}}}
 	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{pkg.ImportPath: pkg}}})
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
 	}
-	fn := c.Module().Program().Statements[0].Expr.(*ExternalFunctionDef)
+	fn := c.Module().Program().Statements[0].Expr.(*FunctionDef)
 	if enum, ok := fn.Parameters[0].Type.(*Enum); !ok || enum.ExternalBinding != "go:git.sr.ht/~rockorager/vaxis as vaxis::AnimationStatus" || len(enum.Values) != 3 {
 		t.Fatalf("param type = %#v, want direct Go enum-like AnimationStatus", fn.Parameters[0].Type)
 	}
@@ -1477,302 +1453,6 @@ func goEnumConstant(name string, typ GoValueType, value int) GoConstant {
 	return GoConstant{Name: name, Type: typ, IntValue: value, HasIntValue: true}
 }
 
-func TestDirectGoExternBindingRequiresImportedAlias(t *testing.T) {
-	result := parse.Parse([]byte(`extern fn floor(value: Float) Float = math::Floor`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{}}})
-	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("expected missing Go import alias diagnostic")
-	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, `Unknown Go import alias "math"`) {
-		t.Fatalf("diagnostic = %q", got)
-	}
-}
-
-func TestDirectGoExternBindingValidatesMissingFunction(t *testing.T) {
-	result := parse.Parse([]byte(`use go:math
-extern fn floor(value: Float) Float = math::Missing`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"math": {ImportPath: "math", Name: "math", Functions: map[string]GoFunction{"Floor": {Name: "Floor"}}},
-	}}})
-	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("expected missing Go function diagnostic")
-	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, `Go package "math" has no exported function "Missing"`) {
-		t.Fatalf("diagnostic = %q", got)
-	}
-}
-
-func TestDirectGoExternBindingValidatesMethods(t *testing.T) {
-	result := parse.Parse([]byte(`use go:time
-extern fn stringify(value: time::Time) Str = time::Time::String`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	receiver := goNamed(GoValueOther, "time.Time", "time", "Time")
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"time": {
-			ImportPath: "time",
-			Name:       "time",
-			Types: map[string]GoType{
-				"Time": {Name: "Time", Methods: map[string]GoMethod{"String": {Name: "String", Signature: GoSignature{Receiver: &receiver, Results: []GoValueType{goParam(GoValueString, "string")}}}}},
-			},
-		},
-	}}})
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
-	}
-}
-
-func TestDirectGoExternSignatureRejectsParameterArityMismatch(t *testing.T) {
-	result := parse.Parse([]byte(`use go:math
-extern fn floor(left: Float, right: Float) Float = math::Floor`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"math": {ImportPath: "math", Name: "math", Functions: map[string]GoFunction{"Floor": {Name: "Floor", Signature: GoSignature{Params: []GoValueType{goParam(GoValueFloat, "float64")}, Results: []GoValueType{goParam(GoValueFloat, "float64")}}}}},
-	}}})
-	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("expected arity diagnostic")
-	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "expects 1 parameter(s)") {
-		t.Fatalf("diagnostic = %q", got)
-	}
-}
-
-func TestDirectGoExternSignatureRejectsParameterTypeMismatch(t *testing.T) {
-	result := parse.Parse([]byte(`use go:math
-extern fn floor(value: Str) Float = math::Floor`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"math": {ImportPath: "math", Name: "math", Functions: map[string]GoFunction{"Floor": {Name: "Floor", Signature: GoSignature{Params: []GoValueType{goParam(GoValueFloat, "float64")}, Results: []GoValueType{goParam(GoValueFloat, "float64")}}}}},
-	}}})
-	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("expected parameter type diagnostic")
-	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "parameter 1") || !strings.Contains(got, "Ard type Str is not compatible with Go type float64") {
-		t.Fatalf("diagnostic = %q", got)
-	}
-}
-
-func TestDirectGoExternSignatureRejectsReturnTypeMismatch(t *testing.T) {
-	result := parse.Parse([]byte(`use go:math
-extern fn floor(value: Float) Str = math::Floor`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"math": {ImportPath: "math", Name: "math", Functions: map[string]GoFunction{"Floor": {Name: "Floor", Signature: GoSignature{Params: []GoValueType{goParam(GoValueFloat, "float64")}, Results: []GoValueType{goParam(GoValueFloat, "float64")}}}}},
-	}}})
-	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("expected return type diagnostic")
-	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "return for math.Floor") || !strings.Contains(got, "Ard type Str is not compatible with Go type float64") {
-		t.Fatalf("diagnostic = %q", got)
-	}
-}
-
-func TestDirectGoExternSignatureAcceptsErrorToVoidResultAdapter(t *testing.T) {
-	result := parse.Parse([]byte(`use go:os
-extern fn chdir(dir: Str) Void!Str = os::Chdir`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"os": {ImportPath: "os", Name: "os", Functions: map[string]GoFunction{"Chdir": {Name: "Chdir", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueError, "error")}}}}},
-	}}})
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
-	}
-}
-
-func TestDirectGoExternSignatureAcceptsValueErrorToResultAdapter(t *testing.T) {
-	result := parse.Parse([]byte(`use go:strconv
-extern fn atoi(value: Str) Int!Str = strconv::Atoi`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"strconv": {ImportPath: "strconv", Name: "strconv", Functions: map[string]GoFunction{"Atoi": {Name: "Atoi", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueInt, "int"), goParam(GoValueError, "error")}}}}},
-	}}})
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
-	}
-}
-
-func TestDirectGoExternSignatureAcceptsValueBoolToMaybeAdapter(t *testing.T) {
-	result := parse.Parse([]byte(`use go:os
-extern fn lookup_env(key: Str) Str? = os::LookupEnv`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"os": {ImportPath: "os", Name: "os", Functions: map[string]GoFunction{"LookupEnv": {Name: "LookupEnv", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueString, "string"), goParam(GoValueBool, "bool")}}}}},
-	}}})
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
-	}
-}
-
-func TestDirectGoExternSignatureRejectsNamedBoolMaybeAdapter(t *testing.T) {
-	result := parse.Parse([]byte(`use go:example.com/lookup as lookup
-extern fn lookup_value(key: Str) Str? = lookup::Value`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"example.com/lookup": {ImportPath: "example.com/lookup", Name: "lookup", Functions: map[string]GoFunction{"Value": {Name: "Value", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueString, "string"), goNamed(GoValueBool, "lookup.Found", "example.com/lookup", "Found")}}}}},
-	}}})
-	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("expected unsupported named bool adapter diagnostic")
-	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "no supported adapter matches") {
-		t.Fatalf("diagnostic = %q", got)
-	}
-}
-
-func TestDirectGoExternSignatureRejectsUnsupportedMultipleReturnAdapters(t *testing.T) {
-	result := parse.Parse([]byte(`use go:example.com/unsupported as unsupported
-extern fn pair(value: Str) Int = unsupported::Pair`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"example.com/unsupported": {ImportPath: "example.com/unsupported", Name: "unsupported", Functions: map[string]GoFunction{"Pair": {Name: "Pair", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string")}, Results: []GoValueType{goParam(GoValueInt, "int"), goParam(GoValueString, "string")}}}}},
-	}}})
-	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("expected unsupported multiple-return adapter diagnostic")
-	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "no supported adapter matches") {
-		t.Fatalf("diagnostic = %q", got)
-	}
-}
-
-func TestDirectGoExternSignatureAcceptsListAndMapTypes(t *testing.T) {
-	result := parse.Parse([]byte(`use go:example.com/collections as collections
-extern fn split(value: Str) [Str] = collections::Split
-extern fn counts(value: [Str]) [Str:Int] = collections::Counts`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	str := goParam(GoValueString, "string")
-	intType := goParam(GoValueInt, "int")
-	strSlice := GoValueType{Kind: GoValueSlice, Expr: "[]string", Elem: &str}
-	strIntMap := GoValueType{Kind: GoValueMap, Expr: "map[string]int", Key: &str, Value: &intType}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"example.com/collections": {ImportPath: "example.com/collections", Name: "collections", Functions: map[string]GoFunction{
-			"Split":  {Name: "Split", Signature: GoSignature{Params: []GoValueType{str}, Results: []GoValueType{strSlice}}},
-			"Counts": {Name: "Counts", Signature: GoSignature{Params: []GoValueType{strSlice}, Results: []GoValueType{strIntMap}}},
-		}},
-	}}})
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
-	}
-}
-
-func TestDirectGoExternSignatureAcceptsMutableDirectGoPointerReceiver(t *testing.T) {
-	result := parse.Parse([]byte(`use go:database/sql as sql
-extern fn ping(db: mut sql::DB) Void!Str = sql::DB::Ping`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	db := goNamed(GoValueOther, "sql.DB", "database/sql", "DB")
-	ptrDB := GoValueType{Kind: GoValuePointer, Expr: "*sql.DB", Elem: &db}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"database/sql": {ImportPath: "database/sql", Name: "sql", Types: map[string]GoType{
-			"DB": {Name: "DB", Methods: map[string]GoMethod{"Ping": {Name: "Ping", Signature: GoSignature{Receiver: &ptrDB, Results: []GoValueType{goParam(GoValueError, "error")}}}}},
-		}},
-	}}})
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
-	}
-}
-
-func TestDirectGoExternSignatureAcceptsMutableDirectGoPointerReturn(t *testing.T) {
-	result := parse.Parse([]byte(`use go:os
-extern fn create_temp(dir: Str, pattern: Str) (mut os::File)!Str = os::CreateTemp`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	file := goNamed(GoValueOther, "os.File", "os", "File")
-	ptrFile := GoValueType{Kind: GoValuePointer, Expr: "*os.File", Elem: &file}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"os": {ImportPath: "os", Name: "os", Functions: map[string]GoFunction{
-			"CreateTemp": {Name: "CreateTemp", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string"), goParam(GoValueString, "string")}, Results: []GoValueType{ptrFile, goParam(GoValueError, "error")}}},
-		}, Types: map[string]GoType{"File": {Name: "File"}}},
-	}}})
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
-	}
-}
-
-func TestDirectGoExternSignatureRejectsMutableEnumPointerReturn(t *testing.T) {
-	result := parse.Parse([]byte(`use go:example.com/status as status
-extern fn current() (mut status::State)!Str = status::Current`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	state := goNamed(GoValueInt, "status.State", "example.com/status", "State")
-	ptrState := GoValueType{Kind: GoValuePointer, Expr: "*status.State", Elem: &state}
-	pkg := fakeEnumLikePackage("example.com/status", "status", state, []GoConstant{
-		goEnumConstant("StateReady", state, 0),
-		goEnumConstant("StateDone", state, 1),
-	})
-	pkg.Functions = map[string]GoFunction{"Current": {Name: "Current", Signature: GoSignature{Results: []GoValueType{ptrState, goParam(GoValueError, "error")}}}}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{pkg.ImportPath: pkg}}})
-	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("expected enum pointer diagnostic")
-	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "pointer to enum-like type") {
-		t.Fatalf("diagnostic = %q", got)
-	}
-}
-
-func TestDirectGoExternSignatureRejectsPlainValueForPointerReceiver(t *testing.T) {
-	result := parse.Parse([]byte(`use go:database/sql as sql
-extern fn ping(db: sql::DB) Void!Str = sql::DB::Ping`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	db := goNamed(GoValueOther, "sql.DB", "database/sql", "DB")
-	ptrDB := GoValueType{Kind: GoValuePointer, Expr: "*sql.DB", Elem: &db}
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"database/sql": {ImportPath: "database/sql", Name: "sql", Types: map[string]GoType{
-			"DB": {Name: "DB", Methods: map[string]GoMethod{"Ping": {Name: "Ping", Signature: GoSignature{Receiver: &ptrDB, Results: []GoValueType{goParam(GoValueError, "error")}}}}},
-		}},
-	}}})
-	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("expected pointer diagnostic")
-	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "requires Ard type mut sql::DB") {
-		t.Fatalf("diagnostic = %q", got)
-	}
-}
-
 // A `mut <direct-Go handle>` value (a Go pointer handle such as *sql.DB) can be
 // stored in a `mut T` struct field and re-passed to a direct-Go pointer
 // parameter: the field read deref's to the value type but auto-borrows back into
@@ -1835,26 +1515,6 @@ fn main() Int!Str { strconv::ParseInt("42", 10, 64) }`), "main.ard")
 		"strconv": {ImportPath: "strconv", Name: "strconv", Functions: map[string]GoFunction{
 			"ParseInt": {Name: "ParseInt", Signature: GoSignature{Params: []GoValueType{goParam(GoValueString, "string"), goParam(GoValueInt, "int"), goParam(GoValueInt, "int")}, Results: []GoValueType{goParam(GoValueInt, "int64"), goParam(GoValueError, "error")}}},
 		}},
-	}}})
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
-	}
-}
-
-func TestDirectGoExternSignatureAllowsNamedScalarReturnCoercion(t *testing.T) {
-	result := parse.Parse([]byte(`use go:time
-extern fn since(value: time::Time) Int = time::Since`), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
-	}
-	timeType := goNamed(GoValueOther, "time.Time", "time", "Time")
-	duration := goNamed(GoValueInt, "time.Duration", "time", "Duration")
-	duration.Bits = 64
-	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
-		"time": {ImportPath: "time", Name: "time", Functions: map[string]GoFunction{
-			"Since": {Name: "Since", Signature: GoSignature{Params: []GoValueType{timeType}, Results: []GoValueType{duration}}},
-		}, Types: map[string]GoType{"Time": {Name: "Time"}, "Duration": {Name: "Duration"}}},
 	}}})
 	c.Check()
 	if c.HasErrors() {
