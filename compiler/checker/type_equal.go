@@ -146,7 +146,9 @@ func equalFunctionDefSeen(left FunctionDef, right Type, seen map[typeEqualKey]st
 			return false
 		}
 		for i := range left.Parameters {
-			if !equalTypesSeen(left.Parameters[i].Type, r.Parameters[i].Type, seen) {
+			_, lType := normalizedParamMutability(left.Parameters[i])
+			_, rType := normalizedParamMutability(r.Parameters[i])
+			if !equalTypesSeen(lType, rType, seen) {
 				return false
 			}
 		}
@@ -157,11 +159,24 @@ func equalFunctionDefSeen(left FunctionDef, right Type, seen map[typeEqualKey]st
 		return false
 	}
 	for i := range left.Parameters {
-		if !equalTypesSeen(left.Parameters[i].Type, r.Parameters[i].Type, seen) {
+		lMut, lType := normalizedParamMutability(left.Parameters[i])
+		rMut, rType := normalizedParamMutability(r.Parameters[i])
+		if lMut != rMut || !equalTypesSeen(lType, rType, seen) {
 			return false
 		}
 	}
 	return left.Mutates == r.Mutates && equalTypesSeen(left.ReturnType, r.ReturnType, seen)
+}
+
+// normalizedParamMutability reconciles the two ways a `mut T` parameter can be
+// represented: as a `MutableRef` baked into the parameter type (the `name: mut T`
+// and closure form) or as the `Mutable` flag with a plain type (the `fn(mut T)`
+// function-type form). It returns a canonical (isMutable, underlyingType) pair.
+func normalizedParamMutability(p Parameter) (bool, Type) {
+	if mr, ok := p.Type.(*MutableRef); ok {
+		return true, mr.Of()
+	}
+	return p.Mutable, p.Type
 }
 
 func externTypeNamesMatch(left *ExternType, right *ExternType) bool {

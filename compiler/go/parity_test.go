@@ -1438,6 +1438,27 @@ func TestGoTargetParityMapClosureCapturesOuterLocal(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityMutableParameterClosureInFunctionTypedMap(t *testing.T) {
+	// A `mut T` parameter is represented two ways: as the `Mutable` flag (the
+	// `fn(mut T)` function-type form used by the map's value type) and as a
+	// `MutableRef` baked into the type (the `name: mut T` closure form). The two
+	// must reconcile so the closure is assignable to the map and lowers to the
+	// same Go signature.
+	program := lowerParitySource(t, `
+		struct Box { n: Int }
+
+		fn main() Int {
+			let base = 41
+			mut handlers: [Str: fn(mut Box)] = [:]
+			handlers.set("a", fn(b: mut Box) {})
+			handlers.size() + base
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "42" {
+		t.Fatalf("got %s, want 42", got)
+	}
+}
+
 func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
 	t.Run("returned closure captures two outer scopes", func(t *testing.T) {
 		program := lowerParitySource(t, `

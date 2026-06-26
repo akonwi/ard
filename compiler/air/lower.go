@@ -630,7 +630,14 @@ func (l *lowerer) declareClosureFunction(module ModuleID, keyName string, def *c
 	}
 	params := make([]Param, len(def.Parameters))
 	for i, param := range def.Parameters {
-		params[i] = Param{Name: param.Name, Type: typeInfo.Params[i], Mutable: param.Mutable}
+		// Match the expected function type's interned parameter shape exactly so
+		// the closure's Go signature agrees with it. The expected type already
+		// reconciled the two `mut T` representations via internFunctionParamType.
+		mutable := param.Mutable
+		if i < len(typeInfo.ParamMutable) {
+			mutable = typeInfo.ParamMutable[i]
+		}
+		params[i] = Param{Name: param.Name, Type: typeInfo.Params[i], Mutable: mutable}
 	}
 	signature := Signature{Params: params, Return: typeInfo.Return}
 	key := concreteFunctionKey(module, keyName, signature, "")
@@ -968,6 +975,32 @@ func (fl *functionLowerer) internResolvedStructType(typ *checker.StructDef) (Typ
 // A `mut T` over any other base is a borrow of a mutable lvalue: it is interned
 // as the base type plus the Mutable flag, and the backend lowers it as `*T`
 // with the &/* machinery.
+// internFunctionParamType interns a function parameter's type and reports its
+// effective AIR mutability, reconciling the two ways a `mut T` parameter is
+// represented (a MutableRef baked into the type, or the Mutable flag with a
+// plain type). It mirrors internStructFieldType: a `mut <direct-Go handle>`
+// parameter (e.g. `*http.Request`) is a pointer-valued handle interned as a
+// plain pointer-extern (mutable=false, no &/* machinery), while a `mut T` over
+// any other base is a borrow interned as the base type plus the Mutable flag.
+func (l *lowerer) internFunctionParamType(param checker.Parameter, intern func(checker.Type) (TypeID, error)) (TypeID, bool, error) {
+	underlying := param.Type
+	mutable := param.Mutable
+	if ref, ok := param.Type.(*checker.MutableRef); ok {
+		underlying = ref.Of()
+		mutable = true
+	}
+	if mutable {
+		if binding, isHandle := directGoPointerExternBinding(underlying); isHandle {
+			id, err := l.internSyntheticType(checker.MakeMutableRef(underlying).String(), TypeInfo{Kind: TypeExtern, ExternBinding: binding})
+			return id, false, err
+		}
+		id, err := intern(underlying)
+		return id, true, err
+	}
+	id, err := intern(underlying)
+	return id, false, err
+}
+
 func (l *lowerer) internStructFieldType(fieldTypeValue checker.Type, intern func(checker.Type) (TypeID, error)) (TypeID, bool, error) {
 	if ref, ok := fieldTypeValue.(*checker.MutableRef); ok {
 		if binding, isHandle := directGoPointerExternBinding(ref.Of()); isHandle {
@@ -1091,12 +1124,14 @@ func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, 
 		}
 	case *checker.FunctionDef:
 		params := make([]TypeID, len(typ.Parameters))
+		mutable := make([]bool, len(typ.Parameters))
 		for i, param := range typ.Parameters {
-			paramType, err := fl.internResolvedType(param.Type)
+			paramType, paramMut, err := fl.l.internFunctionParamType(param, fl.internResolvedType)
 			if err != nil {
 				return NoType, err
 			}
 			params[i] = paramType
+			mutable[i] = paramMut
 		}
 		returnType, err := fl.internResolvedType(typ.ReturnType)
 		if err != nil {
@@ -1110,10 +1145,6 @@ func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, 
 			name += fl.l.typeName(param)
 		}
 		name += ") " + fl.l.typeName(returnType)
-		mutable := make([]bool, len(typ.Parameters))
-		for i, param := range typ.Parameters {
-			mutable[i] = param.Mutable
-		}
 		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeFunction, Params: params, ParamMutable: mutable, Return: returnType})
 	}
 	return NoType, fmt.Errorf("unresolved generic type variable in %s", t.String())
@@ -1166,12 +1197,14 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 		return fl.l.internType(t)
 	case *checker.FunctionDef:
 		params := make([]TypeID, len(typ.Parameters))
+		mutable := make([]bool, len(typ.Parameters))
 		for i, param := range typ.Parameters {
-			paramType, err := fl.internType(param.Type)
+			paramType, paramMut, err := fl.l.internFunctionParamType(param, fl.internType)
 			if err != nil {
 				return NoType, err
 			}
 			params[i] = paramType
+			mutable[i] = paramMut
 		}
 		returnType, err := fl.internType(typ.ReturnType)
 		if err != nil {
@@ -1185,10 +1218,6 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 			name += fl.l.typeName(param)
 		}
 		name += ") " + fl.l.typeName(returnType)
-		mutable := make([]bool, len(typ.Parameters))
-		for i, param := range typ.Parameters {
-			mutable[i] = param.Mutable
-		}
 		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeFunction, Params: params, ParamMutable: mutable, Return: returnType})
 	default:
 		return fl.l.internType(t)
@@ -2140,12 +2169,12 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	case *checker.FunctionDef:
 		info.Kind = TypeFunction
 		for _, param := range typ.Parameters {
-			paramType, err := l.internType(param.Type)
+			paramType, paramMut, err := l.internFunctionParamType(param, l.internType)
 			if err != nil {
 				return NoType, err
 			}
 			info.Params = append(info.Params, paramType)
-			info.ParamMutable = append(info.ParamMutable, param.Mutable)
+			info.ParamMutable = append(info.ParamMutable, paramMut)
 		}
 		returnType, err := l.internType(typ.ReturnType)
 		if err != nil {
@@ -2155,12 +2184,12 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	case *checker.ExternalFunctionDef:
 		info.Kind = TypeFunction
 		for _, param := range typ.Parameters {
-			paramType, err := l.internType(param.Type)
+			paramType, paramMut, err := l.internFunctionParamType(param, l.internType)
 			if err != nil {
 				return NoType, err
 			}
 			info.Params = append(info.Params, paramType)
-			info.ParamMutable = append(info.ParamMutable, param.Mutable)
+			info.ParamMutable = append(info.ParamMutable, paramMut)
 		}
 		returnType, err := l.internType(typ.ReturnType)
 		if err != nil {

@@ -2629,7 +2629,9 @@ func unsafeResultOkValueCompatible(expected Type, actual Type) bool {
 			return false
 		}
 		for i := range expectedType.Parameters {
-			if expectedType.Parameters[i].Mutable != actualType.Parameters[i].Mutable || !unsafeResultOkValueCompatible(expectedType.Parameters[i].Type, actualType.Parameters[i].Type) {
+			eMut, eType := normalizedParamMutability(expectedType.Parameters[i])
+			aMut, aType := normalizedParamMutability(actualType.Parameters[i])
+			if eMut != aMut || !unsafeResultOkValueCompatible(eType, aType) {
 				return false
 			}
 		}
