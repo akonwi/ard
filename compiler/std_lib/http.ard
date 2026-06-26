@@ -3,6 +3,7 @@ use ard/ffi
 use ard/maybe
 use ard/string as Str
 
+use go:github.com/akonwi/ard/std_lib/ffi as host
 use go:net/http as gohttp
 
 enum Method {
@@ -94,13 +95,6 @@ impl Response {
   }
 }
 
-// HTTP client FFI functions - operate on opaque Go response handles
-// body is Dynamic (nil means no body)
-private extern fn http_do(method: Str, url: Str, body: Dynamic, headers: [Str: Str], timeout: Int?) (mut gohttp::Response)!Str = "HTTP_Do"
-private extern fn http_response_headers(resp: mut gohttp::Response) [Str: Str] = "HTTP_ResponseHeaders"
-private extern fn http_response_body(resp: mut gohttp::Response) Str!Str = "HTTP_ResponseBody"
-private extern fn http_response_close(resp: mut gohttp::Response) Void = "HTTP_ResponseClose"
-
 fn send(req: Request, timeout: Int?) Response!Str {
   let method = req.method.to_str()
   let effective_timeout = match timeout {
@@ -114,25 +108,19 @@ fn send(req: Request, timeout: Int?) Response!Str {
     _ => dynamic::from_void(),
   }
 
-  // Make the HTTP request
-  let resp = try http_do(method, req.url, request_body, req.headers, effective_timeout)
+  // Make the HTTP request; resp is the opaque *http.Response handle
+  let resp = try host::HTTPDo(method, req.url, request_body, req.headers, effective_timeout)
 
-  // Extract response data
-  let status = match ffi::is_nil(resp) {
-    true => 0,
-    false => resp.StatusCode,
-  }
-  let headers = http_response_headers(resp)
-  let body_result = http_response_body(resp)
+  let headers = host::HTTPResponseHeaders(resp)
+  let body_result = host::HTTPResponseBody(resp)
 
   // Clean up resources
-  http_response_close(resp)
+  host::HTTPResponseClose(resp)
 
-  // Build response
   let response_body = try body_result
   Result::ok(
     Response{
-      status: status,
+      status: resp.StatusCode,
       headers: headers,
       body: response_body,
     },

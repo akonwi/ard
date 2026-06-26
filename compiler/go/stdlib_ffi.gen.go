@@ -41,13 +41,9 @@ type generatedStdlibExternLowering struct {
 }
 
 var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
-	"HTTP_Do":              {function: "HTTPDo", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamAny, generatedStdlibParamDirect, generatedStdlibParamDirect}},
-	"HTTP_ResponseBody":    {function: "HTTPResponseBody", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"HTTP_ResponseClose":   {function: "HTTPResponseClose", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"HTTP_ResponseHeaders": {function: "HTTPResponseHeaders", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"HTTP_Serve":           {function: "HTTPServe", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
-	"JsonEncode":           {kind: generatedStdlibExternJSONEncode},
-	"JsonParse":            {kind: generatedStdlibExternJSONParse},
+	"HTTP_Serve": {function: "HTTPServe", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
+	"JsonEncode": {kind: generatedStdlibExternJSONEncode},
+	"JsonParse":  {kind: generatedStdlibExternJSONParse},
 }
 
 func (l *lowerer) lowerGeneratedStdlibExtern(binding string, signature air.Signature, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, bool, error) {

@@ -622,7 +622,7 @@ func ExtractField(data any, name string) (any, error) {
 	return nil, fmt.Errorf("%s", formatDynamicValueForError(data))
 }
 
-func HTTPDo(method string, url string, body any, headers map[string]string, timeout Maybe[int]) (*http.Response, error) {
+func HTTPDo(method string, url string, body any, headers map[string]string, timeout *int) (*http.Response, error) {
 	var bodyReader io.Reader = strings.NewReader("")
 	if body != nil {
 		switch value := body.(type) {
@@ -648,8 +648,8 @@ func HTTPDo(method string, url string, body any, headers map[string]string, time
 	}
 
 	client := &http.Client{}
-	if timeout.IsSome() {
-		client.Timeout = time.Duration(timeout.Value()) * time.Second
+	if timeout != nil {
+		client.Timeout = time.Duration(*timeout) * time.Second
 	}
 	resp, err := client.Do(req)
 	if err != nil {
