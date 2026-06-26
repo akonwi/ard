@@ -2210,3 +2210,26 @@ func TestGoPackagesResolverLoadsBundledStdlib(t *testing.T) {
 		t.Fatalf("bundled ffi missing FloatFromInt; have %d functions", len(pkg.Functions))
 	}
 }
+
+// TestGoValueTypesMatchAcrossSeparateLoads guards the structural fallback used
+// when a concrete type and an interface (or their method signatures) come from
+// distinct go/packages loads, where types.Identical/AssignableTo fail on
+// instance identity even for the same Go type.
+func TestGoValueTypesMatchAcrossSeparateLoads(t *testing.T) {
+	src := "package p\n\ntype Rows struct{ x int }"
+	a := goPackageFromSource(t, "example.com/p", "p", src)
+	b := goPackageFromSource(t, "example.com/p", "p", src)
+	rowsA, okA := a.Types["Rows"]
+	rowsB, okB := b.Types["Rows"]
+	if !okA || !okB || rowsA.Type == nil || rowsB.Type == nil {
+		t.Fatal("missing Rows type metadata")
+	}
+	if gotypes.Identical(rowsA.Type, rowsB.Type) {
+		t.Fatal("expected distinct type instances across separate loads")
+	}
+	left := GoValueType{Named: true, ImportPath: "example.com/p", Name: "Rows", Type: rowsA.Type}
+	right := GoValueType{Named: true, ImportPath: "example.com/p", Name: "Rows", Type: rowsB.Type}
+	if !goValueTypesMatch(left, right) {
+		t.Fatal("same-named Go types from separate loads should match structurally")
+	}
+}

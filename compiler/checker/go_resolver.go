@@ -1822,9 +1822,13 @@ func (c *Checker) directGoInterfaceAssignable(ard Type, goType GoValueType) bool
 		return false
 	}
 	if expected.Type != nil {
-		if actualType, ok := c.directGoGoTypeForArdType(ard); ok {
-			return types.AssignableTo(actualType, expected.Type)
+		if actualType, ok := c.directGoGoTypeForArdType(ard); ok && types.AssignableTo(actualType, expected.Type) {
+			return true
 		}
+		// AssignableTo compares by type identity, which fails when the concrete
+		// type and the interface come from separate go/packages loads. Fall
+		// through to the structural method-set comparison below, unless the
+		// interface has unexported methods, which an external type cannot satisfy.
 		if expected.HasUnexportedMethods {
 			return false
 		}
@@ -2140,8 +2144,11 @@ func goMethodSignaturesMatch(actual GoSignature, required GoSignature) bool {
 }
 
 func goValueTypesMatch(left GoValueType, right GoValueType) bool {
-	if left.Type != nil && right.Type != nil {
-		return types.Identical(left.Type, right.Type)
+	// Prefer exact identity, but fall through to a structural (name + shape)
+	// comparison when it fails: types loaded in separate go/packages sessions are
+	// distinct instances even when they denote the same Go type.
+	if left.Type != nil && right.Type != nil && types.Identical(left.Type, right.Type) {
+		return true
 	}
 	if left.Named || right.Named {
 		return left.Named == right.Named && left.ImportPath == right.ImportPath && left.Name == right.Name
