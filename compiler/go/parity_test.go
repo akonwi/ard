@@ -2387,6 +2387,43 @@ func TestGoTargetParityHTTP(t *testing.T) {
 			`, server.URL),
 		}})
 	})
+
+	t.Run("serve runs handler and writes response", func(t *testing.T) {
+		// End-to-end Go-target check of the server path: an Ard-defined handler is
+		// registered, the server runs in a fiber, and a client request observes the
+		// handler-produced status and body (including a query parameter read from
+		// the raw *http.Request).
+		program := lowerParitySource(t, `
+			use ard/http
+			use ard/async
+			use ard/maybe
+
+			fn main() Str {
+				let handlers: [Str: http::HandlerFn] = [
+					"/hello": fn(req: http::Request) http::Response {
+						http::Response::new(201, "hi {req.query_param("name")}")
+					},
+				]
+				async::start(fn() {
+					http::serve(18097, handlers).or(())
+				})
+				async::sleep(500)
+				let resp = http::send(
+					http::Request{
+						method: http::Method::Get,
+						url: "http://localhost:18097/hello?name=ard",
+						headers: [:],
+						timeout: maybe::some(5),
+					},
+					maybe::none(),
+				).or(http::Response::new(-1, "fail"))
+				"{resp.status}:{resp.body}"
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != `"201:hi ard"` {
+			t.Fatalf("got %s, want %q", got, "201:hi ard")
+		}
+	})
 }
 
 func TestGoTargetParitySQL(t *testing.T) {

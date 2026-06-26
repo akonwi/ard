@@ -688,36 +688,45 @@ func HTTPResponseClose(resp *http.Response) {
 	}
 }
 
-func HTTPServe(port int, handlers map[string]func(Request, *Response)) error {
+// HTTPServe registers each handler on a mux and serves. The handlers receive the
+// raw *http.Request and http.ResponseWriter; the Ard http module builds its
+// Request/Response and writes the result, so this stays Ard-agnostic.
+func HTTPServe(port int, handlers map[string]func(http.ResponseWriter, *http.Request)) error {
 	mux := http.NewServeMux()
 	for path, handler := range handlers {
-		path := path
-		handler := handler
-		mux.HandleFunc(convertHTTPPattern(path), func(writer http.ResponseWriter, req *http.Request) {
-			ardReq := Request{
-				Method:  methodFromHTTPRequest(req.Method),
-				Url:     req.URL.String(),
-				Headers: requestHeaders(req),
-				Body:    requestBody(req),
-				Raw:     Some[*http.Request](req),
-			}
-			ardRes := Response{
-				Status:  200,
-				Headers: map[string]string{},
-			}
-			handler(ardReq, &ardRes)
-			for key, value := range ardRes.Headers {
-				writer.Header().Set(key, value)
-			}
-			status := ardRes.Status
-			if status == 0 {
-				status = 200
-			}
-			writer.WriteHeader(status)
-			_, _ = io.WriteString(writer, ardRes.Body)
-		})
+		mux.HandleFunc(convertHTTPPattern(path), handler)
 	}
 	return http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
+}
+
+// HTTPRequestBody reads and returns the request body, or "" when absent.
+func HTTPRequestBody(req *http.Request) string {
+	if req == nil || req.Body == nil {
+		return ""
+	}
+	body, err := io.ReadAll(req.Body)
+	_ = req.Body.Close()
+	if err != nil {
+		return ""
+	}
+	return string(body)
+}
+
+// HTTPRequestHeaders flattens the request's first header values into a map.
+func HTTPRequestHeaders(req *http.Request) map[string]string {
+	return requestHeaders(req)
+}
+
+// HTTPWriteResponse writes a status, headers, and body to a response writer.
+func HTTPWriteResponse(w http.ResponseWriter, status int, headers map[string]string, body string) {
+	for key, value := range headers {
+		w.Header().Set(key, value)
+	}
+	if status == 0 {
+		status = 200
+	}
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, body)
 }
 
 func convertHTTPPattern(path string) string {
@@ -730,25 +739,6 @@ func convertHTTPPattern(path string) string {
 	return strings.Join(parts, "/")
 }
 
-func methodFromHTTPRequest(method string) Method {
-	switch method {
-	case "GET":
-		return Method(0)
-	case "POST":
-		return Method(1)
-	case "PUT":
-		return Method(2)
-	case "DELETE":
-		return Method(3)
-	case "PATCH":
-		return Method(4)
-	case "OPTIONS":
-		return Method(5)
-	default:
-		return Method(0)
-	}
-}
-
 func requestHeaders(req *http.Request) map[string]string {
 	headers := make(map[string]string, len(req.Header))
 	for key, values := range req.Header {
@@ -757,18 +747,6 @@ func requestHeaders(req *http.Request) map[string]string {
 		}
 	}
 	return headers
-}
-
-func requestBody(req *http.Request) Maybe[any] {
-	if req.Body == nil {
-		return None[any]()
-	}
-	body, err := io.ReadAll(req.Body)
-	_ = req.Body.Close()
-	if err != nil || len(body) == 0 {
-		return None[any]()
-	}
-	return Some[any](string(body))
 }
 
 func formatDynamicValueForError(data any) string {

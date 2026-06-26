@@ -34,7 +34,7 @@ type WaitGroup = any
 
 type Decoder = any
 
-type HandlerFn = func(Request, *Response)
+type HandlerFn = func(Request) Response
 
 type JsonInput = any
 
