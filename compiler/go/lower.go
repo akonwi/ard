@@ -6390,36 +6390,6 @@ func unionSliceCaseClauses(program *air.Program, unionInfo air.TypeInfo, outTemp
 	return cases
 }
 
-func (l *lowerer) wrapStdlibResultCall(resultTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
-	if !validTypeID(l.program, resultTypeID) {
-		return loweredExpr{}, fmt.Errorf("invalid result type id %d", resultTypeID)
-	}
-	resultType := l.program.Types[resultTypeID-1]
-	if resultType.Kind != air.TypeResult {
-		return loweredExpr{}, fmt.Errorf("expected result type, got kind %d", resultType.Kind)
-	}
-	valueType, err := l.goType(resultType.Value)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	resultTemp := l.nextTemp()
-	stdlibResultType := &ast.IndexListExpr{X: l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Result"), Indices: []ast.Expr{valueType, l.qualified("stdlibffi", "github.com/akonwi/ard/std_lib/ffi", "Error")}}
-	stmts := []ast.Stmt{
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: stdlibResultType}}}},
-		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}},
-	}
-	errExpr, err := l.convertStdlibError(resultType.Error, &ast.SelectorExpr{X: ast.NewIdent(resultTemp), Sel: ast.NewIdent("Err")})
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	resultExpr := &ast.CompositeLit{Type: mustTypeExpr(l, resultTypeID), Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.SelectorExpr{X: ast.NewIdent(resultTemp), Sel: ast.NewIdent("Value")}},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: errExpr},
-		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.SelectorExpr{X: ast.NewIdent(resultTemp), Sel: ast.NewIdent("Ok")}},
-	}}
-	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
-}
-
 func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Extern < 0 || int(expr.Extern) >= len(l.program.Externs) {
 		return loweredExpr{}, fmt.Errorf("invalid extern id %d", expr.Extern)
