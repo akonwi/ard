@@ -1717,8 +1717,11 @@ func directGoInterfaceCompatible(expected Type, actual Type) bool {
 		return false
 	}
 	if expectedExtern.DirectGoType != nil {
-		actualGoType, ok := directGoExternGoTypeForType(actual)
-		return ok && types.AssignableTo(actualGoType, expectedExtern.DirectGoType)
+		if actualGoType, ok := directGoExternGoTypeForType(actual); ok && types.AssignableTo(actualGoType, expectedExtern.DirectGoType) {
+			return true
+		}
+		// AssignableTo compares by type identity, which fails across separate
+		// go/packages loads; fall through to the structural method-set check.
 	}
 	required := directGoExternInterfaceMethods(expectedExtern)
 	if required == nil {
@@ -1735,9 +1738,12 @@ func (c *Checker) directGoInterfaceCompatible(expected Type, actual Type) bool {
 		return false
 	}
 	if expectedExtern.DirectGoType != nil {
-		if actualGoType, ok := c.directGoGoTypeForArdType(actual); ok {
-			return types.AssignableTo(actualGoType, expectedExtern.DirectGoType)
+		if actualGoType, ok := c.directGoGoTypeForArdType(actual); ok && types.AssignableTo(actualGoType, expectedExtern.DirectGoType) {
+			return true
 		}
+		// AssignableTo compares by type identity, which fails across separate
+		// go/packages loads; fall through to the structural method-set check
+		// unless the interface has unexported methods an external type can't have.
 		if expectedExtern.DirectGoHasUnexportedMethods {
 			return false
 		}

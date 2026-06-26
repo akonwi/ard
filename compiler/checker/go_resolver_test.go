@@ -2233,3 +2233,29 @@ func TestGoValueTypesMatchAcrossSeparateLoads(t *testing.T) {
 		t.Fatal("same-named Go types from separate loads should match structurally")
 	}
 }
+
+// TestDirectGoInterfaceCompatibleFallsThroughToMethodSet guards that interface
+// satisfaction for struct-field/let assignment falls through to the structural
+// method-set comparison when types.AssignableTo fails on cross-load identity.
+func TestDirectGoInterfaceCompatibleFallsThroughToMethodSet(t *testing.T) {
+	ifacePkg := goPackageFromSource(t, "example.com/p", "p", "package p\n\ntype Reader interface{ Read() int }")
+	implPkg := goPackageFromSource(t, "example.com/q", "q", "package q\n\ntype Empty struct{}")
+	ifaceType := ifacePkg.Types["Reader"].Type
+	implType := implPkg.Types["Empty"].Type
+	if ifaceType == nil || implType == nil {
+		t.Fatal("missing type metadata")
+	}
+	// Precondition: the concrete type is NOT assignable to the interface by
+	// go/types, so success can only come from the structural fallback.
+	if gotypes.AssignableTo(implType, ifaceType) {
+		t.Fatal("precondition failed: Empty should not implement Reader")
+	}
+
+	readMethod := map[string]GoMethod{"Read": {Name: "Read", Signature: GoSignature{Results: []GoValueType{{Kind: GoValueInt, Expr: "int"}}}}}
+	expected := &ExternType{DirectGoInterface: true, DirectGoType: ifaceType, DirectGoMethods: readMethod}
+	actual := &ExternType{DirectGoType: implType, DirectGoMethods: readMethod}
+
+	if !directGoInterfaceCompatible(expected, actual) {
+		t.Fatal("matching method sets should satisfy the interface despite AssignableTo failing")
+	}
+}
