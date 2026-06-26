@@ -14,6 +14,7 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/stdlibgo"
 )
 
 type loweredExpr struct {
@@ -221,7 +222,7 @@ func collectGoImportsFromPaths(paths []string) map[string]string {
 
 func collectGoImportsFromEmbeddedArdModule() map[string]string {
 	imports := map[string]string{}
-	for rel, content := range embeddedArdModuleFiles {
+	for rel, content := range stdlibgo.Files {
 		if !strings.HasPrefix(rel, "std_lib/ffi/") || skipFFIImportSource(rel) {
 			continue
 		}

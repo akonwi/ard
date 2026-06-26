@@ -6,7 +6,9 @@ import (
 	gotoken "go/token"
 	"go/types"
 	"math"
+	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"unicode"
 
 	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/stdlibgo"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -146,18 +149,37 @@ func (r *GoPackagesResolver) LoadPackage(importPath string) (*GoPackage, error) 
 	if cached, ok := r.cache[importPath]; ok {
 		return cached, nil
 	}
-	sharedCacheKey, useSharedCache := stdlibGoPackageCacheKey(r.Dir, importPath)
+	cfg := &packages.Config{
+		Dir:        r.Dir,
+		Mode:       packages.NeedName | packages.NeedTypes,
+		BuildFlags: []string{"-mod=readonly"},
+	}
+	var sharedCacheKey string
+	var useSharedCache bool
+	if stdlibgo.IsBundledImportPath(importPath) {
+		// The bundled standard library Go packages are not on the build's module
+		// path, so resolve them against the embedded module materialized to a
+		// content-hashed cache directory. Resolve hermetically, independent of any
+		// enclosing Go workspace or hostile GOFLAGS, while preserving proxy/sumdb
+		// configuration so deps download exactly as the generated program's build
+		// would.
+		bundledDir, err := stdlibgo.MaterializedDir()
+		if err != nil {
+			return nil, fmt.Errorf("materialize bundled standard library: %w", err)
+		}
+		cfg.Dir = bundledDir
+		cfg.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
+		sharedCacheKey = "bundled:" + stdlibgo.ContentHash() + ":" + goruntime.GOOS + "/" + goruntime.GOARCH + ":" + importPath
+		useSharedCache = true
+	} else {
+		sharedCacheKey, useSharedCache = stdlibGoPackageCacheKey(r.Dir, importPath)
+	}
 	if useSharedCache {
 		if cached, ok := sharedStdlibGoPackageCache.Load(sharedCacheKey); ok {
 			pkg := cached.(*GoPackage)
 			r.cache[importPath] = pkg
 			return pkg, nil
 		}
-	}
-	cfg := &packages.Config{
-		Dir:        r.Dir,
-		Mode:       packages.NeedName | packages.NeedTypes,
-		BuildFlags: []string{"-mod=readonly"},
 	}
 	pkgs, err := packages.Load(cfg, importPath)
 	if err != nil {

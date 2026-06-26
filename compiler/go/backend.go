@@ -1,7 +1,5 @@
 package gotarget
 
-//go:generate go run generate_ard_module_files.go
-
 import (
 	"encoding/json"
 	"fmt"
@@ -20,6 +18,7 @@ import (
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
 	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
+	"github.com/akonwi/ard/stdlibgo"
 	"github.com/akonwi/ard/version"
 )
 
@@ -1307,7 +1306,7 @@ func writeArdModuleDependency(dir string) (string, error) {
 }
 
 func writeEmbeddedArdModule(dir string) error {
-	for rel, content := range embeddedArdModuleFiles {
+	for rel, content := range stdlibgo.Files {
 		path := filepath.Join(dir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err

@@ -2192,3 +2192,21 @@ func TestGoPackagesResolverLoadsStdlibFunctionsAndMethods(t *testing.T) {
 		t.Fatalf("reflect.Kind has unsigned backing and should not become enum-like yet: %#v", kind.EnumConstants)
 	}
 }
+
+// TestGoPackagesResolverLoadsBundledStdlib verifies that the bundled standard
+// library Go packages resolve regardless of the resolver's working directory
+// (the regression: from a user project dir they previously failed to load,
+// silently degrading stdlib calls to Void / empty bodies).
+func TestGoPackagesResolverLoadsBundledStdlib(t *testing.T) {
+	resolver := NewGoPackagesResolver(t.TempDir())
+	pkg, err := resolver.LoadPackage("github.com/akonwi/ard/std_lib/ffi")
+	if err != nil {
+		t.Fatalf("load bundled ffi: %v", err)
+	}
+	if pkg == nil || pkg.Name != "ffi" {
+		t.Fatalf("unexpected package %#v", pkg)
+	}
+	if _, ok := pkg.Functions["FloatFromInt"]; !ok {
+		t.Fatalf("bundled ffi missing FloatFromInt; have %d functions", len(pkg.Functions))
+	}
+}
