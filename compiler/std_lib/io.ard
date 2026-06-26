@@ -1,9 +1,11 @@
 use ard/string as Str
 
-private extern fn _print(string: Str) Void = "Print"
+use go:github.com/akonwi/ard/std_lib/ffi
 
 fn print(value: Str::ToString) {
-  _print(value.to_str())
+  ffi::Print(value.to_str())
 }
 
-extern fn read_line() Str!Str = "ReadLine"
+fn read_line() Str!Str {
+  ffi::ReadLine()
+}

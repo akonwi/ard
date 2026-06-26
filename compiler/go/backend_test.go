@@ -3851,7 +3851,7 @@ func TestLowerProgramSupportsResultExpectAndStringPredicates(t *testing.T) {
 	}) {
 		t.Fatal("generated AST missing runtime.Result usage")
 	}
-	if !astFilesHaveCall(files, "stdlibffi.ReadLine") {
+	if !astFilesHaveCall(files, "ffi.ReadLine") {
 		t.Fatal("generated AST missing ReadLine lowering")
 	}
 	if astFilesHaveCall(files, "ardReadLine") {

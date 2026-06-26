@@ -1,6 +1,10 @@
 use ard/list as List
 
-extern fn os_args() [Str] = "OsArgs"
+use go:github.com/akonwi/ard/std_lib/ffi
+
+fn os_args() [Str] {
+  ffi::OsArgs()
+}
 
 struct Argv {
   program: Str,

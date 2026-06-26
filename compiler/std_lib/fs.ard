@@ -2,6 +2,7 @@ use ard/byte as Byte
 use ard/string as Str
 use ard/testing
 
+use go:github.com/akonwi/ard/std_lib/ffi
 use go:io
 use go:os
 use go:path/filepath
@@ -12,11 +13,17 @@ let FILE_MODE = 420
 // 0755 directory permissions.
 let DIR_MODE = 493
 
-extern fn exists(path: Str) Bool = "FS_Exists"
+fn exists(path: Str) Bool {
+  ffi::FSExists(path)
+}
 
-extern fn is_file(path: Str) Bool = "FS_IsFile"
+fn is_file(path: Str) Bool {
+  ffi::FSIsFile(path)
+}
 
-extern fn is_dir(path: Str) Bool = "FS_IsDir"
+fn is_dir(path: Str) Bool {
+  ffi::FSIsDir(path)
+}
 
 fn create_file(path: Str) Bool!Str {
   let file = try os::Create(path)
@@ -91,7 +98,9 @@ fn delete_dir(path: Str) Void!Str {
 }
 
 // Private FFI returns map of name -> is_file
-private extern fn _list_dir_map(path: Str) [Str: Bool]!Str = "FS_ListDir"
+fn _list_dir_map(path: Str) [Str: Bool]!Str {
+  ffi::FSListDir(path)
+}
 
 fn list_dir(path: Str) [DirEntry]!Str {
   let entries_map = try _list_dir_map(path)

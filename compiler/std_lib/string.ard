@@ -1,3 +1,4 @@
+use go:github.com/akonwi/ard/std_lib/ffi
 use go:strings
 
 // defines converting to a string
@@ -8,5 +9,10 @@ trait ToString {
 fn split(input: Str, delimiter: Str) [Str] {
   strings::Split(input, delimiter)
 }
-extern fn from_bytes(bytes: [Byte]) Str!Str = "StrFromUtf8"
-extern fn from_runes(runes: [Rune]) Str!Str = "StrFromRunes"
+fn from_bytes(bytes: [Byte]) Str!Str {
+  ffi::StrFromUtf8(bytes)
+}
+
+fn from_runes(runes: [Rune]) Str!Str {
+  ffi::StrFromRunes(runes)
+}

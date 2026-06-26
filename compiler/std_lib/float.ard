@@ -1,6 +1,7 @@
 use ard/maybe
 use ard/testing
 
+use go:github.com/akonwi/ard/std_lib/ffi
 use go:math
 use go:strconv
 
@@ -12,7 +13,9 @@ fn from_str(input: Str) Float? {
   maybe::some(value)
 }
 
-extern fn from_int(int: Int) Float = "FloatFromInt"
+fn from_int(int: Int) Float {
+  ffi::FloatFromInt(int)
+}
 
 fn floor(float: Float) Float {
   math::Floor(float)
