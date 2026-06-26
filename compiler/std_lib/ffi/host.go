@@ -106,19 +106,19 @@ func ChannelClose[T any](ch chan T) (closed bool) {
 	return true
 }
 
-func ByteFromInt(value int) Maybe[byte] {
+func ByteFromInt(value int) (byte, bool) {
 	if value < 0 || value > 255 {
-		return None[byte]()
+		return 0, false
 	}
-	return Some(byte(value))
+	return byte(value), true
 }
 
-func RuneFromInt(value int) Maybe[rune] {
+func RuneFromInt(value int) (rune, bool) {
 	r := rune(value)
 	if !utf8.ValidRune(r) {
-		return None[rune]()
+		return 0, false
 	}
-	return Some(r)
+	return r, true
 }
 
 func StrFromUtf8(bytes []byte) (string, error) {
