@@ -71,6 +71,10 @@ const (
 	ExprListSort
 	ExprListSwap
 	ExprMakeMap
+	ExprMakeChannel
+	ExprChannelSend
+	ExprChannelRecv
+	ExprChannelClose
 	ExprMapKeys
 	ExprMapSize
 	ExprMapGet

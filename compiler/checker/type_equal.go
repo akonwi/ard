@@ -53,6 +53,14 @@ func equalTypesSeen(left Type, right Type, seen map[typeEqualKey]struct{}) bool 
 			return equalTypesSeen(r, l, seen)
 		}
 		return false
+	case *Chan:
+		if r, ok := right.(*Chan); ok {
+			return equalTypesSeen(l.of, r.of, seen)
+		}
+		if r, ok := right.(*TypeVar); ok {
+			return r.actual == nil || equalTypesSeen(l, r.actual, seen)
+		}
+		return false
 	case *Map:
 		if r, ok := right.(*Map); ok {
 			return equalTypesSeen(l.key, r.key, seen) && equalTypesSeen(l.value, r.value, seen)
@@ -229,6 +237,8 @@ func typeEqualID(t Type) string {
 		return fmt.Sprintf("Trait:%s:%s", v.ModulePath, v.Name)
 	case *List:
 		return fmt.Sprintf("List:%p", v)
+	case *Chan:
+		return fmt.Sprintf("Chan:%p", v)
 	case *Map:
 		return fmt.Sprintf("Map:%p", v)
 	case Map:

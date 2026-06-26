@@ -298,6 +298,12 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			return t
 		}
 		return &List{of: newOf}
+	case *Chan:
+		newOf := replaceGeneric(t.of, genericName, concreteType)
+		if newOf == t.of {
+			return t
+		}
+		return &Chan{of: newOf}
 	case *Map:
 		newKey := replaceGeneric(t.key, genericName, concreteType)
 		newValue := replaceGeneric(t.value, genericName, concreteType)

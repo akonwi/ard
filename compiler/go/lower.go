@@ -2163,6 +2163,14 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMatchStr(fn, expr)
 	case air.ExprMakeList:
 		return l.lowerMakeList(fn, expr)
+	case air.ExprMakeChannel:
+		return l.lowerMakeChannel(fn, expr)
+	case air.ExprChannelSend:
+		return l.lowerChannelSend(fn, expr)
+	case air.ExprChannelRecv:
+		return l.lowerChannelRecv(fn, expr)
+	case air.ExprChannelClose:
+		return l.lowerChannelClose(fn, expr)
 	case air.ExprJSONParse:
 		return l.lowerJSONParse(fn, expr)
 	case air.ExprStrContains:
@@ -3173,6 +3181,12 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		return &ast.ArrayType{Elt: elem}, nil
+	case air.TypeChannel:
+		elem, err := l.goType(info.Elem)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ChanType{Dir: ast.SEND | ast.RECV, Value: elem}, nil
 	case air.TypeMap:
 		key, err := l.goType(info.Key)
 		if err != nil {
@@ -5762,6 +5776,87 @@ func (l *lowerer) lowerMapHas(fn air.Function, expr air.Expr) (loweredExpr, erro
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_"), ast.NewIdent(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{lookup}})
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(okName)}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
+}
+
+// lowerMakeChannel lowers ard/channel::new to `make(chan T, capacity)`.
+func (l *lowerer) lowerMakeChannel(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("make channel expects one arg")
+	}
+	chanType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	capacity, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	call := &ast.CallExpr{Fun: ast.NewIdent("make"), Args: []ast.Expr{chanType, capacity.expr}}
+	return loweredExpr{stmts: capacity.stmts, expr: call}, nil
+}
+
+// lowerChannelSend lowers ard/channel::send to `ch <- value` and yields Void.
+func (l *lowerer) lowerChannelSend(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if len(expr.Args) != 2 {
+		return loweredExpr{}, fmt.Errorf("channel send expects two args")
+	}
+	ch, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	value, err := l.lowerExpr(fn, expr.Args[1])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := append(ch.stmts, value.stmts...)
+	stmts = append(stmts, &ast.SendStmt{Chan: ch.expr, Value: value.expr})
+	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
+}
+
+// lowerChannelRecv lowers ard/channel::recv to `v, ok := <-ch` wrapped into a
+// Maybe (some on a live receive, none on a closed-and-drained channel).
+func (l *lowerer) lowerChannelRecv(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("channel recv expects one arg")
+	}
+	ch, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	temp := l.nextTemp()
+	decls, err := l.declareTemp(expr.Type, temp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	valueTemp := l.nextTemp()
+	okName := l.nextTemp()
+	recv := ast.Expr(&ast.UnaryExpr{Op: token.ARROW, X: ch.expr})
+	stmts := append(ch.stmts, decls...)
+	someExpr, err := l.maybeSomeExpr(expr.Type, ast.NewIdent(valueTemp))
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts = append(stmts, &ast.IfStmt{
+		Init: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(valueTemp), ast.NewIdent(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{recv}},
+		Cond: ast.NewIdent(okName),
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{someExpr}},
+		}},
+	})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
+}
+
+// lowerChannelClose lowers ard/channel::close to `close(ch)` and yields Void.
+func (l *lowerer) lowerChannelClose(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("channel close expects one arg")
+	}
+	ch, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := append(ch.stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("close"), Args: []ast.Expr{ch.expr}}})
+	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
 }
 
 func (l *lowerer) lowerMapGet(fn air.Function, expr air.Expr) (loweredExpr, error) {

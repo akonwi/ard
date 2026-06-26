@@ -121,6 +121,7 @@ const (
 	TypeDynamic
 	TypeExtern
 	TypeFunction
+	TypeChannel
 	TypeTraitObject
 	// TypeParam is a reference to a generic type parameter inside a generic
 	// definition (e.g. the `T` in `struct Partition<$T>`). It only appears in

@@ -546,6 +546,31 @@ func (l *List) Of() Type {
 	return l.of
 }
 
+// Chan is a typed channel for communicating between concurrent tasks. It
+// lowers to a native Go `chan T`.
+type Chan struct {
+	of Type
+}
+
+func MakeChan(of Type) *Chan {
+	return &Chan{of}
+}
+func (c Chan) String() string {
+	return "Chan<" + c.of.String() + ">"
+}
+func (c Chan) get(name string) Type {
+	return nil
+}
+func (c *Chan) equal(other Type) bool {
+	return equalTypes(c, other)
+}
+func (c *Chan) hasTrait(trait *Trait) bool {
+	return false
+}
+func (c *Chan) Of() Type {
+	return c.of
+}
+
 type Map struct {
 	key   Type
 	value Type

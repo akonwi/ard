@@ -70,7 +70,7 @@ func Validate(program *Program) error {
 
 func validateTypeInfo(program *Program, typ TypeInfo) error {
 	switch typ.Kind {
-	case TypeList, TypeMaybe:
+	case TypeList, TypeMaybe, TypeChannel:
 		if !validTypeID(program, typ.Elem) {
 			return fmt.Errorf("type %s has invalid elem type %d", typ.Name, typ.Elem)
 		}

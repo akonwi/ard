@@ -90,6 +90,12 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 			return nil, err
 		}
 		return &ast.ArrayType{Elt: elem}, nil
+	case TypeChannel:
+		elem, err := goTypeExpr(program, typ.Elem, runtimeQualifier)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ChanType{Dir: ast.SEND | ast.RECV, Value: elem}, nil
 	case TypeMap:
 		key, err := goTypeExpr(program, typ.Key, runtimeQualifier)
 		if err != nil {
@@ -184,7 +190,7 @@ func goTypeContainsMaybe(program *Program, id TypeID, seen map[TypeID]bool) bool
 	switch typ.Kind {
 	case TypeMaybe:
 		return true
-	case TypeList:
+	case TypeList, TypeChannel:
 		return goTypeContainsMaybe(program, typ.Elem, seen)
 	case TypeMap:
 		return goTypeContainsMaybe(program, typ.Key, seen) || goTypeContainsMaybe(program, typ.Value, seen)

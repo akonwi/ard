@@ -2956,6 +2956,99 @@ fn main() Bool { json::parse<Todo>("\{\"id\":1,\"title\":\"x\",\"note\":\"hi\"\}
 	}
 }
 
+func TestGoTargetParityChannel(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name: "buffered send and receive",
+			input: `use ard/channel
+fn main() Bool {
+  let ch = channel::new<Int>(1)
+  channel::send(ch, 42)
+  channel::recv(ch).expect("recv") == 42
+}`,
+			want: "true",
+		},
+		{
+			name: "receive on closed empty channel returns none",
+			input: `use ard/channel
+fn main() Bool {
+  let ch = channel::new<Int>(1)
+  channel::close(ch)
+  channel::recv(ch).is_none()
+}`,
+			want: "true",
+		},
+		{
+			name: "buffered drain preserves order then closes",
+			input: `use ard/channel
+fn main() Bool {
+  let ch = channel::new<Str>(2)
+  channel::send(ch, "a")
+  channel::send(ch, "b")
+  channel::close(ch)
+  let a = channel::recv(ch).expect("a")
+  let b = channel::recv(ch).expect("b")
+  let drained = channel::recv(ch).is_none()
+  a == "a" and b == "b" and drained
+}`,
+			want: "true",
+		},
+		{
+			name: "communicates across a goroutine over an unbuffered channel",
+			input: `use ard/channel
+use ard/async
+fn main() Bool {
+  let ch = channel::new<Int>(0)
+  let fiber = async::start(fn() { channel::send(ch, 7) })
+  let v = channel::recv(ch).expect("recv")
+  fiber.Wait()
+  v == 7
+}`,
+			want: "true",
+		},
+		{
+			name: "sends contextual optional values",
+			input: `use ard/channel
+use ard/maybe
+fn main() Bool {
+  let ch = channel::new<Int?>(2)
+  channel::send(ch, maybe::none())
+  channel::send(ch, maybe::some(5))
+  channel::close(ch)
+  let first = channel::recv(ch).expect("first")
+  let second = channel::recv(ch).expect("second")
+  first.is_none() and second.expect("s") == 5
+}`,
+			want: "true",
+		},
+		{
+			name: "generic function inferring the channel element type",
+			input: `use ard/channel
+fn first<$T>(ch: channel::Chan<$T>) $T? {
+  channel::recv(ch)
+}
+fn main() Bool {
+  let ch = channel::new<Int>(1)
+  channel::send(ch, 99)
+  first(ch).expect("first") == 99
+}`,
+			want: "true",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			program := lowerParitySource(t, tc.input)
+			if got := strings.TrimSpace(runGoTargetParityJSON(t, program)); got != tc.want {
+				t.Fatalf("go output = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
