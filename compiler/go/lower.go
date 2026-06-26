@@ -2163,6 +2163,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMatchStr(fn, expr)
 	case air.ExprMakeList:
 		return l.lowerMakeList(fn, expr)
+	case air.ExprJSONParse:
+		return l.lowerJSONParse(fn, expr)
 	case air.ExprStrContains:
 		if expr.Target == nil || len(expr.Args) != 1 {
 			return loweredExpr{}, fmt.Errorf("str contains expects target and substring")
@@ -5256,6 +5258,52 @@ func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, 
 		Body: &ast.BlockStmt{List: someBody},
 		Else: &ast.BlockStmt{List: noneBody},
 	})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+// lowerJSONParse lowers json::parse<T>(input) to a native encoding/json/v2
+// Unmarshal into the typed target. Struct json tags, runtime.Maybe's
+// UnmarshalJSON, and enums-as-int give the Ard JSON shape without a generated
+// decoder (ADR 0031).
+func (l *lowerer) lowerJSONParse(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("json::parse missing input argument")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if !validTypeID(l.program, expr.Type) {
+		return loweredExpr{}, fmt.Errorf("invalid json::parse result type %d", expr.Type)
+	}
+	resultInfo := l.program.Types[expr.Type-1]
+	if resultInfo.Kind != air.TypeResult {
+		return loweredExpr{}, fmt.Errorf("json::parse expected result return, got %s", resultInfo.Name)
+	}
+	valueType, err := l.goType(resultInfo.Value)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	errTemp := l.nextTemp()
+	outTemp := l.nextTemp()
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	stmts = append(stmts,
+		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(outTemp)}, Type: valueType}}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `""`}}},
+		&ast.IfStmt{
+			Init: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("err")}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.CallExpr{Fun: l.qualified("json", "encoding/json/v2", "Unmarshal"), Args: []ast.Expr{
+				&ast.CallExpr{Fun: &ast.ArrayType{Elt: ast.NewIdent("byte")}, Args: []ast.Expr{target.expr}},
+				&ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(outTemp)},
+			}}}},
+			Cond: &ast.BinaryExpr{X: ast.NewIdent("err"), Op: token.NEQ, Y: ast.NewIdent("nil")},
+			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent("err"), Sel: ast.NewIdent("Error")}}}}}},
+		},
+	)
+	resultExpr := &ast.CompositeLit{Type: mustTypeExpr(l, expr.Type), Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: ast.NewIdent(outTemp)},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: ast.NewIdent(errTemp)},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.EQL, Y: &ast.BasicLit{Kind: token.STRING, Value: `""`}}},
+	}}
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
 

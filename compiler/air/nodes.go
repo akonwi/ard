@@ -60,6 +60,9 @@ const (
 	ExprTraitUpcast
 	ExprCallTrait
 	ExprMakeList
+	// ExprJSONParse lowers json::parse<T>(input) to a typed encoding/json/v2
+	// Unmarshal into the result's value type. Target is the input string.
+	ExprJSONParse
 	ExprListAt
 	ExprListPrepend
 	ExprListPush

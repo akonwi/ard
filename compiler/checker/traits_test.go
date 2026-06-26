@@ -691,3 +691,42 @@ func TestTraitsAsTypes(t *testing.T) {
 		},
 	})
 }
+
+func TestJSONParseRejectsUnions(t *testing.T) {
+	run(t, []test{
+		{
+			name: "json::parse into a union is rejected as ambiguous",
+			input: `use ard/json
+type Val = Str | Int
+let v = json::parse<Val>("5")`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "json::parse does not support Val: parsing into a union is ambiguous"},
+			},
+		},
+		{
+			name: "json::parse into a struct containing a union is rejected",
+			input: `use ard/json
+type Val = Str | Int
+struct Holder { value: Val }
+let h = json::parse<Holder>("\{\}")`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "json::parse field value: json::parse does not support Val: parsing into a union is ambiguous"},
+			},
+		},
+		{
+			name: "json::parse only supports Str map keys",
+			input: `use ard/json
+let m = json::parse<[Int: Str]>("\{\}")`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "json::parse only supports Str map keys, got Int"},
+			},
+		},
+		{
+			name: "json::parse into a struct is allowed",
+			input: `use ard/json
+struct Todo { id: Int, title: Str }
+let t = json::parse<Todo>("\{\}")`,
+			diagnostics: []checker.Diagnostic{},
+		},
+	})
+}

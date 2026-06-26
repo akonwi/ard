@@ -3742,6 +3742,16 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			return &Expr{Kind: ExprMakeList, Type: typeID}, nil
 		}
+		if e.Module == "ard/json" && e.Call.Name == "parse" {
+			if len(e.Call.Args) != 1 {
+				return nil, fmt.Errorf("ard/json::parse expects one argument")
+			}
+			arg, err := fl.lowerExpr(e.Call.Args[0])
+			if err != nil {
+				return nil, err
+			}
+			return &Expr{Kind: ExprJSONParse, Type: typeID, Target: arg}, nil
+		}
 		moduleID := fl.l.internModule(e.Module)
 		if err := fl.l.ensureModuleGlobalsDeclared(e.Module); err != nil {
 			return nil, err

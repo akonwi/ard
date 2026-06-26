@@ -2888,6 +2888,74 @@ fn main() Bool { os::LookupEnv("__ARD_MISSING_DIRECT_GO_ADAPTER__").is_none() }`
 	}
 }
 
+func TestGoTargetParityJSON(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name: "encode list preserves order",
+			input: `use ard/json
+fn main() Bool { json::encode([1, 2, 3]).expect("e") == "[1,2,3]" }`,
+			want: "true",
+		},
+		{
+			name: "parse struct field",
+			input: `use ard/json
+struct Todo { id: Int, title: Str, note: Str? }
+fn main() Bool { json::parse<Todo>("\{\"id\":1,\"title\":\"ship\"\}").expect("p").id == 1 }`,
+			want: "true",
+		},
+		{
+			name: "round trips a struct through encode and parse",
+			input: `use ard/json
+use ard/maybe
+struct Todo { id: Int, title: Str, note: Str? }
+fn main() Bool {
+  let raw = json::encode(Todo{id: 7, title: "x", note: maybe::none()}).expect("e")
+  json::parse<Todo>(raw).expect("p").id == 7
+}`,
+			want: "true",
+		},
+		{
+			name: "parse reports an error for invalid json",
+			input: `use ard/json
+struct Todo { id: Int, title: Str, note: Str? }
+fn main() Bool { json::parse<Todo>("not json").is_err() }`,
+			want: "true",
+		},
+		{
+			name: "parse a list of primitives",
+			input: `use ard/json
+fn main() Bool { json::parse<[Int]>("[1,2,3]").expect("p").size() == 3 }`,
+			want: "true",
+		},
+		{
+			name: "missing optional field decodes as none",
+			input: `use ard/json
+struct Todo { id: Int, title: Str, note: Str? }
+fn main() Bool { json::parse<Todo>("\{\"id\":1,\"title\":\"x\"\}").expect("p").note.is_none() }`,
+			want: "true",
+		},
+		{
+			name: "present optional field decodes as some",
+			input: `use ard/json
+struct Todo { id: Int, title: Str, note: Str? }
+fn main() Bool { json::parse<Todo>("\{\"id\":1,\"title\":\"x\",\"note\":\"hi\"\}").expect("p").note.is_some() }`,
+			want: "true",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			program := lowerParitySource(t, tc.input)
+			if got := strings.TrimSpace(runGoTargetParityJSON(t, program)); got != tc.want {
+				t.Fatalf("go output = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{

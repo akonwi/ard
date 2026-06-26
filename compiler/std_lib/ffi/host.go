@@ -438,6 +438,17 @@ func JsonToDynamic(input string) (any, error) {
 	return out, nil
 }
 
+// JsonEncode marshals v to a JSON string. Marshal accepts any value, so Ard's
+// json::encode is an ordinary function that calls this directly via use go:;
+// only json::parse needs intrinsic lowering for its typed target.
+func JsonEncode(v any) (string, error) {
+	b, err := jsonv2.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 // The Decode* functions report failure with an error whose message is the
 // formatted "found" value. The Ard decode module supplies the "expected" type
 // name and decode path, building its structured decode error in Ard (ADR 0031).

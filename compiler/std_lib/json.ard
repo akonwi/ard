@@ -1,0 +1,16 @@
+use go:github.com/akonwi/ard/std_lib/ffi as host
+
+// encode serializes any value to a JSON string. Structs serialize with their
+// Ard field names, lists/maps/primitives/enums natively, and Maybe/Result
+// unwrapped (none -> null, some(x)/ok(x)/err(e) -> the inner value).
+fn encode(value: $T) Str!Str {
+  host::JsonEncode(value)
+}
+
+// parse deserializes a JSON string into the requested type, e.g.
+// `json::parse<Person>(text)`. It is a compiler intrinsic: the backend lowers
+// it to a typed encoding/json/v2 Unmarshal into the concrete target type, so
+// the placeholder body below is never executed.
+fn parse(input: Str) $T!Str {
+  Result::err("json::parse is lowered as an intrinsic")
+}
