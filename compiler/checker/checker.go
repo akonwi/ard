@@ -7000,7 +7000,7 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 		// This mutates expectedType.bound and expectedType.actual directly.
 		return genericScope.bindGeneric(expectedType.name, actual)
 	case *FunctionDef:
-		// Function type unification - handle both FunctionDef and ExternalFunctionDef
+		// Function type unification
 		var actualParams []Parameter
 		var actualReturnType Type
 
