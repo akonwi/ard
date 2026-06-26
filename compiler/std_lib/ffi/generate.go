@@ -295,11 +295,22 @@ func directGoCustomTypeGoType(t *parse.CustomType, directGoImports map[string]st
 		return "", false
 	}
 	alias := parts[0]
-	if directGoImports[alias] == "" {
+	importPath := directGoImports[alias]
+	if importPath == "" {
 		return "", false
+	}
+	if importPath == ffiSelfImportPath {
+		// A reference to the ffi package itself (e.g. ffi::Runner) is emitted
+		// unqualified, since ard.gen.go lives in package ffi.
+		return parts[1], true
 	}
 	return alias + "." + parts[1], true
 }
+
+// ffiSelfImportPath is the import path of the std_lib/ffi package that hosts the
+// generated ard.gen.go. References to it are emitted unqualified and never
+// self-imported.
+const ffiSelfImportPath = "github.com/akonwi/ard/std_lib/ffi"
 
 func lowerStruct(node *parse.StructDefinition, aliases map[string]string, definedTypes map[string]struct{}, directGoImports map[string]string) structDecl {
 	decl := structDecl{Name: goExportedName(node.Name.Name)}
@@ -675,6 +686,9 @@ func importsForContract(c contract, availableImports map[string]string) (map[str
 		return nil, err
 	}
 	for alias, path := range contractImports {
+		if path == ffiSelfImportPath {
+			continue
+		}
 		imports[alias] = path
 	}
 	return imports, nil

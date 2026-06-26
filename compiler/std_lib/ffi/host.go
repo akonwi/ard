@@ -40,7 +40,11 @@ const (
 	defaultScryptSaltLen = 16
 )
 
-type sqlRunner interface {
+// Runner is the shared query surface implemented by both *sql.DB and *sql.Tx.
+// Ard's sql module references it directly (ffi::Runner) instead of a Db|Tx
+// union, so a connection or transaction handle can be passed without a runtime
+// type switch.
+type Runner interface {
 	Query(query string, args ...any) (*sql.Rows, error)
 	Exec(query string, args ...any) (sql.Result, error)
 }
@@ -368,33 +372,21 @@ func SqlRollback(tx *sql.Tx) error {
 	return tx.Rollback()
 }
 
-func SqlQuery(conn any, driver string, sqlStr string, values []any) ([]any, error) {
-	runner, ok := resolveSQLRunner(conn)
-	if !ok {
+func SqlQuery(conn Runner, driver string, sqlStr string, values []any) ([]any, error) {
+	if conn == nil {
 		return nil, fmt.Errorf("SQL Error: invalid connection object")
 	}
 	sqlStr = normalizeSQLPlaceholders(sqlStr, driver)
-	return executeSQLQuery(runner, sqlStr, values)
+	return executeSQLQuery(conn, sqlStr, values)
 }
 
-func SqlExecute(conn any, driver string, sqlStr string, values []any) error {
-	runner, ok := resolveSQLRunner(conn)
-	if !ok {
+func SqlExecute(conn Runner, driver string, sqlStr string, values []any) error {
+	if conn == nil {
 		return fmt.Errorf("SQL Error: invalid connection object")
 	}
 	sqlStr = normalizeSQLPlaceholders(sqlStr, driver)
-	_, err := runner.Exec(sqlStr, values...)
+	_, err := conn.Exec(sqlStr, values...)
 	return err
-}
-
-func resolveSQLRunner(raw any) (sqlRunner, bool) {
-	if db, ok := raw.(*sql.DB); ok && db != nil {
-		return db, true
-	}
-	if tx, ok := raw.(*sql.Tx); ok && tx != nil {
-		return tx, true
-	}
-	return nil, false
 }
 
 func normalizeSQLPlaceholders(sqlStr string, driver string) string {
@@ -436,7 +428,7 @@ func normalizeSQLPlaceholders(sqlStr string, driver string) string {
 	return out.String()
 }
 
-func executeSQLQuery(runner sqlRunner, sqlStr string, values []any) ([]any, error) {
+func executeSQLQuery(runner Runner, sqlStr string, values []any) ([]any, error) {
 	rows, err := runner.Query(sqlStr, values...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)

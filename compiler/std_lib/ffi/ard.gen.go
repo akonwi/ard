@@ -32,8 +32,6 @@ func Err[T, E any](err E) Result[T, E] {
 
 type WaitGroup = any
 
-type Conn = any
-
 type Decoder = any
 
 type HandlerFn = func(Request, *Response)
@@ -100,7 +98,7 @@ type PreparedQuery struct {
 }
 
 type Query struct {
-	Conn   any
+	Conn   Runner
 	Driver string
 	String string
 	Params []string

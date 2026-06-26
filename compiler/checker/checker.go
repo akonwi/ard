@@ -3325,7 +3325,20 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 					}
 				} else {
 					// Non-nullable fields use checkExprAs which provides type context
+					diagCount := len(c.diagnostics)
 					val = c.checkExprAs(property.Value, fieldExpected)
+					if val == nil {
+						// A mutable-reference lvalue (e.g. a `mut T` field read that
+						// deref's to its value type) auto-borrows back into `mut T` so a
+						// stored Go pointer handle can satisfy an interface/pointer field
+						// (ADR 0031).
+						if borrowed := c.checkExpr(property.Value); borrowed != nil {
+							if refType := referenceArgType(borrowed); !refType.equal(borrowed.Type()) && c.areCompatible(fieldExpected, refType) {
+								c.diagnostics = c.diagnostics[:diagCount]
+								val = borrowed
+							}
+						}
+					}
 				}
 				if val != nil {
 					if fieldIsMutableRef && !c.isMutable(val) {

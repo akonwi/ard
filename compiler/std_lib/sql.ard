@@ -1,14 +1,37 @@
+use ard/dynamic
 use ard/list as List
 use ard/maybe
 use ard/result as Result
 use ard/testing
 
+use go:database/sql
+use go:github.com/akonwi/ard/std_lib/ffi
+
 // Only support primitives as values for query variables
 type Value = Str | Bool | Int | Float | Void
 
-private extern type Db = "*sql.DB"
-private extern type Tx = "*sql.Tx"
-private type Conn = Db | Tx
+// Box a query value into Dynamic for the FFI boundary, which receives []any.
+// The Value union lowers to a tagged struct, so it is matched down to the
+// underlying primitive before boxing — otherwise the SQL driver receives the
+// union wrapper instead of the scalar argument.
+fn value_to_dynamic(value: Value) Dynamic {
+  match value {
+    Str(s) => dynamic::from(s),
+    Bool(b) => dynamic::from(b),
+    Int(i) => dynamic::from(i),
+    Float(f) => dynamic::from(f),
+    _ => dynamic::from_void(),
+  }
+}
+
+fn values_to_dynamics(values: [Value]) [Dynamic] {
+  List::map(
+    values,
+    fn(v: Value) Dynamic {
+      value_to_dynamic(v)
+    },
+  )
+}
 
 fn detect_driver(connection_string: Str) Str {
   let conn = connection_string.trim()
@@ -18,14 +41,6 @@ fn detect_driver(connection_string: Str) Str {
     _ => "sqlite3",
   }
 }
-
-private extern fn connect(driver: Str, connection_string: Str) Db!Str = "SqlCreateConnection"
-private extern fn close_db(db: Db) Void!Str = "SqlClose"
-private extern fn execute(conn: Conn, driver: Str, sql: Str, values: [Value]) Void!Str = "SqlExecute"
-private extern fn run_query(conn: Conn, driver: Str, sql: Str, values: [Value]) [Dynamic]!Str = "SqlQuery"
-private extern fn begin_tx(db: Db) Tx!Str = "SqlBeginTx"
-private extern fn commit_tx(tx: Tx) Void!Str = "SqlCommit"
-private extern fn rollback_tx(tx: Tx) Void!Str = "SqlRollback"
 
 fn is_sql_delimiter(ch: Rune) Bool {
   match ch {
@@ -123,7 +138,7 @@ fn extract_params(sql: Str) [Str] {
 }
 
 struct Transaction {
-  _tx: Tx,
+  _tx: mut sql::Tx,
   driver: Str,
 }
 
@@ -133,7 +148,7 @@ struct PreparedQuery {
 }
 
 struct Query {
-  conn: Conn,
+  conn: ffi::Runner,
   driver: Str,
   string: Str,
   params: [Str],
@@ -156,12 +171,12 @@ impl Query {
 
   fn run(args: [Str: Value]) Void!Str {
     let prepared = try self.prepare(args)
-    execute(self.conn, self.driver, prepared.string, prepared.values)
+    ffi::SqlExecute(self.conn, self.driver, prepared.string, values_to_dynamics(prepared.values))
   }
 
   fn all(args: [Str: Value]) [Dynamic]!Str {
     let prepared = try self.prepare(args)
-    run_query(self.conn, self.driver, prepared.string, prepared.values)
+    ffi::SqlQuery(self.conn, self.driver, prepared.string, values_to_dynamics(prepared.values))
   }
 
   fn first(args: [Str: Value]) Dynamic?!Str {
@@ -174,14 +189,14 @@ impl Query {
 }
 
 struct Database {
-  _db: Db,
+  _db: mut sql::DB,
   driver: Str,
   path: Str,
 }
 
 fn open(path: Str) Database!Str {
   let driver = detect_driver(path)
-  let conn = try connect(driver, path)
+  let conn = try ffi::SqlCreateConnection(driver, path)
   Result::ok(
     Database{
       _db: conn,
@@ -193,13 +208,13 @@ fn open(path: Str) Database!Str {
 
 impl Database {
   fn close() Void!Str {
-    close_db(self._db)
+    ffi::SqlClose(self._db)
   }
 
   // simple one-off executions where the results aren't needed
   // [note]: could be removed entirely for query.run() once optional params are sorted
   fn exec(sql: Str) Void!Str {
-    execute(self._db, self.driver, sql, List::new<Value>())
+    ffi::SqlExecute(self._db, self.driver, sql, values_to_dynamics(List::new<Value>()))
   }
 
   fn query(sql: Str) Query {
@@ -212,7 +227,7 @@ impl Database {
   }
 
   fn begin() Transaction!Str {
-    let tx = try begin_tx(self._db)
+    let tx = try ffi::SqlBeginTx(self._db)
     Result::ok(Transaction{_tx: tx, driver: self.driver})
   }
 }
@@ -228,15 +243,15 @@ impl Transaction {
   }
 
   fn exec(sql: Str) Void!Str {
-    execute(self._tx, self.driver, sql, List::new<Value>())
+    ffi::SqlExecute(self._tx, self.driver, sql, values_to_dynamics(List::new<Value>()))
   }
 
   fn commit() Void!Str {
-    commit_tx(self._tx)
+    ffi::SqlCommit(self._tx)
   }
 
   fn rollback() Void!Str {
-    rollback_tx(self._tx)
+    ffi::SqlRollback(self._tx)
   }
 }
 
@@ -266,6 +281,34 @@ test fn test_extract_params() Void!Str {
   try testing::assert(params.at(0) == "id", "Expected first param")
   try testing::assert(params.at(1) == "name", "Expected second param")
   testing::assert(params.at(2) == "name", "Expected duplicate param")
+}
+
+test fn test_live_crud_transactions_and_params() Void!Str {
+  let db = try open(":memory:")
+  try db.exec("create table users (id integer primary key, name text)")
+  try db.exec("insert into users (name) values ('alice')")
+  try db.exec("insert into users (name) values ('bob')")
+
+  let rows = try db.query("select id, name from users").all([:])
+  try testing::assert(rows.size() == 2, "expected two inserted rows")
+
+  let tx = try db.begin()
+  try tx.exec("insert into users (name) values ('carol')")
+  try tx.commit()
+  let after_commit = try db.query("select id from users").all([:])
+  try testing::assert(after_commit.size() == 3, "expected committed row to persist")
+
+  let tx2 = try db.begin()
+  try tx2.exec("insert into users (name) values ('dave')")
+  try tx2.rollback()
+  let after_rollback = try db.query("select id from users").all([:])
+  try testing::assert(after_rollback.size() == 3, "expected rolled back row to be discarded")
+
+  let params: [Str: Value] = ["name": "alice"]
+  let matched = try db.query("select id from users where name=@name").all(params)
+  try testing::assert(matched.size() == 1, "expected one row for parameterized query")
+
+  db.close()
 }
 
 test fn test_extract_params_trims_extra_markers_and_punctuation() Void!Str {

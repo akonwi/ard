@@ -46,13 +46,6 @@ var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
 	"HTTP_ResponseClose":   {function: "HTTPResponseClose", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"HTTP_ResponseHeaders": {function: "HTTPResponseHeaders", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"HTTP_Serve":           {function: "HTTPServe", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
-	"SqlBeginTx":           {function: "SqlBeginTx", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"SqlClose":             {function: "SqlClose", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"SqlCommit":            {function: "SqlCommit", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"SqlCreateConnection":  {function: "SqlCreateConnection", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
-	"SqlExecute":           {function: "SqlExecute", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamAnySlice}},
-	"SqlQuery":             {function: "SqlQuery", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamAnySlice}},
-	"SqlRollback":          {function: "SqlRollback", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"JsonEncode":           {kind: generatedStdlibExternJSONEncode},
 	"JsonParse":            {kind: generatedStdlibExternJSONParse},
 }
