@@ -746,20 +746,6 @@ func render(c contract, packageName string, availableImports map[string]string) 
 		out.WriteString("}\n\n")
 	}
 
-	out.WriteString("type Host struct {\n")
-	for _, fn := range c.Functions {
-		fmt.Fprintf(&out, "\t%s %s\n", fn.Field, fn.Type)
-	}
-	out.WriteString("}\n\n")
-
-	out.WriteString("func (h Host) Functions() map[string]any {\n")
-	out.WriteString("\tfunctions := map[string]any{}\n")
-	for _, fn := range c.Functions {
-		fmt.Fprintf(&out, "\tif h.%s != nil {\n\t\tfunctions[%q] = h.%s\n\t}\n", fn.Field, fn.Binding, fn.Field)
-	}
-	out.WriteString("\treturn functions\n")
-	out.WriteString("}\n\n")
-
 	for _, skipped := range c.Skipped {
 		fmt.Fprintf(&out, "// Skipped extern %s: %s.\n", skipped.Binding, skipped.Reason)
 	}

@@ -17,7 +17,6 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
-	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
 	"github.com/akonwi/ard/stdlibgo"
 	"github.com/akonwi/ard/version"
 )
@@ -1275,16 +1274,17 @@ func goExternBinding(ext air.Extern) string {
 	return ext.Name
 }
 
-var stdlibGoBindings = func() map[string]struct{} {
-	bindings := map[string]struct{}{}
-	for binding := range stdlibffi.HostFunctions {
-		bindings[binding] = struct{}{}
-	}
-	return bindings
-}()
+// stdlibGoExternBindings are standard-library extern bindings that are lowered
+// through dedicated code paths rather than the generated lowering table (today,
+// the async runtime helpers). The lowering table covers every other stdlib
+// binding.
+var stdlibGoExternBindings = map[string]struct{}{
+	"AsyncStart": {},
+	"WaitFor":    {},
+}
 
 func stdlibGoBinding(binding string) bool {
-	if _, ok := stdlibGoBindings[binding]; ok {
+	if _, ok := stdlibGoExternBindings[binding]; ok {
 		return true
 	}
 	_, ok := generatedStdlibExternLowerings[binding]

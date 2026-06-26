@@ -32,72 +32,6 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-type HostConfig struct {
-	Args []string
-}
-
-var HostFunctions = NewHostFunctions(HostConfig{})
-
-func NewHostFunctions(config HostConfig) map[string]any {
-	return NewHost(config).Functions()
-}
-
-func NewHost(config HostConfig) Host {
-	args := config.Args
-	if args != nil {
-		args = append([]string(nil), args...)
-	}
-	return Host{
-		ByteFromInt:          ByteFromInt,
-		RuneFromInt:          RuneFromInt,
-		StrFromUtf8:          StrFromUtf8,
-		StrFromRunes:         StrFromRunes,
-		BytesToDynamic:       BytesToDynamic,
-		CryptoHashPassword:   CryptoHashPassword,
-		CryptoMd5:            CryptoMd5,
-		CryptoScryptHash:     CryptoScryptHash,
-		CryptoScryptVerify:   CryptoScryptVerify,
-		CryptoSha256:         CryptoSha256,
-		CryptoSha512:         CryptoSha512,
-		CryptoUUID:           CryptoUUID,
-		CryptoVerifyPassword: CryptoVerifyPassword,
-		DecodeBool:           DecodeBool,
-		DecodeByte:           DecodeByte,
-		DecodeFloat:          DecodeFloat,
-		DecodeInt:            DecodeInt,
-		DecodeRune:           DecodeRune,
-		DecodeString:         DecodeString,
-		DynamicToList:        DynamicToList,
-		DynamicToMap:         DynamicToMap,
-		ExtractField:         ExtractField,
-		FSExists:             FSExists,
-		FSIsDir:              FSIsDir,
-		FSIsFile:             FSIsFile,
-		FSListDir:            FSListDir,
-		FloatFromInt:         FloatFromInt,
-		HTTPDo:               HTTPDo,
-		HTTPResponseBody:     HTTPResponseBody,
-		HTTPResponseClose:    HTTPResponseClose,
-		HTTPResponseHeaders:  HTTPResponseHeaders,
-		HTTPServe:            HTTPServe,
-		IsNil:                IsNil,
-		JsonToDynamic:        JsonToDynamic,
-		ListToDynamic:        ListToDynamic,
-		MapToDynamic:         MapToDynamic,
-		OsArgs:               func() []string { return hostOSArgs(args) },
-		Print:                Print,
-		ReadLine:             ReadLine,
-		SqlBeginTx:           SqlBeginTx,
-		SqlClose:             SqlClose,
-		SqlCommit:            SqlCommit,
-		SqlCreateConnection:  SqlCreateConnection,
-		SqlExecute:           SqlExecute,
-		SqlQuery:             SqlQuery,
-		SqlRollback:          SqlRollback,
-		VoidToDynamic:        VoidToDynamic,
-	}
-}
-
 const (
 	defaultScryptN       = 16384
 	defaultScryptR       = 16
@@ -112,13 +46,6 @@ type sqlRunner interface {
 }
 
 func OsArgs() []string {
-	return hostOSArgs(nil)
-}
-
-func hostOSArgs(args []string) []string {
-	if args != nil {
-		return append([]string(nil), args...)
-	}
 	return append([]string(nil), os.Args...)
 }
 
