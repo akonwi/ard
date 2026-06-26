@@ -6423,24 +6423,7 @@ func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, 
 	if direct, ok, err := l.lowerDirectGoExternCall(ext, binding, args, stmts); err != nil || ok {
 		return direct, err
 	}
-	if !externModuleIsStdlib(l.program, ext) {
-		if alias, ok := dependencyAliasForModulePath(modulePathForExtern(l.program, ext), l.projectInfo); ok {
-			return l.lowerDependencyExternCall(ext, alias, binding, args, stmts, expr.Type)
-		}
-		return l.lowerProjectExternCall(ext, binding, args, stmts, expr.Type)
-	}
 	return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
-}
-
-func (l *lowerer) adaptProjectExternArgs(signature air.Signature, args []ast.Expr) ([]ast.Expr, []ast.Stmt, error) {
-	if len(signature.Params) != len(args) {
-		return nil, nil, fmt.Errorf("project extern argument count mismatch: signature has %d params, call has %d args", len(signature.Params), len(args))
-	}
-	return append([]ast.Expr(nil), args...), nil, nil
-}
-
-func (l *lowerer) lowerDependencyExternCall(ext air.Extern, alias string, binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
-	return l.lowerDirectExternCall(ext, l.dependencyFFIBindingExpr, alias, binding, args, stmts, returnTypeID)
 }
 
 func (l *lowerer) dependencyFFITypeExpr(alias string, binding string) (ast.Expr, error) {
@@ -6575,10 +6558,6 @@ func (l *lowerer) rewriteDependencyFFIFieldList(alias string, binding string, fi
 	return rewritten, nil
 }
 
-func (l *lowerer) lowerProjectExternCall(ext air.Extern, binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
-	return l.lowerDirectExternCall(ext, func(_ string, binding string) (ast.Expr, error) { return l.projectFFIBindingExpr(binding) }, "", binding, args, stmts, returnTypeID)
-}
-
 func (l *lowerer) applyExplicitExternTypeArgs(callee ast.Expr, typeArgs []air.TypeID) (ast.Expr, error) {
 	if len(typeArgs) == 0 {
 		return callee, nil
@@ -6597,100 +6576,12 @@ func (l *lowerer) applyExplicitExternTypeArgs(callee ast.Expr, typeArgs []air.Ty
 	return &ast.IndexListExpr{X: callee, Indices: indices}, nil
 }
 
-func (l *lowerer) lowerDirectExternCall(ext air.Extern, bindingExpr func(string, string) (ast.Expr, error), alias string, binding string, args []ast.Expr, stmts []ast.Stmt, returnTypeID air.TypeID) (loweredExpr, error) {
-	adaptedArgs, argStmts, err := l.adaptProjectExternArgs(ext.Signature, args)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	stmts = append(stmts, argStmts...)
-	callee, err := bindingExpr(alias, binding)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	callee, err = l.applyExplicitExternTypeArgs(callee, ext.TypeArgs)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	call := &ast.CallExpr{Fun: callee, Args: adaptedArgs}
-	if !validTypeID(l.program, returnTypeID) {
-		return loweredExpr{stmts: stmts, expr: call}, nil
-	}
-	returnType := l.program.Types[returnTypeID-1]
-	switch returnType.Kind {
-	case air.TypeVoid:
-		return loweredExpr{stmts: stmts, expr: call}, nil
-	case air.TypeMaybe:
-		if wrapped, ok, err := l.wrapMaybeNativeTraitExternCall(returnTypeID, call, stmts); ok || err != nil {
-			return wrapped, err
-		}
-		return loweredExpr{stmts: stmts, expr: call}, nil
-	case air.TypeStruct:
-		return loweredExpr{stmts: stmts, expr: call}, nil
-	case air.TypeResult:
-		if validTypeID(l.program, returnType.Value) && l.program.Types[returnType.Value-1].Kind == air.TypeVoid {
-			wrapped, err := l.wrapErrorCall(returnTypeID, call)
-			if err != nil {
-				return loweredExpr{}, err
-			}
-			wrapped.stmts = append(stmts, wrapped.stmts...)
-			return wrapped, nil
-		}
-		wrapped, err := l.wrapValueErrorCall(returnTypeID, call)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		wrapped.stmts = append(stmts, wrapped.stmts...)
-		return wrapped, nil
-	default:
-		if l.usesNativeTraitInterface(returnTypeID) {
-			coerced, err := l.nativeTraitInterfaceAssertion(returnTypeID, call)
-			if err != nil {
-				return loweredExpr{}, err
-			}
-			return loweredExpr{stmts: stmts, expr: coerced}, nil
-		}
-		return loweredExpr{stmts: stmts, expr: call}, nil
-	}
-}
-
 func (l *lowerer) nativeTraitInterfaceAssertion(typeID air.TypeID, value ast.Expr) (ast.Expr, error) {
 	traitType, err := l.goType(typeID)
 	if err != nil {
 		return nil, err
 	}
 	return &ast.TypeAssertExpr{X: &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{value}}, Type: traitType}, nil
-}
-
-func (l *lowerer) dependencyFFIBindingExpr(alias string, binding string) (ast.Expr, error) {
-	if strings.TrimSpace(alias) == "" {
-		return nil, fmt.Errorf("empty dependency alias for go extern binding %q", binding)
-	}
-	if strings.TrimSpace(binding) == "" {
-		return nil, fmt.Errorf("empty go extern binding")
-	}
-	if !token.IsIdentifier(binding) {
-		return nil, fmt.Errorf("dependency go extern binding %q must be an unqualified function name in package ffi", binding)
-	}
-	packageAlias := sanitizeName(alias) + "ffi"
-	return l.qualified(packageAlias, "generated/depffi/"+sanitizeName(alias), binding), nil
-}
-
-func (l *lowerer) projectFFIBindingExpr(binding string) (ast.Expr, error) {
-	if strings.TrimSpace(binding) == "" {
-		return nil, fmt.Errorf("empty go extern binding")
-	}
-	expr, err := parser.ParseExpr(binding)
-	if err != nil {
-		return nil, fmt.Errorf("invalid go extern binding %q: %w", binding, err)
-	}
-	if name, ok := unqualifiedExternFunctionIdent(expr); ok {
-		return nil, fmt.Errorf("project go extern binding %q must qualify %s with package %s", binding, name, projectFFIPackageAlias(l.projectInfo))
-	}
-	if !isQualifiedExternFunctionExpr(expr) {
-		return nil, fmt.Errorf("project go extern binding %q must be a qualified function reference", binding)
-	}
-	l.registerFFIImportsForGoType(expr)
-	return expr, nil
 }
 
 func unqualifiedExternFunctionIdent(expr ast.Expr) (string, bool) {

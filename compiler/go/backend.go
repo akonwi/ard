@@ -290,9 +290,6 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 			return err
 		}
 	}
-	if err := writeProjectFFICompanions(dir, program, options.ProjectInfo); err != nil {
-		return err
-	}
 	if err := writeDependencyFFICompanions(dir, program, options.ProjectInfo); err != nil {
 		return err
 	}
@@ -325,7 +322,7 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 	requireSeen := requireKeys(goMod)
 	requires := make([]string, 0)
 	addDependencyGoModRequirements(&requires, requireSeen, program, projectInfo)
-	if programUsesProjectFFI(program, projectInfo) || projectUsesDirectGo(program, projectInfo) {
+	if projectUsesDirectGo(program, projectInfo) {
 		addProjectGoModRequirements(&requires, requireSeen, projectInfo)
 	}
 	if importsProjectGoModule && !requireSeen[projectGoModule] {
@@ -341,7 +338,7 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 		replaces = append(replaces, projectGoModule+" => "+projectInfo.RootPath)
 		replaceSeen[projectGoModule] = true
 	}
-	if programUsesProjectFFI(program, projectInfo) || projectUsesDirectGo(program, projectInfo) {
+	if projectUsesDirectGo(program, projectInfo) {
 		addProjectGoModReplaces(&replaces, replaceSeen, projectInfo)
 	}
 	addDependencyGoModReplaces(&replaces, replaceSeen, program, projectInfo)
@@ -618,7 +615,7 @@ func mergeGoSum(dir string, program *air.Program, projectInfo *checker.ProjectIn
 	lines := make([]string, 0)
 	seen := map[string]bool{}
 	addGoSumLines(&lines, seen, goSumPath)
-	if (programUsesProjectFFI(program, projectInfo) || projectUsesDirectGo(program, projectInfo)) && projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
+	if (projectUsesDirectGo(program, projectInfo)) && projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
 		addGoSumLines(&lines, seen, filepath.Join(projectInfo.RootPath, "go.sum"))
 	}
 	for _, root := range dependencyGoModPackages(program, projectInfo) {
@@ -812,40 +809,6 @@ func artifactRootDir(pathHint string) (string, error) {
 	return candidate, nil
 }
 
-func writeProjectFFICompanions(dir string, program *air.Program, projectInfo *checker.ProjectInfo) error {
-	if !programUsesProjectFFI(program, projectInfo) {
-		return nil
-	}
-	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
-		return fmt.Errorf("go target uses project externs but project information is unavailable")
-	}
-	rootFile := filepath.Join(projectInfo.RootPath, "ffi.go")
-	dirMatches, err := filepath.Glob(filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
-	if err != nil {
-		return err
-	}
-	rootExists := fileExists(rootFile)
-	if rootExists && len(dirMatches) > 0 {
-		return fmt.Errorf("project Go FFI must use either %s or %s, not both", rootFile, filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
-	}
-	ffiDir := filepath.Join(dir, projectFFIPackageAlias(projectInfo))
-	if rootExists {
-		if err := copyProjectFFIFile(rootFile, filepath.Join(ffiDir, filepath.Base(rootFile))); err != nil {
-			return err
-		}
-		return nil
-	}
-	if len(dirMatches) > 0 {
-		for _, sourcePath := range dirMatches {
-			if err := copyProjectFFIFile(sourcePath, filepath.Join(ffiDir, filepath.Base(sourcePath))); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	return fmt.Errorf("go target uses project externs but no project Go FFI companion was found at %s or %s", rootFile, filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
-}
-
 func copyProjectFFIFile(sourcePath, destPath string) error {
 	content, err := os.ReadFile(sourcePath)
 	if err != nil {
@@ -989,36 +952,6 @@ func dependencyPackageForModulePath(modulePath string, projectInfo *checker.Proj
 		}
 	}
 	return "", "", false
-}
-
-func programUsesProjectFFI(program *air.Program, projectInfo *checker.ProjectInfo) bool {
-	if program == nil {
-		return false
-	}
-	for _, ext := range program.Externs {
-		if externModuleIsStdlib(program, ext) {
-			continue
-		}
-		if externHasDirectGoBinding(ext) {
-			continue
-		}
-		if _, ok := dependencyAliasForModulePath(modulePathForExtern(program, ext), projectInfo); ok {
-			continue
-		}
-		return true
-	}
-	for _, typ := range program.Types {
-		if typ.Kind != air.TypeExtern || strings.HasPrefix(typ.ModulePath, "ard/") {
-			continue
-		}
-		if _, ok := dependencyAliasForModulePath(typ.ModulePath, projectInfo); ok {
-			continue
-		}
-		if externBindingUsesProjectFFIType(typ.ExternBinding, projectInfo) {
-			return true
-		}
-	}
-	return false
 }
 
 func externHasDirectGoBinding(ext air.Extern) bool {
@@ -1249,14 +1182,6 @@ func blockUsesDirectGoDirectly(program *air.Program, block air.Block) bool {
 	return exprUsesDirectGoDirectly(program, block.Result)
 }
 
-func externBindingUsesProjectFFIType(binding string, projectInfo *checker.ProjectInfo) bool {
-	expr, err := parser.ParseExpr(binding)
-	if err != nil {
-		return false
-	}
-	return exprUsesProjectFFIType(expr, projectFFIPackageAlias(projectInfo))
-}
-
 func exprUsesProjectFFIType(expr ast.Expr, projectAlias string) bool {
 	switch node := expr.(type) {
 	case *ast.Ident:
@@ -1317,10 +1242,6 @@ func projectHasFFICompanions(projectInfo *checker.ProjectInfo) bool {
 	}
 	matches, err := filepath.Glob(filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
 	return err == nil && len(matches) > 0
-}
-
-func externModuleIsStdlib(program *air.Program, ext air.Extern) bool {
-	return program != nil && int(ext.Module) >= 0 && int(ext.Module) < len(program.Modules) && strings.HasPrefix(program.Modules[ext.Module].Path, "ard/")
 }
 
 func writeArdModuleDependency(dir string) (string, error) {
