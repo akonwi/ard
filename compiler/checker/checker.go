@@ -240,9 +240,28 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 	}
 }
 
+// referenceArgType returns the type used when matching an argument against a
+// parameter, preserving a mutable-reference field's reference type. Reading a
+// `mut T` field deref's to its value type `T` (write-through semantics); this
+// recovers the underlying `mut T` so a stored handle (a mutable lvalue) can be
+// borrowed back into `mut T` at a call site (ADR 0031).
+func referenceArgType(expr Expression) Type {
+	if ip, ok := expr.(*InstanceProperty); ok {
+		return ip._type
+	}
+	return expr.Type()
+}
+
 func (c Checker) isMutable(expr Expression) bool {
 	switch e := expr.(type) {
 	case *Variable:
+		// A value whose type is a mutable reference is itself mutable through the
+		// reference, regardless of whether the binding is reassignable (ADR 0031).
+		// Mirrors the InstanceProperty case so a `mut T` value is usable wherever a
+		// `mut T` is expected (fields, params, mutating methods).
+		if _, ok := mutableRefBase(e.sym.Type); ok {
+			return true
+		}
 		return e.sym.mutable
 	case *InstanceProperty:
 		if _, ok := mutableRefBase(e._type); ok {
@@ -3218,6 +3237,19 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 			c.addError(fmt.Sprintf("Unknown field: %s", fieldName), property.GetLocation())
 		} else {
 			providedFields[fieldName] = true
+
+			// A `mut T` (MutableRef) field accepts an existing `mut T` reference value
+			// directly (a stored handle), in addition to borrowing a mutable base-type
+			// lvalue below (ADR 0031). Try the reference value first.
+			if _, ok := mutableRefBase(field); ok {
+				diagCount := len(c.diagnostics)
+				if checked := c.checkExprAs(property.Value, field); checked != nil && checked.Type().equal(field) {
+					fields[fieldName] = checked
+					fieldTypes[fieldName] = field
+					continue
+				}
+				c.diagnostics = c.diagnostics[:diagCount]
+			}
 
 			fieldExpected := field
 			fieldIsMutableRef := false

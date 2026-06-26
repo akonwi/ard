@@ -957,6 +957,30 @@ func (fl *functionLowerer) internResolvedStructType(typ *checker.StructDef) (Typ
 	return fl.internStructTypeWithInterner(typ, fl.internResolvedType)
 }
 
+// internStructFieldType interns a struct field's type and reports whether it is
+// a write-through mutable-reference field.
+//
+// A `mut <direct-Go handle>` field (e.g. `*sql.DB`) is a pointer-valued handle:
+// the Ard value IS the Go pointer. It is interned as a plain pointer-extern
+// field (mutable=false), mirroring internType, so the backend's mutable-
+// reference machinery (&-on-store, *-on-read) does not apply to it.
+//
+// A `mut T` over any other base is a borrow of a mutable lvalue: it is interned
+// as the base type plus the Mutable flag, and the backend lowers it as `*T`
+// with the &/* machinery.
+func (l *lowerer) internStructFieldType(fieldTypeValue checker.Type, intern func(checker.Type) (TypeID, error)) (TypeID, bool, error) {
+	if ref, ok := fieldTypeValue.(*checker.MutableRef); ok {
+		if binding, isHandle := directGoPointerExternBinding(ref.Of()); isHandle {
+			id, err := l.internSyntheticType(ref.String(), TypeInfo{Kind: TypeExtern, ExternBinding: binding})
+			return id, false, err
+		}
+		id, err := intern(ref.Of())
+		return id, true, err
+	}
+	id, err := intern(fieldTypeValue)
+	return id, false, err
+}
+
 func (fl *functionLowerer) internStructTypeWithInterner(typ *checker.StructDef, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
 	if typ.Name == "Fiber" {
 		return fl.l.internType(typ)
@@ -965,13 +989,7 @@ func (fl *functionLowerer) internStructTypeWithInterner(typ *checker.StructDef, 
 	info := TypeInfo{Kind: TypeStruct, ModulePath: typ.ModulePath, Private: typ.Private}
 	info.Fields = make([]FieldInfo, len(fields))
 	for i, name := range fields {
-		fieldTypeValue := typ.Fields[name]
-		fieldMutable := false
-		if ref, ok := fieldTypeValue.(*checker.MutableRef); ok {
-			fieldTypeValue = ref.Of()
-			fieldMutable = true
-		}
-		fieldType, err := intern(fieldTypeValue)
+		fieldType, fieldMutable, err := fl.l.internStructFieldType(typ.Fields[name], intern)
 		if err != nil {
 			return NoType, err
 		}
@@ -2057,13 +2075,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		fields := sortedFieldNames(typ.Fields)
 		info.Fields = make([]FieldInfo, len(fields))
 		for i, name := range fields {
-			fieldTypeValue := typ.Fields[name]
-			fieldMutable := false
-			if ref, ok := fieldTypeValue.(*checker.MutableRef); ok {
-				fieldTypeValue = ref.Of()
-				fieldMutable = true
-			}
-			fieldType, err := l.internType(fieldTypeValue)
+			fieldType, fieldMutable, err := l.internStructFieldType(typ.Fields[name], l.internType)
 			if err != nil {
 				return NoType, err
 			}

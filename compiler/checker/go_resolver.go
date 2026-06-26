@@ -1107,7 +1107,18 @@ func (c *Checker) checkDirectGoCallArguments(rawArgs []parse.Argument, goParams 
 		if checkedArg == nil {
 			return nil, nil, false
 		}
-		if ok, reason := c.directGoParamCompatible(checkedArg.Type(), goParams[i], true); !ok {
+		ok, reason := c.directGoParamCompatible(checkedArg.Type(), goParams[i], true)
+		if !ok {
+			// A mutable-reference lvalue (e.g. a `mut T` field whose read deref's to
+			// its value type) auto-borrows back into `mut T` at the call site, so a
+			// stored Go pointer handle can be re-passed (ADR 0031).
+			if refType := referenceArgType(checkedArg); refType != checkedArg.Type() {
+				if ok2, _ := c.directGoParamCompatible(refType, goParams[i], true); ok2 {
+					ok = true
+				}
+			}
+		}
+		if !ok {
 			c.addError(fmt.Sprintf("parameter %d: %s", i+1, reason), arg.Value.GetLocation())
 			return nil, nil, false
 		}

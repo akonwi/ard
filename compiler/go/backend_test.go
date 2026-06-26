@@ -3993,6 +3993,41 @@ func TestLowerProgramUsesDirectGoStructFieldSelector(t *testing.T) {
 	}
 }
 
+// A `mut <direct-Go handle>` struct field is a pointer-valued handle (e.g.
+// *sql.DB), lowered as a plain pointer field with no mutable-reference (&/*)
+// machinery, since the Ard value already IS the Go pointer (ADR 0031).
+func TestLowerProgramStoresDirectGoHandleAsPointerField(t *testing.T) {
+	program := lowerSourceWithCheckOptions(t, `
+		use go:database/sql as sql
+
+		struct Handle { db: mut sql::DB }
+
+		fn store(c: mut sql::DB) Handle {
+			Handle{db: c}
+		}
+	`, checker.CheckOptions{GoResolver: testGoResolver{packages: map[string]*checker.GoPackage{
+		"database/sql": {ImportPath: "database/sql", Name: "sql", Types: map[string]checker.GoType{"DB": {Name: "DB"}}},
+	}}})
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+
+	// The field must be a plain pointer field `*sql.DB`.
+	if !astFilesContain(files, func(node ast.Node) bool {
+		field, ok := node.(*ast.Field)
+		return ok && field.Type != nil && astExprName(field.Type) == "*sql.DB"
+	}) {
+		t.Fatal("generated AST missing *sql.DB pointer field for the stored handle")
+	}
+
+	// The handle is stored directly: no address-of (&) borrow machinery.
+	if astFilesContain(files, func(node ast.Node) bool {
+		unary, ok := node.(*ast.UnaryExpr)
+		return ok && unary.Op == token.AND
+	}) {
+		t.Fatal("handle field store unexpectedly took the address of the value")
+	}
+}
+
 func TestLowerProgramUsesDirectGoStructFieldAssignmentSelector(t *testing.T) {
 	response := checker.GoValueType{Kind: checker.GoValueOther, Expr: "http.Response", Named: true, ImportPath: "example.com/http", Package: "http", Name: "Response"}
 	program := lowerSourceWithCheckOptions(t, `

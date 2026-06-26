@@ -1773,6 +1773,32 @@ extern fn ping(db: sql::DB) Void!Str = sql::DB::Ping`), "main.ard")
 	}
 }
 
+// A `mut <direct-Go handle>` value (a Go pointer handle such as *sql.DB) can be
+// stored in a `mut T` struct field and re-passed to a direct-Go pointer
+// parameter: the field read deref's to the value type but auto-borrows back into
+// `mut T` at the call site (ADR 0031).
+func TestDirectGoMutableHandleStoredInFieldAndRepassed(t *testing.T) {
+	result := parse.Parse([]byte(`use go:database/sql as sql
+struct Handle { db: mut sql::DB }
+fn store(c: mut sql::DB) Handle { Handle{db: c} }
+fn run(h: Handle) Void!Str { sql::Close(h.db) }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	db := goNamed(GoValueOther, "sql.DB", "database/sql", "DB")
+	ptrDB := GoValueType{Kind: GoValuePointer, Expr: "*sql.DB", Elem: &db}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"database/sql": {ImportPath: "database/sql", Name: "sql",
+			Types:     map[string]GoType{"DB": {Name: "DB"}},
+			Functions: map[string]GoFunction{"Close": {Name: "Close", Signature: GoSignature{Params: []GoValueType{ptrDB}, Results: []GoValueType{goParam(GoValueError, "error")}}}},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected errors: %v", c.Diagnostics())
+	}
+}
+
 func TestDirectGoCallUsesExpectedResultForWidthScalarReturn(t *testing.T) {
 	result := parse.Parse([]byte(`use go:strconv
 fn main() Int!Str { strconv::ParseInt("42", 10, 64) }`), "main.ard")
