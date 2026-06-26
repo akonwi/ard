@@ -1363,7 +1363,8 @@ func testTypeInfo(t *testing.T, program *Program, id TypeID) TypeInfo {
 
 func TestLowerRejectsUnboundReturnOnlyGenericWrapper(t *testing.T) {
 	result := parse.Parse([]byte(`
-		extern fn raw<$T>(key: Str) $T? = "Raw"
+		use ard/maybe
+		fn raw<$T>(key: Str) $T? { maybe::none() }
 
 		fn has<$T>(key: Str) Bool {
 			raw<$T>(key).is_some()
@@ -1423,7 +1424,8 @@ func TestLowerInstanceMethodForwardedGenericTypeArg(t *testing.T) {
 }
 func TestLowerForwardedGenericUsedOnlyInCalleeBody(t *testing.T) {
 	_ = lowerSource(t, `
-		extern fn raw<$T>(key: Str) $T? = "Raw"
+		use ard/maybe
+		fn raw<$T>(key: Str) $T? { maybe::none() }
 
 		fn has<$T>() Bool {
 			raw<$T>("x").is_some()
@@ -1439,8 +1441,12 @@ func TestLowerForwardedGenericUsedOnlyInCalleeBody(t *testing.T) {
 	`)
 }
 func TestLowerReceiverGenericUsedOnlyInMethodBody(t *testing.T) {
-	program := lowerSource(t, `
-		extern fn raw<$T>(key: Str) $T? = "Raw"
+	// A generic function called inside a generic method body forwards the
+	// struct's type parameter abstractly; this must lower without trying to
+	// monomorphize at an unbound type parameter.
+	_ = lowerSource(t, `
+		use ard/maybe
+		fn raw<$T>(key: Str) $T? { maybe::none() }
 
 		struct Box {
 			item: $T
@@ -1457,17 +1463,6 @@ func TestLowerReceiverGenericUsedOnlyInMethodBody(t *testing.T) {
 			box.has_raw()
 		}
 	`)
-	// Inside the generic method body the struct's type parameter stays abstract,
-	// so the generic extern call is instantiated at the type parameter.
-	for _, ext := range program.Externs {
-		if ext.Name == "raw" && len(ext.TypeArgs) == 1 {
-			if got := typeKind(t, program, ext.TypeArgs[0]); got != TypeParam {
-				t.Fatalf("raw type arg kind = %v, want TypeParam", got)
-			}
-			return
-		}
-	}
-	t.Fatalf("raw extern specialization with type arg not found: %#v", program.Externs)
 }
 func TestLowerGenericFunctionAdapterClosureCapturesSpecializedCallback(t *testing.T) {
 	_ = lowerSource(t, `
@@ -1480,7 +1475,12 @@ func TestLowerGenericFunctionAdapterClosureCapturesSpecializedCallback(t *testin
 			handle: StateHandle,
 		}
 
-		extern fn stateful_raw_init_key<$T>(key: Str, init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget = "StatefulRawInitKey"
+		fn stateful_raw_init_key<$T>(key: Str, init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget {
+			let handle = StateHandle{id: 0}
+			let ctx = BuildContextHandle{id: 0}
+			let _value = init(ctx, handle)
+			build(ctx, handle)
+		}
 
 		fn stateful<$T>(key: Str, init: fn(BuildContext) $T, build: fn(BuildContext, State<$T>) Widget) Widget {
 			stateful_raw_init_key(
