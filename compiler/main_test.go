@@ -174,6 +174,17 @@ func TestRunGoTargetTraitsSample(t *testing.T) {
 	}
 }
 
+func TestRunGoTargetAsyncAllSample(t *testing.T) {
+	output := runGoSampleBinary(t, filepath.Join("samples", "async.ard"), "")
+	// async::all runs each task on its own goroutine and blocks until every one
+	// finishes, so all task output and the trailing line must be present.
+	for _, want := range []string{"task a", "task b", "task c", "all done"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("async sample output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestRunGoTargetTypeUnionsSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "type-unions.ard")
 	module, err := loadModule(sourcePath)

@@ -402,7 +402,7 @@ func (c *Checker) Check() {
 
 		if strings.HasPrefix(imp.Path, "ard/") {
 			// Handle standard library imports
-			if mod, ok := findInStdLib(imp.Path); ok {
+			if mod, ok := findInStdLib(imp.Path, c.options.GoResolver); ok {
 				c.program.Imports[imp.Name] = mod
 			} else {
 				c.addError(fmt.Sprintf("Unknown module: %s", imp.Path), imp.GetLocation())
@@ -471,28 +471,28 @@ func (c *Checker) Check() {
 
 	// Auto-import prelude modules (only for non-std lib)
 	if !strings.HasPrefix(c.filePath, "ard/") {
-		if mod, ok := findInStdLib("ard/dynamic"); ok {
+		if mod, ok := findInStdLib("ard/dynamic", c.options.GoResolver); ok {
 			c.program.Imports["Dynamic"] = mod
 		}
-		if mod, ok := findInStdLib("ard/float"); ok {
+		if mod, ok := findInStdLib("ard/float", c.options.GoResolver); ok {
 			c.program.Imports["Float"] = mod
 		}
-		if mod, ok := findInStdLib("ard/int"); ok {
+		if mod, ok := findInStdLib("ard/int", c.options.GoResolver); ok {
 			c.program.Imports["Int"] = mod
 		}
-		if mod, ok := findInStdLib("ard/byte"); ok {
+		if mod, ok := findInStdLib("ard/byte", c.options.GoResolver); ok {
 			c.program.Imports["Byte"] = mod
 		}
-		if mod, ok := findInStdLib("ard/rune"); ok {
+		if mod, ok := findInStdLib("ard/rune", c.options.GoResolver); ok {
 			c.program.Imports["Rune"] = mod
 		}
-		if mod, ok := findInStdLib("ard/list"); ok {
+		if mod, ok := findInStdLib("ard/list", c.options.GoResolver); ok {
 			c.program.Imports["List"] = mod
 		}
-		if mod, ok := findInStdLib("ard/map"); ok {
+		if mod, ok := findInStdLib("ard/map", c.options.GoResolver); ok {
 			c.program.Imports["Map"] = mod
 		}
-		if mod, ok := findInStdLib("ard/string"); ok {
+		if mod, ok := findInStdLib("ard/string", c.options.GoResolver); ok {
 			c.program.Imports["Str"] = mod
 		}
 	}
@@ -4881,27 +4881,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 			if extFn, ok := sym.Type.(*ExternalFunctionDef); ok {
 				call.ExternalBinding = extFn.ExternalBinding
-			}
-
-			// Special validation for async::start calls
-			if mod.Path() == "ard/async" && s.Function.Name == "start" {
-				return c.validateFiberFunction(s.Function.Args[0].Value, mod.Get("Fiber").Type)
-			}
-			// Special validation for async::eval calls
-			if mod.Path() == "ard/async" && s.Function.Name == "eval" {
-				return c.validateAsyncEval(s.Function.Args[0].Value)
-			}
-			if mod.Path() == "ard/json" && s.Function.Name == "parse" {
-				if err := validateJSONShape("json::parse", call.Type()); err != nil {
-					c.addError(err.Error(), s.GetLocation())
-					return nil
-				}
-			}
-			if mod.Path() == "ard/json" && s.Function.Name == "encode" && len(args) > 0 {
-				if err := validateJSONShape("json::encode", args[0].Type()); err != nil {
-					c.addError(err.Error(), s.GetLocation())
-					return nil
-				}
 			}
 
 			return &ModuleFunctionCall{

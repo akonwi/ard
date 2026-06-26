@@ -4,12 +4,10 @@ var prelude = map[string]Module{
 	"Result": ResultPkg{},
 }
 
-func findInStdLib(path string) (Module, bool) {
+func findInStdLib(path string, goResolver GoPackageResolver) (Module, bool) {
 	// Provide minimal hardcoded definitions for special modules
 	// These provide the function signatures for type checking
 	switch path {
-	case "ard/async":
-		return AsyncPkg{}, true
 	case "ard/maybe":
 		return MaybePkg{}, true
 	case "ard/result":
@@ -17,120 +15,11 @@ func findInStdLib(path string) (Module, bool) {
 	}
 
 	// Check for embedded .ard modules for other modules
-	if mod, ok := FindEmbeddedModule(path); ok {
+	if mod, ok := FindEmbeddedModule(path, goResolver); ok {
 		return mod, true
 	}
 
 	return nil, false
-}
-
-/* ard/async */
-type AsyncPkg struct{}
-
-func (pkg AsyncPkg) Path() string {
-	return "ard/async"
-}
-
-func (pkg AsyncPkg) Program() *Program {
-	// Return the embedded module's program so Fiber methods have access to wait_for
-	if embeddedMod, ok := pkg.embeddedModule(); ok {
-		return embeddedMod.Program()
-	}
-	return nil
-}
-
-func (pkg AsyncPkg) embeddedModule() (Module, bool) {
-	return FindEmbeddedModule("ard/async")
-}
-
-func (pkg AsyncPkg) Get(name string) Symbol {
-	switch name {
-	case "sleep":
-		return Symbol{
-			Name: name,
-			Type: &ExternalFunctionDef{
-				Name:             name,
-				Parameters:       []Parameter{{Name: "ms", Type: Int}},
-				ReturnType:       Void,
-				ExternalBinding:  "go:time::Sleep",
-				ExternalBindings: map[string]string{"go": "go:time::Sleep"},
-			},
-		}
-	case "start":
-		// Get the Fiber struct from the embedded module for consistency
-		var fiberType Type = &StructDef{Name: "Fiber"}
-		if embeddedMod, ok := pkg.embeddedModule(); ok {
-			if fiberSym := embeddedMod.Get("Fiber"); fiberSym.Type != nil {
-				fiberType = fiberSym.Type
-			}
-		}
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name: name,
-				Parameters: []Parameter{{
-					Name: "do",
-					Type: &FunctionDef{
-						Name:       "",
-						Parameters: []Parameter{},
-						ReturnType: Void,
-					},
-				}},
-				ReturnType: fiberType,
-			},
-		}
-	case "eval":
-		// Get the Fiber struct from the embedded module for consistency
-		var fiberType Type = &StructDef{Name: "Fiber"}
-		if embeddedMod, ok := pkg.embeddedModule(); ok {
-			if fiberSym := embeddedMod.Get("Fiber"); fiberSym.Type != nil {
-				fiberType = fiberSym.Type
-			}
-		}
-		typeVar := &TypeVar{name: "T"}
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name: name,
-				Parameters: []Parameter{{
-					Name: "do",
-					Type: &FunctionDef{
-						Name:       "",
-						Parameters: []Parameter{},
-						ReturnType: typeVar,
-					},
-				}},
-				ReturnType: fiberType,
-			},
-		}
-	case "join":
-		// Get the Fiber struct from the embedded module for consistency
-		var fiberType Type = &StructDef{Name: "Fiber"}
-		if embeddedMod, ok := pkg.embeddedModule(); ok {
-			if fiberSym := embeddedMod.Get("Fiber"); fiberSym.Type != nil {
-				fiberType = fiberSym.Type
-			}
-		}
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name: name,
-				Parameters: []Parameter{{
-					Name: "fibers",
-					Type: &List{of: fiberType},
-				}},
-				ReturnType: Void,
-			},
-		}
-	case "Fiber":
-		// Return the Fiber struct from the embedded module
-		if embeddedMod, ok := pkg.embeddedModule(); ok {
-			return embeddedMod.Get("Fiber")
-		}
-		return Symbol{}
-	default:
-		return Symbol{}
-	}
 }
 
 /* ard/maybe */

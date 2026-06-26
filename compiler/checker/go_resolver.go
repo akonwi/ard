@@ -64,6 +64,7 @@ const (
 	GoValueMap     GoValueKind = "map"
 	GoValuePointer GoValueKind = "pointer"
 	GoValueError   GoValueKind = "error"
+	GoValueFunc    GoValueKind = "func"
 	GoValueOther   GoValueKind = "other"
 )
 
@@ -80,7 +81,10 @@ type GoValueType struct {
 	Elem       *GoValueType
 	Key        *GoValueType
 	Value      *GoValueType
-	Type       types.Type
+	// Func holds the parameter/result types when Kind == GoValueFunc, i.e. the
+	// Go parameter is a `func(...)` value that an Ard closure can satisfy.
+	Func *GoSignature
+	Type types.Type
 }
 
 type GoType struct {
@@ -1203,6 +1207,19 @@ func (c *Checker) directGoValueArdType(goType GoValueType, loc parse.Location) (
 		return c.directGoNamedArdType(goType, loc)
 	}
 	switch goType.Kind {
+	case GoValueFunc:
+		if goType.Func == nil {
+			c.addError("Go func type is missing signature metadata", loc)
+			return nil, false
+		}
+		// Phase 2a only supports parameterless `func()` callbacks: an Ard
+		// `fn() Void` closure already lowers to a Go `func()`, so it passes
+		// through with no boundary adapter.
+		if len(goType.Func.Params) != 0 || len(goType.Func.Results) != 0 {
+			c.addError(fmt.Sprintf("Go func type %s is not supported by direct Go bindings yet: only parameterless `func()` callbacks are supported", goType.String()), loc)
+			return nil, false
+		}
+		return &FunctionDef{ReturnType: Void}, true
 	case GoValueBool:
 		return Bool, true
 	case GoValueString:
@@ -1531,6 +1548,23 @@ func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel
 			}
 			return true, ""
 		}
+	case GoValueFunc:
+		fn, ok := ard.(*FunctionDef)
+		if !ok {
+			return false, fmt.Sprintf("Ard type %s is not a function compatible with Go type %s", typeSyntaxString(ard), goType.String())
+		}
+		// Phase 2a: only parameterless, Void-returning callbacks pass through
+		// directly (Ard `fn() Void` == Go `func()`).
+		if goType.Func == nil || len(goType.Func.Params) != 0 || len(goType.Func.Results) != 0 {
+			return false, fmt.Sprintf("Go func type %s is not supported by direct Go bindings yet: only `func()` callbacks are supported", goType.String())
+		}
+		if len(fn.Parameters) != 0 {
+			return false, fmt.Sprintf("Go type %s expects a function with no parameters, got %s", goType.String(), typeSyntaxString(ard))
+		}
+		if fn.ReturnType != nil && fn.ReturnType != Void {
+			return false, fmt.Sprintf("Go type %s expects a function returning Void, got a function returning %s", goType.String(), typeSyntaxString(fn.ReturnType))
+		}
+		return true, ""
 	case GoValueError:
 		return false, "Go error values require an adapter; direct Go error adapters are not supported yet"
 	}
@@ -2398,6 +2432,10 @@ func goValueTypeSeen(typ types.Type, seen map[types.Type]bool) GoValueType {
 		if underlying.Empty() {
 			out.Kind = GoValueAny
 		}
+	case *types.Signature:
+		out.Kind = GoValueFunc
+		sig := goSignature(underlying)
+		out.Func = &sig
 	}
 	return out
 }

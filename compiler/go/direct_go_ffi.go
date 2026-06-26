@@ -612,6 +612,11 @@ func (l *lowerer) coerceDirectGoArg(ardType air.TypeID, arg ast.Expr, goType che
 	if goType.Kind == checker.GoValuePointer && l.typeKind(ardType) == air.TypeMaybe {
 		return &ast.CallExpr{Fun: &ast.SelectorExpr{X: arg, Sel: ast.NewIdent("Ptr")}}, nil
 	}
+	// Phase 2a: an Ard `fn() Void` closure already lowers to a Go `func()`, so a
+	// parameterless callback passes straight through with no adapter shim.
+	if goType.Kind == checker.GoValueFunc {
+		return arg, nil
+	}
 	if !l.directGoScalarNeedsConversion(ardType, goType) {
 		return arg, nil
 	}

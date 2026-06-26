@@ -1,0 +1,14 @@
+use ard/async
+use ard/io
+
+fn main() {
+  let a = async::start(fn() { io::print("task a") })
+  let b = async::start(fn() { io::print("task b") })
+  let c = async::start(fn() { io::print("task c") })
+
+  a.Wait()
+  b.Wait()
+  c.Wait()
+
+  io::print("all done")
+}
