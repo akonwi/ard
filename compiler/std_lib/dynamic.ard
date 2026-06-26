@@ -1,3 +1,5 @@
+use go:github.com/akonwi/ard/std_lib/ffi
+
 // functions to create Dynamic values
 
 // Explicit conversion of any value into a Dynamic.
@@ -21,10 +23,21 @@ fn from_bool(val: Bool) Dynamic {
   from(val)
 }
 
-extern fn from_void() Dynamic = "VoidToDynamic"
-extern fn from_list(list: [Dynamic]) Dynamic = "ListToDynamic"
-extern fn object(from: [Str: Dynamic]) Dynamic = "MapToDynamic"
-extern fn from_bytes(bytes: [Byte]) Dynamic = "BytesToDynamic"
+fn from_void() Dynamic {
+  ffi::VoidToDynamic()
+}
+
+fn from_list(list: [Dynamic]) Dynamic {
+  ffi::ListToDynamic(list)
+}
+
+fn object(from: [Str: Dynamic]) Dynamic {
+  ffi::MapToDynamic(from)
+}
+
+fn from_bytes(bytes: [Byte]) Dynamic {
+  ffi::BytesToDynamic(bytes)
+}
 
 fn list(from: [$T], of: fn($T) Dynamic) Dynamic {
   mut array: [Dynamic] = []

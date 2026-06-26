@@ -41,7 +41,6 @@ type generatedStdlibExternLowering struct {
 }
 
 var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
-	"BytesToDynamic":       {function: "BytesToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"DecodeBool":           {function: "DecodeBool", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
 	"DecodeByte":           {function: "DecodeByte", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
 	"DecodeFloat":          {function: "DecodeFloat", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
@@ -58,8 +57,6 @@ var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
 	"HTTP_Serve":           {function: "HTTPServe", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
 	"IsNil":                {function: "IsNil", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
 	"JsonToDynamic":        {function: "JsonToDynamic", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"ListToDynamic":        {function: "ListToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAnySlice}},
-	"MapToDynamic":         {function: "MapToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"SqlBeginTx":           {function: "SqlBeginTx", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"SqlClose":             {function: "SqlClose", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"SqlCommit":            {function: "SqlCommit", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
@@ -67,7 +64,6 @@ var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
 	"SqlExecute":           {function: "SqlExecute", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamAnySlice}},
 	"SqlQuery":             {function: "SqlQuery", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamAnySlice}},
 	"SqlRollback":          {function: "SqlRollback", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"VoidToDynamic":        {function: "VoidToDynamic", returns: generatedStdlibReturnDirect, params: nil},
 	"JsonEncode":           {kind: generatedStdlibExternJSONEncode},
 	"JsonParse":            {kind: generatedStdlibExternJSONParse},
 }
