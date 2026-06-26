@@ -844,7 +844,7 @@ fn set_state() {
 	}}})
 	c.Check()
 	if !c.HasErrors() {
-		t.Fatal("expected closed enum field extern-value diagnostic")
+		t.Fatal("expected closed enum field direct-Go-value diagnostic")
 	}
 	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Type mismatch: Expected State, got example.com/status::State") {
 		t.Fatalf("diagnostic = %q", got)
@@ -1207,11 +1207,11 @@ func TestDirectGoExternTypeEqualityUsesBindingBeforeDisplayName(t *testing.T) {
 	left := &ExternType{Name_: "p::T", ExternalBinding: "go:example.com/a as p::T"}
 	right := &ExternType{Name_: "p::T", ExternalBinding: "go:example.com/b as p::T"}
 	if equalTypes(left, right) {
-		t.Fatal("direct Go extern types with different import paths should not be equal")
+		t.Fatal("direct Go types with different import paths should not be equal")
 	}
 	alias := &ExternType{Name_: "other::T", ExternalBinding: "go:example.com/a as other::T"}
 	if !equalTypes(left, alias) {
-		t.Fatal("direct Go extern types with same import path and symbol should be equal despite aliases")
+		t.Fatal("direct Go types with same import path and symbol should be equal despite aliases")
 	}
 }
 
@@ -1820,7 +1820,7 @@ func TestCloneExternTypePreservesDirectGoMetadata(t *testing.T) {
 	}
 	cloned := cloneExternTypeWithTypeArgs(ext, []Type{Str})
 	if !cloned.DirectGoInterface || cloned.DirectGoType != ext.DirectGoType || cloned.DirectGoMethods["Read"].Name != "Read" || len(cloned.TypeArgs) != 1 {
-		t.Fatalf("cloned extern metadata = %#v", cloned)
+		t.Fatalf("cloned direct Go type metadata = %#v", cloned)
 	}
 	cloned.DirectGoMethods["Other"] = GoMethod{Name: "Other"}
 	if _, ok := ext.DirectGoMethods["Other"]; ok {
