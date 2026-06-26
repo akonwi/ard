@@ -5796,8 +5796,7 @@ fn main() Int { time::Now().UnixNano() }`)
 
 func TestLowerDirectGoExternFunctionCall(t *testing.T) {
 	program := lowerSource(t, `use go:math
-extern fn floor(value: Float) Float = math::Floor
-fn main() Float { floor(1.2) }`)
+fn main() Float { math::Floor(1.2) }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveImport(files, "math", "math") {
 		t.Fatal("generated AST missing math import")
@@ -5823,12 +5822,10 @@ func TestLowerProgramImportAliasAvoidsLocalNames(t *testing.T) {
 	program := lowerSource(t, `
 		use go:strings as fmt
 
-		extern fn eq(a: Str, b: Str) Bool = fmt::EqualFold
-
 		fn main() Bool {
 			let x = 1
 			let fmt = 2
-			let same = eq("a", "A")
+			let same = fmt::EqualFold("a", "A")
 			same and x == 1 and fmt == 2
 		}
 	`)
@@ -5872,8 +5869,7 @@ func TestLowererImportAliasAvoidsSinglePackageTopLevelNamesAcrossModules(t *test
 
 func TestLowerDirectGoExternUsesImportAlias(t *testing.T) {
 	program := lowerSource(t, `use go:math/rand as mathrand
-extern fn intn(max: Int) Int = mathrand::Intn
-fn main() Int { intn(10) }`)
+fn main() Int { mathrand::Intn(10) }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveImport(files, "mathrand", "math/rand") {
 		t.Fatal("generated AST missing mathrand import alias")
@@ -5885,8 +5881,7 @@ fn main() Int { intn(10) }`)
 
 func TestLowerDirectGoExternAliasAvoidsPredeclaredIdentifiers(t *testing.T) {
 	program := lowerSource(t, `use go:math as int
-extern fn floor(value: Float) Float = int::Floor
-fn use_floor() Float { floor(1.2) }`)
+fn use_floor() Float { int::Floor(1.2) }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveImport(files, "int_1", "math") {
 		t.Fatal("generated AST missing collision-free int_1 import alias")
@@ -5929,8 +5924,7 @@ func TestDirectGoExternAliasAvoidsReservedRuntimeHelperNames(t *testing.T) {
 
 func TestLowerDirectGoExternAliasAvoidsRuntimeHelperNames(t *testing.T) {
 	program := lowerSource(t, `use go:unicode/utf8 as ardDirectGoCheckSignedIntRange
-extern fn rune_len(value: Int) Int = ardDirectGoCheckSignedIntRange::RuneLen
-fn main() Int { rune_len(65) }`)
+fn main() Int { ardDirectGoCheckSignedIntRange::RuneLen(65) }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveImport(files, "ardDirectGoCheckSignedIntRange_1", "unicode/utf8") {
 		t.Fatal("generated AST missing collision-free runtime-helper import alias")
@@ -5945,10 +5939,9 @@ fn main() Int { rune_len(65) }`)
 
 func TestLowerDirectGoExternAliasAvoidsSortComparatorParams(t *testing.T) {
 	program := lowerSource(t, `use go:strings as i
-extern fn eq(a: Str, b: Str) Bool = i::EqualFold
 fn main() {
   mut values = ["a", "B"]
-  values.sort(fn(a: Str, b: Str) Bool { eq(a, b) })
+  values.sort(fn(a: Str, b: Str) Bool { i::EqualFold(a, b) })
 }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveImport(files, "i_1", "strings") {
@@ -5961,8 +5954,7 @@ fn main() {
 
 func TestLowerDirectGoExternAliasAvoidsLocalShadowing(t *testing.T) {
 	program := lowerSource(t, `use go:math as m
-extern fn floor(value: Float) Float = m::Floor
-fn use_floor(m: Int) Float { floor(1.2) }`)
+fn use_floor(m: Int) Float { m::Floor(1.2) }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveImport(files, "m", "math") {
 		t.Fatal("generated AST missing m import alias")
@@ -5974,9 +5966,8 @@ fn use_floor(m: Int) Float { floor(1.2) }`)
 
 func TestLowerDirectGoTypeReference(t *testing.T) {
 	program := lowerSource(t, `use go:time as tm
-extern fn sleep(duration: tm::Duration) Void = tm::Sleep
 fn use_duration(duration: tm::Duration) {
-  sleep(duration)
+  tm::Sleep(duration)
 }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveImport(files, "tm", "time") {
@@ -5989,15 +5980,13 @@ fn use_duration(duration: tm::Duration) {
 
 func TestLowerDirectGoEnumLikeConstants(t *testing.T) {
 	program := lowerSource(t, `use go:time
-extern fn now() time::Time = time::Now
-extern fn month(value: time::Time) time::Month = time::Time::Month
 fn month_number(value: time::Month) Int {
   match value {
     time::January => 1
     _ => 0
   }
 }
-fn main() Int { month_number(month(now())) }`)
+fn main() Int { month_number(time::Now().Month()) }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveImport(files, "time", "time") {
 		t.Fatal("generated AST missing time import")
@@ -6070,15 +6059,11 @@ fn main() Int {
 
 func TestDirectGoPointerReturnAndMethodBuilds(t *testing.T) {
 	program := lowerSource(t, `use go:os
-extern fn create_temp(dir: Str, pattern: Str) (mut os::File)!Str = os::CreateTemp
-extern fn name(file: mut os::File) Str = os::File::Name
-extern fn close(file: mut os::File) Void!Str = os::File::Close
-extern fn remove(path: Str) Void!Str = os::Remove
 fn main() Void!Str {
-  let file = try create_temp("", "ard-direct-go-pointer-*")
-  let path = name(file)
-  try close(file)
-  remove(path)
+  let file = try os::CreateTemp("", "ard-direct-go-pointer-*")
+  let path = file.Name()
+  try file.Close()
+  os::Remove(path)
 }`)
 	tempDir := t.TempDir()
 	sources, err := GenerateSources(program, Options{PackageName: "main"})
@@ -6129,10 +6114,9 @@ fn main() {
 
 func TestLowerDirectGoExternCoercesNamedScalarArguments(t *testing.T) {
 	program := lowerSource(t, `use go:time as tm
-extern fn sleep(ms: Int) Void = tm::Sleep
 fn main() {
   let ms = 1
-  sleep(ms)
+  tm::Sleep(ms)
 }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveImport(files, "tm", "time") {
@@ -6152,9 +6136,7 @@ fn main() {
 
 func TestLowerDirectGoExternCoercesNamedScalarReturn(t *testing.T) {
 	program := lowerSource(t, `use go:time as tm
-extern fn now() tm::Time = tm::Now
-extern fn since(value: tm::Time) Int = tm::Since
-fn main() Int { since(now()) }`)
+fn main() Int { tm::Since(tm::Now()) }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveCall(files, "tm.Since") {
 		t.Fatal("generated AST missing tm.Since call")
@@ -6166,8 +6148,7 @@ fn main() Int { since(now()) }`)
 
 func TestLowerDirectGoExternChecksUnsignedArgumentRange(t *testing.T) {
 	program := lowerSource(t, `use go:strings
-extern fn index_byte(value: Str, byte: Int) Int = strings::IndexByte
-fn main() Int { index_byte("abc", 98) }`)
+fn main() Int { strings::IndexByte("abc", 98) }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveCall(files, "strings.IndexByte") {
 		t.Fatal("generated AST missing strings.IndexByte call")
@@ -6179,8 +6160,7 @@ fn main() Int { index_byte("abc", 98) }`)
 
 func TestDirectGoExternRangeCheckPanicsBeforeUnsignedWrap(t *testing.T) {
 	program := lowerSource(t, `use go:strings
-extern fn index_byte(value: Str, byte: Int) Int = strings::IndexByte
-fn main() Int { index_byte("abc", 300) }`)
+fn main() Int { strings::IndexByte("abc", 300) }`)
 	tempDir := t.TempDir()
 	sources, err := GenerateSources(program, Options{PackageName: "main"})
 	if err != nil {
@@ -6211,8 +6191,7 @@ fn main() Int { index_byte("abc", 300) }`)
 
 func TestLowerDirectGoExternChecksSignedArgumentRange(t *testing.T) {
 	program := lowerSource(t, `use go:unicode/utf8 as utf8
-extern fn rune_len(value: Int) Int = utf8::RuneLen
-fn main() Int { rune_len(65) }`)
+fn main() Int { utf8::RuneLen(65) }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveCall(files, "utf8.RuneLen") {
 		t.Fatal("generated AST missing utf8.RuneLen call")
@@ -6236,8 +6215,7 @@ func TestLowerDirectGoExternChecksFloat32ArgumentRange(t *testing.T) {
 
 func TestLowerDirectGoExternValidatesRuneReturn(t *testing.T) {
 	program := lowerSource(t, `use go:unicode
-extern fn upper(value: Rune) Rune = unicode::ToUpper
-fn main() Rune { upper('a') }`)
+fn main() Rune { unicode::ToUpper('a') }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveCall(files, "unicode.ToUpper") {
 		t.Fatal("generated AST missing unicode.ToUpper call")
@@ -6252,8 +6230,7 @@ fn main() Rune { upper('a') }`)
 
 func TestLowerDirectGoExternAdaptsErrorReturnToResult(t *testing.T) {
 	program := lowerSource(t, `use go:os
-extern fn remove(path: Str) Void!Str = os::Remove
-fn main() Void!Str { remove("missing") }`)
+fn main() Void!Str { os::Remove("missing") }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveImport(files, "os", "os") {
 		t.Fatal("generated AST missing os import")
@@ -6268,8 +6245,7 @@ fn main() Void!Str { remove("missing") }`)
 
 func TestLowerDirectGoExternAdaptsValueErrorReturnToResult(t *testing.T) {
 	program := lowerSource(t, `use go:strconv
-extern fn atoi(value: Str) Int!Str = strconv::Atoi
-fn main() Int!Str { atoi("42") }`)
+fn main() Int!Str { strconv::Atoi("42") }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveImport(files, "strconv", "strconv") {
 		t.Fatal("generated AST missing strconv import")
@@ -6284,8 +6260,7 @@ fn main() Int!Str { atoi("42") }`)
 
 func TestDirectGoExternAdaptsInt64ErrorReturnToIntResultBuild(t *testing.T) {
 	program := lowerSource(t, `use go:strconv
-extern fn parse_int(value: Str, base: Int, bits: Int) Int!Str = strconv::ParseInt
-fn main() Int!Str { parse_int("42", 10, 64) }`)
+fn main() Int!Str { strconv::ParseInt("42", 10, 64) }`)
 	tempDir := t.TempDir()
 	sources, err := GenerateSources(program, Options{PackageName: "main"})
 	if err != nil {
@@ -6306,8 +6281,7 @@ fn main() Int!Str { parse_int("42", 10, 64) }`)
 
 func TestLowerDirectGoExternAdaptsValueBoolReturnToMaybe(t *testing.T) {
 	program := lowerSource(t, `use go:os
-extern fn lookup_env(key: Str) Str? = os::LookupEnv
-fn main() Str? { lookup_env("PATH") }`)
+fn main() Str? { os::LookupEnv("PATH") }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesHaveImport(files, "os", "os") {
 		t.Fatal("generated AST missing os import")
