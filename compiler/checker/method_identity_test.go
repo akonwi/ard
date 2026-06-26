@@ -45,7 +45,9 @@ func TestStructMethodsAreStoredInProgramSideTable(t *testing.T) {
 
 func TestStructSideTableMethodUsesGenericBindingsFromNestedFields(t *testing.T) {
 	result := parse.Parse([]byte(`
-		extern type Chan<$T>
+		struct Chan {
+			value: $T
+		}
 
 		struct Channel {
 			chan: Chan<$T>
@@ -57,7 +59,7 @@ func TestStructSideTableMethodUsesGenericBindingsFromNestedFields(t *testing.T) 
 			}
 		}
 
-		extern fn new() Channel<Int> = "NewChannel"
+		fn new() Channel<Int> { Channel{ chan: Chan{ value: 0 } } }
 
 		let ch = new()
 		ch.send(42)
@@ -222,7 +224,8 @@ func TestExplicitMethodTypeArgsPreserveReceiverGenericBindings(t *testing.T) {
 
 func TestUnboundGenericExplicitCallTypeArgIsRejected(t *testing.T) {
 	result := parse.Parse([]byte(`
-		extern fn get_raw<$T>(key: Str) $T? = "GetRaw"
+		use ard/maybe
+		fn get_raw<$T>(key: Str) $T? { maybe::none() }
 		get_raw<$U>("count")
 	`), "test.ard")
 	if len(result.Errors) > 0 {
@@ -240,7 +243,8 @@ func TestUnboundGenericExplicitCallTypeArgIsRejected(t *testing.T) {
 
 func TestNestedFunctionCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 	result := parse.Parse([]byte(`
-		extern fn raw<$T>(key: Str) $T? = "Raw"
+		use ard/maybe
+		fn raw<$T>(key: Str) $T? { maybe::none() }
 
 		fn outer<$T>() Bool {
 			fn inner() Bool {
@@ -264,7 +268,8 @@ func TestNestedFunctionCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 
 func TestClosureCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 	result := parse.Parse([]byte(`
-		extern fn raw<$T>(key: Str) $T? = "Raw"
+		use ard/maybe
+		fn raw<$T>(key: Str) $T? { maybe::none() }
 
 		fn outer<$T>() Bool {
 			let inner = fn() Bool {

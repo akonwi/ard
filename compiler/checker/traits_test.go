@@ -160,20 +160,6 @@ struct Box {
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Generic type Box requires type arguments"}},
 		},
 		{
-			name: "enum and extern type names are hoisted",
-			input: `struct Holder {
-  mode: Mode,
-  runtime: Runtime,
-}
-
-enum Mode {
-  Ready,
-}
-
-extern type Runtime
-`,
-		},
-		{
 			name: "alias to later type is available to earlier fields",
 			input: `struct Holder {
   value: Item,

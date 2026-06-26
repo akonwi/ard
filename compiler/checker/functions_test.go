@@ -285,9 +285,9 @@ func TestTestFunctions(t *testing.T) {
 			},
 		},
 		{
-			name: "explicit type arguments on non-generic extern are rejected",
+			name: "explicit type arguments on non-generic function are rejected",
 			input: strings.Join([]string{
-				`extern fn foo() Int = "Foo"`,
+				`fn foo() Int { 0 }`,
 				`foo<Int>()`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
@@ -443,87 +443,6 @@ func TestCallingPackageFunctions(t *testing.T) {
 			},
 		},
 	})
-}
-
-func TestExternalFunctionGoBindingBlock(t *testing.T) {
-	source := `extern fn read_line() Str!Str = {
-  go = "ReadLine"
-}`
-
-	result := parse.Parse([]byte(source), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("unexpected parse errors: %v", result.Errors)
-	}
-
-	c := checker.New("main.ard", result.Program, nil)
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
-	}
-	program := c.Module().Program()
-	fn, ok := program.Statements[0].Expr.(*checker.ExternalFunctionDef)
-	if !ok {
-		t.Fatalf("expected external function def, got %#v", program.Statements[0].Expr)
-	}
-	if fn.ExternalBinding != "ReadLine" || fn.ExternalBindings["go"] != "ReadLine" {
-		t.Fatalf("unexpected extern bindings: %#v", fn)
-	}
-}
-
-func TestExternalFunctionShorthandResolvesToGo(t *testing.T) {
-	source := `extern fn query_selector(selector: Str) Dynamic? = "querySelector"`
-
-	result := parse.Parse([]byte(source), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("unexpected parse errors: %v", result.Errors)
-	}
-
-	c := checker.New("main.ard", result.Program, nil)
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
-	}
-	fn := c.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
-	if fn.ExternalBinding != "querySelector" || fn.ExternalBindings["go"] != "querySelector" {
-		t.Fatalf("unexpected shorthand binding: %#v", fn)
-	}
-}
-
-func TestExternalFunctionRejectsUnsupportedBindingTargets(t *testing.T) {
-	cases := []struct {
-		name   string
-		source string
-		want   string
-	}{
-		{
-			name: "bytecode function binding",
-			source: `extern fn value() Str = {
-  bytecode = "Value"
-}`,
-			want: `Unsupported extern binding target "bytecode"`,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			result := parse.Parse([]byte(tc.source), "main.ard")
-			if len(result.Errors) > 0 {
-				t.Fatalf("unexpected parse errors: %v", result.Errors)
-			}
-			c := checker.New("main.ard", result.Program, nil)
-			c.Check()
-			if !c.HasErrors() {
-				t.Fatal("expected checker diagnostics")
-			}
-			joined := ""
-			for _, diagnostic := range c.Diagnostics() {
-				joined += diagnostic.String() + "\n"
-			}
-			if !strings.Contains(joined, tc.want) {
-				t.Fatalf("diagnostics = %s, want %q", joined, tc.want)
-			}
-		})
-	}
 }
 
 func TestCallingInstanceMethods(t *testing.T) {

@@ -78,22 +78,17 @@ fn good() Int!Str {
 }`,
 		},
 		{
-			name: "unsafe block allows direct Go extern aliases in try catch ok result",
+			name: "unsafe block allows direct Go types in try catch ok result",
 			input: `use go:time
-
-extern type Time1 = "go:time::Time"
-extern type Time2 = "go:time as t::Time"
-extern fn now1() Time1 = time::Now
-extern fn now2() Time2 = time::Now
 
 fn inner() Int!Str {
   Result::err("inner")
 }
 
-fn good() Time1!Str {
+fn good() time::Time!Str {
   unsafe {
-    let value = try inner() -> err { Result::ok(now2()) }
-    now1()
+    let value = try inner() -> err { Result::ok(time::Now()) }
+    time::Now()
   }
 }`,
 		},
