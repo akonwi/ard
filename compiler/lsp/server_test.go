@@ -1366,9 +1366,9 @@ func TestDefinitionImportedExternFunction(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"linear_cli\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	vaxisSource := `extern type Window = "Window"
-
-extern fn window_width(win: Window) Int = "WindowWidth"
+	vaxisSource := `fn window_width() Int {
+  0
+}
 `
 	vaxisPath := filepath.Join(root, "vaxis.ard")
 	if err := os.WriteFile(vaxisPath, []byte(vaxisSource), 0o644); err != nil {
@@ -1376,8 +1376,8 @@ extern fn window_width(win: Window) Int = "WindowWidth"
 	}
 	source := `use linear_cli/vaxis
 
-fn main(win: vaxis::Window) Int {
-  vaxis::window_width(win)
+fn main() Int {
+  vaxis::window_width()
 }
 `
 	filePath := filepath.Join(root, "issue_tab.ard")
@@ -1386,7 +1386,7 @@ fn main(win: vaxis::Window) Int {
 	}
 
 	loc := requireDefinition(t, source, filePath, 3, 15)
-	assertDefinitionStart(t, loc, vaxisPath, 2, 7)
+	assertDefinitionStart(t, loc, vaxisPath, 0, 0)
 }
 
 // TestDefinitionImportedInstanceMembers verifies go-to-definition for imported fields and methods.
@@ -1581,16 +1581,6 @@ func TestSignatureHelpStaticPreludeFunction(t *testing.T) {
 `
 	help := requireSignatureHelp(t, source, "test.ard", 1, 30)
 	assertSignature(t, help, "fn Int::from_str(str: Str) Int?", 0)
-}
-
-// TestSignatureHelpLocalExternFunction verifies signature help for extern calls declared in the same module.
-func TestSignatureHelpLocalExternFunction(t *testing.T) {
-	help, _ := requireSignatureHelpAtMarker(t, `extern fn window_width() Int = "WindowWidth"
-fn main() {
-  let width = window_width(|)
-}
-`, "test.ard")
-	assertSignature(t, help, "fn window_width() Int", 0)
 }
 
 // TestSignatureHelpNamedArguments maps named arguments back to the matching parameter.

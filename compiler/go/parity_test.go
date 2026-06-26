@@ -2862,22 +2862,19 @@ func TestGoTargetParityDirectGoReturnAdapters(t *testing.T) {
 		{
 			name: "value error to result",
 			input: `use go:strconv
-extern fn atoi(value: Str) Int!Str = strconv::Atoi
-fn main() Int { atoi("42").expect("parse") }`,
+fn main() Int { strconv::Atoi("42").expect("parse") }`,
 			want: "42",
 		},
 		{
 			name: "error to void result",
 			input: `use go:os
-extern fn chdir(path: Str) Void!Str = os::Chdir
-fn main() Bool { chdir(".").is_ok() }`,
+fn main() Bool { os::Chdir(".").is_ok() }`,
 			want: "true",
 		},
 		{
 			name: "value bool to maybe",
 			input: `use go:os
-extern fn lookup_env(key: Str) Str? = os::LookupEnv
-fn main() Bool { lookup_env("__ARD_MISSING_DIRECT_GO_ADAPTER__").is_none() }`,
+fn main() Bool { os::LookupEnv("__ARD_MISSING_DIRECT_GO_ADAPTER__").is_none() }`,
 			want: "true",
 		},
 	}

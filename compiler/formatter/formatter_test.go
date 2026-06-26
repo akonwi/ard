@@ -90,49 +90,9 @@ func TestFormat(t *testing.T) {
 			output: "struct Fiber {\n  result: Int,\n}\nimpl Fiber {\n  fn join() {}\n\n  fn get() Int {\n    self.join()\n    self.result\n  }\n}\n",
 		},
 		{
-			name:   "preserves formal result type syntax when written formally",
-			input:  "extern fn hash(password: Str, cost: Int?) Result<Str, Str> = \"CryptoHashPassword\"\n",
-			output: "extern fn hash(password: Str, cost: Int?) Result<Str, Str> = \"CryptoHashPassword\"\n",
-		},
-		{
-			name:   "formats go extern binding blocks as shorthand",
-			input:  "extern fn read_line() Str!Str = {\n  go = \"ReadLine\"\n}\n",
-			output: "extern fn read_line() Str!Str = \"ReadLine\"\n",
-		},
-		{
-			name:   "formats direct Go extern binding as namespace path",
-			input:  "extern fn floor(value: Float) Float = {\n  go = math::Floor\n}\n",
-			output: "extern fn floor(value: Float) Float = math::Floor\n",
-		},
-		{
-			name:   "keeps imports used only by extern bindings",
-			input:  "use go:math\nextern fn floor(value: Float) Float = math::Floor\n",
-			output: "use go:math\n\nextern fn floor(value: Float) Float = math::Floor\n",
-		},
-		{
-			name:   "formats extern type declaration",
-			input:  "extern type ConnectionPtr\n",
-			output: "extern type ConnectionPtr\n",
-		},
-		{
-			name:   "preserves extern type Go binding",
-			input:  "extern type Terminal = \"*vaxis.Vaxis\"\n",
-			output: "extern type Terminal = \"*vaxis.Vaxis\"\n",
-		},
-		{
-			name:   "formats generic extern type declaration",
-			input:  "extern type Promise<$T>\n",
-			output: "extern type Promise<$T>\n",
-		},
-		{
 			name:   "formats generic struct declaration",
 			input:  "struct State<$T>{handle:Int}\n",
 			output: "struct State<$T> {\n  handle: Int,\n}\n",
-		},
-		{
-			name:   "formats private extern type declaration",
-			input:  "private extern type ConnectionPtr\n",
-			output: "private extern type ConnectionPtr\n",
 		},
 		{
 			name:   "preserves mut in function type parameters",
@@ -371,10 +331,6 @@ func TestFormatIsIdempotent(t *testing.T) {
 		{
 			name:  "test and regular functions together",
 			input: "fn helper() Int {\n  1\n}\ntest fn test_helper() Void!Str {\n  Result::ok(())\n}\n",
-		},
-		{
-			name:  "private extern type declaration",
-			input: "private extern type ConnectionPtr\n",
 		},
 		{
 			name:  "anonymous function with inferred parameter type",

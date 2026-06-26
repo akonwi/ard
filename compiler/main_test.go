@@ -1054,17 +1054,22 @@ func TestTestCommandGoTargetSupportsProjectFFI(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module demo\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(projectDir, "main.ard"), []byte(`use ard/testing
-
-extern fn lookup() Str = "demo.Lookup"
+use go:demo/ffi as ffi
 
 test fn ffi_passes() Void!Str {
-  testing::assert(lookup() == "ok", "project ffi should run on the Go backend")
+  testing::assert(ffi::Lookup() == "ok", "project ffi should run on the Go backend")
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "ffi.go"), []byte(`package ffi
+	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "host.go"), []byte(`package ffi
 
 func Lookup() string { return "ok" }
 `), 0o644); err != nil {
