@@ -82,34 +82,6 @@ func ReadLine() (string, error) {
 	return strings.TrimRight(line, "\r\n"), nil
 }
 
-func ChannelSend[T any](ch chan T, value T) (sent bool) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			sent = false
-		}
-	}()
-	ch <- value
-	return true
-}
-
-func ChannelRecv[T any](ch chan T) Maybe[T] {
-	value, ok := <-ch
-	if !ok {
-		return None[T]()
-	}
-	return Some(value)
-}
-
-func ChannelClose[T any](ch chan T) (closed bool) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			closed = false
-		}
-	}()
-	close(ch)
-	return true
-}
-
 func ByteFromInt(value int) (byte, bool) {
 	if value < 0 || value > 255 {
 		return 0, false
@@ -575,14 +547,6 @@ func DynamicToList(data any) ([]any, error) {
 	return nil, fmt.Errorf("%s", formatDynamicValueForError(data))
 }
 
-func JsonEncode(value any) (string, error) {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return "", err
-	}
-	return string(encoded), nil
-}
-
 func DynamicToMap(data any) (map[string]any, error) {
 	if data == nil {
 		return nil, fmt.Errorf("Void")
@@ -691,64 +655,6 @@ func HTTPResponseClose(resp *http.Response) {
 // HTTPServe registers each handler on a mux and serves. The handlers receive the
 // raw *http.Request and http.ResponseWriter; the Ard http module builds its
 // Request/Response and writes the result, so this stays Ard-agnostic.
-func HTTPServe(port int, handlers map[string]func(http.ResponseWriter, *http.Request)) error {
-	mux := http.NewServeMux()
-	for path, handler := range handlers {
-		mux.HandleFunc(convertHTTPPattern(path), handler)
-	}
-	return http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
-}
-
-// HTTPRequestBody reads and returns the request body, or "" when absent.
-func HTTPRequestBody(req *http.Request) string {
-	if req == nil || req.Body == nil {
-		return ""
-	}
-	body, err := io.ReadAll(req.Body)
-	_ = req.Body.Close()
-	if err != nil {
-		return ""
-	}
-	return string(body)
-}
-
-// HTTPRequestHeaders flattens the request's first header values into a map.
-func HTTPRequestHeaders(req *http.Request) map[string]string {
-	return requestHeaders(req)
-}
-
-// HTTPWriteResponse writes a status, headers, and body to a response writer.
-func HTTPWriteResponse(w http.ResponseWriter, status int, headers map[string]string, body string) {
-	for key, value := range headers {
-		w.Header().Set(key, value)
-	}
-	if status == 0 {
-		status = 200
-	}
-	w.WriteHeader(status)
-	_, _ = io.WriteString(w, body)
-}
-
-func convertHTTPPattern(path string) string {
-	parts := strings.Split(path, "/")
-	for i, part := range parts {
-		if strings.HasPrefix(part, ":") {
-			parts[i] = "{" + part[1:] + "}"
-		}
-	}
-	return strings.Join(parts, "/")
-}
-
-func requestHeaders(req *http.Request) map[string]string {
-	headers := make(map[string]string, len(req.Header))
-	for key, values := range req.Header {
-		if len(values) > 0 {
-			headers[key] = values[0]
-		}
-	}
-	return headers
-}
-
 func formatDynamicValueForError(data any) string {
 	switch value := data.(type) {
 	case nil:

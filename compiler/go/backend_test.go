@@ -334,56 +334,6 @@ func TestLowerExprQualifiesCrossModuleUnionWrapAndMatchInModulePackageMode(t *te
 	}
 }
 
-func TestLowerProgramAliasesJSONHelperImportsAfterDirectGoAliasConflict(t *testing.T) {
-	program := lowerSource(t, `
-		use go:strings as fmt
-		use ard/json
-
-		extern fn eq(a: Str, b: Str) Bool = fmt::EqualFold
-
-		fn main() {
-			let _same = eq("a", "A")
-			let _encoded = json::encode(1).expect("json")
-		}
-	`)
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	joined := joinGeneratedSources(sources)
-	if !strings.Contains(joined, "\"fmt\"") || !strings.Contains(joined, "fmt_1 \"strings\"") {
-		t.Fatalf("generated source missing expected import aliases:\n%s", joined)
-	}
-	if !strings.Contains(joined, "fmt.Sprint") || !strings.Contains(joined, "fmt_1.EqualFold") {
-		t.Fatalf("generated source did not keep helper/direct Go aliases distinct:\n%s", joined)
-	}
-}
-
-func TestLowerProgramUsesRegisteredDirectGoTypeAlias(t *testing.T) {
-	program := lowerSource(t, `
-		use ard/json
-		use go:time as fmt
-
-		extern fn sleep(duration: Int) Void = fmt::Sleep
-
-		fn main() {
-			let _encoded = json::encode(1).expect("json")
-			sleep(1)
-		}
-	`)
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	joined := joinGeneratedSources(sources)
-	if !strings.Contains(joined, "\"fmt\"") || !strings.Contains(joined, "fmt_1 \"time\"") {
-		t.Fatalf("generated source missing expected import aliases:\n%s", joined)
-	}
-	if !strings.Contains(joined, "fmt_1.Sleep(fmt_1.Duration(1))") {
-		t.Fatalf("generated direct Go conversion did not use registered time alias:\n%s", joined)
-	}
-}
-
 func TestLowerProgramAliasesNaturalFunctionConflictingWithGeneratedImport(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/io
@@ -2075,68 +2025,6 @@ func TestRunProgramSupportsCommonStdlibExterns(t *testing.T) {
 	}
 }
 
-func TestLowerProgramUsesNativeJSONCodec(t *testing.T) {
-	program := lowerSource(t, `
-		use ard/json
-
-		struct Item { name: Str }
-		struct Payload { items: [Item], note: Str? }
-
-		fn main() Bool {
-			let parsed = json::parse<Payload>("\{\"items\":[\{\"name\":\"one\"\}],\"note\":null\}").expect("parse")
-			let encoded = json::encode(parsed).expect("encode")
-			encoded.size() > 0
-		}
-	`)
-
-	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	// json::parse and json::encode lower onto encoding/json/v2, not a generated codec.
-	if !astFilesHaveImport(files, "json", "encoding/json/v2") {
-		t.Fatal("generated AST missing encoding/json/v2 import for native JSON codec")
-	}
-	if !astFilesHaveCall(files, "json.Unmarshal") || !astFilesHaveCall(files, "json.Marshal") {
-		t.Fatal("generated AST missing native json.Unmarshal/json.Marshal calls")
-	}
-	for _, name := range []string{"ardJSONDecodeMaybe", "ardJSONDecodeList", "ardJSONDecodeString", "ardJSONDecodeStringMap"} {
-		if _, ok := astFilesFunc(files, name); ok {
-			t.Fatalf("generated AST should not emit the removed custom JSON decode glue %q", name)
-		}
-	}
-}
-
-func TestBuildProgramCompilesJSONPreludeForStdlibBackedHTTPTypes(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	mainPath := filepath.Join(dir, "main.ard")
-	if err := os.WriteFile(mainPath, []byte(`
-use ard/http
-use ard/json
-
-struct App {
-  routes: [Str: fn(http::Request, mut http::Response)]
-}
-
-fn main() Str {
-  json::encode(Dynamic::from("ok")).or("")
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := frontend.LoadModule(mainPath)
-	if err != nil {
-		t.Fatalf("load module: %v", err)
-	}
-	program, err := air.Lower(loaded.Module)
-	if err != nil {
-		t.Fatalf("lower: %v", err)
-	}
-	if _, err := BuildProgram(program, filepath.Join(dir, "app"), loaded.ProjectInfo); err != nil {
-		t.Fatalf("build: %v", err)
-	}
-}
-
 func TestBuildProgramLowersTransitiveStdlibExternFromSubmodule(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"sleep-repro\"\nard = \">= 0.13.0\"\n"), 0o644); err != nil {
@@ -2559,15 +2447,11 @@ fn next_event(name: Str) Event!Str {
 	}
 	mainPath := filepath.Join(dir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`use ard/io
-use ard/json
 use demo/lib
 
 fn main() {
   match lib::next_event("hello").expect("ev") {
-    KeyEvent(k) => {
-      let s = json::encode(k).expect("enc")
-      io::print(s)
-    },
+    KeyEvent(k) => io::print(k.name),
     QuitEvent(_) => io::print("quit"),
   }
 }
@@ -2575,52 +2459,6 @@ fn main() {
 		t.Fatal(err)
 	}
 
-	loaded, err := frontend.LoadModule(mainPath)
-	if err != nil {
-		t.Fatalf("load module: %v", err)
-	}
-	program, err := air.Lower(loaded.Module)
-	if err != nil {
-		t.Fatalf("lower: %v", err)
-	}
-	builtPath, err := BuildProgram(program, filepath.Join(dir, "app"), loaded.ProjectInfo)
-	if err != nil {
-		t.Fatalf("build: %v", err)
-	}
-	if err := exec.Command(builtPath).Run(); err != nil {
-		t.Fatalf("run built binary: %v", err)
-	}
-}
-
-func TestBuildProgramJSONEncodeDoesNotStealStdRuntimeImport(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	mainPath := filepath.Join(dir, "main.ard")
-	if err := os.WriteFile(mainPath, []byte(`
-use ard/json
-
-extern type Stats = "runtime.MemStats"
-extern fn stats() Stats = "demo.Stats"
-
-fn main() Bool {
-	let _stats = stats()
-	json::encode(1).expect("json") == "1"
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
-
-import "runtime"
-
-func Stats() runtime.MemStats {
-	return runtime.MemStats{}
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	loaded, err := frontend.LoadModule(mainPath)
 	if err != nil {
 		t.Fatalf("load module: %v", err)
@@ -2797,109 +2635,6 @@ func GetRaw[T any](key string) ardruntime.Maybe[T] {
 	default:
 		return ardruntime.None[T]()
 	}
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := frontend.LoadModule(mainPath)
-	if err != nil {
-		t.Fatalf("load module: %v", err)
-	}
-	program, err := air.Lower(loaded.Module)
-	if err != nil {
-		t.Fatalf("lower: %v", err)
-	}
-	binaryPath := filepath.Join(dir, "app")
-	builtPath, err := BuildProgram(program, binaryPath, loaded.ProjectInfo)
-	if err != nil {
-		t.Fatalf("build: %v", err)
-	}
-	if err := exec.Command(builtPath).Run(); err != nil {
-		t.Fatalf("run built binary: %v", err)
-	}
-}
-
-func TestBuildProgramWrapsProjectFFIRawChannelReturn(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	mainPath := filepath.Join(dir, "main.ard")
-	if err := os.WriteFile(mainPath, []byte(`
-use ard/async/channel
-use ard/io
-
-extern type RawEvent = "demo.Event"
-extern fn events() channel::Channel<RawEvent> = "demo.Events"
-extern fn event_value(e: RawEvent) Int = "demo.EventValue"
-
-fn main() {
-	let ch = events()
-	let raw = ch.recv().expect("event")
-	io::print(event_value(raw))
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
-
-type Event struct{ Value int }
-
-func Events() chan Event {
-	ch := make(chan Event, 1)
-	ch <- Event{Value: 42}
-	close(ch)
-	return ch
-}
-
-func EventValue(e Event) int { return e.Value }
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := frontend.LoadModule(mainPath)
-	if err != nil {
-		t.Fatalf("load module: %v", err)
-	}
-	program, err := air.Lower(loaded.Module)
-	if err != nil {
-		t.Fatalf("lower: %v", err)
-	}
-	binaryPath := filepath.Join(dir, "app")
-	builtPath, err := BuildProgram(program, binaryPath, loaded.ProjectInfo)
-	if err != nil {
-		t.Fatalf("build: %v", err)
-	}
-	out, err := exec.Command(builtPath).CombinedOutput()
-	if err != nil {
-		t.Fatalf("run built binary: %v\n%s", err, out)
-	}
-	if got := string(out); got != "42\n" {
-		t.Fatalf("stdout = %q, want 42\\n", got)
-	}
-}
-
-func TestBuildProgramSupportsProjectGoFFIWithNativeChannel(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	mainPath := filepath.Join(dir, "main.ard")
-	if err := os.WriteFile(mainPath, []byte(`
-use ard/async/channel
-
-extern fn observe(ch: channel::Chan<Int>) Int = "demo.Observe"
-
-fn main() Bool {
-	let ch = channel::new<Int>(size: 1)
-	ch.send(7) and observe(ch.chan) == 7
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "ffi.go"), []byte(`package ffi
-
-func Observe(ch chan int) int {
-	return <-ch
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -3798,24 +3533,6 @@ func TestLowerProgramSkipsVoidAssignmentForStatementMatchBranches(t *testing.T) 
 		return false
 	}) {
 		t.Fatal("generated AST assigned nil in statement match lowering")
-	}
-}
-
-func TestRunProgramSupportsVoidFiberFunctions(t *testing.T) {
-	program := lowerSource(t, `
-		use ard/async
-
-		fn job() Void {
-			()
-		}
-
-		fn main() Void {
-			async::start(job)
-		}
-	`)
-
-	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
-		t.Fatalf("RunProgram error = %v", err)
 	}
 }
 

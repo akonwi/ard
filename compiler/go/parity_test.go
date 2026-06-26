@@ -1353,60 +1353,6 @@ fn main() Str {
 	})
 }
 
-func TestGoTargetParityAsyncTiming(t *testing.T) {
-	t.Run("async sleep waits requested duration", func(t *testing.T) {
-		start := time.Now()
-		program := lowerParitySource(t, `
-			use ard/async
-			fn main() Int {
-				async::sleep(1000000)
-				0
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "0" {
-			t.Fatalf("got %s, want 0", got)
-		}
-		if elapsed := time.Since(start); elapsed < time.Millisecond {
-			t.Fatalf("expected script to take >= 1ms, took %v", elapsed)
-		}
-	})
-
-	t.Run("joining fibers waits for concurrent work", func(t *testing.T) {
-		start := time.Now()
-		program := lowerParitySource(t, `
-			use ard/async
-			fn main() Int {
-				let fiber1 = async::start(fn() { async::sleep(2000000) })
-				let fiber2 = async::start(fn() { async::sleep(1000000) })
-				let fiber3 = async::start(fn() { async::sleep(1000000) })
-				fiber1.join()
-				fiber2.join()
-				fiber3.join()
-				0
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "0" {
-			t.Fatalf("got %s, want 0", got)
-		}
-		if elapsed := time.Since(start); elapsed < 2*time.Millisecond {
-			t.Fatalf("expected concurrent execution >= 2ms, got %v", elapsed)
-		}
-	})
-
-	t.Run("async eval get returns computed value", func(t *testing.T) {
-		program := lowerParitySource(t, `
-			use ard/async
-			fn main() Int {
-				let fiber = async::eval(fn() Int { 40 + 2 })
-				fiber.get()
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "42" {
-			t.Fatalf("got %s, want 42", got)
-		}
-	})
-}
-
 func TestGoTargetParityMapClosureCapturesOuterLocal(t *testing.T) {
 	t.Run("maybe map", func(t *testing.T) {
 		program := lowerParitySource(t, `
@@ -2109,88 +2055,6 @@ func TestGoTargetParityMethodClosureCapturesSelf(t *testing.T) {
 	}
 }
 
-func TestGoTargetParityAsyncChannels(t *testing.T) {
-	t.Run("unbuffered channel communicates with fiber", func(t *testing.T) {
-		program := lowerParitySource(t, `
-			use ard/async
-			use ard/async/channel
-
-			fn main() Int {
-				let ch = channel::new<Int>()
-				let sender = async::start(fn() {
-					ch.send(42)
-					ch.close()
-				})
-				let value = ch.recv().or(0)
-				sender.join()
-				value
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "42" {
-			t.Fatalf("got %s, want 42", got)
-		}
-	})
-
-	t.Run("buffered channel drains before closed receive returns none", func(t *testing.T) {
-		program := lowerParitySource(t, `
-			use ard/async/channel
-
-			fn main() Int {
-				let ch = channel::new<Int>(size: 2)
-				let sent_a = ch.send(20)
-				let sent_b = ch.send(22)
-				let closed = ch.close()
-				let total = ch.recv().or(0) + ch.recv().or(0)
-				match ch.recv() {
-					value => 0
-					_ => match sent_a and sent_b and closed {
-						true => total
-						false => -1
-					}
-				}
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "42" {
-			t.Fatalf("got %s, want 42", got)
-		}
-	})
-
-	t.Run("negative channel size falls back to unbuffered", func(t *testing.T) {
-		program := lowerParitySource(t, `
-			use ard/async
-			use ard/async/channel
-
-			fn main() Int {
-				let ch = channel::new<Int>(size: -1)
-				let sender = async::start(fn() {
-					ch.send(9)
-					ch.close()
-				})
-				let value = ch.recv().or(0)
-				sender.join()
-				value
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "9" {
-			t.Fatalf("got %s, want 9", got)
-		}
-	})
-
-	t.Run("send and close report closed channel state", func(t *testing.T) {
-		program := lowerParitySource(t, `
-			use ard/async/channel
-
-			fn main() Bool {
-				let ch = channel::new<Int>(size: 1)
-				ch.close() and not ch.send(1) and not ch.close()
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "true" {
-			t.Fatalf("got %s, want true", got)
-		}
-	})
-}
-
 func TestGoTargetParityPrinting(t *testing.T) {
 	got := runGoTargetSourceStdout(t, `
 		use ard/io
@@ -2387,43 +2251,6 @@ func TestGoTargetParityHTTP(t *testing.T) {
 			`, server.URL),
 		}})
 	})
-
-	t.Run("serve runs handler and writes response", func(t *testing.T) {
-		// End-to-end Go-target check of the server path: an Ard-defined handler is
-		// registered, the server runs in a fiber, and a client request observes the
-		// handler-produced status and body (including a query parameter read from
-		// the raw *http.Request).
-		program := lowerParitySource(t, `
-			use ard/http
-			use ard/async
-			use ard/maybe
-
-			fn main() Str {
-				let handlers: [Str: http::HandlerFn] = [
-					"/hello": fn(req: http::Request) http::Response {
-						http::Response::new(201, "hi {req.query_param("name")}")
-					},
-				]
-				async::start(fn() {
-					http::serve(18097, handlers).or(())
-				})
-				async::sleep(500)
-				let resp = http::send(
-					http::Request{
-						method: http::Method::Get,
-						url: "http://localhost:18097/hello?name=ard",
-						headers: [:],
-						timeout: maybe::some(5),
-					},
-					maybe::none(),
-				).or(http::Response::new(-1, "fail"))
-				"{resp.status}:{resp.body}"
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != `"201:hi ard"` {
-			t.Fatalf("got %s, want %q", got, "201:hi ard")
-		}
-	})
 }
 
 func TestGoTargetParitySQL(t *testing.T) {
@@ -2560,33 +2387,6 @@ func TestGoTargetParityEnvGet(t *testing.T) {
 				use ard/env
 				fn main() Bool {
 					env::get("ARD_MISSING_ENV_TEST").is_none()
-				}
-			`,
-		},
-	})
-}
-
-func TestGoTargetParityEncodeUnion(t *testing.T) {
-	runGoParityCases(t, []goParityCase{
-		{
-			name: "union encodes active string member",
-			input: `
-				use ard/json
-				type Val = Str | Int
-				fn main() Str {
-					let v: Val = "hi"
-					json::encode(v).expect("encode")
-				}
-			`,
-		},
-		{
-			name: "union encodes active int member",
-			input: `
-				use ard/json
-				type Val = Str | Int
-				fn main() Str {
-					let v: Val = 5
-					json::encode(v).expect("encode")
 				}
 			`,
 		},
@@ -3141,19 +2941,6 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			`,
 		},
 		{
-			name: "json empty list decodes as empty list",
-			input: `
-				use ard/json
-
-				struct Payload { items: [Int] }
-
-				fn main() Bool {
-					let parsed = json::parse<Payload>("\{\"items\":[]\}").expect("parse")
-					parsed.items.size() == 0
-				}
-			`,
-		},
-		{
 			name: "maybe expect returns value",
 			input: `
 				use ard/maybe
@@ -3473,18 +3260,18 @@ func runGoTargetParityJSON(t *testing.T, program *air.Program) string {
 	runner := fmt.Sprintf(`package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
-	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
 	%s %q
 )
 
 func main() {
-	encoded, err := stdlibffi.JsonEncode(normalizeParityValue(%s()))
+	encoded, err := json.Marshal(normalizeParityValue(%s()))
 	if err != nil {
 		panic(err)
 	}
-	fmt.Print(encoded)
+	fmt.Print(string(encoded))
 }
 
 func normalizeParityValue(value any) any {

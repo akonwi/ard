@@ -174,21 +174,6 @@ func TestRunGoTargetTraitsSample(t *testing.T) {
 	}
 }
 
-func TestRunGoTargetConcurrentStressSample(t *testing.T) {
-	sourcePath := filepath.Join("samples", "concurrent_stress.ard")
-	module, err := loadModule(sourcePath)
-	if err != nil {
-		t.Fatalf("load module: %v", err)
-	}
-	program, err := air.Lower(module)
-	if err != nil {
-		t.Fatalf("lower AIR: %v", err)
-	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", sourcePath}); err != nil {
-		t.Fatalf("run go concurrent stress sample: %v", err)
-	}
-}
-
 func TestRunGoTargetTypeUnionsSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "type-unions.ard")
 	module, err := loadModule(sourcePath)
@@ -403,33 +388,6 @@ func ReadKey(vx Vaxis) (string, error) { return "q", nil }
 	runGitForTest(t, repo, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "init")
 	commit := strings.TrimSpace(runGitOutputForTest(t, repo, "rev-parse", "HEAD"))
 	return repo, commit
-}
-
-func TestRunServerExampleRoutes(t *testing.T) {
-	outputPath := buildGoSampleBinary(t, filepath.Join("..", "examples", "server", "main.ard"))
-
-	port := freeTCPPort(t)
-	cmd := exec.Command(outputPath)
-	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", port))
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start server example: %v", err)
-	}
-	t.Cleanup(func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-			_, _ = cmd.Process.Wait()
-		}
-	})
-
-	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
-	waitForHTTPServer(t, baseURL)
-
-	assertHTTPResponse(t, http.MethodGet, baseURL+"/", "", http.StatusOK, "Hello, World!")
-	assertHTTPResponse(t, http.MethodGet, baseURL+"/me", "", http.StatusOK, "this is /me")
-	assertHTTPResponse(t, http.MethodGet, baseURL+"/error", "", http.StatusBadRequest, "Bad request")
-	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", `{"email":"ard@example.com"}`, http.StatusCreated, "Created user with email ard@example.com")
-	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", "", http.StatusBadRequest, "Missing request body")
-	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", `{"name":"Ard"}`, http.StatusBadRequest, `Missing email: email: got Missing field "email", expected Field`)
 }
 
 func copyFileForTest(t *testing.T, src string, dst string) {

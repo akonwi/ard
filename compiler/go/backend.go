@@ -1261,34 +1261,7 @@ func projectHasFFICompanions(projectInfo *checker.ProjectInfo) bool {
 }
 
 func externModuleIsStdlib(program *air.Program, ext air.Extern) bool {
-	if program != nil && int(ext.Module) >= 0 && int(ext.Module) < len(program.Modules) && strings.HasPrefix(program.Modules[ext.Module].Path, "ard/") {
-		return true
-	}
-	return stdlibGoBinding(goExternBinding(ext))
-}
-
-func goExternBinding(ext air.Extern) string {
-	if binding := ext.Bindings["go"]; binding != "" {
-		return binding
-	}
-	return ext.Name
-}
-
-// stdlibGoExternBindings are standard-library extern bindings that are lowered
-// through dedicated code paths rather than the generated lowering table (today,
-// the async runtime helpers). The lowering table covers every other stdlib
-// binding.
-var stdlibGoExternBindings = map[string]struct{}{
-	"AsyncStart": {},
-	"WaitFor":    {},
-}
-
-func stdlibGoBinding(binding string) bool {
-	if _, ok := stdlibGoExternBindings[binding]; ok {
-		return true
-	}
-	_, ok := generatedStdlibExternLowerings[binding]
-	return ok
+	return program != nil && int(ext.Module) >= 0 && int(ext.Module) < len(program.Modules) && strings.HasPrefix(program.Modules[ext.Module].Path, "ard/")
 }
 
 func writeArdModuleDependency(dir string) (string, error) {

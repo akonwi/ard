@@ -1,4 +1,4 @@
-// Package ffi contains Go host functions for Ard's internal standard library.
-//
-//go:generate go run generate.go -go-out ../../go/stdlib_ffi.gen.go -go-package gotarget
+// Package ffi is a plain Go helper package for Ard's standard library. Ard
+// modules import it via `use go:github.com/akonwi/ard/std_lib/ffi` like any
+// other Go dependency; it knows nothing about Ard's type system.
 package ffi

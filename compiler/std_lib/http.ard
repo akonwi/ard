@@ -1,5 +1,4 @@
 use ard/dynamic
-use ard/ffi
 use ard/maybe
 use ard/string as Str
 
@@ -34,45 +33,6 @@ struct Request {
   headers: [Str: Str],
   body: Dynamic?,
   timeout: Int?,
-
-  // inbound requests have the *http.Request
-  raw: (mut gohttp::Request)?,
-}
-
-impl Request {
-  fn path() Str? {
-    let raw = try self.raw
-    match ffi::is_nil(raw) {
-      true => maybe::some(""),
-      false => {
-        match ffi::is_nil(raw.URL) {
-          true => maybe::some(""),
-          false => maybe::some(raw.URL.Path),
-        }
-      },
-    }
-  }
-
-  fn path_param(name: Str) Str {
-    let raw = try self.raw -> _ { "" }
-    match ffi::is_nil(raw) {
-      true => "",
-      false => raw.PathValue(name),
-    }
-  }
-
-  fn query_param(name: Str) Str {
-    let raw = try self.raw -> _ { "" }
-    match ffi::is_nil(raw) {
-      true => "",
-      false => {
-        match ffi::is_nil(raw.URL) {
-          true => "",
-          false => raw.URL.Query().Get(name),
-        }
-      },
-    }
-  }
 }
 
 struct Response {
@@ -125,56 +85,4 @@ fn send(req: Request, timeout: Int?) Response!Str {
       body: response_body,
     },
   )
-}
-
-type HandlerFn = fn(Request) Response
-
-fn method_from_string(method: Str) Method {
-  match method {
-    "GET" => Method::Get,
-    "POST" => Method::Post,
-    "PUT" => Method::Put,
-    "DELETE" => Method::Del,
-    "PATCH" => Method::Patch,
-    "OPTIONS" => Method::Options,
-    _ => Method::Get,
-  }
-}
-
-fn request_from_raw(raw: mut gohttp::Request) Request {
-  let body_str = host::HTTPRequestBody(raw)
-  let body = match body_str.is_empty() {
-    true => maybe::none(),
-    false => maybe::some(dynamic::from(body_str)),
-  }
-  Request{
-    method: method_from_string(raw.Method),
-    url: raw.URL.String(),
-    headers: host::HTTPRequestHeaders(raw),
-    body: body,
-    timeout: maybe::none(),
-    raw: maybe::some(raw),
-  }
-}
-
-// The Go HTTPServe is Ard-agnostic: it registers each raw handler on a mux. The
-// adapter that builds the Ard Request, runs the user handler, and writes the
-// Response lives here in Ard.
-private extern fn _http_serve(
-  port: Int,
-  handlers: [Str: fn(gohttp::ResponseWriter, mut gohttp::Request)],
-) Void!Str = "HTTP_Serve"
-
-fn serve(port: Int, handlers: [Str: HandlerFn]) Void!Str {
-  mut adapters: [Str: fn(gohttp::ResponseWriter, mut gohttp::Request)] = [:]
-  for pattern, handler in handlers {
-    adapters.set(
-      pattern,
-      fn(w: gohttp::ResponseWriter, r: mut gohttp::Request) {
-        let response = handler(request_from_raw(r))
-        host::HTTPWriteResponse(w, response.status, response.headers, response.body)
-      },
-    )
-  }
-  _http_serve(port, adapters)
 }

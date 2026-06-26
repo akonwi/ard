@@ -108,10 +108,10 @@ func TestGenericImportedTypeRequiresTypeArguments(t *testing.T) {
 	run(t, []test{
 		{
 			name: "generic imported struct without type args is an error",
-			input: `use ard/async/channel
-extern fn events() channel::Channel = "Events"`,
+			input: `use ard/list
+fn f(p: list::Partition) {}`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Generic type channel::Channel requires type arguments"},
+				{Kind: checker.Error, Message: "Generic type list::Partition requires type arguments"},
 			},
 		},
 	})
@@ -2647,29 +2647,6 @@ func TestGenerics(t *testing.T) {
 			},
 		},
 		{
-			name: "Providing type arguments to static functions",
-			input: `
-				use ard/json
-				let result = json::encode<Int>(42)
-			`,
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Stmt: &checker.VariableDef{
-							Name: "result",
-							Value: &checker.ModuleFunctionCall{
-								Module: "ard/json",
-								Call: &checker.FunctionCall{
-									Name: "encode",
-									Args: []checker.Expression{&checker.IntLiteral{42}},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		{
 			name: "Providing type arguments to normal functions",
 			input: `
 			  fn identity(of: $T) $T { of }
@@ -2710,23 +2687,6 @@ func TestGenerics(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "type mismatch: expected Str, got Int"},
 			},
-		},
-		{
-			name: "Providing type arguments to methods",
-			input: `
-				use ard/json
-			  struct Foo {
-					body: Str
-				}
-				impl Foo {
-				  fn bar() $T!Str {
-					  json::encode<$T>(self.body)
-					}
-				}
-			  let foo = Foo{body: "200"}
-				let num = foo.bar<Int>()
-			`,
-			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name: "Generic structs",

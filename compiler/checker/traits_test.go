@@ -611,50 +611,6 @@ func TestTraitsAsTypes(t *testing.T) {
 				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of ToString, got Foo"},
 			},
 		},
-		{
-			name: "json parse validates supported target type",
-			input: `
-			use ard/json
-
-			json::parse<fn() Void>("null")
-			`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "json::parse does not support fn <function>() Void"},
-			},
-		},
-		{
-			name: "json parse validates map keys",
-			input: `
-			use ard/json
-
-			json::parse<[Int: Str]>("{}")
-			`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "json::parse only supports Str map keys, got Int"},
-			},
-		},
-		{
-			name: "json encode supports unions",
-			input: `
-			use ard/json
-
-			type Val = Str | Int
-			let v: Val = "hi"
-			json::encode(v)
-			`,
-		},
-		{
-			name: "json parse rejects unions as ambiguous",
-			input: `
-			use ard/json
-
-			type Val = Str | Int
-			json::parse<Val>("5")
-			`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "json::parse does not support Val: parsing into a union is ambiguous"},
-			},
-		},
 		// {
 		// 	name: "functions with Trait return",
 		// 	input: `

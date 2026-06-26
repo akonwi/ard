@@ -108,33 +108,6 @@ fn main() Bool {
 }`,
 			want: "true",
 		},
-		{
-			name: "json encodes bytes as base64",
-			input: `use ard/json
-fn main() Bool {
-  json::encode("hi".bytes()).expect("json") == "\"aGk=\""
-}`,
-			want: "true",
-		},
-		{
-			name: "json parses byte and rune numbers",
-			input: `use ard/json
-fn main() Bool {
-  let b = json::parse<Byte>("255").expect("byte")
-  let r = json::parse<Rune>("233").expect("rune")
-  b.to_int() == 255 and r.to_str() == "é" and json::parse<Byte>("256").is_err()
-}`,
-			want: "true",
-		},
-		{
-			name: "json parses bytes from base64",
-			input: `use ard/json
-fn main() Bool {
-  let bytes = json::parse<[Byte]>("\"aGk=\"").expect("json")
-  Str::from_bytes(bytes).expect("utf8") == "hi"
-}`,
-			want: "true",
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

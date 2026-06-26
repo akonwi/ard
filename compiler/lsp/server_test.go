@@ -1836,7 +1836,6 @@ fn inspect(req: web::Request, response: web::Response, box: boxes::Box<Int>) {
 	reqItems := computeCompletions(source, filePath, protocol.Position{Line: 4, Character: 6})
 	assertCompletion(t, reqItems, "url", "Str")
 	assertCompletion(t, reqItems, "method", "web::Method")
-	assertCompletion(t, reqItems, "path", "fn () Str?")
 
 	responseItems := computeCompletions(source, filePath, protocol.Position{Line: 5, Character: 11})
 	assertCompletion(t, responseItems, "is_ok", "fn () Bool")

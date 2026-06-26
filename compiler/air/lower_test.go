@@ -910,24 +910,23 @@ fn main() Str {
 
 func TestLowerImportedGenericModuleFunctionSpecialization(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/async
+		use ard/list
 
-		let a = async::eval(fn() Int { 1 })
-		let b = async::eval(fn() Int { 2 })
-		async::join([a, b])
+		let kept = list::keep([1, 2, 3], fn(x: Int) Bool { x > 1 })
 	`)
 
-	join := findFunction(t, program, "join")
-	if len(join.Signature.Params) != 1 {
-		t.Fatalf("join param count = %d, want 1", len(join.Signature.Params))
+	keep := findFunction(t, program, "keep")
+	if len(keep.Signature.Params) != 2 {
+		t.Fatalf("keep param count = %d, want 2", len(keep.Signature.Params))
 	}
-	paramType := testTypeInfo(t, program, join.Signature.Params[0].Type)
+	// keep is lowered once as a generic definition, so its parameter is a list
+	// of the type parameter rather than a monomorphized element type.
+	paramType := testTypeInfo(t, program, keep.Signature.Params[0].Type)
 	if paramType.Kind != TypeList {
-		t.Fatalf("join param kind = %v, want TypeList", paramType.Kind)
+		t.Fatalf("keep param kind = %v, want TypeList", paramType.Kind)
 	}
-	elemType := testTypeInfo(t, program, paramType.Elem)
-	if elemType.Kind != TypeFiber || typeKind(t, program, elemType.Elem) != TypeInt {
-		t.Fatalf("join param elem = %#v, want Fiber<Int>", elemType)
+	if typeKind(t, program, paramType.Elem) != TypeParam {
+		t.Fatalf("keep param elem = %v, want TypeParam", typeKind(t, program, paramType.Elem))
 	}
 }
 
@@ -1393,11 +1392,9 @@ func TestLowerRejectsUnboundReturnOnlyGenericWrapper(t *testing.T) {
 
 func TestLowerImportedGenericStructReturnTypeWithTypeArg(t *testing.T) {
 	lowerSource(t, `
-use ard/async/channel
-extern type RawEvent = "RawEvent"
-extern fn events() channel::Channel<RawEvent> = "Events"
+use ard/list
 fn run() {
-  let ch = events()
+  let p = list::partition([1, 2, 3], fn(x: Int) Bool { x > 1 })
 }
 fn main() { run() }
 `)
