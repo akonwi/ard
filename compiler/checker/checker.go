@@ -7496,6 +7496,12 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 			return nil
 		}
 
+		// Direct Go method calls (e.g. `try db.Close()` on a *sql.DB handle)
+		// resolve via the Go resolver, not the Ard struct/extern method tables.
+		if call, handled := c.checkDirectGoInstanceMethod(target, p.Method, p.GetLocation()); handled {
+			return call
+		}
+
 		// Try to get the method signature
 		innerType := target.Type()
 		var isMaybe bool

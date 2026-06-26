@@ -967,8 +967,18 @@ func (c *Checker) checkDirectGoInstanceMethodAs(subject Expression, call parse.F
 		c.addError(fmt.Sprintf("Go method %s has no receiver metadata", target.Name), loc)
 		return nil, true
 	}
-	if ok, reason := c.directGoAssignableCompatible(subject.Type(), *target.Signature.Receiver); !ok {
-		c.addError(fmt.Sprintf("receiver for %s: %s", target.Name, reason), loc)
+	recvOK, recvReason := c.directGoAssignableCompatible(subject.Type(), *target.Signature.Receiver)
+	if !recvOK {
+		// A mutable-reference lvalue (a `mut T` field read deref's to its value
+		// type) auto-borrows back into `mut T` for a pointer receiver (ADR 0031).
+		if refType := referenceArgType(subject); !refType.equal(subject.Type()) {
+			if ok2, _ := c.directGoAssignableCompatible(refType, *target.Signature.Receiver); ok2 {
+				recvOK = true
+			}
+		}
+	}
+	if !recvOK {
+		c.addError(fmt.Sprintf("receiver for %s: %s", target.Name, recvReason), loc)
 		return nil, true
 	}
 	args, params, ok := c.checkDirectGoCallArguments(call.Args, target.Signature.Params, loc)

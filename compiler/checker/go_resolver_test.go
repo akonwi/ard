@@ -1799,6 +1799,32 @@ fn run(h: Handle) Void!Str { sql::Close(h.db) }`), "main.ard")
 	}
 }
 
+// A Go method with a pointer receiver can be called directly on a stored
+// `mut <handle>` field, including under `try`: the field read deref's to the
+// value type but auto-borrows back into `mut T` for the receiver (ADR 0031).
+func TestDirectGoInstanceMethodOnStoredHandleUnderTry(t *testing.T) {
+	result := parse.Parse([]byte(`use go:database/sql as sql
+struct Database { _db: mut sql::DB }
+fn close(d: Database) Void!Str {
+	try d._db.Close()
+	Result::ok(())
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	db := goNamed(GoValueOther, "sql.DB", "database/sql", "DB")
+	ptrDB := GoValueType{Kind: GoValuePointer, Expr: "*sql.DB", Elem: &db}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"database/sql": {ImportPath: "database/sql", Name: "sql", Types: map[string]GoType{
+			"DB": {Name: "DB", Methods: map[string]GoMethod{"Close": {Name: "Close", Signature: GoSignature{Receiver: &ptrDB, Results: []GoValueType{goParam(GoValueError, "error")}}}}},
+		}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected errors: %v", c.Diagnostics())
+	}
+}
+
 func TestDirectGoCallUsesExpectedResultForWidthScalarReturn(t *testing.T) {
 	result := parse.Parse([]byte(`use go:strconv
 fn main() Int!Str { strconv::ParseInt("42", 10, 64) }`), "main.ard")

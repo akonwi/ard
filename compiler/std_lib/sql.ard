@@ -169,14 +169,14 @@ impl Query {
     Result::ok(PreparedQuery{string: query_str, values: values})
   }
 
-  fn run(args: [Str: Value]) Void!Str {
-    let prepared = try self.prepare(args)
-    ffi::SqlExecute(self.conn, self.driver, prepared.string, values_to_dynamics(prepared.values))
-  }
-
   fn all(args: [Str: Value]) [Dynamic]!Str {
     let prepared = try self.prepare(args)
-    ffi::SqlQuery(self.conn, self.driver, prepared.string, values_to_dynamics(prepared.values))
+    ffi::ExecuteSQLQuery(self.conn, self.driver, prepared.string, values_to_dynamics(prepared.values))
+  }
+
+  fn run(args: [Str: Value]) Void!Str {
+    let _rows = try self.all(args)
+    Result::ok(())
   }
 
   fn first(args: [Str: Value]) Dynamic?!Str {
@@ -208,13 +208,7 @@ fn open(path: Str) Database!Str {
 
 impl Database {
   fn close() Void!Str {
-    ffi::SqlClose(self._db)
-  }
-
-  // simple one-off executions where the results aren't needed
-  // [note]: could be removed entirely for query.run() once optional params are sorted
-  fn exec(sql: Str) Void!Str {
-    ffi::SqlExecute(self._db, self.driver, sql, values_to_dynamics(List::new<Value>()))
+    self._db.Close()
   }
 
   fn query(sql: Str) Query {
@@ -226,8 +220,13 @@ impl Database {
     }
   }
 
+  // simple one-off executions where the results aren't needed
+  fn exec(sql: Str) Void!Str {
+    self.query(sql).run([:])
+  }
+
   fn begin() Transaction!Str {
-    let tx = try ffi::SqlBeginTx(self._db)
+    let tx = try self._db.Begin()
     Result::ok(Transaction{_tx: tx, driver: self.driver})
   }
 }
@@ -243,15 +242,15 @@ impl Transaction {
   }
 
   fn exec(sql: Str) Void!Str {
-    ffi::SqlExecute(self._tx, self.driver, sql, values_to_dynamics(List::new<Value>()))
+    self.query(sql).run([:])
   }
 
   fn commit() Void!Str {
-    ffi::SqlCommit(self._tx)
+    self._tx.Commit()
   }
 
   fn rollback() Void!Str {
-    ffi::SqlRollback(self._tx)
+    self._tx.Rollback()
   }
 }
 

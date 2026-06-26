@@ -340,55 +340,6 @@ func SqlCreateConnection(driver string, connectionString string) (*sql.DB, error
 	return db, nil
 }
 
-func SqlClose(db *sql.DB) error {
-	if db == nil {
-		return fmt.Errorf("SQL Error: invalid connection object")
-	}
-	return db.Close()
-}
-
-func SqlBeginTx(db *sql.DB) (*sql.Tx, error) {
-	if db == nil {
-		return nil, fmt.Errorf("SQL Error: invalid connection object")
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	return tx, nil
-}
-
-func SqlCommit(tx *sql.Tx) error {
-	if tx == nil {
-		return fmt.Errorf("SQL Error: invalid transaction object")
-	}
-	return tx.Commit()
-}
-
-func SqlRollback(tx *sql.Tx) error {
-	if tx == nil {
-		return fmt.Errorf("SQL Error: invalid transaction object")
-	}
-	return tx.Rollback()
-}
-
-func SqlQuery(conn Runner, driver string, sqlStr string, values []any) ([]any, error) {
-	if conn == nil {
-		return nil, fmt.Errorf("SQL Error: invalid connection object")
-	}
-	sqlStr = normalizeSQLPlaceholders(sqlStr, driver)
-	return executeSQLQuery(conn, sqlStr, values)
-}
-
-func SqlExecute(conn Runner, driver string, sqlStr string, values []any) error {
-	if conn == nil {
-		return fmt.Errorf("SQL Error: invalid connection object")
-	}
-	sqlStr = normalizeSQLPlaceholders(sqlStr, driver)
-	_, err := conn.Exec(sqlStr, values...)
-	return err
-}
-
 func normalizeSQLPlaceholders(sqlStr string, driver string) string {
 	if driver != "pgx" {
 		return sqlStr
@@ -428,8 +379,15 @@ func normalizeSQLPlaceholders(sqlStr string, driver string) string {
 	return out.String()
 }
 
-func executeSQLQuery(runner Runner, sqlStr string, values []any) ([]any, error) {
-	rows, err := runner.Query(sqlStr, values...)
+// ExecuteSQLQuery runs a statement on the given runner (a *sql.DB or *sql.Tx)
+// and returns the result rows as []any. Statements that produce no result set
+// (inserts, updates, DDL) simply yield no rows.
+func ExecuteSQLQuery(conn Runner, driver string, sqlStr string, values []any) ([]any, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("SQL Error: invalid connection object")
+	}
+	sqlStr = normalizeSQLPlaceholders(sqlStr, driver)
+	rows, err := conn.Query(sqlStr, values...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
