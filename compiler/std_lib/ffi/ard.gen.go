@@ -140,6 +140,5 @@ type WinnerJSONTest struct {
 
 // Skipped extern AsyncEval: generic parameters are not generated yet.
 // Skipped extern GetResult: generic parameters are not generated yet.
-// Skipped extern IsNil: generic parameters are not generated yet.
 // Skipped extern JsonEncode: generic parameters are not generated yet.
 // Skipped extern JsonParse: generic returns are not generated yet.

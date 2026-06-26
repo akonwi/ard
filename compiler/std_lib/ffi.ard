@@ -1,2 +1,7 @@
+use go:github.com/akonwi/ard/std_lib/ffi
+
 // FFI helpers for direct host interop.
-extern fn is_nil(value: $T) Bool = "IsNil"
+
+fn is_nil(value: $T) Bool {
+  ffi::IsNil(value)
+}

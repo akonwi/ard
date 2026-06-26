@@ -41,22 +41,11 @@ type generatedStdlibExternLowering struct {
 }
 
 var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
-	"DecodeBool":           {function: "DecodeBool", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
-	"DecodeByte":           {function: "DecodeByte", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
-	"DecodeFloat":          {function: "DecodeFloat", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
-	"DecodeInt":            {function: "DecodeInt", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
-	"DecodeRune":           {function: "DecodeRune", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
-	"DecodeString":         {function: "DecodeString", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
-	"DynamicToList":        {function: "DynamicToList", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
-	"DynamicToMap":         {function: "DynamicToMap", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
-	"ExtractField":         {function: "ExtractField", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny, generatedStdlibParamDirect}},
 	"HTTP_Do":              {function: "HTTPDo", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamAny, generatedStdlibParamDirect, generatedStdlibParamDirect}},
 	"HTTP_ResponseBody":    {function: "HTTPResponseBody", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"HTTP_ResponseClose":   {function: "HTTPResponseClose", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"HTTP_ResponseHeaders": {function: "HTTPResponseHeaders", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"HTTP_Serve":           {function: "HTTPServe", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
-	"IsNil":                {function: "IsNil", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
-	"JsonToDynamic":        {function: "JsonToDynamic", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"SqlBeginTx":           {function: "SqlBeginTx", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"SqlClose":             {function: "SqlClose", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
 	"SqlCommit":            {function: "SqlCommit", returns: generatedStdlibReturnError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},

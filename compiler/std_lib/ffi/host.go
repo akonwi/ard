@@ -516,105 +516,103 @@ func JsonToDynamic(input string) (any, error) {
 	return out, nil
 }
 
-func DecodeString(data any) Result[string, Error] {
+// The Decode* functions report failure with an error whose message is the
+// formatted "found" value. The Ard decode module supplies the "expected" type
+// name and decode path, building its structured decode error in Ard (ADR 0031).
+func DecodeString(data any) (string, error) {
 	if value, ok := data.(string); ok {
-		return Ok[string, Error](value)
+		return value, nil
 	}
-	return Err[string](decodeError("Str", formatDynamicValueForError(data)))
+	return "", errors.New(formatDynamicValueForError(data))
 }
 
-func DecodeInt(data any) Result[int, Error] {
+func DecodeInt(data any) (int, error) {
 	maxInt := int64(^uint(0) >> 1)
 	minInt := -maxInt - 1
 	maxUintInt := uint64(^uint(0) >> 1)
 	switch value := data.(type) {
 	case int:
-		return Ok[int, Error](value)
+		return value, nil
 	case int8:
-		return Ok[int, Error](int(value))
+		return int(value), nil
 	case int16:
-		return Ok[int, Error](int(value))
+		return int(value), nil
 	case int32:
-		return Ok[int, Error](int(value))
+		return int(value), nil
 	case int64:
 		if value >= minInt && value <= maxInt {
-			return Ok[int, Error](int(value))
+			return int(value), nil
 		}
 	case uint:
 		if uint64(value) <= maxUintInt {
-			return Ok[int, Error](int(value))
+			return int(value), nil
 		}
 	case uint8:
-		return Ok[int, Error](int(value))
+		return int(value), nil
 	case uint16:
-		return Ok[int, Error](int(value))
+		return int(value), nil
 	case uint32:
 		if uint64(value) <= maxUintInt {
-			return Ok[int, Error](int(value))
+			return int(value), nil
 		}
 	case uint64:
 		if value <= maxUintInt {
-			return Ok[int, Error](int(value))
+			return int(value), nil
 		}
 	case float64:
 		parsed := int(value)
 		if value == float64(parsed) {
-			return Ok[int, Error](parsed)
+			return parsed, nil
 		}
 	case json.Number:
 		if parsed, err := value.Int64(); err == nil && parsed >= minInt && parsed <= maxInt {
-			return Ok[int, Error](int(parsed))
+			return int(parsed), nil
 		}
 	}
-	return Err[int](decodeError("Int", formatDynamicValueForError(data)))
+	return 0, errors.New(formatDynamicValueForError(data))
 }
 
-func DecodeByte(data any) Result[byte, Error] {
-	decoded := DecodeInt(data)
-	if !decoded.Ok {
-		return Err[byte](decodeError("Byte", formatDynamicValueForError(data)))
+func DecodeByte(data any) (byte, error) {
+	value, err := DecodeInt(data)
+	if err != nil || value < 0 || value > 255 {
+		return 0, errors.New(formatDynamicValueForError(data))
 	}
-	value := decoded.Value
-	if value < 0 || value > 255 {
-		return Err[byte](decodeError("Byte", formatDynamicValueForError(data)))
-	}
-	return Ok[byte, Error](byte(value))
+	return byte(value), nil
 }
 
-func DecodeRune(data any) Result[rune, Error] {
-	decoded := DecodeInt(data)
-	if !decoded.Ok {
-		return Err[rune](decodeError("Rune", formatDynamicValueForError(data)))
+func DecodeRune(data any) (rune, error) {
+	value, err := DecodeInt(data)
+	if err != nil {
+		return 0, errors.New(formatDynamicValueForError(data))
 	}
-	value := decoded.Value
 	r := rune(value)
 	if !utf8.ValidRune(r) {
-		return Err[rune](decodeError("Rune", formatDynamicValueForError(data)))
+		return 0, errors.New(formatDynamicValueForError(data))
 	}
-	return Ok[rune, Error](r)
+	return r, nil
 }
 
-func DecodeFloat(data any) Result[float64, Error] {
+func DecodeFloat(data any) (float64, error) {
 	switch value := data.(type) {
 	case float64:
-		return Ok[float64, Error](value)
+		return value, nil
 	case int:
-		return Ok[float64, Error](float64(value))
+		return float64(value), nil
 	case int64:
-		return Ok[float64, Error](float64(value))
+		return float64(value), nil
 	case json.Number:
 		if parsed, err := value.Float64(); err == nil {
-			return Ok[float64, Error](parsed)
+			return parsed, nil
 		}
 	}
-	return Err[float64](decodeError("Float", formatDynamicValueForError(data)))
+	return 0, errors.New(formatDynamicValueForError(data))
 }
 
-func DecodeBool(data any) Result[bool, Error] {
+func DecodeBool(data any) (bool, error) {
 	if value, ok := data.(bool); ok {
-		return Ok[bool, Error](value)
+		return value, nil
 	}
-	return Err[bool](decodeError("Bool", formatDynamicValueForError(data)))
+	return false, errors.New(formatDynamicValueForError(data))
 }
 
 func DynamicToList(data any) ([]any, error) {
@@ -821,10 +819,6 @@ func requestBody(req *http.Request) Maybe[any] {
 		return None[any]()
 	}
 	return Some[any](string(body))
-}
-
-func decodeError(expected string, found string) Error {
-	return Error{Expected: expected, Found: found}
 }
 
 func formatDynamicValueForError(data any) string {

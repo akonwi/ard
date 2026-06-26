@@ -3,6 +3,8 @@ use ard/list as List
 use ard/maybe
 use ard/string as Str
 
+use go:github.com/akonwi/ard/std_lib/ffi
+
 type PathSegment = Str | Int
 
 struct Error {
@@ -39,58 +41,111 @@ impl Str::ToString for Error {
 
 type JsonInput = Str | Dynamic
 
-private extern fn _decode_string(data: Dynamic) Str!Error = "DecodeString"
-private extern fn _decode_int(data: Dynamic) Int!Error = "DecodeInt"
-private extern fn _decode_byte(data: Dynamic) Byte!Error = "DecodeByte"
-private extern fn _decode_rune(data: Dynamic) Rune!Error = "DecodeRune"
-private extern fn _decode_float(data: Dynamic) Float!Error = "DecodeFloat"
-private extern fn _decode_bool(data: Dynamic) Bool!Error = "DecodeBool"
-extern fn is_void(data: Dynamic) Bool = "IsNil"
-
-// parse json text
-private extern fn _from_json(json: Str) Dynamic!Str = "JsonToDynamic"
+fn is_void(data: Dynamic) Bool {
+  ffi::IsNil(data)
+}
 
 fn from_json(input: JsonInput) Dynamic!Str {
   let json = match input {
     Str(text) => text,
     Dynamic(raw) => {
-      let text = try _decode_string(raw) -> err { Result::err("Expected a JSON string, got {err.found}") }
+      let text = try ffi::DecodeString(raw) -> found { Result::err("Expected a JSON string, got {found}") }
       text
     },
   }
 
-  _from_json(json)
+  ffi::JsonToDynamic(json)
 }
 
 type Decoder = fn(Dynamic) $Out![Error]
 
 fn string(data: Dynamic) Str![Error] {
-  let val = try _decode_string(data) -> err { Result::err([err]) }
+  let val = try ffi::DecodeString(data) -> found {
+    Result::err(
+      [
+        Error{
+          expected: "Str",
+          found: found,
+          path: [],
+        },
+      ],
+    )
+  }
   Result::ok(val)
 }
 
 fn int(data: Dynamic) Int![Error] {
-  let val = try _decode_int(data) -> err { Result::err([err]) }
+  let val = try ffi::DecodeInt(data) -> found {
+    Result::err(
+      [
+        Error{
+          expected: "Int",
+          found: found,
+          path: [],
+        },
+      ],
+    )
+  }
   Result::ok(val)
 }
 
 fn byte(data: Dynamic) Byte![Error] {
-  let val = try _decode_byte(data) -> err { Result::err([err]) }
+  let val = try ffi::DecodeByte(data) -> found {
+    Result::err(
+      [
+        Error{
+          expected: "Byte",
+          found: found,
+          path: [],
+        },
+      ],
+    )
+  }
   Result::ok(val)
 }
 
 fn rune(data: Dynamic) Rune![Error] {
-  let val = try _decode_rune(data) -> err { Result::err([err]) }
+  let val = try ffi::DecodeRune(data) -> found {
+    Result::err(
+      [
+        Error{
+          expected: "Rune",
+          found: found,
+          path: [],
+        },
+      ],
+    )
+  }
   Result::ok(val)
 }
 
 fn float(data: Dynamic) Float![Error] {
-  let val = try _decode_float(data) -> err { Result::err([err]) }
+  let val = try ffi::DecodeFloat(data) -> found {
+    Result::err(
+      [
+        Error{
+          expected: "Float",
+          found: found,
+          path: [],
+        },
+      ],
+    )
+  }
   Result::ok(val)
 }
 
 fn bool(data: Dynamic) Bool![Error] {
-  let val = try _decode_bool(data) -> err { Result::err([err]) }
+  let val = try ffi::DecodeBool(data) -> found {
+    Result::err(
+      [
+        Error{
+          expected: "Bool",
+          found: found,
+          path: [],
+        },
+      ],
+    )
+  }
   Result::ok(val)
 }
 
@@ -110,7 +165,9 @@ fn dynamic(data: Dynamic) Dynamic![Error] {
   Result::ok(data)
 }
 
-extern fn to_list(data: Dynamic) [Dynamic]!Str = "DynamicToList"
+fn to_list(data: Dynamic) [Dynamic]!Str {
+  ffi::DynamicToList(data)
+}
 
 fn list(decoder: Decoder<$T>) fn(Dynamic) [$T]![Error] {
   fn(data: Dynamic) [$T]![Error] {
@@ -182,7 +239,9 @@ fn at(index: Int, with: Decoder<$T>) fn(Dynamic) $T![Error] {
   }
 }
 
-extern fn to_map(data: Dynamic) [Str: Dynamic]!Str = "DynamicToMap"
+fn to_map(data: Dynamic) [Str: Dynamic]!Str {
+  ffi::DynamicToMap(data)
+}
 
 fn map(key: Decoder<$Key>, value: Decoder<$Value>) Decoder<[$Key: $Value]> {
   fn(data: Dynamic) [$Key: $Value]![Error] {
@@ -241,7 +300,9 @@ fn map(key: Decoder<$Key>, value: Decoder<$Value>) Decoder<[$Key: $Value]> {
   }
 }
 
-extern fn extract_field(data: Dynamic, name: Str) Dynamic!Str = "ExtractField"
+fn extract_field(data: Dynamic, name: Str) Dynamic!Str {
+  ffi::ExtractField(data, name)
+}
 
 fn field(name: Str, with: Decoder<$T>) Decoder<$T> {
   fn(data: Dynamic) $T![Error] {
