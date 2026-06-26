@@ -317,17 +317,30 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 	}
 	goMod += ardRequirement
 
+	// The project's own Go module is wired in via require+replace so that
+	// `use go:<module>/...` imports of the project's own packages build.
+	projectGoModule := projectGoModuleName(projectInfo)
+	importsProjectGoModule := projectGoModule != "" && programImportsGoModule(program, projectGoModule)
+
 	requireSeen := requireKeys(goMod)
 	requires := make([]string, 0)
 	addDependencyGoModRequirements(&requires, requireSeen, program, projectInfo)
 	if programUsesProjectFFI(program, projectInfo) || projectUsesDirectGo(program, projectInfo) {
 		addProjectGoModRequirements(&requires, requireSeen, projectInfo)
 	}
+	if importsProjectGoModule && !requireSeen[projectGoModule] {
+		requires = append(requires, projectGoModule+" v0.0.0")
+		requireSeen[projectGoModule] = true
+	}
 	addGoModRequirementsFromFile(&requires, requireSeen, filepath.Join(dir, "go.mod"))
 	goMod += formatRequireBlock(requires)
 
 	replaceSeen := replaceKeys(goMod)
 	replaces := make([]string, 0)
+	if importsProjectGoModule && !replaceSeen[projectGoModule] {
+		replaces = append(replaces, projectGoModule+" => "+projectInfo.RootPath)
+		replaceSeen[projectGoModule] = true
+	}
 	if programUsesProjectFFI(program, projectInfo) || projectUsesDirectGo(program, projectInfo) {
 		addProjectGoModReplaces(&replaces, replaceSeen, projectInfo)
 	}
@@ -432,6 +445,52 @@ func addProjectGoModReplaces(out *[]string, seen map[string]bool, projectInfo *c
 		return
 	}
 	addGoModReplacesFromFile(out, seen, filepath.Join(projectInfo.RootPath, "go.mod"), projectInfo.RootPath)
+}
+
+// projectGoModuleName returns the module path declared in the project's go.mod,
+// or "" if the project has no Go module. This is the module that owns the
+// project's own Go packages imported via `use go:<module>/...`.
+func projectGoModuleName(projectInfo *checker.ProjectInfo) string {
+	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(projectInfo.RootPath, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(line, "module "); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
+
+// programImportsGoModule reports whether any `use go:` binding in the program
+// imports a package owned by moduleName (the module itself or a subpackage).
+func programImportsGoModule(program *air.Program, moduleName string) bool {
+	if program == nil || moduleName == "" {
+		return false
+	}
+	owns := func(importPath string) bool {
+		return importPath == moduleName || strings.HasPrefix(importPath, moduleName+"/")
+	}
+	for _, ext := range program.Externs {
+		if binding, ok := ext.Bindings["go"]; ok {
+			if direct, ok, _ := parseDirectGoExternBinding(binding); ok && owns(direct.ImportPath) {
+				return true
+			}
+		}
+	}
+	for _, typ := range program.Types {
+		if typ.Kind == air.TypeExtern && typ.ExternBinding != "" {
+			if direct, ok, _ := parseDirectGoExternBinding(typ.ExternBinding); ok && owns(direct.ImportPath) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func addDependencyGoModReplaces(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
