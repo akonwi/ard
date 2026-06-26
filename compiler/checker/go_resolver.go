@@ -711,37 +711,6 @@ func (c *Checker) directGoEnumType(goImport directGoImport, goType GoType, loc p
 	return &Enum{Name: goType.Name, ModulePath: "go:" + goImport.importPath, Values: values, Methods: map[string]*FunctionDef{}, Location: loc, ExternalBinding: binding, ExternalBindings: map[string]string{"go": binding}, Open: !goType.ClosedEnum}
 }
 
-func (c *Checker) resolveDirectGoExternBinding(binding string, loc parse.Location) string {
-	parts, ok := directGoBindingParts(binding)
-	if !ok {
-		return binding
-	}
-	if len(parts) != 2 && len(parts) != 3 {
-		c.addError(fmt.Sprintf("Direct Go extern binding %q must be package::Function or package::Type::Method", binding), loc)
-		return binding
-	}
-	goImport, ok := c.directGoImports[parts[0]]
-	if !ok {
-		c.addError(fmt.Sprintf("Unknown Go import alias %q in extern binding %q", parts[0], binding), loc)
-		return binding
-	}
-	if goImport.pkg != nil {
-		if len(parts) == 2 {
-			if _, ok := goImport.pkg.Functions[parts[1]]; !ok {
-				c.addError(fmt.Sprintf("Go package %q has no exported function %q", goImport.importPath, parts[1]), loc)
-			}
-		} else {
-			typ, ok := goImport.pkg.Types[parts[1]]
-			if !ok {
-				c.addError(fmt.Sprintf("Go package %q has no exported type %q", goImport.importPath, parts[1]), loc)
-			} else if _, ok := typ.Methods[parts[2]]; !ok {
-				c.addError(fmt.Sprintf("Go type %q in package %q has no exported method %q", parts[1], goImport.importPath, parts[2]), loc)
-			}
-		}
-	}
-	return canonicalDirectGoBinding(goImport.importPath, goImport.alias, parts[1:])
-}
-
 func canonicalDirectGoBinding(importPath string, alias string, symbolParts []string) string {
 	head := importPath
 	if strings.TrimSpace(alias) != "" {
@@ -1316,39 +1285,6 @@ func (c *Checker) directGoNamedArdType(goType GoValueType, loc parse.Location) (
 		name = qualifier + "::" + goType.Name
 	}
 	return directGoExternTypeWithMetadata(name, binding, metadata), true
-}
-
-func (c *Checker) validateDirectGoExternSignature(name string, params []Parameter, returnType Type, binding string, loc parse.Location) {
-	target, ok := c.directGoSignatureTarget(binding)
-	if !ok {
-		return
-	}
-	if target.Signature.Variadic {
-		c.addError(fmt.Sprintf("Go function %s is variadic; variadic direct Go externs are not supported yet", target.Name), loc)
-		return
-	}
-	expectedParams := len(target.Signature.Params)
-	paramOffset := 0
-	if target.Method {
-		expectedParams++
-		paramOffset = 1
-	}
-	if len(params) != expectedParams {
-		c.addError(fmt.Sprintf("Go function %s expects %d parameter(s), extern %s declares %d", target.Name, expectedParams, name, len(params)), loc)
-		return
-	}
-	if target.Method && target.Signature.Receiver != nil {
-		if ok, reason := c.directGoAssignableCompatible(params[0].Type, *target.Signature.Receiver); !ok {
-			c.addError(fmt.Sprintf("receiver for %s: %s", target.Name, reason), loc)
-		}
-	}
-	for i, goParam := range target.Signature.Params {
-		ardParam := params[i+paramOffset]
-		if ok, reason := c.directGoParamCompatible(ardParam.Type, goParam, true); !ok {
-			c.addError(fmt.Sprintf("parameter %d for %s: %s", i+1+paramOffset, target.Name, reason), loc)
-		}
-	}
-	c.validateDirectGoExternReturn(name, returnType, target, loc)
 }
 
 func (c *Checker) directGoSignatureTarget(binding string) (directGoSignatureTarget, bool) {

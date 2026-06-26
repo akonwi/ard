@@ -2,7 +2,6 @@ package checker
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -1085,68 +1084,6 @@ func (f FunctionDef) String() string {
 }
 
 func (f FunctionDef) get(name string) Type { return nil }
-
-type ExternalFunctionDef struct {
-	Name             string
-	GenericParams    []string
-	Parameters       []Parameter
-	ReturnType       Type
-	ExternalBinding  string
-	ExternalBindings map[string]string
-	Private          bool
-}
-
-func (e ExternalFunctionDef) String() string {
-	paramStrs := make([]string, len(e.Parameters))
-	for i := range e.Parameters {
-		paramStrs[i] = e.Parameters[i].Type.String()
-	}
-
-	if len(e.ExternalBindings) > 1 || (len(e.ExternalBindings) == 1 && e.ExternalBindings["go"] == "") {
-		keys := make([]string, 0, len(e.ExternalBindings))
-		for key := range e.ExternalBindings {
-			keys = append(keys, key)
-		}
-		slices.Sort(keys)
-		parts := make([]string, 0, len(keys))
-		for _, key := range keys {
-			parts = append(parts, fmt.Sprintf("%s = %q", key, e.ExternalBindings[key]))
-		}
-		return fmt.Sprintf("extern fn (%s) %s = { %s }", strings.Join(paramStrs, ","), e.ReturnType.String(), strings.Join(parts, ", "))
-	}
-
-	binding := e.ExternalBinding
-	if binding == "" && len(e.ExternalBindings) == 1 {
-		binding = e.ExternalBindings["go"]
-	}
-	return fmt.Sprintf("extern fn (%s) %s = %q", strings.Join(paramStrs, ","), e.ReturnType.String(), binding)
-}
-
-func (e ExternalFunctionDef) get(name string) Type { return nil }
-
-func (e *ExternalFunctionDef) Type() Type {
-	return e
-}
-
-func (e ExternalFunctionDef) equal(other Type) bool {
-	return equalTypes(e, other)
-}
-
-func (e ExternalFunctionDef) hasTrait(trait *Trait) bool {
-	return false
-}
-
-func (e *ExternalFunctionDef) hasGenerics() bool {
-	if len(e.GenericParams) > 0 {
-		return true
-	}
-	for i := range e.Parameters {
-		if strings.HasPrefix(e.Parameters[i].Type.String(), "$") {
-			return true
-		}
-	}
-	return strings.Contains(e.ReturnType.String(), "$")
-}
 
 func (f FunctionDef) name() string {
 	return f.Name

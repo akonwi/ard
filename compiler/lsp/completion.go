@@ -466,11 +466,6 @@ func moduleCompletionItems(alias string, mod checker.Module, prog *parse.Program
 					continue
 				}
 				items = append(items, staticFunctionCompletionItem(alias, fn.Name, fn.Type(), prog, filePath))
-			case *checker.ExternalFunctionDef:
-				if strings.Contains(fn.Name, "::") || mod.Get(fn.Name).IsZero() {
-					continue
-				}
-				items = append(items, staticFunctionCompletionItem(alias, fn.Name, fn.Type(), prog, filePath))
 			}
 		}
 		if stmt.Stmt != nil {
@@ -531,9 +526,6 @@ func importedTypeStaticCompletionItems(target string, prog *parse.Program, fileP
 		var fnName string
 		switch fn := stmt.Expr.(type) {
 		case *checker.FunctionDef:
-			fnName = fn.Name
-			fnType = fn.Type()
-		case *checker.ExternalFunctionDef:
 			fnName = fn.Name
 			fnType = fn.Type()
 		}

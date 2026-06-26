@@ -264,13 +264,6 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 			if _, err := l.declareFunction(modID, expr); err != nil {
 				return err
 			}
-		case *checker.ExternalFunctionDef:
-			if externalFunctionHasUnresolvedTypeVar(expr) {
-				continue
-			}
-			if _, err := l.declareExtern(modID, expr); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -1707,48 +1700,6 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 	return id, typeArgs, nil
 }
 
-func (l *lowerer) declareExtern(module ModuleID, def *checker.ExternalFunctionDef) (ExternID, error) {
-	if externalFunctionHasUnresolvedTypeVar(def) {
-		return 0, fmt.Errorf("cannot declare unspecialized generic extern %s", def.Name)
-	}
-	key := functionKey(module, def.Name)
-	if id, ok := l.externs[key]; ok {
-		return id, nil
-	}
-	params := make([]Param, len(def.Parameters))
-	for i, param := range def.Parameters {
-		typeID, err := l.internType(param.Type)
-		if err != nil {
-			return 0, err
-		}
-		params[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable}
-	}
-	returnType, err := l.internType(def.ReturnType)
-	if err != nil {
-		return 0, err
-	}
-	id := ExternID(len(l.program.Externs))
-	l.externs[key] = id
-	bindings := map[string]string{}
-	for target, binding := range def.ExternalBindings {
-		bindings[target] = binding
-	}
-	if len(bindings) == 0 && def.ExternalBinding != "" {
-		bindings["go"] = def.ExternalBinding
-	}
-	l.program.Externs = append(l.program.Externs, Extern{
-		ID:     id,
-		Module: module,
-		Name:   def.Name,
-		Signature: Signature{
-			Params: params,
-			Return: returnType,
-		},
-		Bindings: bindings,
-	})
-	return id, nil
-}
-
 func (l *lowerer) declareModuleCallExtern(call *checker.ModuleFunctionCall) (ExternID, error) {
 	name := call.Module + "::" + call.Call.Name
 	key := "module:" + name
@@ -2160,21 +2111,6 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 			return NoType, err
 		}
 		info.Return = returnType
-	case *checker.ExternalFunctionDef:
-		info.Kind = TypeFunction
-		for _, param := range typ.Parameters {
-			paramType, paramMut, err := l.internFunctionParamType(param, l.internType)
-			if err != nil {
-				return NoType, err
-			}
-			info.Params = append(info.Params, paramType)
-			info.ParamMutable = append(info.ParamMutable, paramMut)
-		}
-		returnType, err := l.internType(typ.ReturnType)
-		if err != nil {
-			return NoType, err
-		}
-		info.Return = returnType
 	case *checker.Trait:
 		traitID, err := l.internTrait(typ)
 		if err != nil {
@@ -2385,22 +2321,6 @@ func functionHasTypeVar(def *checker.FunctionDef) bool {
 	return typeContainsTypeVar(def.ReturnType)
 }
 
-func externalFunctionHasUnresolvedTypeVar(def *checker.ExternalFunctionDef) bool {
-	return typeHasUnresolvedTypeVarSeen(def, map[checker.Type]struct{}{})
-}
-
-func externalFunctionSignatureHasUnresolvedTypeVarSeen(def *checker.ExternalFunctionDef, seen map[checker.Type]struct{}) bool {
-	if def == nil {
-		return false
-	}
-	for _, param := range def.Parameters {
-		if typeHasUnresolvedTypeVarSeen(param.Type, seen) {
-			return true
-		}
-	}
-	return typeHasUnresolvedTypeVarSeen(def.ReturnType, seen)
-}
-
 func typeContainsTypeVar(t checker.Type) bool {
 	return typeContainsTypeVarSeen(t, map[checker.Type]struct{}{})
 }
@@ -2446,13 +2366,6 @@ func typeContainsTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}) boo
 		}
 		return false
 	case *checker.FunctionDef:
-		for _, param := range typ.Parameters {
-			if typeContainsTypeVarSeen(param.Type, seen) {
-				return true
-			}
-		}
-		return typeContainsTypeVarSeen(typ.ReturnType, seen)
-	case *checker.ExternalFunctionDef:
 		for _, param := range typ.Parameters {
 			if typeContainsTypeVarSeen(param.Type, seen) {
 				return true
@@ -2520,8 +2433,6 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 		return false
 	case *checker.FunctionDef:
 		return functionSignatureHasUnresolvedTypeVarSeen(typ, seen)
-	case *checker.ExternalFunctionDef:
-		return externalFunctionSignatureHasUnresolvedTypeVarSeen(typ, seen)
 	case *checker.ExternType:
 		for _, typeArg := range typ.TypeArgs {
 			if typeHasUnresolvedTypeVarSeen(typeArg, seen) {
@@ -2595,8 +2506,6 @@ func airTypeKeySeen(t checker.Type, seen map[checker.Type]struct{}) string {
 	case *checker.Union:
 		return airUnionKeySeen(typ, seen)
 	case *checker.FunctionDef:
-		return airFunctionTypeKeySeen(typ.Parameters, typ.ReturnType, seen)
-	case *checker.ExternalFunctionDef:
 		return airFunctionTypeKeySeen(typ.Parameters, typ.ReturnType, seen)
 	case *checker.Trait:
 		return "trait " + checkerTraitKey(typ)
@@ -5121,67 +5030,7 @@ func (fl *functionLowerer) lowerModuleSymbol(typeID TypeID, symbol *checker.Modu
 		return &Expr{Kind: ExprFunctionRef, Type: typeID, Function: id}, nil
 	}
 
-	if def, ok := symbol.Symbol.Type.(*checker.ExternalFunctionDef); ok {
-		id, err := fl.lowerExternModuleSymbol(typeID, symbol.Module, symbol.Symbol.Name, def)
-		if err != nil {
-			return nil, err
-		}
-		return &Expr{Kind: ExprFunctionRef, Type: typeID, Function: id}, nil
-	}
-
 	return nil, fmt.Errorf("unsupported AIR module symbol %s::%s of type %s", symbol.Module, symbol.Symbol.Name, symbol.Type().String())
-}
-
-func (fl *functionLowerer) lowerExternModuleSymbol(typeID TypeID, modulePath string, name string, def *checker.ExternalFunctionDef) (FunctionID, error) {
-	typeInfo, ok := fl.l.typeInfo(typeID)
-	if !ok || typeInfo.Kind != TypeFunction {
-		return NoFunction, fmt.Errorf("extern module symbol %s::%s lowered with non-function AIR type %d", modulePath, name, typeID)
-	}
-	module := fl.l.internModule(modulePath)
-	extern, err := fl.l.declareExtern(module, def)
-	if err != nil {
-		return NoFunction, err
-	}
-
-	signature := fl.l.program.Externs[extern].Signature
-	if len(signature.Params) != len(typeInfo.Params) {
-		return NoFunction, fmt.Errorf("extern module symbol %s::%s expects %d params, got %d", modulePath, name, len(signature.Params), len(typeInfo.Params))
-	}
-
-	key := fmt.Sprintf("extern-symbol:%d:%s:%d", module, name, typeID)
-	if id, ok := fl.l.functions[key]; ok {
-		return id, nil
-	}
-
-	params := make([]Param, len(signature.Params))
-	locals := make([]Local, len(signature.Params))
-	args := make([]Expr, len(signature.Params))
-	for i, param := range signature.Params {
-		params[i] = param
-		locals[i] = Local{ID: LocalID(i), Name: param.Name, Type: param.Type, Mutable: param.Mutable}
-		args[i] = *loadLocal(param.Type, LocalID(i))
-	}
-
-	id := FunctionID(len(fl.l.program.Functions))
-	fl.l.functions[key] = id
-	fl.l.program.Functions = append(fl.l.program.Functions, Function{
-		ID:     id,
-		Module: module,
-		Name:   modulePath + "::" + name,
-		Signature: Signature{
-			Params: params,
-			Return: signature.Return,
-		},
-		Locals: locals,
-		Body: Block{Result: &Expr{
-			Kind:   ExprCallExtern,
-			Type:   signature.Return,
-			Extern: extern,
-			Args:   args,
-		}},
-	})
-	fl.l.program.Modules[module].Functions = appendUniqueFunction(fl.l.program.Modules[module].Functions, id)
-	return id, nil
 }
 
 func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.InstanceMethod) (*Expr, error) {
@@ -5794,7 +5643,7 @@ func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement
 	filtered := make([]checker.Statement, 0, len(stmts))
 	for _, stmt := range stmts {
 		switch stmt.Expr.(type) {
-		case *checker.FunctionDef, *checker.ExternalFunctionDef:
+		case *checker.FunctionDef:
 			continue
 		}
 		if stmt.Stmt != nil {

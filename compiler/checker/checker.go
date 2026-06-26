@@ -754,7 +754,7 @@ func isValidMapKeyType(t Type) bool {
 			return isValidMapKeyType(ty.actual)
 		}
 		return true
-	case *Maybe, *List, *Map, *Result, *Union, *FunctionDef, *ExternalFunctionDef, *Trait, *dynamicType:
+	case *Maybe, *List, *Map, *Result, *Union, *FunctionDef, *Trait, *dynamicType:
 		return false
 	default:
 		return true
@@ -1357,33 +1357,6 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				c.addError(fmt.Sprintf("%s cannot implement a Trait", s.ForType.Name), s.ForType.GetLocation())
 				return nil
 			}
-		}
-	case *parse.ExternTypeDeclaration:
-		{
-			externType, ok := c.hoistedExternType(s.Name)
-			if !ok {
-				return nil
-			}
-			typeArgs := make([]Type, len(s.TypeParams))
-			for i, param := range s.TypeParams {
-				typeArgs[i] = &TypeVar{name: param}
-			}
-			bindings := cloneExternalBindings(s.ExternalBindings)
-			if len(bindings) == 0 && s.ExternalBinding != "" {
-				bindings = map[string]string{"go": s.ExternalBinding}
-			}
-			if target, ok := validateExternalBindingTargets(bindings); !ok {
-				c.addError(fmt.Sprintf("Unsupported extern binding target %q", target), s.GetLocation())
-				return nil
-			}
-			resolvedBinding := resolveExternalBinding(bindings)
-			externType.Name_ = s.Name
-			externType.GenericParams = append([]string(nil), s.TypeParams...)
-			externType.TypeArgs = typeArgs
-			externType.ExternalBinding = resolvedBinding
-			externType.ExternalBindings = bindings
-			externType.private = s.Private
-			return &Statement{Stmt: externType}
 		}
 	case *parse.TypeDeclaration:
 		{
@@ -3874,15 +3847,6 @@ func functionDefForCallableType(typ Type) (*FunctionDef, bool) {
 	switch fn := typ.(type) {
 	case *FunctionDef:
 		return fn, true
-	case *ExternalFunctionDef:
-		return &FunctionDef{
-			Name:          fn.Name,
-			GenericParams: append([]string(nil), fn.GenericParams...),
-			Parameters:    fn.Parameters,
-			ReturnType:    fn.ReturnType,
-			Body:          nil,
-			Private:       fn.Private,
-		}, true
 	default:
 		return nil, false
 	}
@@ -4085,37 +4049,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			// Try different types for the function symbol
 			fnDef, ok = fnSym.Type.(*FunctionDef)
 			if !ok {
-				// Check if it's an external function
-				if extFnDef, ok := fnSym.Type.(*ExternalFunctionDef); ok {
-					// Convert ExternalFunctionDef to FunctionDef for type checking
-					fnDef = &FunctionDef{
-						Name:          extFnDef.Name,
-						GenericParams: append([]string(nil), extFnDef.GenericParams...),
-						Parameters:    extFnDef.Parameters,
-						ReturnType:    extFnDef.ReturnType,
-						Body:          nil, // External functions don't have bodies
-						Private:       extFnDef.Private,
-					}
-				} else {
-					//// technically, the below isn't possible anymore
-					// Check if it's a variable that holds a function
-					// if varDef, ok := fnSym.(*VariableDef); ok {
-					// 	// Try to get a FunctionDef directly
-					// 	if anon, ok := varDef.Value.(*FunctionDef); ok {
-					// 		fnDef = anon
-					// 	} else if existingFnDef, ok := varDef._type().(*FunctionDef); ok {
-					// 		// FunctionDef can be used directly
-					// 		// This handles the case where a variable holds a function
-					// 		fnDef = existingFnDef
-					// 	} else {
-					// 		c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
-					// 		return nil
-					// 	}
-					// } else {
-					c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
-					return nil
-					// }
-				}
+				c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
+				return nil
 			}
 
 			callTypeArgs := c.resolveCallTypeArgs(s.TypeArgs)
@@ -4168,9 +4103,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				TypeArgs:   callTypeArgs,
 				fn:         fnToUse,
 				ReturnType: fnToUse.ReturnType,
-			}
-			if extFnDef, ok := fnSym.Type.(*ExternalFunctionDef); ok {
-				call.ExternalBinding = extFnDef.ExternalBinding
 			}
 			return call
 		}
@@ -4806,16 +4738,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			case *FunctionDef:
 				fnDef = fn
 				ok = true
-			case *ExternalFunctionDef:
-				// Convert ExternalFunctionDef to FunctionDef for validation
-				fnDef = &FunctionDef{
-					Name:          fn.Name,
-					GenericParams: append([]string(nil), fn.GenericParams...),
-					Parameters:    fn.Parameters,
-					ReturnType:    fn.ReturnType,
-					Private:       fn.Private,
-				}
-				ok = true
 			default:
 				ok = false
 			}
@@ -4879,10 +4801,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				fn:         fnToUse,
 				ReturnType: fnToUse.ReturnType,
 			}
-			if extFn, ok := sym.Type.(*ExternalFunctionDef); ok {
-				call.ExternalBinding = extFn.ExternalBinding
-			}
-
 			return &ModuleFunctionCall{
 				Module: mod.Path(),
 				Call:   call,
@@ -4892,8 +4810,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		return c.checkIfChain(s)
 	case *parse.FunctionDeclaration:
 		return c.checkFunction(s, nil)
-	case *parse.ExternalFunction:
-		return c.checkExternalFunction(s)
 	case *parse.AnonymousFunction:
 		{
 			// Resolve parameters and return type (no type context for inference)
@@ -6377,16 +6293,6 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			case *FunctionDef:
 				fnDef = fn
 				isFunc = true
-			case *ExternalFunctionDef:
-				// Convert ExternalFunctionDef to FunctionDef for validation
-				fnDef = &FunctionDef{
-					Name:          fn.Name,
-					GenericParams: append([]string(nil), fn.GenericParams...),
-					Parameters:    fn.Parameters,
-					ReturnType:    fn.ReturnType,
-					Private:       fn.Private,
-				}
-				isFunc = true
 			default:
 				isFunc = false
 			}
@@ -6450,19 +6356,6 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 	return checked
 }
 
-func validateExternalBindingTargets(bindings map[string]string) (string, bool) {
-	for target := range bindings {
-		if target != "go" {
-			return target, false
-		}
-	}
-	return "", true
-}
-
-func resolveExternalBinding(bindings map[string]string) string {
-	return bindings["go"]
-}
-
 func cloneExternalBindings(bindings map[string]string) map[string]string {
 	if len(bindings) == 0 {
 		return nil
@@ -6474,65 +6367,6 @@ func cloneExternalBindings(bindings map[string]string) map[string]string {
 	return out
 }
 
-func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFunctionDef {
-	// Check for duplicate function names
-	if _, dup := c.scope.get(def.Name); dup {
-		c.addError(fmt.Sprintf("Duplicate declaration: %s", def.Name), def.GetLocation())
-		return nil
-	}
-
-	// Process parameters
-	params := make([]Parameter, len(def.Parameters))
-	for i, param := range def.Parameters {
-		paramType := c.resolveType(param.Type)
-		params[i] = Parameter{
-			Name:    param.Name,
-			Type:    paramType,
-			Mutable: param.Mutable,
-		}
-	}
-
-	// Resolve return type
-	returnType := c.resolveType(def.ReturnType)
-
-	bindings := cloneExternalBindings(def.ExternalBindings)
-	if len(bindings) == 0 && def.ExternalBinding != "" {
-		bindings = map[string]string{"go": def.ExternalBinding}
-	}
-	if len(bindings) == 0 {
-		c.addError("External binding cannot be empty", def.GetLocation())
-		return nil
-	}
-	if target, ok := validateExternalBindingTargets(bindings); !ok {
-		c.addError(fmt.Sprintf("Unsupported extern binding target %q", target), def.GetLocation())
-		return nil
-	}
-
-	resolvedBinding := resolveExternalBinding(bindings)
-	resolvedBinding = c.resolveDirectGoExternBinding(resolvedBinding, def.GetLocation())
-	if _, ok := bindings["go"]; ok {
-		bindings["go"] = resolvedBinding
-	}
-	c.validateDirectGoExternSignature(def.Name, params, returnType, resolvedBinding, def.GetLocation())
-
-	// Create external function definition
-	extFn := &ExternalFunctionDef{
-		Name:             def.Name,
-		GenericParams:    append([]string(nil), def.TypeParams...),
-		Parameters:       params,
-		ReturnType:       returnType,
-		ExternalBinding:  resolvedBinding,
-		ExternalBindings: bindings,
-		Private:          def.Private,
-	}
-
-	// Add to scope
-	c.scope.add(def.Name, extFn, false)
-
-	return extFn
-}
-
-// resolveParametersWithContext resolves parameter types, optionally inferring from an expected function type
 func (c *Checker) resolveParametersWithContext(params []parse.Parameter, expectedFnType *FunctionDef) []Parameter {
 	result := make([]Parameter, len(params))
 	for i, param := range params {
@@ -7171,9 +7005,6 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 		var actualReturnType Type
 
 		if actualFn, ok := actual.(*FunctionDef); ok {
-			actualParams = actualFn.Parameters
-			actualReturnType = actualFn.ReturnType
-		} else if actualFn, ok := actual.(*ExternalFunctionDef); ok {
 			actualParams = actualFn.Parameters
 			actualReturnType = actualFn.ReturnType
 		} else {

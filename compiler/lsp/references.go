@@ -177,15 +177,6 @@ func findReferenceDeclarationTarget(stmts []parse.Statement, target parse.Point,
 			if resolved := findReferenceDeclaredTypeTarget(s.Type, target, filePath, prog); resolved != nil {
 				return resolved
 			}
-		case *parse.ExternalFunction:
-			for _, param := range s.Parameters {
-				if resolved := findReferenceDeclaredTypeTarget(param.Type, target, filePath, prog); resolved != nil {
-					return resolved
-				}
-			}
-			if resolved := findReferenceDeclaredTypeTarget(s.ReturnType, target, filePath, prog); resolved != nil {
-				return resolved
-			}
 		case *parse.IfStatement:
 			if resolved := findReferenceDeclarationTarget(s.Body, target, filePath, source, prog); resolved != nil {
 				return resolved
@@ -281,10 +272,6 @@ func definitionTargetIsType(def *definitionTarget, currentProg *parse.Program, c
 			}
 		case *parse.EnumDefinition:
 			if sameParseLocation(def.loc, typeDefinitionNameLocation(stmt, parse.Location{}, s.Name, len("enum "))) {
-				return true
-			}
-		case *parse.ExternTypeDeclaration:
-			if sameParseLocation(def.loc, typeDefinitionNameLocation(stmt, parse.Location{}, s.Name, len("extern type "))) {
 				return true
 			}
 		}
@@ -484,12 +471,6 @@ func visitReferenceStatement(stmt parse.Statement, currentFile string, source st
 		for _, declared := range s.Type {
 			visitReferenceDeclaredType(declared, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		}
-	case *parse.ExternalFunction:
-		for i := range s.Parameters {
-			visitReferenceExpr(&s.Parameters[i], currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
-			visitReferenceDeclaredType(s.Parameters[i].Type, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
-		}
-		visitReferenceDeclaredType(s.ReturnType, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 	case *parse.IfStatement:
 		visitReferenceExpr(s.Condition, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
 		visitReferenceStatements(s.Body, currentFile, source, prog, rootFile, targetKind, targetName, targetDef, add)
@@ -732,8 +713,6 @@ func referenceExprName(expr parse.Expression) string {
 		return e.Name
 	case *parse.FunctionCall:
 		return e.Name
-	case *parse.ExternalFunction:
-		return e.Name
 	case *parse.StaticFunctionDeclaration:
 		return e.Name
 	case *parse.StaticFunction:
@@ -754,8 +733,6 @@ func referenceExprName(expr parse.Expression) string {
 		return e.Name.Name
 	case *parse.TypeDeclaration:
 		return e.Name.Name
-	case *parse.ExternTypeDeclaration:
-		return e.Name
 	}
 	return ""
 }
@@ -852,7 +829,7 @@ func referenceExprKind(expr parse.Expression, prog *parse.Program) string {
 		return "name"
 	case *parse.Parameter, *parse.VariableDeclaration:
 		return "name"
-	case *parse.FunctionDeclaration, *parse.FunctionCall, *parse.StaticFunctionDeclaration, *parse.ExternalFunction:
+	case *parse.FunctionDeclaration, *parse.FunctionCall, *parse.StaticFunctionDeclaration:
 		return "function"
 	case *parse.StaticFunction:
 		return "staticFunction"
@@ -862,7 +839,7 @@ func referenceExprKind(expr parse.Expression, prog *parse.Program) string {
 		return "instanceProperty"
 	case *parse.InstanceMethod:
 		return "instanceMethod"
-	case *parse.StructInstance, *parse.StructDefinition, *parse.EnumDefinition, *parse.TraitDefinition, *parse.TypeDeclaration, *parse.ExternTypeDeclaration:
+	case *parse.StructInstance, *parse.StructDefinition, *parse.EnumDefinition, *parse.TraitDefinition, *parse.TypeDeclaration:
 		return "type"
 	}
 	return "other"

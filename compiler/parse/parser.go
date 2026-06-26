@@ -88,61 +88,6 @@ func trimQuotedString(value string) string {
 	return value
 }
 
-func (p *parser) parseExternalBindingValue() (string, error) {
-	if p.check(string_) {
-		return trimQuotedString(p.advance().text), nil
-	}
-	if path := p.parseStaticPath(); path != nil {
-		return path.String(), nil
-	}
-	return "", p.makeError(p.peek(), "Expected string literal or Go namespace path for external binding")
-}
-
-func (p *parser) parseExternalBindingBlock() (map[string]string, error) {
-	bindings := map[string]string{}
-	p.skipNewlines()
-	for !p.check(right_brace) && !p.isAtEnd() {
-		target, err := p.parseExternalBindingTarget()
-		if err != nil {
-			return nil, err
-		}
-		if !p.match(equal) {
-			return nil, p.makeError(p.peek(), "Expected '=' after extern binding target")
-		}
-		binding, err := p.parseExternalBindingValue()
-		if err != nil {
-			return nil, err
-		}
-		bindings[target] = binding
-		p.match(comma)
-		p.skipNewlines()
-	}
-	if !p.match(right_brace) {
-		return nil, p.makeError(p.peek(), "Expected '}' after extern binding block")
-	}
-	if len(bindings) == 0 {
-		return nil, p.makeError(p.peek(), "Extern binding block cannot be empty")
-	}
-	return bindings, nil
-}
-
-func (p *parser) parseExternalBindingTarget() (string, error) {
-	current := p.peek()
-	if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
-		return "", p.makeError(current, "Expected extern binding target")
-	}
-	parts := []string{p.advance().text}
-	for p.match(minus) {
-		current = p.peek()
-		if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
-			return "", p.makeError(current, "Expected extern binding target segment after '-' ")
-		}
-		parts = append(parts, p.advance().text)
-	}
-	return strings.Join(parts, "-"), nil
-}
-
-// synchronize skips tokens until reaching a statement boundary or EOF
 func (p *parser) synchronize() {
 	for !p.check(new_line) && !p.isAtEnd() {
 		p.advance()
@@ -2357,57 +2302,6 @@ func (p *parser) try() (Expression, error) {
 
 func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 	private := p.match(private)
-	isExtern := p.match(extern)
-
-	// Handle extern type declarations
-	if isExtern && p.match(type_) {
-		keyword := p.previous()
-		if !p.check(identifier) {
-			return nil, p.makeError(p.peek(), "Expected type name after 'extern type'")
-		}
-		nameToken := p.advance()
-		typeParams := p.parseGenericTypeParameters()
-		endRow := nameToken.line
-		endCol := nameToken.column + len(nameToken.text)
-		if len(typeParams) > 0 {
-			endToken := p.previous()
-			endRow = endToken.line
-			endCol = endToken.column + len(endToken.text)
-		}
-		externalBinding := ""
-		var externalBindings map[string]string
-		if p.match(equal) {
-			if p.check(string_) {
-				bindingToken := p.advance()
-				externalBinding = trimQuotedString(bindingToken.text)
-				endRow = bindingToken.line
-				endCol = bindingToken.column + len(bindingToken.text)
-			} else if p.match(left_brace) {
-				bindings, err := p.parseExternalBindingBlock()
-				if err != nil {
-					return nil, err
-				}
-				externalBindings = bindings
-				externalBinding = bindings["go"]
-				endToken := p.previous()
-				endRow = endToken.line
-				endCol = endToken.column + len(endToken.text)
-			} else {
-				return nil, p.makeError(p.peek(), "Expected string literal or binding block for extern type binding")
-			}
-		}
-		return &ExternTypeDeclaration{
-			Name:             nameToken.text,
-			TypeParams:       typeParams,
-			ExternalBinding:  externalBinding,
-			ExternalBindings: externalBindings,
-			Private:          private,
-			Location: Location{
-				Start: Point{Row: keyword.line, Col: keyword.column},
-				End:   Point{Row: endRow, Col: endCol},
-			},
-		}, nil
-	}
 
 	if p.match(fn) {
 		keyword := p.previous()
@@ -2535,52 +2429,6 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 		if (name == "" && !p.check(left_brace)) || name != "" {
 			// Function with explicit return type
 			returnType = p.parseType()
-		}
-
-		// Handle extern functions
-		if isExtern {
-			// Extern functions must have a name
-			if name == "" {
-				return nil, p.makeError(p.peek(), "Extern functions must have a name")
-			}
-
-			// Expect "= external_binding"
-			if !p.match(equal) {
-				return nil, p.makeError(p.peek(), "Expected '=' after extern function signature")
-			}
-
-			externalBinding := ""
-			var externalBindings map[string]string
-			if p.match(left_brace) {
-				bindings, err := p.parseExternalBindingBlock()
-				if err != nil {
-					return nil, err
-				}
-				externalBindings = bindings
-				externalBinding = bindings["go"]
-			} else {
-				binding, err := p.parseExternalBindingValue()
-				if err != nil {
-					return nil, err
-				}
-				externalBinding = binding
-			}
-
-			extFn := &ExternalFunction{
-				Private:          private,
-				Name:             name.(string), // External functions must have string names
-				TypeParams:       typeParams,
-				Parameters:       params,
-				ReturnType:       returnType,
-				ExternalBinding:  externalBinding,
-				ExternalBindings: externalBindings,
-				Location: Location{
-					Start: Point{Row: keyword.line, Col: keyword.column},
-					End:   Point{Row: p.previous().line, Col: p.previous().column},
-				},
-			}
-
-			return extFn, nil
 		}
 
 		statements, err := p.block()

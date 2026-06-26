@@ -39,14 +39,6 @@ func TestMaybeStringParenthesizesCompositeTypes(t *testing.T) {
 	if got, want := MakeMaybe(MakeResult(functionType, Str)).String(), "((fn(Int) Void)!Str)?"; got != want {
 		t.Fatalf("function result maybe string = %q, want %q", got, want)
 	}
-	externalFunctionType := &ExternalFunctionDef{
-		Parameters: []Parameter{{Name: "arg0", Type: Int}},
-		ReturnType: Void,
-	}
-	if got, want := MakeMaybe(externalFunctionType).String(), "(fn(Int) Void)?"; got != want {
-		t.Fatalf("external function maybe string = %q, want %q", got, want)
-	}
-
 	nestedFunctionType := &FunctionDef{
 		Name:       "<function>",
 		Parameters: []Parameter{{Name: "callback", Type: functionType, Mutable: true}},
@@ -102,48 +94,6 @@ func TestTypeEquality(t *testing.T) {
 			right: &FunctionDef{
 				Parameters: []Parameter{},
 				ReturnType: MakeResult(&TypeVar{name: "T"}, Void),
-			},
-			expect: true,
-		},
-		{
-			left: &ExternalFunctionDef{
-				Parameters: []Parameter{
-					{
-						Name: "foo",
-						Type: &TypeVar{name: "T"},
-					},
-				},
-				ReturnType: MakeResult(Str, Void),
-			},
-			right: &FunctionDef{
-				Parameters: []Parameter{
-					{
-						Name: "foo",
-						Type: Int,
-					},
-				},
-				ReturnType: MakeResult(&TypeVar{name: "T"}, Void),
-			},
-			expect: true,
-		},
-		{
-			left: &FunctionDef{
-				Parameters: []Parameter{
-					{
-						Name: "foo",
-						Type: Int,
-					},
-				},
-				ReturnType: Void,
-			},
-			right: &ExternalFunctionDef{
-				Parameters: []Parameter{
-					{
-						Name: "foo",
-						Type: &TypeVar{name: "T"},
-					},
-				},
-				ReturnType: Void,
 			},
 			expect: true,
 		},

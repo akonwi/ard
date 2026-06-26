@@ -2,7 +2,6 @@ package parse
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 )
 
@@ -338,65 +337,6 @@ type FunctionDeclaration struct {
 
 func (f FunctionDeclaration) String() string {
 	return fmt.Sprintf("%s(%v) %s", f.Name, f.Parameters, f.ReturnType.GetName())
-}
-
-type ExternTypeDeclaration struct {
-	Location
-	Name             string
-	TypeParams       []string
-	ExternalBinding  string
-	ExternalBindings map[string]string
-	Private          bool
-}
-
-func (e ExternTypeDeclaration) String() string {
-	if len(e.ExternalBindings) > 1 || (len(e.ExternalBindings) == 1 && e.ExternalBindings["go"] == "") {
-		keys := make([]string, 0, len(e.ExternalBindings))
-		for key := range e.ExternalBindings {
-			keys = append(keys, key)
-		}
-		slices.Sort(keys)
-		parts := make([]string, 0, len(keys))
-		for _, key := range keys {
-			parts = append(parts, fmt.Sprintf("%s = %q", key, e.ExternalBindings[key]))
-		}
-		return fmt.Sprintf("extern type %s%s = { %s }", e.Name, renderTypeParams(e.TypeParams), strings.Join(parts, ", "))
-	}
-	if e.ExternalBinding != "" {
-		return fmt.Sprintf("extern type %s%s = %q", e.Name, renderTypeParams(e.TypeParams), e.ExternalBinding)
-	}
-	return fmt.Sprintf("extern type %s%s", e.Name, renderTypeParams(e.TypeParams))
-}
-
-type ExternalFunction struct {
-	Location
-	Name             string
-	TypeParams       []string // Generic type parameters
-	Parameters       []Parameter
-	ReturnType       DeclaredType
-	ExternalBinding  string
-	ExternalBindings map[string]string
-	Private          bool
-}
-
-func (e ExternalFunction) String() string {
-	if len(e.ExternalBindings) > 1 || (len(e.ExternalBindings) == 1 && e.ExternalBindings["go"] == "") {
-		keys := make([]string, 0, len(e.ExternalBindings))
-		for key := range e.ExternalBindings {
-			keys = append(keys, key)
-		}
-		slices.Sort(keys)
-		parts := make([]string, 0, len(keys))
-		for _, key := range keys {
-			parts = append(parts, fmt.Sprintf("%s = %q", key, e.ExternalBindings[key]))
-		}
-		return fmt.Sprintf("extern fn %s(%v) %s = { %s }", e.Name, e.Parameters, e.ReturnType.GetName(), strings.Join(parts, ", "))
-	}
-	binding := e.ExternalBinding
-	if binding == "" && len(e.ExternalBindings) == 1 {
-		binding = e.ExternalBindings["go"]
-	}
-	return fmt.Sprintf("extern fn %s(%v) %s = %q", e.Name, e.Parameters, e.ReturnType.GetName(), binding)
 }
 
 type StaticFunctionDeclaration struct {

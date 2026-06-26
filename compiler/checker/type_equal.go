@@ -123,10 +123,6 @@ func equalTypesSeen(left Type, right Type, seen map[typeEqualKey]struct{}) bool 
 		return equalFunctionDefSeen(*l, right, seen)
 	case FunctionDef:
 		return equalFunctionDefSeen(l, right, seen)
-	case *ExternalFunctionDef:
-		return equalExternalFunctionDefSeen(*l, right, seen)
-	case ExternalFunctionDef:
-		return equalExternalFunctionDefSeen(l, right, seen)
 	case *StructDef:
 		return equalStructDefSeen(*l, right, seen)
 	case StructDef:
@@ -141,19 +137,6 @@ func equalTypesSeen(left Type, right Type, seen map[typeEqualKey]struct{}) bool 
 }
 
 func equalFunctionDefSeen(left FunctionDef, right Type, seen map[typeEqualKey]struct{}) bool {
-	if r, ok := right.(*ExternalFunctionDef); ok {
-		if len(left.Parameters) != len(r.Parameters) {
-			return false
-		}
-		for i := range left.Parameters {
-			_, lType := normalizedParamMutability(left.Parameters[i])
-			_, rType := normalizedParamMutability(r.Parameters[i])
-			if !equalTypesSeen(lType, rType, seen) {
-				return false
-			}
-		}
-		return true
-	}
 	r, ok := right.(*FunctionDef)
 	if !ok || len(left.Parameters) != len(r.Parameters) {
 		return false
@@ -186,40 +169,6 @@ func externTypeNamesMatch(left *ExternType, right *ExternType) bool {
 		return leftOK && rightOK && len(leftBinding.Symbols) == 1 && len(rightBinding.Symbols) == 1 && leftBinding.ImportPath == rightBinding.ImportPath && leftBinding.Symbols[0] == rightBinding.Symbols[0]
 	}
 	return left.Name_ == right.Name_
-}
-
-func equalExternalFunctionDefSeen(left ExternalFunctionDef, right Type, seen map[typeEqualKey]struct{}) bool {
-	if r, ok := right.(*ExternalFunctionDef); ok {
-		if len(left.Parameters) != len(r.Parameters) || len(left.ExternalBindings) != len(r.ExternalBindings) {
-			return false
-		}
-		for i := range left.Parameters {
-			if !equalTypesSeen(left.Parameters[i].Type, r.Parameters[i].Type, seen) {
-				return false
-			}
-		}
-		if !equalTypesSeen(left.ReturnType, r.ReturnType, seen) || left.ExternalBinding != r.ExternalBinding {
-			return false
-		}
-		for key, value := range left.ExternalBindings {
-			if r.ExternalBindings[key] != value {
-				return false
-			}
-		}
-		return true
-	}
-	if r, ok := right.(*FunctionDef); ok {
-		if len(left.Parameters) != len(r.Parameters) {
-			return false
-		}
-		for i := range left.Parameters {
-			if !equalTypesSeen(left.Parameters[i].Type, r.Parameters[i].Type, seen) {
-				return false
-			}
-		}
-		return equalTypesSeen(left.ReturnType, r.ReturnType, seen)
-	}
-	return false
 }
 
 func equalStructDefSeen(left StructDef, right Type, seen map[typeEqualKey]struct{}) bool {
@@ -298,8 +247,6 @@ func typeEqualID(t Type) string {
 		return fmt.Sprintf("Function:%p", v)
 	case FunctionDef:
 		return fmt.Sprintf("Function:%s", v.Name)
-	case *ExternalFunctionDef:
-		return fmt.Sprintf("ExternalFunction:%p", v)
 	case *Enum:
 		return fmt.Sprintf("Enum:%s:%s", v.ModulePath, v.Name)
 	case Enum:

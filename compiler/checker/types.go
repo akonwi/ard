@@ -633,7 +633,7 @@ func MakeMaybe(of Type) *Maybe {
 
 func (m *Maybe) String() string {
 	switch m.of.(type) {
-	case *FunctionDef, FunctionDef, *ExternalFunctionDef, ExternalFunctionDef, *Result, *MutableRef:
+	case *FunctionDef, FunctionDef, *Result, *MutableRef:
 		return "(" + typeSyntaxString(m.of) + ")?"
 	default:
 		return typeSyntaxString(m.of) + "?"
@@ -646,10 +646,6 @@ func typeSyntaxString(t Type) string {
 		return functionTypeString(*typ)
 	case FunctionDef:
 		return functionTypeString(typ)
-	case *ExternalFunctionDef:
-		return externalFunctionTypeString(*typ)
-	case ExternalFunctionDef:
-		return externalFunctionTypeString(typ)
 	case *Maybe:
 		return typ.String()
 	case *Result:
@@ -666,7 +662,7 @@ func typeSyntaxString(t Type) string {
 func resultOperandSyntax(t Type) string {
 	value := typeSyntaxString(t)
 	switch t.(type) {
-	case *FunctionDef, FunctionDef, *ExternalFunctionDef, ExternalFunctionDef, *Result:
+	case *FunctionDef, FunctionDef, *Result:
 		return "(" + value + ")"
 	default:
 		return value
@@ -674,10 +670,6 @@ func resultOperandSyntax(t Type) string {
 }
 
 func functionTypeString(f FunctionDef) string {
-	return callableTypeString(f.Parameters, f.ReturnType)
-}
-
-func externalFunctionTypeString(f ExternalFunctionDef) string {
 	return callableTypeString(f.Parameters, f.ReturnType)
 }
 

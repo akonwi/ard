@@ -468,10 +468,6 @@ func findFunctionSignature(name string, stmts []parse.Statement) *hoverStaticFun
 			if sig := findFunctionSignature(name, s.Body); sig != nil {
 				return sig
 			}
-		case *parse.ExternalFunction:
-			if s.Name == name {
-				return parseExternalFunctionSignature(s)
-			}
 		case *parse.ImplBlock:
 			for i := range s.Methods {
 				if sig := findFunctionSignature(name, []parse.Statement{&s.Methods[i]}); sig != nil {
@@ -493,28 +489,6 @@ func findFunctionSignature(name string, stmts []parse.Statement) *hoverStaticFun
 		}
 	}
 	return nil
-}
-
-func parseExternalFunctionSignature(fd *parse.ExternalFunction) *hoverStaticFunctionSignature {
-	params := make([]hoverParam, len(fd.Parameters))
-	for i, p := range fd.Parameters {
-		paramType := "?"
-		if p.Type != nil {
-			paramType = typeDeclString(p.Type)
-		}
-		params[i] = hoverParam{Name: p.Name, Type: paramType, Mutable: p.Mutable}
-	}
-
-	retType := "Void"
-	if fd.ReturnType != nil {
-		retType = typeDeclString(fd.ReturnType)
-	}
-
-	return &hoverStaticFunctionSignature{
-		Name:       fd.Name,
-		Params:     params,
-		ReturnType: retType,
-	}
 }
 
 func builtinFunctionSignature(name string) *hoverStaticFunctionSignature {

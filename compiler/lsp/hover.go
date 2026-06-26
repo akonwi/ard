@@ -317,8 +317,6 @@ func localTypeNames(stmts []parse.Statement) map[string]bool {
 			names[s.Name] = true
 		case *parse.TypeDeclaration:
 			names[s.Name.Name] = true
-		case *parse.ExternTypeDeclaration:
-			names[s.Name] = true
 		case *parse.TraitDefinition:
 			names[s.Name.Name] = true
 		}
@@ -756,7 +754,6 @@ func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expres
 			}
 			continue
 		case *parse.StructDefinition, *parse.EnumDefinition,
-			*parse.ExternTypeDeclaration, *parse.ExternalFunction,
 			*parse.TypeDeclaration, *parse.Comment,
 			*parse.StaticFunctionDeclaration:
 			continue
@@ -2774,10 +2771,6 @@ func checkerStaticFunctionSignature(alias string, name string, t checker.Type) *
 	sig := &hoverStaticFunctionSignature{Qualifier: alias, Name: name}
 	switch fn := t.(type) {
 	case *checker.FunctionDef:
-		sig.Params = checkerHoverParams(fn.Parameters)
-		sig.ReturnType = checkerTypeString(fn.ReturnType)
-		return sig
-	case *checker.ExternalFunctionDef:
 		sig.Params = checkerHoverParams(fn.Parameters)
 		sig.ReturnType = checkerTypeString(fn.ReturnType)
 		return sig

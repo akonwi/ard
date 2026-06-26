@@ -137,10 +137,6 @@ func (p printer) renderStatementDoc(statement parse.Statement) doc {
 		return p.renderFunctionDeclarationDoc(node, false)
 	case *parse.StaticFunctionDeclaration:
 		return p.renderStaticFunctionDeclarationDoc(node)
-	case *parse.ExternTypeDeclaration:
-		return p.renderExternTypeDeclarationDoc(node)
-	case *parse.ExternalFunction:
-		return p.renderExternalFunctionDoc(node)
 	case *parse.StructDefinition:
 		return p.renderStructDefinitionDoc(node)
 	case *parse.TraitDefinition:
@@ -284,101 +280,6 @@ func (p printer) renderStaticFunctionDeclarationDoc(node *parse.StaticFunctionDe
 		header += " " + p.renderType(node.ReturnType)
 	}
 	return p.renderBlockDoc(header, node.Body)
-}
-
-func (p printer) renderExternTypeDeclaration(node *parse.ExternTypeDeclaration) string {
-	prefix := ""
-	if node.Private {
-		prefix = "private "
-	}
-	header := prefix + "extern type " + node.Name + p.renderTypeParams(node.TypeParams)
-	if len(node.ExternalBindings) == 0 {
-		if node.ExternalBinding != "" {
-			return header + " = " + strconv.Quote(node.ExternalBinding)
-		}
-		return header
-	}
-	if len(node.ExternalBindings) == 1 && node.ExternalBindings["go"] != "" {
-		binding := node.ExternalBinding
-		if binding == "" {
-			binding = node.ExternalBindings["go"]
-		}
-		return header + " = " + strconv.Quote(binding)
-	}
-
-	keys := make([]string, 0, len(node.ExternalBindings))
-	for key := range node.ExternalBindings {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	var builder strings.Builder
-	builder.WriteString(header)
-	builder.WriteString(" = {\n")
-	for _, key := range keys {
-		builder.WriteString(strings.Repeat(" ", indentWidth))
-		builder.WriteString(key)
-		builder.WriteString(" = ")
-		builder.WriteString(strconv.Quote(node.ExternalBindings[key]))
-		builder.WriteString("\n")
-	}
-	builder.WriteString("}")
-	return builder.String()
-}
-
-func (p printer) renderExternTypeDeclarationDoc(node *parse.ExternTypeDeclaration) doc {
-	return dText(p.renderExternTypeDeclaration(node))
-}
-
-func (p printer) renderExternalFunction(node *parse.ExternalFunction) string {
-	prefix := ""
-	if node.Private {
-		prefix = "private "
-	}
-	header := prefix + "extern fn " + node.Name + p.renderTypeParams(node.TypeParams)
-	header += p.renderParameterList(node.Parameters, 0, header)
-	if node.ReturnType != nil {
-		header += " " + p.renderType(node.ReturnType)
-	}
-
-	if len(node.ExternalBindings) == 0 || (len(node.ExternalBindings) == 1 && node.ExternalBindings["go"] != "") {
-		binding := node.ExternalBinding
-		if binding == "" && len(node.ExternalBindings) == 1 {
-			binding = node.ExternalBindings["go"]
-		}
-		header += " = " + renderExternFunctionBindingValue(binding)
-		return header
-	}
-
-	keys := make([]string, 0, len(node.ExternalBindings))
-	for key := range node.ExternalBindings {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	var builder strings.Builder
-	builder.WriteString(header)
-	builder.WriteString(" = {\n")
-	for _, key := range keys {
-		builder.WriteString(strings.Repeat(" ", indentWidth))
-		builder.WriteString(key)
-		builder.WriteString(" = ")
-		builder.WriteString(renderExternFunctionBindingValue(node.ExternalBindings[key]))
-		builder.WriteString("\n")
-	}
-	builder.WriteString("}")
-	return builder.String()
-}
-
-func (p printer) renderExternalFunctionDoc(node *parse.ExternalFunction) doc {
-	return dText(p.renderExternalFunction(node))
-}
-
-func renderExternFunctionBindingValue(binding string) string {
-	if strings.Contains(binding, "::") {
-		return binding
-	}
-	return strconv.Quote(binding)
 }
 
 func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {

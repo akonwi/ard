@@ -39,12 +39,6 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 			c.scope.add(name, &Trait{Name: s.Name.Name, ModulePath: c.typeOwnerPath(), private: s.Private}, false)
 		case *parse.EnumDefinition:
 			c.scope.add(name, &Enum{Name: s.Name, ModulePath: c.typeOwnerPath(), Private: s.Private, Methods: make(map[string]*FunctionDef), Location: s.GetLocation()}, false)
-		case *parse.ExternTypeDeclaration:
-			typeArgs := make([]Type, len(s.TypeParams))
-			for i, param := range s.TypeParams {
-				typeArgs[i] = &TypeVar{name: param}
-			}
-			c.scope.add(name, &ExternType{Name_: s.Name, GenericParams: append([]string(nil), s.TypeParams...), TypeArgs: typeArgs, private: s.Private}, false)
 		case *parse.TypeDeclaration:
 			if len(s.Type) == 1 {
 				if c.topLevelTypeAliases == nil {
@@ -61,7 +55,7 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 func (c *Checker) populateTopLevelTypeDefinitions() {
 	for i := range c.input.Statements {
 		switch c.input.Statements[i].(type) {
-		case *parse.StructDefinition, *parse.TraitDefinition, *parse.EnumDefinition, *parse.ExternTypeDeclaration, *parse.TypeDeclaration:
+		case *parse.StructDefinition, *parse.TraitDefinition, *parse.EnumDefinition, *parse.TypeDeclaration:
 			c.checkStmt(&c.input.Statements[i])
 		}
 	}
@@ -83,12 +77,6 @@ func (c *Checker) checkedTopLevelTypeStatement(stmt parse.Statement) *Statement 
 			return nil
 		}
 		return &Statement{Stmt: def}
-	case *parse.ExternTypeDeclaration:
-		externType, ok := c.hoistedExternType(s.Name)
-		if !ok {
-			return nil
-		}
-		return &Statement{Stmt: externType}
 	case *parse.TypeDeclaration:
 		if len(s.Type) <= 1 {
 			return nil
@@ -110,8 +98,6 @@ func topLevelTypeDeclarationName(stmt parse.Statement) (string, parse.Location, 
 	case *parse.TraitDefinition:
 		return s.Name.Name, s.Name.GetLocation(), true
 	case *parse.EnumDefinition:
-		return s.Name, s.GetLocation(), true
-	case *parse.ExternTypeDeclaration:
 		return s.Name, s.GetLocation(), true
 	case *parse.TypeDeclaration:
 		return s.Name.Name, s.Name.GetLocation(), true
@@ -314,18 +300,6 @@ func (c *Checker) hoistedEnum(name string) (*Enum, bool) {
 		return nil, false
 	}
 	return enum, true
-}
-
-func (c *Checker) hoistedExternType(name string) (*ExternType, bool) {
-	sym, ok := c.scope.get(name)
-	if !ok {
-		return nil, false
-	}
-	externType, ok := sym.Type.(*ExternType)
-	if !ok {
-		return nil, false
-	}
-	return externType, true
 }
 
 func (c *Checker) hoistedUnion(name string) (*Union, bool) {
