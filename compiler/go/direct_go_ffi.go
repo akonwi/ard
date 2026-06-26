@@ -607,6 +607,11 @@ func (l *lowerer) coerceDirectGoArgs(signature air.Signature, args []ast.Expr, g
 }
 
 func (l *lowerer) coerceDirectGoArg(ardType air.TypeID, arg ast.Expr, goType checker.GoValueType, binding directGoExternBinding) (ast.Expr, error) {
+	// An optional Ard value passes to a Go pointer parameter as its backing
+	// pointer: some(x) -> &x, none() -> nil (ADR 0031).
+	if goType.Kind == checker.GoValuePointer && l.typeKind(ardType) == air.TypeMaybe {
+		return &ast.CallExpr{Fun: &ast.SelectorExpr{X: arg, Sel: ast.NewIdent("Ptr")}}, nil
+	}
 	if !l.directGoScalarNeedsConversion(ardType, goType) {
 		return arg, nil
 	}

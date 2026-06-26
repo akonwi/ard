@@ -42,14 +42,6 @@ type generatedStdlibExternLowering struct {
 
 var generatedStdlibExternLowerings = map[string]generatedStdlibExternLowering{
 	"BytesToDynamic":       {function: "BytesToDynamic", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"CryptoHashPassword":   {function: "CryptoHashPassword", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
-	"CryptoMd5":            {function: "CryptoMd5", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"CryptoScryptHash":     {function: "CryptoScryptHash", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect}},
-	"CryptoScryptVerify":   {function: "CryptoScryptVerify", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect, generatedStdlibParamDirect}},
-	"CryptoSha256":         {function: "CryptoSha256", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"CryptoSha512":         {function: "CryptoSha512", returns: generatedStdlibReturnDirect, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect}},
-	"CryptoUUID":           {function: "CryptoUUID", returns: generatedStdlibReturnDirect, params: nil},
-	"CryptoVerifyPassword": {function: "CryptoVerifyPassword", returns: generatedStdlibReturnValueError, params: []generatedStdlibExternParamAdapter{generatedStdlibParamDirect, generatedStdlibParamDirect}},
 	"DecodeBool":           {function: "DecodeBool", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
 	"DecodeByte":           {function: "DecodeByte", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},
 	"DecodeFloat":          {function: "DecodeFloat", returns: generatedStdlibReturnResult, params: []generatedStdlibExternParamAdapter{generatedStdlibParamAny}},

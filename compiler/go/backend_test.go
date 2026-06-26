@@ -6722,3 +6722,29 @@ fn main() Int {
 		t.Fatal("generated AST missing generic-receiver method func (self Box[T]) Get()")
 	}
 }
+
+func TestLowerMaybeArgToGoPointerParam(t *testing.T) {
+	// An optional Ard value passes to a Go pointer parameter via its backing
+	// pointer (some(x) -> &x, none() -> nil): ADR 0031.
+	program := lowerSource(t, `use ard/maybe
+use go:github.com/akonwi/ard/std_lib/ffi
+
+fn hash(password: Str, cost: Int?) Str!Str {
+  ffi::CryptoHashPassword(password, cost)
+}
+
+fn main() {
+  let _ = hash("pw", maybe::none())
+}`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		return ok && sel.Sel.Name == "Ptr"
+	}) {
+		t.Fatal("generated AST missing .Ptr() coercion for Maybe -> Go pointer param")
+	}
+}

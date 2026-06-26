@@ -1,25 +1,43 @@
 use ard/hex
 use ard/testing
 
-extern fn md5(input: [Byte]) [Byte] = "CryptoMd5"
+use go:github.com/akonwi/ard/std_lib/ffi
+
+fn md5(input: [Byte]) [Byte] {
+  ffi::CryptoMd5(input)
+}
 
 // Returns the raw SHA-256 digest (32 bytes). Use `hex::encode` or
 // `base64::encode` to render it as a text string.
-extern fn sha256(input: [Byte]) [Byte] = "CryptoSha256"
+fn sha256(input: [Byte]) [Byte] {
+  ffi::CryptoSha256(input)
+}
 
 // Returns the raw SHA-512 digest (64 bytes). Use `hex::encode` or
 // `base64::encode` to render it as a text string.
-extern fn sha512(input: [Byte]) [Byte] = "CryptoSha512"
+fn sha512(input: [Byte]) [Byte] {
+  ffi::CryptoSha512(input)
+}
 
-extern fn hash(password: Str, cost: Int?) Str!Str = "CryptoHashPassword"
+fn hash(password: Str, cost: Int?) Str!Str {
+  ffi::CryptoHashPassword(password, cost)
+}
 
-extern fn verify(password: Str, hashed: Str) Bool!Str = "CryptoVerifyPassword"
+fn verify(password: Str, hashed: Str) Bool!Str {
+  ffi::CryptoVerifyPassword(password, hashed)
+}
 
-extern fn scrypt_hash(password: Str, salt_hex: Str?, n: Int?, r: Int?, p: Int?, dk_len: Int?) Str!Str = "CryptoScryptHash"
+fn scrypt_hash(password: Str, salt_hex: Str?, n: Int?, r: Int?, p: Int?, dk_len: Int?) Str!Str {
+  ffi::CryptoScryptHash(password, salt_hex, n, r, p, dk_len)
+}
 
-extern fn scrypt_verify(password: Str, hash: Str, n: Int?, r: Int?, p: Int?, dk_len: Int?) Bool!Str = "CryptoScryptVerify"
+fn scrypt_verify(password: Str, hash: Str, n: Int?, r: Int?, p: Int?, dk_len: Int?) Bool!Str {
+  ffi::CryptoScryptVerify(password, hash, n, r, p, dk_len)
+}
 
-extern fn uuid() Str = "CryptoUUID"
+fn uuid() Str {
+  ffi::CryptoUUID()
+}
 
 test fn test_md5_hashes_hello() Void!Str {
   testing::assert(

@@ -152,10 +152,10 @@ func CryptoSha512(input []byte) []byte {
 	return sum[:]
 }
 
-func CryptoHashPassword(password string, cost Maybe[int]) (string, error) {
+func CryptoHashPassword(password string, cost *int) (string, error) {
 	hashCost := bcrypt.DefaultCost
-	if cost.IsSome() {
-		hashCost = cost.Value()
+	if cost != nil {
+		hashCost = *cost
 	}
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), hashCost)
 	if err != nil {
@@ -175,20 +175,20 @@ func CryptoVerifyPassword(password, hashed string) (bool, error) {
 	return false, err
 }
 
-func CryptoScryptHash(password string, saltHex Maybe[string], n Maybe[int], r Maybe[int], p Maybe[int], dkLen Maybe[int]) (string, error) {
+func CryptoScryptHash(password string, saltHex *string, n *int, r *int, p *int, dkLen *int) (string, error) {
 	password = norm.NFKC.String(password)
-	nVal := maybeOr(n, defaultScryptN)
-	rVal := maybeOr(r, defaultScryptR)
-	pVal := maybeOr(p, defaultScryptP)
-	dkLenVal := maybeOr(dkLen, defaultScryptDKLen)
+	nVal := ptrOr(n, defaultScryptN)
+	rVal := ptrOr(r, defaultScryptR)
+	pVal := ptrOr(p, defaultScryptP)
+	dkLenVal := ptrOr(dkLen, defaultScryptDKLen)
 
 	if err := validateScryptParams(nVal, rVal, pVal, dkLenVal); err != nil {
 		return "", fmt.Errorf("scrypt_runtime: %s", err.Error())
 	}
 
 	var saltHexValue string
-	if saltHex.IsSome() {
-		saltHexValue = strings.TrimSpace(saltHex.Value())
+	if saltHex != nil {
+		saltHexValue = strings.TrimSpace(*saltHex)
 		decoded, err := hex.DecodeString(saltHexValue)
 		if err != nil {
 			return "", fmt.Errorf("scrypt_runtime: invalid salt hex: %s", err.Error())
@@ -212,13 +212,13 @@ func CryptoScryptHash(password string, saltHex Maybe[string], n Maybe[int], r Ma
 	return fmt.Sprintf("%s:%s", saltHexValue, hex.EncodeToString(derived)), nil
 }
 
-func CryptoScryptVerify(password, hash string, n Maybe[int], r Maybe[int], p Maybe[int], dkLen Maybe[int]) (bool, error) {
+func CryptoScryptVerify(password, hash string, n *int, r *int, p *int, dkLen *int) (bool, error) {
 	password = norm.NFKC.String(password)
 	hash = strings.TrimSpace(hash)
-	nVal := maybeOr(n, defaultScryptN)
-	rVal := maybeOr(r, defaultScryptR)
-	pVal := maybeOr(p, defaultScryptP)
-	dkLenVal := maybeOr(dkLen, defaultScryptDKLen)
+	nVal := ptrOr(n, defaultScryptN)
+	rVal := ptrOr(r, defaultScryptR)
+	pVal := ptrOr(p, defaultScryptP)
+	dkLenVal := ptrOr(dkLen, defaultScryptDKLen)
 
 	if err := validateScryptParams(nVal, rVal, pVal, dkLenVal); err != nil {
 		return false, fmt.Errorf("scrypt_runtime: %s", err.Error())
@@ -254,9 +254,9 @@ func CryptoScryptVerify(password, hash string, n Maybe[int], r Maybe[int], p May
 	return subtle.ConstantTimeCompare(derived, storedKey) == 1, nil
 }
 
-func maybeOr(value Maybe[int], fallback int) int {
-	if value.IsSome() {
-		return value.Value()
+func ptrOr(value *int, fallback int) int {
+	if value != nil {
+		return *value
 	}
 	return fallback
 }

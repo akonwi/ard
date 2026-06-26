@@ -1465,6 +1465,11 @@ func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel
 		if directGoPointerToEnumLike(ard, goType) {
 			return false, fmt.Sprintf("Go pointer to enum-like type %s is not supported by direct Go pointer bindings yet", goType.String())
 		}
+		// An optional Ard value passes to a Go pointer parameter: some(x) -> &x,
+		// none() -> nil (ADR 0031).
+		if directGoMaybePointerCompatible(ard, goType) {
+			return true, ""
+		}
 		if directGoPointerCompatible(ard, goType) {
 			return true, ""
 		}
@@ -1676,6 +1681,19 @@ func directGoPointerToEnumLike(ard Type, goType GoValueType) bool {
 		return false
 	}
 	return directGoNamedTypeMatches(ref.Of(), *goType.Elem)
+}
+
+// directGoMaybePointerCompatible reports whether an Ard Maybe over a primitive
+// value maps to a Go pointer to the matching primitive (`Int?` <-> `*int`).
+func directGoMaybePointerCompatible(ard Type, goType GoValueType) bool {
+	if goType.Kind != GoValuePointer || goType.Elem == nil || goType.Elem.Named {
+		return false
+	}
+	maybe, ok := derefType(ard).(*Maybe)
+	if !ok {
+		return false
+	}
+	return directGoScalarCompatible(maybe.Of(), *goType.Elem)
 }
 
 func directGoPointerCompatible(ard Type, goType GoValueType) bool {
