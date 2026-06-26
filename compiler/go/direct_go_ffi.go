@@ -146,7 +146,6 @@ func predeclaredGoIdentifiers() []string {
 
 func runtimePreludeTopLevelNames() []string {
 	return []string{
-		"ardFiberState", "ardFiber", "ardSpawnFiber", "ardJoinFiber", "ardGetFiber",
 		"ardSortedIntKeys", "ardSortedStringKeys", "ardSortedAnyKeys", "ardListToAnySlice",
 		"ardDirectGoCheckSignedIntRange", "ardDirectGoCheckUintIntRange", "ardDirectGoCheckNonNegativeInt",
 		"ardDirectGoIntFromSigned", "ardDirectGoIntFromUnsigned",

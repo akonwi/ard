@@ -417,7 +417,7 @@ func (l *lowerer) collectExternalTypeOwnerModules(typeID air.TypeID, self air.Mo
 	}
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
-	case air.TypeList, air.TypeMaybe, air.TypeFiber:
+	case air.TypeList, air.TypeMaybe:
 		l.collectExternalTypeOwnerModules(info.Elem, self, out)
 	case air.TypeMap:
 		l.collectExternalTypeOwnerModules(info.Key, self, out)
@@ -445,7 +445,7 @@ func functionRefsInBlock(block air.Block) []air.FunctionID {
 	refs := []air.FunctionID{}
 	walkBlockExprs(block, func(expr air.Expr) {
 		switch expr.Kind {
-		case air.ExprCall, air.ExprFunctionRef, air.ExprMakeClosure, air.ExprSpawnFiber:
+		case air.ExprCall, air.ExprFunctionRef, air.ExprMakeClosure:
 			refs = append(refs, expr.Function)
 		}
 	})
@@ -2016,12 +2016,6 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerDirectGoFieldAccess(fn, expr)
 	case air.ExprDirectGoStructLiteral:
 		return l.lowerDirectGoStructLiteral(fn, expr)
-	case air.ExprSpawnFiber:
-		return l.lowerSpawnFiber(fn, expr)
-	case air.ExprFiberGet:
-		return l.lowerFiberGet(fn, expr)
-	case air.ExprFiberJoin:
-		return l.lowerFiberJoin(fn, expr)
 	case air.ExprMakeClosure:
 		return l.lowerMakeClosure(fn, expr)
 	case air.ExprCallClosure:
@@ -3133,12 +3127,6 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		return &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Maybe"), Index: elem}, nil
-	case air.TypeFiber:
-		elem, err := l.goType(info.Elem)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Fiber"), Index: elem}, nil
 	case air.TypeFunction:
 		params := make([]*ast.Field, 0, len(info.Params))
 		for i, paramTypeID := range info.Params {
@@ -5305,71 +5293,6 @@ func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, er
 	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
 }
 
-func (l *lowerer) lowerSpawnFiber(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	var targetExpr ast.Expr
-	stmts := []ast.Stmt{}
-	if expr.Target != nil {
-		target, err := l.lowerExpr(fn, *expr.Target)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, target.stmts...)
-		targetExpr = target.expr
-		if validTypeID(l.program, expr.Type) {
-			fiberType := l.program.Types[expr.Type-1]
-			if validTypeID(l.program, fiberType.Elem) && l.program.Types[fiberType.Elem-1].Kind == air.TypeVoid {
-				targetExpr = &ast.FuncLit{
-					Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: l.voidTypeExpr()}}}},
-					Body: &ast.BlockStmt{List: []ast.Stmt{
-						&ast.ExprStmt{X: &ast.CallExpr{Fun: target.expr}},
-						&ast.ReturnStmt{Results: []ast.Expr{l.voidValueExpr()}},
-					}},
-				}
-			}
-		}
-	} else {
-		if !validFunctionID(l.program, expr.Function) {
-			return loweredExpr{}, fmt.Errorf("invalid fiber function %d", expr.Function)
-		}
-		targetFn := l.program.Functions[expr.Function]
-		if l.isVoidType(targetFn.Signature.Return) {
-			targetExpr = &ast.FuncLit{
-				Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: l.voidTypeExpr()}}}},
-				Body: &ast.BlockStmt{List: []ast.Stmt{
-					&ast.ExprStmt{X: &ast.CallExpr{Fun: l.functionExpr(targetFn)}},
-					&ast.ReturnStmt{Results: []ast.Expr{l.voidValueExpr()}},
-				}},
-			}
-		} else {
-			targetExpr = &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: mustTypeExpr(l, targetFn.Signature.Return)}}}}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: l.functionExpr(targetFn)}}}}}}
-		}
-	}
-	return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "SpawnFiber"), Index: mustTypeExpr(l, l.program.Types[expr.Type-1].Elem)}, Args: []ast.Expr{targetExpr}}}, nil
-}
-
-func (l *lowerer) lowerFiberGet(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.Target == nil {
-		return loweredExpr{}, fmt.Errorf("fiber get missing target")
-	}
-	target, err := l.lowerExpr(fn, *expr.Target)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "GetFiber"), Index: mustTypeExpr(l, expr.Type)}, Args: []ast.Expr{target.expr}}}, nil
-}
-
-func (l *lowerer) lowerFiberJoin(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.Target == nil {
-		return loweredExpr{}, fmt.Errorf("fiber join missing target")
-	}
-	target, err := l.lowerExpr(fn, *expr.Target)
-	if err != nil {
-		return loweredExpr{}, err
-	}
-	fiberType := l.program.Types[expr.Target.Type-1]
-	return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "JoinFiber"), Index: mustTypeExpr(l, fiberType.Elem)}, Args: []ast.Expr{target.expr}}}, nil
-}
-
 func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if !validFunctionID(l.program, expr.Function) {
 		return loweredExpr{}, fmt.Errorf("invalid closure function %d", expr.Function)
@@ -6972,10 +6895,6 @@ func (l *lowerer) collectClosureUsesInExpr(expr air.Expr, context closureUseCont
 		}
 	case air.ExprCall, air.ExprFunctionRef:
 		directRefs[expr.Function] = true
-	case air.ExprSpawnFiber:
-		if expr.Target == nil {
-			directRefs[expr.Function] = true
-		}
 	}
 
 	argContext := closureUseValue
@@ -7057,8 +6976,6 @@ func functionDirectlyReferences(block air.Block, function air.FunctionID) bool {
 		switch expr.Kind {
 		case air.ExprCall, air.ExprFunctionRef:
 			found = expr.Function == function
-		case air.ExprSpawnFiber:
-			found = expr.Target == nil && expr.Function == function
 		}
 	})
 	return found

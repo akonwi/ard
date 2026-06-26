@@ -808,7 +808,7 @@ func (fl *functionLowerer) bindTypeVars(pattern checker.Type, actual TypeID) {
 			fl.bindTypeVars(typ.ReturnType, actualInfo.Return)
 		}
 	case *checker.StructDef:
-		if actualInfo.Kind == TypeStruct || actualInfo.Kind == TypeFiber {
+		if actualInfo.Kind == TypeStruct {
 			fieldsByName := map[string]FieldInfo{}
 			for _, field := range actualInfo.Fields {
 				fieldsByName[field.Name] = field
@@ -816,11 +816,6 @@ func (fl *functionLowerer) bindTypeVars(pattern checker.Type, actual TypeID) {
 			for name, fieldType := range typ.Fields {
 				if field, ok := fieldsByName[name]; ok {
 					fl.bindTypeVars(fieldType, field.Type)
-				}
-			}
-			if actualInfo.Kind == TypeFiber {
-				if result, ok := typ.Fields["result"]; ok {
-					fl.bindTypeVars(result, actualInfo.Elem)
 				}
 			}
 		}
@@ -1015,9 +1010,6 @@ func (l *lowerer) internStructFieldType(fieldTypeValue checker.Type, intern func
 }
 
 func (fl *functionLowerer) internStructTypeWithInterner(typ *checker.StructDef, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
-	if typ.Name == "Fiber" {
-		return fl.l.internType(typ)
-	}
 	fields := sortedFieldNames(typ.Fields)
 	info := TypeInfo{Kind: TypeStruct, ModulePath: typ.ModulePath, Private: typ.Private}
 	info.Fields = make([]FieldInfo, len(fields))
@@ -2087,19 +2079,6 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		info.Error = errType
 	case *checker.StructDef:
 		info.Private = typ.Private
-		if typ.Name == "Fiber" {
-			elemType, ok := typ.Fields["result"]
-			if !ok {
-				return NoType, fmt.Errorf("Fiber type missing result field")
-			}
-			elem, err := l.internType(elemType)
-			if err != nil {
-				return NoType, err
-			}
-			info.Kind = TypeFiber
-			info.Elem = elem
-			break
-		}
 		info.Kind = TypeStruct
 		fields := sortedFieldNames(typ.Fields)
 		info.Fields = make([]FieldInfo, len(fields))
@@ -2577,11 +2556,6 @@ func signaturesEqual(left, right Signature) bool {
 }
 
 func airTypeName(t checker.Type) string {
-	if typ, ok := t.(*checker.StructDef); ok && typ.Name == "Fiber" {
-		if elem, ok := typ.Fields["result"]; ok {
-			return "Fiber<" + elem.String() + ">"
-		}
-	}
 	return t.String()
 }
 
@@ -2612,11 +2586,6 @@ func airTypeKeySeen(t checker.Type, seen map[checker.Type]struct{}) string {
 	case *checker.MutableRef:
 		return "mut<" + airTypeKeySeen(typ.Of(), seen) + ">"
 	case *checker.StructDef:
-		if typ.Name == "Fiber" {
-			if elem, ok := typ.Fields["result"]; ok {
-				return "fiber<" + airTypeKey(elem) + ">"
-			}
-		}
 		if hasSelfReference(typ) {
 			return "recursive struct " + typ.ModulePath + "::" + typ.Name
 		}
@@ -3772,12 +3741,6 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerTemplateStr(typeID, e)
 	case *checker.FunctionDef:
 		return fl.lowerClosure(typeID, e)
-	case *checker.FiberStart:
-		return fl.lowerFiberSpawn(typeID, e.GetFn())
-	case *checker.FiberEval:
-		return fl.lowerFiberSpawn(typeID, e.GetFn())
-	case *checker.FiberExecution:
-		return fl.lowerFiberExecution(typeID, e)
 	case *checker.FunctionValueCall:
 		target, err := fl.lowerExpr(e.Callee)
 		if err != nil {
@@ -5221,25 +5184,6 @@ func (fl *functionLowerer) lowerExternModuleSymbol(typeID TypeID, modulePath str
 	return id, nil
 }
 
-func (fl *functionLowerer) lowerFiberSpawn(typeID TypeID, fn checker.Expression) (*Expr, error) {
-	target, err := fl.lowerExpr(fn)
-	if err != nil {
-		return nil, err
-	}
-	return &Expr{Kind: ExprSpawnFiber, Type: typeID, Target: target}, nil
-}
-
-func (fl *functionLowerer) lowerFiberExecution(typeID TypeID, exec *checker.FiberExecution) (*Expr, error) {
-	id, ok, err := fl.l.resolveModuleFunction(exec.GetModule().Path(), exec.GetMainName())
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, fmt.Errorf("unknown fiber execution target %s::%s", exec.GetModule().Path(), exec.GetMainName())
-	}
-	return &Expr{Kind: ExprSpawnFiber, Type: typeID, Function: id}, nil
-}
-
 func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.InstanceMethod) (*Expr, error) {
 	target, err := fl.lowerExpr(method.Subject)
 	if err != nil {
@@ -5279,17 +5223,7 @@ func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.In
 	if typeInfo.Kind == TypeStruct || typeInfo.Kind == TypeEnum {
 		return fl.lowerUserInstanceMethod(typeID, target, typeInfo, method)
 	}
-	if typeInfo.Kind != TypeFiber {
-		return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
-	}
-	switch method.Method.Name {
-	case "get":
-		return &Expr{Kind: ExprFiberGet, Type: typeID, Target: target}, nil
-	case "join":
-		return &Expr{Kind: ExprFiberJoin, Type: typeID, Target: target}, nil
-	default:
-		return nil, fmt.Errorf("unsupported AIR Fiber method %s", method.Method.Name)
-	}
+	return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
 }
 
 func (fl *functionLowerer) lowerUserInstanceMethod(typeID TypeID, target *Expr, typeInfo TypeInfo, method *checker.InstanceMethod) (*Expr, error) {

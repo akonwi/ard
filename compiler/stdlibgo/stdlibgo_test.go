@@ -11,7 +11,7 @@ func TestMaterializedDirWritesCompleteModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MaterializedDir: %v", err)
 	}
-	for _, rel := range []string{"go.mod", "go.sum", "runtime/fiber.go", "runtime/maybe.go", "std_lib/ffi/host.go"} {
+	for _, rel := range []string{"go.mod", "go.sum", "runtime/maybe.go", "std_lib/ffi/host.go"} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
 			t.Errorf("expected materialized %s: %v", rel, err)
 		}

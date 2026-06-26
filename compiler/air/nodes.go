@@ -55,9 +55,6 @@ const (
 	ExprDirectGoStructLiteral
 	ExprMakeClosure
 	ExprCallClosure
-	ExprSpawnFiber
-	ExprFiberGet
-	ExprFiberJoin
 	ExprUnionWrap
 	ExprMatchUnion
 	ExprTraitUpcast
