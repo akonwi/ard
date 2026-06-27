@@ -1,233 +1,241 @@
 ---
 title: "Async Programming"
-description: Learn about asynchronous programming in Ard using the async module.
+description: Write concurrent Ard programs with goroutines and channels.
 ---
 
 ## Overview
 
-Ard takes inspiration from Go and Rust for async execution:
-- Go's goroutines power the underlying async implementation
-- From Rust, Ard adopts safety guardrails for managing concurrent execution
+Ard's concurrency model is Go's: lightweight goroutines that communicate over
+typed channels. There are no `async`/`await` keywords and no promises. Instead,
+two small primitives compose into everything else:
 
-## Fibers
+- [`ard/async`](/stdlib/async/) starts goroutines and sleeps.
+- [`ard/channel`](/stdlib/channel/) passes typed values between them.
 
-Ard uses **fibers** for concurrent execution contexts. Currently, all fibers are goroutines under the hood, meaning they are "green" threads managed by the Go runtime.
+Waiting for completion, returning results, joining a set of tasks, fan-in, and
+timeouts are all written in ordinary Ard on top of these — not baked into the
+language.
 
-> 💡 This design choice keeps the possibility of OS-level threads open without naming conflicts.
+## Starting goroutines
 
-Fiber scopes can safely access readonly data from parent scopes and mutable access is prohibited to guard against race conditions.
-
-## The `ard/async` Module
-
-Async functionality is provided through the `ard/async` standard library module.
-
-### Basic Sleep
-
-From the current (main) fiber, a program can sleep for a duration in nanoseconds:
+`async::start` runs a function on a new goroutine. It is **fire-and-forget**: it
+returns immediately and gives you no handle.
 
 ```ard
 use ard/async
 use ard/io
 
 fn main() {
-  io::print("hello...")
-  async::sleep(1000000000)  // Sleep for 1 second (1 billion nanoseconds)
-  io::print("world!")
+  async::start(fn() {
+    io::print("running concurrently")
+  })
+
+  async::sleep(1_000_000) // 1ms, so main doesn't exit first
 }
 ```
 
-### No `async`/`await` Keywords
+Because `start` returns nothing, you coordinate with a channel rather than a
+return value. Spawned closures follow Go's semantics: they capture by reference,
+and there is no isolation rule — shared state is coordinated through channels and
+data races are your responsibility.
 
-Note how there's no `async`, `await`, or `go` keyword. Ard avoids JavaScript's problem of infectious `async` functions where async spreads throughout the codebase.
+### Sleeping
 
-## Starting Fibers
-
-Use `async::start()` to run code concurrently:
+`async::sleep` blocks the current goroutine for a number of nanoseconds. Import
+Go's `time` constants for readable durations:
 
 ```ard
 use ard/async
+use go:time
+
+async::sleep(time::Second)
+async::sleep(time::Millisecond * 250)
+```
+
+## Coordinating with channels
+
+A channel is a typed conduit between goroutines. `send` blocks until a value is
+taken (or buffered); `recv` blocks until a value arrives or the channel is
+closed.
+
+### Waiting for completion
+
+```ard
+use ard/async
+use ard/channel
 use ard/io
 
 fn main() {
-  io::print("1")
+  let done = channel::new<Bool>(0)
 
   async::start(fn() {
-    io::print("2")
+    io::print("working")
+    done.send(true)
   })
 
-  io::print("3")
+  done.recv() // blocks until the goroutine signals
+  io::print("finished")
 }
 ```
 
-The output of this program is not guaranteed to have the numbers in order (could be "1", "3", "2" or "1", "2", "3") because there's no control over when the fiber executes.
+### Returning a result
 
-## Waiting for Fibers
-
-The `async::start()` function returns a `Fiber` handle that provides a `.join()` method:
+A goroutine "returns" by sending its result on a channel. This is the pattern
+that replaces a result-returning task: start the work, then receive its value.
 
 ```ard
 use ard/async
-use ard/io
+use ard/channel
 
-fn main() {
-  io::print("1")
-
-  let fiber = async::start(fn() {
-    async::sleep(100000000)  // Sleep for 100 milliseconds
-    io::print("2")
-  })
-
-  fiber.join()  // Wait for the fiber to complete
-  io::print("3")
-}
-```
-
-Now the output will always be:
-```
-1
-2
-3
-```
-
-With a 100 millisecond delay between "1" and "2".
-
-## Evaluating Functions with Results
-
-The `async::eval()` function executes a closure concurrently and returns a `Fiber` handle. Like `async::start()`, it creates a concurrent fiber, but the `Fiber` allows you to retrieve the computed result:
-
-```ard
-use ard/async
-use ard/io
-
-fn main() {
-  let fiber = async::eval(fn() {
-    5 + 10
-  })
-
-  let result = fiber.get()  // Wait for result
-  io::print(result.to_str())  // Prints "15"
-}
-```
-
-The generic return type `$T` adapts to whatever the function returns:
-
-```ard
-use ard/async
-use ard/io
-
-fn main() {
-  let sum_fiber = async::eval(fn() {
-    10 + 20
-  })
-  let sum = sum_fiber.get()
-  io::print(sum.to_str())  // Prints "30"
-
-  let message_fiber = async::eval(fn() {
-    "Hello from eval"
-  })
-  let message = message_fiber.get()
-  io::print(message)  // Prints "Hello from eval"
-}
-```
-
-### Multiple Concurrent Operations
-
-You can run multiple concurrent operations and wait for all of them to complete:
-
-```ard
-use ard/async
-use ard/io
-
-fn expensive_computation(n: Int) Int {
-  async::sleep(100000000)  // Sleep 100ms
-  n * 2
+fn compute() Int {
+  // ... expensive work ...
+  42
 }
 
-fn main() {
-  let fiber1 = async::eval(fn() { expensive_computation(5) })
-  let fiber2 = async::eval(fn() { expensive_computation(10) })
-  
-  // Both computations run concurrently
-  async::join([fiber1, fiber2])
-  
-  // Get the results
-  let result1 = fiber1.get()  // 10
-  let result2 = fiber2.get()  // 20
-}
-```
-
-### Differences from `async::start()`
-
-| Feature | `async::start()` | `async::eval()` |
-|---------|------------------|-----------------|
-| Execution | Concurrent (returns immediately) | Concurrent (returns immediately) |
-| Return Value | `Fiber` handle with `.join()` method | `Fiber` handle with `.join()` and `.get()` methods |
-| Result Access | Not available | Retrieved via `.get()` with type safety |
-| Use Case | Background tasks | Computing values concurrently with result retrieval |
-
-## Scope Access
-
-Both `async::start()` and `async::eval()` enforce the same isolation rules. Functions passed to either can access **read-only variables** from parent scopes, but cannot access mutable variables:
-
-```ard
-use ard/async
-use ard/io
-
-fn main() {
-  let value = 42      // Immutable - accessible in both start() and eval()
-  mut count = 0       // Mutable - NOT accessible in either start() or eval()
+fn main() Int {
+  let result = channel::new<Int>(0)
 
   async::start(fn() {
-    io::print(value)  // ✅ Works! Read-only access is safe
-    count += 1        // ❌ Error: mutable variables are isolated
+    result.send(compute())
   })
 
-  let result = async::eval(fn() {
-    value * 2         // ✅ Works! Read-only access is safe
-    count += 1        // ❌ Error: mutable variables are isolated
-  })
+  result.recv().or(0)
 }
 ```
 
-This design provides safe concurrent execution by:
-- **Allowing** access to readonly variables
-- **Preventing** access to mutable references, which could cause race conditions
+### Joining many goroutines (fan-in)
 
-Both approaches enforce these rules at compile-time, preventing data races before the program runs.
-
-### Practical Example
-
-For background tasks that need external data, use module-level functions or reload data within the fiber:
+To wait on several goroutines, have each send to the same channel and receive
+once per goroutine:
 
 ```ard
 use ard/async
-use ard/duration
-use maestro/config
-use maestro/db
+use ard/channel
+use ard/list as List
 
-fn main() {
-  // Start background worker
+fn main() Int {
+  let inputs = [1, 2, 3, 4]
+  let results = channel::new<Int>(inputs.size())
+
+  for n in inputs {
+    async::start(fn() {
+      results.send(n * n)
+    })
+  }
+
+  mut total = 0
+  for _ in inputs {
+    total = total + results.recv().or(0)
+  }
+  total // 30
+}
+```
+
+### Closing and draining
+
+The sending side closes a channel when it is done producing. A receiver loops
+until `recv()` returns `none`, the closed-and-drained signal:
+
+```ard
+use ard/async
+use ard/channel
+
+fn main() Int {
+  let jobs = channel::new<Int>(0)
+
   async::start(fn() {
-    let conn = db::connect()
+    jobs.send(1)
+    jobs.send(2)
+    jobs.send(3)
+    jobs.close()
+  })
 
-    while true {
-      // Do work...
-      conn.query("SELECT * FROM foo WHERE id = @id").run(["id": 1])
-      // ...
-      async::sleep(duration::from_minutes(5))
+  mut total = 0
+  mut draining = true
+  while draining {
+    match jobs.recv() {
+      n => { total = total + n },
+      _ => { draining = false },
     }
-  })
-
-  // Continue with main program...
+  }
+  total // 6
 }
 ```
 
-## Design Philosophy
+## Directional channels
 
-Each fiber runs in its own concurrent context with:
-- **Read-only access** to immutable variables from parent scopes
-- **Complete isolation** from mutable state
+An API can express direction by narrowing a bidirectional `Chan<$T>` to a
+receive-only `Receiver<$T>` or a send-only `Sender<$T>`. Narrowing is explicit
+and one-way:
 
-## API Reference
+```ard
+use ard/channel
 
-For a complete API reference of the `ard/async` module, see the [Async Module Reference](/stdlib/async).
+fn produce(out: channel::Sender<Int>) {
+  out.send(1)
+  out.close()
+}
+
+fn main() {
+  let ch = channel::new<Int>(0)
+  produce(channel::sender(ch))
+  // ch.recv() ...
+}
+```
+
+## Waiting on many channels with `select`
+
+`select` waits on several channel operations at once and runs the arm whose
+operation is ready first. Unlike a sequence of `recv` calls, it registers every
+arm together and blocks until one can proceed. If several are ready, one is
+chosen at random (Go's fairness). It is an expression, so it can produce a value.
+
+```ard
+select {
+  let job = jobs.recv() => match job {
+    j => run(j),   // received a value
+    _ => drain(),  // jobs closed (recv() == none)
+  },
+  results.send(value) => recorded(), // a send arm
+  timeout.recv() => give_up(),       // receive and discard
+  _ => idle(),                       // non-blocking default
+}
+```
+
+- **`let name = ch.recv() => body`** binds `name: $T?`; a closed channel surfaces
+  as `none`, handled with a normal `match`.
+- **`ch.recv() => body`** receives and discards the value.
+- **`ch.send(x) => body`** sends an in-scope value; with a `_` arm it is a
+  non-blocking try-send.
+- **`_ => body`** runs when no other arm is ready, making the whole `select`
+  non-blocking.
+
+### Timeouts
+
+Go's `time::After` returns a channel that fires after a delay, which composes
+naturally as a `select` arm:
+
+```ard
+use ard/channel
+use go:time
+
+fn main() Int {
+  let work = channel::new<Int>(0)
+  // ... a goroutine may eventually send on `work` ...
+
+  select {
+    let v = work.recv() => v.or(0),
+    time::After(time::Second).recv() => -1, // timed out
+  }
+}
+```
+
+## Design philosophy
+
+Ard deliberately keeps async tiny. The only thing the language must provide is a
+way to *start* a goroutine, because there is no `go` statement to write in
+userland. Everything a richer async library would offer — futures, joins,
+wait-groups, structured concurrency — is expressible as plain Ard over channels,
+so it lives in libraries and programs rather than in the runtime. The runtime
+itself defines no async type; `start` is a one-line Go helper, and channels lower
+to native `chan T`.
