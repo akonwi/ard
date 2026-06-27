@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -109,7 +109,7 @@ An Ard project may depend on other Ard projects (`0017-use-git-based-dependencie
 
 #### Host Go code placement
 
-The Go code a project provides is carried into the generated Go module verbatim, as its own ordinary Go package, and imported from Ard via `use go:` like any other Go package (`0028-use-direct-go-imports-for-ffi.md`). It is not inlined into the declaring module's package. This keeps packages shared across modules from being duplicated and keeps package-level state intact. The FFI section describes this and the deprecation of the `extern` binding mechanism in full.
+The Go code a project provides is carried into the generated Go module verbatim, as its own ordinary Go package, and imported from Ard via `use go:` like any other Go package (`0028-use-direct-go-imports-for-ffi.md`). It is not inlined into the declaring module's package. This keeps packages shared across modules from being duplicated and keeps package-level state intact. The FFI section describes this and the removal of the `extern` binding mechanism in full.
 
 ### Names and visibility
 
@@ -529,6 +529,15 @@ Interop with Go is a single mechanism: direct Go interop through `use go:`. Ther
 - struct values, field access, and method calls go straight through to the Go package
 - because Ard impl methods now lower to natural Go methods, an Ard type satisfies a Go interface structurally, with no generated wrapper layer
 
+Go values map to Ard types structurally, and a few idiomatic Go shapes are adapted at the boundary:
+
+- Go `struct{}` is Ard's unit type `Void`, and a no-result Go function is `Void` too.
+- A Go function returning `(T, error)` is adapted to Ard `T!Str`; one returning only `error` is `Void!Str`. The Go `error` is stringified — Ard does not model Go's `error` interface as a value.
+- A Go function returning the comma-ok pair `(T, bool)` is adapted to Ard `T?`.
+- Otherwise a single Go result maps to its Ard type by the normal rules: primitives, `[]T` to `[T]`, `map[K]V` to `[K:V]`, `any` to `Dynamic`, `func` to a function type, and `chan T` to a channel (directional per `0032-select-on-channels.md`).
+
+These boundary adaptations are distinct from how Ard's own types lower. An Ard `Result[T, E]` value still lowers to `runtime.Result[T, E]` and is not collapsed into `(T, error)`; the adaptations above apply only when *calling* idiomatic Go through `use go:`.
+
 #### Host Go code is a package in the output
 
 The Go code a project provides is carried into the generated Go module verbatim, as an ordinary Go package, and is imported from Ard with the go prefix like any other Go package. There is no companion-rewriting step, no per-module copying, and no special package clause handling.
@@ -537,13 +546,15 @@ The Go code a project provides is carried into the generated Go module verbatim,
 - Ard references it with `use go:<project>/ffi`, and calls it exactly as it would call `math` or `image`.
 - Dependency Go packages are carried in the same way, under the dependency's namespaced subtree.
 
+Here `<project>` is the Ard project name, which is also the generated Go module path, so a project imports its own Go code as `use go:<project>/ffi`. A `tic_tac_toe` project writes `use go:tic_tac_toe/ffi`. The project's Go module is wired into the generated module through `require`/`replace`, so the import resolves at type-check time as well as in the build. The standard library is the bootstrap instance of this same mechanism: its modules import their Go implementation as `use go:ard/ffi`, which the compiler canonicalizes to the bundled standard-library Go module path.
+
 This supersedes the earlier statement in the Packages and Modules section that FFI companions land in the declaring module's package. Host Go code is its own package and is imported, not inlined, so packages shared across modules are not duplicated and package-level state is not split.
 
-#### Deprecating extern
+#### `extern` is removed
 
-The `extern fn` and `extern type` declarations, and the `extern` keyword, exist only to bind Ard declarations to host functions and types. Direct Go interop makes them redundant: anything an extern expressed is expressed by importing the Go package and calling it. The `extern` mechanism is therefore deprecated and is removed once migration is complete.
+The `extern fn` and `extern type` declarations and the `extern` keyword existed only to bind Ard declarations to host functions and types. Direct Go interop makes them redundant — anything an extern expressed is expressed by importing the Go package and calling it — so they have been removed. `extern` is no longer valid syntax.
 
-The standard library participates in this migration. Today `std_lib/*.ard` uses `extern fn` extensively; under this model the standard library's Go implementations are an ordinary Go package that the `ard/*` modules import via `use go:`, exactly like user-provided Go code. Until the migration finishes, `extern` lowering remains supported as a direct call to its bound Go target, with the required import added.
+The standard library completed this migration: its Go implementation is an ordinary Go package imported via `use go:ard/ffi`, exactly like user-provided Go code. No generated FFI binding tables or Ard-type mirror types remain, and the runtime is reduced to `Maybe` and `Result`.
 
 ## Consequences
 
@@ -551,7 +562,7 @@ The standard library participates in this migration. Today `std_lib/*.ard` uses 
 - Ard visibility maps onto Go's package/export boundary, so cross-module name collisions are resolved structurally and module-name-prefixed artifact identifiers are no longer needed.
 - `package main` is always synthetic and decoupled from Ard source, matching Ard's model where any module can host an entry.
 - The standard library lowers under the same rules as user code, which requires stdlib public declarations to be exported with natural Go names.
-- Interop with Go is unified into direct `use go:` interop. Host Go code is carried into the generated module as an ordinary imported package, the `extern` binding mechanism is deprecated and eventually removed, and the standard library migrates from `extern fn` to importing its Go implementation package via `use go:`.
+- Interop with Go is unified into direct `use go:` interop. Host Go code is carried into the generated module as an ordinary imported package, the `extern` binding mechanism has been removed, and the standard library imports its Go implementation package via `use go:ard/ffi`.
 - Dependencies remain inside one Go module under a namespaced subtree, keeping output self-contained.
 - The backend commits to minimizing synthetic helpers, with only `Maybe` and `Result` sanctioned as shared runtime types. `Void` lowers to `struct{}` and the structural-map helper is removed.
 - Equality is restricted to primitives, nullable primitives, and enums, so no structural-equality helper is generated. Map iteration order is unspecified and uses Go's native range, removing the sorted-key helpers. The previously generated equality and key-sorting helpers become dead and are removed.
