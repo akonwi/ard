@@ -14,14 +14,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -597,82 +595,6 @@ func ExtractField(data any, name string) (any, error) {
 	return nil, fmt.Errorf("%s", formatDynamicValueForError(data))
 }
 
-func HTTPDo(method string, url string, body any, headers map[string]string, timeout *int) (*http.Response, error) {
-	var bodyReader io.Reader = strings.NewReader("")
-	if body != nil {
-		switch value := body.(type) {
-		case string:
-			bodyReader = strings.NewReader(value)
-		case []byte:
-			bodyReader = strings.NewReader(string(value))
-		default:
-			encoded, err := json.Marshal(value)
-			if err != nil {
-				return nil, err
-			}
-			bodyReader = strings.NewReader(string(encoded))
-		}
-	}
-
-	req, err := http.NewRequest(method, url, bodyReader)
-	if err != nil {
-		return nil, err
-	}
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-
-	client := &http.Client{}
-	if timeout != nil {
-		client.Timeout = time.Duration(*timeout) * time.Second
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-func HTTPResponseHeaders(resp *http.Response) map[string]string {
-	if resp == nil {
-		return map[string]string{}
-	}
-	headers := make(map[string]string, len(resp.Header))
-	for key, values := range resp.Header {
-		if len(values) > 0 {
-			headers[key] = values[0]
-		}
-	}
-	return headers
-}
-
-func HTTPResponseBody(resp *http.Response) (string, error) {
-	if resp == nil {
-		return "", fmt.Errorf("invalid HTTP response handle")
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return string(body), nil
-}
-
-func HTTPResponseClose(resp *http.Response) {
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
-	}
-}
-
-// HTTPListenAndServe serves the default mux on addr. Handlers are registered
-// from Ard with net/http's HandleFunc; this just starts the server, since Ard
-// cannot yet pass a nil http.Handler.
-func HTTPListenAndServe(addr string) error {
-	return http.ListenAndServe(addr, nil)
-}
-
-// HTTPServe registers each handler on a mux and serves. The handlers receive the
-// raw *http.Request and http.ResponseWriter; the Ard http module builds its
-// Request/Response and writes the result, so this stays Ard-agnostic.
 func formatDynamicValueForError(data any) string {
 	switch value := data.(type) {
 	case nil:

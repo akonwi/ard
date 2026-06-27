@@ -7,8 +7,6 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
@@ -2187,70 +2184,6 @@ func TestGoTargetParityCryptoUUID(t *testing.T) {
 	if !pattern.MatchString(uuid) {
 		t.Fatalf("uuid = %q", uuid)
 	}
-}
-
-func TestGoTargetParityHTTP(t *testing.T) {
-	runGoParityCases(t, []goParityCase{
-		{
-			name: "method implements tostring",
-			input: `
-				use ard/http
-				fn main() Str {
-					let method = http::Method::Post
-					"{method}"
-				}
-			`,
-		},
-	})
-
-	t.Run("request timeout uses req timeout", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			time.Sleep(1100 * time.Millisecond)
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("ok"))
-		}))
-		defer server.Close()
-		runGoParityCases(t, []goParityCase{{
-			name: "http send request timeout fallback",
-			input: fmt.Sprintf(`
-				use ard/http
-				use ard/maybe
-				fn main() Int {
-					http::send(http::Request{
-						method: http::Method::Get,
-						url: %q,
-						headers: [:],
-						timeout: maybe::some(1),
-					}).or(http::Response::new(-1, "")).status
-				}
-			`, server.URL),
-		}})
-	})
-
-	t.Run("call site timeout overrides req timeout", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			time.Sleep(1100 * time.Millisecond)
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte("created"))
-		}))
-		defer server.Close()
-		runGoParityCases(t, []goParityCase{{
-			name: "http send override timeout succeeds",
-			input: fmt.Sprintf(`
-				use ard/http
-				use ard/maybe
-				fn main() Int {
-					let req = http::Request{
-						method: http::Method::Get,
-						url: %q,
-						headers: [:],
-						timeout: maybe::some(1),
-					}
-					http::send(req, 2).or(http::Response::new(-1, "")).status
-				}
-			`, server.URL),
-		}})
-	})
 }
 
 func TestGoTargetParitySQL(t *testing.T) {

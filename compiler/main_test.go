@@ -3,14 +3,11 @@ package main
 import (
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
@@ -472,55 +469,6 @@ func runGoSampleBinary(t *testing.T, sourcePath, stdin string) string {
 		t.Fatalf("run go sample %s wrote stderr:\n%s", sourcePath, stderr.String())
 	}
 	return stdout.String()
-}
-
-func freeTCPPort(t *testing.T) int {
-	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen on free TCP port: %v", err)
-	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port
-}
-
-func waitForHTTPServer(t *testing.T, baseURL string) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := http.Get(baseURL + "/")
-		if err == nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("server at %s did not become ready", baseURL)
-}
-
-func assertHTTPResponse(t *testing.T, method, url, body string, wantStatus int, wantBody string) {
-	t.Helper()
-	req, err := http.NewRequest(method, url, strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("new request %s %s: %v", method, url, err)
-	}
-	if body != "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("%s %s: %v", method, url, err)
-	}
-	defer resp.Body.Close()
-	gotBodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read response body: %v", err)
-	}
-	gotBody := strings.TrimRight(string(gotBodyBytes), "\n")
-	if resp.StatusCode != wantStatus || gotBody != wantBody {
-		t.Fatalf("%s %s = (%d, %q), want (%d, %q)", method, url, resp.StatusCode, gotBody, wantStatus, wantBody)
-	}
 }
 
 func TestRunGoTargetModulesSample(t *testing.T) {

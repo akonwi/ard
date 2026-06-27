@@ -82,14 +82,6 @@ func TestStructs(t *testing.T) {
 			},
 		},
 		{
-			name: "Using a package struct",
-			input: `use ard/http` + "\n" +
-				`let req = http::Request{method:http::Method::Get, url:"google.com", headers: [:]}` + "\n" +
-				`req.url`,
-			// Note: We skip detailed checking of ModuleStructInstance FieldTypes
-			// because it contains Type structs with unexported fields that are hard to compare
-		},
-		{
 			name: "Cannot instantiate with incorrect fields",
 			input: personStructInput + "\n" + strings.Join([]string{
 				`Person{ name: "Alice", age: 30 }`,

@@ -972,44 +972,6 @@ fn main() Scrollview {
 	assertLocationStart(t, refs[6], filePath, 13, 2)
 }
 
-// TestReferencesImportedSymbols verifies find-references for imported members.
-func TestReferencesImportedSymbols(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	responsesSource := `use ard/http
-
-fn json_error(mut res: http::Response, status: Int, message: Str) {
-  res.status = status
-}
-`
-	responsesPath := filepath.Join(root, "responses.ard")
-	if err := os.WriteFile(responsesPath, []byte(responsesSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use ard/http
-use test_project/responses
-
-fn main(mut res: http::Response) {
-  responses::json_error(res, 400, "Nope")
-  responses::json_error(res, 500, "Oops")
-}
-`
-	filePath := filepath.Join(root, "routes.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	refs := requireReferences(t, source, filePath, 4, 15, true)
-	if len(refs) != 3 {
-		t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
-	}
-	assertLocationStart(t, refs[0], responsesPath, 2, 0)
-	assertLocationStart(t, refs[1], filePath, 4, 13)
-	assertLocationStart(t, refs[2], filePath, 5, 13)
-}
-
 // TestReferencesWorkspaceFiles verifies find-references across project files.
 func TestReferencesWorkspaceFiles(t *testing.T) {
 	root := t.TempDir()
@@ -1320,46 +1282,6 @@ fn main() {
 	assertDefinitionStart(t, loc, textPath, 0, 0)
 }
 
-func TestDefinitionImportedModuleSymbols(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	responsesSource := `use ard/http
-
-let api_name = "ranger"
-
-fn json_error(mut res: http::Response, status: Int, message: Str) {
-  res.status = status
-}
-`
-	responsesPath := filepath.Join(root, "responses.ard")
-	if err := os.WriteFile(responsesPath, []byte(responsesSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use ard/http
-use test_project/responses
-
-fn main(mut res: http::Response) {
-  responses::json_error(res, 400, "Nope")
-  let name = responses::api_name
-}
-`
-	filePath := filepath.Join(root, "routes.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Run("imported function", func(t *testing.T) {
-		loc := requireDefinition(t, source, filePath, 4, 15)
-		assertDefinitionStart(t, loc, responsesPath, 4, 0)
-	})
-	t.Run("module variable", func(t *testing.T) {
-		loc := requireDefinition(t, source, filePath, 5, 25)
-		assertDefinitionStart(t, loc, responsesPath, 2, 0)
-	})
-}
-
 // TestDefinitionImportedExternFunction verifies go-to-definition for imported extern functions.
 func TestDefinitionImportedExternFunction(t *testing.T) {
 	root := t.TempDir()
@@ -1531,36 +1453,6 @@ fn main(box: boxes::Box<Int>) {
 	}
 	help := requireSignatureHelp(t, source, filePath, line, char)
 	assertSignature(t, help, "fn boxes::Box<Int>.replace(item: Int) Int", 0)
-}
-
-// TestSignatureHelpImportedStaticFunction verifies signature help for imported module calls.
-func TestSignatureHelpImportedStaticFunction(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	responsesSource := `use ard/http
-
-fn json_error(mut res: http::Response, status: Int, message: Str) {
-  res.status = status
-}
-`
-	if err := os.WriteFile(filepath.Join(root, "responses.ard"), []byte(responsesSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use ard/http
-use test_project/responses
-
-fn main(mut res: http::Response) {
-  responses::json_error(res, 400, "Nope")
-}
-`
-	filePath := filepath.Join(root, "routes.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	help := requireSignatureHelp(t, source, filePath, 4, 31)
-	assertSignature(t, help, "fn responses::json_error(mut res: http::Response, status: Int, message: Str) Void", 1)
 }
 
 func TestSignatureHelpDirectGoFunction(t *testing.T) {
@@ -1791,79 +1683,6 @@ fn main() {
 	}
 }
 
-// TestCompletionImportedInstanceMembers verifies imported and generic instance completions.
-func TestCompletionImportedInstanceMembers(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	boxesSource := `struct Box {
-  item: $T,
-}
-
-impl Box {
-  fn get() $T { self.item }
-}
-`
-	if err := os.WriteFile(filepath.Join(root, "boxes.ard"), []byte(boxesSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use ard/http as web
-use test_project/boxes
-
-fn inspect(req: web::Request, response: web::Response, box: boxes::Box<Int>) {
-  req.
-  response.
-  req.method.
-  box.
-}
-`
-	filePath := filepath.Join(root, "main.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	reqItems := computeCompletions(source, filePath, protocol.Position{Line: 4, Character: 6})
-	assertCompletion(t, reqItems, "url", "Str")
-	assertCompletion(t, reqItems, "method", "web::Method")
-
-	responseItems := computeCompletions(source, filePath, protocol.Position{Line: 5, Character: 11})
-	assertCompletion(t, responseItems, "is_ok", "fn () Bool")
-
-	methodItems := computeCompletions(source, filePath, protocol.Position{Line: 6, Character: 13})
-	assertCompletion(t, methodItems, "to_str", "fn () Str")
-
-	boxItems := computeCompletions(source, filePath, protocol.Position{Line: 7, Character: 6})
-	assertCompletion(t, boxItems, "item", "Int")
-	assertCompletion(t, boxItems, "get", "fn () Int")
-}
-
-// TestCompletionStaticMembers verifies double-colon completions for modules and static type members.
-func TestCompletionStaticMembers(t *testing.T) {
-	source := `use ard/http as web
-
-fn main() {
-  web::
-  web::Response::
-  web::Method::
-  Int::
-}
-`
-
-	moduleItems := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 7})
-	assertCompletion(t, moduleItems, "Response", "web::Response")
-	assertCompletion(t, moduleItems, "send", "fn (req: web::Request, timeout: Int?) web::Response!Str")
-
-	responseItems := computeCompletions(source, "test.ard", protocol.Position{Line: 4, Character: 17})
-	assertCompletion(t, responseItems, "new", "fn (status: Int, body: Str) web::Response")
-
-	methodItems := computeCompletions(source, "test.ard", protocol.Position{Line: 5, Character: 15})
-	assertCompletion(t, methodItems, "Get", "web::Method")
-
-	intItems := computeCompletions(source, "test.ard", protocol.Position{Line: 6, Character: 7})
-	assertCompletion(t, intItems, "from_str", "fn (str: Str) Int?")
-}
-
 // TestCompletionUserModuleStaticMembers verifies user module functions and variables complete after ::.
 func TestCompletionDirectGoPackageSymbols(t *testing.T) {
 	source := `use go:math
@@ -1961,39 +1780,6 @@ fn main() {
 	if _, ok := completionItemByLabel(items, "helper_test"); ok {
 		t.Fatalf("test function completion should be excluded: %#v", items)
 	}
-}
-
-func TestCompletionUserModuleStaticMembers(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	responsesSource := `use ard/http
-
-let api_name = "ranger"
-
-fn json_error(mut res: http::Response, status: Int, message: Str) {
-  res.status = status
-}
-`
-	if err := os.WriteFile(filepath.Join(root, "responses.ard"), []byte(responsesSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use ard/http
-use test_project/responses
-
-fn main() {
-  responses::
-}
-`
-	filePath := filepath.Join(root, "routes.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	items := computeCompletions(source, filePath, protocol.Position{Line: 4, Character: 13})
-	assertCompletion(t, items, "json_error", "fn (mut res: http::Response, status: Int, message: Str) Void")
-	assertCompletion(t, items, "api_name", "Str")
 }
 
 // TestCompletionTraitMethods verifies dot completions for trait-typed receivers.
@@ -2657,107 +2443,6 @@ fn bad(state: mut status::State) {
 	info := computeHover(source, filePath, protocol.Position{Line: 3, Character: 9})
 	if info != nil && strings.Contains(info.content, "fn mut status::State.Mutate") {
 		t.Fatalf("hover content = %q; unsupported enum pointer receiver should not be advertised", info.content)
-	}
-}
-
-// TestHoverImportedModuleTypes verifies imported types use the source alias in hovers.
-func TestHoverImportedModuleTypes(t *testing.T) {
-	source := `use ard/http as web
-
-fn inspect(req: web::Request, response: web::Response) {
-  let url = req.url
-  let method = req.method
-  response.is_ok()
-  req.method.to_str()
-}
-
-fn main() {
-  let response = web::Response::new(200, "ok")
-  let responses: [web::Response] = [response]
-}
-`
-
-	tests := []struct {
-		name string
-		line uint32
-		char uint32
-		want string
-	}{
-		{name: "imported string field", line: 3, char: 17, want: "web::Request.url: Str"},
-		{name: "imported field type", line: 4, char: 21, want: "web::Request.method: web::Method"},
-		{name: "imported struct method", line: 5, char: 12, want: "fn web::Response.is_ok() Bool"},
-		{name: "imported enum method after field", line: 6, char: 14, want: "fn web::Method.to_str() Str"},
-		{name: "inferred imported type", line: 10, char: 7, want: "web::Response"},
-		{name: "imported static constructor", line: 10, char: 33, want: "fn web::Response::new(status: Int, body: Str) web::Response"},
-		{name: "imported type in list", line: 11, char: 7, want: "[web::Response]"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, "test.ard", pos)
-			if info == nil {
-				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
-			}
-			if !strings.Contains(info.content, tt.want) {
-				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
-			}
-		})
-	}
-}
-
-// TestHoverUserModuleFunctionSignature verifies static function hovers from user imports.
-func TestHoverUserModuleFunctionSignature(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	responsesSource := `use ard/http
-
-let api_name = "ranger"
-
-fn json_error(mut res: http::Response, status: Int, message: Str) {
-  res.status = status
-}
-`
-	if err := os.WriteFile(filepath.Join(root, "responses.ard"), []byte(responsesSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use ard/http
-use test_project/responses
-
-fn main(mut res: http::Response) {
-  responses::json_error(res, 400, "Nope")
-  let name = responses::api_name
-}
-`
-	filePath := filepath.Join(root, "routes.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	tests := []struct {
-		name string
-		line uint32
-		char uint32
-		want string
-	}{
-		{name: "module alias", line: 4, char: 4, want: "module responses: test_project/responses"},
-		{name: "imported function", line: 4, char: 15, want: "fn responses::json_error(mut res: http::Response, status: Int, message: Str) Void"},
-		{name: "module variable", line: 5, char: 25, want: "responses::api_name: Str"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, filePath, pos)
-			if info == nil {
-				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
-			}
-			if !strings.Contains(info.content, tt.want) {
-				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
-			}
-		})
 	}
 }
 

@@ -4013,9 +4013,6 @@ func TestCollectFFIGoImportsIncludesStdlibImportsWithoutSourceCheckout(t *testin
 	if imports["sql"] != "database/sql" {
 		t.Fatalf("embedded stdlib FFI imports missing sql: %#v", imports)
 	}
-	if imports["http"] != "net/http" {
-		t.Fatalf("embedded stdlib FFI imports missing http: %#v", imports)
-	}
 }
 
 func TestWriteProgramUsesEmbeddedArdModuleForReleaseVersion(t *testing.T) {
