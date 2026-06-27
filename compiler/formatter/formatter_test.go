@@ -85,6 +85,11 @@ func TestFormat(t *testing.T) {
 			output: "fn main() {\n  match maybe_name {\n    name => io::print(name),\n    _ => (),\n  }\n}\n",
 		},
 		{
+			name:   "formats select arms with bindings, sends, and a default",
+			input:  "fn main() {\n  select {\n    let v = jobs.recv() => use(v),\n    sink.send(x) => done(),\n    timeout.recv() => stop(),\n    _ => idle(),\n  }\n}\n",
+			output: "fn main() {\n  select {\n    let v = jobs.recv() => use(v),\n    sink.send(x) => done(),\n    timeout.recv() => stop(),\n    _ => idle(),\n  }\n}\n",
+		},
+		{
 			name:   "keeps self method calls with dot",
 			input:  "struct Fiber {\n  result: Int\n}\nimpl Fiber {\n  fn join() {}\n  fn get() Int {\n    self.join()\n    self.result\n  }\n}\n",
 			output: "struct Fiber {\n  result: Int,\n}\nimpl Fiber {\n  fn join() {}\n\n  fn get() Int {\n    self.join()\n    self.result\n  }\n}\n",

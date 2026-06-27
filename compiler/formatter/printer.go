@@ -804,6 +804,7 @@ func renderableExpressionStatement(statement parse.Statement) (parse.Expression,
 		*parse.StaticProperty, parse.StaticProperty,
 		*parse.StaticFunction, parse.StaticFunction,
 		*parse.MatchExpression,
+		*parse.SelectExpression,
 		*parse.ConditionalMatchExpression,
 		*parse.AnonymousFunction,
 		*parse.Try,
@@ -936,6 +937,8 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 		return p.renderExpressionDoc(&copy, parentPrecedence)
 	case *parse.MatchExpression:
 		return p.renderMatchExpressionDoc(node)
+	case *parse.SelectExpression:
+		return p.renderSelectExpressionDoc(node)
 	case *parse.ConditionalMatchExpression:
 		return p.renderConditionalMatchExpressionDoc(node)
 	case *parse.AnonymousFunction:
@@ -1331,12 +1334,17 @@ func (p printer) renderConditionalMatchCaseDoc(matchCase parse.ConditionalMatchC
 }
 
 func (p printer) renderMatchCaseDoc(matchCase parse.MatchCase) doc {
-	pattern := p.renderExpression(matchCase.Pattern, 0)
-	if len(matchCase.Body) == 0 {
+	return p.renderArmWithPattern(p.renderExpression(matchCase.Pattern, 0), matchCase.Body)
+}
+
+// renderArmWithPattern renders a `pattern => body` arm shared by match and
+// select cases.
+func (p printer) renderArmWithPattern(pattern string, body []parse.Statement) doc {
+	if len(body) == 0 {
 		return dText(pattern + " => ()")
 	}
-	if len(matchCase.Body) == 1 {
-		if expr, ok := renderableExpressionStatement(matchCase.Body[0]); ok {
+	if len(body) == 1 {
+		if expr, ok := renderableExpressionStatement(body[0]); ok {
 			rendered := p.renderExpression(expr, 0)
 			if canInlineMatchBlockExpression(expr) && !strings.Contains(rendered, "\n") {
 				line := pattern + " => { " + rendered + " }"
@@ -1358,10 +1366,40 @@ func (p printer) renderMatchCaseDoc(matchCase parse.MatchCase) doc {
 
 	return dGroup(dConcat(
 		dText(pattern+" => {"),
-		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(matchCase.Body))),
+		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(body))),
 		dHardLine(),
 		dText("}"),
 	))
+}
+
+func (p printer) renderSelectExpressionDoc(node *parse.SelectExpression) doc {
+	caseDocs := make([]doc, 0, len(node.Cases)+len(node.Comments))
+	for _, comment := range node.Comments {
+		caseDocs = append(caseDocs, dText(p.renderComment(comment.Value)))
+	}
+	for _, arm := range node.Cases {
+		caseDocs = append(caseDocs, dConcat(p.renderSelectCaseDoc(arm), dText(",")))
+	}
+
+	body := dText("")
+	if len(caseDocs) > 0 {
+		body = dJoin(dHardLine(), caseDocs)
+	}
+
+	return dGroup(dConcat(
+		dText("select {"),
+		dIndent(dConcat(dHardLine(), body)),
+		dHardLine(),
+		dText("}"),
+	))
+}
+
+func (p printer) renderSelectCaseDoc(arm parse.SelectCase) doc {
+	pattern := p.renderExpression(arm.Op, 0)
+	if arm.Binding != nil {
+		pattern = "let " + arm.Binding.Name + " = " + pattern
+	}
+	return p.renderArmWithPattern(pattern, arm.Body)
 }
 
 const (
