@@ -65,6 +65,7 @@ const (
 	GoValuePointer GoValueKind = "pointer"
 	GoValueError   GoValueKind = "error"
 	GoValueFunc    GoValueKind = "func"
+	GoValueChan    GoValueKind = "chan"
 	GoValueOther   GoValueKind = "other"
 )
 
@@ -84,7 +85,9 @@ type GoValueType struct {
 	// Func holds the parameter/result types when Kind == GoValueFunc, i.e. the
 	// Go parameter is a `func(...)` value that an Ard closure can satisfy.
 	Func *GoSignature
-	Type types.Type
+	// ChanDir holds the direction when Kind == GoValueChan.
+	ChanDir types.ChanDir
+	Type    types.Type
 }
 
 type GoType struct {
@@ -1230,6 +1233,23 @@ func (c *Checker) directGoValueArdType(goType GoValueType, loc parse.Location) (
 			}
 			return MakeMap(key, value), true
 		}
+	case GoValueChan:
+		if goType.Elem == nil {
+			c.addError("Go channel type is missing element metadata", loc)
+			return nil, false
+		}
+		elem, ok := c.directGoValueArdType(*goType.Elem, loc)
+		if !ok {
+			return nil, false
+		}
+		switch goType.ChanDir {
+		case types.RecvOnly:
+			return MakeReceiver(elem), true
+		case types.SendOnly:
+			return MakeSender(elem), true
+		default:
+			return MakeChan(elem), true
+		}
 	case GoValueError:
 		c.addError("Go error values require a Result adapter", loc)
 		return nil, false
@@ -2372,6 +2392,11 @@ func goValueTypeSeen(typ types.Type, seen map[types.Type]bool) GoValueType {
 		out.Kind = GoValueFunc
 		sig := goSignature(underlying)
 		out.Func = &sig
+	case *types.Chan:
+		elem := goValueTypeSeen(underlying.Elem(), seen)
+		out.Kind = GoValueChan
+		out.Elem = &elem
+		out.ChanDir = underlying.Dir()
 	}
 	return out
 }

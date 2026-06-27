@@ -1971,3 +1971,50 @@ func TestDirectGoInterfaceCompatibleFallsThroughToMethodSet(t *testing.T) {
 		t.Fatal("matching method sets should satisfy the interface despite AssignableTo failing")
 	}
 }
+
+func TestDirectGoReceiveOnlyChannelMapsToReceiver(t *testing.T) {
+	intElem := goParam(GoValueInt, "int")
+	recvChan := GoValueType{Kind: GoValueChan, Expr: "<-chan int", Elem: &intElem, ChanDir: gotypes.RecvOnly}
+	pkgs := map[string]*GoPackage{
+		"timer": {ImportPath: "timer", Name: "timer", Functions: map[string]GoFunction{
+			"Tick": {Name: "Tick", Signature: GoSignature{Results: []GoValueType{recvChan}}},
+		}},
+	}
+
+	t.Run("receive-only channel return maps to a Receiver usable in select", func(t *testing.T) {
+		result := parse.Parse([]byte(`use go:timer
+use ard/channel
+fn main() {
+  let tick = timer::Tick()
+  let ch = channel::new<Int>(1)
+  select {
+    let v = ch.recv() => {},
+    tick.recv() => {},
+  }
+}`), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: pkgs}})
+		c.Check()
+		if c.HasErrors() {
+			t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+		}
+	})
+
+	t.Run("a receive-only Go channel rejects send", func(t *testing.T) {
+		result := parse.Parse([]byte(`use go:timer
+fn main() {
+  let tick = timer::Tick()
+  tick.send(1)
+}`), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: pkgs}})
+		c.Check()
+		if !c.HasErrors() {
+			t.Fatalf("expected a diagnostic for send on a receive-only channel")
+		}
+	})
+}
