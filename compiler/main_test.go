@@ -171,11 +171,11 @@ func TestRunGoTargetTraitsSample(t *testing.T) {
 	}
 }
 
-func TestRunGoTargetAsyncAllSample(t *testing.T) {
+func TestRunGoTargetAsyncSample(t *testing.T) {
 	output := runGoSampleBinary(t, filepath.Join("samples", "async.ard"), "")
-	// async::all runs each task on its own goroutine and blocks until every one
-	// finishes, so all task output and the trailing line must be present.
-	for _, want := range []string{"task a", "task b", "task c", "all done"} {
+	// async::start fires a goroutine and the program coordinates completion over
+	// a channel, so both lines must be present and in order.
+	for _, want := range []string{"working in a goroutine", "done"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("async sample output missing %q:\n%s", want, output)
 		}

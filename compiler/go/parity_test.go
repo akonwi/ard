@@ -2971,9 +2971,8 @@ fn main() Bool {
 use ard/async
 fn main() Bool {
   let ch = channel::new<Int>(0)
-  let fiber = async::start(fn() { ch.send(7) })
+  async::start(fn() { ch.send(7) })
   let v = ch.recv().expect("recv")
-  fiber.Wait()
   v == 7
 }`,
 			want: "true",
@@ -3148,11 +3147,10 @@ fn main() Bool {
 use ard/async
 fn main() Bool {
   let ch = channel::new<Int>(0)
-  let f = async::start(fn() { ch.send(7) })
+  async::start(fn() { ch.send(7) })
   let got = select {
     let v = ch.recv() => v.expect("v"),
   }
-  f.Wait()
   got == 7
 }`,
 			want: "true",

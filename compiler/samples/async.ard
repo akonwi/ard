@@ -1,14 +1,16 @@
 use ard/async
+use ard/channel
 use ard/io
 
 fn main() {
-  let a = async::start(fn() { io::print("task a") })
-  let b = async::start(fn() { io::print("task b") })
-  let c = async::start(fn() { io::print("task c") })
+  let done = channel::new<Bool>(0)
 
-  a.Wait()
-  b.Wait()
-  c.Wait()
+  async::start(fn() {
+    io::print("working in a goroutine")
+    done.send(true)
+  })
 
-  io::print("all done")
+  // start is fire-and-forget; coordinate with a channel.
+  let _ = done.recv()
+  io::print("done")
 }

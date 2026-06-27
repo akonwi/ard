@@ -1,13 +1,10 @@
 use go:github.com/akonwi/ard/std_lib/ffi as host
 use go:time as time
 
-// Fiber is a handle to concurrent work started with start().
-type Fiber = host::Fiber
-
-// start runs `do` concurrently on a new goroutine and returns a Fiber that can
-// be awaited with Wait().
-fn start(do: fn() Void) Fiber {
-  host::Start(do)
+// start runs `do` concurrently on a new goroutine. It is fire-and-forget;
+// coordinate completion or results with channels (see ard/channel).
+fn start(do: fn() Void) {
+  host::Spawn(do)
 }
 
 // sleep blocks the current task for the given number of nanoseconds.
