@@ -22,7 +22,6 @@ The only shared runtime types the backend is allowed to depend on for encoding i
 
 - `runtime.Maybe[T]`
 - `runtime.Result[T, E]`
-- `runtime.Fiber[T]`
 
 Introducing any other generated cross-cutting helper type requires justification that it encodes an Ard semantic Go cannot express directly. Helpers that merely paper over an unfinished lowering should be removed as the lowering is completed.
 
@@ -182,7 +181,7 @@ Local variables and parameters never cross package boundaries, so they are conve
 
 ### Types
 
-The backend lowers Ard types to Go types directly. The only shared runtime types it may rely on are `runtime.Maybe[T]`, `runtime.Result[T, E]`, and `runtime.Fiber[T]`; everything else is either a Go builtin, a Go composite, or the generated representation of a specific user type.
+The backend lowers Ard types to Go types directly. The only shared runtime types it may rely on are `runtime.Maybe[T]` and `runtime.Result[T, E]`; everything else is either a Go builtin, a Go composite, or the generated representation of a specific user type.
 
 #### Primitives
 
@@ -204,12 +203,13 @@ The backend lowers Ard types to Go types directly. The only shared runtime types
 - `Map[K]V` lowers to `map[K]V`. Map key types are constrained, during checking, to types that are Go strictly-comparable and whose Go `==` matches Ard equality. This allows all primitives (including `Float`), enums, and structs whose fields are all valid key types. It excludes `Maybe` (which is Go-comparable but would compare by pointer identity, not value, because it is pointer-backed), `List`, `Map`, and `Dynamic`. Every Ard map therefore lowers to a plain Go map and no structural-map helper is generated. `Float` keys carry Go's usual `NaN`-key behavior, which is accepted.
 - `Struct` lowers to a Go struct. Fields appear in AIR index order and are always exported regardless of the struct's visibility, so every struct is uniformly serializable; the struct type's own visibility still governs cross-package naming. Each field carries a `json` tag preserving its original Ard name (see the JSON and marshalling section). Field indirection is not added for the common recursive cases: a nullable self-reference is finite because `Maybe[T]` is pointer-backed, and list/map self-references are finite through the slice/map. Explicit pointer indirection is inserted only for a non-nullable, non-collection recursive cycle that would otherwise be infinitely sized (see `0020-support-recursive-struct-fields-through-indirection.md`).
 
-#### Maybe, Result, Fiber, Dynamic
+#### Maybe, Result, Dynamic
 
 - `Maybe[T]` lowers to `runtime.Maybe[T]` (`0012-represent-optional-values-with-maybe.md`, `0024-preserve-maybe-semantics-in-go-lowering.md`).
 - `Result[T, E]` lowers to `runtime.Result[T, E]` (`0005-use-result-maybe-and-try-for-error-handling.md`). It is not collapsed into Go's `(T, error)` multi-return.
-- `Fiber[T]` lowers to `runtime.Fiber[T]` (`0003-use-generic-fibers-for-async-eval.md`).
 - `Dynamic` lowers to `any`.
+
+There is no `Fiber` runtime type: async is a fire-and-forget `async::start` goroutine plus channels (`0033-async-is-goroutines-and-channels.md`).
 
 #### Enums
 
@@ -439,17 +439,16 @@ The generated program depends on a single small runtime package, `github.com/ako
 
 #### Sanctioned runtime types
 
-The runtime defines exactly three types:
+The runtime defines exactly two types:
 
 - `runtime.Maybe[T]` for optional values. It is pointer-backed internally, which is intentional: the indirection makes recursive nullable fields finite-size, and it is the reason nullable-primitive equality lowers inline and `Maybe`-keyed maps are disallowed.
 - `runtime.Result[T, E]` for fallible values, with `Value`, `Err`, and `Ok` fields that `try` reads directly. It is not collapsed into Go's `(T, error)`.
-- `runtime.Fiber[T]` for asynchronous results, with `SpawnFiber`, `JoinFiber`, and `GetFiber`.
 
 No other shared runtime type is introduced. The one exception sanctioned elsewhere in this contract is the minimal per-primitive boxing adapter required for dynamic trait objects over builtins, which is generated, not part of the runtime package.
 
 #### Async
 
-Fiber-based async (`0003-use-generic-fibers-for-async-eval.md`) uses `runtime.Fiber` and its spawn/join/get functions. Typed channels (`0019-use-typed-channels-for-fiber-communication.md`) lower to native Go `chan T` rather than a runtime type.
+Async is goroutines and channels, with no runtime shape (`0033-async-is-goroutines-and-channels.md`). `async::start(fn() Void)` runs a closure on a new goroutine via a `use go:` helper; coordination is ordinary Ard over channels. Typed channels (`0019-use-typed-channels-for-fiber-communication.md`, `0032-select-on-channels.md`) lower to native Go `chan T` rather than a runtime type.
 
 #### Dynamic
 
@@ -461,7 +460,7 @@ The runtime package may import only the Go standard library. It must never impor
 
 #### Standard library boundary
 
-Standard library behavior lives in Ard modules and their FFI companions under `std_lib/ffi`, not in the runtime package. Utilities that back specific stdlib modules — for example command-line argument access for `ard/argv` — are provided through FFI companions rather than the runtime, keeping the runtime limited to the three semantic types and their async/try support.
+Standard library behavior lives in Ard modules and their FFI companions under `std_lib/ffi`, not in the runtime package. Utilities that back specific stdlib modules — for example command-line argument access for `ard/argv`, or the goroutine-spawn primitive for `ard/async` — are provided through FFI companions rather than the runtime, keeping the runtime limited to the two semantic types and their `try` support.
 
 ### JSON and marshalling
 
@@ -554,9 +553,9 @@ The standard library participates in this migration. Today `std_lib/*.ard` uses 
 - The standard library lowers under the same rules as user code, which requires stdlib public declarations to be exported with natural Go names.
 - Interop with Go is unified into direct `use go:` interop. Host Go code is carried into the generated module as an ordinary imported package, the `extern` binding mechanism is deprecated and eventually removed, and the standard library migrates from `extern fn` to importing its Go implementation package via `use go:`.
 - Dependencies remain inside one Go module under a namespaced subtree, keeping output self-contained.
-- The backend commits to minimizing synthetic helpers, with only `Maybe`, `Result`, and `Fiber` sanctioned as shared runtime types. `Void` lowers to `struct{}` and the structural-map helper is removed.
+- The backend commits to minimizing synthetic helpers, with only `Maybe` and `Result` sanctioned as shared runtime types. `Void` lowers to `struct{}` and the structural-map helper is removed.
 - Equality is restricted to primitives, nullable primitives, and enums, so no structural-equality helper is generated. Map iteration order is unspecified and uses Go's native range, removing the sorted-key helpers. The previously generated equality and key-sorting helpers become dead and are removed.
-- The runtime package is reduced to `Maybe`, `Result`, and `Fiber` and must import only the Go standard library. The universal boxed `Object`/`Kind` representation, structural-map, equality, sorted-key, and void helpers are removed, and stdlib utilities such as argv access move to FFI companions.
+- The runtime package is reduced to `Maybe` and `Result` and must import only the Go standard library. The universal boxed `Object`/`Kind` representation, the `Fiber` async shape, the structural-map, equality, sorted-key, and void helpers are removed, and stdlib utilities such as argv access and the `ard/async` goroutine-spawn primitive move to FFI companions.
 - JSON lowers onto Go's `encoding/json/v2` over the generated types. Struct fields are always exported (revising the earlier fields-follow-type-visibility rule) and carry `json` tags preserving the Ard field name, so every struct is serializable. Marshalling applies to `Dynamic`, structs, lists, string-keyed maps, primitives, `Maybe`, `Result`, enums, and unions (a union marshals to its active member, unwrapped); only parsing into a union is rejected by the checker, as it is ambiguous. `Maybe` and `Result` are the sanctioned runtime JSON marshalers. Decoding into `Dynamic` uses `json.Number` to disambiguate `Int` from `Float`.
 - Map key types are constrained during checking to Go strictly-comparable types whose Go equality matches Ard equality, so every Ard map lowers to a plain Go map. `Float` keys are allowed; `Maybe`, `List`, `Map`, and `Dynamic` keys are rejected. Generic type parameters used as map keys emit a Go `comparable` constraint. This is a language-level constraint the checker must enforce. The standard library conforms to it: `ard/decode`'s `to_map` is removed and decode migrates to string-keyed maps, which is the correct shape for JSON objects anyway.
 - Impl methods lower to real Go methods with no duplicated standalone helpers, mutation is expressed through pointer receivers and pointer parameters rather than forwarding tables, and closures lower to Go function literals. Generic functions lower to Go generics, with monomorphization only as a fallback. These choices require AIR to preserve generic structure and receiver/mutation metadata for the backend.
@@ -572,7 +571,8 @@ The standard library participates in this migration. Today `std_lib/*.ard` uses 
 - `docs/adrs/0013-use-file-based-modules-and-absolute-imports.md`
 - `docs/adrs/0006-support-chained-relative-comparisons.md`
 - `docs/adrs/0011-for-loop-expressions.md`
-- `docs/adrs/0003-use-generic-fibers-for-async-eval.md`
+- `docs/adrs/0003-use-generic-fibers-for-async-eval.md` (superseded by 0033)
+- `docs/adrs/0033-async-is-goroutines-and-channels.md`
 - `docs/adrs/0019-use-typed-channels-for-fiber-communication.md`
 - `docs/adrs/0014-use-ard-native-test-functions.md`
 - `docs/adrs/0017-use-git-based-dependencies.md`
