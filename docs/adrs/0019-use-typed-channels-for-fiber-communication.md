@@ -4,6 +4,8 @@
 
 Accepted
 
+Partially superseded: the lowering is revised by [ADR 0031](0031-go-backend-lowering-contract.md) (channels lower to native `chan T` rather than through FFI), and the channel API shape plus the "no `select` keyword" guidance are superseded by [ADR 0032](0032-select-on-channels.md). The core decision — typed channels for fiber communication — still stands.
+
 ## Context
 
 Ard fibers can start concurrent work and retrieve typed results through `async::Fiber<$T>`, but Ard does not yet have a native way for concurrently running fibers to communicate while they are running. Programs must either wait for a final fiber result or route communication through target-specific externs.
