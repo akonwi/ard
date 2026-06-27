@@ -113,6 +113,18 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			return typ
 		}
 		return &Chan{of: derefInner}
+	case *Receiver:
+		derefInner := derefTypeSeen(typ.of, seen)
+		if derefInner == typ.of {
+			return typ
+		}
+		return &Receiver{of: derefInner}
+	case *Sender:
+		derefInner := derefTypeSeen(typ.of, seen)
+		if derefInner == typ.of {
+			return typ
+		}
+		return &Sender{of: derefInner}
 	case *Map:
 		derefKey := derefTypeSeen(typ.key, seen)
 		derefVal := derefTypeSeen(typ.value, seen)
@@ -629,6 +641,10 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 	case *List:
 		collectGenericsFromType(t.of, params, seen)
 	case *Chan:
+		collectGenericsFromType(t.of, params, seen)
+	case *Receiver:
+		collectGenericsFromType(t.of, params, seen)
+	case *Sender:
 		collectGenericsFromType(t.of, params, seen)
 	case *Map:
 		collectGenericsFromType(t.key, params, seen)
@@ -2582,6 +2598,12 @@ func unsafeResultOkValueCompatible(expected Type, actual Type) bool {
 	case *Chan:
 		actualType, ok := actual.(*Chan)
 		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
+	case *Receiver:
+		actualType, ok := actual.(*Receiver)
+		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
+	case *Sender:
+		actualType, ok := actual.(*Sender)
+		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
 	case *Map:
 		actualType, ok := actual.(*Map)
 		return ok && unsafeResultOkValueCompatible(expectedType.key, actualType.key) && unsafeResultOkValueCompatible(expectedType.value, actualType.value)
@@ -3738,6 +3760,14 @@ func bindGenericTypes(original Type, specialized Type, bindings map[string]Type)
 		}
 	case *Chan:
 		if spec, ok := specialized.(*Chan); ok {
+			bindGenericTypes(orig.of, spec.of, bindings)
+		}
+	case *Receiver:
+		if spec, ok := specialized.(*Receiver); ok {
+			bindGenericTypes(orig.of, spec.of, bindings)
+		}
+	case *Sender:
+		if spec, ok := specialized.(*Sender); ok {
 			bindGenericTypes(orig.of, spec.of, bindings)
 		}
 	case *Map:
@@ -4932,15 +4962,18 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if channel == nil {
 				continue
 			}
-			chanType, ok := channel.Type().(*Chan)
+			elem, ok := channelElementType(channel.Type())
 			if !ok {
 				c.addError(fmt.Sprintf("A select arm operates on a channel, but got %s", channel.Type().String()), op.Target.GetLocation())
 				continue
 			}
-			elem := chanType.of
 
 			switch op.Method.Name {
 			case "recv":
+				if !channelCanRecv(channel.Type()) {
+					c.addError(fmt.Sprintf("recv() is not available on %s", channel.Type().String()), op.GetLocation())
+					continue
+				}
 				if len(op.Method.Args) != 0 {
 					c.addError("recv() in a select arm takes no arguments", op.GetLocation())
 				}
@@ -4958,6 +4991,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					resultType = merged
 				}
 			case "send":
+				if !channelCanSend(channel.Type()) {
+					c.addError(fmt.Sprintf("send() is not available on %s", channel.Type().String()), op.GetLocation())
+					continue
+				}
 				if arm.Binding != nil {
 					c.addError("A select send arm cannot bind a value", arm.Op.GetLocation())
 				}
@@ -6231,6 +6268,14 @@ func bindInferredTypeVars(expected Type, actual Type) {
 		if act, ok := actual.(*Chan); ok {
 			bindInferredTypeVars(exp.Of(), act.Of())
 		}
+	case *Receiver:
+		if act, ok := actual.(*Receiver); ok {
+			bindInferredTypeVars(exp.Of(), act.Of())
+		}
+	case *Sender:
+		if act, ok := actual.(*Sender); ok {
+			bindInferredTypeVars(exp.Of(), act.Of())
+		}
 	case *Map:
 		if act, ok := actual.(*Map); ok {
 			bindInferredTypeVars(exp.Key(), act.Key())
@@ -6648,6 +6693,10 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		return &List{of: substituteType(typ.of, typeMap)}
 	case *Chan:
 		return &Chan{of: substituteType(typ.of, typeMap)}
+	case *Receiver:
+		return &Receiver{of: substituteType(typ.of, typeMap)}
+	case *Sender:
+		return &Sender{of: substituteType(typ.of, typeMap)}
 	case *Map:
 		return &Map{key: substituteType(typ.key, typeMap), value: substituteType(typ.value, typeMap)}
 	case *Union:
@@ -6758,6 +6807,14 @@ func inferGenericBindingsFromTypes(original, specialized Type, bindings map[stri
 		}
 	case *Chan:
 		if spec, ok := specialized.(*Chan); ok {
+			inferGenericBindingsFromTypes(orig.Of(), spec.Of(), bindings)
+		}
+	case *Receiver:
+		if spec, ok := specialized.(*Receiver); ok {
+			inferGenericBindingsFromTypes(orig.Of(), spec.Of(), bindings)
+		}
+	case *Sender:
+		if spec, ok := specialized.(*Sender); ok {
 			inferGenericBindingsFromTypes(orig.Of(), spec.Of(), bindings)
 		}
 	case *List:
@@ -7181,6 +7238,16 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 			return c.unifyTypes(expectedType.of, actualChannel.of, genericScope)
 		}
 		return fmt.Errorf("expected channel type, got %T", actual)
+	case *Receiver:
+		if act, ok := actual.(*Receiver); ok {
+			return c.unifyTypes(expectedType.of, act.of, genericScope)
+		}
+		return fmt.Errorf("expected receiver type, got %T", actual)
+	case *Sender:
+		if act, ok := actual.(*Sender); ok {
+			return c.unifyTypes(expectedType.of, act.of, genericScope)
+		}
+		return fmt.Errorf("expected sender type, got %T", actual)
 	case *StructDef:
 		actualStruct, ok := actual.(*StructDef)
 		if !ok || expectedType.Name != actualStruct.Name || namedTypeOwnersDiffer(expectedType.ModulePath, actualStruct.ModulePath) || len(expectedType.TypeArgs) != len(actualStruct.TypeArgs) {

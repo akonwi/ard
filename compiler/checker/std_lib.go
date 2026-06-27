@@ -118,6 +118,12 @@ func (pkg ChannelPkg) Get(name string) Symbol {
 	case "Chan":
 		// The Chan<$T> type, resolvable in annotations as channel::Chan<T>.
 		return Symbol{Name: name, Type: MakeChan(&TypeVar{name: "T"})}
+	case "Receiver":
+		// The receive-only Receiver<$T> type.
+		return Symbol{Name: name, Type: MakeReceiver(&TypeVar{name: "T"})}
+	case "Sender":
+		// The send-only Sender<$T> type.
+		return Symbol{Name: name, Type: MakeSender(&TypeVar{name: "T"})}
 	case "new":
 		// new<$T>(capacity: Int) Chan<$T>; send/recv/close are methods on Chan.
 		t := &TypeVar{name: "T"}
@@ -126,6 +132,26 @@ func (pkg ChannelPkg) Get(name string) Symbol {
 			GenericParams: []string{"T"},
 			Parameters:    []Parameter{{Name: "capacity", Type: Int}},
 			ReturnType:    MakeChan(t),
+		}}
+	case "receiver":
+		// receiver<$T>(ch: Chan<$T>) Receiver<$T> narrows a bidirectional channel
+		// to a receive-only view.
+		t := &TypeVar{name: "T"}
+		return Symbol{Name: name, Type: &FunctionDef{
+			Name:          name,
+			GenericParams: []string{"T"},
+			Parameters:    []Parameter{{Name: "ch", Type: MakeChan(t)}},
+			ReturnType:    MakeReceiver(t),
+		}}
+	case "sender":
+		// sender<$T>(ch: Chan<$T>) Sender<$T> narrows a bidirectional channel to a
+		// send-only view.
+		t := &TypeVar{name: "T"}
+		return Symbol{Name: name, Type: &FunctionDef{
+			Name:          name,
+			GenericParams: []string{"T"},
+			Parameters:    []Parameter{{Name: "ch", Type: MakeChan(t)}},
+			ReturnType:    MakeSender(t),
 		}}
 	default:
 		return Symbol{}

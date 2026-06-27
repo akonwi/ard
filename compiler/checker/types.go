@@ -561,21 +561,11 @@ func (c Chan) String() string {
 func (c Chan) get(name string) Type {
 	switch name {
 	case "send":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{{Name: "value", Type: c.of}},
-			ReturnType: Void,
-		}
+		return chanSendMethod(c.of)
 	case "recv":
-		return &FunctionDef{
-			Name:       name,
-			ReturnType: &Maybe{c.of},
-		}
+		return chanRecvMethod(c.of)
 	case "close":
-		return &FunctionDef{
-			Name:       name,
-			ReturnType: Void,
-		}
+		return chanCloseMethod()
 	}
 	return nil
 }
@@ -586,6 +576,109 @@ func (c *Chan) hasTrait(trait *Trait) bool {
 	return false
 }
 func (c *Chan) Of() Type {
+	return c.of
+}
+
+// channelElementType returns the element type of any channel-like type (Chan,
+// Receiver, Sender) and whether the type is a channel at all.
+func channelElementType(t Type) (Type, bool) {
+	switch ch := t.(type) {
+	case *Chan:
+		return ch.of, true
+	case *Receiver:
+		return ch.of, true
+	case *Sender:
+		return ch.of, true
+	}
+	return nil, false
+}
+
+// channelCanRecv reports whether the channel type permits receiving.
+func channelCanRecv(t Type) bool {
+	switch t.(type) {
+	case *Chan, *Receiver:
+		return true
+	}
+	return false
+}
+
+// channelCanSend reports whether the channel type permits sending.
+func channelCanSend(t Type) bool {
+	switch t.(type) {
+	case *Chan, *Sender:
+		return true
+	}
+	return false
+}
+
+// chanSendMethod / chanRecvMethod / chanCloseMethod build the channel method
+// signatures shared by the bidirectional and directional channel types.
+func chanSendMethod(of Type) Type {
+	return &FunctionDef{Name: "send", Parameters: []Parameter{{Name: "value", Type: of}}, ReturnType: Void}
+}
+func chanRecvMethod(of Type) Type {
+	return &FunctionDef{Name: "recv", ReturnType: &Maybe{of}}
+}
+func chanCloseMethod() Type {
+	return &FunctionDef{Name: "close", ReturnType: Void}
+}
+
+// Receiver is a receive-only channel view (Go `<-chan T`). Its only method is
+// recv. Created by channel::receiver and produced by mapping Go `<-chan T`.
+type Receiver struct {
+	of Type
+}
+
+func MakeReceiver(of Type) *Receiver {
+	return &Receiver{of}
+}
+func (c Receiver) String() string {
+	return "Receiver<" + c.of.String() + ">"
+}
+func (c Receiver) get(name string) Type {
+	if name == "recv" {
+		return chanRecvMethod(c.of)
+	}
+	return nil
+}
+func (c *Receiver) equal(other Type) bool {
+	return equalTypes(c, other)
+}
+func (c *Receiver) hasTrait(trait *Trait) bool {
+	return false
+}
+func (c *Receiver) Of() Type {
+	return c.of
+}
+
+// Sender is a send-only channel view (Go `chan<- T`). Its methods are send and
+// close. Created by channel::sender and produced by mapping Go `chan<- T`.
+type Sender struct {
+	of Type
+}
+
+func MakeSender(of Type) *Sender {
+	return &Sender{of}
+}
+func (c Sender) String() string {
+	return "Sender<" + c.of.String() + ">"
+}
+func (c Sender) get(name string) Type {
+	switch name {
+	case "send":
+		return chanSendMethod(c.of)
+	case "close":
+		return chanCloseMethod()
+	}
+	return nil
+}
+func (c *Sender) equal(other Type) bool {
+	return equalTypes(c, other)
+}
+func (c *Sender) hasTrait(trait *Trait) bool {
+	return false
+}
+func (c *Sender) Of() Type {
 	return c.of
 }
 

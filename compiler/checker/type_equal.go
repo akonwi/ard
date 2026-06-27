@@ -61,6 +61,22 @@ func equalTypesSeen(left Type, right Type, seen map[typeEqualKey]struct{}) bool 
 			return r.actual == nil || equalTypesSeen(l, r.actual, seen)
 		}
 		return false
+	case *Receiver:
+		if r, ok := right.(*Receiver); ok {
+			return equalTypesSeen(l.of, r.of, seen)
+		}
+		if r, ok := right.(*TypeVar); ok {
+			return r.actual == nil || equalTypesSeen(l, r.actual, seen)
+		}
+		return false
+	case *Sender:
+		if r, ok := right.(*Sender); ok {
+			return equalTypesSeen(l.of, r.of, seen)
+		}
+		if r, ok := right.(*TypeVar); ok {
+			return r.actual == nil || equalTypesSeen(l, r.actual, seen)
+		}
+		return false
 	case *Map:
 		if r, ok := right.(*Map); ok {
 			return equalTypesSeen(l.key, r.key, seen) && equalTypesSeen(l.value, r.value, seen)
@@ -239,6 +255,10 @@ func typeEqualID(t Type) string {
 		return fmt.Sprintf("List:%p", v)
 	case *Chan:
 		return fmt.Sprintf("Chan:%p", v)
+	case *Receiver:
+		return fmt.Sprintf("Receiver:%p", v)
+	case *Sender:
+		return fmt.Sprintf("Sender:%p", v)
 	case *Map:
 		return fmt.Sprintf("Map:%p", v)
 	case Map:

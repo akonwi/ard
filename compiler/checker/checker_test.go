@@ -2925,3 +2925,89 @@ fn main() {
 		},
 	})
 }
+
+func TestDirectionalChannels(t *testing.T) {
+	run(t, []test{
+		{
+			name: "receiver factory yields a recv-only channel",
+			input: `use ard/channel
+fn main() {
+  let ch = channel::new<Int>(1)
+  let rx = channel::receiver(ch)
+  let v = rx.recv()
+}`,
+		},
+		{
+			name: "receiver rejects send",
+			input: `use ard/channel
+fn main() {
+  let ch = channel::new<Int>(1)
+  let rx = channel::receiver(ch)
+  rx.send(1)
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: rx.send"},
+			},
+		},
+		{
+			name: "sender factory yields a send-only channel with send and close",
+			input: `use ard/channel
+fn main() {
+  let ch = channel::new<Int>(1)
+  let tx = channel::sender(ch)
+  tx.send(1)
+  tx.close()
+}`,
+		},
+		{
+			name: "sender rejects recv",
+			input: `use ard/channel
+fn main() {
+  let ch = channel::new<Int>(1)
+  let tx = channel::sender(ch)
+  let v = tx.recv()
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: tx.recv"},
+			},
+		},
+		{
+			name: "a bidirectional channel does not implicitly narrow to a receiver",
+			input: `use ard/channel
+fn take(rx: channel::Receiver<Int>) {}
+fn main() {
+  take(channel::new<Int>(1))
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Receiver<Int>, got Chan<Int>"},
+			},
+		},
+		{
+			name: "select recv arm accepts a receiver",
+			input: `use ard/channel
+fn main() {
+  let ch = channel::new<Int>(1)
+  let rx = channel::receiver(ch)
+  select {
+    let v = rx.recv() => {},
+    _ => {}
+  }
+}`,
+		},
+		{
+			name: "select send arm rejects a receiver",
+			input: `use ard/channel
+fn main() {
+  let ch = channel::new<Int>(1)
+  let rx = channel::receiver(ch)
+  select {
+    rx.send(1) => {},
+    _ => {}
+  }
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "send() is not available on Receiver<Int>"},
+			},
+		},
+	})
+}
