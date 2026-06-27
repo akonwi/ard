@@ -750,6 +750,32 @@ func (m MatchCase) String() string {
 	return fmt.Sprintf("MatchCase(%s)", m.Pattern)
 }
 
+// SelectExpression multiplexes over several channel operations, running the
+// arm whose operation can proceed first. See ADR 0032.
+type SelectExpression struct {
+	Location
+	Cases    []SelectCase
+	Comments []Comment
+}
+
+func (s SelectExpression) String() string {
+	return "SelectExpression"
+}
+
+// SelectCase is one arm of a select. Op is the channel operation expression
+// (e.g. `ch.recv()`, `ch.send(x)`) or the `_` identifier for the default arm.
+// Binding is the optional `let name =` capture, valid only on receive arms.
+type SelectCase struct {
+	Location
+	Binding *Identifier
+	Op      Expression
+	Body    []Statement
+}
+
+func (s SelectCase) String() string {
+	return fmt.Sprintf("SelectCase(%s)", s.Op)
+}
+
 type ConditionalMatchExpression struct {
 	Location
 	Cases    []ConditionalMatchCase

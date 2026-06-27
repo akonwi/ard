@@ -1919,7 +1919,103 @@ func (p *parser) parseGenericTypeParameters() []string {
 }
 
 func (p *parser) parseExpression() (Expression, error) {
+	if p.check(select_) {
+		return p.selectExpr()
+	}
 	return p.matchExpr()
+}
+
+func (p *parser) selectExpr() (Expression, error) {
+	keyword := p.advance() // consume 'select'
+	sel := &SelectExpression{
+		Location: Location{Start: Point{Row: keyword.line, Col: keyword.column}},
+	}
+
+	if !p.check(left_brace) {
+		p.addError(p.peek(), "Expected '{' after 'select'")
+		p.synchronizeToTokens(left_brace, new_line)
+		if !p.check(left_brace) {
+			return sel, nil
+		}
+	}
+	p.advance() // consume '{'
+
+	if p.check(new_line) {
+		p.advance()
+	} else {
+		p.addError(p.peek(), "Expected new line after '{'")
+	}
+
+	for !p.match(right_brace) {
+		if c := p.parseInlineComment(); c != nil {
+			sel.Comments = append(sel.Comments, *c)
+			p.match(new_line)
+			continue
+		}
+		if p.match(new_line) {
+			continue
+		}
+
+		selCase := SelectCase{
+			Location: Location{Start: Point{Row: p.peek().line, Col: p.peek().column}},
+		}
+
+		// Optional `let name =` receive binding.
+		if p.match(let) {
+			if !p.check(identifier) {
+				p.addError(p.peek(), "Expected identifier after 'let'")
+			} else {
+				name := p.advance()
+				selCase.Binding = &Identifier{
+					Location: Location{Start: Point{Row: name.line, Col: name.column}},
+					Name:     name.text,
+				}
+			}
+			if p.check(equal) {
+				p.advance()
+			} else {
+				p.addError(p.peek(), "Expected '=' after select binding")
+			}
+		}
+
+		// The channel operation expression, or `_` for the default arm.
+		op, err := p.or()
+		if err != nil {
+			return nil, err
+		}
+		selCase.Op = op
+
+		if !p.check(fat_arrow) {
+			p.addError(p.peek(), "Expected '=>' after select arm")
+			p.synchronizeToTokens(fat_arrow, new_line, right_brace)
+			if !p.check(fat_arrow) {
+				continue
+			}
+		}
+		p.advance() // consume '=>'
+
+		body := []Statement{}
+		if p.check(left_brace) {
+			b, err := p.block()
+			if err != nil {
+				return nil, err
+			}
+			body = b
+		} else {
+			stmt, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			body = append(body, stmt)
+		}
+		selCase.Body = body
+		selCase.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
+		sel.Cases = append(sel.Cases, selCase)
+		p.match(comma)
+	}
+
+	sel.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
+	return sel, nil
 }
 
 func (p *parser) matchExpr() (Expression, error) {

@@ -65,6 +65,7 @@ const (
 	mut     = "mut"
 	break_  = "break"
 	match   = "match"
+	select_ = "select"
 	while_  = "while"
 	for_    = "for"
 	use     = "use"
@@ -680,6 +681,8 @@ func (l *lexer) takeIdentifier() token {
 		return makeKeyword(break_)
 	case "match":
 		return makeKeyword(match)
+	case "select":
+		return makeKeyword(select_)
 	case "while":
 		return makeKeyword(while_)
 	case "for":
