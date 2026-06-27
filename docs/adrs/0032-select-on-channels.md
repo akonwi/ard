@@ -88,14 +88,14 @@ A send arm whose channel is closed is *ready* in Go's `select` and will panic wh
 
 Cancellation is not a special form. A cancellation/`done` channel is an ordinary channel; a consumer selects on `done.recv()` (or observes its close), consistent with ADR 0019's requirement that cancellation be a separate signal rather than a meaning of channel close.
 
-### Deferred to a follow-up (Layer 2)
+### Directional channels and Go channel imports (Layer 2 — implemented)
 
-These are explicitly out of scope for the initial `select` implementation, which operates on channels created by `channel::new`:
+These build on the `select` core and are now implemented:
 
-- **Directional channel types** (receive-only / send-only `Chan` views), for API hygiene and for soundly typing Go channel imports.
-- **`use go:` channel-typed imports** — mapping Go `chan T` / `<-chan T` / `chan<- T` in imported signatures to Ard channels. This is what lets Go-sourced channels (`time.After`, `context.Done()`, any library returning a channel) participate in `select`, and is the intended way to obtain timeouts rather than a bespoke `channel::after`. Soundly typing `time.After`'s receive-only result is the concrete motivation for revisiting directional channels, which ADR 0019 deferred.
+- **Directional channel types** are distinct Ard types: `Receiver<T>` (receive-only, `recv` only) and `Sender<T>` (send-only, `send`/`close`), alongside the bidirectional `Chan<T>`. They do not implicitly narrow, so type-checking is explicit. `channel::receiver(ch)` and `channel::sender(ch)` derive a directional view from a bidirectional channel. They lower to Go `<-chan T` / `chan<- T`, and the factory is a Go directional conversion.
+- **`use go:` channel-typed imports** map Go `chan T` / `<-chan T` / `chan<- T` in imported signatures to `Chan<T>` / `Receiver<T>` / `Sender<T>`. This lets Go-sourced channels participate in `select`: `time::After(d)` returns `<-chan time.Time`, which types as a `Receiver`, so `timeout.recv()` works in a select arm and `.send` on it is a compile error. Timeouts are obtained this way rather than via a bespoke `channel::after`.
 
-`select` v1 is fully functional for channels the program creates itself, including self-built timeouts (a goroutine that sends after a delay). Go-sourced channels light up when Layer 2 lands.
+A fresh directional channel is intentionally not constructable on its own (a receive-only channel with no sender can never receive); directional channels are always derived from a bidirectional one or sourced from Go.
 
 ## Consequences
 
@@ -105,7 +105,7 @@ These are explicitly out of scope for the initial `select` implementation, which
 - Keeping native panic-on-closed `send` preserves channels as a pure native lowering with no runtime type, at the cost that a chosen-but-closed send panics — the same hazard Go has.
 - The checker must restrict `select` arm heads to channel `recv()`/`send(...)` operations and reject other expressions, and must allow `let` only on `recv()`.
 - The backend must lower `select` arms to native Go `case` clauses per the mapping table, constructing a `Maybe` for `let`-bound receives.
-- Directional channels and `use go:` channel-typed imports remain future work; until then `select` cannot consume Go-sourced channels and has no built-in timeout primitive.
+- Directional channels (`Receiver<T>`/`Sender<T>`) and `use go:` channel-typed imports are implemented, so `select` can consume Go-sourced channels (e.g. `time::After`) and obtain timeouts without a bespoke primitive.
 - ADR 0019's channel API (`ard/async/channel`, `Channel<$T>` wrapper, `Bool` send/close, FFI-backed operations) and its "channel-aware `match` instead of a `select` keyword" guidance are superseded.
 
 ## Related
