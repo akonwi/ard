@@ -2182,6 +2182,59 @@ fn main() {
 	}
 }
 
+func TestBuildProgramPassesArdChannelToGoChannelParam(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module demo\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ffi", "host.go"), []byte(`package ffi
+
+func Fill(ch chan<- int) { ch <- 7 }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	// A bidirectional Ard channel narrows to a Go send-only param, like Go.
+	if err := os.WriteFile(mainPath, []byte(`use go:demo/ffi as host
+use ard/channel
+use ard/io
+
+fn main() {
+  let ch = channel::new<Int>(1)
+  host::Fill(ch)
+  let v = ch.recv().expect("v")
+  io::print("got {v}")
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	builtPath, err := BuildProgram(program, filepath.Join(dir, "app"), loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	out, err := exec.Command(builtPath).Output()
+	if err != nil {
+		t.Fatalf("run built binary: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != "got 7" {
+		t.Fatalf("got %q, want %q", string(out), "got 7")
+	}
+}
+
 func TestBuildProgramMapsGoEmptyStructToVoid(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

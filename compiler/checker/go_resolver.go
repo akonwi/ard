@@ -1518,6 +1518,8 @@ func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel
 		if ard == Void {
 			return true, ""
 		}
+	case GoValueChan:
+		return c.directGoChanCompatible(ard, goType)
 	case GoValueSlice:
 		list, ok := ard.(*List)
 		if ok && goType.Elem != nil {
@@ -1589,6 +1591,39 @@ func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel
 	return false, fmt.Sprintf("Ard type %s is not compatible with Go type %s", typeSyntaxString(ard), goType.String())
 }
 
+// directGoChanCompatible reports whether an Ard channel type satisfies a Go
+// channel parameter, following Go's channel assignability: a bidirectional Chan
+// satisfies a Go channel of any direction; a Receiver only a `<-chan`; a Sender
+// only a `chan<-`. Channel elements must match exactly, since channels are
+// invariant.
+func (c *Checker) directGoChanCompatible(ard Type, goType GoValueType) (bool, string) {
+	if goType.Elem == nil {
+		return false, "Go channel type is missing element metadata"
+	}
+	var ardElem Type
+	switch a := ard.(type) {
+	case *Chan:
+		ardElem = a.Of()
+	case *Receiver:
+		if goType.ChanDir != types.RecvOnly {
+			return false, fmt.Sprintf("Ard Receiver is receive-only and cannot satisfy Go type %s", goType.String())
+		}
+		ardElem = a.Of()
+	case *Sender:
+		if goType.ChanDir != types.SendOnly {
+			return false, fmt.Sprintf("Ard Sender is send-only and cannot satisfy Go type %s", goType.String())
+		}
+		ardElem = a.Of()
+	default:
+		return false, fmt.Sprintf("Ard type %s is not a channel compatible with Go type %s", typeSyntaxString(ard), goType.String())
+	}
+	elemGo, ok := c.goValueTypeForArdType(ardElem, false)
+	if !ok || !goValueTypesMatch(elemGo, *goType.Elem) {
+		return false, fmt.Sprintf("channel element: Ard %s is not compatible with Go %s", typeSyntaxString(ardElem), goType.Elem.String())
+	}
+	return true, ""
+}
+
 func (c *Checker) directGoAssignableCompatible(ard Type, goType GoValueType) (bool, string) {
 	return c.directGoAssignableCompatibleAt(ard, goType, true)
 }
@@ -1635,6 +1670,8 @@ func (c *Checker) directGoAssignableCompatibleAt(ard Type, goType GoValueType, t
 		if ard == Void {
 			return true, ""
 		}
+	case GoValueChan:
+		return c.directGoChanCompatible(ard, goType)
 	case GoValueSlice:
 		list, ok := ard.(*List)
 		if ok && goType.Elem != nil {
@@ -2109,8 +2146,28 @@ func (c *Checker) goValueTypeForArdType(typ Type, mutable bool) (GoValueType, bo
 		return GoValueType{Kind: GoValueInt, Expr: "rune", Bits: 32}, true
 	case Str:
 		return GoValueType{Kind: GoValueString, Expr: "string"}, true
+	case Void:
+		return GoValueType{Kind: GoValueVoid, Expr: "struct{}"}, true
 	}
 	switch typed := typ.(type) {
+	case *Chan:
+		elem, ok := c.goValueTypeForArdType(typed.Of(), false)
+		if !ok {
+			return GoValueType{}, false
+		}
+		return GoValueType{Kind: GoValueChan, Expr: "chan " + elem.String(), Elem: &elem, ChanDir: types.SendRecv}, true
+	case *Receiver:
+		elem, ok := c.goValueTypeForArdType(typed.Of(), false)
+		if !ok {
+			return GoValueType{}, false
+		}
+		return GoValueType{Kind: GoValueChan, Expr: "<-chan " + elem.String(), Elem: &elem, ChanDir: types.RecvOnly}, true
+	case *Sender:
+		elem, ok := c.goValueTypeForArdType(typed.Of(), false)
+		if !ok {
+			return GoValueType{}, false
+		}
+		return GoValueType{Kind: GoValueChan, Expr: "chan<- " + elem.String(), Elem: &elem, ChanDir: types.SendOnly}, true
 	case *List:
 		elem, ok := c.goValueTypeForArdType(typed.Of(), false)
 		if !ok {

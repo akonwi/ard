@@ -1392,6 +1392,50 @@ fn sleep(duration: time::Duration) { time::Sleep(duration) }`), "main.ard")
 	}
 }
 
+func TestDirectGoChannelParamDirections(t *testing.T) {
+	intElem := GoValueType{Kind: GoValueInt, Expr: "int"}
+	strElem := GoValueType{Kind: GoValueString, Expr: "string"}
+	chanParam := func(dir gotypes.ChanDir, elem GoValueType, expr string) GoValueType {
+		e := elem
+		return GoValueType{Kind: GoValueChan, Elem: &e, ChanDir: dir, Expr: expr}
+	}
+	pkg := &GoPackage{ImportPath: "host", Name: "host", Functions: map[string]GoFunction{
+		"Bidi":    {Name: "Bidi", Signature: GoSignature{Params: []GoValueType{chanParam(gotypes.SendRecv, intElem, "chan int")}}},
+		"Recv":    {Name: "Recv", Signature: GoSignature{Params: []GoValueType{chanParam(gotypes.RecvOnly, intElem, "<-chan int")}}},
+		"Send":    {Name: "Send", Signature: GoSignature{Params: []GoValueType{chanParam(gotypes.SendOnly, intElem, "chan<- int")}}},
+		"RecvStr": {Name: "RecvStr", Signature: GoSignature{Params: []GoValueType{chanParam(gotypes.RecvOnly, strElem, "<-chan string")}}},
+	}}
+	cases := []struct {
+		name   string
+		call   string
+		wantOK bool
+	}{
+		{"bidi to chan", "host::Bidi(ch)", true},
+		{"bidi narrows to recv", "host::Recv(ch)", true},
+		{"bidi narrows to send", "host::Send(ch)", true},
+		{"receiver to recv", "host::Recv(channel::receiver(ch))", true},
+		{"receiver to chan rejected", "host::Bidi(channel::receiver(ch))", false},
+		{"receiver to send rejected", "host::Send(channel::receiver(ch))", false},
+		{"sender to send", "host::Send(channel::sender(ch))", true},
+		{"sender to recv rejected", "host::Recv(channel::sender(ch))", false},
+		{"wrong element rejected", "host::RecvStr(ch)", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "use go:host as host\nuse ard/channel\nfn run() {\n  let ch = channel::new<Int>(0)\n  " + tc.call + "\n}"
+			result := parse.Parse([]byte(src), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{"host": pkg}}})
+			c.Check()
+			if c.HasErrors() == tc.wantOK {
+				t.Fatalf("HasErrors=%v, wantOK=%v; diagnostics: %v", c.HasErrors(), tc.wantOK, c.Diagnostics())
+			}
+		})
+	}
+}
+
 func TestDirectGoEmptyStructResolvesAsVoid(t *testing.T) {
 	result := parse.Parse([]byte(`use go:demo as demo
 fn run() {
