@@ -1392,6 +1392,28 @@ fn sleep(duration: time::Duration) { time::Sleep(duration) }`), "main.ard")
 	}
 }
 
+func TestDirectGoEmptyStructResolvesAsVoid(t *testing.T) {
+	result := parse.Parse([]byte(`use go:demo as demo
+fn run() {
+  demo::Consume(demo::Unit())
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	void := GoValueType{Kind: GoValueVoid, Expr: "struct{}"}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"demo": {ImportPath: "demo", Name: "demo", Functions: map[string]GoFunction{
+			// Unit() struct{} returns Void; Consume(struct{}) accepts a Void arg.
+			"Unit":    {Name: "Unit", Signature: GoSignature{Results: []GoValueType{void}}},
+			"Consume": {Name: "Consume", Signature: GoSignature{Params: []GoValueType{void}}},
+		}},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
 func TestDirectGoEnumLikeConstantsResolveAsClosedEnum(t *testing.T) {
 	result := parse.Parse([]byte(`use go:git.sr.ht/~rockorager/vaxis as vaxis
 fn active(status: vaxis::AnimationStatus) Bool {

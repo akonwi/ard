@@ -66,6 +66,7 @@ const (
 	GoValueError   GoValueKind = "error"
 	GoValueFunc    GoValueKind = "func"
 	GoValueChan    GoValueKind = "chan"
+	GoValueVoid    GoValueKind = "void"
 	GoValueOther   GoValueKind = "other"
 )
 
@@ -1226,6 +1227,8 @@ func (c *Checker) directGoValueArdType(goType GoValueType, loc parse.Location) (
 			}
 			return MakeMap(key, value), true
 		}
+	case GoValueVoid:
+		return Void, true
 	case GoValueChan:
 		if goType.Elem == nil {
 			c.addError("Go channel type is missing element metadata", loc)
@@ -1511,6 +1514,10 @@ func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel
 		if equalTypes(ard, Dynamic) {
 			return true, ""
 		}
+	case GoValueVoid:
+		if ard == Void {
+			return true, ""
+		}
 	case GoValueSlice:
 		list, ok := ard.(*List)
 		if ok && goType.Elem != nil {
@@ -1622,6 +1629,10 @@ func (c *Checker) directGoAssignableCompatibleAt(ard Type, goType GoValueType, t
 		}
 	case GoValueAny:
 		if equalTypes(ard, Dynamic) {
+			return true, ""
+		}
+	case GoValueVoid:
+		if ard == Void {
 			return true, ""
 		}
 	case GoValueSlice:
@@ -2442,6 +2453,11 @@ func goValueTypeSeen(typ types.Type, seen map[types.Type]bool) GoValueType {
 	case *types.Interface:
 		if underlying.Empty() {
 			out.Kind = GoValueAny
+		}
+	case *types.Struct:
+		// Go's empty struct{} is Ard's unit type Void (ADR 0031).
+		if underlying.NumFields() == 0 {
+			out.Kind = GoValueVoid
 		}
 	case *types.Signature:
 		out.Kind = GoValueFunc

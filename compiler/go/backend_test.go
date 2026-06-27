@@ -2182,6 +2182,62 @@ fn main() {
 	}
 }
 
+func TestBuildProgramMapsGoEmptyStructToVoid(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module demo\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Go's `chan struct{}` signalling idiom must surface as Ard `Chan<Void>`,
+	// since Void lowers to struct{} (ADR 0031).
+	if err := os.WriteFile(filepath.Join(dir, "ffi", "host.go"), []byte(`package ffi
+
+func Signal() chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(dir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use go:demo/ffi as host
+use ard/io
+
+fn main() {
+  let sig = host::Signal()
+  let _ = sig.recv()
+  io::print("void ok")
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	builtPath, err := BuildProgram(program, filepath.Join(dir, "app"), loaded.ProjectInfo)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	out, err := exec.Command(builtPath).Output()
+	if err != nil {
+		t.Fatalf("run built binary: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != "void ok" {
+		t.Fatalf("got %q, want %q", string(out), "void ok")
+	}
+}
+
 func TestBuildProgramDoesNotRequireDependencyFFIForDirectGoCall(t *testing.T) {
 	workspace := t.TempDir()
 	depDir := filepath.Join(workspace, "dep")
