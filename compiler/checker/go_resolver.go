@@ -150,6 +150,26 @@ func NewGoPackagesResolver(dir string) *GoPackagesResolver {
 	return &GoPackagesResolver{Dir: dir, cache: map[string]*GoPackage{}}
 }
 
+// packagesConfig builds a go/packages config for importPath at the requested
+// load mode. Bundled standard-library packages are resolved hermetically
+// against the materialized embedded module (see LoadPackage).
+func (r *GoPackagesResolver) packagesConfig(importPath string, mode packages.LoadMode) (*packages.Config, error) {
+	cfg := &packages.Config{
+		Dir:        r.Dir,
+		Mode:       mode,
+		BuildFlags: []string{"-mod=readonly"},
+	}
+	if stdlibgo.IsBundledImportPath(importPath) {
+		bundledDir, err := stdlibgo.MaterializedDir()
+		if err != nil {
+			return nil, fmt.Errorf("materialize bundled standard library: %w", err)
+		}
+		cfg.Dir = bundledDir
+		cfg.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
+	}
+	return cfg, nil
+}
+
 func (r *GoPackagesResolver) LoadPackage(importPath string) (*GoPackage, error) {
 	if r.cache == nil {
 		r.cache = map[string]*GoPackage{}
@@ -157,26 +177,16 @@ func (r *GoPackagesResolver) LoadPackage(importPath string) (*GoPackage, error) 
 	if cached, ok := r.cache[importPath]; ok {
 		return cached, nil
 	}
-	cfg := &packages.Config{
-		Dir:        r.Dir,
-		Mode:       packages.NeedName | packages.NeedTypes,
-		BuildFlags: []string{"-mod=readonly"},
+	// The bundled standard library Go packages are not on the build's module
+	// path, so resolve them against the embedded module materialized to a
+	// content-hashed cache directory, hermetically and with a process-wide cache.
+	cfg, err := r.packagesConfig(importPath, packages.NeedName|packages.NeedTypes)
+	if err != nil {
+		return nil, err
 	}
 	var sharedCacheKey string
 	var useSharedCache bool
 	if stdlibgo.IsBundledImportPath(importPath) {
-		// The bundled standard library Go packages are not on the build's module
-		// path, so resolve them against the embedded module materialized to a
-		// content-hashed cache directory. Resolve hermetically, independent of any
-		// enclosing Go workspace or hostile GOFLAGS, while preserving proxy/sumdb
-		// configuration so deps download exactly as the generated program's build
-		// would.
-		bundledDir, err := stdlibgo.MaterializedDir()
-		if err != nil {
-			return nil, fmt.Errorf("materialize bundled standard library: %w", err)
-		}
-		cfg.Dir = bundledDir
-		cfg.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
 		sharedCacheKey = "bundled:" + stdlibgo.ContentHash() + ":" + goruntime.GOOS + "/" + goruntime.GOARCH + ":" + importPath
 		useSharedCache = true
 	} else {
@@ -213,6 +223,29 @@ func (r *GoPackagesResolver) LoadPackage(importPath string) (*GoPackage, error) 
 		sharedStdlibGoPackageCache.Store(sharedCacheKey, resolved)
 	}
 	return resolved, nil
+}
+
+// SymbolPosition returns the source position of a top-level symbol declared in
+// importPath. It powers go-to-definition for `use go:` references. ok is false
+// when the package or symbol cannot be resolved.
+func (r *GoPackagesResolver) SymbolPosition(importPath, symbol string) (gotoken.Position, bool) {
+	cfg, err := r.packagesConfig(importPath, packages.NeedName|packages.NeedTypes|packages.NeedSyntax|packages.NeedFiles)
+	if err != nil {
+		return gotoken.Position{}, false
+	}
+	pkgs, err := packages.Load(cfg, importPath)
+	if err != nil || len(pkgs) == 0 {
+		return gotoken.Position{}, false
+	}
+	pkg := pkgs[0]
+	if pkg.Types == nil || pkg.Fset == nil {
+		return gotoken.Position{}, false
+	}
+	obj := pkg.Types.Scope().Lookup(symbol)
+	if obj == nil || !obj.Pos().IsValid() {
+		return gotoken.Position{}, false
+	}
+	return pkg.Fset.Position(obj.Pos()), true
 }
 
 func stdlibGoPackageCacheKey(dir string, importPath string) (string, bool) {

@@ -13,7 +13,7 @@ impl zed::Extension for ArdExtension {
         worktree: &zed::Worktree,
     ) -> zed::Result<zed::Command> {
         let ard_path = worktree
-            .which("ard")
+            .which("ard-dev")
             .ok_or_else(|| "ard binary not found in PATH. Install via: cd compiler && go build -o ard".to_string())?;
 
         Ok(zed::Command {

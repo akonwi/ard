@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	gotoken "go/token"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/std_lib"
+	"github.com/akonwi/ard/stdlibgo"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -64,6 +66,11 @@ func definitionForExpr(expr parse.Expression, prog *parse.Program, filePath stri
 	case *parse.InstanceMethod:
 		return definitionForInstanceMethod(e, prog, filePath)
 	case *parse.StructInstance:
+		if alias, member := splitStaticTarget(e.Name.Name); member != "" {
+			if def := definitionForGoSymbol(alias, member, prog, filePath); def != nil {
+				return def
+			}
+		}
 		return definitionForTypeName(e.Name.Name, prog, filePath)
 	}
 	return nil
@@ -315,6 +322,36 @@ func locationStartsAfterPoint(loc parse.Location, point parse.Point) bool {
 	return loc.Start.Row == point.Row && loc.Start.Col > point.Col
 }
 
+// definitionForGoSymbol resolves go-to-definition for a `use go:` reference
+// `alias::symbol` (a function, type, const, or var) to its position in the Go
+// source — host code, the Go standard library, or imported Go packages.
+func definitionForGoSymbol(alias string, symbol string, prog *parse.Program, filePath string) *definitionTarget {
+	if alias == "" || symbol == "" {
+		return nil
+	}
+	imp, ok := directGoImportForAlias(alias, prog)
+	if !ok {
+		return nil
+	}
+	dir := "."
+	if filePath != "" {
+		dir = filepath.Dir(filePath)
+	}
+	pos, ok := checker.NewGoPackagesResolver(dir).SymbolPosition(stdlibgo.CanonicalGoImportPath(imp.Path), symbol)
+	if !ok || pos.Filename == "" {
+		return nil
+	}
+	return &definitionTarget{filePath: pos.Filename, loc: goPositionToLocation(pos, symbol)}
+}
+
+// goPositionToLocation converts a Go token.Position (1-based line/column) to an
+// Ard parse.Location spanning the symbol name.
+func goPositionToLocation(pos gotoken.Position, symbol string) parse.Location {
+	start := parse.Point{Row: pos.Line, Col: pos.Column}
+	end := parse.Point{Row: pos.Line, Col: pos.Column + len(symbol)}
+	return parse.Location{Start: start, End: end}
+}
+
 func definitionForModuleAlias(alias string, prog *parse.Program, filePath string) *definitionTarget {
 	modulePath, moduleProg, ok := moduleSourceForAlias(alias, prog, filePath)
 	if !ok || moduleProg == nil {
@@ -353,6 +390,11 @@ func definitionForStaticFunction(sf *parse.StaticFunction, prog *parse.Program, 
 		}
 		return nil
 	}
+	if memberPrefix == "" {
+		if def := definitionForGoSymbol(alias, sf.Function.Name, prog, filePath); def != nil {
+			return def
+		}
+	}
 	return findStaticFunctionDefinition(target+"::"+sf.Function.Name, prog.Statements, filePath)
 }
 
@@ -384,6 +426,9 @@ func definitionForStaticProperty(sp *parse.StaticProperty, prog *parse.Program, 
 	}
 
 	if def := findVariableDefinition(property, prog.Statements, filePath); def != nil {
+		return def
+	}
+	if def := definitionForGoSymbol(alias, property, prog, filePath); def != nil {
 		return def
 	}
 	return nil
@@ -428,6 +473,11 @@ func moduleSourceForAlias(alias string, prog *parse.Program, filePath string) (s
 	for _, imp := range prog.Imports {
 		if imp.Name != alias {
 			continue
+		}
+		if imp.Kind == parse.ImportKindGo {
+			// A `use go:` alias is not an Ard module source; callers resolve it
+			// against the Go package instead.
+			return "", nil, false
 		}
 		return moduleSourceForImport(imp, filePath)
 	}

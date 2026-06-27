@@ -2656,3 +2656,36 @@ func assertRenameEdits(t *testing.T, edit *protocol.WorkspaceEdit, filePath stri
 		}
 	}
 }
+
+// TestDefinitionGoSymbols verifies go-to-definition resolves use go: references
+// to their Go source: the standard library and the bundled host ffi package.
+func TestDefinitionGoSymbols(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "test.ard")
+
+	t.Run("go stdlib function", func(t *testing.T) {
+		source := "use go:strings\nfn main() {\n  let parts = strings::Split(\"a,b\", \",\")\n}\n"
+		loc := requireDefinition(t, source, filePath, 2, 25)
+		got := loc.URI.Filename()
+		if !strings.Contains(got, "strings") || !strings.HasSuffix(got, ".go") {
+			t.Fatalf("definition file = %q, want a strings .go source", got)
+		}
+	})
+
+	t.Run("bundled host ffi function", func(t *testing.T) {
+		source := "use go:ard/ffi\nfn main() {\n  let b = ffi::ByteFromInt(65)\n}\n"
+		loc := requireDefinition(t, source, filePath, 2, 16)
+		got := loc.URI.Filename()
+		if !strings.HasSuffix(got, ".go") || !strings.Contains(got, "ffi") {
+			t.Fatalf("definition file = %q, want the bundled ffi host source", got)
+		}
+	})
+
+	t.Run("go stdlib constant", func(t *testing.T) {
+		source := "use go:time\nfn main() {\n  let d = time::Second\n}\n"
+		loc := requireDefinition(t, source, filePath, 2, 16)
+		got := loc.URI.Filename()
+		if !strings.Contains(got, "time") || !strings.HasSuffix(got, ".go") {
+			t.Fatalf("definition file = %q, want a time .go source", got)
+		}
+	})
+}
