@@ -595,6 +595,16 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return err
 		}
 	}
+	if expr.Kind == ExprSelect {
+		for _, arm := range expr.SelectCases {
+			if arm.HasBind && (arm.BindLocal < 0 || int(arm.BindLocal) >= len(fn.Locals)) {
+				return fmt.Errorf("select recv arm binds invalid local %d", arm.BindLocal)
+			}
+			if err := validateBlock(program, fn, arm.Body); err != nil {
+				return err
+			}
+		}
+	}
 	if expr.Kind == ExprMatchResult {
 		if expr.OkLocal < 0 || int(expr.OkLocal) >= len(fn.Locals) {
 			return fmt.Errorf("Result match binds invalid ok local %d", expr.OkLocal)

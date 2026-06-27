@@ -3611,6 +3611,73 @@ func (fl *functionLowerer) lowerChannelCall(typeID TypeID, e *checker.ModuleFunc
 	return &Expr{Kind: ExprMakeChannel, Type: typeID, Args: []Expr{*capacity}}, nil
 }
 
+// lowerSelect lowers a checker Select into an ExprSelect with native channel
+// arms (ADR 0032).
+func (fl *functionLowerer) lowerSelect(typeID TypeID, sel *checker.Select) (*Expr, error) {
+	result := &Expr{Kind: ExprSelect, Type: typeID}
+	for _, arm := range sel.Arms {
+		switch arm.Kind {
+		case checker.SelectArmDefault:
+			body, err := fl.lowerBlockWithDefault(arm.Body.Stmts, typeID)
+			if err != nil {
+				return nil, err
+			}
+			result.SelectCases = append(result.SelectCases, SelectMatchCase{Kind: SelectArmDefault, Body: body})
+
+		case checker.SelectArmRecv:
+			channel, err := fl.lowerExpr(arm.Channel)
+			if err != nil {
+				return nil, err
+			}
+			armCase := SelectMatchCase{Kind: SelectArmRecv, Channel: channel}
+			if arm.Binding != nil {
+				maybeTypeID, err := fl.internType(checker.MakeMaybe(arm.ElemType))
+				if err != nil {
+					return nil, err
+				}
+				name := arm.Binding.Name
+				oldLocal, hadOld := fl.locals[name]
+				bindLocal := fl.defineLocal(name, maybeTypeID, false)
+				body, err := fl.lowerBlockWithDefault(arm.Body.Stmts, typeID)
+				if hadOld {
+					fl.locals[name] = oldLocal
+				} else {
+					delete(fl.locals, name)
+				}
+				if err != nil {
+					return nil, err
+				}
+				armCase.HasBind = true
+				armCase.BindLocal = bindLocal
+				armCase.Body = body
+			} else {
+				body, err := fl.lowerBlockWithDefault(arm.Body.Stmts, typeID)
+				if err != nil {
+					return nil, err
+				}
+				armCase.Body = body
+			}
+			result.SelectCases = append(result.SelectCases, armCase)
+
+		case checker.SelectArmSend:
+			channel, err := fl.lowerExpr(arm.Channel)
+			if err != nil {
+				return nil, err
+			}
+			value, err := fl.lowerChannelValue(channel.Type, arm.Value)
+			if err != nil {
+				return nil, err
+			}
+			body, err := fl.lowerBlockWithDefault(arm.Body.Stmts, typeID)
+			if err != nil {
+				return nil, err
+			}
+			result.SelectCases = append(result.SelectCases, SelectMatchCase{Kind: SelectArmSend, Channel: channel, Value: value, Body: body})
+		}
+	}
+	return result, nil
+}
+
 // lowerChannelValue lowers a value being sent on a channel, using the channel's
 // element type as the expected type when it is known.
 func (fl *functionLowerer) lowerChannelValue(chanTypeID TypeID, value checker.Expression) (*Expr, error) {
@@ -3960,6 +4027,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerMaybeMethod(typeID, e)
 	case *checker.OptionMatch:
 		return fl.lowerOptionMatch(typeID, e)
+	case *checker.Select:
+		return fl.lowerSelect(typeID, e)
 	case *checker.ResultMethod:
 		return fl.lowerResultMethod(typeID, e)
 	case *checker.ResultMatch:

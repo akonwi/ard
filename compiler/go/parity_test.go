@@ -3049,6 +3049,117 @@ fn main() Bool {
 	}
 }
 
+func TestGoTargetParitySelect(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name: "receives from the ready channel and binds the value",
+			input: `use ard/channel
+fn main() Bool {
+  let a = channel::new<Int>(1)
+  a.send(42)
+  let got = select {
+    let v = a.recv() => v.expect("a"),
+    _ => 0,
+  }
+  got == 42
+}`,
+			want: "true",
+		},
+		{
+			name: "non-blocking send falls to default when the buffer is full",
+			input: `use ard/channel
+fn main() Bool {
+  let full = channel::new<Int>(1)
+  full.send(1)
+  select {
+    full.send(2) => false,
+    _ => true,
+  }
+}`,
+			want: "true",
+		},
+		{
+			name: "closed channel receive binds none",
+			input: `use ard/channel
+fn main() Bool {
+  let c = channel::new<Int>(1)
+  c.close()
+  select {
+    let v = c.recv() => v.is_none(),
+    _ => false,
+  }
+}`,
+			want: "true",
+		},
+		{
+			name: "default fires when nothing is ready",
+			input: `use ard/channel
+fn main() Bool {
+  let empty = channel::new<Int>(1)
+  select {
+    let v = empty.recv() => v.is_some(),
+    _ => true,
+  }
+}`,
+			want: "true",
+		},
+		{
+			name: "discard receive fires and runs its body",
+			input: `use ard/channel
+fn main() Bool {
+  let b = channel::new<Int>(1)
+  b.send(1)
+  select {
+    b.recv() => true,
+    _ => false,
+  }
+}`,
+			want: "true",
+		},
+		{
+			name: "blocks on a single recv arm until a goroutine sends",
+			input: `use ard/channel
+use ard/async
+fn main() Bool {
+  let ch = channel::new<Int>(0)
+  let f = async::start(fn() { ch.send(7) })
+  let got = select {
+    let v = ch.recv() => v.expect("v"),
+  }
+  f.Wait()
+  got == 7
+}`,
+			want: "true",
+		},
+		{
+			name: "lowers a contextual none send value",
+			input: `use ard/channel
+use ard/maybe
+fn main() Bool {
+  let ch = channel::new<Int?>(1)
+  let sent = select {
+    ch.send(maybe::none()) => true,
+    _ => false,
+  }
+  sent and ch.recv().expect("v").is_none()
+}`,
+			want: "true",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			program := lowerParitySource(t, tc.input)
+			if got := strings.TrimSpace(runGoTargetParityJSON(t, program)); got != tc.want {
+				t.Fatalf("go output = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{

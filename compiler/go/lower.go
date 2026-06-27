@@ -2171,6 +2171,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerChannelRecv(fn, expr)
 	case air.ExprChannelClose:
 		return l.lowerChannelClose(fn, expr)
+	case air.ExprSelect:
+		return l.lowerSelect(fn, expr)
 	case air.ExprJSONParse:
 		return l.lowerJSONParse(fn, expr)
 	case air.ExprStrContains:
@@ -2857,7 +2859,7 @@ func (l *lowerer) canOverrideExprType(expr air.Expr, expectedType air.TypeID) bo
 		air.ExprMakeMaybeSome, air.ExprMakeMaybeNone,
 		air.ExprBlock, air.ExprIf,
 		air.ExprMatchEnum, air.ExprMatchInt, air.ExprMatchStr, air.ExprMatchMaybe, air.ExprMatchResult,
-		air.ExprTryResult, air.ExprTryMaybe:
+		air.ExprSelect, air.ExprTryResult, air.ExprTryMaybe:
 		return from.Kind == air.TypeResult || from.Kind == air.TypeMaybe
 	default:
 		return false
@@ -5857,6 +5859,119 @@ func (l *lowerer) lowerChannelClose(fn air.Function, expr air.Expr) (loweredExpr
 	}
 	stmts := append(ch.stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("close"), Args: []ast.Expr{ch.expr}}})
 	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
+}
+
+// lowerSelect emits a native Go select statement (ADR 0032). Channel and send
+// operands are hoisted before the select so they are evaluated once; recv arms
+// with a binding build the element Maybe from the comma-ok receive.
+func (l *lowerer) lowerSelect(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	var preStmts []ast.Stmt
+	var resultExpr ast.Expr = ast.NewIdent("nil")
+	var assignTarget ast.Expr
+	if !l.isVoidType(expr.Type) {
+		temp := l.nextTemp()
+		decls, err := l.declareTemp(expr.Type, temp)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		preStmts = append(preStmts, decls...)
+		assignTarget = ast.NewIdent(temp)
+		resultExpr = ast.NewIdent(temp)
+	}
+
+	clauses := []ast.Stmt{}
+	for _, arm := range expr.SelectCases {
+		clause := &ast.CommClause{}
+		switch arm.Kind {
+		case air.SelectArmDefault:
+			body, err := l.lowerValueBlock(fn, arm.Body, expr.Type, assignTarget)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			clause.Body = body
+
+		case air.SelectArmSend:
+			if arm.Channel == nil || arm.Value == nil {
+				return loweredExpr{}, fmt.Errorf("select send arm missing channel or value")
+			}
+			ch, err := l.lowerExpr(fn, *arm.Channel)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			val, err := l.lowerExpr(fn, *arm.Value)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			preStmts = append(preStmts, ch.stmts...)
+			preStmts = append(preStmts, val.stmts...)
+			clause.Comm = &ast.SendStmt{Chan: ch.expr, Value: val.expr}
+			body, err := l.lowerValueBlock(fn, arm.Body, expr.Type, assignTarget)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			clause.Body = body
+
+		case air.SelectArmRecv:
+			if arm.Channel == nil {
+				return loweredExpr{}, fmt.Errorf("select recv arm missing channel")
+			}
+			ch, err := l.lowerExpr(fn, *arm.Channel)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			preStmts = append(preStmts, ch.stmts...)
+			recv := ast.Expr(&ast.UnaryExpr{Op: token.ARROW, X: ch.expr})
+			if arm.HasBind {
+				valueTemp := l.nextTemp()
+				okTemp := l.nextTemp()
+				clause.Comm = &ast.AssignStmt{
+					Lhs: []ast.Expr{ast.NewIdent(valueTemp), ast.NewIdent(okTemp)},
+					Tok: token.DEFINE,
+					Rhs: []ast.Expr{recv},
+				}
+				bindName := localName(fn, arm.BindLocal)
+				l.declaredLocals[arm.BindLocal] = true
+				maybeTypeID := fn.Locals[arm.BindLocal].Type
+				decls, err := l.declareTemp(maybeTypeID, bindName)
+				if err != nil {
+					return loweredExpr{}, err
+				}
+				someExpr, err := l.maybeSomeExpr(maybeTypeID, ast.NewIdent(valueTemp))
+				if err != nil {
+					return loweredExpr{}, err
+				}
+				body, err := l.lowerValueBlock(fn, arm.Body, expr.Type, assignTarget)
+				if err != nil {
+					return loweredExpr{}, err
+				}
+				prefix := append([]ast.Stmt{}, decls...)
+				prefix = append(prefix,
+					&ast.IfStmt{
+						Cond: ast.NewIdent(okTemp),
+						Body: &ast.BlockStmt{List: []ast.Stmt{
+							&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(bindName)}, Tok: token.ASSIGN, Rhs: []ast.Expr{someExpr}},
+						}},
+					},
+					&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(bindName)}},
+				)
+				clause.Body = append(prefix, body...)
+			} else {
+				clause.Comm = &ast.ExprStmt{X: recv}
+				body, err := l.lowerValueBlock(fn, arm.Body, expr.Type, assignTarget)
+				if err != nil {
+					return loweredExpr{}, err
+				}
+				clause.Body = body
+			}
+
+		default:
+			return loweredExpr{}, fmt.Errorf("unknown select arm kind %d", arm.Kind)
+		}
+		clauses = append(clauses, clause)
+	}
+
+	preStmts = append(preStmts, &ast.SelectStmt{Body: &ast.BlockStmt{List: clauses}})
+	return loweredExpr{stmts: preStmts, expr: resultExpr}, nil
 }
 
 func (l *lowerer) lowerMapGet(fn air.Function, expr air.Expr) (loweredExpr, error) {

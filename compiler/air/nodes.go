@@ -75,6 +75,7 @@ const (
 	ExprChannelSend
 	ExprChannelRecv
 	ExprChannelClose
+	ExprSelect
 	ExprMapKeys
 	ExprMapSize
 	ExprMapGet
@@ -207,6 +208,29 @@ type Expr struct {
 	HasCatch   bool
 	CatchLocal LocalID
 	Catch      Block
+
+	SelectCases []SelectMatchCase
+}
+
+// SelectArmKind distinguishes the lowered select arm forms (ADR 0032).
+type SelectArmKind int
+
+const (
+	SelectArmRecv SelectArmKind = iota
+	SelectArmSend
+	SelectArmDefault
+)
+
+// SelectMatchCase is one arm of an ExprSelect. Recv/send arms carry the
+// Channel; send arms carry the Value; recv arms with a binding set HasBind and
+// bind BindLocal (of type Maybe<elem>) before running Body.
+type SelectMatchCase struct {
+	Kind      SelectArmKind
+	Channel   *Expr
+	Value     *Expr
+	HasBind   bool
+	BindLocal LocalID
+	Body      Block
 }
 
 type StructFieldValue struct {
