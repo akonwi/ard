@@ -119,40 +119,13 @@ func (pkg ChannelPkg) Get(name string) Symbol {
 		// The Chan<$T> type, resolvable in annotations as channel::Chan<T>.
 		return Symbol{Name: name, Type: MakeChan(&TypeVar{name: "T"})}
 	case "new":
-		// new<$T>(capacity: Int) Chan<$T>
+		// new<$T>(capacity: Int) Chan<$T>; send/recv/close are methods on Chan.
 		t := &TypeVar{name: "T"}
 		return Symbol{Name: name, Type: &FunctionDef{
 			Name:          name,
 			GenericParams: []string{"T"},
 			Parameters:    []Parameter{{Name: "capacity", Type: Int}},
 			ReturnType:    MakeChan(t),
-		}}
-	case "send":
-		// send<$T>(ch: Chan<$T>, value: $T) Void
-		t := &TypeVar{name: "T"}
-		return Symbol{Name: name, Type: &FunctionDef{
-			Name:          name,
-			GenericParams: []string{"T"},
-			Parameters:    []Parameter{{Name: "ch", Type: MakeChan(t)}, {Name: "value", Type: t}},
-			ReturnType:    Void,
-		}}
-	case "recv":
-		// recv<$T>(ch: Chan<$T>) $T?
-		t := &TypeVar{name: "T"}
-		return Symbol{Name: name, Type: &FunctionDef{
-			Name:          name,
-			GenericParams: []string{"T"},
-			Parameters:    []Parameter{{Name: "ch", Type: MakeChan(t)}},
-			ReturnType:    &Maybe{t},
-		}}
-	case "close":
-		// close<$T>(ch: Chan<$T>) Void
-		t := &TypeVar{name: "T"}
-		return Symbol{Name: name, Type: &FunctionDef{
-			Name:          name,
-			GenericParams: []string{"T"},
-			Parameters:    []Parameter{{Name: "ch", Type: MakeChan(t)}},
-			ReturnType:    Void,
 		}}
 	default:
 		return Symbol{}

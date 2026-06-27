@@ -2967,8 +2967,8 @@ func TestGoTargetParityChannel(t *testing.T) {
 			input: `use ard/channel
 fn main() Bool {
   let ch = channel::new<Int>(1)
-  channel::send(ch, 42)
-  channel::recv(ch).expect("recv") == 42
+  ch.send(42)
+  ch.recv().expect("recv") == 42
 }`,
 			want: "true",
 		},
@@ -2977,8 +2977,8 @@ fn main() Bool {
 			input: `use ard/channel
 fn main() Bool {
   let ch = channel::new<Int>(1)
-  channel::close(ch)
-  channel::recv(ch).is_none()
+  ch.close()
+  ch.recv().is_none()
 }`,
 			want: "true",
 		},
@@ -2987,12 +2987,12 @@ fn main() Bool {
 			input: `use ard/channel
 fn main() Bool {
   let ch = channel::new<Str>(2)
-  channel::send(ch, "a")
-  channel::send(ch, "b")
-  channel::close(ch)
-  let a = channel::recv(ch).expect("a")
-  let b = channel::recv(ch).expect("b")
-  let drained = channel::recv(ch).is_none()
+  ch.send("a")
+  ch.send("b")
+  ch.close()
+  let a = ch.recv().expect("a")
+  let b = ch.recv().expect("b")
+  let drained = ch.recv().is_none()
   a == "a" and b == "b" and drained
 }`,
 			want: "true",
@@ -3003,8 +3003,8 @@ fn main() Bool {
 use ard/async
 fn main() Bool {
   let ch = channel::new<Int>(0)
-  let fiber = async::start(fn() { channel::send(ch, 7) })
-  let v = channel::recv(ch).expect("recv")
+  let fiber = async::start(fn() { ch.send(7) })
+  let v = ch.recv().expect("recv")
   fiber.Wait()
   v == 7
 }`,
@@ -3016,11 +3016,11 @@ fn main() Bool {
 use ard/maybe
 fn main() Bool {
   let ch = channel::new<Int?>(2)
-  channel::send(ch, maybe::none())
-  channel::send(ch, maybe::some(5))
-  channel::close(ch)
-  let first = channel::recv(ch).expect("first")
-  let second = channel::recv(ch).expect("second")
+  ch.send(maybe::none())
+  ch.send(maybe::some(5))
+  ch.close()
+  let first = ch.recv().expect("first")
+  let second = ch.recv().expect("second")
   first.is_none() and second.expect("s") == 5
 }`,
 			want: "true",
@@ -3029,11 +3029,11 @@ fn main() Bool {
 			name: "generic function inferring the channel element type",
 			input: `use ard/channel
 fn first<$T>(ch: channel::Chan<$T>) $T? {
-  channel::recv(ch)
+  ch.recv()
 }
 fn main() Bool {
   let ch = channel::new<Int>(1)
-  channel::send(ch, 99)
+  ch.send(99)
   first(ch).expect("first") == 99
 }`,
 			want: "true",

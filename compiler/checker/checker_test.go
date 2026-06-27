@@ -2829,9 +2829,9 @@ func TestChan(t *testing.T) {
 			input: `use ard/channel
 fn main() {
   let ch = channel::new<Int>(1)
-  channel::send(ch, 42)
-  let v = channel::recv(ch)
-  channel::close(ch)
+  ch.send(42)
+  let v = ch.recv()
+  ch.close()
 }`,
 		},
 		{
@@ -2839,10 +2839,10 @@ fn main() {
 			input: `use ard/channel
 fn main() {
   let ch = channel::new<Int>(1)
-  channel::send(ch, "wrong")
+  ch.send("wrong")
 }`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "type mismatch: expected Int, got Str"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"},
 			},
 		},
 		{
@@ -2850,15 +2850,15 @@ fn main() {
 			input: `use ard/channel
 fn main() Int {
   let ch = channel::new<Int>(1)
-  channel::send(ch, 7)
-  channel::recv(ch).expect("v")
+  ch.send(7)
+  ch.recv().expect("v")
 }`,
 		},
 		{
 			name: "Chan annotation resolves the element type",
 			input: `use ard/channel
 fn take(ch: channel::Chan<Str>) {
-  channel::send(ch, "x")
+  ch.send("x")
 }`,
 		},
 	})

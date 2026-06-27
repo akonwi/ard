@@ -559,6 +559,24 @@ func (c Chan) String() string {
 	return "Chan<" + c.of.String() + ">"
 }
 func (c Chan) get(name string) Type {
+	switch name {
+	case "send":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "value", Type: c.of}},
+			ReturnType: Void,
+		}
+	case "recv":
+		return &FunctionDef{
+			Name:       name,
+			ReturnType: &Maybe{c.of},
+		}
+	case "close":
+		return &FunctionDef{
+			Name:       name,
+			ReturnType: Void,
+		}
+	}
 	return nil
 }
 func (c *Chan) equal(other Type) bool {

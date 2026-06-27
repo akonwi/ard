@@ -3598,52 +3598,17 @@ func (fl *functionLowerer) lowerNonProducingBlock(stmts []checker.Statement) (Bl
 // the native channel AIR expressions. The element type comes from the call's
 // Chan type argument (for new) or the channel operand's type (for the rest).
 func (fl *functionLowerer) lowerChannelCall(typeID TypeID, e *checker.ModuleFunctionCall) (*Expr, error) {
-	switch e.Call.Name {
-	case "new":
-		if len(e.Call.Args) != 1 {
-			return nil, fmt.Errorf("ard/channel::new expects one argument")
-		}
-		capacity, err := fl.lowerExpr(e.Call.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		return &Expr{Kind: ExprMakeChannel, Type: typeID, Args: []Expr{*capacity}}, nil
-	case "send":
-		if len(e.Call.Args) != 2 {
-			return nil, fmt.Errorf("ard/channel::send expects two arguments")
-		}
-		ch, err := fl.lowerExpr(e.Call.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		// Lower the sent value against the channel's element type so contextual
-		// expressions (empty literals, union wrapping, maybe/none, dynamic) are
-		// lowered correctly.
-		value, err := fl.lowerChannelValue(ch.Type, e.Call.Args[1])
-		if err != nil {
-			return nil, err
-		}
-		return &Expr{Kind: ExprChannelSend, Type: typeID, Args: []Expr{*ch, *value}}, nil
-	case "recv":
-		if len(e.Call.Args) != 1 {
-			return nil, fmt.Errorf("ard/channel::recv expects one argument")
-		}
-		ch, err := fl.lowerExpr(e.Call.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		return &Expr{Kind: ExprChannelRecv, Type: typeID, Args: []Expr{*ch}}, nil
-	case "close":
-		if len(e.Call.Args) != 1 {
-			return nil, fmt.Errorf("ard/channel::close expects one argument")
-		}
-		ch, err := fl.lowerExpr(e.Call.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		return &Expr{Kind: ExprChannelClose, Type: typeID, Args: []Expr{*ch}}, nil
+	if e.Call.Name != "new" {
+		return nil, fmt.Errorf("unknown ard/channel function %s", e.Call.Name)
 	}
-	return nil, fmt.Errorf("unknown ard/channel function %s", e.Call.Name)
+	if len(e.Call.Args) != 1 {
+		return nil, fmt.Errorf("ard/channel::new expects one argument")
+	}
+	capacity, err := fl.lowerExpr(e.Call.Args[0])
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: ExprMakeChannel, Type: typeID, Args: []Expr{*capacity}}, nil
 }
 
 // lowerChannelValue lowers a value being sent on a channel, using the channel's
@@ -5172,10 +5137,37 @@ func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.In
 		}
 		return nil, fmt.Errorf("trait %s has no method %s", trait.Name, method.Method.Name)
 	}
+	if typeInfo.Kind == TypeChannel {
+		return fl.lowerChanMethod(typeID, target, method)
+	}
 	if typeInfo.Kind == TypeStruct || typeInfo.Kind == TypeEnum {
 		return fl.lowerUserInstanceMethod(typeID, target, typeInfo, method)
 	}
 	return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
+}
+
+// lowerChanMethod lowers the Chan<T> methods (send/recv/close) to the native
+// channel AIR expressions, with the channel receiver as Args[0].
+func (fl *functionLowerer) lowerChanMethod(typeID TypeID, target *Expr, method *checker.InstanceMethod) (*Expr, error) {
+	switch method.Method.Name {
+	case "send":
+		if len(method.Method.Args) != 1 {
+			return nil, fmt.Errorf("Chan.send expects one argument")
+		}
+		// Lower the sent value against the channel's element type so contextual
+		// expressions (empty literals, union wrapping, maybe/none, dynamic) lower
+		// correctly.
+		value, err := fl.lowerChannelValue(target.Type, method.Method.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprChannelSend, Type: typeID, Args: []Expr{*target, *value}}, nil
+	case "recv":
+		return &Expr{Kind: ExprChannelRecv, Type: typeID, Args: []Expr{*target}}, nil
+	case "close":
+		return &Expr{Kind: ExprChannelClose, Type: typeID, Args: []Expr{*target}}, nil
+	}
+	return nil, fmt.Errorf("unknown Chan method %s", method.Method.Name)
 }
 
 func (fl *functionLowerer) lowerUserInstanceMethod(typeID TypeID, target *Expr, typeInfo TypeInfo, method *checker.InstanceMethod) (*Expr, error) {
