@@ -1203,6 +1203,49 @@ fn main() {
 	}
 }
 
+func directGoCallbackPackage() *GoPackage {
+	callback := GoValueType{Kind: GoValueFunc, Expr: "func(string) bool", Func: &GoSignature{
+		Params:  []GoValueType{goParam(GoValueString, "string")},
+		Results: []GoValueType{goParam(GoValueBool, "bool")},
+	}}
+	return &GoPackage{ImportPath: "demo", Name: "demo", Functions: map[string]GoFunction{
+		"Each": {Name: "Each", Signature: GoSignature{Params: []GoValueType{callback}}},
+	}}
+}
+
+func TestDirectGoCallbackAcceptsMatchingSignature(t *testing.T) {
+	result := parse.Parse([]byte(`use go:demo as demo
+fn main() {
+  demo::Each(fn(s: Str) Bool { s == "x" })
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{"demo": directGoCallbackPackage()}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoCallbackRejectsMismatchedResult(t *testing.T) {
+	result := parse.Parse([]byte(`use go:demo as demo
+fn main() {
+  demo::Each(fn(s: Str) Int { 1 })
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{"demo": directGoCallbackPackage()}}})
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("expected mismatched callback result to be rejected")
+	}
+	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "callback returning a value of Go type bool") {
+		t.Fatalf("diagnostic = %q", got)
+	}
+}
+
 func TestDirectGoExternTypeEqualityUsesBindingBeforeDisplayName(t *testing.T) {
 	left := &ExternType{Name_: "p::T", ExternalBinding: "go:example.com/a as p::T"}
 	right := &ExternType{Name_: "p::T", ExternalBinding: "go:example.com/b as p::T"}

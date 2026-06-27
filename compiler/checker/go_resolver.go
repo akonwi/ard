@@ -1184,14 +1184,7 @@ func (c *Checker) directGoValueArdType(goType GoValueType, loc parse.Location) (
 			c.addError("Go func type is missing signature metadata", loc)
 			return nil, false
 		}
-		// Phase 2a only supports parameterless `func()` callbacks: an Ard
-		// `fn() Void` closure already lowers to a Go `func()`, so it passes
-		// through with no boundary adapter.
-		if len(goType.Func.Params) != 0 || len(goType.Func.Results) != 0 {
-			c.addError(fmt.Sprintf("Go func type %s is not supported by direct Go bindings yet: only parameterless `func()` callbacks are supported", goType.String()), loc)
-			return nil, false
-		}
-		return &FunctionDef{ReturnType: Void}, true
+		return c.directGoFuncArdType(goType, loc)
 	case GoValueBool:
 		return Bool, true
 	case GoValueString:
@@ -1256,6 +1249,40 @@ func (c *Checker) directGoValueArdType(goType GoValueType, loc parse.Location) (
 	}
 	c.addError(fmt.Sprintf("Go type %s cannot be represented as an inferred Ard direct Go value type", goType.String()), loc)
 	return nil, false
+}
+
+// directGoFuncArdType maps a Go callback signature to the Ard function type a
+// closure must have. Parameters and a single result map recursively; a Go
+// pointer parameter (which maps to a mutable ref) becomes a `mut` Ard
+// parameter. Signatures that cannot map without a boundary adapter (multiple
+// results, a bare error, an optional pointer) are reported as unsupported.
+func (c *Checker) directGoFuncArdType(goType GoValueType, loc parse.Location) (Type, bool) {
+	if len(goType.Func.Results) > 1 {
+		c.addError(fmt.Sprintf("Go func type %s is not supported by direct Go bindings yet: callbacks with multiple results require an adapter", goType.String()), loc)
+		return nil, false
+	}
+	params := make([]Parameter, len(goType.Func.Params))
+	for i := range goType.Func.Params {
+		pt, ok := c.directGoValueArdType(goType.Func.Params[i], loc)
+		if !ok {
+			return nil, false
+		}
+		mutable := false
+		if ref, isRef := pt.(*MutableRef); isRef {
+			mutable = true
+			pt = ref.Of()
+		}
+		params[i] = Parameter{Name: fmt.Sprintf("arg%d", i), Type: pt, Mutable: mutable}
+	}
+	returnType := Type(Void)
+	if len(goType.Func.Results) == 1 {
+		rt, ok := c.directGoValueArdType(goType.Func.Results[0], loc)
+		if !ok {
+			return nil, false
+		}
+		returnType = rt
+	}
+	return &FunctionDef{Parameters: params, ReturnType: returnType}, true
 }
 
 func (c *Checker) directGoNamedArdType(goType GoValueType, loc parse.Location) (Type, bool) {
@@ -1509,16 +1536,44 @@ func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel
 		if !ok {
 			return false, fmt.Sprintf("Ard type %s is not a function compatible with Go type %s", typeSyntaxString(ard), goType.String())
 		}
-		// Phase 2a: only parameterless, Void-returning callbacks pass through
-		// directly (Ard `fn() Void` == Go `func()`).
-		if goType.Func == nil || len(goType.Func.Params) != 0 || len(goType.Func.Results) != 0 {
-			return false, fmt.Sprintf("Go func type %s is not supported by direct Go bindings yet: only `func()` callbacks are supported", goType.String())
+		if goType.Func == nil {
+			return false, "Go func type is missing signature metadata"
 		}
-		if len(fn.Parameters) != 0 {
-			return false, fmt.Sprintf("Go type %s expects a function with no parameters, got %s", goType.String(), typeSyntaxString(ard))
+		if len(goType.Func.Results) > 1 {
+			return false, fmt.Sprintf("Go func type %s is not supported by direct Go bindings yet: callbacks with multiple results require an adapter", goType.String())
 		}
-		if fn.ReturnType != nil && fn.ReturnType != Void {
-			return false, fmt.Sprintf("Go type %s expects a function returning Void, got a function returning %s", goType.String(), typeSyntaxString(fn.ReturnType))
+		if len(fn.Parameters) != len(goType.Func.Params) {
+			return false, fmt.Sprintf("Go type %s expects a callback with %d parameter(s), got %d", goType.String(), len(goType.Func.Params), len(fn.Parameters))
+		}
+		// The closure passes through with no boundary adapter, so its lowered Go
+		// signature must match the target func type exactly.
+		for i := range fn.Parameters {
+			// A `mut` parameter (whether written `mut x: T` or `x: mut T`) lowers
+			// to a Go pointer, so normalize either form before mapping.
+			paramType := fn.Parameters[i].Type
+			mutable := fn.Parameters[i].Mutable
+			if ref, isRef := paramType.(*MutableRef); isRef {
+				mutable = true
+				paramType = ref.Of()
+			}
+			got, ok := c.goValueTypeForArdType(paramType, mutable)
+			if !ok || !goValueTypesMatch(got, goType.Func.Params[i]) {
+				return false, fmt.Sprintf("Go type %s callback parameter %d expects a value of Go type %s", goType.String(), i+1, goType.Func.Params[i].String())
+			}
+		}
+		retIsVoid := fn.ReturnType == nil || fn.ReturnType == Void
+		if len(goType.Func.Results) == 0 {
+			if !retIsVoid {
+				return false, fmt.Sprintf("Go type %s expects a callback returning Void, got a callback returning %s", goType.String(), typeSyntaxString(fn.ReturnType))
+			}
+		} else {
+			if retIsVoid {
+				return false, fmt.Sprintf("Go type %s expects a callback returning a value of Go type %s, got Void", goType.String(), goType.Func.Results[0].String())
+			}
+			got, ok := c.goValueTypeForArdType(fn.ReturnType, false)
+			if !ok || !goValueTypesMatch(got, goType.Func.Results[0]) {
+				return false, fmt.Sprintf("Go type %s expects a callback returning a value of Go type %s", goType.String(), goType.Func.Results[0].String())
+			}
 		}
 		return true, ""
 	case GoValueError:

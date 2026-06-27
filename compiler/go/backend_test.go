@@ -4659,6 +4659,19 @@ func buildProgramFromGeneratedSources(t *testing.T, program *air.Program, output
 	}
 }
 
+func TestDirectGoCallbackWithTypedParamsBuilds(t *testing.T) {
+	// An Ard closure whose parameters are use go: types (an interface and a
+	// mut pointer) and whose result is Void lowers to exactly the Go func type
+	// and passes straight through to net/http's HandleFunc.
+	program := lowerSource(t, `use go:net/http as http
+fn main() {
+  http::HandleFunc("/", fn(w: http::ResponseWriter, r: mut http::Request) {
+    http::Error(w, "hi", 200)
+  })
+}`)
+	buildProgramFromGeneratedSources(t, program, "app")
+}
+
 func TestDirectGoScalarReturnBuildsWithPredeclaredNameParameter(t *testing.T) {
 	program := lowerSource(t, `use go:math/rand as rand
 fn foo(int64: Int) Int { rand::Int63() }

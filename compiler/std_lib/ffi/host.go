@@ -663,6 +663,13 @@ func HTTPResponseClose(resp *http.Response) {
 	}
 }
 
+// HTTPListenAndServe serves the default mux on addr. Handlers are registered
+// from Ard with net/http's HandleFunc; this just starts the server, since Ard
+// cannot yet pass a nil http.Handler.
+func HTTPListenAndServe(addr string) error {
+	return http.ListenAndServe(addr, nil)
+}
+
 // HTTPServe registers each handler on a mux and serves. The handlers receive the
 // raw *http.Request and http.ResponseWriter; the Ard http module builds its
 // Request/Response and writes the result, so this stays Ard-agnostic.

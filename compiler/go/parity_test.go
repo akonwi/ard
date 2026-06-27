@@ -2888,6 +2888,41 @@ fn main() Bool { os::LookupEnv("__ARD_MISSING_DIRECT_GO_ADAPTER__").is_none() }`
 	}
 }
 
+func TestGoTargetParityDirectGoFuncCallbacks(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name: "predicate callback finds matching rune",
+			input: `use go:strings
+fn main() Int { strings::IndexFunc("ab3c", fn(r: Rune) Bool { r == '3' }) }`,
+			want: "2",
+		},
+		{
+			name: "predicate callback returns -1 when none match",
+			input: `use go:strings
+fn main() Int { strings::IndexFunc("abc", fn(r: Rune) Bool { r == '9' }) }`,
+			want: "-1",
+		},
+		{
+			name: "mapping callback transforms runes",
+			input: `use go:strings
+fn main() Bool { strings::Map(fn(r: Rune) Rune { r }, "hi") == "hi" }`,
+			want: "true",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			program := lowerParitySource(t, tc.input)
+			if got := strings.TrimSpace(runGoTargetParityJSON(t, program)); got != tc.want {
+				t.Fatalf("go output = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGoTargetParityJSON(t *testing.T) {
 	cases := []struct {
 		name  string
