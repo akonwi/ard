@@ -145,7 +145,7 @@ func TestImports(t *testing.T) {
 		{
 			name: "name collisions are caught",
 			input: strings.Join([]string{
-				`use ard/fs`,
+				`use ard/float as fs`,
 				`use ard/io as fs`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{

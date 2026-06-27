@@ -2,13 +2,7 @@ package ffi
 
 import (
 	"bufio"
-	"crypto/md5"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/sha512"
-	"crypto/subtle"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"errors"
@@ -25,17 +19,6 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/mattn/go-sqlite3"
-	"golang.org/x/crypto/bcrypt"
-	"golang.org/x/crypto/scrypt"
-	"golang.org/x/text/unicode/norm"
-)
-
-const (
-	defaultScryptN       = 16384
-	defaultScryptR       = 16
-	defaultScryptP       = 1
-	defaultScryptDKLen   = 64
-	defaultScryptSaltLen = 16
 )
 
 // Runner is the shared query surface implemented by both *sql.DB and *sql.Tx.
@@ -111,191 +94,8 @@ func StrFromRunes(runes []rune) (string, error) {
 	return string(runes), nil
 }
 
-func CryptoMd5(input []byte) []byte {
-	sum := md5.Sum(input)
-	return sum[:]
-}
-
-func CryptoSha256(input []byte) []byte {
-	sum := sha256.Sum256(input)
-	return sum[:]
-}
-
-func CryptoSha512(input []byte) []byte {
-	sum := sha512.Sum512(input)
-	return sum[:]
-}
-
-func CryptoHashPassword(password string, cost *int) (string, error) {
-	hashCost := bcrypt.DefaultCost
-	if cost != nil {
-		hashCost = *cost
-	}
-	hashed, err := bcrypt.GenerateFromPassword([]byte(password), hashCost)
-	if err != nil {
-		return "", err
-	}
-	return string(hashed), nil
-}
-
-func CryptoVerifyPassword(password, hashed string) (bool, error) {
-	err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(password))
-	if err == nil {
-		return true, nil
-	}
-	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-		return false, nil
-	}
-	return false, err
-}
-
-func CryptoScryptHash(password string, saltHex *string, n *int, r *int, p *int, dkLen *int) (string, error) {
-	password = norm.NFKC.String(password)
-	nVal := ptrOr(n, defaultScryptN)
-	rVal := ptrOr(r, defaultScryptR)
-	pVal := ptrOr(p, defaultScryptP)
-	dkLenVal := ptrOr(dkLen, defaultScryptDKLen)
-
-	if err := validateScryptParams(nVal, rVal, pVal, dkLenVal); err != nil {
-		return "", fmt.Errorf("scrypt_runtime: %s", err.Error())
-	}
-
-	var saltHexValue string
-	if saltHex != nil {
-		saltHexValue = strings.TrimSpace(*saltHex)
-		decoded, err := hex.DecodeString(saltHexValue)
-		if err != nil {
-			return "", fmt.Errorf("scrypt_runtime: invalid salt hex: %s", err.Error())
-		}
-		if len(decoded) == 0 {
-			return "", errors.New("scrypt_runtime: invalid salt hex: empty salt")
-		}
-	} else {
-		saltBytes := make([]byte, defaultScryptSaltLen)
-		if _, err := rand.Read(saltBytes); err != nil {
-			return "", fmt.Errorf("scrypt_runtime: failed to generate salt: %s", err.Error())
-		}
-		saltHexValue = hex.EncodeToString(saltBytes)
-	}
-
-	derived, err := scrypt.Key([]byte(password), []byte(saltHexValue), nVal, rVal, pVal, dkLenVal)
-	if err != nil {
-		return "", fmt.Errorf("scrypt_runtime: %s", err.Error())
-	}
-
-	return fmt.Sprintf("%s:%s", saltHexValue, hex.EncodeToString(derived)), nil
-}
-
-func CryptoScryptVerify(password, hash string, n *int, r *int, p *int, dkLen *int) (bool, error) {
-	password = norm.NFKC.String(password)
-	hash = strings.TrimSpace(hash)
-	nVal := ptrOr(n, defaultScryptN)
-	rVal := ptrOr(r, defaultScryptR)
-	pVal := ptrOr(p, defaultScryptP)
-	dkLenVal := ptrOr(dkLen, defaultScryptDKLen)
-
-	if err := validateScryptParams(nVal, rVal, pVal, dkLenVal); err != nil {
-		return false, fmt.Errorf("scrypt_runtime: %s", err.Error())
-	}
-
-	parts := strings.Split(hash, ":")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return false, errors.New("scrypt_malformed_hash: expected format <salt_hex>:<derived_key_hex>")
-	}
-
-	saltHex := parts[0]
-	salt, err := hex.DecodeString(saltHex)
-	if err != nil {
-		return false, fmt.Errorf("scrypt_malformed_hash: invalid salt hex: %s", err.Error())
-	}
-	if len(salt) == 0 {
-		return false, errors.New("scrypt_malformed_hash: invalid salt hex: empty salt")
-	}
-
-	storedKey, err := hex.DecodeString(parts[1])
-	if err != nil {
-		return false, fmt.Errorf("scrypt_malformed_hash: invalid derived key hex: %s", err.Error())
-	}
-	if len(storedKey) != dkLenVal {
-		return false, fmt.Errorf("scrypt_malformed_hash: derived key length mismatch: expected %d bytes, got %d", dkLenVal, len(storedKey))
-	}
-
-	derived, err := scrypt.Key([]byte(password), []byte(saltHex), nVal, rVal, pVal, dkLenVal)
-	if err != nil {
-		return false, fmt.Errorf("scrypt_runtime: %s", err.Error())
-	}
-
-	return subtle.ConstantTimeCompare(derived, storedKey) == 1, nil
-}
-
-func ptrOr(value *int, fallback int) int {
-	if value != nil {
-		return *value
-	}
-	return fallback
-}
-
-func validateScryptParams(n, r, p, dkLen int) error {
-	if n <= 1 || n&(n-1) != 0 {
-		return fmt.Errorf("invalid N parameter: must be a power of two greater than 1")
-	}
-	if r <= 0 {
-		return fmt.Errorf("invalid r parameter: must be greater than 0")
-	}
-	if p <= 0 {
-		return fmt.Errorf("invalid p parameter: must be greater than 0")
-	}
-	if dkLen <= 0 {
-		return fmt.Errorf("invalid dk_len parameter: must be greater than 0")
-	}
-	return nil
-}
-
 func FloatFromInt(value int) float64 {
 	return float64(value)
-}
-
-func FSExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func FSIsFile(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
-}
-
-func FSIsDir(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
-}
-
-func FSListDir(path string) (map[string]bool, error) {
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]bool, len(entries))
-	for _, entry := range entries {
-		out[entry.Name()] = !entry.IsDir()
-	}
-	return out, nil
-}
-
-func CryptoUUID() string {
-	var uuid [16]byte
-	if _, err := rand.Read(uuid[:]); err != nil {
-		panic(fmt.Errorf("CryptoUUID failed: %w", err))
-	}
-	uuid[6] = (uuid[6] & 0x0f) | 0x40
-	uuid[8] = (uuid[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		uuid[0:4],
-		uuid[4:6],
-		uuid[6:8],
-		uuid[8:10],
-		uuid[10:16],
-	)
 }
 
 func SqlCreateConnection(driver string, connectionString string) (*sql.DB, error) {

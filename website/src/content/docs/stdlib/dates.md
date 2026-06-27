@@ -49,11 +49,10 @@ fn main() {
 ```ard
 use ard/dates
 use ard/io
-use ard/fs
 
 fn main() {
   let timestamp = dates::get_today()
   let message = "{timestamp}: Application started"
-  fs::append("app.log", "{message}\n").expect("Failed to write log")
+  io::print(message)
 }
 ```

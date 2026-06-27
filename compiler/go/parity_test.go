@@ -10,8 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -988,80 +986,6 @@ func TestGoTargetParityTry(t *testing.T) {
 				}
 				fn main() Str {
 					process_with_catch(true)
-				}
-			`,
-		},
-	})
-}
-
-func TestGoTargetParityCryptoHashes(t *testing.T) {
-	runGoParityCases(t, []goParityCase{
-		{
-			name: "md5 hashes hello",
-			input: `
-				use ard/crypto
-				use ard/hex
-				fn main() Str {
-					hex::encode(crypto::md5("hello".bytes()))
-				}
-			`,
-		},
-		{
-			name: "sha256 returns raw bytes",
-			input: `
-				use ard/crypto
-				fn main() Int {
-					crypto::sha256("".bytes()).size()
-				}
-			`,
-		},
-		{
-			name: "sha256 can be hex encoded",
-			input: `
-				use ard/crypto
-				use ard/hex
-				fn main() Str {
-					hex::encode(crypto::sha256("".bytes()))
-				}
-			`,
-		},
-		{
-			name: "sha512 returns raw bytes",
-			input: `
-				use ard/crypto
-				fn main() Int {
-					crypto::sha512("hello".bytes()).size()
-				}
-			`,
-		},
-		{
-			name: "crypto password hashing",
-			input: `
-				use ard/crypto
-				fn check() Bool!Str {
-					let hashed = try crypto::hash("password123", 4)
-					let verified = try crypto::verify("password123", hashed)
-					let wrong = try crypto::verify("wrong-password", hashed)
-					Result::ok(verified and not wrong and crypto::hash("password123", 32).is_err())
-				}
-				fn main() Bool {
-					check().expect("crypto password check failed")
-				}
-			`,
-		},
-		{
-			name: "crypto scrypt",
-			input: `
-				use ard/crypto
-				fn check() Bool!Str {
-					let hashed = try crypto::scrypt_hash("password", "73616c74", 16, 1, 1, 16)
-					let verified = try crypto::scrypt_verify("password", hashed, 16, 1, 1, 16)
-					let deterministic = hashed == "73616c74:d360147c2a2db7903186e387bb385547"
-					let malformed = crypto::scrypt_verify("password123", "bad-hash").is_err()
-					Result::ok(deterministic and verified and malformed)
-				}
-				fn main() Bool {
-					check().expect("scrypt check failed")
 				}
 			`,
 		},
@@ -2078,114 +2002,6 @@ func TestGoTargetParityEscapeSequences(t *testing.T) {
 	}
 }
 
-func TestGoTargetParityDurationFunctions(t *testing.T) {
-	runGoParityCases(t, []goParityCase{
-		{name: "from seconds", input: `use ard/duration
-fn main() Int { duration::from_seconds(20) }`},
-		{name: "from minutes", input: `use ard/duration
-fn main() Int { duration::from_minutes(5) }`},
-		{name: "from hours", input: `use ard/duration
-fn main() Int { duration::from_hours(2) }`},
-	})
-}
-
-func TestGoTargetParityFS(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "go-target-fs-parity")
-	dir := filepath.Join(root, "workspace")
-	file := filepath.Join(dir, "sample.txt")
-	copyFile := filepath.Join(dir, "copy.txt")
-	renamedFile := filepath.Join(dir, "renamed.txt")
-	runGoParityCasesSerial(t, []goParityCase{
-		{
-			name: "fs create dir exists and is dir",
-			input: fmt.Sprintf(`
-				use ard/fs
-				fn main() Bool {
-					fs::delete_dir(%q).expect("")
-					fs::create_dir(%q).expect("")
-					fs::exists(%q) and fs::is_dir(%q)
-				}
-			`, root, dir, dir, dir),
-		},
-		{
-			name: "fs write append and read",
-			input: fmt.Sprintf(`
-				use ard/fs
-				fn main() Str {
-					fs::delete_dir(%q).expect("")
-					fs::create_dir(%q).expect("")
-					fs::create_file(%q).expect("")
-					fs::write(%q, "hello").expect("")
-					fs::append(%q, " world").expect("")
-					fs::read(%q).expect("")
-				}
-			`, root, dir, file, file, file, file),
-		},
-		{
-			name: "fs copy rename delete and is file",
-			input: fmt.Sprintf(`
-				use ard/fs
-				fn main() Bool {
-					fs::delete_dir(%q).expect("")
-					fs::create_dir(%q).expect("")
-					fs::write(%q, "hello!").expect("")
-					fs::copy(%q, %q).expect("")
-					fs::rename(%q, %q).expect("")
-					let renamed_ok = fs::is_file(%q) and fs::read(%q).expect("") == "hello!"
-					fs::delete(%q).expect("")
-					fs::delete(%q).expect("")
-					renamed_ok and not fs::exists(%q) and not fs::exists(%q)
-				}
-			`, root, dir, file, file, copyFile, copyFile, renamedFile, renamedFile, renamedFile, file, renamedFile, file, renamedFile),
-		},
-		{
-			name: "fs cwd abs and list dir",
-			input: fmt.Sprintf(`
-				use ard/fs
-				fn main() Bool {
-					fs::delete_dir(%q).expect("")
-					fs::create_dir(%q).expect("")
-					fs::write(%q, "a").expect("")
-					fs::write(%q, "b").expect("")
-					let entries = fs::list_dir(%q).expect("")
-					let cwd = fs::cwd().expect("")
-					let abs = fs::abs(%q).expect("")
-					entries.size() == 2 and cwd.size() > 0 and abs.size() >= %d
-				}
-			`, root, dir, file, copyFile, dir, dir, len(dir)),
-		},
-		{
-			name: "fs delete dir removes tree",
-			input: fmt.Sprintf(`
-				use ard/fs
-				fn main() Bool {
-					fs::delete_dir(%q).expect("")
-					fs::create_dir(%q).expect("")
-					fs::write(%q, "bye").expect("")
-					fs::delete_dir(%q).expect("")
-					not fs::exists(%q)
-				}
-			`, root, dir, file, dir, dir),
-		},
-	})
-}
-
-func TestGoTargetParityCryptoUUID(t *testing.T) {
-	program := lowerParitySource(t, `
-		use ard/crypto
-		fn main() Str { crypto::uuid() }
-	`)
-	got := runGoTargetParityJSON(t, program)
-	uuid, err := strconv.Unquote(got)
-	if err != nil {
-		t.Fatalf("unquote uuid %q: %v", got, err)
-	}
-	pattern := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-	if !pattern.MatchString(uuid) {
-		t.Fatalf("uuid = %q", uuid)
-	}
-}
-
 func TestGoTargetParitySQL(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "query.db")
 	runGoParityCasesSerial(t, []goParityCase{
@@ -2298,30 +2114,6 @@ func TestGoTargetParitySQL(t *testing.T) {
 					decode::run(rows.at(0), decode::field("name", decode::string)).expect("Failed to decode name")
 				}
 			`, filepath.Join(filepath.Dir(dbPath), "commit.db")),
-		},
-	})
-}
-
-func TestGoTargetParityEnvGet(t *testing.T) {
-	t.Setenv("ARD_ENV_TEST", "present")
-	runGoParityCases(t, []goParityCase{
-		{
-			name: "env get returns some string for set variable",
-			input: `
-				use ard/env
-				fn main() Str {
-					env::get("ARD_ENV_TEST").or("")
-				}
-			`,
-		},
-		{
-			name: "env get returns none for missing variable",
-			input: `
-				use ard/env
-				fn main() Bool {
-					env::get("ARD_MISSING_ENV_TEST").is_none()
-				}
-			`,
 		},
 	})
 }

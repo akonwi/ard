@@ -1998,25 +1998,16 @@ func TestLowerProgramPropagatesTryResultAcrossDifferentResultValueTypes(t *testi
 func TestRunProgramSupportsCommonStdlibExterns(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/argv
-		use ard/base64
 		use ard/dynamic
-		use ard/env
 		use ard/float
-		use ard/hex
 
 		fn main() Bool {
-			let encoded = base64::encode("hi".bytes(), true)
-			let decoded = base64::decode(encoded, true).expect("decode")
-			let hexed = hex::encode(decoded)
-			let unhex = hex::decode(hexed).expect("hex")
-			let unhex_text = Str::from_bytes(unhex).expect("utf8")
 			let args = argv::os_args()
-			let _path = env::get("PATH")
 			let parsed = float::from_str("3.5").or(0.0)
 			let floored = float::floor(parsed)
-			let _dyn_list = dynamic::from_list([dynamic::from_str(unhex_text)])
+			let _dyn_list = dynamic::from_list([dynamic::from_str("hi")])
 			let _dyn_map = dynamic::object(["value": dynamic::from_int(args.size())])
-			unhex_text == "hi" and floored == 3.0 and args.size() >= 0
+			floored == 3.0 and args.size() >= 0
 		}
 	`)
 
@@ -2750,12 +2741,10 @@ func TestLowerProgramSupportsResultExpectAndStringPredicates(t *testing.T) {
 func TestLowerProgramUsesDirectStdlibMaybeCalls(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/dynamic
-		use ard/env
 		use ard/float
 		use ard/int
 
 		fn main() Bool {
-			let _a = env::get("PATH")
 			let _b = float::from_str("1.5")
 			let _c = int::from_str("2")
 			let _d = dynamic::object(["a": dynamic::from_int(1)])
@@ -2764,9 +2753,6 @@ func TestLowerProgramUsesDirectStdlibMaybeCalls(t *testing.T) {
 	`)
 
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesHaveCall(files, "os.LookupEnv") {
-		t.Fatal("generated AST missing direct Go env lookup")
-	}
 	if !astFilesHaveCall(files, "strconv.ParseFloat") {
 		t.Fatal("generated AST missing direct Go float parsing call")
 	}
@@ -5545,14 +5531,14 @@ func TestLowerMaybeArgToGoPointerParam(t *testing.T) {
 	// An optional Ard value passes to a Go pointer parameter via its backing
 	// pointer (some(x) -> &x, none() -> nil): ADR 0031.
 	program := lowerSource(t, `use ard/maybe
-use go:github.com/akonwi/ard/std_lib/ffi
+use go:flag
 
-fn hash(password: Str, cost: Int?) Str!Str {
-  ffi::CryptoHashPassword(password, cost)
+fn bind(count: Int?) {
+  flag::IntVar(count, "count", 0, "count flag")
 }
 
 fn main() {
-  let _ = hash("pw", maybe::none())
+  bind(maybe::none())
 }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {

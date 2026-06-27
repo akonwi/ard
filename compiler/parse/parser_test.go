@@ -125,7 +125,7 @@ func TestImportStatements(t *testing.T) {
 			name: "importing modules",
 			input: strings.Join([]string{
 				`// comment`,
-				`use ard/fs`,
+				`use ard/io`,
 				`use github.com/google/go-cmp/cmp`,
 				`use github.com/tree-sitter/go-tree-sitter as ts`,
 				`use go:git.sr.ht/~rockorager/vaxis as vaxis`,
@@ -136,8 +136,8 @@ func TestImportStatements(t *testing.T) {
 			output: Program{
 				Imports: []Import{
 					{
-						Path: "ard/fs",
-						Name: "fs",
+						Path: "ard/io",
+						Name: "io",
 					},
 					{
 						Path: "github.com/google/go-cmp/cmp",
