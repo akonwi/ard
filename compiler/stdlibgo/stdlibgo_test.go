@@ -61,3 +61,17 @@ func TestIsBundledImportPath(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalGoImportPath(t *testing.T) {
+	cases := map[string]string{
+		"ard/ffi":                           "github.com/akonwi/ard/std_lib/ffi",
+		"github.com/akonwi/ard/std_lib/ffi": "github.com/akonwi/ard/std_lib/ffi",
+		"strconv":                           "strconv",
+		"demo/ffi":                          "demo/ffi",
+	}
+	for in, want := range cases {
+		if got := CanonicalGoImportPath(in); got != want {
+			t.Errorf("CanonicalGoImportPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

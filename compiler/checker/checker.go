@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/stdlibgo"
 )
 
 type Program struct {
@@ -404,9 +405,9 @@ func (c *Checker) Check() {
 				c.addError(fmt.Sprintf("Go import alias %q cannot be used as a Go selector; use `as` with a valid Go identifier", imp.Name), imp.GetLocation())
 				continue
 			}
-			goImport := directGoImport{alias: imp.Name, importPath: imp.Path}
+			goImport := directGoImport{alias: imp.Name, importPath: stdlibgo.CanonicalGoImportPath(imp.Path)}
 			if c.options.GoResolver != nil {
-				pkg, err := c.options.GoResolver.LoadPackage(imp.Path)
+				pkg, err := c.options.GoResolver.LoadPackage(goImport.importPath)
 				if err != nil {
 					c.addError(fmt.Sprintf("Failed to load Go package '%s': %v", imp.Path, err), imp.GetLocation())
 					c.directGoImports[imp.Name] = goImport

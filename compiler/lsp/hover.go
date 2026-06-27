@@ -8,6 +8,7 @@ import (
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
+	"github.com/akonwi/ard/stdlibgo"
 	"go.lsp.dev/protocol"
 )
 
@@ -2499,7 +2500,7 @@ func loadDirectGoPackage(imp parse.Import, filePath string) (*checker.GoPackage,
 	if filePath != "" {
 		dir = filepath.Dir(filePath)
 	}
-	pkg, err := checker.NewGoPackagesResolver(dir).LoadPackage(imp.Path)
+	pkg, err := checker.NewGoPackagesResolver(dir).LoadPackage(stdlibgo.CanonicalGoImportPath(imp.Path))
 	if err != nil {
 		log.Printf("hover: direct Go package %s load error: %v", imp.Path, err)
 		return nil, false

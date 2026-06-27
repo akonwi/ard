@@ -1,7 +1,7 @@
+use go:ard/ffi
 use ard/maybe
 use ard/testing
 
-use go:github.com/akonwi/ard/std_lib/ffi
 use go:math
 use go:strconv
 

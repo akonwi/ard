@@ -1,4 +1,4 @@
-use go:github.com/akonwi/ard/std_lib/ffi
+use go:ard/ffi
 
 fn from_int(value: Int) Byte? {
   ffi::ByteFromInt(value)

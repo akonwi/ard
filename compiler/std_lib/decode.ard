@@ -1,9 +1,8 @@
 use ard/dynamic as Dynamic
+use go:ard/ffi
 use ard/list as List
 use ard/maybe
 use ard/string as Str
-
-use go:github.com/akonwi/ard/std_lib/ffi
 
 type PathSegment = Str | Int
 

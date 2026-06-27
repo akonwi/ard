@@ -37,6 +37,19 @@ func IsBundledImportPath(importPath string) bool {
 	return false
 }
 
+// CanonicalGoImportPath maps the standard library's shorthand `use go:` paths
+// for its own embedded Go packages to their real module import paths. The
+// standard library is itself an embedded Ard project, so it references its host
+// Go code as `ard/ffi` the same way a project references its own Go code as
+// `<module>/ffi`. Non-shorthand paths are returned unchanged.
+func CanonicalGoImportPath(importPath string) string {
+	switch importPath {
+	case "ard/ffi":
+		return "github.com/akonwi/ard/std_lib/ffi"
+	}
+	return importPath
+}
+
 var (
 	materializeOnce sync.Once
 	materializedDir string

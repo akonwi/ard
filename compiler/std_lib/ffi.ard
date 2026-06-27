@@ -1,4 +1,4 @@
-use go:github.com/akonwi/ard/std_lib/ffi
+use go:ard/ffi
 
 // FFI helpers for direct host interop.
 

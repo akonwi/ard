@@ -1,4 +1,5 @@
-use go:github.com/akonwi/ard/std_lib/ffi
+use go:ard/ffi
+
 use go:strings
 
 // defines converting to a string

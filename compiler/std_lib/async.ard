@@ -1,5 +1,6 @@
-use go:github.com/akonwi/ard/std_lib/ffi as host
-use go:time as time
+use go:ard/ffi as host
+
+use go:time
 
 // start runs `do` concurrently on a new goroutine. It is fire-and-forget;
 // coordinate completion or results with channels (see ard/channel).

@@ -1,6 +1,5 @@
+use go:ard/ffi
 use ard/string as Str
-
-use go:github.com/akonwi/ard/std_lib/ffi
 
 fn print(value: Str::ToString) {
   ffi::Print(value.to_str())

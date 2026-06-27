@@ -1,6 +1,5 @@
+use go:ard/ffi
 use ard/maybe
-
-use go:github.com/akonwi/ard/std_lib/ffi
 
 fn from_int(value: Int) Rune? {
   ffi::RuneFromInt(value)

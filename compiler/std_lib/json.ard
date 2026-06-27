@@ -1,4 +1,4 @@
-use go:github.com/akonwi/ard/std_lib/ffi as host
+use go:ard/ffi as host
 
 // encode serializes any value to a JSON string. Structs serialize with their
 // Ard field names, lists/maps/primitives/enums natively, and Maybe/Result

@@ -1,11 +1,11 @@
 use ard/dynamic
+use go:ard/ffi
 use ard/list as List
 use ard/maybe
 use ard/result as Result
 use ard/testing
 
 use go:database/sql
-use go:github.com/akonwi/ard/std_lib/ffi
 
 // Only support primitives as values for query variables
 type Value = Str | Bool | Int | Float | Void
