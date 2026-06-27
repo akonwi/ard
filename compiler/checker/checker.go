@@ -2072,7 +2072,7 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal Type, onlyMatchFinal bool) bool {
 	if onlyMatchFinal && expectedFinal != Void {
 		switch s := stmt.(type) {
-		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.InstanceMethod, *parse.UnsafeBlock:
+		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.InstanceMethod, *parse.UnsafeBlock:
 			return true
 		case *parse.StaticFunction:
 			return c.isDirectGoStaticFunction(s)
@@ -2086,7 +2086,7 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 			*parse.Identifier, *parse.FunctionCall, *parse.FunctionValueCall, *parse.InstanceProperty, *parse.InstanceMethod,
 			*parse.UnaryExpression, *parse.BinaryExpression, *parse.ChainedComparison, *parse.StaticFunction,
 			*parse.IfStatement, *parse.AnonymousFunction, *parse.ListLiteral, *parse.MapLiteral,
-			*parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.StaticProperty,
+			*parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.StaticProperty,
 			*parse.StructInstance, *parse.Try, *parse.BlockExpression, *parse.UnsafeBlock:
 			return true
 		default:
@@ -2095,7 +2095,7 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 	}
 
 	switch stmt.(type) {
-	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.IfStatement, *parse.StaticFunction, *parse.FunctionValueCall, *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction, *parse.UnsafeBlock:
+	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.IfStatement, *parse.StaticFunction, *parse.FunctionValueCall, *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction, *parse.UnsafeBlock:
 		return true
 	default:
 		return false
@@ -2211,6 +2211,15 @@ func parseExpressionContainsBreak(expr parse.Expression) bool {
 	case *parse.StructInstance:
 		for _, prop := range e.Properties {
 			if parseExpressionContainsBreak(prop.Value) {
+				return true
+			}
+		}
+	case *parse.SelectExpression:
+		for _, arm := range e.Cases {
+			if arm.Op != nil && parseExpressionContainsBreak(arm.Op) {
+				return true
+			}
+			if parseStatementsContainBreak(arm.Body) {
 				return true
 			}
 		}
@@ -4883,6 +4892,93 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		return c.checkList(nil, s)
 	case *parse.MapLiteral:
 		return c.checkMap(nil, s)
+	case *parse.SelectExpression:
+		allowMixedVoid := discardThisExpr || c.expectedExpr == Void
+		previousArmDiscard := c.matchArmDiscardContext
+		c.matchArmDiscardContext = allowMixedVoid
+		defer func() {
+			c.matchArmDiscardContext = previousArmDiscard
+		}()
+
+		sel := &Select{}
+		var resultType Type
+		hasDefault := false
+
+		for _, arm := range s.Cases {
+			// Default arm: the head is the `_` identifier.
+			if id, ok := arm.Op.(*parse.Identifier); ok && id.Name == "_" {
+				if arm.Binding != nil {
+					c.addError("The default select arm cannot bind a value", arm.Op.GetLocation())
+				}
+				if hasDefault {
+					c.addError("Duplicate default (_) arm in select", arm.Op.GetLocation())
+				}
+				hasDefault = true
+				body := c.checkMatchArmBlock(arm.Body, nil)
+				sel.Arms = append(sel.Arms, SelectArm{Kind: SelectArmDefault, Body: body})
+				if merged, ok := mergeMatchResultType(c, resultType, body.Type(), arm.Op.GetLocation(), allowMixedVoid); ok {
+					resultType = merged
+				}
+				continue
+			}
+
+			op, ok := arm.Op.(*parse.InstanceMethod)
+			if !ok {
+				c.addError("A select arm must be a channel recv() or send() operation", arm.Op.GetLocation())
+				continue
+			}
+
+			channel := c.checkExpr(op.Target)
+			if channel == nil {
+				continue
+			}
+			chanType, ok := channel.Type().(*Chan)
+			if !ok {
+				c.addError(fmt.Sprintf("A select arm operates on a channel, but got %s", channel.Type().String()), op.Target.GetLocation())
+				continue
+			}
+			elem := chanType.of
+
+			switch op.Method.Name {
+			case "recv":
+				if len(op.Method.Args) != 0 {
+					c.addError("recv() in a select arm takes no arguments", op.GetLocation())
+				}
+				var binding *Identifier
+				if arm.Binding != nil {
+					binding = &Identifier{Name: arm.Binding.Name}
+				}
+				body := c.checkMatchArmBlock(arm.Body, func() {
+					if arm.Binding != nil {
+						c.scope.add(arm.Binding.Name, &Maybe{elem}, false)
+					}
+				})
+				sel.Arms = append(sel.Arms, SelectArm{Kind: SelectArmRecv, Channel: channel, Binding: binding, ElemType: elem, Body: body})
+				if merged, ok := mergeMatchResultType(c, resultType, body.Type(), op.GetLocation(), allowMixedVoid); ok {
+					resultType = merged
+				}
+			case "send":
+				if arm.Binding != nil {
+					c.addError("A select send arm cannot bind a value", arm.Op.GetLocation())
+				}
+				if len(op.Method.Args) != 1 {
+					c.addError("send() in a select arm takes exactly one argument", op.GetLocation())
+					continue
+				}
+				value := c.checkExprAs(op.Method.Args[0].Value, elem)
+				body := c.checkMatchArmBlock(arm.Body, nil)
+				sel.Arms = append(sel.Arms, SelectArm{Kind: SelectArmSend, Channel: channel, ElemType: elem, Value: value, Body: body})
+				if merged, ok := mergeMatchResultType(c, resultType, body.Type(), op.GetLocation(), allowMixedVoid); ok {
+					resultType = merged
+				}
+			default:
+				c.addError(fmt.Sprintf("A select arm must use recv() or send(), got %s()", op.Method.Name), op.GetLocation())
+			}
+		}
+
+		sel.ResultType = resultType
+		return sel
+
 	case *parse.MatchExpression:
 		allowMixedVoid := discardThisExpr || c.expectedExpr == Void
 		previousArmDiscard := c.matchArmDiscardContext
@@ -6182,6 +6278,10 @@ func bindInferredTypeVars(expected Type, actual Type) {
 func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expression {
 	switch s := (expr).(type) {
 	case *parse.MatchExpression:
+		return c.withExpectedExpr(expectedType, func() Expression {
+			return c.checkExpr(s)
+		})
+	case *parse.SelectExpression:
 		return c.withExpectedExpr(expectedType, func() Expression {
 			return c.checkExpr(s)
 		})

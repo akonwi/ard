@@ -2863,3 +2863,65 @@ fn take(ch: channel::Chan<Str>) {
 		},
 	})
 }
+
+func TestSelectChecker(t *testing.T) {
+	run(t, []test{
+		{
+			name: "valid select with recv binding, send, discard, and default",
+			input: `use ard/channel
+fn main() {
+  let jobs = channel::new<Int>(1)
+  let sink = channel::new<Int>(0)
+  jobs.send(1)
+  select {
+    let job = jobs.recv() => sink.send(job.expect("j")),
+    sink.send(0) => sink.close(),
+    jobs.recv() => sink.close(),
+    _ => sink.close()
+  }
+}`,
+		},
+		{
+			name: "send arm rejects a mismatched value type",
+			input: `use ard/channel
+fn main() {
+  let ch = channel::new<Int>(1)
+  select {
+    ch.send("x") => ch.close(),
+    _ => ch.close()
+  }
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"},
+			},
+		},
+		{
+			name: "arm on a non-channel is rejected",
+			input: `use ard/channel
+fn main() {
+  let n = 5
+  select {
+    n.recv() => {},
+    _ => {}
+  }
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "A select arm operates on a channel, but got Int"},
+			},
+		},
+		{
+			name: "default arm cannot bind",
+			input: `use ard/channel
+fn main() {
+  let ch = channel::new<Int>(1)
+  select {
+    let x = _ => {},
+    ch.recv() => {}
+  }
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "The default select arm cannot bind a value"},
+			},
+		},
+	})
+}

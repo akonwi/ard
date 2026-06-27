@@ -718,6 +718,40 @@ func (b *BoolMatch) Type() Type {
 	return b.True.Type()
 }
 
+// SelectArmKind distinguishes the channel-multiplexing arm forms (ADR 0032).
+type SelectArmKind int
+
+const (
+	SelectArmRecv SelectArmKind = iota
+	SelectArmSend
+	SelectArmDefault
+)
+
+// SelectArm is one arm of a Select. For recv/send arms Channel is the channel
+// expression and ElemType is its element type. Recv arms may carry a Binding
+// (`let name = ch.recv()`) that binds `ElemType?` in the arm body. Send arms
+// carry the Value to send. The default arm has Kind SelectArmDefault.
+type SelectArm struct {
+	Kind     SelectArmKind
+	Channel  Expression
+	Binding  *Identifier
+	ElemType Type
+	Value    Expression
+	Body     *Block
+}
+
+type Select struct {
+	Arms       []SelectArm
+	ResultType Type
+}
+
+func (s *Select) Type() Type {
+	if s.ResultType != nil {
+		return s.ResultType
+	}
+	return Void
+}
+
 type IntRange struct {
 	Start int
 	End   int
