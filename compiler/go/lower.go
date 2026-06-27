@@ -2171,6 +2171,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerChannelRecv(fn, expr)
 	case air.ExprChannelClose:
 		return l.lowerChannelClose(fn, expr)
+	case air.ExprChannelNarrow:
+		return l.lowerChannelNarrow(fn, expr)
 	case air.ExprSelect:
 		return l.lowerSelect(fn, expr)
 	case air.ExprJSONParse:
@@ -3189,6 +3191,18 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		return &ast.ChanType{Dir: ast.SEND | ast.RECV, Value: elem}, nil
+	case air.TypeReceiver:
+		elem, err := l.goType(info.Elem)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ChanType{Dir: ast.RECV, Value: elem}, nil
+	case air.TypeSender:
+		elem, err := l.goType(info.Elem)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ChanType{Dir: ast.SEND, Value: elem}, nil
 	case air.TypeMap:
 		key, err := l.goType(info.Key)
 		if err != nil {
@@ -5859,6 +5873,28 @@ func (l *lowerer) lowerChannelClose(fn air.Function, expr air.Expr) (loweredExpr
 	}
 	stmts := append(ch.stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("close"), Args: []ast.Expr{ch.expr}}})
 	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
+}
+
+// lowerChannelNarrow converts a bidirectional channel to a directional view via
+// a Go conversion to the result's directional channel type (ADR 0032 Layer 2).
+func (l *lowerer) lowerChannelNarrow(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("channel narrow expects one arg")
+	}
+	ch, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	typ, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	// (<-chan T)(ch) / (chan<- T)(ch). Parenthesize the channel type so it parses
+	// as a conversion.
+	return loweredExpr{stmts: ch.stmts, expr: &ast.CallExpr{
+		Fun:  &ast.ParenExpr{X: typ},
+		Args: []ast.Expr{ch.expr},
+	}}, nil
 }
 
 // lowerSelect emits a native Go select statement (ADR 0032). Channel and send

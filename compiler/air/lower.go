@@ -779,6 +779,14 @@ func (fl *functionLowerer) bindTypeVars(pattern checker.Type, actual TypeID) {
 		if actualInfo.Kind == TypeChannel {
 			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
 		}
+	case *checker.Receiver:
+		if actualInfo.Kind == TypeReceiver {
+			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
+		}
+	case *checker.Sender:
+		if actualInfo.Kind == TypeSender {
+			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
+		}
 	case *checker.Map:
 		if actualInfo.Kind == TypeMap {
 			fl.bindTypeVars(typ.Key(), actualInfo.Key)
@@ -1083,6 +1091,18 @@ func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, 
 			return NoType, err
 		}
 		return fl.l.internSyntheticType("Chan<"+fl.l.typeName(elem)+">", TypeInfo{Kind: TypeChannel, Elem: elem})
+	case *checker.Receiver:
+		elem, err := fl.internResolvedType(typ.Of())
+		if err != nil {
+			return NoType, err
+		}
+		return fl.l.internSyntheticType("Receiver<"+fl.l.typeName(elem)+">", TypeInfo{Kind: TypeReceiver, Elem: elem})
+	case *checker.Sender:
+		elem, err := fl.internResolvedType(typ.Of())
+		if err != nil {
+			return NoType, err
+		}
+		return fl.l.internSyntheticType("Sender<"+fl.l.typeName(elem)+">", TypeInfo{Kind: TypeSender, Elem: elem})
 	case *checker.Map:
 		key, err := fl.internResolvedType(typ.Key())
 		if err != nil {
@@ -1161,6 +1181,18 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 			return NoType, err
 		}
 		return fl.l.internSyntheticType("Chan<"+fl.l.typeName(elem)+">", TypeInfo{Kind: TypeChannel, Elem: elem})
+	case *checker.Receiver:
+		elem, err := fl.internType(typ.Of())
+		if err != nil {
+			return NoType, err
+		}
+		return fl.l.internSyntheticType("Receiver<"+fl.l.typeName(elem)+">", TypeInfo{Kind: TypeReceiver, Elem: elem})
+	case *checker.Sender:
+		elem, err := fl.internType(typ.Of())
+		if err != nil {
+			return NoType, err
+		}
+		return fl.l.internSyntheticType("Sender<"+fl.l.typeName(elem)+">", TypeInfo{Kind: TypeSender, Elem: elem})
 	case *checker.Map:
 		key, err := fl.internType(typ.Key())
 		if err != nil {
@@ -2018,6 +2050,20 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 		info.Kind = TypeChannel
 		info.Elem = elem
+	case *checker.Receiver:
+		elem, err := l.internType(typ.Of())
+		if err != nil {
+			return NoType, err
+		}
+		info.Kind = TypeReceiver
+		info.Elem = elem
+	case *checker.Sender:
+		elem, err := l.internType(typ.Of())
+		if err != nil {
+			return NoType, err
+		}
+		info.Kind = TypeSender
+		info.Elem = elem
 	case *checker.Map:
 		key, err := l.internType(typ.Key())
 		if err != nil {
@@ -2363,6 +2409,10 @@ func typeContainsTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}) boo
 		return typeContainsTypeVarSeen(typ.Of(), seen)
 	case *checker.Chan:
 		return typeContainsTypeVarSeen(typ.Of(), seen)
+	case *checker.Receiver:
+		return typeContainsTypeVarSeen(typ.Of(), seen)
+	case *checker.Sender:
+		return typeContainsTypeVarSeen(typ.Of(), seen)
 	case *checker.Map:
 		return typeContainsTypeVarSeen(typ.Key(), seen) || typeContainsTypeVarSeen(typ.Value(), seen)
 	case *checker.Maybe:
@@ -2431,6 +2481,10 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 		return typeHasUnresolvedTypeVarSeen(typ.Of(), seen)
 	case *checker.Chan:
 		return typeHasUnresolvedTypeVarSeen(typ.Of(), seen)
+	case *checker.Receiver:
+		return typeHasUnresolvedTypeVarSeen(typ.Of(), seen)
+	case *checker.Sender:
+		return typeHasUnresolvedTypeVarSeen(typ.Of(), seen)
 	case *checker.Map:
 		return typeHasUnresolvedTypeVarSeen(typ.Key(), seen) || typeHasUnresolvedTypeVarSeen(typ.Value(), seen)
 	case *checker.Maybe:
@@ -2474,7 +2528,7 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 
 func canWrapAsDynamic(kind TypeKind) bool {
 	switch kind {
-	case TypeVoid, TypeInt, TypeFloat, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeChannel, TypeDynamic:
+	case TypeVoid, TypeInt, TypeFloat, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeChannel, TypeReceiver, TypeSender, TypeDynamic:
 		return true
 	default:
 		return false
@@ -2517,6 +2571,10 @@ func airTypeKeySeen(t checker.Type, seen map[checker.Type]struct{}) string {
 		return "list<" + airTypeKeySeen(typ.Of(), seen) + ">"
 	case *checker.Chan:
 		return "channel<" + airTypeKeySeen(typ.Of(), seen) + ">"
+	case *checker.Receiver:
+		return "receiver<" + airTypeKeySeen(typ.Of(), seen) + ">"
+	case *checker.Sender:
+		return "sender<" + airTypeKeySeen(typ.Of(), seen) + ">"
 	case *checker.Map:
 		return "map<" + airTypeKeySeen(typ.Key(), seen) + "," + airTypeKeySeen(typ.Value(), seen) + ">"
 	case *checker.Maybe:
@@ -3598,17 +3656,29 @@ func (fl *functionLowerer) lowerNonProducingBlock(stmts []checker.Statement) (Bl
 // the native channel AIR expressions. The element type comes from the call's
 // Chan type argument (for new) or the channel operand's type (for the rest).
 func (fl *functionLowerer) lowerChannelCall(typeID TypeID, e *checker.ModuleFunctionCall) (*Expr, error) {
-	if e.Call.Name != "new" {
-		return nil, fmt.Errorf("unknown ard/channel function %s", e.Call.Name)
+	switch e.Call.Name {
+	case "new":
+		if len(e.Call.Args) != 1 {
+			return nil, fmt.Errorf("ard/channel::new expects one argument")
+		}
+		capacity, err := fl.lowerExpr(e.Call.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprMakeChannel, Type: typeID, Args: []Expr{*capacity}}, nil
+	case "receiver", "sender":
+		// Narrow a bidirectional channel to a directional view: a Go directional
+		// conversion to the result type (TypeReceiver/TypeSender -> <-chan/chan<-).
+		if len(e.Call.Args) != 1 {
+			return nil, fmt.Errorf("ard/channel::%s expects one argument", e.Call.Name)
+		}
+		ch, err := fl.lowerExpr(e.Call.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprChannelNarrow, Type: typeID, Args: []Expr{*ch}}, nil
 	}
-	if len(e.Call.Args) != 1 {
-		return nil, fmt.Errorf("ard/channel::new expects one argument")
-	}
-	capacity, err := fl.lowerExpr(e.Call.Args[0])
-	if err != nil {
-		return nil, err
-	}
-	return &Expr{Kind: ExprMakeChannel, Type: typeID, Args: []Expr{*capacity}}, nil
+	return nil, fmt.Errorf("unknown ard/channel function %s", e.Call.Name)
 }
 
 // lowerSelect lowers a checker Select into an ExprSelect with native channel
@@ -3681,7 +3751,7 @@ func (fl *functionLowerer) lowerSelect(typeID TypeID, sel *checker.Select) (*Exp
 // lowerChannelValue lowers a value being sent on a channel, using the channel's
 // element type as the expected type when it is known.
 func (fl *functionLowerer) lowerChannelValue(chanTypeID TypeID, value checker.Expression) (*Expr, error) {
-	if info, ok := fl.l.typeInfo(chanTypeID); ok && info.Kind == TypeChannel && info.Elem != NoType {
+	if info, ok := fl.l.typeInfo(chanTypeID); ok && (info.Kind == TypeChannel || info.Kind == TypeReceiver || info.Kind == TypeSender) && info.Elem != NoType {
 		return fl.lowerExprWithExpected(value, info.Elem)
 	}
 	return fl.lowerExpr(value)
@@ -5206,7 +5276,7 @@ func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.In
 		}
 		return nil, fmt.Errorf("trait %s has no method %s", trait.Name, method.Method.Name)
 	}
-	if typeInfo.Kind == TypeChannel {
+	if typeInfo.Kind == TypeChannel || typeInfo.Kind == TypeReceiver || typeInfo.Kind == TypeSender {
 		return fl.lowerChanMethod(typeID, target, method)
 	}
 	if typeInfo.Kind == TypeStruct || typeInfo.Kind == TypeEnum {

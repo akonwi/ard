@@ -3049,6 +3049,60 @@ fn main() Bool {
 	}
 }
 
+func TestGoTargetParityDirectionalChannels(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name: "sender and receiver views round-trip a value",
+			input: `use ard/channel
+fn main() Bool {
+  let ch = channel::new<Int>(1)
+  let tx = channel::sender(ch)
+  let rx = channel::receiver(ch)
+  tx.send(42)
+  rx.recv().expect("v") == 42
+}`,
+			want: "true",
+		},
+		{
+			name: "select receives on a receiver view",
+			input: `use ard/channel
+fn main() Bool {
+  let ch = channel::new<Int>(1)
+  let rx = channel::receiver(ch)
+  ch.send(7)
+  select {
+    let v = rx.recv() => v.expect("v") == 7,
+    _ => false,
+  }
+}`,
+			want: "true",
+		},
+		{
+			name: "sender can close the channel",
+			input: `use ard/channel
+fn main() Bool {
+  let ch = channel::new<Int>(1)
+  let tx = channel::sender(ch)
+  tx.close()
+  ch.recv().is_none()
+}`,
+			want: "true",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			program := lowerParitySource(t, tc.input)
+			if got := strings.TrimSpace(runGoTargetParityJSON(t, program)); got != tc.want {
+				t.Fatalf("go output = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGoTargetParitySelect(t *testing.T) {
 	cases := []struct {
 		name  string

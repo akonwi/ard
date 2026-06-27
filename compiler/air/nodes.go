@@ -75,6 +75,7 @@ const (
 	ExprChannelSend
 	ExprChannelRecv
 	ExprChannelClose
+	ExprChannelNarrow
 	ExprSelect
 	ExprMapKeys
 	ExprMapSize
