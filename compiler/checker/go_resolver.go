@@ -654,6 +654,10 @@ func (c *Checker) directGoAssignableShapeSupported(goType GoValueType, loc parse
 	switch goType.Kind {
 	case GoValueBool, GoValueString, GoValueAny:
 		return true
+	case GoValueFunc:
+		// A func-typed field accepts an Ard closure, validated in detail against
+		// the value by directGoParamCompatible's GoValueFunc case.
+		return goType.Func != nil
 	case GoValueInt:
 		return topLevel || goType.Bits == 0 || goType.Bits == 32
 	case GoValueUint:

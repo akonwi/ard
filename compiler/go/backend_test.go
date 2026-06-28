@@ -5552,3 +5552,47 @@ fn main() {
 		t.Fatal("generated AST missing .Ptr() coercion for Maybe -> Go pointer param")
 	}
 }
+
+// A Go struct literal may set a func-typed field; the Ard closure passes
+// through as the Go func value (Gap 2: func-typed direct-Go struct fields).
+func TestLowerProgramConstructsGoStructWithFuncField(t *testing.T) {
+	program := lowerSourceWithCheckOptions(t, `
+		use go:example.com/widget as widget
+
+		fn build() widget::Widget {
+			widget::Widget{ OnClick: fn() {} }
+		}
+	`, checker.CheckOptions{GoResolver: testGoResolver{packages: map[string]*checker.GoPackage{
+		"example.com/widget": {
+			ImportPath: "example.com/widget",
+			Name:       "widget",
+			Types: map[string]checker.GoType{"Widget": {Name: "Widget", Struct: true, Fields: map[string]checker.GoField{
+				"OnClick": {Name: "OnClick", Type: checker.GoValueType{Kind: checker.GoValueFunc, Expr: "func()", Func: &checker.GoSignature{}}},
+			}}},
+		},
+	}}})
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		lit, ok := node.(*ast.CompositeLit)
+		if !ok {
+			return false
+		}
+		for _, elt := range lit.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			key, isIdent := kv.Key.(*ast.Ident)
+			if !isIdent || key.Name != "OnClick" {
+				continue
+			}
+			if _, isFunc := kv.Value.(*ast.FuncLit); isFunc {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("generated AST missing widget.Widget{OnClick: func(){...}}")
+	}
+}

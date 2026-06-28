@@ -2127,3 +2127,24 @@ fn main() {
 		}
 	})
 }
+
+func TestDirectGoStructFuncField(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/widget as widget
+fn make() widget::Widget { widget::Widget{ OnClick: fn() {} } }`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{
+		"example.com/widget": {
+			ImportPath: "example.com/widget",
+			Name:       "widget",
+			Types: map[string]GoType{"Widget": {Name: "Widget", Struct: true, Fields: map[string]GoField{
+				"OnClick": {Name: "OnClick", Type: GoValueType{Kind: GoValueFunc, Expr: "func()", Func: &GoSignature{}}},
+			}}},
+		},
+	}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
