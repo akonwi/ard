@@ -1,5 +1,2 @@
 name = "tic_tac_toe"
 ard = ">= 0.1.0"
-
-[dependencies]
-vaxis = { git = "https://github.com/akonwi/vaxis-ard.git", commit = "76f7c1b" }
