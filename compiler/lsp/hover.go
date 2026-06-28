@@ -553,6 +553,10 @@ func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expres
 		// but need special handling to recurse into their bodies).
 		switch s := stmt.(type) {
 		case *parse.VariableDeclaration:
+			if inner := walkDeclaredType(s.Type, target); inner != nil {
+				best = inner
+				continue
+			}
 			if s.Value != nil {
 				if inner := walkExpr(s.Value, target); inner != nil {
 					best = inner
@@ -577,10 +581,17 @@ func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expres
 			if target.Row == s.Location.Start.Row {
 				best = s
 			}
-			for _, p := range s.Parameters {
+			for i := range s.Parameters {
+				p := s.Parameters[i]
 				if inner := walkExpr(&p, target); inner != nil {
 					best = inner
 				}
+				if inner := walkDeclaredType(p.Type, target); inner != nil {
+					best = inner
+				}
+			}
+			if inner := walkDeclaredType(s.ReturnType, target); inner != nil {
+				best = inner
 			}
 			if inner := findInStmts(s.Body, target); inner != nil {
 				best = inner
@@ -773,6 +784,39 @@ func findInStmts(stmts []parse.Statement, target parse.Point) (best parse.Expres
 
 // walkExpr recursively descends into an expression tree looking for the
 // innermost expression containing target. Returns the deepest match.
+// walkDeclaredType returns the qualified static reference (e.g. `strings::Builder`)
+// of a type annotation at target, so go-to-definition resolves Go and
+// cross-module type references that appear in type positions. It returns nil for
+// unqualified types and positions that don't land on a qualified reference.
+func walkDeclaredType(t parse.DeclaredType, target parse.Point) parse.Expression {
+	switch dt := t.(type) {
+	case *parse.CustomType:
+		for i := range dt.TypeArgs {
+			if inner := walkDeclaredType(dt.TypeArgs[i], target); inner != nil {
+				return inner
+			}
+		}
+		if dt.Type.Target != nil && pointInRange(target, dt.Type.GetLocation()) {
+			return &dt.Type
+		}
+	case *parse.MutableType:
+		return walkDeclaredType(dt.Inner, target)
+	case *parse.ResultType:
+		if inner := walkDeclaredType(dt.Val, target); inner != nil {
+			return inner
+		}
+		return walkDeclaredType(dt.Err, target)
+	case *parse.FunctionType:
+		for i := range dt.Params {
+			if inner := walkDeclaredType(dt.Params[i], target); inner != nil {
+				return inner
+			}
+		}
+		return walkDeclaredType(dt.Return, target)
+	}
+	return nil
+}
+
 func walkExpr(expr parse.Expression, target parse.Point) parse.Expression {
 	if expr == nil {
 		return nil
@@ -875,6 +919,10 @@ func walkExpr(expr parse.Expression, target parse.Point) parse.Expression {
 			if inner := findInStmts([]parse.Statement{bodyStmt}, target); inner != nil {
 				best = inner
 			}
+		}
+	case *parse.Parameter:
+		if inner := walkDeclaredType(e.Type, target); inner != nil {
+			return inner
 		}
 	case *parse.Identifier, *parse.StrLiteral, *parse.NumLiteral,
 		*parse.BoolLiteral, *parse.VoidLiteral:

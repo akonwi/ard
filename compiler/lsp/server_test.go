@@ -2688,4 +2688,22 @@ func TestDefinitionGoSymbols(t *testing.T) {
 			t.Fatalf("definition file = %q, want a time .go source", got)
 		}
 	})
+
+	t.Run("go type in parameter annotation", func(t *testing.T) {
+		source := "use go:strings\nfn use_it(b: strings::Builder) {\n}\n"
+		loc := requireDefinition(t, source, filePath, 1, 24)
+		got := loc.URI.Filename()
+		if !strings.Contains(got, "strings") || !strings.HasSuffix(got, ".go") {
+			t.Fatalf("definition file = %q, want a strings .go source", got)
+		}
+	})
+
+	t.Run("go type in return annotation", func(t *testing.T) {
+		source := "use go:strings\nfn make() strings::Builder {\n  strings::Builder{}\n}\n"
+		loc := requireDefinition(t, source, filePath, 1, 22)
+		got := loc.URI.Filename()
+		if !strings.Contains(got, "strings") || !strings.HasSuffix(got, ".go") {
+			t.Fatalf("definition file = %q, want a strings .go source", got)
+		}
+	})
 }
