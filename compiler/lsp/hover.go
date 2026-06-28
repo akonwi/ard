@@ -2236,6 +2236,14 @@ func inferExprType(expr parse.Expression, prog *parse.Program, filePath string) 
 			}
 			return resolveIdentType(id.Name, prog, filePath)
 		}
+		// A qualified struct literal `alias::Type{...}` parses as a static
+		// property whose property is the struct instance; its type is the
+		// qualified name.
+		if si, ok := e.Property.(*parse.StructInstance); ok {
+			if target := simpleExprName(e.Target); target != "" {
+				return target + "::" + si.Name.Name
+			}
+		}
 		return "?"
 	case *parse.UnaryExpression:
 		if e.Operator == parse.Bang || e.Operator == parse.Not {
@@ -2415,7 +2423,34 @@ func resolveStaticFunctionReturnType(sf *parse.StaticFunction, prog *parse.Progr
 	if sig := resolveStaticFunctionSignature(sf, prog, filePath); sig != nil {
 		return qualifyTypeDisplay(sig.ReturnType, prog, filePath)
 	}
+	if display, ok := goStaticFunctionReturnType(sf, prog, filePath); ok {
+		return display
+	}
 	return ""
+}
+
+// goStaticFunctionReturnType infers the Ard display type of a single-result
+// `use go:` function call, so that chained method/field access on the result
+// resolves. Multi-result Go functions (e.g. (T, error)) are not inferred since
+// they adapt to Result/Maybe rather than a callable value.
+func goStaticFunctionReturnType(sf *parse.StaticFunction, prog *parse.Program, filePath string) (string, bool) {
+	alias := simpleExprName(sf.Target)
+	if alias == "" {
+		return "", false
+	}
+	imp, ok := directGoImportForAlias(alias, prog)
+	if !ok {
+		return "", false
+	}
+	pkg, ok := loadDirectGoPackage(imp, filePath)
+	if !ok {
+		return "", false
+	}
+	fn, ok := pkg.Functions[sf.Function.Name]
+	if !ok || len(fn.Signature.Results) != 1 {
+		return "", false
+	}
+	return directGoHoverReturnType(fn.Signature.Results[0], directGoHoverContextForImport(imp, prog))
 }
 
 func resolveStaticFunctionSignature(sf *parse.StaticFunction, prog *parse.Program, filePath string) *hoverStaticFunctionSignature {

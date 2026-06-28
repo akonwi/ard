@@ -2715,4 +2715,22 @@ func TestDefinitionGoSymbols(t *testing.T) {
 			t.Fatalf("definition file = %q, want a strings .go source", got)
 		}
 	})
+
+	t.Run("method on a struct-literal go value", func(t *testing.T) {
+		source := "use go:strings\nfn f() {\n  let w = strings::Builder{}\n  w.Len()\n}\n"
+		loc := requireDefinition(t, source, filePath, 3, 5)
+		got := loc.URI.Filename()
+		if !strings.Contains(got, "strings") || !strings.HasSuffix(got, ".go") {
+			t.Fatalf("definition file = %q, want a strings .go source", got)
+		}
+	})
+
+	t.Run("method on a chained go call result", func(t *testing.T) {
+		source := "use go:strings\nfn f() {\n  let r = strings::NewReplacer(\"a\", \"b\")\n  r.Replace(\"x\")\n}\n"
+		loc := requireDefinition(t, source, filePath, 3, 5)
+		got := loc.URI.Filename()
+		if !strings.Contains(got, "strings") || !strings.HasSuffix(got, ".go") {
+			t.Fatalf("definition file = %q, want a strings .go source", got)
+		}
+	})
 }
