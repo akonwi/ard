@@ -225,20 +225,30 @@ func (r *GoPackagesResolver) LoadPackage(importPath string) (*GoPackage, error) 
 	return resolved, nil
 }
 
+// loadForPositions loads importPath with the syntax/position information needed
+// to resolve source locations for go-to-definition.
+func (r *GoPackagesResolver) loadForPositions(importPath string) (*packages.Package, bool) {
+	cfg, err := r.packagesConfig(importPath, packages.NeedName|packages.NeedTypes|packages.NeedSyntax|packages.NeedFiles)
+	if err != nil {
+		return nil, false
+	}
+	pkgs, err := packages.Load(cfg, importPath)
+	if err != nil || len(pkgs) == 0 {
+		return nil, false
+	}
+	pkg := pkgs[0]
+	if pkg.Types == nil || pkg.Fset == nil {
+		return nil, false
+	}
+	return pkg, true
+}
+
 // SymbolPosition returns the source position of a top-level symbol declared in
 // importPath. It powers go-to-definition for `use go:` references. ok is false
 // when the package or symbol cannot be resolved.
 func (r *GoPackagesResolver) SymbolPosition(importPath, symbol string) (gotoken.Position, bool) {
-	cfg, err := r.packagesConfig(importPath, packages.NeedName|packages.NeedTypes|packages.NeedSyntax|packages.NeedFiles)
-	if err != nil {
-		return gotoken.Position{}, false
-	}
-	pkgs, err := packages.Load(cfg, importPath)
-	if err != nil || len(pkgs) == 0 {
-		return gotoken.Position{}, false
-	}
-	pkg := pkgs[0]
-	if pkg.Types == nil || pkg.Fset == nil {
+	pkg, ok := r.loadForPositions(importPath)
+	if !ok {
 		return gotoken.Position{}, false
 	}
 	obj := pkg.Types.Scope().Lookup(symbol)
@@ -246,6 +256,57 @@ func (r *GoPackagesResolver) SymbolPosition(importPath, symbol string) (gotoken.
 		return gotoken.Position{}, false
 	}
 	return pkg.Fset.Position(obj.Pos()), true
+}
+
+// MethodPosition returns the source position of a method on a named type in
+// importPath, covering both value- and pointer-receiver methods.
+func (r *GoPackagesResolver) MethodPosition(importPath, typeName, methodName string) (gotoken.Position, bool) {
+	pkg, ok := r.loadForPositions(importPath)
+	if !ok {
+		return gotoken.Position{}, false
+	}
+	obj := pkg.Types.Scope().Lookup(typeName)
+	if obj == nil {
+		return gotoken.Position{}, false
+	}
+	named, ok := obj.Type().(*types.Named)
+	if !ok {
+		return gotoken.Position{}, false
+	}
+	ms := types.NewMethodSet(types.NewPointer(named))
+	sel := ms.Lookup(pkg.Types, methodName)
+	if sel == nil || !sel.Obj().Pos().IsValid() {
+		return gotoken.Position{}, false
+	}
+	return pkg.Fset.Position(sel.Obj().Pos()), true
+}
+
+// FieldPosition returns the source position of an exported field on a named
+// struct type in importPath.
+func (r *GoPackagesResolver) FieldPosition(importPath, typeName, fieldName string) (gotoken.Position, bool) {
+	pkg, ok := r.loadForPositions(importPath)
+	if !ok {
+		return gotoken.Position{}, false
+	}
+	obj := pkg.Types.Scope().Lookup(typeName)
+	if obj == nil {
+		return gotoken.Position{}, false
+	}
+	named, ok := obj.Type().(*types.Named)
+	if !ok {
+		return gotoken.Position{}, false
+	}
+	struc, ok := named.Underlying().(*types.Struct)
+	if !ok {
+		return gotoken.Position{}, false
+	}
+	for i := 0; i < struc.NumFields(); i++ {
+		field := struc.Field(i)
+		if field.Name() == fieldName && field.Pos().IsValid() {
+			return pkg.Fset.Position(field.Pos()), true
+		}
+	}
+	return gotoken.Position{}, false
 }
 
 func stdlibGoPackageCacheKey(dir string, importPath string) (string, bool) {

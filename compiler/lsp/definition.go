@@ -344,6 +344,36 @@ func definitionForGoSymbol(alias string, symbol string, prog *parse.Program, fil
 	return &definitionTarget{filePath: pos.Filename, loc: goPositionToLocation(pos, symbol)}
 }
 
+// definitionForGoTypeMember resolves go-to-definition for a method call or
+// field access on a value of a Go type `alias::goTypeName`, locating the member
+// in the Go source.
+func definitionForGoTypeMember(alias string, goTypeName string, member string, prog *parse.Program, filePath string, method bool) *definitionTarget {
+	if alias == "" || goTypeName == "" || member == "" {
+		return nil
+	}
+	imp, ok := directGoImportForAlias(alias, prog)
+	if !ok {
+		return nil
+	}
+	dir := "."
+	if filePath != "" {
+		dir = filepath.Dir(filePath)
+	}
+	resolver := checker.NewGoPackagesResolver(dir)
+	path := stdlibgo.CanonicalGoImportPath(imp.Path)
+	var pos gotoken.Position
+	var found bool
+	if method {
+		pos, found = resolver.MethodPosition(path, goTypeName, member)
+	} else {
+		pos, found = resolver.FieldPosition(path, goTypeName, member)
+	}
+	if !found || pos.Filename == "" {
+		return nil
+	}
+	return &definitionTarget{filePath: pos.Filename, loc: goPositionToLocation(pos, member)}
+}
+
 // goPositionToLocation converts a Go token.Position (1-based line/column) to an
 // Ard parse.Location spanning the symbol name.
 func goPositionToLocation(pos gotoken.Position, symbol string) parse.Location {
@@ -443,7 +473,7 @@ func definitionForInstanceProperty(ip *parse.InstanceProperty, prog *parse.Progr
 	if alias, memberName, ok := importedTypeDisplayParts(ownerType); ok {
 		modulePath, moduleProg, ok := moduleSourceForAlias(alias, prog, filePath)
 		if !ok {
-			return nil
+			return definitionForGoTypeMember(alias, memberName, ip.Property.Name, prog, filePath, false)
 		}
 		return findStructFieldDefinition(memberName, ip.Property.Name, moduleProg.Statements, modulePath)
 	}
@@ -459,7 +489,7 @@ func definitionForInstanceMethod(im *parse.InstanceMethod, prog *parse.Program, 
 	if alias, memberName, ok := importedTypeDisplayParts(ownerType); ok {
 		modulePath, moduleProg, ok := moduleSourceForAlias(alias, prog, filePath)
 		if !ok {
-			return nil
+			return definitionForGoTypeMember(alias, memberName, im.Method.Name, prog, filePath, true)
 		}
 		return findMethodDefinition(memberName, im.Method.Name, moduleProg.Statements, modulePath)
 	}

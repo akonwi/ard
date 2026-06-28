@@ -2706,4 +2706,13 @@ func TestDefinitionGoSymbols(t *testing.T) {
 			t.Fatalf("definition file = %q, want a strings .go source", got)
 		}
 	})
+
+	t.Run("method on a go value", func(t *testing.T) {
+		source := "use go:strings\nfn use_it(b: strings::Builder) {\n  b.WriteString(\"x\")\n}\n"
+		loc := requireDefinition(t, source, filePath, 2, 6)
+		got := loc.URI.Filename()
+		if !strings.Contains(got, "strings") || !strings.HasSuffix(got, ".go") {
+			t.Fatalf("definition file = %q, want a strings .go source", got)
+		}
+	})
 }
