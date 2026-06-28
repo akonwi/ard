@@ -2009,8 +2009,10 @@ func TestGoPackagesResolverLoadsStdlibFunctionsAndMethods(t *testing.T) {
 	if !ok {
 		t.Fatalf("reflect types missing Kind")
 	}
-	if len(kind.EnumConstants) != 0 {
-		t.Fatalf("reflect.Kind has unsigned backing and should not become enum-like yet: %#v", kind.EnumConstants)
+	// reflect.Kind has an unsigned (`uint`) backing type; its iota constants still
+	// form a closed enum and are matchable from Ard.
+	if !goTypeHasEnumConstant(kind, "Int") {
+		t.Fatalf("reflect.Kind should be detected as a closed enum, got %d constants", len(kind.EnumConstants))
 	}
 }
 
@@ -2146,5 +2148,49 @@ fn make() widget::Widget { widget::Widget{ OnClick: fn() {} } }`), "main.ard")
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestDirectGoUnsignedEnumLikeConstantsResolveAsClosedEnum(t *testing.T) {
+	pkg := goPackageFromSource(t, "example.com/kinds", "kinds", `package kinds
+
+type Kind uint
+
+const (
+	KindInvalid Kind = iota
+	KindBool
+	KindInt
+)
+
+type Typer interface {
+	Kind() Kind
+}
+`)
+	result := parse.Parse([]byte(`use go:example.com/kinds
+
+fn from_value(k: kinds::Kind) Str {
+  match k {
+    kinds::KindInt => "int"
+    _ => "other"
+  }
+}
+
+fn from_method(t: kinds::Typer) Str {
+  match t.Kind() {
+    kinds::KindInt => "int"
+    _ => "other"
+  }
+}`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := New("main.ard", result.Program, nil, CheckOptions{GoResolver: fakeGoResolver{packages: map[string]*GoPackage{pkg.ImportPath: pkg}}})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+	fn := c.Module().Program().Statements[0].Expr.(*FunctionDef)
+	if enum, ok := fn.Parameters[0].Type.(*Enum); !ok || len(enum.Values) != 3 {
+		t.Fatalf("param type = %#v, want closed enum Kind with 3 values", fn.Parameters[0].Type)
 	}
 }

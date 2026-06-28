@@ -441,7 +441,10 @@ func goConstantIsEnumCandidate(importPath string, constant GoConstant) bool {
 	if !constant.Type.Named || constant.Type.ImportPath != importPath || constant.Type.Name == "" {
 		return false
 	}
-	return constant.Type.Kind == GoValueInt && constant.Type.Bits == 0
+	// Any named integer type — signed or unsigned, of any width — is an enum
+	// candidate (e.g. `type Kind uint`). Whether its constants actually form a
+	// closed enum is decided by the contiguity check in goConstantsLookClosedEnum.
+	return constant.Type.Kind == GoValueInt || constant.Type.Kind == GoValueUint
 }
 
 func goConstantsLookClosedEnum(constants []GoConstant) bool {
