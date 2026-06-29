@@ -71,6 +71,13 @@ func TestParseRunArgs(t *testing.T) {
 			args: []string{"samples/main.ard", "extra"},
 			path: "samples/main.ard",
 		},
+		{
+			// Flags after the input file belong to the program and are forwarded
+			// verbatim, not parsed as run flags.
+			name: "program flags after input are forwarded",
+			args: []string{"samples/main.ard", "create", "x", "--dir", "y"},
+			path: "samples/main.ard",
+		},
 	}
 
 	for _, tt := range tests {

@@ -647,15 +647,14 @@ func loadModule(inputPath string) (checker.Module, error) {
 }
 
 func parseRunArgs(args []string) (string, error) {
-	inputPath := ""
-	for _, arg := range args {
-		if strings.HasPrefix(arg, "-") {
-			return "", fmt.Errorf("unknown flag: %s", arg)
-		}
-		if inputPath == "" {
-			inputPath = arg
-			continue
-		}
+	// `ard run <file.ard> [program args...]` forwards everything after the input
+	// file to the program verbatim, so only the input path is parsed here.
+	if len(args) == 0 {
+		return "", fmt.Errorf("expected filepath argument")
+	}
+	inputPath := args[0]
+	if strings.HasPrefix(inputPath, "-") {
+		return "", fmt.Errorf("unknown flag: %s", inputPath)
 	}
 	if inputPath == "" {
 		return "", fmt.Errorf("expected filepath argument")
