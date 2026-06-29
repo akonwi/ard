@@ -787,7 +787,9 @@ fn main() {
 		t.Fatalf("lower error: %v", err)
 	}
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesHaveFuncContaining(files, "Main") {
+	// main.ard collapses to the root `package main`, so the entry lowers to
+	// `func main()` rather than an exported `Main` (ADR 0031).
+	if !astFilesHaveFuncContaining(files, "main") {
 		t.Fatal("generated AST missing main body")
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
@@ -5632,5 +5634,75 @@ func TestLowerProgramConstructsGoStructWithFuncField(t *testing.T) {
 		return false
 	}) {
 		t.Fatal("generated AST missing widget.Widget{OnClick: func(){...}}")
+	}
+}
+
+func lowerMainArdSource(t *testing.T, input string) *air.Program {
+	t.Helper()
+	result := parse.Parse([]byte(input), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+	program, err := air.Lower(c.Module())
+	if err != nil {
+		t.Fatalf("lower error: %v", err)
+	}
+	return program
+}
+
+func TestLowerCollapsesMainArdIntoRootPackage(t *testing.T) {
+	program := lowerMainArdSource(t, `use ard/io
+fn main() {
+  io::print("hi")
+}`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+
+	root, ok := files["main.go"]
+	if !ok {
+		t.Fatal("missing root main.go")
+	}
+	if root.Name.Name != "main" {
+		t.Fatalf("root package = %q, want main", root.Name.Name)
+	}
+	hasFuncMain := false
+	for _, decl := range root.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Recv == nil && fn.Name.Name == "main" {
+			hasFuncMain = true
+		}
+	}
+	if !hasFuncMain {
+		t.Fatal("root main.go missing func main()")
+	}
+	// No separate synthetic package and no main_ rename remain.
+	for name := range files {
+		if strings.Contains(name, "main_") {
+			t.Fatalf("unexpected main_ artifact: %s", name)
+		}
+	}
+}
+
+func TestLowerSynthesizesMainForNonMainEntryModule(t *testing.T) {
+	// test.ard (package test) keeps the synthetic root package main importing it.
+	program := lowerSource(t, `use ard/io
+fn main() {
+  io::print("hi")
+}`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	root, ok := files["main.go"]
+	if !ok || root.Name.Name != "main" {
+		t.Fatal("missing synthetic root package main")
+	}
+	// The entry module is still its own importable package.
+	if !astFilesContain(files, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		return ok && fn.Name.Name == "Main"
+	}) {
+		t.Fatal("expected exported Main in the entry module's package")
 	}
 }

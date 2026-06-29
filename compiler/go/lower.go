@@ -49,6 +49,14 @@ type lowerer struct {
 	suppressMain            bool
 	includeTests            bool
 	useModulePackages       bool
+
+	// When the entry root lives in a module named `main` (main.ard) that no
+	// other module imports, that module is emitted as the root `package main`
+	// with the root lowered to `func main()`, instead of an importable package
+	// plus a separate synthetic main (ADR 0031).
+	entryAsMainPackage  bool
+	entryMainModuleID   air.ModuleID
+	entryMainFunctionID air.FunctionID
 }
 
 func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, error) {
@@ -72,6 +80,19 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
 	mainModuleID := l.mainModuleID(rootID, hasRoot)
+	// A `main.ard` entry that nothing imports becomes the root `package main`
+	// directly, rather than an importable package plus a synthetic main.
+	l.entryMainFunctionID = air.NoFunction
+	if !l.suppressMain && hasRoot {
+		rootModuleID := program.Functions[rootID].Module
+		if strings.TrimSuffix(filepath.Base(program.Modules[rootModuleID].Path), filepath.Ext(program.Modules[rootModuleID].Path)) == "main" &&
+			l.isVoidType(program.Functions[rootID].Signature.Return) &&
+			!moduleIsImported(program, rootModuleID) {
+			l.entryAsMainPackage = true
+			l.entryMainModuleID = rootModuleID
+			l.entryMainFunctionID = rootID
+		}
+	}
 	modules := make([]air.Module, 0, len(program.Modules))
 	if hasRoot {
 		rootModuleID := program.Functions[rootID].Module
@@ -96,7 +117,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 		}
 		files[l.moduleOutputFileName(module, mainModuleID)] = file
 	}
-	if !l.suppressMain {
+	if !l.suppressMain && !l.entryAsMainPackage {
 		if hasRoot {
 			mainFile, err := l.synthesizeEntryMain(rootID, mainModuleID)
 			if err != nil {
@@ -486,13 +507,47 @@ func (l *lowerer) mainModuleID(rootID air.FunctionID, hasRoot bool) air.ModuleID
 }
 
 func (l *lowerer) modulePackageName(moduleID air.ModuleID, mainModuleID air.ModuleID) string {
-	// Every Ard module lowers to its own Go package; `package main` is always
-	// synthetic and never a transpiled module (ADR 0031).
+	// A `main.ard` entry that nothing imports is emitted as the root `package
+	// main` directly; otherwise `package main` is synthetic and never a
+	// transpiled module (ADR 0031).
+	if l.entryAsMainPackage && moduleID == l.entryMainModuleID {
+		return "main"
+	}
 	return modulePackageName(l.program, moduleID)
 }
 
 func (l *lowerer) moduleOutputFileName(module air.Module, mainModuleID air.ModuleID) string {
+	if l.entryAsMainPackage && module.ID == l.entryMainModuleID {
+		return "main.go"
+	}
 	return filepath.Join(modulePackageDir(l.program, module.ID), modulePackageFileName(l.program, module.ID))
+}
+
+// moduleIsImported reports whether any other module imports the target module.
+// A `package main` cannot be imported, so the entry module only collapses into
+// the root main package when nothing imports it.
+func moduleIsImported(program *air.Program, target air.ModuleID) bool {
+	for _, m := range program.Modules {
+		if m.ID == target {
+			continue
+		}
+		for _, imp := range m.Imports {
+			if imp == target {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// goFunctionName is the emitted Go identifier for a function. The entry root of
+// a collapsed `main.ard` package is `main`; everything else uses the normal
+// naming rules.
+func (l *lowerer) goFunctionName(fn air.Function) string {
+	if l.entryAsMainPackage && fn.ID == l.entryMainFunctionID {
+		return "main"
+	}
+	return functionName(l.program, fn)
 }
 
 func modulePackageFileName(program *air.Program, module air.ModuleID) string {
@@ -1217,7 +1272,7 @@ func (l *lowerer) enumVariantExpr(typ air.TypeInfo, variant air.VariantInfo) ast
 }
 
 func (l *lowerer) functionExpr(fn air.Function) ast.Expr {
-	name := functionName(l.program, fn)
+	name := l.goFunctionName(fn)
 	module := l.functionModule(fn)
 	if !l.useModulePackages || module == l.currentModule {
 		return ast.NewIdent(name)
@@ -1356,7 +1411,7 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 		funcType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
 	}
 	return &ast.FuncDecl{
-		Name: ast.NewIdent(functionName(l.program, fn)),
+		Name: ast.NewIdent(l.goFunctionName(fn)),
 		Type: funcType,
 		Body: body,
 	}, nil

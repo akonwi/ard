@@ -81,9 +81,9 @@ Two modules in different directories whose basenames sanitize to the same Go pac
 
 `main` is a reserved package name (see entry points). Any Ard module whose sanitized package name would be `main` is remapped to a non-reserved name (for example `main_`), because Go cannot import a `package main`.
 
-#### Entry points are always synthetic
+#### Entry points
 
-Ard has no concept of a "main module": any module may define an entry. The backend therefore never transpiles an Ard module into `package main`. Instead:
+Ard has no concept of a "main module": any module may define an entry. By default the backend does not transpile an Ard module into `package main`. Instead:
 
 - Every Ard module — including one that defines an entry — lowers to an ordinary importable package under the normal rules. An Ard `fn main` is just a public function and lowers to an exported `Main` in its own package.
 - When the program has an entry root (AIR `Entry`) or a top-level-statement script root (AIR `Script`), the backend generates a separate, fully synthetic root `package main` whose only responsibility is to call the entry package's root:
@@ -101,7 +101,9 @@ func main() {
 - For a script root, the synthetic `main` calls the entry module's generated script root function instead.
 - A library project with no entry or script root emits no synthetic `main` package; it is just a set of importable packages.
 
-This keeps `package main` fully generated and decoupled from Ard source, so entry selection is a property of lowering rather than of any module's name.
+This keeps `package main` decoupled from Ard source: entry selection is a property of lowering, not of any module's name.
+
+As the one concession to the common case, when the entry root lives in a module named `main` (a `main.ard` file) that no other module imports, that module is emitted directly as the root `package main`, with its root lowered to `func main()` — no separate synthetic package and no `main_` rename. The result is a single root `main.go`. This applies only when the module's package would be `main` and nothing imports it (Go forbids importing `package main`), and never in test builds (where the synthetic test runner is itself `package main`, so the entry module must remain importable). Every other entry — a differently named module, a `main.ard` that something imports, or a test build — uses the synthetic package above.
 
 #### Dependencies
 
