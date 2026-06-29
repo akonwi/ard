@@ -615,19 +615,10 @@ func (c *Checker) resolveDirectGoStructInstance(goImport directGoImport, inst *p
 		fieldGoTypes[fieldName] = field.Type
 	}
 
-	missing := []string{}
-	for _, fieldName := range sortedGoFieldNames(goType.Fields) {
-		if unsupportedFields[fieldName] {
-			continue
-		}
-		if !providedFields[fieldName] {
-			missing = append(missing, fieldName)
-		}
-	}
-	if len(missing) > 0 {
-		c.addError(fmt.Sprintf("Missing Go field: %s", strings.Join(missing, ", ")), inst.GetLocation())
-		valid = false
-	}
+	// Direct-Go struct literals follow Go's own keyed-literal semantics: omitted
+	// exported fields are left to their Go zero value rather than required. This
+	// is scoped to Go structs (this resolver); Ard-defined struct literals still
+	// require every field. (ADR 0030.)
 	if !valid {
 		return nil
 	}

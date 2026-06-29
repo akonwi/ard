@@ -105,8 +105,8 @@ Construction rules:
 
 - Only keyed struct literals are supported. Do not support Go-style positional struct literals.
 - Keys must name exported, non-embedded/non-promoted Go fields exactly.
-- Every exported, non-embedded/non-promoted field in the Ard-visible shape must be supplied. Direct-Go struct literals do not use Go zero values as defaults for omitted fields.
-- Ard's existing omission rule only applies to Ard nullable fields. Because Go does not mark pointer, slice, map, interface, channel, or function fields as semantically optional, the compiler must not infer optional fields from Go zero or nil-able types.
+- Omitted exported fields follow Go's own keyed-literal semantics and take their Go zero value; a direct-Go struct literal need not supply every field. This matches `use go:` being a direct call into Go and makes idiomatic Go libraries (which set a few of many fields) usable from pure Ard. This applies only to Go structs; Ard-defined struct literals still require every field.
+  - (Superseded decision: this previously required every exported field, on the reasoning that Go does not mark fields optional. In practice that made any real Go library need a companion wrapper per struct, defeating direct interop, so direct-Go literals now mirror Go's zero-value defaults.)
 - Field values are checked with the same direct-Go assignment compatibility used for field writes.
 - If any exported, non-embedded field's Go type is unsupported by the current direct-Go type mapping, construction is rejected rather than allowing the field to be omitted.
 - Unexported fields cannot be set. They are not part of the Ard-visible shape; if a Go type relies on unexported state or constructor invariants, use an exported Go constructor or companion wrapper instead of a direct struct literal.
@@ -228,8 +228,8 @@ This work was implemented in phases while keeping the feature scope intact:
 
 4. **Keyed struct construction**
    - Type-check module-qualified direct-Go struct literals.
-   - Reject literals that omit any exported, non-embedded/non-promoted Ard-visible field.
-   - Lower to keyed Go composite literals once all visible fields are supplied.
+   - Allow literals to omit exported fields; omitted fields take their Go zero value.
+   - Lower to keyed Go composite literals containing only the supplied fields.
    - Reject fields whose Go type is not representable by current direct-Go assignment compatibility.
 
 5. **Stdlib cleanup**
@@ -248,7 +248,7 @@ This work was implemented in phases while keeping the feature scope intact:
 - Ard users can work with ordinary Go structs without writing companion functions for every field.
 - Standard-library code can expose and store Go handles directly instead of using stringly `extern type` declarations where the handle is a Go named type or pointer to one.
 - Field writes and construction become part of the same direct-Go struct story, so users can both inspect and build common Go configuration structs.
-- Direct-Go struct construction is stricter than Go keyed literals: omitted exported fields are checker errors rather than implicit zero values.
+- Direct-Go struct construction mirrors Go keyed literals: omitted exported fields take their Go zero value (Ard-defined structs still require every field).
 - Go pointer fields do not receive special `Maybe` treatment, keeping checker and lowering complexity lower and preserving a uniform direct-Go mapping.
 - Direct-Go field access inherits Go nil and panic behavior. That is an intentional interop risk users accept when using Go APIs directly.
 - Ard's safety promise remains focused on Ard code and Ard semantics; arbitrary Go package invariants are outside what the Ard checker can prove.

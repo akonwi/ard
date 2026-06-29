@@ -994,7 +994,10 @@ fn width() Int {
 	}
 }
 
-func TestDirectGoStructConstructionRequiresAllVisibleFields(t *testing.T) {
+func TestDirectGoStructConstructionAllowsPartialFields(t *testing.T) {
+	// Direct-Go struct literals follow Go's keyed-literal semantics: omitted
+	// exported fields zero-value rather than being required (ADR 0030). This is
+	// scoped to Go structs; Ard-defined structs still require every field.
 	result := parse.Parse([]byte(`use go:example.com/image as image
 fn point() image::Point {
   image::Point{X: 10}
@@ -1009,11 +1012,8 @@ fn point() image::Point {
 		}}}},
 	}}})
 	c.Check()
-	if !c.HasErrors() {
-		t.Fatal("expected missing direct Go struct field diagnostic")
-	}
-	if got := c.Diagnostics()[0].Message; !strings.Contains(got, "Missing Go field: Y") {
-		t.Fatalf("diagnostic = %q", got)
+	if c.HasErrors() {
+		t.Fatalf("partial direct Go struct literal should be accepted, got %v", c.Diagnostics())
 	}
 }
 
