@@ -2717,6 +2717,9 @@ func (fl *functionLowerer) lowerBlock(stmts []checker.Statement) (Block, error) 
 }
 
 func (fl *functionLowerer) lowerBlockWithDefault(stmts []checker.Statement, defaultType TypeID) (Block, error) {
+	// A block is a lexical scope: locals it declares must not leak into the
+	// enclosing scope, so references after the block resolve to the right local.
+	defer fl.scopeLocals()()
 	var block Block
 	last := len(stmts) - 1
 	for last >= 0 && stmts[last].Expr == nil && stmts[last].Stmt == nil && !stmts[last].Break {
@@ -3296,19 +3299,24 @@ func (fl *functionLowerer) lowerStmts(stmt checker.Statement) ([]Stmt, error) {
 	if stmt.Expr == nil && stmt.Stmt == nil && !stmt.Break {
 		return nil, nil
 	}
-	if loop, ok := stmt.Stmt.(*checker.ForIntRange); ok {
+	// For loops introduce their iteration variables (and lowering machinery) as
+	// locals; those are scoped to the loop, so restore on exit to avoid leaking
+	// them (and shadowing the iteration name) into the enclosing scope.
+	switch loop := stmt.Stmt.(type) {
+	case *checker.ForIntRange:
+		defer fl.scopeLocals()()
 		return fl.lowerForIntRange(loop)
-	}
-	if loop, ok := stmt.Stmt.(*checker.ForInStr); ok {
+	case *checker.ForInStr:
+		defer fl.scopeLocals()()
 		return fl.lowerForInStr(loop)
-	}
-	if loop, ok := stmt.Stmt.(*checker.ForInList); ok {
+	case *checker.ForInList:
+		defer fl.scopeLocals()()
 		return fl.lowerForInList(loop)
-	}
-	if loop, ok := stmt.Stmt.(*checker.ForInMap); ok {
+	case *checker.ForInMap:
+		defer fl.scopeLocals()()
 		return fl.lowerForInMap(loop)
-	}
-	if loop, ok := stmt.Stmt.(*checker.ForLoop); ok {
+	case *checker.ForLoop:
+		defer fl.scopeLocals()()
 		return fl.lowerForLoop(loop)
 	}
 	lowered, err := fl.lowerStmt(stmt)
@@ -3641,6 +3649,9 @@ func (fl *functionLowerer) lowerFunctionTypeCall(name string, args []checker.Exp
 }
 
 func (fl *functionLowerer) lowerNonProducingBlock(stmts []checker.Statement) (Block, error) {
+	// Like lowerBlockWithDefault, this is a lexical scope; restore on exit so the
+	// block's locals do not leak into the enclosing scope.
+	defer fl.scopeLocals()()
 	var block Block
 	for _, stmt := range stmts {
 		lowered, err := fl.lowerStmts(stmt)
@@ -4956,6 +4967,16 @@ func (fl *functionLowerer) lowerBoundBlockWithDefault(name string, typeID TypeID
 	block, err := fl.lowerBlockWithDefault(stmts, defaultType)
 	fl.locals = oldLocals
 	return local, block, err
+}
+
+// scopeLocals snapshots the currently visible locals and returns a restore
+// function intended for `defer fl.scopeLocals()()`. It makes the caller a
+// lexical scope: locals defined after the snapshot are dropped on restore, so
+// block-local bindings never leak into the enclosing scope. Restoring only
+// affects name visibility; the locals remain in fl.fn.Locals with stable ids.
+func (fl *functionLowerer) scopeLocals() func() {
+	saved := fl.cloneLocals()
+	return func() { fl.locals = saved }
 }
 
 func (fl *functionLowerer) cloneLocals() map[string]LocalID {

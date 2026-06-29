@@ -54,6 +54,48 @@ func TestLowerTinyProgram(t *testing.T) {
 	}
 }
 
+func TestLowerNestedBlockShadowDoesNotLeakInnerLocal(t *testing.T) {
+	program := lowerSource(t, `
+		fn f(n: Int) Int {
+			let x = n
+			let r = match n > 0 {
+				true => {
+					let x = n * 2
+					x
+				},
+				false => 0,
+			}
+			x + r
+		}
+
+		f(5)
+	`)
+	f := findFunction(t, program, "f")
+	// The outer x is the first local named "x"; an inner x is declared inside the
+	// match arm. The body result `x + r` must reference the OUTER x, proving the
+	// inner binding did not leak out of its block scope.
+	var outerX LocalID = -1
+	for _, loc := range f.Locals {
+		if loc.Name == "x" {
+			outerX = loc.ID
+			break
+		}
+	}
+	if outerX < 0 {
+		t.Fatalf("no local named x in %#v", f.Locals)
+	}
+	res := f.Body.Result
+	if res == nil || res.Kind != ExprIntAdd {
+		t.Fatalf("f result = %#v, want ExprIntAdd", res)
+	}
+	if res.Left == nil || res.Left.Kind != ExprLoadLocal {
+		t.Fatalf("f result left = %#v, want ExprLoadLocal", res.Left)
+	}
+	if res.Left.Local != outerX {
+		t.Fatalf("f result references local %d, want outer x local %d (inner binding leaked)", res.Left.Local, outerX)
+	}
+}
+
 func TestLowerTransitiveStructMethodCanReadOwnerModuleGlobal(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\""), 0o644); err != nil {
