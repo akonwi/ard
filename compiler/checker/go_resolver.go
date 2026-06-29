@@ -909,13 +909,14 @@ func (c *Checker) checkDirectGoStaticFunctionAs(call *parse.StaticFunction, expe
 	if !ok {
 		return nil, true
 	}
-	if target.Signature.Variadic {
-		c.addError(fmt.Sprintf("Go function %s is variadic; variadic direct Go calls are not supported yet", target.Name), call.GetLocation())
-		return nil, true
-	}
 	goParams, ok := directGoCallSourceParams(target, call.GetLocation(), func(message string, loc parse.Location) { c.addError(message, loc) })
 	if !ok {
 		return nil, true
+	}
+	if target.Signature.Variadic {
+		if goParams, ok = c.dropVariadicParam(target.Name, goParams, len(call.Function.Args), call.GetLocation()); !ok {
+			return nil, true
+		}
 	}
 	args, params, ok := c.checkDirectGoCallArguments(call.Function.Args, goParams, call.GetLocation())
 	if !ok {
@@ -1030,10 +1031,7 @@ func (c *Checker) checkDirectGoInstanceMethodAs(subject Expression, call parse.F
 	if !ok {
 		return nil, true
 	}
-	if target.Signature.Variadic {
-		c.addError(fmt.Sprintf("Go method %s is variadic; variadic direct Go calls are not supported yet", target.Name), loc)
-		return nil, true
-	}
+
 	if target.Signature.Receiver == nil {
 		c.addError(fmt.Sprintf("Go method %s has no receiver metadata", target.Name), loc)
 		return nil, true
@@ -1052,7 +1050,14 @@ func (c *Checker) checkDirectGoInstanceMethodAs(subject Expression, call parse.F
 		c.addError(fmt.Sprintf("receiver for %s: %s", target.Name, recvReason), loc)
 		return nil, true
 	}
-	args, params, ok := c.checkDirectGoCallArguments(call.Args, target.Signature.Params, loc)
+	methodParams := target.Signature.Params
+	if target.Signature.Variadic {
+		var vok bool
+		if methodParams, vok = c.dropVariadicParam(target.Name, methodParams, len(call.Args), loc); !vok {
+			return nil, true
+		}
+	}
+	args, params, ok := c.checkDirectGoCallArguments(call.Args, methodParams, loc)
 	if !ok {
 		return nil, true
 	}
@@ -1154,6 +1159,22 @@ func (c *Checker) directGoCallTarget(goImport directGoImport, symbols []string, 
 		c.addError(fmt.Sprintf("Direct Go function call %q must be package::Function or package::Type::Method", strings.Join(append([]string{goImport.alias}, symbols...), "::")), loc)
 		return directGoSignatureTarget{}, false
 	}
+}
+
+// dropVariadicParam supports calling a Go variadic function or method with no
+// variadic arguments by dropping the trailing variadic parameter and requiring
+// the call to supply exactly the fixed parameters. Passing explicit variadic
+// values is not supported yet.
+func (c *Checker) dropVariadicParam(name string, params []GoValueType, argCount int, loc parse.Location) ([]GoValueType, bool) {
+	if len(params) == 0 {
+		return params, true
+	}
+	fixed := params[:len(params)-1]
+	if argCount != len(fixed) {
+		c.addError(fmt.Sprintf("Go function %s is variadic; passing variadic arguments is not supported yet (call it with %d fixed argument(s))", name, len(fixed)), loc)
+		return nil, false
+	}
+	return fixed, true
 }
 
 func directGoCallSourceParams(target directGoSignatureTarget, loc parse.Location, addError func(string, parse.Location)) ([]GoValueType, bool) {
