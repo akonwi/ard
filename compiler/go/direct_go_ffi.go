@@ -668,6 +668,17 @@ func (l *lowerer) coerceDirectGoArgs(signature air.Signature, args []ast.Expr, g
 	return coerced, nil
 }
 
+func (l *lowerer) directGoListNeedsAnyBoxing(ardType air.TypeID) bool {
+	if l.typeKind(ardType) != air.TypeList {
+		return false
+	}
+	info := l.program.Types[ardType-1]
+	if !validTypeID(l.program, info.Elem) {
+		return false
+	}
+	return l.program.Types[info.Elem-1].Kind != air.TypeDynamic
+}
+
 func (l *lowerer) coerceDirectGoArg(ardType air.TypeID, arg ast.Expr, goType checker.GoValueType, binding directGoExternBinding) (ast.Expr, error) {
 	// An optional Ard value passes to a Go pointer parameter as its backing
 	// pointer: some(x) -> &x, none() -> nil (ADR 0031).
@@ -680,6 +691,12 @@ func (l *lowerer) coerceDirectGoArg(ardType air.TypeID, arg ast.Expr, goType che
 	// is always safe.
 	if goType.Kind == checker.GoValueFunc {
 		return arg, nil
+	}
+	// An Ard list passes to a Go []any parameter with its elements boxed to any,
+	// unless it already lowers to []any (a list of Dynamic).
+	if goType.Kind == checker.GoValueSlice && goType.Elem != nil && goType.Elem.Kind == checker.GoValueAny && l.directGoListNeedsAnyBoxing(ardType) {
+		l.markRuntimeHelper("list_to_any_slice")
+		return &ast.CallExpr{Fun: ast.NewIdent("ardListToAnySlice"), Args: []ast.Expr{arg}}, nil
 	}
 	if !l.directGoScalarNeedsConversion(ardType, goType) {
 		return arg, nil

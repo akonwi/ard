@@ -592,6 +592,8 @@ func (c *Checker) resolveDirectGoStructInstance(goImport directGoImport, inst *p
 		c.withValueExprContext(func() {
 			if expectedClosedEnum != nil {
 				value = c.checkExprAs(property.Value, expectedClosedEnum)
+			} else if lit, ok := property.Value.(*parse.ListLiteral); ok && field.Type.Kind == GoValueSlice {
+				value = c.checkDirectGoSliceLiteral(lit, field.Type)
 			} else {
 				value = c.checkExpr(property.Value)
 			}
@@ -1560,6 +1562,39 @@ func (c *Checker) directGoReturnValueCompatible(ard Type, goType GoValueType) (b
 	return c.directGoParamCompatible(ard, goType, true)
 }
 
+// checkDirectGoSliceLiteral checks an Ard list literal against a Go slice
+// parameter/field, element by element. Unlike a normal Ard list it does not
+// require homogeneous elements: each element only has to be compatible with the
+// Go element type, so a `[]any` accepts a heterogeneous mix (the backend boxes
+// each element). The resulting list is typed by the Go element's Ard mapping
+// (e.g. `[]any` -> a list of Dynamic).
+func (c *Checker) checkDirectGoSliceLiteral(lit *parse.ListLiteral, sliceType GoValueType) Expression {
+	if sliceType.Elem == nil {
+		c.addError("Go slice type is missing element metadata", lit.GetLocation())
+		return nil
+	}
+	elemGo := *sliceType.Elem
+	ardElem, ok := c.directGoValueArdType(elemGo, lit.GetLocation())
+	if !ok {
+		return nil
+	}
+	elements := make([]Expression, len(lit.Items))
+	for i := range lit.Items {
+		item := lit.Items[i]
+		element := c.checkExpr(item)
+		if element == nil {
+			return nil
+		}
+		if compatible, reason := c.directGoParamCompatible(element.Type(), elemGo, true); !compatible {
+			c.addError(fmt.Sprintf("list element: %s", reason), item.GetLocation())
+			return nil
+		}
+		elements[i] = element
+	}
+	listType := MakeList(ardElem)
+	return &ListLiteral{Elements: elements, _type: listType, ListType: listType}
+}
+
 func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel bool) (bool, string) {
 	ard = derefType(ard)
 	if goType.Named && c.directGoNamedTypeHasTypeParams(goType) {
@@ -1603,7 +1638,10 @@ func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel
 			return true, ""
 		}
 	case GoValueAny:
-		if equalTypes(ard, Dynamic) {
+		// Go's `any` accepts any value, so any representable Ard value flows into
+		// it (ADR 0030). Scalars convert implicitly at the call site; slices of
+		// `any` are boxed element-wise by the backend.
+		if ard != Void {
 			return true, ""
 		}
 	case GoValueVoid:
@@ -1755,7 +1793,10 @@ func (c *Checker) directGoAssignableCompatibleAt(ard Type, goType GoValueType, t
 			return true, ""
 		}
 	case GoValueAny:
-		if equalTypes(ard, Dynamic) {
+		// Go's `any` accepts any value, so any representable Ard value flows into
+		// it (ADR 0030). Scalars convert implicitly at the call site; slices of
+		// `any` are boxed element-wise by the backend.
+		if ard != Void {
 			return true, ""
 		}
 	case GoValueVoid:
