@@ -1650,7 +1650,10 @@ func (c *Checker) directGoParamCompatible(ard Type, goType GoValueType, topLevel
 	if topLevel && directGoScalarCompatible(ard, goType) {
 		return true, ""
 	}
-	if goType.Named {
+	// A named func type (e.g. `type VoidCallback func(...)`) is satisfied by a
+	// matching closure: fall through to the func-kind compatibility logic rather
+	// than rejecting it as an opaque named type.
+	if goType.Named && goType.Kind != GoValueFunc {
 		return false, fmt.Sprintf("Ard type %s is not compatible with Go named type %s", typeSyntaxString(ard), goType.String())
 	}
 	switch goType.Kind {
@@ -1805,7 +1808,10 @@ func (c *Checker) directGoAssignableCompatibleAt(ard Type, goType GoValueType, t
 		}
 		return false, fmt.Sprintf("Go type %s requires Ard type %s", goType.String(), directGoPointerArdTypeString(goType))
 	}
-	if goType.Named {
+	// A named func type (e.g. `type VoidCallback func(...)`) is satisfied by a
+	// matching closure: fall through to the func-kind compatibility logic rather
+	// than rejecting it as an opaque named type.
+	if goType.Named && goType.Kind != GoValueFunc {
 		return false, fmt.Sprintf("Ard type %s is not compatible with Go named type %s", typeSyntaxString(ard), goType.String())
 	}
 	switch goType.Kind {
