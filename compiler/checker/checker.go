@@ -4920,9 +4920,17 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 		return fn
 	case *parse.ListLiteral:
-		return c.checkList(nil, s)
+		// checkList returns a typed-nil *ListLiteral on failure; normalize to an
+		// interface nil so callers' `== nil` checks hold and never deref it.
+		if result := c.checkList(nil, s); result != nil {
+			return result
+		}
+		return nil
 	case *parse.MapLiteral:
-		return c.checkMap(nil, s)
+		if result := c.checkMap(nil, s); result != nil {
+			return result
+		}
+		return nil
 	case *parse.SelectExpression:
 		allowMixedVoid := discardThisExpr || c.expectedExpr == Void
 		previousArmDiscard := c.matchArmDiscardContext
