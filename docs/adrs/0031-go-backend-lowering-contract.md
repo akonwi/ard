@@ -540,6 +540,14 @@ Go values map to Ard types structurally, and a few idiomatic Go shapes are adapt
 
 These boundary adaptations are distinct from how Ard's own types lower. An Ard `Result[T, E]` value still lowers to `runtime.Result[T, E]` and is not collapsed into `(T, error)`; the adaptations above apply only when *calling* idiomatic Go through `use go:`.
 
+Passing Ard values into Go follows Go's own assignability so idiomatic, `any`-heavy Go libraries are usable from pure Ard:
+
+- Any representable Ard value flows into a Go `any` parameter or field; scalars convert implicitly and an Ard list passed to a Go `[]any` is boxed element-wise. A list literal targeting a Go slice is checked element-by-element against the slice's element type, so a `[]any` accepts a heterogeneous mix.
+- A Go type alias is the same type as its target across packages (`ui.Style = vaxis.Style`), compared by unaliased `go/types` identity.
+- A closure satisfies a named Go func type (`type VoidCallback func(...)`) when its signature matches.
+- A Go variadic function may be called with no variadic arguments (`ui.Run(root)`); passing explicit variadic values is not yet supported and can be wrapped in host Go.
+- A direct-Go struct literal may omit exported fields, which take their Go zero value (`0030-use-direct-go-struct-values-and-fields.md`).
+
 #### Host Go code is a package in the output
 
 The Go code a project provides is carried into the generated Go module verbatim, as an ordinary Go package, and is imported from Ard with the go prefix like any other Go package. There is no companion-rewriting step, no per-module copying, and no special package clause handling.
