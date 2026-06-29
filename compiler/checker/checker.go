@@ -6442,7 +6442,7 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			}
 			resultType, expectResult := expectedType.(*Result)
 			target, ok := s.Target.(*parse.Identifier)
-			if !expectResult || !ok || target.Name != "Result" || (s.Function.Name != "ok" && s.Function.Name != "err") {
+			if !expectResult || resultType == nil || !ok || target.Name != "Result" || (s.Function.Name != "ok" && s.Function.Name != "err") {
 				break
 			}
 
@@ -6484,6 +6484,9 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			var arg Expression = nil
 			if fnDef.name() == "ok" {
 				arg = c.checkExpr(s.Function.Args[0].Value)
+				if arg == nil {
+					return nil
+				}
 				if !resultType.Val().equal(arg.Type()) {
 					c.addError(typeMismatch(resultType.Val(), arg.Type()), s.Function.Args[0].Value.GetLocation())
 					return nil
@@ -6492,6 +6495,9 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			}
 			if fnDef.name() == "err" {
 				arg = c.checkExpr(s.Function.Args[0].Value)
+				if arg == nil {
+					return nil
+				}
 				if !resultType.Err().equal(arg.Type()) {
 					c.addError(typeMismatch(resultType.Err(), arg.Type()), s.Function.Args[0].Value.GetLocation())
 					return nil
