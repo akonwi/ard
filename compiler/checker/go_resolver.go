@@ -1916,12 +1916,33 @@ func directGoNamedTypeMatches(ard Type, goType GoValueType) bool {
 		return false
 	}
 	if extern, ok := ard.(*ExternType); ok {
+		// A Go type alias (e.g. `ui.Style = vaxis.Style`) is the same type as its
+		// target, even across packages. Compare the unaliased named-type identity
+		// first so an alias-named value satisfies a target-named field/parameter.
+		if goNamedTypesIdentical(extern.DirectGoType, goType.Type) {
+			return true
+		}
 		return directGoBindingMatchesNamedType(extern.ExternalBinding, goType)
 	}
 	if enum, ok := ard.(*Enum); ok {
 		return directGoBindingMatchesNamedType(enum.ExternalBinding, goType)
 	}
 	return false
+}
+
+// goNamedTypesIdentical reports whether two Go types denote the same named type
+// after resolving aliases, comparing type-object identity so cross-package
+// aliases match their target.
+func goNamedTypesIdentical(a, b types.Type) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	na, _ := types.Unalias(a).(*types.Named)
+	nb, _ := types.Unalias(b).(*types.Named)
+	if na == nil || nb == nil {
+		return false
+	}
+	return na.Obj() == nb.Obj()
 }
 
 func directGoEnumTypeMatches(ard Type, goType GoValueType) bool {
