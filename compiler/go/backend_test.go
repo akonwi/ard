@@ -865,7 +865,7 @@ func TestLowerProgramTakesAddressOfLocalMutTraitArgs(t *testing.T) {
 				continue
 			}
 			ident, identOK := addr.X.(*ast.Ident)
-			if identOK && ident.Name == "c_0" {
+			if identOK && ident.Name == "c" {
 				return true
 			}
 		}
@@ -908,7 +908,7 @@ func TestLowerProgramPassesMutTraitArgsByPointer(t *testing.T) {
 			return false
 		}
 		ident, ok := call.Args[1].(*ast.Ident)
-		return ok && ident.Name == "c_1"
+		return ok && ident.Name == "c"
 	}) {
 		t.Fatal("generated AST missing pointer trait dispatch arg")
 	}
@@ -922,7 +922,7 @@ func TestLowerProgramPassesMutTraitArgsByPointer(t *testing.T) {
 			return false
 		}
 		ident, identOK := star.X.(*ast.Ident)
-		return identOK && ident.Name == "c_1"
+		return identOK && ident.Name == "c"
 	}) {
 		t.Fatal("generated AST dereferences mutable trait dispatch arg")
 	}
@@ -957,7 +957,7 @@ func TestLowerProgramDereferencesMutParamForNonMutMethodCall(t *testing.T) {
 			return false
 		}
 		ident, ok := call.Args[0].(*ast.Ident)
-		return ok && ident.Name == "b_0"
+		return ok && ident.Name == "b"
 	}) {
 		t.Fatal("generated AST missing mut method pointer call")
 	}
@@ -971,7 +971,7 @@ func TestLowerProgramDereferencesMutParamForNonMutMethodCall(t *testing.T) {
 			return false
 		}
 		ident, identOK := star.X.(*ast.Ident)
-		return identOK && ident.Name == "b_0"
+		return identOK && ident.Name == "b"
 	}) {
 		t.Fatal("generated AST missing deref for non-mut method call on mut param")
 	}
@@ -1000,10 +1000,10 @@ func TestGenerateSourcesFormatsSimpleProgram(t *testing.T) {
 	if !strings.Contains(got, "package test") {
 		t.Fatalf("generated entry module missing package declaration:\n%s", got)
 	}
-	if !strings.Contains(got, "func Add(a_0 int, b_1 int) int") {
+	if !strings.Contains(got, "func Add(a int, b int) int") {
 		t.Fatalf("generated source missing lowered add function:\n%s", got)
 	}
-	if !strings.Contains(got, "return a_0 + b_1") {
+	if !strings.Contains(got, "return a + b") {
 		t.Fatalf("generated source missing arithmetic return:\n%s", got)
 	}
 	// `main` is a separate synthetic package that calls the entry module's Main.
@@ -3065,7 +3065,7 @@ func TestLowerProgramUsesPointersForMutableStructParams(t *testing.T) {
 			return false
 		}
 		ident, ok := addr.X.(*ast.Ident)
-		return ok && ident.Name == "res_0"
+		return ok && ident.Name == "res"
 	}) {
 		t.Fatal("generated AST missing pointer call lowering")
 	}
@@ -3416,7 +3416,7 @@ func TestLowerProgramPassesPointerReceiverForMutatingTraitImpl(t *testing.T) {
 		if !ok || fn.Name == nil || !strings.Contains(fn.Name.Name, "Buffer_Writer_write") || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
 			return false
 		}
-		if len(fn.Type.Params.List[0].Names) == 0 || fn.Type.Params.List[0].Names[0].Name != "self_0" {
+		if len(fn.Type.Params.List[0].Names) == 0 || fn.Type.Params.List[0].Names[0].Name != "self" {
 			return false
 		}
 		_, ok = fn.Type.Params.List[0].Type.(*ast.StarExpr)
@@ -4869,6 +4869,40 @@ func TestLowerProgramImportAliasAvoidsLocalNames(t *testing.T) {
 	}
 }
 
+func TestLocalNameKeepsBareNameWhenShadowingUnusedOuter(t *testing.T) {
+	input := `
+		use ard/io
+		fn f(x: Int) Int {
+			mut total = 0
+			for x in [1, 2, 3] {
+				total = total + x
+			}
+			total + x
+		}
+		fn main() {
+			io::print("{f(100)}")
+		}
+	`
+	program := lowerSource(t, input)
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := joinGeneratedSources(sources)
+	// The loop variable shadows the parameter only inside the loop body, where
+	// the parameter is never referenced, so it keeps the bare name. The post-loop
+	// use of the parameter resolves to the (still bare) parameter.
+	if !strings.Contains(joined, "func F(x int)") {
+		t.Fatalf("expected bare parameter name:\n%s", joined)
+	}
+	if !strings.Contains(joined, "x := x_list[x_index]") {
+		t.Fatalf("expected bare shadowing loop variable:\n%s", joined)
+	}
+	if got := runGoTargetSourceStdout(t, input); got != "106\n" {
+		t.Fatalf("stdout = %q, want %q", got, "106\n")
+	}
+}
+
 func TestRenderTestRunnerAliasesImportsAroundTopLevelNames(t *testing.T) {
 	program := &air.Program{Functions: []air.Function{
 		{ID: 0, Module: 0, Name: "os", Private: true},
@@ -4922,7 +4956,8 @@ fn use_floor() Float { int::Floor(1.2) }`)
 }
 
 func TestGeneratedGoImportAliasAvoidsTempPrefix(t *testing.T) {
-	l := &lowerer{directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(nil)}
+	l := &lowerer{directGoAliases: map[string]string{}}
+	l.reservedGoIdentifiers = l.buildReservedGoIdentifiers()
 	alias := l.generatedGoImportAlias("math", "_tmp_0")
 	if alias != "ardgo" {
 		t.Fatalf("alias = %q, want ardgo", alias)
@@ -4945,7 +4980,8 @@ func TestDirectGoTypeExprAllocatesAliasesForSecondaryPackages(t *testing.T) {
 
 func TestDirectGoExternAliasAvoidsReservedRuntimeHelperNames(t *testing.T) {
 	program := &air.Program{Types: []air.TypeInfo{{ID: 2, Kind: air.TypeInt, Name: "Int"}}}
-	l := &lowerer{program: program, directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(program)}
+	l := &lowerer{program: program, directGoAliases: map[string]string{}}
+	l.reservedGoIdentifiers = l.buildReservedGoIdentifiers()
 	alias := l.directGoBindingAlias(directGoExternBinding{ImportPath: "math", Alias: "ardSortedIntKeys"})
 	if alias != "ardSortedIntKeys_1" {
 		t.Fatalf("alias = %q, want ardSortedIntKeys_1", alias)
@@ -4986,6 +5022,8 @@ func TestLowerDirectGoExternAliasAvoidsLocalShadowing(t *testing.T) {
 	program := lowerSource(t, `use go:math as m
 fn use_floor(m: Int) Float { m::Floor(1.2) }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	// The explicit `as m` alias keeps precedence; the colliding parameter is the
+	// one that suffixes (to m_0).
 	if !astFilesHaveImport(files, "m", "math") {
 		t.Fatal("generated AST missing m import alias")
 	}

@@ -31,6 +31,9 @@ type lowerer struct {
 	importErr               error
 	directGoAliases         map[string]string
 	reservedGoIdentifiers   map[string]bool
+	topLevelReserved        map[string]bool
+	explicitGoAliases       map[string]bool
+	localNameCache          map[air.FunctionID]map[air.LocalID]string
 	declaredLocals          map[air.LocalID]bool
 	runtimeHelpers          map[string]bool
 	ffiImports              map[string]string
@@ -59,7 +62,8 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if options.ProjectInfo != nil && options.ProjectInfo.RootPath != "" {
 		directGoResolverDir = options.ProjectInfo.RootPath
 	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, directGoResolver: checker.NewGoPackagesResolver(directGoResolverDir), directGoAliases: map[string]string{}, reservedGoIdentifiers: collectReservedGoIdentifiers(program), suppressMain: options.SuppressMain, includeTests: options.IncludeTests, useModulePackages: true}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, directGoResolver: checker.NewGoPackagesResolver(directGoResolverDir), directGoAliases: map[string]string{}, suppressMain: options.SuppressMain, includeTests: options.IncludeTests, useModulePackages: true}
+	l.reservedGoIdentifiers = l.buildReservedGoIdentifiers()
 	l.inlineClosures = l.collectInlineClosureFunctions()
 	l.goMethodCollisions = l.collectGoMethodCollisions()
 	l.emittedGoMethods = map[string]bool{}
@@ -1315,7 +1319,7 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 			return nil, err
 		}
 		params = append(params, &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(localName(fn, capture.Local))},
+			Names: []*ast.Ident{ast.NewIdent(l.localName(fn, capture.Local))},
 			Type:  captureType,
 		})
 		l.declaredLocals[capture.Local] = true
@@ -1326,7 +1330,7 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 			return nil, err
 		}
 		params = append(params, &ast.Field{
-			Names: []*ast.Ident{ast.NewIdent(localName(fn, air.LocalID(i)))},
+			Names: []*ast.Ident{ast.NewIdent(l.localName(fn, air.LocalID(i)))},
 			Type:  paramType,
 		})
 	}
@@ -1487,14 +1491,14 @@ func (l *lowerer) lowerGoMethodWrapper(fn air.Function) (*ast.FuncDecl, bool, er
 	}
 
 	params := make([]*ast.Field, 0, len(fn.Signature.Params)-1)
-	callArgs := []ast.Expr{ast.NewIdent(localName(fn, 0))}
+	callArgs := []ast.Expr{ast.NewIdent(l.localName(fn, 0))}
 	for i, param := range fn.Signature.Params[1:] {
 		paramType, err := l.goParamType(param)
 		if err != nil {
 			return nil, false, err
 		}
 		localID := air.LocalID(i + 1)
-		name := localName(fn, localID)
+		name := l.localName(fn, localID)
 		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: paramType})
 		callArgs = append(callArgs, ast.NewIdent(name))
 	}
@@ -1523,7 +1527,7 @@ func (l *lowerer) lowerGoMethodWrapper(fn air.Function) (*ast.FuncDecl, bool, er
 
 	l.emittedGoMethods[key] = true
 	return &ast.FuncDecl{
-		Recv: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(localName(fn, 0))}, Type: receiverType}}},
+		Recv: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(l.localName(fn, 0))}, Type: receiverType}}},
 		Name: ast.NewIdent(methodName),
 		Type: funcType,
 		Body: &ast.BlockStmt{List: body},
@@ -1714,7 +1718,7 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			return nil, err
 		}
 		out := append([]ast.Stmt{}, value.stmts...)
-		name := localName(fn, stmt.Local)
+		name := l.localName(fn, stmt.Local)
 		tok := token.DEFINE
 		if l.declaredLocals[stmt.Local] {
 			tok = token.ASSIGN
@@ -1756,7 +1760,7 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		out := append([]ast.Stmt{}, value.stmts...)
 		if l.isVoidType(localType) || isVoidExpr(value.expr) {
 			out = l.appendVoidValueEval(out, value.expr)
-			name := localName(fn, stmt.Local)
+			name := l.localName(fn, stmt.Local)
 			tok := token.ASSIGN
 			if !l.declaredLocals[stmt.Local] {
 				tok = token.DEFINE
@@ -1768,7 +1772,7 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		}
 		if l.localIsPointerParam(fn, stmt.Local) && l.isTraitObjectType(localType) {
 			assignValue := l.mutableTraitAssignValueExpr(fn, *stmt.Value, value.expr, localType)
-			out = append(out, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(localName(fn, stmt.Local)), Sel: ast.NewIdent(l.mutableTraitAssignFieldNameForType(localType))}, Args: []ast.Expr{assignValue}}})
+			out = append(out, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(l.localName(fn, stmt.Local)), Sel: ast.NewIdent(l.mutableTraitAssignFieldNameForType(localType))}, Args: []ast.Expr{assignValue}}})
 			return out, nil
 		}
 		out = append(out, &ast.AssignStmt{
@@ -3747,7 +3751,7 @@ func (l *lowerer) mutableTraitRefPointerExpr(fn air.Function, arg air.Expr) (ast
 	switch arg.Kind {
 	case air.ExprLoadLocal:
 		if l.localIsPointerParam(fn, arg.Local) {
-			return ast.NewIdent(localName(fn, arg.Local)), nil, true, nil
+			return ast.NewIdent(l.localName(fn, arg.Local)), nil, true, nil
 		}
 	case air.ExprGetField:
 		if arg.Target == nil || !validTypeID(l.program, arg.Target.Type) {
@@ -4059,7 +4063,7 @@ func (l *lowerer) mutableTraitUpcastPlace(fn air.Function, arg air.Expr) (ast.Ex
 
 func (l *lowerer) mutableReferenceArg(fn air.Function, arg air.Expr, argExpr ast.Expr) ast.Expr {
 	if arg.Kind == air.ExprLoadLocal && l.localIsPointerParam(fn, arg.Local) {
-		return ast.NewIdent(localName(fn, arg.Local))
+		return ast.NewIdent(l.localName(fn, arg.Local))
 	}
 	if arg.Kind == air.ExprGetField {
 		if fieldExpr, ok := l.mutableFieldReferenceExpr(fn, arg); ok {
@@ -4089,7 +4093,7 @@ func (l *lowerer) mutableFieldReferenceExpr(fn air.Function, arg air.Expr) (ast.
 }
 
 func (l *lowerer) localValueExpr(fn air.Function, local air.LocalID) ast.Expr {
-	name := ast.Expr(ast.NewIdent(localName(fn, local)))
+	name := ast.Expr(ast.NewIdent(l.localName(fn, local)))
 	if l.localIsPointerParam(fn, local) {
 		return &ast.StarExpr{X: name}
 	}
@@ -4155,7 +4159,7 @@ func (l *lowerer) importAliasAvailable(alias string, importPath string) bool {
 		return false
 	}
 	if l.reservedGoIdentifiers == nil && l.program != nil {
-		l.reservedGoIdentifiers = collectReservedGoIdentifiers(l.program)
+		l.reservedGoIdentifiers = l.buildReservedGoIdentifiers()
 	}
 	if l.reservedGoIdentifiers[alias] && !l.aliasReservedForImport(alias, importPath) {
 		return false
@@ -4352,7 +4356,7 @@ func (l *lowerer) lowerMatchUnion(fn air.Function, expr air.Expr) (loweredExpr, 
 		if fieldName == "" {
 			return loweredExpr{}, fmt.Errorf("invalid union case tag %d", unionCase.Tag)
 		}
-		localName := localName(fn, unionCase.Local)
+		localName := l.localName(fn, unionCase.Local)
 		l.declaredLocals[unionCase.Local] = true
 		bind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(localName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(fieldName)}}}
 		body, err := l.lowerValueBlock(fn, unionCase.Body, expr.Type, assignTarget)
@@ -5002,8 +5006,8 @@ func (l *lowerer) lowerMatchResult(fn air.Function, expr air.Expr) (loweredExpr,
 		assignTarget = ast.NewIdent(temp)
 		resultExpr = ast.NewIdent(temp)
 	}
-	okName := localName(fn, expr.OkLocal)
-	errName := localName(fn, expr.ErrLocal)
+	okName := l.localName(fn, expr.OkLocal)
+	errName := l.localName(fn, expr.ErrLocal)
 	l.declaredLocals[expr.OkLocal] = true
 	l.declaredLocals[expr.ErrLocal] = true
 	okBind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}
@@ -5123,7 +5127,7 @@ func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, e
 			}
 			catchTarget = ast.NewIdent(catchTargetName)
 		}
-		errName := localName(fn, expr.CatchLocal)
+		errName := l.localName(fn, expr.CatchLocal)
 		l.declaredLocals[expr.CatchLocal] = true
 		errBind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Err")}}}
 		catchBody, err := l.lowerValueBlock(fn, expr.Catch, fn.Signature.Return, catchTarget)
@@ -5266,7 +5270,7 @@ func (l *lowerer) lowerMatchMaybe(fn air.Function, expr air.Expr) (loweredExpr, 
 		assignTarget = ast.NewIdent(temp)
 		resultExpr = ast.NewIdent(temp)
 	}
-	someName := localName(fn, expr.SomeLocal)
+	someName := l.localName(fn, expr.SomeLocal)
 	l.declaredLocals[expr.SomeLocal] = true
 	someDecl := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(someName)}, Tok: token.DEFINE, Rhs: []ast.Expr{l.maybeValueExpr(targetExpr)}}
 	someBody, err := l.lowerValueBlock(fn, expr.Some, expr.Type, assignTarget)
@@ -5387,7 +5391,7 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	callArgs := make([]ast.Expr, 0, len(expr.CaptureLocals)+len(closureFn.Signature.Params))
 	stmts := []ast.Stmt{}
 	for i, local := range expr.CaptureLocals {
-		argExpr := ast.Expr(ast.NewIdent(localName(fn, local)))
+		argExpr := ast.Expr(ast.NewIdent(l.localName(fn, local)))
 		if i < len(closureFn.Captures) {
 			capture := closureFn.Captures[i]
 			captureParam := air.Param{Name: capture.Name, Type: capture.Type}
@@ -5411,7 +5415,7 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		name := localName(closureFn, air.LocalID(i))
+		name := l.localName(closureFn, air.LocalID(i))
 		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: paramType})
 		callArgs = append(callArgs, ast.NewIdent(name))
 	}
@@ -5454,7 +5458,7 @@ func (l *lowerer) lowerInlineClosure(parent air.Function, expr air.Expr, closure
 		if int(capture.Local) < 0 || int(capture.Local) >= len(inlineFn.Locals) {
 			continue
 		}
-		outerName := localName(parent, expr.CaptureLocals[i])
+		outerName := l.localName(parent, expr.CaptureLocals[i])
 		capture.Name = outerName
 		inlineFn.Locals[capture.Local].Name = outerName
 		// Inline closures directly close over the outer Go local. Do not treat
@@ -5462,6 +5466,20 @@ func (l *lowerer) lowerInlineClosure(parent air.Function, expr air.Expr, closure
 		// the address of the outer local when a callee requires it.
 		inlineFn.Locals[capture.Local].Mutable = false
 	}
+	// inlineFn is a mutated copy sharing the original closure's FunctionID. Drop
+	// any cached name table (e.g. populated eagerly by buildReservedGoIdentifiers)
+	// so names recompute from the rewritten capture names, and restore the entry
+	// afterwards so the original closure's table is never observed as the inline
+	// one.
+	prevLocalNames, hadLocalNames := l.localNameCache[inlineFn.ID]
+	delete(l.localNameCache, inlineFn.ID)
+	defer func() {
+		if hadLocalNames {
+			l.localNameCache[inlineFn.ID] = prevLocalNames
+		} else {
+			delete(l.localNameCache, inlineFn.ID)
+		}
+	}()
 
 	closureType, err := l.goType(expr.Type)
 	if err != nil {
@@ -5474,7 +5492,7 @@ func (l *lowerer) lowerInlineClosure(parent air.Function, expr air.Expr, closure
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		name := localName(inlineFn, air.LocalID(i))
+		name := l.localName(inlineFn, air.LocalID(i))
 		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: paramType})
 	}
 	if funcType == nil {
@@ -5965,7 +5983,7 @@ func (l *lowerer) lowerSelect(fn air.Function, expr air.Expr) (loweredExpr, erro
 					Tok: token.DEFINE,
 					Rhs: []ast.Expr{recv},
 				}
-				bindName := localName(fn, arm.BindLocal)
+				bindName := l.localName(fn, arm.BindLocal)
 				l.declaredLocals[arm.BindLocal] = true
 				maybeTypeID := fn.Locals[arm.BindLocal].Type
 				decls, err := l.declareTemp(maybeTypeID, bindName)
@@ -7204,6 +7222,16 @@ func walkExpr(expr air.Expr, visit func(air.Expr)) {
 	}
 	for i := range expr.UnionCases {
 		walkBlockExprs(expr.UnionCases[i].Body, visit)
+	}
+	for i := range expr.SelectCases {
+		arm := expr.SelectCases[i]
+		if arm.Channel != nil {
+			walkExpr(*arm.Channel, visit)
+		}
+		if arm.Value != nil {
+			walkExpr(*arm.Value, visit)
+		}
+		walkBlockExprs(arm.Body, visit)
 	}
 }
 

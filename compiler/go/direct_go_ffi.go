@@ -79,7 +79,7 @@ func (l *lowerer) generatedGoImportAlias(importPath string, preferred string) st
 		l.directGoAliases = map[string]string{}
 	}
 	if l.reservedGoIdentifiers == nil {
-		l.reservedGoIdentifiers = collectReservedGoIdentifiers(l.program)
+		l.reservedGoIdentifiers = l.buildReservedGoIdentifiers()
 	}
 	base := sanitizeName(preferred)
 	if strings.HasPrefix(preferred, "_tmp_") || !validGeneratedGoImportAlias(base) {
@@ -102,7 +102,11 @@ func validGeneratedGoImportAlias(alias string) bool {
 	return alias != "_" && alias != "init" && !strings.HasPrefix(alias, "_tmp_") && token.IsIdentifier(alias) && token.Lookup(alias) == token.IDENT
 }
 
-func collectReservedGoIdentifiers(program *air.Program) map[string]bool {
+// collectTopLevelReservedNames is the set of generated package-level names plus
+// Go predeclared identifiers that a bare local must not shadow. It deliberately
+// excludes local names and import aliases, so it does not depend on local
+// naming (which keeps localName free of a cycle).
+func collectTopLevelReservedNames(program *air.Program) map[string]bool {
 	reserved := map[string]bool{"main": true}
 	for _, name := range predeclaredGoIdentifiers() {
 		reserved[name] = true
@@ -124,8 +128,67 @@ func collectReservedGoIdentifiers(program *air.Program) map[string]bool {
 	}
 	for _, fn := range program.Functions {
 		reserved[functionName(program, fn)] = true
-		for _, local := range fn.Locals {
-			reserved[localName(fn, local.ID)] = true
+	}
+	return reserved
+}
+
+// explicitGoAliasReserved reports whether name is a user-chosen `use go:... as
+// name` import alias. A bare local must not take such a name: explicit aliases
+// keep precedence and the colliding local is suffixed instead. This is a
+// separate set from reservedGoIdentifiers so that alias selection itself is not
+// blocked from using the alias.
+func (l *lowerer) explicitGoAliasReserved(name string) bool {
+	if l.explicitGoAliases == nil {
+		l.explicitGoAliases = collectExplicitGoAliases(l.program)
+	}
+	return l.explicitGoAliases[name]
+}
+
+func collectExplicitGoAliases(program *air.Program) map[string]bool {
+	aliases := map[string]bool{}
+	if program == nil {
+		return aliases
+	}
+	add := func(binding string) {
+		if binding == "" {
+			return
+		}
+		if direct, ok, err := parseDirectGoExternBinding(binding); err == nil && ok && direct.Alias != "" {
+			aliases[sanitizeName(direct.Alias)] = true
+		}
+	}
+	// Explicit `use go:... as alias` names reach the backend through every direct
+	// Go binding: function/method externs, Go type references, and package value
+	// references in function bodies.
+	for _, ext := range program.Externs {
+		add(ext.Bindings["go"])
+	}
+	for _, typ := range program.Types {
+		add(typ.ExternBinding)
+	}
+	collectValue := func(e air.Expr) {
+		if e.Kind == air.ExprDirectGoPackageValue {
+			add(e.Str)
+		}
+	}
+	for _, fn := range program.Functions {
+		walkBlockExprs(fn.Body, collectValue)
+	}
+	for _, global := range program.Globals {
+		walkExpr(global.Value, collectValue)
+	}
+	return aliases
+}
+
+// buildReservedGoIdentifiers is the set that generated import aliases must
+// avoid: every top-level reserved name plus every emitted local name.
+func (l *lowerer) buildReservedGoIdentifiers() map[string]bool {
+	reserved := collectTopLevelReservedNames(l.program)
+	if l.program != nil {
+		for _, fn := range l.program.Functions {
+			for _, local := range fn.Locals {
+				reserved[l.localName(fn, local.ID)] = true
+			}
 		}
 	}
 	return reserved
