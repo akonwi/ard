@@ -1,8 +1,8 @@
 //go:build ignore
 
 // Command generate_stdlibgo_files regenerates files.gen.go, embedding the Go
-// support tree of Ard's standard library (go.mod, go.sum, the runtime package,
-// and the std_lib/ffi package) as a path-keyed string map. Run via
+// support tree of Ard's standard library (go.mod, go.sum, and the runtime
+// package) as a path-keyed string map. Run via
 // `go generate ./stdlibgo` from the compiler module root.
 package main
 
@@ -18,7 +18,7 @@ import (
 
 func main() {
 	paths := []string{"go.mod", "go.sum"}
-	for _, dir := range []string{"runtime", filepath.Join("std_lib", "ffi")} {
+	for _, dir := range []string{"runtime"} {
 		matches, err := filepath.Glob(filepath.Join("..", dir, "*.go"))
 		if err != nil {
 			panic(err)

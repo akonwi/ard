@@ -11,7 +11,7 @@ func TestMaterializedDirWritesCompleteModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MaterializedDir: %v", err)
 	}
-	for _, rel := range []string{"go.mod", "go.sum", "runtime/maybe.go", "std_lib/ffi/host.go"} {
+	for _, rel := range []string{"go.mod", "go.sum", "runtime/maybe.go"} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
 			t.Errorf("expected materialized %s: %v", rel, err)
 		}
@@ -42,7 +42,6 @@ func TestMaterializedDirIsIdempotent(t *testing.T) {
 func TestIsBundledImportPath(t *testing.T) {
 	bundled := []string{
 		"github.com/akonwi/ard/runtime",
-		"github.com/akonwi/ard/std_lib/ffi",
 	}
 	for _, p := range bundled {
 		if !IsBundledImportPath(p) {
@@ -58,20 +57,6 @@ func TestIsBundledImportPath(t *testing.T) {
 	for _, p := range notBundled {
 		if IsBundledImportPath(p) {
 			t.Errorf("expected %q to not be bundled", p)
-		}
-	}
-}
-
-func TestCanonicalGoImportPath(t *testing.T) {
-	cases := map[string]string{
-		"ard/ffi":                           "github.com/akonwi/ard/std_lib/ffi",
-		"github.com/akonwi/ard/std_lib/ffi": "github.com/akonwi/ard/std_lib/ffi",
-		"strconv":                           "strconv",
-		"demo/ffi":                          "demo/ffi",
-	}
-	for in, want := range cases {
-		if got := CanonicalGoImportPath(in); got != want {
-			t.Errorf("CanonicalGoImportPath(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

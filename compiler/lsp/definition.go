@@ -9,7 +9,6 @@ import (
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/std_lib"
-	"github.com/akonwi/ard/stdlibgo"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -337,7 +336,7 @@ func definitionForGoSymbol(alias string, symbol string, prog *parse.Program, fil
 	if filePath != "" {
 		dir = filepath.Dir(filePath)
 	}
-	pos, ok := checker.NewGoPackagesResolver(dir).SymbolPosition(stdlibgo.CanonicalGoImportPath(imp.Path), symbol)
+	pos, ok := checker.NewGoPackagesResolver(dir).SymbolPosition(imp.Path, symbol)
 	if !ok || pos.Filename == "" {
 		return nil
 	}
@@ -360,7 +359,7 @@ func definitionForGoTypeMember(alias string, goTypeName string, member string, p
 		dir = filepath.Dir(filePath)
 	}
 	resolver := checker.NewGoPackagesResolver(dir)
-	path := stdlibgo.CanonicalGoImportPath(imp.Path)
+	path := imp.Path
 	var pos gotoken.Position
 	var found bool
 	if method {
