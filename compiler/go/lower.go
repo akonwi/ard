@@ -5,16 +5,13 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/stdlibgo"
 )
 
 type loweredExpr struct {
@@ -29,20 +26,15 @@ type lowerer struct {
 	currentImports          map[string]string
 	currentModule           air.ModuleID
 	importErr               error
-	directGoAliases         map[string]string
 	reservedGoIdentifiers   map[string]bool
 	topLevelReserved        map[string]bool
-	explicitGoAliases       map[string]bool
 	localNameCache          map[air.FunctionID]map[air.LocalID]string
 	declaredLocals          map[air.LocalID]bool
 	runtimeHelpers          map[string]bool
-	ffiImports              map[string]string
 	projectInfo             *checker.ProjectInfo
-	directGoResolver        *checker.GoPackagesResolver
 	inlineClosures          map[air.FunctionID]bool
 	goMethodCollisions      map[string]bool
 	emittedGoMethods        map[string]bool
-	ffiNativeTraitFallbacks map[air.TraitID]bool
 	functionModules         map[air.FunctionID]air.ModuleID
 	mutableTraitRefs        map[air.TraitID]bool
 	emittedMutableTraitRefs map[air.TraitID]bool
@@ -66,16 +58,11 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	if err := air.Validate(program); err != nil {
 		return nil, err
 	}
-	directGoResolverDir := "."
-	if options.ProjectInfo != nil && options.ProjectInfo.RootPath != "" {
-		directGoResolverDir = options.ProjectInfo.RootPath
-	}
-	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, ffiImports: collectFFIGoImports(options.ProjectInfo), projectInfo: options.ProjectInfo, directGoResolver: checker.NewGoPackagesResolver(directGoResolverDir), directGoAliases: map[string]string{}, suppressMain: options.SuppressMain, includeTests: options.IncludeTests, useModulePackages: true}
+	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, projectInfo: options.ProjectInfo, suppressMain: options.SuppressMain, includeTests: options.IncludeTests, useModulePackages: true}
 	l.reservedGoIdentifiers = l.buildReservedGoIdentifiers()
 	l.inlineClosures = l.collectInlineClosureFunctions()
 	l.goMethodCollisions = l.collectGoMethodCollisions()
 	l.emittedGoMethods = map[string]bool{}
-	l.ffiNativeTraitFallbacks = collectFFINativeTraitFallbacks(program)
 	l.functionModules = l.collectFunctionEmitModules()
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
@@ -158,133 +145,6 @@ func (l *lowerer) synthesizeEntryMain(rootID air.FunctionID, entryModuleID air.M
 	}}}
 	mainDecl := &ast.FuncDecl{Name: ast.NewIdent("main"), Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: &ast.BlockStmt{List: []ast.Stmt{stmt}}}
 	return &ast.File{Name: ast.NewIdent("main"), Decls: []ast.Decl{importDecl, mainDecl}}, nil
-}
-
-func collectFFIGoImports(projectInfo *checker.ProjectInfo) map[string]string {
-	imports := collectGoImportsFromEmbeddedArdModule()
-	for alias, path := range collectGoImportsFromPaths(stdlibFFIGoPaths()) {
-		imports[alias] = path
-	}
-	for alias, path := range collectGoImportsFromPaths(projectFFIGoPaths(projectInfo)) {
-		imports[alias] = path
-	}
-	if projectHasFFICompanions(projectInfo) {
-		registerProjectFFIImports(imports, projectInfo)
-	}
-	for alias, path := range collectGoImportsFromPaths(dependencyFFIGoPaths(projectInfo)) {
-		imports[alias] = path
-	}
-	return imports
-}
-
-func stdlibFFIGoPaths() []string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return nil
-	}
-	stdlibFFIDir := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "std_lib", "ffi"))
-	matches, err := filepath.Glob(filepath.Join(stdlibFFIDir, "*.go"))
-	if err != nil {
-		return nil
-	}
-	return matches
-}
-
-func dependencyFFIGoPaths(projectInfo *checker.ProjectInfo) []string {
-	if projectInfo == nil {
-		return nil
-	}
-	paths := []string{}
-	seenRoots := map[string]bool{}
-	addRoot := func(root string) {
-		if root == "" || seenRoots[root] {
-			return
-		}
-		seenRoots[root] = true
-		matches, err := filepath.Glob(filepath.Join(root, "ffi", "*.go"))
-		if err == nil {
-			paths = append(paths, matches...)
-		}
-	}
-	for _, dep := range projectInfo.Dependencies {
-		addRoot(dependencyRootPath(dep))
-	}
-	for packageID, pkg := range projectInfo.Packages {
-		if packageID == projectInfo.RootPackageID {
-			continue
-		}
-		addRoot(pkg.RootPath)
-	}
-	return paths
-}
-
-func projectFFIGoPaths(projectInfo *checker.ProjectInfo) []string {
-	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
-		return nil
-	}
-	paths := []string{filepath.Join(projectInfo.RootPath, "ffi.go")}
-	matches, err := filepath.Glob(filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
-	if err == nil {
-		paths = append(paths, matches...)
-	}
-	return paths
-}
-
-func collectGoImportsFromPaths(paths []string) map[string]string {
-	imports := map[string]string{}
-	for _, path := range paths {
-		if skipFFIImportSource(path) {
-			continue
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		collectGoImportsFromSource(imports, path, data)
-	}
-	return imports
-}
-
-func collectGoImportsFromEmbeddedArdModule() map[string]string {
-	imports := map[string]string{}
-	for rel, content := range stdlibgo.Files {
-		if !strings.HasPrefix(rel, "std_lib/ffi/") || skipFFIImportSource(rel) {
-			continue
-		}
-		collectGoImportsFromSource(imports, rel, []byte(content))
-	}
-	return imports
-}
-
-func skipFFIImportSource(path string) bool {
-	base := filepath.Base(path)
-	return strings.HasSuffix(base, ".gen.go") || strings.HasSuffix(base, "_test.go") || base == "generate.go"
-}
-
-func collectGoImportsFromSource(imports map[string]string, name string, data []byte) {
-	file, err := parser.ParseFile(token.NewFileSet(), name, data, parser.ImportsOnly)
-	if err != nil {
-		return
-	}
-	for _, spec := range file.Imports {
-		if spec.Path == nil {
-			continue
-		}
-		importPath := strings.Trim(spec.Path.Value, "\"")
-		if importPath == "" || importPath == "C" {
-			continue
-		}
-		alias := ""
-		if spec.Name != nil {
-			if spec.Name.Name == "." || spec.Name.Name == "_" {
-				continue
-			}
-			alias = spec.Name.Name
-		} else {
-			alias = filepath.Base(importPath)
-		}
-		imports[alias] = importPath
-	}
 }
 
 func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
@@ -591,10 +451,6 @@ func (l *lowerer) typesForModule(moduleID air.ModuleID, mainModuleID air.ModuleI
 			}
 			continue
 		}
-		if strings.TrimSpace(typ.ExternBinding) != "" {
-			out = append(out, typ)
-			continue
-		}
 		if moduleID == mainModuleID {
 			out = append(out, typ)
 		}
@@ -655,10 +511,6 @@ func (l *lowerer) markRuntimeHelper(name string) {
 	l.runtimeHelpers[name] = true
 }
 
-func (l *lowerer) registerFFIImportsForGoType(expr ast.Expr) {
-	l.registerImportsForGoType(expr, l.ffiImports)
-}
-
 func (l *lowerer) registerImportsForGoType(expr ast.Expr, imports map[string]string) {
 	ast.Inspect(expr, func(node ast.Node) bool {
 		selector, ok := node.(*ast.SelectorExpr)
@@ -674,53 +526,6 @@ func (l *lowerer) registerImportsForGoType(expr ast.Expr, imports map[string]str
 		}
 		return true
 	})
-}
-
-func (l *lowerer) validateProjectFFIExternTypeBinding(binding string, expr ast.Expr) error {
-	if !projectHasFFICompanions(l.projectInfo) {
-		return nil
-	}
-	if name, ok := unqualifiedExternTypeIdent(expr); ok {
-		return fmt.Errorf("project go extern type binding %q must qualify %s with package %s", binding, name, projectFFIPackageAlias(l.projectInfo))
-	}
-	return nil
-}
-
-func unqualifiedExternTypeIdent(expr ast.Expr) (string, bool) {
-	switch node := expr.(type) {
-	case *ast.Ident:
-		return node.Name, ast.IsExported(node.Name) && !isPredeclaredGoTypeName(node.Name)
-	case *ast.StarExpr:
-		return unqualifiedExternTypeIdent(node.X)
-	case *ast.ArrayType:
-		return unqualifiedExternTypeIdent(node.Elt)
-	case *ast.MapType:
-		if name, ok := unqualifiedExternTypeIdent(node.Key); ok {
-			return name, true
-		}
-		return unqualifiedExternTypeIdent(node.Value)
-	case *ast.IndexExpr:
-		if name, ok := unqualifiedExternTypeIdent(node.X); ok {
-			return name, true
-		}
-		return unqualifiedExternTypeIdent(node.Index)
-	case *ast.IndexListExpr:
-		if name, ok := unqualifiedExternTypeIdent(node.X); ok {
-			return name, true
-		}
-		for _, index := range node.Indices {
-			if name, ok := unqualifiedExternTypeIdent(index); ok {
-				return name, true
-			}
-		}
-		return "", false
-	case *ast.ParenExpr:
-		return unqualifiedExternTypeIdent(node.X)
-	case *ast.SelectorExpr:
-		return "", false
-	default:
-		return "", false
-	}
 }
 
 func isPredeclaredGoTypeName(name string) bool {
@@ -795,82 +600,6 @@ func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	}
 `)
 	}
-	if l.runtimeHelpers["direct_go_signed_int_range"] {
-		parts = append(parts, `
-	func ardDirectGoCheckSignedIntRange(value int, min int64, max int64, target string) int {
-		v := int64(value)
-		if v < min || v > max {
-			panic("Ard direct Go FFI: int value out of range for " + target)
-		}
-		return value
-	}
-`)
-	}
-	if l.runtimeHelpers["direct_go_uint_int_range"] {
-		parts = append(parts, `
-	func ardDirectGoCheckUintIntRange(value int, max uint64, target string) int {
-		if value < 0 || uint64(value) > max {
-			panic("Ard direct Go FFI: int value out of range for " + target)
-		}
-		return value
-	}
-`)
-	}
-	if l.runtimeHelpers["direct_go_nonnegative_int"] {
-		parts = append(parts, `
-	func ardDirectGoCheckNonNegativeInt(value int, target string) int {
-		if value < 0 {
-			panic("Ard direct Go FFI: negative int value out of range for " + target)
-		}
-		return value
-	}
-`)
-	}
-	if l.runtimeHelpers["direct_go_signed_to_int"] {
-		parts = append(parts, `
-	func ardDirectGoIntFromSigned(value int64, target string) int {
-		max := int64(^uint(0) >> 1)
-		min := -max - 1
-		if value < min || value > max {
-			panic("Ard direct Go FFI: signed integer value out of range for Int from " + target)
-		}
-		return int(value)
-	}
-`)
-	}
-	if l.runtimeHelpers["direct_go_unsigned_to_int"] {
-		parts = append(parts, `
-	func ardDirectGoIntFromUnsigned(value uint64, target string) int {
-		max := uint64(^uint(0) >> 1)
-		if value > max {
-			panic("Ard direct Go FFI: unsigned integer value out of range for Int from " + target)
-		}
-		return int(value)
-	}
-`)
-	}
-	if l.runtimeHelpers["direct_go_float32_range"] {
-		mathAlias := l.registerImport("ardmath", "math")
-		parts = append(parts, fmt.Sprintf(`
-	func ardDirectGoCheckFloat32Range(value float64, target string) float64 {
-		if value > %s.MaxFloat32 || value < -%s.MaxFloat32 {
-			panic("Ard direct Go FFI: float value out of range for " + target)
-		}
-		return value
-	}
-`, mathAlias, mathAlias))
-	}
-	if l.runtimeHelpers["direct_go_valid_rune"] {
-		utf8Alias := l.registerImport("ardutf8", "unicode/utf8")
-		parts = append(parts, fmt.Sprintf(`
-	func ardDirectGoCheckRune(value rune) rune {
-		if !%s.ValidRune(value) {
-			panic("Ard direct Go FFI: Go returned invalid Rune")
-		}
-		return value
-	}
-`, utf8Alias))
-	}
 	src := strings.Join(parts, "\n")
 	file, err := parser.ParseFile(token.NewFileSet(), "prelude.go", src, 0)
 	if err != nil {
@@ -925,29 +654,9 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 		return l.lowerTraitObjectDecls(typ)
 	case air.TypeEnum:
 		typeSpec := &ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: ast.NewIdent("int")}
-		directGoEnum := false
-		if strings.TrimSpace(typ.ExternBinding) != "" {
-			if typeExpr, ok, err := l.directGoExternTypeExpr(typ.ExternBinding); err != nil || ok {
-				if err != nil {
-					return nil, err
-				}
-				directGoEnum = true
-				typeSpec.Assign = token.Pos(1)
-				typeSpec.Type = typeExpr
-			}
-		}
 		specs := []ast.Spec{typeSpec}
 		for _, variant := range typ.Variants {
 			value := ast.Expr(&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", variant.Discriminant)})
-			if directGoEnum {
-				constant, ok, err := l.directGoEnumConstantExpr(typ.ExternBinding, variant.Name)
-				if err != nil {
-					return nil, err
-				}
-				if ok {
-					value = constant
-				}
-			}
 			specs = append(specs, &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(enumVariantName(l.program, typ, variant))}, Type: ast.NewIdent(typeName(l.program, typ)), Values: []ast.Expr{value}})
 		}
 		decls := []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: specs[:1]}}
@@ -1071,7 +780,7 @@ func (l *lowerer) usesNativeTraitInterface(typeID air.TypeID) bool {
 		return false
 	}
 	traitID := l.program.Types[typeID-1].Trait
-	if !l.traitInterfaceAvailable(traitID) || l.ffiNativeTraitFallbacks[traitID] || l.traitHasMutableTraitUse(traitID) {
+	if !l.traitInterfaceAvailable(traitID) || l.traitHasMutableTraitUse(traitID) {
 		return false
 	}
 	for _, impl := range l.program.Impls {
@@ -1589,51 +1298,6 @@ func (l *lowerer) lowerGoMethodWrapper(fn air.Function) (*ast.FuncDecl, bool, er
 	}, true, nil
 }
 
-func collectFFINativeTraitFallbacks(program *air.Program) map[air.TraitID]bool {
-	// Project/dependency FFI companions historically see Ard trait objects as any.
-	// Keep that ABI for container-shaped signatures we do not adapt at the
-	// boundary; top-level return Trait, Trait?, and Trait!E are adapted below.
-	fallbacks := map[air.TraitID]bool{}
-	if program == nil {
-		return fallbacks
-	}
-	var scan func(air.TypeID, bool, int, bool)
-	scan = func(typeID air.TypeID, unsupportedContainer bool, wrapperDepth int, allowDirectWrapper bool) {
-		if !validTypeID(program, typeID) {
-			return
-		}
-		info := program.Types[typeID-1]
-		switch info.Kind {
-		case air.TypeTraitObject:
-			if validTraitID(program, info.Trait) && (unsupportedContainer || wrapperDepth > 1 || wrapperDepth == 1 && !allowDirectWrapper) {
-				fallbacks[info.Trait] = true
-			}
-		case air.TypeList:
-			scan(info.Elem, true, wrapperDepth, allowDirectWrapper)
-		case air.TypeMap:
-			scan(info.Key, true, wrapperDepth, allowDirectWrapper)
-			scan(info.Value, true, wrapperDepth, allowDirectWrapper)
-		case air.TypeFunction:
-			for _, param := range info.Params {
-				scan(param, true, wrapperDepth, allowDirectWrapper)
-			}
-			scan(info.Return, true, wrapperDepth, allowDirectWrapper)
-		case air.TypeMaybe:
-			scan(info.Elem, unsupportedContainer, wrapperDepth+1, allowDirectWrapper)
-		case air.TypeResult:
-			scan(info.Value, unsupportedContainer, wrapperDepth+1, allowDirectWrapper)
-			scan(info.Error, unsupportedContainer, wrapperDepth+1, allowDirectWrapper)
-		}
-	}
-	for _, ext := range program.Externs {
-		for _, param := range ext.Signature.Params {
-			scan(param.Type, false, 0, false)
-		}
-		scan(ext.Signature.Return, false, 0, true)
-	}
-	return fallbacks
-}
-
 func (l *lowerer) collectGoMethodCollisions() map[string]bool {
 	counts := map[string]int{}
 	for _, fn := range l.program.Functions {
@@ -1674,9 +1338,6 @@ func (l *lowerer) canEmitGoMethodOnType(typeID air.TypeID) bool {
 		return false
 	}
 	info := l.program.Types[typeID-1]
-	if strings.TrimSpace(info.ExternBinding) != "" {
-		return false
-	}
 	switch info.Kind {
 	case air.TypeStruct, air.TypeEnum, air.TypeUnion:
 		return true
@@ -1889,36 +1550,6 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			Rhs: []ast.Expr{valueExpr},
 		})
 		return out, nil
-	case air.StmtSetDirectGoField:
-		if stmt.Target == nil {
-			return nil, fmt.Errorf("direct Go field set statement missing target")
-		}
-		if stmt.Value == nil {
-			return nil, fmt.Errorf("direct Go field set statement missing value")
-		}
-		if strings.TrimSpace(stmt.FieldName) == "" {
-			return nil, fmt.Errorf("direct Go field set statement missing field name")
-		}
-		target, err := l.lowerExpr(fn, *stmt.Target)
-		if err != nil {
-			return nil, err
-		}
-		value, err := l.lowerExpr(fn, *stmt.Value)
-		if err != nil {
-			return nil, err
-		}
-		valueExpr, err := l.coerceDirectGoArg(stmt.Value.Type, value.expr, stmt.DirectGoFieldType, directGoExternBinding{})
-		if err != nil {
-			return nil, err
-		}
-		out := append([]ast.Stmt{}, target.stmts...)
-		out = append(out, value.stmts...)
-		out = append(out, &ast.AssignStmt{
-			Lhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(stmt.FieldName)}},
-			Tok: token.ASSIGN,
-			Rhs: []ast.Expr{valueExpr},
-		})
-		return out, nil
 	case air.StmtExpr:
 		if stmt.Expr == nil {
 			return nil, fmt.Errorf("expr statement missing expression")
@@ -2067,14 +1698,6 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{target.expr}}}, nil
-	case air.ExprCallExtern:
-		return l.lowerExternCall(fn, expr)
-	case air.ExprDirectGoPackageValue:
-		return l.lowerDirectGoPackageValue(expr.Str, expr.Type)
-	case air.ExprDirectGoFieldAccess:
-		return l.lowerDirectGoFieldAccess(fn, expr)
-	case air.ExprDirectGoStructLiteral:
-		return l.lowerDirectGoStructLiteral(fn, expr)
 	case air.ExprMakeClosure:
 		return l.lowerMakeClosure(fn, expr)
 	case air.ExprCallClosure:
@@ -2938,7 +2561,7 @@ func (l *lowerer) shouldPropagateMaybeNone(expr air.Expr) bool {
 }
 
 func sameAIRExpr(a air.Expr, b air.Expr) bool {
-	if a.Kind != b.Kind || a.Type != b.Type || a.Field != b.Field || a.Local != b.Local || a.Function != b.Function || a.Extern != b.Extern {
+	if a.Kind != b.Kind || a.Type != b.Type || a.Field != b.Field || a.Local != b.Local || a.Function != b.Function {
 		return false
 	}
 	if a.Int != b.Int || a.Float != b.Float || a.Bool != b.Bool || a.Str != b.Str {
@@ -3081,7 +2704,7 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 		return ast.NewIdent("false"), nil
 	case air.TypeStr:
 		return &ast.BasicLit{Kind: token.STRING, Value: "\"\""}, nil
-	case air.TypeDynamic, air.TypeExtern, air.TypeFunction, air.TypeTraitObject:
+	case air.TypeDynamic, air.TypeFunction, air.TypeTraitObject:
 		return ast.NewIdent("nil"), nil
 	default:
 		typ, err := l.goType(typeID)
@@ -3278,25 +2901,6 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return l.namedTypeExpr(info), nil
 	case air.TypeUnion:
 		return l.namedTypeExpr(info), nil
-	case air.TypeExtern:
-		if strings.TrimSpace(info.ExternBinding) != "" {
-			if typ, ok, err := l.directGoExternTypeExpr(info.ExternBinding); err != nil || ok {
-				return typ, err
-			}
-			if alias, ok := dependencyAliasForModulePath(info.ModulePath, l.projectInfo); ok {
-				return l.dependencyFFITypeExpr(alias, info.ExternBinding)
-			}
-			typ, err := parser.ParseExpr(info.ExternBinding)
-			if err != nil {
-				return nil, fmt.Errorf("invalid go extern type binding %q for %s: %w", info.ExternBinding, info.Name, err)
-			}
-			if err := l.validateProjectFFIExternTypeBinding(info.ExternBinding, typ); err != nil {
-				return nil, err
-			}
-			l.registerFFIImportsForGoType(typ)
-			return typ, nil
-		}
-		return ast.NewIdent("any"), nil
 	case air.TypeDynamic:
 		return ast.NewIdent("any"), nil
 	case air.TypeTraitObject:
@@ -4194,9 +3798,6 @@ func (l *lowerer) registerImport(alias string, importPath string) string {
 	for i := 1; ; i++ {
 		if l.importAliasAvailable(chosen, importPath) {
 			l.currentImports[chosen] = importPath
-			if chosen != alias {
-				l.updateDirectGoAliasReservation(alias, chosen, importPath)
-			}
 			if l.reservedGoIdentifiers != nil {
 				l.reservedGoIdentifiers[chosen] = true
 			}
@@ -4222,25 +3823,7 @@ func (l *lowerer) importAliasAvailable(alias string, importPath string) bool {
 	return !l.importAliasCollidesWithTopLevel(alias)
 }
 
-func (l *lowerer) updateDirectGoAliasReservation(oldAlias string, newAlias string, importPath string) {
-	updated := false
-	for key, reservedAlias := range l.directGoAliases {
-		if reservedAlias == oldAlias && strings.HasPrefix(key, importPath+"\x00") {
-			l.directGoAliases[key] = newAlias
-			updated = true
-		}
-	}
-	if updated && l.reservedGoIdentifiers != nil {
-		delete(l.reservedGoIdentifiers, oldAlias)
-	}
-}
-
 func (l *lowerer) aliasReservedForImport(alias string, importPath string) bool {
-	for key, reservedAlias := range l.directGoAliases {
-		if reservedAlias == alias && strings.HasPrefix(key, importPath+"\x00") {
-			return true
-		}
-	}
 	return false
 }
 
@@ -6252,7 +5835,7 @@ func (l *lowerer) mapKeyHelper(typeID air.TypeID) (string, error) {
 	case air.TypeStr:
 		l.markRuntimeHelper("sorted_string_keys")
 		return "ardSortedStringKeys", nil
-	case air.TypeDynamic, air.TypeExtern:
+	case air.TypeDynamic:
 		l.markRuntimeHelper("sorted_any_keys")
 		return "ardSortedAnyKeys", nil
 	default:
@@ -6559,40 +6142,6 @@ func (l *lowerer) convertStdlibError(typeID air.TypeID, expr ast.Expr) (ast.Expr
 	return &ast.CompositeLit{Type: l.compositeTypeExpr(info), Elts: elts}, nil
 }
 
-func (l *lowerer) wrapMaybeNativeTraitExternCall(maybeTypeID air.TypeID, call ast.Expr, stmts []ast.Stmt) (loweredExpr, bool, error) {
-	if !validTypeID(l.program, maybeTypeID) {
-		return loweredExpr{}, false, fmt.Errorf("invalid maybe type id %d", maybeTypeID)
-	}
-	maybeType := l.program.Types[maybeTypeID-1]
-	if maybeType.Kind != air.TypeMaybe || !l.usesNativeTraitInterface(maybeType.Elem) {
-		return loweredExpr{}, false, nil
-	}
-	maybeGoType, err := l.goType(maybeTypeID)
-	if err != nil {
-		return loweredExpr{}, false, err
-	}
-	elemGoType, err := l.goType(maybeType.Elem)
-	if err != nil {
-		return loweredExpr{}, false, err
-	}
-	rawTemp := l.nextTemp()
-	resultTemp := l.nextTemp()
-	coercedValue, err := l.nativeTraitInterfaceAssertion(maybeType.Elem, &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(rawTemp), Sel: ast.NewIdent("Value")}})
-	if err != nil {
-		return loweredExpr{}, false, err
-	}
-	stmts = append(stmts,
-		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(rawTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{call}},
-		&ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: maybeGoType}}}},
-		&ast.IfStmt{
-			Cond: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(rawTemp), Sel: ast.NewIdent("IsSome")}},
-			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: elemGoType}, Args: []ast.Expr{coercedValue}}}}}},
-			Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "None"), Index: elemGoType}}}}}},
-		},
-	)
-	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, true, nil
-}
-
 func (l *lowerer) wrapValueErrorCall(resultTypeID air.TypeID, call ast.Expr) (loweredExpr, error) {
 	if !validTypeID(l.program, resultTypeID) {
 		return loweredExpr{}, fmt.Errorf("invalid result type id %d", resultTypeID)
@@ -6757,229 +6306,12 @@ func unionSliceCaseClauses(program *air.Program, unionInfo air.TypeInfo, outTemp
 	return cases
 }
 
-func (l *lowerer) lowerExternCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
-	if expr.Extern < 0 || int(expr.Extern) >= len(l.program.Externs) {
-		return loweredExpr{}, fmt.Errorf("invalid extern id %d", expr.Extern)
-	}
-	ext := l.program.Externs[expr.Extern]
-	args := make([]ast.Expr, 0, len(expr.Args))
-	stmts := []ast.Stmt{}
-	for i, arg := range expr.Args {
-		var loweredArg loweredExpr
-		var err error
-		if i < len(ext.Signature.Params) && !ext.Signature.Params[i].Mutable {
-			loweredArg, err = l.lowerExprWithExpectedType(fn, arg, ext.Signature.Params[i].Type)
-		} else {
-			loweredArg, err = l.lowerExpr(fn, arg)
-		}
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts = append(stmts, loweredArg.stmts...)
-		argExpr := loweredArg.expr
-		if i < len(ext.Signature.Params) && l.isVoidType(ext.Signature.Params[i].Type) {
-			stmts = l.appendVoidValueEval(stmts, argExpr)
-			argExpr = l.voidValueExpr()
-		}
-		args = append(args, argExpr)
-	}
-	binding := ext.Name
-	if goBinding, ok := ext.Bindings["go"]; ok && goBinding != "" {
-		binding = goBinding
-	}
-	if direct, ok, err := l.lowerDirectGoExternCall(ext, binding, args, stmts); err != nil || ok {
-		return direct, err
-	}
-	return loweredExpr{}, fmt.Errorf("unsupported go extern binding %q", binding)
-}
-
-func (l *lowerer) dependencyFFITypeExpr(alias string, binding string) (ast.Expr, error) {
-	expr, err := parser.ParseExpr(binding)
-	if err != nil {
-		return nil, fmt.Errorf("invalid go extern type binding %q: %w", binding, err)
-	}
-	return l.rewriteDependencyFFITypeExpr(alias, binding, expr)
-}
-
-func (l *lowerer) rewriteDependencyFFITypeExpr(alias string, binding string, expr ast.Expr) (ast.Expr, error) {
-	switch node := expr.(type) {
-	case *ast.StarExpr:
-		x, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.X)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.StarExpr{X: x}, nil
-	case *ast.ArrayType:
-		elt, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.Elt)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.ArrayType{Len: node.Len, Elt: elt}, nil
-	case *ast.MapType:
-		key, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.Key)
-		if err != nil {
-			return nil, err
-		}
-		value, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.Value)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.MapType{Key: key, Value: value}, nil
-	case *ast.ChanType:
-		value, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.Value)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.ChanType{Dir: node.Dir, Value: value}, nil
-	case *ast.Ellipsis:
-		elt, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.Elt)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.Ellipsis{Elt: elt}, nil
-	case *ast.FuncType:
-		params, err := l.rewriteDependencyFFIFieldList(alias, binding, node.Params)
-		if err != nil {
-			return nil, err
-		}
-		results, err := l.rewriteDependencyFFIFieldList(alias, binding, node.Results)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.FuncType{Params: params, Results: results}, nil
-	case *ast.StructType:
-		fields, err := l.rewriteDependencyFFIFieldList(alias, binding, node.Fields)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.StructType{Fields: fields}, nil
-	case *ast.InterfaceType:
-		methods, err := l.rewriteDependencyFFIFieldList(alias, binding, node.Methods)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.InterfaceType{Methods: methods}, nil
-	case *ast.IndexExpr:
-		x, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.X)
-		if err != nil {
-			return nil, err
-		}
-		index, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.Index)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.IndexExpr{X: x, Index: index}, nil
-	case *ast.IndexListExpr:
-		x, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.X)
-		if err != nil {
-			return nil, err
-		}
-		indices := make([]ast.Expr, len(node.Indices))
-		for i := range node.Indices {
-			indices[i], err = l.rewriteDependencyFFITypeExpr(alias, binding, node.Indices[i])
-			if err != nil {
-				return nil, err
-			}
-		}
-		return &ast.IndexListExpr{X: x, Indices: indices}, nil
-	case *ast.ParenExpr:
-		x, err := l.rewriteDependencyFFITypeExpr(alias, binding, node.X)
-		if err != nil {
-			return nil, err
-		}
-		return &ast.ParenExpr{X: x}, nil
-	case *ast.SelectorExpr:
-		if ident, ok := node.X.(*ast.Ident); ok && ident.Name == "ffi" {
-			packageAlias := sanitizeName(alias) + "ffi"
-			return l.qualified(packageAlias, "generated/depffi/"+sanitizeName(alias), node.Sel.Name), nil
-		}
-		l.registerFFIImportsForGoType(node)
-		return node, nil
-	case *ast.Ident:
-		if isPredeclaredGoTypeName(node.Name) {
-			return node, nil
-		}
-		return nil, fmt.Errorf("dependency go extern type binding %q must qualify %s with package ffi", binding, node.Name)
-	default:
-		l.registerFFIImportsForGoType(node)
-		return node, nil
-	}
-}
-
-func (l *lowerer) rewriteDependencyFFIFieldList(alias string, binding string, fields *ast.FieldList) (*ast.FieldList, error) {
-	if fields == nil {
-		return nil, nil
-	}
-	rewritten := &ast.FieldList{List: make([]*ast.Field, len(fields.List))}
-	for i, field := range fields.List {
-		copyField := *field
-		if field.Type != nil {
-			typ, err := l.rewriteDependencyFFITypeExpr(alias, binding, field.Type)
-			if err != nil {
-				return nil, err
-			}
-			copyField.Type = typ
-		}
-		rewritten.List[i] = &copyField
-	}
-	return rewritten, nil
-}
-
-func (l *lowerer) applyExplicitExternTypeArgs(callee ast.Expr, typeArgs []air.TypeID) (ast.Expr, error) {
-	if len(typeArgs) == 0 {
-		return callee, nil
-	}
-	indices := make([]ast.Expr, len(typeArgs))
-	for i, typeArg := range typeArgs {
-		goType, err := l.goType(typeArg)
-		if err != nil {
-			return nil, err
-		}
-		indices[i] = goType
-	}
-	if len(indices) == 1 {
-		return &ast.IndexExpr{X: callee, Index: indices[0]}, nil
-	}
-	return &ast.IndexListExpr{X: callee, Indices: indices}, nil
-}
-
 func (l *lowerer) nativeTraitInterfaceAssertion(typeID air.TypeID, value ast.Expr) (ast.Expr, error) {
 	traitType, err := l.goType(typeID)
 	if err != nil {
 		return nil, err
 	}
 	return &ast.TypeAssertExpr{X: &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{value}}, Type: traitType}, nil
-}
-
-func unqualifiedExternFunctionIdent(expr ast.Expr) (string, bool) {
-	switch node := expr.(type) {
-	case *ast.Ident:
-		return node.Name, true
-	case *ast.IndexExpr:
-		return unqualifiedExternFunctionIdent(node.X)
-	case *ast.IndexListExpr:
-		return unqualifiedExternFunctionIdent(node.X)
-	case *ast.ParenExpr:
-		return unqualifiedExternFunctionIdent(node.X)
-	default:
-		return "", false
-	}
-}
-
-func isQualifiedExternFunctionExpr(expr ast.Expr) bool {
-	switch node := expr.(type) {
-	case *ast.SelectorExpr:
-		_, ok := node.X.(*ast.Ident)
-		return ok && node.Sel != nil
-	case *ast.IndexExpr:
-		return isQualifiedExternFunctionExpr(node.X)
-	case *ast.IndexListExpr:
-		return isQualifiedExternFunctionExpr(node.X)
-	case *ast.ParenExpr:
-		return isQualifiedExternFunctionExpr(node.X)
-	default:
-		return false
-	}
 }
 
 func isVoidExpr(expr ast.Expr) bool {
@@ -7320,3 +6652,6 @@ func (l *lowerer) canDefineMethodsOnType(info air.TypeInfo) bool {
 // directly, keeping detailed item paths only on error. A small default capacity
 // avoids repeated growth for typical short JSON arrays while preserving [] for
 // empty arrays instead of a nil slice.
+func (l *lowerer) buildReservedGoIdentifiers() map[string]bool {
+	return map[string]bool{}
+}

@@ -62,7 +62,6 @@ func TestMutableReferenceFields(t *testing.T) {
 		},
 	})
 }
-
 func TestMutableReferenceParameters(t *testing.T) {
 	run(t, []test{
 		{

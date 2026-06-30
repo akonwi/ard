@@ -107,7 +107,6 @@ func TestVariables(t *testing.T) {
 
 	runTests(t, tests)
 }
-
 func TestFunctionTypes(t *testing.T) {
 	runTests(t, []test{
 		// Function type error cases
@@ -219,7 +218,6 @@ func TestFunctionTypes(t *testing.T) {
 		},
 	})
 }
-
 func TestGenericCallTypeArgumentDiagnostics(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -269,7 +267,6 @@ func TestGenericCallTypeArgumentDiagnostics(t *testing.T) {
 		},
 	})
 }
-
 func TestArrayMapTypes(t *testing.T) {
 	runTests(t, []test{
 		// Array/Map type error cases
@@ -305,7 +302,6 @@ func TestArrayMapTypes(t *testing.T) {
 		},
 	})
 }
-
 func TestGenericTypeParameters(t *testing.T) {
 	runTests(t, []test{
 		{

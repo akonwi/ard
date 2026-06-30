@@ -163,7 +163,6 @@ func TestGoTargetParityRecursiveStructFields(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityCoreCorpus(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -377,7 +376,6 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityLoops(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -481,7 +479,6 @@ func TestGoTargetParityLoops(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityNullableArguments(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -588,7 +585,6 @@ func TestGoTargetParityNullableArguments(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityAnonymousFunctionInference(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -615,7 +611,6 @@ func TestGoTargetParityAnonymousFunctionInference(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityFunctionValuedStructFields(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -696,7 +691,6 @@ func TestGoTargetParityFunctionValuedStructFields(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityNullableStructFields(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -788,7 +782,6 @@ func TestGoTargetParityNullableStructFields(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityTryOnMaybe(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -862,7 +855,6 @@ func TestGoTargetParityTryOnMaybe(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityTry(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -991,7 +983,6 @@ func TestGoTargetParityTry(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -1112,7 +1103,6 @@ func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityConcurrentMethodAccess(t *testing.T) {
 	const workers = 20
 	var wg sync.WaitGroup
@@ -1153,7 +1143,6 @@ func TestGoTargetParityConcurrentMethodAccess(t *testing.T) {
 		}
 	}
 }
-
 func TestGoTargetParityConcurrentModuleAccess(t *testing.T) {
 	const workers = 20
 	var wg sync.WaitGroup
@@ -1189,7 +1178,6 @@ func TestGoTargetParityConcurrentModuleAccess(t *testing.T) {
 		}
 	}
 }
-
 func TestGoTargetParityUnsafeBlocks(t *testing.T) {
 	t.Run("success result can be unwrapped", func(t *testing.T) {
 		program := lowerParitySource(t, `
@@ -1273,7 +1261,6 @@ fn main() Str {
 		}
 	})
 }
-
 func TestGoTargetParityMapClosureCapturesOuterLocal(t *testing.T) {
 	t.Run("maybe map", func(t *testing.T) {
 		program := lowerParitySource(t, `
@@ -1304,7 +1291,6 @@ func TestGoTargetParityMapClosureCapturesOuterLocal(t *testing.T) {
 		}
 	})
 }
-
 func TestGoTargetParityMutableParameterClosureInFunctionTypedMap(t *testing.T) {
 	// A `mut T` parameter is represented two ways: as the `Mutable` flag (the
 	// `fn(mut T)` function-type form used by the map's value type) and as a
@@ -1325,7 +1311,6 @@ func TestGoTargetParityMutableParameterClosureInFunctionTypedMap(t *testing.T) {
 		t.Fatalf("got %s, want 42", got)
 	}
 }
-
 func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
 	t.Run("returned closure captures two outer scopes", func(t *testing.T) {
 		program := lowerParitySource(t, `
@@ -1392,7 +1377,6 @@ func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
 		}
 	})
 }
-
 func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait Initializer {
@@ -1422,7 +1406,6 @@ func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
 		t.Fatalf("got %s, want 1", got)
 	}
 }
-
 func TestGoTargetParityNativeTraitObjectMutableParameterFromTraitLocal(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait Draw {
@@ -1452,7 +1435,6 @@ func TestGoTargetParityNativeTraitObjectMutableParameterFromTraitLocal(t *testin
 		t.Fatalf("got %s, want 1", got)
 	}
 }
-
 func TestGoTargetParityMutableTraitObjectParameterFromConcrete(t *testing.T) {
 	program := lowerParitySource(t, `
 		struct Context {
@@ -1494,7 +1476,6 @@ func TestGoTargetParityMutableTraitObjectParameterFromConcrete(t *testing.T) {
 		t.Fatalf("got %s, want 42", got)
 	}
 }
-
 func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing.T) {
 	program := lowerParitySource(t, `
 		use ard/maybe
@@ -1707,7 +1688,6 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 		t.Fatalf("got %s, want 607", got)
 	}
 }
-
 func TestGoTargetParityMutableTraitMethodNamesDoNotCollideWithForwarderHooks(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait Weird {
@@ -1738,7 +1718,6 @@ func TestGoTargetParityMutableTraitMethodNamesDoNotCollideWithForwarderHooks(t *
 		t.Fatalf("got %s, want 42", got)
 	}
 }
-
 func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait View {
@@ -1802,7 +1781,6 @@ func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.
 		t.Fatalf("got %s, want 3", got)
 	}
 }
-
 func TestGoTargetParityMutableReferenceFieldUpdatesSharedStorage(t *testing.T) {
 	program := lowerParitySource(t, `
 		struct Tree {
@@ -1842,7 +1820,6 @@ func TestGoTargetParityMutableReferenceFieldUpdatesSharedStorage(t *testing.T) {
 		t.Fatalf("got %s, want 10", got)
 	}
 }
-
 func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 	t.Run("struct", func(t *testing.T) {
 		program := lowerParitySource(t, `
@@ -1922,7 +1899,6 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 		}
 	})
 }
-
 func TestGoTargetParityMutMethodClosureCapturesSelf(t *testing.T) {
 	program := lowerParitySource(t, `
 		use ard/io
@@ -1950,7 +1926,6 @@ func TestGoTargetParityMutMethodClosureCapturesSelf(t *testing.T) {
 		t.Fatalf("got %s, want 1", got)
 	}
 }
-
 func TestGoTargetParityMethodClosureCapturesSelf(t *testing.T) {
 	program := lowerParitySource(t, `
 		struct Counter {
@@ -1975,7 +1950,6 @@ func TestGoTargetParityMethodClosureCapturesSelf(t *testing.T) {
 		t.Fatalf("got %s, want 42", got)
 	}
 }
-
 func TestGoTargetParityPrinting(t *testing.T) {
 	got := runGoTargetSourceStdout(t, `
 		use ard/io
@@ -1987,7 +1961,6 @@ func TestGoTargetParityPrinting(t *testing.T) {
 		t.Fatalf("stdout = %q, want %q", got, "Hello, World!\n")
 	}
 }
-
 func TestGoTargetParityEscapeSequences(t *testing.T) {
 	got := runGoTargetSourceStdout(t, `
 		use ard/io
@@ -2001,7 +1974,6 @@ func TestGoTargetParityEscapeSequences(t *testing.T) {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
-
 func TestGoTargetParitySQL(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "query.db")
 	runGoParityCasesSerial(t, []goParityCase{
@@ -2117,7 +2089,6 @@ func TestGoTargetParitySQL(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityDecodeHostFlows(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -2309,7 +2280,6 @@ func TestGoTargetParityDecodeHostFlows(t *testing.T) {
 
 // JSON encoding of primitives is exercised through ard/json. The legacy
 // ard/encode module and its Encodable trait were removed (ADR 0031).
-
 func TestGoTargetParityStringHelpers(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{name: "int to str", input: `fn main() Str { 100.to_str() }`},
@@ -2327,7 +2297,6 @@ func TestGoTargetParityStringHelpers(t *testing.T) {
 		{name: "str is empty", input: `fn main() Bool { "".is_empty() }`},
 	})
 }
-
 func TestGoTargetParityStringMatching(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{name: "str match first case", input: `fn main() Str {
@@ -2353,7 +2322,6 @@ func TestGoTargetParityStringMatching(t *testing.T) {
 }`},
 	})
 }
-
 func TestGoTargetParityMatching(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -2485,7 +2453,6 @@ func TestGoTargetParityMatching(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityCollectionsMutation(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -2577,77 +2544,6 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 		},
 	})
 }
-
-func TestGoTargetParityDirectGoReturnAdapters(t *testing.T) {
-	cases := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name: "value error to result",
-			input: `use go:strconv
-fn main() Int { strconv::Atoi("42").expect("parse") }`,
-			want: "42",
-		},
-		{
-			name: "error to void result",
-			input: `use go:os
-fn main() Bool { os::Chdir(".").is_ok() }`,
-			want: "true",
-		},
-		{
-			name: "value bool to maybe",
-			input: `use go:os
-fn main() Bool { os::LookupEnv("__ARD_MISSING_DIRECT_GO_ADAPTER__").is_none() }`,
-			want: "true",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			program := lowerParitySource(t, tc.input)
-			if got := strings.TrimSpace(runGoTargetParityJSON(t, program)); got != tc.want {
-				t.Fatalf("go output = %s, want %s", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestGoTargetParityDirectGoFuncCallbacks(t *testing.T) {
-	cases := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name: "predicate callback finds matching rune",
-			input: `use go:strings
-fn main() Int { strings::IndexFunc("ab3c", fn(r: Rune) Bool { r == '3' }) }`,
-			want: "2",
-		},
-		{
-			name: "predicate callback returns -1 when none match",
-			input: `use go:strings
-fn main() Int { strings::IndexFunc("abc", fn(r: Rune) Bool { r == '9' }) }`,
-			want: "-1",
-		},
-		{
-			name: "mapping callback transforms runes",
-			input: `use go:strings
-fn main() Bool { strings::Map(fn(r: Rune) Rune { r }, "hi") == "hi" }`,
-			want: "true",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			program := lowerParitySource(t, tc.input)
-			if got := strings.TrimSpace(runGoTargetParityJSON(t, program)); got != tc.want {
-				t.Fatalf("go output = %s, want %s", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestGoTargetParityJSON(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -2715,7 +2611,6 @@ fn main() Bool { json::parse<Todo>("\{\"id\":1,\"title\":\"x\",\"note\":\"hi\"\}
 		})
 	}
 }
-
 func TestGoTargetParityChannel(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -2807,7 +2702,6 @@ fn main() Bool {
 		})
 	}
 }
-
 func TestGoTargetParityDirectionalChannels(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -2861,7 +2755,6 @@ fn main() Bool {
 		})
 	}
 }
-
 func TestGoTargetParitySelect(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -2971,7 +2864,6 @@ fn main() Bool {
 		})
 	}
 }
-
 func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{

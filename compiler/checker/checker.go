@@ -237,22 +237,6 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			Private:                 typ.Private,
 			GenericBindings:         cloneTypeMap(typ.GenericBindings),
 		}
-	case *ExternType:
-		if len(typ.TypeArgs) == 0 {
-			return typ
-		}
-		newTypeArgs := make([]Type, len(typ.TypeArgs))
-		changed := false
-		for i, typeArg := range typ.TypeArgs {
-			newTypeArgs[i] = derefTypeSeen(typeArg, seen)
-			if newTypeArgs[i] != typeArg {
-				changed = true
-			}
-		}
-		if !changed {
-			return typ
-		}
-		return cloneExternTypeWithTypeArgs(typ, newTypeArgs)
 	default:
 		return t
 	}
@@ -290,30 +274,6 @@ func (c Checker) isMutable(expr Expression) bool {
 	return false
 }
 
-func (c *Checker) checkDirectGoFieldAssignmentTarget(ip *parse.InstanceProperty) (*DirectGoFieldAccess, bool) {
-	if ip == nil {
-		return nil, false
-	}
-	subject := c.checkExpr(ip.Target)
-	if subject == nil {
-		return nil, true
-	}
-	return c.checkDirectGoInstancePropertyAssignmentTarget(subject, ip.Property.Name, ip.Property.GetLocation())
-}
-
-func (c Checker) isDirectGoFieldAssignable(field *DirectGoFieldAccess) bool {
-	if field == nil || field.Subject == nil {
-		return false
-	}
-	if _, ok := mutableRefBase(field.Subject.Type()); ok {
-		return true
-	}
-	if subjectField, ok := field.Subject.(*DirectGoFieldAccess); ok {
-		return c.isDirectGoFieldAssignable(subjectField)
-	}
-	return c.isMutable(field.Subject)
-}
-
 type Checker struct {
 	diagnostics                       []Diagnostic
 	input                             *parse.Program
@@ -324,7 +284,6 @@ type Checker struct {
 	halted                            bool
 	moduleResolver                    *ModuleResolver
 	options                           CheckOptions
-	directGoImports                   map[string]directGoImport
 	expectedExpr                      Type
 	duplicateTopLevelTypeDeclarations map[parse.Statement]bool
 	topLevelStructDeclarations        map[string]*parse.StructDefinition
@@ -347,13 +306,12 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 		modulePath = checkOptions.ModulePath
 	}
 	c := &Checker{
-		diagnostics:     []Diagnostic{},
-		input:           input,
-		filePath:        filePath,
-		modulePath:      modulePath,
-		moduleResolver:  moduleResolver,
-		options:         checkOptions,
-		directGoImports: map[string]directGoImport{},
+		diagnostics:    []Diagnostic{},
+		input:          input,
+		filePath:       filePath,
+		modulePath:     modulePath,
+		moduleResolver: moduleResolver,
+		options:        checkOptions,
 		program: &Program{
 			Imports:       map[string]Module{},
 			Statements:    []Statement{},
@@ -388,11 +346,6 @@ func (c *Checker) Check() {
 			continue
 		}
 		seenImportAliases[imp.Name] = struct{}{}
-
-		if imp.Kind == parse.ImportKindGo {
-			c.addError(fmt.Sprintf("Go imports are disabled during the pure Ard reset: %s", imp.Path), imp.GetLocation())
-			continue
-		}
 
 		if strings.HasPrefix(imp.Path, "ard/") {
 			// Handle standard library imports
@@ -594,8 +547,6 @@ func namedTypeRequiresTypeArguments(t Type) bool {
 	switch typ := t.(type) {
 	case *StructDef:
 		return (len(typ.GenericParams) > 0 && len(typ.TypeArgs) == 0) || hasGenericsInType(typ)
-	case *ExternType:
-		return len(typ.GenericParams) > 0 || hasGenericsInType(typ)
 	default:
 		return hasGenericsInType(typ)
 	}
@@ -638,16 +589,6 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 					*params = append(*params, genericName)
 					seen[genericName] = true
 				}
-			}
-		}
-		for _, typeArg := range t.TypeArgs {
-			collectGenericsFromType(typeArg, params, seen)
-		}
-	case *ExternType:
-		for _, genericName := range t.GenericParams {
-			if !seen[genericName] {
-				*params = append(*params, genericName)
-				seen[genericName] = true
 			}
 		}
 		for _, typeArg := range t.TypeArgs {
@@ -844,10 +785,6 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			break
 		}
 		if ty.Type.Target != nil {
-			if goType := c.resolveDirectGoType(ty); goType != nil {
-				baseType = goType
-				break
-			}
 			mod := c.resolveModule(ty.Type.Target.(*parse.Identifier).Name)
 			if mod != nil {
 				// at some point, this will need to unwrap the property down to root for nested paths: `mod::sym::more`
@@ -1084,9 +1021,6 @@ func typeMismatch(expected, got Type) string {
 func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	if trait, ok := expected.(*Trait); ok {
 		return actual.hasTrait(trait)
-	}
-	if c.directGoInterfaceCompatible(expected, actual) {
-		return true
 	}
 	return expected.equal(actual)
 }
@@ -1487,47 +1421,6 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			if ip, ok := s.Target.(*parse.InstanceProperty); ok {
-				if target, handled := c.checkDirectGoFieldAssignmentTarget(ip); handled {
-					if target == nil {
-						return nil
-					}
-					var expectedClosedEnum *Enum
-					if enum, required := c.directGoClosedEnumAssignmentType(target.FieldGoType, s.Value.GetLocation()); required {
-						if enum == nil {
-							return nil
-						}
-						expectedClosedEnum = enum
-					}
-
-					var value Expression
-					c.withValueExprContext(func() {
-						if expectedClosedEnum != nil {
-							value = c.checkExprAs(s.Value, expectedClosedEnum)
-						} else {
-							value = c.checkExpr(s.Value)
-						}
-					})
-					if value == nil {
-						return nil
-					}
-					if !c.isDirectGoFieldAssignable(target) {
-						c.addError(fmt.Sprintf("Immutable: %s", ip), s.Target.GetLocation())
-						return nil
-					}
-					if expectedClosedEnum != nil {
-						if !directGoEnumTypeMatches(value.Type(), target.FieldGoType) {
-							c.addError(fmt.Sprintf("field %s: %s", target.Field, typeMismatch(expectedClosedEnum, value.Type())), s.Value.GetLocation())
-							return nil
-						}
-					} else if ok, reason := c.directGoParamCompatible(value.Type(), target.FieldGoType, true); !ok {
-						c.addError(fmt.Sprintf("field %s: %s", target.Field, reason), s.Value.GetLocation())
-						return nil
-					}
-					return &Statement{
-						Stmt: &Reassignment{Target: target, Value: value},
-					}
-				}
-
 				subject := c.checkExpr(ip)
 				if subject == nil {
 					return nil
@@ -1547,31 +1440,6 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 				return &Statement{
 					Stmt: &Reassignment{Target: subject, Value: value},
-				}
-			}
-
-			if sp, ok := s.Target.(*parse.StaticProperty); ok {
-				if id, ok := sp.Target.(*parse.Identifier); ok {
-					if goImport, ok := c.directGoImports[id.Name]; ok {
-						propIdent, ok := sp.Property.(*parse.Identifier)
-						if !ok {
-							c.addError(fmt.Sprintf("Cannot assign to Go package value %s::%s", id.Name, sp.Property), sp.Property.GetLocation())
-							return nil
-						}
-						kind := "value"
-						reason := "direct Go package values are read-only"
-						if goImport.pkg != nil {
-							if _, ok := goImport.pkg.Constants[propIdent.Name]; ok {
-								kind = "constant"
-								reason = "Go constants cannot be assigned"
-							} else if _, ok := goImport.pkg.Variables[propIdent.Name]; ok {
-								kind = "variable"
-								reason = "direct Go package variables are read-only"
-							}
-						}
-						c.addError(fmt.Sprintf("Cannot assign to Go package %s %s::%s; %s", kind, id.Name, propIdent.Name, reason), s.Target.GetLocation())
-						return nil
-					}
 				}
 			}
 
@@ -2057,11 +1925,9 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 
 func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal Type, onlyMatchFinal bool) bool {
 	if onlyMatchFinal && expectedFinal != Void {
-		switch s := stmt.(type) {
+		switch stmt.(type) {
 		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.InstanceMethod, *parse.UnsafeBlock:
 			return true
-		case *parse.StaticFunction:
-			return c.isDirectGoStaticFunction(s)
 		default:
 			return false
 		}
@@ -2586,17 +2452,6 @@ func unsafeResultOkValueCompatible(expected Type, actual Type) bool {
 	case *MutableRef:
 		actualType, ok := actual.(*MutableRef)
 		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
-	case *ExternType:
-		actualType, ok := actual.(*ExternType)
-		if !ok || !externTypeNamesMatch(expectedType, actualType) || len(expectedType.TypeArgs) != len(actualType.TypeArgs) {
-			return false
-		}
-		for i := range expectedType.TypeArgs {
-			if !unsafeResultOkValueCompatible(expectedType.TypeArgs[i], actualType.TypeArgs[i]) {
-				return false
-			}
-		}
-		return true
 	case *StructDef:
 		actualType, ok := actual.(*StructDef)
 		if !ok || expectedType.Name != actualType.Name || expectedType.ModulePath != actualType.ModulePath || len(expectedType.TypeArgs) != len(actualType.TypeArgs) {
@@ -2916,12 +2771,6 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 			for _, field := range e.Property.Fields {
 				c.validateUnsafeCatchResultsInExpression(field, resultType, loc)
 			}
-		}
-	case *DirectGoFieldAccess:
-		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
-	case *DirectGoStructInstance:
-		for _, field := range e.Fields {
-			c.validateUnsafeCatchResultsInExpression(field, resultType, loc)
 		}
 	case *TemplateStr:
 		for _, chunk := range e.Chunks {
@@ -3754,15 +3603,6 @@ func bindGenericTypes(original Type, specialized Type, bindings map[string]Type)
 			bindGenericTypes(orig.val, spec.val, bindings)
 			bindGenericTypes(orig.err, spec.err, bindings)
 		}
-	case *ExternType:
-		if spec, ok := specialized.(*ExternType); ok {
-			for i := range orig.TypeArgs {
-				if i >= len(spec.TypeArgs) {
-					break
-				}
-				bindGenericTypes(orig.TypeArgs[i], spec.TypeArgs[i], bindings)
-			}
-		}
 	case *StructDef:
 		if spec, ok := specialized.(*StructDef); ok {
 			for i, originalArg := range orig.TypeArgs {
@@ -4138,10 +3978,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 
-			if field, handled := c.checkDirectGoInstanceProperty(subj, s.Property.Name, s.Property.GetLocation()); handled {
-				return field
-			}
-
 			propType := subj.Type().get(s.Property.Name)
 			if propType == nil {
 				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Property.Name), s.Property.GetLocation())
@@ -4175,9 +4011,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 			if subj.Type() == nil {
 				panic(fmt.Errorf("Cannot access %+v on nil: %s", subj.(*Variable).sym, s.Target))
-			}
-			if call, handled := c.checkDirectGoInstanceMethod(subj, s.Method, s.GetLocation()); handled {
-				return call
 			}
 			var sig Type
 			if structDef, ok := subj.Type().(*StructDef); ok {
@@ -4733,10 +4566,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					call.ReturnType = specialized.ReturnType
 				}
 
-				return call
-			}
-
-			if call, handled := c.checkDirectGoStaticFunction(s); handled {
 				return call
 			}
 
@@ -5804,18 +5633,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 				}
 
-				if goImport, ok := c.directGoImports[id.Name]; ok {
-					switch prop := s.Property.(type) {
-					case *parse.Identifier:
-						return c.resolveDirectGoPackageValue(id.Name, prop.Name, prop.GetLocation())
-					case *parse.StructInstance:
-						return c.resolveDirectGoStructInstance(goImport, prop)
-					default:
-						c.addError(fmt.Sprintf("Unsupported property type in Go import %s::%s", id.Name, s.Property), s.Property.GetLocation())
-						return nil
-					}
-				}
-
 				// Handle local enum variants or static functions (not from modules)
 				sym, ok := c.scope.get(id.Name)
 				if !ok {
@@ -6285,16 +6102,6 @@ func bindInferredTypeVars(expected Type, actual Type) {
 			}
 			bindInferredTypeVars(exp.ReturnType, act.ReturnType)
 		}
-	case *ExternType:
-		if act, ok := actual.(*ExternType); ok && exp.Name_ == act.Name_ {
-			limit := len(exp.TypeArgs)
-			if len(act.TypeArgs) < limit {
-				limit = len(act.TypeArgs)
-			}
-			for i := 0; i < limit; i++ {
-				bindInferredTypeVars(exp.TypeArgs[i], act.TypeArgs[i])
-			}
-		}
 	}
 }
 
@@ -6408,15 +6215,9 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 				c.addError(fmt.Sprintf("Cannot access %s on Void", s.Method.Name), s.Method.GetLocation())
 				return nil
 			}
-			if call, handled := c.checkDirectGoInstanceMethodAs(subj, s.Method, s.GetLocation(), expectedType); handled {
-				return call
-			}
 		}
 	case *parse.StaticFunction:
 		{
-			if call, handled := c.checkDirectGoStaticFunctionAs(s, expectedType); handled {
-				return call
-			}
 			resultType, expectResult := expectedType.(*Result)
 			target, ok := s.Target.(*parse.Identifier)
 			if !expectResult || resultType == nil || !ok || target.Name != "Result" || (s.Function.Name != "ok" && s.Function.Name != "err") {
@@ -6510,17 +6311,6 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 	}
 
 	return checked
-}
-
-func cloneExternalBindings(bindings map[string]string) map[string]string {
-	if len(bindings) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(bindings))
-	for key, value := range bindings {
-		out[key] = value
-	}
-	return out
 }
 
 func (c *Checker) resolveParametersWithContext(params []parse.Parameter, expectedFnType *FunctionDef) []Parameter {
@@ -6717,12 +6507,6 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			Private:                 typ.Private,
 			GenericBindings:         cloneTypeMap(typ.GenericBindings),
 		}
-	case *ExternType:
-		substitutedArgs := make([]Type, len(typ.TypeArgs))
-		for i, typeArg := range typ.TypeArgs {
-			substitutedArgs[i] = substituteType(typeArg, typeMap)
-		}
-		return cloneExternTypeWithTypeArgs(typ, substitutedArgs)
 	// Handle other compound types
 	default:
 		return t
@@ -7252,17 +7036,6 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 			}
 		}
 		return nil
-	case *ExternType:
-		actualExtern, ok := actual.(*ExternType)
-		if !ok || expectedType.Name_ != actualExtern.Name_ || len(expectedType.TypeArgs) != len(actualExtern.TypeArgs) {
-			return fmt.Errorf("type mismatch: expected %s, got %s", expected.String(), actual.String())
-		}
-		for i := range expectedType.TypeArgs {
-			if err := c.unifyTypes(expectedType.TypeArgs[i], actualExtern.TypeArgs[i], genericScope); err != nil {
-				return err
-			}
-		}
-		return nil
 	default:
 		// Concrete types - must match exactly
 		if !expected.equal(actual) {
@@ -7464,12 +7237,6 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 			isMaybe = true
 		}
 
-		if !isMaybe {
-			if field, handled := c.checkDirectGoInstanceProperty(target, p.Property.Name, p.Property.GetLocation()); handled {
-				return field
-			}
-		}
-
 		propType := innerType.get(p.Property.Name)
 		if propType == nil {
 			c.addError(fmt.Sprintf("Undefined: %s.%s", innerType, p.Property.Name), p.Property.GetLocation())
@@ -7495,12 +7262,6 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 		target := c.checkAccessorChainWithMaybes(p.Target)
 		if target == nil {
 			return nil
-		}
-
-		// Direct Go method calls (e.g. `try db.Close()` on a *sql.DB handle)
-		// resolve via the Go resolver, not the Ard struct/extern method tables.
-		if call, handled := c.checkDirectGoInstanceMethod(target, p.Method, p.GetLocation()); handled {
-			return call
 		}
 
 		// Try to get the method signature

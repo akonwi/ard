@@ -27,7 +27,6 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(checker.InstanceMethod{}, "ReceiverKind", "StructType", "EnumType", "TraitType"),
 	cmpopts.IgnoreFields(checker.ModuleStructInstance{}, "StructType"),
 	cmpopts.IgnoreFields(checker.FunctionCall{}, "ReturnType"),
-	cmpopts.IgnoreFields(checker.FunctionCall{}, "ExternalBinding"),
 	cmpopts.IgnoreFields(checker.FunctionCall{}, "TypeArgs"),
 	cmpopts.IgnoreFields(checker.MaybeMethod{}, "ReturnType"),
 	cmpopts.IgnoreFields(checker.ResultMethod{}, "ReturnType"),
@@ -101,7 +100,6 @@ func run(t *testing.T, tests []test) {
 		})
 	}
 }
-
 func TestGenericImportedTypeRequiresTypeArguments(t *testing.T) {
 	run(t, []test{
 		{
@@ -114,47 +112,6 @@ fn f(p: list::Partition) {}`,
 		},
 	})
 }
-
-func TestImports(t *testing.T) {
-	run(t, []test{
-		{
-			name:  "importing modules",
-			input: `use ard/io`,
-			output: &checker.Program{
-				Imports: map[string]checker.Module{},
-			},
-		},
-		{
-			name:   "direct Go imports are not resolved as Ard modules",
-			input:  `use go:math`,
-			output: &checker.Program{},
-		},
-		{
-			name: "errors when importing unknowns from standard lib",
-			input: strings.Join([]string{
-				`use ard/foobar`,
-			}, "\n"),
-			output: &checker.Program{},
-			diagnostics: []checker.Diagnostic{
-				{
-					Kind:    checker.Error,
-					Message: "Unknown module: ard/foobar",
-				},
-			},
-		},
-		{
-			name: "name collisions are caught",
-			input: strings.Join([]string{
-				`use ard/float as fs`,
-				`use ard/io as fs`,
-			}, "\n"),
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Warn, Message: "[2:1] Duplicate import: fs"},
-			},
-		},
-	})
-}
-
 func TestPrimitiveLiterals(t *testing.T) {
 	run(t, []test{
 		{
@@ -216,7 +173,6 @@ func TestPrimitiveLiterals(t *testing.T) {
 		},
 	})
 }
-
 func TestVariables(t *testing.T) {
 	run(t, []test{
 		{
@@ -453,7 +409,6 @@ func TestVariables(t *testing.T) {
 		},
 	})
 }
-
 func TestInstanceProperties(t *testing.T) {
 	run(t, []test{
 		{
@@ -470,7 +425,6 @@ func TestInstanceProperties(t *testing.T) {
 		},
 	})
 }
-
 func TestUnaryExpressions(t *testing.T) {
 	run(t, []test{
 		{
@@ -514,7 +468,6 @@ func TestUnaryExpressions(t *testing.T) {
 		},
 	})
 }
-
 func TestIntMath(t *testing.T) {
 	tests := []test{
 		{
@@ -935,7 +888,6 @@ func TestIntMath(t *testing.T) {
 
 	run(t, tests)
 }
-
 func TestEqualityComparisons(t *testing.T) {
 	run(t, []test{
 		{
@@ -1050,7 +1002,6 @@ func TestEqualityComparisons(t *testing.T) {
 		},
 	})
 }
-
 func TestEnumToIntComparisons(t *testing.T) {
 	run(t, []test{
 		{
@@ -1087,7 +1038,6 @@ func TestEnumToIntComparisons(t *testing.T) {
 		},
 	})
 }
-
 func TestChainedComparisons(t *testing.T) {
 	run(t, []test{
 		{
@@ -1112,7 +1062,6 @@ func TestChainedComparisons(t *testing.T) {
 		},
 	})
 }
-
 func TestBooleanOperations(t *testing.T) {
 	run(t, []test{
 		{
@@ -1146,7 +1095,6 @@ func TestBooleanOperations(t *testing.T) {
 		},
 	})
 }
-
 func TestParenthesizedExpressions(t *testing.T) {
 	run(t, []test{
 		{
@@ -1179,7 +1127,6 @@ func TestParenthesizedExpressions(t *testing.T) {
 		},
 	})
 }
-
 func TestIfStatements(t *testing.T) {
 	run(t, []test{
 		{
@@ -1314,7 +1261,6 @@ func TestIfStatements(t *testing.T) {
 		},
 	})
 }
-
 func TestForLoops(t *testing.T) {
 	run(t, []test{
 		{
@@ -1429,7 +1375,6 @@ func TestForLoops(t *testing.T) {
 		},
 	})
 }
-
 func TestLoopingOverMaps(t *testing.T) {
 	run(t, []test{
 		{
@@ -1476,7 +1421,6 @@ func TestLoopingOverMaps(t *testing.T) {
 		},
 	})
 }
-
 func TestTraditionalForLoop(t *testing.T) {
 	run(t, []test{
 		{
@@ -1527,7 +1471,6 @@ func TestTraditionalForLoop(t *testing.T) {
 		},
 	})
 }
-
 func TestWhileLoops(t *testing.T) {
 	run(t, []test{
 		{
@@ -1639,7 +1582,6 @@ func TestWhileLoops(t *testing.T) {
 		},
 	})
 }
-
 func TestMaybes(t *testing.T) {
 	run(t, []test{
 		{
@@ -1807,7 +1749,6 @@ func TestMaybes(t *testing.T) {
 		},
 	})
 }
-
 func TestLists(t *testing.T) {
 	run(t, []test{
 		{
@@ -1917,7 +1858,6 @@ func TestLists(t *testing.T) {
 		},
 	})
 }
-
 func TestMapKeyTypeConstraint(t *testing.T) {
 	run(t, []test{
 		{
@@ -1940,7 +1880,6 @@ func TestMapKeyTypeConstraint(t *testing.T) {
 		},
 	})
 }
-
 func TestMaps(t *testing.T) {
 	run(t, []test{
 		{
@@ -2017,7 +1956,6 @@ func TestMaps(t *testing.T) {
 		},
 	})
 }
-
 func TestEnums(t *testing.T) {
 	run(t, []test{
 		{
@@ -2088,7 +2026,6 @@ func TestEnums(t *testing.T) {
 		},
 	})
 }
-
 func TestEnumValues(t *testing.T) {
 	run(t, []test{
 		{
@@ -2160,7 +2097,6 @@ func TestEnumValues(t *testing.T) {
 		},
 	})
 }
-
 func TestMatchingOnEnums(t *testing.T) {
 	run(t, []test{
 		{
@@ -2309,7 +2245,6 @@ func TestMatchingOnEnums(t *testing.T) {
 		},
 	})
 }
-
 func TestMatchingOnBooleans(t *testing.T) {
 	run(t, []test{
 		{
@@ -2479,7 +2414,6 @@ func TestMatchingOnBooleans(t *testing.T) {
 		},
 	})
 }
-
 func TestMatchArmScope(t *testing.T) {
 	run(t, []test{
 		{
@@ -2521,7 +2455,6 @@ func TestMatchArmScope(t *testing.T) {
 		},
 	})
 }
-
 func TestMatchingOnStrings(t *testing.T) {
 	run(t, []test{
 		{
@@ -2559,7 +2492,6 @@ func TestMatchingOnStrings(t *testing.T) {
 		},
 	})
 }
-
 func TestMatchingOnInts(t *testing.T) {
 	run(t, []test{
 		{
@@ -2618,7 +2550,6 @@ func TestMatchingOnInts(t *testing.T) {
 		},
 	})
 }
-
 func TestGenerics(t *testing.T) {
 	run(t, []test{
 		{
@@ -2772,7 +2703,6 @@ func TestGenerics(t *testing.T) {
 		},
 	})
 }
-
 func TestVoidLiteral(t *testing.T) {
 	run(t, []test{
 		{
@@ -2788,7 +2718,6 @@ func TestVoidLiteral(t *testing.T) {
 		},
 	})
 }
-
 func TestGenericTypeParams(t *testing.T) {
 	run(t, []test{
 		{
@@ -2821,7 +2750,6 @@ func TestGenericTypeParams(t *testing.T) {
 		},
 	})
 }
-
 func TestChan(t *testing.T) {
 	run(t, []test{
 		{
@@ -2863,7 +2791,6 @@ fn take(ch: channel::Chan<Str>) {
 		},
 	})
 }
-
 func TestSelectChecker(t *testing.T) {
 	run(t, []test{
 		{
@@ -2925,7 +2852,6 @@ fn main() {
 		},
 	})
 }
-
 func TestDirectionalChannels(t *testing.T) {
 	run(t, []test{
 		{

@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -203,7 +204,7 @@ func naturalTypeName(program *air.Program, typ air.TypeInfo) (string, bool) {
 	if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum && typ.Kind != air.TypeUnion {
 		return "", false
 	}
-	if typ.Name == "" || strings.ContainsAny(typ.Name, "<>[]?:!") || typ.ExternBinding != "" {
+	if typ.Name == "" || strings.ContainsAny(typ.Name, "<>[]?:!") {
 		return "", false
 	}
 	name := naturalGoIdentifier(typ.Name, !typ.Private)
@@ -220,7 +221,7 @@ func naturalTypeNameEligible(typ air.TypeInfo) bool {
 	if typ.Kind != air.TypeStruct && typ.Kind != air.TypeEnum && typ.Kind != air.TypeUnion {
 		return false
 	}
-	return typ.Name != "" && !strings.ContainsAny(typ.Name, "<>[]?:!") && typ.ExternBinding == ""
+	return typ.Name != "" && !strings.ContainsAny(typ.Name, "<>[]?:!")
 }
 
 func topLevelValueNameAlias(program *air.Program, selfKind topLevelNameKind, selfID int, base string) string {
@@ -279,22 +280,13 @@ func isSpecialGoTopLevelName(name string) bool {
 	if name == "main" || name == "ardRunTest" || name == "ardTestOutcome" {
 		return true
 	}
-	for _, reserved := range predeclaredGoIdentifiers() {
-		if name == reserved {
-			return true
-		}
+	if slices.Contains(predeclaredGoIdentifiers(), name) {
+		return true
 	}
-	for _, reserved := range runtimePreludeTopLevelNames() {
-		if name == reserved {
-			return true
-		}
+	if slices.Contains(runtimePreludeTopLevelNames(), name) {
+		return true
 	}
-	for _, reserved := range generatedImportAliases() {
-		if name == reserved {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(generatedImportAliases(), name)
 }
 
 func generatedImportAliases() []string {
@@ -322,7 +314,6 @@ func generatedImportAliasPaths() map[string]string {
 		"slices":     "slices",
 		"sort":       "sort",
 		"strconv":    "strconv",
-		"stdlibffi":  "github.com/akonwi/ard/std_lib/ffi",
 		"strings":    "strings",
 	}
 }
@@ -485,7 +476,7 @@ func enumVariantName(program *air.Program, typ air.TypeInfo, variant air.Variant
 }
 
 func naturalEnumVariantName(program *air.Program, typ air.TypeInfo, variant air.VariantInfo) (string, bool) {
-	if typ.Kind != air.TypeEnum || variant.Name == "" || len(goIdentifierParts(variant.Name)) == 0 || typ.ExternBinding != "" {
+	if typ.Kind != air.TypeEnum || variant.Name == "" || len(goIdentifierParts(variant.Name)) == 0 {
 		return "", false
 	}
 	typePart, ok := naturalTypeName(program, typ)
@@ -669,8 +660,7 @@ func rawLocalName(fn air.Function, local air.LocalID) string {
 // unambiguous within the function. A numeric suffix (the AIR local id) is added
 // only when the bare name is already claimed by an earlier local, or collides
 // with a Go keyword, a predeclared identifier, a generated top-level name, or an
-// explicit `use go:... as X` import alias (which keeps precedence). Generated
-// import aliases without an explicit name still avoid locals, not the reverse.
+// generated import alias.
 func (l *lowerer) localName(fn air.Function, local air.LocalID) string {
 	if name, ok := l.allocateLocalNames(fn)[local]; ok {
 		return name
@@ -734,7 +724,7 @@ func (n *localNamer) push() { n.frames = append(n.frames, map[string]air.LocalID
 func (n *localNamer) pop() { n.frames = n.frames[:len(n.frames)-1] }
 
 func (n *localNamer) reservedName(name string) bool {
-	return token.IsKeyword(name) || isReservedLocalName(name) || n.l.topLevelReservedName(name) || n.l.explicitGoAliasReserved(name)
+	return token.IsKeyword(name) || isReservedLocalName(name) || n.l.topLevelReservedName(name)
 }
 
 // mustSuffix reports whether name cannot be used bare for a local whose scope
@@ -1033,17 +1023,10 @@ func isReservedLocalName(name string) bool {
 	if name == "main" {
 		return true
 	}
-	for _, reserved := range predeclaredGoIdentifiers() {
-		if name == reserved {
-			return true
-		}
+	if slices.Contains(predeclaredGoIdentifiers(), name) {
+		return true
 	}
-	for _, reserved := range runtimePreludeTopLevelNames() {
-		if name == reserved {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(runtimePreludeTopLevelNames(), name)
 }
 
 func sanitizeName(raw string) string {

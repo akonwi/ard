@@ -40,7 +40,6 @@ func captureStdout(t *testing.T, fn func()) string {
 	}
 	return string(out)
 }
-
 func TestParseRunArgs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -102,7 +101,6 @@ func TestParseRunArgs(t *testing.T) {
 		})
 	}
 }
-
 func TestRunGoProgram(t *testing.T) {
 	tempDir := t.TempDir()
 	sourcePath := filepath.Join(tempDir, "main.ard")
@@ -131,7 +129,6 @@ func TestRunGoProgram(t *testing.T) {
 		t.Fatalf("run go backend: %v", err)
 	}
 }
-
 func TestRunGoTargetVariablesSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "variables.ard")
 	module, err := loadModule(sourcePath)
@@ -146,7 +143,6 @@ func TestRunGoTargetVariablesSample(t *testing.T) {
 		t.Fatalf("run go variables sample: %v", err)
 	}
 }
-
 func TestRunGoTargetNullablesSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "nullables.ard")
 	module, err := loadModule(sourcePath)
@@ -161,7 +157,6 @@ func TestRunGoTargetNullablesSample(t *testing.T) {
 		t.Fatalf("run go nullables sample: %v", err)
 	}
 }
-
 func TestRunGoTargetTraitsSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "traits.ard")
 	module, err := loadModule(sourcePath)
@@ -176,7 +171,6 @@ func TestRunGoTargetTraitsSample(t *testing.T) {
 		t.Fatalf("run go traits sample: %v", err)
 	}
 }
-
 func TestRunGoTargetAsyncSample(t *testing.T) {
 	output := runGoSampleBinary(t, filepath.Join("samples", "async.ard"), "")
 	// async::start fires a goroutine and the program coordinates completion over
@@ -187,7 +181,6 @@ func TestRunGoTargetAsyncSample(t *testing.T) {
 		}
 	}
 }
-
 func TestRunGoTargetTypeUnionsSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "type-unions.ard")
 	module, err := loadModule(sourcePath)
@@ -202,7 +195,6 @@ func TestRunGoTargetTypeUnionsSample(t *testing.T) {
 		t.Fatalf("run go type-unions sample: %v", err)
 	}
 }
-
 func TestRunGoTargetTemperaturesSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "temperatures.ard")
 	module, err := loadModule(sourcePath)
@@ -217,7 +209,6 @@ func TestRunGoTargetTemperaturesSample(t *testing.T) {
 		t.Fatalf("run go temperatures sample: %v", err)
 	}
 }
-
 func TestRunGoTargetLightsSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "lights.ard")
 	module, err := loadModule(sourcePath)
@@ -232,7 +223,6 @@ func TestRunGoTargetLightsSample(t *testing.T) {
 		t.Fatalf("run go lights sample: %v", err)
 	}
 }
-
 func TestRunGoTargetSampleStdoutConformance(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -326,18 +316,6 @@ func TestRunGoTargetSampleStdoutConformance(t *testing.T) {
 	}
 }
 
-func TestBuildTicTacToeExample(t *testing.T) {
-	// The example calls the vaxis Go library directly via `use go:`, with the
-	// genuinely-Go bits in its own `tic_tac_toe/ffi` package. Build a temp copy
-	// of the real project so no ard-out artifacts land in the repo.
-	repoProjectDir := filepath.Join("..", "examples", "tic-tac-toe")
-	projectDir := t.TempDir()
-	for _, name := range []string{"ard.toml", "go.mod", "go.sum", "main.ard", filepath.Join("ffi", "host.go")} {
-		copyFileForTest(t, filepath.Join(repoProjectDir, name), filepath.Join(projectDir, name))
-	}
-	_ = buildGoSampleBinary(t, filepath.Join(projectDir, "main.ard"))
-}
-
 func copyFileForTest(t *testing.T, src string, dst string) {
 	t.Helper()
 	data, err := os.ReadFile(src)
@@ -388,7 +366,6 @@ func runGoSampleBinary(t *testing.T, sourcePath, stdin string) string {
 	}
 	return stdout.String()
 }
-
 func TestRunGoTargetModulesSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "modules.ard")
 	module, err := loadModule(sourcePath)
@@ -403,7 +380,6 @@ func TestRunGoTargetModulesSample(t *testing.T) {
 		t.Fatalf("run go modules sample: %v", err)
 	}
 }
-
 func TestBuildRejectsInvalidMainEntrypointSignature(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -442,7 +418,6 @@ func TestBuildRejectsInvalidMainEntrypointSignature(t *testing.T) {
 		})
 	}
 }
-
 func TestBuildGoBinary(t *testing.T) {
 	tempDir := t.TempDir()
 	sourcePath := filepath.Join(tempDir, "main.ard")
@@ -467,7 +442,6 @@ func TestBuildGoBinary(t *testing.T) {
 		t.Fatalf("stat built binary: %v", err)
 	}
 }
-
 func TestParseTestArgs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -540,7 +514,6 @@ func TestParseTestArgs(t *testing.T) {
 		})
 	}
 }
-
 func TestParseBuildArgs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -607,7 +580,6 @@ func TestParseBuildArgs(t *testing.T) {
 		})
 	}
 }
-
 func TestParseFormatArgs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -674,7 +646,6 @@ func TestParseFormatArgs(t *testing.T) {
 		})
 	}
 }
-
 func TestFormatFile(t *testing.T) {
 	t.Run("writes formatted source", func(t *testing.T) {
 		dir := t.TempDir()
@@ -725,7 +696,6 @@ func TestFormatFile(t *testing.T) {
 		}
 	})
 }
-
 func TestFormatPath(t *testing.T) {
 	t.Run("formats directories recursively", func(t *testing.T) {
 		dir := t.TempDir()
@@ -755,7 +725,6 @@ func TestFormatPath(t *testing.T) {
 		}
 	})
 }
-
 func TestTestCommand(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")
@@ -829,7 +798,6 @@ test fn panics() Void!Str {
 		}
 	})
 }
-
 func TestTestCommandDisambiguatesSameNamedTestsInSingleRun(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")
@@ -873,7 +841,6 @@ test fn same() Void!Str {
 		t.Fatalf("output missing same-named test display paths:\n%s", output)
 	}
 }
-
 func TestTestCommandSupportsImportedHelperWithCollidingGeneratedModuleName(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")
@@ -916,50 +883,6 @@ test fn helper_module() Void!Str {
 		t.Fatalf("unexpected output:\n%s", output)
 	}
 }
-
-func TestTestCommandGoTargetSupportsProjectFFI(t *testing.T) {
-	dir := t.TempDir()
-	projectDir := filepath.Join(dir, "project")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module demo\n\ngo 1.25\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, "main.ard"), []byte(`use ard/testing
-use go:demo/ffi as ffi
-
-test fn ffi_passes() Void!Str {
-  testing::assert(ffi::Lookup() == "ok", "project ffi should run on the Go backend")
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "host.go"), []byte(`package ffi
-
-func Lookup() string { return "ok" }
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var ok bool
-	output := captureStdout(t, func() {
-		ok = runTests(projectDir, "", false)
-	})
-	if !ok {
-		t.Fatalf("expected Go backend tests to pass\n%s", output)
-	}
-	if !strings.Contains(output, "✓") || !strings.Contains(output, "1 passed; 0 failed; 0 panicked") {
-		t.Fatalf("unexpected output:\n%s", output)
-	}
-}
-
 func TestTestCommandRespectsPrivateAccessInTestDir(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")
@@ -1002,7 +925,6 @@ test fn private_access() Void!Str {
 		t.Fatalf("unexpected output:\n%s", output)
 	}
 }
-
 func TestDependencyFromAddSpecGitHubCommit(t *testing.T) {
 	dep, err := dependencyFromAddSpec("github.com/akonwi/vaxis-ard@76f7c1b")
 	if err != nil {
@@ -1018,7 +940,6 @@ func TestDependencyFromAddSpecGitHubCommit(t *testing.T) {
 		t.Fatalf("commit/tag = %q/%q", dep.Commit, dep.Tag)
 	}
 }
-
 func TestDependencyFromAddSpecSSHTransport(t *testing.T) {
 	dep, err := dependencyFromAddSpec("git@github.com:akonwi/vaxis-ard.git@76f7c1b")
 	if err != nil {
@@ -1035,7 +956,6 @@ func TestDependencyFromAddSpecSSHTransport(t *testing.T) {
 		t.Fatalf("dep = %#v", dep)
 	}
 }
-
 func TestDependencyFromAddSpecGitHubHyphenShorthand(t *testing.T) {
 	dep, err := dependencyFromAddSpec("github.com/akonwi-vaxis-ard@76f7c1b")
 	if err != nil {
@@ -1045,7 +965,6 @@ func TestDependencyFromAddSpecGitHubHyphenShorthand(t *testing.T) {
 		t.Fatalf("dep = %#v", dep)
 	}
 }
-
 func TestParseManifestName(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
@@ -1057,7 +976,6 @@ func TestParseManifestName(t *testing.T) {
 		t.Fatalf("parseManifestName = %q, %v", name, ok)
 	}
 }
-
 func TestAddDependencyToManifest(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
@@ -1077,7 +995,6 @@ func TestAddDependencyToManifest(t *testing.T) {
 		t.Fatalf("manifest missing dependency:\n%s", got)
 	}
 }
-
 func TestReplaceDependencyInManifestRemovesOldAlias(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
@@ -1101,7 +1018,6 @@ func TestReplaceDependencyInManifestRemovesOldAlias(t *testing.T) {
 		t.Fatalf("manifest missing replacement or existing dependency:\n%s", got)
 	}
 }
-
 func TestDependencyAliasesForGitInManifestCanonicalizesRawEntries(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
@@ -1117,7 +1033,6 @@ func TestDependencyAliasesForGitInManifestCanonicalizesRawEntries(t *testing.T) 
 		t.Fatalf("aliases = %#v, want [old]", aliases)
 	}
 }
-
 func TestDependencyAliasesForGitCanonicalizesSource(t *testing.T) {
 	deps := map[string]checker.DependencyInfo{
 		"old":   {Alias: "old", Git: "https://github.com/akonwi/vaxis-ard"},
@@ -1128,7 +1043,6 @@ func TestDependencyAliasesForGitCanonicalizesSource(t *testing.T) {
 		t.Fatalf("aliases = %#v, want [old]", aliases)
 	}
 }
-
 func TestRemoveDependencyFromManifest(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
@@ -1155,7 +1069,6 @@ func TestRemoveDependencyFromManifest(t *testing.T) {
 		t.Fatalf("manifest lost remaining dependencies:\n%s", got)
 	}
 }
-
 func TestRemoveDependencyFromManifestMissing(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")

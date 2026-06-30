@@ -21,7 +21,6 @@ func TestMaybeCanHoldRecursiveType(t *testing.T) {
 		t.Fatalf("parent value = %d, want 1", got)
 	}
 }
-
 func TestMaybeJSON(t *testing.T) {
 	encodedNone, err := json.Marshal(None[int]())
 	if err != nil {
@@ -53,7 +52,6 @@ func TestMaybeJSON(t *testing.T) {
 		t.Fatalf("unmarshal null = some, want none")
 	}
 }
-
 
 func TestMaybeSomeNilPointerIsDistinctFromNone(t *testing.T) {
 	type Item struct{ Value int }

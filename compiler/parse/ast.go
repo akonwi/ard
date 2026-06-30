@@ -55,7 +55,6 @@ type ImportKind string
 
 const (
 	ImportKindModule ImportKind = ""
-	ImportKindGo     ImportKind = "go"
 )
 
 type Import struct {

@@ -123,15 +123,6 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 		return &ast.MapType{Key: key, Value: value}, nil
 	case TypeStruct, TypeEnum, TypeUnion, TypeTraitObject:
 		return ast.NewIdent(goExportedName(typ.Name)), nil
-	case TypeExtern:
-		if typ.Elem != NoType && (typ.Name == "Chan" || strings.HasPrefix(typ.Name, "Chan<")) {
-			elem, err := goTypeExpr(program, typ.Elem, runtimeQualifier)
-			if err != nil {
-				return nil, err
-			}
-			return &ast.ChanType{Dir: ast.SEND | ast.RECV, Value: elem}, nil
-		}
-		return ast.NewIdent(goExportedName(typ.Name)), nil
 	case TypeMaybe:
 		elem, err := goTypeExpr(program, typ.Elem, runtimeQualifier)
 		if err != nil {

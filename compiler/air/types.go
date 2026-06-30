@@ -3,7 +3,6 @@ package air
 type ModuleID int
 type TypeID int
 type FunctionID int
-type ExternID int
 type GlobalID int
 type LocalID int
 type TraitID int
@@ -20,7 +19,6 @@ type Program struct {
 	Types     []TypeInfo
 	Traits    []Trait
 	Impls     []Impl
-	Externs   []Extern
 	Globals   []Global
 	Tests     []Test
 	Functions []Function
@@ -119,7 +117,6 @@ const (
 	TypeResult
 	TypeUnion
 	TypeDynamic
-	TypeExtern
 	TypeFunction
 	TypeChannel
 	TypeReceiver
@@ -137,8 +134,6 @@ type TypeInfo struct {
 	Name       string
 	ModulePath string
 	Private    bool
-
-	ExternBinding string
 
 	Elem  TypeID
 	Key   TypeID
@@ -202,13 +197,4 @@ type Impl struct {
 	Trait   TraitID
 	ForType TypeID
 	Methods []FunctionID
-}
-
-type Extern struct {
-	ID        ExternID
-	Module    ModuleID
-	Name      string
-	Signature Signature
-	TypeArgs  []TypeID
-	Bindings  map[string]string
 }

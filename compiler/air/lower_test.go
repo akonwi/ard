@@ -53,7 +53,6 @@ func TestLowerTinyProgram(t *testing.T) {
 		t.Fatalf("script call arg count = %d, want 2", got)
 	}
 }
-
 func TestLowerNestedBlockShadowDoesNotLeakInnerLocal(t *testing.T) {
 	program := lowerSource(t, `
 		fn f(n: Int) Int {
@@ -95,7 +94,6 @@ func TestLowerNestedBlockShadowDoesNotLeakInnerLocal(t *testing.T) {
 		t.Fatalf("f result references local %d, want outer x local %d (inner binding leaked)", res.Left.Local, outerX)
 	}
 }
-
 func TestLowerTransitiveStructMethodCanReadOwnerModuleGlobal(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\""), 0o644); err != nil {
@@ -134,7 +132,6 @@ func TestLowerTransitiveStructMethodCanReadOwnerModuleGlobal(t *testing.T) {
 		t.Fatalf("greet result = %#v, want ExprLoadGlobal", greet.Body.Result)
 	}
 }
-
 func TestLowerFunctionCanReadModuleLevelLet(t *testing.T) {
 	program := lowerSource(t, `
 		let refresh_event = "inbox.refresh"
@@ -158,7 +155,6 @@ func TestLowerFunctionCanReadModuleLevelLet(t *testing.T) {
 		t.Fatalf("event_name loads global %d, want %d", eventName.Body.Result.Global, program.Globals[0].ID)
 	}
 }
-
 func TestLowerOmitsTestsByDefault(t *testing.T) {
 	result := parse.Parse([]byte(`
 		fn main() Int { 1 }
@@ -194,7 +190,6 @@ func TestLowerOmitsTestsByDefault(t *testing.T) {
 		t.Fatalf("withTests tests = %#v, want check", withTests.Tests)
 	}
 }
-
 func TestLowerModulesWithTestsIncludesEachRootModuleTest(t *testing.T) {
 	left := checkedModuleWithPath(t, "demo/left", `
 		test fn same() Void!Str { Result::ok(()) }
@@ -220,7 +215,6 @@ func TestLowerModulesWithTestsIncludesEachRootModuleTest(t *testing.T) {
 		}
 	}
 }
-
 func TestLowerMainEntrypoint(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
@@ -239,7 +233,6 @@ func TestLowerMainEntrypoint(t *testing.T) {
 		t.Fatalf("entry name = %q, want main", entry.Name)
 	}
 }
-
 func TestLowerStructLayoutAndFieldAccess(t *testing.T) {
 	program := lowerSource(t, `
 		struct User {
@@ -275,7 +268,6 @@ func TestLowerStructLayoutAndFieldAccess(t *testing.T) {
 		t.Fatalf("field index = %d, want age index 0", field.Field)
 	}
 }
-
 func TestLowerIfExpression(t *testing.T) {
 	program := lowerSource(t, `
 		fn choose(flag: Bool) Int {
@@ -301,7 +293,6 @@ func TestLowerIfExpression(t *testing.T) {
 		t.Fatalf("else block = %#v, want 2", choose.Body.Result.Else.Result)
 	}
 }
-
 func TestLowerBoolMatch(t *testing.T) {
 	program := lowerSource(t, `
 		fn choose(flag: Bool) Int {
@@ -326,7 +317,6 @@ func TestLowerBoolMatch(t *testing.T) {
 		t.Fatalf("else block = %#v, want 2", choose.Body.Result.Else.Result)
 	}
 }
-
 func TestLowerTemplateString(t *testing.T) {
 	program := lowerSource(t, `
 		let name = "Ada"
@@ -342,7 +332,6 @@ func TestLowerTemplateString(t *testing.T) {
 		t.Fatalf("script result = %#v, want ExprToStr inside concat tree", script.Body.Result)
 	}
 }
-
 func TestLowerWhileLoop(t *testing.T) {
 	program := lowerSource(t, `
 		mut count = 0
@@ -367,7 +356,6 @@ func TestLowerWhileLoop(t *testing.T) {
 		t.Fatalf("while body = %#v, want assignment", loop.Body)
 	}
 }
-
 func TestLowerEnums(t *testing.T) {
 	program := lowerSource(t, `
 		enum Direction {
@@ -415,38 +403,6 @@ func TestLowerEnums(t *testing.T) {
 		t.Fatalf("right case = %#v, want discriminant 3", name.Body.Result.EnumCases[3])
 	}
 }
-
-func TestLowerResultConstructors(t *testing.T) {
-	program := lowerSource(t, `
-		fn pass() Void!Str {
-			Result::ok(())
-		}
-
-		fn fail() Void!Str {
-			Result::err("boom")
-		}
-	`)
-
-	pass := findFunction(t, program, "pass")
-	if pass.Body.Result == nil || pass.Body.Result.Kind != ExprMakeResultOk {
-		t.Fatalf("pass result = %#v, want ExprMakeResultOk", pass.Body.Result)
-	}
-	if pass.Body.Result.Target == nil || pass.Body.Result.Target.Kind != ExprConstVoid {
-		t.Fatalf("pass value = %#v, want void", pass.Body.Result.Target)
-	}
-
-	fail := findFunction(t, program, "fail")
-	if fail.Body.Result == nil || fail.Body.Result.Kind != ExprMakeResultErr {
-		t.Fatalf("fail result = %#v, want ExprMakeResultErr", fail.Body.Result)
-	}
-	if fail.Body.Result.Target == nil || fail.Body.Result.Target.Str != "boom" {
-		t.Fatalf("fail value = %#v, want boom", fail.Body.Result.Target)
-	}
-	if len(program.Externs) != 0 {
-		t.Fatalf("extern count = %d, want result constructors as AIR built-ins", len(program.Externs))
-	}
-}
-
 func TestLowerMaybes(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
@@ -497,7 +453,6 @@ func TestLowerMaybes(t *testing.T) {
 		t.Fatalf("some local = %d, want local after params", pick.Body.Result.SomeLocal)
 	}
 }
-
 func TestLowerResults(t *testing.T) {
 	program := lowerSource(t, `
 		fn value(result: Int!Str) Int {
@@ -528,7 +483,6 @@ func TestLowerResults(t *testing.T) {
 		t.Fatalf("err local = %d, want local after params", pick.Body.Result.ErrLocal)
 	}
 }
-
 func TestLowerTraitAndImplTables(t *testing.T) {
 	program := lowerSource(t, `
 		trait Speaks {
@@ -600,7 +554,6 @@ func TestLowerTraitAndImplTables(t *testing.T) {
 		t.Fatalf("method left = %#v, want field access", method.Body.Result.Left)
 	}
 }
-
 func TestLowerTraitObjectDispatch(t *testing.T) {
 	program := lowerSource(t, `
 		trait Speaks {
@@ -643,7 +596,6 @@ func TestLowerTraitObjectDispatch(t *testing.T) {
 		t.Fatalf("upcast impl = %d, want %d", script.Body.Result.Args[0].Impl, program.Impls[0].ID)
 	}
 }
-
 func TestLowerContextualMaybeTypesInNestedExpressions(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
@@ -678,7 +630,6 @@ func TestLowerContextualMaybeTypesInNestedExpressions(t *testing.T) {
 		t.Fatalf("result some target type = %q, want Dynamic", got)
 	}
 }
-
 func TestLowerContextualResultTypesInNestedExpressions(t *testing.T) {
 	program := lowerSource(t, `
 		fn pick(flag: Bool) Int!Str {
@@ -704,7 +655,6 @@ func TestLowerContextualResultTypesInNestedExpressions(t *testing.T) {
 		t.Fatalf("result type = %q, want Int!Str", got)
 	}
 }
-
 func TestLowerTryOps(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
@@ -754,7 +704,6 @@ func TestLowerTryOps(t *testing.T) {
 		t.Fatalf("maybe try = %#v, want ExprTryMaybe", maybeLet.Value)
 	}
 }
-
 func TestLowerImportedModuleFunctionCall(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/testing
@@ -779,7 +728,6 @@ func TestLowerImportedModuleFunctionCall(t *testing.T) {
 		}
 	}
 }
-
 func TestLowerKeepsSameNamedStructsFromDifferentModulesDistinct(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -857,7 +805,6 @@ fn main() Str {
 		t.Fatalf("Store module paths = %#v, want inbox and issues", paths)
 	}
 }
-
 func TestLowerImportedModuleFunctionCanReadModuleLevelLet(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -903,7 +850,6 @@ fn main() Str {
 		t.Fatalf("event_name result = %#v, want ExprLoadGlobal", featureFn.Body.Result)
 	}
 }
-
 func TestLowerImportedGenericModuleFunctionSpecialization(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/list
@@ -925,7 +871,6 @@ func TestLowerImportedGenericModuleFunctionSpecialization(t *testing.T) {
 		t.Fatalf("keep param elem = %v, want TypeParam", typeKind(t, program, paramType.Elem))
 	}
 }
-
 func TestLowerImportedGenericStdlibFunctionLowersAsGoGeneric(t *testing.T) {
 	// A generic stdlib function is lowered once as a generic definition (ADR
 	// 0031, Phase 2): its signature and body reference type parameters rather
@@ -958,7 +903,6 @@ func TestLowerImportedGenericStdlibFunctionLowersAsGoGeneric(t *testing.T) {
 		}
 	}
 }
-
 func TestLowerGenericStructMethodBodyUsesReceiverBindings(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box {
@@ -987,7 +931,6 @@ func TestLowerGenericStructMethodBodyUsesReceiverBindings(t *testing.T) {
 		t.Fatalf("get return kind = %v, want TypeParam", typeKind(t, program, get.Signature.Return))
 	}
 }
-
 func TestLowerGenericStructMethodLowersOnceAsGeneric(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box {
@@ -1033,7 +976,6 @@ func TestLowerGenericStructMethodLowersOnceAsGeneric(t *testing.T) {
 		t.Fatalf("get_str call type args = %v, want [Str]", strGet.Body.Result.TypeArgs)
 	}
 }
-
 func TestLowerGenericStructMethodOwnGenericSpecializationsDoNotCollapse(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box {
@@ -1073,7 +1015,6 @@ func TestLowerGenericStructMethodOwnGenericSpecializationsDoNotCollapse(t *testi
 		t.Fatalf("echo_str method return kind = %v, want Str", typeKind(t, program, program.Functions[strEcho.Body.Result.Function].Signature.Return))
 	}
 }
-
 func TestLowerInstanceMethodKeepsDeclaredTraitParameterType(t *testing.T) {
 	program := lowerSource(t, `
 		trait View {
@@ -1112,7 +1053,6 @@ func TestLowerInstanceMethodKeepsDeclaredTraitParameterType(t *testing.T) {
 		t.Fatalf("add_child child param kind = %v, want trait object", kind)
 	}
 }
-
 func TestLowerSameShapeStructsWithDifferentMethodsStayDistinct(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -1203,7 +1143,6 @@ func TestLowerSameShapeStructsWithDifferentMethodsStayDistinct(t *testing.T) {
 		t.Fatalf("same-shape imported struct params collapsed to type %d", readFirst.Signature.Params[0].Type)
 	}
 }
-
 func TestLowerTestsManifest(t *testing.T) {
 	program := lowerSourceWithTests(t, `
 		use ard/testing
@@ -1220,7 +1159,6 @@ func TestLowerTestsManifest(t *testing.T) {
 		t.Fatalf("test name = %q, want adds", program.Tests[0].Name)
 	}
 }
-
 func TestValidateRejectsBadTypeReference(t *testing.T) {
 	program := &Program{
 		Types:  []TypeInfo{{ID: 1, Kind: TypeList, Name: "[Missing]", Elem: 99}},
@@ -1356,7 +1294,6 @@ func testTypeInfo(t *testing.T, program *Program, id TypeID) TypeInfo {
 	t.Fatalf("type id %d not found", id)
 	return TypeInfo{}
 }
-
 func TestLowerRejectsUnboundReturnOnlyGenericWrapper(t *testing.T) {
 	result := parse.Parse([]byte(`
 		use ard/maybe
@@ -1386,7 +1323,6 @@ func TestLowerRejectsUnboundReturnOnlyGenericWrapper(t *testing.T) {
 		t.Fatalf("Lower error = %v, want unspecialized has", err)
 	}
 }
-
 func TestLowerImportedGenericStructReturnTypeWithTypeArg(t *testing.T) {
 	lowerSource(t, `
 use ard/list
@@ -1396,6 +1332,7 @@ fn run() {
 fn main() { run() }
 `)
 }
+
 func TestLowerInstanceMethodForwardedGenericTypeArg(t *testing.T) {
 	_ = lowerSource(t, `
 		struct Box {
@@ -1418,6 +1355,7 @@ func TestLowerInstanceMethodForwardedGenericTypeArg(t *testing.T) {
 		}
 	`)
 }
+
 func TestLowerForwardedGenericUsedOnlyInCalleeBody(t *testing.T) {
 	_ = lowerSource(t, `
 		use ard/maybe
@@ -1436,6 +1374,7 @@ func TestLowerForwardedGenericUsedOnlyInCalleeBody(t *testing.T) {
 		}
 	`)
 }
+
 func TestLowerReceiverGenericUsedOnlyInMethodBody(t *testing.T) {
 	// A generic function called inside a generic method body forwards the
 	// struct's type parameter abstractly; this must lower without trying to
@@ -1460,6 +1399,7 @@ func TestLowerReceiverGenericUsedOnlyInMethodBody(t *testing.T) {
 		}
 	`)
 }
+
 func TestLowerGenericFunctionAdapterClosureCapturesSpecializedCallback(t *testing.T) {
 	_ = lowerSource(t, `
 		struct StateHandle { id: Int }

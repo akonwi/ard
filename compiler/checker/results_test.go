@@ -384,7 +384,6 @@ func TestResults(t *testing.T) {
 		},
 	})
 }
-
 func TestTry(t *testing.T) {
 	run(t, []test{
 		{
@@ -704,7 +703,6 @@ func TestTry(t *testing.T) {
 		},
 	})
 }
-
 func TestTryInMatchBlocks(t *testing.T) {
 	run(t, []test{
 		{

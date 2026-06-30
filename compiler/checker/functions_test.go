@@ -34,7 +34,6 @@ func TestUnknownParameterTypeMethodLookupReportsDiagnostics(t *testing.T) {
 		t.Fatalf("diagnostics = %v, want undefined method diagnostic", c.Diagnostics())
 	}
 }
-
 func TestFunctions(t *testing.T) {
 	run(t, []test{
 		{
@@ -217,7 +216,6 @@ func TestFunctions(t *testing.T) {
 		},
 	})
 }
-
 func TestTestFunctions(t *testing.T) {
 	t.Run("marks valid test functions", func(t *testing.T) {
 		result := parse.Parse([]byte(`test fn works() Void!Str { Result::ok(()) }`), "test.ard")
@@ -317,7 +315,6 @@ func TestTestFunctions(t *testing.T) {
 		},
 	})
 }
-
 func TestCallingPackageFunctions(t *testing.T) {
 	run(t, []test{
 		{
@@ -444,7 +441,6 @@ func TestCallingPackageFunctions(t *testing.T) {
 		},
 	})
 }
-
 func TestCallingInstanceMethods(t *testing.T) {
 	run(t, []test{
 		{
@@ -463,7 +459,6 @@ func TestCallingInstanceMethods(t *testing.T) {
 		},
 	})
 }
-
 func TestNamedArguments(t *testing.T) {
 	run(t, []test{
 		{
@@ -683,7 +678,6 @@ func TestNamedArguments(t *testing.T) {
 		},
 	})
 }
-
 func TestInferringEmptyCollectionArguments(t *testing.T) {
 	run(t, []test{
 		{
@@ -704,7 +698,6 @@ func TestInferringEmptyCollectionArguments(t *testing.T) {
 		},
 	})
 }
-
 func TestUsingValidTypesForUnionArguments(t *testing.T) {
 	run(t, []test{
 		{
@@ -719,7 +712,6 @@ func TestUsingValidTypesForUnionArguments(t *testing.T) {
 		},
 	})
 }
-
 func TestGroupedNullableFunctionTypes(t *testing.T) {
 	run(t, []test{
 		{
@@ -734,7 +726,6 @@ func TestGroupedNullableFunctionTypes(t *testing.T) {
 		},
 	})
 }
-
 func TestTypeDoubleColonFunctionDefinition(t *testing.T) {
 	run(t, []test{
 		{
@@ -783,7 +774,6 @@ func TestTypeDoubleColonFunctionDefinition(t *testing.T) {
 		},
 	})
 }
-
 func TestCallingFunctionValuedStructFields(t *testing.T) {
 	run(t, []test{
 		{
@@ -864,7 +854,6 @@ func TestCallingFunctionValuedStructFields(t *testing.T) {
 		},
 	})
 }
-
 func TestInferringAnonymousFunctionTypes(t *testing.T) {
 	run(t, []test{
 		{

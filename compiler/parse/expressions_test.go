@@ -108,7 +108,6 @@ func TestGenericCallLookaheadDoesNotLeakTypeErrorsIntoComparisons(t *testing.T) 
 		},
 	})
 }
-
 func TestListLiterals(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -135,7 +134,6 @@ func TestListLiterals(t *testing.T) {
 		},
 	})
 }
-
 func TestMultilineListLiteralLocationSpansClosingBracket(t *testing.T) {
 	result := Parse([]byte("let items = [\n  one::new(),\n]\n"), "test.ard")
 	if len(result.Errors) > 0 {
@@ -156,7 +154,6 @@ func TestMultilineListLiteralLocationSpansClosingBracket(t *testing.T) {
 		t.Fatalf("list end col = %d, want %d", got, want)
 	}
 }
-
 func TestMapLiterals(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -182,7 +179,6 @@ func TestMapLiterals(t *testing.T) {
 		},
 	})
 }
-
 func TestUnaryExpressions(t *testing.T) {
 	tests := []test{
 		{
@@ -226,7 +222,6 @@ func TestUnaryExpressions(t *testing.T) {
 
 	runTests(t, tests)
 }
-
 func TestBinaryExpressions(t *testing.T) {
 	tests := []test{
 		{
@@ -572,7 +567,6 @@ func TestBinaryExpressions(t *testing.T) {
 
 	runTests(t, tests)
 }
-
 func TestParenthesizedExpressions(t *testing.T) {
 	tests := []test{
 		{
@@ -621,7 +615,6 @@ func TestParenthesizedExpressions(t *testing.T) {
 
 	runTests(t, tests)
 }
-
 func TestMemberAccess(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -714,7 +707,6 @@ func TestMemberAccess(t *testing.T) {
 		},
 	})
 }
-
 func TestInterpolatedStrings(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -749,11 +741,9 @@ func TestInterpolatedStrings(t *testing.T) {
 		},
 	})
 }
-
 func TestInterpolatedStringFunctionCallStringArgDoesNotHang(t *testing.T) {
 	assertParseCompletes(t, `"{wrap(\"arg\")}"`, false)
 }
-
 func TestUnescapedOpenBraceInStringDoesNotHang(t *testing.T) {
 	assertParseCompletes(t, `"hello {"`, true)
 }
@@ -777,7 +767,6 @@ func assertParseCompletes(t *testing.T, input string, wantErr bool) {
 		t.Fatalf("parser hung while parsing %s", input)
 	}
 }
-
 func TestAndOrs(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -824,7 +813,6 @@ func TestAndOrs(t *testing.T) {
 		},
 	})
 }
-
 func TestChainedComparisons(t *testing.T) {
 	tests := []test{
 		{
@@ -934,7 +922,6 @@ func TestChainedComparisons(t *testing.T) {
 
 	runTests(t, tests)
 }
-
 func TestVoidLiteral(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -947,7 +934,6 @@ func TestVoidLiteral(t *testing.T) {
 		},
 	})
 }
-
 func TestRuneLiterals(t *testing.T) {
 	runTests(t, []test{
 		{

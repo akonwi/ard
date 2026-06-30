@@ -1,7 +1,5 @@
 package air
 
-import "github.com/akonwi/ard/checker"
-
 type Block struct {
 	Stmts  []Stmt
 	Result *Expr
@@ -16,21 +14,19 @@ const (
 	StmtExpr
 	StmtWhile
 	StmtBreak
-	StmtSetDirectGoField
 )
 
 type Stmt struct {
-	Kind              StmtKind
-	Local             LocalID
-	Name              string
-	Type              TypeID
-	Mutable           bool
-	Value             *Expr
-	Expr              *Expr
-	Target            *Expr
-	Field             int
-	FieldName         string
-	DirectGoFieldType checker.GoValueType
+	Kind      StmtKind
+	Local     LocalID
+	Name      string
+	Type      TypeID
+	Mutable   bool
+	Value     *Expr
+	Expr      *Expr
+	Target    *Expr
+	Field     int
+	FieldName string
 
 	Condition *Expr
 	Body      Block
@@ -49,10 +45,6 @@ const (
 	ExprLoadGlobal
 	ExprFunctionRef
 	ExprCall
-	ExprCallExtern
-	ExprDirectGoPackageValue
-	ExprDirectGoFieldAccess
-	ExprDirectGoStructLiteral
 	ExprMakeClosure
 	ExprCallClosure
 	ExprUnionWrap
@@ -170,7 +162,6 @@ type Expr struct {
 
 	Function      FunctionID
 	TypeArgs      []TypeID
-	Extern        ExternID
 	Impl          ImplID
 	Trait         TraitID
 	Method        int
@@ -235,10 +226,9 @@ type SelectMatchCase struct {
 }
 
 type StructFieldValue struct {
-	Index             int
-	Name              string
-	Value             Expr
-	DirectGoFieldType checker.GoValueType
+	Index int
+	Name  string
+	Value Expr
 }
 
 type MapEntry struct {

@@ -177,7 +177,6 @@ func TestStructDefinitions(t *testing.T) {
 		},
 	})
 }
-
 func TestUsingStructs(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -239,7 +238,6 @@ func TestUsingStructs(t *testing.T) {
 		},
 	})
 }
-
 func TestReferencingStructsFromPackage(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -292,7 +290,6 @@ func TestReferencingStructsFromPackage(t *testing.T) {
 		},
 	})
 }
-
 func TestNestedStructInstantiation(t *testing.T) {
 	runTests(t, []test{
 		{

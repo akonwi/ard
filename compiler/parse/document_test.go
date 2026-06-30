@@ -14,12 +14,10 @@ func assertEquality(t *testing.T, got, want string) {
 		t.Errorf("Output does not match (-want +got):\n%s", diff)
 	}
 }
-
 func TestEmptyDocument(t *testing.T) {
 	doc := MakeDoc("")
 	assertEquality(t, doc.String(), "")
 }
-
 func TestLines(t *testing.T) {
 	doc := MakeDoc("")
 	doc.Line("line 1")
@@ -34,7 +32,6 @@ line 2
 line 3`
 	assertEquality(t, doc.String(), want)
 }
-
 func TestIndents(t *testing.T) {
 	doc := MakeDoc("")
 	doc.Line("line 1")
@@ -58,7 +55,6 @@ line 2`
 
 	assertEquality(t, doc.String(), want)
 }
-
 func TestNesting(t *testing.T) {
 	whileBlock := MakeDoc("")
 	whileBlock.Line("print('volcano is stable')")
@@ -81,7 +77,6 @@ volcano.erupt()`
 
 	assertEquality(t, doc.String(), want)
 }
-
 func TestAppending(t *testing.T) {
 	imports := MakeDoc("")
 	imports.Line("use ard/io")

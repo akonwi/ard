@@ -6,25 +6,6 @@ import (
 	"github.com/akonwi/ard/air"
 )
 
-func TestGoPackageNameFromModulePathSanitizesInvalidNames(t *testing.T) {
-	tests := []struct {
-		path string
-		want string
-	}{
-		{path: "user.ard", want: "user"},
-		{path: "accounts/foo_bar.ard", want: "foo_bar"},
-		{path: "foo-bar.ard", want: "foo_bar"},
-		{path: "123-api.ard", want: "_123_api"},
-		{path: "type.ard", want: "type_"},
-		{path: "---.ard", want: "module"},
-	}
-	for _, tt := range tests {
-		if got := goPackageNameFromModulePath(tt.path); got != tt.want {
-			t.Fatalf("goPackageNameFromModulePath(%q) = %q, want %q", tt.path, got, tt.want)
-		}
-	}
-}
-
 func TestModulePackageHelpersSanitizePaths(t *testing.T) {
 	program := &air.Program{Modules: []air.Module{
 		{ID: 0, Path: "accounts/foo_bar.ard"},
@@ -44,7 +25,6 @@ func TestModulePackageHelpersSanitizePaths(t *testing.T) {
 		t.Fatalf("modulePackageDir dotted directory = %q, want v1_0/foo", got)
 	}
 }
-
 func TestNaturalTypeNameUsesVisibilityForArdTypes(t *testing.T) {
 	program := &air.Program{Types: []air.TypeInfo{
 		{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "user.ard"},
@@ -61,7 +41,6 @@ func TestNaturalTypeNameUsesVisibilityForArdTypes(t *testing.T) {
 		t.Fatalf("stdlib type = %q, want Std", got)
 	}
 }
-
 func TestNaturalTypeNameFallsBackOnCollisions(t *testing.T) {
 	program := &air.Program{Types: []air.TypeInfo{
 		{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "a.ard"},
@@ -74,7 +53,6 @@ func TestNaturalTypeNameFallsBackOnCollisions(t *testing.T) {
 		t.Fatalf("second colliding type = %q, want B_ard__User", got)
 	}
 }
-
 func TestNaturalEnumVariantNameUsesEnumVisibility(t *testing.T) {
 	program := &air.Program{Types: []air.TypeInfo{
 		{ID: 1, Kind: air.TypeEnum, Name: "Direction", ModulePath: "direction.ard", Variants: []air.VariantInfo{{Name: "Down", Discriminant: 0}}},
@@ -87,7 +65,6 @@ func TestNaturalEnumVariantNameUsesEnumVisibility(t *testing.T) {
 		t.Fatalf("private enum variant = %q, want internalStateReady", got)
 	}
 }
-
 func TestNaturalEnumVariantNameAliasesCollisions(t *testing.T) {
 	program := &air.Program{Types: []air.TypeInfo{
 		{ID: 1, Kind: air.TypeStruct, Name: "DirectionDown", ModulePath: "other.ard"},
@@ -109,7 +86,6 @@ func TestNaturalEnumVariantNameAliasesCollisions(t *testing.T) {
 		t.Fatalf("underscore-only variant = %q, want legacy fallback", got)
 	}
 }
-
 func TestNaturalEnumVariantNameAliasesDuplicateVariantNames(t *testing.T) {
 	program := &air.Program{Types: []air.TypeInfo{{ID: 1, Kind: air.TypeEnum, Name: "Direction", ModulePath: "direction.ard", Variants: []air.VariantInfo{{Name: "Down", Discriminant: 0}, {Name: "Down", Discriminant: 1}}}}}
 	if got := enumVariantName(program, program.Types[0], program.Types[0].Variants[0]); got != "DirectionDown" {
@@ -119,7 +95,6 @@ func TestNaturalEnumVariantNameAliasesDuplicateVariantNames(t *testing.T) {
 		t.Fatalf("second duplicate variant = %q, want DirectionDown_1", got)
 	}
 }
-
 func TestNaturalEnumVariantNameAliasesValueCollisions(t *testing.T) {
 	program := &air.Program{
 		Types:     []air.TypeInfo{{ID: 1, Kind: air.TypeEnum, Name: "Direction", ModulePath: "direction.ard", Variants: []air.VariantInfo{{Name: "Down", Discriminant: 0}}}},
@@ -129,7 +104,6 @@ func TestNaturalEnumVariantNameAliasesValueCollisions(t *testing.T) {
 		t.Fatalf("variant colliding with function = %q, want DirectionDown_1", got)
 	}
 }
-
 func TestNaturalFunctionAndGlobalNamesUseVisibility(t *testing.T) {
 	program := &air.Program{
 		Functions: []air.Function{
@@ -154,7 +128,6 @@ func TestNaturalFunctionAndGlobalNamesUseVisibility(t *testing.T) {
 		t.Fatalf("private global = %q, want cacheKey", got)
 	}
 }
-
 func TestNaturalFunctionNameFallsBackForSyntheticFunctions(t *testing.T) {
 	program := &air.Program{Functions: []air.Function{
 		{ID: 0, Module: 0, Name: "main", IsScript: true},
@@ -171,7 +144,6 @@ func TestNaturalFunctionNameFallsBackForSyntheticFunctions(t *testing.T) {
 		t.Fatalf("closure helper function = %q, want module_0__anon_func_2", got)
 	}
 }
-
 func TestNaturalTopLevelNamesAliasSpecialGoNames(t *testing.T) {
 	program := &air.Program{
 		Types: []air.TypeInfo{{ID: 1, Kind: air.TypeStruct, Name: "len", ModulePath: "types.ard", Private: true}},
@@ -194,7 +166,6 @@ func TestNaturalTopLevelNamesAliasSpecialGoNames(t *testing.T) {
 		t.Fatalf("private main global alias = %q, want main_2", got)
 	}
 }
-
 func TestNaturalTopLevelNamesFallBackOnCollisions(t *testing.T) {
 	program := &air.Program{
 		Types:     []air.TypeInfo{{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "types.ard"}},
@@ -215,7 +186,6 @@ func TestNaturalTopLevelNamesFallBackOnCollisions(t *testing.T) {
 		t.Fatalf("global colliding with type/function = %q, want User_2", got)
 	}
 }
-
 func TestNaturalTypeNameFallsBackOnCrossKindCollisions(t *testing.T) {
 	program := &air.Program{Types: []air.TypeInfo{
 		{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "a.ard"},
@@ -228,7 +198,6 @@ func TestNaturalTypeNameFallsBackOnCrossKindCollisions(t *testing.T) {
 		t.Fatalf("enum colliding with struct = %q, want B_ard__User", got)
 	}
 }
-
 func TestUnionNamesUseExportedNaturalNamesWithAliases(t *testing.T) {
 	typ := air.TypeInfo{Kind: air.TypeUnion, Name: "value", Members: []air.UnionMember{
 		{Type: 1, Tag: 0, Name: "FooBar"},
@@ -249,7 +218,6 @@ func TestUnionNamesUseExportedNaturalNamesWithAliases(t *testing.T) {
 		t.Fatalf("union tag field = %q, want ArdTag1", got)
 	}
 }
-
 func TestGoFieldNamesAreAlwaysExported(t *testing.T) {
 	l := &lowerer{}
 	publicStruct := air.TypeInfo{Kind: air.TypeStruct, Name: "Error", ModulePath: "ard/decode"}
@@ -262,7 +230,6 @@ func TestGoFieldNamesAreAlwaysExported(t *testing.T) {
 		t.Fatalf("private struct field = %q, want SecretKey (always exported)", got)
 	}
 }
-
 func TestNaturalGoIdentifierUsesVisibility(t *testing.T) {
 	tests := []struct {
 		raw      string

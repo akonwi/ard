@@ -20,7 +20,6 @@ The benchmarks are intentionally more realistic than tiny microbenchmarks, but s
 - `lru_cache.ard`
   - mutation-heavy map/list cache workload
 - `base64_batch.ard`
-  - base64/base64url encode/decode stdlib FFI workload
 - `fs_batch.ard`
   - directory lifecycle, repeated file write/read/copy/rename/delete
 - `sql_batch.ard`

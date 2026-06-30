@@ -1147,12 +1147,11 @@ func (f *FunctionDef) hasGenerics() bool {
 }
 
 type FunctionCall struct {
-	Name            string
-	Args            []Expression
-	TypeArgs        []Type
-	fn              *FunctionDef
-	ReturnType      Type // Pre-computed by checker
-	ExternalBinding string
+	Name       string
+	Args       []Expression
+	TypeArgs   []Type
+	fn         *FunctionDef
+	ReturnType Type // Pre-computed by checker
 }
 
 func CreateCall(name string, args []Expression, fn FunctionDef) *FunctionCall {
@@ -1212,87 +1211,20 @@ func (p *ModuleSymbol) Type() Type {
 	return p.Symbol.Type
 }
 
-type DirectGoPackageValue struct {
-	ImportPath  string
-	Alias       string
-	PackageName string
-	Name        string
-	Binding     string
-	ValueType   Type
-}
-
-func (v *DirectGoPackageValue) Type() Type {
-	return v.ValueType
-}
-
-func (v *DirectGoPackageValue) String() string {
-	qualifier := v.Alias
-	if qualifier == "" {
-		qualifier = v.PackageName
-	}
-	if qualifier == "" {
-		qualifier = v.ImportPath
-	}
-	return qualifier + "::" + v.Name
-}
-
-type DirectGoFieldAccess struct {
-	Subject     Expression
-	Field       string
-	FieldType   Type
-	FieldGoType GoValueType
-}
-
-func (f *DirectGoFieldAccess) Type() Type {
-	return f.FieldType
-}
-
-func (f *DirectGoFieldAccess) String() string {
-	return fmt.Sprintf("%s.%s", f.Subject, f.Field)
-}
-
-type DirectGoStructInstance struct {
-	ImportPath   string
-	Alias        string
-	PackageName  string
-	Name         string
-	Binding      string
-	Fields       map[string]Expression
-	FieldGoTypes map[string]GoValueType
-	ValueType    Type
-}
-
-func (s *DirectGoStructInstance) Type() Type {
-	return s.ValueType
-}
-
-func (s *DirectGoStructInstance) String() string {
-	qualifier := s.Alias
-	if qualifier == "" {
-		qualifier = s.PackageName
-	}
-	if qualifier == "" {
-		qualifier = s.ImportPath
-	}
-	return qualifier + "::" + s.Name
-}
-
 type EnumValue struct {
 	Name  string
 	Value int // The computed integer discriminant
 }
 
 type Enum struct {
-	Name             string
-	ModulePath       string
-	Private          bool
-	Values           []EnumValue // The discriminant values for each variant
-	Methods          map[string]*FunctionDef
-	Traits           []*Trait
-	Location         parse.Location
-	ExternalBinding  string
-	ExternalBindings map[string]string
-	Open             bool // Open enum-like values require wildcard matches and skip FFI closed-set validation.
+	Name       string
+	ModulePath string
+	Private    bool
+	Values     []EnumValue // The discriminant values for each variant
+	Methods    map[string]*FunctionDef
+	Traits     []*Trait
+	Location   parse.Location
+	Open       bool
 }
 
 func (e Enum) NonProducing() {}

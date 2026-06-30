@@ -26,7 +26,6 @@ func testLexAngleBrackets(t *testing.T) {
 		},
 	})
 }
-
 func TestResultTypeInSignature(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -221,7 +220,6 @@ func TestResultTypeInSignature(t *testing.T) {
 		},
 	})
 }
-
 func TestUnsafeBlock(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -248,7 +246,6 @@ func TestUnsafeBlock(t *testing.T) {
 		},
 	})
 }
-
 func TestTryKeyword(t *testing.T) {
 	runTests(t, []test{
 		{

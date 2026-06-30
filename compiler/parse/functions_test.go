@@ -209,7 +209,6 @@ func TestFunctionDeclaration(t *testing.T) {
 
 	runTests(t, tests)
 }
-
 func TestFunctionCalls(t *testing.T) {
 	tests := []test{
 		{
@@ -397,7 +396,6 @@ func TestFunctionCalls(t *testing.T) {
 
 	runTests(t, tests)
 }
-
 func TestFunctionsWithGenerics(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -466,7 +464,6 @@ func TestFunctionsWithGenerics(t *testing.T) {
 		},
 	})
 }
-
 func TestAnonymousFunctions(t *testing.T) {
 	tests := []test{
 		{
@@ -524,7 +521,6 @@ func TestAnonymousFunctions(t *testing.T) {
 
 	runTests(t, tests)
 }
-
 func TestTestFunctionEdgeCases(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -591,7 +587,6 @@ func TestTestFunctionEdgeCases(t *testing.T) {
 		},
 	})
 }
-
 func TestGenericFunctionDeclaration(t *testing.T) {
 	tests := []test{
 		{
@@ -648,7 +643,6 @@ func TestGenericFunctionDeclaration(t *testing.T) {
 
 	runTests(t, tests)
 }
-
 func TestIncompleteFunctionCallDoesNotHang(t *testing.T) {
 	result := Parse([]byte("fn main() {\n  io::print(\n}\n"), "test.ard")
 	if result.Program == nil {

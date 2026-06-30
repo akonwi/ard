@@ -93,7 +93,6 @@ func TestDispatchRecoversFromPanic(t *testing.T) {
 		t.Fatal("expected dispatch to reply")
 	}
 }
-
 func TestDocumentSyncRepliesBeforeDiagnosticsComplete(t *testing.T) {
 	t.Run("didOpen", func(t *testing.T) {
 		assertDocumentSyncRepliesBeforeDiagnostics(t, func(server *Server, docURI uri.URI, reply jsonrpc2.Replier) error {
@@ -129,7 +128,6 @@ func TestDocumentSyncRepliesBeforeDiagnosticsComplete(t *testing.T) {
 		})
 	})
 }
-
 func TestDidChangeAppliesFullAndIncrementalChanges(t *testing.T) {
 	t.Run("full document change", func(t *testing.T) {
 		server := NewServer()
@@ -189,7 +187,6 @@ func TestDidChangeAppliesFullAndIncrementalChanges(t *testing.T) {
 		}
 	})
 }
-
 func TestApplyDocumentChangesHandlesUTF16AndClamping(t *testing.T) {
 	updated, err := applyDocumentChanges("a😀b", []documentContentChange{{
 		Range: &protocol.Range{
@@ -233,7 +230,6 @@ func TestApplyDocumentChangesHandlesUTF16AndClamping(t *testing.T) {
 		t.Fatalf("updated = %q, want EOF clamped insertion", updated)
 	}
 }
-
 func TestDocumentSyncSchedulesDiagnosticsForAllOpenDocuments(t *testing.T) {
 	t.Run("didChange", func(t *testing.T) {
 		server := NewServer()
@@ -353,7 +349,6 @@ func assertDocumentSyncRepliesBeforeDiagnostics(t *testing.T, handle func(*Serve
 		t.Fatal("document sync handler did not return")
 	}
 }
-
 func TestJSONRPCHandlerDoesNotSerializeFeatureRequests(t *testing.T) {
 	server := NewServer()
 	entered := make(chan struct{}, 2)
@@ -401,7 +396,6 @@ func TestJSONRPCHandlerDoesNotSerializeFeatureRequests(t *testing.T) {
 		}
 	}
 }
-
 func TestJSONRPCHandlerDoesNotBlockDocumentSyncBehindFeatureRequests(t *testing.T) {
 	server := NewServer()
 	server.diagnosticsDelay = 0
@@ -615,7 +609,6 @@ func TestFormatSource(t *testing.T) {
 		})
 	}
 }
-
 func TestFeatureHandlersIgnoreNonFileDocuments(t *testing.T) {
 	server := NewServer()
 	docURI := uri.URI("untitled:Untitled-1")
@@ -673,7 +666,6 @@ func TestFeatureHandlersIgnoreNonFileDocuments(t *testing.T) {
 		t.Fatal("expected hover handler to reply")
 	}
 }
-
 func TestCodeActionRemoveUnusedImports(t *testing.T) {
 	server := NewServer()
 	docURI := uri.New("file:///test.ard")
@@ -1282,35 +1274,6 @@ fn main() {
 	assertDefinitionStart(t, loc, textPath, 0, 0)
 }
 
-// TestDefinitionImportedExternFunction verifies go-to-definition for imported extern functions.
-func TestDefinitionImportedExternFunction(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"linear_cli\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	vaxisSource := `fn window_width() Int {
-  0
-}
-`
-	vaxisPath := filepath.Join(root, "vaxis.ard")
-	if err := os.WriteFile(vaxisPath, []byte(vaxisSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use linear_cli/vaxis
-
-fn main() Int {
-  vaxis::window_width()
-}
-`
-	filePath := filepath.Join(root, "issue_tab.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	loc := requireDefinition(t, source, filePath, 3, 15)
-	assertDefinitionStart(t, loc, vaxisPath, 0, 0)
-}
-
 // TestDefinitionImportedInstanceMembers verifies go-to-definition for imported fields and methods.
 func TestDefinitionImportedInstanceMembers(t *testing.T) {
 	root := t.TempDir()
@@ -1455,16 +1418,6 @@ fn main(box: boxes::Box<Int>) {
 	assertSignature(t, help, "fn boxes::Box<Int>.replace(item: Int) Int", 0)
 }
 
-func TestSignatureHelpDirectGoFunction(t *testing.T) {
-	help, _ := requireSignatureHelpAtMarker(t, `use go:strconv
-
-fn main() Float!Str {
-  strconv::ParseFloat("1.5", |)
-}
-`, "test.ard")
-	assertSignature(t, help, "fn strconv::ParseFloat(s: Str, bitSize: Int) Float!Str", 1)
-}
-
 // TestSignatureHelpStaticPreludeFunction verifies signature help for prelude static calls.
 func TestSignatureHelpStaticPreludeFunction(t *testing.T) {
 	source := `fn main(input: Str) {
@@ -1494,17 +1447,6 @@ fn main() {
 }
 `, "test.ard")
 	assertSignature(t, help, "fn outer(label: Str, value: Int, done: Bool) Void", 2)
-}
-
-// TestSignatureHelpImportedExternFunction verifies signatures for stdlib extern functions.
-func TestSignatureHelpImportedExternFunction(t *testing.T) {
-	help, _ := requireSignatureHelpAtMarker(t, `use ard/io
-
-fn main() {
-  let input = io::read_line(|)
-}
-`, "test.ard")
-	assertSignature(t, help, "fn io::read_line() Str!Str", 0)
 }
 
 // TestSignatureHelpIncompleteCall verifies help while the user is still typing a call.
@@ -1613,7 +1555,6 @@ func TestTicTacToeLine42TypingDoesNotHang(t *testing.T) {
 		t.Fatal("typing line 42 in tic-tac-toe sample timed out")
 	}
 }
-
 func TestCompletionImportPaths(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
@@ -1684,74 +1625,6 @@ fn main() {
 }
 
 // TestCompletionUserModuleStaticMembers verifies user module functions and variables complete after ::.
-func TestCompletionDirectGoPackageSymbols(t *testing.T) {
-	source := `use go:math
-
-fn main() {
-  math::
-}
-`
-
-	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 8})
-	assertCompletion(t, items, "Floor", "fn (x: Float) Float")
-	assertCompletion(t, items, "Pi", "Float")
-}
-
-func TestCompletionDirectGoPackageTypesAndEnumConstants(t *testing.T) {
-	source := `use go:time
-
-fn main() {
-  time::
-}
-`
-
-	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 8})
-	assertCompletion(t, items, "Time", "time::Time")
-	assertCompletion(t, items, "January", "time::Month")
-	assertCompletion(t, items, "Now", "fn () time::Time")
-}
-
-func TestCompletionDirectGoPackageVariables(t *testing.T) {
-	source := `use go:os
-use go:encoding/base64 as base64
-
-fn main() {
-  os::
-  base64::
-}
-`
-
-	osItems := computeCompletions(source, "test.ard", protocol.Position{Line: 4, Character: 6})
-	assertCompletion(t, osItems, "Args", "[Str]")
-
-	base64Items := computeCompletions(source, "test.ard", protocol.Position{Line: 5, Character: 10})
-	assertCompletion(t, base64Items, "StdEncoding", "mut base64::Encoding")
-}
-
-func TestCompletionDirectGoPackageVariableInstanceMethods(t *testing.T) {
-	source := `use go:encoding/base64 as base64
-
-fn main() {
-  base64::StdEncoding.
-}
-`
-
-	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 22})
-	assertCompletion(t, items, "EncodeToString", "fn mut (src: [Byte]) Str")
-}
-
-func TestCompletionDirectGoTypeStaticMethods(t *testing.T) {
-	source := `use go:time
-
-fn main(value: time::Time) {
-  time::Time::
-}
-`
-
-	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 14})
-	assertCompletion(t, items, "Format", "fn (receiver: time::Time, layout: Str) Str")
-}
-
 func TestCompletionUserModuleStaticMembersExcludesTests(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
@@ -2252,200 +2125,6 @@ fn main() {
 }
 
 // TestHoverStaticFunctionSignatures verifies static function hovers include qualifier, params, and return type.
-func TestHoverStaticFunctionSignatures(t *testing.T) {
-	source := `use ard/io
-
-fn main() {
-  io::print("hello")
-  let input_str = io::read_line().or("")
-  let input = Int::from_str(input_str).or(-1)
-}
-`
-
-	tests := []struct {
-		name string
-		line uint32
-		char uint32
-		want string
-	}{
-		{name: "imported function", line: 3, char: 7, want: "fn io::print(value: ToString) Void"},
-		{name: "imported extern function", line: 4, char: 24, want: "fn io::read_line() Str!Str"},
-		{name: "prelude static function", line: 5, char: 20, want: "fn Int::from_str(str: Str) Int?"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, "test.ard", pos)
-			if info == nil {
-				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
-			}
-			if !strings.Contains(info.content, tt.want) {
-				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
-			}
-		})
-	}
-}
-
-func TestHoverDirectGoPackageConstant(t *testing.T) {
-	source := `use go:os
-
-fn main() {
-  os::O_WRONLY
-}
-`
-
-	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 7})
-	if info == nil {
-		t.Fatal("expected hover info, got nil")
-	}
-	if !strings.Contains(info.content, "os::O_WRONLY: Int") {
-		t.Fatalf("hover = %q", info.content)
-	}
-}
-
-func TestHoverDirectGoPackageVariable(t *testing.T) {
-	source := `use go:os
-
-fn main() {
-  os::Args
-}
-`
-
-	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 7})
-	if info == nil {
-		t.Fatal("expected hover info, got nil")
-	}
-	if !strings.Contains(info.content, "os::Args: [Str]") {
-		t.Fatalf("hover = %q", info.content)
-	}
-}
-
-func TestHoverDirectGoFunctionSignature(t *testing.T) {
-	source := `use go:strconv
-
-fn parse() Float!Str {
-  strconv::ParseFloat("1.5", 64)
-}
-`
-
-	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 14})
-	if info == nil {
-		t.Fatal("expected hover info, got nil")
-	}
-	want := "fn strconv::ParseFloat(s: Str, bitSize: Int) Float!Str"
-	if !strings.Contains(info.content, want) {
-		t.Fatalf("hover content = %q, want contains %q", info.content, want)
-	}
-}
-
-func TestHoverDirectGoInstanceMethodSignature(t *testing.T) {
-	source := `use go:time
-
-fn today() Str {
-  time::Now().Format("2006-01-02")
-}
-`
-
-	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 16})
-	if info == nil {
-		t.Fatal("expected hover info, got nil")
-	}
-	want := "fn time::Time.Format(layout: Str) Str"
-	if !strings.Contains(info.content, want) {
-		t.Fatalf("hover content = %q, want contains %q", info.content, want)
-	}
-}
-
-func TestHoverDirectGoCrossPackageTypeSignature(t *testing.T) {
-	source := `use go:io
-use go:net/http as http
-
-fn request(body: io::Reader) (mut http::Request)!Str {
-  http::NewRequest("GET", "https://example.com", body)
-}
-`
-
-	info := computeHover(source, "test.ard", protocol.Position{Line: 4, Character: 10})
-	if info == nil {
-		t.Fatal("expected hover info, got nil")
-	}
-	want := "fn http::NewRequest(method: Str, url: Str, body: io::Reader) (mut http::Request)!Str"
-	if !strings.Contains(info.content, want) {
-		t.Fatalf("hover content = %q, want contains %q", info.content, want)
-	}
-}
-
-func TestHoverDirectGoPointerReceiverMethodSignature(t *testing.T) {
-	source := `use go:os
-
-fn close(file: mut os::File) Void!Str {
-  file.Close()
-}
-`
-
-	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 8})
-	if info == nil {
-		t.Fatal("expected hover info, got nil")
-	}
-	want := "fn mut os::File.Close() Void!Str"
-	if !strings.Contains(info.content, want) {
-		t.Fatalf("hover content = %q, want contains %q", info.content, want)
-	}
-}
-
-func TestDirectGoHoverRejectsNamedPointerReturn(t *testing.T) {
-	client := checker.GoValueType{Kind: checker.GoValueOther, Expr: "pkg.Client", Named: true, ImportPath: "example.com/pkg", Package: "pkg", Name: "Client"}
-	namedPointer := checker.GoValueType{Kind: checker.GoValuePointer, Expr: "pkg.Handle", Named: true, ImportPath: "example.com/pkg", Package: "pkg", Name: "Handle", Elem: &client}
-	if got, ok := directGoHoverReturn([]checker.GoValueType{namedPointer}, directGoHoverContext{currentImportPath: "example.com/pkg", currentAlias: "pkg"}); ok {
-		t.Fatalf("named pointer return displayed as %q; expected unsupported", got)
-	}
-}
-
-func TestHoverDirectGoRejectsUnsupportedPointerReceiver(t *testing.T) {
-	root := t.TempDir()
-	statusDir := filepath.Join(root, "status")
-	appDir := filepath.Join(root, "app")
-	for _, dir := range []string{statusDir, appDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(statusDir, "go.mod"), []byte("module example.com/status\n\ngo 1.26.0\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(statusDir, "status.go"), []byte(`package status
-
-type State int
-
-const (
-	StateReady State = iota
-	StateDone
-)
-
-func (s *State) Mutate() {}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(fmt.Sprintf("module app\n\ngo 1.26.0\n\nrequire example.com/status v0.0.0\nreplace example.com/status => %s\n", statusDir)), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	filePath := filepath.Join(appDir, "main.ard")
-	source := `use go:example.com/status as status
-
-fn bad(state: mut status::State) {
-  state.Mutate()
-}
-`
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	info := computeHover(source, filePath, protocol.Position{Line: 3, Character: 9})
-	if info != nil && strings.Contains(info.content, "fn mut status::State.Mutate") {
-		t.Fatalf("hover content = %q; unsupported enum pointer receiver should not be advertised", info.content)
-	}
-}
-
 // TestHoverTraitMethodReference verifies trait-typed receiver method hovers.
 func TestHoverTraitMethodReference(t *testing.T) {
 	source := `fn render(value: Str::ToString) Str {
@@ -2571,7 +2250,6 @@ func TestDocumentCache(t *testing.T) {
 		t.Error("expected nil after close")
 	}
 }
-
 func TestRenameLocalVariable(t *testing.T) {
 	root := t.TempDir()
 	filePath := filepath.Join(root, "main.ard")
@@ -2587,7 +2265,6 @@ func TestRenameLocalVariable(t *testing.T) {
 	edit := computeRename(source, filePath, protocol.Position{Line: 1, Character: 7}, "total", nil)
 	assertRenameEdits(t, edit, filePath, []renameWant{{1, 6, 11}, {2, 13, 18}, {3, 2, 7}})
 }
-
 func TestRenameImportedFunction(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
@@ -2615,7 +2292,6 @@ fn main() {
 	assertRenameEdits(t, edit, modPath, []renameWant{{0, 3, 13}})
 	assertRenameEdits(t, edit, mainPath, []renameWant{{3, 13, 23}})
 }
-
 func TestRenameField(t *testing.T) {
 	root := t.TempDir()
 	filePath := filepath.Join(root, "main.ard")
@@ -2655,82 +2331,4 @@ func assertRenameEdits(t *testing.T, edit *protocol.WorkspaceEdit, filePath stri
 			t.Fatalf("edit[%d] range = %#v, want line %d chars %d-%d", i, got, want.line, want.start, want.end)
 		}
 	}
-}
-
-// TestDefinitionGoSymbols verifies go-to-definition resolves use go: references
-// to their Go source: the standard library and the bundled host ffi package.
-func TestDefinitionGoSymbols(t *testing.T) {
-	filePath := filepath.Join(t.TempDir(), "test.ard")
-
-	t.Run("go stdlib function", func(t *testing.T) {
-		source := "use go:strings\nfn main() {\n  let parts = strings::Split(\"a,b\", \",\")\n}\n"
-		loc := requireDefinition(t, source, filePath, 2, 25)
-		got := loc.URI.Filename()
-		if !strings.Contains(got, "strings") || !strings.HasSuffix(got, ".go") {
-			t.Fatalf("definition file = %q, want a strings .go source", got)
-		}
-	})
-
-	t.Run("bundled host ffi function", func(t *testing.T) {
-		source := "use go:ard/ffi\nfn main() {\n  let b = ffi::ByteFromInt(65)\n}\n"
-		loc := requireDefinition(t, source, filePath, 2, 16)
-		got := loc.URI.Filename()
-		if !strings.HasSuffix(got, ".go") || !strings.Contains(got, "ffi") {
-			t.Fatalf("definition file = %q, want the bundled ffi host source", got)
-		}
-	})
-
-	t.Run("go stdlib constant", func(t *testing.T) {
-		source := "use go:time\nfn main() {\n  let d = time::Second\n}\n"
-		loc := requireDefinition(t, source, filePath, 2, 16)
-		got := loc.URI.Filename()
-		if !strings.Contains(got, "time") || !strings.HasSuffix(got, ".go") {
-			t.Fatalf("definition file = %q, want a time .go source", got)
-		}
-	})
-
-	t.Run("go type in parameter annotation", func(t *testing.T) {
-		source := "use go:strings\nfn use_it(b: strings::Builder) {\n}\n"
-		loc := requireDefinition(t, source, filePath, 1, 24)
-		got := loc.URI.Filename()
-		if !strings.Contains(got, "strings") || !strings.HasSuffix(got, ".go") {
-			t.Fatalf("definition file = %q, want a strings .go source", got)
-		}
-	})
-
-	t.Run("go type in return annotation", func(t *testing.T) {
-		source := "use go:strings\nfn make() strings::Builder {\n  strings::Builder{}\n}\n"
-		loc := requireDefinition(t, source, filePath, 1, 22)
-		got := loc.URI.Filename()
-		if !strings.Contains(got, "strings") || !strings.HasSuffix(got, ".go") {
-			t.Fatalf("definition file = %q, want a strings .go source", got)
-		}
-	})
-
-	t.Run("method on a go value", func(t *testing.T) {
-		source := "use go:strings\nfn use_it(b: strings::Builder) {\n  b.WriteString(\"x\")\n}\n"
-		loc := requireDefinition(t, source, filePath, 2, 6)
-		got := loc.URI.Filename()
-		if !strings.Contains(got, "strings") || !strings.HasSuffix(got, ".go") {
-			t.Fatalf("definition file = %q, want a strings .go source", got)
-		}
-	})
-
-	t.Run("method on a struct-literal go value", func(t *testing.T) {
-		source := "use go:strings\nfn f() {\n  let w = strings::Builder{}\n  w.Len()\n}\n"
-		loc := requireDefinition(t, source, filePath, 3, 5)
-		got := loc.URI.Filename()
-		if !strings.Contains(got, "strings") || !strings.HasSuffix(got, ".go") {
-			t.Fatalf("definition file = %q, want a strings .go source", got)
-		}
-	})
-
-	t.Run("method on a chained go call result", func(t *testing.T) {
-		source := "use go:strings\nfn f() {\n  let r = strings::NewReplacer(\"a\", \"b\")\n  r.Replace(\"x\")\n}\n"
-		loc := requireDefinition(t, source, filePath, 3, 5)
-		got := loc.URI.Filename()
-		if !strings.Contains(got, "strings") || !strings.HasSuffix(got, ".go") {
-			t.Fatalf("definition file = %q, want a strings .go source", got)
-		}
-	})
 }

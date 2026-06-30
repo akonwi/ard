@@ -9,7 +9,6 @@ func TestTraitEqualityIncludesModulePath(t *testing.T) {
 		t.Fatal("same-named traits from different modules should not be equal")
 	}
 }
-
 func TestUnresolvedTypeVarGetReturnsNil(t *testing.T) {
 	unknown := &TypeVar{name: "unknown"}
 
@@ -17,7 +16,6 @@ func TestUnresolvedTypeVarGetReturnsNil(t *testing.T) {
 		t.Fatalf("unresolved TypeVar.get() = %v, want nil", got)
 	}
 }
-
 func TestMaybeStringParenthesizesCompositeTypes(t *testing.T) {
 	functionType := &FunctionDef{
 		Name: "<function>",
@@ -48,7 +46,6 @@ func TestMaybeStringParenthesizesCompositeTypes(t *testing.T) {
 		t.Fatalf("nested function maybe string = %q, want %q", got, want)
 	}
 }
-
 func TestTypeEquality(t *testing.T) {
 	var tests = []struct {
 		left   Type

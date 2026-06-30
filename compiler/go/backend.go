@@ -3,8 +3,6 @@ package gotarget
 import (
 	"encoding/json"
 	"fmt"
-	"go/ast"
-	"go/parser"
 	"go/token"
 	"os"
 	"os/exec"
@@ -290,9 +288,6 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 			return err
 		}
 	}
-	if err := writeDependencyFFICompanions(dir, program, options.ProjectInfo); err != nil {
-		return err
-	}
 	goMod, err := generatedGoMod(dir, program, options.ProjectInfo)
 	if err != nil {
 		return err
@@ -314,33 +309,14 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 	}
 	goMod += ardRequirement
 
-	// The project's own Go module is wired in via require+replace so that
-	// `use go:<module>/...` imports of the project's own packages build.
-	projectGoModule := projectGoModuleName(projectInfo)
-	importsProjectGoModule := projectGoModule != "" && programImportsGoModule(program, projectGoModule)
-
 	requireSeen := requireKeys(goMod)
 	requires := make([]string, 0)
 	addDependencyGoModRequirements(&requires, requireSeen, program, projectInfo)
-	if projectUsesDirectGo(program, projectInfo) {
-		addProjectGoModRequirements(&requires, requireSeen, projectInfo)
-	}
-	if importsProjectGoModule && !requireSeen[projectGoModule] {
-		requires = append(requires, projectGoModule+" v0.0.0")
-		requireSeen[projectGoModule] = true
-	}
 	addGoModRequirementsFromFile(&requires, requireSeen, filepath.Join(dir, "go.mod"))
 	goMod += formatRequireBlock(requires)
 
 	replaceSeen := replaceKeys(goMod)
 	replaces := make([]string, 0)
-	if importsProjectGoModule && !replaceSeen[projectGoModule] {
-		replaces = append(replaces, projectGoModule+" => "+projectInfo.RootPath)
-		replaceSeen[projectGoModule] = true
-	}
-	if projectUsesDirectGo(program, projectInfo) {
-		addProjectGoModReplaces(&replaces, replaceSeen, projectInfo)
-	}
 	addDependencyGoModReplaces(&replaces, replaceSeen, program, projectInfo)
 	addGoModReplacesFromFile(&replaces, replaceSeen, filepath.Join(dir, "go.mod"), dir)
 	goMod += formatReplaceBlock(replaces)
@@ -446,7 +422,6 @@ func addProjectGoModReplaces(out *[]string, seen map[string]bool, projectInfo *c
 
 // projectGoModuleName returns the module path declared in the project's go.mod,
 // or "" if the project has no Go module. This is the module that owns the
-// project's own Go packages imported via `use go:<module>/...`.
 func projectGoModuleName(projectInfo *checker.ProjectInfo) string {
 	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
 		return ""
@@ -462,32 +437,6 @@ func projectGoModuleName(projectInfo *checker.ProjectInfo) string {
 		}
 	}
 	return ""
-}
-
-// programImportsGoModule reports whether any `use go:` binding in the program
-// imports a package owned by moduleName (the module itself or a subpackage).
-func programImportsGoModule(program *air.Program, moduleName string) bool {
-	if program == nil || moduleName == "" {
-		return false
-	}
-	owns := func(importPath string) bool {
-		return importPath == moduleName || strings.HasPrefix(importPath, moduleName+"/")
-	}
-	for _, ext := range program.Externs {
-		if binding, ok := ext.Bindings["go"]; ok {
-			if direct, ok, _ := parseDirectGoExternBinding(binding); ok && owns(direct.ImportPath) {
-				return true
-			}
-		}
-	}
-	for _, typ := range program.Types {
-		if typ.Kind == air.TypeExtern && typ.ExternBinding != "" {
-			if direct, ok, _ := parseDirectGoExternBinding(typ.ExternBinding); ok && owns(direct.ImportPath) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func addDependencyGoModReplaces(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
@@ -615,9 +564,6 @@ func mergeGoSum(dir string, program *air.Program, projectInfo *checker.ProjectIn
 	lines := make([]string, 0)
 	seen := map[string]bool{}
 	addGoSumLines(&lines, seen, goSumPath)
-	if (projectUsesDirectGo(program, projectInfo)) && projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
-		addGoSumLines(&lines, seen, filepath.Join(projectInfo.RootPath, "go.sum"))
-	}
 	for _, root := range dependencyGoModPackages(program, projectInfo) {
 		addGoSumLines(&lines, seen, filepath.Join(root, "go.sum"))
 	}
@@ -809,117 +755,13 @@ func artifactRootDir(pathHint string) (string, error) {
 	return candidate, nil
 }
 
-func copyProjectFFIFile(sourcePath, destPath string) error {
-	content, err := os.ReadFile(sourcePath)
-	if err != nil {
-		return fmt.Errorf("read project Go FFI companion %s: %w", sourcePath, err)
-	}
-	file, err := parser.ParseFile(token.NewFileSet(), sourcePath, content, parser.PackageClauseOnly)
-	if err != nil {
-		return fmt.Errorf("parse project Go FFI companion %s: %w", sourcePath, err)
-	}
-	if file.Name == nil || file.Name.Name != "ffi" {
-		pkg := ""
-		if file.Name != nil {
-			pkg = file.Name.Name
-		}
-		return fmt.Errorf("project Go FFI companion %s must use package ffi, got package %s", sourcePath, pkg)
-	}
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(destPath, content, 0o644); err != nil {
-		return err
-	}
-	return nil
-}
-
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
 
-func writeDependencyFFICompanions(dir string, program *air.Program, projectInfo *checker.ProjectInfo) error {
-	if projectInfo == nil {
-		return nil
-	}
-	used := dependencyFFIPackages(program, projectInfo)
-	for key, root := range used {
-		matches, err := filepath.Glob(filepath.Join(root, "ffi", "*.go"))
-		if err != nil {
-			return err
-		}
-		if len(matches) == 0 {
-			return fmt.Errorf("go target uses dependency externs from %s but no Go FFI companion was found at %s", key, filepath.Join(root, "ffi", "*.go"))
-		}
-		ffiDir := filepath.Join(dir, "depffi", sanitizeName(key))
-		for _, sourcePath := range matches {
-			if err := copyProjectFFIFile(sourcePath, filepath.Join(ffiDir, filepath.Base(sourcePath))); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func dependencyGoModPackages(program *air.Program, projectInfo *checker.ProjectInfo) map[string]string {
-	used := dependencyFFIPackages(program, projectInfo)
-	for key, root := range dependencyDirectGoPackages(program, projectInfo) {
-		used[key] = root
-	}
-	return used
-}
-
-func dependencyDirectGoPackages(program *air.Program, projectInfo *checker.ProjectInfo) map[string]string {
-	used := map[string]string{}
-	if program == nil || projectInfo == nil {
-		return used
-	}
-	for _, ext := range program.Externs {
-		if !externHasDirectGoBinding(ext) {
-			continue
-		}
-		if key, root, ok := dependencyPackageForModulePath(modulePathForExtern(program, ext), projectInfo); ok {
-			used[key] = root
-		}
-	}
-	for _, module := range program.Modules {
-		if key, root, ok := dependencyPackageForModulePath(module.Path, projectInfo); ok && moduleUsesDirectGoTypes(program, module) {
-			used[key] = root
-		}
-	}
-	return used
-}
-
-func dependencyFFIPackages(program *air.Program, projectInfo *checker.ProjectInfo) map[string]string {
-	used := map[string]string{}
-	if program == nil || projectInfo == nil {
-		return used
-	}
-	for _, ext := range program.Externs {
-		if externHasDirectGoBinding(ext) {
-			continue
-		}
-		if key, root, ok := dependencyPackageForModulePath(modulePathForExtern(program, ext), projectInfo); ok {
-			used[key] = root
-		}
-	}
-	for _, typ := range program.Types {
-		if typ.Kind != air.TypeExtern || strings.TrimSpace(typ.ExternBinding) == "" || typeHasDirectGoBinding(typ) {
-			continue
-		}
-		if key, root, ok := dependencyPackageForModulePath(typ.ModulePath, projectInfo); ok {
-			used[key] = root
-		}
-	}
-	return used
-}
-
-func modulePathForExtern(program *air.Program, ext air.Extern) string {
-	if program != nil && int(ext.Module) >= 0 && int(ext.Module) < len(program.Modules) {
-		return program.Modules[ext.Module].Path
-	}
-	return ""
+	return map[string]string{}
 }
 
 func dependencyAliasForModulePath(modulePath string, projectInfo *checker.ProjectInfo) (string, bool) {
@@ -952,296 +794,6 @@ func dependencyPackageForModulePath(modulePath string, projectInfo *checker.Proj
 		}
 	}
 	return "", "", false
-}
-
-func externHasDirectGoBinding(ext air.Extern) bool {
-	if binding := strings.TrimSpace(ext.Bindings["go"]); strings.HasPrefix(binding, "go:") {
-		return true
-	}
-	return false
-}
-
-func typeHasDirectGoBinding(typ air.TypeInfo) bool {
-	return (typ.Kind == air.TypeExtern || typ.Kind == air.TypeEnum) && strings.HasPrefix(strings.TrimSpace(typ.ExternBinding), "go:")
-}
-
-func projectUsesDirectGo(program *air.Program, projectInfo *checker.ProjectInfo) bool {
-	if program == nil {
-		return false
-	}
-	for _, ext := range program.Externs {
-		if !externHasDirectGoBinding(ext) {
-			continue
-		}
-		modulePath := modulePathForExtern(program, ext)
-		if strings.HasPrefix(modulePath, "ard/") {
-			continue
-		}
-		if _, ok := dependencyAliasForModulePath(modulePath, projectInfo); ok {
-			continue
-		}
-		return true
-	}
-	for _, module := range program.Modules {
-		if strings.HasPrefix(module.Path, "ard/") {
-			continue
-		}
-		if _, ok := dependencyAliasForModulePath(module.Path, projectInfo); ok {
-			continue
-		}
-		if moduleInterfaceUsesDirectGoTypes(program, module) {
-			return true
-		}
-	}
-	return false
-}
-
-func moduleInterfaceUsesDirectGoTypes(program *air.Program, module air.Module) bool {
-	for _, typeID := range module.Types {
-		if typeUsesDirectGo(program, typeID, map[air.TypeID]bool{}) {
-			return true
-		}
-	}
-	for _, globalID := range module.Globals {
-		if int(globalID) < 0 || int(globalID) >= len(program.Globals) {
-			continue
-		}
-		if exprUsesDirectGoDirectly(program, &program.Globals[globalID].Value) {
-			return true
-		}
-	}
-	for _, functionID := range module.Functions {
-		if int(functionID) < 0 || int(functionID) >= len(program.Functions) {
-			continue
-		}
-		fn := program.Functions[functionID]
-		if signatureUsesDirectGo(program, fn.Signature) || blockUsesDirectGoDirectly(program, fn.Body) {
-			return true
-		}
-	}
-	return false
-}
-
-func moduleUsesDirectGoTypes(program *air.Program, module air.Module) bool {
-	for _, typeID := range module.Types {
-		if typeUsesDirectGo(program, typeID, map[air.TypeID]bool{}) {
-			return true
-		}
-	}
-	for _, globalID := range module.Globals {
-		if int(globalID) < 0 || int(globalID) >= len(program.Globals) {
-			continue
-		}
-		global := program.Globals[globalID]
-		if typeUsesDirectGo(program, global.Type, map[air.TypeID]bool{}) || exprUsesDirectGoDirectly(program, &global.Value) {
-			return true
-		}
-	}
-	for _, functionID := range module.Functions {
-		if int(functionID) < 0 || int(functionID) >= len(program.Functions) {
-			continue
-		}
-		fn := program.Functions[functionID]
-		if signatureUsesDirectGo(program, fn.Signature) || blockUsesDirectGoDirectly(program, fn.Body) {
-			return true
-		}
-		for _, local := range fn.Locals {
-			if typeUsesDirectGo(program, local.Type, map[air.TypeID]bool{}) {
-				return true
-			}
-		}
-		for _, capture := range fn.Captures {
-			if typeUsesDirectGo(program, capture.Type, map[air.TypeID]bool{}) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func signatureUsesDirectGo(program *air.Program, signature air.Signature) bool {
-	for _, param := range signature.Params {
-		if typeUsesDirectGo(program, param.Type, map[air.TypeID]bool{}) {
-			return true
-		}
-	}
-	return typeUsesDirectGo(program, signature.Return, map[air.TypeID]bool{})
-}
-
-func typeUsesDirectGo(program *air.Program, typeID air.TypeID, seen map[air.TypeID]bool) bool {
-	if program == nil || typeID == air.NoType || int(typeID) < 1 || int(typeID) > len(program.Types) {
-		return false
-	}
-	if seen[typeID] {
-		return false
-	}
-	seen[typeID] = true
-	typ := program.Types[typeID-1]
-	if typeHasDirectGoBinding(typ) {
-		return true
-	}
-	switch typ.Kind {
-	case air.TypeList, air.TypeMaybe:
-		return typeUsesDirectGo(program, typ.Elem, seen)
-	case air.TypeMap:
-		return typeUsesDirectGo(program, typ.Key, seen) || typeUsesDirectGo(program, typ.Value, seen)
-	case air.TypeResult:
-		return typeUsesDirectGo(program, typ.Value, seen) || typeUsesDirectGo(program, typ.Error, seen)
-	case air.TypeStruct:
-		for _, field := range typ.Fields {
-			if typeUsesDirectGo(program, field.Type, seen) {
-				return true
-			}
-		}
-	case air.TypeUnion:
-		for _, member := range typ.Members {
-			if typeUsesDirectGo(program, member.Type, seen) {
-				return true
-			}
-		}
-	case air.TypeFunction:
-		for _, param := range typ.Params {
-			if typeUsesDirectGo(program, param, seen) {
-				return true
-			}
-		}
-		return typeUsesDirectGo(program, typ.Return, seen)
-	}
-	return false
-}
-
-func exprUsesDirectGoDirectly(program *air.Program, expr *air.Expr) bool {
-	if program == nil || expr == nil {
-		return false
-	}
-	if expr.Kind == air.ExprCallExtern && int(expr.Extern) >= 0 && int(expr.Extern) < len(program.Externs) && externHasDirectGoBinding(program.Externs[expr.Extern]) {
-		return true
-	}
-	if expr.Kind == air.ExprDirectGoPackageValue || expr.Kind == air.ExprDirectGoFieldAccess || expr.Kind == air.ExprDirectGoStructLiteral {
-		return true
-	}
-	if expr.Kind == air.ExprEnumVariant && typeUsesDirectGo(program, expr.Type, map[air.TypeID]bool{}) {
-		return true
-	}
-	for i := range expr.Args {
-		if exprUsesDirectGoDirectly(program, &expr.Args[i]) {
-			return true
-		}
-	}
-	for i := range expr.Entries {
-		if exprUsesDirectGoDirectly(program, &expr.Entries[i].Key) || exprUsesDirectGoDirectly(program, &expr.Entries[i].Value) {
-			return true
-		}
-	}
-	for i := range expr.Fields {
-		if exprUsesDirectGoDirectly(program, &expr.Fields[i].Value) {
-			return true
-		}
-	}
-	if exprUsesDirectGoDirectly(program, expr.Target) || exprUsesDirectGoDirectly(program, expr.Left) || exprUsesDirectGoDirectly(program, expr.Right) || exprUsesDirectGoDirectly(program, expr.Condition) {
-		return true
-	}
-	if blockUsesDirectGoDirectly(program, expr.Body) || blockUsesDirectGoDirectly(program, expr.Then) || blockUsesDirectGoDirectly(program, expr.Else) || blockUsesDirectGoDirectly(program, expr.CatchAll) || blockUsesDirectGoDirectly(program, expr.Some) || blockUsesDirectGoDirectly(program, expr.None) || blockUsesDirectGoDirectly(program, expr.Ok) || blockUsesDirectGoDirectly(program, expr.Err) || blockUsesDirectGoDirectly(program, expr.Catch) {
-		return true
-	}
-	for i := range expr.EnumCases {
-		if blockUsesDirectGoDirectly(program, expr.EnumCases[i].Body) {
-			return true
-		}
-	}
-	for i := range expr.IntCases {
-		if blockUsesDirectGoDirectly(program, expr.IntCases[i].Body) {
-			return true
-		}
-	}
-	for i := range expr.StrCases {
-		if blockUsesDirectGoDirectly(program, expr.StrCases[i].Body) {
-			return true
-		}
-	}
-	for i := range expr.RangeCases {
-		if blockUsesDirectGoDirectly(program, expr.RangeCases[i].Body) {
-			return true
-		}
-	}
-	for i := range expr.UnionCases {
-		if blockUsesDirectGoDirectly(program, expr.UnionCases[i].Body) {
-			return true
-		}
-	}
-	return false
-}
-
-func blockUsesDirectGoDirectly(program *air.Program, block air.Block) bool {
-	for i := range block.Stmts {
-		stmt := &block.Stmts[i]
-		if exprUsesDirectGoDirectly(program, stmt.Value) || exprUsesDirectGoDirectly(program, stmt.Expr) || exprUsesDirectGoDirectly(program, stmt.Target) || exprUsesDirectGoDirectly(program, stmt.Condition) || blockUsesDirectGoDirectly(program, stmt.Body) {
-			return true
-		}
-	}
-	return exprUsesDirectGoDirectly(program, block.Result)
-}
-
-func exprUsesProjectFFIType(expr ast.Expr, projectAlias string) bool {
-	switch node := expr.(type) {
-	case *ast.Ident:
-		return false
-	case *ast.StarExpr:
-		return exprUsesProjectFFIType(node.X, projectAlias)
-	case *ast.ArrayType:
-		return exprUsesProjectFFIType(node.Elt, projectAlias)
-	case *ast.MapType:
-		return exprUsesProjectFFIType(node.Key, projectAlias) || exprUsesProjectFFIType(node.Value, projectAlias)
-	case *ast.IndexExpr:
-		return exprUsesProjectFFIType(node.X, projectAlias) || exprUsesProjectFFIType(node.Index, projectAlias)
-	case *ast.IndexListExpr:
-		if exprUsesProjectFFIType(node.X, projectAlias) {
-			return true
-		}
-		for _, index := range node.Indices {
-			if exprUsesProjectFFIType(index, projectAlias) {
-				return true
-			}
-		}
-		return false
-	case *ast.ParenExpr:
-		return exprUsesProjectFFIType(node.X, projectAlias)
-	case *ast.SelectorExpr:
-		ident, ok := node.X.(*ast.Ident)
-		return ok && ident.Name == projectAlias
-	default:
-		return false
-	}
-}
-
-func projectFFIPackageAlias(projectInfo *checker.ProjectInfo) string {
-	name := "project"
-	if projectInfo != nil {
-		name = sanitizeName(projectInfo.ProjectName)
-	}
-	if !token.IsIdentifier(name) {
-		return "project"
-	}
-	return name
-}
-
-func projectFFIImportPath(projectInfo *checker.ProjectInfo) string {
-	return "generated/" + projectFFIPackageAlias(projectInfo)
-}
-
-func registerProjectFFIImports(imports map[string]string, projectInfo *checker.ProjectInfo) {
-	imports[projectFFIPackageAlias(projectInfo)] = projectFFIImportPath(projectInfo)
-}
-
-func projectHasFFICompanions(projectInfo *checker.ProjectInfo) bool {
-	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
-		return false
-	}
-	if fileExists(filepath.Join(projectInfo.RootPath, "ffi.go")) {
-		return true
-	}
-	matches, err := filepath.Glob(filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
-	return err == nil && len(matches) > 0
 }
 
 func writeArdModuleDependency(dir string) (string, error) {

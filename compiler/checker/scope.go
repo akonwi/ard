@@ -214,10 +214,6 @@ func extractGenericNames(t Type, names map[string]bool) {
 			extractGenericNames(param.Type, names)
 		}
 		extractGenericNames(t.ReturnType, names)
-	case *ExternType:
-		for _, typeArg := range t.TypeArgs {
-			extractGenericNames(typeArg, names)
-		}
 	}
 }
 
@@ -272,13 +268,6 @@ func hasGenericsInTypeSeen(t Type, seen map[Type]struct{}) bool {
 			}
 		}
 		return hasGenericsInTypeSeen(t.ReturnType, seen)
-	case *ExternType:
-		for _, typeArg := range t.TypeArgs {
-			if hasGenericsInTypeSeen(typeArg, seen) {
-				return true
-			}
-		}
-		return false
 	default:
 		return false
 	}
@@ -399,23 +388,6 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			TypeArgs:      newTypeArgs,
 			Private:       t.Private,
 		}
-	case *ExternType:
-		if len(t.TypeArgs) == 0 {
-			return t
-		}
-		newTypeArgs := make([]Type, len(t.TypeArgs))
-		changed := false
-		for i, typeArg := range t.TypeArgs {
-			newTypeArg := replaceGeneric(typeArg, genericName, concreteType)
-			newTypeArgs[i] = newTypeArg
-			if newTypeArg != typeArg {
-				changed = true
-			}
-		}
-		if !changed {
-			return t
-		}
-		return cloneExternTypeWithTypeArgs(t, newTypeArgs)
 	default:
 		return t
 	}
@@ -573,10 +545,6 @@ func collectUnboundGenericsFromType(t Type, params *[]string, seenGenerics map[s
 			collectUnboundGenericsFromType(param.Type, params, seenGenerics, seenTypes)
 		}
 		collectUnboundGenericsFromType(typ.ReturnType, params, seenGenerics, seenTypes)
-	case *ExternType:
-		for _, typeArg := range typ.TypeArgs {
-			collectUnboundGenericsFromType(typeArg, params, seenGenerics, seenTypes)
-		}
 	}
 }
 
@@ -623,12 +591,6 @@ func copyTypeWithTypeVarMapSeen(t Type, typeVarMap map[string]*TypeVar, seenStru
 		return copyStructWithTypeVarMapSeen(typ, typeVarMap, seenStructs)
 	case *FunctionDef:
 		return copyFunctionWithTypeVarMap(typ, typeVarMap)
-	case *ExternType:
-		newTypeArgs := make([]Type, len(typ.TypeArgs))
-		for i, typeArg := range typ.TypeArgs {
-			newTypeArgs[i] = copyTypeWithTypeVarMapSeen(typeArg, typeVarMap, seenStructs)
-		}
-		return cloneExternTypeWithTypeArgs(typ, newTypeArgs)
 	default:
 		return t
 	}

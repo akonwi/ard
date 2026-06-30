@@ -79,7 +79,6 @@ func (c *recordingConn) lastDiagnostics(t *testing.T) *protocol.PublishDiagnosti
 	}
 	return params
 }
-
 func TestParseAndCheckWithError(t *testing.T) {
 	source := `let x: Int = "hello"`
 	diags, err := parseAndCheck(source, "/tmp/test.ard")
@@ -127,7 +126,6 @@ func TestParseAndCheckWithParseError(t *testing.T) {
 	}
 	t.Logf("parse error diagnostics: %v", diags)
 }
-
 func TestParseAndCheckUsesOpenDocumentOverlaysForImports(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
@@ -172,7 +170,6 @@ func TestPublishDiagnosticsLifecycle(t *testing.T) {
 	server.cache.Close(docURI)
 	server.publishDiagnostics(ctx, docURI)
 }
-
 func TestPublishDiagnosticsIncludesDocumentVersion(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
@@ -190,7 +187,6 @@ func TestPublishDiagnosticsIncludesDocumentVersion(t *testing.T) {
 		t.Fatalf("expected no diagnostics, got %#v", params.Diagnostics)
 	}
 }
-
 func TestPublishDiagnosticsClearsClosedDocumentDiagnostics(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
@@ -207,7 +203,6 @@ func TestPublishDiagnosticsClearsClosedDocumentDiagnostics(t *testing.T) {
 		t.Fatalf("expected diagnostics to be cleared, got %#v", params.Diagnostics)
 	}
 }
-
 func TestPublishDiagnosticsDiscardsStaleOverlaySnapshot(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
@@ -240,7 +235,6 @@ func TestPublishDiagnosticsDiscardsStaleOverlaySnapshot(t *testing.T) {
 		t.Fatalf("published %d stale diagnostic notifications, want none", got)
 	}
 }
-
 func TestPublishDiagnosticsHandlesNonFileURI(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
@@ -262,7 +256,6 @@ func TestPublishDiagnosticsHandlesNonFileURI(t *testing.T) {
 		t.Fatalf("diagnostic message = %q", message)
 	}
 }
-
 func TestPublishDiagnosticsSkipsNonFileOverlays(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
@@ -278,7 +271,6 @@ func TestPublishDiagnosticsSkipsNonFileOverlays(t *testing.T) {
 		t.Fatalf("expected no diagnostics, got %#v", params.Diagnostics)
 	}
 }
-
 func TestPublishDiagnosticsReportsAnalysisPanic(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()

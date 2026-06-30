@@ -2,7 +2,6 @@ package checker
 
 import (
 	"fmt"
-	"go/types"
 	"strings"
 )
 
@@ -11,10 +10,6 @@ func areCompatible(expected Type, actual Type) bool {
 	if trait, ok := expected.(*Trait); ok {
 		return actual.hasTrait(trait)
 	}
-	if directGoInterfaceCompatible(expected, actual) {
-		return true
-	}
-
 	return expected.equal(actual)
 }
 
@@ -1045,62 +1040,3 @@ func (d dynamicType) equal(other Type) bool {
 func (d dynamicType) hasTrait(trait *Trait) bool { return false }
 
 var Dynamic = &dynamicType{}
-
-// ExternType represents an opaque type whose values can only be created by FFI.
-// Identity is by name plus any instantiated type arguments.
-type ExternType struct {
-	Name_            string
-	GenericParams    []string
-	TypeArgs         []Type
-	ExternalBinding  string
-	ExternalBindings map[string]string
-
-	// Direct Go metadata is populated for `use go:` named types when available.
-	// Interface metadata lets named Go interfaces participate in Ard assignment
-	// compatibility similarly to traits while still lowering as native Go types.
-	DirectGoInterface            bool
-	DirectGoHasUnexportedMethods bool
-	DirectGoMethods              map[string]GoMethod
-	DirectGoValueMethods         map[string]GoMethod
-	DirectGoPointerMethods       map[string]GoMethod
-	DirectGoType                 types.Type
-
-	private bool
-}
-
-func cloneExternTypeWithTypeArgs(e *ExternType, typeArgs []Type) *ExternType {
-	if e == nil {
-		return nil
-	}
-	return &ExternType{
-		Name_:                        e.Name_,
-		GenericParams:                append([]string(nil), e.GenericParams...),
-		TypeArgs:                     typeArgs,
-		ExternalBinding:              e.ExternalBinding,
-		ExternalBindings:             cloneExternalBindings(e.ExternalBindings),
-		DirectGoInterface:            e.DirectGoInterface,
-		DirectGoHasUnexportedMethods: e.DirectGoHasUnexportedMethods,
-		DirectGoMethods:              cloneGoMethodMap(e.DirectGoMethods),
-		DirectGoValueMethods:         cloneGoMethodMap(e.DirectGoValueMethods),
-		DirectGoPointerMethods:       cloneGoMethodMap(e.DirectGoPointerMethods),
-		DirectGoType:                 e.DirectGoType,
-		private:                      e.private,
-	}
-}
-
-func (e *ExternType) String() string {
-	if len(e.TypeArgs) == 0 {
-		return e.Name_
-	}
-	parts := make([]string, len(e.TypeArgs))
-	for i, arg := range e.TypeArgs {
-		parts[i] = arg.String()
-	}
-	return e.Name_ + "<" + strings.Join(parts, ", ") + ">"
-}
-func (e *ExternType) get(name string) Type { return nil }
-func (e *ExternType) equal(other Type) bool {
-	return equalTypes(e, other)
-}
-func (e *ExternType) hasTrait(trait *Trait) bool { return false }
-func (e *ExternType) NonProducing()              {}

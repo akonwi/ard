@@ -86,7 +86,6 @@ func TestEnumDefinitions(t *testing.T) {
 		},
 	})
 }
-
 func TestMatchingOnEnums(t *testing.T) {
 	runTests(t, []test{
 		{

@@ -80,7 +80,6 @@ ard = ">= 0.1.0"`
 		t.Errorf("Expected nested path '%s', got '%s'", expectedPath, filePath)
 	}
 }
-
 func TestUserModuleImports(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_checker_integration_*")
@@ -145,7 +144,6 @@ fn main() Int {
 		t.Error("Expected utils module to be a UserModule")
 	}
 }
-
 func TestSameNamedGenericStructsFromDifferentModulesAreNominallyDistinct(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -191,7 +189,6 @@ fn main() {
 		t.Fatalf("diagnostics = %v, want type mismatch", c.Diagnostics())
 	}
 }
-
 func TestSameNamedStructsFromDifferentModulesAreNominallyDistinct(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -254,7 +251,6 @@ func diagnosticsString(diags []checker.Diagnostic) string {
 	}
 	return strings.Join(parts, "\n")
 }
-
 func TestUserModuleSymbolResolution(t *testing.T) {
 	// Create temporary directory structure
 	tempDir, err := os.MkdirTemp("", "ard_symbol_resolution_")
@@ -339,7 +335,6 @@ fn main() Int {
 		t.Error("Expected math module to be a UserModule")
 	}
 }
-
 func TestUserModulePrivateStructMethodAccessError(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -412,7 +407,6 @@ let x = c.secret()`
 		}
 	})
 }
-
 func TestUserModulePrivateAccessError(t *testing.T) {
 	// Create temporary directory structure
 	tempDir, err := os.MkdirTemp("", "ard_private_access_")
@@ -471,7 +465,6 @@ fn main() Int {
 		t.Errorf("Expected 'Undefined: utils::private_helper' error, got: %v", diagnostics)
 	}
 }
-
 func TestUserModulePrivateUnionAccessError(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -541,7 +534,6 @@ fn main() utils::Secret {
 	}
 	t.Fatalf("expected private union diagnostic for utils::Secret, got: %v", diagnostics)
 }
-
 func TestUserModuleCaching(t *testing.T) {
 	// Create temporary directory structure
 	tempDir, err := os.MkdirTemp("", "ard_caching_")
@@ -622,7 +614,6 @@ fn func2() Int {
 		t.Error("Expected modules to be the same instance (cached)")
 	}
 }
-
 func TestUserModuleErrors(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_error_test_*")
@@ -690,7 +681,6 @@ ard = ">= 0.1.0"`
 		})
 	}
 }
-
 func TestModuleResolverWithoutArdToml(t *testing.T) {
 	// Create a temporary directory without ard.toml
 	tempDir, err := os.MkdirTemp("", "fallback_project_*")
@@ -729,7 +719,6 @@ func TestModuleResolverWithoutArdToml(t *testing.T) {
 		t.Errorf("Expected path '%s', got '%s'", expectedPath, filePath)
 	}
 }
-
 func TestLoadModule(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_load_module_test_*")
@@ -786,7 +775,6 @@ private fn private_helper() Str {
 		t.Errorf("Expected 0 imports, got %d", len(program.Imports))
 	}
 }
-
 func TestLoadModuleErrors(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_load_error_test_*")
@@ -854,7 +842,6 @@ ard = ">= 0.1.0"`
 		})
 	}
 }
-
 func TestModuleAST_Caching(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_caching_test_*")
@@ -922,7 +909,6 @@ ard = ">= 0.1.0"`
 		t.Error("Expected third call to also return cached pointer")
 	}
 }
-
 func TestCircularDependencyDetection(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_circular_dep_test_*")
@@ -983,7 +969,6 @@ fn func_b() Int {
 		t.Errorf("Expected dependency chain in error message, got: %v", err)
 	}
 }
-
 func TestComplexCircularDependency(t *testing.T) {
 	// Test A -> B -> C -> A circular dependency
 	tempDir, err := os.MkdirTemp("", "ard_complex_circular_test_*")
@@ -1034,7 +1019,6 @@ fn func_c() Int { 3 }`,
 		t.Errorf("Expected circular dependency error, got: %v", err)
 	}
 }
-
 func TestNonCircularDependencies(t *testing.T) {
 	// Test that valid dependency chains work fine
 	tempDir, err := os.MkdirTemp("", "ard_valid_deps_test_*")
@@ -1088,7 +1072,6 @@ fn func_b() Int { 2 }`,
 		t.Errorf("Expected 1 import, got %d", len(program.Imports))
 	}
 }
-
 func TestVariableModuleExports(t *testing.T) {
 	// Create temporary directory structure
 	tempDir, err := os.MkdirTemp("", "ard_variable_exports_")
@@ -1171,7 +1154,6 @@ fn main() Str {
 		t.Error("Expected constants module to be a UserModule")
 	}
 }
-
 func TestSymbolExtraction(t *testing.T) {
 	// Create test module with public and private symbols
 	moduleContent := `
@@ -1277,7 +1259,6 @@ mut private_variable: Str = "secret"
 		t.Error("Expected nonexistent symbol to be nil")
 	}
 }
-
 func TestTestDirCannotAccessPrivateSymbols(t *testing.T) {
 	samplesDir := filepath.Join("..", "samples")
 	testDir := filepath.Join(samplesDir, "test")

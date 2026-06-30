@@ -53,7 +53,6 @@ type lowerer struct {
 	traits       map[string]TraitID
 	impls        map[string]ImplID
 	functions    map[string]FunctionID
-	externs      map[string]ExternID
 	globals      map[string]GlobalID
 
 	loweringModules          map[string]bool
@@ -93,7 +92,6 @@ func newLowerer(options LowerOptions) *lowerer {
 		traits:       map[string]TraitID{},
 		impls:        map[string]ImplID{},
 		functions:    map[string]FunctionID{},
-		externs:      map[string]ExternID{},
 		globals:      map[string]GlobalID{},
 
 		loweringModules:          map[string]bool{},
@@ -824,10 +822,6 @@ func (fl *functionLowerer) bindTypeVars(pattern checker.Type, actual TypeID) {
 				}
 			}
 		}
-	case *checker.ExternType:
-		if actualInfo.Kind == TypeExtern && typ.Name_ == "Chan" && len(typ.TypeArgs) == 1 && actualInfo.Elem != NoType {
-			fl.bindTypeVars(typ.TypeArgs[0], actualInfo.Elem)
-		}
 	}
 }
 
@@ -964,24 +958,10 @@ func (fl *functionLowerer) internResolvedStructType(typ *checker.StructDef) (Typ
 	return fl.internStructTypeWithInterner(typ, fl.internResolvedType)
 }
 
-// internStructFieldType interns a struct field's type and reports whether it is
-// a write-through mutable-reference field.
-//
-// A `mut <direct-Go handle>` field (e.g. `*sql.DB`) is a pointer-valued handle:
-// the Ard value IS the Go pointer. It is interned as a plain pointer-extern
-// field (mutable=false), mirroring internType, so the backend's mutable-
-// reference machinery (&-on-store, *-on-read) does not apply to it.
-//
-// A `mut T` over any other base is a borrow of a mutable lvalue: it is interned
-// as the base type plus the Mutable flag, and the backend lowers it as `*T`
-// with the &/* machinery.
 // internFunctionParamType interns a function parameter's type and reports its
 // effective AIR mutability, reconciling the two ways a `mut T` parameter is
 // represented (a MutableRef baked into the type, or the Mutable flag with a
-// plain type). It mirrors internStructFieldType: a `mut <direct-Go handle>`
-// parameter (e.g. `*http.Request`) is a pointer-valued handle interned as a
-// plain pointer-extern (mutable=false, no &/* machinery), while a `mut T` over
-// any other base is a borrow interned as the base type plus the Mutable flag.
+// plain type).
 func (l *lowerer) internFunctionParamType(param checker.Parameter, intern func(checker.Type) (TypeID, error)) (TypeID, bool, error) {
 	underlying := param.Type
 	mutable := param.Mutable
@@ -990,10 +970,6 @@ func (l *lowerer) internFunctionParamType(param checker.Parameter, intern func(c
 		mutable = true
 	}
 	if mutable {
-		if binding, isHandle := directGoPointerExternBinding(underlying); isHandle {
-			id, err := l.internSyntheticType(checker.MakeMutableRef(underlying).String(), TypeInfo{Kind: TypeExtern, ExternBinding: binding})
-			return id, false, err
-		}
 		id, err := intern(underlying)
 		return id, true, err
 	}
@@ -1003,10 +979,6 @@ func (l *lowerer) internFunctionParamType(param checker.Parameter, intern func(c
 
 func (l *lowerer) internStructFieldType(fieldTypeValue checker.Type, intern func(checker.Type) (TypeID, error)) (TypeID, bool, error) {
 	if ref, ok := fieldTypeValue.(*checker.MutableRef); ok {
-		if binding, isHandle := directGoPointerExternBinding(ref.Of()); isHandle {
-			id, err := l.internSyntheticType(ref.String(), TypeInfo{Kind: TypeExtern, ExternBinding: binding})
-			return id, false, err
-		}
 		id, err := intern(ref.Of())
 		return id, true, err
 	}
@@ -1129,14 +1101,6 @@ func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, 
 			return NoType, err
 		}
 		return fl.l.internSyntheticType(fl.l.typeName(value)+"!"+fl.l.typeName(errType), TypeInfo{Kind: TypeResult, Value: value, Error: errType})
-	case *checker.ExternType:
-		if typ.Name_ == "Chan" && len(typ.TypeArgs) == 1 {
-			elem, err := fl.internResolvedType(typ.TypeArgs[0])
-			if err != nil {
-				return NoType, err
-			}
-			return fl.l.internSyntheticType("Chan<"+fl.l.typeName(elem)+">", TypeInfo{Kind: TypeExtern, Elem: elem, ExternBinding: typ.ExternalBinding, ModulePath: fl.l.typeOwnerPath(typ)})
-		}
 	case *checker.FunctionDef:
 		params := make([]TypeID, len(typ.Parameters))
 		mutable := make([]bool, len(typ.Parameters))
@@ -1219,15 +1183,6 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 			return NoType, err
 		}
 		return fl.l.internSyntheticType(fl.l.typeName(value)+"!"+fl.l.typeName(errType), TypeInfo{Kind: TypeResult, Value: value, Error: errType})
-	case *checker.ExternType:
-		if typ.Name_ == "Chan" && len(typ.TypeArgs) == 1 {
-			elem, err := fl.internType(typ.TypeArgs[0])
-			if err != nil {
-				return NoType, err
-			}
-			return fl.l.internSyntheticType("Chan<"+fl.l.typeName(elem)+">", TypeInfo{Kind: TypeExtern, Elem: elem, ExternBinding: typ.ExternalBinding, ModulePath: fl.l.typeOwnerPath(typ)})
-		}
-		return fl.l.internType(t)
 	case *checker.FunctionDef:
 		params := make([]TypeID, len(typ.Parameters))
 		mutable := make([]bool, len(typ.Parameters))
@@ -1748,83 +1703,6 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 	return id, typeArgs, nil
 }
 
-func (l *lowerer) declareModuleCallExtern(call *checker.ModuleFunctionCall) (ExternID, error) {
-	name := call.Module + "::" + call.Call.Name
-	key := "module:" + name
-	if id, ok := l.externs[key]; ok {
-		return id, nil
-	}
-	params := make([]Param, len(call.Call.Args))
-	for i, arg := range call.Call.Args {
-		typeID, err := l.internType(arg.Type())
-		if err != nil {
-			return 0, err
-		}
-		params[i] = Param{Name: fmt.Sprintf("arg%d", i), Type: typeID}
-	}
-	returnType, err := l.internType(call.Type())
-	if err != nil {
-		return 0, err
-	}
-	id := ExternID(len(l.program.Externs))
-	l.externs[key] = id
-	l.program.Externs = append(l.program.Externs, Extern{
-		ID:   id,
-		Name: name,
-		Signature: Signature{
-			Params: params,
-			Return: returnType,
-		},
-		Bindings: map[string]string{},
-	})
-	return id, nil
-}
-
-func (l *lowerer) declareFunctionCallExtern(module ModuleID, call *checker.FunctionCall) (ExternID, error) {
-	return l.declareConcreteExternCall(module, call.Name, call)
-}
-
-func (l *lowerer) declareConcreteExternCall(module ModuleID, name string, call *checker.FunctionCall) (ExternID, error) {
-	signature, err := l.signatureForCall(call)
-	if err != nil {
-		return 0, err
-	}
-	typeArgs, err := typeArgsForCallWithInterner(call, l.internType)
-	if err != nil {
-		return 0, err
-	}
-	return l.declareConcreteExternCallWithSignature(module, name, call, signature, typeArgs)
-}
-
-func (l *lowerer) declareConcreteExternCallWithSignature(module ModuleID, name string, call *checker.FunctionCall, signature Signature, typeArgs []TypeID) (ExternID, error) {
-	key := functionKey(module, name)
-	if id, ok := l.externs[key]; ok {
-		extern := l.program.Externs[id]
-		if signaturesEqual(extern.Signature, signature) && typeIDsEqual(extern.TypeArgs, typeArgs) {
-			return id, nil
-		}
-	}
-	key = concreteExternKey(module, name, signature, typeArgs)
-	if id, ok := l.externs[key]; ok {
-		return id, nil
-	}
-	id := ExternID(len(l.program.Externs))
-	l.externs[key] = id
-	bindings := map[string]string{}
-	if call.ExternalBinding != "" {
-		bindings["go"] = call.ExternalBinding
-	}
-	l.program.Externs = append(l.program.Externs, Extern{
-		ID:        id,
-		Module:    module,
-		Name:      name,
-		Signature: signature,
-		TypeArgs:  typeArgs,
-		Bindings:  bindings,
-	})
-	return id, nil
-}
-
 func (l *lowerer) signatureForCall(call *checker.FunctionCall) (Signature, error) {
 	return signatureForCallWithInterner(call, l.internType)
 }
@@ -1850,29 +1728,6 @@ func typeArgsForCallWithInterner(call *checker.FunctionCall, intern func(checker
 		typeArgs[i] = typeID
 	}
 	return typeArgs, nil
-}
-
-func directGoPointerExternBinding(t checker.Type) (string, bool) {
-	ext, ok := t.(*checker.ExternType)
-	if !ok {
-		return "", false
-	}
-	importPath, typeName, ok := directGoExternTypeBindingParts(ext.ExternalBinding)
-	if !ok {
-		return "", false
-	}
-	return "go:" + importPath + "::*" + typeName, true
-}
-
-func directGoExternTypeBindingParts(binding string) (string, string, bool) {
-	if !strings.HasPrefix(binding, "go:") {
-		return "", "", false
-	}
-	parts := strings.Split(strings.TrimPrefix(binding, "go:"), "::")
-	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" || strings.HasPrefix(parts[1], "*") {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
 }
 
 func signatureForCallWithInterner(call *checker.FunctionCall, intern func(checker.Type) (TypeID, error)) (Signature, error) {
@@ -2012,9 +1867,6 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 	}
 	if ref, ok := t.(*checker.MutableRef); ok {
-		if binding, ok := directGoPointerExternBinding(ref.Of()); ok {
-			return l.internSyntheticType(ref.String(), TypeInfo{Kind: TypeExtern, ExternBinding: binding})
-		}
 		return l.internType(ref.Of())
 	}
 	key := airTypeKey(t)
@@ -2138,7 +1990,6 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	case *checker.Enum:
 		info.Kind = TypeEnum
 		info.Private = typ.Private
-		info.ExternBinding = typ.ExternalBinding
 		info.EnumOpen = typ.Open
 		info.Variants = make([]VariantInfo, len(typ.Values))
 		for i, variant := range typ.Values {
@@ -2154,16 +2005,6 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 				return NoType, err
 			}
 			info.Members[i] = UnionMember{Type: memberID, Tag: uint32(i), Name: member.String()}
-		}
-	case *checker.ExternType:
-		info.Kind = TypeExtern
-		info.ExternBinding = typ.ExternalBinding
-		if typ.Name_ == "Chan" && len(typ.TypeArgs) == 1 {
-			elem, err := l.internType(typ.TypeArgs[0])
-			if err != nil {
-				return NoType, err
-			}
-			info.Elem = elem
 		}
 	case *checker.FunctionDef:
 		info.Kind = TypeFunction
@@ -2248,8 +2089,6 @@ func syntheticTypeKey(name string, info TypeInfo) string {
 			parts[i] = fmt.Sprintf("%s%d", mut, param)
 		}
 		return fmt.Sprintf("fn:(%s)->%d", strings.Join(parts, ","), info.Return)
-	case TypeExtern:
-		return fmt.Sprintf("extern:%s:%s:%d", info.ModulePath, info.ExternBinding, info.Elem)
 	default:
 		return "synthetic:" + name
 	}
@@ -2276,8 +2115,6 @@ func (l *lowerer) typeOwnerPath(t checker.Type) string {
 			return typ.ModulePath
 		}
 		name = typ.Name
-	case *checker.ExternType:
-		name = typ.Name_
 	default:
 		return ""
 	}
@@ -2285,11 +2122,6 @@ func (l *lowerer) typeOwnerPath(t checker.Type) string {
 		sym := module.Get(name)
 		if sym.Type == t {
 			return path
-		}
-		if original, ok := sym.Type.(*checker.ExternType); ok {
-			if typed, ok := t.(*checker.ExternType); ok && typed.Name_ == "Chan" && original.Name_ == typed.Name_ {
-				return path
-			}
 		}
 	}
 	return ""
@@ -2447,13 +2279,6 @@ func typeContainsTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}) boo
 			}
 		}
 		return typeContainsTypeVarSeen(typ.ReturnType, seen)
-	case *checker.ExternType:
-		for _, typeArg := range typ.TypeArgs {
-			if typeContainsTypeVarSeen(typeArg, seen) {
-				return true
-			}
-		}
-		return false
 	default:
 		return false
 	}
@@ -2514,13 +2339,6 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 		return false
 	case *checker.FunctionDef:
 		return functionSignatureHasUnresolvedTypeVarSeen(typ, seen)
-	case *checker.ExternType:
-		for _, typeArg := range typ.TypeArgs {
-			if typeHasUnresolvedTypeVarSeen(typeArg, seen) {
-				return true
-			}
-		}
-		return false
 	default:
 		return false
 	}
@@ -2596,40 +2414,9 @@ func airTypeKeySeen(t checker.Type, seen map[checker.Type]struct{}) string {
 		return airFunctionTypeKeySeen(typ.Parameters, typ.ReturnType, seen)
 	case *checker.Trait:
 		return "trait " + checkerTraitKey(typ)
-	case *checker.ExternType:
-		name := typ.Name_
-		if key, ok := directGoExternTypeKey(typ.ExternalBinding); ok {
-			name = key
-		}
-		if len(typ.TypeArgs) == 0 {
-			return "extern " + name
-		}
-		parts := make([]string, len(typ.TypeArgs))
-		for i, arg := range typ.TypeArgs {
-			parts[i] = airTypeKeySeen(arg, seen)
-		}
-		return "extern " + name + "<" + strings.Join(parts, ",") + ">"
 	default:
 		return t.String()
 	}
-}
-
-func directGoExternTypeKey(binding string) (string, bool) {
-	if !strings.HasPrefix(binding, "go:") {
-		return "", false
-	}
-	parts := strings.Split(strings.TrimPrefix(binding, "go:"), "::")
-	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-		return "", false
-	}
-	importPath := strings.TrimSpace(parts[0])
-	if aliasParts := strings.Split(importPath, " as "); len(aliasParts) == 2 {
-		importPath = strings.TrimSpace(aliasParts[0])
-	}
-	if importPath == "" {
-		return "", false
-	}
-	return "go:" + importPath + "::" + strings.TrimSpace(parts[1]), true
 }
 
 func airStructKey(typ *checker.StructDef) string {
@@ -3267,8 +3054,6 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 			return &Stmt{Kind: StmtAssign, Local: local, Value: value}, nil
 		case *checker.InstanceProperty:
 			return fl.lowerFieldAssignment(target, s.Value)
-		case *checker.DirectGoFieldAccess:
-			return fl.lowerDirectGoFieldAssignment(target, s.Value)
 		default:
 			return nil, fmt.Errorf("unsupported AIR assignment target %T", s.Target)
 		}
@@ -3871,25 +3656,6 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				return fl.lowerFunctionTypeCall(e.Name, e.Args, target)
 			}
 		}
-		if e.ExternalBinding != "" {
-			signature, err := fl.signatureForCall(e)
-			if err != nil {
-				return nil, err
-			}
-			typeArgs, err := fl.typeArgsForCall(e)
-			if err != nil {
-				return nil, err
-			}
-			id, err := fl.l.declareConcreteExternCallWithSignature(fl.fn.Module, e.Name, e, signature, typeArgs)
-			if err != nil {
-				return nil, err
-			}
-			args, err := fl.lowerArgsWithSignature(e.Args, fl.l.program.Externs[id].Signature)
-			if err != nil {
-				return nil, err
-			}
-			return &Expr{Kind: ExprCallExtern, Type: fl.l.program.Externs[id].Signature.Return, Extern: id, Args: args}, nil
-		}
 		if def := e.Definition(); def != nil {
 			if def.Body != nil {
 				id, err := fl.declareAndLowerFunctionCall(fl.fn.Module, def, e)
@@ -3923,13 +3689,6 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				return nil, err
 			}
 			return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Function: id, Args: args}, nil
-		}
-		if id, ok := fl.l.lookupExtern(e.Name); ok {
-			args, err := fl.lowerArgsWithSignature(e.Args, fl.l.program.Externs[id].Signature)
-			if err != nil {
-				return nil, err
-			}
-			return &Expr{Kind: ExprCallExtern, Type: fl.l.program.Externs[id].Signature.Return, Extern: id, Args: args}, nil
 		}
 		return nil, fmt.Errorf("unsupported unresolved function call %s", e.Name)
 	case *checker.ModuleFunctionCall:
@@ -3972,25 +3731,6 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 				return fl.lowerFunctionTypeCall(e.Call.Name, e.Call.Args, target)
 			}
 		}
-		if e.Call.ExternalBinding != "" {
-			signature, err := fl.signatureForCall(e.Call)
-			if err != nil {
-				return nil, err
-			}
-			typeArgs, err := fl.typeArgsForCall(e.Call)
-			if err != nil {
-				return nil, err
-			}
-			id, err := fl.l.declareConcreteExternCallWithSignature(moduleID, e.Call.Name, e.Call, signature, typeArgs)
-			if err != nil {
-				return nil, err
-			}
-			args, err := fl.lowerArgsWithSignature(e.Call.Args, fl.l.program.Externs[id].Signature)
-			if err != nil {
-				return nil, err
-			}
-			return &Expr{Kind: ExprCallExtern, Type: fl.l.program.Externs[id].Signature.Return, Extern: id, Args: args}, nil
-		}
 		if def := fl.l.moduleFunctionDefinitionForCall(e); def != nil && def.Body != nil {
 			id, err := fl.declareAndLowerFunctionCall(moduleID, def, e.Call)
 			if err != nil {
@@ -4007,36 +3747,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Function: id, Args: args}, nil
 		}
-		if id, ok, err := fl.l.resolveModuleExtern(e.Module, e.Call.Name); err != nil {
-			return nil, err
-		} else if ok {
-			args, err := fl.lowerArgsWithSignature(e.Call.Args, fl.l.program.Externs[id].Signature)
-			if err != nil {
-				return nil, err
-			}
-			return &Expr{Kind: ExprCallExtern, Type: fl.l.program.Externs[id].Signature.Return, Extern: id, Args: args}, nil
-		}
-		extern, err := fl.l.declareModuleCallExtern(e)
-		if err != nil {
-			return nil, err
-		}
-		args, err := fl.lowerArgsWithSignature(e.Call.Args, fl.l.program.Externs[extern].Signature)
-		if err != nil {
-			return nil, err
-		}
-		return &Expr{Kind: ExprCallExtern, Type: fl.l.program.Externs[extern].Signature.Return, Extern: extern, Args: args}, nil
+		return nil, fmt.Errorf("unsupported module function call %s::%s", e.Module, e.Call.Name)
 	case *checker.ModuleSymbol:
 		return fl.lowerModuleSymbol(typeID, e)
-	case *checker.DirectGoPackageValue:
-		return &Expr{Kind: ExprDirectGoPackageValue, Type: typeID, Str: e.Binding}, nil
-	case *checker.DirectGoFieldAccess:
-		target, err := fl.lowerExpr(e.Subject)
-		if err != nil {
-			return nil, err
-		}
-		return &Expr{Kind: ExprDirectGoFieldAccess, Type: typeID, Target: target, Str: e.Field}, nil
-	case *checker.DirectGoStructInstance:
-		return fl.lowerDirectGoStructInstance(typeID, e)
 	case *checker.ListLiteral:
 		return fl.lowerListLiteral(typeID, e, NoType)
 	case *checker.MapLiteral:
@@ -5116,31 +4829,6 @@ func (fl *functionLowerer) lowerStructInstance(typeID TypeID, inst *checker.Stru
 	return &Expr{Kind: ExprMakeStruct, Type: typeID, Fields: fields}, nil
 }
 
-func (fl *functionLowerer) lowerDirectGoStructInstance(typeID TypeID, inst *checker.DirectGoStructInstance) (*Expr, error) {
-	typeInfo, ok := fl.l.typeInfo(typeID)
-	if !ok || typeInfo.Kind != TypeExtern {
-		return nil, fmt.Errorf("direct Go struct instance lowered with non-extern type %s", inst.Type().String())
-	}
-	fieldNames := make([]string, 0, len(inst.FieldGoTypes))
-	for name := range inst.FieldGoTypes {
-		fieldNames = append(fieldNames, name)
-	}
-	sort.Strings(fieldNames)
-	fields := make([]StructFieldValue, 0, len(fieldNames))
-	for _, fieldName := range fieldNames {
-		fieldExpr, ok := inst.Fields[fieldName]
-		if !ok {
-			return nil, fmt.Errorf("direct Go struct instance missing checked field %s", fieldName)
-		}
-		value, err := fl.lowerExpr(fieldExpr)
-		if err != nil {
-			return nil, err
-		}
-		fields = append(fields, StructFieldValue{Name: fieldName, Value: *value, DirectGoFieldType: inst.FieldGoTypes[fieldName]})
-	}
-	return &Expr{Kind: ExprDirectGoStructLiteral, Type: typeID, Fields: fields}, nil
-}
-
 func (fl *functionLowerer) lowerInstanceProperty(typeID TypeID, prop *checker.InstanceProperty) (*Expr, error) {
 	target, err := fl.lowerExpr(prop.Subject)
 	if err != nil {
@@ -5181,18 +4869,6 @@ func (fl *functionLowerer) lowerFieldAssignment(prop *checker.InstanceProperty, 
 		return &Stmt{Kind: StmtSetField, Target: target, Field: field.Index, Type: field.Type, Value: value}, nil
 	}
 	return nil, fmt.Errorf("field %s not found on %s", prop.Property, targetInfo.Name)
-}
-
-func (fl *functionLowerer) lowerDirectGoFieldAssignment(field *checker.DirectGoFieldAccess, valueExpr checker.Expression) (*Stmt, error) {
-	target, err := fl.lowerExpr(field.Subject)
-	if err != nil {
-		return nil, err
-	}
-	value, err := fl.lowerExpr(valueExpr)
-	if err != nil {
-		return nil, err
-	}
-	return &Stmt{Kind: StmtSetDirectGoField, Target: target, FieldName: field.Field, DirectGoFieldType: field.FieldGoType, Value: value}, nil
 }
 
 func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef) (*Expr, error) {
@@ -5527,15 +5203,6 @@ func (l *lowerer) lookupFunctionInModule(modulePath, name string) (FunctionID, b
 	return id, ok
 }
 
-func (l *lowerer) lookupExternInModule(modulePath, name string) (ExternID, bool) {
-	moduleID, ok := l.moduleByPath[modulePath]
-	if !ok {
-		return 0, false
-	}
-	id, ok := l.externs[functionKey(moduleID, name)]
-	return id, ok
-}
-
 func (l *lowerer) ensureModuleImportTraitImplsDeclared(moduleID ModuleID) error {
 	if moduleID < 0 || int(moduleID) >= len(l.program.Modules) {
 		return nil
@@ -5850,34 +5517,6 @@ func (l *lowerer) moduleForInstanceMethod(method *checker.InstanceMethod, fallba
 	return fallback
 }
 
-func (l *lowerer) resolveModuleExtern(modulePath, name string) (ExternID, bool, error) {
-	if id, ok := l.lookupExternInModule(modulePath, name); ok {
-		return id, true, nil
-	}
-
-	mod, ok := l.moduleByName[modulePath]
-	if !ok {
-		return 0, false, nil
-	}
-	if mod.Program() == nil {
-		return 0, false, nil
-	}
-	if err := l.lowerModule(mod); err != nil {
-		return 0, false, err
-	}
-	id, ok := l.lookupExternInModule(modulePath, name)
-	return id, ok, nil
-}
-
-func (l *lowerer) lookupExtern(name string) (ExternID, bool) {
-	for key, id := range l.externs {
-		if keyHasFunctionName(key, name) {
-			return id, true
-		}
-	}
-	return 0, false
-}
-
 func (l *lowerer) typeInfo(id TypeID) (TypeInfo, bool) {
 	if id <= 0 || int(id) > len(l.program.Types) {
 		return TypeInfo{}, false
@@ -5903,7 +5542,7 @@ func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement
 		}
 		if stmt.Stmt != nil {
 			switch node := stmt.Stmt.(type) {
-			case *checker.StructDef, *checker.Enum, *checker.Union, *checker.ExternType:
+			case *checker.StructDef, *checker.Enum, *checker.Union:
 				continue
 			case *checker.VariableDef:
 				if !node.Mutable {
@@ -5986,10 +5625,6 @@ func concreteFunctionKey(module ModuleID, name string, signature Signature, gene
 		return fmt.Sprintf("%d:%s:%s", module, name, signatureKey(signature))
 	}
 	return fmt.Sprintf("%d:%s:%s:%s", module, name, signatureKey(signature), genericKey)
-}
-
-func concreteExternKey(module ModuleID, name string, signature Signature, typeArgs []TypeID) string {
-	return fmt.Sprintf("%d:extern:%s:%s:%s", module, name, signatureKey(signature), typeIDsKey(typeArgs))
 }
 
 func (l *lowerer) genericBindingsKey(def *checker.FunctionDef) (string, error) {

@@ -42,7 +42,6 @@ func TestStructMethodsAreStoredInProgramSideTable(t *testing.T) {
 		t.Fatal("method sub missing from Program.StructMethods side table")
 	}
 }
-
 func TestStructSideTableMethodUsesGenericBindingsFromNestedFields(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct Chan {
@@ -73,7 +72,6 @@ func TestStructSideTableMethodUsesGenericBindingsFromNestedFields(t *testing.T) 
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
-
 func TestStructMethodLookupUsesOwnerModuleBeyondDirectImports(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\""), 0o644); err != nil {
@@ -108,7 +106,6 @@ func TestStructMethodLookupUsesOwnerModuleBeyondDirectImports(t *testing.T) {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
-
 func TestTransitiveGenericStructMethodUsesOwnerDefinition(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\""), 0o644); err != nil {
@@ -158,7 +155,6 @@ func TestTransitiveGenericStructMethodUsesOwnerDefinition(t *testing.T) {
 		t.Fatalf("first diagnostic = %q, want generic method argument mismatch", got)
 	}
 }
-
 func TestStructEqualityIndependentOfMethodSideTable(t *testing.T) {
 	left := &StructDef{Name: "Frame", Fields: map[string]Type{}}
 	right := &StructDef{Name: "Frame", Fields: map[string]Type{}}
@@ -169,6 +165,7 @@ func TestStructEqualityIndependentOfMethodSideTable(t *testing.T) {
 		t.Fatal("struct equality should ignore side-table method signatures")
 	}
 }
+
 func TestExplicitTypeArgsCannotOverrideReceiverGenericMethod(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct Box {
@@ -196,7 +193,6 @@ func TestExplicitTypeArgsCannotOverrideReceiverGenericMethod(t *testing.T) {
 		t.Fatalf("first diagnostic = %q, want explicit method type arg rejection", got)
 	}
 }
-
 func TestExplicitMethodTypeArgsPreserveReceiverGenericBindings(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct Box {
@@ -221,7 +217,6 @@ func TestExplicitMethodTypeArgsPreserveReceiverGenericBindings(t *testing.T) {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
-
 func TestUnboundGenericExplicitCallTypeArgIsRejected(t *testing.T) {
 	result := parse.Parse([]byte(`
 		use ard/maybe
@@ -240,7 +235,6 @@ func TestUnboundGenericExplicitCallTypeArgIsRejected(t *testing.T) {
 		t.Fatalf("first diagnostic = %q, want unbound generic type arg", got)
 	}
 }
-
 func TestNestedFunctionCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 	result := parse.Parse([]byte(`
 		use ard/maybe
@@ -265,7 +259,6 @@ func TestNestedFunctionCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 		t.Fatalf("first diagnostic = %q, want unbound generic type arg", got)
 	}
 }
-
 func TestClosureCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 	result := parse.Parse([]byte(`
 		use ard/maybe
@@ -290,7 +283,6 @@ func TestClosureCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 		t.Fatalf("first diagnostic = %q, want unbound generic type arg", got)
 	}
 }
-
 func TestGenericStructReceiverBindingInExplicitCallbackParameter(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct State {
@@ -331,7 +323,6 @@ func TestGenericStructReceiverBindingInExplicitCallbackParameter(t *testing.T) {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
-
 func TestGenericStructReceiverBindingInInferredCallbackParameter(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct State {
@@ -372,7 +363,6 @@ func TestGenericStructReceiverBindingInInferredCallbackParameter(t *testing.T) {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
-
 func TestGenericStructReceiverBindingInCallbackParameterStillRejectsMismatch(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct State {
@@ -416,7 +406,6 @@ func TestGenericStructReceiverBindingInCallbackParameterStillRejectsMismatch(t *
 		t.Fatalf("first diagnostic = %q, want callback state type mismatch", got)
 	}
 }
-
 func TestExplicitGenericStructCanUseTypeParamOnlyInMethods(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct State<$T> {
@@ -463,7 +452,6 @@ func TestExplicitGenericStructCanUseTypeParamOnlyInMethods(t *testing.T) {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
-
 func TestExplicitGenericStructTypeArgumentsRemainDistinctWithoutGenericFields(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct State<$T> {

@@ -129,20 +129,6 @@ func equalTypesSeen(left Type, right Type, seen map[typeEqualKey]struct{}) bool 
 			return r.actual == nil || equalTypesSeen(l, r.actual, seen)
 		}
 		return false
-	case *ExternType:
-		if r, ok := right.(*TypeVar); ok && r.actual == nil {
-			return true
-		}
-		r, ok := right.(*ExternType)
-		if !ok || !externTypeNamesMatch(l, r) || len(l.TypeArgs) != len(r.TypeArgs) {
-			return false
-		}
-		for i := range l.TypeArgs {
-			if !equalTypesSeen(l.TypeArgs[i], r.TypeArgs[i], seen) {
-				return false
-			}
-		}
-		return true
 	case *FunctionDef:
 		return equalFunctionDefSeen(*l, right, seen)
 	case FunctionDef:
@@ -184,15 +170,6 @@ func normalizedParamMutability(p Parameter) (bool, Type) {
 		return true, mr.Of()
 	}
 	return p.Mutable, p.Type
-}
-
-func externTypeNamesMatch(left *ExternType, right *ExternType) bool {
-	leftBinding, leftOK := parseCanonicalDirectGoBinding(left.ExternalBinding)
-	rightBinding, rightOK := parseCanonicalDirectGoBinding(right.ExternalBinding)
-	if leftOK || rightOK {
-		return leftOK && rightOK && len(leftBinding.Symbols) == 1 && len(rightBinding.Symbols) == 1 && leftBinding.ImportPath == rightBinding.ImportPath && leftBinding.Symbols[0] == rightBinding.Symbols[0]
-	}
-	return left.Name_ == right.Name_
 }
 
 func equalStructDefSeen(left StructDef, right Type, seen map[typeEqualKey]struct{}) bool {
@@ -271,8 +248,6 @@ func typeEqualID(t Type) string {
 		return fmt.Sprintf("Result:%p", v)
 	case *MutableRef:
 		return fmt.Sprintf("MutableRef:%p", v)
-	case *ExternType:
-		return fmt.Sprintf("Extern:%p", v)
 	case *FunctionDef:
 		return fmt.Sprintf("Function:%p", v)
 	case FunctionDef:

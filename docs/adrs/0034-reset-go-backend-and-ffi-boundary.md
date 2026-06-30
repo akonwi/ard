@@ -129,9 +129,7 @@ Use this order as a guide:
 ## Related
 
 - `docs/language-philosophy.md`
-- `docs/adrs/0028-use-direct-go-imports-for-ffi.md`
 - `docs/adrs/0030-use-direct-go-struct-values-and-fields.md`
 - `docs/adrs/0031-go-backend-lowering-contract.md`
-- `docs/standard-library-ffi-audit.md`
 - `compiler/checker`
 - `compiler/go`

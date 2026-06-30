@@ -129,7 +129,6 @@ func TestStructs(t *testing.T) {
 		},
 	})
 }
-
 func TestMutableAggregateInitialization(t *testing.T) {
 	personStructInput := strings.Join([]string{
 		"struct Person {",
@@ -148,7 +147,6 @@ func TestMutableAggregateInitialization(t *testing.T) {
 		},
 	})
 }
-
 func TestMethods(t *testing.T) {
 	shapeCode := strings.Join([]string{
 		"struct Shape {",
@@ -215,7 +213,6 @@ func TestMethods(t *testing.T) {
 		},
 	})
 }
-
 func TestStructsWithMaybeFields(t *testing.T) {
 	run(t, []test{
 		{
@@ -229,7 +226,6 @@ func TestStructsWithMaybeFields(t *testing.T) {
 		},
 	})
 }
-
 func TestStructsWithStaticFunctions(t *testing.T) {
 	run(t, []test{
 		{
