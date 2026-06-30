@@ -11,7 +11,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/akonwi/ard/parse"
-	"github.com/akonwi/ard/stdlibgo"
 )
 
 type Program struct {
@@ -347,16 +346,6 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 	if checkOptions.ModulePath != "" {
 		modulePath = checkOptions.ModulePath
 	}
-	if checkOptions.GoResolver == nil {
-		dir := filepath.Dir(filePath)
-		if strings.HasPrefix(modulePath, "ard/") {
-			dir = "."
-		}
-		if moduleResolver != nil && moduleResolver.project.RootPath != "" {
-			dir = moduleResolver.project.RootPath
-		}
-		checkOptions.GoResolver = NewGoPackagesResolver(dir)
-	}
 	c := &Checker{
 		diagnostics:     []Diagnostic{},
 		input:           input,
@@ -401,27 +390,13 @@ func (c *Checker) Check() {
 		seenImportAliases[imp.Name] = struct{}{}
 
 		if imp.Kind == parse.ImportKindGo {
-			if !validDirectGoImportAlias(imp.Name) {
-				c.addError(fmt.Sprintf("Go import alias %q cannot be used as a Go selector; use `as` with a valid Go identifier", imp.Name), imp.GetLocation())
-				continue
-			}
-			goImport := directGoImport{alias: imp.Name, importPath: stdlibgo.CanonicalGoImportPath(imp.Path)}
-			if c.options.GoResolver != nil {
-				pkg, err := c.options.GoResolver.LoadPackage(goImport.importPath)
-				if err != nil {
-					c.addError(fmt.Sprintf("Failed to load Go package '%s': %v", imp.Path, err), imp.GetLocation())
-					c.directGoImports[imp.Name] = goImport
-					continue
-				}
-				goImport.pkg = pkg
-			}
-			c.directGoImports[imp.Name] = goImport
+			c.addError(fmt.Sprintf("Go imports are disabled during the pure Ard reset: %s", imp.Path), imp.GetLocation())
 			continue
 		}
 
 		if strings.HasPrefix(imp.Path, "ard/") {
 			// Handle standard library imports
-			if mod, ok := findInStdLib(imp.Path, c.options.GoResolver); ok {
+			if mod, ok := findInStdLib(imp.Path); ok {
 				c.program.Imports[imp.Name] = mod
 			} else {
 				c.addError(fmt.Sprintf("Unknown module: %s", imp.Path), imp.GetLocation())
@@ -461,12 +436,6 @@ func (c *Checker) Check() {
 
 			// Type-check the imported module
 			importOptions := c.options
-			if resolved.PackageID != "" {
-				pkg := c.moduleResolver.packageInfo(resolved.PackageID)
-				if pkg.RootPath != "" {
-					importOptions.GoResolver = NewGoPackagesResolver(pkg.RootPath)
-				}
-			}
 			userModule, diagnostics := check(ast, c.moduleResolver, filePath, resolved.ModulePath, importOptions)
 			c.moduleResolver.loadingChain = c.moduleResolver.loadingChain[:len(c.moduleResolver.loadingChain)-1]
 			if len(diagnostics) > 0 {
@@ -490,28 +459,28 @@ func (c *Checker) Check() {
 
 	// Auto-import prelude modules (only for non-std lib)
 	if !strings.HasPrefix(c.filePath, "ard/") {
-		if mod, ok := findInStdLib("ard/dynamic", c.options.GoResolver); ok {
+		if mod, ok := findInStdLib("ard/dynamic"); ok {
 			c.program.Imports["Dynamic"] = mod
 		}
-		if mod, ok := findInStdLib("ard/float", c.options.GoResolver); ok {
+		if mod, ok := findInStdLib("ard/float"); ok {
 			c.program.Imports["Float"] = mod
 		}
-		if mod, ok := findInStdLib("ard/int", c.options.GoResolver); ok {
+		if mod, ok := findInStdLib("ard/int"); ok {
 			c.program.Imports["Int"] = mod
 		}
-		if mod, ok := findInStdLib("ard/byte", c.options.GoResolver); ok {
+		if mod, ok := findInStdLib("ard/byte"); ok {
 			c.program.Imports["Byte"] = mod
 		}
-		if mod, ok := findInStdLib("ard/rune", c.options.GoResolver); ok {
+		if mod, ok := findInStdLib("ard/rune"); ok {
 			c.program.Imports["Rune"] = mod
 		}
-		if mod, ok := findInStdLib("ard/list", c.options.GoResolver); ok {
+		if mod, ok := findInStdLib("ard/list"); ok {
 			c.program.Imports["List"] = mod
 		}
-		if mod, ok := findInStdLib("ard/map", c.options.GoResolver); ok {
+		if mod, ok := findInStdLib("ard/map"); ok {
 			c.program.Imports["Map"] = mod
 		}
-		if mod, ok := findInStdLib("ard/string", c.options.GoResolver); ok {
+		if mod, ok := findInStdLib("ard/string"); ok {
 			c.program.Imports["Str"] = mod
 		}
 	}

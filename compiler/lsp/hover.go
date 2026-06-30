@@ -468,7 +468,7 @@ func importedModuleForAlias(alias string, prog *parse.Program, filePath string) 
 		return moduleForImport(imp, filePath)
 	}
 	if path := preludeModulePath(alias); path != "" {
-		return checker.FindEmbeddedModule(path, nil)
+		return checker.FindEmbeddedModule(path)
 	}
 	return nil, false
 }
@@ -478,7 +478,7 @@ func moduleForImport(imp parse.Import, filePath string) (checker.Module, bool) {
 		return nil, false
 	}
 	if strings.HasPrefix(imp.Path, "ard/") {
-		return checker.FindEmbeddedModule(imp.Path, nil)
+		return checker.FindEmbeddedModule(imp.Path)
 	}
 
 	if filePath == "" {

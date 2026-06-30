@@ -4,7 +4,7 @@ var prelude = map[string]Module{
 	"Result": ResultPkg{},
 }
 
-func findInStdLib(path string, goResolver GoPackageResolver) (Module, bool) {
+func findInStdLib(path string) (Module, bool) {
 	// Provide minimal hardcoded definitions for special modules
 	// These provide the function signatures for type checking
 	switch path {
@@ -14,11 +14,6 @@ func findInStdLib(path string, goResolver GoPackageResolver) (Module, bool) {
 		return ResultPkg{}, true
 	case "ard/channel":
 		return ChannelPkg{}, true
-	}
-
-	// Check for embedded .ard modules for other modules
-	if mod, ok := FindEmbeddedModule(path, goResolver); ok {
-		return mod, true
 	}
 
 	return nil, false

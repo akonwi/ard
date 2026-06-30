@@ -1,7 +1,0 @@
-use go:ard/ffi
-
-// FFI helpers for direct host interop.
-
-fn is_nil(value: $T) Bool {
-  ffi::IsNil(value)
-}

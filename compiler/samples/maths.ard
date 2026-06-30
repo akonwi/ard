@@ -1,5 +1,3 @@
-use ard/io
-
 // this is a module just for math functions
 
 fn add(x: Int, y: Int) Int {

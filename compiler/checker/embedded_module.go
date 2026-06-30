@@ -25,9 +25,7 @@ func (m EmbeddedModule) Get(name string) Symbol {
 }
 
 // FindEmbeddedModule loads a .ard standard library module from embedded files.
-// goResolver lets the embedded module resolve its own `use go:` imports (e.g.
-// std_lib/ffi); without it, Go-typed public signatures would not resolve.
-func FindEmbeddedModule(path string, goResolver GoPackageResolver) (Module, bool) {
+func FindEmbeddedModule(path string) (Module, bool) {
 	// Read the embedded file using std_lib.Find
 	content, err := std_lib.Find(path)
 	if err != nil {
@@ -43,7 +41,7 @@ func FindEmbeddedModule(path string, goResolver GoPackageResolver) (Module, bool
 
 	// Type check the program to create a Program with symbols
 	// Use the check function which returns a Module and diagnostics
-	module, diagnostics := check(program, nil, path, path, CheckOptions{GoResolver: goResolver})
+	module, diagnostics := check(program, nil, path, path, CheckOptions{})
 	if len(diagnostics) > 0 {
 		// For now, we'll continue even with diagnostics
 		// In a production system, you might want to handle this differently

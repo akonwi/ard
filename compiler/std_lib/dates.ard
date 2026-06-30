@@ -1,5 +1,0 @@
-use go:time
-
-fn get_today() Str {
-  time::Now().Format("2006-01-02")
-}
