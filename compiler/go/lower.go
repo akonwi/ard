@@ -1499,6 +1499,32 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			Rhs: []ast.Expr{value.expr},
 		})
 		return out, nil
+	case air.StmtSetForeignField:
+		if stmt.Target == nil {
+			return nil, fmt.Errorf("foreign field set statement missing target")
+		}
+		if stmt.Value == nil {
+			return nil, fmt.Errorf("foreign field set statement missing value")
+		}
+		if stmt.ForeignTarget != "go" {
+			return nil, fmt.Errorf("unsupported foreign field set target %q", stmt.ForeignTarget)
+		}
+		target, err := l.lowerExpr(fn, *stmt.Target)
+		if err != nil {
+			return nil, err
+		}
+		value, err := l.lowerExprWithExpectedType(fn, *stmt.Value, stmt.Type)
+		if err != nil {
+			return nil, err
+		}
+		out := append([]ast.Stmt{}, target.stmts...)
+		out = append(out, value.stmts...)
+		out = append(out, &ast.AssignStmt{
+			Lhs: []ast.Expr{&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(stmt.ForeignSymbol)}},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{value.expr},
+		})
+		return out, nil
 	case air.StmtSetField:
 		if stmt.Target == nil {
 			return nil, fmt.Errorf("field set statement missing target")

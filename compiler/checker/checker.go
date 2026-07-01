@@ -273,6 +273,8 @@ func (c Checker) isMutable(expr Expression) bool {
 			return true
 		}
 		return c.isMutable(e.Subject)
+	case *ForeignFieldAccess:
+		return c.isMutable(e.Subject)
 	}
 	return false
 }
@@ -1486,6 +1488,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 				if !c.isMutable(subject) {
 					c.addError(fmt.Sprintf("Immutable: %s", ip), s.Target.GetLocation())
+					return nil
+				}
+				if _, ok := subject.(*ForeignFieldAccess); ok && !c.areCompatible(subject.Type(), value.Type()) {
+					c.addError(typeMismatch(subject.Type(), value.Type()), s.Value.GetLocation())
 					return nil
 				}
 

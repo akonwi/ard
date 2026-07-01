@@ -6,6 +6,30 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+func TestGoImportAssignsExportedStructFields(t *testing.T) {
+	run(t, []test{
+		{
+			name: "mutable struct field assignment",
+			input: `use go:image
+
+fn update() {
+  mut rect = image::Rect(1, 2, 3, 4)
+  rect.Min.X = 10
+}`,
+		},
+		{
+			name: "immutable struct field assignment rejected",
+			input: `use go:image
+
+fn update() {
+  let rect = image::Rect(1, 2, 3, 4)
+  rect.Min.X = 10
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Immutable: rect.Min.X"}},
+		},
+	})
+}
+
 func TestGoImportResolvesExportedStructFields(t *testing.T) {
 	run(t, []test{
 		{

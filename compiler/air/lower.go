@@ -3073,6 +3073,8 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 			return &Stmt{Kind: StmtAssign, Local: local, Value: value}, nil
 		case *checker.InstanceProperty:
 			return fl.lowerFieldAssignment(target, s.Value)
+		case *checker.ForeignFieldAccess:
+			return fl.lowerForeignFieldAssignment(target, s.Value)
 		default:
 			return nil, fmt.Errorf("unsupported AIR assignment target %T", s.Target)
 		}
@@ -4908,6 +4910,22 @@ func (fl *functionLowerer) lowerInstanceProperty(typeID TypeID, prop *checker.In
 		}
 	}
 	return nil, fmt.Errorf("field %s not found on %s", prop.Property, targetInfo.Name)
+}
+
+func (fl *functionLowerer) lowerForeignFieldAssignment(prop *checker.ForeignFieldAccess, valueExpr checker.Expression) (*Stmt, error) {
+	target, err := fl.lowerExpr(prop.Subject)
+	if err != nil {
+		return nil, err
+	}
+	fieldType, err := fl.internContextualCheckerType(prop.Type())
+	if err != nil {
+		return nil, err
+	}
+	value, err := fl.lowerExprWithExpected(valueExpr, fieldType)
+	if err != nil {
+		return nil, err
+	}
+	return &Stmt{Kind: StmtSetForeignField, Target: target, ForeignTarget: prop.Target, ForeignSymbol: prop.Symbol, Type: fieldType, Value: value}, nil
 }
 
 func (fl *functionLowerer) lowerFieldAssignment(prop *checker.InstanceProperty, valueExpr checker.Expression) (*Stmt, error) {

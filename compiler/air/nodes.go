@@ -11,6 +11,7 @@ const (
 	StmtLet StmtKind = iota
 	StmtAssign
 	StmtSetField
+	StmtSetForeignField
 	StmtExpr
 	StmtWhile
 	StmtBreak
@@ -27,6 +28,9 @@ type Stmt struct {
 	Target    *Expr
 	Field     int
 	FieldName string
+
+	ForeignTarget string
+	ForeignSymbol string
 
 	Condition *Expr
 	Body      Block
