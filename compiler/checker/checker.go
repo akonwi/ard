@@ -412,8 +412,8 @@ func (c *Checker) Check() {
 
 	// Auto-import prelude modules (only for non-std lib)
 	if !strings.HasPrefix(c.filePath, "ard/") {
-		if mod, ok := findInStdLib("ard/dynamic"); ok {
-			c.program.Imports["Dynamic"] = mod
+		if mod, ok := findInStdLib("ard/any"); ok {
+			c.program.Imports["Any"] = mod
 		}
 		if mod, ok := findInStdLib("ard/float"); ok {
 			c.program.Imports["Float"] = mod
@@ -670,7 +670,7 @@ func (c *Checker) validateMapKeyType(key Type, loc parse.Location) {
 // isComparableValueType reports whether a type can be compared with == / != per
 // ADR 0031: only primitives and enums (and, via the caller, their nullable
 // forms). There is no structural equality over lists, maps, structs, unions, or
-// Dynamic.
+// Any.
 func isComparableValueType(t Type) bool {
 	if t == nil {
 		return false
@@ -689,7 +689,7 @@ func isValidMapKeyType(t Type) bool {
 			return isValidMapKeyType(ty.actual)
 		}
 		return true
-	case *Maybe, *List, *Map, *Result, *Union, *FunctionDef, *Trait, *dynamicType:
+	case *Maybe, *List, *Map, *Result, *Union, *FunctionDef, *Trait, *anyType:
 		return false
 	default:
 		return true
@@ -754,8 +754,8 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		baseType = MakeResult(val, err)
 	case *parse.CustomType:
 		switch t.GetName() {
-		case "Dynamic":
-			baseType = Dynamic
+		case "Any":
+			baseType = Any
 			break
 		case "Byte":
 			baseType = Byte
@@ -7379,7 +7379,7 @@ func validateJSONParseTarget(typ Type) error {
 
 func validateJSONParseShape(typ Type, seen map[string]bool) error {
 	typ = derefType(typ)
-	if typ == Str || typ == Int || typ == Float || typ == Bool || typ == Byte || typ == Rune || typ == Dynamic {
+	if typ == Str || typ == Int || typ == Float || typ == Bool || typ == Byte || typ == Rune || typ == Any {
 		return nil
 	}
 	switch t := typ.(type) {

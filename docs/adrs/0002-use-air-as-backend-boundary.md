@@ -81,7 +81,7 @@ The Go backend should:
 - use statement-oriented Go lowering when Ard expressions require temporaries, setup statements, or explicit control flow
 - keep generated helper functions small and backend-owned
 
-The Go target should prefer plain Go representations where practical, while using shared runtime types where they encode Ard semantics more clearly. In particular, `Maybe<T>` lowers to `runtime.Maybe[T]`, `Result<T, E>` lowers to `runtime.Result[T, E]`, `Dynamic` and opaque extern values lower to `any`, and extern-backed standard library/host calls should lower as direct static Go calls wherever possible.
+The Go target should prefer plain Go representations where practical, while using shared runtime types where they encode Ard semantics more clearly. In particular, `Maybe<T>` lowers to `runtime.Maybe[T]`, `Result<T, E>` lowers to `runtime.Result[T, E]`, `Any` and opaque extern values lower to `any`, and extern-backed standard library/host calls should lower as direct static Go calls wherever possible.
 
 The Go backend should not reintroduce the deleted Go backend architecture, use a universal `runtime.Object` representation, model all values as `any`, or use registry-driven host adapter models.
 

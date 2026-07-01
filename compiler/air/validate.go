@@ -335,7 +335,7 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	if expr.Kind == ExprToStr && expr.Target == nil {
 		return fmt.Errorf("to_str expression missing target")
 	}
-	if expr.Kind == ExprToDynamic && expr.Target == nil {
+	if expr.Kind == ExprToAny && expr.Target == nil {
 		return fmt.Errorf("to_dyn expression missing target")
 	}
 	if expr.Kind == ExprPanic && expr.Target == nil {

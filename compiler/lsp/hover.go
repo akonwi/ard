@@ -1718,7 +1718,7 @@ func primitiveMethodSignature(ownerType string, methodName string) *hoverMethodS
 		case "to_str":
 			return mk("Str")
 		case "to_dyn":
-			return mk("Dynamic")
+			return mk("Any")
 		case "trim":
 			return mk("Str")
 		}
@@ -1727,14 +1727,14 @@ func primitiveMethodSignature(ownerType string, methodName string) *hoverMethodS
 		case "to_str":
 			return mk("Str")
 		case "to_dyn":
-			return mk("Dynamic")
+			return mk("Any")
 		}
 	case "Float":
 		switch methodName {
 		case "to_str":
 			return mk("Str")
 		case "to_dyn":
-			return mk("Dynamic")
+			return mk("Any")
 		case "to_int":
 			return mk("Int")
 		}
@@ -1743,7 +1743,7 @@ func primitiveMethodSignature(ownerType string, methodName string) *hoverMethodS
 		case "to_str":
 			return mk("Str")
 		case "to_dyn":
-			return mk("Dynamic")
+			return mk("Any")
 		}
 	}
 	return nil
@@ -2386,8 +2386,8 @@ func splitStaticTarget(target string) (alias string, memberPrefix string) {
 
 func preludeModulePath(alias string) string {
 	switch alias {
-	case "Dynamic":
-		return "ard/dynamic"
+	case "Any":
+		return "ard/any"
 	case "Float":
 		return "ard/float"
 	case "Int":

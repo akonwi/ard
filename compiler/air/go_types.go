@@ -139,7 +139,7 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 			return nil, err
 		}
 		return goRuntimeGeneric(runtimeQualifier, "Result", value, errType), nil
-	case TypeDynamic:
+	case TypeAny:
 		return ast.NewIdent("any"), nil
 	case TypeFunction:
 		params := make([]*ast.Field, 0, len(typ.Params))

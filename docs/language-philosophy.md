@@ -46,6 +46,12 @@ Ard intentionally keeps scalar types small and simple:
 
 Additional scalar-like types such as bytes and runes may exist when they carry distinct language or interop meaning, but the default numeric model should remain simple.
 
+## Opaque Values
+
+Ard uses `Any` for opaque boxed values, especially at FFI boundaries. `Any` can hold any representable Ard value and maps naturally to Go's `any`, but it is not a loophole around the type system: Ard code cannot inspect, call methods on, access fields of, or implicitly unbox an `Any` value without an explicit API designed for that purpose.
+
+`Any` replaces the older `Dynamic` concept. Untyped external data and Go `any` values should use `Any`; richer decoding or inspection should be provided by explicit libraries rather than by making the core type dynamically inspectable.
+
 ## Relationship to Go
 
 Go is Ard's default target language and the current practical runtime platform. Ard should interoperate with Go directly and well, especially because access to existing Go libraries is one of the language's major strengths.

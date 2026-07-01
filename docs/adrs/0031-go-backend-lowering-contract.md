@@ -202,14 +202,14 @@ The backend lowers Ard types to Go types directly. The only shared runtime types
 #### Containers
 
 - `List[T]` lowers to `[]T`.
-- `Map[K]V` lowers to `map[K]V`. Map key types are constrained, during checking, to types that are Go strictly-comparable and whose Go `==` matches Ard equality. This allows all primitives (including `Float`), enums, and structs whose fields are all valid key types. It excludes `Maybe` (which is Go-comparable but would compare by pointer identity, not value, because it is pointer-backed), `List`, `Map`, and `Dynamic`. Every Ard map therefore lowers to a plain Go map and no structural-map helper is generated. `Float` keys carry Go's usual `NaN`-key behavior, which is accepted.
+- `Map[K]V` lowers to `map[K]V`. Map key types are constrained, during checking, to types that are Go strictly-comparable and whose Go `==` matches Ard equality. This allows all primitives (including `Float`), enums, and structs whose fields are all valid key types. It excludes `Maybe` (which is Go-comparable but would compare by pointer identity, not value, because it is pointer-backed), `List`, `Map`, and `Any`. Every Ard map therefore lowers to a plain Go map and no structural-map helper is generated. `Float` keys carry Go's usual `NaN`-key behavior, which is accepted.
 - `Struct` lowers to a Go struct. Fields appear in AIR index order and are always exported regardless of the struct's visibility, so every struct is uniformly serializable; the struct type's own visibility still governs cross-package naming. Each field carries a `json` tag preserving its original Ard name (see the JSON and marshalling section). Field indirection is not added for the common recursive cases: a nullable self-reference is finite because `Maybe[T]` is pointer-backed, and list/map self-references are finite through the slice/map. Explicit pointer indirection is inserted only for a non-nullable, non-collection recursive cycle that would otherwise be infinitely sized (see `0020-support-recursive-struct-fields-through-indirection.md`).
 
-#### Maybe, Result, Dynamic
+#### Maybe, Result, Any
 
 - `Maybe[T]` lowers to `runtime.Maybe[T]` (`0012-represent-optional-values-with-maybe.md`, `0024-preserve-maybe-semantics-in-go-lowering.md`).
 - `Result[T, E]` lowers to `runtime.Result[T, E]` (`0005-use-result-maybe-and-try-for-error-handling.md`). It is not collapsed into Go's `(T, error)` multi-return.
-- `Dynamic` lowers to `any`.
+- `Any` lowers to `any`.
 
 There is no `Fiber` runtime type: async is a fire-and-forget `async::start` goroutine plus channels (`0033-async-is-goroutines-and-channels.md`).
 
@@ -244,7 +244,7 @@ Generic structs and unions lower to generic Go types. `struct Partition<$T> { se
 
 #### Type aliases
 
-A union type declaration (`type Name = A | B`) declares a named union and lowers to a named tagged struct, as in the Unions section. Any other type alias lowers to a Go type alias that mirrors the Ard alias, so the intended name appears in the generated API. For example `type Decoder<$T> = fn(Dynamic) $T![Error]` lowers to a generic Go type alias `type Decoder[T any] = func(any) runtime.Result[T, Error]`, and `type Primitive = Str | Bool | Void` follows the named-union lowering. Aliases remain transparent to type checking; the Go alias is for naming, not a distinct type. Parameterized type aliases require Go 1.24 or newer; the compiler and its generated programs target Go 1.26, so this is satisfied.
+A union type declaration (`type Name = A | B`) declares a named union and lowers to a named tagged struct, as in the Unions section. Any other type alias lowers to a Go type alias that mirrors the Ard alias, so the intended name appears in the generated API. For example `type Decoder<$T> = fn(Any) $T![Error]` lowers to a generic Go type alias `type Decoder[T any] = func(any) runtime.Result[T, Error]`, and `type Primitive = Str | Bool | Void` follows the named-union lowering. Aliases remain transparent to type checking; the Go alias is for naming, not a distinct type. Parameterized type aliases require Go 1.24 or newer; the compiler and its generated programs target Go 1.26, so this is satisfied.
 
 #### Functions, traits, and extern types
 
@@ -357,7 +357,7 @@ A generic bounded by a trait lowers to a Go type parameter constrained by the tr
 Enums, structs, and unions are defined Go types and can carry methods, so they satisfy trait interfaces directly. Builtin primitives (`int`, `string`, and the other primitive lowerings) cannot have Go methods, so traits implemented for primitives are handled in two ways:
 
 - static or generic trait dispatch on a known primitive lowers the trait method directly, with no interface value
-- a dynamic trait object whose value is a primitive is boxed in a minimal generated per-primitive adapter type that forwards the trait method
+- a boxed trait object whose value is a primitive is boxed in a minimal generated per-primitive adapter type that forwards the trait method
 
 The per-primitive adapter is the one sanctioned synthetic type here, justified solely because Go cannot attach methods to builtins.
 
@@ -446,15 +446,15 @@ The runtime defines exactly two types:
 - `runtime.Maybe[T]` for optional values. It is pointer-backed internally, which is intentional: the indirection makes recursive nullable fields finite-size, and it is the reason nullable-primitive equality lowers inline and `Maybe`-keyed maps are disallowed.
 - `runtime.Result[T, E]` for fallible values, with `Value`, `Err`, and `Ok` fields that `try` reads directly. It is not collapsed into Go's `(T, error)`.
 
-No other shared runtime type is introduced. The one exception sanctioned elsewhere in this contract is the minimal per-primitive boxing adapter required for dynamic trait objects over builtins, which is generated, not part of the runtime package.
+No other shared runtime type is introduced. The one exception sanctioned elsewhere in this contract is the minimal per-primitive boxing adapter required for boxed trait objects over builtins, which is generated, not part of the runtime package.
 
 #### Async
 
 Async is goroutines and channels, with no runtime shape (`0033-async-is-goroutines-and-channels.md`). `async::start(fn() Void)` runs a closure on a new goroutine via a `use go:` helper; coordination is ordinary Ard over channels. Typed channels (`0019-use-typed-channels-for-fiber-communication.md`, `0032-select-on-channels.md`) lower to native Go `chan T` rather than a runtime type.
 
-#### Dynamic
+#### Any
 
-`Dynamic` lowers to `any`. The runtime contains no universal boxed object or kind-tagged value representation. Operations on dynamic data are provided by the relevant standard library modules and their FFI companions, not by a runtime object model.
+`Any` lowers to `any`. The runtime contains no universal boxed object or kind-tagged value representation. Operations on opaque data are provided by the relevant standard library modules and their FFI companions, not by a runtime object model.
 
 #### Leaf-dependency rule
 
@@ -466,15 +466,15 @@ Standard library behavior lives in Ard modules and their FFI companions under `s
 
 ### JSON and marshalling
 
-Ard JSON support lowers onto Go's `encoding/json/v2` over the generated Go types, rather than a custom typed codec or a boxed object model. Typed JSON (`ard/json`) uses `Marshal`/`Unmarshal` directly, and `Dynamic`-based decoding (`ard/decode`) operates on `any`. The previous universal `runtime.Object`/`Kind` representation is removed.
+Ard JSON support lowers onto Go's `encoding/json/v2` over the generated Go types, rather than a custom typed codec or a boxed object model. Typed JSON (`ard/json`) uses `Marshal`/`Unmarshal` directly, and `Any`-based decoding (`ard/decode`) operates on `any`. The previous universal `runtime.Object`/`Kind` representation is removed.
 
 #### What is marshallable
 
-Marshalling applies to every JSON-representable type: `Dynamic`, structs, lists, string-keyed maps, primitives, `Maybe`, `Result`, enums, and unions. `Dynamic` is the general-purpose marshalling vehicle. A union marshals to its active member's value, unwrapped, so a `Str | Int` holding `"hi"` marshals to `"hi"` and one holding `5` marshals to `5`; the union tag is not part of the wire form.
+Marshalling applies to every JSON-representable type: `Any`, structs, lists, string-keyed maps, primitives, `Maybe`, `Result`, enums, and unions. `Any` is the general-purpose marshalling vehicle. A union marshals to its active member's value, unwrapped, so a `Str | Int` holding `"hi"` marshals to `"hi"` and one holding `5` marshals to `5`; the union tag is not part of the wire form.
 
 Unmarshalling (`json::parse`) applies to the same shapes with one exception: parsing into a union is not supported, because choosing a member from arbitrary JSON is ambiguous. The checker rejects `json::parse` into a union or a type that contains one.
 
-The `ard/encode` module, including the `Encodable` trait and its `to_dyn` method, is also removed. It existed to give a single customizable API for turning a value into a particular encoded form, but that capability is unused in practice; building a `Dynamic` goes through the `Dynamic` constructors instead. This keeps `ToString` as the only standard library trait.
+The `ard/encode` module, including the `Encodable` trait and its `to_dyn` method, is also removed. It existed to give a single customizable API for turning a value into a particular encoded form, but that capability is unused in practice; building a `Any` goes through the `Any` constructors instead. This keeps `ToString` as the only standard library trait.
 
 #### Struct fields
 
@@ -494,11 +494,11 @@ An enum marshals as its underlying integer value, which a named `int` type does 
 
 Lists lower to `[]T` and maps to `map[K]V`, both marshalled natively. A `[Byte]` value lowers to `[]byte`, which `encoding/json` encodes and decodes as base64, matching Ard's byte-buffer JSON behavior.
 
-#### Dynamic and number disambiguation
+#### Any and number disambiguation
 
-`Dynamic` lowers to `any`, and JSON parses into the ordinary Go shapes `map[string]any`, `[]any`, `string`, `bool`, and `nil`. Numbers decoded into `Dynamic` use `json.Number` so that `decode` combinators can distinguish `Int` from `Float`; typed parsing into a known type decodes numbers directly into the target `Int` or `Float` field with no ambiguity. The runtime holds no boxed object or kind-tagged representation for dynamic data.
+`Any` lowers to `any`, and JSON parses into the ordinary Go shapes `map[string]any`, `[]any`, `string`, `bool`, and `nil`. Numbers decoded into `Any` use `json.Number` so that `decode` combinators can distinguish `Int` from `Float`; typed parsing into a known type decodes numbers directly into the target `Int` or `Float` field with no ambiguity. The runtime holds no boxed object or kind-tagged representation for opaque data.
 
-`Dynamic` is kept, but demoted. As a boxed runtime representation it is gone; it is now simply the named Ard surface for Go's `any`, with no runtime machinery. It remains the substrate for genuinely untyped data — `ard/decode`, schema-unknown or partial JSON, SQL rows, and host values typed as `any` — but it is no longer the default path for structured data, because `json::parse<T>` decodes directly into generated structs. How prominent `Dynamic` stays depends on a separate, future language decision about whether to keep `ard/decode` and whether SQL moves to typed row scanning; if those untyped producers move to typed paths, `Dynamic` becomes a rarely-used escape hatch. That decision is out of scope for this ADR, which only fixes that `Dynamic` lowers to `any`.
+`Any` is kept, but demoted. As a boxed runtime representation it is gone; it is now simply the named Ard surface for Go's `any`, with no runtime machinery. It remains the substrate for genuinely untyped data — `ard/decode`, schema-unknown or partial JSON, SQL rows, and host values typed as `any` — but it is no longer the default path for structured data, because `json::parse<T>` decodes directly into generated structs. How prominent `Any` stays depends on a separate, future language decision about whether to keep `ard/decode` and whether SQL moves to typed row scanning; if those untyped producers move to typed paths, `Any` becomes a rarely-used escape hatch. That decision is out of scope for this ADR, which only fixes that `Any` lowers to `any`.
 
 ### Tests
 
@@ -536,7 +536,7 @@ Go values map to Ard types structurally, and a few idiomatic Go shapes are adapt
 - Go `struct{}` is Ard's unit type `Void`, and a no-result Go function is `Void` too.
 - A Go function returning `(T, error)` is adapted to Ard `T!Str`; one returning only `error` is `Void!Str`. The Go `error` is stringified — Ard does not model Go's `error` interface as a value.
 - A Go function returning the comma-ok pair `(T, bool)` is adapted to Ard `T?`.
-- Otherwise a single Go result maps to its Ard type by the normal rules: primitives, `[]T` to `[T]`, `map[K]V` to `[K:V]`, `any` to `Dynamic`, `func` to a function type, and `chan T` to a channel (directional per `0032-select-on-channels.md`).
+- Otherwise a single Go result maps to its Ard type by the normal rules: primitives, `[]T` to `[T]`, `map[K]V` to `[K:V]`, `any` to `Any`, `func` to a function type, and `chan T` to a channel (directional per `0032-select-on-channels.md`).
 
 These boundary adaptations are distinct from how Ard's own types lower. An Ard `Result[T, E]` value still lowers to `runtime.Result[T, E]` and is not collapsed into `(T, error)`; the adaptations above apply only when *calling* idiomatic Go through `use go:`.
 
@@ -577,10 +577,10 @@ The standard library completed this migration: its Go implementation is an ordin
 - The backend commits to minimizing synthetic helpers, with only `Maybe` and `Result` sanctioned as shared runtime types. `Void` lowers to `struct{}` and the structural-map helper is removed.
 - Equality is restricted to primitives, nullable primitives, and enums, so no structural-equality helper is generated. Map iteration order is unspecified and uses Go's native range, removing the sorted-key helpers. The previously generated equality and key-sorting helpers become dead and are removed.
 - The runtime package is reduced to `Maybe` and `Result` and must import only the Go standard library. The universal boxed `Object`/`Kind` representation, the `Fiber` async shape, the structural-map, equality, sorted-key, and void helpers are removed, and stdlib utilities such as argv access and the `ard/async` goroutine-spawn primitive move to FFI companions.
-- JSON lowers onto Go's `encoding/json/v2` over the generated types. Struct fields are always exported (revising the earlier fields-follow-type-visibility rule) and carry `json` tags preserving the Ard field name, so every struct is serializable. Marshalling applies to `Dynamic`, structs, lists, string-keyed maps, primitives, `Maybe`, `Result`, enums, and unions (a union marshals to its active member, unwrapped); only parsing into a union is rejected by the checker, as it is ambiguous. `Maybe` and `Result` are the sanctioned runtime JSON marshalers. Decoding into `Dynamic` uses `json.Number` to disambiguate `Int` from `Float`.
-- Map key types are constrained during checking to Go strictly-comparable types whose Go equality matches Ard equality, so every Ard map lowers to a plain Go map. `Float` keys are allowed; `Maybe`, `List`, `Map`, and `Dynamic` keys are rejected. Generic type parameters used as map keys emit a Go `comparable` constraint. This is a language-level constraint the checker must enforce. The standard library conforms to it: `ard/decode`'s `to_map` is removed and decode migrates to string-keyed maps, which is the correct shape for JSON objects anyway.
+- JSON lowers onto Go's `encoding/json/v2` over the generated types. Struct fields are always exported (revising the earlier fields-follow-type-visibility rule) and carry `json` tags preserving the Ard field name, so every struct is serializable. Marshalling applies to `Any`, structs, lists, string-keyed maps, primitives, `Maybe`, `Result`, enums, and unions (a union marshals to its active member, unwrapped); only parsing into a union is rejected by the checker, as it is ambiguous. `Maybe` and `Result` are the sanctioned runtime JSON marshalers. Decoding into `Any` uses `json.Number` to disambiguate `Int` from `Float`.
+- Map key types are constrained during checking to Go strictly-comparable types whose Go equality matches Ard equality, so every Ard map lowers to a plain Go map. `Float` keys are allowed; `Maybe`, `List`, `Map`, and `Any` keys are rejected. Generic type parameters used as map keys emit a Go `comparable` constraint. This is a language-level constraint the checker must enforce. The standard library conforms to it: `ard/decode`'s `to_map` is removed and decode migrates to string-keyed maps, which is the correct shape for JSON objects anyway.
 - Impl methods lower to real Go methods with no duplicated standalone helpers, mutation is expressed through pointer receivers and pointer parameters rather than forwarding tables, and closures lower to Go function literals. Generic functions lower to Go generics, with monomorphization only as a fallback. These choices require AIR to preserve generic structure and receiver/mutation metadata for the backend.
-- Traits lower to Go interfaces with structural satisfaction, removing generated dispatch and forwarding-table machinery and superseding the Go-lowering portion of `0023-represent-mutable-trait-references-with-forwarding-tables.md`. `ToString` maps to `fmt.Stringer`. Traits implemented for builtin primitives require a minimal per-primitive boxing adapter for dynamic trait objects, since Go cannot attach methods to builtins.
+- Traits lower to Go interfaces with structural satisfaction, removing generated dispatch and forwarding-table machinery and superseding the Go-lowering portion of `0023-represent-mutable-trait-references-with-forwarding-tables.md`. `ToString` maps to `fmt.Stringer`. Traits implemented for builtin primitives require a minimal per-primitive boxing adapter for boxed trait objects, since Go cannot attach methods to builtins.
 - Trait methods are always public contract, so trait-implementing methods always lower to exported Go methods. The checker must reject a `private` modifier on a trait-implementing method.
 - Remaining sections of this contract still need to be drafted before the contract is complete enough to drive a backend rewrite.
 

@@ -2005,14 +2005,14 @@ func TestTypeNameUsesModulePathAndUniqueFallback(t *testing.T) {
 }
 func TestLowerProgramUsesDirectStdlibMaybeCalls(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/dynamic
+		use ard/any
 		use ard/float
 		use ard/int
 
 		fn main() Bool {
 			let _b = float::from_str("1.5")
 			let _c = int::from_str("2")
-			let _d = dynamic::object(["a": dynamic::from_int(1)])
+			let _d = any::object(["a": any::from_int(1)])
 			true
 		}
 	`)
@@ -2027,8 +2027,8 @@ func TestLowerProgramUsesDirectStdlibMaybeCalls(t *testing.T) {
 	if astFilesHaveCall(files, "ardIntFromStr") {
 		t.Fatal("generated AST should not use legacy IntFromStr helper")
 	}
-	if astFilesHaveCall(files, "ardMapToDynamic") {
-		t.Fatal("generated AST should not use legacy MapToDynamic helper")
+	if astFilesHaveCall(files, "ardMapToAny") {
+		t.Fatal("generated AST should not use legacy MapToAny helper")
 	}
 }
 

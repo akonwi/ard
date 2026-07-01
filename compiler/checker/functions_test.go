@@ -340,7 +340,7 @@ func TestCallingPackageFunctions(t *testing.T) {
 				`  fn mut bump(n: Int) { self.scroll = self.scroll + n }`,
 				`}`,
 				`struct Tab {`,
-				`  data: Dynamic,`,
+				`  data: Any,`,
 				`  sv: Sv,`,
 				`  flag: Bool,`,
 				`  cursor: Int,`,
@@ -379,7 +379,7 @@ func TestCallingPackageFunctions(t *testing.T) {
 			input: strings.Join([]string{
 				`use ard/decode`,
 				`struct Sv { scroll: Int }`,
-				`struct Tab { data: Dynamic, sv: Sv, flag: Bool }`,
+				`struct Tab { data: Any, sv: Sv, flag: Bool }`,
 				`struct A {}`,
 				`struct B {}`,
 				`type Event = A | B`,
@@ -755,13 +755,13 @@ func TestTypeDoubleColonFunctionDefinition(t *testing.T) {
 					name: Str,
 				}
 
-				fn Fixture::from_api_entry(data: Dynamic) Fixture![decode::Error] {
+				fn Fixture::from_api_entry(data: Any) Fixture![decode::Error] {
 					let id = try decode::run(data, decode::field("id", decode::int))
 					let name = try decode::run(data, decode::field("name", decode::string))
 					Result::ok(Fixture{id: id, name: name})
 				}
 
-				fn find_fixtures(body: Dynamic) [Fixture]!Str {
+				fn find_fixtures(body: Any) [Fixture]!Str {
 					let fixtures = try decode::run(body, decode::field("response", decode::list(Fixture::from_api_entry))) -> errs {
 						Result::err("Error decoding fixtures")
 					}

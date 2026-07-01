@@ -1635,12 +1635,12 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 			set_map.get("x").expect("missing").set(81)
 			let set_map_observed = direct_leaf.n
 
-			mut dynamic_slot = make(2)
-			let dynamic_node = Node{view: dynamic_slot}
-			dynamic_slot = Branch{n: 17}
-			let dynamic_observed = dynamic_node.view.value()
-			dynamic_node.view.set(19)
-			let dynamic_slot_observed = read(dynamic_slot)
+			mut any_slot = make(2)
+			let any_node = Node{view: any_slot}
+			any_slot = Branch{n: 17}
+			let any_observed = any_node.view.value()
+			any_node.view.set(19)
+			let any_slot_observed = read(any_slot)
 
 			mut replace_slot = make(1)
 			mut root = Root{view: replace_slot}
@@ -1681,7 +1681,7 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 			setter(53)
 			let setter_observed = setter_leaf.n
 
-			stored_observed + stored_leaf.n + direct_observed + direct_leaf.n + immutable_observed + via_ref_observed + snapshot_observed + list_observed + map_observed + maybe_observed + result_observed + union_observed + push_observed + prepend_observed + set_observed + set_map_observed + dynamic_observed + dynamic_slot_observed + replaced_observed + param_observed + replaced_leaf.n + replaced_slot_observed + forwarded_assign_observed + closure_observed + sink_result + sink_leaf.n + node_sink_result + node_sink_leaf.n + setter_observed
+			stored_observed + stored_leaf.n + direct_observed + direct_leaf.n + immutable_observed + via_ref_observed + snapshot_observed + list_observed + map_observed + maybe_observed + result_observed + union_observed + push_observed + prepend_observed + set_observed + set_map_observed + any_observed + any_slot_observed + replaced_observed + param_observed + replaced_leaf.n + replaced_slot_observed + forwarded_assign_observed + closure_observed + sink_result + sink_leaf.n + node_sink_result + node_sink_leaf.n + setter_observed
 		}
 	`)
 	if got := runGoTargetParityJSON(t, program); got != "607" {
@@ -2092,25 +2092,25 @@ func TestGoTargetParitySQL(t *testing.T) {
 func TestGoTargetParityDecodeHostFlows(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
-			name: "dynamic list decodes back to list",
+			name: "any list decodes back to list",
 			input: `
 				use ard/decode
 				fn main() Int {
 					let foo = [1,2,3]
-					let data = Dynamic::list(from: foo, of: Dynamic::from_int)
+					let data = Any::list(from: foo, of: Any::from_int)
 					let list = decode::run(data, decode::list(decode::int)).expect("Couldn't decode data")
 					list.at(1)
 				}
 			`,
 		},
 		{
-			name: "dynamic object decodes back to map",
+			name: "any object decodes back to map",
 			input: `
 				use ard/decode
 				fn main() Int {
-					let data = Dynamic::object([
-						"foo": Dynamic::from_int(0),
-						"baz": Dynamic::from_int(1),
+					let data = Any::object([
+						"foo": Any::from_int(0),
+						"baz": Any::from_int(1),
 					])
 					let m = decode::run(data, decode::map(decode::string, decode::int)).expect("Couldn't decode data")
 					m.get("foo").or(-1)
@@ -2128,22 +2128,22 @@ func TestGoTargetParityDecodeHostFlows(t *testing.T) {
 			`,
 		},
 		{
-			name: "from json accepts dynamic string input",
+			name: "from json accepts any string input",
 			input: `
 				use ard/decode
 				fn main() Int {
-					let raw = Dynamic::from("\{\"count\": 7\}")
+					let raw = Any::from("\{\"count\": 7\}")
 					let data = decode::from_json(raw).expect("parse")
 					decode::run(data, decode::field("count", decode::int)).expect("decode")
 				}
 			`,
 		},
 		{
-			name: "from json rejects non string dynamic input",
+			name: "from json rejects non string any input",
 			input: `
 				use ard/decode
 				fn main() Str {
-					let raw = Dynamic::from(42)
+					let raw = Any::from(42)
 					match decode::from_json(raw) {
 						err(msg) => msg,
 						ok(_) => "unexpected success",
@@ -2177,7 +2177,7 @@ func TestGoTargetParityDecodeHostFlows(t *testing.T) {
 			input: `
 				use ard/decode
 				fn main() Str {
-					let data = Dynamic::from(42)
+					let data = Any::from(42)
 					let result = decode::run(data, decode::string)
 					match result {
 						err(errs) => {
@@ -2251,7 +2251,7 @@ func TestGoTargetParityDecodeHostFlows(t *testing.T) {
 			name: "one of falls back to alternate decoder",
 			input: `
 				use ard/decode
-				fn int_to_string(data: Dynamic) Str![decode::Error] {
+				fn int_to_string(data: Any) Str![decode::Error] {
 					let int = try decode::int(data)
 					Result::ok(int.to_str())
 				}

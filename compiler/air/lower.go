@@ -114,7 +114,7 @@ func newLowerer(options LowerOptions) *lowerer {
 	l.mustIntern(checker.Byte)
 	l.mustIntern(checker.Rune)
 	l.mustIntern(checker.Str)
-	l.mustIntern(checker.Dynamic)
+	l.mustIntern(checker.Any)
 	return l
 }
 
@@ -2044,8 +2044,8 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 			info.Kind = TypeRune
 		case checker.Str:
 			info.Kind = TypeStr
-		case checker.Dynamic:
-			info.Kind = TypeDynamic
+		case checker.Any:
+			info.Kind = TypeAny
 		default:
 			return NoType, fmt.Errorf("unsupported AIR type %T (%s)", t, t.String())
 		}
@@ -2344,9 +2344,9 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 	}
 }
 
-func canWrapAsDynamic(kind TypeKind) bool {
+func canWrapAsAny(kind TypeKind) bool {
 	switch kind {
-	case TypeVoid, TypeInt, TypeFloat, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeChannel, TypeReceiver, TypeSender, TypeDynamic:
+	case TypeVoid, TypeInt, TypeFloat, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeChannel, TypeReceiver, TypeSender, TypeAny:
 		return true
 	default:
 		return false
@@ -2560,7 +2560,7 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 	if wrapped, ok, err := fl.lowerTraitUpcastIfNeeded(expr, expected); ok || err != nil {
 		return wrapped, err
 	}
-	if wrapped, ok, err := fl.lowerDynamicWrapIfNeeded(expr, expected); ok || err != nil {
+	if wrapped, ok, err := fl.lowerAnyWrapIfNeeded(expr, expected); ok || err != nil {
 		return wrapped, err
 	}
 	if list, ok := expr.(*checker.ListLiteral); ok {
@@ -2926,9 +2926,9 @@ func (fl *functionLowerer) isWeakContextType(typeID TypeID) bool {
 	}
 }
 
-func (fl *functionLowerer) lowerDynamicWrapIfNeeded(expr checker.Expression, expected TypeID) (*Expr, bool, error) {
+func (fl *functionLowerer) lowerAnyWrapIfNeeded(expr checker.Expression, expected TypeID) (*Expr, bool, error) {
 	expectedInfo, ok := fl.l.typeInfo(expected)
-	if !ok || expectedInfo.Kind != TypeDynamic {
+	if !ok || expectedInfo.Kind != TypeAny {
 		return nil, false, nil
 	}
 	actual, err := fl.internType(expr.Type())
@@ -2942,14 +2942,14 @@ func (fl *functionLowerer) lowerDynamicWrapIfNeeded(expr checker.Expression, exp
 		return nil, false, nil
 	}
 	actualInfo, ok := fl.l.typeInfo(actual)
-	if !ok || !canWrapAsDynamic(actualInfo.Kind) {
+	if !ok || !canWrapAsAny(actualInfo.Kind) {
 		return nil, false, nil
 	}
 	value, err := fl.lowerExpr(expr)
 	if err != nil {
 		return nil, true, err
 	}
-	return &Expr{Kind: ExprToDynamic, Type: expected, Target: value}, true, nil
+	return &Expr{Kind: ExprToAny, Type: expected, Target: value}, true, nil
 }
 
 func (fl *functionLowerer) lowerUnionWrapIfNeeded(expr checker.Expression, expected TypeID) (*Expr, bool, error) {
@@ -4991,7 +4991,7 @@ func (fl *functionLowerer) lowerChanMethod(typeID TypeID, target *Expr, method *
 			return nil, fmt.Errorf("Chan.send expects one argument")
 		}
 		// Lower the sent value against the channel's element type so contextual
-		// expressions (empty literals, union wrapping, maybe/none, dynamic) lower
+		// expressions (empty literals, union wrapping, maybe/none, any) lower
 		// correctly.
 		value, err := fl.lowerChannelValue(target.Type, method.Method.Args[0])
 		if err != nil {

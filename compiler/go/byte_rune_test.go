@@ -98,13 +98,13 @@ func TestGoTargetParityByteRunePrimitives(t *testing.T) {
 			want: "true",
 		},
 		{
-			name: "decode byte and rune dynamics",
+			name: "decode byte and rune anys",
 			input: `use ard/decode
-use ard/dynamic as Dynamic
+use ard/any as Any
 fn main() Bool {
   let b = Byte::from_int(7).expect("byte")
   let r = Rune::from_str("é").expect("rune")
-  decode::byte(Dynamic::from(b)).expect("byte").to_int() == 7 and decode::rune(Dynamic::from(r)).expect("rune").to_str() == "é" and decode::int(Dynamic::from(b)).expect("int") == 7
+  decode::byte(Any::from(b)).expect("byte").to_int() == 7 and decode::rune(Any::from(r)).expect("rune").to_str() == "é" and decode::int(Any::from(b)).expect("int") == 7
 }`,
 			want: "true",
 		},

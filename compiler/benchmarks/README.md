@@ -16,7 +16,7 @@ The benchmarks are intentionally more realistic than tiny microbenchmarks, but s
 - `dna_frequency.ard`
   - string-heavy generated DNA data, map counting, string predicates
 - `json_serde_roundtrip.ard`
-  - JSON encode/decode, dynamic values, Result-heavy hot loop
+  - JSON encode/decode, opaque values, Result-heavy hot loop
 - `lru_cache.ard`
   - mutation-heavy map/list cache workload
 - `base64_batch.ard`

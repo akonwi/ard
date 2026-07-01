@@ -102,7 +102,7 @@ const (
 	ExprStrSplit
 	ExprStrStartsWith
 	ExprStrEndsWith
-	ExprToDynamic
+	ExprToAny
 	ExprStrTrim
 	ExprEq
 	ExprNotEq

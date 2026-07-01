@@ -1953,9 +1953,9 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		stmts := append(target.stmts, suffix.stmts...)
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "HasSuffix"), Args: []ast.Expr{target.expr, suffix.expr}}}, nil
-	case air.ExprToDynamic:
+	case air.ExprToAny:
 		if expr.Target == nil {
-			return loweredExpr{}, fmt.Errorf("to dynamic missing target")
+			return loweredExpr{}, fmt.Errorf("to any missing target")
 		}
 		return l.lowerExpr(fn, *expr.Target)
 	case air.ExprStrTrim:
@@ -2704,7 +2704,7 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 		return ast.NewIdent("false"), nil
 	case air.TypeStr:
 		return &ast.BasicLit{Kind: token.STRING, Value: "\"\""}, nil
-	case air.TypeDynamic, air.TypeFunction, air.TypeTraitObject:
+	case air.TypeAny, air.TypeFunction, air.TypeTraitObject:
 		return ast.NewIdent("nil"), nil
 	default:
 		typ, err := l.goType(typeID)
@@ -2901,7 +2901,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return l.namedTypeExpr(info), nil
 	case air.TypeUnion:
 		return l.namedTypeExpr(info), nil
-	case air.TypeDynamic:
+	case air.TypeAny:
 		return ast.NewIdent("any"), nil
 	case air.TypeTraitObject:
 		if l.usesNativeTraitInterface(typeID) {
@@ -3378,7 +3378,7 @@ func (l *lowerer) mutableTraitObjectArg(fn air.Function, arg air.Expr, argExpr a
 		if !ok {
 			return nil, nil, nil, true, fmt.Errorf("mutable trait object argument is not an assignable place")
 		}
-		ref, err := l.mutableTraitDynamicForwarderExpr(place, param.Type)
+		ref, err := l.mutableTraitAnyForwarderExpr(place, param.Type)
 		if err != nil {
 			return nil, nil, nil, true, err
 		}
@@ -3506,7 +3506,7 @@ func (l *lowerer) mutableTraitForwarderExpr(upcast air.Expr, place ast.Expr, tra
 	return &ast.CompositeLit{Type: refType, Elts: elts}, nil
 }
 
-func (l *lowerer) mutableTraitDynamicForwarderExpr(place ast.Expr, traitTypeID air.TypeID) (ast.Expr, error) {
+func (l *lowerer) mutableTraitAnyForwarderExpr(place ast.Expr, traitTypeID air.TypeID) (ast.Expr, error) {
 	if !l.isTraitObjectType(traitTypeID) {
 		return nil, fmt.Errorf("type %d is not a trait object", traitTypeID)
 	}
@@ -3515,7 +3515,7 @@ func (l *lowerer) mutableTraitDynamicForwarderExpr(place ast.Expr, traitTypeID a
 		return nil, fmt.Errorf("invalid trait id %d", traitID)
 	}
 	trait := l.program.Traits[traitID]
-	assignFunc, err := l.mutableTraitDynamicAssignFuncLit(place, traitTypeID)
+	assignFunc, err := l.mutableTraitAnyAssignFuncLit(place, traitTypeID)
 	if err != nil {
 		return nil, err
 	}
@@ -3524,7 +3524,7 @@ func (l *lowerer) mutableTraitDynamicForwarderExpr(place ast.Expr, traitTypeID a
 		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitAssignFieldName(trait)), Value: assignFunc},
 	}
 	for i, method := range trait.Methods {
-		fieldValue, err := l.mutableTraitDynamicForwarderMethodExpr(trait, i, method, place, traitTypeID)
+		fieldValue, err := l.mutableTraitAnyForwarderMethodExpr(trait, i, method, place, traitTypeID)
 		if err != nil {
 			return nil, err
 		}
@@ -3537,7 +3537,7 @@ func (l *lowerer) mutableTraitDynamicForwarderExpr(place ast.Expr, traitTypeID a
 	return &ast.CompositeLit{Type: refType, Elts: elts}, nil
 }
 
-func (l *lowerer) mutableTraitDynamicForwarderMethodExpr(trait air.Trait, methodIndex int, traitMethod air.TraitMethod, place ast.Expr, traitTypeID air.TypeID) (ast.Expr, error) {
+func (l *lowerer) mutableTraitAnyForwarderMethodExpr(trait air.Trait, methodIndex int, traitMethod air.TraitMethod, place ast.Expr, traitTypeID air.TypeID) (ast.Expr, error) {
 	fnTypeExpr, err := l.mutableTraitMethodFuncType(traitMethod)
 	if err != nil {
 		return nil, err
@@ -3643,7 +3643,7 @@ func mutableTraitAssignFuncLit(place ast.Expr, targetType ast.Expr, trait air.Tr
 	}
 }
 
-func (l *lowerer) mutableTraitDynamicAssignFuncLit(place ast.Expr, traitTypeID air.TypeID) (ast.Expr, error) {
+func (l *lowerer) mutableTraitAnyAssignFuncLit(place ast.Expr, traitTypeID air.TypeID) (ast.Expr, error) {
 	value := ast.Expr(ast.NewIdent("value"))
 	if l.usesNativeTraitInterface(traitTypeID) {
 		traitType, err := l.goType(traitTypeID)
@@ -5835,7 +5835,7 @@ func (l *lowerer) mapKeyHelper(typeID air.TypeID) (string, error) {
 	case air.TypeStr:
 		l.markRuntimeHelper("sorted_string_keys")
 		return "ardSortedStringKeys", nil
-	case air.TypeDynamic:
+	case air.TypeAny:
 		l.markRuntimeHelper("sorted_any_keys")
 		return "ardSortedAnyKeys", nil
 	default:

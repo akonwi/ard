@@ -116,7 +116,7 @@ const (
 	TypeMaybe
 	TypeResult
 	TypeUnion
-	TypeDynamic
+	TypeAny
 	TypeFunction
 	TypeChannel
 	TypeReceiver

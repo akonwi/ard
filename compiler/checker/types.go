@@ -46,7 +46,7 @@ type Type interface {
 	/* A.K.A 'compatible()'
 	  The Ard type system only allows generics in parameters.
 		This means equal is called as `expected.equal(actual)`,
-		where `expected` is the declared parameter type and `actual` is the provided dynamic type.
+		where `expected` is the declared parameter type and `actual` is the provided any type.
 		The exception is when resolving generics in a function call based on inferred types.
 	 	In this scenario, the generic is the `other` argument, so that the callee type can fill in the resolved type.
 	*/
@@ -1023,13 +1023,13 @@ func (r *Result) Err() Type {
 	return r.err
 }
 
-// Dynamic type for external/untyped data
-type dynamicType struct{}
+// Any type for external/untyped data
+type anyType struct{}
 
-func (d dynamicType) String() string       { return "Dynamic" }
-func (d dynamicType) get(name string) Type { return nil }
-func (d dynamicType) equal(other Type) bool {
-	if _, ok := other.(*dynamicType); ok {
+func (d anyType) String() string       { return "Any" }
+func (d anyType) get(name string) Type { return nil }
+func (d anyType) equal(other Type) bool {
+	if _, ok := other.(*anyType); ok {
 		return true
 	}
 	if typeVar, ok := other.(*TypeVar); ok && typeVar.actual == nil {
@@ -1037,6 +1037,6 @@ func (d dynamicType) equal(other Type) bool {
 	}
 	return false
 }
-func (d dynamicType) hasTrait(trait *Trait) bool { return false }
+func (d anyType) hasTrait(trait *Trait) bool { return false }
 
-var Dynamic = &dynamicType{}
+var Any = &anyType{}

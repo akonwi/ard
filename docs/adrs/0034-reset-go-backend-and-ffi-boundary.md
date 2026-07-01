@@ -75,7 +75,7 @@ Examples of semantic adaptation include:
 - converting Go comma-ok or absence-like APIs into `Maybe`;
 - hiding nil-prone or panic-prone APIs behind safer Ard functions;
 - choosing defaults for Go APIs with many configuration parameters;
-- adapting callback, interface, dynamic, reflection, or lifecycle-heavy APIs.
+- adapting callback, interface, opaque `Any`, reflection, or lifecycle-heavy APIs.
 
 Direct Go interop should make simple cases simple, but it should not force arbitrary Go concepts into Ard's core semantics.
 
