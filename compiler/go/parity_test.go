@@ -177,7 +177,7 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 			`,
 		},
 		{name: "unary not", input: `fn main() Bool { not true }`},
-		{name: "unary negative float", input: `fn main() Float { -20.1 }`},
+		{name: "unary negative float", input: `fn main() Float64 { -20.1 }`},
 		{name: "arithmetic precedence", input: `fn main() Int { 30 + (20 * 4) }`},
 		{name: "chained comparisons", input: `fn main() Bool { 200 <= 250 <= 300 }`},
 		{

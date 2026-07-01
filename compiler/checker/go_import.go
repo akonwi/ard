@@ -126,7 +126,7 @@ func typeFromGo(t types.Type) (Type, string) {
 	case types.Int:
 		return Int, ""
 	case types.Float64:
-		return Float, ""
+		return Float64, ""
 	}
 	return nil, fmt.Sprintf("unsupported basic type %s", basic.Name())
 }

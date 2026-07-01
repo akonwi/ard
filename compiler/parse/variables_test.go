@@ -11,7 +11,7 @@ func TestVariables(t *testing.T) {
 			input: `
 				let name: Str = "Alice"
     		mut age: Int = 30
-        mut temp: Float = 98.6
+        mut temp: Float64 = 98.6
       	let is_student: Bool = true`,
 			output: Program{
 				Imports: []Import{},

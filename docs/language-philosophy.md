@@ -40,9 +40,9 @@ Ard intentionally keeps scalar types small and simple:
 - `Bool`
 - `Str`
 - `Int`
-- `Float`
+- `Float64`
 
-`Int` and `Float` map to the target's ordinary large/default scalar types. In the Go backend, `Int` lowers to `int` and `Float` lowers to `float64`.
+`Int` and `Float64` map to the target's ordinary large/default scalar types. In the Go backend, `Int` lowers to `int` and `Float64` lowers to `float64`.
 
 Additional scalar-like types such as bytes and runes may exist when they carry distinct language or interop meaning, but the default numeric model should remain simple.
 

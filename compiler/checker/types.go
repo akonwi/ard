@@ -362,7 +362,7 @@ var Int = &_int{}
 
 type float struct{}
 
-func (f float) String() string { return "Float" }
+func (f float) String() string { return "Float64" }
 func (f float) get(name string) Type {
 	switch name {
 	case "to_str":
@@ -401,7 +401,7 @@ func (f *float) hasTrait(trait *Trait) bool {
 	return trait.name() == "ToString"
 }
 
-var Float = &float{}
+var Float64 = &float{}
 
 type _bool struct{}
 

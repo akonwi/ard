@@ -937,7 +937,7 @@ func describeExpr(expr parse.Expression, source string, filePath string, prog *p
 		return simpleHover("Str")
 	case *parse.NumLiteral:
 		if strings.ContainsRune(e.Value, '.') {
-			return simpleHover("Float")
+			return simpleHover("Float64")
 		}
 		return simpleHover("Int")
 	case *parse.BoolLiteral:
@@ -1729,7 +1729,7 @@ func primitiveMethodSignature(ownerType string, methodName string) *hoverMethodS
 		case "to_dyn":
 			return mk("Any")
 		}
-	case "Float":
+	case "Float64":
 		switch methodName {
 		case "to_str":
 			return mk("Str")
@@ -2107,7 +2107,7 @@ func inferExprType(expr parse.Expression, prog *parse.Program, filePath string) 
 		return "Str"
 	case *parse.NumLiteral:
 		if strings.ContainsRune(e.Value, '.') {
-			return "Float"
+			return "Float64"
 		}
 		return "Int"
 	case *parse.BoolLiteral:
@@ -2388,8 +2388,6 @@ func preludeModulePath(alias string) string {
 	switch alias {
 	case "Any":
 		return "ard/any"
-	case "Float":
-		return "ard/float"
 	case "Int":
 		return "ard/int"
 	case "List":
@@ -2526,8 +2524,8 @@ func inferBinaryExprType(e *parse.BinaryExpression, prog *parse.Program, filePat
 		if left == "Str" || right == "Str" {
 			return "Str"
 		}
-		if left == "Float" || right == "Float" {
-			return "Float"
+		if left == "Float64" || right == "Float64" {
+			return "Float64"
 		}
 		return "Int"
 	case parse.Minus, parse.Divide, parse.Multiply, parse.Modulo:

@@ -524,7 +524,7 @@ func builtinMethodNames(ownerType string) []string {
 		return []string{"at", "contains", "is_empty", "replace", "replace_all", "size", "split", "starts_with", "ends_with", "to_str", "to_dyn", "trim"}
 	case "Int":
 		return []string{"to_str", "to_dyn"}
-	case "Float":
+	case "Float64":
 		return []string{"to_str", "to_dyn", "to_int"}
 	case "Bool":
 		return []string{"to_str", "to_dyn"}

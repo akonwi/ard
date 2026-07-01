@@ -222,7 +222,6 @@ export default defineConfig({
             { label: "ard/dynamic", slug: "stdlib/dynamic" },
             { label: "ard/encode", slug: "stdlib/encode" },
             { label: "ard/ffi", slug: "stdlib/ffi" },
-            { label: "ard/float", slug: "stdlib/float" },
             { label: "ard/http", slug: "stdlib/http" },
             { label: "ard/int", slug: "stdlib/int" },
             { label: "ard/io", slug: "stdlib/io" },

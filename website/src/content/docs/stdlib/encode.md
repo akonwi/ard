@@ -6,7 +6,7 @@ description: Encode primitive values to JSON strings with the ard/encode module.
 The `ard/encode` module provides a focused JSON encoder for primitive values. It exposes a small `Encodable` trait implemented only by the core primitives.
 
 :::note
-`Encodable` is implemented by `Str`, `Int`, `Float`, and `Bool`. For structs, lists, maps, or `Dynamic`, use `ard/json` instead.
+`Encodable` is implemented by `Str`, `Int`, `Float64`, and `Bool`. For structs, lists, maps, or `Dynamic`, use `ard/json` instead.
 :::
 
 ```ard

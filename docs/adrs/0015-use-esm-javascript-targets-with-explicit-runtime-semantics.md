@@ -25,11 +25,11 @@ The effective target for `run` and `build` is resolved in this order:
 2. `ard.toml` `target`
 3. compiler default target
 
-Checker-side validation is part of the JavaScript target model. Target incompatibilities should fail during checking/import resolution, including restricted stdlib imports and semantic cases JavaScript cannot represent safely, such as union matches that try to discriminate `Int` from `Float`.
+Checker-side validation is part of the JavaScript target model. Target incompatibilities should fail during checking/import resolution, including restricted stdlib imports and semantic cases JavaScript cannot represent safely, such as union matches that try to discriminate `Int` from `Float64`.
 
 JavaScript runtime representations should be explicit:
 
-- `Int` and `Float` both lower to JS `number`
+- `Int` and `Float64` both lower to JS `number`
 - `Bool` lowers to `boolean`
 - `Str` lowers to `string`
 - `Void` lowers to `undefined`

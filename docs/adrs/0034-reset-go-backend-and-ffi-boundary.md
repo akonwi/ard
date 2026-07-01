@@ -26,7 +26,7 @@ Preserve these areas unless a specific backend/FFI decision exposes a real langu
 - formatter behavior for core Ard;
 - AIR as the frontend/backend boundary;
 - core checker semantics for Ard-owned types and values;
-- primitives such as `Bool`, `Str`, `Int`, and `Float`;
+- primitives such as `Bool`, `Str`, `Int`, and `Float64`;
 - `Maybe` for explicit nullability;
 - `Result` for errors as values;
 - explicit mutability and immutable access;

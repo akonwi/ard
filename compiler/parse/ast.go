@@ -168,7 +168,7 @@ type FloatType struct {
 }
 
 func (f FloatType) GetName() string {
-	return "Float"
+	return "Float64"
 }
 func (f FloatType) IsNullable() bool {
 	return f.nullable

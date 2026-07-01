@@ -35,7 +35,7 @@ Parse a JSON string into the requested Ard type. Returns a result containing the
 
 Supported target types:
 
-- **Primitives**: `Str`, `Int`, `Float`, `Bool`, `Byte`, `Rune`
+- **Primitives**: `Str`, `Int`, `Float64`, `Bool`, `Byte`, `Rune`
 - **Collections**: lists and maps with `Str` keys, such as `[Todo]` and `[Str:Int]`
 - **Byte buffers**: `[Byte]` parses from a base64 JSON string
 - **Structs**: JSON objects with fields matching the struct field names
@@ -61,7 +61,7 @@ Encode a JSON-compatible Ard value as a JSON string. Returns a result containing
 
 Supported values include:
 
-- **Primitives**: `Str`, `Int`, `Float`, `Bool`, `Byte`, `Rune`
+- **Primitives**: `Str`, `Int`, `Float64`, `Bool`, `Byte`, `Rune`
 - **Collections**: lists and maps with `Str` keys
 - **Byte buffers**: `[Byte]` encodes as a base64 JSON string
 - **Structs**: encoded as objects with named fields

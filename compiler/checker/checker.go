@@ -427,9 +427,6 @@ func (c *Checker) Check() {
 		if mod, ok := findInStdLib("ard/any"); ok {
 			c.program.Imports["Any"] = mod
 		}
-		if mod, ok := findInStdLib("ard/float"); ok {
-			c.program.Imports["Float"] = mod
-		}
 		if mod, ok := findInStdLib("ard/int"); ok {
 			c.program.Imports["Int"] = mod
 		}
@@ -687,7 +684,7 @@ func isComparableValueType(t Type) bool {
 	if t == nil {
 		return false
 	}
-	if t.equal(Int) || t.equal(Float) || t.equal(Str) || t.equal(Bool) || t.equal(Byte) || t.equal(Rune) {
+	if t.equal(Int) || t.equal(Float64) || t.equal(Str) || t.equal(Bool) || t.equal(Byte) || t.equal(Rune) {
 		return true
 	}
 	_, isEnum := t.(*Enum)
@@ -716,7 +713,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 	case *parse.IntType:
 		baseType = Int
 	case *parse.FloatType:
-		baseType = Float
+		baseType = Float64
 	case *parse.BooleanType:
 		baseType = Bool
 	case *parse.VoidType:
@@ -3267,7 +3264,7 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 		return c.createByteMethod(subject, methodName)
 	case Rune:
 		return c.createRuneMethod(subject, methodName)
-	case Float:
+	case Float64:
 		return c.createFloatMethod(subject, methodName)
 	case Bool:
 		return c.createBoolMethod(subject, methodName)
@@ -3405,7 +3402,7 @@ func (c *Checker) createFloatMethod(subject Expression, methodName string) Expre
 	case "to_int":
 		kind = FloatToInt
 	default:
-		panic(fmt.Sprintf("Unknown Float method: %s", methodName))
+		panic(fmt.Sprintf("Unknown Float64 method: %s", methodName))
 	}
 	return &FloatMethod{
 		Subject: subject,
@@ -4177,7 +4174,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 			if s.Operator == parse.Minus {
-				if value.Type() != Int && value.Type() != Float {
+				if value.Type() != Int && value.Type() != Float64 {
 					c.addError("Only numbers can be negated with '-'", s.GetLocation())
 					return nil
 				}
@@ -4208,13 +4205,13 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					if left.Type() == Int {
 						return &IntAddition{left, right}
 					}
-					if left.Type() == Float {
+					if left.Type() == Float64 {
 						return &FloatAddition{left, right}
 					}
 					if left.Type() == Str {
 						return &StrAddition{left, right}
 					}
-					c.addError("The '-' operator can only be used for Int or Float", s.GetLocation())
+					c.addError("The '-' operator can only be used for Int or Float64", s.GetLocation())
 					return nil
 				}
 			case parse.Minus:
@@ -4232,10 +4229,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					if left.Type() == Int {
 						return &IntSubtraction{left, right}
 					}
-					if left.Type() == Float {
+					if left.Type() == Float64 {
 						return &FloatSubtraction{left, right}
 					}
-					c.addError("The '+' operator can only be used for Int or Float", s.GetLocation())
+					c.addError("The '+' operator can only be used for Int or Float64", s.GetLocation())
 					return nil
 				}
 			case parse.Multiply:
@@ -4253,10 +4250,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					if left.Type() == Int {
 						return &IntMultiplication{left, right}
 					}
-					if left.Type() == Float {
+					if left.Type() == Float64 {
 						return &FloatMultiplication{left, right}
 					}
-					c.addError("The '*' operator can only be used for Int or Float", s.GetLocation())
+					c.addError("The '*' operator can only be used for Int or Float64", s.GetLocation())
 					return nil
 				}
 			case parse.Divide:
@@ -4274,10 +4271,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					if left.Type() == Int {
 						return &IntDivision{left, right}
 					}
-					if left.Type() == Float {
+					if left.Type() == Float64 {
 						return &FloatDivision{left, right}
 					}
-					c.addError("The '/' operator can only be used for Int or Float", s.GetLocation())
+					c.addError("The '/' operator can only be used for Int or Float64", s.GetLocation())
 					return nil
 				}
 			case parse.Modulo:
@@ -4311,7 +4308,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
 							return &IntGreater{left, right}
 						}
-						if left.Type() == Float {
+						if left.Type() == Float64 {
 							return &FloatGreater{left, right}
 						}
 					}
@@ -4331,7 +4328,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
 							return &IntGreaterEqual{left, right}
 						}
-						if left.Type() == Float {
+						if left.Type() == Float64 {
 							return &FloatGreaterEqual{left, right}
 						}
 					}
@@ -4351,7 +4348,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
 							return &IntLess{left, right}
 						}
-						if left.Type() == Float {
+						if left.Type() == Float64 {
 							return &FloatLess{left, right}
 						}
 					}
@@ -4371,7 +4368,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
 							return &IntLessEqual{left, right}
 						}
-						if left.Type() == Float {
+						if left.Type() == Float64 {
 							return &FloatLessEqual{left, right}
 						}
 					}
@@ -7222,40 +7219,40 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 		if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
 			return &IntGreater{left, right}
 		}
-		if left.Type() == Float {
+		if left.Type() == Float64 {
 			return &FloatGreater{left, right}
 		}
-		c.addError("The '>' operator can only be used for Int or Float", leftExpr.GetLocation())
+		c.addError("The '>' operator can only be used for Int or Float64", leftExpr.GetLocation())
 		return nil
 
 	case parse.GreaterThanOrEqual:
 		if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
 			return &IntGreaterEqual{left, right}
 		}
-		if left.Type() == Float {
+		if left.Type() == Float64 {
 			return &FloatGreaterEqual{left, right}
 		}
-		c.addError("The '>=' operator can only be used for Int or Float", leftExpr.GetLocation())
+		c.addError("The '>=' operator can only be used for Int or Float64", leftExpr.GetLocation())
 		return nil
 
 	case parse.LessThan:
 		if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
 			return &IntLess{left, right}
 		}
-		if left.Type() == Float {
+		if left.Type() == Float64 {
 			return &FloatLess{left, right}
 		}
-		c.addError("The '<' operator can only be used for Int or Float", leftExpr.GetLocation())
+		c.addError("The '<' operator can only be used for Int or Float64", leftExpr.GetLocation())
 		return nil
 
 	case parse.LessThanOrEqual:
 		if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
 			return &IntLessEqual{left, right}
 		}
-		if left.Type() == Float {
+		if left.Type() == Float64 {
 			return &FloatLessEqual{left, right}
 		}
-		c.addError("The '<=' operator can only be used for Int or Float", leftExpr.GetLocation())
+		c.addError("The '<=' operator can only be used for Int or Float64", leftExpr.GetLocation())
 		return nil
 
 	default:
@@ -7447,7 +7444,7 @@ func validateJSONParseTarget(typ Type) error {
 
 func validateJSONParseShape(typ Type, seen map[string]bool) error {
 	typ = derefType(typ)
-	if typ == Str || typ == Int || typ == Float || typ == Bool || typ == Byte || typ == Rune || typ == Any {
+	if typ == Str || typ == Int || typ == Float64 || typ == Bool || typ == Byte || typ == Rune || typ == Any {
 		return nil
 	}
 	switch t := typ.(type) {

@@ -1773,7 +1773,7 @@ func (p *parser) parseNamedType() DeclaredType {
 			Location: id.getLocation(),
 			nullable: nullable,
 		}
-	case "Float":
+	case "Float64":
 		return &FloatType{
 			Location: id.getLocation(),
 			nullable: nullable,

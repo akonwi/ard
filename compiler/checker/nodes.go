@@ -99,7 +99,7 @@ func (f *FloatLiteral) String() string {
 }
 
 func (f *FloatLiteral) Type() Type {
-	return Float
+	return Float64
 }
 
 type ListLiteral struct {
@@ -656,7 +656,7 @@ type FloatAddition struct {
 }
 
 func (n *FloatAddition) Type() Type {
-	return Float
+	return Float64
 }
 
 type Match struct {
@@ -869,7 +869,7 @@ type FloatSubtraction struct {
 }
 
 func (n *FloatSubtraction) Type() Type {
-	return Float
+	return Float64
 }
 
 type FloatMultiplication struct {
@@ -878,7 +878,7 @@ type FloatMultiplication struct {
 }
 
 func (n *FloatMultiplication) Type() Type {
-	return Float
+	return Float64
 }
 
 type FloatDivision struct {
@@ -887,7 +887,7 @@ type FloatDivision struct {
 }
 
 func (n *FloatDivision) Type() Type {
-	return Float
+	return Float64
 }
 
 type FloatGreater struct {

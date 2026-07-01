@@ -30,7 +30,7 @@ struct Pair { first: $T, second: $U }
 Callers may provide explicit type arguments when needed:
 
 ```ard
-let floats = map<Int, Float>(ints)
+let floats = map<Int, Float64>(ints)
 let box: Box<Int> = Box{ item: 42 }
 ```
 

@@ -109,7 +109,7 @@ func newLowerer(options LowerOptions) *lowerer {
 	}
 	l.mustIntern(checker.Void)
 	l.mustIntern(checker.Int)
-	l.mustIntern(checker.Float)
+	l.mustIntern(checker.Float64)
 	l.mustIntern(checker.Bool)
 	l.mustIntern(checker.Byte)
 	l.mustIntern(checker.Rune)
@@ -1336,7 +1336,7 @@ func (l *lowerer) declareBuiltinTraitImpl(module ModuleID, traitID TraitID, owne
 		return 0, false, fmt.Errorf("invalid builtin trait owner type %d", ownerType)
 	}
 	switch ownerInfo.Kind {
-	case TypeStr, TypeInt, TypeFloat, TypeBool, TypeByte, TypeRune:
+	case TypeStr, TypeInt, TypeFloat64, TypeBool, TypeByte, TypeRune:
 	default:
 		return 0, false, nil
 	}
@@ -2034,8 +2034,8 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 			info.Kind = TypeVoid
 		case checker.Int:
 			info.Kind = TypeInt
-		case checker.Float:
-			info.Kind = TypeFloat
+		case checker.Float64:
+			info.Kind = TypeFloat64
 		case checker.Bool:
 			info.Kind = TypeBool
 		case checker.Byte:
@@ -2346,7 +2346,7 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 
 func canWrapAsAny(kind TypeKind) bool {
 	switch kind {
-	case TypeVoid, TypeInt, TypeFloat, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeChannel, TypeReceiver, TypeSender, TypeAny:
+	case TypeVoid, TypeInt, TypeFloat64, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeChannel, TypeReceiver, TypeSender, TypeAny:
 		return true
 	default:
 		return false

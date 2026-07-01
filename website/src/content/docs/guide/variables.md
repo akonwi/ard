@@ -27,7 +27,7 @@ Types can be optionally be declared:
 
 ```ard
 let name: Str = "Bob"
-let temperature: Float = 98.6
+let temperature: Float64 = 98.6
 let items: [Int] = [1, 2, 3]
 let map: [Str:Int] = ["a": 1, "b": 2]
 ```

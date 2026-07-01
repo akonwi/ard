@@ -69,7 +69,7 @@ use ard/io
 fn main() {
   io::print("Number: 42")
   io::print("Boolean: true")
-  io::print("Float: 3.14")
+  io::print("Float64: 3.14")
 }
 ```
 

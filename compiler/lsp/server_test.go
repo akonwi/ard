@@ -1701,7 +1701,7 @@ func TestHoverPositions(t *testing.T) {
 			source: `let f = 3.14` + "\n",
 			line:   0,
 			char:   8,
-			want:   "Float",
+			want:   "Float64",
 		},
 		{
 			name:   "variable declaration with type",

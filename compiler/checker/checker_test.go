@@ -170,7 +170,7 @@ func TestVariables(t *testing.T) {
 			input: strings.Join([]string{
 				`let name: Str = "Alice"`,
 				"let age: Int = 32",
-				"let temp: Float = 98.6",
+				"let temp: Float64 = 98.6",
 				"mut is_student: Bool = true",
 			}, "\n"),
 			output: &checker.Program{
@@ -259,10 +259,10 @@ func TestVariables(t *testing.T) {
 			},
 		},
 		{
-			name:  "Int literals are not inferred as Float",
-			input: `let temp: Float = 98`,
+			name:  "Int literals are not inferred as Float64",
+			input: `let temp: Float64 = 98`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Float, got Int"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Float64, got Int"},
 			},
 		},
 		{

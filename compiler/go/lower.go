@@ -2842,7 +2842,7 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 	switch info.Kind {
 	case air.TypeInt, air.TypeByte, air.TypeRune, air.TypeEnum:
 		return &ast.BasicLit{Kind: token.INT, Value: "0"}, nil
-	case air.TypeFloat:
+	case air.TypeFloat64:
 		return &ast.BasicLit{Kind: token.FLOAT, Value: "0"}, nil
 	case air.TypeBool:
 		return ast.NewIdent("false"), nil
@@ -2955,7 +2955,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return ast.NewIdent("byte"), nil
 	case air.TypeRune:
 		return ast.NewIdent("rune"), nil
-	case air.TypeFloat:
+	case air.TypeFloat64:
 		return ast.NewIdent("float64"), nil
 	case air.TypeBool:
 		return ast.NewIdent("bool"), nil
@@ -4048,7 +4048,7 @@ func (l *lowerer) typeTopLevelNameCollidesWithImportAlias(typ air.TypeInfo, alia
 func (l *lowerer) toStringExpr(typeID air.TypeID, expr ast.Expr) ast.Expr {
 	if validTypeID(l.program, typeID) {
 		switch l.program.Types[typeID-1].Kind {
-		case air.TypeFloat:
+		case air.TypeFloat64:
 			return &ast.CallExpr{Fun: l.qualified("strconv", "strconv", "FormatFloat"), Args: []ast.Expr{expr, &ast.BasicLit{Kind: token.CHAR, Value: "'f'"}, &ast.BasicLit{Kind: token.INT, Value: "2"}, &ast.BasicLit{Kind: token.INT, Value: "64"}}}
 		case air.TypeRune:
 			return &ast.CallExpr{Fun: ast.NewIdent("string"), Args: []ast.Expr{expr}}
@@ -6233,7 +6233,7 @@ func (l *lowerer) isBuiltinToStringTraitCall(expr air.Expr, typeID air.TypeID) b
 		return false
 	}
 	switch l.program.Types[typeID-1].Kind {
-	case air.TypeInt, air.TypeFloat, air.TypeBool, air.TypeByte, air.TypeRune, air.TypeStr:
+	case air.TypeInt, air.TypeFloat64, air.TypeBool, air.TypeByte, air.TypeRune, air.TypeStr:
 		return true
 	default:
 		return false

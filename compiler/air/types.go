@@ -104,7 +104,7 @@ type TypeKind uint8
 const (
 	TypeVoid TypeKind = iota
 	TypeInt
-	TypeFloat
+	TypeFloat64
 	TypeBool
 	TypeByte
 	TypeRune

@@ -1,15 +1,13 @@
-use ard/io
+use go:fmt
 
-fn fahrenheit_to_celsius(f: Float) Float {
+fn fahrenheit_to_celsius(f: Float64) Float64 {
   (f - 32.0) * 5.0 / 9.0
 }
 
 fn main() {
   // Convert temperatures from 0F to 220F, step by 20
-  for temp in 0..220 {
-      if temp % 20 == 0 {
-          let celsius = fahrenheit_to_celsius(Float::from_int(temp))
-          io::print("{temp} F = {celsius} C")
-      }
+  for temp in [0.0, 20.0, 40.0, 60.0, 80.0, 100.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0] {
+    let celsius = fahrenheit_to_celsius(temp)
+    fmt::Println("{temp} F = {celsius} C")
   }
 }

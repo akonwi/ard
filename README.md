@@ -216,7 +216,7 @@ for fruit in fruits {
 ### Built-in types
 - Str
 - Int
-- Float
+- Float64
 - Bool
 - [Int] - List
 - [Str:Int] - Map

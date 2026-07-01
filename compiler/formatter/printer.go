@@ -700,7 +700,7 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 	case *parse.IntType:
 		return maybeNullable("Int", node.IsNullable())
 	case *parse.FloatType:
-		return maybeNullable("Float", node.IsNullable())
+		return maybeNullable("Float64", node.IsNullable())
 	case *parse.BooleanType:
 		return maybeNullable("Bool", node.IsNullable())
 	case *parse.VoidType:

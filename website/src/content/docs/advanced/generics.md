@@ -43,7 +43,7 @@ When type inference isn't sufficient, provide explicit type arguments:
 
 ```ard
 let ints = [1, 2, 3]
-let floats = map<Int, Float>(ints, Float::from_int)
+let labels = map<Int, Str>(ints, fn(value: Int) Str { value.to_str() })
 ```
 
 Type arguments correspond to the order of generics introduced in the signature.

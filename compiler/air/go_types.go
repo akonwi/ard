@@ -74,7 +74,7 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 		return &ast.StructType{Fields: &ast.FieldList{}}, nil
 	case TypeInt:
 		return ast.NewIdent("int"), nil
-	case TypeFloat:
+	case TypeFloat64:
 		return ast.NewIdent("float64"), nil
 	case TypeBool:
 		return ast.NewIdent("bool"), nil

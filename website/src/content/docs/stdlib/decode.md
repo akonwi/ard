@@ -74,7 +74,7 @@ let data = Dynamic::from(233)
 let r = decode::run(data, decode::rune).expect("Failed to decode")
 ```
 
-#### `fn float(data: Dynamic) Float![Error]`
+#### `fn float(data: Dynamic) Float64![Error]`
 
 Decode a float value from Dynamic data.
 
