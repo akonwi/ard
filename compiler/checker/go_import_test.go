@@ -6,6 +6,56 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+func TestGoImportConstructsGoStructLiterals(t *testing.T) {
+	run(t, []test{
+		{
+			name: "keyed struct literal",
+			input: `use go:image
+
+fn make() Int {
+  let point = image::Point{X: 10, Y: 20}
+  point.X
+}`,
+		},
+		{
+			name: "partial keyed struct literal",
+			input: `use go:image
+
+fn make() Int {
+  let point = image::Point{X: 10}
+  point.X
+}`,
+		},
+		{
+			name: "unknown field rejected",
+			input: `use go:image
+
+fn make() {
+  image::Point{Z: 10}
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unknown field: Z"}},
+		},
+		{
+			name: "non-struct named type rejected",
+			input: `use go:time
+
+fn make() {
+  time::Duration{}
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Go struct literals require a non-pointer Go struct type"}},
+		},
+		{
+			name: "duplicate field rejected",
+			input: `use go:image
+
+fn make() {
+  image::Point{X: 1, X: 2}
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Duplicate field: X"}},
+		},
+	})
+}
+
 func TestGoImportAssignsExportedStructFields(t *testing.T) {
 	run(t, []test{
 		{

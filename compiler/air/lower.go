@@ -3718,6 +3718,16 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return nil, fmt.Errorf("unsupported unresolved function call %s", e.Name)
 	case *checker.ForeignValue:
 		return &Expr{Kind: ExprForeignValue, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol}, nil
+	case *checker.ForeignStructInstance:
+		fields := make([]StructFieldValue, 0, len(e.Fields))
+		for name, valueExpr := range e.Fields {
+			value, err := fl.lowerExpr(valueExpr)
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, StructFieldValue{Name: name, Value: *value})
+		}
+		return &Expr{Kind: ExprForeignStructInstance, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Name, Fields: fields}, nil
 	case *checker.ForeignFieldAccess:
 		target, err := fl.lowerExpr(e.Subject)
 		if err != nil {

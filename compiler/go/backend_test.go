@@ -1222,6 +1222,24 @@ func TestRunProgramExecutesGoOpaqueNamedTypes(t *testing.T) {
 	}
 }
 
+func TestRunProgramConstructsGoStructLiterals(t *testing.T) {
+	program := lowerSource(t, `
+		use go:image
+
+		fn main() {
+			let point = image::Point{X: 10, Y: 20}
+			if not point.X == 10 { panic("bad x") }
+			if not point.Y == 20 { panic("bad y") }
+			let partial = image::Point{X: 7}
+			if not partial.Y == 0 { panic("bad zero") }
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramWritesGoStructFields(t *testing.T) {
 	program := lowerSource(t, `
 		use go:image

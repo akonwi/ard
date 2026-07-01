@@ -3084,6 +3084,46 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 	}
 }
 
+func (c *Checker) validateForeignStructInstance(foreign *ForeignType, properties []parse.StructValue, loc parse.Location) *ForeignStructInstance {
+	if foreign == nil || foreign.Target != "go" || foreign.Pointer || !foreign.Struct {
+		c.addError("Go struct literals require a non-pointer Go struct type", loc)
+		return nil
+	}
+	if !foreign.FieldsLoaded {
+		foreign.Fields, foreign.UnsupportedFields = loadForeignTypeFields(foreign)
+		foreign.FieldsLoaded = true
+	}
+	fields := map[string]Expression{}
+	seen := map[string]bool{}
+	for _, property := range properties {
+		name := property.Name.Name
+		fieldType := foreign.Fields[name]
+		if fieldType == nil {
+			if reason := foreign.UnsupportedFields[name]; reason != "" {
+				c.addError(fmt.Sprintf("Unsupported foreign field %s.%s: %s", foreign, name, reason), property.GetLocation())
+			} else {
+				c.addError(fmt.Sprintf("Unknown field: %s", name), property.GetLocation())
+			}
+			continue
+		}
+		if seen[name] {
+			c.addError(fmt.Sprintf("Duplicate field: %s", name), property.GetLocation())
+			continue
+		}
+		seen[name] = true
+		value := c.checkExprAs(property.Value, fieldType)
+		if value == nil {
+			continue
+		}
+		if !c.areCompatible(fieldType, value.Type()) {
+			c.addError(typeMismatch(fieldType, value.Type()), property.Value.GetLocation())
+			continue
+		}
+		fields[name] = value
+	}
+	return &ForeignStructInstance{Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Name: foreign.Name, Fields: fields, _type: foreign}
+}
+
 // validateStructInstance validates struct instantiation and returns the instance or nil if errors
 func (c *Checker) validateStructInstance(structType *StructDef, properties []parse.StructValue, structName string, loc parse.Location) *StructInstance {
 	instance := &StructInstance{Name: structName, _type: structType}
@@ -5795,20 +5835,29 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		{
 			if id, ok := s.Target.(*parse.Identifier); ok {
 				if goPkg := c.program.GoImports[id.Name]; goPkg != nil {
-					prop, ok := s.Property.(*parse.Identifier)
-					if !ok {
+					switch prop := s.Property.(type) {
+					case *parse.Identifier:
+						if typ := goPkg.Constants[prop.Name]; typ != nil {
+							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ}
+						}
+						if reason := goPkg.UnsupportedConstants[prop.Name]; reason != "" {
+							c.addError(fmt.Sprintf("Unsupported Go constant %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+							return nil
+						}
+						c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
+						return nil
+					case *parse.StructInstance:
+						typ := goPkg.Types[prop.Name.Name]
+						foreign, ok := typ.(*ForeignType)
+						if !ok {
+							c.addError(fmt.Sprintf("Undefined Go type: %s::%s", id.Name, prop.Name.Name), prop.Name.GetLocation())
+							return nil
+						}
+						return c.validateForeignStructInstance(foreign, prop.Properties, prop.GetLocation())
+					default:
 						c.addError(fmt.Sprintf("Unsupported property type in %s::%s", id.Name, s.Property), s.Property.GetLocation())
 						return nil
 					}
-					if typ := goPkg.Constants[prop.Name]; typ != nil {
-						return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ}
-					}
-					if reason := goPkg.UnsupportedConstants[prop.Name]; reason != "" {
-						c.addError(fmt.Sprintf("Unsupported Go constant %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
-						return nil
-					}
-					c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
-					return nil
 				}
 
 				// Check if this is accessing a module

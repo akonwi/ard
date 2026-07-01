@@ -10,6 +10,7 @@ type ForeignType struct {
 	Name               string
 	Underlying         Type
 	Pointer            bool
+	Struct             bool
 	Fields             map[string]Type
 	UnsupportedFields  map[string]string
 	FieldsLoaded       bool

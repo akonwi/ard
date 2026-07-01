@@ -238,7 +238,8 @@ func foreignNamedTypeFromGo(named *types.Named, pointer bool, includeMethods boo
 		qualifier = pkg.Name()
 	}
 	underlying, _ := primitiveTypeFromGo(named.Underlying())
-	foreign := &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying, Pointer: pointer}
+	_, isStruct := named.Underlying().(*types.Struct)
+	foreign := &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying, Pointer: pointer, Struct: isStruct}
 	if includeMethods {
 		foreign.Methods, foreign.UnsupportedMethods = goMethodsForNamedType(named, pointer)
 		foreign.MethodsLoaded = true

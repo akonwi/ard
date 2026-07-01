@@ -202,6 +202,17 @@ type ForeignFieldAccess struct {
 
 func (f *ForeignFieldAccess) Type() Type { return f._type }
 
+type ForeignStructInstance struct {
+	Target    string
+	Namespace string
+	Qualifier string
+	Name      string
+	Fields    map[string]Expression
+	_type     *ForeignType
+}
+
+func (f *ForeignStructInstance) Type() Type { return f._type }
+
 type InstanceMethod struct {
 	Subject      Expression
 	Method       *FunctionCall

@@ -2280,6 +2280,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerForeignMethodValue(fn, expr)
 	case air.ExprForeignFieldAccess:
 		return l.lowerForeignFieldAccess(fn, expr)
+	case air.ExprForeignStructInstance:
+		return l.lowerForeignStructInstance(fn, expr)
 	case air.ExprForeignValue:
 		return l.lowerForeignValue(expr)
 	case air.ExprCall:
@@ -2631,6 +2633,32 @@ func (l *lowerer) nextTemp() string {
 	name := fmt.Sprintf("_tmp_%d", l.tempCounter)
 	l.tempCounter++
 	return name
+}
+
+func (l *lowerer) lowerForeignStructInstance(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.ForeignTarget != "go" {
+		return loweredExpr{}, fmt.Errorf("unsupported foreign struct target %q", expr.ForeignTarget)
+	}
+	if expr.ForeignNamespace == "" || expr.ForeignSymbol == "" {
+		return loweredExpr{}, fmt.Errorf("invalid foreign struct literal")
+	}
+	typ, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	var stmts []ast.Stmt
+	elts := make([]ast.Expr, 0, len(expr.Fields))
+	fields := append([]air.StructFieldValue{}, expr.Fields...)
+	sort.Slice(fields, func(i, j int) bool { return fields[i].Name < fields[j].Name })
+	for _, field := range fields {
+		value, err := l.lowerExpr(fn, field.Value)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, value.stmts...)
+		elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(field.Name), Value: value.expr})
+	}
+	return loweredExpr{stmts: stmts, expr: &ast.CompositeLit{Type: typ, Elts: elts}}, nil
 }
 
 func (l *lowerer) lowerForeignFieldAccess(fn air.Function, expr air.Expr) (loweredExpr, error) {
