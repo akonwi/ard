@@ -126,6 +126,35 @@ fn main() Void!Str {
 }`,
 		},
 		{
+			name: "variadic foreign method is one Ard argument",
+			input: `use go:log
+
+fn main() {
+  let logger = log::Default()
+  logger.Println("hello")
+}`,
+		},
+		{
+			name: "variadic foreign method rejects zero variadic args",
+			input: `use go:log
+
+fn main() {
+  let logger = log::Default()
+  logger.Println()
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "missing argument for parameter: v"}},
+		},
+		{
+			name: "variadic foreign method rejects multiple variadic args",
+			input: `use go:log
+
+fn main() {
+  let logger = log::Default()
+  logger.Println("hello", "world")
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 1, got 2"}},
+		},
+		{
 			name: "unsupported foreign method signature is reported",
 			input: `use go:regexp
 

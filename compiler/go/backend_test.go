@@ -1158,6 +1158,21 @@ func TestRunProgramExecutesGoForeignMethods(t *testing.T) {
 	}
 }
 
+func TestRunProgramExecutesGoVariadicForeignMethod(t *testing.T) {
+	program := lowerSource(t, `
+		use go:log
+
+		fn main() {
+			let logger = log::Default()
+			logger.Println("hello")
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesGoOpaqueNamedTypes(t *testing.T) {
 	program := lowerSource(t, `
 		use go:fmt
