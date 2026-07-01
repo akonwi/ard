@@ -14,6 +14,8 @@ type GoPackage struct {
 	TypesName            string
 	Functions            map[string]*FunctionDef
 	Types                map[string]Type
+	Constants            map[string]Type
+	UnsupportedConstants map[string]string
 	UnsupportedFunctions map[string]string
 }
 
@@ -30,6 +32,8 @@ func ResolveGoPackage(path string) (*GoPackage, error) {
 		TypesName:            pkg.Name(),
 		Functions:            map[string]*FunctionDef{},
 		Types:                map[string]Type{},
+		Constants:            map[string]Type{},
+		UnsupportedConstants: map[string]string{},
 		UnsupportedFunctions: map[string]string{},
 	}
 	scope := pkg.Scope()
@@ -41,6 +45,14 @@ func ResolveGoPackage(path string) (*GoPackage, error) {
 		if typeName, ok := obj.(*types.TypeName); ok {
 			if typ, reason := namedScalarFromGo(path, pkg.Name(), typeName); reason == "" {
 				goPkg.Types[name] = typ
+			}
+			continue
+		}
+		if constant, ok := obj.(*types.Const); ok {
+			if typ, reason := constTypeFromGo(constant.Type()); reason == "" {
+				goPkg.Constants[name] = typ
+			} else {
+				goPkg.UnsupportedConstants[name] = reason
 			}
 			continue
 		}
@@ -110,6 +122,22 @@ func returnTypeFromGo(results *types.Tuple) (Type, string) {
 		}
 	}
 	return nil, fmt.Sprintf("unsupported result shape %s", results.String())
+}
+
+func constTypeFromGo(t types.Type) (Type, string) {
+	if basic, ok := t.(*types.Basic); ok {
+		switch basic.Kind() {
+		case types.UntypedBool:
+			return Bool, ""
+		case types.UntypedString:
+			return Str, ""
+		case types.UntypedInt, types.UntypedRune:
+			return Int, ""
+		case types.UntypedFloat:
+			return Float64, ""
+		}
+	}
+	return typeFromGo(t)
 }
 
 func typeFromGo(t types.Type) (Type, string) {

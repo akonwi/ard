@@ -2248,6 +2248,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerIfExpr(fn, expr)
 	case air.ExprForeignCall:
 		return l.lowerForeignCall(fn, expr)
+	case air.ExprForeignValue:
+		return l.lowerForeignValue(expr)
 	case air.ExprCall:
 		if !validFunctionID(l.program, expr.Function) {
 			return loweredExpr{}, fmt.Errorf("invalid function id %d", expr.Function)
@@ -2597,6 +2599,23 @@ func (l *lowerer) nextTemp() string {
 	name := fmt.Sprintf("_tmp_%d", l.tempCounter)
 	l.tempCounter++
 	return name
+}
+
+func (l *lowerer) lowerForeignValue(expr air.Expr) (loweredExpr, error) {
+	if expr.ForeignTarget != "go" {
+		return loweredExpr{}, fmt.Errorf("unsupported foreign value target %q", expr.ForeignTarget)
+	}
+	if expr.ForeignNamespace == "" || expr.ForeignSymbol == "" {
+		return loweredExpr{}, fmt.Errorf("invalid go foreign value %q::%q", expr.ForeignNamespace, expr.ForeignSymbol)
+	}
+	qualifier := expr.ForeignQualifier
+	if qualifier == "" {
+		qualifier = expr.ForeignNamespace
+		if slash := strings.LastIndex(qualifier, "/"); slash >= 0 {
+			qualifier = qualifier[slash+1:]
+		}
+	}
+	return loweredExpr{expr: l.qualified(qualifier, expr.ForeignNamespace, expr.ForeignSymbol)}, nil
 }
 
 func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr, error) {

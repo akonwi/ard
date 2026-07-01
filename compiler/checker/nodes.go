@@ -1214,6 +1214,18 @@ func (p *ForeignFunctionCall) Type() Type {
 	return p.Call.Type()
 }
 
+type ForeignValue struct {
+	Target    string
+	Namespace string
+	Qualifier string
+	Symbol    string
+	ValueType Type
+}
+
+func (p *ForeignValue) Type() Type {
+	return p.ValueType
+}
+
 type ModuleSymbol struct {
 	Module string
 	Symbol Symbol

@@ -1092,6 +1092,20 @@ func TestRunProgramExecutesGoNamedScalarLiteralCall(t *testing.T) {
 	}
 }
 
+func TestRunProgramExecutesGoPackageConstant(t *testing.T) {
+	program := lowerSource(t, `
+		use go:time
+
+		fn main() {
+			time::Sleep(time::Nanosecond)
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesGoFmtPrintln(t *testing.T) {
 	program := lowerSource(t, `
 		use go:fmt

@@ -46,6 +46,7 @@ const (
 	ExprFunctionRef
 	ExprCall
 	ExprForeignCall
+	ExprForeignValue
 	ExprMakeClosure
 	ExprCallClosure
 	ExprUnionWrap

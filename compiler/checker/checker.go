@@ -5695,6 +5695,23 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 	case *parse.StaticProperty:
 		{
 			if id, ok := s.Target.(*parse.Identifier); ok {
+				if goPkg := c.program.GoImports[id.Name]; goPkg != nil {
+					prop, ok := s.Property.(*parse.Identifier)
+					if !ok {
+						c.addError(fmt.Sprintf("Unsupported property type in %s::%s", id.Name, s.Property), s.Property.GetLocation())
+						return nil
+					}
+					if typ := goPkg.Constants[prop.Name]; typ != nil {
+						return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ}
+					}
+					if reason := goPkg.UnsupportedConstants[prop.Name]; reason != "" {
+						c.addError(fmt.Sprintf("Unsupported Go constant %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+						return nil
+					}
+					c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
+					return nil
+				}
+
 				// Check if this is accessing a module
 				if mod := c.resolveModule(id.Name); mod != nil {
 					switch prop := s.Property.(type) {

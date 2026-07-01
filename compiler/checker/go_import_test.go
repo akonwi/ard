@@ -76,6 +76,24 @@ fn main() Void!Str {
 	})
 }
 
+func TestGoImportResolvesExportedPackageConstant(t *testing.T) {
+	run(t, []test{
+		{
+			name: "typed named scalar constant",
+			input: `use go:time
+
+fn main() {
+  time::Sleep(time::Nanosecond)
+}`,
+		},
+		{
+			name: "untyped float constant",
+			input: `use go:math
+let pi: Float64 = math::Pi`,
+		},
+	})
+}
+
 func TestGoImportRejectsUnknownFunction(t *testing.T) {
 	run(t, []test{
 		{

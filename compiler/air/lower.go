@@ -3711,6 +3711,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return &Expr{Kind: ExprCall, Type: fl.l.program.Functions[id].Signature.Return, Function: id, Args: args}, nil
 		}
 		return nil, fmt.Errorf("unsupported unresolved function call %s", e.Name)
+	case *checker.ForeignValue:
+		return &Expr{Kind: ExprForeignValue, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol}, nil
 	case *checker.ForeignFunctionCall:
 		args := make([]Expr, len(e.Call.Args))
 		for i, arg := range e.Call.Args {
