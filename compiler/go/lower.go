@@ -2647,7 +2647,9 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 	}
 	call := &ast.CallExpr{Fun: l.qualified(pkgName, importPath, functionName), Args: args}
 	if validTypeID(l.program, expr.Type) {
-		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeResult {
+		info := l.program.Types[expr.Type-1]
+		switch info.Kind {
+		case air.TypeResult:
 			shape, err := goForeignResultShape(importPath, functionName)
 			if err != nil {
 				return loweredExpr{}, err
@@ -2657,6 +2659,14 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 				return l.lowerGoValueErrorResultCall(expr, stmts, call, info)
 			case goResultErrorOnly:
 				return l.lowerGoErrorOnlyResultCall(expr, stmts, call)
+			}
+		case air.TypeMaybe:
+			shape, err := goForeignResultShape(importPath, functionName)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			if shape == goResultValueBool {
+				return l.lowerGoValueBoolMaybeCall(expr, stmts, call)
 			}
 		}
 	}
@@ -2669,6 +2679,7 @@ const (
 	goResultOther goResultShape = iota
 	goResultValueError
 	goResultErrorOnly
+	goResultValueBool
 )
 
 func goForeignResultShape(importPath, functionName string) (goResultShape, error) {
@@ -2687,12 +2698,53 @@ func goForeignResultShape(importPath, functionName string) (goResultShape, error
 	if results.Len() == 2 && isGoErrorType(results.At(1).Type()) {
 		return goResultValueError, nil
 	}
+	if results.Len() == 2 && isGoBoolType(results.At(1).Type()) {
+		return goResultValueBool, nil
+	}
 	return goResultOther, nil
+}
+
+func isGoBoolType(t types.Type) bool {
+	basic, ok := t.(*types.Basic)
+	return ok && basic.Kind() == types.Bool
 }
 
 func isGoErrorType(t types.Type) bool {
 	named, ok := t.(*types.Named)
 	return ok && named.Obj().Pkg() == nil && named.Obj().Name() == "error"
+}
+
+func (l *lowerer) lowerGoValueBoolMaybeCall(expr air.Expr, stmts []ast.Stmt, call *ast.CallExpr) (loweredExpr, error) {
+	maybeTemp := l.nextTemp()
+	valueTemp := l.nextTemp()
+	okTemp := l.nextTemp()
+	decls, err := l.declareTemp(expr.Type, maybeTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	info := l.program.Types[expr.Type-1]
+	valueType, err := l.goType(info.Elem)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts = append(stmts, decls...)
+	stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(valueTemp)}, Type: valueType}}}})
+	stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(okTemp)}, Type: ast.NewIdent("bool")}}}})
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(valueTemp), ast.NewIdent(okTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}})
+	someExpr, err := l.maybeSomeExpr(expr.Type, ast.NewIdent(valueTemp))
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	noneExpr, err := l.maybeNoneExpr(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: ast.NewIdent(okTemp),
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(maybeTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{someExpr}}}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(maybeTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneExpr}}}},
+	})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(maybeTemp)}, nil
 }
 
 func (l *lowerer) lowerGoErrorOnlyResultCall(expr air.Expr, stmts []ast.Stmt, call *ast.CallExpr) (loweredExpr, error) {

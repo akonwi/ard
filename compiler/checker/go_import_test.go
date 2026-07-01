@@ -41,6 +41,16 @@ fn main() Int!Str {
 	})
 }
 
+func TestGoImportResolvesCommaOkFunction(t *testing.T) {
+	run(t, []test{
+		{
+			name: "os LookupEnv returns Maybe",
+			input: `use go:os
+let home: Str? = os::LookupEnv("HOME")`,
+		},
+	})
+}
+
 func TestGoImportResolvesErrorOnlyFunction(t *testing.T) {
 	run(t, []test{
 		{

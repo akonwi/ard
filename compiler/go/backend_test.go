@@ -1038,6 +1038,28 @@ func TestRunProgramExecutesGoErrorOnlyFunction(t *testing.T) {
 	}
 }
 
+func TestRunProgramExecutesGoCommaOkFunction(t *testing.T) {
+	program := lowerSource(t, `
+		use go:os
+
+		fn main() {
+			try os::Setenv("ARD_LOOKUP_TEST", "ok") -> err { panic(err) }
+			let value = os::LookupEnv("ARD_LOOKUP_TEST").expect("missing")
+			if value != "ok" {
+				panic("bad lookup")
+			}
+			try os::Unsetenv("ARD_LOOKUP_TEST") -> err { panic(err) }
+			if os::LookupEnv("ARD_LOOKUP_TEST").is_some() {
+				panic("expected missing env")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesGoSliceFunctionCalls(t *testing.T) {
 	program := lowerSource(t, `
 		use go:sort

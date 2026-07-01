@@ -120,6 +120,13 @@ func returnTypeFromGo(results *types.Tuple) (Type, string) {
 			}
 			return MakeResult(val, Str), ""
 		}
+		if isGoBool(results.At(1).Type()) {
+			val, reason := typeFromGo(results.At(0).Type())
+			if reason != "" {
+				return nil, fmt.Sprintf("result 1 has unsupported type %s: %s", results.At(0).Type().String(), reason)
+			}
+			return MakeMaybe(val), ""
+		}
 	}
 	return nil, fmt.Sprintf("unsupported result shape %s", results.String())
 }
@@ -233,6 +240,11 @@ func primitiveTypeFromGo(t types.Type) (Type, string) {
 func isGoAny(t types.Type) bool {
 	iface, ok := t.Underlying().(*types.Interface)
 	return ok && iface.Empty()
+}
+
+func isGoBool(t types.Type) bool {
+	basic, ok := t.(*types.Basic)
+	return ok && basic.Kind() == types.Bool
 }
 
 func isGoError(t types.Type) bool {
