@@ -48,6 +48,7 @@ const (
 	ExprForeignCall
 	ExprForeignMethodCall
 	ExprForeignMethodValue
+	ExprForeignFieldAccess
 	ExprForeignValue
 	ExprMakeClosure
 	ExprCallClosure

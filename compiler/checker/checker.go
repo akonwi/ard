@@ -4042,6 +4042,20 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 
+			if foreign, ok := subj.Type().(*ForeignType); ok {
+				if !foreign.FieldsLoaded {
+					foreign.Fields, foreign.UnsupportedFields = loadForeignTypeFields(foreign)
+					foreign.FieldsLoaded = true
+				}
+				if reason := foreign.UnsupportedFields[s.Property.Name]; reason != "" {
+					c.addError(fmt.Sprintf("Unsupported foreign field %s.%s: %s", foreign, s.Property.Name, reason), s.Property.GetLocation())
+					return nil
+				}
+				if fieldType := foreign.Fields[s.Property.Name]; fieldType != nil {
+					return &ForeignFieldAccess{Subject: subj, Target: foreign.Target, Symbol: s.Property.Name, _type: fieldType}
+				}
+			}
+
 			propType := subj.Type().get(s.Property.Name)
 			foreignPointerReceiver := false
 			if propType == nil {

@@ -246,6 +246,47 @@ func foreignNamedTypeFromGo(named *types.Named, pointer bool, includeMethods boo
 	return foreign
 }
 
+func loadForeignTypeFields(f *ForeignType) (map[string]Type, map[string]string) {
+	if f == nil || f.Target != "go" || f.Namespace == "" || f.Name == "" {
+		return nil, nil
+	}
+	pkg, err := importer.Default().Import(f.Namespace)
+	if err != nil {
+		return nil, nil
+	}
+	typeName, ok := pkg.Scope().Lookup(f.Name).(*types.TypeName)
+	if !ok {
+		return nil, nil
+	}
+	named, ok := typeName.Type().(*types.Named)
+	if !ok {
+		return nil, nil
+	}
+	return goFieldsForNamedType(named)
+}
+
+func goFieldsForNamedType(named *types.Named) (map[string]Type, map[string]string) {
+	strct, ok := named.Underlying().(*types.Struct)
+	if !ok {
+		return nil, nil
+	}
+	fields := map[string]Type{}
+	unsupported := map[string]string{}
+	for i := 0; i < strct.NumFields(); i++ {
+		field := strct.Field(i)
+		if !field.Exported() || field.Embedded() {
+			continue
+		}
+		typ, reason := typeFromGoWithMethods(field.Type(), false)
+		if reason == "" {
+			fields[field.Name()] = typ
+		} else {
+			unsupported[field.Name()] = reason
+		}
+	}
+	return fields, unsupported
+}
+
 func loadForeignTypeMethods(f *ForeignType) (map[string]*FunctionDef, map[string]string) {
 	if f == nil || f.Target != "go" || f.Namespace == "" || f.Name == "" {
 		return nil, nil

@@ -1222,6 +1222,22 @@ func TestRunProgramExecutesGoOpaqueNamedTypes(t *testing.T) {
 	}
 }
 
+func TestRunProgramReadsGoStructFields(t *testing.T) {
+	program := lowerSource(t, `
+		use go:image
+
+		fn main() {
+			let rect = image::Rect(1, 2, 3, 4)
+			if not rect.Min.X == 1 { panic("bad min x") }
+			if not rect.Max.Y == 4 { panic("bad max y") }
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesGoFmtPrintln(t *testing.T) {
 	program := lowerSource(t, `
 		use go:fmt

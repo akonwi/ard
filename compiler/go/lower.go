@@ -2252,6 +2252,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerForeignMethodCall(fn, expr)
 	case air.ExprForeignMethodValue:
 		return l.lowerForeignMethodValue(fn, expr)
+	case air.ExprForeignFieldAccess:
+		return l.lowerForeignFieldAccess(fn, expr)
 	case air.ExprForeignValue:
 		return l.lowerForeignValue(expr)
 	case air.ExprCall:
@@ -2603,6 +2605,20 @@ func (l *lowerer) nextTemp() string {
 	name := fmt.Sprintf("_tmp_%d", l.tempCounter)
 	l.tempCounter++
 	return name
+}
+
+func (l *lowerer) lowerForeignFieldAccess(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.ForeignTarget != "go" {
+		return loweredExpr{}, fmt.Errorf("unsupported foreign field target %q", expr.ForeignTarget)
+	}
+	if expr.Target == nil || expr.ForeignSymbol == "" {
+		return loweredExpr{}, fmt.Errorf("invalid foreign field access")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	return loweredExpr{stmts: target.stmts, expr: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(expr.ForeignSymbol)}}, nil
 }
 
 func (l *lowerer) lowerForeignValue(expr air.Expr) (loweredExpr, error) {

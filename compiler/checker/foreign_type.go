@@ -10,6 +10,9 @@ type ForeignType struct {
 	Name               string
 	Underlying         Type
 	Pointer            bool
+	Fields             map[string]Type
+	UnsupportedFields  map[string]string
+	FieldsLoaded       bool
 	Methods            map[string]*FunctionDef
 	UnsupportedMethods map[string]string
 	MethodsLoaded      bool
@@ -27,6 +30,13 @@ func (f *ForeignType) String() string {
 }
 
 func (f *ForeignType) get(name string) Type {
+	if !f.FieldsLoaded {
+		f.Fields, f.UnsupportedFields = loadForeignTypeFields(f)
+		f.FieldsLoaded = true
+	}
+	if field := f.Fields[name]; field != nil {
+		return field
+	}
 	if !f.MethodsLoaded {
 		f.Methods, f.UnsupportedMethods = loadForeignTypeMethods(f)
 		f.MethodsLoaded = true

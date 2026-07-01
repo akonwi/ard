@@ -6,6 +6,20 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+func TestGoImportResolvesExportedStructFields(t *testing.T) {
+	run(t, []test{
+		{
+			name: "nested exported struct fields",
+			input: `use go:image
+
+fn min_x() Int {
+  let rect = image::Rect(1, 2, 3, 4)
+  rect.Min.X
+}`,
+		},
+	})
+}
+
 func TestGoImportResolvesExportedPackageFunction(t *testing.T) {
 	run(t, []test{
 		{

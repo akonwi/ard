@@ -193,6 +193,15 @@ func (i *InstanceProperty) String() string {
 	return fmt.Sprintf("%s.%s", i.Subject, i.Property)
 }
 
+type ForeignFieldAccess struct {
+	Subject Expression
+	Target  string
+	Symbol  string
+	_type   Type
+}
+
+func (f *ForeignFieldAccess) Type() Type { return f._type }
+
 type InstanceMethod struct {
 	Subject      Expression
 	Method       *FunctionCall
