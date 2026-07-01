@@ -126,6 +126,16 @@ fn main() Void!Str {
 }`,
 		},
 		{
+			name: "unsupported foreign method signature is reported",
+			input: `use go:regexp
+
+fn main() {
+  let re = try regexp::Compile("[a-z]+") -> err { panic(err) }
+  re.FindReaderIndex("abc")
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported foreign method mut regexp::Regexp.FindReaderIndex: parameter 1 has unsupported type io.RuneReader: Go interface types are not supported yet"}},
+		},
+		{
 			name: "pointer receiver method on immutable opaque value rejected",
 			input: `use go:time
 

@@ -4,14 +4,15 @@ package checker
 // its underlying Ard representation. When Underlying is nil, the value is opaque
 // to Ard and can only be stored or passed back across compatible foreign boundaries.
 type ForeignType struct {
-	Target        string
-	Namespace     string
-	Qualifier     string
-	Name          string
-	Underlying    Type
-	Pointer       bool
-	Methods       map[string]*FunctionDef
-	MethodsLoaded bool
+	Target             string
+	Namespace          string
+	Qualifier          string
+	Name               string
+	Underlying         Type
+	Pointer            bool
+	Methods            map[string]*FunctionDef
+	UnsupportedMethods map[string]string
+	MethodsLoaded      bool
 }
 
 func (f *ForeignType) String() string {
@@ -27,7 +28,7 @@ func (f *ForeignType) String() string {
 
 func (f *ForeignType) get(name string) Type {
 	if !f.MethodsLoaded {
-		f.Methods = loadForeignTypeMethods(f)
+		f.Methods, f.UnsupportedMethods = loadForeignTypeMethods(f)
 		f.MethodsLoaded = true
 	}
 	method := f.Methods[name]

@@ -240,38 +240,39 @@ func foreignNamedTypeFromGo(named *types.Named, pointer bool, includeMethods boo
 	underlying, _ := primitiveTypeFromGo(named.Underlying())
 	foreign := &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying, Pointer: pointer}
 	if includeMethods {
-		foreign.Methods = goMethodsForNamedType(named, pointer)
+		foreign.Methods, foreign.UnsupportedMethods = goMethodsForNamedType(named, pointer)
 		foreign.MethodsLoaded = true
 	}
 	return foreign
 }
 
-func loadForeignTypeMethods(f *ForeignType) map[string]*FunctionDef {
+func loadForeignTypeMethods(f *ForeignType) (map[string]*FunctionDef, map[string]string) {
 	if f == nil || f.Target != "go" || f.Namespace == "" || f.Name == "" {
-		return nil
+		return nil, nil
 	}
 	pkg, err := importer.Default().Import(f.Namespace)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	typeName, ok := pkg.Scope().Lookup(f.Name).(*types.TypeName)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	named, ok := typeName.Type().(*types.Named)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	return goMethodsForNamedType(named, f.Pointer)
 }
 
-func goMethodsForNamedType(named *types.Named, pointer bool) map[string]*FunctionDef {
+func goMethodsForNamedType(named *types.Named, pointer bool) (map[string]*FunctionDef, map[string]string) {
 	var receiver types.Type = named
 	if pointer {
 		receiver = types.NewPointer(named)
 	}
 	methodSet := types.NewMethodSet(receiver)
 	methods := map[string]*FunctionDef{}
+	unsupported := map[string]string{}
 	for i := 0; i < methodSet.Len(); i++ {
 		selection := methodSet.At(i)
 		method, ok := selection.Obj().(*types.Func)
@@ -281,9 +282,11 @@ func goMethodsForNamedType(named *types.Named, pointer bool) map[string]*Functio
 		def, reason := functionDefFromGoSignatureWithMethods(method.Name(), method.Type().(*types.Signature), false)
 		if reason == "" {
 			methods[method.Name()] = def
+		} else {
+			unsupported[method.Name()] = reason
 		}
 	}
-	return methods
+	return methods, unsupported
 }
 
 func primitiveTypeFromGo(t types.Type) (Type, string) {
