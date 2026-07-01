@@ -111,7 +111,7 @@ An Ard project may depend on other Ard projects (`0017-use-git-based-dependencie
 
 #### Host Go code placement
 
-The Go code a project provides is carried into the generated Go module verbatim, as its own ordinary Go package, and imported from Ard via `use go:` like any other Go package (`0028-use-direct-go-imports-for-ffi.md`). It is not inlined into the declaring module's package. This keeps packages shared across modules from being duplicated and keeps package-level state intact. The FFI section describes this and the removal of the `extern` binding mechanism in full.
+The Go code a project provides is carried into the generated Go module verbatim, as its own ordinary Go package, and imported from Ard via `use go:` like any other Go package (`0034-reset-go-backend-and-ffi-boundary.md`). It is not inlined into a generated Ard package. This keeps packages shared across modules from being duplicated and keeps package-level state intact. The FFI section describes this and the removal of the `extern` binding mechanism in full.
 
 ### Names and visibility
 
@@ -246,11 +246,11 @@ Generic structs and unions lower to generic Go types. `struct Partition<$T> { se
 
 A union type declaration (`type Name = A | B`) declares a named union and lowers to a named tagged struct, as in the Unions section. Any other type alias lowers to a Go type alias that mirrors the Ard alias, so the intended name appears in the generated API. For example `type Decoder<$T> = fn(Any) $T![Error]` lowers to a generic Go type alias `type Decoder[T any] = func(any) runtime.Result[T, Error]`, and `type Primitive = Str | Bool | Void` follows the named-union lowering. Aliases remain transparent to type checking; the Go alias is for naming, not a distinct type. Parameterized type aliases require Go 1.24 or newer; the compiler and its generated programs target Go 1.26, so this is satisfied.
 
-#### Functions, traits, and extern types
+#### Functions, traits, and foreign types
 
 - A function type lowers to a Go `func(params) result`. A mutable (`mut`) parameter lowers to a pointer parameter so the callee can write back through it.
 - A value typed as a trait object lowers to the trait's generated Go interface; the interface itself is defined by the trait's module (see the Traits section).
-- An extern or direct Go type lowers to the bound Go type or its FFI companion type (`0028-use-direct-go-imports-for-ffi.md`, `0030-use-direct-go-struct-values-and-fields.md`).
+- A foreign Go type imported through `use go:` lowers to its bound Go type (`0030-use-direct-go-struct-values-and-fields.md`, `0034-reset-go-backend-and-ffi-boundary.md`).
 
 ### Variables and globals
 
@@ -437,7 +437,7 @@ Conversions such as `to_int`, `to_float`, `to_str`, `Byte::from_int`, `Rune::fro
 
 ### Runtime shapes
 
-The generated program depends on a single small runtime package, `github.com/akonwi/ard/runtime`. That package exists only to hold the shapes that encode Ard semantics Go cannot express directly. Everything else lives in generated code, Go builtins, or standard library FFI companions.
+The generated program depends on a single small runtime package, `github.com/akonwi/ard/runtime`. That package exists only to hold the shapes that encode Ard semantics Go cannot express directly. Everything else lives in generated code, Go builtins, direct Go imports, or ordinary host Go shim packages.
 
 #### Sanctioned runtime types
 
@@ -454,7 +454,7 @@ Async is goroutines and channels, with no runtime shape (`0033-async-is-goroutin
 
 #### Any
 
-`Any` lowers to `any`. The runtime contains no universal boxed object or kind-tagged value representation. Operations on opaque data are provided by the relevant standard library modules and their FFI companions, not by a runtime object model.
+`Any` lowers to `any`. The runtime contains no universal boxed object or kind-tagged value representation. Operations on opaque data are provided by explicit Ard libraries or host Go shim packages, not by a runtime object model.
 
 #### Leaf-dependency rule
 
@@ -462,7 +462,7 @@ The runtime package may import only the Go standard library. It must never impor
 
 #### Standard library boundary
 
-Standard library behavior lives in Ard modules and their FFI companions under `std_lib/ffi`, not in the runtime package. Utilities that back specific stdlib modules — for example command-line argument access for `ard/argv`, or the goroutine-spawn primitive for `ard/async` — are provided through FFI companions rather than the runtime, keeping the runtime limited to the two semantic types and their `try` support.
+Standard library behavior lives in Ard modules, direct Go imports, and ordinary host Go shim packages, not in the runtime package. Utilities that back specific stdlib modules — for example command-line argument access or goroutine-spawn helpers — should use direct `use go:` imports where possible and shim packages where adaptation is required. They should not expand the runtime beyond the semantic types and operations that only the backend can provide.
 
 ### JSON and marshalling
 
@@ -525,7 +525,7 @@ Interop with Go is a single mechanism: direct Go interop through `use go:`. Ther
 
 #### Direct Go interop is the one mechanism
 
-`use go:` imports a real Go package and Ard calls it directly (`0028-use-direct-go-imports-for-ffi.md`, `0030-use-direct-go-struct-values-and-fields.md`):
+`use go:` imports a real Go package and Ard calls it directly (`0030-use-direct-go-struct-values-and-fields.md`, `0034-reset-go-backend-and-ffi-boundary.md`):
 
 - `use go:image as image` lowers to a Go import, and `image::Point{...}` lowers to `image.Point{...}`
 - struct values, field access, and method calls go straight through to the Go package
@@ -545,7 +545,7 @@ Passing Ard values into Go follows Go's own assignability so idiomatic, `any`-he
 - Any representable Ard value flows into a Go `any` parameter or field; scalars convert implicitly and an Ard list passed to a Go `[]any` is boxed element-wise. A list literal targeting a Go slice is checked element-by-element against the slice's element type, so a `[]any` accepts a heterogeneous mix.
 - A Go type alias is the same type as its target across packages (`ui.Style = vaxis.Style`), compared by unaliased `go/types` identity.
 - A closure satisfies a named Go func type (`type VoidCallback func(...)`) when its signature matches.
-- A Go variadic function may be called with no variadic arguments (`ui.Run(root)`); passing explicit variadic values is not yet supported and can be wrapped in host Go.
+- A Go variadic parameter is exposed to Ard as exactly one argument of the variadic element type. For example, `fmt.Println(a ...any)` is callable as `fmt::Println(value)`; Ard does not gain variadic parameters or spread syntax from Go interop.
 - A direct-Go struct literal may omit exported fields, which take their Go zero value (`0030-use-direct-go-struct-values-and-fields.md`).
 
 #### Host Go code is a package in the output
@@ -556,15 +556,15 @@ The Go code a project provides is carried into the generated Go module verbatim,
 - Ard references it with `use go:<project>/ffi`, and calls it exactly as it would call `math` or `image`.
 - Dependency Go packages are carried in the same way, under the dependency's namespaced subtree.
 
-Here `<project>` is the Ard project name, which is also the generated Go module path, so a project imports its own Go code as `use go:<project>/ffi`. A `tic_tac_toe` project writes `use go:tic_tac_toe/ffi`. The project's Go module is wired into the generated module through `require`/`replace`, so the import resolves at type-check time as well as in the build. The standard library is the bootstrap instance of this same mechanism: its modules import their Go implementation as `use go:ard/ffi`, which the compiler canonicalizes to the bundled standard-library Go module path.
+Here `<project>` is the Ard project name, which is also the generated Go module path, so a project imports its own Go code as `use go:<project>/ffi`. A `tic_tac_toe` project writes `use go:tic_tac_toe/ffi`. The project's Go module is wired into the generated module through `require`/`replace`, so the import resolves at type-check time as well as in the build. The standard library uses the same model when it needs host Go adaptation: prefer direct imports of Go standard-library packages, and add ordinary shim packages only when the Ard-facing API intentionally adapts Go semantics.
 
-This supersedes the earlier statement in the Packages and Modules section that FFI companions land in the declaring module's package. Host Go code is its own package and is imported, not inlined, so packages shared across modules are not duplicated and package-level state is not split.
+Host Go code is its own package and is imported, not inlined into generated Ard packages, so packages shared across modules are not duplicated and package-level state is not split.
 
 #### `extern` is removed
 
 The `extern fn` and `extern type` declarations and the `extern` keyword existed only to bind Ard declarations to host functions and types. Direct Go interop makes them redundant — anything an extern expressed is expressed by importing the Go package and calling it — so they have been removed. `extern` is no longer valid syntax.
 
-The standard library completed this migration: its Go implementation is an ordinary Go package imported via `use go:ard/ffi`, exactly like user-provided Go code. No generated FFI binding tables or Ard-type mirror types remain, and the runtime is reduced to `Maybe` and `Result`.
+The standard library was reset as part of the FFI cleanup and should be rebuilt on top of this model. No generated FFI binding tables or Ard-type mirror types remain, and the runtime is reduced to `Maybe` and `Result`.
 
 ## Consequences
 
@@ -572,11 +572,11 @@ The standard library completed this migration: its Go implementation is an ordin
 - Ard visibility maps onto Go's package/export boundary, so cross-module name collisions are resolved structurally and module-name-prefixed artifact identifiers are no longer needed.
 - `package main` is always synthetic and decoupled from Ard source, matching Ard's model where any module can host an entry.
 - The standard library lowers under the same rules as user code, which requires stdlib public declarations to be exported with natural Go names.
-- Interop with Go is unified into direct `use go:` interop. Host Go code is carried into the generated module as an ordinary imported package, the `extern` binding mechanism has been removed, and the standard library imports its Go implementation package via `use go:ard/ffi`.
+- Interop with Go is unified into direct `use go:` interop. Host Go code is carried into the generated module as an ordinary imported package, the `extern` binding mechanism has been removed, and standard-library host adaptation uses the same direct-import or shim-package model as user code.
 - Dependencies remain inside one Go module under a namespaced subtree, keeping output self-contained.
 - The backend commits to minimizing synthetic helpers, with only `Maybe` and `Result` sanctioned as shared runtime types. `Void` lowers to `struct{}` and the structural-map helper is removed.
 - Equality is restricted to primitives, nullable primitives, and enums, so no structural-equality helper is generated. Map iteration order is unspecified and uses Go's native range, removing the sorted-key helpers. The previously generated equality and key-sorting helpers become dead and are removed.
-- The runtime package is reduced to `Maybe` and `Result` and must import only the Go standard library. The universal boxed `Object`/`Kind` representation, the `Fiber` async shape, the structural-map, equality, sorted-key, and void helpers are removed, and stdlib utilities such as argv access and the `ard/async` goroutine-spawn primitive move to FFI companions.
+- The runtime package is reduced to `Maybe` and `Result` and must import only the Go standard library. The universal boxed `Object`/`Kind` representation, the `Fiber` async shape, the structural-map, equality, sorted-key, and void helpers are removed. Standard-library utilities such as argv access and goroutine-spawn helpers use direct Go imports or ordinary shim packages instead of runtime helpers.
 - JSON lowers onto Go's `encoding/json/v2` over the generated types. Struct fields are always exported (revising the earlier fields-follow-type-visibility rule) and carry `json` tags preserving the Ard field name, so every struct is serializable. Marshalling applies to `Any`, structs, lists, string-keyed maps, primitives, `Maybe`, `Result`, enums, and unions (a union marshals to its active member, unwrapped); only parsing into a union is rejected by the checker, as it is ambiguous. `Maybe` and `Result` are the sanctioned runtime JSON marshalers. Decoding into `Any` uses `json.Number` to disambiguate `Int` from `Float64`.
 - Map key types are constrained during checking to Go strictly-comparable types whose Go equality matches Ard equality, so every Ard map lowers to a plain Go map. `Float64` keys are allowed; `Maybe`, `List`, `Map`, and `Any` keys are rejected. Generic type parameters used as map keys emit a Go `comparable` constraint. This is a language-level constraint the checker must enforce. The standard library conforms to it: `ard/decode`'s `to_map` is removed and decode migrates to string-keyed maps, which is the correct shape for JSON objects anyway.
 - Impl methods lower to real Go methods with no duplicated standalone helpers, mutation is expressed through pointer receivers and pointer parameters rather than forwarding tables, and closures lower to Go function literals. Generic functions lower to Go generics, with monomorphization only as a fallback. These choices require AIR to preserve generic structure and receiver/mutation metadata for the backend.
@@ -597,8 +597,6 @@ The standard library completed this migration: its Go implementation is an ordin
 - `docs/adrs/0019-use-typed-channels-for-fiber-communication.md`
 - `docs/adrs/0014-use-ard-native-test-functions.md`
 - `docs/adrs/0017-use-git-based-dependencies.md`
-- `docs/adrs/0008-use-target-aware-extern-companions-for-ffi.md`
-- `docs/adrs/0028-use-direct-go-imports-for-ffi.md`
 - `docs/adrs/0030-use-direct-go-struct-values-and-fields.md`
-- `docs/adrs/0016-defer-project-ffi-codegen.md`
+- `docs/adrs/0034-reset-go-backend-and-ffi-boundary.md`
 - `docs/go-backend-idiomatic-lowering.md`
