@@ -41,6 +41,41 @@ fn main() Int!Str {
 	})
 }
 
+func TestGoImportResolvesErrorOnlyFunction(t *testing.T) {
+	run(t, []test{
+		{
+			name: "os Setenv returns Void result",
+			input: `use go:os
+
+fn main() Void!Str {
+  os::Setenv("ARD_TEST", "ok")
+}`,
+			output: &checker.Program{
+				Statements: []checker.Statement{
+					{Expr: &checker.FunctionDef{
+						Name:       "main",
+						Parameters: []checker.Parameter{},
+						ReturnType: checker.MakeResult(checker.Void, checker.Str),
+						Body: &checker.Block{Stmts: []checker.Statement{
+							{Expr: &checker.ForeignFunctionCall{
+								Target:    "go",
+								Namespace: "os",
+								Qualifier: "os",
+								Symbol:    "Setenv",
+								Call: &checker.FunctionCall{
+									Name:       "Setenv",
+									Args:       []checker.Expression{&checker.StrLiteral{Value: "ARD_TEST"}, &checker.StrLiteral{Value: "ok"}},
+									ReturnType: checker.MakeResult(checker.Void, checker.Str),
+								},
+							}},
+						}},
+					}},
+				},
+			},
+		},
+	})
+}
+
 func TestGoImportRejectsUnknownFunction(t *testing.T) {
 	run(t, []test{
 		{

@@ -3,8 +3,10 @@ package gotarget
 import (
 	"fmt"
 	"go/ast"
+	"go/importer"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -2627,10 +2629,79 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 	call := &ast.CallExpr{Fun: l.qualified(pkgName, importPath, functionName), Args: args}
 	if validTypeID(l.program, expr.Type) {
 		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeResult {
-			return l.lowerGoValueErrorResultCall(expr, stmts, call, info)
+			shape, err := goForeignResultShape(importPath, functionName)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			switch shape {
+			case goResultValueError:
+				return l.lowerGoValueErrorResultCall(expr, stmts, call, info)
+			case goResultErrorOnly:
+				return l.lowerGoErrorOnlyResultCall(expr, stmts, call)
+			}
 		}
 	}
 	return loweredExpr{stmts: stmts, expr: call}, nil
+}
+
+type goResultShape int
+
+const (
+	goResultOther goResultShape = iota
+	goResultValueError
+	goResultErrorOnly
+)
+
+func goForeignResultShape(importPath, functionName string) (goResultShape, error) {
+	pkg, err := importer.Default().Import(importPath)
+	if err != nil {
+		return goResultOther, err
+	}
+	fn, ok := pkg.Scope().Lookup(functionName).(*types.Func)
+	if !ok {
+		return goResultOther, fmt.Errorf("unknown Go function %s.%s", importPath, functionName)
+	}
+	results := fn.Type().(*types.Signature).Results()
+	if results.Len() == 1 && isGoErrorType(results.At(0).Type()) {
+		return goResultErrorOnly, nil
+	}
+	if results.Len() == 2 && isGoErrorType(results.At(1).Type()) {
+		return goResultValueError, nil
+	}
+	return goResultOther, nil
+}
+
+func isGoErrorType(t types.Type) bool {
+	named, ok := t.(*types.Named)
+	return ok && named.Obj().Pkg() == nil && named.Obj().Name() == "error"
+}
+
+func (l *lowerer) lowerGoErrorOnlyResultCall(expr air.Expr, stmts []ast.Stmt, call *ast.CallExpr) (loweredExpr, error) {
+	resultTemp := l.nextTemp()
+	errTemp := l.nextTemp()
+	decls, err := l.declareTemp(expr.Type, resultTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts = append(stmts, decls...)
+	stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(errTemp)}, Type: ast.NewIdent("error")}}}})
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(errTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}})
+	resultType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	okLit := &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: ast.NewIdent("true")},
+	}}
+	errLit := &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(errTemp), Sel: ast.NewIdent("Error")}}},
+	}}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.NEQ, Y: ast.NewIdent("nil")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{errLit}}}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{okLit}}}},
+	})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
 }
 
 func (l *lowerer) lowerGoValueErrorResultCall(expr air.Expr, stmts []ast.Stmt, call *ast.CallExpr, result air.TypeInfo) (loweredExpr, error) {

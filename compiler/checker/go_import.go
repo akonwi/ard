@@ -84,6 +84,9 @@ func returnTypeFromGo(results *types.Tuple) (Type, string) {
 	case 0:
 		return Void, ""
 	case 1:
+		if isGoError(results.At(0).Type()) {
+			return MakeResult(Void, Str), ""
+		}
 		return typeFromGo(results.At(0).Type())
 	case 2:
 		if isGoError(results.At(1).Type()) {
