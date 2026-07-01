@@ -1128,6 +1128,23 @@ func TestRunProgramExecutesGoPackageConstant(t *testing.T) {
 	}
 }
 
+func TestRunProgramExecutesGoOpaqueNamedTypes(t *testing.T) {
+	program := lowerSource(t, `
+		use go:fmt
+		use go:time
+
+		fn main() {
+			let loc = try time::LoadLocation("UTC") -> err { panic(err) }
+			let when = time::Date(2024, time::January, 2, 0, 0, 0, 0, loc)
+			try fmt::Println(when) -> err { panic(err) }
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesGoFmtPrintln(t *testing.T) {
 	program := lowerSource(t, `
 		use go:fmt

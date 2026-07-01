@@ -146,6 +146,7 @@ type TypeInfo struct {
 	ForeignNamespace string
 	ForeignQualifier string
 	ForeignSymbol    string
+	ForeignPointer   bool
 
 	Fields   []FieldInfo
 	Variants []VariantInfo

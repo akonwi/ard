@@ -43,7 +43,7 @@ func ResolveGoPackage(path string) (*GoPackage, error) {
 		}
 		obj := scope.Lookup(name)
 		if typeName, ok := obj.(*types.TypeName); ok {
-			if typ, reason := namedScalarFromGo(path, pkg.Name(), typeName); reason == "" {
+			if typ, reason := exportedNamedTypeFromGo(typeName); reason == "" {
 				goPkg.Types[name] = typ
 			}
 			continue
@@ -166,18 +166,19 @@ func typeFromGo(t types.Type) (Type, string) {
 		return &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: alias.Obj().Name(), Underlying: underlying}, ""
 	}
 	if named, ok := t.(*types.Named); ok && !isGoError(t) {
-		underlying, reason := primitiveTypeFromGo(named.Underlying())
-		if reason != "" {
+		if reason := unsupportedForeignNamedUnderlying(named.Underlying(), false); reason != "" {
 			return nil, reason
 		}
-		pkg := named.Obj().Pkg()
-		namespace := ""
-		qualifier := ""
-		if pkg != nil {
-			namespace = pkg.Path()
-			qualifier = pkg.Name()
+		return foreignNamedTypeFromGo(named, false), ""
+	}
+	if ptr, ok := t.(*types.Pointer); ok {
+		if named, ok := ptr.Elem().(*types.Named); ok && !isGoError(named) {
+			if reason := unsupportedForeignNamedUnderlying(named.Underlying(), true); reason != "" {
+				return nil, reason
+			}
+			return foreignNamedTypeFromGo(named, true), ""
 		}
-		return &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying}, ""
+		return nil, "only pointers to named Go types are supported"
 	}
 	if slice, ok := t.Underlying().(*types.Slice); ok {
 		elem, reason := typeFromGo(slice.Elem())
@@ -189,12 +190,43 @@ func typeFromGo(t types.Type) (Type, string) {
 	return primitiveTypeFromGo(t)
 }
 
-func namedScalarFromGo(namespace, qualifier string, typeName *types.TypeName) (Type, string) {
-	underlying, reason := primitiveTypeFromGo(typeName.Type().Underlying())
-	if reason != "" {
+func exportedNamedTypeFromGo(typeName *types.TypeName) (Type, string) {
+	named, ok := typeName.Type().(*types.Named)
+	if !ok {
+		return nil, "exported Go type is not named"
+	}
+	if reason := unsupportedForeignNamedUnderlying(named.Underlying(), false); reason != "" {
 		return nil, reason
 	}
-	return &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: typeName.Name(), Underlying: underlying}, ""
+	return foreignNamedTypeFromGo(named, false), ""
+}
+
+func unsupportedForeignNamedUnderlying(underlying types.Type, pointer bool) string {
+	if _, reason := primitiveTypeFromGo(underlying); reason == "" {
+		return ""
+	}
+	if _, ok := underlying.(*types.Struct); ok {
+		return ""
+	}
+	if _, ok := underlying.(*types.Interface); ok {
+		if pointer {
+			return "pointers to Go interface types are not supported"
+		}
+		return "Go interface types are not supported yet"
+	}
+	return fmt.Sprintf("named Go types with underlying %s are not supported yet", underlying.String())
+}
+
+func foreignNamedTypeFromGo(named *types.Named, pointer bool) Type {
+	pkg := named.Obj().Pkg()
+	namespace := ""
+	qualifier := ""
+	if pkg != nil {
+		namespace = pkg.Path()
+		qualifier = pkg.Name()
+	}
+	underlying, _ := primitiveTypeFromGo(named.Underlying())
+	return &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying, Pointer: pointer}
 }
 
 func primitiveTypeFromGo(t types.Type) (Type, string) {

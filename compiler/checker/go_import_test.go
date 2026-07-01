@@ -86,6 +86,20 @@ fn main() Void!Str {
 	})
 }
 
+func TestGoImportSupportsOpaqueNamedTypes(t *testing.T) {
+	run(t, []test{
+		{
+			name: "pointer to named Go type can be returned and passed back",
+			input: `use go:time
+
+fn main() {
+  let loc = try time::LoadLocation("UTC") -> err { panic(err) }
+  let _ = time::Date(2024, time::January, 2, 0, 0, 0, 0, loc)
+}`,
+		},
+	})
+}
+
 func TestGoImportResolvesExportedPackageConstant(t *testing.T) {
 	run(t, []test{
 		{
@@ -121,7 +135,13 @@ func TestGoImportReportsUnsupportedFunctionSignature(t *testing.T) {
 			name: "exported function with unsupported signature",
 			input: `use go:fmt
 fmt::Fprint("hello")`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go function fmt::Fprint: parameter 1 has unsupported type io.Writer: only basic scalar, slice, and any types are supported"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go function fmt::Fprint: parameter 1 has unsupported type io.Writer: Go interface types are not supported yet"}},
+		},
+		{
+			name: "named func type is unsupported",
+			input: `use go:net/http
+http::HandleFunc("/", fn() { () })`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go function http::HandleFunc: parameter 2 has unsupported type func(net/http.ResponseWriter, *net/http.Request): only basic scalar, slice, and any types are supported"}},
 		},
 	})
 }

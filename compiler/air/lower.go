@@ -2014,11 +2014,14 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		info.ForeignNamespace = typ.Namespace
 		info.ForeignQualifier = typ.Qualifier
 		info.ForeignSymbol = typ.Name
-		underlying, err := l.internType(typ.Underlying)
-		if err != nil {
-			return NoType, err
+		info.ForeignPointer = typ.Pointer
+		if typ.Underlying != nil {
+			underlying, err := l.internType(typ.Underlying)
+			if err != nil {
+				return NoType, err
+			}
+			info.Value = underlying
 		}
-		info.Value = underlying
 	case *checker.FunctionDef:
 		info.Kind = TypeFunction
 		for _, param := range typ.Parameters {
