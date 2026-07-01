@@ -1037,6 +1037,20 @@ func TestRenderTestRunnerUsesStructForVoidResult(t *testing.T) {
 		t.Fatalf("test runner missing void result container using struct{}:\n%s", runner)
 	}
 }
+func TestRunProgramExecutesGoFmtPrintln(t *testing.T) {
+	program := lowerSource(t, `
+		use go:fmt
+
+		fn main() {
+			try fmt::Println("hello") -> err { panic(err) }
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesSimpleMain(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Void {

@@ -128,6 +128,7 @@ func TestImportStatements(t *testing.T) {
 				`use github.com/tree-sitter/go-tree-sitter as ts`,
 				`// comment`,
 				`use github.com/tree-sitter/tree-sitter`,
+				`use go:fmt`,
 			}, "\n"),
 			output: Program{
 				Imports: []Import{
@@ -146,6 +147,11 @@ func TestImportStatements(t *testing.T) {
 					{
 						Path: "github.com/tree-sitter/tree-sitter",
 						Name: "tree_sitter",
+					},
+					{
+						Path: "fmt",
+						Name: "fmt",
+						Kind: ImportKindGo,
 					},
 				},
 			},

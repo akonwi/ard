@@ -15,6 +15,7 @@ import (
 
 type Program struct {
 	Imports       map[string]Module
+	GoImports     map[string]*GoPackage
 	Statements    []Statement
 	StructMethods map[MethodOwner]map[string]*FunctionDef
 }
@@ -314,6 +315,7 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 		options:        checkOptions,
 		program: &Program{
 			Imports:       map[string]Module{},
+			GoImports:     map[string]*GoPackage{},
 			Statements:    []Statement{},
 			StructMethods: map[MethodOwner]map[string]*FunctionDef{},
 		},
@@ -346,6 +348,16 @@ func (c *Checker) Check() {
 			continue
 		}
 		seenImportAliases[imp.Name] = struct{}{}
+
+		if imp.Kind == parse.ImportKindGo {
+			pkg, err := ResolveGoPackage(imp.Path)
+			if err != nil {
+				c.addError(fmt.Sprintf("Failed to resolve Go import '%s': %v", imp.Path, err), imp.GetLocation())
+				continue
+			}
+			c.program.GoImports[imp.Name] = pkg
+			continue
+		}
 
 		if strings.HasPrefix(imp.Path, "ard/") {
 			// Handle standard library imports
@@ -1019,6 +1031,9 @@ func typeMismatch(expected, got Type) string {
 }
 
 func (c *Checker) areCompatible(expected Type, actual Type) bool {
+	if _, ok := expected.(*anyType); ok {
+		return true
+	}
 	if trait, ok := expected.(*Trait); ok {
 		return actual.hasTrait(trait)
 	}
@@ -3845,6 +3860,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					continue
 				}
 
+				if toStr, ok := cx.Type().get("to_str").(*FunctionDef); ok && toStr.ReturnType == Str && len(toStr.Parameters) == 0 {
+					chunks[i] = c.createPrimitiveMethodNode(cx, toStr.Name, []Expression{}, toStr, nil)
+					continue
+				}
+
 				if strMod := c.findModuleByPath("ard/string"); strMod != nil {
 					toStringTrait := strMod.Get("ToString").Type.(*Trait)
 					if !cx.Type().hasTrait(toStringTrait) {
@@ -3858,7 +3878,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					toStrMethod := toStringTrait.methods[0]
 					methodNode := c.createPrimitiveMethodNode(cx, toStrMethod.Name, []Expression{}, &toStrMethod, nil)
 					chunks[i] = methodNode
+					continue
 				}
+
+				c.addError(fmt.Sprintf("Type mismatch: Expected stringable value, got %s", cx.Type()), s.Chunks[i].GetLocation())
+				chunks[i] = &StrLiteral{}
 			}
 			return &TemplateStr{chunks}
 		}
@@ -4569,8 +4593,44 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return call
 			}
 
-			// find the function in a module
+			// find the function in a module or Go package namespace
 			modName, name := c.destructurePath(s)
+			if goPkg := c.program.GoImports[modName]; goPkg != nil {
+				fnDef := goPkg.Functions[name]
+				if fnDef == nil {
+					c.addError(fmt.Sprintf("Undefined Go function: %s::%s", modName, name), s.GetLocation())
+					return nil
+				}
+				for _, arg := range s.Function.Args {
+					if arg.Name != "" {
+						c.addError("Go function calls do not support named arguments", arg.GetLocation())
+						return nil
+					}
+				}
+				resolvedExprs, err := c.resolveArguments(s.Function.Args, fnDef.Parameters)
+				if err != nil {
+					c.addError(err.Error(), s.GetLocation())
+					return nil
+				}
+				if len(resolvedExprs) != len(fnDef.Parameters) {
+					c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
+					return nil
+				}
+				args := make([]Expression, len(resolvedExprs))
+				for i, expr := range resolvedExprs {
+					checkedArg := c.checkExprAs(expr, fnDef.Parameters[i].Type)
+					if checkedArg == nil {
+						return nil
+					}
+					if !c.areCompatible(fnDef.Parameters[i].Type, checkedArg.Type()) {
+						c.addError(typeMismatch(fnDef.Parameters[i].Type, checkedArg.Type()), expr.GetLocation())
+						return nil
+					}
+					args[i] = checkedArg
+				}
+				return &ForeignFunctionCall{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: name, Call: &FunctionCall{Name: name, Args: args, fn: fnDef, ReturnType: fnDef.ReturnType}}
+			}
+
 			var fnDef *FunctionDef
 			mod := c.resolveModule(modName)
 			if mod == nil {

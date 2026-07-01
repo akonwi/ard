@@ -2244,6 +2244,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerUnsafeBlockExpr(fn, expr)
 	case air.ExprIf:
 		return l.lowerIfExpr(fn, expr)
+	case air.ExprForeignCall:
+		return l.lowerForeignCall(fn, expr)
 	case air.ExprCall:
 		if !validFunctionID(l.program, expr.Function) {
 			return loweredExpr{}, fmt.Errorf("invalid function id %d", expr.Function)
@@ -2593,6 +2595,77 @@ func (l *lowerer) nextTemp() string {
 	name := fmt.Sprintf("_tmp_%d", l.tempCounter)
 	l.tempCounter++
 	return name
+}
+
+func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.ForeignTarget != "go" {
+		return loweredExpr{}, fmt.Errorf("unsupported foreign call target %q", expr.ForeignTarget)
+	}
+	if expr.ForeignNamespace == "" || expr.ForeignSymbol == "" {
+		return loweredExpr{}, fmt.Errorf("invalid go foreign call %q::%q", expr.ForeignNamespace, expr.ForeignSymbol)
+	}
+
+	args := make([]ast.Expr, 0, len(expr.Args))
+	var stmts []ast.Stmt
+	for i := range expr.Args {
+		arg, err := l.lowerExpr(fn, expr.Args[i])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, arg.stmts...)
+		args = append(args, arg.expr)
+	}
+	importPath := expr.ForeignNamespace
+	functionName := expr.ForeignSymbol
+	pkgName := expr.ForeignQualifier
+	if pkgName == "" {
+		pkgName = importPath
+		if slash := strings.LastIndex(pkgName, "/"); slash >= 0 {
+			pkgName = pkgName[slash+1:]
+		}
+	}
+	call := &ast.CallExpr{Fun: l.qualified(pkgName, importPath, functionName), Args: args}
+	if validTypeID(l.program, expr.Type) {
+		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeResult {
+			return l.lowerGoValueErrorResultCall(expr, stmts, call, info)
+		}
+	}
+	return loweredExpr{stmts: stmts, expr: call}, nil
+}
+
+func (l *lowerer) lowerGoValueErrorResultCall(expr air.Expr, stmts []ast.Stmt, call *ast.CallExpr, result air.TypeInfo) (loweredExpr, error) {
+	resultTemp := l.nextTemp()
+	valueTemp := l.nextTemp()
+	errTemp := l.nextTemp()
+	decls, err := l.declareTemp(expr.Type, resultTemp)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	valueType, err := l.goType(result.Value)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts = append(stmts, decls...)
+	stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(valueTemp)}, Type: valueType}}}})
+	stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(errTemp)}, Type: ast.NewIdent("error")}}}})
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(valueTemp), ast.NewIdent(errTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{call}})
+	resultType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	okLit := &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: ast.NewIdent(valueTemp)},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: ast.NewIdent("true")},
+	}}
+	errLit := &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(errTemp), Sel: ast.NewIdent("Error")}}},
+	}}
+	stmts = append(stmts, &ast.IfStmt{
+		Cond: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.NEQ, Y: ast.NewIdent("nil")},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{errLit}}}},
+		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{okLit}}}},
+	})
+	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
 }
 
 func (l *lowerer) binaryToken(kind air.ExprKind) token.Token {

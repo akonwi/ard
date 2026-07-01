@@ -59,6 +59,7 @@ var compareOptions = cmp.Options{
 		checker.Variable{},
 		checker.VariableDef{},
 		checker.FunctionCall{},
+		checker.ForeignFunctionCall{},
 		checker.ListLiteral{},
 		checker.List{},
 		checker.MapLiteral{},

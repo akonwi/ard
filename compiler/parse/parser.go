@@ -265,9 +265,13 @@ func (p *parser) parseImport() *Import {
 	importKind := ImportKindModule
 	importPath := pathToken.text
 	if strings.HasPrefix(importPath, "go:") {
-		p.addError(&pathToken, "Go imports are disabled during the pure Ard reset")
-		p.synchronize()
-		return nil
+		importKind = ImportKindGo
+		importPath = strings.TrimPrefix(importPath, "go:")
+		if importPath == "" {
+			p.addError(&pathToken, "Expected Go package path after 'go:'")
+			p.synchronize()
+			return nil
+		}
 	}
 
 	// Parse optional alias
