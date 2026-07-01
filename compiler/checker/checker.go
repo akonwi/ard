@@ -4207,6 +4207,15 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if args == nil {
 				return nil
 			}
+			if foreign, ok := subj.Type().(*ForeignType); ok {
+				for _, arg := range s.Method.Args {
+					if arg.Name != "" {
+						c.addError("Foreign method calls do not support named arguments", arg.GetLocation())
+						return nil
+					}
+				}
+				return &ForeignMethodCall{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: foreign.Pointer, Symbol: s.Method.Name, Call: &FunctionCall{Name: s.Method.Name, Args: args, fn: fnToUse, ReturnType: fnToUse.ReturnType}}
+			}
 			// Create function call
 			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs)
 		}

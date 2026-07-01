@@ -1128,6 +1128,30 @@ func TestRunProgramExecutesGoPackageConstant(t *testing.T) {
 	}
 }
 
+func TestRunProgramExecutesGoForeignMethods(t *testing.T) {
+	program := lowerSource(t, `
+		use go:regexp
+		use go:time
+
+		fn main() {
+			let re = try regexp::Compile("[a-z]+") -> err { panic(err) }
+			if not re.MatchString("abc") {
+				panic("expected regexp match")
+			}
+			let loc = try time::LoadLocation("UTC") -> err { panic(err) }
+			let when = time::Date(2024, time::January, 2, 0, 0, 0, 0, loc)
+			if not when.Format(time::RFC3339) == "2024-01-02T00:00:00Z" {
+				panic("bad time format")
+			}
+			let _ = time::Now().Local().Format(time::RFC3339)
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesGoOpaqueNamedTypes(t *testing.T) {
 	program := lowerSource(t, `
 		use go:fmt

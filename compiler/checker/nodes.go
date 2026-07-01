@@ -1214,6 +1214,21 @@ func (p *ForeignFunctionCall) Type() Type {
 	return p.Call.Type()
 }
 
+type ForeignMethodCall struct {
+	Subject   Expression
+	Target    string
+	Namespace string
+	Qualifier string
+	Receiver  string
+	Pointer   bool
+	Symbol    string
+	Call      *FunctionCall
+}
+
+func (p *ForeignMethodCall) Type() Type {
+	return p.Call.Type()
+}
+
 type ForeignValue struct {
 	Target    string
 	Namespace string

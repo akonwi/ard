@@ -2248,6 +2248,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerIfExpr(fn, expr)
 	case air.ExprForeignCall:
 		return l.lowerForeignCall(fn, expr)
+	case air.ExprForeignMethodCall:
+		return l.lowerForeignMethodCall(fn, expr)
 	case air.ExprForeignValue:
 		return l.lowerForeignValue(expr)
 	case air.ExprCall:
@@ -2704,6 +2706,40 @@ func goForeignResultShape(importPath, functionName string) (goResultShape, error
 	return goResultOther, nil
 }
 
+func goForeignMethodResultShape(importPath, receiverName string, pointer bool, methodName string) (goResultShape, error) {
+	pkg, err := importer.Default().Import(importPath)
+	if err != nil {
+		return goResultOther, err
+	}
+	typeName, ok := pkg.Scope().Lookup(receiverName).(*types.TypeName)
+	if !ok {
+		return goResultOther, fmt.Errorf("unknown Go type %s.%s", importPath, receiverName)
+	}
+	var receiver types.Type = typeName.Type()
+	if pointer {
+		receiver = types.NewPointer(receiver)
+	}
+	selection := types.NewMethodSet(receiver).Lookup(pkg, methodName)
+	if selection == nil {
+		return goResultOther, fmt.Errorf("unknown Go method %s.%s", receiverName, methodName)
+	}
+	fn, ok := selection.Obj().(*types.Func)
+	if !ok {
+		return goResultOther, fmt.Errorf("Go selection %s.%s is not a method", receiverName, methodName)
+	}
+	results := fn.Type().(*types.Signature).Results()
+	if results.Len() == 1 && isGoErrorType(results.At(0).Type()) {
+		return goResultErrorOnly, nil
+	}
+	if results.Len() == 2 && isGoErrorType(results.At(1).Type()) {
+		return goResultValueError, nil
+	}
+	if results.Len() == 2 && isGoBoolType(results.At(1).Type()) {
+		return goResultValueBool, nil
+	}
+	return goResultOther, nil
+}
+
 func isGoBoolType(t types.Type) bool {
 	basic, ok := t.(*types.Basic)
 	return ok && basic.Kind() == types.Bool
@@ -2773,6 +2809,54 @@ func (l *lowerer) lowerGoErrorOnlyResultCall(expr air.Expr, stmts []ast.Stmt, ca
 		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{okLit}}}},
 	})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
+}
+
+func (l *lowerer) lowerForeignMethodCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.ForeignTarget != "go" {
+		return loweredExpr{}, fmt.Errorf("unsupported foreign method target %q", expr.ForeignTarget)
+	}
+	if expr.Target == nil || expr.ForeignSymbol == "" {
+		return loweredExpr{}, fmt.Errorf("invalid go foreign method call %q", expr.ForeignSymbol)
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	args := make([]ast.Expr, 0, len(expr.Args))
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	for i := range expr.Args {
+		arg, err := l.lowerExpr(fn, expr.Args[i])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, arg.stmts...)
+		args = append(args, arg.expr)
+	}
+	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(expr.ForeignSymbol)}, Args: args}
+	if validTypeID(l.program, expr.Type) {
+		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeResult {
+			shape, err := goForeignMethodResultShape(expr.ForeignNamespace, expr.ForeignReceiver, expr.ForeignPointer, expr.ForeignSymbol)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			switch shape {
+			case goResultValueError:
+				return l.lowerGoValueErrorResultCall(expr, stmts, call, info)
+			case goResultErrorOnly:
+				return l.lowerGoErrorOnlyResultCall(expr, stmts, call)
+			}
+		}
+		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeMaybe {
+			shape, err := goForeignMethodResultShape(expr.ForeignNamespace, expr.ForeignReceiver, expr.ForeignPointer, expr.ForeignSymbol)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			if shape == goResultValueBool {
+				return l.lowerGoValueBoolMaybeCall(expr, stmts, call)
+			}
+		}
+	}
+	return loweredExpr{stmts: stmts, expr: call}, nil
 }
 
 func (l *lowerer) lowerGoValueErrorResultCall(expr air.Expr, stmts []ast.Stmt, call *ast.CallExpr, result air.TypeInfo) (loweredExpr, error) {

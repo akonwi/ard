@@ -86,6 +86,38 @@ fn main() Void!Str {
 	})
 }
 
+func TestGoImportSupportsForeignMethods(t *testing.T) {
+	run(t, []test{
+		{
+			name: "method on opaque pointer Go type",
+			input: `use go:regexp
+
+fn main() Bool {
+  let re = try regexp::Compile("[a-z]+") -> err { panic(err) }
+  re.MatchString("abc")
+}`,
+		},
+		{
+			name: "method on opaque value Go type",
+			input: `use go:time
+
+fn main() Str {
+  let loc = try time::LoadLocation("UTC") -> err { panic(err) }
+  let when = time::Date(2024, time::January, 2, 0, 0, 0, 0, loc)
+  when.Format(time::RFC3339)
+}`,
+		},
+		{
+			name: "method chain through returned opaque value keeps methods",
+			input: `use go:time
+
+fn main() Str {
+  time::Now().Local().Format(time::RFC3339)
+}`,
+		},
+	})
+}
+
 func TestGoImportSupportsOpaqueNamedTypes(t *testing.T) {
 	run(t, []test{
 		{

@@ -71,6 +71,10 @@ func ResolveGoPackage(path string) (*GoPackage, error) {
 }
 
 func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef, string) {
+	return functionDefFromGoSignatureWithMethods(name, sig, true)
+}
+
+func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, includeMethods bool) (*FunctionDef, string) {
 	params := make([]Parameter, 0, sig.Params().Len())
 	for i := 0; i < sig.Params().Len(); i++ {
 		param := sig.Params().At(i)
@@ -85,7 +89,7 @@ func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef
 		} else if _, ok := goType.Underlying().(*types.Slice); ok {
 			mutable = true
 		}
-		ardType, reason := typeFromGo(goType)
+		ardType, reason := typeFromGoWithMethods(goType, includeMethods)
 		if reason != "" {
 			return nil, fmt.Sprintf("parameter %d has unsupported type %s: %s", i+1, goType.String(), reason)
 		}
@@ -96,7 +100,7 @@ func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef
 		params = append(params, Parameter{Name: paramName, Type: ardType, Mutable: mutable})
 	}
 
-	ret, reason := returnTypeFromGo(sig.Results())
+	ret, reason := returnTypeFromGoWithMethods(sig.Results(), includeMethods)
 	if reason != "" {
 		return nil, reason
 	}
@@ -104,6 +108,10 @@ func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef
 }
 
 func returnTypeFromGo(results *types.Tuple) (Type, string) {
+	return returnTypeFromGoWithMethods(results, true)
+}
+
+func returnTypeFromGoWithMethods(results *types.Tuple, includeMethods bool) (Type, string) {
 	switch results.Len() {
 	case 0:
 		return Void, ""
@@ -111,17 +119,17 @@ func returnTypeFromGo(results *types.Tuple) (Type, string) {
 		if isGoError(results.At(0).Type()) {
 			return MakeResult(Void, Str), ""
 		}
-		return typeFromGo(results.At(0).Type())
+		return typeFromGoWithMethods(results.At(0).Type(), includeMethods)
 	case 2:
 		if isGoError(results.At(1).Type()) {
-			val, reason := typeFromGo(results.At(0).Type())
+			val, reason := typeFromGoWithMethods(results.At(0).Type(), includeMethods)
 			if reason != "" {
 				return nil, fmt.Sprintf("result 1 has unsupported type %s: %s", results.At(0).Type().String(), reason)
 			}
 			return MakeResult(val, Str), ""
 		}
 		if isGoBool(results.At(1).Type()) {
-			val, reason := typeFromGo(results.At(0).Type())
+			val, reason := typeFromGoWithMethods(results.At(0).Type(), includeMethods)
 			if reason != "" {
 				return nil, fmt.Sprintf("result 1 has unsupported type %s: %s", results.At(0).Type().String(), reason)
 			}
@@ -148,6 +156,10 @@ func constTypeFromGo(t types.Type) (Type, string) {
 }
 
 func typeFromGo(t types.Type) (Type, string) {
+	return typeFromGoWithMethods(t, true)
+}
+
+func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 	if isGoAny(t) {
 		return Any, ""
 	}
@@ -169,19 +181,19 @@ func typeFromGo(t types.Type) (Type, string) {
 		if reason := unsupportedForeignNamedUnderlying(named.Underlying(), false); reason != "" {
 			return nil, reason
 		}
-		return foreignNamedTypeFromGo(named, false), ""
+		return foreignNamedTypeFromGo(named, false, includeMethods), ""
 	}
 	if ptr, ok := t.(*types.Pointer); ok {
 		if named, ok := ptr.Elem().(*types.Named); ok && !isGoError(named) {
 			if reason := unsupportedForeignNamedUnderlying(named.Underlying(), true); reason != "" {
 				return nil, reason
 			}
-			return foreignNamedTypeFromGo(named, true), ""
+			return foreignNamedTypeFromGo(named, true, includeMethods), ""
 		}
 		return nil, "only pointers to named Go types are supported"
 	}
 	if slice, ok := t.Underlying().(*types.Slice); ok {
-		elem, reason := typeFromGo(slice.Elem())
+		elem, reason := typeFromGoWithMethods(slice.Elem(), includeMethods)
 		if reason != "" {
 			return nil, "slice element " + reason
 		}
@@ -198,7 +210,7 @@ func exportedNamedTypeFromGo(typeName *types.TypeName) (Type, string) {
 	if reason := unsupportedForeignNamedUnderlying(named.Underlying(), false); reason != "" {
 		return nil, reason
 	}
-	return foreignNamedTypeFromGo(named, false), ""
+	return foreignNamedTypeFromGo(named, false, true), ""
 }
 
 func unsupportedForeignNamedUnderlying(underlying types.Type, pointer bool) string {
@@ -217,7 +229,7 @@ func unsupportedForeignNamedUnderlying(underlying types.Type, pointer bool) stri
 	return fmt.Sprintf("named Go types with underlying %s are not supported yet", underlying.String())
 }
 
-func foreignNamedTypeFromGo(named *types.Named, pointer bool) Type {
+func foreignNamedTypeFromGo(named *types.Named, pointer bool, includeMethods bool) Type {
 	pkg := named.Obj().Pkg()
 	namespace := ""
 	qualifier := ""
@@ -226,7 +238,52 @@ func foreignNamedTypeFromGo(named *types.Named, pointer bool) Type {
 		qualifier = pkg.Name()
 	}
 	underlying, _ := primitiveTypeFromGo(named.Underlying())
-	return &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying, Pointer: pointer}
+	foreign := &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying, Pointer: pointer}
+	if includeMethods {
+		foreign.Methods = goMethodsForNamedType(named, pointer)
+		foreign.MethodsLoaded = true
+	}
+	return foreign
+}
+
+func loadForeignTypeMethods(f *ForeignType) map[string]*FunctionDef {
+	if f == nil || f.Target != "go" || f.Namespace == "" || f.Name == "" {
+		return nil
+	}
+	pkg, err := importer.Default().Import(f.Namespace)
+	if err != nil {
+		return nil
+	}
+	typeName, ok := pkg.Scope().Lookup(f.Name).(*types.TypeName)
+	if !ok {
+		return nil
+	}
+	named, ok := typeName.Type().(*types.Named)
+	if !ok {
+		return nil
+	}
+	return goMethodsForNamedType(named, f.Pointer)
+}
+
+func goMethodsForNamedType(named *types.Named, pointer bool) map[string]*FunctionDef {
+	var receiver types.Type = named
+	if pointer {
+		receiver = types.NewPointer(named)
+	}
+	methodSet := types.NewMethodSet(receiver)
+	methods := map[string]*FunctionDef{}
+	for i := 0; i < methodSet.Len(); i++ {
+		selection := methodSet.At(i)
+		method, ok := selection.Obj().(*types.Func)
+		if !ok || !token.IsExported(method.Name()) {
+			continue
+		}
+		def, reason := functionDefFromGoSignatureWithMethods(method.Name(), method.Type().(*types.Signature), false)
+		if reason == "" {
+			methods[method.Name()] = def
+		}
+	}
+	return methods
 }
 
 func primitiveTypeFromGo(t types.Type) (Type, string) {

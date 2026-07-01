@@ -46,6 +46,7 @@ const (
 	ExprFunctionRef
 	ExprCall
 	ExprForeignCall
+	ExprForeignMethodCall
 	ExprForeignValue
 	ExprMakeClosure
 	ExprCallClosure
@@ -167,6 +168,8 @@ type Expr struct {
 	ForeignNamespace string
 	ForeignQualifier string
 	ForeignSymbol    string
+	ForeignReceiver  string
+	ForeignPointer   bool
 	TypeArgs         []TypeID
 	Impl             ImplID
 	Trait            TraitID
