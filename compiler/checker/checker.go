@@ -4598,7 +4598,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if goPkg := c.program.GoImports[modName]; goPkg != nil {
 				fnDef := goPkg.Functions[name]
 				if fnDef == nil {
-					c.addError(fmt.Sprintf("Undefined Go function: %s::%s", modName, name), s.GetLocation())
+					if reason, ok := goPkg.UnsupportedFunctions[name]; ok {
+						c.addError(fmt.Sprintf("Unsupported Go function %s::%s: %s", modName, name, reason), s.GetLocation())
+					} else {
+						c.addError(fmt.Sprintf("Undefined Go function: %s::%s", modName, name), s.GetLocation())
+					}
 					return nil
 				}
 				for _, arg := range s.Function.Args {

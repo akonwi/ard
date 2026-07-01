@@ -52,6 +52,17 @@ fmt::Nope("hello")`,
 	})
 }
 
+func TestGoImportReportsUnsupportedFunctionSignature(t *testing.T) {
+	run(t, []test{
+		{
+			name: "exported function with unsupported signature",
+			input: `use go:fmt
+fmt::Fprint("hello")`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go function fmt::Fprint: parameter 1 has unsupported type io.Writer: only basic scalar and any types are supported"}},
+		},
+	})
+}
+
 func TestGoVariadicIsSingleArdArgument(t *testing.T) {
 	run(t, []test{
 		{

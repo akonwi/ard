@@ -10,9 +10,10 @@ import (
 // GoPackage is target metadata for a directly imported Go package. It is kept
 // separate from Ard modules so Go symbols do not become core Ard declarations.
 type GoPackage struct {
-	Path      string
-	TypesName string
-	Functions map[string]*FunctionDef
+	Path                 string
+	TypesName            string
+	Functions            map[string]*FunctionDef
+	UnsupportedFunctions map[string]string
 }
 
 // ResolveGoPackage loads exported function signatures for a Go package.
@@ -23,7 +24,12 @@ func ResolveGoPackage(path string) (*GoPackage, error) {
 	if err != nil {
 		return nil, err
 	}
-	goPkg := &GoPackage{Path: path, TypesName: pkg.Name(), Functions: map[string]*FunctionDef{}}
+	goPkg := &GoPackage{
+		Path:                 path,
+		TypesName:            pkg.Name(),
+		Functions:            map[string]*FunctionDef{},
+		UnsupportedFunctions: map[string]string{},
+	}
 	scope := pkg.Scope()
 	for _, name := range scope.Names() {
 		if !token.IsExported(name) {
@@ -33,15 +39,17 @@ func ResolveGoPackage(path string) (*GoPackage, error) {
 		if !ok {
 			continue
 		}
-		def, ok := functionDefFromGoSignature(name, fn.Type().(*types.Signature))
-		if ok {
+		def, reason := functionDefFromGoSignature(name, fn.Type().(*types.Signature))
+		if reason == "" {
 			goPkg.Functions[name] = def
+		} else {
+			goPkg.UnsupportedFunctions[name] = reason
 		}
 	}
 	return goPkg, nil
 }
 
-func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef, bool) {
+func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef, string) {
 	params := make([]Parameter, 0, sig.Params().Len())
 	for i := 0; i < sig.Params().Len(); i++ {
 		param := sig.Params().At(i)
@@ -49,13 +57,13 @@ func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef
 		if sig.Variadic() && i == sig.Params().Len()-1 {
 			slice, ok := goType.(*types.Slice)
 			if !ok {
-				return nil, false
+				return nil, fmt.Sprintf("variadic parameter %d is not a slice", i+1)
 			}
 			goType = slice.Elem()
 		}
-		ardType, ok := typeFromGo(goType)
-		if !ok {
-			return nil, false
+		ardType, reason := typeFromGo(goType)
+		if reason != "" {
+			return nil, fmt.Sprintf("parameter %d has unsupported type %s: %s", i+1, goType.String(), reason)
 		}
 		paramName := param.Name()
 		if paramName == "" {
@@ -64,50 +72,50 @@ func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef
 		params = append(params, Parameter{Name: paramName, Type: ardType})
 	}
 
-	ret, ok := returnTypeFromGo(sig.Results())
-	if !ok {
-		return nil, false
+	ret, reason := returnTypeFromGo(sig.Results())
+	if reason != "" {
+		return nil, reason
 	}
-	return &FunctionDef{Name: name, Parameters: params, ReturnType: ret}, true
+	return &FunctionDef{Name: name, Parameters: params, ReturnType: ret}, ""
 }
 
-func returnTypeFromGo(results *types.Tuple) (Type, bool) {
+func returnTypeFromGo(results *types.Tuple) (Type, string) {
 	switch results.Len() {
 	case 0:
-		return Void, true
+		return Void, ""
 	case 1:
 		return typeFromGo(results.At(0).Type())
 	case 2:
 		if isGoError(results.At(1).Type()) {
-			val, ok := typeFromGo(results.At(0).Type())
-			if !ok {
-				return nil, false
+			val, reason := typeFromGo(results.At(0).Type())
+			if reason != "" {
+				return nil, fmt.Sprintf("result 1 has unsupported type %s: %s", results.At(0).Type().String(), reason)
 			}
-			return MakeResult(val, Str), true
+			return MakeResult(val, Str), ""
 		}
 	}
-	return nil, false
+	return nil, fmt.Sprintf("unsupported result shape %s", results.String())
 }
 
-func typeFromGo(t types.Type) (Type, bool) {
+func typeFromGo(t types.Type) (Type, string) {
 	if isGoAny(t) {
-		return Any, true
+		return Any, ""
 	}
 	basic, ok := t.Underlying().(*types.Basic)
 	if !ok {
-		return nil, false
+		return nil, "only basic scalar and any types are supported"
 	}
 	switch basic.Kind() {
 	case types.Bool:
-		return Bool, true
+		return Bool, ""
 	case types.String:
-		return Str, true
+		return Str, ""
 	case types.Int:
-		return Int, true
+		return Int, ""
 	case types.Float64:
-		return Float, true
+		return Float, ""
 	}
-	return nil, false
+	return nil, fmt.Sprintf("unsupported basic type %s", basic.Name())
 }
 
 func isGoAny(t types.Type) bool {
