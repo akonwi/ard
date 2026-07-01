@@ -286,10 +286,10 @@ func TestLowerIfExpression(t *testing.T) {
 	if choose.Body.Result.Condition == nil || choose.Body.Result.Condition.Kind != ExprLoadLocal {
 		t.Fatalf("condition = %#v, want local load", choose.Body.Result.Condition)
 	}
-	if choose.Body.Result.Then.Result == nil || choose.Body.Result.Then.Result.Int != 1 {
+	if choose.Body.Result.Then.Result == nil || choose.Body.Result.Then.Result.Int != "1" {
 		t.Fatalf("then block = %#v, want 1", choose.Body.Result.Then.Result)
 	}
-	if choose.Body.Result.Else.Result == nil || choose.Body.Result.Else.Result.Int != 2 {
+	if choose.Body.Result.Else.Result == nil || choose.Body.Result.Else.Result.Int != "2" {
 		t.Fatalf("else block = %#v, want 2", choose.Body.Result.Else.Result)
 	}
 }
@@ -310,10 +310,10 @@ func TestLowerBoolMatch(t *testing.T) {
 	if choose.Body.Result.Condition == nil || choose.Body.Result.Condition.Kind != ExprLoadLocal {
 		t.Fatalf("condition = %#v, want local load", choose.Body.Result.Condition)
 	}
-	if choose.Body.Result.Then.Result == nil || choose.Body.Result.Then.Result.Int != 1 {
+	if choose.Body.Result.Then.Result == nil || choose.Body.Result.Then.Result.Int != "1" {
 		t.Fatalf("then block = %#v, want 1", choose.Body.Result.Then.Result)
 	}
-	if choose.Body.Result.Else.Result == nil || choose.Body.Result.Else.Result.Int != 2 {
+	if choose.Body.Result.Else.Result == nil || choose.Body.Result.Else.Result.Int != "2" {
 		t.Fatalf("else block = %#v, want 2", choose.Body.Result.Else.Result)
 	}
 }
@@ -431,7 +431,7 @@ func TestLowerMaybes(t *testing.T) {
 	if some.Body.Result == nil || some.Body.Result.Kind != ExprMakeMaybeSome {
 		t.Fatalf("some result = %#v, want ExprMakeMaybeSome", some.Body.Result)
 	}
-	if some.Body.Result.Target == nil || some.Body.Result.Target.Int != 42 {
+	if some.Body.Result.Target == nil || some.Body.Result.Target.Int != "42" {
 		t.Fatalf("some target = %#v, want 42", some.Body.Result.Target)
 	}
 

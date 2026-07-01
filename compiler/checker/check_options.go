@@ -1,8 +1,15 @@
 package checker
 
+type TargetInfo struct {
+	IntBits     int
+	UintBits    int
+	UintptrBits int
+}
+
 type CheckOptions struct {
 	// ModulePath overrides the checked module identity while keeping filePath for diagnostics.
 	ModulePath string
+	Target     TargetInfo
 }
 
 func normalizeCheckOptions(options []CheckOptions) CheckOptions {

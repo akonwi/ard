@@ -3,6 +3,7 @@ package air
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/akonwi/ard/checker"
@@ -1336,7 +1337,7 @@ func (l *lowerer) declareBuiltinTraitImpl(module ModuleID, traitID TraitID, owne
 		return 0, false, fmt.Errorf("invalid builtin trait owner type %d", ownerType)
 	}
 	switch ownerInfo.Kind {
-	case TypeStr, TypeInt, TypeFloat64, TypeBool, TypeByte, TypeRune:
+	case TypeStr, TypeInt, TypeScalar, TypeFloat64, TypeBool, TypeByte, TypeRune:
 	default:
 		return 0, false, nil
 	}
@@ -2034,6 +2035,9 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 			info.Kind = TypeVoid
 		case checker.Int:
 			info.Kind = TypeInt
+		case checker.Int8, checker.Int16, checker.Int32, checker.Int64, checker.Uint, checker.Uint8, checker.Uint16, checker.Uint32, checker.Uint64, checker.Uintptr, checker.Float32:
+			info.Kind = TypeScalar
+			info.Name = t.String()
 		case checker.Float64:
 			info.Kind = TypeFloat64
 		case checker.Bool:
@@ -2346,7 +2350,7 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 
 func canWrapAsAny(kind TypeKind) bool {
 	switch kind {
-	case TypeVoid, TypeInt, TypeFloat64, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeChannel, TypeReceiver, TypeSender, TypeAny:
+	case TypeVoid, TypeInt, TypeScalar, TypeFloat64, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeChannel, TypeReceiver, TypeSender, TypeAny:
 		return true
 	default:
 		return false
@@ -3142,7 +3146,7 @@ func (fl *functionLowerer) lowerForIntRange(loop *checker.ForIntRange) ([]Stmt, 
 	if loop.Index != "" {
 		indexCounter = fl.defineLocal(loop.Index+"$range", intType, true)
 		index = fl.defineLocal(loop.Index, intType, false)
-		stmts = append(stmts, Stmt{Kind: StmtLet, Local: indexCounter, Name: loop.Index + "$range", Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: 0}})
+		stmts = append(stmts, Stmt{Kind: StmtLet, Local: indexCounter, Name: loop.Index + "$range", Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: "0"}})
 	}
 
 	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
@@ -3169,13 +3173,13 @@ func (fl *functionLowerer) lowerForIntRange(loop *checker.ForIntRange) ([]Stmt, 
 	body.Stmts = append(body.Stmts, Stmt{
 		Kind:  StmtAssign,
 		Local: counter,
-		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, counter), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
+		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, counter), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: "1"}},
 	})
 	if loop.Index != "" {
 		body.Stmts = append(body.Stmts, Stmt{
 			Kind:  StmtAssign,
 			Local: indexCounter,
-			Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, indexCounter), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
+			Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, indexCounter), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: "1"}},
 		})
 	}
 
@@ -3227,7 +3231,7 @@ func (fl *functionLowerer) lowerForInStr(loop *checker.ForInStr) ([]Stmt, error)
 
 	stmts := []Stmt{
 		{Kind: StmtLet, Local: runesLocal, Name: loop.Cursor + "$runes", Type: runeListType, Value: &Expr{Kind: ExprStrRunes, Type: runeListType, Target: str}},
-		{Kind: StmtLet, Local: index, Name: indexName, Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: 0}},
+		{Kind: StmtLet, Local: index, Name: indexName, Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: "0"}},
 	}
 
 	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
@@ -3254,7 +3258,7 @@ func (fl *functionLowerer) lowerForInStr(loop *checker.ForInStr) ([]Stmt, error)
 	body.Stmts = append(body.Stmts, Stmt{
 		Kind:  StmtAssign,
 		Local: index,
-		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
+		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: "1"}},
 	})
 
 	stmts = append(stmts, Stmt{
@@ -3297,7 +3301,7 @@ func (fl *functionLowerer) lowerForInList(loop *checker.ForInList) ([]Stmt, erro
 
 	stmts := []Stmt{
 		{Kind: StmtLet, Local: listLocal, Name: loop.Cursor + "$list", Type: list.Type, Value: list},
-		{Kind: StmtLet, Local: index, Name: indexName, Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: 0}},
+		{Kind: StmtLet, Local: index, Name: indexName, Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: "0"}},
 	}
 
 	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
@@ -3324,7 +3328,7 @@ func (fl *functionLowerer) lowerForInList(loop *checker.ForInList) ([]Stmt, erro
 	body.Stmts = append(body.Stmts, Stmt{
 		Kind:  StmtAssign,
 		Local: index,
-		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
+		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: "1"}},
 	})
 
 	stmts = append(stmts, Stmt{
@@ -3360,7 +3364,7 @@ func (fl *functionLowerer) lowerForInMap(loop *checker.ForInMap) ([]Stmt, error)
 
 	stmts := []Stmt{
 		{Kind: StmtLet, Local: mapLocal, Name: loop.Key + "$map", Type: m.Type, Value: m},
-		{Kind: StmtLet, Local: index, Name: loop.Key + "$index", Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: 0}},
+		{Kind: StmtLet, Local: index, Name: loop.Key + "$index", Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: "0"}},
 	}
 
 	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
@@ -3386,7 +3390,7 @@ func (fl *functionLowerer) lowerForInMap(loop *checker.ForInMap) ([]Stmt, error)
 	body.Stmts = append(body.Stmts, Stmt{
 		Kind:  StmtAssign,
 		Local: index,
-		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: 1}},
+		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: "1"}},
 	})
 
 	stmts = append(stmts, Stmt{
@@ -3619,15 +3623,19 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 	case *checker.VoidLiteral:
 		return &Expr{Kind: ExprConstVoid, Type: typeID}, nil
 	case *checker.IntLiteral:
-		return &Expr{Kind: ExprConstInt, Type: typeID, Int: e.Value}, nil
+		return &Expr{Kind: ExprConstInt, Type: typeID, Int: strconv.Itoa(e.Value)}, nil
+	case *checker.TypedIntLiteral:
+		return &Expr{Kind: ExprConstInt, Type: typeID, Int: e.String()}, nil
 	case *checker.FloatLiteral:
-		return &Expr{Kind: ExprConstFloat, Type: typeID, Float: e.Value}, nil
+		return &Expr{Kind: ExprConstFloat, Type: typeID, Float: e.String()}, nil
+	case *checker.TypedFloatLiteral:
+		return &Expr{Kind: ExprConstFloat, Type: typeID, Float: e.String()}, nil
 	case *checker.BoolLiteral:
 		return &Expr{Kind: ExprConstBool, Type: typeID, Bool: e.Value}, nil
 	case *checker.StrLiteral:
 		return &Expr{Kind: ExprConstStr, Type: typeID, Str: e.Value}, nil
 	case *checker.RuneLiteral:
-		return &Expr{Kind: ExprConstInt, Type: typeID, Int: int(e.Value)}, nil
+		return &Expr{Kind: ExprConstInt, Type: typeID, Int: strconv.Itoa(int(e.Value))}, nil
 	case *checker.Panic:
 		message, err := fl.lowerExprWithExpected(e.Message, fl.l.mustIntern(checker.Str))
 		if err != nil {

@@ -3,6 +3,8 @@ package checker
 import (
 	"fmt"
 	"maps"
+	"math"
+	"math/big"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -684,7 +686,7 @@ func isComparableValueType(t Type) bool {
 	if t == nil {
 		return false
 	}
-	if t.equal(Int) || t.equal(Float64) || t.equal(Str) || t.equal(Bool) || t.equal(Byte) || t.equal(Rune) {
+	if t.equal(Int) || t.equal(Float64) || t.equal(Str) || t.equal(Bool) || t.equal(Byte) || t.equal(Rune) || isExplicitScalar(t) {
 		return true
 	}
 	_, isEnum := t.(*Enum)
@@ -703,6 +705,34 @@ func isValidMapKeyType(t Type) bool {
 	default:
 		return true
 	}
+}
+
+func scalarTypeByName(name string) Type {
+	switch name {
+	case "Int8":
+		return Int8
+	case "Int16":
+		return Int16
+	case "Int32":
+		return Int32
+	case "Int64":
+		return Int64
+	case "Uint":
+		return Uint
+	case "Uint8":
+		return Uint8
+	case "Uint16":
+		return Uint16
+	case "Uint32":
+		return Uint32
+	case "Uint64":
+		return Uint64
+	case "Uintptr":
+		return Uintptr
+	case "Float32":
+		return Float32
+	}
+	return nil
 }
 
 func (c *Checker) resolveType(t parse.DeclaredType) Type {
@@ -772,6 +802,8 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		case "Rune":
 			baseType = Rune
 			break
+		default:
+			baseType = scalarTypeByName(t.GetName())
 		}
 		if baseType != nil {
 			break
@@ -3827,18 +3859,22 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		{
 			stripped := strings.ReplaceAll(s.Value, "_", "")
 			if strings.Contains(stripped, ".") {
-				value, err := strconv.ParseFloat(s.Value, 64)
+				value, err := strconv.ParseFloat(stripped, 64)
 				if err != nil {
 					c.addError(fmt.Sprintf("Invalid float: %s", s.Value), s.GetLocation())
 					return &FloatLiteral{Value: 0.0}
 				}
 				return &FloatLiteral{Value: value}
 			}
-			value, err := strconv.Atoi(stripped)
+			value64, err := strconv.ParseInt(stripped, 0, 64)
 			if err != nil {
 				c.addError(fmt.Sprintf("Invalid int: %s", s.Value), s.GetLocation())
+				return &IntLiteral{0}
 			}
-			return &IntLiteral{value}
+			if !c.intLiteralFitsType(value64, Int) {
+				c.addError(fmt.Sprintf("Integer literal %s overflows Int", s.Value), s.GetLocation())
+			}
+			return &IntLiteral{int(value64)}
 		}
 	case *parse.InterpolatedStr:
 		{
@@ -4174,8 +4210,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 			if s.Operator == parse.Minus {
-				if value.Type() != Int && value.Type() != Float64 {
-					c.addError("Only numbers can be negated with '-'", s.GetLocation())
+				if !isSignedArithmeticLike(value.Type()) {
+					c.addError("Only signed numbers can be negated with '-'", s.GetLocation())
 					return nil
 				}
 				return &Negation{value}
@@ -4202,10 +4238,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError("Cannot add different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if isArithmeticIntegerLike(left.Type()) {
 						return &IntAddition{left, right}
 					}
-					if left.Type() == Float64 {
+					if isArithmeticFloatLike(left.Type()) {
 						return &FloatAddition{left, right}
 					}
 					if left.Type() == Str {
@@ -4222,14 +4258,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					if !left.Type().equal(right.Type()) {
 						c.addError("Cannot subtract different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if isArithmeticIntegerLike(left.Type()) {
 						return &IntSubtraction{left, right}
 					}
-					if left.Type() == Float64 {
+					if isArithmeticFloatLike(left.Type()) {
 						return &FloatSubtraction{left, right}
 					}
 					c.addError("The '+' operator can only be used for Int or Float64", s.GetLocation())
@@ -4243,14 +4279,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					if !left.Type().equal(right.Type()) {
 						c.addError("Cannot multiply different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if isArithmeticIntegerLike(left.Type()) {
 						return &IntMultiplication{left, right}
 					}
-					if left.Type() == Float64 {
+					if isArithmeticFloatLike(left.Type()) {
 						return &FloatMultiplication{left, right}
 					}
 					c.addError("The '*' operator can only be used for Int or Float64", s.GetLocation())
@@ -4264,14 +4300,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					if !left.Type().equal(right.Type()) {
 						c.addError("Cannot divide different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if isArithmeticIntegerLike(left.Type()) {
 						return &IntDivision{left, right}
 					}
-					if left.Type() == Float64 {
+					if isArithmeticFloatLike(left.Type()) {
 						return &FloatDivision{left, right}
 					}
 					c.addError("The '/' operator can only be used for Int or Float64", s.GetLocation())
@@ -4285,14 +4321,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					if !left.Type().equal(right.Type()) {
 						c.addError("Cannot modulo different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if isArithmeticIntegerLike(left.Type()) {
 						return &IntModulo{left, right}
 					}
-					c.addError("The '%' operator can only be used for Int", s.GetLocation())
+					c.addError("The '%' operator can only be used for integer scalars", s.GetLocation())
 					return nil
 				}
 			case parse.GreaterThan:
@@ -4305,10 +4341,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 					// Allow Enum vs Int comparisons
 					if c.areTypesComparable(left.Type(), right.Type()) {
-						if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+						if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 							return &IntGreater{left, right}
 						}
-						if left.Type() == Float64 {
+						if isRelationalFloatLike(left.Type()) {
 							return &FloatGreater{left, right}
 						}
 					}
@@ -4325,10 +4361,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 					// Allow Enum vs Int comparisons
 					if c.areTypesComparable(left.Type(), right.Type()) {
-						if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+						if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 							return &IntGreaterEqual{left, right}
 						}
-						if left.Type() == Float64 {
+						if isRelationalFloatLike(left.Type()) {
 							return &FloatGreaterEqual{left, right}
 						}
 					}
@@ -4345,10 +4381,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 					// Allow Enum vs Int comparisons
 					if c.areTypesComparable(left.Type(), right.Type()) {
-						if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+						if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 							return &IntLess{left, right}
 						}
-						if left.Type() == Float64 {
+						if isRelationalFloatLike(left.Type()) {
 							return &FloatLess{left, right}
 						}
 					}
@@ -4365,10 +4401,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 					// Allow Enum vs Int comparisons
 					if c.areTypesComparable(left.Type(), right.Type()) {
-						if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+						if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 							return &IntLessEqual{left, right}
 						}
-						if left.Type() == Float64 {
+						if isRelationalFloatLike(left.Type()) {
 							return &FloatLessEqual{left, right}
 						}
 					}
@@ -6170,7 +6206,211 @@ func bindInferredTypeVars(expected Type, actual Type) {
 	}
 }
 
+func (c *Checker) checkNumericLiteralAs(expr parse.Expression, expected Type) Expression {
+	if unary, ok := expr.(*parse.UnaryExpression); ok && unary.Operator == parse.Minus {
+		if num, ok := unary.Operand.(*parse.NumLiteral); ok {
+			return c.checkSignedNumericLiteralAs(num, expected, true)
+		}
+	}
+	num, ok := expr.(*parse.NumLiteral)
+	if !ok || expected == nil {
+		return nil
+	}
+	return c.checkSignedNumericLiteralAs(num, expected, false)
+}
+
+func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Type, negative bool) Expression {
+	if expected == nil || (!isIntegerScalar(expected) && expected != Float32 && expected != Float64) {
+		return nil
+	}
+	literalText := num.Value
+	if negative {
+		literalText = "-" + literalText
+	}
+	if strings.Contains(num.Value, ".") {
+		clean := strings.ReplaceAll(literalText, "_", "")
+		value, err := strconv.ParseFloat(clean, 64)
+		if err != nil {
+			c.addError(fmt.Sprintf("Invalid float: %s", num.Value), num.GetLocation())
+			return nil
+		}
+		if expected == Float64 {
+			return &FloatLiteral{Value: value}
+		}
+		if expected == Float32 {
+			float32Value, err := strconv.ParseFloat(clean, 32)
+			if err != nil {
+				c.addError(fmt.Sprintf("Float literal %s overflows Float32", num.Value), num.GetLocation())
+				return &TypedFloatLiteral{Value: float32Value, Text: clean, Typed: Float32}
+			}
+			return &TypedFloatLiteral{Value: float32Value, Text: clean, Typed: Float32}
+		}
+		return nil
+	}
+	clean := strings.ReplaceAll(literalText, "_", "")
+	if isUnsignedScalar(expected) {
+		value := new(big.Int)
+		if _, ok := value.SetString(clean, 0); !ok || value.Sign() < 0 || !c.uintLiteralFitsType(value, expected) {
+			c.addError(fmt.Sprintf("Integer literal %s overflows %s", literalText, expected), num.GetLocation())
+		}
+		return &TypedIntLiteral{Value: int(value.Int64()), Text: clean, Typed: expected}
+	}
+	if expected == Float32 || expected == Float64 {
+		return nil
+	}
+	value64, err := strconv.ParseInt(clean, 0, 64)
+	if err != nil {
+		c.addError(fmt.Sprintf("Invalid int: %s", literalText), num.GetLocation())
+		return nil
+	}
+	if !c.intLiteralFitsType(value64, expected) {
+		c.addError(fmt.Sprintf("Integer literal %s overflows %s", literalText, expected), num.GetLocation())
+		if isIntegerScalar(expected) {
+			return &TypedIntLiteral{Value: int(value64), Text: clean, Typed: expected}
+		}
+		return nil
+	}
+	if expected == Int {
+		return &IntLiteral{Value: int(value64)}
+	}
+	if isIntegerScalar(expected) {
+		return &TypedIntLiteral{Value: int(value64), Text: clean, Typed: expected}
+	}
+	return nil
+}
+
+func isExplicitScalar(t Type) bool {
+	switch t {
+	case Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, Uintptr, Float32:
+		return true
+	default:
+		return false
+	}
+}
+
+func isIntegerScalar(t Type) bool {
+	switch t {
+	case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, Uintptr, Byte, Rune:
+		return true
+	default:
+		return false
+	}
+}
+
+func isRelationalIntegerLike(t Type) bool { return isIntegerScalar(t) }
+
+func isRelationalFloatLike(t Type) bool { return t == Float64 || t == Float32 }
+
+func isArithmeticIntegerLike(t Type) bool { return isIntegerScalar(t) }
+
+func isSignedArithmeticLike(t Type) bool {
+	switch t {
+	case Int, Int8, Int16, Int32, Int64, Float32, Float64:
+		return true
+	default:
+		return false
+	}
+}
+
+func isArithmeticFloatLike(t Type) bool { return isRelationalFloatLike(t) }
+
+func isUnsignedScalar(t Type) bool {
+	switch t {
+	case Uint, Uint8, Uint16, Uint32, Uint64, Uintptr:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Checker) targetIntBits() int {
+	if c.options.Target.IntBits != 0 {
+		return c.options.Target.IntBits
+	}
+	return strconv.IntSize
+}
+
+func (c *Checker) targetUintBits() int {
+	if c.options.Target.UintBits != 0 {
+		return c.options.Target.UintBits
+	}
+	return c.targetIntBits()
+}
+
+func (c *Checker) targetUintptrBits() int {
+	if c.options.Target.UintptrBits != 0 {
+		return c.options.Target.UintptrBits
+	}
+	return c.targetIntBits()
+}
+
+func unsignedMax(bits int) *big.Int {
+	if bits <= 0 {
+		bits = strconv.IntSize
+	}
+	return new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(bits)), big.NewInt(1))
+}
+
+func (c *Checker) uintLiteralFitsType(value *big.Int, t Type) bool {
+	if value.Sign() < 0 {
+		return false
+	}
+	switch t {
+	case Uint:
+		return value.Cmp(unsignedMax(c.targetUintBits())) <= 0
+	case Uintptr:
+		return value.Cmp(unsignedMax(c.targetUintptrBits())) <= 0
+	case Uint64:
+		return value.Cmp(unsignedMax(64)) <= 0
+	case Uint8:
+		return value.Cmp(big.NewInt(math.MaxUint8)) <= 0
+	case Uint16:
+		return value.Cmp(big.NewInt(math.MaxUint16)) <= 0
+	case Uint32:
+		return value.Cmp(big.NewInt(math.MaxUint32)) <= 0
+	default:
+		return false
+	}
+}
+
+func (c *Checker) intLiteralFitsType(value int64, t Type) bool {
+	switch t {
+	case Int:
+		bits := c.targetIntBits()
+		if bits <= 0 {
+			bits = strconv.IntSize
+		}
+		if bits >= 64 {
+			return true
+		}
+		min := -(int64(1) << (bits - 1))
+		max := (int64(1) << (bits - 1)) - 1
+		return value >= min && value <= max
+	case Int64:
+		return true
+	case Int8:
+		return value >= math.MinInt8 && value <= math.MaxInt8
+	case Int16:
+		return value >= math.MinInt16 && value <= math.MaxInt16
+	case Int32, Rune:
+		return value >= math.MinInt32 && value <= math.MaxInt32
+	case Uint, Uint64, Uintptr:
+		return value >= 0
+	case Uint8, Byte:
+		return value >= 0 && value <= math.MaxUint8
+	case Uint16:
+		return value >= 0 && value <= math.MaxUint16
+	case Uint32:
+		return value >= 0 && value <= math.MaxUint32
+	default:
+		return false
+	}
+}
+
 func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expression {
+	if literal := c.checkNumericLiteralAs(expr, expectedType); literal != nil {
+		return literal
+	}
 	switch s := (expr).(type) {
 	case *parse.MatchExpression:
 		return c.withExpectedExpr(expectedType, func() Expression {
@@ -7216,40 +7456,40 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 	// Build the appropriate comparison node based on operator and type
 	switch op {
 	case parse.GreaterThan:
-		if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+		if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 			return &IntGreater{left, right}
 		}
-		if left.Type() == Float64 {
+		if isRelationalFloatLike(left.Type()) {
 			return &FloatGreater{left, right}
 		}
 		c.addError("The '>' operator can only be used for Int or Float64", leftExpr.GetLocation())
 		return nil
 
 	case parse.GreaterThanOrEqual:
-		if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+		if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 			return &IntGreaterEqual{left, right}
 		}
-		if left.Type() == Float64 {
+		if isRelationalFloatLike(left.Type()) {
 			return &FloatGreaterEqual{left, right}
 		}
 		c.addError("The '>=' operator can only be used for Int or Float64", leftExpr.GetLocation())
 		return nil
 
 	case parse.LessThan:
-		if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+		if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 			return &IntLess{left, right}
 		}
-		if left.Type() == Float64 {
+		if isRelationalFloatLike(left.Type()) {
 			return &FloatLess{left, right}
 		}
 		c.addError("The '<' operator can only be used for Int or Float64", leftExpr.GetLocation())
 		return nil
 
 	case parse.LessThanOrEqual:
-		if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+		if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 			return &IntLessEqual{left, right}
 		}
-		if left.Type() == Float64 {
+		if isRelationalFloatLike(left.Type()) {
 			return &FloatLessEqual{left, right}
 		}
 		c.addError("The '<=' operator can only be used for Int or Float64", leftExpr.GetLocation())

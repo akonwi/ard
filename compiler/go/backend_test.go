@@ -283,7 +283,7 @@ func TestLowerExprQualifiesCrossModuleUnionWrapAndMatchInModulePackageMode(t *te
 		},
 	}
 	l := &lowerer{program: program, currentModule: 1, currentImports: map[string]string{}, useModulePackages: true, declaredLocals: map[air.LocalID]bool{}}
-	wrap, err := l.lowerExpr(air.Function{Module: 1}, air.Expr{Kind: air.ExprUnionWrap, Type: 3, Tag: 0, Target: &air.Expr{Kind: air.ExprConstInt, Type: 1, Int: 7}})
+	wrap, err := l.lowerExpr(air.Function{Module: 1}, air.Expr{Kind: air.ExprUnionWrap, Type: 3, Tag: 0, Target: &air.Expr{Kind: air.ExprConstInt, Type: 1, Int: "7"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestLowerExprQualifiesCrossModuleUnionWrapAndMatchInModulePackageMode(t *te
 			Local: 1,
 			Body:  air.Block{Result: &air.Expr{Kind: air.ExprLoadLocal, Type: 1, Local: 1}},
 		}},
-		CatchAll: air.Block{Result: &air.Expr{Kind: air.ExprConstInt, Type: 1, Int: 0}},
+		CatchAll: air.Block{Result: &air.Expr{Kind: air.ExprConstInt, Type: 1, Int: "0"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1038,6 +1038,22 @@ func TestRunProgramExecutesGoSliceFunctionCalls(t *testing.T) {
 			if parts.size() != 2 or parts.at(0) != "a" {
 				panic("bad split")
 			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramExecutesGoPrimitiveScalarFunction(t *testing.T) {
+	program := lowerSource(t, `
+		use go:fmt
+		use go:math
+
+		fn main() {
+			let bits: Uint32 = math::Float32bits(1.5)
+			try fmt::Println(bits) -> err { panic(err) }
 		}
 	`)
 

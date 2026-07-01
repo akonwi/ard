@@ -575,7 +575,7 @@ type IntAddition struct {
 }
 
 func (n *IntAddition) Type() Type {
-	return Int
+	return n.Left.Type()
 }
 
 type IntSubtraction struct {
@@ -584,7 +584,7 @@ type IntSubtraction struct {
 }
 
 func (n *IntSubtraction) Type() Type {
-	return Int
+	return n.Left.Type()
 }
 
 type IntMultiplication struct {
@@ -593,7 +593,7 @@ type IntMultiplication struct {
 }
 
 func (n *IntMultiplication) Type() Type {
-	return Int
+	return n.Left.Type()
 }
 
 type IntDivision struct {
@@ -602,7 +602,7 @@ type IntDivision struct {
 }
 
 func (n *IntDivision) Type() Type {
-	return Int
+	return n.Left.Type()
 }
 
 type IntModulo struct {
@@ -611,7 +611,7 @@ type IntModulo struct {
 }
 
 func (n *IntModulo) Type() Type {
-	return Int
+	return n.Left.Type()
 }
 
 type IntGreater struct {
@@ -656,7 +656,7 @@ type FloatAddition struct {
 }
 
 func (n *FloatAddition) Type() Type {
-	return Float64
+	return n.Left.Type()
 }
 
 type Match struct {
@@ -869,7 +869,7 @@ type FloatSubtraction struct {
 }
 
 func (n *FloatSubtraction) Type() Type {
-	return Float64
+	return n.Left.Type()
 }
 
 type FloatMultiplication struct {
@@ -878,7 +878,7 @@ type FloatMultiplication struct {
 }
 
 func (n *FloatMultiplication) Type() Type {
-	return Float64
+	return n.Left.Type()
 }
 
 type FloatDivision struct {
@@ -887,7 +887,7 @@ type FloatDivision struct {
 }
 
 func (n *FloatDivision) Type() Type {
-	return Float64
+	return n.Left.Type()
 }
 
 type FloatGreater struct {

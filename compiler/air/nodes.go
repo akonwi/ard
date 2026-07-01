@@ -149,8 +149,8 @@ type Expr struct {
 	Kind ExprKind
 	Type TypeID
 
-	Int   int
-	Float float64
+	Int   string
+	Float string
 	Bool  bool
 	Str   string
 

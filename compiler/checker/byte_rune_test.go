@@ -47,11 +47,8 @@ let same = slash == '/'`,
 			},
 		},
 		{
-			name:  "byte and rune are not implicit ints",
+			name:  "integer literals can contextually type as byte",
 			input: `let b: Byte = 65`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Byte, got Int"},
-			},
 		},
 		{
 			name:  "split method is removed from primitive str",

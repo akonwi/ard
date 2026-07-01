@@ -125,6 +125,28 @@ func typeFromGo(t types.Type) (Type, string) {
 		return Str, ""
 	case types.Int:
 		return Int, ""
+	case types.Int8:
+		return Int8, ""
+	case types.Int16:
+		return Int16, ""
+	case types.Int32:
+		return Int32, ""
+	case types.Int64:
+		return Int64, ""
+	case types.Uint:
+		return Uint, ""
+	case types.Uint8:
+		return Uint8, ""
+	case types.Uint16:
+		return Uint16, ""
+	case types.Uint32:
+		return Uint32, ""
+	case types.Uint64:
+		return Uint64, ""
+	case types.Uintptr:
+		return Uintptr, ""
+	case types.Float32:
+		return Float32, ""
 	case types.Float64:
 		return Float64, ""
 	}

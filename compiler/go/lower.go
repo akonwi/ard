@@ -1595,9 +1595,9 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 	case air.ExprConstVoid:
 		return loweredExpr{expr: l.voidValueExpr()}, nil
 	case air.ExprConstInt:
-		return loweredExpr{expr: &ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", expr.Int)}}, nil
+		return loweredExpr{expr: &ast.BasicLit{Kind: token.INT, Value: expr.Int}}, nil
 	case air.ExprConstFloat:
-		return loweredExpr{expr: &ast.BasicLit{Kind: token.FLOAT, Value: fmt.Sprintf("%v", expr.Float)}}, nil
+		return loweredExpr{expr: &ast.BasicLit{Kind: token.FLOAT, Value: expr.Float}}, nil
 	case air.ExprConstBool:
 		if expr.Bool {
 			return loweredExpr{expr: ast.NewIdent("true")}, nil
@@ -2840,7 +2840,7 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 	}
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
-	case air.TypeInt, air.TypeByte, air.TypeRune, air.TypeEnum:
+	case air.TypeInt, air.TypeScalar, air.TypeByte, air.TypeRune, air.TypeEnum:
 		return &ast.BasicLit{Kind: token.INT, Value: "0"}, nil
 	case air.TypeFloat64:
 		return &ast.BasicLit{Kind: token.FLOAT, Value: "0"}, nil
@@ -2941,6 +2941,35 @@ func (l *lowerer) modulePathForType(typeID air.TypeID) string {
 	return ""
 }
 
+func goScalarTypeName(name string) string {
+	switch name {
+	case "Int8":
+		return "int8"
+	case "Int16":
+		return "int16"
+	case "Int32":
+		return "int32"
+	case "Int64":
+		return "int64"
+	case "Uint":
+		return "uint"
+	case "Uint8":
+		return "uint8"
+	case "Uint16":
+		return "uint16"
+	case "Uint32":
+		return "uint32"
+	case "Uint64":
+		return "uint64"
+	case "Uintptr":
+		return "uintptr"
+	case "Float32":
+		return "float32"
+	default:
+		return name
+	}
+}
+
 func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 	if !validTypeID(l.program, typeID) {
 		return nil, fmt.Errorf("invalid type id %d", typeID)
@@ -2951,6 +2980,8 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return l.voidTypeExpr(), nil
 	case air.TypeInt:
 		return ast.NewIdent("int"), nil
+	case air.TypeScalar:
+		return ast.NewIdent(goScalarTypeName(info.Name)), nil
 	case air.TypeByte:
 		return ast.NewIdent("byte"), nil
 	case air.TypeRune:
@@ -6233,7 +6264,7 @@ func (l *lowerer) isBuiltinToStringTraitCall(expr air.Expr, typeID air.TypeID) b
 		return false
 	}
 	switch l.program.Types[typeID-1].Kind {
-	case air.TypeInt, air.TypeFloat64, air.TypeBool, air.TypeByte, air.TypeRune, air.TypeStr:
+	case air.TypeInt, air.TypeScalar, air.TypeFloat64, air.TypeBool, air.TypeByte, air.TypeRune, air.TypeStr:
 		return true
 	default:
 		return false

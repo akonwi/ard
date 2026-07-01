@@ -360,6 +360,53 @@ func (i *_int) hasTrait(trait *Trait) bool {
 
 var Int = &_int{}
 
+type scalarType struct {
+	name string
+}
+
+func (s *scalarType) String() string { return s.name }
+func (s *scalarType) get(name string) Type {
+	switch name {
+	case "to_str":
+		return &FunctionDef{Name: name, Parameters: []Parameter{}, ReturnType: Str}
+	default:
+		return nil
+	}
+}
+func (s *scalarType) equal(other Type) bool {
+	if s == other {
+		return true
+	}
+	if typeVar, ok := other.(*TypeVar); ok {
+		if typeVar.actual == nil {
+			return true
+		}
+		return s.equal(typeVar.actual)
+	}
+	if union, ok := other.(*Union); ok {
+		return union.equal(s)
+	}
+	if trait, ok := other.(*Trait); ok {
+		return s.hasTrait(trait)
+	}
+	return false
+}
+func (s *scalarType) hasTrait(trait *Trait) bool { return trait.name() == "ToString" }
+
+var (
+	Int8    = &scalarType{name: "Int8"}
+	Int16   = &scalarType{name: "Int16"}
+	Int32   = &scalarType{name: "Int32"}
+	Int64   = &scalarType{name: "Int64"}
+	Uint    = &scalarType{name: "Uint"}
+	Uint8   = &scalarType{name: "Uint8"}
+	Uint16  = &scalarType{name: "Uint16"}
+	Uint32  = &scalarType{name: "Uint32"}
+	Uint64  = &scalarType{name: "Uint64"}
+	Uintptr = &scalarType{name: "Uintptr"}
+	Float32 = &scalarType{name: "Float32"}
+)
+
 type float struct{}
 
 func (f float) String() string { return "Float64" }

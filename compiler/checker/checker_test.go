@@ -434,7 +434,7 @@ func TestUnaryExpressions(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{
 					Kind:    checker.Error,
-					Message: "Only numbers can be negated with '-'",
+					Message: "Only signed numbers can be negated with '-'",
 				},
 			},
 		},
@@ -687,7 +687,7 @@ func TestIntMath(t *testing.T) {
 			name:  "Modulo Floats",
 			input: "10.0 % 3.0",
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "The '%' operator can only be used for Int"},
+				{Kind: checker.Error, Message: "The '%' operator can only be used for integer scalars"},
 			},
 		},
 		{
