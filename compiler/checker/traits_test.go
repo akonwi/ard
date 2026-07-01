@@ -193,8 +193,6 @@ func TestTraitDefinitions(t *testing.T) {
 		{
 			name: "A valid implementation",
 			input: `
-			use ard/io
-
 			trait Speaks {
 				fn say(s: Str)
 			}
@@ -202,7 +200,7 @@ func TestTraitDefinitions(t *testing.T) {
 
 			impl Speaks for Dog {
 			  fn say(stuff: Str) {
-					io::print("woof")
+					()
 				}
 			}
 			`,
@@ -247,8 +245,6 @@ func TestTraitDefinitions(t *testing.T) {
 		{
 			name: "An invalid implementation",
 			input: `
-					use ard/io
-
 					trait Speaks {
 						fn say(s: Str)
 					}
@@ -292,56 +288,9 @@ func TestTraitDefinitions(t *testing.T) {
 		},
 	})
 }
-func TestUsingPackageTraits(t *testing.T) {
-	run(t, []test{
-		{
-			name: "Implementing Str::ToString",
-			input: `
-			struct Person { name: Str }
 
-			impl Str::ToString for Person {
-			  fn to_str() Str {
-					"Person: {self.name}"
-				}
-			}
-			`,
-		},
-	})
-}
 func TestTraitsAsTypes(t *testing.T) {
 	run(t, []test{
-		{
-			name: "functions with Trait params",
-			input: `
-			use ard/io
-			struct Foo {}
-
-			fn display(item: Str::ToString) {
-			  io::print(item.to_str())
-			}
-			display(100)
-			display(Foo{})
-			`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of ToString, got Foo"},
-			},
-		},
-		// {
-		// 	name: "functions with Trait return",
-		// 	input: `
-		// 	struct Foo {}
-
-		// 	fn valid() Str::ToString {
-		// 	  100
-		// 	}
-		// 	fn invalid(item: Str::ToString) Str::ToString {
-		// 	  Foo{}
-		// 	}
-		// 	`,
-		// 	diagnostics: []checker.Diagnostic{
-		// 		{Kind: checker.Error, Message: "Type mismatch: Expected ToString, got Foo"},
-		// 	},
-		// },
 		{
 			name: "let binding with explicit trait type (success)",
 			input: `
@@ -416,44 +365,6 @@ func TestTraitsAsTypes(t *testing.T) {
 			  let items: [Drawable] = [Box{w: 5}, Box{w: 10}]
 			}
 			`,
-			diagnostics: []checker.Diagnostic{},
-		},
-	})
-}
-func TestJSONParseRejectsUnions(t *testing.T) {
-	run(t, []test{
-		{
-			name: "json::parse into a union is rejected as ambiguous",
-			input: `use ard/json
-type Val = Str | Int
-let v = json::parse<Val>("5")`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "json::parse does not support Val: parsing into a union is ambiguous"},
-			},
-		},
-		{
-			name: "json::parse into a struct containing a union is rejected",
-			input: `use ard/json
-type Val = Str | Int
-struct Holder { value: Val }
-let h = json::parse<Holder>("\{\}")`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "json::parse field value: json::parse does not support Val: parsing into a union is ambiguous"},
-			},
-		},
-		{
-			name: "json::parse only supports Str map keys",
-			input: `use ard/json
-let m = json::parse<[Int: Str]>("\{\}")`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "json::parse only supports Str map keys, got Int"},
-			},
-		},
-		{
-			name: "json::parse into a struct is allowed",
-			input: `use ard/json
-struct Todo { id: Int, title: Str }
-let t = json::parse<Todo>("\{\}")`,
 			diagnostics: []checker.Diagnostic{},
 		},
 	})

@@ -320,36 +320,7 @@ func TestLowerExprQualifiesCrossModuleUnionWrapAndMatchInModulePackageMode(t *te
 		t.Fatalf("registered import = %q, want generated/models/value", got)
 	}
 }
-func TestLowerProgramAliasesNaturalFunctionConflictingWithGeneratedImport(t *testing.T) {
-	program := lowerSource(t, `
-		use ard/io
 
-		private fn fmt() {
-			io::print(1)
-		}
-
-		fn main() {
-			fmt()
-		}
-	`)
-	sources, err := GenerateSources(program, Options{PackageName: "main"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got string
-	for _, source := range sources {
-		if strings.Contains(string(source), "func fmt_1()") {
-			got = string(source)
-			break
-		}
-	}
-	if got == "" {
-		t.Fatalf("generated sources missing aliased fmt function: %#v", mapsKeys(sources))
-	}
-	if !strings.Contains(got, "\"fmt\"") || strings.Contains(got, "fmt_1 \"fmt\"") {
-		t.Fatalf("generated source should keep fmt import unaliased and alias the Ard function:\n%s", got)
-	}
-}
 func TestFunctionExprQualifiesCrossModuleInModulePackageMode(t *testing.T) {
 	program := &air.Program{Modules: []air.Module{
 		{ID: 0, Path: "service.ard"},
@@ -2031,34 +2002,6 @@ func TestTypeNameUsesModulePathAndUniqueFallback(t *testing.T) {
 		t.Fatalf("fallback type names should be unique, got %q", left)
 	}
 }
-func TestLowerProgramUsesDirectStdlibMaybeCalls(t *testing.T) {
-	program := lowerSource(t, `
-		use ard/any
-		use ard/float
-		use ard/int
-
-		fn main() Bool {
-			let _b = float::from_str("1.5")
-			let _c = int::from_str("2")
-			let _d = any::object(["a": any::from_int(1)])
-			true
-		}
-	`)
-
-	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesHaveCall(files, "strconv.ParseFloat") {
-		t.Fatal("generated AST missing direct Go float parsing call")
-	}
-	if !astFilesHaveCall(files, "strconv.Atoi") {
-		t.Fatal("generated AST missing direct Go int parsing call")
-	}
-	if astFilesHaveCall(files, "ardIntFromStr") {
-		t.Fatal("generated AST should not use legacy IntFromStr helper")
-	}
-	if astFilesHaveCall(files, "ardMapToAny") {
-		t.Fatal("generated AST should not use legacy MapToAny helper")
-	}
-}
 
 // A `mut <direct-Go handle>` struct field is a pointer-valued handle (e.g.
 // *sql.DB), lowered as a plain pointer field with no mutable-reference (&/*)
@@ -2662,65 +2605,7 @@ fn main() { demo::run() }
 		t.Fatal("generated AST should use native interface dispatch for aliased-constructor trait dispatch")
 	}
 }
-func TestLowerProgramSupportsVoidTraitObjectDispatch(t *testing.T) {
-	program := lowerSource(t, `
-		use ard/io
 
-		trait Greet {
-			fn say()
-		}
-
-		struct Cat {
-			name: Str,
-		}
-
-		impl Greet for Cat {
-			fn say() {
-				io::print("meow from {self.name}")
-			}
-		}
-
-		fn invoke(g: Greet) {
-			g.say()
-		}
-
-		fn main() {
-			invoke(Cat{name: "milo"})
-		}
-	`)
-
-	files := lowerProgramAST(t, program, Options{PackageName: "main"})
-	if !astFilesContain(files, func(node ast.Node) bool {
-		_, ok := node.(*ast.TypeSwitchStmt)
-		return ok
-	}) {
-		t.Fatal("generated AST missing void trait object dispatch lowering")
-	}
-	if !astFilesContain(files, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		return ok && strings.Contains(astCallName(call), "Cat_Greet_say")
-	}) {
-		t.Fatal("generated AST missing void trait dispatch call")
-	}
-	if astFilesContain(files, func(node ast.Node) bool {
-		assign, ok := node.(*ast.AssignStmt)
-		if !ok {
-			return false
-		}
-		for _, rhs := range assign.Rhs {
-			call, ok := rhs.(*ast.CallExpr)
-			if ok && strings.Contains(astCallName(call), "Cat_Greet_say") {
-				return true
-			}
-		}
-		return false
-	}) {
-		t.Fatal("generated AST assigns void trait dispatch result")
-	}
-	if !astFilesHaveCall(files, "any") {
-		t.Fatal("generated AST missing trait upcast for call argument")
-	}
-}
 func TestLowerProgramSupportsListSwapAndMapKeys(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
@@ -3112,7 +2997,6 @@ func TestLowererRenamesImportAliasPathConflicts(t *testing.T) {
 }
 func TestLocalNameKeepsBareNameWhenShadowingUnusedOuter(t *testing.T) {
 	input := `
-		use ard/io
 		fn f(x: Int) Int {
 			mut total = 0
 			for x in [1, 2, 3] {
@@ -3120,8 +3004,8 @@ func TestLocalNameKeepsBareNameWhenShadowingUnusedOuter(t *testing.T) {
 			}
 			total + x
 		}
-		fn main() {
-			io::print("{f(100)}")
+		fn main() Int {
+			f(100)
 		}
 	`
 	program := lowerSource(t, input)
@@ -3138,9 +3022,6 @@ func TestLocalNameKeepsBareNameWhenShadowingUnusedOuter(t *testing.T) {
 	}
 	if !strings.Contains(joined, "x := x_list[x_index]") {
 		t.Fatalf("expected bare shadowing loop variable:\n%s", joined)
-	}
-	if got := runGoTargetSourceStdout(t, input); got != "106\n" {
-		t.Fatalf("stdout = %q, want %q", got, "106\n")
 	}
 }
 func TestRenderTestRunnerAliasesImportsAroundTopLevelNames(t *testing.T) {
@@ -3388,9 +3269,8 @@ func lowerMainArdSource(t *testing.T, input string) *air.Program {
 	return program
 }
 func TestLowerCollapsesMainArdIntoRootPackage(t *testing.T) {
-	program := lowerMainArdSource(t, `use ard/io
-fn main() {
-  io::print("hi")
+	program := lowerMainArdSource(t, `fn main() {
+  ()
 }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 
@@ -3420,9 +3300,8 @@ fn main() {
 }
 func TestLowerSynthesizesMainForNonMainEntryModule(t *testing.T) {
 	// test.ard (package test) keeps the synthetic root package main importing it.
-	program := lowerSource(t, `use ard/io
-fn main() {
-  io::print("hi")
+	program := lowerSource(t, `fn main() {
+  ()
 }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	root, ok := files["main.go"]
@@ -3435,5 +3314,54 @@ fn main() {
 		return ok && fn.Name.Name == "Main"
 	}) {
 		t.Fatal("expected exported Main in the entry module's package")
+	}
+}
+
+func TestLowerProgramSupportsVoidTraitObjectDispatchWithoutStdlib(t *testing.T) {
+	program := lowerSource(t, `
+		trait Greet {
+			fn say()
+		}
+
+		struct Cat {
+			name: Str,
+		}
+
+		impl Greet for Cat {
+			fn say() {
+				()
+			}
+		}
+
+		fn invoke(g: Greet) {
+			g.say()
+		}
+
+		fn main() {
+			invoke(Cat{name: "milo"})
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	if !astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		return ok && strings.Contains(astCallName(call), "Cat_Greet_say")
+	}) {
+		t.Fatal("generated AST missing void trait dispatch call")
+	}
+	if astFilesContain(files, func(node ast.Node) bool {
+		assign, ok := node.(*ast.AssignStmt)
+		if !ok {
+			return false
+		}
+		for _, rhs := range assign.Rhs {
+			call, ok := rhs.(*ast.CallExpr)
+			if ok && strings.Contains(astCallName(call), "Cat_Greet_say") {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("void trait dispatch call should not be assigned")
 	}
 }

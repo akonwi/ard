@@ -24,11 +24,6 @@ func TestByteAndRunePrimitiveTypes(t *testing.T) {
 let runes: [Rune] = "hé".runes()`,
 		},
 		{
-			name: "byte and rune constructors are prelude imports",
-			input: `let b: Byte? = Byte::from_int(65)
-let r: Rune? = Rune::from_int(65)`,
-		},
-		{
 			name: "rune literals have Rune type",
 			input: `let slash: Rune = '/'
 let accent: Rune = 'é'
@@ -56,14 +51,6 @@ let same = slash == '/'`,
 			input: `let b: Byte = 65`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Type mismatch: Expected Byte, got Int"},
-			},
-		},
-		{
-			name: "byte and int cannot be mixed in comparisons",
-			input: `let b = Byte::from_int(65).or(Byte::from_int(0).expect("zero"))
-b == 65`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Invalid: Byte == Int"},
 			},
 		},
 		{

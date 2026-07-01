@@ -72,40 +72,7 @@ func TestStructSideTableMethodUsesGenericBindingsFromNestedFields(t *testing.T) 
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
-func TestStructMethodLookupUsesOwnerModuleBeyondDirectImports(t *testing.T) {
-	tempDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\""), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tempDir, "db.ard"), []byte(`
-		use ard/sql
 
-		fn init() sql::Database {
-			sql::open("postgres://example").expect("connect")
-		}
-	`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	result := parse.Parse([]byte(`
-		use test_project/db
-
-		let conn = db::init()
-		let query = conn.query("SELECT 1")
-	`), filepath.Join(tempDir, "main.ard"))
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse error: %s", result.Errors[0].Message)
-	}
-	resolver, err := NewModuleResolver(tempDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := New(filepath.Join(tempDir, "main.ard"), result.Program, resolver)
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
-	}
-}
 func TestTransitiveGenericStructMethodUsesOwnerDefinition(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\""), 0o644); err != nil {

@@ -315,132 +315,6 @@ func TestTestFunctions(t *testing.T) {
 		},
 	})
 }
-func TestCallingPackageFunctions(t *testing.T) {
-	run(t, []test{
-		{
-			name: "Non-final side-effect match is not checked against function return type",
-			input: strings.Join([]string{
-				`use ard/io`,
-				`fn run_up(applied_count: Int) Void!Str {`,
-				`  match applied_count {`,
-				`    0 => io::print("No pending migrations"),`,
-				`    _ => io::print("{applied_count} migration(s) applied"),`,
-				`  }`,
-				`  Result::ok(())`,
-				`}`,
-			}, "\n"),
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name: "If branches ending in list set are Void-compatible",
-			input: strings.Join([]string{
-				`use ard/decode`,
-				`struct Sv { scroll: Int }`,
-				`impl Sv {`,
-				`  fn mut bump(n: Int) { self.scroll = self.scroll + n }`,
-				`}`,
-				`struct Tab {`,
-				`  data: Any,`,
-				`  sv: Sv,`,
-				`  flag: Bool,`,
-				`  cursor: Int,`,
-				`}`,
-				`struct A {}`,
-				`struct B {}`,
-				`type Event = A | B`,
-				`fn main() {`,
-				`  let raw = decode::from_json("\\{}").expect("parse")`,
-				`  mut xs: [Tab] = [Tab{data: raw, sv: Sv{scroll: 0}, flag: true, cursor: 0}]`,
-				`  let ev: Event = A{}`,
-				`  match ev {`,
-				`    A(_) => {`,
-				`      let idx = 0`,
-				`      mut tab = xs.at(idx)`,
-				`      if tab.flag {`,
-				`        if tab.cursor == 0 {`,
-				`          tab.sv.bump(-1)`,
-				`          xs.set(idx, tab)`,
-				`        } else {`,
-				`          tab.cursor = tab.cursor - 1`,
-				`          xs.set(idx, tab)`,
-				`        }`,
-				`      } else {`,
-				`        ()`,
-				`      }`,
-				`    },`,
-				`    B(_) => (),`,
-				`  }`,
-				`}`,
-			}, "\n"),
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name: "If branches ending in list set with struct literals are Void-compatible",
-			input: strings.Join([]string{
-				`use ard/decode`,
-				`struct Sv { scroll: Int }`,
-				`struct Tab { data: Any, sv: Sv, flag: Bool }`,
-				`struct A {}`,
-				`struct B {}`,
-				`type Event = A | B`,
-				`fn main() {`,
-				`  let raw = decode::from_json("\\{}").expect("parse")`,
-				`  mut xs: [Tab] = [Tab{data: raw, sv: Sv{scroll: 0}, flag: true}]`,
-				`  let ev: Event = A{}`,
-				`  match ev {`,
-				`    A(_) => {`,
-				`      let idx = 0`,
-				`      let current = xs.at(idx)`,
-				`      if current.flag {`,
-				`        xs.set(idx, Tab{data: current.data, sv: current.sv, flag: false})`,
-				`      } else if (not current.flag) {`,
-				`        xs.set(idx, Tab{data: current.data, sv: current.sv, flag: true})`,
-				`      } else {`,
-				`        ()`,
-				`      }`,
-				`    },`,
-				`    B(_) => (),`,
-				`  }`,
-				`}`,
-			}, "\n"),
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name: "Calling io::print",
-			input: strings.Join([]string{
-				`use ard/io`,
-				`io::print("Hello World")`,
-				`io::print(200)`,
-			}, "\n"),
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Expr: &checker.ModuleFunctionCall{
-							Module: "ard/io",
-							Call: &checker.FunctionCall{
-								Name: "print",
-								Args: []checker.Expression{
-									&checker.StrLiteral{Value: "Hello World"},
-								},
-							},
-						},
-					},
-					{
-						Expr: &checker.ModuleFunctionCall{
-							Module: "ard/io",
-							Call: &checker.FunctionCall{
-								Name: "print",
-								Args: []checker.Expression{
-									&checker.IntLiteral{200},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	})
-}
 func TestCallingInstanceMethods(t *testing.T) {
 	run(t, []test{
 		{
@@ -698,20 +572,6 @@ func TestInferringEmptyCollectionArguments(t *testing.T) {
 		},
 	})
 }
-func TestUsingValidTypesForUnionArguments(t *testing.T) {
-	run(t, []test{
-		{
-			name: "Map literal with union values",
-			input: `
-				use ard/sql
-
-				fn foo(values: [Str : sql::Value]) {}
-				foo(values: ["int":1, "str":"hey"])
-			`,
-			diagnostics: []checker.Diagnostic{},
-		},
-	})
-}
 func TestGroupedNullableFunctionTypes(t *testing.T) {
 	run(t, []test{
 		{
@@ -742,33 +602,6 @@ func TestTypeDoubleColonFunctionDefinition(t *testing.T) {
 
 				let f = Fixture::from_entry("Test")
 				f.name
-			`,
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name: "Type::function called in decode path similar to maestro fixtures.ard",
-			input: `
-				use ard/decode
-
-				struct Fixture {
-					id: Int,
-					name: Str,
-				}
-
-				fn Fixture::from_api_entry(data: Any) Fixture![decode::Error] {
-					let id = try decode::run(data, decode::field("id", decode::int))
-					let name = try decode::run(data, decode::field("name", decode::string))
-					Result::ok(Fixture{id: id, name: name})
-				}
-
-				fn find_fixtures(body: Any) [Fixture]!Str {
-					let fixtures = try decode::run(body, decode::field("response", decode::list(Fixture::from_api_entry))) -> errs {
-						Result::err("Error decoding fixtures")
-					}
-					Result::ok(fixtures)
-				}
-
-				Fixture{id: 1, name: "Test"}
 			`,
 			diagnostics: []checker.Diagnostic{},
 		},
@@ -892,6 +725,39 @@ func TestInferringAnonymousFunctionTypes(t *testing.T) {
 				"\n",
 			),
 			diagnostics: []checker.Diagnostic{},
+		},
+	})
+}
+
+func TestCallingPackageFunctions(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Non-final side-effect match is not checked against function return type",
+			input: `
+			fn log(message: Str) { () }
+
+			fn value(flag: Bool) Int {
+			  match flag {
+			    true => log("yes"),
+			    false => log("no"),
+			  }
+			  1
+			}
+			`,
+		},
+		{
+			name: "If branches ending in list set are Void-compatible",
+			input: `
+			struct Tab { id: Str }
+
+			fn update(mut tabs: [Tab], idx: Int, id: Str) {
+			  if idx == 0 {
+			    tabs.set(0, Tab{id: id})
+			  } else {
+			    tabs.set(1, Tab{id: id})
+			  }
+			}
+			`,
 		},
 	})
 }

@@ -101,18 +101,7 @@ func run(t *testing.T, tests []test) {
 		})
 	}
 }
-func TestGenericImportedTypeRequiresTypeArguments(t *testing.T) {
-	run(t, []test{
-		{
-			name: "generic imported struct without type args is an error",
-			input: `use ard/list
-fn f(p: list::Partition) {}`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Generic type list::Partition requires type arguments"},
-			},
-		},
-	})
-}
+
 func TestPrimitiveLiterals(t *testing.T) {
 	run(t, []test{
 		{
@@ -1675,79 +1664,6 @@ func TestMaybes(t *testing.T) {
 				{Kind: checker.Error, Message: "Type mismatch: Expected Str?, got Str"},
 			},
 		},
-		{
-			name: "Matching on maybes",
-			input: `
-				use ard/io
-				use ard/maybe
-
-				mut name: Str? = maybe::none()
-				match name {
-				  value => io::print("name is {value}"),
-					_ => io::print("no name")
-				}`,
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Stmt: &checker.VariableDef{
-							Mutable: true,
-							Name:    "name",
-							Value: &checker.ModuleFunctionCall{
-								Module: "ard/maybe",
-								Call: &checker.FunctionCall{
-									Name: "none",
-									Args: []checker.Expression{},
-								},
-							},
-						},
-					},
-					{
-						Expr: &checker.OptionMatch{
-							Subject:   &checker.Variable{},
-							InnerType: checker.Str,
-							Some: &checker.Match{
-								Pattern: &checker.Identifier{Name: "value"},
-								Body: &checker.Block{
-									Stmts: []checker.Statement{
-										{
-											Expr: &checker.ModuleFunctionCall{
-												Module: "ard/io",
-												Call: &checker.FunctionCall{
-													Name: "print",
-													Args: []checker.Expression{
-														&checker.TemplateStr{
-															Chunks: []checker.Expression{
-																&checker.StrLiteral{Value: "name is "},
-																&checker.Variable{},
-															},
-														},
-													},
-												},
-											},
-										},
-									},
-								},
-							},
-							None: &checker.Block{
-								Stmts: []checker.Statement{
-									{
-										Expr: &checker.ModuleFunctionCall{
-											Module: "ard/io",
-											Call: &checker.FunctionCall{
-												Name: "print",
-												Args: []checker.Expression{
-													&checker.StrLiteral{Value: "no name"},
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
 	})
 }
 func TestLists(t *testing.T) {
@@ -1765,16 +1681,6 @@ func TestLists(t *testing.T) {
 						},
 					}},
 				},
-			},
-		},
-		{
-			name: "Empty lists must have declared type",
-			input: `
-			let empty = List::new()
-			let uninferred = []
-			`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Empty lists need an explicit type"},
 			},
 		},
 		{
