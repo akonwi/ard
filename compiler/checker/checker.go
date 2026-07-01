@@ -826,7 +826,14 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			break
 		}
 		if ty.Type.Target != nil {
-			mod := c.resolveModule(ty.Type.Target.(*parse.Identifier).Name)
+			targetName := ty.Type.Target.(*parse.Identifier).Name
+			if goPkg := c.program.GoImports[targetName]; goPkg != nil {
+				if goType := goPkg.Types[ty.Type.Property.(*parse.Identifier).Name]; goType != nil {
+					baseType = goType
+					break
+				}
+			}
+			mod := c.resolveModule(targetName)
 			if mod != nil {
 				// at some point, this will need to unwrap the property down to root for nested paths: `mod::sym::more`
 				sym := mod.Get(ty.Type.Property.(*parse.Identifier).Name)
@@ -6220,7 +6227,11 @@ func (c *Checker) checkNumericLiteralAs(expr parse.Expression, expected Type) Ex
 }
 
 func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Type, negative bool) Expression {
-	if expected == nil || (!isIntegerScalar(expected) && expected != Float32 && expected != Float64) {
+	literalType := expected
+	if foreign, ok := expected.(*ForeignType); ok {
+		literalType = foreign.Underlying
+	}
+	if expected == nil || (!isIntegerScalar(literalType) && literalType != Float32 && literalType != Float64) {
 		return nil
 	}
 	literalText := num.Value
@@ -6234,28 +6245,31 @@ func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Ty
 			c.addError(fmt.Sprintf("Invalid float: %s", num.Value), num.GetLocation())
 			return nil
 		}
-		if expected == Float64 {
+		if literalType == Float64 {
+			if expected != literalType {
+				return &TypedFloatLiteral{Value: value, Text: clean, Typed: expected}
+			}
 			return &FloatLiteral{Value: value}
 		}
-		if expected == Float32 {
+		if literalType == Float32 {
 			float32Value, err := strconv.ParseFloat(clean, 32)
 			if err != nil {
 				c.addError(fmt.Sprintf("Float literal %s overflows Float32", num.Value), num.GetLocation())
-				return &TypedFloatLiteral{Value: float32Value, Text: clean, Typed: Float32}
+				return &TypedFloatLiteral{Value: float32Value, Text: clean, Typed: expected}
 			}
-			return &TypedFloatLiteral{Value: float32Value, Text: clean, Typed: Float32}
+			return &TypedFloatLiteral{Value: float32Value, Text: clean, Typed: expected}
 		}
 		return nil
 	}
 	clean := strings.ReplaceAll(literalText, "_", "")
-	if isUnsignedScalar(expected) {
+	if isUnsignedScalar(literalType) {
 		value := new(big.Int)
-		if _, ok := value.SetString(clean, 0); !ok || value.Sign() < 0 || !c.uintLiteralFitsType(value, expected) {
+		if _, ok := value.SetString(clean, 0); !ok || value.Sign() < 0 || !c.uintLiteralFitsType(value, literalType) {
 			c.addError(fmt.Sprintf("Integer literal %s overflows %s", literalText, expected), num.GetLocation())
 		}
 		return &TypedIntLiteral{Value: int(value.Int64()), Text: clean, Typed: expected}
 	}
-	if expected == Float32 || expected == Float64 {
+	if literalType == Float32 || literalType == Float64 {
 		return nil
 	}
 	value64, err := strconv.ParseInt(clean, 0, 64)
@@ -6263,9 +6277,9 @@ func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Ty
 		c.addError(fmt.Sprintf("Invalid int: %s", literalText), num.GetLocation())
 		return nil
 	}
-	if !c.intLiteralFitsType(value64, expected) {
+	if !c.intLiteralFitsType(value64, literalType) {
 		c.addError(fmt.Sprintf("Integer literal %s overflows %s", literalText, expected), num.GetLocation())
-		if isIntegerScalar(expected) {
+		if isIntegerScalar(literalType) {
 			return &TypedIntLiteral{Value: int(value64), Text: clean, Typed: expected}
 		}
 		return nil
@@ -6273,7 +6287,7 @@ func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Ty
 	if expected == Int {
 		return &IntLiteral{Value: int(value64)}
 	}
-	if isIntegerScalar(expected) {
+	if isIntegerScalar(literalType) {
 		return &TypedIntLiteral{Value: int(value64), Text: clean, Typed: expected}
 	}
 	return nil

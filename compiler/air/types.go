@@ -105,6 +105,7 @@ const (
 	TypeVoid TypeKind = iota
 	TypeInt
 	TypeScalar
+	TypeForeignType
 	TypeFloat64
 	TypeBool
 	TypeByte
@@ -140,6 +141,11 @@ type TypeInfo struct {
 	Key   TypeID
 	Value TypeID
 	Error TypeID
+
+	ForeignTarget    string
+	ForeignNamespace string
+	ForeignQualifier string
+	ForeignSymbol    string
 
 	Fields   []FieldInfo
 	Variants []VariantInfo

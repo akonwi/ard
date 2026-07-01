@@ -2842,6 +2842,11 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 	switch info.Kind {
 	case air.TypeInt, air.TypeScalar, air.TypeByte, air.TypeRune, air.TypeEnum:
 		return &ast.BasicLit{Kind: token.INT, Value: "0"}, nil
+	case air.TypeForeignType:
+		if validTypeID(l.program, info.Value) {
+			return l.zeroValueExpr(info.Value)
+		}
+		return &ast.BasicLit{Kind: token.INT, Value: "0"}, nil
 	case air.TypeFloat64:
 		return &ast.BasicLit{Kind: token.FLOAT, Value: "0"}, nil
 	case air.TypeBool:
@@ -2982,6 +2987,11 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		return ast.NewIdent("int"), nil
 	case air.TypeScalar:
 		return ast.NewIdent(goScalarTypeName(info.Name)), nil
+	case air.TypeForeignType:
+		if info.ForeignTarget != "go" {
+			return nil, fmt.Errorf("unsupported foreign type target %q", info.ForeignTarget)
+		}
+		return l.qualified(info.ForeignQualifier, info.ForeignNamespace, info.ForeignSymbol), nil
 	case air.TypeByte:
 		return ast.NewIdent("byte"), nil
 	case air.TypeRune:

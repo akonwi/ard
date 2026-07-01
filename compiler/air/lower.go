@@ -2007,6 +2007,18 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 			}
 			info.Members[i] = UnionMember{Type: memberID, Tag: uint32(i), Name: member.String()}
 		}
+	case *checker.ForeignType:
+		info.Kind = TypeForeignType
+		info.Name = typ.String()
+		info.ForeignTarget = typ.Target
+		info.ForeignNamespace = typ.Namespace
+		info.ForeignQualifier = typ.Qualifier
+		info.ForeignSymbol = typ.Name
+		underlying, err := l.internType(typ.Underlying)
+		if err != nil {
+			return NoType, err
+		}
+		info.Value = underlying
 	case *checker.FunctionDef:
 		info.Kind = TypeFunction
 		for _, param := range typ.Parameters {
@@ -2350,7 +2362,7 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 
 func canWrapAsAny(kind TypeKind) bool {
 	switch kind {
-	case TypeVoid, TypeInt, TypeScalar, TypeFloat64, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeChannel, TypeReceiver, TypeSender, TypeAny:
+	case TypeVoid, TypeInt, TypeScalar, TypeForeignType, TypeFloat64, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeChannel, TypeReceiver, TypeSender, TypeAny:
 		return true
 	default:
 		return false

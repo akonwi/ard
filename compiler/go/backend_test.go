@@ -17,6 +17,22 @@ import (
 	"github.com/akonwi/ard/version"
 )
 
+func TestZeroValueForForeignNumericTypeUsesUnderlyingZero(t *testing.T) {
+	program := &air.Program{Types: []air.TypeInfo{
+		{ID: 1, Kind: air.TypeInt},
+		{ID: 2, Kind: air.TypeForeignType, Name: "time::Duration", Value: 1, ForeignTarget: "go", ForeignNamespace: "time", ForeignQualifier: "time", ForeignSymbol: "Duration"},
+	}}
+	l := &lowerer{program: program}
+	zero, err := l.zeroValueExpr(2)
+	if err != nil {
+		t.Fatalf("zeroValueExpr error = %v", err)
+	}
+	lit, ok := zero.(*ast.BasicLit)
+	if !ok || lit.Kind != token.INT || lit.Value != "0" {
+		t.Fatalf("foreign numeric zero = %#v, want integer literal 0", zero)
+	}
+}
+
 func TestTypesForModuleKeepsOwnedTypesWithOwningModule(t *testing.T) {
 	program := &air.Program{
 		Modules: []air.Module{
@@ -1054,6 +1070,20 @@ func TestRunProgramExecutesGoPrimitiveScalarFunction(t *testing.T) {
 		fn main() {
 			let bits: Uint32 = math::Float32bits(1.5)
 			try fmt::Println(bits) -> err { panic(err) }
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramExecutesGoNamedScalarLiteralCall(t *testing.T) {
+	program := lowerSource(t, `
+		use go:time
+
+		fn main() {
+			time::Sleep(1)
 		}
 	`)
 

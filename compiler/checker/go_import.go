@@ -13,6 +13,7 @@ type GoPackage struct {
 	Path                 string
 	TypesName            string
 	Functions            map[string]*FunctionDef
+	Types                map[string]Type
 	UnsupportedFunctions map[string]string
 }
 
@@ -28,6 +29,7 @@ func ResolveGoPackage(path string) (*GoPackage, error) {
 		Path:                 path,
 		TypesName:            pkg.Name(),
 		Functions:            map[string]*FunctionDef{},
+		Types:                map[string]Type{},
 		UnsupportedFunctions: map[string]string{},
 	}
 	scope := pkg.Scope()
@@ -35,7 +37,14 @@ func ResolveGoPackage(path string) (*GoPackage, error) {
 		if !token.IsExported(name) {
 			continue
 		}
-		fn, ok := scope.Lookup(name).(*types.Func)
+		obj := scope.Lookup(name)
+		if typeName, ok := obj.(*types.TypeName); ok {
+			if typ, reason := namedScalarFromGo(path, pkg.Name(), typeName); reason == "" {
+				goPkg.Types[name] = typ
+			}
+			continue
+		}
+		fn, ok := obj.(*types.Func)
 		if !ok {
 			continue
 		}
@@ -107,6 +116,34 @@ func typeFromGo(t types.Type) (Type, string) {
 	if isGoAny(t) {
 		return Any, ""
 	}
+	if alias, ok := t.(*types.Alias); ok {
+		underlying, reason := primitiveTypeFromGo(alias.Underlying())
+		if reason != "" {
+			return nil, reason
+		}
+		pkg := alias.Obj().Pkg()
+		namespace := ""
+		qualifier := ""
+		if pkg != nil {
+			namespace = pkg.Path()
+			qualifier = pkg.Name()
+		}
+		return &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: alias.Obj().Name(), Underlying: underlying}, ""
+	}
+	if named, ok := t.(*types.Named); ok && !isGoError(t) {
+		underlying, reason := primitiveTypeFromGo(named.Underlying())
+		if reason != "" {
+			return nil, reason
+		}
+		pkg := named.Obj().Pkg()
+		namespace := ""
+		qualifier := ""
+		if pkg != nil {
+			namespace = pkg.Path()
+			qualifier = pkg.Name()
+		}
+		return &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying}, ""
+	}
 	if slice, ok := t.Underlying().(*types.Slice); ok {
 		elem, reason := typeFromGo(slice.Elem())
 		if reason != "" {
@@ -114,6 +151,18 @@ func typeFromGo(t types.Type) (Type, string) {
 		}
 		return MakeList(elem), ""
 	}
+	return primitiveTypeFromGo(t)
+}
+
+func namedScalarFromGo(namespace, qualifier string, typeName *types.TypeName) (Type, string) {
+	underlying, reason := primitiveTypeFromGo(typeName.Type().Underlying())
+	if reason != "" {
+		return nil, reason
+	}
+	return &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: typeName.Name(), Underlying: underlying}, ""
+}
+
+func primitiveTypeFromGo(t types.Type) (Type, string) {
 	basic, ok := t.Underlying().(*types.Basic)
 	if !ok {
 		return nil, "only basic scalar, slice, and any types are supported"
