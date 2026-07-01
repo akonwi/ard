@@ -1222,6 +1222,22 @@ func TestRunProgramExecutesGoOpaqueNamedTypes(t *testing.T) {
 	}
 }
 
+func TestRunProgramPassesGoFunctionCallbacks(t *testing.T) {
+	program := lowerSource(t, `
+		use go:sort
+
+		fn main() {
+			let threshold = 5
+			let index = sort::Search(10, fn(i) { i == threshold })
+			if not index == 5 { panic("bad index") }
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramConstructsGoStructLiterals(t *testing.T) {
 	program := lowerSource(t, `
 		use go:image

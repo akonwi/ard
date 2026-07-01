@@ -6,6 +6,19 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+func TestGoImportAcceptsFunctionCallbacks(t *testing.T) {
+	run(t, []test{
+		{
+			name: "function callback parameter",
+			input: `use go:sort
+
+fn find() Int {
+  sort::Search(10, fn(i) { i == 5 })
+}`,
+		},
+	})
+}
+
 func TestGoImportConstructsGoStructLiterals(t *testing.T) {
 	run(t, []test{
 		{
@@ -364,10 +377,10 @@ fmt::Fprint("hello")`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go function fmt::Fprint: parameter 1 has unsupported type io.Writer: Go interface types are not supported yet"}},
 		},
 		{
-			name: "named func type is unsupported",
+			name: "function type with unsupported parameters is unsupported",
 			input: `use go:net/http
 http::HandleFunc("/", fn() { () })`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go function http::HandleFunc: parameter 2 has unsupported type func(net/http.ResponseWriter, *net/http.Request): only basic scalar, slice, and any types are supported"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go function http::HandleFunc: parameter 2 has unsupported type func(net/http.ResponseWriter, *net/http.Request): parameter 1 has unsupported type net/http.ResponseWriter: Go interface types are not supported yet"}},
 		},
 	})
 }

@@ -3756,8 +3756,13 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, Args: args}, nil
 	case *checker.ForeignFunctionCall:
 		args := make([]Expr, len(e.Call.Args))
+		fnDef := e.Call.Definition()
 		for i, arg := range e.Call.Args {
-			lowered, err := fl.lowerExpr(arg)
+			paramType, err := fl.internContextualCheckerType(fnDef.Parameters[i].Type)
+			if err != nil {
+				return nil, err
+			}
+			lowered, err := fl.lowerExprWithExpected(arg, paramType)
 			if err != nil {
 				return nil, err
 			}

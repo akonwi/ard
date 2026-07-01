@@ -107,6 +107,49 @@ func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, in
 	return &FunctionDef{Name: name, Parameters: params, ReturnType: ret}, ""
 }
 
+func functionDefFromGoCallbackSignature(name string, sig *types.Signature) (*FunctionDef, string) {
+	params := make([]Parameter, 0, sig.Params().Len())
+	for i := 0; i < sig.Params().Len(); i++ {
+		param := sig.Params().At(i)
+		goType := param.Type()
+		if sig.Variadic() && i == sig.Params().Len()-1 {
+			slice, ok := goType.(*types.Slice)
+			if !ok {
+				return nil, fmt.Sprintf("variadic parameter %d is not a slice", i+1)
+			}
+			goType = slice.Elem()
+		}
+		ardType, reason := typeFromGoWithMethods(goType, false)
+		if reason != "" {
+			return nil, fmt.Sprintf("parameter %d has unsupported type %s: %s", i+1, goType.String(), reason)
+		}
+		paramName := param.Name()
+		if paramName == "" {
+			paramName = fmt.Sprintf("arg%d", i+1)
+		}
+		params = append(params, Parameter{Name: paramName, Type: ardType})
+	}
+	ret, reason := callbackReturnTypeFromGo(sig.Results())
+	if reason != "" {
+		return nil, reason
+	}
+	return &FunctionDef{Name: name, Parameters: params, ReturnType: ret}, ""
+}
+
+func callbackReturnTypeFromGo(results *types.Tuple) (Type, string) {
+	switch results.Len() {
+	case 0:
+		return Void, ""
+	case 1:
+		if isGoError(results.At(0).Type()) {
+			return nil, "callback error returns are not supported yet"
+		}
+		return typeFromGoWithMethods(results.At(0).Type(), false)
+	default:
+		return nil, fmt.Sprintf("callback multi-result shape %s is not supported yet", results.String())
+	}
+}
+
 func returnTypeFromGo(results *types.Tuple) (Type, string) {
 	return returnTypeFromGoWithMethods(results, true)
 }
@@ -178,10 +221,24 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 		return &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: alias.Obj().Name(), Underlying: underlying}, ""
 	}
 	if named, ok := t.(*types.Named); ok && !isGoError(t) {
+		if sig, ok := named.Underlying().(*types.Signature); ok {
+			fn, reason := functionDefFromGoCallbackSignature("<function>", sig)
+			if reason != "" {
+				return nil, reason
+			}
+			return fn, ""
+		}
 		if reason := unsupportedForeignNamedUnderlying(named.Underlying(), false); reason != "" {
 			return nil, reason
 		}
 		return foreignNamedTypeFromGo(named, false, includeMethods), ""
+	}
+	if sig, ok := t.Underlying().(*types.Signature); ok {
+		fn, reason := functionDefFromGoCallbackSignature("<function>", sig)
+		if reason != "" {
+			return nil, reason
+		}
+		return fn, ""
 	}
 	if ptr, ok := t.(*types.Pointer); ok {
 		if named, ok := ptr.Elem().(*types.Named); ok && !isGoError(named) {
