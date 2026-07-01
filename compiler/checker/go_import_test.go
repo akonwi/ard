@@ -115,6 +115,27 @@ fn main() Str {
   time::Now().Local().Format(time::RFC3339)
 }`,
 		},
+		{
+			name: "pointer receiver method on mutable opaque value",
+			input: `use go:time
+
+fn main() Void!Str {
+  mut when = time::Now()
+  mut text = "2024-01-02T00:00:00Z".bytes()
+  when.UnmarshalText(text)
+}`,
+		},
+		{
+			name: "pointer receiver method on immutable opaque value rejected",
+			input: `use go:time
+
+fn main() {
+  let when = time::Now()
+  mut text = "2024-01-02T00:00:00Z".bytes()
+  when.UnmarshalText(text)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call pointer receiver method time::Time.UnmarshalText on immutable value"}},
+		},
 	})
 }
 

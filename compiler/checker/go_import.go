@@ -309,7 +309,7 @@ func primitiveTypeFromGo(t types.Type) (Type, string) {
 	case types.Uint:
 		return Uint, ""
 	case types.Uint8:
-		return Uint8, ""
+		return Byte, ""
 	case types.Uint16:
 		return Uint16, ""
 	case types.Uint32:

@@ -1144,6 +1144,12 @@ func TestRunProgramExecutesGoForeignMethods(t *testing.T) {
 				panic("bad time format")
 			}
 			let _ = time::Now().Local().Format(time::RFC3339)
+			mut mutable_when = time::Now()
+			mut text = "2024-01-02T00:00:00Z".bytes()
+			try mutable_when.UnmarshalText(text) -> err { panic(err) }
+			if not mutable_when.Format(time::RFC3339) == "2024-01-02T00:00:00Z" {
+				panic("bad pointer receiver method call")
+			}
 		}
 	`)
 

@@ -30,7 +30,11 @@ func (f *ForeignType) get(name string) Type {
 		f.Methods = loadForeignTypeMethods(f)
 		f.MethodsLoaded = true
 	}
-	return f.Methods[name]
+	method := f.Methods[name]
+	if method == nil {
+		return nil
+	}
+	return method
 }
 
 func (f *ForeignType) equal(other Type) bool {

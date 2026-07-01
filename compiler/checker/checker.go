@@ -4084,6 +4084,23 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			} else {
 				sig = subj.Type().get(s.Method.Name)
 			}
+			foreignPointerReceiver := false
+			if sig == nil {
+				if foreign, ok := subj.Type().(*ForeignType); ok && !foreign.Pointer {
+					pointerForeign := *foreign
+					pointerForeign.Pointer = true
+					pointerForeign.Methods = nil
+					pointerForeign.MethodsLoaded = false
+					if pointerSig := pointerForeign.get(s.Method.Name); pointerSig != nil {
+						if !c.isMutable(subj) {
+							c.addError(fmt.Sprintf("Cannot call pointer receiver method %s.%s on immutable value", foreign, s.Method.Name), s.Method.GetLocation())
+							return nil
+						}
+						sig = pointerSig
+						foreignPointerReceiver = true
+					}
+				}
+			}
 			if sig == nil {
 				if call, ok := c.checkFunctionFieldCall(subj, s.Method, s.GetLocation()); ok {
 					return call
@@ -4214,7 +4231,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 				}
-				return &ForeignMethodCall{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: foreign.Pointer, Symbol: s.Method.Name, Call: &FunctionCall{Name: s.Method.Name, Args: args, fn: fnToUse, ReturnType: fnToUse.ReturnType}}
+				pointer := foreign.Pointer || foreignPointerReceiver
+				return &ForeignMethodCall{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Method.Name, Call: &FunctionCall{Name: s.Method.Name, Args: args, fn: fnToUse, ReturnType: fnToUse.ReturnType}}
 			}
 			// Create function call
 			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs)
@@ -7624,6 +7642,21 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 			}
 		} else {
 			sig = innerType.get(p.Method.Name)
+		}
+		if sig == nil {
+			// This accessor-chain path only speculatively verifies that a method
+			// exists before falling back to normal expression checking below.
+			// Pointer-receiver mutability/addressability is enforced by the normal
+			// InstanceMethod checker, not here.
+			if foreign, ok := innerType.(*ForeignType); ok && !foreign.Pointer {
+				pointerForeign := *foreign
+				pointerForeign.Pointer = true
+				pointerForeign.Methods = nil
+				pointerForeign.MethodsLoaded = false
+				if pointerSig := pointerForeign.get(p.Method.Name); pointerSig != nil {
+					sig = pointerSig
+				}
+			}
 		}
 		if sig == nil {
 			if !isMaybe {
