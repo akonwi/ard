@@ -1022,6 +1022,30 @@ func TestRunProgramExecutesGoErrorOnlyFunction(t *testing.T) {
 	}
 }
 
+func TestRunProgramExecutesGoSliceFunctionCalls(t *testing.T) {
+	program := lowerSource(t, `
+		use go:sort
+		use go:strings
+
+		fn main() {
+			mut values = [3, 1, 2]
+			sort::Ints(values)
+			if values.at(0) != 1 {
+				panic("not sorted")
+			}
+
+			let parts = strings::Split("a,b", ",")
+			if parts.size() != 2 or parts.at(0) != "a" {
+				panic("bad split")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesGoFmtPrintln(t *testing.T) {
 	program := lowerSource(t, `
 		use go:fmt

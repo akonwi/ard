@@ -4630,6 +4630,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError(typeMismatch(fnDef.Parameters[i].Type, checkedArg.Type()), expr.GetLocation())
 						return nil
 					}
+					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), expr.GetLocation())
+						return nil
+					}
 					args[i] = checkedArg
 				}
 				return &ForeignFunctionCall{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: name, Call: &FunctionCall{Name: name, Args: args, fn: fnDef, ReturnType: fnDef.ReturnType}}

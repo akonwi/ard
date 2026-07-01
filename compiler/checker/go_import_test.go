@@ -93,7 +93,7 @@ func TestGoImportReportsUnsupportedFunctionSignature(t *testing.T) {
 			name: "exported function with unsupported signature",
 			input: `use go:fmt
 fmt::Fprint("hello")`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go function fmt::Fprint: parameter 1 has unsupported type io.Writer: only basic scalar and any types are supported"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go function fmt::Fprint: parameter 1 has unsupported type io.Writer: only basic scalar, slice, and any types are supported"}},
 		},
 	})
 }
@@ -122,6 +122,40 @@ func TestGoFunctionCallsRejectNamedArguments(t *testing.T) {
 			input: `use go:fmt
 fmt::Println(a: "hello")`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Go function calls do not support named arguments"}},
+		},
+	})
+}
+
+func TestGoSliceParametersRequireMutableLists(t *testing.T) {
+	run(t, []test{
+		{
+			name: "mutable list accepted for Go slice parameter",
+			input: `use go:sort
+fn main() {
+  mut values = [3, 1, 2]
+  sort::Ints(values)
+}`,
+		},
+		{
+			name: "immutable list rejected for Go slice parameter",
+			input: `use go:sort
+fn main() {
+  let values = [3, 1, 2]
+  sort::Ints(values)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected a mutable [Int]"}},
+		},
+	})
+}
+
+func TestGoSliceReturnsMapToLists(t *testing.T) {
+	run(t, []test{
+		{
+			name: "strings Split returns list of strings",
+			input: `use go:strings
+fn split() [Str] {
+  strings::Split("a,b", ",")
+}`,
 		},
 	})
 }

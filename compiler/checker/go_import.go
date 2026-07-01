@@ -54,12 +54,15 @@ func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef
 	for i := 0; i < sig.Params().Len(); i++ {
 		param := sig.Params().At(i)
 		goType := param.Type()
+		mutable := false
 		if sig.Variadic() && i == sig.Params().Len()-1 {
 			slice, ok := goType.(*types.Slice)
 			if !ok {
 				return nil, fmt.Sprintf("variadic parameter %d is not a slice", i+1)
 			}
 			goType = slice.Elem()
+		} else if _, ok := goType.Underlying().(*types.Slice); ok {
+			mutable = true
 		}
 		ardType, reason := typeFromGo(goType)
 		if reason != "" {
@@ -69,7 +72,7 @@ func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef
 		if paramName == "" {
 			paramName = fmt.Sprintf("arg%d", i+1)
 		}
-		params = append(params, Parameter{Name: paramName, Type: ardType})
+		params = append(params, Parameter{Name: paramName, Type: ardType, Mutable: mutable})
 	}
 
 	ret, reason := returnTypeFromGo(sig.Results())
@@ -104,9 +107,16 @@ func typeFromGo(t types.Type) (Type, string) {
 	if isGoAny(t) {
 		return Any, ""
 	}
+	if slice, ok := t.Underlying().(*types.Slice); ok {
+		elem, reason := typeFromGo(slice.Elem())
+		if reason != "" {
+			return nil, "slice element " + reason
+		}
+		return MakeList(elem), ""
+	}
 	basic, ok := t.Underlying().(*types.Basic)
 	if !ok {
-		return nil, "only basic scalar and any types are supported"
+		return nil, "only basic scalar, slice, and any types are supported"
 	}
 	switch basic.Kind() {
 	case types.Bool:
