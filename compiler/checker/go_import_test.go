@@ -86,6 +86,52 @@ fn main() Void!Str {
 	})
 }
 
+func TestGoImportSupportsForeignMethodValues(t *testing.T) {
+	run(t, []test{
+		{
+			name: "bound method value with direct return",
+			input: `use go:regexp
+
+fn main() Bool {
+  let re = try regexp::Compile("[a-z]+") -> err { panic(err) }
+  let matches: fn(Str) Bool = re.MatchString
+  matches("abc")
+}`,
+		},
+		{
+			name: "bound method value with adapted result return",
+			input: `use go:time
+
+fn main() [Byte]!Str {
+  let when = time::Now()
+  let marshal: fn() [Byte]!Str = when.MarshalText
+  marshal()
+}`,
+		},
+		{
+			name: "pointer receiver method value on mutable opaque value",
+			input: `use go:time
+
+fn main() Void!Str {
+  mut when = time::Now()
+  let unmarshal: fn(mut [Byte]) Void!Str = when.UnmarshalText
+  mut text = "2024-01-02T00:00:00Z".bytes()
+  unmarshal(text)
+}`,
+		},
+		{
+			name: "pointer receiver method value on immutable opaque value rejected",
+			input: `use go:time
+
+fn main() {
+  let when = time::Now()
+  let _ = when.UnmarshalText
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot access pointer receiver method time::Time.UnmarshalText on immutable value"}},
+		},
+	})
+}
+
 func TestGoImportSupportsForeignMethods(t *testing.T) {
 	run(t, []test{
 		{

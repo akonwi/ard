@@ -2250,6 +2250,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerForeignCall(fn, expr)
 	case air.ExprForeignMethodCall:
 		return l.lowerForeignMethodCall(fn, expr)
+	case air.ExprForeignMethodValue:
+		return l.lowerForeignMethodValue(fn, expr)
 	case air.ExprForeignValue:
 		return l.lowerForeignValue(expr)
 	case air.ExprCall:
@@ -2809,6 +2811,123 @@ func (l *lowerer) lowerGoErrorOnlyResultCall(expr air.Expr, stmts []ast.Stmt, ca
 		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{okLit}}}},
 	})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
+}
+
+func (l *lowerer) lowerForeignMethodValue(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.ForeignTarget != "go" {
+		return loweredExpr{}, fmt.Errorf("unsupported foreign method target %q", expr.ForeignTarget)
+	}
+	if expr.Target == nil || expr.ForeignSymbol == "" {
+		return loweredExpr{}, fmt.Errorf("invalid go foreign method value %q", expr.ForeignSymbol)
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	selector := &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(expr.ForeignSymbol)}
+	if !validTypeID(l.program, expr.Type) {
+		return loweredExpr{stmts: target.stmts, expr: selector}, nil
+	}
+	fnInfo := l.program.Types[expr.Type-1]
+	if fnInfo.Kind != air.TypeFunction {
+		return loweredExpr{stmts: target.stmts, expr: selector}, nil
+	}
+	retInfo := air.TypeInfo{}
+	adapt := false
+	shape := goResultOther
+	if validTypeID(l.program, fnInfo.Return) {
+		retInfo = l.program.Types[fnInfo.Return-1]
+		switch retInfo.Kind {
+		case air.TypeResult, air.TypeMaybe:
+			shape, err = goForeignMethodResultShape(expr.ForeignNamespace, expr.ForeignReceiver, expr.ForeignPointer, expr.ForeignSymbol)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			adapt = (retInfo.Kind == air.TypeResult && (shape == goResultValueError || shape == goResultErrorOnly)) || (retInfo.Kind == air.TypeMaybe && shape == goResultValueBool)
+		}
+	}
+	needsArgAdaptation := false
+	for _, mutable := range fnInfo.ParamMutable {
+		if mutable {
+			needsArgAdaptation = true
+			break
+		}
+	}
+	if !adapt && !needsArgAdaptation {
+		return loweredExpr{stmts: target.stmts, expr: selector}, nil
+	}
+	methodTemp := l.nextTemp()
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(methodTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{selector}})
+	methodValue := ast.NewIdent(methodTemp)
+	params := make([]*ast.Field, len(fnInfo.Params))
+	args := make([]ast.Expr, len(fnInfo.Params))
+	bodyPrefix := []ast.Stmt{}
+	for i, paramType := range fnInfo.Params {
+		name := fmt.Sprintf("arg%d", i+1)
+		typ, err := l.goType(paramType)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		argExpr := ast.Expr(ast.NewIdent(name))
+		if i < len(fnInfo.ParamMutable) && fnInfo.ParamMutable[i] {
+			typ = &ast.StarExpr{X: typ}
+			argExpr = &ast.StarExpr{X: ast.NewIdent(name)}
+		}
+		params[i] = &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: typ}
+		args[i] = argExpr
+	}
+	call := &ast.CallExpr{Fun: methodValue, Args: args}
+	var resultType ast.Expr
+	if !l.isVoidType(fnInfo.Return) {
+		resultType, err = l.goType(fnInfo.Return)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+	}
+	var body []ast.Stmt
+	if retInfo.Kind == air.TypeResult {
+		if shape == goResultErrorOnly {
+			errName := ast.NewIdent("err")
+			body = append(bodyPrefix, &ast.AssignStmt{Lhs: []ast.Expr{errName}, Tok: token.DEFINE, Rhs: []ast.Expr{call}})
+			body = append(body, l.resultErrorReturnIfStmt(resultType, errName))
+			body = append(body, &ast.ReturnStmt{Results: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: &ast.CompositeLit{Type: l.voidTypeExpr()}}, &ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: ast.NewIdent("true")}}}}})
+		} else {
+			valueName := ast.NewIdent("value")
+			errName := ast.NewIdent("err")
+			body = append(bodyPrefix, &ast.AssignStmt{Lhs: []ast.Expr{valueName, errName}, Tok: token.DEFINE, Rhs: []ast.Expr{call}})
+			body = append(body, l.resultErrorReturnIfStmt(resultType, errName))
+			body = append(body, &ast.ReturnStmt{Results: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: valueName}, &ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: ast.NewIdent("true")}}}}})
+		}
+	} else if retInfo.Kind == air.TypeMaybe {
+		valueName := ast.NewIdent("value")
+		okName := ast.NewIdent("ok")
+		body = append(bodyPrefix, &ast.AssignStmt{Lhs: []ast.Expr{valueName, okName}, Tok: token.DEFINE, Rhs: []ast.Expr{call}})
+		someExpr, err := l.maybeSomeExpr(fnInfo.Return, valueName)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		body = append(body, &ast.IfStmt{Cond: okName, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{someExpr}}}}})
+		noneExpr, err := l.maybeNoneExpr(fnInfo.Return)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		body = append(body, &ast.ReturnStmt{Results: []ast.Expr{noneExpr}})
+	} else if l.isVoidType(fnInfo.Return) {
+		body = append(bodyPrefix, &ast.ExprStmt{X: call})
+	} else {
+		body = append(bodyPrefix, &ast.ReturnStmt{Results: []ast.Expr{call}})
+	}
+	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
+	if !l.isVoidType(fnInfo.Return) {
+		funcType.Results = &ast.FieldList{List: []*ast.Field{{Type: resultType}}}
+	}
+	lit := &ast.FuncLit{Type: funcType, Body: &ast.BlockStmt{List: body}}
+	return loweredExpr{stmts: stmts, expr: lit}, nil
+}
+
+func (l *lowerer) resultErrorReturnIfStmt(resultType ast.Expr, errName ast.Expr) ast.Stmt {
+	return &ast.IfStmt{Cond: &ast.BinaryExpr{X: errName, Op: token.NEQ, Y: ast.NewIdent("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CompositeLit{Type: resultType, Elts: []ast.Expr{&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: &ast.CallExpr{Fun: &ast.SelectorExpr{X: errName, Sel: ast.NewIdent("Error")}}}}}}}}}}
 }
 
 func (l *lowerer) lowerForeignMethodCall(fn air.Function, expr air.Expr) (loweredExpr, error) {

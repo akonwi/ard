@@ -3716,6 +3716,12 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return nil, fmt.Errorf("unsupported unresolved function call %s", e.Name)
 	case *checker.ForeignValue:
 		return &Expr{Kind: ExprForeignValue, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol}, nil
+	case *checker.ForeignMethodValue:
+		target, err := fl.lowerExpr(e.Subject)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprForeignMethodValue, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol}, nil
 	case *checker.ForeignMethodCall:
 		target, err := fl.lowerExpr(e.Subject)
 		if err != nil {

@@ -4043,9 +4043,47 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			propType := subj.Type().get(s.Property.Name)
+			foreignPointerReceiver := false
 			if propType == nil {
+				if foreign, ok := subj.Type().(*ForeignType); ok && !foreign.Pointer {
+					pointerForeign := *foreign
+					pointerForeign.Pointer = true
+					pointerForeign.Methods = nil
+					pointerForeign.UnsupportedMethods = nil
+					pointerForeign.MethodsLoaded = false
+					if pointerSig := pointerForeign.get(s.Property.Name); pointerSig != nil {
+						if !c.isMutable(subj) {
+							c.addError(fmt.Sprintf("Cannot access pointer receiver method %s.%s on immutable value", foreign, s.Property.Name), s.Property.GetLocation())
+							return nil
+						}
+						propType = pointerSig
+						foreignPointerReceiver = true
+					} else if reason := pointerForeign.UnsupportedMethods[s.Property.Name]; reason != "" {
+						c.addError(fmt.Sprintf("Unsupported foreign method %s.%s: %s", foreign, s.Property.Name, reason), s.Property.GetLocation())
+						return nil
+					}
+				}
+			}
+			if propType == nil {
+				if foreign, ok := subj.Type().(*ForeignType); ok {
+					if !foreign.MethodsLoaded {
+						foreign.Methods, foreign.UnsupportedMethods = loadForeignTypeMethods(foreign)
+						foreign.MethodsLoaded = true
+					}
+					if reason := foreign.UnsupportedMethods[s.Property.Name]; reason != "" {
+						c.addError(fmt.Sprintf("Unsupported foreign method %s.%s: %s", foreign, s.Property.Name, reason), s.Property.GetLocation())
+						return nil
+					}
+				}
 				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Property.Name), s.Property.GetLocation())
 				return nil
+			}
+
+			if fnDef, ok := propType.(*FunctionDef); ok {
+				if foreign, ok := subj.Type().(*ForeignType); ok {
+					pointer := foreign.Pointer || foreignPointerReceiver
+					return &ForeignMethodValue{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Property.Name, _type: fnDef}
+				}
 			}
 
 			prop := &InstanceProperty{

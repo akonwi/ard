@@ -1158,6 +1158,38 @@ func TestRunProgramExecutesGoForeignMethods(t *testing.T) {
 	}
 }
 
+func TestRunProgramExecutesGoForeignMethodValues(t *testing.T) {
+	program := lowerSource(t, `
+		use go:regexp
+		use go:time
+
+		fn main() {
+			let re = try regexp::Compile("[a-z]+") -> err { panic(err) }
+			let matches: fn(Str) Bool = re.MatchString
+			if not matches("abc") {
+				panic("expected method value match")
+			}
+			let when = time::Now()
+			let marshal: fn() [Byte]!Str = when.MarshalText
+			let bytes = try marshal() -> err { panic(err) }
+			if bytes.size() == 0 {
+				panic("expected marshal bytes")
+			}
+			mut mutable_when = time::Now()
+			let unmarshal: fn(mut [Byte]) Void!Str = mutable_when.UnmarshalText
+			mut text = "2024-01-02T00:00:00Z".bytes()
+			try unmarshal(text) -> err { panic(err) }
+			if not mutable_when.Format(time::RFC3339) == "2024-01-02T00:00:00Z" {
+				panic("expected unmarshal mutation")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesGoVariadicForeignMethod(t *testing.T) {
 	program := lowerSource(t, `
 		use go:log

@@ -1214,6 +1214,19 @@ func (p *ForeignFunctionCall) Type() Type {
 	return p.Call.Type()
 }
 
+type ForeignMethodValue struct {
+	Subject   Expression
+	Target    string
+	Namespace string
+	Qualifier string
+	Receiver  string
+	Pointer   bool
+	Symbol    string
+	_type     Type
+}
+
+func (p *ForeignMethodValue) Type() Type { return p._type }
+
 type ForeignMethodCall struct {
 	Subject   Expression
 	Target    string
