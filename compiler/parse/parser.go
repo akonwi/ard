@@ -2421,8 +2421,10 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			name = "" // Treat as anonymous function
 		}
 
-		// Parse generic type parameters if present (e.g., <$T, $U>)
-		typeParams := p.parseGenericTypeParameters()
+		if p.check(less_than) {
+			p.addError(p.peek(), "Generic declaration lists are not supported; use $T in the function signature")
+			p.parseGenericTypeParameters()
+		}
 
 		if !p.check(left_paren) {
 			p.addError(p.peek(), "Expected '(' for parameters list")
@@ -2546,7 +2548,6 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 
 		fnDef := &FunctionDeclaration{
 			Private:    private,
-			TypeParams: typeParams,
 			Mutates:    asMethod && mutates,
 			IsTest:     isTest,
 			Parameters: params,

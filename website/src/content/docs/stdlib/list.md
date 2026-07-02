@@ -104,7 +104,7 @@ let parts = List::partition(numbers, fn(n) { n > 2 })
 // parts.others = [1, 2]
 ```
 
-### `struct Partition<$T>`
+### `struct Partition`
 
 Result of partitioning a list.
 

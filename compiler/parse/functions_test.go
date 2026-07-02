@@ -555,49 +555,22 @@ func TestTestFunctionEdgeCases(t *testing.T) {
 			},
 		},
 		{
-			name:  "Test function with generic type params",
-			input: `test fn generic_test<$T>() Void!Str { Result::ok(()) }`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&FunctionDeclaration{
-						IsTest:     true,
-						Name:       "generic_test",
-						TypeParams: []string{"T"},
-						Parameters: []Parameter{},
-						ReturnType: &ResultType{
-							Val: &VoidType{},
-							Err: &StringType{},
-						},
-						Body: []Statement{
-							&StaticFunction{
-								Target: &Identifier{Name: "Result"},
-								Function: FunctionCall{
-									Name: "ok",
-									Args: []Argument{
-										{Name: "", Value: &VoidLiteral{}},
-									},
-									Comments: []Comment{},
-								},
-							},
-						},
-					},
-				},
-			},
+			name:     "Test function rejects generic declaration list",
+			input:    `test fn generic_test<$T>() Void!Str { Result::ok(()) }`,
+			wantErrs: []string{"Generic declaration lists are not supported"},
 		},
 	})
 }
 func TestGenericFunctionDeclaration(t *testing.T) {
 	tests := []test{
 		{
-			name:  "Generic function with single type parameter",
-			input: `fn identity<$T>(value: $T) $T { value }`,
+			name:  "Generic function with inferred type parameter",
+			input: `fn identity(value: $T) $T { value }`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					&FunctionDeclaration{
-						Name:       "identity",
-						TypeParams: []string{"T"},
+						Name: "identity",
 						Parameters: []Parameter{
 							{
 								Name: "value",
@@ -613,31 +586,14 @@ func TestGenericFunctionDeclaration(t *testing.T) {
 			},
 		},
 		{
-			name:  "Generic function with multiple type parameters",
-			input: `fn pair<$A, $B>(a: $A, b: $B) $A { a }`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&FunctionDeclaration{
-						Name:       "pair",
-						TypeParams: []string{"A", "B"},
-						Parameters: []Parameter{
-							{
-								Name: "a",
-								Type: &GenericType{Name: "A"},
-							},
-							{
-								Name: "b",
-								Type: &GenericType{Name: "B"},
-							},
-						},
-						ReturnType: &GenericType{Name: "A"},
-						Body: []Statement{
-							&Identifier{Name: "a"},
-						},
-					},
-				},
-			},
+			name:     "Generic function rejects single declaration parameter",
+			input:    `fn identity<$T>(value: $T) $T { value }`,
+			wantErrs: []string{"Generic declaration lists are not supported"},
+		},
+		{
+			name:     "Generic function rejects multiple declaration parameters",
+			input:    `fn pair<$A, $B>(a: $A, b: $B) $A { a }`,
+			wantErrs: []string{"Generic declaration lists are not supported"},
 		},
 	}
 

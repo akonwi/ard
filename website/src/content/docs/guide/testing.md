@@ -126,15 +126,11 @@ Test functions have a few restrictions enforced by the compiler:
 
 - Must be top-level declarations (not nested inside structs or other functions)
 - Must not take parameters
-- Must not be generic
 - Must return `Void!Str`
 
 ```ard
 // ✗ Compile error: test functions must not take parameters
 test fn bad_test(x: Int) Void!Str { Result::ok(()) }
-
-// ✗ Compile error: test functions must not be generic
-test fn bad_generic<$T>() Void!Str { Result::ok(()) }
 
 // ✓ Valid test function
 test fn good_test() Void!Str {

@@ -14,7 +14,7 @@ Generic inference is especially important for collection helpers and anonymous c
 
 Support generic type parameters using a `$` prefix, such as `$T` and `$U`.
 
-Generic parameters are introduced by appearing in function or struct signatures. They do not require a separate generic parameter declaration list. Methods may use generic parameters introduced by their receiver type, but methods do not introduce independent method-owned generic parameters.
+Generic parameters are introduced by appearing in function signatures or struct signatures. Structs may also declare generic parameters explicitly when a parameter belongs to the receiver type but does not immediately appear in fields. Functions and methods do not use separate generic parameter declaration lists. Methods may use generic parameters introduced by their receiver type, but methods do not introduce independent method-owned generic parameters.
 
 Examples:
 
@@ -25,6 +25,7 @@ fn map(list: [$A]) [$B] {
 
 struct Box { item: $T }
 struct Pair { first: $T, second: $U }
+struct State<$T> { handle: StateHandle }
 ```
 
 Callers may provide explicit type arguments when needed:

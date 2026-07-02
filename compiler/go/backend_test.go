@@ -1873,7 +1873,7 @@ func TestBuildProgramSpecializesNestedGenericLambdasPerOuterBinding(t *testing.T
 	}
 	if err := os.WriteFile(filepath.Join(sharedDir, "shared.ard"), []byte(`struct State<$T> { handle: Int }
 
-fn _stateful<$T>(
+fn _stateful(
   init: fn(Int) $T,
   build: fn(Int) Int,
 ) Int {
@@ -1881,7 +1881,7 @@ fn _stateful<$T>(
   build(0)
 }
 
-fn stateful<$T>(
+fn stateful(
   init: fn() $T,
   build: fn(State<$T>) Int,
 ) Int {

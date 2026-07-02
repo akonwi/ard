@@ -190,7 +190,7 @@ func TestMethodsCannotIntroduceGenericParams(t *testing.T) {
 func TestUnboundGenericExplicitCallTypeArgIsRejected(t *testing.T) {
 	result := parse.Parse([]byte(`
 		use ard/maybe
-		fn get_raw<$T>(key: Str) $T? { maybe::none() }
+		fn get_raw(key: Str) $T? { maybe::none() }
 		get_raw<$U>("count")
 	`), "test.ard")
 	if len(result.Errors) > 0 {
@@ -208,9 +208,9 @@ func TestUnboundGenericExplicitCallTypeArgIsRejected(t *testing.T) {
 func TestNestedFunctionCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 	result := parse.Parse([]byte(`
 		use ard/maybe
-		fn raw<$T>(key: Str) $T? { maybe::none() }
+		fn raw(key: Str) $T? { maybe::none() }
 
-		fn outer<$T>() Bool {
+		fn outer() Bool {
 			fn inner() Bool {
 				raw<$T>("x").is_some()
 			}
@@ -232,9 +232,9 @@ func TestNestedFunctionCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 func TestClosureCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 	result := parse.Parse([]byte(`
 		use ard/maybe
-		fn raw<$T>(key: Str) $T? { maybe::none() }
+		fn raw(key: Str) $T? { maybe::none() }
 
-		fn outer<$T>() Bool {
+		fn outer() Bool {
 			let inner = fn() Bool {
 				raw<$T>("x").is_some()
 			}
@@ -268,7 +268,7 @@ func TestGenericStructReceiverBindingInExplicitCallbackParameter(t *testing.T) {
 			}
 		}
 
-		fn make<$T>(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
+		fn make(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
 			Widget{}
 		}
 
@@ -308,7 +308,7 @@ func TestGenericStructReceiverBindingInInferredCallbackParameter(t *testing.T) {
 			}
 		}
 
-		fn make<$T>(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
+		fn make(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
 			Widget{}
 		}
 
@@ -348,7 +348,7 @@ func TestGenericStructReceiverBindingInCallbackParameterStillRejectsMismatch(t *
 			}
 		}
 
-		fn make<$T>(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
+		fn make(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
 			Widget{}
 		}
 
@@ -374,52 +374,6 @@ func TestGenericStructReceiverBindingInCallbackParameterStillRejectsMismatch(t *
 	}
 	if got := c.Diagnostics()[0].Message; got != "type mismatch: expected Model, got Other" {
 		t.Fatalf("first diagnostic = %q, want callback state type mismatch", got)
-	}
-}
-func TestExplicitGenericStructCanUseTypeParamOnlyInMethods(t *testing.T) {
-	result := parse.Parse([]byte(`
-		struct State<$T> {
-			handle: Int
-		}
-
-		struct Widget {}
-		struct Ctx {}
-
-		impl State {
-			fn value() $T {
-				panic("x")
-			}
-
-			fn set(mutate: fn(mut $T)) {
-			}
-		}
-
-		fn make<$T>(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
-			Widget{}
-		}
-
-		struct Model { n: Int }
-
-		fn main() {
-			let _ = make<Model>(
-				init: fn(_ctx: Ctx, _state: State<Model>) Model { Model{n: 0} },
-				build: fn(_ctx: Ctx, state: State<Model>) Widget {
-					let model = state.value()
-					state.set(fn(mut next: Model) {
-						next.n = model.n + 1
-					})
-					Widget{}
-				},
-			)
-		}
-	`), "test.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse error: %s", result.Errors[0].Message)
-	}
-	c := New("test.ard", result.Program, nil)
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
 func TestExplicitGenericStructTypeArgumentsRemainDistinctWithoutGenericFields(t *testing.T) {
@@ -448,5 +402,52 @@ func TestExplicitGenericStructTypeArgumentsRemainDistinctWithoutGenericFields(t 
 	}
 	if got := c.Diagnostics()[0].Message; got != "Type mismatch: Expected State<Model>, got State<Other>" {
 		t.Fatalf("first diagnostic = %q, want State<Model>/State<Other> mismatch", got)
+	}
+}
+
+func TestExplicitGenericStructCanUseTypeParamOnlyInMethods(t *testing.T) {
+	result := parse.Parse([]byte(`
+		struct State<$T> {
+			handle: Int
+		}
+
+		struct Widget {}
+		struct Ctx {}
+
+		impl State {
+			fn value() $T {
+				panic("x")
+			}
+
+			fn set(mutate: fn(mut $T)) {
+			}
+		}
+
+		fn make(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
+			Widget{}
+		}
+
+		struct Model { n: Int }
+
+		fn main() {
+			let _ = make<Model>(
+				init: fn(_ctx: Ctx, _state: State<Model>) Model { Model{n: 0} },
+				build: fn(_ctx: Ctx, state: State<Model>) Widget {
+					let model = state.value()
+					state.set(fn(mut next: Model) {
+						next.n = model.n + 1
+					})
+					Widget{}
+				},
+			)
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }

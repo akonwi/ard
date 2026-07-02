@@ -125,7 +125,7 @@ const (
 	TypeSender
 	TypeTraitObject
 	// TypeParam is a reference to a generic type parameter inside a generic
-	// definition (e.g. the `T` in `struct Partition<$T>`). It only appears in
+	// definition (e.g. the `T` in `struct Partition { selected: [$T] }`). It only appears in
 	// the fields/signature of a generic definition, never in a concrete value.
 	TypeParam
 )

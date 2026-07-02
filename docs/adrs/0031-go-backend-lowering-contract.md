@@ -240,7 +240,7 @@ A `union` lowers to a generated tagged struct: a discriminant field plus one fie
 
 #### Generic type declarations
 
-Generic structs and unions lower to generic Go types. `struct Partition<$T> { selected: [$T], others: [$T] }` lowers to `type Partition[T any] struct { Selected []T; Others []T }`. Trait bounds on type parameters map to Go type constraints and map-key parameters carry a `comparable` constraint, the same as generic functions. Enums are simple named `int` types and are not generic.
+Generic structs and unions lower to generic Go types. `struct Partition { selected: [$T], others: [$T] }` lowers to `type Partition[T any] struct { Selected []T; Others []T }`. A struct may also declare receiver-level generic parameters explicitly, as in `struct State<$T> { handle: Int }`, when the parameter is needed by methods or type-level behavior but does not immediately appear in fields. Trait bounds on type parameters map to Go type constraints and map-key parameters carry a `comparable` constraint, the same as generic functions. Enums are simple named `int` types and are not generic.
 
 #### Type aliases
 

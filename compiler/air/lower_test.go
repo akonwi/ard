@@ -3,7 +3,6 @@ package air
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -1255,35 +1254,6 @@ func testTypeInfo(t *testing.T, program *Program, id TypeID) TypeInfo {
 	t.Fatalf("type id %d not found", id)
 	return TypeInfo{}
 }
-func TestLowerRejectsUnboundReturnOnlyGenericWrapper(t *testing.T) {
-	result := parse.Parse([]byte(`
-		use ard/maybe
-		fn raw<$T>(key: Str) $T? { maybe::none() }
-
-		fn has<$T>(key: Str) Bool {
-			raw<$T>(key).is_some()
-		}
-
-		fn main() {
-			let a = has("int")
-		}
-	`), "test.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse error: %s", result.Errors[0].Message)
-	}
-	c := checker.New("test.ard", result.Program, nil)
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
-	}
-	_, err := Lower(c.Module())
-	if err == nil {
-		t.Fatal("Lower succeeded; expected unbound return-only generic wrapper error")
-	}
-	if !strings.Contains(err.Error(), "cannot declare unspecialized generic function has") {
-		t.Fatalf("Lower error = %v, want unspecialized has", err)
-	}
-}
 func TestLowerImportedGenericStructReturnTypeWithTypeArg(t *testing.T) {
 	lowerSource(t, `
 use ard/list
@@ -1294,32 +1264,13 @@ fn main() { run() }
 `)
 }
 
-func TestLowerForwardedGenericUsedOnlyInCalleeBody(t *testing.T) {
-	_ = lowerSource(t, `
-		use ard/maybe
-		fn raw<$T>(key: Str) $T? { maybe::none() }
-
-		fn has<$T>() Bool {
-			raw<$T>("x").is_some()
-		}
-
-		fn outer<$U>() Bool {
-			has<$U>()
-		}
-
-		fn main() Bool {
-			outer<Int>()
-		}
-	`)
-}
-
 func TestLowerReceiverGenericUsedOnlyInMethodBody(t *testing.T) {
 	// A generic function called inside a generic method body forwards the
 	// struct's type parameter abstractly; this must lower without trying to
 	// monomorphize at an unbound type parameter.
 	_ = lowerSource(t, `
 		use ard/maybe
-		fn raw<$T>(key: Str) $T? { maybe::none() }
+		fn raw(key: Str) $T? { maybe::none() }
 
 		struct Box {
 			item: $T
@@ -1349,14 +1300,14 @@ func TestLowerGenericFunctionAdapterClosureCapturesSpecializedCallback(t *testin
 			handle: StateHandle,
 		}
 
-		fn stateful_raw_init_key<$T>(key: Str, init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget {
+		fn stateful_raw_init_key(key: Str, init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget {
 			let handle = StateHandle{id: 0}
 			let ctx = BuildContextHandle{id: 0}
 			let _value = init(ctx, handle)
 			build(ctx, handle)
 		}
 
-		fn stateful<$T>(key: Str, init: fn(BuildContext) $T, build: fn(BuildContext, State<$T>) Widget) Widget {
+		fn stateful(key: Str, init: fn(BuildContext) $T, build: fn(BuildContext, State<$T>) Widget) Widget {
 			stateful_raw_init_key(
 				key: key,
 				init: fn(_build_ctx: BuildContextHandle, _state_handle: StateHandle) $T {

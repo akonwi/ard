@@ -5,7 +5,7 @@ description: Learn about generic programming in Ard using type parameters.
 
 ## Overview
 
-Generics allow writing code that works with multiple types while maintaining type safety. Ard uses a simple syntax for generic types that doesn't require explicit declarations.
+Generics allow writing code that works with multiple types while maintaining type safety. Ard uses a simple syntax where function generics are inferred from `$T` usage, and structs may explicitly declare receiver-level generics when needed.
 
 ## Generic Syntax
 
@@ -61,7 +61,7 @@ let int_container = Container{value: 42}
 let str_container = Container{value: "hello"}
 ```
 
-When a generic parameter is used only by methods or other type-level behavior, declare it explicitly on the struct:
+Generic parameters are introduced by fields and function signatures. Structs may also declare receiver-level generic parameters explicitly when methods need a generic that does not immediately appear in fields:
 
 ```ard
 struct State<$T> {
@@ -74,6 +74,8 @@ impl State {
   }
 }
 ```
+
+Methods may use the generic parameters introduced by their receiver type, but they cannot introduce independent method-only generic parameters.
 
 When referencing a generic struct as a type, provide concrete type arguments:
 

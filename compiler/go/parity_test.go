@@ -1074,7 +1074,7 @@ func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
 		{
 			name: "direct generic return compared with equals",
 			input: `
-				fn id<$T>(value: $T) $T {
+				fn id(value: $T) $T {
 					value
 				}
 				fn main() Bool {

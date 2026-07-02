@@ -275,13 +275,7 @@ func TestTestFunctions(t *testing.T) {
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{},
 		},
-		{
-			name:  "test functions must not be generic",
-			input: `test fn generic_test<$T>() Void!Str { Result::ok(()) }`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "test functions must not be generic"},
-			},
-		},
+
 		{
 			name: "explicit type arguments on non-generic function are rejected",
 			input: strings.Join([]string{

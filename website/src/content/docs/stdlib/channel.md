@@ -27,7 +27,7 @@ fn main() {
 
 ## Creating a channel
 
-### `fn new<$T>(capacity: Int) Chan<$T>`
+### `fn new(capacity: Int) Chan<$T>`
 
 Creates a channel carrying values of type `$T`. `capacity` is the buffer size:
 `0` is an unbuffered (synchronous) channel where each send blocks until a
@@ -101,8 +101,8 @@ API express whether a caller may send or receive:
 - `Receiver<$T>` — receive-only (`recv`).
 - `Sender<$T>` — send-only (`send`, `close`).
 
-### `fn receiver<$T>(ch: Chan<$T>) Receiver<$T>`
-### `fn sender<$T>(ch: Chan<$T>) Sender<$T>`
+### `fn receiver(ch: Chan<$T>) Receiver<$T>`
+### `fn sender(ch: Chan<$T>) Sender<$T>`
 
 ```ard
 let ch = channel::new<Int>(0)
