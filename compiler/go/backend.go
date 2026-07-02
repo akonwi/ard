@@ -317,18 +317,32 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 	if err != nil {
 		return "", err
 	}
+	generatedAlias := ""
+	if modulePathFromGoMod(goMod) != "generated" {
+		generatedAlias = "\nrequire generated v0.0.0\nreplace generated => .\n"
+	}
 	requireSeen := requireKeys(goMod)
 	requires := make([]string, 0)
+	addGoModRequirements(&requires, requireSeen, generatedAlias)
 	addGoModRequirements(&requires, requireSeen, ardRequirement)
 	addDependencyGoModRequirements(&requires, requireSeen, program, projectInfo)
 	goMod += formatRequireBlock(requires)
 
 	replaceSeen := replaceKeys(goMod)
 	replaces := make([]string, 0)
+	addGoModReplaces(&replaces, replaceSeen, generatedAlias)
 	addGoModReplaces(&replaces, replaceSeen, ardRequirement)
 	addDependencyGoModReplaces(&replaces, replaceSeen, program, projectInfo)
 	goMod += formatReplaceBlock(replaces)
 	return goMod, nil
+}
+
+func modulePathFromGoMod(goMod string) string {
+	file, err := modfile.Parse("go.mod", []byte(goMod), nil)
+	if err != nil || file.Module == nil {
+		return ""
+	}
+	return file.Module.Mod.Path
 }
 
 func generatedGoModBase(projectInfo *checker.ProjectInfo) (string, error) {

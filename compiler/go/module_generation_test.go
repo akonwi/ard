@@ -34,6 +34,44 @@ func TestGeneratedGoModCopiesProjectModuleAndRewritesRelativeReplace(t *testing.
 	}
 }
 
+func TestGeneratedGoModAddsGeneratedAliasForProjectModule(t *testing.T) {
+	root := t.TempDir()
+	goMod := "module example.com/app\n\ngo 1.21\n"
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(goMod), 0644); err != nil {
+		t.Fatal(err)
+	}
+	project := &checker.ProjectInfo{RootPath: root, ProjectName: "app"}
+	generated, err := generatedGoMod(t.TempDir(), &air.Program{}, project)
+	if err != nil {
+		t.Fatalf("generatedGoMod: %v", err)
+	}
+	if count := strings.Count(generated, "generated v0.0.0"); count != 1 {
+		t.Fatalf("generated require count = %d in:\n%s", count, generated)
+	}
+	if count := strings.Count(generated, "generated => ."); count != 1 {
+		t.Fatalf("generated replace count = %d in:\n%s", count, generated)
+	}
+}
+
+func TestGeneratedGoModDoesNotDuplicateExistingGeneratedAlias(t *testing.T) {
+	root := t.TempDir()
+	goMod := "module example.com/app\n\ngo 1.21\n\nrequire generated v0.0.0\n\nreplace generated => .\n"
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(goMod), 0644); err != nil {
+		t.Fatal(err)
+	}
+	project := &checker.ProjectInfo{RootPath: root, ProjectName: "app"}
+	generated, err := generatedGoMod(t.TempDir(), &air.Program{}, project)
+	if err != nil {
+		t.Fatalf("generatedGoMod: %v", err)
+	}
+	if count := strings.Count(generated, "require generated"); count != 1 {
+		t.Fatalf("generated require count = %d in:\n%s", count, generated)
+	}
+	if count := strings.Count(generated, "replace generated"); count != 1 {
+		t.Fatalf("generated replace count = %d in:\n%s", count, generated)
+	}
+}
+
 func TestGeneratedGoModDoesNotDuplicateExistingArdDependency(t *testing.T) {
 	root := t.TempDir()
 	goMod := "module example.com/app\n\ngo 1.21\n\nrequire github.com/akonwi/ard v0.0.0\n\nreplace github.com/akonwi/ard => /tmp/ard\n"
