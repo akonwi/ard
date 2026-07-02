@@ -64,6 +64,25 @@ func TestGeneratedGoModUsesSyntheticModuleWithoutProjectGoMod(t *testing.T) {
 	}
 }
 
+func TestBuildGeneratedProgramUsesConfiguredBuildTags(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module tagged\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tagged.go"), []byte("//go:build special\n\npackage main\n\nfunc init() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "needs_tag.go"), []byte("//go:build !special\n\npackage main\n\nfunc init() { missingSymbol() }\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := buildGeneratedProgram(dir, filepath.Join(dir, "tagged-bin"), "special"); err != nil {
+		t.Fatalf("buildGeneratedProgram with tag: %v", err)
+	}
+}
+
 func TestWriteProgramCopiesProjectFFIDirectory(t *testing.T) {
 	root := t.TempDir()
 	ffiDir := filepath.Join(root, "ffi", "sub")

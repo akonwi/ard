@@ -57,18 +57,19 @@ func GenerateSources(program *air.Program, options Options) (map[string][]byte, 
 }
 
 func RunProgram(program *air.Program, args []string, projectInfo ...*checker.ProjectInfo) error {
+	info := optionalProjectInfo(projectInfo)
 	workspaceDir, err := artifactWorkspace(inputPathFromCLIArgs(args), "run")
 	if err != nil {
 		return err
 	}
-	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: optionalProjectInfo(projectInfo)}); err != nil {
+	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: info}); err != nil {
 		return err
 	}
-	binaryPath := runBinaryPath(workspaceDir, optionalProjectInfo(projectInfo))
+	binaryPath := runBinaryPath(workspaceDir, info)
 	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
 		return err
 	}
-	if err := buildGeneratedProgram(workspaceDir, binaryPath); err != nil {
+	if err := buildGeneratedProgram(workspaceDir, binaryPath, goBuildTags(info)...); err != nil {
 		return err
 	}
 	cmd := exec.Command(binaryPath, programArgs(args)...)
@@ -82,11 +83,12 @@ func RunProgram(program *air.Program, args []string, projectInfo ...*checker.Pro
 }
 
 func BuildProgram(program *air.Program, outputPath string, projectInfo ...*checker.ProjectInfo) (string, error) {
+	info := optionalProjectInfo(projectInfo)
 	workspaceDir, err := artifactWorkspace(outputPath, "build")
 	if err != nil {
 		return "", err
 	}
-	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: optionalProjectInfo(projectInfo)}); err != nil {
+	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: info}); err != nil {
 		return "", err
 	}
 	if outputPath == "" {
@@ -96,25 +98,26 @@ func BuildProgram(program *air.Program, outputPath string, projectInfo ...*check
 	if err != nil {
 		return "", err
 	}
-	if err := buildGeneratedProgram(workspaceDir, absOutput); err != nil {
+	if err := buildGeneratedProgram(workspaceDir, absOutput, goBuildTags(info)...); err != nil {
 		return "", err
 	}
 	return absOutput, nil
 }
 
 func RunTests(program *air.Program, args []string, tests []TestCase, failFast bool, projectInfo ...*checker.ProjectInfo) ([]TestOutcome, error) {
+	info := optionalProjectInfo(projectInfo)
 	workspaceDir, err := artifactWorkspace(inputPathFromCLIArgs(args), "test")
 	if err != nil {
 		return nil, err
 	}
-	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: optionalProjectInfo(projectInfo), SuppressMain: true, IncludeTests: true}); err != nil {
+	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: info, SuppressMain: true, IncludeTests: true}); err != nil {
 		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(workspaceDir, "ard_tests.go"), []byte(renderTestRunner(program, tests, failFast)), 0o644); err != nil {
 		return nil, err
 	}
 	binaryPath := filepath.Join(workspaceDir, "ard-tests")
-	if err := buildGeneratedProgram(workspaceDir, binaryPath); err != nil {
+	if err := buildGeneratedProgram(workspaceDir, binaryPath, goBuildTags(info)...); err != nil {
 		return nil, err
 	}
 	resultPath := filepath.Join(workspaceDir, "test-results.json")
@@ -964,34 +967,24 @@ func compilerModuleRoot() (string, bool) {
 	return root, true
 }
 
-func buildGeneratedProgram(dir string, outputPath string) error {
-	cmd := exec.Command("go", "build", "-tags=goexperiment.jsonv2", "-mod=mod", "-o", outputPath, ".")
+func buildGeneratedProgram(dir string, outputPath string, buildTags ...string) error {
+	args := []string{"build", "-mod=mod", "-o", outputPath}
+	if len(buildTags) > 0 {
+		args = append(args, "-tags="+strings.Join(buildTags, ","))
+	}
+	args = append(args, ".")
+	cmd := exec.Command("go", args...)
 	cmd.Dir = dir
-	cmd.Env = appendGoExperimentJSONv2(os.Environ())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
-func appendGoExperimentJSONv2(env []string) []string {
-	for i, entry := range env {
-		if !strings.HasPrefix(entry, "GOEXPERIMENT=") {
-			continue
-		}
-		current := strings.TrimPrefix(entry, "GOEXPERIMENT=")
-		if current == "" {
-			env[i] = "GOEXPERIMENT=jsonv2"
-			return env
-		}
-		for _, experiment := range strings.Split(current, ",") {
-			if experiment == "jsonv2" {
-				return env
-			}
-		}
-		env[i] = entry + ",jsonv2"
-		return env
+func goBuildTags(projectInfo *checker.ProjectInfo) []string {
+	if projectInfo == nil || len(projectInfo.Go.BuildTags) == 0 {
+		return nil
 	}
-	return append(env, "GOEXPERIMENT=jsonv2")
+	return append([]string(nil), projectInfo.Go.BuildTags...)
 }
 
 func programArgs(args []string) []string {
