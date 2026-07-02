@@ -26,8 +26,13 @@ type ProjectInfo struct {
 	RootPath      string                    // absolute path to project root
 	ProjectName   string                    // project name from ard.toml or directory name
 	Dependencies  map[string]DependencyInfo // dependency aliases from ard.toml
+	Go            GoProjectConfig
 	RootPackageID string
 	Packages      map[string]PackageInfo
+}
+
+type GoProjectConfig struct {
+	BuildTags []string
 }
 
 type DependencyInfo struct {
@@ -119,6 +124,10 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse ard.toml: %w", err)
 			}
+			goConfig, err := parseGoProjectConfig(tomlPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse ard.toml: %w", err)
+			}
 			rootPackageID := "root"
 			packages := map[string]PackageInfo{
 				rootPackageID: {
@@ -140,6 +149,7 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 				RootPath:      current,
 				ProjectName:   projectName,
 				Dependencies:  dependencies,
+				Go:            goConfig,
 				RootPackageID: rootPackageID,
 				Packages:      packages,
 			}, nil
@@ -197,6 +207,64 @@ func parseArdVersion(tomlPath string) (string, bool) {
 	}
 
 	return matches[1], true
+}
+
+func parseGoProjectConfig(tomlPath string) (GoProjectConfig, error) {
+	content, err := os.ReadFile(tomlPath)
+	if err != nil {
+		return GoProjectConfig{}, err
+	}
+	config := GoProjectConfig{}
+	section := ""
+	sectionRe := regexp.MustCompile(`^\s*\[([^\]]+)\]\s*$`)
+	buildTagsAssignRe := regexp.MustCompile(`^\s*build_tags\s*=`)
+	buildTagsRe := regexp.MustCompile(`^\s*build_tags\s*=\s*\[(.*)\]\s*(?:#.*)?$`)
+	quotedTagRe := regexp.MustCompile(`["']([^"']*)["']`)
+	validTagRe := regexp.MustCompile(`^[A-Za-z0-9_.]+$`)
+	for _, line := range strings.Split(string(content), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if matches := sectionRe.FindStringSubmatch(line); len(matches) == 2 {
+			section = matches[1]
+			continue
+		}
+		if section != "go" {
+			continue
+		}
+		if !buildTagsAssignRe.MatchString(line) {
+			continue
+		}
+		matches := buildTagsRe.FindStringSubmatch(line)
+		if len(matches) != 2 {
+			return GoProjectConfig{}, fmt.Errorf("[go].build_tags must be a list of quoted strings")
+		}
+		rawList := strings.TrimSpace(matches[1])
+		if rawList == "" {
+			continue
+		}
+		rawItems := strings.Split(rawList, ",")
+		for i, rawItem := range rawItems {
+			rawItem = strings.TrimSpace(rawItem)
+			if rawItem == "" {
+				if i == len(rawItems)-1 && strings.HasSuffix(strings.TrimSpace(rawList), ",") {
+					continue
+				}
+				return GoProjectConfig{}, fmt.Errorf("[go].build_tags must be a list of quoted strings")
+			}
+			tagMatch := quotedTagRe.FindStringSubmatch(rawItem)
+			if len(tagMatch) != 2 || tagMatch[0] != rawItem {
+				return GoProjectConfig{}, fmt.Errorf("[go].build_tags must be a list of quoted strings")
+			}
+			tag := tagMatch[1]
+			if tag == "" || !validTagRe.MatchString(tag) {
+				return GoProjectConfig{}, fmt.Errorf("invalid Go build tag %q", tag)
+			}
+			config.BuildTags = append(config.BuildTags, tag)
+		}
+	}
+	return config, nil
 }
 
 func parseProjectDependencies(tomlPath string, projectRoot string) (map[string]DependencyInfo, error) {

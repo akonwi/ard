@@ -68,6 +68,70 @@ func TestFindProjectRootFallback(t *testing.T) {
 		t.Errorf("Expected project name '%s', got '%s'", expectedName, project.ProjectName)
 	}
 }
+func TestGoBuildTagsConfig(t *testing.T) {
+	t.Run("parses configured tags", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := `name = "demo"
+ard = ">= 0.1.0"
+
+[go]
+build_tags_file = "ignored"
+build_tags = ["sqlite", "debug", "sqlite",]
+`
+		if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte(manifest), 0644); err != nil {
+			t.Fatal(err)
+		}
+		resolver, err := checker.NewModuleResolver(dir)
+		if err != nil {
+			t.Fatalf("NewModuleResolver: %v", err)
+		}
+		got := resolver.GetProjectInfo().Go.BuildTags
+		want := []string{"sqlite", "debug", "sqlite"}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("build tags = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("rejects malformed tags", func(t *testing.T) {
+		for _, tag := range []string{"", "sqlite debug", "!prod", "linux&&cgo"} {
+			dir := t.TempDir()
+			manifest := fmt.Sprintf("name = \"demo\"\nard = \">= 0.1.0\"\n\n[go]\nbuild_tags = [%q]\n", tag)
+			if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte(manifest), 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := checker.NewModuleResolver(dir)
+			if err == nil {
+				t.Fatalf("expected error for build tag %q", tag)
+			}
+			if !strings.Contains(err.Error(), "invalid Go build tag") {
+				t.Fatalf("unexpected error for %q: %v", tag, err)
+			}
+		}
+	})
+
+	t.Run("rejects malformed build_tags assignment", func(t *testing.T) {
+		for _, assignment := range []string{
+			`build_tags = "sqlite"`,
+			`build_tags = ["sqlite"] trailing`,
+			`build_tags = ["sqlite" "debug"]`,
+			`build_tags = ["sqlite",, "debug"]`,
+		} {
+			dir := t.TempDir()
+			manifest := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[go]\n" + assignment + "\n"
+			if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte(manifest), 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := checker.NewModuleResolver(dir)
+			if err == nil {
+				t.Fatalf("expected error for assignment %s", assignment)
+			}
+			if !strings.Contains(err.Error(), "[go].build_tags must be a list of quoted strings") {
+				t.Fatalf("unexpected error for %s: %v", assignment, err)
+			}
+		}
+	})
+}
+
 func TestArdVersionConstraint(t *testing.T) {
 	t.Run("missing ard field is rejected", func(t *testing.T) {
 		dir := t.TempDir()
