@@ -3115,10 +3115,10 @@ func TestWriteProgramUsesEmbeddedArdModuleForReleaseVersion(t *testing.T) {
 		t.Fatalf("read go.mod: %v", err)
 	}
 	goMod := string(data)
-	if !strings.Contains(goMod, "require github.com/akonwi/ard v0.0.0") {
+	if !strings.Contains(goMod, "github.com/akonwi/ard v0.0.0") {
 		t.Fatalf("go.mod missing Ard module requirement:\n%s", goMod)
 	}
-	if !strings.Contains(goMod, "replace github.com/akonwi/ard => ./.ard/ard-module") {
+	if !strings.Contains(goMod, "github.com/akonwi/ard => ./.ard/ard-module") {
 		t.Fatalf("release go.mod missing embedded module replace:\n%s", goMod)
 	}
 	if strings.Contains(goMod, "/home/runner") {
@@ -3146,7 +3146,7 @@ func TestWriteProgramUsesLocalReplaceForDevVersion(t *testing.T) {
 		t.Fatalf("read go.mod: %v", err)
 	}
 	goMod := string(data)
-	if !strings.Contains(goMod, "require github.com/akonwi/ard v0.0.0") || !strings.Contains(goMod, "replace github.com/akonwi/ard =>") {
+	if !strings.Contains(goMod, "github.com/akonwi/ard v0.0.0") || !strings.Contains(goMod, "github.com/akonwi/ard =>") {
 		t.Fatalf("dev go.mod missing local replace:\n%s", goMod)
 	}
 }

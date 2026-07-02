@@ -18,7 +18,7 @@ func findInStdLib(path string) (Module, bool) {
 		return AnyPkg{}, true
 	}
 
-	return nil, false
+	return FindEmbeddedModule(path)
 }
 
 /* ard/maybe */
