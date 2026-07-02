@@ -60,7 +60,9 @@ func parseAndCheckWithOverlays(source string, filePath string, overlays map[stri
 		relPath = filePath
 	}
 
-	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{})
+	projectInfo := moduleResolver.GetProjectInfo()
+	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
+	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{GoResolver: goResolver})
 	c.Check()
 
 	return c.Diagnostics(), nil

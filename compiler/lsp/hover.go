@@ -490,7 +490,9 @@ func moduleForImport(imp parse.Import, filePath string) (checker.Module, bool) {
 	if err != nil {
 		return nil, false
 	}
-	c := checker.New(importPath, ast, moduleResolver, checker.CheckOptions{})
+	projectInfo := moduleResolver.GetProjectInfo()
+	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
+	c := checker.New(importPath, ast, moduleResolver, checker.CheckOptions{GoResolver: goResolver})
 	c.Check()
 	return c.Module(), true
 }
@@ -1046,7 +1048,9 @@ func resolveFromChecker(name string, prog *parse.Program, filePath string) strin
 		relPath = filePath
 	}
 
-	c := checker.New(relPath, prog, moduleResolver, checker.CheckOptions{})
+	projectInfo := moduleResolver.GetProjectInfo()
+	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
+	c := checker.New(relPath, prog, moduleResolver, checker.CheckOptions{GoResolver: goResolver})
 	c.Check()
 
 	// Try module public symbols first
@@ -2050,7 +2054,9 @@ func resolveCallFromChecker(name string, prog *parse.Program, filePath string) *
 		relPath = filePath
 	}
 
-	c := checker.New(relPath, prog, moduleResolver, checker.CheckOptions{})
+	projectInfo := moduleResolver.GetProjectInfo()
+	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
+	c := checker.New(relPath, prog, moduleResolver, checker.CheckOptions{GoResolver: goResolver})
 	c.Check()
 
 	if sym := c.Module().Get(name); !sym.IsZero() {

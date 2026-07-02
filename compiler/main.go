@@ -966,9 +966,10 @@ func loadGoTestModules(inputPath string, files []string, filter string) ([]loade
 		return nil, nil, err
 	}
 	projectInfo := resolver.GetProjectInfo()
+	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
 	loaded := make([]loadedGoTestModule, 0, len(files))
 	for _, path := range files {
-		module, err := loadGoTestModule(path, resolver, projectInfo)
+		module, err := loadGoTestModule(path, resolver, projectInfo, goResolver)
 		if err != nil {
 			return nil, projectInfo, err
 		}
@@ -980,7 +981,7 @@ func loadGoTestModules(inputPath string, files []string, filter string) ([]loade
 	return loaded, projectInfo, nil
 }
 
-func loadGoTestModule(path string, resolver *checker.ModuleResolver, projectInfo *checker.ProjectInfo) (checker.Module, error) {
+func loadGoTestModule(path string, resolver *checker.ModuleResolver, projectInfo *checker.ProjectInfo, goResolver checker.GoPackageResolver) (checker.Module, error) {
 	sourceCode, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("error reading file %s - %v", path, err)
@@ -1001,7 +1002,8 @@ func loadGoTestModule(path string, resolver *checker.ModuleResolver, projectInfo
 			}
 		}
 	}
-	c := checker.New(filePath, result.Program, resolver, checker.CheckOptions{ModulePath: modulePath})
+	options := checker.CheckOptions{ModulePath: modulePath, GoResolver: goResolver}
+	c := checker.New(filePath, result.Program, resolver, options)
 	c.Check()
 	if c.HasErrors() {
 		for _, diagnostic := range c.Diagnostics() {
