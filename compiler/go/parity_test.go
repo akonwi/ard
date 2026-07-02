@@ -293,11 +293,11 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 			`,
 		},
 		{
-			name: "map keys use sorted order",
+			name: "map keys expose native map keys",
 			input: `
-				fn main() [Str] {
+				fn main() Int {
 					let values = ["b": 2, "a": 1, "c": 3]
-					values.keys()
+					values.keys().size()
 				}
 			`,
 		},
@@ -451,14 +451,15 @@ func TestGoTargetParityLoops(t *testing.T) {
 			`,
 		},
 		{
-			name: "looping over a map uses sorted keys",
+			name: "looping over a map uses native map order",
 			input: `
-				fn main() Str {
-					mut out = ""
+				fn main() Int {
+					mut sum = 0
 					for key,val in [3:"c", 1:"a", 2:"b"] {
-						out = out + "{key}:{val};"
+						sum =+ key
+						sum =+ val.size()
 					}
-					out
+					sum
 				}
 			`,
 		},

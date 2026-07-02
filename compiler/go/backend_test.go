@@ -2921,8 +2921,11 @@ func TestLowerProgramSupportsListSwapAndMapKeys(t *testing.T) {
 	}) {
 		t.Fatal("generated AST missing list swap lowering")
 	}
-	if !astFilesHaveCall(files, "ardSortedStringKeys") {
-		t.Fatal("generated AST missing map keys lowering")
+	if !astFilesContain(files, func(node ast.Node) bool {
+		_, ok := node.(*ast.RangeStmt)
+		return ok
+	}) {
+		t.Fatal("generated AST missing map keys range lowering")
 	}
 }
 func TestLowerProgramEmitsOnlyUsedImports(t *testing.T) {

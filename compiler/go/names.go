@@ -816,6 +816,17 @@ func (n *localNamer) walkStmt(s air.Stmt, scopeRefs map[air.LocalID]bool) {
 			n.walkExpr(*s.Condition)
 		}
 		n.walkBlock(s.Body)
+	case air.StmtForMap:
+		if s.Target != nil {
+			n.walkExpr(*s.Target)
+		}
+		n.push()
+		scope := map[air.LocalID]bool{}
+		collectBlockRefs(s.Body, scope)
+		n.assign(s.Local, scope)
+		n.assign(s.ValueLocal, scope)
+		n.walkStmts(s.Body)
+		n.pop()
 	default:
 		if s.Value != nil {
 			n.walkExpr(*s.Value)

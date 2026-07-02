@@ -14,20 +14,22 @@ const (
 	StmtSetForeignField
 	StmtExpr
 	StmtWhile
+	StmtForMap
 	StmtBreak
 )
 
 type Stmt struct {
-	Kind      StmtKind
-	Local     LocalID
-	Name      string
-	Type      TypeID
-	Mutable   bool
-	Value     *Expr
-	Expr      *Expr
-	Target    *Expr
-	Field     int
-	FieldName string
+	Kind       StmtKind
+	Local      LocalID
+	ValueLocal LocalID
+	Name       string
+	Type       TypeID
+	Mutable    bool
+	Value      *Expr
+	Expr       *Expr
+	Target     *Expr
+	Field      int
+	FieldName  string
 
 	ForeignTarget string
 	ForeignSymbol string

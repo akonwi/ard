@@ -3371,14 +3371,6 @@ func (fl *functionLowerer) lowerForInList(loop *checker.ForInList) ([]Stmt, erro
 }
 
 func (fl *functionLowerer) lowerForInMap(loop *checker.ForInMap) ([]Stmt, error) {
-	intType, err := fl.l.internType(checker.Int)
-	if err != nil {
-		return nil, err
-	}
-	boolType, err := fl.l.internType(checker.Bool)
-	if err != nil {
-		return nil, err
-	}
 	m, err := fl.lowerExpr(loop.Map)
 	if err != nil {
 		return nil, err
@@ -3389,47 +3381,18 @@ func (fl *functionLowerer) lowerForInMap(loop *checker.ForInMap) ([]Stmt, error)
 	}
 
 	mapLocal := fl.defineLocal(loop.Key+"$map", m.Type, false)
-	index := fl.defineLocal(loop.Key+"$index", intType, true)
 	key := fl.defineLocal(loop.Key, mapType.Key, false)
 	value := fl.defineLocal(loop.Val, mapType.Value, false)
-
-	stmts := []Stmt{
-		{Kind: StmtLet, Local: mapLocal, Name: loop.Key + "$map", Type: m.Type, Value: m},
-		{Kind: StmtLet, Local: index, Name: loop.Key + "$index", Type: intType, Mutable: true, Value: &Expr{Kind: ExprConstInt, Type: intType, Int: "0"}},
-	}
 
 	body, err := fl.lowerNonProducingBlock(loop.Body.Stmts)
 	if err != nil {
 		return nil, err
 	}
-	body.Stmts = append([]Stmt{
-		{
-			Kind:  StmtLet,
-			Local: key,
-			Name:  loop.Key,
-			Type:  mapType.Key,
-			Value: &Expr{Kind: ExprMapKeyAt, Type: mapType.Key, Target: loadLocal(m.Type, mapLocal), Args: []Expr{*loadLocal(intType, index)}},
-		},
-		{
-			Kind:  StmtLet,
-			Local: value,
-			Name:  loop.Val,
-			Type:  mapType.Value,
-			Value: &Expr{Kind: ExprMapValueAt, Type: mapType.Value, Target: loadLocal(m.Type, mapLocal), Args: []Expr{*loadLocal(intType, index)}},
-		},
-	}, body.Stmts...)
-	body.Stmts = append(body.Stmts, Stmt{
-		Kind:  StmtAssign,
-		Local: index,
-		Value: &Expr{Kind: ExprIntAdd, Type: intType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprConstInt, Type: intType, Int: "1"}},
-	})
 
-	stmts = append(stmts, Stmt{
-		Kind:      StmtWhile,
-		Condition: &Expr{Kind: ExprLt, Type: boolType, Left: loadLocal(intType, index), Right: &Expr{Kind: ExprMapSize, Type: intType, Target: loadLocal(m.Type, mapLocal)}},
-		Body:      body,
-	})
-	return stmts, nil
+	return []Stmt{
+		{Kind: StmtLet, Local: mapLocal, Name: loop.Key + "$map", Type: m.Type, Value: m},
+		{Kind: StmtForMap, Target: loadLocal(m.Type, mapLocal), Local: key, ValueLocal: value, Body: body},
+	}, nil
 }
 
 func (fl *functionLowerer) lowerForLoop(loop *checker.ForLoop) ([]Stmt, error) {

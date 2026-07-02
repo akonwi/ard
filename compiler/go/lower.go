@@ -541,56 +541,6 @@ func isPredeclaredGoTypeName(name string) bool {
 
 func (l *lowerer) runtimePreludeDecls() []ast.Decl {
 	parts := []string{"package main\n"}
-	if l.runtimeHelpers["sorted_int_keys"] {
-		slicesAlias := l.registerImport("slices", "slices")
-		parts = append(parts, fmt.Sprintf(`
-	func ardSortedIntKeys[V any](m map[int]V) []int {
-		keys := make([]int, 0, len(m))
-		for k := range m {
-			keys = append(keys, k)
-		}
-		%s.Sort(keys)
-		return keys
-	}
-`, slicesAlias))
-	}
-	if l.runtimeHelpers["sorted_string_keys"] {
-		slicesAlias := l.registerImport("slices", "slices")
-		parts = append(parts, fmt.Sprintf(`
-	func ardSortedStringKeys[V any](m map[string]V) []string {
-		keys := make([]string, 0, len(m))
-		for k := range m {
-			keys = append(keys, k)
-		}
-		%s.Sort(keys)
-		return keys
-	}
-`, slicesAlias))
-	}
-	if l.runtimeHelpers["sorted_any_keys"] {
-		fmtAlias := l.registerImport("fmt", "fmt")
-		slicesAlias := l.registerImport("slices", "slices")
-		parts = append(parts, fmt.Sprintf(`
-	func ardSortedAnyKeys[V any](m map[any]V) []any {
-		keys := make([]any, 0, len(m))
-		for k := range m {
-			keys = append(keys, k)
-		}
-		%s.SortFunc(keys, func(a any, b any) int {
-			as := %s.Sprint(a)
-			bs := %s.Sprint(b)
-			if as < bs {
-				return -1
-			}
-			if as > bs {
-				return 1
-			}
-			return 0
-		})
-		return keys
-	}
-`, slicesAlias, fmtAlias, fmtAlias))
-	}
 	if l.runtimeHelpers["list_to_any_slice"] {
 		parts = append(parts, `
 	func ardListToAnySlice[T any](values []T) []any {
@@ -1609,6 +1559,30 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			return nil, err
 		}
 		return []ast.Stmt{&ast.ForStmt{Cond: condition.expr, Body: body}}, nil
+	case air.StmtForMap:
+		if stmt.Target == nil {
+			return nil, fmt.Errorf("map for statement missing target")
+		}
+		target, err := l.lowerExpr(fn, *stmt.Target)
+		if err != nil {
+			return nil, err
+		}
+		if len(target.stmts) != 0 {
+			return nil, fmt.Errorf("map for targets with setup statements are not supported yet")
+		}
+		keyName := l.localName(fn, stmt.Local)
+		valueName := l.localName(fn, stmt.ValueLocal)
+		l.declaredLocals[stmt.Local] = true
+		l.declaredLocals[stmt.ValueLocal] = true
+		body, err := l.lowerBlock(fn, stmt.Body, air.NoType)
+		if err != nil {
+			return nil, err
+		}
+		body.List = append([]ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(keyName)}},
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(valueName)}},
+		}, body.List...)
+		return []ast.Stmt{&ast.RangeStmt{Key: ast.NewIdent(keyName), Value: ast.NewIdent(valueName), Tok: token.DEFINE, X: target.expr, Body: body}}, nil
 	case air.StmtBreak:
 		return []ast.Stmt{&ast.BranchStmt{Tok: token.BREAK}}, nil
 	default:
@@ -3520,7 +3494,7 @@ func (l *lowerer) findLocalInitializerExpr(block air.Block, local air.LocalID) *
 			if stmt.Local == local {
 				return stmt.Value
 			}
-		case air.StmtWhile:
+		case air.StmtWhile, air.StmtForMap:
 			if expr := l.findLocalInitializerExpr(stmt.Body, local); expr != nil {
 				return expr
 			}
@@ -3586,7 +3560,7 @@ func (l *lowerer) inferLocalTypeFromBlock(fn air.Function, local air.LocalID, bl
 			if stmt.Local == local && stmt.Value != nil && !l.isWeakContextType(stmt.Value.Type) {
 				return stmt.Value.Type
 			}
-		case air.StmtWhile:
+		case air.StmtWhile, air.StmtForMap:
 			if inferred := l.inferLocalTypeFromBlock(fn, local, stmt.Body); inferred != air.NoType {
 				return inferred
 			}
@@ -6310,11 +6284,11 @@ func (l *lowerer) lowerMapKeys(fn air.Function, expr air.Expr) (loweredExpr, err
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	helper, err := l.mapKeyHelper(expr.Target.Type)
+	keys, err := l.mapKeysExpr(expr.Target.Type, target.expr)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent(helper), Args: []ast.Expr{target.expr}}}, nil
+	return loweredExpr{stmts: target.stmts, expr: keys}, nil
 }
 
 func (l *lowerer) lowerMapKeyAt(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -6330,11 +6304,10 @@ func (l *lowerer) lowerMapKeyAt(fn air.Function, expr air.Expr) (loweredExpr, er
 		return loweredExpr{}, err
 	}
 	stmts := append(target.stmts, index.stmts...)
-	helper, err := l.mapKeyHelper(expr.Target.Type)
+	keys, err := l.mapKeysExpr(expr.Target.Type, target.expr)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	keys := &ast.CallExpr{Fun: ast.NewIdent(helper), Args: []ast.Expr{target.expr}}
 	return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: keys, Index: index.expr}}, nil
 }
 
@@ -6351,36 +6324,58 @@ func (l *lowerer) lowerMapValueAt(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{}, err
 	}
 	stmts := append(target.stmts, index.stmts...)
-	helper, err := l.mapKeyHelper(expr.Target.Type)
+	keys, err := l.mapKeysExpr(expr.Target.Type, target.expr)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	keyExpr := &ast.IndexExpr{X: &ast.CallExpr{Fun: ast.NewIdent(helper), Args: []ast.Expr{target.expr}}, Index: index.expr}
+	keyExpr := &ast.IndexExpr{X: keys, Index: index.expr}
 	return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: target.expr, Index: keyExpr}}, nil
 }
 
-func (l *lowerer) mapKeyHelper(typeID air.TypeID) (string, error) {
+func (l *lowerer) mapKeysExpr(typeID air.TypeID, mapExpr ast.Expr) (ast.Expr, error) {
 	if !validTypeID(l.program, typeID) {
-		return "", fmt.Errorf("invalid map type %d", typeID)
+		return nil, fmt.Errorf("invalid map type %d", typeID)
 	}
 	info := l.program.Types[typeID-1]
 	if info.Kind != air.TypeMap && !(info.Kind == air.TypeForeignType && validTypeID(l.program, info.Key) && validTypeID(l.program, info.Value)) {
-		return "", fmt.Errorf("type %s is not a map", info.Name)
+		return nil, fmt.Errorf("type %s is not a map", info.Name)
 	}
-	keyType := l.program.Types[info.Key-1]
-	switch keyType.Kind {
-	case air.TypeInt:
-		l.markRuntimeHelper("sorted_int_keys")
-		return "ardSortedIntKeys", nil
-	case air.TypeStr:
-		l.markRuntimeHelper("sorted_string_keys")
-		return "ardSortedStringKeys", nil
-	case air.TypeAny:
-		l.markRuntimeHelper("sorted_any_keys")
-		return "ardSortedAnyKeys", nil
-	default:
-		return "", fmt.Errorf("unsupported map key type %s for ordered iteration", keyType.Name)
+	mapType, err := l.goType(typeID)
+	if err != nil {
+		return nil, err
 	}
+	keyType, err := l.goType(info.Key)
+	if err != nil {
+		return nil, err
+	}
+	keysType := &ast.ArrayType{Elt: keyType}
+	return &ast.CallExpr{
+		Fun: &ast.FuncLit{
+			Type: &ast.FuncType{
+				Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("m")}, Type: mapType}}},
+				Results: &ast.FieldList{List: []*ast.Field{{Type: keysType}}},
+			},
+			Body: &ast.BlockStmt{List: []ast.Stmt{
+				&ast.AssignStmt{
+					Lhs: []ast.Expr{ast.NewIdent("keys")},
+					Tok: token.DEFINE,
+					Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("make"), Args: []ast.Expr{keysType, &ast.BasicLit{Kind: token.INT, Value: "0"}, &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent("m")}}}}},
+				},
+				&ast.RangeStmt{
+					Key: ast.NewIdent("k"),
+					Tok: token.DEFINE,
+					X:   ast.NewIdent("m"),
+					Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{
+						Lhs: []ast.Expr{ast.NewIdent("keys")},
+						Tok: token.ASSIGN,
+						Rhs: []ast.Expr{&ast.CallExpr{Fun: ast.NewIdent("append"), Args: []ast.Expr{ast.NewIdent("keys"), ast.NewIdent("k")}}},
+					}}},
+				},
+				&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("keys")}},
+			}},
+		},
+		Args: []ast.Expr{mapExpr},
+	}, nil
 }
 
 func mustTypeExpr(l *lowerer, typeID air.TypeID) ast.Expr {
