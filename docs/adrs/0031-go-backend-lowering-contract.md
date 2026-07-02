@@ -240,7 +240,7 @@ A `union` lowers to a generated tagged struct: a discriminant field plus one fie
 
 #### Generic type declarations
 
-Generic structs and unions lower to generic Go types. `struct Partition { selected: [$T], others: [$T] }` lowers to `type Partition[T any] struct { Selected []T; Others []T }`. A struct may also declare receiver-level generic parameters explicitly, as in `struct State<$T> { handle: Int }`, when the parameter is needed by methods or type-level behavior but does not immediately appear in fields. Trait bounds on type parameters map to Go type constraints and map-key parameters carry a `comparable` constraint, the same as generic functions. Enums are simple named `int` types and are not generic.
+Generic structs and unions lower to generic Go types. `struct Partition { selected: [$T], others: [$T] }` lowers to `type Partition[T any] struct { Selected []T; Others []T }`. A struct may also declare receiver-level generic parameters explicitly, as in `struct State<$T> { handle: Int }`, when the parameter is needed by methods or type-level behavior but does not immediately appear in fields. Type parameters lower to Go type parameters, using `any` by default. A type parameter used as a map key carries a Go `comparable` constraint because `map[K]V` requires it. Enums are simple named `int` types and are not generic.
 
 #### Type aliases
 
@@ -310,13 +310,9 @@ A reference to a top-level function as a value lowers to the Go function identif
 
 #### Generics
 
-Ard generic functions lower to Go generics: a generic Ard function becomes a single generic Go function with its natural name, and Ard trait bounds map to Go type constraints (interfaces). This keeps the public Go API natural and the output small, rather than emitting many mangled monomorphized specializations.
+Ard generic functions lower to Go generics: a generic Ard function becomes a single generic Go function with its natural name. Generic parameters are inferred from `$T`-style type usage in the function signature rather than declared in a generic parameter list. Type parameters lower to `any` unless the backend must emit a stricter Go constraint for the generated code, such as `comparable` for map keys. Ard does not currently have trait bounds.
 
 A method on a generic struct may use the receiver type's generic parameters and lowers to a real Go generic-receiver method (`func (self Foo[T]) M(...)`), where the receiver binds those type parameters. Methods cannot introduce their own generic parameters beyond the receiver's. Go has no syntax for method-owned type parameters, and Ard standardizes on the receiver-only model instead of adding a second lowering strategy. Because Ard generics are inferred from `$T`-style type usage rather than declared on the method, the checker rejects methods whose signatures introduce non-receiver type parameters such as `fn echo(value: $U) $U` inside an `impl` block.
-
-Where a top-level generic function cannot be expressed with Go type constraints, the backend falls back to monomorphization, emitting a concrete specialized Go function per instantiation. Monomorphization is the fallback, not the default.
-
-A type parameter used as a map key emits a Go `comparable` constraint, since `map[K]V` requires it. When such a parameter also has a trait bound, the emitted constraint is an interface embedding both `comparable` and the trait's interface. The checker infers the comparability requirement from map-key usage and enforces it at instantiation using the same map-key rule as concrete maps; in particular it is stricter than Go `comparable` in one case, rejecting a `Maybe` type argument for a key parameter even though Go would accept it. On the monomorphization fallback path the key type is concrete and already checked, so no constraint is emitted.
 
 #### Reserved Go method names
 
@@ -347,10 +343,6 @@ This supersedes, for Go lowering, the mutable-trait forwarding-table representat
 #### Mutation through pointer receivers
 
 Mutability is a property of an implementation, not of the trait: a trait declares required methods, and an `impl` decides whether its implementation mutates `self`. An impl method that mutates `self` lowers to a pointer-receiver method, so that implementer satisfies the trait as `*T`. When such a value is used as a trait object, it is held as a pointer, and the checker must guarantee the upcast value is addressable. Each implementer independently satisfies the interface as `T` or `*T` according to its own methods.
-
-#### Generic trait bounds
-
-A generic bounded by a trait lowers to a Go type parameter constrained by the trait's interface. Where the bound is satisfied by a builtin primitive, which cannot carry Go methods, the Go constraint cannot express it and the generic falls back to monomorphization (see the Functions section), lowering the primitive's trait methods directly.
 
 #### Traits implemented for primitives
 
@@ -580,7 +572,7 @@ The standard library was reset as part of the FFI cleanup and should be rebuilt 
 - The runtime package is reduced to `Maybe` and `Result` and must import only the Go standard library. The universal boxed `Object`/`Kind` representation, the `Fiber` async shape, the structural-map, equality, sorted-key, and void helpers are removed. Standard-library utilities such as argv access and goroutine-spawn helpers use direct Go imports or ordinary shim packages instead of runtime helpers.
 - JSON lowers onto Go's `encoding/json/v2` over the generated types. Struct fields are always exported (revising the earlier fields-follow-type-visibility rule) and carry `json` tags preserving the Ard field name, so every struct is serializable. Marshalling applies to `Any`, structs, lists, string-keyed maps, primitives, `Maybe`, `Result`, enums, and unions (a union marshals to its active member, unwrapped); only parsing into a union is rejected by the checker, as it is ambiguous. `Maybe` and `Result` are the sanctioned runtime JSON marshalers. Decoding into `Any` uses `json.Number` to disambiguate `Int` from `Float64`.
 - Map key types are constrained during checking to Go strictly-comparable types whose Go equality matches Ard equality, so every Ard map lowers to a plain Go map. `Float64` keys are allowed; `Maybe`, `List`, `Map`, and `Any` keys are rejected. Generic type parameters used as map keys emit a Go `comparable` constraint. This is a language-level constraint the checker must enforce. The standard library conforms to it: `ard/decode`'s `to_map` is removed and decode migrates to string-keyed maps, which is the correct shape for JSON objects anyway.
-- Impl methods lower to real Go methods with no duplicated standalone helpers, mutation is expressed through pointer receivers and pointer parameters rather than forwarding tables, and closures lower to Go function literals. Generic functions lower to Go generics, with monomorphization only as a fallback. These choices require AIR to preserve generic structure and receiver/mutation metadata for the backend.
+- Impl methods lower to real Go methods with no duplicated standalone helpers, mutation is expressed through pointer receivers and pointer parameters rather than forwarding tables, and closures lower to Go function literals. Generic functions lower to Go generics, and generic methods use only receiver generics. These choices require AIR to preserve generic structure and receiver/mutation metadata for the backend.
 - Traits lower to Go interfaces with structural satisfaction, removing generated dispatch and forwarding-table machinery and superseding the Go-lowering portion of `0023-represent-mutable-trait-references-with-forwarding-tables.md`. `ToString` maps to `fmt.Stringer`. Traits implemented for builtin primitives require a minimal per-primitive boxing adapter for boxed trait objects, since Go cannot attach methods to builtins.
 - Trait methods are always public contract, so trait-implementing methods always lower to exported Go methods. The checker must reject a `private` modifier on a trait-implementing method.
 - Remaining sections of this contract still need to be drafted before the contract is complete enough to drive a backend rewrite.
