@@ -33,6 +33,10 @@ func (ImporterGoPackageResolver) ResolveGoPackage(path string) (*GoPackage, erro
 	if err != nil {
 		return nil, err
 	}
+	return goPackageFromTypesPackage(path, pkg), nil
+}
+
+func goPackageFromTypesPackage(path string, pkg *types.Package) *GoPackage {
 	goPkg := &GoPackage{
 		Path:                 path,
 		TypesName:            pkg.Name(),
@@ -73,7 +77,7 @@ func (ImporterGoPackageResolver) ResolveGoPackage(path string) (*GoPackage, erro
 			goPkg.UnsupportedFunctions[name] = reason
 		}
 	}
-	return goPkg, nil
+	return goPkg
 }
 
 func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef, string) {
