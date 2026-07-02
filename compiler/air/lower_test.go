@@ -976,45 +976,6 @@ func TestLowerGenericStructMethodLowersOnceAsGeneric(t *testing.T) {
 		t.Fatalf("get_str call type args = %v, want [Str]", strGet.Body.Result.TypeArgs)
 	}
 }
-func TestLowerGenericStructMethodOwnGenericSpecializationsDoNotCollapse(t *testing.T) {
-	program := lowerSource(t, `
-		struct Box {
-			item: Int
-		}
-
-		impl Box {
-			fn echo(value: $U) $U {
-				value
-			}
-		}
-
-		fn echo_int(box: Box) Int {
-			box.echo(1)
-		}
-
-		fn echo_str(box: Box) Str {
-			box.echo("x")
-		}
-	`)
-
-	intEcho := findFunction(t, program, "echo_int")
-	strEcho := findFunction(t, program, "echo_str")
-	if intEcho.Body.Result == nil || intEcho.Body.Result.Kind != ExprCall {
-		t.Fatalf("echo_int result = %#v, want method call", intEcho.Body.Result)
-	}
-	if strEcho.Body.Result == nil || strEcho.Body.Result.Kind != ExprCall {
-		t.Fatalf("echo_str result = %#v, want method call", strEcho.Body.Result)
-	}
-	if intEcho.Body.Result.Function == strEcho.Body.Result.Function {
-		t.Fatalf("method-local generic specializations collapsed to function %d", intEcho.Body.Result.Function)
-	}
-	if typeKind(t, program, program.Functions[intEcho.Body.Result.Function].Signature.Return) != TypeInt {
-		t.Fatalf("echo_int method return kind = %v, want Int", typeKind(t, program, program.Functions[intEcho.Body.Result.Function].Signature.Return))
-	}
-	if typeKind(t, program, program.Functions[strEcho.Body.Result.Function].Signature.Return) != TypeStr {
-		t.Fatalf("echo_str method return kind = %v, want Str", typeKind(t, program, program.Functions[strEcho.Body.Result.Function].Signature.Return))
-	}
-}
 func TestLowerInstanceMethodKeepsDeclaredTraitParameterType(t *testing.T) {
 	program := lowerSource(t, `
 		trait View {
@@ -1331,29 +1292,6 @@ fn run() {
 }
 fn main() { run() }
 `)
-}
-
-func TestLowerInstanceMethodForwardedGenericTypeArg(t *testing.T) {
-	_ = lowerSource(t, `
-		struct Box {
-			item: $T
-		}
-
-		impl Box {
-			fn pick<$U>(value: $U) $T {
-				self.item
-			}
-		}
-
-		fn use_pick<$V>(box: Box<Int>, value: $V) Int {
-			box.pick<$V>(value)
-		}
-
-		fn main() Int {
-			let box = Box{item: 1}
-			use_pick<Str>(box, "x")
-		}
-	`)
 }
 
 func TestLowerForwardedGenericUsedOnlyInCalleeBody(t *testing.T) {

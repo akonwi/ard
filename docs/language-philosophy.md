@@ -31,7 +31,7 @@ These features are part of Ard's semantic identity and should not be weakened me
 - Mutability and immutable access are explicit in the language.
 - Modules are file-based and forward-looking, with public/private visibility as part of the source model.
 - Traits express shared behavior. They are related to Go interfaces in the Go backend, but they are Ard traits first and may include semantics that are closer to traits in languages like Rust.
-- Generics are core language features. Ard may support generic forms that Go does not support directly, including generic methods on structs.
+- Generics are core language features. Generic parameters are inferred from `$T`-style type usage. Methods may use their receiver type's generics, but they do not introduce independent method-owned generic parameters.
 
 ## Simple Scalar Types
 

@@ -5144,11 +5144,11 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 		}
 	}
 	// A method on a generic struct lowers once as a generic method definition
-	// (ADR 0031), provided it only uses the struct's type parameters: Go method
-	// receivers cannot introduce additional type parameters, so a method with
-	// its own generic parameters keeps the monomorphization fallback. The call
-	// references the definition with the receiver's concrete type arguments and
-	// lowers its arguments against their concrete types.
+	// (ADR 0031) when it uses the struct's type parameters. Methods cannot
+	// introduce their own generic parameters, because Go method receivers cannot
+	// express them. The call references the definition with the receiver's
+	// concrete type arguments and lowers its arguments against their concrete
+	// types.
 	if typeInfo.Generic != NoType && methodUsesOnlyStructTypeParams(def, fl.l.program.Types[typeInfo.Generic-1].TypeParams) {
 		id, typeArgs, err := fl.declareGenericInstanceMethodFunction(module, target.Type, method.StructType, def)
 		if err != nil {

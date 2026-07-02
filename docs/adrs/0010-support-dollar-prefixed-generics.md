@@ -14,7 +14,7 @@ Generic inference is especially important for collection helpers and anonymous c
 
 Support generic type parameters using a `$` prefix, such as `$T` and `$U`.
 
-Generic parameters are introduced by appearing in function, method, or struct signatures. They do not require a separate generic parameter declaration list.
+Generic parameters are introduced by appearing in function or struct signatures. They do not require a separate generic parameter declaration list. Methods may use generic parameters introduced by their receiver type, but methods do not introduce independent method-owned generic parameters.
 
 Examples:
 
@@ -38,13 +38,13 @@ When explicit type arguments are omitted, the checker should infer generic param
 
 Generic type parameters may stand for any valid Ard type, including primitives, lists, maps, function types, nested generic instantiations, `Maybe`, and `Result`.
 
-Each generic function or method call should use fresh type variables for that call site, so inference and refinement do not mutate the original definition or leak between calls. Within a call, generic bindings may be refined as arguments are checked, allowing later arguments and anonymous callback parameters to observe earlier inferred types.
+Each generic function call should use fresh type variables for that call site, so inference and refinement do not mutate the original definition or leak between calls. Within a call, generic bindings may be refined as arguments are checked, allowing later arguments and anonymous callback parameters to observe earlier inferred types. Method calls use the receiver's generic bindings.
 
 Conflicting bindings for the same generic parameter must be rejected.
 
 ## Consequences
 
-- Generic declarations stay concise because `$T` in a signature is enough to introduce a type parameter.
+- Generic declarations stay concise because `$T` in a function or struct signature is enough to introduce a type parameter.
 - Common higher-order functions can infer anonymous callback parameter types from earlier arguments.
 - The checker must support per-call fresh generic variables and consistent type refinement.
 - Backends should receive concrete specialized types after checking/AIR lowering rather than open generic definitions where executable code requires concrete types.

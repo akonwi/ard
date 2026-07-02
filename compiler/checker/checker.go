@@ -298,6 +298,7 @@ type Checker struct {
 	resolvingTopLevelAliases          map[string]bool
 	resolvedTopLevelAliases           map[string]bool
 	genericContextStack               []map[string]bool
+	methodGenericAllowlist            []map[string]bool
 	discardExprContext                bool
 	matchArmDiscardContext            bool
 	reportedMapKeyErrors              map[parse.Location]bool
@@ -855,6 +856,9 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
 		return &TypeVar{name: "unknown"}
 	case *parse.GenericType:
+		if !c.genericAllowedInCurrentMethod(ty.Name) {
+			c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", ty.GetLocation())
+		}
 		if existing := c.scope.findGeneric(ty.Name); existing != nil {
 			baseType = existing
 		} else {
@@ -905,6 +909,28 @@ func (c *Checker) popFunctionGenericContext() {
 		return
 	}
 	c.genericContextStack = c.genericContextStack[:len(c.genericContextStack)-1]
+}
+
+func (c *Checker) pushMethodGenericAllowlist(params []string) {
+	allowed := make(map[string]bool, len(params))
+	for _, param := range params {
+		allowed[param] = true
+	}
+	c.methodGenericAllowlist = append(c.methodGenericAllowlist, allowed)
+}
+
+func (c *Checker) popMethodGenericAllowlist() {
+	if len(c.methodGenericAllowlist) == 0 {
+		return
+	}
+	c.methodGenericAllowlist = c.methodGenericAllowlist[:len(c.methodGenericAllowlist)-1]
+}
+
+func (c *Checker) genericAllowedInCurrentMethod(name string) bool {
+	if len(c.methodGenericAllowlist) == 0 {
+		return true
+	}
+	return c.methodGenericAllowlist[len(c.methodGenericAllowlist)-1][name]
 }
 
 func (c *Checker) genericInCurrentContext(name string) bool {
@@ -979,6 +1005,45 @@ func genericParamsForFunction(fnDef *FunctionDef) []string {
 		collectGenericsFromType(fnDef.ReturnType, &genericParams, seen)
 	}
 	return genericParams
+}
+
+func methodUsesOnlyReceiverGenerics(fnDef *FunctionDef, receiverGenerics []string) bool {
+	allowed := make(map[string]bool, len(receiverGenerics))
+	for _, param := range receiverGenerics {
+		allowed[param] = true
+	}
+	params := genericParamsForFunction(fnDef)
+	collectGenericsFromBlock(fnDef.Body, &params, mapSeenStrings(params))
+	for _, param := range params {
+		if !allowed[param] {
+			return false
+		}
+	}
+	return true
+}
+
+func mapSeenStrings(values []string) map[string]bool {
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		seen[value] = true
+	}
+	return seen
+}
+
+func collectGenericsFromBlock(block *Block, params *[]string, seen map[string]bool) {
+	if block == nil {
+		return
+	}
+	for _, stmt := range block.Stmts {
+		switch s := stmt.Stmt.(type) {
+		case *VariableDef:
+			collectGenericsFromType(s.Type(), params, seen)
+		case *Reassignment:
+			if s.Target != nil {
+				collectGenericsFromType(s.Target.Type(), params, seen)
+			}
+		}
+	}
 }
 
 func (c *Checker) explicitMethodGenericParams(fnDef *FunctionDef, subject Type) []string {
@@ -1175,9 +1240,16 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Verify that all required methods are implemented
 				traitMethods := trait.GetMethods()
 				implementedMethods := make(map[string]bool)
+				invalidImplementedMethods := map[string]bool{}
+				receiverGenerics := genericParamsForType(targetType)
 
 				// Check each method in the implementation
 				for _, method := range s.Methods {
+					if len(method.TypeParams) > 0 {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						invalidImplementedMethods[method.Name] = true
+						continue
+					}
 					implementedMethods[method.Name] = true
 
 					// Find the corresponding trait method
@@ -1226,9 +1298,16 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}
 
 					// if we made it this far, it's a valid implementation
+					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add(s.Receiver.Name, targetType, method.Mutates)
-					}, genericParamsForType(targetType)...)
+					}, receiverGenerics...)
+					c.popMethodGenericAllowlist()
+					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						invalidImplementedMethods[method.Name] = true
+						continue
+					}
 					fnDef.Receiver = s.Receiver.Name
 					fnDef.Mutates = method.Mutates
 					// add the method to the struct method table
@@ -1237,7 +1316,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 				// Check if all required methods are implemented
 				for _, method := range traitMethods {
-					if !implementedMethods[method.Name] {
+					if !implementedMethods[method.Name] && !invalidImplementedMethods[method.Name] {
 						c.addError(fmt.Sprintf("Missing method '%s' in trait '%s'", method.Name, trait.name()), s.GetLocation())
 					}
 				}
@@ -1252,9 +1331,16 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Verify that all required methods are implemented (same logic as structs)
 				traitMethods := trait.GetMethods()
 				implementedMethods := make(map[string]bool)
+				invalidImplementedMethods := map[string]bool{}
+				receiverGenerics := genericParamsForType(targetType)
 
 				// Check each method in the implementation
 				for _, method := range s.Methods {
+					if len(method.TypeParams) > 0 {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						invalidImplementedMethods[method.Name] = true
+						continue
+					}
 					implementedMethods[method.Name] = true
 
 					// Find the corresponding trait method
@@ -1303,9 +1389,16 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}
 
 					// if we made it this far, it's a valid implementation
+					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add(s.Receiver.Name, targetType, false) // Enums are immutable, so always false
-					}, genericParamsForType(targetType)...)
+					}, receiverGenerics...)
+					c.popMethodGenericAllowlist()
+					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						invalidImplementedMethods[method.Name] = true
+						continue
+					}
 					fnDef.Receiver = s.Receiver.Name
 					// Enums cannot have mutating methods
 					if method.Mutates {
@@ -1323,7 +1416,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 				// Check if all required methods are implemented
 				for _, method := range traitMethods {
-					if !implementedMethods[method.Name] {
+					if !implementedMethods[method.Name] && !invalidImplementedMethods[method.Name] {
 						c.addError(fmt.Sprintf("Missing method '%s' in trait '%s'", method.Name, trait.name()), s.GetLocation())
 					}
 				}
@@ -1814,11 +1907,22 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 			switch def := sym.Type.(type) {
 			case *StructDef:
+				receiverGenerics := genericParamsForType(def)
 				for _, method := range s.Methods {
+					if len(method.TypeParams) > 0 {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						continue
+					}
+					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add(s.Receiver.Name, def, method.Mutates)
-					}, genericParamsForType(def)...)
+					}, receiverGenerics...)
+					c.popMethodGenericAllowlist()
 					if fnDef != nil {
+						if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
+							c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+							continue
+						}
 						fnDef.Receiver = s.Receiver.Name
 						fnDef.Mutates = method.Mutates
 						c.addStructMethod(def, fnDef)
@@ -1829,13 +1933,24 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				if def.Methods == nil {
 					def.Methods = make(map[string]*FunctionDef)
 				}
+				receiverGenerics := genericParamsForType(def)
 				for _, method := range s.Methods {
+					if len(method.TypeParams) > 0 {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						continue
+					}
 					if method.Mutates {
 						c.addError("Enum methods cannot be mutating", method.GetLocation())
 					}
+					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add(s.Receiver.Name, def, false)
-					}, genericParamsForType(def)...)
+					}, receiverGenerics...)
+					c.popMethodGenericAllowlist()
+					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						continue
+					}
 					fnDef.Receiver = s.Receiver.Name
 					def.Methods[method.Name] = fnDef
 				}
@@ -4322,7 +4437,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						fnDefCopy = fnDef
 					}
 				} else {
-					// Not a generic struct, use normal generic setup (for methods with their own generics)
 					fnDefCopy, genericScope = c.setupFunctionGenerics(fnDef)
 				}
 			} else {

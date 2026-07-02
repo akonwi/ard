@@ -160,28 +160,31 @@ func TestExplicitTypeArgsCannotOverrideReceiverGenericMethod(t *testing.T) {
 		t.Fatalf("first diagnostic = %q, want explicit method type arg rejection", got)
 	}
 }
-func TestExplicitMethodTypeArgsPreserveReceiverGenericBindings(t *testing.T) {
+func TestMethodsCannotIntroduceGenericParams(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct Box {
-			item: $T
+			item: Int
 		}
 
 		impl Box {
-			fn pick<$U>(value: $U) $T {
+			fn get() Int {
+				if true {
+					let x: $U = 1
+				}
 				self.item
 			}
 		}
-
-		let b = Box{item: 1}
-		let x: Int = b.pick<Str>("ok")
 	`), "test.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
 	c := New("test.ard", result.Program, nil)
 	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected method generic parameter error")
+	}
+	if got := c.Diagnostics()[0].Message; got != "methods cannot introduce generic type parameters; use the receiver type's generics" {
+		t.Fatalf("first diagnostic = %q, want method generic parameter rejection", got)
 	}
 }
 func TestUnboundGenericExplicitCallTypeArgIsRejected(t *testing.T) {
