@@ -92,12 +92,10 @@ func main() {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			builtPath, err := buildGoBinary(inputPath, outputPath)
-			if err != nil {
+			if _, err := buildGoBinary(inputPath, outputPath); err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			fmt.Printf("Built %s\n", builtPath)
 		}
 	case "test":
 		{
