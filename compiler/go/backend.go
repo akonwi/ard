@@ -232,7 +232,11 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool, pro
 	sort.Ints(moduleIDs)
 	for _, moduleID := range moduleIDs {
 		id := air.ModuleID(moduleID)
-		writeImportSpec(&b, imports.modules[id], modulePackageName(program, id), moduleImportPathWithPrefix(program, id, generatedModulePath(projectInfo)))
+		projectName := ""
+		if projectInfo != nil {
+			projectName = projectInfo.ProjectName
+		}
+		writeImportSpec(&b, imports.modules[id], modulePackageName(program, id), moduleImportPathForProject(program, id, generatedModulePath(projectInfo), projectName))
 	}
 	b.WriteString(")\n\n")
 	b.WriteString("type ardTestOutcome struct {\n")

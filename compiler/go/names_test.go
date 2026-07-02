@@ -25,6 +25,17 @@ func TestModulePackageHelpersSanitizePaths(t *testing.T) {
 		t.Fatalf("modulePackageDir dotted directory = %q, want v1_0/foo", got)
 	}
 }
+
+func TestModulePackageHelpersStripProjectName(t *testing.T) {
+	program := &air.Program{Modules: []air.Module{{ID: 0, Path: "modules.ard"}, {ID: 1, Path: "samples/maths.ard"}}}
+	if got := modulePackageDirWithProject(program, 1, "samples"); got != "maths" {
+		t.Fatalf("modulePackageDirWithProject = %q, want maths", got)
+	}
+	if got := moduleImportPathForProject(program, 1, "samples", "samples"); got != "samples/maths" {
+		t.Fatalf("moduleImportPathForProject = %q, want samples/maths", got)
+	}
+}
+
 func TestNaturalTypeNameUsesVisibilityForArdTypes(t *testing.T) {
 	program := &air.Program{Types: []air.TypeInfo{
 		{ID: 1, Kind: air.TypeStruct, Name: "User", ModulePath: "user.ard"},

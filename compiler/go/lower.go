@@ -382,7 +382,7 @@ func (l *lowerer) moduleOutputFileName(module air.Module, mainModuleID air.Modul
 	if l.entryAsMainPackage && module.ID == l.entryMainModuleID {
 		return "main.go"
 	}
-	return filepath.Join(modulePackageDir(l.program, module.ID), modulePackageFileName(l.program, module.ID))
+	return filepath.Join(l.modulePackageDir(module.ID), modulePackageFileName(l.program, module.ID))
 }
 
 // moduleIsImported reports whether any other module imports the target module.
@@ -949,12 +949,24 @@ func (l *lowerer) globalExpr(global air.Global) ast.Expr {
 	return l.moduleQualified(global.Module, name)
 }
 
+func (l *lowerer) modulePackageDir(module air.ModuleID) string {
+	projectName := ""
+	if l.projectInfo != nil {
+		projectName = l.projectInfo.ProjectName
+	}
+	return modulePackageDirWithProject(l.program, module, projectName)
+}
+
 func (l *lowerer) moduleQualified(module air.ModuleID, name string) ast.Expr {
 	return l.qualified(l.moduleImportAlias(module), l.moduleImportPath(module), name)
 }
 
 func (l *lowerer) moduleImportPath(module air.ModuleID) string {
-	return moduleImportPathWithPrefix(l.program, module, generatedModulePath(l.projectInfo))
+	projectName := ""
+	if l.projectInfo != nil {
+		projectName = l.projectInfo.ProjectName
+	}
+	return moduleImportPathForProject(l.program, module, generatedModulePath(l.projectInfo), projectName)
 }
 
 func (l *lowerer) moduleImportAlias(module air.ModuleID) string {

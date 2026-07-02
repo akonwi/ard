@@ -34,10 +34,18 @@ func modulePackageName(program *air.Program, module air.ModuleID) string {
 }
 
 func modulePackageDir(program *air.Program, module air.ModuleID) string {
+	return modulePackageDirWithProject(program, module, "")
+}
+
+func modulePackageDirWithProject(program *air.Program, module air.ModuleID, projectName string) string {
 	if program == nil || module < 0 || int(module) >= len(program.Modules) {
 		return "module"
 	}
 	pathNoExt := strings.TrimSuffix(program.Modules[module].Path, filepath.Ext(program.Modules[module].Path))
+	if projectName != "" {
+		pathNoExt = strings.TrimPrefix(pathNoExt, projectName+"/")
+		pathNoExt = strings.TrimPrefix(pathNoExt, projectName+"\\")
+	}
 	parts := strings.FieldsFunc(pathNoExt, func(r rune) bool { return r == '/' || r == '\\' })
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
@@ -57,10 +65,14 @@ func moduleImportPath(program *air.Program, module air.ModuleID) string {
 }
 
 func moduleImportPathWithPrefix(program *air.Program, module air.ModuleID, modulePath string) string {
+	return moduleImportPathForProject(program, module, modulePath, "")
+}
+
+func moduleImportPathForProject(program *air.Program, module air.ModuleID, modulePath string, projectName string) string {
 	if strings.TrimSpace(modulePath) == "" {
 		modulePath = "generated"
 	}
-	dir := modulePackageDir(program, module)
+	dir := modulePackageDirWithProject(program, module, projectName)
 	if dir == "" || dir == "." {
 		return modulePath
 	}
