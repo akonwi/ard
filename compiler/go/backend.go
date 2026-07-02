@@ -17,6 +17,7 @@ import (
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/stdlibgo"
 	"github.com/akonwi/ard/version"
+	"golang.org/x/mod/modfile"
 )
 
 type Options struct {
@@ -288,6 +289,9 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 			return err
 		}
 	}
+	if err := copyProjectFFIDir(dir, options.ProjectInfo); err != nil {
+		return err
+	}
 	goMod, err := generatedGoMod(dir, program, options.ProjectInfo)
 	if err != nil {
 		return err
@@ -302,25 +306,83 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 }
 
 func generatedGoMod(dir string, program *air.Program, projectInfo *checker.ProjectInfo) (string, error) {
-	goMod := "module generated\n\ngo 1.26.0\n"
+	goMod, err := generatedGoModBase(projectInfo)
+	if err != nil {
+		return "", err
+	}
 	ardRequirement, err := writeArdModuleDependency(dir)
 	if err != nil {
 		return "", err
 	}
-	goMod += ardRequirement
-
 	requireSeen := requireKeys(goMod)
 	requires := make([]string, 0)
+	addGoModRequirements(&requires, requireSeen, ardRequirement)
 	addDependencyGoModRequirements(&requires, requireSeen, program, projectInfo)
-	addGoModRequirementsFromFile(&requires, requireSeen, filepath.Join(dir, "go.mod"))
 	goMod += formatRequireBlock(requires)
 
 	replaceSeen := replaceKeys(goMod)
 	replaces := make([]string, 0)
+	addGoModReplaces(&replaces, replaceSeen, ardRequirement)
 	addDependencyGoModReplaces(&replaces, replaceSeen, program, projectInfo)
-	addGoModReplacesFromFile(&replaces, replaceSeen, filepath.Join(dir, "go.mod"), dir)
 	goMod += formatReplaceBlock(replaces)
 	return goMod, nil
+}
+
+func generatedGoModBase(projectInfo *checker.ProjectInfo) (string, error) {
+	if projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
+		goModPath := filepath.Join(projectInfo.RootPath, "go.mod")
+		data, err := os.ReadFile(goModPath)
+		if err == nil {
+			rewritten, err := rewriteRelativeReplaces(data, projectInfo.RootPath)
+			if err != nil {
+				return "", err
+			}
+			return string(rewritten), nil
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		if strings.TrimSpace(projectInfo.ProjectName) != "" {
+			return fmt.Sprintf("module %s\n\ngo 1.26.0\n", projectInfo.ProjectName), nil
+		}
+	}
+	return "module generated\n\ngo 1.26.0\n", nil
+}
+
+func rewriteRelativeReplaces(data []byte, projectRoot string) ([]byte, error) {
+	file, err := modfile.Parse("go.mod", data, nil)
+	if err != nil {
+		return nil, err
+	}
+	type replacementRewrite struct {
+		oldPath    string
+		oldVersion string
+		newPath    string
+	}
+	rewrites := []replacementRewrite{}
+	for _, replace := range file.Replace {
+		if replace.New.Version != "" || !isRelativeLocalReplacePath(replace.New.Path) {
+			continue
+		}
+		abs, err := filepath.Abs(filepath.Join(projectRoot, replace.New.Path))
+		if err != nil {
+			return nil, err
+		}
+		rewrites = append(rewrites, replacementRewrite{oldPath: replace.Old.Path, oldVersion: replace.Old.Version, newPath: abs})
+	}
+	for _, rewrite := range rewrites {
+		if err := file.DropReplace(rewrite.oldPath, rewrite.oldVersion); err != nil {
+			return nil, err
+		}
+		if err := file.AddReplace(rewrite.oldPath, rewrite.oldVersion, rewrite.newPath, ""); err != nil {
+			return nil, err
+		}
+	}
+	return file.Format()
+}
+
+func isRelativeLocalReplacePath(path string) bool {
+	return strings.HasPrefix(path, "./") || strings.HasPrefix(path, "../") || path == "." || path == ".."
 }
 
 func addDependencyGoModRequirements(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
@@ -455,13 +517,23 @@ func addGoModReplacesFromFile(out *[]string, seen map[string]bool, path string, 
 		if !ok {
 			continue
 		}
-		key := replaceKey(normalized)
-		if key == "" || replacedModulePath(key) == "github.com/akonwi/ard" || seen[key] {
-			continue
-		}
-		seen[key] = true
-		*out = append(*out, normalized)
+		addGoModReplace(out, seen, normalized)
 	}
+}
+
+func addGoModReplaces(out *[]string, seen map[string]bool, goMod string) {
+	for _, replace := range extractReplaceLines(goMod) {
+		addGoModReplace(out, seen, replace)
+	}
+}
+
+func addGoModReplace(out *[]string, seen map[string]bool, replace string) {
+	key := replaceKey(replace)
+	if key == "" || seen[key] {
+		return
+	}
+	seen[key] = true
+	*out = append(*out, replace)
 }
 
 func replaceKeys(goMod string) map[string]bool {
@@ -564,6 +636,9 @@ func mergeGoSum(dir string, program *air.Program, projectInfo *checker.ProjectIn
 	lines := make([]string, 0)
 	seen := map[string]bool{}
 	addGoSumLines(&lines, seen, goSumPath)
+	if projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
+		addGoSumLines(&lines, seen, filepath.Join(projectInfo.RootPath, "go.sum"))
+	}
 	for _, root := range dependencyGoModPackages(program, projectInfo) {
 		addGoSumLines(&lines, seen, filepath.Join(root, "go.sum"))
 	}
@@ -808,6 +883,60 @@ func writeArdModuleDependency(dir string) (string, error) {
 		return fmt.Sprintf("\nrequire github.com/akonwi/ard v0.0.0\nreplace github.com/akonwi/ard => %s\n", moduleRoot), nil
 	}
 	return "", nil
+}
+
+func copyProjectFFIDir(outputDir string, projectInfo *checker.ProjectInfo) error {
+	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
+		return nil
+	}
+	source := filepath.Join(projectInfo.RootPath, "ffi")
+	info, err := os.Stat(source)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("project ffi path is not a directory: %s", source)
+	}
+	return copyDir(source, filepath.Join(outputDir, "ffi"))
+}
+
+func copyDir(source string, dest string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if entry.IsDir() {
+			if strings.HasPrefix(entry.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return os.MkdirAll(filepath.Join(dest, rel), 0o755)
+		}
+		if strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dest, rel)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
 }
 
 func writeEmbeddedArdModule(dir string) error {
