@@ -1087,11 +1087,21 @@ func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, 
 		}
 		return fl.l.internSyntheticType("["+fl.l.typeName(key)+":"+fl.l.typeName(value)+"]", TypeInfo{Kind: TypeMap, Key: key, Value: value})
 	case *checker.Maybe:
-		elem, err := fl.internResolvedType(typ.Of())
+		elemType := typ.Of()
+		elemMutable := false
+		if ref, ok := elemType.(*checker.MutableRef); ok {
+			elemMutable = true
+			elemType = ref.Of()
+		}
+		elem, err := fl.internResolvedType(elemType)
 		if err != nil {
 			return NoType, err
 		}
-		return fl.l.internSyntheticType(fl.l.typeName(elem)+"?", TypeInfo{Kind: TypeMaybe, Elem: elem})
+		name := fl.l.typeName(elem) + "?"
+		if elemMutable {
+			name = "(mut " + fl.l.typeName(elem) + ")?"
+		}
+		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeMaybe, Elem: elem, ElemMutable: elemMutable})
 	case *checker.Result:
 		value, err := fl.internResolvedType(typ.Val())
 		if err != nil {
@@ -1169,11 +1179,21 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 		}
 		return fl.l.internSyntheticType("["+fl.l.typeName(key)+":"+fl.l.typeName(value)+"]", TypeInfo{Kind: TypeMap, Key: key, Value: value})
 	case *checker.Maybe:
-		elem, err := fl.internType(typ.Of())
+		elemType := typ.Of()
+		elemMutable := false
+		if ref, ok := elemType.(*checker.MutableRef); ok {
+			elemMutable = true
+			elemType = ref.Of()
+		}
+		elem, err := fl.internType(elemType)
 		if err != nil {
 			return NoType, err
 		}
-		return fl.l.internSyntheticType(fl.l.typeName(elem)+"?", TypeInfo{Kind: TypeMaybe, Elem: elem})
+		name := fl.l.typeName(elem) + "?"
+		if elemMutable {
+			name = "(mut " + fl.l.typeName(elem) + ")?"
+		}
+		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeMaybe, Elem: elem, ElemMutable: elemMutable})
 	case *checker.Result:
 		value, err := fl.internType(typ.Val())
 		if err != nil {
@@ -1930,12 +1950,19 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		info.Key = key
 		info.Value = value
 	case *checker.Maybe:
-		elem, err := l.internType(typ.Of())
+		elemType := typ.Of()
+		elemMutable := false
+		if ref, ok := elemType.(*checker.MutableRef); ok {
+			elemMutable = true
+			elemType = ref.Of()
+		}
+		elem, err := l.internType(elemType)
 		if err != nil {
 			return NoType, err
 		}
 		info.Kind = TypeMaybe
 		info.Elem = elem
+		info.ElemMutable = elemMutable
 	case *checker.MutableRef:
 		return l.internType(typ.Of())
 	case *checker.Result:
@@ -2109,7 +2136,7 @@ func syntheticTypeKey(name string, info TypeInfo) string {
 	case TypeMap:
 		return fmt.Sprintf("map:%d:%d", info.Key, info.Value)
 	case TypeMaybe:
-		return fmt.Sprintf("maybe:%d", info.Elem)
+		return fmt.Sprintf("maybe:%d:%t", info.Elem, info.ElemMutable)
 	case TypeResult:
 		return fmt.Sprintf("result:%d:%d", info.Value, info.Error)
 	case TypeFunction:
@@ -3731,6 +3758,22 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			args[i] = *lowered
 		}
 		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, Args: args}, nil
+	case *checker.AnyCast:
+		value, err := fl.lowerExprWithExpected(e.Value, fl.l.mustIntern(checker.Any))
+		if err != nil {
+			return nil, err
+		}
+		targetType := e.TargetType
+		mutable := false
+		if ref, ok := targetType.(*checker.MutableRef); ok {
+			mutable = true
+			targetType = ref.Of()
+		}
+		targetTypeID, err := fl.l.internType(targetType)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprAnyCast, Type: typeID, Target: value, TypeArgs: []TypeID{targetTypeID}, ForeignPointer: mutable}, nil
 	case *checker.ForeignFunctionCall:
 		args := make([]Expr, len(e.Call.Args))
 		fnDef := e.Call.Definition()

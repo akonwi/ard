@@ -137,10 +137,11 @@ type TypeInfo struct {
 	ModulePath string
 	Private    bool
 
-	Elem  TypeID
-	Key   TypeID
-	Value TypeID
-	Error TypeID
+	Elem        TypeID
+	ElemMutable bool
+	Key         TypeID
+	Value       TypeID
+	Error       TypeID
 
 	ForeignTarget    string
 	ForeignNamespace string

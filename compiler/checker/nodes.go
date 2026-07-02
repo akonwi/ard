@@ -1274,6 +1274,16 @@ func (p *ForeignValue) Type() Type {
 	return p.ValueType
 }
 
+// AnyCast is the compiler-backed ard/any::cast<T>(value) operation.
+// TargetType is the requested T, including mut T when mutable access is requested.
+type AnyCast struct {
+	Value      Expression
+	TargetType Type
+	ReturnType Type
+}
+
+func (p *AnyCast) Type() Type { return p.ReturnType }
+
 type ModuleSymbol struct {
 	Module string
 	Symbol Symbol

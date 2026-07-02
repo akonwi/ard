@@ -1304,6 +1304,70 @@ func TestRunProgramExecutesGoFmtPrintln(t *testing.T) {
 	}
 }
 
+func TestRunProgramExecutesAnyValueCast(t *testing.T) {
+	program := lowerSource(t, `use ard/any
+
+fn main() {
+  let value: Any = "hello"
+  let text = any::cast<Str>(value).expect("cast")
+  if not text == "hello" { panic("bad cast") }
+  if any::cast<Int>(value).is_some() { panic("unexpected int") }
+}`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramExecutesAnyMutableCast(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"anycast\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module anycast\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
+
+var Name = "Ada"
+
+func BoxName() any { return &Name }
+func BoxNilName() any { var name *string; return name }
+func NameValue() string { return Name }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use ard/any
+use go:anycast/ffi
+
+fn main() {
+  let name = any::cast<mut Str>(ffi::BoxName())
+  if not name.is_some() { panic("mutable cast failed") }
+  if any::cast<mut Str>("Ada").is_some() { panic("mutable cast accepted value") }
+  if any::cast<mut Str>(ffi::BoxNilName()).is_some() { panic("mutable cast accepted nil") }
+  if not any::cast<Str>(ffi::BoxName()).expect("value") == "Ada" { panic("value cast did not deref") }
+  if any::cast<Str>(ffi::BoxNilName()).is_some() { panic("value cast accepted nil") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesGoNamedMapMethods(t *testing.T) {
 	program := lowerSource(t, `
 		use go:net/url

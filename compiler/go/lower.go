@@ -1726,7 +1726,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		expected := air.NoType
 		if validTypeID(l.program, expr.Type) {
-			if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeMaybe {
+			if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeMaybe && !info.ElemMutable {
 				expected = info.Elem
 			}
 		}
@@ -1975,7 +1975,11 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("to any missing target")
 		}
-		return l.lowerExpr(fn, *expr.Target)
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprStrTrim:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("str trim missing target")
@@ -2274,6 +2278,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerForeignStructInstance(fn, expr)
 	case air.ExprForeignValue:
 		return l.lowerForeignValue(expr)
+	case air.ExprAnyCast:
+		return l.lowerAnyCast(fn, expr)
 	case air.ExprCall:
 		if !validFunctionID(l.program, expr.Function) {
 			return loweredExpr{}, fmt.Errorf("invalid function id %d", expr.Function)
@@ -2663,6 +2669,68 @@ func (l *lowerer) lowerForeignFieldAccess(fn air.Function, expr air.Expr) (lower
 		return loweredExpr{}, err
 	}
 	return loweredExpr{stmts: target.stmts, expr: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(expr.ForeignSymbol)}}, nil
+}
+
+func (l *lowerer) lowerAnyCast(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("Any cast missing target")
+	}
+	if len(expr.TypeArgs) != 1 {
+		return loweredExpr{}, fmt.Errorf("Any cast expects one target type, got %d", len(expr.TypeArgs))
+	}
+	maybeType, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	targetType, err := l.goType(expr.TypeArgs[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	value, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultElemType := targetType
+	if expr.ForeignPointer {
+		resultElemType = &ast.StarExpr{X: targetType}
+	}
+
+	valueName := l.nextTemp()
+	cases := []*ast.CaseClause{}
+	if !expr.ForeignPointer {
+		cases = append(cases, &ast.CaseClause{
+			List: []ast.Expr{targetType},
+			Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: resultElemType}, Args: []ast.Expr{ast.NewIdent(valueName)}}}}},
+		})
+	}
+	pointerType := &ast.StarExpr{X: targetType}
+	pointerBody := []ast.Stmt{
+		&ast.IfStmt{Cond: &ast.BinaryExpr{X: ast.NewIdent(valueName), Op: token.NEQ, Y: ast.NewIdent("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: resultElemType}, Args: []ast.Expr{anyCastSomeArg(ast.NewIdent(valueName), expr.ForeignPointer)}}}}}}},
+	}
+	cases = append(cases, &ast.CaseClause{List: []ast.Expr{pointerType}, Body: pointerBody})
+	body := []ast.Stmt{
+		&ast.TypeSwitchStmt{
+			Assign: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(valueName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: value.expr, Type: nil}}},
+			Body:   &ast.BlockStmt{List: typeSwitchClausesToStmts(cases)},
+		},
+		&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "None"), Index: resultElemType}}}},
+	}
+	return loweredExpr{stmts: value.stmts, expr: &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Results: &ast.FieldList{List: []*ast.Field{{Type: maybeType}}}}, Body: &ast.BlockStmt{List: body}}}}, nil
+}
+
+func anyCastSomeArg(value ast.Expr, mutable bool) ast.Expr {
+	if mutable {
+		return value
+	}
+	return &ast.StarExpr{X: value}
+}
+
+func typeSwitchClausesToStmts(cases []*ast.CaseClause) []ast.Stmt {
+	stmts := make([]ast.Stmt, len(cases))
+	for i, clause := range cases {
+		stmts[i] = clause
+	}
+	return stmts
 }
 
 func (l *lowerer) lowerForeignValue(expr air.Expr) (loweredExpr, error) {
@@ -3351,6 +3419,9 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		elem, err := l.goType(info.Elem)
 		if err != nil {
 			return nil, err
+		}
+		if info.ElemMutable {
+			elem = &ast.StarExpr{X: elem}
 		}
 		return &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Maybe"), Index: elem}, nil
 	case air.TypeFunction:
@@ -6893,7 +6964,14 @@ func (l *lowerer) maybeElemTypeExpr(maybeTypeID air.TypeID) (ast.Expr, error) {
 	if info.Kind != air.TypeMaybe {
 		return nil, fmt.Errorf("expected maybe type, got kind %d", info.Kind)
 	}
-	return l.goType(info.Elem)
+	elem, err := l.goType(info.Elem)
+	if err != nil {
+		return nil, err
+	}
+	if info.ElemMutable {
+		elem = &ast.StarExpr{X: elem}
+	}
+	return elem, nil
 }
 
 func (l *lowerer) maybeSomeExpr(maybeTypeID air.TypeID, value ast.Expr) (ast.Expr, error) {

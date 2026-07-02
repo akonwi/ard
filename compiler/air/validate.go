@@ -338,6 +338,14 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	if expr.Kind == ExprToAny && expr.Target == nil {
 		return fmt.Errorf("to_dyn expression missing target")
 	}
+	if expr.Kind == ExprAnyCast {
+		if expr.Target == nil {
+			return fmt.Errorf("Any cast expression missing target")
+		}
+		if len(expr.TypeArgs) != 1 {
+			return fmt.Errorf("Any cast expression expects one target type, got %d", len(expr.TypeArgs))
+		}
+	}
 	if expr.Kind == ExprPanic && expr.Target == nil {
 		return fmt.Errorf("panic expression missing target")
 	}
