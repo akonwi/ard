@@ -2022,6 +2022,20 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 			}
 			info.Value = underlying
 		}
+		if typ.MapKey != nil {
+			key, err := l.internType(typ.MapKey)
+			if err != nil {
+				return NoType, err
+			}
+			info.Key = key
+		}
+		if typ.MapValue != nil {
+			value, err := l.internType(typ.MapValue)
+			if err != nil {
+				return NoType, err
+			}
+			info.Value = value
+		}
 	case *checker.FunctionDef:
 		info.Kind = TypeFunction
 		for _, param := range typ.Parameters {
@@ -4575,7 +4589,7 @@ func (fl *functionLowerer) lowerMapMethod(typeID TypeID, method *checker.MapMeth
 		return nil, err
 	}
 	mapType, ok := fl.l.typeInfo(target.Type)
-	if !ok || mapType.Kind != TypeMap {
+	if !ok || (mapType.Kind != TypeMap && !(mapType.Kind == TypeForeignType && mapType.Key != NoType && mapType.Value != NoType)) {
 		return nil, fmt.Errorf("Map method lowered with non-map subject %s", method.Subject.Type().String())
 	}
 

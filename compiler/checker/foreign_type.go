@@ -11,6 +11,8 @@ type ForeignType struct {
 	Underlying         Type
 	Pointer            bool
 	Struct             bool
+	MapKey             Type
+	MapValue           Type
 	Fields             map[string]Type
 	UnsupportedFields  map[string]string
 	FieldsLoaded       bool
@@ -31,6 +33,11 @@ func (f *ForeignType) String() string {
 }
 
 func (f *ForeignType) get(name string) Type {
+	if f.MapKey != nil && f.MapValue != nil {
+		if method := MakeMap(f.MapKey, f.MapValue).get(name); method != nil {
+			return method
+		}
+	}
 	if !f.FieldsLoaded {
 		f.Fields, f.UnsupportedFields = loadForeignTypeFields(f)
 		f.FieldsLoaded = true

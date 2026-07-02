@@ -479,7 +479,7 @@ func (m *MapMethod) Type() Type {
 	case MapGet:
 		return MakeMaybe(m.ValueType)
 	case MapSet:
-		return Bool
+		return Void
 	case MapDrop:
 		return Void
 	case MapHas:

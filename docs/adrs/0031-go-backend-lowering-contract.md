@@ -202,7 +202,7 @@ The backend lowers Ard types to Go types directly. The only shared runtime types
 #### Containers
 
 - `List[T]` lowers to `[]T`.
-- `Map[K]V` lowers to `map[K]V`. Map key types are constrained, during checking, to types that are Go strictly-comparable and whose Go `==` matches Ard equality. This allows all primitives (including `Float64`), enums, and structs whose fields are all valid key types. It excludes `Maybe` (which is Go-comparable but would compare by pointer identity, not value, because it is pointer-backed), `List`, `Map`, and `Any`. Every Ard map therefore lowers to a plain Go map and no structural-map helper is generated. `Float64` keys carry Go's usual `NaN`-key behavior, which is accepted.
+- `Map[K]V` lowers to `map[K]V`. Map key types are constrained, during checking, to types that are valid Go map keys and whose Go `==` matches Ard equality. This allows all primitives (including `Float64`), enums, and structs whose fields are all valid key types. It excludes `Maybe` (which is Go-comparable but would compare by pointer identity, not value, because it is pointer-backed), `List`, `Map`, and `Any`. Every Ard map therefore lowers to a plain Go map and no structural-map helper is generated. `Float64` keys carry Go's usual `NaN`-key behavior, which is accepted. Ard exposes map operations through methods (`get`, `has`, `set`, `remove`/`drop`, `size`, and key/value helpers) rather than subscript syntax; those methods lower to the corresponding Go map lookup, assignment, `delete`, `len`, and range operations. `get` exposes Go's comma-ok lookup as `Maybe[V]`; `set` and `remove`/`drop` return `Void`. Mutable map methods require a mutable receiver.
 - `Struct` lowers to a Go struct. Fields appear in AIR index order and are always exported regardless of the struct's visibility, so every struct is uniformly serializable; the struct type's own visibility still governs cross-package naming. Each field carries a `json` tag preserving its original Ard name (see the JSON and marshalling section). Field indirection is not added for the common recursive cases: a nullable self-reference is finite because `Maybe[T]` is pointer-backed, and list/map self-references are finite through the slice/map. Explicit pointer indirection is inserted only for a non-nullable, non-collection recursive cycle that would otherwise be infinitely sized (see `0020-support-recursive-struct-fields-through-indirection.md`).
 
 #### Maybe, Result, Any
@@ -536,13 +536,14 @@ Go values map to Ard types structurally, and a few idiomatic Go shapes are adapt
 - Go `struct{}` is Ard's unit type `Void`, and a no-result Go function is `Void` too.
 - A Go function returning `(T, error)` is adapted to Ard `T!Str`; one returning only `error` is `Void!Str`. The Go `error` is stringified — Ard does not model Go's `error` interface as a value.
 - A Go function returning the comma-ok pair `(T, bool)` is adapted to Ard `T?`.
-- Otherwise a single Go result maps to its Ard type by the normal rules: primitives, `[]T` to `[T]`, `map[K]V` to `[K:V]`, `any` to `Any`, `func` to a function type, and `chan T` to a channel (directional per `0032-select-on-channels.md`).
+- Otherwise a single Go result maps to its Ard type by the normal rules: primitives, `[]T` to `[T]`, `map[K]V` to `[K:V]`, `any` to `Any`, `func` to a function type, and `chan T` to a channel (directional per `0032-select-on-channels.md`). Named Go map types remain foreign named types, but expose map-like methods when their key and value types are representable.
 
 These boundary adaptations are distinct from how Ard's own types lower. An Ard `Result[T, E]` value still lowers to `runtime.Result[T, E]` and is not collapsed into `(T, error)`; the adaptations above apply only when *calling* idiomatic Go through `use go:`.
 
 Passing Ard values into Go follows Go's own assignability so idiomatic, `any`-heavy Go libraries are usable from pure Ard:
 
 - Any representable Ard value flows into a Go `any` parameter or field; scalars convert implicitly and an Ard list passed to a Go `[]any` is boxed element-wise. A list literal targeting a Go slice is checked element-by-element against the slice's element type, so a `[]any` accepts a heterogeneous mix.
+- Go `map[K]V` parameters are imported as mutable Ard parameters, matching slice interop. Go does not express read-only maps, and maps are reference types, so passing a map to Go makes mutation risk explicit at the Ard call site.
 - A Go type alias is the same type as its target across packages (`ui.Style = vaxis.Style`), compared by unaliased `go/types` identity.
 - A closure satisfies a named Go func type (`type VoidCallback func(...)`) when its signature matches.
 - A Go variadic parameter is exposed to Ard as exactly one argument of the variadic element type. For example, `fmt.Println(a ...any)` is callable as `fmt::Println(value)`; Ard does not gain variadic parameters or spread syntax from Go interop.

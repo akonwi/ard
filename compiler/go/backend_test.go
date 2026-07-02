@@ -1304,6 +1304,31 @@ func TestRunProgramExecutesGoFmtPrintln(t *testing.T) {
 	}
 }
 
+func TestRunProgramExecutesGoNamedMapMethods(t *testing.T) {
+	program := lowerSource(t, `
+		use go:net/url
+
+		fn main() {
+			mut values = try url::ParseQuery("a=one") -> err { panic(err) }
+			if not values.has("a") {
+				panic("missing")
+			}
+			values.set("b", ["two"])
+			if not values.has("b") {
+				panic("set failed")
+			}
+			values.remove("a")
+			if values.has("a") {
+				panic("remove failed")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesSimpleMain(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Void {

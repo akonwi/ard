@@ -88,6 +88,8 @@ func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, in
 			goType = slice.Elem()
 		} else if _, ok := goType.Underlying().(*types.Slice); ok {
 			mutable = true
+		} else if _, ok := goType.Underlying().(*types.Map); ok {
+			mutable = true
 		}
 		ardType, reason := typeFromGoWithMethods(goType, includeMethods)
 		if reason != "" {
@@ -256,6 +258,17 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 		}
 		return MakeList(elem), ""
 	}
+	if goMap, ok := t.Underlying().(*types.Map); ok {
+		key, reason := typeFromGoWithMethods(goMap.Key(), includeMethods)
+		if reason != "" {
+			return nil, "map key " + reason
+		}
+		value, reason := typeFromGoWithMethods(goMap.Elem(), includeMethods)
+		if reason != "" {
+			return nil, "map value " + reason
+		}
+		return MakeMap(key, value), ""
+	}
 	return primitiveTypeFromGo(t)
 }
 
@@ -275,6 +288,15 @@ func unsupportedForeignNamedUnderlying(underlying types.Type, pointer bool) stri
 		return ""
 	}
 	if _, ok := underlying.(*types.Struct); ok {
+		return ""
+	}
+	if goMap, ok := underlying.(*types.Map); ok {
+		if _, reason := typeFromGoWithMethods(goMap.Key(), false); reason != "" {
+			return "map key " + reason
+		}
+		if _, reason := typeFromGoWithMethods(goMap.Elem(), false); reason != "" {
+			return "map value " + reason
+		}
 		return ""
 	}
 	if _, ok := underlying.(*types.Interface); ok {
@@ -297,6 +319,16 @@ func foreignNamedTypeFromGo(named *types.Named, pointer bool, includeMethods boo
 	underlying, _ := primitiveTypeFromGo(named.Underlying())
 	_, isStruct := named.Underlying().(*types.Struct)
 	foreign := &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying, Pointer: pointer, Struct: isStruct}
+	if !pointer {
+		if goMap, ok := named.Underlying().(*types.Map); ok {
+			if key, reason := typeFromGoWithMethods(goMap.Key(), false); reason == "" {
+				foreign.MapKey = key
+			}
+			if value, reason := typeFromGoWithMethods(goMap.Elem(), false); reason == "" {
+				foreign.MapValue = value
+			}
+		}
+	}
 	if includeMethods {
 		foreign.Methods, foreign.UnsupportedMethods = goMethodsForNamedType(named, pointer)
 		foreign.MethodsLoaded = true
@@ -391,7 +423,7 @@ func goMethodsForNamedType(named *types.Named, pointer bool) (map[string]*Functi
 func primitiveTypeFromGo(t types.Type) (Type, string) {
 	basic, ok := t.Underlying().(*types.Basic)
 	if !ok {
-		return nil, "only basic scalar, slice, and any types are supported"
+		return nil, "only basic scalar, slice, map, and any types are supported"
 	}
 	switch basic.Kind() {
 	case types.Bool:

@@ -3362,6 +3362,9 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 	if _, isMap := subject.Type().(*Map); isMap {
 		return c.createMapMethod(subject, methodName, args, fnDef)
 	}
+	if foreign, isForeign := subject.Type().(*ForeignType); isForeign && foreign.MapKey != nil && foreign.MapValue != nil {
+		return c.createMapMethod(subject, methodName, args, fnDef)
+	}
 	if _, isMaybe := subject.Type().(*Maybe); isMaybe {
 		return c.createMaybeMethod(subject, methodName, args, fnDef)
 	}
@@ -3539,8 +3542,27 @@ func (c *Checker) createListMethod(subject Expression, methodName string, args [
 	}
 }
 
+func isMapMethodName(name string) bool {
+	switch name {
+	case "keys", "size", "get", "set", "drop", "remove", "has":
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *Checker) createMapMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
-	mapType := subject.Type().(*Map)
+	var keyType Type
+	var valueType Type
+	if mapType, ok := subject.Type().(*Map); ok {
+		keyType = mapType.Key()
+		valueType = mapType.Value()
+	} else if foreign, ok := subject.Type().(*ForeignType); ok && foreign.MapKey != nil && foreign.MapValue != nil {
+		keyType = foreign.MapKey
+		valueType = foreign.MapValue
+	} else {
+		panic(fmt.Sprintf("Map method on non-map type: %s", subject.Type()))
+	}
 	var kind MapMethodKind
 	switch methodName {
 	case "keys":
@@ -3551,7 +3573,7 @@ func (c *Checker) createMapMethod(subject Expression, methodName string, args []
 		kind = MapGet
 	case "set":
 		kind = MapSet
-	case "drop":
+	case "drop", "remove":
 		kind = MapDrop
 	case "has":
 		kind = MapHas
@@ -3562,8 +3584,8 @@ func (c *Checker) createMapMethod(subject Expression, methodName string, args []
 		Subject:   subject,
 		Kind:      kind,
 		Args:      args,
-		KeyType:   mapType.Key(),
-		ValueType: mapType.Value(),
+		KeyType:   keyType,
+		ValueType: valueType,
 		fn:        fnDef,
 	}
 }
@@ -4337,6 +4359,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 			if foreign, ok := subj.Type().(*ForeignType); ok {
+				if foreign.MapKey != nil && foreign.MapValue != nil && isMapMethodName(s.Method.Name) {
+					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs)
+				}
 				for _, arg := range s.Method.Args {
 					if arg.Name != "" {
 						c.addError("Foreign method calls do not support named arguments", arg.GetLocation())

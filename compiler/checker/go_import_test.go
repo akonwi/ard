@@ -447,6 +447,19 @@ fn split() [Str] {
 	})
 }
 
+func TestGoNamedMapTypesExposeMapMethods(t *testing.T) {
+	run(t, []test{
+		{
+			name: "url Values returned from Go exposes map get",
+			input: `use go:net/url
+fn first() {
+  let values = try url::ParseQuery("a=1") -> err { panic(err) }
+  values.get("a").expect("missing")
+}`,
+		},
+	})
+}
+
 func TestAnyAcceptsAnyArdValue(t *testing.T) {
 	run(t, []test{
 		{

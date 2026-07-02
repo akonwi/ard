@@ -3190,7 +3190,7 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 		if info.ForeignPointer {
 			return ast.NewIdent("nil"), nil
 		}
-		if validTypeID(l.program, info.Value) {
+		if validTypeID(l.program, info.Value) && !validTypeID(l.program, info.Key) {
 			return l.zeroValueExpr(info.Value)
 		}
 		typ, err := l.goType(typeID)
@@ -3224,7 +3224,7 @@ func (l *lowerer) mapKeyValueTypes(mapTypeID air.TypeID) (air.TypeID, air.TypeID
 		return air.NoType, air.NoType
 	}
 	info := l.program.Types[mapTypeID-1]
-	if info.Kind != air.TypeMap {
+	if info.Kind != air.TypeMap && !(info.Kind == air.TypeForeignType && validTypeID(l.program, info.Key) && validTypeID(l.program, info.Value)) {
 		return air.NoType, air.NoType
 	}
 	return info.Key, info.Value
@@ -6282,7 +6282,7 @@ func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, erro
 		valueExpr = l.voidValueExpr()
 	}
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: keyExpr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}})
-	return loweredExpr{stmts: stmts, expr: ast.NewIdent("true")}, nil
+	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
 }
 
 func (l *lowerer) lowerMapDrop(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -6364,7 +6364,7 @@ func (l *lowerer) mapKeyHelper(typeID air.TypeID) (string, error) {
 		return "", fmt.Errorf("invalid map type %d", typeID)
 	}
 	info := l.program.Types[typeID-1]
-	if info.Kind != air.TypeMap {
+	if info.Kind != air.TypeMap && !(info.Kind == air.TypeForeignType && validTypeID(l.program, info.Key) && validTypeID(l.program, info.Value)) {
 		return "", fmt.Errorf("type %s is not a map", info.Name)
 	}
 	keyType := l.program.Types[info.Key-1]
