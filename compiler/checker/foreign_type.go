@@ -4,21 +4,25 @@ package checker
 // its underlying Ard representation. When Underlying is nil, the value is opaque
 // to Ard and can only be stored or passed back across compatible foreign boundaries.
 type ForeignType struct {
-	Target             string
-	Namespace          string
-	Qualifier          string
-	Name               string
-	Underlying         Type
-	Pointer            bool
-	Struct             bool
-	MapKey             Type
-	MapValue           Type
-	Fields             map[string]Type
-	UnsupportedFields  map[string]string
-	FieldsLoaded       bool
-	Methods            map[string]*FunctionDef
-	UnsupportedMethods map[string]string
-	MethodsLoaded      bool
+	Target                    string
+	Namespace                 string
+	Qualifier                 string
+	Name                      string
+	Underlying                Type
+	Pointer                   bool
+	Struct                    bool
+	MapKey                    Type
+	MapValue                  Type
+	Fields                    map[string]Type
+	UnsupportedFields         map[string]string
+	FieldsLoaded              bool
+	Methods                   map[string]*FunctionDef
+	UnsupportedMethods        map[string]string
+	PointerMethods            map[string]*FunctionDef
+	UnsupportedPointerMethods map[string]string
+	MethodsLoaded             bool
+	LoadFields                func() (map[string]Type, map[string]string)
+	LoadMethods               func(pointer bool) (map[string]*FunctionDef, map[string]string)
 }
 
 func (f *ForeignType) String() string {
@@ -38,15 +42,18 @@ func (f *ForeignType) get(name string) Type {
 			return method
 		}
 	}
-	if !f.FieldsLoaded {
-		f.Fields, f.UnsupportedFields = loadForeignTypeFields(f)
+	if !f.FieldsLoaded && f.LoadFields != nil {
+		f.Fields, f.UnsupportedFields = f.LoadFields()
 		f.FieldsLoaded = true
 	}
 	if field := f.Fields[name]; field != nil {
 		return field
 	}
-	if !f.MethodsLoaded {
-		f.Methods, f.UnsupportedMethods = loadForeignTypeMethods(f)
+	if !f.MethodsLoaded && f.LoadMethods != nil {
+		f.Methods, f.UnsupportedMethods = f.LoadMethods(f.Pointer)
+		if !f.Pointer {
+			f.PointerMethods, f.UnsupportedPointerMethods = f.LoadMethods(true)
+		}
 		f.MethodsLoaded = true
 	}
 	method := f.Methods[name]

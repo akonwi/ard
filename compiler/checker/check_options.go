@@ -10,6 +10,7 @@ type CheckOptions struct {
 	// ModulePath overrides the checked module identity while keeping filePath for diagnostics.
 	ModulePath string
 	Target     TargetInfo
+	GoResolver GoPackageResolver
 }
 
 func normalizeCheckOptions(options []CheckOptions) CheckOptions {

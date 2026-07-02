@@ -355,7 +355,11 @@ func (c *Checker) Check() {
 		seenImportAliases[imp.Name] = struct{}{}
 
 		if imp.Kind == parse.ImportKindGo {
-			pkg, err := ResolveGoPackage(imp.Path)
+			resolver := c.options.GoResolver
+			if resolver == nil {
+				resolver = ImporterGoPackageResolver{}
+			}
+			pkg, err := resolver.ResolveGoPackage(imp.Path)
 			if err != nil {
 				c.addError(fmt.Sprintf("Failed to resolve Go import '%s': %v", imp.Path, err), imp.GetLocation())
 				continue
@@ -3204,8 +3208,8 @@ func (c *Checker) validateForeignStructInstance(foreign *ForeignType, properties
 		c.addError("Go struct literals require a non-pointer Go struct type", loc)
 		return nil
 	}
-	if !foreign.FieldsLoaded {
-		foreign.Fields, foreign.UnsupportedFields = loadForeignTypeFields(foreign)
+	if !foreign.FieldsLoaded && foreign.LoadFields != nil {
+		foreign.Fields, foreign.UnsupportedFields = foreign.LoadFields()
 		foreign.FieldsLoaded = true
 	}
 	fields := map[string]Expression{}
@@ -4226,8 +4230,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			if foreign, ok := subj.Type().(*ForeignType); ok {
-				if !foreign.FieldsLoaded {
-					foreign.Fields, foreign.UnsupportedFields = loadForeignTypeFields(foreign)
+				if !foreign.FieldsLoaded && foreign.LoadFields != nil {
+					foreign.Fields, foreign.UnsupportedFields = foreign.LoadFields()
 					foreign.FieldsLoaded = true
 				}
 				if reason := foreign.UnsupportedFields[s.Property.Name]; reason != "" {
@@ -4245,9 +4249,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				if foreign, ok := subj.Type().(*ForeignType); ok && !foreign.Pointer {
 					pointerForeign := *foreign
 					pointerForeign.Pointer = true
-					pointerForeign.Methods = nil
-					pointerForeign.UnsupportedMethods = nil
-					pointerForeign.MethodsLoaded = false
+					pointerForeign.Methods = foreign.PointerMethods
+					pointerForeign.UnsupportedMethods = foreign.UnsupportedPointerMethods
+					pointerForeign.MethodsLoaded = pointerForeign.Methods != nil || pointerForeign.UnsupportedMethods != nil
 					if pointerSig := pointerForeign.get(s.Property.Name); pointerSig != nil {
 						if !c.isMutable(subj) {
 							c.addError(fmt.Sprintf("Cannot access pointer receiver method %s.%s on immutable value", foreign, s.Property.Name), s.Property.GetLocation())
@@ -4263,10 +4267,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 			if propType == nil {
 				if foreign, ok := subj.Type().(*ForeignType); ok {
-					if !foreign.MethodsLoaded {
-						foreign.Methods, foreign.UnsupportedMethods = loadForeignTypeMethods(foreign)
-						foreign.MethodsLoaded = true
-					}
 					if reason := foreign.UnsupportedMethods[s.Property.Name]; reason != "" {
 						c.addError(fmt.Sprintf("Unsupported foreign method %s.%s: %s", foreign, s.Property.Name, reason), s.Property.GetLocation())
 						return nil
@@ -4322,10 +4322,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			foreignPointerReceiver := false
 			if sig == nil {
 				if foreign, ok := subj.Type().(*ForeignType); ok {
-					if !foreign.MethodsLoaded {
-						foreign.Methods, foreign.UnsupportedMethods = loadForeignTypeMethods(foreign)
-						foreign.MethodsLoaded = true
-					}
 					if reason := foreign.UnsupportedMethods[s.Method.Name]; reason != "" {
 						c.addError(fmt.Sprintf("Unsupported foreign method %s.%s: %s", foreign, s.Method.Name, reason), s.Method.GetLocation())
 						return nil
@@ -4333,9 +4329,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					if !foreign.Pointer {
 						pointerForeign := *foreign
 						pointerForeign.Pointer = true
-						pointerForeign.Methods = nil
-						pointerForeign.UnsupportedMethods = nil
-						pointerForeign.MethodsLoaded = false
+						pointerForeign.Methods = foreign.PointerMethods
+						pointerForeign.UnsupportedMethods = foreign.UnsupportedPointerMethods
+						pointerForeign.MethodsLoaded = pointerForeign.Methods != nil || pointerForeign.UnsupportedMethods != nil
 						if pointerSig := pointerForeign.get(s.Method.Name); pointerSig != nil {
 							if !c.isMutable(subj) {
 								c.addError(fmt.Sprintf("Cannot call pointer receiver method %s.%s on immutable value", foreign, s.Method.Name), s.Method.GetLocation())

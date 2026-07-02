@@ -19,10 +19,16 @@ type GoPackage struct {
 	UnsupportedFunctions map[string]string
 }
 
-// ResolveGoPackage loads exported function signatures for a Go package.
-// This first slice intentionally supports only the types needed for simple
-// package functions such as fmt.Println.
-func ResolveGoPackage(path string) (*GoPackage, error) {
+type GoPackageResolver interface {
+	ResolveGoPackage(path string) (*GoPackage, error)
+}
+
+type ImporterGoPackageResolver struct{}
+
+// ResolveGoPackage loads exported metadata for a Go package using go/importer.
+// It is the fallback resolver for standard-library/simple package imports until
+// the module-aware go/packages resolver is wired into project loading.
+func (ImporterGoPackageResolver) ResolveGoPackage(path string) (*GoPackage, error) {
 	pkg, err := importer.Default().Import(path)
 	if err != nil {
 		return nil, err
@@ -319,6 +325,10 @@ func foreignNamedTypeFromGo(named *types.Named, pointer bool, includeMethods boo
 	underlying, _ := primitiveTypeFromGo(named.Underlying())
 	_, isStruct := named.Underlying().(*types.Struct)
 	foreign := &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying, Pointer: pointer, Struct: isStruct}
+	foreign.LoadFields = func() (map[string]Type, map[string]string) { return goFieldsForNamedType(named) }
+	foreign.LoadMethods = func(pointer bool) (map[string]*FunctionDef, map[string]string) {
+		return goMethodsForNamedType(named, pointer)
+	}
 	if !pointer {
 		if goMap, ok := named.Underlying().(*types.Map); ok {
 			if key, reason := typeFromGoWithMethods(goMap.Key(), false); reason == "" {
@@ -331,28 +341,12 @@ func foreignNamedTypeFromGo(named *types.Named, pointer bool, includeMethods boo
 	}
 	if includeMethods {
 		foreign.Methods, foreign.UnsupportedMethods = goMethodsForNamedType(named, pointer)
+		if !pointer {
+			foreign.PointerMethods, foreign.UnsupportedPointerMethods = goMethodsForNamedType(named, true)
+		}
 		foreign.MethodsLoaded = true
 	}
 	return foreign
-}
-
-func loadForeignTypeFields(f *ForeignType) (map[string]Type, map[string]string) {
-	if f == nil || f.Target != "go" || f.Namespace == "" || f.Name == "" {
-		return nil, nil
-	}
-	pkg, err := importer.Default().Import(f.Namespace)
-	if err != nil {
-		return nil, nil
-	}
-	typeName, ok := pkg.Scope().Lookup(f.Name).(*types.TypeName)
-	if !ok {
-		return nil, nil
-	}
-	named, ok := typeName.Type().(*types.Named)
-	if !ok {
-		return nil, nil
-	}
-	return goFieldsForNamedType(named)
 }
 
 func goFieldsForNamedType(named *types.Named) (map[string]Type, map[string]string) {
@@ -360,6 +354,10 @@ func goFieldsForNamedType(named *types.Named) (map[string]Type, map[string]strin
 	if !ok {
 		return nil, nil
 	}
+	return goFieldsForStruct(strct)
+}
+
+func goFieldsForStruct(strct *types.Struct) (map[string]Type, map[string]string) {
 	fields := map[string]Type{}
 	unsupported := map[string]string{}
 	for i := 0; i < strct.NumFields(); i++ {
@@ -375,25 +373,6 @@ func goFieldsForNamedType(named *types.Named) (map[string]Type, map[string]strin
 		}
 	}
 	return fields, unsupported
-}
-
-func loadForeignTypeMethods(f *ForeignType) (map[string]*FunctionDef, map[string]string) {
-	if f == nil || f.Target != "go" || f.Namespace == "" || f.Name == "" {
-		return nil, nil
-	}
-	pkg, err := importer.Default().Import(f.Namespace)
-	if err != nil {
-		return nil, nil
-	}
-	typeName, ok := pkg.Scope().Lookup(f.Name).(*types.TypeName)
-	if !ok {
-		return nil, nil
-	}
-	named, ok := typeName.Type().(*types.Named)
-	if !ok {
-		return nil, nil
-	}
-	return goMethodsForNamedType(named, f.Pointer)
 }
 
 func goMethodsForNamedType(named *types.Named, pointer bool) (map[string]*FunctionDef, map[string]string) {
