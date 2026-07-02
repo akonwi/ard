@@ -113,7 +113,7 @@ func RunTests(program *air.Program, args []string, tests []TestCase, failFast bo
 	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: info, SuppressMain: true, IncludeTests: true}); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "ard_tests.go"), []byte(renderTestRunner(program, tests, failFast)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "ard_tests.go"), []byte(renderTestRunner(program, tests, failFast, info)), 0o644); err != nil {
 		return nil, err
 	}
 	binaryPath := filepath.Join(workspaceDir, "ard-tests")
@@ -215,7 +215,7 @@ func testRunnerReservedTopLevelNames(program *air.Program) map[string]bool {
 	return reserved
 }
 
-func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) string {
+func renderTestRunner(program *air.Program, tests []TestCase, failFast bool, projectInfo *checker.ProjectInfo) string {
 	imports := testRunnerImportAliases(program, tests)
 	aliases := imports.std
 	var b strings.Builder
@@ -232,7 +232,7 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) str
 	sort.Ints(moduleIDs)
 	for _, moduleID := range moduleIDs {
 		id := air.ModuleID(moduleID)
-		writeImportSpec(&b, imports.modules[id], modulePackageName(program, id), moduleImportPath(program, id))
+		writeImportSpec(&b, imports.modules[id], modulePackageName(program, id), moduleImportPathWithPrefix(program, id, generatedModulePath(projectInfo)))
 	}
 	b.WriteString(")\n\n")
 	b.WriteString("type ardTestOutcome struct {\n")
@@ -317,32 +317,28 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 	if err != nil {
 		return "", err
 	}
-	generatedAlias := ""
-	if modulePathFromGoMod(goMod) != "generated" {
-		generatedAlias = "\nrequire generated v0.0.0\nreplace generated => .\n"
-	}
 	requireSeen := requireKeys(goMod)
 	requires := make([]string, 0)
-	addGoModRequirements(&requires, requireSeen, generatedAlias)
 	addGoModRequirements(&requires, requireSeen, ardRequirement)
 	addDependencyGoModRequirements(&requires, requireSeen, program, projectInfo)
 	goMod += formatRequireBlock(requires)
 
 	replaceSeen := replaceKeys(goMod)
 	replaces := make([]string, 0)
-	addGoModReplaces(&replaces, replaceSeen, generatedAlias)
 	addGoModReplaces(&replaces, replaceSeen, ardRequirement)
 	addDependencyGoModReplaces(&replaces, replaceSeen, program, projectInfo)
 	goMod += formatReplaceBlock(replaces)
 	return goMod, nil
 }
 
-func modulePathFromGoMod(goMod string) string {
-	file, err := modfile.Parse("go.mod", []byte(goMod), nil)
-	if err != nil || file.Module == nil {
-		return ""
+func generatedModulePath(projectInfo *checker.ProjectInfo) string {
+	if module := projectGoModuleName(projectInfo); module != "" {
+		return module
 	}
-	return file.Module.Mod.Path
+	if projectInfo != nil && strings.TrimSpace(projectInfo.ProjectName) != "" {
+		return projectInfo.ProjectName
+	}
+	return "generated"
 }
 
 func generatedGoModBase(projectInfo *checker.ProjectInfo) (string, error) {

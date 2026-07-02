@@ -133,7 +133,7 @@ func (l *lowerer) synthesizeEntryMain(rootID air.FunctionID, entryModuleID air.M
 		return nil, fmt.Errorf("entry function parameters are not supported yet")
 	}
 	alias := modulePackageName(l.program, entryModuleID)
-	importPath := moduleImportPath(l.program, entryModuleID)
+	importPath := l.moduleImportPath(entryModuleID)
 	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(functionName(l.program, fn))}}
 	var stmt ast.Stmt
 	if l.isVoidType(fn.Signature.Return) {
@@ -950,12 +950,16 @@ func (l *lowerer) globalExpr(global air.Global) ast.Expr {
 }
 
 func (l *lowerer) moduleQualified(module air.ModuleID, name string) ast.Expr {
-	return l.qualified(l.moduleImportAlias(module), moduleImportPath(l.program, module), name)
+	return l.qualified(l.moduleImportAlias(module), l.moduleImportPath(module), name)
+}
+
+func (l *lowerer) moduleImportPath(module air.ModuleID) string {
+	return moduleImportPathWithPrefix(l.program, module, generatedModulePath(l.projectInfo))
 }
 
 func (l *lowerer) moduleImportAlias(module air.ModuleID) string {
 	base := modulePackageName(l.program, module)
-	importPath := moduleImportPath(l.program, module)
+	importPath := l.moduleImportPath(module)
 	if l.currentImports == nil {
 		return base
 	}

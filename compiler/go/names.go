@@ -53,11 +53,18 @@ func modulePackageDir(program *air.Program, module air.ModuleID) string {
 }
 
 func moduleImportPath(program *air.Program, module air.ModuleID) string {
+	return moduleImportPathWithPrefix(program, module, "generated")
+}
+
+func moduleImportPathWithPrefix(program *air.Program, module air.ModuleID, modulePath string) string {
+	if strings.TrimSpace(modulePath) == "" {
+		modulePath = "generated"
+	}
 	dir := modulePackageDir(program, module)
 	if dir == "" || dir == "." {
-		return "generated"
+		return modulePath
 	}
-	return path.Join("generated", filepath.ToSlash(dir))
+	return path.Join(modulePath, filepath.ToSlash(dir))
 }
 
 func moduleFileBaseName(program *air.Program, module air.ModuleID) string {
