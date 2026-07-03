@@ -5188,79 +5188,41 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					return nil
 				}
 
-				// We also need argument mutability aligned with parameters
-				resolvedArgs := make([]parse.Argument, len(fnDef.Parameters))
-				if len(s.Function.Args) > 0 && s.Function.Args[0].Name != "" {
-					paramMap := make(map[string]int)
-					for i, param := range fnDef.Parameters {
-						paramMap[param.Name] = i
-					}
-					for _, arg := range s.Function.Args {
-						if index, exists := paramMap[arg.Name]; exists {
-							resolvedArgs[index] = parse.Argument{
-								Location: arg.Location,
-								Name:     "",
-								Value:    arg.Value,
-								Mutable:  arg.Mutable,
-							}
+				numOmittedArgs := 0
+				if len(resolvedExprs) < len(fnDef.Parameters) {
+					for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
+						if _, isMaybe := fnDef.Parameters[i].Type.(*Maybe); !isMaybe {
+							c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
+							return nil
 						}
 					}
-				} else {
-					copy(resolvedArgs, s.Function.Args)
+					numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
+				} else if len(resolvedExprs) > len(fnDef.Parameters) {
+					c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
+					resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 				}
 
-				// Check and process arguments
-				args := make([]Expression, len(resolvedArgs))
-				for i := range resolvedArgs {
-					paramType := fnDef.Parameters[i].Type
-
-					var checkedArg Expression
-					switch resolvedExprs[i].(type) {
-					case *parse.ListLiteral, *parse.MapLiteral:
-						checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
-					default:
-						checkedArg = c.checkExpr(resolvedExprs[i])
-					}
-
-					if checkedArg == nil {
-						return nil
-					}
-
-					// Type check the argument against the parameter type
-					if !c.areCompatible(paramType, checkedArg.Type()) {
-						c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
-						return nil
-					}
-
-					// Check mutability constraints if needed
-					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
-						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
-					}
-
-					args[i] = checkedArg
+				fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
+				args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+				if args == nil {
+					return nil
 				}
-
-				call := &FunctionCall{
-					Name:       absolutePath,
-					Args:       args,
-					TypeArgs:   callTypeArgs,
-					fn:         fnDef,
-					ReturnType: fnDef.ReturnType,
-				}
-
-				// Use new generic resolution system
-				if fnDef.hasGenerics() || len(callTypeArgs) > 0 {
+				if len(callTypeArgs) > 0 {
 					specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, s.GetLocation())
 					if err != nil {
 						c.addError(err.Error(), s.GetLocation())
 						return nil
 					}
-
-					call.fn = specialized
-					call.ReturnType = specialized.ReturnType
+					fnToUse = specialized
 				}
 
-				return call
+				return &FunctionCall{
+					Name:       absolutePath,
+					Args:       args,
+					TypeArgs:   callTypeArgs,
+					fn:         fnToUse,
+					ReturnType: fnToUse.ReturnType,
+				}
 			}
 
 			// find the function in a module or Go package namespace

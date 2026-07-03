@@ -558,6 +558,22 @@ func TestGoTargetParityNullableArguments(t *testing.T) {
 			`,
 		},
 		{
+			name: "static function nullable parameter sugar",
+			input: `
+				use ard/maybe
+				struct Config { name: Str, retries: Int? }
+				fn Config::new(name: Str, retries: Int?) Config {
+					Config{name: name, retries: retries}
+				}
+				fn main() Int {
+					let omitted = Config::new("worker")
+					let named = Config::new(name: "worker")
+					let provided = Config::new("worker", 3)
+					omitted.retries.or(10) + named.retries.or(20) + provided.retries.or(0)
+				}
+			`,
+		},
+		{
 			name: "automatic wrapping of map literals for nullable parameters",
 			input: `
 				fn process(data: [Str:Int]?) Bool {

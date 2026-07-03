@@ -327,6 +327,69 @@ func TestCallingInstanceMethods(t *testing.T) {
 		},
 	})
 }
+func TestNullableParameterCallSugar(t *testing.T) {
+	run(t, []test{
+		{
+			name: "omits trailing nullable positional arguments",
+			input: strings.Join([]string{
+				`fn configure(name: Str, retries: Int?, verbose: Bool?) {}`,
+				`configure("worker")`,
+			}, "\n"),
+		},
+		{
+			name: "wraps provided nullable parameter values",
+			input: strings.Join([]string{
+				`fn configure(name: Str, retries: Int?, verbose: Bool?) {}`,
+				`configure("worker", 3, true)`,
+			}, "\n"),
+		},
+		{
+			name: "passes explicit maybe arguments through",
+			input: strings.Join([]string{
+				`use ard/maybe`,
+				`fn configure(name: Str, retries: Int?) {}`,
+				`configure("worker", maybe::some(3))`,
+				`configure("worker", maybe::none())`,
+			}, "\n"),
+		},
+		{
+			name: "named arguments can skip nullable parameters",
+			input: strings.Join([]string{
+				`fn configure(retries: Int?, name: Str) {}`,
+				`configure(name: "worker")`,
+			}, "\n"),
+		},
+		{
+			name: "static functions use nullable argument sugar",
+			input: strings.Join([]string{
+				`struct Config { name: Str, retries: Int? }`,
+				`fn Config::new(name: Str, retries: Int?) Config { Config{name: name, retries: retries} }`,
+				`Config::new("worker")`,
+				`Config::new(name: "worker")`,
+				`Config::new("worker", 3)`,
+			}, "\n"),
+		},
+		{
+			name: "generic nullable parameter can be omitted",
+			input: strings.Join([]string{
+				`use ard/maybe`,
+				`fn optional(value: $T?) $T? { value }`,
+				`let missing: Int? = optional<Int>()`,
+				`let present: Int? = optional<Int>(1)`,
+				`let explicit: Int? = optional<Int>(maybe::some(2))`,
+			}, "\n"),
+		},
+		{
+			name: "positional arguments cannot skip non-trailing nullable parameters",
+			input: strings.Join([]string{
+				`fn configure(retries: Int?, name: Str) {}`,
+				`configure("worker")`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "missing argument for parameter: name"}},
+		},
+	})
+}
+
 func TestNamedArguments(t *testing.T) {
 	run(t, []test{
 		{

@@ -121,6 +121,25 @@ greet(age: 30, name: "Bob")
 
 When using named arguments, all arguments must be named. Mixing positional arguments with named arguments is not supported.
 
+#### Nullable Parameters
+
+Parameters declared as nullable (`T?`) can be omitted at the call site when the omission is unambiguous. The compiler fills omitted nullable parameters with `none`, and wraps plain `T` values as `some(value)` when passed to a `T?` parameter.
+
+```ard
+fn connect(host: Str, port: Int?) {}
+
+connect("localhost")      // port = none
+connect("localhost", 80)  // port = some(80)
+```
+
+For positional calls, only trailing nullable parameters can be omitted. Named calls can skip nullable parameters in any position:
+
+```ard
+fn f(timeout: Int?, name: Str) {}
+
+f(name: "worker") // timeout = none
+```
+
 Functions are first class and can therefore be used as arguments
 
 ```ard
