@@ -211,7 +211,7 @@ The backend lowers Ard types to Go types directly. The only shared runtime types
 - `Result[T, E]` lowers to `runtime.Result[T, E]` (`0005-use-result-maybe-and-try-for-error-handling.md`). It is not collapsed into Go's `(T, error)` multi-return.
 - `Any` lowers to `any`.
 
-There is no `Fiber` runtime type: async is a fire-and-forget `async::start` goroutine plus channels (`0033-async-is-goroutines-and-channels.md`).
+There is no `Fiber` runtime type: async is a fire-and-forget `async::start` intrinsic plus typed channels (`0019-use-typed-channels-for-fiber-communication.md`, `0032-select-on-channels.md`, `0033-async-is-goroutines-and-channels.md`).
 
 #### Enums
 
@@ -442,7 +442,7 @@ No other shared runtime type is introduced. The one exception sanctioned elsewhe
 
 #### Async
 
-Async is goroutines and channels, with no runtime shape (`0033-async-is-goroutines-and-channels.md`). `async::start(fn() Void)` runs a closure on a new goroutine via a `use go:` helper; coordination is ordinary Ard over channels. Typed channels (`0019-use-typed-channels-for-fiber-communication.md`, `0032-select-on-channels.md`) lower to native Go `chan T` rather than a runtime type.
+Async is `async::start` plus typed channels, with no runtime shape (`0019-use-typed-channels-for-fiber-communication.md`, `0032-select-on-channels.md`, `0033-async-is-goroutines-and-channels.md`). `async::start(fn() Void)` is a module-shaped compiler intrinsic; on the Go target it runs the closure on a new goroutine. `Chan<T>`, `Receiver<T>`, and `Sender<T>` lower to native Go `chan T`, `<-chan T`, and `chan<- T` rather than runtime types.
 
 #### Any
 
@@ -528,7 +528,7 @@ Go values map to Ard types structurally, and a few idiomatic Go shapes are adapt
 - Go `struct{}` is Ard's unit type `Void`, and a no-result Go function is `Void` too.
 - A Go function returning `(T, error)` is adapted to Ard `T!Str`; one returning only `error` is `Void!Str`. The Go `error` is stringified — Ard does not model Go's `error` interface as a value.
 - A Go function returning the comma-ok pair `(T, bool)` is adapted to Ard `T?`.
-- Otherwise a single Go result maps to its Ard type by the normal rules: primitives, `[]T` to `[T]`, `map[K]V` to `[K:V]`, `any` to `Any`, `func` to a function type, and `chan T` to a channel (directional per `0032-select-on-channels.md`). Named Go map types remain foreign named types, but expose map-like methods when their key and value types are representable.
+- Otherwise a single Go result maps to its Ard type by the normal rules: primitives, `[]T` to `[T]`, `map[K]V` to `[K:V]`, `any` to `Any`, `func` to a function type, and Go channel types to `Chan<T>`, `Receiver<T>`, or `Sender<T>` according to direction. Named Go map types remain foreign named types, but expose map-like methods when their key and value types are representable.
 
 These boundary adaptations are distinct from how Ard's own types lower. An Ard `Result[T, E]` value still lowers to `runtime.Result[T, E]` and is not collapsed into `(T, error)`; the adaptations above apply only when *calling* idiomatic Go through `use go:`.
 
