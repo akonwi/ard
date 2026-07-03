@@ -931,7 +931,7 @@ func TestLowerProgramDiscardsFinalExprInVoidFunction(t *testing.T) {
 		t.Fatal("generated AST still uses anonymous empty struct for Void")
 	}
 }
-func TestLowerProgramUsesStructForVoidResultValues(t *testing.T) {
+func TestLowerProgramUsesIdiomaticGoABIForVoidResultReturn(t *testing.T) {
 	program := lowerSource(t, `
 		fn ok() Void!Str {
 			Result::ok(())
@@ -946,20 +946,49 @@ func TestLowerProgramUsesStructForVoidResultValues(t *testing.T) {
 	if !ok || fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
 		t.Fatalf("generated AST missing ok return type: %#v", fn)
 	}
-	resultType, ok := fn.Type.Results.List[0].Type.(*ast.IndexListExpr)
-	if !ok || astExprName(resultType.X) != "ardruntime.Result" || len(resultType.Indices) != 2 || !isEmptyStructType(resultType.Indices[0]) || astExprName(resultType.Indices[1]) != "string" {
-		t.Fatalf("generated AST missing void result container return type using struct{}: %#v", fn.Type.Results.List[0].Type)
+	if got := astExprName(fn.Type.Results.List[0].Type); got != "error" {
+		t.Fatalf("generated AST return type = %s, want error", got)
 	}
 	if !astFilesContain(files, func(node ast.Node) bool {
-		kv, ok := node.(*ast.KeyValueExpr)
-		if !ok {
-			return false
-		}
-		key, keyOK := kv.Key.(*ast.Ident)
-		lit, litOK := kv.Value.(*ast.CompositeLit)
-		return keyOK && key.Name == "Value" && litOK && isEmptyStructType(lit.Type)
+		ret, ok := node.(*ast.ReturnStmt)
+		return ok && len(ret.Results) == 1 && astExprName(ret.Results[0]) == "nil"
 	}) {
-		t.Fatal("generated AST missing struct{}{} Void value")
+		t.Fatal("generated AST missing nil error return")
+	}
+}
+
+func TestLowerProgramUsesIdiomaticGoABIForResultAndMaybeReturns(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn parse() Int!Str {
+			Result::ok(1)
+		}
+
+		fn find() Int? {
+			maybe::some(1)
+		}
+	`)
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	parseFn, ok := astFilesFunc(files, "Parse")
+	if !ok || parseFn.Type.Results == nil || len(parseFn.Type.Results.List) != 2 {
+		t.Fatalf("Parse results = %#v, want (int, error)", parseFn)
+	}
+	if got := astExprName(parseFn.Type.Results.List[0].Type); got != "int" {
+		t.Fatalf("Parse first result = %s, want int", got)
+	}
+	if got := astExprName(parseFn.Type.Results.List[1].Type); got != "error" {
+		t.Fatalf("Parse second result = %s, want error", got)
+	}
+	findFn, ok := astFilesFunc(files, "Find")
+	if !ok || findFn.Type.Results == nil || len(findFn.Type.Results.List) != 2 {
+		t.Fatalf("Find results = %#v, want (int, bool)", findFn)
+	}
+	if got := astExprName(findFn.Type.Results.List[0].Type); got != "int" {
+		t.Fatalf("Find first result = %s, want int", got)
+	}
+	if got := astExprName(findFn.Type.Results.List[1].Type); got != "bool" {
+		t.Fatalf("Find second result = %s, want bool", got)
 	}
 }
 
@@ -2217,34 +2246,13 @@ func TestLowerProgramPropagatesTryResultAcrossDifferentResultValueTypes(t *testi
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
 		ret, ok := node.(*ast.ReturnStmt)
-		if !ok || len(ret.Results) != 1 {
+		if !ok || len(ret.Results) != 2 {
 			return false
 		}
-		lit, ok := ret.Results[0].(*ast.CompositeLit)
-		if !ok || astExprName(lit.Type) != "ardruntime.Result" {
-			return false
-		}
-		for _, elem := range lit.Elts {
-			kv, ok := elem.(*ast.KeyValueExpr)
-			if !ok {
-				continue
-			}
-			key, keyOK := kv.Key.(*ast.Ident)
-			if !keyOK || key.Name != "Err" {
-				continue
-			}
-			if value, ok := kv.Value.(*ast.Ident); ok && strings.HasPrefix(value.Name, "_tmp_") {
-				return true
-			}
-			if selector, ok := kv.Value.(*ast.SelectorExpr); ok {
-				if ident, ok := selector.X.(*ast.Ident); ok && strings.HasPrefix(ident.Name, "_tmp_") && selector.Sel.Name == "Err" {
-					return true
-				}
-			}
-		}
-		return false
+		call, ok := ret.Results[1].(*ast.CallExpr)
+		return ok && astExprName(call.Fun) == "errors.New"
 	}) {
-		t.Fatal("generated AST missing result error propagation conversion")
+		t.Fatal("generated AST missing ABI result error propagation conversion")
 	}
 }
 func TestArtifactWorkspacePreservesGoModuleFiles(t *testing.T) {

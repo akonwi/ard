@@ -2602,17 +2602,41 @@ func runGoTargetParityJSON(t *testing.T, program *air.Program) string {
 	entryAlias := modulePackageName(program, entryModuleID)
 	entryImportPath := moduleImportPath(program, entryModuleID)
 	scriptFn := entryAlias + "." + functionName(program, program.Functions[rootID])
+	runtimeImport := ""
+	runnerValue := scriptFn + "()"
+	returnType := program.Functions[rootID].Signature.Return
+	if returnType > 0 && int(returnType) <= len(program.Types) {
+		ret := program.Types[returnType-1]
+		switch ret.Kind {
+		case air.TypeResult:
+			if ret.Error > 0 && int(ret.Error) <= len(program.Types) && program.Types[ret.Error-1].Kind == air.TypeStr {
+				runtimeImport = "\n\tardruntime \"github.com/akonwi/ard/runtime\""
+				if ret.Value == air.NoType || program.Types[ret.Value-1].Kind == air.TypeVoid {
+					runnerValue = fmt.Sprintf("func() any { err := %s(); if err != nil { return ardruntime.Result[struct{}, string]{Err: err.Error()} }; return ardruntime.Result[struct{}, string]{Value: struct{}{}, Ok: true} }()", scriptFn)
+				} else {
+					runnerValue = fmt.Sprintf("func() any { value, err := %s(); if err != nil { return ardruntime.Result[any, string]{Err: err.Error()} }; return ardruntime.Result[any, string]{Value: value, Ok: true} }()", scriptFn)
+				}
+			}
+		case air.TypeMaybe:
+			runtimeImport = "\n\tardruntime \"github.com/akonwi/ard/runtime\""
+			if ret.Elem == air.NoType || program.Types[ret.Elem-1].Kind == air.TypeVoid {
+				runnerValue = fmt.Sprintf("func() any { ok := %s(); if ok { return ardruntime.Maybe[struct{}]{Value: struct{}{}, Ok: true} }; return ardruntime.Maybe[struct{}]{} }()", scriptFn)
+			} else {
+				runnerValue = fmt.Sprintf("func() any { value, ok := %s(); if ok { return ardruntime.Maybe[any]{Value: value, Ok: true} }; return ardruntime.Maybe[any]{} }()", scriptFn)
+			}
+		}
+	}
 	runner := fmt.Sprintf(`package main
 
 import (
 	"encoding/json"
 	"fmt"
-	"reflect"
+	"reflect"%s
 	%s %q
 )
 
 func main() {
-	encoded, err := json.Marshal(normalizeParityValue(%s()))
+	encoded, err := json.Marshal(normalizeParityValue(%s))
 	if err != nil {
 		panic(err)
 	}
@@ -2669,7 +2693,7 @@ func normalizeReflectValue(v reflect.Value) any {
 		return v.Interface()
 	}
 }
-`, entryAlias, entryImportPath, scriptFn)
+`, runtimeImport, entryAlias, entryImportPath, runnerValue)
 	if err := os.WriteFile(filepath.Join(tempDir, "runner.go"), []byte(runner), 0o644); err != nil {
 		t.Fatalf("write runner: %v", err)
 	}
