@@ -2284,6 +2284,25 @@ func TestGoTargetParityDirectionalChannels(t *testing.T) {
 }`,
 			want: "true",
 		},
+		{
+			name: "select receives on inline Go receive-only channel",
+			input: `use go:time
+fn main() Bool {
+  select {
+    time::After(0).recv() => true,
+  }
+}`,
+			want: "true",
+		},
+		{
+			name: "received Go channel value preserves foreign methods",
+			input: `use go:time
+fn main() Bool {
+  let tick = time::After(0).recv().expect("tick")
+  tick.Year() >= 2000
+}`,
+			want: "true",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

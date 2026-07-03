@@ -280,6 +280,22 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 		}
 		return MakeList(elem), ""
 	}
+	if goChan, ok := t.Underlying().(*types.Chan); ok {
+		elem, reason := typeFromGoWithMethods(goChan.Elem(), includeMethods)
+		if reason != "" {
+			return nil, "channel element " + reason
+		}
+		switch goChan.Dir() {
+		case types.SendRecv:
+			return MakeChan(elem), ""
+		case types.RecvOnly:
+			return MakeReceiver(elem), ""
+		case types.SendOnly:
+			return MakeSender(elem), ""
+		default:
+			return nil, "unsupported channel direction"
+		}
+	}
 	if goMap, ok := t.Underlying().(*types.Map); ok {
 		key, reason := typeFromGoWithMethods(goMap.Key(), includeMethods)
 		if reason != "" {

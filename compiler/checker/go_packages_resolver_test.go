@@ -48,6 +48,69 @@ func Greet(name string) string { return "hello " + name }
 	}
 }
 
+func TestGoPackagesResolverMapsChannelDirections(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ffiDir := filepath.Join(root, "ffi")
+	if err := os.MkdirAll(ffiDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ffiDir, "ffi.go"), []byte(`package ffi
+
+func Both() chan int { return make(chan int) }
+func In(ch chan<- int) {}
+func Out() <-chan int { return make(chan int) }
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	resolver := checker.NewGoPackagesResolver(root, nil)
+	pkg, err := resolver.ResolveGoPackage("example.com/app/ffi")
+	if err != nil {
+		t.Fatalf("ResolveGoPackage(local ffi): %v", err)
+	}
+	if got := pkg.Functions["Both"].ReturnType.String(); got != "Chan<Int>" {
+		t.Fatalf("Both return = %s, want Chan<Int>", got)
+	}
+	if got := pkg.Functions["In"].Parameters[0].Type.String(); got != "Sender<Int>" {
+		t.Fatalf("In param = %s, want Sender<Int>", got)
+	}
+	if got := pkg.Functions["Out"].ReturnType.String(); got != "Receiver<Int>" {
+		t.Fatalf("Out return = %s, want Receiver<Int>", got)
+	}
+}
+
+func TestGoPackagesResolverRejectsNamedChannelTypes(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.21\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ffiDir := filepath.Join(root, "ffi")
+	if err := os.MkdirAll(ffiDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ffiDir, "ffi.go"), []byte(`package ffi
+
+type Ticks <-chan int
+
+func NewTicks() Ticks { return make(chan int) }
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	resolver := checker.NewGoPackagesResolver(root, nil)
+	pkg, err := resolver.ResolveGoPackage("example.com/app/ffi")
+	if err != nil {
+		t.Fatalf("ResolveGoPackage(local ffi): %v", err)
+	}
+	if pkg.Functions["NewTicks"] != nil {
+		t.Fatal("NewTicks should be unsupported while named channel types are deferred")
+	}
+	if got := pkg.UnsupportedFunctions["NewTicks"]; got != "named Go types with underlying <-chan int are not supported yet" {
+		t.Fatalf("unsupported reason = %q", got)
+	}
+}
+
 func TestGoPackagesResolverUsesBuildTags(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.21\n"), 0644); err != nil {

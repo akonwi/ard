@@ -307,6 +307,36 @@ fn main() Int!Str {
 	})
 }
 
+func TestGoImportResolvesChannelFunction(t *testing.T) {
+	run(t, []test{
+		{
+			name: "time After returns receive-only channel",
+			input: `use go:time
+fn main() {
+  let timeout: Receiver<time::Time> = time::After(1)
+  let _ = timeout.recv()
+}`,
+		},
+		{
+			name: "receive-only Go channel rejects send",
+			input: `use go:time
+fn main() {
+  let timeout = time::After(1)
+  timeout.send(time::Now())
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Undefined: timeout.send"}},
+		},
+		{
+			name: "Go struct channel field is receive-only channel",
+			input: `use go:time
+fn main() {
+  let ticker = time::NewTicker(1)
+  let ticks: Receiver<time::Time> = ticker.C
+}`,
+		},
+	})
+}
+
 func TestGoImportResolvesCommaOkFunction(t *testing.T) {
 	run(t, []test{
 		{
