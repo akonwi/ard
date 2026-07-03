@@ -141,19 +141,19 @@ Nil-able Go slices, maps, interfaces, functions, and channels likewise preserve 
 Provide nil checks through an explicit standard-library predicate rather than comparing against `Void`:
 
 ```ard
-use ard/ffi
+use ard/unsafe
 
-if ffi::is_nil(req.URL) {
+if unsafe::is_nil(req.URL) {
   "/"
 } else {
   req.URL.Path
 }
 ```
 
-`ffi::is_nil` should be a normal function in an `ard/ffi` standard-library module, implemented by a stdlib Go companion function such as `ffi.IsNil` rather than by a special checker intrinsic. Conceptually:
+`unsafe::is_nil` is a compiler-backed `ard/unsafe` intrinsic accepted in ADR 0037. Conceptually:
 
 ```ard
-extern fn is_nil(value: $T) Bool = "IsNil"
+fn is_nil(value: Any) Bool
 ```
 
 The Go implementation should perform the nil test in Go, including typed nil pointers. It should not rely only on comparing a boxed `any` value to nil, because a typed nil pointer stored in an interface is not itself a nil interface:
@@ -184,9 +184,9 @@ func IsNil(value any) bool {
 
 Calling `IsNil` on non-nil-able values such as integers, strings, and structs should return `false`, not panic.
 
-Because `ffi::is_nil` is an ordinary generic function, it does not need a special type-system exception. It can accept any Ard value and return `false` for values whose Go representation cannot be nil. This keeps nil testing visible as an FFI operation instead of making `()` an exception to equality or assignability rules.
+Because `unsafe::is_nil` accepts `Any`, it can accept any boxable Ard value and return `false` for values whose Go representation cannot be nil. This keeps nil testing visible as an unsafe interop operation instead of making `()` an exception to equality or assignability rules.
 
-The predicate only tests the value passed to it. For example, `ffi::is_nil(req.URL)` can still panic first if `req` itself is nil, because Go must dereference `req` to read the `URL` field.
+The predicate only tests the value passed to it. For example, `unsafe::is_nil(req.URL)` can still panic first if `req` itself is nil, because Go must dereference `req` to read the `URL` field.
 
 #### Unsafe/recovering interop blocks
 
@@ -220,9 +220,8 @@ This work was implemented in phases while keeping the feature scope intact:
    - Reuse direct-Go scalar conversion/range-check helpers for assigned values.
 
 3. **Nil predicate helper**
-   - Add an `ard/ffi` module with a normal generic `is_nil(value: $T) Bool` extern.
-   - Implement the binding in stdlib Go FFI, using Go reflection where needed so typed nil pointers are detected correctly.
-   - Extend stdlib FFI generation/lowering for this generic extern if needed; do not add a checker intrinsic or opaque special form.
+   - Add the compiler-backed `ard/unsafe::is_nil(value: Any) Bool` intrinsic.
+   - Lower it with Go reflection where needed so typed nil pointers are detected correctly.
    - Return `false` for non-nil-able values.
    - Do not add a general Go `nil` literal and do not allow `()` as a pointer assignment, constructor field value, or equality special case.
 
@@ -253,9 +252,9 @@ This work was implemented in phases while keeping the feature scope intact:
 - Direct-Go field access inherits Go nil and panic behavior. That is an intentional interop risk users accept when using Go APIs directly.
 - Ard's safety promise remains focused on Ard code and Ard semantics; arbitrary Go package invariants are outside what the Ard checker can prove.
 - Nil-sensitive public Ard APIs should keep explicit adapters when they need domain-safe behavior.
-- `ffi::is_nil(value)` provides a small nil-test surface without introducing a general nil literal or special `Void` comparison rule.
+- `unsafe::is_nil(value)` provides a small nil-test surface without introducing a general nil literal or special `Void` comparison rule.
 - `unsafe { ... }` provides an escape hatch and mitigation path by making panic recovery explicit in Ard control flow.
-- `ffi::is_nil` can cover broader nil-able Go values as those representations become available through direct Go interop.
+- `unsafe::is_nil` can cover broader nil-able Go values as those representations become available through direct Go interop.
 - Embedded/promoted fields are not part of the initial lookup model; #249 remains the place to expand that behavior.
 - Callback bridges, Ard-side implementations of Go interfaces, wider pointer shapes, variadics, and compound conversion gaps still constrain how far stdlib cleanup can go.
 

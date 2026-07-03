@@ -2278,8 +2278,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerForeignStructInstance(fn, expr)
 	case air.ExprForeignValue:
 		return l.lowerForeignValue(expr)
-	case air.ExprAnyCast:
-		return l.lowerAnyCast(fn, expr)
+	case air.ExprUnsafeCast:
+		return l.lowerUnsafeCast(fn, expr)
+	case air.ExprUnsafeIsNil:
+		return l.lowerUnsafeIsNil(fn, expr)
 	case air.ExprCall:
 		if !validFunctionID(l.program, expr.Function) {
 			return loweredExpr{}, fmt.Errorf("invalid function id %d", expr.Function)
@@ -2671,12 +2673,12 @@ func (l *lowerer) lowerForeignFieldAccess(fn air.Function, expr air.Expr) (lower
 	return loweredExpr{stmts: target.stmts, expr: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(expr.ForeignSymbol)}}, nil
 }
 
-func (l *lowerer) lowerAnyCast(fn air.Function, expr air.Expr) (loweredExpr, error) {
+func (l *lowerer) lowerUnsafeCast(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil {
-		return loweredExpr{}, fmt.Errorf("Any cast missing target")
+		return loweredExpr{}, fmt.Errorf("unsafe::cast missing target")
 	}
 	if len(expr.TypeArgs) != 1 {
-		return loweredExpr{}, fmt.Errorf("Any cast expects one target type, got %d", len(expr.TypeArgs))
+		return loweredExpr{}, fmt.Errorf("unsafe::cast expects one target type, got %d", len(expr.TypeArgs))
 	}
 	maybeType, err := l.goType(expr.Type)
 	if err != nil {
@@ -2716,6 +2718,17 @@ func (l *lowerer) lowerAnyCast(fn air.Function, expr air.Expr) (loweredExpr, err
 		&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "None"), Index: resultElemType}}}},
 	}
 	return loweredExpr{stmts: value.stmts, expr: &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Results: &ast.FieldList{List: []*ast.Field{{Type: maybeType}}}}, Body: &ast.BlockStmt{List: body}}}}, nil
+}
+
+func (l *lowerer) lowerUnsafeIsNil(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("unsafe::is_nil missing target")
+	}
+	value, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	return loweredExpr{stmts: value.stmts, expr: &ast.CallExpr{Fun: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "IsNil"), Args: []ast.Expr{value.expr}}}, nil
 }
 
 func anyCastSomeArg(value ast.Expr, mutable bool) ast.Expr {

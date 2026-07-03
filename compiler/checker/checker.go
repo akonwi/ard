@@ -433,9 +433,6 @@ func (c *Checker) Check() {
 
 	// Auto-import prelude modules (only for non-std lib)
 	if !strings.HasPrefix(c.filePath, "ard/") {
-		if mod, ok := findInStdLib("ard/any"); ok {
-			c.program.Imports["Any"] = mod
-		}
 		if mod, ok := findInStdLib("ard/int"); ok {
 			c.program.Imports["Int"] = mod
 		}
@@ -969,15 +966,15 @@ func (c *Checker) resolveCallTypeArgs(typeArgs []parse.DeclaredType) []Type {
 	return resolved
 }
 
-func (c *Checker) checkAnyCast(s *parse.StaticFunction) Expression {
+func (c *Checker) checkUnsafeCast(s *parse.StaticFunction) Expression {
 	modName, _ := c.destructurePath(s)
-	if !c.hasExplicitImportAlias("ard/any", modName) {
-		c.addError("any::cast requires importing ard/any", s.Target.GetLocation())
+	if !c.hasExplicitImportAlias("ard/unsafe", modName) {
+		c.addError("unsafe::cast requires importing ard/unsafe", s.Target.GetLocation())
 		return nil
 	}
 	callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
 	if len(callTypeArgs) != 1 {
-		c.addError("any::cast requires exactly one explicit type argument", s.GetLocation())
+		c.addError("unsafe::cast requires exactly one explicit type argument", s.GetLocation())
 		return nil
 	}
 	if len(s.Function.Args) != 1 {
@@ -997,7 +994,36 @@ func (c *Checker) checkAnyCast(s *parse.StaticFunction) Expression {
 		return nil
 	}
 	targetType := callTypeArgs[0]
-	return &AnyCast{Value: arg, TargetType: targetType, ReturnType: MakeMaybe(targetType)}
+	return &UnsafeCast{Value: arg, TargetType: targetType, ReturnType: MakeMaybe(targetType)}
+}
+
+func (c *Checker) checkUnsafeIsNil(s *parse.StaticFunction) Expression {
+	modName, _ := c.destructurePath(s)
+	if !c.hasExplicitImportAlias("ard/unsafe", modName) {
+		c.addError("unsafe::is_nil requires importing ard/unsafe", s.Target.GetLocation())
+		return nil
+	}
+	if len(s.Function.TypeArgs) != 0 {
+		c.addError("unsafe::is_nil does not accept type arguments", s.GetLocation())
+		return nil
+	}
+	if len(s.Function.Args) != 1 {
+		c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 1, got %d", len(s.Function.Args)), s.GetLocation())
+		return nil
+	}
+	if s.Function.Args[0].Name != "" && s.Function.Args[0].Name != "value" {
+		c.addError(fmt.Sprintf("unknown argument: %s", s.Function.Args[0].Name), s.Function.Args[0].GetLocation())
+		return nil
+	}
+	arg := c.checkExprAs(s.Function.Args[0].Value, Any)
+	if arg == nil {
+		return nil
+	}
+	if !c.areCompatible(Any, arg.Type()) {
+		c.addError(typeMismatch(Any, arg.Type()), s.Function.Args[0].Value.GetLocation())
+		return nil
+	}
+	return &UnsafeIsNil{Value: arg}
 }
 
 func (c *Checker) hasExplicitImportAlias(path string, alias string) bool {
@@ -2982,7 +3008,9 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 				c.validateUnsafeCatchResultsInExpression(arg, resultType, loc)
 			}
 		}
-	case *AnyCast:
+	case *UnsafeCast:
+		c.validateUnsafeCatchResultsInExpression(e.Value, resultType, loc)
+	case *UnsafeIsNil:
 		c.validateUnsafeCatchResultsInExpression(e.Value, resultType, loc)
 	case *ModuleStructInstance:
 		if e.Property != nil {
@@ -4951,8 +4979,13 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 			// find the function in a module or Go package namespace
 			modName, name := c.destructurePath(s)
-			if mod := c.resolveModule(modName); mod != nil && mod.Path() == "ard/any" && name == "cast" {
-				return c.checkAnyCast(s)
+			if mod := c.resolveModule(modName); mod != nil && mod.Path() == "ard/unsafe" {
+				switch name {
+				case "cast":
+					return c.checkUnsafeCast(s)
+				case "is_nil":
+					return c.checkUnsafeIsNil(s)
+				}
 			}
 			if goPkg := c.program.GoImports[modName]; goPkg != nil {
 				fnDef := goPkg.Functions[name]

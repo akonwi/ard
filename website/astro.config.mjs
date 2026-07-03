@@ -221,7 +221,7 @@ export default defineConfig({
             { label: "ard/decode", slug: "stdlib/decode" },
             { label: "ard/dynamic", slug: "stdlib/dynamic" },
             { label: "ard/encode", slug: "stdlib/encode" },
-            { label: "ard/ffi", slug: "stdlib/ffi" },
+            { label: "ard/unsafe", slug: "stdlib/unsafe" },
             { label: "ard/http", slug: "stdlib/http" },
             { label: "ard/int", slug: "stdlib/int" },
             { label: "ard/io", slug: "stdlib/io" },

@@ -1304,14 +1304,14 @@ func TestRunProgramExecutesGoFmtPrintln(t *testing.T) {
 	}
 }
 
-func TestRunProgramExecutesAnyValueCast(t *testing.T) {
-	program := lowerSource(t, `use ard/any
+func TestRunProgramExecutesUnsafeValueCast(t *testing.T) {
+	program := lowerSource(t, `use ard/unsafe
 
 fn main() {
   let value: Any = "hello"
-  let text = any::cast<Str>(value).expect("cast")
+  let text = unsafe::cast<Str>(value).expect("cast")
   if not text == "hello" { panic("bad cast") }
-  if any::cast<Int>(value).is_some() { panic("unexpected int") }
+  if unsafe::cast<Int>(value).is_some() { panic("unexpected int") }
 }`)
 
 	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
@@ -1319,7 +1319,7 @@ fn main() {
 	}
 }
 
-func TestRunProgramExecutesAnyMutableCast(t *testing.T) {
+func TestRunProgramExecutesUnsafeMutableCast(t *testing.T) {
 	projectDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"anycast\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1341,16 +1341,63 @@ func NameValue() string { return Name }
 		t.Fatal(err)
 	}
 	mainPath := filepath.Join(projectDir, "main.ard")
-	if err := os.WriteFile(mainPath, []byte(`use ard/any
+	if err := os.WriteFile(mainPath, []byte(`use ard/unsafe
 use go:anycast/ffi
 
 fn main() {
-  let name = any::cast<mut Str>(ffi::BoxName())
+  let name = unsafe::cast<mut Str>(ffi::BoxName())
   if not name.is_some() { panic("mutable cast failed") }
-  if any::cast<mut Str>("Ada").is_some() { panic("mutable cast accepted value") }
-  if any::cast<mut Str>(ffi::BoxNilName()).is_some() { panic("mutable cast accepted nil") }
-  if not any::cast<Str>(ffi::BoxName()).expect("value") == "Ada" { panic("value cast did not deref") }
-  if any::cast<Str>(ffi::BoxNilName()).is_some() { panic("value cast accepted nil") }
+  if unsafe::cast<mut Str>("Ada").is_some() { panic("mutable cast accepted value") }
+  if unsafe::cast<mut Str>(ffi::BoxNilName()).is_some() { panic("mutable cast accepted nil") }
+  if not unsafe::cast<Str>(ffi::BoxName()).expect("value") == "Ada" { panic("value cast did not deref") }
+  if unsafe::cast<Str>(ffi::BoxNilName()).is_some() { panic("value cast accepted nil") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramExecutesUnsafeIsNil(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"isnil\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module isnil\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
+
+type User struct{ Name string }
+
+var Ada = &User{Name: "Ada"}
+
+func NilUser() any { var user *User; return user }
+func AdaUser() any { return Ada }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use ard/unsafe
+use go:isnil/ffi
+
+fn main() {
+  if not unsafe::is_nil(ffi::NilUser()) { panic("nil pointer not detected") }
+  if unsafe::is_nil(ffi::AdaUser()) { panic("non-nil pointer reported nil") }
+  if unsafe::is_nil("Ada") { panic("string reported nil") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)

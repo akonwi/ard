@@ -3758,7 +3758,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			args[i] = *lowered
 		}
 		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, Args: args}, nil
-	case *checker.AnyCast:
+	case *checker.UnsafeCast:
 		value, err := fl.lowerExprWithExpected(e.Value, fl.l.mustIntern(checker.Any))
 		if err != nil {
 			return nil, err
@@ -3773,7 +3773,13 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprAnyCast, Type: typeID, Target: value, TypeArgs: []TypeID{targetTypeID}, ForeignPointer: mutable}, nil
+		return &Expr{Kind: ExprUnsafeCast, Type: typeID, Target: value, TypeArgs: []TypeID{targetTypeID}, ForeignPointer: mutable}, nil
+	case *checker.UnsafeIsNil:
+		value, err := fl.lowerExprWithExpected(e.Value, fl.l.mustIntern(checker.Any))
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprUnsafeIsNil, Type: typeID, Target: value}, nil
 	case *checker.ForeignFunctionCall:
 		args := make([]Expr, len(e.Call.Args))
 		fnDef := e.Call.Definition()

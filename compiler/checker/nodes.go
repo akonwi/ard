@@ -1274,15 +1274,22 @@ func (p *ForeignValue) Type() Type {
 	return p.ValueType
 }
 
-// AnyCast is the compiler-backed ard/any::cast<T>(value) operation.
+// UnsafeCast is the compiler-backed ard/unsafe::cast<T>(value) operation.
 // TargetType is the requested T, including mut T when mutable access is requested.
-type AnyCast struct {
+type UnsafeCast struct {
 	Value      Expression
 	TargetType Type
 	ReturnType Type
 }
 
-func (p *AnyCast) Type() Type { return p.ReturnType }
+func (p *UnsafeCast) Type() Type { return p.ReturnType }
+
+// UnsafeIsNil is the compiler-backed ard/unsafe::is_nil(value) operation.
+type UnsafeIsNil struct {
+	Value Expression
+}
+
+func (p *UnsafeIsNil) Type() Type { return Bool }
 
 type ModuleSymbol struct {
 	Module string

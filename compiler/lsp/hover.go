@@ -2392,8 +2392,6 @@ func splitStaticTarget(target string) (alias string, memberPrefix string) {
 
 func preludeModulePath(alias string) string {
 	switch alias {
-	case "Any":
-		return "ard/any"
 	case "Int":
 		return "ard/int"
 	case "List":

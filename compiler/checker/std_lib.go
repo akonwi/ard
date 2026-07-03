@@ -14,8 +14,8 @@ func findInStdLib(path string) (Module, bool) {
 		return ResultPkg{}, true
 	case "ard/channel":
 		return ChannelPkg{}, true
-	case "ard/any":
-		return AnyPkg{}, true
+	case "ard/unsafe":
+		return UnsafePkg{}, true
 	}
 
 	return FindEmbeddedModule(path)
@@ -103,17 +103,19 @@ func (pkg ResultPkg) Get(name string) Symbol {
 	}
 }
 
-/* ard/any */
-type AnyPkg struct{}
+/* ard/unsafe */
+type UnsafePkg struct{}
 
-func (pkg AnyPkg) Path() string { return "ard/any" }
+func (pkg UnsafePkg) Path() string { return "ard/unsafe" }
 
-func (pkg AnyPkg) Program() *Program { return nil }
+func (pkg UnsafePkg) Program() *Program { return nil }
 
-func (pkg AnyPkg) Get(name string) Symbol {
+func (pkg UnsafePkg) Get(name string) Symbol {
 	switch name {
 	case "cast":
 		return Symbol{Name: name, Type: &FunctionDef{Name: name, GenericParams: []string{"T"}, Parameters: []Parameter{{Name: "value", Type: Any}}, ReturnType: MakeMaybe(&TypeVar{name: "T"})}}
+	case "is_nil":
+		return Symbol{Name: name, Type: &FunctionDef{Name: name, Parameters: []Parameter{{Name: "value", Type: Any}}, ReturnType: Bool}}
 	default:
 		return Symbol{}
 	}

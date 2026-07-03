@@ -1,22 +1,22 @@
 ---
-title: FFI Helpers with ard/ffi
+title: Unsafe Interop Helpers with ard/unsafe
 description: Helpers for direct host interop, including Go nil checks.
 ---
 
-The `ard/ffi` module contains helpers for direct host interop. These functions are intentionally low-level; prefer ordinary Ard APIs when they already model the behavior you need.
+The `ard/unsafe` module contains compiler-backed helpers for direct host interop. These functions are intentionally low-level; prefer ordinary Ard APIs when they already model the behavior you need.
 
 ## API
 
-### `fn is_nil(value: $T) Bool`
+### `fn is_nil(value: Any) Bool`
 
 Return `true` when the value's Go representation is nil.
 
 ```ard
-use ard/ffi
+use ard/unsafe
 use go:net/http as gohttp
 
 fn request_path(req: mut gohttp::Request) Str {
-  match ffi::is_nil(req.URL) {
+  match unsafe::is_nil(req.URL) {
     true => "",
     false => req.URL.Path,
   }
@@ -26,7 +26,7 @@ fn request_path(req: mut gohttp::Request) Str {
 `is_nil` is a normal generic function implemented by Go FFI. It returns `false` for values whose Go representation cannot be nil, such as integers, strings, and structs.
 
 :::caution
-`is_nil` only tests the value passed to it. The argument is evaluated first, so `ffi::is_nil(req.URL)` can still panic if `req` itself is nil.
+`is_nil` only tests the value passed to it. The argument is evaluated first, so `unsafe::is_nil(req.URL)` can still panic if `req` itself is nil.
 :::
 
 ## Why this is not Maybe

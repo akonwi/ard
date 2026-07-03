@@ -57,7 +57,8 @@ const (
 	ExprForeignFieldAccess
 	ExprForeignStructInstance
 	ExprForeignValue
-	ExprAnyCast
+	ExprUnsafeCast
+	ExprUnsafeIsNil
 	ExprMakeClosure
 	ExprCallClosure
 	ExprUnionWrap

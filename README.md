@@ -393,7 +393,7 @@ fn mark_ok(resp: mut gohttp::Response) {
 }
 ```
 
-Go pointer nil behavior is preserved. Use `ard/ffi::is_nil(value)` for explicit host nil checks, or `unsafe { ... }` when a trusted interop block may panic and should return `T!Str`.
+Go pointer nil behavior is preserved. Use `ard/unsafe::is_nil(value)` for explicit host nil checks, or `unsafe { ... }` when a trusted interop block may panic and should return `T!Str`.
 
 ### Errors
 Ard does not have exceptions. Instead, errors are represented as values. The built-in `Result<$Val, $Err>` type can be used as a special type union of a success value and an error value.

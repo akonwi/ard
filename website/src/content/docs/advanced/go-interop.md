@@ -136,23 +136,23 @@ Use `(mut T)?` when an Ard API intentionally models an optional reference. Direc
 
 ## Checking for Nil
 
-Use `ard/ffi::is_nil` when you need to test a Go value for nil without adding a new Ard `nil` literal.
+Use `ard/unsafe::is_nil` when you need to test a Go value for nil without adding a new Ard `nil` literal.
 
 ```ard
-use ard/ffi
+use ard/unsafe
 use go:net/http as gohttp
 
 fn request_path(req: mut gohttp::Request) Str {
-  match ffi::is_nil(req.URL) {
+  match unsafe::is_nil(req.URL) {
     true => "",
     false => req.URL.Path,
   }
 }
 ```
 
-`ffi::is_nil` is a normal generic stdlib function implemented by Go FFI. It returns `false` for values whose Go representation cannot be nil.
+`unsafe::is_nil` is a compiler-backed stdlib intrinsic. It returns `false` for values whose Go representation cannot be nil.
 
-The argument expression is evaluated before `is_nil` runs. For example, `ffi::is_nil(req.URL)` can still panic first if `req` itself is nil.
+The argument expression is evaluated before `is_nil` runs. For example, `unsafe::is_nil(req.URL)` can still panic first if `req` itself is nil.
 
 ## Unsafe Interop Blocks
 
