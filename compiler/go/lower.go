@@ -1714,6 +1714,34 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			Rhs: []ast.Expr{value.expr},
 		})
 		return out, nil
+	case air.StmtSetForeignValue:
+		if stmt.Value == nil {
+			return nil, fmt.Errorf("foreign value set statement missing value")
+		}
+		if stmt.ForeignTarget != "go" {
+			return nil, fmt.Errorf("unsupported foreign value set target %q", stmt.ForeignTarget)
+		}
+		if stmt.ForeignNamespace == "" || stmt.ForeignSymbol == "" {
+			return nil, fmt.Errorf("invalid go foreign value set %q::%q", stmt.ForeignNamespace, stmt.ForeignSymbol)
+		}
+		value, err := l.lowerExprWithExpectedType(fn, *stmt.Value, stmt.Type)
+		if err != nil {
+			return nil, err
+		}
+		qualifier := stmt.ForeignQualifier
+		if qualifier == "" {
+			qualifier = stmt.ForeignNamespace
+			if slash := strings.LastIndex(qualifier, "/"); slash >= 0 {
+				qualifier = qualifier[slash+1:]
+			}
+		}
+		out := append([]ast.Stmt{}, value.stmts...)
+		out = append(out, &ast.AssignStmt{
+			Lhs: []ast.Expr{l.qualified(qualifier, stmt.ForeignNamespace, stmt.ForeignSymbol)},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{value.expr},
+		})
+		return out, nil
 	case air.StmtSetForeignField:
 		if stmt.Target == nil {
 			return nil, fmt.Errorf("foreign field set statement missing target")

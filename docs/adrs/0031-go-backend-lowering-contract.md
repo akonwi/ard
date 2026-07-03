@@ -520,7 +520,7 @@ Interop with Go is a single mechanism: direct Go interop through `use go:`. Ther
 `use go:` imports a real Go package and Ard calls it directly (`0030-use-direct-go-struct-values-and-fields.md`, `0034-reset-go-backend-and-ffi-boundary.md`):
 
 - `use go:image as image` lowers to a Go import, and `image::Point{...}` lowers to `image.Point{...}`
-- struct values, field access, and method calls go straight through to the Go package
+- package functions, constants, variables, struct values, field access, and method calls go straight through to the Go package
 - because Ard impl methods now lower to natural Go methods, an Ard type satisfies a Go interface structurally, with no generated wrapper layer
 
 Go values map to Ard types structurally, and a few idiomatic Go shapes are adapted at the boundary:
@@ -538,6 +538,7 @@ Passing Ard values into Go follows Go's own assignability so idiomatic, `any`-he
 - Go `map[K]V` parameters are imported as mutable Ard parameters, matching slice interop. Go does not express read-only maps, and maps are reference types, so passing a map to Go makes mutation risk explicit at the Ard call site.
 - A Go type alias is the same type as its target across packages (`ui.Style = vaxis.Style`), compared by unaliased `go/types` identity.
 - A closure satisfies a named Go func type (`type VoidCallback func(...)`) when its signature matches.
+- Exported Go package variables are readable and assignable as foreign values when their types are representable. Assignment requires no Ard `mut` annotation; it mirrors Go package-var semantics and preserves Go package state, including pointer and interface assignability at call boundaries. Go constants remain read-only.
 - A Go variadic parameter is exposed to Ard as exactly one argument of the variadic element type. For example, `fmt.Println(a ...any)` is callable as `fmt::Println(value)`; Ard does not gain variadic parameters or spread syntax from Go interop.
 - A direct-Go struct literal may omit exported fields, which take their Go zero value (`0030-use-direct-go-struct-values-and-fields.md`).
 

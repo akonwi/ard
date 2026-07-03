@@ -12,6 +12,7 @@ const (
 	StmtAssign
 	StmtSetField
 	StmtSetForeignField
+	StmtSetForeignValue
 	StmtExpr
 	StmtWhile
 	StmtForMap
@@ -31,8 +32,10 @@ type Stmt struct {
 	Field      int
 	FieldName  string
 
-	ForeignTarget string
-	ForeignSymbol string
+	ForeignTarget    string
+	ForeignNamespace string
+	ForeignQualifier string
+	ForeignSymbol    string
 
 	Condition *Expr
 	Body      Block

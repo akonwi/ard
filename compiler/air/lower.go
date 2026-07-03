@@ -3117,6 +3117,8 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 			return fl.lowerFieldAssignment(target, s.Value)
 		case *checker.ForeignFieldAccess:
 			return fl.lowerForeignFieldAssignment(target, s.Value)
+		case *checker.ForeignValue:
+			return fl.lowerForeignValueAssignment(target, s.Value)
 		default:
 			return nil, fmt.Errorf("unsupported AIR assignment target %T", s.Target)
 		}
@@ -4974,6 +4976,21 @@ func (fl *functionLowerer) lowerForeignFieldAssignment(prop *checker.ForeignFiel
 		return nil, err
 	}
 	return &Stmt{Kind: StmtSetForeignField, Target: target, ForeignTarget: prop.Target, ForeignSymbol: prop.Symbol, Type: fieldType, Value: value}, nil
+}
+
+func (fl *functionLowerer) lowerForeignValueAssignment(prop *checker.ForeignValue, valueExpr checker.Expression) (*Stmt, error) {
+	if !prop.Assignable {
+		return nil, fmt.Errorf("assignment to non-assignable foreign value %s::%s", prop.Namespace, prop.Symbol)
+	}
+	valueType, err := fl.internContextualCheckerType(prop.Type())
+	if err != nil {
+		return nil, err
+	}
+	value, err := fl.lowerExprWithExpected(valueExpr, valueType)
+	if err != nil {
+		return nil, err
+	}
+	return &Stmt{Kind: StmtSetForeignValue, ForeignTarget: prop.Target, ForeignNamespace: prop.Namespace, ForeignQualifier: prop.Qualifier, ForeignSymbol: prop.Symbol, Type: valueType, Value: value}, nil
 }
 
 func (fl *functionLowerer) lowerFieldAssignment(prop *checker.InstanceProperty, valueExpr checker.Expression) (*Stmt, error) {

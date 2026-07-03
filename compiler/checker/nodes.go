@@ -1271,11 +1271,12 @@ type ForeignInterfaceUpcast struct {
 func (p *ForeignInterfaceUpcast) Type() Type { return p.Iface }
 
 type ForeignValue struct {
-	Target    string
-	Namespace string
-	Qualifier string
-	Symbol    string
-	ValueType Type
+	Target     string
+	Namespace  string
+	Qualifier  string
+	Symbol     string
+	ValueType  Type
+	Assignable bool
 }
 
 func (p *ForeignValue) Type() Type {

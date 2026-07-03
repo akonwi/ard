@@ -1909,7 +1909,47 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 			}
 
-			panic(fmt.Sprintf("Unsupported reassignment target: %T", s.Target))
+			if sp, ok := s.Target.(*parse.StaticProperty); ok {
+				if id, ok := sp.Target.(*parse.Identifier); ok {
+					if prop, ok := sp.Property.(*parse.Identifier); ok {
+						if goPkg := c.program.GoImports[id.Name]; goPkg != nil {
+							if typ := goPkg.Variables[prop.Name]; typ != nil {
+								var value Expression
+								c.withValueExprContext(func() {
+									value = c.checkExpr(s.Value)
+								})
+								if value == nil {
+									return nil
+								}
+								if !c.areCompatible(typ, value.Type()) {
+									c.addError(typeMismatch(typ, value.Type()), s.Value.GetLocation())
+									return nil
+								}
+								return &Statement{Stmt: &Reassignment{Target: &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ, Assignable: true}, Value: value}}
+							}
+							if goPkg.Constants[prop.Name] != nil {
+								c.addError(fmt.Sprintf("Cannot assign to Go constant: %s::%s", id.Name, prop.Name), s.Target.GetLocation())
+								return nil
+							}
+							if reason := goPkg.UnsupportedConstants[prop.Name]; reason != "" {
+								c.addError(fmt.Sprintf("Unsupported Go constant %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+								return nil
+							}
+							if reason := goPkg.UnsupportedVariables[prop.Name]; reason != "" {
+								c.addError(fmt.Sprintf("Unsupported Go variable %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+								return nil
+							}
+							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
+							return nil
+						}
+					}
+				}
+				c.addError(fmt.Sprintf("Cannot assign to static property: %s", sp), s.Target.GetLocation())
+				return nil
+			}
+
+			c.addError(fmt.Sprintf("Unsupported reassignment target: %T", s.Target), s.Target.GetLocation())
+			return nil
 		}
 	case *parse.WhileLoop:
 		{
@@ -6303,8 +6343,15 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						if typ := goPkg.Constants[prop.Name]; typ != nil {
 							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ}
 						}
+						if typ := goPkg.Variables[prop.Name]; typ != nil {
+							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ, Assignable: true}
+						}
 						if reason := goPkg.UnsupportedConstants[prop.Name]; reason != "" {
 							c.addError(fmt.Sprintf("Unsupported Go constant %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+							return nil
+						}
+						if reason := goPkg.UnsupportedVariables[prop.Name]; reason != "" {
+							c.addError(fmt.Sprintf("Unsupported Go variable %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
 							return nil
 						}
 						c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())

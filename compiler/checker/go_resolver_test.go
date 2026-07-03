@@ -6,6 +6,7 @@ import (
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
+	"github.com/google/go-cmp/cmp"
 )
 
 type recordingGoResolver struct {
@@ -63,7 +64,9 @@ func (r *recordingGoResolver) ResolveGoPackage(path string) (*checker.GoPackage,
 		},
 		Types:                map[string]checker.Type{},
 		Constants:            map[string]checker.Type{},
-		UnsupportedConstants: map[string]string{},
+		Variables:            map[string]checker.Type{},
+		UnsupportedConstants: map[string]string{"UnsupportedConst": "named Go types with underlying chan int are not supported yet"},
+		UnsupportedVariables: map[string]string{"UnsupportedVar": "named Go types with underlying chan int are not supported yet"},
 		UnsupportedFunctions: map[string]string{},
 	}, nil
 }
@@ -111,4 +114,38 @@ fn main() {
   mut counter = ffi::NewCounter()
   counter.Reset()
 }`)
+}
+
+func TestConfiguredGoResolverReportsUnsupportedVariables(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/ffi as ffi
+
+let _ = ffi::UnsupportedVar`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %#v", result.Errors)
+	}
+	resolver := &recordingGoResolver{}
+	c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+	c.Check()
+	want := []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go variable ffi::UnsupportedVar: named Go types with underlying chan int are not supported yet"}}
+	if diff := cmp.Diff(want, c.Diagnostics(), compareOptions); diff != "" {
+		t.Fatalf("Diagnostics mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestConfiguredGoResolverReportsUnsupportedConstantAssignment(t *testing.T) {
+	result := parse.Parse([]byte(`use go:example.com/ffi as ffi
+
+fn main() {
+  ffi::UnsupportedConst = 1
+}`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %#v", result.Errors)
+	}
+	resolver := &recordingGoResolver{}
+	c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+	c.Check()
+	want := []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go constant ffi::UnsupportedConst: named Go types with underlying chan int are not supported yet"}}
+	if diff := cmp.Diff(want, c.Diagnostics(), compareOptions); diff != "" {
+		t.Fatalf("Diagnostics mismatch (-want +got):\n%s", diff)
+	}
 }

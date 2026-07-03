@@ -1143,6 +1143,86 @@ func TestRunProgramExecutesGoNamedScalarLiteralCall(t *testing.T) {
 	}
 }
 
+func TestRunProgramExecutesGoPackageVariable(t *testing.T) {
+	program := lowerSource(t, `
+		use go:fmt
+		use go:os
+
+		fn main() {
+			os::Stdout = os::Stdout
+			let written = try fmt::Fprintln(os::Stdout, "hello") -> err { panic(err) }
+			if written <= 0 {
+				panic("expected bytes written")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramAssignsGoPackageVariable(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"pkgvars\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module pkgvars\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
+
+import "io"
+
+var Name = "Ada"
+var Writer io.Writer
+
+func NameValue() string { return Name }
+func HasWriter() bool { return Writer != nil }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use go:io
+use go:pkgvars/ffi
+
+struct Sink {}
+
+impl io::Writer for Sink {
+  fn write(bytes: [Byte]) Int!Str {
+    Result::ok(bytes.size())
+  }
+}
+
+fn main() {
+  ffi::Name = "Grace"
+  if ffi::NameValue() != "Grace" {
+    panic("package var assignment was not observable")
+  }
+  ffi::Writer = Sink{}
+  if not ffi::HasWriter() {
+    panic("interface package var assignment failed")
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesGoPackageConstant(t *testing.T) {
 	program := lowerSource(t, `
 		use go:time

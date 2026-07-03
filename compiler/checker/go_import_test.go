@@ -522,6 +522,51 @@ let pi: Float64 = math::Pi`,
 	})
 }
 
+func TestGoImportResolvesExportedPackageVariable(t *testing.T) {
+	run(t, []test{
+		{
+			name: "pointer variable passed to interface parameter",
+			input: `use go:fmt
+use go:os
+
+fn main() {
+  let _ = try fmt::Fprintln(os::Stdout, "hello") -> err { panic(err) }
+}`,
+		},
+	})
+}
+
+func TestGoImportAssignsExportedPackageVariable(t *testing.T) {
+	run(t, []test{
+		{
+			name: "package variable assignment accepted",
+			input: `use go:os
+
+fn main() {
+  os::Stdout = os::Stdout
+}`,
+		},
+		{
+			name: "package variable type mismatch rejected",
+			input: `use go:os
+
+fn main() {
+  os::Stdout = 5
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut os::File, got Int"}},
+		},
+		{
+			name: "package constant assignment rejected",
+			input: `use go:time
+
+fn main() {
+  time::Nanosecond = 1
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot assign to Go constant: time::Nanosecond"}},
+		},
+	})
+}
+
 func TestGoImportRejectsUnknownFunction(t *testing.T) {
 	run(t, []test{
 		{
