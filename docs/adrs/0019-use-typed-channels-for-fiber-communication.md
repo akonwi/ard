@@ -38,15 +38,13 @@ They do not require an import to name. On the Go target they lower to:
 
 Channels are reference-like handles. Sending, receiving, closing, and deriving directional views do not require a `mut` binding.
 
-### `ard/channel` API
+### `Chan` static constructor and methods
 
-Construction and helper operations live in `ard/channel`:
+Construction and helper operations are compiler-backed static functions and methods on the built-in channel types. No `ard/channel` module is required:
 
 ```ard
-use ard/channel
-
-let ch = channel::new<Str>()
-let buffered = channel::new<Str>(10)
+let ch = Chan::new<Str>()
+let buffered = Chan::new<Str>(10)
 let rx = ch.receiver()
 let tx = ch.sender()
 ```
@@ -54,7 +52,7 @@ let tx = ch.sender()
 The constructor has one nullable capacity parameter:
 
 ```ard
-fn new<$T>(capacity: Int?) Chan<$T>
+Chan::new<$T>(capacity: Int?) Chan<$T>
 ```
 
 Omitting the nullable capacity, or passing `none`, creates an unbuffered channel. Passing `some(n)` creates a buffered channel of capacity `n`. On the Go target this lowers to `make(chan T)` or `make(chan T, n)`.
@@ -116,7 +114,7 @@ It is fire-and-forget: no join handle, no returned value, and no automatic panic
 - Channels become a first-class, typed concurrency primitive in Ard.
 - The Go target can lower channels and async start directly to native `chan T` and goroutines without FFI wrappers.
 - Directional channel types let Ard express Go's receive-only and send-only channel contracts.
-- The API remains module-shaped and avoids adding Go-specific concurrency syntax to Ard.
+- The API remains type-shaped through `Chan::new` and channel methods, avoiding both a dedicated channel module and Go-specific concurrency syntax in Ard.
 - `send` and `close` preserve native panic behavior instead of converting failures to `Bool` or `Result`.
 - Closure is observed through `recv() -> T?`, aligning with Ard's `Maybe` semantics.
 - Targets that cannot support channels or async scheduling must reject these features explicitly.
@@ -126,3 +124,4 @@ It is fire-and-forget: no join handle, no returned value, and no automatic panic
 - `docs/adrs/0032-select-on-channels.md`
 - `docs/adrs/0031-go-backend-lowering-contract.md`
 - `docs/adrs/0034-reset-go-backend-and-ffi-boundary.md`
+- `docs/adrs/0041-use-nullable-parameter-call-sugar.md`

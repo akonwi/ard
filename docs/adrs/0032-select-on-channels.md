@@ -4,7 +4,7 @@
 
 Accepted
 
-Builds on [ADR 0019](0019-use-typed-channels-for-fiber-communication.md), which defines `Chan<T>`, `Receiver<T>`, `Sender<T>`, `ard/channel`, and `ard/async::start`.
+Builds on [ADR 0019](0019-use-typed-channels-for-fiber-communication.md), which defines `Chan<T>`, `Receiver<T>`, `Sender<T>`, `Chan::new`, and `ard/async::start`.
 
 ## Context
 
@@ -39,12 +39,11 @@ where:
 Examples:
 
 ```ard
-use ard/channel
 use go:fmt
 use go:time
 
-let jobs = channel::new<Str>()
-let done = channel::new<Void>()
+let jobs = Chan::new<Str>()
+let done = Chan::new<Void>()
 let timeout = time::After(duration)
 
 select {
