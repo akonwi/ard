@@ -46,7 +46,7 @@ fn main() {
 }`,
 		},
 		{
-			name: "Go interface impl rejects mutable parameters",
+			name: "Go interface impl allows mutable descriptor parameters",
 			input: `use go:io
 
 struct Sink {}
@@ -56,7 +56,6 @@ impl io::Writer for Sink {
     Result::ok(bytes.size())
   }
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Go interface method 'write' parameter 'bytes' cannot be mutable"}},
 		},
 		{
 			name: "mutable Go interface impl accepts mutable field",

@@ -1291,8 +1291,8 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 				c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
 				valid = false
 			}
-			if param.Mutable {
-				c.addError(fmt.Sprintf("Go interface method '%s' parameter '%s' cannot be mutable", method.Name, param.Name), param.GetLocation())
+			if param.Mutable && mutableParamNeedsGoPointer(paramType) {
+				c.addError(fmt.Sprintf("Go interface method '%s' parameter '%s' cannot be mutable because it would change the Go ABI", method.Name, param.Name), param.GetLocation())
 				valid = false
 			}
 			params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: param.Mutable}
@@ -1376,6 +1376,18 @@ func (c *Checker) structImplementsForeignInterface(def *StructDef, iface *Foreig
 		}
 	}
 	return false
+}
+
+func mutableParamNeedsGoPointer(t Type) bool {
+	base, _ := mutableRefBase(t)
+	switch typ := base.(type) {
+	case *List, *Map, *Chan, *Receiver, *Sender:
+		return false
+	case *ForeignType:
+		return !typ.Pointer && !typ.Interface
+	default:
+		return true
+	}
 }
 
 func (c *Checker) foreignInterfaceArgUpcast(expected Type, actual Expression) (Expression, bool) {

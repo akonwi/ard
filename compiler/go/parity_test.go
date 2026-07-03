@@ -1809,7 +1809,24 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 		}
 	})
 
-	t.Run("list", func(t *testing.T) {
+	t.Run("list descriptor element mutation", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			fn replace_first(mut values: [Int]) {
+				values.set(0, 1)
+			}
+
+			fn main() Int {
+				mut values: [Int] = [0]
+				replace_first(values)
+				values.at(0)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "1" {
+			t.Fatalf("got %s, want 1", got)
+		}
+	})
+
+	t.Run("list descriptor header rebinding is local", func(t *testing.T) {
 		program := lowerParitySource(t, `
 			fn append_one(mut values: [Int]) {
 				values.push(1)
@@ -1821,8 +1838,8 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 				values.size()
 			}
 		`)
-		if got := runGoTargetParityJSON(t, program); got != "1" {
-			t.Fatalf("got %s, want 1", got)
+		if got := runGoTargetParityJSON(t, program); got != "0" {
+			t.Fatalf("got %s, want 0", got)
 		}
 	})
 

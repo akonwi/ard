@@ -3283,8 +3283,13 @@ func (l *lowerer) lowerForeignMethodValue(fn air.Function, expr air.Expr) (lower
 		}
 		argExpr := ast.Expr(ast.NewIdent(name))
 		if i < len(fnInfo.ParamMutable) && fnInfo.ParamMutable[i] {
-			typ = &ast.StarExpr{X: typ}
-			argExpr = &ast.StarExpr{X: ast.NewIdent(name)}
+			typ, err = l.mutableParamType(paramType)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			if l.mutableParamUsesPointer(paramType) {
+				argExpr = &ast.StarExpr{X: ast.NewIdent(name)}
+			}
 		}
 		params[i] = &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: typ}
 		args[i] = argExpr
@@ -3648,21 +3653,43 @@ func (l *lowerer) resultErrorIsStr(typeID air.TypeID) bool {
 	return info.Kind == air.TypeResult && validTypeID(l.program, info.Error) && l.program.Types[info.Error-1].Kind == air.TypeStr
 }
 
-func (l *lowerer) goParamType(param air.Param) (ast.Expr, error) {
-	typ, err := l.goType(param.Type)
+func (l *lowerer) mutableParamUsesPointer(typeID air.TypeID) bool {
+	if !validTypeID(l.program, typeID) || l.isVoidType(typeID) {
+		return false
+	}
+	info := l.program.Types[typeID-1]
+	switch info.Kind {
+	case air.TypeList, air.TypeMap, air.TypeChannel, air.TypeReceiver, air.TypeSender:
+		return false
+	case air.TypeForeignType:
+		return !info.ForeignPointer && !info.ForeignInterface
+	default:
+		return true
+	}
+}
+
+func (l *lowerer) mutableParamType(typeID air.TypeID) (ast.Expr, error) {
+	typ, err := l.goType(typeID)
 	if err != nil {
 		return nil, err
 	}
-	if param.Mutable && validTypeID(l.program, param.Type) && !l.isVoidType(param.Type) {
-		if l.isTraitObjectType(param.Type) {
-			typ, err = l.mutableTraitRefType(param.Type)
-			if err != nil {
-				return nil, err
-			}
-		}
-		return &ast.StarExpr{X: typ}, nil
+	if !l.mutableParamUsesPointer(typeID) {
+		return typ, nil
 	}
-	return typ, nil
+	if l.isTraitObjectType(typeID) {
+		typ, err = l.mutableTraitRefType(typeID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &ast.StarExpr{X: typ}, nil
+}
+
+func (l *lowerer) goParamType(param air.Param) (ast.Expr, error) {
+	if param.Mutable {
+		return l.mutableParamType(param.Type)
+	}
+	return l.goType(param.Type)
 }
 
 func (l *lowerer) modulePathForType(typeID air.TypeID) string {
@@ -3756,13 +3783,10 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 				return nil, err
 			}
 			if i < len(info.ParamMutable) && info.ParamMutable[i] {
-				if l.isTraitObjectType(paramTypeID) {
-					paramType, err = l.mutableTraitRefType(paramTypeID)
-					if err != nil {
-						return nil, err
-					}
+				paramType, err = l.mutableParamType(paramTypeID)
+				if err != nil {
+					return nil, err
 				}
-				paramType = &ast.StarExpr{X: paramType}
 			}
 			params = append(params, &ast.Field{Type: paramType})
 		}
@@ -4258,14 +4282,14 @@ func (l *lowerer) finishCallWithWriteback(typeID air.TypeID, stmts []ast.Stmt, c
 }
 
 func (l *lowerer) adaptCallArg(fn air.Function, arg air.Expr, argExpr ast.Expr, param air.Param) ast.Expr {
-	if !param.Mutable || !validTypeID(l.program, param.Type) || l.isVoidType(param.Type) {
+	if !param.Mutable || !l.mutableParamUsesPointer(param.Type) {
 		return argExpr
 	}
 	return l.mutableReferenceArg(fn, arg, argExpr)
 }
 
 func (l *lowerer) adaptCallArgWithStmts(fn air.Function, arg air.Expr, argExpr ast.Expr, param air.Param) (ast.Expr, []ast.Stmt, []ast.Stmt, error) {
-	if !param.Mutable || !validTypeID(l.program, param.Type) || l.isVoidType(param.Type) {
+	if !param.Mutable || !l.mutableParamUsesPointer(param.Type) {
 		return argExpr, nil, nil, nil
 	}
 	if adapted, setup, writeback, ok, err := l.mutableTraitObjectArg(fn, arg, argExpr, param); ok || err != nil {
@@ -4692,14 +4716,14 @@ func (l *lowerer) localIsPointerParam(fn air.Function, local air.LocalID) bool {
 	idx := int(local)
 	if idx >= 0 && idx < len(fn.Signature.Params) {
 		param := fn.Signature.Params[idx]
-		return param.Mutable && validTypeID(l.program, param.Type) && !l.isVoidType(param.Type)
+		return param.Mutable && l.mutableParamUsesPointer(param.Type)
 	}
 	for _, capture := range fn.Captures {
 		if capture.Local != local || idx < 0 || idx >= len(fn.Locals) {
 			continue
 		}
 		captured := fn.Locals[idx]
-		return captured.Mutable && validTypeID(l.program, captured.Type) && !l.isVoidType(captured.Type)
+		return captured.Mutable && l.mutableParamUsesPointer(captured.Type)
 	}
 	return false
 }

@@ -2489,6 +2489,41 @@ func TestLowerProgramUsesPointersForMutableStructParams(t *testing.T) {
 		t.Fatal("generated AST missing pointer call lowering")
 	}
 }
+func TestLowerProgramUsesDescriptorsForMutableListParams(t *testing.T) {
+	program := lowerSource(t, `
+		fn replace_first(mut values: [Int]) Void {
+			values.set(0, 1)
+		}
+
+		fn main() Void {
+			mut values = [0]
+			replace_first(values)
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	fn, ok := astFilesFunc(files, "ReplaceFirst")
+	if !ok || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
+		t.Fatalf("generated AST missing replace_first function")
+	}
+	if _, ok := fn.Type.Params.List[0].Type.(*ast.StarExpr); ok {
+		t.Fatalf("mutable list parameter should lower as descriptor, got pointer: %#v", fn.Type.Params.List[0].Type)
+	}
+	if _, ok := fn.Type.Params.List[0].Type.(*ast.ArrayType); !ok {
+		t.Fatalf("mutable list parameter should lower to slice: %#v", fn.Type.Params.List[0].Type)
+	}
+	if astFilesContain(files, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || astCallName(call) != "ReplaceFirst" || len(call.Args) == 0 {
+			return false
+		}
+		_, isAddr := call.Args[0].(*ast.UnaryExpr)
+		return isAddr
+	}) {
+		t.Fatal("mutable list call should not pass address")
+	}
+}
+
 func TestLowerProgramSupportsCapturedClosureSort(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
