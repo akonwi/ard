@@ -94,6 +94,9 @@ func (p printer) renderImport(item parse.Import) string {
 }
 
 func renderImportPath(item parse.Import) string {
+	if item.Kind == parse.ImportKindGo {
+		return "go:" + item.Path
+	}
 	return item.Path
 }
 

@@ -1,7 +1,10 @@
 package checker
 
 var prelude = map[string]Module{
-	"Result": ResultPkg{},
+	"Result":   ResultPkg{},
+	"Chan":     ChannelPkg{},
+	"Receiver": ChannelPkg{},
+	"Sender":   ChannelPkg{},
 }
 
 func findInStdLib(path string) (Module, bool) {
@@ -12,6 +15,8 @@ func findInStdLib(path string) (Module, bool) {
 		return MaybePkg{}, true
 	case "ard/result":
 		return ResultPkg{}, true
+	case "ard/async":
+		return AsyncPkg{}, true
 	case "ard/channel":
 		return ChannelPkg{}, true
 	case "ard/unsafe":
@@ -103,6 +108,22 @@ func (pkg ResultPkg) Get(name string) Symbol {
 	}
 }
 
+/* ard/async */
+type AsyncPkg struct{}
+
+func (pkg AsyncPkg) Path() string { return "ard/async" }
+
+func (pkg AsyncPkg) Program() *Program { return nil }
+
+func (pkg AsyncPkg) Get(name string) Symbol {
+	switch name {
+	case "start":
+		return Symbol{Name: name, Type: &FunctionDef{Name: name, Parameters: []Parameter{{Name: "task", Type: &FunctionDef{Name: "<function>", ReturnType: Void}}}, ReturnType: Void}}
+	default:
+		return Symbol{}
+	}
+}
+
 /* ard/unsafe */
 type UnsafePkg struct{}
 
@@ -140,12 +161,12 @@ func (pkg ChannelPkg) Get(name string) Symbol {
 		// The send-only Sender<$T> type.
 		return Symbol{Name: name, Type: MakeSender(&TypeVar{name: "T"})}
 	case "new":
-		// new<$T>(capacity: Int) Chan<$T>; send/recv/close are methods on Chan.
+		// Chan::new<$T>(capacity: Int?) Chan<$T>; send/recv/close are methods on Chan.
 		t := &TypeVar{name: "T"}
 		return Symbol{Name: name, Type: &FunctionDef{
 			Name:          name,
 			GenericParams: []string{"T"},
-			Parameters:    []Parameter{{Name: "capacity", Type: Int}},
+			Parameters:    []Parameter{{Name: "capacity", Type: MakeMaybe(Int)}},
 			ReturnType:    MakeChan(t),
 		}}
 	case "receiver":

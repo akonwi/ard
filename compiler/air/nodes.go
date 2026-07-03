@@ -81,6 +81,7 @@ const (
 	ExprListSort
 	ExprListSwap
 	ExprMakeMap
+	ExprAsyncStart
 	ExprMakeChannel
 	ExprChannelSend
 	ExprChannelRecv

@@ -2140,6 +2140,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMatchStr(fn, expr)
 	case air.ExprMakeList:
 		return l.lowerMakeList(fn, expr)
+	case air.ExprAsyncStart:
+		return l.lowerAsyncStart(fn, expr)
 	case air.ExprMakeChannel:
 		return l.lowerMakeChannel(fn, expr)
 	case air.ExprChannelSend:
@@ -6487,7 +6489,19 @@ func (l *lowerer) lowerMapHas(fn air.Function, expr air.Expr) (loweredExpr, erro
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
 }
 
-// lowerMakeChannel lowers ard/channel::new to `make(chan T, capacity)`.
+func (l *lowerer) lowerAsyncStart(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("async start expects one arg")
+	}
+	task, err := l.lowerExpr(fn, expr.Args[0])
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := append(task.stmts, &ast.GoStmt{Call: &ast.CallExpr{Fun: task.expr}})
+	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
+}
+
+// lowerMakeChannel lowers Chan::new to `make(chan T)` or `make(chan T, capacity)`.
 func (l *lowerer) lowerMakeChannel(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("make channel expects one arg")
@@ -6500,7 +6514,7 @@ func (l *lowerer) lowerMakeChannel(fn air.Function, expr air.Expr) (loweredExpr,
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	call := &ast.CallExpr{Fun: ast.NewIdent("make"), Args: []ast.Expr{chanType, capacity.expr}}
+	call := &ast.CallExpr{Fun: ast.NewIdent("make"), Args: []ast.Expr{chanType, &ast.CallExpr{Fun: &ast.SelectorExpr{X: capacity.expr, Sel: ast.NewIdent("Value")}}}}
 	return loweredExpr{stmts: capacity.stmts, expr: call}, nil
 }
 

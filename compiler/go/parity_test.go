@@ -2223,11 +2223,10 @@ func TestGoTargetParityDirectionalChannels(t *testing.T) {
 	}{
 		{
 			name: "sender and receiver views round-trip a value",
-			input: `use ard/channel
-fn main() Bool {
-  let ch = channel::new<Int>(1)
-  let tx = channel::sender(ch)
-  let rx = channel::receiver(ch)
+			input: `fn main() Bool {
+  let ch = Chan::new<Int>(1)
+  let tx = ch.sender()
+  let rx = ch.receiver()
   tx.send(42)
   rx.recv().expect("v") == 42
 }`,
@@ -2235,10 +2234,9 @@ fn main() Bool {
 		},
 		{
 			name: "select receives on a receiver view",
-			input: `use ard/channel
-fn main() Bool {
-  let ch = channel::new<Int>(1)
-  let rx = channel::receiver(ch)
+			input: `fn main() Bool {
+  let ch = Chan::new<Int>(1)
+  let rx = ch.receiver()
   ch.send(7)
   select {
     let v = rx.recv() => v.expect("v") == 7,
@@ -2249,10 +2247,9 @@ fn main() Bool {
 		},
 		{
 			name: "sender can close the channel",
-			input: `use ard/channel
-fn main() Bool {
-  let ch = channel::new<Int>(1)
-  let tx = channel::sender(ch)
+			input: `fn main() Bool {
+  let ch = Chan::new<Int>(1)
+  let tx = ch.sender()
   tx.close()
   ch.recv().is_none()
 }`,

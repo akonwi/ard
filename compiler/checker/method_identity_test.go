@@ -44,21 +44,21 @@ func TestStructMethodsAreStoredInProgramSideTable(t *testing.T) {
 }
 func TestStructSideTableMethodUsesGenericBindingsFromNestedFields(t *testing.T) {
 	result := parse.Parse([]byte(`
-		struct Chan {
+		struct Slot {
 			value: $T
 		}
 
-		struct Channel {
-			chan: Chan<$T>
+		struct BoxedSlot {
+			chan: Slot<$T>
 		}
 
-		impl Channel {
+		impl BoxedSlot {
 			fn send(value: $T) Bool {
 				true
 			}
 		}
 
-		fn new() Channel<Int> { Channel{ chan: Chan{ value: 0 } } }
+		fn new() BoxedSlot<Int> { BoxedSlot{ chan: Slot{ value: 0 } } }
 
 		let ch = new()
 		ch.send(42)

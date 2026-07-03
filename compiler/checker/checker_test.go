@@ -2661,9 +2661,9 @@ func TestChan(t *testing.T) {
 	run(t, []test{
 		{
 			name: "channel new/send/recv/close type-check",
-			input: `use ard/channel
-fn main() {
-  let ch = channel::new<Int>(1)
+			input: `fn main() {
+  let unbuffered = Chan::new<Int>()
+  let ch = Chan::new<Int>(1)
   ch.send(42)
   let v = ch.recv()
   ch.close()
@@ -2671,9 +2671,8 @@ fn main() {
 		},
 		{
 			name: "send rejects a mismatched value type",
-			input: `use ard/channel
-fn main() {
-  let ch = channel::new<Int>(1)
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
   ch.send("wrong")
 }`,
 			diagnostics: []checker.Diagnostic{
@@ -2682,17 +2681,15 @@ fn main() {
 		},
 		{
 			name: "recv yields an optional of the element type",
-			input: `use ard/channel
-fn main() Int {
-  let ch = channel::new<Int>(1)
+			input: `fn main() Int {
+  let ch = Chan::new<Int>(1)
   ch.send(7)
   ch.recv().expect("v")
 }`,
 		},
 		{
 			name: "Chan annotation resolves the element type",
-			input: `use ard/channel
-fn take(ch: channel::Chan<Str>) {
+			input: `fn take(ch: Chan<Str>) {
   ch.send("x")
 }`,
 		},
@@ -2702,10 +2699,9 @@ func TestSelectChecker(t *testing.T) {
 	run(t, []test{
 		{
 			name: "valid select with recv binding, send, discard, and default",
-			input: `use ard/channel
-fn main() {
-  let jobs = channel::new<Int>(1)
-  let sink = channel::new<Int>(0)
+			input: `fn main() {
+  let jobs = Chan::new<Int>(1)
+  let sink = Chan::new<Int>(0)
   jobs.send(1)
   select {
     let job = jobs.recv() => sink.send(job.expect("j")),
@@ -2717,9 +2713,8 @@ fn main() {
 		},
 		{
 			name: "send arm rejects a mismatched value type",
-			input: `use ard/channel
-fn main() {
-  let ch = channel::new<Int>(1)
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
   select {
     ch.send("x") => ch.close(),
     _ => ch.close()
@@ -2731,8 +2726,7 @@ fn main() {
 		},
 		{
 			name: "arm on a non-channel is rejected",
-			input: `use ard/channel
-fn main() {
+			input: `fn main() {
   let n = 5
   select {
     n.recv() => {},
@@ -2745,9 +2739,8 @@ fn main() {
 		},
 		{
 			name: "default arm cannot bind",
-			input: `use ard/channel
-fn main() {
-  let ch = channel::new<Int>(1)
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
   select {
     let x = _ => {},
     ch.recv() => {}
@@ -2763,19 +2756,17 @@ func TestDirectionalChannels(t *testing.T) {
 	run(t, []test{
 		{
 			name: "receiver factory yields a recv-only channel",
-			input: `use ard/channel
-fn main() {
-  let ch = channel::new<Int>(1)
-  let rx = channel::receiver(ch)
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  let rx = ch.receiver()
   let v = rx.recv()
 }`,
 		},
 		{
 			name: "receiver rejects send",
-			input: `use ard/channel
-fn main() {
-  let ch = channel::new<Int>(1)
-  let rx = channel::receiver(ch)
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  let rx = ch.receiver()
   rx.send(1)
 }`,
 			diagnostics: []checker.Diagnostic{
@@ -2784,20 +2775,18 @@ fn main() {
 		},
 		{
 			name: "sender factory yields a send-only channel with send and close",
-			input: `use ard/channel
-fn main() {
-  let ch = channel::new<Int>(1)
-  let tx = channel::sender(ch)
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  let tx = ch.sender()
   tx.send(1)
   tx.close()
 }`,
 		},
 		{
 			name: "sender rejects recv",
-			input: `use ard/channel
-fn main() {
-  let ch = channel::new<Int>(1)
-  let tx = channel::sender(ch)
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  let tx = ch.sender()
   let v = tx.recv()
 }`,
 			diagnostics: []checker.Diagnostic{
@@ -2806,10 +2795,9 @@ fn main() {
 		},
 		{
 			name: "a bidirectional channel does not implicitly narrow to a receiver",
-			input: `use ard/channel
-fn take(rx: channel::Receiver<Int>) {}
+			input: `fn take(rx: Receiver<Int>) {}
 fn main() {
-  take(channel::new<Int>(1))
+  take(Chan::new<Int>(1))
 }`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Type mismatch: Expected Receiver<Int>, got Chan<Int>"},
@@ -2817,10 +2805,9 @@ fn main() {
 		},
 		{
 			name: "select recv arm accepts a receiver",
-			input: `use ard/channel
-fn main() {
-  let ch = channel::new<Int>(1)
-  let rx = channel::receiver(ch)
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  let rx = ch.receiver()
   select {
     let v = rx.recv() => {},
     _ => {}
@@ -2829,10 +2816,9 @@ fn main() {
 		},
 		{
 			name: "select send arm rejects a receiver",
-			input: `use ard/channel
-fn main() {
-  let ch = channel::new<Int>(1)
-  let rx = channel::receiver(ch)
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  let rx = ch.receiver()
   select {
     rx.send(1) => {},
     _ => {}

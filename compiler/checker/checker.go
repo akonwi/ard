@@ -808,6 +808,27 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		case "Rune":
 			baseType = Rune
 			break
+		case "Chan":
+			if len(ty.TypeArgs) != 1 {
+				c.addError("Generic type Chan requires type arguments", ty.GetLocation())
+				return &TypeVar{name: "unknown"}
+			}
+			baseType = MakeChan(c.resolveType(ty.TypeArgs[0]))
+			break
+		case "Receiver":
+			if len(ty.TypeArgs) != 1 {
+				c.addError("Generic type Receiver requires type arguments", ty.GetLocation())
+				return &TypeVar{name: "unknown"}
+			}
+			baseType = MakeReceiver(c.resolveType(ty.TypeArgs[0]))
+			break
+		case "Sender":
+			if len(ty.TypeArgs) != 1 {
+				c.addError("Generic type Sender requires type arguments", ty.GetLocation())
+				return &TypeVar{name: "unknown"}
+			}
+			baseType = MakeSender(c.resolveType(ty.TypeArgs[0]))
+			break
 		default:
 			baseType = scalarTypeByName(t.GetName())
 		}

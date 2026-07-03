@@ -23,6 +23,10 @@ func TestFormatIsIdempotent(t *testing.T) {
 			name:  "anonymous function with inferred parameter type",
 			input: "fn main() {\n  let adults = List::keep(\n    users,\n    fn(u) {\n      u.age >= 30\n    },\n  )\n}\n",
 		},
+		{
+			name:  "go import",
+			input: "use go:fmt\n\nfn main() {\n  fmt::Println(\"hello\")\n}\n",
+		},
 	}
 
 	for _, tt := range inputs {

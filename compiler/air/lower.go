@@ -3817,6 +3817,16 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			return &Expr{Kind: ExprMakeList, Type: typeID}, nil
 		}
+		if e.Module == "ard/async" && e.Call.Name == "start" {
+			if len(e.Call.Args) != 1 {
+				return nil, fmt.Errorf("ard/async::start expects one argument")
+			}
+			task, err := fl.lowerExpr(e.Call.Args[0])
+			if err != nil {
+				return nil, err
+			}
+			return &Expr{Kind: ExprAsyncStart, Type: typeID, Args: []Expr{*task}}, nil
+		}
 		if e.Module == "ard/channel" {
 			return fl.lowerChannelCall(typeID, e)
 		}
@@ -5146,6 +5156,8 @@ func (fl *functionLowerer) lowerChanMethod(typeID TypeID, target *Expr, method *
 		return &Expr{Kind: ExprChannelRecv, Type: typeID, Args: []Expr{*target}}, nil
 	case "close":
 		return &Expr{Kind: ExprChannelClose, Type: typeID, Args: []Expr{*target}}, nil
+	case "receiver", "sender":
+		return &Expr{Kind: ExprChannelNarrow, Type: typeID, Args: []Expr{*target}}, nil
 	}
 	return nil, fmt.Errorf("unknown Chan method %s", method.Method.Name)
 }

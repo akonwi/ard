@@ -608,6 +608,10 @@ func (c Chan) get(name string) Type {
 		return chanRecvMethod(c.of)
 	case "close":
 		return chanCloseMethod()
+	case "receiver":
+		return &FunctionDef{Name: "receiver", ReturnType: MakeReceiver(c.of)}
+	case "sender":
+		return &FunctionDef{Name: "sender", ReturnType: MakeSender(c.of)}
 	}
 	return nil
 }
