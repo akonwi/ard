@@ -159,7 +159,7 @@ An Ard-owned value may be assigned to or passed as a foreign Go interface only i
 
 If the required impl methods are non-mutating, the value may be passed according to ordinary value rules. If any required impl method is mutating and therefore lowers with a pointer receiver, the value must be mutable and addressable at the upcast/call site.
 
-The initial implementation supports pointer-required upcasts for mutable local bindings. Broader mutable addressable places, such as nested mutable fields, are deferred until the checker and AIR carry a general addressable-place representation for foreign-interface upcasts.
+The initial implementation supports pointer-required upcasts for mutable local bindings and mutable Ard struct fields. Broader addressable foreign places can be added as the checker and AIR grow a more general addressable-place representation for foreign-interface upcasts.
 
 ```ard
 mut sink = Sink { written: 0 }
@@ -184,7 +184,7 @@ A future design may add explicit bridging between Ard traits and specific Go int
 - Generated Go remains idiomatic and may naturally satisfy Go interfaces.
 - ADR 0038's idiomatic return ABI becomes important for interface method compatibility.
 - Go interface nil behavior remains a foreign value-state concern governed by ADR 0037.
-- Pointer-to-interface, non-local addressable upcasts, and adapter generation for unsupported method shapes remain deferred.
+- Pointer-to-interface, broader foreign addressable upcasts, and adapter generation for unsupported method shapes remain deferred.
 - Diagnostics must clearly distinguish unsupported Go interface shapes from missing explicit Ard impls.
 
 ## Related

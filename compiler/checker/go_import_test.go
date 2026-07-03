@@ -59,6 +59,32 @@ impl io::Writer for Sink {
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Go interface method 'write' parameter 'bytes' cannot be mutable"}},
 		},
 		{
+			name: "mutable Go interface impl accepts mutable field",
+			input: `use go:io
+
+struct Sink {
+  written: Int,
+}
+
+struct Box {
+  sink: Sink,
+}
+
+impl io::Writer for Sink {
+  fn mut write(bytes: [Byte]) Int!Str {
+    self.written =+ bytes.size()
+    Result::ok(bytes.size())
+  }
+}
+
+fn consume(writer: io::Writer) {}
+
+fn main() {
+  mut box = Box{sink: Sink{written: 0}}
+  consume(box.sink)
+}`,
+		},
+		{
 			name: "mutable Go interface impl requires mutable value",
 			input: `use go:io
 

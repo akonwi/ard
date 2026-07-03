@@ -1285,6 +1285,37 @@ func TestRunProgramConstructsGoStructLiterals(t *testing.T) {
 	}
 }
 
+func TestRunProgramPassesMutableFieldToGoInterface(t *testing.T) {
+	program := lowerSource(t, `
+		use go:io
+
+		struct Sink { written: Int }
+		struct Box { sink: Sink }
+
+		impl io::Writer for Sink {
+			fn mut write(bytes: [Byte]) Int!Str {
+				self.written =+ bytes.size()
+				Result::ok(bytes.size())
+			}
+		}
+
+		fn consume(writer: io::Writer) Int!Str {
+			mut bytes: [Byte] = []
+			writer.Write(bytes)
+		}
+
+		fn main() {
+			mut box = Box{sink: Sink{written: 0}}
+			let _ = try consume(box.sink) -> err { panic(err) }
+			if not box.sink.written == 0 { panic("bad write count") }
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramWritesGoStructFields(t *testing.T) {
 	program := lowerSource(t, `
 		use go:image

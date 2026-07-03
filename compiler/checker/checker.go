@@ -1389,13 +1389,19 @@ func (c *Checker) foreignInterfaceArgUpcast(expected Type, actual Expression) (E
 		return nil, false
 	}
 	pointer := c.foreignInterfaceImplRequiresPointer(def, iface)
-	if pointer {
-		variable, ok := actual.(*Variable)
-		if !ok || !variable.sym.mutable {
-			return nil, false
-		}
+	if pointer && !c.isAddressableForeignInterfaceUpcast(actual) {
+		return nil, false
 	}
 	return &ForeignInterfaceUpcast{Value: actual, Iface: iface, Pointer: pointer}, true
+}
+
+func (c *Checker) isAddressableForeignInterfaceUpcast(expr Expression) bool {
+	switch expr.(type) {
+	case *Variable, *InstanceProperty:
+		return c.isMutable(expr)
+	default:
+		return false
+	}
 }
 
 func (c *Checker) foreignInterfaceImplRequiresPointer(def *StructDef, iface *ForeignType) bool {
