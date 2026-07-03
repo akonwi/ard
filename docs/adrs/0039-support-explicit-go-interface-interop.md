@@ -73,8 +73,6 @@ For example, if a Go package returns `*bytes.Buffer`, and a direct-Go API expect
 
 This does not require an Ard `impl`, because both sides are Go-owned and the semantics are Go's own structural interface semantics.
 
-This is desired behavior, but it can be implemented after the first explicit-interface slice. The initial implementation may only accept exact foreign interface values plus Ard-owned values with explicit impls.
-
 ### Ard-owned values require explicit implementation
 
 An Ard-owned type is assignable to a foreign Go interface only when Ard source contains an explicit implementation block for that interface:
@@ -176,7 +174,7 @@ Foreign Go interfaces do not replace Ard traits. Ard traits remain the core lang
 
 A future design may add explicit bridging between Ard traits and specific Go interfaces, but this ADR does not make arbitrary Ard traits equivalent to arbitrary Go interfaces. The only interface satisfaction described here is:
 
-- Go-owned value to Go-owned interface by Go assignability, once implemented;
+- Go-owned value to Go-owned interface by Go assignability;
 - Ard-owned value to Go-owned interface by explicit `impl go::Interface for ArdType`.
 
 ## Consequences
@@ -186,7 +184,7 @@ A future design may add explicit bridging between Ard traits and specific Go int
 - Generated Go remains idiomatic and may naturally satisfy Go interfaces.
 - ADR 0038's idiomatic return ABI becomes important for interface method compatibility.
 - Go interface nil behavior remains a foreign value-state concern governed by ADR 0037.
-- Pointer-to-interface, Go-owned concrete-to-interface assignability, non-local addressable upcasts, and adapter generation for unsupported method shapes remain deferred.
+- Pointer-to-interface, non-local addressable upcasts, and adapter generation for unsupported method shapes remain deferred.
 - Diagnostics must clearly distinguish unsupported Go interface shapes from missing explicit Ard impls.
 
 ## Related

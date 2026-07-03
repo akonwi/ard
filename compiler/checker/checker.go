@@ -1215,7 +1215,7 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	if iface, ok := expected.(*ForeignType); ok && iface.Interface {
 		actualBase, _ := mutableRefBase(actual)
 		if actualForeign, ok := actualBase.(*ForeignType); ok {
-			return actualForeign.equal(iface)
+			return actualForeign.equal(iface) || foreignGoAssignableTo(actualForeign, iface)
 		}
 		if def, ok := actualBase.(*StructDef); ok {
 			return c.structImplementsForeignInterface(def, iface) && !c.foreignInterfaceImplRequiresPointer(def, iface)

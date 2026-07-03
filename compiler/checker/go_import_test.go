@@ -15,6 +15,15 @@ func TestGoImportSupportsGoInterfaces(t *testing.T) {
 fn consume(writer: io::Writer) {}`,
 		},
 		{
+			name: "Go concrete value satisfies Go interface",
+			input: `use go:bytes
+use go:fmt
+
+fn main() Int!Str {
+  fmt::Fprint(bytes::NewBufferString("hello"), "!")
+}`,
+		},
+		{
 			name: "Ard struct explicitly implements Go interface",
 			input: `use go:io
 

@@ -1,5 +1,7 @@
 package checker
 
+import "go/types"
+
 // ForeignType is a named type owned by a foreign target. It is distinct from
 // its underlying Ard representation. When Underlying is nil, the value is opaque
 // to Ard and can only be stored or passed back across compatible foreign boundaries.
@@ -12,6 +14,7 @@ type ForeignType struct {
 	Pointer                   bool
 	Struct                    bool
 	Interface                 bool
+	GoType                    types.Type
 	MapKey                    Type
 	MapValue                  Type
 	Fields                    map[string]Type
@@ -79,3 +82,10 @@ func (f *ForeignType) equal(other Type) bool {
 }
 
 func (f *ForeignType) hasTrait(trait *Trait) bool { return false }
+
+func foreignGoAssignableTo(actual *ForeignType, expected *ForeignType) bool {
+	if actual == nil || expected == nil || actual.Target != "go" || expected.Target != "go" || actual.GoType == nil || expected.GoType == nil {
+		return false
+	}
+	return types.AssignableTo(actual.GoType, expected.GoType)
+}

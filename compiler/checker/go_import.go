@@ -230,7 +230,7 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 			namespace = pkg.Path()
 			qualifier = pkg.Name()
 		}
-		return &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: alias.Obj().Name(), Underlying: underlying}, ""
+		return &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: alias.Obj().Name(), Underlying: underlying, GoType: alias}, ""
 	}
 	if named, ok := t.(*types.Named); ok && !isGoError(t) {
 		if sig, ok := named.Underlying().(*types.Signature); ok {
@@ -329,7 +329,11 @@ func foreignNamedTypeFromGo(named *types.Named, pointer bool, includeMethods boo
 	underlying, _ := primitiveTypeFromGo(named.Underlying())
 	_, isStruct := named.Underlying().(*types.Struct)
 	_, isInterface := named.Underlying().(*types.Interface)
-	foreign := &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying, Pointer: pointer, Struct: isStruct, Interface: isInterface}
+	goType := types.Type(named)
+	if pointer {
+		goType = types.NewPointer(named)
+	}
+	foreign := &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying, Pointer: pointer, Struct: isStruct, Interface: isInterface, GoType: goType}
 	foreign.LoadFields = func() (map[string]Type, map[string]string) { return goFieldsForNamedType(named) }
 	foreign.LoadMethods = func(pointer bool) (map[string]*FunctionDef, map[string]string) {
 		return goMethodsForNamedType(named, pointer)
