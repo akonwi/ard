@@ -20,6 +20,26 @@ var personStruct = &StructDefinition{
 	},
 }
 
+func TestStructNameLocation(t *testing.T) {
+	result := Parse([]byte("struct Sender {\n  name: Str\n}\n"), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	def, ok := result.Program.Statements[0].(*StructDefinition)
+	if !ok {
+		t.Fatalf("statement = %T, want *StructDefinition", result.Program.Statements[0])
+	}
+	if got, want := def.Name.Location.Start.Row, 1; got != want {
+		t.Fatalf("name start row = %d, want %d", got, want)
+	}
+	if got, want := def.Name.Location.Start.Col, 8; got != want {
+		t.Fatalf("name start col = %d, want %d", got, want)
+	}
+	if got, want := def.Name.Location.End.Col, 13; got != want {
+		t.Fatalf("name end col = %d, want %d", got, want)
+	}
+}
+
 func TestStructDefinitions(t *testing.T) {
 	runTests(t, []test{
 		{

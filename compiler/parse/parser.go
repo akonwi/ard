@@ -826,7 +826,7 @@ func (p *parser) structDef(private bool) Statement {
 	typeParams := p.parseGenericTypeParameters()
 	structDef := &StructDefinition{
 		Private:    private,
-		Name:       Identifier{Name: nameToken.text},
+		Name:       Identifier{Name: nameToken.text, Location: nameToken.getLocation()},
 		TypeParams: typeParams,
 		Fields:     []StructField{},
 		Location: Location{

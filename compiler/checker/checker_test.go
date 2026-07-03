@@ -2657,6 +2657,24 @@ func TestGenericTypeParams(t *testing.T) {
 		},
 	})
 }
+
+func TestReservedBuiltinStructDiagnosticLocation(t *testing.T) {
+	result := parse.Parse([]byte("struct Sender {\n  name: Str\n}\n"), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	diagnostics := c.Diagnostics()
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics = %v, want one diagnostic", diagnostics)
+	}
+	got := diagnostics[0].String()
+	if !strings.Contains(got, "test.ard [1:8] Sender is a built-in type and cannot be redeclared") {
+		t.Fatalf("diagnostic = %q, want struct name location", got)
+	}
+}
+
 func TestAsyncStart(t *testing.T) {
 	run(t, []test{
 		{
