@@ -57,6 +57,7 @@ const (
 	ExprForeignFieldAccess
 	ExprForeignStructInstance
 	ExprForeignValue
+	ExprForeignInterfaceUpcast
 	ExprUnsafeCast
 	ExprUnsafeIsNil
 	ExprMakeClosure
@@ -174,20 +175,21 @@ type Expr struct {
 	Local  LocalID
 	Global GlobalID
 
-	Function         FunctionID
-	ForeignTarget    string
-	ForeignNamespace string
-	ForeignQualifier string
-	ForeignSymbol    string
-	ForeignReceiver  string
-	ForeignPointer   bool
-	TypeArgs         []TypeID
-	Impl             ImplID
-	Trait            TraitID
-	Method           int
-	Args             []Expr
-	Entries          []MapEntry
-	CaptureLocals    []LocalID
+	Function                FunctionID
+	ForeignTarget           string
+	ForeignNamespace        string
+	ForeignQualifier        string
+	ForeignSymbol           string
+	ForeignReceiver         string
+	ForeignPointer          bool
+	ForeignInterfacePointer bool
+	TypeArgs                []TypeID
+	Impl                    ImplID
+	Trait                   TraitID
+	Method                  int
+	Args                    []Expr
+	Entries                 []MapEntry
+	CaptureLocals           []LocalID
 
 	Fields []StructFieldValue
 	Target *Expr

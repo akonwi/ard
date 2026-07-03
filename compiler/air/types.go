@@ -148,6 +148,7 @@ type TypeInfo struct {
 	ForeignQualifier string
 	ForeignSymbol    string
 	ForeignPointer   bool
+	ForeignInterface bool
 
 	Fields   []FieldInfo
 	Variants []VariantInfo

@@ -16,10 +16,11 @@ import (
 )
 
 type Program struct {
-	Imports       map[string]Module
-	GoImports     map[string]*GoPackage
-	Statements    []Statement
-	StructMethods map[MethodOwner]map[string]*FunctionDef
+	Imports               map[string]Module
+	GoImports             map[string]*GoPackage
+	Statements            []Statement
+	StructMethods         map[MethodOwner]map[string]*FunctionDef
+	ForeignInterfaceImpls map[MethodOwner][]*ForeignType
 }
 
 type Module interface {
@@ -319,10 +320,11 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 		moduleResolver: moduleResolver,
 		options:        checkOptions,
 		program: &Program{
-			Imports:       map[string]Module{},
-			GoImports:     map[string]*GoPackage{},
-			Statements:    []Statement{},
-			StructMethods: map[MethodOwner]map[string]*FunctionDef{},
+			Imports:               map[string]Module{},
+			GoImports:             map[string]*GoPackage{},
+			Statements:            []Statement{},
+			StructMethods:         map[MethodOwner]map[string]*FunctionDef{},
+			ForeignInterfaceImpls: map[MethodOwner][]*ForeignType{},
 		},
 		scope: &rootScope,
 	}
@@ -1210,7 +1212,220 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	if trait, ok := expected.(*Trait); ok {
 		return actual.hasTrait(trait)
 	}
+	if iface, ok := expected.(*ForeignType); ok && iface.Interface {
+		actualBase, _ := mutableRefBase(actual)
+		if actualForeign, ok := actualBase.(*ForeignType); ok {
+			return actualForeign.equal(iface)
+		}
+		if def, ok := actualBase.(*StructDef); ok {
+			return c.structImplementsForeignInterface(def, iface) && !c.foreignInterfaceImplRequiresPointer(def, iface)
+		}
+	}
 	return expected.equal(actual)
+}
+
+func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementation, iface *ForeignType) *Statement {
+	typeSym, ok := c.scope.get(s.ForType.Name)
+	if !ok {
+		c.addError(fmt.Sprintf("Undefined type: %s", s.ForType.Name), s.ForType.GetLocation())
+		return nil
+	}
+	targetType, ok := typeSym.Type.(*StructDef)
+	if !ok {
+		c.addError(fmt.Sprintf("%s cannot implement a Go interface", s.ForType.Name), s.ForType.GetLocation())
+		return nil
+	}
+	if !iface.MethodsLoaded && iface.LoadMethods != nil {
+		iface.Methods, iface.UnsupportedMethods = iface.LoadMethods(false)
+		iface.MethodsLoaded = true
+	}
+
+	validImpl := true
+	for goName, reason := range iface.UnsupportedMethods {
+		validImpl = false
+		c.addError(fmt.Sprintf("Unsupported Go interface method %s::%s.%s: %s", iface.Qualifier, iface.Name, goName, reason), s.GetLocation())
+	}
+	implementedMethods := map[string]bool{}
+	invalidImplementedMethods := map[string]bool{}
+	pendingMethods := map[string]*FunctionDef{}
+	receiverGenerics := genericParamsForType(targetType)
+	for _, method := range s.Methods {
+		if len(method.TypeParams) > 0 {
+			validImpl = false
+			c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+			invalidImplementedMethods[method.Name] = true
+			continue
+		}
+		var interfaceMethod *FunctionDef
+		var interfaceMethodName string
+		for goName, m := range iface.Methods {
+			if goMethodNameToArdName(goName) == method.Name {
+				copy := *m
+				interfaceMethod = &copy
+				interfaceMethodName = goName
+				break
+			}
+		}
+		if interfaceMethod == nil {
+			c.addWarning(fmt.Sprintf("Method %s is not part of Go interface %s", method.Name, iface.String()), method.GetLocation())
+			continue
+		}
+		implementedMethods[method.Name] = true
+		if len(method.Parameters) != len(interfaceMethod.Parameters) {
+			validImpl = false
+			c.addError(fmt.Sprintf("Method %s has wrong number of parameters", method.Name), method.GetLocation())
+			invalidImplementedMethods[method.Name] = true
+			continue
+		}
+		params := make([]Parameter, len(method.Parameters))
+		valid := true
+		for i, param := range method.Parameters {
+			paramType := c.resolveType(param.Type)
+			if paramType == nil {
+				c.addError(fmt.Sprintf("Unrecognized type: %s", param.Type.GetName()), param.Type.GetLocation())
+				valid = false
+				continue
+			}
+			expectedType := interfaceMethod.Parameters[i].Type
+			if !c.areCompatible(expectedType, paramType) {
+				c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
+				valid = false
+			}
+			if param.Mutable {
+				c.addError(fmt.Sprintf("Go interface method '%s' parameter '%s' cannot be mutable", method.Name, param.Name), param.GetLocation())
+				valid = false
+			}
+			params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: param.Mutable}
+		}
+		returnType := Type(Void)
+		if method.ReturnType != nil {
+			returnType = c.resolveType(method.ReturnType)
+			if returnType == nil {
+				c.addError(fmt.Sprintf("Unrecognized return type: %s", method.ReturnType.GetName()), method.ReturnType.GetLocation())
+				valid = false
+			}
+		}
+		if returnType != nil && !c.areCompatible(interfaceMethod.ReturnType, returnType) {
+			c.addError(fmt.Sprintf("Go interface method '%s' has return type of %s", method.Name, interfaceMethod.ReturnType), method.GetLocation())
+			valid = false
+		}
+		if !valid {
+			validImpl = false
+			invalidImplementedMethods[method.Name] = true
+			continue
+		}
+		c.pushMethodGenericAllowlist(receiverGenerics)
+		fnDef := c.checkFunction(&method, func() {
+			c.scope.add(s.Receiver.Name, targetType, method.Mutates)
+		}, receiverGenerics...)
+		c.popMethodGenericAllowlist()
+		if fnDef == nil {
+			validImpl = false
+			invalidImplementedMethods[method.Name] = true
+			continue
+		}
+		if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
+			validImpl = false
+			c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+			invalidImplementedMethods[method.Name] = true
+			continue
+		}
+		fnDef.Receiver = s.Receiver.Name
+		fnDef.Mutates = method.Mutates
+		fnDef.Name = goMethodNameToArdName(interfaceMethodName)
+		if _, exists := c.structMethod(targetType, fnDef.Name); exists {
+			validImpl = false
+			invalidImplementedMethods[method.Name] = true
+			c.addError(fmt.Sprintf("Duplicate method: %s", fnDef.Name), method.GetLocation())
+			continue
+		}
+		if _, exists := pendingMethods[fnDef.Name]; exists {
+			validImpl = false
+			invalidImplementedMethods[method.Name] = true
+			c.addError(fmt.Sprintf("Duplicate method: %s", fnDef.Name), method.GetLocation())
+			continue
+		}
+		pendingMethods[fnDef.Name] = fnDef
+	}
+
+	for goName := range iface.Methods {
+		ardName := goMethodNameToArdName(goName)
+		if !implementedMethods[ardName] && !invalidImplementedMethods[ardName] {
+			validImpl = false
+			c.addError(fmt.Sprintf("Missing method '%s' in Go interface '%s'", ardName, iface.String()), s.GetLocation())
+		}
+	}
+	if !validImpl {
+		return nil
+	}
+	for _, method := range pendingMethods {
+		c.addStructMethod(targetType, method)
+	}
+	owner := StructMethodOwner(targetType)
+	c.program.ForeignInterfaceImpls[owner] = append(c.program.ForeignInterfaceImpls[owner], iface)
+	return &Statement{Stmt: targetType}
+}
+
+func (c *Checker) structImplementsForeignInterface(def *StructDef, iface *ForeignType) bool {
+	if def == nil || iface == nil {
+		return false
+	}
+	for _, implemented := range c.program.ForeignInterfaceImpls[StructMethodOwner(def)] {
+		if implemented != nil && implemented.equal(iface) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Checker) foreignInterfaceArgUpcast(expected Type, actual Expression) (Expression, bool) {
+	iface, ok := expected.(*ForeignType)
+	if !ok || !iface.Interface || actual == nil {
+		return nil, false
+	}
+	actualBase, _ := mutableRefBase(actual.Type())
+	def, ok := actualBase.(*StructDef)
+	if !ok || !c.structImplementsForeignInterface(def, iface) {
+		return nil, false
+	}
+	pointer := c.foreignInterfaceImplRequiresPointer(def, iface)
+	if pointer {
+		variable, ok := actual.(*Variable)
+		if !ok || !variable.sym.mutable {
+			return nil, false
+		}
+	}
+	return &ForeignInterfaceUpcast{Value: actual, Iface: iface, Pointer: pointer}, true
+}
+
+func (c *Checker) foreignInterfaceImplRequiresPointer(def *StructDef, iface *ForeignType) bool {
+	if def == nil || iface == nil {
+		return false
+	}
+	methods := c.structMethods(def)
+	for goName := range iface.Methods {
+		if method := methods[goMethodNameToArdName(goName)]; method != nil && method.Mutates {
+			return true
+		}
+	}
+	return false
+}
+
+func goMethodNameToArdName(name string) string {
+	if name == "" {
+		return ""
+	}
+	var b strings.Builder
+	for i, r := range name {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			b.WriteByte('_')
+		}
+		if r >= 'A' && r <= 'Z' {
+			r = r + ('a' - 'A')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
@@ -1274,10 +1489,20 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					sym = *s
 				}
 			case parse.StaticProperty:
-				mod := c.resolveModule(name.Target.(*parse.Identifier).Name)
+				modName := name.Target.(*parse.Identifier).Name
+				mod := c.resolveModule(modName)
 				if mod != nil {
 					if propId, ok := name.Property.(*parse.Identifier); ok {
 						sym = mod.Get(propId.Name)
+					} else {
+						c.addError(fmt.Sprintf("Bad path: %s", name), name.Property.GetLocation())
+						return nil
+					}
+				} else if goPkg := c.program.GoImports[modName]; goPkg != nil {
+					if propId, ok := name.Property.(*parse.Identifier); ok {
+						if typ := goPkg.Types[propId.Name]; typ != nil {
+							sym = Symbol{Name: propId.Name, Type: typ}
+						}
 					} else {
 						c.addError(fmt.Sprintf("Bad path: %s", name), name.Property.GetLocation())
 						return nil
@@ -1294,6 +1519,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 			trait, ok := sym.Type.(*Trait)
 			if !ok {
+				if foreign, ok := sym.Type.(*ForeignType); ok && foreign.Interface {
+					return c.checkForeignInterfaceImplementation(s, foreign)
+				}
 				c.addError(fmt.Sprintf("%T is not a trait", sym.Type), s.Trait.GetLocation())
 				return nil
 			}
@@ -5019,8 +5247,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 					if !c.areCompatible(fnDef.Parameters[i].Type, checkedArg.Type()) {
-						c.addError(typeMismatch(fnDef.Parameters[i].Type, checkedArg.Type()), expr.GetLocation())
-						return nil
+						upcast, ok := c.foreignInterfaceArgUpcast(fnDef.Parameters[i].Type, checkedArg)
+						if !ok {
+							c.addError(typeMismatch(fnDef.Parameters[i].Type, checkedArg.Type()), expr.GetLocation())
+							return nil
+						}
+						checkedArg = upcast
 					}
 					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
 						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), expr.GetLocation())
@@ -7478,8 +7710,12 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		} else {
 			// For non-generic functions, do regular type compatibility check
 			if !c.areCompatible(paramType, checkedArg.Type()) {
-				c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
-				return nil, nil
+				upcast, ok := c.foreignInterfaceArgUpcast(paramType, checkedArg)
+				if !ok {
+					c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
+					return nil, nil
+				}
+				checkedArg = upcast
 			}
 		}
 

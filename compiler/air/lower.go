@@ -2042,6 +2042,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		info.ForeignQualifier = typ.Qualifier
 		info.ForeignSymbol = typ.Name
 		info.ForeignPointer = typ.Pointer
+		info.ForeignInterface = typ.Interface
 		if typ.Underlying != nil {
 			underlying, err := l.internType(typ.Underlying)
 			if err != nil {
@@ -3722,6 +3723,12 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return nil, fmt.Errorf("unsupported unresolved function call %s", e.Name)
 	case *checker.ForeignValue:
 		return &Expr{Kind: ExprForeignValue, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol}, nil
+	case *checker.ForeignInterfaceUpcast:
+		value, err := fl.lowerExpr(e.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprForeignInterfaceUpcast, Type: typeID, Target: value, ForeignInterfacePointer: e.Pointer}, nil
 	case *checker.ForeignStructInstance:
 		fields := make([]StructFieldValue, 0, len(e.Fields))
 		for name, valueExpr := range e.Fields {

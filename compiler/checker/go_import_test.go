@@ -6,6 +6,137 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+func TestGoImportSupportsGoInterfaces(t *testing.T) {
+	run(t, []test{
+		{
+			name: "named Go interface can be used as parameter",
+			input: `use go:io
+
+fn consume(writer: io::Writer) {}`,
+		},
+		{
+			name: "Ard struct explicitly implements Go interface",
+			input: `use go:io
+
+struct Sink {
+  written: Int,
+}
+
+impl io::Writer for Sink {
+  fn mut write(bytes: [Byte]) Int!Str {
+    self.written =+ bytes.size()
+    Result::ok(bytes.size())
+  }
+}
+
+fn consume(writer: io::Writer) {}
+
+fn main() {
+  mut sink = Sink{written: 0}
+  consume(sink)
+}`,
+		},
+		{
+			name: "Go interface impl rejects mutable parameters",
+			input: `use go:io
+
+struct Sink {}
+
+impl io::Writer for Sink {
+  fn write(mut bytes: [Byte]) Int!Str {
+    Result::ok(bytes.size())
+  }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Go interface method 'write' parameter 'bytes' cannot be mutable"}},
+		},
+		{
+			name: "mutable Go interface impl requires mutable value",
+			input: `use go:io
+
+struct Sink {
+  written: Int,
+}
+
+impl io::Writer for Sink {
+  fn mut write(bytes: [Byte]) Int!Str {
+    self.written =+ bytes.size()
+    Result::ok(bytes.size())
+  }
+}
+
+fn consume(writer: io::Writer) {}
+
+fn main() {
+  let sink = Sink{written: 0}
+  consume(sink)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected io::Writer, got Sink"}},
+		},
+		{
+			name: "invalid Go interface impl is not recorded",
+			input: `use go:io
+
+struct Sink {}
+
+impl io::Writer for Sink {
+}
+
+fn consume(writer: io::Writer) {}
+
+fn main() {
+  let sink = Sink{}
+  consume(sink)
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Missing method 'write' in Go interface 'io::Writer'"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected io::Writer, got Sink"},
+			},
+		},
+		{
+			name: "duplicate inherent method conflicts with Go interface impl",
+			input: `use go:io
+
+struct Sink {}
+
+impl Sink {
+  fn write(bytes: [Byte]) Int!Str {
+    Result::ok(bytes.size())
+  }
+}
+
+impl io::Writer for Sink {
+  fn write(bytes: [Byte]) Int!Str {
+    Result::ok(bytes.size())
+  }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Duplicate method: write"}},
+		},
+		{
+			name: "missing explicit Go interface impl is rejected",
+			input: `use go:io
+
+struct Sink {
+  written: Int,
+}
+
+impl Sink {
+  fn mut write(bytes: [Byte]) Int!Str {
+    self.written =+ bytes.size()
+    Result::ok(bytes.size())
+  }
+}
+
+fn consume(writer: io::Writer) {}
+
+fn main() {
+  mut sink = Sink{written: 0}
+  consume(sink)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected io::Writer, got Sink"}},
+		},
+	})
+}
+
 func TestGoImportAcceptsFunctionCallbacks(t *testing.T) {
 	run(t, []test{
 		{
@@ -302,14 +433,14 @@ fn main() {
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 1, got 2"}},
 		},
 		{
-			name: "unsupported foreign method signature is reported",
+			name: "foreign interface method argument type mismatch is reported",
 			input: `use go:regexp
 
 fn main() {
   let re = try regexp::Compile("[a-z]+") -> err { panic(err) }
   re.FindReaderIndex("abc")
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported foreign method mut regexp::Regexp.FindReaderIndex: parameter 1 has unsupported type io.RuneReader: Go interface types are not supported yet"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected io::RuneReader, got Str"}},
 		},
 		{
 			name: "pointer receiver method on immutable opaque value rejected",
@@ -368,19 +499,19 @@ fmt::Nope("hello")`,
 	})
 }
 
-func TestGoImportReportsUnsupportedFunctionSignature(t *testing.T) {
+func TestGoImportReportsFunctionCallErrors(t *testing.T) {
 	run(t, []test{
 		{
-			name: "exported function with unsupported signature",
+			name: "interface function reports arity after signature is supported",
 			input: `use go:fmt
 fmt::Fprint("hello")`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go function fmt::Fprint: parameter 1 has unsupported type io.Writer: Go interface types are not supported yet"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 2, got 1"}},
 		},
 		{
-			name: "function type with unsupported parameters is unsupported",
+			name: "function callback reports arity after interface parameters are supported",
 			input: `use go:net/http
-http::HandleFunc("/", fn() { () })`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go function http::HandleFunc: parameter 2 has unsupported type func(net/http.ResponseWriter, *net/http.Request): parameter 1 has unsupported type net/http.ResponseWriter: Go interface types are not supported yet"}},
+http::HandleFunc()`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 2, got 0"}},
 		},
 	})
 }

@@ -1262,6 +1262,14 @@ func (p *ForeignMethodCall) Type() Type {
 	return p.Call.Type()
 }
 
+type ForeignInterfaceUpcast struct {
+	Value   Expression
+	Iface   *ForeignType
+	Pointer bool
+}
+
+func (p *ForeignInterfaceUpcast) Type() Type { return p.Iface }
+
 type ForeignValue struct {
 	Target    string
 	Namespace string

@@ -11,6 +11,7 @@ type ForeignType struct {
 	Underlying                Type
 	Pointer                   bool
 	Struct                    bool
+	Interface                 bool
 	MapKey                    Type
 	MapValue                  Type
 	Fields                    map[string]Type

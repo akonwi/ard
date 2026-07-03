@@ -2527,6 +2527,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerForeignStructInstance(fn, expr)
 	case air.ExprForeignValue:
 		return l.lowerForeignValue(expr)
+	case air.ExprForeignInterfaceUpcast:
+		return l.lowerForeignInterfaceUpcast(fn, expr)
 	case air.ExprUnsafeCast:
 		return l.lowerUnsafeCast(fn, expr)
 	case air.ExprUnsafeIsNil:
@@ -3016,6 +3018,20 @@ func (l *lowerer) lowerForeignValue(expr air.Expr) (loweredExpr, error) {
 		}
 	}
 	return loweredExpr{expr: l.qualified(qualifier, expr.ForeignNamespace, expr.ForeignSymbol)}, nil
+}
+
+func (l *lowerer) lowerForeignInterfaceUpcast(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("foreign interface upcast missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	if expr.ForeignInterfacePointer {
+		target.expr = l.mutableReferenceArg(fn, *expr.Target, target.expr)
+	}
+	return target, nil
 }
 
 func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr, error) {

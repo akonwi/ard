@@ -313,7 +313,7 @@ func unsupportedForeignNamedUnderlying(underlying types.Type, pointer bool) stri
 		if pointer {
 			return "pointers to Go interface types are not supported"
 		}
-		return "Go interface types are not supported yet"
+		return ""
 	}
 	return fmt.Sprintf("named Go types with underlying %s are not supported yet", underlying.String())
 }
@@ -328,7 +328,8 @@ func foreignNamedTypeFromGo(named *types.Named, pointer bool, includeMethods boo
 	}
 	underlying, _ := primitiveTypeFromGo(named.Underlying())
 	_, isStruct := named.Underlying().(*types.Struct)
-	foreign := &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying, Pointer: pointer, Struct: isStruct}
+	_, isInterface := named.Underlying().(*types.Interface)
+	foreign := &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying, Pointer: pointer, Struct: isStruct, Interface: isInterface}
 	foreign.LoadFields = func() (map[string]Type, map[string]string) { return goFieldsForNamedType(named) }
 	foreign.LoadMethods = func(pointer bool) (map[string]*FunctionDef, map[string]string) {
 		return goMethodsForNamedType(named, pointer)
