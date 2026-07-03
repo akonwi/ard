@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -85,7 +85,7 @@ struct Sink {
 }
 
 impl io::Writer for Sink {
-  fn write(mut self, bytes: [Byte]) Int!Str {
+  fn mut write(bytes: [Byte]) Int!Str {
     self.written =+ bytes.size()
     bytes.size()
   }
@@ -96,7 +96,7 @@ The explicit `impl` is required even if the type has an inherent method whose ge
 
 ```ard
 impl Sink {
-  fn write(mut self, bytes: [Byte]) Int!Str {
+  fn mut write(bytes: [Byte]) Int!Str {
     bytes.size()
   }
 }
@@ -134,7 +134,7 @@ For the `io.Writer` example:
 
 ```ard
 impl io::Writer for Sink {
-  fn write(mut self, bytes: [Byte]) Int!Str {
+  fn mut write(bytes: [Byte]) Int!Str {
     self.written =+ bytes.size()
     bytes.size()
   }
