@@ -17,9 +17,10 @@ capturing mutable outer state.
 Two things have since changed the landscape:
 
 - Ard can start goroutines. `async::start(fn() Void)` lowers to a goroutine.
-- Ard has typed channels (`0031-go-backend-lowering-contract.md`,
-  `0032-select-on-channels.md`): `ard/channel` lowers to native `chan T` with
-  `send`/`recv`/`close` and `select`.
+- Ard has typed channels (`0019-use-typed-channels-for-fiber-communication.md`,
+  `0031-go-backend-lowering-contract.md`, `0032-select-on-channels.md`):
+  `Chan<T>`, `Receiver<T>`, and `Sender<T>` lower to native Go channel types
+  with `send`/`recv`/`close` and `select`.
 
 With both in place, every ergonomic the fiber model provided — waiting for
 completion, retrieving a typed result, joining a set of tasks, wait-groups,
@@ -33,19 +34,15 @@ the runtime — when it is now just library code.
 
 ## Decision
 
-Async is two primitives: starting a goroutine, and channels. Everything else is
-ordinary Ard.
+Async is `async::start` plus channels. Everything else is ordinary Ard.
 
-- `ard/async` exposes exactly:
-  - `start(do: fn() Void)` — run `do` on a new goroutine. It is fire-and-forget;
-    it returns nothing.
-  - `sleep(nanoseconds: Int)` — block the current goroutine.
-- The single irreducible primitive — `go do()` — is a one-line `use go:` helper
-  (`func Spawn(do func()) { go do() }`), not a compiler intrinsic.
-- Coordination is userland over `ard/channel`. Result-returning tasks (the old
-  `eval`/`get`), joining (the old `join`), wait-groups, and structured
-  concurrency are written in Ard against channels, not provided by the runtime
-  or stdlib.
+- `ard/async::start(do: fn() Void) Void` is a module-shaped compiler intrinsic.
+  On the Go target it runs `do` on a new goroutine. It is fire-and-forget and
+  returns no handle or value.
+- Coordination is userland over channels. Result-returning tasks (the old
+  `eval`/`get`), joining (the old `join`), wait-groups, sleeps/timeouts, and
+  structured concurrency are written in Ard against channels or direct Go
+  imports such as `time::After`, not provided by the runtime.
 - The runtime no longer defines a `Fiber` type. The sanctioned shared runtime
   types are `runtime.Maybe[T]` and `runtime.Result[T, E]` (see 0031).
 - Spawned closures follow Go's concurrency semantics. The previous rule
@@ -60,11 +57,11 @@ This supersedes the `Fiber<$T>` / `async::eval` / `join` / `get` model of
 
 - The runtime package is reduced to `Maybe` and `Result`; `runtime.Fiber` and
   its `SpawnFiber`/`JoinFiber`/`GetFiber` are removed.
-- The `ard/async` surface is two functions; the `Fiber` type, `eval`, `join`,
-  and `get` no longer exist in the standard library.
+- The `ard/async` surface is the compiler-backed `start` function; the `Fiber`
+  type, `eval`, `join`, and `get` no longer exist in the standard library.
 - Opinionated concurrency ergonomics move to userland and can evolve as ordinary
   libraries rather than as compiler/runtime commitments. A result-returning task
-  is a struct over a `channel::Receiver<$T>`; joining is reading channels.
+  is a struct over a `Receiver<$T>`; joining is reading channels.
 - Async adopts Go-like semantics: no enforced capture isolation, so the checker
   no longer validates fiber capture rules.
 - `0003`'s typed `Fiber<$T>` result-retrieval guarantee is given up at the
@@ -77,4 +74,4 @@ This supersedes the `Fiber<$T>` / `async::eval` / `join` / `get` model of
 - `docs/adrs/0031-go-backend-lowering-contract.md`
 - `docs/adrs/0019-use-typed-channels-for-fiber-communication.md`
 - `docs/adrs/0032-select-on-channels.md`
-- `compiler/std_lib/async.ard`
+- `compiler/checker/std_lib.go` (`AsyncPkg`)

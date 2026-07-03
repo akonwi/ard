@@ -55,7 +55,7 @@ The constructor has one nullable capacity parameter:
 Chan::new<$T>(capacity: Int?) Chan<$T>
 ```
 
-Omitting the nullable capacity, or passing `none`, creates an unbuffered channel. Passing `some(n)` creates a buffered channel of capacity `n`. On the Go target this lowers to `make(chan T)` or `make(chan T, n)`.
+Omitting the nullable capacity, or passing `maybe::none()`, creates an unbuffered channel. Passing `some(n)` creates a buffered channel of capacity `n`. On the Go target this lowers to `make(chan T)` or `make(chan T, n)`.
 
 Channel operations are methods:
 

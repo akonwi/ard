@@ -2215,6 +2215,35 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 	})
 }
 
+func TestGoTargetParityAsyncStart(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name: "async start coordinates over unbuffered channel",
+			input: `use ard/async
+fn main() Bool {
+  let done = Chan::new<Bool>()
+  async::start(fn() {
+    done.send(true)
+  })
+  done.recv().expect("done")
+}`,
+			want: "true",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			program := lowerParitySource(t, tc.input)
+			if got := strings.TrimSpace(runGoTargetParityJSON(t, program)); got != tc.want {
+				t.Fatalf("go output = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGoTargetParityDirectionalChannels(t *testing.T) {
 	cases := []struct {
 		name  string

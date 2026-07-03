@@ -9,8 +9,8 @@ Ard's concurrency model is Go's: lightweight goroutines that communicate over
 typed channels. There are no `async`/`await` keywords and no promises. Instead,
 two small primitives compose into everything else:
 
-- [`ard/async`](/stdlib/async/) starts goroutines and sleeps.
-- [`ard/channel`](/stdlib/channel/) passes typed values between them.
+- [`ard/async`](/stdlib/async/) starts goroutines.
+- [channels](/stdlib/channel/) passes typed values between them.
 
 Waiting for completion, returning results, joining a set of tasks, fan-in, and
 timeouts are all written in ordinary Ard on top of these — not baked into the
@@ -23,14 +23,15 @@ returns immediately and gives you no handle.
 
 ```ard
 use ard/async
-use ard/io
+use go:fmt
 
 fn main() {
+  let done = Chan::new<Bool>()
   async::start(fn() {
-    io::print("running concurrently")
+    fmt::Println("running concurrently")
+    done.send(true)
   })
-
-  async::sleep(1_000_000) // 1ms, so main doesn't exit first
+  done.recv()
 }
 ```
 
@@ -38,19 +39,6 @@ Because `start` returns nothing, you coordinate with a channel rather than a
 return value. Spawned closures follow Go's semantics: they capture by reference,
 and there is no isolation rule — shared state is coordinated through channels and
 data races are your responsibility.
-
-### Sleeping
-
-`async::sleep` blocks the current goroutine for a number of nanoseconds. Import
-Go's `time` constants for readable durations:
-
-```ard
-use ard/async
-use go:time
-
-async::sleep(time::Second)
-async::sleep(time::Millisecond * 250)
-```
 
 ## Coordinating with channels
 
@@ -62,19 +50,18 @@ closed.
 
 ```ard
 use ard/async
-use ard/channel
-use ard/io
+use go:fmt
 
 fn main() {
-  let done = channel::new<Bool>(0)
+  let done = Chan::new<Bool>()
 
   async::start(fn() {
-    io::print("working")
+    fmt::Println("working")
     done.send(true)
   })
 
   done.recv() // blocks until the goroutine signals
-  io::print("finished")
+  fmt::Println("finished")
 }
 ```
 
@@ -85,7 +72,6 @@ that replaces a result-returning task: start the work, then receive its value.
 
 ```ard
 use ard/async
-use ard/channel
 
 fn compute() Int {
   // ... expensive work ...
@@ -93,7 +79,7 @@ fn compute() Int {
 }
 
 fn main() Int {
-  let result = channel::new<Int>(0)
+  let result = Chan::new<Int>()
 
   async::start(fn() {
     result.send(compute())
@@ -110,12 +96,11 @@ once per goroutine:
 
 ```ard
 use ard/async
-use ard/channel
 use ard/list as List
 
 fn main() Int {
   let inputs = [1, 2, 3, 4]
-  let results = channel::new<Int>(inputs.size())
+  let results = Chan::new<Int>(inputs.size())
 
   for n in inputs {
     async::start(fn() {
@@ -138,10 +123,9 @@ until `recv()` returns `none`, the closed-and-drained signal:
 
 ```ard
 use ard/async
-use ard/channel
 
 fn main() Int {
-  let jobs = channel::new<Int>(0)
+  let jobs = Chan::new<Int>()
 
   async::start(fn() {
     jobs.send(1)
@@ -169,16 +153,15 @@ receive-only `Receiver<$T>` or a send-only `Sender<$T>`. Narrowing is explicit
 and one-way:
 
 ```ard
-use ard/channel
 
-fn produce(out: channel::Sender<Int>) {
+fn produce(out: Sender<Int>) {
   out.send(1)
   out.close()
 }
 
 fn main() {
-  let ch = channel::new<Int>(0)
-  produce(channel::sender(ch))
+  let ch = Chan::new<Int>()
+  produce(ch.sender())
   // ch.recv() ...
 }
 ```
@@ -216,11 +199,10 @@ Go's `time::After` returns a channel that fires after a delay, which composes
 naturally as a `select` arm:
 
 ```ard
-use ard/channel
 use go:time
 
 fn main() Int {
-  let work = channel::new<Int>(0)
+  let work = Chan::new<Int>()
   // ... a goroutine may eventually send on `work` ...
 
   select {
@@ -237,5 +219,5 @@ way to *start* a goroutine, because there is no `go` statement to write in
 userland. Everything a richer async library would offer — futures, joins,
 wait-groups, structured concurrency — is expressible as plain Ard over channels,
 so it lives in libraries and programs rather than in the runtime. The runtime
-itself defines no async type; `start` is a one-line Go helper, and channels lower
+itself defines no async type; `start` is a compiler-backed intrinsic, and channels lower
 to native `chan T`.

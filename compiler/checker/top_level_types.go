@@ -20,6 +20,11 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 			continue
 		}
 		seen[name] = loc
+		if isReservedBuiltinTypeName(name) {
+			c.addError(fmt.Sprintf("%s is a built-in type and cannot be redeclared", name), loc)
+			c.markDuplicateTopLevelTypeDeclaration(stmt)
+			continue
+		}
 
 		switch s := stmt.(type) {
 		case *parse.StructDefinition:

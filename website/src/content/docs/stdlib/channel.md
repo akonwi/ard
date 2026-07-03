@@ -1,42 +1,41 @@
 ---
-title: Channels with ard/channel
+title: Channels
 description: Send typed values between goroutines with native channels.
 ---
 
-The `ard/channel` module provides typed channels for communicating between
+The built-in channel API provides typed channels for communicating between
 goroutines. A channel lowers to a native Go `chan T`. Use channels to coordinate
 goroutines started with [`ard/async`](/stdlib/async/) — waiting for completion,
 passing results, fan-in — without sharing mutable state.
 
 ```ard
 use ard/async
-use ard/channel
-use ard/io
+use go:fmt
 
 fn main() {
-  let results = channel::new<Int>(0)
+  let results = Chan::new<Int>()
 
   async::start(fn() {
     results.send(42)
   })
 
   let value = results.recv() // some(42)
-  io::print("{value.or(0)}")
+  fmt::Println("{value.or(0)}")
 }
 ```
 
 ## Creating a channel
 
-### `fn new(capacity: Int) Chan<$T>`
+### `Chan::new<$T>(capacity: Int?) Chan<$T>`
 
-Creates a channel carrying values of type `$T`. `capacity` is the buffer size:
-`0` is an unbuffered (synchronous) channel where each send blocks until a
-receiver is ready; a positive capacity buffers that many values before sends
-block.
+Creates a channel carrying values of type `$T`. Omit `capacity` for an
+unbuffered synchronous channel where each send blocks until a receiver is ready.
+Pass a positive capacity to create a buffered channel that holds that many values
+before sends block.
 
 ```ard
-let unbuffered = channel::new<Str>(0)
-let buffered = channel::new<Int>(8)
+let unbuffered = Chan::new<Str>()
+let buffered = Chan::new<Int>(8)
 ```
 
 ## Operations on `Chan<$T>`
@@ -71,10 +70,9 @@ sees `none`:
 
 ```ard
 use ard/async
-use ard/channel
 
 fn main() {
-  let jobs = channel::new<Int>(2)
+  let jobs = Chan::new<Int>(2)
 
   async::start(fn() {
     jobs.send(1)
@@ -101,13 +99,13 @@ API express whether a caller may send or receive:
 - `Receiver<$T>` — receive-only (`recv`).
 - `Sender<$T>` — send-only (`send`, `close`).
 
-### `fn receiver(ch: Chan<$T>) Receiver<$T>`
-### `fn sender(ch: Chan<$T>) Sender<$T>`
+### `Chan<$T>.receiver() Receiver<$T>`
+### `Chan<$T>.sender() Sender<$T>`
 
 ```ard
-let ch = channel::new<Int>(0)
-let rx = channel::receiver(ch) // Receiver<Int>
-let tx = channel::sender(ch)   // Sender<Int>
+let ch = Chan::new<Int>()
+let rx = ch.receiver() // Receiver<Int>
+let tx = ch.sender()   // Sender<Int>
 ```
 
 Narrowing is explicit and one-way: there is no implicit conversion, and a

@@ -2657,6 +2657,39 @@ func TestGenericTypeParams(t *testing.T) {
 		},
 	})
 }
+func TestAsyncStart(t *testing.T) {
+	run(t, []test{
+		{
+			name: "async start accepts void closure",
+			input: `use ard/async
+fn main() {
+  async::start(fn() {})
+}`,
+		},
+		{
+			name: "async start rejects missing task",
+			input: `use ard/async
+fn main() {
+  async::start()
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "missing argument for parameter: task"},
+			},
+		},
+		{
+			name: "async start rejects non-void function",
+			input: `use ard/async
+fn value() Int { 1 }
+fn main() {
+  async::start(value)
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected fn <function>() Void, got fn value() Int"},
+			},
+		},
+	})
+}
+
 func TestChan(t *testing.T) {
 	run(t, []test{
 		{
@@ -2692,6 +2725,42 @@ func TestChan(t *testing.T) {
 			input: `fn take(ch: Chan<Str>) {
   ch.send("x")
 }`,
+		},
+		{
+			name: "Receiver cannot construct channels",
+			input: `fn main() {
+  let ch = Receiver::new<Int>(1)
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: Receiver::new"},
+			},
+		},
+		{
+			name: "Sender cannot construct channels",
+			input: `fn main() {
+  let ch = Sender::new<Int>(1)
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: Sender::new"},
+			},
+		},
+		{
+			name: "reserved channel type name cannot be redeclared",
+			input: `struct Sender {
+  name: Str
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Sender is a built-in type and cannot be redeclared"},
+			},
+		},
+		{
+			name: "reserved scalar type name cannot be redeclared",
+			input: `struct Int8 {
+  value: Int
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Int8 is a built-in type and cannot be redeclared"},
+			},
 		},
 	})
 }

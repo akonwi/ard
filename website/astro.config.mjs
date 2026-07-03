@@ -216,7 +216,7 @@ export default defineConfig({
           items: [
             { label: "ard/argv", slug: "stdlib/argv" },
             { label: "ard/async", slug: "stdlib/async" },
-            { label: "ard/channel", slug: "stdlib/channel" },
+            { label: "Channels", slug: "stdlib/channel" },
             { label: "ard/dates", slug: "stdlib/dates" },
             { label: "ard/decode", slug: "stdlib/decode" },
             { label: "ard/dynamic", slug: "stdlib/dynamic" },

@@ -6518,7 +6518,7 @@ func (l *lowerer) lowerMakeChannel(fn air.Function, expr air.Expr) (loweredExpr,
 	return loweredExpr{stmts: capacity.stmts, expr: call}, nil
 }
 
-// lowerChannelSend lowers ard/channel::send to `ch <- value` and yields Void.
+// lowerChannelSend lowers Chan.send/Sender.send to `ch <- value` and yields Void.
 func (l *lowerer) lowerChannelSend(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if len(expr.Args) != 2 {
 		return loweredExpr{}, fmt.Errorf("channel send expects two args")
@@ -6536,7 +6536,7 @@ func (l *lowerer) lowerChannelSend(fn air.Function, expr air.Expr) (loweredExpr,
 	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
 }
 
-// lowerChannelRecv lowers ard/channel::recv to `v, ok := <-ch` wrapped into a
+// lowerChannelRecv lowers Chan.recv/Receiver.recv to `v, ok := <-ch` wrapped into a
 // Maybe (some on a live receive, none on a closed-and-drained channel).
 func (l *lowerer) lowerChannelRecv(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if len(expr.Args) != 1 {
@@ -6569,7 +6569,7 @@ func (l *lowerer) lowerChannelRecv(fn air.Function, expr air.Expr) (loweredExpr,
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
 }
 
-// lowerChannelClose lowers ard/channel::close to `close(ch)` and yields Void.
+// lowerChannelClose lowers Chan.close/Sender.close to `close(ch)` and yields Void.
 func (l *lowerer) lowerChannelClose(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("channel close expects one arg")

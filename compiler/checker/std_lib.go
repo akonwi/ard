@@ -2,9 +2,9 @@ package checker
 
 var prelude = map[string]Module{
 	"Result":   ResultPkg{},
-	"Chan":     ChannelPkg{},
-	"Receiver": ChannelPkg{},
-	"Sender":   ChannelPkg{},
+	"Chan":     ChannelStaticPkg{},
+	"Receiver": EmptyBuiltinPkg{name: "Receiver"},
+	"Sender":   EmptyBuiltinPkg{name: "Sender"},
 }
 
 func findInStdLib(path string) (Module, bool) {
@@ -17,8 +17,6 @@ func findInStdLib(path string) (Module, bool) {
 		return ResultPkg{}, true
 	case "ard/async":
 		return AsyncPkg{}, true
-	case "ard/channel":
-		return ChannelPkg{}, true
 	case "ard/unsafe":
 		return UnsafePkg{}, true
 	}
@@ -142,24 +140,23 @@ func (pkg UnsafePkg) Get(name string) Symbol {
 	}
 }
 
-/* ard/channel — typed channels lowering to native Go `chan T` */
-type ChannelPkg struct{}
+type EmptyBuiltinPkg struct{ name string }
 
-func (pkg ChannelPkg) Path() string { return "ard/channel" }
+func (pkg EmptyBuiltinPkg) Path() string { return "builtin/" + pkg.name }
 
-func (pkg ChannelPkg) Program() *Program { return nil }
+func (pkg EmptyBuiltinPkg) Program() *Program { return nil }
 
-func (pkg ChannelPkg) Get(name string) Symbol {
+func (pkg EmptyBuiltinPkg) Get(name string) Symbol { return Symbol{} }
+
+/* Chan static functions — typed channels lowering to native Go `chan T` */
+type ChannelStaticPkg struct{}
+
+func (pkg ChannelStaticPkg) Path() string { return "builtin/Chan" }
+
+func (pkg ChannelStaticPkg) Program() *Program { return nil }
+
+func (pkg ChannelStaticPkg) Get(name string) Symbol {
 	switch name {
-	case "Chan":
-		// The Chan<$T> type, resolvable in annotations as channel::Chan<T>.
-		return Symbol{Name: name, Type: MakeChan(&TypeVar{name: "T"})}
-	case "Receiver":
-		// The receive-only Receiver<$T> type.
-		return Symbol{Name: name, Type: MakeReceiver(&TypeVar{name: "T"})}
-	case "Sender":
-		// The send-only Sender<$T> type.
-		return Symbol{Name: name, Type: MakeSender(&TypeVar{name: "T"})}
 	case "new":
 		// Chan::new<$T>(capacity: Int?) Chan<$T>; send/recv/close are methods on Chan.
 		t := &TypeVar{name: "T"}
@@ -168,26 +165,6 @@ func (pkg ChannelPkg) Get(name string) Symbol {
 			GenericParams: []string{"T"},
 			Parameters:    []Parameter{{Name: "capacity", Type: MakeMaybe(Int)}},
 			ReturnType:    MakeChan(t),
-		}}
-	case "receiver":
-		// receiver<$T>(ch: Chan<$T>) Receiver<$T> narrows a bidirectional channel
-		// to a receive-only view.
-		t := &TypeVar{name: "T"}
-		return Symbol{Name: name, Type: &FunctionDef{
-			Name:          name,
-			GenericParams: []string{"T"},
-			Parameters:    []Parameter{{Name: "ch", Type: MakeChan(t)}},
-			ReturnType:    MakeReceiver(t),
-		}}
-	case "sender":
-		// sender<$T>(ch: Chan<$T>) Sender<$T> narrows a bidirectional channel to a
-		// send-only view.
-		t := &TypeVar{name: "T"}
-		return Symbol{Name: name, Type: &FunctionDef{
-			Name:          name,
-			GenericParams: []string{"T"},
-			Parameters:    []Parameter{{Name: "ch", Type: MakeChan(t)}},
-			ReturnType:    MakeSender(t),
 		}}
 	default:
 		return Symbol{}

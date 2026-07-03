@@ -1,40 +1,42 @@
 ---
 title: Concurrent Execution with ard/async
-description: Start goroutines and sleep with the ard/async module.
+description: Start goroutines with the ard/async module.
 ---
 
-The `ard/async` module provides the two concurrency primitives Ard cannot
-express on its own: starting a goroutine and sleeping. Everything else —
-waiting for completion, returning a result, joining a set of tasks — is
-ordinary Ard built on [channels](/stdlib/channel/).
+The `ard/async` module provides the concurrency primitive Ard cannot express on
+its own: starting concurrent work. Everything else — waiting for completion,
+returning a result, joining a set of tasks — is ordinary Ard built on
+[channels](/stdlib/channel/).
 
 ```ard
 use ard/async
-use ard/io
+use go:fmt
 
 fn main() {
+  let done = Chan::new<Bool>()
+
   async::start(fn() {
-    io::print("running on a goroutine")
+    fmt::Println("running on a goroutine")
+    done.send(true)
   })
 
-  async::sleep(1_000_000) // give it a moment (1ms)
+  done.recv()
 }
 ```
 
 ## Functions
 
-### `fn start(do: fn() Void)`
+### `fn start(do: fn() Void) Void`
 
-Runs `do` concurrently on a new goroutine. It is **fire-and-forget**: `start`
-returns immediately and gives you no handle. Coordinate completion or results
-with a [channel](/stdlib/channel/).
+Runs `do` concurrently on a new goroutine in the Go target. It is
+**fire-and-forget**: `start` returns immediately and gives you no handle.
+Coordinate completion or results with a [channel](/stdlib/channel/).
 
 ```ard
 use ard/async
-use ard/channel
 
 fn main() {
-  let done = channel::new<Bool>(0)
+  let done = Chan::new<Bool>()
 
   async::start(fn() {
     // ... work ...
@@ -49,30 +51,7 @@ Spawned closures follow Go's concurrency semantics: they capture variables by
 reference and there is no isolation rule. Coordinate shared state through
 channels; data races are your responsibility, exactly as in Go.
 
-### `fn sleep(nanoseconds: Int)`
-
-Blocks the current goroutine for the given number of nanoseconds.
-
-```ard
-async::sleep(1_000_000_000) // 1 second
-```
-
-There are no duration helpers in the standard library. Use a plain nanosecond
-count, or import Go's `time` constants for readable values — `time::Second`,
-`time::Millisecond`, and friends are durations in nanoseconds and convert
-directly to `Int`:
-
-```ard
-use ard/async
-use go:time
-
-fn main() {
-  async::sleep(time::Second)      // 1 second
-  async::sleep(time::Millisecond * 250)
-}
-```
-
 ## See also
 
-- [`ard/channel`](/stdlib/channel/) — typed channels for coordinating goroutines.
+- [channels](/stdlib/channel/) — typed channels for coordinating goroutines.
 - [Async Programming](/advanced/async/) — patterns for results, fan-in, and `select`.

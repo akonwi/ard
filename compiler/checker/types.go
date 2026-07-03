@@ -670,7 +670,7 @@ func chanCloseMethod() Type {
 }
 
 // Receiver is a receive-only channel view (Go `<-chan T`). Its only method is
-// recv. Created by channel::receiver and produced by mapping Go `<-chan T`.
+// recv. Created by Chan.receiver() and produced by mapping Go `<-chan T`.
 type Receiver struct {
 	of Type
 }
@@ -698,7 +698,7 @@ func (c *Receiver) Of() Type {
 }
 
 // Sender is a send-only channel view (Go `chan<- T`). Its methods are send and
-// close. Created by channel::sender and produced by mapping Go `chan<- T`.
+// close. Created by Chan.sender() and produced by mapping Go `chan<- T`.
 type Sender struct {
 	of Type
 }

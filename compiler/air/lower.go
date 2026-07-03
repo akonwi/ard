@@ -3476,33 +3476,20 @@ func (fl *functionLowerer) lowerNonProducingBlock(stmts []checker.Statement) (Bl
 	return block, nil
 }
 
-// lowerChannelCall lowers the ard/channel intrinsics (new/send/recv/close) to
-// the native channel AIR expressions. The element type comes from the call's
-// Chan type argument (for new) or the channel operand's type (for the rest).
+// lowerChannelCall lowers the Chan static intrinsics to native channel AIR expressions.
 func (fl *functionLowerer) lowerChannelCall(typeID TypeID, e *checker.ModuleFunctionCall) (*Expr, error) {
 	switch e.Call.Name {
 	case "new":
 		if len(e.Call.Args) != 1 {
-			return nil, fmt.Errorf("ard/channel::new expects one argument")
+			return nil, fmt.Errorf("Chan::new expects one argument")
 		}
 		capacity, err := fl.lowerExpr(e.Call.Args[0])
 		if err != nil {
 			return nil, err
 		}
 		return &Expr{Kind: ExprMakeChannel, Type: typeID, Args: []Expr{*capacity}}, nil
-	case "receiver", "sender":
-		// Narrow a bidirectional channel to a directional view: a Go directional
-		// conversion to the result type (TypeReceiver/TypeSender -> <-chan/chan<-).
-		if len(e.Call.Args) != 1 {
-			return nil, fmt.Errorf("ard/channel::%s expects one argument", e.Call.Name)
-		}
-		ch, err := fl.lowerExpr(e.Call.Args[0])
-		if err != nil {
-			return nil, err
-		}
-		return &Expr{Kind: ExprChannelNarrow, Type: typeID, Args: []Expr{*ch}}, nil
 	}
-	return nil, fmt.Errorf("unknown ard/channel function %s", e.Call.Name)
+	return nil, fmt.Errorf("unknown Chan static function %s", e.Call.Name)
 }
 
 // lowerSelect lowers a checker Select into an ExprSelect with native channel
@@ -3827,7 +3814,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			return &Expr{Kind: ExprAsyncStart, Type: typeID, Args: []Expr{*task}}, nil
 		}
-		if e.Module == "ard/channel" {
+		if e.Module == "builtin/Chan" {
 			return fl.lowerChannelCall(typeID, e)
 		}
 		if e.Module == "ard/json" && e.Call.Name == "parse" {
