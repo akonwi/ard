@@ -103,7 +103,7 @@ func typeDeclString(t parse.DeclaredType) string {
 	case *parse.List:
 		s = "[" + typeDeclString(tt.Element) + "]"
 	case *parse.Map:
-		s = "[" + typeDeclString(tt.Key) + ":" + typeDeclString(tt.Value) + "]"
+		s = "[" + typeDeclString(tt.Key) + ": " + typeDeclString(tt.Value) + "]"
 	case *parse.CustomType:
 		s = tt.Name
 		if len(tt.TypeArgs) > 0 {

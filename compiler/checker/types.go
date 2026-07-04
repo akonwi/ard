@@ -744,7 +744,7 @@ func MakeMap(key, value Type) *Map {
 }
 
 func (m Map) String() string {
-	return fmt.Sprintf("[%s:%s]", m.key.String(), m.value.String())
+	return fmt.Sprintf("[%s: %s]", m.key.String(), m.value.String())
 }
 func (m Map) equal(other Type) bool {
 	return equalTypes(m, other)
@@ -841,7 +841,7 @@ func typeSyntaxString(t Type) string {
 	case *List:
 		return "[" + typeSyntaxString(typ.of) + "]"
 	case *Map:
-		return "[" + typeSyntaxString(typ.key) + ":" + typeSyntaxString(typ.value) + "]"
+		return "[" + typeSyntaxString(typ.key) + ": " + typeSyntaxString(typ.value) + "]"
 	default:
 		return t.String()
 	}
@@ -871,7 +871,7 @@ func callableTypeString(params []Parameter, returnType Type) string {
 			paramStrs[i] = "mut " + paramStrs[i]
 		}
 	}
-	rendered := fmt.Sprintf("fn(%s)", strings.Join(paramStrs, ","))
+	rendered := fmt.Sprintf("fn(%s)", strings.Join(paramStrs, ", "))
 	// Ard syntax omits the return type for non-returning functions.
 	if returnType == nil || returnType.equal(Void) {
 		return rendered

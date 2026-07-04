@@ -103,3 +103,26 @@ func TestTypeEquality(t *testing.T) {
 		}
 	}
 }
+
+// Diagnostics render types in formatter-canonical Ard syntax: parameters are
+// comma-space separated and map entries colon-space separated, matching the
+// formatter's output (`ard format` emits `[Str: Int]` for map annotations).
+func TestTypeRenderingIsFormatterCanonical(t *testing.T) {
+	fn := &FunctionDef{
+		Name: "<function>",
+		Parameters: []Parameter{
+			{Name: "a", Type: Str},
+			{Name: "b", Type: Int, Mutable: true},
+		},
+		ReturnType: Bool,
+	}
+	if got, want := fn.String(), "fn(Str, mut Int) Bool"; got != want {
+		t.Fatalf("function type = %q, want %q", got, want)
+	}
+	if got, want := MakeMap(Str, Int).String(), "[Str: Int]"; got != want {
+		t.Fatalf("map type = %q, want %q", got, want)
+	}
+	if got, want := typeSyntaxString(MakeMap(Str, MakeList(Int))), "[Str: [Int]]"; got != want {
+		t.Fatalf("map syntax = %q, want %q", got, want)
+	}
+}

@@ -1083,7 +1083,7 @@ fn store(handler: http::HandlerFunc) fn(http::ResponseWriter, mut http::Request)
 fn store(handler: http::HandlerFunc) {
   let f: fn(http::ResponseWriter, http::Request) = handler
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected fn(http::ResponseWriter,http::Request), got http::HandlerFunc"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected fn(http::ResponseWriter, http::Request), got http::HandlerFunc"}},
 		},
 		{
 			name: "closure with mut foreign param satisfies the annotation",
