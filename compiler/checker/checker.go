@@ -1492,7 +1492,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 			// The impl method's signature becomes the generated Go method's
 			// signature, so the foreign scalar narrowing coercion cannot apply:
 			// the Go types must line up for interface satisfaction.
-			if !c.areCompatible(expectedType, paramType) || foreignScalarNarrows(expectedType, paramType) {
+			if !c.areCompatible(expectedType, paramType) || foreignScalarNarrows(expectedType, paramType) || foreignFuncCoerces(expectedType, paramType) {
 				c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
 				valid = false
 			}
@@ -1510,7 +1510,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 				valid = false
 			}
 		}
-		if returnType != nil && (!c.areCompatible(interfaceMethod.ReturnType, returnType) || foreignScalarNarrows(interfaceMethod.ReturnType, returnType)) {
+		if returnType != nil && (!c.areCompatible(interfaceMethod.ReturnType, returnType) || foreignScalarNarrows(interfaceMethod.ReturnType, returnType) || foreignFuncCoerces(interfaceMethod.ReturnType, returnType)) {
 			c.addError(fmt.Sprintf("Go interface method '%s' has return type of %s", method.Name, interfaceMethod.ReturnType), method.GetLocation())
 			valid = false
 		}
@@ -7462,6 +7462,29 @@ func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Ty
 func foreignScalarNarrows(expected Type, actual Type) bool {
 	foreign, ok := actual.(*ForeignType)
 	return ok && !foreign.Pointer && foreign.Underlying != nil && isPrimitiveScalar(expected) && foreign.Underlying.equal(expected)
+}
+
+// foreignFuncCoerces reports whether compatibility between expected and actual
+// relies on the named/unnamed Go func coercion in either direction. Contexts
+// that require exact Go type identity (such as Go interface conformance)
+// must exclude this coercion: the generated Go method signature has to match
+// the interface's signature exactly.
+func foreignFuncCoerces(expected Type, actual Type) bool {
+	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer {
+		if _, ok := foreign.Underlying.(*FunctionDef); ok {
+			if _, isFn := actual.(*FunctionDef); isFn {
+				return true
+			}
+		}
+	}
+	if foreign, ok := actual.(*ForeignType); ok && !foreign.Pointer {
+		if _, ok := foreign.Underlying.(*FunctionDef); ok {
+			if _, isFn := expected.(*FunctionDef); isFn {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isPrimitiveScalar(t Type) bool {

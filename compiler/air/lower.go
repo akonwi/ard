@@ -3526,7 +3526,11 @@ func (fl *functionLowerer) functionTypeIDForCallable(typeID TypeID) (TypeID, boo
 	if typeInfo.Kind == TypeFunction {
 		return typeID, true
 	}
-	if typeInfo.Kind == TypeForeignType && typeInfo.Value != NoType {
+	// TypeInfo.Value is overloaded for foreign types: it holds the underlying
+	// type for named scalars/funcs, but the map value type for named Go maps
+	// (which also set Key). Require Key to be unset so a named map whose value
+	// type is a func is not misclassified as callable.
+	if typeInfo.Kind == TypeForeignType && typeInfo.Value != NoType && typeInfo.Key == NoType {
 		if underlying, ok := fl.l.typeInfo(typeInfo.Value); ok && underlying.Kind == TypeFunction {
 			return typeInfo.Value, true
 		}
