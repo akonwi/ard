@@ -4363,3 +4363,22 @@ func TestRunProgramExecutesListPushOnStructField(t *testing.T) {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+
+// Foreign method arguments lower against the method's parameter types, so a
+// foreign named scalar narrows with an explicit Go conversion (for example
+// `int(month)`) instead of passing the named Go type where a primitive is
+// expected.
+func TestRunProgramNarrowsForeignScalarMethodArguments(t *testing.T) {
+	program := lowerSource(t, `use go:time
+
+fn main() {
+	let month = time::January
+	let base = time::Now()
+	let shifted = base.AddDate(0, month, 0)
+	if not shifted.After(base) { panic("expected shifted time to be later") }
+}`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}

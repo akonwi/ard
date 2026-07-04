@@ -3799,8 +3799,19 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		args := make([]Expr, len(e.Call.Args))
+		methodDef := e.Call.Definition()
 		for i, arg := range e.Call.Args {
-			lowered, err := fl.lowerExpr(arg)
+			var lowered *Expr
+			var err error
+			if methodDef != nil && i < len(methodDef.Parameters) && methodDef.Parameters[i].Type != nil {
+				var paramTypeID TypeID
+				paramTypeID, err = fl.internType(methodDef.Parameters[i].Type)
+				if err == nil {
+					lowered, err = fl.lowerExprWithExpected(arg, paramTypeID)
+				}
+			} else {
+				lowered, err = fl.lowerExpr(arg)
+			}
 			if err != nil {
 				return nil, err
 			}
