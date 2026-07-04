@@ -2,9 +2,7 @@ module vaxis_demo
 
 go 1.26
 
-replace go.rockorager.dev/vaxis => ../../../vaxis
-
-require go.rockorager.dev/vaxis v0.0.0-00010101000000-000000000000
+require go.rockorager.dev/vaxis v0.16.1-0.20260604003537-24ba647481e9
 
 require (
 	github.com/rockorager/go-uucode v1.2.0 // indirect

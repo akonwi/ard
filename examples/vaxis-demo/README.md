@@ -15,15 +15,14 @@ A full port of the [vaxis](https://git.sr.ht/~rockorager/vaxis) `ui` framework d
 
 ## Requirements
 
-The demo depends on the vaxis `ui` framework. The `go.mod` uses a `replace`
-directive pointing at a sibling checkout:
+The demo depends on the vaxis `ui` framework, pinned in `go.mod` as an
+ordinary Go module dependency (a pseudo-version of `go.rockorager.dev/vaxis`,
+since the `ui` package is newer than the latest tagged release). Update it the
+usual way:
 
-```text
-replace go.rockorager.dev/vaxis => ../../../vaxis
+```sh
+go get go.rockorager.dev/vaxis@master
 ```
-
-Adjust that path (or remove the replace once the `ui` package is published) to
-match your checkout.
 
 ## Run
 
