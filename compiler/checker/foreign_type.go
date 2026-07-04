@@ -102,6 +102,17 @@ func (f *ForeignType) equal(other Type) bool {
 
 func (f *ForeignType) hasTrait(trait *Trait) bool { return false }
 
+// EmptyInterface reports whether f is a Go interface type with an empty
+// method set (for example `type Event interface{}`). Any value is assignable
+// to it, matching Go's own assignability.
+func (f *ForeignType) EmptyInterface() bool {
+	if !f.Interface || f.GoType == nil {
+		return false
+	}
+	iface, ok := f.GoType.Underlying().(*types.Interface)
+	return ok && iface.Empty()
+}
+
 func isPointerForeign(t Type) bool {
 	foreign, ok := t.(*ForeignType)
 	return ok && foreign.Pointer

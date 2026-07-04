@@ -4306,3 +4306,27 @@ func TestRunProgramExecutesIntToF64(t *testing.T) {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+
+// Named empty Go interfaces and named Go func types keep their Go type
+// identity: values flow into them by Go assignability and generated code
+// names the exact Go type.
+func TestRunProgramExecutesNamedGoTypeIdentities(t *testing.T) {
+	program := lowerSource(t, `
+		use go:database/sql/driver
+		use go:net/http
+
+		fn main() {
+			// Any value passes to a named empty interface parameter.
+			if driver::IsValue("hello") == false {
+				panic("expected string to be a driver value")
+			}
+			// A closure satisfies a named Go func type annotation.
+			let handler: http::HandlerFunc = fn(w: http::ResponseWriter, r: mut http::Request) {}
+			let _ = handler
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}

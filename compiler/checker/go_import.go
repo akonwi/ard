@@ -272,11 +272,22 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 	}
 	if named, ok := t.(*types.Named); ok && !isGoError(t) {
 		if sig, ok := named.Underlying().(*types.Signature); ok {
-			fn, reason := functionDefFromGoCallbackSignature("<function>", sig)
+			// A named Go func type (for example `ui.VoidCallback`) keeps its
+			// type identity so generated Go names the exact type. Its
+			// Underlying carries the signature; Ard closures with a matching
+			// signature are assignable, mirroring Go's unnamed-to-named rule.
+			fn, reason := functionDefFromGoCallbackSignature(named.Obj().Name(), sig)
 			if reason != "" {
 				return nil, reason
 			}
-			return fn, ""
+			pkg := named.Obj().Pkg()
+			namespace := ""
+			qualifier := ""
+			if pkg != nil {
+				namespace = pkg.Path()
+				qualifier = pkg.Name()
+			}
+			return &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: fn, GoType: named}, ""
 		}
 		if reason := unsupportedGoNamedTypeArgs(named); reason != "" {
 			return nil, reason
@@ -356,8 +367,8 @@ func unsupportedGoNamedTypeArgs(named *types.Named) string {
 }
 
 func exportedNamedTypeFromGo(typeName *types.TypeName) (Type, string) {
-	// An empty interface carries no method set, so both named empty-interface
-	// types and aliases of the empty interface map to Ard's opaque Any.
+	// Only the unnamed empty interface (and aliases of it) map to Ard's
+	// opaque Any; named empty interfaces keep their Go type identity.
 	if isGoAny(typeName.Type()) {
 		return Any, ""
 	}
@@ -367,6 +378,10 @@ func exportedNamedTypeFromGo(typeName *types.TypeName) (Type, string) {
 	named, ok := typeName.Type().(*types.Named)
 	if !ok {
 		return nil, "exported Go type is not named"
+	}
+	// Named func types keep their identity through the general mapping.
+	if _, isFunc := named.Underlying().(*types.Signature); isFunc {
+		return typeFromGo(named)
 	}
 	if reason := unsupportedForeignNamedUnderlying(named.Underlying(), false); reason != "" {
 		return nil, reason
@@ -537,7 +552,15 @@ func primitiveTypeFromGo(t types.Type) (Type, string) {
 	return nil, fmt.Sprintf("unsupported basic type %s", basic.Name())
 }
 
+// isGoAny reports whether a Go type is the unnamed empty interface (`any` /
+// `interface{}`), including aliases of it. A *named* empty interface (for
+// example `type Event interface{}`) is a distinct Go type identity and maps
+// to a foreign interface type instead, so signatures that name it lower to
+// the exact Go type.
 func isGoAny(t types.Type) bool {
+	if _, isNamed := types.Unalias(t).(*types.Named); isNamed {
+		return false
+	}
 	iface, ok := t.Underlying().(*types.Interface)
 	return ok && iface.Empty()
 }

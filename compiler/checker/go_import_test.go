@@ -981,3 +981,53 @@ fn bad() {
 		},
 	})
 }
+
+// Named empty Go interfaces keep their type identity (they are foreign
+// interface types, not Any) but still accept any value and support dynamic
+// matching. driver.Value is `type Value any`.
+func TestNamedEmptyGoInterfacesKeepIdentity(t *testing.T) {
+	run(t, []test{
+		{
+			name: "any value passes to a named empty interface parameter",
+			input: `use go:database/sql/driver
+fn check() Bool {
+  driver::IsValue("hello")
+}`,
+		},
+		{
+			name: "named empty interface values are dynamically matchable",
+			input: `use go:database/sql/driver
+use go:time
+fn describe(value: driver::Value) Str {
+  match value {
+    time::Duration(d) => "duration",
+    _ => "other",
+  }
+}`,
+		},
+	})
+}
+
+// A named Go func type accepts an Ard closure with a matching signature,
+// mirroring Go's unnamed-to-named assignability.
+func TestNamedGoFuncTypesAcceptClosures(t *testing.T) {
+	run(t, []test{
+		{
+			name: "closure satisfies a named Go func annotation",
+			input: `use go:net/http
+fn handler() http::HandlerFunc {
+  let f: http::HandlerFunc = fn(w: http::ResponseWriter, r: mut http::Request) {}
+  f
+}`,
+		},
+		{
+			name: "mismatched closure is rejected",
+			input: `use go:net/http
+fn bad_fn(x: Int) {}
+fn bad() {
+  let f: http::HandlerFunc = bad_fn
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected http::HandlerFunc, got fn bad_fn(Int) Void"}},
+		},
+	})
+}

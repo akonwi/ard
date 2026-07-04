@@ -1377,6 +1377,11 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 		return actual.hasTrait(trait)
 	}
 	if iface, ok := expected.(*ForeignType); ok && iface.Interface {
+		// A named empty Go interface accepts any value, matching Go's own
+		// assignability rules.
+		if iface.EmptyInterface() {
+			return true
+		}
 		actualBase, _ := mutableRefBase(actual)
 		if actualForeign, ok := actualBase.(*ForeignType); ok {
 			return actualForeign.equal(iface) || foreignGoAssignableTo(actualForeign, iface)
@@ -1398,6 +1403,15 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer && foreign.MapKey != nil && foreign.MapValue != nil {
 		if actualMap, ok := actual.(*Map); ok {
 			return foreign.MapKey.equal(actualMap.Key()) && foreign.MapValue.equal(actualMap.Value())
+		}
+	}
+	// A named Go func type accepts an Ard function value with a matching
+	// signature, mirroring Go's unnamed-to-named assignability.
+	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer {
+		if expectedFn, ok := foreign.Underlying.(*FunctionDef); ok {
+			if _, isFn := actual.(*FunctionDef); isFn {
+				return c.areCompatible(expectedFn, actual)
+			}
 		}
 	}
 	return expected.equal(actual)
