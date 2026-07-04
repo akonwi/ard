@@ -4093,3 +4093,197 @@ func TestLowerProgramSupportsVoidTraitObjectDispatchWithoutStdlib(t *testing.T) 
 		t.Fatal("void trait dispatch call should not be assigned")
 	}
 }
+
+func TestRunProgramExecutesGenericGoFunctions(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"genericfns\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module genericfns\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
+
+type StateCtx struct {
+	Value any
+}
+
+func StateRef[T any](c *StateCtx) *T {
+	if p, ok := c.Value.(*T); ok {
+		return p
+	}
+	v := c.Value.(T)
+	p := &v
+	c.Value = p
+	return p
+}
+
+func StateValue[T any](c *StateCtx) T {
+	if p, ok := c.Value.(*T); ok {
+		return *p
+	}
+	return c.Value.(T)
+}
+
+func StateSet[T any](c *StateCtx, v T) {
+	c.Value = v
+}
+
+func Identity[T any](value T) T {
+	return value
+}
+
+func NewCtx(value any) *StateCtx {
+	return &StateCtx{Value: value}
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use go:genericfns/ffi
+
+struct DemoState {
+	ticks: Int,
+}
+
+fn bump(c: mut ffi::StateCtx) {
+	let state = ffi::StateRef<DemoState>(c)
+	state.ticks = state.ticks + 1
+}
+
+fn main() {
+	let boxed: Any = DemoState{ticks: 0}
+	mut c = ffi::NewCtx(boxed)
+	bump(c)
+	bump(c)
+	let snapshot = ffi::StateValue<DemoState>(c)
+	if not snapshot.ticks == 2 { panic("expected live mutation through StateRef, got {snapshot.ticks}") }
+	ffi::StateSet(c, DemoState{ticks: 10})
+	let replaced = ffi::StateValue<DemoState>(c)
+	if not replaced.ticks == 10 { panic("expected StateSet to replace state") }
+	let echoed = ffi::Identity("hello")
+	if not echoed == "hello" { panic("expected inferred Identity call") }
+	// A mut reference argument infers the value type: the callee stores a copy.
+	let other: Any = DemoState{ticks: 0}
+	mut c2 = ffi::NewCtx(other)
+	let live = ffi::StateRef<DemoState>(c)
+	ffi::StateSet(c2, live)
+	live.ticks = 99
+	let copied = ffi::StateValue<DemoState>(c2)
+	if not copied.ticks == 10 { panic("expected StateSet to store a copy, got {copied.ticks}") }
+	let echoed_state = ffi::Identity(live)
+	if not echoed_state.ticks == 99 { panic("expected Identity to echo a value copy") }
+	// A value-typed annotation snapshots instead of aliasing.
+	let snap: DemoState = ffi::StateRef<DemoState>(c)
+	live.ticks = 123
+	if not snap.ticks == 99 { panic("expected value-typed binding to snapshot, got {snap.ticks}") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestLowerRejectsEscapingGenericGoPointerResults(t *testing.T) {
+	ffiSource := `package ffi
+
+type StateCtx struct {
+	Value any
+}
+
+func StateRef[T any](c *StateCtx) *T {
+	v := c.Value.(T)
+	p := &v
+	c.Value = p
+	return p
+}
+
+func NewCtx(value any) *StateCtx {
+	return &StateCtx{Value: value}
+}
+`
+	tests := []struct {
+		name    string
+		main    string
+		wantErr string
+	}{
+		{
+			name: "closure capture of pointer-backed local",
+			main: `use go:genericptr/ffi
+
+struct DemoState {
+	ticks: Int,
+}
+
+fn bump(c: mut ffi::StateCtx) {
+	let state = ffi::StateRef<DemoState>(c)
+	let f = fn() { state.ticks = state.ticks + 1 }
+	f()
+}
+
+fn main() {}
+`,
+			wantErr: "capturing a mut reference from a Go call is not supported yet",
+		},
+		{
+			name: "indirect initializer through match",
+			main: `use go:genericptr/ffi
+
+struct DemoState {
+	ticks: Int,
+}
+
+fn pick(c: mut ffi::StateCtx, flag: Bool) {
+	let state = match flag {
+		true => ffi::StateRef<DemoState>(c),
+		false => ffi::StateRef<DemoState>(c),
+	}
+}
+
+fn main() {}
+`,
+			wantErr: "must be bound directly with let",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			projectDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"genericptr\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module genericptr\n\ngo 1.26\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(ffiSource), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			mainPath := filepath.Join(projectDir, "main.ard")
+			if err := os.WriteFile(mainPath, []byte(tt.main), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := frontend.LoadModule(mainPath)
+			if err != nil {
+				t.Fatalf("load module: %v", err)
+			}
+			if _, err := air.Lower(loaded.Module); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("air.Lower error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}

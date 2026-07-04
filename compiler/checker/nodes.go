@@ -1250,7 +1250,12 @@ type ForeignFunctionCall struct {
 	Namespace string
 	Qualifier string
 	Symbol    string
-	Call      *FunctionCall
+	// TypeArgs instantiate a generic Go function. Empty for ordinary calls.
+	TypeArgs []Type
+	// PointerResult marks calls whose instantiated Go result is a raw pointer
+	// represented as Ard `mut T` (live shared storage, not a value copy).
+	PointerResult bool
+	Call          *FunctionCall
 }
 
 func (p *ForeignFunctionCall) Type() Type {

@@ -1383,6 +1383,14 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 			return c.structImplementsForeignInterface(def, iface) && !c.foreignInterfaceImplRequiresPointer(def, iface)
 		}
 	}
+	// A `mut T` value satisfies an expected value `T`: the reader receives a
+	// dereferenced copy. Contexts that require mutable identity (mutable
+	// parameters, assignment targets) check mutability separately.
+	if ref, ok := actual.(*MutableRef); ok {
+		if _, expectsRef := expected.(*MutableRef); !expectsRef {
+			return c.areCompatible(expected, ref.Of())
+		}
+	}
 	return expected.equal(actual)
 }
 
@@ -2002,6 +2010,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}
 					__type = expected
 				}
+			}
+
+			if call, ok := val.(*ForeignFunctionCall); ok && call.PointerResult && s.Mutable {
+				c.addError("A mut reference from a Go call must be bound with let; rebinding it is not supported", s.Value.GetLocation())
+				return nil
 			}
 
 			v := &VariableDef{
@@ -3898,6 +3911,8 @@ func goTypeMentionsTypeParam(t gotypes.Type, params *gotypes.TypeParamList) bool
 				return true
 			}
 		}
+	case *gotypes.Chan:
+		return goTypeMentionsTypeParam(typ.Elem(), params)
 	case *gotypes.Named:
 		if args := typ.TypeArgs(); args != nil {
 			for i := 0; i < args.Len(); i++ {
@@ -5070,9 +5085,15 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 
 			// Pre-compute which kind of property this is based on subject type
-			switch subj.Type().(type) {
+			switch subjType := subj.Type().(type) {
 			case *StructDef:
 				prop.Kind = StructSubject
+			case *MutableRef:
+				if _, ok := subjType.Of().(*StructDef); ok {
+					prop.Kind = StructSubject
+				} else {
+					c.addError(fmt.Sprintf("Cannot access property on type %s", subj.Type()), s.Property.GetLocation())
+				}
 			default:
 				// unreachable
 				c.addError(fmt.Sprintf("Cannot access property on type %s", subj.Type()), s.Property.GetLocation())
@@ -5666,6 +5687,17 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			}
 			if goPkg := c.program.GoImports[modName]; goPkg != nil {
 				fnDef := goPkg.Functions[name]
+				var callTypeArgs []Type
+				pointerResult := false
+				if goFn := goPkg.Generics[name]; goFn != nil {
+					fnDef, callTypeArgs, pointerResult = c.instantiateGoFunctionCall(modName, name, goFn, s)
+					if fnDef == nil {
+						return nil
+					}
+				} else if fnDef != nil && len(s.Function.TypeArgs) > 0 {
+					c.addError(fmt.Sprintf("Go function %s::%s is not generic", modName, name), s.GetLocation())
+					return nil
+				}
 				if fnDef == nil {
 					if reason, ok := goPkg.UnsupportedFunctions[name]; ok {
 						c.addError(fmt.Sprintf("Unsupported Go function %s::%s: %s", modName, name, reason), s.GetLocation())
@@ -5709,7 +5741,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					}
 					args[i] = checkedArg
 				}
-				return &ForeignFunctionCall{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: name, Call: &FunctionCall{Name: name, Args: args, fn: fnDef, ReturnType: fnDef.ReturnType}}
+				return &ForeignFunctionCall{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: name, TypeArgs: callTypeArgs, PointerResult: pointerResult, Call: &FunctionCall{Name: name, Args: args, fn: fnDef, ReturnType: fnDef.ReturnType}}
 			}
 
 			var fnDef *FunctionDef

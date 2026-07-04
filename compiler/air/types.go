@@ -86,6 +86,10 @@ type Local struct {
 	Name    string
 	Type    TypeID
 	Mutable bool
+	// Reference marks a local bound to live mutable storage owned elsewhere
+	// (an Ard `mut T` value produced by a foreign call). The Go backend keeps
+	// the local pointer-backed so mutations flow through to the owner.
+	Reference bool
 }
 
 type Capture struct {

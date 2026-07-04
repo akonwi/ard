@@ -211,10 +211,10 @@ type Expr struct {
 	Then      Block
 	Else      Block
 
-	EnumCases  []EnumMatchCase
-	IntCases   []IntMatchCase
-	StrCases   []StrMatchCase
-	RangeCases []IntRangeMatchCase
+	EnumCases    []EnumMatchCase
+	IntCases     []IntMatchCase
+	StrCases     []StrMatchCase
+	RangeCases   []IntRangeMatchCase
 	UnionCases   []UnionMatchCase
 	ForeignCases []ForeignTypeMatchCase
 	CatchAll     Block

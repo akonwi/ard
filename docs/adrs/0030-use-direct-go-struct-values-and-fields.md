@@ -130,6 +130,25 @@ Go named struct types may be generic (`type Radio[T comparable] struct { Value T
 - Conflicting field values that unify a type parameter to different types are rejected with a diagnostic naming the conflicting fields.
 - Inferred or explicit type arguments must satisfy the Go type parameter's constraint (for example `comparable`); the checker validates this rather than deferring to a Go build error.
 
+### Generic Go functions
+
+Go package functions may be generic (`func StateRef[T any](c *StateCtx) *T`, `func MustDepend[T any](ctx BuildContext) T`). Direct-Go calls support generic Go functions:
+
+- Explicit type arguments use Ard's existing call-site type-argument syntax:
+
+  ```ard
+  let state = ffi::StateRef<DemoState>(c)
+  let theme = ui::MustDepend<ui::Theme>(ctx)
+  ```
+
+- Type arguments are optional when they can be inferred by unifying the supplied argument values against the Go parameter types, mirroring Go's own call-site inference. `ffi::StateSet(c, snapshot)` infers `T` from `snapshot`.
+- A call that leaves any type parameter unbound is rejected with a diagnostic naming the uninferred type parameter. Type arguments on a non-generic Go function are rejected. Type arguments are never silently ignored.
+- Type arguments may be any Ard-representable type, including Ard-defined structs. The backend lowers every Ard type to a concrete Go type, so instantiating a Go generic at an Ard struct is meaningful (`ffi.StateRef[main.DemoState](c)`).
+- Explicit or inferred type arguments must satisfy the Go type parameter's constraint. An empty constraint (`any`) accepts every representable Ard type; other constraints are validated with the Go type checker when the argument has a direct Go representation, and rejected otherwise.
+- The instantiated signature maps through the same representability and boundary rules as concrete signatures. A generic result `*T` follows the instantiated type's mapping: `StateRef<DemoState>` returns `mut DemoState`, live mutable access to the Go-side storage. `(T, error)`, `(T, bool)`, and error-only result adaptations apply after instantiation.
+- The backend always lowers to an explicitly instantiated Go call (`pkg.Fn[T1, T2](args)`), never relying on Go-side inference, so the generated code is deterministic.
+- A `mut T` result must be bound directly with `let`; the binding becomes a pointer-backed local so mutations flow through to the Go-side storage. A value-typed annotation (`let snap: T = ...`) snapshots a copy instead. Rebinding (`mut` bindings), closure capture, indirect initializers (match/if arms), wrapping in `Result`/`Maybe`, and discarding the result are rejected until their semantics are defined.
+
 ### Nil semantics and direct-Go safety boundary
 
 Do not implicitly translate Go `nil` into Ard `Maybe` for direct-Go struct fields.

@@ -1650,6 +1650,11 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		if err != nil {
 			return nil, err
 		}
+		if stmt.Value.Kind == air.ExprForeignCall && stmt.Value.ForeignPointer && !l.localIsReference(fn, stmt.Local) {
+			// A value-typed binding of a pointer-returning Go call snapshots the
+			// referenced storage instead of aliasing it.
+			value.expr = &ast.StarExpr{X: value.expr}
+		}
 		out := append([]ast.Stmt{}, value.stmts...)
 		name := l.localName(fn, stmt.Local)
 		tok := token.DEFINE
@@ -3106,7 +3111,11 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 			pkgName = pkgName[slash+1:]
 		}
 	}
-	call := &ast.CallExpr{Fun: l.qualified(pkgName, importPath, functionName), Args: args}
+	fun := l.qualified(pkgName, importPath, functionName)
+	if len(expr.TypeArgs) > 0 {
+		fun = l.indexWithTypeArgs(fun, expr.TypeArgs)
+	}
+	call := &ast.CallExpr{Fun: fun, Args: args}
 	if validTypeID(l.program, expr.Type) {
 		info := l.program.Types[expr.Type-1]
 		switch info.Kind {
@@ -4768,7 +4777,15 @@ func (l *lowerer) localAssignExpr(fn air.Function, local air.LocalID) ast.Expr {
 	return l.localValueExpr(fn, local)
 }
 
+func (l *lowerer) localIsReference(fn air.Function, local air.LocalID) bool {
+	idx := int(local)
+	return idx >= 0 && idx < len(fn.Locals) && fn.Locals[idx].Reference
+}
+
 func (l *lowerer) localIsPointerParam(fn air.Function, local air.LocalID) bool {
+	if l.localIsReference(fn, local) {
+		return true
+	}
 	idx := int(local)
 	if idx >= 0 && idx < len(fn.Signature.Params) {
 		param := fn.Signature.Params[idx]

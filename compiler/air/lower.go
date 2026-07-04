@@ -79,6 +79,11 @@ type functionLowerer struct {
 	captureByName map[string]LocalID
 	captureLocals []LocalID
 	typeVars      map[string]TypeID
+	// directLetValue is the initializer expression of the let statement being
+	// lowered. Pointer-result foreign calls are only representable as direct
+	// let bindings (they become pointer-backed locals); anywhere else they
+	// have no value representation yet and must be rejected.
+	directLetValue checker.Expression
 }
 
 func newLowerer(options LowerOptions) *lowerer {
@@ -3130,11 +3135,21 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 		if err != nil {
 			return nil, err
 		}
+		previousLetValue := fl.directLetValue
+		fl.directLetValue = s.Value
 		value, actualType, err := fl.lowerContextualExpr(s.Value, typeID)
+		fl.directLetValue = previousLetValue
 		if err != nil {
 			return nil, err
 		}
 		local := fl.defineLocal(s.Name, actualType, s.Mutable)
+		if _, bindsRef := s.Type().(*checker.MutableRef); bindsRef && isMutableReferenceProducer(s.Value) {
+			// The binding refers to live storage owned elsewhere (a Go pointer
+			// produced by a foreign call); keep it pointer-backed in the backend.
+			// A value-typed annotation instead coerces to a deref copy: the
+			// backend snapshots through ForeignPointer on the call expr.
+			fl.fn.Locals[local].Reference = true
+		}
 		return &Stmt{Kind: StmtLet, Local: local, Name: s.Name, Type: actualType, Mutable: s.Mutable, Value: value}, nil
 	case *checker.Reassignment:
 		switch target := s.Target.(type) {
@@ -3825,6 +3840,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		return &Expr{Kind: ExprUnsafeIsNil, Type: typeID, Target: value}, nil
 	case *checker.ForeignFunctionCall:
+		if e.PointerResult && fl.directLetValue != checker.Expression(e) {
+			return nil, fmt.Errorf("a Go call returning %s must be bound directly with let", e.Call.Type())
+		}
 		args := make([]Expr, len(e.Call.Args))
 		fnDef := e.Call.Definition()
 		for i, arg := range e.Call.Args {
@@ -3838,7 +3856,15 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			args[i] = *lowered
 		}
-		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, Args: args}, nil
+		var typeArgs []TypeID
+		for _, typeArg := range e.TypeArgs {
+			argID, err := fl.internContextualCheckerType(typeArg)
+			if err != nil {
+				return nil, err
+			}
+			typeArgs = append(typeArgs, argID)
+		}
+		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, Args: args}, nil
 	case *checker.ModuleFunctionCall:
 		if kind, ok := resultConstructorKind(e); ok {
 			return fl.lowerResultConstructor(kind, typeID, e)
@@ -5392,6 +5418,9 @@ func (fl *functionLowerer) captureLocal(name string) (LocalID, TypeID, bool, boo
 	if err != nil || !ok {
 		return 0, NoType, false, ok, err
 	}
+	if int(sourceLocal) >= 0 && int(sourceLocal) < len(fl.parent.fn.Locals) && fl.parent.fn.Locals[sourceLocal].Reference {
+		return 0, NoType, false, false, fmt.Errorf("closures cannot capture %q: capturing a mut reference from a Go call is not supported yet", name)
+	}
 	local := fl.defineLocal(name, typeID, mutable)
 	fl.captureByName[name] = local
 	fl.captureLocals = append(fl.captureLocals, sourceLocal)
@@ -6013,4 +6042,13 @@ func keyHasFunctionName(key, name string) bool {
 		}
 	}
 	return key == name
+}
+
+// isMutableReferenceProducer reports whether an expression yields live mutable
+// storage represented as a Go pointer: a generic Go function call whose
+// instantiated result is `mut T` for an Ard-owned type. Foreign named types
+// carry pointer-ness in the type itself and do not need the local flag.
+func isMutableReferenceProducer(expr checker.Expression) bool {
+	call, ok := expr.(*checker.ForeignFunctionCall)
+	return ok && call.PointerResult
 }

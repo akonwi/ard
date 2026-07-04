@@ -13,6 +13,7 @@ type GoPackage struct {
 	Path                 string
 	TypesName            string
 	Functions            map[string]*FunctionDef
+	Generics             map[string]*types.Func
 	Types                map[string]Type
 	Constants            map[string]Type
 	Variables            map[string]Type
@@ -44,6 +45,7 @@ func goPackageFromTypesPackage(path string, pkg *types.Package) *GoPackage {
 		Path:                 path,
 		TypesName:            pkg.Name(),
 		Functions:            map[string]*FunctionDef{},
+		Generics:             map[string]*types.Func{},
 		Types:                map[string]Type{},
 		Constants:            map[string]Type{},
 		Variables:            map[string]Type{},
@@ -86,7 +88,14 @@ func goPackageFromTypesPackage(path string, pkg *types.Package) *GoPackage {
 		if !ok {
 			continue
 		}
-		def, reason := functionDefFromGoSignature(name, fn.Type().(*types.Signature))
+		sig := fn.Type().(*types.Signature)
+		if sig.TypeParams().Len() > 0 {
+			// Generic Go functions are mapped lazily at each call site, once
+			// type arguments are known (explicit or inferred).
+			goPkg.Generics[name] = fn
+			continue
+		}
+		def, reason := functionDefFromGoSignature(name, sig)
 		if reason == "" {
 			goPkg.Functions[name] = def
 		} else {
@@ -231,6 +240,12 @@ func typeFromGo(t types.Type) (Type, string) {
 }
 
 func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
+	// A bare type parameter must be checked before the empty-interface test:
+	// a `T any` parameter's underlying type is the empty interface, but an
+	// uninstantiated type parameter is not Ard `Any`.
+	if tp, ok := t.(*types.TypeParam); ok {
+		return nil, fmt.Sprintf("type parameter %s requires instantiation", tp.Obj().Name())
+	}
 	if isGoAny(t) {
 		return Any, ""
 	}
