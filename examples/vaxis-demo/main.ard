@@ -642,6 +642,7 @@ fn tab_button(c: mut ffi::StateCtx, s: DemoState, theme: ui::Theme, label: Str, 
   let tab = ui::Button{Label: label, OnPressed: fn(ev: ui::EventContext) {
     set_page(c, page)
   }}
+
   match s.page == page {
     true => {
       let active = ui::Theme{
@@ -1190,42 +1191,38 @@ fn build(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
   for e in dialog_list {
     overlays.push(e)
   }
-  // Custom demo intents are Go interface values on a string newtype (ffi), but
-  // the key bindings and handlers are pure Ard. Map-literal keys can't yet be
-  // call expressions, so the intent-type keys are bound to locals first.
-  let quit_type = ffi::QuitIntentType()
-  let next_type = ffi::NextPageIntentType()
-  let prev_type = ffi::PreviousPageIntentType()
-  let palette_type = ffi::CommandPaletteIntentType()
+  // Custom demo intents are string intent types; only the ui.Intent interface
+  // wrapper (ffi::Intent) needs Go. Str literals widen into ui::IntentType
+  // keys and parameters directly.
   // The palette search field and the terminal both own the keyboard, so the
   // single-key page shortcuts are suppressed there (Alt+k still toggles it).
   let keys_captured = state.palette or state.page == 7
   let shortcuts: [Str: ui::Intent] = match keys_captured {
-    true => ["Alt+k": ffi::CommandPaletteIntent()],
+    true => ["Alt+k": ffi::Intent("demo.command-palette")],
     false => {
       [
-        "q": ffi::QuitIntent(),
-        "n": ffi::NextPageIntent(),
-        "p": ffi::PreviousPageIntent(),
-        "Alt+k": ffi::CommandPaletteIntent(),
+        "q": ffi::Intent("demo.quit"),
+        "n": ffi::Intent("demo.next-page"),
+        "p": ffi::Intent("demo.previous-page"),
+        "Alt+k": ffi::Intent("demo.command-palette"),
       ]
     },
   }
   ui::Actions{
     Bindings: [
-      quit_type: fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+      "demo.quit": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         ev.Quit()
         ui::EventHandled
       },
-      palette_type: fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+      "demo.command-palette": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         set_palette(c, true)
         ui::EventHandled
       },
-      next_type: fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+      "demo.next-page": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         set_page(c, next_page(state.page))
         ui::EventHandled
       },
-      prev_type: fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+      "demo.previous-page": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         set_page(c, previous_page(state.page))
         ui::EventHandled
       },
