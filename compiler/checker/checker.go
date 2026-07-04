@@ -314,6 +314,7 @@ type Checker struct {
 	reportedMapKeyErrors              map[parse.Location]bool
 	goTypesContext                    *gotypes.Context
 	spans                             *SpanIndex
+	moduleFiles                       map[string]string
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -342,6 +343,7 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 	}
 	if checkOptions.RecordSpans {
 		c.spans = &SpanIndex{}
+		c.moduleFiles = map[string]string{}
 	}
 
 	return c
@@ -440,6 +442,9 @@ func (c *Checker) Check() {
 			// Set the correct module path for the module
 			if um, ok := userModule.(*UserModule); ok {
 				um.setFilePath(resolved.ModulePath)
+			}
+			if c.moduleFiles != nil {
+				c.moduleFiles[resolved.ModulePath] = filePath
 			}
 
 			// Cache and add to imports
@@ -893,6 +898,9 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		}
 
 		if sym, ok := c.scope.get(t.GetName()); ok {
+			if isNominalType(sym.Type) && !strings.Contains(t.GetName(), "::") {
+				c.recordTypeRef(ty.GetLocation(), t.GetName())
+			}
 			if len(ty.TypeArgs) > 0 {
 				baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
 			} else {
@@ -914,8 +922,15 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			mod := c.resolveModule(targetName)
 			if mod != nil {
 				// at some point, this will need to unwrap the property down to root for nested paths: `mod::sym::more`
-				sym := mod.Get(ty.Type.Property.(*parse.Identifier).Name)
+				propName := ty.Type.Property.(*parse.Identifier).Name
+				sym := mod.Get(propName)
 				if !sym.IsZero() {
+					if c.spans != nil {
+						c.spans.add(SpanRecord{
+							Loc:    ty.GetLocation(),
+							Target: &SpanTarget{Kind: TargetType, Module: mod.Path(), Symbol: propName},
+						})
+					}
 					if len(ty.TypeArgs) > 0 {
 						baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
 					} else {
@@ -1725,6 +1740,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			if !ok {
 				return nil
 			}
+			c.recordDef(s.Name.GetLocation(), TypeKey(c.typeOwnerPath(), s.Name.Name))
 			methods := make([]FunctionDef, len(s.Methods))
 			for i, method := range s.Methods {
 				params := make([]Parameter, len(method.Parameters))
@@ -2016,6 +2032,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 			}
+			c.recordDef(s.Name.GetLocation(), TypeKey(c.typeOwnerPath(), s.Name.Name))
 			// Handle type declaration (type unions/aliases)
 			types := make([]Type, len(s.Type))
 			for i, declType := range s.Type {
@@ -2444,6 +2461,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			if !ok {
 				return nil
 			}
+			c.recordDef(s.GetLocation(), TypeKey(c.typeOwnerPath(), s.Name))
 			if len(s.Variants) == 0 {
 				c.addError("Enums must have at least one variant", s.GetLocation())
 				return nil
@@ -2516,6 +2534,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			if !ok {
 				return nil
 			}
+			c.recordDef(s.Name.GetLocation(), TypeKey(c.typeOwnerPath(), s.Name.Name))
 			c.populateStructDefinition(def, s)
 			return &Statement{Stmt: def}
 		}
@@ -5272,6 +5291,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				Property: s.Property.Name,
 				_type:    propType,
 			}
+			c.recordMember(s.Property.GetLocation(), TargetField, subj.Type(), s.Property.Name, prop)
 
 			// Pre-compute which kind of property this is based on subject type
 			switch subjType := subj.Type().(type) {
@@ -6062,6 +6082,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				fn:         fnToUse,
 				ReturnType: fnToUse.ReturnType,
 			}
+			c.recordTarget(s, call, SpanTarget{Kind: TargetFunction, Module: mod.Path(), Symbol: name})
 			// json::parse decodes into the requested type; parsing into a union is
 			// ambiguous, so the checker rejects it (ADR 0031).
 			if mod.Path() == "ard/json" && name == "parse" {
@@ -7183,6 +7204,9 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 		if !ok {
 			c.addError(fmt.Sprintf("Undefined: %s", name), s.GetLocation())
 			return nil
+		}
+		if !strings.Contains(name, "::") {
+			c.recordTypeRef(s.Name.GetLocation(), name)
 		}
 
 		// Use helper function for validation

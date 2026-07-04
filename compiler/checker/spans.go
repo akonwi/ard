@@ -31,6 +31,74 @@ type SpanRecord struct {
 	Key any
 	// IsDef marks the record as the entity's definition site.
 	IsDef bool
+	// Target names an entity defined in another module, for cross-file
+	// navigation. Nil for local references.
+	Target *SpanTarget
+}
+
+// TargetKind classifies a cross-module reference target.
+type TargetKind uint8
+
+const (
+	TargetFunction TargetKind = iota
+	TargetType
+	TargetField
+	TargetMethod
+)
+
+// SpanTarget names an entity defined in another Ard module.
+type SpanTarget struct {
+	Kind TargetKind
+	// Module is the target module's canonical path.
+	Module string
+	// File is the target module's source file path when known at check time.
+	// Preferred over re-resolving Module in tooling.
+	File string
+	// Symbol is the entity's name in the target module.
+	Symbol string
+	// Owner is the owning type's name for field and method targets.
+	Owner string
+}
+
+// memberTarget builds a field/method target from a subject type when the
+// subject is a struct (or mutable reference to one).
+func memberTarget(kind TargetKind, subjType Type, member string) *SpanTarget {
+	if ref, ok := subjType.(*MutableRef); ok {
+		subjType = ref.Of()
+	}
+	switch owner := subjType.(type) {
+	case *StructDef:
+		return &SpanTarget{Kind: kind, Module: owner.ModulePath, Symbol: member, Owner: owner.Name}
+	case *Enum:
+		return &SpanTarget{Kind: kind, Module: owner.ModulePath, Symbol: member, Owner: owner.Name}
+	case *Trait:
+		return &SpanTarget{Kind: kind, Module: owner.ModulePath, Symbol: member, Owner: owner.Name}
+	}
+	return nil
+}
+
+// recordMember records a struct/enum member access for navigation. Member
+// accesses on function-typed properties are method values and recorded as
+// method targets.
+func (c *Checker) recordMember(loc parse.Location, kind TargetKind, subjType Type, member string, node Expression) {
+	if c.spans == nil {
+		return
+	}
+	if kind == TargetField && node != nil {
+		if _, isFn := node.Type().(*FunctionDef); isFn {
+			kind = TargetMethod
+		}
+	}
+	target := memberTarget(kind, subjType, member)
+	if target == nil {
+		return
+	}
+	target.File = c.moduleFiles[target.Module]
+	c.spans.add(SpanRecord{
+		Loc:    loc,
+		Node:   node,
+		Target: target,
+	})
 }
 
 func (i *SpanIndex) add(rec SpanRecord) {
@@ -155,12 +223,35 @@ func (c *Checker) recordExprSpan(source parse.Expression, node Expression) {
 	if c.spans == nil || source == nil || node == nil {
 		return
 	}
-	c.spans.add(SpanRecord{
+	rec := SpanRecord{
 		Loc:    source.GetLocation(),
 		Source: source,
 		Node:   node,
 		Key:    c.spanKeyFor(node),
-	})
+	}
+	// Derive member targets centrally so method calls navigate to their
+	// definitions. The precise method-name sub-span comes from the parse node
+	// when available.
+	if im, ok := node.(*InstanceMethod); ok && im.Method != nil {
+		var subjType Type
+		if im.StructType != nil {
+			subjType = im.StructType
+		} else if im.EnumType != nil {
+			subjType = im.EnumType
+		} else if im.TraitType != nil {
+			subjType = im.TraitType
+		}
+		if subjType != nil {
+			if target := memberTarget(TargetMethod, subjType, im.Method.Name); target != nil {
+				target.File = c.moduleFiles[target.Module]
+				rec.Target = target
+				if parsed, ok := source.(*parse.InstanceMethod); ok {
+					rec.Loc = parsed.Method.GetLocation()
+				}
+			}
+		}
+	}
+	c.spans.add(rec)
 }
 
 // recordBinding records a local symbol's definition site.
@@ -185,6 +276,33 @@ func (c *Checker) recordSymbolUse(source parse.Expression, sym *Symbol, node Exp
 		Source: source,
 		Node:   node,
 		Key:    sym,
+	})
+}
+
+// recordTarget records a reference to an entity defined in another module.
+func (c *Checker) recordTarget(source parse.Expression, node Expression, target SpanTarget) {
+	if c.spans == nil || source == nil {
+		return
+	}
+	if target.File == "" {
+		target.File = c.moduleFiles[target.Module]
+	}
+	c.spans.add(SpanRecord{
+		Loc:    source.GetLocation(),
+		Source: source,
+		Node:   node,
+		Target: &target,
+	})
+}
+
+// recordTypeRef records a reference to a locally defined nominal type.
+func (c *Checker) recordTypeRef(loc parse.Location, name string) {
+	if c.spans == nil {
+		return
+	}
+	c.spans.add(SpanRecord{
+		Loc: loc,
+		Key: TypeKey(c.typeOwnerPath(), name),
 	})
 }
 
@@ -215,6 +333,16 @@ func (c *Checker) spanKeyFor(node Expression) any {
 		}
 	}
 	return nil
+}
+
+// isNominalType reports whether a checker type is a nominal declaration that
+// TypeKey identity applies to.
+func isNominalType(t Type) bool {
+	switch t.(type) {
+	case *StructDef, *Enum, *Trait, *Union:
+		return true
+	}
+	return false
 }
 
 // FunctionKey builds the identity key for a module-level function.

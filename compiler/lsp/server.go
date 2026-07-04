@@ -465,7 +465,12 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		if !ok {
 			return
 		}
-		locations = computeDefinition(doc.Text, filePath, params.Position)
+		// Span-table resolution first (ADR 0043); legacy heuristics as
+		// fallback during the migration.
+		locations = s.definitionFromSpans(params.TextDocument.URI, params.Position)
+		if len(locations) == 0 {
+			locations = computeDefinition(doc.Text, filePath, params.Position)
+		}
 	}()
 	if locations == nil {
 		locations = []protocol.Location{}

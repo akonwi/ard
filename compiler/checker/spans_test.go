@@ -1,6 +1,8 @@
 package checker_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -238,4 +240,72 @@ func keyAt(t *testing.T, spans *checker.SpanIndex, p parse.Point) any {
 	}
 	t.Fatalf("no keyed span at %v", p)
 	return nil
+}
+
+func TestSpansRecordTypeDefAndRefs(t *testing.T) {
+	spans := checkWithSpans(t, `struct Point {
+  x: Int,
+}
+
+fn origin() Point {
+  Point{x: 0}
+}
+`)
+	key := checker.TypeKey("test.ard", "Point")
+	group := spans.ByKey(key)
+	defs, refs := 0, 0
+	for _, rec := range group {
+		if rec.IsDef {
+			defs++
+		} else {
+			refs++
+		}
+	}
+	if defs != 1 {
+		t.Fatalf("expected 1 type def, got %d", defs)
+	}
+	if refs < 2 {
+		t.Fatalf("expected annotation + literal refs, got %d", refs)
+	}
+}
+
+func TestSpansRecordCrossModuleFunctionTarget(t *testing.T) {
+	dir := t.TempDir()
+	writeFileT(t, dir, "ard.toml", "name = \"proj\"\nard = \">= 0.1.0\"\n")
+	writeFileT(t, dir, "lib.ard", "fn helper() Int {\n  1\n}\n")
+	source := "use proj/lib\n\nfn main() {\n  let x = lib::helper()\n}\n"
+
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	resolver, err := checker.NewModuleResolver(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New("main.ard", result.Program, resolver, checker.CheckOptions{RecordSpans: true})
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("check errors: %v", c.Diagnostics())
+	}
+
+	found := false
+	for _, rec := range c.Spans().Records() {
+		if rec.Target != nil && rec.Target.Kind == checker.TargetFunction && rec.Target.Symbol == "helper" {
+			found = true
+			if rec.Target.Module == "" {
+				t.Fatal("target module is empty")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no cross-module function target recorded for lib::helper")
+	}
+}
+
+func writeFileT(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

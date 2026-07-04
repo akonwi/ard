@@ -475,3 +475,9 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 	h.Write([]byte(s.engine.goModSignature()))
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+// Engine returns the engine backing this workspace.
+func (w *Workspace) Engine() *Engine { return w.engine }
+
+// Engine returns the engine backing this snapshot.
+func (s *Snapshot) Engine() *Engine { return s.engine }
