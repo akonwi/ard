@@ -551,7 +551,10 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		if !ok {
 			return
 		}
-		items = computeCompletions(doc.Text, filePath, params.Position)
+		items = s.completionFromSpans(params.TextDocument.URI, doc.Text, params.Position)
+		if len(items) == 0 {
+			items = computeCompletions(doc.Text, filePath, params.Position)
+		}
 	}()
 	if items == nil {
 		items = []protocol.CompletionItem{}

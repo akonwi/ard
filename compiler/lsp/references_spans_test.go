@@ -67,3 +67,74 @@ func TestRenameFromSpansDefersNominalEntitiesToLegacy(t *testing.T) {
 		t.Fatal("nominal entity rename should defer to the legacy cross-file path")
 	}
 }
+
+// TestCompletionImportedStructMethods guards cross-module method completion:
+// imported structs keep methods in the defining module's program.
+func TestCompletionImportedStructMethods(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"proj\"\nard = \">= 0.1.0\"\n"), 0o644)
+	os.WriteFile(filepath.Join(root, "boxes.ard"), []byte("struct Box {\n  item: Int,\n}\n\nimpl Box {\n  fn get() Int {\n    self.item\n  }\n}\n"), 0o644)
+	source := "use proj/boxes\n\nfn main(box: boxes::Box) {\n  box.\n}\n"
+	path := filepath.Join(root, "main.ard")
+	os.WriteFile(path, []byte(source), 0o644)
+
+	srv := NewServer()
+	docURI := uri.File(path)
+	srv.cache.Open(docURI, "ard", 1, source)
+	items := srv.completionFromSpans(docURI, source, protocol.Position{Line: 3, Character: 6})
+
+	var haveField, haveMethod bool
+	for _, item := range items {
+		if item.Label == "item" {
+			haveField = true
+		}
+		if item.Label == "get" {
+			haveMethod = true
+		}
+	}
+	if !haveField {
+		t.Fatalf("field 'item' missing from completions: %#v", items)
+	}
+	if !haveMethod {
+		t.Fatalf("method 'get' missing from completions (cross-module side table): %#v", items)
+	}
+}
+
+// TestCompletionStructWithTraitImpl guards trait-impl methods on structs.
+func TestCompletionStructWithTraitImpl(t *testing.T) {
+	dir := t.TempDir()
+	source := `trait Render {
+  fn describe() Str
+}
+
+struct Board {
+  cells: [Str],
+}
+
+impl Render for Board {
+  fn describe() Str {
+    "board"
+  }
+}
+
+fn main(board: Board) {
+  board.
+}
+`
+	path := filepath.Join(dir, "test.ard")
+	os.WriteFile(path, []byte(source), 0o644)
+	srv := NewServer()
+	docURI := uri.File(path)
+	srv.cache.Open(docURI, "ard", 1, source)
+	items := srv.completionFromSpans(docURI, source, protocol.Position{Line: 15, Character: 8})
+
+	var haveDescribe bool
+	for _, item := range items {
+		if item.Label == "describe" {
+			haveDescribe = true
+		}
+	}
+	if !haveDescribe {
+		t.Fatalf("trait-impl method 'describe' missing: %#v", items)
+	}
+}

@@ -301,7 +301,18 @@ func (s *Snapshot) Parse(filePath string) (*parse.Program, []parse.ParseError, e
 // Analyze parses and checks the file at this snapshot, memoized by the
 // content signature of the file's import closure. Panics in the checker are
 // recovered and reported as errors; failed analyses are not cached.
-func (s *Snapshot) Analyze(filePath string) (analysis *FileAnalysis, err error) {
+func (s *Snapshot) Analyze(filePath string) (*FileAnalysis, error) {
+	return s.analyze(filePath, true)
+}
+
+// AnalyzeEphemeral analyzes without inserting into the check cache. Used for
+// synthetic content (e.g. completion placeholder patching) that would
+// otherwise thrash the bounded cache with never-reused entries.
+func (s *Snapshot) AnalyzeEphemeral(filePath string) (*FileAnalysis, error) {
+	return s.analyze(filePath, false)
+}
+
+func (s *Snapshot) analyze(filePath string, cache bool) (analysis *FileAnalysis, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			analysis = nil
@@ -344,6 +355,10 @@ func (s *Snapshot) Analyze(filePath string) (analysis *FileAnalysis, err error) 
 	analysis, err = s.check(filePath, relPath, entry.program, moduleResolver, sig)
 	if err != nil {
 		return nil, err
+	}
+
+	if !cache {
+		return analysis, nil
 	}
 
 	s.engine.mu.Lock()

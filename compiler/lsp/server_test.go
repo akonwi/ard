@@ -1656,10 +1656,7 @@ fn main() {
 
 // TestCompletionTraitMethods verifies dot completions for trait-typed receivers.
 func TestCompletionTraitMethods(t *testing.T) {
-	// Checklist(ADR 0043): trait-method completion for user-defined traits.
-	// The legacy completion engine only handled the removed prelude trait;
-	// this un-skips when completion ports to the snapshot/span path.
-	t.Skip("pending completion port to the span table (ADR 0043)")
+	dir := t.TempDir()
 	source := `trait Render {
   fn describe() Str
 }
@@ -1668,8 +1665,14 @@ fn render(value: Render) Str {
   value.
 }
 `
-
-	items := computeCompletions(source, "test.ard", protocol.Position{Line: 5, Character: 8})
+	path := filepath.Join(dir, "test.ard")
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer()
+	docURI := uri.File(path)
+	srv.cache.Open(docURI, "ard", 1, source)
+	items := srv.completionFromSpans(docURI, source, protocol.Position{Line: 5, Character: 8})
 	assertCompletion(t, items, "describe", "fn () Str")
 }
 
