@@ -1393,6 +1393,13 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 			return c.areCompatible(expected, ref.Of())
 		}
 	}
+	// A named Go map type accepts an Ard map with the same key/value shape,
+	// mirroring Go's unnamed-to-named assignability.
+	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer && foreign.MapKey != nil && foreign.MapValue != nil {
+		if actualMap, ok := actual.(*Map); ok {
+			return foreign.MapKey.equal(actualMap.Key()) && foreign.MapValue.equal(actualMap.Value())
+		}
+	}
 	return expected.equal(actual)
 }
 
@@ -3597,6 +3604,11 @@ func (c *Checker) checkValueExpr(expr parse.Expression) Expression {
 }
 
 func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLiteral {
+	// A named Go map type accepts an Ard map literal: Go assignability allows
+	// an unnamed map value where the named type is expected.
+	if foreign, ok := declaredType.(*ForeignType); ok && !foreign.Pointer && foreign.MapKey != nil && foreign.MapValue != nil {
+		declaredType = MakeMap(foreign.MapKey, foreign.MapValue)
+	}
 	// Handle empty map with declared type
 	if len(expr.Entries) == 0 {
 		if declaredType != nil {

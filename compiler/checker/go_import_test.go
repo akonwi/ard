@@ -948,3 +948,36 @@ let c: Any = true`,
 		},
 	})
 }
+
+// A named Go map type accepts an Ard map value or literal with the same
+// key/value shape, mirroring Go's unnamed-to-named assignability
+// (for example `ui.ShortcutMap map[string]Intent`).
+func TestNamedGoMapTypesAcceptArdMaps(t *testing.T) {
+	run(t, []test{
+		{
+			name: "map literal contextually types as a named Go map",
+			input: `use go:net/url
+fn build() url::Values {
+  let values: url::Values = ["a": ["1"]]
+  values
+}`,
+		},
+		{
+			name: "map value satisfies a named Go map parameter",
+			input: `use go:net/url
+fn encode() Str {
+  let query: [Str: [Str]] = ["a": ["1"]]
+  let values: url::Values = query
+  values.Encode()
+}`,
+		},
+		{
+			name: "mismatched map shape is rejected",
+			input: `use go:net/url
+fn bad() {
+  let values: url::Values = ["a": 1]
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected [Str], got Int"}},
+		},
+	})
+}
