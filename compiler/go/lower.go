@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/tools/go/packages"
+
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
 )
@@ -44,6 +46,7 @@ type lowerer struct {
 	includeTests            bool
 	useModulePackages       bool
 	forceValueResultReturns bool
+	goTypesPackages         map[string]*types.Package
 
 	// When the entry root lives in a module named `main` (main.ard) that no
 	// other module imports, that module is emitted as the root `package main`
@@ -3129,7 +3132,7 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 		info := l.program.Types[expr.Type-1]
 		switch info.Kind {
 		case air.TypeResult:
-			shape, err := goForeignResultShape(importPath, functionName)
+			shape, err := l.goForeignResultShape(importPath, functionName)
 			if err != nil {
 				return loweredExpr{}, err
 			}
@@ -3140,7 +3143,7 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 				return l.lowerGoErrorOnlyResultCall(expr, stmts, call)
 			}
 		case air.TypeMaybe:
-			shape, err := goForeignResultShape(importPath, functionName)
+			shape, err := l.goForeignResultShape(importPath, functionName)
 			if err != nil {
 				return loweredExpr{}, err
 			}
@@ -3161,8 +3164,50 @@ const (
 	goResultValueBool
 )
 
-func goForeignResultShape(importPath, functionName string) (goResultShape, error) {
-	pkg, err := importer.Default().Import(importPath)
+// loadGoTypesPackage resolves a Go package's type information. When the
+// program has project context, the load runs in the project module so
+// third-party and project-local FFI packages resolve; otherwise it falls back
+// to the standard-library importer.
+func (l *lowerer) loadGoTypesPackage(importPath string) (*types.Package, error) {
+	if l.goTypesPackages == nil {
+		l.goTypesPackages = map[string]*types.Package{}
+	}
+	if pkg, ok := l.goTypesPackages[importPath]; ok {
+		return pkg, nil
+	}
+	var pkg *types.Package
+	var err error
+	if l.projectInfo != nil && l.projectInfo.RootPath != "" {
+		cfg := &packages.Config{
+			Mode: packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps,
+			Dir:  l.projectInfo.RootPath,
+		}
+		if tags := l.projectInfo.Go.BuildTags; len(tags) > 0 {
+			cfg.BuildFlags = []string{"-tags=" + strings.Join(tags, ",")}
+		}
+		var loaded []*packages.Package
+		loaded, err = packages.Load(cfg, importPath)
+		if err == nil {
+			if len(loaded) == 0 || loaded[0].Types == nil {
+				err = fmt.Errorf("cannot load Go package %q", importPath)
+			} else if len(loaded[0].Errors) > 0 {
+				err = fmt.Errorf("load Go package %q: %s", importPath, loaded[0].Errors[0].Msg)
+			} else {
+				pkg = loaded[0].Types
+			}
+		}
+	} else {
+		pkg, err = importer.Default().Import(importPath)
+	}
+	if err != nil {
+		return nil, err
+	}
+	l.goTypesPackages[importPath] = pkg
+	return pkg, nil
+}
+
+func (l *lowerer) goForeignResultShape(importPath, functionName string) (goResultShape, error) {
+	pkg, err := l.loadGoTypesPackage(importPath)
 	if err != nil {
 		return goResultOther, err
 	}
@@ -3183,8 +3228,8 @@ func goForeignResultShape(importPath, functionName string) (goResultShape, error
 	return goResultOther, nil
 }
 
-func goForeignMethodResultShape(importPath, receiverName string, pointer bool, methodName string) (goResultShape, error) {
-	pkg, err := importer.Default().Import(importPath)
+func (l *lowerer) goForeignMethodResultShape(importPath, receiverName string, pointer bool, methodName string) (goResultShape, error) {
+	pkg, err := l.loadGoTypesPackage(importPath)
 	if err != nil {
 		return goResultOther, err
 	}
@@ -3314,7 +3359,7 @@ func (l *lowerer) lowerForeignMethodValue(fn air.Function, expr air.Expr) (lower
 		retInfo = l.program.Types[fnInfo.Return-1]
 		switch retInfo.Kind {
 		case air.TypeResult, air.TypeMaybe:
-			shape, err = goForeignMethodResultShape(expr.ForeignNamespace, expr.ForeignReceiver, expr.ForeignPointer, expr.ForeignSymbol)
+			shape, err = l.goForeignMethodResultShape(expr.ForeignNamespace, expr.ForeignReceiver, expr.ForeignPointer, expr.ForeignSymbol)
 			if err != nil {
 				return loweredExpr{}, err
 			}
@@ -3408,7 +3453,7 @@ func (l *lowerer) lowerForeignMethodCall(fn air.Function, expr air.Expr) (lowere
 	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(expr.ForeignSymbol)}, Args: args}
 	if validTypeID(l.program, expr.Type) {
 		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeResult {
-			shape, err := goForeignMethodResultShape(expr.ForeignNamespace, expr.ForeignReceiver, expr.ForeignPointer, expr.ForeignSymbol)
+			shape, err := l.goForeignMethodResultShape(expr.ForeignNamespace, expr.ForeignReceiver, expr.ForeignPointer, expr.ForeignSymbol)
 			if err != nil {
 				return loweredExpr{}, err
 			}
@@ -3420,7 +3465,7 @@ func (l *lowerer) lowerForeignMethodCall(fn air.Function, expr air.Expr) (lowere
 			}
 		}
 		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeMaybe {
-			shape, err := goForeignMethodResultShape(expr.ForeignNamespace, expr.ForeignReceiver, expr.ForeignPointer, expr.ForeignSymbol)
+			shape, err := l.goForeignMethodResultShape(expr.ForeignNamespace, expr.ForeignReceiver, expr.ForeignPointer, expr.ForeignSymbol)
 			if err != nil {
 				return loweredExpr{}, err
 			}
