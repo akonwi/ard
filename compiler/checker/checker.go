@@ -269,9 +269,15 @@ func (c Checker) isMutable(expr Expression) bool {
 		if _, ok := mutableRefBase(e.sym.Type); ok {
 			return true
 		}
+		if isPointerForeign(e.sym.Type) {
+			return true
+		}
 		return e.sym.mutable
 	case *InstanceProperty:
 		if _, ok := mutableRefBase(e._type); ok {
+			return true
+		}
+		if isPointerForeign(e._type) {
 			return true
 		}
 		return c.isMutable(e.Subject)
@@ -687,15 +693,37 @@ func (c *Checker) validateMapKeyType(key Type, loc parse.Location) {
 	c.addError(fmt.Sprintf("Invalid map key type %s: map keys must be comparable (primitives, enums, or structs)", formatTypeForDisplay(key)), loc)
 }
 
+// makeMutableType resolves `mut T` annotations. A foreign Go named type's
+// mutable form is its pointer form (`mut image::Point` is `*image.Point`),
+// matching how Go signatures import pointer parameters, so both spellings
+// produce the same type. Everything else wraps in an Ard mutable reference.
+func (c *Checker) makeMutableType(inner Type) Type {
+	if foreign, ok := inner.(*ForeignType); ok {
+		if foreign.Pointer {
+			return foreign
+		}
+		if pointer := foreign.PointerForm(); pointer != nil {
+			return pointer
+		}
+	}
+	return MakeMutableRef(inner)
+}
+
 // isComparableValueType reports whether a type can be compared with == / != per
 // ADR 0031: only primitives and enums (and, via the caller, their nullable
-// forms). There is no structural equality over lists, maps, structs, unions, or
+// forms), plus foreign named scalars, which compare with the target's native
+// ==. There is no structural equality over lists, maps, structs, unions, or
 // Any.
 func isComparableValueType(t Type) bool {
 	if t == nil {
 		return false
 	}
 	if t.equal(Int) || t.equal(Float64) || t.equal(Str) || t.equal(Bool) || t.equal(Byte) || t.equal(Rune) || isExplicitScalar(t) {
+		return true
+	}
+	// A foreign named scalar (for example Go's time.Month or a status enum-like
+	// type) compares with the target's native == on its scalar underlying.
+	if foreign, ok := t.(*ForeignType); ok && !foreign.Pointer && foreign.Underlying != nil && isComparableValueType(foreign.Underlying) {
 		return true
 	}
 	_, isEnum := t.(*Enum)
@@ -759,9 +787,9 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		baseType = Void
 
 	case *parse.MutableType:
-		baseType = MakeMutableRef(c.resolveType(ty.Inner))
+		baseType = c.makeMutableType(c.resolveType(ty.Inner))
 	case parse.MutableType:
-		baseType = MakeMutableRef(c.resolveType(ty.Inner))
+		baseType = c.makeMutableType(c.resolveType(ty.Inner))
 	case *parse.FunctionType:
 		// Convert each parameter type and return type
 		params := make([]Parameter, len(ty.Params))

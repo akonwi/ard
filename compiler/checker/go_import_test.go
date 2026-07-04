@@ -534,6 +534,124 @@ fn main() {
 	})
 }
 
+func TestMutableForeignAnnotationsMatchGoPointerTypes(t *testing.T) {
+	run(t, []test{
+		{
+			name: "mut foreign parameter forwards to another mut foreign parameter",
+			input: `use go:strings
+
+fn inner(b: mut strings::Builder) {}
+
+fn outer(b: mut strings::Builder) {
+  inner(b)
+}`,
+		},
+		{
+			name: "mut foreign parameter exposes pointer receiver methods",
+			input: `use go:strings
+
+fn write(b: mut strings::Builder) {
+  try b.WriteString("hello") -> err { panic(err) }
+}`,
+		},
+		{
+			name: "mut foreign parameter allows field writes",
+			input: `use go:image
+
+fn reset(p: mut image::Point) {
+  p.X = 0
+}`,
+		},
+	})
+}
+
+func TestForeignNamedScalarsSupportEquality(t *testing.T) {
+	run(t, []test{
+		{
+			name: "foreign named scalar values compare with ==",
+			input: `use go:time
+
+fn is_january(month: time::Month) Bool {
+  month == time::January
+}`,
+		},
+		{
+			name: "foreign named scalars in match-like dispatch",
+			input: `use go:time
+
+fn label(day: time::Weekday) Str {
+  match day == time::Sunday {
+    true => "rest",
+    false => "work",
+  }
+}`,
+		},
+	})
+}
+
+func TestUnsafeCastAcceptsForeignTargets(t *testing.T) {
+	run(t, []test{
+		{
+			name: "value cast to foreign struct type",
+			input: `use ard/unsafe
+use go:image
+
+fn origin(value: Any) Int {
+  match unsafe::cast<image::Point>(value) {
+    point => point.X,
+    _ => 0,
+  }
+}`,
+		},
+		{
+			name: "mutable cast to foreign struct type allows mutation",
+			input: `use ard/unsafe
+use go:image
+
+fn reset(value: Any) {
+  match unsafe::cast<mut image::Point>(value) {
+    point => { point.X = 0 },
+    _ => {},
+  }
+}`,
+		},
+	})
+}
+
+func TestGoImportMapsEmptyInterfaceAliasesToAny(t *testing.T) {
+	run(t, []test{
+		{
+			name: "empty-interface alias resolves as Any in signatures",
+			input: `use go:encoding/xml
+
+fn describe(token: xml::Token) Str {
+  "token"
+}
+
+fn main() {
+  let _ = describe("raw")
+  let _ = describe(42)
+}`,
+		},
+		{
+			name: "empty-interface alias accepts any Ard value as Any",
+			input: `use go:database/sql/driver
+
+struct Row {
+  id: Int,
+}
+
+fn store(value: driver::Value) {}
+
+fn main() {
+  store(Row{id: 1})
+  let boxed: Any = true
+  store(boxed)
+}`,
+		},
+	})
+}
+
 func TestGoImportResolvesExportedPackageConstant(t *testing.T) {
 	run(t, []test{
 		{

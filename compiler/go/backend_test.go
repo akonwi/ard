@@ -1509,6 +1509,80 @@ fn main() {
 	}
 }
 
+func TestRunProgramExecutesUnsafeForeignValueCast(t *testing.T) {
+	program := lowerSource(t, `use ard/unsafe
+use go:image
+use go:time
+
+fn main() {
+  let boxed: Any = image::Point{X: 3, Y: 4}
+  let point = unsafe::cast<image::Point>(boxed).expect("point")
+  if not point.X == 3 { panic("bad X") }
+  if unsafe::cast<image::Rectangle>(boxed).is_some() { panic("wrong type matched") }
+
+  let month: Any = time::January
+  let m = unsafe::cast<time::Month>(month).expect("month")
+  if not m == time::January { panic("bad month") }
+  if unsafe::cast<time::Weekday>(month).is_some() { panic("weekday matched month") }
+}`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramExecutesUnsafeForeignMutableCast(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"foreigncast\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module foreigncast\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
+
+import "image"
+
+var Pt = image.Point{X: 1, Y: 2}
+
+func BoxPt() any { return &Pt }
+func BoxNilPt() any { var p *image.Point; return p }
+func PtX() int { return Pt.X }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use ard/unsafe
+use go:foreigncast/ffi
+use go:image
+
+fn main() {
+  let handle = unsafe::cast<mut image::Point>(ffi::BoxPt()).expect("point handle")
+  handle.X = 42
+  if not ffi::PtX() == 42 { panic("mutation lost") }
+  if unsafe::cast<mut image::Point>(ffi::BoxNilPt()).is_some() { panic("nil pointer matched") }
+  if unsafe::cast<mut image::Rectangle>(ffi::BoxPt()).is_some() { panic("wrong pointer type matched") }
+  if not unsafe::cast<image::Point>(ffi::BoxPt()).expect("deref").X == 42 { panic("value cast did not deref") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesUnsafeMutableCast(t *testing.T) {
 	projectDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"anycast\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

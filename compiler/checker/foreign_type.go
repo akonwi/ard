@@ -102,6 +102,47 @@ func (f *ForeignType) equal(other Type) bool {
 
 func (f *ForeignType) hasTrait(trait *Trait) bool { return false }
 
+func isPointerForeign(t Type) bool {
+	foreign, ok := t.(*ForeignType)
+	return ok && foreign.Pointer
+}
+
+// PointerForm returns the pointer-shaped form of a foreign named type, or nil
+// when the type has no supported pointer form (interfaces, maps, already
+// pointer-shaped values, or types without Go metadata).
+func (f *ForeignType) PointerForm() *ForeignType {
+	if f == nil || f.Pointer || f.Interface || f.Target != "go" || f.GoType == nil {
+		return nil
+	}
+	named, ok := f.GoType.(*types.Named)
+	if !ok {
+		return nil
+	}
+	if reason := unsupportedForeignNamedUnderlying(named.Underlying(), true); reason != "" {
+		return nil
+	}
+	pointer, _ := foreignNamedTypeFromGo(named, true, false).(*ForeignType)
+	return pointer
+}
+
+// ValueForm returns the value-shaped form of a pointer foreign named type, or
+// nil when the receiver is not a pointer form backed by Go metadata.
+func (f *ForeignType) ValueForm() *ForeignType {
+	if f == nil || !f.Pointer || f.GoType == nil {
+		return nil
+	}
+	pointer, ok := f.GoType.(*types.Pointer)
+	if !ok {
+		return nil
+	}
+	named, ok := pointer.Elem().(*types.Named)
+	if !ok {
+		return nil
+	}
+	value, _ := foreignNamedTypeFromGo(named, false, false).(*ForeignType)
+	return value
+}
+
 func foreignGoAssignableTo(actual *ForeignType, expected *ForeignType) bool {
 	if actual == nil || expected == nil || actual.Target != "go" || expected.Target != "go" || actual.GoType == nil || expected.GoType == nil {
 		return false

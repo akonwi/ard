@@ -330,6 +330,14 @@ func unsupportedGoNamedTypeArgs(named *types.Named) string {
 }
 
 func exportedNamedTypeFromGo(typeName *types.TypeName) (Type, string) {
+	// An empty interface carries no method set, so both named empty-interface
+	// types and aliases of the empty interface map to Ard's opaque Any.
+	if isGoAny(typeName.Type()) {
+		return Any, ""
+	}
+	if typeName.IsAlias() {
+		return typeFromGo(typeName.Type())
+	}
 	named, ok := typeName.Type().(*types.Named)
 	if !ok {
 		return nil, "exported Go type is not named"

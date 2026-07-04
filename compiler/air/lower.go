@@ -3772,6 +3772,16 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			mutable = true
 			targetType = ref.Of()
 		}
+		if foreign, ok := targetType.(*checker.ForeignType); ok && foreign.Pointer {
+			// A `mut pkg::T` target resolves to the pointer-shaped foreign type;
+			// the backend asserts against the value type and marks the pointer form.
+			valueForm := foreign.ValueForm()
+			if valueForm == nil {
+				return nil, fmt.Errorf("unsafe::cast target %s has no value form", foreign)
+			}
+			mutable = true
+			targetType = valueForm
+		}
 		targetTypeID, err := fl.l.internType(targetType)
 		if err != nil {
 			return nil, err
