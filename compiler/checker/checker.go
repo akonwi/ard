@@ -4387,6 +4387,8 @@ func (c *Checker) createIntMethod(subject Expression, methodName string) Express
 	switch methodName {
 	case "to_str":
 		kind = IntToStr
+	case "to_f64":
+		kind = IntToF64
 	default:
 		panic(fmt.Sprintf("Unknown Int method: %s", methodName))
 	}

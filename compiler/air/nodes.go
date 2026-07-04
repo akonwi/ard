@@ -114,6 +114,7 @@ const (
 	ExprStrConcat
 	ExprToStr
 	ExprToInt
+	ExprToF64
 	ExprStrAt
 	ExprStrBytes
 	ExprStrRunes

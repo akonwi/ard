@@ -330,6 +330,12 @@ func (i _int) get(name string) Type {
 			Parameters: []Parameter{},
 			ReturnType: Str,
 		}
+	case "to_f64":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Float64,
+		}
 	default:
 		return nil
 	}

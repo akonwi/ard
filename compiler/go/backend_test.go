@@ -4287,3 +4287,22 @@ fn main() {}
 		})
 	}
 }
+
+func TestRunProgramExecutesIntToF64(t *testing.T) {
+	program := lowerSource(t, `
+		use go:fmt
+
+		fn main() {
+			let width = 5
+			let scaled = 0.5 * (width - 1).to_f64()
+			fmt::Println(scaled.to_str())
+			if scaled.to_int() != 2 {
+				panic("expected 2")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}

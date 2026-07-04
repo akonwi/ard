@@ -3971,6 +3971,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if e.Kind == checker.IntToStr {
 			return fl.lowerUnary(ExprToStr, typeID, e.Subject)
 		}
+		if e.Kind == checker.IntToF64 {
+			return fl.lowerUnary(ExprToF64, typeID, e.Subject)
+		}
 		return nil, fmt.Errorf("unsupported AIR Int method %d", e.Kind)
 	case *checker.FloatMethod:
 		if e.Kind == checker.FloatToStr {

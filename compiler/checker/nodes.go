@@ -342,6 +342,7 @@ type IntMethodKind uint8
 
 const (
 	IntToStr IntMethodKind = iota
+	IntToF64
 )
 
 type IntMethod struct {
@@ -353,6 +354,8 @@ func (m *IntMethod) Type() Type {
 	switch m.Kind {
 	case IntToStr:
 		return Str
+	case IntToF64:
+		return Float64
 	default:
 		return Void
 	}

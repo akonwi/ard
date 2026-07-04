@@ -2013,6 +2013,15 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("int"), Args: []ast.Expr{target.expr}}}, nil
+	case air.ExprToF64:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("to_f64 missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("float64"), Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprMakeClosure:
 		return l.lowerMakeClosure(fn, expr)
 	case air.ExprCallClosure:
