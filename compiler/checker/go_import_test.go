@@ -1112,6 +1112,93 @@ fn bad() {
 	})
 }
 
+// A named Go slice type accepts an Ard list value or literal with the same
+// element type, mirroring Go's unnamed-to-named assignability (for example
+// `sort.IntSlice []int`).
+func TestNamedGoSliceTypesAcceptArdLists(t *testing.T) {
+	run(t, []test{
+		{
+			name: "list literal contextually types as a named Go slice",
+			input: `use go:sort
+fn build() sort::IntSlice {
+  let nums: sort::IntSlice = [3, 1, 2]
+  nums
+}`,
+		},
+		{
+			name: "list value satisfies a named Go slice annotation",
+			input: `use go:sort
+fn build() sort::IntSlice {
+  let raw: [Int] = [1, 2]
+  let nums: sort::IntSlice = raw
+  nums
+}`,
+		},
+		{
+			name: "named Go slices expose list methods",
+			input: `use go:sort
+fn peek(nums: sort::IntSlice) Int {
+  nums.at(0) + nums.size()
+}`,
+		},
+		{
+			name: "real Go methods on the named slice still resolve",
+			input: `use go:sort
+fn sorted(mut nums: sort::IntSlice) sort::IntSlice {
+  nums.Sort()
+  nums
+}`,
+		},
+		{
+			name: "mismatched element type is rejected",
+			input: `use go:sort
+fn bad() {
+  let nums: sort::IntSlice = ["a"]
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"}},
+		},
+	})
+}
+
+// A freshly constructed container literal is new storage with no other
+// observer, so it satisfies a mutable Go slice/map parameter directly.
+func TestFreshContainerLiteralsSatisfyMutableGoParams(t *testing.T) {
+	run(t, []test{
+		{
+			name: "list literal passes to a mutable Go slice parameter",
+			input: `use go:sort
+fn main() {
+  sort::Ints([3, 1, 2])
+}`,
+		},
+		{
+			name: "map literal passes to a mutable Ard map parameter",
+			input: `fn consume(mut m: [Str: Int]) Int {
+  m.size()
+}
+fn main() {
+  let _ = consume(["a": 1])
+}`,
+		},
+		{
+			name: "list literal against a non-list annotation reports a diagnostic",
+			input: `fn main() {
+  let x: Int = [1]
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Expected Int but got a list"}},
+		},
+		{
+			name: "immutable bindings are still rejected for mutable Go params",
+			input: `use go:sort
+fn main() {
+  let nums = [3, 1]
+  sort::Ints(nums)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected a mutable [Int]"}},
+		},
+	})
+}
+
 // Named empty Go interfaces keep their type identity (they are foreign
 // interface types, not Any) but still accept any value and support dynamic
 // matching. driver.Value is `type Value any`.

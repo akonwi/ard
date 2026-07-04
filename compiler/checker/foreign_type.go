@@ -18,6 +18,9 @@ type ForeignType struct {
 	TypeArgs                  []Type
 	MapKey                    Type
 	MapValue                  Type
+	// Elem is set for named Go slice types (`type Nums []int`); the foreign
+	// value then behaves like an Ard list of Elem.
+	Elem Type
 	Fields                    map[string]Type
 	UnsupportedFields         map[string]string
 	FieldsLoaded              bool
@@ -54,6 +57,11 @@ func (f *ForeignType) String() string {
 func (f *ForeignType) get(name string) Type {
 	if f.MapKey != nil && f.MapValue != nil {
 		if method := MakeMap(f.MapKey, f.MapValue).get(name); method != nil {
+			return method
+		}
+	}
+	if f.Elem != nil {
+		if method := MakeList(f.Elem).get(name); method != nil {
 			return method
 		}
 	}

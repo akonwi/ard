@@ -1424,6 +1424,13 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 			return foreign.MapKey.equal(actualMap.Key()) && foreign.MapValue.equal(actualMap.Value())
 		}
 	}
+	// A named Go slice type accepts an Ard list with the same element type,
+	// mirroring Go's unnamed-to-named assignability.
+	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer && foreign.Elem != nil {
+		if actualList, ok := actual.(*List); ok {
+			return foreign.Elem.equal(actualList.of)
+		}
+	}
 	// A named Go func type accepts an Ard function value with a matching
 	// signature, mirroring Go's unnamed-to-named assignability.
 	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer {
@@ -1602,12 +1609,37 @@ func (c *Checker) structImplementsForeignInterface(def *StructDef, iface *Foreig
 	return false
 }
 
+// freshContainerSatisfiesMutable reports whether arg may be passed to a
+// mutable parameter of paramType despite not being a mutable place: a freshly
+// constructed list/map literal is new storage with no other observer, and
+// descriptor-shaped parameters (slices, maps) lower without pointers, so the
+// callee mutating the temporary is sound. Idiomatic Go passes container
+// literals to such parameters directly.
+func freshContainerSatisfiesMutable(paramType Type, arg Expression) bool {
+	if mutableParamNeedsGoPointer(paramType) {
+		return false
+	}
+	switch arg.(type) {
+	case *ListLiteral, *MapLiteral:
+		return true
+	}
+	return false
+}
+
 func mutableParamNeedsGoPointer(t Type) bool {
 	base, _ := mutableRefBase(t)
 	switch typ := base.(type) {
 	case *List, *Map, *Chan, *Receiver, *Sender:
 		return false
 	case *ForeignType:
+		// Named Go map and slice types are descriptors like their unnamed
+		// shapes: content mutation flows through the value without a pointer.
+		if typ.MapKey != nil && typ.MapValue != nil {
+			return false
+		}
+		if typ.Elem != nil {
+			return false
+		}
 		return !typ.Pointer && !typ.Interface
 	default:
 		return true
@@ -2559,8 +2591,18 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 }
 
 func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLiteral {
+	// A named Go slice type accepts an Ard list literal: Go assignability
+	// allows an unnamed slice value where the named type is expected.
+	if foreign, ok := declaredType.(*ForeignType); ok && !foreign.Pointer && foreign.Elem != nil {
+		declaredType = MakeList(foreign.Elem)
+	}
 	if declaredType != nil {
-		expectedElementType := declaredType.(*List).of
+		declaredList, ok := declaredType.(*List)
+		if !ok {
+			c.addError(fmt.Sprintf("Expected %s but got a list", formatTypeForDisplay(declaredType)), expr.GetLocation())
+			return nil
+		}
+		expectedElementType := declaredList.of
 		elements := make([]Expression, len(expr.Items))
 		hasError := false
 		for i := range expr.Items {
@@ -2581,11 +2623,10 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 			return nil
 		}
 
-		listType := declaredType.(*List)
 		return &ListLiteral{
 			Elements: elements,
-			_type:    listType,
-			ListType: listType,
+			_type:    declaredList,
+			ListType: declaredList,
 		}
 	}
 
@@ -4335,6 +4376,9 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 	if foreign, isForeign := subject.Type().(*ForeignType); isForeign && foreign.MapKey != nil && foreign.MapValue != nil {
 		return c.createMapMethod(subject, methodName, args, fnDef)
 	}
+	if foreign, isForeign := subject.Type().(*ForeignType); isForeign && foreign.Elem != nil {
+		return c.createListMethod(subject, methodName, args, fnDef)
+	}
 	if _, isMaybe := subject.Type().(*Maybe); isMaybe {
 		return c.createMaybeMethod(subject, methodName, args, fnDef)
 	}
@@ -4485,7 +4529,14 @@ func (c *Checker) createBoolMethod(subject Expression, methodName string) Expres
 }
 
 func (c *Checker) createListMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
-	listType := subject.Type().(*List)
+	var elemType Type
+	if listType, ok := subject.Type().(*List); ok {
+		elemType = listType.of
+	} else if foreign, ok := subject.Type().(*ForeignType); ok && foreign.Elem != nil {
+		elemType = foreign.Elem
+	} else {
+		panic(fmt.Sprintf("List method on non-list type: %s", subject.Type()))
+	}
 	var kind ListMethodKind
 	switch methodName {
 	case "at":
@@ -4509,8 +4560,17 @@ func (c *Checker) createListMethod(subject Expression, methodName string, args [
 		Subject:     subject,
 		Kind:        kind,
 		Args:        args,
-		ElementType: listType.of,
+		ElementType: elemType,
 		fn:          fnDef,
+	}
+}
+
+func isListMethodName(name string) bool {
+	switch name {
+	case "at", "prepend", "push", "set", "size", "sort", "swap":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -5355,6 +5415,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				if foreign.MapKey != nil && foreign.MapValue != nil && isMapMethodName(s.Method.Name) {
 					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs)
 				}
+				if foreign.Elem != nil && isListMethodName(s.Method.Name) {
+					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs)
+				}
 				for _, arg := range s.Method.Args {
 					if arg.Name != "" {
 						c.addError("Foreign method calls do not support named arguments", arg.GetLocation())
@@ -5851,7 +5914,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						}
 						checkedArg = upcast
 					}
-					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
+					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) && !freshContainerSatisfiesMutable(fnDef.Parameters[i].Type, checkedArg) {
 						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), expr.GetLocation())
 						return nil
 					}
@@ -8452,7 +8515,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// requires an addressable mutable place; a call-site `mut` marker no longer
 		// requests a defensive copy.
 		if fnDefCopy.Parameters[i].Mutable {
-			if !c.isMutable(checkedArg) || foreignScalarNarrows(paramType, checkedArg.Type()) || foreignScalarWidens(paramType, checkedArg.Type()) {
+			if (!c.isMutable(checkedArg) && !freshContainerSatisfiesMutable(paramType, checkedArg)) || foreignScalarNarrows(paramType, checkedArg.Type()) || foreignScalarWidens(paramType, checkedArg.Type()) {
 				c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDefCopy.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
 				return nil, nil
 			}

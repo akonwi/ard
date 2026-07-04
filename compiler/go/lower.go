@@ -3802,6 +3802,14 @@ func (l *lowerer) mutableParamUsesPointer(typeID air.TypeID) bool {
 	case air.TypeList, air.TypeMap, air.TypeChannel, air.TypeReceiver, air.TypeSender:
 		return false
 	case air.TypeForeignType:
+		// Named Go map and slice types are descriptors like their unnamed
+		// shapes: content mutation flows through the value without a pointer.
+		if info.Key != air.NoType && info.Value != air.NoType {
+			return false
+		}
+		if info.Elem != air.NoType {
+			return false
+		}
 		return !info.ForeignPointer && !info.ForeignInterface
 	default:
 		return true

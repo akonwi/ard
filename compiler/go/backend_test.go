@@ -1758,6 +1758,34 @@ func TestRunProgramExecutesSimpleMain(t *testing.T) {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+func TestRunProgramExecutesNamedGoContainerTypes(t *testing.T) {
+	program := lowerSource(t, `
+		use go:sort
+		use go:net/url
+
+		fn main() {
+			// Named Go slice: literal contextual typing, list methods, Go methods,
+			// and fresh literals passing to mutable Go slice params.
+			mut nums: sort::IntSlice = [3, 1, 2]
+			nums.Sort()
+			if nums.at(0) != 1 or nums.at(2) != 3 or nums.size() != 3 {
+				panic("sorted named slice wrong: {nums.at(0)} {nums.at(1)} {nums.at(2)}")
+			}
+			sort::Ints([2, 1])
+
+			// Named Go map: literal contextual typing plus Go methods.
+			let values: url::Values = ["a": ["1"]]
+			if values.Get("a") != "1" {
+				panic("named map get failed")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesForeignScalarWideningSites(t *testing.T) {
 	program := lowerSource(t, `
 		use go:encoding/json

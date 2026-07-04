@@ -407,6 +407,12 @@ func unsupportedForeignNamedUnderlying(underlying types.Type, pointer bool) stri
 		}
 		return ""
 	}
+	if goSlice, ok := underlying.(*types.Slice); ok {
+		if _, reason := typeFromGoWithMethods(goSlice.Elem(), false); reason != "" {
+			return "slice element " + reason
+		}
+		return ""
+	}
 	if _, ok := underlying.(*types.Interface); ok {
 		if pointer {
 			return "pointers to Go interface types are not supported"
@@ -451,6 +457,11 @@ func foreignNamedTypeFromGo(named *types.Named, pointer bool, includeMethods boo
 			}
 			if value, reason := typeFromGoWithMethods(goMap.Elem(), false); reason == "" {
 				foreign.MapValue = value
+			}
+		}
+		if goSlice, ok := named.Underlying().(*types.Slice); ok {
+			if elem, reason := typeFromGoWithMethods(goSlice.Elem(), false); reason == "" {
+				foreign.Elem = elem
 			}
 		}
 	}

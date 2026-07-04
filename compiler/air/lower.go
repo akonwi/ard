@@ -2074,6 +2074,13 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 			}
 			info.Key = key
 		}
+		if typ.Elem != nil {
+			elem, err := l.internType(typ.Elem)
+			if err != nil {
+				return NoType, err
+			}
+			info.Elem = elem
+		}
 		if typ.MapValue != nil {
 			value, err := l.internType(typ.MapValue)
 			if err != nil {
@@ -2654,11 +2661,22 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 		return wrapped, err
 	}
 	if list, ok := expr.(*checker.ListLiteral); ok {
-		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeList {
-			return fl.lowerListLiteral(expected, list, expectedInfo.Elem)
+		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo {
+			if expectedInfo.Kind == TypeList {
+				return fl.lowerListLiteral(expected, list, expectedInfo.Elem)
+			}
+			// A list literal against a named Go slice type keeps the named
+			// type so the composite literal is spelled with it.
+			if expectedInfo.Kind == TypeForeignType && !expectedInfo.ForeignPointer && expectedInfo.Elem != NoType {
+				return fl.lowerListLiteral(expected, list, expectedInfo.Elem)
+			}
 		}
 	}
 	if m, ok := expr.(*checker.MapLiteral); ok {
+		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeForeignType && !expectedInfo.ForeignPointer && expectedInfo.Key != NoType && expectedInfo.Value != NoType {
+			// A map literal against a named Go map type keeps the named type.
+			return fl.lowerMapLiteral(expected, m, expectedInfo.Key, expectedInfo.Value)
+		}
 		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeMap {
 			return fl.lowerMapLiteral(expected, m, expectedInfo.Key, expectedInfo.Value)
 		}
@@ -4774,7 +4792,7 @@ func (fl *functionLowerer) lowerListMethod(typeID TypeID, method *checker.ListMe
 		return nil, err
 	}
 	listType, ok := fl.l.typeInfo(target.Type)
-	if !ok || listType.Kind != TypeList {
+	if !ok || (listType.Kind != TypeList && !(listType.Kind == TypeForeignType && listType.Elem != NoType)) {
 		return nil, fmt.Errorf("List method lowered with non-list subject %s", method.Subject.Type().String())
 	}
 
