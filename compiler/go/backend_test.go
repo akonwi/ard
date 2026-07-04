@@ -4330,3 +4330,36 @@ func TestRunProgramExecutesNamedGoTypeIdentities(t *testing.T) {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+
+// list push supports struct-field targets, including fields reached through a
+// mutable reference, lowering to `x.F = append(x.F, v)`.
+func TestRunProgramExecutesListPushOnStructField(t *testing.T) {
+	program := lowerSource(t, `
+		struct Log {
+			entries: [Str],
+		}
+
+		fn add(mut log: Log, entry: Str) {
+			log.entries.push(entry)
+		}
+
+		fn main() {
+			mut log = Log{entries: []}
+			add(log, "one")
+			log.entries.push("two")
+			if log.entries.size() != 2 {
+				panic("expected 2 entries")
+			}
+			if log.entries.at(0) != "one" {
+				panic("expected first entry")
+			}
+			if log.entries.at(1) != "two" {
+				panic("expected second entry")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}

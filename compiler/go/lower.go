@@ -6540,8 +6540,8 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("list push missing target")
 	}
-	if expr.Target.Kind != air.ExprLoadLocal {
-		return loweredExpr{}, fmt.Errorf("list push currently requires local target")
+	if expr.Target.Kind != air.ExprLoadLocal && expr.Target.Kind != air.ExprGetField {
+		return loweredExpr{}, fmt.Errorf("list push requires an addressable local or field target")
 	}
 	if len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("list push expects one arg")
@@ -6560,9 +6560,20 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	target := l.localValueExpr(fn, expr.Target.Local)
+	var target ast.Expr
+	var targetStmts []ast.Stmt
+	if expr.Target.Kind == air.ExprLoadLocal {
+		target = l.localValueExpr(fn, expr.Target.Local)
+	} else {
+		loweredTarget, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		target = loweredTarget.expr
+		targetStmts = loweredTarget.stmts
+	}
 	valueExpr := value.expr
-	stmts := append([]ast.Stmt{}, value.stmts...)
+	stmts := append(append([]ast.Stmt{}, targetStmts...), value.stmts...)
 	if validTypeID(l.program, expr.Target.Type) {
 		if info := l.program.Types[expr.Target.Type-1]; info.Kind == air.TypeList && l.isVoidType(info.Elem) {
 			stmts = l.appendVoidValueEval(stmts, valueExpr)
