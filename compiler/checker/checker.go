@@ -1386,6 +1386,12 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	if foreignScalarNarrows(expected, actual) {
 		return true
 	}
+	// The reverse direction: a Str or Bool value widens into a foreign named
+	// scalar type where the Go conversion is total (e.g. "demo.quit" flows
+	// into a ui::IntentType parameter, field, or map key).
+	if foreignScalarWidens(expected, actual) {
+		return true
+	}
 	if trait, ok := expected.(*Trait); ok {
 		return actual.hasTrait(trait)
 	}
@@ -1505,7 +1511,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 			// The impl method's signature becomes the generated Go method's
 			// signature, so the foreign scalar narrowing coercion cannot apply:
 			// the Go types must line up for interface satisfaction.
-			if !c.areCompatible(expectedType, paramType) || foreignScalarNarrows(expectedType, paramType) || foreignFuncCoerces(expectedType, paramType) {
+			if !c.areCompatible(expectedType, paramType) || foreignScalarNarrows(expectedType, paramType) || foreignScalarWidens(expectedType, paramType) || foreignFuncCoerces(expectedType, paramType) {
 				c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
 				valid = false
 			}
@@ -1523,7 +1529,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 				valid = false
 			}
 		}
-		if returnType != nil && (!c.areCompatible(interfaceMethod.ReturnType, returnType) || foreignScalarNarrows(interfaceMethod.ReturnType, returnType) || foreignFuncCoerces(interfaceMethod.ReturnType, returnType)) {
+		if returnType != nil && (!c.areCompatible(interfaceMethod.ReturnType, returnType) || foreignScalarNarrows(interfaceMethod.ReturnType, returnType) || foreignScalarWidens(interfaceMethod.ReturnType, returnType) || foreignFuncCoerces(interfaceMethod.ReturnType, returnType)) {
 			c.addError(fmt.Sprintf("Go interface method '%s' has return type of %s", method.Name, interfaceMethod.ReturnType), method.GetLocation())
 			valid = false
 		}
@@ -4936,6 +4942,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					continue
 				}
 
+				// A foreign named scalar stringifies as its underlying primitive
+				// (e.g. term::EventTitle interpolates as its Str value).
+				if prim := foreignScalarPrimitive(cx.Type()); prim != nil {
+					cx = &ForeignScalarConvert{Value: cx, Target: prim}
+				}
+
 				// If chunk is a string, use it directly
 				if cx.Type() == Str {
 					chunks[i] = cx
@@ -5211,8 +5223,19 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				if call, ok := c.checkFunctionFieldCall(subj, s.Method, s.GetLocation()); ok {
 					return call
 				}
-				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Method.Name), s.Method.GetLocation())
-				return nil
+				// A foreign named scalar with no Go method of this name falls back
+				// to its underlying primitive's methods (e.g. EventTitle.to_str()).
+				// Real Go methods on the named type still win above.
+				if prim := foreignScalarPrimitive(subj.Type()); prim != nil {
+					if primSig := prim.get(s.Method.Name); primSig != nil {
+						subj = &ForeignScalarConvert{Value: subj, Target: prim}
+						sig = primSig
+					}
+				}
+				if sig == nil {
+					c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Method.Name), s.Method.GetLocation())
+					return nil
+				}
 			}
 
 			fnDef, ok := sig.(*FunctionDef)
@@ -5571,8 +5594,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						rightInner := rightMaybe.Of()
 						maybeEqualityCompatible := func(expected Type, actual Type) bool {
 							// Equality lowering has no coercion point, so the foreign
-							// scalar narrowing coercion does not apply here.
-							return c.areCompatible(expected, actual) && !foreignScalarNarrows(expected, actual)
+							// scalar coercions do not apply here.
+							return c.areCompatible(expected, actual) && !foreignScalarNarrows(expected, actual) && !foreignScalarWidens(expected, actual)
 						}
 						if leftInner != Void && rightInner != Void && !maybeEqualityCompatible(leftInner, rightInner) && !maybeEqualityCompatible(rightInner, leftInner) {
 							c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
@@ -5758,6 +5781,36 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					return nil
 				}
 				if fnDef == nil {
+					// `pkg::T(x)` where T is a foreign named scalar type is an
+					// explicit conversion to the named type, e.g. ui::IntentType(s).
+					// Once T is known to be such a type, commit to the conversion so
+					// a mismatched argument reports a clear error.
+					if named, ok := goPkg.Types[name]; ok && len(s.Function.TypeArgs) == 0 {
+						if prim := foreignScalarPrimitive(named); prim != nil {
+							if len(s.Function.Args) != 1 {
+								c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 1, got %d", len(s.Function.Args)), s.GetLocation())
+								return nil
+							}
+							arg := c.checkExprAs(s.Function.Args[0].Value, prim)
+							if arg == nil {
+								return nil
+							}
+							// Identity conversion is a no-op, matching Go.
+							if named.equal(arg.Type()) {
+								return arg
+							}
+							if prim.equal(arg.Type()) {
+								return &ForeignScalarConvert{Value: arg, Target: named}
+							}
+							// Another foreign scalar with the same underlying converts
+							// through the primitive, lowering to T(string(x)).
+							if foreignScalarNarrows(prim, arg.Type()) {
+								return &ForeignScalarConvert{Value: &ForeignScalarConvert{Value: arg, Target: prim}, Target: named}
+							}
+							c.addError(typeMismatch(prim, arg.Type()), s.Function.Args[0].GetLocation())
+							return nil
+						}
+					}
 					if reason, ok := goPkg.UnsupportedFunctions[name]; ok {
 						c.addError(fmt.Sprintf("Unsupported Go function %s::%s: %s", modName, name, reason), s.GetLocation())
 					} else {
@@ -7477,6 +7530,50 @@ func foreignScalarNarrows(expected Type, actual Type) bool {
 	return ok && !foreign.Pointer && foreign.Underlying != nil && isPrimitiveScalar(expected) && foreign.Underlying.equal(expected)
 }
 
+// foreignScalarWidens reports whether actual is a primitive that satisfies
+// expected only through the widening coercion into a foreign named scalar
+// type (e.g. Str -> ui::IntentType). Restricted to Str and Bool underlyings,
+// where the Go conversion is total; numeric widenings could truncate and stay
+// explicit. Like narrowing, the coercion produces a converted value, so
+// mutable places and identity contexts must reject it.
+func foreignScalarWidens(expected Type, actual Type) bool {
+	foreign, ok := expected.(*ForeignType)
+	if !ok || foreign.Pointer || foreign.Interface || foreign.Struct || foreign.Underlying == nil {
+		return false
+	}
+	if !foreign.Underlying.equal(Str) && !foreign.Underlying.equal(Bool) {
+		return false
+	}
+	return foreign.Underlying.equal(actual)
+}
+
+// ValidForeignScalarConversion reports whether a ForeignScalarConvert between
+// the two types is a supported foreign-scalar coercion in either direction.
+// The AIR lowering asserts this so future widening of the checker-side gates
+// cannot silently emit an unchecked Go conversion.
+func ValidForeignScalarConversion(from, to Type) bool {
+	if prim := foreignScalarPrimitive(from); prim != nil && prim.equal(to) {
+		return true
+	}
+	if prim := foreignScalarPrimitive(to); prim != nil && prim.equal(from) {
+		return true
+	}
+	return false
+}
+
+// foreignScalarPrimitive returns the underlying Ard primitive of a foreign
+// named scalar type, or nil when t is not one.
+func foreignScalarPrimitive(t Type) Type {
+	foreign, ok := t.(*ForeignType)
+	if !ok || foreign.Pointer || foreign.Interface || foreign.Struct || foreign.Underlying == nil {
+		return nil
+	}
+	if !isPrimitiveScalar(foreign.Underlying) {
+		return nil
+	}
+	return foreign.Underlying
+}
+
 // foreignFuncCoerces reports whether compatibility between expected and actual
 // relies on the named/unnamed Go func coercion in either direction. Contexts
 // that require exact Go type identity (such as Go interface conformance)
@@ -8355,7 +8452,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// requires an addressable mutable place; a call-site `mut` marker no longer
 		// requests a defensive copy.
 		if fnDefCopy.Parameters[i].Mutable {
-			if !c.isMutable(checkedArg) || foreignScalarNarrows(paramType, checkedArg.Type()) {
+			if !c.isMutable(checkedArg) || foreignScalarNarrows(paramType, checkedArg.Type()) || foreignScalarWidens(paramType, checkedArg.Type()) {
 				c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDefCopy.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
 				return nil, nil
 			}

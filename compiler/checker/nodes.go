@@ -193,6 +193,16 @@ func (i *InstanceProperty) String() string {
 	return fmt.Sprintf("%s.%s", i.Subject, i.Property)
 }
 
+// ForeignScalarConvert converts a value between a foreign named scalar type
+// and its underlying Ard primitive, in either direction. It lowers to an
+// explicit Go conversion such as string(t) or ui.IntentType(s).
+type ForeignScalarConvert struct {
+	Value  Expression
+	Target Type
+}
+
+func (f *ForeignScalarConvert) Type() Type { return f.Target }
+
 type ForeignFieldAccess struct {
 	Subject Expression
 	Target  string

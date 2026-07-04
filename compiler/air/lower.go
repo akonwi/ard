@@ -2650,6 +2650,9 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 	if wrapped, ok, err := fl.lowerForeignScalarNarrowIfNeeded(expr, expected); ok || err != nil {
 		return wrapped, err
 	}
+	if wrapped, ok, err := fl.lowerForeignScalarWidenIfNeeded(expr, expected); ok || err != nil {
+		return wrapped, err
+	}
 	if list, ok := expr.(*checker.ListLiteral); ok {
 		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeList {
 			return fl.lowerListLiteral(expected, list, expectedInfo.Elem)
@@ -3032,6 +3035,37 @@ func (fl *functionLowerer) lowerForeignScalarNarrowIfNeeded(expr checker.Express
 	}
 	underlyingID, err := fl.internType(foreign.Underlying)
 	if err != nil || underlyingID != expected {
+		return nil, false, nil
+	}
+	value, err := fl.lowerExpr(expr)
+	if err != nil {
+		return nil, true, err
+	}
+	return &Expr{Kind: ExprScalarConvert, Type: expected, Target: value}, true, nil
+}
+
+// lowerForeignScalarWidenIfNeeded converts a primitive Str or Bool value into
+// an expected foreign named scalar type, lowering to an explicit Go conversion
+// such as ui.IntentType(s).
+func (fl *functionLowerer) lowerForeignScalarWidenIfNeeded(expr checker.Expression, expected TypeID) (*Expr, bool, error) {
+	foreign, ok := expr.Type().(*checker.ForeignType)
+	if ok && !foreign.Pointer {
+		// Already the foreign type (or another foreign type); nothing to widen.
+		return nil, false, nil
+	}
+	expectedForeign, ok := fl.l.typeInfo(expected)
+	if !ok || expectedForeign.Kind != TypeForeignType || expectedForeign.ForeignPointer || expectedForeign.ForeignInterface {
+		return nil, false, nil
+	}
+	if expectedForeign.Value == NoType || expectedForeign.Key != NoType {
+		return nil, false, nil
+	}
+	underlyingInfo, ok := fl.l.typeInfo(expectedForeign.Value)
+	if !ok || (underlyingInfo.Kind != TypeStr && underlyingInfo.Kind != TypeBool) {
+		return nil, false, nil
+	}
+	actual, err := fl.internType(expr.Type())
+	if err != nil || actual != expectedForeign.Value {
 		return nil, false, nil
 	}
 	value, err := fl.lowerExpr(expr)
@@ -3826,6 +3860,15 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			fields = append(fields, StructFieldValue{Name: name, Value: *value})
 		}
 		return &Expr{Kind: ExprForeignStructInstance, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Name, Fields: fields}, nil
+	case *checker.ForeignScalarConvert:
+		if !checker.ValidForeignScalarConversion(e.Value.Type(), e.Target) {
+			return nil, fmt.Errorf("unsupported foreign scalar conversion: %s -> %s", e.Value.Type().String(), e.Target.String())
+		}
+		target, err := fl.lowerExpr(e.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprScalarConvert, Type: typeID, Target: target}, nil
 	case *checker.ForeignFieldAccess:
 		target, err := fl.lowerExpr(e.Subject)
 		if err != nil {

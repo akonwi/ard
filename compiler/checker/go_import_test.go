@@ -607,6 +607,126 @@ fn main() {
 	})
 }
 
+func TestForeignScalarWideningAndArdSites(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Str widens into a foreign string newtype parameter",
+			input: `use go:encoding/json
+
+fn take(n: json::Number) Str {
+  "got"
+}
+
+fn main() {
+  let _ = take("42")
+}`,
+		},
+		{
+			name: "Str widens into foreign string newtype map keys",
+			input: `use go:encoding/json
+
+fn main() {
+  let m: [json::Number: Int] = ["a": 1]
+  let _ = m.get("a")
+}`,
+		},
+		{
+			name: "foreign string newtype interpolates as its underlying Str",
+			input: `use go:encoding/json
+
+fn show(n: json::Number) Str {
+  "{n}"
+}`,
+		},
+		{
+			name: "foreign string newtype falls back to primitive methods",
+			input: `use go:encoding/json
+
+fn size(n: json::Number) Int {
+  n.size()
+}`,
+		},
+		{
+			name: "real Go methods on the newtype win over primitive fallback",
+			input: `use go:encoding/json
+
+fn as_float(n: json::Number) Float64!Str {
+  n.Float64()
+}`,
+		},
+		{
+			name: "pkg::T(x) converts a Str into the foreign newtype",
+			input: `use go:encoding/json
+
+fn main() {
+  let n: json::Number = json::Number("42")
+}`,
+		},
+		{
+			name: "pkg::T(x) accepts an identity conversion",
+			input: `use go:encoding/json
+
+fn main() {
+  let n = json::Number("42")
+  let again: json::Number = json::Number(n)
+}`,
+		},
+		{
+			name: "pkg::T(x) converts between foreign scalars sharing an underlying",
+			input: `use go:html/template
+
+fn main() {
+  let js = template::JS("1")
+  let html: template::HTML = template::HTML(js)
+}`,
+		},
+		{
+			name: "pkg::T(x) rejects a second argument",
+			input: `use go:encoding/json
+
+fn main() {
+  let _ = json::Number("4", "2")
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 1, got 2"}},
+		},
+		{
+			name: "pkg::T(x) rejects a mismatched argument",
+			input: `use go:encoding/json
+
+fn main() {
+  let _ = json::Number(42)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"}},
+		},
+		{
+			name: "Int does not widen into a numeric foreign scalar implicitly",
+			input: `use go:time
+
+fn take(month: time::Month) Bool {
+  month == time::January
+}
+
+fn main() {
+  let _ = take(1)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected time::Month, got Int"}},
+		},
+		{
+			name: "Str is rejected for a mutable foreign newtype parameter",
+			input: `use go:encoding/json
+
+fn rewrite(mut n: json::Number) {
+}
+
+fn main() {
+  mut s = "42"
+  rewrite(s)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected a mutable json::Number"}},
+		},
+	})
+}
+
 func TestForeignNamedScalarsSupportEquality(t *testing.T) {
 	run(t, []test{
 		{

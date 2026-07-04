@@ -1758,6 +1758,39 @@ func TestRunProgramExecutesSimpleMain(t *testing.T) {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+func TestRunProgramExecutesForeignScalarWideningSites(t *testing.T) {
+	program := lowerSource(t, `
+		use go:encoding/json
+
+		fn take(n: json::Number) Str {
+			"{n}"
+		}
+
+		fn main() {
+			let n = json::Number("42")
+			let identity: json::Number = json::Number(n)
+			let narrowed: Str = identity
+			if narrowed != "42" {
+				panic("narrowed={narrowed}")
+			}
+			if take("7") != "7" {
+				panic("widened param failed")
+			}
+			if n.to_str() != "42" {
+				panic("primitive method fallback failed")
+			}
+			let m: [json::Number: Int] = ["a": 1]
+			if m.get("a").expect("missing key") != 1 {
+				panic("widened map key failed")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramSupportsStatementProducingGlobalInitializers(t *testing.T) {
 	program := lowerSource(t, `
 		mut selected = match true {
