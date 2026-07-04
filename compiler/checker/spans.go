@@ -13,7 +13,17 @@ import (
 // See docs/adrs/0043-rebuild-lsp-on-snapshot-analysis.md.
 type SpanIndex struct {
 	records []SpanRecord
+	seen    map[spanDedupKey]bool
 	sorted  bool
+}
+
+// spanDedupKey identifies a record by position and checked node so the same
+// resolution recorded through both checkExpr and checkExprAs (or through
+// re-checks) collapses to one entry. Reference counts (ByKey) depend on this.
+type spanDedupKey struct {
+	loc  parse.Location
+	node Expression
+	key  any
 }
 
 // SpanRecord ties a source span to its checked node and an optional identity
@@ -105,6 +115,14 @@ func (i *SpanIndex) add(rec SpanRecord) {
 	if !locValid(rec.Loc) {
 		return
 	}
+	dedup := spanDedupKey{loc: rec.Loc, node: rec.Node, key: rec.Key}
+	if i.seen == nil {
+		i.seen = map[spanDedupKey]bool{}
+	}
+	if i.seen[dedup] {
+		return
+	}
+	i.seen[dedup] = true
 	i.records = append(i.records, rec)
 	i.sorted = false
 }
@@ -232,6 +250,13 @@ func (c *Checker) recordExprSpan(source parse.Expression, node Expression) {
 	// Derive member targets centrally so method calls navigate to their
 	// definitions. The precise method-name sub-span comes from the parse node
 	// when available.
+	if _, _, ok := BuiltinMethodInfo(node); ok {
+		// Builtin method: narrow to the method-name sub-span for precise
+		// hover/definition anchoring.
+		if parsed, ok := source.(*parse.InstanceMethod); ok {
+			rec.Loc = parsed.Method.GetLocation()
+		}
+	}
 	if im, ok := node.(*InstanceMethod); ok && im.Method != nil {
 		var subjType Type
 		if im.StructType != nil {
@@ -380,6 +405,9 @@ func (c *Checker) spansTruncate(mark int) {
 		return
 	}
 	if mark < len(c.spans.records) {
+		for _, rec := range c.spans.records[mark:] {
+			delete(c.spans.seen, spanDedupKey{loc: rec.Loc, node: rec.Node, key: rec.Key})
+		}
 		c.spans.records = c.spans.records[:mark]
 	}
 }

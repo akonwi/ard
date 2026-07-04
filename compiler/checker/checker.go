@@ -7879,6 +7879,14 @@ func (c *Checker) intLiteralFitsType(value int64, t Type) bool {
 }
 
 func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expression {
+	result := c.checkExprAsInner(expr, expectedType)
+	if result != nil {
+		c.recordExprSpan(expr, result)
+	}
+	return result
+}
+
+func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type) Expression {
 	if literal := c.checkNumericLiteralAs(expr, expectedType); literal != nil {
 		return literal
 	}

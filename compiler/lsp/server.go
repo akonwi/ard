@@ -426,7 +426,12 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		if !ok {
 			return
 		}
-		info = computeHover(doc.Text, filePath, params.Position)
+		// Span-table rendering first (ADR 0043); legacy heuristics fall back
+		// during the migration.
+		info = s.hoverFromSpans(params.TextDocument.URI, params.Position)
+		if info == nil {
+			info = computeHover(doc.Text, filePath, params.Position)
+		}
 	}()
 
 	if info == nil || info.content == "" {

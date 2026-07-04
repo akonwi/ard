@@ -309,3 +309,24 @@ func writeFileT(t *testing.T, dir, name, content string) {
 		t.Fatal(err)
 	}
 }
+
+func TestSpansDedupExpectedTypeContexts(t *testing.T) {
+	// Typed contexts route through checkExprAs; the recording wrappers on
+	// both checkExpr and checkExprAs must not double-count references.
+	spans := checkWithSpans(t, `fn main() {
+  let n = 1
+  let typed: Int = n
+  let other = n
+}
+`)
+	key := keyAt(t, spans, parse.Point{Row: 3, Col: 20})
+	refs := 0
+	for _, rec := range spans.ByKey(key) {
+		if !rec.IsDef {
+			refs++
+		}
+	}
+	if refs != 2 {
+		t.Fatalf("expected exactly 2 uses of n, got %d (double recording?)", refs)
+	}
+}
