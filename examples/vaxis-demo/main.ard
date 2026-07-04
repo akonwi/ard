@@ -810,7 +810,7 @@ fn lists_page(c: mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
                 EstimatedItemExtent: 2,
                 Overscan: 8,
                 Builder: fn(bctx: ui::BuildContext, i: Int) ui::Widget {
-                  chat_message(i, s.logs.at(i))
+                  chat_message(i, s.logs.at(i).or(""))
                 },
               },
             ],

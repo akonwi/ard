@@ -482,7 +482,7 @@ func TestTry(t *testing.T) {
 
 				fn do_stuff(stuff: [Int]) Int!Str {
 					for i in 0..stuff.size() {
-						let processed = try process(stuff.at(i)) -> err {
+						let processed = try process(stuff.at(i).expect("bounds")) -> err {
 							Result::err("Failed: {err}")
 						}
 					}

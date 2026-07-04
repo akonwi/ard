@@ -4805,7 +4805,7 @@ func (fl *functionLowerer) lowerListMethod(typeID TypeID, method *checker.ListMe
 	var expected []TypeID
 	switch method.Kind {
 	case checker.ListAt:
-		kind = ExprListAt
+		kind = ExprListAtChecked
 		expected = []TypeID{intType}
 	case checker.ListPrepend:
 		kind = ExprListPrepend

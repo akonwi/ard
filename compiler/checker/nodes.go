@@ -444,7 +444,7 @@ func (m *ListMethod) Type() Type {
 	// Fallback to computed type (for backwards compatibility)
 	switch m.Kind {
 	case ListAt:
-		return m.ElementType
+		return MakeMaybe(m.ElementType)
 	case ListPrepend, ListPush:
 		return MakeList(m.ElementType)
 	case ListSet:

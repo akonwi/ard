@@ -1097,12 +1097,12 @@ func TestRunProgramExecutesGoSliceFunctionCalls(t *testing.T) {
 		fn main() {
 			mut values = [3, 1, 2]
 			sort::Ints(values)
-			if values.at(0) != 1 {
+			if values.at(0).expect("bounds") != 1 {
 				panic("not sorted")
 			}
 
 			let parts = strings::Split("a,b", ",")
-			if parts.size() != 2 or parts.at(0) != "a" {
+			if parts.size() != 2 or parts.at(0).expect("bounds") != "a" {
 				panic("bad split")
 			}
 		}
@@ -1758,6 +1758,44 @@ func TestRunProgramExecutesSimpleMain(t *testing.T) {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+func TestRunProgramBoundsChecksListAt(t *testing.T) {
+	program := lowerSource(t, `
+		fn main() {
+			let xs = [10, 20, 30]
+			if xs.at(1).expect("bounds") != 20 {
+				panic("in-bounds at failed")
+			}
+			if xs.at(3).is_some() or xs.at(-1).is_some() {
+				panic("out-of-bounds at should be none")
+			}
+
+			// Lists of Maybe elements: for-loop desugaring keeps raw indexing
+			// while user-facing at produces a nested Maybe.
+			mut maybes: [Int?] = []
+			maybes.push(["a": 1].get("a"))
+			maybes.push(["a": 1].get("b"))
+			mut sum = 0
+			for m in maybes {
+				sum = sum + m.or(0)
+			}
+			if sum != 1 {
+				panic("maybe-element loop sum = {sum}")
+			}
+			let nested = maybes.at(0)
+			if nested.is_none() or nested.or(["a": 1].get("b")).or(-1) != 1 {
+				panic("nested maybe at failed")
+			}
+			if maybes.at(9).is_some() {
+				panic("out-of-bounds maybe-element at should be none")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesArdGenericStructLiteralTypeArgs(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box<$T> {
@@ -1805,8 +1843,8 @@ func TestRunProgramExecutesNamedGoContainerTypes(t *testing.T) {
 			// and fresh literals passing to mutable Go slice params.
 			mut nums: sort::IntSlice = [3, 1, 2]
 			nums.Sort()
-			if nums.at(0) != 1 or nums.at(2) != 3 or nums.size() != 3 {
-				panic("sorted named slice wrong: {nums.at(0)} {nums.at(1)} {nums.at(2)}")
+			if nums.at(0).expect("bounds") != 1 or nums.at(2).expect("bounds") != 3 or nums.size() != 3 {
+				panic("sorted named slice wrong: {nums.at(0).or(-1)} {nums.at(1).or(-1)} {nums.at(2).or(-1)}")
 			}
 			sort::Ints([2, 1])
 
@@ -1904,8 +1942,8 @@ func TestRunProgramSupportsMutableModuleGlobals(t *testing.T) {
 			if items.size() != 3 {
 				panic("expected 3 items, got {items.size()}")
 			}
-			if items.at(0) != "start" or items.at(1) != "n1" or items.at(2) != "n2" {
-				panic("unexpected items {items.at(0)} {items.at(1)} {items.at(2)}")
+			if items.at(0).expect("bounds") != "start" or items.at(1).expect("bounds") != "n1" or items.at(2).expect("bounds") != "n2" {
+				panic("unexpected items {items.at(0).or(\"?\")} {items.at(1).or(\"?\")} {items.at(2).or(\"?\")}")
 			}
 		}
 	`)
@@ -2426,7 +2464,7 @@ func TestRunProgramSpecializesGenericEmptyListLocal(t *testing.T) {
 
 		fn main() Bool {
 			let dropped = drop([1, 2, 3], 1)
-			dropped.size() == 2 and dropped.at(0) == 2
+			dropped.size() == 2 and dropped.at(0).expect("bounds") == 2
 		}
 	`)
 
@@ -2936,7 +2974,7 @@ func TestLowerProgramSupportsCapturedClosureSort(t *testing.T) {
 			items.sort(fn(a: Int, b: Int) Bool {
 				a + bias < b + bias
 			})
-			items.at(0)
+			items.at(0).expect("bounds")
 		}
 	`)
 
@@ -3495,7 +3533,7 @@ func TestLowerProgramSupportsListSwapAndMapKeys(t *testing.T) {
 			items.swap(0, 2)
 			let values = ["b": 2, "a": 1]
 			let keys = values.keys()
-			items.at(0) + keys.size()
+			items.at(0).expect("bounds") + keys.size()
 		}
 	`)
 
@@ -4507,10 +4545,10 @@ func TestRunProgramExecutesListPushOnStructField(t *testing.T) {
 			if log.entries.size() != 2 {
 				panic("expected 2 entries")
 			}
-			if log.entries.at(0) != "one" {
+			if log.entries.at(0).expect("bounds") != "one" {
 				panic("expected first entry")
 			}
-			if log.entries.at(1) != "two" {
+			if log.entries.at(1).expect("bounds") != "two" {
 				panic("expected second entry")
 			}
 		}

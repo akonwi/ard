@@ -521,10 +521,12 @@ func (l List) String() string {
 func (l List) get(name string) Type {
 	switch name {
 	case "at":
+		// Bounds-checked access, symmetric with Str.at: Some(element) when the
+		// index is in range, None otherwise.
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "index", Type: Int}},
-			ReturnType: l.of,
+			ReturnType: MakeMaybe(l.of),
 		}
 	case "prepend":
 		return &FunctionDef{

@@ -638,7 +638,7 @@ func TestLowerContextualMaybeTypesInNestedExpressions(t *testing.T) {
 		fn pick(choices: [Any]) Any? {
 			let first_choice = match choices.size() {
 				0 => maybe::none(),
-				_ => maybe::some(choices.at(0)),
+				_ => maybe::some(choices.at(0).expect("bounds")),
 			}
 			let choice = try first_choice -> _ { maybe::none() }
 			maybe::some(choice)

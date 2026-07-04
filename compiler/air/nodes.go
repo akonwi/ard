@@ -80,6 +80,10 @@ const (
 	// Unmarshal into the result's value type. Target is the input string.
 	ExprJSONParse
 	ExprListAt
+	// ExprListAtChecked is the user-facing list.at: a bounds-checked access
+	// producing Maybe(elem). ExprListAt is raw indexing used by internal
+	// desugaring such as for-loop lowering.
+	ExprListAtChecked
 	ExprListPrepend
 	ExprListPush
 	ExprListSet

@@ -32,7 +32,7 @@ func TestGoTargetParityRecursiveStructFields(t *testing.T) {
 				struct Node { value: Int, children: [Node] }
 				fn main() Int {
 					let root = Node{value: 1, children: [Node{value: 2, children: []}]}
-					root.children.at(0).value
+					root.children.at(0).expect("bounds").value
 				}
 			`,
 		},
@@ -1584,7 +1584,7 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 			snapshot.view.set(59)
 			let snapshot_observed = direct_leaf.n
 			let view_list: [View] = [direct_node.view]
-			view_list.at(0).set(61)
+			view_list.at(0).expect("bounds").set(61)
 			let list_observed = direct_leaf.n
 			let view_map: [Str:View] = ["x": direct_node.view]
 			view_map.get("x").expect("missing").set(67)
@@ -1603,15 +1603,15 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 			let union_observed = direct_leaf.n
 			mut push_views: [View] = []
 			push_views.push(direct_node.view)
-			push_views.at(0).set(75)
+			push_views.at(0).expect("bounds").set(75)
 			let push_observed = direct_leaf.n
 			mut prepend_views: [View] = []
 			prepend_views.prepend(direct_node.view)
-			prepend_views.at(0).set(77)
+			prepend_views.at(0).expect("bounds").set(77)
 			let prepend_observed = direct_leaf.n
 			mut set_views: [View] = [Leaf{n: 1}]
 			set_views.set(0, direct_node.view)
-			set_views.at(0).set(79)
+			set_views.at(0).expect("bounds").set(79)
 			let set_observed = direct_leaf.n
 			mut set_map: [Str:View] = [:]
 			set_map.set("x", direct_node.view)
@@ -1834,7 +1834,7 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 			fn main() Int {
 				mut values: [Int] = [0]
 				replace_first(values)
-				values.at(0)
+				values.at(0).expect("bounds")
 			}
 		`)
 		if got := runGoTargetParityJSON(t, program); got != "1" {
@@ -1963,6 +1963,10 @@ func TestGoTargetParityStringHelpers(t *testing.T) {
 		{name: "str at uses rune index", input: `fn main() Str { "hé".at(1).expect("missing").to_str() }`},
 		{name: "str at out of bounds returns none", input: `fn main() Bool { "hello".at(5).is_none() }`},
 		{name: "str at negative returns none", input: `fn main() Bool { "hello".at(-1).is_none() }`},
+		{name: "list at returns element", input: `fn main() Int { [10, 20, 30].at(1).expect("missing") }`},
+		{name: "list at out of bounds returns none", input: `fn main() Bool { [10, 20, 30].at(3).is_none() }`},
+		{name: "list at negative returns none", input: `fn main() Bool { [10, 20, 30].at(-1).is_none() }`},
+		{name: "list at falls back to a default", input: `fn main() Int { [10].at(9).or(-1) }`},
 		{name: "str trim", input: `fn main() Str { "  hello \n".trim() }`},
 		{name: "str is empty", input: `fn main() Bool { "".is_empty() }`},
 	})
@@ -2151,7 +2155,7 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 				fn main() Int {
 					mut list = [1,2,3]
 					list.push(4)
-					list.at(3)
+					list.at(3).expect("bounds")
 				}
 			`,
 		},
@@ -2161,7 +2165,7 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 				fn main() Int {
 					mut list = [1,2,3]
 					list.set(1, 10)
-					list.at(1)
+					list.at(1).expect("bounds")
 				}
 			`,
 		},
@@ -2171,7 +2175,7 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 				fn main() Int {
 					mut list = [1,2,3]
 					list.swap(0,2)
-					list.at(0)
+					list.at(0).expect("bounds")
 				}
 			`,
 		},

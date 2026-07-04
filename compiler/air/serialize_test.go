@@ -12,7 +12,7 @@ func TestSerializeProgram(t *testing.T) {
 	result := parse.Parse([]byte(`
 		fn main() Int {
 			let values = [20, 22]
-			values.at(0) + values.at(1)
+			values.at(0).expect("bounds") + values.at(1).expect("bounds")
 		}
 	`), "main.ard")
 	if len(result.Errors) > 0 {

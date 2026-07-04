@@ -2445,6 +2445,56 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		stmts := append(target.stmts, index.stmts...)
 		return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: target.expr, Index: index.expr}}, nil
+	case air.ExprListAtChecked:
+		// User-facing list.at: a bounds-checked access producing Maybe(elem).
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("list at missing target")
+		}
+		if len(expr.Args) != 1 {
+			return loweredExpr{}, fmt.Errorf("list at expects one arg")
+		}
+		if !validTypeID(l.program, expr.Type) || l.program.Types[expr.Type-1].Kind != air.TypeMaybe {
+			return loweredExpr{}, fmt.Errorf("checked list at lowered with non-Maybe type %d", expr.Type)
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		index, err := l.lowerExpr(fn, expr.Args[0])
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts := append(target.stmts, index.stmts...)
+		resultTemp := l.nextTemp()
+		decls, err := l.declareTemp(expr.Type, resultTemp)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, decls...)
+		sliceTemp := l.nextTemp()
+		indexTemp := l.nextTemp()
+		stmts = append(stmts,
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(sliceTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{target.expr}},
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(indexTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{index.expr}},
+		)
+		cond := &ast.BinaryExpr{
+			X:  &ast.BinaryExpr{X: ast.NewIdent(indexTemp), Op: token.LSS, Y: &ast.BasicLit{Kind: token.INT, Value: "0"}},
+			Op: token.LOR,
+			Y:  &ast.BinaryExpr{X: ast.NewIdent(indexTemp), Op: token.GEQ, Y: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{ast.NewIdent(sliceTemp)}}},
+		}
+		elemTypeID := l.program.Types[expr.Type-1].Elem
+		elemType, err := l.goType(elemTypeID)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		noneCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "None"), Index: elemType}}
+		someCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: elemType}, Args: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(sliceTemp), Index: ast.NewIdent(indexTemp)}}}
+		stmts = append(stmts, &ast.IfStmt{
+			Cond: cond,
+			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneCall}}}},
+			Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{someCall}}}},
+		})
+		return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
 	case air.ExprListPush:
 		return l.lowerListPush(fn, expr)
 	case air.ExprListPrepend:

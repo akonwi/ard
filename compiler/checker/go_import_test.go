@@ -1138,7 +1138,7 @@ fn build() sort::IntSlice {
 			name: "named Go slices expose list methods",
 			input: `use go:sort
 fn peek(nums: sort::IntSlice) Int {
-  nums.at(0) + nums.size()
+  nums.at(0).expect("bounds") + nums.size()
 }`,
 		},
 		{
