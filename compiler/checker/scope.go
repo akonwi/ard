@@ -40,13 +40,14 @@ func makeScope(parent *SymbolTable) SymbolTable {
 	}
 }
 
-func (st *SymbolTable) add(name string, type_ Type, mutable bool) {
+func (st *SymbolTable) add(name string, type_ Type, mutable bool) *Symbol {
 	sym := Symbol{
 		Name:    name,
 		Type:    type_,
 		mutable: mutable,
 	}
 	st.symbols[name] = &sym
+	return &sym
 }
 
 func (st SymbolTable) get(name string) (*Symbol, bool) {

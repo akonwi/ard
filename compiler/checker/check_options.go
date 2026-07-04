@@ -11,6 +11,10 @@ type CheckOptions struct {
 	ModulePath string
 	Target     TargetInfo
 	GoResolver GoPackageResolver
+	// RecordSpans makes the checker record a position-indexed table of
+	// resolved source spans for tooling (see SpanIndex). Off for normal
+	// compilation.
+	RecordSpans bool
 }
 
 func normalizeCheckOptions(options []CheckOptions) CheckOptions {

@@ -313,6 +313,7 @@ type Checker struct {
 	matchArmDiscardContext            bool
 	reportedMapKeyErrors              map[parse.Location]bool
 	goTypesContext                    *gotypes.Context
+	spans                             *SpanIndex
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -338,6 +339,9 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 		},
 		scope:          &rootScope,
 		goTypesContext: gotypes.NewContext(),
+	}
+	if checkOptions.RecordSpans {
+		c.spans = &SpanIndex{}
 	}
 
 	return c
@@ -2107,7 +2111,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				Value:   val,
 				__type:  __type,
 			}
-			c.scope.add(v.Name, v.__type, v.Mutable)
+			c.recordBinding(s.GetLocation(), c.scope.add(v.Name, v.__type, v.Mutable))
 			return &Statement{
 				Stmt: v,
 			}
@@ -2324,9 +2328,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					End:    end,
 				}
 				body := c.checkBlock(s.Body, func() {
-					c.scope.add(s.Cursor.Name, start.Type(), false)
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, start.Type(), false))
 					if loop.Index != "" {
-						c.scope.add(loop.Index, Int, false)
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
 				})
 				loop.Body = body
@@ -2353,9 +2357,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Create a new scope for the loop body where the cursor is defined
 				body := c.checkBlock(s.Body, func() {
 					// Direct string iteration yields Unicode scalar values.
-					c.scope.add(s.Cursor.Name, Rune, false)
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, Rune, false))
 					if loop.Index != "" {
-						c.scope.add(loop.Index, Int, false)
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
 				})
 
@@ -2376,9 +2380,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Create a new scope for the loop body where the cursor is defined
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursor variable to the scope
-					c.scope.add(s.Cursor.Name, Int, false)
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, Int, false))
 					if loop.Index != "" {
-						c.scope.add(loop.Index, Int, false)
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
 				})
 
@@ -2397,9 +2401,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursor variable to the scope
-					c.scope.add(s.Cursor.Name, listType.of, cursorMutable)
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, listType.of, cursorMutable))
 					if loop.Index != "" {
-						c.scope.add(loop.Index, Int, false)
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
 				})
 
@@ -2422,8 +2426,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				valueMutable := c.isMutable(iterable)
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursors to the scope
-					c.scope.add(loop.Key, mapType.Key(), false)
-					c.scope.add(loop.Val, mapType.Value(), valueMutable)
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(loop.Key, mapType.Key(), false))
+					c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Val, mapType.Value(), valueMutable))
 				})
 
 				loop.Body = body
@@ -3975,9 +3979,11 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 
 func (c *Checker) checkExprForInference(expr parse.Expression) Expression {
 	diagnosticsLen := len(c.diagnostics)
+	spansMark := c.spansMark()
 	halted := c.halted
 	checked := c.checkExpr(expr)
 	c.diagnostics = c.diagnostics[:diagnosticsLen]
+	c.spansTruncate(spansMark)
 	c.halted = halted
 	return checked
 }
@@ -4222,12 +4228,14 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 			// lvalue below (ADR 0031). Try the reference value first.
 			if _, ok := mutableRefBase(field); ok {
 				diagCount := len(c.diagnostics)
+				spansMark := c.spansMark()
 				if checked := c.checkExprAs(property.Value, field); checked != nil && checked.Type().equal(field) {
 					fields[fieldName] = checked
 					fieldTypes[fieldName] = field
 					continue
 				}
 				c.diagnostics = c.diagnostics[:diagCount]
+				c.spansTruncate(spansMark)
 			}
 
 			fieldExpected := field
@@ -4288,9 +4296,11 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 						}
 					default:
 						diagnosticCount := len(c.diagnostics)
+						spansMark := c.spansMark()
 						val = c.checkExprAs(property.Value, fieldExpected)
 						if val == nil {
 							c.diagnostics = c.diagnostics[:diagnosticCount]
+							c.spansTruncate(spansMark)
 							val = c.checkExpr(property.Value)
 							if val != nil && !val.Type().equal(fieldExpected) {
 								if c.areCompatible(maybeField.Of(), val.Type()) {
@@ -4305,6 +4315,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				} else {
 					// Non-nullable fields use checkExprAs which provides type context
 					diagCount := len(c.diagnostics)
+					spansMark := c.spansMark()
 					val = c.checkExprAs(property.Value, fieldExpected)
 					if val == nil {
 						// A mutable-reference lvalue (e.g. a `mut T` field read that
@@ -4314,6 +4325,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 						if borrowed := c.checkExpr(property.Value); borrowed != nil {
 							if refType := referenceArgType(borrowed); !refType.equal(borrowed.Type()) && c.areCompatible(fieldExpected, refType) {
 								c.diagnostics = c.diagnostics[:diagCount]
+								c.spansTruncate(spansMark)
 								val = borrowed
 							}
 						}
@@ -4982,6 +4994,14 @@ func (c *Checker) checkFunctionFieldCall(subject Expression, method parse.Functi
 }
 
 func (c *Checker) checkExpr(expr parse.Expression) Expression {
+	result := c.checkExprInner(expr)
+	if result != nil {
+		c.recordExprSpan(expr, result)
+	}
+	return result
+}
+
+func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 	if c.halted {
 		return nil
 	}
@@ -5078,6 +5098,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		}
 	case *parse.Identifier:
 		if sym, ok := c.scope.get(s.Name); ok {
+			c.recordSymbolUse(s, sym, nil)
 			return &Variable{*sym}
 		}
 		c.addError(fmt.Sprintf("Undefined variable: %s", s.Name), s.GetLocation())
@@ -6079,7 +6100,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			body := c.checkBlockWithExpected(s.Body, func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
-					c.scope.add(param.Name, param.Type, param.Mutable)
+					c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
 				}
 			}, returnType, true)
 			c.popFunctionGenericContext()
@@ -7191,7 +7212,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					c.scope = &newScope
 
 					// Add error variable to scope with the error type
-					c.scope.add(s.CatchVar.Name, _type.err, false)
+					c.recordBinding(s.CatchVar.GetLocation(), c.scope.add(s.CatchVar.Name, _type.err, false))
 
 					// Check catch block statements
 					for _, stmt := range s.CatchBlock {
@@ -7913,7 +7934,7 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			body := c.checkBlockWithExpected(s.Body, func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
-					c.scope.add(param.Name, param.Type, param.Mutable)
+					c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
 				}
 			}, returnType, true)
 			c.popFunctionGenericContext()
@@ -8062,6 +8083,7 @@ func (c *Checker) resolveParametersWithContext(params []parse.Parameter, expecte
 			Name:    param.Name,
 			Type:    paramType,
 			Mutable: param.Mutable,
+			Loc:     param.GetLocation(),
 		}
 	}
 	return result
@@ -8098,7 +8120,7 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 		c.scope.expectReturn(returnType)
 		// Add parameters to scope
 		for _, param := range params {
-			c.scope.add(param.Name, param.Type, param.Mutable)
+			c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
 		}
 	}, returnType, true)
 	c.popFunctionGenericContext()
@@ -8114,6 +8136,11 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func(), extraGenericParams ...string) *FunctionDef {
 	if init != nil {
 		init()
+	}
+	if c.spans != nil && init == nil {
+		// Module-level function definition. Methods (init != nil) are keyed
+		// separately when method identity recording lands.
+		c.recordDef(def.GetLocation(), FunctionKey(c.typeOwnerPath(), def.Name))
 	}
 
 	// Reuse the hoisted signature when this is a top-level declaration whose
@@ -8180,7 +8207,7 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func(), ext
 	body := c.checkBlockWithExpected(def.Body, func() {
 		c.scope.expectReturn(returnType)
 		for _, param := range params {
-			c.scope.add(param.Name, param.Type, param.Mutable)
+			c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
 		}
 	}, returnType, true)
 	c.popFunctionGenericContext()

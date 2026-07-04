@@ -1148,6 +1148,10 @@ type Parameter struct {
 	Name    string
 	Type    Type
 	Mutable bool
+	// Loc is the parameter's source location when the parameter came from
+	// parsed source. Zero for synthesized parameters. Used only for tooling
+	// span recording.
+	Loc parse.Location
 	// Variadic marks the single Ard argument that maps to a Go variadic
 	// parameter. The argument may be omitted at the call site, mirroring
 	// Go's zero-argument variadic calls. Ard has no variadic parameters or

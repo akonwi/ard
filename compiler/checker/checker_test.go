@@ -20,6 +20,7 @@ type test struct {
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
 	cmpopts.IgnoreFields(checker.BoolMatch{}, "ResultType"),
+	cmpopts.IgnoreFields(checker.Parameter{}, "Loc"),
 	cmpopts.IgnoreFields(checker.OptionMatch{}, "ResultType"),
 	cmpopts.IgnoreFields(checker.EnumMatch{}, "DiscriminantToIndex", "ResultType"),
 	cmpopts.IgnoreFields(checker.EnumVariant{}, "EnumType", "Discriminant"),
