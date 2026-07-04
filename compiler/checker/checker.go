@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	gotypes "go/types"
 	"maps"
 	"math"
 	"math/big"
@@ -303,6 +304,7 @@ type Checker struct {
 	discardExprContext                bool
 	matchArmDiscardContext            bool
 	reportedMapKeyErrors              map[parse.Location]bool
+	goTypesContext                    *gotypes.Context
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -326,7 +328,8 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 			StructMethods:         map[MethodOwner]map[string]*FunctionDef{},
 			ForeignInterfaceImpls: map[MethodOwner][]*ForeignType{},
 		},
-		scope: &rootScope,
+		scope:          &rootScope,
+		goTypesContext: gotypes.NewContext(),
 	}
 
 	return c
@@ -3580,9 +3583,13 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 	}
 }
 
-func (c *Checker) validateForeignStructInstance(foreign *ForeignType, properties []parse.StructValue, loc parse.Location) *ForeignStructInstance {
+func (c *Checker) validateForeignStructInstance(foreign *ForeignType, typeArgs []parse.DeclaredType, properties []parse.StructValue, loc parse.Location) *ForeignStructInstance {
 	if foreign == nil || foreign.Target != "go" || foreign.Pointer || !foreign.Struct {
 		c.addError("Go struct literals require a non-pointer Go struct type", loc)
+		return nil
+	}
+	foreign = c.instantiateForeignStructForLiteral(foreign, typeArgs, properties, loc)
+	if foreign == nil {
 		return nil
 	}
 	if !foreign.FieldsLoaded && foreign.LoadFields != nil {
@@ -3620,16 +3627,258 @@ func (c *Checker) validateForeignStructInstance(foreign *ForeignType, properties
 	return &ForeignStructInstance{Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Name: foreign.Name, Fields: fields, _type: foreign}
 }
 
-// allowStructTypeArgs reports whether a struct literal's type arguments are
-// usable. Explicit type arguments parse (ADR 0030) but checker support for
-// validating and inferring them has not landed yet, so they are rejected
-// rather than silently dropped: lowering an uninstantiated generic Go struct
-// would fail the Go build without an Ard diagnostic.
-func (c *Checker) allowStructTypeArgs(instance *parse.StructInstance) bool {
+func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeArgs []parse.DeclaredType, properties []parse.StructValue, loc parse.Location) *ForeignType {
+	named, ok := foreign.GoType.(*gotypes.Named)
+	if !ok {
+		if len(typeArgs) > 0 {
+			c.addError("Go struct literal type arguments require a named Go type", loc)
+			return nil
+		}
+		return foreign
+	}
+	params := named.TypeParams()
+	if params == nil || params.Len() == 0 {
+		if len(typeArgs) > 0 {
+			c.addError(fmt.Sprintf("Go type %s is not generic", foreign), loc)
+			return nil
+		}
+		return foreign
+	}
+
+	args := make([]Type, params.Len())
+	goArgs := make([]gotypes.Type, params.Len())
+	if len(typeArgs) > 0 {
+		if len(typeArgs) != params.Len() {
+			c.addError(fmt.Sprintf("Go type %s expects %d type argument(s), got %d", foreign, params.Len(), len(typeArgs)), loc)
+			return nil
+		}
+		for i, typeArg := range typeArgs {
+			arg := c.resolveType(typeArg)
+			if arg == nil {
+				return nil
+			}
+			goArg, ok := checkerTypeToGoType(arg)
+			if !ok {
+				c.addError(fmt.Sprintf("Type argument %s cannot be used as a Go type argument", arg), loc)
+				return nil
+			}
+			args[i] = arg
+			goArgs[i] = goArg
+		}
+	} else {
+		inferredTypes := make([]Type, params.Len())
+		inferredGoTypes := make([]gotypes.Type, params.Len())
+		structType, ok := named.Underlying().(*gotypes.Struct)
+		if !ok {
+			return foreign
+		}
+		for _, property := range properties {
+			field := exportedGoStructField(structType, property.Name.Name)
+			if field == nil || !goTypeMentionsTypeParam(field.Type(), params) {
+				continue
+			}
+			value := c.checkExprForInference(property.Value)
+			if value == nil {
+				continue
+			}
+			goValue, ok := checkerTypeToGoType(value.Type())
+			if !ok {
+				continue
+			}
+			if !c.inferGoStructTypeArgs(field.Type(), value.Type(), goValue, params, inferredTypes, inferredGoTypes, property.GetLocation()) {
+				return nil
+			}
+		}
+		for i := 0; i < params.Len(); i++ {
+			if inferredTypes[i] == nil || inferredGoTypes[i] == nil {
+				c.addError(fmt.Sprintf("Could not infer type argument %s for Go type %s", params.At(i).Obj().Name(), foreign), loc)
+				return nil
+			}
+			args[i] = inferredTypes[i]
+			goArgs[i] = inferredGoTypes[i]
+		}
+	}
+
+	for i, goArg := range goArgs {
+		constraint, ok := params.At(i).Constraint().Underlying().(*gotypes.Interface)
+		if ok && !gotypes.Satisfies(goArg, constraint) {
+			c.addError(fmt.Sprintf("Type argument %s does not satisfy Go constraint %s", args[i], params.At(i).Constraint()), loc)
+			return nil
+		}
+	}
+	instantiated, err := gotypes.Instantiate(c.goTypesContext, named, goArgs, true)
+	if err != nil {
+		c.addError(fmt.Sprintf("Could not instantiate Go type %s: %s", foreign, err), loc)
+		return nil
+	}
+	instNamed, ok := instantiated.(*gotypes.Named)
+	if !ok {
+		c.addError(fmt.Sprintf("Could not instantiate Go type %s", foreign), loc)
+		return nil
+	}
+	inst := foreignNamedTypeFromGo(instNamed, false, true).(*ForeignType)
+	inst.TypeArgs = args
+	return inst
+}
+
+func (c *Checker) checkExprForInference(expr parse.Expression) Expression {
+	diagnosticsLen := len(c.diagnostics)
+	halted := c.halted
+	checked := c.checkExpr(expr)
+	c.diagnostics = c.diagnostics[:diagnosticsLen]
+	c.halted = halted
+	return checked
+}
+
+func goTypeMentionsTypeParam(t gotypes.Type, params *gotypes.TypeParamList) bool {
+	switch typ := t.(type) {
+	case *gotypes.TypeParam:
+		for i := 0; i < params.Len(); i++ {
+			if params.At(i) == typ {
+				return true
+			}
+		}
+	case *gotypes.Slice:
+		return goTypeMentionsTypeParam(typ.Elem(), params)
+	case *gotypes.Map:
+		return goTypeMentionsTypeParam(typ.Key(), params) || goTypeMentionsTypeParam(typ.Elem(), params)
+	case *gotypes.Pointer:
+		return goTypeMentionsTypeParam(typ.Elem(), params)
+	case *gotypes.Array:
+		return goTypeMentionsTypeParam(typ.Elem(), params)
+	case *gotypes.Signature:
+		for i := 0; i < typ.Params().Len(); i++ {
+			if goTypeMentionsTypeParam(typ.Params().At(i).Type(), params) {
+				return true
+			}
+		}
+		for i := 0; i < typ.Results().Len(); i++ {
+			if goTypeMentionsTypeParam(typ.Results().At(i).Type(), params) {
+				return true
+			}
+		}
+	case *gotypes.Named:
+		if args := typ.TypeArgs(); args != nil {
+			for i := 0; i < args.Len(); i++ {
+				if goTypeMentionsTypeParam(args.At(i), params) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func exportedGoStructField(strct *gotypes.Struct, name string) *gotypes.Var {
+	for i := 0; i < strct.NumFields(); i++ {
+		field := strct.Field(i)
+		if field.Name() == name && field.Exported() && !field.Embedded() {
+			return field
+		}
+	}
+	return nil
+}
+
+func (c *Checker) inferGoStructTypeArgs(pattern gotypes.Type, actual Type, goActual gotypes.Type, params *gotypes.TypeParamList, inferred []Type, inferredGo []gotypes.Type, loc parse.Location) bool {
+	switch pattern := pattern.(type) {
+	case *gotypes.TypeParam:
+		for i := 0; i < params.Len(); i++ {
+			if params.At(i) != pattern {
+				continue
+			}
+			if inferred[i] != nil && !inferred[i].equal(actual) {
+				c.addError(fmt.Sprintf("Conflicting inferred type arguments for %s: %s and %s", pattern.Obj().Name(), inferred[i], actual), loc)
+				return false
+			}
+			inferred[i] = actual
+			inferredGo[i] = goActual
+			return true
+		}
+	case *gotypes.Slice:
+		if list, ok := actual.(*List); ok {
+			if goSlice, ok := goActual.Underlying().(*gotypes.Slice); ok {
+				return c.inferGoStructTypeArgs(pattern.Elem(), list.Of(), goSlice.Elem(), params, inferred, inferredGo, loc)
+			}
+		}
+	case *gotypes.Map:
+		if m, ok := actual.(*Map); ok {
+			goMap, ok := goActual.Underlying().(*gotypes.Map)
+			if !ok {
+				return true
+			}
+			if !c.inferGoStructTypeArgs(pattern.Key(), m.Key(), goMap.Key(), params, inferred, inferredGo, loc) {
+				return false
+			}
+			return c.inferGoStructTypeArgs(pattern.Elem(), m.Value(), goMap.Elem(), params, inferred, inferredGo, loc)
+		}
+	}
+	return true
+}
+
+func checkerTypeToGoType(t Type) (gotypes.Type, bool) {
+	switch t {
+	case Bool:
+		return gotypes.Typ[gotypes.Bool], true
+	case Str:
+		return gotypes.Typ[gotypes.String], true
+	case Int:
+		return gotypes.Typ[gotypes.Int], true
+	case Int8:
+		return gotypes.Typ[gotypes.Int8], true
+	case Int16:
+		return gotypes.Typ[gotypes.Int16], true
+	case Int32:
+		return gotypes.Typ[gotypes.Int32], true
+	case Int64:
+		return gotypes.Typ[gotypes.Int64], true
+	case Uint:
+		return gotypes.Typ[gotypes.Uint], true
+	case Byte:
+		return gotypes.Typ[gotypes.Uint8], true
+	case Uint16:
+		return gotypes.Typ[gotypes.Uint16], true
+	case Uint32:
+		return gotypes.Typ[gotypes.Uint32], true
+	case Uint64:
+		return gotypes.Typ[gotypes.Uint64], true
+	case Uintptr:
+		return gotypes.Typ[gotypes.Uintptr], true
+	case Float32:
+		return gotypes.Typ[gotypes.Float32], true
+	case Float64:
+		return gotypes.Typ[gotypes.Float64], true
+	case Any:
+		return gotypes.NewInterfaceType(nil, nil), true
+	}
+	switch typ := t.(type) {
+	case *ForeignType:
+		if typ.GoType != nil {
+			return typ.GoType, true
+		}
+	case *List:
+		elem, ok := checkerTypeToGoType(typ.Of())
+		if ok {
+			return gotypes.NewSlice(elem), true
+		}
+	case *Map:
+		key, ok := checkerTypeToGoType(typ.Key())
+		if !ok {
+			return nil, false
+		}
+		value, ok := checkerTypeToGoType(typ.Value())
+		if !ok {
+			return nil, false
+		}
+		return gotypes.NewMap(key, value), true
+	}
+	return nil, false
+}
+
+func (c *Checker) rejectArdStructTypeArgs(instance *parse.StructInstance) bool {
 	if len(instance.TypeArgs) == 0 {
 		return true
 	}
-	c.addError("Struct literal type arguments are not supported yet", instance.GetLocation())
+	c.addError("Struct literal type arguments are only supported for Go structs", instance.GetLocation())
 	return false
 }
 
@@ -6353,16 +6602,17 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
 						return nil
 					case *parse.StructInstance:
-						if !c.allowStructTypeArgs(prop) {
-							return nil
-						}
 						typ := goPkg.Types[prop.Name.Name]
 						foreign, ok := typ.(*ForeignType)
 						if !ok {
 							c.addError(fmt.Sprintf("Undefined Go type: %s::%s", id.Name, prop.Name.Name), prop.Name.GetLocation())
 							return nil
 						}
-						return c.validateForeignStructInstance(foreign, prop.Properties, prop.GetLocation())
+						instance := c.validateForeignStructInstance(foreign, prop.TypeArgs, prop.Properties, prop.GetLocation())
+						if instance == nil {
+							return nil
+						}
+						return instance
 					default:
 						c.addError(fmt.Sprintf("Unsupported property type in %s::%s", id.Name, s.Property), s.Property.GetLocation())
 						return nil
@@ -6373,7 +6623,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				if mod := c.resolveModule(id.Name); mod != nil {
 					switch prop := s.Property.(type) {
 					case *parse.StructInstance:
-						if !c.allowStructTypeArgs(prop) {
+						if !c.rejectArdStructTypeArgs(prop) {
 							return nil
 						}
 						// Look up the struct symbol directly from the module
@@ -6499,7 +6749,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			panic(fmt.Errorf("Unexpected static property target: %T", s.Target))
 		}
 	case *parse.StructInstance:
-		if !c.allowStructTypeArgs(s) {
+		if !c.rejectArdStructTypeArgs(s) {
 			return nil
 		}
 		name := s.Name.Name

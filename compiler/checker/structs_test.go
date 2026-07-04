@@ -245,7 +245,7 @@ func TestStructsWithStaticFunctions(t *testing.T) {
 	})
 }
 
-func TestStructLiteralTypeArgsNotSupportedYet(t *testing.T) {
+func TestArdStructLiteralTypeArgsRejected(t *testing.T) {
 	run(t, []test{
 		{
 			name: "explicit type args on a struct literal are rejected",
@@ -256,7 +256,7 @@ func TestStructLiteralTypeArgsNotSupportedYet(t *testing.T) {
 				"let b = Box<Str>{ value: 1 }",
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Struct literal type arguments are not supported yet"},
+				{Kind: checker.Error, Message: "Struct literal type arguments are only supported for Go structs"},
 			},
 		},
 	})

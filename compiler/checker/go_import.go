@@ -252,6 +252,9 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 			}
 			return fn, ""
 		}
+		if reason := unsupportedGoNamedTypeArgs(named); reason != "" {
+			return nil, reason
+		}
 		if reason := unsupportedForeignNamedUnderlying(named.Underlying(), false); reason != "" {
 			return nil, reason
 		}
@@ -266,6 +269,9 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 	}
 	if ptr, ok := t.(*types.Pointer); ok {
 		if named, ok := ptr.Elem().(*types.Named); ok && !isGoError(named) {
+			if reason := unsupportedGoNamedTypeArgs(named); reason != "" {
+				return nil, reason
+			}
 			if reason := unsupportedForeignNamedUnderlying(named.Underlying(), true); reason != "" {
 				return nil, reason
 			}
@@ -308,6 +314,19 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 		return MakeMap(key, value), ""
 	}
 	return primitiveTypeFromGo(t)
+}
+
+func unsupportedGoNamedTypeArgs(named *types.Named) string {
+	args := named.TypeArgs()
+	if args == nil || args.Len() == 0 {
+		return ""
+	}
+	for i := 0; i < args.Len(); i++ {
+		if _, reason := typeFromGoWithMethods(args.At(i), false); reason != "" {
+			return fmt.Sprintf("type argument %d has unsupported type %s: %s", i+1, args.At(i).String(), reason)
+		}
+	}
+	return ""
 }
 
 func exportedNamedTypeFromGo(typeName *types.TypeName) (Type, string) {
@@ -362,6 +381,14 @@ func foreignNamedTypeFromGo(named *types.Named, pointer bool, includeMethods boo
 		goType = types.NewPointer(named)
 	}
 	foreign := &ForeignType{Target: "go", Namespace: namespace, Qualifier: qualifier, Name: named.Obj().Name(), Underlying: underlying, Pointer: pointer, Struct: isStruct, Interface: isInterface, GoType: goType}
+	if args := named.TypeArgs(); args != nil && args.Len() > 0 {
+		for i := 0; i < args.Len(); i++ {
+			arg, reason := typeFromGoWithMethods(args.At(i), false)
+			if reason == "" {
+				foreign.TypeArgs = append(foreign.TypeArgs, arg)
+			}
+		}
+	}
 	foreign.LoadFields = func() (map[string]Type, map[string]string) { return goFieldsForNamedType(named) }
 	foreign.LoadMethods = func(pointer bool) (map[string]*FunctionDef, map[string]string) {
 		return goMethodsForNamedType(named, pointer)

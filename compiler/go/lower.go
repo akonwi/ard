@@ -3782,6 +3782,17 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, fmt.Errorf("unsupported foreign type target %q", info.ForeignTarget)
 		}
 		typ := l.qualified(info.ForeignQualifier, info.ForeignNamespace, info.ForeignSymbol)
+		if len(info.GenericArgs) > 0 {
+			args := make([]ast.Expr, 0, len(info.GenericArgs))
+			for _, argID := range info.GenericArgs {
+				arg, err := l.goType(argID)
+				if err != nil {
+					return nil, err
+				}
+				args = append(args, arg)
+			}
+			typ = &ast.IndexListExpr{X: typ, Indices: args}
+		}
 		if info.ForeignPointer {
 			return &ast.StarExpr{X: typ}, nil
 		}

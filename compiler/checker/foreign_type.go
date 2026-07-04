@@ -15,6 +15,7 @@ type ForeignType struct {
 	Struct                    bool
 	Interface                 bool
 	GoType                    types.Type
+	TypeArgs                  []Type
 	MapKey                    Type
 	MapValue                  Type
 	Fields                    map[string]Type
@@ -33,6 +34,16 @@ func (f *ForeignType) String() string {
 	name := f.Name
 	if f.Qualifier != "" {
 		name = f.Qualifier + "::" + f.Name
+	}
+	if len(f.TypeArgs) > 0 {
+		name += "<"
+		for i, arg := range f.TypeArgs {
+			if i > 0 {
+				name += ", "
+			}
+			name += arg.String()
+		}
+		name += ">"
 	}
 	if f.Pointer {
 		return "mut " + name
@@ -78,7 +89,15 @@ func (f *ForeignType) equal(other Type) bool {
 		}
 		return false
 	}
-	return f.Target == o.Target && f.Namespace == o.Namespace && f.Name == o.Name && f.Pointer == o.Pointer
+	if f.Target != o.Target || f.Namespace != o.Namespace || f.Name != o.Name || f.Pointer != o.Pointer || len(f.TypeArgs) != len(o.TypeArgs) {
+		return false
+	}
+	for i := range f.TypeArgs {
+		if !f.TypeArgs[i].equal(o.TypeArgs[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func (f *ForeignType) hasTrait(trait *Trait) bool { return false }

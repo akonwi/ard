@@ -2043,6 +2043,13 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		info.ForeignSymbol = typ.Name
 		info.ForeignPointer = typ.Pointer
 		info.ForeignInterface = typ.Interface
+		for _, arg := range typ.TypeArgs {
+			argID, err := l.internType(arg)
+			if err != nil {
+				return NoType, err
+			}
+			info.GenericArgs = append(info.GenericArgs, argID)
+		}
 		if typ.Underlying != nil {
 			underlying, err := l.internType(typ.Underlying)
 			if err != nil {

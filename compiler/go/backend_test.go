@@ -1365,6 +1365,56 @@ func TestRunProgramConstructsGoStructLiterals(t *testing.T) {
 	}
 }
 
+func TestRunProgramConstructsGenericGoStructLiterals(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"genericstructs\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module genericstructs\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
+
+type Box[T any] struct { Value T }
+
+type Radio[T comparable] struct {
+	Value T
+	GroupValue T
+}
+
+func BoxValue(b Box[string]) string { return b.Value }
+func RadioMatches(r Radio[string]) bool { return r.Value == r.GroupValue }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use go:genericstructs/ffi
+
+fn main() {
+  let explicit = ffi::Box<Str>{Value: "hello"}
+  if not ffi::BoxValue(explicit) == "hello" { panic("bad explicit generic struct") }
+  let inferred = ffi::Radio{Value: "same", GroupValue: "same"}
+  if not ffi::RadioMatches(inferred) { panic("bad inferred generic struct") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramPassesMutableFieldToGoInterface(t *testing.T) {
 	program := lowerSource(t, `
 		use go:io
