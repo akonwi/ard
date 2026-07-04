@@ -244,3 +244,20 @@ func TestStructsWithStaticFunctions(t *testing.T) {
 		},
 	})
 }
+
+func TestStructLiteralTypeArgsNotSupportedYet(t *testing.T) {
+	run(t, []test{
+		{
+			name: "explicit type args on a struct literal are rejected",
+			input: strings.Join([]string{
+				"struct Box<$T> {",
+				"  value: Int",
+				"}",
+				"let b = Box<Str>{ value: 1 }",
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Struct literal type arguments are not supported yet"},
+			},
+		},
+	})
+}

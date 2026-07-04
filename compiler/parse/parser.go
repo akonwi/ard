@@ -2586,6 +2586,10 @@ func (p *parser) structInstance() (Expression, error) {
 		p.index = p.index - 1
 	}
 
+	if instance, ok, err := p.tryGenericStructInstance(index, static); ok || err != nil {
+		return instance, err
+	}
+
 	if p.check(identifier, left_brace) {
 		if p.peek().text == "unsafe" {
 			p.index = index
@@ -2630,6 +2634,52 @@ func (p *parser) structInstance() (Expression, error) {
 	}
 
 	return p.iterRange()
+}
+
+// tryGenericStructInstance speculatively parses a struct instantiation with
+// call-site type arguments, such as Name<Str>{...} or pkg::Name<ui::Theme>{...}.
+// It commits only when the type arguments are followed by '>' and '{', so
+// comparison chains like a < b are left untouched. On failure it rewinds to
+// index and reports ok=false.
+func (p *parser) tryGenericStructInstance(index int, static *StaticProperty) (Expression, bool, error) {
+	if !p.check(identifier, less_than) || !adjacent(p.peek().getLocation(), &p.tokens[p.index+1]) {
+		return nil, false, nil
+	}
+
+	savedErrorCount := len(p.errors)
+	nameToken := p.advance()
+	p.advance() // consume the '<'
+	typeArgs := p.parseCallTypeArguments()
+
+	// Commit when the `>` `{` shape is clear, even if the type arguments had
+	// diagnostics, mirroring tryStaticGenericFunctionCall's recovery policy.
+	hasTypeArgsOrErrors := len(typeArgs) > 0 || len(p.errors) > savedErrorCount
+	hasGenericStructShape := hasTypeArgsOrErrors && p.check(greater_than, left_brace)
+	if !hasGenericStructShape {
+		p.index = index
+		p.errors = p.errors[:savedErrorCount]
+		return nil, false, nil
+	}
+	p.advance() // consume the '>'
+
+	name := &Identifier{
+		Name: nameToken.text,
+		Location: Location{
+			Start: Point{Row: nameToken.line, Col: nameToken.column},
+			End:   Point{Row: nameToken.line, Col: nameToken.column + len(nameToken.text)},
+		},
+	}
+	instance, err := p.parseStructFields(name)
+	if err != nil {
+		return nil, true, err
+	}
+	instance.TypeArgs = typeArgs
+
+	if static != nil {
+		static.Property = instance
+		return static, true, nil
+	}
+	return instance, true, nil
 }
 
 // parseStructInstantiationFromIdentifier parses a struct instantiation given an identifier.

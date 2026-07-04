@@ -1167,15 +1167,23 @@ func (p printer) renderMapLiteralDoc(m *parse.MapLiteral) doc {
 }
 
 func (p printer) renderStructInstanceDoc(node *parse.StructInstance) doc {
+	head := node.Name.Name
+	if len(node.TypeArgs) > 0 {
+		types := make([]string, 0, len(node.TypeArgs))
+		for _, item := range node.TypeArgs {
+			types = append(types, p.renderType(item))
+		}
+		head += "<" + strings.Join(types, ", ") + ">"
+	}
 	if len(node.Properties) == 0 && len(node.Comments) == 0 {
-		return dText(node.Name.Name + "{}")
+		return dText(head + "{}")
 	}
 
 	parts := make([]string, 0, len(node.Properties))
 	for _, property := range node.Properties {
 		parts = append(parts, property.Name.Name+": "+p.renderExpression(property.Value, 0))
 	}
-	oneLine := node.Name.Name + "{" + strings.Join(parts, ", ") + "}"
+	oneLine := head + "{" + strings.Join(parts, ", ") + "}"
 	if len(node.Properties) <= 2 && len(node.Comments) == 0 && len(oneLine) <= p.maxLineWidth {
 		return dText(oneLine)
 	}
@@ -1190,7 +1198,7 @@ func (p printer) renderStructInstanceDoc(node *parse.StructInstance) doc {
 	body := dJoin(dHardLine(), items)
 
 	return dConcat(
-		dText(node.Name.Name+"{"),
+		dText(head+"{"),
 		dIndent(dConcat(dHardLine(), body)),
 		dHardLine(),
 		dText("}"),

@@ -114,6 +114,22 @@ Construction rules:
 
 A direct Go struct literal creates a Go value, not a pointer. If Ard needs `mut go::T`, it should follow normal mutable-reference rules: bind the value to mutable storage or pass an addressable mutable value where a `mut go::T` is required. Do not add special pointer-literal syntax as part of this decision.
 
+### Generic Go struct literals
+
+Go named struct types may be generic (`type Radio[T comparable] struct { Value T; GroupValue T; ... }`). Direct-Go struct literals support generic Go structs:
+
+- Explicit type arguments use Ard's existing call-site type-argument syntax:
+
+  ```ard
+  ui::Radio<Str>{Value: "compact", GroupValue: mode}
+  ui::Provider<ui::Theme>{Value: active, Child: tab}
+  ```
+
+- Type arguments are optional when they can be inferred by unifying the supplied field values against the Go struct's field types. `ui::Provider{Value: active, Child: tab}` infers `T = ui::Theme` from `Value`. Note this is more permissive than Go itself, which does not infer type arguments for composite literals; Ard's checker performs the inference and the backend always lowers to an explicitly instantiated Go composite literal (`ui.Radio[string]{...}`).
+- Inference fails, and explicit type arguments are required, when no supplied field constrains a type parameter — including when all fields mentioning it are omitted under the zero-value rule. The diagnostic must name the uninferred type parameter.
+- Conflicting field values that unify a type parameter to different types are rejected with a diagnostic naming the conflicting fields.
+- Inferred or explicit type arguments must satisfy the Go type parameter's constraint (for example `comparable`); the checker validates this rather than deferring to a Go build error.
+
 ### Nil semantics and direct-Go safety boundary
 
 Do not implicitly translate Go `nil` into Ard `Maybe` for direct-Go struct fields.

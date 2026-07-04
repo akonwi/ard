@@ -422,6 +422,7 @@ type StructValue struct {
 type StructInstance struct {
 	Location
 	Name       Identifier
+	TypeArgs   []DeclaredType
 	Properties []StructValue
 	Comments   []Comment // Comments found within the struct instance
 }

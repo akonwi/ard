@@ -334,3 +334,178 @@ func TestNestedStructInstantiation(t *testing.T) {
 		},
 	})
 }
+
+func TestGenericStructInstantiation(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "explicit type args on a struct literal",
+			input: `Radio<Str>{ value: "compact" }`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StructInstance{
+						Name:     Identifier{Name: "Radio"},
+						TypeArgs: []DeclaredType{&StringType{}},
+						Properties: []StructValue{
+							{Name: Identifier{Name: "value"}, Value: &StrLiteral{Value: "compact"}},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "explicit custom type args on a static struct literal",
+			input: `ui::Provider<ui::Theme>{ value: active }`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StaticProperty{
+						Target: &Identifier{Name: "ui"},
+						Property: &StructInstance{
+							Name: Identifier{Name: "Provider"},
+							TypeArgs: []DeclaredType{
+								&CustomType{
+									Name: "ui::Theme",
+									Type: StaticProperty{
+										Target:   &Identifier{Name: "ui"},
+										Property: &Identifier{Name: "Theme"},
+									},
+								},
+							},
+							Properties: []StructValue{
+								{Name: Identifier{Name: "value"}, Value: &Identifier{Name: "active"}},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "empty generic struct literal",
+			input: `Box<Int>{}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StructInstance{
+						Name:       Identifier{Name: "Box"},
+						TypeArgs:   []DeclaredType{&IntType{}},
+						Properties: []StructValue{},
+					},
+				},
+			},
+		},
+		{
+			name:  "comparison chain is not a generic struct literal",
+			input: `let x = a < b`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name: "x",
+						Value: &BinaryExpression{
+							Operator: LessThan,
+							Left:     &Identifier{Name: "a"},
+							Right:    &Identifier{Name: "b"},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
+func TestGenericStructInstantiationAmbiguity(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "unspaced comparison is not a generic struct literal",
+			input: `let x = a<b`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name: "x",
+						Value: &BinaryExpression{
+							Operator: LessThan,
+							Left:     &Identifier{Name: "a"},
+							Right:    &Identifier{Name: "b"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "unspaced comparison in a larger expression leaves no errors",
+			input: `let ok = a<b and c`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name: "ok",
+						Value: &BinaryExpression{
+							Operator: And,
+							Left: &BinaryExpression{
+								Operator: LessThan,
+								Left:     &Identifier{Name: "a"},
+								Right:    &Identifier{Name: "b"},
+							},
+							Right: &Identifier{Name: "c"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "non-adjacent angle bracket is not a generic struct literal",
+			input: `let x = a < b`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name: "x",
+						Value: &BinaryExpression{
+							Operator: LessThan,
+							Left:     &Identifier{Name: "a"},
+							Right:    &Identifier{Name: "b"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "nested type args on a struct literal",
+			input: `Box<List<Str>>{}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StructInstance{
+						Name: Identifier{Name: "Box"},
+						TypeArgs: []DeclaredType{
+							&CustomType{
+								Name:     "List",
+								TypeArgs: []DeclaredType{&StringType{}},
+							},
+						},
+						Properties: []StructValue{},
+					},
+				},
+			},
+		},
+		{
+			name:  "multiple type args on a struct literal",
+			input: `Pair<Str, Int>{ left: "a", right: 1 }`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StructInstance{
+						Name:     Identifier{Name: "Pair"},
+						TypeArgs: []DeclaredType{&StringType{}, &IntType{}},
+						Properties: []StructValue{
+							{Name: Identifier{Name: "left"}, Value: &StrLiteral{Value: "a"}},
+							{Name: Identifier{Name: "right"}, Value: &NumLiteral{Value: "1"}},
+						},
+					},
+				},
+			},
+		},
+	})
+}

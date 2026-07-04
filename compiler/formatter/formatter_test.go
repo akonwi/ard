@@ -47,3 +47,52 @@ func TestFormatIsIdempotent(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatGenericStructLiterals(t *testing.T) {
+	inputs := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "one-line generic struct literal keeps type args",
+			input: "fn main() {\n  let r = Radio<Str>{value: \"compact\"}\n}\n",
+			want:  "fn main() {\n  let r = Radio<Str>{value: \"compact\"}\n}\n",
+		},
+		{
+			name:  "empty generic struct literal keeps type args",
+			input: "fn main() {\n  let b = Box<Int>{}\n}\n",
+			want:  "fn main() {\n  let b = Box<Int>{}\n}\n",
+		},
+		{
+			name:  "multi-line generic struct literal keeps type args",
+			input: "fn main() {\n  let r = Radio<Str>{value: \"compact\", group: mode, label: \"Compact\", disabled: false}\n}\n",
+			want:  "fn main() {\n  let r = Radio<Str>{\n    value: \"compact\",\n    group: mode,\n    label: \"Compact\",\n    disabled: false,\n  }\n}\n",
+		},
+		{
+			name:  "static generic struct literal keeps type args",
+			input: "fn main() {\n  let p = ui::Provider<ui::Theme>{value: active}\n}\n",
+			want:  "fn main() {\n  let p = ui::Provider<ui::Theme>{value: active}\n}\n",
+		},
+	}
+
+	for _, tt := range inputs {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Format([]byte(tt.input), "test.ard")
+			if err != nil {
+				t.Fatalf("format failed: %v", err)
+			}
+			if string(got) != tt.want {
+				t.Fatalf("format mismatch:\ngot:\n%s\nwant:\n%s", got, tt.want)
+			}
+
+			again, err := Format(got, "test.ard")
+			if err != nil {
+				t.Fatalf("second format failed: %v", err)
+			}
+			if string(again) != string(got) {
+				t.Fatalf("format not idempotent:\nfirst:\n%s\nsecond:\n%s", got, again)
+			}
+		})
+	}
+}

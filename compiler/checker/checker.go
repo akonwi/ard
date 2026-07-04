@@ -3620,6 +3620,19 @@ func (c *Checker) validateForeignStructInstance(foreign *ForeignType, properties
 	return &ForeignStructInstance{Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Name: foreign.Name, Fields: fields, _type: foreign}
 }
 
+// allowStructTypeArgs reports whether a struct literal's type arguments are
+// usable. Explicit type arguments parse (ADR 0030) but checker support for
+// validating and inferring them has not landed yet, so they are rejected
+// rather than silently dropped: lowering an uninstantiated generic Go struct
+// would fail the Go build without an Ard diagnostic.
+func (c *Checker) allowStructTypeArgs(instance *parse.StructInstance) bool {
+	if len(instance.TypeArgs) == 0 {
+		return true
+	}
+	c.addError("Struct literal type arguments are not supported yet", instance.GetLocation())
+	return false
+}
+
 // validateStructInstance validates struct instantiation and returns the instance or nil if errors
 func (c *Checker) validateStructInstance(structType *StructDef, properties []parse.StructValue, structName string, loc parse.Location) *StructInstance {
 	instance := &StructInstance{Name: structName, _type: structType}
@@ -6340,6 +6353,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
 						return nil
 					case *parse.StructInstance:
+						if !c.allowStructTypeArgs(prop) {
+							return nil
+						}
 						typ := goPkg.Types[prop.Name.Name]
 						foreign, ok := typ.(*ForeignType)
 						if !ok {
@@ -6357,6 +6373,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				if mod := c.resolveModule(id.Name); mod != nil {
 					switch prop := s.Property.(type) {
 					case *parse.StructInstance:
+						if !c.allowStructTypeArgs(prop) {
+							return nil
+						}
 						// Look up the struct symbol directly from the module
 						sym := mod.Get(prop.Name.Name)
 						if sym.IsZero() {
@@ -6480,6 +6499,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			panic(fmt.Errorf("Unexpected static property target: %T", s.Target))
 		}
 	case *parse.StructInstance:
+		if !c.allowStructTypeArgs(s) {
+			return nil
+		}
 		name := s.Name.Name
 		sym, ok := c.scope.get(name)
 		if !ok {
