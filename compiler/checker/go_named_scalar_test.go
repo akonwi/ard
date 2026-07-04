@@ -35,7 +35,7 @@ fn main() {
 fn main() {
   os::Mkdir("tmp", -1)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Integer literal -1 overflows os::FileMode"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Integer literal -1 overflows fs::FileMode"}},
 		},
 	})
 }

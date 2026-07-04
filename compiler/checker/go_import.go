@@ -250,6 +250,13 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 		return Any, ""
 	}
 	if alias, ok := t.(*types.Alias); ok {
+		// A Go alias is the same type as its target, so aliases of named types
+		// (for example `ui.Style = vaxis.Style`) resolve through the aliased
+		// type to preserve type identity across packages.
+		unaliased := types.Unalias(t)
+		if _, isBasic := unaliased.(*types.Basic); !isBasic {
+			return typeFromGoWithMethods(unaliased, includeMethods)
+		}
 		underlying, reason := primitiveTypeFromGo(alias.Underlying())
 		if reason != "" {
 			return nil, reason
