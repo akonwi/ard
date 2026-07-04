@@ -202,14 +202,15 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			return typ
 		}
 		return &StructDef{
-			Name:          typ.Name,
-			ModulePath:    typ.ModulePath,
-			Fields:        newFields,
-			Self:          typ.Self,
-			Traits:        typ.Traits,
-			GenericParams: append([]string(nil), typ.GenericParams...),
-			TypeArgs:      newTypeArgs,
-			Private:       typ.Private,
+			Name:             typ.Name,
+			ModulePath:       typ.ModulePath,
+			Fields:           newFields,
+			Self:             typ.Self,
+			Traits:           typ.Traits,
+			GenericParams:    append([]string(nil), typ.GenericParams...),
+			DeclaredGenerics: typ.DeclaredGenerics,
+			TypeArgs:         newTypeArgs,
+			Private:          typ.Private,
 		}
 	case *FunctionDef:
 		newParams := make([]Parameter, len(typ.Parameters))
@@ -4127,16 +4128,27 @@ func checkerTypeToGoType(t Type) (gotypes.Type, bool) {
 	return nil, false
 }
 
-func (c *Checker) rejectArdStructTypeArgs(instance *parse.StructInstance) bool {
+// resolveStructTypeArgs resolves explicit struct literal type arguments
+// (`Box<Str>{...}`). Returns ok=false when any argument fails to resolve;
+// a diagnostic has been reported in that case.
+func (c *Checker) resolveStructTypeArgs(instance *parse.StructInstance) ([]Type, bool) {
 	if len(instance.TypeArgs) == 0 {
-		return true
+		return nil, true
 	}
-	c.addError("Struct literal type arguments are only supported for Go structs", instance.GetLocation())
-	return false
+	typeArgs := make([]Type, len(instance.TypeArgs))
+	for i, arg := range instance.TypeArgs {
+		resolved := c.resolveType(arg)
+		if resolved == nil {
+			c.addError(fmt.Sprintf("Unrecognized type: %s", arg.GetName()), arg.GetLocation())
+			return nil, false
+		}
+		typeArgs[i] = resolved
+	}
+	return typeArgs, true
 }
 
 // validateStructInstance validates struct instantiation and returns the instance or nil if errors
-func (c *Checker) validateStructInstance(structType *StructDef, properties []parse.StructValue, structName string, loc parse.Location) *StructInstance {
+func (c *Checker) validateStructInstance(structType *StructDef, properties []parse.StructValue, structName string, loc parse.Location, typeArgs []Type) *StructInstance {
 	instance := &StructInstance{Name: structName, _type: structType}
 	fields := make(map[string]Expression)
 	fieldTypes := make(map[string]Type)
@@ -4160,7 +4172,30 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		// Create generic scope and fresh struct copy
 		genericScope = c.scope.createGenericScope(genericParams)
 		structDefCopy = copyStructWithTypeVarMap(structType, *genericScope.genericContext)
+
+		// Bind explicit type arguments (`Box<Str>{...}`) before checking
+		// fields, so unused-in-fields generics resolve and field values are
+		// checked against the instantiated types. On any type-argument error,
+		// report and fall back to inference so checking can continue.
+		if len(typeArgs) > 0 {
+			switch {
+			case !structType.DeclaredGenerics && len(genericParams) > 1:
+				c.addError(fmt.Sprintf("Struct %s must declare its generic parameters to take explicit type arguments", structName), loc)
+			case len(typeArgs) != len(genericParams):
+				c.addError(fmt.Sprintf("Expected %d type argument(s), got %d", len(genericParams), len(typeArgs)), loc)
+			default:
+				for i, actual := range typeArgs {
+					if err := genericScope.bindGeneric(genericParams[i], actual); err != nil {
+						c.addError(err.Error(), loc)
+						break
+					}
+				}
+			}
+		}
 	} else {
+		if len(typeArgs) > 0 {
+			c.addError(fmt.Sprintf("Struct %s does not take type arguments", structName), loc)
+		}
 		structDefCopy = structType
 	}
 
@@ -4325,23 +4360,24 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	instance.Fields = fields
 	instance.FieldTypes = fieldTypes
 	// Store the refined struct definition (with resolved generics) as the instance's type
-	typeArgs := make([]Type, len(structDefCopy.TypeArgs))
+	resolvedTypeArgs := make([]Type, len(structDefCopy.TypeArgs))
 	for i, typeArg := range structDefCopy.TypeArgs {
-		typeArgs[i] = derefType(typeArg)
+		resolvedTypeArgs[i] = derefType(typeArg)
 	}
 	genericParams := append([]string(nil), structDefCopy.GenericParams...)
 	if len(genericParams) == 0 {
 		genericParams = nil
 	}
 	instance._type = &StructDef{
-		Name:          structDefCopy.Name,
-		ModulePath:    structDefCopy.ModulePath,
-		Fields:        fieldTypes,
-		Self:          structDefCopy.Self,
-		Traits:        structDefCopy.Traits,
-		GenericParams: genericParams,
-		TypeArgs:      typeArgs,
-		Private:       structDefCopy.Private,
+		Name:             structDefCopy.Name,
+		ModulePath:       structDefCopy.ModulePath,
+		Fields:           fieldTypes,
+		Self:             structDefCopy.Self,
+		Traits:           structDefCopy.Traits,
+		GenericParams:    genericParams,
+		DeclaredGenerics: structDefCopy.DeclaredGenerics,
+		TypeArgs:         resolvedTypeArgs,
+		Private:          structDefCopy.Private,
 	}
 	instance.StructType = instance._type
 	return instance
@@ -6984,7 +7020,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				if mod := c.resolveModule(id.Name); mod != nil {
 					switch prop := s.Property.(type) {
 					case *parse.StructInstance:
-						if !c.rejectArdStructTypeArgs(prop) {
+						typeArgs, ok := c.resolveStructTypeArgs(prop)
+						if !ok {
 							return nil
 						}
 						// Look up the struct symbol directly from the module
@@ -7001,7 +7038,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						}
 
 						// Use helper function for validation
-						instance := c.validateStructInstance(structType, prop.Properties, prop.Name.Name, prop.GetLocation())
+						instance := c.validateStructInstance(structType, prop.Properties, prop.Name.Name, prop.GetLocation(), typeArgs)
 						if instance == nil {
 							return nil
 						}
@@ -7110,7 +7147,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			panic(fmt.Errorf("Unexpected static property target: %T", s.Target))
 		}
 	case *parse.StructInstance:
-		if !c.rejectArdStructTypeArgs(s) {
+		typeArgs, argsOk := c.resolveStructTypeArgs(s)
+		if !argsOk {
 			return nil
 		}
 		name := s.Name.Name
@@ -7127,7 +7165,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		}
 
 		// Use helper function for validation
-		return c.validateStructInstance(structType, s.Properties, name, s.GetLocation())
+		return c.validateStructInstance(structType, s.Properties, name, s.GetLocation(), typeArgs)
 	case *parse.Try:
 		{
 			// Check if this is a property/method accessor chain that might need cascading Maybe handling

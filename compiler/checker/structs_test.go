@@ -245,18 +245,94 @@ func TestStructsWithStaticFunctions(t *testing.T) {
 	})
 }
 
-func TestArdStructLiteralTypeArgsRejected(t *testing.T) {
+func TestArdStructLiteralTypeArgs(t *testing.T) {
 	run(t, []test{
 		{
-			name: "explicit type args on a struct literal are rejected",
+			name: "explicit type args instantiate a generic struct literal",
 			input: strings.Join([]string{
 				"struct Box<$T> {",
-				"  value: Int",
+				"  value: $T",
+				"}",
+				"let b = Box<Str>{ value: \"hi\" }",
+			}, "\n"),
+		},
+		{
+			name: "explicit type args bind generics unused in provided fields",
+			input: strings.Join([]string{
+				"struct Empty<$T> {",
+				"  tag: Str",
+				"}",
+				"let e = Empty<Int>{ tag: \"x\" }",
+			}, "\n"),
+		},
+		{
+			name: "mismatched field value against an explicit type arg is rejected",
+			input: strings.Join([]string{
+				"struct Box<$T> {",
+				"  value: $T",
 				"}",
 				"let b = Box<Str>{ value: 1 }",
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Struct literal type arguments are only supported for Go structs"},
+				{Kind: checker.Error, Message: "type mismatch: expected Str, got Int"},
+			},
+		},
+		{
+			name: "type args on a non-generic struct are rejected",
+			input: strings.Join([]string{
+				"struct Plain {",
+				"  x: Int",
+				"}",
+				"let p = Plain<Int>{ x: 1 }",
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Struct Plain does not take type arguments"},
+			},
+		},
+		{
+			name: "wrong number of type args is rejected",
+			input: strings.Join([]string{
+				"struct Box<$T> {",
+				"  value: $T",
+				"}",
+				"let b = Box<Str, Int>{ value: \"hi\" }",
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Expected 1 type argument(s), got 2"},
+			},
+		},
+		{
+			name: "single inferred generic accepts an explicit type arg",
+			input: strings.Join([]string{
+				"struct Single {",
+				"  value: $T",
+				"}",
+				"let s = Single<Str>{ value: \"hi\" }",
+			}, "\n"),
+		},
+		{
+			name: "multiple inferred generics require a declared parameter list",
+			input: strings.Join([]string{
+				"struct Pair {",
+				"  first: $A,",
+				"  second: $B,",
+				"}",
+				"let p = Pair<Str, Int>{ first: \"x\", second: 1 }",
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Struct Pair must declare its generic parameters to take explicit type arguments"},
+			},
+		},
+		{
+			name: "unknown type argument is rejected",
+			input: strings.Join([]string{
+				"struct Box<$T> {",
+				"  value: $T",
+				"}",
+				"let b = Box<Nope>{ value: \"hi\" }",
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Unrecognized type: Nope"},
 			},
 		},
 	})

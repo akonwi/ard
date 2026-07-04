@@ -1492,8 +1492,12 @@ type StructDef struct {
 	Self          string
 	Traits        []*Trait
 	GenericParams []string
-	TypeArgs      []Type
-	Private       bool
+	// DeclaredGenerics is true when the struct declared its generic
+	// parameters explicitly (`struct Box<$T>`), giving them a defined order
+	// for explicit literal type arguments.
+	DeclaredGenerics bool
+	TypeArgs         []Type
+	Private          bool
 }
 
 func (def StructDef) NonProducing() {}

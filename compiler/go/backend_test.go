@@ -1758,6 +1758,43 @@ func TestRunProgramExecutesSimpleMain(t *testing.T) {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+func TestRunProgramExecutesArdGenericStructLiteralTypeArgs(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box<$T> {
+			value: $T,
+		}
+
+		struct Pair<$A, $B> {
+			first: $A,
+			second: $B,
+		}
+
+		struct Tagged<$T> {
+			tag: Str,
+		}
+
+		fn main() {
+			let a = Box<Str>{value: "hi"}
+			let b = Box{value: 42}
+			let p = Pair<Str, Int>{first: "x", second: 1}
+			let t = Tagged<Int>{tag: "x"}
+			if a.value != "hi" or b.value != 42 {
+				panic("box values wrong: {a.value} {b.value}")
+			}
+			if p.first != "x" or p.second != 1 {
+				panic("pair values wrong: {p.first} {p.second}")
+			}
+			if t.tag != "x" {
+				panic("tagged value wrong: {t.tag}")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesNamedGoContainerTypes(t *testing.T) {
 	program := lowerSource(t, `
 		use go:sort

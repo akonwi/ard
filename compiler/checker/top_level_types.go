@@ -283,6 +283,7 @@ func (c *Checker) populateStructDefinition(def *StructDef, decl *parse.StructDef
 	def.ModulePath = c.typeOwnerPath()
 	def.Fields = make(map[string]Type)
 	def.GenericParams = declaredGenericParams
+	def.DeclaredGenerics = len(decl.TypeParams) > 0
 	def.Private = decl.Private
 	resolvedGenericParams := []string{}
 	seenGenerics := make(map[string]bool)

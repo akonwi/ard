@@ -2731,9 +2731,14 @@ func (p *parser) parseStructFields(name *Identifier) (*StructInstance, error) {
 		if err != nil {
 			return nil, err
 		}
+		propLocation := propToken.getLocation()
+		if val != nil {
+			propLocation.End = val.GetLocation().End
+		}
 		instance.Properties = append(instance.Properties, StructValue{
-			Name:  Identifier{Name: propToken.text},
-			Value: val,
+			Location: propLocation,
+			Name:     Identifier{Location: propToken.getLocation(), Name: propToken.text},
+			Value:    val,
 		})
 
 		// Check for inline comment after property

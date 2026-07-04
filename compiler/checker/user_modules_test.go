@@ -189,6 +189,45 @@ fn main() {
 		t.Fatalf("diagnostics = %v, want type mismatch", c.Diagnostics())
 	}
 }
+func TestModuleQualifiedGenericStructLiteralTypeArgs(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "models.ard"), []byte(`
+struct Box<$T> {
+  value: $T,
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := parse.Parse([]byte(`
+use app/models
+
+fn main() {
+  let good = models::Box<Str>{value: "hi"}
+  let bad = models::Box<Str>{value: 1}
+}
+`), filepath.Join(tempDir, "main.ard"))
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New("main.ard", result.Program, resolver)
+	c.Check()
+	diags := c.Diagnostics()
+	if len(diags) != 1 {
+		t.Fatalf("diagnostics = %v, want exactly the mismatched literal rejected", diags)
+	}
+	if !strings.Contains(strings.ToLower(diags[0].Message), "type mismatch") {
+		t.Fatalf("diagnostic = %v, want type mismatch", diags[0])
+	}
+}
+
 func TestSameNamedStructsFromDifferentModulesAreNominallyDistinct(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

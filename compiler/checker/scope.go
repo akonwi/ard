@@ -379,14 +379,15 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			newTypeArgs[i] = replaceGeneric(typeArg, genericName, concreteType)
 		}
 		return &StructDef{
-			Name:          t.Name,
-			ModulePath:    t.ModulePath,
-			Fields:        newFields,
-			Self:          t.Self,
-			Traits:        t.Traits,
-			GenericParams: append([]string(nil), t.GenericParams...),
-			TypeArgs:      newTypeArgs,
-			Private:       t.Private,
+			Name:             t.Name,
+			ModulePath:       t.ModulePath,
+			Fields:           newFields,
+			Self:             t.Self,
+			Traits:           t.Traits,
+			GenericParams:    append([]string(nil), t.GenericParams...),
+			DeclaredGenerics: t.DeclaredGenerics,
+			TypeArgs:         newTypeArgs,
+			Private:          t.Private,
 		}
 	default:
 		return t
@@ -469,13 +470,14 @@ func copyStructWithTypeVarMapSeen(structDef *StructDef, typeVarMap map[string]*T
 	}
 	newFields := make(map[string]Type)
 	structCopy := &StructDef{
-		Name:          structDef.Name,
-		ModulePath:    structDef.ModulePath,
-		Fields:        newFields,
-		Self:          structDef.Self,
-		Traits:        structDef.Traits,
-		GenericParams: append([]string(nil), structDef.GenericParams...),
-		Private:       structDef.Private,
+		Name:             structDef.Name,
+		ModulePath:       structDef.ModulePath,
+		Fields:           newFields,
+		Self:             structDef.Self,
+		Traits:           structDef.Traits,
+		GenericParams:    append([]string(nil), structDef.GenericParams...),
+		DeclaredGenerics: structDef.DeclaredGenerics,
+		Private:          structDef.Private,
 	}
 	seen[structDef] = structCopy
 	for name, fieldType := range structDef.Fields {
