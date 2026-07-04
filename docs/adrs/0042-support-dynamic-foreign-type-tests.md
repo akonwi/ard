@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -84,7 +84,7 @@ OnEvent: fn(ctx: ui::EventContext, ev: ui::Event) ui::EventResult {
 Rules:
 
 - Type patterns are only valid when the subject's static type is `Any` or a foreign Go interface type. Ard unions keep their existing closed, checked matching; this feature does not apply to them.
-- A pattern names a foreign Go type (or `mut` foreign type for the pointer form) and binds the narrowed value: `term::EventNotify(e)` binds `e` with type `term::EventNotify`.
+- A pattern names a concrete foreign Go type and binds the narrowed value: `term::EventNotify(e)` binds `e` with type `term::EventNotify`. A `_` binding matches the type without binding. Pointer (`mut`) patterns are deferred; use `unsafe::cast<mut T>` when a pointer form must be recovered.
 - The dynamic type set is open, so a catch-all `_` arm is required, mirroring the existing rule for imported Go enum-like constants.
 - Exhaustiveness is not checked beyond the catch-all requirement. Duplicate type patterns are diagnosed as unreachable.
 - The whole match lowers to a single Go type switch, with each arm becoming a `case pkg.T:` clause.
@@ -96,6 +96,17 @@ Match type patterns do not require an `unsafe` marker. The distinction is delibe
 - Not a general runtime reflection or introspection API. The only observable is "does this value have exactly this dynamic type."
 - Not applicable to Ard-owned types. Boxing an Ard struct into `Any` and recovering it uses the existing ADR 0036 rules; type patterns over Ard types in `match` are not added by this decision.
 - Not interface-to-interface narrowing. Patterns and cast targets are concrete named Go types (value or pointer form). Asserting from one Go interface to another Go interface is deferred until a use case demands it.
+
+### Foreign scalar narrowing
+
+Implementing the vaxis handler surfaced one supporting coercion: a foreign
+named scalar (such as `term.EventTitle`, a Go string newtype) narrows
+implicitly to its underlying primitive wherever a value of that primitive is
+expected, lowering to an explicit Go conversion like `string(v)`. The coercion
+is total and one-directional; primitives still require contextual literal
+typing or wrappers to become named scalars. Contexts that need type identity
+rather than a converted value exclude the coercion: mutable parameters,
+equality over nullable inners, and Go interface impl signatures.
 
 ## Consequences
 
