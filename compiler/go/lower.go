@@ -6380,6 +6380,13 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 			targetInfo = info
 			hasFunctionType = true
 		}
+		// A named Go func type is called through its underlying signature.
+		if info.Kind == air.TypeForeignType && validTypeID(l.program, info.Value) {
+			if underlying := l.program.Types[info.Value-1]; underlying.Kind == air.TypeFunction {
+				targetInfo = underlying
+				hasFunctionType = true
+			}
+		}
 	}
 	params := []air.Param{}
 	if hasFunctionType {

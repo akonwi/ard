@@ -1414,6 +1414,15 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 			}
 		}
 	}
+	// The reverse also mirrors Go: a named Go func value flows where an Ard
+	// function type is expected (named-to-unnamed assignability).
+	if expectedFn, ok := expected.(*FunctionDef); ok {
+		if foreign, ok := actual.(*ForeignType); ok && !foreign.Pointer {
+			if actualFn, ok := foreign.Underlying.(*FunctionDef); ok {
+				return c.areCompatible(expectedFn, actualFn)
+			}
+		}
+	}
 	return expected.equal(actual)
 }
 
@@ -4774,6 +4783,15 @@ func functionDefForCallableType(typ Type) (*FunctionDef, bool) {
 	switch fn := typ.(type) {
 	case *FunctionDef:
 		return fn, true
+	case *ForeignType:
+		// A named Go func type is callable with its underlying signature,
+		// matching Go's own call rules for named func values.
+		if !fn.Pointer {
+			if underlying, ok := fn.Underlying.(*FunctionDef); ok {
+				return underlying, true
+			}
+		}
+		return nil, false
 	default:
 		return nil, false
 	}
@@ -4986,8 +5004,9 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			var fnDef *FunctionDef
 			var ok bool
 
-			// Try different types for the function symbol
-			fnDef, ok = fnSym.Type.(*FunctionDef)
+			// Try different types for the function symbol, including named Go
+			// func values, which call through their underlying signature.
+			fnDef, ok = functionDefForCallableType(fnSym.Type)
 			if !ok {
 				c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
 				return nil

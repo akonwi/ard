@@ -3503,15 +3503,35 @@ func (fl *functionLowerer) lowerFunctionTypeCall(name string, args []checker.Exp
 	if target == nil {
 		return nil, fmt.Errorf("function value call %s missing target", name)
 	}
-	loweredArgs, err := fl.lowerArgsForFunctionType(args, target.Type)
+	functionTypeID, ok := fl.functionTypeIDForCallable(target.Type)
+	if !ok {
+		return nil, fmt.Errorf("%s is not a function", name)
+	}
+	loweredArgs, err := fl.lowerArgsForFunctionType(args, functionTypeID)
 	if err != nil {
 		return nil, err
 	}
-	typeInfo, ok := fl.l.typeInfo(target.Type)
-	if !ok || typeInfo.Kind != TypeFunction {
-		return nil, fmt.Errorf("%s is not a function", name)
-	}
+	typeInfo, _ := fl.l.typeInfo(functionTypeID)
 	return &Expr{Kind: ExprCallClosure, Type: typeInfo.Return, Target: target, Args: loweredArgs}, nil
+}
+
+// functionTypeIDForCallable resolves a callee type to its function type: a
+// function type directly, or a named Go func type through its underlying
+// signature (foreign func values are called like ordinary Go func values).
+func (fl *functionLowerer) functionTypeIDForCallable(typeID TypeID) (TypeID, bool) {
+	typeInfo, ok := fl.l.typeInfo(typeID)
+	if !ok {
+		return NoType, false
+	}
+	if typeInfo.Kind == TypeFunction {
+		return typeID, true
+	}
+	if typeInfo.Kind == TypeForeignType && typeInfo.Value != NoType {
+		if underlying, ok := fl.l.typeInfo(typeInfo.Value); ok && underlying.Kind == TypeFunction {
+			return typeInfo.Value, true
+		}
+	}
+	return NoType, false
 }
 
 func (fl *functionLowerer) lowerNonProducingBlock(stmts []checker.Statement) (Block, error) {
@@ -3717,9 +3737,11 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		return fl.lowerFunctionTypeCall("function value", e.Args, target)
 	case *checker.FunctionCall:
-		if local, ok := fl.locals[e.Name]; ok && fl.localKind(local) == TypeFunction {
-			target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
-			return fl.lowerFunctionTypeCall(e.Name, e.Args, target)
+		if local, ok := fl.locals[e.Name]; ok {
+			if _, callable := fl.functionTypeIDForCallable(fl.fn.Locals[local].Type); callable {
+				target := &Expr{Kind: ExprLoadLocal, Type: fl.fn.Locals[local].Type, Local: local}
+				return fl.lowerFunctionTypeCall(e.Name, e.Args, target)
+			}
 		}
 		if global, ok := fl.l.lookupGlobalInModule(fl.fn.Module, e.Name); ok {
 			globalType := fl.l.program.Globals[global].Type

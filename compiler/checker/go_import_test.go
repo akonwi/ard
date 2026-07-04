@@ -1031,3 +1031,33 @@ fn bad() {
 		},
 	})
 }
+
+// Named Go func values are callable with their underlying signature and flow
+// where Ard function types are expected (Go's named-to-unnamed assignability).
+func TestNamedGoFuncValuesAreCallable(t *testing.T) {
+	run(t, []test{
+		{
+			name: "named func value satisfies an Ard fn annotation",
+			input: `use go:context
+fn wrap(cancel: context::CancelFunc) fn() Void {
+  let f: fn() Void = cancel
+  f
+}`,
+		},
+		{
+			name: "calling a named func value directly",
+			input: `use go:context
+fn run(cancel: context::CancelFunc) {
+  cancel()
+}`,
+		},
+		{
+			name: "calling a named func value with wrong arity is rejected",
+			input: `use go:net/http
+fn call(handler: http::HandlerFunc) {
+  handler()
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "missing argument for parameter: arg1"}},
+		},
+	})
+}

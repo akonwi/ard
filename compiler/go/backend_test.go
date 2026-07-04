@@ -4382,3 +4382,58 @@ fn main() {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+
+// Named Go func values flow back into Ard: they are callable with their
+// underlying signature and satisfy Ard function types (Go's named-to-unnamed
+// assignability).
+func TestRunProgramExecutesNamedGoFuncValues(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"namedfunc\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module namedfunc\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
+
+type Doubler func(int) int
+
+func MakeDoubler() Doubler { return func(v int) int { return v * 2 } }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use go:namedfunc/ffi
+
+fn apply(f: fn(Int) Int, v: Int) Int {
+  f(v)
+}
+
+fn main() {
+  let double = ffi::MakeDoubler()
+  // Calling a named Go func value directly.
+  if not double(3) == 6 { panic("direct call failed") }
+  // A named Go func value satisfies an Ard function annotation.
+  let f: fn(Int) Int = double
+  if not f(4) == 8 { panic("annotated call failed") }
+  // And flows into Ard function-typed parameters.
+  if not apply(double, 5) == 10 { panic("param flow failed") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
