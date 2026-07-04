@@ -1,6 +1,9 @@
 package formatter
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFormatIsIdempotent(t *testing.T) {
 	inputs := []struct {
@@ -92,6 +95,49 @@ func TestFormatGenericStructLiterals(t *testing.T) {
 			}
 			if string(again) != string(got) {
 				t.Fatalf("format not idempotent:\nfirst:\n%s\nsecond:\n%s", got, again)
+			}
+		})
+	}
+}
+
+func TestUnusedImportRemovalKeepsTypeArgUses(t *testing.T) {
+	inputs := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "module used only in struct literal type args",
+			input: "use go:example.com/ui\n\nstruct Box<$T> {\n  value: $T,\n}\n\nfn f() {\n  let b = Box<ui::Theme>{}\n}\n",
+		},
+		{
+			name:  "module used only in static call type args",
+			input: "use ard/unsafe\nuse go:example.com/ui\n\nfn f(v: Any) {\n  let x = unsafe::cast<ui::Theme>(v)\n}\n",
+		},
+		{
+			name:  "module used only in function call type args",
+			input: "use go:example.com/ui\n\nfn f(v: Any) {\n  let x = identity<ui::Theme>(v)\n}\n",
+		},
+		{
+			name:  "module used only in method call type args",
+			input: "use go:example.com/ui\n\nfn f(v: Holder) {\n  let x = v.pick<ui::Theme>()\n}\n",
+		},
+		{
+			name:  "unused import is still removed alongside type arg use",
+			input: "use go:example.com/ui\nuse go:example.com/unused\n\nstruct Box<$T> {\n  value: $T,\n}\n\nfn f() {\n  let b = Box<ui::Theme>{}\n}\n",
+		},
+	}
+
+	for _, tt := range inputs {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Format([]byte(tt.input), "test.ard")
+			if err != nil {
+				t.Fatalf("format failed: %v", err)
+			}
+			if !strings.Contains(string(got), "use go:example.com/ui") {
+				t.Fatalf("expected import to be preserved, got:\n%s", got)
+			}
+			if strings.Contains(string(got), "use go:example.com/unused") {
+				t.Fatalf("expected unused import to be removed, got:\n%s", got)
 			}
 		})
 	}

@@ -189,15 +189,24 @@ func collectImportUsesInExpression(expr parse.Expression, used map[string]bool) 
 			used[name] = true
 		}
 		collectImportUsesInExpression(e.Target, used)
+		for _, typeArg := range e.Function.TypeArgs {
+			collectImportUsesInType(typeArg, used)
+		}
 		for _, arg := range e.Function.Args {
 			collectImportUsesInExpression(arg.Value, used)
 		}
 	case *parse.FunctionCall:
+		for _, typeArg := range e.TypeArgs {
+			collectImportUsesInType(typeArg, used)
+		}
 		for _, arg := range e.Args {
 			collectImportUsesInExpression(arg.Value, used)
 		}
 	case *parse.FunctionValueCall:
 		collectImportUsesInExpression(e.Callee, used)
+		for _, typeArg := range e.TypeArgs {
+			collectImportUsesInType(typeArg, used)
+		}
 		for _, arg := range e.Args {
 			collectImportUsesInExpression(arg.Value, used)
 		}
@@ -206,12 +215,18 @@ func collectImportUsesInExpression(expr parse.Expression, used map[string]bool) 
 		collectImportUsesInExpression(e.Property, used)
 	case *parse.InstanceMethod:
 		collectImportUsesInExpression(e.Target, used)
+		for _, typeArg := range e.Method.TypeArgs {
+			collectImportUsesInType(typeArg, used)
+		}
 		for _, arg := range e.Method.Args {
 			collectImportUsesInExpression(arg.Value, used)
 		}
 	case *parse.StructInstance:
 		if strings.Contains(e.Name.Name, "::") {
 			used[strings.SplitN(e.Name.Name, "::", 2)[0]] = true
+		}
+		for _, typeArg := range e.TypeArgs {
+			collectImportUsesInType(typeArg, used)
 		}
 		for _, prop := range e.Properties {
 			collectImportUsesInExpression(prop.Value, used)
