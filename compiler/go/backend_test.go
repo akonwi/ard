@@ -1758,6 +1758,65 @@ func TestRunProgramExecutesSimpleMain(t *testing.T) {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+func TestRunProgramSupportsStatementProducingGlobalInitializers(t *testing.T) {
+	program := lowerSource(t, `
+		mut selected = match true {
+			true => 1,
+			false => 2,
+		}
+		let doubled = match selected {
+			1 => 10,
+			_ => 20,
+		}
+
+		fn main() {
+			selected = selected + 1
+			if selected != 2 {
+				panic("expected selected 2, got {selected}")
+			}
+			if doubled != 10 {
+				panic("expected doubled 10, got {doubled}")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramSupportsMutableModuleGlobals(t *testing.T) {
+	program := lowerSource(t, `
+		mut counter = 0
+		mut items: [Str] = []
+
+		fn bump() {
+			counter = counter + 1
+			items.push("n{counter}")
+		}
+
+		fn main() {
+			bump()
+			bump()
+			counter = counter + 10
+			items.prepend("start")
+			if counter != 12 {
+				panic("expected counter 12, got {counter}")
+			}
+			if items.size() != 3 {
+				panic("expected 3 items, got {items.size()}")
+			}
+			if items.at(0) != "start" or items.at(1) != "n1" or items.at(2) != "n2" {
+				panic("unexpected items {items.at(0)} {items.at(1)} {items.at(2)}")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramSupportsModuleLevelLetCapturedByClosure(t *testing.T) {
 	program := lowerSource(t, `
 		let refresh_event = "inbox.refresh"

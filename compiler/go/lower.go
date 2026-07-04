@@ -1033,7 +1033,15 @@ func (l *lowerer) lowerGlobal(global air.Global) (ast.Decl, error) {
 			valueExpr = l.voidValueExpr()
 		}
 	} else if len(value.stmts) != 0 {
-		return nil, fmt.Errorf("global initializers with setup statements are not supported")
+		// Wrap statement-producing initializers (match, try, etc.) in an
+		// immediately-invoked function so they remain valid Go package
+		// variable initializers.
+		body := append([]ast.Stmt{}, value.stmts...)
+		body = append(body, &ast.ReturnStmt{Results: []ast.Expr{valueExpr}})
+		valueExpr = &ast.CallExpr{Fun: &ast.FuncLit{
+			Type: &ast.FuncType{Results: &ast.FieldList{List: []*ast.Field{{Type: globalType}}}},
+			Body: &ast.BlockStmt{List: body},
+		}}
 	}
 	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
 		Names:  []*ast.Ident{ast.NewIdent(globalName(l.program, global))},
@@ -1720,6 +1728,30 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			Lhs: []ast.Expr{l.localAssignExpr(fn, stmt.Local)},
 			Tok: token.ASSIGN,
 			Rhs: []ast.Expr{value.expr},
+		})
+		return out, nil
+	case air.StmtAssignGlobal:
+		if stmt.Value == nil {
+			return nil, fmt.Errorf("global assignment missing value")
+		}
+		if stmt.Global < 0 || int(stmt.Global) >= len(l.program.Globals) {
+			return nil, fmt.Errorf("assignment to unknown global %d", stmt.Global)
+		}
+		global := l.program.Globals[stmt.Global]
+		value, err := l.lowerExprWithExpectedType(fn, *stmt.Value, global.Type)
+		if err != nil {
+			return nil, err
+		}
+		out := append([]ast.Stmt{}, value.stmts...)
+		valueExpr := value.expr
+		if l.isVoidType(global.Type) || isVoidExpr(valueExpr) {
+			out = l.appendVoidValueEval(out, valueExpr)
+			valueExpr = l.voidValueExpr()
+		}
+		out = append(out, &ast.AssignStmt{
+			Lhs: []ast.Expr{l.globalExpr(global)},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{valueExpr},
 		})
 		return out, nil
 	case air.StmtSetForeignValue:
@@ -6482,8 +6514,8 @@ func (l *lowerer) lowerListPrepend(fn air.Function, expr air.Expr) (loweredExpr,
 	if expr.Target == nil || len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("list prepend expects target and value")
 	}
-	if expr.Target.Kind != air.ExprLoadLocal {
-		return loweredExpr{}, fmt.Errorf("list prepend currently requires local target")
+	if expr.Target.Kind != air.ExprLoadLocal && expr.Target.Kind != air.ExprLoadGlobal {
+		return loweredExpr{}, fmt.Errorf("list prepend requires an addressable local or global target")
 	}
 	if !validTypeID(l.program, expr.Target.Type) {
 		return loweredExpr{}, fmt.Errorf("invalid list prepend target type")
@@ -6500,7 +6532,15 @@ func (l *lowerer) lowerListPrepend(fn air.Function, expr air.Expr) (loweredExpr,
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	target := l.localValueExpr(fn, expr.Target.Local)
+	var target ast.Expr
+	if expr.Target.Kind == air.ExprLoadLocal {
+		target = l.localValueExpr(fn, expr.Target.Local)
+	} else {
+		if expr.Target.Global < 0 || int(expr.Target.Global) >= len(l.program.Globals) {
+			return loweredExpr{}, fmt.Errorf("list prepend references invalid global %d", expr.Target.Global)
+		}
+		target = l.globalExpr(l.program.Globals[expr.Target.Global])
+	}
 	valueExpr := value.expr
 	stmts := append([]ast.Stmt{}, value.stmts...)
 	if l.isVoidType(listInfo.Elem) || isVoidExpr(valueExpr) {
@@ -6549,8 +6589,8 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("list push missing target")
 	}
-	if expr.Target.Kind != air.ExprLoadLocal && expr.Target.Kind != air.ExprGetField {
-		return loweredExpr{}, fmt.Errorf("list push requires an addressable local or field target")
+	if expr.Target.Kind != air.ExprLoadLocal && expr.Target.Kind != air.ExprGetField && expr.Target.Kind != air.ExprLoadGlobal {
+		return loweredExpr{}, fmt.Errorf("list push requires an addressable local, field, or global target")
 	}
 	if len(expr.Args) != 1 {
 		return loweredExpr{}, fmt.Errorf("list push expects one arg")

@@ -154,6 +154,38 @@ func TestLowerFunctionCanReadModuleLevelLet(t *testing.T) {
 		t.Fatalf("event_name loads global %d, want %d", eventName.Body.Result.Global, program.Globals[0].ID)
 	}
 }
+func TestLowerMutableModuleGlobalAssignment(t *testing.T) {
+	program := lowerSource(t, `
+		mut counter = 0
+
+		fn bump() {
+			counter = counter + 1
+		}
+	`)
+
+	if len(program.Globals) != 1 {
+		t.Fatalf("global count = %d, want 1", len(program.Globals))
+	}
+	global := program.Globals[0]
+	if global.Name != "counter" || !global.Mutable || !global.Private {
+		t.Fatalf("global = %#v, want mutable private counter", global)
+	}
+	bump := findFunction(t, program, "bump")
+	if len(bump.Body.Stmts) != 1 {
+		t.Fatalf("bump stmt count = %d, want 1", len(bump.Body.Stmts))
+	}
+	assign := bump.Body.Stmts[0]
+	if assign.Kind != StmtAssignGlobal {
+		t.Fatalf("bump stmt kind = %d, want StmtAssignGlobal", assign.Kind)
+	}
+	if assign.Global != global.ID {
+		t.Fatalf("assignment targets global %d, want %d", assign.Global, global.ID)
+	}
+	if assign.Value == nil || assign.Value.Kind != ExprIntAdd {
+		t.Fatalf("assignment value = %#v, want ExprIntAdd", assign.Value)
+	}
+}
+
 func TestLowerOmitsTestsByDefault(t *testing.T) {
 	result := parse.Parse([]byte(`
 		fn main() Int { 1 }
@@ -340,19 +372,23 @@ func TestLowerWhileLoop(t *testing.T) {
 		count
 	`)
 
+	// Module-level `mut count` is an AIR global, so the script holds only the loop.
 	script := program.Functions[program.Script]
-	if len(script.Body.Stmts) != 2 {
-		t.Fatalf("script stmt count = %d, want let and while", len(script.Body.Stmts))
+	if len(script.Body.Stmts) != 1 {
+		t.Fatalf("script stmt count = %d, want while only", len(script.Body.Stmts))
 	}
-	loop := script.Body.Stmts[1]
+	if len(program.Globals) != 1 || program.Globals[0].Name != "count" {
+		t.Fatalf("globals = %#v, want mut count", program.Globals)
+	}
+	loop := script.Body.Stmts[0]
 	if loop.Kind != StmtWhile {
-		t.Fatalf("second stmt = %#v, want StmtWhile", loop)
+		t.Fatalf("first stmt = %#v, want StmtWhile", loop)
 	}
 	if loop.Condition == nil || loop.Condition.Kind != ExprLt {
 		t.Fatalf("while condition = %#v, want ExprLt", loop.Condition)
 	}
-	if len(loop.Body.Stmts) != 1 || loop.Body.Stmts[0].Kind != StmtAssign {
-		t.Fatalf("while body = %#v, want assignment", loop.Body)
+	if len(loop.Body.Stmts) != 1 || loop.Body.Stmts[0].Kind != StmtAssignGlobal {
+		t.Fatalf("while body = %#v, want global assignment", loop.Body)
 	}
 }
 func TestLowerEnums(t *testing.T) {

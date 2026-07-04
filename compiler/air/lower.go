@@ -247,10 +247,8 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 
 		switch node := stmt.Stmt.(type) {
 		case *checker.VariableDef:
-			if !node.Mutable {
-				if _, err := l.declareGlobal(modID, node); err != nil {
-					return err
-				}
+			if _, err := l.declareGlobal(modID, node); err != nil {
+				return err
 			}
 		}
 
@@ -293,7 +291,7 @@ func (l *lowerer) lowerModule(module checker.Module) error {
 
 	for i := range prog.Statements {
 		stmt := prog.Statements[i]
-		if def, ok := stmt.Stmt.(*checker.VariableDef); ok && !def.Mutable {
+		if def, ok := stmt.Stmt.(*checker.VariableDef); ok {
 			if err := l.lowerGlobal(modID, def); err != nil {
 				return fmt.Errorf("lower global %s: %w", def.Name, err)
 			}
@@ -3172,6 +3170,14 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 				return nil, err
 			}
 			if !ok {
+				if global, found := fl.l.lookupGlobalInModule(fl.fn.Module, target.Name()); found {
+					globalType := fl.l.program.Globals[global].Type
+					value, err := fl.lowerExprWithExpected(s.Value, globalType)
+					if err != nil {
+						return nil, err
+					}
+					return &Stmt{Kind: StmtAssignGlobal, Global: global, Type: globalType, Value: value}, nil
+				}
 				return nil, fmt.Errorf("assignment to unknown local %s", target.Name())
 			}
 			value, err := fl.lowerExprWithExpected(s.Value, fl.fn.Locals[local].Type)
@@ -5853,13 +5859,12 @@ func topLevelExecutableStatements(stmts []checker.Statement) []checker.Statement
 			continue
 		}
 		if stmt.Stmt != nil {
-			switch node := stmt.Stmt.(type) {
+			switch stmt.Stmt.(type) {
 			case *checker.StructDef, *checker.Enum, *checker.Union:
 				continue
 			case *checker.VariableDef:
-				if !node.Mutable {
-					continue
-				}
+				// Module-level variables (both let and mut) are AIR globals.
+				continue
 			}
 		}
 		filtered = append(filtered, stmt)

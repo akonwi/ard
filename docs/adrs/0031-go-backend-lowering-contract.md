@@ -271,11 +271,13 @@ Module-level variables lower to package-level Go `var` declarations (`0021-repre
 
 Module-level variables always lower to `var`, never `const`, even when the initializer is a literal. Ard module lets can hold arbitrary expressions, and uniform `var` lowering avoids special-casing; a future optimization may emit `const` for literal-initialized lets but is out of scope here.
 
-When an initializer requires setup statements (for example a block or match expression), the variable is declared without an initializer and assigned in a generated `init()` function, rather than wrapped in an immediately-invoked function literal.
+When an initializer requires setup statements (for example a block or match expression), the initializer is wrapped in an immediately-invoked function literal (`var x T = func() T { ...; return v }()`). An IIFE is preferred over a generated `init()` function because it keeps Go's dependency-aware package variable initialization intact: a later variable whose initializer reads `x` still observes the initialized value, which an `init()`-assigned variable would not guarantee.
 
 Initialization order relies on Go's package-level variable initialization: declaration order is preserved for otherwise-independent variables, and reference dependencies are resolved automatically. This matches Ard's top-to-bottom module-load order. Cyclic global initializers are rejected during AIR lowering before code generation.
 
-A `mut` global receives no special treatment beyond being an unexported package variable; it is ordinary package state, as in Ard today.
+A `mut` global receives no special treatment beyond being an unexported package variable; it is ordinary package state, as in Ard today. Assignments to a `mut` global from function bodies lower to ordinary Go package-variable assignments.
+
+In a script-root module, all module-level variable initializers — `let` and `mut` alike — run at package initialization time, before any top-level statements execute. Top-level statements observe fully initialized module variables and never interleave with their initializers.
 
 ### Functions and methods
 

@@ -245,6 +245,20 @@ func validateBlock(program *Program, fn Function, block Block) error {
 				return err
 			}
 		}
+		if stmt.Kind == StmtAssignGlobal {
+			if !validGlobalID(program, stmt.Global) {
+				return fmt.Errorf("global assignment references invalid global %d", stmt.Global)
+			}
+			if stmt.Value == nil {
+				return fmt.Errorf("global assignment missing value")
+			}
+			if !program.Globals[stmt.Global].Mutable {
+				return fmt.Errorf("assignment to immutable global %s", program.Globals[stmt.Global].Name)
+			}
+			if stmt.Type != NoType && stmt.Type != program.Globals[stmt.Global].Type {
+				return fmt.Errorf("global assignment type %d does not match global type %d", stmt.Type, program.Globals[stmt.Global].Type)
+			}
+		}
 		if stmt.Kind == StmtSetField {
 			if stmt.Target == nil {
 				return fmt.Errorf("field set statement missing target")

@@ -10,6 +10,7 @@ type StmtKind uint8
 const (
 	StmtLet StmtKind = iota
 	StmtAssign
+	StmtAssignGlobal
 	StmtSetField
 	StmtSetForeignField
 	StmtSetForeignValue
@@ -22,6 +23,7 @@ const (
 type Stmt struct {
 	Kind       StmtKind
 	Local      LocalID
+	Global     GlobalID
 	ValueLocal LocalID
 	Name       string
 	Type       TypeID
