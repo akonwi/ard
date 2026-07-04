@@ -818,3 +818,43 @@ func TestCallingPackageFunctions(t *testing.T) {
 		},
 	})
 }
+
+// Top-level function signatures are hoisted, so functions can be referenced
+// before their declaration within a module.
+func TestForwardFunctionReferences(t *testing.T) {
+	run(t, []test{
+		{
+			name: "call a function declared later in the module",
+			input: strings.Join([]string{
+				`fn caller() Str {`,
+				`  helper("x")`,
+				`}`,
+				`fn helper(v: Str) Str { v }`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "forward reference inside a closure",
+			input: strings.Join([]string{
+				`fn make() fn() Str {`,
+				`  fn() Str { helper("x") }`,
+				`}`,
+				`fn helper(v: Str) Str { v }`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "forward reference with a bad argument still reports a mismatch",
+			input: strings.Join([]string{
+				`fn caller() Str {`,
+				`  helper(1)`,
+				`}`,
+				`fn helper(v: Str) Str { v }`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Void"},
+			},
+		},
+	})
+}

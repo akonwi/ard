@@ -57,6 +57,44 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 	}
 }
 
+// hoistTopLevelFunctionSignatures pre-resolves the signatures of top-level
+// function declarations and adds them to module scope so functions can be
+// referenced before their declaration within a module.
+func (c *Checker) hoistTopLevelFunctionSignatures() {
+	c.hoistedTopLevelFunctions = map[*parse.FunctionDeclaration]*FunctionDef{}
+	for i := range c.input.Statements {
+		def, ok := c.input.Statements[i].(*parse.FunctionDeclaration)
+		if !ok {
+			continue
+		}
+		params := c.resolveParametersWithContext(def.Parameters, nil)
+		returnType := c.resolveReturnTypeWithContext(def.ReturnType, nil)
+		resolved := true
+		for i, param := range def.Parameters {
+			if param.Type != nil && params[i].Type == nil {
+				resolved = false
+				break
+			}
+		}
+		if !resolved {
+			// Leave unresolvable signatures to the in-order pass so its
+			// diagnostics and panics behave as before.
+			continue
+		}
+		fn := &FunctionDef{
+			Name:          def.Name,
+			GenericParams: append([]string(nil), def.TypeParams...),
+			Parameters:    params,
+			ReturnType:    returnType,
+			Body:          nil,
+			Private:       def.Private,
+			IsTest:        def.IsTest,
+		}
+		c.hoistedTopLevelFunctions[def] = fn
+		c.scope.add(def.Name, fn, false)
+	}
+}
+
 func (c *Checker) populateTopLevelTypeDefinitions() {
 	for i := range c.input.Statements {
 		switch c.input.Statements[i].(type) {

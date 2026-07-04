@@ -301,6 +301,7 @@ type Checker struct {
 	duplicateTopLevelTypeDeclarations map[parse.Statement]bool
 	topLevelStructDeclarations        map[string]*parse.StructDefinition
 	topLevelTypeAliases               map[string]*parse.TypeDeclaration
+	hoistedTopLevelFunctions          map[*parse.FunctionDeclaration]*FunctionDef
 	resolvingTopLevelStructs          map[string]bool
 	resolvedTopLevelStructs           map[string]bool
 	resolvingTopLevelAliases          map[string]bool
@@ -467,6 +468,7 @@ func (c *Checker) Check() {
 	c.hoistTopLevelTypeDeclarations()
 	c.predeclareTopLevelTypeAliases()
 	c.populateTopLevelTypeDefinitions()
+	c.hoistTopLevelFunctionSignatures()
 
 	for i := range c.input.Statements {
 		if stmt := c.checkedTopLevelTypeStatement(c.input.Statements[i]); stmt != nil {
@@ -7835,26 +7837,39 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func(), ext
 		init()
 	}
 
-	// Resolve parameters and return type
-	params := c.resolveParametersWithContext(def.Parameters, nil)
-	returnType := c.resolveReturnTypeWithContext(def.ReturnType, nil)
+	// Reuse the hoisted signature when this is a top-level declaration whose
+	// signature was pre-resolved for forward references. This keeps earlier
+	// call sites pointing at the same definition instance and avoids duplicate
+	// signature diagnostics.
+	var fn *FunctionDef
+	var params []Parameter
+	var returnType Type
+	if hoisted, ok := c.hoistedTopLevelFunctions[def]; ok && init == nil {
+		fn = hoisted
+		params = fn.Parameters
+		returnType = fn.ReturnType
+	} else {
+		// Resolve parameters and return type
+		params = c.resolveParametersWithContext(def.Parameters, nil)
+		returnType = c.resolveReturnTypeWithContext(def.ReturnType, nil)
 
-	// Validate parameters resolved correctly (for named functions, types must be explicit)
-	for i, param := range def.Parameters {
-		if param.Type != nil && params[i].Type == nil {
-			panic(fmt.Errorf("Cannot resolve type for parameter %s", param.Name))
+		// Validate parameters resolved correctly (for named functions, types must be explicit)
+		for i, param := range def.Parameters {
+			if param.Type != nil && params[i].Type == nil {
+				panic(fmt.Errorf("Cannot resolve type for parameter %s", param.Name))
+			}
 		}
-	}
 
-	// Create function definition
-	fn := &FunctionDef{
-		Name:          def.Name,
-		GenericParams: append([]string(nil), def.TypeParams...),
-		Parameters:    params,
-		ReturnType:    returnType,
-		Body:          nil,
-		Private:       def.Private,
-		IsTest:        def.IsTest,
+		// Create function definition
+		fn = &FunctionDef{
+			Name:          def.Name,
+			GenericParams: append([]string(nil), def.TypeParams...),
+			Parameters:    params,
+			ReturnType:    returnType,
+			Body:          nil,
+			Private:       def.Private,
+			IsTest:        def.IsTest,
+		}
 	}
 
 	if def.IsTest {
@@ -7873,10 +7888,13 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func(), ext
 		}
 	}
 
-	// Add function to scope before checking body (for recursion support)
-	// For methods (when init != nil), only add within the body scope
+	// Add function to scope before checking body (for recursion support).
+	// Hoisted top-level functions are already in scope.
+	// For methods (when init != nil), only add within the body scope.
 	if init == nil {
-		c.scope.add(def.Name, fn, false)
+		if _, ok := c.hoistedTopLevelFunctions[def]; !ok {
+			c.scope.add(def.Name, fn, false)
+		}
 	}
 
 	c.pushFunctionGenericContext(fn, extraGenericParams...)
