@@ -4827,8 +4827,7 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 	numOmittedArgs := 0
 	if len(resolvedExprs) < len(fnDef.Parameters) {
 		for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-			paramType := fnDef.Parameters[i].Type
-			if _, isMaybe := paramType.(*Maybe); !isMaybe {
+			if !parameterOmittable(fnDef.Parameters[i]) {
 				c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), location)
 				return nil
 			}
@@ -5039,8 +5038,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if len(resolvedExprs) < len(fnDef.Parameters) {
 				// Find first non-nullable parameter that's missing
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-					paramType := fnDef.Parameters[i].Type
-					if _, isMaybe := paramType.(*Maybe); !isMaybe {
+					if !parameterOmittable(fnDef.Parameters[i]) {
 						c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
 						return nil
 					}
@@ -5240,8 +5238,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if len(resolvedExprs) < len(fnDef.Parameters) {
 				// Find first non-nullable parameter that's missing
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-					paramType := fnDef.Parameters[i].Type
-					if _, isMaybe := paramType.(*Maybe); !isMaybe {
+					if !parameterOmittable(fnDef.Parameters[i]) {
 						c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
 						return nil
 					}
@@ -5703,7 +5700,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				numOmittedArgs := 0
 				if len(resolvedExprs) < len(fnDef.Parameters) {
 					for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-						if _, isMaybe := fnDef.Parameters[i].Type.(*Maybe); !isMaybe {
+						if !parameterOmittable(fnDef.Parameters[i]) {
 							c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
 							return nil
 						}
@@ -5780,8 +5777,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					return nil
 				}
 				if len(resolvedExprs) != len(fnDef.Parameters) {
-					c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
-					return nil
+					// A trailing Go variadic argument may be omitted.
+					omittedVariadic := len(resolvedExprs) == len(fnDef.Parameters)-1 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic
+					if !omittedVariadic {
+						c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
+						return nil
+					}
 				}
 				args := make([]Expression, len(resolvedExprs))
 				for i, expr := range resolvedExprs {
@@ -5849,8 +5850,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if len(resolvedExprs) < len(fnDef.Parameters) {
 				// Find first non-nullable parameter that's missing
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-					paramType := fnDef.Parameters[i].Type
-					if _, isMaybe := paramType.(*Maybe); !isMaybe {
+					if !parameterOmittable(fnDef.Parameters[i]) {
 						c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
 						return nil
 					}
@@ -8246,6 +8246,18 @@ func (c *Checker) synthesizeMaybeSome(value Expression, maybeType Type) Expressi
 // Mutable parameters require addressable mutable arguments.
 // Synthesizes maybe::none() calls for omitted nullable arguments.
 // If any error occurs, it's added to the checker's diagnostics.
+
+// parameterOmittable reports whether a trailing parameter may be omitted at a
+// call site: nullable parameters default to none, and a Go variadic parameter
+// may receive zero arguments.
+func parameterOmittable(param Parameter) bool {
+	if param.Variadic {
+		return true
+	}
+	_, isMaybe := param.Type.(*Maybe)
+	return isMaybe
+}
+
 func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int) ([]Expression, *FunctionDef) {
 	// Create the full argument list including synthesized maybe::none() calls for omitted arguments
 	// Need to maintain parameter order, so use indexed assignment instead of appending
@@ -8351,6 +8363,12 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		} else {
 			allExprs[i] = checkedArg
 		}
+	}
+
+	// An omitted trailing Go variadic argument stays omitted: the generated
+	// call simply passes nothing for the variadic tail.
+	if len(allExprs) > 0 && allExprs[len(allExprs)-1] == nil && fnDefCopy.Parameters[len(allExprs)-1].Variadic {
+		allExprs = allExprs[:len(allExprs)-1]
 	}
 
 	// Fill in synthesized maybe::none() calls for omitted arguments
@@ -8621,9 +8639,8 @@ func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([
 			// Check if remaining parameters are all nullable
 			allNullableOrProvidedMatches := true
 			for i := len(positionalArgs); i < len(params); i++ {
-				paramType := params[i].Type
-				// Check if parameter type is nullable (Maybe)
-				if _, isMaybe := paramType.(*Maybe); !isMaybe {
+				// Check if the parameter is omittable (nullable or Go variadic)
+				if !parameterOmittable(params[i]) {
 					allNullableOrProvidedMatches = false
 					break
 				}
@@ -8675,9 +8692,8 @@ func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([
 	// Check that all parameters are provided (allow missing nullable parameters)
 	for i, param := range params {
 		if !used[i] {
-			// Allow omitting nullable parameters
-			paramType := params[i].Type
-			if _, isMaybe := paramType.(*Maybe); !isMaybe {
+			// Allow omitting nullable and Go variadic parameters
+			if !parameterOmittable(params[i]) {
 				return nil, fmt.Errorf("missing argument for parameter: %s", param.Name)
 			}
 		}

@@ -115,12 +115,14 @@ func functionDefFromGoSignatureBound(name string, sig *types.Signature, bindings
 		param := sig.Params().At(i)
 		goType := param.Type()
 		mutable := false
+		variadic := false
 		if sig.Variadic() && i == sig.Params().Len()-1 {
 			slice, ok := goType.(*types.Slice)
 			if !ok {
 				return nil, fmt.Sprintf("variadic parameter %d is not a slice", i+1)
 			}
 			goType = slice.Elem()
+			variadic = true
 		} else if _, ok := goType.Underlying().(*types.Slice); ok {
 			mutable = true
 		} else if _, ok := goType.Underlying().(*types.Map); ok {
@@ -134,7 +136,7 @@ func functionDefFromGoSignatureBound(name string, sig *types.Signature, bindings
 		if paramName == "" {
 			paramName = fmt.Sprintf("arg%d", i+1)
 		}
-		params = append(params, Parameter{Name: paramName, Type: ardType, Mutable: mutable})
+		params = append(params, Parameter{Name: paramName, Type: ardType, Mutable: mutable, Variadic: variadic})
 	}
 
 	ret, reason := boundReturnTypeFromGo(sig.Results(), sig.TypeParams(), bindings)

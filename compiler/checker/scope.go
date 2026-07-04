@@ -430,9 +430,10 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 	newParams := make([]Parameter, len(fnDef.Parameters))
 	for i, param := range fnDef.Parameters {
 		newParams[i] = Parameter{
-			Name:    param.Name,
-			Type:    copyTypeWithTypeVarMap(param.Type, typeVarMap),
-			Mutable: param.Mutable,
+			Name:     param.Name,
+			Type:     copyTypeWithTypeVarMap(param.Type, typeVarMap),
+			Mutable:  param.Mutable,
+			Variadic: param.Variadic,
 		}
 	}
 

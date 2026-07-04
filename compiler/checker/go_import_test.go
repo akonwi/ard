@@ -477,14 +477,13 @@ fn main() {
 }`,
 		},
 		{
-			name: "variadic foreign method rejects zero variadic args",
+			name: "variadic foreign method allows zero variadic args",
 			input: `use go:log
 
 fn main() {
   let logger = log::Default()
   logger.Println()
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "missing argument for parameter: v"}},
 		},
 		{
 			name: "variadic foreign method rejects multiple variadic args",
@@ -849,10 +848,12 @@ fmt::Nope("hello")`,
 func TestGoImportReportsFunctionCallErrors(t *testing.T) {
 	run(t, []test{
 		{
-			name: "interface function reports arity after signature is supported",
+			// The variadic tail is omittable, so one argument is valid arity;
+			// the remaining error is the first argument's type.
+			name: "interface function checks provided args when variadic tail is omitted",
 			input: `use go:fmt
 fmt::Fprint("hello")`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 2, got 1"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected io::Writer, got Str"}},
 		},
 		{
 			name: "function callback reports arity after interface parameters are supported",
@@ -866,9 +867,18 @@ http::HandleFunc()`,
 func TestGoVariadicIsSingleArdArgument(t *testing.T) {
 	run(t, []test{
 		{
-			name: "zero variadic arguments rejected",
+			name: "zero variadic arguments allowed",
 			input: `use go:fmt
-fmt::Println()`,
+fn main() {
+  let _ = fmt::Println()
+}`,
+		},
+		{
+			name: "omitting a required argument still rejected",
+			input: `use go:strings
+fn main() {
+  let _ = strings::ToUpper()
+}`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 1, got 0"}},
 		},
 		{

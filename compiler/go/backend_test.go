@@ -4497,3 +4497,22 @@ fn main() {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+
+func TestRunProgramExecutesZeroArgVariadicGoCalls(t *testing.T) {
+	program := lowerSource(t, `
+		use go:fmt
+
+		fn main() {
+			// Go variadic tail may be omitted entirely.
+			let printed = try fmt::Println() -> err { panic(err) }
+			if printed != 1 {
+				panic("expected lone newline")
+			}
+			try fmt::Println("with value") -> err { panic(err) }
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}

@@ -1138,6 +1138,11 @@ type Parameter struct {
 	Name    string
 	Type    Type
 	Mutable bool
+	// Variadic marks the single Ard argument that maps to a Go variadic
+	// parameter. The argument may be omitted at the call site, mirroring
+	// Go's zero-argument variadic calls. Ard has no variadic parameters or
+	// spread syntax; at most one value can be passed.
+	Variadic bool
 }
 
 type FunctionDef struct {
