@@ -63,6 +63,10 @@ const (
 	ExprForeignInterfaceUpcast
 	ExprUnsafeCast
 	ExprUnsafeIsNil
+	ExprMatchForeignType
+	// ExprScalarConvert converts Target's foreign named scalar value to the
+	// primitive scalar named by Type (for example Go's string(v)).
+	ExprScalarConvert
 	ExprMakeClosure
 	ExprCallClosure
 	ExprUnionWrap
@@ -211,8 +215,9 @@ type Expr struct {
 	IntCases   []IntMatchCase
 	StrCases   []StrMatchCase
 	RangeCases []IntRangeMatchCase
-	UnionCases []UnionMatchCase
-	CatchAll   Block
+	UnionCases   []UnionMatchCase
+	ForeignCases []ForeignTypeMatchCase
+	CatchAll     Block
 
 	SomeLocal LocalID
 	Some      Block
@@ -287,5 +292,15 @@ type IntRangeMatchCase struct {
 type UnionMatchCase struct {
 	Tag   uint32
 	Local LocalID
+	Body  Block
+}
+
+// ForeignTypeMatchCase is one arm of a dynamic foreign type test (ADR 0042).
+// Type names the concrete foreign type asserted by the arm. Bound reports
+// whether Local should carry the narrowed value into Body.
+type ForeignTypeMatchCase struct {
+	Type  TypeID
+	Local LocalID
+	Bound bool
 	Body  Block
 }

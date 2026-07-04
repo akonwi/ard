@@ -718,7 +718,7 @@ func isComparableValueType(t Type) bool {
 	if t == nil {
 		return false
 	}
-	if t.equal(Int) || t.equal(Float64) || t.equal(Str) || t.equal(Bool) || t.equal(Byte) || t.equal(Rune) || isExplicitScalar(t) {
+	if isPrimitiveScalar(t) {
 		return true
 	}
 	// A foreign named scalar (for example Go's time.Month or a status enum-like
@@ -1051,6 +1051,108 @@ func (c *Checker) checkUnsafeCast(s *parse.StaticFunction) Expression {
 	return &UnsafeCast{Value: arg, TargetType: targetType, ReturnType: MakeMaybe(targetType)}
 }
 
+// isDynamicMatchSubject reports whether a match subject participates in
+// dynamic foreign type tests (ADR 0042): opaque Any values and foreign Go
+// interface values.
+func isDynamicMatchSubject(t Type) bool {
+	if _, ok := t.(*anyType); ok {
+		return true
+	}
+	foreign, ok := t.(*ForeignType)
+	return ok && foreign.Interface
+}
+
+// checkForeignTypeMatch checks a match whose subject is Any or a foreign Go
+// interface value. Arms name concrete foreign Go named types and bind the
+// narrowed value; the dynamic type set is open, so a catch-all is required.
+func (c *Checker) checkForeignTypeMatch(s *parse.MatchExpression, subject Expression, allowMixedVoid bool) Expression {
+	cases := []ForeignTypeCase{}
+	seen := map[string]bool{}
+	var catchAll *Block
+	for _, matchCase := range s.Cases {
+		switch p := matchCase.Pattern.(type) {
+		case *parse.Identifier:
+			if p.Name != "_" {
+				c.addError("Match on a dynamic value requires foreign type patterns like pkg::Type(binding) or a catch-all '_'", matchCase.Pattern.GetLocation())
+				continue
+			}
+			if catchAll != nil {
+				c.addWarning("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+				continue
+			}
+			catchAll = c.checkMatchArmBlock(matchCase.Body, nil)
+		case *parse.StaticFunction:
+			nsIdent, ok := p.Target.(*parse.Identifier)
+			if !ok {
+				c.addError("Foreign type pattern must be qualified as pkg::Type(binding)", matchCase.Pattern.GetLocation())
+				continue
+			}
+			goPkg := c.program.GoImports[nsIdent.Name]
+			if goPkg == nil {
+				c.addError(fmt.Sprintf("Unknown Go namespace: %s", nsIdent.Name), nsIdent.GetLocation())
+				continue
+			}
+			typ := goPkg.Types[p.Function.Name]
+			if typ == nil {
+				if reason := goPkg.UnsupportedTypes[p.Function.Name]; reason != "" {
+					c.addError(fmt.Sprintf("Unsupported Go type %s::%s: %s", nsIdent.Name, p.Function.Name, reason), matchCase.Pattern.GetLocation())
+				} else {
+					c.addError(fmt.Sprintf("Unrecognized type: %s::%s", nsIdent.Name, p.Function.Name), matchCase.Pattern.GetLocation())
+				}
+				continue
+			}
+			foreign, ok := typ.(*ForeignType)
+			if !ok || foreign.Interface {
+				c.addError(fmt.Sprintf("Foreign type pattern must name a concrete foreign type, got %s::%s", nsIdent.Name, p.Function.Name), matchCase.Pattern.GetLocation())
+				continue
+			}
+			if len(p.Function.Args) != 1 {
+				c.addError("Foreign type pattern requires exactly one binding, like pkg::Type(binding)", matchCase.Pattern.GetLocation())
+				continue
+			}
+			bindingIdent, ok := p.Function.Args[0].Value.(*parse.Identifier)
+			if !ok {
+				c.addError("Foreign type pattern binding must be an identifier", p.Function.Args[0].GetLocation())
+				continue
+			}
+			if seen[foreign.String()] {
+				c.addWarning(fmt.Sprintf("Duplicate case: %s", foreign), matchCase.Pattern.GetLocation())
+				continue
+			}
+			seen[foreign.String()] = true
+			body := c.checkMatchArmBlock(matchCase.Body, func() {
+				if bindingIdent.Name != "_" {
+					c.scope.add(bindingIdent.Name, foreign, false)
+				}
+			})
+			cases = append(cases, ForeignTypeCase{Type: foreign, Binding: bindingIdent.Name, Body: body})
+		default:
+			c.addError("Match on a dynamic value requires foreign type patterns like pkg::Type(binding) or a catch-all '_'", matchCase.Pattern.GetLocation())
+		}
+	}
+	if catchAll == nil {
+		c.addError("Match on a dynamic value requires a catch-all '_' case because the type set is open", s.GetLocation())
+		return nil
+	}
+	var resultType Type
+	for _, matchCase := range cases {
+		if matchCase.Body == nil {
+			continue
+		}
+		var ok bool
+		resultType, ok = mergeMatchResultType(c, resultType, matchCase.Body.Type(), s.GetLocation(), allowMixedVoid)
+		if !ok {
+			return nil
+		}
+	}
+	var ok bool
+	resultType, ok = mergeMatchResultType(c, resultType, catchAll.Type(), s.GetLocation(), allowMixedVoid)
+	if !ok {
+		return nil
+	}
+	return &ForeignTypeMatch{Subject: subject, Cases: cases, CatchAll: catchAll, ResultType: resultType}
+}
+
 func (c *Checker) checkUnsafeIsNil(s *parse.StaticFunction) Expression {
 	modName, _ := c.destructurePath(s)
 	if !c.hasExplicitImportAlias("ard/unsafe", modName) {
@@ -1261,6 +1363,14 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	if _, ok := expected.(*anyType); ok {
 		return true
 	}
+	// A foreign named scalar narrows to its underlying primitive (ADR 0028
+	// boundary coercions): the conversion is total, so `term::EventTitle`
+	// flows anywhere a Str value is expected. The reverse direction stays
+	// explicit, and contexts that need an identity (mutable places, equality)
+	// must exclude the coercion with foreignScalarNarrows.
+	if foreignScalarNarrows(expected, actual) {
+		return true
+	}
 	if trait, ok := expected.(*Trait); ok {
 		return actual.hasTrait(trait)
 	}
@@ -1339,7 +1449,10 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 				continue
 			}
 			expectedType := interfaceMethod.Parameters[i].Type
-			if !c.areCompatible(expectedType, paramType) {
+			// The impl method's signature becomes the generated Go method's
+			// signature, so the foreign scalar narrowing coercion cannot apply:
+			// the Go types must line up for interface satisfaction.
+			if !c.areCompatible(expectedType, paramType) || foreignScalarNarrows(expectedType, paramType) {
 				c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
 				valid = false
 			}
@@ -1357,7 +1470,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 				valid = false
 			}
 		}
-		if returnType != nil && !c.areCompatible(interfaceMethod.ReturnType, returnType) {
+		if returnType != nil && (!c.areCompatible(interfaceMethod.ReturnType, returnType) || foreignScalarNarrows(interfaceMethod.ReturnType, returnType)) {
 			c.addError(fmt.Sprintf("Go interface method '%s' has return type of %s", method.Name, interfaceMethod.ReturnType), method.GetLocation())
 			valid = false
 		}
@@ -5376,7 +5489,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					if leftIsMaybe && rightIsMaybe {
 						leftInner := leftMaybe.Of()
 						rightInner := rightMaybe.Of()
-						if leftInner != Void && rightInner != Void && !c.areCompatible(leftInner, rightInner) && !c.areCompatible(rightInner, leftInner) {
+						maybeEqualityCompatible := func(expected Type, actual Type) bool {
+							// Equality lowering has no coercion point, so the foreign
+							// scalar narrowing coercion does not apply here.
+							return c.areCompatible(expected, actual) && !foreignScalarNarrows(expected, actual)
+						}
+						if leftInner != Void && rightInner != Void && !maybeEqualityCompatible(leftInner, rightInner) && !maybeEqualityCompatible(rightInner, leftInner) {
 							c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
 							return nil
 						}
@@ -5858,6 +5976,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		subject := c.checkExpr(s.Subject)
 		if subject == nil {
 			return nil
+		}
+
+		// Dynamic type tests over Any or foreign-interface subjects (ADR 0042)
+		if isDynamicMatchSubject(subject.Type()) {
+			return c.checkForeignTypeMatch(s, subject, allowMixedVoid)
 		}
 
 		// For Maybe types, generate an OptionMatch
@@ -7251,6 +7374,22 @@ func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Ty
 	return nil
 }
 
+// foreignScalarNarrows reports whether actual is a foreign named scalar that
+// satisfies expected only through the narrowing coercion to its underlying
+// primitive. The coercion produces a converted value, not the original place,
+// so mutable parameters and equality contexts must reject it.
+func foreignScalarNarrows(expected Type, actual Type) bool {
+	foreign, ok := actual.(*ForeignType)
+	return ok && !foreign.Pointer && foreign.Underlying != nil && isPrimitiveScalar(expected) && foreign.Underlying.equal(expected)
+}
+
+func isPrimitiveScalar(t Type) bool {
+	if t == nil {
+		return false
+	}
+	return t.equal(Int) || t.equal(Float64) || t.equal(Str) || t.equal(Bool) || t.equal(Byte) || t.equal(Rune) || isExplicitScalar(t)
+}
+
 func isExplicitScalar(t Type) bool {
 	switch t {
 	case Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, Uintptr, Float32:
@@ -8071,7 +8210,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// requires an addressable mutable place; a call-site `mut` marker no longer
 		// requests a defensive copy.
 		if fnDefCopy.Parameters[i].Mutable {
-			if !c.isMutable(checkedArg) {
+			if !c.isMutable(checkedArg) || foreignScalarNarrows(paramType, checkedArg.Type()) {
 				c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDefCopy.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
 				return nil, nil
 			}

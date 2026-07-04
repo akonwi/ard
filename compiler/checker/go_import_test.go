@@ -565,6 +565,49 @@ fn reset(p: mut image::Point) {
 	})
 }
 
+func TestForeignScalarNarrowingLimits(t *testing.T) {
+	run(t, []test{
+		{
+			name: "foreign scalar narrows to primitive value parameter",
+			input: `use go:time
+
+fn double(value: Int) Int {
+  value * 2
+}
+
+fn main() {
+  let _ = double(time::January)
+}`,
+		},
+		{
+			name: "foreign scalar is rejected for mutable primitive parameter",
+			input: `use go:time
+
+fn bump(mut value: Int) {
+  value = value + 1
+}
+
+fn main() {
+  mut month = time::January
+  bump(month)
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected a mutable Int"}},
+		},
+		{
+			name: "foreign scalar Maybe does not compare against primitive Maybe",
+			input: `use go:time
+use ard/maybe
+
+fn main() {
+  let month: time::Month? = maybe::some(time::January)
+  let number: Int? = maybe::some(1)
+  let _ = month == number
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: time::Month? == Int?"}},
+		},
+	})
+}
+
 func TestForeignNamedScalarsSupportEquality(t *testing.T) {
 	run(t, []test{
 		{
@@ -612,6 +655,83 @@ fn reset(value: Any) {
   match unsafe::cast<mut image::Point>(value) {
     point => { point.X = 0 },
     _ => {},
+  }
+}`,
+		},
+	})
+}
+
+func TestForeignTypeMatchOverDynamicSubjects(t *testing.T) {
+	run(t, []test{
+		{
+			name: "match over Any with foreign type patterns",
+			input: `use go:image
+
+fn describe(value: Any) Str {
+  match value {
+    image::Point(point) => "point at {point.X}",
+    image::Rectangle(_) => "rectangle",
+    _ => "unknown",
+  }
+}`,
+		},
+		{
+			name: "match over empty-interface alias subject",
+			input: `use go:encoding/xml
+use go:image
+
+fn describe(token: xml::Token) Str {
+  match token {
+    image::Point(_) => "point",
+    _ => "other",
+  }
+}`,
+		},
+		{
+			name: "catch-all is required",
+			input: `use go:image
+
+fn describe(value: Any) Str {
+  match value {
+    image::Point(_) => "point",
+  }
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Match on a dynamic value requires a catch-all '_' case because the type set is open"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Void"},
+			},
+		},
+		{
+			name: "duplicate type patterns are diagnosed",
+			input: `use go:image
+
+fn describe(value: Any) Str {
+  match value {
+    image::Point(_) => "point",
+    image::Point(_) => "again",
+    _ => "other",
+  }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Warn, Message: "Duplicate case: image::Point"}},
+		},
+		{
+			name: "interface patterns are rejected",
+			input: `use go:io
+
+fn describe(value: Any) Str {
+  match value {
+    io::Writer(_) => "writer",
+    _ => "other",
+  }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Foreign type pattern must name a concrete foreign type, got io::Writer"}},
+		},
+		{
+			name: "non-dynamic subjects keep existing match semantics",
+			input: `fn describe(value: Int) Str {
+  match value {
+    1 => "one",
+    _ => "many",
   }
 }`,
 		},

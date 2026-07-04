@@ -2631,6 +2631,9 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 	if wrapped, ok, err := fl.lowerAnyWrapIfNeeded(expr, expected); ok || err != nil {
 		return wrapped, err
 	}
+	if wrapped, ok, err := fl.lowerForeignScalarNarrowIfNeeded(expr, expected); ok || err != nil {
+		return wrapped, err
+	}
 	if list, ok := expr.(*checker.ListLiteral); ok {
 		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeList {
 			return fl.lowerListLiteral(expected, list, expectedInfo.Elem)
@@ -2992,6 +2995,34 @@ func (fl *functionLowerer) isWeakContextType(typeID TypeID) bool {
 	default:
 		return false
 	}
+}
+
+// lowerForeignScalarNarrowIfNeeded converts a foreign named scalar value to
+// the expected primitive scalar (ADR 0028 boundary coercions), lowering to an
+// explicit Go conversion such as string(v).
+func (fl *functionLowerer) lowerForeignScalarNarrowIfNeeded(expr checker.Expression, expected TypeID) (*Expr, bool, error) {
+	expectedInfo, ok := fl.l.typeInfo(expected)
+	if !ok {
+		return nil, false, nil
+	}
+	switch expectedInfo.Kind {
+	case TypeInt, TypeScalar, TypeFloat64, TypeBool, TypeByte, TypeRune, TypeStr:
+	default:
+		return nil, false, nil
+	}
+	foreign, ok := expr.Type().(*checker.ForeignType)
+	if !ok || foreign.Pointer || foreign.Underlying == nil {
+		return nil, false, nil
+	}
+	underlyingID, err := fl.internType(foreign.Underlying)
+	if err != nil || underlyingID != expected {
+		return nil, false, nil
+	}
+	value, err := fl.lowerExpr(expr)
+	if err != nil {
+		return nil, true, err
+	}
+	return &Expr{Kind: ExprScalarConvert, Type: expected, Target: value}, true, nil
 }
 
 func (fl *functionLowerer) lowerAnyWrapIfNeeded(expr checker.Expression, expected TypeID) (*Expr, bool, error) {
@@ -3944,6 +3975,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerEnumMatch(typeID, e)
 	case *checker.UnionMatch:
 		return fl.lowerUnionMatch(typeID, e)
+	case *checker.ForeignTypeMatch:
+		return fl.lowerForeignTypeMatch(typeID, e)
 	case *checker.MaybeMethod:
 		return fl.lowerMaybeMethod(typeID, e)
 	case *checker.OptionMatch:
@@ -4434,6 +4467,43 @@ func (fl *functionLowerer) lowerUnionMatch(typeID TypeID, match *checker.UnionMa
 		UnionCases: cases,
 		CatchAll:   catchAll,
 	}, nil
+}
+
+func (fl *functionLowerer) lowerForeignTypeMatch(typeID TypeID, match *checker.ForeignTypeMatch) (*Expr, error) {
+	subject, err := fl.lowerExpr(match.Subject)
+	if err != nil {
+		return nil, err
+	}
+	cases := make([]ForeignTypeMatchCase, 0, len(match.Cases))
+	for _, matchCase := range match.Cases {
+		if matchCase.Body == nil {
+			continue
+		}
+		caseTypeID, err := fl.l.internType(matchCase.Type)
+		if err != nil {
+			return nil, err
+		}
+		bound := matchCase.Binding != "" && matchCase.Binding != "_"
+		var local LocalID
+		var body Block
+		if bound {
+			local, body, err = fl.lowerBoundBlockWithDefault(matchCase.Binding, caseTypeID, matchCase.Body.Stmts, typeID)
+		} else {
+			body, err = fl.lowerBlockWithDefault(matchCase.Body.Stmts, typeID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		cases = append(cases, ForeignTypeMatchCase{Type: caseTypeID, Local: local, Bound: bound, Body: body})
+	}
+	if match.CatchAll == nil {
+		return nil, fmt.Errorf("foreign type match missing catch-all")
+	}
+	catchAll, err := fl.lowerBlockWithDefault(match.CatchAll.Stmts, typeID)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: ExprMatchForeignType, Type: typeID, Target: subject, ForeignCases: cases, CatchAll: catchAll}, nil
 }
 
 func (fl *functionLowerer) lowerOptionMatch(typeID TypeID, match *checker.OptionMatch) (*Expr, error) {

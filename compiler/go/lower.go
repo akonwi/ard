@@ -1929,6 +1929,21 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerUnionWrap(fn, expr)
 	case air.ExprMatchUnion:
 		return l.lowerMatchUnion(fn, expr)
+	case air.ExprMatchForeignType:
+		return l.lowerMatchForeignType(fn, expr)
+	case air.ExprScalarConvert:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("scalar convert missing target")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		convertType, err := l.goType(expr.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: convertType, Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprTraitUpcast:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("trait upcast missing target")
@@ -5002,6 +5017,71 @@ func (l *lowerer) lowerMatchUnion(fn air.Function, expr air.Expr) (loweredExpr, 
 		cases = append(cases, &ast.CaseClause{Body: body})
 	}
 	stmts = append(stmts, &ast.SwitchStmt{Tag: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(unionTagFieldName(unionType))}, Body: &ast.BlockStmt{List: cases}})
+	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+// lowerMatchForeignType lowers a dynamic foreign type test (ADR 0042) to a Go
+// type switch over the subject's dynamic type.
+func (l *lowerer) lowerMatchForeignType(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("foreign type match missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	resultExpr := ast.NewIdent("nil")
+	stmts := append([]ast.Stmt{}, target.stmts...)
+	var assignTarget ast.Expr
+	if !l.isVoidType(expr.Type) {
+		temp := l.nextTemp()
+		decls, err := l.declareTemp(expr.Type, temp)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts = append(stmts, decls...)
+		assignTarget = ast.NewIdent(temp)
+		resultExpr = ast.NewIdent(temp)
+	}
+	switchLocal := l.nextTemp()
+	cases := make([]ast.Stmt, 0, len(expr.ForeignCases)+1)
+	for _, foreignCase := range expr.ForeignCases {
+		caseType, err := l.goType(foreignCase.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		body, err := l.lowerValueBlock(fn, foreignCase.Body, expr.Type, assignTarget)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		if foreignCase.Bound {
+			localName := l.localName(fn, foreignCase.Local)
+			l.declaredLocals[foreignCase.Local] = true
+			bind := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(localName)}, Tok: token.DEFINE, Rhs: []ast.Expr{ast.NewIdent(switchLocal)}}
+			discard := &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(localName)}}
+			body = append([]ast.Stmt{bind, discard}, body...)
+		}
+		cases = append(cases, &ast.CaseClause{List: []ast.Expr{caseType}, Body: body})
+	}
+	catchAll, err := l.lowerValueBlock(fn, expr.CatchAll, expr.Type, assignTarget)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	cases = append(cases, &ast.CaseClause{Body: catchAll})
+	anyBound := false
+	for _, foreignCase := range expr.ForeignCases {
+		if foreignCase.Bound {
+			anyBound = true
+			break
+		}
+	}
+	typeSwitch := &ast.TypeSwitchStmt{Body: &ast.BlockStmt{List: cases}}
+	if anyBound {
+		typeSwitch.Assign = &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(switchLocal)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: target.expr, Type: nil}}}
+	} else {
+		typeSwitch.Assign = &ast.ExprStmt{X: &ast.TypeAssertExpr{X: target.expr, Type: nil}}
+	}
+	stmts = append(stmts, typeSwitch)
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
 }
 

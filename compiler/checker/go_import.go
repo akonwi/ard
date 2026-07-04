@@ -16,6 +16,7 @@ type GoPackage struct {
 	Types                map[string]Type
 	Constants            map[string]Type
 	Variables            map[string]Type
+	UnsupportedTypes     map[string]string
 	UnsupportedConstants map[string]string
 	UnsupportedVariables map[string]string
 	UnsupportedFunctions map[string]string
@@ -46,6 +47,7 @@ func goPackageFromTypesPackage(path string, pkg *types.Package) *GoPackage {
 		Types:                map[string]Type{},
 		Constants:            map[string]Type{},
 		Variables:            map[string]Type{},
+		UnsupportedTypes:     map[string]string{},
 		UnsupportedConstants: map[string]string{},
 		UnsupportedVariables: map[string]string{},
 		UnsupportedFunctions: map[string]string{},
@@ -59,6 +61,8 @@ func goPackageFromTypesPackage(path string, pkg *types.Package) *GoPackage {
 		if typeName, ok := obj.(*types.TypeName); ok {
 			if typ, reason := exportedNamedTypeFromGo(typeName); reason == "" {
 				goPkg.Types[name] = typ
+			} else {
+				goPkg.UnsupportedTypes[name] = reason
 			}
 			continue
 		}

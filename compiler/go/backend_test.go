@@ -1531,6 +1531,49 @@ fn main() {
 	}
 }
 
+func TestRunProgramExecutesForeignTypeMatch(t *testing.T) {
+	program := lowerSource(t, `use go:image
+use go:time
+
+fn describe(value: Any) Str {
+  match value {
+    image::Point(point) => "point:{point.X}",
+    time::Month(_) => "month",
+    _ => "unknown",
+  }
+}
+
+fn main() {
+  let point = image::Point{X: 7, Y: 8}
+  if not describe(point) == "point:7" { panic("point arm failed") }
+  if not describe(time::January) == "month" { panic("month arm failed") }
+  if not describe("other") == "unknown" { panic("catch-all failed") }
+}`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramNarrowsForeignScalarsToPrimitives(t *testing.T) {
+	program := lowerSource(t, `use go:time
+
+fn double(value: Int) Int {
+  value * 2
+}
+
+fn main() {
+  let month = time::January
+  let raw: Int = month
+  if not raw == 1 { panic("narrowed value wrong") }
+  if not double(month) == 2 { panic("narrowed argument wrong") }
+}`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesUnsafeForeignMutableCast(t *testing.T) {
 	projectDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"foreigncast\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

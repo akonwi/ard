@@ -859,6 +859,29 @@ func (u *UnionMatch) Type() Type {
 	return Void
 }
 
+// ForeignTypeMatch is a dynamic type test over an Any or foreign-interface
+// subject (ADR 0042). Each case narrows to a concrete foreign Go named type;
+// the set is open, so a catch-all arm is required.
+type ForeignTypeMatch struct {
+	Subject    Expression
+	Cases      []ForeignTypeCase
+	CatchAll   *Block
+	ResultType Type
+}
+
+type ForeignTypeCase struct {
+	Type    *ForeignType
+	Binding string
+	Body    *Block
+}
+
+func (f *ForeignTypeMatch) Type() Type {
+	if f.ResultType != nil {
+		return f.ResultType
+	}
+	return Void
+}
+
 type ConditionalMatch struct {
 	Cases      []ConditionalCase
 	CatchAll   *Block
