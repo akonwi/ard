@@ -746,7 +746,14 @@ func assertDefinitionStart(t *testing.T, loc protocol.Location, filePath string,
 
 func requireReferences(t *testing.T, source string, filePath string, line uint32, char uint32, includeDeclaration bool) []protocol.Location {
 	t.Helper()
-	locations := computeReferences(source, filePath, protocol.Position{Line: line, Character: char}, includeDeclaration)
+	// Span path first (the real handler order), legacy heuristics fallback.
+	srv := NewServer()
+	docURI := uri.File(filePath)
+	srv.cache.Open(docURI, "ard", 1, source)
+	locations := srv.referencesFromSpans(docURI, protocol.Position{Line: line, Character: char}, includeDeclaration)
+	if len(locations) == 0 {
+		locations = computeReferences(source, filePath, protocol.Position{Line: line, Character: char}, includeDeclaration)
+	}
 	if len(locations) == 0 {
 		t.Fatalf("expected references at %d:%d, got none", line, char)
 	}
@@ -834,7 +841,7 @@ fn main() Int {
 		if len(refs) != 3 {
 			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 		}
-		assertLocationStart(t, refs[0], filePath, 0, 0)
+		assertLocationStart(t, refs[0], filePath, 0, 3)
 		assertLocationStart(t, refs[1], filePath, 6, 15)
 		assertLocationStart(t, refs[2], filePath, 7, 2)
 	})
@@ -876,7 +883,7 @@ fn second() Int {
 	if len(refs) != 2 {
 		t.Fatalf("expected 2 refs, got %d: %#v", len(refs), refs)
 	}
-	assertLocationStart(t, refs[0], filePath, 1, 2)
+	assertLocationStart(t, refs[0], filePath, 1, 6)
 	assertLocationStart(t, refs[1], filePath, 2, 2)
 }
 
@@ -1004,7 +1011,7 @@ fn other() Int {
 		if len(refs) != 3 {
 			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 		}
-		assertLocationStart(t, refs[0], mathPath, 0, 0)
+		assertLocationStart(t, refs[0], mathPath, 0, 3)
 		assertLocationStart(t, refs[1], filePath, 3, 8)
 		assertLocationStart(t, refs[2], otherPath, 3, 8)
 	})
@@ -1014,7 +1021,7 @@ fn other() Int {
 		if len(refs) != 3 {
 			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 		}
-		assertLocationStart(t, refs[0], mathPath, 0, 0)
+		assertLocationStart(t, refs[0], mathPath, 0, 3)
 		assertLocationStart(t, refs[1], filePath, 3, 8)
 		assertLocationStart(t, refs[2], otherPath, 3, 8)
 	})
@@ -1094,9 +1101,9 @@ fn main() Int {
 	if len(refs) != 3 {
 		t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 	}
-	assertLocationStart(t, refs[0], responsesPath, 0, 0)
-	assertLocationStart(t, refs[1], filePath, 3, 13)
-	assertLocationStart(t, refs[2], responsesPath, 5, 2)
+	assertLocationStart(t, refs[0], responsesPath, 0, 3)
+	assertLocationStart(t, refs[1], responsesPath, 5, 2)
+	assertLocationStart(t, refs[2], filePath, 3, 13)
 }
 
 // TestReferencesImportedVariableSkipsModuleAlias verifies module aliases are not reported as variable refs.
@@ -1128,7 +1135,7 @@ fn main() Str {
 	if len(refs) != 3 {
 		t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 	}
-	assertLocationStart(t, refs[0], responsesPath, 0, 0)
+	assertLocationStart(t, refs[0], responsesPath, 0, 4)
 	assertLocationStart(t, refs[1], filePath, 3, 21)
 	assertLocationStart(t, refs[2], filePath, 4, 21)
 }
@@ -1173,9 +1180,9 @@ fn main(box: boxes::Box) {
 			t.Fatalf("expected 4 refs, got %d: %#v", len(refs), refs)
 		}
 		assertLocationStart(t, refs[0], boxesPath, 1, 2)
-		assertLocationStart(t, refs[1], filePath, 3, 14)
-		assertLocationStart(t, refs[2], filePath, 4, 14)
-		assertLocationStart(t, refs[3], boxesPath, 6, 9)
+		assertLocationStart(t, refs[1], boxesPath, 6, 9)
+		assertLocationStart(t, refs[2], filePath, 3, 14)
+		assertLocationStart(t, refs[3], filePath, 4, 14)
 	})
 
 	t.Run("method", func(t *testing.T) {
@@ -1183,7 +1190,7 @@ fn main(box: boxes::Box) {
 		if len(refs) != 3 {
 			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 		}
-		assertLocationStart(t, refs[0], boxesPath, 5, 2)
+		assertLocationStart(t, refs[0], boxesPath, 5, 5)
 		assertLocationStart(t, refs[1], filePath, 5, 6)
 		assertLocationStart(t, refs[2], filePath, 6, 6)
 	})
@@ -1194,8 +1201,10 @@ fn main(box: boxes::Box) {
 			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 		}
 		assertLocationStart(t, refs[0], boxesPath, 0, 7)
-		assertLocationStart(t, refs[1], filePath, 2, 13)
-		assertLocationStart(t, refs[2], boxesPath, 4, 5)
+		assertLocationStart(t, refs[1], boxesPath, 4, 5)
+		// The reference narrows to the type name itself (`Box`), not the
+		// module-qualified prefix, so rename edits stay valid.
+		assertLocationStart(t, refs[2], filePath, 2, 20)
 	})
 
 	t.Run("method declaration", func(t *testing.T) {
@@ -1203,7 +1212,7 @@ fn main(box: boxes::Box) {
 		if len(refs) != 3 {
 			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 		}
-		assertLocationStart(t, refs[0], boxesPath, 5, 2)
+		assertLocationStart(t, refs[0], boxesPath, 5, 5)
 		assertLocationStart(t, refs[1], filePath, 5, 6)
 		assertLocationStart(t, refs[2], filePath, 6, 6)
 	})

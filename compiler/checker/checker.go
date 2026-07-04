@@ -928,7 +928,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 					if c.spans != nil {
 						c.spans.add(SpanRecord{
 							Loc:    ty.GetLocation(),
-							Target: &SpanTarget{Kind: TargetType, Module: mod.Path(), Symbol: propName},
+							Target: &SpanTarget{Kind: TargetType, Module: mod.Path(), File: c.moduleFiles[mod.Path()], Symbol: propName},
 						})
 					}
 					if len(ty.TypeArgs) > 0 {
@@ -2128,7 +2128,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				Value:   val,
 				__type:  __type,
 			}
-			c.recordBinding(s.GetLocation(), c.scope.add(v.Name, v.__type, v.Mutable))
+			bound := c.scope.add(v.Name, v.__type, v.Mutable)
+			c.recordBinding(s.GetLocation(), bound)
+			if c.spans != nil && c.scope.parent == nil {
+				// Module-level values are importable; give them a canonical
+				// identity for cross-module references.
+				c.spans.add(SpanRecord{
+					Loc:   s.GetLocation(),
+					Key:   ValueKey(c.typeOwnerPath(), v.Name),
+					IsDef: true,
+				})
+			}
 			return &Statement{
 				Stmt: v,
 			}
@@ -2545,6 +2555,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				c.addError(fmt.Sprintf("Undefined: %s", s.Target), s.Target.GetLocation())
 				return nil
 			}
+			if isNominalType(sym.Type) {
+				c.recordTypeRef(s.Target.GetLocation(), s.Target.Name)
+			}
 
 			switch def := sym.Type.(type) {
 			case *StructDef:
@@ -2553,6 +2566,13 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					if len(method.TypeParams) > 0 {
 						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
 						continue
+					}
+					if c.spans != nil {
+						c.spans.add(SpanRecord{
+							Loc:   method.GetLocation(),
+							Key:   MemberKey(TargetMethod, def.ModulePath, def.Name, method.Name),
+							IsDef: true,
+						})
 					}
 					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunction(&method, func() {
@@ -4175,6 +4195,13 @@ func (c *Checker) resolveStructTypeArgs(instance *parse.StructInstance) ([]Type,
 // validateStructInstance validates struct instantiation and returns the instance or nil if errors
 func (c *Checker) validateStructInstance(structType *StructDef, properties []parse.StructValue, structName string, loc parse.Location, typeArgs []Type) *StructInstance {
 	instance := &StructInstance{Name: structName, _type: structType}
+	if c.spans != nil {
+		for _, prop := range properties {
+			if _, exists := structType.Fields[prop.Name.Name]; exists {
+				c.recordMember(prop.Name.GetLocation(), TargetField, structType, prop.Name.Name, nil)
+			}
+		}
+	}
 	fields := make(map[string]Expression)
 	fieldTypes := make(map[string]Type)
 	providedFields := make(map[string]bool)
@@ -5850,6 +5877,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			// Handle local functions
 			absolutePath := s.Target.String() + "::" + s.Function.Name
 			if sym, ok := c.scope.get(absolutePath); ok {
+				if c.spans != nil {
+					if targetIdent, isIdent := s.Target.(*parse.Identifier); isIdent {
+						if typeSym, found := c.scope.get(targetIdent.Name); found && isNominalType(typeSym.Type) {
+							c.recordTypeRef(targetIdent.GetLocation(), targetIdent.Name)
+						}
+					}
+				}
 				fnDef := sym.Type.(*FunctionDef)
 				callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
 
@@ -6139,6 +6173,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			return fn
 		}
 	case *parse.StaticFunctionDeclaration:
+		if c.spans != nil {
+			if target, ok := s.Path.Target.(*parse.Identifier); ok {
+				if sym, found := c.scope.get(target.Name); found && isNominalType(sym.Type) {
+					c.recordTypeRef(target.GetLocation(), target.Name)
+				}
+			}
+		}
 		fn := c.checkFunction(&s.FunctionDeclaration, nil)
 		if fn != nil {
 			fn.Name = s.Path.String()
@@ -7101,7 +7142,9 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
 							return nil
 						}
-						return &ModuleSymbol{Module: mod.Path(), Symbol: Symbol{Name: prop.Name, Type: sym.Type}}
+						node := &ModuleSymbol{Module: mod.Path(), Symbol: Symbol{Name: prop.Name, Type: sym.Type}}
+						c.recordTarget(prop, node, SpanTarget{Kind: TargetValue, Module: mod.Path(), Symbol: prop.Name})
+						return node
 					default:
 						c.addError(fmt.Sprintf("Unsupported property type in %s::%s", id.Name, prop), s.Property.GetLocation())
 						return nil

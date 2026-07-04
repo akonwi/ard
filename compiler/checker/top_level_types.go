@@ -298,6 +298,13 @@ func (c *Checker) populateStructDefinition(def *StructDef, decl *parse.StructDef
 			continue
 		}
 		def.Fields[field.Name.Name] = fieldType
+		if c.spans != nil {
+			c.spans.add(SpanRecord{
+				Loc:   field.Name.GetLocation(),
+				Key:   MemberKey(TargetField, def.ModulePath, def.Name, field.Name.Name),
+				IsDef: true,
+			})
+		}
 		collectGenericsFromType(fieldType, &resolvedGenericParams, seenGenerics)
 	}
 	def.GenericParams = appendUniqueStrings(declaredGenericParams, resolvedGenericParams...)

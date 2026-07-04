@@ -506,8 +506,11 @@ func (s *Server) handleReferences(ctx context.Context, reply jsonrpc2.Replier, r
 		if !ok {
 			return
 		}
-		overlays := overlaySources(s.cache.Snapshot())
-		locations = computeReferencesWithOverlays(doc.Text, filePath, params.Position, params.Context.IncludeDeclaration, overlays)
+		locations = s.referencesFromSpans(params.TextDocument.URI, params.Position, params.Context.IncludeDeclaration)
+		if len(locations) == 0 {
+			overlays := overlaySources(s.cache.Snapshot())
+			locations = computeReferencesWithOverlays(doc.Text, filePath, params.Position, params.Context.IncludeDeclaration, overlays)
+		}
 	}()
 	if locations == nil {
 		locations = []protocol.Location{}
@@ -686,7 +689,10 @@ func (s *Server) handleDocumentHighlight(ctx context.Context, reply jsonrpc2.Rep
 	if !ok {
 		return reply(ctx, []protocol.DocumentHighlight{}, nil)
 	}
-	highlights := computeDocumentHighlights(doc.Text, filePath, params.Position)
+	highlights := s.highlightsFromSpans(params.TextDocument.URI, params.Position)
+	if len(highlights) == 0 {
+		highlights = computeDocumentHighlights(doc.Text, filePath, params.Position)
+	}
 	if highlights == nil {
 		highlights = []protocol.DocumentHighlight{}
 	}
@@ -706,7 +712,10 @@ func (s *Server) handlePrepareRename(ctx context.Context, reply jsonrpc2.Replier
 	if !ok {
 		return reply(ctx, nil, nil)
 	}
-	rng := prepareRename(doc.Text, filePath, params.Position)
+	rng := s.prepareRenameFromSpans(params.TextDocument.URI, params.Position)
+	if rng == nil {
+		rng = prepareRename(doc.Text, filePath, params.Position)
+	}
 	return reply(ctx, rng, nil)
 }
 
@@ -724,6 +733,9 @@ func (s *Server) handleRename(ctx context.Context, reply jsonrpc2.Replier, req j
 		return reply(ctx, nil, nil)
 	}
 	overlays := overlaySources(s.cache.Snapshot())
-	edit := computeRename(doc.Text, filePath, params.Position, params.NewName, overlays)
+	edit := s.renameFromSpans(params.TextDocument.URI, params.Position, params.NewName)
+	if edit == nil {
+		edit = computeRename(doc.Text, filePath, params.Position, params.NewName, overlays)
+	}
 	return reply(ctx, edit, nil)
 }

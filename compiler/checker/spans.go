@@ -54,6 +54,7 @@ const (
 	TargetType
 	TargetField
 	TargetMethod
+	TargetValue
 )
 
 // SpanTarget names an entity defined in another Ard module.
@@ -107,6 +108,7 @@ func (c *Checker) recordMember(loc parse.Location, kind TargetKind, subjType Typ
 	c.spans.add(SpanRecord{
 		Loc:    loc,
 		Node:   node,
+		Key:    MemberKey(kind, target.Module, target.Owner, member),
 		Target: target,
 	})
 }
@@ -270,6 +272,7 @@ func (c *Checker) recordExprSpan(source parse.Expression, node Expression) {
 			if target := memberTarget(TargetMethod, subjType, im.Method.Name); target != nil {
 				target.File = c.moduleFiles[target.Module]
 				rec.Target = target
+				rec.Key = MemberKey(TargetMethod, target.Module, target.Owner, im.Method.Name)
 				if parsed, ok := source.(*parse.InstanceMethod); ok {
 					rec.Loc = parsed.Method.GetLocation()
 				}
@@ -378,6 +381,20 @@ func FunctionKey(modulePath, name string) string {
 // TypeKey builds the identity key for a nominal type.
 func TypeKey(modulePath, name string) string {
 	return "type:" + modulePath + ":" + name
+}
+
+// ValueKey builds the identity key for a module-level value.
+func ValueKey(modulePath, name string) string {
+	return "val:" + modulePath + ":" + name
+}
+
+// MemberKey builds the identity key for a struct/enum/trait member.
+func MemberKey(kind TargetKind, modulePath, owner, name string) string {
+	prefix := "field"
+	if kind == TargetMethod {
+		prefix = "method"
+	}
+	return prefix + ":" + modulePath + ":" + owner + "." + name
 }
 
 // Spans returns the recorded span index. Nil-safe: returns an empty index
