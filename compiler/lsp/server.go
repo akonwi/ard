@@ -14,6 +14,8 @@ import (
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
+
+	"github.com/akonwi/ard/lsp/analysis"
 )
 
 // stdio wraps os.Stdin and os.Stdout into a single io.ReadWriteCloser.
@@ -38,6 +40,14 @@ type Server struct {
 	conn        jsonrpc2.Conn
 	projectRoot string
 
+	engineMu  sync.Mutex
+	engine    *analysis.Engine
+	workspace *analysis.Workspace
+
+	// requestTimeout bounds any single feature request so a runaway analysis
+	// cannot hang the editor. Zero disables the watchdog (tests).
+	requestTimeout time.Duration
+
 	diagnosticsMu        sync.Mutex
 	diagnosticsTimers    map[uri.URI]*time.Timer
 	diagnosticsDelay     time.Duration
@@ -52,8 +62,9 @@ func NewServer() *Server {
 		handlers:             make(map[string]jsonrpc2.Handler),
 		diagnosticsTimers:    make(map[uri.URI]*time.Timer),
 		diagnosticsDelay:     100 * time.Millisecond,
+		requestTimeout:       5 * time.Second,
 		diagnosticsPublisher: nil,
-		diagnosticsAnalyzer:  parseAndCheckWithOverlays,
+		diagnosticsAnalyzer:  nil,
 	}
 	s.diagnosticsPublisher = s.publishDiagnostics
 	s.registerHandlers()
@@ -77,22 +88,69 @@ func (s *Server) Run(ctx context.Context) error {
 
 func (s *Server) jsonRPCHandler() jsonrpc2.Handler {
 	return protocol.CancelHandler(
-		concurrentRequestHandler(
+		s.concurrentRequestHandler(
 			jsonrpc2.ReplyHandler(jsonrpc2.Handler(s.dispatch)),
 		),
 	)
 }
 
 // concurrentRequestHandler runs feature requests concurrently while preserving
-// lifecycle and document-sync ordering on the reader goroutine.
-func concurrentRequestHandler(handler jsonrpc2.Handler) jsonrpc2.Handler {
+// lifecycle and document-sync ordering on the reader goroutine. Every spawned
+// request is panic-guarded and watchdog-bounded: a panic or deadline yields an
+// LSP error reply instead of a dead server or a hung editor.
+func (s *Server) concurrentRequestHandler(handler jsonrpc2.Handler) jsonrpc2.Handler {
 	return func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 		if handleRequestInline(req.Method()) {
 			return handler(ctx, reply, req)
 		}
 
 		go func() {
-			_ = handler(ctx, reply, req)
+			var once sync.Once
+			guardedReply := func(ctx context.Context, result interface{}, err error) error {
+				var replyErr error
+				once.Do(func() { replyErr = reply(ctx, result, err) })
+				return replyErr
+			}
+
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "ard-lsp panic in %s: %v\n%s", req.Method(), r, debug.Stack())
+					_ = guardedReply(ctx, nil, fmt.Errorf("internal server error handling %s", req.Method()))
+				}
+			}()
+
+			if s.requestTimeout <= 0 {
+				_ = handler(ctx, guardedReply, req)
+				return
+			}
+
+			reqCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
+			defer cancel()
+
+			done := make(chan struct{})
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Fprintf(os.Stderr, "ard-lsp panic in %s: %v\n%s", req.Method(), r, debug.Stack())
+						_ = guardedReply(ctx, nil, fmt.Errorf("internal server error handling %s", req.Method()))
+					}
+					close(done)
+				}()
+				_ = handler(reqCtx, guardedReply, req)
+			}()
+
+			select {
+			case <-done:
+			case <-reqCtx.Done():
+				if ctx.Err() != nil {
+					// The client cancelled the request; reply with the LSP
+					// cancellation error rather than a fake timeout.
+					_ = guardedReply(ctx, nil, protocol.ErrRequestCancelled)
+					return
+				}
+				fmt.Fprintf(os.Stderr, "ard-lsp watchdog: %s exceeded %s\n", req.Method(), s.requestTimeout)
+				_ = guardedReply(ctx, nil, fmt.Errorf("%s timed out after %s", req.Method(), s.requestTimeout))
+			}
 		}()
 		return nil
 	}
@@ -179,12 +237,15 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
 
-	// Detect project root from workspace folders or root URI
+	// Detect project root from workspace folders or root URI. Guarded by
+	// engineMu because feature goroutines read it through workspaceFor.
+	s.engineMu.Lock()
 	if len(params.WorkspaceFolders) > 0 {
 		s.projectRoot = string(params.WorkspaceFolders[0].URI)
 	} else if params.RootURI != "" {
 		s.projectRoot = string(params.RootURI)
 	}
+	s.engineMu.Unlock()
 
 	result := &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
@@ -291,6 +352,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		params.TextDocument.Version,
 		params.TextDocument.Text,
 	)
+	s.syncOverlay(params.TextDocument.URI, params.TextDocument.Text)
 	s.scheduleDiagnosticsForOpenDocuments()
 
 	return reply(ctx, nil, nil)
@@ -310,6 +372,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 				return reply(ctx, nil, fmt.Errorf("invalid document change: %w", err))
 			}
 			s.cache.Update(params.TextDocument.URI, params.TextDocument.Version, updated)
+			s.syncOverlay(params.TextDocument.URI, updated)
 		}
 	}
 
@@ -329,6 +392,7 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 	}
 
 	s.cache.Close(params.TextDocument.URI)
+	s.dropOverlay(params.TextDocument.URI)
 	s.scheduleDiagnostics(params.TextDocument.URI)
 	s.scheduleDiagnosticsForOpenDocuments()
 

@@ -295,3 +295,38 @@ func TestPublishDiagnosticsReportsAnalysisPanic(t *testing.T) {
 		t.Fatalf("diagnostic message = %q", message)
 	}
 }
+
+// TestPublishDiagnosticsEnginePathParseErrors exercises the default
+// (snapshot-engine) diagnostics path with no injected analyzer: parse errors
+// must surface as diagnostics.
+func TestPublishDiagnosticsEnginePathParseErrors(t *testing.T) {
+	server := NewServer()
+	conn := newRecordingConn()
+	server.conn = conn
+	docURI := uri.New("file:///tmp/engine_parse.ard")
+	server.cache.Open(docURI, "ard", 1, "fn main( {\n}\n")
+
+	server.publishDiagnostics(context.Background(), docURI)
+
+	params := conn.lastDiagnostics(t)
+	if len(params.Diagnostics) == 0 {
+		t.Fatal("expected parse-error diagnostics from engine path")
+	}
+}
+
+// TestPublishDiagnosticsEnginePathTypeErrors exercises the default path with
+// a checker diagnostic.
+func TestPublishDiagnosticsEnginePathTypeErrors(t *testing.T) {
+	server := NewServer()
+	conn := newRecordingConn()
+	server.conn = conn
+	docURI := uri.New("file:///tmp/engine_check.ard")
+	server.cache.Open(docURI, "ard", 1, "fn main() {\n  let x: Str = 42\n}\n")
+
+	server.publishDiagnostics(context.Background(), docURI)
+
+	params := conn.lastDiagnostics(t)
+	if len(params.Diagnostics) == 0 {
+		t.Fatal("expected type-error diagnostics from engine path")
+	}
+}

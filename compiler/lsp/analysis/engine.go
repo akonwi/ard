@@ -194,12 +194,43 @@ func NewWorkspace(engine *Engine) *Workspace {
 	}
 }
 
-// SetOverlay records unsaved editor content for a file and bumps the revision.
+// SetOverlay records unsaved editor content for a file and bumps the
+// revision. Setting identical content is a no-op so callers may sync
+// overlays idempotently.
 func (w *Workspace) SetOverlay(filePath string, content string) uint64 {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if existing, ok := w.overlays[filePath]; ok && existing == content {
+		return w.revision
+	}
 	w.overlays[filePath] = content
 	w.revision++
+	return w.revision
+}
+
+// SyncOverlays replaces the overlay set atomically: files present in the map
+// are set, files absent are removed. The revision only bumps when content
+// actually changed. This lets the server make its document cache
+// authoritative and heal races between doc-sync and feature requests.
+func (w *Workspace) SyncOverlays(overlays map[string]string) uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	changed := false
+	for path, content := range overlays {
+		if existing, ok := w.overlays[path]; !ok || existing != content {
+			w.overlays[path] = content
+			changed = true
+		}
+	}
+	for path := range w.overlays {
+		if _, ok := overlays[path]; !ok {
+			delete(w.overlays, path)
+			changed = true
+		}
+	}
+	if changed {
+		w.revision++
+	}
 	return w.revision
 }
 
@@ -207,6 +238,9 @@ func (w *Workspace) SetOverlay(filePath string, content string) uint64 {
 func (w *Workspace) DeleteOverlay(filePath string) uint64 {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if _, ok := w.overlays[filePath]; !ok {
+		return w.revision
+	}
 	delete(w.overlays, filePath)
 	w.revision++
 	return w.revision

@@ -340,3 +340,26 @@ func TestOverlayOnlyFileAnalyzes(t *testing.T) {
 		t.Fatal("expected diagnostics from overlay-only file")
 	}
 }
+
+func TestSyncOverlaysRemovesAbsentFiles(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"main.ard": "fn main() {\n}\n",
+	})
+	engine := NewEngine(root)
+	ws := NewWorkspace(engine)
+	stale := filepath.Join(root, "stale.ard")
+	keep := filepath.Join(root, "main.ard")
+
+	ws.SetOverlay(stale, "fn stale() {\n}\n")
+	ws.SetOverlay(keep, "fn main() {\n}\n")
+
+	rev := ws.SyncOverlays(map[string]string{keep: "fn main() {\n}\n"})
+	snap := ws.Snapshot()
+	if _, ok := snap.overlays[stale]; ok {
+		t.Fatal("stale overlay survived authoritative sync")
+	}
+	// A second identical sync must not bump the revision.
+	if again := ws.SyncOverlays(map[string]string{keep: "fn main() {\n}\n"}); again != rev {
+		t.Fatalf("no-op sync bumped revision %d -> %d", rev, again)
+	}
+}

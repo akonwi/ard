@@ -185,12 +185,23 @@ func (s *Server) analyzeDiagnostics(doc *Doc, docs []Doc) (diagnostics []checker
 	if err != nil {
 		return nil, err
 	}
-	overlays := overlaySources(docs)
-	analyzer := s.diagnosticsAnalyzer
-	if analyzer == nil {
-		analyzer = parseAndCheckWithOverlays
+	// Tests may inject a custom analyzer; the default path goes through the
+	// snapshot engine so parses and checks are memoized.
+	if s.diagnosticsAnalyzer != nil {
+		return s.diagnosticsAnalyzer(doc.Text, filePath, overlaySources(docs))
 	}
-	return analyzer(doc.Text, filePath, overlays)
+	fa, err := s.analyzeSnapshot(doc.URI)
+	if err != nil {
+		return nil, err
+	}
+	if len(fa.ParseErrors) > 0 {
+		diags := make([]checker.Diagnostic, 0, len(fa.ParseErrors))
+		for _, perr := range fa.ParseErrors {
+			diags = append(diags, checker.NewDiagnostic(checker.Error, perr.Message, filePath, perr.Location))
+		}
+		return diags, nil
+	}
+	return fa.Diagnostics, nil
 }
 
 func analysisErrorDiagnostic(err error) protocol.Diagnostic {
