@@ -1061,3 +1061,37 @@ fn call(handler: http::HandlerFunc) {
 		},
 	})
 }
+
+// A `mut` parameter in a function-type annotation resolves like a named `mut`
+// parameter: foreign Go types take their pointer form, so an annotation like
+// `fn(http::ResponseWriter, mut http::Request)` unifies with an imported Go
+// signature such as http.HandlerFunc. The value form does not match a Go
+// pointer parameter: pointer-ness must be spelled with `mut`.
+func TestFunctionTypeAnnotationsUnifyWithGoSignatures(t *testing.T) {
+	run(t, []test{
+		{
+			name: "mut annotation matches an imported Go pointer parameter",
+			input: `use go:net/http
+fn store(handler: http::HandlerFunc) fn(http::ResponseWriter, mut http::Request) {
+  let f: fn(http::ResponseWriter, mut http::Request) = handler
+  f
+}`,
+		},
+		{
+			name: "value annotation does not match a Go pointer parameter",
+			input: `use go:net/http
+fn store(handler: http::HandlerFunc) {
+  let f: fn(http::ResponseWriter, http::Request) = handler
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected fn <function>(http::ResponseWriter,http::Request) Void, got http::HandlerFunc"}},
+		},
+		{
+			name: "closure with mut foreign param satisfies the annotation",
+			input: `use go:net/http
+fn main() {
+  let f: fn(http::ResponseWriter, mut http::Request) = fn(w: http::ResponseWriter, r: mut http::Request) {}
+  let _ = f
+}`,
+		},
+	})
+}

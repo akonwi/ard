@@ -4437,3 +4437,63 @@ fn main() {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+
+// A `mut pkg::T` parameter in a function-type annotation takes the foreign
+// pointer form, so annotations unify with imported Go signatures — in both
+// directions — and calls through the annotated and named values execute.
+func TestRunProgramExecutesMutForeignFnTypeAnnotations(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"mutfn\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module mutfn\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
+
+type Counter struct{ N int }
+
+type Setter func(*Counter)
+
+func NewCounter() *Counter { return &Counter{} }
+
+func Apply(s Setter, c *Counter) { s(c) }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use go:mutfn/ffi
+
+fn main() {
+  let set: fn(mut ffi::Counter) = fn(c: mut ffi::Counter) {
+    c.N = 7
+  }
+  // The annotated fn value satisfies the named Go func type (reverse flow).
+  let named: ffi::Setter = set
+  let counter = ffi::NewCounter()
+  // Calling through the named Go func value mutates through the pointer.
+  named(counter)
+  if not counter.N == 7 { panic("mutation lost through named value") }
+  counter.N = 0
+  // The annotated value also flows into a Go parameter of the named type.
+  ffi::Apply(set, counter)
+  if not counter.N == 7 { panic("mutation lost through Go call") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}

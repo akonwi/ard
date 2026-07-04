@@ -169,6 +169,13 @@ func normalizedParamMutability(p Parameter) (bool, Type) {
 	if mr, ok := p.Type.(*MutableRef); ok {
 		return true, mr.Of()
 	}
+	// A pointer-shaped foreign Go type is its own mutability marker (ADR
+	// 0040): `mut` adds no extra indirection, and imported Go signatures
+	// carry no Mutable flag. Canonicalize so `mut pkg::T` annotations and
+	// imported `*pkg.T` parameters compare equal.
+	if foreign, ok := p.Type.(*ForeignType); ok && foreign.Pointer {
+		return true, foreign
+	}
 	return p.Mutable, p.Type
 }
 

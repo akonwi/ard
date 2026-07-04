@@ -975,6 +975,13 @@ func (l *lowerer) internFunctionParamType(param checker.Parameter, intern func(c
 		underlying = ref.Of()
 		mutable = true
 	}
+	// A pointer-shaped foreign Go param is its own mutability marker: imported
+	// Go signatures never set the Mutable flag while `mut pkg::T` spellings
+	// do. Normalize to mutable so checker-equal function types intern to the
+	// same AIR type (mirrors checker.normalizedParamMutability).
+	if foreign, ok := underlying.(*checker.ForeignType); ok && foreign.Pointer {
+		mutable = true
+	}
 	if mutable {
 		id, err := intern(underlying)
 		return id, true, err
@@ -2563,7 +2570,13 @@ func airFunctionTypeKeySeen(params []checker.Parameter, returnType checker.Type,
 		if i > 0 {
 			key += ","
 		}
-		if param.Mutable {
+		mutable := param.Mutable
+		// Mirror internFunctionParamType: pointer-shaped foreign params are
+		// canonically mutable so checker-equal function types share one key.
+		if foreign, ok := param.Type.(*checker.ForeignType); ok && foreign.Pointer {
+			mutable = true
+		}
+		if mutable {
 			key += "mut "
 		}
 		key += airTypeKeySeen(param.Type, seen)

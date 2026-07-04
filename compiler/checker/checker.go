@@ -800,9 +800,22 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			if i < len(ty.ParamMutability) {
 				mutable = ty.ParamMutability[i]
 			}
+			paramType := c.resolveType(param)
+			if mutable {
+				// A `mut pkg::T` parameter in function-type position takes the
+				// foreign type's pointer form, matching named `mut` parameters,
+				// so annotations unify with imported Go signatures. Non-foreign
+				// types keep the Mutable-flag representation that call-site
+				// mutability checking relies on.
+				if foreign, ok := paramType.(*ForeignType); ok && !foreign.Pointer {
+					if pointer := foreign.PointerForm(); pointer != nil {
+						paramType = pointer
+					}
+				}
+			}
 			params[i] = Parameter{
 				Name:    fmt.Sprintf("arg%d", i),
-				Type:    c.resolveType(param),
+				Type:    paramType,
 				Mutable: mutable,
 			}
 		}
