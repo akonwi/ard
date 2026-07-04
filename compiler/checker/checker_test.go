@@ -2702,7 +2702,7 @@ fn main() {
   async::start(value)
 }`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected fn <function>() Void, got fn value() Int"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected fn(), got fn() Int"},
 			},
 		},
 	})

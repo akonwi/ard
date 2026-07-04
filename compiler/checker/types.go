@@ -864,12 +864,19 @@ func functionTypeString(f FunctionDef) string {
 func callableTypeString(params []Parameter, returnType Type) string {
 	paramStrs := make([]string, len(params))
 	for i := range params {
-		paramStrs[i] = typeSyntaxString(params[i].Type)
-		if params[i].Mutable {
+		mutable, paramType := normalizedParamMutability(params[i])
+		paramStrs[i] = typeSyntaxString(paramType)
+		// A pointer-shaped foreign type renders its own `mut` prefix.
+		if foreign, ok := paramType.(*ForeignType); mutable && (!ok || !foreign.Pointer) {
 			paramStrs[i] = "mut " + paramStrs[i]
 		}
 	}
-	return fmt.Sprintf("fn(%s) %s", strings.Join(paramStrs, ","), typeSyntaxString(returnType))
+	rendered := fmt.Sprintf("fn(%s)", strings.Join(paramStrs, ","))
+	// Ard syntax omits the return type for non-returning functions.
+	if returnType == nil || returnType.equal(Void) {
+		return rendered
+	}
+	return rendered + " " + typeSyntaxString(returnType)
 }
 func (m *Maybe) get(name string) Type {
 	switch name {

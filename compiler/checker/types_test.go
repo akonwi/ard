@@ -24,7 +24,7 @@ func TestMaybeStringParenthesizesCompositeTypes(t *testing.T) {
 		},
 		ReturnType: Void,
 	}
-	if got, want := MakeMaybe(functionType).String(), "(fn(Int) Void)?"; got != want {
+	if got, want := MakeMaybe(functionType).String(), "(fn(Int))?"; got != want {
 		t.Fatalf("function maybe string = %q, want %q", got, want)
 	}
 
@@ -34,7 +34,7 @@ func TestMaybeStringParenthesizesCompositeTypes(t *testing.T) {
 	if got, want := MakeMaybe(MakeMutableRef(Int)).String(), "(mut Int)?"; got != want {
 		t.Fatalf("mutable reference maybe string = %q, want %q", got, want)
 	}
-	if got, want := MakeMaybe(MakeResult(functionType, Str)).String(), "((fn(Int) Void)!Str)?"; got != want {
+	if got, want := MakeMaybe(MakeResult(functionType, Str)).String(), "((fn(Int))!Str)?"; got != want {
 		t.Fatalf("function result maybe string = %q, want %q", got, want)
 	}
 	nestedFunctionType := &FunctionDef{
@@ -42,7 +42,7 @@ func TestMaybeStringParenthesizesCompositeTypes(t *testing.T) {
 		Parameters: []Parameter{{Name: "callback", Type: functionType, Mutable: true}},
 		ReturnType: functionType,
 	}
-	if got, want := MakeMaybe(nestedFunctionType).String(), "(fn(mut fn(Int) Void) fn(Int) Void)?"; got != want {
+	if got, want := MakeMaybe(nestedFunctionType).String(), "(fn(mut fn(Int)) fn(Int))?"; got != want {
 		t.Fatalf("nested function maybe string = %q, want %q", got, want)
 	}
 }

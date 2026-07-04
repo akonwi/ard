@@ -1027,7 +1027,7 @@ fn bad_fn(x: Int) {}
 fn bad() {
   let f: http::HandlerFunc = bad_fn
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected http::HandlerFunc, got fn bad_fn(Int) Void"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected http::HandlerFunc, got fn(Int)"}},
 		},
 	})
 }
@@ -1083,7 +1083,7 @@ fn store(handler: http::HandlerFunc) fn(http::ResponseWriter, mut http::Request)
 fn store(handler: http::HandlerFunc) {
   let f: fn(http::ResponseWriter, http::Request) = handler
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected fn <function>(http::ResponseWriter,http::Request) Void, got http::HandlerFunc"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected fn(http::ResponseWriter,http::Request), got http::HandlerFunc"}},
 		},
 		{
 			name: "closure with mut foreign param satisfies the annotation",

@@ -1154,13 +1154,11 @@ type FunctionDef struct {
 	GenericBindings         map[string]Type
 }
 
+// String renders the function's *type* in Ard syntax (`fn(Str) Int`), never
+// its declaration name: FunctionDef doubles as a type, and synthetic names
+// (`<function>`, `anon_func_0x...`) must not leak into diagnostics.
 func (f FunctionDef) String() string {
-	paramStrs := make([]string, len(f.Parameters))
-	for i := range f.Parameters {
-		paramStrs[i] = f.Parameters[i].Type.String()
-	}
-
-	return fmt.Sprintf("fn %s(%s) %s", f.Name, strings.Join(paramStrs, ","), f.ReturnType.String())
+	return functionTypeString(f)
 }
 
 func (f FunctionDef) get(name string) Type { return nil }
