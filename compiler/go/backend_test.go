@@ -4772,3 +4772,34 @@ func TestRunProgramMutParameterWritesBack(t *testing.T) {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+
+// TestRunProgramReturnsMaybeThroughABI covers the Maybe half of the
+// idiomatic return ABI (ADR 0038): a function whose body produces a
+// Maybe-typed value must unpack it through the runtime's methods when
+// lowering to the (T, bool) multi-return shape.
+func TestRunProgramReturnsMaybeThroughABI(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn pick(flag: Bool) Str? {
+			mut res: Str? = maybe::none()
+			if flag {
+				res = maybe::some("value")
+			}
+			res
+		}
+
+		fn main() {
+			if pick(true).or("none") != "value" {
+				panic("some path failed")
+			}
+			if pick(false).is_some() {
+				panic("none path failed")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
