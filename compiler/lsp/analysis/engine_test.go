@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -156,7 +157,7 @@ func TestParseErrorsShortCircuitChecking(t *testing.T) {
 	if len(fa.ParseErrors) == 0 {
 		t.Fatal("expected parse errors")
 	}
-	if fa.Checker != nil {
+	if fa.Checked != nil {
 		t.Fatal("checker should not run on parse errors")
 	}
 }
@@ -317,7 +318,7 @@ func TestCheckCacheEviction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again == nil || again.Checker == nil {
+	if again == nil || again.Checked == nil {
 		t.Fatal("re-analysis after eviction failed")
 	}
 	_ = first
@@ -361,5 +362,25 @@ func TestSyncOverlaysRemovesAbsentFiles(t *testing.T) {
 	// A second identical sync must not bump the revision.
 	if again := ws.SyncOverlays(map[string]string{keep: "fn main() {\n}\n"}); again != rev {
 		t.Fatalf("no-op sync bumped revision %d -> %d", rev, again)
+	}
+}
+
+func TestAnalyzeCtxHonorsCancellation(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"main.ard": "fn main() {\n}\n",
+	})
+	engine := NewEngine(root)
+	ws := NewWorkspace(engine)
+	path := filepath.Join(root, "main.ard")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := ws.Snapshot().AnalyzeCtx(ctx, path); err == nil {
+		t.Fatal("expected cancellation error from AnalyzeCtx")
+	}
+	// A live context still analyzes.
+	fa, err := ws.Snapshot().AnalyzeCtx(context.Background(), path)
+	if err != nil || fa == nil {
+		t.Fatalf("analyze failed after cancellation test: %v", err)
 	}
 }

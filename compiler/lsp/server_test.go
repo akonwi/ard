@@ -750,7 +750,7 @@ func requireReferences(t *testing.T, source string, filePath string, line uint32
 	srv := NewServer()
 	docURI := uri.File(filePath)
 	srv.cache.Open(docURI, "ard", 1, source)
-	locations := srv.referencesFromSpans(docURI, protocol.Position{Line: line, Character: char}, includeDeclaration)
+	locations := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: line, Character: char}, includeDeclaration)
 	if len(locations) == 0 {
 		locations = computeReferences(source, filePath, protocol.Position{Line: line, Character: char}, includeDeclaration)
 	}
@@ -1672,7 +1672,7 @@ fn render(value: Render) Str {
 	srv := NewServer()
 	docURI := uri.File(path)
 	srv.cache.Open(docURI, "ard", 1, source)
-	items := srv.completionFromSpans(docURI, source, protocol.Position{Line: 5, Character: 8})
+	items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 5, Character: 8})
 	assertCompletion(t, items, "describe", "fn () Str")
 }
 

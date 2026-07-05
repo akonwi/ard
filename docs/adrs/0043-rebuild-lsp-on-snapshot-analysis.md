@@ -8,11 +8,12 @@ Implementation status: the engine (Workspace/Snapshot/memoized parse and
 check, shared Go resolver), checker span table, and the hover, definition,
 references, document-highlight, rename (local symbols), and member-completion
 features are live on the snapshot/span path with legacy heuristics as
-fallback. Remaining migration work: cross-file rename on the span path,
-signature-help/static-completion/document-symbol/code-action ports, context
-cancellation inside Analyze, trimming FileAnalysis to stop retaining whole
-Checker instances in the bounded cache, and deletion of the legacy paths at
-cutover (each legacy test scenario needs a span-path equivalent first).
+fallback. Rename is project-wide on the span path, analysis honors request
+cancellation between pipeline stages, and cached analyses retain only the
+checked program rather than whole Checker instances. Remaining migration
+work: signature-help/static-completion/document-symbol/code-action ports and
+deletion of the legacy paths at cutover (each legacy test scenario needs a
+span-path equivalent first).
 
 ## Context
 

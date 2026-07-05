@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,12 +17,12 @@ import (
 // (ADR 0043). References span the whole project: the definition module's
 // own records join records in other files that target the same entity.
 // Nil result lets callers fall back to legacy heuristics.
-func (s *Server) referencesFromSpans(docURI uri.URI, position protocol.Position, includeDeclaration bool) []protocol.Location {
+func (s *Server) referencesFromSpans(ctx context.Context, docURI uri.URI, position protocol.Position, includeDeclaration bool) []protocol.Location {
 	filePath, err := filePathFromURI(docURI)
 	if err != nil {
 		return nil
 	}
-	group := s.spanGroupAt(docURI, position)
+	group := s.spanGroupAt(ctx, docURI, position)
 	if group == nil {
 		return nil
 	}
@@ -44,9 +45,9 @@ func (s *Server) referencesFromSpans(docURI uri.URI, position protocol.Position,
 	// other files, and when the position itself was a cross-module use,
 	// gather the definition module's own group.
 	if _, isLocal := group.key.(*checker.Symbol); !isLocal {
-		out = append(out, s.workspaceReferences(filePath, group, includeDeclaration)...)
+		out = append(out, s.workspaceReferences(ctx, filePath, group, includeDeclaration)...)
 		if includeDeclaration {
-			if defLoc, ok := s.definitionLocation(group, filePath); ok {
+			if defLoc, ok := s.definitionLocation(ctx, group, filePath); ok {
 				out = append(out, defLoc)
 			}
 		}
@@ -55,7 +56,7 @@ func (s *Server) referencesFromSpans(docURI uri.URI, position protocol.Position,
 	out = dedupeLocations(out)
 	sortLocationsByFile(out)
 	// Definition first: editors expect the declaration to lead the list.
-	if defLoc, ok := s.definitionLocation(group, filePath); ok {
+	if defLoc, ok := s.definitionLocation(ctx, group, filePath); ok {
 		for i, loc := range out {
 			if loc == defLoc && i > 0 {
 				copy(out[1:i+1], out[:i])
@@ -68,7 +69,7 @@ func (s *Server) referencesFromSpans(docURI uri.URI, position protocol.Position,
 }
 
 // definitionLocation finds the group's definition as an LSP location.
-func (s *Server) definitionLocation(group *spanGroup, fromFile string) (protocol.Location, bool) {
+func (s *Server) definitionLocation(ctx context.Context, group *spanGroup, fromFile string) (protocol.Location, bool) {
 	for _, rec := range group.records {
 		if rec.IsDef {
 			return protocol.Location{
@@ -79,7 +80,7 @@ func (s *Server) definitionLocation(group *spanGroup, fromFile string) (protocol
 	}
 	if group.target != nil && group.target.File != "" {
 		snap := s.workspaceFor(fromFile).Snapshot()
-		if fa, err := snap.Analyze(group.target.File); err == nil && fa != nil && fa.Spans != nil {
+		if fa, err := snap.AnalyzeCtx(ctx, group.target.File); err == nil && fa != nil && fa.Spans != nil {
 			// The defining module's own key uses its local module path, which
 			// differs from the canonical import path in the target; match by
 			// kind/symbol/owner suffix instead of exact key.
@@ -103,7 +104,7 @@ func (s *Server) definitionLocation(group *spanGroup, fromFile string) (protocol
 
 // workspaceReferences finds records in other project files that refer to the
 // same entity as group.
-func (s *Server) workspaceReferences(fromFile string, group *spanGroup, includeDeclaration bool) []protocol.Location {
+func (s *Server) workspaceReferences(ctx context.Context, fromFile string, group *spanGroup, includeDeclaration bool) []protocol.Location {
 	snap := s.workspaceFor(fromFile).Snapshot()
 	root := snap.Engine().ProjectRoot()
 	if root == "" {
@@ -160,12 +161,15 @@ func (s *Server) workspaceReferences(fromFile string, group *spanGroup, includeD
 	seenFiles := map[string]bool{canonicalPath(fromFile): true}
 
 	addMatches := func(path string) {
+		if ctx.Err() != nil {
+			return
+		}
 		canon := canonicalPath(path)
 		if seenFiles[canon] {
 			return
 		}
 		seenFiles[canon] = true
-		fa, err := snap.Analyze(path)
+		fa, err := snap.AnalyzeCtx(ctx, path)
 		if err != nil || fa == nil || fa.Spans == nil {
 			return
 		}
@@ -195,6 +199,9 @@ func (s *Server) workspaceReferences(fromFile string, group *spanGroup, includeD
 	}
 
 	for _, path := range projectArdFiles(root) {
+		if ctx.Err() != nil {
+			break
+		}
 		addMatches(path)
 	}
 	return out
@@ -269,12 +276,12 @@ func sortLocationsByFile(locs []protocol.Location) {
 // highlightsFromSpans resolves document highlights: same grouping as
 // references, restricted to the current file by construction, with Write
 // kind on definitions.
-func (s *Server) highlightsFromSpans(docURI uri.URI, position protocol.Position) []protocol.DocumentHighlight {
+func (s *Server) highlightsFromSpans(ctx context.Context, docURI uri.URI, position protocol.Position) []protocol.DocumentHighlight {
 	filePath, err := filePathFromURI(docURI)
 	if err != nil {
 		return nil
 	}
-	group := s.spanGroupAt(docURI, position)
+	group := s.spanGroupAt(ctx, docURI, position)
 	if group == nil {
 		return nil
 	}
@@ -300,60 +307,87 @@ func (s *Server) highlightsFromSpans(docURI uri.URI, position protocol.Position)
 }
 
 // renameFromSpans computes a workspace edit renaming the symbol at position.
-// Only local symbols are handled here: their reference set is single-file by
-// construction. Nominal entities (functions, types, members) return nil so
-// the legacy path produces cross-file edits until the workspace rename
-// slice lands.
-func (s *Server) renameFromSpans(docURI uri.URI, position protocol.Position, newName string) *protocol.WorkspaceEdit {
-	filePath, err := filePathFromURI(docURI)
-	if err != nil {
+// Local symbols edit the current file; nominal entities (functions, types,
+// members, module values) rename project-wide through the same reference
+// machinery as find-references.
+func (s *Server) renameFromSpans(ctx context.Context, docURI uri.URI, position protocol.Position, newName string) *protocol.WorkspaceEdit {
+	if _, err := filePathFromURI(docURI); err != nil {
 		return nil
 	}
 	if !isValidRenameIdentifier(newName) {
 		return nil
 	}
-	group := s.spanGroupAt(docURI, position)
+	group := s.spanGroupAt(ctx, docURI, position)
 	if group == nil || group.name == "" {
 		return nil
 	}
 	if group.name == newName {
 		return nil
 	}
-	if _, isLocal := group.key.(*checker.Symbol); !isLocal {
+
+	// The full reference set (declaration included) is the edit set.
+	refs := s.referencesFromSpans(ctx, docURI, position, true)
+	if len(refs) == 0 {
 		return nil
 	}
 
-	var edits []protocol.TextEdit
-	seen := map[protocol.Range]bool{}
-	for _, rec := range group.records {
-		r := parseLocationToLSPRange(s.refLocation(rec, group.name, filePath))
-		if seen[r] {
+	changes := map[uri.URI][]protocol.TextEdit{}
+	seen := map[protocol.Location]bool{}
+	for _, ref := range refs {
+		if seen[ref] {
 			continue
 		}
-		seen[r] = true
-		edits = append(edits, protocol.TextEdit{Range: r, NewText: newName})
+		seen[ref] = true
+		// Guard: every edit range must currently hold exactly the old
+		// identifier. A single unverifiable range aborts the whole rename —
+		// a partial rename would corrupt the workspace — and the caller
+		// falls back to the legacy path.
+		if !s.rangeHoldsIdentifier(ref, group.name) {
+			return nil
+		}
+		target := uri.URI(ref.URI)
+		changes[target] = append(changes[target], protocol.TextEdit{Range: ref.Range, NewText: newName})
 	}
-	if len(edits) == 0 {
+	if len(changes) == 0 {
 		return nil
 	}
-	sort.Slice(edits, func(a, b int) bool {
-		if edits[a].Range.Start.Line != edits[b].Range.Start.Line {
-			return edits[a].Range.Start.Line < edits[b].Range.Start.Line
-		}
-		return edits[a].Range.Start.Character < edits[b].Range.Start.Character
-	})
-	return &protocol.WorkspaceEdit{
-		Changes: map[uri.URI][]protocol.TextEdit{docURI: edits},
+	for _, edits := range changes {
+		sort.Slice(edits, func(a, b int) bool {
+			if edits[a].Range.Start.Line != edits[b].Range.Start.Line {
+				return edits[a].Range.Start.Line < edits[b].Range.Start.Line
+			}
+			return edits[a].Range.Start.Character < edits[b].Range.Start.Character
+		})
 	}
+	return &protocol.WorkspaceEdit{Changes: changes}
+}
+
+// rangeHoldsIdentifier verifies the range's current text is exactly name, so
+// rename never rewrites a span that was not narrowed to the identifier.
+func (s *Server) rangeHoldsIdentifier(loc protocol.Location, name string) bool {
+	if loc.Range.Start.Line != loc.Range.End.Line {
+		return false
+	}
+	path, err := filePathFromURI(uri.URI(loc.URI))
+	if err != nil {
+		return false
+	}
+	text := s.lineText(path, int(loc.Range.Start.Line)+1)
+	start := int(loc.Range.Start.Character)
+	end := int(loc.Range.End.Character)
+	if start < 0 || end > len(text) || start >= end {
+		return false
+	}
+	return text[start:end] == name
 }
 
 // prepareRenameFromSpans reports the exact range that would be renamed.
-func (s *Server) prepareRenameFromSpans(docURI uri.URI, position protocol.Position) *protocol.Range {
+func (s *Server) prepareRenameFromSpans(ctx context.Context, docURI uri.URI, position protocol.Position) *protocol.Range {
 	filePath, err := filePathFromURI(docURI)
 	if err != nil {
 		return nil
 	}
-	group := s.spanGroupAt(docURI, position)
+	group := s.spanGroupAt(ctx, docURI, position)
 	if group == nil || group.name == "" {
 		return nil
 	}
@@ -378,8 +412,8 @@ type spanGroup struct {
 }
 
 // spanGroupAt resolves the identity group for the symbol at a position.
-func (s *Server) spanGroupAt(docURI uri.URI, position protocol.Position) *spanGroup {
-	fa, err := s.analyzeSnapshot(docURI)
+func (s *Server) spanGroupAt(ctx context.Context, docURI uri.URI, position protocol.Position) *spanGroup {
+	fa, err := s.analyzeSnapshot(ctx, docURI)
 	if err != nil || fa == nil || fa.Spans == nil {
 		return nil
 	}

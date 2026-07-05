@@ -428,7 +428,7 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 		}
 		// Span-table rendering first (ADR 0043); legacy heuristics fall back
 		// during the migration.
-		info = s.hoverFromSpans(params.TextDocument.URI, params.Position)
+		info = s.hoverFromSpans(ctx, params.TextDocument.URI, params.Position)
 		if info == nil {
 			info = computeHover(doc.Text, filePath, params.Position)
 		}
@@ -472,7 +472,7 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 		}
 		// Span-table resolution first (ADR 0043); legacy heuristics as
 		// fallback during the migration.
-		locations = s.definitionFromSpans(params.TextDocument.URI, params.Position)
+		locations = s.definitionFromSpans(ctx, params.TextDocument.URI, params.Position)
 		if len(locations) == 0 {
 			locations = computeDefinition(doc.Text, filePath, params.Position)
 		}
@@ -506,7 +506,7 @@ func (s *Server) handleReferences(ctx context.Context, reply jsonrpc2.Replier, r
 		if !ok {
 			return
 		}
-		locations = s.referencesFromSpans(params.TextDocument.URI, params.Position, params.Context.IncludeDeclaration)
+		locations = s.referencesFromSpans(ctx, params.TextDocument.URI, params.Position, params.Context.IncludeDeclaration)
 		if len(locations) == 0 {
 			overlays := overlaySources(s.cache.Snapshot())
 			locations = computeReferencesWithOverlays(doc.Text, filePath, params.Position, params.Context.IncludeDeclaration, overlays)
@@ -551,7 +551,7 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		if !ok {
 			return
 		}
-		items = s.completionFromSpans(params.TextDocument.URI, doc.Text, params.Position)
+		items = s.completionFromSpans(ctx, params.TextDocument.URI, doc.Text, params.Position)
 		if len(items) == 0 {
 			items = computeCompletions(doc.Text, filePath, params.Position)
 		}
@@ -692,7 +692,7 @@ func (s *Server) handleDocumentHighlight(ctx context.Context, reply jsonrpc2.Rep
 	if !ok {
 		return reply(ctx, []protocol.DocumentHighlight{}, nil)
 	}
-	highlights := s.highlightsFromSpans(params.TextDocument.URI, params.Position)
+	highlights := s.highlightsFromSpans(ctx, params.TextDocument.URI, params.Position)
 	if len(highlights) == 0 {
 		highlights = computeDocumentHighlights(doc.Text, filePath, params.Position)
 	}
@@ -715,7 +715,7 @@ func (s *Server) handlePrepareRename(ctx context.Context, reply jsonrpc2.Replier
 	if !ok {
 		return reply(ctx, nil, nil)
 	}
-	rng := s.prepareRenameFromSpans(params.TextDocument.URI, params.Position)
+	rng := s.prepareRenameFromSpans(ctx, params.TextDocument.URI, params.Position)
 	if rng == nil {
 		rng = prepareRename(doc.Text, filePath, params.Position)
 	}
@@ -736,7 +736,7 @@ func (s *Server) handleRename(ctx context.Context, reply jsonrpc2.Replier, req j
 		return reply(ctx, nil, nil)
 	}
 	overlays := overlaySources(s.cache.Snapshot())
-	edit := s.renameFromSpans(params.TextDocument.URI, params.Position, params.NewName)
+	edit := s.renameFromSpans(ctx, params.TextDocument.URI, params.Position, params.NewName)
 	if edit == nil {
 		edit = computeRename(doc.Text, filePath, params.Position, params.NewName, overlays)
 	}

@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,7 @@ func spanHover(t *testing.T, source string, line, char uint32) string {
 	s := NewServer()
 	docURI := uri.File(path)
 	s.cache.Open(docURI, "ard", 1, source)
-	info := s.hoverFromSpans(docURI, protocol.Position{Line: line, Character: char})
+	info := s.hoverFromSpans(context.Background(), docURI, protocol.Position{Line: line, Character: char})
 	if info == nil {
 		return ""
 	}

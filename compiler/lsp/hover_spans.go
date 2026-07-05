@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -13,8 +14,8 @@ import (
 // hoverFromSpans renders hover content from the checker's span table
 // (ADR 0043). Returns nil when the position resolves to nothing so callers
 // can fall back to legacy heuristics during the migration.
-func (s *Server) hoverFromSpans(docURI uri.URI, position protocol.Position) *hoverInfo {
-	fa, err := s.analyzeSnapshot(docURI)
+func (s *Server) hoverFromSpans(ctx context.Context, docURI uri.URI, position protocol.Position) *hoverInfo {
+	fa, err := s.analyzeSnapshot(ctx, docURI)
 	if err != nil || fa == nil || fa.Spans == nil {
 		return nil
 	}

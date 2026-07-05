@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,7 +25,7 @@ func TestReferencesModuleValueFromDefinition(t *testing.T) {
 	srv := NewServer()
 	docURI := uri.File(valuesPath)
 	srv.cache.Open(docURI, "ard", 1, valuesSource)
-	refs := srv.referencesFromSpans(docURI, protocol.Position{Line: 0, Character: 5}, true)
+	refs := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: 0, Character: 5}, true)
 	if len(refs) != 2 {
 		t.Fatalf("expected def + cross-file use, got %d: %#v", len(refs), refs)
 	}
@@ -40,21 +41,21 @@ func TestRenameFromSpansRejectsInvalidNames(t *testing.T) {
 	docURI := uri.File(path)
 	srv.cache.Open(docURI, "ard", 1, source)
 
-	if edit := srv.renameFromSpans(docURI, protocol.Position{Line: 2, Character: 11}, "1 bad name!"); edit != nil {
+	if edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, "1 bad name!"); edit != nil {
 		t.Fatal("invalid identifier accepted")
 	}
-	if edit := srv.renameFromSpans(docURI, protocol.Position{Line: 2, Character: 11}, "count"); edit != nil {
+	if edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, "count"); edit != nil {
 		t.Fatal("no-op rename produced edits")
 	}
-	edit := srv.renameFromSpans(docURI, protocol.Position{Line: 2, Character: 11}, "total")
+	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, "total")
 	if edit == nil || len(edit.Changes[docURI]) != 2 {
 		t.Fatalf("expected 2 edits for local rename, got %#v", edit)
 	}
 }
 
-// TestRenameFromSpansDefersNominalEntitiesToLegacy: nominal renames need
-// cross-file edits, which the span path does not produce yet.
-func TestRenameFromSpansDefersNominalEntitiesToLegacy(t *testing.T) {
+// TestRenameFromSpansNominalSameFile renames a function and its call sites
+// within one file, with the declaration edit covering only the identifier.
+func TestRenameFromSpansNominalSameFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.ard")
 	source := "fn helper() Int {\n  1\n}\n\nfn main() {\n  let x = helper()\n}\n"
@@ -63,8 +64,16 @@ func TestRenameFromSpansDefersNominalEntitiesToLegacy(t *testing.T) {
 	docURI := uri.File(path)
 	srv.cache.Open(docURI, "ard", 1, source)
 
-	if edit := srv.renameFromSpans(docURI, protocol.Position{Line: 5, Character: 11}, "renamed"); edit != nil {
-		t.Fatal("nominal entity rename should defer to the legacy cross-file path")
+	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 5, Character: 11}, "renamed")
+	if edit == nil {
+		t.Fatal("expected rename edit")
+	}
+	edits := edit.Changes[docURI]
+	if len(edits) != 2 {
+		t.Fatalf("expected declaration + call edits, got %#v", edits)
+	}
+	if edits[0].Range.Start.Line != 0 || edits[0].Range.Start.Character != 3 {
+		t.Fatalf("declaration edit should target the identifier, got %#v", edits[0].Range)
 	}
 }
 
@@ -81,7 +90,7 @@ func TestCompletionImportedStructMethods(t *testing.T) {
 	srv := NewServer()
 	docURI := uri.File(path)
 	srv.cache.Open(docURI, "ard", 1, source)
-	items := srv.completionFromSpans(docURI, source, protocol.Position{Line: 3, Character: 6})
+	items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 3, Character: 6})
 
 	var haveField, haveMethod bool
 	for _, item := range items {
@@ -126,7 +135,7 @@ fn main(board: Board) {
 	srv := NewServer()
 	docURI := uri.File(path)
 	srv.cache.Open(docURI, "ard", 1, source)
-	items := srv.completionFromSpans(docURI, source, protocol.Position{Line: 15, Character: 8})
+	items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 15, Character: 8})
 
 	var haveDescribe bool
 	for _, item := range items {
@@ -136,5 +145,83 @@ fn main(board: Board) {
 	}
 	if !haveDescribe {
 		t.Fatalf("trait-impl method 'describe' missing: %#v", items)
+	}
+}
+
+// TestRenameFromSpansCrossFile verifies nominal renames edit every file that
+// references the entity.
+func TestRenameFromSpansCrossFile(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"proj\"\nard = \">= 0.1.0\"\n"), 0o644)
+	mathSource := "fn inc(value: Int) Int {\n  value + 1\n}\n"
+	mathPath := filepath.Join(root, "math.ard")
+	os.WriteFile(mathPath, []byte(mathSource), 0o644)
+	mainSource := "use proj/math\n\nfn main() Int {\n  math::inc(1)\n}\n"
+	mainPath := filepath.Join(root, "main.ard")
+	os.WriteFile(mainPath, []byte(mainSource), 0o644)
+
+	srv := NewServer()
+	docURI := uri.File(mainPath)
+	srv.cache.Open(docURI, "ard", 1, mainSource)
+
+	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 9}, "bump")
+	if edit == nil {
+		t.Fatal("expected cross-file rename edit")
+	}
+	mathEdits := edit.Changes[uri.File(mathPath)]
+	mainEdits := edit.Changes[uri.File(mainPath)]
+	if len(mathEdits) != 1 {
+		t.Fatalf("expected 1 edit in math.ard (the declaration), got %#v", edit.Changes)
+	}
+	if len(mainEdits) != 1 {
+		t.Fatalf("expected 1 edit in main.ard (the call), got %#v", edit.Changes)
+	}
+	if mathEdits[0].NewText != "bump" || mainEdits[0].NewText != "bump" {
+		t.Fatal("wrong replacement text")
+	}
+	// The declaration edit must cover exactly the identifier.
+	if mathEdits[0].Range.Start.Character != 3 || mathEdits[0].Range.End.Character != 6 {
+		t.Fatalf("declaration edit range imprecise: %#v", mathEdits[0].Range)
+	}
+}
+
+// TestRangeHoldsIdentifierGuard exercises the rename verification guard
+// directly: only ranges holding exactly the identifier verify, so any
+// unverifiable range aborts the whole rename (no partial edits).
+func TestRangeHoldsIdentifierGuard(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.ard")
+	source := "fn helper() Int {\n  1\n}\n"
+	os.WriteFile(path, []byte(source), 0o644)
+	srv := NewServer()
+	docURI := uri.File(path)
+	srv.cache.Open(docURI, "ard", 1, source)
+
+	mk := func(line, start, end uint32) protocol.Location {
+		return protocol.Location{
+			URI: protocol.DocumentURI(docURI),
+			Range: protocol.Range{
+				Start: protocol.Position{Line: line, Character: start},
+				End:   protocol.Position{Line: line, Character: end},
+			},
+		}
+	}
+	if !srv.rangeHoldsIdentifier(mk(0, 3, 9), "helper") {
+		t.Fatal("exact identifier range failed verification")
+	}
+	if srv.rangeHoldsIdentifier(mk(0, 0, 9), "helper") {
+		t.Fatal("range including the fn keyword must not verify")
+	}
+	if srv.rangeHoldsIdentifier(mk(0, 3, 8), "helper") {
+		t.Fatal("truncated range must not verify")
+	}
+	if srv.rangeHoldsIdentifier(protocol.Location{
+		URI: protocol.DocumentURI(docURI),
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 0, Character: 3},
+			End:   protocol.Position{Line: 2, Character: 1},
+		},
+	}, "helper") {
+		t.Fatal("multi-line range must not verify")
 	}
 }

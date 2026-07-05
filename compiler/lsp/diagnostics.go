@@ -190,7 +190,7 @@ func (s *Server) analyzeDiagnostics(doc *Doc, docs []Doc) (diagnostics []checker
 	if s.diagnosticsAnalyzer != nil {
 		return s.diagnosticsAnalyzer(doc.Text, filePath, overlaySources(docs))
 	}
-	fa, err := s.analyzeSnapshot(doc.URI)
+	fa, err := s.analyzeSnapshot(context.Background(), doc.URI)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 
@@ -14,8 +15,8 @@ import (
 // definitionFromSpans resolves go-to-definition using the checker's span
 // table (ADR 0043). It returns nil when the position resolves to nothing,
 // letting callers fall back to legacy heuristics during the migration.
-func (s *Server) definitionFromSpans(docURI uri.URI, position protocol.Position) []protocol.Location {
-	fa, err := s.analyzeSnapshot(docURI)
+func (s *Server) definitionFromSpans(ctx context.Context, docURI uri.URI, position protocol.Position) []protocol.Location {
+	fa, err := s.analyzeSnapshot(ctx, docURI)
 	if err != nil || fa == nil || fa.Spans == nil {
 		return nil
 	}

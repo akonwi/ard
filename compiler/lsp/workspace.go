@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,8 +71,9 @@ func (s *Server) dropOverlay(docURI uri.URI) {
 
 // analyzeSnapshot analyzes the document against the current snapshot. Open
 // document contents are synced from the document cache first, so the cache
-// remains the single source of truth for editor state.
-func (s *Server) analyzeSnapshot(docURI uri.URI) (*analysis.FileAnalysis, error) {
+// remains the single source of truth for editor state. The context cancels
+// between analysis stages (watchdog and superseded requests).
+func (s *Server) analyzeSnapshot(ctx context.Context, docURI uri.URI) (*analysis.FileAnalysis, error) {
 	filePath, err := filePathFromURI(docURI)
 	if err != nil {
 		return nil, err
@@ -87,7 +89,7 @@ func (s *Server) analyzeSnapshot(docURI uri.URI) (*analysis.FileAnalysis, error)
 	}
 	ws.SyncOverlays(overlays)
 	snap := ws.Snapshot()
-	fa, err := snap.Analyze(filePath)
+	fa, err := snap.AnalyzeCtx(ctx, filePath)
 	if err != nil {
 		return nil, fmt.Errorf("analyze %s: %w", filePath, err)
 	}

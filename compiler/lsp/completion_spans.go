@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"context"
 	"sort"
 
 	"github.com/akonwi/ard/checker"
@@ -13,9 +14,9 @@ import (
 // engine: the receiver expression's checked type enumerates fields and
 // methods. Returns nil to fall back to legacy heuristics (builtin receivers,
 // static/import completion) during the migration.
-func (s *Server) completionFromSpans(docURI uri.URI, source string, position protocol.Position) []protocol.CompletionItem {
-	ctx, ok := completionContextAt(source, position)
-	if !ok || ctx.kind != completionInstance || ctx.sepEnd < 2 {
+func (s *Server) completionFromSpans(ctx context.Context, docURI uri.URI, source string, position protocol.Position) []protocol.CompletionItem {
+	cctx, ok := completionContextAt(source, position)
+	if !ok || cctx.kind != completionInstance || cctx.sepEnd < 2 {
 		return nil
 	}
 	filePath, err := filePathFromURI(docURI)
@@ -25,7 +26,7 @@ func (s *Server) completionFromSpans(docURI uri.URI, source string, position pro
 
 	// Patch a placeholder identifier after the dot so the file parses, then
 	// analyze it in a scratch workspace sharing the engine's caches.
-	patched := source[:ctx.sepEnd] + completionPlaceholder + source[ctx.offset:]
+	patched := source[:cctx.sepEnd] + completionPlaceholder + source[cctx.offset:]
 	ws := s.workspaceFor(filePath)
 	scratch := analysis.NewWorkspace(ws.Engine())
 	// Carry over sibling overlays so imports resolve against editor state.
@@ -35,13 +36,13 @@ func (s *Server) completionFromSpans(docURI uri.URI, source string, position pro
 		}
 	}
 	scratch.SetOverlay(filePath, patched)
-	fa, err := scratch.Snapshot().AnalyzeEphemeral(filePath)
+	fa, err := scratch.Snapshot().AnalyzeEphemeral(ctx, filePath)
 	if err != nil || fa == nil || fa.Spans == nil {
 		return nil
 	}
 
 	// The receiver is the expression immediately before the dot.
-	receiverPoint := offsetToParsePoint(patched, ctx.sepEnd-2)
+	receiverPoint := offsetToParsePoint(patched, cctx.sepEnd-2)
 	var receiverType checker.Type
 	for _, rec := range fa.Spans.At(receiverPoint) {
 		if rec.Node != nil && rec.Node.Type() != nil {
@@ -64,7 +65,7 @@ func (s *Server) completionFromSpans(docURI uri.URI, source string, position pro
 	if len(items) == 0 {
 		return nil
 	}
-	return withCompletionTextEdits(items, ctx, position)
+	return withCompletionTextEdits(items, cctx, position)
 }
 
 // memberCompletionItems enumerates fields and methods for a checked type.
@@ -100,8 +101,8 @@ func memberCompletionItems(t checker.Type, fa *analysis.FileAnalysis) []protocol
 				Detail: checkerTypeString(owner.Fields[name]),
 			})
 		}
-		if fa.Checker != nil {
-			program := fa.Checker.Module().Program()
+		if fa.Checked != nil {
+			program := fa.Checked
 			methods := program.StructMethodsFor(checker.StructMethodOwner(owner))
 			// Imported structs keep their methods in the defining module's
 			// program; merge the cross-module view.

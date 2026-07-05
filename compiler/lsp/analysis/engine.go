@@ -14,6 +14,7 @@
 package analysis
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -57,14 +58,19 @@ type parseEntry struct {
 	errors  []parse.ParseError
 }
 
-// FileAnalysis is the immutable result of analyzing one file.
+// FileAnalysis is the immutable result of analyzing one file. It retains
+// only what features consume — not the whole Checker — so the bounded cache
+// stays small.
 type FileAnalysis struct {
 	FilePath    string
 	Program     *parse.Program
 	ParseErrors []parse.ParseError
 	Diagnostics []checker.Diagnostic
 	Spans       *checker.SpanIndex
-	Checker     *checker.Checker
+	// Checked is the checker's output program: imports, struct-method side
+	// tables, and public symbols. Like Program, it is shared across snapshot
+	// consumers and must be treated as read-only.
+	Checked *checker.Program
 	// Signature identifies the inputs this analysis was computed from.
 	Signature string
 }
@@ -302,17 +308,25 @@ func (s *Snapshot) Parse(filePath string) (*parse.Program, []parse.ParseError, e
 // content signature of the file's import closure. Panics in the checker are
 // recovered and reported as errors; failed analyses are not cached.
 func (s *Snapshot) Analyze(filePath string) (*FileAnalysis, error) {
-	return s.analyze(filePath, true)
+	return s.analyze(context.Background(), filePath, true)
+}
+
+// AnalyzeCtx is Analyze with cooperative cancellation: the context is
+// checked between pipeline stages (before parse, signature, and check), so
+// a superseded or timed-out request stops before the expensive stage instead
+// of burning a full check. The checker itself is not interruptible.
+func (s *Snapshot) AnalyzeCtx(ctx context.Context, filePath string) (*FileAnalysis, error) {
+	return s.analyze(ctx, filePath, true)
 }
 
 // AnalyzeEphemeral analyzes without inserting into the check cache. Used for
 // synthetic content (e.g. completion placeholder patching) that would
 // otherwise thrash the bounded cache with never-reused entries.
-func (s *Snapshot) AnalyzeEphemeral(filePath string) (*FileAnalysis, error) {
-	return s.analyze(filePath, false)
+func (s *Snapshot) AnalyzeEphemeral(ctx context.Context, filePath string) (*FileAnalysis, error) {
+	return s.analyze(ctx, filePath, false)
 }
 
-func (s *Snapshot) analyze(filePath string, cache bool) (analysis *FileAnalysis, err error) {
+func (s *Snapshot) analyze(ctx context.Context, filePath string, cache bool) (analysis *FileAnalysis, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			analysis = nil
@@ -320,6 +334,9 @@ func (s *Snapshot) analyze(filePath string, cache bool) (analysis *FileAnalysis,
 		}
 	}()
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	content, err := s.Content(filePath)
 	if err != nil {
 		return nil, err
@@ -338,6 +355,9 @@ func (s *Snapshot) analyze(filePath string, cache bool) (analysis *FileAnalysis,
 		}, nil
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	moduleResolver, relPath, err := s.newModuleResolver(filePath)
 	if err != nil {
 		return nil, err
@@ -352,6 +372,9 @@ func (s *Snapshot) analyze(filePath string, cache bool) (analysis *FileAnalysis,
 	}
 	s.engine.mu.Unlock()
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	analysis, err = s.check(filePath, relPath, entry.program, moduleResolver, sig)
 	if err != nil {
 		return nil, err
@@ -416,7 +439,7 @@ func (s *Snapshot) check(filePath string, relPath string, program *parse.Program
 		Program:     program,
 		Diagnostics: c.Diagnostics(),
 		Spans:       c.Spans(),
-		Checker:     c,
+		Checked:     c.Module().Program(),
 		Signature:   sig,
 	}, nil
 }
