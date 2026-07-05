@@ -65,9 +65,3 @@ All commands should be run from the `/compiler` directory:
   - When changing formatter behavior or stdlib `.ard` files, also run the relevant formatter tests (at least `cd compiler && go test ./formatter`) and, for stdlib changes, prefer `cd compiler && go run main.go format std_lib` as a regression check.
 - **Project Structure**: Compiler follows parse → checker → AIR → target lowering
 - **Development Tracking**: Use GitHub issues for top-level work items
-- **Sample Programs**: Reference samples directory for example Ard programs
-- **FFI System**: Go interop is direct — there is no extern binding layer (see ADRs 0031/0034/0035)
-  - Ard code imports Go packages with `use go:` and calls exported symbols with namespace syntax (`fmt::Println`)
-  - The checker validates Go boundaries through `go/packages`; the Go backend owns the lowering
-  - Project Go shim code lives in `ffi/*.go` as `package ffi` and is imported like any other Go package (`use go:<project>/ffi`)
-  - `extern` is no longer valid syntax; the old std_lib/ffi generation step no longer exists
