@@ -3,6 +3,9 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -218,5 +221,135 @@ func TestConcurrentHandlerClientCancellation(t *testing.T) {
 	defer mu.Unlock()
 	if replyErr == nil || strings.Contains(replyErr.Error(), "timed out") {
 		t.Fatalf("expected cancellation error, got %v", replyErr)
+	}
+}
+
+// fakeStream feeds scripted read results to resilientStream.
+type fakeStream struct {
+	reads []fakeRead
+	idx   int
+}
+
+type fakeRead struct {
+	msg jsonrpc2.Message
+	err error
+}
+
+func (f *fakeStream) Read(ctx context.Context) (jsonrpc2.Message, int64, error) {
+	if f.idx >= len(f.reads) {
+		return nil, 0, errFakeEOF
+	}
+	r := f.reads[f.idx]
+	f.idx++
+	return r.msg, 0, r.err
+}
+
+func (f *fakeStream) Write(ctx context.Context, msg jsonrpc2.Message) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeStream) Close() error { return nil }
+
+var errFakeEOF = errors.New("fake eof")
+
+// TestResilientStreamSkipsMalformedBodies verifies decode errors are skipped
+// while framing/IO errors stay fatal.
+func TestResilientStreamSkipsMalformedBodies(t *testing.T) {
+	good, err := jsonrpc2.NewNotification("initialized", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := resilientStream{inner: &fakeStream{reads: []fakeRead{
+		{err: errors.New(`unmarshaling jsonrpc message: json: invalid`)},
+		{msg: good},
+		{err: errors.New(`failed reading header line: broken`)},
+	}}}
+
+	msg, _, err := stream.Read(context.Background())
+	if err != nil {
+		t.Fatalf("expected malformed body to be skipped, got error: %v", err)
+	}
+	if msg == nil || msg.(jsonrpc2.Request).Method() != "initialized" {
+		t.Fatalf("expected the following good message, got %#v", msg)
+	}
+
+	// The header error is a desync: fatal.
+	_, _, err = stream.Read(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "header") {
+		t.Fatalf("expected fatal header error, got %v", err)
+	}
+}
+
+// TestDispatchNeverPropagatesErrors: handler errors must not reach the
+// jsonrpc2 connection, which would kill the whole session.
+func TestDispatchNeverPropagatesErrors(t *testing.T) {
+	s := NewServer()
+	s.handlers["test/explode"] = func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+		return errors.New("handler failure")
+	}
+	s.handlers["test/panicAfterReply"] = func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
+		_ = reply(ctx, "ok", nil)
+		panic("after reply")
+	}
+
+	for _, method := range []string{"test/explode", "test/panicAfterReply", "no/such/method"} {
+		req := newTestRequest(t, method)
+		err := s.dispatch(context.Background(), func(ctx context.Context, result interface{}, err error) error {
+			return nil
+		}, req)
+		if err != nil {
+			t.Fatalf("dispatch(%s) returned %v; must always return nil", method, err)
+		}
+	}
+}
+
+// pipeRWC adapts an io.Pipe pair into the ReadWriteCloser the framed stream
+// wants, so resilientStream can be tested against the real jsonrpc2 stream.
+type pipeRWC struct {
+	*io.PipeReader
+	*io.PipeWriter
+}
+
+func (p pipeRWC) Close() error {
+	_ = p.PipeReader.Close()
+	if p.PipeWriter != nil {
+		return p.PipeWriter.Close()
+	}
+	return nil
+}
+
+// TestResilientStreamAgainstRealFraming pins the error classification to the
+// actual jsonrpc2 stream implementation: a library upgrade that changes the
+// decode-error message turns this red instead of silently making malformed
+// frames fatal again.
+func TestResilientStreamAgainstRealFraming(t *testing.T) {
+	reader, writer := io.Pipe()
+	stream := resilientStream{inner: jsonrpc2.NewStream(pipeRWC{reader, nil})}
+
+	go func() {
+		// 1. framed garbage body (invalid JSON)
+		garbage := "{oops"
+		fmt.Fprintf(writer, "Content-Length: %d\r\n\r\n%s", len(garbage), garbage)
+		// 2. framed valid JSON that is not a valid message (no method, no id)
+		empty := "{}"
+		fmt.Fprintf(writer, "Content-Length: %d\r\n\r\n%s", len(empty), empty)
+		// 3. a valid notification
+		valid := `{"jsonrpc":"2.0","method":"initialized","params":{}}`
+		fmt.Fprintf(writer, "Content-Length: %d\r\n\r\n%s", len(valid), valid)
+		_ = writer.Close()
+	}()
+
+	msg, _, err := stream.Read(context.Background())
+	if err != nil {
+		t.Fatalf("expected malformed frames to be skipped, got error: %v", err)
+	}
+	req, ok := msg.(jsonrpc2.Request)
+	if !ok || req.Method() != "initialized" {
+		t.Fatalf("expected the valid notification, got %#v", msg)
+	}
+
+	// Pipe closed: the next read is a genuine IO error and must be fatal.
+	if _, _, err := stream.Read(context.Background()); err == nil {
+		t.Fatal("expected fatal error after pipe close")
 	}
 }

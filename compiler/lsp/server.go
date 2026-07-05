@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -77,13 +78,68 @@ func (s *Server) Run(ctx context.Context) error {
 		ReadCloser:  os.Stdin,
 		WriteCloser: os.Stdout,
 	}
-	stream := jsonrpc2.NewStream(rwc)
+	stream := resilientStream{inner: jsonrpc2.NewStream(rwc)}
 	conn := jsonrpc2.NewConn(stream)
 	s.conn = conn
 
 	conn.Go(ctx, s.jsonRPCHandler())
 	<-conn.Done()
 	return conn.Err()
+}
+
+// resilientStream keeps the server alive across malformed message bodies.
+//
+// The jsonrpc2 connection treats every stream read error as fatal, but the
+// error classes differ: a body that fails to decode was still fully consumed
+// (io.ReadFull ran before DecodeMessage), so the stream remains
+// frame-aligned and the connection is healthy. Per the JSON-RPC spec such
+// input should not end the session. Header/framing errors leave the stream
+// position unknown and IO errors mean the client is gone; both stay fatal.
+//
+// Skipped messages are logged. A malformed *request* (vs notification) gets
+// no response, so the client owns that id's timeout; the library cannot
+// express the spec's null-id ParseError response.
+type resilientStream struct {
+	inner jsonrpc2.Stream
+}
+
+func (r resilientStream) Read(ctx context.Context) (jsonrpc2.Message, int64, error) {
+	for {
+		msg, n, err := r.inner.Read(ctx)
+		if err == nil {
+			return msg, n, nil
+		}
+		if isRecoverableStreamError(err) {
+			fmt.Fprintf(os.Stderr, "ard-lsp: skipping malformed message: %v\n", err)
+			continue
+		}
+		return nil, n, err
+	}
+}
+
+func (r resilientStream) Write(ctx context.Context, msg jsonrpc2.Message) (int64, error) {
+	return r.inner.Write(ctx, msg)
+}
+
+func (r resilientStream) Close() error {
+	return r.inner.Close()
+}
+
+// isRecoverableStreamError matches body-decode failures, the only read
+// error class that leaves the stream frame-aligned (this invariant holds
+// for the header-framed NewStream, which is what Run uses: the body is
+// fully consumed by io.ReadFull before DecodeMessage runs). Two shapes:
+// invalid JSON (untyped; matched by the stable message prefix, pinned by a
+// real-stream test) and valid JSON with neither method nor id
+// (jsonrpc2.ErrInvalidRequest).
+func isRecoverableStreamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, jsonrpc2.ErrInvalidRequest) {
+		return true
+	}
+	return strings.HasPrefix(err.Error(), "unmarshaling jsonrpc message")
 }
 
 func (s *Server) jsonRPCHandler() jsonrpc2.Handler {
@@ -173,7 +229,12 @@ func handleRequestInline(method string) bool {
 }
 
 // dispatch routes incoming LSP requests and notifications to registered handlers.
-func (s *Server) dispatch(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) (err error) {
+// dispatch routes a message to its handler. It never returns a non-nil
+// error: the jsonrpc2 connection kills the whole session on any handler
+// error, so failures are replied (when possible) and logged instead. The
+// only acceptable ways for the server to exit are client disconnect, the
+// exit notification, and stream desync.
+func (s *Server) dispatch(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	method := req.Method()
 	replied := false
 	safeReply := func(ctx context.Context, result interface{}, replyErr error) error {
@@ -185,18 +246,21 @@ func (s *Server) dispatch(ctx context.Context, reply jsonrpc2.Replier, req jsonr
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "ard-lsp panic handling %s: %v\n%s", method, r, debug.Stack())
 			if !replied {
-				err = safeReply(ctx, nil, fmt.Errorf("internal server error handling %s: %v", method, r))
-				return
+				_ = safeReply(ctx, nil, fmt.Errorf("internal server error handling %s: %v", method, r))
 			}
-			err = fmt.Errorf("internal server error after reply handling %s: %v", method, r)
 		}
 	}()
 
+	var err error
 	if handler, ok := s.handlers[method]; ok {
-		return handler(ctx, safeReply, req)
+		err = handler(ctx, safeReply, req)
+	} else {
+		err = jsonrpc2.MethodNotFoundHandler(ctx, safeReply, req)
 	}
-
-	return jsonrpc2.MethodNotFoundHandler(ctx, safeReply, req)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintf(os.Stderr, "ard-lsp error handling %s: %v\n", method, err)
+	}
+	return nil
 }
 
 // registerHandlers registers all LSP method handlers.
