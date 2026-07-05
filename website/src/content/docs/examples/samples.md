@@ -339,14 +339,14 @@ fn main() {
   io::print("Starting server on port 3000...")
 
   let routes: [Str:http::HandlerFn] = [
-    "/": fn(req: http::Request, mut res: http::Response) {
+    "/": fn(req: http::Request, res: mut http::Response) {
       res.body = "Welcome to Ard server!"
     },
-    "/about": fn(req: http::Request, mut res: http::Response) {
+    "/about": fn(req: http::Request, res: mut http::Response) {
       let path = req.path().or("/")
       res.body = "About page from {path}"
     },
-    "/echo": fn(req: http::Request, mut res: http::Response) {
+    "/echo": fn(req: http::Request, res: mut http::Response) {
       let path = req.path().or("/")
       res.body = "You requested: {path}"
     }

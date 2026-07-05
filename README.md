@@ -41,7 +41,7 @@ mut age = 30
 Ard uses `mut` for mutable access. A mutable function parameter receives a mutable reference to caller-owned storage, so the caller must pass an addressable mutable value:
 
 ```ard
-fn update_person(mut person: Person) {
+fn update_person(person: mut Person) {
     person.age = 99  // Mutates the caller's value
 }
 

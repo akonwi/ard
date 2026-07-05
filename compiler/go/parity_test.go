@@ -1405,7 +1405,7 @@ func TestGoTargetParityNativeTraitObjectMutableParameterFromTraitLocal(t *testin
 			}
 		}
 
-		fn apply(mut d: Draw) Int {
+		fn apply(d: mut Draw) Int {
 			d.draw()
 		}
 
@@ -1429,7 +1429,7 @@ func TestGoTargetParityMutableTraitObjectParameterFromConcrete(t *testing.T) {
 			fn node_id() Int
 		}
 
-		fn add_child(ctx: Context, mut child: View) {
+		fn add_child(ctx: Context, child: mut View) {
 			child.init(Context{node_id: ctx.node_id + 1})
 		}
 
@@ -1497,7 +1497,7 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 		}
 
 		trait Sink {
-			fn take(mut child: View) Int
+			fn take(child: mut View) Int
 		}
 
 		struct Holder {}
@@ -1507,7 +1507,7 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 		}
 
 		impl Sink for Holder {
-			fn take(mut child: View) Int {
+			fn take(child: mut View) Int {
 				child.set(41)
 				child.value()
 			}
@@ -1523,7 +1523,7 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 
 		type ViewOrInt = View | Int
 
-		fn store(mut child: View) Node {
+		fn store(child: mut View) Node {
 			Node{view: child}
 		}
 
@@ -1541,21 +1541,21 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 			}
 		}
 
-		fn replace_param(mut child: View, value: Int) {
+		fn replace_param(child: mut View, value: Int) {
 			child = Leaf{n: value}
 		}
 
-		fn assign_param(mut child: View, next: View) {
+		fn assign_param(child: mut View, next: View) {
 			child = next
 		}
 
-		fn make_reader(mut child: View) fn() Int {
+		fn make_reader(child: mut View) fn() Int {
 			fn() Int {
 				child.value()
 			}
 		}
 
-		fn make_setter(mut child: View) fn(Int) {
+		fn make_setter(child: mut View) fn(Int) {
 			fn(value: Int) {
 				child = Leaf{n: value}
 			}
@@ -1736,12 +1736,12 @@ func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.
 			}
 		}
 
-		fn run_typed(mut typed: AppRoot) Int {
+		fn run_typed(typed: mut AppRoot) Int {
 			typed.view.handle_event()
 			typed.view.value()
 		}
 
-		fn run_any(mut any: AppRoot) Int {
+		fn run_any(any: mut AppRoot) Int {
 			any.view.handle_event()
 			any.view.value()
 		}
@@ -1774,7 +1774,7 @@ func TestGoTargetParityMutableReferenceFieldUpdatesSharedStorage(t *testing.T) {
 			tree: mut Tree,
 		}
 
-		fn bump(mut tree: Tree) {
+		fn bump(tree: mut Tree) {
 			tree.count = tree.count + 1
 		}
 
@@ -1782,7 +1782,7 @@ func TestGoTargetParityMutableReferenceFieldUpdatesSharedStorage(t *testing.T) {
 			value: mut Int,
 		}
 
-		fn set(mut value: Int) {
+		fn set(value: mut Int) {
 			value = 3
 		}
 
@@ -1810,7 +1810,7 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 				value: Int,
 			}
 
-			fn bump(mut c: Counter) {
+			fn bump(c: mut Counter) {
 				c.value = c.value + 1
 			}
 
@@ -1827,7 +1827,7 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 
 	t.Run("list descriptor element mutation", func(t *testing.T) {
 		program := lowerParitySource(t, `
-			fn replace_first(mut values: [Int]) {
+			fn replace_first(values: mut [Int]) {
 				values.set(0, 1)
 			}
 
@@ -1844,7 +1844,7 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 
 	t.Run("list descriptor header rebinding is local", func(t *testing.T) {
 		program := lowerParitySource(t, `
-			fn append_one(mut values: [Int]) {
+			fn append_one(values: mut [Int]) {
 				values.push(1)
 			}
 
@@ -1861,7 +1861,7 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 
 	t.Run("primitive", func(t *testing.T) {
 		program := lowerParitySource(t, `
-			fn bump(mut count: Int) {
+			fn bump(count: mut Int) {
 				count = count + 1
 			}
 
@@ -1880,11 +1880,11 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 		program := lowerParitySource(t, `
 			type MutIntFn = fn(mut Int)
 
-			fn bump(mut count: Int) {
+			fn bump(count: mut Int) {
 				count = count + 1
 			}
 
-			fn apply(f: MutIntFn, mut count: Int) {
+			fn apply(f: MutIntFn, count: mut Int) {
 				f(count)
 			}
 

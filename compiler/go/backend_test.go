@@ -697,13 +697,13 @@ func TestLowerProgramTakesAddressOfLocalMutTraitArgs(t *testing.T) {
 		}
 
 		trait Bumpable {
-			fn poke(mut c: Counter)
+			fn poke(c: mut Counter)
 		}
 
 		struct Doubler {}
 
 		impl Bumpable for Doubler {
-			fn poke(mut c: Counter) {
+			fn poke(c: mut Counter) {
 				c.bump()
 				c.bump()
 			}
@@ -746,19 +746,19 @@ func TestLowerProgramPassesMutTraitArgsByPointer(t *testing.T) {
 		}
 
 		trait Bumpable {
-			fn poke(mut c: Counter)
+			fn poke(c: mut Counter)
 		}
 
 		struct Doubler {}
 
 		impl Bumpable for Doubler {
-			fn poke(mut c: Counter) {
+			fn poke(c: mut Counter) {
 				c.bump()
 				c.bump()
 			}
 		}
 
-		fn invoke(b: Bumpable, mut c: Counter) {
+		fn invoke(b: Bumpable, c: mut Counter) {
 			b.poke(c)
 		}
 	`)
@@ -805,7 +805,7 @@ func TestLowerProgramDereferencesMutParamForNonMutMethodCall(t *testing.T) {
 			}
 		}
 
-		fn process(mut b: Box) Int {
+		fn process(b: mut Box) Int {
 			b.bump()
 			b.peek()
 		}
@@ -2897,7 +2897,7 @@ func TestLowerProgramUsesPointersForMutableStructParams(t *testing.T) {
 			body: Str,
 		}
 
-		fn set_body(mut res: Response) Void {
+		fn set_body(res: mut Response) Void {
 			res.body = "ok"
 		}
 
@@ -2933,7 +2933,7 @@ func TestLowerProgramUsesPointersForMutableStructParams(t *testing.T) {
 }
 func TestLowerProgramUsesDescriptorsForMutableListParams(t *testing.T) {
 	program := lowerSource(t, `
-		fn replace_first(mut values: [Int]) Void {
+		fn replace_first(values: mut [Int]) Void {
 			values.set(0, 1)
 		}
 
@@ -4534,7 +4534,7 @@ func TestRunProgramExecutesListPushOnStructField(t *testing.T) {
 			entries: [Str],
 		}
 
-		fn add(mut log: Log, entry: Str) {
+		fn add(log: mut Log, entry: Str) {
 			log.entries.push(entry)
 		}
 
@@ -4737,6 +4737,33 @@ func TestRunProgramWrapsFieldAssignmentIntoMaybe(t *testing.T) {
 			s.label = maybe::none()
 			if s.label.is_some() {
 				panic("none reset failed")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+// TestRunProgramMutParameterWritesBack pins the runtime write-back contract
+// for `name: mut Type` parameters called with mut locals.
+func TestRunProgramMutParameterWritesBack(t *testing.T) {
+	program := lowerSource(t, `
+		struct S {
+			n: Int,
+		}
+
+		fn bump(s: mut S) {
+			s.n = s.n + 1
+		}
+
+		fn main() {
+			mut s = S{n: 1}
+			bump(s)
+			bump(s)
+			if s.n != 3 {
+				panic("write-back failed")
 			}
 		}
 	`)

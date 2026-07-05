@@ -40,7 +40,7 @@ func TestRecursiveTraitChildManagementTypeDoesNotOverflow(t *testing.T) {
 		input: `struct Children {}
 
 trait View {
-  fn init(mut children: Children)
+  fn init(children: mut Children)
 }
 
 impl Children {
@@ -50,7 +50,7 @@ impl Children {
 struct Leaf {}
 
 impl View for Leaf {
-  fn init(mut children: Children) {}
+  fn init(children: mut Children) {}
 }
 `,
 	}})
@@ -214,11 +214,11 @@ func TestTraitDefinitions(t *testing.T) {
 			input: `
 			struct Counter { value: Int }
 			trait Bumpable {
-				fn poke(mut c: Counter)
+				fn poke(c: mut Counter)
 			}
 			struct Doubler {}
 			impl Bumpable for Doubler {
-				fn poke(mut c: Counter) { () }
+				fn poke(c: mut Counter) { () }
 			}
 			`,
 			output: &checker.Program{
@@ -231,7 +231,7 @@ func TestTraitDefinitions(t *testing.T) {
 			input: `
 			struct Counter { value: Int }
 			trait Bumpable {
-				fn poke(mut c: Counter)
+				fn poke(c: mut Counter)
 			}
 			struct Doubler {}
 			impl Bumpable for Doubler {

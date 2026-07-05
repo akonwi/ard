@@ -673,11 +673,7 @@ func (p printer) renderTypeParams(params []string) string {
 func (p printer) renderParameterList(params []parse.Parameter, indent int, header string) string {
 	parts := make([]string, 0, len(params))
 	for _, parameter := range params {
-		part := ""
-		if parameter.Mutable {
-			part += "mut "
-		}
-		part += parameter.Name
+		part := parameter.Name
 		if parameter.Type != nil {
 			part += ": " + p.renderType(parameter.Type)
 		}

@@ -106,7 +106,7 @@ func TestFunctions(t *testing.T) {
 			name: "Mutable parameters",
 			input: strings.Join(
 				[]string{
-					`fn update(mut value: Int) {}`,
+					`fn update(value: mut Int) {}`,
 				},
 				"\n",
 			),
@@ -807,7 +807,7 @@ func TestCallingPackageFunctions(t *testing.T) {
 			input: `
 			struct Tab { id: Str }
 
-			fn update(mut tabs: [Tab], idx: Int, id: Str) {
+			fn update(tabs: mut [Tab], idx: Int, id: Str) {
 			  if idx == 0 {
 			    tabs.set(0, Tab{id: id})
 			  } else {

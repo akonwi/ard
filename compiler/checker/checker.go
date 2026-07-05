@@ -1531,7 +1531,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 		params := make([]Parameter, len(method.Parameters))
 		valid := true
 		for i, param := range method.Parameters {
-			paramType := c.resolveType(param.Type)
+			paramType, paramMutable := c.resolveParameterType(param.Type)
 			if paramType == nil {
 				c.addError(fmt.Sprintf("Unrecognized type: %s", param.Type.GetName()), param.Type.GetLocation())
 				valid = false
@@ -1545,11 +1545,11 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 				c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
 				valid = false
 			}
-			if param.Mutable && mutableParamNeedsGoPointer(paramType) {
+			if paramMutable && mutableParamNeedsGoPointer(paramType) {
 				c.addError(fmt.Sprintf("Go interface method '%s' parameter '%s' cannot be mutable because it would change the Go ABI", method.Name, param.Name), param.GetLocation())
 				valid = false
 			}
-			params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: param.Mutable}
+			params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable}
 		}
 		returnType := Type(Void)
 		if method.ReturnType != nil {
@@ -1748,12 +1748,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			for i, method := range s.Methods {
 				params := make([]Parameter, len(method.Parameters))
 				for j, param := range method.Parameters {
-					paramType := c.resolveType(param.Type)
+					paramType, paramMutable := c.resolveParameterType(param.Type)
 					if paramType == nil {
 						c.addError(fmt.Sprintf("Unrecognized type: %s", param.Type.GetName()), param.Type.GetLocation())
 						continue
 					}
-					params[j] = Parameter{Name: param.Name, Type: paramType, Mutable: param.Mutable}
+					params[j] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable}
 				}
 
 				var returnType Type = Void
@@ -1870,17 +1870,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 					params := make([]Parameter, len(method.Parameters))
 					for i, param := range method.Parameters {
-						paramType := c.resolveType(param.Type)
+						paramType, paramMutable := c.resolveParameterType(param.Type)
 						expectedType := traitMethod.Parameters[i].Type
 						if !paramType.equal(expectedType) {
 							c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
 						}
 
-						if param.Mutable != traitMethod.Parameters[i].Mutable {
+						if paramMutable != traitMethod.Parameters[i].Mutable {
 							c.addError(fmt.Sprintf("Trait method '%s' parameter '%s' mutability mismatch", method.Name, param.Name), param.GetLocation())
 						}
 
-						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: param.Mutable}
+						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable}
 					}
 
 					// Check return type
@@ -1961,17 +1961,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 					params := make([]Parameter, len(method.Parameters))
 					for i, param := range method.Parameters {
-						paramType := c.resolveType(param.Type)
+						paramType, paramMutable := c.resolveParameterType(param.Type)
 						expectedType := traitMethod.Parameters[i].Type
 						if !paramType.equal(expectedType) {
 							c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
 						}
 
-						if param.Mutable != traitMethod.Parameters[i].Mutable {
+						if paramMutable != traitMethod.Parameters[i].Mutable {
 							c.addError(fmt.Sprintf("Trait method '%s' parameter '%s' mutability mismatch", method.Name, param.Name), param.GetLocation())
 						}
 
-						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: param.Mutable}
+						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable}
 					}
 
 					// Check return type
@@ -8175,24 +8175,60 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type) Exp
 	return checked
 }
 
+// resolveParameterType resolves a parameter's declared type. Mutability is
+// type syntax (`name: mut T`); an outermost `mut` normalizes into the
+// internal flag representation:
+//
+//   - natives and descriptor types (lists, maps, channels, named Go
+//     slices/maps) carry their base type with the Mutable flag — content
+//     mutation flows through the value (ADR 0040);
+//   - other foreign types (structs, scalars) carry their pointer form so
+//     type identity lines up with `mut pkg::T` values and Go signatures.
+func (c *Checker) resolveParameterType(t parse.DeclaredType) (Type, bool) {
+	var inner parse.DeclaredType
+	switch mt := t.(type) {
+	case *parse.MutableType:
+		inner = mt.Inner
+	case parse.MutableType:
+		inner = mt.Inner
+	default:
+		return c.resolveType(t), false
+	}
+
+	base := c.resolveType(inner)
+	if base == nil {
+		return nil, true
+	}
+	if foreign, ok := base.(*ForeignType); ok && !foreign.Pointer {
+		if mutableParamNeedsGoPointer(foreign) {
+			if pointer := foreign.PointerForm(); pointer != nil {
+				return pointer, true
+			}
+		}
+	}
+	return derefMutableRef(base), true
+}
+
 func (c *Checker) resolveParametersWithContext(params []parse.Parameter, expectedFnType *FunctionDef) []Parameter {
 	result := make([]Parameter, len(params))
 	for i, param := range params {
 		var paramType Type = Void
+		mutable := false
 
 		if param.Type != nil {
 			// Explicit type provided
-			paramType = c.resolveType(param.Type)
+			paramType, mutable = c.resolveParameterType(param.Type)
 		} else if expectedFnType != nil && i < len(expectedFnType.Parameters) {
 			// Infer from expected function type
 			paramType = expectedFnType.Parameters[i].Type
+			mutable = expectedFnType.Parameters[i].Mutable
 		}
 		// Otherwise defaults to Void
 
 		result[i] = Parameter{
 			Name:    param.Name,
 			Type:    paramType,
-			Mutable: param.Mutable,
+			Mutable: mutable,
 			Loc:     param.GetLocation(),
 		}
 	}

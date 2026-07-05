@@ -4,6 +4,11 @@
 
 Accepted
 
+Amended: parameter mutability is type syntax only. `fn f(s: mut S)` is the
+single spelling; the former `fn f(mut s: S)` flag spelling is rejected by
+the parser with a pointer to the type-position form. Examples below using
+the old spelling are historical.
+
 ## Context
 
 Ard currently uses `mut` for two related but different ideas:

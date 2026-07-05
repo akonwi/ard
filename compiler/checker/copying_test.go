@@ -14,7 +14,7 @@ func TestMutableReferenceFields(t *testing.T) {
 				struct Tree { count: Int }
 				struct Context { tree: mut Tree }
 
-				fn bump(mut tree: Tree) {
+				fn bump(tree: mut Tree) {
 					tree.count =+ 1
 				}
 
@@ -69,7 +69,7 @@ func TestMutableReferenceParameters(t *testing.T) {
 			input: `
 				struct Person { age: Int }
 
-				fn grow(mut p: Person) {
+				fn grow(p: mut Person) {
 					p.age =+ 1
 				}
 				mut joe = Person{age: 20}
@@ -82,7 +82,7 @@ func TestMutableReferenceParameters(t *testing.T) {
 			input: `
 				struct Person { age: Int }
 
-				fn grow(mut p: Person) {
+				fn grow(p: mut Person) {
 					p.age =+ 1
 				}
 				let joe = Person{age: 20}
@@ -100,7 +100,7 @@ func TestMutableReferenceParameters(t *testing.T) {
 			input: `
 				struct Person { age: Int }
 
-				fn grow(mut p: Person) {
+				fn grow(p: mut Person) {
 					p.age =+ 1
 				}
 				let joe = Person{age: 20}

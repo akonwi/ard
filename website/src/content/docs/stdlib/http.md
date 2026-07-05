@@ -83,7 +83,7 @@ Get the path from an inbound request.
 ```ard
 use ard/http
 
-fn handler(req: http::Request, mut res: http::Response) {
+fn handler(req: http::Request, res: mut http::Response) {
   match req.path() {
     path => res.body = "Path: {path}",
     _ => {
@@ -101,7 +101,7 @@ Get a path parameter value from an inbound request by name.
 ```ard
 use ard/http
 
-fn handler(req: http::Request, mut res: http::Response) {
+fn handler(req: http::Request, res: mut http::Response) {
   let id = req.path_param("id")
   res.body = "User: {id}"
 }
@@ -114,7 +114,7 @@ Get a query parameter value from an inbound request by name.
 ```ard
 use ard/http
 
-fn handler(req: http::Request, mut res: http::Response) {
+fn handler(req: http::Request, res: mut http::Response) {
   let page = req.query_param("page")
   res.body = "Page: {page}"
 }
@@ -183,7 +183,7 @@ use ard/http
 
 fn main() {
   let handlers: [Str:fn(http::Request, mut http::Response)] = [
-    "/": fn(req: http::Request, mut res: http::Response) {
+    "/": fn(req: http::Request, res: mut http::Response) {
       res.body = "Hello, World!"
       res.status = 200
     }
@@ -271,7 +271,7 @@ use ard/decode
 
 fn main() {
   let handlers: [Str:fn(http::Request, mut http::Response)] = [
-    "/api/auth/sign-up": fn(req: http::Request, mut res: http::Response) {
+    "/api/auth/sign-up": fn(req: http::Request, res: mut http::Response) {
       let raw_body = try req.body -> _ {
         res.status = 400
         res.body = "Missing request body"
@@ -308,13 +308,13 @@ use ard/http
 
 fn main() {
   let handlers: [Str:fn(http::Request, mut http::Response)] = [
-    "/": fn(req: http::Request, mut res: http::Response) {
+    "/": fn(req: http::Request, res: mut http::Response) {
       res.body = "Welcome!"
     },
-    "/about": fn(req: http::Request, mut res: http::Response) {
+    "/about": fn(req: http::Request, res: mut http::Response) {
       res.body = "About page"
     },
-    "/users/:id": fn(req: http::Request, mut res: http::Response) {
+    "/users/:id": fn(req: http::Request, res: mut http::Response) {
       let id = req.path_param("id")
       res.body = "User ID: {id}"
     }
@@ -331,7 +331,7 @@ use ard/http
 
 fn main() {
   let handlers: [Str:fn(http::Request, mut http::Response)] = [
-    "/search": fn(req: http::Request, mut res: http::Response) {
+    "/search": fn(req: http::Request, res: mut http::Response) {
       let query = req.query_param("q")
       res.body = "Results for: {query}"
     }

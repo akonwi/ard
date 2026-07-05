@@ -138,7 +138,7 @@ func TestFunctionDeclaration(t *testing.T) {
 		},
 		{
 			name:  "Mutable parameter",
-			input: `fn greet(mut person: Str) Str { }`,
+			input: `fn greet(person: mut Str) Str { }`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
@@ -146,9 +146,8 @@ func TestFunctionDeclaration(t *testing.T) {
 						Name: "greet",
 						Parameters: []Parameter{
 							{
-								Name:    "person",
-								Type:    &StringType{},
-								Mutable: true,
+								Name: "person",
+								Type: &MutableType{Inner: &StringType{}},
 							},
 						},
 						ReturnType: &StringType{},
@@ -440,7 +439,7 @@ func TestFunctionsWithGenerics(t *testing.T) {
 		{
 			name: "Function call with mut argument",
 			input: `
-				fn update(mut person: Person) {}
+				fn update(person: mut Person) {}
 				update(mut alice)`,
 			output: Program{
 				Imports: []Import{},
@@ -448,7 +447,7 @@ func TestFunctionsWithGenerics(t *testing.T) {
 					&FunctionDeclaration{
 						Name: "update",
 						Parameters: []Parameter{
-							{Name: "person", Type: &CustomType{Name: "Person"}, Mutable: true},
+							{Name: "person", Type: &MutableType{Inner: &CustomType{Name: "Person"}}},
 						},
 						Body: []Statement{},
 					},

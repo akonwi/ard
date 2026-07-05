@@ -52,7 +52,7 @@ fn main() {
 struct Sink {}
 
 impl io::Writer for Sink {
-  fn write(mut bytes: [Byte]) Int!Str {
+  fn write(bytes: mut [Byte]) Int!Str {
     Result::ok(bytes.size())
   }
 }`,
@@ -582,7 +582,7 @@ fn main() {
 			name: "foreign scalar is rejected for mutable primitive parameter",
 			input: `use go:time
 
-fn bump(mut value: Int) {
+fn bump(value: mut Int) {
   value = value + 1
 }
 
@@ -715,14 +715,14 @@ fn main() {
 			name: "Str is rejected for a mutable foreign newtype parameter",
 			input: `use go:encoding/json
 
-fn rewrite(mut n: json::Number) {
+fn rewrite(n: mut json::Number) {
 }
 
 fn main() {
   mut s = "42"
   rewrite(s)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected a mutable json::Number"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut json::Number, got Str"}},
 		},
 	})
 }
@@ -1144,7 +1144,7 @@ fn peek(nums: sort::IntSlice) Int {
 		{
 			name: "real Go methods on the named slice still resolve",
 			input: `use go:sort
-fn sorted(mut nums: sort::IntSlice) sort::IntSlice {
+fn sorted(nums: mut sort::IntSlice) sort::IntSlice {
   nums.Sort()
   nums
 }`,
@@ -1173,7 +1173,7 @@ fn main() {
 		},
 		{
 			name: "map literal passes to a mutable Ard map parameter",
-			input: `fn consume(mut m: [Str: Int]) Int {
+			input: `fn consume(m: mut [Str: Int]) Int {
   m.size()
 }
 fn main() {

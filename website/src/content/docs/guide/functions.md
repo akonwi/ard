@@ -34,7 +34,7 @@ fn print_message(msg: Str) {
 In order for a function to apply side-effects or mutations to parameters, the parameter must be marked as mutable in the signature.
 
 ```ard
-fn add_ten(mut value: Int) {
+fn add_ten(value: mut Int) {
   value =+ 10
 }
 

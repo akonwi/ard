@@ -92,7 +92,7 @@ A function parameter marked `mut` receives mutable access to caller-owned storag
 ```ard
 struct Person { name: Str, age: Int }
 
-fn update_person(mut person: Person) {
+fn update_person(person: mut Person) {
     person.age = 99  // Mutates the caller's value
 }
 

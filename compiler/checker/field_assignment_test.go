@@ -64,7 +64,7 @@ fn main() {
   n: Int,
 }
 
-fn f(mut s: S) {
+fn f(s: mut S) {
   s.n = "oops"
 }
 
@@ -159,5 +159,70 @@ fn main() {
   s.label = 42
 }
 `), "Type mismatch")
+	})
+}
+
+// Mutability is type syntax: `name: mut Type` is the only parameter
+// spelling, and a mut local satisfies a mut parameter (write-back flows to
+// caller storage). Regression tests for the call-boundary bug found by LSP
+// validation.
+func TestMutableParameterTypeSyntax(t *testing.T) {
+	t.Run("mut local satisfies mut parameter", func(t *testing.T) {
+		wantClean(t, checkSource(t, `struct S {
+  n: Int,
+}
+
+fn f(s: mut S) {
+  s.n = 2
+}
+
+fn main() {
+  mut s = S{n: 1}
+  f(s)
+}
+`))
+	})
+
+	t.Run("immutable local is rejected", func(t *testing.T) {
+		wantError(t, checkSource(t, `struct S {
+  n: Int,
+}
+
+fn f(s: mut S) {
+  s.n = 2
+}
+
+fn main() {
+  let s = S{n: 1}
+  f(s)
+}
+`), "Expected a mutable")
+	})
+
+	t.Run("mut parameter forwards to mut parameter", func(t *testing.T) {
+		wantClean(t, checkSource(t, `struct S {
+  n: Int,
+}
+
+fn inner(s: mut S) {
+  s.n = 3
+}
+
+fn outer(s: mut S) {
+  inner(s)
+}
+
+fn main() {
+  mut s = S{n: 1}
+  outer(s)
+}
+`))
+	})
+
+	t.Run("legacy flag spelling is a parse error", func(t *testing.T) {
+		result := parse.Parse([]byte("fn f(mut s: Int) {\n}\n"), "test.ard")
+		if len(result.Errors) == 0 {
+			t.Fatal("expected parse error for 'mut name: Type' spelling")
+		}
 	})
 }

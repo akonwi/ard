@@ -325,9 +325,8 @@ func (v VariableAssignment) String() string {
 
 type Parameter struct {
 	Location
-	Name    string
-	Type    DeclaredType
-	Mutable bool
+	Name string
+	Type DeclaredType
 }
 
 func (p Parameter) String() string {

@@ -1090,8 +1090,6 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 				p.advance()
 			}
 
-			isMutable := p.match(mut)
-
 			// Use same logic as struct fields for parameter name parsing
 			current := p.peek()
 			if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
@@ -1112,7 +1110,6 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 			paramType := p.parseType()
 			params = append(params, Parameter{
 				Location: paramName.getLocation(),
-				Mutable:  isMutable,
 				Name:     paramName.text,
 				Type:     paramType,
 			})
@@ -2481,7 +2478,6 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			if p.match(new_line) {
 				continue
 			}
-			isMutable := p.match(mut)
 			nameToken := p.consumeVariableName("Expected parameter name")
 
 			// Check if this is a simple parameter list in an anonymous function
@@ -2509,7 +2505,6 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 
 			params = append(params, Parameter{
 				Location: nameToken.getLocation(),
-				Mutable:  isMutable,
 				Name:     nameToken.text,
 				Type:     paramType,
 			})
