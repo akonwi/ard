@@ -225,3 +225,55 @@ func TestRangeHoldsIdentifierGuard(t *testing.T) {
 		t.Fatal("multi-line range must not verify")
 	}
 }
+
+// TestSignatureHelpFromSpans covers the span-based signature path: function,
+// method, and builtin calls with active-parameter tracking.
+func TestSignatureHelpFromSpans(t *testing.T) {
+	dir := t.TempDir()
+	source := `struct Board {
+  cells: [Str],
+}
+impl Board {
+  fn play(player: Str, pos: Int) Bool {
+    true
+  }
+}
+
+fn configure(width: Int, height: Int, title: Str) {}
+
+fn main(board: Board) {
+  configure(80, 24, "demo")
+  board.play("x", 0)
+}
+`
+	path := filepath.Join(dir, "test.ard")
+	os.WriteFile(path, []byte(source), 0o644)
+	srv := NewServer()
+	docURI := uri.File(path)
+	srv.cache.Open(docURI, "ard", 1, source)
+
+	t.Run("function second arg", func(t *testing.T) {
+		help := srv.signatureHelpFromSpans(context.Background(), docURI, source, protocol.Position{Line: 12, Character: 17})
+		if help == nil || len(help.Signatures) == 0 {
+			t.Fatal("no signature help")
+		}
+		if want := "fn configure(width: Int, height: Int, title: Str)"; help.Signatures[0].Label != want {
+			t.Fatalf("label = %q, want %q", help.Signatures[0].Label, want)
+		}
+		if help.ActiveParameter != 1 {
+			t.Fatalf("active parameter = %d, want 1", help.ActiveParameter)
+		}
+	})
+	t.Run("method first arg", func(t *testing.T) {
+		help := srv.signatureHelpFromSpans(context.Background(), docURI, source, protocol.Position{Line: 13, Character: 14})
+		if help == nil || len(help.Signatures) == 0 {
+			t.Fatal("no signature help")
+		}
+		if want := "fn Board.play(player: Str, pos: Int) Bool"; help.Signatures[0].Label != want {
+			t.Fatalf("label = %q, want %q", help.Signatures[0].Label, want)
+		}
+		if help.ActiveParameter != 0 {
+			t.Fatalf("active parameter = %d, want 0", help.ActiveParameter)
+		}
+	})
+}

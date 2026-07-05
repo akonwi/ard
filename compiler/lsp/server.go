@@ -671,7 +671,10 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 		if !ok {
 			return
 		}
-		help = computeSignatureHelp(doc.Text, filePath, params.Position)
+		help = s.signatureHelpFromSpans(ctx, params.TextDocument.URI, doc.Text, params.Position)
+		if help == nil {
+			help = computeSignatureHelp(doc.Text, filePath, params.Position)
+		}
 	}()
 
 	return reply(ctx, help, nil)
