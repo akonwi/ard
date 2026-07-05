@@ -10,6 +10,7 @@ import (
 
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
+	cmpopts.IgnoreFields(EnumDefinition{}, "NameLocation"),
 	cmp.AllowUnexported(MutableType{}),
 	cmpopts.IgnoreUnexported(
 		Identifier{},

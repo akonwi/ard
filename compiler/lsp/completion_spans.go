@@ -121,24 +121,8 @@ func memberCompletionItems(t checker.Type, fa *analysis.FileAnalysis) []protocol
 			})
 		}
 		if fa.Checked != nil {
-			program := fa.Checked
-			methods := program.StructMethodsFor(checker.StructMethodOwner(owner))
-			// Imported structs keep their methods in the defining module's
-			// program; merge the cross-module view.
-			imported := checker.StructMethodsInModules(program.Imports, checker.StructMethodOwner(owner))
-			merged := make(map[string]*checker.FunctionDef, len(methods)+len(imported))
-			for name, def := range imported {
-				merged[name] = def
-			}
-			for name, def := range methods {
-				merged[name] = def
-			}
-			methodNames := make([]string, 0, len(merged))
-			for name := range merged {
-				methodNames = append(methodNames, name)
-			}
-			sort.Strings(methodNames)
-			for _, name := range methodNames {
+			merged := mergedStructMethods(fa.Checked, owner)
+			for _, name := range sortedKeys(merged) {
 				addMethod(merged[name])
 			}
 		}
@@ -356,4 +340,30 @@ func computeImportCompletions(source string, filePath string, position protocol.
 		return []protocol.CompletionItem{}
 	}
 	return withCompletionTextEdits(importPathCompletionItems(cctx.importPath, filePath), cctx, position)
+}
+
+// mergedStructMethods returns a struct's methods across the local program
+// and imported modules: imported structs keep their methods in the defining
+// module's program. Local definitions win on name collisions.
+func mergedStructMethods(program *checker.Program, owner *checker.StructDef) map[string]*checker.FunctionDef {
+	local := program.StructMethodsFor(checker.StructMethodOwner(owner))
+	imported := checker.StructMethodsInModules(program.Imports, checker.StructMethodOwner(owner))
+	merged := make(map[string]*checker.FunctionDef, len(local)+len(imported))
+	for name, def := range imported {
+		merged[name] = def
+	}
+	for name, def := range local {
+		merged[name] = def
+	}
+	return merged
+}
+
+// sortedKeys returns a map's keys in sorted order.
+func sortedKeys(m map[string]*checker.FunctionDef) []string {
+	out := make([]string, 0, len(m))
+	for name := range m {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }

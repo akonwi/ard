@@ -181,3 +181,88 @@ fn native_mut(board: mut Board) {
 		t.Fatalf("double mut in rendering: %q", content)
 	}
 }
+
+// TestSpanHoverTypeDeclarations renders the full declared shape when
+// hovering a type declaration's name, across all declaration kinds.
+func TestSpanHoverTypeDeclarations(t *testing.T) {
+	source := `struct Board {
+  cells: [Str],
+  score: Int?,
+}
+
+private struct Hidden {
+  secret: Str,
+}
+
+struct Box<$T> {
+  value: $T,
+}
+
+enum Color {
+  Red,
+  Green,
+}
+
+trait Render {
+  fn describe() Str
+}
+
+type Fallback = Str | Int
+
+type Cells = [Str]
+`
+	t.Run("struct with fields in source order", func(t *testing.T) {
+		content := spanHover(t, source, 0, 8)
+		want := "struct Board {\n  cells: [Str],\n  score: Int?,\n}"
+		if !strings.Contains(content, want) {
+			t.Fatalf("struct hover = %q, want contains %q", content, want)
+		}
+	})
+	t.Run("private struct", func(t *testing.T) {
+		content := spanHover(t, source, 5, 16)
+		if !strings.Contains(content, "struct Hidden") {
+			t.Fatalf("private struct hover = %q", content)
+		}
+	})
+	t.Run("generic struct", func(t *testing.T) {
+		content := spanHover(t, source, 9, 8)
+		if !strings.Contains(content, "struct Box<$T>") {
+			t.Fatalf("generic struct hover = %q", content)
+		}
+	})
+	t.Run("enum with variants", func(t *testing.T) {
+		content := spanHover(t, source, 13, 6)
+		want := "enum Color {\n  Red,\n  Green,\n}"
+		if !strings.Contains(content, want) {
+			t.Fatalf("enum hover = %q, want contains %q", content, want)
+		}
+	})
+	t.Run("trait with method signatures", func(t *testing.T) {
+		content := spanHover(t, source, 18, 7)
+		want := "trait Render {\n  fn describe() Str\n}"
+		if !strings.Contains(content, want) {
+			t.Fatalf("trait hover = %q, want contains %q", content, want)
+		}
+	})
+	t.Run("union declaration", func(t *testing.T) {
+		content := spanHover(t, source, 22, 6)
+		if !strings.Contains(content, "type Fallback = Str | Int") {
+			t.Fatalf("union hover = %q", content)
+		}
+	})
+	t.Run("alias declaration", func(t *testing.T) {
+		content := spanHover(t, source, 24, 6)
+		if !strings.Contains(content, "type Cells = [Str]") {
+			t.Fatalf("alias hover = %q", content)
+		}
+	})
+	t.Run("enum body hover resolves inner content, not the enum", func(t *testing.T) {
+		// Hovering a variant inside the body must not render the enum shape:
+		// the def record is name-anchored now, so the oversized-span
+		// shadowing hazard stays closed.
+		content := spanHover(t, source, 14, 3)
+		if strings.Contains(content, "enum Color {") {
+			t.Fatalf("enum body hover leaked the declaration shape: %q", content)
+		}
+	})
+}

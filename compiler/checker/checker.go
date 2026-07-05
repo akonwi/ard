@@ -2030,12 +2030,14 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 		}
 	case *parse.TypeDeclaration:
 		{
+			// Record before the hoisted-alias early return below, or plain
+			// aliases (already in scope) would never get a definition span.
+			c.recordDef(s.Name.GetLocation(), TypeKey(c.typeOwnerPath(), s.Name.Name))
 			if len(s.Type) == 1 {
 				if _, exists := c.scope.get(s.Name.Name); exists {
 					return nil
 				}
 			}
-			c.recordDef(s.Name.GetLocation(), TypeKey(c.typeOwnerPath(), s.Name.Name))
 			// Handle type declaration (type unions/aliases)
 			types := make([]Type, len(s.Type))
 			for i, declType := range s.Type {
@@ -2505,7 +2507,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			if !ok {
 				return nil
 			}
-			c.recordDef(s.GetLocation(), TypeKey(c.typeOwnerPath(), s.Name))
+			c.recordDef(s.NameLocation, TypeKey(c.typeOwnerPath(), s.Name))
 			if len(s.Variants) == 0 {
 				c.addError("Enums must have at least one variant", s.GetLocation())
 				return nil

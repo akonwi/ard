@@ -55,6 +55,13 @@ func (s *Server) hoverFromSpans(ctx context.Context, docURI uri.URI, position pr
 				if def := methodDefFromAnalysis(fa, owner, name); def != nil {
 					return simpleHover(methodSignatureString(owner, def))
 				}
+			case strings.HasPrefix(key, "type:"):
+				// Declaration-site hover is same-file: render the shape from
+				// the parse tree (author order, private types, alias kinds).
+				name := key[strings.LastIndex(key, ":")+1:]
+				if content := renderTypeDeclHover(fa.Program, name); content != "" {
+					return simpleHover(content)
+				}
 			}
 		}
 	}
@@ -182,10 +189,7 @@ func methodDefFromAnalysis(fa *analysis.FileAnalysis, owner string, name string)
 	switch ownerType := sym.Type.(type) {
 	case *checker.StructDef:
 		if fa.Checked != nil {
-			if def, ok := fa.Checked.StructMethod(checker.StructMethodOwner(ownerType), name); ok {
-				return def
-			}
-			return checker.StructMethodsInModules(fa.Checked.Imports, checker.StructMethodOwner(ownerType))[name]
+			return mergedStructMethods(fa.Checked, ownerType)[name]
 		}
 	case *checker.Enum:
 		return ownerType.Methods[name]

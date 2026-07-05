@@ -449,10 +449,13 @@ type EnumVariant struct {
 
 type EnumDefinition struct {
 	Location
-	Name     string
-	Variants []EnumVariant
-	Private  bool
-	Comments []Comment // Comments found within the enum definition
+	Name string
+	// NameLocation is the span of the enum's name token, for tooling that
+	// anchors on the declared name rather than the whole declaration.
+	NameLocation Location
+	Variants     []EnumVariant
+	Private      bool
+	Comments     []Comment // Comments found within the enum definition
 }
 
 func (e EnumDefinition) String() string {

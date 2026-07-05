@@ -2,8 +2,8 @@ package lsp
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"

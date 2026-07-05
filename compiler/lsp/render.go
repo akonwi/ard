@@ -56,8 +56,6 @@ func pointInRange(p parse.Point, loc parse.Location) bool {
 	return true
 }
 
-// typeDeclString converts a parse.DeclaredType to a readable string.
-
 func checkerTypeString(t checker.Type) string {
 	if t == nil {
 		return "?"

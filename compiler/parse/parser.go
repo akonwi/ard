@@ -755,8 +755,9 @@ func (p *parser) enumDef(private bool) Statement {
 	}
 	nameToken := p.advance()
 	enum := &EnumDefinition{
-		Name:    nameToken.text,
-		Private: private,
+		Name:         nameToken.text,
+		NameLocation: nameToken.getLocation(),
+		Private:      private,
 		Location: Location{
 			Start: Point{Row: enumToken.line, Col: enumToken.column},
 		},
