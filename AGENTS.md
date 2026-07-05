@@ -33,7 +33,6 @@ This is a monorepo with the following top-level directories:
   - when working on bugs, start with test reproduction. tests also add documentation of the case for future reference
 
 ## Commands
-Generated programs use Go's `encoding/json/v2`, which requires the `jsonv2` Go experiment. Ensure `GOEXPERIMENT=jsonv2` is set in the environment (CI passes `-tags=goexperiment.jsonv2` explicitly).
 
 All commands should be run from the `/compiler` directory:
 

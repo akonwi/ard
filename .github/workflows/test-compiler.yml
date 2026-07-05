@@ -23,11 +23,11 @@ jobs:
 
       - name: Run compiler unit tests
         working-directory: compiler
-        run: go test -tags=goexperiment.jsonv2 ./...
+        run: go test ./...
 
       - name: Standard Libary tests
         working-directory: compiler
-        run: go run -tags=goexperiment.jsonv2 main.go test std_lib
+        run: go run main.go test std_lib
 
   test-go-backend:
     runs-on: ubuntu-latest
@@ -44,7 +44,7 @@ jobs:
 
       - name: Run Go backend integration tests
         working-directory: compiler
-        run: go test -tags=goexperiment.jsonv2 ./go -count=1
+        run: go test ./go -count=1
 
   test-examples:
     runs-on: ubuntu-latest
@@ -61,7 +61,7 @@ jobs:
 
       - name: Build Ard CLI for examples
         working-directory: compiler
-        run: go build -tags=goexperiment.jsonv2 -o "$RUNNER_TEMP/ard" .
+        run: go build -o "$RUNNER_TEMP/ard" .
 
       - name: Run tic-tac-toe PTY smoke test
         working-directory: examples/tic-tac-toe

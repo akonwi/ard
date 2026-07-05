@@ -23,6 +23,25 @@ type goPackageResolveResult struct {
 	err error
 }
 
+// JSONV2BuildTag enables encoding/json/v2, which generated Ard output
+// imports for union marshalling. It is part of the generated output's
+// contract, so both go/packages resolution and generated builds apply it
+// unconditionally — the checker must see the same build configuration the
+// backend compiles. Drop when json/v2 leaves its Go experiment.
+const JSONV2BuildTag = "goexperiment.jsonv2"
+
+// resolutionBuildTags prepends the compiler-owned jsonv2 tag to the
+// project's configured tags, deduplicating.
+func resolutionBuildTags(buildTags []string) []string {
+	tags := []string{JSONV2BuildTag}
+	for _, tag := range buildTags {
+		if tag != JSONV2BuildTag {
+			tags = append(tags, tag)
+		}
+	}
+	return tags
+}
+
 func NewGoPackagesResolver(projectRoot string, buildTags []string) *GoPackagesResolver {
 	if absRoot, err := filepath.Abs(projectRoot); err == nil {
 		projectRoot = absRoot
@@ -31,7 +50,7 @@ func NewGoPackagesResolver(projectRoot string, buildTags []string) *GoPackagesRe
 	if os.IsNotExist(modulePathErr) {
 		modulePathErr = nil
 	}
-	return &GoPackagesResolver{ProjectRoot: projectRoot, BuildTags: append([]string(nil), buildTags...), modulePath: modulePath, modulePathErr: modulePathErr, cache: map[string]goPackageResolveResult{}}
+	return &GoPackagesResolver{ProjectRoot: projectRoot, BuildTags: resolutionBuildTags(buildTags), modulePath: modulePath, modulePathErr: modulePathErr, cache: map[string]goPackageResolveResult{}}
 }
 
 func (r *GoPackagesResolver) ResolveGoPackage(path string) (*GoPackage, error) {

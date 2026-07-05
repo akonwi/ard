@@ -982,10 +982,18 @@ func compilerModuleRoot() (string, bool) {
 }
 
 func buildGeneratedProgram(dir string, outputPath string, buildTags ...string) error {
-	args := []string{"build", "-mod=mod", "-o", outputPath}
-	if len(buildTags) > 0 {
-		args = append(args, "-tags="+strings.Join(buildTags, ","))
+	// The generated output imports encoding/json/v2 (union marshalling), so
+	// the jsonv2 experiment tag is part of the output contract and always
+	// applied here, regardless of caller or environment. The checker's
+	// go/packages resolution applies the same tag (checker.JSONV2BuildTag)
+	// so both sides see one build configuration.
+	tags := []string{checker.JSONV2BuildTag}
+	for _, tag := range buildTags {
+		if tag != checker.JSONV2BuildTag {
+			tags = append(tags, tag)
+		}
 	}
+	args := []string{"build", "-mod=mod", "-o", outputPath, "-tags=" + strings.Join(tags, ",")}
 	args = append(args, ".")
 	cmd := exec.Command("go", args...)
 	cmd.Dir = dir

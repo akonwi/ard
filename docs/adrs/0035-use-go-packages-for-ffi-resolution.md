@@ -78,7 +78,9 @@ Go build tags are configured only in `ard.toml`:
 build_tags = ["sqlite", "debug"]
 ```
 
-There is no CLI override, no forced default tag set, and no compiler-owned registry of known tags. Go build tags are open-ended and package-defined, so Ard should not reject unknown valid tags.
+There is no CLI override, no forced default tag set for *user configuration*, and no compiler-owned registry of known tags. Go build tags are open-ended and package-defined, so Ard should not reject unknown valid tags.
+
+One exception is compiler-owned, not user-facing: generated output imports `encoding/json/v2` for union marshalling, so the compiler applies the `goexperiment.jsonv2` tag unconditionally to both `go/packages` resolution and every generated build — keeping the checker and the backend on one build configuration. It is part of the generated output's contract — independent of `[go] build_tags` and of the caller's environment — and disappears when json/v2 leaves its Go experiment. Note the experiment also switches the standard library's `encoding/json` (v1) to its experiment-backed implementation for all Go code in the build, including FFI dependencies that never touch Ard unions.
 
 Ard should only validate basic syntax for individual tag entries and reject malformed values such as empty strings, values with whitespace, or build-constraint expressions like `linux && cgo`. The configured tags are passed through unchanged and consistently to both `go/packages` resolution and generated Go build/run/test commands.
 

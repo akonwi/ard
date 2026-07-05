@@ -29,7 +29,7 @@ jobs:
 
       - name: Run tests
         working-directory: compiler
-        run: go test -tags=goexperiment.jsonv2 ./...
+        run: go test ./...
 
   build:
     needs: test
@@ -74,7 +74,6 @@ jobs:
         working-directory: compiler
         run: |
           go build \
-            -tags=goexperiment.jsonv2 \
             -ldflags="-X github.com/akonwi/ard/version.Version=${VERSION}" \
             -o ard \
             .
