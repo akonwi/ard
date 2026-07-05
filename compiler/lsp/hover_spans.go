@@ -30,6 +30,16 @@ func (s *Server) hoverFromSpans(ctx context.Context, docURI uri.URI, position pr
 		if sym, ok := rec.Key.(*checker.Symbol); ok && sym.Type != nil {
 			return simpleHover(checkerTypeString(sym.Type))
 		}
+		// Function definition records render their signature when the cursor
+		// sits on the declaration line itself.
+		if key, ok := rec.Key.(string); ok && rec.IsDef && strings.HasPrefix(key, "fn:") &&
+			point.Row == rec.Loc.Start.Row {
+			for _, other := range records {
+				if def, ok := other.Node.(*checker.FunctionDef); ok && other.Loc == rec.Loc {
+					return simpleHover(functionSignatureString(def.Name, def))
+				}
+			}
+		}
 	}
 	return nil
 }

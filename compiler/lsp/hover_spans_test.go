@@ -134,3 +134,14 @@ impl Board {
 		requireSpanHover(t, source, 5, 10, "Board.cells: [Str]")
 	})
 }
+
+// TestSpanHoverFunctionDeclaration renders the signature when hovering the
+// declaration name itself.
+func TestSpanHoverFunctionDeclaration(t *testing.T) {
+	source := `fn greet(name: Str) Str {
+  let msg = "Hello"
+  msg
+}
+`
+	requireSpanHover(t, source, 0, 3, "fn greet(name: Str) Str")
+}
