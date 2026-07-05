@@ -69,6 +69,18 @@ func (p Import) String() string {
 	return p.Name
 }
 
+// Alias returns the name the import is referenced by: the explicit alias
+// when present, otherwise the final path segment.
+func (p Import) Alias() string {
+	if p.Name != "" {
+		return p.Name
+	}
+	if idx := strings.LastIndex(p.Path, "/"); idx >= 0 {
+		return p.Path[idx+1:]
+	}
+	return p.Path
+}
+
 type Program struct {
 	Imports    []Import
 	Statements []Statement

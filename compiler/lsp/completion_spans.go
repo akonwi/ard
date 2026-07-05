@@ -181,19 +181,19 @@ func (s *Server) staticCompletionFromSpans(fa *analysis.FileAnalysis, source str
 	// path; resolve the alias through the parse tree's import list.
 	if fa.Program != nil {
 		for _, imp := range fa.Program.Imports {
-			alias := imp.Name
-			if alias == "" {
-				if idx := strings.LastIndex(imp.Path, "/"); idx >= 0 {
-					alias = imp.Path[idx+1:]
-				} else {
-					alias = imp.Path
-				}
-			}
-			if alias != target {
+			if imp.Alias() != target {
 				continue
 			}
 			if mod := fa.Checked.Imports[imp.Path]; mod != nil {
 				for name, sym := range mod.Symbols() {
+					// Compound (Type::fn) statics and test functions are not
+					// module member completions, matching legacy behavior.
+					if strings.Contains(name, "::") {
+						continue
+					}
+					if def, ok := sym.Type.(*checker.FunctionDef); ok && def.IsTest {
+						continue
+					}
 					add(staticSymbolCompletionItem(name, sym))
 				}
 			}

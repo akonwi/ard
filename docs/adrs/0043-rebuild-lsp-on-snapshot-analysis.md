@@ -10,11 +10,18 @@ references, document-highlight, rename (local symbols), and member-completion
 features are live on the snapshot/span path with legacy heuristics as
 fallback. Rename is project-wide on the span path, analysis honors request
 cancellation between pipeline stages, and cached analyses retain only the
-checked program rather than whole Checker instances. Signature help resolves
-through checked definitions on the span path. Remaining migration work:
-static-completion/document-symbol/code-action ports (parse-based, cheap,
-currently correct on the legacy path) and deletion of the legacy paths at
-cutover (each legacy test scenario needs a span-path equivalent first).
+checked program rather than whole Checker instances. Signature help and
+static completion resolve through checked definitions on the span path.
+
+Cutover checklist — gaps currently invisible behind legacy fallbacks that
+must gain span-path coverage (with tests) before legacy deletion:
+
+- imported-type statics in completion (`mod::Type::`, imported enum variants)
+- prelude statics in completion (`Result::`, `Maybe::`, `Chan::` members)
+- method-declaration and `Type::fn` static-declaration hovers
+- document symbols and code actions (parse-based; port or bless as-is)
+- UTF-16 column conversion for non-ASCII lines (project-wide)
+- import-graph filtering for the workspace reference scan
 
 ## Context
 

@@ -344,3 +344,27 @@ fn main() {
 		}
 	})
 }
+
+// TestStaticCompletionAliasedImport covers `use x as y` alias resolution.
+func TestStaticCompletionAliasedImport(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"proj\"\nard = \">= 0.1.0\"\n"), 0o644)
+	os.WriteFile(filepath.Join(root, "math.ard"), []byte("fn inc(v: Int) Int {\n  v + 1\n}\n"), 0o644)
+	source := "use proj/math as m\n\nfn main() {\n  m::\n}\n"
+	path := filepath.Join(root, "main.ard")
+	os.WriteFile(path, []byte(source), 0o644)
+	srv := NewServer()
+	docURI := uri.File(path)
+	srv.cache.Open(docURI, "ard", 1, source)
+
+	items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 3, Character: 5})
+	found := false
+	for _, item := range items {
+		if item.Label == "inc" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("aliased module member missing: %#v", items)
+	}
+}

@@ -171,28 +171,37 @@ func (pkg ChannelStaticPkg) Get(name string) Symbol {
 	}
 }
 
-// Symbols enumerations for builtin packages. Names mirror each Get above.
+// Builtin package symbol names: the single source of truth for each Get
+// switch above. BuiltinPkgNames is exported so tests can assert Get and
+// Symbols stay in sync.
+var BuiltinPkgNames = map[string][]string{
+	"ard/maybe":    {"none", "some"},
+	"ard/result":   {"ok", "err"},
+	"ard/async":    {"start"},
+	"ard/unsafe":   {"cast", "is_nil"},
+	"builtin/Chan": {"new"},
+}
 
 func (pkg MaybePkg) Symbols() map[string]Symbol {
-	return symbolsByName(pkg, "none", "some")
+	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
 }
 
 func (pkg ResultPkg) Symbols() map[string]Symbol {
-	return symbolsByName(pkg, "ok", "err")
+	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
 }
 
 func (pkg AsyncPkg) Symbols() map[string]Symbol {
-	return symbolsByName(pkg, "start")
+	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
 }
 
 func (pkg UnsafePkg) Symbols() map[string]Symbol {
-	return symbolsByName(pkg, "cast", "is_nil")
+	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
 }
 
 func (pkg EmptyBuiltinPkg) Symbols() map[string]Symbol { return map[string]Symbol{} }
 
 func (pkg ChannelStaticPkg) Symbols() map[string]Symbol {
-	return symbolsByName(pkg, "new")
+	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
 }
 
 func symbolsByName(mod Module, names ...string) map[string]Symbol {
