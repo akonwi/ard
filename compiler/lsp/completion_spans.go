@@ -177,6 +177,22 @@ func (s *Server) staticCompletionFromSpans(fa *analysis.FileAnalysis, source str
 		}
 	}
 
+	// Prelude statics: auto-imported modules are keyed by their surface
+	// alias (Int, Str, List, ...), and builtin static packages (Result,
+	// Chan) resolve through the prelude table.
+	if mod := fa.Checked.Imports[target]; mod != nil {
+		for name, sym := range mod.Symbols() {
+			if !strings.Contains(name, "::") {
+				add(staticSymbolCompletionItem(name, sym))
+			}
+		}
+	}
+	if mod, ok := checker.PreludeModule(target); ok {
+		for name, sym := range mod.Symbols() {
+			add(staticSymbolCompletionItem(name, sym))
+		}
+	}
+
 	// Imported module members. The checked Imports map is keyed by import
 	// path; resolve the alias through the parse tree's import list.
 	if fa.Program != nil {
@@ -195,6 +211,36 @@ func (s *Server) staticCompletionFromSpans(fa *analysis.FileAnalysis, source str
 						continue
 					}
 					add(staticSymbolCompletionItem(name, sym))
+				}
+			}
+		}
+	}
+
+	// Imported types: `Color::` variants and `Type::fn` statics where the
+	// type comes from an imported module.
+	if fa.Program != nil {
+		for _, imp := range fa.Program.Imports {
+			mod := fa.Checked.Imports[imp.Path]
+			if mod == nil {
+				continue
+			}
+			if sym := mod.Get(target); !sym.IsZero() {
+				if enum, ok := sym.Type.(*checker.Enum); ok {
+					for _, value := range enum.Values {
+						add(protocol.CompletionItem{Label: value.Name, Kind: protocol.CompletionItemKindEnumMember, Detail: target})
+					}
+				}
+			}
+			importPrefix := target + "::"
+			for name, memberSym := range mod.Symbols() {
+				if strings.HasPrefix(name, importPrefix) {
+					if def, ok := memberSym.Type.(*checker.FunctionDef); ok {
+						add(protocol.CompletionItem{
+							Label:  strings.TrimPrefix(name, importPrefix),
+							Kind:   protocol.CompletionItemKindFunction,
+							Detail: methodDetailString(def),
+						})
+					}
 				}
 			}
 		}

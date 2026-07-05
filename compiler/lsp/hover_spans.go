@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/lsp/analysis"
 	"github.com/akonwi/ard/parse"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -20,7 +21,11 @@ func (s *Server) hoverFromSpans(ctx context.Context, docURI uri.URI, position pr
 		return nil
 	}
 
-	point := parse.Point{Row: int(position.Line) + 1, Col: int(position.Character) + 1}
+	docURIPath, err := filePathFromURI(docURI)
+	if err != nil {
+		return nil
+	}
+	point := s.docLinesFor(docURIPath).positionToPoint(position)
 	records := fa.Spans.At(point)
 	for _, rec := range records {
 		if content := renderSpanHover(rec); content != "" {
@@ -30,13 +35,25 @@ func (s *Server) hoverFromSpans(ctx context.Context, docURI uri.URI, position pr
 		if sym, ok := rec.Key.(*checker.Symbol); ok && sym.Type != nil {
 			return simpleHover(checkerTypeString(sym.Type))
 		}
-		// Function definition records render their signature when the cursor
-		// sits on the declaration line itself.
-		if key, ok := rec.Key.(string); ok && rec.IsDef && strings.HasPrefix(key, "fn:") &&
-			point.Row == rec.Loc.Start.Row {
-			for _, other := range records {
-				if def, ok := other.Node.(*checker.FunctionDef); ok && other.Loc == rec.Loc {
-					return simpleHover(functionSignatureString(def.Name, def))
+		// Function and method definition records render their signature when
+		// the cursor sits on the declaration line itself.
+		if key, ok := rec.Key.(string); ok && rec.IsDef && point.Row == rec.Loc.Start.Row {
+			switch {
+			case strings.HasPrefix(key, "fn:"):
+				for _, other := range records {
+					if def, ok := other.Node.(*checker.FunctionDef); ok && other.Loc == rec.Loc {
+						return simpleHover(functionSignatureString(def.Name, def))
+					}
+				}
+			case strings.HasPrefix(key, "method:"):
+				// key = method:<module>:<Owner>.<name>
+				tail := key[strings.LastIndex(key, ":")+1:]
+				owner, name, found := strings.Cut(tail, ".")
+				if !found {
+					break
+				}
+				if def := methodDefFromAnalysis(fa, owner, name); def != nil {
+					return simpleHover(methodSignatureString(owner, def))
 				}
 			}
 		}
@@ -153,4 +170,28 @@ func paramListString(def *checker.FunctionDef) string {
 		parts = append(parts, text)
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// methodDefFromAnalysis resolves a method definition by owner and name from
+// the checked module view.
+func methodDefFromAnalysis(fa *analysis.FileAnalysis, owner string, name string) *checker.FunctionDef {
+	if fa.Module == nil {
+		return nil
+	}
+	sym := fa.Module.Get(owner)
+	if sym.IsZero() {
+		return nil
+	}
+	switch ownerType := sym.Type.(type) {
+	case *checker.StructDef:
+		if fa.Checked != nil {
+			if def, ok := fa.Checked.StructMethod(checker.StructMethodOwner(ownerType), name); ok {
+				return def
+			}
+			return checker.StructMethodsInModules(fa.Checked.Imports, checker.StructMethodOwner(ownerType))[name]
+		}
+	case *checker.Enum:
+		return ownerType.Methods[name]
+	}
+	return nil
 }

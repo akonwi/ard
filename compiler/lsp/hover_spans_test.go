@@ -145,3 +145,18 @@ func TestSpanHoverFunctionDeclaration(t *testing.T) {
 `
 	requireSpanHover(t, source, 0, 3, "fn greet(name: Str) Str")
 }
+
+// TestSpanHoverMethodDeclaration renders the signature when hovering a
+// method's declaration inside an impl block.
+func TestSpanHoverMethodDeclaration(t *testing.T) {
+	source := `struct Board {
+  cells: [Str],
+}
+impl Board {
+  fn can_play(pos: Int) Bool {
+    true
+  }
+}
+`
+	requireSpanHover(t, source, 4, 6, "fn Board.can_play(pos: Int) Bool")
+}

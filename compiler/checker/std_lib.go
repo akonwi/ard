@@ -213,3 +213,10 @@ func symbolsByName(mod Module, names ...string) map[string]Symbol {
 	}
 	return out
 }
+
+// PreludeModule returns a built-in prelude static package (Result, Chan,
+// Receiver, Sender) by its surface name. Tooling uses this for completion.
+func PreludeModule(name string) (Module, bool) {
+	mod, ok := prelude[name]
+	return mod, ok
+}

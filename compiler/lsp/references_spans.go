@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/akonwi/ard/lsp/analysis"
+
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 	"go.lsp.dev/protocol"
@@ -28,17 +30,16 @@ func (s *Server) referencesFromSpans(ctx context.Context, docURI uri.URI, positi
 	}
 
 	var out []protocol.Location
-	appendRec := func(path string, loc parse.Location) {
-		out = append(out, protocol.Location{
-			URI:   protocol.DocumentURI(uri.File(path)),
-			Range: parseLocationToLSPRange(loc),
-		})
-	}
+	fileLines := s.docLinesFor(filePath)
 	for _, rec := range group.records {
 		if rec.IsDef && !includeDeclaration {
 			continue
 		}
-		appendRec(filePath, s.refLocation(rec, group.name, filePath))
+		loc := refLocationIn(fileLines, rec, group.name)
+		out = append(out, protocol.Location{
+			URI:   protocol.DocumentURI(uri.File(filePath)),
+			Range: fileLines.locationToRange(loc),
+		})
 	}
 
 	// Nominal entities are visible across the project: gather references in
@@ -74,7 +75,7 @@ func (s *Server) definitionLocation(ctx context.Context, group *spanGroup, fromF
 		if rec.IsDef {
 			return protocol.Location{
 				URI:   protocol.DocumentURI(uri.File(fromFile)),
-				Range: parseLocationToLSPRange(s.refLocation(rec, group.name, fromFile)),
+				Range: s.rangeFor(fromFile, s.refLocation(rec, group.name, fromFile)),
 			}, true
 		}
 	}
@@ -94,7 +95,7 @@ func (s *Server) definitionLocation(ctx context.Context, group *spanGroup, fromF
 				}
 				return protocol.Location{
 					URI:   protocol.DocumentURI(uri.File(group.target.File)),
-					Range: parseLocationToLSPRange(s.refLocation(rec, group.name, group.target.File)),
+					Range: s.rangeFor(group.target.File, s.refLocation(rec, group.name, group.target.File)),
 				}, true
 			}
 		}
@@ -174,6 +175,7 @@ func (s *Server) workspaceReferences(ctx context.Context, fromFile string, group
 			return
 		}
 		isDefFile := canon == defFileCanon
+		pathLines := s.docLinesFor(path)
 		for _, rec := range fa.Spans.Records() {
 			match := false
 			if rec.Target != nil && rec.Target.Symbol == symbol && rec.Target.Kind == kind && rec.Target.Owner == owner &&
@@ -192,7 +194,7 @@ func (s *Server) workspaceReferences(ctx context.Context, fromFile string, group
 			if match {
 				out = append(out, protocol.Location{
 					URI:   protocol.DocumentURI(uri.File(path)),
-					Range: parseLocationToLSPRange(s.refLocation(rec, symbol, path)),
+					Range: pathLines.locationToRange(refLocationIn(pathLines, rec, symbol)),
 				})
 			}
 		}
@@ -202,9 +204,63 @@ func (s *Server) workspaceReferences(ctx context.Context, fromFile string, group
 		if ctx.Err() != nil {
 			break
 		}
+		// Import-graph filter: a file can only reference the entity if it
+		// imports the defining module (or is the defining module itself).
+		// A cheap parse decides that before paying for a full check.
+		if canonicalPath(path) != defFileCanon && !snapImportsFile(snap, path, defFileCanon) {
+			continue
+		}
 		addMatches(path)
 	}
 	return out
+}
+
+// snapImportsFile reports whether the file's parsed imports may resolve to
+// the given (canonical) module file. Parse results are memoized by the
+// engine, so this costs a map lookup for unchanged files.
+//
+// The mapping is conservative: an import that cannot be confirmed to point
+// elsewhere (unparseable file, dependency/package alias, unresolvable path)
+// keeps the file in the scan set. Filtering must only ever save cost, never
+// hide references — an incomplete reference set would leak into rename.
+func snapImportsFile(snap *analysis.Snapshot, path string, defFileCanon string) bool {
+	program, parseErrs, err := snap.Parse(path)
+	if err != nil || program == nil || len(parseErrs) > 0 {
+		return true
+	}
+	root := snap.Engine().ProjectRoot()
+	for _, imp := range program.Imports {
+		if imp.Kind == parse.ImportKindGo || strings.HasPrefix(imp.Path, "ard/") {
+			continue
+		}
+		// Project-relative resolution mirrors the signature computation:
+		// strip the leading project segment and try root-relative.
+		parts := strings.SplitN(imp.Path, "/", 2)
+		resolvedElsewhere := false
+		if len(parts) == 2 {
+			candidate := filepath.Join(root, parts[1]+".ard")
+			if canonicalPath(candidate) == defFileCanon {
+				return true
+			}
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				resolvedElsewhere = true
+			}
+		}
+		candidate := filepath.Join(root, imp.Path+".ard")
+		if canonicalPath(candidate) == defFileCanon {
+			return true
+		}
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			resolvedElsewhere = true
+		}
+		if !resolvedElsewhere {
+			// Dependency alias or package-prefixed import this heuristic
+			// cannot map (e.g. monorepo package aliases). Scan the file
+			// rather than risk hiding a reference.
+			return true
+		}
+	}
+	return false
 }
 
 // canonicalPath normalizes a file path for identity comparison, resolving
@@ -287,13 +343,14 @@ func (s *Server) highlightsFromSpans(ctx context.Context, docURI uri.URI, positi
 	}
 
 	var out []protocol.DocumentHighlight
+	fileLines := s.docLinesFor(filePath)
 	for _, rec := range group.records {
 		kind := protocol.DocumentHighlightKindRead
 		if rec.IsDef {
 			kind = protocol.DocumentHighlightKindWrite
 		}
 		out = append(out, protocol.DocumentHighlight{
-			Range: parseLocationToLSPRange(s.refLocation(rec, group.name, filePath)),
+			Range: fileLines.locationToRange(refLocationIn(fileLines, rec, group.name)),
 			Kind:  kind,
 		})
 	}
@@ -364,6 +421,7 @@ func (s *Server) renameFromSpans(ctx context.Context, docURI uri.URI, position p
 
 // rangeHoldsIdentifier verifies the range's current text is exactly name, so
 // rename never rewrites a span that was not narrowed to the identifier.
+// Ranges carry UTF-16 columns; convert to byte offsets before slicing.
 func (s *Server) rangeHoldsIdentifier(loc protocol.Location, name string) bool {
 	if loc.Range.Start.Line != loc.Range.End.Line {
 		return false
@@ -373,8 +431,8 @@ func (s *Server) rangeHoldsIdentifier(loc protocol.Location, name string) bool {
 		return false
 	}
 	text := s.lineText(path, int(loc.Range.Start.Line)+1)
-	start := int(loc.Range.Start.Character)
-	end := int(loc.Range.End.Character)
+	start := utf16ColToByteCol(text, int(loc.Range.Start.Character))
+	end := utf16ColToByteCol(text, int(loc.Range.End.Character))
 	if start < 0 || end > len(text) || start >= end {
 		return false
 	}
@@ -391,11 +449,11 @@ func (s *Server) prepareRenameFromSpans(ctx context.Context, docURI uri.URI, pos
 	if group == nil || group.name == "" {
 		return nil
 	}
-	point := parse.Point{Row: int(position.Line) + 1, Col: int(position.Character) + 1}
+	point := s.docLinesFor(filePath).positionToPoint(position)
 	for _, rec := range group.records {
 		loc := s.refLocation(rec, group.name, filePath)
 		if spanContainsPoint(loc, point) {
-			r := parseLocationToLSPRange(loc)
+			r := s.rangeFor(filePath, loc)
 			return &r
 		}
 	}
@@ -417,7 +475,11 @@ func (s *Server) spanGroupAt(ctx context.Context, docURI uri.URI, position proto
 	if err != nil || fa == nil || fa.Spans == nil {
 		return nil
 	}
-	point := parse.Point{Row: int(position.Line) + 1, Col: int(position.Character) + 1}
+	filePath, pathErr := filePathFromURI(docURI)
+	if pathErr != nil {
+		return nil
+	}
+	point := s.docLinesFor(filePath).positionToPoint(position)
 	records := fa.Spans.At(point)
 	// A module-level binding records both a *Symbol key and a canonical
 	// string key at the same span; prefer the string key so project-wide
@@ -521,8 +583,14 @@ func groupSymbolName(rec checker.SpanRecord) string {
 }
 
 // refLocation narrows imprecise (multi-line or statement-wide) record spans
-// to the identifier's own range by scanning the source text.
+// to the identifier's own range by scanning the source text. Callers should
+// hoist one docLines per file per request via linesFor.
 func (s *Server) refLocation(rec checker.SpanRecord, name string, filePath string) parse.Location {
+	return refLocationIn(s.docLinesFor(filePath), rec, name)
+}
+
+// refLocationIn is refLocation against a pre-loaded line index.
+func refLocationIn(lines *docLines, rec checker.SpanRecord, name string) parse.Location {
 	loc := rec.Loc
 	if name == "" {
 		return loc
@@ -531,7 +599,7 @@ func (s *Server) refLocation(rec checker.SpanRecord, name string, filePath strin
 	if loc.End.Row == loc.Start.Row && loc.End.Col-loc.Start.Col == len(name) {
 		return loc
 	}
-	text := s.lineText(filePath, loc.Start.Row)
+	text := lines.line(loc.Start.Row)
 	if text == "" {
 		return loc
 	}

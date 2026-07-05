@@ -13,15 +13,21 @@ cancellation between pipeline stages, and cached analyses retain only the
 checked program rather than whole Checker instances. Signature help and
 static completion resolve through checked definitions on the span path.
 
-Cutover checklist — gaps currently invisible behind legacy fallbacks that
-must gain span-path coverage (with tests) before legacy deletion:
+Cutover checklist status:
 
-- imported-type statics in completion (`mod::Type::`, imported enum variants)
-- prelude statics in completion (`Result::`, `Maybe::`, `Chan::` members)
-- method-declaration and `Type::fn` static-declaration hovers
-- document symbols and code actions (parse-based; port or bless as-is)
-- UTF-16 column conversion for non-ASCII lines (project-wide)
-- import-graph filtering for the workspace reference scan
+- imported-type statics and prelude statics in completion: done (span path)
+- method-declaration hovers: done (span path)
+- document symbols and code actions: blessed as parse-based — they are
+  syntactic features computed directly from the AST with no semantic
+  re-derivation, so they carry no drift risk and stay as-is
+- UTF-16 column conversion: done at the span-feature boundary (positions
+  in, ranges out, rename verification), with a non-ASCII regression test
+- import-graph filtering for the workspace reference scan: done (memoized
+  parse of candidate imports gates the full check)
+
+Remaining before legacy deletion: sweep the legacy-calling test scenarios
+feature by feature onto the span path (span-only, no fallback), then delete
+the legacy heuristic internals.
 
 ## Context
 

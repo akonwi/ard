@@ -368,3 +368,125 @@ func TestStaticCompletionAliasedImport(t *testing.T) {
 		t.Fatalf("aliased module member missing: %#v", items)
 	}
 }
+
+// TestStaticCompletionPreludeAndImportedTypes covers Result:: prelude
+// statics and imported enum variants / Type::fn statics.
+func TestStaticCompletionPreludeAndImportedTypes(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"proj\"\nard = \">= 0.1.0\"\n"), 0o644)
+	os.WriteFile(filepath.Join(root, "shapes.ard"), []byte(`enum Color {
+  Red,
+  Green,
+}
+
+struct Board {
+  cells: [Str],
+}
+
+fn Board::empty() Board {
+  Board{cells: []}
+}
+`), 0o644)
+	source := "use proj/shapes\n\nfn main() {\n  Result::\n}\n"
+	path := filepath.Join(root, "main.ard")
+	os.WriteFile(path, []byte(source), 0o644)
+	srv := NewServer()
+	docURI := uri.File(path)
+	srv.cache.Open(docURI, "ard", 1, source)
+
+	labels := func(items []protocol.CompletionItem) map[string]bool {
+		out := map[string]bool{}
+		for _, item := range items {
+			out[item.Label] = true
+		}
+		return out
+	}
+
+	t.Run("prelude Result statics", func(t *testing.T) {
+		items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 3, Character: 10})
+		got := labels(items)
+		if !got["ok"] || !got["err"] {
+			t.Fatalf("Result:: statics missing: %#v", items)
+		}
+	})
+	t.Run("imported enum variants", func(t *testing.T) {
+		src := strings.Replace(source, "Result::", "Color::", 1)
+		srv.cache.Update(docURI, 2, src)
+		items := srv.completionFromSpans(context.Background(), docURI, src, protocol.Position{Line: 3, Character: 9})
+		got := labels(items)
+		if !got["Red"] || !got["Green"] {
+			t.Fatalf("imported enum variants missing: %#v", items)
+		}
+	})
+	t.Run("imported type statics", func(t *testing.T) {
+		src := strings.Replace(source, "Result::", "Board::", 1)
+		srv.cache.Update(docURI, 3, src)
+		items := srv.completionFromSpans(context.Background(), docURI, src, protocol.Position{Line: 3, Character: 9})
+		got := labels(items)
+		if !got["empty"] {
+			t.Fatalf("imported type statics missing: %#v", items)
+		}
+	})
+}
+
+// TestNonASCIIColumns verifies UTF-16/byte column conversion end to end:
+// hover, references, and rename on an identifier that sits after a
+// multi-byte string literal on the same line.
+func TestNonASCIIColumns(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.ard")
+	// "héllo wörld" contains two 2-byte runes: byte columns and UTF-16
+	// columns diverge for everything after the literal.
+	source := "fn main() {\n  let greeting = \"héllo wörld\"\n  let count = 1\n  let x = greeting\n  let y = count\n}\n"
+	os.WriteFile(path, []byte(source), 0o644)
+	srv := NewServer()
+	docURI := uri.File(path)
+	srv.cache.Open(docURI, "ard", 1, source)
+
+	// Hover on `greeting` use (line 3, UTF-16 col 10).
+	info := srv.hoverFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 11})
+	if info == nil || !strings.Contains(info.content, "Str") {
+		t.Fatalf("hover over non-ASCII-adjacent identifier failed: %#v", info)
+	}
+
+	// References on `greeting`: the declaration line contains multi-byte
+	// runes, so the returned columns must be UTF-16.
+	refs := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 11}, true)
+	if len(refs) != 2 {
+		t.Fatalf("expected decl + use, got %#v", refs)
+	}
+
+	// Rename must verify and produce edits despite the multi-byte line.
+	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 11}, "message")
+	if edit == nil || len(edit.Changes[docURI]) != 2 {
+		t.Fatalf("rename across non-ASCII line failed: %#v", edit)
+	}
+}
+
+// TestSurrogatePairColumns covers the 2-unit UTF-16 path (astral runes):
+// emoji occupy 4 bytes and 2 UTF-16 units, so both conversions diverge.
+func TestSurrogatePairColumns(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.ard")
+	source := "fn main() {\n  let tag = \"🎉🎉\"\n  let x = tag\n}\n"
+	os.WriteFile(path, []byte(source), 0o644)
+	srv := NewServer()
+	docURI := uri.File(path)
+	srv.cache.Open(docURI, "ard", 1, source)
+
+	refs := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, true)
+	if len(refs) != 2 {
+		t.Fatalf("expected decl + use over emoji line, got %#v", refs)
+	}
+	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, "label")
+	if edit == nil || len(edit.Changes[docURI]) != 2 {
+		t.Fatalf("rename over emoji line failed: %#v", edit)
+	}
+	// The declaration line contains emoji after the identifier; its edit
+	// must still target `tag` exactly (UTF-16 col 6..9).
+	for _, e := range edit.Changes[docURI] {
+		if e.Range.Start.Line == 1 && (e.Range.Start.Character != 6 || e.Range.End.Character != 9) {
+			t.Fatalf("declaration edit range wrong on emoji line: %#v", e.Range)
+		}
+	}
+}

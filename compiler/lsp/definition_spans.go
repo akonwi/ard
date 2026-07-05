@@ -25,7 +25,7 @@ func (s *Server) definitionFromSpans(ctx context.Context, docURI uri.URI, positi
 		return nil
 	}
 
-	point := parse.Point{Row: int(position.Line) + 1, Col: int(position.Character) + 1}
+	point := s.docLinesFor(filePath).positionToPoint(position)
 	for _, rec := range fa.Spans.At(point) {
 		// Same-file identity: def recorded in this file's span table.
 		if rec.Key != nil {
@@ -33,7 +33,7 @@ func (s *Server) definitionFromSpans(ctx context.Context, docURI uri.URI, positi
 				loc := narrowDefLocation(def.Loc)
 				return []protocol.Location{{
 					URI:   protocol.DocumentURI(docURI),
-					Range: parseLocationToLSPRange(loc),
+					Range: s.rangeFor(filePath, loc),
 				}}
 			}
 		}
@@ -83,7 +83,7 @@ func (s *Server) crossModuleDefinition(fromFile string, target *checker.SpanTarg
 	}
 	return []protocol.Location{{
 		URI:   protocol.DocumentURI(uri.File(depPath)),
-		Range: parseLocationToLSPRange(narrowDefLocation(loc)),
+		Range: s.rangeFor(depPath, narrowDefLocation(loc)),
 	}}
 }
 
