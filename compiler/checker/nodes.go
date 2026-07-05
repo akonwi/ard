@@ -1627,3 +1627,9 @@ func (t TryOp) Expr() Expression {
 func (t TryOp) Type() Type {
 	return t.ok
 }
+
+// Symbol exposes the variable's resolved scope symbol for tooling.
+func (v *Variable) Symbol() *Symbol {
+	sym := v.sym
+	return &sym
+}

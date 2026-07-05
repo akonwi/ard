@@ -25,9 +25,18 @@ Cutover checklist status:
 - import-graph filtering for the workspace reference scan: done (memoized
   parse of candidate imports gates the full check)
 
-Remaining before legacy deletion: sweep the legacy-calling test scenarios
-feature by feature onto the span path (span-only, no fallback), then delete
-the legacy heuristic internals.
+Cutover complete: every feature test runs span-only, handler fallbacks are
+removed, and the legacy heuristic internals (hover, definition, references,
+rename, document-highlight, and the completion/signature resolution engines)
+are deleted — roughly 5,400 lines of drift-prone heuristics. Import-path
+completion remains on its dedicated parse/filesystem path, and document
+symbols/code actions remain parse-based by design. The checker span table
+gained call-attempt records so signature help resolves in-progress (invalid)
+calls; ephemeral analyses best-effort check partial ASTs behind the existing
+panic recovery; and builtin-receiver completion enumerates through the same
+checker kind tables hover renders from. Known limitation: the workspace
+reference scan walks the filesystem, so overlay-only (never-saved) files do
+not participate in cross-file references.
 
 ## Context
 

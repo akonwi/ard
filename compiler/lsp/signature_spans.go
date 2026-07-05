@@ -19,8 +19,9 @@ func (s *Server) signatureHelpFromSpans(ctx context.Context, docURI uri.URI, sou
 		return nil
 	}
 
-	// Reuse the legacy paren-patching so an in-progress call parses.
-	patched := signatureParseSource(source, position)
+	// Complete calls analyze as-is; in-progress calls (unbalanced parens or
+	// a dangling comma) need the legacy paren-patching to parse. Patching a
+	// valid call would corrupt it, so try the plain source first.
 	ws := s.workspaceFor(filePath)
 	scratch := analysis.NewWorkspace(ws.Engine())
 	for _, doc := range s.cache.Snapshot() {
@@ -28,13 +29,27 @@ func (s *Server) signatureHelpFromSpans(ctx context.Context, docURI uri.URI, sou
 			scratch.SetOverlay(p, doc.Text)
 		}
 	}
-	scratch.SetOverlay(filePath, patched)
-	fa, err := scratch.Snapshot().AnalyzeEphemeral(ctx, filePath)
-	if err != nil || fa == nil || fa.Spans == nil {
+	analyzeWith := func(text string, allowPartial bool) *analysis.FileAnalysis {
+		scratch.SetOverlay(filePath, text)
+		fa, err := scratch.Snapshot().AnalyzeEphemeral(ctx, filePath)
+		if err != nil || fa == nil || fa.Spans == nil {
+			return nil
+		}
+		if !allowPartial && len(fa.ParseErrors) > 0 {
+			return nil
+		}
+		return fa
+	}
+	fa := analyzeWith(source, false)
+	if fa == nil {
+		// In-progress call: paren-patch and best-effort check the partial AST.
+		fa = analyzeWith(signatureParseSource(source, position), true)
+	}
+	if fa == nil {
 		return nil
 	}
 
-	target := lspPositionToParsePoint(position)
+	target := s.docLinesFor(filePath).positionToPoint(position)
 	for _, rec := range fa.Spans.At(target) {
 		label, params, callLoc, callArgs, ok := signatureFromRecord(rec)
 		if !ok {
@@ -65,32 +80,40 @@ func signatureFromRecord(rec checker.SpanRecord) (string, []hoverParam, parse.Lo
 
 	var def *checker.FunctionDef
 	var label string
+	voidLabel := func(base string, d *checker.FunctionDef) string {
+		// Signature help spells out Void returns, matching editor
+		// conventions for callable tooltips.
+		if ret := checkerTypeString(d.ReturnType); ret == "" || ret == "Void" {
+			return base + " Void"
+		}
+		return base
+	}
 
 	switch node := rec.Node.(type) {
 	case *checker.FunctionCall:
 		def = node.Definition()
 		if def != nil {
-			label = functionSignatureString(node.Name, def)
+			label = voidLabel(functionSignatureString(node.Name, def), def)
 		}
 	case *checker.InstanceMethod:
 		if node.Method != nil {
 			def = node.Method.Definition()
 			if def != nil {
-				label = methodSignatureString(instanceMethodOwner(node), def)
+				label = voidLabel(methodSignatureString(instanceMethodOwner(node), def), def)
 			}
 		}
 	case *checker.ForeignFunctionCall:
 		if node.Call != nil {
 			def = node.Call.Definition()
 			if def != nil {
-				label = functionSignatureString(node.Qualifier+"::"+node.Symbol, def)
+				label = voidLabel(functionSignatureString(node.Qualifier+"::"+node.Symbol, def), def)
 			}
 		}
 	default:
 		if recv, name, ok := checker.BuiltinMethodInfo(rec.Node); ok && name != "" {
 			def = checker.BuiltinMethodDef(recv, name)
 			if def != nil {
-				label = methodSignatureString(checkerTypeString(recv), def)
+				label = voidLabel(methodSignatureString(checkerTypeString(recv), def), def)
 			}
 		}
 	}

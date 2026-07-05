@@ -348,9 +348,12 @@ func (s *Snapshot) analyze(ctx context.Context, filePath string, cache bool) (an
 	if entry.program == nil {
 		return nil, fmt.Errorf("parse returned no program for %s", filePath)
 	}
-	if len(entry.errors) > 0 {
-		// Parse errors block checking; not cached in checkCache because the
-		// parse cache already makes this cheap.
+	if len(entry.errors) > 0 && cache {
+		// Parse errors block checking on the cached path; not cached in
+		// checkCache because the parse cache already makes this cheap.
+		// Ephemeral (tooling-patched) analyses continue: signature help and
+		// completion need best-effort checking of partial ASTs, and Analyze
+		// recovers checker panics.
 		return &FileAnalysis{
 			FilePath:    filePath,
 			Program:     entry.program,
@@ -378,7 +381,7 @@ func (s *Snapshot) analyze(ctx context.Context, filePath string, cache bool) (an
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	analysis, err = s.check(filePath, relPath, entry.program, moduleResolver, sig)
+	analysis, err = s.check(filePath, relPath, entry.program, entry.errors, moduleResolver, sig)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +430,7 @@ func (s *Snapshot) newModuleResolver(filePath string) (*checker.ModuleResolver, 
 }
 
 // check runs the checker for the file with snapshot overlays applied.
-func (s *Snapshot) check(filePath string, relPath string, program *parse.Program, moduleResolver *checker.ModuleResolver, sig string) (*FileAnalysis, error) {
+func (s *Snapshot) check(filePath string, relPath string, program *parse.Program, parseErrors []parse.ParseError, moduleResolver *checker.ModuleResolver, sig string) (*FileAnalysis, error) {
 	projectInfo := moduleResolver.GetProjectInfo()
 	goResolver := s.engine.goResolverFor(projectInfo)
 
@@ -441,6 +444,7 @@ func (s *Snapshot) check(filePath string, relPath string, program *parse.Program
 	return &FileAnalysis{
 		FilePath:    filePath,
 		Program:     program,
+		ParseErrors: parseErrors,
 		Diagnostics: c.Diagnostics(),
 		Spans:       c.Spans(),
 		Checked:     module.Program(),

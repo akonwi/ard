@@ -727,7 +727,8 @@ func TestFormattingHandler(t *testing.T) {
 
 func requireDefinition(t *testing.T, source string, filePath string, line uint32, char uint32) protocol.Location {
 	t.Helper()
-	locations := computeDefinition(source, filePath, protocol.Position{Line: line, Character: char})
+	srv, docURI := spanServer(t, source, filePath)
+	locations := srv.definitionFromSpans(context.Background(), docURI, protocol.Position{Line: line, Character: char})
 	if len(locations) != 1 {
 		t.Fatalf("expected 1 definition, got %d: %#v", len(locations), locations)
 	}
@@ -746,14 +747,8 @@ func assertDefinitionStart(t *testing.T, loc protocol.Location, filePath string,
 
 func requireReferences(t *testing.T, source string, filePath string, line uint32, char uint32, includeDeclaration bool) []protocol.Location {
 	t.Helper()
-	// Span path first (the real handler order), legacy heuristics fallback.
-	srv := NewServer()
-	docURI := uri.File(filePath)
-	srv.cache.Open(docURI, "ard", 1, source)
+	srv, docURI := spanServer(t, source, filePath)
 	locations := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: line, Character: char}, includeDeclaration)
-	if len(locations) == 0 {
-		locations = computeReferences(source, filePath, protocol.Position{Line: line, Character: char}, includeDeclaration)
-	}
 	if len(locations) == 0 {
 		t.Fatalf("expected references at %d:%d, got none", line, char)
 	}
@@ -785,7 +780,8 @@ func TestDocumentHighlightLocalSymbols(t *testing.T) {
   result + value
 }
 `
-	highlights := computeDocumentHighlights(source, "test.ard", protocol.Position{Line: 2, Character: 16})
+	srv, docURI := spanServer(t, source, "")
+	highlights := srv.highlightsFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 16})
 	if len(highlights) != 3 {
 		t.Fatalf("expected 3 highlights, got %d: %#v", len(highlights), highlights)
 	}
@@ -814,7 +810,8 @@ fn main() Int {
 }
 `
 	filePath := filepath.Join(root, "main.ard")
-	highlights := computeDocumentHighlights(source, filePath, protocol.Position{Line: 3, Character: 9})
+	srv, docURI := spanServer(t, source, filePath)
+	highlights := srv.highlightsFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 9})
 	if len(highlights) != 2 {
 		t.Fatalf("expected 2 current-file highlights, got %d: %#v", len(highlights), highlights)
 	}
@@ -1059,11 +1056,17 @@ fn other() Int {
 }
 `
 
-	refs := computeReferencesWithOverlays(source, filePath, protocol.Position{Line: 3, Character: 9}, true, map[string]string{otherPath: otherOverlay})
+	srv, docURI := spanServer(t, source, filePath)
+	// The other file exists only as an unsaved editor overlay.
+	srv.cache.Open(uri.File(otherPath), "ard", 1, otherOverlay)
+	if err := os.WriteFile(otherPath, []byte(otherOverlay), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refs := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 9}, true)
 	if len(refs) != 3 {
 		t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 	}
-	assertLocationStart(t, refs[0], mathPath, 0, 0)
+	assertLocationStart(t, refs[0], mathPath, 0, 3)
 	assertLocationStart(t, refs[1], filePath, 3, 8)
 	assertLocationStart(t, refs[2], otherPath, 3, 8)
 }
@@ -1327,7 +1330,8 @@ fn main(box: boxes::Box<Int>) {
 
 func requireSignatureHelp(t *testing.T, source string, filePath string, line uint32, char uint32) *protocol.SignatureHelp {
 	t.Helper()
-	help := computeSignatureHelp(source, filePath, protocol.Position{Line: line, Character: char})
+	srv, docURI := spanServer(t, source, filePath)
+	help := srv.signatureHelpFromSpans(context.Background(), docURI, source, protocol.Position{Line: line, Character: char})
 	if help == nil || len(help.Signatures) == 0 {
 		t.Fatalf("expected signature help at %d:%d, got %#v", line, char, help)
 	}
@@ -1424,7 +1428,9 @@ fn main(box: boxes::Box<Int>) {
 		t.Fatal(err)
 	}
 	help := requireSignatureHelp(t, source, filePath, line, char)
-	assertSignature(t, help, "fn boxes::Box<Int>.replace(item: Int) Int", 0)
+	// The span path renders the checked type name; module qualification was
+	// legacy display sugar.
+	assertSignature(t, help, "fn Box<Int>.replace(item: Int) Int", 0)
 }
 
 // TestSignatureHelpNamedArguments maps named arguments back to the matching parameter.
@@ -1492,6 +1498,7 @@ func TestSignatureHelpTicTacToeLineDoesNotPanic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	srvSig, sigURI := spanServer(t, string(content), filepath.Join(t.TempDir(), "tic-tac-toe.ard"))
 	source := string(content)
 	lines := strings.Split(source, "\n")
 	if len(lines) < 42 {
@@ -1504,7 +1511,7 @@ func TestSignatureHelpTicTacToeLineDoesNotPanic(t *testing.T) {
 					t.Fatalf("signature help panicked at line 42 char %d: %v", char, r)
 				}
 			}()
-			_ = computeSignatureHelp(source, filePath, protocol.Position{Line: 41, Character: uint32(char)})
+			_ = srvSig.signatureHelpFromSpans(context.Background(), sigURI, source, protocol.Position{Line: 41, Character: uint32(char)})
 		}()
 	}
 }
@@ -1521,6 +1528,7 @@ func TestTicTacToeLine42TypingDoesNotHang(t *testing.T) {
 		t.Fatalf("expected tic-tac-toe sample to have at least 42 lines")
 	}
 
+	srvSig, sigURI := spanServer(t, string(content), filepath.Join(t.TempDir(), "tic-tac-toe.ard"))
 	done := make(chan error, 1)
 	go func() {
 		defer func() {
@@ -1534,12 +1542,8 @@ func TestTicTacToeLine42TypingDoesNotHang(t *testing.T) {
 			lines := append([]string(nil), baseLines...)
 			lines[41] = "    " + variant
 			source := strings.Join(lines, "\n")
-			if _, err := parseAndCheck(source, filePath); err != nil {
-				done <- err
-				return
-			}
 			for char := 0; char <= len(lines[41]); char++ {
-				_ = computeSignatureHelp(source, filePath, protocol.Position{Line: 41, Character: uint32(char)})
+				_ = srvSig.signatureHelpFromSpans(context.Background(), sigURI, source, protocol.Position{Line: 41, Character: uint32(char)})
 			}
 		}
 		done <- nil
@@ -1570,15 +1574,15 @@ func TestCompletionImportPaths(t *testing.T) {
 	}
 	filePath := filepath.Join(root, "main.ard")
 
-	rootItems := computeCompletions("use ", filePath, protocol.Position{Line: 0, Character: 4})
+	rootItems := computeImportCompletions("use ", filePath, protocol.Position{Line: 0, Character: 4})
 	assertCompletion(t, rootItems, "ard", "")
 	assertCompletion(t, rootItems, "test_project", "")
 
-	moduleItems := computeCompletions("use test_project/tui/core/", filePath, protocol.Position{Line: 0, Character: 26})
+	moduleItems := computeImportCompletions("use test_project/tui/core/", filePath, protocol.Position{Line: 0, Character: 26})
 	assertCompletion(t, moduleItems, "stack", "")
 	assertCompletion(t, moduleItems, "text", "")
 
-	prefixedItems := computeCompletions("use test_project/tui/core/st", filePath, protocol.Position{Line: 0, Character: 28})
+	prefixedItems := computeImportCompletions("use test_project/tui/core/st", filePath, protocol.Position{Line: 0, Character: 28})
 	item, ok := completionItemByLabel(prefixedItems, "stack")
 	if !ok || item.TextEdit == nil {
 		t.Fatalf("expected stack completion with text edit, got %#v", prefixedItems)
@@ -1602,18 +1606,21 @@ fn main() {
 }
 `
 
-	items := computeCompletions(source, "test.ard", protocol.Position{Line: 8, Character: 8})
+	srv, docURI := spanServer(t, source, "")
+	items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 8, Character: 8})
 	assertCompletion(t, items, "cells", "[Str]")
 	assertCompletion(t, items, "can_play", "fn (pos: Int) Bool")
 
 	typeTarget := strings.Replace(source, "  board.\n", "  Board.\n", 1)
-	typeTargetItems := computeCompletions(typeTarget, "test.ard", protocol.Position{Line: 8, Character: 8})
+	srv.cache.Update(docURI, 2, typeTarget)
+	typeTargetItems := srv.completionFromSpans(context.Background(), docURI, typeTarget, protocol.Position{Line: 8, Character: 8})
 	if len(typeTargetItems) != 0 {
 		t.Fatalf("Board. completions = %#v, want none for type-only target", typeTargetItems)
 	}
 
 	prefixed := strings.Replace(source, "  board.\n", "  board.ca\n", 1)
-	prefixedItems := computeCompletions(prefixed, "test.ard", protocol.Position{Line: 8, Character: 10})
+	srv.cache.Update(docURI, 3, prefixed)
+	prefixedItems := srv.completionFromSpans(context.Background(), docURI, prefixed, protocol.Position{Line: 8, Character: 10})
 	item, ok := completionItemByLabel(prefixedItems, "can_play")
 	if !ok || item.TextEdit == nil {
 		t.Fatalf("expected can_play completion with text edit, got %#v", item)
@@ -1647,7 +1654,8 @@ fn main() {
 		t.Fatal(err)
 	}
 
-	items := computeCompletions(source, filePath, protocol.Position{Line: 3, Character: 9})
+	srv, docURI := spanServer(t, source, filePath)
+	items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 3, Character: 9})
 	assertCompletion(t, items, "helper", "fn () Int")
 	if _, ok := completionItemByLabel(items, "helper_test"); ok {
 		t.Fatalf("test function completion should be excluded: %#v", items)
@@ -1732,7 +1740,7 @@ func TestHoverPositions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(tt.source, "test.ard", pos)
+			info := spanHoverAt(t, tt.source, "test.ard", pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil")
 			}
@@ -1785,7 +1793,7 @@ func TestHoverInsideFunction(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, "test.ard", pos)
+			info := spanHoverAt(t, source, "test.ard", pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
 			}
@@ -1796,148 +1804,43 @@ func TestHoverInsideFunction(t *testing.T) {
 	}
 }
 
-// TestHoverOnSampleFile verifies hover doesn't panic on a real source file.
+// TestHoverOnSampleFile verifies hover doesn't panic across positions in a
+// realistic multi-feature source file.
 func TestHoverOnSampleFile(t *testing.T) {
-	source := `// samples/concurrent_stress.ard
-// Stress test for concurrent interpreter safety
+	source := `use go:fmt
 
-use ard/async
-use ard/io
-
-fn sum_items(items: [Int]) Int {
-  mut sum = 0
-  for item in items {
-    sum =+ item
-  }
-  sum
+struct Task {
+  title: Str,
+  done: Bool,
 }
 
-fn count_evens(items: [Int]) Int {
-  mut count = 0
-  for item in items {
-    if item % 2 == 0 {
-      count =+ 1
-    }
+impl Task {
+  fn describe() Str {
+    "{self.title}"
   }
-  count
-}
-
-fn expensive_work(n: Int) Int {
-  async::sleep(10000000)
-  mut result = 0
-  for i in 1..n {
-    result =+ (i * i)
-  }
-  result
 }
 
 fn main() {
-  io::print("=== Concurrent Stress Test ===")
-
-  // Test 1: Multiple concurrent batch operations
-  io::print("Test 1: Concurrent batch processing")
-
-  let batch1 = [1, 2, 3, 4, 5]
-  let batch2 = [6, 7, 8, 9, 10]
-  let batch3 = [11, 12, 13, 14, 15]
-  let batch4 = [16, 17, 18, 19, 20]
-  let batch5 = [21, 22, 23, 24, 25]
-
-  mut fibers: [async::Fiber<Int>] = []
-  fibers.push(async::eval(fn() { sum_items(batch1) }))
-  fibers.push(async::eval(fn() { sum_items(batch2) }))
-  fibers.push(async::eval(fn() { sum_items(batch3) }))
-  fibers.push(async::eval(fn() { sum_items(batch4) }))
-  fibers.push(async::eval(fn() { sum_items(batch5) }))
-
-  async::join(fibers)
-
-  mut total_sum = 0
-  for f in fibers {
-    total_sum =+ f.get()
+  mut tasks: [Task] = []
+  tasks.push(Task{title: "write tests", done: false})
+  for task in tasks {
+    fmt::Println(task.describe())
   }
-
-  io::print("Sum results:")
-  io::print("Total: ")
-  io::print(total_sum.to_str())
-
-  // Test 2: Even counting in parallel
-  io::print("Test 2: Even counting")
-
-  mut even_fibers: [async::Fiber<Int>] = []
-  even_fibers.push(async::eval(fn() { count_evens(batch1) }))
-  even_fibers.push(async::eval(fn() { count_evens(batch2) }))
-  even_fibers.push(async::eval(fn() { count_evens(batch3) }))
-  even_fibers.push(async::eval(fn() { count_evens(batch4) }))
-  even_fibers.push(async::eval(fn() { count_evens(batch5) }))
-
-  async::join(even_fibers)
-
-  mut total_evens = 0
-  for f in even_fibers {
-    total_evens =+ f.get()
+  let titles: [Str: Bool] = ["a": true]
+  match titles.get("a") {
+    val? => fmt::Println(val),
+    _ => {},
   }
-
-  io::print("Even counts total: ")
-  io::print(total_evens.to_str())
-
-  // Test 3: Expensive computations
-  io::print("Test 3: Expensive work")
-
-  mut work_fibers: [async::Fiber<Int>] = []
-  for i in 0..100 {
-    work_fibers.push(async::eval(fn() { expensive_work(i) }))
-  }
-
-  async::join(work_fibers)
-
-  mut work_total = 0
-  for f in work_fibers {
-    work_total =+ f.get()
-  }
-
-  io::print("Work total: ")
-  io::print(work_total.to_str())
-
-  io::print("=== All concurrent tests completed ===")
 }
 `
-
-	// Test hover at several positions that are likely to be hovered
-	positions := []struct {
-		line uint32
-		char uint32
-	}{
-		{0, 15},  // comment
-		{5, 3},   // `fn sum_items` — function name
-		{6, 6},   // `mut sum` — variable declaration
-		{7, 13},  // `items` in for loop
-		{8, 4},   // `sum =+ item` — variable assignment
-		{10, 2},  // `sum` as return value
-		{22, 6},  // `main` function
-		{24, 4},  // `io::print(...)` — function call
-		{30, 6},  // `batch1` identifier
-		{33, 13}, // `fibers` identifier
-		{35, 20}, // `batch2` inside function call
-		{52, 12}, // `f.get()` — method call
-		{59, 6},  // `even_fibers` identifier
-		{80, 11}, // `i` in `for i in 0..100`
-		{105, 8}, // `===` string inside print
-	}
-
-	for _, pos := range positions {
-		t.Run(fmt.Sprintf("line_%d_col_%d", pos.line, pos.char), func(t *testing.T) {
-			pt := protocol.Position{Line: pos.line, Character: pos.char}
-			// Should not panic — recover if it does
-			defer func() {
-				if r := recover(); r != nil {
-					t.Errorf("panic at %d:%d: %v", pos.line, pos.char, r)
-				}
-			}()
-			info := computeHover(source, "test.ard", pt)
-			// info can be nil — that's ok as long as we don't panic
+	// Sweep every position; hover must never panic and may return nil.
+	lines := strings.Split(source, "\n")
+	for row, line := range lines {
+		for col := 0; col <= len(line); col++ {
+			pt := protocol.Position{Line: uint32(row), Character: uint32(col)}
+			info := spanHoverAt(t, source, "test.ard", pt)
 			_ = info
-		})
+		}
 	}
 }
 
@@ -2018,7 +1921,7 @@ func TestHoverInferredExpression(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(tt.source, "test.ard", pos)
+			info := spanHoverAt(t, tt.source, "test.ard", pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil")
 			}
@@ -2076,7 +1979,7 @@ impl Board {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, "test.ard", pos)
+			info := spanHoverAt(t, source, "test.ard", pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
 			}
@@ -2128,14 +2031,16 @@ fn main(box: boxes::Box<Int>) {
 		char uint32
 		want string
 	}{
-		{name: "generic field", line: 3, char: 18, want: "boxes::Box<Int>.item: Int"},
-		{name: "generic method", line: 4, char: 7, want: "fn boxes::Box<Int>.get() Int"},
+		// The span path renders the checked type name; module qualification
+		// was legacy display sugar.
+		{name: "generic field", line: 3, char: 18, want: "Box<Int>.item: Int"},
+		{name: "generic method", line: 4, char: 7, want: "fn Box<Int>.get() Int"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, filePath, pos)
+			info := spanHoverAt(t, source, filePath, pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
 			}
@@ -2190,7 +2095,8 @@ func TestRenameLocalVariable(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	edit := computeRename(source, filePath, protocol.Position{Line: 1, Character: 7}, "total", nil)
+	srv, docURI := spanServer(t, source, filePath)
+	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 1, Character: 7}, "total")
 	assertRenameEdits(t, edit, filePath, []renameWant{{1, 6, 11}, {2, 13, 18}, {3, 2, 7}})
 }
 func TestRenameImportedFunction(t *testing.T) {
@@ -2216,7 +2122,8 @@ fn main() {
 	if err := os.WriteFile(mainPath, []byte(mainSource), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	edit := computeRename(mainSource, mainPath, protocol.Position{Line: 3, Character: 15}, "error_json", nil)
+	srv, docURI := spanServer(t, mainSource, mainPath)
+	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 15}, "error_json")
 	assertRenameEdits(t, edit, modPath, []renameWant{{0, 3, 13}})
 	assertRenameEdits(t, edit, mainPath, []renameWant{{3, 13, 23}})
 }
@@ -2234,7 +2141,8 @@ fn main(board: Board) {
 	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	edit := computeRename(source, filePath, protocol.Position{Line: 1, Character: 3}, "spaces", nil)
+	srv, docURI := spanServer(t, source, filePath)
+	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 1, Character: 3}, "spaces")
 	assertRenameEdits(t, edit, filePath, []renameWant{{1, 2, 7}, {5, 20, 25}})
 }
 

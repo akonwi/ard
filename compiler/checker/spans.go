@@ -334,6 +334,20 @@ func (c *Checker) recordTypeRef(loc parse.Location, name string) {
 	})
 }
 
+// recordCallAttempt records a call site whose checking failed (wrong arity,
+// bad argument) so tooling can still resolve the callee. Signature help
+// depends on this: its whole purpose is mid-typing, when calls are invalid.
+func (c *Checker) recordCallAttempt(source parse.Expression, name string, fnDef *FunctionDef) {
+	if c.spans == nil || source == nil || fnDef == nil {
+		return
+	}
+	c.spans.add(SpanRecord{
+		Loc:    source.GetLocation(),
+		Source: source,
+		Node:   &FunctionCall{Name: name, fn: fnDef, ReturnType: fnDef.ReturnType},
+	})
+}
+
 // recordDef records a nominal entity's definition site under a string key.
 func (c *Checker) recordDef(loc parse.Location, key string) {
 	if c.spans == nil {

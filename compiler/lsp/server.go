@@ -422,16 +422,11 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 				info = nil
 			}
 		}()
-		filePath, ok := docFilePath(doc)
-		if !ok {
+		if _, ok := docFilePath(doc); !ok {
 			return
 		}
-		// Span-table rendering first (ADR 0043); legacy heuristics fall back
-		// during the migration.
+		// The span table is authoritative (ADR 0043); nil means no hover.
 		info = s.hoverFromSpans(ctx, params.TextDocument.URI, params.Position)
-		if info == nil {
-			info = computeHover(doc.Text, filePath, params.Position)
-		}
 	}()
 
 	if info == nil || info.content == "" {
@@ -466,16 +461,11 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				locations = []protocol.Location{}
 			}
 		}()
-		filePath, ok := docFilePath(doc)
-		if !ok {
+		if _, ok := docFilePath(doc); !ok {
 			return
 		}
-		// Span-table resolution first (ADR 0043); legacy heuristics as
-		// fallback during the migration.
+		// The span table is authoritative (ADR 0043); empty means not found.
 		locations = s.definitionFromSpans(ctx, params.TextDocument.URI, params.Position)
-		if len(locations) == 0 {
-			locations = computeDefinition(doc.Text, filePath, params.Position)
-		}
 	}()
 	if locations == nil {
 		locations = []protocol.Location{}
@@ -502,15 +492,10 @@ func (s *Server) handleReferences(ctx context.Context, reply jsonrpc2.Replier, r
 				locations = []protocol.Location{}
 			}
 		}()
-		filePath, ok := docFilePath(doc)
-		if !ok {
+		if _, ok := docFilePath(doc); !ok {
 			return
 		}
 		locations = s.referencesFromSpans(ctx, params.TextDocument.URI, params.Position, params.Context.IncludeDeclaration)
-		if len(locations) == 0 {
-			overlays := overlaySources(s.cache.Snapshot())
-			locations = computeReferencesWithOverlays(doc.Text, filePath, params.Position, params.Context.IncludeDeclaration, overlays)
-		}
 	}()
 	if locations == nil {
 		locations = []protocol.Location{}
@@ -553,7 +538,9 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		}
 		items = s.completionFromSpans(ctx, params.TextDocument.URI, doc.Text, params.Position)
 		if len(items) == 0 {
-			items = computeCompletions(doc.Text, filePath, params.Position)
+			// Import-path completion is parse/filesystem based and stays on
+			// its own dedicated path.
+			items = computeImportCompletions(doc.Text, filePath, params.Position)
 		}
 	}()
 	if items == nil {
@@ -667,14 +654,10 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 				help = nil
 			}
 		}()
-		filePath, ok := docFilePath(doc)
-		if !ok {
+		if _, ok := docFilePath(doc); !ok {
 			return
 		}
 		help = s.signatureHelpFromSpans(ctx, params.TextDocument.URI, doc.Text, params.Position)
-		if help == nil {
-			help = computeSignatureHelp(doc.Text, filePath, params.Position)
-		}
 	}()
 
 	return reply(ctx, help, nil)
@@ -691,14 +674,10 @@ func (s *Server) handleDocumentHighlight(ctx context.Context, reply jsonrpc2.Rep
 		return reply(ctx, []protocol.DocumentHighlight{}, nil)
 	}
 
-	filePath, ok := docFilePath(doc)
-	if !ok {
+	if _, ok := docFilePath(doc); !ok {
 		return reply(ctx, []protocol.DocumentHighlight{}, nil)
 	}
 	highlights := s.highlightsFromSpans(ctx, params.TextDocument.URI, params.Position)
-	if len(highlights) == 0 {
-		highlights = computeDocumentHighlights(doc.Text, filePath, params.Position)
-	}
 	if highlights == nil {
 		highlights = []protocol.DocumentHighlight{}
 	}
@@ -714,14 +693,10 @@ func (s *Server) handlePrepareRename(ctx context.Context, reply jsonrpc2.Replier
 	if doc == nil {
 		return reply(ctx, nil, nil)
 	}
-	filePath, ok := docFilePath(doc)
-	if !ok {
+	if _, ok := docFilePath(doc); !ok {
 		return reply(ctx, nil, nil)
 	}
 	rng := s.prepareRenameFromSpans(ctx, params.TextDocument.URI, params.Position)
-	if rng == nil {
-		rng = prepareRename(doc.Text, filePath, params.Position)
-	}
 	return reply(ctx, rng, nil)
 }
 
@@ -734,14 +709,9 @@ func (s *Server) handleRename(ctx context.Context, reply jsonrpc2.Replier, req j
 	if doc == nil {
 		return reply(ctx, nil, nil)
 	}
-	filePath, ok := docFilePath(doc)
-	if !ok {
+	if _, ok := docFilePath(doc); !ok {
 		return reply(ctx, nil, nil)
 	}
-	overlays := overlaySources(s.cache.Snapshot())
 	edit := s.renameFromSpans(ctx, params.TextDocument.URI, params.Position, params.NewName)
-	if edit == nil {
-		edit = computeRename(doc.Text, filePath, params.Position, params.NewName, overlays)
-	}
 	return reply(ctx, edit, nil)
 }

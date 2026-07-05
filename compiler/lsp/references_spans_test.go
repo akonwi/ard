@@ -258,7 +258,7 @@ fn main(board: Board) {
 		if help == nil || len(help.Signatures) == 0 {
 			t.Fatal("no signature help")
 		}
-		if want := "fn configure(width: Int, height: Int, title: Str)"; help.Signatures[0].Label != want {
+		if want := "fn configure(width: Int, height: Int, title: Str) Void"; help.Signatures[0].Label != want {
 			t.Fatalf("label = %q, want %q", help.Signatures[0].Label, want)
 		}
 		if help.ActiveParameter != 1 {
@@ -489,4 +489,65 @@ func TestSurrogatePairColumns(t *testing.T) {
 			t.Fatalf("declaration edit range wrong on emoji line: %#v", e.Range)
 		}
 	}
+}
+
+// TestCompletionBuiltinReceivers guards dot-completion on builtin types —
+// the most common completion class (was silently lost once during cutover).
+func TestCompletionBuiltinReceivers(t *testing.T) {
+	source := `fn main() {
+  let s = "hello"
+  let items = [1, 2]
+  let m: [Str: Int] = ["a": 1]
+  let maybe = items.at(0)
+  s.
+}
+`
+	srv, docURI := spanServer(t, source, "")
+	labels := func(items []protocol.CompletionItem) map[string]string {
+		out := map[string]string{}
+		for _, item := range items {
+			out[item.Label] = item.Detail
+		}
+		return out
+	}
+
+	t.Run("str", func(t *testing.T) {
+		items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 5, Character: 4})
+		got := labels(items)
+		if _, ok := got["is_empty"]; !ok {
+			t.Fatalf("Str builtin methods missing: %#v", items)
+		}
+		if _, ok := got["trim"]; !ok {
+			t.Fatalf("Str trim missing: %#v", items)
+		}
+	})
+	t.Run("list", func(t *testing.T) {
+		src := strings.Replace(source, "  s.\n", "  items.\n", 1)
+		srv.cache.Update(docURI, 2, src)
+		items := srv.completionFromSpans(context.Background(), docURI, src, protocol.Position{Line: 5, Character: 8})
+		got := labels(items)
+		if _, ok := got["push"]; !ok {
+			t.Fatalf("List push missing: %#v", items)
+		}
+		if detail, ok := got["at"]; !ok || !strings.Contains(detail, "Int?") {
+			t.Fatalf("List at should return Int? on [Int], got %q", detail)
+		}
+	})
+	t.Run("map", func(t *testing.T) {
+		src := strings.Replace(source, "  s.\n", "  m.\n", 1)
+		srv.cache.Update(docURI, 3, src)
+		items := srv.completionFromSpans(context.Background(), docURI, src, protocol.Position{Line: 5, Character: 4})
+		if _, ok := labels(items)["keys"]; !ok {
+			t.Fatalf("Map keys missing: %#v", items)
+		}
+	})
+	t.Run("maybe", func(t *testing.T) {
+		src := strings.Replace(source, "  s.\n", "  maybe.\n", 1)
+		srv.cache.Update(docURI, 4, src)
+		items := srv.completionFromSpans(context.Background(), docURI, src, protocol.Position{Line: 5, Character: 8})
+		got := labels(items)
+		if detail, ok := got["or"]; !ok || !strings.Contains(detail, "Int") {
+			t.Fatalf("Maybe or missing or unspecialized: %#v", items)
+		}
+	})
 }

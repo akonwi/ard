@@ -57,12 +57,19 @@ func (s *Server) completionFromSpans(ctx context.Context, docURI uri.URI, source
 	receiverPoint := offsetToParsePoint(patched, cctx.sepEnd-2)
 	var receiverType checker.Type
 	for _, rec := range fa.Spans.At(receiverPoint) {
-		if rec.Node != nil && rec.Node.Type() != nil {
-			receiverType = rec.Node.Type()
+		if sym, ok := rec.Key.(*checker.Symbol); ok && sym.Type != nil {
+			if isTypeNameSymbol(sym) {
+				// `TypeName.` is not a value receiver; statics use `::`.
+				return nil
+			}
+			receiverType = sym.Type
 			break
 		}
-		if sym, ok := rec.Key.(*checker.Symbol); ok && sym.Type != nil {
-			receiverType = sym.Type
+		if rec.Node != nil && rec.Node.Type() != nil {
+			if v, ok := rec.Node.(*checker.Variable); ok && isTypeNameSymbol(v.Symbol()) {
+				return nil
+			}
+			receiverType = rec.Node.Type()
 			break
 		}
 	}
@@ -145,7 +152,15 @@ func memberCompletionItems(t checker.Type, fa *analysis.FileAnalysis) []protocol
 			addMethod(owner.Methods[name])
 		}
 	default:
-		return nil
+		// Builtin receivers (Str, Int, lists, maps, Maybe, Result, ...)
+		// enumerate through the checker's kind tables so completion and
+		// hover render from the same source of truth.
+		for _, name := range checker.BuiltinMemberNames(t) {
+			addMethod(checker.BuiltinMethodDef(t, name))
+		}
+		if len(items) == 0 {
+			return nil
+		}
 	}
 	return items
 }
@@ -314,4 +329,31 @@ func staticSymbolCompletionItem(name string, sym checker.Symbol) protocol.Comple
 		kind = protocol.CompletionItemKindInterface
 	}
 	return protocol.CompletionItem{Label: name, Kind: kind, Detail: checkerTypeString(sym.Type)}
+}
+
+// isTypeNameSymbol reports whether a scope symbol is a nominal type's own
+// name (the hoisted type symbol) rather than a value binding.
+func isTypeNameSymbol(sym *checker.Symbol) bool {
+	if sym == nil || sym.Type == nil {
+		return false
+	}
+	switch owner := sym.Type.(type) {
+	case *checker.StructDef:
+		return owner.Name == sym.Name
+	case *checker.Enum:
+		return owner.Name == sym.Name
+	case *checker.Trait:
+		return owner.Name == sym.Name
+	}
+	return false
+}
+
+// computeImportCompletions serves `use ` path completion, which is
+// filesystem/parse based rather than semantic.
+func computeImportCompletions(source string, filePath string, position protocol.Position) []protocol.CompletionItem {
+	cctx, ok := completionContextAt(source, position)
+	if !ok || cctx.kind != completionImport {
+		return []protocol.CompletionItem{}
+	}
+	return withCompletionTextEdits(importPathCompletionItems(cctx.importPath, filePath), cctx, position)
 }

@@ -659,15 +659,6 @@ func spanContainsPoint(loc parse.Location, p parse.Point) bool {
 	return true
 }
 
-func sortLocations(locs []protocol.Location) {
-	sort.Slice(locs, func(a, b int) bool {
-		if locs[a].Range.Start.Line != locs[b].Range.Start.Line {
-			return locs[a].Range.Start.Line < locs[b].Range.Start.Line
-		}
-		return locs[a].Range.Start.Character < locs[b].Range.Start.Character
-	})
-}
-
 // projectArdFiles enumerates .ard files under the project root, bounded to
 // keep reference searches cheap in large trees.
 func projectArdFiles(root string) []string {

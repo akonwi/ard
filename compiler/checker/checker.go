@@ -2150,6 +2150,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 		{
 			if id, ok := s.Target.(*parse.Identifier); ok {
 				target, ok := c.scope.get(id.Name)
+				if ok {
+					c.recordSymbolUse(id, target, nil)
+				}
 				if !ok {
 					c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.Target.GetLocation())
 					return nil
@@ -5201,6 +5204,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
 				return nil
 			}
+			c.recordCallAttempt(s, s.Name, fnDef)
 
 			callTypeArgs := c.resolveCallTypeArgs(s.TypeArgs)
 

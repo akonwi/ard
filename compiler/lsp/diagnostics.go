@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
@@ -13,60 +12,6 @@ import (
 )
 
 type diagnosticAnalyzer func(source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error)
-
-// parseAndCheck runs the Ard parser and checker on a source file.
-// It returns the parsed AST, the checked module, and any diagnostics.
-func parseAndCheck(source string, filePath string) ([]checker.Diagnostic, error) {
-	return parseAndCheckWithOverlays(source, filePath, nil)
-}
-
-func parseAndCheckWithOverlays(source string, filePath string, overlays map[string]string) (diagnostics []checker.Diagnostic, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			diagnostics = nil
-			err = fmt.Errorf("analysis panic: %v", r)
-		}
-	}()
-
-	// Parse the source
-	result := parse.Parse([]byte(source), filePath)
-	if result.Program == nil {
-		return nil, fmt.Errorf("failed to parse: no program returned")
-	}
-
-	if len(result.Errors) > 0 {
-		// Convert parse errors to checker-style diagnostics
-		diags := make([]checker.Diagnostic, 0, len(result.Errors))
-		for _, err := range result.Errors {
-			diags = append(diags, checker.NewDiagnostic(checker.Error, err.Message, filePath, err.Location))
-		}
-		return diags, nil
-	}
-
-	program := result.Program
-
-	// Initialize the module resolver
-	workingDir := filepath.Dir(filePath)
-	moduleResolver, err := checker.NewModuleResolver(workingDir)
-	if err != nil {
-		return nil, fmt.Errorf("error initializing module resolver: %w", err)
-	}
-	for overlayPath, overlaySource := range overlays {
-		moduleResolver.SetOverlay(overlayPath, overlaySource)
-	}
-
-	relPath, err := filepath.Rel(workingDir, filePath)
-	if err != nil {
-		relPath = filePath
-	}
-
-	projectInfo := moduleResolver.GetProjectInfo()
-	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
-	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{GoResolver: goResolver})
-	c.Check()
-
-	return c.Diagnostics(), nil
-}
 
 func formatSource(source string, filePath string) (string, error) {
 	formatted, err := formatter.Format([]byte(source), filePath)
