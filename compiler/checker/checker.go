@@ -2186,9 +2186,30 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				if subject == nil {
 					return nil
 				}
+				// Check the value with the field type as expected context so
+				// literals type contextually, then enforce compatibility for
+				// every field target - native and foreign alike. Nullable
+				// fields check against the inner type (mirroring call
+				// arguments) and wrap below.
+				fieldType := subject.Type()
 				var value Expression
 				c.withValueExprContext(func() {
-					value = c.checkExpr(s.Value)
+					if maybeField, isMaybe := fieldType.(*Maybe); isMaybe {
+						// Mirror call-argument checking for nullable targets:
+						// literals and anonymous functions check against the
+						// inner type; other expressions check freely and wrap
+						// below when they produce the inner type.
+						switch s.Value.(type) {
+						case *parse.StrLiteral, *parse.NumLiteral, *parse.BoolLiteral,
+							*parse.RuneLiteral, *parse.InterpolatedStr,
+							*parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
+							value = c.checkExprAs(s.Value, maybeField.Of())
+						default:
+							value = c.checkExpr(s.Value)
+						}
+						return
+					}
+					value = c.checkExprAs(s.Value, fieldType)
 				})
 				if value == nil {
 					return nil
@@ -2198,8 +2219,15 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					c.addError(fmt.Sprintf("Immutable: %s", ip), s.Target.GetLocation())
 					return nil
 				}
-				if _, ok := subject.(*ForeignFieldAccess); ok && !c.areCompatible(subject.Type(), value.Type()) {
-					c.addError(typeMismatch(subject.Type(), value.Type()), s.Value.GetLocation())
+				if maybeField, isMaybe := fieldType.(*Maybe); isMaybe && !value.Type().equal(fieldType) {
+					// A bare T assigns into a T? field by wrapping, matching
+					// struct literal and call-argument behavior.
+					if c.areCompatible(maybeField.Of(), value.Type()) {
+						value = c.synthesizeMaybeSome(value, fieldType)
+					}
+				}
+				if !c.areCompatible(fieldType, value.Type()) {
+					c.addError(typeMismatch(fieldType, value.Type()), s.Value.GetLocation())
 					return nil
 				}
 

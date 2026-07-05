@@ -4711,3 +4711,37 @@ func TestRunProgramExecutesZeroArgVariadicGoCalls(t *testing.T) {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+
+// TestRunProgramWrapsFieldAssignmentIntoMaybe pins the runtime behavior of
+// assigning a bare T into a T? struct field: the checker synthesizes a
+// maybe::some wrap, and resetting with maybe::none round-trips.
+func TestRunProgramWrapsFieldAssignmentIntoMaybe(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		struct S {
+			label: Str?,
+		}
+
+		fn main() {
+			mut s = S{label: "start"}
+			s.label = "wrapped"
+			if s.label.or("missing") != "wrapped" {
+				panic("literal wrap failed")
+			}
+			let name = "from variable"
+			s.label = name
+			if s.label.or("missing") != "from variable" {
+				panic("variable wrap failed")
+			}
+			s.label = maybe::none()
+			if s.label.is_some() {
+				panic("none reset failed")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
