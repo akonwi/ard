@@ -504,7 +504,7 @@ Ard test functions (`0014-use-ard-native-test-functions.md`) lower under the sam
 
 #### Test functions
 
-A `test fn` lowers to an ordinary function in its module's package and is included only in test builds; production builds omit test functions entirely. A test returns `Void!Str`, which lowers to `runtime.Result[struct{}, string]`. Assertion helpers from `ard/testing` return `Void!Str` and compose with `try`.
+A `test fn` lowers to an ordinary function in its module's package and is included only in test builds; production builds omit test functions entirely. A test returns `Void!Str`, which lowers through the normal Result return ABI to `func() error`. Assertion helpers from `ard/testing` return `Void!Str` and compose with `try`.
 
 The visibility split from `0014` is enforced for free by Go's package boundary:
 
@@ -513,7 +513,7 @@ The visibility split from `0014` is enforced for free by Go's package boundary:
 
 #### Test runner
 
-The runner is a synthetic `package main`, analogous to the entry main but for tests. It gathers every test, invokes each with `recover()` for panics, interprets the returned `Result[struct{}, string]` (`Ok` is a pass, `Err` is a failure with its message, a panic is an errored test), and reports outcomes.
+The runner is a synthetic `package main`, analogous to the entry main but for tests. It gathers every test, invokes each with `recover()` for panics, interprets the returned `error` (`nil` is a pass, non-nil is a failure with its message, a panic is an errored test), and reports outcomes.
 
 To reach tests across packages without exporting arbitrary test functions, each test-bearing package emits a single exported aggregator, for example `func ArdTests() []ardTest`, whose entries pair each test's name with a thunk referencing the package's own test functions. The thunks may reference unexported test functions because they are defined in the same package. The runner imports each test package and calls its aggregator, so individual test functions stay unexported and no registry or `init()` side effects are needed.
 

@@ -159,7 +159,7 @@ type testRunnerImports struct {
 func testRunnerImportAliases(program *air.Program, tests []TestCase) testRunnerImports {
 	imports := testRunnerImports{std: map[string]string{}, modules: map[air.ModuleID]string{}}
 	used := testRunnerReservedTopLevelNames(program)
-	for _, base := range []string{"json", "fmt", "os", "runtime"} {
+	for _, base := range []string{"json", "fmt", "os"} {
 		alias := base
 		for i := 1; used[alias]; i++ {
 			alias = fmt.Sprintf("%s_%d", base, i)
@@ -224,7 +224,6 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool, pro
 	writeImportSpec(&b, aliases["json"], "json", "encoding/json")
 	writeImportSpec(&b, aliases["fmt"], "fmt", "fmt")
 	writeImportSpec(&b, aliases["os"], "os", "os")
-	writeImportSpec(&b, aliases["runtime"], "runtime", "github.com/akonwi/ard/runtime")
 	moduleIDs := make([]int, 0, len(imports.modules))
 	for moduleID := range imports.modules {
 		moduleIDs = append(moduleIDs, int(moduleID))
@@ -245,11 +244,11 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool, pro
 	b.WriteString("\tStatus string `json:\"status\"`\n")
 	b.WriteString("\tMessage string `json:\"message,omitempty\"`\n")
 	b.WriteString("}\n\n")
-	fmt.Fprintf(&b, "func ardRunTest(name string, displayName string, fn func() %s.Result[struct{}, string]) (out ardTestOutcome) {\n", aliases["runtime"])
+	b.WriteString("func ardRunTest(name string, displayName string, fn func() error) (out ardTestOutcome) {\n")
 	b.WriteString("\tout = ardTestOutcome{Name: name, DisplayName: displayName, Status: \"panic\"}\n")
 	fmt.Fprintf(&b, "\tdefer func() { if recovered := recover(); recovered != nil { out.Status = \"panic\"; out.Message = %s.Sprint(recovered) } }()\n", aliases["fmt"])
-	b.WriteString("\tresult := fn()\n")
-	b.WriteString("\tif result.Ok { out.Status = \"pass\"; out.Message = \"\" } else { out.Status = \"fail\"; out.Message = result.Err }\n")
+	b.WriteString("\terr := fn()\n")
+	b.WriteString("\tif err == nil { out.Status = \"pass\"; out.Message = \"\" } else { out.Status = \"fail\"; out.Message = err.Error() }\n")
 	b.WriteString("\treturn out\n")
 	b.WriteString("}\n\n")
 	b.WriteString("func main() {\n")

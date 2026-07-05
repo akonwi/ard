@@ -1049,8 +1049,11 @@ func TestRenderTestRunnerUsesStructForVoidResult(t *testing.T) {
 		t.Fatalf("lower with tests: %v", err)
 	}
 	runner := renderTestRunner(program, []TestCase{{Name: "check", DisplayName: "check", Function: program.Tests[0].Function}}, false, nil)
-	if !strings.Contains(runner, "func() runtime.Result[struct{}, string]") {
-		t.Fatalf("test runner missing void result container using struct{}:\n%s", runner)
+	if !strings.Contains(runner, "fn func() error") {
+		t.Fatalf("test runner missing error-returning test function ABI:\n%s", runner)
+	}
+	if !strings.Contains(runner, "err := fn()") || !strings.Contains(runner, "err.Error()") {
+		t.Fatalf("test runner does not interpret error-returning tests:\n%s", runner)
 	}
 }
 func TestRunProgramExecutesGoErrorOnlyFunction(t *testing.T) {
@@ -3950,13 +3953,12 @@ func TestLocalNameKeepsBareNameWhenShadowingUnusedOuter(t *testing.T) {
 func TestRenderTestRunnerAliasesImportsAroundTopLevelNames(t *testing.T) {
 	program := &air.Program{Functions: []air.Function{
 		{ID: 0, Module: 0, Name: "os", Private: true},
-		{ID: 1, Module: 0, Name: "runtime", Private: true},
 	}}
 	runner := renderTestRunner(program, nil, false, nil)
-	if !strings.Contains(runner, "os_1 \"os\"") || !strings.Contains(runner, "runtime_1 \"github.com/akonwi/ard/runtime\"") {
+	if !strings.Contains(runner, "os_1 \"os\"") {
 		t.Fatalf("test runner did not alias conflicting imports:\n%s", runner)
 	}
-	if !strings.Contains(runner, "os_1.Stderr") || !strings.Contains(runner, "runtime_1.Result") {
+	if !strings.Contains(runner, "os_1.Stderr") {
 		t.Fatalf("test runner did not use aliased imports:\n%s", runner)
 	}
 }
