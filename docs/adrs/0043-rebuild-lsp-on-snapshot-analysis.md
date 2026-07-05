@@ -38,6 +38,13 @@ checker kind tables hover renders from. Known limitation: the workspace
 reference scan walks the filesystem, so overlay-only (never-saved) files do
 not participate in cross-file references.
 
+End-to-end validation: `scripts/lsp-harness.py` drives the built binary over
+real stdio frames against `examples/vaxis-demo` (real vaxis go/packages
+load), asserting lifecycle, diagnostics cycles, hover/definition/references/
+completion, malformed-input survival, and per-request latency. It is a
+manual tool, not CI: run it before releases and after changes to the server
+transport, the engine, or checker semantics the demo exercises.
+
 ## Context
 
 The current LSP implementation (`compiler/lsp`, ~9.8k lines) grew feature-by-feature without a shared analysis layer. Reading the code confirms structural problems:
