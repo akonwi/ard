@@ -4933,3 +4933,127 @@ func TestRunProgramForwardReferencesGenericFunctions(t *testing.T) {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+
+// TestRunProgramMarshalsUnionsThroughGoJSON pins the union marshalling
+// contract: generated unions carry a MarshalJSON method so Go JSON APIs
+// encode the active member unwrapped (no ArdTag on the wire). This is the
+// reason generated output imports encoding/json/v2 (ADR 0031/0035); the
+// built-in ard/json module was removed, so Go interop is the consumer.
+func TestRunProgramMarshalsUnionsThroughGoJSON(t *testing.T) {
+	program := lowerSource(t, `
+		use go:encoding/json
+
+		type Value = Str | Int
+
+		fn encode(v: Value) Str {
+			let bytes = try json::Marshal(v) -> err { panic(err) }
+			mut out = ""
+			for b in bytes {
+				out = "{out}{b.to_str()},"
+			}
+			out
+		}
+
+		fn main() {
+			let s: Value = "hi"
+			let n: Value = 42
+			// "hi" encodes as the JSON string "hi" -> bytes 34,104,105,34
+			if encode(s) != "34,104,105,34," {
+				panic("union Str member did not marshal unwrapped: {encode(s)}")
+			}
+			// 42 encodes as the JSON number 42 -> bytes 52,50
+			if encode(n) != "52,50," {
+				panic("union Int member did not marshal unwrapped: {encode(n)}")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+// TestRunProgramCompositeMarshalsThroughGoJSON pins the wider FFI marshalling
+// contract from ADR 0031: struct field tags preserve Ard names, Maybe fields
+// marshal as value-or-null, and enums marshal as their integer discriminants,
+// all through a real Go JSON API.
+func TestRunProgramCompositeMarshalsThroughGoJSON(t *testing.T) {
+	program := lowerSource(t, `
+		use go:encoding/json
+		use go:fmt
+		use ard/maybe
+
+		enum Color {
+			Red,
+			Green,
+		}
+
+		struct Task {
+			task_name: Str,
+			due_note: Str?,
+			color: Color,
+		}
+
+		fn encode(task: Task) Str {
+			let bytes = try json::Marshal(task) -> err { panic(err) }
+			fmt::Sprintf("%s", bytes)
+		}
+
+		fn check(encoded: Str, fragment: Str) {
+			if not encoded.contains(fragment) {
+				panic("missing {fragment} in {encoded}")
+			}
+		}
+
+		fn main() {
+			let with_note = Task{task_name: "write", due_note: "soon", color: Color::Green}
+			let encoded = encode(with_note)
+			// Field tags keep Ard names; Maybe marshals unwrapped; enums as ints.
+			check(encoded, "\"task_name\":\"write\"")
+			check(encoded, "\"due_note\":\"soon\"")
+			check(encoded, "\"color\":1")
+
+			let without = Task{task_name: "rest", due_note: maybe::none(), color: Color::Red}
+			let encoded_null = encode(without)
+			check(encoded_null, "\"due_note\":null")
+			check(encoded_null, "\"color\":0")
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+// TestUnionDeclsCarryOnlyMarshalJSON pins the ADR 0031 claim that unions have
+// a MarshalJSON method and deliberately no UnmarshalJSON: decoding into a
+// union is ambiguous and must stay unsupported unless decided otherwise.
+func TestUnionDeclsCarryOnlyMarshalJSON(t *testing.T) {
+	program := lowerSource(t, `
+		type Value = Str | Int
+
+		fn main() {
+			let v: Value = "x"
+		}
+	`)
+
+	sources, err := GenerateSources(program, Options{PackageName: "main"})
+	if err != nil {
+		t.Fatalf("GenerateSources error = %v", err)
+	}
+	var unionFile string
+	for _, src := range sources {
+		if strings.Contains(string(src), "type Value struct") {
+			unionFile = string(src)
+		}
+	}
+	if unionFile == "" {
+		t.Fatal("union decl not found in generated sources")
+	}
+	if !strings.Contains(unionFile, "func (u Value) MarshalJSON()") {
+		t.Fatal("union MarshalJSON method missing")
+	}
+	if strings.Contains(unionFile, "UnmarshalJSON") {
+		t.Fatal("unions must not carry UnmarshalJSON (decoding into a union is ambiguous)")
+	}
+}

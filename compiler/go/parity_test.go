@@ -1949,8 +1949,6 @@ func TestGoTargetParityMethodClosureCapturesSelf(t *testing.T) {
 	}
 }
 
-// JSON encoding of primitives is exercised through ard/json. The legacy
-// ard/encode module and its Encodable trait were removed (ADR 0031).
 func TestGoTargetParityStringHelpers(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{name: "int to str", input: `fn main() Str { 100.to_str() }`},

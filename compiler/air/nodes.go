@@ -43,6 +43,9 @@ type Stmt struct {
 	Body      Block
 }
 
+// ExprKind values are iota-assigned and NOT stable across compiler
+// versions: kinds are added and removed freely. They must never be
+// persisted; AIR gob serialization is only valid within a single binary.
 type ExprKind uint8
 
 const (
@@ -76,9 +79,6 @@ const (
 	ExprTraitUpcast
 	ExprCallTrait
 	ExprMakeList
-	// ExprJSONParse lowers json::parse<T>(input) to a typed encoding/json/v2
-	// Unmarshal into the result's value type. Target is the input string.
-	ExprJSONParse
 	ExprListAt
 	// ExprListAtChecked is the user-facing list.at: a bounds-checked access
 	// producing Maybe(elem). ExprListAt is raw indexing used by internal

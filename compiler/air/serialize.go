@@ -1,5 +1,10 @@
 package air
 
+// AIR serialization round-trips within one compiler binary only: node kind
+// enums are iota-assigned and not stable across versions. If this format
+// ever backs an on-disk cache, it must gain explicit numbering and a format
+// version first.
+
 import (
 	"bytes"
 	"encoding/gob"

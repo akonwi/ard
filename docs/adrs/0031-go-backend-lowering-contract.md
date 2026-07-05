@@ -462,15 +462,17 @@ Standard library behavior lives in Ard modules, direct Go imports, and ordinary 
 
 ### JSON and marshalling
 
-Ard JSON support lowers onto Go's `encoding/json/v2` over the generated Go types, rather than a custom typed codec or a boxed object model. Typed JSON (`ard/json`) uses `Marshal`/`Unmarshal` directly, and `Any`-based decoding (`ard/decode`) operates on `any`. The previous universal `runtime.Object`/`Kind` representation is removed.
+Generated Ard types are natively serializable through Go's own JSON machinery, rather than a custom typed codec or a boxed object model. There is no built-in Ard JSON module: the `ard/json` surface (`json::encode`, `json::parse<T>`) and its compiler-lowered pipeline were removed with the stdlib reset (ADR 0034). Programs serialize through Go interop — `use go:encoding/json` (or json/v2) over Ard values directly, or host shim code that marshals Ard values it receives.
+
+The marshalling support in generated output exists to make that interop correct: struct field tags, `Maybe`/`Result` marshalers, enums-as-ints, and union marshalers together mean any Go JSON API produces the Ard-shaped wire form.
 
 #### What is marshallable
 
-Marshalling applies to every JSON-representable type: `Any`, structs, lists, string-keyed maps, primitives, `Maybe`, `Result`, enums, and unions. `Any` is the general-purpose marshalling vehicle. A union marshals to its active member's value, unwrapped, so a `Str | Int` holding `"hi"` marshals to `"hi"` and one holding `5` marshals to `5`; the union tag is not part of the wire form.
+Marshalling applies to every JSON-representable type: `Any`, structs, lists, string-keyed maps, primitives, `Maybe`, `Result`, enums, and unions. A union marshals to its active member's value, unwrapped, so a `Str | Int` holding `"hi"` marshals to `"hi"` and one holding `5` marshals to `5`; the union tag is not part of the wire form. The generated union `MarshalJSON` method is the reason generated output imports `encoding/json/v2` and carries the `goexperiment.jsonv2` build tag (ADR 0035).
 
-Unmarshalling (`json::parse`) applies to the same shapes with one exception: parsing into a union is not supported, because choosing a member from arbitrary JSON is ambiguous. The checker rejects `json::parse` into a union or a type that contains one.
+Unmarshalling into a union is not supported — choosing a member from arbitrary JSON is ambiguous — and unions carry no `UnmarshalJSON` method.
 
-The `ard/encode` module, including the `Encodable` trait and its `to_dyn` method, is also removed. It existed to give a single customizable API for turning a value into a particular encoded form, but that capability is unused in practice; building a `Any` goes through the `Any` constructors instead. This keeps `ToString` as the only standard library trait.
+The `ard/encode` module, including the `Encodable` trait and its `to_dyn` method, is also removed. It existed to give a single customizable API for turning a value into a particular encoded form, but that capability is unused in practice. This keeps `ToString` as the only standard library trait.
 
 #### Struct fields
 
@@ -490,11 +492,11 @@ An enum marshals as its underlying integer value, which a named `int` type does 
 
 Lists lower to `[]T` and maps to `map[K]V`, both marshalled natively. A `[Byte]` value lowers to `[]byte`, which `encoding/json` encodes and decodes as base64, matching Ard's byte-buffer JSON behavior.
 
-#### Any and number disambiguation
+#### Any
 
-`Any` lowers to `any`, and JSON parses into the ordinary Go shapes `map[string]any`, `[]any`, `string`, `bool`, and `nil`. Numbers decoded into `Any` use `json.Number` so that `decode` combinators can distinguish `Int` from `Float64`; typed parsing into a known type decodes numbers directly into the target `Int` or `Float64` field with no ambiguity. The runtime holds no boxed object or kind-tagged representation for opaque data.
+`Any` lowers to `any`. The runtime holds no boxed object or kind-tagged representation for opaque data.
 
-`Any` is kept, but demoted. As a boxed runtime representation it is gone; it is now simply the named Ard surface for Go's `any`, with no runtime machinery. It remains the substrate for genuinely untyped data — `ard/decode`, schema-unknown or partial JSON, SQL rows, and host values typed as `any` — but it is no longer the default path for structured data, because `json::parse<T>` decodes directly into generated structs. How prominent `Any` stays depends on a separate, future language decision about whether to keep `ard/decode` and whether SQL moves to typed row scanning; if those untyped producers move to typed paths, `Any` becomes a rarely-used escape hatch. That decision is out of scope for this ADR, which only fixes that `Any` lowers to `any`.
+`Any` is kept, but demoted. As a boxed runtime representation it is gone; it is now simply the named Ard surface for Go's `any`, with no runtime machinery. It remains the substrate for genuinely untyped data — host values typed as `any` and schema-unknown payloads flowing through Go interop — with inspection provided explicitly by `ard/unsafe` rather than by a dynamically inspectable core type.
 
 ### Tests
 
@@ -580,8 +582,8 @@ The standard library was reset as part of the FFI cleanup and should be rebuilt 
 - The backend commits to minimizing synthetic helpers, with only `Maybe` and `Result` sanctioned as shared runtime types. `Void` lowers to `struct{}` and the structural-map helper is removed.
 - Equality is restricted to primitives, nullable primitives, and enums, so no structural-equality helper is generated. Map iteration order is unspecified and uses Go's native range, removing the sorted-key helpers. The previously generated equality and key-sorting helpers become dead and are removed.
 - The runtime package is reduced to `Maybe` and `Result` and must import only the Go standard library. The universal boxed `Object`/`Kind` representation, the `Fiber` async shape, the structural-map, equality, sorted-key, and void helpers are removed. Standard-library utilities such as argv access and goroutine-spawn helpers use direct Go imports or ordinary shim packages instead of runtime helpers.
-- JSON lowers onto Go's `encoding/json/v2` over the generated types. Struct fields are always exported (revising the earlier fields-follow-type-visibility rule) and carry `json` tags preserving the Ard field name, so every struct is serializable. Marshalling applies to `Any`, structs, lists, string-keyed maps, primitives, `Maybe`, `Result`, enums, and unions (a union marshals to its active member, unwrapped); only parsing into a union is rejected by the checker, as it is ambiguous. `Maybe` and `Result` are the sanctioned runtime JSON marshalers. Decoding into `Any` uses `json.Number` to disambiguate `Int` from `Float64`.
-- Map key types are constrained during checking to Go strictly-comparable types whose Go equality matches Ard equality, so every Ard map lowers to a plain Go map. `Float64` keys are allowed; `Maybe`, `List`, `Map`, and `Any` keys are rejected. Generic type parameters used as map keys emit a Go `comparable` constraint. This is a language-level constraint the checker must enforce. The standard library conforms to it: `ard/decode`'s `to_map` is removed and decode migrates to string-keyed maps, which is the correct shape for JSON objects anyway.
+- Generated types are natively serializable through Go JSON APIs: struct fields are always exported (revising the earlier fields-follow-type-visibility rule) and carry `json` tags preserving the Ard field name; `Maybe` and `Result` are the sanctioned runtime JSON marshalers; a union marshals to its active member, unwrapped, via a generated `MarshalJSON`. There is no built-in Ard JSON module; serialization happens through Go interop.
+- Map key types are constrained during checking to Go strictly-comparable types whose Go equality matches Ard equality, so every Ard map lowers to a plain Go map. `Float64` keys are allowed; `Maybe`, `List`, `Map`, and `Any` keys are rejected. Generic type parameters used as map keys emit a Go `comparable` constraint. This is a language-level constraint the checker must enforce. String-keyed maps are the correct shape for JSON objects, which Go marshals natively.
 - Impl methods lower to real Go methods with no duplicated standalone helpers, mutation is expressed through pointer receivers and pointer parameters rather than forwarding tables, and closures lower to Go function literals. Generic functions lower to Go generics, and generic methods use only receiver generics. These choices require AIR to preserve generic structure and receiver/mutation metadata for the backend.
 - Traits lower to Go interfaces with structural satisfaction, removing generated dispatch and forwarding-table machinery and superseding the Go-lowering portion of `0023-represent-mutable-trait-references-with-forwarding-tables.md`. `ToString` maps to `fmt.Stringer`. Traits implemented for builtin primitives require a minimal per-primitive boxing adapter for boxed trait objects, since Go cannot attach methods to builtins.
 - Trait methods are always public contract, so trait-implementing methods always lower to exported Go methods. The checker must reject a `private` modifier on a trait-implementing method.

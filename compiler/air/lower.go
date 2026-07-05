@@ -4013,16 +4013,6 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if e.Module == "builtin/Chan" {
 			return fl.lowerChannelCall(typeID, e)
 		}
-		if e.Module == "ard/json" && e.Call.Name == "parse" {
-			if len(e.Call.Args) != 1 {
-				return nil, fmt.Errorf("ard/json::parse expects one argument")
-			}
-			arg, err := fl.lowerExpr(e.Call.Args[0])
-			if err != nil {
-				return nil, err
-			}
-			return &Expr{Kind: ExprJSONParse, Type: typeID, Target: arg}, nil
-		}
 		moduleID := fl.l.internModule(e.Module)
 		if err := fl.l.ensureModuleGlobalsDeclared(e.Module); err != nil {
 			return nil, err

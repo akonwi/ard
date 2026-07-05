@@ -6154,14 +6154,6 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				ReturnType: fnToUse.ReturnType,
 			}
 			c.recordTarget(s, call, SpanTarget{Kind: TargetFunction, Module: mod.Path(), Symbol: name})
-			// json::parse decodes into the requested type; parsing into a union is
-			// ambiguous, so the checker rejects it (ADR 0031).
-			if mod.Path() == "ard/json" && name == "parse" {
-				if err := validateJSONParseTarget(call.ReturnType); err != nil {
-					c.addError(err.Error(), s.GetLocation())
-					return nil
-				}
-			}
 			return &ModuleFunctionCall{
 				Module: mod.Path(),
 				Call:   call,
@@ -9322,58 +9314,3 @@ func (c *Checker) wrapAccessorInMatch(subject Expression, prop *InstanceProperty
 	}
 }
 
-// validateJSONParseTarget rejects json::parse into shapes it cannot decode
-// unambiguously. It is parse-specific: parsing into a union is ambiguous, and
-// JSON object keys are always strings (ADR 0031). Encoding has no such
-// restriction (a union marshals to its active member), so it is an ordinary
-// function and is not validated here.
-func validateJSONParseTarget(typ Type) error {
-	if result, ok := derefType(typ).(*Result); ok {
-		typ = result.Val()
-	}
-	return validateJSONParseShape(derefType(typ), map[string]bool{})
-}
-
-func validateJSONParseShape(typ Type, seen map[string]bool) error {
-	typ = derefType(typ)
-	if typ == Str || typ == Int || typ == Float64 || typ == Bool || typ == Byte || typ == Rune || typ == Any {
-		return nil
-	}
-	switch t := typ.(type) {
-	case *List:
-		return validateJSONParseShape(t.Of(), seen)
-	case *Map:
-		if derefType(t.Key()) != Str {
-			return fmt.Errorf("json::parse only supports Str map keys, got %s", t.Key().String())
-		}
-		return validateJSONParseShape(t.Value(), seen)
-	case *Maybe:
-		return validateJSONParseShape(t.Of(), seen)
-	case *Enum:
-		return nil
-	case *Result:
-		if err := validateJSONParseShape(t.Val(), seen); err != nil {
-			return err
-		}
-		return validateJSONParseShape(t.Err(), seen)
-	case *Union:
-		return fmt.Errorf("json::parse does not support %s: parsing into a union is ambiguous", typ.String())
-	case *StructDef:
-		name := t.String()
-		if seen[name] {
-			return nil
-		}
-		seen[name] = true
-		for fieldName, fieldType := range t.Fields {
-			if err := validateJSONParseShape(fieldType, seen); err != nil {
-				return fmt.Errorf("json::parse field %s: %w", fieldName, err)
-			}
-		}
-		return nil
-	case *TypeVar:
-		if t.Actual() != nil {
-			return validateJSONParseShape(t.Actual(), seen)
-		}
-	}
-	return fmt.Errorf("json::parse does not support %s", typ.String())
-}
