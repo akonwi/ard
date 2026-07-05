@@ -160,3 +160,24 @@ impl Board {
 `
 	requireSpanHover(t, source, 4, 6, "fn Board.can_play(pos: Int) Bool")
 }
+
+// TestSpanHoverMutParamRendering: pointer-form foreign types already spell
+// "mut" in their type string; the parameter flag must not double it, while
+// native mutable params still get exactly one marker.
+func TestSpanHoverMutParamRendering(t *testing.T) {
+	source := `struct Board {
+  cells: [Str],
+}
+
+fn native_mut(board: mut Board) {
+  board.cells.push("x")
+}
+`
+	content := spanHover(t, source, 4, 4)
+	if !strings.Contains(content, "fn native_mut(board: mut Board)") {
+		t.Fatalf("native mut param rendering wrong: %q", content)
+	}
+	if strings.Contains(content, "mut mut") {
+		t.Fatalf("double mut in rendering: %q", content)
+	}
+}

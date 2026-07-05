@@ -160,10 +160,7 @@ func functionSignatureString(name string, def *checker.FunctionDef) string {
 func paramListString(def *checker.FunctionDef) string {
 	parts := make([]string, 0, len(def.Parameters))
 	for _, p := range def.Parameters {
-		text := checkerTypeString(p.Type)
-		if p.Mutable {
-			text = "mut " + text
-		}
+		text := mutParamTypeString(checkerTypeString(p.Type), p.Mutable)
 		if p.Name != "" && !strings.HasPrefix(p.Name, "arg") {
 			text = p.Name + ": " + text
 		}

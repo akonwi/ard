@@ -94,3 +94,13 @@ func isTypeIdentPart(ch byte) bool {
 func isTypeIdentStart(ch byte) bool {
 	return ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
 }
+
+// mutParamTypeString renders a parameter type with its mutability marker.
+// Pointer-form foreign types and mutable references already spell "mut " in
+// their type string; prepending the flag's marker again would double it.
+func mutParamTypeString(typeText string, mutable bool) string {
+	if !mutable || strings.HasPrefix(typeText, "mut ") {
+		return typeText
+	}
+	return "mut " + typeText
+}

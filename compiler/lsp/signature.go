@@ -39,14 +39,11 @@ func signatureParameterInformation(params []hoverParam) []protocol.ParameterInfo
 }
 
 func formatHoverParam(p hoverParam) string {
-	mut := ""
-	if p.Mutable {
-		mut = "mut "
-	}
+	text := mutParamTypeString(normalizeDisplayType(p.Type), p.Mutable)
 	if p.Name == "" {
-		return mut + normalizeDisplayType(p.Type)
+		return text
 	}
-	return mut + p.Name + ": " + normalizeDisplayType(p.Type)
+	return p.Name + ": " + text
 }
 
 func openParensBefore(source string, offset int) []int {
