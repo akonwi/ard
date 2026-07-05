@@ -3826,7 +3826,12 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 		}
 		if def := e.Definition(); def != nil {
-			if def.Body != nil {
+			// Forward references to generic functions carry a specialized
+			// copy of the hoisted signature whose Body is still nil (the
+			// original's body is attached after the copy). Generic calls
+			// resolve the original definition inside declareAndLower, so the
+			// nil body does not block them.
+			if def.Body != nil || len(def.GenericBindings) > 0 {
 				id, err := fl.declareAndLowerFunctionCall(fl.fn.Module, def, e)
 				if err != nil {
 					return nil, err
@@ -5806,8 +5811,13 @@ func (l *lowerer) moduleFunctionDefinitionForCall(call *checker.ModuleFunctionCa
 		return def
 	}
 	return &checker.FunctionDef{
-		Name:                    def.Name,
-		Receiver:                bodyDef.Receiver,
+		Name:     def.Name,
+		Receiver: bodyDef.Receiver,
+		// Preserve generic identity so a generic def flowing through this
+		// merge stays on the lower-once path (ADR 0031) instead of being
+		// silently monomorphized with a concrete call-site signature.
+		GenericParams:           bodyDef.GenericParams,
+		GenericBindings:         def.GenericBindings,
 		Parameters:              def.Parameters,
 		ReturnType:              def.ReturnType,
 		InferReturnTypeFromBody: bodyDef.InferReturnTypeFromBody,
@@ -5831,8 +5841,13 @@ func (l *lowerer) moduleFunctionDefinitionForSymbol(symbol *checker.ModuleSymbol
 		return def, true
 	}
 	return &checker.FunctionDef{
-		Name:                    def.Name,
-		Receiver:                bodyDef.Receiver,
+		Name:     def.Name,
+		Receiver: bodyDef.Receiver,
+		// Preserve generic identity so a generic def flowing through this
+		// merge stays on the lower-once path (ADR 0031) instead of being
+		// silently monomorphized with a concrete call-site signature.
+		GenericParams:           bodyDef.GenericParams,
+		GenericBindings:         def.GenericBindings,
 		Parameters:              def.Parameters,
 		ReturnType:              def.ReturnType,
 		InferReturnTypeFromBody: bodyDef.InferReturnTypeFromBody,

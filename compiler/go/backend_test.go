@@ -4904,3 +4904,32 @@ func TestRunProgramReturnsGenericResultThroughABI(t *testing.T) {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+
+// TestRunProgramForwardReferencesGenericFunctions covers calling a generic
+// function declared after the caller: the call site's specialized copy of
+// the hoisted signature has no body yet, and lowering must resolve the
+// original definition instead of failing the call target lookup.
+func TestRunProgramForwardReferencesGenericFunctions(t *testing.T) {
+	program := lowerSource(t, `
+		fn main() {
+			if head([1, 2]).or(-1) != 1 {
+				panic("public forward generic failed")
+			}
+			if tail([1, 2]).or(-1) != 2 {
+				panic("private forward generic failed")
+			}
+		}
+
+		fn head(items: [$T]) $T? {
+			items.at(0)
+		}
+
+		private fn tail(items: [$T]) $T? {
+			items.at(items.size() - 1)
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
