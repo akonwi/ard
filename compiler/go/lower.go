@@ -1537,16 +1537,19 @@ func (l *lowerer) returnPackedABIValue(typeID air.TypeID, expr ast.Expr) ([]ast.
 			&ast.ReturnStmt{Results: []ast.Expr{&ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Value")}, ast.NewIdent("nil")}},
 		}, nil
 	case air.TypeMaybe:
+		// runtime.Maybe exposes IsSome()/Value() methods, not Result-style
+		// Ok/Value fields.
 		if l.isVoidType(info.Elem) {
-			return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Ok")}}}}, nil
+			return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{l.maybeIsSomeExpr(expr)}}}, nil
 		}
 		zero, err := l.zeroValueExpr(info.Elem)
 		if err != nil {
 			return nil, err
 		}
+		valueCall := &ast.CallExpr{Fun: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Value")}}
 		return []ast.Stmt{
-			&ast.IfStmt{Cond: &ast.UnaryExpr{Op: token.NOT, X: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Ok")}}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{zero, ast.NewIdent("false")}}}}},
-			&ast.ReturnStmt{Results: []ast.Expr{&ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Value")}, ast.NewIdent("true")}},
+			&ast.IfStmt{Cond: l.maybeIsNoneExpr(expr), Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{zero, ast.NewIdent("false")}}}}},
+			&ast.ReturnStmt{Results: []ast.Expr{valueCall, ast.NewIdent("true")}},
 		}, nil
 	default:
 		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{expr}}}, nil

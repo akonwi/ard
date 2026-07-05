@@ -12,6 +12,11 @@ impl Board {
     self.cells.set(pos, player)
   }
 
+  // List.at returns Str?; a missing cell reads as empty.
+  fn cell(pos: Int) Str {
+    self.cells.at(pos).or("")
+  }
+
   fn is_full() Bool {
     mut full = true
     for cell in self.cells {
@@ -25,7 +30,7 @@ impl Board {
 
   fn can_play(pos: Int) Bool {
     match pos >= 0 and pos < self.cells.size() {
-      true => self.cells.at(pos).is_empty(),
+      true => self.cell(pos).is_empty(),
       false => false,
     }
   }
@@ -33,42 +38,42 @@ impl Board {
   fn get_winner() Str? {
     mut res: Str? = maybe::none()
 
-    if not self.cells.at(0).is_empty() {
-      if self.cells.at(0) == self.cells.at(1) and self.cells.at(0) == self.cells.at(2) {
-        res = maybe::some(self.cells.at(0))
+    if not self.cell(0).is_empty() {
+      if self.cell(0) == self.cell(1) and self.cell(0) == self.cell(2) {
+        res = maybe::some(self.cell(0))
       }
-      if self.cells.at(0) == self.cells.at(3) and self.cells.at(0) == self.cells.at(6) {
-        res = maybe::some(self.cells.at(0))
+      if self.cell(0) == self.cell(3) and self.cell(0) == self.cell(6) {
+        res = maybe::some(self.cell(0))
       }
-      if self.cells.at(0) == self.cells.at(4) and self.cells.at(0) == self.cells.at(8) {
-        res = maybe::some(self.cells.at(0))
-      }
-    }
-
-    if not self.cells.at(1).is_empty() {
-      if self.cells.at(1) == self.cells.at(4) and self.cells.at(1) == self.cells.at(7) {
-        res = maybe::some(self.cells.at(1))
+      if self.cell(0) == self.cell(4) and self.cell(0) == self.cell(8) {
+        res = maybe::some(self.cell(0))
       }
     }
 
-    if not self.cells.at(2).is_empty() {
-      if self.cells.at(2) == self.cells.at(5) and self.cells.at(2) == self.cells.at(8) {
-        res = maybe::some(self.cells.at(2))
-      }
-      if self.cells.at(2) == self.cells.at(4) and self.cells.at(2) == self.cells.at(6) {
-        res = maybe::some(self.cells.at(2))
+    if not self.cell(1).is_empty() {
+      if self.cell(1) == self.cell(4) and self.cell(1) == self.cell(7) {
+        res = maybe::some(self.cell(1))
       }
     }
 
-    if not self.cells.at(3).is_empty() {
-      if self.cells.at(3) == self.cells.at(4) and self.cells.at(3) == self.cells.at(5) {
-        res = maybe::some(self.cells.at(3))
+    if not self.cell(2).is_empty() {
+      if self.cell(2) == self.cell(5) and self.cell(2) == self.cell(8) {
+        res = maybe::some(self.cell(2))
+      }
+      if self.cell(2) == self.cell(4) and self.cell(2) == self.cell(6) {
+        res = maybe::some(self.cell(2))
       }
     }
 
-    if not self.cells.at(6).is_empty() {
-      if self.cells.at(6) == self.cells.at(7) and self.cells.at(6) == self.cells.at(8) {
-        res = maybe::some(self.cells.at(6))
+    if not self.cell(3).is_empty() {
+      if self.cell(3) == self.cell(4) and self.cell(3) == self.cell(5) {
+        res = maybe::some(self.cell(3))
+      }
+    }
+
+    if not self.cell(6).is_empty() {
+      if self.cell(6) == self.cell(7) and self.cell(6) == self.cell(8) {
+        res = maybe::some(self.cell(6))
       }
     }
 
@@ -77,7 +82,7 @@ impl Board {
 }
 
 fn cell_label(board: Board, pos: Int, selected: Int) Str {
-  let value = board.cells.at(pos)
+  let value = board.cells.at(pos).or("")
   mut label = value
   if label.is_empty() {
     label = " "
