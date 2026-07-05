@@ -3570,7 +3570,13 @@ func (l *lowerer) lowerGoValueErrorResultCall(expr air.Expr, stmts []ast.Stmt, c
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	valueType, err := l.goType(result.Value)
+	// The temp must use the call site's instantiated value type; the callee's
+	// declared type may be an uninstantiated type parameter.
+	valueTypeID := result.Value
+	if exprInfo, ok := l.typeInfo(expr.Type); ok && exprInfo.Kind == air.TypeResult && validTypeID(l.program, exprInfo.Value) {
+		valueTypeID = exprInfo.Value
+	}
+	valueType, err := l.goType(valueTypeID)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -3720,6 +3726,14 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 		return &ast.BasicLit{Kind: token.STRING, Value: "\"\""}, nil
 	case air.TypeAny, air.TypeFunction, air.TypeTraitObject:
 		return ast.NewIdent("nil"), nil
+	case air.TypeParam:
+		// A composite literal T{} is illegal for a type parameter; *new(T)
+		// is the canonical zero-value expression for any T.
+		typ, err := l.goType(typeID)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.StarExpr{X: &ast.CallExpr{Fun: ast.NewIdent("new"), Args: []ast.Expr{typ}}}, nil
 	default:
 		typ, err := l.goType(typeID)
 		if err != nil {

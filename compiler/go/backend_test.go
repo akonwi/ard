@@ -4803,3 +4803,104 @@ func TestRunProgramReturnsMaybeThroughABI(t *testing.T) {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+
+// TestRunProgramReturnsGenericMaybeThroughABI covers zero-value synthesis
+// for generic type parameters in the idiomatic return ABI: a `$T?` return
+// lowers to (T, bool), and the none path needs a zero T — which must be
+// *new(T), not the illegal composite literal T{}.
+func TestRunProgramReturnsGenericMaybeThroughABI(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/maybe
+
+		fn first_match(items: [$T], pred: fn($T) Bool) $T? {
+			mut res: $T? = maybe::none()
+			for item in items {
+				if pred(item) {
+					res = maybe::some(item)
+					break
+				}
+			}
+			res
+		}
+
+		// A generic body calling another generic keeps the outer $T
+		// uninstantiated at the inner call site.
+		fn head(items: [$T]) $T? {
+			first_match(items, fn(item: $T) Bool { true })
+		}
+
+		fn main() {
+			let nums = [1, 2, 3]
+			if first_match(nums, fn(n: Int) Bool { n == 2 }).or(-1) != 2 {
+				panic("some path failed")
+			}
+			if first_match(nums, fn(n: Int) Bool { n == 9 }).is_some() {
+				panic("none path failed")
+			}
+			let names = ["a", "bb"]
+			if first_match(names, fn(s: Str) Bool { s.size() == 2 }).or("") != "bb" {
+				panic("str instantiation failed")
+			}
+			if head([4, 5]).or(-1) != 4 {
+				panic("generic-calling-generic failed")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+// TestRunProgramStdlibListFindThroughABI pins the stdlib shape that first
+// exposed the generic zero-value bug.
+func TestRunProgramStdlibListFindThroughABI(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/list
+
+		fn main() {
+			let nums = [1, 2, 3]
+			let found = list::find(nums, fn(n: Int) Bool { n == 2 })
+			if found.or(-1) != 2 {
+				panic("find some failed")
+			}
+			let missing = list::find(nums, fn(n: Int) Bool { n == 9 })
+			if missing.is_some() {
+				panic("find none failed")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+// TestRunProgramReturnsGenericResultThroughABI covers the Result half for
+// generic functions: the (T, error) unpacking temp at a call site must use
+// the instantiated type, not the callee's declared type parameter.
+func TestRunProgramReturnsGenericResultThroughABI(t *testing.T) {
+	program := lowerSource(t, `
+		fn require_first(items: [$T]) $T!Str {
+			match items.at(0) {
+				item => Result::ok(item),
+				_ => Result::err("empty"),
+			}
+		}
+
+		fn main() {
+			let n = try require_first([7]) -> err { panic(err) }
+			if n != 7 {
+				panic("wrong value")
+			}
+			let empty: [Int] = []
+			if require_first(empty).is_ok() {
+				panic("expected err")
+			}
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
