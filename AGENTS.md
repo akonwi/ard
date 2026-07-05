@@ -6,14 +6,21 @@ This is the source code for the Ard programming language.
 ### Repo structure
 This is a monorepo with the following top-level directories:
 - /compiler: The Ard language compiler, parser, type checker, and Go target
-  - /compiler/docs: documentation about language syntax, feature design, and implementation decisions
-  - /compiler/samples: runnable Ard program samples
   - /compiler/parse: parser implementation
-  - /compiler/checker: type checker and semantic analysis
-  - /compiler/go: Go target implementation
-  - /compiler/std_lib: standard library definitions
+  - /compiler/checker: type checker and semantic analysis (including direct Go FFI resolution)
+  - /compiler/air: the target-neutral intermediate representation (frontend/backend boundary)
+  - /compiler/frontend: module loading pipeline shared by CLI commands
+  - /compiler/go: Go target implementation (lowering and code generation)
+  - /compiler/lsp: the language server (snapshot-based analysis engine, see ADR 0043)
+  - /compiler/formatter: canonical Ard formatting
+  - /compiler/runtime: the minimal shared runtime (`Maybe`, `Result`) generated programs depend on
+  - /compiler/std_lib: standard library definitions (intentionally minimal during the FFI reset, see ADR 0034)
+  - /compiler/samples: runnable Ard program samples
   - /compiler/main.go: compiler CLI entry point
   - /compiler/go.mod & go.sum: Go module dependencies for the compiler
+- /docs: project-wide documentation; /docs/adrs holds the Architecture Decision Records
+- /examples: full example projects (vaxis-demo exercises the direct Go FFI against a real dependency)
+- /scripts: repo tooling (commit message validation, the manual LSP harness)
 - /tree-sitter-ard: tree-sitter grammar for Ard (used for the zed plugin and syntax highlighting)
 - /website: the documentation website built with Astro and Starlight as a static site
 - /zed-plugin: plugin for the Zed editor
@@ -26,7 +33,7 @@ This is a monorepo with the following top-level directories:
   - when working on bugs, start with test reproduction. tests also add documentation of the case for future reference
 
 ## Commands
-The project uses the `jsonv2` experiment for the [new json tools](https://antonz.org/go-json-v2/) and has build tag directives for it.
+Generated programs use Go's `encoding/json/v2`, which requires the `jsonv2` Go experiment. Ensure `GOEXPERIMENT=jsonv2` is set in the environment (CI passes `-tags=goexperiment.jsonv2` explicitly).
 
 All commands should be run from the `/compiler` directory:
 
@@ -34,11 +41,10 @@ All commands should be run from the `/compiler` directory:
   > Important: do not stage and commit the built binary
 - Run Ard program: `cd compiler && go run main.go run samples/[file].ard`
 - Format Ard files: `cd compiler && go run main.go format [path]`
-- Run all tests: `cd compiler && go generate ./std_lib/ffi && go test ./...`
+- Run all tests: `cd compiler && go test ./...`
 - Run package tests: `cd compiler && go test ./go` or `go test ./checker` or `go test ./formatter`
 - Run single test: `cd compiler && go test -run TestName ./[package]`
 - Verbose testing: `cd compiler && go test -v ./...`
-- Generate stdlib FFI/Go-target metadata: `cd compiler && go generate ./std_lib/ffi` (run before tests and when changing stdlib extern declarations)
 - Validate the LSP end-to-end: `cd compiler && go build -o /tmp/ard-lsp-test . && cd .. && python3 scripts/lsp-harness.py` (manual stdio harness against `examples/vaxis-demo`; run after changes to the LSP transport, analysis engine, or checker semantics — see ADR 0043)
 
 ## Instructions
@@ -61,7 +67,8 @@ All commands should be run from the `/compiler` directory:
 - **Project Structure**: Compiler follows parse → checker → AIR → target lowering
 - **Development Tracking**: Use GitHub issues for top-level work items
 - **Sample Programs**: Reference samples directory for example Ard programs
-- **FFI System**: Standard library modules use Foreign Function Interface (FFI)
-  - Go target stdlib FFI metadata is generated from std_lib extern declarations and std_lib/ffi Go implementations
-  - Project Go FFI companions live in root `ffi.go` or `ffi/*.go` and use `package ffi`
-  - Standard library definitions in std_lib/*.ard use `extern fn` declarations
+- **FFI System**: Go interop is direct — there is no extern binding layer (see ADRs 0031/0034/0035)
+  - Ard code imports Go packages with `use go:` and calls exported symbols with namespace syntax (`fmt::Println`)
+  - The checker validates Go boundaries through `go/packages`; the Go backend owns the lowering
+  - Project Go shim code lives in `ffi/*.go` as `package ffi` and is imported like any other Go package (`use go:<project>/ffi`)
+  - `extern` is no longer valid syntax; the old std_lib/ffi generation step no longer exists

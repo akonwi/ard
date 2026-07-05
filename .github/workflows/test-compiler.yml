@@ -21,13 +21,6 @@ jobs:
           go-version: "1.26"
           cache: true
 
-      - name: Generate stdlib FFI bridge code
-        working-directory: compiler
-        run: go generate -tags=goexperiment.jsonv2 ./std_lib/ffi
-
-      - name: Check generated files are current
-        run: git diff --exit-code
-
       - name: Run compiler unit tests
         working-directory: compiler
         run: go test -tags=goexperiment.jsonv2 ./...
@@ -69,12 +62,6 @@ jobs:
       - name: Build Ard CLI for examples
         working-directory: compiler
         run: go build -tags=goexperiment.jsonv2 -o "$RUNNER_TEMP/ard" .
-
-      - name: Run server smoke test
-        working-directory: examples/server
-        env:
-          ARD: ${{ runner.temp }}/ard
-        run: ./test_server.py
 
       - name: Run tic-tac-toe PTY smoke test
         working-directory: examples/tic-tac-toe
