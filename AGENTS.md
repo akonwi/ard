@@ -39,6 +39,7 @@ All commands should be run from the `/compiler` directory:
 - Run single test: `cd compiler && go test -run TestName ./[package]`
 - Verbose testing: `cd compiler && go test -v ./...`
 - Generate stdlib FFI/Go-target metadata: `cd compiler && go generate ./std_lib/ffi` (run before tests and when changing stdlib extern declarations)
+- Validate the LSP end-to-end: `cd compiler && go build -o /tmp/ard-lsp-test . && cd .. && python3 scripts/lsp-harness.py` (manual stdio harness against `examples/vaxis-demo`; run after changes to the LSP transport, analysis engine, or checker semantics — see ADR 0043)
 
 ## Instructions
 - use the gopls tool (Go language server) to get diagnostics and compilation info
