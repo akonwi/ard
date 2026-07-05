@@ -71,6 +71,9 @@ type FileAnalysis struct {
 	// tables, and public symbols. Like Program, it is shared across snapshot
 	// consumers and must be treated as read-only.
 	Checked *checker.Program
+	// Module is the checked module view exposing public symbols (functions,
+	// types, enums, module values) by name. Read-only.
+	Module checker.Module
 	// Signature identifies the inputs this analysis was computed from.
 	Signature string
 }
@@ -434,12 +437,14 @@ func (s *Snapshot) check(filePath string, relPath string, program *parse.Program
 	})
 	c.Check()
 
+	module := c.Module()
 	return &FileAnalysis{
 		FilePath:    filePath,
 		Program:     program,
 		Diagnostics: c.Diagnostics(),
 		Spans:       c.Spans(),
-		Checked:     c.Module().Program(),
+		Checked:     module.Program(),
+		Module:      module,
 		Signature:   sig,
 	}, nil
 }

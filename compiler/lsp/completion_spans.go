@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/lsp/analysis"
@@ -16,7 +17,10 @@ import (
 // static/import completion) during the migration.
 func (s *Server) completionFromSpans(ctx context.Context, docURI uri.URI, source string, position protocol.Position) []protocol.CompletionItem {
 	cctx, ok := completionContextAt(source, position)
-	if !ok || cctx.kind != completionInstance || cctx.sepEnd < 2 {
+	if !ok || cctx.sepEnd < 2 {
+		return nil
+	}
+	if cctx.kind != completionInstance && cctx.kind != completionStatic {
 		return nil
 	}
 	filePath, err := filePathFromURI(docURI)
@@ -39,6 +43,14 @@ func (s *Server) completionFromSpans(ctx context.Context, docURI uri.URI, source
 	fa, err := scratch.Snapshot().AnalyzeEphemeral(ctx, filePath)
 	if err != nil || fa == nil || fa.Spans == nil {
 		return nil
+	}
+
+	if cctx.kind == completionStatic {
+		items := s.staticCompletionFromSpans(fa, source, cctx)
+		if len(items) == 0 {
+			return nil
+		}
+		return withCompletionTextEdits(items, cctx, position)
 	}
 
 	// The receiver is the expression immediately before the dot.
@@ -145,4 +157,115 @@ func methodDetailString(def *checker.FunctionDef) string {
 		detail += " " + ret
 	}
 	return detail
+}
+
+// staticCompletionFromSpans enumerates `target::` members from the checked
+// program: imported module symbols, local type statics (enum variants,
+// Type::fn declarations), and builtin static packages.
+func (s *Server) staticCompletionFromSpans(fa *analysis.FileAnalysis, source string, cctx completionContext) []protocol.CompletionItem {
+	target := staticCompletionTarget(source, cctx)
+	if target == "" || fa.Checked == nil {
+		return nil
+	}
+
+	items := map[string]protocol.CompletionItem{}
+	add := func(item protocol.CompletionItem) {
+		if item.Label != "" {
+			if _, exists := items[item.Label]; !exists {
+				items[item.Label] = item
+			}
+		}
+	}
+
+	// Imported module members. The checked Imports map is keyed by import
+	// path; resolve the alias through the parse tree's import list.
+	if fa.Program != nil {
+		for _, imp := range fa.Program.Imports {
+			alias := imp.Name
+			if alias == "" {
+				if idx := strings.LastIndex(imp.Path, "/"); idx >= 0 {
+					alias = imp.Path[idx+1:]
+				} else {
+					alias = imp.Path
+				}
+			}
+			if alias != target {
+				continue
+			}
+			if mod := fa.Checked.Imports[imp.Path]; mod != nil {
+				for name, sym := range mod.Symbols() {
+					add(staticSymbolCompletionItem(name, sym))
+				}
+			}
+		}
+	}
+
+	// Local declarations from the module's public symbol table: enum
+	// variants for `Target::`, and `fn Target::name` statics.
+	prefix := target + "::"
+	if fa.Module != nil {
+		for name, sym := range fa.Module.Symbols() {
+			if name == target {
+				if enum, ok := sym.Type.(*checker.Enum); ok {
+					for _, value := range enum.Values {
+						add(protocol.CompletionItem{Label: value.Name, Kind: protocol.CompletionItemKindEnumMember, Detail: target})
+					}
+				}
+			}
+			if strings.HasPrefix(name, prefix) {
+				if def, ok := sym.Type.(*checker.FunctionDef); ok {
+					add(protocol.CompletionItem{
+						Label:  strings.TrimPrefix(name, prefix),
+						Kind:   protocol.CompletionItemKindFunction,
+						Detail: methodDetailString(def),
+					})
+				}
+			}
+		}
+	}
+
+	out := make([]protocol.CompletionItem, 0, len(items))
+	names := make([]string, 0, len(items))
+	for name := range items {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		out = append(out, items[name])
+	}
+	return out
+}
+
+// staticCompletionTarget extracts the identifier before `::`.
+func staticCompletionTarget(source string, cctx completionContext) string {
+	end := cctx.sepEnd - 2
+	if end <= 0 || end > len(source) {
+		return ""
+	}
+	start := end
+	for start > 0 && isIdentByte(source[start-1]) {
+		start--
+	}
+	return source[start:end]
+}
+
+// staticSymbolCompletionItem renders one module member.
+func staticSymbolCompletionItem(name string, sym checker.Symbol) protocol.CompletionItem {
+	if def, ok := sym.Type.(*checker.FunctionDef); ok {
+		return protocol.CompletionItem{
+			Label:  name,
+			Kind:   protocol.CompletionItemKindFunction,
+			Detail: methodDetailString(def),
+		}
+	}
+	kind := protocol.CompletionItemKindValue
+	switch sym.Type.(type) {
+	case *checker.StructDef:
+		kind = protocol.CompletionItemKindStruct
+	case *checker.Enum:
+		kind = protocol.CompletionItemKindEnum
+	case *checker.Trait:
+		kind = protocol.CompletionItemKindInterface
+	}
+	return protocol.CompletionItem{Label: name, Kind: kind, Detail: checkerTypeString(sym.Type)}
 }

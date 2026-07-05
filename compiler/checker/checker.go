@@ -28,6 +28,9 @@ type Module interface {
 	Path() string
 	Get(name string) Symbol
 	Program() *Program
+	// Symbols returns the module's public symbols by name. The map is owned
+	// by the module and must be treated as read-only.
+	Symbols() map[string]Symbol
 }
 
 type DiagnosticKind string

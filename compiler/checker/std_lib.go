@@ -170,3 +170,37 @@ func (pkg ChannelStaticPkg) Get(name string) Symbol {
 		return Symbol{}
 	}
 }
+
+// Symbols enumerations for builtin packages. Names mirror each Get above.
+
+func (pkg MaybePkg) Symbols() map[string]Symbol {
+	return symbolsByName(pkg, "none", "some")
+}
+
+func (pkg ResultPkg) Symbols() map[string]Symbol {
+	return symbolsByName(pkg, "ok", "err")
+}
+
+func (pkg AsyncPkg) Symbols() map[string]Symbol {
+	return symbolsByName(pkg, "start")
+}
+
+func (pkg UnsafePkg) Symbols() map[string]Symbol {
+	return symbolsByName(pkg, "cast", "is_nil")
+}
+
+func (pkg EmptyBuiltinPkg) Symbols() map[string]Symbol { return map[string]Symbol{} }
+
+func (pkg ChannelStaticPkg) Symbols() map[string]Symbol {
+	return symbolsByName(pkg, "new")
+}
+
+func symbolsByName(mod Module, names ...string) map[string]Symbol {
+	out := make(map[string]Symbol, len(names))
+	for _, name := range names {
+		if sym := mod.Get(name); !sym.IsZero() {
+			out[name] = sym
+		}
+	}
+	return out
+}

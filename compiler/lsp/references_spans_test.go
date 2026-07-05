@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.lsp.dev/protocol"
@@ -274,6 +275,72 @@ fn main(board: Board) {
 		}
 		if help.ActiveParameter != 0 {
 			t.Fatalf("active parameter = %d, want 0", help.ActiveParameter)
+		}
+	})
+}
+
+// TestStaticCompletionFromSpans covers module members, enum variants, and
+// Type::fn statics on the span path.
+func TestStaticCompletionFromSpans(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"proj\"\nard = \">= 0.1.0\"\n"), 0o644)
+	os.WriteFile(filepath.Join(root, "math.ard"), []byte("fn inc(v: Int) Int {\n  v + 1\n}\n\nfn dec(v: Int) Int {\n  v - 1\n}\n"), 0o644)
+	source := `use proj/math
+
+enum Color {
+  Red,
+  Green,
+}
+
+struct Board {
+  cells: [Str],
+}
+
+fn Board::empty() Board {
+  Board{cells: []}
+}
+
+fn main() {
+  math::
+}
+`
+	path := filepath.Join(root, "main.ard")
+	os.WriteFile(path, []byte(source), 0o644)
+	srv := NewServer()
+	docURI := uri.File(path)
+	srv.cache.Open(docURI, "ard", 1, source)
+
+	labels := func(items []protocol.CompletionItem) map[string]bool {
+		out := map[string]bool{}
+		for _, item := range items {
+			out[item.Label] = true
+		}
+		return out
+	}
+
+	t.Run("module members", func(t *testing.T) {
+		items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 16, Character: 8})
+		got := labels(items)
+		if !got["inc"] || !got["dec"] {
+			t.Fatalf("module members missing: %#v", items)
+		}
+	})
+	t.Run("enum variants", func(t *testing.T) {
+		src := strings.Replace(source, "math::", "Color::", 1)
+		srv.cache.Update(docURI, 2, src)
+		items := srv.completionFromSpans(context.Background(), docURI, src, protocol.Position{Line: 16, Character: 9})
+		got := labels(items)
+		if !got["Red"] || !got["Green"] {
+			t.Fatalf("enum variants missing: %#v", items)
+		}
+	})
+	t.Run("type statics", func(t *testing.T) {
+		src := strings.Replace(source, "math::", "Board::", 1)
+		srv.cache.Update(docURI, 3, src)
+		items := srv.completionFromSpans(context.Background(), docURI, src, protocol.Position{Line: 16, Character: 9})
+		got := labels(items)
+		if !got["empty"] {
+			t.Fatalf("static function missing: %#v", items)
 		}
 	})
 }

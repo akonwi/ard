@@ -78,3 +78,8 @@ func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) 
 		program:       program,
 	}
 }
+
+// Symbols returns the module's public symbols. Read-only.
+func (m *UserModule) Symbols() map[string]Symbol {
+	return m.publicSymbols
+}
