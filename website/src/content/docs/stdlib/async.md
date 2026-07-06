@@ -1,12 +1,11 @@
 ---
-title: Concurrent Execution with ard/async
-description: Start goroutines with the ard/async module.
+title: ard/async
+description: Start concurrent work on the Go backend.
 ---
 
-The `ard/async` module provides the concurrency primitive Ard cannot express on
-its own: starting concurrent work. Everything else — waiting for completion,
-returning a result, joining a set of tasks — is ordinary Ard built on
-[channels](/stdlib/channel/).
+The `ard/async` module provides one compiler-backed operation: starting concurrent work.
+
+Channels are built-in types (`Chan<T>`, `Receiver<T>`, and `Sender<T>`) and are the usual way to coordinate with work started by `async::start`.
 
 ```ard
 use ard/async
@@ -16,7 +15,7 @@ fn main() {
   let done = Chan::new<Bool>()
 
   async::start(fn() {
-    fmt::Println("running on a goroutine")
+    fmt::Println("running concurrently")
     done.send(true)
   })
 
@@ -24,13 +23,13 @@ fn main() {
 }
 ```
 
-## Functions
+## API
 
-### `fn start(do: fn() Void) Void`
+### `start(do: fn() Void) Void`
 
-Runs `do` concurrently on a new goroutine in the Go target. It is
-**fire-and-forget**: `start` returns immediately and gives you no handle.
-Coordinate completion or results with a [channel](/stdlib/channel/).
+Run `do` concurrently. On the Go backend this lowers to a goroutine.
+
+`start` is fire-and-forget: it returns immediately and does not provide a handle. Use channels or other explicit coordination when the caller needs a result or completion signal.
 
 ```ard
 use ard/async
@@ -39,19 +38,19 @@ fn main() {
   let done = Chan::new<Bool>()
 
   async::start(fn() {
-    // ... work ...
+    // work happens concurrently
     done.send(true)
   })
 
-  done.recv() // wait for the goroutine to finish
+  done.recv()
 }
 ```
 
-Spawned closures follow Go's concurrency semantics: they capture variables by
-reference and there is no isolation rule. Coordinate shared state through
-channels; data races are your responsibility, exactly as in Go.
+Captured variables follow the backend's concurrency rules. On Go, closures capture by reference and Ard does not add data-race protection. Prefer communicating through channels.
 
-## See also
+## Related built-ins
 
-- [channels](/stdlib/channel/) — typed channels for coordinating goroutines.
-- [Async Programming](/advanced/async/) — patterns for results, fan-in, and `select`.
+- `Chan<T>`: bidirectional typed channel.
+- `Receiver<T>`: receive-only channel view.
+- `Sender<T>`: send-only channel view.
+- `Chan::new<T>(capacity: Int?) Chan<T>`: create a channel. Omit the capacity or pass `none` for an unbuffered channel.

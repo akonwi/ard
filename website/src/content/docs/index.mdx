@@ -43,23 +43,23 @@ It combines elements from JavaScript, Swift, Go, and Rust.
 ## Quick Example
 
 ```ard
-use ard/io
+use go:fmt
 
 fn main() {
   mut numbers: [Int] = []
-  io::print("numbers.size = {numbers.size()}")
+  fmt::Println("numbers.size = {numbers.size()}")
 
-  io::print("adding numbers from 0 to 10")
+  fmt::Println("adding numbers from 0 to 10")
   for i in 0..10 {
     numbers.push(i)
   }
 
-  io::print("numbers.size = {numbers.size()}")
+  fmt::Println("numbers.size = {numbers.size()}")
   for n in numbers {
-    io::print(n)
+    fmt::Println(n)
   }
 
-  io::print("7th element = {numbers.at(6)}")
+  fmt::Println("7th element = {numbers.at(6)}")
 }
 ```
 

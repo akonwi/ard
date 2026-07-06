@@ -1,112 +1,110 @@
 ---
-title: List Operations with ard/list
-description: Work with lists using functional operations like map, filter, and partition.
+title: ard/list
+description: Generic helpers for creating, transforming, searching, and partitioning lists.
 ---
 
-The `ard/list` module provides functional operations for working with lists.
+The `ard/list` module provides a small set of generic helpers for working with Ard lists.
 
-:::note
-The `ard/list` module is a prelude module. It is automatically imported and aliased as `List` in all programs, allowing methods to be accessed with the `List::` namespace (e.g., `List::new()`, `List::map()`).
-:::
-
-The list module provides:
-- **List creation** with `List::new()`
-- **Functional transformations** like map, filter, and find
-- **List utilities** for concatenation, dropping elements, and partitioning
+Import it explicitly when needed:
 
 ```ard
 use ard/list
-
-fn main() {
-  let numbers = [1, 2, 3, 4, 5]
-  let evens = List::keep(numbers, fn(n) { n % 2 == 0 })
-}
 ```
 
 ## API
 
-### `fn new() [$T]`
+### `new() [$T]`
 
-Create a new empty list. Type parameters must be explicitly provided.
-
-```ard
-use ard/list
-
-let nums: [Int] = List::new<Int>()
-```
-
-### `fn concat(a: [$T], b: [$T]) [$T]`
-
-Concatenate two lists into a new list, with elements from `a` followed by elements from `b`.
+Create a new empty list. The expected type is usually inferred from context.
 
 ```ard
 use ard/list
 
-let a = [1, 2, 3]
-let b = [4, 5, 6]
-let combined = List::concat(a, b)  // [1, 2, 3, 4, 5, 6]
+let nums: [Int] = list::new()
 ```
 
-### `fn drop(from: [$T], till: Int) [$T]`
+### `concat(a: [$T], b: [$T]) [$T]`
 
-Create a new list with elements starting from the given index. Elements before the index are dropped.
+Return a new list containing the elements of `a` followed by the elements of `b`.
 
 ```ard
 use ard/list
 
-let list = [1, 2, 3, 4, 5]
-let dropped = List::drop(list, 2)  // [3, 4, 5]
+let combined = list::concat([1, 2, 3], [4, 5])
 ```
 
-### `fn keep(list: [$T], where: fn($T) Bool) [$T]`
+### `drop(from: [$T], till: Int) [$T]`
 
-Filter a list, keeping only elements that match the given predicate function.
+Return a new list containing elements whose index is greater than or equal to `till`.
 
 ```ard
 use ard/list
 
-let numbers = [1, 2, 3, 4, 5]
-let evens = List::keep(numbers, fn(n) { n % 2 == 0 })  // [2, 4]
+let tail = list::drop([1, 2, 3, 4], 2) // [3, 4]
 ```
 
-### `fn map(list: [$A], transform: fn($A) $B) [$B]`
+### `keep(list: [$T], where: fn($T) Bool) [$T]`
 
-Transform each element in a list using the given function, returning a new list of the transformed elements.
+Return a new list containing only values for which `where` returns `true`.
 
 ```ard
 use ard/list
 
-let numbers = [1, 2, 3]
-let doubled = List::map(numbers, fn(n) { n * 2 })  // [2, 4, 6]
+let evens = list::keep([1, 2, 3, 4], fn(n: Int) Bool { n % 2 == 0 })
 ```
 
-### `fn find(list: [$T], where: fn($T) Bool) $T?`
+### `map(list: [$A], transform: fn($A) $B) [$B]`
 
-Find the first element in a list that matches the given predicate. Returns a `Maybe` type.
+Transform each element and return the transformed values in order.
 
 ```ard
 use ard/list
 
-let numbers = [1, 2, 3, 4, 5]
-let first_even = List::find(numbers, fn(n) { n % 2 == 0 })  // some(2)
+let doubled = list::map([1, 2, 3], fn(n: Int) Int { n * 2 })
 ```
 
-### `fn partition(list: [$T], where: fn($T) Bool) Partition<$T>`
+### `find(list: [$T], where: fn($T) Bool) $T?`
 
-Split a list into two based on a predicate. Returns a `Partition` struct with `selected` and `others` fields.
+Return the first matching value, or `none` if no value matches.
 
 ```ard
 use ard/list
 
-let numbers = [1, 2, 3, 4, 5]
-let parts = List::partition(numbers, fn(n) { n > 2 })
-// parts.selected = [3, 4, 5]
-// parts.others = [1, 2]
+let found = list::find([1, 2, 3], fn(n: Int) Bool { n == 2 })
 ```
 
-### `struct Partition`
+### `partition(list: [$T], where: fn($T) Bool) Partition<$T>`
 
-Result of partitioning a list.
+Split a list into matching and non-matching values.
 
-- **`selected: [$T]`** - Elements matching the predicate
-- **`others: [$T]`** - Elements not matching the predicate
+```ard
+use ard/list
+
+let parts = list::partition([1, 2, 3, 4], fn(n: Int) Bool { n > 2 })
+// parts.selected == [3, 4]
+// parts.others == [1, 2]
+```
+
+### `partition_int(list: [Int], where: fn(Int) Bool) IntPartition`
+
+Specialized `Int` version of `partition`.
+
+## Types
+
+### `Partition<$T>`
+
+```ard
+struct Partition {
+  selected: [$T],
+  others: [$T],
+}
+```
+
+### `IntPartition`
+
+```ard
+struct IntPartition {
+  selected: [Int],
+  others: [Int],
+}
+```
