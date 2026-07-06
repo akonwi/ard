@@ -1,19 +1,22 @@
-use ard/io
+use go:fmt
+
+trait Display {
+  fn display() Str
+}
 
 struct Book {
   title: Str,
-  author: Str
+  author: Str,
 }
 
-impl Str::ToString for Book {
-  fn to_str() Str {
+impl Display for Book {
+  fn display() Str {
     "Book: " + self.title + " by " + self.author
   }
 }
 
-// This is a contrived example with the same signature as `io::print()`
-fn show(item: Str::ToString) {
-  io::print(item)
+fn show(item: Display) {
+  fmt::Println(item.display())
 }
 
 fn main() {

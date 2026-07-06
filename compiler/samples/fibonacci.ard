@@ -1,14 +1,14 @@
-use ard/io
+use go:fmt
 
 fn fib(n: Int) Int {
-  match (n <= 1) {
+  match n <= 1 {
     true => n,
-    false => fib(n - 2) + fib(n - 1)
+    false => fib(n - 2) + fib(n - 1),
   }
 }
 
 fn main() {
   for n in 20 {
-    io::print("fib({n}) = {fib(n)}")
+    fmt::Println("fib({n}) = {fib(n)}")
   }
 }

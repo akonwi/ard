@@ -12,6 +12,6 @@ fn main() {
   // read the value
   match name {
     n => fmt::Println("name is: {n}"),
-    _ => fmt::Println("no name")
+    _ => fmt::Println("no name"),
   }
 }
