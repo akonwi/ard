@@ -7,15 +7,14 @@ import (
 )
 
 // embeddedFS contains Ard standard-library source files used by the checker and
-// targets to resolve imports such as ard/io and ard/async/channel.
-// Keep these patterns in sync with nested std_lib module directories.
+// targets to resolve imports such as ard/io.
 //
-//go:embed *.ard async/*.ard
+//go:embed *.ard
 var embeddedFS embed.FS
 
 // Find returns the content of an embedded .ard file by path
 func Find(path string) ([]byte, error) {
-	// Convert "ard/duration" to "duration.ard"
+	// Convert "ard/list" to "list.ard"
 	if !strings.HasPrefix(path, "ard/") {
 		return nil, fmt.Errorf("invalid std_lib path: %s", path)
 	}

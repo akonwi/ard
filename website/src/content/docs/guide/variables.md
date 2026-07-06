@@ -27,7 +27,7 @@ Types can be optionally be declared:
 
 ```ard
 let name: Str = "Bob"
-let temperature: Float = 98.6
+let temperature: Float64 = 98.6
 let items: [Int] = [1, 2, 3]
 let map: [Str:Int] = ["a": 1, "b": 2]
 ```
@@ -92,7 +92,7 @@ A function parameter marked `mut` receives mutable access to caller-owned storag
 ```ard
 struct Person { name: Str, age: Int }
 
-fn update_person(mut person: Person) {
+fn update_person(person: mut Person) {
     person.age = 99  // Mutates the caller's value
 }
 

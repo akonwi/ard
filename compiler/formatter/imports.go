@@ -27,14 +27,6 @@ func removeUnusedImports(program *parse.Program) {
 	program.Imports = imports
 }
 
-func collectImportUseInExternBinding(binding string, used map[string]bool) {
-	parts := strings.Split(binding, "::")
-	if len(parts) < 2 || strings.TrimSpace(parts[0]) == "" {
-		return
-	}
-	used[parts[0]] = true
-}
-
 func collectImportUsesInType(t parse.DeclaredType, used map[string]bool) {
 	switch v := t.(type) {
 	case *parse.MutableType:
@@ -113,19 +105,6 @@ func collectImportUsesInStatement(stmt parse.Statement, used map[string]bool) {
 	case *parse.StaticFunctionDeclaration:
 		collectImportUsesInExpression(&s.Path, used)
 		collectImportUsesInStatement(&s.FunctionDeclaration, used)
-	case *parse.ExternalFunction:
-		collectImportUseInExternBinding(s.ExternalBinding, used)
-		for _, binding := range s.ExternalBindings {
-			collectImportUseInExternBinding(binding, used)
-		}
-		for _, p := range s.Parameters {
-			if p.Type != nil {
-				collectImportUsesInType(p.Type, used)
-			}
-		}
-		if s.ReturnType != nil {
-			collectImportUsesInType(s.ReturnType, used)
-		}
 	case *parse.TypeDeclaration:
 		for _, t := range s.Type {
 			collectImportUsesInType(t, used)
@@ -184,7 +163,7 @@ func collectImportUsesInStatement(stmt parse.Statement, used map[string]bool) {
 			collectImportUsesInStatement(body, used)
 		}
 		collectImportUsesInStatement(s.Else, used)
-	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.Try, *parse.BlockExpression, *parse.UnsafeBlock:
+	case *parse.MatchExpression, *parse.SelectExpression, *parse.ConditionalMatchExpression, *parse.Try, *parse.BlockExpression, *parse.UnsafeBlock:
 		collectImportUsesInExpression(s, used)
 	default:
 		if expr, ok := stmt.(parse.Expression); ok {
@@ -210,15 +189,24 @@ func collectImportUsesInExpression(expr parse.Expression, used map[string]bool) 
 			used[name] = true
 		}
 		collectImportUsesInExpression(e.Target, used)
+		for _, typeArg := range e.Function.TypeArgs {
+			collectImportUsesInType(typeArg, used)
+		}
 		for _, arg := range e.Function.Args {
 			collectImportUsesInExpression(arg.Value, used)
 		}
 	case *parse.FunctionCall:
+		for _, typeArg := range e.TypeArgs {
+			collectImportUsesInType(typeArg, used)
+		}
 		for _, arg := range e.Args {
 			collectImportUsesInExpression(arg.Value, used)
 		}
 	case *parse.FunctionValueCall:
 		collectImportUsesInExpression(e.Callee, used)
+		for _, typeArg := range e.TypeArgs {
+			collectImportUsesInType(typeArg, used)
+		}
 		for _, arg := range e.Args {
 			collectImportUsesInExpression(arg.Value, used)
 		}
@@ -227,12 +215,18 @@ func collectImportUsesInExpression(expr parse.Expression, used map[string]bool) 
 		collectImportUsesInExpression(e.Property, used)
 	case *parse.InstanceMethod:
 		collectImportUsesInExpression(e.Target, used)
+		for _, typeArg := range e.Method.TypeArgs {
+			collectImportUsesInType(typeArg, used)
+		}
 		for _, arg := range e.Method.Args {
 			collectImportUsesInExpression(arg.Value, used)
 		}
 	case *parse.StructInstance:
 		if strings.Contains(e.Name.Name, "::") {
 			used[strings.SplitN(e.Name.Name, "::", 2)[0]] = true
+		}
+		for _, typeArg := range e.TypeArgs {
+			collectImportUsesInType(typeArg, used)
 		}
 		for _, prop := range e.Properties {
 			collectImportUsesInExpression(prop.Value, used)
@@ -278,6 +272,13 @@ func collectImportUsesInExpression(expr parse.Expression, used map[string]bool) 
 		collectImportUsesInExpression(e.Subject, used)
 		for _, c := range e.Cases {
 			collectImportUsesInExpression(c.Pattern, used)
+			for _, body := range c.Body {
+				collectImportUsesInStatement(body, used)
+			}
+		}
+	case *parse.SelectExpression:
+		for _, c := range e.Cases {
+			collectImportUsesInExpression(c.Op, used)
 			for _, body := range c.Body {
 				collectImportUsesInStatement(body, used)
 			}

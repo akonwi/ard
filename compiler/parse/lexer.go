@@ -65,6 +65,7 @@ const (
 	mut     = "mut"
 	break_  = "break"
 	match   = "match"
+	select_ = "select"
 	while_  = "while"
 	for_    = "for"
 	use     = "use"
@@ -74,7 +75,6 @@ const (
 	else_   = "else"
 	type_   = "type"
 	private = "private"
-	extern  = "extern"
 
 	// Types
 	int_  = "int"
@@ -681,6 +681,8 @@ func (l *lexer) takeIdentifier() token {
 		return makeKeyword(break_)
 	case "match":
 		return makeKeyword(match)
+	case "select":
+		return makeKeyword(select_)
 	case "while":
 		return makeKeyword(while_)
 	case "for":
@@ -699,8 +701,6 @@ func (l *lexer) takeIdentifier() token {
 		return makeKeyword(type_)
 	case "private":
 		return makeKeyword(private)
-	case "extern":
-		return makeKeyword(extern)
 	default:
 		return makeIdentifier(identifier)
 	}

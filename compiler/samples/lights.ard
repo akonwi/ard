@@ -1,24 +1,22 @@
-use ard/io
+use go:fmt
 
 enum Color {
   Red,
   Yellow,
-  Green
+  Green,
 }
 
 fn get_meaning(light: Color) Str {
   match light {
     // map a pattern to a simple expression
-    Color::Red => "Stop",
     // or a block
-    Color::Yellow => {
-      "Yield"
-    },
     // use _ for catch alls
-    _ => "Go"
+    Color::Red => "Stop",
+    Color::Yellow => "Yield",
+    _ => "Go",
   }
 }
 
 fn main() {
-  io::print("Yellow means {get_meaning(Color::Yellow)}")
+  fmt::Println("Yellow means {get_meaning(Color::Yellow)}")
 }

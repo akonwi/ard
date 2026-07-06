@@ -1,9 +1,6 @@
 package air
 
-import (
-	"fmt"
-	"strings"
-)
+import "fmt"
 
 func Validate(program *Program) error {
 	if program == nil {
@@ -49,11 +46,6 @@ func Validate(program *Program) error {
 			return err
 		}
 	}
-	for _, ext := range program.Externs {
-		if err := validateSignature(program, ext.Signature); err != nil {
-			return fmt.Errorf("extern %s: %w", ext.Name, err)
-		}
-	}
 	if program.Entry != NoFunction && !validFunctionID(program, program.Entry) {
 		return fmt.Errorf("invalid entry function id %d", program.Entry)
 	}
@@ -70,7 +62,7 @@ func Validate(program *Program) error {
 
 func validateTypeInfo(program *Program, typ TypeInfo) error {
 	switch typ.Kind {
-	case TypeList, TypeMaybe, TypeFiber:
+	case TypeList, TypeMaybe, TypeChannel, TypeReceiver, TypeSender:
 		if !validTypeID(program, typ.Elem) {
 			return fmt.Errorf("type %s has invalid elem type %d", typ.Name, typ.Elem)
 		}
@@ -253,6 +245,20 @@ func validateBlock(program *Program, fn Function, block Block) error {
 				return err
 			}
 		}
+		if stmt.Kind == StmtAssignGlobal {
+			if !validGlobalID(program, stmt.Global) {
+				return fmt.Errorf("global assignment references invalid global %d", stmt.Global)
+			}
+			if stmt.Value == nil {
+				return fmt.Errorf("global assignment missing value")
+			}
+			if !program.Globals[stmt.Global].Mutable {
+				return fmt.Errorf("assignment to immutable global %s", program.Globals[stmt.Global].Name)
+			}
+			if stmt.Type != NoType && stmt.Type != program.Globals[stmt.Global].Type {
+				return fmt.Errorf("global assignment type %d does not match global type %d", stmt.Type, program.Globals[stmt.Global].Type)
+			}
+		}
 		if stmt.Kind == StmtSetField {
 			if stmt.Target == nil {
 				return fmt.Errorf("field set statement missing target")
@@ -269,27 +275,6 @@ func validateBlock(program *Program, fn Function, block Block) error {
 			}
 			if targetType.Fields[stmt.Field].Type != stmt.Type {
 				return fmt.Errorf("field set type %d does not match field type %d", stmt.Type, targetType.Fields[stmt.Field].Type)
-			}
-		}
-		if stmt.Kind == StmtSetDirectGoField {
-			if stmt.Target == nil {
-				return fmt.Errorf("direct Go field set statement missing target")
-			}
-			if stmt.Value == nil {
-				return fmt.Errorf("direct Go field set statement missing value")
-			}
-			if strings.TrimSpace(stmt.FieldName) == "" {
-				return fmt.Errorf("direct Go field set statement missing field name")
-			}
-			if stmt.DirectGoFieldType.Kind == "" {
-				return fmt.Errorf("direct Go field set statement missing Go field type")
-			}
-			targetType, err := typeInfo(program, stmt.Target.Type)
-			if err != nil {
-				return err
-			}
-			if targetType.Kind != TypeExtern {
-				return fmt.Errorf("direct Go field set target has type kind %d", targetType.Kind)
 			}
 		}
 		if stmt.Kind == StmtWhile {
@@ -325,19 +310,6 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	if expr.Kind == ExprCall && !validFunctionID(program, expr.Function) {
 		return fmt.Errorf("expression calls invalid function %d", expr.Function)
 	}
-	if expr.Kind == ExprSpawnFiber && expr.Target == nil && !validFunctionID(program, expr.Function) {
-		return fmt.Errorf("expression spawns invalid fiber function %d", expr.Function)
-	}
-	if expr.Kind == ExprSpawnFiber && expr.Target != nil && expr.Target.Kind == ExprMakeClosure {
-		for _, local := range expr.Target.CaptureLocals {
-			if local < 0 || int(local) >= len(fn.Locals) {
-				return fmt.Errorf("fiber spawn captures invalid local %d", local)
-			}
-			if fn.Locals[local].Mutable {
-				return fmt.Errorf("fiber spawn closure cannot capture mutable local %s", fn.Locals[local].Name)
-			}
-		}
-	}
 	if expr.Kind == ExprMakeClosure && !validFunctionID(program, expr.Function) {
 		return fmt.Errorf("expression creates invalid closure function %d", expr.Function)
 	}
@@ -354,9 +326,6 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 				return fmt.Errorf("closure %s capture %s type %d does not match source local type %d", closureFn.Name, closureFn.Captures[i].Name, closureFn.Captures[i].Type, fn.Locals[local].Type)
 			}
 		}
-	}
-	if expr.Kind == ExprCallExtern && (expr.Extern < 0 || int(expr.Extern) >= len(program.Externs)) {
-		return fmt.Errorf("expression calls invalid extern %d", expr.Extern)
 	}
 	if expr.Kind == ExprUnionWrap {
 		if expr.Target == nil {
@@ -380,8 +349,19 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	if expr.Kind == ExprToStr && expr.Target == nil {
 		return fmt.Errorf("to_str expression missing target")
 	}
-	if expr.Kind == ExprToDynamic && expr.Target == nil {
+	if expr.Kind == ExprToAny && expr.Target == nil {
 		return fmt.Errorf("to_dyn expression missing target")
+	}
+	if expr.Kind == ExprUnsafeCast {
+		if expr.Target == nil {
+			return fmt.Errorf("unsafe::cast expression missing target")
+		}
+		if len(expr.TypeArgs) != 1 {
+			return fmt.Errorf("unsafe::cast expression expects one target type, got %d", len(expr.TypeArgs))
+		}
+	}
+	if expr.Kind == ExprUnsafeIsNil && expr.Target == nil {
+		return fmt.Errorf("unsafe::is_nil expression missing target")
 	}
 	if expr.Kind == ExprPanic && expr.Target == nil {
 		return fmt.Errorf("panic expression missing target")
@@ -434,26 +414,6 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	if expr.Condition != nil {
 		if err := validateExpr(program, fn, *expr.Condition); err != nil {
 			return err
-		}
-	}
-	if expr.Kind == ExprDirectGoStructLiteral {
-		typeInfo, err := typeInfo(program, expr.Type)
-		if err != nil {
-			return err
-		}
-		if typeInfo.Kind != TypeExtern {
-			return fmt.Errorf("direct Go struct literal has type kind %d", typeInfo.Kind)
-		}
-		for _, field := range expr.Fields {
-			if strings.TrimSpace(field.Name) == "" {
-				return fmt.Errorf("direct Go struct literal field missing name")
-			}
-			if field.DirectGoFieldType.Kind == "" {
-				return fmt.Errorf("direct Go struct literal field %s missing Go field type", field.Name)
-			}
-			if err := validateExpr(program, fn, field.Value); err != nil {
-				return err
-			}
 		}
 	}
 	if expr.Kind == ExprBlock {
@@ -606,6 +566,16 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		}
 		if err := validateBlock(program, fn, expr.None); err != nil {
 			return err
+		}
+	}
+	if expr.Kind == ExprSelect {
+		for _, arm := range expr.SelectCases {
+			if arm.HasBind && (arm.BindLocal < 0 || int(arm.BindLocal) >= len(fn.Locals)) {
+				return fmt.Errorf("select recv arm binds invalid local %d", arm.BindLocal)
+			}
+			if err := validateBlock(program, fn, arm.Body); err != nil {
+				return err
+			}
 		}
 	}
 	if expr.Kind == ExprMatchResult {

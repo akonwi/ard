@@ -10,7 +10,7 @@ description: Overview of Ard's type system including built-in types, type unions
 ```ard
 let text: Str = "Hello, World!"
 let number: Int = 42
-let decimal: Float = 3.14
+let decimal: Float64 = 3.14
 let flag: Bool = true
 let byte: Byte = Byte::from_int(255).expect("byte")
 let rune: Rune = 'é'
@@ -51,7 +51,7 @@ Type unions allow a value to be one of several types:
 
 ```ard
 type Printable = Str | Int
-type Value = Int | Float | Str
+type Value = Int | Float64 | Str
 
 let item: Printable = "Hello"
 let data: Value = 42

@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
@@ -13,58 +12,6 @@ import (
 )
 
 type diagnosticAnalyzer func(source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error)
-
-// parseAndCheck runs the Ard parser and checker on a source file.
-// It returns the parsed AST, the checked module, and any diagnostics.
-func parseAndCheck(source string, filePath string) ([]checker.Diagnostic, error) {
-	return parseAndCheckWithOverlays(source, filePath, nil)
-}
-
-func parseAndCheckWithOverlays(source string, filePath string, overlays map[string]string) (diagnostics []checker.Diagnostic, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			diagnostics = nil
-			err = fmt.Errorf("analysis panic: %v", r)
-		}
-	}()
-
-	// Parse the source
-	result := parse.Parse([]byte(source), filePath)
-	if result.Program == nil {
-		return nil, fmt.Errorf("failed to parse: no program returned")
-	}
-
-	if len(result.Errors) > 0 {
-		// Convert parse errors to checker-style diagnostics
-		diags := make([]checker.Diagnostic, 0, len(result.Errors))
-		for _, err := range result.Errors {
-			diags = append(diags, checker.NewDiagnostic(checker.Error, err.Message, filePath, err.Location))
-		}
-		return diags, nil
-	}
-
-	program := result.Program
-
-	// Initialize the module resolver
-	workingDir := filepath.Dir(filePath)
-	moduleResolver, err := checker.NewModuleResolver(workingDir)
-	if err != nil {
-		return nil, fmt.Errorf("error initializing module resolver: %w", err)
-	}
-	for overlayPath, overlaySource := range overlays {
-		moduleResolver.SetOverlay(overlayPath, overlaySource)
-	}
-
-	relPath, err := filepath.Rel(workingDir, filePath)
-	if err != nil {
-		relPath = filePath
-	}
-
-	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{})
-	c.Check()
-
-	return c.Diagnostics(), nil
-}
 
 func formatSource(source string, filePath string) (string, error) {
 	formatted, err := formatter.Format([]byte(source), filePath)
@@ -183,12 +130,23 @@ func (s *Server) analyzeDiagnostics(doc *Doc, docs []Doc) (diagnostics []checker
 	if err != nil {
 		return nil, err
 	}
-	overlays := overlaySources(docs)
-	analyzer := s.diagnosticsAnalyzer
-	if analyzer == nil {
-		analyzer = parseAndCheckWithOverlays
+	// Tests may inject a custom analyzer; the default path goes through the
+	// snapshot engine so parses and checks are memoized.
+	if s.diagnosticsAnalyzer != nil {
+		return s.diagnosticsAnalyzer(doc.Text, filePath, overlaySources(docs))
 	}
-	return analyzer(doc.Text, filePath, overlays)
+	fa, err := s.analyzeSnapshot(context.Background(), doc.URI)
+	if err != nil {
+		return nil, err
+	}
+	if len(fa.ParseErrors) > 0 {
+		diags := make([]checker.Diagnostic, 0, len(fa.ParseErrors))
+		for _, perr := range fa.ParseErrors {
+			diags = append(diags, checker.NewDiagnostic(checker.Error, perr.Message, filePath, perr.Location))
+		}
+		return diags, nil
+	}
+	return fa.Diagnostics, nil
 }
 
 func analysisErrorDiagnostic(err error) protocol.Diagnostic {

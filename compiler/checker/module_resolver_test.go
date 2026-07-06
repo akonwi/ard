@@ -49,7 +49,6 @@ func TestFindProjectRoot(t *testing.T) {
 		t.Errorf("Expected root path '%s', got '%s'", tempDir, project.RootPath)
 	}
 }
-
 func TestFindProjectRootFallback(t *testing.T) {
 	// Create a temporary directory without ard.toml
 	tempDir, err := os.MkdirTemp("", "fallback_project_*")
@@ -68,6 +67,69 @@ func TestFindProjectRootFallback(t *testing.T) {
 	if project.ProjectName != expectedName {
 		t.Errorf("Expected project name '%s', got '%s'", expectedName, project.ProjectName)
 	}
+}
+func TestGoBuildTagsConfig(t *testing.T) {
+	t.Run("parses configured tags", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := `name = "demo"
+ard = ">= 0.1.0"
+
+[go]
+build_tags_file = "ignored"
+build_tags = ["sqlite", "debug", "sqlite",]
+`
+		if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte(manifest), 0644); err != nil {
+			t.Fatal(err)
+		}
+		resolver, err := checker.NewModuleResolver(dir)
+		if err != nil {
+			t.Fatalf("NewModuleResolver: %v", err)
+		}
+		got := resolver.GetProjectInfo().Go.BuildTags
+		want := []string{"sqlite", "debug", "sqlite"}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("build tags = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("rejects malformed tags", func(t *testing.T) {
+		for _, tag := range []string{"", "sqlite debug", "!prod", "linux&&cgo"} {
+			dir := t.TempDir()
+			manifest := fmt.Sprintf("name = \"demo\"\nard = \">= 0.1.0\"\n\n[go]\nbuild_tags = [%q]\n", tag)
+			if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte(manifest), 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := checker.NewModuleResolver(dir)
+			if err == nil {
+				t.Fatalf("expected error for build tag %q", tag)
+			}
+			if !strings.Contains(err.Error(), "invalid Go build tag") {
+				t.Fatalf("unexpected error for %q: %v", tag, err)
+			}
+		}
+	})
+
+	t.Run("rejects malformed build_tags assignment", func(t *testing.T) {
+		for _, assignment := range []string{
+			`build_tags = "sqlite"`,
+			`build_tags = ["sqlite"] trailing`,
+			`build_tags = ["sqlite" "debug"]`,
+			`build_tags = ["sqlite",, "debug"]`,
+		} {
+			dir := t.TempDir()
+			manifest := "name = \"demo\"\nard = \">= 0.1.0\"\n\n[go]\n" + assignment + "\n"
+			if err := os.WriteFile(filepath.Join(dir, "ard.toml"), []byte(manifest), 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := checker.NewModuleResolver(dir)
+			if err == nil {
+				t.Fatalf("expected error for assignment %s", assignment)
+			}
+			if !strings.Contains(err.Error(), "[go].build_tags must be a list of quoted strings") {
+				t.Fatalf("unexpected error for %s: %v", assignment, err)
+			}
+		}
+	})
 }
 
 func TestArdVersionConstraint(t *testing.T) {
@@ -107,7 +169,6 @@ func TestArdVersionConstraint(t *testing.T) {
 		}
 	})
 }
-
 func TestResolveImportPath(t *testing.T) {
 	// Create test project structure
 	tempDir, err := os.MkdirTemp("", "ard_resolve_test_*")
@@ -208,6 +269,7 @@ func TestResolveImportPath(t *testing.T) {
 		})
 	}
 }
+
 func TestPathDependencyIsResolvedFromSource(t *testing.T) {
 	workspace := t.TempDir()
 	root := filepath.Join(workspace, "app")
@@ -245,7 +307,6 @@ func TestPathDependencyIsResolvedFromSource(t *testing.T) {
 		t.Fatalf("resolved path = %q, want %q", path, filepath.Join(depSrc, "dep.ard"))
 	}
 }
-
 func TestLockedPathDependencyAliasUsesPackageNameForRootModule(t *testing.T) {
 	workspace := t.TempDir()
 	app := filepath.Join(workspace, "app")
@@ -291,7 +352,6 @@ func TestLockedPathDependencyAliasUsesPackageNameForRootModule(t *testing.T) {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
-
 func TestDependencyUsesItsOwnTransitiveAliasFromLock(t *testing.T) {
 	workspace := t.TempDir()
 	app := filepath.Join(workspace, "app")
@@ -345,7 +405,6 @@ func TestDependencyUsesItsOwnTransitiveAliasFromLock(t *testing.T) {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
-
 func TestRootCannotImportTransitiveDependencyAlias(t *testing.T) {
 	workspace := t.TempDir()
 	app := filepath.Join(workspace, "app")
@@ -400,7 +459,6 @@ func parseSourceForResolverTest(t *testing.T, path string) *parse.Program {
 	}
 	return result.Program
 }
-
 func TestReadDependencyLockMigratesCanonicalGitPackageIDs(t *testing.T) {
 	root := t.TempDir()
 	commit := "0123456789abcdef0123456789abcdef01234567"
@@ -431,7 +489,6 @@ func TestReadDependencyLockMigratesCanonicalGitPackageIDs(t *testing.T) {
 		t.Fatalf("canonical package %s missing from %#v", canonicalID, packages)
 	}
 }
-
 func TestReadDependencyLockPrefersRootTransportWhenMigratingDuplicateGitIDs(t *testing.T) {
 	root := t.TempDir()
 	commit := "0123456789abcdef0123456789abcdef01234567"
@@ -460,7 +517,6 @@ func TestReadDependencyLockPrefersRootTransportWhenMigratingDuplicateGitIDs(t *t
 		t.Fatalf("transport git = %q, want ssh", got)
 	}
 }
-
 func TestCanonicalGitSourceNormalizesGitHubVariants(t *testing.T) {
 	want := "https://github.com/akonwi/vaxis-ard.git"
 	for _, input := range []string{
@@ -477,7 +533,6 @@ func TestCanonicalGitSourceNormalizesGitHubVariants(t *testing.T) {
 		}
 	}
 }
-
 func TestGitDependencyResolvesFromLockCache(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("ARD_CACHE_DIR", cacheRoot)
@@ -530,7 +585,6 @@ func TestGitDependencyResolvesFromLockCache(t *testing.T) {
 		t.Fatalf("resolved path = %q, want %q", path, filepath.Join(cachePath, "dep.ard"))
 	}
 }
-
 func TestGitDependencyWithoutLockFailsClearly(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { git = \"https://example.invalid/dep.git\", commit = \"0123456\" }\n"), 0o644); err != nil {
@@ -545,7 +599,6 @@ func TestGitDependencyWithoutLockFailsClearly(t *testing.T) {
 		t.Fatalf("ResolveImportPath error = %v, want not locked", err)
 	}
 }
-
 func TestLockDependencyGraphIncludesTransitiveGitDependencies(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("ARD_CACHE_DIR", cacheRoot)
@@ -620,7 +673,6 @@ func TestLockDependencyGraphIncludesTransitiveGitDependencies(t *testing.T) {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
-
 func TestLockDependencyGraphRejectsConflictingTransitiveGitVersions(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("ARD_CACHE_DIR", cacheRoot)
@@ -659,7 +711,6 @@ func TestLockDependencyGraphRejectsConflictingTransitiveGitVersions(t *testing.T
 		t.Fatalf("LockDependencyGraph error = %v, want dependency conflict", err)
 	}
 }
-
 func TestLockDependencyGraphResolvesTagsBeforeSameNamedBranches(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("ARD_CACHE_DIR", cacheRoot)
@@ -696,7 +747,6 @@ func TestLockDependencyGraphResolvesTagsBeforeSameNamedBranches(t *testing.T) {
 		t.Fatalf("requested = %q, want v1", got)
 	}
 }
-
 func TestLockDependencyGraphPeelsAnnotatedTagObjectCommits(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("ARD_CACHE_DIR", cacheRoot)
@@ -728,7 +778,6 @@ func TestLockDependencyGraphPeelsAnnotatedTagObjectCommits(t *testing.T) {
 		t.Fatalf("lock packages = %#v, want peeled commit package %s", packages, packageID)
 	}
 }
-
 func TestLockDependencyGraphPreservesExistingRequestedRef(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("ARD_CACHE_DIR", cacheRoot)
@@ -764,7 +813,6 @@ func TestLockDependencyGraphPreservesExistingRequestedRef(t *testing.T) {
 		t.Fatalf("helper requested = %q, want stable", got)
 	}
 }
-
 func TestLockDependencyGraphRefetchesBeforeRecordingFirstIntegrity(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("ARD_CACHE_DIR", cacheRoot)
@@ -812,7 +860,6 @@ func TestLockDependencyGraphRefetchesBeforeRecordingFirstIntegrity(t *testing.T)
 		t.Fatalf("integrity = %q, want %q", got, wantIntegrity)
 	}
 }
-
 func TestVerifyDependenciesChecksGitCacheIntegrity(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("ARD_CACHE_DIR", cacheRoot)
@@ -848,7 +895,6 @@ func TestVerifyDependenciesChecksGitCacheIntegrity(t *testing.T) {
 		t.Fatalf("VerifyDependencies error = %v, want integrity mismatch", err)
 	}
 }
-
 func TestFetchDependenciesRestoresGitCacheFromLock(t *testing.T) {
 	cacheRoot := t.TempDir()
 	t.Setenv("ARD_CACHE_DIR", cacheRoot)

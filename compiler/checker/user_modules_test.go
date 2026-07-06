@@ -80,7 +80,6 @@ ard = ">= 0.1.0"`
 		t.Errorf("Expected nested path '%s', got '%s'", expectedPath, filePath)
 	}
 }
-
 func TestUserModuleImports(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_checker_integration_*")
@@ -145,7 +144,6 @@ fn main() Int {
 		t.Error("Expected utils module to be a UserModule")
 	}
 }
-
 func TestSameNamedGenericStructsFromDifferentModulesAreNominallyDistinct(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -189,6 +187,44 @@ fn main() {
 	}
 	if !strings.Contains(strings.ToLower(diagnosticsString(c.Diagnostics())), "type mismatch") {
 		t.Fatalf("diagnostics = %v, want type mismatch", c.Diagnostics())
+	}
+}
+func TestModuleQualifiedGenericStructLiteralTypeArgs(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "models.ard"), []byte(`
+struct Box<$T> {
+  value: $T,
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := parse.Parse([]byte(`
+use app/models
+
+fn main() {
+  let good = models::Box<Str>{value: "hi"}
+  let bad = models::Box<Str>{value: 1}
+}
+`), filepath.Join(tempDir, "main.ard"))
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New("main.ard", result.Program, resolver)
+	c.Check()
+	diags := c.Diagnostics()
+	if len(diags) != 1 {
+		t.Fatalf("diagnostics = %v, want exactly the mismatched literal rejected", diags)
+	}
+	if !strings.Contains(strings.ToLower(diags[0].Message), "type mismatch") {
+		t.Fatalf("diagnostic = %v, want type mismatch", diags[0])
 	}
 }
 
@@ -254,7 +290,6 @@ func diagnosticsString(diags []checker.Diagnostic) string {
 	}
 	return strings.Join(parts, "\n")
 }
-
 func TestUserModuleSymbolResolution(t *testing.T) {
 	// Create temporary directory structure
 	tempDir, err := os.MkdirTemp("", "ard_symbol_resolution_")
@@ -339,7 +374,6 @@ fn main() Int {
 		t.Error("Expected math module to be a UserModule")
 	}
 }
-
 func TestUserModulePrivateStructMethodAccessError(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -412,7 +446,6 @@ let x = c.secret()`
 		}
 	})
 }
-
 func TestUserModulePrivateAccessError(t *testing.T) {
 	// Create temporary directory structure
 	tempDir, err := os.MkdirTemp("", "ard_private_access_")
@@ -471,7 +504,75 @@ fn main() Int {
 		t.Errorf("Expected 'Undefined: utils::private_helper' error, got: %v", diagnostics)
 	}
 }
+func TestUserModulePrivateUnionAccessError(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	utilsContent := `private type Secret = Int | Str
 
+type Public = Int | Str
+`
+	if err := os.WriteFile(filepath.Join(tempDir, "utils.ard"), []byte(utilsContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicMain := `use test_project/utils
+
+fn main() utils::Public {
+  1
+}
+`
+	publicResult := parse.Parse([]byte(publicMain), "main.ard")
+	if len(publicResult.Errors) > 0 {
+		t.Fatal(publicResult.Errors[0].Message)
+	}
+	publicChecker := checker.New("main.ard", publicResult.Program, resolver)
+	publicChecker.Check()
+	if publicChecker.HasErrors() {
+		t.Fatalf("unexpected public union diagnostics: %v", publicChecker.Diagnostics())
+	}
+	utilsModule, ok := publicChecker.Module().Program().Imports["test_project/utils"]
+	if !ok {
+		t.Fatal("expected test_project/utils import")
+	}
+	userModule, ok := utilsModule.(*checker.UserModule)
+	if !ok {
+		t.Fatal("expected utils module to be a UserModule")
+	}
+	if secret := userModule.Get("Secret"); !secret.IsZero() {
+		t.Fatalf("private union Secret was exported: %#v", secret)
+	}
+	if public := userModule.Get("Public"); public.IsZero() {
+		t.Fatal("public union Public was not exported")
+	}
+
+	privateMain := `use test_project/utils
+
+fn main() utils::Secret {
+  1
+}
+`
+	result := parse.Parse([]byte(privateMain), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	c := checker.New("main.ard", result.Program, resolver)
+	c.Check()
+	diagnostics := c.Diagnostics()
+	if len(diagnostics) == 0 {
+		t.Fatal("expected error when accessing private union")
+	}
+	for _, diag := range diagnostics {
+		if strings.Contains(diag.Message, "utils::Secret") {
+			return
+		}
+	}
+	t.Fatalf("expected private union diagnostic for utils::Secret, got: %v", diagnostics)
+}
 func TestUserModuleCaching(t *testing.T) {
 	// Create temporary directory structure
 	tempDir, err := os.MkdirTemp("", "ard_caching_")
@@ -552,7 +653,6 @@ fn func2() Int {
 		t.Error("Expected modules to be the same instance (cached)")
 	}
 }
-
 func TestUserModuleErrors(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_error_test_*")
@@ -620,7 +720,6 @@ ard = ">= 0.1.0"`
 		})
 	}
 }
-
 func TestModuleResolverWithoutArdToml(t *testing.T) {
 	// Create a temporary directory without ard.toml
 	tempDir, err := os.MkdirTemp("", "fallback_project_*")
@@ -659,7 +758,6 @@ func TestModuleResolverWithoutArdToml(t *testing.T) {
 		t.Errorf("Expected path '%s', got '%s'", expectedPath, filePath)
 	}
 }
-
 func TestLoadModule(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_load_module_test_*")
@@ -716,7 +814,6 @@ private fn private_helper() Str {
 		t.Errorf("Expected 0 imports, got %d", len(program.Imports))
 	}
 }
-
 func TestLoadModuleErrors(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_load_error_test_*")
@@ -784,7 +881,6 @@ ard = ">= 0.1.0"`
 		})
 	}
 }
-
 func TestModuleAST_Caching(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_caching_test_*")
@@ -852,7 +948,6 @@ ard = ">= 0.1.0"`
 		t.Error("Expected third call to also return cached pointer")
 	}
 }
-
 func TestCircularDependencyDetection(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_circular_dep_test_*")
@@ -913,7 +1008,6 @@ fn func_b() Int {
 		t.Errorf("Expected dependency chain in error message, got: %v", err)
 	}
 }
-
 func TestComplexCircularDependency(t *testing.T) {
 	// Test A -> B -> C -> A circular dependency
 	tempDir, err := os.MkdirTemp("", "ard_complex_circular_test_*")
@@ -964,7 +1058,6 @@ fn func_c() Int { 3 }`,
 		t.Errorf("Expected circular dependency error, got: %v", err)
 	}
 }
-
 func TestNonCircularDependencies(t *testing.T) {
 	// Test that valid dependency chains work fine
 	tempDir, err := os.MkdirTemp("", "ard_valid_deps_test_*")
@@ -1018,7 +1111,6 @@ fn func_b() Int { 2 }`,
 		t.Errorf("Expected 1 import, got %d", len(program.Imports))
 	}
 }
-
 func TestVariableModuleExports(t *testing.T) {
 	// Create temporary directory structure
 	tempDir, err := os.MkdirTemp("", "ard_variable_exports_")
@@ -1101,7 +1193,6 @@ fn main() Str {
 		t.Error("Expected constants module to be a UserModule")
 	}
 }
-
 func TestSymbolExtraction(t *testing.T) {
 	// Create test module with public and private symbols
 	moduleContent := `
@@ -1206,69 +1297,4 @@ mut private_variable: Str = "secret"
 	if !nonExistent.IsZero() {
 		t.Error("Expected nonexistent symbol to be nil")
 	}
-}
-
-func TestTestDirCannotAccessPrivateSymbols(t *testing.T) {
-	samplesDir := filepath.Join("..", "samples")
-	testDir := filepath.Join(samplesDir, "test")
-	testFile := filepath.Join(testDir, "maths_test.ard")
-
-	t.Run("public symbol access works", func(t *testing.T) {
-		src, err := os.ReadFile(testFile)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		result := parse.Parse(src, testFile)
-		if len(result.Errors) > 0 {
-			t.Fatal(result.Errors[0].Message)
-		}
-
-		resolver, err := checker.NewModuleResolver(samplesDir)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		c := checker.New(testFile, result.Program, resolver)
-		c.Check()
-		diagnostics := c.Diagnostics()
-
-		if len(diagnostics) > 0 {
-			t.Errorf("Expected no errors when accessing public symbols, got: %v", diagnostics)
-		}
-	})
-
-	t.Run("private symbol access produces error", func(t *testing.T) {
-		privateSource := `use samples/maths
-
-test fn access_private() Void!Str {
-  maths::multiply(2, 3)
-  Result::ok(())
-}
-`
-		result := parse.Parse([]byte(privateSource), testFile)
-		if len(result.Errors) > 0 {
-			t.Fatal(result.Errors[0].Message)
-		}
-
-		resolver, err := checker.NewModuleResolver(samplesDir)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		c := checker.New(testFile, result.Program, resolver)
-		c.Check()
-		diagnostics := c.Diagnostics()
-
-		found := false
-		for _, diag := range diagnostics {
-			if strings.Contains(diag.Message, "Undefined: maths::multiply") {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("Expected 'Undefined: maths::multiply' error, got: %v", diagnostics)
-		}
-	})
 }

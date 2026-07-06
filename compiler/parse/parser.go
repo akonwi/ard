@@ -88,61 +88,6 @@ func trimQuotedString(value string) string {
 	return value
 }
 
-func (p *parser) parseExternalBindingValue() (string, error) {
-	if p.check(string_) {
-		return trimQuotedString(p.advance().text), nil
-	}
-	if path := p.parseStaticPath(); path != nil {
-		return path.String(), nil
-	}
-	return "", p.makeError(p.peek(), "Expected string literal or Go namespace path for external binding")
-}
-
-func (p *parser) parseExternalBindingBlock() (map[string]string, error) {
-	bindings := map[string]string{}
-	p.skipNewlines()
-	for !p.check(right_brace) && !p.isAtEnd() {
-		target, err := p.parseExternalBindingTarget()
-		if err != nil {
-			return nil, err
-		}
-		if !p.match(equal) {
-			return nil, p.makeError(p.peek(), "Expected '=' after extern binding target")
-		}
-		binding, err := p.parseExternalBindingValue()
-		if err != nil {
-			return nil, err
-		}
-		bindings[target] = binding
-		p.match(comma)
-		p.skipNewlines()
-	}
-	if !p.match(right_brace) {
-		return nil, p.makeError(p.peek(), "Expected '}' after extern binding block")
-	}
-	if len(bindings) == 0 {
-		return nil, p.makeError(p.peek(), "Extern binding block cannot be empty")
-	}
-	return bindings, nil
-}
-
-func (p *parser) parseExternalBindingTarget() (string, error) {
-	current := p.peek()
-	if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
-		return "", p.makeError(current, "Expected extern binding target")
-	}
-	parts := []string{p.advance().text}
-	for p.match(minus) {
-		current = p.peek()
-		if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
-			return "", p.makeError(current, "Expected extern binding target segment after '-' ")
-		}
-		parts = append(parts, p.advance().text)
-	}
-	return strings.Join(parts, "-"), nil
-}
-
-// synchronize skips tokens until reaching a statement boundary or EOF
 func (p *parser) synchronize() {
 	for !p.check(new_line) && !p.isAtEnd() {
 		p.advance()
@@ -323,7 +268,7 @@ func (p *parser) parseImport() *Import {
 		importKind = ImportKindGo
 		importPath = strings.TrimPrefix(importPath, "go:")
 		if importPath == "" {
-			p.addError(&pathToken, "Expected Go import path after 'go:'")
+			p.addError(&pathToken, "Expected Go package path after 'go:'")
 			p.synchronize()
 			return nil
 		}
@@ -810,8 +755,9 @@ func (p *parser) enumDef(private bool) Statement {
 	}
 	nameToken := p.advance()
 	enum := &EnumDefinition{
-		Name:    nameToken.text,
-		Private: private,
+		Name:         nameToken.text,
+		NameLocation: nameToken.getLocation(),
+		Private:      private,
 		Location: Location{
 			Start: Point{Row: enumToken.line, Col: enumToken.column},
 		},
@@ -881,7 +827,7 @@ func (p *parser) structDef(private bool) Statement {
 	typeParams := p.parseGenericTypeParameters()
 	structDef := &StructDefinition{
 		Private:    private,
-		Name:       Identifier{Name: nameToken.text},
+		Name:       Identifier{Name: nameToken.text, Location: nameToken.getLocation()},
 		TypeParams: typeParams,
 		Fields:     []StructField{},
 		Location: Location{
@@ -1145,8 +1091,6 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 				p.advance()
 			}
 
-			isMutable := p.match(mut)
-
 			// Use same logic as struct fields for parameter name parsing
 			current := p.peek()
 			if !(current.kind == identifier || p.isAllowedIdentifierKeyword(current.kind)) {
@@ -1167,7 +1111,6 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 			paramType := p.parseType()
 			params = append(params, Parameter{
 				Location: paramName.getLocation(),
-				Mutable:  isMutable,
 				Name:     paramName.text,
 				Type:     paramType,
 			})
@@ -1828,7 +1771,7 @@ func (p *parser) parseNamedType() DeclaredType {
 			Location: id.getLocation(),
 			nullable: nullable,
 		}
-	case "Float":
+	case "Float64":
 		return &FloatType{
 			Location: id.getLocation(),
 			nullable: nullable,
@@ -1974,7 +1917,103 @@ func (p *parser) parseGenericTypeParameters() []string {
 }
 
 func (p *parser) parseExpression() (Expression, error) {
+	if p.check(select_) {
+		return p.selectExpr()
+	}
 	return p.matchExpr()
+}
+
+func (p *parser) selectExpr() (Expression, error) {
+	keyword := p.advance() // consume 'select'
+	sel := &SelectExpression{
+		Location: Location{Start: Point{Row: keyword.line, Col: keyword.column}},
+	}
+
+	if !p.check(left_brace) {
+		p.addError(p.peek(), "Expected '{' after 'select'")
+		p.synchronizeToTokens(left_brace, new_line)
+		if !p.check(left_brace) {
+			return sel, nil
+		}
+	}
+	p.advance() // consume '{'
+
+	if p.check(new_line) {
+		p.advance()
+	} else {
+		p.addError(p.peek(), "Expected new line after '{'")
+	}
+
+	for !p.match(right_brace) {
+		if c := p.parseInlineComment(); c != nil {
+			sel.Comments = append(sel.Comments, *c)
+			p.match(new_line)
+			continue
+		}
+		if p.match(new_line) {
+			continue
+		}
+
+		selCase := SelectCase{
+			Location: Location{Start: Point{Row: p.peek().line, Col: p.peek().column}},
+		}
+
+		// Optional `let name =` receive binding.
+		if p.match(let) {
+			if !p.check(identifier) {
+				p.addError(p.peek(), "Expected identifier after 'let'")
+			} else {
+				name := p.advance()
+				selCase.Binding = &Identifier{
+					Location: Location{Start: Point{Row: name.line, Col: name.column}},
+					Name:     name.text,
+				}
+			}
+			if p.check(equal) {
+				p.advance()
+			} else {
+				p.addError(p.peek(), "Expected '=' after select binding")
+			}
+		}
+
+		// The channel operation expression, or `_` for the default arm.
+		op, err := p.or()
+		if err != nil {
+			return nil, err
+		}
+		selCase.Op = op
+
+		if !p.check(fat_arrow) {
+			p.addError(p.peek(), "Expected '=>' after select arm")
+			p.synchronizeToTokens(fat_arrow, new_line, right_brace)
+			if !p.check(fat_arrow) {
+				continue
+			}
+		}
+		p.advance() // consume '=>'
+
+		body := []Statement{}
+		if p.check(left_brace) {
+			b, err := p.block()
+			if err != nil {
+				return nil, err
+			}
+			body = b
+		} else {
+			stmt, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			body = append(body, stmt)
+		}
+		selCase.Body = body
+		selCase.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
+		sel.Cases = append(sel.Cases, selCase)
+		p.match(comma)
+	}
+
+	sel.Location.End = Point{Row: p.previous().line, Col: p.previous().column}
+	return sel, nil
 }
 
 func (p *parser) matchExpr() (Expression, error) {
@@ -2357,57 +2396,6 @@ func (p *parser) try() (Expression, error) {
 
 func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 	private := p.match(private)
-	isExtern := p.match(extern)
-
-	// Handle extern type declarations
-	if isExtern && p.match(type_) {
-		keyword := p.previous()
-		if !p.check(identifier) {
-			return nil, p.makeError(p.peek(), "Expected type name after 'extern type'")
-		}
-		nameToken := p.advance()
-		typeParams := p.parseGenericTypeParameters()
-		endRow := nameToken.line
-		endCol := nameToken.column + len(nameToken.text)
-		if len(typeParams) > 0 {
-			endToken := p.previous()
-			endRow = endToken.line
-			endCol = endToken.column + len(endToken.text)
-		}
-		externalBinding := ""
-		var externalBindings map[string]string
-		if p.match(equal) {
-			if p.check(string_) {
-				bindingToken := p.advance()
-				externalBinding = trimQuotedString(bindingToken.text)
-				endRow = bindingToken.line
-				endCol = bindingToken.column + len(bindingToken.text)
-			} else if p.match(left_brace) {
-				bindings, err := p.parseExternalBindingBlock()
-				if err != nil {
-					return nil, err
-				}
-				externalBindings = bindings
-				externalBinding = bindings["go"]
-				endToken := p.previous()
-				endRow = endToken.line
-				endCol = endToken.column + len(endToken.text)
-			} else {
-				return nil, p.makeError(p.peek(), "Expected string literal or binding block for extern type binding")
-			}
-		}
-		return &ExternTypeDeclaration{
-			Name:             nameToken.text,
-			TypeParams:       typeParams,
-			ExternalBinding:  externalBinding,
-			ExternalBindings: externalBindings,
-			Private:          private,
-			Location: Location{
-				Start: Point{Row: keyword.line, Col: keyword.column},
-				End:   Point{Row: endRow, Col: endCol},
-			},
-		}, nil
-	}
 
 	if p.match(fn) {
 		keyword := p.previous()
@@ -2431,8 +2419,10 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			name = "" // Treat as anonymous function
 		}
 
-		// Parse generic type parameters if present (e.g., <$T, $U>)
-		typeParams := p.parseGenericTypeParameters()
+		if p.check(less_than) {
+			p.addError(p.peek(), "Generic declaration lists are not supported; use $T in the function signature")
+			p.parseGenericTypeParameters()
+		}
 
 		if !p.check(left_paren) {
 			p.addError(p.peek(), "Expected '(' for parameters list")
@@ -2489,7 +2479,6 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			if p.match(new_line) {
 				continue
 			}
-			isMutable := p.match(mut)
 			nameToken := p.consumeVariableName("Expected parameter name")
 
 			// Check if this is a simple parameter list in an anonymous function
@@ -2517,7 +2506,6 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 
 			params = append(params, Parameter{
 				Location: nameToken.getLocation(),
-				Mutable:  isMutable,
 				Name:     nameToken.text,
 				Type:     paramType,
 			})
@@ -2535,52 +2523,6 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 		if (name == "" && !p.check(left_brace)) || name != "" {
 			// Function with explicit return type
 			returnType = p.parseType()
-		}
-
-		// Handle extern functions
-		if isExtern {
-			// Extern functions must have a name
-			if name == "" {
-				return nil, p.makeError(p.peek(), "Extern functions must have a name")
-			}
-
-			// Expect "= external_binding"
-			if !p.match(equal) {
-				return nil, p.makeError(p.peek(), "Expected '=' after extern function signature")
-			}
-
-			externalBinding := ""
-			var externalBindings map[string]string
-			if p.match(left_brace) {
-				bindings, err := p.parseExternalBindingBlock()
-				if err != nil {
-					return nil, err
-				}
-				externalBindings = bindings
-				externalBinding = bindings["go"]
-			} else {
-				binding, err := p.parseExternalBindingValue()
-				if err != nil {
-					return nil, err
-				}
-				externalBinding = binding
-			}
-
-			extFn := &ExternalFunction{
-				Private:          private,
-				Name:             name.(string), // External functions must have string names
-				TypeParams:       typeParams,
-				Parameters:       params,
-				ReturnType:       returnType,
-				ExternalBinding:  externalBinding,
-				ExternalBindings: externalBindings,
-				Location: Location{
-					Start: Point{Row: keyword.line, Col: keyword.column},
-					End:   Point{Row: p.previous().line, Col: p.previous().column},
-				},
-			}
-
-			return extFn, nil
 		}
 
 		statements, err := p.block()
@@ -2602,7 +2544,6 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 
 		fnDef := &FunctionDeclaration{
 			Private:    private,
-			TypeParams: typeParams,
 			Mutates:    asMethod && mutates,
 			IsTest:     isTest,
 			Parameters: params,
@@ -2639,6 +2580,10 @@ func (p *parser) structInstance() (Expression, error) {
 	if static != nil {
 		// go back 1 so the last identifier can be checked as starting the below expression
 		p.index = p.index - 1
+	}
+
+	if instance, ok, err := p.tryGenericStructInstance(index, static); ok || err != nil {
+		return instance, err
 	}
 
 	if p.check(identifier, left_brace) {
@@ -2685,6 +2630,52 @@ func (p *parser) structInstance() (Expression, error) {
 	}
 
 	return p.iterRange()
+}
+
+// tryGenericStructInstance speculatively parses a struct instantiation with
+// call-site type arguments, such as Name<Str>{...} or pkg::Name<ui::Theme>{...}.
+// It commits only when the type arguments are followed by '>' and '{', so
+// comparison chains like a < b are left untouched. On failure it rewinds to
+// index and reports ok=false.
+func (p *parser) tryGenericStructInstance(index int, static *StaticProperty) (Expression, bool, error) {
+	if !p.check(identifier, less_than) || !adjacent(p.peek().getLocation(), &p.tokens[p.index+1]) {
+		return nil, false, nil
+	}
+
+	savedErrorCount := len(p.errors)
+	nameToken := p.advance()
+	p.advance() // consume the '<'
+	typeArgs := p.parseCallTypeArguments()
+
+	// Commit when the `>` `{` shape is clear, even if the type arguments had
+	// diagnostics, mirroring tryStaticGenericFunctionCall's recovery policy.
+	hasTypeArgsOrErrors := len(typeArgs) > 0 || len(p.errors) > savedErrorCount
+	hasGenericStructShape := hasTypeArgsOrErrors && p.check(greater_than, left_brace)
+	if !hasGenericStructShape {
+		p.index = index
+		p.errors = p.errors[:savedErrorCount]
+		return nil, false, nil
+	}
+	p.advance() // consume the '>'
+
+	name := &Identifier{
+		Name: nameToken.text,
+		Location: Location{
+			Start: Point{Row: nameToken.line, Col: nameToken.column},
+			End:   Point{Row: nameToken.line, Col: nameToken.column + len(nameToken.text)},
+		},
+	}
+	instance, err := p.parseStructFields(name)
+	if err != nil {
+		return nil, true, err
+	}
+	instance.TypeArgs = typeArgs
+
+	if static != nil {
+		static.Property = instance
+		return static, true, nil
+	}
+	return instance, true, nil
 }
 
 // parseStructInstantiationFromIdentifier parses a struct instantiation given an identifier.
@@ -2736,9 +2727,14 @@ func (p *parser) parseStructFields(name *Identifier) (*StructInstance, error) {
 		if err != nil {
 			return nil, err
 		}
+		propLocation := propToken.getLocation()
+		if val != nil {
+			propLocation.End = val.GetLocation().End
+		}
 		instance.Properties = append(instance.Properties, StructValue{
-			Name:  Identifier{Name: propToken.text},
-			Value: val,
+			Location: propLocation,
+			Name:     Identifier{Location: propToken.getLocation(), Name: propToken.text},
+			Value:    val,
 		})
 
 		// Check for inline comment after property

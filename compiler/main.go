@@ -92,12 +92,10 @@ func main() {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			builtPath, err := buildGoBinary(inputPath, outputPath)
-			if err != nil {
+			if _, err := buildGoBinary(inputPath, outputPath); err != nil {
 				fmt.Println(err)
 				os.Exit(1)
 			}
-			fmt.Printf("Built %s\n", builtPath)
 		}
 	case "test":
 		{
@@ -647,15 +645,14 @@ func loadModule(inputPath string) (checker.Module, error) {
 }
 
 func parseRunArgs(args []string) (string, error) {
-	inputPath := ""
-	for _, arg := range args {
-		if strings.HasPrefix(arg, "-") {
-			return "", fmt.Errorf("unknown flag: %s", arg)
-		}
-		if inputPath == "" {
-			inputPath = arg
-			continue
-		}
+	// `ard run <file.ard> [program args...]` forwards everything after the input
+	// file to the program verbatim, so only the input path is parsed here.
+	if len(args) == 0 {
+		return "", fmt.Errorf("expected filepath argument")
+	}
+	inputPath := args[0]
+	if strings.HasPrefix(inputPath, "-") {
+		return "", fmt.Errorf("unknown flag: %s", inputPath)
 	}
 	if inputPath == "" {
 		return "", fmt.Errorf("expected filepath argument")
@@ -967,9 +964,10 @@ func loadGoTestModules(inputPath string, files []string, filter string) ([]loade
 		return nil, nil, err
 	}
 	projectInfo := resolver.GetProjectInfo()
+	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
 	loaded := make([]loadedGoTestModule, 0, len(files))
 	for _, path := range files {
-		module, err := loadGoTestModule(path, resolver, projectInfo)
+		module, err := loadGoTestModule(path, resolver, projectInfo, goResolver)
 		if err != nil {
 			return nil, projectInfo, err
 		}
@@ -981,7 +979,7 @@ func loadGoTestModules(inputPath string, files []string, filter string) ([]loade
 	return loaded, projectInfo, nil
 }
 
-func loadGoTestModule(path string, resolver *checker.ModuleResolver, projectInfo *checker.ProjectInfo) (checker.Module, error) {
+func loadGoTestModule(path string, resolver *checker.ModuleResolver, projectInfo *checker.ProjectInfo, goResolver checker.GoPackageResolver) (checker.Module, error) {
 	sourceCode, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("error reading file %s - %v", path, err)
@@ -1002,7 +1000,8 @@ func loadGoTestModule(path string, resolver *checker.ModuleResolver, projectInfo
 			}
 		}
 	}
-	c := checker.New(filePath, result.Program, resolver, checker.CheckOptions{ModulePath: modulePath})
+	options := checker.CheckOptions{ModulePath: modulePath, GoResolver: goResolver}
+	c := checker.New(filePath, result.Program, resolver, options)
 	c.Check()
 	if c.HasErrors() {
 		for _, diagnostic := range c.Diagnostics() {

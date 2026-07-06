@@ -82,14 +82,6 @@ func TestStructs(t *testing.T) {
 			},
 		},
 		{
-			name: "Using a package struct",
-			input: `use ard/http` + "\n" +
-				`let req = http::Request{method:http::Method::Get, url:"google.com", headers: [:]}` + "\n" +
-				`req.url`,
-			// Note: We skip detailed checking of ModuleStructInstance FieldTypes
-			// because it contains Type structs with unexported fields that are hard to compare
-		},
-		{
 			name: "Cannot instantiate with incorrect fields",
 			input: personStructInput + "\n" + strings.Join([]string{
 				`Person{ name: "Alice", age: 30 }`,
@@ -137,7 +129,6 @@ func TestStructs(t *testing.T) {
 		},
 	})
 }
-
 func TestMutableAggregateInitialization(t *testing.T) {
 	personStructInput := strings.Join([]string{
 		"struct Person {",
@@ -156,7 +147,6 @@ func TestMutableAggregateInitialization(t *testing.T) {
 		},
 	})
 }
-
 func TestMethods(t *testing.T) {
 	shapeCode := strings.Join([]string{
 		"struct Shape {",
@@ -223,7 +213,6 @@ func TestMethods(t *testing.T) {
 		},
 	})
 }
-
 func TestStructsWithMaybeFields(t *testing.T) {
 	run(t, []test{
 		{
@@ -237,7 +226,6 @@ func TestStructsWithMaybeFields(t *testing.T) {
 		},
 	})
 }
-
 func TestStructsWithStaticFunctions(t *testing.T) {
 	run(t, []test{
 		{
@@ -253,6 +241,99 @@ func TestStructsWithStaticFunctions(t *testing.T) {
 			Message::new("info", maybe::some(42))
 			`,
 			diagnostics: []checker.Diagnostic{},
+		},
+	})
+}
+
+func TestArdStructLiteralTypeArgs(t *testing.T) {
+	run(t, []test{
+		{
+			name: "explicit type args instantiate a generic struct literal",
+			input: strings.Join([]string{
+				"struct Box<$T> {",
+				"  value: $T",
+				"}",
+				"let b = Box<Str>{ value: \"hi\" }",
+			}, "\n"),
+		},
+		{
+			name: "explicit type args bind generics unused in provided fields",
+			input: strings.Join([]string{
+				"struct Empty<$T> {",
+				"  tag: Str",
+				"}",
+				"let e = Empty<Int>{ tag: \"x\" }",
+			}, "\n"),
+		},
+		{
+			name: "mismatched field value against an explicit type arg is rejected",
+			input: strings.Join([]string{
+				"struct Box<$T> {",
+				"  value: $T",
+				"}",
+				"let b = Box<Str>{ value: 1 }",
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "type mismatch: expected Str, got Int"},
+			},
+		},
+		{
+			name: "type args on a non-generic struct are rejected",
+			input: strings.Join([]string{
+				"struct Plain {",
+				"  x: Int",
+				"}",
+				"let p = Plain<Int>{ x: 1 }",
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Struct Plain does not take type arguments"},
+			},
+		},
+		{
+			name: "wrong number of type args is rejected",
+			input: strings.Join([]string{
+				"struct Box<$T> {",
+				"  value: $T",
+				"}",
+				"let b = Box<Str, Int>{ value: \"hi\" }",
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Expected 1 type argument(s), got 2"},
+			},
+		},
+		{
+			name: "single inferred generic accepts an explicit type arg",
+			input: strings.Join([]string{
+				"struct Single {",
+				"  value: $T",
+				"}",
+				"let s = Single<Str>{ value: \"hi\" }",
+			}, "\n"),
+		},
+		{
+			name: "multiple inferred generics require a declared parameter list",
+			input: strings.Join([]string{
+				"struct Pair {",
+				"  first: $A,",
+				"  second: $B,",
+				"}",
+				"let p = Pair<Str, Int>{ first: \"x\", second: 1 }",
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Struct Pair must declare its generic parameters to take explicit type arguments"},
+			},
+		},
+		{
+			name: "unknown type argument is rejected",
+			input: strings.Join([]string{
+				"struct Box<$T> {",
+				"  value: $T",
+				"}",
+				"let b = Box<Nope>{ value: \"hi\" }",
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Unrecognized type: Nope"},
+			},
 		},
 	})
 }

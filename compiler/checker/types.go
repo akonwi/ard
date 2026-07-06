@@ -10,7 +10,6 @@ func areCompatible(expected Type, actual Type) bool {
 	if trait, ok := expected.(*Trait); ok {
 		return actual.hasTrait(trait)
 	}
-
 	return expected.equal(actual)
 }
 
@@ -47,7 +46,7 @@ type Type interface {
 	/* A.K.A 'compatible()'
 	  The Ard type system only allows generics in parameters.
 		This means equal is called as `expected.equal(actual)`,
-		where `expected` is the declared parameter type and `actual` is the provided dynamic type.
+		where `expected` is the declared parameter type and `actual` is the provided any type.
 		The exception is when resolving generics in a function call based on inferred types.
 	 	In this scenario, the generic is the `other` argument, so that the callee type can fill in the resolved type.
 	*/
@@ -99,13 +98,18 @@ func derefMutableRef(t Type) Type {
 }
 
 type Trait struct {
-	Name    string
-	methods []FunctionDef
-	private bool
+	Name       string
+	ModulePath string
+	methods    []FunctionDef
+	private    bool
 }
 
 func (t Trait) String() string {
 	return t.Name
+}
+
+func (t Trait) IsPrivate() bool {
+	return t.private
 }
 
 func (t Trait) name() string {
@@ -199,12 +203,6 @@ func (s str) get(name string) Type {
 			Parameters: []Parameter{},
 			ReturnType: Str,
 		}
-	case "to_dyn":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Dynamic,
-		}
 	case "trim":
 		return &FunctionDef{
 			Name:       name,
@@ -226,7 +224,7 @@ func (s *str) equal(other Type) bool {
 }
 
 func (s *str) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString" || trait.name() == "Encodable"
+	return trait.name() == "ToString"
 }
 
 var Str = &str{}
@@ -247,12 +245,6 @@ func (b byteType) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: Str,
-		}
-	case "to_dyn":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Dynamic,
 		}
 	default:
 		return nil
@@ -277,7 +269,7 @@ func (b *byteType) equal(other Type) bool {
 	return false
 }
 func (b *byteType) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString" || trait.name() == "Encodable"
+	return trait.name() == "ToString"
 }
 
 var Byte = &byteType{}
@@ -298,12 +290,6 @@ func (r runeType) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: Str,
-		}
-	case "to_dyn":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Dynamic,
 		}
 	default:
 		return nil
@@ -328,7 +314,7 @@ func (r *runeType) equal(other Type) bool {
 	return false
 }
 func (r *runeType) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString" || trait.name() == "Encodable"
+	return trait.name() == "ToString"
 }
 
 var Rune = &runeType{}
@@ -344,11 +330,11 @@ func (i _int) get(name string) Type {
 			Parameters: []Parameter{},
 			ReturnType: Str,
 		}
-	case "to_dyn":
+	case "to_f64":
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{},
-			ReturnType: Dynamic,
+			ReturnType: Float64,
 		}
 	default:
 		return nil
@@ -375,14 +361,61 @@ func (i *_int) equal(other Type) bool {
 }
 
 func (i *_int) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString" || trait.name() == "Encodable"
+	return trait.name() == "ToString"
 }
 
 var Int = &_int{}
 
+type scalarType struct {
+	name string
+}
+
+func (s *scalarType) String() string { return s.name }
+func (s *scalarType) get(name string) Type {
+	switch name {
+	case "to_str":
+		return &FunctionDef{Name: name, Parameters: []Parameter{}, ReturnType: Str}
+	default:
+		return nil
+	}
+}
+func (s *scalarType) equal(other Type) bool {
+	if s == other {
+		return true
+	}
+	if typeVar, ok := other.(*TypeVar); ok {
+		if typeVar.actual == nil {
+			return true
+		}
+		return s.equal(typeVar.actual)
+	}
+	if union, ok := other.(*Union); ok {
+		return union.equal(s)
+	}
+	if trait, ok := other.(*Trait); ok {
+		return s.hasTrait(trait)
+	}
+	return false
+}
+func (s *scalarType) hasTrait(trait *Trait) bool { return trait.name() == "ToString" }
+
+var (
+	Int8    = &scalarType{name: "Int8"}
+	Int16   = &scalarType{name: "Int16"}
+	Int32   = &scalarType{name: "Int32"}
+	Int64   = &scalarType{name: "Int64"}
+	Uint    = &scalarType{name: "Uint"}
+	Uint8   = &scalarType{name: "Uint8"}
+	Uint16  = &scalarType{name: "Uint16"}
+	Uint32  = &scalarType{name: "Uint32"}
+	Uint64  = &scalarType{name: "Uint64"}
+	Uintptr = &scalarType{name: "Uintptr"}
+	Float32 = &scalarType{name: "Float32"}
+)
+
 type float struct{}
 
-func (f float) String() string { return "Float" }
+func (f float) String() string { return "Float64" }
 func (f float) get(name string) Type {
 	switch name {
 	case "to_str":
@@ -390,12 +423,6 @@ func (f float) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: Str,
-		}
-	case "to_dyn":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Dynamic,
 		}
 	case "to_int":
 		return &FunctionDef{
@@ -424,10 +451,10 @@ func (f *float) equal(other Type) bool {
 }
 
 func (f *float) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString" || trait.name() == "Encodable"
+	return trait.name() == "ToString"
 }
 
-var Float = &float{}
+var Float64 = &float{}
 
 type _bool struct{}
 
@@ -439,12 +466,6 @@ func (b _bool) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{},
 			ReturnType: Str,
-		}
-	case "to_dyn":
-		return &FunctionDef{
-			Name:       name,
-			Parameters: []Parameter{},
-			ReturnType: Dynamic,
 		}
 	default:
 		return nil
@@ -467,7 +488,7 @@ func (b *_bool) equal(other Type) bool {
 }
 
 func (b *_bool) hasTrait(trait *Trait) bool {
-	return trait.name() == "ToString" || trait.name() == "Encodable"
+	return trait.name() == "ToString"
 }
 
 var Bool = &_bool{}
@@ -500,10 +521,12 @@ func (l List) String() string {
 func (l List) get(name string) Type {
 	switch name {
 	case "at":
+		// Bounds-checked access, symmetric with Str.at: Some(element) when the
+		// index is in range, None otherwise.
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "index", Type: Int}},
-			ReturnType: l.of,
+			ReturnType: MakeMaybe(l.of),
 		}
 	case "prepend":
 		return &FunctionDef{
@@ -573,6 +596,146 @@ func (l *List) Of() Type {
 	return l.of
 }
 
+// Chan is a typed channel for communicating between concurrent tasks. It
+// lowers to a native Go `chan T`.
+type Chan struct {
+	of Type
+}
+
+func MakeChan(of Type) *Chan {
+	return &Chan{of}
+}
+func (c Chan) String() string {
+	return "Chan<" + c.of.String() + ">"
+}
+func (c Chan) get(name string) Type {
+	switch name {
+	case "send":
+		return chanSendMethod(c.of)
+	case "recv":
+		return chanRecvMethod(c.of)
+	case "close":
+		return chanCloseMethod()
+	case "receiver":
+		return &FunctionDef{Name: "receiver", ReturnType: MakeReceiver(c.of)}
+	case "sender":
+		return &FunctionDef{Name: "sender", ReturnType: MakeSender(c.of)}
+	}
+	return nil
+}
+func (c *Chan) equal(other Type) bool {
+	return equalTypes(c, other)
+}
+func (c *Chan) hasTrait(trait *Trait) bool {
+	return false
+}
+func (c *Chan) Of() Type {
+	return c.of
+}
+
+// channelElementType returns the element type of any channel-like type (Chan,
+// Receiver, Sender) and whether the type is a channel at all.
+func channelElementType(t Type) (Type, bool) {
+	switch ch := t.(type) {
+	case *Chan:
+		return ch.of, true
+	case *Receiver:
+		return ch.of, true
+	case *Sender:
+		return ch.of, true
+	}
+	return nil, false
+}
+
+// channelCanRecv reports whether the channel type permits receiving.
+func channelCanRecv(t Type) bool {
+	switch t.(type) {
+	case *Chan, *Receiver:
+		return true
+	}
+	return false
+}
+
+// channelCanSend reports whether the channel type permits sending.
+func channelCanSend(t Type) bool {
+	switch t.(type) {
+	case *Chan, *Sender:
+		return true
+	}
+	return false
+}
+
+// chanSendMethod / chanRecvMethod / chanCloseMethod build the channel method
+// signatures shared by the bidirectional and directional channel types.
+func chanSendMethod(of Type) Type {
+	return &FunctionDef{Name: "send", Parameters: []Parameter{{Name: "value", Type: of}}, ReturnType: Void}
+}
+func chanRecvMethod(of Type) Type {
+	return &FunctionDef{Name: "recv", ReturnType: &Maybe{of}}
+}
+func chanCloseMethod() Type {
+	return &FunctionDef{Name: "close", ReturnType: Void}
+}
+
+// Receiver is a receive-only channel view (Go `<-chan T`). Its only method is
+// recv. Created by Chan.receiver() and produced by mapping Go `<-chan T`.
+type Receiver struct {
+	of Type
+}
+
+func MakeReceiver(of Type) *Receiver {
+	return &Receiver{of}
+}
+func (c Receiver) String() string {
+	return "Receiver<" + c.of.String() + ">"
+}
+func (c Receiver) get(name string) Type {
+	if name == "recv" {
+		return chanRecvMethod(c.of)
+	}
+	return nil
+}
+func (c *Receiver) equal(other Type) bool {
+	return equalTypes(c, other)
+}
+func (c *Receiver) hasTrait(trait *Trait) bool {
+	return false
+}
+func (c *Receiver) Of() Type {
+	return c.of
+}
+
+// Sender is a send-only channel view (Go `chan<- T`). Its methods are send and
+// close. Created by Chan.sender() and produced by mapping Go `chan<- T`.
+type Sender struct {
+	of Type
+}
+
+func MakeSender(of Type) *Sender {
+	return &Sender{of}
+}
+func (c Sender) String() string {
+	return "Sender<" + c.of.String() + ">"
+}
+func (c Sender) get(name string) Type {
+	switch name {
+	case "send":
+		return chanSendMethod(c.of)
+	case "close":
+		return chanCloseMethod()
+	}
+	return nil
+}
+func (c *Sender) equal(other Type) bool {
+	return equalTypes(c, other)
+}
+func (c *Sender) hasTrait(trait *Trait) bool {
+	return false
+}
+func (c *Sender) Of() Type {
+	return c.of
+}
+
 type Map struct {
 	key   Type
 	value Type
@@ -583,7 +746,7 @@ func MakeMap(key, value Type) *Map {
 }
 
 func (m Map) String() string {
-	return fmt.Sprintf("[%s:%s]", m.key.String(), m.value.String())
+	return fmt.Sprintf("[%s: %s]", m.key.String(), m.value.String())
 }
 func (m Map) equal(other Type) bool {
 	return equalTypes(m, other)
@@ -611,9 +774,9 @@ func (m Map) get(name string) Type {
 			Name:       name,
 			Parameters: []Parameter{{Name: "key", Type: m.key}, {Name: "value", Type: m.value}},
 			Mutates:    true,
-			ReturnType: Bool,
+			ReturnType: Void,
 		}
-	case "drop":
+	case "drop", "remove":
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "key", Type: m.key}},
@@ -660,7 +823,7 @@ func MakeMaybe(of Type) *Maybe {
 
 func (m *Maybe) String() string {
 	switch m.of.(type) {
-	case *FunctionDef, FunctionDef, *ExternalFunctionDef, ExternalFunctionDef, *Result, *MutableRef:
+	case *FunctionDef, FunctionDef, *Result, *MutableRef:
 		return "(" + typeSyntaxString(m.of) + ")?"
 	default:
 		return typeSyntaxString(m.of) + "?"
@@ -673,10 +836,6 @@ func typeSyntaxString(t Type) string {
 		return functionTypeString(*typ)
 	case FunctionDef:
 		return functionTypeString(typ)
-	case *ExternalFunctionDef:
-		return externalFunctionTypeString(*typ)
-	case ExternalFunctionDef:
-		return externalFunctionTypeString(typ)
 	case *Maybe:
 		return typ.String()
 	case *Result:
@@ -684,7 +843,7 @@ func typeSyntaxString(t Type) string {
 	case *List:
 		return "[" + typeSyntaxString(typ.of) + "]"
 	case *Map:
-		return "[" + typeSyntaxString(typ.key) + ":" + typeSyntaxString(typ.value) + "]"
+		return "[" + typeSyntaxString(typ.key) + ": " + typeSyntaxString(typ.value) + "]"
 	default:
 		return t.String()
 	}
@@ -693,7 +852,7 @@ func typeSyntaxString(t Type) string {
 func resultOperandSyntax(t Type) string {
 	value := typeSyntaxString(t)
 	switch t.(type) {
-	case *FunctionDef, FunctionDef, *ExternalFunctionDef, ExternalFunctionDef, *Result:
+	case *FunctionDef, FunctionDef, *Result:
 		return "(" + value + ")"
 	default:
 		return value
@@ -704,19 +863,22 @@ func functionTypeString(f FunctionDef) string {
 	return callableTypeString(f.Parameters, f.ReturnType)
 }
 
-func externalFunctionTypeString(f ExternalFunctionDef) string {
-	return callableTypeString(f.Parameters, f.ReturnType)
-}
-
 func callableTypeString(params []Parameter, returnType Type) string {
 	paramStrs := make([]string, len(params))
 	for i := range params {
-		paramStrs[i] = typeSyntaxString(params[i].Type)
-		if params[i].Mutable {
+		mutable, paramType := normalizedParamMutability(params[i])
+		paramStrs[i] = typeSyntaxString(paramType)
+		// A pointer-shaped foreign type renders its own `mut` prefix.
+		if foreign, ok := paramType.(*ForeignType); mutable && (!ok || !foreign.Pointer) {
 			paramStrs[i] = "mut " + paramStrs[i]
 		}
 	}
-	return fmt.Sprintf("fn(%s) %s", strings.Join(paramStrs, ","), typeSyntaxString(returnType))
+	rendered := fmt.Sprintf("fn(%s)", strings.Join(paramStrs, ", "))
+	// Ard syntax omits the return type for non-returning functions.
+	if returnType == nil || returnType.equal(Void) {
+		return rendered
+	}
+	return rendered + " " + typeSyntaxString(returnType)
 }
 func (m *Maybe) get(name string) Type {
 	switch name {
@@ -927,13 +1089,13 @@ func (r *Result) Err() Type {
 	return r.err
 }
 
-// Dynamic type for external/untyped data
-type dynamicType struct{}
+// Any type for external/untyped data
+type anyType struct{}
 
-func (d dynamicType) String() string       { return "Dynamic" }
-func (d dynamicType) get(name string) Type { return nil }
-func (d dynamicType) equal(other Type) bool {
-	if _, ok := other.(*dynamicType); ok {
+func (d anyType) String() string       { return "Any" }
+func (d anyType) get(name string) Type { return nil }
+func (d anyType) equal(other Type) bool {
+	if _, ok := other.(*anyType); ok {
 		return true
 	}
 	if typeVar, ok := other.(*TypeVar); ok && typeVar.actual == nil {
@@ -941,34 +1103,6 @@ func (d dynamicType) equal(other Type) bool {
 	}
 	return false
 }
-func (d dynamicType) hasTrait(trait *Trait) bool { return false }
+func (d anyType) hasTrait(trait *Trait) bool { return false }
 
-var Dynamic = &dynamicType{}
-
-// ExternType represents an opaque type whose values can only be created by FFI.
-// Identity is by name plus any instantiated type arguments.
-type ExternType struct {
-	Name_            string
-	GenericParams    []string
-	TypeArgs         []Type
-	ExternalBinding  string
-	ExternalBindings map[string]string
-	private          bool
-}
-
-func (e *ExternType) String() string {
-	if len(e.TypeArgs) == 0 {
-		return e.Name_
-	}
-	parts := make([]string, len(e.TypeArgs))
-	for i, arg := range e.TypeArgs {
-		parts[i] = arg.String()
-	}
-	return e.Name_ + "<" + strings.Join(parts, ", ") + ">"
-}
-func (e *ExternType) get(name string) Type { return nil }
-func (e *ExternType) equal(other Type) bool {
-	return equalTypes(e, other)
-}
-func (e *ExternType) hasTrait(trait *Trait) bool { return false }
-func (e *ExternType) NonProducing()              {}
+var Any = &anyType{}

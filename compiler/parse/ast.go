@@ -2,7 +2,6 @@ package parse
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 )
 
@@ -68,6 +67,18 @@ type Import struct {
 
 func (p Import) String() string {
 	return p.Name
+}
+
+// Alias returns the name the import is referenced by: the explicit alias
+// when present, otherwise the final path segment.
+func (p Import) Alias() string {
+	if p.Name != "" {
+		return p.Name
+	}
+	if idx := strings.LastIndex(p.Path, "/"); idx >= 0 {
+		return p.Path[idx+1:]
+	}
+	return p.Path
 }
 
 type Program struct {
@@ -169,7 +180,7 @@ type FloatType struct {
 }
 
 func (f FloatType) GetName() string {
-	return "Float"
+	return "Float64"
 }
 func (f FloatType) IsNullable() bool {
 	return f.nullable
@@ -314,9 +325,8 @@ func (v VariableAssignment) String() string {
 
 type Parameter struct {
 	Location
-	Name    string
-	Type    DeclaredType
-	Mutable bool
+	Name string
+	Type DeclaredType
 }
 
 func (p Parameter) String() string {
@@ -326,7 +336,7 @@ func (p Parameter) String() string {
 type FunctionDeclaration struct {
 	Location
 	Name       string
-	TypeParams []string // Generic type parameters (e.g., ["T", "U"] for fn<$T, $U>(...))
+	TypeParams []string // Legacy/constructed generic parameter metadata; source function declaration lists are rejected.
 	Mutates    bool
 	IsTest     bool
 	Parameters []Parameter
@@ -338,65 +348,6 @@ type FunctionDeclaration struct {
 
 func (f FunctionDeclaration) String() string {
 	return fmt.Sprintf("%s(%v) %s", f.Name, f.Parameters, f.ReturnType.GetName())
-}
-
-type ExternTypeDeclaration struct {
-	Location
-	Name             string
-	TypeParams       []string
-	ExternalBinding  string
-	ExternalBindings map[string]string
-	Private          bool
-}
-
-func (e ExternTypeDeclaration) String() string {
-	if len(e.ExternalBindings) > 1 || (len(e.ExternalBindings) == 1 && e.ExternalBindings["go"] == "") {
-		keys := make([]string, 0, len(e.ExternalBindings))
-		for key := range e.ExternalBindings {
-			keys = append(keys, key)
-		}
-		slices.Sort(keys)
-		parts := make([]string, 0, len(keys))
-		for _, key := range keys {
-			parts = append(parts, fmt.Sprintf("%s = %q", key, e.ExternalBindings[key]))
-		}
-		return fmt.Sprintf("extern type %s%s = { %s }", e.Name, renderTypeParams(e.TypeParams), strings.Join(parts, ", "))
-	}
-	if e.ExternalBinding != "" {
-		return fmt.Sprintf("extern type %s%s = %q", e.Name, renderTypeParams(e.TypeParams), e.ExternalBinding)
-	}
-	return fmt.Sprintf("extern type %s%s", e.Name, renderTypeParams(e.TypeParams))
-}
-
-type ExternalFunction struct {
-	Location
-	Name             string
-	TypeParams       []string // Generic type parameters
-	Parameters       []Parameter
-	ReturnType       DeclaredType
-	ExternalBinding  string
-	ExternalBindings map[string]string
-	Private          bool
-}
-
-func (e ExternalFunction) String() string {
-	if len(e.ExternalBindings) > 1 || (len(e.ExternalBindings) == 1 && e.ExternalBindings["go"] == "") {
-		keys := make([]string, 0, len(e.ExternalBindings))
-		for key := range e.ExternalBindings {
-			keys = append(keys, key)
-		}
-		slices.Sort(keys)
-		parts := make([]string, 0, len(keys))
-		for _, key := range keys {
-			parts = append(parts, fmt.Sprintf("%s = %q", key, e.ExternalBindings[key]))
-		}
-		return fmt.Sprintf("extern fn %s(%v) %s = { %s }", e.Name, e.Parameters, e.ReturnType.GetName(), strings.Join(parts, ", "))
-	}
-	binding := e.ExternalBinding
-	if binding == "" && len(e.ExternalBindings) == 1 {
-		binding = e.ExternalBindings["go"]
-	}
-	return fmt.Sprintf("extern fn %s(%v) %s = %q", e.Name, e.Parameters, e.ReturnType.GetName(), binding)
 }
 
 type StaticFunctionDeclaration struct {
@@ -482,6 +433,7 @@ type StructValue struct {
 type StructInstance struct {
 	Location
 	Name       Identifier
+	TypeArgs   []DeclaredType
 	Properties []StructValue
 	Comments   []Comment // Comments found within the struct instance
 }
@@ -497,10 +449,13 @@ type EnumVariant struct {
 
 type EnumDefinition struct {
 	Location
-	Name     string
-	Variants []EnumVariant
-	Private  bool
-	Comments []Comment // Comments found within the enum definition
+	Name string
+	// NameLocation is the span of the enum's name token, for tooling that
+	// anchors on the declared name rather than the whole declaration.
+	NameLocation Location
+	Variants     []EnumVariant
+	Private      bool
+	Comments     []Comment // Comments found within the enum definition
 }
 
 func (e EnumDefinition) String() string {
@@ -808,6 +763,32 @@ type MatchCase struct {
 
 func (m MatchCase) String() string {
 	return fmt.Sprintf("MatchCase(%s)", m.Pattern)
+}
+
+// SelectExpression multiplexes over several channel operations, running the
+// arm whose operation can proceed first. See ADR 0032.
+type SelectExpression struct {
+	Location
+	Cases    []SelectCase
+	Comments []Comment
+}
+
+func (s SelectExpression) String() string {
+	return "SelectExpression"
+}
+
+// SelectCase is one arm of a select. Op is the channel operation expression
+// (e.g. `ch.recv()`, `ch.send(x)`) or the `_` identifier for the default arm.
+// Binding is the optional `let name =` capture, valid only on receive arms.
+type SelectCase struct {
+	Location
+	Binding *Identifier
+	Op      Expression
+	Body    []Statement
+}
+
+func (s SelectCase) String() string {
+	return fmt.Sprintf("SelectCase(%s)", s.Op)
 }
 
 type ConditionalMatchExpression struct {

@@ -147,7 +147,7 @@ impl Str::ToString for Point {
 The following built-in types have `to_str()` methods:
 - **Str**: Returns itself
 - **Int**: Converts to decimal string representation
-- **Float**: Converts to decimal string representation
+- **Float64**: Converts to decimal string representation
 - **Bool**: Returns "true" or "false"
 
 ## Examples

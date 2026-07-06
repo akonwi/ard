@@ -6,286 +6,6 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
-func TestSelfRecursiveStructFieldsThroughIndirection(t *testing.T) {
-	run(t, []test{
-		{
-			name: "list self reference",
-			input: `struct Node {
-  children: [Node],
-}
-`,
-		},
-		{
-			name: "map value self reference",
-			input: `struct Node {
-  children: [Str:Node],
-}
-`,
-		},
-		{
-			name: "nullable self reference",
-			input: `struct Node {
-  parent: Node?,
-}
-`,
-		},
-		{
-			name: "mutable reference self reference",
-			input: `struct Node {
-  parent: mut Node,
-}
-`,
-		},
-		{
-			name: "direct self reference is rejected",
-			input: `struct Node {
-  child: Node,
-}
-`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field Node.child has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
-		},
-	})
-}
-
-func TestSameModuleRecursiveTypeGroups(t *testing.T) {
-	run(t, []test{
-		{
-			name: "retained tree finite through list and trait object",
-			input: `struct Context {
-  tree: ViewTree,
-  node_id: Int,
-}
-
-struct ViewTree {
-  nodes: [TreeNode],
-}
-
-struct TreeNode {
-  view: View,
-  children: [Int],
-}
-
-trait View {
-  fn init(ctx: Context)
-}
-`,
-		},
-		{
-			name: "forward same module struct reference",
-			input: `struct A {
-  b: B,
-}
-
-struct B {
-  value: Int,
-}
-`,
-		},
-		{
-			name: "mut reference breaks recursive layout cycle",
-			input: `struct A {
-  b: mut B,
-}
-
-struct B {
-  a: A,
-}
-`,
-		},
-		{
-			name: "map value breaks recursive layout cycle",
-			input: `struct A {
-  values: [Str:B],
-}
-
-struct B {
-  a: A,
-}
-`,
-		},
-		{
-			name: "nullable breaks recursive layout cycle",
-			input: `struct A {
-  b: B?,
-}
-
-struct B {
-  a: A,
-}
-`,
-		},
-		{
-			name: "function type breaks recursive layout cycle",
-			input: `struct A {
-  make: fn() B,
-}
-
-struct B {
-  a: A,
-}
-`,
-		},
-		{
-			name: "forward generic struct reference with type arguments",
-			input: `struct Holder {
-  box: Box<Int>,
-}
-
-struct Box {
-  value: $T,
-}
-
-fn accept(holder: Holder) {}
-`,
-		},
-		{
-			name: "generic self specialization is rejected before partial types escape",
-			input: `struct Node {
-  next: Node<$T>?,
-  value: $T,
-}
-`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive generic self-reference Node is not supported yet"}},
-		},
-		{
-			name: "forward generic struct reference without type arguments is rejected",
-			input: `struct Holder {
-  box: Box,
-}
-
-struct Box {
-  value: $T,
-}
-`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Generic type Box requires type arguments"}},
-		},
-		{
-			name: "enum and extern type names are hoisted",
-			input: `struct Holder {
-  mode: Mode,
-  runtime: Runtime,
-}
-
-enum Mode {
-  Ready,
-}
-
-extern type Runtime
-`,
-		},
-		{
-			name: "alias to later type is available to earlier fields",
-			input: `struct Holder {
-  value: Item,
-}
-
-type Item = Leaf
-
-struct Leaf {
-  value: Int,
-}
-`,
-		},
-		{
-			name: "alias chain to later type is resolved before fields",
-			input: `struct Holder {
-  value: A,
-}
-
-type A = B
-type B = Leaf
-
-struct Leaf {
-  value: Int,
-}
-`,
-		},
-		{
-			name: "nested alias dependency is resolved before fields",
-			input: `struct Holder {
-  values: A,
-}
-
-type A = [B]
-type B = Leaf
-
-struct Leaf {
-  value: Int,
-}
-`,
-		},
-		{
-			name: "generic specialized inline cycle is rejected",
-			input: `struct A {
-  box: Box<A>,
-}
-
-struct Box {
-  value: $T,
-}
-`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field A.box has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
-		},
-		{
-			name: "map key recursive cycle is rejected",
-			input: `struct A {
-  values: [A:Int],
-}
-`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field A.values has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
-		},
-		{
-			name: "nested map key recursive cycle is rejected",
-			input: `struct A {
-  values: [[A:Int]],
-}
-`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field A.values has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
-		},
-		{
-			name: "mut indirection permits recursive map key",
-			input: `struct A {
-  box: mut Box,
-}
-
-struct Box {
-  values: [A:Int],
-}
-`,
-		},
-		{
-			name: "nullable nested in result does not break layout yet",
-			input: `struct A {
-  result: A?!Str,
-}
-`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field A.result has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
-		},
-		{
-			name: "nullable nested in union does not break layout yet",
-			input: `type U = A? | Int
-
-struct A {
-  value: U,
-}
-`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field A.value has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
-		},
-		{
-			name: "direct mutual struct value cycle is rejected",
-			input: `struct A {
-  b: B,
-}
-
-struct B {
-  a: A,
-}
-`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Recursive field A.b has infinite size. Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."}},
-		},
-	})
-}
-
 func TestTopLevelTypeDetailsAreHoistedBeforeBodies(t *testing.T) {
 	run(t, []test{
 		{
@@ -314,14 +34,13 @@ trait T {
 		},
 	})
 }
-
 func TestRecursiveTraitChildManagementTypeDoesNotOverflow(t *testing.T) {
 	run(t, []test{{
 		name: "struct method can accept list of trait that accepts struct",
 		input: `struct Children {}
 
 trait View {
-  fn init(mut children: Children)
+  fn init(children: mut Children)
 }
 
 impl Children {
@@ -331,12 +50,11 @@ impl Children {
 struct Leaf {}
 
 impl View for Leaf {
-  fn init(mut children: Children) {}
+  fn init(children: mut Children) {}
 }
 `,
 	}})
 }
-
 func TestMatchAllowsConcreteTraitImplementationBranch(t *testing.T) {
 	traitFixture := `trait View {
   fn render()
@@ -460,7 +178,6 @@ fn main(flag: Bool) AnyScreen!Str {
 		},
 	})
 }
-
 func TestTraitDefinitions(t *testing.T) {
 	run(t, []test{
 		{
@@ -476,8 +193,6 @@ func TestTraitDefinitions(t *testing.T) {
 		{
 			name: "A valid implementation",
 			input: `
-			use ard/io
-
 			trait Speaks {
 				fn say(s: Str)
 			}
@@ -485,7 +200,7 @@ func TestTraitDefinitions(t *testing.T) {
 
 			impl Speaks for Dog {
 			  fn say(stuff: Str) {
-					io::print("woof")
+					()
 				}
 			}
 			`,
@@ -499,11 +214,11 @@ func TestTraitDefinitions(t *testing.T) {
 			input: `
 			struct Counter { value: Int }
 			trait Bumpable {
-				fn poke(mut c: Counter)
+				fn poke(c: mut Counter)
 			}
 			struct Doubler {}
 			impl Bumpable for Doubler {
-				fn poke(mut c: Counter) { () }
+				fn poke(c: mut Counter) { () }
 			}
 			`,
 			output: &checker.Program{
@@ -516,7 +231,7 @@ func TestTraitDefinitions(t *testing.T) {
 			input: `
 			struct Counter { value: Int }
 			trait Bumpable {
-				fn poke(mut c: Counter)
+				fn poke(c: mut Counter)
 			}
 			struct Doubler {}
 			impl Bumpable for Doubler {
@@ -530,8 +245,6 @@ func TestTraitDefinitions(t *testing.T) {
 		{
 			name: "An invalid implementation",
 			input: `
-					use ard/io
-
 					trait Speaks {
 						fn say(s: Str)
 					}
@@ -576,93 +289,8 @@ func TestTraitDefinitions(t *testing.T) {
 	})
 }
 
-func TestUsingPackageTraits(t *testing.T) {
-	run(t, []test{
-		{
-			name: "Implementing Str::ToString",
-			input: `
-			struct Person { name: Str }
-
-			impl Str::ToString for Person {
-			  fn to_str() Str {
-					"Person: {self.name}"
-				}
-			}
-			`,
-		},
-	})
-}
-
 func TestTraitsAsTypes(t *testing.T) {
 	run(t, []test{
-		{
-			name: "functions with Trait params",
-			input: `
-			use ard/io
-			struct Foo {}
-
-			fn display(item: Str::ToString) {
-			  io::print(item.to_str())
-			}
-			display(100)
-			display(Foo{})
-			`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of ToString, got Foo"},
-			},
-		},
-		{
-			name: "encode::Encodable only accepts primitives",
-			input: `
-			use ard/encode
-
-			encode::json(1)
-			encode::json("ok")
-			encode::json(false)
-			encode::json([1, 2, 3])
-			`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected implementation of Encodable, got [Int]"},
-			},
-		},
-		{
-			name: "json parse validates supported target type",
-			input: `
-			use ard/json
-
-			json::parse<fn() Void>("null")
-			`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "json::parse does not support fn <function>() Void"},
-			},
-		},
-		{
-			name: "json parse validates map keys",
-			input: `
-			use ard/json
-
-			json::parse<[Int: Str]>("{}")
-			`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "json::parse only supports Str map keys, got Int"},
-			},
-		},
-		// {
-		// 	name: "functions with Trait return",
-		// 	input: `
-		// 	struct Foo {}
-
-		// 	fn valid() Str::ToString {
-		// 	  100
-		// 	}
-		// 	fn invalid(item: Str::ToString) Str::ToString {
-		// 	  Foo{}
-		// 	}
-		// 	`,
-		// 	diagnostics: []checker.Diagnostic{
-		// 		{Kind: checker.Error, Message: "Type mismatch: Expected ToString, got Foo"},
-		// 	},
-		// },
 		{
 			name: "let binding with explicit trait type (success)",
 			input: `

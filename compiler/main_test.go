@@ -1,16 +1,12 @@
 package main
 
 import (
-	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
@@ -44,7 +40,6 @@ func captureStdout(t *testing.T, fn func()) string {
 	}
 	return string(out)
 }
-
 func TestParseRunArgs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -75,6 +70,13 @@ func TestParseRunArgs(t *testing.T) {
 			args: []string{"samples/main.ard", "extra"},
 			path: "samples/main.ard",
 		},
+		{
+			// Flags after the input file belong to the program and are forwarded
+			// verbatim, not parsed as run flags.
+			name: "program flags after input are forwarded",
+			args: []string{"samples/main.ard", "create", "x", "--dir", "y"},
+			path: "samples/main.ard",
+		},
 	}
 
 	for _, tt := range tests {
@@ -99,7 +101,6 @@ func TestParseRunArgs(t *testing.T) {
 		})
 	}
 }
-
 func TestRunGoProgram(t *testing.T) {
 	tempDir := t.TempDir()
 	sourcePath := filepath.Join(tempDir, "main.ard")
@@ -128,7 +129,6 @@ func TestRunGoProgram(t *testing.T) {
 		t.Fatalf("run go backend: %v", err)
 	}
 }
-
 func TestRunGoTargetVariablesSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "variables.ard")
 	module, err := loadModule(sourcePath)
@@ -143,7 +143,6 @@ func TestRunGoTargetVariablesSample(t *testing.T) {
 		t.Fatalf("run go variables sample: %v", err)
 	}
 }
-
 func TestRunGoTargetNullablesSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "nullables.ard")
 	module, err := loadModule(sourcePath)
@@ -158,7 +157,6 @@ func TestRunGoTargetNullablesSample(t *testing.T) {
 		t.Fatalf("run go nullables sample: %v", err)
 	}
 }
-
 func TestRunGoTargetTraitsSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "traits.ard")
 	module, err := loadModule(sourcePath)
@@ -173,22 +171,16 @@ func TestRunGoTargetTraitsSample(t *testing.T) {
 		t.Fatalf("run go traits sample: %v", err)
 	}
 }
-
-func TestRunGoTargetConcurrentStressSample(t *testing.T) {
-	sourcePath := filepath.Join("samples", "concurrent_stress.ard")
-	module, err := loadModule(sourcePath)
-	if err != nil {
-		t.Fatalf("load module: %v", err)
-	}
-	program, err := air.Lower(module)
-	if err != nil {
-		t.Fatalf("lower AIR: %v", err)
-	}
-	if err := gotarget.RunProgram(program, []string{"ard", "run", sourcePath}); err != nil {
-		t.Fatalf("run go concurrent stress sample: %v", err)
+func TestRunGoTargetAsyncSample(t *testing.T) {
+	output := runGoSampleBinary(t, filepath.Join("samples", "async.ard"), "")
+	// async::start fires a goroutine and the program coordinates completion over
+	// a channel, so both lines must be present and in order.
+	for _, want := range []string{"working in a goroutine", "done"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("async sample output missing %q:\n%s", want, output)
+		}
 	}
 }
-
 func TestRunGoTargetTypeUnionsSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "type-unions.ard")
 	module, err := loadModule(sourcePath)
@@ -203,7 +195,6 @@ func TestRunGoTargetTypeUnionsSample(t *testing.T) {
 		t.Fatalf("run go type-unions sample: %v", err)
 	}
 }
-
 func TestRunGoTargetTemperaturesSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "temperatures.ard")
 	module, err := loadModule(sourcePath)
@@ -218,7 +209,6 @@ func TestRunGoTargetTemperaturesSample(t *testing.T) {
 		t.Fatalf("run go temperatures sample: %v", err)
 	}
 }
-
 func TestRunGoTargetLightsSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "lights.ard")
 	module, err := loadModule(sourcePath)
@@ -233,7 +223,6 @@ func TestRunGoTargetLightsSample(t *testing.T) {
 		t.Fatalf("run go lights sample: %v", err)
 	}
 }
-
 func TestRunGoTargetSampleStdoutConformance(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -327,111 +316,6 @@ func TestRunGoTargetSampleStdoutConformance(t *testing.T) {
 	}
 }
 
-func TestBuildTicTacToeExample(t *testing.T) {
-	repoProjectDir := filepath.Join("..", "examples", "tic-tac-toe")
-	projectDir := prepareTicTacToeLockCacheProject(t, repoProjectDir)
-	_ = buildGoSampleBinary(t, filepath.Join(projectDir, "main.ard"))
-}
-
-func prepareTicTacToeLockCacheProject(t *testing.T, sourceProjectDir string) string {
-	t.Helper()
-	projectDir := t.TempDir()
-	for _, name := range []string{"main.ard"} {
-		copyFileForTest(t, filepath.Join(sourceProjectDir, name), filepath.Join(projectDir, name))
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"tic_tac_toe\"\nard = \">= 0.1.0\"\n\n"), 0o644); err != nil {
-		t.Fatalf("write temp tic-tac-toe manifest: %v", err)
-	}
-
-	cacheRoot := t.TempDir()
-	t.Setenv("ARD_CACHE_DIR", cacheRoot)
-	vaxisGit, vaxisCommit := createTicTacToeVaxisGitDependency(t)
-	manifest := fmt.Sprintf("name = \"tic_tac_toe\"\nard = \">= 0.1.0\"\n\n[dependencies]\nvaxis = { git = %q, commit = %q }\n", vaxisGit, vaxisCommit)
-	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte(manifest), 0o644); err != nil {
-		t.Fatalf("write temp tic-tac-toe dependency manifest: %v", err)
-	}
-	lock, err := checker.LockDependencyGraph(projectDir, "tic_tac_toe", "vaxis", checker.DependencyInfo{Alias: "vaxis", Git: vaxisGit, Commit: vaxisCommit, Requested: vaxisCommit}, "vaxis", vaxisCommit)
-	if err != nil {
-		t.Fatalf("lock temp tic-tac-toe dependency graph: %v", err)
-	}
-	if err := checker.WriteDependencyLock(projectDir, lock); err != nil {
-		t.Fatalf("write temp tic-tac-toe lock: %v", err)
-	}
-	return projectDir
-}
-
-func createTicTacToeVaxisGitDependency(t *testing.T) (string, string) {
-	t.Helper()
-	repo := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(repo, "ffi"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "ard.toml"), []byte("name = \"vaxis\"\nard = \">= 0.19.2\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "vaxis.ard"), []byte(`extern type Vaxis = "ffi.Vaxis"
-
-extern fn new(title: Str) Vaxis!Str = "New"
-
-extern fn close(vx: Vaxis) Void!Str = "Close"
-
-extern fn clear(vx: Vaxis) Void = "Clear"
-
-extern fn draw_text(vx: Vaxis, x: Int, y: Int, text: Str) Void = "DrawText"
-
-extern fn render(vx: Vaxis) Void!Str = "Render"
-
-extern fn read_key(vx: Vaxis) Str!Str = "ReadKey"
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "ffi", "host.go"), []byte(`package ffi
-
-type Vaxis struct{}
-
-func New(title string) (Vaxis, error) { return Vaxis{}, nil }
-func Close(vx Vaxis) error { return nil }
-func Clear(vx Vaxis) {}
-func DrawText(vx Vaxis, x int, y int, text string) {}
-func Render(vx Vaxis) error { return nil }
-func ReadKey(vx Vaxis) (string, error) { return "q", nil }
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGitForTest(t, repo, "init")
-	runGitForTest(t, repo, "add", ".")
-	runGitForTest(t, repo, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "init")
-	commit := strings.TrimSpace(runGitOutputForTest(t, repo, "rev-parse", "HEAD"))
-	return repo, commit
-}
-
-func TestRunServerExampleRoutes(t *testing.T) {
-	outputPath := buildGoSampleBinary(t, filepath.Join("..", "examples", "server", "main.ard"))
-
-	port := freeTCPPort(t)
-	cmd := exec.Command(outputPath)
-	cmd.Env = append(os.Environ(), fmt.Sprintf("PORT=%d", port))
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start server example: %v", err)
-	}
-	t.Cleanup(func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-			_, _ = cmd.Process.Wait()
-		}
-	})
-
-	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
-	waitForHTTPServer(t, baseURL)
-
-	assertHTTPResponse(t, http.MethodGet, baseURL+"/", "", http.StatusOK, "Hello, World!")
-	assertHTTPResponse(t, http.MethodGet, baseURL+"/me", "", http.StatusOK, "this is /me")
-	assertHTTPResponse(t, http.MethodGet, baseURL+"/error", "", http.StatusBadRequest, "Bad request")
-	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", `{"email":"ard@example.com"}`, http.StatusCreated, "Created user with email ard@example.com")
-	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", "", http.StatusBadRequest, "Missing request body")
-	assertHTTPResponse(t, http.MethodPost, baseURL+"/api/auth/sign-up", `{"name":"Ard"}`, http.StatusBadRequest, `Missing email: email: got Missing field "email", expected Field`)
-}
-
 func copyFileForTest(t *testing.T, src string, dst string) {
 	t.Helper()
 	data, err := os.ReadFile(src)
@@ -444,22 +328,6 @@ func copyFileForTest(t *testing.T, src string, dst string) {
 	if err := os.WriteFile(dst, data, 0o644); err != nil {
 		t.Fatalf("write %s: %v", dst, err)
 	}
-}
-
-func runGitForTest(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	_ = runGitOutputForTest(t, dir, args...)
-}
-
-func runGitOutputForTest(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
-	}
-	return string(output)
 }
 
 func buildGoSampleBinary(t *testing.T, sourcePath string) string {
@@ -498,56 +366,6 @@ func runGoSampleBinary(t *testing.T, sourcePath, stdin string) string {
 	}
 	return stdout.String()
 }
-
-func freeTCPPort(t *testing.T) int {
-	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen on free TCP port: %v", err)
-	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port
-}
-
-func waitForHTTPServer(t *testing.T, baseURL string) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := http.Get(baseURL + "/")
-		if err == nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("server at %s did not become ready", baseURL)
-}
-
-func assertHTTPResponse(t *testing.T, method, url, body string, wantStatus int, wantBody string) {
-	t.Helper()
-	req, err := http.NewRequest(method, url, strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("new request %s %s: %v", method, url, err)
-	}
-	if body != "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("%s %s: %v", method, url, err)
-	}
-	defer resp.Body.Close()
-	gotBodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read response body: %v", err)
-	}
-	gotBody := strings.TrimRight(string(gotBodyBytes), "\n")
-	if resp.StatusCode != wantStatus || gotBody != wantBody {
-		t.Fatalf("%s %s = (%d, %q), want (%d, %q)", method, url, resp.StatusCode, gotBody, wantStatus, wantBody)
-	}
-}
-
 func TestRunGoTargetModulesSample(t *testing.T) {
 	sourcePath := filepath.Join("samples", "modules.ard")
 	module, err := loadModule(sourcePath)
@@ -562,7 +380,6 @@ func TestRunGoTargetModulesSample(t *testing.T) {
 		t.Fatalf("run go modules sample: %v", err)
 	}
 }
-
 func TestBuildRejectsInvalidMainEntrypointSignature(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -601,7 +418,6 @@ func TestBuildRejectsInvalidMainEntrypointSignature(t *testing.T) {
 		})
 	}
 }
-
 func TestBuildGoBinary(t *testing.T) {
 	tempDir := t.TempDir()
 	sourcePath := filepath.Join(tempDir, "main.ard")
@@ -626,7 +442,6 @@ func TestBuildGoBinary(t *testing.T) {
 		t.Fatalf("stat built binary: %v", err)
 	}
 }
-
 func TestParseTestArgs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -699,7 +514,6 @@ func TestParseTestArgs(t *testing.T) {
 		})
 	}
 }
-
 func TestParseBuildArgs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -766,7 +580,6 @@ func TestParseBuildArgs(t *testing.T) {
 		})
 	}
 }
-
 func TestParseFormatArgs(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -833,7 +646,6 @@ func TestParseFormatArgs(t *testing.T) {
 		})
 	}
 }
-
 func TestFormatFile(t *testing.T) {
 	t.Run("writes formatted source", func(t *testing.T) {
 		dir := t.TempDir()
@@ -884,7 +696,6 @@ func TestFormatFile(t *testing.T) {
 		}
 	})
 }
-
 func TestFormatPath(t *testing.T) {
 	t.Run("formats directories recursively", func(t *testing.T) {
 		dir := t.TempDir()
@@ -914,7 +725,6 @@ func TestFormatPath(t *testing.T) {
 		}
 	})
 }
-
 func TestTestCommand(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")
@@ -988,7 +798,6 @@ test fn panics() Void!Str {
 		}
 	})
 }
-
 func TestTestCommandDisambiguatesSameNamedTestsInSingleRun(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")
@@ -1032,7 +841,6 @@ test fn same() Void!Str {
 		t.Fatalf("output missing same-named test display paths:\n%s", output)
 	}
 }
-
 func TestTestCommandSupportsImportedHelperWithCollidingGeneratedModuleName(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")
@@ -1075,45 +883,6 @@ test fn helper_module() Void!Str {
 		t.Fatalf("unexpected output:\n%s", output)
 	}
 }
-
-func TestTestCommandGoTargetSupportsProjectFFI(t *testing.T) {
-	dir := t.TempDir()
-	projectDir := filepath.Join(dir, "project")
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, "main.ard"), []byte(`use ard/testing
-
-extern fn lookup() Str = "demo.Lookup"
-
-test fn ffi_passes() Void!Str {
-  testing::assert(lookup() == "ok", "project ffi should run on the Go backend")
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, "ffi.go"), []byte(`package ffi
-
-func Lookup() string { return "ok" }
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var ok bool
-	output := captureStdout(t, func() {
-		ok = runTests(projectDir, "", false)
-	})
-	if !ok {
-		t.Fatalf("expected Go backend tests to pass\n%s", output)
-	}
-	if !strings.Contains(output, "✓") || !strings.Contains(output, "1 passed; 0 failed; 0 panicked") {
-		t.Fatalf("unexpected output:\n%s", output)
-	}
-}
-
 func TestTestCommandRespectsPrivateAccessInTestDir(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")
@@ -1156,7 +925,6 @@ test fn private_access() Void!Str {
 		t.Fatalf("unexpected output:\n%s", output)
 	}
 }
-
 func TestDependencyFromAddSpecGitHubCommit(t *testing.T) {
 	dep, err := dependencyFromAddSpec("github.com/akonwi/vaxis-ard@76f7c1b")
 	if err != nil {
@@ -1172,7 +940,6 @@ func TestDependencyFromAddSpecGitHubCommit(t *testing.T) {
 		t.Fatalf("commit/tag = %q/%q", dep.Commit, dep.Tag)
 	}
 }
-
 func TestDependencyFromAddSpecSSHTransport(t *testing.T) {
 	dep, err := dependencyFromAddSpec("git@github.com:akonwi/vaxis-ard.git@76f7c1b")
 	if err != nil {
@@ -1189,7 +956,6 @@ func TestDependencyFromAddSpecSSHTransport(t *testing.T) {
 		t.Fatalf("dep = %#v", dep)
 	}
 }
-
 func TestDependencyFromAddSpecGitHubHyphenShorthand(t *testing.T) {
 	dep, err := dependencyFromAddSpec("github.com/akonwi-vaxis-ard@76f7c1b")
 	if err != nil {
@@ -1199,7 +965,6 @@ func TestDependencyFromAddSpecGitHubHyphenShorthand(t *testing.T) {
 		t.Fatalf("dep = %#v", dep)
 	}
 }
-
 func TestParseManifestName(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
@@ -1211,7 +976,6 @@ func TestParseManifestName(t *testing.T) {
 		t.Fatalf("parseManifestName = %q, %v", name, ok)
 	}
 }
-
 func TestAddDependencyToManifest(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
@@ -1231,7 +995,6 @@ func TestAddDependencyToManifest(t *testing.T) {
 		t.Fatalf("manifest missing dependency:\n%s", got)
 	}
 }
-
 func TestReplaceDependencyInManifestRemovesOldAlias(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
@@ -1255,7 +1018,6 @@ func TestReplaceDependencyInManifestRemovesOldAlias(t *testing.T) {
 		t.Fatalf("manifest missing replacement or existing dependency:\n%s", got)
 	}
 }
-
 func TestDependencyAliasesForGitInManifestCanonicalizesRawEntries(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
@@ -1271,7 +1033,6 @@ func TestDependencyAliasesForGitInManifestCanonicalizesRawEntries(t *testing.T) 
 		t.Fatalf("aliases = %#v, want [old]", aliases)
 	}
 }
-
 func TestDependencyAliasesForGitCanonicalizesSource(t *testing.T) {
 	deps := map[string]checker.DependencyInfo{
 		"old":   {Alias: "old", Git: "https://github.com/akonwi/vaxis-ard"},
@@ -1282,7 +1043,6 @@ func TestDependencyAliasesForGitCanonicalizesSource(t *testing.T) {
 		t.Fatalf("aliases = %#v, want [old]", aliases)
 	}
 }
-
 func TestRemoveDependencyFromManifest(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")
@@ -1309,7 +1069,6 @@ func TestRemoveDependencyFromManifest(t *testing.T) {
 		t.Fatalf("manifest lost remaining dependencies:\n%s", got)
 	}
 }
-
 func TestRemoveDependencyFromManifestMissing(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")

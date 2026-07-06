@@ -1,25 +1,22 @@
 package gotarget
 
-//go:generate go run generate_ard_module_files.go
-
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"go/ast"
-	"go/parser"
 	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
-	goruntime "runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
-	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
-	"github.com/akonwi/ard/version"
+	runtimesrc "github.com/akonwi/ard/runtime"
+	"golang.org/x/mod/modfile"
 )
 
 type Options struct {
@@ -59,18 +56,19 @@ func GenerateSources(program *air.Program, options Options) (map[string][]byte, 
 }
 
 func RunProgram(program *air.Program, args []string, projectInfo ...*checker.ProjectInfo) error {
+	info := optionalProjectInfo(projectInfo)
 	workspaceDir, err := artifactWorkspace(inputPathFromCLIArgs(args), "run")
 	if err != nil {
 		return err
 	}
-	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: optionalProjectInfo(projectInfo)}); err != nil {
+	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: info}); err != nil {
 		return err
 	}
-	binaryPath := runBinaryPath(workspaceDir, optionalProjectInfo(projectInfo))
+	binaryPath := runBinaryPath(workspaceDir, info)
 	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
 		return err
 	}
-	if err := buildGeneratedProgram(workspaceDir, binaryPath); err != nil {
+	if err := buildGeneratedProgram(workspaceDir, binaryPath, goBuildTags(info)...); err != nil {
 		return err
 	}
 	cmd := exec.Command(binaryPath, programArgs(args)...)
@@ -84,11 +82,12 @@ func RunProgram(program *air.Program, args []string, projectInfo ...*checker.Pro
 }
 
 func BuildProgram(program *air.Program, outputPath string, projectInfo ...*checker.ProjectInfo) (string, error) {
+	info := optionalProjectInfo(projectInfo)
 	workspaceDir, err := artifactWorkspace(outputPath, "build")
 	if err != nil {
 		return "", err
 	}
-	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: optionalProjectInfo(projectInfo)}); err != nil {
+	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: info}); err != nil {
 		return "", err
 	}
 	if outputPath == "" {
@@ -98,25 +97,26 @@ func BuildProgram(program *air.Program, outputPath string, projectInfo ...*check
 	if err != nil {
 		return "", err
 	}
-	if err := buildGeneratedProgram(workspaceDir, absOutput); err != nil {
+	if err := buildGeneratedProgram(workspaceDir, absOutput, goBuildTags(info)...); err != nil {
 		return "", err
 	}
 	return absOutput, nil
 }
 
 func RunTests(program *air.Program, args []string, tests []TestCase, failFast bool, projectInfo ...*checker.ProjectInfo) ([]TestOutcome, error) {
+	info := optionalProjectInfo(projectInfo)
 	workspaceDir, err := artifactWorkspace(inputPathFromCLIArgs(args), "test")
 	if err != nil {
 		return nil, err
 	}
-	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: optionalProjectInfo(projectInfo), SuppressMain: true, IncludeTests: true}); err != nil {
+	if err := writeProgram(workspaceDir, program, Options{PackageName: "main", ProjectInfo: info, SuppressMain: true, IncludeTests: true}); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, "ard_tests.go"), []byte(renderTestRunner(program, tests, failFast)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceDir, "ard_tests.go"), []byte(renderTestRunner(program, tests, failFast, info)), 0o644); err != nil {
 		return nil, err
 	}
 	binaryPath := filepath.Join(workspaceDir, "ard-tests")
-	if err := buildGeneratedProgram(workspaceDir, binaryPath); err != nil {
+	if err := buildGeneratedProgram(workspaceDir, binaryPath, goBuildTags(info)...); err != nil {
 		return nil, err
 	}
 	resultPath := filepath.Join(workspaceDir, "test-results.json")
@@ -139,14 +139,103 @@ func RunTests(program *air.Program, args []string, tests []TestCase, failFast bo
 	return outcomes, nil
 }
 
-func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) string {
+func writeImportSpec(b *strings.Builder, alias string, defaultAlias string, importPath string) {
+	if alias == "" {
+		alias = defaultAlias
+	}
+	if alias == defaultAlias {
+		fmt.Fprintf(b, "\t%q\n", importPath)
+		return
+	}
+	fmt.Fprintf(b, "\t%s %q\n", alias, importPath)
+}
+
+type testRunnerImports struct {
+	std     map[string]string
+	modules map[air.ModuleID]string
+}
+
+func testRunnerImportAliases(program *air.Program, tests []TestCase) testRunnerImports {
+	imports := testRunnerImports{std: map[string]string{}, modules: map[air.ModuleID]string{}}
+	used := testRunnerReservedTopLevelNames(program)
+	for _, base := range []string{"json", "fmt", "os"} {
+		alias := base
+		for i := 1; used[alias]; i++ {
+			alias = fmt.Sprintf("%s_%d", base, i)
+		}
+		imports.std[base] = alias
+		used[alias] = true
+	}
+	if program == nil {
+		return imports
+	}
+	for _, test := range tests {
+		if test.Function < 0 || int(test.Function) >= len(program.Functions) {
+			continue
+		}
+		// Every module is its own package now, so the test runner (the sole
+		// `package main`) imports and qualifies all test functions (ADR 0031).
+		moduleID := program.Functions[test.Function].Module
+		if _, ok := imports.modules[moduleID]; ok {
+			continue
+		}
+		base := modulePackageName(program, moduleID)
+		alias := base
+		for i := 1; used[alias]; i++ {
+			alias = fmt.Sprintf("%s_%d", base, i)
+		}
+		imports.modules[moduleID] = alias
+		used[alias] = true
+	}
+	return imports
+}
+
+func testRunnerReservedTopLevelNames(program *air.Program) map[string]bool {
+	reserved := map[string]bool{"main": true, "ardRunTest": true, "ardTestOutcome": true}
+	if program == nil {
+		return reserved
+	}
+	traitLowerer := &lowerer{program: program}
+	for _, typ := range program.Types {
+		reserved[typeName(program, typ)] = true
+		for _, variant := range typ.Variants {
+			reserved[enumVariantName(program, typ, variant)] = true
+		}
+	}
+	for _, trait := range program.Traits {
+		reserved[traitLowerer.traitInterfaceTypeName(trait)] = true
+	}
+	for _, global := range program.Globals {
+		reserved[globalName(program, global)] = true
+	}
+	for _, fn := range program.Functions {
+		reserved[functionName(program, fn)] = true
+	}
+	return reserved
+}
+
+func renderTestRunner(program *air.Program, tests []TestCase, failFast bool, projectInfo *checker.ProjectInfo) string {
+	imports := testRunnerImportAliases(program, tests)
+	aliases := imports.std
 	var b strings.Builder
 	b.WriteString("package main\n\n")
 	b.WriteString("import (\n")
-	b.WriteString("\t\"encoding/json\"\n")
-	b.WriteString("\t\"fmt\"\n")
-	b.WriteString("\t\"os\"\n")
-	b.WriteString("\truntime \"github.com/akonwi/ard/runtime\"\n")
+	writeImportSpec(&b, aliases["json"], "json", "encoding/json")
+	writeImportSpec(&b, aliases["fmt"], "fmt", "fmt")
+	writeImportSpec(&b, aliases["os"], "os", "os")
+	moduleIDs := make([]int, 0, len(imports.modules))
+	for moduleID := range imports.modules {
+		moduleIDs = append(moduleIDs, int(moduleID))
+	}
+	sort.Ints(moduleIDs)
+	for _, moduleID := range moduleIDs {
+		id := air.ModuleID(moduleID)
+		projectName := ""
+		if projectInfo != nil {
+			projectName = projectInfo.ProjectName
+		}
+		writeImportSpec(&b, imports.modules[id], modulePackageName(program, id), moduleImportPathForProject(program, id, generatedModulePath(projectInfo), projectName))
+	}
 	b.WriteString(")\n\n")
 	b.WriteString("type ardTestOutcome struct {\n")
 	b.WriteString("\tName string `json:\"name\"`\n")
@@ -154,11 +243,11 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) str
 	b.WriteString("\tStatus string `json:\"status\"`\n")
 	b.WriteString("\tMessage string `json:\"message,omitempty\"`\n")
 	b.WriteString("}\n\n")
-	b.WriteString("func ardRunTest(name string, displayName string, fn func() runtime.Result[runtime.Void, string]) (out ardTestOutcome) {\n")
+	b.WriteString("func ardRunTest(name string, displayName string, fn func() error) (out ardTestOutcome) {\n")
 	b.WriteString("\tout = ardTestOutcome{Name: name, DisplayName: displayName, Status: \"panic\"}\n")
-	b.WriteString("\tdefer func() { if recovered := recover(); recovered != nil { out.Status = \"panic\"; out.Message = fmt.Sprint(recovered) } }()\n")
-	b.WriteString("\tresult := fn()\n")
-	b.WriteString("\tif result.Ok { out.Status = \"pass\"; out.Message = \"\" } else { out.Status = \"fail\"; out.Message = result.Err }\n")
+	fmt.Fprintf(&b, "\tdefer func() { if recovered := recover(); recovered != nil { out.Status = \"panic\"; out.Message = %s.Sprint(recovered) } }()\n", aliases["fmt"])
+	b.WriteString("\terr := fn()\n")
+	b.WriteString("\tif err == nil { out.Status = \"pass\"; out.Message = \"\" } else { out.Status = \"fail\"; out.Message = err.Error() }\n")
 	b.WriteString("\treturn out\n")
 	b.WriteString("}\n\n")
 	b.WriteString("func main() {\n")
@@ -168,7 +257,11 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) str
 			continue
 		}
 		fn := program.Functions[test.Function]
-		fmt.Fprintf(&b, "\toutcomes = append(outcomes, ardRunTest(%s, %s, %s))\n", strconv.Quote(test.Name), strconv.Quote(test.DisplayName), functionName(program, fn))
+		fnName := functionName(program, fn)
+		if alias := imports.modules[fn.Module]; alias != "" {
+			fnName = alias + "." + fnName
+		}
+		fmt.Fprintf(&b, "\toutcomes = append(outcomes, ardRunTest(%s, %s, %s))\n", strconv.Quote(test.Name), strconv.Quote(test.DisplayName), fnName)
 		if failFast {
 			b.WriteString("\tif outcomes[len(outcomes)-1].Status != \"pass\" { goto done }\n")
 		}
@@ -176,13 +269,13 @@ func renderTestRunner(program *air.Program, tests []TestCase, failFast bool) str
 	if failFast {
 		b.WriteString("done:\n")
 	}
-	b.WriteString("\tdata, err := json.Marshal(outcomes)\n")
-	b.WriteString("\tif err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }\n")
-	b.WriteString("\tif path := os.Getenv(\"ARD_TEST_RESULTS\"); path != \"\" {\n")
-	b.WriteString("\t\tif err := os.WriteFile(path, data, 0o644); err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }\n")
+	fmt.Fprintf(&b, "\tdata, err := %s.Marshal(outcomes)\n", aliases["json"])
+	fmt.Fprintf(&b, "\tif err != nil { %s.Fprintln(%s.Stderr, err); %s.Exit(1) }\n", aliases["fmt"], aliases["os"], aliases["os"])
+	fmt.Fprintf(&b, "\tif path := %s.Getenv(\"ARD_TEST_RESULTS\"); path != \"\" {\n", aliases["os"])
+	fmt.Fprintf(&b, "\t\tif err := %s.WriteFile(path, data, 0o644); err != nil { %s.Fprintln(%s.Stderr, err); %s.Exit(1) }\n", aliases["os"], aliases["fmt"], aliases["os"], aliases["os"])
 	b.WriteString("\t\treturn\n")
 	b.WriteString("\t}\n")
-	b.WriteString("\t_, _ = os.Stdout.Write(data)\n")
+	fmt.Fprintf(&b, "\t_, _ = %s.Stdout.Write(data)\n", aliases["os"])
 	b.WriteString("}\n")
 	return b.String()
 }
@@ -194,14 +287,17 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 	}
 	for name, source := range sources {
 		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
 		if err := os.WriteFile(path, source, 0o644); err != nil {
 			return err
 		}
 	}
-	if err := writeProjectFFICompanions(dir, program, options.ProjectInfo); err != nil {
+	if err := copyProjectFFIDir(dir, options.ProjectInfo); err != nil {
 		return err
 	}
-	if err := writeDependencyFFICompanions(dir, program, options.ProjectInfo); err != nil {
+	if err := writeGeneratedRuntimePackage(dir); err != nil {
 		return err
 	}
 	goMod, err := generatedGoMod(dir, program, options.ProjectInfo)
@@ -218,31 +314,87 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 }
 
 func generatedGoMod(dir string, program *air.Program, projectInfo *checker.ProjectInfo) (string, error) {
-	goMod := "module generated\n\ngo 1.26.0\n"
-	ardRequirement, err := writeArdModuleDependency(dir)
+	goMod, err := generatedGoModBase(projectInfo)
 	if err != nil {
 		return "", err
 	}
-	goMod += ardRequirement
-
 	requireSeen := requireKeys(goMod)
 	requires := make([]string, 0)
 	addDependencyGoModRequirements(&requires, requireSeen, program, projectInfo)
-	if programUsesProjectFFI(program, projectInfo) || projectUsesDirectGo(program, projectInfo) {
-		addProjectGoModRequirements(&requires, requireSeen, projectInfo)
-	}
-	addGoModRequirementsFromFile(&requires, requireSeen, filepath.Join(dir, "go.mod"))
 	goMod += formatRequireBlock(requires)
 
 	replaceSeen := replaceKeys(goMod)
 	replaces := make([]string, 0)
-	if programUsesProjectFFI(program, projectInfo) || projectUsesDirectGo(program, projectInfo) {
-		addProjectGoModReplaces(&replaces, replaceSeen, projectInfo)
-	}
 	addDependencyGoModReplaces(&replaces, replaceSeen, program, projectInfo)
-	addGoModReplacesFromFile(&replaces, replaceSeen, filepath.Join(dir, "go.mod"), dir)
 	goMod += formatReplaceBlock(replaces)
 	return goMod, nil
+}
+
+func generatedModulePath(projectInfo *checker.ProjectInfo) string {
+	if module := projectGoModuleName(projectInfo); module != "" {
+		return module
+	}
+	if projectInfo != nil && strings.TrimSpace(projectInfo.ProjectName) != "" {
+		return projectInfo.ProjectName
+	}
+	return "generated"
+}
+
+func generatedGoModBase(projectInfo *checker.ProjectInfo) (string, error) {
+	if projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
+		goModPath := filepath.Join(projectInfo.RootPath, "go.mod")
+		data, err := os.ReadFile(goModPath)
+		if err == nil {
+			rewritten, err := rewriteRelativeReplaces(data, projectInfo.RootPath)
+			if err != nil {
+				return "", err
+			}
+			return string(rewritten), nil
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		if strings.TrimSpace(projectInfo.ProjectName) != "" {
+			return fmt.Sprintf("module %s\n\ngo 1.26.0\n", projectInfo.ProjectName), nil
+		}
+	}
+	return "module generated\n\ngo 1.26.0\n", nil
+}
+
+func rewriteRelativeReplaces(data []byte, projectRoot string) ([]byte, error) {
+	file, err := modfile.Parse("go.mod", data, nil)
+	if err != nil {
+		return nil, err
+	}
+	type replacementRewrite struct {
+		oldPath    string
+		oldVersion string
+		newPath    string
+	}
+	rewrites := []replacementRewrite{}
+	for _, replace := range file.Replace {
+		if replace.New.Version != "" || !isRelativeLocalReplacePath(replace.New.Path) {
+			continue
+		}
+		abs, err := filepath.Abs(filepath.Join(projectRoot, replace.New.Path))
+		if err != nil {
+			return nil, err
+		}
+		rewrites = append(rewrites, replacementRewrite{oldPath: replace.Old.Path, oldVersion: replace.Old.Version, newPath: abs})
+	}
+	for _, rewrite := range rewrites {
+		if err := file.DropReplace(rewrite.oldPath, rewrite.oldVersion); err != nil {
+			return nil, err
+		}
+		if err := file.AddReplace(rewrite.oldPath, rewrite.oldVersion, rewrite.newPath, ""); err != nil {
+			return nil, err
+		}
+	}
+	return file.Format()
+}
+
+func isRelativeLocalReplacePath(path string) bool {
+	return strings.HasPrefix(path, "./") || strings.HasPrefix(path, "../") || path == "." || path == ".."
 }
 
 func addDependencyGoModRequirements(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
@@ -342,6 +494,25 @@ func addProjectGoModReplaces(out *[]string, seen map[string]bool, projectInfo *c
 	addGoModReplacesFromFile(out, seen, filepath.Join(projectInfo.RootPath, "go.mod"), projectInfo.RootPath)
 }
 
+// projectGoModuleName returns the module path declared in the project's go.mod,
+// or "" if the project has no Go module. This is the module that owns the
+func projectGoModuleName(projectInfo *checker.ProjectInfo) string {
+	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(projectInfo.RootPath, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(line, "module "); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
+
 func addDependencyGoModReplaces(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
 	for _, root := range dependencyGoModPackages(program, projectInfo) {
 		addGoModReplacesFromFile(out, seen, filepath.Join(root, "go.mod"), root)
@@ -358,13 +529,23 @@ func addGoModReplacesFromFile(out *[]string, seen map[string]bool, path string, 
 		if !ok {
 			continue
 		}
-		key := replaceKey(normalized)
-		if key == "" || replacedModulePath(key) == "github.com/akonwi/ard" || seen[key] {
-			continue
-		}
-		seen[key] = true
-		*out = append(*out, normalized)
+		addGoModReplace(out, seen, normalized)
 	}
+}
+
+func addGoModReplaces(out *[]string, seen map[string]bool, goMod string) {
+	for _, replace := range extractReplaceLines(goMod) {
+		addGoModReplace(out, seen, replace)
+	}
+}
+
+func addGoModReplace(out *[]string, seen map[string]bool, replace string) {
+	key := replaceKey(replace)
+	if key == "" || seen[key] {
+		return
+	}
+	seen[key] = true
+	*out = append(*out, replace)
 }
 
 func replaceKeys(goMod string) map[string]bool {
@@ -467,7 +648,7 @@ func mergeGoSum(dir string, program *air.Program, projectInfo *checker.ProjectIn
 	lines := make([]string, 0)
 	seen := map[string]bool{}
 	addGoSumLines(&lines, seen, goSumPath)
-	if (programUsesProjectFFI(program, projectInfo) || projectUsesDirectGo(program, projectInfo)) && projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
+	if projectInfo != nil && strings.TrimSpace(projectInfo.RootPath) != "" {
 		addGoSumLines(&lines, seen, filepath.Join(projectInfo.RootPath, "go.sum"))
 	}
 	for _, root := range dependencyGoModPackages(program, projectInfo) {
@@ -661,151 +842,13 @@ func artifactRootDir(pathHint string) (string, error) {
 	return candidate, nil
 }
 
-func writeProjectFFICompanions(dir string, program *air.Program, projectInfo *checker.ProjectInfo) error {
-	if !programUsesProjectFFI(program, projectInfo) {
-		return nil
-	}
-	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
-		return fmt.Errorf("go target uses project externs but project information is unavailable")
-	}
-	rootFile := filepath.Join(projectInfo.RootPath, "ffi.go")
-	dirMatches, err := filepath.Glob(filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
-	if err != nil {
-		return err
-	}
-	rootExists := fileExists(rootFile)
-	if rootExists && len(dirMatches) > 0 {
-		return fmt.Errorf("project Go FFI must use either %s or %s, not both", rootFile, filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
-	}
-	ffiDir := filepath.Join(dir, projectFFIPackageAlias(projectInfo))
-	if rootExists {
-		if err := copyProjectFFIFile(rootFile, filepath.Join(ffiDir, filepath.Base(rootFile))); err != nil {
-			return err
-		}
-		return nil
-	}
-	if len(dirMatches) > 0 {
-		for _, sourcePath := range dirMatches {
-			if err := copyProjectFFIFile(sourcePath, filepath.Join(ffiDir, filepath.Base(sourcePath))); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	return fmt.Errorf("go target uses project externs but no project Go FFI companion was found at %s or %s", rootFile, filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
-}
-
-func copyProjectFFIFile(sourcePath, destPath string) error {
-	content, err := os.ReadFile(sourcePath)
-	if err != nil {
-		return fmt.Errorf("read project Go FFI companion %s: %w", sourcePath, err)
-	}
-	file, err := parser.ParseFile(token.NewFileSet(), sourcePath, content, parser.PackageClauseOnly)
-	if err != nil {
-		return fmt.Errorf("parse project Go FFI companion %s: %w", sourcePath, err)
-	}
-	if file.Name == nil || file.Name.Name != "ffi" {
-		pkg := ""
-		if file.Name != nil {
-			pkg = file.Name.Name
-		}
-		return fmt.Errorf("project Go FFI companion %s must use package ffi, got package %s", sourcePath, pkg)
-	}
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(destPath, content, 0o644); err != nil {
-		return err
-	}
-	return nil
-}
-
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
 
-func writeDependencyFFICompanions(dir string, program *air.Program, projectInfo *checker.ProjectInfo) error {
-	if projectInfo == nil {
-		return nil
-	}
-	used := dependencyFFIPackages(program, projectInfo)
-	for key, root := range used {
-		matches, err := filepath.Glob(filepath.Join(root, "ffi", "*.go"))
-		if err != nil {
-			return err
-		}
-		if len(matches) == 0 {
-			return fmt.Errorf("go target uses dependency externs from %s but no Go FFI companion was found at %s", key, filepath.Join(root, "ffi", "*.go"))
-		}
-		ffiDir := filepath.Join(dir, "depffi", sanitizeName(key))
-		for _, sourcePath := range matches {
-			if err := copyProjectFFIFile(sourcePath, filepath.Join(ffiDir, filepath.Base(sourcePath))); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func dependencyGoModPackages(program *air.Program, projectInfo *checker.ProjectInfo) map[string]string {
-	used := dependencyFFIPackages(program, projectInfo)
-	for key, root := range dependencyDirectGoPackages(program, projectInfo) {
-		used[key] = root
-	}
-	return used
-}
-
-func dependencyDirectGoPackages(program *air.Program, projectInfo *checker.ProjectInfo) map[string]string {
-	used := map[string]string{}
-	if program == nil || projectInfo == nil {
-		return used
-	}
-	for _, ext := range program.Externs {
-		if !externHasDirectGoBinding(ext) {
-			continue
-		}
-		if key, root, ok := dependencyPackageForModulePath(modulePathForExtern(program, ext), projectInfo); ok {
-			used[key] = root
-		}
-	}
-	for _, module := range program.Modules {
-		if key, root, ok := dependencyPackageForModulePath(module.Path, projectInfo); ok && moduleUsesDirectGoTypes(program, module) {
-			used[key] = root
-		}
-	}
-	return used
-}
-
-func dependencyFFIPackages(program *air.Program, projectInfo *checker.ProjectInfo) map[string]string {
-	used := map[string]string{}
-	if program == nil || projectInfo == nil {
-		return used
-	}
-	for _, ext := range program.Externs {
-		if externHasDirectGoBinding(ext) {
-			continue
-		}
-		if key, root, ok := dependencyPackageForModulePath(modulePathForExtern(program, ext), projectInfo); ok {
-			used[key] = root
-		}
-	}
-	for _, typ := range program.Types {
-		if typ.Kind != air.TypeExtern || strings.TrimSpace(typ.ExternBinding) == "" || typeHasDirectGoBinding(typ) {
-			continue
-		}
-		if key, root, ok := dependencyPackageForModulePath(typ.ModulePath, projectInfo); ok {
-			used[key] = root
-		}
-	}
-	return used
-}
-
-func modulePathForExtern(program *air.Program, ext air.Extern) string {
-	if program != nil && int(ext.Module) >= 0 && int(ext.Module) < len(program.Modules) {
-		return program.Modules[ext.Module].Path
-	}
-	return ""
+	return map[string]string{}
 }
 
 func dependencyAliasForModulePath(modulePath string, projectInfo *checker.ProjectInfo) (string, bool) {
@@ -840,431 +883,104 @@ func dependencyPackageForModulePath(modulePath string, projectInfo *checker.Proj
 	return "", "", false
 }
 
-func programUsesProjectFFI(program *air.Program, projectInfo *checker.ProjectInfo) bool {
-	if program == nil {
-		return false
-	}
-	for _, ext := range program.Externs {
-		if externModuleIsStdlib(program, ext) {
-			continue
-		}
-		if externHasDirectGoBinding(ext) {
-			continue
-		}
-		if _, ok := dependencyAliasForModulePath(modulePathForExtern(program, ext), projectInfo); ok {
-			continue
-		}
-		return true
-	}
-	for _, typ := range program.Types {
-		if typ.Kind != air.TypeExtern || strings.HasPrefix(typ.ModulePath, "ard/") {
-			continue
-		}
-		if _, ok := dependencyAliasForModulePath(typ.ModulePath, projectInfo); ok {
-			continue
-		}
-		if externBindingUsesProjectFFIType(typ.ExternBinding, projectInfo) {
-			return true
-		}
-	}
-	return false
-}
-
-func externHasDirectGoBinding(ext air.Extern) bool {
-	if binding := strings.TrimSpace(ext.Bindings["go"]); strings.HasPrefix(binding, "go:") {
-		return true
-	}
-	return false
-}
-
-func typeHasDirectGoBinding(typ air.TypeInfo) bool {
-	return (typ.Kind == air.TypeExtern || typ.Kind == air.TypeEnum) && strings.HasPrefix(strings.TrimSpace(typ.ExternBinding), "go:")
-}
-
-func projectUsesDirectGo(program *air.Program, projectInfo *checker.ProjectInfo) bool {
-	if program == nil {
-		return false
-	}
-	for _, ext := range program.Externs {
-		if !externHasDirectGoBinding(ext) {
-			continue
-		}
-		modulePath := modulePathForExtern(program, ext)
-		if strings.HasPrefix(modulePath, "ard/") {
-			continue
-		}
-		if _, ok := dependencyAliasForModulePath(modulePath, projectInfo); ok {
-			continue
-		}
-		return true
-	}
-	for _, module := range program.Modules {
-		if strings.HasPrefix(module.Path, "ard/") {
-			continue
-		}
-		if _, ok := dependencyAliasForModulePath(module.Path, projectInfo); ok {
-			continue
-		}
-		if moduleInterfaceUsesDirectGoTypes(program, module) {
-			return true
-		}
-	}
-	return false
-}
-
-func moduleInterfaceUsesDirectGoTypes(program *air.Program, module air.Module) bool {
-	for _, typeID := range module.Types {
-		if typeUsesDirectGo(program, typeID, map[air.TypeID]bool{}) {
-			return true
-		}
-	}
-	for _, globalID := range module.Globals {
-		if int(globalID) < 0 || int(globalID) >= len(program.Globals) {
-			continue
-		}
-		if exprUsesDirectGoDirectly(program, &program.Globals[globalID].Value) {
-			return true
-		}
-	}
-	for _, functionID := range module.Functions {
-		if int(functionID) < 0 || int(functionID) >= len(program.Functions) {
-			continue
-		}
-		fn := program.Functions[functionID]
-		if signatureUsesDirectGo(program, fn.Signature) || blockUsesDirectGoDirectly(program, fn.Body) {
-			return true
-		}
-	}
-	return false
-}
-
-func moduleUsesDirectGoTypes(program *air.Program, module air.Module) bool {
-	for _, typeID := range module.Types {
-		if typeUsesDirectGo(program, typeID, map[air.TypeID]bool{}) {
-			return true
-		}
-	}
-	for _, globalID := range module.Globals {
-		if int(globalID) < 0 || int(globalID) >= len(program.Globals) {
-			continue
-		}
-		global := program.Globals[globalID]
-		if typeUsesDirectGo(program, global.Type, map[air.TypeID]bool{}) || exprUsesDirectGoDirectly(program, &global.Value) {
-			return true
-		}
-	}
-	for _, functionID := range module.Functions {
-		if int(functionID) < 0 || int(functionID) >= len(program.Functions) {
-			continue
-		}
-		fn := program.Functions[functionID]
-		if signatureUsesDirectGo(program, fn.Signature) || blockUsesDirectGoDirectly(program, fn.Body) {
-			return true
-		}
-		for _, local := range fn.Locals {
-			if typeUsesDirectGo(program, local.Type, map[air.TypeID]bool{}) {
-				return true
-			}
-		}
-		for _, capture := range fn.Captures {
-			if typeUsesDirectGo(program, capture.Type, map[air.TypeID]bool{}) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func signatureUsesDirectGo(program *air.Program, signature air.Signature) bool {
-	for _, param := range signature.Params {
-		if typeUsesDirectGo(program, param.Type, map[air.TypeID]bool{}) {
-			return true
-		}
-	}
-	return typeUsesDirectGo(program, signature.Return, map[air.TypeID]bool{})
-}
-
-func typeUsesDirectGo(program *air.Program, typeID air.TypeID, seen map[air.TypeID]bool) bool {
-	if program == nil || typeID == air.NoType || int(typeID) < 1 || int(typeID) > len(program.Types) {
-		return false
-	}
-	if seen[typeID] {
-		return false
-	}
-	seen[typeID] = true
-	typ := program.Types[typeID-1]
-	if typeHasDirectGoBinding(typ) {
-		return true
-	}
-	switch typ.Kind {
-	case air.TypeList, air.TypeMaybe:
-		return typeUsesDirectGo(program, typ.Elem, seen)
-	case air.TypeMap:
-		return typeUsesDirectGo(program, typ.Key, seen) || typeUsesDirectGo(program, typ.Value, seen)
-	case air.TypeResult:
-		return typeUsesDirectGo(program, typ.Value, seen) || typeUsesDirectGo(program, typ.Error, seen)
-	case air.TypeStruct:
-		for _, field := range typ.Fields {
-			if typeUsesDirectGo(program, field.Type, seen) {
-				return true
-			}
-		}
-	case air.TypeUnion:
-		for _, member := range typ.Members {
-			if typeUsesDirectGo(program, member.Type, seen) {
-				return true
-			}
-		}
-	case air.TypeFunction:
-		for _, param := range typ.Params {
-			if typeUsesDirectGo(program, param, seen) {
-				return true
-			}
-		}
-		return typeUsesDirectGo(program, typ.Return, seen)
-	}
-	return false
-}
-
-func exprUsesDirectGoDirectly(program *air.Program, expr *air.Expr) bool {
-	if program == nil || expr == nil {
-		return false
-	}
-	if expr.Kind == air.ExprCallExtern && int(expr.Extern) >= 0 && int(expr.Extern) < len(program.Externs) && externHasDirectGoBinding(program.Externs[expr.Extern]) {
-		return true
-	}
-	if expr.Kind == air.ExprDirectGoPackageValue || expr.Kind == air.ExprDirectGoFieldAccess || expr.Kind == air.ExprDirectGoStructLiteral {
-		return true
-	}
-	if expr.Kind == air.ExprEnumVariant && typeUsesDirectGo(program, expr.Type, map[air.TypeID]bool{}) {
-		return true
-	}
-	for i := range expr.Args {
-		if exprUsesDirectGoDirectly(program, &expr.Args[i]) {
-			return true
-		}
-	}
-	for i := range expr.Entries {
-		if exprUsesDirectGoDirectly(program, &expr.Entries[i].Key) || exprUsesDirectGoDirectly(program, &expr.Entries[i].Value) {
-			return true
-		}
-	}
-	for i := range expr.Fields {
-		if exprUsesDirectGoDirectly(program, &expr.Fields[i].Value) {
-			return true
-		}
-	}
-	if exprUsesDirectGoDirectly(program, expr.Target) || exprUsesDirectGoDirectly(program, expr.Left) || exprUsesDirectGoDirectly(program, expr.Right) || exprUsesDirectGoDirectly(program, expr.Condition) {
-		return true
-	}
-	if blockUsesDirectGoDirectly(program, expr.Body) || blockUsesDirectGoDirectly(program, expr.Then) || blockUsesDirectGoDirectly(program, expr.Else) || blockUsesDirectGoDirectly(program, expr.CatchAll) || blockUsesDirectGoDirectly(program, expr.Some) || blockUsesDirectGoDirectly(program, expr.None) || blockUsesDirectGoDirectly(program, expr.Ok) || blockUsesDirectGoDirectly(program, expr.Err) || blockUsesDirectGoDirectly(program, expr.Catch) {
-		return true
-	}
-	for i := range expr.EnumCases {
-		if blockUsesDirectGoDirectly(program, expr.EnumCases[i].Body) {
-			return true
-		}
-	}
-	for i := range expr.IntCases {
-		if blockUsesDirectGoDirectly(program, expr.IntCases[i].Body) {
-			return true
-		}
-	}
-	for i := range expr.StrCases {
-		if blockUsesDirectGoDirectly(program, expr.StrCases[i].Body) {
-			return true
-		}
-	}
-	for i := range expr.RangeCases {
-		if blockUsesDirectGoDirectly(program, expr.RangeCases[i].Body) {
-			return true
-		}
-	}
-	for i := range expr.UnionCases {
-		if blockUsesDirectGoDirectly(program, expr.UnionCases[i].Body) {
-			return true
-		}
-	}
-	return false
-}
-
-func blockUsesDirectGoDirectly(program *air.Program, block air.Block) bool {
-	for i := range block.Stmts {
-		stmt := &block.Stmts[i]
-		if exprUsesDirectGoDirectly(program, stmt.Value) || exprUsesDirectGoDirectly(program, stmt.Expr) || exprUsesDirectGoDirectly(program, stmt.Target) || exprUsesDirectGoDirectly(program, stmt.Condition) || blockUsesDirectGoDirectly(program, stmt.Body) {
-			return true
-		}
-	}
-	return exprUsesDirectGoDirectly(program, block.Result)
-}
-
-func externBindingUsesProjectFFIType(binding string, projectInfo *checker.ProjectInfo) bool {
-	expr, err := parser.ParseExpr(binding)
-	if err != nil {
-		return false
-	}
-	return exprUsesProjectFFIType(expr, projectFFIPackageAlias(projectInfo))
-}
-
-func exprUsesProjectFFIType(expr ast.Expr, projectAlias string) bool {
-	switch node := expr.(type) {
-	case *ast.Ident:
-		return false
-	case *ast.StarExpr:
-		return exprUsesProjectFFIType(node.X, projectAlias)
-	case *ast.ArrayType:
-		return exprUsesProjectFFIType(node.Elt, projectAlias)
-	case *ast.MapType:
-		return exprUsesProjectFFIType(node.Key, projectAlias) || exprUsesProjectFFIType(node.Value, projectAlias)
-	case *ast.IndexExpr:
-		return exprUsesProjectFFIType(node.X, projectAlias) || exprUsesProjectFFIType(node.Index, projectAlias)
-	case *ast.IndexListExpr:
-		if exprUsesProjectFFIType(node.X, projectAlias) {
-			return true
-		}
-		for _, index := range node.Indices {
-			if exprUsesProjectFFIType(index, projectAlias) {
-				return true
-			}
-		}
-		return false
-	case *ast.ParenExpr:
-		return exprUsesProjectFFIType(node.X, projectAlias)
-	case *ast.SelectorExpr:
-		ident, ok := node.X.(*ast.Ident)
-		return ok && ident.Name == projectAlias
-	default:
-		return false
-	}
-}
-
-func projectFFIPackageAlias(projectInfo *checker.ProjectInfo) string {
-	name := "project"
-	if projectInfo != nil {
-		name = sanitizeName(projectInfo.ProjectName)
-	}
-	if !token.IsIdentifier(name) {
-		return "project"
-	}
-	return name
-}
-
-func projectFFIImportPath(projectInfo *checker.ProjectInfo) string {
-	return "generated/" + projectFFIPackageAlias(projectInfo)
-}
-
-func registerProjectFFIImports(imports map[string]string, projectInfo *checker.ProjectInfo) {
-	imports[projectFFIPackageAlias(projectInfo)] = projectFFIImportPath(projectInfo)
-}
-
-func projectHasFFICompanions(projectInfo *checker.ProjectInfo) bool {
+func copyProjectFFIDir(outputDir string, projectInfo *checker.ProjectInfo) error {
 	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
-		return false
+		return nil
 	}
-	if fileExists(filepath.Join(projectInfo.RootPath, "ffi.go")) {
-		return true
+	source := filepath.Join(projectInfo.RootPath, "ffi")
+	info, err := os.Stat(source)
+	if os.IsNotExist(err) {
+		return nil
 	}
-	matches, err := filepath.Glob(filepath.Join(projectInfo.RootPath, "ffi", "*.go"))
-	return err == nil && len(matches) > 0
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("project ffi path is not a directory: %s", source)
+	}
+	return copyDir(source, filepath.Join(outputDir, "ffi"))
 }
 
-func externModuleIsStdlib(program *air.Program, ext air.Extern) bool {
-	if program != nil && int(ext.Module) >= 0 && int(ext.Module) < len(program.Modules) && strings.HasPrefix(program.Modules[ext.Module].Path, "ard/") {
-		return true
-	}
-	return stdlibGoBinding(goExternBinding(ext))
-}
-
-func goExternBinding(ext air.Extern) string {
-	if binding := ext.Bindings["go"]; binding != "" {
-		return binding
-	}
-	return ext.Name
-}
-
-var stdlibGoBindings = func() map[string]struct{} {
-	bindings := map[string]struct{}{}
-	for binding := range stdlibffi.HostFunctions {
-		bindings[binding] = struct{}{}
-	}
-	return bindings
-}()
-
-func stdlibGoBinding(binding string) bool {
-	if _, ok := stdlibGoBindings[binding]; ok {
-		return true
-	}
-	_, ok := generatedStdlibExternLowerings[binding]
-	return ok
-}
-
-func writeArdModuleDependency(dir string) (string, error) {
-	if releaseVersion := strings.TrimSpace(version.Get()); releaseVersion != "" && releaseVersion != "dev" {
-		moduleDir := filepath.Join(dir, ".ard", "ard-module")
-		if err := writeEmbeddedArdModule(moduleDir); err != nil {
-			return "", err
+func copyDir(source string, dest string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		return "\nrequire github.com/akonwi/ard v0.0.0\nreplace github.com/akonwi/ard => ./.ard/ard-module\n", nil
-	}
-	if moduleRoot, ok := compilerModuleRoot(); ok {
-		return fmt.Sprintf("\nrequire github.com/akonwi/ard v0.0.0\nreplace github.com/akonwi/ard => %s\n", moduleRoot), nil
-	}
-	return "", nil
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if entry.IsDir() {
+			if strings.HasPrefix(entry.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return os.MkdirAll(filepath.Join(dest, rel), 0o755)
+		}
+		if strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dest, rel)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
 }
 
-func writeEmbeddedArdModule(dir string) error {
-	for rel, content := range embeddedArdModuleFiles {
-		path := filepath.Join(dir, filepath.FromSlash(rel))
+func writeGeneratedRuntimePackage(dir string) error {
+	for _, name := range runtimesrc.SourceFileNames {
+		content, err := runtimesrc.SourceFiles.ReadFile(name)
+		if err != nil {
+			return err
+		}
+		content = bytes.Replace(content, []byte("package runtime"), []byte("package ard"), 1)
+		path := filepath.Join(dir, "internal", "ard", name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(path, content, 0o644); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func compilerModuleRoot() (string, bool) {
-	_, file, _, ok := goruntime.Caller(0)
-	if !ok {
-		return "", false
+func buildGeneratedProgram(dir string, outputPath string, buildTags ...string) error {
+	// The generated output imports encoding/json/v2 (union marshalling), so
+	// the jsonv2 experiment tag is part of the output contract and always
+	// applied here, regardless of caller or environment. The checker's
+	// go/packages resolution applies the same tag (checker.JSONV2BuildTag)
+	// so both sides see one build configuration.
+	tags := []string{checker.JSONV2BuildTag}
+	for _, tag := range buildTags {
+		if tag != checker.JSONV2BuildTag {
+			tags = append(tags, tag)
+		}
 	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), ".."))
-	if strings.TrimSpace(root) == "" {
-		return "", false
-	}
-	return root, true
-}
-
-func buildGeneratedProgram(dir string, outputPath string) error {
-	cmd := exec.Command("go", "build", "-tags=goexperiment.jsonv2", "-mod=mod", "-o", outputPath, ".")
+	args := []string{"build", "-mod=mod", "-o", outputPath, "-tags=" + strings.Join(tags, ",")}
+	args = append(args, ".")
+	cmd := exec.Command("go", args...)
 	cmd.Dir = dir
-	cmd.Env = appendGoExperimentJSONv2(os.Environ())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
-func appendGoExperimentJSONv2(env []string) []string {
-	for i, entry := range env {
-		if !strings.HasPrefix(entry, "GOEXPERIMENT=") {
-			continue
-		}
-		current := strings.TrimPrefix(entry, "GOEXPERIMENT=")
-		if current == "" {
-			env[i] = "GOEXPERIMENT=jsonv2"
-			return env
-		}
-		for _, experiment := range strings.Split(current, ",") {
-			if experiment == "jsonv2" {
-				return env
-			}
-		}
-		env[i] = entry + ",jsonv2"
-		return env
+func goBuildTags(projectInfo *checker.ProjectInfo) []string {
+	if projectInfo == nil || len(projectInfo.Go.BuildTags) == 0 {
+		return nil
 	}
-	return append(env, "GOEXPERIMENT=jsonv2")
+	return append([]string(nil), projectInfo.Go.BuildTags...)
 }
 
 func programArgs(args []string) []string {
@@ -1278,7 +994,14 @@ func defaultPackageName(name string) string {
 	if name == "" {
 		return "main"
 	}
-	return name
+	sanitized := sanitizeGoIdentifier(name)
+	if sanitized == "" || sanitized == "_" {
+		return "main"
+	}
+	if token.Lookup(sanitized) != token.IDENT {
+		return sanitized + "_"
+	}
+	return sanitized
 }
 
 func rootFunction(program *air.Program) (air.FunctionID, error) {

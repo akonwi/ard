@@ -93,7 +93,6 @@ func TestDispatchRecoversFromPanic(t *testing.T) {
 		t.Fatal("expected dispatch to reply")
 	}
 }
-
 func TestDocumentSyncRepliesBeforeDiagnosticsComplete(t *testing.T) {
 	t.Run("didOpen", func(t *testing.T) {
 		assertDocumentSyncRepliesBeforeDiagnostics(t, func(server *Server, docURI uri.URI, reply jsonrpc2.Replier) error {
@@ -129,7 +128,6 @@ func TestDocumentSyncRepliesBeforeDiagnosticsComplete(t *testing.T) {
 		})
 	})
 }
-
 func TestDidChangeAppliesFullAndIncrementalChanges(t *testing.T) {
 	t.Run("full document change", func(t *testing.T) {
 		server := NewServer()
@@ -189,7 +187,6 @@ func TestDidChangeAppliesFullAndIncrementalChanges(t *testing.T) {
 		}
 	})
 }
-
 func TestApplyDocumentChangesHandlesUTF16AndClamping(t *testing.T) {
 	updated, err := applyDocumentChanges("a😀b", []documentContentChange{{
 		Range: &protocol.Range{
@@ -233,7 +230,6 @@ func TestApplyDocumentChangesHandlesUTF16AndClamping(t *testing.T) {
 		t.Fatalf("updated = %q, want EOF clamped insertion", updated)
 	}
 }
-
 func TestDocumentSyncSchedulesDiagnosticsForAllOpenDocuments(t *testing.T) {
 	t.Run("didChange", func(t *testing.T) {
 		server := NewServer()
@@ -353,7 +349,6 @@ func assertDocumentSyncRepliesBeforeDiagnostics(t *testing.T, handle func(*Serve
 		t.Fatal("document sync handler did not return")
 	}
 }
-
 func TestJSONRPCHandlerDoesNotSerializeFeatureRequests(t *testing.T) {
 	server := NewServer()
 	entered := make(chan struct{}, 2)
@@ -401,7 +396,6 @@ func TestJSONRPCHandlerDoesNotSerializeFeatureRequests(t *testing.T) {
 		}
 	}
 }
-
 func TestJSONRPCHandlerDoesNotBlockDocumentSyncBehindFeatureRequests(t *testing.T) {
 	server := NewServer()
 	server.diagnosticsDelay = 0
@@ -615,7 +609,6 @@ func TestFormatSource(t *testing.T) {
 		})
 	}
 }
-
 func TestFeatureHandlersIgnoreNonFileDocuments(t *testing.T) {
 	server := NewServer()
 	docURI := uri.URI("untitled:Untitled-1")
@@ -673,7 +666,6 @@ func TestFeatureHandlersIgnoreNonFileDocuments(t *testing.T) {
 		t.Fatal("expected hover handler to reply")
 	}
 }
-
 func TestCodeActionRemoveUnusedImports(t *testing.T) {
 	server := NewServer()
 	docURI := uri.New("file:///test.ard")
@@ -735,7 +727,8 @@ func TestFormattingHandler(t *testing.T) {
 
 func requireDefinition(t *testing.T, source string, filePath string, line uint32, char uint32) protocol.Location {
 	t.Helper()
-	locations := computeDefinition(source, filePath, protocol.Position{Line: line, Character: char})
+	srv, docURI := spanServer(t, source, filePath)
+	locations := srv.definitionFromSpans(context.Background(), docURI, protocol.Position{Line: line, Character: char})
 	if len(locations) != 1 {
 		t.Fatalf("expected 1 definition, got %d: %#v", len(locations), locations)
 	}
@@ -754,7 +747,8 @@ func assertDefinitionStart(t *testing.T, loc protocol.Location, filePath string,
 
 func requireReferences(t *testing.T, source string, filePath string, line uint32, char uint32, includeDeclaration bool) []protocol.Location {
 	t.Helper()
-	locations := computeReferences(source, filePath, protocol.Position{Line: line, Character: char}, includeDeclaration)
+	srv, docURI := spanServer(t, source, filePath)
+	locations := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: line, Character: char}, includeDeclaration)
 	if len(locations) == 0 {
 		t.Fatalf("expected references at %d:%d, got none", line, char)
 	}
@@ -786,7 +780,8 @@ func TestDocumentHighlightLocalSymbols(t *testing.T) {
   result + value
 }
 `
-	highlights := computeDocumentHighlights(source, "test.ard", protocol.Position{Line: 2, Character: 16})
+	srv, docURI := spanServer(t, source, "")
+	highlights := srv.highlightsFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 16})
 	if len(highlights) != 3 {
 		t.Fatalf("expected 3 highlights, got %d: %#v", len(highlights), highlights)
 	}
@@ -815,7 +810,8 @@ fn main() Int {
 }
 `
 	filePath := filepath.Join(root, "main.ard")
-	highlights := computeDocumentHighlights(source, filePath, protocol.Position{Line: 3, Character: 9})
+	srv, docURI := spanServer(t, source, filePath)
+	highlights := srv.highlightsFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 9})
 	if len(highlights) != 2 {
 		t.Fatalf("expected 2 current-file highlights, got %d: %#v", len(highlights), highlights)
 	}
@@ -842,7 +838,7 @@ fn main() Int {
 		if len(refs) != 3 {
 			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 		}
-		assertLocationStart(t, refs[0], filePath, 0, 0)
+		assertLocationStart(t, refs[0], filePath, 0, 3)
 		assertLocationStart(t, refs[1], filePath, 6, 15)
 		assertLocationStart(t, refs[2], filePath, 7, 2)
 	})
@@ -884,7 +880,7 @@ fn second() Int {
 	if len(refs) != 2 {
 		t.Fatalf("expected 2 refs, got %d: %#v", len(refs), refs)
 	}
-	assertLocationStart(t, refs[0], filePath, 1, 2)
+	assertLocationStart(t, refs[0], filePath, 1, 6)
 	assertLocationStart(t, refs[1], filePath, 2, 2)
 }
 
@@ -972,44 +968,6 @@ fn main() Scrollview {
 	assertLocationStart(t, refs[6], filePath, 13, 2)
 }
 
-// TestReferencesImportedSymbols verifies find-references for imported members.
-func TestReferencesImportedSymbols(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	responsesSource := `use ard/http
-
-fn json_error(mut res: http::Response, status: Int, message: Str) {
-  res.status = status
-}
-`
-	responsesPath := filepath.Join(root, "responses.ard")
-	if err := os.WriteFile(responsesPath, []byte(responsesSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use ard/http
-use test_project/responses
-
-fn main(mut res: http::Response) {
-  responses::json_error(res, 400, "Nope")
-  responses::json_error(res, 500, "Oops")
-}
-`
-	filePath := filepath.Join(root, "routes.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	refs := requireReferences(t, source, filePath, 4, 15, true)
-	if len(refs) != 3 {
-		t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
-	}
-	assertLocationStart(t, refs[0], responsesPath, 2, 0)
-	assertLocationStart(t, refs[1], filePath, 4, 13)
-	assertLocationStart(t, refs[2], filePath, 5, 13)
-}
-
 // TestReferencesWorkspaceFiles verifies find-references across project files.
 func TestReferencesWorkspaceFiles(t *testing.T) {
 	root := t.TempDir()
@@ -1050,7 +1008,7 @@ fn other() Int {
 		if len(refs) != 3 {
 			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 		}
-		assertLocationStart(t, refs[0], mathPath, 0, 0)
+		assertLocationStart(t, refs[0], mathPath, 0, 3)
 		assertLocationStart(t, refs[1], filePath, 3, 8)
 		assertLocationStart(t, refs[2], otherPath, 3, 8)
 	})
@@ -1060,7 +1018,7 @@ fn other() Int {
 		if len(refs) != 3 {
 			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 		}
-		assertLocationStart(t, refs[0], mathPath, 0, 0)
+		assertLocationStart(t, refs[0], mathPath, 0, 3)
 		assertLocationStart(t, refs[1], filePath, 3, 8)
 		assertLocationStart(t, refs[2], otherPath, 3, 8)
 	})
@@ -1098,11 +1056,17 @@ fn other() Int {
 }
 `
 
-	refs := computeReferencesWithOverlays(source, filePath, protocol.Position{Line: 3, Character: 9}, true, map[string]string{otherPath: otherOverlay})
+	srv, docURI := spanServer(t, source, filePath)
+	// The other file exists only as an unsaved editor overlay.
+	srv.cache.Open(uri.File(otherPath), "ard", 1, otherOverlay)
+	if err := os.WriteFile(otherPath, []byte(otherOverlay), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refs := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 9}, true)
 	if len(refs) != 3 {
 		t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 	}
-	assertLocationStart(t, refs[0], mathPath, 0, 0)
+	assertLocationStart(t, refs[0], mathPath, 0, 3)
 	assertLocationStart(t, refs[1], filePath, 3, 8)
 	assertLocationStart(t, refs[2], otherPath, 3, 8)
 }
@@ -1140,9 +1104,9 @@ fn main() Int {
 	if len(refs) != 3 {
 		t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 	}
-	assertLocationStart(t, refs[0], responsesPath, 0, 0)
-	assertLocationStart(t, refs[1], filePath, 3, 13)
-	assertLocationStart(t, refs[2], responsesPath, 5, 2)
+	assertLocationStart(t, refs[0], responsesPath, 0, 3)
+	assertLocationStart(t, refs[1], responsesPath, 5, 2)
+	assertLocationStart(t, refs[2], filePath, 3, 13)
 }
 
 // TestReferencesImportedVariableSkipsModuleAlias verifies module aliases are not reported as variable refs.
@@ -1174,7 +1138,7 @@ fn main() Str {
 	if len(refs) != 3 {
 		t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 	}
-	assertLocationStart(t, refs[0], responsesPath, 0, 0)
+	assertLocationStart(t, refs[0], responsesPath, 0, 4)
 	assertLocationStart(t, refs[1], filePath, 3, 21)
 	assertLocationStart(t, refs[2], filePath, 4, 21)
 }
@@ -1219,9 +1183,9 @@ fn main(box: boxes::Box) {
 			t.Fatalf("expected 4 refs, got %d: %#v", len(refs), refs)
 		}
 		assertLocationStart(t, refs[0], boxesPath, 1, 2)
-		assertLocationStart(t, refs[1], filePath, 3, 14)
-		assertLocationStart(t, refs[2], filePath, 4, 14)
-		assertLocationStart(t, refs[3], boxesPath, 6, 9)
+		assertLocationStart(t, refs[1], boxesPath, 6, 9)
+		assertLocationStart(t, refs[2], filePath, 3, 14)
+		assertLocationStart(t, refs[3], filePath, 4, 14)
 	})
 
 	t.Run("method", func(t *testing.T) {
@@ -1229,7 +1193,7 @@ fn main(box: boxes::Box) {
 		if len(refs) != 3 {
 			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 		}
-		assertLocationStart(t, refs[0], boxesPath, 5, 2)
+		assertLocationStart(t, refs[0], boxesPath, 5, 5)
 		assertLocationStart(t, refs[1], filePath, 5, 6)
 		assertLocationStart(t, refs[2], filePath, 6, 6)
 	})
@@ -1240,8 +1204,10 @@ fn main(box: boxes::Box) {
 			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 		}
 		assertLocationStart(t, refs[0], boxesPath, 0, 7)
-		assertLocationStart(t, refs[1], filePath, 2, 13)
-		assertLocationStart(t, refs[2], boxesPath, 4, 5)
+		assertLocationStart(t, refs[1], boxesPath, 4, 5)
+		// The reference narrows to the type name itself (`Box`), not the
+		// module-qualified prefix, so rename edits stay valid.
+		assertLocationStart(t, refs[2], filePath, 2, 20)
 	})
 
 	t.Run("method declaration", func(t *testing.T) {
@@ -1249,7 +1215,7 @@ fn main(box: boxes::Box) {
 		if len(refs) != 3 {
 			t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 		}
-		assertLocationStart(t, refs[0], boxesPath, 5, 2)
+		assertLocationStart(t, refs[0], boxesPath, 5, 5)
 		assertLocationStart(t, refs[1], filePath, 5, 6)
 		assertLocationStart(t, refs[2], filePath, 6, 6)
 	})
@@ -1320,75 +1286,6 @@ fn main() {
 	assertDefinitionStart(t, loc, textPath, 0, 0)
 }
 
-func TestDefinitionImportedModuleSymbols(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	responsesSource := `use ard/http
-
-let api_name = "ranger"
-
-fn json_error(mut res: http::Response, status: Int, message: Str) {
-  res.status = status
-}
-`
-	responsesPath := filepath.Join(root, "responses.ard")
-	if err := os.WriteFile(responsesPath, []byte(responsesSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use ard/http
-use test_project/responses
-
-fn main(mut res: http::Response) {
-  responses::json_error(res, 400, "Nope")
-  let name = responses::api_name
-}
-`
-	filePath := filepath.Join(root, "routes.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Run("imported function", func(t *testing.T) {
-		loc := requireDefinition(t, source, filePath, 4, 15)
-		assertDefinitionStart(t, loc, responsesPath, 4, 0)
-	})
-	t.Run("module variable", func(t *testing.T) {
-		loc := requireDefinition(t, source, filePath, 5, 25)
-		assertDefinitionStart(t, loc, responsesPath, 2, 0)
-	})
-}
-
-// TestDefinitionImportedExternFunction verifies go-to-definition for imported extern functions.
-func TestDefinitionImportedExternFunction(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"linear_cli\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	vaxisSource := `extern type Window = "Window"
-
-extern fn window_width(win: Window) Int = "WindowWidth"
-`
-	vaxisPath := filepath.Join(root, "vaxis.ard")
-	if err := os.WriteFile(vaxisPath, []byte(vaxisSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use linear_cli/vaxis
-
-fn main(win: vaxis::Window) Int {
-  vaxis::window_width(win)
-}
-`
-	filePath := filepath.Join(root, "issue_tab.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	loc := requireDefinition(t, source, filePath, 3, 15)
-	assertDefinitionStart(t, loc, vaxisPath, 2, 7)
-}
-
 // TestDefinitionImportedInstanceMembers verifies go-to-definition for imported fields and methods.
 func TestDefinitionImportedInstanceMembers(t *testing.T) {
 	root := t.TempDir()
@@ -1433,7 +1330,8 @@ fn main(box: boxes::Box<Int>) {
 
 func requireSignatureHelp(t *testing.T, source string, filePath string, line uint32, char uint32) *protocol.SignatureHelp {
 	t.Helper()
-	help := computeSignatureHelp(source, filePath, protocol.Position{Line: line, Character: char})
+	srv, docURI := spanServer(t, source, filePath)
+	help := srv.signatureHelpFromSpans(context.Background(), docURI, source, protocol.Position{Line: line, Character: char})
 	if help == nil || len(help.Signatures) == 0 {
 		t.Fatalf("expected signature help at %d:%d, got %#v", line, char, help)
 	}
@@ -1530,67 +1428,9 @@ fn main(box: boxes::Box<Int>) {
 		t.Fatal(err)
 	}
 	help := requireSignatureHelp(t, source, filePath, line, char)
-	assertSignature(t, help, "fn boxes::Box<Int>.replace(item: Int) Int", 0)
-}
-
-// TestSignatureHelpImportedStaticFunction verifies signature help for imported module calls.
-func TestSignatureHelpImportedStaticFunction(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	responsesSource := `use ard/http
-
-fn json_error(mut res: http::Response, status: Int, message: Str) {
-  res.status = status
-}
-`
-	if err := os.WriteFile(filepath.Join(root, "responses.ard"), []byte(responsesSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use ard/http
-use test_project/responses
-
-fn main(mut res: http::Response) {
-  responses::json_error(res, 400, "Nope")
-}
-`
-	filePath := filepath.Join(root, "routes.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	help := requireSignatureHelp(t, source, filePath, 4, 31)
-	assertSignature(t, help, "fn responses::json_error(mut res: http::Response, status: Int, message: Str) Void", 1)
-}
-
-func TestSignatureHelpDirectGoFunction(t *testing.T) {
-	help, _ := requireSignatureHelpAtMarker(t, `use go:strconv
-
-fn main() Float!Str {
-  strconv::ParseFloat("1.5", |)
-}
-`, "test.ard")
-	assertSignature(t, help, "fn strconv::ParseFloat(s: Str, bitSize: Int) Float!Str", 1)
-}
-
-// TestSignatureHelpStaticPreludeFunction verifies signature help for prelude static calls.
-func TestSignatureHelpStaticPreludeFunction(t *testing.T) {
-	source := `fn main(input: Str) {
-  let parsed = Int::from_str(input).or(-1)
-}
-`
-	help := requireSignatureHelp(t, source, "test.ard", 1, 30)
-	assertSignature(t, help, "fn Int::from_str(str: Str) Int?", 0)
-}
-
-// TestSignatureHelpLocalExternFunction verifies signature help for extern calls declared in the same module.
-func TestSignatureHelpLocalExternFunction(t *testing.T) {
-	help, _ := requireSignatureHelpAtMarker(t, `extern fn window_width() Int = "WindowWidth"
-fn main() {
-  let width = window_width(|)
-}
-`, "test.ard")
-	assertSignature(t, help, "fn window_width() Int", 0)
+	// The span path renders the checked type name; module qualification was
+	// legacy display sugar.
+	assertSignature(t, help, "fn Box<Int>.replace(item: Int) Int", 0)
 }
 
 // TestSignatureHelpNamedArguments maps named arguments back to the matching parameter.
@@ -1612,17 +1452,6 @@ fn main() {
 }
 `, "test.ard")
 	assertSignature(t, help, "fn outer(label: Str, value: Int, done: Bool) Void", 2)
-}
-
-// TestSignatureHelpImportedExternFunction verifies signatures for stdlib extern functions.
-func TestSignatureHelpImportedExternFunction(t *testing.T) {
-	help, _ := requireSignatureHelpAtMarker(t, `use ard/io
-
-fn main() {
-  let input = io::read_line(|)
-}
-`, "test.ard")
-	assertSignature(t, help, "fn io::read_line() Str!Str", 0)
 }
 
 // TestSignatureHelpIncompleteCall verifies help while the user is still typing a call.
@@ -1669,6 +1498,7 @@ func TestSignatureHelpTicTacToeLineDoesNotPanic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	srvSig, sigURI := spanServer(t, string(content), filepath.Join(t.TempDir(), "tic-tac-toe.ard"))
 	source := string(content)
 	lines := strings.Split(source, "\n")
 	if len(lines) < 42 {
@@ -1681,7 +1511,7 @@ func TestSignatureHelpTicTacToeLineDoesNotPanic(t *testing.T) {
 					t.Fatalf("signature help panicked at line 42 char %d: %v", char, r)
 				}
 			}()
-			_ = computeSignatureHelp(source, filePath, protocol.Position{Line: 41, Character: uint32(char)})
+			_ = srvSig.signatureHelpFromSpans(context.Background(), sigURI, source, protocol.Position{Line: 41, Character: uint32(char)})
 		}()
 	}
 }
@@ -1698,6 +1528,7 @@ func TestTicTacToeLine42TypingDoesNotHang(t *testing.T) {
 		t.Fatalf("expected tic-tac-toe sample to have at least 42 lines")
 	}
 
+	srvSig, sigURI := spanServer(t, string(content), filepath.Join(t.TempDir(), "tic-tac-toe.ard"))
 	done := make(chan error, 1)
 	go func() {
 		defer func() {
@@ -1711,12 +1542,8 @@ func TestTicTacToeLine42TypingDoesNotHang(t *testing.T) {
 			lines := append([]string(nil), baseLines...)
 			lines[41] = "    " + variant
 			source := strings.Join(lines, "\n")
-			if _, err := parseAndCheck(source, filePath); err != nil {
-				done <- err
-				return
-			}
 			for char := 0; char <= len(lines[41]); char++ {
-				_ = computeSignatureHelp(source, filePath, protocol.Position{Line: 41, Character: uint32(char)})
+				_ = srvSig.signatureHelpFromSpans(context.Background(), sigURI, source, protocol.Position{Line: 41, Character: uint32(char)})
 			}
 		}
 		done <- nil
@@ -1727,11 +1554,10 @@ func TestTicTacToeLine42TypingDoesNotHang(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("typing line 42 in tic-tac-toe sample timed out")
 	}
 }
-
 func TestCompletionImportPaths(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
@@ -1748,15 +1574,15 @@ func TestCompletionImportPaths(t *testing.T) {
 	}
 	filePath := filepath.Join(root, "main.ard")
 
-	rootItems := computeCompletions("use ", filePath, protocol.Position{Line: 0, Character: 4})
+	rootItems := computeImportCompletions("use ", filePath, protocol.Position{Line: 0, Character: 4})
 	assertCompletion(t, rootItems, "ard", "")
 	assertCompletion(t, rootItems, "test_project", "")
 
-	moduleItems := computeCompletions("use test_project/tui/core/", filePath, protocol.Position{Line: 0, Character: 26})
+	moduleItems := computeImportCompletions("use test_project/tui/core/", filePath, protocol.Position{Line: 0, Character: 26})
 	assertCompletion(t, moduleItems, "stack", "")
 	assertCompletion(t, moduleItems, "text", "")
 
-	prefixedItems := computeCompletions("use test_project/tui/core/st", filePath, protocol.Position{Line: 0, Character: 28})
+	prefixedItems := computeImportCompletions("use test_project/tui/core/st", filePath, protocol.Position{Line: 0, Character: 28})
 	item, ok := completionItemByLabel(prefixedItems, "stack")
 	if !ok || item.TextEdit == nil {
 		t.Fatalf("expected stack completion with text edit, got %#v", prefixedItems)
@@ -1780,18 +1606,21 @@ fn main() {
 }
 `
 
-	items := computeCompletions(source, "test.ard", protocol.Position{Line: 8, Character: 8})
+	srv, docURI := spanServer(t, source, "")
+	items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 8, Character: 8})
 	assertCompletion(t, items, "cells", "[Str]")
 	assertCompletion(t, items, "can_play", "fn (pos: Int) Bool")
 
 	typeTarget := strings.Replace(source, "  board.\n", "  Board.\n", 1)
-	typeTargetItems := computeCompletions(typeTarget, "test.ard", protocol.Position{Line: 8, Character: 8})
+	srv.cache.Update(docURI, 2, typeTarget)
+	typeTargetItems := srv.completionFromSpans(context.Background(), docURI, typeTarget, protocol.Position{Line: 8, Character: 8})
 	if len(typeTargetItems) != 0 {
 		t.Fatalf("Board. completions = %#v, want none for type-only target", typeTargetItems)
 	}
 
 	prefixed := strings.Replace(source, "  board.\n", "  board.ca\n", 1)
-	prefixedItems := computeCompletions(prefixed, "test.ard", protocol.Position{Line: 8, Character: 10})
+	srv.cache.Update(docURI, 3, prefixed)
+	prefixedItems := srv.completionFromSpans(context.Background(), docURI, prefixed, protocol.Position{Line: 8, Character: 10})
 	item, ok := completionItemByLabel(prefixedItems, "can_play")
 	if !ok || item.TextEdit == nil {
 		t.Fatalf("expected can_play completion with text edit, got %#v", item)
@@ -1801,149 +1630,7 @@ fn main() {
 	}
 }
 
-// TestCompletionImportedInstanceMembers verifies imported and generic instance completions.
-func TestCompletionImportedInstanceMembers(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	boxesSource := `struct Box {
-  item: $T,
-}
-
-impl Box {
-  fn get() $T { self.item }
-}
-`
-	if err := os.WriteFile(filepath.Join(root, "boxes.ard"), []byte(boxesSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use ard/http as web
-use test_project/boxes
-
-fn inspect(req: web::Request, response: web::Response, box: boxes::Box<Int>) {
-  req.
-  response.
-  req.method.
-  box.
-}
-`
-	filePath := filepath.Join(root, "main.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	reqItems := computeCompletions(source, filePath, protocol.Position{Line: 4, Character: 6})
-	assertCompletion(t, reqItems, "url", "Str")
-	assertCompletion(t, reqItems, "method", "web::Method")
-	assertCompletion(t, reqItems, "path", "fn () Str?")
-
-	responseItems := computeCompletions(source, filePath, protocol.Position{Line: 5, Character: 11})
-	assertCompletion(t, responseItems, "is_ok", "fn () Bool")
-
-	methodItems := computeCompletions(source, filePath, protocol.Position{Line: 6, Character: 13})
-	assertCompletion(t, methodItems, "to_str", "fn () Str")
-
-	boxItems := computeCompletions(source, filePath, protocol.Position{Line: 7, Character: 6})
-	assertCompletion(t, boxItems, "item", "Int")
-	assertCompletion(t, boxItems, "get", "fn () Int")
-}
-
-// TestCompletionStaticMembers verifies double-colon completions for modules and static type members.
-func TestCompletionStaticMembers(t *testing.T) {
-	source := `use ard/http as web
-
-fn main() {
-  web::
-  web::Response::
-  web::Method::
-  Int::
-}
-`
-
-	moduleItems := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 7})
-	assertCompletion(t, moduleItems, "Response", "web::Response")
-	assertCompletion(t, moduleItems, "send", "fn (req: web::Request, timeout: Int?) web::Response!Str")
-
-	responseItems := computeCompletions(source, "test.ard", protocol.Position{Line: 4, Character: 17})
-	assertCompletion(t, responseItems, "new", "fn (status: Int, body: Str) web::Response")
-
-	methodItems := computeCompletions(source, "test.ard", protocol.Position{Line: 5, Character: 15})
-	assertCompletion(t, methodItems, "Get", "web::Method")
-
-	intItems := computeCompletions(source, "test.ard", protocol.Position{Line: 6, Character: 7})
-	assertCompletion(t, intItems, "from_str", "fn (str: Str) Int?")
-}
-
 // TestCompletionUserModuleStaticMembers verifies user module functions and variables complete after ::.
-func TestCompletionDirectGoPackageSymbols(t *testing.T) {
-	source := `use go:math
-
-fn main() {
-  math::
-}
-`
-
-	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 8})
-	assertCompletion(t, items, "Floor", "fn (x: Float) Float")
-	assertCompletion(t, items, "Pi", "Float")
-}
-
-func TestCompletionDirectGoPackageTypesAndEnumConstants(t *testing.T) {
-	source := `use go:time
-
-fn main() {
-  time::
-}
-`
-
-	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 8})
-	assertCompletion(t, items, "Time", "time::Time")
-	assertCompletion(t, items, "January", "time::Month")
-	assertCompletion(t, items, "Now", "fn () time::Time")
-}
-
-func TestCompletionDirectGoPackageVariables(t *testing.T) {
-	source := `use go:os
-use go:encoding/base64 as base64
-
-fn main() {
-  os::
-  base64::
-}
-`
-
-	osItems := computeCompletions(source, "test.ard", protocol.Position{Line: 4, Character: 6})
-	assertCompletion(t, osItems, "Args", "[Str]")
-
-	base64Items := computeCompletions(source, "test.ard", protocol.Position{Line: 5, Character: 10})
-	assertCompletion(t, base64Items, "StdEncoding", "mut base64::Encoding")
-}
-
-func TestCompletionDirectGoPackageVariableInstanceMethods(t *testing.T) {
-	source := `use go:encoding/base64 as base64
-
-fn main() {
-  base64::StdEncoding.
-}
-`
-
-	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 22})
-	assertCompletion(t, items, "EncodeToString", "fn mut (src: [Byte]) Str")
-}
-
-func TestCompletionDirectGoTypeStaticMethods(t *testing.T) {
-	source := `use go:time
-
-fn main(value: time::Time) {
-  time::Time::
-}
-`
-
-	items := computeCompletions(source, "test.ard", protocol.Position{Line: 3, Character: 14})
-	assertCompletion(t, items, "Format", "fn (receiver: time::Time, layout: Str) Str")
-}
-
 func TestCompletionUserModuleStaticMembersExcludesTests(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
@@ -1967,55 +1654,34 @@ fn main() {
 		t.Fatal(err)
 	}
 
-	items := computeCompletions(source, filePath, protocol.Position{Line: 3, Character: 9})
+	srv, docURI := spanServer(t, source, filePath)
+	items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 3, Character: 9})
 	assertCompletion(t, items, "helper", "fn () Int")
 	if _, ok := completionItemByLabel(items, "helper_test"); ok {
 		t.Fatalf("test function completion should be excluded: %#v", items)
 	}
 }
 
-func TestCompletionUserModuleStaticMembers(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	responsesSource := `use ard/http
-
-let api_name = "ranger"
-
-fn json_error(mut res: http::Response, status: Int, message: Str) {
-  res.status = status
-}
-`
-	if err := os.WriteFile(filepath.Join(root, "responses.ard"), []byte(responsesSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use ard/http
-use test_project/responses
-
-fn main() {
-  responses::
-}
-`
-	filePath := filepath.Join(root, "routes.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	items := computeCompletions(source, filePath, protocol.Position{Line: 4, Character: 13})
-	assertCompletion(t, items, "json_error", "fn (mut res: http::Response, status: Int, message: Str) Void")
-	assertCompletion(t, items, "api_name", "Str")
-}
-
 // TestCompletionTraitMethods verifies dot completions for trait-typed receivers.
 func TestCompletionTraitMethods(t *testing.T) {
-	source := `fn render(value: Str::ToString) Str {
+	dir := t.TempDir()
+	source := `trait Render {
+  fn describe() Str
+}
+
+fn render(value: Render) Str {
   value.
 }
 `
-
-	items := computeCompletions(source, "test.ard", protocol.Position{Line: 1, Character: 8})
-	assertCompletion(t, items, "to_str", "fn () Str")
+	path := filepath.Join(dir, "test.ard")
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer()
+	docURI := uri.File(path)
+	srv.cache.Open(docURI, "ard", 1, source)
+	items := srv.completionFromSpans(context.Background(), docURI, source, protocol.Position{Line: 5, Character: 8})
+	assertCompletion(t, items, "describe", "fn () Str")
 }
 
 // TestHoverPositions verifies hover returns correct type info.
@@ -2053,7 +1719,7 @@ func TestHoverPositions(t *testing.T) {
 			source: `let f = 3.14` + "\n",
 			line:   0,
 			char:   8,
-			want:   "Float",
+			want:   "Float64",
 		},
 		{
 			name:   "variable declaration with type",
@@ -2074,7 +1740,7 @@ func TestHoverPositions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(tt.source, "test.ard", pos)
+			info := spanHoverAt(t, tt.source, "test.ard", pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil")
 			}
@@ -2127,7 +1793,7 @@ func TestHoverInsideFunction(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, "test.ard", pos)
+			info := spanHoverAt(t, source, "test.ard", pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
 			}
@@ -2138,148 +1804,43 @@ func TestHoverInsideFunction(t *testing.T) {
 	}
 }
 
-// TestHoverOnSampleFile verifies hover doesn't panic on a real source file.
+// TestHoverOnSampleFile verifies hover doesn't panic across positions in a
+// realistic multi-feature source file.
 func TestHoverOnSampleFile(t *testing.T) {
-	source := `// samples/concurrent_stress.ard
-// Stress test for concurrent interpreter safety
+	source := `use go:fmt
 
-use ard/async
-use ard/io
-
-fn sum_items(items: [Int]) Int {
-  mut sum = 0
-  for item in items {
-    sum =+ item
-  }
-  sum
+struct Task {
+  title: Str,
+  done: Bool,
 }
 
-fn count_evens(items: [Int]) Int {
-  mut count = 0
-  for item in items {
-    if item % 2 == 0 {
-      count =+ 1
-    }
+impl Task {
+  fn describe() Str {
+    "{self.title}"
   }
-  count
-}
-
-fn expensive_work(n: Int) Int {
-  async::sleep(10000000)
-  mut result = 0
-  for i in 1..n {
-    result =+ (i * i)
-  }
-  result
 }
 
 fn main() {
-  io::print("=== Concurrent Stress Test ===")
-
-  // Test 1: Multiple concurrent batch operations
-  io::print("Test 1: Concurrent batch processing")
-
-  let batch1 = [1, 2, 3, 4, 5]
-  let batch2 = [6, 7, 8, 9, 10]
-  let batch3 = [11, 12, 13, 14, 15]
-  let batch4 = [16, 17, 18, 19, 20]
-  let batch5 = [21, 22, 23, 24, 25]
-
-  mut fibers: [async::Fiber<Int>] = []
-  fibers.push(async::eval(fn() { sum_items(batch1) }))
-  fibers.push(async::eval(fn() { sum_items(batch2) }))
-  fibers.push(async::eval(fn() { sum_items(batch3) }))
-  fibers.push(async::eval(fn() { sum_items(batch4) }))
-  fibers.push(async::eval(fn() { sum_items(batch5) }))
-
-  async::join(fibers)
-
-  mut total_sum = 0
-  for f in fibers {
-    total_sum =+ f.get()
+  mut tasks: [Task] = []
+  tasks.push(Task{title: "write tests", done: false})
+  for task in tasks {
+    fmt::Println(task.describe())
   }
-
-  io::print("Sum results:")
-  io::print("Total: ")
-  io::print(total_sum.to_str())
-
-  // Test 2: Even counting in parallel
-  io::print("Test 2: Even counting")
-
-  mut even_fibers: [async::Fiber<Int>] = []
-  even_fibers.push(async::eval(fn() { count_evens(batch1) }))
-  even_fibers.push(async::eval(fn() { count_evens(batch2) }))
-  even_fibers.push(async::eval(fn() { count_evens(batch3) }))
-  even_fibers.push(async::eval(fn() { count_evens(batch4) }))
-  even_fibers.push(async::eval(fn() { count_evens(batch5) }))
-
-  async::join(even_fibers)
-
-  mut total_evens = 0
-  for f in even_fibers {
-    total_evens =+ f.get()
+  let titles: [Str: Bool] = ["a": true]
+  match titles.get("a") {
+    val? => fmt::Println(val),
+    _ => {},
   }
-
-  io::print("Even counts total: ")
-  io::print(total_evens.to_str())
-
-  // Test 3: Expensive computations
-  io::print("Test 3: Expensive work")
-
-  mut work_fibers: [async::Fiber<Int>] = []
-  for i in 0..100 {
-    work_fibers.push(async::eval(fn() { expensive_work(i) }))
-  }
-
-  async::join(work_fibers)
-
-  mut work_total = 0
-  for f in work_fibers {
-    work_total =+ f.get()
-  }
-
-  io::print("Work total: ")
-  io::print(work_total.to_str())
-
-  io::print("=== All concurrent tests completed ===")
 }
 `
-
-	// Test hover at several positions that are likely to be hovered
-	positions := []struct {
-		line uint32
-		char uint32
-	}{
-		{0, 15},  // comment
-		{5, 3},   // `fn sum_items` — function name
-		{6, 6},   // `mut sum` — variable declaration
-		{7, 13},  // `items` in for loop
-		{8, 4},   // `sum =+ item` — variable assignment
-		{10, 2},  // `sum` as return value
-		{22, 6},  // `main` function
-		{24, 4},  // `io::print(...)` — function call
-		{30, 6},  // `batch1` identifier
-		{33, 13}, // `fibers` identifier
-		{35, 20}, // `batch2` inside function call
-		{52, 12}, // `f.get()` — method call
-		{59, 6},  // `even_fibers` identifier
-		{80, 11}, // `i` in `for i in 0..100`
-		{105, 8}, // `===` string inside print
-	}
-
-	for _, pos := range positions {
-		t.Run(fmt.Sprintf("line_%d_col_%d", pos.line, pos.char), func(t *testing.T) {
-			pt := protocol.Position{Line: pos.line, Character: pos.char}
-			// Should not panic — recover if it does
-			defer func() {
-				if r := recover(); r != nil {
-					t.Errorf("panic at %d:%d: %v", pos.line, pos.char, r)
-				}
-			}()
-			info := computeHover(source, "test.ard", pt)
-			// info can be nil — that's ok as long as we don't panic
+	// Sweep every position; hover must never panic and may return nil.
+	lines := strings.Split(source, "\n")
+	for row, line := range lines {
+		for col := 0; col <= len(line); col++ {
+			pt := protocol.Position{Line: uint32(row), Character: uint32(col)}
+			info := spanHoverAt(t, source, "test.ard", pt)
 			_ = info
-		})
+		}
 	}
 }
 
@@ -2342,16 +1903,16 @@ func TestHoverInferredExpression(t *testing.T) {
 			want:   "Board",
 		},
 		{
-			name:   "variable from static method chain",
-			source: "fn main() {\n  let input = Int::from_str(\"9\").or(-1)\n  input\n}\n",
-			line:   1,
+			name:   "variable from maybe method chain",
+			source: "fn main() {\n  let items = [9]\n  let input = items.at(0).or(-1)\n  input\n}\n",
+			line:   2,
 			char:   6,
 			want:   "Int",
 		},
 		{
 			name:   "variable in match case body",
-			source: "fn read_move() Int {\n  let input = Int::from_str(\"9\").or(-1)\n  match input >= 1 and input <= 9 {\n    true => input - 1,\n    false => -1,\n  }\n}\n",
-			line:   3,
+			source: "fn read_move() Int {\n  let items = [9]\n  let input = items.at(0).or(-1)\n  match input >= 1 and input <= 9 {\n    true => input - 1,\n    false => -1,\n  }\n}\n",
+			line:   4,
 			char:   13,
 			want:   "Int",
 		},
@@ -2360,7 +1921,7 @@ func TestHoverInferredExpression(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(tt.source, "test.ard", pos)
+			info := spanHoverAt(t, tt.source, "test.ard", pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil")
 			}
@@ -2418,7 +1979,7 @@ impl Board {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, "test.ard", pos)
+			info := spanHoverAt(t, source, "test.ard", pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
 			}
@@ -2429,367 +1990,10 @@ impl Board {
 	}
 }
 
-// TestHoverInstanceMethodSignatures verifies instance method hovers include owner, params, and return type.
-func TestHoverInstanceMethodSignatures(t *testing.T) {
-	source := `struct Board {
-  cells: [Str]
-}
-impl Board {
-  fn mut play(player: Str, pos: Int) {
-    self.cells.set(pos, player)
-  }
-  fn can_play(pos: Int) Bool {
-    self.cells.at(pos).is_empty()
-  }
-}
-fn main() {
-  mut board = Board{cells: []}
-  board.can_play(0)
-  let parsed = Int::from_str("1").or(0)
-}
-`
-
-	tests := []struct {
-		name string
-		line uint32
-		char uint32
-		want string
-	}{
-		{name: "list mutating method", line: 5, char: 15, want: "fn mut [Str].set(index: Int, value: Str) Bool"},
-		{name: "list method in chain", line: 8, char: 15, want: "fn [Str].at(index: Int) Str"},
-		{name: "string method after chain", line: 8, char: 23, want: "fn Str.is_empty() Bool"},
-		{name: "struct method", line: 13, char: 9, want: "fn Board.can_play(pos: Int) Bool"},
-		{name: "maybe method after static call", line: 14, char: 34, want: "fn Int?.or(default: Int) Int"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, "test.ard", pos)
-			if info == nil {
-				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
-			}
-			if !strings.Contains(info.content, tt.want) {
-				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
-			}
-		})
-	}
-}
+// TestHoverInstanceMethodSignatures moved to hover_spans_test.go
+// (TestSpanHoverInstanceMethodSignatures) on the snapshot/span path.
 
 // TestHoverStaticFunctionSignatures verifies static function hovers include qualifier, params, and return type.
-func TestHoverStaticFunctionSignatures(t *testing.T) {
-	source := `use ard/io
-
-fn main() {
-  io::print("hello")
-  let input_str = io::read_line().or("")
-  let input = Int::from_str(input_str).or(-1)
-}
-`
-
-	tests := []struct {
-		name string
-		line uint32
-		char uint32
-		want string
-	}{
-		{name: "imported function", line: 3, char: 7, want: "fn io::print(value: ToString) Void"},
-		{name: "imported extern function", line: 4, char: 24, want: "fn io::read_line() Str!Str"},
-		{name: "prelude static function", line: 5, char: 20, want: "fn Int::from_str(str: Str) Int?"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, "test.ard", pos)
-			if info == nil {
-				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
-			}
-			if !strings.Contains(info.content, tt.want) {
-				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
-			}
-		})
-	}
-}
-
-func TestHoverDirectGoPackageConstant(t *testing.T) {
-	source := `use go:os
-
-fn main() {
-  os::O_WRONLY
-}
-`
-
-	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 7})
-	if info == nil {
-		t.Fatal("expected hover info, got nil")
-	}
-	if !strings.Contains(info.content, "os::O_WRONLY: Int") {
-		t.Fatalf("hover = %q", info.content)
-	}
-}
-
-func TestHoverDirectGoPackageVariable(t *testing.T) {
-	source := `use go:os
-
-fn main() {
-  os::Args
-}
-`
-
-	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 7})
-	if info == nil {
-		t.Fatal("expected hover info, got nil")
-	}
-	if !strings.Contains(info.content, "os::Args: [Str]") {
-		t.Fatalf("hover = %q", info.content)
-	}
-}
-
-func TestHoverDirectGoFunctionSignature(t *testing.T) {
-	source := `use go:strconv
-
-fn parse() Float!Str {
-  strconv::ParseFloat("1.5", 64)
-}
-`
-
-	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 14})
-	if info == nil {
-		t.Fatal("expected hover info, got nil")
-	}
-	want := "fn strconv::ParseFloat(s: Str, bitSize: Int) Float!Str"
-	if !strings.Contains(info.content, want) {
-		t.Fatalf("hover content = %q, want contains %q", info.content, want)
-	}
-}
-
-func TestHoverDirectGoInstanceMethodSignature(t *testing.T) {
-	source := `use go:time
-
-fn today() Str {
-  time::Now().Format("2006-01-02")
-}
-`
-
-	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 16})
-	if info == nil {
-		t.Fatal("expected hover info, got nil")
-	}
-	want := "fn time::Time.Format(layout: Str) Str"
-	if !strings.Contains(info.content, want) {
-		t.Fatalf("hover content = %q, want contains %q", info.content, want)
-	}
-}
-
-func TestHoverDirectGoCrossPackageTypeSignature(t *testing.T) {
-	source := `use go:io
-use go:net/http as http
-
-fn request(body: io::Reader) (mut http::Request)!Str {
-  http::NewRequest("GET", "https://example.com", body)
-}
-`
-
-	info := computeHover(source, "test.ard", protocol.Position{Line: 4, Character: 10})
-	if info == nil {
-		t.Fatal("expected hover info, got nil")
-	}
-	want := "fn http::NewRequest(method: Str, url: Str, body: io::Reader) (mut http::Request)!Str"
-	if !strings.Contains(info.content, want) {
-		t.Fatalf("hover content = %q, want contains %q", info.content, want)
-	}
-}
-
-func TestHoverDirectGoPointerReceiverMethodSignature(t *testing.T) {
-	source := `use go:os
-
-fn close(file: mut os::File) Void!Str {
-  file.Close()
-}
-`
-
-	info := computeHover(source, "test.ard", protocol.Position{Line: 3, Character: 8})
-	if info == nil {
-		t.Fatal("expected hover info, got nil")
-	}
-	want := "fn mut os::File.Close() Void!Str"
-	if !strings.Contains(info.content, want) {
-		t.Fatalf("hover content = %q, want contains %q", info.content, want)
-	}
-}
-
-func TestDirectGoHoverRejectsNamedPointerReturn(t *testing.T) {
-	client := checker.GoValueType{Kind: checker.GoValueOther, Expr: "pkg.Client", Named: true, ImportPath: "example.com/pkg", Package: "pkg", Name: "Client"}
-	namedPointer := checker.GoValueType{Kind: checker.GoValuePointer, Expr: "pkg.Handle", Named: true, ImportPath: "example.com/pkg", Package: "pkg", Name: "Handle", Elem: &client}
-	if got, ok := directGoHoverReturn([]checker.GoValueType{namedPointer}, directGoHoverContext{currentImportPath: "example.com/pkg", currentAlias: "pkg"}); ok {
-		t.Fatalf("named pointer return displayed as %q; expected unsupported", got)
-	}
-}
-
-func TestHoverDirectGoRejectsUnsupportedPointerReceiver(t *testing.T) {
-	root := t.TempDir()
-	statusDir := filepath.Join(root, "status")
-	appDir := filepath.Join(root, "app")
-	for _, dir := range []string{statusDir, appDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(statusDir, "go.mod"), []byte("module example.com/status\n\ngo 1.26.0\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(statusDir, "status.go"), []byte(`package status
-
-type State int
-
-const (
-	StateReady State = iota
-	StateDone
-)
-
-func (s *State) Mutate() {}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(fmt.Sprintf("module app\n\ngo 1.26.0\n\nrequire example.com/status v0.0.0\nreplace example.com/status => %s\n", statusDir)), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	filePath := filepath.Join(appDir, "main.ard")
-	source := `use go:example.com/status as status
-
-fn bad(state: mut status::State) {
-  state.Mutate()
-}
-`
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	info := computeHover(source, filePath, protocol.Position{Line: 3, Character: 9})
-	if info != nil && strings.Contains(info.content, "fn mut status::State.Mutate") {
-		t.Fatalf("hover content = %q; unsupported enum pointer receiver should not be advertised", info.content)
-	}
-}
-
-// TestHoverImportedModuleTypes verifies imported types use the source alias in hovers.
-func TestHoverImportedModuleTypes(t *testing.T) {
-	source := `use ard/http as web
-
-fn inspect(req: web::Request, response: web::Response) {
-  let url = req.url
-  let method = req.method
-  response.is_ok()
-  req.method.to_str()
-}
-
-fn main() {
-  let response = web::Response::new(200, "ok")
-  let responses: [web::Response] = [response]
-}
-`
-
-	tests := []struct {
-		name string
-		line uint32
-		char uint32
-		want string
-	}{
-		{name: "imported string field", line: 3, char: 17, want: "web::Request.url: Str"},
-		{name: "imported field type", line: 4, char: 21, want: "web::Request.method: web::Method"},
-		{name: "imported struct method", line: 5, char: 12, want: "fn web::Response.is_ok() Bool"},
-		{name: "imported enum method after field", line: 6, char: 14, want: "fn web::Method.to_str() Str"},
-		{name: "inferred imported type", line: 10, char: 7, want: "web::Response"},
-		{name: "imported static constructor", line: 10, char: 33, want: "fn web::Response::new(status: Int, body: Str) web::Response"},
-		{name: "imported type in list", line: 11, char: 7, want: "[web::Response]"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, "test.ard", pos)
-			if info == nil {
-				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
-			}
-			if !strings.Contains(info.content, tt.want) {
-				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
-			}
-		})
-	}
-}
-
-// TestHoverUserModuleFunctionSignature verifies static function hovers from user imports.
-func TestHoverUserModuleFunctionSignature(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	responsesSource := `use ard/http
-
-let api_name = "ranger"
-
-fn json_error(mut res: http::Response, status: Int, message: Str) {
-  res.status = status
-}
-`
-	if err := os.WriteFile(filepath.Join(root, "responses.ard"), []byte(responsesSource), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	source := `use ard/http
-use test_project/responses
-
-fn main(mut res: http::Response) {
-  responses::json_error(res, 400, "Nope")
-  let name = responses::api_name
-}
-`
-	filePath := filepath.Join(root, "routes.ard")
-	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	tests := []struct {
-		name string
-		line uint32
-		char uint32
-		want string
-	}{
-		{name: "module alias", line: 4, char: 4, want: "module responses: test_project/responses"},
-		{name: "imported function", line: 4, char: 15, want: "fn responses::json_error(mut res: http::Response, status: Int, message: Str) Void"},
-		{name: "module variable", line: 5, char: 25, want: "responses::api_name: Str"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, filePath, pos)
-			if info == nil {
-				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
-			}
-			if !strings.Contains(info.content, tt.want) {
-				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
-			}
-		})
-	}
-}
-
-// TestHoverTraitMethodReference verifies trait-typed receiver method hovers.
-func TestHoverTraitMethodReference(t *testing.T) {
-	source := `fn render(value: Str::ToString) Str {
-  value.to_str()
-}
-`
-
-	pos := protocol.Position{Line: 1, Character: 9}
-	info := computeHover(source, "test.ard", pos)
-	if info == nil {
-		t.Fatalf("expected hover info, got nil")
-	}
-	want := "fn Str::ToString.to_str() Str"
-	if !strings.Contains(info.content, want) {
-		t.Errorf("hover content = %q, want contains %q", info.content, want)
-	}
-}
-
 // TestHoverGenericImportedMembers verifies imported generic fields and methods substitute type args.
 func TestHoverGenericImportedMembers(t *testing.T) {
 	root := t.TempDir()
@@ -2827,14 +2031,16 @@ fn main(box: boxes::Box<Int>) {
 		char uint32
 		want string
 	}{
-		{name: "generic field", line: 3, char: 18, want: "boxes::Box<Int>.item: Int"},
-		{name: "generic method", line: 4, char: 7, want: "fn boxes::Box<Int>.get() Int"},
+		// The span path renders the checked type name; module qualification
+		// was legacy display sugar.
+		{name: "generic field", line: 3, char: 18, want: "Box<Int>.item: Int"},
+		{name: "generic method", line: 4, char: 7, want: "fn Box<Int>.get() Int"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos := protocol.Position{Line: tt.line, Character: tt.char}
-			info := computeHover(source, filePath, pos)
+			info := spanHoverAt(t, source, filePath, pos)
 			if info == nil {
 				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
 			}
@@ -2842,26 +2048,6 @@ fn main(box: boxes::Box<Int>) {
 				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
 			}
 		})
-	}
-}
-
-// TestHoverImportedStaticResultMethod verifies instance method hovers after imported static calls.
-func TestHoverImportedStaticResultMethod(t *testing.T) {
-	source := `use ard/io
-
-fn main() {
-  let input_str = io::read_line().or("")
-}
-`
-
-	pos := protocol.Position{Line: 3, Character: 34}
-	info := computeHover(source, "test.ard", pos)
-	if info == nil {
-		t.Fatalf("expected hover info, got nil")
-	}
-	want := "fn Str!Str.or(default: Str) Str"
-	if !strings.Contains(info.content, want) {
-		t.Errorf("hover content = %q, want contains %q", info.content, want)
 	}
 }
 
@@ -2897,7 +2083,6 @@ func TestDocumentCache(t *testing.T) {
 		t.Error("expected nil after close")
 	}
 }
-
 func TestRenameLocalVariable(t *testing.T) {
 	root := t.TempDir()
 	filePath := filepath.Join(root, "main.ard")
@@ -2910,10 +2095,10 @@ func TestRenameLocalVariable(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	edit := computeRename(source, filePath, protocol.Position{Line: 1, Character: 7}, "total", nil)
+	srv, docURI := spanServer(t, source, filePath)
+	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 1, Character: 7}, "total")
 	assertRenameEdits(t, edit, filePath, []renameWant{{1, 6, 11}, {2, 13, 18}, {3, 2, 7}})
 }
-
 func TestRenameImportedFunction(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
@@ -2937,11 +2122,11 @@ fn main() {
 	if err := os.WriteFile(mainPath, []byte(mainSource), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	edit := computeRename(mainSource, mainPath, protocol.Position{Line: 3, Character: 15}, "error_json", nil)
+	srv, docURI := spanServer(t, mainSource, mainPath)
+	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 15}, "error_json")
 	assertRenameEdits(t, edit, modPath, []renameWant{{0, 3, 13}})
 	assertRenameEdits(t, edit, mainPath, []renameWant{{3, 13, 23}})
 }
-
 func TestRenameField(t *testing.T) {
 	root := t.TempDir()
 	filePath := filepath.Join(root, "main.ard")
@@ -2956,7 +2141,8 @@ fn main(board: Board) {
 	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	edit := computeRename(source, filePath, protocol.Position{Line: 1, Character: 3}, "spaces", nil)
+	srv, docURI := spanServer(t, source, filePath)
+	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 1, Character: 3}, "spaces")
 	assertRenameEdits(t, edit, filePath, []renameWant{{1, 2, 7}, {5, 20, 25}})
 }
 

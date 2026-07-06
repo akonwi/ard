@@ -42,22 +42,23 @@ func TestStructMethodsAreStoredInProgramSideTable(t *testing.T) {
 		t.Fatal("method sub missing from Program.StructMethods side table")
 	}
 }
-
 func TestStructSideTableMethodUsesGenericBindingsFromNestedFields(t *testing.T) {
 	result := parse.Parse([]byte(`
-		extern type Chan<$T>
-
-		struct Channel {
-			chan: Chan<$T>
+		struct Slot {
+			value: $T
 		}
 
-		impl Channel {
+		struct BoxedSlot {
+			chan: Slot<$T>
+		}
+
+		impl BoxedSlot {
 			fn send(value: $T) Bool {
 				true
 			}
 		}
 
-		extern fn new() Channel<Int> = "NewChannel"
+		fn new() BoxedSlot<Int> { BoxedSlot{ chan: Slot{ value: 0 } } }
 
 		let ch = new()
 		ch.send(42)
@@ -66,41 +67,6 @@ func TestStructSideTableMethodUsesGenericBindingsFromNestedFields(t *testing.T) 
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
 	c := New("test.ard", result.Program, nil)
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
-	}
-}
-
-func TestStructMethodLookupUsesOwnerModuleBeyondDirectImports(t *testing.T) {
-	tempDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\""), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tempDir, "db.ard"), []byte(`
-		use ard/sql
-
-		fn init() sql::Database {
-			sql::open("postgres://example").expect("connect")
-		}
-	`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	result := parse.Parse([]byte(`
-		use test_project/db
-
-		let conn = db::init()
-		let query = conn.query("SELECT 1")
-	`), filepath.Join(tempDir, "main.ard"))
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse error: %s", result.Errors[0].Message)
-	}
-	resolver, err := NewModuleResolver(tempDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := New(filepath.Join(tempDir, "main.ard"), result.Program, resolver)
 	c.Check()
 	if c.HasErrors() {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
@@ -156,7 +122,6 @@ func TestTransitiveGenericStructMethodUsesOwnerDefinition(t *testing.T) {
 		t.Fatalf("first diagnostic = %q, want generic method argument mismatch", got)
 	}
 }
-
 func TestStructEqualityIndependentOfMethodSideTable(t *testing.T) {
 	left := &StructDef{Name: "Frame", Fields: map[string]Type{}}
 	right := &StructDef{Name: "Frame", Fields: map[string]Type{}}
@@ -167,6 +132,7 @@ func TestStructEqualityIndependentOfMethodSideTable(t *testing.T) {
 		t.Fatal("struct equality should ignore side-table method signatures")
 	}
 }
+
 func TestExplicitTypeArgsCannotOverrideReceiverGenericMethod(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct Box {
@@ -194,35 +160,37 @@ func TestExplicitTypeArgsCannotOverrideReceiverGenericMethod(t *testing.T) {
 		t.Fatalf("first diagnostic = %q, want explicit method type arg rejection", got)
 	}
 }
-
-func TestExplicitMethodTypeArgsPreserveReceiverGenericBindings(t *testing.T) {
+func TestMethodsCannotIntroduceGenericParams(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct Box {
-			item: $T
+			item: Int
 		}
 
 		impl Box {
-			fn pick<$U>(value: $U) $T {
+			fn get() Int {
+				if true {
+					let x: $U = 1
+				}
 				self.item
 			}
 		}
-
-		let b = Box{item: 1}
-		let x: Int = b.pick<Str>("ok")
 	`), "test.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse error: %s", result.Errors[0].Message)
 	}
 	c := New("test.ard", result.Program, nil)
 	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected method generic parameter error")
+	}
+	if got := c.Diagnostics()[0].Message; got != "methods cannot introduce generic type parameters; use the receiver type's generics" {
+		t.Fatalf("first diagnostic = %q, want method generic parameter rejection", got)
 	}
 }
-
 func TestUnboundGenericExplicitCallTypeArgIsRejected(t *testing.T) {
 	result := parse.Parse([]byte(`
-		extern fn get_raw<$T>(key: Str) $T? = "GetRaw"
+		use ard/maybe
+		fn get_raw(key: Str) $T? { maybe::none() }
 		get_raw<$U>("count")
 	`), "test.ard")
 	if len(result.Errors) > 0 {
@@ -237,12 +205,12 @@ func TestUnboundGenericExplicitCallTypeArgIsRejected(t *testing.T) {
 		t.Fatalf("first diagnostic = %q, want unbound generic type arg", got)
 	}
 }
-
 func TestNestedFunctionCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 	result := parse.Parse([]byte(`
-		extern fn raw<$T>(key: Str) $T? = "Raw"
+		use ard/maybe
+		fn raw(key: Str) $T? { maybe::none() }
 
-		fn outer<$T>() Bool {
+		fn outer() Bool {
 			fn inner() Bool {
 				raw<$T>("x").is_some()
 			}
@@ -261,12 +229,12 @@ func TestNestedFunctionCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 		t.Fatalf("first diagnostic = %q, want unbound generic type arg", got)
 	}
 }
-
 func TestClosureCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 	result := parse.Parse([]byte(`
-		extern fn raw<$T>(key: Str) $T? = "Raw"
+		use ard/maybe
+		fn raw(key: Str) $T? { maybe::none() }
 
-		fn outer<$T>() Bool {
+		fn outer() Bool {
 			let inner = fn() Bool {
 				raw<$T>("x").is_some()
 			}
@@ -285,7 +253,6 @@ func TestClosureCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 		t.Fatalf("first diagnostic = %q, want unbound generic type arg", got)
 	}
 }
-
 func TestGenericStructReceiverBindingInExplicitCallbackParameter(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct State {
@@ -301,7 +268,7 @@ func TestGenericStructReceiverBindingInExplicitCallbackParameter(t *testing.T) {
 			}
 		}
 
-		fn make<$T>(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
+		fn make(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
 			Widget{}
 		}
 
@@ -326,7 +293,6 @@ func TestGenericStructReceiverBindingInExplicitCallbackParameter(t *testing.T) {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
-
 func TestGenericStructReceiverBindingInInferredCallbackParameter(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct State {
@@ -342,7 +308,7 @@ func TestGenericStructReceiverBindingInInferredCallbackParameter(t *testing.T) {
 			}
 		}
 
-		fn make<$T>(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
+		fn make(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
 			Widget{}
 		}
 
@@ -367,7 +333,6 @@ func TestGenericStructReceiverBindingInInferredCallbackParameter(t *testing.T) {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
-
 func TestGenericStructReceiverBindingInCallbackParameterStillRejectsMismatch(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct State {
@@ -383,7 +348,7 @@ func TestGenericStructReceiverBindingInCallbackParameterStillRejectsMismatch(t *
 			}
 		}
 
-		fn make<$T>(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
+		fn make(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
 			Widget{}
 		}
 
@@ -411,54 +376,6 @@ func TestGenericStructReceiverBindingInCallbackParameterStillRejectsMismatch(t *
 		t.Fatalf("first diagnostic = %q, want callback state type mismatch", got)
 	}
 }
-
-func TestExplicitGenericStructCanUseTypeParamOnlyInMethods(t *testing.T) {
-	result := parse.Parse([]byte(`
-		struct State<$T> {
-			handle: Int
-		}
-
-		struct Widget {}
-		struct Ctx {}
-
-		impl State {
-			fn value() $T {
-				panic("x")
-			}
-
-			fn set(mutate: fn(mut $T)) {
-			}
-		}
-
-		fn make<$T>(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
-			Widget{}
-		}
-
-		struct Model { n: Int }
-
-		fn main() {
-			let _ = make<Model>(
-				init: fn(_ctx: Ctx, _state: State<Model>) Model { Model{n: 0} },
-				build: fn(_ctx: Ctx, state: State<Model>) Widget {
-					let model = state.value()
-					state.set(fn(mut next: Model) {
-						next.n = model.n + 1
-					})
-					Widget{}
-				},
-			)
-		}
-	`), "test.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse error: %s", result.Errors[0].Message)
-	}
-	c := New("test.ard", result.Program, nil)
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
-	}
-}
-
 func TestExplicitGenericStructTypeArgumentsRemainDistinctWithoutGenericFields(t *testing.T) {
 	result := parse.Parse([]byte(`
 		struct State<$T> {
@@ -485,5 +402,52 @@ func TestExplicitGenericStructTypeArgumentsRemainDistinctWithoutGenericFields(t 
 	}
 	if got := c.Diagnostics()[0].Message; got != "Type mismatch: Expected State<Model>, got State<Other>" {
 		t.Fatalf("first diagnostic = %q, want State<Model>/State<Other> mismatch", got)
+	}
+}
+
+func TestExplicitGenericStructCanUseTypeParamOnlyInMethods(t *testing.T) {
+	result := parse.Parse([]byte(`
+		struct State<$T> {
+			handle: Int
+		}
+
+		struct Widget {}
+		struct Ctx {}
+
+		impl State {
+			fn value() $T {
+				panic("x")
+			}
+
+			fn set(mutate: fn(mut $T)) {
+			}
+		}
+
+		fn make(init: fn(Ctx, State<$T>) $T, build: fn(Ctx, State<$T>) Widget) Widget {
+			Widget{}
+		}
+
+		struct Model { n: Int }
+
+		fn main() {
+			let _ = make<Model>(
+				init: fn(_ctx: Ctx, _state: State<Model>) Model { Model{n: 0} },
+				build: fn(_ctx: Ctx, state: State<Model>) Widget {
+					let model = state.value()
+					state.set(fn(next: mut Model) {
+						next.n = model.n + 1
+					})
+					Widget{}
+				},
+			)
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }

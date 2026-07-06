@@ -32,7 +32,6 @@ func TestComments(t *testing.T) {
 		},
 	})
 }
-
 func TestCommentsInStructFields(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -89,7 +88,6 @@ func TestCommentsInStructFields(t *testing.T) {
 		},
 	})
 }
-
 func TestCommentsInEnumVariants(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -120,7 +118,6 @@ func TestCommentsInEnumVariants(t *testing.T) {
 		},
 	})
 }
-
 func TestCommentsInFunctionParameters(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -148,7 +145,6 @@ func TestCommentsInFunctionParameters(t *testing.T) {
 		},
 	})
 }
-
 func TestCommentsInStructLiterals(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -178,7 +174,6 @@ func TestCommentsInStructLiterals(t *testing.T) {
 		},
 	})
 }
-
 func TestInlineCommentsInStructLiterals(t *testing.T) {
 	runTests(t, []test{
 		{

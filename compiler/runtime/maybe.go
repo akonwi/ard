@@ -48,11 +48,11 @@ func (m Maybe[T]) Ptr() *T {
 	return &value
 }
 
-func MaybeEqual[T any](left, right Maybe[T]) bool {
+func MaybeEqual[T comparable](left, right Maybe[T]) bool {
 	if left.IsNone() || right.IsNone() {
 		return left.IsNone() && right.IsNone()
 	}
-	return Equal(left.Value(), right.Value())
+	return left.Value() == right.Value()
 }
 
 func (m Maybe[T]) MarshalJSON() ([]byte, error) {

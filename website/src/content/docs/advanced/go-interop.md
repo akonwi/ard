@@ -41,6 +41,25 @@ Raw Go pointer syntax does not appear in Ard source. Use Ard's mutable-reference
 - `gohttp::Response` lowers to `http.Response`
 - `mut gohttp::Response` lowers to `*http.Response`
 
+## Go Interfaces
+
+Named Go interfaces can be used as direct Go types. Ard checks assignability with Go's interface rules for direct-Go values, similar to Ard trait compatibility, while generated code keeps native Go interface values.
+
+```ard
+use go:io
+use go:strings
+
+fn read_all(reader: io::Reader) [Byte]!Str {
+  io::ReadAll(reader)
+}
+
+let bytes = read_all(strings::NewReader("hello")).expect("read")
+```
+
+Interface-to-interface assignability also follows Go's rules, so a value such as `io::ReadCloser` can be used where `io::Reader` or `io::Closer` is expected when the required methods match. Go slices and maps remain invariant: `[mut strings::Reader]` is not automatically converted to `[]io.Reader`.
+
+Ard-defined structs can satisfy Go interfaces when their `impl` methods have Go-compatible method names and signatures. The Go backend emits receiver methods for those impls, including methods that are only needed by Go interface dispatch. Functions and closure adapters still need companion FFI wrappers.
+
 ## Struct Field Reads
 
 Exported Go struct fields use ordinary dot syntax. Field names match Go exactly, including casing.
@@ -117,23 +136,23 @@ Use `(mut T)?` when an Ard API intentionally models an optional reference. Direc
 
 ## Checking for Nil
 
-Use `ard/ffi::is_nil` when you need to test a Go value for nil without adding a new Ard `nil` literal.
+Use `ard/unsafe::is_nil` when you need to test a Go value for nil without adding a new Ard `nil` literal.
 
 ```ard
-use ard/ffi
+use ard/unsafe
 use go:net/http as gohttp
 
 fn request_path(req: mut gohttp::Request) Str {
-  match ffi::is_nil(req.URL) {
+  match unsafe::is_nil(req.URL) {
     true => "",
     false => req.URL.Path,
   }
 }
 ```
 
-`ffi::is_nil` is a normal generic stdlib function implemented by Go FFI. It returns `false` for values whose Go representation cannot be nil.
+`unsafe::is_nil` is a compiler-backed stdlib intrinsic. It returns `false` for values whose Go representation cannot be nil.
 
-The argument expression is evaluated before `is_nil` runs. For example, `ffi::is_nil(req.URL)` can still panic first if `req` itself is nil.
+The argument expression is evaluated before `is_nil` runs. For example, `unsafe::is_nil(req.URL)` can still panic first if `req` itself is nil.
 
 ## Unsafe Interop Blocks
 
@@ -158,6 +177,6 @@ fn request_path_or_default(req: mut gohttp::Request) Str {
 Direct Go interop is intentionally incremental. Current limitations include:
 
 - embedded/promoted Go fields are not resolved through promotion;
-- Go interfaces are not generally modeled as Ard traits;
+- Ard functions and closures cannot implement Go callback-shaped interfaces directly yet;
 - callbacks, variadics, and many compound Go shapes still need companion wrappers;
 - generic Go struct construction is not supported yet.

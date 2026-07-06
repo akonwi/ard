@@ -7,17 +7,12 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
@@ -37,7 +32,7 @@ func TestGoTargetParityRecursiveStructFields(t *testing.T) {
 				struct Node { value: Int, children: [Node] }
 				fn main() Int {
 					let root = Node{value: 1, children: [Node{value: 2, children: []}]}
-					root.children.at(0).value
+					root.children.at(0).expect("bounds").value
 				}
 			`,
 		},
@@ -168,7 +163,6 @@ func TestGoTargetParityRecursiveStructFields(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityCoreCorpus(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -183,7 +177,7 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 			`,
 		},
 		{name: "unary not", input: `fn main() Bool { not true }`},
-		{name: "unary negative float", input: `fn main() Float { -20.1 }`},
+		{name: "unary negative float", input: `fn main() Float64 { -20.1 }`},
 		{name: "arithmetic precedence", input: `fn main() Int { 30 + (20 * 4) }`},
 		{name: "chained comparisons", input: `fn main() Bool { 200 <= 250 <= 300 }`},
 		{
@@ -299,11 +293,11 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 			`,
 		},
 		{
-			name: "map keys use sorted order",
+			name: "map keys expose native map keys",
 			input: `
-				fn main() [Str] {
+				fn main() Int {
 					let values = ["b": 2, "a": 1, "c": 3]
-					values.keys()
+					values.keys().size()
 				}
 			`,
 		},
@@ -382,7 +376,6 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityLoops(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -458,14 +451,15 @@ func TestGoTargetParityLoops(t *testing.T) {
 			`,
 		},
 		{
-			name: "looping over a map uses sorted keys",
+			name: "looping over a map uses native map order",
 			input: `
-				fn main() Str {
-					mut out = ""
+				fn main() Int {
+					mut sum = 0
 					for key,val in [3:"c", 1:"a", 2:"b"] {
-						out = out + "{key}:{val};"
+						sum =+ key
+						sum =+ val.size()
 					}
-					out
+					sum
 				}
 			`,
 		},
@@ -486,7 +480,6 @@ func TestGoTargetParityLoops(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityNullableArguments(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -565,6 +558,22 @@ func TestGoTargetParityNullableArguments(t *testing.T) {
 			`,
 		},
 		{
+			name: "static function nullable parameter sugar",
+			input: `
+				use ard/maybe
+				struct Config { name: Str, retries: Int? }
+				fn Config::new(name: Str, retries: Int?) Config {
+					Config{name: name, retries: retries}
+				}
+				fn main() Int {
+					let omitted = Config::new("worker")
+					let named = Config::new(name: "worker")
+					let provided = Config::new("worker", 3)
+					omitted.retries.or(10) + named.retries.or(20) + provided.retries.or(0)
+				}
+			`,
+		},
+		{
 			name: "automatic wrapping of map literals for nullable parameters",
 			input: `
 				fn process(data: [Str:Int]?) Bool {
@@ -593,7 +602,6 @@ func TestGoTargetParityNullableArguments(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityAnonymousFunctionInference(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -620,7 +628,6 @@ func TestGoTargetParityAnonymousFunctionInference(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityFunctionValuedStructFields(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -701,7 +708,6 @@ func TestGoTargetParityFunctionValuedStructFields(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityNullableStructFields(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -793,7 +799,6 @@ func TestGoTargetParityNullableStructFields(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityTryOnMaybe(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -867,7 +872,6 @@ func TestGoTargetParityTryOnMaybe(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityTry(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -996,81 +1000,6 @@ func TestGoTargetParityTry(t *testing.T) {
 		},
 	})
 }
-
-func TestGoTargetParityCryptoHashes(t *testing.T) {
-	runGoParityCases(t, []goParityCase{
-		{
-			name: "md5 hashes hello",
-			input: `
-				use ard/crypto
-				use ard/hex
-				fn main() Str {
-					hex::encode(crypto::md5("hello".bytes()))
-				}
-			`,
-		},
-		{
-			name: "sha256 returns raw bytes",
-			input: `
-				use ard/crypto
-				fn main() Int {
-					crypto::sha256("".bytes()).size()
-				}
-			`,
-		},
-		{
-			name: "sha256 can be hex encoded",
-			input: `
-				use ard/crypto
-				use ard/hex
-				fn main() Str {
-					hex::encode(crypto::sha256("".bytes()))
-				}
-			`,
-		},
-		{
-			name: "sha512 returns raw bytes",
-			input: `
-				use ard/crypto
-				fn main() Int {
-					crypto::sha512("hello".bytes()).size()
-				}
-			`,
-		},
-		{
-			name: "crypto password hashing",
-			input: `
-				use ard/crypto
-				fn check() Bool!Str {
-					let hashed = try crypto::hash("password123", 4)
-					let verified = try crypto::verify("password123", hashed)
-					let wrong = try crypto::verify("wrong-password", hashed)
-					Result::ok(verified and not wrong and crypto::hash("password123", 32).is_err())
-				}
-				fn main() Bool {
-					check().expect("crypto password check failed")
-				}
-			`,
-		},
-		{
-			name: "crypto scrypt",
-			input: `
-				use ard/crypto
-				fn check() Bool!Str {
-					let hashed = try crypto::scrypt_hash("password", "73616c74", 16, 1, 1, 16)
-					let verified = try crypto::scrypt_verify("password", hashed, 16, 1, 1, 16)
-					let deterministic = hashed == "73616c74:d360147c2a2db7903186e387bb385547"
-					let malformed = crypto::scrypt_verify("password123", "bad-hash").is_err()
-					Result::ok(deterministic and verified and malformed)
-				}
-				fn main() Bool {
-					check().expect("scrypt check failed")
-				}
-			`,
-		},
-	})
-}
-
 func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -1161,7 +1090,7 @@ func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
 		{
 			name: "direct generic return compared with equals",
 			input: `
-				fn id<$T>(value: $T) $T {
+				fn id(value: $T) $T {
 					value
 				}
 				fn main() Bool {
@@ -1191,7 +1120,6 @@ func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityConcurrentMethodAccess(t *testing.T) {
 	const workers = 20
 	var wg sync.WaitGroup
@@ -1223,42 +1151,6 @@ func TestGoTargetParityConcurrentMethodAccess(t *testing.T) {
 			_ = runGoTargetParityJSON(t, program)
 			errCh <- nil
 		}(i)
-	}
-	wg.Wait()
-	close(errCh)
-	for err := range errCh {
-		if err != nil {
-			t.Fatalf("concurrent go parity failed: %v", err)
-		}
-	}
-}
-
-func TestGoTargetParityConcurrentModuleAccess(t *testing.T) {
-	const workers = 20
-	var wg sync.WaitGroup
-	errCh := make(chan error, workers)
-	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer func() {
-				if r := recover(); r != nil {
-					errCh <- fmt.Errorf("panic: %v", r)
-				}
-			}()
-			program := lowerParitySource(t, `
-				use ard/decode
-				fn main() Int {
-					let d = decode::from_json("[1,2,3]").expect("")
-					decode::run(d, decode::list(decode::int)).expect("").size()
-				}
-			`)
-			if got := runGoTargetParityJSON(t, program); got != "3" {
-				errCh <- fmt.Errorf("got %s, want 3", got)
-				return
-			}
-			errCh <- nil
-		}()
 	}
 	wg.Wait()
 	close(errCh)
@@ -1352,61 +1244,6 @@ fn main() Str {
 		}
 	})
 }
-
-func TestGoTargetParityAsyncTiming(t *testing.T) {
-	t.Run("async sleep waits requested duration", func(t *testing.T) {
-		start := time.Now()
-		program := lowerParitySource(t, `
-			use ard/async
-			fn main() Int {
-				async::sleep(1000000)
-				0
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "0" {
-			t.Fatalf("got %s, want 0", got)
-		}
-		if elapsed := time.Since(start); elapsed < time.Millisecond {
-			t.Fatalf("expected script to take >= 1ms, took %v", elapsed)
-		}
-	})
-
-	t.Run("joining fibers waits for concurrent work", func(t *testing.T) {
-		start := time.Now()
-		program := lowerParitySource(t, `
-			use ard/async
-			fn main() Int {
-				let fiber1 = async::start(fn() { async::sleep(2000000) })
-				let fiber2 = async::start(fn() { async::sleep(1000000) })
-				let fiber3 = async::start(fn() { async::sleep(1000000) })
-				fiber1.join()
-				fiber2.join()
-				fiber3.join()
-				0
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "0" {
-			t.Fatalf("got %s, want 0", got)
-		}
-		if elapsed := time.Since(start); elapsed < 2*time.Millisecond {
-			t.Fatalf("expected concurrent execution >= 2ms, got %v", elapsed)
-		}
-	})
-
-	t.Run("async eval get returns computed value", func(t *testing.T) {
-		program := lowerParitySource(t, `
-			use ard/async
-			fn main() Int {
-				let fiber = async::eval(fn() Int { 40 + 2 })
-				fiber.get()
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "42" {
-			t.Fatalf("got %s, want 42", got)
-		}
-	})
-}
-
 func TestGoTargetParityMapClosureCapturesOuterLocal(t *testing.T) {
 	t.Run("maybe map", func(t *testing.T) {
 		program := lowerParitySource(t, `
@@ -1437,7 +1274,26 @@ func TestGoTargetParityMapClosureCapturesOuterLocal(t *testing.T) {
 		}
 	})
 }
+func TestGoTargetParityMutableParameterClosureInFunctionTypedMap(t *testing.T) {
+	// A `mut T` parameter is represented two ways: as the `Mutable` flag (the
+	// `fn(mut T)` function-type form used by the map's value type) and as a
+	// `MutableRef` baked into the type (the `name: mut T` closure form). The two
+	// must reconcile so the closure is assignable to the map and lowers to the
+	// same Go signature.
+	program := lowerParitySource(t, `
+		struct Box { n: Int }
 
+		fn main() Int {
+			let base = 41
+			mut handlers: [Str: fn(mut Box)] = [:]
+			handlers.set("a", fn(b: mut Box) {})
+			handlers.size() + base
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "42" {
+		t.Fatalf("got %s, want 42", got)
+	}
+}
 func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
 	t.Run("returned closure captures two outer scopes", func(t *testing.T) {
 		program := lowerParitySource(t, `
@@ -1504,7 +1360,6 @@ func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
 		}
 	})
 }
-
 func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait Initializer {
@@ -1534,7 +1389,35 @@ func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
 		t.Fatalf("got %s, want 1", got)
 	}
 }
+func TestGoTargetParityNativeTraitObjectMutableParameterFromTraitLocal(t *testing.T) {
+	program := lowerParitySource(t, `
+		trait Draw {
+			fn draw() Int
+		}
 
+		struct Box {
+			value: Int,
+		}
+
+		impl Draw for Box {
+			fn draw() Int {
+				self.value
+			}
+		}
+
+		fn apply(d: mut Draw) Int {
+			d.draw()
+		}
+
+		fn main() Int {
+			mut d: Draw = Box{value: 1}
+			apply(d)
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "1" {
+		t.Fatalf("got %s, want 1", got)
+	}
+}
 func TestGoTargetParityMutableTraitObjectParameterFromConcrete(t *testing.T) {
 	program := lowerParitySource(t, `
 		struct Context {
@@ -1546,7 +1429,7 @@ func TestGoTargetParityMutableTraitObjectParameterFromConcrete(t *testing.T) {
 			fn node_id() Int
 		}
 
-		fn add_child(ctx: Context, mut child: View) {
+		fn add_child(ctx: Context, child: mut View) {
 			child.init(Context{node_id: ctx.node_id + 1})
 		}
 
@@ -1576,7 +1459,6 @@ func TestGoTargetParityMutableTraitObjectParameterFromConcrete(t *testing.T) {
 		t.Fatalf("got %s, want 42", got)
 	}
 }
-
 func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing.T) {
 	program := lowerParitySource(t, `
 		use ard/maybe
@@ -1615,7 +1497,7 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 		}
 
 		trait Sink {
-			fn take(mut child: View) Int
+			fn take(child: mut View) Int
 		}
 
 		struct Holder {}
@@ -1625,7 +1507,7 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 		}
 
 		impl Sink for Holder {
-			fn take(mut child: View) Int {
+			fn take(child: mut View) Int {
 				child.set(41)
 				child.value()
 			}
@@ -1641,7 +1523,7 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 
 		type ViewOrInt = View | Int
 
-		fn store(mut child: View) Node {
+		fn store(child: mut View) Node {
 			Node{view: child}
 		}
 
@@ -1659,21 +1541,21 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 			}
 		}
 
-		fn replace_param(mut child: View, value: Int) {
+		fn replace_param(child: mut View, value: Int) {
 			child = Leaf{n: value}
 		}
 
-		fn assign_param(mut child: View, next: View) {
+		fn assign_param(child: mut View, next: View) {
 			child = next
 		}
 
-		fn make_reader(mut child: View) fn() Int {
+		fn make_reader(child: mut View) fn() Int {
 			fn() Int {
 				child.value()
 			}
 		}
 
-		fn make_setter(mut child: View) fn(Int) {
+		fn make_setter(child: mut View) fn(Int) {
 			fn(value: Int) {
 				child = Leaf{n: value}
 			}
@@ -1702,7 +1584,7 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 			snapshot.view.set(59)
 			let snapshot_observed = direct_leaf.n
 			let view_list: [View] = [direct_node.view]
-			view_list.at(0).set(61)
+			view_list.at(0).expect("bounds").set(61)
 			let list_observed = direct_leaf.n
 			let view_map: [Str:View] = ["x": direct_node.view]
 			view_map.get("x").expect("missing").set(67)
@@ -1721,27 +1603,27 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 			let union_observed = direct_leaf.n
 			mut push_views: [View] = []
 			push_views.push(direct_node.view)
-			push_views.at(0).set(75)
+			push_views.at(0).expect("bounds").set(75)
 			let push_observed = direct_leaf.n
 			mut prepend_views: [View] = []
 			prepend_views.prepend(direct_node.view)
-			prepend_views.at(0).set(77)
+			prepend_views.at(0).expect("bounds").set(77)
 			let prepend_observed = direct_leaf.n
 			mut set_views: [View] = [Leaf{n: 1}]
 			set_views.set(0, direct_node.view)
-			set_views.at(0).set(79)
+			set_views.at(0).expect("bounds").set(79)
 			let set_observed = direct_leaf.n
 			mut set_map: [Str:View] = [:]
 			set_map.set("x", direct_node.view)
 			set_map.get("x").expect("missing").set(81)
 			let set_map_observed = direct_leaf.n
 
-			mut dynamic_slot = make(2)
-			let dynamic_node = Node{view: dynamic_slot}
-			dynamic_slot = Branch{n: 17}
-			let dynamic_observed = dynamic_node.view.value()
-			dynamic_node.view.set(19)
-			let dynamic_slot_observed = read(dynamic_slot)
+			mut any_slot = make(2)
+			let any_node = Node{view: any_slot}
+			any_slot = Branch{n: 17}
+			let any_observed = any_node.view.value()
+			any_node.view.set(19)
+			let any_slot_observed = read(any_slot)
 
 			mut replace_slot = make(1)
 			mut root = Root{view: replace_slot}
@@ -1782,14 +1664,13 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 			setter(53)
 			let setter_observed = setter_leaf.n
 
-			stored_observed + stored_leaf.n + direct_observed + direct_leaf.n + immutable_observed + via_ref_observed + snapshot_observed + list_observed + map_observed + maybe_observed + result_observed + union_observed + push_observed + prepend_observed + set_observed + set_map_observed + dynamic_observed + dynamic_slot_observed + replaced_observed + param_observed + replaced_leaf.n + replaced_slot_observed + forwarded_assign_observed + closure_observed + sink_result + sink_leaf.n + node_sink_result + node_sink_leaf.n + setter_observed
+			stored_observed + stored_leaf.n + direct_observed + direct_leaf.n + immutable_observed + via_ref_observed + snapshot_observed + list_observed + map_observed + maybe_observed + result_observed + union_observed + push_observed + prepend_observed + set_observed + set_map_observed + any_observed + any_slot_observed + replaced_observed + param_observed + replaced_leaf.n + replaced_slot_observed + forwarded_assign_observed + closure_observed + sink_result + sink_leaf.n + node_sink_result + node_sink_leaf.n + setter_observed
 		}
 	`)
 	if got := runGoTargetParityJSON(t, program); got != "607" {
 		t.Fatalf("got %s, want 607", got)
 	}
 }
-
 func TestGoTargetParityMutableTraitMethodNamesDoNotCollideWithForwarderHooks(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait Weird {
@@ -1820,7 +1701,6 @@ func TestGoTargetParityMutableTraitMethodNamesDoNotCollideWithForwarderHooks(t *
 		t.Fatalf("got %s, want 42", got)
 	}
 }
-
 func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait View {
@@ -1856,12 +1736,12 @@ func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.
 			}
 		}
 
-		fn run_typed(mut typed: AppRoot) Int {
+		fn run_typed(typed: mut AppRoot) Int {
 			typed.view.handle_event()
 			typed.view.value()
 		}
 
-		fn run_any(mut any: AppRoot) Int {
+		fn run_any(any: mut AppRoot) Int {
 			any.view.handle_event()
 			any.view.value()
 		}
@@ -1884,7 +1764,6 @@ func TestGoTargetParityMutatingTraitDispatchUpdatesStoredTraitObject(t *testing.
 		t.Fatalf("got %s, want 3", got)
 	}
 }
-
 func TestGoTargetParityMutableReferenceFieldUpdatesSharedStorage(t *testing.T) {
 	program := lowerParitySource(t, `
 		struct Tree {
@@ -1895,7 +1774,7 @@ func TestGoTargetParityMutableReferenceFieldUpdatesSharedStorage(t *testing.T) {
 			tree: mut Tree,
 		}
 
-		fn bump(mut tree: Tree) {
+		fn bump(tree: mut Tree) {
 			tree.count = tree.count + 1
 		}
 
@@ -1903,7 +1782,7 @@ func TestGoTargetParityMutableReferenceFieldUpdatesSharedStorage(t *testing.T) {
 			value: mut Int,
 		}
 
-		fn set(mut value: Int) {
+		fn set(value: mut Int) {
 			value = 3
 		}
 
@@ -1924,7 +1803,6 @@ func TestGoTargetParityMutableReferenceFieldUpdatesSharedStorage(t *testing.T) {
 		t.Fatalf("got %s, want 10", got)
 	}
 }
-
 func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 	t.Run("struct", func(t *testing.T) {
 		program := lowerParitySource(t, `
@@ -1932,7 +1810,7 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 				value: Int,
 			}
 
-			fn bump(mut c: Counter) {
+			fn bump(c: mut Counter) {
 				c.value = c.value + 1
 			}
 
@@ -1947,9 +1825,26 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 		}
 	})
 
-	t.Run("list", func(t *testing.T) {
+	t.Run("list descriptor element mutation", func(t *testing.T) {
 		program := lowerParitySource(t, `
-			fn append_one(mut values: [Int]) {
+			fn replace_first(values: mut [Int]) {
+				values.set(0, 1)
+			}
+
+			fn main() Int {
+				mut values: [Int] = [0]
+				replace_first(values)
+				values.at(0).expect("bounds")
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "1" {
+			t.Fatalf("got %s, want 1", got)
+		}
+	})
+
+	t.Run("list descriptor header rebinding is local", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			fn append_one(values: mut [Int]) {
 				values.push(1)
 			}
 
@@ -1959,14 +1854,14 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 				values.size()
 			}
 		`)
-		if got := runGoTargetParityJSON(t, program); got != "1" {
-			t.Fatalf("got %s, want 1", got)
+		if got := runGoTargetParityJSON(t, program); got != "0" {
+			t.Fatalf("got %s, want 0", got)
 		}
 	})
 
 	t.Run("primitive", func(t *testing.T) {
 		program := lowerParitySource(t, `
-			fn bump(mut count: Int) {
+			fn bump(count: mut Int) {
 				count = count + 1
 			}
 
@@ -1985,11 +1880,11 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 		program := lowerParitySource(t, `
 			type MutIntFn = fn(mut Int)
 
-			fn bump(mut count: Int) {
+			fn bump(count: mut Int) {
 				count = count + 1
 			}
 
-			fn apply(f: MutIntFn, mut count: Int) {
+			fn apply(f: MutIntFn, count: mut Int) {
 				f(count)
 			}
 
@@ -2004,11 +1899,8 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 		}
 	})
 }
-
 func TestGoTargetParityMutMethodClosureCapturesSelf(t *testing.T) {
 	program := lowerParitySource(t, `
-		use ard/io
-
 		struct Box {
 			value: Int,
 		}
@@ -2032,7 +1924,6 @@ func TestGoTargetParityMutMethodClosureCapturesSelf(t *testing.T) {
 		t.Fatalf("got %s, want 1", got)
 	}
 }
-
 func TestGoTargetParityMethodClosureCapturesSelf(t *testing.T) {
 	program := lowerParitySource(t, `
 		struct Counter {
@@ -2058,628 +1949,6 @@ func TestGoTargetParityMethodClosureCapturesSelf(t *testing.T) {
 	}
 }
 
-func TestGoTargetParityAsyncChannels(t *testing.T) {
-	t.Run("unbuffered channel communicates with fiber", func(t *testing.T) {
-		program := lowerParitySource(t, `
-			use ard/async
-			use ard/async/channel
-
-			fn main() Int {
-				let ch = channel::new<Int>()
-				let sender = async::start(fn() {
-					ch.send(42)
-					ch.close()
-				})
-				let value = ch.recv().or(0)
-				sender.join()
-				value
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "42" {
-			t.Fatalf("got %s, want 42", got)
-		}
-	})
-
-	t.Run("buffered channel drains before closed receive returns none", func(t *testing.T) {
-		program := lowerParitySource(t, `
-			use ard/async/channel
-
-			fn main() Int {
-				let ch = channel::new<Int>(size: 2)
-				let sent_a = ch.send(20)
-				let sent_b = ch.send(22)
-				let closed = ch.close()
-				let total = ch.recv().or(0) + ch.recv().or(0)
-				match ch.recv() {
-					value => 0
-					_ => match sent_a and sent_b and closed {
-						true => total
-						false => -1
-					}
-				}
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "42" {
-			t.Fatalf("got %s, want 42", got)
-		}
-	})
-
-	t.Run("negative channel size falls back to unbuffered", func(t *testing.T) {
-		program := lowerParitySource(t, `
-			use ard/async
-			use ard/async/channel
-
-			fn main() Int {
-				let ch = channel::new<Int>(size: -1)
-				let sender = async::start(fn() {
-					ch.send(9)
-					ch.close()
-				})
-				let value = ch.recv().or(0)
-				sender.join()
-				value
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "9" {
-			t.Fatalf("got %s, want 9", got)
-		}
-	})
-
-	t.Run("send and close report closed channel state", func(t *testing.T) {
-		program := lowerParitySource(t, `
-			use ard/async/channel
-
-			fn main() Bool {
-				let ch = channel::new<Int>(size: 1)
-				ch.close() and not ch.send(1) and not ch.close()
-			}
-		`)
-		if got := runGoTargetParityJSON(t, program); got != "true" {
-			t.Fatalf("got %s, want true", got)
-		}
-	})
-}
-
-func TestGoTargetParityPrinting(t *testing.T) {
-	got := runGoTargetSourceStdout(t, `
-		use ard/io
-		fn main() {
-			io::print("Hello, World!")
-		}
-	`)
-	if got != "Hello, World!\n" {
-		t.Fatalf("stdout = %q, want %q", got, "Hello, World!\n")
-	}
-}
-
-func TestGoTargetParityEscapeSequences(t *testing.T) {
-	got := runGoTargetSourceStdout(t, `
-		use ard/io
-		fn main() {
-			io::print("Line 1\nLine 2")
-			io::print("Tab:\tText")
-		}
-	`)
-	want := "Line 1\nLine 2\nTab:\tText\n"
-	if got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
-	}
-}
-
-func TestGoTargetParityDurationFunctions(t *testing.T) {
-	runGoParityCases(t, []goParityCase{
-		{name: "from seconds", input: `use ard/duration
-fn main() Int { duration::from_seconds(20) }`},
-		{name: "from minutes", input: `use ard/duration
-fn main() Int { duration::from_minutes(5) }`},
-		{name: "from hours", input: `use ard/duration
-fn main() Int { duration::from_hours(2) }`},
-	})
-}
-
-func TestGoTargetParityFS(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "go-target-fs-parity")
-	dir := filepath.Join(root, "workspace")
-	file := filepath.Join(dir, "sample.txt")
-	copyFile := filepath.Join(dir, "copy.txt")
-	renamedFile := filepath.Join(dir, "renamed.txt")
-	runGoParityCasesSerial(t, []goParityCase{
-		{
-			name: "fs create dir exists and is dir",
-			input: fmt.Sprintf(`
-				use ard/fs
-				fn main() Bool {
-					fs::delete_dir(%q).expect("")
-					fs::create_dir(%q).expect("")
-					fs::exists(%q) and fs::is_dir(%q)
-				}
-			`, root, dir, dir, dir),
-		},
-		{
-			name: "fs write append and read",
-			input: fmt.Sprintf(`
-				use ard/fs
-				fn main() Str {
-					fs::delete_dir(%q).expect("")
-					fs::create_dir(%q).expect("")
-					fs::create_file(%q).expect("")
-					fs::write(%q, "hello").expect("")
-					fs::append(%q, " world").expect("")
-					fs::read(%q).expect("")
-				}
-			`, root, dir, file, file, file, file),
-		},
-		{
-			name: "fs copy rename delete and is file",
-			input: fmt.Sprintf(`
-				use ard/fs
-				fn main() Bool {
-					fs::delete_dir(%q).expect("")
-					fs::create_dir(%q).expect("")
-					fs::write(%q, "hello!").expect("")
-					fs::copy(%q, %q).expect("")
-					fs::rename(%q, %q).expect("")
-					let renamed_ok = fs::is_file(%q) and fs::read(%q).expect("") == "hello!"
-					fs::delete(%q).expect("")
-					fs::delete(%q).expect("")
-					renamed_ok and not fs::exists(%q) and not fs::exists(%q)
-				}
-			`, root, dir, file, file, copyFile, copyFile, renamedFile, renamedFile, renamedFile, file, renamedFile, file, renamedFile),
-		},
-		{
-			name: "fs cwd abs and list dir",
-			input: fmt.Sprintf(`
-				use ard/fs
-				fn main() Bool {
-					fs::delete_dir(%q).expect("")
-					fs::create_dir(%q).expect("")
-					fs::write(%q, "a").expect("")
-					fs::write(%q, "b").expect("")
-					let entries = fs::list_dir(%q).expect("")
-					let cwd = fs::cwd().expect("")
-					let abs = fs::abs(%q).expect("")
-					entries.size() == 2 and cwd.size() > 0 and abs.size() >= %d
-				}
-			`, root, dir, file, copyFile, dir, dir, len(dir)),
-		},
-		{
-			name: "fs delete dir removes tree",
-			input: fmt.Sprintf(`
-				use ard/fs
-				fn main() Bool {
-					fs::delete_dir(%q).expect("")
-					fs::create_dir(%q).expect("")
-					fs::write(%q, "bye").expect("")
-					fs::delete_dir(%q).expect("")
-					not fs::exists(%q)
-				}
-			`, root, dir, file, dir, dir),
-		},
-	})
-}
-
-func TestGoTargetParityCryptoUUID(t *testing.T) {
-	program := lowerParitySource(t, `
-		use ard/crypto
-		fn main() Str { crypto::uuid() }
-	`)
-	got := runGoTargetParityJSON(t, program)
-	uuid, err := strconv.Unquote(got)
-	if err != nil {
-		t.Fatalf("unquote uuid %q: %v", got, err)
-	}
-	pattern := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-	if !pattern.MatchString(uuid) {
-		t.Fatalf("uuid = %q", uuid)
-	}
-}
-
-func TestGoTargetParityHTTP(t *testing.T) {
-	runGoParityCases(t, []goParityCase{
-		{
-			name: "method implements tostring",
-			input: `
-				use ard/http
-				fn main() Str {
-					let method = http::Method::Post
-					"{method}"
-				}
-			`,
-		},
-	})
-
-	t.Run("request timeout uses req timeout", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			time.Sleep(1100 * time.Millisecond)
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("ok"))
-		}))
-		defer server.Close()
-		runGoParityCases(t, []goParityCase{{
-			name: "http send request timeout fallback",
-			input: fmt.Sprintf(`
-				use ard/http
-				use ard/maybe
-				fn main() Int {
-					http::send(http::Request{
-						method: http::Method::Get,
-						url: %q,
-						headers: [:],
-						timeout: maybe::some(1),
-					}).or(http::Response::new(-1, "")).status
-				}
-			`, server.URL),
-		}})
-	})
-
-	t.Run("call site timeout overrides req timeout", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			time.Sleep(1100 * time.Millisecond)
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte("created"))
-		}))
-		defer server.Close()
-		runGoParityCases(t, []goParityCase{{
-			name: "http send override timeout succeeds",
-			input: fmt.Sprintf(`
-				use ard/http
-				use ard/maybe
-				fn main() Int {
-					let req = http::Request{
-						method: http::Method::Get,
-						url: %q,
-						headers: [:],
-						timeout: maybe::some(1),
-					}
-					http::send(req, 2).or(http::Response::new(-1, "")).status
-				}
-			`, server.URL),
-		}})
-	})
-}
-
-func TestGoTargetParitySQL(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "query.db")
-	runGoParityCasesSerial(t, []goParityCase{
-		{
-			name: "sql extract params in query order",
-			input: `
-				use ard/sql
-				fn main() Int {
-					let names = sql::extract_params("SELECT * FROM players WHERE league_id = @league_id AND season = @season AND (home_id = @team_id OR away_id = @team_id)")
-					names.size()
-				}
-			`,
-		},
-		{
-			name: "sql query all decodes row fields",
-			input: fmt.Sprintf(`
-				use ard/sql
-				use ard/decode
-				fn main() Str {
-					let db = sql::open(%q).expect("Failed to open database")
-					db.exec("DROP TABLE IF EXISTS players").expect("Failed to drop table")
-					db.exec("CREATE TABLE players (id INTEGER PRIMARY KEY, name TEXT, number INTEGER)").expect("Failed to create table")
-					db.exec("INSERT INTO players (name, number) VALUES ('John Doe', 2)").expect("Failed to insert player 1")
-					db.exec("INSERT INTO players (name, number) VALUES ('Jane Smith', 5)").expect("Failed to insert player 2")
-					let query = db.query("SELECT id, name, number FROM players WHERE number = @number")
-					let rows = query.all(["number": 5]).expect("Failed to query players")
-					let decode_name = decode::field("name", decode::string)
-					decode_name(rows.at(0)).expect("Unable to decode row")
-				}
-			`, dbPath),
-		},
-		{
-			name: "sql query first returns maybe row",
-			input: fmt.Sprintf(`
-				use ard/sql
-				use ard/decode
-				fn main() Int {
-					let db = sql::open(%q).expect("Failed to open database")
-					let query = db.query("SELECT id FROM players WHERE number = @number")
-					let maybe_row = query.first(["number": 5]).expect("Failed to query players")
-					let row = maybe_row.expect("Found none")
-					decode::run(row, decode::field("id", decode::int)).expect("Failed to decode id")
-				}
-			`, dbPath),
-		},
-		{
-			name: "sql missing parameter reports error",
-			input: fmt.Sprintf(`
-				use ard/sql
-				fn main() Str {
-					let db = sql::open(%q).expect("Failed to open database")
-					let stmt = db.query("INSERT INTO players (name, number) VALUES (@name, @number)")
-					match stmt.run(["name": "John Doe", "int": 2]) {
-						err(msg) => msg,
-						ok(_) => "unexpected success",
-					}
-				}
-			`, dbPath),
-		},
-		{
-			name: "sql rollback discards inserted rows",
-			input: fmt.Sprintf(`
-				use ard/sql
-				fn main() Int {
-					let db = sql::open(%q).expect("Failed to open database")
-					db.exec("DROP TABLE IF EXISTS users").expect("Failed to drop table")
-					db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)").expect("Failed to create table")
-					let tx = db.begin().expect("Failed to begin transaction")
-					tx.exec("INSERT INTO users (id, name) VALUES (1, 'joe')").expect("Failed to insert")
-					tx.rollback().expect("Failed to rollback transaction")
-					let rows = db.query("SELECT * FROM users").all([:]).expect("Failed to get all")
-					rows.size()
-				}
-			`, filepath.Join(filepath.Dir(dbPath), "rollback.db")),
-		},
-		{
-			name: "sql inserting null round trips as nullable field",
-			input: fmt.Sprintf(`
-				use ard/sql
-				use ard/decode
-				fn main() Bool {
-					let db = sql::open(%q).expect("Failed to open database")
-					db.exec("DROP TABLE IF EXISTS users").expect("Failed to drop table")
-					let create_table = db.query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT)")
-					create_table.run([:]).expect("Failed to create table")
-					let stmt = db.query("INSERT INTO users (name, email) VALUES (@name, @email)")
-					let values: [Str:sql::Value] = ["name": "John Doe", "email": ()]
-					stmt.run(values).expect("Failed to insert row")
-					let query = db.query("SELECT email FROM users WHERE id = 1")
-					let rows = query.all(values).expect("Failed to find users with id 1")
-					let email = decode::run(rows.at(0), decode::field("email", decode::nullable(decode::string))).expect("Failed to decode email")
-					email.is_none()
-				}
-			`, filepath.Join(filepath.Dir(dbPath), "maybe.db")),
-		},
-		{
-			name: "sql commit persists inserted rows and query params work in tx",
-			input: fmt.Sprintf(`
-				use ard/sql
-				use ard/decode
-				fn main() Str {
-					let db = sql::open(%q).expect("Failed to open database")
-					db.exec("DROP TABLE IF EXISTS users").expect("Failed to drop table")
-					db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)").expect("Failed to create table")
-					let tx = db.begin().expect("Failed to begin transaction")
-					tx.exec("INSERT INTO users (name, age) VALUES ('User1', 25)").expect("Failed to insert User1")
-					tx.exec("INSERT INTO users (name, age) VALUES ('User2', 30)").expect("Failed to insert User2")
-					let rows = tx.query("SELECT * FROM users WHERE age = @age").all(["age": 30]).expect("Failed to query in transaction")
-					tx.commit().expect("Failed to commit transaction")
-					decode::run(rows.at(0), decode::field("name", decode::string)).expect("Failed to decode name")
-				}
-			`, filepath.Join(filepath.Dir(dbPath), "commit.db")),
-		},
-	})
-}
-
-func TestGoTargetParityEnvGet(t *testing.T) {
-	t.Setenv("ARD_ENV_TEST", "present")
-	runGoParityCases(t, []goParityCase{
-		{
-			name: "env get returns some string for set variable",
-			input: `
-				use ard/env
-				fn main() Str {
-					env::get("ARD_ENV_TEST").or("")
-				}
-			`,
-		},
-		{
-			name: "env get returns none for missing variable",
-			input: `
-				use ard/env
-				fn main() Bool {
-					env::get("ARD_MISSING_ENV_TEST").is_none()
-				}
-			`,
-		},
-	})
-}
-
-func TestGoTargetParityDecodeHostFlows(t *testing.T) {
-	runGoParityCases(t, []goParityCase{
-		{
-			name: "dynamic list decodes back to list",
-			input: `
-				use ard/decode
-				fn main() Int {
-					let foo = [1,2,3]
-					let data = Dynamic::list(from: foo, of: Dynamic::from_int)
-					let list = decode::run(data, decode::list(decode::int)).expect("Couldn't decode data")
-					list.at(1)
-				}
-			`,
-		},
-		{
-			name: "dynamic object decodes back to map",
-			input: `
-				use ard/decode
-				fn main() Int {
-					let data = Dynamic::object([
-						"foo": Dynamic::from_int(0),
-						"baz": Dynamic::from_int(1),
-					])
-					let m = decode::run(data, decode::map(decode::string, decode::int)).expect("Couldn't decode data")
-					m.get("foo").or(-1)
-				}
-			`,
-		},
-		{
-			name: "from json accepts string input",
-			input: `
-				use ard/decode
-				fn main() Int {
-					let data = decode::from_json("42").expect("parse")
-					decode::run(data, decode::int).expect("decode")
-				}
-			`,
-		},
-		{
-			name: "from json accepts dynamic string input",
-			input: `
-				use ard/decode
-				fn main() Int {
-					let raw = Dynamic::from("\{\"count\": 7\}")
-					let data = decode::from_json(raw).expect("parse")
-					decode::run(data, decode::field("count", decode::int)).expect("decode")
-				}
-			`,
-		},
-		{
-			name: "from json rejects non string dynamic input",
-			input: `
-				use ard/decode
-				fn main() Str {
-					let raw = Dynamic::from(42)
-					match decode::from_json(raw) {
-						err(msg) => msg,
-						ok(_) => "unexpected success",
-					}
-				}
-			`,
-		},
-		{
-			name: "decode field string",
-			input: `
-				use ard/decode
-				fn main() Str {
-					let data = decode::from_json("\{\"name\": \"John Doe\"\}").expect("parse")
-					decode::run(data, decode::field("name", decode::string)).expect("decode")
-				}
-			`,
-		},
-		{
-			name: "path with array index",
-			input: `
-				use ard/decode
-				fn main() Int {
-					let data = decode::from_json("\{\"items\": [10, 20, 30]\}").expect("parse")
-					let result = decode::run(data, decode::path(["items", 1], decode::int))
-					result.expect("decode")
-				}
-			`,
-		},
-		{
-			name: "string decoder fails on int returns error list",
-			input: `
-				use ard/decode
-				fn main() Str {
-					let data = Dynamic::from(42)
-					let result = decode::run(data, decode::string)
-					match result {
-						err(errs) => {
-							if not errs.size() == 1 { panic("Expected 1 error. Got {errs.size()}") }
-							errs.at(0).to_str()
-						},
-						ok(_) => ""
-					}
-				}
-			`,
-		},
-		{
-			name: "nullable string on null returns none",
-			input: `
-				use ard/decode
-				fn main() Bool {
-					let data = decode::from_json("null").expect("parse")
-					let result = decode::run(data, decode::nullable(decode::string)).expect("decode")
-					result.is_none()
-				}
-			`,
-		},
-		{
-			name: "can decode a list",
-			input: `
-				use ard/decode
-				fn main() Int {
-					let data = decode::from_json("[1, 2, 3, 4, 5]").expect("parse")
-					let list = decode::run(data, decode::list(decode::int)).expect("decode")
-					list.at(4)
-				}
-			`,
-		},
-		{
-			name: "map of string keys to integers",
-			input: `
-				use ard/decode
-				fn main() Int {
-					let data = decode::from_json("\{\"age\": 30, \"score\": 95\}").expect("parse")
-					let decode_map = decode::map(decode::string, decode::int)
-					let m = decode_map(data).expect("decode")
-					m.get("age").or(0)
-				}
-			`,
-		},
-		{
-			name: "decode nested path with mixed segments",
-			input: `
-				use ard/decode
-				fn main() Str {
-					let data = decode::from_json("\{\"response\": [\{\"name\": \"Alice\"\}, \{\"name\": \"Bob\"\}]\}").expect("parse")
-					decode::run(data, decode::path(["response", 0, "name"], decode::string)).expect("decode")
-				}
-			`,
-		},
-		{
-			name: "path error includes array index",
-			input: `
-				use ard/decode
-				fn main() Str {
-					let data = decode::from_json("\{\"items\": [\"a\", \"b\"]\}").expect("parse")
-					let result = decode::run(data, decode::path(["items", 1], decode::int))
-					match result {
-						ok => "unexpected success",
-						err(errs) => errs.at(0).to_str(),
-					}
-				}
-			`,
-		},
-		{
-			name: "one of falls back to alternate decoder",
-			input: `
-				use ard/decode
-				fn int_to_string(data: Dynamic) Str![decode::Error] {
-					let int = try decode::int(data)
-					Result::ok(int.to_str())
-				}
-				fn main() Str {
-					let data = decode::from_json("20").expect("parse")
-					let take_string = decode::one_of(decode::string, [int_to_string])
-					take_string(data).expect("decode")
-				}
-			`,
-		},
-		{
-			name: "flatten multiple errors with newlines",
-			input: `
-				use ard/decode
-				fn main() Str {
-					let errors = [
-						decode::Error{expected: "Int", found: "false", path: ["[1]"]},
-						decode::Error{expected: "Str", found: "42", path: ["[2]"]},
-					]
-					decode::flatten(errors)
-				}
-			`,
-		},
-	})
-}
-
-func TestGoTargetParityEncodeJSONPrimitives(t *testing.T) {
-	runGoParityCases(t, []goParityCase{
-		{name: "encoding str", input: `use ard/encode
-fn main() Str { encode::json("hello").expect("encode failed") }`},
-		{name: "encoding int", input: `use ard/encode
-fn main() Str { encode::json(200).expect("encode failed") }`},
-		{name: "encoding float", input: `use ard/encode
-fn main() Str { encode::json(98.6).expect("encode failed") }`},
-		{name: "encoding bool", input: `use ard/encode
-fn main() Str { encode::json(true).expect("encode failed") }`},
-	})
-}
-
 func TestGoTargetParityStringHelpers(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{name: "int to str", input: `fn main() Str { 100.to_str() }`},
@@ -2692,12 +1961,14 @@ func TestGoTargetParityStringHelpers(t *testing.T) {
 		{name: "str at uses rune index", input: `fn main() Str { "hé".at(1).expect("missing").to_str() }`},
 		{name: "str at out of bounds returns none", input: `fn main() Bool { "hello".at(5).is_none() }`},
 		{name: "str at negative returns none", input: `fn main() Bool { "hello".at(-1).is_none() }`},
-		{name: "str split", input: `fn main() [Str] { Str::split("a,b,c", ",") }`},
+		{name: "list at returns element", input: `fn main() Int { [10, 20, 30].at(1).expect("missing") }`},
+		{name: "list at out of bounds returns none", input: `fn main() Bool { [10, 20, 30].at(3).is_none() }`},
+		{name: "list at negative returns none", input: `fn main() Bool { [10, 20, 30].at(-1).is_none() }`},
+		{name: "list at falls back to a default", input: `fn main() Int { [10].at(9).or(-1) }`},
 		{name: "str trim", input: `fn main() Str { "  hello \n".trim() }`},
 		{name: "str is empty", input: `fn main() Bool { "".is_empty() }`},
 	})
 }
-
 func TestGoTargetParityStringMatching(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{name: "str match first case", input: `fn main() Str {
@@ -2723,7 +1994,6 @@ func TestGoTargetParityStringMatching(t *testing.T) {
 }`},
 	})
 }
-
 func TestGoTargetParityMatching(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -2855,7 +2125,6 @@ func TestGoTargetParityMatching(t *testing.T) {
 		},
 	})
 }
-
 func TestGoTargetParityCollectionsMutation(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -2884,7 +2153,7 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 				fn main() Int {
 					mut list = [1,2,3]
 					list.push(4)
-					list.at(3)
+					list.at(3).expect("bounds")
 				}
 			`,
 		},
@@ -2894,7 +2163,7 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 				fn main() Int {
 					mut list = [1,2,3]
 					list.set(1, 10)
-					list.at(1)
+					list.at(1).expect("bounds")
 				}
 			`,
 		},
@@ -2904,7 +2173,7 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 				fn main() Int {
 					mut list = [1,2,3]
 					list.swap(0,2)
-					list.at(0)
+					list.at(0).expect("bounds")
 				}
 			`,
 		},
@@ -2936,30 +2205,6 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 			`,
 		},
 		{
-			name: "map maybe keys use value semantics",
-			input: `
-				use ard/maybe
-
-				fn main() Str {
-					let key = maybe::some(1)
-					let values = [key: "one"]
-					values.get(maybe::some(1)).or("missing")
-				}
-			`,
-		},
-		{
-			name: "global map with maybe keys compiles",
-			input: `
-				use ard/maybe
-
-				let values: [Int?:Str] = [:]
-
-				fn main() Str {
-					values.get(maybe::some(1)).or("missing")
-				}
-			`,
-		},
-		{
 			name: "map drop removes key",
 			input: `
 				fn main() Bool {
@@ -2972,31 +2217,92 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 	})
 }
 
-func TestGoTargetParityDirectGoReturnAdapters(t *testing.T) {
+func TestGoTargetParityAsyncStart(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
 		want  string
 	}{
 		{
-			name: "value error to result",
-			input: `use go:strconv
-extern fn atoi(value: Str) Int!Str = strconv::Atoi
-fn main() Int { atoi("42").expect("parse") }`,
-			want: "42",
+			name: "async start coordinates over unbuffered channel",
+			input: `use ard/async
+fn main() Bool {
+  let done = Chan::new<Bool>()
+  async::start(fn() {
+    done.send(true)
+  })
+  done.recv().expect("done")
+}`,
+			want: "true",
 		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			program := lowerParitySource(t, tc.input)
+			if got := strings.TrimSpace(runGoTargetParityJSON(t, program)); got != tc.want {
+				t.Fatalf("go output = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGoTargetParityDirectionalChannels(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
 		{
-			name: "error to void result",
-			input: `use go:os
-extern fn chdir(path: Str) Void!Str = os::Chdir
-fn main() Bool { chdir(".").is_ok() }`,
+			name: "sender and receiver views round-trip a value",
+			input: `fn main() Bool {
+  let ch = Chan::new<Int>(1)
+  let tx = ch.sender()
+  let rx = ch.receiver()
+  tx.send(42)
+  rx.recv().expect("v") == 42
+}`,
 			want: "true",
 		},
 		{
-			name: "value bool to maybe",
-			input: `use go:os
-extern fn lookup_env(key: Str) Str? = os::LookupEnv
-fn main() Bool { lookup_env("__ARD_MISSING_DIRECT_GO_ADAPTER__").is_none() }`,
+			name: "select receives on a receiver view",
+			input: `fn main() Bool {
+  let ch = Chan::new<Int>(1)
+  let rx = ch.receiver()
+  ch.send(7)
+  select {
+    let v = rx.recv() => v.expect("v") == 7,
+    _ => false,
+  }
+}`,
+			want: "true",
+		},
+		{
+			name: "sender can close the channel",
+			input: `fn main() Bool {
+  let ch = Chan::new<Int>(1)
+  let tx = ch.sender()
+  tx.close()
+  ch.recv().is_none()
+}`,
+			want: "true",
+		},
+		{
+			name: "select receives on inline Go receive-only channel",
+			input: `use go:time
+fn main() Bool {
+  select {
+    time::After(0).recv() => true,
+  }
+}`,
+			want: "true",
+		},
+		{
+			name: "received Go channel value preserves foreign methods",
+			input: `use go:time
+fn main() Bool {
+  let tick = time::After(0).recv().expect("tick")
+  tick.Year() >= 2000
+}`,
 			want: "true",
 		},
 	}
@@ -3056,51 +2362,6 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 				fn main() Bool {
 					let none: Int? = maybe::none()
 					not maybe::some(0) == none and none == maybe::none()
-				}
-			`,
-		},
-		{
-			name: "maybe equality handles structural maps",
-			input: `
-				use ard/maybe
-
-				fn main() Bool {
-					let one = maybe::some(1)
-					let two = maybe::some(2)
-					let left = [one: "one", two: "two"]
-					let right = [two: "two", one: "one"]
-					maybe::some(left) == maybe::some(right)
-				}
-			`,
-		},
-		{
-			name: "maybe equality handles structs containing structural maps",
-			input: `
-				use ard/maybe
-
-				struct Box { values: [Int?:Str] }
-
-				fn main() Bool {
-					let one = maybe::some(1)
-					let two = maybe::some(2)
-					let left = Box{values: [one: "one", two: "two"]}
-					let right = Box{values: [two: "two", one: "one"]}
-					maybe::some(left) == maybe::some(right)
-				}
-			`,
-		},
-		{
-			name: "json empty list decodes as empty list",
-			input: `
-				use ard/json
-				use ard/maybe
-
-				struct Payload { items: [Int] }
-
-				fn main() Bool {
-					let parsed = json::parse<Payload>("\{\"items\":[]\}").expect("parse")
-					let empty: [Int] = []
-					maybe::some(parsed.items) == maybe::some(empty)
 				}
 			`,
 		},
@@ -3404,34 +2665,62 @@ func runGoTargetParityJSON(t *testing.T, program *air.Program) string {
 	if err != nil {
 		t.Fatalf("generate sources: %v", err)
 	}
+	trimmedSources := make(map[string][]byte, len(sources))
 	for name, source := range sources {
-		trimmed, err := stripGeneratedMain(source)
-		if err != nil {
-			t.Fatalf("strip main from %s: %v", name, err)
+		// The synthetic main package is replaced by the parity runner below.
+		if name == "main.go" {
+			continue
 		}
-		if err := os.WriteFile(filepath.Join(tempDir, name), trimmed, 0o644); err != nil {
-			t.Fatalf("write source %s: %v", name, err)
-		}
+		trimmedSources[name] = source
 	}
+	writeGeneratedSourcesForTest(t, tempDir, trimmedSources)
 	rootID, err := rootFunction(program)
 	if err != nil {
 		t.Fatalf("root function: %v", err)
 	}
-	scriptFn := functionName(program, program.Functions[rootID])
+	entryModuleID := program.Functions[rootID].Module
+	entryAlias := modulePackageName(program, entryModuleID)
+	entryImportPath := moduleImportPath(program, entryModuleID)
+	scriptFn := entryAlias + "." + functionName(program, program.Functions[rootID])
+	runtimeImport := ""
+	runnerValue := scriptFn + "()"
+	returnType := program.Functions[rootID].Signature.Return
+	if returnType > 0 && int(returnType) <= len(program.Types) {
+		ret := program.Types[returnType-1]
+		switch ret.Kind {
+		case air.TypeResult:
+			if ret.Error > 0 && int(ret.Error) <= len(program.Types) && program.Types[ret.Error-1].Kind == air.TypeStr {
+				runtimeImport = "\n\tard \"generated/internal/ard\""
+				if ret.Value == air.NoType || program.Types[ret.Value-1].Kind == air.TypeVoid {
+					runnerValue = fmt.Sprintf("func() any { err := %s(); if err != nil { return ard.Result[struct{}, string]{Err: err.Error()} }; return ard.Result[struct{}, string]{Value: struct{}{}, Ok: true} }()", scriptFn)
+				} else {
+					runnerValue = fmt.Sprintf("func() any { value, err := %s(); if err != nil { return ard.Result[any, string]{Err: err.Error()} }; return ard.Result[any, string]{Value: value, Ok: true} }()", scriptFn)
+				}
+			}
+		case air.TypeMaybe:
+			runtimeImport = "\n\tard \"generated/internal/ard\""
+			if ret.Elem == air.NoType || program.Types[ret.Elem-1].Kind == air.TypeVoid {
+				runnerValue = fmt.Sprintf("func() any { ok := %s(); if ok { return ard.Maybe[struct{}]{Value: struct{}{}, Ok: true} }; return ard.Maybe[struct{}]{} }()", scriptFn)
+			} else {
+				runnerValue = fmt.Sprintf("func() any { value, ok := %s(); if ok { return ard.Maybe[any]{Value: value, Ok: true} }; return ard.Maybe[any]{} }()", scriptFn)
+			}
+		}
+	}
 	runner := fmt.Sprintf(`package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"reflect"
-	stdlibffi "github.com/akonwi/ard/std_lib/ffi"
+	"reflect"%s
+	%s %q
 )
 
 func main() {
-	encoded, err := stdlibffi.JsonEncode(normalizeParityValue(%s()))
+	encoded, err := json.Marshal(normalizeParityValue(%s))
 	if err != nil {
 		panic(err)
 	}
-	fmt.Print(encoded)
+	fmt.Print(string(encoded))
 }
 
 func normalizeParityValue(value any) any {
@@ -3484,15 +2773,14 @@ func normalizeReflectValue(v reflect.Value) any {
 		return v.Interface()
 	}
 }
-`, scriptFn)
+`, runtimeImport, entryAlias, entryImportPath, runnerValue)
 	if err := os.WriteFile(filepath.Join(tempDir, "runner.go"), []byte(runner), 0o644); err != nil {
 		t.Fatalf("write runner: %v", err)
 	}
-	goMod := "module generated\n\ngo 1.26.0\n"
-	if moduleRoot, ok := compilerModuleRoot(); ok {
-		goMod += "\nrequire github.com/akonwi/ard v0.0.0\n"
-		goMod += fmt.Sprintf("replace github.com/akonwi/ard => %s\n", moduleRoot)
+	if err := writeGeneratedRuntimePackage(tempDir); err != nil {
+		t.Fatalf("write generated runtime: %v", err)
 	}
+	goMod := "module generated\n\ngo 1.26.0\n"
 	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
@@ -3520,16 +2808,11 @@ func runGoTargetSourceStdout(t *testing.T, input string) string {
 	if err != nil {
 		t.Fatalf("generate sources: %v", err)
 	}
-	for name, source := range sources {
-		if err := os.WriteFile(filepath.Join(tempDir, name), source, 0o644); err != nil {
-			t.Fatalf("write source %s: %v", name, err)
-		}
+	writeGeneratedSourcesForTest(t, tempDir, sources)
+	if err := writeGeneratedRuntimePackage(tempDir); err != nil {
+		t.Fatalf("write generated runtime: %v", err)
 	}
 	goMod := "module generated\n\ngo 1.26.0\n"
-	if moduleRoot, ok := compilerModuleRoot(); ok {
-		goMod += "\nrequire github.com/akonwi/ard v0.0.0\n"
-		goMod += fmt.Sprintf("replace github.com/akonwi/ard => %s\n", moduleRoot)
-	}
 	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}

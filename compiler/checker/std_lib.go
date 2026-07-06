@@ -1,136 +1,27 @@
 package checker
 
 var prelude = map[string]Module{
-	"Result": ResultPkg{},
+	"Result":   ResultPkg{},
+	"Chan":     ChannelStaticPkg{},
+	"Receiver": EmptyBuiltinPkg{name: "Receiver"},
+	"Sender":   EmptyBuiltinPkg{name: "Sender"},
 }
 
 func findInStdLib(path string) (Module, bool) {
 	// Provide minimal hardcoded definitions for special modules
 	// These provide the function signatures for type checking
 	switch path {
-	case "ard/async":
-		return AsyncPkg{}, true
 	case "ard/maybe":
 		return MaybePkg{}, true
 	case "ard/result":
 		return ResultPkg{}, true
+	case "ard/async":
+		return AsyncPkg{}, true
+	case "ard/unsafe":
+		return UnsafePkg{}, true
 	}
 
-	// Check for embedded .ard modules for other modules
-	if mod, ok := FindEmbeddedModule(path); ok {
-		return mod, true
-	}
-
-	return nil, false
-}
-
-/* ard/async */
-type AsyncPkg struct{}
-
-func (pkg AsyncPkg) Path() string {
-	return "ard/async"
-}
-
-func (pkg AsyncPkg) Program() *Program {
-	// Return the embedded module's program so Fiber methods have access to wait_for
-	if embeddedMod, ok := pkg.embeddedModule(); ok {
-		return embeddedMod.Program()
-	}
-	return nil
-}
-
-func (pkg AsyncPkg) embeddedModule() (Module, bool) {
-	return FindEmbeddedModule("ard/async")
-}
-
-func (pkg AsyncPkg) Get(name string) Symbol {
-	switch name {
-	case "sleep":
-		return Symbol{
-			Name: name,
-			Type: &ExternalFunctionDef{
-				Name:             name,
-				Parameters:       []Parameter{{Name: "ms", Type: Int}},
-				ReturnType:       Void,
-				ExternalBinding:  "go:time::Sleep",
-				ExternalBindings: map[string]string{"go": "go:time::Sleep"},
-			},
-		}
-	case "start":
-		// Get the Fiber struct from the embedded module for consistency
-		var fiberType Type = &StructDef{Name: "Fiber"}
-		if embeddedMod, ok := pkg.embeddedModule(); ok {
-			if fiberSym := embeddedMod.Get("Fiber"); fiberSym.Type != nil {
-				fiberType = fiberSym.Type
-			}
-		}
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name: name,
-				Parameters: []Parameter{{
-					Name: "do",
-					Type: &FunctionDef{
-						Name:       "",
-						Parameters: []Parameter{},
-						ReturnType: Void,
-					},
-				}},
-				ReturnType: fiberType,
-			},
-		}
-	case "eval":
-		// Get the Fiber struct from the embedded module for consistency
-		var fiberType Type = &StructDef{Name: "Fiber"}
-		if embeddedMod, ok := pkg.embeddedModule(); ok {
-			if fiberSym := embeddedMod.Get("Fiber"); fiberSym.Type != nil {
-				fiberType = fiberSym.Type
-			}
-		}
-		typeVar := &TypeVar{name: "T"}
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name: name,
-				Parameters: []Parameter{{
-					Name: "do",
-					Type: &FunctionDef{
-						Name:       "",
-						Parameters: []Parameter{},
-						ReturnType: typeVar,
-					},
-				}},
-				ReturnType: fiberType,
-			},
-		}
-	case "join":
-		// Get the Fiber struct from the embedded module for consistency
-		var fiberType Type = &StructDef{Name: "Fiber"}
-		if embeddedMod, ok := pkg.embeddedModule(); ok {
-			if fiberSym := embeddedMod.Get("Fiber"); fiberSym.Type != nil {
-				fiberType = fiberSym.Type
-			}
-		}
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name: name,
-				Parameters: []Parameter{{
-					Name: "fibers",
-					Type: &List{of: fiberType},
-				}},
-				ReturnType: Void,
-			},
-		}
-	case "Fiber":
-		// Return the Fiber struct from the embedded module
-		if embeddedMod, ok := pkg.embeddedModule(); ok {
-			return embeddedMod.Get("Fiber")
-		}
-		return Symbol{}
-	default:
-		return Symbol{}
-	}
+	return FindEmbeddedModule(path)
 }
 
 /* ard/maybe */
@@ -213,4 +104,119 @@ func (pkg ResultPkg) Get(name string) Symbol {
 	default:
 		return Symbol{}
 	}
+}
+
+/* ard/async */
+type AsyncPkg struct{}
+
+func (pkg AsyncPkg) Path() string { return "ard/async" }
+
+func (pkg AsyncPkg) Program() *Program { return nil }
+
+func (pkg AsyncPkg) Get(name string) Symbol {
+	switch name {
+	case "start":
+		return Symbol{Name: name, Type: &FunctionDef{Name: name, Parameters: []Parameter{{Name: "task", Type: &FunctionDef{Name: "<function>", ReturnType: Void}}}, ReturnType: Void}}
+	default:
+		return Symbol{}
+	}
+}
+
+/* ard/unsafe */
+type UnsafePkg struct{}
+
+func (pkg UnsafePkg) Path() string { return "ard/unsafe" }
+
+func (pkg UnsafePkg) Program() *Program { return nil }
+
+func (pkg UnsafePkg) Get(name string) Symbol {
+	switch name {
+	case "cast":
+		return Symbol{Name: name, Type: &FunctionDef{Name: name, GenericParams: []string{"T"}, Parameters: []Parameter{{Name: "value", Type: Any}}, ReturnType: MakeMaybe(&TypeVar{name: "T"})}}
+	case "is_nil":
+		return Symbol{Name: name, Type: &FunctionDef{Name: name, Parameters: []Parameter{{Name: "value", Type: Any}}, ReturnType: Bool}}
+	default:
+		return Symbol{}
+	}
+}
+
+type EmptyBuiltinPkg struct{ name string }
+
+func (pkg EmptyBuiltinPkg) Path() string { return "builtin/" + pkg.name }
+
+func (pkg EmptyBuiltinPkg) Program() *Program { return nil }
+
+func (pkg EmptyBuiltinPkg) Get(name string) Symbol { return Symbol{} }
+
+/* Chan static functions — typed channels lowering to native Go `chan T` */
+type ChannelStaticPkg struct{}
+
+func (pkg ChannelStaticPkg) Path() string { return "builtin/Chan" }
+
+func (pkg ChannelStaticPkg) Program() *Program { return nil }
+
+func (pkg ChannelStaticPkg) Get(name string) Symbol {
+	switch name {
+	case "new":
+		// Chan::new<$T>(capacity: Int?) Chan<$T>; send/recv/close are methods on Chan.
+		t := &TypeVar{name: "T"}
+		return Symbol{Name: name, Type: &FunctionDef{
+			Name:          name,
+			GenericParams: []string{"T"},
+			Parameters:    []Parameter{{Name: "capacity", Type: MakeMaybe(Int)}},
+			ReturnType:    MakeChan(t),
+		}}
+	default:
+		return Symbol{}
+	}
+}
+
+// Builtin package symbol names: the single source of truth for each Get
+// switch above. BuiltinPkgNames is exported so tests can assert Get and
+// Symbols stay in sync.
+var BuiltinPkgNames = map[string][]string{
+	"ard/maybe":    {"none", "some"},
+	"ard/result":   {"ok", "err"},
+	"ard/async":    {"start"},
+	"ard/unsafe":   {"cast", "is_nil"},
+	"builtin/Chan": {"new"},
+}
+
+func (pkg MaybePkg) Symbols() map[string]Symbol {
+	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
+}
+
+func (pkg ResultPkg) Symbols() map[string]Symbol {
+	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
+}
+
+func (pkg AsyncPkg) Symbols() map[string]Symbol {
+	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
+}
+
+func (pkg UnsafePkg) Symbols() map[string]Symbol {
+	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
+}
+
+func (pkg EmptyBuiltinPkg) Symbols() map[string]Symbol { return map[string]Symbol{} }
+
+func (pkg ChannelStaticPkg) Symbols() map[string]Symbol {
+	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
+}
+
+func symbolsByName(mod Module, names ...string) map[string]Symbol {
+	out := make(map[string]Symbol, len(names))
+	for _, name := range names {
+		if sym := mod.Get(name); !sym.IsZero() {
+			out[name] = sym
+		}
+	}
+	return out
+}
+
+// PreludeModule returns a built-in prelude static package (Result, Chan,
+// Receiver, Sender) by its surface name. Tooling uses this for completion.
+func PreludeModule(name string) (Module, bool) {
+	mod, ok := prelude[name]
+	return mod, ok
 }

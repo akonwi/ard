@@ -41,7 +41,9 @@ func LoadModule(inputPath string) (*LoadResult, error) {
 		relPath = inputPath
 	}
 
-	c := checker.New(relPath, program, moduleResolver)
+	projectInfo := moduleResolver.GetProjectInfo()
+	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
+	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{GoResolver: goResolver})
 	c.Check()
 	if c.HasErrors() {
 		for _, diagnostic := range c.Diagnostics() {
@@ -52,6 +54,6 @@ func LoadModule(inputPath string) (*LoadResult, error) {
 
 	return &LoadResult{
 		Module:      c.Module(),
-		ProjectInfo: moduleResolver.GetProjectInfo(),
+		ProjectInfo: projectInfo,
 	}, nil
 }

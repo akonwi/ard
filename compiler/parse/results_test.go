@@ -26,7 +26,6 @@ func testLexAngleBrackets(t *testing.T) {
 		},
 	})
 }
-
 func TestResultTypeInSignature(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -86,7 +85,7 @@ func TestResultTypeInSignature(t *testing.T) {
 		{
 			name: "Result sugar syntax with generic maybe type",
 			input: `
-			fn nullable(decoder: fn(Dynamic) $T![Error]) $T?![Error] {}
+			fn nullable(decoder: fn(Any) $T![Error]) $T?![Error] {}
 			`,
 			output: Program{
 				Imports: []Import{},
@@ -97,7 +96,7 @@ func TestResultTypeInSignature(t *testing.T) {
 							{
 								Name: "decoder",
 								Type: &FunctionType{
-									Params: []DeclaredType{&CustomType{Name: "Dynamic"}},
+									Params: []DeclaredType{&CustomType{Name: "Any"}},
 									Return: &ResultType{
 										Val:      &GenericType{Name: "T", nullable: false},
 										Err:      &List{Element: &CustomType{Name: "Error"}},
@@ -221,7 +220,6 @@ func TestResultTypeInSignature(t *testing.T) {
 		},
 	})
 }
-
 func TestUnsafeBlock(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -248,7 +246,6 @@ func TestUnsafeBlock(t *testing.T) {
 		},
 	})
 }
-
 func TestTryKeyword(t *testing.T) {
 	runTests(t, []test{
 		{

@@ -80,12 +80,33 @@ func (c *recordingConn) lastDiagnostics(t *testing.T) *protocol.PublishDiagnosti
 	return params
 }
 
+// analyzeDiagnosticsForTest runs the snapshot-engine diagnostics path for a
+// single document, with optional sibling overlays as open documents.
+func analyzeDiagnosticsForTest(t *testing.T, source string, filePath string, overlays map[string]string) []checker.Diagnostic {
+	t.Helper()
+	if filepath.Dir(filePath) == "/tmp" {
+		filePath = filepath.Join(t.TempDir(), filepath.Base(filePath))
+	}
+	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer()
+	docURI := uri.File(filePath)
+	server.cache.Open(docURI, "ard", 1, source)
+	for path, text := range overlays {
+		server.cache.Open(uri.File(path), "ard", 1, text)
+	}
+	doc := server.cache.Get(docURI)
+	diags, err := server.analyzeDiagnostics(doc, server.cache.Snapshot())
+	if err != nil {
+		t.Fatalf("analyze failed: %v", err)
+	}
+	return diags
+}
+
 func TestParseAndCheckWithError(t *testing.T) {
 	source := `let x: Int = "hello"`
-	diags, err := parseAndCheck(source, "/tmp/test.ard")
-	if err != nil {
-		t.Fatalf("parseAndCheck failed: %v", err)
-	}
+	diags := analyzeDiagnosticsForTest(t, source, "/tmp/test.ard", nil)
 	if len(diags) == 0 {
 		t.Fatal("expected diagnostics for type error, got none")
 	}
@@ -106,10 +127,7 @@ func TestParseAndCheckWithError(t *testing.T) {
 // TestParseAndCheckWithValidCode verifies no diagnostics for valid code.
 func TestParseAndCheckWithValidCode(t *testing.T) {
 	source := `let x = 5`
-	diags, err := parseAndCheck(source, "/tmp/test.ard")
-	if err != nil {
-		t.Fatalf("parseAndCheck failed: %v", err)
-	}
+	diags := analyzeDiagnosticsForTest(t, source, "/tmp/test.ard", nil)
 	if len(diags) != 0 {
 		t.Errorf("expected no diagnostics for valid code, got %d: %v", len(diags), diags)
 	}
@@ -118,16 +136,12 @@ func TestParseAndCheckWithValidCode(t *testing.T) {
 // TestParseAndCheckWithParseError verifies diagnostics for parse errors.
 func TestParseAndCheckWithParseError(t *testing.T) {
 	source := `let x = `
-	diags, err := parseAndCheck(source, "/tmp/test.ard")
-	if err != nil {
-		t.Fatalf("parseAndCheck failed: %v", err)
-	}
+	diags := analyzeDiagnosticsForTest(t, source, "/tmp/test.ard", nil)
 	if len(diags) == 0 {
 		t.Fatal("expected diagnostics for parse error, got none")
 	}
 	t.Logf("parse error diagnostics: %v", diags)
 }
-
 func TestParseAndCheckUsesOpenDocumentOverlaysForImports(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
@@ -143,12 +157,9 @@ func TestParseAndCheckUsesOpenDocumentOverlaysForImports(t *testing.T) {
 let value = tools::new_name()
 `
 
-	diags, err := parseAndCheckWithOverlays(source, mainPath, map[string]string{
+	diags := analyzeDiagnosticsForTest(t, source, mainPath, map[string]string{
 		modPath: "fn new_name() Int { 1 }\n",
 	})
-	if err != nil {
-		t.Fatalf("parseAndCheckWithOverlays failed: %v", err)
-	}
 	if len(diags) != 0 {
 		t.Fatalf("expected overlay import to clear stale diagnostics, got %v", diags)
 	}
@@ -172,7 +183,6 @@ func TestPublishDiagnosticsLifecycle(t *testing.T) {
 	server.cache.Close(docURI)
 	server.publishDiagnostics(ctx, docURI)
 }
-
 func TestPublishDiagnosticsIncludesDocumentVersion(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
@@ -190,7 +200,6 @@ func TestPublishDiagnosticsIncludesDocumentVersion(t *testing.T) {
 		t.Fatalf("expected no diagnostics, got %#v", params.Diagnostics)
 	}
 }
-
 func TestPublishDiagnosticsClearsClosedDocumentDiagnostics(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
@@ -207,7 +216,6 @@ func TestPublishDiagnosticsClearsClosedDocumentDiagnostics(t *testing.T) {
 		t.Fatalf("expected diagnostics to be cleared, got %#v", params.Diagnostics)
 	}
 }
-
 func TestPublishDiagnosticsDiscardsStaleOverlaySnapshot(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
@@ -240,7 +248,6 @@ func TestPublishDiagnosticsDiscardsStaleOverlaySnapshot(t *testing.T) {
 		t.Fatalf("published %d stale diagnostic notifications, want none", got)
 	}
 }
-
 func TestPublishDiagnosticsHandlesNonFileURI(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
@@ -262,7 +269,6 @@ func TestPublishDiagnosticsHandlesNonFileURI(t *testing.T) {
 		t.Fatalf("diagnostic message = %q", message)
 	}
 }
-
 func TestPublishDiagnosticsSkipsNonFileOverlays(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
@@ -278,7 +284,6 @@ func TestPublishDiagnosticsSkipsNonFileOverlays(t *testing.T) {
 		t.Fatalf("expected no diagnostics, got %#v", params.Diagnostics)
 	}
 }
-
 func TestPublishDiagnosticsReportsAnalysisPanic(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
@@ -301,5 +306,40 @@ func TestPublishDiagnosticsReportsAnalysisPanic(t *testing.T) {
 	message := params.Diagnostics[0].Message
 	if !strings.Contains(message, "Analysis error") || !strings.Contains(message, "checker exploded") {
 		t.Fatalf("diagnostic message = %q", message)
+	}
+}
+
+// TestPublishDiagnosticsEnginePathParseErrors exercises the default
+// (snapshot-engine) diagnostics path with no injected analyzer: parse errors
+// must surface as diagnostics.
+func TestPublishDiagnosticsEnginePathParseErrors(t *testing.T) {
+	server := NewServer()
+	conn := newRecordingConn()
+	server.conn = conn
+	docURI := uri.New("file:///tmp/engine_parse.ard")
+	server.cache.Open(docURI, "ard", 1, "fn main( {\n}\n")
+
+	server.publishDiagnostics(context.Background(), docURI)
+
+	params := conn.lastDiagnostics(t)
+	if len(params.Diagnostics) == 0 {
+		t.Fatal("expected parse-error diagnostics from engine path")
+	}
+}
+
+// TestPublishDiagnosticsEnginePathTypeErrors exercises the default path with
+// a checker diagnostic.
+func TestPublishDiagnosticsEnginePathTypeErrors(t *testing.T) {
+	server := NewServer()
+	conn := newRecordingConn()
+	server.conn = conn
+	docURI := uri.New("file:///tmp/engine_check.ard")
+	server.cache.Open(docURI, "ard", 1, "fn main() {\n  let x: Str = 42\n}\n")
+
+	server.publishDiagnostics(context.Background(), docURI)
+
+	params := conn.lastDiagnostics(t)
+	if len(params.Diagnostics) == 0 {
+		t.Fatal("expected type-error diagnostics from engine path")
 	}
 }

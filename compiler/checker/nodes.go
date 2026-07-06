@@ -2,7 +2,6 @@ package checker
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -100,7 +99,7 @@ func (f *FloatLiteral) String() string {
 }
 
 func (f *FloatLiteral) Type() Type {
-	return Float
+	return Float64
 }
 
 type ListLiteral struct {
@@ -194,6 +193,36 @@ func (i *InstanceProperty) String() string {
 	return fmt.Sprintf("%s.%s", i.Subject, i.Property)
 }
 
+// ForeignScalarConvert converts a value between a foreign named scalar type
+// and its underlying Ard primitive, in either direction. It lowers to an
+// explicit Go conversion such as string(t) or ui.IntentType(s).
+type ForeignScalarConvert struct {
+	Value  Expression
+	Target Type
+}
+
+func (f *ForeignScalarConvert) Type() Type { return f.Target }
+
+type ForeignFieldAccess struct {
+	Subject Expression
+	Target  string
+	Symbol  string
+	_type   Type
+}
+
+func (f *ForeignFieldAccess) Type() Type { return f._type }
+
+type ForeignStructInstance struct {
+	Target    string
+	Namespace string
+	Qualifier string
+	Name      string
+	Fields    map[string]Expression
+	_type     *ForeignType
+}
+
+func (f *ForeignStructInstance) Type() Type { return f._type }
+
 type InstanceMethod struct {
 	Subject      Expression
 	Method       *FunctionCall
@@ -237,7 +266,6 @@ const (
 	StrStartsWith
 	StrEndsWith
 	StrToStr
-	StrToDyn
 	StrTrim
 )
 
@@ -267,8 +295,6 @@ func (s *StrMethod) Type() Type {
 		return Bool
 	case StrToStr:
 		return Str
-	case StrToDyn:
-		return Dynamic
 	case StrTrim:
 		return Str
 	default:
@@ -281,7 +307,6 @@ type ByteMethodKind uint8
 const (
 	ByteToInt ByteMethodKind = iota
 	ByteToStr
-	ByteToDyn
 )
 
 type ByteMethod struct {
@@ -295,8 +320,6 @@ func (m *ByteMethod) Type() Type {
 		return Int
 	case ByteToStr:
 		return Str
-	case ByteToDyn:
-		return Dynamic
 	default:
 		return Void
 	}
@@ -307,7 +330,6 @@ type RuneMethodKind uint8
 const (
 	RuneToInt RuneMethodKind = iota
 	RuneToStr
-	RuneToDyn
 )
 
 type RuneMethod struct {
@@ -321,8 +343,6 @@ func (m *RuneMethod) Type() Type {
 		return Int
 	case RuneToStr:
 		return Str
-	case RuneToDyn:
-		return Dynamic
 	default:
 		return Void
 	}
@@ -332,7 +352,7 @@ type IntMethodKind uint8
 
 const (
 	IntToStr IntMethodKind = iota
-	IntToDyn
+	IntToF64
 )
 
 type IntMethod struct {
@@ -344,8 +364,8 @@ func (m *IntMethod) Type() Type {
 	switch m.Kind {
 	case IntToStr:
 		return Str
-	case IntToDyn:
-		return Dynamic
+	case IntToF64:
+		return Float64
 	default:
 		return Void
 	}
@@ -356,7 +376,6 @@ type FloatMethodKind uint8
 const (
 	FloatToStr FloatMethodKind = iota
 	FloatToInt
-	FloatToDyn
 )
 
 type FloatMethod struct {
@@ -370,8 +389,6 @@ func (m *FloatMethod) Type() Type {
 		return Str
 	case FloatToInt:
 		return Int
-	case FloatToDyn:
-		return Dynamic
 	default:
 		return Void
 	}
@@ -381,7 +398,6 @@ type BoolMethodKind uint8
 
 const (
 	BoolToStr BoolMethodKind = iota
-	BoolToDyn
 )
 
 type BoolMethod struct {
@@ -393,8 +409,6 @@ func (m *BoolMethod) Type() Type {
 	switch m.Kind {
 	case BoolToStr:
 		return Str
-	case BoolToDyn:
-		return Dynamic
 	default:
 		return Void
 	}
@@ -430,7 +444,7 @@ func (m *ListMethod) Type() Type {
 	// Fallback to computed type (for backwards compatibility)
 	switch m.Kind {
 	case ListAt:
-		return m.ElementType
+		return MakeMaybe(m.ElementType)
 	case ListPrepend, ListPush:
 		return MakeList(m.ElementType)
 	case ListSet:
@@ -478,7 +492,7 @@ func (m *MapMethod) Type() Type {
 	case MapGet:
 		return MakeMaybe(m.ValueType)
 	case MapSet:
-		return Bool
+		return Void
 	case MapDrop:
 		return Void
 	case MapHas:
@@ -594,7 +608,7 @@ type IntAddition struct {
 }
 
 func (n *IntAddition) Type() Type {
-	return Int
+	return n.Left.Type()
 }
 
 type IntSubtraction struct {
@@ -603,7 +617,7 @@ type IntSubtraction struct {
 }
 
 func (n *IntSubtraction) Type() Type {
-	return Int
+	return n.Left.Type()
 }
 
 type IntMultiplication struct {
@@ -612,7 +626,7 @@ type IntMultiplication struct {
 }
 
 func (n *IntMultiplication) Type() Type {
-	return Int
+	return n.Left.Type()
 }
 
 type IntDivision struct {
@@ -621,7 +635,7 @@ type IntDivision struct {
 }
 
 func (n *IntDivision) Type() Type {
-	return Int
+	return n.Left.Type()
 }
 
 type IntModulo struct {
@@ -630,7 +644,7 @@ type IntModulo struct {
 }
 
 func (n *IntModulo) Type() Type {
-	return Int
+	return n.Left.Type()
 }
 
 type IntGreater struct {
@@ -675,7 +689,7 @@ type FloatAddition struct {
 }
 
 func (n *FloatAddition) Type() Type {
-	return Float
+	return n.Left.Type()
 }
 
 type Match struct {
@@ -735,6 +749,40 @@ func (b *BoolMatch) Type() Type {
 		return b.ResultType
 	}
 	return b.True.Type()
+}
+
+// SelectArmKind distinguishes the channel-multiplexing arm forms (ADR 0032).
+type SelectArmKind int
+
+const (
+	SelectArmRecv SelectArmKind = iota
+	SelectArmSend
+	SelectArmDefault
+)
+
+// SelectArm is one arm of a Select. For recv/send arms Channel is the channel
+// expression and ElemType is its element type. Recv arms may carry a Binding
+// (`let name = ch.recv()`) that binds `ElemType?` in the arm body. Send arms
+// carry the Value to send. The default arm has Kind SelectArmDefault.
+type SelectArm struct {
+	Kind     SelectArmKind
+	Channel  Expression
+	Binding  *Identifier
+	ElemType Type
+	Value    Expression
+	Body     *Block
+}
+
+type Select struct {
+	Arms       []SelectArm
+	ResultType Type
+}
+
+func (s *Select) Type() Type {
+	if s.ResultType != nil {
+		return s.ResultType
+	}
+	return Void
 }
 
 type IntRange struct {
@@ -824,6 +872,29 @@ func (u *UnionMatch) Type() Type {
 	return Void
 }
 
+// ForeignTypeMatch is a dynamic type test over an Any or foreign-interface
+// subject (ADR 0042). Each case narrows to a concrete foreign Go named type;
+// the set is open, so a catch-all arm is required.
+type ForeignTypeMatch struct {
+	Subject    Expression
+	Cases      []ForeignTypeCase
+	CatchAll   *Block
+	ResultType Type
+}
+
+type ForeignTypeCase struct {
+	Type    *ForeignType
+	Binding string
+	Body    *Block
+}
+
+func (f *ForeignTypeMatch) Type() Type {
+	if f.ResultType != nil {
+		return f.ResultType
+	}
+	return Void
+}
+
 type ConditionalMatch struct {
 	Cases      []ConditionalCase
 	CatchAll   *Block
@@ -854,7 +925,7 @@ type FloatSubtraction struct {
 }
 
 func (n *FloatSubtraction) Type() Type {
-	return Float
+	return n.Left.Type()
 }
 
 type FloatMultiplication struct {
@@ -863,7 +934,7 @@ type FloatMultiplication struct {
 }
 
 func (n *FloatMultiplication) Type() Type {
-	return Float
+	return n.Left.Type()
 }
 
 type FloatDivision struct {
@@ -872,7 +943,7 @@ type FloatDivision struct {
 }
 
 func (n *FloatDivision) Type() Type {
-	return Float
+	return n.Left.Type()
 }
 
 type FloatGreater struct {
@@ -1077,6 +1148,15 @@ type Parameter struct {
 	Name    string
 	Type    Type
 	Mutable bool
+	// Loc is the parameter's source location when the parameter came from
+	// parsed source. Zero for synthesized parameters. Used only for tooling
+	// span recording.
+	Loc parse.Location
+	// Variadic marks the single Ard argument that maps to a Go variadic
+	// parameter. The argument may be omitted at the call site, mirroring
+	// Go's zero-argument variadic calls. Ard has no variadic parameters or
+	// spread syntax; at most one value can be passed.
+	Variadic bool
 }
 
 type FunctionDef struct {
@@ -1093,78 +1173,14 @@ type FunctionDef struct {
 	GenericBindings         map[string]Type
 }
 
+// String renders the function's *type* in Ard syntax (`fn(Str) Int`), never
+// its declaration name: FunctionDef doubles as a type, and synthetic names
+// (`<function>`, `anon_func_0x...`) must not leak into diagnostics.
 func (f FunctionDef) String() string {
-	paramStrs := make([]string, len(f.Parameters))
-	for i := range f.Parameters {
-		paramStrs[i] = f.Parameters[i].Type.String()
-	}
-
-	return fmt.Sprintf("fn %s(%s) %s", f.Name, strings.Join(paramStrs, ","), f.ReturnType.String())
+	return functionTypeString(f)
 }
 
 func (f FunctionDef) get(name string) Type { return nil }
-
-type ExternalFunctionDef struct {
-	Name             string
-	GenericParams    []string
-	Parameters       []Parameter
-	ReturnType       Type
-	ExternalBinding  string
-	ExternalBindings map[string]string
-	Private          bool
-}
-
-func (e ExternalFunctionDef) String() string {
-	paramStrs := make([]string, len(e.Parameters))
-	for i := range e.Parameters {
-		paramStrs[i] = e.Parameters[i].Type.String()
-	}
-
-	if len(e.ExternalBindings) > 1 || (len(e.ExternalBindings) == 1 && e.ExternalBindings["go"] == "") {
-		keys := make([]string, 0, len(e.ExternalBindings))
-		for key := range e.ExternalBindings {
-			keys = append(keys, key)
-		}
-		slices.Sort(keys)
-		parts := make([]string, 0, len(keys))
-		for _, key := range keys {
-			parts = append(parts, fmt.Sprintf("%s = %q", key, e.ExternalBindings[key]))
-		}
-		return fmt.Sprintf("extern fn (%s) %s = { %s }", strings.Join(paramStrs, ","), e.ReturnType.String(), strings.Join(parts, ", "))
-	}
-
-	binding := e.ExternalBinding
-	if binding == "" && len(e.ExternalBindings) == 1 {
-		binding = e.ExternalBindings["go"]
-	}
-	return fmt.Sprintf("extern fn (%s) %s = %q", strings.Join(paramStrs, ","), e.ReturnType.String(), binding)
-}
-
-func (e ExternalFunctionDef) get(name string) Type { return nil }
-
-func (e *ExternalFunctionDef) Type() Type {
-	return e
-}
-
-func (e ExternalFunctionDef) equal(other Type) bool {
-	return equalTypes(e, other)
-}
-
-func (e ExternalFunctionDef) hasTrait(trait *Trait) bool {
-	return false
-}
-
-func (e *ExternalFunctionDef) hasGenerics() bool {
-	if len(e.GenericParams) > 0 {
-		return true
-	}
-	for i := range e.Parameters {
-		if strings.HasPrefix(e.Parameters[i].Type.String(), "$") {
-			return true
-		}
-	}
-	return strings.Contains(e.ReturnType.String(), "$")
-}
 
 func (f FunctionDef) name() string {
 	return f.Name
@@ -1194,12 +1210,11 @@ func (f *FunctionDef) hasGenerics() bool {
 }
 
 type FunctionCall struct {
-	Name            string
-	Args            []Expression
-	TypeArgs        []Type
-	fn              *FunctionDef
-	ReturnType      Type // Pre-computed by checker
-	ExternalBinding string
+	Name       string
+	Args       []Expression
+	TypeArgs   []Type
+	fn         *FunctionDef
+	ReturnType Type // Pre-computed by checker
 }
 
 func CreateCall(name string, args []Expression, fn FunctionDef) *FunctionCall {
@@ -1250,6 +1265,89 @@ func (p *ModuleFunctionCall) Type() Type {
 	return p.Call.Type()
 }
 
+type ForeignFunctionCall struct {
+	Target    string
+	Namespace string
+	Qualifier string
+	Symbol    string
+	// TypeArgs instantiate a generic Go function. Empty for ordinary calls.
+	TypeArgs []Type
+	// PointerResult marks calls whose instantiated Go result is a raw pointer
+	// represented as Ard `mut T` (live shared storage, not a value copy).
+	PointerResult bool
+	Call          *FunctionCall
+}
+
+func (p *ForeignFunctionCall) Type() Type {
+	return p.Call.Type()
+}
+
+type ForeignMethodValue struct {
+	Subject   Expression
+	Target    string
+	Namespace string
+	Qualifier string
+	Receiver  string
+	Pointer   bool
+	Symbol    string
+	_type     Type
+}
+
+func (p *ForeignMethodValue) Type() Type { return p._type }
+
+type ForeignMethodCall struct {
+	Subject   Expression
+	Target    string
+	Namespace string
+	Qualifier string
+	Receiver  string
+	Pointer   bool
+	Symbol    string
+	Call      *FunctionCall
+}
+
+func (p *ForeignMethodCall) Type() Type {
+	return p.Call.Type()
+}
+
+type ForeignInterfaceUpcast struct {
+	Value   Expression
+	Iface   *ForeignType
+	Pointer bool
+}
+
+func (p *ForeignInterfaceUpcast) Type() Type { return p.Iface }
+
+type ForeignValue struct {
+	Target     string
+	Namespace  string
+	Qualifier  string
+	Symbol     string
+	ValueType  Type
+	Assignable bool
+}
+
+func (p *ForeignValue) Type() Type {
+	return p.ValueType
+}
+
+// UnsafeCast is the compiler-backed ard/unsafe::cast<T>(value) operation.
+// TargetType is the requested T, including mut T when mutable access is requested.
+type UnsafeCast struct {
+	Value      Expression
+	TargetType Type
+	ReturnType Type
+}
+
+func (p *UnsafeCast) Type() Type { return p.ReturnType }
+
+// UnsafeIsNil is the compiler-backed ard/unsafe::is_nil(value) operation.
+type UnsafeIsNil struct {
+	Value Expression
+}
+
+func (p *UnsafeIsNil) Type() Type { return Bool }
+
 type ModuleSymbol struct {
 	Module string
 	Symbol Symbol
@@ -1259,87 +1357,20 @@ func (p *ModuleSymbol) Type() Type {
 	return p.Symbol.Type
 }
 
-type DirectGoPackageValue struct {
-	ImportPath  string
-	Alias       string
-	PackageName string
-	Name        string
-	Binding     string
-	ValueType   Type
-}
-
-func (v *DirectGoPackageValue) Type() Type {
-	return v.ValueType
-}
-
-func (v *DirectGoPackageValue) String() string {
-	qualifier := v.Alias
-	if qualifier == "" {
-		qualifier = v.PackageName
-	}
-	if qualifier == "" {
-		qualifier = v.ImportPath
-	}
-	return qualifier + "::" + v.Name
-}
-
-type DirectGoFieldAccess struct {
-	Subject     Expression
-	Field       string
-	FieldType   Type
-	FieldGoType GoValueType
-}
-
-func (f *DirectGoFieldAccess) Type() Type {
-	return f.FieldType
-}
-
-func (f *DirectGoFieldAccess) String() string {
-	return fmt.Sprintf("%s.%s", f.Subject, f.Field)
-}
-
-type DirectGoStructInstance struct {
-	ImportPath   string
-	Alias        string
-	PackageName  string
-	Name         string
-	Binding      string
-	Fields       map[string]Expression
-	FieldGoTypes map[string]GoValueType
-	ValueType    Type
-}
-
-func (s *DirectGoStructInstance) Type() Type {
-	return s.ValueType
-}
-
-func (s *DirectGoStructInstance) String() string {
-	qualifier := s.Alias
-	if qualifier == "" {
-		qualifier = s.PackageName
-	}
-	if qualifier == "" {
-		qualifier = s.ImportPath
-	}
-	return qualifier + "::" + s.Name
-}
-
 type EnumValue struct {
 	Name  string
 	Value int // The computed integer discriminant
 }
 
 type Enum struct {
-	Name             string
-	ModulePath       string
-	Private          bool
-	Values           []EnumValue // The discriminant values for each variant
-	Methods          map[string]*FunctionDef
-	Traits           []*Trait
-	Location         parse.Location
-	ExternalBinding  string
-	ExternalBindings map[string]string
-	Open             bool // Open enum-like values require wildcard matches and skip FFI closed-set validation.
+	Name       string
+	ModulePath string
+	Private    bool
+	Values     []EnumValue // The discriminant values for each variant
+	Methods    map[string]*FunctionDef
+	Traits     []*Trait
+	Location   parse.Location
+	Open       bool
 }
 
 func (e Enum) NonProducing() {}
@@ -1425,6 +1456,7 @@ type Union struct {
 	Name       string
 	ModulePath string
 	Types      []Type
+	Private    bool
 }
 
 func (u Union) NonProducing() {}
@@ -1464,8 +1496,12 @@ type StructDef struct {
 	Self          string
 	Traits        []*Trait
 	GenericParams []string
-	TypeArgs      []Type
-	Private       bool
+	// DeclaredGenerics is true when the struct declared its generic
+	// parameters explicitly (`struct Box<$T>`), giving them a defined order
+	// for explicit literal type arguments.
+	DeclaredGenerics bool
+	TypeArgs         []Type
+	Private          bool
 }
 
 func (def StructDef) NonProducing() {}
@@ -1590,4 +1626,10 @@ func (t TryOp) Expr() Expression {
 
 func (t TryOp) Type() Type {
 	return t.ok
+}
+
+// Symbol exposes the variable's resolved scope symbol for tooling.
+func (v *Variable) Symbol() *Symbol {
+	sym := v.sym
+	return &sym
 }

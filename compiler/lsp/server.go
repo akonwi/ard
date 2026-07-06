@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
+
+	"github.com/akonwi/ard/lsp/analysis"
 )
 
 // stdio wraps os.Stdin and os.Stdout into a single io.ReadWriteCloser.
@@ -38,6 +41,14 @@ type Server struct {
 	conn        jsonrpc2.Conn
 	projectRoot string
 
+	engineMu  sync.Mutex
+	engine    *analysis.Engine
+	workspace *analysis.Workspace
+
+	// requestTimeout bounds any single feature request so a runaway analysis
+	// cannot hang the editor. Zero disables the watchdog (tests).
+	requestTimeout time.Duration
+
 	diagnosticsMu        sync.Mutex
 	diagnosticsTimers    map[uri.URI]*time.Timer
 	diagnosticsDelay     time.Duration
@@ -52,8 +63,9 @@ func NewServer() *Server {
 		handlers:             make(map[string]jsonrpc2.Handler),
 		diagnosticsTimers:    make(map[uri.URI]*time.Timer),
 		diagnosticsDelay:     100 * time.Millisecond,
+		requestTimeout:       5 * time.Second,
 		diagnosticsPublisher: nil,
-		diagnosticsAnalyzer:  parseAndCheckWithOverlays,
+		diagnosticsAnalyzer:  nil,
 	}
 	s.diagnosticsPublisher = s.publishDiagnostics
 	s.registerHandlers()
@@ -66,7 +78,7 @@ func (s *Server) Run(ctx context.Context) error {
 		ReadCloser:  os.Stdin,
 		WriteCloser: os.Stdout,
 	}
-	stream := jsonrpc2.NewStream(rwc)
+	stream := resilientStream{inner: jsonrpc2.NewStream(rwc)}
 	conn := jsonrpc2.NewConn(stream)
 	s.conn = conn
 
@@ -75,24 +87,126 @@ func (s *Server) Run(ctx context.Context) error {
 	return conn.Err()
 }
 
+// resilientStream keeps the server alive across malformed message bodies.
+//
+// The jsonrpc2 connection treats every stream read error as fatal, but the
+// error classes differ: a body that fails to decode was still fully consumed
+// (io.ReadFull ran before DecodeMessage), so the stream remains
+// frame-aligned and the connection is healthy. Per the JSON-RPC spec such
+// input should not end the session. Header/framing errors leave the stream
+// position unknown and IO errors mean the client is gone; both stay fatal.
+//
+// Skipped messages are logged. A malformed *request* (vs notification) gets
+// no response, so the client owns that id's timeout; the library cannot
+// express the spec's null-id ParseError response.
+type resilientStream struct {
+	inner jsonrpc2.Stream
+}
+
+func (r resilientStream) Read(ctx context.Context) (jsonrpc2.Message, int64, error) {
+	for {
+		msg, n, err := r.inner.Read(ctx)
+		if err == nil {
+			return msg, n, nil
+		}
+		if isRecoverableStreamError(err) {
+			fmt.Fprintf(os.Stderr, "ard-lsp: skipping malformed message: %v\n", err)
+			continue
+		}
+		return nil, n, err
+	}
+}
+
+func (r resilientStream) Write(ctx context.Context, msg jsonrpc2.Message) (int64, error) {
+	return r.inner.Write(ctx, msg)
+}
+
+func (r resilientStream) Close() error {
+	return r.inner.Close()
+}
+
+// isRecoverableStreamError matches body-decode failures, the only read
+// error class that leaves the stream frame-aligned (this invariant holds
+// for the header-framed NewStream, which is what Run uses: the body is
+// fully consumed by io.ReadFull before DecodeMessage runs). Two shapes:
+// invalid JSON (untyped; matched by the stable message prefix, pinned by a
+// real-stream test) and valid JSON with neither method nor id
+// (jsonrpc2.ErrInvalidRequest).
+func isRecoverableStreamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, jsonrpc2.ErrInvalidRequest) {
+		return true
+	}
+	return strings.HasPrefix(err.Error(), "unmarshaling jsonrpc message")
+}
+
 func (s *Server) jsonRPCHandler() jsonrpc2.Handler {
 	return protocol.CancelHandler(
-		concurrentRequestHandler(
+		s.concurrentRequestHandler(
 			jsonrpc2.ReplyHandler(jsonrpc2.Handler(s.dispatch)),
 		),
 	)
 }
 
 // concurrentRequestHandler runs feature requests concurrently while preserving
-// lifecycle and document-sync ordering on the reader goroutine.
-func concurrentRequestHandler(handler jsonrpc2.Handler) jsonrpc2.Handler {
+// lifecycle and document-sync ordering on the reader goroutine. Every spawned
+// request is panic-guarded and watchdog-bounded: a panic or deadline yields an
+// LSP error reply instead of a dead server or a hung editor.
+func (s *Server) concurrentRequestHandler(handler jsonrpc2.Handler) jsonrpc2.Handler {
 	return func(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 		if handleRequestInline(req.Method()) {
 			return handler(ctx, reply, req)
 		}
 
 		go func() {
-			_ = handler(ctx, reply, req)
+			var once sync.Once
+			guardedReply := func(ctx context.Context, result interface{}, err error) error {
+				var replyErr error
+				once.Do(func() { replyErr = reply(ctx, result, err) })
+				return replyErr
+			}
+
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "ard-lsp panic in %s: %v\n%s", req.Method(), r, debug.Stack())
+					_ = guardedReply(ctx, nil, fmt.Errorf("internal server error handling %s", req.Method()))
+				}
+			}()
+
+			if s.requestTimeout <= 0 {
+				_ = handler(ctx, guardedReply, req)
+				return
+			}
+
+			reqCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
+			defer cancel()
+
+			done := make(chan struct{})
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Fprintf(os.Stderr, "ard-lsp panic in %s: %v\n%s", req.Method(), r, debug.Stack())
+						_ = guardedReply(ctx, nil, fmt.Errorf("internal server error handling %s", req.Method()))
+					}
+					close(done)
+				}()
+				_ = handler(reqCtx, guardedReply, req)
+			}()
+
+			select {
+			case <-done:
+			case <-reqCtx.Done():
+				if ctx.Err() != nil {
+					// The client cancelled the request; reply with the LSP
+					// cancellation error rather than a fake timeout.
+					_ = guardedReply(ctx, nil, protocol.ErrRequestCancelled)
+					return
+				}
+				fmt.Fprintf(os.Stderr, "ard-lsp watchdog: %s exceeded %s\n", req.Method(), s.requestTimeout)
+				_ = guardedReply(ctx, nil, fmt.Errorf("%s timed out after %s", req.Method(), s.requestTimeout))
+			}
 		}()
 		return nil
 	}
@@ -115,7 +229,12 @@ func handleRequestInline(method string) bool {
 }
 
 // dispatch routes incoming LSP requests and notifications to registered handlers.
-func (s *Server) dispatch(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) (err error) {
+// dispatch routes a message to its handler. It never returns a non-nil
+// error: the jsonrpc2 connection kills the whole session on any handler
+// error, so failures are replied (when possible) and logged instead. The
+// only acceptable ways for the server to exit are client disconnect, the
+// exit notification, and stream desync.
+func (s *Server) dispatch(ctx context.Context, reply jsonrpc2.Replier, req jsonrpc2.Request) error {
 	method := req.Method()
 	replied := false
 	safeReply := func(ctx context.Context, result interface{}, replyErr error) error {
@@ -127,18 +246,21 @@ func (s *Server) dispatch(ctx context.Context, reply jsonrpc2.Replier, req jsonr
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "ard-lsp panic handling %s: %v\n%s", method, r, debug.Stack())
 			if !replied {
-				err = safeReply(ctx, nil, fmt.Errorf("internal server error handling %s: %v", method, r))
-				return
+				_ = safeReply(ctx, nil, fmt.Errorf("internal server error handling %s: %v", method, r))
 			}
-			err = fmt.Errorf("internal server error after reply handling %s: %v", method, r)
 		}
 	}()
 
+	var err error
 	if handler, ok := s.handlers[method]; ok {
-		return handler(ctx, safeReply, req)
+		err = handler(ctx, safeReply, req)
+	} else {
+		err = jsonrpc2.MethodNotFoundHandler(ctx, safeReply, req)
 	}
-
-	return jsonrpc2.MethodNotFoundHandler(ctx, safeReply, req)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Fprintf(os.Stderr, "ard-lsp error handling %s: %v\n", method, err)
+	}
+	return nil
 }
 
 // registerHandlers registers all LSP method handlers.
@@ -179,12 +301,15 @@ func (s *Server) handleInitialize(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
 
-	// Detect project root from workspace folders or root URI
+	// Detect project root from workspace folders or root URI. Guarded by
+	// engineMu because feature goroutines read it through workspaceFor.
+	s.engineMu.Lock()
 	if len(params.WorkspaceFolders) > 0 {
 		s.projectRoot = string(params.WorkspaceFolders[0].URI)
 	} else if params.RootURI != "" {
 		s.projectRoot = string(params.RootURI)
 	}
+	s.engineMu.Unlock()
 
 	result := &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
@@ -291,6 +416,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		params.TextDocument.Version,
 		params.TextDocument.Text,
 	)
+	s.syncOverlay(params.TextDocument.URI, params.TextDocument.Text)
 	s.scheduleDiagnosticsForOpenDocuments()
 
 	return reply(ctx, nil, nil)
@@ -310,6 +436,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 				return reply(ctx, nil, fmt.Errorf("invalid document change: %w", err))
 			}
 			s.cache.Update(params.TextDocument.URI, params.TextDocument.Version, updated)
+			s.syncOverlay(params.TextDocument.URI, updated)
 		}
 	}
 
@@ -329,6 +456,7 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 	}
 
 	s.cache.Close(params.TextDocument.URI)
+	s.dropOverlay(params.TextDocument.URI)
 	s.scheduleDiagnostics(params.TextDocument.URI)
 	s.scheduleDiagnosticsForOpenDocuments()
 
@@ -358,11 +486,11 @@ func (s *Server) handleHover(ctx context.Context, reply jsonrpc2.Replier, req js
 				info = nil
 			}
 		}()
-		filePath, ok := docFilePath(doc)
-		if !ok {
+		if _, ok := docFilePath(doc); !ok {
 			return
 		}
-		info = computeHover(doc.Text, filePath, params.Position)
+		// The span table is authoritative (ADR 0043); nil means no hover.
+		info = s.hoverFromSpans(ctx, params.TextDocument.URI, params.Position)
 	}()
 
 	if info == nil || info.content == "" {
@@ -397,11 +525,11 @@ func (s *Server) handleDefinition(ctx context.Context, reply jsonrpc2.Replier, r
 				locations = []protocol.Location{}
 			}
 		}()
-		filePath, ok := docFilePath(doc)
-		if !ok {
+		if _, ok := docFilePath(doc); !ok {
 			return
 		}
-		locations = computeDefinition(doc.Text, filePath, params.Position)
+		// The span table is authoritative (ADR 0043); empty means not found.
+		locations = s.definitionFromSpans(ctx, params.TextDocument.URI, params.Position)
 	}()
 	if locations == nil {
 		locations = []protocol.Location{}
@@ -428,12 +556,10 @@ func (s *Server) handleReferences(ctx context.Context, reply jsonrpc2.Replier, r
 				locations = []protocol.Location{}
 			}
 		}()
-		filePath, ok := docFilePath(doc)
-		if !ok {
+		if _, ok := docFilePath(doc); !ok {
 			return
 		}
-		overlays := overlaySources(s.cache.Snapshot())
-		locations = computeReferencesWithOverlays(doc.Text, filePath, params.Position, params.Context.IncludeDeclaration, overlays)
+		locations = s.referencesFromSpans(ctx, params.TextDocument.URI, params.Position, params.Context.IncludeDeclaration)
 	}()
 	if locations == nil {
 		locations = []protocol.Location{}
@@ -474,7 +600,12 @@ func (s *Server) handleCompletion(ctx context.Context, reply jsonrpc2.Replier, r
 		if !ok {
 			return
 		}
-		items = computeCompletions(doc.Text, filePath, params.Position)
+		items = s.completionFromSpans(ctx, params.TextDocument.URI, doc.Text, params.Position)
+		if len(items) == 0 {
+			// Import-path completion is parse/filesystem based and stays on
+			// its own dedicated path.
+			items = computeImportCompletions(doc.Text, filePath, params.Position)
+		}
 	}()
 	if items == nil {
 		items = []protocol.CompletionItem{}
@@ -587,11 +718,10 @@ func (s *Server) handleSignatureHelp(ctx context.Context, reply jsonrpc2.Replier
 				help = nil
 			}
 		}()
-		filePath, ok := docFilePath(doc)
-		if !ok {
+		if _, ok := docFilePath(doc); !ok {
 			return
 		}
-		help = computeSignatureHelp(doc.Text, filePath, params.Position)
+		help = s.signatureHelpFromSpans(ctx, params.TextDocument.URI, doc.Text, params.Position)
 	}()
 
 	return reply(ctx, help, nil)
@@ -608,11 +738,10 @@ func (s *Server) handleDocumentHighlight(ctx context.Context, reply jsonrpc2.Rep
 		return reply(ctx, []protocol.DocumentHighlight{}, nil)
 	}
 
-	filePath, ok := docFilePath(doc)
-	if !ok {
+	if _, ok := docFilePath(doc); !ok {
 		return reply(ctx, []protocol.DocumentHighlight{}, nil)
 	}
-	highlights := computeDocumentHighlights(doc.Text, filePath, params.Position)
+	highlights := s.highlightsFromSpans(ctx, params.TextDocument.URI, params.Position)
 	if highlights == nil {
 		highlights = []protocol.DocumentHighlight{}
 	}
@@ -628,11 +757,10 @@ func (s *Server) handlePrepareRename(ctx context.Context, reply jsonrpc2.Replier
 	if doc == nil {
 		return reply(ctx, nil, nil)
 	}
-	filePath, ok := docFilePath(doc)
-	if !ok {
+	if _, ok := docFilePath(doc); !ok {
 		return reply(ctx, nil, nil)
 	}
-	rng := prepareRename(doc.Text, filePath, params.Position)
+	rng := s.prepareRenameFromSpans(ctx, params.TextDocument.URI, params.Position)
 	return reply(ctx, rng, nil)
 }
 
@@ -645,11 +773,9 @@ func (s *Server) handleRename(ctx context.Context, reply jsonrpc2.Replier, req j
 	if doc == nil {
 		return reply(ctx, nil, nil)
 	}
-	filePath, ok := docFilePath(doc)
-	if !ok {
+	if _, ok := docFilePath(doc); !ok {
 		return reply(ctx, nil, nil)
 	}
-	overlays := overlaySources(s.cache.Snapshot())
-	edit := computeRename(doc.Text, filePath, params.Position, params.NewName, overlays)
+	edit := s.renameFromSpans(ctx, params.TextDocument.URI, params.Position, params.NewName)
 	return reply(ctx, edit, nil)
 }

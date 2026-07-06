@@ -38,7 +38,6 @@ func TestParseSemver(t *testing.T) {
 		})
 	}
 }
-
 func TestSemverCompare(t *testing.T) {
 	tests := []struct {
 		a, b string
@@ -63,7 +62,6 @@ func TestSemverCompare(t *testing.T) {
 		})
 	}
 }
-
 func TestParseConstraint(t *testing.T) {
 	tests := []struct {
 		input  string
@@ -95,7 +93,6 @@ func TestParseConstraint(t *testing.T) {
 		})
 	}
 }
-
 func TestConstraintCheck(t *testing.T) {
 	tests := []struct {
 		constraint string
@@ -136,14 +133,12 @@ func TestConstraintCheck(t *testing.T) {
 		})
 	}
 }
-
 func TestCheckVersionDevSkipsCheck(t *testing.T) {
 	// The default version is "dev", so CheckVersion should always pass
 	if err := CheckVersion(">= 99.0.0"); err != nil {
 		t.Fatalf("expected dev version to skip check, got: %v", err)
 	}
 }
-
 func TestCheckVersionWithRealVersion(t *testing.T) {
 	// Temporarily override the version
 	original := Version

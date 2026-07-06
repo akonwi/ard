@@ -137,10 +137,6 @@ func (p printer) renderStatementDoc(statement parse.Statement) doc {
 		return p.renderFunctionDeclarationDoc(node, false)
 	case *parse.StaticFunctionDeclaration:
 		return p.renderStaticFunctionDeclarationDoc(node)
-	case *parse.ExternTypeDeclaration:
-		return p.renderExternTypeDeclarationDoc(node)
-	case *parse.ExternalFunction:
-		return p.renderExternalFunctionDoc(node)
 	case *parse.StructDefinition:
 		return p.renderStructDefinitionDoc(node)
 	case *parse.TraitDefinition:
@@ -284,101 +280,6 @@ func (p printer) renderStaticFunctionDeclarationDoc(node *parse.StaticFunctionDe
 		header += " " + p.renderType(node.ReturnType)
 	}
 	return p.renderBlockDoc(header, node.Body)
-}
-
-func (p printer) renderExternTypeDeclaration(node *parse.ExternTypeDeclaration) string {
-	prefix := ""
-	if node.Private {
-		prefix = "private "
-	}
-	header := prefix + "extern type " + node.Name + p.renderTypeParams(node.TypeParams)
-	if len(node.ExternalBindings) == 0 {
-		if node.ExternalBinding != "" {
-			return header + " = " + strconv.Quote(node.ExternalBinding)
-		}
-		return header
-	}
-	if len(node.ExternalBindings) == 1 && node.ExternalBindings["go"] != "" {
-		binding := node.ExternalBinding
-		if binding == "" {
-			binding = node.ExternalBindings["go"]
-		}
-		return header + " = " + strconv.Quote(binding)
-	}
-
-	keys := make([]string, 0, len(node.ExternalBindings))
-	for key := range node.ExternalBindings {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	var builder strings.Builder
-	builder.WriteString(header)
-	builder.WriteString(" = {\n")
-	for _, key := range keys {
-		builder.WriteString(strings.Repeat(" ", indentWidth))
-		builder.WriteString(key)
-		builder.WriteString(" = ")
-		builder.WriteString(strconv.Quote(node.ExternalBindings[key]))
-		builder.WriteString("\n")
-	}
-	builder.WriteString("}")
-	return builder.String()
-}
-
-func (p printer) renderExternTypeDeclarationDoc(node *parse.ExternTypeDeclaration) doc {
-	return dText(p.renderExternTypeDeclaration(node))
-}
-
-func (p printer) renderExternalFunction(node *parse.ExternalFunction) string {
-	prefix := ""
-	if node.Private {
-		prefix = "private "
-	}
-	header := prefix + "extern fn " + node.Name + p.renderTypeParams(node.TypeParams)
-	header += p.renderParameterList(node.Parameters, 0, header)
-	if node.ReturnType != nil {
-		header += " " + p.renderType(node.ReturnType)
-	}
-
-	if len(node.ExternalBindings) == 0 || (len(node.ExternalBindings) == 1 && node.ExternalBindings["go"] != "") {
-		binding := node.ExternalBinding
-		if binding == "" && len(node.ExternalBindings) == 1 {
-			binding = node.ExternalBindings["go"]
-		}
-		header += " = " + renderExternFunctionBindingValue(binding)
-		return header
-	}
-
-	keys := make([]string, 0, len(node.ExternalBindings))
-	for key := range node.ExternalBindings {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	var builder strings.Builder
-	builder.WriteString(header)
-	builder.WriteString(" = {\n")
-	for _, key := range keys {
-		builder.WriteString(strings.Repeat(" ", indentWidth))
-		builder.WriteString(key)
-		builder.WriteString(" = ")
-		builder.WriteString(renderExternFunctionBindingValue(node.ExternalBindings[key]))
-		builder.WriteString("\n")
-	}
-	builder.WriteString("}")
-	return builder.String()
-}
-
-func (p printer) renderExternalFunctionDoc(node *parse.ExternalFunction) doc {
-	return dText(p.renderExternalFunction(node))
-}
-
-func renderExternFunctionBindingValue(binding string) string {
-	if strings.Contains(binding, "::") {
-		return binding
-	}
-	return strconv.Quote(binding)
 }
 
 func (p printer) renderStructDefinitionDoc(node *parse.StructDefinition) doc {
@@ -772,11 +673,7 @@ func (p printer) renderTypeParams(params []string) string {
 func (p printer) renderParameterList(params []parse.Parameter, indent int, header string) string {
 	parts := make([]string, 0, len(params))
 	for _, parameter := range params {
-		part := ""
-		if parameter.Mutable {
-			part += "mut "
-		}
-		part += parameter.Name
+		part := parameter.Name
 		if parameter.Type != nil {
 			part += ": " + p.renderType(parameter.Type)
 		}
@@ -802,7 +699,7 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 	case *parse.IntType:
 		return maybeNullable("Int", node.IsNullable())
 	case *parse.FloatType:
-		return maybeNullable("Float", node.IsNullable())
+		return maybeNullable("Float64", node.IsNullable())
 	case *parse.BooleanType:
 		return maybeNullable("Bool", node.IsNullable())
 	case *parse.VoidType:
@@ -903,6 +800,7 @@ func renderableExpressionStatement(statement parse.Statement) (parse.Expression,
 		*parse.StaticProperty, parse.StaticProperty,
 		*parse.StaticFunction, parse.StaticFunction,
 		*parse.MatchExpression,
+		*parse.SelectExpression,
 		*parse.ConditionalMatchExpression,
 		*parse.AnonymousFunction,
 		*parse.Try,
@@ -1035,6 +933,8 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 		return p.renderExpressionDoc(&copy, parentPrecedence)
 	case *parse.MatchExpression:
 		return p.renderMatchExpressionDoc(node)
+	case *parse.SelectExpression:
+		return p.renderSelectExpressionDoc(node)
 	case *parse.ConditionalMatchExpression:
 		return p.renderConditionalMatchExpressionDoc(node)
 	case *parse.AnonymousFunction:
@@ -1263,15 +1163,23 @@ func (p printer) renderMapLiteralDoc(m *parse.MapLiteral) doc {
 }
 
 func (p printer) renderStructInstanceDoc(node *parse.StructInstance) doc {
+	head := node.Name.Name
+	if len(node.TypeArgs) > 0 {
+		types := make([]string, 0, len(node.TypeArgs))
+		for _, item := range node.TypeArgs {
+			types = append(types, p.renderType(item))
+		}
+		head += "<" + strings.Join(types, ", ") + ">"
+	}
 	if len(node.Properties) == 0 && len(node.Comments) == 0 {
-		return dText(node.Name.Name + "{}")
+		return dText(head + "{}")
 	}
 
 	parts := make([]string, 0, len(node.Properties))
 	for _, property := range node.Properties {
 		parts = append(parts, property.Name.Name+": "+p.renderExpression(property.Value, 0))
 	}
-	oneLine := node.Name.Name + "{" + strings.Join(parts, ", ") + "}"
+	oneLine := head + "{" + strings.Join(parts, ", ") + "}"
 	if len(node.Properties) <= 2 && len(node.Comments) == 0 && len(oneLine) <= p.maxLineWidth {
 		return dText(oneLine)
 	}
@@ -1286,7 +1194,7 @@ func (p printer) renderStructInstanceDoc(node *parse.StructInstance) doc {
 	body := dJoin(dHardLine(), items)
 
 	return dConcat(
-		dText(node.Name.Name+"{"),
+		dText(head+"{"),
 		dIndent(dConcat(dHardLine(), body)),
 		dHardLine(),
 		dText("}"),
@@ -1430,12 +1338,17 @@ func (p printer) renderConditionalMatchCaseDoc(matchCase parse.ConditionalMatchC
 }
 
 func (p printer) renderMatchCaseDoc(matchCase parse.MatchCase) doc {
-	pattern := p.renderExpression(matchCase.Pattern, 0)
-	if len(matchCase.Body) == 0 {
+	return p.renderArmWithPattern(p.renderExpression(matchCase.Pattern, 0), matchCase.Body)
+}
+
+// renderArmWithPattern renders a `pattern => body` arm shared by match and
+// select cases.
+func (p printer) renderArmWithPattern(pattern string, body []parse.Statement) doc {
+	if len(body) == 0 {
 		return dText(pattern + " => ()")
 	}
-	if len(matchCase.Body) == 1 {
-		if expr, ok := renderableExpressionStatement(matchCase.Body[0]); ok {
+	if len(body) == 1 {
+		if expr, ok := renderableExpressionStatement(body[0]); ok {
 			rendered := p.renderExpression(expr, 0)
 			if canInlineMatchBlockExpression(expr) && !strings.Contains(rendered, "\n") {
 				line := pattern + " => { " + rendered + " }"
@@ -1457,10 +1370,40 @@ func (p printer) renderMatchCaseDoc(matchCase parse.MatchCase) doc {
 
 	return dGroup(dConcat(
 		dText(pattern+" => {"),
-		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(matchCase.Body))),
+		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(body))),
 		dHardLine(),
 		dText("}"),
 	))
+}
+
+func (p printer) renderSelectExpressionDoc(node *parse.SelectExpression) doc {
+	caseDocs := make([]doc, 0, len(node.Cases)+len(node.Comments))
+	for _, comment := range node.Comments {
+		caseDocs = append(caseDocs, dText(p.renderComment(comment.Value)))
+	}
+	for _, arm := range node.Cases {
+		caseDocs = append(caseDocs, dConcat(p.renderSelectCaseDoc(arm), dText(",")))
+	}
+
+	body := dText("")
+	if len(caseDocs) > 0 {
+		body = dJoin(dHardLine(), caseDocs)
+	}
+
+	return dGroup(dConcat(
+		dText("select {"),
+		dIndent(dConcat(dHardLine(), body)),
+		dHardLine(),
+		dText("}"),
+	))
+}
+
+func (p printer) renderSelectCaseDoc(arm parse.SelectCase) doc {
+	pattern := p.renderExpression(arm.Op, 0)
+	if arm.Binding != nil {
+		pattern = "let " + arm.Binding.Name + " = " + pattern
+	}
+	return p.renderArmWithPattern(pattern, arm.Body)
 }
 
 const (

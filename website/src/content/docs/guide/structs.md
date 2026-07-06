@@ -67,16 +67,16 @@ Use `impl` blocks to define struct methods.
 
 ```ard
 struct Rectangle {
-  width: Float,
-  height: Float
+  width: Float64,
+  height: Float64
 }
 
 impl Rectangle {
-  fn area() Float {
+  fn area() Float64 {
     self.width * self.height
   }
 
-  fn perimeter() Float {
+  fn perimeter() Float64 {
     2.0 * (self.width + self.height)
   }
 

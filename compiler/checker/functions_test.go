@@ -34,7 +34,6 @@ func TestUnknownParameterTypeMethodLookupReportsDiagnostics(t *testing.T) {
 		t.Fatalf("diagnostics = %v, want undefined method diagnostic", c.Diagnostics())
 	}
 }
-
 func TestFunctions(t *testing.T) {
 	run(t, []test{
 		{
@@ -107,7 +106,7 @@ func TestFunctions(t *testing.T) {
 			name: "Mutable parameters",
 			input: strings.Join(
 				[]string{
-					`fn update(mut value: Int) {}`,
+					`fn update(value: mut Int) {}`,
 				},
 				"\n",
 			),
@@ -217,7 +216,6 @@ func TestFunctions(t *testing.T) {
 		},
 	})
 }
-
 func TestTestFunctions(t *testing.T) {
 	t.Run("marks valid test functions", func(t *testing.T) {
 		result := parse.Parse([]byte(`test fn works() Void!Str { Result::ok(()) }`), "test.ard")
@@ -277,17 +275,11 @@ func TestTestFunctions(t *testing.T) {
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{},
 		},
+
 		{
-			name:  "test functions must not be generic",
-			input: `test fn generic_test<$T>() Void!Str { Result::ok(()) }`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "test functions must not be generic"},
-			},
-		},
-		{
-			name: "explicit type arguments on non-generic extern are rejected",
+			name: "explicit type arguments on non-generic function are rejected",
 			input: strings.Join([]string{
-				`extern fn foo() Int = "Foo"`,
+				`fn foo() Int { 0 }`,
 				`foo<Int>()`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
@@ -317,215 +309,6 @@ func TestTestFunctions(t *testing.T) {
 		},
 	})
 }
-
-func TestCallingPackageFunctions(t *testing.T) {
-	run(t, []test{
-		{
-			name: "Non-final side-effect match is not checked against function return type",
-			input: strings.Join([]string{
-				`use ard/io`,
-				`fn run_up(applied_count: Int) Void!Str {`,
-				`  match applied_count {`,
-				`    0 => io::print("No pending migrations"),`,
-				`    _ => io::print("{applied_count} migration(s) applied"),`,
-				`  }`,
-				`  Result::ok(())`,
-				`}`,
-			}, "\n"),
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name: "If branches ending in list set are Void-compatible",
-			input: strings.Join([]string{
-				`use ard/decode`,
-				`struct Sv { scroll: Int }`,
-				`impl Sv {`,
-				`  fn mut bump(n: Int) { self.scroll = self.scroll + n }`,
-				`}`,
-				`struct Tab {`,
-				`  data: Dynamic,`,
-				`  sv: Sv,`,
-				`  flag: Bool,`,
-				`  cursor: Int,`,
-				`}`,
-				`struct A {}`,
-				`struct B {}`,
-				`type Event = A | B`,
-				`fn main() {`,
-				`  let raw = decode::from_json("\\{}").expect("parse")`,
-				`  mut xs: [Tab] = [Tab{data: raw, sv: Sv{scroll: 0}, flag: true, cursor: 0}]`,
-				`  let ev: Event = A{}`,
-				`  match ev {`,
-				`    A(_) => {`,
-				`      let idx = 0`,
-				`      mut tab = xs.at(idx)`,
-				`      if tab.flag {`,
-				`        if tab.cursor == 0 {`,
-				`          tab.sv.bump(-1)`,
-				`          xs.set(idx, tab)`,
-				`        } else {`,
-				`          tab.cursor = tab.cursor - 1`,
-				`          xs.set(idx, tab)`,
-				`        }`,
-				`      } else {`,
-				`        ()`,
-				`      }`,
-				`    },`,
-				`    B(_) => (),`,
-				`  }`,
-				`}`,
-			}, "\n"),
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name: "If branches ending in list set with struct literals are Void-compatible",
-			input: strings.Join([]string{
-				`use ard/decode`,
-				`struct Sv { scroll: Int }`,
-				`struct Tab { data: Dynamic, sv: Sv, flag: Bool }`,
-				`struct A {}`,
-				`struct B {}`,
-				`type Event = A | B`,
-				`fn main() {`,
-				`  let raw = decode::from_json("\\{}").expect("parse")`,
-				`  mut xs: [Tab] = [Tab{data: raw, sv: Sv{scroll: 0}, flag: true}]`,
-				`  let ev: Event = A{}`,
-				`  match ev {`,
-				`    A(_) => {`,
-				`      let idx = 0`,
-				`      let current = xs.at(idx)`,
-				`      if current.flag {`,
-				`        xs.set(idx, Tab{data: current.data, sv: current.sv, flag: false})`,
-				`      } else if (not current.flag) {`,
-				`        xs.set(idx, Tab{data: current.data, sv: current.sv, flag: true})`,
-				`      } else {`,
-				`        ()`,
-				`      }`,
-				`    },`,
-				`    B(_) => (),`,
-				`  }`,
-				`}`,
-			}, "\n"),
-			diagnostics: []checker.Diagnostic{},
-		},
-		{
-			name: "Calling io::print",
-			input: strings.Join([]string{
-				`use ard/io`,
-				`io::print("Hello World")`,
-				`io::print(200)`,
-			}, "\n"),
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Expr: &checker.ModuleFunctionCall{
-							Module: "ard/io",
-							Call: &checker.FunctionCall{
-								Name: "print",
-								Args: []checker.Expression{
-									&checker.StrLiteral{Value: "Hello World"},
-								},
-							},
-						},
-					},
-					{
-						Expr: &checker.ModuleFunctionCall{
-							Module: "ard/io",
-							Call: &checker.FunctionCall{
-								Name: "print",
-								Args: []checker.Expression{
-									&checker.IntLiteral{200},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	})
-}
-
-func TestExternalFunctionGoBindingBlock(t *testing.T) {
-	source := `extern fn read_line() Str!Str = {
-  go = "ReadLine"
-}`
-
-	result := parse.Parse([]byte(source), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("unexpected parse errors: %v", result.Errors)
-	}
-
-	c := checker.New("main.ard", result.Program, nil)
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
-	}
-	program := c.Module().Program()
-	fn, ok := program.Statements[0].Expr.(*checker.ExternalFunctionDef)
-	if !ok {
-		t.Fatalf("expected external function def, got %#v", program.Statements[0].Expr)
-	}
-	if fn.ExternalBinding != "ReadLine" || fn.ExternalBindings["go"] != "ReadLine" {
-		t.Fatalf("unexpected extern bindings: %#v", fn)
-	}
-}
-
-func TestExternalFunctionShorthandResolvesToGo(t *testing.T) {
-	source := `extern fn query_selector(selector: Str) Dynamic? = "querySelector"`
-
-	result := parse.Parse([]byte(source), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("unexpected parse errors: %v", result.Errors)
-	}
-
-	c := checker.New("main.ard", result.Program, nil)
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
-	}
-	fn := c.Module().Program().Statements[0].Expr.(*checker.ExternalFunctionDef)
-	if fn.ExternalBinding != "querySelector" || fn.ExternalBindings["go"] != "querySelector" {
-		t.Fatalf("unexpected shorthand binding: %#v", fn)
-	}
-}
-
-func TestExternalFunctionRejectsUnsupportedBindingTargets(t *testing.T) {
-	cases := []struct {
-		name   string
-		source string
-		want   string
-	}{
-		{
-			name: "bytecode function binding",
-			source: `extern fn value() Str = {
-  bytecode = "Value"
-}`,
-			want: `Unsupported extern binding target "bytecode"`,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			result := parse.Parse([]byte(tc.source), "main.ard")
-			if len(result.Errors) > 0 {
-				t.Fatalf("unexpected parse errors: %v", result.Errors)
-			}
-			c := checker.New("main.ard", result.Program, nil)
-			c.Check()
-			if !c.HasErrors() {
-				t.Fatal("expected checker diagnostics")
-			}
-			joined := ""
-			for _, diagnostic := range c.Diagnostics() {
-				joined += diagnostic.String() + "\n"
-			}
-			if !strings.Contains(joined, tc.want) {
-				t.Fatalf("diagnostics = %s, want %q", joined, tc.want)
-			}
-		})
-	}
-}
-
 func TestCallingInstanceMethods(t *testing.T) {
 	run(t, []test{
 		{
@@ -541,6 +324,68 @@ func TestCallingInstanceMethods(t *testing.T) {
 					},
 				},
 			},
+		},
+	})
+}
+func TestNullableParameterCallSugar(t *testing.T) {
+	run(t, []test{
+		{
+			name: "omits trailing nullable positional arguments",
+			input: strings.Join([]string{
+				`fn configure(name: Str, retries: Int?, verbose: Bool?) {}`,
+				`configure("worker")`,
+			}, "\n"),
+		},
+		{
+			name: "wraps provided nullable parameter values",
+			input: strings.Join([]string{
+				`fn configure(name: Str, retries: Int?, verbose: Bool?) {}`,
+				`configure("worker", 3, true)`,
+			}, "\n"),
+		},
+		{
+			name: "passes explicit maybe arguments through",
+			input: strings.Join([]string{
+				`use ard/maybe`,
+				`fn configure(name: Str, retries: Int?) {}`,
+				`configure("worker", maybe::some(3))`,
+				`configure("worker", maybe::none())`,
+			}, "\n"),
+		},
+		{
+			name: "named arguments can skip nullable parameters",
+			input: strings.Join([]string{
+				`fn configure(retries: Int?, name: Str) {}`,
+				`configure(name: "worker")`,
+			}, "\n"),
+		},
+		{
+			name: "static functions use nullable argument sugar",
+			input: strings.Join([]string{
+				`struct Config { name: Str, retries: Int? }`,
+				`fn Config::new(name: Str, retries: Int?) Config { Config{name: name, retries: retries} }`,
+				`Config::new("worker")`,
+				`Config::new(name: "worker")`,
+				`Config::new("worker", 3)`,
+			}, "\n"),
+		},
+		{
+			name: "generic nullable parameter can be omitted",
+			input: strings.Join([]string{
+				`use ard/maybe`,
+				`fn optional(value: $T?) $T? { value }`,
+				`let missing: Int? = optional<Int>()`,
+				`let present: Int? = optional<Int>(1)`,
+				`let explicit: Int? = optional<Int>(maybe::some(2))`,
+			}, "\n"),
+		},
+		{
+			name: "positional arguments cannot skip non-trailing nullable parameters",
+			input: strings.Join([]string{
+				`fn configure(retries: Int?, name: Str) {}`,
+				`configure("worker")`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "missing argument for parameter: name"}},
 		},
 	})
 }
@@ -764,7 +609,6 @@ func TestNamedArguments(t *testing.T) {
 		},
 	})
 }
-
 func TestInferringEmptyCollectionArguments(t *testing.T) {
 	run(t, []test{
 		{
@@ -785,22 +629,6 @@ func TestInferringEmptyCollectionArguments(t *testing.T) {
 		},
 	})
 }
-
-func TestUsingValidTypesForUnionArguments(t *testing.T) {
-	run(t, []test{
-		{
-			name: "Map literal with union values",
-			input: `
-				use ard/sql
-
-				fn foo(values: [Str : sql::Value]) {}
-				foo(values: ["int":1, "str":"hey"])
-			`,
-			diagnostics: []checker.Diagnostic{},
-		},
-	})
-}
-
 func TestGroupedNullableFunctionTypes(t *testing.T) {
 	run(t, []test{
 		{
@@ -815,7 +643,6 @@ func TestGroupedNullableFunctionTypes(t *testing.T) {
 		},
 	})
 }
-
 func TestTypeDoubleColonFunctionDefinition(t *testing.T) {
 	run(t, []test{
 		{
@@ -835,36 +662,8 @@ func TestTypeDoubleColonFunctionDefinition(t *testing.T) {
 			`,
 			diagnostics: []checker.Diagnostic{},
 		},
-		{
-			name: "Type::function called in decode path similar to maestro fixtures.ard",
-			input: `
-				use ard/decode
-
-				struct Fixture {
-					id: Int,
-					name: Str,
-				}
-
-				fn Fixture::from_api_entry(data: Dynamic) Fixture![decode::Error] {
-					let id = try decode::run(data, decode::field("id", decode::int))
-					let name = try decode::run(data, decode::field("name", decode::string))
-					Result::ok(Fixture{id: id, name: name})
-				}
-
-				fn find_fixtures(body: Dynamic) [Fixture]!Str {
-					let fixtures = try decode::run(body, decode::field("response", decode::list(Fixture::from_api_entry))) -> errs {
-						Result::err("Error decoding fixtures")
-					}
-					Result::ok(fixtures)
-				}
-
-				Fixture{id: 1, name: "Test"}
-			`,
-			diagnostics: []checker.Diagnostic{},
-		},
 	})
 }
-
 func TestCallingFunctionValuedStructFields(t *testing.T) {
 	run(t, []test{
 		{
@@ -945,7 +744,6 @@ func TestCallingFunctionValuedStructFields(t *testing.T) {
 		},
 	})
 }
-
 func TestInferringAnonymousFunctionTypes(t *testing.T) {
 	run(t, []test{
 		{
@@ -984,6 +782,79 @@ func TestInferringAnonymousFunctionTypes(t *testing.T) {
 				"\n",
 			),
 			diagnostics: []checker.Diagnostic{},
+		},
+	})
+}
+
+func TestCallingPackageFunctions(t *testing.T) {
+	run(t, []test{
+		{
+			name: "Non-final side-effect match is not checked against function return type",
+			input: `
+			fn log(message: Str) { () }
+
+			fn value(flag: Bool) Int {
+			  match flag {
+			    true => log("yes"),
+			    false => log("no"),
+			  }
+			  1
+			}
+			`,
+		},
+		{
+			name: "If branches ending in list set are Void-compatible",
+			input: `
+			struct Tab { id: Str }
+
+			fn update(tabs: mut [Tab], idx: Int, id: Str) {
+			  if idx == 0 {
+			    tabs.set(0, Tab{id: id})
+			  } else {
+			    tabs.set(1, Tab{id: id})
+			  }
+			}
+			`,
+		},
+	})
+}
+
+// Top-level function signatures are hoisted, so functions can be referenced
+// before their declaration within a module.
+func TestForwardFunctionReferences(t *testing.T) {
+	run(t, []test{
+		{
+			name: "call a function declared later in the module",
+			input: strings.Join([]string{
+				`fn caller() Str {`,
+				`  helper("x")`,
+				`}`,
+				`fn helper(v: Str) Str { v }`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "forward reference inside a closure",
+			input: strings.Join([]string{
+				`fn make() fn() Str {`,
+				`  fn() Str { helper("x") }`,
+				`}`,
+				`fn helper(v: Str) Str { v }`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "forward reference with a bad argument still reports a mismatch",
+			input: strings.Join([]string{
+				`fn caller() Str {`,
+				`  helper(1)`,
+				`}`,
+				`fn helper(v: Str) Str { v }`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Void"},
+			},
 		},
 	})
 }

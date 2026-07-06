@@ -123,8 +123,8 @@ Using type unions for polymorphic behavior:
 ```ard
 use ard/io
 
-struct Square { size: Int }
-struct Circle { radius: Int }
+struct Square { size: Float64 }
+struct Circle { radius: Float64 }
 
 type Shape = Square | Circle
 
@@ -135,16 +135,16 @@ fn get_name(shape: Shape) Str {
   }
 }
 
-fn calculate_area(shape: Shape) Float {
+fn calculate_area(shape: Shape) Float64 {
   match shape {
-    Square => Float::from_int(it.size * it.size)
-    Circle => 3.14159 * Float::from_int(it.radius * it.radius)
+    Square => it.size * it.size
+    Circle => 3.14159 * it.radius * it.radius
   }
 }
 
 fn main() {
-  let square = Square { size: 10 }
-  let circle = Circle { radius: 5 }
+  let square = Square { size: 10.0 }
+  let circle = Circle { radius: 5.0 }
 
   let shapes: [Shape] = [square, circle]
   for shape in shapes {
@@ -233,13 +233,13 @@ fn parse_number(text: Str) Int!Str {
   text.to_int().or_err("Invalid number format")
 }
 
-fn calculate_percentage(text1: Str, text2: Str) Float!Str {
+fn calculate_percentage(text1: Str, text2: Str) Float64!Str {
   let num1 = try parse_number(text1)
   let num2 = try parse_number(text2)
   
   match num2 == 0 {
     true => Result::err("Cannot divide by zero")
-    false => Result::ok((Float::from_int(num1) / Float::from_int(num2)) * 100.0)
+    false => Result::err("Int to Float64 conversion requires an explicit helper")
   }
 }
 
@@ -339,14 +339,14 @@ fn main() {
   io::print("Starting server on port 3000...")
 
   let routes: [Str:http::HandlerFn] = [
-    "/": fn(req: http::Request, mut res: http::Response) {
+    "/": fn(req: http::Request, res: mut http::Response) {
       res.body = "Welcome to Ard server!"
     },
-    "/about": fn(req: http::Request, mut res: http::Response) {
+    "/about": fn(req: http::Request, res: mut http::Response) {
       let path = req.path().or("/")
       res.body = "About page from {path}"
     },
-    "/echo": fn(req: http::Request, mut res: http::Response) {
+    "/echo": fn(req: http::Request, res: mut http::Response) {
       let path = req.path().or("/")
       res.body = "You requested: {path}"
     }

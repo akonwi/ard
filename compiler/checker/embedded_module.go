@@ -50,3 +50,8 @@ func FindEmbeddedModule(path string) (Module, bool) {
 
 	return module, true
 }
+
+// Symbols returns the module's public symbols. Read-only.
+func (m EmbeddedModule) Symbols() map[string]Symbol {
+	return m.publicSymbols
+}

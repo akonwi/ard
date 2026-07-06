@@ -1,32 +1,30 @@
-use ard/io
+use go:bufio
+use go:fmt
+use go:os
+use go:strconv
+use go:strings
 
 fn main() {
   let target = 47
-  io::print("Guess the number!")
+  mut scanner = bufio::NewScanner(os::Stdin)
+  fmt::Println("Guess the number!")
 
-  while {
-    io::print("Please input your guess:")
-    match io::read_line() {
-      ok(guess) => {
-        io::print("You guessed: {guess.trim()}")
-        match Int::from_str(guess) {
-          num => {
-            if num < target {
-              io::print("Too low")
-            } else if num > target {
-              io::print("Too high")
-            } else {
-              io::print("Correct!")
-              break
-            }
-          },
-          _ => io::print("not a number")
+  while scanner.Scan() {
+    fmt::Println("Please input your guess:")
+    let guess = strings::TrimSpace(scanner.Text())
+    fmt::Println("You guessed: {guess}")
+    match strconv::Atoi(guess) {
+      ok(num) => {
+        if num < target {
+          fmt::Println("Too low")
+        } else if num > target {
+          fmt::Println("Too high")
+        } else {
+          fmt::Println("Correct!")
+          break
         }
       },
-      err => {
-        io::print("Failed to read input: {err}")
-        break
-      }
+      err(_) => fmt::Println("not a number"),
     }
   }
 }

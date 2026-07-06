@@ -74,7 +74,7 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 		return &ast.StructType{Fields: &ast.FieldList{}}, nil
 	case TypeInt:
 		return ast.NewIdent("int"), nil
-	case TypeFloat:
+	case TypeFloat64:
 		return ast.NewIdent("float64"), nil
 	case TypeBool:
 		return ast.NewIdent("bool"), nil
@@ -90,6 +90,24 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 			return nil, err
 		}
 		return &ast.ArrayType{Elt: elem}, nil
+	case TypeChannel:
+		elem, err := goTypeExpr(program, typ.Elem, runtimeQualifier)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ChanType{Dir: ast.SEND | ast.RECV, Value: elem}, nil
+	case TypeReceiver:
+		elem, err := goTypeExpr(program, typ.Elem, runtimeQualifier)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ChanType{Dir: ast.RECV, Value: elem}, nil
+	case TypeSender:
+		elem, err := goTypeExpr(program, typ.Elem, runtimeQualifier)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ChanType{Dir: ast.SEND, Value: elem}, nil
 	case TypeMap:
 		key, err := goTypeExpr(program, typ.Key, runtimeQualifier)
 		if err != nil {
@@ -104,15 +122,6 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 		}
 		return &ast.MapType{Key: key, Value: value}, nil
 	case TypeStruct, TypeEnum, TypeUnion, TypeTraitObject:
-		return ast.NewIdent(goExportedName(typ.Name)), nil
-	case TypeExtern:
-		if typ.Elem != NoType && (typ.Name == "Chan" || strings.HasPrefix(typ.Name, "Chan<")) {
-			elem, err := goTypeExpr(program, typ.Elem, runtimeQualifier)
-			if err != nil {
-				return nil, err
-			}
-			return &ast.ChanType{Dir: ast.SEND | ast.RECV, Value: elem}, nil
-		}
 		return ast.NewIdent(goExportedName(typ.Name)), nil
 	case TypeMaybe:
 		elem, err := goTypeExpr(program, typ.Elem, runtimeQualifier)
@@ -130,7 +139,7 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 			return nil, err
 		}
 		return goRuntimeGeneric(runtimeQualifier, "Result", value, errType), nil
-	case TypeDynamic:
+	case TypeAny:
 		return ast.NewIdent("any"), nil
 	case TypeFunction:
 		params := make([]*ast.Field, 0, len(typ.Params))
@@ -153,12 +162,6 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 			fnType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
 		}
 		return fnType, nil
-	case TypeFiber:
-		elem, err := goTypeExpr(program, typ.Elem, runtimeQualifier)
-		if err != nil {
-			return nil, err
-		}
-		return goRuntimeGeneric(runtimeQualifier, "Fiber", elem), nil
 	default:
 		return nil, fmt.Errorf("unsupported AIR type kind %d", typ.Kind)
 	}
@@ -190,7 +193,7 @@ func goTypeContainsMaybe(program *Program, id TypeID, seen map[TypeID]bool) bool
 	switch typ.Kind {
 	case TypeMaybe:
 		return true
-	case TypeList, TypeFiber:
+	case TypeList, TypeChannel, TypeReceiver, TypeSender:
 		return goTypeContainsMaybe(program, typ.Elem, seen)
 	case TypeMap:
 		return goTypeContainsMaybe(program, typ.Key, seen) || goTypeContainsMaybe(program, typ.Value, seen)

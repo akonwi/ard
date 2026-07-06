@@ -41,7 +41,7 @@ mut age = 30
 Ard uses `mut` for mutable access. A mutable function parameter receives a mutable reference to caller-owned storage, so the caller must pass an addressable mutable value:
 
 ```ard
-fn update_person(mut person: Person) {
+fn update_person(person: mut Person) {
     person.age = 99  // Mutates the caller's value
 }
 
@@ -120,6 +120,25 @@ greet(age: 30, name: "Bob")
 ```
 
 When using named arguments, all arguments must be named. Mixing positional arguments with named arguments is not supported.
+
+#### Nullable Parameters
+
+Parameters declared as nullable (`T?`) can be omitted at the call site when the omission is unambiguous. The compiler fills omitted nullable parameters with `none`, and wraps plain `T` values as `some(value)` when passed to a `T?` parameter.
+
+```ard
+fn connect(host: Str, port: Int?) {}
+
+connect("localhost")      // port = none
+connect("localhost", 80)  // port = some(80)
+```
+
+For positional calls, only trailing nullable parameters can be omitted. Named calls can skip nullable parameters in any position:
+
+```ard
+fn f(timeout: Int?, name: Str) {}
+
+f(name: "worker") // timeout = none
+```
 
 Functions are first class and can therefore be used as arguments
 
@@ -216,7 +235,7 @@ for fruit in fruits {
 ### Built-in types
 - Str
 - Int
-- Float
+- Float64
 - Bool
 - [Int] - List
 - [Str:Int] - Map
@@ -393,7 +412,7 @@ fn mark_ok(resp: mut gohttp::Response) {
 }
 ```
 
-Go pointer nil behavior is preserved. Use `ard/ffi::is_nil(value)` for explicit host nil checks, or `unsafe { ... }` when a trusted interop block may panic and should return `T!Str`.
+Go pointer nil behavior is preserved. Use `ard/unsafe::is_nil(value)` for explicit host nil checks, or `unsafe { ... }` when a trusted interop block may panic and should return `T!Str`.
 
 ### Errors
 Ard does not have exceptions. Instead, errors are represented as values. The built-in `Result<$Val, $Err>` type can be used as a special type union of a success value and an error value.

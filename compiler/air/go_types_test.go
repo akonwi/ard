@@ -37,7 +37,6 @@ func TestGenerateGoStructDeclarations(t *testing.T) {
 		t.Fatalf("generated Go structs:\n%s\nwant:\n%s", got, want)
 	}
 }
-
 func TestGenerateGoStructDeclarationsRejectsInvalidFieldType(t *testing.T) {
 	program := &Program{
 		Types: []TypeInfo{{

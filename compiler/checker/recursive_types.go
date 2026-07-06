@@ -7,7 +7,7 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
-const recursiveLayoutDiagnostic = "Put the recursive reference behind mut, list, map, nullable, trait, extern, or function indirection."
+const recursiveLayoutDiagnostic = "Put the recursive reference behind mut, list, map, nullable, trait, or function indirection."
 
 type recursiveStructEdge struct {
 	from      *StructDef
@@ -120,7 +120,7 @@ func inlineStructReferencesWithNullable(t Type, seen map[Type]bool, nullableIsBo
 			refs = append(refs, inlineStructReferencesWithNullable(member, seen, false)...)
 		}
 		return refs
-	case *MutableRef, *List, *Trait, *ExternType, *FunctionDef, *ExternalFunctionDef:
+	case *MutableRef, *List, *Trait, *FunctionDef:
 		return nil
 	default:
 		return nil
@@ -165,12 +165,6 @@ func recursiveMapKeyReferences(t Type, seen map[Type]bool) []*StructDef {
 		}
 		return refs
 	case *FunctionDef:
-		refs := recursiveMapKeyReferences(typ.ReturnType, seen)
-		for _, param := range typ.Parameters {
-			refs = append(refs, recursiveMapKeyReferences(param.Type, seen)...)
-		}
-		return refs
-	case *ExternalFunctionDef:
 		refs := recursiveMapKeyReferences(typ.ReturnType, seen)
 		for _, param := range typ.Parameters {
 			refs = append(refs, recursiveMapKeyReferences(param.Type, seen)...)

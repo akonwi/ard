@@ -20,16 +20,14 @@ type test struct {
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
 	cmpopts.IgnoreFields(checker.BoolMatch{}, "ResultType"),
+	cmpopts.IgnoreFields(checker.Parameter{}, "Loc"),
 	cmpopts.IgnoreFields(checker.OptionMatch{}, "ResultType"),
 	cmpopts.IgnoreFields(checker.EnumMatch{}, "DiscriminantToIndex", "ResultType"),
 	cmpopts.IgnoreFields(checker.EnumVariant{}, "EnumType", "Discriminant"),
 	cmpopts.IgnoreFields(checker.ListLiteral{}, "ListType"),
 	cmpopts.IgnoreFields(checker.InstanceMethod{}, "ReceiverKind", "StructType", "EnumType", "TraitType"),
-	cmpopts.IgnoreFields(checker.FiberEval{}, "FiberType"),
-	cmpopts.IgnoreFields(checker.FiberExecution{}, "FiberType"),
 	cmpopts.IgnoreFields(checker.ModuleStructInstance{}, "StructType"),
 	cmpopts.IgnoreFields(checker.FunctionCall{}, "ReturnType"),
-	cmpopts.IgnoreFields(checker.FunctionCall{}, "ExternalBinding"),
 	cmpopts.IgnoreFields(checker.FunctionCall{}, "TypeArgs"),
 	cmpopts.IgnoreFields(checker.MaybeMethod{}, "ReturnType"),
 	cmpopts.IgnoreFields(checker.ResultMethod{}, "ReturnType"),
@@ -62,6 +60,7 @@ var compareOptions = cmp.Options{
 		checker.Variable{},
 		checker.VariableDef{},
 		checker.FunctionCall{},
+		checker.ForeignFunctionCall{},
 		checker.ListLiteral{},
 		checker.List{},
 		checker.MapLiteral{},
@@ -102,62 +101,6 @@ func run(t *testing.T, tests []test) {
 			}
 		})
 	}
-}
-
-func TestGenericImportedTypeRequiresTypeArguments(t *testing.T) {
-	run(t, []test{
-		{
-			name: "generic imported struct without type args is an error",
-			input: `use ard/async/channel
-extern fn events() channel::Channel = "Events"`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Generic type channel::Channel requires type arguments"},
-			},
-		},
-	})
-}
-
-func TestImports(t *testing.T) {
-	run(t, []test{
-		{
-			name:  "importing modules",
-			input: `use ard/io`,
-			output: &checker.Program{
-				Imports: map[string]checker.Module{},
-			},
-		},
-		{
-			name: "direct Go imports are not resolved as Ard modules",
-			input: strings.Join([]string{
-				`use go:math`,
-				`extern fn floor(value: Float) Float = math::Floor`,
-			}, "\n"),
-			output: &checker.Program{},
-		},
-		{
-			name: "errors when importing unknowns from standard lib",
-			input: strings.Join([]string{
-				`use ard/foobar`,
-			}, "\n"),
-			output: &checker.Program{},
-			diagnostics: []checker.Diagnostic{
-				{
-					Kind:    checker.Error,
-					Message: "Unknown module: ard/foobar",
-				},
-			},
-		},
-		{
-			name: "name collisions are caught",
-			input: strings.Join([]string{
-				`use ard/fs`,
-				`use ard/io as fs`,
-			}, "\n"),
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Warn, Message: "[2:1] Duplicate import: fs"},
-			},
-		},
-	})
 }
 
 func TestPrimitiveLiterals(t *testing.T) {
@@ -221,7 +164,6 @@ func TestPrimitiveLiterals(t *testing.T) {
 		},
 	})
 }
-
 func TestVariables(t *testing.T) {
 	run(t, []test{
 		{
@@ -229,7 +171,7 @@ func TestVariables(t *testing.T) {
 			input: strings.Join([]string{
 				`let name: Str = "Alice"`,
 				"let age: Int = 32",
-				"let temp: Float = 98.6",
+				"let temp: Float64 = 98.6",
 				"mut is_student: Bool = true",
 			}, "\n"),
 			output: &checker.Program{
@@ -318,10 +260,10 @@ func TestVariables(t *testing.T) {
 			},
 		},
 		{
-			name:  "Int literals are not inferred as Float",
-			input: `let temp: Float = 98`,
+			name:  "Int literals are not inferred as Float64",
+			input: `let temp: Float64 = 98`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Float, got Int"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected Float64, got Int"},
 			},
 		},
 		{
@@ -458,7 +400,6 @@ func TestVariables(t *testing.T) {
 		},
 	})
 }
-
 func TestInstanceProperties(t *testing.T) {
 	run(t, []test{
 		{
@@ -475,7 +416,6 @@ func TestInstanceProperties(t *testing.T) {
 		},
 	})
 }
-
 func TestUnaryExpressions(t *testing.T) {
 	run(t, []test{
 		{
@@ -495,7 +435,7 @@ func TestUnaryExpressions(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{
 					Kind:    checker.Error,
-					Message: "Only numbers can be negated with '-'",
+					Message: "Only signed numbers can be negated with '-'",
 				},
 			},
 		},
@@ -519,7 +459,6 @@ func TestUnaryExpressions(t *testing.T) {
 		},
 	})
 }
-
 func TestIntMath(t *testing.T) {
 	tests := []test{
 		{
@@ -749,7 +688,7 @@ func TestIntMath(t *testing.T) {
 			name:  "Modulo Floats",
 			input: "10.0 % 3.0",
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "The '%' operator can only be used for Int"},
+				{Kind: checker.Error, Message: "The '%' operator can only be used for integer scalars"},
 			},
 		},
 		{
@@ -940,9 +879,26 @@ func TestIntMath(t *testing.T) {
 
 	run(t, tests)
 }
-
 func TestEqualityComparisons(t *testing.T) {
 	run(t, []test{
+		{
+			name: "nullable primitive equality is allowed",
+			input: strings.Join([]string{
+				`use ard/maybe`,
+				`maybe::some(1) == maybe::none()`,
+			}, "\n"),
+		},
+		{
+			name: "nullable list equality is rejected",
+			input: strings.Join([]string{
+				`use ard/maybe`,
+				`let a: [Int] = [1]`,
+				`maybe::some(a) == maybe::some(a)`,
+			}, "\n"),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Invalid: [Int]? == [Int]?"},
+			},
+		},
 		{
 			name: "Mismatched Maybe equality reports an error",
 			input: strings.Join([]string{
@@ -1037,7 +993,6 @@ func TestEqualityComparisons(t *testing.T) {
 		},
 	})
 }
-
 func TestEnumToIntComparisons(t *testing.T) {
 	run(t, []test{
 		{
@@ -1074,7 +1029,6 @@ func TestEnumToIntComparisons(t *testing.T) {
 		},
 	})
 }
-
 func TestChainedComparisons(t *testing.T) {
 	run(t, []test{
 		{
@@ -1099,7 +1053,6 @@ func TestChainedComparisons(t *testing.T) {
 		},
 	})
 }
-
 func TestBooleanOperations(t *testing.T) {
 	run(t, []test{
 		{
@@ -1133,7 +1086,6 @@ func TestBooleanOperations(t *testing.T) {
 		},
 	})
 }
-
 func TestParenthesizedExpressions(t *testing.T) {
 	run(t, []test{
 		{
@@ -1166,7 +1118,6 @@ func TestParenthesizedExpressions(t *testing.T) {
 		},
 	})
 }
-
 func TestIfStatements(t *testing.T) {
 	run(t, []test{
 		{
@@ -1301,7 +1252,6 @@ func TestIfStatements(t *testing.T) {
 		},
 	})
 }
-
 func TestForLoops(t *testing.T) {
 	run(t, []test{
 		{
@@ -1416,7 +1366,6 @@ func TestForLoops(t *testing.T) {
 		},
 	})
 }
-
 func TestLoopingOverMaps(t *testing.T) {
 	run(t, []test{
 		{
@@ -1463,7 +1412,6 @@ func TestLoopingOverMaps(t *testing.T) {
 		},
 	})
 }
-
 func TestTraditionalForLoop(t *testing.T) {
 	run(t, []test{
 		{
@@ -1514,7 +1462,6 @@ func TestTraditionalForLoop(t *testing.T) {
 		},
 	})
 }
-
 func TestWhileLoops(t *testing.T) {
 	run(t, []test{
 		{
@@ -1626,7 +1573,6 @@ func TestWhileLoops(t *testing.T) {
 		},
 	})
 }
-
 func TestMaybes(t *testing.T) {
 	run(t, []test{
 		{
@@ -1719,82 +1665,8 @@ func TestMaybes(t *testing.T) {
 				{Kind: checker.Error, Message: "Type mismatch: Expected Str?, got Str"},
 			},
 		},
-		{
-			name: "Matching on maybes",
-			input: `
-				use ard/io
-				use ard/maybe
-
-				mut name: Str? = maybe::none()
-				match name {
-				  value => io::print("name is {value}"),
-					_ => io::print("no name")
-				}`,
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Stmt: &checker.VariableDef{
-							Mutable: true,
-							Name:    "name",
-							Value: &checker.ModuleFunctionCall{
-								Module: "ard/maybe",
-								Call: &checker.FunctionCall{
-									Name: "none",
-									Args: []checker.Expression{},
-								},
-							},
-						},
-					},
-					{
-						Expr: &checker.OptionMatch{
-							Subject:   &checker.Variable{},
-							InnerType: checker.Str,
-							Some: &checker.Match{
-								Pattern: &checker.Identifier{Name: "value"},
-								Body: &checker.Block{
-									Stmts: []checker.Statement{
-										{
-											Expr: &checker.ModuleFunctionCall{
-												Module: "ard/io",
-												Call: &checker.FunctionCall{
-													Name: "print",
-													Args: []checker.Expression{
-														&checker.TemplateStr{
-															Chunks: []checker.Expression{
-																&checker.StrLiteral{Value: "name is "},
-																&checker.Variable{},
-															},
-														},
-													},
-												},
-											},
-										},
-									},
-								},
-							},
-							None: &checker.Block{
-								Stmts: []checker.Statement{
-									{
-										Expr: &checker.ModuleFunctionCall{
-											Module: "ard/io",
-											Call: &checker.FunctionCall{
-												Name: "print",
-												Args: []checker.Expression{
-													&checker.StrLiteral{Value: "no name"},
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
 	})
 }
-
 func TestLists(t *testing.T) {
 	run(t, []test{
 		{
@@ -1810,16 +1682,6 @@ func TestLists(t *testing.T) {
 						},
 					}},
 				},
-			},
-		},
-		{
-			name: "Empty lists must have declared type",
-			input: `
-			let empty = List::new()
-			let uninferred = []
-			`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Empty lists need an explicit type"},
 			},
 		},
 		{
@@ -1904,7 +1766,28 @@ func TestLists(t *testing.T) {
 		},
 	})
 }
-
+func TestMapKeyTypeConstraint(t *testing.T) {
+	run(t, []test{
+		{
+			name:  "nullable key is rejected",
+			input: `let m: [Str?: Int] = [:]`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Invalid map key type Str?: map keys must be comparable (primitives, enums, or structs)"},
+			},
+		},
+		{
+			name:  "list key is rejected",
+			input: `let m: [[Int]: Int] = [:]`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Invalid map key type [Int]: map keys must be comparable (primitives, enums, or structs)"},
+			},
+		},
+		{
+			name:  "primitive and enum keys are allowed",
+			input: `let ages: [Str: Int] = ["ard": 0]`,
+		},
+	})
+}
 func TestMaps(t *testing.T) {
 	run(t, []test{
 		{
@@ -1981,7 +1864,6 @@ func TestMaps(t *testing.T) {
 		},
 	})
 }
-
 func TestEnums(t *testing.T) {
 	run(t, []test{
 		{
@@ -2052,7 +1934,6 @@ func TestEnums(t *testing.T) {
 		},
 	})
 }
-
 func TestEnumValues(t *testing.T) {
 	run(t, []test{
 		{
@@ -2124,7 +2005,6 @@ func TestEnumValues(t *testing.T) {
 		},
 	})
 }
-
 func TestMatchingOnEnums(t *testing.T) {
 	run(t, []test{
 		{
@@ -2273,7 +2153,6 @@ func TestMatchingOnEnums(t *testing.T) {
 		},
 	})
 }
-
 func TestMatchingOnBooleans(t *testing.T) {
 	run(t, []test{
 		{
@@ -2443,7 +2322,6 @@ func TestMatchingOnBooleans(t *testing.T) {
 		},
 	})
 }
-
 func TestMatchArmScope(t *testing.T) {
 	run(t, []test{
 		{
@@ -2485,7 +2363,6 @@ func TestMatchArmScope(t *testing.T) {
 		},
 	})
 }
-
 func TestMatchingOnStrings(t *testing.T) {
 	run(t, []test{
 		{
@@ -2523,7 +2400,6 @@ func TestMatchingOnStrings(t *testing.T) {
 		},
 	})
 }
-
 func TestMatchingOnInts(t *testing.T) {
 	run(t, []test{
 		{
@@ -2582,7 +2458,6 @@ func TestMatchingOnInts(t *testing.T) {
 		},
 	})
 }
-
 func TestGenerics(t *testing.T) {
 	run(t, []test{
 		{
@@ -2598,29 +2473,6 @@ func TestGenerics(t *testing.T) {
 							Body: &checker.Block{
 								Stmts: []checker.Statement{
 									{Expr: &checker.Variable{}},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "Providing type arguments to static functions",
-			input: `
-				use ard/json
-				let result = json::encode<Int>(42)
-			`,
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Stmt: &checker.VariableDef{
-							Name: "result",
-							Value: &checker.ModuleFunctionCall{
-								Module: "ard/json",
-								Call: &checker.FunctionCall{
-									Name: "encode",
-									Args: []checker.Expression{&checker.IntLiteral{42}},
 								},
 							},
 						},
@@ -2669,23 +2521,6 @@ func TestGenerics(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "type mismatch: expected Str, got Int"},
 			},
-		},
-		{
-			name: "Providing type arguments to methods",
-			input: `
-				use ard/json
-			  struct Foo {
-					body: Str
-				}
-				impl Foo {
-				  fn bar() $T!Str {
-					  json::encode<$T>(self.body)
-					}
-				}
-			  let foo = Foo{body: "200"}
-				let num = foo.bar<Int>()
-			`,
-			diagnostics: []checker.Diagnostic{},
 		},
 		{
 			name: "Generic structs",
@@ -2776,7 +2611,6 @@ func TestGenerics(t *testing.T) {
 		},
 	})
 }
-
 func TestVoidLiteral(t *testing.T) {
 	run(t, []test{
 		{
@@ -2792,7 +2626,6 @@ func TestVoidLiteral(t *testing.T) {
 		},
 	})
 }
-
 func TestGenericTypeParams(t *testing.T) {
 	run(t, []test{
 		{
@@ -2822,6 +2655,266 @@ func TestGenericTypeParams(t *testing.T) {
 				`struct Weird { zeta: $T, alpha: $U }`,
 				`let weird: Weird<Int, Str> = Weird{ zeta: 42, alpha: "hello" }`,
 			}, "\n"),
+		},
+	})
+}
+
+func TestReservedBuiltinStructDiagnosticLocation(t *testing.T) {
+	result := parse.Parse([]byte("struct Sender {\n  name: Str\n}\n"), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse error: %s", result.Errors[0].Message)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	diagnostics := c.Diagnostics()
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics = %v, want one diagnostic", diagnostics)
+	}
+	got := diagnostics[0].String()
+	if !strings.Contains(got, "test.ard [1:8] Sender is a built-in type and cannot be redeclared") {
+		t.Fatalf("diagnostic = %q, want struct name location", got)
+	}
+}
+
+func TestAsyncStart(t *testing.T) {
+	run(t, []test{
+		{
+			name: "async start accepts void closure",
+			input: `use ard/async
+fn main() {
+  async::start(fn() {})
+}`,
+		},
+		{
+			name: "async start rejects missing task",
+			input: `use ard/async
+fn main() {
+  async::start()
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "missing argument for parameter: task"},
+			},
+		},
+		{
+			name: "async start rejects non-void function",
+			input: `use ard/async
+fn value() Int { 1 }
+fn main() {
+  async::start(value)
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected fn(), got fn() Int"},
+			},
+		},
+	})
+}
+
+func TestChan(t *testing.T) {
+	run(t, []test{
+		{
+			name: "channel new/send/recv/close type-check",
+			input: `fn main() {
+  let unbuffered = Chan::new<Int>()
+  let ch = Chan::new<Int>(1)
+  ch.send(42)
+  let v = ch.recv()
+  ch.close()
+}`,
+		},
+		{
+			name: "send rejects a mismatched value type",
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  ch.send("wrong")
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"},
+			},
+		},
+		{
+			name: "recv yields an optional of the element type",
+			input: `fn main() Int {
+  let ch = Chan::new<Int>(1)
+  ch.send(7)
+  ch.recv().expect("v")
+}`,
+		},
+		{
+			name: "Chan annotation resolves the element type",
+			input: `fn take(ch: Chan<Str>) {
+  ch.send("x")
+}`,
+		},
+		{
+			name: "Receiver cannot construct channels",
+			input: `fn main() {
+  let ch = Receiver::new<Int>(1)
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: Receiver::new"},
+			},
+		},
+		{
+			name: "Sender cannot construct channels",
+			input: `fn main() {
+  let ch = Sender::new<Int>(1)
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: Sender::new"},
+			},
+		},
+		{
+			name: "reserved channel type name cannot be redeclared",
+			input: `struct Sender {
+  name: Str
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Sender is a built-in type and cannot be redeclared"},
+			},
+		},
+		{
+			name: "reserved scalar type name cannot be redeclared",
+			input: `struct Int8 {
+  value: Int
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Int8 is a built-in type and cannot be redeclared"},
+			},
+		},
+	})
+}
+func TestSelectChecker(t *testing.T) {
+	run(t, []test{
+		{
+			name: "valid select with recv binding, send, discard, and default",
+			input: `fn main() {
+  let jobs = Chan::new<Int>(1)
+  let sink = Chan::new<Int>(0)
+  jobs.send(1)
+  select {
+    let job = jobs.recv() => sink.send(job.expect("j")),
+    sink.send(0) => sink.close(),
+    jobs.recv() => sink.close(),
+    _ => sink.close()
+  }
+}`,
+		},
+		{
+			name: "send arm rejects a mismatched value type",
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  select {
+    ch.send("x") => ch.close(),
+    _ => ch.close()
+  }
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"},
+			},
+		},
+		{
+			name: "arm on a non-channel is rejected",
+			input: `fn main() {
+  let n = 5
+  select {
+    n.recv() => {},
+    _ => {}
+  }
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "A select arm operates on a channel, but got Int"},
+			},
+		},
+		{
+			name: "default arm cannot bind",
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  select {
+    let x = _ => {},
+    ch.recv() => {}
+  }
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "The default select arm cannot bind a value"},
+			},
+		},
+	})
+}
+func TestDirectionalChannels(t *testing.T) {
+	run(t, []test{
+		{
+			name: "receiver factory yields a recv-only channel",
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  let rx = ch.receiver()
+  let v = rx.recv()
+}`,
+		},
+		{
+			name: "receiver rejects send",
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  let rx = ch.receiver()
+  rx.send(1)
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: rx.send"},
+			},
+		},
+		{
+			name: "sender factory yields a send-only channel with send and close",
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  let tx = ch.sender()
+  tx.send(1)
+  tx.close()
+}`,
+		},
+		{
+			name: "sender rejects recv",
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  let tx = ch.sender()
+  let v = tx.recv()
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined: tx.recv"},
+			},
+		},
+		{
+			name: "a bidirectional channel does not implicitly narrow to a receiver",
+			input: `fn take(rx: Receiver<Int>) {}
+fn main() {
+  take(Chan::new<Int>(1))
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Receiver<Int>, got Chan<Int>"},
+			},
+		},
+		{
+			name: "select recv arm accepts a receiver",
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  let rx = ch.receiver()
+  select {
+    let v = rx.recv() => {},
+    _ => {}
+  }
+}`,
+		},
+		{
+			name: "select send arm rejects a receiver",
+			input: `fn main() {
+  let ch = Chan::new<Int>(1)
+  let rx = ch.receiver()
+  select {
+    rx.send(1) => {},
+    _ => {}
+  }
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "send() is not available on Receiver<Int>"},
+			},
 		},
 	})
 }

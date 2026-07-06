@@ -20,6 +20,11 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 			continue
 		}
 		seen[name] = loc
+		if isReservedBuiltinTypeName(name) {
+			c.addError(fmt.Sprintf("%s is a built-in type and cannot be redeclared", name), loc)
+			c.markDuplicateTopLevelTypeDeclaration(stmt)
+			continue
+		}
 
 		switch s := stmt.(type) {
 		case *parse.StructDefinition:
@@ -36,15 +41,9 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 				Private:       s.Private,
 			}, false)
 		case *parse.TraitDefinition:
-			c.scope.add(name, &Trait{Name: s.Name.Name, private: s.Private}, false)
+			c.scope.add(name, &Trait{Name: s.Name.Name, ModulePath: c.typeOwnerPath(), private: s.Private}, false)
 		case *parse.EnumDefinition:
 			c.scope.add(name, &Enum{Name: s.Name, ModulePath: c.typeOwnerPath(), Private: s.Private, Methods: make(map[string]*FunctionDef), Location: s.GetLocation()}, false)
-		case *parse.ExternTypeDeclaration:
-			typeArgs := make([]Type, len(s.TypeParams))
-			for i, param := range s.TypeParams {
-				typeArgs[i] = &TypeVar{name: param}
-			}
-			c.scope.add(name, &ExternType{Name_: s.Name, GenericParams: append([]string(nil), s.TypeParams...), TypeArgs: typeArgs, private: s.Private}, false)
 		case *parse.TypeDeclaration:
 			if len(s.Type) == 1 {
 				if c.topLevelTypeAliases == nil {
@@ -52,16 +51,54 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 				}
 				c.topLevelTypeAliases[name] = s
 			} else {
-				c.scope.add(name, &Union{Name: s.Name.Name, ModulePath: c.typeOwnerPath()}, false)
+				c.scope.add(name, &Union{Name: s.Name.Name, ModulePath: c.typeOwnerPath(), Private: s.Private}, false)
 			}
 		}
+	}
+}
+
+// hoistTopLevelFunctionSignatures pre-resolves the signatures of top-level
+// function declarations and adds them to module scope so functions can be
+// referenced before their declaration within a module.
+func (c *Checker) hoistTopLevelFunctionSignatures() {
+	c.hoistedTopLevelFunctions = map[*parse.FunctionDeclaration]*FunctionDef{}
+	for i := range c.input.Statements {
+		def, ok := c.input.Statements[i].(*parse.FunctionDeclaration)
+		if !ok {
+			continue
+		}
+		params := c.resolveParametersWithContext(def.Parameters, nil)
+		returnType := c.resolveReturnTypeWithContext(def.ReturnType, nil)
+		resolved := true
+		for i, param := range def.Parameters {
+			if param.Type != nil && params[i].Type == nil {
+				resolved = false
+				break
+			}
+		}
+		if !resolved {
+			// Leave unresolvable signatures to the in-order pass so its
+			// diagnostics and panics behave as before.
+			continue
+		}
+		fn := &FunctionDef{
+			Name:          def.Name,
+			GenericParams: append([]string(nil), def.TypeParams...),
+			Parameters:    params,
+			ReturnType:    returnType,
+			Body:          nil,
+			Private:       def.Private,
+			IsTest:        def.IsTest,
+		}
+		c.hoistedTopLevelFunctions[def] = fn
+		c.scope.add(def.Name, fn, false)
 	}
 }
 
 func (c *Checker) populateTopLevelTypeDefinitions() {
 	for i := range c.input.Statements {
 		switch c.input.Statements[i].(type) {
-		case *parse.StructDefinition, *parse.TraitDefinition, *parse.EnumDefinition, *parse.ExternTypeDeclaration, *parse.TypeDeclaration:
+		case *parse.StructDefinition, *parse.TraitDefinition, *parse.EnumDefinition, *parse.TypeDeclaration:
 			c.checkStmt(&c.input.Statements[i])
 		}
 	}
@@ -83,12 +120,6 @@ func (c *Checker) checkedTopLevelTypeStatement(stmt parse.Statement) *Statement 
 			return nil
 		}
 		return &Statement{Stmt: def}
-	case *parse.ExternTypeDeclaration:
-		externType, ok := c.hoistedExternType(s.Name)
-		if !ok {
-			return nil
-		}
-		return &Statement{Stmt: externType}
 	case *parse.TypeDeclaration:
 		if len(s.Type) <= 1 {
 			return nil
@@ -110,8 +141,6 @@ func topLevelTypeDeclarationName(stmt parse.Statement) (string, parse.Location, 
 	case *parse.TraitDefinition:
 		return s.Name.Name, s.Name.GetLocation(), true
 	case *parse.EnumDefinition:
-		return s.Name, s.GetLocation(), true
-	case *parse.ExternTypeDeclaration:
 		return s.Name, s.GetLocation(), true
 	case *parse.TypeDeclaration:
 		return s.Name.Name, s.Name.GetLocation(), true
@@ -254,6 +283,7 @@ func (c *Checker) populateStructDefinition(def *StructDef, decl *parse.StructDef
 	def.ModulePath = c.typeOwnerPath()
 	def.Fields = make(map[string]Type)
 	def.GenericParams = declaredGenericParams
+	def.DeclaredGenerics = len(decl.TypeParams) > 0
 	def.Private = decl.Private
 	resolvedGenericParams := []string{}
 	seenGenerics := make(map[string]bool)
@@ -268,6 +298,13 @@ func (c *Checker) populateStructDefinition(def *StructDef, decl *parse.StructDef
 			continue
 		}
 		def.Fields[field.Name.Name] = fieldType
+		if c.spans != nil {
+			c.spans.add(SpanRecord{
+				Loc:   field.Name.GetLocation(),
+				Key:   MemberKey(TargetField, def.ModulePath, def.Name, field.Name.Name),
+				IsDef: true,
+			})
+		}
 		collectGenericsFromType(fieldType, &resolvedGenericParams, seenGenerics)
 	}
 	def.GenericParams = appendUniqueStrings(declaredGenericParams, resolvedGenericParams...)
@@ -314,18 +351,6 @@ func (c *Checker) hoistedEnum(name string) (*Enum, bool) {
 		return nil, false
 	}
 	return enum, true
-}
-
-func (c *Checker) hoistedExternType(name string) (*ExternType, bool) {
-	sym, ok := c.scope.get(name)
-	if !ok {
-		return nil, false
-	}
-	externType, ok := sym.Type.(*ExternType)
-	if !ok {
-		return nil, false
-	}
-	return externType, true
 }
 
 func (c *Checker) hoistedUnion(name string) (*Union, bool) {

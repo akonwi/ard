@@ -103,21 +103,27 @@ fn partition_int(list: [Int], where: fn(Int) Bool) IntPartition {
 test fn test_concat_combines_lists() Void!Str {
   let combined = concat([1, 2, 3], [4, 5, 6])
   try testing::assert(combined.size() == 6, "concat should keep all elements")
-  try testing::assert(combined.at(3) == 4, "concat should append the second list in order")
-  testing::assert(combined.at(5) == 6, "concat should keep the tail of the second list")
+  try testing::assert(
+    combined.at(3).expect("bounds") == 4,
+    "concat should append the second list in order",
+  )
+  testing::assert(
+    combined.at(5).expect("bounds") == 6,
+    "concat should keep the tail of the second list",
+  )
 }
 
 test fn test_drop_keeps_suffix() Void!Str {
   let dropped = drop([1, 2, 3, 4, 5], 2)
   try testing::assert(dropped.size() == 3, "drop should remove the prefix")
-  try testing::assert(dropped.at(0) == 3, "drop should keep the element at the cutoff")
-  testing::assert(dropped.at(2) == 5, "drop should keep the tail of the list")
+  try testing::assert(dropped.at(0).expect("bounds") == 3, "drop should keep the element at the cutoff")
+  testing::assert(dropped.at(2).expect("bounds") == 5, "drop should keep the tail of the list")
 }
 
 test fn test_drop_zero_returns_all_elements() Void!Str {
   let dropped = drop([1, 2, 3], 0)
   try testing::assert(dropped.size() == 3, "drop(0) should keep all elements")
-  testing::assert(dropped.at(2) == 3, "drop(0) should preserve element order")
+  testing::assert(dropped.at(2).expect("bounds") == 3, "drop(0) should preserve element order")
 }
 
 test fn test_map_transforms_in_order() Void!Str {
@@ -129,8 +135,8 @@ test fn test_map_transforms_in_order() Void!Str {
     },
   )
   try testing::assert(doubled.size() == 3, "map should preserve list size")
-  try testing::assert(doubled.at(0) == 2, "map should transform the first element")
-  testing::assert(doubled.at(2) == 6, "map should transform later elements too")
+  try testing::assert(doubled.at(0).expect("bounds") == 2, "map should transform the first element")
+  testing::assert(doubled.at(2).expect("bounds") == 6, "map should transform later elements too")
 }
 
 test fn test_find_returns_some_for_match() Void!Str {
@@ -155,6 +161,9 @@ test fn test_partition_splits_matching_and_other_values() Void!Str {
   )
   try testing::assert(parts.selected.size() == 3, "partition should collect matches")
   try testing::assert(parts.others.size() == 2, "partition should collect non-matches")
-  try testing::assert(parts.selected.at(0) == 3, "partition should preserve selected order")
-  testing::assert(parts.others.at(1) == 2, "partition should preserve other order")
+  try testing::assert(
+    parts.selected.at(0).expect("bounds") == 3,
+    "partition should preserve selected order",
+  )
+  testing::assert(parts.others.at(1).expect("bounds") == 2, "partition should preserve other order")
 }

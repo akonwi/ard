@@ -10,6 +10,7 @@ import (
 
 var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
+	cmpopts.IgnoreFields(EnumDefinition{}, "NameLocation"),
 	cmp.AllowUnexported(MutableType{}),
 	cmpopts.IgnoreUnexported(
 		Identifier{},
@@ -24,8 +25,6 @@ var compareOptions = cmp.Options{
 		GenericType{},
 		ResultType{},
 		Try{},
-		ExternalFunction{},
-		ExternTypeDeclaration{},
 	),
 	cmp.FilterPath(func(p cmp.Path) bool {
 		return p.Last().String() == ".BaseNode" || p.Last().String() == ".Location"
@@ -108,7 +107,6 @@ func runTests(t *testing.T, tests []test) {
 		})
 	}
 }
-
 func TestEmptyProgram(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -120,26 +118,24 @@ func TestEmptyProgram(t *testing.T) {
 		},
 	})
 }
-
 func TestImportStatements(t *testing.T) {
 	runTests(t, []test{
 		{
 			name: "importing modules",
 			input: strings.Join([]string{
 				`// comment`,
-				`use ard/fs`,
+				`use ard/io`,
 				`use github.com/google/go-cmp/cmp`,
 				`use github.com/tree-sitter/go-tree-sitter as ts`,
-				`use go:git.sr.ht/~rockorager/vaxis as vaxis`,
 				`// comment`,
-				`use go:math`,
 				`use github.com/tree-sitter/tree-sitter`,
+				`use go:fmt`,
 			}, "\n"),
 			output: Program{
 				Imports: []Import{
 					{
-						Path: "ard/fs",
-						Name: "fs",
+						Path: "ard/io",
+						Name: "io",
 					},
 					{
 						Path: "github.com/google/go-cmp/cmp",
@@ -150,25 +146,19 @@ func TestImportStatements(t *testing.T) {
 						Name: "ts",
 					},
 					{
-						Path: "git.sr.ht/~rockorager/vaxis",
-						Name: "vaxis",
-						Kind: ImportKindGo,
-					},
-					{
-						Path: "math",
-						Name: "math",
-						Kind: ImportKindGo,
-					},
-					{
 						Path: "github.com/tree-sitter/tree-sitter",
 						Name: "tree_sitter",
+					},
+					{
+						Path: "fmt",
+						Name: "fmt",
+						Kind: ImportKindGo,
 					},
 				},
 			},
 		},
 	})
 }
-
 func TestIdentifiers(t *testing.T) {
 	tests := []test{
 		{
@@ -187,7 +177,6 @@ func TestIdentifiers(t *testing.T) {
 
 	runTests(t, tests)
 }
-
 func TestWhileLoop(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -220,7 +209,6 @@ func TestWhileLoop(t *testing.T) {
 		},
 	})
 }
-
 func TestIfAndElse(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -342,7 +330,6 @@ func TestIfAndElse(t *testing.T) {
 		},
 	})
 }
-
 func TestForInLoops(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -443,7 +430,6 @@ func TestForInLoops(t *testing.T) {
 		},
 	})
 }
-
 func TestForLoops(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -479,7 +465,6 @@ func TestForLoops(t *testing.T) {
 		},
 	})
 }
-
 func TestTypeUnion(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -541,7 +526,6 @@ func TestTypeUnion(t *testing.T) {
 		},
 	})
 }
-
 func TestStaticPaths(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -569,7 +553,6 @@ func TestStaticPaths(t *testing.T) {
 		},
 	})
 }
-
 func TestMissingTryKeywordWithCatchBlock(t *testing.T) {
 	runTests(t, []test{
 		{

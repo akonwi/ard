@@ -3,7 +3,6 @@ package air
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -53,7 +52,47 @@ func TestLowerTinyProgram(t *testing.T) {
 		t.Fatalf("script call arg count = %d, want 2", got)
 	}
 }
+func TestLowerNestedBlockShadowDoesNotLeakInnerLocal(t *testing.T) {
+	program := lowerSource(t, `
+		fn f(n: Int) Int {
+			let x = n
+			let r = match n > 0 {
+				true => {
+					let x = n * 2
+					x
+				},
+				false => 0,
+			}
+			x + r
+		}
 
+		f(5)
+	`)
+	f := findFunction(t, program, "f")
+	// The outer x is the first local named "x"; an inner x is declared inside the
+	// match arm. The body result `x + r` must reference the OUTER x, proving the
+	// inner binding did not leak out of its block scope.
+	var outerX LocalID = -1
+	for _, loc := range f.Locals {
+		if loc.Name == "x" {
+			outerX = loc.ID
+			break
+		}
+	}
+	if outerX < 0 {
+		t.Fatalf("no local named x in %#v", f.Locals)
+	}
+	res := f.Body.Result
+	if res == nil || res.Kind != ExprIntAdd {
+		t.Fatalf("f result = %#v, want ExprIntAdd", res)
+	}
+	if res.Left == nil || res.Left.Kind != ExprLoadLocal {
+		t.Fatalf("f result left = %#v, want ExprLoadLocal", res.Left)
+	}
+	if res.Left.Local != outerX {
+		t.Fatalf("f result references local %d, want outer x local %d (inner binding leaked)", res.Left.Local, outerX)
+	}
+}
 func TestLowerTransitiveStructMethodCanReadOwnerModuleGlobal(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.1.0\""), 0o644); err != nil {
@@ -92,7 +131,6 @@ func TestLowerTransitiveStructMethodCanReadOwnerModuleGlobal(t *testing.T) {
 		t.Fatalf("greet result = %#v, want ExprLoadGlobal", greet.Body.Result)
 	}
 }
-
 func TestLowerFunctionCanReadModuleLevelLet(t *testing.T) {
 	program := lowerSource(t, `
 		let refresh_event = "inbox.refresh"
@@ -114,6 +152,37 @@ func TestLowerFunctionCanReadModuleLevelLet(t *testing.T) {
 	}
 	if eventName.Body.Result.Global != program.Globals[0].ID {
 		t.Fatalf("event_name loads global %d, want %d", eventName.Body.Result.Global, program.Globals[0].ID)
+	}
+}
+func TestLowerMutableModuleGlobalAssignment(t *testing.T) {
+	program := lowerSource(t, `
+		mut counter = 0
+
+		fn bump() {
+			counter = counter + 1
+		}
+	`)
+
+	if len(program.Globals) != 1 {
+		t.Fatalf("global count = %d, want 1", len(program.Globals))
+	}
+	global := program.Globals[0]
+	if global.Name != "counter" || !global.Mutable || !global.Private {
+		t.Fatalf("global = %#v, want mutable private counter", global)
+	}
+	bump := findFunction(t, program, "bump")
+	if len(bump.Body.Stmts) != 1 {
+		t.Fatalf("bump stmt count = %d, want 1", len(bump.Body.Stmts))
+	}
+	assign := bump.Body.Stmts[0]
+	if assign.Kind != StmtAssignGlobal {
+		t.Fatalf("bump stmt kind = %d, want StmtAssignGlobal", assign.Kind)
+	}
+	if assign.Global != global.ID {
+		t.Fatalf("assignment targets global %d, want %d", assign.Global, global.ID)
+	}
+	if assign.Value == nil || assign.Value.Kind != ExprIntAdd {
+		t.Fatalf("assignment value = %#v, want ExprIntAdd", assign.Value)
 	}
 }
 
@@ -152,7 +221,6 @@ func TestLowerOmitsTestsByDefault(t *testing.T) {
 		t.Fatalf("withTests tests = %#v, want check", withTests.Tests)
 	}
 }
-
 func TestLowerModulesWithTestsIncludesEachRootModuleTest(t *testing.T) {
 	left := checkedModuleWithPath(t, "demo/left", `
 		test fn same() Void!Str { Result::ok(()) }
@@ -178,7 +246,6 @@ func TestLowerModulesWithTestsIncludesEachRootModuleTest(t *testing.T) {
 		}
 	}
 }
-
 func TestLowerMainEntrypoint(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
@@ -197,7 +264,6 @@ func TestLowerMainEntrypoint(t *testing.T) {
 		t.Fatalf("entry name = %q, want main", entry.Name)
 	}
 }
-
 func TestLowerStructLayoutAndFieldAccess(t *testing.T) {
 	program := lowerSource(t, `
 		struct User {
@@ -233,53 +299,6 @@ func TestLowerStructLayoutAndFieldAccess(t *testing.T) {
 		t.Fatalf("field index = %d, want age index 0", field.Field)
 	}
 }
-
-func TestLowerKeepsDistinctStructTypesWithSameName(t *testing.T) {
-	program := lowerSource(t, `
-		use ard/http
-
-		struct Request {
-			isNotification: Bool,
-		}
-
-		fn local_flag(req: Request) Bool {
-			req.isNotification
-		}
-
-		fn http_body(req: http::Request) Dynamic? {
-			req.body
-		}
-	`)
-
-	requestStructs := []TypeInfo{}
-	for _, typ := range program.Types {
-		if typ.Kind == TypeStruct && typ.Name == "Request" {
-			requestStructs = append(requestStructs, typ)
-		}
-	}
-	if len(requestStructs) != 2 {
-		t.Fatalf("Request struct count = %d, want 2", len(requestStructs))
-	}
-
-	hasNotificationRequest := false
-	hasBodyRequest := false
-	for _, typ := range requestStructs {
-		fieldNames := map[string]bool{}
-		for _, field := range typ.Fields {
-			fieldNames[field.Name] = true
-		}
-		if fieldNames["isNotification"] {
-			hasNotificationRequest = true
-		}
-		if fieldNames["body"] {
-			hasBodyRequest = true
-		}
-	}
-	if !hasNotificationRequest || !hasBodyRequest {
-		t.Fatalf("distinct Request field sets not preserved: notification=%v body=%v", hasNotificationRequest, hasBodyRequest)
-	}
-}
-
 func TestLowerIfExpression(t *testing.T) {
 	program := lowerSource(t, `
 		fn choose(flag: Bool) Int {
@@ -298,14 +317,13 @@ func TestLowerIfExpression(t *testing.T) {
 	if choose.Body.Result.Condition == nil || choose.Body.Result.Condition.Kind != ExprLoadLocal {
 		t.Fatalf("condition = %#v, want local load", choose.Body.Result.Condition)
 	}
-	if choose.Body.Result.Then.Result == nil || choose.Body.Result.Then.Result.Int != 1 {
+	if choose.Body.Result.Then.Result == nil || choose.Body.Result.Then.Result.Int != "1" {
 		t.Fatalf("then block = %#v, want 1", choose.Body.Result.Then.Result)
 	}
-	if choose.Body.Result.Else.Result == nil || choose.Body.Result.Else.Result.Int != 2 {
+	if choose.Body.Result.Else.Result == nil || choose.Body.Result.Else.Result.Int != "2" {
 		t.Fatalf("else block = %#v, want 2", choose.Body.Result.Else.Result)
 	}
 }
-
 func TestLowerBoolMatch(t *testing.T) {
 	program := lowerSource(t, `
 		fn choose(flag: Bool) Int {
@@ -323,14 +341,13 @@ func TestLowerBoolMatch(t *testing.T) {
 	if choose.Body.Result.Condition == nil || choose.Body.Result.Condition.Kind != ExprLoadLocal {
 		t.Fatalf("condition = %#v, want local load", choose.Body.Result.Condition)
 	}
-	if choose.Body.Result.Then.Result == nil || choose.Body.Result.Then.Result.Int != 1 {
+	if choose.Body.Result.Then.Result == nil || choose.Body.Result.Then.Result.Int != "1" {
 		t.Fatalf("then block = %#v, want 1", choose.Body.Result.Then.Result)
 	}
-	if choose.Body.Result.Else.Result == nil || choose.Body.Result.Else.Result.Int != 2 {
+	if choose.Body.Result.Else.Result == nil || choose.Body.Result.Else.Result.Int != "2" {
 		t.Fatalf("else block = %#v, want 2", choose.Body.Result.Else.Result)
 	}
 }
-
 func TestLowerTemplateString(t *testing.T) {
 	program := lowerSource(t, `
 		let name = "Ada"
@@ -346,7 +363,6 @@ func TestLowerTemplateString(t *testing.T) {
 		t.Fatalf("script result = %#v, want ExprToStr inside concat tree", script.Body.Result)
 	}
 }
-
 func TestLowerWhileLoop(t *testing.T) {
 	program := lowerSource(t, `
 		mut count = 0
@@ -356,22 +372,25 @@ func TestLowerWhileLoop(t *testing.T) {
 		count
 	`)
 
+	// Module-level `mut count` is an AIR global, so the script holds only the loop.
 	script := program.Functions[program.Script]
-	if len(script.Body.Stmts) != 2 {
-		t.Fatalf("script stmt count = %d, want let and while", len(script.Body.Stmts))
+	if len(script.Body.Stmts) != 1 {
+		t.Fatalf("script stmt count = %d, want while only", len(script.Body.Stmts))
 	}
-	loop := script.Body.Stmts[1]
+	if len(program.Globals) != 1 || program.Globals[0].Name != "count" {
+		t.Fatalf("globals = %#v, want mut count", program.Globals)
+	}
+	loop := script.Body.Stmts[0]
 	if loop.Kind != StmtWhile {
-		t.Fatalf("second stmt = %#v, want StmtWhile", loop)
+		t.Fatalf("first stmt = %#v, want StmtWhile", loop)
 	}
 	if loop.Condition == nil || loop.Condition.Kind != ExprLt {
 		t.Fatalf("while condition = %#v, want ExprLt", loop.Condition)
 	}
-	if len(loop.Body.Stmts) != 1 || loop.Body.Stmts[0].Kind != StmtAssign {
-		t.Fatalf("while body = %#v, want assignment", loop.Body)
+	if len(loop.Body.Stmts) != 1 || loop.Body.Stmts[0].Kind != StmtAssignGlobal {
+		t.Fatalf("while body = %#v, want global assignment", loop.Body)
 	}
 }
-
 func TestLowerEnums(t *testing.T) {
 	program := lowerSource(t, `
 		enum Direction {
@@ -419,38 +438,6 @@ func TestLowerEnums(t *testing.T) {
 		t.Fatalf("right case = %#v, want discriminant 3", name.Body.Result.EnumCases[3])
 	}
 }
-
-func TestLowerResultConstructors(t *testing.T) {
-	program := lowerSource(t, `
-		fn pass() Void!Str {
-			Result::ok(())
-		}
-
-		fn fail() Void!Str {
-			Result::err("boom")
-		}
-	`)
-
-	pass := findFunction(t, program, "pass")
-	if pass.Body.Result == nil || pass.Body.Result.Kind != ExprMakeResultOk {
-		t.Fatalf("pass result = %#v, want ExprMakeResultOk", pass.Body.Result)
-	}
-	if pass.Body.Result.Target == nil || pass.Body.Result.Target.Kind != ExprConstVoid {
-		t.Fatalf("pass value = %#v, want void", pass.Body.Result.Target)
-	}
-
-	fail := findFunction(t, program, "fail")
-	if fail.Body.Result == nil || fail.Body.Result.Kind != ExprMakeResultErr {
-		t.Fatalf("fail result = %#v, want ExprMakeResultErr", fail.Body.Result)
-	}
-	if fail.Body.Result.Target == nil || fail.Body.Result.Target.Str != "boom" {
-		t.Fatalf("fail value = %#v, want boom", fail.Body.Result.Target)
-	}
-	if len(program.Externs) != 0 {
-		t.Fatalf("extern count = %d, want result constructors as AIR built-ins", len(program.Externs))
-	}
-}
-
 func TestLowerMaybes(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
@@ -479,7 +466,7 @@ func TestLowerMaybes(t *testing.T) {
 	if some.Body.Result == nil || some.Body.Result.Kind != ExprMakeMaybeSome {
 		t.Fatalf("some result = %#v, want ExprMakeMaybeSome", some.Body.Result)
 	}
-	if some.Body.Result.Target == nil || some.Body.Result.Target.Int != 42 {
+	if some.Body.Result.Target == nil || some.Body.Result.Target.Int != "42" {
 		t.Fatalf("some target = %#v, want 42", some.Body.Result.Target)
 	}
 
@@ -501,7 +488,6 @@ func TestLowerMaybes(t *testing.T) {
 		t.Fatalf("some local = %d, want local after params", pick.Body.Result.SomeLocal)
 	}
 }
-
 func TestLowerResults(t *testing.T) {
 	program := lowerSource(t, `
 		fn value(result: Int!Str) Int {
@@ -532,7 +518,6 @@ func TestLowerResults(t *testing.T) {
 		t.Fatalf("err local = %d, want local after params", pick.Body.Result.ErrLocal)
 	}
 }
-
 func TestLowerTraitAndImplTables(t *testing.T) {
 	program := lowerSource(t, `
 		trait Speaks {
@@ -604,7 +589,6 @@ func TestLowerTraitAndImplTables(t *testing.T) {
 		t.Fatalf("method left = %#v, want field access", method.Body.Result.Left)
 	}
 }
-
 func TestLowerTraitObjectDispatch(t *testing.T) {
 	program := lowerSource(t, `
 		trait Speaks {
@@ -647,15 +631,14 @@ func TestLowerTraitObjectDispatch(t *testing.T) {
 		t.Fatalf("upcast impl = %d, want %d", script.Body.Result.Args[0].Impl, program.Impls[0].ID)
 	}
 }
-
 func TestLowerContextualMaybeTypesInNestedExpressions(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
 
-		fn pick(choices: [Dynamic]) Dynamic? {
+		fn pick(choices: [Any]) Any? {
 			let first_choice = match choices.size() {
 				0 => maybe::none(),
-				_ => maybe::some(choices.at(0)),
+				_ => maybe::some(choices.at(0).expect("bounds")),
 			}
 			let choice = try first_choice -> _ { maybe::none() }
 			maybe::some(choice)
@@ -663,26 +646,25 @@ func TestLowerContextualMaybeTypesInNestedExpressions(t *testing.T) {
 	`)
 
 	pick := findFunction(t, program, "pick")
-	if got := testTypeInfo(t, program, pick.Locals[1].Type).Name; got != "Dynamic?" {
-		t.Fatalf("first_choice type = %q, want Dynamic?", got)
+	if got := testTypeInfo(t, program, pick.Locals[1].Type).Name; got != "Any?" {
+		t.Fatalf("first_choice type = %q, want Any?", got)
 	}
-	if got := testTypeInfo(t, program, pick.Locals[2].Type).Name; got != "Dynamic" {
-		t.Fatalf("choice type = %q, want Dynamic", got)
+	if got := testTypeInfo(t, program, pick.Locals[2].Type).Name; got != "Any" {
+		t.Fatalf("choice type = %q, want Any", got)
 	}
-	if got := testTypeInfo(t, program, pick.Body.Stmts[0].Value.Type).Name; got != "Dynamic?" {
-		t.Fatalf("first_choice expr type = %q, want Dynamic?", got)
+	if got := testTypeInfo(t, program, pick.Body.Stmts[0].Value.Type).Name; got != "Any?" {
+		t.Fatalf("first_choice expr type = %q, want Any?", got)
 	}
-	if got := testTypeInfo(t, program, pick.Body.Stmts[1].Value.Type).Name; got != "Dynamic" {
-		t.Fatalf("choice expr type = %q, want Dynamic", got)
+	if got := testTypeInfo(t, program, pick.Body.Stmts[1].Value.Type).Name; got != "Any" {
+		t.Fatalf("choice expr type = %q, want Any", got)
 	}
 	if pick.Body.Result == nil || pick.Body.Result.Target == nil {
 		t.Fatalf("result tree missing maybe::some target: %#v", pick.Body.Result)
 	}
-	if got := testTypeInfo(t, program, pick.Body.Result.Target.Type).Name; got != "Dynamic" {
-		t.Fatalf("result some target type = %q, want Dynamic", got)
+	if got := testTypeInfo(t, program, pick.Body.Result.Target.Type).Name; got != "Any" {
+		t.Fatalf("result some target type = %q, want Any", got)
 	}
 }
-
 func TestLowerContextualResultTypesInNestedExpressions(t *testing.T) {
 	program := lowerSource(t, `
 		fn pick(flag: Bool) Int!Str {
@@ -708,7 +690,6 @@ func TestLowerContextualResultTypesInNestedExpressions(t *testing.T) {
 		t.Fatalf("result type = %q, want Int!Str", got)
 	}
 }
-
 func TestLowerTryOps(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/maybe
@@ -758,7 +739,6 @@ func TestLowerTryOps(t *testing.T) {
 		t.Fatalf("maybe try = %#v, want ExprTryMaybe", maybeLet.Value)
 	}
 }
-
 func TestLowerImportedModuleFunctionCall(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/testing
@@ -783,7 +763,6 @@ func TestLowerImportedModuleFunctionCall(t *testing.T) {
 		}
 	}
 }
-
 func TestLowerKeepsSameNamedStructsFromDifferentModulesDistinct(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -861,7 +840,6 @@ fn main() Str {
 		t.Fatalf("Store module paths = %#v, want inbox and issues", paths)
 	}
 }
-
 func TestLowerImportedModuleFunctionCanReadModuleLevelLet(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -907,31 +885,31 @@ fn main() Str {
 		t.Fatalf("event_name result = %#v, want ExprLoadGlobal", featureFn.Body.Result)
 	}
 }
-
 func TestLowerImportedGenericModuleFunctionSpecialization(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/async
+		use ard/list
 
-		let a = async::eval(fn() Int { 1 })
-		let b = async::eval(fn() Int { 2 })
-		async::join([a, b])
+		let kept = list::keep([1, 2, 3], fn(x: Int) Bool { x > 1 })
 	`)
 
-	join := findFunction(t, program, "join")
-	if len(join.Signature.Params) != 1 {
-		t.Fatalf("join param count = %d, want 1", len(join.Signature.Params))
+	keep := findFunction(t, program, "keep")
+	if len(keep.Signature.Params) != 2 {
+		t.Fatalf("keep param count = %d, want 2", len(keep.Signature.Params))
 	}
-	paramType := testTypeInfo(t, program, join.Signature.Params[0].Type)
+	// keep is lowered once as a generic definition, so its parameter is a list
+	// of the type parameter rather than a monomorphized element type.
+	paramType := testTypeInfo(t, program, keep.Signature.Params[0].Type)
 	if paramType.Kind != TypeList {
-		t.Fatalf("join param kind = %v, want TypeList", paramType.Kind)
+		t.Fatalf("keep param kind = %v, want TypeList", paramType.Kind)
 	}
-	elemType := testTypeInfo(t, program, paramType.Elem)
-	if elemType.Kind != TypeFiber || typeKind(t, program, elemType.Elem) != TypeInt {
-		t.Fatalf("join param elem = %#v, want Fiber<Int>", elemType)
+	if typeKind(t, program, paramType.Elem) != TypeParam {
+		t.Fatalf("keep param elem = %v, want TypeParam", typeKind(t, program, paramType.Elem))
 	}
 }
-
-func TestLowerImportedGenericStdlibFunctionBodyUsesConcreteBindings(t *testing.T) {
+func TestLowerImportedGenericStdlibFunctionLowersAsGoGeneric(t *testing.T) {
+	// A generic stdlib function is lowered once as a generic definition (ADR
+	// 0031, Phase 2): its signature and body reference type parameters rather
+	// than concrete monomorphized types.
 	program := lowerSource(t, `
 		use ard/list
 
@@ -944,18 +922,22 @@ func TestLowerImportedGenericStdlibFunctionBodyUsesConcreteBindings(t *testing.T
 	if len(keep.Signature.Params) != 2 {
 		t.Fatalf("keep param count = %d, want 2", len(keep.Signature.Params))
 	}
-	returnType := testTypeInfo(t, program, keep.Signature.Return)
-	if returnType.Kind != TypeList || typeKind(t, program, returnType.Elem) != TypeInt {
-		t.Fatalf("keep return = %#v, want [Int]", returnType)
+	if len(keep.TypeParams) == 0 {
+		t.Fatalf("keep should be a generic definition with type parameters")
 	}
+	returnType := testTypeInfo(t, program, keep.Signature.Return)
+	if returnType.Kind != TypeList || typeKind(t, program, returnType.Elem) != TypeParam {
+		t.Fatalf("keep return = %#v, want [TypeParam]", returnType)
+	}
+	// The body must reference type parameters, never lower unresolved type
+	// variables to Void.
 	for _, local := range keep.Locals {
 		info := testTypeInfo(t, program, local.Type)
 		if info.Kind == TypeList && typeKind(t, program, info.Elem) == TypeVoid {
-			t.Fatalf("keep local %s has [Void], want concrete generic binding", local.Name)
+			t.Fatalf("keep local %s has [Void], want type parameter", local.Name)
 		}
 	}
 }
-
 func TestLowerGenericStructMethodBodyUsesReceiverBindings(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box {
@@ -974,13 +956,17 @@ func TestLowerGenericStructMethodBodyUsesReceiverBindings(t *testing.T) {
 		}
 	`)
 
-	get := findFunction(t, program, "Box<Int>.get")
-	if typeKind(t, program, get.Signature.Return) != TypeInt {
-		t.Fatalf("get return kind = %v, want TypeInt", typeKind(t, program, get.Signature.Return))
+	// The method is lowered once as a generic definition whose return type is
+	// the struct's type parameter (ADR 0031, Phase 3).
+	get := findFunction(t, program, "Box.get")
+	if len(get.TypeParams) == 0 {
+		t.Fatalf("Box.get should be a generic method definition")
+	}
+	if typeKind(t, program, get.Signature.Return) != TypeParam {
+		t.Fatalf("get return kind = %v, want TypeParam", typeKind(t, program, get.Signature.Return))
 	}
 }
-
-func TestLowerGenericStructMethodSpecializationsDoNotCollapse(t *testing.T) {
+func TestLowerGenericStructMethodLowersOnceAsGeneric(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box {
 			item: $T
@@ -1009,57 +995,22 @@ func TestLowerGenericStructMethodSpecializationsDoNotCollapse(t *testing.T) {
 	if strGet.Body.Result == nil || strGet.Body.Result.Kind != ExprCall {
 		t.Fatalf("get_str result = %#v, want method call", strGet.Body.Result)
 	}
-	if intGet.Body.Result.Function == strGet.Body.Result.Function {
-		t.Fatalf("generic method specializations collapsed to function %d", intGet.Body.Result.Function)
+	// Both calls resolve to the single generic method definition (no
+	// monomorphized specializations), each supplying its own type argument.
+	if intGet.Body.Result.Function != strGet.Body.Result.Function {
+		t.Fatalf("generic method should lower once, got functions %d and %d", intGet.Body.Result.Function, strGet.Body.Result.Function)
 	}
-	if typeKind(t, program, program.Functions[intGet.Body.Result.Function].Signature.Return) != TypeInt {
-		t.Fatalf("get_int method return kind = %v, want Int", typeKind(t, program, program.Functions[intGet.Body.Result.Function].Signature.Return))
+	method := program.Functions[intGet.Body.Result.Function]
+	if len(method.TypeParams) == 0 || typeKind(t, program, method.Signature.Return) != TypeParam {
+		t.Fatalf("method should be generic with a TypeParam return, got %#v", method.Signature)
 	}
-	if typeKind(t, program, program.Functions[strGet.Body.Result.Function].Signature.Return) != TypeStr {
-		t.Fatalf("get_str method return kind = %v, want Str", typeKind(t, program, program.Functions[strGet.Body.Result.Function].Signature.Return))
+	if len(intGet.Body.Result.TypeArgs) != 1 || typeKind(t, program, intGet.Body.Result.TypeArgs[0]) != TypeInt {
+		t.Fatalf("get_int call type args = %v, want [Int]", intGet.Body.Result.TypeArgs)
 	}
-}
-
-func TestLowerGenericStructMethodOwnGenericSpecializationsDoNotCollapse(t *testing.T) {
-	program := lowerSource(t, `
-		struct Box {
-			item: Int
-		}
-
-		impl Box {
-			fn echo(value: $U) $U {
-				value
-			}
-		}
-
-		fn echo_int(box: Box) Int {
-			box.echo(1)
-		}
-
-		fn echo_str(box: Box) Str {
-			box.echo("x")
-		}
-	`)
-
-	intEcho := findFunction(t, program, "echo_int")
-	strEcho := findFunction(t, program, "echo_str")
-	if intEcho.Body.Result == nil || intEcho.Body.Result.Kind != ExprCall {
-		t.Fatalf("echo_int result = %#v, want method call", intEcho.Body.Result)
-	}
-	if strEcho.Body.Result == nil || strEcho.Body.Result.Kind != ExprCall {
-		t.Fatalf("echo_str result = %#v, want method call", strEcho.Body.Result)
-	}
-	if intEcho.Body.Result.Function == strEcho.Body.Result.Function {
-		t.Fatalf("method-local generic specializations collapsed to function %d", intEcho.Body.Result.Function)
-	}
-	if typeKind(t, program, program.Functions[intEcho.Body.Result.Function].Signature.Return) != TypeInt {
-		t.Fatalf("echo_int method return kind = %v, want Int", typeKind(t, program, program.Functions[intEcho.Body.Result.Function].Signature.Return))
-	}
-	if typeKind(t, program, program.Functions[strEcho.Body.Result.Function].Signature.Return) != TypeStr {
-		t.Fatalf("echo_str method return kind = %v, want Str", typeKind(t, program, program.Functions[strEcho.Body.Result.Function].Signature.Return))
+	if len(strGet.Body.Result.TypeArgs) != 1 || typeKind(t, program, strGet.Body.Result.TypeArgs[0]) != TypeStr {
+		t.Fatalf("get_str call type args = %v, want [Str]", strGet.Body.Result.TypeArgs)
 	}
 }
-
 func TestLowerInstanceMethodKeepsDeclaredTraitParameterType(t *testing.T) {
 	program := lowerSource(t, `
 		trait View {
@@ -1098,7 +1049,6 @@ func TestLowerInstanceMethodKeepsDeclaredTraitParameterType(t *testing.T) {
 		t.Fatalf("add_child child param kind = %v, want trait object", kind)
 	}
 }
-
 func TestLowerSameShapeStructsWithDifferentMethodsStayDistinct(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -1189,7 +1139,6 @@ func TestLowerSameShapeStructsWithDifferentMethodsStayDistinct(t *testing.T) {
 		t.Fatalf("same-shape imported struct params collapsed to type %d", readFirst.Signature.Params[0].Type)
 	}
 }
-
 func TestLowerTestsManifest(t *testing.T) {
 	program := lowerSourceWithTests(t, `
 		use ard/testing
@@ -1206,7 +1155,6 @@ func TestLowerTestsManifest(t *testing.T) {
 		t.Fatalf("test name = %q, want adds", program.Tests[0].Name)
 	}
 }
-
 func TestValidateRejectsBadTypeReference(t *testing.T) {
 	program := &Program{
 		Types:  []TypeInfo{{ID: 1, Kind: TypeList, Name: "[Missing]", Elem: 99}},
@@ -1342,89 +1290,23 @@ func testTypeInfo(t *testing.T, program *Program, id TypeID) TypeInfo {
 	t.Fatalf("type id %d not found", id)
 	return TypeInfo{}
 }
-
-func TestLowerRejectsUnboundReturnOnlyGenericWrapper(t *testing.T) {
-	result := parse.Parse([]byte(`
-		extern fn raw<$T>(key: Str) $T? = "Raw"
-
-		fn has<$T>(key: Str) Bool {
-			raw<$T>(key).is_some()
-		}
-
-		fn main() {
-			let a = has("int")
-		}
-	`), "test.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse error: %s", result.Errors[0].Message)
-	}
-	c := checker.New("test.ard", result.Program, nil)
-	c.Check()
-	if c.HasErrors() {
-		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
-	}
-	_, err := Lower(c.Module())
-	if err == nil {
-		t.Fatal("Lower succeeded; expected unbound return-only generic wrapper error")
-	}
-	if !strings.Contains(err.Error(), "cannot declare unspecialized generic function has") {
-		t.Fatalf("Lower error = %v, want unspecialized has", err)
-	}
-}
-
 func TestLowerImportedGenericStructReturnTypeWithTypeArg(t *testing.T) {
 	lowerSource(t, `
-use ard/async/channel
-extern type RawEvent = "RawEvent"
-extern fn events() channel::Channel<RawEvent> = "Events"
+use ard/list
 fn run() {
-  let ch = events()
+  let p = list::partition([1, 2, 3], fn(x: Int) Bool { x > 1 })
 }
 fn main() { run() }
 `)
 }
-func TestLowerInstanceMethodForwardedGenericTypeArg(t *testing.T) {
-	_ = lowerSource(t, `
-		struct Box {
-			item: $T
-		}
 
-		impl Box {
-			fn pick<$U>(value: $U) $T {
-				self.item
-			}
-		}
-
-		fn use_pick<$V>(box: Box<Int>, value: $V) Int {
-			box.pick<$V>(value)
-		}
-
-		fn main() Int {
-			let box = Box{item: 1}
-			use_pick<Str>(box, "x")
-		}
-	`)
-}
-func TestLowerForwardedGenericUsedOnlyInCalleeBody(t *testing.T) {
-	_ = lowerSource(t, `
-		extern fn raw<$T>(key: Str) $T? = "Raw"
-
-		fn has<$T>() Bool {
-			raw<$T>("x").is_some()
-		}
-
-		fn outer<$U>() Bool {
-			has<$U>()
-		}
-
-		fn main() Bool {
-			outer<Int>()
-		}
-	`)
-}
 func TestLowerReceiverGenericUsedOnlyInMethodBody(t *testing.T) {
-	program := lowerSource(t, `
-		extern fn raw<$T>(key: Str) $T? = "Raw"
+	// A generic function called inside a generic method body forwards the
+	// struct's type parameter abstractly; this must lower without trying to
+	// monomorphize at an unbound type parameter.
+	_ = lowerSource(t, `
+		use ard/maybe
+		fn raw(key: Str) $T? { maybe::none() }
 
 		struct Box {
 			item: $T
@@ -1441,16 +1323,8 @@ func TestLowerReceiverGenericUsedOnlyInMethodBody(t *testing.T) {
 			box.has_raw()
 		}
 	`)
-	for _, ext := range program.Externs {
-		if ext.Name == "raw" && len(ext.TypeArgs) == 1 {
-			if got := typeKind(t, program, ext.TypeArgs[0]); got != TypeInt {
-				t.Fatalf("raw type arg kind = %v, want Int", got)
-			}
-			return
-		}
-	}
-	t.Fatalf("raw extern specialization with explicit type arg not found: %#v", program.Externs)
 }
+
 func TestLowerGenericFunctionAdapterClosureCapturesSpecializedCallback(t *testing.T) {
 	_ = lowerSource(t, `
 		struct StateHandle { id: Int }
@@ -1462,9 +1336,14 @@ func TestLowerGenericFunctionAdapterClosureCapturesSpecializedCallback(t *testin
 			handle: StateHandle,
 		}
 
-		extern fn stateful_raw_init_key<$T>(key: Str, init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget = "StatefulRawInitKey"
+		fn stateful_raw_init_key(key: Str, init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget {
+			let handle = StateHandle{id: 0}
+			let ctx = BuildContextHandle{id: 0}
+			let _value = init(ctx, handle)
+			build(ctx, handle)
+		}
 
-		fn stateful<$T>(key: Str, init: fn(BuildContext) $T, build: fn(BuildContext, State<$T>) Widget) Widget {
+		fn stateful(key: Str, init: fn(BuildContext) $T, build: fn(BuildContext, State<$T>) Widget) Widget {
 			stateful_raw_init_key(
 				key: key,
 				init: fn(_build_ctx: BuildContextHandle, _state_handle: StateHandle) $T {

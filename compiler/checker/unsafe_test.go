@@ -3,185 +3,13 @@ package checker_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	checker "github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/parse"
 	"github.com/google/go-cmp/cmp"
 )
-
-func TestUnsafeBlocks(t *testing.T) {
-	run(t, []test{
-		{
-			name: "unsafe block types as result",
-			input: `fn safe() Int!Str {
-  unsafe {
-    42
-  }
-}`,
-		},
-		{
-			name: "unsafe block rejects break",
-			input: `fn bad() Int!Str {
-  unsafe {
-    break
-    1
-  }
-}`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "break is not allowed inside unsafe blocks"},
-			},
-		},
-		{
-			name: "unsafe block allows break in nested closures",
-			input: `fn ok() Void!Str {
-  unsafe {
-    let stop = fn() {
-      while true {
-        break
-      }
-    }
-    ()
-  }
-}`,
-		},
-		{
-			name: "unsafe block rejects incompatible try catch ok result",
-			input: `fn inner() Int!Str {
-  Result::err("inner")
-}
-
-fn bad() Str!Str {
-  unsafe {
-    let value = try inner() -> err { Result::ok(5) }
-    value.to_str()
-  }
-}`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Str!Str, got Int!$Err"},
-			},
-		},
-		{
-			name: "unsafe block preserves local Result ok alias in try catch",
-			input: `fn inner() Int!Str {
-  Result::err("inner")
-}
-
-fn good() Int!Str {
-  unsafe {
-    let value = try inner() -> _ {
-      let r = Result::ok(5)
-      r
-    }
-    value
-  }
-}`,
-		},
-		{
-			name: "unsafe block allows direct Go extern aliases in try catch ok result",
-			input: `use go:time
-
-extern type Time1 = "go:time::Time"
-extern type Time2 = "go:time as t::Time"
-extern fn now1() Time1 = time::Now
-extern fn now2() Time2 = time::Now
-
-fn inner() Int!Str {
-  Result::err("inner")
-}
-
-fn good() Time1!Str {
-  unsafe {
-    let value = try inner() -> err { Result::ok(now2()) }
-    now1()
-  }
-}`,
-		},
-		{
-			name: "unsafe block rejects generic incompatible try catch ok result",
-			input: `fn inner() Int!Str {
-  Result::err("inner")
-}
-
-fn bad<$T>(x: $T) Str!Str {
-  unsafe {
-    let value = try inner() -> err { Result::ok(x) }
-    value.to_str()
-  }
-}`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Str!Str, got $T!$Err"},
-			},
-		},
-		{
-			name: "unsafe block rejects generic incompatible try catch err result",
-			input: `fn inner() Int!Str {
-  Result::err("inner")
-}
-
-fn bad<$E>(e: $E) Str!Str {
-  unsafe {
-    let value = try inner() -> err { Result::err(e) }
-    value.to_str()
-  }
-}`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Str!Str, got $Val!$E"},
-			},
-		},
-		{
-			name: "unsafe block rejects incompatible try catch err after non-final expression",
-			input: `fn inner() Int!Str {
-  Result::err("inner")
-}
-
-fn bad<$E>(e: $E) Str!Str {
-  unsafe {
-    let value = try inner() -> err {
-      Result::ok("ignored")
-      Result::err(e)
-    }
-    value.to_str()
-  }
-}`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Str!Str, got $Val!$E"},
-			},
-		},
-		{
-			name: "unsafe block rejects generic compound incompatible try catch ok result",
-			input: `fn inner() Int!Str {
-  Result::err("inner")
-}
-
-fn bad<$T>(x: $T) [$T]!Str {
-  unsafe {
-    let value = try inner() -> err { Result::ok([1]) }
-    [x]
-  }
-}`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected [$T]!Str, got [Int]!$Err"},
-			},
-		},
-		{
-			name: "unsafe block rejects nested incompatible try catch ok result",
-			input: `fn inner() Int!Str {
-  Result::err("inner")
-}
-
-fn bad() Str!Str {
-  unsafe {
-    let value = (try inner() -> err { Result::ok(5) }) + 1
-    value.to_str()
-  }
-}`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected Str!Str, got Int!$Err"},
-			},
-		},
-	})
-}
 
 func TestUnsafeCatchValidationDoesNotSpecialCaseUserResultModules(t *testing.T) {
 	tempDir := t.TempDir()
@@ -224,4 +52,174 @@ fn bad() Str!Str {
 	if diff := cmp.Diff(want, c.Diagnostics(), compareOptions); diff != "" {
 		t.Fatalf("Diagnostics mismatch (-want +got):\n%s", diff)
 	}
+}
+
+func TestUnsafeCastTypeChecksValueTarget(t *testing.T) {
+	module, diagnostics := checkUnsafeCastSource(t, `use ard/unsafe
+
+let value: Any = "hello"
+let text = unsafe::cast<Str>(value)`)
+	if len(diagnostics) > 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	got := module.Get("text").Type.String()
+	if got != "Str?" {
+		t.Fatalf("text type = %q, want Str?", got)
+	}
+}
+
+func TestUnsafeCastTypeChecksMutableTarget(t *testing.T) {
+	module, diagnostics := checkUnsafeCastSource(t, `use ard/unsafe
+
+let value: Any = "hello"
+let text = unsafe::cast<mut Str>(value)`)
+	if len(diagnostics) > 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	got := module.Get("text").Type.String()
+	if got != "(mut Str)?" {
+		t.Fatalf("text type = %q, want (mut Str)?", got)
+	}
+}
+
+func TestUnsafeCastWorksThroughImportAlias(t *testing.T) {
+	module, diagnostics := checkUnsafeCastSource(t, `use ard/unsafe as box
+
+let value: Any = "hello"
+let text = box::cast<Str>(value)`)
+	if len(diagnostics) > 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	got := module.Get("text").Type.String()
+	if got != "Str?" {
+		t.Fatalf("text type = %q, want Str?", got)
+	}
+}
+
+func TestUnsafeCastRequiresImport(t *testing.T) {
+	_, diagnostics := checkUnsafeCastSource(t, `let value: Any = "hello"
+let text = unsafe::cast<Str>(value)`)
+	assertUnsafeCastDiagnostic(t, diagnostics, "Undefined module: unsafe")
+}
+
+func TestUnsafeCastRejectsPreludeAnyAlias(t *testing.T) {
+	_, diagnostics := checkUnsafeCastSource(t, `let value: Any = "hello"
+let text = Any::cast<Str>(value)`)
+	assertUnsafeCastDiagnostic(t, diagnostics, "Undefined module: Any")
+}
+
+func TestUnsafeCastRejectsUnknownNamedArgument(t *testing.T) {
+	_, diagnostics := checkUnsafeCastSource(t, `use ard/unsafe
+
+let value: Any = "hello"
+let text = unsafe::cast<Str>(wrong: value)`)
+	assertUnsafeCastDiagnostic(t, diagnostics, "unknown argument: wrong")
+}
+
+func TestUnsafeCastAcceptsNamedValueArgument(t *testing.T) {
+	module, diagnostics := checkUnsafeCastSource(t, `use ard/unsafe
+
+let value: Any = "hello"
+let text = unsafe::cast<Str>(value: value)`)
+	if len(diagnostics) > 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	got := module.Get("text").Type.String()
+	if got != "Str?" {
+		t.Fatalf("text type = %q, want Str?", got)
+	}
+}
+
+func TestUnsafeCastRequiresExplicitTypeArgument(t *testing.T) {
+	_, diagnostics := checkUnsafeCastSource(t, `use ard/unsafe
+
+let value: Any = "hello"
+let text = unsafe::cast(value)`)
+	assertUnsafeCastDiagnostic(t, diagnostics, "unsafe::cast requires exactly one explicit type argument")
+}
+
+func TestUnsafeCastAcceptsBoxableArgument(t *testing.T) {
+	module, diagnostics := checkUnsafeCastSource(t, `use ard/unsafe
+
+let text = unsafe::cast<Str>("hello")`)
+	if len(diagnostics) > 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	got := module.Get("text").Type.String()
+	if got != "Str?" {
+		t.Fatalf("text type = %q, want Str?", got)
+	}
+}
+
+func TestUnsafeIsNilWorksThroughImportAlias(t *testing.T) {
+	module, diagnostics := checkUnsafeCastSource(t, `use ard/unsafe as u
+
+let nil = u::is_nil("hello")`)
+	if len(diagnostics) > 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	got := module.Get("nil").Type.String()
+	if got != "Bool" {
+		t.Fatalf("nil type = %q, want Bool", got)
+	}
+}
+
+func TestUnsafeIsNilRequiresImport(t *testing.T) {
+	_, diagnostics := checkUnsafeCastSource(t, `let nil = unsafe::is_nil("hello")`)
+	assertUnsafeCastDiagnostic(t, diagnostics, "Undefined module: unsafe")
+}
+
+func TestUnsafeIsNilTypeChecks(t *testing.T) {
+	module, diagnostics := checkUnsafeCastSource(t, `use ard/unsafe
+
+let value: Any = "hello"
+let nil = unsafe::is_nil(value)`)
+	if len(diagnostics) > 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	got := module.Get("nil").Type.String()
+	if got != "Bool" {
+		t.Fatalf("nil type = %q, want Bool", got)
+	}
+}
+
+func TestUnsafeIsNilAcceptsNamedValueArgument(t *testing.T) {
+	module, diagnostics := checkUnsafeCastSource(t, `use ard/unsafe
+
+let nil = unsafe::is_nil(value: "hello")`)
+	if len(diagnostics) > 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	got := module.Get("nil").Type.String()
+	if got != "Bool" {
+		t.Fatalf("nil type = %q, want Bool", got)
+	}
+}
+
+func TestUnsafeIsNilRejectsTypeArgument(t *testing.T) {
+	_, diagnostics := checkUnsafeCastSource(t, `use ard/unsafe
+
+let nil = unsafe::is_nil<Str>("hello")`)
+	assertUnsafeCastDiagnostic(t, diagnostics, "unsafe::is_nil does not accept type arguments")
+}
+
+func checkUnsafeCastSource(t *testing.T, source string) (checker.Module, []checker.Diagnostic) {
+	t.Helper()
+	result := parse.Parse([]byte(source), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	return c.Module(), c.Diagnostics()
+}
+
+func assertUnsafeCastDiagnostic(t *testing.T, diagnostics []checker.Diagnostic, want string) {
+	t.Helper()
+	for _, diagnostic := range diagnostics {
+		if strings.Contains(diagnostic.Message, want) {
+			return
+		}
+	}
+	t.Fatalf("diagnostics %v do not contain %q", diagnostics, want)
 }

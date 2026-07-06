@@ -1,0 +1,11 @@
+use ard/maybe
+
+// Compiler-backed checked recovery from Any.
+fn cast(value: Any) $T? {
+  maybe::none<$T>()
+}
+
+// Compiler-backed check for backend nil value state.
+fn is_nil(value: Any) Bool {
+  false
+}

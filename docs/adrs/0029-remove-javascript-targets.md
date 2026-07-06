@@ -8,7 +8,7 @@ Accepted
 
 Ard's JavaScript targets were experimental and added target selection, target-aware extern bindings, JavaScript runtime files, JavaScript standard-library companions, and backend-specific checker rules. That surface area now slows work on the Go implementation and the next FFI direction.
 
-Ard's active execution path is the Go target. Keeping the JavaScript targets would require continued maintenance for type representation, stdlib parity, async semantics, dependency-owned companions, and benchmark infrastructure even though direct Go FFI work is the current priority.
+Ard's active execution path is the Go target. Keeping the JavaScript targets would require continued maintenance for type representation, stdlib parity, async semantics, and dependency-owned companions even though direct Go FFI work is the current priority.
 
 ## Decision
 

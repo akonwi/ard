@@ -1,0 +1,18 @@
+use ard/async
+
+use go:fmt
+
+fn main() {
+  let done = Chan::new<Bool>()
+
+  async::start(
+    fn() {
+      fmt::Println("working in a goroutine")
+      done.send(true)
+    },
+  )
+
+  // start is fire-and-forget; coordinate with a channel.
+  let _ = done.recv()
+  fmt::Println("done")
+}

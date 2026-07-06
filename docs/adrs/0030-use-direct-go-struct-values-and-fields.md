@@ -105,14 +105,49 @@ Construction rules:
 
 - Only keyed struct literals are supported. Do not support Go-style positional struct literals.
 - Keys must name exported, non-embedded/non-promoted Go fields exactly.
-- Every exported, non-embedded/non-promoted field in the Ard-visible shape must be supplied. Direct-Go struct literals do not use Go zero values as defaults for omitted fields.
-- Ard's existing omission rule only applies to Ard nullable fields. Because Go does not mark pointer, slice, map, interface, channel, or function fields as semantically optional, the compiler must not infer optional fields from Go zero or nil-able types.
+- Omitted exported fields follow Go's own keyed-literal semantics and take their Go zero value; a direct-Go struct literal need not supply every field. This matches `use go:` being a direct call into Go and makes idiomatic Go libraries (which set a few of many fields) usable from pure Ard. This applies only to Go structs; Ard-defined struct literals still require every field.
+  - (Superseded decision: this previously required every exported field, on the reasoning that Go does not mark fields optional. In practice that made any real Go library need a companion wrapper per struct, defeating direct interop, so direct-Go literals now mirror Go's zero-value defaults.)
 - Field values are checked with the same direct-Go assignment compatibility used for field writes.
 - If any exported, non-embedded field's Go type is unsupported by the current direct-Go type mapping, construction is rejected rather than allowing the field to be omitted.
 - Unexported fields cannot be set. They are not part of the Ard-visible shape; if a Go type relies on unexported state or constructor invariants, use an exported Go constructor or companion wrapper instead of a direct struct literal.
 - Embedded fields are not part of the initial Ard-visible shape, even by explicit field name. Embedded/promoted-field lookup remains deferred to ADR/follow-up work for #249.
 
 A direct Go struct literal creates a Go value, not a pointer. If Ard needs `mut go::T`, it should follow normal mutable-reference rules: bind the value to mutable storage or pass an addressable mutable value where a `mut go::T` is required. Do not add special pointer-literal syntax as part of this decision.
+
+### Generic Go struct literals
+
+Go named struct types may be generic (`type Radio[T comparable] struct { Value T; GroupValue T; ... }`). Direct-Go struct literals support generic Go structs:
+
+- Explicit type arguments use Ard's existing call-site type-argument syntax:
+
+  ```ard
+  ui::Radio<Str>{Value: "compact", GroupValue: mode}
+  ui::Provider<ui::Theme>{Value: active, Child: tab}
+  ```
+
+- Type arguments are optional when they can be inferred by unifying the supplied field values against the Go struct's field types. `ui::Provider{Value: active, Child: tab}` infers `T = ui::Theme` from `Value`. Note this is more permissive than Go itself, which does not infer type arguments for composite literals; Ard's checker performs the inference and the backend always lowers to an explicitly instantiated Go composite literal (`ui.Radio[string]{...}`).
+- Inference fails, and explicit type arguments are required, when no supplied field constrains a type parameter — including when all fields mentioning it are omitted under the zero-value rule. The diagnostic must name the uninferred type parameter.
+- Conflicting field values that unify a type parameter to different types are rejected with a diagnostic naming the conflicting fields.
+- Inferred or explicit type arguments must satisfy the Go type parameter's constraint (for example `comparable`); the checker validates this rather than deferring to a Go build error.
+
+### Generic Go functions
+
+Go package functions may be generic (`func StateRef[T any](c *StateCtx) *T`, `func MustDepend[T any](ctx BuildContext) T`). Direct-Go calls support generic Go functions:
+
+- Explicit type arguments use Ard's existing call-site type-argument syntax:
+
+  ```ard
+  let state = ffi::StateRef<DemoState>(c)
+  let theme = ui::MustDepend<ui::Theme>(ctx)
+  ```
+
+- Type arguments are optional when they can be inferred by unifying the supplied argument values against the Go parameter types, mirroring Go's own call-site inference. `ffi::StateSet(c, snapshot)` infers `T` from `snapshot`.
+- A call that leaves any type parameter unbound is rejected with a diagnostic naming the uninferred type parameter. Type arguments on a non-generic Go function are rejected. Type arguments are never silently ignored.
+- Type arguments may be any Ard-representable type, including Ard-defined structs. The backend lowers every Ard type to a concrete Go type, so instantiating a Go generic at an Ard struct is meaningful (`ffi.StateRef[main.DemoState](c)`).
+- Explicit or inferred type arguments must satisfy the Go type parameter's constraint. An empty constraint (`any`) accepts every representable Ard type; other constraints are validated with the Go type checker when the argument has a direct Go representation, and rejected otherwise.
+- The instantiated signature maps through the same representability and boundary rules as concrete signatures. A generic result `*T` follows the instantiated type's mapping: `StateRef<DemoState>` returns `mut DemoState`, live mutable access to the Go-side storage. `(T, error)`, `(T, bool)`, and error-only result adaptations apply after instantiation.
+- The backend always lowers to an explicitly instantiated Go call (`pkg.Fn[T1, T2](args)`), never relying on Go-side inference, so the generated code is deterministic.
+- A `mut T` result must be bound directly with `let`; the binding becomes a pointer-backed local so mutations flow through to the Go-side storage. A value-typed annotation (`let snap: T = ...`) snapshots a copy instead. Rebinding (`mut` bindings), closure capture, indirect initializers (match/if arms), wrapping in `Result`/`Maybe`, and discarding the result are rejected until their semantics are defined.
 
 ### Nil semantics and direct-Go safety boundary
 
@@ -141,19 +176,19 @@ Nil-able Go slices, maps, interfaces, functions, and channels likewise preserve 
 Provide nil checks through an explicit standard-library predicate rather than comparing against `Void`:
 
 ```ard
-use ard/ffi
+use ard/unsafe
 
-if ffi::is_nil(req.URL) {
+if unsafe::is_nil(req.URL) {
   "/"
 } else {
   req.URL.Path
 }
 ```
 
-`ffi::is_nil` should be a normal function in an `ard/ffi` standard-library module, implemented by a stdlib Go companion function such as `ffi.IsNil` rather than by a special checker intrinsic. Conceptually:
+`unsafe::is_nil` is a compiler-backed `ard/unsafe` intrinsic accepted in ADR 0037. Conceptually:
 
 ```ard
-extern fn is_nil(value: $T) Bool = "IsNil"
+fn is_nil(value: Any) Bool
 ```
 
 The Go implementation should perform the nil test in Go, including typed nil pointers. It should not rely only on comparing a boxed `any` value to nil, because a typed nil pointer stored in an interface is not itself a nil interface:
@@ -184,9 +219,9 @@ func IsNil(value any) bool {
 
 Calling `IsNil` on non-nil-able values such as integers, strings, and structs should return `false`, not panic.
 
-Because `ffi::is_nil` is an ordinary generic function, it does not need a special type-system exception. It can accept any Ard value and return `false` for values whose Go representation cannot be nil. This keeps nil testing visible as an FFI operation instead of making `()` an exception to equality or assignability rules.
+Because `unsafe::is_nil` accepts `Any`, it can accept any boxable Ard value and return `false` for values whose Go representation cannot be nil. This keeps nil testing visible as an unsafe interop operation instead of making `()` an exception to equality or assignability rules.
 
-The predicate only tests the value passed to it. For example, `ffi::is_nil(req.URL)` can still panic first if `req` itself is nil, because Go must dereference `req` to read the `URL` field.
+The predicate only tests the value passed to it. For example, `unsafe::is_nil(req.URL)` can still panic first if `req` itself is nil, because Go must dereference `req` to read the `URL` field.
 
 #### Unsafe/recovering interop blocks
 
@@ -220,16 +255,15 @@ This work was implemented in phases while keeping the feature scope intact:
    - Reuse direct-Go scalar conversion/range-check helpers for assigned values.
 
 3. **Nil predicate helper**
-   - Add an `ard/ffi` module with a normal generic `is_nil(value: $T) Bool` extern.
-   - Implement the binding in stdlib Go FFI, using Go reflection where needed so typed nil pointers are detected correctly.
-   - Extend stdlib FFI generation/lowering for this generic extern if needed; do not add a checker intrinsic or opaque special form.
+   - Add the compiler-backed `ard/unsafe::is_nil(value: Any) Bool` intrinsic.
+   - Lower it with Go reflection where needed so typed nil pointers are detected correctly.
    - Return `false` for non-nil-able values.
    - Do not add a general Go `nil` literal and do not allow `()` as a pointer assignment, constructor field value, or equality special case.
 
 4. **Keyed struct construction**
    - Type-check module-qualified direct-Go struct literals.
-   - Reject literals that omit any exported, non-embedded/non-promoted Ard-visible field.
-   - Lower to keyed Go composite literals once all visible fields are supplied.
+   - Allow literals to omit exported fields; omitted fields take their Go zero value.
+   - Lower to keyed Go composite literals containing only the supplied fields.
    - Reject fields whose Go type is not representable by current direct-Go assignment compatibility.
 
 5. **Stdlib cleanup**
@@ -248,16 +282,16 @@ This work was implemented in phases while keeping the feature scope intact:
 - Ard users can work with ordinary Go structs without writing companion functions for every field.
 - Standard-library code can expose and store Go handles directly instead of using stringly `extern type` declarations where the handle is a Go named type or pointer to one.
 - Field writes and construction become part of the same direct-Go struct story, so users can both inspect and build common Go configuration structs.
-- Direct-Go struct construction is stricter than Go keyed literals: omitted exported fields are checker errors rather than implicit zero values.
+- Direct-Go struct construction mirrors Go keyed literals: omitted exported fields take their Go zero value (Ard-defined structs still require every field).
 - Go pointer fields do not receive special `Maybe` treatment, keeping checker and lowering complexity lower and preserving a uniform direct-Go mapping.
 - Direct-Go field access inherits Go nil and panic behavior. That is an intentional interop risk users accept when using Go APIs directly.
 - Ard's safety promise remains focused on Ard code and Ard semantics; arbitrary Go package invariants are outside what the Ard checker can prove.
 - Nil-sensitive public Ard APIs should keep explicit adapters when they need domain-safe behavior.
-- `ffi::is_nil(value)` provides a small nil-test surface without introducing a general nil literal or special `Void` comparison rule.
+- `unsafe::is_nil(value)` provides a small nil-test surface without introducing a general nil literal or special `Void` comparison rule.
 - `unsafe { ... }` provides an escape hatch and mitigation path by making panic recovery explicit in Ard control flow.
-- `ffi::is_nil` can cover broader nil-able Go values as those representations become available through direct Go interop.
+- `unsafe::is_nil` can cover broader nil-able Go values as those representations become available through direct Go interop.
 - Embedded/promoted fields are not part of the initial lookup model; #249 remains the place to expand that behavior.
-- Interfaces, callback bridges, wider pointer shapes, variadics, and compound conversion gaps still constrain how far stdlib cleanup can go.
+- Callback bridges, Ard-side implementations of Go interfaces, wider pointer shapes, variadics, and compound conversion gaps still constrain how far stdlib cleanup can go.
 
 ## Related
 

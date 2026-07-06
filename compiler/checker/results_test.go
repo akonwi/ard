@@ -325,66 +325,8 @@ func TestResults(t *testing.T) {
 				{Kind: checker.Error, Message: "type mismatch: expected Int, got Str"},
 			},
 		},
-		{
-			name: "Matching on results",
-			input: `
-			use ard/io
-
-			let res: Int!Str = Result::err("foo")
-			match res {
-				ok(num) => num,
-				err => {
-				  io::print("failed: " + err)
-					-1
-				}
-			}`,
-			output: &checker.Program{
-				Statements: []checker.Statement{
-					{
-						Stmt: &checker.VariableDef{
-							Name: "res",
-							Value: &checker.ModuleFunctionCall{
-								Module: "ard/result",
-								Call: &checker.FunctionCall{
-									Name: "err",
-									Args: []checker.Expression{&checker.StrLiteral{"foo"}},
-								},
-							},
-						},
-					},
-					{
-						Expr: &checker.ResultMatch{
-							Subject: &checker.Variable{},
-							Ok: &checker.Match{
-								Pattern: &checker.Identifier{Name: "num"},
-								Body: &checker.Block{Stmts: []checker.Statement{
-									{Expr: &checker.Variable{}},
-								}},
-							},
-							Err: &checker.Match{
-								Pattern: &checker.Identifier{Name: "err"},
-								Body: &checker.Block{Stmts: []checker.Statement{
-									{Expr: &checker.ModuleFunctionCall{
-										Module: "ard/io",
-										Call: &checker.FunctionCall{
-											Name: "print",
-											Args: []checker.Expression{
-												&checker.StrAddition{&checker.StrLiteral{"failed: "}, &checker.Variable{}},
-											},
-										},
-									}},
-									{Expr: &checker.Negation{&checker.IntLiteral{1}}},
-								}},
-							},
-						},
-					},
-				},
-			},
-			diagnostics: []checker.Diagnostic{},
-		},
 	})
 }
-
 func TestTry(t *testing.T) {
 	run(t, []test{
 		{
@@ -540,7 +482,7 @@ func TestTry(t *testing.T) {
 
 				fn do_stuff(stuff: [Int]) Int!Str {
 					for i in 0..stuff.size() {
-						let processed = try process(stuff.at(i)) -> err {
+						let processed = try process(stuff.at(i).expect("bounds")) -> err {
 							Result::err("Failed: {err}")
 						}
 					}
@@ -704,7 +646,6 @@ func TestTry(t *testing.T) {
 		},
 	})
 }
-
 func TestTryInMatchBlocks(t *testing.T) {
 	run(t, []test{
 		{

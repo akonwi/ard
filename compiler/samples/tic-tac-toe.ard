@@ -1,11 +1,20 @@
-use ard/io
 use ard/maybe
+
+use go:bufio
+use go:fmt
+use go:os
+use go:strconv
+use go:strings
 
 struct Board {
   cells: [Str],
 }
 
 impl Board {
+  fn cell(pos: Int) Str {
+    self.cells.at(pos).or("")
+  }
+
   fn mut play(player: Str, pos: Int) {
     self.cells.set(pos, player)
   }
@@ -22,16 +31,16 @@ impl Board {
   }
 
   fn draw() {
-    io::print("{self.cells.at(0)} | {self.cells.at(1)} | {self.cells.at(2)}")
-    io::print("-------")
-    io::print("{self.cells.at(3)} | {self.cells.at(4)} | {self.cells.at(5)}")
-    io::print("-------")
-    io::print("{self.cells.at(6)} | {self.cells.at(7)} | {self.cells.at(8)}")
+    fmt::Println("{self.cell(0)} | {self.cell(1)} | {self.cell(2)}")
+    fmt::Println("-------")
+    fmt::Println("{self.cell(3)} | {self.cell(4)} | {self.cell(5)}")
+    fmt::Println("-------")
+    fmt::Println("{self.cell(6)} | {self.cell(7)} | {self.cell(8)}")
   }
 
   fn can_play(pos: Int) Bool {
     match pos < self.cells.size() {
-      true => self.cells.at(pos).is_empty(),
+      true => self.cell(pos).is_empty(),
       false => false,
     }
   }
@@ -39,43 +48,43 @@ impl Board {
   fn get_winner() Str? {
     mut res: Str? = maybe::none()
 
-    if not self.cells.at(0).is_empty() {
+    if not self.cell(0).is_empty() {
       // check top row
-      if self.cells.at(0) == self.cells.at(1) and self.cells.at(0) == self.cells.at(2) {
-        res = maybe::some(self.cells.at(0))
+      if self.cell(0) == self.cell(1) and self.cell(0) == self.cell(2) {
+        res = maybe::some(self.cell(0))
       }
       // check left column
-      if self.cells.at(0) == self.cells.at(3) and self.cells.at(0) == self.cells.at(6) {
-        res = maybe::some(self.cells.at(0))
+      if self.cell(0) == self.cell(3) and self.cell(0) == self.cell(6) {
+        res = maybe::some(self.cell(0))
       }
       // check top-left to bottom-right
-      if self.cells.at(0) == self.cells.at(4) and self.cells.at(0) == self.cells.at(8) {
-        res = maybe::some(self.cells.at(0))
+      if self.cell(0) == self.cell(4) and self.cell(0) == self.cell(8) {
+        res = maybe::some(self.cell(0))
       }
     }
 
     // check middle column
-    if not self.cells.at(1).is_empty() {
-      if self.cells.at(1) == self.cells.at(4) and self.cells.at(1) == self.cells.at(7) {
-        res = maybe::some(self.cells.at(1))
+    if not self.cell(1).is_empty() {
+      if self.cell(1) == self.cell(4) and self.cell(1) == self.cell(7) {
+        res = maybe::some(self.cell(1))
       }
     }
 
-    if not self.cells.at(2).is_empty() {
+    if not self.cell(2).is_empty() {
       // check right column
-      if self.cells.at(2) == self.cells.at(5) and self.cells.at(2) == self.cells.at(8) {
-        res = maybe::some(self.cells.at(2))
+      if self.cell(2) == self.cell(5) and self.cell(2) == self.cell(8) {
+        res = maybe::some(self.cell(2))
       }
       // check top-right to bottom-left
-      if self.cells.at(2) == self.cells.at(4) and self.cells.at(2) == self.cells.at(6) {
-        res = maybe::some(self.cells.at(2))
+      if self.cell(2) == self.cell(4) and self.cell(2) == self.cell(6) {
+        res = maybe::some(self.cell(2))
       }
     }
 
     // check middle row
-    if not self.cells.at(3).is_empty() {
-      if self.cells.at(3) == self.cells.at(4) and self.cells.at(3) == self.cells.at(5) {
-        res = maybe::some(self.cells.at(3))
+    if not self.cell(3).is_empty() {
+      if self.cell(3) == self.cell(4) and self.cell(3) == self.cell(5) {
+        res = maybe::some(self.cell(3))
       }
     }
 
@@ -83,12 +92,15 @@ impl Board {
   }
 }
 
-fn read_move(player: Str) Int {
-  io::print("Enter a number between 1 and 9")
-  io::print("---------------")
+fn read_move(scanner: mut bufio::Scanner) Int {
+  fmt::Println("Enter a number between 1 and 9")
+  fmt::Println("---------------")
 
-  let input_str = io::read_line().or("")
-  let input = Int::from_str(input_str).or(-1)
+  let input_str = match scanner.Scan() {
+    true => strings::TrimSpace(scanner.Text()),
+    false => "",
+  }
+  let input = strconv::Atoi(input_str).or(-1)
   match input >= 1 and input <= 9 {
     true => input - 1,
     false => -1,
@@ -99,36 +111,37 @@ fn main() {
   mut board = Board{cells: ["", "", "", "", "", "", "", "", ""]}
 
   let players = ["X", "O"]
+  mut scanner = bufio::NewScanner(os::Stdin)
 
-  io::print("Starting Game")
-  io::print("---------------")
+  fmt::Println("Starting Game")
+  fmt::Println("---------------")
 
   board.draw()
 
   mut finished = false
   while not board.is_full() or finished {
     for player in players {
-      io::print("Player {player}: Your move")
-      mut move = read_move(player)
+      fmt::Println("Player {player}: Your move")
+      mut move = read_move(scanner)
       while move < 0 {
-        io::print("Invalid move")
-        move = read_move(player)
+        fmt::Println("Invalid move")
+        move = read_move(scanner)
       }
       while not board.can_play(move) {
-        io::print("Position already played")
-        move = read_move(player)
+        fmt::Println("Position already played")
+        move = read_move(scanner)
       }
 
       board.play(player, move)
-      io::print("---------------")
-      io::print("Player {player} played")
-      io::print("---------------")
+      fmt::Println("---------------")
+      fmt::Println("Player {player} played")
+      fmt::Println("---------------")
       board.draw()
-      io::print("---------------")
+      fmt::Println("---------------")
 
       match board.get_winner() {
         winner => {
-          io::print("Player {winner} wins!")
+          fmt::Println("Player {winner} wins!")
           finished = true
           break
         },
@@ -137,7 +150,7 @@ fn main() {
     }
 
     if board.is_full() {
-      io::print("Game Over! It's a draw")
+      fmt::Println("Game Over! It's a draw")
     }
   }
 }

@@ -1,0 +1,1257 @@
+use go:go.rockorager.dev/vaxis/ui
+use go:go.rockorager.dev/vaxis/widgets/term
+use go:strconv
+use go:vaxis_demo/ffi
+
+struct DemoState {
+  page: Int,
+  count: Int,
+  ticks: Int,
+  name: Str,
+  notes: Str,
+  done: Bool,
+  dialog: Bool,
+  palette: Bool,
+  mode: Str,
+  chat: Str,
+  logs: [Str],
+}
+
+// Runs ~1/sec on the UI thread (via the shim's goroutine + Runtime.Dispatch).
+fn tick(c: mut ffi::StateCtx) {
+  let state = ffi::StateRef<DemoState>(c)
+  state.ticks = state.ticks + 1
+  ffi::MarkDirty(c)
+}
+
+// --- state update helpers ---
+// Reference-mutation model: StateRef hands back a `mut DemoState` (a live
+// pointer into the persistent state, via Go `*T`), so each setter mutates its
+// field in place and calls MarkDirty to schedule a rebuild. No snapshot copy
+// and no whole-value write-back. Adding a field to DemoState needs no changes
+// here.
+
+fn set_page(c: mut ffi::StateCtx, v: Int) {
+  let state = ffi::StateRef<DemoState>(c)
+  state.page = v
+  ffi::MarkDirty(c)
+}
+
+fn set_count(c: mut ffi::StateCtx, v: Int) {
+  let state = ffi::StateRef<DemoState>(c)
+  state.count = v
+  ffi::MarkDirty(c)
+}
+
+fn set_name(c: mut ffi::StateCtx, v: Str) {
+  let state = ffi::StateRef<DemoState>(c)
+  state.name = v
+  ffi::MarkDirty(c)
+}
+
+fn set_notes(c: mut ffi::StateCtx, v: Str) {
+  let state = ffi::StateRef<DemoState>(c)
+  state.notes = v
+  ffi::MarkDirty(c)
+}
+
+fn set_done(c: mut ffi::StateCtx, v: Bool) {
+  let state = ffi::StateRef<DemoState>(c)
+  state.done = v
+  ffi::MarkDirty(c)
+}
+
+fn set_dialog(c: mut ffi::StateCtx, v: Bool) {
+  let state = ffi::StateRef<DemoState>(c)
+  state.dialog = v
+  ffi::MarkDirty(c)
+}
+
+fn set_palette(c: mut ffi::StateCtx, v: Bool) {
+  let state = ffi::StateRef<DemoState>(c)
+  state.palette = v
+  ffi::MarkDirty(c)
+}
+
+// Palette actions close the palette as they run.
+fn goto_page(c: mut ffi::StateCtx, page: Int) {
+  let state = ffi::StateRef<DemoState>(c)
+  state.page = page
+  state.palette = false
+  ffi::MarkDirty(c)
+}
+
+fn open_dialog_from_palette(c: mut ffi::StateCtx) {
+  let state = ffi::StateRef<DemoState>(c)
+  state.palette = false
+  state.dialog = true
+  ffi::MarkDirty(c)
+}
+
+fn replay_animation(c: mut ffi::StateCtx) {
+  let anim = ffi::Animation(c)
+  anim.Forward()
+  set_palette(c, false)
+}
+
+fn palette_nav_item(c: mut ffi::StateCtx, label: Str, name: Str, page: Int) ui::CommandPaletteItem {
+  ui::CommandPaletteItem{
+    Title: "Go to {label}",
+    Description: "Open the {name} demo page",
+    Aliases: [name, "page"],
+    OnSelected: fn(ev: ui::EventContext) {
+      goto_page(c, page)
+    },
+  }
+}
+
+fn command_palette_items(c: mut ffi::StateCtx) [ui::CommandPaletteItem] {
+  mut items: [ui::CommandPaletteItem] = [
+    palette_nav_item(c, "Home", "home", 0),
+    palette_nav_item(c, "Text layout", "text", 1),
+    palette_nav_item(c, "Controls", "controls", 2),
+    palette_nav_item(c, "Lists", "lists", 3),
+    palette_nav_item(c, "Table", "table", 4),
+    palette_nav_item(c, "Animation", "animation", 5),
+    palette_nav_item(c, "Theme", "theme", 6),
+  ]
+  items.push(
+    ui::CommandPaletteItem{
+      Title: "Open dialog",
+      Description: "Show the modal dialog example",
+      Aliases: ["modal"],
+      OnSelected: fn(ev: ui::EventContext) {
+        open_dialog_from_palette(c)
+      },
+    },
+  )
+  items.push(
+    ui::CommandPaletteItem{
+      Title: "Replay animation",
+      Description: "Start the animation controller",
+      Aliases: ["play"],
+      OnSelected: fn(ev: ui::EventContext) {
+        replay_animation(c)
+      },
+    },
+  )
+  items.push(
+    ui::CommandPaletteItem{
+      Title: "Send notification",
+      Description: "Show a demo notification",
+      Aliases: ["notify"],
+      OnSelected: fn(ev: ui::EventContext) {
+        ev.Notify("Vaxis UI demo", "Command palette action")
+        set_palette(c, false)
+      },
+    },
+  )
+  items.push(
+    ui::CommandPaletteItem{
+      Title: "Quit",
+      Description: "Exit the demo",
+      Aliases: ["exit"],
+      OnSelected: fn(ev: ui::EventContext) {
+        ev.Quit()
+      },
+    },
+  )
+  items
+}
+
+// A modal command-palette overlay entry, shown when state.palette is set.
+fn palette_entry(c: mut ffi::StateCtx) ui::OverlayEntry {
+  ui::OverlayEntry{
+    Modal: true,
+    Child: ui::CommandPalette{
+      Items: command_palette_items(c),
+      Placeholder: "Type a command…",
+      OnDismiss: fn(ev: ui::EventContext) {
+        set_palette(c, false)
+      },
+    },
+  }
+}
+
+// A modal dialog overlay entry, shown when state.dialog is set.
+fn dialog_entry(c: mut ffi::StateCtx) ui::OverlayEntry {
+  ui::OverlayEntry{
+    Modal: true,
+    Child: ui::Dialog{
+      Title: "Demo dialog",
+      Child: ui::Text{
+        Value: "Focus stays inside this dialog. Press Escape or choose Close to dismiss it.",
+        SoftWrap: true,
+      },
+      Width: 48,
+      Actions: [
+        ui::Button{
+          Label: "Notify",
+          OnPressed: fn(ev: ui::EventContext) {
+            ev.Notify("Dialog", "Action from dialog")
+          },
+        },
+        ui::Button{Label: "Close", OnPressed: fn(ev: ui::EventContext) {
+          set_dialog(c, false)
+        }},
+      ],
+      OnDismiss: fn(ev: ui::EventContext) {
+        set_dialog(c, false)
+      },
+    },
+  }
+}
+
+fn set_mode(c: mut ffi::StateCtx, v: Str) {
+  let state = ffi::StateRef<DemoState>(c)
+  state.mode = v
+  ffi::MarkDirty(c)
+}
+
+fn set_chat(c: mut ffi::StateCtx, v: Str) {
+  let state = ffi::StateRef<DemoState>(c)
+  state.chat = v
+  ffi::MarkDirty(c)
+}
+
+fn submit_chat(c: mut ffi::StateCtx, value: Str) {
+  let trimmed = value.trim()
+  match trimmed.is_empty() {
+    true => (),
+    false => {
+      let state = ffi::StateRef<DemoState>(c)
+      state.logs.push("You: {trimmed}")
+      state.logs.push("Echo: {trimmed}")
+      state.chat = ""
+      ffi::MarkDirty(c)
+    },
+  }
+}
+
+fn bold() ui::Style {
+  ui::Style{Attribute: ui::AttrBold}
+}
+
+// --- pages ---
+
+fn home_page(s: DemoState) ui::Widget {
+  ui::Flex{
+    Axis: ui::Vertical,
+    CrossAxisAlignment: ui::CrossAxisStart,
+    Children: [
+      ui::RichText{
+        Spans: [
+          ui::TextSpan{Text: "Home", Style: bold()},
+          ui::TextSpan{
+            Text: "\nA pure-Ard reimplementation of the vaxis/ui demo, exercising state, focus, buttons, rich text, themed widgets, and generics over the Go framework.",
+          },
+        ],
+        SoftWrap: true,
+      },
+      ui::SizedBox{Height: 1},
+      ui::Text{
+        Value: "The ticker below is incremented by a background goroutine posting through Runtime.Dispatch, which then schedules a rebuild.",
+        SoftWrap: true,
+      },
+      ui::RichText{Spans: [ui::TextSpan{Text: "ticks: "}, ui::TextSpan{Text: "{s.ticks}", Style: bold()}]},
+    ],
+  }
+}
+
+fn controls_page(c: mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
+  ui::Flex{
+    Axis: ui::Vertical,
+    CrossAxisAlignment: ui::CrossAxisStretch,
+    Children: [
+      ui::RichText{
+        Spans: [
+          ui::TextSpan{Text: "Controls", Style: bold()},
+          ui::TextSpan{
+            Text: "\nButtons are focusable. Use Tab/Shift+Tab and Enter, or click them with the mouse.",
+          },
+        ],
+        SoftWrap: true,
+      },
+      ui::SizedBox{Height: 1},
+      ui::Text{Value: "Name"},
+      ui::TextField{
+        Value: s.name,
+        Placeholder: "type here",
+        OnChanged: fn(ev: ui::EventContext, value: Str) {
+          set_name(c, value)
+        },
+      },
+      ui::SizedBox{Height: 1},
+      ui::Stack{
+        Alignment: ui::TopLeft,
+        Children: [
+          ui::SizedBox{
+            Width: 28,
+            Height: 1,
+            Child: ui::DecoratedBox(
+              ui::Decoration{Style: ui::Style{Background: theme.Surface}},
+              ui::Text{Value: "Stack base", Style: bold()},
+            ),
+          },
+          ui::Positioned{
+            Left: 18,
+            Top: 0,
+            Child: ui::Text{Value: "new", Style: ui::Style{Attribute: ui::AttrBold, Foreground: theme.AccentText}},
+          },
+        ],
+      },
+      ui::SizedBox{Height: 1},
+      ui::Text{Value: "Notes"},
+      ui::TextArea{
+        Value: s.notes,
+        Placeholder: "write a note",
+        MinHeight: 2,
+        SoftWrap: true,
+        OnChanged: fn(ev: ui::EventContext, value: Str) {
+          set_notes(c, value)
+        },
+      },
+      ui::SizedBox{Height: 1},
+      ui::Flex{
+        Axis: ui::Horizontal,
+        CrossAxisAlignment: ui::CrossAxisCenter,
+        Children: [
+          ui::Button{Label: "-", OnPressed: fn(ev: ui::EventContext) {
+            set_count(c, s.count - 1)
+          }},
+          ui::SizedBox{Width: 1, Height: 1},
+          ui::RichText{Spans: [ui::TextSpan{Text: "count: "}, ui::TextSpan{Text: "{s.count}", Style: bold()}]},
+          ui::SizedBox{Width: 1, Height: 1},
+          ui::Button{Label: "+", OnPressed: fn(ev: ui::EventContext) {
+            set_count(c, s.count + 1)
+          }},
+          ui::SizedBox{Width: 2, Height: 1},
+          ui::Button{Label: "Title", OnPressed: fn(ev: ui::EventContext) {
+            ev.SetTitle("Vaxis UI demo")
+          }},
+          ui::SizedBox{Width: 1, Height: 1},
+          ui::Button{Label: "Copy notes", OnPressed: fn(ev: ui::EventContext) {
+            ev.Copy(s.notes)
+          }},
+          ui::SizedBox{Width: 1, Height: 1},
+          ui::Button{
+            Label: "Notify",
+            OnPressed: fn(ev: ui::EventContext) {
+              ev.Notify("Vaxis UI demo", "Notification from the controls page")
+            },
+          },
+          ui::SizedBox{Width: 1, Height: 1},
+          ui::Button{Label: "Dialog", OnPressed: fn(ev: ui::EventContext) {
+            set_dialog(c, true)
+          }},
+        ],
+      },
+      ui::Flex{
+        Axis: ui::Horizontal,
+        CrossAxisAlignment: ui::CrossAxisCenter,
+        Children: [
+          ui::Checkbox{
+            Checked: s.done,
+            Label: "Use checkmark style",
+            OnChanged: fn(ev: ui::EventContext, checked: Bool) {
+              set_done(c, checked)
+            },
+          },
+          ui::SizedBox{Width: 2, Height: 1},
+          ui::RichText{
+            Spans: [ui::TextSpan{Text: "checkbox: "}, ui::TextSpan{Text: checkbox_status(s.done), Style: bold()}],
+          },
+          ui::SizedBox{Width: 2, Height: 1},
+          ui::Checkbox{Disabled: true, Label: "Disabled"},
+        ],
+      },
+      ui::Flex{
+        Axis: ui::Horizontal,
+        CrossAxisAlignment: ui::CrossAxisCenter,
+        Children: [
+          ui::Radio<Str>{
+            Value: "compact",
+            GroupValue: s.mode,
+            Label: "Compact",
+            OnChanged: fn(ev: ui::EventContext, value: Str) {
+              set_mode(c, value)
+            },
+          },
+          ui::SizedBox{Width: 1, Height: 1},
+          ui::Radio<Str>{
+            Value: "cozy",
+            GroupValue: s.mode,
+            Label: "Cozy",
+            OnChanged: fn(ev: ui::EventContext, value: Str) {
+              set_mode(c, value)
+            },
+          },
+          ui::SizedBox{Width: 1, Height: 1},
+          ui::Radio<Str>{
+            Value: "spacious",
+            GroupValue: s.mode,
+            Label: "Spacious",
+            OnChanged: fn(ev: ui::EventContext, value: Str) {
+              set_mode(c, value)
+            },
+          },
+          ui::SizedBox{Width: 1, Height: 1},
+          ui::Radio<Str>{
+            Value: "disabled",
+            GroupValue: s.mode,
+            Disabled: true,
+            Label: "Disabled",
+          },
+          ui::SizedBox{Width: 2, Height: 1},
+          ui::RichText{Spans: [ui::TextSpan{Text: "radio: "}, ui::TextSpan{Text: s.mode, Style: bold()}]},
+        ],
+      },
+      ui::Align{Alignment: ui::CenterRight, Child: ui::Text{Value: "aligned right inside the page"}},
+    ],
+  }
+}
+
+fn checkbox_status(checked: Bool) Str {
+  match checked {
+    true => "checked",
+    false => "unchecked",
+  }
+}
+
+fn table_page() ui::Widget {
+  ui::Flex{
+    Axis: ui::Vertical,
+    CrossAxisAlignment: ui::CrossAxisStretch,
+    Children: [
+      ui::RichText{
+        Spans: [
+          ui::TextSpan{Text: "Table", Style: bold()},
+          ui::TextSpan{
+            Text: "\nColumns can size to content, take a fixed width, or share the remaining space proportionally.",
+          },
+        ],
+        SoftWrap: true,
+      },
+      ui::SizedBox{Height: 1},
+      ui::Table{
+        Columns: [ui::IntrinsicColumn(), ui::FlexColumn(1), ui::FixedColumn(8)],
+        ColumnGap: 2,
+        RowGap: 1,
+        Rows: [
+          ui::TableRow{Children: [table_header("job"), table_header("status"), table_header("id")]},
+          ui::TableRow{
+            Children: [ui::Text{Value: "build"}, ui::Text{Value: "running tests"}, ui::Text{Value: "1024"}],
+          },
+          ui::TableRow{
+            Children: [ui::Text{Value: "lint"}, ui::Text{Value: "waiting for worker"}, ui::Text{Value: "7"}],
+          },
+          ui::TableRow{
+            Children: [ui::Text{Value: "deploy"}, ui::Text{Value: "blocked on approval"}, ui::Text{Value: "23"}],
+          },
+        ],
+      },
+    ],
+  }
+}
+
+fn table_header(value: Str) ui::Widget {
+  ui::Text{Value: value, Style: bold()}
+}
+
+fn pad_right(s: Str, n: Int) Str {
+  mut out = s
+  let deficit = n - s.size()
+  for i in 1..deficit {
+    out = "{out} "
+  }
+  out
+}
+
+fn theme_swatch_span(name: Str, background: ui::Color, foreground: ui::Color) ui::TextSpan {
+  ui::TextSpan{
+    Text: " {pad_right(name, 24)} ",
+    Style: ui::Style{Foreground: foreground, Background: background},
+  }
+}
+
+fn theme_text_span(name: Str, foreground: ui::Color) ui::TextSpan {
+  ui::TextSpan{Text: " {pad_right(name, 24)} ", Style: ui::Style{Foreground: foreground}}
+}
+
+// Row indent (2) + a 2-space gap before each span reproduces the reference's
+// "    span  span  span" spacing without a per-item index check.
+fn theme_swatch_row(spans: [ui::TextSpan]) ui::Widget {
+  mut row: [ui::TextSpan] = [ui::TextSpan{Text: "  "}]
+  for span in spans {
+    row.push(ui::TextSpan{Text: "  "})
+    row.push(span)
+  }
+  ui::RichText{Spans: row}
+}
+
+fn theme_group(name: Str, children: [ui::Widget]) ui::Widget {
+  mut kids: [ui::Widget] = [ui::RichText{Spans: [ui::TextSpan{Text: "  "}, ui::TextSpan{Text: name, Style: bold()}]}]
+  for child in children {
+    kids.push(child)
+  }
+  ui::Flex{
+    Axis: ui::Vertical,
+    CrossAxisAlignment: ui::CrossAxisStart,
+    Children: kids,
+  }
+}
+
+fn palette_scale(name: Str, scale: ui::ColorScale) ui::Widget {
+  ui::RichText{
+    Spans: [
+      ui::TextSpan{Text: pad_right(name, 9)},
+      ui::TextSpan{Text: "  ", Style: ui::Style{Background: scale.Tone50}},
+      ui::TextSpan{Text: "  ", Style: ui::Style{Background: scale.Tone100}},
+      ui::TextSpan{Text: "  ", Style: ui::Style{Background: scale.Tone200}},
+      ui::TextSpan{Text: "  ", Style: ui::Style{Background: scale.Tone300}},
+      ui::TextSpan{Text: "  ", Style: ui::Style{Background: scale.Tone400}},
+      ui::TextSpan{Text: "  ", Style: ui::Style{Background: scale.Tone500}},
+      ui::TextSpan{Text: "  ", Style: ui::Style{Background: scale.Tone600}},
+      ui::TextSpan{Text: "  ", Style: ui::Style{Background: scale.Tone700}},
+      ui::TextSpan{Text: "  ", Style: ui::Style{Background: scale.Tone800}},
+      ui::TextSpan{Text: "  ", Style: ui::Style{Background: scale.Tone900}},
+      ui::TextSpan{Text: "  ", Style: ui::Style{Background: scale.Tone950}},
+    ],
+  }
+}
+
+fn theme_page(theme: ui::Theme) ui::Widget {
+  ui::Flex{
+    Axis: ui::Vertical,
+    CrossAxisAlignment: ui::CrossAxisStart,
+    Children: [
+      ui::RichText{
+        Spans: [
+          ui::TextSpan{Text: "Theme", Style: bold()},
+          ui::TextSpan{
+            Text: "\nSemantic colors are generated from the palette, then widgets derive their styles from these roles.",
+          },
+        ],
+        SoftWrap: true,
+      },
+      ui::SizedBox{Height: 1},
+      ui::RichText{Spans: [ui::TextSpan{Text: "Semantic colors", Style: bold()}]},
+      theme_group(
+        "base",
+        [
+          theme_swatch_row(
+            [
+              theme_swatch_span("Theme.Background", theme.Background, theme.Foreground),
+              theme_text_span("Theme.Foreground", theme.Foreground),
+              theme_swatch_span("Theme.Border", theme.Border, theme.Background),
+            ],
+          ),
+        ],
+      ),
+      theme_group(
+        "surface",
+        [
+          theme_swatch_row(
+            [
+              theme_swatch_span("Theme.Surface", theme.Surface, theme.Foreground),
+              theme_swatch_span("Theme.SurfaceRaised", theme.SurfaceRaised, theme.Foreground),
+            ],
+          ),
+          theme_swatch_row(
+            [
+              theme_swatch_span("Theme.SurfaceHovered", theme.SurfaceHovered, theme.Foreground),
+              theme_swatch_span("Theme.SurfacePressed", theme.SurfacePressed, theme.Foreground),
+            ],
+          ),
+        ],
+      ),
+      theme_group(
+        "primary and accent",
+        [
+          theme_swatch_row(
+            [
+              theme_swatch_span("Theme.Primary", theme.Primary, theme.Foreground),
+              theme_text_span("Theme.PrimaryText", theme.PrimaryText),
+            ],
+          ),
+          theme_swatch_row(
+            [
+              theme_swatch_span("Theme.PrimaryHovered", theme.PrimaryHovered, theme.Foreground),
+              theme_swatch_span("Theme.PrimaryPressed", theme.PrimaryPressed, theme.Foreground),
+            ],
+          ),
+          theme_swatch_row(
+            [
+              theme_swatch_span("Theme.Accent", theme.Accent, theme.Foreground),
+              theme_text_span("Theme.AccentText", theme.AccentText),
+            ],
+          ),
+        ],
+      ),
+      theme_group(
+        "state",
+        [
+          theme_swatch_row(
+            [
+              theme_swatch_span("Theme.Success", theme.Success, theme.Foreground),
+              theme_text_span("Theme.SuccessText", theme.SuccessText),
+            ],
+          ),
+          theme_swatch_row(
+            [
+              theme_swatch_span("Theme.Warning", theme.Warning, theme.Foreground),
+              theme_text_span("Theme.WarningText", theme.WarningText),
+            ],
+          ),
+          theme_swatch_row(
+            [
+              theme_swatch_span("Theme.Danger", theme.Danger, theme.Foreground),
+              theme_text_span("Theme.DangerText", theme.DangerText),
+            ],
+          ),
+        ],
+      ),
+      theme_group(
+        "text and selection",
+        [
+          theme_swatch_row(
+            [
+              theme_text_span("Theme.MutedForeground", theme.MutedForeground),
+              theme_text_span("Theme.DisabledForeground", theme.DisabledForeground),
+            ],
+          ),
+          theme_swatch_row([theme_swatch_span("Theme.Selection", theme.Selection, theme.Foreground)]),
+        ],
+      ),
+      ui::SizedBox{Height: 1},
+      ui::RichText{Spans: [ui::TextSpan{Text: "Palette tones", Style: bold()}]},
+      palette_scale("neutral", theme.Palette.Neutral),
+      palette_scale("red", theme.Palette.Red),
+      palette_scale("green", theme.Palette.Green),
+      palette_scale("yellow", theme.Palette.Yellow),
+      palette_scale("blue", theme.Palette.Blue),
+      palette_scale("magenta", theme.Palette.Magenta),
+      palette_scale("cyan", theme.Palette.Cyan),
+    ],
+  }
+}
+
+// --- chrome ---
+
+fn tab_button(c: mut ffi::StateCtx, s: DemoState, theme: ui::Theme, label: Str, page: Int) ui::Widget {
+  let tab = ui::Button{Label: label, OnPressed: fn(ev: ui::EventContext) {
+    set_page(c, page)
+  }}
+
+  match s.page == page {
+    true => {
+      let active = ui::Theme{
+        Background: theme.Background,
+        Foreground: theme.Foreground,
+        Surface: theme.Primary,
+        SurfaceHovered: theme.PrimaryHovered,
+      }
+
+      ui::Provider<ui::Theme>{Value: active, Child: tab}
+    },
+    false => tab,
+  }
+}
+
+fn header(c: mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
+  ui::Flex{
+    Axis: ui::Vertical,
+    CrossAxisAlignment: ui::CrossAxisStretch,
+    Children: [
+      ui::RichText{
+        Spans: [
+          ui::TextSpan{Text: "Vaxis UI demo", Style: bold()},
+          ui::TextSpan{Text: "  —  n/p pages, Tab focus, q quit"},
+        ],
+      },
+      ui::Flex{
+        Axis: ui::Horizontal,
+        MainAxisAlignment: ui::MainAxisCenter,
+        CrossAxisAlignment: ui::CrossAxisCenter,
+        Children: [
+          tab_button(c, s, theme, "Home", 0),
+          ui::SizedBox{Width: 1, Height: 1},
+          tab_button(c, s, theme, "Text", 1),
+          ui::SizedBox{Width: 1, Height: 1},
+          tab_button(c, s, theme, "Controls", 2),
+          ui::SizedBox{Width: 1, Height: 1},
+          tab_button(c, s, theme, "Lists", 3),
+          ui::SizedBox{Width: 1, Height: 1},
+          tab_button(c, s, theme, "Table", 4),
+          ui::SizedBox{Width: 1, Height: 1},
+          tab_button(c, s, theme, "Animation", 5),
+          ui::SizedBox{Width: 1, Height: 1},
+          tab_button(c, s, theme, "Theme", 6),
+          ui::SizedBox{Width: 1, Height: 1},
+          tab_button(c, s, theme, "Terminal", 7),
+        ],
+      },
+    ],
+  }
+}
+
+fn footer(s: DemoState) ui::Widget {
+  ui::Flex{
+    Axis: ui::Horizontal,
+    MainAxisAlignment: ui::MainAxisEnd,
+    Children: [
+      ui::RichText{
+        Spans: [
+          ui::TextSpan{Text: "page "},
+          ui::TextSpan{Text: "{s.page + 1}", Style: bold()},
+          ui::TextSpan{Text: " / 5"},
+        ],
+      },
+    ],
+  }
+}
+
+fn list_demo_row(theme: ui::Theme, i: Int) ui::Widget {
+  ui::RichText{
+    Spans: [
+      ui::TextSpan{Text: "{i}", Style: bold()},
+      ui::TextSpan{Text: "  deploy target {100 + i}  "},
+      ui::TextSpan{Text: "ready", Style: ui::Style{Foreground: theme.MutedForeground}},
+    ],
+  }
+}
+
+fn chat_message(i: Int, body: Str) ui::Widget {
+  ui::RichText{Spans: [ui::TextSpan{Text: "{i + 1} "}, ui::TextSpan{Text: body}], SoftWrap: true}
+}
+
+fn list_tile(leading: Str, title: Str, subtitle: Str, trailing: Str, note: Str) ui::Widget {
+  ui::ListTile{
+    Leading: ui::Text{Value: leading},
+    Title: ui::Text{Value: title},
+    Subtitle: ui::Text{Value: subtitle},
+    Trailing: ui::Text{Value: trailing},
+    OnPressed: fn(ev: ui::EventContext) {
+      ev.Notify("List tile", note)
+    },
+  }
+}
+
+fn lists_page(c: mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
+  ui::Flex{
+    Axis: ui::Vertical,
+    CrossAxisAlignment: ui::CrossAxisStretch,
+    Children: [
+      ui::RichText{
+        Spans: [
+          ui::TextSpan{Text: "Lists", Style: bold()},
+          ui::TextSpan{Text: "  mixed slivers, lazy rows, and follow-output logs"},
+        ],
+        SoftWrap: true,
+      },
+      ui::SizedBox{Height: 1},
+      list_tile("•", "Deploy queue", "2 running, 4 queued", "open", "Deploy queue"),
+      list_tile("✓", "Checks passing", "", "12/12", "Checks passing"),
+      ui::SizedBox{Height: 1},
+      ui::SizedBox{
+        Width: 72,
+        Height: 5,
+        Child: ui::Scrollbar{
+          Child: ui::CustomScrollView{
+            Slivers: [
+              ui::SliverToBox{
+                Child: ui::Text{Value: "The intro sliver scrolls away before the pinned header takes over.", SoftWrap: true},
+              },
+              ui::SliverPinnedHeader{
+                Child: ui::Text{
+                  Value: " #  target             status",
+                  Style: ui::Style{
+                    Attribute: ui::AttrBold,
+                    Foreground: theme.Foreground,
+                    Background: theme.Surface,
+                  },
+                },
+              },
+              ui::SliverListBuilder{
+                Count: 2000,
+                ItemExtent: 1,
+                Overscan: 12,
+                Builder: fn(bctx: ui::BuildContext, i: Int) ui::Widget {
+                  list_demo_row(theme, i + 1)
+                },
+              },
+            ],
+          },
+        },
+      },
+      ui::SizedBox{Height: 1},
+      ui::TextField{
+        Value: s.chat,
+        Placeholder: "echo a message",
+        MinWidth: 72,
+        OnChanged: fn(ev: ui::EventContext, value: Str) {
+          set_chat(c, value)
+        },
+        OnSubmitted: fn(ev: ui::EventContext, value: Str) {
+          submit_chat(c, value)
+        },
+      },
+      ui::SizedBox{Height: 1},
+      ui::Text{Value: "Variable-height messages", Style: bold()},
+      ui::SizedBox{
+        Width: 72,
+        Height: 4,
+        Child: ui::Scrollbar{
+          Child: ui::CustomScrollView{
+            FollowOutput: true,
+            Slivers: [
+              ui::SliverListBuilder{
+                Count: s.logs.size(),
+                EstimatedItemExtent: 2,
+                Overscan: 8,
+                Builder: fn(bctx: ui::BuildContext, i: Int) ui::Widget {
+                  chat_message(i, s.logs.at(i).or(""))
+                },
+              },
+            ],
+          },
+        },
+      },
+    ],
+  }
+}
+
+// 24 rows of scrollable content, built with a range loop + list push.
+fn scroll_demo_lines() ui::Widget {
+  mut rows: [ui::Widget] = []
+  for i in 1..24 {
+    rows.push(
+      ui::RichText{
+        Spans: [
+          ui::TextSpan{Text: "row {i}", Style: bold()},
+          ui::TextSpan{Text: "  scrollable content for the demo viewport"},
+        ],
+      },
+    )
+  }
+  ui::Flex{
+    Axis: ui::Vertical,
+    CrossAxisAlignment: ui::CrossAxisStart,
+    Children: rows,
+  }
+}
+
+fn horizontal_scroll_demo_line() Str {
+  "col-001 alpha  |  col-002 beta  |  col-003 gamma  |  col-004 delta  |  col-005 epsilon  |  col-006 zeta  |  col-007 eta"
+}
+
+fn pad2(n: Int) Str {
+  match n < 10 {
+    true => "0{n}",
+    false => "{n}",
+  }
+}
+
+// An 18x10 grid of labels, built with nested range loops + string interpolation.
+fn scroll_pane_demo_text() Str {
+  mut text = ""
+  for r in 1..18 {
+    mut line = ""
+    for col in 1..10 {
+      line = "{line}r{pad2(r)}c{pad2(col)}  "
+    }
+    text = "{text}{line}\n"
+  }
+  text
+}
+
+fn text_page(theme: ui::Theme) ui::Widget {
+  ui::SelectionArea{
+    Child: ui::Flex{
+      Axis: ui::Vertical,
+      CrossAxisAlignment: ui::CrossAxisStart,
+      Children: [
+        ui::RichText{
+          Spans: [
+            ui::TextSpan{Text: "Text layout", Style: bold()},
+            ui::TextSpan{
+              Text: "\nDrag to select, double-click words, triple-click lines, then press Ctrl+C to copy.",
+            },
+            ui::TextSpan{Text: "\nRichText spans can mix "},
+            ui::TextSpan{Text: "bold", Style: bold()},
+            ui::TextSpan{Text: ", "},
+            ui::TextSpan{Text: "italic", Style: ui::Style{Attribute: ui::AttrItalic}},
+            ui::TextSpan{Text: ", and normal text while sharing the same selection area."},
+          ],
+          SoftWrap: true,
+        },
+        ui::SizedBox{Height: 1},
+        ui::SizedBox{
+          Width: 72,
+          Height: 5,
+          Child: ui::Scrollbar{Child: ui::ScrollView{Child: scroll_demo_lines()}},
+        },
+        ui::SizedBox{Height: 1},
+        ui::Text{Value: "Horizontal scroll"},
+        ui::SizedBox{
+          Width: 48,
+          Height: 2,
+          Child: ui::Scrollbar{
+            Axis: ui::ScrollHorizontal,
+            Child: ui::ScrollView{Axis: ui::ScrollHorizontal, Child: ui::Text{Value: horizontal_scroll_demo_line()}},
+          },
+        },
+        ui::SizedBox{Height: 1},
+        ui::Text{Value: "Scroll pane"},
+        ui::SizedBox{
+          Width: 48,
+          Height: 6,
+          Child: ui::Scrollbar{
+            Axis: ui::ScrollHorizontal,
+            Child: ui::Scrollbar{Child: ui::ScrollPane{Child: ui::Text{Value: scroll_pane_demo_text()}}},
+          },
+        },
+        ui::SizedBox{Height: 1},
+        ui::ConstrainedBox{
+          Constraints: ui::Constraints{MaxWidth: 72},
+          Child: ui::Text{
+            Value: "This paragraph is constrained to seventy-two cells so resizing the terminal makes the surrounding layout obvious while the paragraph itself wraps inside a predictable measure.",
+            SoftWrap: true,
+          },
+        },
+        ui::RichText{
+          Spans: [
+            ui::TextSpan{Text: "Multiple selectable widgets: ", Style: bold()},
+            ui::TextSpan{Text: "drag from this phrase "},
+            ui::TextSpan{Text: "through the next line", Style: bold()},
+            ui::TextSpan{Text: " to test cross-widget copy."},
+          ],
+          SoftWrap: true,
+        },
+        ui::RichText{
+          Spans: [
+            ui::TextSpan{Text: "Inline links can carry OSC 8 metadata and mouse callbacks: "},
+            ui::TextSpan{
+              Text: "rockorager.dev",
+              Style: ui::Style{
+                Foreground: theme.PrimaryHovered,
+                UnderlineStyle: ui::UnderlineSingle,
+                Hyperlink: "https://rockorager.dev",
+                HyperlinkParams: "id=rockorager-demo-link",
+              },
+              OnPressed: fn(ev: ui::EventContext) {
+                ev.Notify("Link clicked", "rockorager.dev")
+              },
+            },
+          ],
+          SoftWrap: true,
+        },
+        ui::Text{Value: "Second selectable line follows the first in copied text."},
+        ui::SelectionContainer{
+          Disabled: true,
+          Child: ui::RichText{
+            Spans: [
+              ui::TextSpan{
+                Text: "This line opts out of SelectionArea.",
+                Style: ui::Style{Foreground: theme.DisabledForeground},
+              },
+            ],
+          },
+        },
+        ui::ConstrainedBox{
+          Constraints: ui::Constraints{MaxWidth: 48},
+          Child: ui::Text{
+            Value: "Ellipsis keeps hidden source text out of mouse selection.",
+            Overflow: ui::TextOverflowEllipsis,
+            MaxLines: 1,
+          },
+        },
+        ui::ConstrainedBox{
+          Constraints: ui::Constraints{MinWidth: 72, MaxWidth: 72},
+          Child: ui::Text{Value: "center aligned text", Align: ui::TextAlignCenter},
+        },
+      ],
+    },
+  }
+}
+
+fn animation_status(status: ui::AnimationStatus) Str {
+  match status == ui::AnimationForward {
+    true => "running",
+    false => {
+      match status == ui::AnimationCompleted {
+        true => "complete",
+        false => "idle",
+      }
+    },
+  }
+}
+
+fn clamp_int(v: Int, lo: Int, hi: Int) Int {
+  match v < lo {
+    true => lo,
+    false => {
+      match v > hi {
+        true => hi,
+        false => v,
+      }
+    },
+  }
+}
+
+// A "|   ◆   |" track with the diamond placed by the animation value.
+fn animation_track(value: Float64, width: Int) Str {
+  let raw = (value * (width - 1).to_f64()).to_int()
+  let pos = clamp_int(raw, 0, width - 1)
+  mut bar = "|"
+  for i in 1..pos {
+    bar = "{bar} "
+  }
+  bar = "{bar}◆"
+  let rest = width - pos - 1
+  for i in 1..rest {
+    bar = "{bar} "
+  }
+  "{bar}|"
+}
+
+fn animation_page(c: mut ffi::StateCtx, theme: ui::Theme) ui::Widget {
+  let anim = ffi::Animation(c)
+  let value = anim.Value()
+  let status = animation_status(anim.Status())
+  ui::Flex{
+    Axis: ui::Vertical,
+    CrossAxisAlignment: ui::CrossAxisStart,
+    Children: [
+      ui::RichText{
+        Spans: [
+          ui::TextSpan{Text: "Animation", Style: bold()},
+          ui::TextSpan{
+            Text: "\nThis page uses a StateBase-owned AnimationController. The runner ticks it before each frame and the state is rebuilt while it is active.",
+          },
+        ],
+        SoftWrap: true,
+      },
+      ui::SizedBox{Height: 1},
+      ui::RichText{
+        Spans: [
+          ui::TextSpan{Text: "value: "},
+          ui::TextSpan{Text: strconv::FormatFloat(value, 102, 2, 64), Style: bold()},
+          ui::TextSpan{Text: "   status: "},
+          ui::TextSpan{Text: status, Style: bold()},
+        ],
+      },
+      ui::ConstrainedBox{
+        Constraints: ui::Constraints{MaxWidth: 120},
+        Child: ui::Text{Value: animation_track(value, 120), Overflow: ui::TextOverflowClip},
+      },
+      ui::ConstrainedBox{
+        Constraints: ui::Constraints{MaxWidth: 120},
+        Child: ui::ProgressBar{
+          Value: value,
+          GradientStart: theme.Accent,
+          GradientEnd: theme.PrimaryHovered,
+        },
+      },
+      ui::SizedBox{Height: 1},
+      ui::Flex{
+        Axis: ui::Horizontal,
+        CrossAxisAlignment: ui::CrossAxisCenter,
+        Children: [
+          ui::Button{Label: "Replay", OnPressed: fn(ev: ui::EventContext) {
+            anim.Forward()
+          }},
+          ui::SizedBox{Width: 1, Height: 1},
+          ui::Button{Label: "Stop", OnPressed: fn(ev: ui::EventContext) {
+            anim.Stop()
+          }},
+          ui::SizedBox{Width: 1, Height: 1},
+          ui::Button{Label: "Reset", OnPressed: fn(ev: ui::EventContext) {
+            anim.Reset()
+          }},
+        ],
+      },
+    ],
+  }
+}
+
+// A PTY-backed terminal widget. exec.Command's variadic arg and term.Option
+// functional options are inexpressible in Ard (ffi shim); the widget and its
+// OnEvent handler — a match over the ui::Event dynamic type — stay in Ard.
+fn terminal_page(theme: ui::Theme) ui::Widget {
+  ui::Flex{
+    Axis: ui::Vertical,
+    CrossAxisAlignment: ui::CrossAxisStretch,
+    Children: [
+      ui::RichText{
+        Spans: [
+          ui::TextSpan{Text: "Terminal", Style: bold()},
+          ui::TextSpan{Text: "\nThe terminal model renders through the ui framework as a focusable widget."},
+        ],
+        SoftWrap: true,
+      },
+      ui::SizedBox{Height: 1},
+      ui::DecoratedBox(
+        ui::Decoration{Style: ui::Style{Background: theme.Surface}, Border: ui::BorderLine(theme.Border)},
+        ui::Padding(
+          ui::All(1),
+          ui::SizedBox{
+            Width: 72,
+            Height: 8,
+            Child: term::Terminal{
+              Command: ffi::ShellCommand(),
+              Options: ffi::TerminalOptions(),
+              AutoFocus: true,
+              OnEvent: fn(ctx: ui::EventContext, ev: ui::Event) ui::EventResult {
+                match ev {
+                  term::EventNotify(e) => {
+                    ctx.Notify(e.Title, e.Body)
+                    ui::EventHandled
+                  },
+                  term::EventTitle(t) => {
+                    ctx.SetTitle(t)
+                    ui::EventHandled
+                  },
+                  _ => ui::EventIgnored,
+                }
+              },
+            },
+          },
+        ),
+      ),
+      ui::SizedBox{Height: 1},
+      ui::Text{
+        Value: "Starts your shell in a PTY. Alt+k still opens the palette; page shortcuts are disabled here so shell input wins.",
+        SoftWrap: true,
+      },
+    ],
+  }
+}
+
+fn page_body(c: mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
+  match s.page {
+    1 => text_page(theme),
+    2 => controls_page(c, s, theme),
+    3 => lists_page(c, s, theme),
+    4 => table_page(),
+    5 => animation_page(c, theme),
+    6 => theme_page(theme),
+    7 => terminal_page(theme),
+    _ => home_page(s),
+  }
+}
+
+fn next_page(page: Int) Int {
+  match page == 7 {
+    true => 0,
+    false => page + 1,
+  }
+}
+
+fn previous_page(page: Int) Int {
+  match page == 0 {
+    true => 7,
+    false => page - 1,
+  }
+}
+
+fn build(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+  let state = ffi::StateValue<DemoState>(c)
+  let theme = ui::MustDepend<ui::Theme>(ctx)
+  let body = ui::DecoratedBox(
+    ui::Decoration{Style: ui::Style{Foreground: theme.Foreground, Background: theme.Background}},
+    ui::Padding(
+      ui::All(1),
+      ui::Flex{
+        Axis: ui::Vertical,
+        CrossAxisAlignment: ui::CrossAxisStretch,
+        Children: [
+          header(c, state, theme),
+          ui::SizedBox{Height: 1},
+          ui::Padding(ui::All(1), page_body(c, state, theme)),
+          ui::SizedBox{Height: 1},
+          footer(state),
+        ],
+      },
+    ),
+  )
+  // Modal overlays sit above the page; palette and dialog appear when opened.
+  let palette_list: [ui::OverlayEntry] = match state.palette {
+    true => [palette_entry(c)],
+    false => [],
+  }
+  let dialog_list: [ui::OverlayEntry] = match state.dialog {
+    true => [dialog_entry(c)],
+    false => [],
+  }
+  mut overlays: [ui::OverlayEntry] = []
+  for e in palette_list {
+    overlays.push(e)
+  }
+  for e in dialog_list {
+    overlays.push(e)
+  }
+  // Custom demo intents are string intent types; only the ui.Intent interface
+  // wrapper (ffi::Intent) needs Go. Str literals widen into ui::IntentType
+  // keys and parameters directly.
+  // The palette search field and the terminal both own the keyboard, so the
+  // single-key page shortcuts are suppressed there (Alt+k still toggles it).
+  let keys_captured = state.palette or state.page == 7
+  let shortcuts: [Str: ui::Intent] = match keys_captured {
+    true => ["Alt+k": ffi::Intent("demo.command-palette")],
+    false => {
+      [
+        "q": ffi::Intent("demo.quit"),
+        "n": ffi::Intent("demo.next-page"),
+        "p": ffi::Intent("demo.previous-page"),
+        "Alt+k": ffi::Intent("demo.command-palette"),
+      ]
+    },
+  }
+  ui::Actions{
+    Bindings: [
+      "demo.quit": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        ev.Quit()
+        ui::EventHandled
+      },
+      "demo.command-palette": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        set_palette(c, true)
+        ui::EventHandled
+      },
+      "demo.next-page": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        set_page(c, next_page(state.page))
+        ui::EventHandled
+      },
+      "demo.previous-page": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        set_page(c, previous_page(state.page))
+        ui::EventHandled
+      },
+    ],
+    Child: ui::Shortcuts{Bindings: shortcuts, Child: ui::Overlay{Child: body, Entries: overlays}},
+  }
+}
+
+fn main() {
+  let app = ffi::Stateful{
+    Init: fn() Any {
+      DemoState{
+        page: 0,
+        count: 0,
+        ticks: 0,
+        name: "",
+        notes: "",
+        done: false,
+        dialog: false,
+        palette: false,
+        mode: "compact",
+        chat: "",
+        logs: ["Ada: welcome to the echo log", "Linus: submit a message below"],
+      }
+    },
+    Build: build,
+    OnTick: tick,
+    Animate: true,
+  }
+
+  let _ = ui::Run(app)
+}

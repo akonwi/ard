@@ -1,4 +1,7 @@
-use ard/io
+use go:bufio
+use go:fmt
+use go:os
+use go:strings
 
 struct WordCount {
   word: Str,
@@ -20,29 +23,31 @@ fn count_words(words: [Str]) [WordCount] {
 }
 
 fn main() {
-  io::print("Enter some text to analyze:")
-  match io::read_line() {
-    ok(text) => {
-      let words = Str::split(text, " ")
-      mut word_counts = count_words(words)
+  mut scanner = bufio::NewScanner(os::Stdin)
 
-      io::print("\nWord Frequency Analysis:")
-      io::print("------------------------")
-      io::print("Total words: {words.size()}")
-      io::print("Unique words: {word_counts.size()}")
+  fmt::Println("Enter some text to analyze:")
+  if scanner.Scan() {
+    let text = strings::TrimSpace(scanner.Text())
+    let words = strings::Split(text, " ")
+    mut word_counts = count_words(words)
 
-      io::print("\nMost frequent words:")
-      word_counts.sort(
-        fn(a: WordCount, b: WordCount) Bool {
-          a.count > b.count
-        },
-      )
+    fmt::Println("\nWord Frequency Analysis:")
+    fmt::Println("------------------------")
+    fmt::Println("Total words: {words.size()}")
+    fmt::Println("Unique words: {word_counts.size()}")
 
-      for entry, rank in word_counts {
-        io::print("{rank + 1}. {entry.word}: {entry.count}")
-      }
-    },
-    err => io::print("Unable to read input: {err}"),
+    fmt::Println("\nMost frequent words:")
+    word_counts.sort(
+      fn(a: WordCount, b: WordCount) Bool {
+        a.count > b.count
+      },
+    )
+
+    for entry, rank in word_counts {
+      fmt::Println("{rank + 1}. {entry.word}: {entry.count}")
+    }
+  } else {
+    fmt::Println("Unable to read input")
   }
 }
 

@@ -2,7 +2,13 @@
 
 ## Status
 
-Accepted
+Superseded by `docs/adrs/0033-async-is-goroutines-and-channels.md`.
+
+The `Fiber<$T>` / `runtime.Fiber` model, `async::eval`/`join`/`get`, and the
+fiber capture-isolation rule described below are no longer in effect. Async is
+now just `async::start` (a fire-and-forget goroutine) plus channels, and
+result-returning/joining ergonomics are ordinary userland Ard. The historical
+decision is preserved below for context.
 
 ## Context
 

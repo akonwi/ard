@@ -54,7 +54,7 @@ use ard/dynamic
 let dyn = Dynamic::from_int(42)
 ```
 
-#### `fn from_float(val: Float) Dynamic`
+#### `fn from_float(val: Float64) Dynamic`
 
 Convert a float to a Dynamic value.
 
@@ -122,7 +122,7 @@ let obj = Dynamic::object([
 
 #### `fn from(primitive: Primitive) Dynamic`
 
-Convert a primitive value (`Str`, `Int`, `Float`, `Bool`, `Byte`, `Rune`, or `Void`) to Dynamic. Byte and rune values become numeric dynamic values.
+Convert a primitive value (`Str`, `Int`, `Float64`, `Bool`, `Byte`, `Rune`, or `Void`) to Dynamic. Byte and rune values become numeric dynamic values.
 
 ```ard
 use ard/dynamic

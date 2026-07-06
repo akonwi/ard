@@ -3,7 +3,6 @@ package air
 type ModuleID int
 type TypeID int
 type FunctionID int
-type ExternID int
 type GlobalID int
 type LocalID int
 type TraitID int
@@ -20,7 +19,6 @@ type Program struct {
 	Types     []TypeInfo
 	Traits    []Trait
 	Impls     []Impl
-	Externs   []Extern
 	Globals   []Global
 	Tests     []Test
 	Functions []Function
@@ -43,6 +41,7 @@ type Global struct {
 	Name    string
 	Type    TypeID
 	Mutable bool
+	Private bool
 	Value   Expr
 }
 
@@ -56,6 +55,19 @@ type Function struct {
 	Body      Block
 	IsTest    bool
 	IsScript  bool
+	Private   bool
+
+	// TypeParams names the generic parameters for a generic function definition
+	// (ADR 0031). When set, the function is emitted as `func Name[T any](...)`
+	// and its body/signature reference TypeParam-kind types. Call sites carry
+	// concrete type arguments (Expr.TypeArgs).
+	TypeParams []string
+
+	// Receiver and MethodName are set for Ard impl methods. They let targets
+	// optionally expose a host-language method shape while preserving the
+	// standalone function lowering used by AIR calls.
+	Receiver   TypeID
+	MethodName string
 }
 
 type Signature struct {
@@ -74,6 +86,10 @@ type Local struct {
 	Name    string
 	Type    TypeID
 	Mutable bool
+	// Reference marks a local bound to live mutable storage owned elsewhere
+	// (an Ard `mut T` value produced by a foreign call). The Go backend keeps
+	// the local pointer-backed so mutations flow through to the owner.
+	Reference bool
 }
 
 type Capture struct {
@@ -92,7 +108,9 @@ type TypeKind uint8
 const (
 	TypeVoid TypeKind = iota
 	TypeInt
-	TypeFloat
+	TypeScalar
+	TypeForeignType
+	TypeFloat64
 	TypeBool
 	TypeByte
 	TypeRune
@@ -104,11 +122,16 @@ const (
 	TypeMaybe
 	TypeResult
 	TypeUnion
-	TypeDynamic
-	TypeExtern
+	TypeAny
 	TypeFunction
-	TypeFiber
+	TypeChannel
+	TypeReceiver
+	TypeSender
 	TypeTraitObject
+	// TypeParam is a reference to a generic type parameter inside a generic
+	// definition (e.g. the `T` in `struct Partition { selected: [$T] }`). It only appears in
+	// the fields/signature of a generic definition, never in a concrete value.
+	TypeParam
 )
 
 type TypeInfo struct {
@@ -116,13 +139,20 @@ type TypeInfo struct {
 	Kind       TypeKind
 	Name       string
 	ModulePath string
+	Private    bool
 
-	ExternBinding string
+	Elem        TypeID
+	ElemMutable bool
+	Key         TypeID
+	Value       TypeID
+	Error       TypeID
 
-	Elem  TypeID
-	Key   TypeID
-	Value TypeID
-	Error TypeID
+	ForeignTarget    string
+	ForeignNamespace string
+	ForeignQualifier string
+	ForeignSymbol    string
+	ForeignPointer   bool
+	ForeignInterface bool
 
 	Fields   []FieldInfo
 	Variants []VariantInfo
@@ -133,6 +163,16 @@ type TypeInfo struct {
 	ParamMutable []bool
 	Return       TypeID
 	Trait        TraitID
+
+	// Generic representation (ADR 0031). A generic definition sets TypeParams
+	// (the parameter names) and references them via TypeParam-kind fields. A
+	// concrete instantiation keeps its concrete Fields for AIR typing but also
+	// records Generic (the definition's TypeID) and GenericArgs (the type
+	// arguments), so the backend can emit it as `Def[args...]`.
+	TypeParams  []string
+	ParamIndex  int
+	Generic     TypeID
+	GenericArgs []TypeID
 }
 
 type FieldInfo struct {
@@ -154,9 +194,11 @@ type UnionMember struct {
 }
 
 type Trait struct {
-	ID      TraitID
-	Name    string
-	Methods []TraitMethod
+	ID         TraitID
+	Name       string
+	ModulePath string
+	Private    bool
+	Methods    []TraitMethod
 }
 
 type TraitMethod struct {
@@ -169,13 +211,4 @@ type Impl struct {
 	Trait   TraitID
 	ForType TypeID
 	Methods []FunctionID
-}
-
-type Extern struct {
-	ID        ExternID
-	Module    ModuleID
-	Name      string
-	Signature Signature
-	TypeArgs  []TypeID
-	Bindings  map[string]string
 }

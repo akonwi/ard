@@ -2,7 +2,10 @@ package checker
 
 import (
 	"fmt"
+	gotypes "go/types"
 	"maps"
+	"math"
+	"math/big"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -14,15 +17,20 @@ import (
 )
 
 type Program struct {
-	Imports       map[string]Module
-	Statements    []Statement
-	StructMethods map[MethodOwner]map[string]*FunctionDef
+	Imports               map[string]Module
+	GoImports             map[string]*GoPackage
+	Statements            []Statement
+	StructMethods         map[MethodOwner]map[string]*FunctionDef
+	ForeignInterfaceImpls map[MethodOwner][]*ForeignType
 }
 
 type Module interface {
 	Path() string
 	Get(name string) Symbol
 	Program() *Program
+	// Symbols returns the module's public symbols by name. The map is owned
+	// by the module and must be treated as read-only.
+	Symbols() map[string]Symbol
 }
 
 type DiagnosticKind string
@@ -107,6 +115,24 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			return typ // No change, return original
 		}
 		return &List{of: derefInner}
+	case *Chan:
+		derefInner := derefTypeSeen(typ.of, seen)
+		if derefInner == typ.of {
+			return typ
+		}
+		return &Chan{of: derefInner}
+	case *Receiver:
+		derefInner := derefTypeSeen(typ.of, seen)
+		if derefInner == typ.of {
+			return typ
+		}
+		return &Receiver{of: derefInner}
+	case *Sender:
+		derefInner := derefTypeSeen(typ.of, seen)
+		if derefInner == typ.of {
+			return typ
+		}
+		return &Sender{of: derefInner}
 	case *Map:
 		derefKey := derefTypeSeen(typ.key, seen)
 		derefVal := derefTypeSeen(typ.value, seen)
@@ -155,6 +181,7 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			Name:       typ.Name,
 			ModulePath: typ.ModulePath,
 			Types:      newTypes,
+			Private:    typ.Private,
 		}
 	case *StructDef:
 		fieldsChanged := false
@@ -178,14 +205,15 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			return typ
 		}
 		return &StructDef{
-			Name:          typ.Name,
-			ModulePath:    typ.ModulePath,
-			Fields:        newFields,
-			Self:          typ.Self,
-			Traits:        typ.Traits,
-			GenericParams: append([]string(nil), typ.GenericParams...),
-			TypeArgs:      newTypeArgs,
-			Private:       typ.Private,
+			Name:             typ.Name,
+			ModulePath:       typ.ModulePath,
+			Fields:           newFields,
+			Self:             typ.Self,
+			Traits:           typ.Traits,
+			GenericParams:    append([]string(nil), typ.GenericParams...),
+			DeclaredGenerics: typ.DeclaredGenerics,
+			TypeArgs:         newTypeArgs,
+			Private:          typ.Private,
 		}
 	case *FunctionDef:
 		newParams := make([]Parameter, len(typ.Parameters))
@@ -218,62 +246,49 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			Private:                 typ.Private,
 			GenericBindings:         cloneTypeMap(typ.GenericBindings),
 		}
-	case *ExternType:
-		if len(typ.TypeArgs) == 0 {
-			return typ
-		}
-		newTypeArgs := make([]Type, len(typ.TypeArgs))
-		changed := false
-		for i, typeArg := range typ.TypeArgs {
-			newTypeArgs[i] = derefTypeSeen(typeArg, seen)
-			if newTypeArgs[i] != typeArg {
-				changed = true
-			}
-		}
-		if !changed {
-			return typ
-		}
-		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: newTypeArgs, ExternalBinding: typ.ExternalBinding, ExternalBindings: cloneExternalBindings(typ.ExternalBindings), private: typ.private}
 	default:
 		return t
 	}
 }
 
+// referenceArgType returns the type used when matching an argument against a
+// parameter, preserving a mutable-reference field's reference type. Reading a
+// `mut T` field deref's to its value type `T` (write-through semantics); this
+// recovers the underlying `mut T` so a stored handle (a mutable lvalue) can be
+// borrowed back into `mut T` at a call site (ADR 0031).
+func referenceArgType(expr Expression) Type {
+	if ip, ok := expr.(*InstanceProperty); ok {
+		return ip._type
+	}
+	return expr.Type()
+}
+
 func (c Checker) isMutable(expr Expression) bool {
 	switch e := expr.(type) {
 	case *Variable:
+		// A value whose type is a mutable reference is itself mutable through the
+		// reference, regardless of whether the binding is reassignable (ADR 0031).
+		// Mirrors the InstanceProperty case so a `mut T` value is usable wherever a
+		// `mut T` is expected (fields, params, mutating methods).
+		if _, ok := mutableRefBase(e.sym.Type); ok {
+			return true
+		}
+		if isPointerForeign(e.sym.Type) {
+			return true
+		}
 		return e.sym.mutable
 	case *InstanceProperty:
 		if _, ok := mutableRefBase(e._type); ok {
 			return true
 		}
+		if isPointerForeign(e._type) {
+			return true
+		}
+		return c.isMutable(e.Subject)
+	case *ForeignFieldAccess:
 		return c.isMutable(e.Subject)
 	}
 	return false
-}
-
-func (c *Checker) checkDirectGoFieldAssignmentTarget(ip *parse.InstanceProperty) (*DirectGoFieldAccess, bool) {
-	if ip == nil {
-		return nil, false
-	}
-	subject := c.checkExpr(ip.Target)
-	if subject == nil {
-		return nil, true
-	}
-	return c.checkDirectGoInstancePropertyAssignmentTarget(subject, ip.Property.Name, ip.Property.GetLocation())
-}
-
-func (c Checker) isDirectGoFieldAssignable(field *DirectGoFieldAccess) bool {
-	if field == nil || field.Subject == nil {
-		return false
-	}
-	if _, ok := mutableRefBase(field.Subject.Type()); ok {
-		return true
-	}
-	if subjectField, ok := field.Subject.(*DirectGoFieldAccess); ok {
-		return c.isDirectGoFieldAssignable(subjectField)
-	}
-	return c.isMutable(field.Subject)
 }
 
 type Checker struct {
@@ -286,18 +301,23 @@ type Checker struct {
 	halted                            bool
 	moduleResolver                    *ModuleResolver
 	options                           CheckOptions
-	directGoImports                   map[string]directGoImport
 	expectedExpr                      Type
 	duplicateTopLevelTypeDeclarations map[parse.Statement]bool
 	topLevelStructDeclarations        map[string]*parse.StructDefinition
 	topLevelTypeAliases               map[string]*parse.TypeDeclaration
+	hoistedTopLevelFunctions          map[*parse.FunctionDeclaration]*FunctionDef
 	resolvingTopLevelStructs          map[string]bool
 	resolvedTopLevelStructs           map[string]bool
 	resolvingTopLevelAliases          map[string]bool
 	resolvedTopLevelAliases           map[string]bool
 	genericContextStack               []map[string]bool
+	methodGenericAllowlist            []map[string]bool
 	discardExprContext                bool
 	matchArmDiscardContext            bool
+	reportedMapKeyErrors              map[parse.Location]bool
+	goTypesContext                    *gotypes.Context
+	spans                             *SpanIndex
+	moduleFiles                       map[string]string
 }
 
 func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, options ...CheckOptions) *Checker {
@@ -307,30 +327,26 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 	if checkOptions.ModulePath != "" {
 		modulePath = checkOptions.ModulePath
 	}
-	if checkOptions.GoResolver == nil {
-		dir := filepath.Dir(filePath)
-		if strings.HasPrefix(modulePath, "ard/") {
-			dir = "."
-		}
-		if moduleResolver != nil && moduleResolver.project.RootPath != "" {
-			dir = moduleResolver.project.RootPath
-		}
-		checkOptions.GoResolver = NewGoPackagesResolver(dir)
-	}
 	c := &Checker{
-		diagnostics:     []Diagnostic{},
-		input:           input,
-		filePath:        filePath,
-		modulePath:      modulePath,
-		moduleResolver:  moduleResolver,
-		options:         checkOptions,
-		directGoImports: map[string]directGoImport{},
+		diagnostics:    []Diagnostic{},
+		input:          input,
+		filePath:       filePath,
+		modulePath:     modulePath,
+		moduleResolver: moduleResolver,
+		options:        checkOptions,
 		program: &Program{
-			Imports:       map[string]Module{},
-			Statements:    []Statement{},
-			StructMethods: map[MethodOwner]map[string]*FunctionDef{},
+			Imports:               map[string]Module{},
+			GoImports:             map[string]*GoPackage{},
+			Statements:            []Statement{},
+			StructMethods:         map[MethodOwner]map[string]*FunctionDef{},
+			ForeignInterfaceImpls: map[MethodOwner][]*ForeignType{},
 		},
-		scope: &rootScope,
+		scope:          &rootScope,
+		goTypesContext: gotypes.NewContext(),
+	}
+	if checkOptions.RecordSpans {
+		c.spans = &SpanIndex{}
+		c.moduleFiles = map[string]string{}
 	}
 
 	return c
@@ -361,21 +377,16 @@ func (c *Checker) Check() {
 		seenImportAliases[imp.Name] = struct{}{}
 
 		if imp.Kind == parse.ImportKindGo {
-			if !validDirectGoImportAlias(imp.Name) {
-				c.addError(fmt.Sprintf("Go import alias %q cannot be used as a Go selector; use `as` with a valid Go identifier", imp.Name), imp.GetLocation())
+			resolver := c.options.GoResolver
+			if resolver == nil {
+				resolver = ImporterGoPackageResolver{}
+			}
+			pkg, err := resolver.ResolveGoPackage(imp.Path)
+			if err != nil {
+				c.addError(fmt.Sprintf("Failed to resolve Go import '%s': %v", imp.Path, err), imp.GetLocation())
 				continue
 			}
-			goImport := directGoImport{alias: imp.Name, importPath: imp.Path}
-			if c.options.GoResolver != nil {
-				pkg, err := c.options.GoResolver.LoadPackage(imp.Path)
-				if err != nil {
-					c.addError(fmt.Sprintf("Failed to load Go package '%s': %v", imp.Path, err), imp.GetLocation())
-					c.directGoImports[imp.Name] = goImport
-					continue
-				}
-				goImport.pkg = pkg
-			}
-			c.directGoImports[imp.Name] = goImport
+			c.program.GoImports[imp.Name] = pkg
 			continue
 		}
 
@@ -421,12 +432,6 @@ func (c *Checker) Check() {
 
 			// Type-check the imported module
 			importOptions := c.options
-			if resolved.PackageID != "" {
-				pkg := c.moduleResolver.packageInfo(resolved.PackageID)
-				if pkg.RootPath != "" {
-					importOptions.GoResolver = NewGoPackagesResolver(pkg.RootPath)
-				}
-			}
 			userModule, diagnostics := check(ast, c.moduleResolver, filePath, resolved.ModulePath, importOptions)
 			c.moduleResolver.loadingChain = c.moduleResolver.loadingChain[:len(c.moduleResolver.loadingChain)-1]
 			if len(diagnostics) > 0 {
@@ -441,6 +446,9 @@ func (c *Checker) Check() {
 			if um, ok := userModule.(*UserModule); ok {
 				um.setFilePath(resolved.ModulePath)
 			}
+			if c.moduleFiles != nil {
+				c.moduleFiles[resolved.ModulePath] = filePath
+			}
 
 			// Cache and add to imports
 			c.moduleResolver.moduleCache[filePath] = userModule
@@ -450,12 +458,6 @@ func (c *Checker) Check() {
 
 	// Auto-import prelude modules (only for non-std lib)
 	if !strings.HasPrefix(c.filePath, "ard/") {
-		if mod, ok := findInStdLib("ard/dynamic"); ok {
-			c.program.Imports["Dynamic"] = mod
-		}
-		if mod, ok := findInStdLib("ard/float"); ok {
-			c.program.Imports["Float"] = mod
-		}
 		if mod, ok := findInStdLib("ard/int"); ok {
 			c.program.Imports["Int"] = mod
 		}
@@ -479,6 +481,7 @@ func (c *Checker) Check() {
 	c.hoistTopLevelTypeDeclarations()
 	c.predeclareTopLevelTypeAliases()
 	c.populateTopLevelTypeDefinitions()
+	c.hoistTopLevelFunctionSignatures()
 
 	for i := range c.input.Statements {
 		if stmt := c.checkedTopLevelTypeStatement(c.input.Statements[i]); stmt != nil {
@@ -585,8 +588,6 @@ func namedTypeRequiresTypeArguments(t Type) bool {
 	switch typ := t.(type) {
 	case *StructDef:
 		return (len(typ.GenericParams) > 0 && len(typ.TypeArgs) == 0) || hasGenericsInType(typ)
-	case *ExternType:
-		return len(typ.GenericParams) > 0 || hasGenericsInType(typ)
 	default:
 		return hasGenericsInType(typ)
 	}
@@ -600,6 +601,12 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 			seen[t.name] = true
 		}
 	case *List:
+		collectGenericsFromType(t.of, params, seen)
+	case *Chan:
+		collectGenericsFromType(t.of, params, seen)
+	case *Receiver:
+		collectGenericsFromType(t.of, params, seen)
+	case *Sender:
 		collectGenericsFromType(t.of, params, seen)
 	case *Map:
 		collectGenericsFromType(t.key, params, seen)
@@ -623,16 +630,6 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 					*params = append(*params, genericName)
 					seen[genericName] = true
 				}
-			}
-		}
-		for _, typeArg := range t.TypeArgs {
-			collectGenericsFromType(typeArg, params, seen)
-		}
-	case *ExternType:
-		for _, genericName := range t.GenericParams {
-			if !seen[genericName] {
-				*params = append(*params, genericName)
-				seen[genericName] = true
 			}
 		}
 		for _, typeArg := range t.TypeArgs {
@@ -691,6 +688,105 @@ func (c *Checker) specializeAliasedType(originalType Type, typeArgs []parse.Decl
 	return specializedType
 }
 
+// validateMapKeyType reports a diagnostic when a map key type is not a valid Go
+// map key. Map keys must be Go strictly-comparable so every Ard map lowers to a
+// plain Go map (ADR 0031). Unresolved generic parameters are allowed; the
+// constraint applies when they are instantiated.
+func (c *Checker) validateMapKeyType(key Type, loc parse.Location) {
+	if key == nil || isValidMapKeyType(key) {
+		return
+	}
+	// Type annotations are resolved more than once, so dedupe by location to
+	// avoid emitting the same map-key diagnostic multiple times.
+	if c.reportedMapKeyErrors == nil {
+		c.reportedMapKeyErrors = map[parse.Location]bool{}
+	}
+	if c.reportedMapKeyErrors[loc] {
+		return
+	}
+	c.reportedMapKeyErrors[loc] = true
+	c.addError(fmt.Sprintf("Invalid map key type %s: map keys must be comparable (primitives, enums, or structs)", formatTypeForDisplay(key)), loc)
+}
+
+// makeMutableType resolves `mut T` annotations. A foreign Go named type's
+// mutable form is its pointer form (`mut image::Point` is `*image.Point`),
+// matching how Go signatures import pointer parameters, so both spellings
+// produce the same type. Everything else wraps in an Ard mutable reference.
+func (c *Checker) makeMutableType(inner Type) Type {
+	if foreign, ok := inner.(*ForeignType); ok {
+		if foreign.Pointer {
+			return foreign
+		}
+		if pointer := foreign.PointerForm(); pointer != nil {
+			return pointer
+		}
+	}
+	return MakeMutableRef(inner)
+}
+
+// isComparableValueType reports whether a type can be compared with == / != per
+// ADR 0031: only primitives and enums (and, via the caller, their nullable
+// forms), plus foreign named scalars, which compare with the target's native
+// ==. There is no structural equality over lists, maps, structs, unions, or
+// Any.
+func isComparableValueType(t Type) bool {
+	if t == nil {
+		return false
+	}
+	if isPrimitiveScalar(t) {
+		return true
+	}
+	// A foreign named scalar (for example Go's time.Month or a status enum-like
+	// type) compares with the target's native == on its scalar underlying.
+	if foreign, ok := t.(*ForeignType); ok && !foreign.Pointer && foreign.Underlying != nil && isComparableValueType(foreign.Underlying) {
+		return true
+	}
+	_, isEnum := t.(*Enum)
+	return isEnum
+}
+
+func isValidMapKeyType(t Type) bool {
+	switch ty := t.(type) {
+	case *TypeVar:
+		if ty.actual != nil {
+			return isValidMapKeyType(ty.actual)
+		}
+		return true
+	case *Maybe, *List, *Map, *Result, *Union, *FunctionDef, *Trait, *anyType:
+		return false
+	default:
+		return true
+	}
+}
+
+func scalarTypeByName(name string) Type {
+	switch name {
+	case "Int8":
+		return Int8
+	case "Int16":
+		return Int16
+	case "Int32":
+		return Int32
+	case "Int64":
+		return Int64
+	case "Uint":
+		return Uint
+	case "Uint8":
+		return Uint8
+	case "Uint16":
+		return Uint16
+	case "Uint32":
+		return Uint32
+	case "Uint64":
+		return Uint64
+	case "Uintptr":
+		return Uintptr
+	case "Float32":
+		return Float32
+	}
+	return nil
+}
+
 func (c *Checker) resolveType(t parse.DeclaredType) Type {
 	var baseType Type
 	switch ty := t.(type) {
@@ -699,16 +795,16 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 	case *parse.IntType:
 		baseType = Int
 	case *parse.FloatType:
-		baseType = Float
+		baseType = Float64
 	case *parse.BooleanType:
 		baseType = Bool
 	case *parse.VoidType:
 		baseType = Void
 
 	case *parse.MutableType:
-		baseType = MakeMutableRef(c.resolveType(ty.Inner))
+		baseType = c.makeMutableType(c.resolveType(ty.Inner))
 	case parse.MutableType:
-		baseType = MakeMutableRef(c.resolveType(ty.Inner))
+		baseType = c.makeMutableType(c.resolveType(ty.Inner))
 	case *parse.FunctionType:
 		// Convert each parameter type and return type
 		params := make([]Parameter, len(ty.Params))
@@ -717,9 +813,22 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			if i < len(ty.ParamMutability) {
 				mutable = ty.ParamMutability[i]
 			}
+			paramType := c.resolveType(param)
+			if mutable {
+				// A `mut pkg::T` parameter in function-type position takes the
+				// foreign type's pointer form, matching named `mut` parameters,
+				// so annotations unify with imported Go signatures. Non-foreign
+				// types keep the Mutable-flag representation that call-site
+				// mutability checking relies on.
+				if foreign, ok := paramType.(*ForeignType); ok && !foreign.Pointer {
+					if pointer := foreign.PointerForm(); pointer != nil {
+						paramType = pointer
+					}
+				}
+			}
 			params[i] = Parameter{
 				Name:    fmt.Sprintf("arg%d", i),
-				Type:    c.resolveType(param),
+				Type:    paramType,
 				Mutable: mutable,
 			}
 		}
@@ -741,6 +850,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 	case *parse.Map:
 		key := c.resolveType(ty.Key)
 		value := c.resolveType(ty.Value)
+		c.validateMapKeyType(key, ty.Key.GetLocation())
 		baseType = MakeMap(key, value)
 	case *parse.ResultType:
 		val := c.resolveType(ty.Val)
@@ -748,8 +858,8 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		baseType = MakeResult(val, err)
 	case *parse.CustomType:
 		switch t.GetName() {
-		case "Dynamic":
-			baseType = Dynamic
+		case "Any":
+			baseType = Any
 			break
 		case "Byte":
 			baseType = Byte
@@ -757,6 +867,29 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		case "Rune":
 			baseType = Rune
 			break
+		case "Chan":
+			if len(ty.TypeArgs) != 1 {
+				c.addError("Generic type Chan requires type arguments", ty.GetLocation())
+				return &TypeVar{name: "unknown"}
+			}
+			baseType = MakeChan(c.resolveType(ty.TypeArgs[0]))
+			break
+		case "Receiver":
+			if len(ty.TypeArgs) != 1 {
+				c.addError("Generic type Receiver requires type arguments", ty.GetLocation())
+				return &TypeVar{name: "unknown"}
+			}
+			baseType = MakeReceiver(c.resolveType(ty.TypeArgs[0]))
+			break
+		case "Sender":
+			if len(ty.TypeArgs) != 1 {
+				c.addError("Generic type Sender requires type arguments", ty.GetLocation())
+				return &TypeVar{name: "unknown"}
+			}
+			baseType = MakeSender(c.resolveType(ty.TypeArgs[0]))
+			break
+		default:
+			baseType = scalarTypeByName(t.GetName())
 		}
 		if baseType != nil {
 			break
@@ -768,6 +901,9 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		}
 
 		if sym, ok := c.scope.get(t.GetName()); ok {
+			if isNominalType(sym.Type) && !strings.Contains(t.GetName(), "::") {
+				c.recordTypeRef(ty.GetLocation(), t.GetName())
+			}
 			if len(ty.TypeArgs) > 0 {
 				baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
 			} else {
@@ -779,15 +915,25 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			break
 		}
 		if ty.Type.Target != nil {
-			if goType := c.resolveDirectGoType(ty); goType != nil {
-				baseType = goType
-				break
+			targetName := ty.Type.Target.(*parse.Identifier).Name
+			if goPkg := c.program.GoImports[targetName]; goPkg != nil {
+				if goType := goPkg.Types[ty.Type.Property.(*parse.Identifier).Name]; goType != nil {
+					baseType = goType
+					break
+				}
 			}
-			mod := c.resolveModule(ty.Type.Target.(*parse.Identifier).Name)
+			mod := c.resolveModule(targetName)
 			if mod != nil {
 				// at some point, this will need to unwrap the property down to root for nested paths: `mod::sym::more`
-				sym := mod.Get(ty.Type.Property.(*parse.Identifier).Name)
+				propName := ty.Type.Property.(*parse.Identifier).Name
+				sym := mod.Get(propName)
 				if !sym.IsZero() {
+					if c.spans != nil {
+						c.spans.add(SpanRecord{
+							Loc:    ty.GetLocation(),
+							Target: &SpanTarget{Kind: TargetType, Module: mod.Path(), File: c.moduleFiles[mod.Path()], Symbol: propName},
+						})
+					}
 					if len(ty.TypeArgs) > 0 {
 						baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
 					} else {
@@ -803,6 +949,9 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
 		return &TypeVar{name: "unknown"}
 	case *parse.GenericType:
+		if !c.genericAllowedInCurrentMethod(ty.Name) {
+			c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", ty.GetLocation())
+		}
 		if existing := c.scope.findGeneric(ty.Name); existing != nil {
 			baseType = existing
 		} else {
@@ -855,6 +1004,28 @@ func (c *Checker) popFunctionGenericContext() {
 	c.genericContextStack = c.genericContextStack[:len(c.genericContextStack)-1]
 }
 
+func (c *Checker) pushMethodGenericAllowlist(params []string) {
+	allowed := make(map[string]bool, len(params))
+	for _, param := range params {
+		allowed[param] = true
+	}
+	c.methodGenericAllowlist = append(c.methodGenericAllowlist, allowed)
+}
+
+func (c *Checker) popMethodGenericAllowlist() {
+	if len(c.methodGenericAllowlist) == 0 {
+		return
+	}
+	c.methodGenericAllowlist = c.methodGenericAllowlist[:len(c.methodGenericAllowlist)-1]
+}
+
+func (c *Checker) genericAllowedInCurrentMethod(name string) bool {
+	if len(c.methodGenericAllowlist) == 0 {
+		return true
+	}
+	return c.methodGenericAllowlist[len(c.methodGenericAllowlist)-1][name]
+}
+
 func (c *Checker) genericInCurrentContext(name string) bool {
 	if len(c.genericContextStack) == 0 {
 		return false
@@ -885,6 +1056,177 @@ func (c *Checker) resolveCallTypeArgs(typeArgs []parse.DeclaredType) []Type {
 		c.validateExplicitCallTypeArg(typeArg)
 	}
 	return resolved
+}
+
+func (c *Checker) checkUnsafeCast(s *parse.StaticFunction) Expression {
+	modName, _ := c.destructurePath(s)
+	if !c.hasExplicitImportAlias("ard/unsafe", modName) {
+		c.addError("unsafe::cast requires importing ard/unsafe", s.Target.GetLocation())
+		return nil
+	}
+	callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
+	if len(callTypeArgs) != 1 {
+		c.addError("unsafe::cast requires exactly one explicit type argument", s.GetLocation())
+		return nil
+	}
+	if len(s.Function.Args) != 1 {
+		c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 1, got %d", len(s.Function.Args)), s.GetLocation())
+		return nil
+	}
+	if s.Function.Args[0].Name != "" && s.Function.Args[0].Name != "value" {
+		c.addError(fmt.Sprintf("unknown argument: %s", s.Function.Args[0].Name), s.Function.Args[0].GetLocation())
+		return nil
+	}
+	arg := c.checkExprAs(s.Function.Args[0].Value, Any)
+	if arg == nil {
+		return nil
+	}
+	if !c.areCompatible(Any, arg.Type()) {
+		c.addError(typeMismatch(Any, arg.Type()), s.Function.Args[0].Value.GetLocation())
+		return nil
+	}
+	targetType := callTypeArgs[0]
+	return &UnsafeCast{Value: arg, TargetType: targetType, ReturnType: MakeMaybe(targetType)}
+}
+
+// isDynamicMatchSubject reports whether a match subject participates in
+// dynamic foreign type tests (ADR 0042): opaque Any values and foreign Go
+// interface values.
+func isDynamicMatchSubject(t Type) bool {
+	if _, ok := t.(*anyType); ok {
+		return true
+	}
+	foreign, ok := t.(*ForeignType)
+	return ok && foreign.Interface
+}
+
+// checkForeignTypeMatch checks a match whose subject is Any or a foreign Go
+// interface value. Arms name concrete foreign Go named types and bind the
+// narrowed value; the dynamic type set is open, so a catch-all is required.
+func (c *Checker) checkForeignTypeMatch(s *parse.MatchExpression, subject Expression, allowMixedVoid bool) Expression {
+	cases := []ForeignTypeCase{}
+	seen := map[string]bool{}
+	var catchAll *Block
+	for _, matchCase := range s.Cases {
+		switch p := matchCase.Pattern.(type) {
+		case *parse.Identifier:
+			if p.Name != "_" {
+				c.addError("Match on a dynamic value requires foreign type patterns like pkg::Type(binding) or a catch-all '_'", matchCase.Pattern.GetLocation())
+				continue
+			}
+			if catchAll != nil {
+				c.addWarning("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+				continue
+			}
+			catchAll = c.checkMatchArmBlock(matchCase.Body, nil)
+		case *parse.StaticFunction:
+			nsIdent, ok := p.Target.(*parse.Identifier)
+			if !ok {
+				c.addError("Foreign type pattern must be qualified as pkg::Type(binding)", matchCase.Pattern.GetLocation())
+				continue
+			}
+			goPkg := c.program.GoImports[nsIdent.Name]
+			if goPkg == nil {
+				c.addError(fmt.Sprintf("Unknown Go namespace: %s", nsIdent.Name), nsIdent.GetLocation())
+				continue
+			}
+			typ := goPkg.Types[p.Function.Name]
+			if typ == nil {
+				if reason := goPkg.UnsupportedTypes[p.Function.Name]; reason != "" {
+					c.addError(fmt.Sprintf("Unsupported Go type %s::%s: %s", nsIdent.Name, p.Function.Name, reason), matchCase.Pattern.GetLocation())
+				} else {
+					c.addError(fmt.Sprintf("Unrecognized type: %s::%s", nsIdent.Name, p.Function.Name), matchCase.Pattern.GetLocation())
+				}
+				continue
+			}
+			foreign, ok := typ.(*ForeignType)
+			if !ok || foreign.Interface {
+				c.addError(fmt.Sprintf("Foreign type pattern must name a concrete foreign type, got %s::%s", nsIdent.Name, p.Function.Name), matchCase.Pattern.GetLocation())
+				continue
+			}
+			if len(p.Function.Args) != 1 {
+				c.addError("Foreign type pattern requires exactly one binding, like pkg::Type(binding)", matchCase.Pattern.GetLocation())
+				continue
+			}
+			bindingIdent, ok := p.Function.Args[0].Value.(*parse.Identifier)
+			if !ok {
+				c.addError("Foreign type pattern binding must be an identifier", p.Function.Args[0].GetLocation())
+				continue
+			}
+			if seen[foreign.String()] {
+				c.addWarning(fmt.Sprintf("Duplicate case: %s", foreign), matchCase.Pattern.GetLocation())
+				continue
+			}
+			seen[foreign.String()] = true
+			body := c.checkMatchArmBlock(matchCase.Body, func() {
+				if bindingIdent.Name != "_" {
+					c.scope.add(bindingIdent.Name, foreign, false)
+				}
+			})
+			cases = append(cases, ForeignTypeCase{Type: foreign, Binding: bindingIdent.Name, Body: body})
+		default:
+			c.addError("Match on a dynamic value requires foreign type patterns like pkg::Type(binding) or a catch-all '_'", matchCase.Pattern.GetLocation())
+		}
+	}
+	if catchAll == nil {
+		c.addError("Match on a dynamic value requires a catch-all '_' case because the type set is open", s.GetLocation())
+		return nil
+	}
+	var resultType Type
+	for _, matchCase := range cases {
+		if matchCase.Body == nil {
+			continue
+		}
+		var ok bool
+		resultType, ok = mergeMatchResultType(c, resultType, matchCase.Body.Type(), s.GetLocation(), allowMixedVoid)
+		if !ok {
+			return nil
+		}
+	}
+	var ok bool
+	resultType, ok = mergeMatchResultType(c, resultType, catchAll.Type(), s.GetLocation(), allowMixedVoid)
+	if !ok {
+		return nil
+	}
+	return &ForeignTypeMatch{Subject: subject, Cases: cases, CatchAll: catchAll, ResultType: resultType}
+}
+
+func (c *Checker) checkUnsafeIsNil(s *parse.StaticFunction) Expression {
+	modName, _ := c.destructurePath(s)
+	if !c.hasExplicitImportAlias("ard/unsafe", modName) {
+		c.addError("unsafe::is_nil requires importing ard/unsafe", s.Target.GetLocation())
+		return nil
+	}
+	if len(s.Function.TypeArgs) != 0 {
+		c.addError("unsafe::is_nil does not accept type arguments", s.GetLocation())
+		return nil
+	}
+	if len(s.Function.Args) != 1 {
+		c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 1, got %d", len(s.Function.Args)), s.GetLocation())
+		return nil
+	}
+	if s.Function.Args[0].Name != "" && s.Function.Args[0].Name != "value" {
+		c.addError(fmt.Sprintf("unknown argument: %s", s.Function.Args[0].Name), s.Function.Args[0].GetLocation())
+		return nil
+	}
+	arg := c.checkExprAs(s.Function.Args[0].Value, Any)
+	if arg == nil {
+		return nil
+	}
+	if !c.areCompatible(Any, arg.Type()) {
+		c.addError(typeMismatch(Any, arg.Type()), s.Function.Args[0].Value.GetLocation())
+		return nil
+	}
+	return &UnsafeIsNil{Value: arg}
+}
+
+func (c *Checker) hasExplicitImportAlias(path string, alias string) bool {
+	for _, imp := range c.input.Imports {
+		if imp.Path == path && imp.Name == alias {
+			return true
+		}
+	}
+	return false
 }
 
 func appendUniqueStrings(values []string, additions ...string) []string {
@@ -927,6 +1269,45 @@ func genericParamsForFunction(fnDef *FunctionDef) []string {
 		collectGenericsFromType(fnDef.ReturnType, &genericParams, seen)
 	}
 	return genericParams
+}
+
+func methodUsesOnlyReceiverGenerics(fnDef *FunctionDef, receiverGenerics []string) bool {
+	allowed := make(map[string]bool, len(receiverGenerics))
+	for _, param := range receiverGenerics {
+		allowed[param] = true
+	}
+	params := genericParamsForFunction(fnDef)
+	collectGenericsFromBlock(fnDef.Body, &params, mapSeenStrings(params))
+	for _, param := range params {
+		if !allowed[param] {
+			return false
+		}
+	}
+	return true
+}
+
+func mapSeenStrings(values []string) map[string]bool {
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		seen[value] = true
+	}
+	return seen
+}
+
+func collectGenericsFromBlock(block *Block, params *[]string, seen map[string]bool) {
+	if block == nil {
+		return
+	}
+	for _, stmt := range block.Stmts {
+		switch s := stmt.Stmt.(type) {
+		case *VariableDef:
+			collectGenericsFromType(s.Type(), params, seen)
+		case *Reassignment:
+			if s.Target != nil {
+				collectGenericsFromType(s.Target.Type(), params, seen)
+			}
+		}
+	}
 }
 
 func (c *Checker) explicitMethodGenericParams(fnDef *FunctionDef, subject Type) []string {
@@ -984,7 +1365,7 @@ func mergeMatchResultType(c *Checker, current Type, next Type, loc parse.Locatio
 	if ok {
 		return merged, true
 	}
-	if c.expectedExpr != nil && areCompatible(c.expectedExpr, current) && areCompatible(c.expectedExpr, next) {
+	if c.expectedExpr != nil && c.areCompatible(c.expectedExpr, current) && c.areCompatible(c.expectedExpr, next) {
 		return c.expectedExpr, true
 	}
 	c.addError(typeMismatch(current, next), loc)
@@ -1016,6 +1397,334 @@ func typeMismatch(expected, got Type) string {
 	return fmt.Sprintf("Type mismatch: Expected %s, got %s", exMsg, formatTypeForDisplay(got))
 }
 
+func (c *Checker) areCompatible(expected Type, actual Type) bool {
+	if _, ok := expected.(*anyType); ok {
+		return true
+	}
+	// A foreign named scalar narrows to its underlying primitive (ADR 0028
+	// boundary coercions): the conversion is total, so `term::EventTitle`
+	// flows anywhere a Str value is expected. The reverse direction stays
+	// explicit, and contexts that need an identity (mutable places, equality)
+	// must exclude the coercion with foreignScalarNarrows.
+	if foreignScalarNarrows(expected, actual) {
+		return true
+	}
+	// The reverse direction: a Str or Bool value widens into a foreign named
+	// scalar type where the Go conversion is total (e.g. "demo.quit" flows
+	// into a ui::IntentType parameter, field, or map key).
+	if foreignScalarWidens(expected, actual) {
+		return true
+	}
+	if trait, ok := expected.(*Trait); ok {
+		return actual.hasTrait(trait)
+	}
+	if iface, ok := expected.(*ForeignType); ok && iface.Interface {
+		// A named empty Go interface accepts any value, matching Go's own
+		// assignability rules.
+		if iface.EmptyInterface() {
+			return true
+		}
+		actualBase, _ := mutableRefBase(actual)
+		if actualForeign, ok := actualBase.(*ForeignType); ok {
+			return actualForeign.equal(iface) || foreignGoAssignableTo(actualForeign, iface)
+		}
+		if def, ok := actualBase.(*StructDef); ok {
+			return c.structImplementsForeignInterface(def, iface) && !c.foreignInterfaceImplRequiresPointer(def, iface)
+		}
+	}
+	// A `mut T` value satisfies an expected value `T`: the reader receives a
+	// dereferenced copy. Contexts that require mutable identity (mutable
+	// parameters, assignment targets) check mutability separately.
+	if ref, ok := actual.(*MutableRef); ok {
+		if _, expectsRef := expected.(*MutableRef); !expectsRef {
+			return c.areCompatible(expected, ref.Of())
+		}
+	}
+	// A named Go map type accepts an Ard map with the same key/value shape,
+	// mirroring Go's unnamed-to-named assignability.
+	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer && foreign.MapKey != nil && foreign.MapValue != nil {
+		if actualMap, ok := actual.(*Map); ok {
+			return foreign.MapKey.equal(actualMap.Key()) && foreign.MapValue.equal(actualMap.Value())
+		}
+	}
+	// A named Go slice type accepts an Ard list with the same element type,
+	// mirroring Go's unnamed-to-named assignability.
+	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer && foreign.Elem != nil {
+		if actualList, ok := actual.(*List); ok {
+			return foreign.Elem.equal(actualList.of)
+		}
+	}
+	// A named Go func type accepts an Ard function value with a matching
+	// signature, mirroring Go's unnamed-to-named assignability.
+	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer {
+		if expectedFn, ok := foreign.Underlying.(*FunctionDef); ok {
+			if _, isFn := actual.(*FunctionDef); isFn {
+				return c.areCompatible(expectedFn, actual)
+			}
+		}
+	}
+	// The reverse also mirrors Go: a named Go func value flows where an Ard
+	// function type is expected (named-to-unnamed assignability).
+	if expectedFn, ok := expected.(*FunctionDef); ok {
+		if foreign, ok := actual.(*ForeignType); ok && !foreign.Pointer {
+			if actualFn, ok := foreign.Underlying.(*FunctionDef); ok {
+				return c.areCompatible(expectedFn, actualFn)
+			}
+		}
+	}
+	return expected.equal(actual)
+}
+
+func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementation, iface *ForeignType) *Statement {
+	typeSym, ok := c.scope.get(s.ForType.Name)
+	if !ok {
+		c.addError(fmt.Sprintf("Undefined type: %s", s.ForType.Name), s.ForType.GetLocation())
+		return nil
+	}
+	targetType, ok := typeSym.Type.(*StructDef)
+	if !ok {
+		c.addError(fmt.Sprintf("%s cannot implement a Go interface", s.ForType.Name), s.ForType.GetLocation())
+		return nil
+	}
+	if !iface.MethodsLoaded && iface.LoadMethods != nil {
+		iface.Methods, iface.UnsupportedMethods = iface.LoadMethods(false)
+		iface.MethodsLoaded = true
+	}
+
+	validImpl := true
+	for goName, reason := range iface.UnsupportedMethods {
+		validImpl = false
+		c.addError(fmt.Sprintf("Unsupported Go interface method %s::%s.%s: %s", iface.Qualifier, iface.Name, goName, reason), s.GetLocation())
+	}
+	implementedMethods := map[string]bool{}
+	invalidImplementedMethods := map[string]bool{}
+	pendingMethods := map[string]*FunctionDef{}
+	receiverGenerics := genericParamsForType(targetType)
+	for _, method := range s.Methods {
+		if len(method.TypeParams) > 0 {
+			validImpl = false
+			c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+			invalidImplementedMethods[method.Name] = true
+			continue
+		}
+		var interfaceMethod *FunctionDef
+		var interfaceMethodName string
+		for goName, m := range iface.Methods {
+			if goMethodNameToArdName(goName) == method.Name {
+				copy := *m
+				interfaceMethod = &copy
+				interfaceMethodName = goName
+				break
+			}
+		}
+		if interfaceMethod == nil {
+			c.addWarning(fmt.Sprintf("Method %s is not part of Go interface %s", method.Name, iface.String()), method.GetLocation())
+			continue
+		}
+		implementedMethods[method.Name] = true
+		if len(method.Parameters) != len(interfaceMethod.Parameters) {
+			validImpl = false
+			c.addError(fmt.Sprintf("Method %s has wrong number of parameters", method.Name), method.GetLocation())
+			invalidImplementedMethods[method.Name] = true
+			continue
+		}
+		params := make([]Parameter, len(method.Parameters))
+		valid := true
+		for i, param := range method.Parameters {
+			paramType, paramMutable := c.resolveParameterType(param.Type)
+			if paramType == nil {
+				c.addError(fmt.Sprintf("Unrecognized type: %s", param.Type.GetName()), param.Type.GetLocation())
+				valid = false
+				continue
+			}
+			expectedType := interfaceMethod.Parameters[i].Type
+			// The impl method's signature becomes the generated Go method's
+			// signature, so the foreign scalar narrowing coercion cannot apply:
+			// the Go types must line up for interface satisfaction.
+			if !c.areCompatible(expectedType, paramType) || foreignScalarNarrows(expectedType, paramType) || foreignScalarWidens(expectedType, paramType) || foreignFuncCoerces(expectedType, paramType) {
+				c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
+				valid = false
+			}
+			if paramMutable && mutableParamNeedsGoPointer(paramType) {
+				c.addError(fmt.Sprintf("Go interface method '%s' parameter '%s' cannot be mutable because it would change the Go ABI", method.Name, param.Name), param.GetLocation())
+				valid = false
+			}
+			params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable}
+		}
+		returnType := Type(Void)
+		if method.ReturnType != nil {
+			returnType = c.resolveType(method.ReturnType)
+			if returnType == nil {
+				c.addError(fmt.Sprintf("Unrecognized return type: %s", method.ReturnType.GetName()), method.ReturnType.GetLocation())
+				valid = false
+			}
+		}
+		if returnType != nil && (!c.areCompatible(interfaceMethod.ReturnType, returnType) || foreignScalarNarrows(interfaceMethod.ReturnType, returnType) || foreignScalarWidens(interfaceMethod.ReturnType, returnType) || foreignFuncCoerces(interfaceMethod.ReturnType, returnType)) {
+			c.addError(fmt.Sprintf("Go interface method '%s' has return type of %s", method.Name, interfaceMethod.ReturnType), method.GetLocation())
+			valid = false
+		}
+		if !valid {
+			validImpl = false
+			invalidImplementedMethods[method.Name] = true
+			continue
+		}
+		c.pushMethodGenericAllowlist(receiverGenerics)
+		fnDef := c.checkFunction(&method, func() {
+			c.scope.add(s.Receiver.Name, targetType, method.Mutates)
+		}, receiverGenerics...)
+		c.popMethodGenericAllowlist()
+		if fnDef == nil {
+			validImpl = false
+			invalidImplementedMethods[method.Name] = true
+			continue
+		}
+		if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
+			validImpl = false
+			c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+			invalidImplementedMethods[method.Name] = true
+			continue
+		}
+		fnDef.Receiver = s.Receiver.Name
+		fnDef.Mutates = method.Mutates
+		fnDef.Name = goMethodNameToArdName(interfaceMethodName)
+		if _, exists := c.structMethod(targetType, fnDef.Name); exists {
+			validImpl = false
+			invalidImplementedMethods[method.Name] = true
+			c.addError(fmt.Sprintf("Duplicate method: %s", fnDef.Name), method.GetLocation())
+			continue
+		}
+		if _, exists := pendingMethods[fnDef.Name]; exists {
+			validImpl = false
+			invalidImplementedMethods[method.Name] = true
+			c.addError(fmt.Sprintf("Duplicate method: %s", fnDef.Name), method.GetLocation())
+			continue
+		}
+		pendingMethods[fnDef.Name] = fnDef
+	}
+
+	for goName := range iface.Methods {
+		ardName := goMethodNameToArdName(goName)
+		if !implementedMethods[ardName] && !invalidImplementedMethods[ardName] {
+			validImpl = false
+			c.addError(fmt.Sprintf("Missing method '%s' in Go interface '%s'", ardName, iface.String()), s.GetLocation())
+		}
+	}
+	if !validImpl {
+		return nil
+	}
+	for _, method := range pendingMethods {
+		c.addStructMethod(targetType, method)
+	}
+	owner := StructMethodOwner(targetType)
+	c.program.ForeignInterfaceImpls[owner] = append(c.program.ForeignInterfaceImpls[owner], iface)
+	return &Statement{Stmt: targetType}
+}
+
+func (c *Checker) structImplementsForeignInterface(def *StructDef, iface *ForeignType) bool {
+	if def == nil || iface == nil {
+		return false
+	}
+	for _, implemented := range c.program.ForeignInterfaceImpls[StructMethodOwner(def)] {
+		if implemented != nil && implemented.equal(iface) {
+			return true
+		}
+	}
+	return false
+}
+
+// freshContainerSatisfiesMutable reports whether arg may be passed to a
+// mutable parameter of paramType despite not being a mutable place: a freshly
+// constructed list/map literal is new storage with no other observer, and
+// descriptor-shaped parameters (slices, maps) lower without pointers, so the
+// callee mutating the temporary is sound. Idiomatic Go passes container
+// literals to such parameters directly.
+func freshContainerSatisfiesMutable(paramType Type, arg Expression) bool {
+	if mutableParamNeedsGoPointer(paramType) {
+		return false
+	}
+	switch arg.(type) {
+	case *ListLiteral, *MapLiteral:
+		return true
+	}
+	return false
+}
+
+func mutableParamNeedsGoPointer(t Type) bool {
+	base, _ := mutableRefBase(t)
+	switch typ := base.(type) {
+	case *List, *Map, *Chan, *Receiver, *Sender:
+		return false
+	case *ForeignType:
+		// Named Go map and slice types are descriptors like their unnamed
+		// shapes: content mutation flows through the value without a pointer.
+		if typ.MapKey != nil && typ.MapValue != nil {
+			return false
+		}
+		if typ.Elem != nil {
+			return false
+		}
+		return !typ.Pointer && !typ.Interface
+	default:
+		return true
+	}
+}
+
+func (c *Checker) foreignInterfaceArgUpcast(expected Type, actual Expression) (Expression, bool) {
+	iface, ok := expected.(*ForeignType)
+	if !ok || !iface.Interface || actual == nil {
+		return nil, false
+	}
+	actualBase, _ := mutableRefBase(actual.Type())
+	def, ok := actualBase.(*StructDef)
+	if !ok || !c.structImplementsForeignInterface(def, iface) {
+		return nil, false
+	}
+	pointer := c.foreignInterfaceImplRequiresPointer(def, iface)
+	if pointer && !c.isAddressableForeignInterfaceUpcast(actual) {
+		return nil, false
+	}
+	return &ForeignInterfaceUpcast{Value: actual, Iface: iface, Pointer: pointer}, true
+}
+
+func (c *Checker) isAddressableForeignInterfaceUpcast(expr Expression) bool {
+	switch expr.(type) {
+	case *Variable, *InstanceProperty:
+		return c.isMutable(expr)
+	default:
+		return false
+	}
+}
+
+func (c *Checker) foreignInterfaceImplRequiresPointer(def *StructDef, iface *ForeignType) bool {
+	if def == nil || iface == nil {
+		return false
+	}
+	methods := c.structMethods(def)
+	for goName := range iface.Methods {
+		if method := methods[goMethodNameToArdName(goName)]; method != nil && method.Mutates {
+			return true
+		}
+	}
+	return false
+}
+
+func goMethodNameToArdName(name string) string {
+	if name == "" {
+		return ""
+	}
+	var b strings.Builder
+	for i, r := range name {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			b.WriteByte('_')
+		}
+		if r >= 'A' && r <= 'Z' {
+			r = r + ('a' - 'A')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 	if c.halted {
 		return nil
@@ -1034,16 +1743,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			if !ok {
 				return nil
 			}
+			c.recordDef(s.Name.GetLocation(), TypeKey(c.typeOwnerPath(), s.Name.Name))
 			methods := make([]FunctionDef, len(s.Methods))
 			for i, method := range s.Methods {
 				params := make([]Parameter, len(method.Parameters))
 				for j, param := range method.Parameters {
-					paramType := c.resolveType(param.Type)
+					paramType, paramMutable := c.resolveParameterType(param.Type)
 					if paramType == nil {
 						c.addError(fmt.Sprintf("Unrecognized type: %s", param.Type.GetName()), param.Type.GetLocation())
 						continue
 					}
-					params[j] = Parameter{Name: param.Name, Type: paramType, Mutable: param.Mutable}
+					params[j] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable}
 				}
 
 				var returnType Type = Void
@@ -1077,10 +1787,20 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					sym = *s
 				}
 			case parse.StaticProperty:
-				mod := c.resolveModule(name.Target.(*parse.Identifier).Name)
+				modName := name.Target.(*parse.Identifier).Name
+				mod := c.resolveModule(modName)
 				if mod != nil {
 					if propId, ok := name.Property.(*parse.Identifier); ok {
 						sym = mod.Get(propId.Name)
+					} else {
+						c.addError(fmt.Sprintf("Bad path: %s", name), name.Property.GetLocation())
+						return nil
+					}
+				} else if goPkg := c.program.GoImports[modName]; goPkg != nil {
+					if propId, ok := name.Property.(*parse.Identifier); ok {
+						if typ := goPkg.Types[propId.Name]; typ != nil {
+							sym = Symbol{Name: propId.Name, Type: typ}
+						}
 					} else {
 						c.addError(fmt.Sprintf("Bad path: %s", name), name.Property.GetLocation())
 						return nil
@@ -1097,6 +1817,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 			trait, ok := sym.Type.(*Trait)
 			if !ok {
+				if foreign, ok := sym.Type.(*ForeignType); ok && foreign.Interface {
+					return c.checkForeignInterfaceImplementation(s, foreign)
+				}
 				c.addError(fmt.Sprintf("%T is not a trait", sym.Type), s.Trait.GetLocation())
 				return nil
 			}
@@ -1113,9 +1836,16 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Verify that all required methods are implemented
 				traitMethods := trait.GetMethods()
 				implementedMethods := make(map[string]bool)
+				invalidImplementedMethods := map[string]bool{}
+				receiverGenerics := genericParamsForType(targetType)
 
 				// Check each method in the implementation
 				for _, method := range s.Methods {
+					if len(method.TypeParams) > 0 {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						invalidImplementedMethods[method.Name] = true
+						continue
+					}
 					implementedMethods[method.Name] = true
 
 					// Find the corresponding trait method
@@ -1140,17 +1870,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 					params := make([]Parameter, len(method.Parameters))
 					for i, param := range method.Parameters {
-						paramType := c.resolveType(param.Type)
+						paramType, paramMutable := c.resolveParameterType(param.Type)
 						expectedType := traitMethod.Parameters[i].Type
 						if !paramType.equal(expectedType) {
 							c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
 						}
 
-						if param.Mutable != traitMethod.Parameters[i].Mutable {
+						if paramMutable != traitMethod.Parameters[i].Mutable {
 							c.addError(fmt.Sprintf("Trait method '%s' parameter '%s' mutability mismatch", method.Name, param.Name), param.GetLocation())
 						}
 
-						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: param.Mutable}
+						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable}
 					}
 
 					// Check return type
@@ -1164,9 +1894,16 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}
 
 					// if we made it this far, it's a valid implementation
+					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add(s.Receiver.Name, targetType, method.Mutates)
-					}, genericParamsForType(targetType)...)
+					}, receiverGenerics...)
+					c.popMethodGenericAllowlist()
+					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						invalidImplementedMethods[method.Name] = true
+						continue
+					}
 					fnDef.Receiver = s.Receiver.Name
 					fnDef.Mutates = method.Mutates
 					// add the method to the struct method table
@@ -1175,7 +1912,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 				// Check if all required methods are implemented
 				for _, method := range traitMethods {
-					if !implementedMethods[method.Name] {
+					if !implementedMethods[method.Name] && !invalidImplementedMethods[method.Name] {
 						c.addError(fmt.Sprintf("Missing method '%s' in trait '%s'", method.Name, trait.name()), s.GetLocation())
 					}
 				}
@@ -1190,9 +1927,16 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Verify that all required methods are implemented (same logic as structs)
 				traitMethods := trait.GetMethods()
 				implementedMethods := make(map[string]bool)
+				invalidImplementedMethods := map[string]bool{}
+				receiverGenerics := genericParamsForType(targetType)
 
 				// Check each method in the implementation
 				for _, method := range s.Methods {
+					if len(method.TypeParams) > 0 {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						invalidImplementedMethods[method.Name] = true
+						continue
+					}
 					implementedMethods[method.Name] = true
 
 					// Find the corresponding trait method
@@ -1217,17 +1961,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 					params := make([]Parameter, len(method.Parameters))
 					for i, param := range method.Parameters {
-						paramType := c.resolveType(param.Type)
+						paramType, paramMutable := c.resolveParameterType(param.Type)
 						expectedType := traitMethod.Parameters[i].Type
 						if !paramType.equal(expectedType) {
 							c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
 						}
 
-						if param.Mutable != traitMethod.Parameters[i].Mutable {
+						if paramMutable != traitMethod.Parameters[i].Mutable {
 							c.addError(fmt.Sprintf("Trait method '%s' parameter '%s' mutability mismatch", method.Name, param.Name), param.GetLocation())
 						}
 
-						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: param.Mutable}
+						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable}
 					}
 
 					// Check return type
@@ -1241,9 +1985,16 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}
 
 					// if we made it this far, it's a valid implementation
+					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add(s.Receiver.Name, targetType, false) // Enums are immutable, so always false
-					}, genericParamsForType(targetType)...)
+					}, receiverGenerics...)
+					c.popMethodGenericAllowlist()
+					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						invalidImplementedMethods[method.Name] = true
+						continue
+					}
 					fnDef.Receiver = s.Receiver.Name
 					// Enums cannot have mutating methods
 					if method.Mutates {
@@ -1261,7 +2012,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 				// Check if all required methods are implemented
 				for _, method := range traitMethods {
-					if !implementedMethods[method.Name] {
+					if !implementedMethods[method.Name] && !invalidImplementedMethods[method.Name] {
 						c.addError(fmt.Sprintf("Missing method '%s' in trait '%s'", method.Name, trait.name()), s.GetLocation())
 					}
 				}
@@ -1277,35 +2028,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return nil
 			}
 		}
-	case *parse.ExternTypeDeclaration:
-		{
-			externType, ok := c.hoistedExternType(s.Name)
-			if !ok {
-				return nil
-			}
-			typeArgs := make([]Type, len(s.TypeParams))
-			for i, param := range s.TypeParams {
-				typeArgs[i] = &TypeVar{name: param}
-			}
-			bindings := cloneExternalBindings(s.ExternalBindings)
-			if len(bindings) == 0 && s.ExternalBinding != "" {
-				bindings = map[string]string{"go": s.ExternalBinding}
-			}
-			if target, ok := validateExternalBindingTargets(bindings); !ok {
-				c.addError(fmt.Sprintf("Unsupported extern binding target %q", target), s.GetLocation())
-				return nil
-			}
-			resolvedBinding := resolveExternalBinding(bindings)
-			externType.Name_ = s.Name
-			externType.GenericParams = append([]string(nil), s.TypeParams...)
-			externType.TypeArgs = typeArgs
-			externType.ExternalBinding = resolvedBinding
-			externType.ExternalBindings = bindings
-			externType.private = s.Private
-			return &Statement{Stmt: externType}
-		}
 	case *parse.TypeDeclaration:
 		{
+			// Record before the hoisted-alias early return below, or plain
+			// aliases (already in scope) would never get a definition span.
+			c.recordDef(s.Name.GetLocation(), TypeKey(c.typeOwnerPath(), s.Name.Name))
 			if len(s.Type) == 1 {
 				if _, exists := c.scope.get(s.Name.Name); exists {
 					return nil
@@ -1335,6 +2062,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			unionType.Name = s.Name.Name
 			unionType.ModulePath = c.typeOwnerPath()
 			unionType.Types = types
+			unionType.Private = s.Private
 			return &Statement{Stmt: unionType}
 		}
 	case *parse.VariableDeclaration:
@@ -1386,12 +2114,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 			if s.Type != nil {
 				if expected := c.resolveType(s.Type); expected != nil {
-					if !areCompatible(expected, val.Type()) {
+					if !c.areCompatible(expected, val.Type()) {
 						c.addError(typeMismatch(expected, val.Type()), s.Value.GetLocation())
 						return nil
 					}
 					__type = expected
 				}
+			}
+
+			if call, ok := val.(*ForeignFunctionCall); ok && call.PointerResult && s.Mutable {
+				c.addError("A mut reference from a Go call must be bound with let; rebinding it is not supported", s.Value.GetLocation())
+				return nil
 			}
 
 			v := &VariableDef{
@@ -1400,7 +2133,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				Value:   val,
 				__type:  __type,
 			}
-			c.scope.add(v.Name, v.__type, v.Mutable)
+			bound := c.scope.add(v.Name, v.__type, v.Mutable)
+			c.recordBinding(s.GetLocation(), bound)
+			if c.spans != nil && c.scope.parent == nil {
+				// Module-level values are importable; give them a canonical
+				// identity for cross-module references.
+				c.spans.add(SpanRecord{
+					Loc:   s.GetLocation(),
+					Key:   ValueKey(c.typeOwnerPath(), v.Name),
+					IsDef: true,
+				})
+			}
 			return &Statement{
 				Stmt: v,
 			}
@@ -1409,6 +2152,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 		{
 			if id, ok := s.Target.(*parse.Identifier); ok {
 				target, ok := c.scope.get(id.Name)
+				if ok {
+					c.recordSymbolUse(id, target, nil)
+				}
 				if !ok {
 					c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.Target.GetLocation())
 					return nil
@@ -1427,7 +2173,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 
-				if !areCompatible(target.Type, value.Type()) {
+				if !c.areCompatible(target.Type, value.Type()) {
 					c.addError(typeMismatch(target.Type, value.Type()), s.Value.GetLocation())
 					return nil
 				}
@@ -1438,54 +2184,34 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			if ip, ok := s.Target.(*parse.InstanceProperty); ok {
-				if target, handled := c.checkDirectGoFieldAssignmentTarget(ip); handled {
-					if target == nil {
-						return nil
-					}
-					var expectedClosedEnum *Enum
-					if enum, required := c.directGoClosedEnumAssignmentType(target.FieldGoType, s.Value.GetLocation()); required {
-						if enum == nil {
-							return nil
-						}
-						expectedClosedEnum = enum
-					}
-
-					var value Expression
-					c.withValueExprContext(func() {
-						if expectedClosedEnum != nil {
-							value = c.checkExprAs(s.Value, expectedClosedEnum)
-						} else {
-							value = c.checkExpr(s.Value)
-						}
-					})
-					if value == nil {
-						return nil
-					}
-					if !c.isDirectGoFieldAssignable(target) {
-						c.addError(fmt.Sprintf("Immutable: %s", ip), s.Target.GetLocation())
-						return nil
-					}
-					if expectedClosedEnum != nil {
-						if !directGoEnumTypeMatches(value.Type(), target.FieldGoType) {
-							c.addError(fmt.Sprintf("field %s: %s", target.Field, typeMismatch(expectedClosedEnum, value.Type())), s.Value.GetLocation())
-							return nil
-						}
-					} else if ok, reason := c.directGoParamCompatible(value.Type(), target.FieldGoType, true); !ok {
-						c.addError(fmt.Sprintf("field %s: %s", target.Field, reason), s.Value.GetLocation())
-						return nil
-					}
-					return &Statement{
-						Stmt: &Reassignment{Target: target, Value: value},
-					}
-				}
-
 				subject := c.checkExpr(ip)
 				if subject == nil {
 					return nil
 				}
+				// Check the value with the field type as expected context so
+				// literals type contextually, then enforce compatibility for
+				// every field target - native and foreign alike. Nullable
+				// fields check against the inner type (mirroring call
+				// arguments) and wrap below.
+				fieldType := subject.Type()
 				var value Expression
 				c.withValueExprContext(func() {
-					value = c.checkExpr(s.Value)
+					if maybeField, isMaybe := fieldType.(*Maybe); isMaybe {
+						// Mirror call-argument checking for nullable targets:
+						// literals and anonymous functions check against the
+						// inner type; other expressions check freely and wrap
+						// below when they produce the inner type.
+						switch s.Value.(type) {
+						case *parse.StrLiteral, *parse.NumLiteral, *parse.BoolLiteral,
+							*parse.RuneLiteral, *parse.InterpolatedStr,
+							*parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
+							value = c.checkExprAs(s.Value, maybeField.Of())
+						default:
+							value = c.checkExpr(s.Value)
+						}
+						return
+					}
+					value = c.checkExprAs(s.Value, fieldType)
 				})
 				if value == nil {
 					return nil
@@ -1493,6 +2219,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 				if !c.isMutable(subject) {
 					c.addError(fmt.Sprintf("Immutable: %s", ip), s.Target.GetLocation())
+					return nil
+				}
+				if maybeField, isMaybe := fieldType.(*Maybe); isMaybe && !value.Type().equal(fieldType) {
+					// A bare T assigns into a T? field by wrapping, matching
+					// struct literal and call-argument behavior.
+					if c.areCompatible(maybeField.Of(), value.Type()) {
+						value = c.synthesizeMaybeSome(value, fieldType)
+					}
+				}
+				if !c.areCompatible(fieldType, value.Type()) {
+					c.addError(typeMismatch(fieldType, value.Type()), s.Value.GetLocation())
 					return nil
 				}
 
@@ -1503,30 +2240,45 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 			if sp, ok := s.Target.(*parse.StaticProperty); ok {
 				if id, ok := sp.Target.(*parse.Identifier); ok {
-					if goImport, ok := c.directGoImports[id.Name]; ok {
-						propIdent, ok := sp.Property.(*parse.Identifier)
-						if !ok {
-							c.addError(fmt.Sprintf("Cannot assign to Go package value %s::%s", id.Name, sp.Property), sp.Property.GetLocation())
+					if prop, ok := sp.Property.(*parse.Identifier); ok {
+						if goPkg := c.program.GoImports[id.Name]; goPkg != nil {
+							if typ := goPkg.Variables[prop.Name]; typ != nil {
+								var value Expression
+								c.withValueExprContext(func() {
+									value = c.checkExpr(s.Value)
+								})
+								if value == nil {
+									return nil
+								}
+								if !c.areCompatible(typ, value.Type()) {
+									c.addError(typeMismatch(typ, value.Type()), s.Value.GetLocation())
+									return nil
+								}
+								return &Statement{Stmt: &Reassignment{Target: &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ, Assignable: true}, Value: value}}
+							}
+							if goPkg.Constants[prop.Name] != nil {
+								c.addError(fmt.Sprintf("Cannot assign to Go constant: %s::%s", id.Name, prop.Name), s.Target.GetLocation())
+								return nil
+							}
+							if reason := goPkg.UnsupportedConstants[prop.Name]; reason != "" {
+								c.addError(fmt.Sprintf("Unsupported Go constant %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+								return nil
+							}
+							if reason := goPkg.UnsupportedVariables[prop.Name]; reason != "" {
+								c.addError(fmt.Sprintf("Unsupported Go variable %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+								return nil
+							}
+							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
 							return nil
 						}
-						kind := "value"
-						reason := "direct Go package values are read-only"
-						if goImport.pkg != nil {
-							if _, ok := goImport.pkg.Constants[propIdent.Name]; ok {
-								kind = "constant"
-								reason = "Go constants cannot be assigned"
-							} else if _, ok := goImport.pkg.Variables[propIdent.Name]; ok {
-								kind = "variable"
-								reason = "direct Go package variables are read-only"
-							}
-						}
-						c.addError(fmt.Sprintf("Cannot assign to Go package %s %s::%s; %s", kind, id.Name, propIdent.Name, reason), s.Target.GetLocation())
-						return nil
 					}
 				}
+				c.addError(fmt.Sprintf("Cannot assign to static property: %s", sp), s.Target.GetLocation())
+				return nil
 			}
 
-			panic(fmt.Sprintf("Unsupported reassignment target: %T", s.Target))
+			c.addError(fmt.Sprintf("Unsupported reassignment target: %T", s.Target), s.Target.GetLocation())
+			return nil
 		}
 	case *parse.WhileLoop:
 		{
@@ -1639,9 +2391,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					End:    end,
 				}
 				body := c.checkBlock(s.Body, func() {
-					c.scope.add(s.Cursor.Name, start.Type(), false)
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, start.Type(), false))
 					if loop.Index != "" {
-						c.scope.add(loop.Index, Int, false)
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
 				})
 				loop.Body = body
@@ -1668,9 +2420,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Create a new scope for the loop body where the cursor is defined
 				body := c.checkBlock(s.Body, func() {
 					// Direct string iteration yields Unicode scalar values.
-					c.scope.add(s.Cursor.Name, Rune, false)
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, Rune, false))
 					if loop.Index != "" {
-						c.scope.add(loop.Index, Int, false)
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
 				})
 
@@ -1691,9 +2443,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Create a new scope for the loop body where the cursor is defined
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursor variable to the scope
-					c.scope.add(s.Cursor.Name, Int, false)
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, Int, false))
 					if loop.Index != "" {
-						c.scope.add(loop.Index, Int, false)
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
 				})
 
@@ -1712,9 +2464,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursor variable to the scope
-					c.scope.add(s.Cursor.Name, listType.of, cursorMutable)
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, listType.of, cursorMutable))
 					if loop.Index != "" {
-						c.scope.add(loop.Index, Int, false)
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
 				})
 
@@ -1737,8 +2489,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				valueMutable := c.isMutable(iterable)
 				body := c.checkBlock(s.Body, func() {
 					// Add the cursors to the scope
-					c.scope.add(loop.Key, mapType.Key(), false)
-					c.scope.add(loop.Val, mapType.Value(), valueMutable)
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(loop.Key, mapType.Key(), false))
+					c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Val, mapType.Value(), valueMutable))
 				})
 
 				loop.Body = body
@@ -1755,6 +2507,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			if !ok {
 				return nil
 			}
+			c.recordDef(s.NameLocation, TypeKey(c.typeOwnerPath(), s.Name))
 			if len(s.Variants) == 0 {
 				c.addError("Enums must have at least one variant", s.GetLocation())
 				return nil
@@ -1827,6 +2580,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			if !ok {
 				return nil
 			}
+			c.recordDef(s.Name.GetLocation(), TypeKey(c.typeOwnerPath(), s.Name.Name))
 			c.populateStructDefinition(def, s)
 			return &Statement{Stmt: def}
 		}
@@ -1837,14 +2591,35 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				c.addError(fmt.Sprintf("Undefined: %s", s.Target), s.Target.GetLocation())
 				return nil
 			}
+			if isNominalType(sym.Type) {
+				c.recordTypeRef(s.Target.GetLocation(), s.Target.Name)
+			}
 
 			switch def := sym.Type.(type) {
 			case *StructDef:
+				receiverGenerics := genericParamsForType(def)
 				for _, method := range s.Methods {
+					if len(method.TypeParams) > 0 {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						continue
+					}
+					if c.spans != nil {
+						c.spans.add(SpanRecord{
+							Loc:   method.GetLocation(),
+							Key:   MemberKey(TargetMethod, def.ModulePath, def.Name, method.Name),
+							IsDef: true,
+						})
+					}
+					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add(s.Receiver.Name, def, method.Mutates)
-					}, genericParamsForType(def)...)
+					}, receiverGenerics...)
+					c.popMethodGenericAllowlist()
 					if fnDef != nil {
+						if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
+							c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+							continue
+						}
 						fnDef.Receiver = s.Receiver.Name
 						fnDef.Mutates = method.Mutates
 						c.addStructMethod(def, fnDef)
@@ -1855,13 +2630,24 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				if def.Methods == nil {
 					def.Methods = make(map[string]*FunctionDef)
 				}
+				receiverGenerics := genericParamsForType(def)
 				for _, method := range s.Methods {
+					if len(method.TypeParams) > 0 {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						continue
+					}
 					if method.Mutates {
 						c.addError("Enum methods cannot be mutating", method.GetLocation())
 					}
+					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunction(&method, func() {
 						c.scope.add(s.Receiver.Name, def, false)
-					}, genericParamsForType(def)...)
+					}, receiverGenerics...)
+					c.popMethodGenericAllowlist()
+					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						continue
+					}
 					fnDef.Receiver = s.Receiver.Name
 					def.Methods[method.Name] = fnDef
 				}
@@ -1885,8 +2671,18 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 }
 
 func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLiteral {
+	// A named Go slice type accepts an Ard list literal: Go assignability
+	// allows an unnamed slice value where the named type is expected.
+	if foreign, ok := declaredType.(*ForeignType); ok && !foreign.Pointer && foreign.Elem != nil {
+		declaredType = MakeList(foreign.Elem)
+	}
 	if declaredType != nil {
-		expectedElementType := declaredType.(*List).of
+		declaredList, ok := declaredType.(*List)
+		if !ok {
+			c.addError(fmt.Sprintf("Expected %s but got a list", formatTypeForDisplay(declaredType)), expr.GetLocation())
+			return nil
+		}
+		expectedElementType := declaredList.of
 		elements := make([]Expression, len(expr.Items))
 		hasError := false
 		for i := range expr.Items {
@@ -1896,7 +2692,7 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 				hasError = true
 				continue
 			}
-			if !areCompatible(expectedElementType, element.Type()) {
+			if !c.areCompatible(expectedElementType, element.Type()) {
 				c.addError(typeMismatch(expectedElementType, element.Type()), item.GetLocation())
 				hasError = true
 				continue
@@ -1907,11 +2703,10 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 			return nil
 		}
 
-		listType := declaredType.(*List)
 		return &ListLiteral{
 			Elements: elements,
-			_type:    listType,
-			ListType: listType,
+			_type:    declaredList,
+			ListType: declaredList,
 		}
 	}
 
@@ -2008,11 +2803,9 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 
 func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal Type, onlyMatchFinal bool) bool {
 	if onlyMatchFinal && expectedFinal != Void {
-		switch s := stmt.(type) {
-		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.InstanceMethod, *parse.UnsafeBlock:
+		switch stmt.(type) {
+		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.InstanceMethod, *parse.UnsafeBlock:
 			return true
-		case *parse.StaticFunction:
-			return c.isDirectGoStaticFunction(s)
 		default:
 			return false
 		}
@@ -2023,7 +2816,7 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 			*parse.Identifier, *parse.FunctionCall, *parse.FunctionValueCall, *parse.InstanceProperty, *parse.InstanceMethod,
 			*parse.UnaryExpression, *parse.BinaryExpression, *parse.ChainedComparison, *parse.StaticFunction,
 			*parse.IfStatement, *parse.AnonymousFunction, *parse.ListLiteral, *parse.MapLiteral,
-			*parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.StaticProperty,
+			*parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.StaticProperty,
 			*parse.StructInstance, *parse.Try, *parse.BlockExpression, *parse.UnsafeBlock:
 			return true
 		default:
@@ -2032,7 +2825,7 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 	}
 
 	switch stmt.(type) {
-	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.IfStatement, *parse.StaticFunction, *parse.FunctionValueCall, *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction, *parse.UnsafeBlock:
+	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.IfStatement, *parse.StaticFunction, *parse.FunctionValueCall, *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction, *parse.UnsafeBlock:
 		return true
 	default:
 		return false
@@ -2148,6 +2941,15 @@ func parseExpressionContainsBreak(expr parse.Expression) bool {
 	case *parse.StructInstance:
 		for _, prop := range e.Properties {
 			if parseExpressionContainsBreak(prop.Value) {
+				return true
+			}
+		}
+	case *parse.SelectExpression:
+		for _, arm := range e.Cases {
+			if arm.Op != nil && parseExpressionContainsBreak(arm.Op) {
+				return true
+			}
+			if parseStatementsContainBreak(arm.Body) {
 				return true
 			}
 		}
@@ -2507,6 +3309,15 @@ func unsafeResultOkValueCompatible(expected Type, actual Type) bool {
 	case *List:
 		actualType, ok := actual.(*List)
 		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
+	case *Chan:
+		actualType, ok := actual.(*Chan)
+		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
+	case *Receiver:
+		actualType, ok := actual.(*Receiver)
+		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
+	case *Sender:
+		actualType, ok := actual.(*Sender)
+		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
 	case *Map:
 		actualType, ok := actual.(*Map)
 		return ok && unsafeResultOkValueCompatible(expectedType.key, actualType.key) && unsafeResultOkValueCompatible(expectedType.value, actualType.value)
@@ -2519,17 +3330,6 @@ func unsafeResultOkValueCompatible(expected Type, actual Type) bool {
 	case *MutableRef:
 		actualType, ok := actual.(*MutableRef)
 		return ok && unsafeResultOkValueCompatible(expectedType.of, actualType.of)
-	case *ExternType:
-		actualType, ok := actual.(*ExternType)
-		if !ok || !externTypeNamesMatch(expectedType, actualType) || len(expectedType.TypeArgs) != len(actualType.TypeArgs) {
-			return false
-		}
-		for i := range expectedType.TypeArgs {
-			if !unsafeResultOkValueCompatible(expectedType.TypeArgs[i], actualType.TypeArgs[i]) {
-				return false
-			}
-		}
-		return true
 	case *StructDef:
 		actualType, ok := actual.(*StructDef)
 		if !ok || expectedType.Name != actualType.Name || expectedType.ModulePath != actualType.ModulePath || len(expectedType.TypeArgs) != len(actualType.TypeArgs) {
@@ -2547,7 +3347,9 @@ func unsafeResultOkValueCompatible(expected Type, actual Type) bool {
 			return false
 		}
 		for i := range expectedType.Parameters {
-			if expectedType.Parameters[i].Mutable != actualType.Parameters[i].Mutable || !unsafeResultOkValueCompatible(expectedType.Parameters[i].Type, actualType.Parameters[i].Type) {
+			eMut, eType := normalizedParamMutability(expectedType.Parameters[i])
+			aMut, aType := normalizedParamMutability(actualType.Parameters[i])
+			if eMut != aMut || !unsafeResultOkValueCompatible(eType, aType) {
 				return false
 			}
 		}
@@ -2842,17 +3644,15 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 				c.validateUnsafeCatchResultsInExpression(arg, resultType, loc)
 			}
 		}
+	case *UnsafeCast:
+		c.validateUnsafeCatchResultsInExpression(e.Value, resultType, loc)
+	case *UnsafeIsNil:
+		c.validateUnsafeCatchResultsInExpression(e.Value, resultType, loc)
 	case *ModuleStructInstance:
 		if e.Property != nil {
 			for _, field := range e.Property.Fields {
 				c.validateUnsafeCatchResultsInExpression(field, resultType, loc)
 			}
-		}
-	case *DirectGoFieldAccess:
-		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
-	case *DirectGoStructInstance:
-		for _, field := range e.Fields {
-			c.validateUnsafeCatchResultsInExpression(field, resultType, loc)
 		}
 	case *TemplateStr:
 		for _, chunk := range e.Chunks {
@@ -2967,6 +3767,11 @@ func (c *Checker) checkValueExpr(expr parse.Expression) Expression {
 }
 
 func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLiteral {
+	// A named Go map type accepts an Ard map literal: Go assignability allows
+	// an unnamed map value where the named type is expected.
+	if foreign, ok := declaredType.(*ForeignType); ok && !foreign.Pointer && foreign.MapKey != nil && foreign.MapValue != nil {
+		declaredType = MakeMap(foreign.MapKey, foreign.MapValue)
+	}
 	// Handle empty map with declared type
 	if len(expr.Entries) == 0 {
 		if declaredType != nil {
@@ -3021,7 +3826,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 				hasError = true
 				continue
 			}
-			if !areCompatible(expectedKeyType, key.Type()) {
+			if !c.areCompatible(expectedKeyType, key.Type()) {
 				c.addError(typeMismatch(expectedKeyType, key.Type()), entry.Key.GetLocation())
 				hasError = true
 				continue
@@ -3034,7 +3839,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 				hasError = true
 				continue
 			}
-			if !areCompatible(expectedValueType, value.Type()) {
+			if !c.areCompatible(expectedValueType, value.Type()) {
 				c.addError(typeMismatch(expectedValueType, value.Type()), entry.Value.GetLocation())
 				hasError = true
 				continue
@@ -3098,6 +3903,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 	}
 
 	// Create and return the map
+	c.validateMapKeyType(keyType, expr.Entries[0].Key.GetLocation())
 	mapType := MakeMap(keyType, valueType)
 	return &MapLiteral{
 		Keys:      keys,
@@ -3108,9 +3914,330 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 	}
 }
 
+func (c *Checker) validateForeignStructInstance(foreign *ForeignType, typeArgs []parse.DeclaredType, properties []parse.StructValue, loc parse.Location) *ForeignStructInstance {
+	if foreign == nil || foreign.Target != "go" || foreign.Pointer || !foreign.Struct {
+		c.addError("Go struct literals require a non-pointer Go struct type", loc)
+		return nil
+	}
+	foreign = c.instantiateForeignStructForLiteral(foreign, typeArgs, properties, loc)
+	if foreign == nil {
+		return nil
+	}
+	if !foreign.FieldsLoaded && foreign.LoadFields != nil {
+		foreign.Fields, foreign.UnsupportedFields = foreign.LoadFields()
+		foreign.FieldsLoaded = true
+	}
+	fields := map[string]Expression{}
+	seen := map[string]bool{}
+	for _, property := range properties {
+		name := property.Name.Name
+		fieldType := foreign.Fields[name]
+		if fieldType == nil {
+			if reason := foreign.UnsupportedFields[name]; reason != "" {
+				c.addError(fmt.Sprintf("Unsupported foreign field %s.%s: %s", foreign, name, reason), property.GetLocation())
+			} else {
+				c.addError(fmt.Sprintf("Unknown field: %s", name), property.GetLocation())
+			}
+			continue
+		}
+		if seen[name] {
+			c.addError(fmt.Sprintf("Duplicate field: %s", name), property.GetLocation())
+			continue
+		}
+		seen[name] = true
+		value := c.checkExprAs(property.Value, fieldType)
+		if value == nil {
+			continue
+		}
+		if !c.areCompatible(fieldType, value.Type()) {
+			c.addError(typeMismatch(fieldType, value.Type()), property.Value.GetLocation())
+			continue
+		}
+		fields[name] = value
+	}
+	return &ForeignStructInstance{Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Name: foreign.Name, Fields: fields, _type: foreign}
+}
+
+func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeArgs []parse.DeclaredType, properties []parse.StructValue, loc parse.Location) *ForeignType {
+	named, ok := foreign.GoType.(*gotypes.Named)
+	if !ok {
+		if len(typeArgs) > 0 {
+			c.addError("Go struct literal type arguments require a named Go type", loc)
+			return nil
+		}
+		return foreign
+	}
+	params := named.TypeParams()
+	if params == nil || params.Len() == 0 {
+		if len(typeArgs) > 0 {
+			c.addError(fmt.Sprintf("Go type %s is not generic", foreign), loc)
+			return nil
+		}
+		return foreign
+	}
+
+	args := make([]Type, params.Len())
+	goArgs := make([]gotypes.Type, params.Len())
+	if len(typeArgs) > 0 {
+		if len(typeArgs) != params.Len() {
+			c.addError(fmt.Sprintf("Go type %s expects %d type argument(s), got %d", foreign, params.Len(), len(typeArgs)), loc)
+			return nil
+		}
+		for i, typeArg := range typeArgs {
+			arg := c.resolveType(typeArg)
+			if arg == nil {
+				return nil
+			}
+			goArg, ok := checkerTypeToGoType(arg)
+			if !ok {
+				c.addError(fmt.Sprintf("Type argument %s cannot be used as a Go type argument", arg), loc)
+				return nil
+			}
+			args[i] = arg
+			goArgs[i] = goArg
+		}
+	} else {
+		inferredTypes := make([]Type, params.Len())
+		inferredGoTypes := make([]gotypes.Type, params.Len())
+		structType, ok := named.Underlying().(*gotypes.Struct)
+		if !ok {
+			return foreign
+		}
+		for _, property := range properties {
+			field := exportedGoStructField(structType, property.Name.Name)
+			if field == nil || !goTypeMentionsTypeParam(field.Type(), params) {
+				continue
+			}
+			value := c.checkExprForInference(property.Value)
+			if value == nil {
+				continue
+			}
+			goValue, ok := checkerTypeToGoType(value.Type())
+			if !ok {
+				continue
+			}
+			if !c.inferGoStructTypeArgs(field.Type(), value.Type(), goValue, params, inferredTypes, inferredGoTypes, property.GetLocation()) {
+				return nil
+			}
+		}
+		for i := 0; i < params.Len(); i++ {
+			if inferredTypes[i] == nil || inferredGoTypes[i] == nil {
+				c.addError(fmt.Sprintf("Could not infer type argument %s for Go type %s", params.At(i).Obj().Name(), foreign), loc)
+				return nil
+			}
+			args[i] = inferredTypes[i]
+			goArgs[i] = inferredGoTypes[i]
+		}
+	}
+
+	for i, goArg := range goArgs {
+		constraint, ok := params.At(i).Constraint().Underlying().(*gotypes.Interface)
+		if ok && !gotypes.Satisfies(goArg, constraint) {
+			c.addError(fmt.Sprintf("Type argument %s does not satisfy Go constraint %s", args[i], params.At(i).Constraint()), loc)
+			return nil
+		}
+	}
+	instantiated, err := gotypes.Instantiate(c.goTypesContext, named, goArgs, true)
+	if err != nil {
+		c.addError(fmt.Sprintf("Could not instantiate Go type %s: %s", foreign, err), loc)
+		return nil
+	}
+	instNamed, ok := instantiated.(*gotypes.Named)
+	if !ok {
+		c.addError(fmt.Sprintf("Could not instantiate Go type %s", foreign), loc)
+		return nil
+	}
+	inst := foreignNamedTypeFromGo(instNamed, false, true).(*ForeignType)
+	inst.TypeArgs = args
+	return inst
+}
+
+func (c *Checker) checkExprForInference(expr parse.Expression) Expression {
+	diagnosticsLen := len(c.diagnostics)
+	spansMark := c.spansMark()
+	halted := c.halted
+	checked := c.checkExpr(expr)
+	c.diagnostics = c.diagnostics[:diagnosticsLen]
+	c.spansTruncate(spansMark)
+	c.halted = halted
+	return checked
+}
+
+func goTypeMentionsTypeParam(t gotypes.Type, params *gotypes.TypeParamList) bool {
+	switch typ := t.(type) {
+	case *gotypes.TypeParam:
+		for i := 0; i < params.Len(); i++ {
+			if params.At(i) == typ {
+				return true
+			}
+		}
+	case *gotypes.Slice:
+		return goTypeMentionsTypeParam(typ.Elem(), params)
+	case *gotypes.Map:
+		return goTypeMentionsTypeParam(typ.Key(), params) || goTypeMentionsTypeParam(typ.Elem(), params)
+	case *gotypes.Pointer:
+		return goTypeMentionsTypeParam(typ.Elem(), params)
+	case *gotypes.Array:
+		return goTypeMentionsTypeParam(typ.Elem(), params)
+	case *gotypes.Signature:
+		for i := 0; i < typ.Params().Len(); i++ {
+			if goTypeMentionsTypeParam(typ.Params().At(i).Type(), params) {
+				return true
+			}
+		}
+		for i := 0; i < typ.Results().Len(); i++ {
+			if goTypeMentionsTypeParam(typ.Results().At(i).Type(), params) {
+				return true
+			}
+		}
+	case *gotypes.Chan:
+		return goTypeMentionsTypeParam(typ.Elem(), params)
+	case *gotypes.Named:
+		if args := typ.TypeArgs(); args != nil {
+			for i := 0; i < args.Len(); i++ {
+				if goTypeMentionsTypeParam(args.At(i), params) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func exportedGoStructField(strct *gotypes.Struct, name string) *gotypes.Var {
+	for i := 0; i < strct.NumFields(); i++ {
+		field := strct.Field(i)
+		if field.Name() == name && field.Exported() && !field.Embedded() {
+			return field
+		}
+	}
+	return nil
+}
+
+func (c *Checker) inferGoStructTypeArgs(pattern gotypes.Type, actual Type, goActual gotypes.Type, params *gotypes.TypeParamList, inferred []Type, inferredGo []gotypes.Type, loc parse.Location) bool {
+	switch pattern := pattern.(type) {
+	case *gotypes.TypeParam:
+		for i := 0; i < params.Len(); i++ {
+			if params.At(i) != pattern {
+				continue
+			}
+			if inferred[i] != nil && !inferred[i].equal(actual) {
+				c.addError(fmt.Sprintf("Conflicting inferred type arguments for %s: %s and %s", pattern.Obj().Name(), inferred[i], actual), loc)
+				return false
+			}
+			inferred[i] = actual
+			inferredGo[i] = goActual
+			return true
+		}
+	case *gotypes.Slice:
+		if list, ok := actual.(*List); ok {
+			if goSlice, ok := goActual.Underlying().(*gotypes.Slice); ok {
+				return c.inferGoStructTypeArgs(pattern.Elem(), list.Of(), goSlice.Elem(), params, inferred, inferredGo, loc)
+			}
+		}
+	case *gotypes.Map:
+		if m, ok := actual.(*Map); ok {
+			goMap, ok := goActual.Underlying().(*gotypes.Map)
+			if !ok {
+				return true
+			}
+			if !c.inferGoStructTypeArgs(pattern.Key(), m.Key(), goMap.Key(), params, inferred, inferredGo, loc) {
+				return false
+			}
+			return c.inferGoStructTypeArgs(pattern.Elem(), m.Value(), goMap.Elem(), params, inferred, inferredGo, loc)
+		}
+	}
+	return true
+}
+
+func checkerTypeToGoType(t Type) (gotypes.Type, bool) {
+	switch t {
+	case Bool:
+		return gotypes.Typ[gotypes.Bool], true
+	case Str:
+		return gotypes.Typ[gotypes.String], true
+	case Int:
+		return gotypes.Typ[gotypes.Int], true
+	case Int8:
+		return gotypes.Typ[gotypes.Int8], true
+	case Int16:
+		return gotypes.Typ[gotypes.Int16], true
+	case Int32:
+		return gotypes.Typ[gotypes.Int32], true
+	case Int64:
+		return gotypes.Typ[gotypes.Int64], true
+	case Uint:
+		return gotypes.Typ[gotypes.Uint], true
+	case Byte:
+		return gotypes.Typ[gotypes.Uint8], true
+	case Uint16:
+		return gotypes.Typ[gotypes.Uint16], true
+	case Uint32:
+		return gotypes.Typ[gotypes.Uint32], true
+	case Uint64:
+		return gotypes.Typ[gotypes.Uint64], true
+	case Uintptr:
+		return gotypes.Typ[gotypes.Uintptr], true
+	case Float32:
+		return gotypes.Typ[gotypes.Float32], true
+	case Float64:
+		return gotypes.Typ[gotypes.Float64], true
+	case Any:
+		return gotypes.NewInterfaceType(nil, nil), true
+	}
+	switch typ := t.(type) {
+	case *ForeignType:
+		if typ.GoType != nil {
+			return typ.GoType, true
+		}
+	case *List:
+		elem, ok := checkerTypeToGoType(typ.Of())
+		if ok {
+			return gotypes.NewSlice(elem), true
+		}
+	case *Map:
+		key, ok := checkerTypeToGoType(typ.Key())
+		if !ok {
+			return nil, false
+		}
+		value, ok := checkerTypeToGoType(typ.Value())
+		if !ok {
+			return nil, false
+		}
+		return gotypes.NewMap(key, value), true
+	}
+	return nil, false
+}
+
+// resolveStructTypeArgs resolves explicit struct literal type arguments
+// (`Box<Str>{...}`). Returns ok=false when any argument fails to resolve;
+// a diagnostic has been reported in that case.
+func (c *Checker) resolveStructTypeArgs(instance *parse.StructInstance) ([]Type, bool) {
+	if len(instance.TypeArgs) == 0 {
+		return nil, true
+	}
+	typeArgs := make([]Type, len(instance.TypeArgs))
+	for i, arg := range instance.TypeArgs {
+		resolved := c.resolveType(arg)
+		if resolved == nil {
+			c.addError(fmt.Sprintf("Unrecognized type: %s", arg.GetName()), arg.GetLocation())
+			return nil, false
+		}
+		typeArgs[i] = resolved
+	}
+	return typeArgs, true
+}
+
 // validateStructInstance validates struct instantiation and returns the instance or nil if errors
-func (c *Checker) validateStructInstance(structType *StructDef, properties []parse.StructValue, structName string, loc parse.Location) *StructInstance {
+func (c *Checker) validateStructInstance(structType *StructDef, properties []parse.StructValue, structName string, loc parse.Location, typeArgs []Type) *StructInstance {
 	instance := &StructInstance{Name: structName, _type: structType}
+	if c.spans != nil {
+		for _, prop := range properties {
+			if _, exists := structType.Fields[prop.Name.Name]; exists {
+				c.recordMember(prop.Name.GetLocation(), TargetField, structType, prop.Name.Name, nil)
+			}
+		}
+	}
 	fields := make(map[string]Expression)
 	fieldTypes := make(map[string]Type)
 	providedFields := make(map[string]bool)
@@ -3133,7 +4260,30 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		// Create generic scope and fresh struct copy
 		genericScope = c.scope.createGenericScope(genericParams)
 		structDefCopy = copyStructWithTypeVarMap(structType, *genericScope.genericContext)
+
+		// Bind explicit type arguments (`Box<Str>{...}`) before checking
+		// fields, so unused-in-fields generics resolve and field values are
+		// checked against the instantiated types. On any type-argument error,
+		// report and fall back to inference so checking can continue.
+		if len(typeArgs) > 0 {
+			switch {
+			case !structType.DeclaredGenerics && len(genericParams) > 1:
+				c.addError(fmt.Sprintf("Struct %s must declare its generic parameters to take explicit type arguments", structName), loc)
+			case len(typeArgs) != len(genericParams):
+				c.addError(fmt.Sprintf("Expected %d type argument(s), got %d", len(genericParams), len(typeArgs)), loc)
+			default:
+				for i, actual := range typeArgs {
+					if err := genericScope.bindGeneric(genericParams[i], actual); err != nil {
+						c.addError(err.Error(), loc)
+						break
+					}
+				}
+			}
+		}
 	} else {
+		if len(typeArgs) > 0 {
+			c.addError(fmt.Sprintf("Struct %s does not take type arguments", structName), loc)
+		}
 		structDefCopy = structType
 	}
 
@@ -3155,6 +4305,21 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		} else {
 			providedFields[fieldName] = true
 
+			// A `mut T` (MutableRef) field accepts an existing `mut T` reference value
+			// directly (a stored handle), in addition to borrowing a mutable base-type
+			// lvalue below (ADR 0031). Try the reference value first.
+			if _, ok := mutableRefBase(field); ok {
+				diagCount := len(c.diagnostics)
+				spansMark := c.spansMark()
+				if checked := c.checkExprAs(property.Value, field); checked != nil && checked.Type().equal(field) {
+					fields[fieldName] = checked
+					fieldTypes[fieldName] = field
+					continue
+				}
+				c.diagnostics = c.diagnostics[:diagCount]
+				c.spansTruncate(spansMark)
+			}
+
 			fieldExpected := field
 			fieldIsMutableRef := false
 			if base, ok := mutableRefBase(field); ok {
@@ -3173,7 +4338,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				// Implicit Maybe wrapping: if field is Maybe<T> and value is T, wrap in maybe::some()
 				if maybeField, isMaybe := fieldExpected.(*Maybe); isMaybe {
 					if valType := checkVal.Type(); !valType.equal(fieldExpected) {
-						if areCompatible(maybeField.Of(), valType) {
+						if c.areCompatible(maybeField.Of(), valType) {
 							checkVal = c.synthesizeMaybeSome(checkVal, fieldExpected)
 						}
 					}
@@ -3213,12 +4378,14 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 						}
 					default:
 						diagnosticCount := len(c.diagnostics)
+						spansMark := c.spansMark()
 						val = c.checkExprAs(property.Value, fieldExpected)
 						if val == nil {
 							c.diagnostics = c.diagnostics[:diagnosticCount]
+							c.spansTruncate(spansMark)
 							val = c.checkExpr(property.Value)
 							if val != nil && !val.Type().equal(fieldExpected) {
-								if areCompatible(maybeField.Of(), val.Type()) {
+								if c.areCompatible(maybeField.Of(), val.Type()) {
 									val = c.synthesizeMaybeSome(val, fieldExpected)
 								} else {
 									c.addError(typeMismatch(fieldExpected, val.Type()), property.GetLocation())
@@ -3229,7 +4396,22 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 					}
 				} else {
 					// Non-nullable fields use checkExprAs which provides type context
+					diagCount := len(c.diagnostics)
+					spansMark := c.spansMark()
 					val = c.checkExprAs(property.Value, fieldExpected)
+					if val == nil {
+						// A mutable-reference lvalue (e.g. a `mut T` field read that
+						// deref's to its value type) auto-borrows back into `mut T` so a
+						// stored Go pointer handle can satisfy an interface/pointer field
+						// (ADR 0031).
+						if borrowed := c.checkExpr(property.Value); borrowed != nil {
+							if refType := referenceArgType(borrowed); !refType.equal(borrowed.Type()) && c.areCompatible(fieldExpected, refType) {
+								c.diagnostics = c.diagnostics[:diagCount]
+								c.spansTruncate(spansMark)
+								val = borrowed
+							}
+						}
+					}
 				}
 				if val != nil {
 					if fieldIsMutableRef && !c.isMutable(val) {
@@ -3272,23 +4454,24 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	instance.Fields = fields
 	instance.FieldTypes = fieldTypes
 	// Store the refined struct definition (with resolved generics) as the instance's type
-	typeArgs := make([]Type, len(structDefCopy.TypeArgs))
+	resolvedTypeArgs := make([]Type, len(structDefCopy.TypeArgs))
 	for i, typeArg := range structDefCopy.TypeArgs {
-		typeArgs[i] = derefType(typeArg)
+		resolvedTypeArgs[i] = derefType(typeArg)
 	}
 	genericParams := append([]string(nil), structDefCopy.GenericParams...)
 	if len(genericParams) == 0 {
 		genericParams = nil
 	}
 	instance._type = &StructDef{
-		Name:          structDefCopy.Name,
-		ModulePath:    structDefCopy.ModulePath,
-		Fields:        fieldTypes,
-		Self:          structDefCopy.Self,
-		Traits:        structDefCopy.Traits,
-		GenericParams: genericParams,
-		TypeArgs:      typeArgs,
-		Private:       structDefCopy.Private,
+		Name:             structDefCopy.Name,
+		ModulePath:       structDefCopy.ModulePath,
+		Fields:           fieldTypes,
+		Self:             structDefCopy.Self,
+		Traits:           structDefCopy.Traits,
+		GenericParams:    genericParams,
+		DeclaredGenerics: structDefCopy.DeclaredGenerics,
+		TypeArgs:         resolvedTypeArgs,
+		Private:          structDefCopy.Private,
 	}
 	instance.StructType = instance._type
 	return instance
@@ -3307,7 +4490,7 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 		return c.createByteMethod(subject, methodName)
 	case Rune:
 		return c.createRuneMethod(subject, methodName)
-	case Float:
+	case Float64:
 		return c.createFloatMethod(subject, methodName)
 	case Bool:
 		return c.createBoolMethod(subject, methodName)
@@ -3319,6 +4502,12 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 	}
 	if _, isMap := subject.Type().(*Map); isMap {
 		return c.createMapMethod(subject, methodName, args, fnDef)
+	}
+	if foreign, isForeign := subject.Type().(*ForeignType); isForeign && foreign.MapKey != nil && foreign.MapValue != nil {
+		return c.createMapMethod(subject, methodName, args, fnDef)
+	}
+	if foreign, isForeign := subject.Type().(*ForeignType); isForeign && foreign.Elem != nil {
+		return c.createListMethod(subject, methodName, args, fnDef)
 	}
 	if _, isMaybe := subject.Type().(*Maybe); isMaybe {
 		return c.createMaybeMethod(subject, methodName, args, fnDef)
@@ -3384,8 +4573,6 @@ func (c *Checker) createStrMethod(subject Expression, methodName string, args []
 		kind = StrEndsWith
 	case "to_str":
 		kind = StrToStr
-	case "to_dyn":
-		kind = StrToDyn
 	case "trim":
 		kind = StrTrim
 	default:
@@ -3406,8 +4593,6 @@ func (c *Checker) createByteMethod(subject Expression, methodName string) Expres
 		kind = ByteToInt
 	case "to_str":
 		kind = ByteToStr
-	case "to_dyn":
-		kind = ByteToDyn
 	default:
 		panic(fmt.Sprintf("Unknown Byte method: %s", methodName))
 	}
@@ -3421,8 +4606,6 @@ func (c *Checker) createRuneMethod(subject Expression, methodName string) Expres
 		kind = RuneToInt
 	case "to_str":
 		kind = RuneToStr
-	case "to_dyn":
-		kind = RuneToDyn
 	default:
 		panic(fmt.Sprintf("Unknown Rune method: %s", methodName))
 	}
@@ -3434,8 +4617,8 @@ func (c *Checker) createIntMethod(subject Expression, methodName string) Express
 	switch methodName {
 	case "to_str":
 		kind = IntToStr
-	case "to_dyn":
-		kind = IntToDyn
+	case "to_f64":
+		kind = IntToF64
 	default:
 		panic(fmt.Sprintf("Unknown Int method: %s", methodName))
 	}
@@ -3452,10 +4635,8 @@ func (c *Checker) createFloatMethod(subject Expression, methodName string) Expre
 		kind = FloatToStr
 	case "to_int":
 		kind = FloatToInt
-	case "to_dyn":
-		kind = FloatToDyn
 	default:
-		panic(fmt.Sprintf("Unknown Float method: %s", methodName))
+		panic(fmt.Sprintf("Unknown Float64 method: %s", methodName))
 	}
 	return &FloatMethod{
 		Subject: subject,
@@ -3468,8 +4649,6 @@ func (c *Checker) createBoolMethod(subject Expression, methodName string) Expres
 	switch methodName {
 	case "to_str":
 		kind = BoolToStr
-	case "to_dyn":
-		kind = BoolToDyn
 	default:
 		panic(fmt.Sprintf("Unknown Bool method: %s", methodName))
 	}
@@ -3480,7 +4659,14 @@ func (c *Checker) createBoolMethod(subject Expression, methodName string) Expres
 }
 
 func (c *Checker) createListMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
-	listType := subject.Type().(*List)
+	var elemType Type
+	if listType, ok := subject.Type().(*List); ok {
+		elemType = listType.of
+	} else if foreign, ok := subject.Type().(*ForeignType); ok && foreign.Elem != nil {
+		elemType = foreign.Elem
+	} else {
+		panic(fmt.Sprintf("List method on non-list type: %s", subject.Type()))
+	}
 	var kind ListMethodKind
 	switch methodName {
 	case "at":
@@ -3504,13 +4690,41 @@ func (c *Checker) createListMethod(subject Expression, methodName string, args [
 		Subject:     subject,
 		Kind:        kind,
 		Args:        args,
-		ElementType: listType.of,
+		ElementType: elemType,
 		fn:          fnDef,
 	}
 }
 
+func isListMethodName(name string) bool {
+	switch name {
+	case "at", "prepend", "push", "set", "size", "sort", "swap":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMapMethodName(name string) bool {
+	switch name {
+	case "keys", "size", "get", "set", "drop", "remove", "has":
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *Checker) createMapMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
-	mapType := subject.Type().(*Map)
+	var keyType Type
+	var valueType Type
+	if mapType, ok := subject.Type().(*Map); ok {
+		keyType = mapType.Key()
+		valueType = mapType.Value()
+	} else if foreign, ok := subject.Type().(*ForeignType); ok && foreign.MapKey != nil && foreign.MapValue != nil {
+		keyType = foreign.MapKey
+		valueType = foreign.MapValue
+	} else {
+		panic(fmt.Sprintf("Map method on non-map type: %s", subject.Type()))
+	}
 	var kind MapMethodKind
 	switch methodName {
 	case "keys":
@@ -3521,7 +4735,7 @@ func (c *Checker) createMapMethod(subject Expression, methodName string, args []
 		kind = MapGet
 	case "set":
 		kind = MapSet
-	case "drop":
+	case "drop", "remove":
 		kind = MapDrop
 	case "has":
 		kind = MapHas
@@ -3532,8 +4746,8 @@ func (c *Checker) createMapMethod(subject Expression, methodName string, args []
 		Subject:   subject,
 		Kind:      kind,
 		Args:      args,
-		KeyType:   mapType.Key(),
-		ValueType: mapType.Value(),
+		KeyType:   keyType,
+		ValueType: valueType,
 		fn:        fnDef,
 	}
 }
@@ -3644,6 +4858,18 @@ func bindGenericTypes(original Type, specialized Type, bindings map[string]Type)
 		if spec, ok := specialized.(*List); ok {
 			bindGenericTypes(orig.of, spec.of, bindings)
 		}
+	case *Chan:
+		if spec, ok := specialized.(*Chan); ok {
+			bindGenericTypes(orig.of, spec.of, bindings)
+		}
+	case *Receiver:
+		if spec, ok := specialized.(*Receiver); ok {
+			bindGenericTypes(orig.of, spec.of, bindings)
+		}
+	case *Sender:
+		if spec, ok := specialized.(*Sender); ok {
+			bindGenericTypes(orig.of, spec.of, bindings)
+		}
 	case *Map:
 		if spec, ok := specialized.(*Map); ok {
 			bindGenericTypes(orig.key, spec.key, bindings)
@@ -3657,15 +4883,6 @@ func bindGenericTypes(original Type, specialized Type, bindings map[string]Type)
 		if spec, ok := specialized.(*Result); ok {
 			bindGenericTypes(orig.val, spec.val, bindings)
 			bindGenericTypes(orig.err, spec.err, bindings)
-		}
-	case *ExternType:
-		if spec, ok := specialized.(*ExternType); ok {
-			for i := range orig.TypeArgs {
-				if i >= len(spec.TypeArgs) {
-					break
-				}
-				bindGenericTypes(orig.TypeArgs[i], spec.TypeArgs[i], bindings)
-			}
 		}
 	case *StructDef:
 		if spec, ok := specialized.(*StructDef); ok {
@@ -3775,15 +4992,15 @@ func functionDefForCallableType(typ Type) (*FunctionDef, bool) {
 	switch fn := typ.(type) {
 	case *FunctionDef:
 		return fn, true
-	case *ExternalFunctionDef:
-		return &FunctionDef{
-			Name:          fn.Name,
-			GenericParams: append([]string(nil), fn.GenericParams...),
-			Parameters:    fn.Parameters,
-			ReturnType:    fn.ReturnType,
-			Body:          nil,
-			Private:       fn.Private,
-		}, true
+	case *ForeignType:
+		// A named Go func type is callable with its underlying signature,
+		// matching Go's own call rules for named func values.
+		if !fn.Pointer {
+			if underlying, ok := fn.Underlying.(*FunctionDef); ok {
+				return underlying, true
+			}
+		}
+		return nil, false
 	default:
 		return nil, false
 	}
@@ -3806,8 +5023,7 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 	numOmittedArgs := 0
 	if len(resolvedExprs) < len(fnDef.Parameters) {
 		for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-			paramType := fnDef.Parameters[i].Type
-			if _, isMaybe := paramType.(*Maybe); !isMaybe {
+			if !parameterOmittable(fnDef.Parameters[i]) {
 				c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), location)
 				return nil
 			}
@@ -3860,6 +5076,14 @@ func (c *Checker) checkFunctionFieldCall(subject Expression, method parse.Functi
 }
 
 func (c *Checker) checkExpr(expr parse.Expression) Expression {
+	result := c.checkExprInner(expr)
+	if result != nil {
+		c.recordExprSpan(expr, result)
+	}
+	return result
+}
+
+func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 	if c.halted {
 		return nil
 	}
@@ -3888,18 +5112,22 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		{
 			stripped := strings.ReplaceAll(s.Value, "_", "")
 			if strings.Contains(stripped, ".") {
-				value, err := strconv.ParseFloat(s.Value, 64)
+				value, err := strconv.ParseFloat(stripped, 64)
 				if err != nil {
 					c.addError(fmt.Sprintf("Invalid float: %s", s.Value), s.GetLocation())
 					return &FloatLiteral{Value: 0.0}
 				}
 				return &FloatLiteral{Value: value}
 			}
-			value, err := strconv.Atoi(stripped)
+			value64, err := strconv.ParseInt(stripped, 0, 64)
 			if err != nil {
 				c.addError(fmt.Sprintf("Invalid int: %s", s.Value), s.GetLocation())
+				return &IntLiteral{0}
 			}
-			return &IntLiteral{value}
+			if !c.intLiteralFitsType(value64, Int) {
+				c.addError(fmt.Sprintf("Integer literal %s overflows Int", s.Value), s.GetLocation())
+			}
+			return &IntLiteral{int(value64)}
 		}
 	case *parse.InterpolatedStr:
 		{
@@ -3912,9 +5140,20 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					continue
 				}
 
+				// A foreign named scalar stringifies as its underlying primitive
+				// (e.g. term::EventTitle interpolates as its Str value).
+				if prim := foreignScalarPrimitive(cx.Type()); prim != nil {
+					cx = &ForeignScalarConvert{Value: cx, Target: prim}
+				}
+
 				// If chunk is a string, use it directly
 				if cx.Type() == Str {
 					chunks[i] = cx
+					continue
+				}
+
+				if toStr, ok := cx.Type().get("to_str").(*FunctionDef); ok && toStr.ReturnType == Str && len(toStr.Parameters) == 0 {
+					chunks[i] = c.createPrimitiveMethodNode(cx, toStr.Name, []Expression{}, toStr, nil)
 					continue
 				}
 
@@ -3931,12 +5170,17 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					toStrMethod := toStringTrait.methods[0]
 					methodNode := c.createPrimitiveMethodNode(cx, toStrMethod.Name, []Expression{}, &toStrMethod, nil)
 					chunks[i] = methodNode
+					continue
 				}
+
+				c.addError(fmt.Sprintf("Type mismatch: Expected stringable value, got %s", cx.Type()), s.Chunks[i].GetLocation())
+				chunks[i] = &StrLiteral{}
 			}
 			return &TemplateStr{chunks}
 		}
 	case *parse.Identifier:
 		if sym, ok := c.scope.get(s.Name); ok {
+			c.recordSymbolUse(s, sym, nil)
 			return &Variable{*sym}
 		}
 		c.addError(fmt.Sprintf("Undefined variable: %s", s.Name), s.GetLocation())
@@ -3983,41 +5227,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			var fnDef *FunctionDef
 			var ok bool
 
-			// Try different types for the function symbol
-			fnDef, ok = fnSym.Type.(*FunctionDef)
+			// Try different types for the function symbol, including named Go
+			// func values, which call through their underlying signature.
+			fnDef, ok = functionDefForCallableType(fnSym.Type)
 			if !ok {
-				// Check if it's an external function
-				if extFnDef, ok := fnSym.Type.(*ExternalFunctionDef); ok {
-					// Convert ExternalFunctionDef to FunctionDef for type checking
-					fnDef = &FunctionDef{
-						Name:          extFnDef.Name,
-						GenericParams: append([]string(nil), extFnDef.GenericParams...),
-						Parameters:    extFnDef.Parameters,
-						ReturnType:    extFnDef.ReturnType,
-						Body:          nil, // External functions don't have bodies
-						Private:       extFnDef.Private,
-					}
-				} else {
-					//// technically, the below isn't possible anymore
-					// Check if it's a variable that holds a function
-					// if varDef, ok := fnSym.(*VariableDef); ok {
-					// 	// Try to get a FunctionDef directly
-					// 	if anon, ok := varDef.Value.(*FunctionDef); ok {
-					// 		fnDef = anon
-					// 	} else if existingFnDef, ok := varDef._type().(*FunctionDef); ok {
-					// 		// FunctionDef can be used directly
-					// 		// This handles the case where a variable holds a function
-					// 		fnDef = existingFnDef
-					// 	} else {
-					// 		c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
-					// 		return nil
-					// 	}
-					// } else {
-					c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
-					return nil
-					// }
-				}
+				c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
+				return nil
 			}
+			c.recordCallAttempt(s, s.Name, fnDef)
 
 			callTypeArgs := c.resolveCallTypeArgs(s.TypeArgs)
 
@@ -4033,8 +5250,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if len(resolvedExprs) < len(fnDef.Parameters) {
 				// Find first non-nullable parameter that's missing
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-					paramType := fnDef.Parameters[i].Type
-					if _, isMaybe := paramType.(*Maybe); !isMaybe {
+					if !parameterOmittable(fnDef.Parameters[i]) {
 						c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
 						return nil
 					}
@@ -4070,9 +5286,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				fn:         fnToUse,
 				ReturnType: fnToUse.ReturnType,
 			}
-			if extFnDef, ok := fnSym.Type.(*ExternalFunctionDef); ok {
-				call.ExternalBinding = extFnDef.ExternalBinding
-			}
 			return call
 		}
 	case *parse.InstanceProperty:
@@ -4083,14 +5296,58 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 
-			if field, handled := c.checkDirectGoInstanceProperty(subj, s.Property.Name, s.Property.GetLocation()); handled {
-				return field
+			if foreign, ok := subj.Type().(*ForeignType); ok {
+				if !foreign.FieldsLoaded && foreign.LoadFields != nil {
+					foreign.Fields, foreign.UnsupportedFields = foreign.LoadFields()
+					foreign.FieldsLoaded = true
+				}
+				if reason := foreign.UnsupportedFields[s.Property.Name]; reason != "" {
+					c.addError(fmt.Sprintf("Unsupported foreign field %s.%s: %s", foreign, s.Property.Name, reason), s.Property.GetLocation())
+					return nil
+				}
+				if fieldType := foreign.Fields[s.Property.Name]; fieldType != nil {
+					return &ForeignFieldAccess{Subject: subj, Target: foreign.Target, Symbol: s.Property.Name, _type: fieldType}
+				}
 			}
 
 			propType := subj.Type().get(s.Property.Name)
+			foreignPointerReceiver := false
 			if propType == nil {
+				if foreign, ok := subj.Type().(*ForeignType); ok && !foreign.Pointer {
+					pointerForeign := *foreign
+					pointerForeign.Pointer = true
+					pointerForeign.Methods = foreign.PointerMethods
+					pointerForeign.UnsupportedMethods = foreign.UnsupportedPointerMethods
+					pointerForeign.MethodsLoaded = pointerForeign.Methods != nil || pointerForeign.UnsupportedMethods != nil
+					if pointerSig := pointerForeign.get(s.Property.Name); pointerSig != nil {
+						if !c.isMutable(subj) {
+							c.addError(fmt.Sprintf("Cannot access pointer receiver method %s.%s on immutable value", foreign, s.Property.Name), s.Property.GetLocation())
+							return nil
+						}
+						propType = pointerSig
+						foreignPointerReceiver = true
+					} else if reason := pointerForeign.UnsupportedMethods[s.Property.Name]; reason != "" {
+						c.addError(fmt.Sprintf("Unsupported foreign method %s.%s: %s", foreign, s.Property.Name, reason), s.Property.GetLocation())
+						return nil
+					}
+				}
+			}
+			if propType == nil {
+				if foreign, ok := subj.Type().(*ForeignType); ok {
+					if reason := foreign.UnsupportedMethods[s.Property.Name]; reason != "" {
+						c.addError(fmt.Sprintf("Unsupported foreign method %s.%s: %s", foreign, s.Property.Name, reason), s.Property.GetLocation())
+						return nil
+					}
+				}
 				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Property.Name), s.Property.GetLocation())
 				return nil
+			}
+
+			if fnDef, ok := propType.(*FunctionDef); ok {
+				if foreign, ok := subj.Type().(*ForeignType); ok {
+					pointer := foreign.Pointer || foreignPointerReceiver
+					return &ForeignMethodValue{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Property.Name, _type: fnDef}
+				}
 			}
 
 			prop := &InstanceProperty{
@@ -4098,11 +5355,18 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				Property: s.Property.Name,
 				_type:    propType,
 			}
+			c.recordMember(s.Property.GetLocation(), TargetField, subj.Type(), s.Property.Name, prop)
 
 			// Pre-compute which kind of property this is based on subject type
-			switch subj.Type().(type) {
+			switch subjType := subj.Type().(type) {
 			case *StructDef:
 				prop.Kind = StructSubject
+			case *MutableRef:
+				if _, ok := subjType.Of().(*StructDef); ok {
+					prop.Kind = StructSubject
+				} else {
+					c.addError(fmt.Sprintf("Cannot access property on type %s", subj.Type()), s.Property.GetLocation())
+				}
 			default:
 				// unreachable
 				c.addError(fmt.Sprintf("Cannot access property on type %s", subj.Type()), s.Property.GetLocation())
@@ -4121,9 +5385,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if subj.Type() == nil {
 				panic(fmt.Errorf("Cannot access %+v on nil: %s", subj.(*Variable).sym, s.Target))
 			}
-			if call, handled := c.checkDirectGoInstanceMethod(subj, s.Method, s.GetLocation()); handled {
-				return call
-			}
 			var sig Type
 			if structDef, ok := subj.Type().(*StructDef); ok {
 				if method, ok := c.structMethod(structDef, s.Method.Name); ok {
@@ -4132,12 +5393,50 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			} else {
 				sig = subj.Type().get(s.Method.Name)
 			}
+			foreignPointerReceiver := false
+			if sig == nil {
+				if foreign, ok := subj.Type().(*ForeignType); ok {
+					if reason := foreign.UnsupportedMethods[s.Method.Name]; reason != "" {
+						c.addError(fmt.Sprintf("Unsupported foreign method %s.%s: %s", foreign, s.Method.Name, reason), s.Method.GetLocation())
+						return nil
+					}
+					if !foreign.Pointer {
+						pointerForeign := *foreign
+						pointerForeign.Pointer = true
+						pointerForeign.Methods = foreign.PointerMethods
+						pointerForeign.UnsupportedMethods = foreign.UnsupportedPointerMethods
+						pointerForeign.MethodsLoaded = pointerForeign.Methods != nil || pointerForeign.UnsupportedMethods != nil
+						if pointerSig := pointerForeign.get(s.Method.Name); pointerSig != nil {
+							if !c.isMutable(subj) {
+								c.addError(fmt.Sprintf("Cannot call pointer receiver method %s.%s on immutable value", foreign, s.Method.Name), s.Method.GetLocation())
+								return nil
+							}
+							sig = pointerSig
+							foreignPointerReceiver = true
+						} else if reason := pointerForeign.UnsupportedMethods[s.Method.Name]; reason != "" {
+							c.addError(fmt.Sprintf("Unsupported foreign method %s.%s: %s", foreign, s.Method.Name, reason), s.Method.GetLocation())
+							return nil
+						}
+					}
+				}
+			}
 			if sig == nil {
 				if call, ok := c.checkFunctionFieldCall(subj, s.Method, s.GetLocation()); ok {
 					return call
 				}
-				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Method.Name), s.Method.GetLocation())
-				return nil
+				// A foreign named scalar with no Go method of this name falls back
+				// to its underlying primitive's methods (e.g. EventTitle.to_str()).
+				// Real Go methods on the named type still win above.
+				if prim := foreignScalarPrimitive(subj.Type()); prim != nil {
+					if primSig := prim.get(s.Method.Name); primSig != nil {
+						subj = &ForeignScalarConvert{Value: subj, Target: prim}
+						sig = primSig
+					}
+				}
+				if sig == nil {
+					c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Method.Name), s.Method.GetLocation())
+					return nil
+				}
 			}
 
 			fnDef, ok := sig.(*FunctionDef)
@@ -4163,8 +5462,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if len(resolvedExprs) < len(fnDef.Parameters) {
 				// Find first non-nullable parameter that's missing
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-					paramType := fnDef.Parameters[i].Type
-					if _, isMaybe := paramType.(*Maybe); !isMaybe {
+					if !parameterOmittable(fnDef.Parameters[i]) {
 						c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
 						return nil
 					}
@@ -4219,7 +5517,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						fnDefCopy = fnDef
 					}
 				} else {
-					// Not a generic struct, use normal generic setup (for methods with their own generics)
 					fnDefCopy, genericScope = c.setupFunctionGenerics(fnDef)
 				}
 			} else {
@@ -4255,6 +5552,22 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if args == nil {
 				return nil
 			}
+			if foreign, ok := subj.Type().(*ForeignType); ok {
+				if foreign.MapKey != nil && foreign.MapValue != nil && isMapMethodName(s.Method.Name) {
+					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs)
+				}
+				if foreign.Elem != nil && isListMethodName(s.Method.Name) {
+					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs)
+				}
+				for _, arg := range s.Method.Args {
+					if arg.Name != "" {
+						c.addError("Foreign method calls do not support named arguments", arg.GetLocation())
+						return nil
+					}
+				}
+				pointer := foreign.Pointer || foreignPointerReceiver
+				return &ForeignMethodCall{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Method.Name, Call: &FunctionCall{Name: s.Method.Name, Args: args, fn: fnToUse, ReturnType: fnToUse.ReturnType}}
+			}
 			// Create function call
 			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs)
 		}
@@ -4265,8 +5578,8 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				return nil
 			}
 			if s.Operator == parse.Minus {
-				if value.Type() != Int && value.Type() != Float {
-					c.addError("Only numbers can be negated with '-'", s.GetLocation())
+				if !isSignedArithmeticLike(value.Type()) {
+					c.addError("Only signed numbers can be negated with '-'", s.GetLocation())
 					return nil
 				}
 				return &Negation{value}
@@ -4293,16 +5606,16 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						c.addError("Cannot add different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if isArithmeticIntegerLike(left.Type()) {
 						return &IntAddition{left, right}
 					}
-					if left.Type() == Float {
+					if isArithmeticFloatLike(left.Type()) {
 						return &FloatAddition{left, right}
 					}
 					if left.Type() == Str {
 						return &StrAddition{left, right}
 					}
-					c.addError("The '-' operator can only be used for Int or Float", s.GetLocation())
+					c.addError("The '-' operator can only be used for Int or Float64", s.GetLocation())
 					return nil
 				}
 			case parse.Minus:
@@ -4313,17 +5626,17 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					if !left.Type().equal(right.Type()) {
 						c.addError("Cannot subtract different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if isArithmeticIntegerLike(left.Type()) {
 						return &IntSubtraction{left, right}
 					}
-					if left.Type() == Float {
+					if isArithmeticFloatLike(left.Type()) {
 						return &FloatSubtraction{left, right}
 					}
-					c.addError("The '+' operator can only be used for Int or Float", s.GetLocation())
+					c.addError("The '+' operator can only be used for Int or Float64", s.GetLocation())
 					return nil
 				}
 			case parse.Multiply:
@@ -4334,17 +5647,17 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					if !left.Type().equal(right.Type()) {
 						c.addError("Cannot multiply different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if isArithmeticIntegerLike(left.Type()) {
 						return &IntMultiplication{left, right}
 					}
-					if left.Type() == Float {
+					if isArithmeticFloatLike(left.Type()) {
 						return &FloatMultiplication{left, right}
 					}
-					c.addError("The '*' operator can only be used for Int or Float", s.GetLocation())
+					c.addError("The '*' operator can only be used for Int or Float64", s.GetLocation())
 					return nil
 				}
 			case parse.Divide:
@@ -4355,17 +5668,17 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					if !left.Type().equal(right.Type()) {
 						c.addError("Cannot divide different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if isArithmeticIntegerLike(left.Type()) {
 						return &IntDivision{left, right}
 					}
-					if left.Type() == Float {
+					if isArithmeticFloatLike(left.Type()) {
 						return &FloatDivision{left, right}
 					}
-					c.addError("The '/' operator can only be used for Int or Float", s.GetLocation())
+					c.addError("The '/' operator can only be used for Int or Float64", s.GetLocation())
 					return nil
 				}
 			case parse.Modulo:
@@ -4376,14 +5689,14 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					if left.Type() != right.Type() {
+					if !left.Type().equal(right.Type()) {
 						c.addError("Cannot modulo different types", s.GetLocation())
 						return nil
 					}
-					if left.Type() == Int {
+					if isArithmeticIntegerLike(left.Type()) {
 						return &IntModulo{left, right}
 					}
-					c.addError("The '%' operator can only be used for Int", s.GetLocation())
+					c.addError("The '%' operator can only be used for integer scalars", s.GetLocation())
 					return nil
 				}
 			case parse.GreaterThan:
@@ -4396,10 +5709,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 					// Allow Enum vs Int comparisons
 					if c.areTypesComparable(left.Type(), right.Type()) {
-						if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+						if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 							return &IntGreater{left, right}
 						}
-						if left.Type() == Float {
+						if isRelationalFloatLike(left.Type()) {
 							return &FloatGreater{left, right}
 						}
 					}
@@ -4416,10 +5729,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 					// Allow Enum vs Int comparisons
 					if c.areTypesComparable(left.Type(), right.Type()) {
-						if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+						if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 							return &IntGreaterEqual{left, right}
 						}
-						if left.Type() == Float {
+						if isRelationalFloatLike(left.Type()) {
 							return &FloatGreaterEqual{left, right}
 						}
 					}
@@ -4436,10 +5749,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 					// Allow Enum vs Int comparisons
 					if c.areTypesComparable(left.Type(), right.Type()) {
-						if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+						if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 							return &IntLess{left, right}
 						}
-						if left.Type() == Float {
+						if isRelationalFloatLike(left.Type()) {
 							return &FloatLess{left, right}
 						}
 					}
@@ -4456,10 +5769,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 					// Allow Enum vs Int comparisons
 					if c.areTypesComparable(left.Type(), right.Type()) {
-						if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+						if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 							return &IntLessEqual{left, right}
 						}
-						if left.Type() == Float {
+						if isRelationalFloatLike(left.Type()) {
 							return &FloatLessEqual{left, right}
 						}
 					}
@@ -4483,7 +5796,23 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					if leftIsMaybe && rightIsMaybe {
 						leftInner := leftMaybe.Of()
 						rightInner := rightMaybe.Of()
-						if leftInner != Void && rightInner != Void && !areCompatible(leftInner, rightInner) && !areCompatible(rightInner, leftInner) {
+						maybeEqualityCompatible := func(expected Type, actual Type) bool {
+							// Equality lowering has no coercion point, so the foreign
+							// scalar coercions do not apply here.
+							return c.areCompatible(expected, actual) && !foreignScalarNarrows(expected, actual) && !foreignScalarWidens(expected, actual)
+						}
+						if leftInner != Void && rightInner != Void && !maybeEqualityCompatible(leftInner, rightInner) && !maybeEqualityCompatible(rightInner, leftInner) {
+							c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
+							return nil
+						}
+						// Equality is only supported on nullable primitives. The
+						// inner type (the non-Void side when one is `none`) must be a
+						// comparable value type.
+						inner := leftInner
+						if inner == Void {
+							inner = rightInner
+						}
+						if inner != Void && !isComparableValueType(inner) {
 							c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
 							return nil
 						}
@@ -4499,17 +5828,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						return nil
 					}
 
-					// Check if types are allowed for equality (use equal() not pointer equality)
-					isAllowedType := func(t Type) bool {
-						// Primitives are allowed for equality
-						if t.equal(Int) || t.equal(Float) || t.equal(Str) || t.equal(Bool) || t.equal(Byte) || t.equal(Rune) {
-							return true
-						}
-						// Enums are allowed (they are just integers with semantic meaning)
-						_, isEnum := t.(*Enum)
-						return isEnum
-					}
-					if !isAllowedType(left.Type()) || !isAllowedType(right.Type()) {
+					if !isComparableValueType(left.Type()) || !isComparableValueType(right.Type()) {
 						c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
 						return nil
 					}
@@ -4595,6 +5914,13 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			// Handle local functions
 			absolutePath := s.Target.String() + "::" + s.Function.Name
 			if sym, ok := c.scope.get(absolutePath); ok {
+				if c.spans != nil {
+					if targetIdent, isIdent := s.Target.(*parse.Identifier); isIdent {
+						if typeSym, found := c.scope.get(targetIdent.Name); found && isNominalType(typeSym.Type) {
+							c.recordTypeRef(targetIdent.GetLocation(), targetIdent.Name)
+						}
+					}
+				}
 				fnDef := sym.Type.(*FunctionDef)
 				callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
 
@@ -4605,87 +5931,146 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					return nil
 				}
 
-				// We also need argument mutability aligned with parameters
-				resolvedArgs := make([]parse.Argument, len(fnDef.Parameters))
-				if len(s.Function.Args) > 0 && s.Function.Args[0].Name != "" {
-					paramMap := make(map[string]int)
-					for i, param := range fnDef.Parameters {
-						paramMap[param.Name] = i
-					}
-					for _, arg := range s.Function.Args {
-						if index, exists := paramMap[arg.Name]; exists {
-							resolvedArgs[index] = parse.Argument{
-								Location: arg.Location,
-								Name:     "",
-								Value:    arg.Value,
-								Mutable:  arg.Mutable,
-							}
+				numOmittedArgs := 0
+				if len(resolvedExprs) < len(fnDef.Parameters) {
+					for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
+						if !parameterOmittable(fnDef.Parameters[i]) {
+							c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
+							return nil
 						}
 					}
-				} else {
-					copy(resolvedArgs, s.Function.Args)
+					numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
+				} else if len(resolvedExprs) > len(fnDef.Parameters) {
+					c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
+					resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 				}
 
-				// Check and process arguments
-				args := make([]Expression, len(resolvedArgs))
-				for i := range resolvedArgs {
-					paramType := fnDef.Parameters[i].Type
-
-					var checkedArg Expression
-					switch resolvedExprs[i].(type) {
-					case *parse.ListLiteral, *parse.MapLiteral:
-						checkedArg = c.checkExprAs(resolvedExprs[i], paramType)
-					default:
-						checkedArg = c.checkExpr(resolvedExprs[i])
-					}
-
-					if checkedArg == nil {
-						return nil
-					}
-
-					// Type check the argument against the parameter type
-					if !areCompatible(paramType, checkedArg.Type()) {
-						c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
-						return nil
-					}
-
-					// Check mutability constraints if needed
-					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) {
-						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
-					}
-
-					args[i] = checkedArg
+				fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
+				args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+				if args == nil {
+					return nil
 				}
-
-				call := &FunctionCall{
-					Name:       absolutePath,
-					Args:       args,
-					TypeArgs:   callTypeArgs,
-					fn:         fnDef,
-					ReturnType: fnDef.ReturnType,
-				}
-
-				// Use new generic resolution system
-				if fnDef.hasGenerics() || len(callTypeArgs) > 0 {
+				if len(callTypeArgs) > 0 {
 					specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, s.GetLocation())
 					if err != nil {
 						c.addError(err.Error(), s.GetLocation())
 						return nil
 					}
-
-					call.fn = specialized
-					call.ReturnType = specialized.ReturnType
+					fnToUse = specialized
 				}
 
-				return call
+				return &FunctionCall{
+					Name:       absolutePath,
+					Args:       args,
+					TypeArgs:   callTypeArgs,
+					fn:         fnToUse,
+					ReturnType: fnToUse.ReturnType,
+				}
 			}
 
-			if call, handled := c.checkDirectGoStaticFunction(s); handled {
-				return call
-			}
-
-			// find the function in a module
+			// find the function in a module or Go package namespace
 			modName, name := c.destructurePath(s)
+			if mod := c.resolveModule(modName); mod != nil && mod.Path() == "ard/unsafe" {
+				switch name {
+				case "cast":
+					return c.checkUnsafeCast(s)
+				case "is_nil":
+					return c.checkUnsafeIsNil(s)
+				}
+			}
+			if goPkg := c.program.GoImports[modName]; goPkg != nil {
+				fnDef := goPkg.Functions[name]
+				var callTypeArgs []Type
+				pointerResult := false
+				if goFn := goPkg.Generics[name]; goFn != nil {
+					fnDef, callTypeArgs, pointerResult = c.instantiateGoFunctionCall(modName, name, goFn, s)
+					if fnDef == nil {
+						return nil
+					}
+				} else if fnDef != nil && len(s.Function.TypeArgs) > 0 {
+					c.addError(fmt.Sprintf("Go function %s::%s is not generic", modName, name), s.GetLocation())
+					return nil
+				}
+				if fnDef == nil {
+					// `pkg::T(x)` where T is a foreign named scalar type is an
+					// explicit conversion to the named type, e.g. ui::IntentType(s).
+					// Once T is known to be such a type, commit to the conversion so
+					// a mismatched argument reports a clear error.
+					if named, ok := goPkg.Types[name]; ok && len(s.Function.TypeArgs) == 0 {
+						if prim := foreignScalarPrimitive(named); prim != nil {
+							if len(s.Function.Args) != 1 {
+								c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 1, got %d", len(s.Function.Args)), s.GetLocation())
+								return nil
+							}
+							arg := c.checkExprAs(s.Function.Args[0].Value, prim)
+							if arg == nil {
+								return nil
+							}
+							// Identity conversion is a no-op, matching Go.
+							if named.equal(arg.Type()) {
+								return arg
+							}
+							if prim.equal(arg.Type()) {
+								return &ForeignScalarConvert{Value: arg, Target: named}
+							}
+							// Another foreign scalar with the same underlying converts
+							// through the primitive, lowering to T(string(x)).
+							if foreignScalarNarrows(prim, arg.Type()) {
+								return &ForeignScalarConvert{Value: &ForeignScalarConvert{Value: arg, Target: prim}, Target: named}
+							}
+							c.addError(typeMismatch(prim, arg.Type()), s.Function.Args[0].GetLocation())
+							return nil
+						}
+					}
+					if reason, ok := goPkg.UnsupportedFunctions[name]; ok {
+						c.addError(fmt.Sprintf("Unsupported Go function %s::%s: %s", modName, name, reason), s.GetLocation())
+					} else {
+						c.addError(fmt.Sprintf("Undefined Go function: %s::%s", modName, name), s.GetLocation())
+					}
+					return nil
+				}
+				for _, arg := range s.Function.Args {
+					if arg.Name != "" {
+						c.addError("Go function calls do not support named arguments", arg.GetLocation())
+						return nil
+					}
+				}
+				resolvedExprs, err := c.resolveArguments(s.Function.Args, fnDef.Parameters)
+				if err != nil {
+					c.addError(err.Error(), s.GetLocation())
+					return nil
+				}
+				if len(resolvedExprs) != len(fnDef.Parameters) {
+					// A trailing Go variadic argument may be omitted.
+					omittedVariadic := len(resolvedExprs) == len(fnDef.Parameters)-1 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic
+					if !omittedVariadic {
+						c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
+						return nil
+					}
+				}
+				args := make([]Expression, len(resolvedExprs))
+				for i, expr := range resolvedExprs {
+					checkedArg := c.checkExprAs(expr, fnDef.Parameters[i].Type)
+					if checkedArg == nil {
+						return nil
+					}
+					if !c.areCompatible(fnDef.Parameters[i].Type, checkedArg.Type()) {
+						upcast, ok := c.foreignInterfaceArgUpcast(fnDef.Parameters[i].Type, checkedArg)
+						if !ok {
+							c.addError(typeMismatch(fnDef.Parameters[i].Type, checkedArg.Type()), expr.GetLocation())
+							return nil
+						}
+						checkedArg = upcast
+					}
+					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) && !freshContainerSatisfiesMutable(fnDef.Parameters[i].Type, checkedArg) {
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), expr.GetLocation())
+						return nil
+					}
+					args[i] = checkedArg
+				}
+				return &ForeignFunctionCall{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: name, TypeArgs: callTypeArgs, PointerResult: pointerResult, Call: &FunctionCall{Name: name, Args: args, fn: fnDef, ReturnType: fnDef.ReturnType}}
+			}
+
 			var fnDef *FunctionDef
 			mod := c.resolveModule(modName)
 			if mod == nil {
@@ -4705,16 +6090,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			switch fn := sym.Type.(type) {
 			case *FunctionDef:
 				fnDef = fn
-				ok = true
-			case *ExternalFunctionDef:
-				// Convert ExternalFunctionDef to FunctionDef for validation
-				fnDef = &FunctionDef{
-					Name:          fn.Name,
-					GenericParams: append([]string(nil), fn.GenericParams...),
-					Parameters:    fn.Parameters,
-					ReturnType:    fn.ReturnType,
-					Private:       fn.Private,
-				}
 				ok = true
 			default:
 				ok = false
@@ -4739,8 +6114,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			if len(resolvedExprs) < len(fnDef.Parameters) {
 				// Find first non-nullable parameter that's missing
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
-					paramType := fnDef.Parameters[i].Type
-					if _, isMaybe := paramType.(*Maybe); !isMaybe {
+					if !parameterOmittable(fnDef.Parameters[i]) {
 						c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
 						return nil
 					}
@@ -4779,31 +6153,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 				fn:         fnToUse,
 				ReturnType: fnToUse.ReturnType,
 			}
-			if extFn, ok := sym.Type.(*ExternalFunctionDef); ok {
-				call.ExternalBinding = extFn.ExternalBinding
-			}
-
-			// Special validation for async::start calls
-			if mod.Path() == "ard/async" && s.Function.Name == "start" {
-				return c.validateFiberFunction(s.Function.Args[0].Value, mod.Get("Fiber").Type)
-			}
-			// Special validation for async::eval calls
-			if mod.Path() == "ard/async" && s.Function.Name == "eval" {
-				return c.validateAsyncEval(s.Function.Args[0].Value)
-			}
-			if mod.Path() == "ard/json" && s.Function.Name == "parse" {
-				if err := validateJSONShape("json::parse", call.Type()); err != nil {
-					c.addError(err.Error(), s.GetLocation())
-					return nil
-				}
-			}
-			if mod.Path() == "ard/json" && s.Function.Name == "encode" && len(args) > 0 {
-				if err := validateJSONShape("json::encode", args[0].Type()); err != nil {
-					c.addError(err.Error(), s.GetLocation())
-					return nil
-				}
-			}
-
+			c.recordTarget(s, call, SpanTarget{Kind: TargetFunction, Module: mod.Path(), Symbol: name})
 			return &ModuleFunctionCall{
 				Module: mod.Path(),
 				Call:   call,
@@ -4813,8 +6163,6 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		return c.checkIfChain(s)
 	case *parse.FunctionDeclaration:
 		return c.checkFunction(s, nil)
-	case *parse.ExternalFunction:
-		return c.checkExternalFunction(s)
 	case *parse.AnonymousFunction:
 		{
 			// Resolve parameters and return type (no type context for inference)
@@ -4836,7 +6184,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			body := c.checkBlockWithExpected(s.Body, func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
-					c.scope.add(param.Name, param.Type, param.Mutable)
+					c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
 				}
 			}, returnType, true)
 			c.popFunctionGenericContext()
@@ -4845,7 +6193,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			c.scope.add(uniqueName, fn, false)
 
 			// Validate return type
-			if returnType != Void && !areCompatible(returnType, body.Type()) {
+			if returnType != Void && !c.areCompatible(returnType, body.Type()) {
 				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
 				return nil
 			}
@@ -4854,6 +6202,13 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			return fn
 		}
 	case *parse.StaticFunctionDeclaration:
+		if c.spans != nil {
+			if target, ok := s.Path.Target.(*parse.Identifier); ok {
+				if sym, found := c.scope.get(target.Name); found && isNominalType(sym.Type) {
+					c.recordTypeRef(target.GetLocation(), target.Name)
+				}
+			}
+		}
 		fn := c.checkFunction(&s.FunctionDeclaration, nil)
 		if fn != nil {
 			fn.Name = s.Path.String()
@@ -4862,9 +6217,111 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 
 		return fn
 	case *parse.ListLiteral:
-		return c.checkList(nil, s)
+		// checkList returns a typed-nil *ListLiteral on failure; normalize to an
+		// interface nil so callers' `== nil` checks hold and never deref it.
+		if result := c.checkList(nil, s); result != nil {
+			return result
+		}
+		return nil
 	case *parse.MapLiteral:
-		return c.checkMap(nil, s)
+		if result := c.checkMap(nil, s); result != nil {
+			return result
+		}
+		return nil
+	case *parse.SelectExpression:
+		allowMixedVoid := discardThisExpr || c.expectedExpr == Void
+		previousArmDiscard := c.matchArmDiscardContext
+		c.matchArmDiscardContext = allowMixedVoid
+		defer func() {
+			c.matchArmDiscardContext = previousArmDiscard
+		}()
+
+		sel := &Select{}
+		var resultType Type
+		hasDefault := false
+
+		for _, arm := range s.Cases {
+			// Default arm: the head is the `_` identifier.
+			if id, ok := arm.Op.(*parse.Identifier); ok && id.Name == "_" {
+				if arm.Binding != nil {
+					c.addError("The default select arm cannot bind a value", arm.Op.GetLocation())
+				}
+				if hasDefault {
+					c.addError("Duplicate default (_) arm in select", arm.Op.GetLocation())
+				}
+				hasDefault = true
+				body := c.checkMatchArmBlock(arm.Body, nil)
+				sel.Arms = append(sel.Arms, SelectArm{Kind: SelectArmDefault, Body: body})
+				if merged, ok := mergeMatchResultType(c, resultType, body.Type(), arm.Op.GetLocation(), allowMixedVoid); ok {
+					resultType = merged
+				}
+				continue
+			}
+
+			op, ok := arm.Op.(*parse.InstanceMethod)
+			if !ok {
+				c.addError("A select arm must be a channel recv() or send() operation", arm.Op.GetLocation())
+				continue
+			}
+
+			channel := c.checkExpr(op.Target)
+			if channel == nil {
+				continue
+			}
+			elem, ok := channelElementType(channel.Type())
+			if !ok {
+				c.addError(fmt.Sprintf("A select arm operates on a channel, but got %s", channel.Type().String()), op.Target.GetLocation())
+				continue
+			}
+
+			switch op.Method.Name {
+			case "recv":
+				if !channelCanRecv(channel.Type()) {
+					c.addError(fmt.Sprintf("recv() is not available on %s", channel.Type().String()), op.GetLocation())
+					continue
+				}
+				if len(op.Method.Args) != 0 {
+					c.addError("recv() in a select arm takes no arguments", op.GetLocation())
+				}
+				var binding *Identifier
+				if arm.Binding != nil {
+					binding = &Identifier{Name: arm.Binding.Name}
+				}
+				body := c.checkMatchArmBlock(arm.Body, func() {
+					if arm.Binding != nil {
+						c.scope.add(arm.Binding.Name, &Maybe{elem}, false)
+					}
+				})
+				sel.Arms = append(sel.Arms, SelectArm{Kind: SelectArmRecv, Channel: channel, Binding: binding, ElemType: elem, Body: body})
+				if merged, ok := mergeMatchResultType(c, resultType, body.Type(), op.GetLocation(), allowMixedVoid); ok {
+					resultType = merged
+				}
+			case "send":
+				if !channelCanSend(channel.Type()) {
+					c.addError(fmt.Sprintf("send() is not available on %s", channel.Type().String()), op.GetLocation())
+					continue
+				}
+				if arm.Binding != nil {
+					c.addError("A select send arm cannot bind a value", arm.Op.GetLocation())
+				}
+				if len(op.Method.Args) != 1 {
+					c.addError("send() in a select arm takes exactly one argument", op.GetLocation())
+					continue
+				}
+				value := c.checkExprAs(op.Method.Args[0].Value, elem)
+				body := c.checkMatchArmBlock(arm.Body, nil)
+				sel.Arms = append(sel.Arms, SelectArm{Kind: SelectArmSend, Channel: channel, ElemType: elem, Value: value, Body: body})
+				if merged, ok := mergeMatchResultType(c, resultType, body.Type(), op.GetLocation(), allowMixedVoid); ok {
+					resultType = merged
+				}
+			default:
+				c.addError(fmt.Sprintf("A select arm must use recv() or send(), got %s()", op.Method.Name), op.GetLocation())
+			}
+		}
+
+		sel.ResultType = resultType
+		return sel
+
 	case *parse.MatchExpression:
 		allowMixedVoid := discardThisExpr || c.expectedExpr == Void
 		previousArmDiscard := c.matchArmDiscardContext
@@ -4877,6 +6334,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 		subject := c.checkExpr(s.Subject)
 		if subject == nil {
 			return nil
+		}
+
+		// Dynamic type tests over Any or foreign-interface subjects (ADR 0042)
+		if isDynamicMatchSubject(subject.Type()) {
+			return c.checkForeignTypeMatch(s, subject, allowMixedVoid)
 		}
 
 		// For Maybe types, generate an OptionMatch
@@ -5629,10 +7091,51 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 	case *parse.StaticProperty:
 		{
 			if id, ok := s.Target.(*parse.Identifier); ok {
+				if goPkg := c.program.GoImports[id.Name]; goPkg != nil {
+					switch prop := s.Property.(type) {
+					case *parse.Identifier:
+						if typ := goPkg.Constants[prop.Name]; typ != nil {
+							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ}
+						}
+						if typ := goPkg.Variables[prop.Name]; typ != nil {
+							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ, Assignable: true}
+						}
+						if reason := goPkg.UnsupportedConstants[prop.Name]; reason != "" {
+							c.addError(fmt.Sprintf("Unsupported Go constant %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+							return nil
+						}
+						if reason := goPkg.UnsupportedVariables[prop.Name]; reason != "" {
+							c.addError(fmt.Sprintf("Unsupported Go variable %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+							return nil
+						}
+						c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
+						return nil
+					case *parse.StructInstance:
+						typ := goPkg.Types[prop.Name.Name]
+						foreign, ok := typ.(*ForeignType)
+						if !ok {
+							c.addError(fmt.Sprintf("Undefined Go type: %s::%s", id.Name, prop.Name.Name), prop.Name.GetLocation())
+							return nil
+						}
+						instance := c.validateForeignStructInstance(foreign, prop.TypeArgs, prop.Properties, prop.GetLocation())
+						if instance == nil {
+							return nil
+						}
+						return instance
+					default:
+						c.addError(fmt.Sprintf("Unsupported property type in %s::%s", id.Name, s.Property), s.Property.GetLocation())
+						return nil
+					}
+				}
+
 				// Check if this is accessing a module
 				if mod := c.resolveModule(id.Name); mod != nil {
 					switch prop := s.Property.(type) {
 					case *parse.StructInstance:
+						typeArgs, ok := c.resolveStructTypeArgs(prop)
+						if !ok {
+							return nil
+						}
 						// Look up the struct symbol directly from the module
 						sym := mod.Get(prop.Name.Name)
 						if sym.IsZero() {
@@ -5647,7 +7150,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 						}
 
 						// Use helper function for validation
-						instance := c.validateStructInstance(structType, prop.Properties, prop.Name.Name, prop.GetLocation())
+						instance := c.validateStructInstance(structType, prop.Properties, prop.Name.Name, prop.GetLocation(), typeArgs)
 						if instance == nil {
 							return nil
 						}
@@ -5668,21 +7171,11 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
 							return nil
 						}
-						return &ModuleSymbol{Module: mod.Path(), Symbol: Symbol{Name: prop.Name, Type: sym.Type}}
+						node := &ModuleSymbol{Module: mod.Path(), Symbol: Symbol{Name: prop.Name, Type: sym.Type}}
+						c.recordTarget(prop, node, SpanTarget{Kind: TargetValue, Module: mod.Path(), Symbol: prop.Name})
+						return node
 					default:
 						c.addError(fmt.Sprintf("Unsupported property type in %s::%s", id.Name, prop), s.Property.GetLocation())
-						return nil
-					}
-				}
-
-				if goImport, ok := c.directGoImports[id.Name]; ok {
-					switch prop := s.Property.(type) {
-					case *parse.Identifier:
-						return c.resolveDirectGoPackageValue(id.Name, prop.Name, prop.GetLocation())
-					case *parse.StructInstance:
-						return c.resolveDirectGoStructInstance(goImport, prop)
-					default:
-						c.addError(fmt.Sprintf("Unsupported property type in Go import %s::%s", id.Name, s.Property), s.Property.GetLocation())
 						return nil
 					}
 				}
@@ -5768,6 +7261,10 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			panic(fmt.Errorf("Unexpected static property target: %T", s.Target))
 		}
 	case *parse.StructInstance:
+		typeArgs, argsOk := c.resolveStructTypeArgs(s)
+		if !argsOk {
+			return nil
+		}
 		name := s.Name.Name
 		sym, ok := c.scope.get(name)
 		if !ok {
@@ -5780,9 +7277,12 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 			c.addError(fmt.Sprintf("Undefined: %s", name), s.GetLocation())
 			return nil
 		}
+		if !strings.Contains(name, "::") {
+			c.recordTypeRef(s.Name.GetLocation(), name)
+		}
 
 		// Use helper function for validation
-		return c.validateStructInstance(structType, s.Properties, name, s.GetLocation())
+		return c.validateStructInstance(structType, s.Properties, name, s.GetLocation(), typeArgs)
 	case *parse.Try:
 		{
 			// Check if this is a property/method accessor chain that might need cascading Maybe handling
@@ -5808,7 +7308,7 @@ func (c *Checker) checkExpr(expr parse.Expression) Expression {
 					c.scope = &newScope
 
 					// Add error variable to scope with the error type
-					c.scope.add(s.CatchVar.Name, _type.err, false)
+					c.recordBinding(s.CatchVar.GetLocation(), c.scope.add(s.CatchVar.Name, _type.err, false))
 
 					// Check catch block statements
 					for _, stmt := range s.CatchBlock {
@@ -6113,6 +7613,18 @@ func bindInferredTypeVars(expected Type, actual Type) {
 		if act, ok := actual.(*List); ok {
 			bindInferredTypeVars(exp.Of(), act.Of())
 		}
+	case *Chan:
+		if act, ok := actual.(*Chan); ok {
+			bindInferredTypeVars(exp.Of(), act.Of())
+		}
+	case *Receiver:
+		if act, ok := actual.(*Receiver); ok {
+			bindInferredTypeVars(exp.Of(), act.Of())
+		}
+	case *Sender:
+		if act, ok := actual.(*Sender); ok {
+			bindInferredTypeVars(exp.Of(), act.Of())
+		}
 	case *Map:
 		if act, ok := actual.(*Map); ok {
 			bindInferredTypeVars(exp.Key(), act.Key())
@@ -6144,22 +7656,318 @@ func bindInferredTypeVars(expected Type, actual Type) {
 			}
 			bindInferredTypeVars(exp.ReturnType, act.ReturnType)
 		}
-	case *ExternType:
-		if act, ok := actual.(*ExternType); ok && exp.Name_ == act.Name_ {
-			limit := len(exp.TypeArgs)
-			if len(act.TypeArgs) < limit {
-				limit = len(act.TypeArgs)
+	}
+}
+
+func (c *Checker) checkNumericLiteralAs(expr parse.Expression, expected Type) Expression {
+	if unary, ok := expr.(*parse.UnaryExpression); ok && unary.Operator == parse.Minus {
+		if num, ok := unary.Operand.(*parse.NumLiteral); ok {
+			return c.checkSignedNumericLiteralAs(num, expected, true)
+		}
+	}
+	num, ok := expr.(*parse.NumLiteral)
+	if !ok || expected == nil {
+		return nil
+	}
+	return c.checkSignedNumericLiteralAs(num, expected, false)
+}
+
+func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Type, negative bool) Expression {
+	literalType := expected
+	if foreign, ok := expected.(*ForeignType); ok {
+		literalType = foreign.Underlying
+	}
+	if expected == nil || (!isIntegerScalar(literalType) && literalType != Float32 && literalType != Float64) {
+		return nil
+	}
+	literalText := num.Value
+	if negative {
+		literalText = "-" + literalText
+	}
+	if strings.Contains(num.Value, ".") {
+		clean := strings.ReplaceAll(literalText, "_", "")
+		value, err := strconv.ParseFloat(clean, 64)
+		if err != nil {
+			c.addError(fmt.Sprintf("Invalid float: %s", num.Value), num.GetLocation())
+			return nil
+		}
+		if literalType == Float64 {
+			if expected != literalType {
+				return &TypedFloatLiteral{Value: value, Text: clean, Typed: expected}
 			}
-			for i := 0; i < limit; i++ {
-				bindInferredTypeVars(exp.TypeArgs[i], act.TypeArgs[i])
+			return &FloatLiteral{Value: value}
+		}
+		if literalType == Float32 {
+			float32Value, err := strconv.ParseFloat(clean, 32)
+			if err != nil {
+				c.addError(fmt.Sprintf("Float literal %s overflows Float32", num.Value), num.GetLocation())
+				return &TypedFloatLiteral{Value: float32Value, Text: clean, Typed: expected}
+			}
+			return &TypedFloatLiteral{Value: float32Value, Text: clean, Typed: expected}
+		}
+		return nil
+	}
+	clean := strings.ReplaceAll(literalText, "_", "")
+	if isUnsignedScalar(literalType) {
+		value := new(big.Int)
+		if _, ok := value.SetString(clean, 0); !ok || value.Sign() < 0 || !c.uintLiteralFitsType(value, literalType) {
+			c.addError(fmt.Sprintf("Integer literal %s overflows %s", literalText, expected), num.GetLocation())
+		}
+		return &TypedIntLiteral{Value: int(value.Int64()), Text: clean, Typed: expected}
+	}
+	if literalType == Float32 || literalType == Float64 {
+		return nil
+	}
+	value64, err := strconv.ParseInt(clean, 0, 64)
+	if err != nil {
+		c.addError(fmt.Sprintf("Invalid int: %s", literalText), num.GetLocation())
+		return nil
+	}
+	if !c.intLiteralFitsType(value64, literalType) {
+		c.addError(fmt.Sprintf("Integer literal %s overflows %s", literalText, expected), num.GetLocation())
+		if isIntegerScalar(literalType) {
+			return &TypedIntLiteral{Value: int(value64), Text: clean, Typed: expected}
+		}
+		return nil
+	}
+	if expected == Int {
+		return &IntLiteral{Value: int(value64)}
+	}
+	if isIntegerScalar(literalType) {
+		return &TypedIntLiteral{Value: int(value64), Text: clean, Typed: expected}
+	}
+	return nil
+}
+
+// foreignScalarNarrows reports whether actual is a foreign named scalar that
+// satisfies expected only through the narrowing coercion to its underlying
+// primitive. The coercion produces a converted value, not the original place,
+// so mutable parameters and equality contexts must reject it.
+func foreignScalarNarrows(expected Type, actual Type) bool {
+	foreign, ok := actual.(*ForeignType)
+	return ok && !foreign.Pointer && foreign.Underlying != nil && isPrimitiveScalar(expected) && foreign.Underlying.equal(expected)
+}
+
+// foreignScalarWidens reports whether actual is a primitive that satisfies
+// expected only through the widening coercion into a foreign named scalar
+// type (e.g. Str -> ui::IntentType). Restricted to Str and Bool underlyings,
+// where the Go conversion is total; numeric widenings could truncate and stay
+// explicit. Like narrowing, the coercion produces a converted value, so
+// mutable places and identity contexts must reject it.
+func foreignScalarWidens(expected Type, actual Type) bool {
+	foreign, ok := expected.(*ForeignType)
+	if !ok || foreign.Pointer || foreign.Interface || foreign.Struct || foreign.Underlying == nil {
+		return false
+	}
+	if !foreign.Underlying.equal(Str) && !foreign.Underlying.equal(Bool) {
+		return false
+	}
+	return foreign.Underlying.equal(actual)
+}
+
+// ValidForeignScalarConversion reports whether a ForeignScalarConvert between
+// the two types is a supported foreign-scalar coercion in either direction.
+// The AIR lowering asserts this so future widening of the checker-side gates
+// cannot silently emit an unchecked Go conversion.
+func ValidForeignScalarConversion(from, to Type) bool {
+	if prim := foreignScalarPrimitive(from); prim != nil && prim.equal(to) {
+		return true
+	}
+	if prim := foreignScalarPrimitive(to); prim != nil && prim.equal(from) {
+		return true
+	}
+	return false
+}
+
+// foreignScalarPrimitive returns the underlying Ard primitive of a foreign
+// named scalar type, or nil when t is not one.
+func foreignScalarPrimitive(t Type) Type {
+	foreign, ok := t.(*ForeignType)
+	if !ok || foreign.Pointer || foreign.Interface || foreign.Struct || foreign.Underlying == nil {
+		return nil
+	}
+	if !isPrimitiveScalar(foreign.Underlying) {
+		return nil
+	}
+	return foreign.Underlying
+}
+
+// foreignFuncCoerces reports whether compatibility between expected and actual
+// relies on the named/unnamed Go func coercion in either direction. Contexts
+// that require exact Go type identity (such as Go interface conformance)
+// must exclude this coercion: the generated Go method signature has to match
+// the interface's signature exactly.
+func foreignFuncCoerces(expected Type, actual Type) bool {
+	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer {
+		if _, ok := foreign.Underlying.(*FunctionDef); ok {
+			if _, isFn := actual.(*FunctionDef); isFn {
+				return true
 			}
 		}
+	}
+	if foreign, ok := actual.(*ForeignType); ok && !foreign.Pointer {
+		if _, ok := foreign.Underlying.(*FunctionDef); ok {
+			if _, isFn := expected.(*FunctionDef); isFn {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isPrimitiveScalar(t Type) bool {
+	if t == nil {
+		return false
+	}
+	return t.equal(Int) || t.equal(Float64) || t.equal(Str) || t.equal(Bool) || t.equal(Byte) || t.equal(Rune) || isExplicitScalar(t)
+}
+
+func isExplicitScalar(t Type) bool {
+	switch t {
+	case Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, Uintptr, Float32:
+		return true
+	default:
+		return false
+	}
+}
+
+func isIntegerScalar(t Type) bool {
+	switch t {
+	case Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, Uintptr, Byte, Rune:
+		return true
+	default:
+		return false
+	}
+}
+
+func isRelationalIntegerLike(t Type) bool { return isIntegerScalar(t) }
+
+func isRelationalFloatLike(t Type) bool { return t == Float64 || t == Float32 }
+
+func isArithmeticIntegerLike(t Type) bool { return isIntegerScalar(t) }
+
+func isSignedArithmeticLike(t Type) bool {
+	switch t {
+	case Int, Int8, Int16, Int32, Int64, Float32, Float64:
+		return true
+	default:
+		return false
+	}
+}
+
+func isArithmeticFloatLike(t Type) bool { return isRelationalFloatLike(t) }
+
+func isUnsignedScalar(t Type) bool {
+	switch t {
+	case Uint, Uint8, Uint16, Uint32, Uint64, Uintptr:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Checker) targetIntBits() int {
+	if c.options.Target.IntBits != 0 {
+		return c.options.Target.IntBits
+	}
+	return strconv.IntSize
+}
+
+func (c *Checker) targetUintBits() int {
+	if c.options.Target.UintBits != 0 {
+		return c.options.Target.UintBits
+	}
+	return c.targetIntBits()
+}
+
+func (c *Checker) targetUintptrBits() int {
+	if c.options.Target.UintptrBits != 0 {
+		return c.options.Target.UintptrBits
+	}
+	return c.targetIntBits()
+}
+
+func unsignedMax(bits int) *big.Int {
+	if bits <= 0 {
+		bits = strconv.IntSize
+	}
+	return new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(bits)), big.NewInt(1))
+}
+
+func (c *Checker) uintLiteralFitsType(value *big.Int, t Type) bool {
+	if value.Sign() < 0 {
+		return false
+	}
+	switch t {
+	case Uint:
+		return value.Cmp(unsignedMax(c.targetUintBits())) <= 0
+	case Uintptr:
+		return value.Cmp(unsignedMax(c.targetUintptrBits())) <= 0
+	case Uint64:
+		return value.Cmp(unsignedMax(64)) <= 0
+	case Uint8:
+		return value.Cmp(big.NewInt(math.MaxUint8)) <= 0
+	case Uint16:
+		return value.Cmp(big.NewInt(math.MaxUint16)) <= 0
+	case Uint32:
+		return value.Cmp(big.NewInt(math.MaxUint32)) <= 0
+	default:
+		return false
+	}
+}
+
+func (c *Checker) intLiteralFitsType(value int64, t Type) bool {
+	switch t {
+	case Int:
+		bits := c.targetIntBits()
+		if bits <= 0 {
+			bits = strconv.IntSize
+		}
+		if bits >= 64 {
+			return true
+		}
+		min := -(int64(1) << (bits - 1))
+		max := (int64(1) << (bits - 1)) - 1
+		return value >= min && value <= max
+	case Int64:
+		return true
+	case Int8:
+		return value >= math.MinInt8 && value <= math.MaxInt8
+	case Int16:
+		return value >= math.MinInt16 && value <= math.MaxInt16
+	case Int32, Rune:
+		return value >= math.MinInt32 && value <= math.MaxInt32
+	case Uint, Uint64, Uintptr:
+		return value >= 0
+	case Uint8, Byte:
+		return value >= 0 && value <= math.MaxUint8
+	case Uint16:
+		return value >= 0 && value <= math.MaxUint16
+	case Uint32:
+		return value >= 0 && value <= math.MaxUint32
+	default:
+		return false
 	}
 }
 
 func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expression {
+	result := c.checkExprAsInner(expr, expectedType)
+	if result != nil {
+		c.recordExprSpan(expr, result)
+	}
+	return result
+}
+
+func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type) Expression {
+	if literal := c.checkNumericLiteralAs(expr, expectedType); literal != nil {
+		return literal
+	}
 	switch s := (expr).(type) {
 	case *parse.MatchExpression:
+		return c.withExpectedExpr(expectedType, func() Expression {
+			return c.checkExpr(s)
+		})
+	case *parse.SelectExpression:
 		return c.withExpectedExpr(expectedType, func() Expression {
 			return c.checkExpr(s)
 		})
@@ -6230,7 +8038,7 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			body := c.checkBlockWithExpected(s.Body, func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
-					c.scope.add(param.Name, param.Type, param.Mutable)
+					c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
 				}
 			}, returnType, true)
 			c.popFunctionGenericContext()
@@ -6248,7 +8056,7 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			bindInferredTypeVars(returnType, body.Type())
 
 			// Validate return type
-			if returnType != Void && !areCompatible(returnType, body.Type()) {
+			if returnType != Void && !c.areCompatible(returnType, body.Type()) {
 				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
 				return nil
 			}
@@ -6263,18 +8071,12 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 				c.addError(fmt.Sprintf("Cannot access %s on Void", s.Method.Name), s.Method.GetLocation())
 				return nil
 			}
-			if call, handled := c.checkDirectGoInstanceMethodAs(subj, s.Method, s.GetLocation(), expectedType); handled {
-				return call
-			}
 		}
 	case *parse.StaticFunction:
 		{
-			if call, handled := c.checkDirectGoStaticFunctionAs(s, expectedType); handled {
-				return call
-			}
 			resultType, expectResult := expectedType.(*Result)
 			target, ok := s.Target.(*parse.Identifier)
-			if !expectResult || !ok || target.Name != "Result" || (s.Function.Name != "ok" && s.Function.Name != "err") {
+			if !expectResult || resultType == nil || !ok || target.Name != "Result" || (s.Function.Name != "ok" && s.Function.Name != "err") {
 				break
 			}
 
@@ -6298,16 +8100,6 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			case *FunctionDef:
 				fnDef = fn
 				isFunc = true
-			case *ExternalFunctionDef:
-				// Convert ExternalFunctionDef to FunctionDef for validation
-				fnDef = &FunctionDef{
-					Name:          fn.Name,
-					GenericParams: append([]string(nil), fn.GenericParams...),
-					Parameters:    fn.Parameters,
-					ReturnType:    fn.ReturnType,
-					Private:       fn.Private,
-				}
-				isFunc = true
 			default:
 				isFunc = false
 			}
@@ -6326,6 +8118,9 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			var arg Expression = nil
 			if fnDef.name() == "ok" {
 				arg = c.checkExpr(s.Function.Args[0].Value)
+				if arg == nil {
+					return nil
+				}
 				if !resultType.Val().equal(arg.Type()) {
 					c.addError(typeMismatch(resultType.Val(), arg.Type()), s.Function.Args[0].Value.GetLocation())
 					return nil
@@ -6334,6 +8129,9 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 			}
 			if fnDef.name() == "err" {
 				arg = c.checkExpr(s.Function.Args[0].Value)
+				if arg == nil {
+					return nil
+				}
 				if !resultType.Err().equal(arg.Type()) {
 					c.addError(typeMismatch(resultType.Err(), arg.Type()), s.Function.Args[0].Value.GetLocation())
 					return nil
@@ -6363,7 +8161,7 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 		return checked
 	}
 
-	if !areCompatible(expectedType, checked.Type()) {
+	if !c.areCompatible(expectedType, checked.Type()) {
 		c.addError(typeMismatch(expectedType, checked.Type()), expr.GetLocation())
 		return nil
 	}
@@ -6371,107 +8169,61 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 	return checked
 }
 
-func validateExternalBindingTargets(bindings map[string]string) (string, bool) {
-	for target := range bindings {
-		if target != "go" {
-			return target, false
+// resolveParameterType resolves a parameter's declared type. Mutability is
+// type syntax (`name: mut T`); an outermost `mut` normalizes into the
+// internal flag representation:
+//
+//   - natives and descriptor types (lists, maps, channels, named Go
+//     slices/maps) carry their base type with the Mutable flag — content
+//     mutation flows through the value (ADR 0040);
+//   - other foreign types (structs, scalars) carry their pointer form so
+//     type identity lines up with `mut pkg::T` values and Go signatures.
+func (c *Checker) resolveParameterType(t parse.DeclaredType) (Type, bool) {
+	var inner parse.DeclaredType
+	switch mt := t.(type) {
+	case *parse.MutableType:
+		inner = mt.Inner
+	case parse.MutableType:
+		inner = mt.Inner
+	default:
+		return c.resolveType(t), false
+	}
+
+	base := c.resolveType(inner)
+	if base == nil {
+		return nil, true
+	}
+	if foreign, ok := base.(*ForeignType); ok && !foreign.Pointer {
+		if mutableParamNeedsGoPointer(foreign) {
+			if pointer := foreign.PointerForm(); pointer != nil {
+				return pointer, true
+			}
 		}
 	}
-	return "", true
+	return derefMutableRef(base), true
 }
 
-func resolveExternalBinding(bindings map[string]string) string {
-	return bindings["go"]
-}
-
-func cloneExternalBindings(bindings map[string]string) map[string]string {
-	if len(bindings) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(bindings))
-	for key, value := range bindings {
-		out[key] = value
-	}
-	return out
-}
-
-func (c *Checker) checkExternalFunction(def *parse.ExternalFunction) *ExternalFunctionDef {
-	// Check for duplicate function names
-	if _, dup := c.scope.get(def.Name); dup {
-		c.addError(fmt.Sprintf("Duplicate declaration: %s", def.Name), def.GetLocation())
-		return nil
-	}
-
-	// Process parameters
-	params := make([]Parameter, len(def.Parameters))
-	for i, param := range def.Parameters {
-		paramType := c.resolveType(param.Type)
-		params[i] = Parameter{
-			Name:    param.Name,
-			Type:    paramType,
-			Mutable: param.Mutable,
-		}
-	}
-
-	// Resolve return type
-	returnType := c.resolveType(def.ReturnType)
-
-	bindings := cloneExternalBindings(def.ExternalBindings)
-	if len(bindings) == 0 && def.ExternalBinding != "" {
-		bindings = map[string]string{"go": def.ExternalBinding}
-	}
-	if len(bindings) == 0 {
-		c.addError("External binding cannot be empty", def.GetLocation())
-		return nil
-	}
-	if target, ok := validateExternalBindingTargets(bindings); !ok {
-		c.addError(fmt.Sprintf("Unsupported extern binding target %q", target), def.GetLocation())
-		return nil
-	}
-
-	resolvedBinding := resolveExternalBinding(bindings)
-	resolvedBinding = c.resolveDirectGoExternBinding(resolvedBinding, def.GetLocation())
-	if _, ok := bindings["go"]; ok {
-		bindings["go"] = resolvedBinding
-	}
-	c.validateDirectGoExternSignature(def.Name, params, returnType, resolvedBinding, def.GetLocation())
-
-	// Create external function definition
-	extFn := &ExternalFunctionDef{
-		Name:             def.Name,
-		GenericParams:    append([]string(nil), def.TypeParams...),
-		Parameters:       params,
-		ReturnType:       returnType,
-		ExternalBinding:  resolvedBinding,
-		ExternalBindings: bindings,
-		Private:          def.Private,
-	}
-
-	// Add to scope
-	c.scope.add(def.Name, extFn, false)
-
-	return extFn
-}
-
-// resolveParametersWithContext resolves parameter types, optionally inferring from an expected function type
 func (c *Checker) resolveParametersWithContext(params []parse.Parameter, expectedFnType *FunctionDef) []Parameter {
 	result := make([]Parameter, len(params))
 	for i, param := range params {
 		var paramType Type = Void
+		mutable := false
 
 		if param.Type != nil {
 			// Explicit type provided
-			paramType = c.resolveType(param.Type)
+			paramType, mutable = c.resolveParameterType(param.Type)
 		} else if expectedFnType != nil && i < len(expectedFnType.Parameters) {
 			// Infer from expected function type
 			paramType = expectedFnType.Parameters[i].Type
+			mutable = expectedFnType.Parameters[i].Mutable
 		}
 		// Otherwise defaults to Void
 
 		result[i] = Parameter{
 			Name:    param.Name,
 			Type:    paramType,
-			Mutable: param.Mutable,
+			Mutable: mutable,
+			Loc:     param.GetLocation(),
 		}
 	}
 	return result
@@ -6508,13 +8260,13 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 		c.scope.expectReturn(returnType)
 		// Add parameters to scope
 		for _, param := range params {
-			c.scope.add(param.Name, param.Type, param.Mutable)
+			c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
 		}
 	}, returnType, true)
 	c.popFunctionGenericContext()
 
 	// Check that the function's return type matches its body's type
-	if returnType != Void && !areCompatible(returnType, body.Type()) {
+	if returnType != Void && !c.areCompatible(returnType, body.Type()) {
 		c.addError(typeMismatch(returnType, body.Type()), location)
 	}
 
@@ -6525,27 +8277,45 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func(), ext
 	if init != nil {
 		init()
 	}
-
-	// Resolve parameters and return type
-	params := c.resolveParametersWithContext(def.Parameters, nil)
-	returnType := c.resolveReturnTypeWithContext(def.ReturnType, nil)
-
-	// Validate parameters resolved correctly (for named functions, types must be explicit)
-	for i, param := range def.Parameters {
-		if param.Type != nil && params[i].Type == nil {
-			panic(fmt.Errorf("Cannot resolve type for parameter %s", param.Name))
-		}
+	if c.spans != nil && init == nil {
+		// Module-level function definition. Methods (init != nil) are keyed
+		// separately when method identity recording lands.
+		c.recordDef(def.GetLocation(), FunctionKey(c.typeOwnerPath(), def.Name))
 	}
 
-	// Create function definition
-	fn := &FunctionDef{
-		Name:          def.Name,
-		GenericParams: append([]string(nil), def.TypeParams...),
-		Parameters:    params,
-		ReturnType:    returnType,
-		Body:          nil,
-		Private:       def.Private,
-		IsTest:        def.IsTest,
+	// Reuse the hoisted signature when this is a top-level declaration whose
+	// signature was pre-resolved for forward references. This keeps earlier
+	// call sites pointing at the same definition instance and avoids duplicate
+	// signature diagnostics.
+	var fn *FunctionDef
+	var params []Parameter
+	var returnType Type
+	if hoisted, ok := c.hoistedTopLevelFunctions[def]; ok && init == nil {
+		fn = hoisted
+		params = fn.Parameters
+		returnType = fn.ReturnType
+	} else {
+		// Resolve parameters and return type
+		params = c.resolveParametersWithContext(def.Parameters, nil)
+		returnType = c.resolveReturnTypeWithContext(def.ReturnType, nil)
+
+		// Validate parameters resolved correctly (for named functions, types must be explicit)
+		for i, param := range def.Parameters {
+			if param.Type != nil && params[i].Type == nil {
+				panic(fmt.Errorf("Cannot resolve type for parameter %s", param.Name))
+			}
+		}
+
+		// Create function definition
+		fn = &FunctionDef{
+			Name:          def.Name,
+			GenericParams: append([]string(nil), def.TypeParams...),
+			Parameters:    params,
+			ReturnType:    returnType,
+			Body:          nil,
+			Private:       def.Private,
+			IsTest:        def.IsTest,
+		}
 	}
 
 	if def.IsTest {
@@ -6564,23 +8334,26 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func(), ext
 		}
 	}
 
-	// Add function to scope before checking body (for recursion support)
-	// For methods (when init != nil), only add within the body scope
+	// Add function to scope before checking body (for recursion support).
+	// Hoisted top-level functions are already in scope.
+	// For methods (when init != nil), only add within the body scope.
 	if init == nil {
-		c.scope.add(def.Name, fn, false)
+		if _, ok := c.hoistedTopLevelFunctions[def]; !ok {
+			c.scope.add(def.Name, fn, false)
+		}
 	}
 
 	c.pushFunctionGenericContext(fn, extraGenericParams...)
 	body := c.checkBlockWithExpected(def.Body, func() {
 		c.scope.expectReturn(returnType)
 		for _, param := range params {
-			c.scope.add(param.Name, param.Type, param.Mutable)
+			c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
 		}
 	}, returnType, true)
 	c.popFunctionGenericContext()
 
 	// Validate return type
-	if returnType != Void && !areCompatible(returnType, body.Type()) {
+	if returnType != Void && !c.areCompatible(returnType, body.Type()) {
 		c.addError(typeMismatch(returnType, body.Type()), def.GetLocation())
 	}
 
@@ -6606,6 +8379,12 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		)
 	case *List:
 		return &List{of: substituteType(typ.of, typeMap)}
+	case *Chan:
+		return &Chan{of: substituteType(typ.of, typeMap)}
+	case *Receiver:
+		return &Receiver{of: substituteType(typ.of, typeMap)}
+	case *Sender:
+		return &Sender{of: substituteType(typ.of, typeMap)}
 	case *Map:
 		return &Map{key: substituteType(typ.key, typeMap), value: substituteType(typ.value, typeMap)}
 	case *Union:
@@ -6613,7 +8392,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		for i, member := range typ.Types {
 			types[i] = substituteType(member, typeMap)
 		}
-		return &Union{Name: typ.Name, ModulePath: typ.ModulePath, Types: types}
+		return &Union{Name: typ.Name, ModulePath: typ.ModulePath, Types: types, Private: typ.Private}
 	case *StructDef:
 		var out Type = typ
 		for genericName, concrete := range typeMap {
@@ -6642,12 +8421,6 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			Private:                 typ.Private,
 			GenericBindings:         cloneTypeMap(typ.GenericBindings),
 		}
-	case *ExternType:
-		substitutedArgs := make([]Type, len(typ.TypeArgs))
-		for i, typeArg := range typ.TypeArgs {
-			substitutedArgs[i] = substituteType(typeArg, typeMap)
-		}
-		return &ExternType{Name_: typ.Name_, GenericParams: append([]string(nil), typ.GenericParams...), TypeArgs: substitutedArgs, ExternalBinding: typ.ExternalBinding, ExternalBindings: cloneExternalBindings(typ.ExternalBindings), private: typ.private}
 	// Handle other compound types
 	default:
 		return t
@@ -6713,6 +8486,18 @@ func inferGenericBindingsFromTypes(original, specialized Type, bindings map[stri
 		if spec, ok := specialized.(*Result); ok {
 			inferGenericBindingsFromTypes(orig.Val(), spec.Val(), bindings)
 			inferGenericBindingsFromTypes(orig.Err(), spec.Err(), bindings)
+		}
+	case *Chan:
+		if spec, ok := specialized.(*Chan); ok {
+			inferGenericBindingsFromTypes(orig.Of(), spec.Of(), bindings)
+		}
+	case *Receiver:
+		if spec, ok := specialized.(*Receiver); ok {
+			inferGenericBindingsFromTypes(orig.Of(), spec.Of(), bindings)
+		}
+	case *Sender:
+		if spec, ok := specialized.(*Sender); ok {
+			inferGenericBindingsFromTypes(orig.Of(), spec.Of(), bindings)
 		}
 	case *List:
 		if spec, ok := specialized.(*List); ok {
@@ -6826,6 +8611,18 @@ func (c *Checker) synthesizeMaybeSome(value Expression, maybeType Type) Expressi
 // Mutable parameters require addressable mutable arguments.
 // Synthesizes maybe::none() calls for omitted nullable arguments.
 // If any error occurs, it's added to the checker's diagnostics.
+
+// parameterOmittable reports whether a trailing parameter may be omitted at a
+// call site: nullable parameters default to none, and a Go variadic parameter
+// may receive zero arguments.
+func parameterOmittable(param Parameter) bool {
+	if param.Variadic {
+		return true
+	}
+	_, isMaybe := param.Type.(*Maybe)
+	return isMaybe
+}
+
 func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int) ([]Expression, *FunctionDef) {
 	// Create the full argument list including synthesized maybe::none() calls for omitted arguments
 	// Need to maintain parameter order, so use indexed assignment instead of appending
@@ -6891,7 +8688,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		if maybeParam, isMaybe := paramType.(*Maybe); isMaybe {
 			if argType := checkedArg.Type(); !argType.equal(paramType) {
 				// Check if argument type matches the inner Maybe type
-				if areCompatible(maybeParam.Of(), argType) {
+				if c.areCompatible(maybeParam.Of(), argType) {
 					// Wrap non-Maybe value in maybe::some()
 					checkedArg = c.synthesizeMaybeSome(checkedArg, paramType)
 				}
@@ -6909,9 +8706,13 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			}
 		} else {
 			// For non-generic functions, do regular type compatibility check
-			if !areCompatible(paramType, checkedArg.Type()) {
-				c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
-				return nil, nil
+			if !c.areCompatible(paramType, checkedArg.Type()) {
+				upcast, ok := c.foreignInterfaceArgUpcast(paramType, checkedArg)
+				if !ok {
+					c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
+					return nil, nil
+				}
+				checkedArg = upcast
 			}
 		}
 
@@ -6919,7 +8720,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// requires an addressable mutable place; a call-site `mut` marker no longer
 		// requests a defensive copy.
 		if fnDefCopy.Parameters[i].Mutable {
-			if !c.isMutable(checkedArg) {
+			if (!c.isMutable(checkedArg) && !freshContainerSatisfiesMutable(paramType, checkedArg)) || foreignScalarNarrows(paramType, checkedArg.Type()) || foreignScalarWidens(paramType, checkedArg.Type()) {
 				c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDefCopy.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
 				return nil, nil
 			}
@@ -6927,6 +8728,12 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		} else {
 			allExprs[i] = checkedArg
 		}
+	}
+
+	// An omitted trailing Go variadic argument stays omitted: the generated
+	// call simply passes nothing for the variadic tail.
+	if len(allExprs) > 0 && allExprs[len(allExprs)-1] == nil && fnDefCopy.Parameters[len(allExprs)-1].Variadic {
+		allExprs = allExprs[:len(allExprs)-1]
 	}
 
 	// Fill in synthesized maybe::none() calls for omitted arguments
@@ -7087,14 +8894,11 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 		// This mutates expectedType.bound and expectedType.actual directly.
 		return genericScope.bindGeneric(expectedType.name, actual)
 	case *FunctionDef:
-		// Function type unification - handle both FunctionDef and ExternalFunctionDef
+		// Function type unification
 		var actualParams []Parameter
 		var actualReturnType Type
 
 		if actualFn, ok := actual.(*FunctionDef); ok {
-			actualParams = actualFn.Parameters
-			actualReturnType = actualFn.ReturnType
-		} else if actualFn, ok := actual.(*ExternalFunctionDef); ok {
 			actualParams = actualFn.Parameters
 			actualReturnType = actualFn.ReturnType
 		} else {
@@ -7133,6 +8937,21 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 			return c.unifyTypes(expectedType.of, actualList.of, genericScope)
 		}
 		return fmt.Errorf("expected list type, got %T", actual)
+	case *Chan:
+		if actualChannel, ok := actual.(*Chan); ok {
+			return c.unifyTypes(expectedType.of, actualChannel.of, genericScope)
+		}
+		return fmt.Errorf("expected channel type, got %T", actual)
+	case *Receiver:
+		if act, ok := actual.(*Receiver); ok {
+			return c.unifyTypes(expectedType.of, act.of, genericScope)
+		}
+		return fmt.Errorf("expected receiver type, got %T", actual)
+	case *Sender:
+		if act, ok := actual.(*Sender); ok {
+			return c.unifyTypes(expectedType.of, act.of, genericScope)
+		}
+		return fmt.Errorf("expected sender type, got %T", actual)
 	case *StructDef:
 		actualStruct, ok := actual.(*StructDef)
 		if !ok || expectedType.Name != actualStruct.Name || namedTypeOwnersDiffer(expectedType.ModulePath, actualStruct.ModulePath) || len(expectedType.TypeArgs) != len(actualStruct.TypeArgs) {
@@ -7149,17 +8968,6 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 				return fmt.Errorf("type mismatch: expected %s, got %s", expected.String(), actual.String())
 			}
 			if err := c.unifyTypes(expectedField, actualField, genericScope); err != nil {
-				return err
-			}
-		}
-		return nil
-	case *ExternType:
-		actualExtern, ok := actual.(*ExternType)
-		if !ok || expectedType.Name_ != actualExtern.Name_ || len(expectedType.TypeArgs) != len(actualExtern.TypeArgs) {
-			return fmt.Errorf("type mismatch: expected %s, got %s", expected.String(), actual.String())
-		}
-		for i := range expectedType.TypeArgs {
-			if err := c.unifyTypes(expectedType.TypeArgs[i], actualExtern.TypeArgs[i], genericScope); err != nil {
 				return err
 			}
 		}
@@ -7196,9 +9004,8 @@ func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([
 			// Check if remaining parameters are all nullable
 			allNullableOrProvidedMatches := true
 			for i := len(positionalArgs); i < len(params); i++ {
-				paramType := params[i].Type
-				// Check if parameter type is nullable (Maybe)
-				if _, isMaybe := paramType.(*Maybe); !isMaybe {
+				// Check if the parameter is omittable (nullable or Go variadic)
+				if !parameterOmittable(params[i]) {
 					allNullableOrProvidedMatches = false
 					break
 				}
@@ -7250,9 +9057,8 @@ func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([
 	// Check that all parameters are provided (allow missing nullable parameters)
 	for i, param := range params {
 		if !used[i] {
-			// Allow omitting nullable parameters
-			paramType := params[i].Type
-			if _, isMaybe := paramType.(*Maybe); !isMaybe {
+			// Allow omitting nullable and Go variadic parameters
+			if !parameterOmittable(params[i]) {
 				return nil, fmt.Errorf("missing argument for parameter: %s", param.Name)
 			}
 		}
@@ -7279,43 +9085,43 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 	// Build the appropriate comparison node based on operator and type
 	switch op {
 	case parse.GreaterThan:
-		if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+		if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 			return &IntGreater{left, right}
 		}
-		if left.Type() == Float {
+		if isRelationalFloatLike(left.Type()) {
 			return &FloatGreater{left, right}
 		}
-		c.addError("The '>' operator can only be used for Int or Float", leftExpr.GetLocation())
+		c.addError("The '>' operator can only be used for Int or Float64", leftExpr.GetLocation())
 		return nil
 
 	case parse.GreaterThanOrEqual:
-		if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+		if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 			return &IntGreaterEqual{left, right}
 		}
-		if left.Type() == Float {
+		if isRelationalFloatLike(left.Type()) {
 			return &FloatGreaterEqual{left, right}
 		}
-		c.addError("The '>=' operator can only be used for Int or Float", leftExpr.GetLocation())
+		c.addError("The '>=' operator can only be used for Int or Float64", leftExpr.GetLocation())
 		return nil
 
 	case parse.LessThan:
-		if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+		if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 			return &IntLess{left, right}
 		}
-		if left.Type() == Float {
+		if isRelationalFloatLike(left.Type()) {
 			return &FloatLess{left, right}
 		}
-		c.addError("The '<' operator can only be used for Int or Float", leftExpr.GetLocation())
+		c.addError("The '<' operator can only be used for Int or Float64", leftExpr.GetLocation())
 		return nil
 
 	case parse.LessThanOrEqual:
-		if left.Type() == Int || left.Type() == Byte || left.Type() == Rune || c.isEnum(left.Type()) {
+		if isRelationalIntegerLike(left.Type()) || c.isEnum(left.Type()) {
 			return &IntLessEqual{left, right}
 		}
-		if left.Type() == Float {
+		if isRelationalFloatLike(left.Type()) {
 			return &FloatLessEqual{left, right}
 		}
-		c.addError("The '<=' operator can only be used for Int or Float", leftExpr.GetLocation())
+		c.addError("The '<=' operator can only be used for Int or Float64", leftExpr.GetLocation())
 		return nil
 
 	default:
@@ -7365,12 +9171,6 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 			isMaybe = true
 		}
 
-		if !isMaybe {
-			if field, handled := c.checkDirectGoInstanceProperty(target, p.Property.Name, p.Property.GetLocation()); handled {
-				return field
-			}
-		}
-
 		propType := innerType.get(p.Property.Name)
 		if propType == nil {
 			c.addError(fmt.Sprintf("Undefined: %s.%s", innerType, p.Property.Name), p.Property.GetLocation())
@@ -7413,6 +9213,21 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 			}
 		} else {
 			sig = innerType.get(p.Method.Name)
+		}
+		if sig == nil {
+			// This accessor-chain path only speculatively verifies that a method
+			// exists before falling back to normal expression checking below.
+			// Pointer-receiver mutability/addressability is enforced by the normal
+			// InstanceMethod checker, not here.
+			if foreign, ok := innerType.(*ForeignType); ok && !foreign.Pointer {
+				pointerForeign := *foreign
+				pointerForeign.Pointer = true
+				pointerForeign.Methods = nil
+				pointerForeign.MethodsLoaded = false
+				if pointerSig := pointerForeign.get(p.Method.Name); pointerSig != nil {
+					sig = pointerSig
+				}
+			}
 		}
 		if sig == nil {
 			if !isMaybe {
@@ -7499,44 +9314,3 @@ func (c *Checker) wrapAccessorInMatch(subject Expression, prop *InstanceProperty
 	}
 }
 
-func validateJSONShape(api string, typ Type) error {
-	if result, ok := derefType(typ).(*Result); ok && api == "json::parse" {
-		typ = result.Val()
-	}
-	return validateJSONShapeType(api, derefType(typ), map[string]bool{})
-}
-
-func validateJSONShapeType(api string, typ Type, seen map[string]bool) error {
-	typ = derefType(typ)
-	if typ == Str || typ == Int || typ == Float || typ == Bool || typ == Byte || typ == Rune || typ == Dynamic {
-		return nil
-	}
-	switch t := typ.(type) {
-	case *List:
-		return validateJSONShapeType(api, t.Of(), seen)
-	case *Map:
-		if derefType(t.Key()) != Str {
-			return fmt.Errorf("%s only supports Str map keys, got %s", api, t.Key().String())
-		}
-		return validateJSONShapeType(api, t.Value(), seen)
-	case *Maybe:
-		return validateJSONShapeType(api, t.Of(), seen)
-	case *StructDef:
-		name := t.String()
-		if seen[name] {
-			return nil
-		}
-		seen[name] = true
-		for fieldName, fieldType := range t.Fields {
-			if err := validateJSONShapeType(api, fieldType, seen); err != nil {
-				return fmt.Errorf("%s field %s: %w", api, fieldName, err)
-			}
-		}
-		return nil
-	case *TypeVar:
-		if t.Actual() != nil {
-			return validateJSONShapeType(api, t.Actual(), seen)
-		}
-	}
-	return fmt.Errorf("%s does not support %s", api, typ.String())
-}

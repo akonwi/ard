@@ -38,10 +38,6 @@ func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) 
 			if !s.Private {
 				publicSymbols[name] = *sym
 			}
-		case *ExternalFunctionDef:
-			if !s.Private {
-				publicSymbols[name] = *sym
-			}
 		case *StructDef:
 			if !s.Private {
 				publicSymbols[name] = *sym
@@ -55,12 +51,7 @@ func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) 
 				publicSymbols[name] = *sym
 			}
 		case *Union:
-			// todo: support 'private' keyword
-			// if !s.Private {
-			publicSymbols[name] = *sym
-			// }
-		case *ExternType:
-			if !s.private {
+			if !s.Private {
 				publicSymbols[name] = *sym
 			}
 		}
@@ -86,4 +77,9 @@ func NewUserModule(filePath string, program *Program, globalScope *SymbolTable) 
 		publicSymbols: publicSymbols,
 		program:       program,
 	}
+}
+
+// Symbols returns the module's public symbols. Read-only.
+func (m *UserModule) Symbols() map[string]Symbol {
+	return m.publicSymbols
 }

@@ -31,7 +31,7 @@ func equalTypesSeen(left Type, right Type, seen map[typeEqualKey]struct{}) bool 
 	switch l := left.(type) {
 	case *Trait:
 		r, ok := right.(*Trait)
-		if !ok || l.Name != r.Name || len(l.methods) != len(r.methods) {
+		if !ok || l.Name != r.Name || l.ModulePath != r.ModulePath || len(l.methods) != len(r.methods) {
 			return false
 		}
 		for i := range l.methods {
@@ -51,6 +51,30 @@ func equalTypesSeen(left Type, right Type, seen map[typeEqualKey]struct{}) bool 
 		}
 		if r, ok := right.(*Union); ok {
 			return equalTypesSeen(r, l, seen)
+		}
+		return false
+	case *Chan:
+		if r, ok := right.(*Chan); ok {
+			return equalTypesSeen(l.of, r.of, seen)
+		}
+		if r, ok := right.(*TypeVar); ok {
+			return r.actual == nil || equalTypesSeen(l, r.actual, seen)
+		}
+		return false
+	case *Receiver:
+		if r, ok := right.(*Receiver); ok {
+			return equalTypesSeen(l.of, r.of, seen)
+		}
+		if r, ok := right.(*TypeVar); ok {
+			return r.actual == nil || equalTypesSeen(l, r.actual, seen)
+		}
+		return false
+	case *Sender:
+		if r, ok := right.(*Sender); ok {
+			return equalTypesSeen(l.of, r.of, seen)
+		}
+		if r, ok := right.(*TypeVar); ok {
+			return r.actual == nil || equalTypesSeen(l, r.actual, seen)
 		}
 		return false
 	case *Map:
@@ -105,28 +129,10 @@ func equalTypesSeen(left Type, right Type, seen map[typeEqualKey]struct{}) bool 
 			return r.actual == nil || equalTypesSeen(l, r.actual, seen)
 		}
 		return false
-	case *ExternType:
-		if r, ok := right.(*TypeVar); ok && r.actual == nil {
-			return true
-		}
-		r, ok := right.(*ExternType)
-		if !ok || !externTypeNamesMatch(l, r) || len(l.TypeArgs) != len(r.TypeArgs) {
-			return false
-		}
-		for i := range l.TypeArgs {
-			if !equalTypesSeen(l.TypeArgs[i], r.TypeArgs[i], seen) {
-				return false
-			}
-		}
-		return true
 	case *FunctionDef:
 		return equalFunctionDefSeen(*l, right, seen)
 	case FunctionDef:
 		return equalFunctionDefSeen(l, right, seen)
-	case *ExternalFunctionDef:
-		return equalExternalFunctionDefSeen(*l, right, seen)
-	case ExternalFunctionDef:
-		return equalExternalFunctionDefSeen(l, right, seen)
 	case *StructDef:
 		return equalStructDefSeen(*l, right, seen)
 	case StructDef:
@@ -141,70 +147,36 @@ func equalTypesSeen(left Type, right Type, seen map[typeEqualKey]struct{}) bool 
 }
 
 func equalFunctionDefSeen(left FunctionDef, right Type, seen map[typeEqualKey]struct{}) bool {
-	if r, ok := right.(*ExternalFunctionDef); ok {
-		if len(left.Parameters) != len(r.Parameters) {
-			return false
-		}
-		for i := range left.Parameters {
-			if !equalTypesSeen(left.Parameters[i].Type, r.Parameters[i].Type, seen) {
-				return false
-			}
-		}
-		return true
-	}
 	r, ok := right.(*FunctionDef)
 	if !ok || len(left.Parameters) != len(r.Parameters) {
 		return false
 	}
 	for i := range left.Parameters {
-		if !equalTypesSeen(left.Parameters[i].Type, r.Parameters[i].Type, seen) {
+		lMut, lType := normalizedParamMutability(left.Parameters[i])
+		rMut, rType := normalizedParamMutability(r.Parameters[i])
+		if lMut != rMut || !equalTypesSeen(lType, rType, seen) {
 			return false
 		}
 	}
 	return left.Mutates == r.Mutates && equalTypesSeen(left.ReturnType, r.ReturnType, seen)
 }
 
-func externTypeNamesMatch(left *ExternType, right *ExternType) bool {
-	leftBinding, leftOK := parseCanonicalDirectGoBinding(left.ExternalBinding)
-	rightBinding, rightOK := parseCanonicalDirectGoBinding(right.ExternalBinding)
-	if leftOK || rightOK {
-		return leftOK && rightOK && len(leftBinding.Symbols) == 1 && len(rightBinding.Symbols) == 1 && leftBinding.ImportPath == rightBinding.ImportPath && leftBinding.Symbols[0] == rightBinding.Symbols[0]
+// normalizedParamMutability reconciles the two ways a `mut T` parameter can be
+// represented: as a `MutableRef` baked into the parameter type (the `name: mut T`
+// and closure form) or as the `Mutable` flag with a plain type (the `fn(mut T)`
+// function-type form). It returns a canonical (isMutable, underlyingType) pair.
+func normalizedParamMutability(p Parameter) (bool, Type) {
+	if mr, ok := p.Type.(*MutableRef); ok {
+		return true, mr.Of()
 	}
-	return left.Name_ == right.Name_
-}
-
-func equalExternalFunctionDefSeen(left ExternalFunctionDef, right Type, seen map[typeEqualKey]struct{}) bool {
-	if r, ok := right.(*ExternalFunctionDef); ok {
-		if len(left.Parameters) != len(r.Parameters) || len(left.ExternalBindings) != len(r.ExternalBindings) {
-			return false
-		}
-		for i := range left.Parameters {
-			if !equalTypesSeen(left.Parameters[i].Type, r.Parameters[i].Type, seen) {
-				return false
-			}
-		}
-		if !equalTypesSeen(left.ReturnType, r.ReturnType, seen) || left.ExternalBinding != r.ExternalBinding {
-			return false
-		}
-		for key, value := range left.ExternalBindings {
-			if r.ExternalBindings[key] != value {
-				return false
-			}
-		}
-		return true
+	// A pointer-shaped foreign Go type is its own mutability marker (ADR
+	// 0040): `mut` adds no extra indirection, and imported Go signatures
+	// carry no Mutable flag. Canonicalize so `mut pkg::T` annotations and
+	// imported `*pkg.T` parameters compare equal.
+	if foreign, ok := p.Type.(*ForeignType); ok && foreign.Pointer {
+		return true, foreign
 	}
-	if r, ok := right.(*FunctionDef); ok {
-		if len(left.Parameters) != len(r.Parameters) {
-			return false
-		}
-		for i := range left.Parameters {
-			if !equalTypesSeen(left.Parameters[i].Type, r.Parameters[i].Type, seen) {
-				return false
-			}
-		}
-		return equalTypesSeen(left.ReturnType, r.ReturnType, seen)
-	}
-	return false
+	return p.Mutable, p.Type
 }
 
 func equalStructDefSeen(left StructDef, right Type, seen map[typeEqualKey]struct{}) bool {
@@ -262,9 +234,15 @@ func typeEqualID(t Type) string {
 	case *Trait:
 		return fmt.Sprintf("Trait:%p", v)
 	case Trait:
-		return fmt.Sprintf("Trait:%s", v.Name)
+		return fmt.Sprintf("Trait:%s:%s", v.ModulePath, v.Name)
 	case *List:
 		return fmt.Sprintf("List:%p", v)
+	case *Chan:
+		return fmt.Sprintf("Chan:%p", v)
+	case *Receiver:
+		return fmt.Sprintf("Receiver:%p", v)
+	case *Sender:
+		return fmt.Sprintf("Sender:%p", v)
 	case *Map:
 		return fmt.Sprintf("Map:%p", v)
 	case Map:
@@ -277,14 +255,10 @@ func typeEqualID(t Type) string {
 		return fmt.Sprintf("Result:%p", v)
 	case *MutableRef:
 		return fmt.Sprintf("MutableRef:%p", v)
-	case *ExternType:
-		return fmt.Sprintf("Extern:%p", v)
 	case *FunctionDef:
 		return fmt.Sprintf("Function:%p", v)
 	case FunctionDef:
 		return fmt.Sprintf("Function:%s", v.Name)
-	case *ExternalFunctionDef:
-		return fmt.Sprintf("ExternalFunction:%p", v)
 	case *Enum:
 		return fmt.Sprintf("Enum:%s:%s", v.ModulePath, v.Name)
 	case Enum:

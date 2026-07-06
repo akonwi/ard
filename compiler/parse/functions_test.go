@@ -4,149 +4,8 @@ import (
 	"testing"
 )
 
-func TestExternTypeDeclaration(t *testing.T) {
-	tests := []test{
-		{
-			name:  "Extern type",
-			input: `extern type ConnectionPtr`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&ExternTypeDeclaration{
-						Name: "ConnectionPtr",
-					},
-				},
-			},
-		},
-		{
-			name:  "Private extern type",
-			input: `private extern type ConnectionPtr`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&ExternTypeDeclaration{
-						Name:    "ConnectionPtr",
-						Private: true,
-					},
-				},
-			},
-		},
-		{
-			name:  "Generic extern type",
-			input: `extern type Promise<$T>`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&ExternTypeDeclaration{
-						Name:       "Promise",
-						TypeParams: []string{"T"},
-					},
-				},
-			},
-		},
-		{
-			name:  "Extern type with Go binding",
-			input: `extern type Vaxis = "*vaxis.Vaxis"`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&ExternTypeDeclaration{
-						Name:            "Vaxis",
-						ExternalBinding: "*vaxis.Vaxis",
-					},
-				},
-			},
-		},
-	}
-	runTests(t, tests)
-}
-
 func TestFunctionDeclaration(t *testing.T) {
 	tests := []test{
-		{
-			name:  "Extern function",
-			input: `extern fn print(value: $T) Void = "runtime.go_print"`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&ExternalFunction{
-						Name: "print",
-						Parameters: []Parameter{
-							{
-								Name: "value",
-								Type: &GenericType{Name: "T"},
-							},
-						},
-						ReturnType:      &VoidType{},
-						ExternalBinding: "runtime.go_print",
-					},
-				},
-			},
-		},
-		{
-			name: "Extern function with Go binding block",
-			input: `extern fn print(value: Str) Void = {
-  go = "Print"
-}`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&ExternalFunction{
-						Name: "print",
-						Parameters: []Parameter{{
-							Name: "value",
-							Type: &StringType{},
-						}},
-						ReturnType:      &VoidType{},
-						ExternalBinding: "Print",
-						ExternalBindings: map[string]string{
-							"go": "Print",
-						},
-					},
-				},
-			},
-		},
-		{
-			name:  "Extern function with direct Go namespace binding",
-			input: `extern fn floor(value: Float) Float = math::Floor`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&ExternalFunction{
-						Name: "floor",
-						Parameters: []Parameter{{
-							Name: "value",
-							Type: &FloatType{},
-						}},
-						ReturnType:      &FloatType{},
-						ExternalBinding: "math::Floor",
-					},
-				},
-			},
-		},
-		{
-			name: "Extern function with direct Go namespace binding block",
-			input: `extern fn floor(value: Float) Float = {
-  go = math::Floor
-}`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&ExternalFunction{
-						Name: "floor",
-						Parameters: []Parameter{{
-							Name: "value",
-							Type: &FloatType{},
-						}},
-						ReturnType:      &FloatType{},
-						ExternalBinding: "math::Floor",
-						ExternalBindings: map[string]string{
-							"go": "math::Floor",
-						},
-					},
-				},
-			},
-		},
 		{
 			name:  "Empty function",
 			input: `fn empty() {}`,
@@ -279,7 +138,7 @@ func TestFunctionDeclaration(t *testing.T) {
 		},
 		{
 			name:  "Mutable parameter",
-			input: `fn greet(mut person: Str) Str { }`,
+			input: `fn greet(person: mut Str) Str { }`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
@@ -287,9 +146,8 @@ func TestFunctionDeclaration(t *testing.T) {
 						Name: "greet",
 						Parameters: []Parameter{
 							{
-								Name:    "person",
-								Type:    &StringType{},
-								Mutable: true,
+								Name: "person",
+								Type: &MutableType{Inner: &StringType{}},
 							},
 						},
 						ReturnType: &StringType{},
@@ -350,7 +208,6 @@ func TestFunctionDeclaration(t *testing.T) {
 
 	runTests(t, tests)
 }
-
 func TestFunctionCalls(t *testing.T) {
 	tests := []test{
 		{
@@ -538,7 +395,6 @@ func TestFunctionCalls(t *testing.T) {
 
 	runTests(t, tests)
 }
-
 func TestFunctionsWithGenerics(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -583,7 +439,7 @@ func TestFunctionsWithGenerics(t *testing.T) {
 		{
 			name: "Function call with mut argument",
 			input: `
-				fn update(mut person: Person) {}
+				fn update(person: mut Person) {}
 				update(mut alice)`,
 			output: Program{
 				Imports: []Import{},
@@ -591,7 +447,7 @@ func TestFunctionsWithGenerics(t *testing.T) {
 					&FunctionDeclaration{
 						Name: "update",
 						Parameters: []Parameter{
-							{Name: "person", Type: &CustomType{Name: "Person"}, Mutable: true},
+							{Name: "person", Type: &MutableType{Inner: &CustomType{Name: "Person"}}},
 						},
 						Body: []Statement{},
 					},
@@ -607,7 +463,6 @@ func TestFunctionsWithGenerics(t *testing.T) {
 		},
 	})
 }
-
 func TestAnonymousFunctions(t *testing.T) {
 	tests := []test{
 		{
@@ -665,7 +520,6 @@ func TestAnonymousFunctions(t *testing.T) {
 
 	runTests(t, tests)
 }
-
 func TestTestFunctionEdgeCases(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -700,50 +554,22 @@ func TestTestFunctionEdgeCases(t *testing.T) {
 			},
 		},
 		{
-			name:  "Test function with generic type params",
-			input: `test fn generic_test<$T>() Void!Str { Result::ok(()) }`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&FunctionDeclaration{
-						IsTest:     true,
-						Name:       "generic_test",
-						TypeParams: []string{"T"},
-						Parameters: []Parameter{},
-						ReturnType: &ResultType{
-							Val: &VoidType{},
-							Err: &StringType{},
-						},
-						Body: []Statement{
-							&StaticFunction{
-								Target: &Identifier{Name: "Result"},
-								Function: FunctionCall{
-									Name: "ok",
-									Args: []Argument{
-										{Name: "", Value: &VoidLiteral{}},
-									},
-									Comments: []Comment{},
-								},
-							},
-						},
-					},
-				},
-			},
+			name:     "Test function rejects generic declaration list",
+			input:    `test fn generic_test<$T>() Void!Str { Result::ok(()) }`,
+			wantErrs: []string{"Generic declaration lists are not supported"},
 		},
 	})
 }
-
 func TestGenericFunctionDeclaration(t *testing.T) {
 	tests := []test{
 		{
-			name:  "Generic function with single type parameter",
-			input: `fn identity<$T>(value: $T) $T { value }`,
+			name:  "Generic function with inferred type parameter",
+			input: `fn identity(value: $T) $T { value }`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
 					&FunctionDeclaration{
-						Name:       "identity",
-						TypeParams: []string{"T"},
+						Name: "identity",
 						Parameters: []Parameter{
 							{
 								Name: "value",
@@ -759,37 +585,19 @@ func TestGenericFunctionDeclaration(t *testing.T) {
 			},
 		},
 		{
-			name:  "Generic function with multiple type parameters",
-			input: `fn pair<$A, $B>(a: $A, b: $B) $A { a }`,
-			output: Program{
-				Imports: []Import{},
-				Statements: []Statement{
-					&FunctionDeclaration{
-						Name:       "pair",
-						TypeParams: []string{"A", "B"},
-						Parameters: []Parameter{
-							{
-								Name: "a",
-								Type: &GenericType{Name: "A"},
-							},
-							{
-								Name: "b",
-								Type: &GenericType{Name: "B"},
-							},
-						},
-						ReturnType: &GenericType{Name: "A"},
-						Body: []Statement{
-							&Identifier{Name: "a"},
-						},
-					},
-				},
-			},
+			name:     "Generic function rejects single declaration parameter",
+			input:    `fn identity<$T>(value: $T) $T { value }`,
+			wantErrs: []string{"Generic declaration lists are not supported"},
+		},
+		{
+			name:     "Generic function rejects multiple declaration parameters",
+			input:    `fn pair<$A, $B>(a: $A, b: $B) $A { a }`,
+			wantErrs: []string{"Generic declaration lists are not supported"},
 		},
 	}
 
 	runTests(t, tests)
 }
-
 func TestIncompleteFunctionCallDoesNotHang(t *testing.T) {
 	result := Parse([]byte("fn main() {\n  io::print(\n}\n"), "test.ard")
 	if result.Program == nil {
