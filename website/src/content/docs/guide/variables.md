@@ -67,38 +67,22 @@ value =- 2    // Equivalent to value = value - 2
 
 There are no `++` or `--` operators in Ard and only increment (=+) and decrement (=-) are supported.
 
-## Scoping Rules
-
-Variables follow standard block scoping rules:
-
-```ard
-let outer = "global"
-
-if some_condition {
-  let inner = "local"
-  // Both 'outer' and 'inner' are accessible here
-}
-
-// Only 'outer' is accessible here
-// 'inner' is out of scope
-```
-
 ## Mutable References
 
-A `mut` binding creates mutable local storage. In type positions, `mut T` means mutable reference to a `T`.
+A `mut` binding creates mutable storage. In type positions, `mut T` means mutable reference to a `T`.
 
 A function parameter marked `mut` receives mutable access to caller-owned storage, so the caller must pass an addressable mutable value. There is no extra `mut` marker at the call site:
 
 ```ard
 struct Person { name: Str, age: Int }
 
-fn update_person(person: mut Person) {
-    person.age = 99  // Mutates the caller's value
+fn age_person(person: mut Person) {
+    person.age =+ 1  // Mutates
 }
 
 mut alice = Person { name: "Alice", age: 30 }
-update_person(alice)
-// alice.age is now 99
+age_person(alice)
+// alice.age is now 31
 ```
 
 Passing an immutable value to a mutable parameter is a compile-time error:
