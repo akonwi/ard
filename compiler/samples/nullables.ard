@@ -1,5 +1,6 @@
-use ard/io
 use ard/maybe
+
+use go:fmt
 
 fn main() {
   // a declared none value needs to be explicitly typed
@@ -10,7 +11,7 @@ fn main() {
 
   // read the value
   match name {
-    n => io::print("name is: {n}"),
-    _ => io::print("no name")
+    n => fmt::Println("name is: {n}"),
+    _ => fmt::Println("no name")
   }
 }
