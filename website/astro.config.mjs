@@ -179,7 +179,6 @@ export default defineConfig({
         {
           label: "Getting Started",
           items: [
-            { label: "Introduction", slug: "getting-started/introduction" },
             { label: "Installation", slug: "getting-started/installation" },
             // { label: 'Your First Program', slug: 'getting-started/first-program' },
           ],
