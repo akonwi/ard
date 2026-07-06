@@ -14,7 +14,7 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
-	"github.com/akonwi/ard/stdlibgo"
+	runtimesrc "github.com/akonwi/ard/runtime"
 	"golang.org/x/mod/modfile"
 )
 
@@ -937,15 +937,16 @@ func copyDir(source string, dest string) error {
 }
 
 func writeGeneratedRuntimePackage(dir string) error {
-	for rel, content := range stdlibgo.Files {
-		if !strings.HasPrefix(rel, "runtime/") || !strings.HasSuffix(rel, ".go") {
-			continue
+	for _, name := range runtimesrc.SourceFileNames {
+		content, err := runtimesrc.SourceFiles.ReadFile(name)
+		if err != nil {
+			return err
 		}
-		path := filepath.Join(dir, "internal", "ardruntime", strings.TrimPrefix(rel, "runtime/"))
+		path := filepath.Join(dir, "internal", "ardruntime", name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(path, content, 0o644); err != nil {
 			return err
 		}
 	}
