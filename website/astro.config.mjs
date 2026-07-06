@@ -186,6 +186,7 @@ export default defineConfig({
         {
           label: "Language Guide",
           items: [
+            { label: "Overview", slug: "guide/overview" },
             { label: "Types", slug: "guide/types" },
             { label: "Variables", slug: "guide/variables" },
             { label: "Formatting", slug: "guide/formatting" },
