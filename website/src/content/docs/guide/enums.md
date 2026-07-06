@@ -27,8 +27,12 @@ enum HttpStatus {
 Use the static operator `::` to reference enum variants:
 
 ```ard
+enum Status {
+  active,
+  inactive,
+}
+
 let current_status = Status::active
-let response_code = HttpStatus::ok
 ```
 
 ## Matching On Enums
@@ -36,19 +40,21 @@ let response_code = HttpStatus::ok
 Use `match` expressions to do conditional logic based on the enum value:
 
 ```ard
+use go:fmt
+
 enum Priority {
   low,
   medium,
   high,
-  critical
+  critical,
 }
 
 fn handle_task(priority: Priority) {
   match priority {
-    Priority::low => io::print("Task can wait")
-    Priority::medium => io::print("Task should be done today")
-    Priority::high => io::print("Task needs attention soon")
-    Priority::critical => io::print("Drop everything and handle this!")
+    Priority::low => fmt::Println("Task can wait"),
+    Priority::medium => fmt::Println("Task should be done today"),
+    Priority::high => fmt::Println("Task needs attention soon"),
+    Priority::critical => fmt::Println("Drop everything and handle this!"),
   }
 }
 ```
@@ -58,6 +64,8 @@ fn handle_task(priority: Priority) {
 ### State Machines
 
 ```ard
+use go:fmt
+
 enum ConnectionState {
   disconnected,
   connecting,
@@ -65,27 +73,29 @@ enum ConnectionState {
   error,
 }
 
-mut state = ConnectionState::disconnected
+fn connection_successful() Bool {
+  true
+}
 
-fn connect() ConnectionState {
-  state = match state {
+fn connect(state: ConnectionState) ConnectionState {
+  match state {
     ConnectionState::disconnected => {
-      io::print("Attempting to connect...")
+      fmt::Println("Attempting to connect...")
       ConnectionState::connecting
     },
     ConnectionState::connecting => {
       // Simulate connection logic
       match connection_successful() {
-        true => ConnectionState::connected
-        false => ConnectionState::error
+        true => ConnectionState::connected,
+        false => ConnectionState::error,
       }
     },
     ConnectionState::connected => {
-      io::print("Already connected")
+      fmt::Println("Already connected")
       ConnectionState::connected
     },
     ConnectionState::error => {
-      io::print("Connection failed, retrying...")
+      fmt::Println("Connection failed, retrying...")
       ConnectionState::disconnected
     },
   }
@@ -102,7 +112,9 @@ Unlike some languages, Ard enums:
 For actual discriminated unions of various types (A.K.A. sum types) like in Rust, consider using <a href="/guide/types/#type-unions">type unions</a>:
 
 ```ard
-type Success = { value: Str }
-type Error = { message: Str }
-type Outcome = Success | Error // supporting the possible shapes cannot be done with a plain enum
+struct Success { value: Str }
+struct Failure { message: Str }
+
+// supporting the possible shapes cannot be done with a plain enum
+type Outcome = Success | Failure
 ```

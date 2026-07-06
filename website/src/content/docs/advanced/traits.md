@@ -11,17 +11,13 @@ Traits define behaviors that can be implemented by custom types. They are simila
 
 ## Defining Traits
 
-Traits consist of method signatures that an implementing types must provide:
-
-Here is a trait that is part of the standard library in the scope of the `Str` type.
+Traits consist of method signatures that implementing types must provide:
 
 ```ard
-trait ToString {
-  fn to_str() Str
+trait Describable {
+  fn describe() Str
 }
 ```
-
-> 💡 `Str::ToString` is the trait that standard `io::print` function accepts and the built-in primitives implement it.
 
 A trait can have multiple methods:
 
@@ -38,13 +34,17 @@ trait Drawable {
 Use `impl TraitName for TypeName` to implement a trait for a specific type:
 
 ```ard
+trait Describable {
+  fn describe() Str
+}
+
 struct Person {
   name: Str,
   age: Int,
 }
 
-impl Str::ToString for Person {
-  fn to_str() Str {
+impl Describable for Person {
+  fn describe() Str {
     "{self.name} is {self.age} years old"
   }
 }
@@ -57,11 +57,14 @@ impl Str::ToString for Person {
 Traits can be used as function parameter types to accept any type that implements the trait:
 
 ```ard
-fn debug(thing: Str::ToString) {
-  io::print(thing.to_str())
-  thing.name // Error
+use go:fmt
+
+fn debug(thing: Describable) {
+  fmt::Println(thing.describe())
 }
 
-let person = Person { name: "Alice", age: 30 }
+let person = Person{name: "Alice", age: 30}
 debug(person)
 ```
+
+Inside `debug`, only the trait's methods are available. Accessing `thing.name` would be a compile-time error because `Describable` says nothing about a `name` field.

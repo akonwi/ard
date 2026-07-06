@@ -19,6 +19,8 @@ Function parameters require type annotations. Return types are specified after t
 Without an explicit return type, Ard will treat the function as non-returning.
 
 ```ard
+use go:fmt
+
 fn add(a: Int, b: Int) Int {
   a + b
 }
@@ -26,7 +28,7 @@ fn add(a: Int, b: Int) Int {
 // No return type specified - this function will not return a value.
 // Equivalent to declaring `Void` as the return type
 fn print_message(msg: Str) {
-  io::print(msg)
+  fmt::Println(msg)
 }
 ```
 
@@ -35,13 +37,15 @@ fn print_message(msg: Str) {
 In order for a function to apply side-effects or mutations to parameters, the parameter type must be marked as mutable in the signature.
 
 ```ard
+use go:fmt
+
 fn add_ten(value: mut Int) {
   value =+ 10
 }
 
 mut count = 0
 add_ten(count)
-io::print(count) // 10
+fmt::Println(count) // 10
 ```
 
 ## Return Values
@@ -83,15 +87,19 @@ greet("Bob")
 When a non-nullable value is provided to a nullable parameter, it's automatically wrapped in `Maybe::new()`:
 
 ```ard
-fn process(data: Str, options: Options?) Result {
-  let opts = options.or(Options::default())
+struct Options {
+  verbose: Bool,
+}
+
+fn process(data: Str, options: Options?) {
+  let opts = options.or(Options{verbose: false})
   // Process with options
 }
 
-// Automatically wraps provided value as Some(Options)
-process("data", Options { verbose: true })
+// Automatically wraps the provided value in maybe::some
+process("data", Options{verbose: true})
 
-// Omits the parameter (becomes None)
+// Omits the parameter (becomes none)
 process("data")
 ```
 
@@ -116,8 +124,14 @@ configure("service")                 // All nullable params omitted
 Functions can be called with labelled arguments, allowing parameters to be specified in any order:
 
 ```ard
+struct User {
+  name: Str,
+  age: Int,
+  email: Str,
+}
+
 fn create_user(name: Str, age: Int, email: Str) User {
-  User { name: name, age: age, email: email }
+  User{name: name, age: age, email: email}
 }
 
 // Positional arguments (order matters)
@@ -143,7 +157,7 @@ Functions are first-class values and can be used as arguments:
 
 ```ard
 fn map(list: [Int], transform: fn(Int) Int) [Int] {
-  let mapped: [Int] = []
+  mut mapped: [Int] = []
   for item in list {
     mapped.push(transform(item))
   }
@@ -164,6 +178,14 @@ let doubled = map(numbers, double)
 Functions can be defined inline without names:
 
 ```ard
+fn map(list: [Int], transform: fn(Int) Int) [Int] {
+  mut mapped: [Int] = []
+  for item in list {
+    mapped.push(transform(item))
+  }
+  mapped
+}
+
 let squared = map([1, 2, 3], fn(x: Int) Int { x * x })
 ```
 
@@ -172,16 +194,26 @@ let squared = map([1, 2, 3], fn(x: Int) Int { x * x })
 When referring to function types, use the `fn` syntax and just omit the body:
 
 ```ard
+use go:fmt
+
+fn add(a: Int, b: Int) Int { a + b }
+fn shout(msg: Str) { fmt::Println(msg) }
+fn get_random_number() Int { 4 }
+
 let operation: fn(Int, Int) Int = add
-let printer: fn(Str) = io::print
+let printer: fn(Str) = shout
 let generator: fn() Int = get_random_number
 ```
 
 Use `?` after the function type for nullable function values. If the function type has an explicit return type, wrap the whole type in parentheses so the `?` applies to the function instead of the return type:
 
 ```ard
+fn lookup_name(id: Int) Str? {
+  Maybe::new<Str>()
+}
+
 let optional_printer: fn(Str)? = Maybe::new()          // nullable fn(Str) Void
-let optional_mapper: (fn(Int) Str)? = Maybe::new()    // nullable fn(Int) Str
+let optional_mapper: (fn(Int) Str)? = Maybe::new()     // nullable fn(Int) Str
 let maybe_name: fn(Int) Str? = lookup_name             // non-null function returning Str?
 ```
 

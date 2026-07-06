@@ -26,6 +26,9 @@ fn divide(a: Int, b: Int) Int!Str {
 Ard has no null or nil value. Optional values are explicit with `Maybe` (written `T?`), and the compiler forces absent cases to be handled before the value can be used.
 
 ```ard
+use ard/list
+
+let numbers = [1, 5, 12]
 let found: Int? = list::find(numbers, fn(n: Int) Bool { n > 10 })
 let value = found.or(0)
 ```

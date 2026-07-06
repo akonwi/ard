@@ -8,11 +8,11 @@ description: Learn about Ard's module system, imports, and code organization.
 Each Ard file is a module that can be either a runnable program or used by other modules. Imports are declared at the top of files using the `use` keyword.
 
 ```ard
-use ard/io
+use go:fmt
 use my_project/utils as helpers
 
 fn main() {
-  io::print("Hello from main module")
+  fmt::Println("Hello from main module")
   helpers::calculate(42)
 }
 ```
@@ -35,10 +35,18 @@ By default, the imported module is available with the last segment of the path a
 The Ard standard library consists of modules under the `ard/*` path:
 
 ```ard
-use ard/io          // Input/output functions
-use ard/json        // JSON parsing and serialization
-use ard/http        // HTTP client functionality
-use ard/async       // Asynchronous programming
+use ard/async       // Concurrency
+use ard/list        // List helpers
+use ard/map         // Map helpers
+use ard/testing     // Test assertions
+use ard/unsafe      // Interop escape hatches
+```
+
+Go packages are also imported with `use`, prefixed with `go:`:
+
+```ard
+use go:fmt
+use go:strings
 ```
 
 ## Project Structure
@@ -82,10 +90,10 @@ fn main() {
 
 ```ard
 // In utils.ard
-use ard/io
+use go:fmt
 
 fn log(message: Str) {
-  io::print("[LOG] {message}")
+  fmt::Println("[LOG] {message}")
 }
 
 fn format_number(num: Int) Str {
@@ -105,8 +113,8 @@ fn multiply(a: Int, b: Int) Int {
 
 fn divide(a: Int, b: Int) Int!Str {
   match b == 0 {
-    true => Result::err("Division by zero")
-    false => Result::ok(a / b)
+    true => Result::err("Division by zero"),
+    false => Result::ok(a / b),
   }
 }
 ```
@@ -124,7 +132,7 @@ fn helper_function() Str {  // Public
 }
 
 struct Config {  // Public
-  name: Str
+  name: Str,
 }
 ```
 
@@ -132,16 +140,16 @@ Use the `private` keyword to make these declarations module-local:
 
 ```ard
 // In utils.ard
-fn public_function() Str {
-  private_helper()  // OK: same module
-}
-
 private fn private_helper() Str {  // Private
   "This cannot be called from other modules"
 }
 
+fn public_function() Str {
+  private_helper()  // OK: same module
+}
+
 private struct InternalConfig {  // Private
-  secret: Str
+  secret: Str,
 }
 ```
 
@@ -184,19 +192,19 @@ Struct fields are always public if the struct is public.
 ```ard
 // In user.ard
 struct User {
-  id: Int          // Public
-  username: Str    // Public
-  email: Str       // Public
+  id: Int,         // Public
+  username: Str,   // Public
+  email: Str,      // Public
 }
 
 // Methods can be private
 impl User {
-  fn get_display_name() Str {  // Public
-    format_name(self.username) // Calls private method
-  }
-
   private fn format_name(name: Str) Str {  // Private
     "User: {name}"
+  }
+
+  fn get_display_name() Str {  // Public
+    self.format_name(self.username) // Calls private method
   }
 }
 ```

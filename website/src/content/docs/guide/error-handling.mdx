@@ -11,16 +11,16 @@ Result types represent operations that can either succeed with a value or fail w
 
 ```ard
 fn divide(a: Int, b: Int) Int!Str {
-    match b == 0 {
-        true => Result::err("division by zero"),
-        false => Result::ok(a / b)
-    }
+  match b == 0 {
+    true => Result::err("division by zero"),
+    false => Result::ok(a / b),
+  }
 }
 ```
 
 ### Creating Results
 
-Use the standard library functions to create Result values:
+Use the built-in constructors to create Result values:
 - `Result::ok(value)` - creates a successful result
 - `Result::err(error)` - creates an error result
 
@@ -29,16 +29,32 @@ Use the standard library functions to create Result values:
 Results can be handled using pattern matching:
 
 ```ard
+use go:fmt
+
+fn divide(a: Int, b: Int) Int!Str {
+  match b == 0 {
+    true => Result::err("division by zero"),
+    false => Result::ok(a / b),
+  }
+}
+
 let result = divide(10, 2)
 match result {
-    ok(value) => io::print("Result: {value}"),
-    err(message) => io::print("Error: {message}")
+  ok(value) => fmt::Println("Result: {value}"),
+  err(message) => fmt::Println("Error: {message}"),
 }
 ```
 
 Or use the `.or(default)` method to provide a fallback value:
 
 ```ard
+fn divide(a: Int, b: Int) Int!Str {
+  match b == 0 {
+    true => Result::err("division by zero"),
+    false => Result::ok(a / b),
+  }
+}
+
 let safe_result = divide(10, 0).or(-1)  // Returns -1 on error
 ```
 
@@ -72,7 +88,10 @@ let normalized = res.map_err(fn(err) { "calc failed: {err}" })
 If inference is ambiguous, explicit type args can guide the checker:
 
 ```ard
-fn parse_num(raw: Str) Int!Str { ... }
+fn parse_num(raw: Str) Int!Str {
+  Result::ok(42)
+}
+
 let text = parse_num("42").and_then<Str>(fn(v) { Result::ok("{v}") })
 ```
 
@@ -82,11 +101,16 @@ Maybe types represent values that may or may not exist. They are written as `Typ
 
 ```ard
 
+struct User {
+  name: Str,
+  id: Int,
+}
+
 fn find_user(id: Int) User? {
-    match id == 42 {
-        true => Maybe::new(User { name: "Alice", id: 42 }),
-        false => Maybe::new()
-    }
+  match id == 42 {
+    true => Maybe::new(User{name: "Alice", id: 42}),
+    false => Maybe::new(),
+  }
 }
 ```
 
@@ -101,10 +125,24 @@ Use the standard library functions to create Maybe values:
 Maybe values can be handled using pattern matching:
 
 ```ard
+use go:fmt
+
+struct User {
+  name: Str,
+  id: Int,
+}
+
+fn find_user(id: Int) User? {
+  match id == 42 {
+    true => Maybe::new(User{name: "Alice", id: 42}),
+    false => Maybe::new(),
+  }
+}
+
 let user = find_user(42)
 match user {
-    user => io::print("Found user: {user.name}"),
-    _ => io::print("User not found")
+  user => fmt::Println("Found user: {user.name}"),
+  _ => fmt::Println("User not found"),
 }
 ```
 
@@ -128,7 +166,7 @@ fn non_empty(name: Str) Str? {
 }
 let checked = maybe_name.and_then(non_empty) // some("Alice")
 let empty: Str? = Maybe::new("")
-empty.and_then(non_empty) // none
+let missing = empty.and_then(non_empty) // none
 ```
 
 As with Results, explicit type args can guide inference when needed:
@@ -141,15 +179,20 @@ let maybe_text = Maybe::new(42).map<Str>(fn(v) { "{v}" })
 
 The `try` keyword provides early return semantics for working with Result and Maybe types, eliminating the need for explicit error checking in many cases.
 
-
-
 ### With Result Types
 
 ```ard
+fn divide(a: Int, b: Int) Int!Str {
+  match b == 0 {
+    true => Result::err("division by zero"),
+    false => Result::ok(a / b),
+  }
+}
+
 fn calculate() Int!Str {
-    let x = try divide(10, 2)  // If divide fails, return early with error
-    let y = try divide(x, 3)   // If this fails, return early with error
-    Result::ok(y + 1)          // If we get here, both operations succeeded
+  let x = try divide(10, 2)  // If divide fails, return early with error
+  let y = try divide(x, 3)   // If this fails, return early with error
+  Result::ok(y + 1)          // If we get here, both operations succeeded
 }
 ```
 
@@ -157,14 +200,26 @@ fn calculate() Int!Str {
 
 ```ard
 
+struct User {
+  name: Str,
+  id: Int,
+}
+
+fn find_user(id: Int) User? {
+  match id == 42 {
+    true => Maybe::new(User{name: "Alice", id: 42}),
+    false => Maybe::new(),
+  }
+}
+
 fn get_user_name(id: Int) Str? {
-    let user = try find_user(id)  // If user not found, return early with none
-    Maybe::new(user.name)        // If we get here, user was found
+  let user = try find_user(id)  // If user not found, return early with none
+  Maybe::new(user.name)        // If we get here, user was found
 }
 
 fn get_user_display(id: Int) Str? {
-    let name = try get_user_name(id)  // Int? -> Str?, compatible types
-    Maybe::new("User: {name}")
+  let name = try get_user_name(id)  // Str? -> Str?, compatible types
+  Maybe::new("User: {name}")
 }
 ```
 
@@ -177,30 +232,53 @@ fn get_user_display(id: Int) Str? {
 
 ## Error Transformation with Catch Blocks
 
-When your function's return type doesn't match the Result's error type or when you want to handle Maybe `none` cases, you can use catch blocks to transform errors:
+When your function's return type doesn't match the Result's error type or when you want to handle Maybe `none` cases, you can use catch blocks:
 
 ```ard
+fn parse_number(raw: Str) Int!Str {
+  match raw == "abc" {
+    true => Result::err("not a number"),
+    false => Result::ok(42),
+  }
+}
+
 fn process_data() Str {
-    let num = try parse_number("abc") -> err {
-        "Failed to parse: {err}"
-    }
-    "Number is: {num}"
+  let num = try parse_number("abc") -> err {
+    "Failed to parse: {err}"
+  }
+  "Number is: {num}"
 }
 ```
 
 ### With Maybe Types
 
+Use `_` in the catch clause because a `none` case carries no payload:
+
 ```ard
 
+struct User {
+  name: Str,
+  id: Int,
+}
+
+fn find_user(id: Int) User? {
+  match id == 42 {
+    true => Maybe::new(User{name: "Alice", id: 42}),
+    false => Maybe::new(),
+  }
+}
+
 fn get_user_display(id: Int) Str {
-    let user = try find_user(id) -> _ {
-        "Unknown User"
-    }
-    "User: {user.name}"
+  let user = try find_user(id) -> _ {
+    "Unknown User"
+  }
+  "User: {user.name}"
 }
 ```
 
 ### Catch Block Semantics
+
+The catch block's value is **returned early from the enclosing function**, so its type must match the function's return type.
 
 #### For Result Types
 - **Success case**: The Result is unwrapped and execution continues normally
@@ -212,151 +290,130 @@ fn get_user_display(id: Int) Str {
 
 ### Function Reference Shorthand
 
-For simple error transformations, you can reference a function directly:
+For simple Result error transformations, you can reference a function directly. The function receives the error value:
 
 ```ard
+fn risky_operation() Str!Str {
+  Result::ok("data")
+}
+
 fn format_error(msg: Str) Str {
-    "Error: {msg}"
+  "Error: {msg}"
 }
 
 fn process() Str {
-    let result = try risky_operation() -> format_error
-    "Success: {result}"
+  let result = try risky_operation() -> format_error
+  "Success: {result}"
 }
 ```
 
 This is equivalent to:
 
 ```ard
+fn risky_operation() Str!Str {
+  Result::ok("data")
+}
+
+fn format_error(msg: Str) Str {
+  "Error: {msg}"
+}
+
 fn process() Str {
-    let result = try risky_operation() -> err {
-        format_error(err)
-    }
-    "Success: {result}"
+  let result = try risky_operation() -> err {
+    format_error(err)
+  }
+  "Success: {result}"
 }
 ```
 
-### Function Reference with Maybe Types
+The shorthand applies to Result types, where the handler receives the error value. For Maybe types, use a `-> _ { ... }` catch block since `none` has no payload to pass.
+
+## Unwrapping Nested Maybes
+
+When working with nested structures where intermediate values are Maybe types, unwrap each level with `try`:
 
 ```ard
 
-fn default_name() Str {
-    "Anonymous"
+struct Profile {
+  name: Str,
+  bio: Str?,
 }
 
-fn greet(id: Int) Str {
-    let name = try get_user_name(id) -> default_name
-    "Hello, {name}!"
+struct User {
+  id: Int,
+  profile: Profile?,
 }
-```
 
-## Chained Property Access in Try Statements
-
-When working with nested structures, you often need to access properties through multiple levels where intermediate values might be Maybe types. The `try` statement handles this elegantly:
-
-```ard
-
-struct Profile { name: Str, bio: Str? }
-struct User { id: Int, profile: Profile? }
-
-fn get_user_bio(user: User?) Str {
-    let bio = try user.profile.name -> _ {
-        "No bio available"
-    }
-    bio
+fn get_profile_name(user: User?) Str {
+  let u = try user -> _ { "no user" }
+  let profile = try u.profile -> _ { "no profile" }
+  profile.name
 }
 ```
 
-When a property in the chain is a Maybe type, `try` automatically unwraps it. If any property in the chain is `none`, the catch block executes and returns early.
-
-This desugars to nested pattern matching internally, but you get the convenience of writing simple dot-notation chains without manually handling each level:
-
-```ard
-// Equivalent to the above, but without the convenience syntax
-fn get_user_bio_manual(user: User?) Str {
-    match user {
-        u => match u.profile {
-            profile => profile.name,
-            _ => Maybe::new()
-        },
-        _ => Maybe::new()
-    } -> _ {
-        "No bio available"
-    }
-}
-```
+Each `try` unwraps one level; if any level is `none`, its catch block returns early with a fallback.
 
 ## Complete Example
 
 Here's a comprehensive example showing different error handling patterns:
 
 ```ard
-use ard/io
+use go:fmt
 
-struct Person { name: Str, age: Int }
-struct Database { users: [Int:Person] }
+struct Person {
+  name: Str,
+  age: Int,
+}
+
+struct Database {
+  users: [Int: Person],
+}
 
 fn parse_age(s: Str) Int!Str {
-    // Simulate parsing that can fail
-    match s {
-        "invalid" => Result::err("not a number"),
-        _ => Result::ok(25)
-    }
+  // Simulate parsing that can fail
+  match s {
+    "invalid" => Result::err("not a number"),
+    _ => Result::ok(25),
+  }
 }
 
 fn create_person(name: Str, age_str: Str) Person!Str {
-    let age = try parse_age(age_str)  // Early return on parse error
-    Result::ok(Person { name: name, age: age })
+  let age = try parse_age(age_str)  // Early return on parse error
+  Result::ok(Person{name: name, age: age})
 }
 
 fn safe_create_person(name: Str, age_str: Str) Person {
-    let age = try parse_age(age_str) -> err {
-        io::print("Age parsing failed: {err}")
-        return Person { name: name, age: 0 }  // Default age on error
-    }
-    Person { name: name, age: age }
+  let age = try parse_age(age_str) -> err {
+    fmt::Println("Age parsing failed: {err}")
+    Person{name: name, age: 0}  // Early return with a default person
+  }
+  Person{name: name, age: age}
 }
 
 fn format_parse_error(msg: Str) Str {
-    "Invalid age provided: {msg}"
+  "Invalid age provided: {msg}"
 }
 
 fn create_person_with_message(name: Str, age_str: Str) Str {
-    let person = try create_person(name, age_str) -> format_parse_error
-    "Created person: {person.name}, age {person.age}"
+  let person = try create_person(name, age_str) -> format_parse_error
+  "Created person: {person.name}, age {person.age}"
 }
 
 // Maybe type examples
 fn find_person(db: Database, id: Int) Person? {
-    match db.users.get(id) {
-        person => Maybe::new(person),
-        _ => Maybe::new()
-    }
+  db.users.get(id)
 }
 
 fn get_person_info(db: Database, id: Int) Str? {
-    let person = try find_person(db, id)  // Early return none if not found
-    Maybe::new("Name: {person.name}, Age: {person.age}")
+  let person = try find_person(db, id)  // Early return none if not found
+  Maybe::new("Name: {person.name}, Age: {person.age}")
 }
 
 fn get_person_display(db: Database, id: Int) Str {
-    let info = try get_person_info(db, id) -> _ {
-        "Person not found"
-    }
-    "Person Info: {info}"
-}
-
-// Mixed Result and Maybe types
-fn safe_get_person_age(db: Database, id: Int, age_str: Str) Int {
-    let person = try find_person(db, id) -> _ {
-        // If person not found, try to parse the provided age string
-        let parsed_age = try parse_age(age_str) -> err {
-            io::print("Both person lookup and age parsing failed: {err}")
-            return 0
-        }
-        return parsed_age
-    }
-    person.age
+  let info = try get_person_info(db, id) -> _ {
+    "Person not found"
+  }
+  "Person Info: {info}"
 }
 ```
 
@@ -367,11 +424,15 @@ fn safe_get_person_age(db: Database, id: Int, age_str: Str) Int {
 The `try` keyword is designed to let you write code that focuses on the success case:
 
 ```ard
+fn read_file(path: Str) Str!Str { Result::ok("{}") }
+fn parse_json(content: Str) Str!Str { Result::ok(content) }
+fn transform_data(parsed: Str) Str!Str { Result::ok(parsed) }
+
 fn process_file() Str!Str {
-    let content = try read_file("data.txt")
-    let parsed = try parse_json(content)
-    let result = try transform_data(parsed)
-    Result::ok(result)
+  let content = try read_file("data.txt")
+  let parsed = try parse_json(content)
+  let result = try transform_data(parsed)
+  Result::ok(result)
 }
 ```
 
@@ -380,10 +441,14 @@ fn process_file() Str!Str {
 Use catch blocks to convert errors into appropriate types for your context:
 
 ```ard
+fn internal_operation() Str!Str {
+  Result::err("code 500")
+}
+
 fn user_friendly_operation() Str {
-    try internal_operation() -> err {
-        "Sorry, something went wrong. Please try again."
-    }
+  try internal_operation() -> err {
+    "Sorry, something went wrong. Please try again."
+  }
 }
 ```
 
@@ -392,11 +457,15 @@ fn user_friendly_operation() Str {
 When functions can naturally propagate errors, prefer `try` without catch:
 
 ```ard
-fn chain_operations() DataType!ErrorType {
-    let step1 = try first_operation()
-    let step2 = try second_operation(step1)
-    let step3 = try third_operation(step2)
-    Result::ok(step3)
+fn first_operation() Int!Str { Result::ok(1) }
+fn second_operation(input: Int) Int!Str { Result::ok(input + 1) }
+fn third_operation(input: Int) Int!Str { Result::ok(input + 1) }
+
+fn chain_operations() Int!Str {
+  let step1 = try first_operation()
+  let step2 = try second_operation(step1)
+  let step3 = try third_operation(step2)
+  Result::ok(step3)
 }
 ```
 
