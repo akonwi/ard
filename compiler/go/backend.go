@@ -1,6 +1,7 @@
 package gotarget
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"go/token"
@@ -942,7 +943,8 @@ func writeGeneratedRuntimePackage(dir string) error {
 		if err != nil {
 			return err
 		}
-		path := filepath.Join(dir, "internal", "ardruntime", name)
+		content = bytes.Replace(content, []byte("package runtime"), []byte("package ard"), 1)
+		path := filepath.Join(dir, "internal", "ard", name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}

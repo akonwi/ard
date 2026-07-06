@@ -2690,19 +2690,19 @@ func runGoTargetParityJSON(t *testing.T, program *air.Program) string {
 		switch ret.Kind {
 		case air.TypeResult:
 			if ret.Error > 0 && int(ret.Error) <= len(program.Types) && program.Types[ret.Error-1].Kind == air.TypeStr {
-				runtimeImport = "\n\tardruntime \"generated/internal/ardruntime\""
+				runtimeImport = "\n\tard \"generated/internal/ard\""
 				if ret.Value == air.NoType || program.Types[ret.Value-1].Kind == air.TypeVoid {
-					runnerValue = fmt.Sprintf("func() any { err := %s(); if err != nil { return ardruntime.Result[struct{}, string]{Err: err.Error()} }; return ardruntime.Result[struct{}, string]{Value: struct{}{}, Ok: true} }()", scriptFn)
+					runnerValue = fmt.Sprintf("func() any { err := %s(); if err != nil { return ard.Result[struct{}, string]{Err: err.Error()} }; return ard.Result[struct{}, string]{Value: struct{}{}, Ok: true} }()", scriptFn)
 				} else {
-					runnerValue = fmt.Sprintf("func() any { value, err := %s(); if err != nil { return ardruntime.Result[any, string]{Err: err.Error()} }; return ardruntime.Result[any, string]{Value: value, Ok: true} }()", scriptFn)
+					runnerValue = fmt.Sprintf("func() any { value, err := %s(); if err != nil { return ard.Result[any, string]{Err: err.Error()} }; return ard.Result[any, string]{Value: value, Ok: true} }()", scriptFn)
 				}
 			}
 		case air.TypeMaybe:
-			runtimeImport = "\n\tardruntime \"generated/internal/ardruntime\""
+			runtimeImport = "\n\tard \"generated/internal/ard\""
 			if ret.Elem == air.NoType || program.Types[ret.Elem-1].Kind == air.TypeVoid {
-				runnerValue = fmt.Sprintf("func() any { ok := %s(); if ok { return ardruntime.Maybe[struct{}]{Value: struct{}{}, Ok: true} }; return ardruntime.Maybe[struct{}]{} }()", scriptFn)
+				runnerValue = fmt.Sprintf("func() any { ok := %s(); if ok { return ard.Maybe[struct{}]{Value: struct{}{}, Ok: true} }; return ard.Maybe[struct{}]{} }()", scriptFn)
 			} else {
-				runnerValue = fmt.Sprintf("func() any { value, ok := %s(); if ok { return ardruntime.Maybe[any]{Value: value, Ok: true} }; return ardruntime.Maybe[any]{} }()", scriptFn)
+				runnerValue = fmt.Sprintf("func() any { value, ok := %s(); if ok { return ard.Maybe[any]{Value: value, Ok: true} }; return ard.Maybe[any]{} }()", scriptFn)
 			}
 		}
 	}

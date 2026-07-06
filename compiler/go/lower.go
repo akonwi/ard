@@ -4962,7 +4962,7 @@ func (l *lowerer) localIsPointerParam(fn air.Function, local air.LocalID) bool {
 }
 
 func (l *lowerer) runtimeQualified(name string) ast.Expr {
-	return l.qualified("ardruntime", path.Join(generatedModulePath(l.projectInfo), "internal", "ardruntime"), name)
+	return l.qualified("ard", path.Join(generatedModulePath(l.projectInfo), "internal", "ard"), name)
 }
 
 func (l *lowerer) qualified(alias string, importPath string, name string) ast.Expr {

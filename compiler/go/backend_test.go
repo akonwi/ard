@@ -2785,7 +2785,7 @@ func TestLowerProgramUsesRuntimeMaybeForRecursiveNullableFields(t *testing.T) {
 			return false
 		}
 		indexed, ok := field.Type.(*ast.IndexExpr)
-		return ok && astExprName(indexed.X) == "ardruntime.Maybe" && astExprName(indexed.Index) == "Node"
+		return ok && astExprName(indexed.X) == "ard.Maybe" && astExprName(indexed.Index) == "Node"
 	}) {
 		t.Fatal("generated AST missing runtime Maybe recursive nullable field")
 	}
@@ -2813,7 +2813,7 @@ func TestLowerProgramUsesExpectedLocalTypeForMaybeNone(t *testing.T) {
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
-		if !ok || astCallName(call) != "ardruntime.None" {
+		if !ok || astCallName(call) != "ard.None" {
 			return false
 		}
 		indexed, ok := call.Fun.(*ast.IndexExpr)
@@ -3679,7 +3679,7 @@ func TestWriteProgramEmbedsRuntimePackage(t *testing.T) {
 	if strings.Contains(goMod, "github.com/akonwi/ard") {
 		t.Fatalf("go.mod should not require Ard runtime module:\n%s", goMod)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "internal", "ardruntime", "maybe.go")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "internal", "ard", "maybe.go")); err != nil {
 		t.Fatalf("generated runtime package not written: %v", err)
 	}
 }
