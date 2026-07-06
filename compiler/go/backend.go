@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	goruntime "runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,7 +15,6 @@ import (
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/stdlibgo"
-	"github.com/akonwi/ard/version"
 	"golang.org/x/mod/modfile"
 )
 
@@ -298,6 +296,9 @@ func writeProgram(dir string, program *air.Program, options Options) error {
 	if err := copyProjectFFIDir(dir, options.ProjectInfo); err != nil {
 		return err
 	}
+	if err := writeGeneratedRuntimePackage(dir); err != nil {
+		return err
+	}
 	goMod, err := generatedGoMod(dir, program, options.ProjectInfo)
 	if err != nil {
 		return err
@@ -316,19 +317,13 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 	if err != nil {
 		return "", err
 	}
-	ardRequirement, err := writeArdModuleDependency(dir)
-	if err != nil {
-		return "", err
-	}
 	requireSeen := requireKeys(goMod)
 	requires := make([]string, 0)
-	addGoModRequirements(&requires, requireSeen, ardRequirement)
 	addDependencyGoModRequirements(&requires, requireSeen, program, projectInfo)
 	goMod += formatRequireBlock(requires)
 
 	replaceSeen := replaceKeys(goMod)
 	replaces := make([]string, 0)
-	addGoModReplaces(&replaces, replaceSeen, ardRequirement)
 	addDependencyGoModReplaces(&replaces, replaceSeen, program, projectInfo)
 	goMod += formatReplaceBlock(replaces)
 	return goMod, nil
@@ -887,20 +882,6 @@ func dependencyPackageForModulePath(modulePath string, projectInfo *checker.Proj
 	return "", "", false
 }
 
-func writeArdModuleDependency(dir string) (string, error) {
-	if releaseVersion := strings.TrimSpace(version.Get()); releaseVersion != "" && releaseVersion != "dev" {
-		moduleDir := filepath.Join(dir, ".ard", "ard-module")
-		if err := writeEmbeddedArdModule(moduleDir); err != nil {
-			return "", err
-		}
-		return "\nrequire github.com/akonwi/ard v0.0.0\nreplace github.com/akonwi/ard => ./.ard/ard-module\n", nil
-	}
-	if moduleRoot, ok := compilerModuleRoot(); ok {
-		return fmt.Sprintf("\nrequire github.com/akonwi/ard v0.0.0\nreplace github.com/akonwi/ard => %s\n", moduleRoot), nil
-	}
-	return "", nil
-}
-
 func copyProjectFFIDir(outputDir string, projectInfo *checker.ProjectInfo) error {
 	if projectInfo == nil || strings.TrimSpace(projectInfo.RootPath) == "" {
 		return nil
@@ -955,9 +936,12 @@ func copyDir(source string, dest string) error {
 	})
 }
 
-func writeEmbeddedArdModule(dir string) error {
+func writeGeneratedRuntimePackage(dir string) error {
 	for rel, content := range stdlibgo.Files {
-		path := filepath.Join(dir, filepath.FromSlash(rel))
+		if !strings.HasPrefix(rel, "runtime/") || !strings.HasSuffix(rel, ".go") {
+			continue
+		}
+		path := filepath.Join(dir, "internal", "ardruntime", strings.TrimPrefix(rel, "runtime/"))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
@@ -966,18 +950,6 @@ func writeEmbeddedArdModule(dir string) error {
 		}
 	}
 	return nil
-}
-
-func compilerModuleRoot() (string, bool) {
-	_, file, _, ok := goruntime.Caller(0)
-	if !ok {
-		return "", false
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), ".."))
-	if strings.TrimSpace(root) == "" {
-		return "", false
-	}
-	return root, true
 }
 
 func buildGeneratedProgram(dir string, outputPath string, buildTags ...string) error {

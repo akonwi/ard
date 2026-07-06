@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -2405,12 +2406,12 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			}
 			elemTypeID := l.program.Types[expr.Type-1].Elem
 			elemType := mustTypeExpr(l, elemTypeID)
-			noneCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "None"), Index: elemType}}
+			noneCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.runtimeQualified("None"), Index: elemType}}
 			someValue := ast.Expr(&ast.IndexExpr{X: ast.NewIdent(runesTemp), Index: ast.NewIdent(indexTemp)})
 			if validTypeID(l.program, elemTypeID) && l.program.Types[elemTypeID-1].Kind == air.TypeStr {
 				someValue = &ast.CallExpr{Fun: ast.NewIdent("string"), Args: []ast.Expr{someValue}}
 			}
-			someCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: elemType}, Args: []ast.Expr{someValue}}
+			someCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.runtimeQualified("Some"), Index: elemType}, Args: []ast.Expr{someValue}}
 			stmts = append(stmts, &ast.IfStmt{
 				Cond: cond,
 				Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneCall}}}},
@@ -2488,8 +2489,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		noneCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "None"), Index: elemType}}
-		someCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: elemType}, Args: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(sliceTemp), Index: ast.NewIdent(indexTemp)}}}
+		noneCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.runtimeQualified("None"), Index: elemType}}
+		someCall := &ast.CallExpr{Fun: &ast.IndexExpr{X: l.runtimeQualified("Some"), Index: elemType}, Args: []ast.Expr{&ast.IndexExpr{X: ast.NewIdent(sliceTemp), Index: ast.NewIdent(indexTemp)}}}
 		stmts = append(stmts, &ast.IfStmt{
 			Cond: cond,
 			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneCall}}}},
@@ -2721,7 +2722,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		l.castEnumIntComparisonOperands(&left, leftTypeID, &right, rightTypeID)
 		var equality ast.Expr = &ast.BinaryExpr{X: left.expr, Op: l.binaryToken(expr.Kind), Y: right.expr}
 		if l.isMaybeType(leftTypeID) || l.isMaybeType(rightTypeID) {
-			equality = &ast.CallExpr{Fun: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "MaybeEqual"), Args: []ast.Expr{left.expr, right.expr}}
+			equality = &ast.CallExpr{Fun: l.runtimeQualified("MaybeEqual"), Args: []ast.Expr{left.expr, right.expr}}
 			if expr.Kind == air.ExprNotEq {
 				equality = &ast.UnaryExpr{Op: token.NOT, X: equality}
 			}
@@ -3104,12 +3105,12 @@ func (l *lowerer) lowerUnsafeCast(fn air.Function, expr air.Expr) (loweredExpr, 
 	if !expr.ForeignPointer {
 		cases = append(cases, &ast.CaseClause{
 			List: []ast.Expr{targetType},
-			Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: resultElemType}, Args: []ast.Expr{ast.NewIdent(valueName)}}}}},
+			Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.runtimeQualified("Some"), Index: resultElemType}, Args: []ast.Expr{ast.NewIdent(valueName)}}}}},
 		})
 	}
 	pointerType := &ast.StarExpr{X: targetType}
 	pointerBody := []ast.Stmt{
-		&ast.IfStmt{Cond: &ast.BinaryExpr{X: ast.NewIdent(valueName), Op: token.NEQ, Y: ast.NewIdent("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: resultElemType}, Args: []ast.Expr{anyCastSomeArg(ast.NewIdent(valueName), expr.ForeignPointer)}}}}}}},
+		&ast.IfStmt{Cond: &ast.BinaryExpr{X: ast.NewIdent(valueName), Op: token.NEQ, Y: ast.NewIdent("nil")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.runtimeQualified("Some"), Index: resultElemType}, Args: []ast.Expr{anyCastSomeArg(ast.NewIdent(valueName), expr.ForeignPointer)}}}}}}},
 	}
 	cases = append(cases, &ast.CaseClause{List: []ast.Expr{pointerType}, Body: pointerBody})
 	body := []ast.Stmt{
@@ -3117,7 +3118,7 @@ func (l *lowerer) lowerUnsafeCast(fn air.Function, expr air.Expr) (loweredExpr, 
 			Assign: &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(valueName)}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: value.expr, Type: nil}}},
 			Body:   &ast.BlockStmt{List: typeSwitchClausesToStmts(cases)},
 		},
-		&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "None"), Index: resultElemType}}}},
+		&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: &ast.IndexExpr{X: l.runtimeQualified("None"), Index: resultElemType}}}},
 	}
 	return loweredExpr{stmts: value.stmts, expr: &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Results: &ast.FieldList{List: []*ast.Field{{Type: maybeType}}}}, Body: &ast.BlockStmt{List: body}}}}, nil
 }
@@ -3130,7 +3131,7 @@ func (l *lowerer) lowerUnsafeIsNil(fn air.Function, expr air.Expr) (loweredExpr,
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	return loweredExpr{stmts: value.stmts, expr: &ast.CallExpr{Fun: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "IsNil"), Args: []ast.Expr{value.expr}}}, nil
+	return loweredExpr{stmts: value.stmts, expr: &ast.CallExpr{Fun: l.runtimeQualified("IsNil"), Args: []ast.Expr{value.expr}}}, nil
 }
 
 func anyCastSomeArg(value ast.Expr, mutable bool) ast.Expr {
@@ -3998,7 +3999,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		if info.ElemMutable {
 			elem = &ast.StarExpr{X: elem}
 		}
-		return &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Maybe"), Index: elem}, nil
+		return &ast.IndexExpr{X: l.runtimeQualified("Maybe"), Index: elem}, nil
 	case air.TypeFunction:
 		params := make([]*ast.Field, 0, len(info.Params))
 		for i, paramTypeID := range info.Params {
@@ -4033,7 +4034,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &ast.IndexListExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Result"), Indices: []ast.Expr{value, errType}}, nil
+		return &ast.IndexListExpr{X: l.runtimeQualified("Result"), Indices: []ast.Expr{value, errType}}, nil
 	case air.TypeList:
 		elem, err := l.goType(info.Elem)
 		if err != nil {
@@ -4958,6 +4959,10 @@ func (l *lowerer) localIsPointerParam(fn air.Function, local air.LocalID) bool {
 		return captured.Mutable && l.mutableParamUsesPointer(captured.Type)
 	}
 	return false
+}
+
+func (l *lowerer) runtimeQualified(name string) ast.Expr {
+	return l.qualified("ardruntime", path.Join(generatedModulePath(l.projectInfo), "internal", "ardruntime"), name)
 }
 
 func (l *lowerer) qualified(alias string, importPath string, name string) ast.Expr {
@@ -7678,7 +7683,7 @@ func (l *lowerer) maybeSomeExpr(maybeTypeID air.TypeID, value ast.Expr) (ast.Exp
 	if err != nil {
 		return nil, err
 	}
-	return &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "Some"), Index: elemType}, Args: []ast.Expr{value}}, nil
+	return &ast.CallExpr{Fun: &ast.IndexExpr{X: l.runtimeQualified("Some"), Index: elemType}, Args: []ast.Expr{value}}, nil
 }
 
 func (l *lowerer) maybeNoneExpr(maybeTypeID air.TypeID) (ast.Expr, error) {
@@ -7686,7 +7691,7 @@ func (l *lowerer) maybeNoneExpr(maybeTypeID air.TypeID) (ast.Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ast.CallExpr{Fun: &ast.IndexExpr{X: l.qualified("ardruntime", "github.com/akonwi/ard/runtime", "None"), Index: elemType}}, nil
+	return &ast.CallExpr{Fun: &ast.IndexExpr{X: l.runtimeQualified("None"), Index: elemType}}, nil
 }
 
 func (l *lowerer) maybeIsSomeExpr(expr ast.Expr) ast.Expr {

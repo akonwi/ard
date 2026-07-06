@@ -18,10 +18,10 @@ This ADR supersedes the parts of `0002-use-air-as-backend-boundary.md` that say 
 
 Lower Ard to idiomatic Go. Go's own constructs — packages, exported/unexported identifiers, structs, interfaces, methods, pointers — should carry Ard semantics directly wherever they can. Generated synthetic helper types and dispatch machinery are a cost, not a feature: every one we keep is a place where the output stops looking like ordinary Go and stops interoperating naturally with Go code.
 
-The only shared runtime types the backend is allowed to depend on for encoding irreducible Ard semantics are:
+The only embedded runtime types the backend is allowed to depend on for encoding irreducible Ard semantics are:
 
-- `runtime.Maybe[T]`
-- `runtime.Result[T, E]`
+- `ardruntime.Maybe[T]`
+- `ardruntime.Result[T, E]`
 
 Introducing any other generated cross-cutting helper type requires justification that it encodes an Ard semantic Go cannot express directly. Helpers that merely paper over an unfinished lowering should be removed as the lowering is completed.
 
@@ -183,7 +183,7 @@ Local variables and parameters never cross package boundaries, so they are conve
 
 ### Types
 
-The backend lowers Ard types to Go types directly. The only shared runtime types it may rely on are `runtime.Maybe[T]` and `runtime.Result[T, E]`; everything else is either a Go builtin, a Go composite, or the generated representation of a specific user type.
+The backend lowers Ard types to Go types directly. The only embedded runtime types it may rely on are `ardruntime.Maybe[T]` and `ardruntime.Result[T, E]`; everything else is either a Go builtin, a Go composite, or the generated representation of a specific user type.
 
 #### Primitives
 
@@ -207,8 +207,8 @@ The backend lowers Ard types to Go types directly. The only shared runtime types
 
 #### Maybe, Result, Any
 
-- `Maybe[T]` lowers to `runtime.Maybe[T]` (`0012-represent-optional-values-with-maybe.md`, `0024-preserve-maybe-semantics-in-go-lowering.md`).
-- `Result[T, E]` lowers to `runtime.Result[T, E]` (`0005-use-result-maybe-and-try-for-error-handling.md`). It is not collapsed into Go's `(T, error)` multi-return.
+- `Maybe[T]` lowers to `ardruntime.Maybe[T]` (`0012-represent-optional-values-with-maybe.md`, `0024-preserve-maybe-semantics-in-go-lowering.md`).
+- `Result[T, E]` lowers to `ardruntime.Result[T, E]` (`0005-use-result-maybe-and-try-for-error-handling.md`). It is not collapsed into Go's `(T, error)` multi-return.
 - `Any` lowers to `any`.
 
 There is no `Fiber` runtime type: async is a fire-and-forget `async::start` intrinsic plus typed channels (`0019-use-typed-channels-for-fiber-communication.md`, `0032-select-on-channels.md`, `0033-async-is-goroutines-and-channels.md`).
@@ -246,7 +246,7 @@ Generic struct literals accept explicit call-site type arguments (`Box<Str>{valu
 
 #### Type aliases
 
-A union type declaration (`type Name = A | B`) declares a named union and lowers to a named tagged struct, as in the Unions section. Any other type alias lowers to a Go type alias that mirrors the Ard alias, so the intended name appears in the generated API. For example `type Decoder<$T> = fn(Any) $T![Error]` lowers to a generic Go type alias `type Decoder[T any] = func(any) runtime.Result[T, Error]`, and `type Primitive = Str | Bool | Void` follows the named-union lowering. Aliases remain transparent to type checking; the Go alias is for naming, not a distinct type. Parameterized type aliases require Go 1.24 or newer; the compiler and its generated programs target Go 1.26, so this is satisfied.
+A union type declaration (`type Name = A | B`) declares a named union and lowers to a named tagged struct, as in the Unions section. Any other type alias lowers to a Go type alias that mirrors the Ard alias, so the intended name appears in the generated API. For example `type Decoder<$T> = fn(Any) $T![Error]` lowers to a generic Go type alias `type Decoder[T any] = func(any) ardruntime.Result[T, Error]`, and `type Primitive = Str | Bool | Void` follows the named-union lowering. Aliases remain transparent to type checking; the Go alias is for naming, not a distinct type. Parameterized type aliases require Go 1.24 or newer; the compiler and its generated programs target Go 1.26, so this is satisfied.
 
 #### Functions, traits, and foreign types
 
@@ -410,7 +410,7 @@ Match exhaustiveness is guaranteed by the checker. A value-producing match emits
 
 - Arithmetic and comparison operators on primitives lower to the corresponding Go operators. The keyword operators `and`, `or`, and `not` lower to `&&`, `||`, and `!`. Compound assignment (`=+` and the other compound forms) lowers to the corresponding Go compound assignment (`+=`, etc.).
 - Equality (`==`/`!=`) and relational comparisons (`<`, `>`, `<=`, `>=`) are supported on primitives, nullable primitives, and enums, including comparisons that mix an enum with `Int`. Primitive comparisons lower to the corresponding Go operators.
-- Nullable-primitive equality lowers to an inline presence-and-value comparison, because `runtime.Maybe` is pointer-backed and cannot use Go `==`. There is no structural equality over structs, lists, or maps, so no general equality helper is generated.
+- Nullable-primitive equality lowers to an inline presence-and-value comparison, because `ardruntime.Maybe` is pointer-backed and cannot use Go `==`. There is no structural equality over structs, lists, or maps, so no general equality helper is generated.
 - Enum comparisons lower to Go comparisons on the enum's named `int` type. When an enum is compared with an `Int`, the backend inserts a Go numeric conversion so both operands share a type, converting the enum operand to `int` (`int(d) == code`), since Go does not allow comparing a named int type directly against `int`.
 - Chained relative comparisons (`0006-support-chained-relative-comparisons.md`) lower to conjunctions, so `a < b < c` becomes `a < b && b < c`.
 
@@ -433,16 +433,16 @@ Conversions such as `to_int`, `to_float`, `to_str`, `Byte::from_int`, `Rune::fro
 
 ### Runtime shapes
 
-The generated program depends on a single small runtime package, `github.com/akonwi/ard/runtime`. That package exists only to hold the shapes that encode Ard semantics Go cannot express directly. Everything else lives in generated code, Go builtins, direct Go imports, or ordinary host Go shim packages.
+Each generated program embeds a small internal runtime package at `<module>/internal/ardruntime`. That package exists only to hold the shapes that encode Ard semantics Go cannot express directly. It is generated into the artifact rather than imported from `github.com/akonwi/ard/runtime`, keeping generated output self-contained and avoiding compiler-module `require`/`replace` wiring. Everything else lives in generated code, Go builtins, direct Go imports, or ordinary host Go shim packages.
 
 #### Sanctioned runtime types
 
-The runtime defines exactly two types:
+The embedded runtime defines exactly two types:
 
-- `runtime.Maybe[T]` for optional values. It is pointer-backed internally, which is intentional: the indirection makes recursive nullable fields finite-size, and it is the reason nullable-primitive equality lowers inline and `Maybe`-keyed maps are disallowed.
-- `runtime.Result[T, E]` for fallible values, with `Value`, `Err`, and `Ok` fields that `try` reads directly. It is not collapsed into Go's `(T, error)`.
+- `ardruntime.Maybe[T]` for optional values. It is pointer-backed internally, which is intentional: the indirection makes recursive nullable fields finite-size, and it is the reason nullable-primitive equality lowers inline and `Maybe`-keyed maps are disallowed.
+- `ardruntime.Result[T, E]` for fallible values, with `Value`, `Err`, and `Ok` fields that `try` reads directly. It is not collapsed into Go's `(T, error)`.
 
-No other shared runtime type is introduced. The one exception sanctioned elsewhere in this contract is the minimal per-primitive boxing adapter required for boxed trait objects over builtins, which is generated, not part of the runtime package.
+No other shared runtime type is introduced. The one exception sanctioned elsewhere in this contract is the minimal per-primitive boxing adapter required for boxed trait objects over builtins, which is generated, not part of the embedded runtime package.
 
 #### Async
 
@@ -454,11 +454,11 @@ Async is `async::start` plus typed channels, with no runtime shape (`0019-use-ty
 
 #### Leaf-dependency rule
 
-The runtime package may import only the Go standard library. It must never import `checker`, `air`, or any other compiler package, because generated programs depend on the runtime and must not pull in the compiler. Any runtime code that depends on compiler packages is by definition not a runtime shape and does not belong here.
+The embedded runtime package may import only the Go standard library. It must never import `checker`, `air`, or any other compiler package, because generated programs include the runtime and must not pull in the compiler. Any runtime code that depends on compiler packages is by definition not a runtime shape and does not belong here.
 
 #### Standard library boundary
 
-Standard library behavior lives in Ard modules, direct Go imports, and ordinary host Go shim packages, not in the runtime package. Utilities that back specific stdlib modules — for example command-line argument access or goroutine-spawn helpers — should use direct `use go:` imports where possible and shim packages where adaptation is required. They should not expand the runtime beyond the semantic types and operations that only the backend can provide.
+Standard library behavior lives in Ard modules, direct Go imports, and ordinary host Go shim packages, not in the embedded runtime package. Utilities that back specific stdlib modules — for example command-line argument access or goroutine-spawn helpers — should use direct `use go:` imports where possible and shim packages where adaptation is required. They should not expand the runtime beyond the semantic types and operations that only the backend can provide.
 
 ### JSON and marshalling
 
@@ -480,9 +480,9 @@ Struct fields are always exported and each carries a `json:"<original_ard_field_
 
 #### Maybe
 
-`runtime.Maybe[T]` implements JSON marshalling and unmarshalling: `none` marshals to `null`, `some(x)` marshals to `x` unwrapped, a present value unmarshals to `some`, and a JSON `null` or a missing field unmarshals to `none`. `Maybe` fields are not `omitempty`, so `none` is emitted as `null`.
+`ardruntime.Maybe[T]` implements JSON marshalling and unmarshalling: `none` marshals to `null`, `some(x)` marshals to `x` unwrapped, a present value unmarshals to `some`, and a JSON `null` or a missing field unmarshals to `none`. `Maybe` fields are not `omitempty`, so `none` is emitted as `null`.
 
-`runtime.Result[T, E]` also implements JSON marshalling: `ok(x)` marshals to `x` and `err(e)` marshals to `e`, each unwrapped. `Maybe` and `Result` are the two sanctioned exceptions to the reserved-method rule, because they are runtime types the backend owns and their JSON shapes encode Ard semantics directly.
+`ardruntime.Result[T, E]` also implements JSON marshalling: `ok(x)` marshals to `x` and `err(e)` marshals to `e`, each unwrapped. `Maybe` and `Result` are the two sanctioned exceptions to the reserved-method rule, because they are runtime types the backend owns and their JSON shapes encode Ard semantics directly.
 
 #### Enums
 
@@ -536,7 +536,7 @@ Go values map to Ard types structurally, and a few idiomatic Go shapes are adapt
 - A Go function returning the comma-ok pair `(T, bool)` is adapted to Ard `T?`.
 - Otherwise a single Go result maps to its Ard type by the normal rules: primitives, `[]T` to `[T]`, `map[K]V` to `[K:V]`, `any` to `Any`, `func` to a function type, and Go channel types to `Chan<T>`, `Receiver<T>`, or `Sender<T>` according to direction. Named Go map types remain foreign named types, but expose map-like methods when their key and value types are representable.
 
-These boundary adaptations are distinct from how Ard's own types lower. An Ard `Result[T, E]` value still lowers to `runtime.Result[T, E]` and is not collapsed into `(T, error)`; the adaptations above apply only when *calling* idiomatic Go through `use go:`.
+These boundary adaptations are distinct from how Ard's own types lower. An Ard `Result[T, E]` value still lowers to `ardruntime.Result[T, E]` and is not collapsed into `(T, error)`; the adaptations above apply only when *calling* idiomatic Go through `use go:`.
 
 Passing Ard values into Go follows Go's own assignability so idiomatic, `any`-heavy Go libraries are usable from pure Ard:
 
@@ -579,9 +579,9 @@ The standard library was reset as part of the FFI cleanup and should be rebuilt 
 - The standard library lowers under the same rules as user code, which requires stdlib public declarations to be exported with natural Go names.
 - Interop with Go is unified into direct `use go:` interop. Host Go code is carried into the generated module as an ordinary imported package, the `extern` binding mechanism has been removed, and standard-library host adaptation uses the same direct-import or shim-package model as user code.
 - Dependencies remain inside one Go module under a namespaced subtree, keeping output self-contained.
-- The backend commits to minimizing synthetic helpers, with only `Maybe` and `Result` sanctioned as shared runtime types. `Void` lowers to `struct{}` and the structural-map helper is removed.
+- The backend commits to minimizing synthetic helpers, with only `Maybe` and `Result` sanctioned as embedded runtime types. `Void` lowers to `struct{}` and the structural-map helper is removed.
 - Equality is restricted to primitives, nullable primitives, and enums, so no structural-equality helper is generated. Map iteration order is unspecified and uses Go's native range, removing the sorted-key helpers. The previously generated equality and key-sorting helpers become dead and are removed.
-- The runtime package is reduced to `Maybe` and `Result` and must import only the Go standard library. The universal boxed `Object`/`Kind` representation, the `Fiber` async shape, the structural-map, equality, sorted-key, and void helpers are removed. Standard-library utilities such as argv access and goroutine-spawn helpers use direct Go imports or ordinary shim packages instead of runtime helpers.
+- The embedded runtime package is reduced to `Maybe` and `Result` and must import only the Go standard library. Generated artifacts write it under `internal/ardruntime` and import it through the generated module path, rather than requiring or replacing the compiler module. The universal boxed `Object`/`Kind` representation, the `Fiber` async shape, the structural-map, equality, sorted-key, and void helpers are removed. Standard-library utilities such as argv access and goroutine-spawn helpers use direct Go imports or ordinary shim packages instead of runtime helpers.
 - Generated types are natively serializable through Go JSON APIs: struct fields are always exported (revising the earlier fields-follow-type-visibility rule) and carry `json` tags preserving the Ard field name; `Maybe` and `Result` are the sanctioned runtime JSON marshalers; a union marshals to its active member, unwrapped, via a generated `MarshalJSON`. There is no built-in Ard JSON module; serialization happens through Go interop.
 - Map key types are constrained during checking to Go strictly-comparable types whose Go equality matches Ard equality, so every Ard map lowers to a plain Go map. `Float64` keys are allowed; `Maybe`, `List`, `Map`, and `Any` keys are rejected. Generic type parameters used as map keys emit a Go `comparable` constraint. This is a language-level constraint the checker must enforce. String-keyed maps are the correct shape for JSON objects, which Go marshals natively.
 - Impl methods lower to real Go methods with no duplicated standalone helpers, mutation is expressed through pointer receivers and pointer parameters rather than forwarding tables, and closures lower to Go function literals. Generic functions lower to Go generics, and generic methods use only receiver generics. These choices require AIR to preserve generic structure and receiver/mutation metadata for the backend.

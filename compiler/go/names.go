@@ -323,17 +323,16 @@ func generatedImportAliasPath(alias string) (string, bool) {
 
 func generatedImportAliasPaths() map[string]string {
 	return map[string]string{
-		"ardmath":    "math",
-		"ardruntime": "github.com/akonwi/ard/runtime",
-		"ardutf8":    "unicode/utf8",
-		"bytes":      "bytes",
-		"fmt":        "fmt",
-		"json":       "encoding/json/v2",
-		"jsontext":   "encoding/json/jsontext",
-		"slices":     "slices",
-		"sort":       "sort",
-		"strconv":    "strconv",
-		"strings":    "strings",
+		"ardmath":  "math",
+		"ardutf8":  "unicode/utf8",
+		"bytes":    "bytes",
+		"fmt":      "fmt",
+		"json":     "encoding/json/v2",
+		"jsontext": "encoding/json/jsontext",
+		"slices":   "slices",
+		"sort":     "sort",
+		"strconv":  "strconv",
+		"strings":  "strings",
 	}
 }
 

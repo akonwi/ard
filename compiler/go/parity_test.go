@@ -2690,7 +2690,7 @@ func runGoTargetParityJSON(t *testing.T, program *air.Program) string {
 		switch ret.Kind {
 		case air.TypeResult:
 			if ret.Error > 0 && int(ret.Error) <= len(program.Types) && program.Types[ret.Error-1].Kind == air.TypeStr {
-				runtimeImport = "\n\tardruntime \"github.com/akonwi/ard/runtime\""
+				runtimeImport = "\n\tardruntime \"generated/internal/ardruntime\""
 				if ret.Value == air.NoType || program.Types[ret.Value-1].Kind == air.TypeVoid {
 					runnerValue = fmt.Sprintf("func() any { err := %s(); if err != nil { return ardruntime.Result[struct{}, string]{Err: err.Error()} }; return ardruntime.Result[struct{}, string]{Value: struct{}{}, Ok: true} }()", scriptFn)
 				} else {
@@ -2698,7 +2698,7 @@ func runGoTargetParityJSON(t *testing.T, program *air.Program) string {
 				}
 			}
 		case air.TypeMaybe:
-			runtimeImport = "\n\tardruntime \"github.com/akonwi/ard/runtime\""
+			runtimeImport = "\n\tardruntime \"generated/internal/ardruntime\""
 			if ret.Elem == air.NoType || program.Types[ret.Elem-1].Kind == air.TypeVoid {
 				runnerValue = fmt.Sprintf("func() any { ok := %s(); if ok { return ardruntime.Maybe[struct{}]{Value: struct{}{}, Ok: true} }; return ardruntime.Maybe[struct{}]{} }()", scriptFn)
 			} else {
@@ -2777,11 +2777,10 @@ func normalizeReflectValue(v reflect.Value) any {
 	if err := os.WriteFile(filepath.Join(tempDir, "runner.go"), []byte(runner), 0o644); err != nil {
 		t.Fatalf("write runner: %v", err)
 	}
-	goMod := "module generated\n\ngo 1.26.0\n"
-	if moduleRoot, ok := compilerModuleRoot(); ok {
-		goMod += "\nrequire github.com/akonwi/ard v0.0.0\n"
-		goMod += fmt.Sprintf("replace github.com/akonwi/ard => %s\n", moduleRoot)
+	if err := writeGeneratedRuntimePackage(tempDir); err != nil {
+		t.Fatalf("write generated runtime: %v", err)
 	}
+	goMod := "module generated\n\ngo 1.26.0\n"
 	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
@@ -2810,11 +2809,10 @@ func runGoTargetSourceStdout(t *testing.T, input string) string {
 		t.Fatalf("generate sources: %v", err)
 	}
 	writeGeneratedSourcesForTest(t, tempDir, sources)
-	goMod := "module generated\n\ngo 1.26.0\n"
-	if moduleRoot, ok := compilerModuleRoot(); ok {
-		goMod += "\nrequire github.com/akonwi/ard v0.0.0\n"
-		goMod += fmt.Sprintf("replace github.com/akonwi/ard => %s\n", moduleRoot)
+	if err := writeGeneratedRuntimePackage(tempDir); err != nil {
+		t.Fatalf("write generated runtime: %v", err)
 	}
+	goMod := "module generated\n\ngo 1.26.0\n"
 	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
