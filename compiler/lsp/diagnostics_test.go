@@ -84,7 +84,7 @@ func (c *recordingConn) lastDiagnostics(t *testing.T) *protocol.PublishDiagnosti
 // single document, with optional sibling overlays as open documents.
 func analyzeDiagnosticsForTest(t *testing.T, source string, filePath string, overlays map[string]string) []checker.Diagnostic {
 	t.Helper()
-	if strings.HasPrefix(filePath, "/tmp/") {
+	if filepath.Dir(filePath) == "/tmp" {
 		filePath = filepath.Join(t.TempDir(), filepath.Base(filePath))
 	}
 	if err := os.WriteFile(filePath, []byte(source), 0o644); err != nil {
