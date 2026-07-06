@@ -23,7 +23,8 @@ fn add(a: Int, b: Int) Int {
   a + b
 }
 
-// No return type specified - this function will not return a value
+// No return type specified - this function will not return a value.
+// Equivalent to declaring `Void` as the return type
 fn print_message(msg: Str) {
   io::print(msg)
 }
@@ -31,7 +32,7 @@ fn print_message(msg: Str) {
 
 ### Mutating parameters
 
-In order for a function to apply side-effects or mutations to parameters, the parameter must be marked as mutable in the signature.
+In order for a function to apply side-effects or mutations to parameters, the parameter type must be marked as mutable in the signature.
 
 ```ard
 fn add_ten(value: mut Int) {
@@ -126,11 +127,14 @@ create_user("Alice", 25, "alice@example.com")
 create_user(age: 30, email: "bob@example.com", name: "Bob")
 ```
 
-**Important**: When using named arguments, all arguments must be named. Mixing positional and named arguments is not supported.
+Positional and named arguments can be mixed, but positional arguments must come first:
 
 ```ard
-// This is NOT allowed:
+// Allowed: positional, then named
 create_user("Charlie", age: 35, email: "charlie@example.com")
+
+// NOT allowed: positional after named
+create_user(name: "Charlie", 35, "charlie@example.com")
 ```
 
 ## First-Class Functions
