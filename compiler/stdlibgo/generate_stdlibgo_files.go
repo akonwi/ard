@@ -1,7 +1,7 @@
 //go:build ignore
 
 // Command generate_stdlibgo_files regenerates files.gen.go, embedding the Go
-// support tree of Ard's standard library (go.mod, go.sum, and the runtime
+// support tree of Ard's standard library (a minimal go.mod and the runtime
 // package) as a path-keyed string map. Run via
 // `go generate ./stdlibgo` from the compiler module root.
 package main
@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	paths := []string{"go.mod", "go.sum"}
+	paths := []string{"go.mod"}
 	for _, dir := range []string{"runtime"} {
 		matches, err := filepath.Glob(filepath.Join("..", dir, "*.go"))
 		if err != nil {
@@ -40,7 +40,7 @@ func main() {
 	out.WriteString("// slash-separated module-relative path.\n")
 	out.WriteString("var Files = map[string]string{\n")
 	for _, rel := range paths {
-		data, err := os.ReadFile(filepath.Join("..", filepath.FromSlash(rel)))
+		data, err := embeddedFile(rel)
 		if err != nil {
 			panic(err)
 		}
@@ -55,6 +55,13 @@ func main() {
 	if err := os.WriteFile("files.gen.go", formatted, 0o644); err != nil {
 		panic(err)
 	}
+}
+
+func embeddedFile(rel string) ([]byte, error) {
+	if rel == "go.mod" {
+		return []byte("module github.com/akonwi/ard\n\ngo 1.26.0\n"), nil
+	}
+	return os.ReadFile(filepath.Join("..", filepath.FromSlash(rel)))
 }
 
 //go:generate go run generate_stdlibgo_files.go
