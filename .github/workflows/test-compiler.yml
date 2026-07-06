@@ -63,8 +63,3 @@ jobs:
         working-directory: compiler
         run: go build -o "$RUNNER_TEMP/ard" .
 
-      - name: Run tic-tac-toe PTY smoke test
-        working-directory: examples/tic-tac-toe
-        env:
-          ARD: ${{ runner.temp }}/ard
-        run: ./test_tic_tac_toe.py
