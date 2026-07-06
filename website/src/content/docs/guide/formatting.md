@@ -71,7 +71,8 @@ let raw = try self.raw -> _ { "" }
 
 1. `ard/*`
 2. absolute package paths
-3. relative paths (`./`, `../`)
+
+Import paths are always absolute from the project root; Ard does not support relative imports.
 
 ## Comments and Spacing
 

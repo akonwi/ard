@@ -189,7 +189,6 @@ export default defineConfig({
             { label: "Overview", slug: "guide/overview" },
             { label: "Types", slug: "guide/types" },
             { label: "Variables", slug: "guide/variables" },
-            { label: "Formatting", slug: "guide/formatting" },
             { label: "Functions", slug: "guide/functions" },
             { label: "Control Flow", slug: "guide/control-flow" },
             { label: "Structs", slug: "guide/structs" },
@@ -199,6 +198,7 @@ export default defineConfig({
             { label: "Modules", slug: "guide/modules" },
             { label: "Dependencies", slug: "guide/dependencies" },
             { label: "Testing", slug: "guide/testing" },
+            { label: "Formatting", slug: "guide/formatting" },
           ],
         },
         {
