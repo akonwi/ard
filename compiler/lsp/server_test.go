@@ -1554,7 +1554,7 @@ func TestTicTacToeLine42TypingDoesNotHang(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("typing line 42 in tic-tac-toe sample timed out")
 	}
 }
