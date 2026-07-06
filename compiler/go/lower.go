@@ -1517,15 +1517,22 @@ func (l *lowerer) unpackABIResultExprs(typeID air.TypeID, expr ast.Expr) []ast.E
 	return []ast.Expr{expr}
 }
 
+func selectorExpr(target ast.Expr, field string) ast.Expr {
+	if _, ok := target.(*ast.CompositeLit); ok {
+		target = &ast.ParenExpr{X: target}
+	}
+	return &ast.SelectorExpr{X: target, Sel: ast.NewIdent(field)}
+}
+
 func (l *lowerer) returnPackedABIValue(typeID air.TypeID, expr ast.Expr) ([]ast.Stmt, error) {
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
 	case air.TypeResult:
-		errSel := &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Err")}
+		errSel := selectorExpr(expr, "Err")
 		errExpr := ast.Expr(&ast.CallExpr{Fun: l.qualified("errors", "errors", "New"), Args: []ast.Expr{errSel}})
 		if l.isVoidType(info.Value) {
 			return []ast.Stmt{
-				&ast.IfStmt{Cond: &ast.UnaryExpr{Op: token.NOT, X: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Ok")}}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{errExpr}}}}},
+				&ast.IfStmt{Cond: &ast.UnaryExpr{Op: token.NOT, X: selectorExpr(expr, "Ok")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{errExpr}}}}},
 				&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("nil")}},
 			}, nil
 		}
@@ -1534,8 +1541,8 @@ func (l *lowerer) returnPackedABIValue(typeID air.TypeID, expr ast.Expr) ([]ast.
 			return nil, err
 		}
 		return []ast.Stmt{
-			&ast.IfStmt{Cond: &ast.UnaryExpr{Op: token.NOT, X: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Ok")}}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{zero, errExpr}}}}},
-			&ast.ReturnStmt{Results: []ast.Expr{&ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Value")}, ast.NewIdent("nil")}},
+			&ast.IfStmt{Cond: &ast.UnaryExpr{Op: token.NOT, X: selectorExpr(expr, "Ok")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{zero, errExpr}}}}},
+			&ast.ReturnStmt{Results: []ast.Expr{selectorExpr(expr, "Value"), ast.NewIdent("nil")}},
 		}, nil
 	case air.TypeMaybe:
 		// runtime.Maybe exposes IsSome()/Value() methods, not Result-style
@@ -7695,15 +7702,15 @@ func (l *lowerer) maybeNoneExpr(maybeTypeID air.TypeID) (ast.Expr, error) {
 }
 
 func (l *lowerer) maybeIsSomeExpr(expr ast.Expr) ast.Expr {
-	return &ast.CallExpr{Fun: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("IsSome")}}
+	return &ast.CallExpr{Fun: selectorExpr(expr, "IsSome")}
 }
 
 func (l *lowerer) maybeIsNoneExpr(expr ast.Expr) ast.Expr {
-	return &ast.CallExpr{Fun: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("IsNone")}}
+	return &ast.CallExpr{Fun: selectorExpr(expr, "IsNone")}
 }
 
 func (l *lowerer) maybeValueExpr(expr ast.Expr) ast.Expr {
-	return &ast.CallExpr{Fun: &ast.SelectorExpr{X: expr, Sel: ast.NewIdent("Value")}}
+	return &ast.CallExpr{Fun: selectorExpr(expr, "Value")}
 }
 
 type closureUseInfo struct {
