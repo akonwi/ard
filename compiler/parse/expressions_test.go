@@ -956,3 +956,69 @@ func TestRuneLiterals(t *testing.T) {
 		},
 	})
 }
+
+func TestMutRefExpressions(t *testing.T) {
+	runTests(t, []test{
+		{
+			name:  "mut ref in let initializer",
+			input: `let r = mut counter`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name:  "r",
+						Value: &MutRef{Operand: &Identifier{Name: "counter"}},
+					},
+				},
+			},
+		},
+		{
+			name:  "mut ref of struct literal",
+			input: `let r = mut Point{x: 1}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name: "r",
+						Value: &MutRef{Operand: &StructInstance{
+							Name: Identifier{Name: "Point"},
+							Properties: []StructValue{
+								{Name: Identifier{Name: "x"}, Value: &NumLiteral{Value: "1"}},
+							},
+						}},
+					},
+				},
+			},
+		},
+		{
+			name:  "mut ref nested in call argument",
+			input: `serve(mut proxy)`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionCall{
+						Name: "serve",
+						Args: []Argument{
+							{Value: &MutRef{Operand: &Identifier{Name: "proxy"}}},
+						},
+						Comments: []Comment{},
+					},
+				},
+			},
+		},
+		{
+			name:  "mut statement is still a declaration",
+			input: `mut count = 1`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&VariableDeclaration{
+						Name:    "count",
+						Mutable: true,
+						Value:   &NumLiteral{Value: "1"},
+					},
+				},
+			},
+		},
+	})
+}

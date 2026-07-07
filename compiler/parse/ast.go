@@ -522,9 +522,20 @@ func (i IfStatement) String() string {
 
 type Argument struct {
 	Location
-	Name    string
-	Value   Expression
-	Mutable bool
+	Name  string
+	Value Expression
+}
+
+// MutRef is the explicit mutable-reference expression `mut <operand>`
+// (ADR 0045). It evaluates to a mutable reference to the operand's storage,
+// or to fresh mutable storage when the operand is a value expression.
+type MutRef struct {
+	Location
+	Operand Expression
+}
+
+func (m MutRef) String() string {
+	return fmt.Sprintf("mut %s", m.Operand)
 }
 
 type FunctionCall struct {

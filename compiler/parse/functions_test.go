@@ -454,7 +454,7 @@ func TestFunctionsWithGenerics(t *testing.T) {
 					&FunctionCall{
 						Name: "update",
 						Args: []Argument{
-							{Name: "", Value: &Identifier{Name: "alice"}, Mutable: true},
+							{Name: "", Value: &MutRef{Operand: &Identifier{Name: "alice"}}},
 						},
 						Comments: []Comment{},
 					},

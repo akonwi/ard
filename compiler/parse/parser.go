@@ -2996,6 +2996,20 @@ func (p *parser) multiplication() (Expression, error) {
 }
 
 func (p *parser) unary() (Expression, error) {
+	if p.match(mut) {
+		mutToken := p.previous()
+		operand, err := p.unary()
+		if err != nil {
+			return nil, err
+		}
+		return &MutRef{
+			Location: Location{
+				Start: mutToken.getLocation().Start,
+				End:   operand.GetLocation().End,
+			},
+			Operand: operand,
+		}, nil
+	}
 	if p.match(minus, not) {
 		opToken := p.previous()
 		if opToken.kind == not {
@@ -3842,9 +3856,7 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 			continue
 		}
 
-		// Check for mut keyword first
 		start := p.peek().getLocation().Start
-		isMutable := p.match(mut)
 
 		// Check if this is a named argument (identifier followed by colon)
 		if p.check(identifier) && p.peek2() != nil && p.peek2().kind == colon {
@@ -3871,9 +3883,8 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 					Start: start,
 					End:   value.GetLocation().End,
 				},
-				Name:    name,
-				Value:   value,
-				Mutable: isMutable,
+				Name:  name,
+				Value: value,
 			})
 		} else {
 			// Check if we've already seen named arguments
@@ -3892,9 +3903,8 @@ func (p *parser) parseFunctionArguments() ([]Argument, []Comment, error) {
 					Start: start,
 					End:   arg.GetLocation().End,
 				},
-				Name:    "",
-				Value:   arg,
-				Mutable: isMutable,
+				Name:  "",
+				Value: arg,
 			})
 		}
 
