@@ -22,6 +22,9 @@ func TestGoPackagesResolverRejectsProjectLocalPackageOutsideFFI(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolver := checker.NewGoPackagesResolver(root, nil)
+	if err := resolver.Prime([]string{"example.com/app/internal"}); err != nil {
+		t.Fatalf("Prime(%s): %v", "example.com/app/internal", err)
+	}
 	_, err := resolver.ResolveGoPackage("example.com/app/internal")
 	if err == nil {
 		t.Fatal("expected project-local package outside ffi to be rejected")
@@ -37,6 +40,9 @@ func TestGoPackagesResolverReportsMalformedGoMod(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolver := checker.NewGoPackagesResolver(root, nil)
+	if err := resolver.Prime([]string{"fmt"}); err != nil {
+		t.Fatalf("Prime(%s): %v", "fmt", err)
+	}
 	_, err := resolver.ResolveGoPackage("fmt")
 	if err == nil {
 		t.Fatal("expected malformed go.mod error")
@@ -59,6 +65,9 @@ func TestGoPackagesResolverAllowsProjectLocalPackageUnderFFI(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolver := checker.NewGoPackagesResolver(root, nil)
+	if err := resolver.Prime([]string{"example.com/app/ffi/http"}); err != nil {
+		t.Fatalf("Prime(%s): %v", "example.com/app/ffi/http", err)
+	}
 	pkg, err := resolver.ResolveGoPackage("example.com/app/ffi/http")
 	if err != nil {
 		t.Fatalf("ResolveGoPackage(ffi/http): %v", err)

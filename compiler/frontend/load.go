@@ -42,13 +42,10 @@ func LoadModule(inputPath string) (*LoadResult, error) {
 	}
 
 	projectInfo := moduleResolver.GetProjectInfo()
+	// The checker primes the resolver with the program's whole Go import
+	// closure before binding imports, so all Go types share a single
+	// go/types universe (ADR 0044).
 	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
-	// Load the whole program's Go imports in one go/packages session so all
-	// Go types share a single go/types universe (ADR 0044).
-	goPaths := checker.CollectGoImportPaths(moduleResolver, checker.GoImportScanEntry{Program: program, ModulePath: relPath})
-	if err := goResolver.Prime(goPaths); err != nil {
-		return nil, fmt.Errorf("error loading Go packages: %w", err)
-	}
 	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{GoResolver: goResolver})
 	c.Check()
 	if c.HasErrors() {

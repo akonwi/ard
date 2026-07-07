@@ -23,9 +23,9 @@ http::ListenAndServe(addr, router)
 
 The current mitigation is cross-universe canonicalization (`goAssignableAcrossUniverses` and `translateGoType` in `compiler/checker/foreign_type.go`): when `types.AssignableTo` fails, the checker structurally re-resolves named types by (package path, name) into the other side's universe and re-checks within a single universe. This is sound — all loads share one project root and build configuration, so an import path always denotes one declaration — but it has structural costs:
 
-- It is a comparison-layer patch. Every future feature that touches go/types (explicit conversions, embedded field promotion, method-set queries, cross-package generic instantiation) must remember to route through the translation layer or silently inherit the identity problem.
-- It cannot resolve the neither-imports-the-other case: when the interface's package and the implementer's package do not (transitively) import each other, no universe contains both declarations, so translation finds no anchor and conservatively rejects code Go would accept.
-- Each load re-type-checks shared dependencies (chi's load re-checks net/http), duplicating work and memory.
+- It was a comparison-layer patch. Every future feature that touches go/types (explicit conversions, embedded field promotion, method-set queries, cross-package generic instantiation) would have had to route through the translation layer or silently inherit the identity problem.
+- It could not resolve the neither-imports-the-other case: when the interface's package and the implementer's package do not (transitively) import each other, no universe contains both declarations, so translation found no anchor and conservatively rejected code Go accepts.
+- Each load re-type-checked shared dependencies (chi's load re-checked net/http), duplicating work and memory.
 
 ## Decision
 

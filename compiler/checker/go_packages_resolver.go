@@ -66,19 +66,19 @@ func (r *GoPackagesResolver) ResolveGoPackage(path string) (*GoPackage, error) {
 	if cached, ok := r.cache[path]; ok {
 		return cached.pkg, cached.err
 	}
-	if r.primed {
-		return nil, fmt.Errorf("internal compiler bug: Go package %q was not collected by the import pre-scan; please report this", path)
-	}
-	pkg, err := r.load(path)
-	r.cache[path] = goPackageResolveResult{pkg: pkg, err: err}
-	return pkg, err
+	// Every resolution comes from the primed session (ADR 0044): a lazy
+	// per-path load here would silently create a second go/types universe.
+	return nil, fmt.Errorf("internal compiler bug: Go package %q was not collected by the import pre-scan; please report this", path)
 }
 
 // Prime loads every given Go import path in a single go/packages call so all
-// resolved packages share one go/types universe (ADR 0044). Per-path
-// failures are recorded and surface as diagnostics at the importing `use`
-// statement; Prime itself only fails when the load session cannot run at
-// all. After priming, resolution misses are reported as internal errors.
+// resolved packages share one go/types universe (ADR 0044). Failures —
+// including a load session that cannot run at all — are recorded per path
+// and surface as diagnostics at the importing `use` statement.
+//
+// Priming is a one-shot operation. Once primed, paths outside the primed set
+// indicate an incomplete pre-scan: loading them would silently create a
+// second type universe, so Prime reports the internal error instead.
 func (r *GoPackagesResolver) Prime(paths []string) error {
 	if r.cache == nil {
 		r.cache = map[string]goPackageResolveResult{}
@@ -99,12 +99,18 @@ func (r *GoPackagesResolver) Prime(paths []string) error {
 		r.primed = true
 		return nil
 	}
+	if r.primed {
+		return fmt.Errorf("internal compiler bug: Go packages %v were not collected by the import pre-scan; please report this", pending)
+	}
+	defer func() { r.primed = true }()
 	if r.modulePathErr != nil {
-		return fmt.Errorf("read go.mod: %w", r.modulePathErr)
+		r.recordFailure(pending, fmt.Errorf("read go.mod: %w", r.modulePathErr))
+		return nil
 	}
 	loaded, err := packages.Load(r.loadConfig(), pending...)
 	if err != nil {
-		return err
+		r.recordFailure(pending, err)
+		return nil
 	}
 	byPath := make(map[string]*packages.Package, len(loaded))
 	for _, pkg := range loaded {
@@ -119,8 +125,15 @@ func (r *GoPackagesResolver) Prime(paths []string) error {
 		goPkg, pkgErr := r.packageFromLoadResult(path, pkg)
 		r.cache[path] = goPackageResolveResult{pkg: goPkg, err: pkgErr}
 	}
-	r.primed = true
 	return nil
+}
+
+// recordFailure caches a session-level load failure for every pending path
+// so it surfaces as a source-located diagnostic at each Go import.
+func (r *GoPackagesResolver) recordFailure(paths []string, err error) {
+	for _, path := range paths {
+		r.cache[path] = goPackageResolveResult{err: err}
+	}
 }
 
 func (r *GoPackagesResolver) loadConfig() *packages.Config {
@@ -151,22 +164,6 @@ func (r *GoPackagesResolver) packageFromLoadResult(path string, pkg *packages.Pa
 		return nil, fmt.Errorf("package has no type information")
 	}
 	return goPackageFromTypesPackage(path, pkg.Types), nil
-}
-
-// TODO(ADR 0044 A3): remove the lazy per-path load once the LSP primes its
-// resolver; after that, every resolution must come from the shared session.
-func (r *GoPackagesResolver) load(path string) (*GoPackage, error) {
-	if r.modulePathErr != nil {
-		return nil, fmt.Errorf("read go.mod: %w", r.modulePathErr)
-	}
-	loaded, err := packages.Load(r.loadConfig(), path)
-	if err != nil {
-		return nil, err
-	}
-	if len(loaded) == 0 {
-		return nil, fmt.Errorf("package not found")
-	}
-	return r.packageFromLoadResult(path, loaded[0])
 }
 
 func readGoModulePath(projectRoot string) (string, error) {

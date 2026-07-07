@@ -94,7 +94,10 @@ func (e *Engine) ProjectRoot() string { return e.projectRoot }
 // --- shared Go resolver ---
 
 // lockedGoResolver serializes access to the underlying GoPackagesResolver,
-// which memoizes go/packages loads but is not goroutine-safe.
+// which memoizes go/packages loads but is not goroutine-safe. Wrapping also
+// intentionally opts LSP checks out of the checker's per-check auto-prime
+// (which type-asserts *GoPackagesResolver): the engine owns session priming
+// with the workspace-wide union in goResolverFor.
 type lockedGoResolver struct {
 	mu    sync.Mutex
 	inner *checker.GoPackagesResolver
@@ -152,12 +155,11 @@ func (e *Engine) goResolverFor(projectInfo *checker.ProjectInfo, goPaths []strin
 	}
 	sort.Strings(union)
 	resolver := checker.NewGoPackagesResolver(root, tags)
+	// Prime on a fresh resolver cannot fail: load-level failures (for
+	// example an unreadable go.mod) are recorded per path and surface as
+	// diagnostics at each Go import.
 	if err := resolver.Prime(union); err != nil {
-		// A load-level failure (for example an unreadable go.mod) degrades
-		// to the lazy per-path resolver so diagnostics surface at each Go
-		// import instead of failing analysis wholesale.
-		resolver = checker.NewGoPackagesResolver(root, tags)
-		primed = map[string]bool{}
+		panic(fmt.Sprintf("prime fresh Go resolver session: %v", err))
 	}
 	e.goResolver = &lockedGoResolver{inner: resolver}
 	e.goModHash = sig

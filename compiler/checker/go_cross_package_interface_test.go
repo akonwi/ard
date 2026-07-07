@@ -12,11 +12,10 @@ import (
 
 // TestGoInterfaceSatisfactionAcrossPackageLoads pins that Go interface
 // assignability holds when the interface and the implementing type come from
-// different `packages.Load` universes. The GoPackagesResolver loads each
-// imported path separately, so named types referenced in interface method
-// signatures (e.g. http.ResponseWriter) have distinct go/types identities per
-// load; assignability must canonicalize across universes instead of relying
-// on object identity.
+// different imported packages. Per ADR 0044 the checker primes the resolver
+// with the whole Go import set in one go/packages session, so named types
+// referenced in interface method signatures (e.g. http.ResponseWriter) share
+// one go/types identity and plain assignability holds.
 func TestGoInterfaceSatisfactionAcrossPackageLoads(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -24,11 +23,10 @@ func TestGoInterfaceSatisfactionAcrossPackageLoads(t *testing.T) {
 		diagnostics []checker.Diagnostic
 	}{
 		{
-			name: "pointer implementer from a different load satisfies the interface",
-			// *httputil.ReverseProxy implements http.Handler; the two
-			// packages resolve in separate loads, so http.Handler's method
-			// signature names (http.ResponseWriter, *http.Request) have
-			// different identities in each universe.
+			name: "pointer implementer from a different package satisfies the interface",
+			// *httputil.ReverseProxy implements http.Handler across package
+			// boundaries; identity holds because both packages load in the
+			// same primed session.
 			input: `use go:net/http
 use go:net/url
 use go:net/http/httputil
@@ -54,7 +52,7 @@ fn main() {
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected http::Handler, got httputil::ReverseProxy"}},
 		},
 		{
-			name: "non-implementing pointer type from a different load is still rejected",
+			name: "non-implementing pointer type from a different package is still rejected",
 			input: `use go:net/http
 use go:strings
 
@@ -65,9 +63,7 @@ fn main() {
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected http::Handler, got mut strings::Reader"}},
 		},
 		{
-			name: "same named type across loads is assignable",
-			// http.StripPrefix (net/http load) returns http.Handler;
-			// httputil-load functions accept the same named types.
+			name: "same named type across packages is assignable",
 			input: `use go:net/http
 use go:net/http/httptest
 
@@ -86,10 +82,9 @@ fn main() {
 	}
 }
 
-// TestGoInterfaceSatisfactionSymmetricDirection pins the reverse
-// canonicalization direction: the interface's package imports the
-// implementer's package, but not vice versa, so assignability resolves by
-// translating the actual type into the expected interface's universe.
+// TestGoInterfaceSatisfactionSymmetricDirection pins interface satisfaction
+// when the interface's package imports the implementer's vocabulary but the
+// two top-level packages do not import each other.
 func TestGoInterfaceSatisfactionSymmetricDirection(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module wrappermod\n\ngo 1.26\n"), 0o644); err != nil {
@@ -111,9 +106,6 @@ func Accept(w Wrapper) {}
 		t.Fatal(err)
 	}
 	resolver := checker.NewGoPackagesResolver(root, nil)
-	// net/http resolves first, so *http.ServeMux lives in a universe that
-	// does not contain wrappermod/ffi; only the symmetric direction can
-	// prove assignability.
 	input := `use go:net/http
 use go:wrappermod/ffi
 

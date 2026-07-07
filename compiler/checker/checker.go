@@ -368,6 +368,7 @@ func (c *Checker) Diagnostics() []Diagnostic {
 }
 
 func (c *Checker) Check() {
+	c.primeGoResolver()
 	seenImportAliases := map[string]struct{}{}
 	for _, imp := range c.input.Imports {
 		if _, dup := seenImportAliases[imp.Name]; dup {
@@ -3660,6 +3661,34 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 		}
 	case *Panic:
 		c.validateUnsafeCatchResultsInExpression(e.Message, resultType, loc)
+	}
+}
+
+// primeGoResolver loads the check's whole Go import closure into the
+// resolver's shared session before any import binds (ADR 0044). Priming is
+// idempotent — drivers that already primed (frontend, test loader) resolve
+// everything from cache — and it makes directly constructed checkers
+// (tests, tools) share one go/types universe too. A prime error means the
+// pre-scan missed a path, which is a compiler bug; when the miss lives only
+// in a transitive module, the sub-module's own check surfaces it at its
+// `use` statement instead.
+//
+// The type assertion is part of the contract: the LSP wraps its resolver
+// (lockedGoResolver), intentionally opting out of per-check auto-prime
+// because the engine owns session priming with the workspace-wide union.
+func (c *Checker) primeGoResolver() {
+	resolver, ok := c.options.GoResolver.(*GoPackagesResolver)
+	if !ok || resolver == nil {
+		return
+	}
+	paths := CollectGoImportPaths(c.moduleResolver, GoImportScanEntry{Program: c.input, ModulePath: c.modulePath})
+	if err := resolver.Prime(paths); err != nil {
+		for _, imp := range c.input.Imports {
+			if imp.Kind == parse.ImportKindGo {
+				c.addError(err.Error(), imp.GetLocation())
+				break
+			}
+		}
 	}
 }
 

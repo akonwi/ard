@@ -30,8 +30,13 @@ type GoPackageResolver interface {
 type ImporterGoPackageResolver struct{}
 
 // ResolveGoPackage loads exported metadata for a Go package using go/importer.
-// It is the fallback resolver for standard-library/simple package imports until
-// the module-aware go/packages resolver is wired into project loading.
+// It is the fallback for checkers constructed without options (tests). Its
+// universe is go/importer's process-global cache, so identity holds within a
+// process, but it is a second loading mechanism outside the primed session
+// model.
+//
+// TODO(ADR 0044): remove this fallback by giving the remaining bare-checker
+// tests a primed GoPackagesResolver.
 func (ImporterGoPackageResolver) ResolveGoPackage(path string) (*GoPackage, error) {
 	pkg, err := importer.Default().Import(path)
 	if err != nil {
