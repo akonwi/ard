@@ -15,6 +15,15 @@ type SymbolTable struct {
 	// isolated means only read-only references in outer scopes are allowed
 	isolated bool
 
+	// inLoop marks a loop body scope; break statements bind to the nearest
+	// enclosing loop within the current function
+	inLoop bool
+
+	// inUnsafe marks an unsafe block's scope. Break statements inside it are
+	// reported by the unsafe pre-scan, so the generic loop-context check
+	// stays quiet to avoid a duplicate diagnostic.
+	inUnsafe bool
+
 	// Generic context for this scope
 	genericContext *GenericContext
 }
@@ -85,6 +94,39 @@ func (st *SymbolTable) findGeneric(genericName string) *TypeVar {
 
 func (st *SymbolTable) expectReturn(returnType Type) {
 	st.returnType = returnType
+}
+
+// breakAllowed reports whether a break statement is valid in this scope: a
+// loop body scope must be reachable without crossing a function boundary
+// (marked by a scope that expects a return value).
+func (st *SymbolTable) breakAllowed() bool {
+	if st.inLoop {
+		return true
+	}
+	if st.returnType != nil {
+		// Function (or unsafe-block) boundary: an enclosing loop belongs to
+		// the outer function and cannot be broken from here.
+		return false
+	}
+	if st.parent != nil {
+		return st.parent.breakAllowed()
+	}
+	return false
+}
+
+// insideUnsafeBlock reports whether this scope sits inside an unsafe block
+// within the current function.
+func (st *SymbolTable) insideUnsafeBlock() bool {
+	if st.inUnsafe {
+		return true
+	}
+	if st.returnType != nil {
+		return false
+	}
+	if st.parent != nil {
+		return st.parent.insideUnsafeBlock()
+	}
+	return false
 }
 
 // getReturnType traverses up the scope hierarchy to find the first non-nil returnType

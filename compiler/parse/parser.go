@@ -312,6 +312,34 @@ func (p *parser) parseImport() *Import {
 	}
 }
 
+// breakStatement builds a Break after the `break` keyword has been consumed.
+// A break is terminated by a newline (consumed), or by a token that ends the
+// surrounding construct without belonging to the break itself: a closing
+// brace (single-line blocks), a comma (inline match arms), or a trailing
+// comment.
+func (p *parser) breakStatement() *Break {
+	tok := p.previous()
+	if p.check(new_line) {
+		newLine := p.advance()
+		return &Break{
+			Location: Location{
+				Start: tok.getLocation().Start,
+				End:   Point{Row: tok.line, Col: newLine.column - 1},
+			},
+		}
+	}
+	if !p.check(right_brace) && !p.check(comma) && !p.check(comment) && !p.check(eof) {
+		p.addError(p.peek(), "Expected new line")
+		// Recovery: create the Break without consuming, using the keyword span
+	}
+	return &Break{
+		Location: Location{
+			Start: tok.getLocation().Start,
+			End:   Point{Row: tok.line, Col: tok.column + len("break")},
+		},
+	}
+}
+
 func (p *parser) parseStatement() (Statement, error) {
 	if c := p.parseComment(); c != nil {
 		return c, nil
@@ -320,27 +348,7 @@ func (p *parser) parseStatement() (Statement, error) {
 		return nil, nil
 	}
 	if p.match(break_) {
-		tok := p.previous()
-
-		// Check for expected newline
-		if !p.check(new_line) {
-			p.addError(p.peek(), "Expected new line")
-			// Recovery: Create Break without consuming newline, use current position
-			return &Break{
-				Location: Location{
-					Start: tok.getLocation().Start,
-					End:   Point{Row: tok.line, Col: tok.column + len("break")},
-				},
-			}, nil
-		}
-
-		new_line := p.advance()
-		return &Break{
-			Location: Location{
-				Start: tok.getLocation().Start,
-				End:   Point{Row: tok.line, Col: new_line.column - 1},
-			},
-		}, nil
+		return p.breakStatement(), nil
 	}
 	if p.match(let, mut) {
 		return p.parseVariableDef()
@@ -2087,6 +2095,10 @@ func (p *parser) matchExpr() (Expression, error) {
 					return nil, err
 				}
 				body = b
+			} else if p.match(break_) {
+				// An inline break arm exits the enclosing loop; the checker
+				// validates loop context and statement position.
+				body = append(body, p.breakStatement())
 			} else {
 				stmt, err := p.parseExpression()
 				if err != nil {
@@ -2176,6 +2188,10 @@ func (p *parser) parseConditionalMatch(keyword token) (Expression, error) {
 				return nil, err
 			}
 			body = b
+		} else if p.match(break_) {
+			// An inline break arm exits the enclosing loop; the checker
+			// validates loop context and statement position.
+			body = append(body, p.breakStatement())
 		} else {
 			stmt, err := p.parseExpression()
 			if err != nil {

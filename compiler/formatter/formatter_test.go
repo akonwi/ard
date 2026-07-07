@@ -154,3 +154,14 @@ func TestFormatMutRefExpressions(t *testing.T) {
 		t.Fatalf("formatted = %q, want %q", string(formatted), want)
 	}
 }
+
+func TestFormatInlineBreakMatchArms(t *testing.T) {
+	input := "fn main() {\n  for i in 1..3 {\n    match i {\n      2 => break,\n      _ => (),\n    }\n    match {\n      i == 1 => break,\n      _ => (),\n    }\n  }\n}\n"
+	formatted, err := Format([]byte(input), "test.ard")
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+	if string(formatted) != input {
+		t.Fatalf("formatted = %q, want unchanged %q", string(formatted), input)
+	}
+}
