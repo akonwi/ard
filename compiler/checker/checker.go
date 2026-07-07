@@ -5650,8 +5650,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			switch s.Operator {
 			case parse.Plus:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5674,8 +5673,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.Minus:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5695,8 +5693,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.Multiply:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5716,8 +5713,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.Divide:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5737,8 +5733,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.Modulo:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5755,8 +5750,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.GreaterThan:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5775,8 +5769,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.GreaterThanOrEqual:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5795,8 +5788,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.LessThan:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5815,8 +5807,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.LessThanOrEqual:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5840,7 +5831,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						operator = "!="
 					}
 
-					left, right := c.checkExpr(s.Left), c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5893,8 +5884,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.And:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5908,8 +5898,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.Or:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -7913,14 +7902,26 @@ func isIntegerScalar(t Type) bool {
 	}
 }
 
-func isRelationalIntegerLike(t Type) bool { return isIntegerScalar(t) }
+func isRelationalIntegerLike(t Type) bool {
+	return isIntegerScalar(t) || isIntegerScalar(foreignScalarPrimitive(t))
+}
 
-func isRelationalFloatLike(t Type) bool { return t == Float64 || t == Float32 }
+func isRelationalFloatLike(t Type) bool {
+	if t == Float64 || t == Float32 {
+		return true
+	}
+	prim := foreignScalarPrimitive(t)
+	return prim == Float64 || prim == Float32
+}
 
-func isArithmeticIntegerLike(t Type) bool { return isIntegerScalar(t) }
+func isArithmeticIntegerLike(t Type) bool { return isRelationalIntegerLike(t) }
 
 func isSignedArithmeticLike(t Type) bool {
 	switch t {
+	case Int, Int8, Int16, Int32, Int64, Float32, Float64:
+		return true
+	}
+	switch foreignScalarPrimitive(t) {
 	case Int, Int8, Int16, Int32, Int64, Float32, Float64:
 		return true
 	default:
@@ -7929,6 +7930,66 @@ func isSignedArithmeticLike(t Type) bool {
 }
 
 func isArithmeticFloatLike(t Type) bool { return isRelationalFloatLike(t) }
+
+// contextualScalarOperandType returns the scalar type an untyped numeric
+// literal operand should adopt from the other operand, or nil when default
+// literal typing applies. Sized Ard scalars (Int16, Float32, Byte, ...) and
+// foreign named scalars (time::Duration) qualify; plain Int and Float64 stay
+// on the default path.
+func contextualScalarOperandType(t Type) Type {
+	if isExplicitScalar(t) || t == Byte || t == Rune {
+		return t
+	}
+	if prim := foreignScalarPrimitive(t); prim != nil && prim != Str && prim != Bool {
+		return t
+	}
+	return nil
+}
+
+// isUntypedNumLiteral reports whether an expression is a numeric literal
+// (optionally negated) that can adopt a scalar type from context, matching
+// Go's untyped-constant behavior for expressions like `5 * time::Second`.
+func isUntypedNumLiteral(expr parse.Expression) bool {
+	switch e := expr.(type) {
+	case *parse.NumLiteral:
+		return true
+	case *parse.UnaryExpression:
+		if e.Operator != parse.Minus {
+			return false
+		}
+		_, ok := e.Operand.(*parse.NumLiteral)
+		return ok
+	}
+	return false
+}
+
+// checkScalarOperands checks a binary operator's operands, letting an
+// untyped numeric literal adopt the other operand's scalar type.
+func (c *Checker) checkScalarOperands(leftExpr, rightExpr parse.Expression) (Expression, Expression) {
+	leftLit := isUntypedNumLiteral(leftExpr)
+	rightLit := isUntypedNumLiteral(rightExpr)
+	if leftLit == rightLit {
+		return c.checkExpr(leftExpr), c.checkExpr(rightExpr)
+	}
+	if leftLit {
+		right := c.checkExpr(rightExpr)
+		if right == nil {
+			return nil, nil
+		}
+		if target := contextualScalarOperandType(right.Type()); target != nil {
+			return c.checkExprAs(leftExpr, target), right
+		}
+		return c.checkExpr(leftExpr), right
+	}
+	left := c.checkExpr(leftExpr)
+	if left == nil {
+		return nil, nil
+	}
+	if target := contextualScalarOperandType(left.Type()); target != nil {
+		return left, c.checkExprAs(rightExpr, target)
+	}
+	return left, c.checkExpr(rightExpr)
+}
 
 func isUnsignedScalar(t Type) bool {
 	switch t {

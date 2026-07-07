@@ -24,8 +24,7 @@ use go:time
 //   - Go errors arrive stringified (`Void!Str`), so `errors.Is(err,
 //     http.ErrServerClosed)` becomes a message comparison.
 
-// time.Duration is nanoseconds; integer literals type contextually.
-let five_seconds: time::Duration = 5000000000
+let five_seconds: time::Duration = 5 * time::Second
 
 fn service() mut chi::Mux {
   let router = chi::NewRouter()
