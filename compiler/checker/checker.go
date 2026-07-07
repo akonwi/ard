@@ -4839,7 +4839,7 @@ func isListMethodName(name string) bool {
 
 func isMapMethodName(name string) bool {
 	switch name {
-	case "keys", "size", "get", "set", "drop", "remove", "has":
+	case "keys", "size", "get", "set", "delete", "has":
 		return true
 	default:
 		return false
@@ -4868,8 +4868,8 @@ func (c *Checker) createMapMethod(subject Expression, methodName string, args []
 		kind = MapGet
 	case "set":
 		kind = MapSet
-	case "drop", "remove":
-		kind = MapDrop
+	case "delete":
+		kind = MapDelete
 	case "has":
 		kind = MapHas
 	default:

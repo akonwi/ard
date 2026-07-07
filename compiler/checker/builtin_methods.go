@@ -9,7 +9,7 @@ var (
 	strMethodNames = map[StrMethodKind]string{
 		StrSize: "size", StrAt: "at", StrBytes: "bytes", StrRunes: "runes",
 		StrIsEmpty: "is_empty", StrContains: "contains", StrReplace: "replace",
-		StrReplaceAll: "replace_all", StrSplit: "split",
+		StrReplaceAll: "replace_all",
 		StrStartsWith: "starts_with", StrEndsWith: "ends_with",
 		StrToStr: "to_str", StrTrim: "trim",
 	}
@@ -24,7 +24,7 @@ var (
 	}
 	mapMethodNames = map[MapMethodKind]string{
 		MapKeys: "keys", MapSize: "size", MapGet: "get", MapSet: "set",
-		MapDrop: "drop", MapHas: "has",
+		MapDelete: "delete", MapHas: "has",
 	}
 	maybeMethodNames = map[MaybeMethodKind]string{
 		MaybeExpect: "expect", MaybeIsNone: "is_none", MaybeIsSome: "is_some",

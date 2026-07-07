@@ -2205,11 +2205,11 @@ func TestGoTargetParityCollectionsMutation(t *testing.T) {
 			`,
 		},
 		{
-			name: "map drop removes key",
+			name: "map delete removes key",
 			input: `
 				fn main() Bool {
 					mut items = ["a": 1, "b": 2]
-					items.drop("a")
+					items.delete("a")
 					not items.has("a")
 				}
 			`,

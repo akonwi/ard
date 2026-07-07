@@ -20,7 +20,7 @@ fn main() {
     fmt::Println("there is an entry for 2")
   }
 
-  nums_to_str.drop(2)
+  nums_to_str.delete(2)
   match nums_to_str.get(2) {
     str => fmt::Println("2 is {str}"),
     _ => fmt::Println("2 is not found"),

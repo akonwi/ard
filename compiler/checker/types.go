@@ -776,7 +776,7 @@ func (m Map) get(name string) Type {
 			Mutates:    true,
 			ReturnType: Void,
 		}
-	case "drop", "remove":
+	case "delete":
 		return &FunctionDef{
 			Name:       name,
 			Parameters: []Parameter{{Name: "key", Type: m.key}},

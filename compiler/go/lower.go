@@ -2283,20 +2283,6 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		stmts := append(target.stmts, from.stmts...)
 		stmts = append(stmts, to.stmts...)
 		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "ReplaceAll"), Args: []ast.Expr{target.expr, from.expr, to.expr}}}, nil
-	case air.ExprStrSplit:
-		if expr.Target == nil || len(expr.Args) != 1 {
-			return loweredExpr{}, fmt.Errorf("str split expects target and delimiter")
-		}
-		target, err := l.lowerExpr(fn, *expr.Target)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		delimiter, err := l.lowerExpr(fn, expr.Args[0])
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		stmts := append(target.stmts, delimiter.stmts...)
-		return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: l.qualified("strings", "strings", "Split"), Args: []ast.Expr{target.expr, delimiter.expr}}}, nil
 	case air.ExprStrStartsWith:
 		if expr.Target == nil || len(expr.Args) != 1 {
 			return loweredExpr{}, fmt.Errorf("str starts_with expects target and prefix")
@@ -2533,8 +2519,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMapGet(fn, expr)
 	case air.ExprMapSet:
 		return l.lowerMapSet(fn, expr)
-	case air.ExprMapDrop:
-		return l.lowerMapDrop(fn, expr)
+	case air.ExprMapDelete:
+		return l.lowerMapDelete(fn, expr)
 	case air.ExprMapKeys:
 		return l.lowerMapKeys(fn, expr)
 	case air.ExprMapKeyAt:
@@ -7105,9 +7091,9 @@ func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, erro
 	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
 }
 
-func (l *lowerer) lowerMapDrop(fn air.Function, expr air.Expr) (loweredExpr, error) {
+func (l *lowerer) lowerMapDelete(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil || len(expr.Args) != 1 {
-		return loweredExpr{}, fmt.Errorf("map drop expects target and one arg")
+		return loweredExpr{}, fmt.Errorf("map delete expects target and one arg")
 	}
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {
