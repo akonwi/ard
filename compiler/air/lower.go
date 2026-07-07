@@ -4287,6 +4287,13 @@ func (fl *functionLowerer) lowerIf(typeID TypeID, expr *checker.If) (*Expr, erro
 	if len(expr.Branches) == 0 {
 		return nil, fmt.Errorf("if expression missing branches")
 	}
+	// Defense in depth for issue #267: the checker types an else-less if
+	// chain as Void, so one can never reach lowering with a value type. The
+	// Go backend would materialize the missing path as a zero value, so fail
+	// loudly instead of generating it.
+	if expr.Else == nil && typeID != NoType && !fl.isVoidType(typeID) {
+		return nil, fmt.Errorf("internal: value-position if without else reached lowering")
+	}
 	return fl.lowerIfBranches(typeID, expr.Branches, expr.Else)
 }
 

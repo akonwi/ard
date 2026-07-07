@@ -5043,6 +5043,23 @@ func bindGenericTypes(original Type, specialized Type, bindings map[string]Type)
 	}
 }
 
+// ifChainHasElse reports whether an if chain ends in a final else branch.
+// A chain ending in `else if` has no final else.
+func ifChainHasElse(s *parse.IfStatement) bool {
+	current := s
+	for current != nil {
+		if current.Else == nil {
+			return false
+		}
+		next, chained := current.Else.(*parse.IfStatement)
+		if !chained {
+			return true
+		}
+		current = next
+	}
+	return false
+}
+
 func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 	if s == nil || s.Condition == nil {
 		return nil
@@ -6333,7 +6350,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 			// Validate return type
 			if !fn.InferReturnTypeFromBody && returnType != Void && !c.areCompatible(returnType, body.Type()) {
-				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
+				c.addError(bodyReturnMismatch(s.Body, returnType, body.Type()), s.GetLocation())
 				return nil
 			}
 
@@ -8202,6 +8219,12 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type) Exp
 			return c.checkExpr(s)
 		})
 	case *parse.IfStatement:
+		// A value is expected, so the chain must be exhaustive: without an
+		// else there is a path that produces nothing (issue #267).
+		if expectedType != nil && expectedType != Void && !ifChainHasElse(s) {
+			c.addError("if used as a value must have an else branch", s.GetLocation())
+			return nil
+		}
 		return c.withExpectedExpr(expectedType, func() Expression {
 			return c.checkExpr(s)
 		})
@@ -8287,7 +8310,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type) Exp
 
 			// Validate return type
 			if returnType != Void && !c.areCompatible(returnType, body.Type()) {
-				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
+				c.addError(bodyReturnMismatch(s.Body, returnType, body.Type()), s.GetLocation())
 				return nil
 			}
 
@@ -8497,10 +8520,27 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 
 	// Check that the function's return type matches its body's type
 	if returnType != Void && !c.areCompatible(returnType, body.Type()) {
-		c.addError(typeMismatch(returnType, body.Type()), location)
+		c.addError(bodyReturnMismatch(bodyStmts, returnType, body.Type()), location)
 	}
 
 	return body
+}
+
+// bodyReturnMismatch picks the diagnostic for a body whose type does not
+// match the declared return type. When the body ends in an if chain without
+// an else, the real problem is exhaustiveness (issue #267), so the message
+// teaches that rule instead of reporting the Void it implies.
+func bodyReturnMismatch(bodyStmts []parse.Statement, expected Type, got Type) string {
+	for i := len(bodyStmts) - 1; i >= 0; i-- {
+		if _, ok := bodyStmts[i].(*parse.Comment); ok {
+			continue
+		}
+		if chain, ok := bodyStmts[i].(*parse.IfStatement); ok && !ifChainHasElse(chain) && got == Void {
+			return "if used as a value must have an else branch"
+		}
+		break
+	}
+	return typeMismatch(expected, got)
 }
 
 func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func(), extraGenericParams ...string) *FunctionDef {
@@ -8584,7 +8624,7 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func(), ext
 
 	// Validate return type
 	if returnType != Void && !c.areCompatible(returnType, body.Type()) {
-		c.addError(typeMismatch(returnType, body.Type()), def.GetLocation())
+		c.addError(bodyReturnMismatch(def.Body, returnType, body.Type()), def.GetLocation())
 	}
 
 	fn.Body = body
