@@ -436,6 +436,9 @@ func (p *parser) parseVariableDef() (Statement, error) {
 	var declaredType DeclaredType = nil
 	if p.match(colon) {
 		declaredType = p.parseType()
+		if declaredType == nil {
+			p.recoverFromBadType()
+		}
 	}
 	if !p.check(equal) {
 		p.addError(p.peek(), "Expected '=' after variable name")
@@ -716,16 +719,15 @@ func (p *parser) typeUnion(private bool) (Statement, error) {
 
 	hasMore := true
 	for hasMore {
-		declType := p.parseType()
+		after := "'='"
+		if len(decl.Type) > 0 {
+			after = "'|'"
+		}
+		declType := p.parseTypeAfter(after)
 		if declType == nil {
-			// parseType returns nil for unsupported forms (for example a
-			// struct-shape alias `type X = { ... }`); report and recover
-			// instead of carrying a nil type (issue #258).
-			after := "'='"
-			if len(decl.Type) > 0 {
-				after = "'|'"
-			}
-			p.addError(p.peek(), fmt.Sprintf("Expected a type after %s", after))
+			p.recoverFromBadType()
+			// recoverFromBadType stops at the type boundary; skip any trailing
+			// junk on the line so the next statement parses cleanly.
 			p.synchronize()
 			return nil, nil
 		}
@@ -899,6 +901,14 @@ func (p *parser) structDef(private bool) Statement {
 		}
 		p.advance()
 		fieldType := p.parseType()
+		if fieldType == nil {
+			// Skip the malformed field; recovery keeps the remaining fields
+			// parseable without cascading errors (issue #258 bug class).
+			p.recoverFromBadType()
+			p.match(comma)
+			p.match(new_line)
+			continue
+		}
 		structDef.Fields = append(structDef.Fields, StructField{
 			Name: Identifier{
 				Name:     fieldName.text,
@@ -1143,10 +1153,15 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 		}
 		p.advance()
 
-		// Parse return type
+		// The return type is optional: a newline or closing brace means the
+		// method implicitly returns Void. Recovery must stop before braces:
+		// a following '{' would be a default-body block, not a type shape.
 		var returnType DeclaredType = nil
-		if !p.check(new_line) {
+		if !p.check(new_line) && !p.check(right_brace) {
 			returnType = p.parseType()
+			if returnType == nil {
+				p.synchronizeToTokens(left_brace, right_brace, new_line)
+			}
 		}
 
 		fnLocation := Location{
@@ -1408,7 +1423,54 @@ func (p *parser) assignment() (Statement, error) {
 	return expr, nil
 }
 
+// parseType parses a type in a required position. When no type can be
+// parsed it reports "Expected a type" — unless an inner required slot
+// already reported — and returns nil. Callers own recovery only; they must
+// not add their own missing-type diagnostics (issue #258 bug class).
 func (p *parser) parseType() DeclaredType {
+	return p.parseTypeExpecting("Expected a type")
+}
+
+// parseTypeAfter is parseType with positional context in the diagnostic,
+// e.g. parseTypeAfter("'='") reports "Expected a type after '='".
+func (p *parser) parseTypeAfter(context string) DeclaredType {
+	return p.parseTypeExpecting(fmt.Sprintf("Expected a type after %s", context))
+}
+
+// parseTypeExpecting relies on an invariant of tryParseType: it never both
+// adds an error and rolls tokens/errors back. A speculative branch inside
+// tryParseType must restore p.errors along with p.index (see
+// startsAdjacentCallArgsAfterFunctionType), otherwise a suppressed report
+// here could leave a phantom diagnostic for a valid program.
+func (p *parser) parseTypeExpecting(message string) DeclaredType {
+	errorsBefore := len(p.errors)
+	parsed := p.tryParseType()
+	if parsed == nil && len(p.errors) == errorsBefore {
+		p.addError(p.peek(), message)
+	}
+	return parsed
+}
+
+// recoverFromBadType skips past an unparseable type form. A brace-delimited
+// shape (the struct-shape alias mistake) skips its whole balanced block so
+// the body lines do not cascade unrelated errors; otherwise it stops at the
+// nearest type boundary.
+func (p *parser) recoverFromBadType() {
+	if p.check(left_brace) {
+		p.advance()
+		p.synchronizeToBlockEnd()
+		return
+	}
+	p.synchronizeToTokens(equal, new_line, comma, right_paren, right_bracket, greater_than)
+}
+
+// tryParseType parses a type when one is present, returning nil without a
+// diagnostic when the next tokens cannot start a type. It is the probing
+// form used by speculative parses; required positions use parseType. Inner
+// slots of composite forms are required once their prefix is consumed, so
+// they recurse through the reporting parseType and propagate nil upward
+// without adding further diagnostics.
+func (p *parser) tryParseType() DeclaredType {
 	if p.match(mut) {
 		mutToken := p.previous()
 		inner := p.parseType()
@@ -1427,7 +1489,6 @@ func (p *parser) parseType() DeclaredType {
 	if p.match(left_paren) {
 		inner := p.parseType()
 		if inner == nil {
-			p.addError(p.peek(), "Expected type inside grouped type")
 			if p.match(right_paren) {
 				p.match(question_mark)
 			} else {
@@ -1533,6 +1594,13 @@ func (p *parser) parseType() DeclaredType {
 				// Skip 'mut' keyword if present (marks mutable parameters in type signatures)
 				isMutable := p.match(mut)
 				paramType := p.parseType()
+				if paramType == nil {
+					p.recoverFromBadType()
+					if !p.match(comma) {
+						break
+					}
+					continue
+				}
 				paramTypes = append(paramTypes, paramType)
 				paramMutability = append(paramMutability, isMutable)
 				if !p.match(comma) {
@@ -1571,7 +1639,10 @@ func (p *parser) parseType() DeclaredType {
 		// Return type is optional - if omitted, implicitly returns Void
 		var returnType DeclaredType
 		returnStartsAdjacentCallArgs := p.startsAdjacentCallArgsAfterFunctionType(paramClose, hasRightParen)
-		if !p.check(right_bracket) && !p.check(right_paren) && !p.check(comma) && !p.check(equal) && !p.check(new_line) && !returnStartsAdjacentCallArgs {
+		// The return type is optional: every token that can legally follow a
+		// function type must be excluded here, because parseType reports when
+		// it cannot parse a type.
+		if !p.check(right_bracket) && !p.check(right_paren) && !p.check(comma) && !p.check(equal) && !p.check(new_line) && !p.check(greater_than) && !p.check(left_brace) && !p.check(right_brace) && !p.check(colon) && !p.check(bang) && !p.check(question_mark) && !returnStartsAdjacentCallArgs {
 			returnType = p.parseType()
 		}
 
@@ -1704,7 +1775,7 @@ func (p *parser) startsAdjacentCallArgsAfterFunctionType(paramClose token, hasRi
 
 	savedIndex := p.index
 	savedErrorCount := len(p.errors)
-	groupedReturn := p.parseType()
+	groupedReturn := p.tryParseType()
 	canBeGroupedReturn := groupedReturn != nil && len(p.errors) == savedErrorCount && p.isCallTypeArgumentDelimiter()
 	p.index = savedIndex
 	p.errors = p.errors[:savedErrorCount]
@@ -1766,7 +1837,15 @@ func (p *parser) parseNamedType() DeclaredType {
 	if p.match(less_than) {
 		// Loop to parse comma-separated types until '>'
 		for !p.check(greater_than) && !p.isAtEnd() {
-			typeArgs = append(typeArgs, p.parseType())
+			typeArg := p.parseType()
+			if typeArg == nil {
+				p.recoverFromBadType()
+				if !p.match(comma) {
+					break
+				}
+				continue
+			}
+			typeArgs = append(typeArgs, typeArg)
 			if !p.match(comma) {
 				break // No comma, so expect '>' next
 			}
@@ -1889,6 +1968,13 @@ func (p *parser) parseTypeArguments() []DeclaredType {
 	if !p.check(greater_than) {
 		for {
 			typeArg := p.parseType()
+			if typeArg == nil {
+				p.recoverFromBadType()
+				if !p.match(comma) {
+					break
+				}
+				continue
+			}
 			typeArgs = append(typeArgs, typeArg)
 			if !p.match(comma) {
 				break
@@ -2548,11 +2634,16 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			p.match(comma)
 		}
 
-		// Return type is required for all functions - except for simple anonymous functions
+		// The return type is optional: a '{' (or newline before it) means the
+		// function implicitly returns Void, so only call the reporting
+		// parseType when a type must follow. Recovery must stop before '{'
+		// because the next brace is the function body, not a type shape.
 		var returnType DeclaredType = nil
-		if (name == "" && !p.check(left_brace)) || name != "" {
-			// Function with explicit return type
+		if !p.check(left_brace) && !p.check(new_line) {
 			returnType = p.parseType()
+			if returnType == nil {
+				p.synchronizeToTokens(left_brace, new_line)
+			}
 		}
 
 		statements, err := p.block()
@@ -3251,9 +3342,14 @@ func (p *parser) parseCallTypeArguments() []DeclaredType {
 			break
 		}
 		typeArg := p.parseType()
-		if typeArg != nil {
-			typeArgs = append(typeArgs, typeArg)
+		if typeArg == nil {
+			p.recoverFromBadType()
+			if !p.match(comma) {
+				break
+			}
+			continue
 		}
+		typeArgs = append(typeArgs, typeArg)
 		if !p.match(comma) {
 			break
 		}

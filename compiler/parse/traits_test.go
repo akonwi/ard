@@ -20,7 +20,7 @@ func TestTraitDefinitions(t *testing.T) {
 		{
 			name:     "Missing newline after brace",
 			input:    "trait MyTrait {fn test(); }",
-			wantErrs: []string{"Expected new line after '{'", "Expected function declaration in trait block"},
+			wantErrs: []string{"Expected new line after '{'", "Expected a type"},
 		},
 		{
 			name:     "Missing fn keyword",

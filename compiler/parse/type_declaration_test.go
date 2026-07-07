@@ -44,13 +44,16 @@ func TestTypeDeclarationInvalidRightHandSide(t *testing.T) {
 	})
 
 	t.Run("mut with no inner type reports a parse error", func(t *testing.T) {
+		// The report comes from the innermost committed slot (mut's inner
+		// type), so it carries the generic message rather than the
+		// declaration-level "after '='" context.
 		messages := parseErrors(t, "type Bad = mut\nfn main() {}\n")
-		assertHasError(t, messages, "Expected a type after '='")
+		assertHasError(t, messages, "Expected a type")
 	})
 
 	t.Run("mut struct-shape alias reports a parse error", func(t *testing.T) {
 		messages := parseErrors(t, "type Bad = mut { x: Int }\n")
-		assertHasError(t, messages, "Expected a type after '='")
+		assertHasError(t, messages, "Expected a type")
 	})
 
 	t.Run("recovery continues to later declarations", func(t *testing.T) {
