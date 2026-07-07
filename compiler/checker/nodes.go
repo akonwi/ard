@@ -169,9 +169,16 @@ func (v Variable) Name() string {
 }
 // Type returns the referent type for reference-typed storage: reads through
 // a `mut T` binding see the referent, mirroring InstanceProperty (ADR 0045).
-// The raw storage type stays available via v.sym.Type.
+// The raw storage type stays available via StorageType.
 func (v Variable) Type() Type {
 	return derefMutableRef(v.sym.Type)
+}
+
+// StorageType returns the binding's declared type, keeping the `mut T`
+// reference identity that Type() dereferences. Tooling uses it so hovers
+// show reference bindings as references.
+func (v Variable) StorageType() Type {
+	return v.sym.Type
 }
 
 type SubjectKind uint8
