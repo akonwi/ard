@@ -108,7 +108,9 @@ func renderSpanHover(rec checker.SpanRecord) string {
 			return functionSignatureString(node.Name, def)
 		}
 	case *checker.Variable:
-		return checkerTypeString(node.Type())
+		// Show the storage type: a reference binding hovers as `mut T`, even
+		// though reads through it produce the referent (ADR 0045).
+		return checkerTypeString(node.StorageType())
 	}
 
 	// Fallback: render the expression's type.

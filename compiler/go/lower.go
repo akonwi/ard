@@ -2068,6 +2068,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("float64"), Args: []ast.Expr{target.expr}}}, nil
+	case air.ExprMutRef:
+		return l.lowerMutRef(fn, expr)
 	case air.ExprMakeClosure:
 		return l.lowerMakeClosure(fn, expr)
 	case air.ExprCallClosure:
@@ -4902,6 +4904,10 @@ func (l *lowerer) mutableTraitUpcastPlace(fn air.Function, arg air.Expr) (ast.Ex
 }
 
 func (l *lowerer) mutableReferenceArg(fn air.Function, arg air.Expr, argExpr ast.Expr) ast.Expr {
+	if arg.Kind == air.ExprMutRef {
+		// An explicit `mut` expression already produced the reference.
+		return argExpr
+	}
 	if arg.Kind == air.ExprLoadLocal && l.localIsPointerParam(fn, arg.Local) {
 		return ast.NewIdent(l.localName(fn, arg.Local))
 	}
@@ -4911,6 +4917,48 @@ func (l *lowerer) mutableReferenceArg(fn air.Function, arg air.Expr, argExpr ast
 		}
 	}
 	return &ast.UnaryExpr{Op: token.AND, X: argExpr}
+}
+
+// lowerMutRef lowers the explicit `mut <operand>` expression (ADR 0045). The
+// result is a Go pointer only when the referent's representation requires one
+// (ADR 0040): descriptor-backed types already share storage by value, so the
+// operand passes through unchanged.
+func (l *lowerer) lowerMutRef(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("mut ref missing operand")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	// The representation decision follows the operand: an already
+	// pointer-shaped operand aliases by copying the pointer, and descriptor
+	// referents share storage by value. Only value forms whose mutation
+	// needs identity take an address.
+	if validTypeID(l.program, expr.Target.Type) {
+		if info := l.program.Types[expr.Target.Type-1]; info.Kind == air.TypeForeignType && info.ForeignPointer {
+			return target, nil
+		}
+	}
+	if !l.mutableParamUsesPointer(expr.Target.Type) {
+		return target, nil
+	}
+	if expr.Bool {
+		// Fresh storage: a struct literal is addressable directly with Go's
+		// &T{...} form; other value expressions materialize a temporary.
+		if _, isComposite := target.expr.(*ast.CompositeLit); isComposite {
+			return loweredExpr{stmts: target.stmts, expr: &ast.UnaryExpr{Op: token.AND, X: target.expr}}, nil
+		}
+		tmp := l.nextTemp()
+		stmts := append([]ast.Stmt{}, target.stmts...)
+		stmts = append(stmts, &ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(tmp)},
+			Tok: token.DEFINE,
+			Rhs: []ast.Expr{target.expr},
+		})
+		return loweredExpr{stmts: stmts, expr: &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(tmp)}}, nil
+	}
+	return loweredExpr{stmts: target.stmts, expr: l.mutableReferenceArg(fn, *expr.Target, target.expr)}, nil
 }
 
 func (l *lowerer) mutableFieldReferenceExpr(fn air.Function, arg air.Expr) (ast.Expr, bool) {
@@ -4951,6 +4999,13 @@ func (l *lowerer) localIsReference(fn air.Function, local air.LocalID) bool {
 
 func (l *lowerer) localIsPointerParam(fn air.Function, local air.LocalID) bool {
 	if l.localIsReference(fn, local) {
+		// Reference locals hold a Go pointer only when the referent's
+		// representation requires one; descriptor-backed referents are
+		// stored as their sharing value forms (ADR 0040).
+		idx := int(local)
+		if idx >= 0 && idx < len(fn.Locals) {
+			return l.mutableParamUsesPointer(fn.Locals[idx].Type)
+		}
 		return true
 	}
 	idx := int(local)

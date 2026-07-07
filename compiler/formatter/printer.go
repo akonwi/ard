@@ -853,6 +853,10 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 		return dText("()")
 	case parse.VoidLiteral:
 		return dText("()")
+	case *parse.MutRef:
+		return dConcat(dText("mut "), p.renderExpressionValueDoc(node.Operand, parentPrecedence))
+	case parse.MutRef:
+		return dConcat(dText("mut "), p.renderExpressionValueDoc(node.Operand, parentPrecedence))
 	case *parse.UnaryExpression:
 		return dText(p.renderUnary(node, parentPrecedence))
 	case parse.UnaryExpression:
@@ -1223,9 +1227,6 @@ func (p printer) renderCallDoc(head string, typeArgs []parse.DeclaredType, args 
 		prefix := ""
 		if arg.Name != "" {
 			prefix += arg.Name + ": "
-		}
-		if arg.Mutable {
-			prefix += "mut "
 		}
 		argDocs = append(argDocs, dConcat(dText(prefix), p.renderExpressionValueDoc(arg.Value, 0)))
 	}

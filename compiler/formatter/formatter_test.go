@@ -142,3 +142,15 @@ func TestUnusedImportRemovalKeepsTypeArgUses(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatMutRefExpressions(t *testing.T) {
+	input := "mut counter = 0\nlet r = mut counter\nbump(mut counter)\nlet fresh = mut Point{x: 1}\n"
+	formatted, err := Format([]byte(input), "test.ard")
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+	want := "mut counter = 0\nlet r = mut counter\nbump(mut counter)\nlet fresh = mut Point{x: 1}\n"
+	if string(formatted) != want {
+		t.Fatalf("formatted = %q, want %q", string(formatted), want)
+	}
+}

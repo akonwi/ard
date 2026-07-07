@@ -2168,3 +2168,57 @@ func assertRenameEdits(t *testing.T, edit *protocol.WorkspaceEdit, filePath stri
 		}
 	}
 }
+
+// TestHoverOnMutRefBinding pins that reference bindings hover with their
+// reference identity (`mut Int`), even though reads through them produce the
+// referent (ADR 0045).
+func TestHoverOnMutRefBinding(t *testing.T) {
+	source := `mut counter = 0
+let r = mut counter
+let snapshot: Int = r
+` + "\n"
+
+	tests := []struct {
+		name    string
+		line    uint32
+		char    uint32
+		want    string
+		notWant string
+	}{
+		{
+			name: "hover on reference binding definition",
+			line: 1,
+			char: 4,
+			want: "mut Int",
+		},
+		{
+			name: "hover on reference binding use",
+			line: 2,
+			char: 20,
+			want: "mut Int",
+		},
+		{
+			name:    "hover on plain mutable binding stays plain",
+			line:    0,
+			char:    4,
+			want:    "Int",
+			notWant: "mut",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pos := protocol.Position{Line: tt.line, Character: tt.char}
+			info := spanHoverAt(t, source, "test.ard", pos)
+			if info == nil {
+				t.Fatalf("expected hover info, got nil at %d:%d", tt.line, tt.char)
+			}
+			if !strings.Contains(info.content, tt.want) {
+				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
+			}
+			if tt.notWant != "" && strings.Contains(info.content, tt.notWant) {
+				t.Errorf("hover content = %q, want without %q", info.content, tt.notWant)
+			}
+		})
+	}
+}
