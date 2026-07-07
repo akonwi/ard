@@ -1113,6 +1113,12 @@ type If struct {
 }
 
 func (i *If) Type() Type {
+	// An if chain without an else has a path that produces no value, so it
+	// can never be a value itself (issue #267). Before this rule, the Go
+	// backend materialized the missing path as a zero value.
+	if i.Else == nil {
+		return Void
+	}
 	if len(i.Branches) == 0 || i.Branches[0].Body == nil {
 		return Void
 	}

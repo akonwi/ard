@@ -2918,3 +2918,89 @@ fn main() {
 		},
 	})
 }
+
+func TestValuePositionIfRequiresElse(t *testing.T) {
+	run(t, []test{
+		{
+			name: "if without else cannot produce a function's return value",
+			input: `
+				fn grade(x: Int) Int {
+					if x > 0 {
+						1
+					}
+				}
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "if used as a value must have an else branch"},
+			},
+		},
+		{
+			name: "else-if chain without a final else cannot produce a value",
+			input: `
+				fn grade(x: Int) Int {
+					if x > 90 {
+						1
+					} else if x > 80 {
+						2
+					}
+				}
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "if used as a value must have an else branch"},
+			},
+		},
+		{
+			name: "if with else produces a value",
+			input: `
+				fn grade(x: Int) Int {
+					if x > 0 {
+						1
+					} else {
+						0
+					}
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "statement-position if needs no else",
+			input: `
+				fn note(x: Int) {
+					mut count = 0
+					if x > 0 {
+						count =+ 1
+					}
+				}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "closure return inference treats else-less if as void",
+			input: `
+				let g = fn(x: Int) {
+					if x > 0 {
+						1
+					}
+				}
+				let y: Int = g(1)
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
+			},
+		},
+		{
+			name: "closure return inference accepts void if without else",
+			input: `
+				use go:fmt
+
+				let g = fn(x: Int) {
+					if x > 0 {
+						fmt::Println(x)
+					}
+				}
+				g(1)
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+	})
+}
