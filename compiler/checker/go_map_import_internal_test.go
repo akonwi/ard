@@ -82,12 +82,18 @@ func TestMapSetReturnsVoid(t *testing.T) {
 	if set.ReturnType != Void {
 		t.Fatalf("map set return = %s, want Void", set.ReturnType)
 	}
-	remove, ok := m.get("remove").(*FunctionDef)
+	deleteMethod, ok := m.get("delete").(*FunctionDef)
 	if !ok {
-		t.Fatalf("map remove method = %T, want *FunctionDef", m.get("remove"))
+		t.Fatalf("map delete method = %T, want *FunctionDef", m.get("delete"))
 	}
-	if remove.ReturnType != Void || !remove.Mutates {
-		t.Fatalf("map remove = return %s mutates %v, want Void mutating", remove.ReturnType, remove.Mutates)
+	if deleteMethod.ReturnType != Void || !deleteMethod.Mutates {
+		t.Fatalf("map delete = return %s mutates %v, want Void mutating", deleteMethod.ReturnType, deleteMethod.Mutates)
+	}
+	if m.get("drop") != nil {
+		t.Fatal("map drop alias should be removed")
+	}
+	if m.get("remove") != nil {
+		t.Fatal("map remove alias should be removed")
 	}
 }
 

@@ -107,7 +107,7 @@ const (
 	ExprMapSize
 	ExprMapGet
 	ExprMapSet
-	ExprMapDrop
+	ExprMapDelete
 	ExprMapHas
 	ExprMapKeyAt
 	ExprMapValueAt

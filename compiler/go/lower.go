@@ -2533,8 +2533,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMapGet(fn, expr)
 	case air.ExprMapSet:
 		return l.lowerMapSet(fn, expr)
-	case air.ExprMapDrop:
-		return l.lowerMapDrop(fn, expr)
+	case air.ExprMapDelete:
+		return l.lowerMapDelete(fn, expr)
 	case air.ExprMapKeys:
 		return l.lowerMapKeys(fn, expr)
 	case air.ExprMapKeyAt:
@@ -7105,9 +7105,9 @@ func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, erro
 	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
 }
 
-func (l *lowerer) lowerMapDrop(fn air.Function, expr air.Expr) (loweredExpr, error) {
+func (l *lowerer) lowerMapDelete(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil || len(expr.Args) != 1 {
-		return loweredExpr{}, fmt.Errorf("map drop expects target and one arg")
+		return loweredExpr{}, fmt.Errorf("map delete expects target and one arg")
 	}
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {

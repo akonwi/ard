@@ -1737,9 +1737,9 @@ func TestRunProgramExecutesGoNamedMapMethods(t *testing.T) {
 			if not values.has("b") {
 				panic("set failed")
 			}
-			values.remove("a")
+			values.delete("a")
 			if values.has("a") {
-				panic("remove failed")
+				panic("delete failed")
 			}
 		}
 	`)

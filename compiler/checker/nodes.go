@@ -493,7 +493,7 @@ const (
 	MapSize
 	MapGet
 	MapSet
-	MapDrop
+	MapDelete
 	MapHas
 )
 
@@ -521,7 +521,7 @@ func (m *MapMethod) Type() Type {
 		return MakeMaybe(m.ValueType)
 	case MapSet:
 		return Void
-	case MapDrop:
+	case MapDelete:
 		return Void
 	case MapHas:
 		return Bool

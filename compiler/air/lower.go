@@ -4874,8 +4874,8 @@ func (fl *functionLowerer) lowerMapMethod(typeID TypeID, method *checker.MapMeth
 	case checker.MapSet:
 		kind = ExprMapSet
 		expected = []TypeID{mapType.Key, mapType.Value}
-	case checker.MapDrop:
-		kind = ExprMapDrop
+	case checker.MapDelete:
+		kind = ExprMapDelete
 		expected = []TypeID{mapType.Key}
 	case checker.MapHas:
 		kind = ExprMapHas

@@ -24,7 +24,7 @@ var (
 	}
 	mapMethodNames = map[MapMethodKind]string{
 		MapKeys: "keys", MapSize: "size", MapGet: "get", MapSet: "set",
-		MapDrop: "drop", MapHas: "has",
+		MapDelete: "delete", MapHas: "has",
 	}
 	maybeMethodNames = map[MaybeMethodKind]string{
 		MaybeExpect: "expect", MaybeIsNone: "is_none", MaybeIsSome: "is_some",
