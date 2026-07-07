@@ -717,6 +717,18 @@ func (p *parser) typeUnion(private bool) (Statement, error) {
 	hasMore := true
 	for hasMore {
 		declType := p.parseType()
+		if declType == nil {
+			// parseType returns nil for unsupported forms (for example a
+			// struct-shape alias `type X = { ... }`); report and recover
+			// instead of carrying a nil type (issue #258).
+			after := "'='"
+			if len(decl.Type) > 0 {
+				after = "'|'"
+			}
+			p.addError(p.peek(), fmt.Sprintf("Expected a type after %s", after))
+			p.synchronize()
+			return nil, nil
+		}
 		decl.Type = append(decl.Type, declType)
 		hasMore = p.matchTypeUnionSeparator()
 	}
@@ -1400,12 +1412,14 @@ func (p *parser) parseType() DeclaredType {
 	if p.match(mut) {
 		mutToken := p.previous()
 		inner := p.parseType()
-		end := mutToken.getLocation().End
-		if inner != nil {
-			end = inner.GetLocation().End
+		if inner == nil {
+			// A `mut` with no valid inner type is not a type; let the caller
+			// report its contextual diagnostic instead of carrying a
+			// MutableType with a nil inner into the checker (issue #258).
+			return nil
 		}
 		return &MutableType{
-			Location: Location{Start: mutToken.getLocation().Start, End: end},
+			Location: Location{Start: mutToken.getLocation().Start, End: inner.GetLocation().End},
 			Inner:    inner,
 		}
 	}
