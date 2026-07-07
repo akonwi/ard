@@ -1,0 +1,102 @@
+use ard/async
+
+use go:context
+use go:fmt
+use go:github.com/go-chi/chi/v5 as chi
+use go:github.com/go-chi/chi/v5/middleware
+use go:net/http
+use go:os
+use go:os/signal
+use go:syscall
+use go:time
+
+// A pure-Ard port of chi's graceful-shutdown example:
+// https://github.com/go-chi/chi/blob/master/_examples/graceful/main.go
+//
+// Adaptations from the Go original:
+//   - `go func() { ... }` becomes `async::start`.
+//   - `signal.NotifyContext(ctx, SIGINT, SIGTERM)` returns a (Context,
+//     CancelFunc) pair, which Ard's Go interop does not map; a signal
+//     channel via `signal.Notify` expresses the same wait. Go variadics
+//     take one Ard argument, so the example listens for SIGINT.
+//   - `context.WithTimeout` also returns a pair; shutdown uses
+//     `context.Background()` and waits for in-flight requests to drain.
+//   - Go errors arrive stringified (`Void!Str`), so `errors.Is(err,
+//     http.ErrServerClosed)` becomes a message comparison.
+//   - Go functions are not yet first-class values (issue #263), so the
+//     middleware is wrapped in closures instead of passed by reference.
+
+// time.Duration is nanoseconds; integer literals type contextually.
+let five_seconds: time::Duration = 5000000000
+
+fn service() mut chi::Mux {
+  let router = chi::NewRouter()
+
+  router.Use(
+    fn(next: http::Handler) http::Handler {
+      middleware::RequestID(next)
+    },
+  )
+  router.Use(
+    fn(next: http::Handler) http::Handler {
+      middleware::Logger(next)
+    },
+  )
+
+  router.Get(
+    "/",
+    fn(w: http::ResponseWriter, r: mut http::Request) {
+      mut body = "sup".bytes()
+      w.Write(body)
+    },
+  )
+
+  router.Get(
+    "/slow",
+    fn(w: http::ResponseWriter, r: mut http::Request) {
+      // Simulates some hard work. We want this handler to complete
+      // successfully during a shutdown signal.
+      time::Sleep(five_seconds)
+
+      mut body = "all done.\n".bytes()
+      w.Write(body)
+    },
+  )
+
+  router
+}
+
+fn main() {
+  // The HTTP server
+  mut server = http::Server{Addr: "0.0.0.0:3333", Handler: service()}
+
+  // Listen for the interrupt signal
+  let interrupts = Chan::new<os::Signal>()
+  signal::Notify(interrupts.sender(), syscall::SIGINT)
+
+  // Run the server in the background
+  async::start(
+    fn() {
+      match server.ListenAndServe() {
+        ok => (),
+        err(message) => {
+          match message == "http: Server closed" {
+            true => (),
+            false => panic(message),
+          }
+        },
+      }
+    },
+  )
+  fmt::Println("listening on {server.Addr}")
+
+  // Wait for the interrupt signal
+  interrupts.recv()
+
+  // Trigger graceful shutdown: in-flight requests (like /slow) finish first
+  fmt::Println("shutting down")
+  match server.Shutdown(context::Background()) {
+    ok => fmt::Println("goodbye"),
+    err(message) => panic(message),
+  }
+}
