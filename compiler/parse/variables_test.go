@@ -160,7 +160,7 @@ func TestFunctionTypes(t *testing.T) {
 		{
 			name:     "Empty grouped type is rejected",
 			input:    "let f: ()? = test",
-			wantErrs: []string{"Expected type inside grouped type"},
+			wantErrs: []string{"Expected a type"},
 		},
 		{
 			name:  "Grouped nullable mutable type",
@@ -214,7 +214,7 @@ func TestFunctionTypes(t *testing.T) {
 		{
 			name:     "Invalid grouped type recovers at closing paren",
 			input:    "let f: (@) = test",
-			wantErrs: []string{"Expected type inside grouped type"},
+			wantErrs: []string{"Expected a type"},
 		},
 	})
 }
@@ -228,7 +228,7 @@ func TestGenericCallTypeArgumentDiagnostics(t *testing.T) {
 		{
 			name:     "Missing generic function type argument keeps type diagnostic",
 			input:    "foo<()>()",
-			wantErrs: []string{"Expected type inside grouped type"},
+			wantErrs: []string{"Expected a type"},
 		},
 		{
 			name:     "Empty static generic function type argument is rejected",
@@ -238,7 +238,7 @@ func TestGenericCallTypeArgumentDiagnostics(t *testing.T) {
 		{
 			name:     "Invalid static generic function type argument keeps type diagnostic",
 			input:    "maybe::none<()>()",
-			wantErrs: []string{"Expected type inside grouped type"},
+			wantErrs: []string{"Expected a type"},
 		},
 		{
 			name:     "Static generic function call missing greater than is diagnosed",

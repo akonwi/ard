@@ -482,8 +482,9 @@ func (s *Snapshot) check(filePath string, relPath string, program *parse.Program
 	goResolver := s.engine.goResolverFor(projectInfo, goPaths)
 
 	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{
-		GoResolver:  goResolver,
-		RecordSpans: true,
+		GoResolver:     goResolver,
+		RecordSpans:    true,
+		HasParseErrors: len(parseErrors) > 0,
 	})
 	c.Check()
 

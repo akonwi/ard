@@ -829,6 +829,18 @@ func scalarTypeByName(name string) Type {
 }
 
 func (c *Checker) resolveType(t parse.DeclaredType) Type {
+	// Defense in depth for the parser's type contract (issue #258 class): a
+	// nil DeclaredType reaching the checker with a clean parse is a parser
+	// bug. Recovery on error-carrying trees leaves nil holes on purpose, and
+	// tooling (LSP) checks such trees, so the internal-error report only
+	// fires when the parse was clean; either way checking degrades to an
+	// unknown type instead of dereferencing nil.
+	if t == nil {
+		if !c.options.HasParseErrors {
+			c.addError("internal error: malformed type node reached the checker (parser bug — please report)", parse.Location{})
+		}
+		return &TypeVar{name: "unknown"}
+	}
 	var baseType Type
 	switch ty := t.(type) {
 	case *parse.StringType:
