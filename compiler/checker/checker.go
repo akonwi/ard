@@ -3663,6 +3663,31 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 	}
 }
 
+// expectedFunctionTypeForClosure returns the function signature a closure
+// literal should check against, or nil when the expected type provides none.
+// A bare `*FunctionDef` counts only when it is a function *type* (marked with
+// the "<function>" name) rather than a specific named function's type. A
+// named Go func type (for example http.HandlerFunc) carries its signature as
+// the foreign type's underlying function; closures check against that
+// signature so parameters infer and a value-producing body is discarded for
+// void callbacks, mirroring Go's unnamed-to-named assignability.
+func expectedFunctionTypeForClosure(expected Type) *FunctionDef {
+	switch expected := expected.(type) {
+	case *FunctionDef:
+		if expected.Name == "<function>" {
+			return expected
+		}
+	case *ForeignType:
+		if expected.Pointer {
+			return nil
+		}
+		if fn, ok := expected.Underlying.(*FunctionDef); ok {
+			return fn
+		}
+	}
+	return nil
+}
+
 func (c *Checker) checkMatchArmBlock(stmts []parse.Statement, setup func()) *Block {
 	expectedType := c.expectedExpr
 	discardFinal := c.matchArmDiscardContext || expectedType == Void
@@ -8006,8 +8031,8 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type) Exp
 	case *parse.AnonymousFunction:
 		{
 			// Try to infer types from the expected type
-			expectedFnType, ok := expectedType.(*FunctionDef)
-			if !ok || expectedFnType.Name != "<function>" {
+			expectedFnType := expectedFunctionTypeForClosure(expectedType)
+			if expectedFnType == nil {
 				// Not a function type (or not a type signature), check normally
 				return c.checkExpr(s)
 			}

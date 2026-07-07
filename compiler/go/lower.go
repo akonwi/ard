@@ -6335,13 +6335,6 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	} else {
 		funcType = &ast.FuncType{Params: &ast.FieldList{List: params}, Results: funcType.Results}
 	}
-	if (funcType.Results == nil || len(funcType.Results.List) == 0) && closureFn.Body.Result != nil && !l.isVoidType(closureFn.Body.Result.Type) {
-		returnType, err := l.goType(closureFn.Body.Result.Type)
-		if err != nil {
-			return loweredExpr{}, err
-		}
-		funcType.Results = &ast.FieldList{List: []*ast.Field{{Type: returnType}}}
-	}
 	if funcType.Results == nil || len(funcType.Results.List) == 0 {
 		bodyStmts = append(bodyStmts, &ast.ExprStmt{X: call})
 	} else if l.usesABIResultReturn(closureFn.Signature.Return) {
