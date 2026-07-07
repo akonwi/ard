@@ -1777,6 +1777,14 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 	case *parse.Comment:
 		return nil
 	case *parse.Break:
+		if !c.scope.breakAllowed() {
+			// The unsafe pre-scan already reports breaks inside unsafe
+			// blocks; avoid stacking a second diagnostic on the same token.
+			if !c.scope.insideUnsafeBlock() {
+				c.addError("break can only be used inside a loop", s.GetLocation())
+			}
+			return nil
+		}
 		return &Statement{Break: true}
 	case *parse.TraitDefinition:
 		{
@@ -2365,7 +2373,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			// Check the body of the loop
-			body := c.checkBlock(s.Body, nil)
+			body := c.checkBlock(s.Body, c.markLoopScope(nil))
 
 			// Create and return the while loop
 			loop := &WhileLoop{
@@ -2424,7 +2432,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			// Check the body of the loop
-			body := c.checkBlock(s.Body, nil)
+			body := c.checkBlock(s.Body, c.markLoopScope(nil))
 
 			// Create and return the for loop
 			loop := &ForLoop{
@@ -2454,12 +2462,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					Start:  start,
 					End:    end,
 				}
-				body := c.checkBlock(s.Body, func() {
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
 					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, start.Type(), false))
 					if loop.Index != "" {
 						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
-				})
+				}))
 				loop.Body = body
 				return &Statement{Stmt: loop}
 			}
@@ -2482,13 +2490,13 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 
 				// Create a new scope for the loop body where the cursor is defined
-				body := c.checkBlock(s.Body, func() {
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
 					// Direct string iteration yields Unicode scalar values.
 					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, Rune, false))
 					if loop.Index != "" {
 						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
-				})
+				}))
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -2505,13 +2513,13 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 
 				// Create a new scope for the loop body where the cursor is defined
-				body := c.checkBlock(s.Body, func() {
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
 					// Add the cursor variable to the scope
 					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, Int, false))
 					if loop.Index != "" {
 						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
-				})
+				}))
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -2526,13 +2534,13 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 				cursorMutable := c.isMutable(iterValue)
 
-				body := c.checkBlock(s.Body, func() {
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
 					// Add the cursor variable to the scope
 					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, listType.of, cursorMutable))
 					if loop.Index != "" {
 						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
 					}
-				})
+				}))
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -2551,11 +2559,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 
 				valueMutable := c.isMutable(iterable)
-				body := c.checkBlock(s.Body, func() {
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
 					// Add the cursors to the scope
 					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(loop.Key, mapType.Key(), false))
 					c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Val, mapType.Value(), valueMutable))
-				})
+				}))
 
 				loop.Body = body
 				return &Statement{Stmt: loop}
@@ -2817,6 +2825,18 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 
 func (c *Checker) checkBlock(stmts []parse.Statement, setup func()) *Block {
 	return c.checkBlockWithExpected(stmts, setup, nil, false)
+}
+
+// markLoopScope wraps a block setup callback so the block's scope is marked
+// as a loop body, making break statements valid within it (up to the next
+// function boundary).
+func (c *Checker) markLoopScope(setup func()) func() {
+	return func() {
+		c.scope.inLoop = true
+		if setup != nil {
+			setup()
+		}
+	}
 }
 
 func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), expectedFinal Type, onlyMatchFinal bool) *Block {
@@ -7682,10 +7702,12 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			if expectedValue != nil {
 				block = c.checkBlockWithExpected(s.Statements, func() {
 					c.scope.expectReturn(unsafeReturnType)
+					c.scope.inUnsafe = true
 				}, expectedValue, false)
 			} else {
 				block = c.checkBlockWithInferredFinalValue(s.Statements, func() {
 					c.scope.expectReturn(unsafeReturnType)
+					c.scope.inUnsafe = true
 				}, discardThisExpr || c.expectedExpr == Void)
 			}
 			valueType := block.Type()

@@ -1310,6 +1310,9 @@ func (p printer) renderConditionalMatchCaseDoc(matchCase parse.ConditionalMatchC
 		return dText(pattern + " => ()")
 	}
 	if len(matchCase.Body) == 1 {
+		if _, ok := matchCase.Body[0].(*parse.Break); ok {
+			return dText(pattern + " => break")
+		}
 		if expr, ok := renderableExpressionStatement(matchCase.Body[0]); ok {
 			rendered := p.renderExpression(expr, 0)
 			if canInlineMatchBlockExpression(expr) && !strings.Contains(rendered, "\n") {
@@ -1349,6 +1352,9 @@ func (p printer) renderArmWithPattern(pattern string, body []parse.Statement) do
 		return dText(pattern + " => ()")
 	}
 	if len(body) == 1 {
+		if _, ok := body[0].(*parse.Break); ok {
+			return dText(pattern + " => break")
+		}
 		if expr, ok := renderableExpressionStatement(body[0]); ok {
 			rendered := p.renderExpression(expr, 0)
 			if canInlineMatchBlockExpression(expr) && !strings.Contains(rendered, "\n") {
