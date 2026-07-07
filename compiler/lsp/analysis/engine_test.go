@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -382,5 +383,145 @@ func TestAnalyzeCtxHonorsCancellation(t *testing.T) {
 	fa, err := ws.Snapshot().AnalyzeCtx(context.Background(), path)
 	if err != nil || fa == nil {
 		t.Fatalf("analyze failed after cancellation test: %v", err)
+	}
+}
+
+// TestGoSessionPrimesSharedUniverse pins ADR 0044 A3: the engine's Go
+// resolver session loads a check's whole Go import set in one universe, so
+// interface satisfaction holds even when the interface's package and the
+// implementer's package do not import each other (the case cross-universe
+// translation cannot anchor).
+func TestGoSessionPrimesSharedUniverse(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"ard.toml": "name = \"universe\"\nard = \">= 0.1.0\"\n",
+		"go.mod":   "module universe\n\ngo 1.26\n",
+		"ffi/shared/shared.go": `package shared
+
+type Record struct {
+	Value int
+}
+`,
+		"ffi/api/api.go": `package api
+
+import "universe/ffi/shared"
+
+type Handler interface {
+	Handle(rec shared.Record) int
+}
+
+func Dispatch(h Handler) int {
+	return h.Handle(shared.Record{Value: 21})
+}
+`,
+		"ffi/impl/impl.go": `package impl
+
+import "universe/ffi/shared"
+
+type Client struct{}
+
+func (c *Client) Handle(rec shared.Record) int {
+	return rec.Value * 2
+}
+
+func New() *Client {
+	return &Client{}
+}
+`,
+		"clients.ard": `use go:universe/ffi/api
+
+fn dispatch(h: api::Handler) Int {
+  api::Dispatch(h)
+}
+`,
+		"main.ard": `use go:universe/ffi/impl
+use universe/clients
+
+fn main() {
+  let client = impl::New()
+  if not clients::dispatch(client) == 42 {
+    panic("dispatch mismatch")
+  }
+}
+`,
+	})
+	engine := NewEngine(root)
+	ws := NewWorkspace(engine)
+
+	fa, err := ws.Snapshot().Analyze(filepath.Join(root, "main.ard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, diag := range fa.Diagnostics {
+		t.Errorf("unexpected diagnostic: %s", diag)
+	}
+}
+
+// TestGoSessionRepricesForNewImports pins that adding a Go import through an
+// overlay re-primes the session instead of surfacing the post-prime internal
+// error, and that unrelated checks reuse the session.
+func TestGoSessionRepricesForNewImports(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"ard.toml": "name = \"session\"\nard = \">= 0.1.0\"\n",
+		"go.mod":   "module session\n\ngo 1.26\n",
+		"main.ard": "use go:fmt\n\nfn main() {\n  fmt::Println(\"hi\")\n}\n",
+	})
+	engine := NewEngine(root)
+	ws := NewWorkspace(engine)
+	path := filepath.Join(root, "main.ard")
+
+	fa, err := ws.Snapshot().Analyze(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, diag := range fa.Diagnostics {
+		t.Errorf("unexpected diagnostic before overlay: %s", diag)
+	}
+	first := engine.goResolver
+
+	// Re-analyzing without new imports reuses the primed session.
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws.SetOverlay(path, string(content)+"\n// trailing comment\n")
+	if _, err := ws.Snapshot().Analyze(path); err != nil {
+		t.Fatal(err)
+	}
+	if engine.goResolver != first {
+		t.Fatal("session should be reused when no new Go imports appear")
+	}
+
+	// A new Go import re-primes; the analysis must not report the
+	// post-prime internal error.
+	ws.SetOverlay(path, "use go:fmt\nuse go:strings\n\nfn main() {\n  fmt::Println(strings::ToUpper(\"hi\"))\n}\n")
+	fa, err = ws.Snapshot().Analyze(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, diag := range fa.Diagnostics {
+		t.Errorf("unexpected diagnostic after new import: %s", diag)
+	}
+	if engine.goResolver == first {
+		t.Fatal("session should be rebuilt for a newly appearing Go import")
+	}
+
+	// A bogus in-progress import path yields a normal resolve diagnostic,
+	// never the internal pre-scan error.
+	ws.SetOverlay(path, "use go:net/htt\n\nfn main() {}\n")
+	fa, err = ws.Snapshot().Analyze(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundResolveError := false
+	for _, diag := range fa.Diagnostics {
+		if strings.Contains(diag.Message, "internal compiler bug") {
+			t.Fatalf("internal error leaked to diagnostics: %s", diag)
+		}
+		if strings.Contains(diag.Message, "Failed to resolve Go import") {
+			foundResolveError = true
+		}
+	}
+	if !foundResolveError {
+		t.Error("expected a resolve diagnostic for the bogus import path")
 	}
 }

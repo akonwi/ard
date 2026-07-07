@@ -9338,4 +9338,3 @@ func (c *Checker) wrapAccessorInMatch(subject Expression, prop *InstanceProperty
 		InnerType: innerType,
 	}
 }
-

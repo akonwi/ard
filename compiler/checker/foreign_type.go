@@ -6,21 +6,21 @@ import "go/types"
 // its underlying Ard representation. When Underlying is nil, the value is opaque
 // to Ard and can only be stored or passed back across compatible foreign boundaries.
 type ForeignType struct {
-	Target                    string
-	Namespace                 string
-	Qualifier                 string
-	Name                      string
-	Underlying                Type
-	Pointer                   bool
-	Struct                    bool
-	Interface                 bool
-	GoType                    types.Type
-	TypeArgs                  []Type
-	MapKey                    Type
-	MapValue                  Type
+	Target     string
+	Namespace  string
+	Qualifier  string
+	Name       string
+	Underlying Type
+	Pointer    bool
+	Struct     bool
+	Interface  bool
+	GoType     types.Type
+	TypeArgs   []Type
+	MapKey     Type
+	MapValue   Type
 	// Elem is set for named Go slice types (`type Nums []int`); the foreign
 	// value then behaves like an Ard list of Elem.
-	Elem Type
+	Elem                      Type
 	Fields                    map[string]Type
 	UnsupportedFields         map[string]string
 	FieldsLoaded              bool
