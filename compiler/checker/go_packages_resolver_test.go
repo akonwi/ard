@@ -3,6 +3,7 @@ package checker_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -141,5 +142,49 @@ func TestGoPackagesResolverUsesBuildTags(t *testing.T) {
 	}
 	if pkg.Functions["Tagged"] == nil {
 		t.Fatal("Tagged should be visible with build tag")
+	}
+}
+
+func TestGoPackagesResolverPrimeSharesOneLoad(t *testing.T) {
+	resolver := checker.NewGoPackagesResolver(t.TempDir(), nil)
+	if err := resolver.Prime([]string{"fmt", "strings", "fmt", ""}); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	pkg, err := resolver.ResolveGoPackage("fmt")
+	if err != nil {
+		t.Fatalf("ResolveGoPackage(fmt): %v", err)
+	}
+	if pkg.Functions["Println"] == nil {
+		t.Fatal("fmt.Println missing from primed package")
+	}
+	if _, err := resolver.ResolveGoPackage("strings"); err != nil {
+		t.Fatalf("ResolveGoPackage(strings): %v", err)
+	}
+}
+
+func TestGoPackagesResolverPrimedMissIsInternalError(t *testing.T) {
+	resolver := checker.NewGoPackagesResolver(t.TempDir(), nil)
+	if err := resolver.Prime([]string{"fmt"}); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	_, err := resolver.ResolveGoPackage("strings")
+	if err == nil {
+		t.Fatal("expected an internal error for a post-prime miss")
+	}
+	if !strings.Contains(err.Error(), "internal compiler bug") || !strings.Contains(err.Error(), "pre-scan") {
+		t.Fatalf("post-prime miss error = %q, want internal pre-scan bug report", err)
+	}
+}
+
+func TestGoPackagesResolverPrimeRecordsPerPathErrors(t *testing.T) {
+	resolver := checker.NewGoPackagesResolver(t.TempDir(), nil)
+	if err := resolver.Prime([]string{"fmt", "example.com/definitely/missing"}); err != nil {
+		t.Fatalf("Prime should not fail for per-path errors: %v", err)
+	}
+	if _, err := resolver.ResolveGoPackage("fmt"); err != nil {
+		t.Fatalf("ResolveGoPackage(fmt): %v", err)
+	}
+	if _, err := resolver.ResolveGoPackage("example.com/definitely/missing"); err == nil {
+		t.Fatal("expected an error for the missing package")
 	}
 }
