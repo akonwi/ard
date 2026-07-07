@@ -10,13 +10,19 @@ import (
 // GoPackage is target metadata for a directly imported Go package. It is kept
 // separate from Ard modules so Go symbols do not become core Ard declarations.
 type GoPackage struct {
-	Path                 string
-	TypesName            string
-	Functions            map[string]*FunctionDef
-	Generics             map[string]*types.Func
-	Types                map[string]Type
-	Constants            map[string]Type
-	Variables            map[string]Type
+	Path      string
+	TypesName string
+	Functions map[string]*FunctionDef
+	Generics  map[string]*types.Func
+	Types     map[string]Type
+	Constants map[string]Type
+	Variables map[string]Type
+	// AdaptedFunctions records why an imported function's raw Go signature
+	// differs from its Ard-visible one (variadic calling convention, error
+	// or comma-ok results rewritten at call boundaries). Such functions can
+	// be called but not referenced as values: a direct Go reference would
+	// have the unadapted signature.
+	AdaptedFunctions     map[string]string
 	UnsupportedTypes     map[string]string
 	UnsupportedConstants map[string]string
 	UnsupportedVariables map[string]string
@@ -30,8 +36,13 @@ type GoPackageResolver interface {
 type ImporterGoPackageResolver struct{}
 
 // ResolveGoPackage loads exported metadata for a Go package using go/importer.
-// It is the fallback resolver for standard-library/simple package imports until
-// the module-aware go/packages resolver is wired into project loading.
+// It is the fallback for checkers constructed without options (tests). Its
+// universe is go/importer's process-global cache, so identity holds within a
+// process, but it is a second loading mechanism outside the primed session
+// model.
+//
+// TODO(ADR 0044): remove this fallback by giving the remaining bare-checker
+// tests a primed GoPackagesResolver.
 func (ImporterGoPackageResolver) ResolveGoPackage(path string) (*GoPackage, error) {
 	pkg, err := importer.Default().Import(path)
 	if err != nil {
@@ -49,6 +60,7 @@ func goPackageFromTypesPackage(path string, pkg *types.Package) *GoPackage {
 		Types:                map[string]Type{},
 		Constants:            map[string]Type{},
 		Variables:            map[string]Type{},
+		AdaptedFunctions:     map[string]string{},
 		UnsupportedTypes:     map[string]string{},
 		UnsupportedConstants: map[string]string{},
 		UnsupportedVariables: map[string]string{},
@@ -98,11 +110,34 @@ func goPackageFromTypesPackage(path string, pkg *types.Package) *GoPackage {
 		def, reason := functionDefFromGoSignature(name, sig)
 		if reason == "" {
 			goPkg.Functions[name] = def
+			if adapted := goSignatureAdaptation(sig); adapted != "" {
+				goPkg.AdaptedFunctions[name] = adapted
+			}
 		} else {
 			goPkg.UnsupportedFunctions[name] = reason
 		}
 	}
 	return goPkg
+}
+
+// goSignatureAdaptation reports why a Go signature's raw form differs from
+// its Ard-visible mapping, or "" when the two agree and a direct reference
+// to the function is a faithful value of the Ard type.
+func goSignatureAdaptation(sig *types.Signature) string {
+	if sig.Variadic() {
+		return "it is variadic"
+	}
+	results := sig.Results()
+	switch {
+	case results.Len() == 1 && isGoError(results.At(0).Type()),
+		results.Len() == 2 && isGoError(results.At(1).Type()):
+		return "it returns a Go error, which Ard adapts to a Result at call sites"
+	case results.Len() == 2 && isGoBool(results.At(1).Type()):
+		return "its comma-ok result is adapted to a Maybe at call sites"
+	case results.Len() >= 2:
+		return "its results are adapted at call boundaries"
+	}
+	return ""
 }
 
 func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef, string) {

@@ -368,6 +368,7 @@ func (c *Checker) Diagnostics() []Diagnostic {
 }
 
 func (c *Checker) Check() {
+	c.primeGoResolver()
 	seenImportAliases := map[string]struct{}{}
 	for _, imp := range c.input.Imports {
 		if _, dup := seenImportAliases[imp.Name]; dup {
@@ -3663,6 +3664,59 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 	}
 }
 
+// primeGoResolver loads the check's whole Go import closure into the
+// resolver's shared session before any import binds (ADR 0044). Priming is
+// idempotent — drivers that already primed (frontend, test loader) resolve
+// everything from cache — and it makes directly constructed checkers
+// (tests, tools) share one go/types universe too. A prime error means the
+// pre-scan missed a path, which is a compiler bug; when the miss lives only
+// in a transitive module, the sub-module's own check surfaces it at its
+// `use` statement instead.
+//
+// The type assertion is part of the contract: the LSP wraps its resolver
+// (lockedGoResolver), intentionally opting out of per-check auto-prime
+// because the engine owns session priming with the workspace-wide union.
+func (c *Checker) primeGoResolver() {
+	resolver, ok := c.options.GoResolver.(*GoPackagesResolver)
+	if !ok || resolver == nil {
+		return
+	}
+	paths := CollectGoImportPaths(c.moduleResolver, GoImportScanEntry{Program: c.input, ModulePath: c.modulePath})
+	if err := resolver.Prime(paths); err != nil {
+		for _, imp := range c.input.Imports {
+			if imp.Kind == parse.ImportKindGo {
+				c.addError(err.Error(), imp.GetLocation())
+				break
+			}
+		}
+	}
+}
+
+// expectedFunctionTypeForClosure returns the function signature a closure
+// literal should check against, or nil when the expected type provides none.
+// A bare `*FunctionDef` counts only when it is a function *type* (marked with
+// the "<function>" name) rather than a specific named function's type. A
+// named Go func type (for example http.HandlerFunc) carries its signature as
+// the foreign type's underlying function; closures check against that
+// signature so parameters infer and a value-producing body is discarded for
+// void callbacks, mirroring Go's unnamed-to-named assignability.
+func expectedFunctionTypeForClosure(expected Type) *FunctionDef {
+	switch expected := expected.(type) {
+	case *FunctionDef:
+		if expected.Name == "<function>" {
+			return expected
+		}
+	case *ForeignType:
+		if expected.Pointer {
+			return nil
+		}
+		if fn, ok := expected.Underlying.(*FunctionDef); ok {
+			return fn
+		}
+	}
+	return nil
+}
+
 func (c *Checker) checkMatchArmBlock(stmts []parse.Statement, setup func()) *Block {
 	expectedType := c.expectedExpr
 	discardFinal := c.matchArmDiscardContext || expectedType == Void
@@ -5596,8 +5650,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			switch s.Operator {
 			case parse.Plus:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5620,8 +5673,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.Minus:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5641,8 +5693,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.Multiply:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5662,8 +5713,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.Divide:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5683,8 +5733,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.Modulo:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5701,8 +5750,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.GreaterThan:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5721,8 +5769,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.GreaterThanOrEqual:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5741,8 +5788,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.LessThan:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5761,8 +5807,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.LessThanOrEqual:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5786,7 +5831,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						operator = "!="
 					}
 
-					left, right := c.checkExpr(s.Left), c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5839,8 +5884,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.And:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -5854,8 +5898,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case parse.Or:
 				{
-					left := c.checkExpr(s.Left)
-					right := c.checkExpr(s.Right)
+					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
 					}
@@ -7100,6 +7143,25 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						if typ := goPkg.Variables[prop.Name]; typ != nil {
 							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ, Assignable: true}
 						}
+						// An imported Go function is a first-class value when its
+						// raw Go signature is its Ard-visible one; adapted shapes
+						// (variadic, error/comma-ok results) would not be faithful
+						// values, so they stay call-only.
+						if def := goPkg.Functions[prop.Name]; def != nil {
+							if reason := goPkg.AdaptedFunctions[prop.Name]; reason != "" {
+								c.addError(fmt.Sprintf("Go function %s::%s cannot be referenced as a value: %s; wrap it in a closure", id.Name, prop.Name, reason), prop.GetLocation())
+								return nil
+							}
+							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: def}
+						}
+						if _, isGeneric := goPkg.Generics[prop.Name]; isGeneric {
+							c.addError(fmt.Sprintf("Generic Go function %s::%s cannot be referenced as a value; wrap it in a closure so its type parameters are fixed", id.Name, prop.Name), prop.GetLocation())
+							return nil
+						}
+						if reason := goPkg.UnsupportedFunctions[prop.Name]; reason != "" {
+							c.addError(fmt.Sprintf("Unsupported Go function %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+							return nil
+						}
 						if reason := goPkg.UnsupportedConstants[prop.Name]; reason != "" {
 							c.addError(fmt.Sprintf("Unsupported Go constant %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
 							return nil
@@ -7840,14 +7902,26 @@ func isIntegerScalar(t Type) bool {
 	}
 }
 
-func isRelationalIntegerLike(t Type) bool { return isIntegerScalar(t) }
+func isRelationalIntegerLike(t Type) bool {
+	return isIntegerScalar(t) || isIntegerScalar(foreignScalarPrimitive(t))
+}
 
-func isRelationalFloatLike(t Type) bool { return t == Float64 || t == Float32 }
+func isRelationalFloatLike(t Type) bool {
+	if t == Float64 || t == Float32 {
+		return true
+	}
+	prim := foreignScalarPrimitive(t)
+	return prim == Float64 || prim == Float32
+}
 
-func isArithmeticIntegerLike(t Type) bool { return isIntegerScalar(t) }
+func isArithmeticIntegerLike(t Type) bool { return isRelationalIntegerLike(t) }
 
 func isSignedArithmeticLike(t Type) bool {
 	switch t {
+	case Int, Int8, Int16, Int32, Int64, Float32, Float64:
+		return true
+	}
+	switch foreignScalarPrimitive(t) {
 	case Int, Int8, Int16, Int32, Int64, Float32, Float64:
 		return true
 	default:
@@ -7856,6 +7930,66 @@ func isSignedArithmeticLike(t Type) bool {
 }
 
 func isArithmeticFloatLike(t Type) bool { return isRelationalFloatLike(t) }
+
+// contextualScalarOperandType returns the scalar type an untyped numeric
+// literal operand should adopt from the other operand, or nil when default
+// literal typing applies. Sized Ard scalars (Int16, Float32, Byte, ...) and
+// foreign named scalars (time::Duration) qualify; plain Int and Float64 stay
+// on the default path.
+func contextualScalarOperandType(t Type) Type {
+	if isExplicitScalar(t) || t == Byte || t == Rune {
+		return t
+	}
+	if prim := foreignScalarPrimitive(t); prim != nil && prim != Str && prim != Bool {
+		return t
+	}
+	return nil
+}
+
+// isUntypedNumLiteral reports whether an expression is a numeric literal
+// (optionally negated) that can adopt a scalar type from context, matching
+// Go's untyped-constant behavior for expressions like `5 * time::Second`.
+func isUntypedNumLiteral(expr parse.Expression) bool {
+	switch e := expr.(type) {
+	case *parse.NumLiteral:
+		return true
+	case *parse.UnaryExpression:
+		if e.Operator != parse.Minus {
+			return false
+		}
+		_, ok := e.Operand.(*parse.NumLiteral)
+		return ok
+	}
+	return false
+}
+
+// checkScalarOperands checks a binary operator's operands, letting an
+// untyped numeric literal adopt the other operand's scalar type.
+func (c *Checker) checkScalarOperands(leftExpr, rightExpr parse.Expression) (Expression, Expression) {
+	leftLit := isUntypedNumLiteral(leftExpr)
+	rightLit := isUntypedNumLiteral(rightExpr)
+	if leftLit == rightLit {
+		return c.checkExpr(leftExpr), c.checkExpr(rightExpr)
+	}
+	if leftLit {
+		right := c.checkExpr(rightExpr)
+		if right == nil {
+			return nil, nil
+		}
+		if target := contextualScalarOperandType(right.Type()); target != nil {
+			return c.checkExprAs(leftExpr, target), right
+		}
+		return c.checkExpr(leftExpr), right
+	}
+	left := c.checkExpr(leftExpr)
+	if left == nil {
+		return nil, nil
+	}
+	if target := contextualScalarOperandType(left.Type()); target != nil {
+		return left, c.checkExprAs(rightExpr, target)
+	}
+	return left, c.checkExpr(rightExpr)
+}
 
 func isUnsignedScalar(t Type) bool {
 	switch t {
@@ -8006,8 +8140,8 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type) Exp
 	case *parse.AnonymousFunction:
 		{
 			// Try to infer types from the expected type
-			expectedFnType, ok := expectedType.(*FunctionDef)
-			if !ok || expectedFnType.Name != "<function>" {
+			expectedFnType := expectedFunctionTypeForClosure(expectedType)
+			if expectedFnType == nil {
 				// Not a function type (or not a type signature), check normally
 				return c.checkExpr(s)
 			}
@@ -9313,4 +9447,3 @@ func (c *Checker) wrapAccessorInMatch(subject Expression, prop *InstanceProperty
 		InnerType: innerType,
 	}
 }
-

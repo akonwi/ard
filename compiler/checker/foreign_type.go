@@ -6,21 +6,21 @@ import "go/types"
 // its underlying Ard representation. When Underlying is nil, the value is opaque
 // to Ard and can only be stored or passed back across compatible foreign boundaries.
 type ForeignType struct {
-	Target                    string
-	Namespace                 string
-	Qualifier                 string
-	Name                      string
-	Underlying                Type
-	Pointer                   bool
-	Struct                    bool
-	Interface                 bool
-	GoType                    types.Type
-	TypeArgs                  []Type
-	MapKey                    Type
-	MapValue                  Type
+	Target     string
+	Namespace  string
+	Qualifier  string
+	Name       string
+	Underlying Type
+	Pointer    bool
+	Struct     bool
+	Interface  bool
+	GoType     types.Type
+	TypeArgs   []Type
+	MapKey     Type
+	MapValue   Type
 	// Elem is set for named Go slice types (`type Nums []int`); the foreign
 	// value then behaves like an Ard list of Elem.
-	Elem Type
+	Elem                      Type
 	Fields                    map[string]Type
 	UnsupportedFields         map[string]string
 	FieldsLoaded              bool
@@ -166,5 +166,8 @@ func foreignGoAssignableTo(actual *ForeignType, expected *ForeignType) bool {
 	if actual == nil || expected == nil || actual.Target != "go" || expected.Target != "go" || actual.GoType == nil || expected.GoType == nil {
 		return false
 	}
+	// Both types come from the resolver's single primed go/packages session
+	// (ADR 0044), so go/types object identity holds and plain assignability
+	// is sufficient.
 	return types.AssignableTo(actual.GoType, expected.GoType)
 }

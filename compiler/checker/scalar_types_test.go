@@ -159,3 +159,79 @@ fn bits() Uint32 {
 		},
 	})
 }
+
+func TestScalarLiteralOperandContext(t *testing.T) {
+	run(t, []test{
+		{
+			name: "integer literal adopts sized scalar operand type in arithmetic",
+			input: `let a: Int16 = 10
+let sum = a + 1
+let diff = 1 - a
+let product = a * 2
+let quotient = a / 2
+let rem = a % 3
+let widened: Int16 = sum`,
+		},
+		{
+			name: "negative literal adopts signed scalar operand type",
+			input: `let a: Int16 = 10
+let sum = a + -1`,
+		},
+		{
+			name: "float literal adopts Float32 operand type",
+			input: `let a: Float32 = 1.5
+let doubled = a * 2.0
+let widened: Float32 = doubled`,
+		},
+		{
+			name: "integer literal adopts sized scalar operand type in comparisons",
+			input: `let a: Int16 = 10
+let less = a < 5
+let greater = 5 > a
+let same = a == 10
+let diff = 10 != a`,
+		},
+		{
+			name:        "overflowing literal operand is rejected",
+			input:       `let a: Int8 = 10
+let sum = a + 1000`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Integer literal 1000 overflows Int8"}},
+		},
+		{
+			name: "two literals keep default Int typing",
+			input: `let sum: Int = 1 + 2`,
+		},
+	})
+}
+
+func TestForeignScalarLiteralOperandContext(t *testing.T) {
+	run(t, []test{
+		{
+			name: "integer literal adopts foreign scalar operand type",
+			input: `use go:time
+
+let five_seconds: time::Duration = 5 * time::Second
+
+fn main() {
+  time::Sleep(five_seconds)
+  time::Sleep(time::Second * 2)
+}`,
+		},
+		{
+			name: "foreign scalar compares against integer literal",
+			input: `use go:time
+
+fn positive(d: time::Duration) Bool {
+  d > 0
+}`,
+		},
+		{
+			name: "foreign scalar arithmetic keeps its type",
+			input: `use go:time
+
+fn total(a: time::Duration, b: time::Duration) time::Duration {
+  a + b
+}`,
+		},
+	})
+}

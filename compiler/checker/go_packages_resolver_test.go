@@ -3,6 +3,7 @@ package checker_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -10,6 +11,9 @@ import (
 
 func TestGoPackagesResolverResolvesStdlibWithoutGoMod(t *testing.T) {
 	resolver := checker.NewGoPackagesResolver(t.TempDir(), nil)
+	if err := resolver.Prime([]string{"fmt"}); err != nil {
+		t.Fatalf("Prime(%s): %v", "fmt", err)
+	}
 	pkg, err := resolver.ResolveGoPackage("fmt")
 	if err != nil {
 		t.Fatalf("ResolveGoPackage(fmt): %v", err)
@@ -35,6 +39,9 @@ func Greet(name string) string { return "hello " + name }
 		t.Fatal(err)
 	}
 	resolver := checker.NewGoPackagesResolver(root, nil)
+	if err := resolver.Prime([]string{"example.com/app/ffi"}); err != nil {
+		t.Fatalf("Prime(%s): %v", "example.com/app/ffi", err)
+	}
 	pkg, err := resolver.ResolveGoPackage("example.com/app/ffi")
 	if err != nil {
 		t.Fatalf("ResolveGoPackage(local ffi): %v", err)
@@ -66,6 +73,9 @@ func Out() <-chan int { return make(chan int) }
 		t.Fatal(err)
 	}
 	resolver := checker.NewGoPackagesResolver(root, nil)
+	if err := resolver.Prime([]string{"example.com/app/ffi"}); err != nil {
+		t.Fatalf("Prime(%s): %v", "example.com/app/ffi", err)
+	}
 	pkg, err := resolver.ResolveGoPackage("example.com/app/ffi")
 	if err != nil {
 		t.Fatalf("ResolveGoPackage(local ffi): %v", err)
@@ -99,6 +109,9 @@ func NewTicks() Ticks { return make(chan int) }
 		t.Fatal(err)
 	}
 	resolver := checker.NewGoPackagesResolver(root, nil)
+	if err := resolver.Prime([]string{"example.com/app/ffi"}); err != nil {
+		t.Fatalf("Prime(%s): %v", "example.com/app/ffi", err)
+	}
 	pkg, err := resolver.ResolveGoPackage("example.com/app/ffi")
 	if err != nil {
 		t.Fatalf("ResolveGoPackage(local ffi): %v", err)
@@ -127,6 +140,9 @@ func TestGoPackagesResolverUsesBuildTags(t *testing.T) {
 		t.Fatal(err)
 	}
 	withoutTag := checker.NewGoPackagesResolver(root, nil)
+	if err := withoutTag.Prime([]string{"example.com/app/ffi"}); err != nil {
+		t.Fatalf("Prime(%s): %v", "example.com/app/ffi", err)
+	}
 	pkg, err := withoutTag.ResolveGoPackage("example.com/app/ffi")
 	if err != nil {
 		t.Fatalf("ResolveGoPackage without tags: %v", err)
@@ -135,11 +151,69 @@ func TestGoPackagesResolverUsesBuildTags(t *testing.T) {
 		t.Fatal("Tagged should not be visible without build tag")
 	}
 	withTag := checker.NewGoPackagesResolver(root, []string{"special"})
+	if err := withTag.Prime([]string{"example.com/app/ffi"}); err != nil {
+		t.Fatalf("Prime(%s): %v", "example.com/app/ffi", err)
+	}
 	pkg, err = withTag.ResolveGoPackage("example.com/app/ffi")
 	if err != nil {
 		t.Fatalf("ResolveGoPackage with tags: %v", err)
 	}
 	if pkg.Functions["Tagged"] == nil {
 		t.Fatal("Tagged should be visible with build tag")
+	}
+}
+
+func TestGoPackagesResolverPrimeSharesOneLoad(t *testing.T) {
+	resolver := checker.NewGoPackagesResolver(t.TempDir(), nil)
+	if err := resolver.Prime([]string{"fmt", "strings", "fmt", ""}); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	// Re-priming with covered paths is an idempotent no-op.
+	if err := resolver.Prime([]string{"fmt"}); err != nil {
+		t.Fatalf("re-Prime with covered paths: %v", err)
+	}
+	pkg, err := resolver.ResolveGoPackage("fmt")
+	if err != nil {
+		t.Fatalf("ResolveGoPackage(fmt): %v", err)
+	}
+	if pkg.Functions["Println"] == nil {
+		t.Fatal("fmt.Println missing from primed package")
+	}
+	if _, err := resolver.ResolveGoPackage("strings"); err != nil {
+		t.Fatalf("ResolveGoPackage(strings): %v", err)
+	}
+}
+
+func TestGoPackagesResolverPrimedMissIsInternalError(t *testing.T) {
+	resolver := checker.NewGoPackagesResolver(t.TempDir(), nil)
+	if err := resolver.Prime([]string{"fmt"}); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	// Re-priming with an uncovered path would create a second universe, so
+	// it reports the internal pre-scan error instead of loading.
+	if err := resolver.Prime([]string{"strings"}); err == nil {
+		t.Fatal("expected an internal error for re-priming with a new path")
+	} else if !strings.Contains(err.Error(), "internal compiler bug") || !strings.Contains(err.Error(), "pre-scan") {
+		t.Fatalf("re-prime error = %q, want internal pre-scan bug report", err)
+	}
+	_, err := resolver.ResolveGoPackage("strings")
+	if err == nil {
+		t.Fatal("expected an internal error for a post-prime miss")
+	}
+	if !strings.Contains(err.Error(), "internal compiler bug") || !strings.Contains(err.Error(), "pre-scan") {
+		t.Fatalf("post-prime miss error = %q, want internal pre-scan bug report", err)
+	}
+}
+
+func TestGoPackagesResolverPrimeRecordsPerPathErrors(t *testing.T) {
+	resolver := checker.NewGoPackagesResolver(t.TempDir(), nil)
+	if err := resolver.Prime([]string{"fmt", "example.com/definitely/missing"}); err != nil {
+		t.Fatalf("Prime should not fail for per-path errors: %v", err)
+	}
+	if _, err := resolver.ResolveGoPackage("fmt"); err != nil {
+		t.Fatalf("ResolveGoPackage(fmt): %v", err)
+	}
+	if _, err := resolver.ResolveGoPackage("example.com/definitely/missing"); err == nil {
+		t.Fatal("expected an error for the missing package")
 	}
 }

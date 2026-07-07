@@ -16,6 +16,12 @@ type GoPackagesResolver struct {
 	modulePath    string
 	modulePathErr error
 	cache         map[string]goPackageResolveResult
+	// primed marks that the whole-program import pre-scan has loaded every
+	// Go package into one shared go/types universe (ADR 0044). After
+	// priming, a cache miss means the pre-scan failed to collect a path,
+	// which is a compiler bug, not a load trigger: issuing a fresh load
+	// would silently create a second type universe.
+	primed bool
 }
 
 type goPackageResolveResult struct {
@@ -60,15 +66,77 @@ func (r *GoPackagesResolver) ResolveGoPackage(path string) (*GoPackage, error) {
 	if cached, ok := r.cache[path]; ok {
 		return cached.pkg, cached.err
 	}
-	pkg, err := r.load(path)
-	r.cache[path] = goPackageResolveResult{pkg: pkg, err: err}
-	return pkg, err
+	// Every resolution comes from the primed session (ADR 0044): a lazy
+	// per-path load here would silently create a second go/types universe.
+	return nil, fmt.Errorf("internal compiler bug: Go package %q was not collected by the import pre-scan; please report this", path)
 }
 
-func (r *GoPackagesResolver) load(path string) (*GoPackage, error) {
-	if r.modulePathErr != nil {
-		return nil, fmt.Errorf("read go.mod: %w", r.modulePathErr)
+// Prime loads every given Go import path in a single go/packages call so all
+// resolved packages share one go/types universe (ADR 0044). Failures —
+// including a load session that cannot run at all — are recorded per path
+// and surface as diagnostics at the importing `use` statement.
+//
+// Priming is a one-shot operation. Once primed, paths outside the primed set
+// indicate an incomplete pre-scan: loading them would silently create a
+// second type universe, so Prime reports the internal error instead.
+func (r *GoPackagesResolver) Prime(paths []string) error {
+	if r.cache == nil {
+		r.cache = map[string]goPackageResolveResult{}
 	}
+	pending := make([]string, 0, len(paths))
+	seen := map[string]bool{}
+	for _, path := range paths {
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		if _, cached := r.cache[path]; cached {
+			continue
+		}
+		pending = append(pending, path)
+	}
+	if len(pending) == 0 {
+		r.primed = true
+		return nil
+	}
+	if r.primed {
+		return fmt.Errorf("internal compiler bug: Go packages %v were not collected by the import pre-scan; please report this", pending)
+	}
+	defer func() { r.primed = true }()
+	if r.modulePathErr != nil {
+		r.recordFailure(pending, fmt.Errorf("read go.mod: %w", r.modulePathErr))
+		return nil
+	}
+	loaded, err := packages.Load(r.loadConfig(), pending...)
+	if err != nil {
+		r.recordFailure(pending, err)
+		return nil
+	}
+	byPath := make(map[string]*packages.Package, len(loaded))
+	for _, pkg := range loaded {
+		byPath[pkg.PkgPath] = pkg
+	}
+	for _, path := range pending {
+		pkg, ok := byPath[path]
+		if !ok {
+			r.cache[path] = goPackageResolveResult{err: fmt.Errorf("package %q not found", path)}
+			continue
+		}
+		goPkg, pkgErr := r.packageFromLoadResult(path, pkg)
+		r.cache[path] = goPackageResolveResult{pkg: goPkg, err: pkgErr}
+	}
+	return nil
+}
+
+// recordFailure caches a session-level load failure for every pending path
+// so it surfaces as a source-located diagnostic at each Go import.
+func (r *GoPackagesResolver) recordFailure(paths []string, err error) {
+	for _, path := range paths {
+		r.cache[path] = goPackageResolveResult{err: err}
+	}
+}
+
+func (r *GoPackagesResolver) loadConfig() *packages.Config {
 	cfg := &packages.Config{
 		Mode: packages.NeedName |
 			packages.NeedTypes |
@@ -82,14 +150,10 @@ func (r *GoPackagesResolver) load(path string) (*GoPackage, error) {
 	if len(r.BuildTags) > 0 {
 		cfg.BuildFlags = []string{"-tags=" + strings.Join(r.BuildTags, ",")}
 	}
-	loaded, err := packages.Load(cfg, path)
-	if err != nil {
-		return nil, err
-	}
-	if len(loaded) == 0 {
-		return nil, fmt.Errorf("package not found")
-	}
-	pkg := loaded[0]
+	return cfg
+}
+
+func (r *GoPackagesResolver) packageFromLoadResult(path string, pkg *packages.Package) (*GoPackage, error) {
 	if err := r.validateLocalFFIBoundary(path, pkg); err != nil {
 		return nil, err
 	}

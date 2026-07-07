@@ -2687,8 +2687,21 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 		}
 	}
 	if closure, ok := expr.(*checker.FunctionDef); ok {
-		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo && expectedInfo.Kind == TypeFunction {
-			return fl.lowerClosure(expected, closure)
+		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo {
+			if expectedInfo.Kind == TypeFunction {
+				return fl.lowerClosure(expected, closure)
+			}
+			// A named Go func type carries its signature as the foreign
+			// type's underlying function (interned into Value with no Key or
+			// Elem, distinguishing it from named Go map and slice types).
+			// Lower the closure against that signature; Go's
+			// unnamed-to-named assignability accepts the literal at the
+			// boundary.
+			if expectedInfo.Kind == TypeForeignType && !expectedInfo.ForeignPointer && expectedInfo.Value != NoType && expectedInfo.Key == NoType && expectedInfo.Elem == NoType {
+				if underlyingInfo, ok := fl.l.typeInfo(expectedInfo.Value); ok && underlyingInfo.Kind == TypeFunction {
+					return fl.lowerClosure(expectedInfo.Value, closure)
+				}
+			}
 		}
 	}
 	if symbol, ok := expr.(*checker.ModuleSymbol); ok {

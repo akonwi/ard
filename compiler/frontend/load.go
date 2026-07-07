@@ -42,6 +42,9 @@ func LoadModule(inputPath string) (*LoadResult, error) {
 	}
 
 	projectInfo := moduleResolver.GetProjectInfo()
+	// The checker primes the resolver with the program's whole Go import
+	// closure before binding imports, so all Go types share a single
+	// go/types universe (ADR 0044).
 	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
 	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{GoResolver: goResolver})
 	c.Check()

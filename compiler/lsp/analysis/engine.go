@@ -37,6 +37,7 @@ type Engine struct {
 	mu         sync.Mutex
 	goResolver *lockedGoResolver
 	goModHash  string
+	goPrimed   map[string]bool        // go import paths primed into the session
 	parseCache map[string]*parseEntry // content hash -> parse result
 	checkCache map[string]*FileAnalysis
 	// insertion order for simple bounded eviction
@@ -93,7 +94,10 @@ func (e *Engine) ProjectRoot() string { return e.projectRoot }
 // --- shared Go resolver ---
 
 // lockedGoResolver serializes access to the underlying GoPackagesResolver,
-// which memoizes go/packages loads but is not goroutine-safe.
+// which memoizes go/packages loads but is not goroutine-safe. Wrapping also
+// intentionally opts LSP checks out of the checker's per-check auto-prime
+// (which type-asserts *GoPackagesResolver): the engine owns session priming
+// with the workspace-wide union in goResolverFor.
 type lockedGoResolver struct {
 	mu    sync.Mutex
 	inner *checker.GoPackagesResolver
@@ -105,22 +109,61 @@ func (r *lockedGoResolver) ResolveGoPackage(path string) (*checker.GoPackage, er
 	return r.inner.ResolveGoPackage(path)
 }
 
-// goResolverFor returns the shared Go resolver, rebuilding it when go.mod or
-// go.sum change.
-func (e *Engine) goResolverFor(projectInfo *checker.ProjectInfo) checker.GoPackageResolver {
+// goResolverFor returns the shared primed Go resolver session (ADR 0044 A3).
+// The session is one go/packages load covering every Go import path the
+// workspace has needed, so all Go types within a check share one go/types
+// universe. It is rebuilt when go.mod/go.sum change or when a check needs
+// paths the session has not primed; rebuilds prime the union of previous and
+// newly needed paths so other files' packages stay in the same session.
+func (e *Engine) goResolverFor(projectInfo *checker.ProjectInfo, goPaths []string) checker.GoPackageResolver {
 	sig := e.goModSignature()
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.goResolver == nil || e.goModHash != sig {
-		root := e.projectRoot
-		var tags []string
-		if projectInfo != nil {
-			root = projectInfo.RootPath
-			tags = projectInfo.Go.BuildTags
+	if e.goResolver != nil && e.goModHash == sig {
+		covered := true
+		for _, path := range goPaths {
+			if !e.goPrimed[path] {
+				covered = false
+				break
+			}
 		}
-		e.goResolver = &lockedGoResolver{inner: checker.NewGoPackagesResolver(root, tags)}
-		e.goModHash = sig
+		if covered {
+			return e.goResolver
+		}
 	}
+	root := e.projectRoot
+	var tags []string
+	if projectInfo != nil {
+		root = projectInfo.RootPath
+		tags = projectInfo.Go.BuildTags
+	}
+	primed := map[string]bool{}
+	if e.goModHash == sig {
+		// Carry previously primed paths into the new session so the rest of
+		// the workspace keeps resolving from the same universe. Paths that
+		// fail to load only cost a per-path error entry.
+		for path := range e.goPrimed {
+			primed[path] = true
+		}
+	}
+	for _, path := range goPaths {
+		primed[path] = true
+	}
+	union := make([]string, 0, len(primed))
+	for path := range primed {
+		union = append(union, path)
+	}
+	sort.Strings(union)
+	resolver := checker.NewGoPackagesResolver(root, tags)
+	// Prime on a fresh resolver cannot fail: load-level failures (for
+	// example an unreadable go.mod) are recorded per path and surface as
+	// diagnostics at each Go import.
+	if err := resolver.Prime(union); err != nil {
+		panic(fmt.Sprintf("prime fresh Go resolver session: %v", err))
+	}
+	e.goResolver = &lockedGoResolver{inner: resolver}
+	e.goModHash = sig
+	e.goPrimed = primed
 	return e.goResolver
 }
 
@@ -432,7 +475,11 @@ func (s *Snapshot) newModuleResolver(filePath string) (*checker.ModuleResolver, 
 // check runs the checker for the file with snapshot overlays applied.
 func (s *Snapshot) check(filePath string, relPath string, program *parse.Program, parseErrors []parse.ParseError, moduleResolver *checker.ModuleResolver, sig string) (*FileAnalysis, error) {
 	projectInfo := moduleResolver.GetProjectInfo()
-	goResolver := s.engine.goResolverFor(projectInfo)
+	// Pre-scan this check's import closure for Go paths so the shared
+	// session is primed before checking begins (ADR 0044). The module
+	// resolver carries the snapshot overlays, so unsaved edits participate.
+	goPaths := checker.CollectGoImportPaths(moduleResolver, checker.GoImportScanEntry{Program: program, ModulePath: strings.TrimSuffix(relPath, ".ard")})
+	goResolver := s.engine.goResolverFor(projectInfo, goPaths)
 
 	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{
 		GoResolver:  goResolver,
