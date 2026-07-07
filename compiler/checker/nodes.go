@@ -167,6 +167,7 @@ func (v Variable) String() string {
 func (v Variable) Name() string {
 	return v.sym.Name
 }
+
 // Type returns the referent type for reference-typed storage: reads through
 // a `mut T` binding see the referent, mirroring InstanceProperty (ADR 0045).
 // The raw storage type stays available via StorageType.
@@ -290,7 +291,6 @@ const (
 	StrContains
 	StrReplace
 	StrReplaceAll
-	StrSplit
 	StrStartsWith
 	StrEndsWith
 	StrToStr

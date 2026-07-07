@@ -4775,8 +4775,6 @@ func (fl *functionLowerer) lowerStrMethod(typeID TypeID, method *checker.StrMeth
 	case checker.StrReplaceAll:
 		kind = ExprStrReplaceAll
 		expected = []TypeID{strType, strType}
-	case checker.StrSplit:
-		kind = ExprStrSplit
 		expected = []TypeID{strType}
 	case checker.StrStartsWith:
 		kind = ExprStrStartsWith

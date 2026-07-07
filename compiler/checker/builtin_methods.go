@@ -9,7 +9,7 @@ var (
 	strMethodNames = map[StrMethodKind]string{
 		StrSize: "size", StrAt: "at", StrBytes: "bytes", StrRunes: "runes",
 		StrIsEmpty: "is_empty", StrContains: "contains", StrReplace: "replace",
-		StrReplaceAll: "replace_all", StrSplit: "split",
+		StrReplaceAll: "replace_all",
 		StrStartsWith: "starts_with", StrEndsWith: "ends_with",
 		StrToStr: "to_str", StrTrim: "trim",
 	}

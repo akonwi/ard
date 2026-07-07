@@ -134,7 +134,6 @@ const (
 	ExprStrContains
 	ExprStrReplace
 	ExprStrReplaceAll
-	ExprStrSplit
 	ExprStrStartsWith
 	ExprStrEndsWith
 	ExprToAny
