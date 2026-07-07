@@ -120,6 +120,38 @@ func goPackageFromTypesPackage(path string, pkg *types.Package) *GoPackage {
 	return goPkg
 }
 
+// adaptedGoFunctionValueType returns the signature a reference to an adapted
+// Go function carries as a value, along with whether the function is
+// variadic. The imported FunctionDef already maps results to their Ard forms
+// (error results to Result, comma-ok to Maybe); a variadic tail additionally
+// becomes a trailing Maybe of the variadic element type, mirroring the
+// call-site rule. It reports false when the adaptation has no value form the
+// compiler knows how to synthesize.
+func adaptedGoFunctionValueType(def *FunctionDef) (*FunctionDef, bool, bool) {
+	variadic := len(def.Parameters) > 0 && def.Parameters[len(def.Parameters)-1].Variadic
+	resultAdapted := false
+	switch def.ReturnType.(type) {
+	case *Result, *Maybe:
+		resultAdapted = true
+	}
+	if !variadic && !resultAdapted {
+		return nil, false, false
+	}
+	if !variadic {
+		// Copy so a ForeignValue's ValueType can never alias the package's
+		// canonical definition.
+		value := *def
+		return &value, false, true
+	}
+	params := make([]Parameter, len(def.Parameters))
+	copy(params, def.Parameters)
+	last := params[len(params)-1]
+	params[len(params)-1] = Parameter{Name: last.Name, Type: MakeMaybe(last.Type)}
+	value := *def
+	value.Parameters = params
+	return &value, true, true
+}
+
 // goSignatureAdaptation reports why a Go signature's raw form differs from
 // its Ard-visible mapping, or "" when the two agree and a direct reference
 // to the function is a faithful value of the Ard type.

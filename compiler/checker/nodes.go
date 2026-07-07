@@ -1359,6 +1359,17 @@ type ForeignValue struct {
 	Symbol     string
 	ValueType  Type
 	Assignable bool
+	// AdaptedFunction marks a reference to a Go function whose raw signature
+	// differs from its Ard-facing one (error results become Results, comma-ok
+	// becomes Maybe, a variadic tail becomes a trailing Maybe parameter).
+	// ValueType is the adapted signature; targets synthesize the boundary
+	// adapter so the value behaves exactly like a call to the function.
+	AdaptedFunction bool
+	// VariadicAdapter is set with AdaptedFunction when the Go function is
+	// variadic: the adapted signature's final parameter is a Maybe of the
+	// variadic element type, and the adapter passes the value when present
+	// and nothing otherwise, mirroring the call-site rule.
+	VariadicAdapter bool
 }
 
 func (p *ForeignValue) Type() Type {
