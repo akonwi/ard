@@ -27,16 +27,8 @@ use go:time
 fn service() mut chi::Mux {
   let router = chi::NewRouter()
 
-  router.Use(
-    fn(next: http::Handler) http::Handler {
-      middleware::RequestID(next)
-    },
-  )
-  router.Use(
-    fn(next: http::Handler) http::Handler {
-      middleware::Logger(next)
-    },
-  )
+  router.Use(middleware::RequestID)
+  router.Use(middleware::Logger)
 
   router.Get(
     "/",
