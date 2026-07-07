@@ -858,3 +858,86 @@ func TestForwardFunctionReferences(t *testing.T) {
 		},
 	})
 }
+
+func TestClosureReturnTypeInference(t *testing.T) {
+	run(t, []test{
+		{
+			name: "closure without return annotation infers its return from the body",
+			input: `
+				let f = fn(x: Int) Int { x + 1 }
+				let inferred = fn(x: Int) { x + 1 }
+				let y: Int = inferred(1)
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "inferred closure return participates in expressions",
+			input: `
+				let double = fn(x: Int) { x * 2 }
+				let total = double(2) + double(3)
+				let text = fn(name: Str) { "hi {name}" }
+				let greeting: Str = text("Ada")
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "closure with statement body stays void",
+			input: `
+				let noop = fn(x: Int) {
+					let y = x
+				}
+				let bad: Int = noop(1)
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
+			},
+		},
+		{
+			name: "declared void return is not overridden by a value body",
+			input: `
+				fn use_void(cb: fn(Int)) {}
+				use_void(fn(x: Int) { x + 1 })
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "explicit Void annotation opts out of inference and discards the value",
+			input: `
+				let g = fn(x: Int) Void { x + 1 }
+				let bad: Int = g(1)
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Void"},
+			},
+		},
+		{
+			name: "inferred closure value flows into fn-typed params and struct fields",
+			input: `
+				struct Holder {
+					transform: fn(Int) Int,
+				}
+
+				fn apply(f: fn(Int) Int, x: Int) Int {
+					f(x)
+				}
+
+				let inc = fn(x: Int) { x + 1 }
+				let holder = Holder{transform: inc}
+				let a: Int = apply(inc, 4)
+				let b: Int = holder.transform(4)
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "inferred non-void closure is rejected where a void callback is expected",
+			input: `
+				fn run(cb: fn(Int)) {}
+				let produce = fn(x: Int) { x + 1 }
+				run(produce)
+			`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected fn(Int), got fn(Int) Int"},
+			},
+		},
+	})
+}

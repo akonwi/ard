@@ -74,3 +74,41 @@ fn main() {
 		t.Fatalf("RunProgram error = %v", err)
 	}
 }
+
+// TestRunProgramInfersClosureReturnFromBody pins that a stand-alone closure
+// with no return annotation adopts its body's final expression type and
+// compiles to a value-returning Go function (issue #266).
+func TestRunProgramInfersClosureReturnFromBody(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"closureinfer\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`fn main() {
+  let double = fn(x: Int) { x * 2 }
+  let total = double(2) + double(3)
+  if not total == 10 { panic("inferred closure returned {total}") }
+
+  let describe = fn(flag: Bool) {
+    match flag {
+      true => "on",
+      false => "off",
+    }
+  }
+  if not describe(true) == "on" { panic("inferred match closure failed") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
