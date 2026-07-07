@@ -24,8 +24,6 @@ use go:time
 //   - Go errors arrive stringified (`Void!Str`), so `errors.Is(err,
 //     http.ErrServerClosed)` becomes a message comparison.
 
-let five_seconds: time::Duration = 5 * time::Second
-
 fn service() mut chi::Mux {
   let router = chi::NewRouter()
 
@@ -53,7 +51,7 @@ fn service() mut chi::Mux {
     fn(w: http::ResponseWriter, r: mut http::Request) {
       // Simulates some hard work. We want this handler to complete
       // successfully during a shutdown signal.
-      time::Sleep(five_seconds)
+      time::Sleep(5 * time::Second)
 
       mut body = "all done.\n".bytes()
       w.Write(body)
