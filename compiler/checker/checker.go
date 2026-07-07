@@ -7276,14 +7276,19 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						if typ := goPkg.Variables[prop.Name]; typ != nil {
 							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ, Assignable: true}
 						}
-						// An imported Go function is a first-class value when its
-						// raw Go signature is its Ard-visible one; adapted shapes
-						// (variadic, error/comma-ok results) would not be faithful
-						// values, so they stay call-only.
+						// An imported Go function is a first-class value with its
+						// Ard-facing signature. Unadapted shapes reference the Go
+						// function directly; adapted shapes (variadic, error and
+						// comma-ok results) get a compiler-synthesized boundary
+						// adapter so the value behaves exactly like a call.
 						if def := goPkg.Functions[prop.Name]; def != nil {
 							if reason := goPkg.AdaptedFunctions[prop.Name]; reason != "" {
-								c.addError(fmt.Sprintf("Go function %s::%s cannot be referenced as a value: %s; wrap it in a closure", id.Name, prop.Name, reason), prop.GetLocation())
-								return nil
+								valueType, variadic, ok := adaptedGoFunctionValueType(def)
+								if !ok {
+									c.addError(fmt.Sprintf("Go function %s::%s cannot be referenced as a value: %s; wrap it in a closure", id.Name, prop.Name, reason), prop.GetLocation())
+									return nil
+								}
+								return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: valueType, AdaptedFunction: true, VariadicAdapter: variadic}
 							}
 							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: def}
 						}

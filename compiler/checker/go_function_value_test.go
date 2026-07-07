@@ -8,10 +8,11 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// TestGoFunctionsAsValues pins that imported Go functions whose signatures
-// need no boundary adaptation are first-class values, while adapted shapes
-// (variadic, error or comma-ok results) and generic functions report an
-// actionable diagnostic instead.
+// TestGoFunctionsAsValues pins that imported Go functions are first-class
+// values with their Ard-facing signatures: unadapted shapes reference the Go
+// function directly, while adapted shapes (variadic, error or comma-ok
+// results) carry the same adapted signature they have in call position.
+// Generic functions still report an actionable diagnostic.
 func TestGoFunctionsAsValues(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -41,31 +42,43 @@ fn main() {
 }`,
 		},
 		{
-			name: "variadic Go function cannot be referenced as a value",
+			name: "variadic Go function value takes a trailing Maybe parameter",
 			input: `use go:fmt
+use ard/maybe
 
 fn main() {
-  let print = fmt::Println
+  let print: fn(Any?) Int!Str = fmt::Println
+  print("hello")
+  print(maybe::none())
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Go function fmt::Println cannot be referenced as a value: it is variadic; wrap it in a closure"}},
 		},
 		{
-			name: "error-adapted Go function cannot be referenced as a value",
+			name: "error-adapted Go function value carries its Result signature",
 			input: `use go:os
 
 fn main() {
-  let read = os::ReadFile
+  let read: fn(Str) [Byte]!Str = os::ReadFile
+  let failed = read("missing.txt").is_err()
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Go function os::ReadFile cannot be referenced as a value: it returns a Go error, which Ard adapts to a Result at call sites; wrap it in a closure"}},
 		},
 		{
-			name: "comma-ok-adapted Go function cannot be referenced as a value",
+			name: "comma-ok-adapted Go function value carries its Maybe signature",
 			input: `use go:os
 
 fn main() {
-  let lookup = os::LookupEnv
+  let lookup: fn(Str) Str? = os::LookupEnv
+  let home = lookup("HOME").or("")
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Go function os::LookupEnv cannot be referenced as a value: its comma-ok result is adapted to a Maybe at call sites; wrap it in a closure"}},
+		},
+		{
+			name: "error-only Go function value carries a Void Result signature",
+			input: `use go:os
+
+fn main() Void!Str {
+  let chdir: fn(Str) Void!Str = os::Chdir
+  try chdir(".")
+  Result::ok(())
+}`,
 		},
 		{
 			name: "generic Go function cannot be referenced as a value",

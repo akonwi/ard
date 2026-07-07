@@ -651,6 +651,94 @@ func (l *lowerer) declareClosureFunction(module ModuleID, keyName string, def *c
 	return id, nil
 }
 
+// declareGoAdapterFunction synthesizes the boundary adapter behind a
+// reference to an adapted Go function (ADR 0031 boundary contract): the
+// adapter's body is an ordinary foreign call, so the existing call lowering
+// provides the error-to-Result, comma-ok-to-Maybe, and variadic adaptations.
+// A variadic Go function's adapter takes a trailing Maybe of the variadic
+// element type and passes the value only when present, mirroring the
+// call-site rule.
+func (l *lowerer) declareGoAdapterFunction(module ModuleID, value *checker.ForeignValue, fnTypeID TypeID) (FunctionID, error) {
+	key := functionKey(module, fmt.Sprintf("go_adapter/%s.%s", value.Namespace, value.Symbol))
+	if id, ok := l.functions[key]; ok {
+		return id, nil
+	}
+	typeInfo, ok := l.typeInfo(fnTypeID)
+	if !ok || typeInfo.Kind != TypeFunction {
+		return NoFunction, fmt.Errorf("go adapter for %s::%s lowered with non-function AIR type %d", value.Qualifier, value.Symbol, fnTypeID)
+	}
+	params := make([]Param, len(typeInfo.Params))
+	locals := make([]Local, len(typeInfo.Params))
+	loads := make([]Expr, len(typeInfo.Params))
+	for i, paramType := range typeInfo.Params {
+		name := fmt.Sprintf("arg%d", i)
+		params[i] = Param{Name: name, Type: paramType}
+		locals[i] = Local{ID: LocalID(i), Name: name, Type: paramType}
+		loads[i] = Expr{Kind: ExprLoadLocal, Type: paramType, Local: LocalID(i)}
+	}
+	foreignCall := func(args []Expr) *Expr {
+		return &Expr{Kind: ExprForeignCall, Type: typeInfo.Return, ForeignTarget: value.Target, ForeignNamespace: value.Namespace, ForeignQualifier: value.Qualifier, ForeignSymbol: value.Symbol, Args: args}
+	}
+	var result *Expr
+	if value.VariadicAdapter {
+		if len(loads) == 0 {
+			return NoFunction, fmt.Errorf("variadic go adapter for %s::%s has no parameters", value.Qualifier, value.Symbol)
+		}
+		last := loads[len(loads)-1]
+		lastInfo, ok := l.typeInfo(last.Type)
+		if !ok || lastInfo.Kind != TypeMaybe {
+			return NoFunction, fmt.Errorf("variadic go adapter for %s::%s expects a trailing Maybe parameter", value.Qualifier, value.Symbol)
+		}
+		boolType, err := l.internType(checker.Bool)
+		if err != nil {
+			return NoFunction, err
+		}
+		strType, err := l.internType(checker.Str)
+		if err != nil {
+			return NoFunction, err
+		}
+		fixedArgs := loads[:len(loads)-1]
+		// The expect message is unreachable: the some-branch only runs after
+		// the is_some check.
+		variadicArg := Expr{Kind: ExprMaybeExpect, Type: lastInfo.Elem, Target: &last, Args: []Expr{{Kind: ExprConstStr, Type: strType, Str: "go adapter: guarded unwrap"}}}
+		result = &Expr{
+			Kind:      ExprIf,
+			Type:      typeInfo.Return,
+			Condition: &Expr{Kind: ExprMaybeIsSome, Type: boolType, Target: &last},
+			Then:      Block{Result: foreignCall(append(append([]Expr{}, fixedArgs...), variadicArg))},
+			Else:      Block{Result: foreignCall(fixedArgs)},
+		}
+	} else {
+		result = foreignCall(loads)
+	}
+	id := FunctionID(len(l.program.Functions))
+	l.functions[key] = id
+	l.program.Functions = append(l.program.Functions, Function{
+		ID:        id,
+		Module:    module,
+		Name:      fmt.Sprintf("go_adapter_%s_%s", sanitizeAdapterName(value.Qualifier), value.Symbol),
+		Signature: Signature{Params: params, Return: typeInfo.Return},
+		Locals:    locals,
+		Body:      Block{Result: result},
+		Private:   true,
+	})
+	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
+	l.loweredFuncs[id] = true
+	return id, nil
+}
+
+func sanitizeAdapterName(name string) string {
+	out := make([]rune, 0, len(name))
+	for _, r := range name {
+		if r == '/' || r == '.' || r == '-' {
+			out = append(out, '_')
+			continue
+		}
+		out = append(out, r)
+	}
+	return string(out)
+}
+
 func (l *lowerer) declareScriptFunction(module ModuleID) (FunctionID, error) {
 	key := functionKey(module, "<script>")
 	if id, ok := l.functions[key]; ok {
@@ -3879,6 +3967,13 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		}
 		return nil, fmt.Errorf("unsupported unresolved function call %s", e.Name)
 	case *checker.ForeignValue:
+		if e.AdaptedFunction {
+			id, err := fl.l.declareGoAdapterFunction(fl.fn.Module, e, typeID)
+			if err != nil {
+				return nil, err
+			}
+			return &Expr{Kind: ExprFunctionRef, Type: typeID, Function: id}, nil
+		}
 		return &Expr{Kind: ExprForeignValue, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol}, nil
 	case *checker.ForeignInterfaceUpcast:
 		value, err := fl.lowerExpr(e.Value)
