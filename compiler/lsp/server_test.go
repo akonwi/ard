@@ -2179,10 +2179,11 @@ let snapshot: Int = r
 ` + "\n"
 
 	tests := []struct {
-		name string
-		line uint32
-		char uint32
-		want string
+		name    string
+		line    uint32
+		char    uint32
+		want    string
+		notWant string
 	}{
 		{
 			name: "hover on reference binding definition",
@@ -2197,10 +2198,11 @@ let snapshot: Int = r
 			want: "mut Int",
 		},
 		{
-			name: "hover on plain mutable binding stays plain",
-			line: 0,
-			char: 4,
-			want: "Int",
+			name:    "hover on plain mutable binding stays plain",
+			line:    0,
+			char:    4,
+			want:    "Int",
+			notWant: "mut",
 		},
 	}
 
@@ -2213,6 +2215,9 @@ let snapshot: Int = r
 			}
 			if !strings.Contains(info.content, tt.want) {
 				t.Errorf("hover content = %q, want contains %q", info.content, tt.want)
+			}
+			if tt.notWant != "" && strings.Contains(info.content, tt.notWant) {
+				t.Errorf("hover content = %q, want without %q", info.content, tt.notWant)
 			}
 		})
 	}
