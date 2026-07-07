@@ -167,8 +167,11 @@ func (v Variable) String() string {
 func (v Variable) Name() string {
 	return v.sym.Name
 }
+// Type returns the referent type for reference-typed storage: reads through
+// a `mut T` binding see the referent, mirroring InstanceProperty (ADR 0045).
+// The raw storage type stays available via v.sym.Type.
 func (v Variable) Type() Type {
-	return v.sym.Type
+	return derefMutableRef(v.sym.Type)
 }
 
 type SubjectKind uint8
@@ -176,6 +179,24 @@ type SubjectKind uint8
 const (
 	StructSubject SubjectKind = iota
 )
+
+// MutableRefExpr is the explicit `mut <operand>` expression (ADR 0045). It
+// evaluates to a mutable reference to the operand's storage. Fresh marks a
+// value-expression operand that materializes new mutable storage rather than
+// referencing an existing place.
+type MutableRefExpr struct {
+	Operand Expression
+	Fresh   bool
+	_type   Type
+}
+
+func (m *MutableRefExpr) Type() Type {
+	return m._type
+}
+
+func (m *MutableRefExpr) String() string {
+	return fmt.Sprintf("mut %s", m.Operand)
+}
 
 type InstanceProperty struct {
 	Subject  Expression

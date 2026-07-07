@@ -96,7 +96,7 @@ func TestMutableReferenceParameters(t *testing.T) {
 			},
 		},
 		{
-			name: "call-site mut no longer copies immutable argument",
+			name: "call-site mut of an immutable argument is rejected",
 			input: `
 				struct Person { age: Int }
 
@@ -109,7 +109,7 @@ func TestMutableReferenceParameters(t *testing.T) {
 			diagnostics: []checker.Diagnostic{
 				{
 					Kind:    checker.Error,
-					Message: "Type mismatch: Expected a mutable Person",
+					Message: "Cannot take a mutable reference to immutable 'joe'",
 				},
 			},
 		},

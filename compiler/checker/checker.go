@@ -263,8 +263,48 @@ func referenceArgType(expr Expression) Type {
 	return expr.Type()
 }
 
+// checkMutRef checks the explicit `mut <operand>` expression (ADR 0045).
+func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
+	operand := c.checkExpr(s.Operand)
+	if operand == nil {
+		return nil
+	}
+	// A place whose storage is already a reference aliases: the result is
+	// another reference to the same referent. Reads see through references,
+	// so `mut` is the only spelling that propagates one (ADR 0045).
+	fresh := false
+	switch operand.(type) {
+	case *Variable, *InstanceProperty, *ForeignFieldAccess:
+		if !c.isMutable(operand) {
+			c.addError(fmt.Sprintf("Cannot take a mutable reference to immutable '%s'", mutRefPlaceName(operand)), s.Operand.GetLocation())
+			return nil
+		}
+	default:
+		// A value expression materializes fresh mutable storage; the
+		// reference points at it, equivalent to binding a mut local first.
+		fresh = true
+	}
+	var refType Type
+	if foreign, ok := operand.Type().(*ForeignType); ok {
+		if foreign.Pointer {
+			// The place already holds a reference; aliasing copies it.
+			refType = foreign
+		} else if pointer := foreign.PointerForm(); pointer != nil {
+			refType = pointer
+		} else {
+			c.addError(fmt.Sprintf("Cannot take a mutable reference to %s", foreign), s.GetLocation())
+			return nil
+		}
+	} else {
+		refType = MakeMutableRef(operand.Type())
+	}
+	return &MutableRefExpr{Operand: operand, Fresh: fresh, _type: refType}
+}
+
 func (c Checker) isMutable(expr Expression) bool {
 	switch e := expr.(type) {
+	case *MutableRefExpr:
+		return true
 	case *Variable:
 		// A value whose type is a mutable reference is itself mutable through the
 		// reference, regardless of whether the binding is reassignable (ADR 0031).
@@ -2161,7 +2201,21 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 
-				if !target.mutable {
+				// Assignment through a mutable-reference binding writes the
+				// referent; it does not rebind, so the binding's own
+				// (im)mutability does not gate it (ADR 0045).
+				expectedType := target.Type
+				refBase, targetIsRef := mutableRefBase(target.Type)
+				if targetIsRef {
+					expectedType = refBase
+					// Whole-value writes cannot reach descriptor-backed
+					// referents: the alias shares element storage, not the
+					// binding slot (ADR 0040 / ADR 0045).
+					if !mutableParamNeedsGoPointer(refBase) {
+						c.addError(fmt.Sprintf("Cannot assign a new value through '%s': element writes share storage, but the referent binding is not reachable. Assign to the original binding instead", target.Name), s.Target.GetLocation())
+						return nil
+					}
+				} else if !target.mutable {
 					c.addError(fmt.Sprintf("Immutable variable: %s", target.Name), s.Target.GetLocation())
 					return nil
 				}
@@ -2174,8 +2228,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 
-				if !c.areCompatible(target.Type, value.Type()) {
-					c.addError(typeMismatch(target.Type, value.Type()), s.Value.GetLocation())
+				if targetIsRef {
+					// A reference binding is not rebindable: writing a new
+					// reference through it has no storage to land in.
+					if _, valueIsRef := value.Type().(*MutableRef); valueIsRef || isPointerForeign(value.Type()) {
+						c.addError("References cannot be rebound; assign the value directly", s.Value.GetLocation())
+						return nil
+					}
+				}
+
+				if !c.areCompatible(expectedType, value.Type()) {
+					c.addError(typeMismatch(expectedType, value.Type()), s.Value.GetLocation())
 					return nil
 				}
 
@@ -3505,6 +3568,8 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 		c.validateUnsafeCatchResultsInExpression(e.Value, resultType, loc)
 	case *Not:
 		c.validateUnsafeCatchResultsInExpression(e.Value, resultType, loc)
+	case *MutableRefExpr:
+		c.validateUnsafeCatchResultsInExpression(e.Operand, resultType, loc)
 	case *IntAddition:
 		c.validateUnsafeCatchResultsInExpression(e.Left, resultType, loc)
 		c.validateUnsafeCatchResultsInExpression(e.Right, resultType, loc)
@@ -3690,6 +3755,20 @@ func (c *Checker) primeGoResolver() {
 			}
 		}
 	}
+}
+
+// mutRefPlaceName renders a place expression for diagnostics without
+// falling back to Go struct formatting for complex subjects.
+func mutRefPlaceName(operand Expression) string {
+	switch e := operand.(type) {
+	case *Variable:
+		return e.Name()
+	case *InstanceProperty:
+		return mutRefPlaceName(e.Subject) + "." + e.Property
+	case *ForeignFieldAccess:
+		return mutRefPlaceName(e.Subject) + "." + e.Symbol
+	}
+	return "value"
 }
 
 // expectedFunctionTypeForClosure returns the function signature a closure
@@ -5625,6 +5704,8 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			// Create function call
 			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs)
 		}
+	case *parse.MutRef:
+		return c.checkMutRef(s)
 	case *parse.UnaryExpression:
 		{
 			value := c.checkExpr(s.Operand)
