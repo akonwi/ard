@@ -6304,20 +6304,35 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			}
 
 			// Check body
-			c.pushFunctionGenericContext(fn)
-			body := c.checkBlockWithExpected(s.Body, func() {
+			setup := func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
 				}
-			}, returnType, true)
+			}
+			c.pushFunctionGenericContext(fn)
+			var body *Block
+			if fn.InferReturnTypeFromBody {
+				// Without a return annotation, the closure adopts its body's
+				// final expression type (issue #266). The final expression is
+				// checked as a value so constructs like match keep their arm
+				// consistency validation. Expected-type contexts (combinator
+				// generics, Go callbacks, annotated fn types) flow through
+				// checkExprAs instead of this path, so the expected type still
+				// governs there — a value-producing body keeps discarding for
+				// void callbacks.
+				body = c.checkBlockWithInferredFinalValue(s.Body, setup, false)
+				fn.ReturnType = body.Type()
+			} else {
+				body = c.checkBlockWithExpected(s.Body, setup, returnType, true)
+			}
 			c.popFunctionGenericContext()
 
 			// Add function to scope after body is checked (for generic resolution support)
 			c.scope.add(uniqueName, fn, false)
 
 			// Validate return type
-			if returnType != Void && !c.areCompatible(returnType, body.Type()) {
+			if !fn.InferReturnTypeFromBody && returnType != Void && !c.areCompatible(returnType, body.Type()) {
 				c.addError(typeMismatch(returnType, body.Type()), s.GetLocation())
 				return nil
 			}
