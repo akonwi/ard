@@ -1902,7 +1902,7 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		if err != nil {
 			return nil, err
 		}
-		return []ast.Stmt{&ast.ForStmt{Cond: condition.expr, Body: body}}, nil
+		return []ast.Stmt{l.labelLoopBreaks(&ast.ForStmt{Cond: condition.expr, Body: body}, body)}, nil
 	case air.StmtForMap:
 		if stmt.Target == nil {
 			return nil, fmt.Errorf("map for statement missing target")
@@ -1926,12 +1926,70 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(keyName)}},
 			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(valueName)}},
 		}, body.List...)
-		return []ast.Stmt{&ast.RangeStmt{Key: ast.NewIdent(keyName), Value: ast.NewIdent(valueName), Tok: token.DEFINE, X: target.expr, Body: body}}, nil
+		rangeStmt := &ast.RangeStmt{Key: ast.NewIdent(keyName), Value: ast.NewIdent(valueName), Tok: token.DEFINE, X: target.expr, Body: body}
+		return []ast.Stmt{l.labelLoopBreaks(rangeStmt, body)}, nil
 	case air.StmtBreak:
 		return []ast.Stmt{&ast.BranchStmt{Tok: token.BREAK}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported statement kind %d", stmt.Kind)
 	}
+}
+
+// labelLoopBreaks rewrites Ard `break` statements that lower lexically inside
+// an emitted Go switch, type switch, or select so they exit the enclosing
+// loop instead of that construct. In Go a bare `break` binds to the nearest
+// switch/select/for, but Ard's `break` always means the nearest loop, so the
+// loop gains a label and the intercepted breaks become `break <label>`.
+// Nested loops and function literals are not descended into: breaks there
+// bind to their own construct.
+func (l *lowerer) labelLoopBreaks(loop ast.Stmt, body *ast.BlockStmt) ast.Stmt {
+	label := fmt.Sprintf("_loop_%d", l.tempCounter)
+	labeled := false
+	var rewrite func(node ast.Node, intercepted bool)
+	rewrite = func(node ast.Node, intercepted bool) {
+		switch node := node.(type) {
+		case nil:
+			return
+		case *ast.BranchStmt:
+			if node.Tok == token.BREAK && node.Label == nil && intercepted {
+				node.Label = ast.NewIdent(label)
+				labeled = true
+			}
+		case *ast.ForStmt, *ast.RangeStmt, *ast.FuncLit:
+			// A nested loop owns its own breaks; a function literal is a
+			// different frame entirely.
+			return
+		case *ast.SwitchStmt:
+			rewrite(node.Body, true)
+		case *ast.TypeSwitchStmt:
+			rewrite(node.Body, true)
+		case *ast.SelectStmt:
+			rewrite(node.Body, true)
+		case *ast.BlockStmt:
+			for _, stmt := range node.List {
+				rewrite(stmt, intercepted)
+			}
+		case *ast.CaseClause:
+			for _, stmt := range node.Body {
+				rewrite(stmt, intercepted)
+			}
+		case *ast.CommClause:
+			for _, stmt := range node.Body {
+				rewrite(stmt, intercepted)
+			}
+		case *ast.IfStmt:
+			rewrite(node.Body, intercepted)
+			rewrite(node.Else, intercepted)
+		case *ast.LabeledStmt:
+			rewrite(node.Stmt, intercepted)
+		}
+	}
+	rewrite(body, false)
+	if !labeled {
+		return loop
+	}
+	l.tempCounter++
+	return &ast.LabeledStmt{Label: ast.NewIdent(label), Stmt: loop}
 }
 
 func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error) {
