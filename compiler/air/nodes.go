@@ -68,6 +68,11 @@ const (
 	ExprForeignInterfaceUpcast
 	ExprUnsafeCast
 	ExprUnsafeIsNil
+	// ExprMutRef is the explicit `mut <operand>` expression (ADR 0045). Target
+	// is the referenced place (or the value expression when Bool marks fresh
+	// storage); Type is the referent type. The backend chooses per
+	// representation whether a Go pointer is involved.
+	ExprMutRef
 	ExprMatchForeignType
 	// ExprScalarConvert converts Target's foreign named scalar value to the
 	// primitive scalar named by Type (for example Go's string(v)).

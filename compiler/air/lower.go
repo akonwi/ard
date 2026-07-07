@@ -3974,6 +3974,15 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		return &Expr{Kind: ExprUnsafeIsNil, Type: typeID, Target: value}, nil
+	case *checker.MutableRefExpr:
+		operand, err := fl.lowerExpr(e.Operand)
+		if err != nil {
+			return nil, err
+		}
+		// typeID interns the referent type (MutableRef interns to its base;
+		// pointer foreigns keep their pointer identity). The backend decides
+		// per representation whether an address-of is involved.
+		return &Expr{Kind: ExprMutRef, Type: typeID, Target: operand, Bool: e.Fresh}, nil
 	case *checker.ForeignFunctionCall:
 		if e.PointerResult && fl.directLetValue != checker.Expression(e) {
 			return nil, fmt.Errorf("a Go call returning %s must be bound directly with let", e.Call.Type())
@@ -6186,6 +6195,9 @@ func keyHasFunctionName(key, name string) bool {
 // instantiated result is `mut T` for an Ard-owned type. Foreign named types
 // carry pointer-ness in the type itself and do not need the local flag.
 func isMutableReferenceProducer(expr checker.Expression) bool {
+	if _, ok := expr.(*checker.MutableRefExpr); ok {
+		return true
+	}
 	call, ok := expr.(*checker.ForeignFunctionCall)
 	return ok && call.PointerResult
 }
