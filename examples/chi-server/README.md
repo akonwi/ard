@@ -8,7 +8,8 @@ There is no Go shim — everything is direct `use go:` interop:
 
 - `chi::NewRouter()` returned as `mut chi::Mux` and passed where `http::Handler`
   is expected (Go interface satisfaction across packages)
-- chi middleware (`RequestID`, `Logger`) applied through `router.Use`
+- chi middleware passed by reference: `router.Use(middleware::Logger)`
+  (Go functions as first-class values)
 - Ard closures as `http.HandlerFunc` route handlers, with value-producing
   bodies discarded for the void callback
 - a keyed `http::Server` struct literal with omitted fields, and
@@ -27,9 +28,6 @@ There is no Go shim — everything is direct `use go:` interop:
   `SIGINT` (the original also registers `SIGTERM`).
 - Go errors are stringified, so `errors.Is(err, http.ErrServerClosed)` becomes
   a message comparison.
-- Go functions are not yet first-class values
-  ([#263](https://github.com/akonwi/ard/issues/263)), so middleware is wrapped
-  in closures instead of passed by reference.
 
 ## Run
 

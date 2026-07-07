@@ -23,8 +23,6 @@ use go:time
 //     `context.Background()` and waits for in-flight requests to drain.
 //   - Go errors arrive stringified (`Void!Str`), so `errors.Is(err,
 //     http.ErrServerClosed)` becomes a message comparison.
-//   - Go functions are not yet first-class values (issue #263), so the
-//     middleware is wrapped in closures instead of passed by reference.
 
 // time.Duration is nanoseconds; integer literals type contextually.
 let five_seconds: time::Duration = 5000000000

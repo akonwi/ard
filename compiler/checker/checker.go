@@ -7154,6 +7154,25 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						if typ := goPkg.Variables[prop.Name]; typ != nil {
 							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ, Assignable: true}
 						}
+						// An imported Go function is a first-class value when its
+						// raw Go signature is its Ard-visible one; adapted shapes
+						// (variadic, error/comma-ok results) would not be faithful
+						// values, so they stay call-only.
+						if def := goPkg.Functions[prop.Name]; def != nil {
+							if reason := goPkg.AdaptedFunctions[prop.Name]; reason != "" {
+								c.addError(fmt.Sprintf("Go function %s::%s cannot be referenced as a value: %s; wrap it in a closure", id.Name, prop.Name, reason), prop.GetLocation())
+								return nil
+							}
+							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: def}
+						}
+						if _, isGeneric := goPkg.Generics[prop.Name]; isGeneric {
+							c.addError(fmt.Sprintf("Generic Go function %s::%s cannot be referenced as a value; wrap it in a closure so its type parameters are fixed", id.Name, prop.Name), prop.GetLocation())
+							return nil
+						}
+						if reason := goPkg.UnsupportedFunctions[prop.Name]; reason != "" {
+							c.addError(fmt.Sprintf("Unsupported Go function %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+							return nil
+						}
 						if reason := goPkg.UnsupportedConstants[prop.Name]; reason != "" {
 							c.addError(fmt.Sprintf("Unsupported Go constant %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
 							return nil
