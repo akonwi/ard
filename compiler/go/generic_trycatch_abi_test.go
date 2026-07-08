@@ -35,6 +35,50 @@ fn main() Bool {
 	}
 }
 
+// The tuple ABI applies to any Str-error Result, so a non-generic function and
+// a void-value Result must pack their try-catch early returns too. (#282)
+func TestGoTargetTryCatchResultABIVariants(t *testing.T) {
+	src := `fn inner(fail: Bool) Void!Str {
+  match fail {
+    true => Result::err("boom"),
+    false => Result::ok(()),
+  }
+}
+
+fn outer(fail: Bool) Void!Str {
+  try inner(fail) -> e {
+    Result::err("wrapped: {e}")
+  }
+  Result::ok(())
+}
+
+fn parse_first(items: [Str]) Int!Str {
+  let head = try items.at(0) -> _ {
+    Result::err("empty")
+  }
+  Result::ok(head.size())
+}
+
+fn main() Bool {
+  let void_ok = outer(false).is_ok()
+  let void_msg = match outer(true) {
+    ok(_) => "",
+    err(e) => e,
+  }
+  let n = parse_first(["abcd"]).or(0)
+  let empty: [Str] = []
+  let empty_msg = match parse_first(empty) {
+    ok(_) => "",
+    err(e) => e,
+  }
+  void_ok and void_msg == "wrapped: boom" and n == 4 and empty_msg == "empty"
+}`
+	program := lowerParitySource(t, src)
+	if got := runGoTargetParityJSON(t, program); got != "true" {
+		t.Fatalf("got %s, want true", got)
+	}
+}
+
 // A try-catch over a Maybe inside a generic Result-returning function must
 // likewise pack the caught value into the (T, error) tuple ABI. (#282)
 func TestGoTargetGenericTryMaybeCatchResultABI(t *testing.T) {
