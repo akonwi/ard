@@ -4816,6 +4816,9 @@ func (c *Checker) checkStrStatic(s *parse.StaticFunction) (Expression, bool) {
 		if arg == nil {
 			return nil, true
 		}
+		// checkExprAs applies contextual typing but does not itself report a
+		// plain mismatch, so this is the diagnostic path (same pattern as the
+		// foreign-scalar and Go-argument checks).
 		if !c.areCompatible(MakeList(Byte), arg.Type()) {
 			c.addError(typeMismatch(MakeList(Byte), arg.Type()), s.Function.Args[0].GetLocation())
 			return nil, true
