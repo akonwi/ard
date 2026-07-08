@@ -155,6 +155,18 @@ func TestFormatMutRefExpressions(t *testing.T) {
 	}
 }
 
+func TestFormatDefer(t *testing.T) {
+	input := "fn main() {\n  defer cleanup(  value )\n  defer {\n  cleanup()\n  log(\"done\")\n}\n}\n"
+	formatted, err := Format([]byte(input), "test.ard")
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+	want := "fn main() {\n  defer cleanup(value)\n  defer {\n    cleanup()\n    log(\"done\")\n  }\n}\n"
+	if string(formatted) != want {
+		t.Fatalf("formatted = %q, want %q", string(formatted), want)
+	}
+}
+
 func TestFormatInlineBreakMatchArms(t *testing.T) {
 	input := "fn main() {\n  for i in 1..3 {\n    match i {\n      2 => break,\n      _ => (),\n    }\n    match {\n      i == 1 => break,\n      _ => (),\n    }\n  }\n}\n"
 	formatted, err := Format([]byte(input), "test.ard")

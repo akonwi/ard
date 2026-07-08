@@ -24,6 +24,10 @@ type SymbolTable struct {
 	// stays quiet to avoid a duplicate diagnostic.
 	inUnsafe bool
 
+	// inScript marks top-level executable statements that will lower into the
+	// synthesized script function.
+	inScript bool
+
 	// Generic context for this scope
 	genericContext *GenericContext
 }
@@ -138,6 +142,19 @@ func (st *SymbolTable) getReturnType() Type {
 		return st.parent.getReturnType()
 	}
 	return nil
+}
+
+func (st *SymbolTable) insideScript() bool {
+	if st.inScript {
+		return true
+	}
+	if st.returnType != nil {
+		return false
+	}
+	if st.parent != nil {
+		return st.parent.insideScript()
+	}
+	return false
 }
 
 func (st *SymbolTable) isolate() {

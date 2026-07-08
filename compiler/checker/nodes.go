@@ -148,6 +148,15 @@ func (r *Reassignment) Type() Type {
 	return Void
 }
 
+type Defer struct {
+	Expr Expression
+	Body *Block
+}
+
+func (d *Defer) NonProducing() {}
+
+func (d *Defer) Type() Type { return Void }
+
 type Identifier struct {
 	Name string
 	sym  Symbol

@@ -2,6 +2,7 @@
 
 ; Keywords (node-based)
 (break_statement) @keyword
+(defer_statement "defer" @keyword)
 (if_statement "if" @keyword)
 (while_loop "while" @keyword)
 (for_loop "for" @keyword)

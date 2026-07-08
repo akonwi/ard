@@ -318,6 +318,19 @@ type VariableAssignment struct {
 	Value    Expression
 }
 
+type Defer struct {
+	Location
+	Expr Expression
+	Body []Statement
+}
+
+func (d Defer) String() string {
+	if d.Expr != nil {
+		return fmt.Sprintf("defer %s", d.Expr)
+	}
+	return "defer { ... }"
+}
+
 // impl interfaces
 func (v VariableAssignment) String() string {
 	return fmt.Sprintf("%v = %s", v.Target, v.Value)

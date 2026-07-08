@@ -285,6 +285,14 @@ func validateBlock(program *Program, fn Function, block Block) error {
 				return err
 			}
 		}
+		if stmt.Kind == StmtDefer {
+			if stmt.Expr == nil && len(stmt.Body.Stmts) == 0 && stmt.Body.Result == nil {
+				return fmt.Errorf("defer statement missing expression or body")
+			}
+			if err := validateBlock(program, fn, stmt.Body); err != nil {
+				return err
+			}
+		}
 	}
 	if block.Result != nil {
 		if err := validateExpr(program, fn, *block.Result); err != nil {

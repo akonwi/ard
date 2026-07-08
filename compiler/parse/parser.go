@@ -350,6 +350,9 @@ func (p *parser) parseStatement() (Statement, error) {
 	if p.match(break_) {
 		return p.breakStatement(), nil
 	}
+	if p.match(defer_) {
+		return p.deferStatement()
+	}
 	if p.match(let, mut) {
 		return p.parseVariableDef()
 	}
@@ -427,6 +430,25 @@ func (p *parser) parseStatement() (Statement, error) {
 		return p.implBlock(), nil
 	}
 	return p.assignment()
+}
+
+func (p *parser) deferStatement() (Statement, error) {
+	start := p.previous()
+	if p.check(left_brace) {
+		body, err := p.block()
+		if err != nil {
+			return nil, err
+		}
+		end := p.previous().getLocation().End
+		p.match(new_line)
+		return &Defer{Body: body, Location: Location{Start: start.getLocation().Start, End: end}}, nil
+	}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	p.match(new_line)
+	return &Defer{Expr: expr, Location: Location{Start: start.getLocation().Start, End: expr.GetLocation().End}}, nil
 }
 
 func (p *parser) parseVariableDef() (Statement, error) {

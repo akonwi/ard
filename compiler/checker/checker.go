@@ -354,6 +354,7 @@ type Checker struct {
 	methodGenericAllowlist            []map[string]bool
 	discardExprContext                bool
 	matchArmDiscardContext            bool
+	deferredWorkDepth                 int
 	reportedMapKeyErrors              map[parse.Location]bool
 	goTypesContext                    *gotypes.Context
 	spans                             *SpanIndex
@@ -405,6 +406,18 @@ func (c *Checker) HasErrors() bool {
 
 func (c *Checker) Diagnostics() []Diagnostic {
 	return c.diagnostics
+}
+
+func isTopLevelExecutableStatement(stmt parse.Statement) bool {
+	if isTopLevelTypeDeclaration(stmt) {
+		return false
+	}
+	switch stmt.(type) {
+	case *parse.FunctionDeclaration, *parse.StaticFunctionDeclaration, *parse.VariableDeclaration:
+		return false
+	default:
+		return true
+	}
 }
 
 func (c *Checker) Check() {
@@ -532,7 +545,15 @@ func (c *Checker) Check() {
 		if isTopLevelTypeDeclaration(c.input.Statements[i]) {
 			continue
 		}
-		if stmt := c.checkStmt(&c.input.Statements[i]); stmt != nil {
+		if isTopLevelExecutableStatement(c.input.Statements[i]) {
+			previousScript := c.scope.inScript
+			c.scope.inScript = true
+			stmt := c.checkStmt(&c.input.Statements[i])
+			c.scope.inScript = previousScript
+			if stmt != nil {
+				c.program.Statements = append(c.program.Statements, *stmt)
+			}
+		} else if stmt := c.checkStmt(&c.input.Statements[i]); stmt != nil {
 			c.program.Statements = append(c.program.Statements, *stmt)
 		}
 		if c.halted {
@@ -1778,6 +1799,68 @@ func goMethodNameToArdName(name string) string {
 	return b.String()
 }
 
+func isDeferCallExpression(expr parse.Expression) bool {
+	switch expr.(type) {
+	case *parse.FunctionCall, *parse.FunctionValueCall, *parse.InstanceMethod, *parse.StaticFunction:
+		return true
+	default:
+		return false
+	}
+}
+
+func checkedBlockHasWork(block *Block) bool {
+	if block == nil {
+		return false
+	}
+	for _, stmt := range block.Stmts {
+		if stmt.Expr != nil || stmt.Stmt != nil || stmt.Break {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Checker) checkDefer(s *parse.Defer) *Statement {
+	if c.scope.getReturnType() == nil && !c.scope.insideScript() {
+		c.addError("defer can only be used inside a function, method, closure, or script body", s.GetLocation())
+		return nil
+	}
+	if c.scope.insideUnsafeBlock() {
+		c.addError("defer is not allowed inside unsafe blocks; move it outside the unsafe block", s.GetLocation())
+		return nil
+	}
+
+	c.deferredWorkDepth++
+	defer func() { c.deferredWorkDepth-- }()
+
+	if s.Expr != nil {
+		if !isDeferCallExpression(s.Expr) {
+			c.addError("defer call form requires a call expression", s.Expr.GetLocation())
+			return nil
+		}
+		expr := c.withDiscardExprContext(func() Expression { return c.checkExpr(s.Expr) })
+		if expr == nil {
+			return nil
+		}
+		return &Statement{Stmt: &Defer{Expr: expr}}
+	}
+
+	diagnosticCount := len(c.diagnostics)
+	body := c.checkBlockWithInferredFinalValue(s.Body, func() {
+		// Deferred blocks lower as zero-argument closure bodies, so break cannot
+		// target an outer loop and nested defers bind to the deferred closure.
+		c.scope.expectReturn(Void)
+	}, true)
+	if len(c.diagnostics) == diagnosticCount && !checkedBlockHasWork(body) {
+		c.addError("deferred block has no statements", s.GetLocation())
+		return nil
+	}
+	if len(c.diagnostics) != diagnosticCount {
+		return nil
+	}
+	return &Statement{Stmt: &Defer{Body: body}}
+}
+
 func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 	if c.halted {
 		return nil
@@ -1798,6 +1881,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			return nil
 		}
 		return &Statement{Break: true}
+	case *parse.Defer:
+		return c.checkDefer(s)
 	case *parse.TraitDefinition:
 		{
 			trait, ok := c.hoistedTrait(s.Name.Name)
@@ -6360,6 +6445,8 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			}
 			c.pushFunctionGenericContext(fn)
+			previousDeferredWorkDepth := c.deferredWorkDepth
+			c.deferredWorkDepth = 0
 			var body *Block
 			if fn.InferReturnTypeFromBody {
 				// Without a return annotation, the closure adopts its body's
@@ -6375,6 +6462,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			} else {
 				body = c.checkBlockWithExpected(s.Body, setup, returnType, true)
 			}
+			c.deferredWorkDepth = previousDeferredWorkDepth
 			c.popFunctionGenericContext()
 
 			// Add function to scope after body is checked (for generic resolution support)
@@ -7497,6 +7585,10 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 		return c.validateStructInstance(structType, s.Properties, name, s.GetLocation(), typeArgs)
 	case *parse.Try:
 		{
+			if c.deferredWorkDepth > 0 {
+				c.addError("try is not allowed inside deferred work; handle the Result or Maybe explicitly", s.GetLocation())
+				return nil
+			}
 			// Check if this is a property/method accessor chain that might need cascading Maybe handling
 			expr := c.tryCheckAccessorChain(s.Expression)
 			if expr == nil {
@@ -8327,12 +8419,15 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type) Exp
 
 			// Check body
 			c.pushFunctionGenericContext(fn)
+			previousDeferredWorkDepth := c.deferredWorkDepth
+			c.deferredWorkDepth = 0
 			body := c.checkBlockWithExpected(s.Body, func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
 				}
 			}, returnType, true)
+			c.deferredWorkDepth = previousDeferredWorkDepth
 			c.popFunctionGenericContext()
 
 			// Add function to scope after checking body

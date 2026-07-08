@@ -18,6 +18,7 @@ const (
 	StmtWhile
 	StmtForMap
 	StmtBreak
+	StmtDefer
 )
 
 type Stmt struct {

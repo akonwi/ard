@@ -242,3 +242,40 @@ for item in items {
   process(item)
 }
 ```
+
+## Deferred Cleanup
+
+Use `defer` to schedule cleanup work for the end of the current function, method, closure, or script. Deferred work runs in last-in-first-out order and still runs when `try` returns early.
+
+```ard
+fn read_file(path: Str) Str!Str {
+  let file = try open_file(path)
+  defer file.close()
+
+  let text = try file.read_all()
+  Result::ok(text)
+}
+```
+
+Both call and block forms are supported:
+
+```ard
+defer resource.close()
+
+defer {
+  match resource.close() {
+    Result::err(e) => log("close failed: {e}"),
+    Result::ok(_) => (),
+  }
+}
+```
+
+Unlike Go, Ard evaluates the deferred call later by lowering it as a zero-argument closure. If a deferred call captures a `mut` binding that is reassigned before the function exits, it sees the later value. Bind an explicit snapshot when needed:
+
+```ard
+let current = resource
+defer current.close()
+resource = next_resource
+```
+
+`try` is not allowed inside deferred work. Handle cleanup results explicitly with `match` if they matter.
