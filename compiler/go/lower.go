@@ -6161,7 +6161,16 @@ func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, e
 		}
 		elseBody = append(catchDecls, errBind, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(errName)}})
 		elseBody = append(elseBody, catchBody...)
-		if !l.isVoidType(fn.Signature.Return) {
+		if l.usesABIResultReturn(fn.Signature.Return) {
+			// The enclosing function uses the (T, error) tuple ABI (ADR 0038),
+			// so the caught Result must be unpacked into that shape rather than
+			// returned as a Result value. (#282)
+			packed, err := l.returnPackedABIValue(fn.Signature.Return, catchTarget)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			elseBody = append(elseBody, packed...)
+		} else if !l.isVoidType(fn.Signature.Return) {
 			elseBody = append(elseBody, &ast.ReturnStmt{Results: []ast.Expr{catchTarget}})
 		} else {
 			elseBody = append(elseBody, &ast.ReturnStmt{})
@@ -6262,7 +6271,15 @@ func (l *lowerer) lowerTryMaybe(fn air.Function, expr air.Expr) (loweredExpr, er
 			return loweredExpr{}, err
 		}
 		noneBody = append(catchDecls, catchBody...)
-		if !l.isVoidType(fn.Signature.Return) {
+		if l.usesABIResultReturn(fn.Signature.Return) {
+			// Unpack the caught value into the enclosing function's tuple ABI
+			// rather than returning a Result/Maybe value directly. (#282)
+			packed, err := l.returnPackedABIValue(fn.Signature.Return, catchTarget)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			noneBody = append(noneBody, packed...)
+		} else if !l.isVoidType(fn.Signature.Return) {
 			noneBody = append(noneBody, &ast.ReturnStmt{Results: []ast.Expr{catchTarget}})
 		} else {
 			noneBody = append(noneBody, &ast.ReturnStmt{})
