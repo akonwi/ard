@@ -4207,12 +4207,6 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerInstanceMethod(typeID, e)
 	case *checker.StrMethod:
 		return fl.lowerStrMethod(typeID, e)
-	case *checker.StrFromBytes:
-		bytes, err := fl.lowerExpr(e.Bytes)
-		if err != nil {
-			return nil, err
-		}
-		return &Expr{Kind: ExprStrFromBytes, Type: typeID, Target: bytes}, nil
 	case *checker.ByteMethod:
 		if e.Kind == checker.ByteToInt {
 			return fl.lowerUnary(ExprToInt, typeID, e.Subject)

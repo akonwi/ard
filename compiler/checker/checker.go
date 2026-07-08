@@ -4799,9 +4799,9 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 }
 
 // checkStrStatic resolves built-in static functions on the Str type, such as
-// Str::from (build a Str from UTF-8 bytes). It returns handled=false when the
-// name is not a known Str static so the caller can continue normal
-// resolution. (#283)
+// Str::from (build a Str from a [Byte] or [Rune] view). It returns
+// handled=false when the name is not a known Str static so the caller can
+// continue normal resolution. (#283)
 func (c *Checker) checkStrStatic(s *parse.StaticFunction) (Expression, bool) {
 	switch s.Function.Name {
 	case "from":
@@ -4813,18 +4813,26 @@ func (c *Checker) checkStrStatic(s *parse.StaticFunction) (Expression, bool) {
 			c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 1, got %d", len(s.Function.Args)), s.GetLocation())
 			return nil, true
 		}
-		arg := c.checkExprAs(s.Function.Args[0].Value, MakeList(Byte))
+		// Str::from(bytes) and Str::from(runes) both build a Str, mirroring Go's
+		// string([]byte) / string([]rune). The byte form is unchecked (invalid
+		// UTF-8 is carried through, like Go); validate with unicode/utf8 in
+		// userland when the boundary can produce invalid bytes.
+		argNode := s.Function.Args[0].Value
+		var arg Expression
+		if lit, ok := argNode.(*parse.ListLiteral); ok && len(lit.Items) == 0 {
+			// An empty list literal has no element type to infer; default to bytes.
+			arg = c.checkExprAs(argNode, MakeList(Byte))
+		} else {
+			arg = c.checkExpr(argNode)
+		}
 		if arg == nil {
 			return nil, true
 		}
-		// checkExprAs applies contextual typing but does not itself report a
-		// plain mismatch, so this is the diagnostic path (same pattern as the
-		// foreign-scalar and Go-argument checks).
-		if !c.areCompatible(MakeList(Byte), arg.Type()) {
-			c.addError(typeMismatch(MakeList(Byte), arg.Type()), s.Function.Args[0].GetLocation())
-			return nil, true
+		if list, ok := arg.Type().(*List); ok && (list.Of().equal(Byte) || list.Of().equal(Rune)) {
+			return &ScalarFrom{Value: arg, Target: Str}, true
 		}
-		return &StrFromBytes{Bytes: arg}, true
+		c.addError(fmt.Sprintf("Str::from expects [Byte] or [Rune], got %s", arg.Type().String()), s.Function.Args[0].GetLocation())
+		return nil, true
 	}
 	return nil, false
 }

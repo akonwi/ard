@@ -241,9 +241,10 @@ type ForeignScalarConvert struct {
 
 func (f *ForeignScalarConvert) Type() Type { return f.Target }
 
-// ScalarFrom is the `T::from(value)` truncating numeric conversion into a bare
-// sized scalar (Int64, Uint32, ...) or a foreign named scalar type, mirroring
-// Go's `T(x)`. It lowers to an explicit Go conversion. (#284)
+// ScalarFrom is a `T::from(value)` conversion that lowers to an explicit Go
+// conversion `T(x)`. It covers the truncating numeric conversions into a bare
+// sized scalar (Int64, Uint32, ...) or a foreign named scalar type (#284), and
+// Str::from building a string from a [Byte]/[Rune] view (#283).
 type ScalarFrom struct {
 	Value  Expression
 	Target Type
@@ -347,17 +348,6 @@ func (s *StrMethod) Type() Type {
 	default:
 		return Void
 	}
-}
-
-// StrFromBytes is the `Str::from([Byte]) Str?` boundary conversion.
-// It validates UTF-8 at runtime, yielding some(Str) for valid input and
-// none for invalid byte sequences. (#283)
-type StrFromBytes struct {
-	Bytes Expression
-}
-
-func (s *StrFromBytes) Type() Type {
-	return MakeMaybe(Str)
 }
 
 type ByteMethodKind uint8

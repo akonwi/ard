@@ -84,19 +84,32 @@ for ch in "a/b" {
 }
 ```
 
-#### `Str::from(bytes: [Byte]) Str?`
+#### `Str::from(bytes: [Byte]) Str` and `Str::from(runes: [Rune]) Str`
 
-Builds a `Str` from UTF-8 bytes, validating the input at the boundary. It
-returns `some(Str)` when `bytes` is valid UTF-8 and `none` otherwise, so invalid
-sequences can't silently masquerade as text. This is the inverse of `bytes()`
-and is the safe way to turn a `[]byte` from a Go API (file reads, `json.Marshal`,
-network payloads) into a `Str`.
+Builds a `Str` from a byte or rune view — the inverse of `bytes()` and `runes()`.
+It mirrors Go's `string([]byte)` / `string([]rune)`: the byte form is
+**unchecked**, so invalid UTF-8 is carried through verbatim (just like Go).
 
 ```ard
-let round = Str::from("hé".bytes())
-round.or("")               // "hé"
+Str::from("hé".bytes()) // "hé"
+Str::from("hé".runes()) // "hé"
+```
 
-Str::from([]).or("x")       // "" (empty bytes are valid)
+When a byte boundary can produce invalid UTF-8 (file reads, network payloads)
+and you need to reject it, validate first with Go's `unicode/utf8` package:
+
+```ard
+use ard/maybe
+use go:unicode/utf8
+
+fn decode(raw: [Byte]) Str? {
+  let s = Str::from(raw)
+  if utf8::ValidString(s) {
+    maybe::some(s)
+  } else {
+    maybe::none()
+  }
+}
 ```
 
 #### `Str::split(input: Str, delimiter: Str) [Str]`
