@@ -31,7 +31,15 @@ type parser struct {
 	fileName               string
 	errors                 []ParseError
 	disallowStructInstance bool
-	inCallTypeArguments    bool
+	// structOperandAllowed reports whether we are in a value position where a
+	// struct literal may appear (set while structInstance() descends). It lets
+	// the `mut <operand>` prefix recognize struct-literal operands in every
+	// form (including empty braces) in value positions, while avoiding the
+	// struct/block ambiguity in subject positions like `if`, `while`, `for`
+	// and `match`, which parse below structInstance(). Reset per statement so
+	// it can't leak through anonymous-function bodies. (#285)
+	structOperandAllowed bool
+	inCallTypeArguments  bool
 }
 
 func Parse(source []byte, fileName string) ParseResult {
@@ -341,6 +349,13 @@ func (p *parser) breakStatement() *Break {
 }
 
 func (p *parser) parseStatement() (Statement, error) {
+	// A statement starts a fresh struct-operand context so a struct-allowing
+	// value position doesn't leak into statements nested in it (e.g. an
+	// anonymous-function body containing `if mut x { ... }`). (#285)
+	prevAllowed := p.structOperandAllowed
+	p.structOperandAllowed = false
+	defer func() { p.structOperandAllowed = prevAllowed }()
+
 	if c := p.parseComment(); c != nil {
 		return c, nil
 	}
@@ -2161,7 +2176,13 @@ func (p *parser) matchExpr() (Expression, error) {
 				Start: Point{Row: keyword.line, Col: keyword.column},
 			},
 		}
+		// The match subject is a subject position (a following `{` opens the
+		// arms block), so struct-literal operands aren't allowed here even when
+		// the match itself is a value expression. (#285)
+		prevAllowed := p.structOperandAllowed
+		p.structOperandAllowed = false
 		expr, err := p.or()
+		p.structOperandAllowed = prevAllowed
 		if err != nil {
 			return nil, err
 		}
@@ -2718,6 +2739,11 @@ func (p *parser) structInstance() (Expression, error) {
 	if p.disallowStructInstance {
 		return p.iterRange()
 	}
+	// We are in a struct-allowing value position; let a nested `mut <operand>`
+	// pick up struct-literal operands in all forms. (#285)
+	prevAllowed := p.structOperandAllowed
+	p.structOperandAllowed = true
+	defer func() { p.structOperandAllowed = prevAllowed }()
 	index := p.index
 	static := p.parseStaticPath()
 	if static != nil {
@@ -3141,7 +3167,20 @@ func (p *parser) multiplication() (Expression, error) {
 func (p *parser) unary() (Expression, error) {
 	if p.match(mut) {
 		mutToken := p.previous()
-		operand, err := p.unary()
+		// In a value position, parse the operand through structInstance() so a
+		// struct-literal operand is recognized in every form. call()'s inline
+		// detection only sees non-empty `Name{ field: ... }` on a bare
+		// identifier, so `mut Name{}`, `mut pkg::Name{}`, and generic struct
+		// literals would otherwise leave the braces dangling. In subject
+		// positions (if/while/for/match) a following `{ ... }` is a block, not
+		// a struct, so fall back to the plain unary operand there. (#285)
+		var operand Expression
+		var err error
+		if p.structOperandAllowed {
+			operand, err = p.structInstance()
+		} else {
+			operand, err = p.unary()
+		}
 		if err != nil {
 			return nil, err
 		}
