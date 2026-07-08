@@ -84,6 +84,21 @@ for ch in "a/b" {
 }
 ```
 
+#### `Str::from_bytes(bytes: [Byte]) Str?`
+
+Builds a `Str` from UTF-8 bytes, validating the input at the boundary. It
+returns `some(Str)` when `bytes` is valid UTF-8 and `none` otherwise, so invalid
+sequences can't silently masquerade as text. This is the inverse of `bytes()`
+and is the safe way to turn a `[]byte` from a Go API (file reads, `json.Marshal`,
+network payloads) into a `Str`.
+
+```ard
+let round = Str::from_bytes("hé".bytes())
+round.or("")               // "hé"
+
+Str::from_bytes([]).or("x") // "" (empty bytes are valid)
+```
+
 #### `Str::split(input: Str, delimiter: Str) [Str]`
 
 Splits a string from the `ard/string` module. An empty delimiter returns one-rune strings.

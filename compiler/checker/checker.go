@@ -4798,6 +4798,36 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 	}
 }
 
+// checkStrStatic resolves built-in static functions on the Str type, such as
+// Str::from_bytes. It returns handled=false when the name is not a known Str
+// static so the caller can continue normal resolution. (#283)
+func (c *Checker) checkStrStatic(s *parse.StaticFunction) (Expression, bool) {
+	switch s.Function.Name {
+	case "from_bytes":
+		if len(s.Function.TypeArgs) > 0 {
+			c.addError("Str::from_bytes does not take type arguments", s.GetLocation())
+			return nil, true
+		}
+		if len(s.Function.Args) != 1 {
+			c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 1, got %d", len(s.Function.Args)), s.GetLocation())
+			return nil, true
+		}
+		arg := c.checkExprAs(s.Function.Args[0].Value, MakeList(Byte))
+		if arg == nil {
+			return nil, true
+		}
+		// checkExprAs applies contextual typing but does not itself report a
+		// plain mismatch, so this is the diagnostic path (same pattern as the
+		// foreign-scalar and Go-argument checks).
+		if !c.areCompatible(MakeList(Byte), arg.Type()) {
+			c.addError(typeMismatch(MakeList(Byte), arg.Type()), s.Function.Args[0].GetLocation())
+			return nil, true
+		}
+		return &StrFromBytes{Bytes: arg}, true
+	}
+	return nil, false
+}
+
 func (c *Checker) createStrMethod(subject Expression, methodName string, args []Expression) Expression {
 	var kind StrMethodKind
 	switch methodName {
@@ -6169,6 +6199,15 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 	// - validate args and resolve generics
 	case *parse.StaticFunction:
 		{
+			// Built-in statics on primitive types, e.g. Str::from_bytes. These
+			// take precedence over module/Go-package lookup since `Str` is not a
+			// user-defined symbol. (#283)
+			if targetIdent, ok := s.Target.(*parse.Identifier); ok && targetIdent.Name == "Str" {
+				if expr, handled := c.checkStrStatic(s); handled {
+					return expr
+				}
+			}
+
 			// Handle local functions
 			absolutePath := s.Target.String() + "::" + s.Function.Name
 			if sym, ok := c.scope.get(absolutePath); ok {
