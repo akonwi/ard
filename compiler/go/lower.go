@@ -2415,6 +2415,40 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.ArrayType{Elt: ast.NewIdent("byte")}, Args: []ast.Expr{target.expr}}}, nil
+	case air.ExprStrFromBytes:
+		// Str::from_bytes(b): some(string(b)) when utf8.Valid(b), else none. (#283)
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("str from_bytes missing target")
+		}
+		bytes, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		resultTemp := l.nextTemp()
+		bytesTemp := l.nextTemp()
+		decls, err := l.declareTemp(expr.Type, resultTemp)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		someCall, err := l.maybeSomeExpr(expr.Type, &ast.CallExpr{Fun: ast.NewIdent("string"), Args: []ast.Expr{ast.NewIdent(bytesTemp)}})
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		noneCall, err := l.maybeNoneExpr(expr.Type)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		stmts := append(bytes.stmts,
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(bytesTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{bytes.expr}},
+		)
+		stmts = append(stmts, decls...)
+		validCall := &ast.CallExpr{Fun: l.qualified("ardutf8", "unicode/utf8", "Valid"), Args: []ast.Expr{ast.NewIdent(bytesTemp)}}
+		stmts = append(stmts, &ast.IfStmt{
+			Cond: validCall,
+			Body: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{someCall}}}},
+			Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(resultTemp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{noneCall}}}},
+		})
+		return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
 	case air.ExprStrRunes:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("str runes missing target")
