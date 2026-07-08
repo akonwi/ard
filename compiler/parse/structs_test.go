@@ -509,3 +509,55 @@ func TestGenericStructInstantiationAmbiguity(t *testing.T) {
 		},
 	})
 }
+
+func TestMutStructInstanceOperand(t *testing.T) {
+	// #285: `mut <struct literal>` must parse for all struct forms,
+	// including empty braces and module-qualified names, and as a
+	// struct-literal field value (not only as a top-level operand).
+	runTests(t, []test{
+		{
+			name:  "mut empty struct literal as field value",
+			input: `Holder{r: mut Inner{}}`,
+		},
+		{
+			name:  "mut qualified empty struct literal as field value",
+			input: `Holder{r: mut pkg::Thing{}}`,
+		},
+		{
+			name:  "mut empty struct literal in a binding",
+			input: `let x = mut pkg::Thing{}`,
+		},
+		{
+			name:  "mut populated struct literal still parses",
+			input: `Holder{r: mut Inner{n: 1}}`,
+		},
+	})
+}
+
+func TestMutOperandInSubjectPositions(t *testing.T) {
+	// #285 review: recognizing struct-literal operands of `mut` must not
+	// leak into subject positions (if/while/for/match), where a following
+	// `{ ... }` is a block, not a struct literal for the mut operand.
+	runTests(t, []test{
+		{
+			name:  "for-in over a mut iterable keeps the loop body",
+			input: "for n in mut xs {\n  work(n)\n}",
+		},
+		{
+			name:  "if over a mut condition keeps the body",
+			input: "if mut flag {\n  work()\n}",
+		},
+		{
+			name:  "while over a mut condition keeps the body",
+			input: "while mut flag {\n  work()\n}",
+		},
+		{
+			name:  "match on a mut subject keeps the arms block",
+			input: "match mut subject {\n  _ => {}\n}",
+		},
+		{
+			name:  "mut struct operand still works as a call argument",
+			input: `take(mut pkg::Thing{})`,
+		},
+	})
+}
