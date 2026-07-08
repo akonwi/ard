@@ -43,5 +43,26 @@ func TestScalarFrom(t *testing.T) {
 				{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 1, got 2"},
 			},
 		},
+		{
+			// A foreign named type over an integer underlying (time.Month is an
+			// int) is a valid numeric conversion target.
+			name: "foreign named integer type accepts from",
+			input: `use go:time
+fn main() {
+  let m = time::Month::from(3)
+}`,
+		},
+		{
+			// A foreign named type over a Str underlying (html/template.HTML is a
+			// named string) is NOT numeric, so ::from is not a conversion here.
+			name: "foreign named string type rejects from",
+			input: `use go:html/template
+fn main() {
+  let x = template::HTML::from(1)
+}`,
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Undefined Go function: template::HTML::from"},
+			},
+		},
 	})
 }
