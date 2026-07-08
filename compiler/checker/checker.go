@@ -4850,6 +4850,12 @@ func (c *Checker) checkScalarFrom(s *parse.StaticFunction, target Type) Expressi
 	if prim := foreignScalarPrimitive(target); prim != nil {
 		valueType = prim
 	}
+	// Defensive: only numeric targets convert. Foreign named types over Str or
+	// Bool underlyings are not numeric and must not reach here.
+	if !isNumericScalar(valueType) {
+		c.addError(fmt.Sprintf("%s::from requires a numeric type", target.String()), s.GetLocation())
+		return nil
+	}
 	floatTarget := isFloatScalar(valueType)
 	argNode := s.Function.Args[0].Value
 	var arg Expression
@@ -4880,6 +4886,12 @@ func (c *Checker) checkScalarFrom(s *parse.StaticFunction, target Type) Expressi
 
 func isFloatScalar(t Type) bool {
 	return t == Float64 || t == Float32
+}
+
+// isNumericScalar reports whether t is an integer or float scalar (excluding
+// Str/Bool-underlying types), i.e. a valid `T::from` conversion target.
+func isNumericScalar(t Type) bool {
+	return isIntegerScalar(t) || isFloatScalar(t)
 }
 
 func isNumericLiteralNode(e parse.Expression) bool {
@@ -6351,7 +6363,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				// `pkg::T::from(x)` truncating conversion into a foreign named
 				// scalar type, e.g. time::Duration::from(ms). (#284)
 				if typeName, isFrom := strings.CutSuffix(name, "::from"); isFrom {
-					if named, ok := goPkg.Types[typeName]; ok && foreignScalarPrimitive(named) != nil {
+					if named, ok := goPkg.Types[typeName]; ok && isNumericScalar(foreignScalarPrimitive(named)) {
 						return c.checkScalarFrom(s, named)
 					}
 				}
