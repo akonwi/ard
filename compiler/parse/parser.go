@@ -2617,6 +2617,19 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 			if p.match(new_line) {
 				continue
 			}
+
+			// `mut` may not prefix a parameter name. Parameter mutability
+			// belongs in the type (`name: mut T`), not before the name.
+			// Named functions already reject `mut name: T` via the
+			// missing-colon path, but `consumeVariableName` treats `mut`
+			// as an identifier, so anonymous functions would otherwise
+			// swallow it as an untyped parameter and miscount arguments.
+			// Reject it explicitly and recover by parsing the real
+			// parameter that follows. (#286)
+			if p.check(mut) {
+				p.addError(p.peek(), "parameter mutability belongs in the type ('name: mut T'), not before the name")
+				p.advance() // consume 'mut' and continue with the parameter name
+			}
 			nameToken := p.consumeVariableName("Expected parameter name")
 
 			// Check if this is a simple parameter list in an anonymous function

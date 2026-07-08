@@ -516,6 +516,19 @@ func TestAnonymousFunctions(t *testing.T) {
 				},
 			},
 		},
+		{
+			// #286: mutability belongs in the type (`name: mut T`); the
+			// `mut name: T` spelling is rejected like regular params.
+			name:     "Anonymous function rejects mut before the parameter name",
+			input:    `fn(mut m: Model) { m.n = 1 }`,
+			wantErrs: []string{"parameter mutability belongs in the type"},
+		},
+		{
+			name:  "Anonymous function accepts mut in the parameter type",
+			input: `fn(m: mut Model) { m.n = 1 }`,
+			// No wantErrs and no expected AST: asserts the canonical
+			// `name: mut T` spelling parses cleanly.
+		},
 	}
 
 	runTests(t, tests)
