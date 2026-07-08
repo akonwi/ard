@@ -3,6 +3,8 @@ package formatter
 import (
 	"strings"
 	"testing"
+
+	"github.com/akonwi/ard/parse"
 )
 
 func TestFormatIsIdempotent(t *testing.T) {
@@ -175,5 +177,22 @@ func TestFormatInlineBreakMatchArms(t *testing.T) {
 	}
 	if string(formatted) != input {
 		t.Fatalf("formatted = %q, want unchanged %q", string(formatted), input)
+	}
+}
+
+func TestFormatMutRefMatchArmStaysInline(t *testing.T) {
+	// #formatter: a `=> mut <expr>` arm must not be wrapped into a block
+	// (`=> { mut x }`), since `mut x` cannot be a block's final expression.
+	input := "struct S {\n  n: Int,\n}\n\nfn pick(cond: Bool, a: mut S, b: mut S) mut S {\n  match cond {\n    true => mut a,\n    false => mut b,\n  }\n}\n"
+	formatted, err := Format([]byte(input), "test.ard")
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+	if string(formatted) != input {
+		t.Fatalf("formatted = %q, want unchanged %q", string(formatted), input)
+	}
+	// The formatted output must still parse cleanly.
+	if res := parse.Parse(formatted, "test.ard"); len(res.Errors) > 0 {
+		t.Fatalf("formatted output does not re-parse: %v", res.Errors)
 	}
 }
