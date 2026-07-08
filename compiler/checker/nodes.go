@@ -349,7 +349,7 @@ func (s *StrMethod) Type() Type {
 	}
 }
 
-// StrFromBytes is the `Str::from_bytes([Byte]) Str?` boundary conversion.
+// StrFromBytes is the `Str::from([Byte]) Str?` boundary conversion.
 // It validates UTF-8 at runtime, yielding some(Str) for valid input and
 // none for invalid byte sequences. (#283)
 type StrFromBytes struct {

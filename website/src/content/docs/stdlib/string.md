@@ -84,7 +84,7 @@ for ch in "a/b" {
 }
 ```
 
-#### `Str::from_bytes(bytes: [Byte]) Str?`
+#### `Str::from(bytes: [Byte]) Str?`
 
 Builds a `Str` from UTF-8 bytes, validating the input at the boundary. It
 returns `some(Str)` when `bytes` is valid UTF-8 and `none` otherwise, so invalid
@@ -93,10 +93,10 @@ and is the safe way to turn a `[]byte` from a Go API (file reads, `json.Marshal`
 network payloads) into a `Str`.
 
 ```ard
-let round = Str::from_bytes("hé".bytes())
+let round = Str::from("hé".bytes())
 round.or("")               // "hé"
 
-Str::from_bytes([]).or("x") // "" (empty bytes are valid)
+Str::from([]).or("x")       // "" (empty bytes are valid)
 ```
 
 #### `Str::split(input: Str, delimiter: Str) [Str]`

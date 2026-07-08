@@ -2416,9 +2416,9 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: &ast.ArrayType{Elt: ast.NewIdent("byte")}, Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprStrFromBytes:
-		// Str::from_bytes(b): some(string(b)) when utf8.Valid(b), else none. (#283)
+		// Str::from(b): some(string(b)) when utf8.Valid(b), else none. (#283)
 		if expr.Target == nil {
-			return loweredExpr{}, fmt.Errorf("str from_bytes missing target")
+			return loweredExpr{}, fmt.Errorf("str from missing target")
 		}
 		bytes, err := l.lowerExpr(fn, *expr.Target)
 		if err != nil {

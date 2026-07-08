@@ -17,7 +17,7 @@ let rune: Rune = 'é'
 let newline: Rune = '\n'
 ```
 
-`Byte` represents an unsigned 8-bit value (`0..255`). `Rune` represents one Unicode scalar value. Single-quoted rune literals make scalar comparisons concise, such as `ch == '/'` while iterating a string. Rune literals support escapes like `'\n'`, `'\x00'`, and `'\u0080'`. Convert text explicitly with `"text".bytes()`, `"text".runes()`, `Str::from_bytes(bytes)`, and `Str::from_runes(runes)`.
+`Byte` represents an unsigned 8-bit value (`0..255`). `Rune` represents one Unicode scalar value. Single-quoted rune literals make scalar comparisons concise, such as `ch == '/'` while iterating a string. Rune literals support escapes like `'\n'`, `'\x00'`, and `'\u0080'`. Convert text explicitly with `"text".bytes()`, `"text".runes()`, and `Str::from(bytes)` (validates UTF-8, returning `Str?`).
 
 ### Collection Types
 

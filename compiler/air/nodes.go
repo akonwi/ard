@@ -130,7 +130,7 @@ const (
 	ExprStrAt
 	ExprStrBytes
 	ExprStrRunes
-	// ExprStrFromBytes is Str::from_bytes: Target is the [Byte] value, the
+	// ExprStrFromBytes is Str::from: Target is the [Byte] value, the
 	// expression type is Maybe<Str>. (#283)
 	ExprStrFromBytes
 	ExprStrSize

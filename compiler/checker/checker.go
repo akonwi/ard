@@ -4799,13 +4799,14 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 }
 
 // checkStrStatic resolves built-in static functions on the Str type, such as
-// Str::from_bytes. It returns handled=false when the name is not a known Str
-// static so the caller can continue normal resolution. (#283)
+// Str::from (build a Str from UTF-8 bytes). It returns handled=false when the
+// name is not a known Str static so the caller can continue normal
+// resolution. (#283)
 func (c *Checker) checkStrStatic(s *parse.StaticFunction) (Expression, bool) {
 	switch s.Function.Name {
-	case "from_bytes":
+	case "from":
 		if len(s.Function.TypeArgs) > 0 {
-			c.addError("Str::from_bytes does not take type arguments", s.GetLocation())
+			c.addError("Str::from does not take type arguments", s.GetLocation())
 			return nil, true
 		}
 		if len(s.Function.Args) != 1 {
@@ -6275,7 +6276,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 	// - validate args and resolve generics
 	case *parse.StaticFunction:
 		{
-			// Built-in statics on primitive types, e.g. Str::from_bytes. These
+			// Built-in statics on primitive types, e.g. Str::from. These
 			// take precedence over module/Go-package lookup since `Str` is not a
 			// user-defined symbol. (#283)
 			if targetIdent, ok := s.Target.(*parse.Identifier); ok && targetIdent.Name == "Str" {
