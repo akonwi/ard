@@ -41,6 +41,37 @@ Raw Go pointer syntax does not appear in Ard source. Use Ard's mutable-reference
 - `gohttp::Response` lowers to `http.Response`
 - `mut gohttp::Response` lowers to `*http.Response`
 
+## Numeric Conversions
+
+`T::from(value)` converts a numeric value into a bare sized scalar (`Int64`,
+`Uint32`, `Float32`, …) or a foreign named scalar type (a Go named type whose
+underlying type is numeric, like `time::Duration`). It is a truncating
+conversion, mirroring Go's `T(x)`, and returns `T` — not an optional — so it
+composes with arithmetic:
+
+```ard
+use go:time
+
+fn every(ms: Int) time::Duration {
+  time::Duration::from(ms) * time::Millisecond
+}
+
+let page: Uint32 = Uint32::from(count)
+```
+
+Runtime values are truncated at the boundary exactly like Go. A numeric
+**literal**, however, is range-checked against the target, so a constant that
+cannot fit is a compile error (again matching Go's constant conversion):
+
+```ard
+Uint8::from(200) // ok
+Uint8::from(300) // error: Integer literal 300 overflows Uint8
+```
+
+Numeric literals already adopt a foreign scalar type directly in arithmetic and
+annotated bindings (`let d: time::Duration = 5 * time::Millisecond`); `from` is
+for converting **runtime** values.
+
 ## Go Interfaces
 
 Named Go interfaces can be used as direct Go types. Ard checks assignability with Go's interface rules for direct-Go values, similar to Ard trait compatibility, while generated code keeps native Go interface values.

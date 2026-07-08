@@ -4828,6 +4828,70 @@ func (c *Checker) checkStrStatic(s *parse.StaticFunction) (Expression, bool) {
 	return nil, false
 }
 
+// checkScalarFrom checks a `T::from(value)` conversion into the sized/named
+// scalar `target`. The conversion is truncating like Go's `T(x)`: integer
+// targets accept an integer-like value, float targets accept a numeric value,
+// and the result is `target` (never optional). (#284)
+func (c *Checker) checkScalarFrom(s *parse.StaticFunction, target Type) Expression {
+	if len(s.Function.TypeArgs) > 0 {
+		c.addError(fmt.Sprintf("%s::from does not take type arguments", target.String()), s.GetLocation())
+		return nil
+	}
+	if len(s.Function.Args) != 1 {
+		c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 1, got %d", len(s.Function.Args)), s.GetLocation())
+		return nil
+	}
+	// The value type is the target itself for a bare scalar, or the foreign
+	// type's underlying sized primitive. Typing the argument against it makes
+	// numeric literals adopt and range-check against the target (a constant
+	// that overflows is an error, matching Go's constant conversion), while
+	// runtime values pass through to be truncated at the Go boundary.
+	valueType := target
+	if prim := foreignScalarPrimitive(target); prim != nil {
+		valueType = prim
+	}
+	floatTarget := isFloatScalar(valueType)
+	argNode := s.Function.Args[0].Value
+	var arg Expression
+	if isNumericLiteralNode(argNode) {
+		// A numeric literal adopts and range-checks against the target, so a
+		// constant that overflows is reported here (matching Go's constant
+		// conversion) instead of leaking a generated-Go compile error.
+		arg = c.checkExprAs(argNode, valueType)
+	} else {
+		// A runtime value keeps its own type and is truncated at the Go
+		// boundary, matching Go's `T(x)` for non-constant x.
+		arg = c.checkExpr(argNode)
+	}
+	if arg == nil {
+		return nil
+	}
+	argType := arg.Type()
+	ok := isRelationalIntegerLike(argType)
+	if floatTarget {
+		ok = ok || isRelationalFloatLike(argType)
+	}
+	if !ok {
+		c.addError(fmt.Sprintf("%s::from expects a numeric value, got %s", target.String(), argType.String()), s.Function.Args[0].GetLocation())
+		return nil
+	}
+	return &ScalarFrom{Value: arg, Target: target}
+}
+
+func isFloatScalar(t Type) bool {
+	return t == Float64 || t == Float32
+}
+
+func isNumericLiteralNode(e parse.Expression) bool {
+	switch n := e.(type) {
+	case *parse.NumLiteral:
+		return true
+	case *parse.UnaryExpression:
+		return n.Operator == parse.Minus && isNumericLiteralNode(n.Operand)
+	}
+	return false
+}
+
 func (c *Checker) createStrMethod(subject Expression, methodName string, args []Expression) Expression {
 	var kind StrMethodKind
 	switch methodName {
@@ -6208,6 +6272,14 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			}
 
+			// `Int64::from(x)`, `Uint32::from(x)`, ... truncating conversion into a
+			// bare sized scalar. (#284)
+			if targetIdent, ok := s.Target.(*parse.Identifier); ok && s.Function.Name == "from" {
+				if scalar := scalarTypeByName(targetIdent.Name); scalar != nil {
+					return c.checkScalarFrom(s, scalar)
+				}
+			}
+
 			// Handle local functions
 			absolutePath := s.Target.String() + "::" + s.Function.Name
 			if sym, ok := c.scope.get(absolutePath); ok {
@@ -6276,6 +6348,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			}
 			if goPkg := c.program.GoImports[modName]; goPkg != nil {
+				// `pkg::T::from(x)` truncating conversion into a foreign named
+				// scalar type, e.g. time::Duration::from(ms). (#284)
+				if typeName, isFrom := strings.CutSuffix(name, "::from"); isFrom {
+					if named, ok := goPkg.Types[typeName]; ok && foreignScalarPrimitive(named) != nil {
+						return c.checkScalarFrom(s, named)
+					}
+				}
 				fnDef := goPkg.Functions[name]
 				var callTypeArgs []Type
 				pointerResult := false

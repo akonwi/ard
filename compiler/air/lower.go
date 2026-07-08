@@ -4020,6 +4020,13 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		return &Expr{Kind: ExprScalarConvert, Type: typeID, Target: target}, nil
+	case *checker.ScalarFrom:
+		// T::from(x): explicit truncating numeric conversion, lowers to T(x). (#284)
+		value, err := fl.lowerExpr(e.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprScalarConvert, Type: typeID, Target: value}, nil
 	case *checker.ForeignFieldAccess:
 		target, err := fl.lowerExpr(e.Subject)
 		if err != nil {

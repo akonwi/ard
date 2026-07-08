@@ -241,6 +241,16 @@ type ForeignScalarConvert struct {
 
 func (f *ForeignScalarConvert) Type() Type { return f.Target }
 
+// ScalarFrom is the `T::from(value)` truncating numeric conversion into a bare
+// sized scalar (Int64, Uint32, ...) or a foreign named scalar type, mirroring
+// Go's `T(x)`. It lowers to an explicit Go conversion. (#284)
+type ScalarFrom struct {
+	Value  Expression
+	Target Type
+}
+
+func (s *ScalarFrom) Type() Type { return s.Target }
+
 type ForeignFieldAccess struct {
 	Subject Expression
 	Target  string
