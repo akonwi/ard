@@ -4020,6 +4020,13 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		return &Expr{Kind: ExprScalarConvert, Type: typeID, Target: target}, nil
+	case *checker.ScalarFrom:
+		// T::from(x): explicit truncating numeric conversion, lowers to T(x). (#284)
+		value, err := fl.lowerExpr(e.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprScalarConvert, Type: typeID, Target: value}, nil
 	case *checker.ForeignFieldAccess:
 		target, err := fl.lowerExpr(e.Subject)
 		if err != nil {
@@ -4200,12 +4207,6 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		return fl.lowerInstanceMethod(typeID, e)
 	case *checker.StrMethod:
 		return fl.lowerStrMethod(typeID, e)
-	case *checker.StrFromBytes:
-		bytes, err := fl.lowerExpr(e.Bytes)
-		if err != nil {
-			return nil, err
-		}
-		return &Expr{Kind: ExprStrFromBytes, Type: typeID, Target: bytes}, nil
 	case *checker.ByteMethod:
 		if e.Kind == checker.ByteToInt {
 			return fl.lowerUnary(ExprToInt, typeID, e.Subject)

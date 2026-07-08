@@ -2,38 +2,44 @@ package gotarget
 
 import "testing"
 
-// #283: Str::from_bytes([Byte]) Str? validates UTF-8 at the boundary,
-// returning some(Str) for valid bytes and none for invalid sequences.
-func TestGoTargetStrFromBytes(t *testing.T) {
+// #283: Str::from([Byte]) and Str::from([Rune]) build a Str, mirroring Go's
+// string([]byte) / string([]rune). The byte form is unchecked.
+func TestGoTargetStrFrom(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
 		want  string
 	}{
 		{
-			name: "valid bytes round-trip to some",
+			name: "from bytes round-trips",
 			input: `fn main() Bool {
-  let round = Str::from_bytes("hé".bytes())
-  round.is_some() and round.or("") == "hé"
+  Str::from("hé".bytes()) == "hé"
 }`,
 			want: "true",
 		},
 		{
-			name: "empty bytes are valid",
+			name: "from runes round-trips",
+			input: `fn main() Bool {
+  Str::from("hé".runes()) == "hé"
+}`,
+			want: "true",
+		},
+		{
+			name: "empty bytes build an empty string",
 			input: `fn main() Bool {
   let empty: [Byte] = []
-  Str::from_bytes(empty).or("x") == ""
+  Str::from(empty) == ""
 }`,
 			want: "true",
 		},
 		{
-			name: "invalid utf-8 returns none",
-			input: `fn main() Bool {
+			name: "invalid utf-8 bytes are carried through unchecked",
+			input: `fn main() Int {
   mut partial: [Byte] = []
   partial.push("é".bytes().at(0).expect("first byte"))
-  Str::from_bytes(partial).is_none()
+  Str::from(partial).size()
 }`,
-			want: "true",
+			want: "1",
 		},
 	}
 	for _, tc := range cases {
