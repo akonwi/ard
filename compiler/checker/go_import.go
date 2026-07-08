@@ -213,6 +213,13 @@ func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, in
 	return &FunctionDef{Name: name, Parameters: params, ReturnType: ret}, ""
 }
 
+// functionDefFromGoCallbackSignature maps a Go callback parameter's
+// signature to the Ard function type that satisfies it. Callback
+// compatibility must stay conversion-free: an Ard closure's lowered Go form
+// must BE the Go callback type (ADR 0038 ABI), because both direct calls and
+// function-value calls (#275 adapters) pass the closure through unchanged.
+// A callback shape that would need a call-site wrapper must be rejected
+// here, not papered over at one call path.
 func functionDefFromGoCallbackSignature(name string, sig *types.Signature) (*FunctionDef, string) {
 	params := make([]Parameter, 0, sig.Params().Len())
 	for i := 0; i < sig.Params().Len(); i++ {
@@ -242,15 +249,38 @@ func functionDefFromGoCallbackSignature(name string, sig *types.Signature) (*Fun
 	return &FunctionDef{Name: name, Parameters: params, ReturnType: ret}, ""
 }
 
+// callbackReturnTypeFromGo maps a Go callback's results to the Ard return
+// type of the closure that satisfies it, mirroring the call-boundary result
+// adaptation in reverse: an error result means the Ard callback returns a
+// Result whose error arm becomes the Go error, and a comma-ok pair means it
+// returns a Maybe. Both rely on those Ard returns already lowering to the
+// matching Go ABI shapes (ADR 0038), so no wrapper is generated.
 func callbackReturnTypeFromGo(results *types.Tuple) (Type, string) {
 	switch results.Len() {
 	case 0:
 		return Void, ""
 	case 1:
 		if isGoError(results.At(0).Type()) {
-			return nil, "callback error returns are not supported yet"
+			return MakeResult(Void, Str), ""
 		}
 		return typeFromGoWithMethods(results.At(0).Type(), false)
+	case 2:
+		// isGoError/isGoBool intentionally match only the universe error type
+		// and the basic bool: a named bool (`type MyBool bool`) or error-like
+		// interface would make the lowered Ard closure's ABI shape
+		// (`(T, bool)` / `(T, error)`) un-assignable to the Go callback type,
+		// producing uncompilable Go. The restriction is load-bearing.
+		if isGoError(results.At(1).Type()) || isGoBool(results.At(1).Type()) {
+			value, reason := typeFromGoWithMethods(results.At(0).Type(), false)
+			if reason != "" {
+				return nil, fmt.Sprintf("callback result 1 has unsupported type %s: %s", results.At(0).Type().String(), reason)
+			}
+			if isGoError(results.At(1).Type()) {
+				return MakeResult(value, Str), ""
+			}
+			return MakeMaybe(value), ""
+		}
+		return nil, fmt.Sprintf("callback multi-result shape %s is not supported yet", results.String())
 	default:
 		return nil, fmt.Sprintf("callback multi-result shape %s is not supported yet", results.String())
 	}
