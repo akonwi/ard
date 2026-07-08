@@ -90,6 +90,11 @@ func collectImportUsesInStatement(stmt parse.Statement, used map[string]bool) {
 	case *parse.VariableAssignment:
 		collectImportUsesInExpression(s.Target, used)
 		collectImportUsesInExpression(s.Value, used)
+	case *parse.Defer:
+		collectImportUsesInExpression(s.Expr, used)
+		for _, body := range s.Body {
+			collectImportUsesInStatement(body, used)
+		}
 	case *parse.FunctionDeclaration:
 		for _, p := range s.Parameters {
 			if p.Type != nil {

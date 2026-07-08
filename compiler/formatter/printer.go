@@ -133,6 +133,8 @@ func (p printer) renderStatementDoc(statement parse.Statement) doc {
 		return p.renderVariableDeclarationDoc(node)
 	case *parse.VariableAssignment:
 		return p.renderVariableAssignmentDoc(node)
+	case *parse.Defer:
+		return p.renderDeferDoc(node)
 	case *parse.FunctionDeclaration:
 		return p.renderFunctionDeclarationDoc(node, false)
 	case *parse.StaticFunctionDeclaration:
@@ -167,6 +169,18 @@ func (p printer) renderStatementDoc(statement parse.Statement) doc {
 		}
 		return dText(statement.String())
 	}
+}
+
+func (p printer) renderDeferDoc(node *parse.Defer) doc {
+	if node.Expr != nil {
+		return dConcat(dText("defer "), dText(p.renderExpression(node.Expr, 0)))
+	}
+	return dConcat(
+		dText("defer {"),
+		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(node.Body))),
+		dHardLine(),
+		dText("}"),
+	)
 }
 
 func (p printer) renderVariableDeclarationDoc(node *parse.VariableDeclaration) doc {

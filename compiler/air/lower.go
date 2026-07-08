@@ -3315,6 +3315,26 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 			fl.fn.Locals[local].Reference = true
 		}
 		return &Stmt{Kind: StmtLet, Local: local, Name: s.Name, Type: actualType, Mutable: s.Mutable, Value: value}, nil
+	case *checker.Defer:
+		if s.Expr != nil {
+			expr, err := fl.lowerExpr(s.Expr)
+			if err != nil {
+				return nil, err
+			}
+			return &Stmt{Kind: StmtDefer, Expr: expr}, nil
+		}
+		if s.Body == nil {
+			return nil, fmt.Errorf("defer missing expression or body")
+		}
+		voidType, err := fl.l.internType(checker.Void)
+		if err != nil {
+			return nil, err
+		}
+		body, err := fl.lowerBlockWithDefault(s.Body.Stmts, voidType)
+		if err != nil {
+			return nil, err
+		}
+		return &Stmt{Kind: StmtDefer, Body: body}, nil
 	case *checker.Reassignment:
 		switch target := s.Target.(type) {
 		case *checker.Variable:

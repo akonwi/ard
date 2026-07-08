@@ -1930,6 +1930,16 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 		return []ast.Stmt{l.labelLoopBreaks(rangeStmt, body)}, nil
 	case air.StmtBreak:
 		return []ast.Stmt{&ast.BranchStmt{Tok: token.BREAK}}, nil
+	case air.StmtDefer:
+		bodyBlock := stmt.Body
+		if stmt.Expr != nil {
+			bodyBlock = air.Block{Stmts: []air.Stmt{{Kind: air.StmtExpr, Expr: stmt.Expr}}}
+		}
+		body, err := l.lowerBlock(fn, bodyBlock, air.NoType)
+		if err != nil {
+			return nil, err
+		}
+		return []ast.Stmt{&ast.DeferStmt{Call: &ast.CallExpr{Fun: &ast.FuncLit{Type: &ast.FuncType{Params: &ast.FieldList{}}, Body: body}}}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported statement kind %d", stmt.Kind)
 	}

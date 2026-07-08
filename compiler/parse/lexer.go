@@ -75,6 +75,7 @@ const (
 	else_   = "else"
 	type_   = "type"
 	private = "private"
+	defer_  = "defer"
 
 	// Types
 	int_  = "int"
@@ -701,6 +702,8 @@ func (l *lexer) takeIdentifier() token {
 		return makeKeyword(type_)
 	case "private":
 		return makeKeyword(private)
+	case "defer":
+		return makeKeyword(defer_)
 	default:
 		return makeIdentifier(identifier)
 	}
