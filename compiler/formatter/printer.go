@@ -819,6 +819,7 @@ func renderableExpressionStatement(statement parse.Statement) (parse.Expression,
 		*parse.AnonymousFunction,
 		*parse.Try,
 		*parse.BlockExpression,
+		*parse.MutRef, parse.MutRef,
 		*parse.UnsafeBlock:
 		return statement.(parse.Expression), true
 	default:
@@ -1371,6 +1372,12 @@ func (p printer) renderArmWithPattern(pattern string, body []parse.Statement) do
 		}
 		if expr, ok := renderableExpressionStatement(body[0]); ok {
 			rendered := p.renderExpression(expr, 0)
+			// `mut <expr>` cannot be a block's final expression, so a mut-ref arm
+			// body must stay inline (`=> mut x`) and never be wrapped in a block
+			// or fall through to the multi-line block form below.
+			if isMutRefExpression(expr) {
+				return dText(pattern + " => " + rendered)
+			}
 			if canInlineMatchBlockExpression(expr) && !strings.Contains(rendered, "\n") {
 				line := pattern + " => { " + rendered + " }"
 				if len(line) <= p.maxLineWidth {
@@ -1588,6 +1595,15 @@ func (p printer) indent(level int) string {
 		return ""
 	}
 	return strings.Repeat(" ", level*indentWidth)
+}
+
+func isMutRefExpression(expression parse.Expression) bool {
+	switch expression.(type) {
+	case *parse.MutRef, parse.MutRef:
+		return true
+	default:
+		return false
+	}
 }
 
 func canInlineMatchExpression(expression parse.Expression) bool {
