@@ -1778,7 +1778,7 @@ func (p *parser) tryParseType() DeclaredType {
 				p.addError(p.peek(), "Expected fixed array length")
 				p.synchronizeToTokens(right_bracket, equal, new_line, comma, right_paren)
 			} else {
-				parsedLength, err := strconv.Atoi(lengthToken.text)
+				parsedLength, err := strconv.Atoi(strings.ReplaceAll(lengthToken.text, "_", ""))
 				if err != nil || parsedLength < 0 {
 					p.addError(lengthToken, "Expected non-negative fixed array length")
 				} else {

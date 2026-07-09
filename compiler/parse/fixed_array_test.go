@@ -20,6 +20,17 @@ func TestFixedArrayTypes(t *testing.T) {
 			}},
 		},
 		{
+			name:  "length may use numeric separators",
+			input: `let bytes: [Byte; 1_000] = []`,
+			output: Program{Imports: []Import{}, Statements: []Statement{
+				&VariableDeclaration{
+					Name:  "bytes",
+					Type:  &FixedArray{Element: &CustomType{Name: "Byte"}, Length: 1000},
+					Value: &ListLiteral{Items: []Expression{}},
+				},
+			}},
+		},
+		{
 			name:  "nullable fixed array",
 			input: `let bytes: [Byte; 0]? = Maybe::new()`,
 			output: Program{Imports: []Import{}, Statements: []Statement{
