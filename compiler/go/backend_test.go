@@ -1306,7 +1306,7 @@ func TestRunProgramExecutesGoVariadicForeignMethod(t *testing.T) {
 
 		fn main() {
 			let logger = log::Default()
-			logger.Println("hello")
+			logger.Println("hello", "world", 42)
 		}
 	`)
 

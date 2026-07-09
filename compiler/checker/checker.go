@@ -5931,7 +5931,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					}
 				}
 				numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
-			} else if len(resolvedExprs) > len(fnDef.Parameters) {
+			} else if len(resolvedExprs) > len(fnDef.Parameters) && !(len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic) {
 				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
 					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
@@ -6009,6 +6009,9 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					}
 				}
 			}
+
+			fnDef = expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
+			fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
 
 			// Check and process arguments (handles both generics and mutability)
 			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
@@ -6521,35 +6524,36 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					c.addError(err.Error(), s.GetLocation())
 					return nil
 				}
-				if len(resolvedExprs) != len(fnDef.Parameters) {
+				effectiveFnDef := expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
+				if len(resolvedExprs) != len(effectiveFnDef.Parameters) {
 					// A trailing Go variadic argument may be omitted.
 					omittedVariadic := len(resolvedExprs) == len(fnDef.Parameters)-1 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic
 					if !omittedVariadic {
-						c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
+						c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", variadicExpectedArgumentCount(fnDef), len(resolvedExprs)), s.GetLocation())
 						return nil
 					}
 				}
 				args := make([]Expression, len(resolvedExprs))
 				for i, expr := range resolvedExprs {
-					checkedArg := c.checkExprAs(expr, fnDef.Parameters[i].Type)
+					checkedArg := c.checkExprAs(expr, effectiveFnDef.Parameters[i].Type)
 					if checkedArg == nil {
 						return nil
 					}
-					if !c.areCompatible(fnDef.Parameters[i].Type, checkedArg.Type()) {
-						upcast, ok := c.foreignInterfaceArgUpcast(fnDef.Parameters[i].Type, checkedArg)
+					if !c.areCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) {
+						upcast, ok := c.foreignInterfaceArgUpcast(effectiveFnDef.Parameters[i].Type, checkedArg)
 						if !ok {
-							c.addError(typeMismatch(fnDef.Parameters[i].Type, checkedArg.Type()), expr.GetLocation())
+							c.addError(typeMismatch(effectiveFnDef.Parameters[i].Type, checkedArg.Type()), expr.GetLocation())
 							return nil
 						}
 						checkedArg = upcast
 					}
-					if fnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) && !freshContainerSatisfiesMutable(fnDef.Parameters[i].Type, checkedArg) {
-						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDef.Parameters[i].Type.String()), expr.GetLocation())
+					if effectiveFnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) && !freshContainerSatisfiesMutable(effectiveFnDef.Parameters[i].Type, checkedArg) {
+						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", effectiveFnDef.Parameters[i].Type.String()), expr.GetLocation())
 						return nil
 					}
 					args[i] = checkedArg
 				}
-				return &ForeignFunctionCall{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: name, TypeArgs: callTypeArgs, PointerResult: pointerResult, Call: &FunctionCall{Name: name, Args: args, fn: fnDef, ReturnType: fnDef.ReturnType}}
+				return &ForeignFunctionCall{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: name, TypeArgs: callTypeArgs, PointerResult: pointerResult, Call: &FunctionCall{Name: name, Args: args, fn: effectiveFnDef, ReturnType: effectiveFnDef.ReturnType}}
 			}
 
 			var fnDef *FunctionDef
@@ -9353,6 +9357,29 @@ func parameterOmittable(param Parameter) bool {
 	}
 	_, isMaybe := param.Type.(*Maybe)
 	return isMaybe
+}
+
+func variadicExpectedArgumentCount(fnDef *FunctionDef) int {
+	if fnDef != nil && len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic {
+		return len(fnDef.Parameters) - 1
+	}
+	if fnDef == nil {
+		return 0
+	}
+	return len(fnDef.Parameters)
+}
+
+func expandFunctionDefForRepeatedVariadic(fnDef *FunctionDef, argCount int) *FunctionDef {
+	if fnDef == nil || len(fnDef.Parameters) == 0 || !fnDef.Parameters[len(fnDef.Parameters)-1].Variadic || argCount <= len(fnDef.Parameters) {
+		return fnDef
+	}
+	expanded := *fnDef
+	expanded.Parameters = append([]Parameter(nil), fnDef.Parameters...)
+	last := expanded.Parameters[len(expanded.Parameters)-1]
+	for len(expanded.Parameters) < argCount {
+		expanded.Parameters = append(expanded.Parameters, last)
+	}
+	return &expanded
 }
 
 func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int) ([]Expression, *FunctionDef) {
