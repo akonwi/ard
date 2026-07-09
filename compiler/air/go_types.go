@@ -90,6 +90,12 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 			return nil, err
 		}
 		return &ast.ArrayType{Elt: elem}, nil
+	case TypeFixedArray:
+		elem, err := goTypeExpr(program, typ.Elem, runtimeQualifier)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ArrayType{Len: ast.NewIdent(fmt.Sprintf("%d", typ.Length)), Elt: elem}, nil
 	case TypeChannel:
 		elem, err := goTypeExpr(program, typ.Elem, runtimeQualifier)
 		if err != nil {

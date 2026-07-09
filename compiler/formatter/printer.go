@@ -741,6 +741,8 @@ func (p printer) renderType(declared parse.DeclaredType) string {
 		return maybeNullable(name, node.IsNullable())
 	case *parse.List:
 		return maybeNullable("["+p.renderType(node.Element)+"]", node.IsNullable())
+	case *parse.FixedArray:
+		return maybeNullable(fmt.Sprintf("[%s; %d]", p.renderType(node.Element), node.Length), node.IsNullable())
 	case *parse.Map:
 		return maybeNullable("["+p.renderType(node.Key)+": "+p.renderType(node.Value)+"]", node.IsNullable())
 	case *parse.ResultType:

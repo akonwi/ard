@@ -85,6 +85,7 @@ const (
 	ExprTraitUpcast
 	ExprCallTrait
 	ExprMakeList
+	ExprMakeFixedArray
 	ExprListAt
 	// ExprListAtChecked is the user-facing list.at: a bounds-checked access
 	// producing Maybe(elem). ExprListAt is raw indexing used by internal

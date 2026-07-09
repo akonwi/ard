@@ -237,6 +237,21 @@ func (v List) IsNullable() bool {
 	return v.nullable
 }
 
+type FixedArray struct {
+	Location
+	Element  DeclaredType
+	Length   int
+	nullable bool
+}
+
+func (s FixedArray) GetName() string {
+	return "FixedArray"
+}
+
+func (v FixedArray) IsNullable() bool {
+	return v.nullable
+}
+
 type Map struct {
 	Location
 	Key      DeclaredType

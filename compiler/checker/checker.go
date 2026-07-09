@@ -921,6 +921,9 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 	case *parse.List:
 		of := c.resolveType(ty.Element)
 		baseType = MakeList(of)
+	case *parse.FixedArray:
+		of := c.resolveType(ty.Element)
+		baseType = MakeFixedArray(of, ty.Length)
 	case *parse.Map:
 		key := c.resolveType(ty.Key)
 		value := c.resolveType(ty.Value)
@@ -1533,6 +1536,24 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer && foreign.Elem != nil {
 		if actualList, ok := actual.(*List); ok {
 			return foreign.Elem.equal(actualList.of)
+		}
+	}
+	// A named Go array type accepts an Ard fixed array with the same element
+	// type and length, mirroring Go's unnamed-to-named assignability.
+	if foreign, ok := expected.(*ForeignType); ok && !foreign.Pointer {
+		if expectedArray, ok := foreign.Underlying.(*FixedArray); ok {
+			if actualArray, ok := actual.(*FixedArray); ok {
+				return expectedArray.length == actualArray.length && expectedArray.of.equal(actualArray.of)
+			}
+		}
+	}
+	// The reverse also mirrors Go: a named Go array value flows where an Ard
+	// fixed array with the same element type and length is expected.
+	if expectedArray, ok := expected.(*FixedArray); ok {
+		if foreign, ok := actual.(*ForeignType); ok && !foreign.Pointer {
+			if actualArray, ok := foreign.Underlying.(*FixedArray); ok {
+				return expectedArray.length == actualArray.length && expectedArray.of.equal(actualArray.of)
+			}
 		}
 	}
 	// A named Go func type accepts an Ard function value with a matching
@@ -2650,6 +2671,23 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return &Statement{Stmt: loop}
 			}
 
+			if arrayType, ok := iterValue.Type().(*FixedArray); ok {
+				loop := &ForInList{
+					Cursor: s.Cursor.Name,
+					Index:  s.Cursor2.Name,
+					List:   iterValue,
+				}
+				body := c.checkBlock(s.Body, c.markLoopScope(func() {
+					c.recordBinding(s.Cursor.GetLocation(), c.scope.add(s.Cursor.Name, arrayType.of, false))
+					if loop.Index != "" {
+						c.recordBinding(s.Cursor2.GetLocation(), c.scope.add(loop.Index, Int, false))
+					}
+				}))
+
+				loop.Body = body
+				return &Statement{Stmt: loop}
+			}
+
 			if mapType, ok := iterValue.Type().(*Map); ok {
 				iterable := c.checkExpr(s.Iterable)
 				if iterable == nil {
@@ -2847,23 +2885,35 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 }
 
 func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLiteral {
-	// A named Go slice type accepts an Ard list literal: Go assignability
-	// allows an unnamed slice value where the named type is expected.
+	// A named Go slice or array type accepts an Ard list-like literal: Go assignability
+	// allows an unnamed composite value where the named type is expected.
+	literalType := declaredType
 	if foreign, ok := declaredType.(*ForeignType); ok && !foreign.Pointer && foreign.Elem != nil {
 		declaredType = MakeList(foreign.Elem)
+	} else if foreign, ok := declaredType.(*ForeignType); ok && !foreign.Pointer {
+		if arrayType, ok := foreign.Underlying.(*FixedArray); ok {
+			declaredType = arrayType
+		}
 	}
 	if declaredType != nil {
-		declaredList, ok := declaredType.(*List)
-		if !ok {
+		var expectedElementType Type
+		if declaredList, ok := declaredType.(*List); ok {
+			expectedElementType = declaredList.of
+		} else if declaredArray, ok := declaredType.(*FixedArray); ok {
+			expectedElementType = declaredArray.of
+			if len(expr.Items) != declaredArray.length {
+				c.addError(fmt.Sprintf("Type mismatch: Expected %d elements, got %d", declaredArray.length, len(expr.Items)), expr.GetLocation())
+				return nil
+			}
+		} else {
 			c.addError(fmt.Sprintf("Expected %s but got a list", formatTypeForDisplay(declaredType)), expr.GetLocation())
 			return nil
 		}
-		expectedElementType := declaredList.of
 		elements := make([]Expression, len(expr.Items))
 		hasError := false
 		for i := range expr.Items {
 			item := expr.Items[i]
-			element := c.checkExpr(item)
+			element := c.checkExprAs(item, expectedElementType)
 			if element == nil {
 				hasError = true
 				continue
@@ -2881,8 +2931,8 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 
 		return &ListLiteral{
 			Elements: elements,
-			_type:    declaredList,
-			ListType: declaredList,
+			_type:    literalType,
+			ListType: literalType,
 		}
 	}
 
@@ -4757,6 +4807,9 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 	if _, isList := subject.Type().(*List); isList {
 		return c.createListMethod(subject, methodName, args, fnDef)
 	}
+	if _, isFixedArray := subject.Type().(*FixedArray); isFixedArray {
+		return c.createListMethod(subject, methodName, args, fnDef)
+	}
 	if _, isMap := subject.Type().(*Map); isMap {
 		return c.createMapMethod(subject, methodName, args, fnDef)
 	}
@@ -4765,6 +4818,11 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 	}
 	if foreign, isForeign := subject.Type().(*ForeignType); isForeign && foreign.Elem != nil {
 		return c.createListMethod(subject, methodName, args, fnDef)
+	}
+	if foreign, isForeign := subject.Type().(*ForeignType); isForeign {
+		if _, ok := foreign.Underlying.(*FixedArray); ok {
+			return c.createListMethod(subject, methodName, args, fnDef)
+		}
 	}
 	if _, isMaybe := subject.Type().(*Maybe); isMaybe {
 		return c.createMaybeMethod(subject, methodName, args, fnDef, loc)
@@ -5034,8 +5092,16 @@ func (c *Checker) createListMethod(subject Expression, methodName string, args [
 	var elemType Type
 	if listType, ok := subject.Type().(*List); ok {
 		elemType = listType.of
+	} else if arrayType, ok := subject.Type().(*FixedArray); ok {
+		elemType = arrayType.of
 	} else if foreign, ok := subject.Type().(*ForeignType); ok && foreign.Elem != nil {
 		elemType = foreign.Elem
+	} else if foreign, ok := subject.Type().(*ForeignType); ok {
+		if arrayType, ok := foreign.Underlying.(*FixedArray); ok {
+			elemType = arrayType.of
+		} else {
+			panic(fmt.Sprintf("List method on non-list type: %s", subject.Type()))
+		}
 	} else {
 		panic(fmt.Sprintf("List method on non-list type: %s", subject.Type()))
 	}
@@ -5954,6 +6020,9 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
 				}
 				if foreign.Elem != nil && isListMethodName(s.Method.Name) {
+					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
+				}
+				if _, ok := foreign.Underlying.(*FixedArray); ok && isListMethodName(s.Method.Name) {
 					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
 				}
 				for _, arg := range s.Method.Args {
@@ -8529,8 +8598,22 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type) Exp
 			return c.checkExpr(s)
 		})
 	case *parse.ListLiteral:
-		// Only use collection-specific inference when the expected type is a list.
-		if _, ok := expectedType.(*List); ok {
+		// Only use collection-specific inference when the expected type is a list or fixed array.
+		switch expected := expectedType.(type) {
+		case *List, *FixedArray:
+			if result := c.checkList(expectedType, s); result != nil {
+				return result
+			}
+			return nil
+		case *ForeignType:
+			if !expected.Pointer && expected.Underlying != nil {
+				if _, ok := expected.Underlying.(*FixedArray); ok {
+					if result := c.checkList(expected, s); result != nil {
+						return result
+					}
+					return nil
+				}
+			}
 			if result := c.checkList(expectedType, s); result != nil {
 				return result
 			}

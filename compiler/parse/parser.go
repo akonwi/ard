@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -1769,6 +1770,51 @@ func (p *parser) tryParseType() DeclaredType {
 					End:   endBracket.getLocation().Start,
 				},
 			}
+		}
+		if p.match(semicolon) {
+			lengthToken := p.peek()
+			length := 0
+			if !p.match(number) {
+				p.addError(p.peek(), "Expected fixed array length")
+				p.synchronizeToTokens(right_bracket, equal, new_line, comma, right_paren)
+			} else {
+				parsedLength, err := strconv.Atoi(lengthToken.text)
+				if err != nil || parsedLength < 0 {
+					p.addError(lengthToken, "Expected non-negative fixed array length")
+				} else {
+					length = parsedLength
+				}
+			}
+			if !p.match(right_bracket) {
+				p.addError(p.peek(), "Expected ']'")
+				p.synchronizeToTokens(equal, new_line, comma, right_paren)
+			}
+			endBracket := p.previous()
+			arrayType := &FixedArray{
+				Location: Location{
+					Start: bracket.getLocation().Start,
+					End:   endBracket.getLocation().Start,
+				},
+				Element:  elementType,
+				Length:   length,
+				nullable: false,
+			}
+			// Check for Result sugar syntax: [Type; N]!ErrorType
+			if p.match(bang) {
+				errType := p.parseType()
+				nullable := p.match(question_mark)
+				return &ResultType{
+					Val:      arrayType,
+					Err:      errType,
+					nullable: nullable,
+					Location: Location{
+						Start: bracket.getLocation().Start,
+						End:   Point{Row: p.previous().line, Col: p.previous().column},
+					},
+				}
+			}
+			arrayType.nullable = p.match(question_mark)
+			return arrayType
 		}
 		if !p.match(right_bracket) {
 			p.addError(p.peek(), "Expected ']'")

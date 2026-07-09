@@ -596,6 +596,50 @@ func (l *List) Of() Type {
 	return l.of
 }
 
+type FixedArray struct {
+	of     Type
+	length int
+}
+
+func MakeFixedArray(of Type, length int) *FixedArray {
+	return &FixedArray{of: of, length: length}
+}
+
+func (a FixedArray) String() string {
+	return fmt.Sprintf("[%s; %d]", typeSyntaxString(a.of), a.length)
+}
+
+func (a FixedArray) get(name string) Type {
+	switch name {
+	case "at":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "index", Type: Int}},
+			ReturnType: MakeMaybe(a.of),
+		}
+	case "size":
+		return &FunctionDef{Name: name, ReturnType: Int}
+	default:
+		return nil
+	}
+}
+
+func (a *FixedArray) equal(other Type) bool {
+	return equalTypes(a, other)
+}
+
+func (a *FixedArray) hasTrait(trait *Trait) bool {
+	return false
+}
+
+func (a *FixedArray) Of() Type {
+	return a.of
+}
+
+func (a *FixedArray) Len() int {
+	return a.length
+}
+
 // Chan is a typed channel for communicating between concurrent tasks. It
 // lowers to a native Go `chan T`.
 type Chan struct {
@@ -842,6 +886,8 @@ func typeSyntaxString(t Type) string {
 		return resultOperandSyntax(typ.val) + "!" + resultOperandSyntax(typ.err)
 	case *List:
 		return "[" + typeSyntaxString(typ.of) + "]"
+	case *FixedArray:
+		return fmt.Sprintf("[%s; %d]", typeSyntaxString(typ.of), typ.length)
 	case *Map:
 		return "[" + typeSyntaxString(typ.key) + ": " + typeSyntaxString(typ.value) + "]"
 	default:
