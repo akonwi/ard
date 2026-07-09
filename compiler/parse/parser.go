@@ -2205,7 +2205,7 @@ func (p *parser) matchExpr() (Expression, error) {
 			p.advance()
 		}
 
-		for !p.match(right_brace) {
+		for !p.isAtEnd() && !p.match(right_brace) {
 			// Parse and collect comments
 			if c := p.parseInlineComment(); c != nil {
 				matchExpr.Comments = append(matchExpr.Comments, *c)
@@ -2285,7 +2285,7 @@ func (p *parser) parseConditionalMatch(keyword token) (Expression, error) {
 		p.advance()
 	}
 
-	for !p.match(right_brace) {
+	for !p.isAtEnd() && !p.match(right_brace) {
 		// Parse and collect comments
 		if c := p.parseInlineComment(); c != nil {
 			conditionalMatch.Comments = append(conditionalMatch.Comments, *c)

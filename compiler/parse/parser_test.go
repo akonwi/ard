@@ -56,6 +56,17 @@ type test struct {
 	wantErrs []string // Expected error messages
 }
 
+func TestParseMalformedMatchArmStopsAtEOF(t *testing.T) {
+	result := Parse([]byte(`impl Board {
+  fn get_winner() Str? {
+    match true {
+      true => io::print("unterminated
+`), "test.ard")
+	if len(result.Errors) == 0 {
+		t.Fatal("expected parse errors for malformed match arm")
+	}
+}
+
 func runTests(t *testing.T, tests []test) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

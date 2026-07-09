@@ -29,6 +29,7 @@ var (
 	maybeMethodNames = map[MaybeMethodKind]string{
 		MaybeExpect: "expect", MaybeIsNone: "is_none", MaybeIsSome: "is_some",
 		MaybeOr: "or", MaybeMap: "map", MaybeAndThen: "and_then",
+		MaybeSet: "set", MaybeClear: "clear",
 	}
 	resultMethodNames = map[ResultMethodKind]string{
 		ResultExpect: "expect", ResultOr: "or", ResultIsOk: "is_ok",

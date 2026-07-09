@@ -167,6 +167,8 @@ const (
 	ExprMaybeOr
 	ExprMaybeMap
 	ExprMaybeAndThen
+	ExprMaybeSet
+	ExprMaybeClear
 	ExprMatchResult
 	ExprResultExpect
 	ExprResultOr

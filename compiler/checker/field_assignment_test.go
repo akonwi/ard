@@ -134,9 +134,7 @@ fn main() {
 	})
 
 	t.Run("maybe value into nullable field", func(t *testing.T) {
-		wantClean(t, checkSource(t, `use ard/maybe
-
-struct S {
+		wantClean(t, checkSource(t, `struct S {
   label: Str?,
 }
 
@@ -144,7 +142,7 @@ fn main() {
   mut a = S{label: "one"}
   mut b = S{label: "two"}
   a.label = b.label
-  a.label = maybe::none()
+  a.label = Maybe::none()
 }
 `))
 	})

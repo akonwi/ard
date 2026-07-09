@@ -189,8 +189,7 @@ func TestMethodsCannotIntroduceGenericParams(t *testing.T) {
 }
 func TestUnboundGenericExplicitCallTypeArgIsRejected(t *testing.T) {
 	result := parse.Parse([]byte(`
-		use ard/maybe
-		fn get_raw(key: Str) $T? { maybe::none() }
+		fn get_raw(key: Str) $T? { Maybe::none() }
 		get_raw<$U>("count")
 	`), "test.ard")
 	if len(result.Errors) > 0 {
@@ -207,8 +206,7 @@ func TestUnboundGenericExplicitCallTypeArgIsRejected(t *testing.T) {
 }
 func TestNestedFunctionCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 	result := parse.Parse([]byte(`
-		use ard/maybe
-		fn raw(key: Str) $T? { maybe::none() }
+		fn raw(key: Str) $T? { Maybe::none() }
 
 		fn outer() Bool {
 			fn inner() Bool {
@@ -231,8 +229,7 @@ func TestNestedFunctionCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 }
 func TestClosureCannotUseOuterGenericAsExplicitTypeArg(t *testing.T) {
 	result := parse.Parse([]byte(`
-		use ard/maybe
-		fn raw(key: Str) $T? { maybe::none() }
+		fn raw(key: Str) $T? { Maybe::none() }
 
 		fn outer() Bool {
 			let inner = fn() Bool {

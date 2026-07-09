@@ -228,7 +228,7 @@ export default defineConfig({
             { label: "ard/json", slug: "stdlib/json" },
             { label: "ard/list", slug: "stdlib/list" },
             { label: "ard/map", slug: "stdlib/map" },
-            { label: "ard/maybe", slug: "stdlib/maybe" },
+            { label: "Maybe", slug: "stdlib/maybe" },
             { label: "ard/result", slug: "stdlib/result" },
             { label: "ard/sql", slug: "stdlib/sql" },
             { label: "ard/string", slug: "stdlib/string" },

@@ -346,10 +346,9 @@ func TestNullableParameterCallSugar(t *testing.T) {
 		{
 			name: "passes explicit maybe arguments through",
 			input: strings.Join([]string{
-				`use ard/maybe`,
 				`fn configure(name: Str, retries: Int?) {}`,
-				`configure("worker", maybe::some(3))`,
-				`configure("worker", maybe::none())`,
+				`configure("worker", Maybe::some(3))`,
+				`configure("worker", Maybe::none())`,
 			}, "\n"),
 		},
 		{
@@ -372,11 +371,10 @@ func TestNullableParameterCallSugar(t *testing.T) {
 		{
 			name: "generic nullable parameter can be omitted",
 			input: strings.Join([]string{
-				`use ard/maybe`,
 				`fn optional(value: $T?) $T? { value }`,
 				`let missing: Int? = optional<Int>()`,
 				`let present: Int? = optional<Int>(1)`,
-				`let explicit: Int? = optional<Int>(maybe::some(2))`,
+				`let explicit: Int? = optional<Int>(Maybe::some(2))`,
 			}, "\n"),
 		},
 		{
@@ -634,9 +632,8 @@ func TestGroupedNullableFunctionTypes(t *testing.T) {
 		{
 			name: "Grouped nullable function type supports Maybe APIs",
 			input: `
-				use ard/maybe
 
-				let f: (fn(Int) Void)? = maybe::none()
+				let f: (fn(Int) Void)? = Maybe::none()
 				f.is_none()
 			`,
 			diagnostics: []checker.Diagnostic{},

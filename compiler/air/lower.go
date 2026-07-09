@@ -4865,6 +4865,10 @@ func (fl *functionLowerer) lowerMaybeMethod(typeID TypeID, method *checker.Maybe
 		kind = ExprMaybeMap
 	case checker.MaybeAndThen:
 		kind = ExprMaybeAndThen
+	case checker.MaybeSet:
+		kind = ExprMaybeSet
+	case checker.MaybeClear:
+		kind = ExprMaybeClear
 	default:
 		return nil, fmt.Errorf("unsupported AIR Maybe method %d", method.Kind)
 	}
@@ -5202,7 +5206,7 @@ func resultConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {
 }
 
 func maybeConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {
-	if call.Module != "ard/maybe" {
+	if call.Module != "builtin/Maybe" {
 		return 0, false
 	}
 	switch call.Call.Name {

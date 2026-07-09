@@ -1,13 +1,11 @@
-use ard/maybe
-
 use go:fmt
 
 fn main() {
   // a declared none value needs to be explicitly typed
-  mut name: Str? = maybe::none()
+  mut name: Str? = Maybe::none<Str>()
 
   // update the value
-  name = maybe::some("Akonwi")
+  name = Maybe::some("Akonwi")
 
   // read the value
   match name {

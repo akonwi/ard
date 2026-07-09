@@ -941,6 +941,13 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		case "Rune":
 			baseType = Rune
 			break
+		case "Maybe":
+			if len(ty.TypeArgs) != 1 {
+				c.addError("Generic type Maybe requires type arguments", ty.GetLocation())
+				return &TypeVar{name: "unknown"}
+			}
+			baseType = MakeMaybe(c.resolveType(ty.TypeArgs[0]))
+			break
 		case "Chan":
 			if len(ty.TypeArgs) != 1 {
 				c.addError("Generic type Chan requires type arguments", ty.GetLocation())
@@ -4585,7 +4592,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 					continue
 				}
 
-				// Implicit Maybe wrapping: if field is Maybe<T> and value is T, wrap in maybe::some()
+				// Implicit Maybe wrapping: if field is Maybe<T> and value is T, wrap in Maybe::some()
 				if maybeField, isMaybe := fieldExpected.(*Maybe); isMaybe {
 					if valType := checkVal.Type(); !valType.equal(fieldExpected) {
 						if c.areCompatible(maybeField.Of(), valType) {
@@ -4617,8 +4624,8 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				// For non-generic structs, handle nullable fields with implicit wrapping
 				var val Expression
 				if maybeField, isMaybe := fieldExpected.(*Maybe); isMaybe {
-					// Preserve full Maybe<T> type context for expressions like maybe::some(...)
-					// and maybe::none(), but use the inner type for literals and anonymous
+					// Preserve full Maybe<T> type context for expressions like Maybe::some(...)
+					// and Maybe::none(), but use the inner type for literals and anonymous
 					// functions so they can still infer their element/parameter types.
 					switch property.Value.(type) {
 					case *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction:
@@ -4729,7 +4736,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 
 // createPrimitiveMethodNode creates type-specific method nodes for primitives and collections
 // Falls back to generic InstanceMethod for user-defined types (structs, enums)
-func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, typeArgs []Type) Expression {
+func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, typeArgs []Type, loc parse.Location) Expression {
 	// Determine subject type - emit specialized nodes for all built-in types
 	switch subject.Type() {
 	case Str:
@@ -4760,7 +4767,7 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 		return c.createListMethod(subject, methodName, args, fnDef)
 	}
 	if _, isMaybe := subject.Type().(*Maybe); isMaybe {
-		return c.createMaybeMethod(subject, methodName, args, fnDef)
+		return c.createMaybeMethod(subject, methodName, args, fnDef, loc)
 	}
 	if _, isResult := subject.Type().(*Result); isResult {
 		return c.createResultMethod(subject, methodName, args, fnDef)
@@ -5117,7 +5124,7 @@ func (c *Checker) createMapMethod(subject Expression, methodName string, args []
 	}
 }
 
-func (c *Checker) createMaybeMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
+func (c *Checker) createMaybeMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, loc parse.Location) Expression {
 	maybeType := subject.Type().(*Maybe)
 	var kind MaybeMethodKind
 	switch methodName {
@@ -5133,8 +5140,16 @@ func (c *Checker) createMaybeMethod(subject Expression, methodName string, args 
 		kind = MaybeMap
 	case "and_then":
 		kind = MaybeAndThen
+	case "set":
+		kind = MaybeSet
+	case "clear":
+		kind = MaybeClear
 	default:
 		panic(fmt.Sprintf("Unknown Maybe method: %s", methodName))
+	}
+	if (kind == MaybeSet || kind == MaybeClear) && !c.isMutable(subject) {
+		c.addError(fmt.Sprintf("Immutable: Maybe.%s receiver", methodName), loc)
+		return nil
 	}
 	return &MaybeMethod{
 		Subject:    subject,
@@ -5535,7 +5550,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 
 				if toStr, ok := cx.Type().get("to_str").(*FunctionDef); ok && toStr.ReturnType == Str && len(toStr.Parameters) == 0 {
-					chunks[i] = c.createPrimitiveMethodNode(cx, toStr.Name, []Expression{}, toStr, nil)
+					chunks[i] = c.createPrimitiveMethodNode(cx, toStr.Name, []Expression{}, toStr, nil, parse.Location{})
 					continue
 				}
 
@@ -5550,7 +5565,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 					// For non-string types that satisfy ToString trait, wrap with to_str() call
 					toStrMethod := toStringTrait.methods[0]
-					methodNode := c.createPrimitiveMethodNode(cx, toStrMethod.Name, []Expression{}, &toStrMethod, nil)
+					methodNode := c.createPrimitiveMethodNode(cx, toStrMethod.Name, []Expression{}, &toStrMethod, nil, parse.Location{})
 					chunks[i] = methodNode
 					continue
 				}
@@ -5936,10 +5951,10 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			}
 			if foreign, ok := subj.Type().(*ForeignType); ok {
 				if foreign.MapKey != nil && foreign.MapValue != nil && isMapMethodName(s.Method.Name) {
-					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs)
+					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
 				}
 				if foreign.Elem != nil && isListMethodName(s.Method.Name) {
-					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs)
+					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
 				}
 				for _, arg := range s.Method.Args {
 					if arg.Name != "" {
@@ -5951,7 +5966,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				return &ForeignMethodCall{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Method.Name, Call: &FunctionCall{Name: s.Method.Name, Args: args, fn: fnToUse, ReturnType: fnToUse.ReturnType}}
 			}
 			// Create function call
-			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs)
+			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
 		}
 	case *parse.MutRef:
 		return c.checkMutRef(s)
@@ -9093,7 +9108,7 @@ func (c *Checker) setupFunctionGenerics(fnDef *FunctionDef) (*FunctionDef, *Symb
 	return fnDefCopy, genericScope
 }
 
-// synthesizeMaybeNone creates a synthetic maybe::none() call for an omitted nullable argument.
+// synthesizeMaybeNone creates a synthetic Maybe::none() call for an omitted nullable argument.
 // This transforms the omitted argument into an explicit function call, allowing backends
 // to treat all arguments uniformly without special OmittedArg handling.
 func (c *Checker) synthesizeMaybeNone(paramType Type) Expression {
@@ -9105,10 +9120,10 @@ func (c *Checker) synthesizeMaybeNone(paramType Type) Expression {
 		return &VoidLiteral{}
 	}
 
-	// Create a module function call: maybe::none()
-	// The return type of maybe::none() depends on its context, which will be the Maybe type
+	// Create a module function call: Maybe::none()
+	// The return type of Maybe::none() depends on its context, which will be the Maybe type
 	return &ModuleFunctionCall{
-		Module: "ard/maybe",
+		Module: "builtin/Maybe",
 		Call: &FunctionCall{
 			Name: "none",
 			Args: []Expression{},
@@ -9123,12 +9138,12 @@ func (c *Checker) synthesizeMaybeNone(paramType Type) Expression {
 	}
 }
 
-// synthesizeMaybeSome wraps a value in maybe::some() for automatic coercion of T to Maybe<T>.
+// synthesizeMaybeSome wraps a value in Maybe::some() for automatic coercion of T to Maybe<T>.
 // This allows calling functions with nullable parameters using unwrapped values:
-// instead of add(1, maybe::some(5)), you can write add(1, 5).
+// instead of add(1, Maybe::some(5)), you can write add(1, 5).
 func (c *Checker) synthesizeMaybeSome(value Expression, maybeType Type) Expression {
 	return &ModuleFunctionCall{
-		Module: "ard/maybe",
+		Module: "builtin/Maybe",
 		Call: &FunctionCall{
 			Name: "some",
 			Args: []Expression{value},
@@ -9152,7 +9167,7 @@ func (c *Checker) synthesizeMaybeSome(value Expression, maybeType Type) Expressi
 // checkAndProcessArguments validates and type-checks function arguments with generic support.
 // Returns the processed arguments and the specialized function (with generics resolved if applicable).
 // Mutable parameters require addressable mutable arguments.
-// Synthesizes maybe::none() calls for omitted nullable arguments.
+// Synthesizes Maybe::none() calls for omitted nullable arguments.
 // If any error occurs, it's added to the checker's diagnostics.
 
 // parameterOmittable reports whether a trailing parameter may be omitted at a
@@ -9167,7 +9182,7 @@ func parameterOmittable(param Parameter) bool {
 }
 
 func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int) ([]Expression, *FunctionDef) {
-	// Create the full argument list including synthesized maybe::none() calls for omitted arguments
+	// Create the full argument list including synthesized Maybe::none() calls for omitted arguments
 	// Need to maintain parameter order, so use indexed assignment instead of appending
 	totalArgs := len(fnDefCopy.Parameters)
 	allExprs := make([]Expression, totalArgs)
@@ -9226,13 +9241,13 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			return nil, nil
 		}
 
-		// Check if we need to wrap the argument in maybe::some() for nullable parameters
+		// Check if we need to wrap the argument in Maybe::some() for nullable parameters
 		// If parameter is Maybe<T> and argument is T, wrap it
 		if maybeParam, isMaybe := paramType.(*Maybe); isMaybe {
 			if argType := checkedArg.Type(); !argType.equal(paramType) {
 				// Check if argument type matches the inner Maybe type
 				if c.areCompatible(maybeParam.Of(), argType) {
-					// Wrap non-Maybe value in maybe::some()
+					// Wrap non-Maybe value in Maybe::some()
 					checkedArg = c.synthesizeMaybeSome(checkedArg, paramType)
 				}
 			}
@@ -9279,7 +9294,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		allExprs = allExprs[:len(allExprs)-1]
 	}
 
-	// Fill in synthesized maybe::none() calls for omitted arguments
+	// Fill in synthesized Maybe::none() calls for omitted arguments
 	for i := range allExprs {
 		if allExprs[i] == nil {
 			paramType := fnDefCopy.Parameters[i].Type

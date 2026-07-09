@@ -1,8 +1,6 @@
-use ard/maybe
-
 // Compiler-backed checked recovery from Any.
 fn cast(value: Any) $T? {
-  maybe::none<$T>()
+  Maybe::none<$T>()
 }
 
 // Compiler-backed check for backend nil value state.

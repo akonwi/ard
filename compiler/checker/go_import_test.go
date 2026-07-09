@@ -595,11 +595,10 @@ fn main() {
 		{
 			name: "foreign scalar Maybe does not compare against primitive Maybe",
 			input: `use go:time
-use ard/maybe
 
 fn main() {
-  let month: time::Month? = maybe::some(time::January)
-  let number: Int? = maybe::some(1)
+  let month: time::Month? = Maybe::some(time::January)
+  let number: Int? = Maybe::some(1)
   let _ = month == number
 }`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: time::Month? == Int?"}},

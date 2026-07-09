@@ -906,6 +906,18 @@ func (m *Maybe) get(name string) Type {
 			Parameters: []Parameter{{Name: "default", Type: m.of}},
 			ReturnType: m.of,
 		}
+	case "set":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "value", Type: m.of}},
+			ReturnType: Void,
+		}
+	case "clear":
+		return &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{},
+			ReturnType: Void,
+		}
 	case "map":
 		mapped := &TypeVar{name: "Mapped"}
 		return &FunctionDef{

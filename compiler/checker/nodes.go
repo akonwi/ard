@@ -559,6 +559,8 @@ const (
 	MaybeOr
 	MaybeMap
 	MaybeAndThen
+	MaybeSet
+	MaybeClear
 )
 
 type MaybeMethod struct {
@@ -582,6 +584,8 @@ func (m *MaybeMethod) Type() Type {
 		return m.InnerType
 	case MaybeIsNone, MaybeIsSome:
 		return Bool
+	case MaybeSet, MaybeClear:
+		return Void
 	default:
 		return Void
 	}

@@ -305,10 +305,9 @@ func TestVariables(t *testing.T) {
 		{
 			name: "Match binding inherits mutability from mutable Maybe",
 			input: strings.Join([]string{
-				`use ard/maybe`,
 				`struct State { cursor: Int }`,
 				`fn main() {`,
-				`  mut s: State? = maybe::some(State{cursor: 0})`,
+				`  mut s: State? = Maybe::some(State{cursor: 0})`,
 				`  match s {`,
 				`    cur => { cur.cursor = cur.cursor + 1 },`,
 				`    _ => (),`,
@@ -320,10 +319,9 @@ func TestVariables(t *testing.T) {
 		{
 			name: "Match binding from immutable Maybe stays immutable",
 			input: strings.Join([]string{
-				`use ard/maybe`,
 				`struct State { cursor: Int }`,
 				`fn main() {`,
-				`  let s: State? = maybe::some(State{cursor: 0})`,
+				`  let s: State? = Maybe::some(State{cursor: 0})`,
 				`  match s {`,
 				`    cur => { cur.cursor = cur.cursor + 1 },`,
 				`    _ => (),`,
@@ -884,16 +882,14 @@ func TestEqualityComparisons(t *testing.T) {
 		{
 			name: "nullable primitive equality is allowed",
 			input: strings.Join([]string{
-				`use ard/maybe`,
-				`maybe::some(1) == maybe::none()`,
+				`Maybe::some(1) == Maybe::none()`,
 			}, "\n"),
 		},
 		{
 			name: "nullable list equality is rejected",
 			input: strings.Join([]string{
-				`use ard/maybe`,
 				`let a: [Int] = [1]`,
-				`maybe::some(a) == maybe::some(a)`,
+				`Maybe::some(a) == Maybe::some(a)`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Invalid: [Int]? == [Int]?"},
@@ -902,8 +898,7 @@ func TestEqualityComparisons(t *testing.T) {
 		{
 			name: "Mismatched Maybe equality reports an error",
 			input: strings.Join([]string{
-				`use ard/maybe`,
-				`maybe::some(1) == maybe::some("x")`,
+				`Maybe::some(1) == Maybe::some("x")`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Invalid: Int? == Str?"},
@@ -1578,9 +1573,8 @@ func TestMaybes(t *testing.T) {
 		{
 			name: "Declaring nullables",
 			input: `
-				use ard/maybe
-				mut name: Str? = maybe::none()
-				mut name2 = maybe::some("Bob")`,
+				mut name: Str? = Maybe::none()
+				mut name2 = Maybe::some("Bob")`,
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
@@ -1588,7 +1582,7 @@ func TestMaybes(t *testing.T) {
 							Mutable: true,
 							Name:    "name",
 							Value: &checker.ModuleFunctionCall{
-								Module: "ard/maybe",
+								Module: "builtin/Maybe",
 								Call: &checker.FunctionCall{
 									Name: "none",
 									Args: []checker.Expression{},
@@ -1601,7 +1595,7 @@ func TestMaybes(t *testing.T) {
 							Mutable: true,
 							Name:    "name2",
 							Value: &checker.ModuleFunctionCall{
-								Module: "ard/maybe",
+								Module: "builtin/Maybe",
 								Call: &checker.FunctionCall{
 									Name: "some",
 									Args: []checker.Expression{&checker.StrLiteral{"Bob"}},
@@ -1615,11 +1609,10 @@ func TestMaybes(t *testing.T) {
 		{
 			name: "Reassigning with nullables",
 			input: `
-				use ard/maybe
-				mut name: Str? = maybe::some("Joe")
-				name = maybe::some("Bob")
+				mut name: Str? = Maybe::some("Joe")
+				name = Maybe::some("Bob")
 			  name = "Alice"
-				name = maybe::none()`,
+				name = Maybe::none()`,
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
@@ -1627,7 +1620,7 @@ func TestMaybes(t *testing.T) {
 							Mutable: true,
 							Name:    "name",
 							Value: &checker.ModuleFunctionCall{
-								Module: "ard/maybe",
+								Module: "builtin/Maybe",
 								Call: &checker.FunctionCall{
 									Name: "some",
 									Args: []checker.Expression{&checker.StrLiteral{"Joe"}},
@@ -1639,7 +1632,7 @@ func TestMaybes(t *testing.T) {
 						Stmt: &checker.Reassignment{
 							Target: &checker.Variable{},
 							Value: &checker.ModuleFunctionCall{
-								Module: "ard/maybe",
+								Module: "builtin/Maybe",
 								Call: &checker.FunctionCall{
 									Name: "some",
 									Args: []checker.Expression{&checker.StrLiteral{"Bob"}},
@@ -1651,7 +1644,7 @@ func TestMaybes(t *testing.T) {
 						Stmt: &checker.Reassignment{
 							Target: &checker.Variable{},
 							Value: &checker.ModuleFunctionCall{
-								Module: "ard/maybe",
+								Module: "builtin/Maybe",
 								Call: &checker.FunctionCall{
 									Name: "none",
 									Args: []checker.Expression{},
@@ -2346,9 +2339,8 @@ func TestMatchArmScope(t *testing.T) {
 		{
 			name: "Maybe match pattern binding does not leak after inferred match expression",
 			input: strings.Join([]string{
-				`use ard/maybe`,
 				`fn main() Int {`,
-				`  let maybe_value: Int? = maybe::some(1)`,
+				`  let maybe_value: Int? = Maybe::some(1)`,
 				`  let x = match maybe_value {`,
 				`    value => value,`,
 				`    _ => 0,`,

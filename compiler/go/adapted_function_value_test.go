@@ -62,7 +62,6 @@ func Join(prefix string, parts ...string) string {
 	}
 	mainPath := filepath.Join(projectDir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`use go:fnvalues/ffi
-use ard/maybe
 
 fn apply(f: fn(Str) Int!Str, input: Str) Int {
   f(input).or(-1)
@@ -89,7 +88,7 @@ fn main() {
   // variadic tail becomes a trailing Maybe parameter
   let join = ffi::Join
   if not join("a", "b") == "a:b" { panic("variadic some case failed") }
-  if not join("a", maybe::none()) == "a" { panic("variadic none case failed") }
+  if not join("a", Maybe::none()) == "a" { panic("variadic none case failed") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)

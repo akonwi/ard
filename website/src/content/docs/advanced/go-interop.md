@@ -157,10 +157,9 @@ Prefer Go constructors or companion wrappers for structs whose zero value is uns
 Nullable mutable references are written with grouping:
 
 ```ard
-use ard/maybe
 use go:net/http as gohttp
 
-let missing: (mut gohttp::Request)? = maybe::none()
+let missing: (mut gohttp::Request)? = Maybe::none()
 ```
 
 Use `(mut T)?` when an Ard API intentionally models an optional reference. Direct-Go pointer fields are not automatically wrapped in `Maybe`; Go pointer values remain `mut go::T` and preserve Go nil behavior.

@@ -2259,6 +2259,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMaybeMap(fn, expr)
 	case air.ExprMaybeAndThen:
 		return l.lowerMaybeAndThen(fn, expr)
+	case air.ExprMaybeSet:
+		return l.lowerMaybeSet(fn, expr)
+	case air.ExprMaybeClear:
+		return l.lowerMaybeClear(fn, expr)
 	case air.ExprResultExpect:
 		return l.lowerResultExpect(fn, expr)
 	case air.ExprResultOr:
@@ -5686,6 +5690,85 @@ func (l *lowerer) lowerResultOr(fn air.Function, expr air.Expr) (loweredExpr, er
 		Else: &ast.BlockStmt{List: []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{resultExpr}, Tok: token.ASSIGN, Rhs: []ast.Expr{defaultExpr}}}},
 	})
 	return loweredExpr{stmts: stmts, expr: resultExpr}, nil
+}
+
+func (l *lowerer) lowerMaybeSet(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 1 {
+		return loweredExpr{}, fmt.Errorf("maybe set expects target and one arg")
+	}
+	if expr.Target.Kind != air.ExprLoadLocal && expr.Target.Kind != air.ExprGetField && expr.Target.Kind != air.ExprLoadGlobal {
+		return loweredExpr{}, fmt.Errorf("maybe set requires an addressable local, field, or global target")
+	}
+	if !validTypeID(l.program, expr.Target.Type) {
+		return loweredExpr{}, fmt.Errorf("maybe set target type is invalid")
+	}
+	maybeInfo := l.program.Types[expr.Target.Type-1]
+	if maybeInfo.Kind != air.TypeMaybe {
+		return loweredExpr{}, fmt.Errorf("maybe set target is not Maybe")
+	}
+	value, err := l.lowerExprWithExpectedType(fn, expr.Args[0], maybeInfo.Elem)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	var target ast.Expr
+	var targetStmts []ast.Stmt
+	if expr.Target.Kind == air.ExprLoadLocal {
+		target = l.localValueExpr(fn, expr.Target.Local)
+	} else {
+		loweredTarget, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		target = loweredTarget.expr
+		targetStmts = loweredTarget.stmts
+	}
+	valueExpr := value.expr
+	stmts := append(append([]ast.Stmt{}, targetStmts...), value.stmts...)
+	if l.isVoidType(maybeInfo.Elem) || isVoidExpr(valueExpr) {
+		stmts = l.appendVoidValueEval(stmts, valueExpr)
+		valueExpr = l.voidValueExpr()
+	}
+	some, err := l.maybeSomeExpr(expr.Target.Type, valueExpr)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{some}})
+	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
+}
+
+func (l *lowerer) lowerMaybeClear(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || len(expr.Args) != 0 {
+		return loweredExpr{}, fmt.Errorf("maybe clear expects target and no args")
+	}
+	if expr.Target.Kind != air.ExprLoadLocal && expr.Target.Kind != air.ExprGetField && expr.Target.Kind != air.ExprLoadGlobal {
+		return loweredExpr{}, fmt.Errorf("maybe clear requires an addressable local, field, or global target")
+	}
+	if !validTypeID(l.program, expr.Target.Type) {
+		return loweredExpr{}, fmt.Errorf("maybe clear target type is invalid")
+	}
+	maybeInfo := l.program.Types[expr.Target.Type-1]
+	if maybeInfo.Kind != air.TypeMaybe {
+		return loweredExpr{}, fmt.Errorf("maybe clear target is not Maybe")
+	}
+	var target ast.Expr
+	var targetStmts []ast.Stmt
+	if expr.Target.Kind == air.ExprLoadLocal {
+		target = l.localValueExpr(fn, expr.Target.Local)
+	} else {
+		loweredTarget, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		target = loweredTarget.expr
+		targetStmts = loweredTarget.stmts
+	}
+	none, err := l.maybeNoneExpr(expr.Target.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	stmts := append([]ast.Stmt{}, targetStmts...)
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{target}, Tok: token.ASSIGN, Rhs: []ast.Expr{none}})
+	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
 }
 
 func (l *lowerer) lowerMaybeMap(fn air.Function, expr air.Expr) (loweredExpr, error) {

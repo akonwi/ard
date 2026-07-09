@@ -263,7 +263,7 @@ func TestReferencingStructsFromPackage(t *testing.T) {
 		{
 			name: "using static properties as types",
 			input: `
-				let req: http::Request? = maybe::none()
+				let req: http::Request? = Maybe::none()
 			`,
 			output: Program{
 				Imports: []Import{},
@@ -278,7 +278,7 @@ func TestReferencingStructsFromPackage(t *testing.T) {
 							},
 						},
 						Value: &StaticFunction{
-							Target:   &Identifier{Name: "maybe"},
+							Target:   &Identifier{Name: "Maybe"},
 							Function: FunctionCall{Name: "none", Args: []Argument{}, Comments: []Comment{}},
 						},
 					},

@@ -81,12 +81,11 @@ let text = parse_num("42").and_then<Str>(fn(v) { Result::ok("{v}") })
 Maybe types represent values that may or may not exist. They are written as `Type?` and are equivalent to `Maybe<Type>`:
 
 ```ard
-use ard/maybe
 
 fn find_user(id: Int) User? {
     match id == 42 {
-        true => maybe::some(User { name: "Alice", id: 42 }),
-        false => maybe::none()
+        true => Maybe::some(User { name: "Alice", id: 42 }),
+        false => Maybe::none()
     }
 }
 ```
@@ -94,8 +93,8 @@ fn find_user(id: Int) User? {
 ### Creating Maybe Values
 
 Use the standard library functions to create Maybe values:
-- `maybe::some(value)` - creates a value that exists
-- `maybe::none()` - creates an absent value
+- `Maybe::some(value)` - creates a value that exists
+- `Maybe::none()` - creates an absent value
 
 ### Working with Maybe Values
 
@@ -115,28 +114,27 @@ match user {
 - **`and_then`** — the callback returns a **Maybe** itself, so it can produce `some(...)` or `none()`. Use when the next step might not produce a value.
 
 ```ard
-use ard/maybe
 
 // map: always produces a value — callback returns a plain value
-let maybe_name: Str? = maybe::some("Alice")
+let maybe_name: Str? = Maybe::some("Alice")
 let maybe_len = maybe_name.map(fn(name) { name.size() }) // some(5)
 
 // and_then: can produce none — callback returns a Maybe
 fn non_empty(name: Str) Str? {
   match name.is_empty() {
-    true => maybe::none(),
-    false => maybe::some(name),
+    true => Maybe::none(),
+    false => Maybe::some(name),
   }
 }
 let checked = maybe_name.and_then(non_empty) // some("Alice")
-let empty: Str? = maybe::some("")
+let empty: Str? = Maybe::some("")
 empty.and_then(non_empty) // none
 ```
 
 As with Results, explicit type args can guide inference when needed:
 
 ```ard
-let maybe_text = maybe::some(42).map<Str>(fn(v) { "{v}" })
+let maybe_text = Maybe::some(42).map<Str>(fn(v) { "{v}" })
 ```
 
 ## The try Keyword
@@ -158,16 +156,15 @@ fn calculate() Int!Str {
 ### With Maybe Types
 
 ```ard
-use ard/maybe
 
 fn get_user_name(id: Int) Str? {
     let user = try find_user(id)  // If user not found, return early with none
-    maybe::some(user.name)        // If we get here, user was found
+    Maybe::some(user.name)        // If we get here, user was found
 }
 
 fn get_user_display(id: Int) Str? {
     let name = try get_user_name(id)  // Int? -> Str?, compatible types
-    maybe::some("User: {name}")
+    Maybe::some("User: {name}")
 }
 ```
 
@@ -194,7 +191,6 @@ fn process_data() Str {
 ### With Maybe Types
 
 ```ard
-use ard/maybe
 
 fn get_user_display(id: Int) Str {
     let user = try find_user(id) -> _ {
@@ -243,7 +239,6 @@ fn process() Str {
 ### Function Reference with Maybe Types
 
 ```ard
-use ard/maybe
 
 fn default_name() Str {
     "Anonymous"
@@ -260,7 +255,6 @@ fn greet(id: Int) Str {
 When working with nested structures, you often need to access properties through multiple levels where intermediate values might be Maybe types. The `try` statement handles this elegantly:
 
 ```ard
-use ard/maybe
 
 struct Profile { name: Str, bio: Str? }
 struct User { id: Int, profile: Profile? }
@@ -283,9 +277,9 @@ fn get_user_bio_manual(user: User?) Str {
     match user {
         u => match u.profile {
             profile => profile.name,
-            _ => maybe::none()
+            _ => Maybe::none()
         },
-        _ => maybe::none()
+        _ => Maybe::none()
     } -> _ {
         "No bio available"
     }
@@ -298,7 +292,6 @@ Here's a comprehensive example showing different error handling patterns:
 
 ```ard
 use ard/io
-use ard/maybe
 
 struct Person { name: Str, age: Int }
 struct Database { users: [Int:Person] }
@@ -336,14 +329,14 @@ fn create_person_with_message(name: Str, age_str: Str) Str {
 // Maybe type examples
 fn find_person(db: Database, id: Int) Person? {
     match db.users.get(id) {
-        person => maybe::some(person),
-        _ => maybe::none()
+        person => Maybe::some(person),
+        _ => Maybe::none()
     }
 }
 
 fn get_person_info(db: Database, id: Int) Str? {
     let person = try find_person(db, id)  // Early return none if not found
-    maybe::some("Name: {person.name}, Age: {person.age}")
+    Maybe::some("Name: {person.name}, Age: {person.age}")
 }
 
 fn get_person_display(db: Database, id: Int) Str {
