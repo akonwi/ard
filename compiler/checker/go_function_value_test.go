@@ -48,7 +48,7 @@ fn main() {
 fn main() {
   let print: fn(Any?) Int!Str = fmt::Println
   print("hello")
-  print(Maybe::none())
+  print(Maybe::new())
 }`,
 		},
 		{

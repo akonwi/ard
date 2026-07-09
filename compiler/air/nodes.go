@@ -160,6 +160,7 @@ const (
 	ExprMatchStr
 	ExprMakeMaybeSome
 	ExprMakeMaybeNone
+	ExprMakeMaybeNew
 	ExprMatchMaybe
 	ExprMaybeExpect
 	ExprMaybeIsNone

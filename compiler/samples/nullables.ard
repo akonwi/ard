@@ -2,10 +2,10 @@ use go:fmt
 
 fn main() {
   // a declared none value needs to be explicitly typed
-  mut name: Str? = Maybe::none<Str>()
+  mut name: Str? = Maybe::new<Str>()
 
   // update the value
-  name = Maybe::some("Akonwi")
+  name = Maybe::new("Akonwi")
 
   // read the value
   match name {

@@ -18,11 +18,11 @@ func TestGenericCallLookaheadDoesNotLeakTypeErrorsIntoComparisons(t *testing.T) 
 		},
 		{
 			name:  "Static generic function type argument with grouped return parses without spaces",
-			input: "Maybe::none<fn(Int)(Str)>()",
+			input: "Maybe::new<fn(Int)(Str)>()",
 		},
 		{
 			name:  "Nested function type argument with grouped return parses without hanging",
-			input: "Maybe::none<[fn(Int)(Str)]>()",
+			input: "Maybe::new<[fn(Int)(Str)]>()",
 		},
 		{
 			name:  "Chained comparison against parenthesized expressions",

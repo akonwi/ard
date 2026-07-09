@@ -245,7 +245,7 @@ func TestResults(t *testing.T) {
 			name: "Maybe.map() can change inner type",
 			input: `
 			fn foo() Str? {
-				let value: Int? = Maybe::some(10)
+				let value: Int? = Maybe::new(10)
 				value.map(fn(v: Int) Str { "{v}" })
 			}`,
 			diagnostics: []checker.Diagnostic{},
@@ -254,7 +254,7 @@ func TestResults(t *testing.T) {
 			name: "Maybe.map() accepts explicit type args",
 			input: `
 			fn foo() Str? {
-				let value: Int? = Maybe::some(10)
+				let value: Int? = Maybe::new(10)
 				value.map<Str>(fn(v) { "{v}" })
 			}`,
 			diagnostics: []checker.Diagnostic{},
@@ -263,7 +263,7 @@ func TestResults(t *testing.T) {
 			name: "Maybe.map() infers anonymous callback types",
 			input: `
 			fn foo() Int? {
-				let value: Int? = Maybe::some(10)
+				let value: Int? = Maybe::new(10)
 				value.map(fn(v) { v + 1 })
 			}`,
 			diagnostics: []checker.Diagnostic{},
@@ -272,8 +272,8 @@ func TestResults(t *testing.T) {
 			name: "Maybe.and_then() can change inner type",
 			input: `
 			fn foo() Str? {
-				let value: Int? = Maybe::some(10)
-				value.and_then(fn(v: Int) Str? { Maybe::some("{v}") })
+				let value: Int? = Maybe::new(10)
+				value.and_then(fn(v: Int) Str? { Maybe::new("{v}") })
 			}`,
 			diagnostics: []checker.Diagnostic{},
 		},
@@ -281,8 +281,8 @@ func TestResults(t *testing.T) {
 			name: "Maybe.and_then() accepts explicit type args",
 			input: `
 			fn foo() Str? {
-				let value: Int? = Maybe::some(10)
-				value.and_then<Str>(fn(v) { Maybe::some("{v}") })
+				let value: Int? = Maybe::new(10)
+				value.and_then<Str>(fn(v) { Maybe::new("{v}") })
 			}`,
 			diagnostics: []checker.Diagnostic{},
 		},
@@ -290,8 +290,8 @@ func TestResults(t *testing.T) {
 			name: "Maybe.and_then() infers anonymous callback types",
 			input: `
 			fn foo() Int? {
-				let value: Int? = Maybe::some(10)
-				value.and_then(fn(v) { Maybe::some(v + 1) })
+				let value: Int? = Maybe::new(10)
+				value.and_then(fn(v) { Maybe::new(v + 1) })
 			}`,
 			diagnostics: []checker.Diagnostic{},
 		},
@@ -299,8 +299,8 @@ func TestResults(t *testing.T) {
 			name: "Maybe.and_then() enforces closure parameter type",
 			input: `
 			fn foo() {
-				let value: Int? = Maybe::some(10)
-				value.and_then(fn(v: Str) Int? { Maybe::some(1) })
+				let value: Int? = Maybe::new(10)
+				value.and_then(fn(v: Str) Int? { Maybe::new(1) })
 			}`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "type mismatch: expected Int, got Str"},
@@ -310,7 +310,7 @@ func TestResults(t *testing.T) {
 			name: "Maybe.map() enforces closure parameter type",
 			input: `
 			fn foo() {
-				let value: Int? = Maybe::some(10)
+				let value: Int? = Maybe::new(10)
 				value.map(fn(v: Str) Int { 1 })
 			}`,
 			diagnostics: []checker.Diagnostic{
@@ -506,16 +506,16 @@ func TestTry(t *testing.T) {
 			input: `
 
 				fn process(val: Int) Int? {
-					Maybe::some(val)
+					Maybe::new(val)
 				}
 
 				fn do_stuff(stuff: [Int]) Int? {
 					for f in stuff {
 						let processed = try process(f) -> _ {
-							Maybe::none()
+							Maybe::new()
 						}
 					}
-					Maybe::some(0)
+					Maybe::new(0)
 				}
 			`,
 			diagnostics: []checker.Diagnostic{},

@@ -4474,6 +4474,11 @@ func (fl *functionLowerer) lowerResultConstructor(kind ExprKind, typeID TypeID, 
 
 func (fl *functionLowerer) lowerMaybeConstructor(kind ExprKind, typeID TypeID, call *checker.ModuleFunctionCall) (*Expr, error) {
 	switch kind {
+	case ExprMakeMaybeNew:
+		if len(call.Call.Args) != 1 {
+			return nil, fmt.Errorf("%s::%s expects one checked argument", call.Module, call.Call.Name)
+		}
+		return fl.lowerExprWithExpected(call.Call.Args[0], typeID)
 	case ExprMakeMaybeSome:
 		if len(call.Call.Args) != 1 {
 			return nil, fmt.Errorf("%s::%s expects one argument", call.Module, call.Call.Name)
@@ -5210,6 +5215,8 @@ func maybeConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {
 		return 0, false
 	}
 	switch call.Call.Name {
+	case "new":
+		return ExprMakeMaybeNew, true
 	case "some":
 		return ExprMakeMaybeSome, true
 	case "none":

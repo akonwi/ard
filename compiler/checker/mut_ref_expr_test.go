@@ -19,7 +19,7 @@ let r = mut counter`,
 let r: mut Int = mut counter`,
 		},
 		{
-			name:  "mut ref of an immutable binding is rejected",
+			name: "mut ref of an immutable binding is rejected",
 			input: `let counter = 0
 let r = mut counter`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot take a mutable reference to immutable 'counter'"}},

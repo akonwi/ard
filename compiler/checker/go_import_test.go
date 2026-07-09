@@ -597,8 +597,8 @@ fn main() {
 			input: `use go:time
 
 fn main() {
-  let month: time::Month? = Maybe::some(time::January)
-  let number: Int? = Maybe::some(1)
+  let month: time::Month? = Maybe::new(time::January)
+  let number: Int? = Maybe::new(1)
   let _ = month == number
 }`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid: time::Month? == Int?"}},

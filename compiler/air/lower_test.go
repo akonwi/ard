@@ -442,11 +442,11 @@ func TestLowerMaybes(t *testing.T) {
 	program := lowerSource(t, `
 
 		fn some() Int? {
-			Maybe::some(42)
+			Maybe::new(42)
 		}
 
 		fn none() Int? {
-			Maybe::none()
+			Maybe::new()
 		}
 
 		fn fallback(value: Int?) Int {
@@ -635,11 +635,11 @@ func TestLowerContextualMaybeTypesInNestedExpressions(t *testing.T) {
 
 		fn pick(choices: [Any]) Any? {
 			let first_choice = match choices.size() {
-				0 => Maybe::none(),
-				_ => Maybe::some(choices.at(0).expect("bounds")),
+				0 => Maybe::new(),
+				_ => Maybe::new(choices.at(0).expect("bounds")),
 			}
-			let choice = try first_choice -> _ { Maybe::none() }
-			Maybe::some(choice)
+			let choice = try first_choice -> _ { Maybe::new() }
+			Maybe::new(choice)
 		}
 	`)
 
@@ -657,7 +657,7 @@ func TestLowerContextualMaybeTypesInNestedExpressions(t *testing.T) {
 		t.Fatalf("choice expr type = %q, want Any", got)
 	}
 	if pick.Body.Result == nil || pick.Body.Result.Target == nil {
-		t.Fatalf("result tree missing Maybe::some target: %#v", pick.Body.Result)
+		t.Fatalf("result tree missing Maybe::new target: %#v", pick.Body.Result)
 	}
 	if got := testTypeInfo(t, program, pick.Body.Result.Target.Type).Name; got != "Any" {
 		t.Fatalf("result some target type = %q, want Any", got)
@@ -705,7 +705,7 @@ func TestLowerTryOps(t *testing.T) {
 
 		fn maybe_value(value: Int?) Int? {
 			let inner = try value
-			Maybe::some(inner + 1)
+			Maybe::new(inner + 1)
 		}
 	`)
 
@@ -1302,7 +1302,7 @@ func TestLowerReceiverGenericUsedOnlyInMethodBody(t *testing.T) {
 	// struct's type parameter abstractly; this must lower without trying to
 	// monomorphize at an unbound type parameter.
 	_ = lowerSource(t, `
-		fn raw(key: Str) $T? { Maybe::none() }
+		fn raw(key: Str) $T? { Maybe::new() }
 
 		struct Box {
 			item: $T

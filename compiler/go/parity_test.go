@@ -51,7 +51,7 @@ func TestGoTargetParityRecursiveStructFields(t *testing.T) {
 			input: `
 				struct Node { value: Int, parent: Node? }
 				fn main() Bool {
-					let missing: Node? = Maybe::none()
+					let missing: Node? = Maybe::new()
 					let root = Node{value: 1, parent: missing}
 					root.parent.is_none()
 				}
@@ -62,8 +62,8 @@ func TestGoTargetParityRecursiveStructFields(t *testing.T) {
 			input: `
 				struct Node { value: Int, parent: Node? }
 				fn main() Int {
-					let root = Node{value: 1, parent: Maybe::none()}
-					let child = Node{value: 2, parent: Maybe::some(root)}
+					let root = Node{value: 1, parent: Maybe::new()}
+					let child = Node{value: 2, parent: Maybe::new(root)}
 					child.parent.expect("").value
 				}
 			`,
@@ -74,7 +74,7 @@ func TestGoTargetParityRecursiveStructFields(t *testing.T) {
 				struct A { b: B? }
 				struct B { a: A }
 				fn main() Int {
-					let a = A{b: Maybe::none()}
+					let a = A{b: Maybe::new()}
 					let b = B{a: a}
 					if b.a.b.is_none() { 1 } else { 0 }
 				}
@@ -86,7 +86,7 @@ func TestGoTargetParityRecursiveStructFields(t *testing.T) {
 				struct A { b: B? }
 				struct B { a: A? }
 				fn main() Int {
-					let a = A{b: Maybe::none()}
+					let a = A{b: Maybe::new()}
 					if a.b.is_none() { 1 } else { 0 }
 				}
 			`,
@@ -105,7 +105,7 @@ func TestGoTargetParityRecursiveStructFields(t *testing.T) {
 				type U = A | Int
 				struct A { u: U? }
 				fn main() Int {
-					let a = A{u: Maybe::none()}
+					let a = A{u: Maybe::new()}
 					if a.u.is_none() { 1 } else { 0 }
 				}
 			`,
@@ -301,7 +301,7 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 			input: `
 
 				fn main() Int {
-					match Maybe::some(42) {
+					match Maybe::new(42) {
 						s => s,
 						_ => 0,
 					}
@@ -494,7 +494,7 @@ func TestGoTargetParityNullableArguments(t *testing.T) {
 					a + b.or(0)
 				}
 				fn main() Int {
-					add(1, Maybe::some(5))
+					add(1, Maybe::new(5))
 				}
 			`,
 		},
@@ -735,7 +735,7 @@ func TestGoTargetParityNullableStructFields(t *testing.T) {
 					timeout: Int?,
 				}
 				fn main() Int {
-					let c = Config{name: "app", timeout: Maybe::some(30)}
+					let c = Config{name: "app", timeout: Maybe::new(30)}
 					c.timeout.or(0)
 				}
 			`,
@@ -795,11 +795,11 @@ func TestGoTargetParityTryOnMaybe(t *testing.T) {
 			name: "try on maybe some returns unwrapped value",
 			input: `
 				fn get_value() Int? {
-					Maybe::some(42)
+					Maybe::new(42)
 				}
 				fn test() Int? {
 					let value = try get_value()
-					Maybe::some(value + 1)
+					Maybe::new(value + 1)
 				}
 				fn main() Int {
 					let result = test()
@@ -814,11 +814,11 @@ func TestGoTargetParityTryOnMaybe(t *testing.T) {
 			name: "try on maybe none propagates none",
 			input: `
 				fn get_value() Int? {
-					Maybe::none()
+					Maybe::new()
 				}
 				fn test() Int? {
 					let value = try get_value()
-					Maybe::some(value + 1)
+					Maybe::new(value + 1)
 				}
 				fn main() Int {
 					let result = test()
@@ -833,7 +833,7 @@ func TestGoTargetParityTryOnMaybe(t *testing.T) {
 			name: "try on maybe with catch block transforms none",
 			input: `
 				fn get_value() Int? {
-					Maybe::none()
+					Maybe::new()
 				}
 				fn main() Int {
 					let value = try get_value() -> _ { 42 }
@@ -847,8 +847,8 @@ func TestGoTargetParityTryOnMaybe(t *testing.T) {
 				struct Profile { name: Str? }
 				struct User { profile: Profile? }
 				fn get_user() User? {
-					let profile = Maybe::some(Profile{name: Maybe::none()})
-					Maybe::some(User{profile: profile})
+					let profile = Maybe::new(Profile{name: Maybe::new()})
+					Maybe::new(User{profile: profile})
 				}
 				fn main() Str {
 					let name = try get_user().profile.name -> _ { "Sample" }
@@ -958,7 +958,7 @@ func TestGoTargetParityTry(t *testing.T) {
 					}
 				}
 				fn main() Int {
-					process_maybe(Maybe::some(5)).expect("")
+					process_maybe(Maybe::new(5)).expect("")
 				}
 			`,
 		},
@@ -1087,11 +1087,11 @@ func TestGoTargetParityEnumsUnionsAndGenericEquality(t *testing.T) {
 			name: "inline maybe wrapping in generic context",
 			input: `
 				fn main() Bool {
-					mut found = Maybe::none<Int>()
+					mut found = Maybe::new<Int>()
 					let list = [1, 2, 3, 4, 5]
 					for t in list {
 						if t == 3 {
-							found = Maybe::some(t)
+							found = Maybe::new(t)
 							break
 						}
 					}
@@ -1234,7 +1234,7 @@ func TestGoTargetParityMapClosureCapturesOuterLocal(t *testing.T) {
 
 			fn main() Int {
 				let offset = 2
-				let result = Maybe::some(40).map(fn(value) { value + offset })
+				let result = Maybe::new(40).map(fn(value) { value + offset })
 				result.or(0)
 			}
 		`)
@@ -1305,7 +1305,7 @@ func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
 			fn make_mapper(offset: Int) fn(Int) Int {
 				let bonus = 1
 				fn(value: Int) Int {
-					Maybe::some(value).map(fn(inner) { inner + offset + bonus }).or(0)
+					Maybe::new(value).map(fn(inner) { inner + offset + bonus }).or(0)
 				}
 			}
 
@@ -1325,7 +1325,7 @@ func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
 			fn make_calc(base: Int) fn(Int) Int {
 				fn(seed: Int) Int {
 					let local = 2
-					Maybe::some(seed).map(fn(value) {
+					Maybe::new(seed).map(fn(value) {
 						value + base + local
 					}).or(0)
 				}
@@ -1569,7 +1569,7 @@ func TestGoTargetParityEscapedMutableTraitObjectUpcastAliasesConcrete(t *testing
 			let view_map: [Str:View] = ["x": direct_node.view]
 			view_map.get("x").expect("missing").set(67)
 			let map_observed = direct_leaf.n
-			let maybe_view: View? = Maybe::some(direct_node.view)
+			let maybe_view: View? = Maybe::new(direct_node.view)
 			maybe_view.expect("missing").set(69)
 			let maybe_observed = direct_leaf.n
 			let result_view: View!Str = Result::ok(direct_node.view)
@@ -2302,7 +2302,7 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			name: "maybe or fallback",
 			input: `
 				fn main() Str {
-					let a: Str? = Maybe::none()
+					let a: Str? = Maybe::new()
 					a.or("foo")
 				}
 			`,
@@ -2311,7 +2311,7 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			name: "maybe is none",
 			input: `
 				fn main() Bool {
-					Maybe::none().is_none()
+					Maybe::new().is_none()
 				}
 			`,
 		},
@@ -2319,7 +2319,7 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			name: "maybe is some",
 			input: `
 				fn main() Bool {
-					Maybe::some(1).is_some()
+					Maybe::new(1).is_some()
 				}
 			`,
 		},
@@ -2327,7 +2327,7 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			name: "maybe equality compares presence and value",
 			input: `
 				fn main() Bool {
-					Maybe::some(1) == Maybe::some(1) and not Maybe::some(1) == Maybe::some(2)
+					Maybe::new(1) == Maybe::new(1) and not Maybe::new(1) == Maybe::new(2)
 				}
 			`,
 		},
@@ -2335,8 +2335,8 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			name: "maybe equality distinguishes none from some",
 			input: `
 				fn main() Bool {
-					let none: Int? = Maybe::none()
-					not Maybe::some(0) == none and none == Maybe::none()
+					let none: Int? = Maybe::new()
+					not Maybe::new(0) == none and none == Maybe::new()
 				}
 			`,
 		},
@@ -2344,7 +2344,7 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			name: "maybe expect returns value",
 			input: `
 				fn main() Int {
-					Maybe::some(42).expect("Should not panic")
+					Maybe::new(42).expect("Should not panic")
 				}
 			`,
 		},
@@ -2408,7 +2408,7 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			name: "maybe map transforms some",
 			input: `
 				fn main() Int {
-					let result = Maybe::some(41).map(fn(value) { value + 1 })
+					let result = Maybe::new(41).map(fn(value) { value + 1 })
 					result.or(0)
 				}
 			`,
@@ -2417,7 +2417,7 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			name: "maybe map supports void callback result",
 			input: `
 				fn main() Bool {
-					let mapped = Maybe::some(1).map(fn(value) { () })
+					let mapped = Maybe::new(1).map(fn(value) { () })
 					mapped.is_some()
 				}
 			`,
@@ -2426,7 +2426,7 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			name: "maybe or supports void values",
 			input: `
 				fn main() Bool {
-					let value: Void? = Maybe::none()
+					let value: Void? = Maybe::new()
 					let fallback = value.or(())
 					true
 				}
@@ -2436,7 +2436,7 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			name: "maybe map keeps none",
 			input: `
 				fn main() Bool {
-					let result: Int? = Maybe::none()
+					let result: Int? = Maybe::new()
 					result.map(fn(value) { value + 1 }).is_none()
 				}
 			`,
@@ -2445,7 +2445,7 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			name: "maybe and then transforms some",
 			input: `
 				fn main() Int {
-					let result = Maybe::some(21).and_then(fn(value) { Maybe::some(value * 2) })
+					let result = Maybe::new(21).and_then(fn(value) { Maybe::new(value * 2) })
 					result.or(0)
 				}
 			`,
@@ -2454,8 +2454,8 @@ func TestGoTargetParityMaybeResultCombinators(t *testing.T) {
 			name: "maybe and then keeps none",
 			input: `
 				fn main() Bool {
-					let result: Int? = Maybe::none()
-					result.and_then(fn(value) { Maybe::some(value + 1) }).is_none()
+					let result: Int? = Maybe::new()
+					result.and_then(fn(value) { Maybe::new(value + 1) }).is_none()
 				}
 			`,
 		},

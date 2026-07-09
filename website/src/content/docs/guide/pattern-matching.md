@@ -155,7 +155,7 @@ for item in items {
 
 ```ard
 
-let maybe_name: Str? = Maybe::some("Alice")
+let maybe_name: Str? = Maybe::new("Alice")
 
 let greeting = match maybe_name {
   name => "Hello, {name}!"      // Binds the value if present

@@ -104,9 +104,9 @@ use go:unicode/utf8
 fn decode(raw: [Byte]) Str? {
   let s = Str::from(raw)
   if utf8::ValidString(s) {
-    Maybe::some(s)
+    Maybe::new(s)
   } else {
-    Maybe::none()
+    Maybe::new()
   }
 }
 ```

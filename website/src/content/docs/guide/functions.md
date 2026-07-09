@@ -79,7 +79,7 @@ greet("Alice", "Hi")
 greet("Bob")
 ```
 
-When a non-nullable value is provided to a nullable parameter, it's automatically wrapped in `Maybe::some()`:
+When a non-nullable value is provided to a nullable parameter, it's automatically wrapped in `Maybe::new()`:
 
 ```ard
 fn process(data: Str, options: Options?) Result {
@@ -176,8 +176,8 @@ let generator: fn() Int = get_random_number
 Use `?` after the function type for nullable function values. If the function type has an explicit return type, wrap the whole type in parentheses so the `?` applies to the function instead of the return type:
 
 ```ard
-let optional_printer: fn(Str)? = Maybe::none()          // nullable fn(Str) Void
-let optional_mapper: (fn(Int) Str)? = Maybe::none()    // nullable fn(Int) Str
+let optional_printer: fn(Str)? = Maybe::new()          // nullable fn(Str) Void
+let optional_mapper: (fn(Int) Str)? = Maybe::new()    // nullable fn(Int) Str
 let maybe_name: fn(Int) Str? = lookup_name             // non-null function returning Str?
 ```
 

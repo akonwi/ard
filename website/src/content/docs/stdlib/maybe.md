@@ -6,7 +6,7 @@ description: Work with optional values using the built-in Maybe type.
 `Maybe` is a built-in optional type. It represents a value that may or may not be present and can be written either as the formal type `Maybe<T>` or the shorthand `T?`.
 
 Maybe provides:
-- **Value creation** with `Maybe::some()` and `Maybe::none<T>()`
+- **Value creation** with `Maybe::new(value)` and `Maybe::new<T>()`
 - **Nullable types** for safe representation of optional values
 - **Mutation helpers** (`set`/`clear`) for mutable optional slots
 - **Type safety** to prevent null pointer errors at compile time
@@ -15,7 +15,7 @@ Maybe provides:
 use ard/io
 
 fn main() {
-  let maybe_name: Str? = Maybe::some("Alice")
+  let maybe_name: Str? = Maybe::new("Alice")
   
   match maybe_name {
     name => io::print("Hello, {name}"),
@@ -26,22 +26,20 @@ fn main() {
 
 ## API
 
-### `Maybe::some(val: $T) Maybe<$T>`
+### `Maybe::new(value: $T?) Maybe<$T>`
 
-Create a `Maybe` value containing the given value.
+Create a `Maybe` value. Pass a value to create a present value, or omit the nullable argument to create an empty value.
 
 ```ard
-let value: Maybe<Int> = Maybe::some(42)
-let shorthand: Int? = Maybe::some(42)
+let value: Maybe<Int> = Maybe::new(42)
+let shorthand: Int? = Maybe::new(42)
 ```
 
-### `Maybe::none<$T>() Maybe<$T>`
-
-Create an empty `Maybe` value. The type parameter may be inferred from context, or provided explicitly when there is no context.
+When the argument is omitted, the type parameter may be inferred from context, or provided explicitly when there is no context.
 
 ```ard
-let empty: Int? = Maybe::none()
-let explicit = Maybe::none<Int>()
+let empty: Int? = Maybe::new()
+let explicit = Maybe::new<Int>()
 ```
 
 ## Maybe Type Methods
@@ -54,7 +52,7 @@ Check if the Maybe contains a value.
 
 ```ard
 
-let val: Int? = Maybe::some(42)
+let val: Int? = Maybe::new(42)
 if val.is_some() {
   // has a value
 }
@@ -66,7 +64,7 @@ Check if the Maybe is empty.
 
 ```ard
 
-let val: Int? = Maybe::none()
+let val: Int? = Maybe::new()
 if val.is_none() {
   // is empty
 }
@@ -78,7 +76,7 @@ Get the value from the Maybe, or return a default if it's empty.
 
 ```ard
 
-let val: Int? = Maybe::none()
+let val: Int? = Maybe::new()
 let result = val.or(0)  // 0
 ```
 
@@ -88,24 +86,24 @@ Get the value from the Maybe, or panic with a message if it's empty.
 
 ```ard
 
-let val: Int? = Maybe::some(42)
+let val: Int? = Maybe::new(42)
 let result = val.expect("expected a value")  // 42
 ```
 
 ### `fn map(with: fn($T) $U) $U?`
 
-Transform a `some` value with a function that **returns a plain value**. The result is automatically wrapped in `some(...)`. If the Maybe is `none`, the callback is not called and `none` passes through unchanged.
+Transform a present value with a function that **returns a plain value**. The result is automatically wrapped as present. If the Maybe is empty, the callback is not called and the empty value passes through unchanged.
 
 Use `map` when the transformation always produces a value.
 
 ```ard
 
-let num: Int? = Maybe::some(21)
+let num: Int? = Maybe::new(21)
 let doubled = num.map(fn(v) { v * 2 })
 let value = doubled.or(0) // 42
 
-// none passes through untouched
-let empty: Int? = Maybe::none()
+// empty values pass through untouched
+let empty: Int? = Maybe::new()
 empty.map(fn(v) { v * 2 }).is_none() // true
 ```
 
@@ -117,7 +115,7 @@ let as_text = num.map<Str>(fn(v) { "{v}" })
 
 ### `fn and_then(with: fn($T) $U?) $U?`
 
-Chain operations that **return a Maybe themselves** (also known as `flat_map` in other languages). Unlike `map`, the callback is responsible for wrapping its return value in `some(...)` or returning `none()`. This lets the callback itself decide whether a value is present.
+Chain operations that **return a Maybe themselves** (also known as `flat_map` in other languages). Unlike `map`, the callback is responsible for returning `Maybe::new(value)` or `Maybe::new<T>()`. This lets the callback itself decide whether a value is present.
 
 Use `and_then` when the next step might not produce a value.
 
@@ -125,16 +123,16 @@ Use `and_then` when the next step might not produce a value.
 
 fn even_only(num: Int) Int? {
   match num % 2 == 0 {
-    true => Maybe::some(num),
-    false => Maybe::none(),
+    true => Maybe::new(num),
+    false => Maybe::new(),
   }
 }
 
-let result = Maybe::some(20).and_then(even_only)
+let result = Maybe::new(20).and_then(even_only)
 result.is_some() // true
 
 // The callback can return none, unlike map:
-let odd = Maybe::some(21).and_then(even_only)
+let odd = Maybe::new(21).and_then(even_only)
 odd.is_none() // true
 ```
 
@@ -143,7 +141,7 @@ odd.is_none() // true
 Mutate a `Maybe<T>` slot to contain `value`. The receiver must be mutable.
 
 ```ard
-mut current = Maybe::none<Int>()
+mut current = Maybe::new<Int>()
 current.set(42)
 current.expect("set") // 42
 ```
@@ -153,7 +151,7 @@ current.expect("set") // 42
 Mutate a `Maybe<T>` slot back to `none`. The receiver must be mutable.
 
 ```ard
-mut current = Maybe::some("ready")
+mut current = Maybe::new("ready")
 current.clear()
 current.is_none() // true
 ```
@@ -166,7 +164,7 @@ Use `match` expressions to safely handle optional values:
 use ard/io
 
 fn main() {
-  let maybe_age: Int? = Maybe::some(30)
+  let maybe_age: Int? = Maybe::new(30)
   
   match maybe_age {
     age => io::print("Age: {age.to_str()}"),
@@ -187,7 +185,7 @@ When a `Maybe` value is matched:
 use ard/io
 
 fn main() {
-  let email: Str? = Maybe::none()
+  let email: Str? = Maybe::new()
   
   if email.is_some() {
     io::print("Email: {email.or("")}")
@@ -202,7 +200,7 @@ fn main() {
 ```ard
 
 fn main() {
-  let theme: Str? = Maybe::none()
+  let theme: Str? = Maybe::new()
   let selected_theme = theme.or("light")
   // selected_theme is "light"
 }
@@ -210,7 +208,7 @@ fn main() {
 
 ### Process Optional Data
 
-Nullable struct fields accept unwrapped values directly — they are automatically wrapped in `Maybe::some()`:
+Nullable struct fields accept unwrapped values directly — they are automatically wrapped in `Maybe::new()`:
 
 ```ard
 struct User {
@@ -219,7 +217,7 @@ struct User {
 }
 
 fn main() {
-  // bio is automatically wrapped in Maybe::some()
+  // bio is automatically wrapped in Maybe::new()
   let user = User {
     name: "Alice",
     bio: "Software engineer"
@@ -243,9 +241,9 @@ use ard/io
 
 fn get_user_name(user_id: Int) Str? {
   if user_id == 1 {
-    Maybe::some("Alice")
+    Maybe::new("Alice")
   } else {
-    Maybe::none()
+    Maybe::new()
   }
 }
 
@@ -262,9 +260,9 @@ use ard/list
 
 fn main() {
   let values: [Int?] = [
-    Maybe::some(1),
-    Maybe::none(),
-    Maybe::some(3)
+    Maybe::new(1),
+    Maybe::new(),
+    Maybe::new(3)
   ]
   
   // Using list operations with optional values

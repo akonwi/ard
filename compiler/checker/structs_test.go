@@ -237,7 +237,7 @@ func TestStructsWithStaticFunctions(t *testing.T) {
 			fn Message::new(kind: Str, stuff: Int?) Message {
 				Message{kind: kind, stuff: stuff}
 			}
-			Message::new("info", Maybe::some(42))
+			Message::new("info", Maybe::new(42))
 			`,
 			diagnostics: []checker.Diagnostic{},
 		},

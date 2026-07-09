@@ -88,7 +88,7 @@ fn main() {
   // variadic tail becomes a trailing Maybe parameter
   let join = ffi::Join
   if not join("a", "b") == "a:b" { panic("variadic some case failed") }
-  if not join("a", Maybe::none()) == "a" { panic("variadic none case failed") }
+  if not join("a", Maybe::new()) == "a" { panic("variadic none case failed") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)

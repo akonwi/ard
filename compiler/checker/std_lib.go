@@ -35,28 +35,16 @@ func (pkg MaybePkg) Program() *Program {
 }
 func (pkg MaybePkg) Get(name string) Symbol {
 	switch name {
-	case "none":
-		return Symbol{
-			Name: name,
-			Type: &FunctionDef{
-				Name:          name,
-				GenericParams: []string{"T"},
-				Parameters:    []Parameter{},
-				ReturnType:    &Maybe{&TypeVar{name: "T"}},
-			},
-		}
-	case "some":
-		// This function returns Maybe<T> where T is the type of the parameter
-		// We use TypeVar as a placeholder, but the type checker should infer
-		// the actual type based on the argument type
+	case "new":
 		typeVar := &TypeVar{name: "T"}
+		maybeType := &Maybe{typeVar}
 		return Symbol{
 			Name: name,
 			Type: &FunctionDef{
 				Name:          name,
 				GenericParams: []string{"T"},
-				Parameters:    []Parameter{{Name: "val", Type: typeVar}},
-				ReturnType:    &Maybe{typeVar},
+				Parameters:    []Parameter{{Name: "value", Type: maybeType}},
+				ReturnType:    maybeType,
 			},
 		}
 	default:
@@ -176,7 +164,7 @@ func (pkg ChannelStaticPkg) Get(name string) Symbol {
 // switch above. BuiltinPkgNames is exported so tests can assert Get and
 // Symbols stay in sync.
 var BuiltinPkgNames = map[string][]string{
-	"builtin/Maybe": {"none", "some"},
+	"builtin/Maybe": {"new"},
 	"ard/result":    {"ok", "err"},
 	"ard/async":     {"start"},
 	"ard/unsafe":    {"cast", "is_nil"},

@@ -307,7 +307,7 @@ func TestVariables(t *testing.T) {
 			input: strings.Join([]string{
 				`struct State { cursor: Int }`,
 				`fn main() {`,
-				`  mut s: State? = Maybe::some(State{cursor: 0})`,
+				`  mut s: State? = Maybe::new(State{cursor: 0})`,
 				`  match s {`,
 				`    cur => { cur.cursor = cur.cursor + 1 },`,
 				`    _ => (),`,
@@ -321,7 +321,7 @@ func TestVariables(t *testing.T) {
 			input: strings.Join([]string{
 				`struct State { cursor: Int }`,
 				`fn main() {`,
-				`  let s: State? = Maybe::some(State{cursor: 0})`,
+				`  let s: State? = Maybe::new(State{cursor: 0})`,
 				`  match s {`,
 				`    cur => { cur.cursor = cur.cursor + 1 },`,
 				`    _ => (),`,
@@ -882,14 +882,14 @@ func TestEqualityComparisons(t *testing.T) {
 		{
 			name: "nullable primitive equality is allowed",
 			input: strings.Join([]string{
-				`Maybe::some(1) == Maybe::none()`,
+				`Maybe::new(1) == Maybe::new()`,
 			}, "\n"),
 		},
 		{
 			name: "nullable list equality is rejected",
 			input: strings.Join([]string{
 				`let a: [Int] = [1]`,
-				`Maybe::some(a) == Maybe::some(a)`,
+				`Maybe::new(a) == Maybe::new(a)`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Invalid: [Int]? == [Int]?"},
@@ -898,7 +898,7 @@ func TestEqualityComparisons(t *testing.T) {
 		{
 			name: "Mismatched Maybe equality reports an error",
 			input: strings.Join([]string{
-				`Maybe::some(1) == Maybe::some("x")`,
+				`Maybe::new(1) == Maybe::new("x")`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Invalid: Int? == Str?"},
@@ -1573,8 +1573,8 @@ func TestMaybes(t *testing.T) {
 		{
 			name: "Declaring nullables",
 			input: `
-				mut name: Str? = Maybe::none()
-				mut name2 = Maybe::some("Bob")`,
+				mut name: Str? = Maybe::new()
+				mut name2 = Maybe::new("Bob")`,
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
@@ -1609,10 +1609,10 @@ func TestMaybes(t *testing.T) {
 		{
 			name: "Reassigning with nullables",
 			input: `
-				mut name: Str? = Maybe::some("Joe")
-				name = Maybe::some("Bob")
+				mut name: Str? = Maybe::new("Joe")
+				name = Maybe::new("Bob")
 			  name = "Alice"
-				name = Maybe::none()`,
+				name = Maybe::new()`,
 			output: &checker.Program{
 				Statements: []checker.Statement{
 					{
@@ -2340,7 +2340,7 @@ func TestMatchArmScope(t *testing.T) {
 			name: "Maybe match pattern binding does not leak after inferred match expression",
 			input: strings.Join([]string{
 				`fn main() Int {`,
-				`  let maybe_value: Int? = Maybe::some(1)`,
+				`  let maybe_value: Int? = Maybe::new(1)`,
 				`  let x = match maybe_value {`,
 				`    value => value,`,
 				`    _ => 0,`,

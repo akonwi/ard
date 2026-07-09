@@ -104,8 +104,8 @@ fn main() {
   // comma-ok callback: Maybe return maps to (T, bool)
   let looked = ffi::Lookup(fn(key: Str) Int? {
     match key == "hit" {
-      true => Maybe::some(7),
-      false => Maybe::none(),
+      true => Maybe::new(7),
+      false => Maybe::new(),
     }
   })
   if not looked == "found" { panic("expected comma-ok lookup, got {looked}") }

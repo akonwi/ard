@@ -159,7 +159,7 @@ Nullable mutable references are written with grouping:
 ```ard
 use go:net/http as gohttp
 
-let missing: (mut gohttp::Request)? = Maybe::none()
+let missing: (mut gohttp::Request)? = Maybe::new()
 ```
 
 Use `(mut T)?` when an Ard API intentionally models an optional reference. Direct-Go pointer fields are not automatically wrapped in `Maybe`; Go pointer values remain `mut go::T` and preserve Go nil behavior.

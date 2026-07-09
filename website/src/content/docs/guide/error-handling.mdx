@@ -84,8 +84,8 @@ Maybe types represent values that may or may not exist. They are written as `Typ
 
 fn find_user(id: Int) User? {
     match id == 42 {
-        true => Maybe::some(User { name: "Alice", id: 42 }),
-        false => Maybe::none()
+        true => Maybe::new(User { name: "Alice", id: 42 }),
+        false => Maybe::new()
     }
 }
 ```
@@ -93,8 +93,8 @@ fn find_user(id: Int) User? {
 ### Creating Maybe Values
 
 Use the standard library functions to create Maybe values:
-- `Maybe::some(value)` - creates a value that exists
-- `Maybe::none()` - creates an absent value
+- `Maybe::new(value)` - creates a value that exists
+- `Maybe::new()` - creates an absent value
 
 ### Working with Maybe Values
 
@@ -110,31 +110,31 @@ match user {
 
 ### Maybe Combinators
 
-- **`map`** — transforms a present value; the callback returns a **plain value** that is automatically wrapped in `some(...)`. Use when the transformation always produces a value.
-- **`and_then`** — the callback returns a **Maybe** itself, so it can produce `some(...)` or `none()`. Use when the next step might not produce a value.
+- **`map`** — transforms a present value; the callback returns a **plain value** that is automatically wrapped as present. Use when the transformation always produces a value.
+- **`and_then`** — the callback returns a **Maybe** itself, so it can produce `Maybe::new(value)` or `Maybe::new<T>()`. Use when the next step might not produce a value.
 
 ```ard
 
 // map: always produces a value — callback returns a plain value
-let maybe_name: Str? = Maybe::some("Alice")
+let maybe_name: Str? = Maybe::new("Alice")
 let maybe_len = maybe_name.map(fn(name) { name.size() }) // some(5)
 
 // and_then: can produce none — callback returns a Maybe
 fn non_empty(name: Str) Str? {
   match name.is_empty() {
-    true => Maybe::none(),
-    false => Maybe::some(name),
+    true => Maybe::new(),
+    false => Maybe::new(name),
   }
 }
 let checked = maybe_name.and_then(non_empty) // some("Alice")
-let empty: Str? = Maybe::some("")
+let empty: Str? = Maybe::new("")
 empty.and_then(non_empty) // none
 ```
 
 As with Results, explicit type args can guide inference when needed:
 
 ```ard
-let maybe_text = Maybe::some(42).map<Str>(fn(v) { "{v}" })
+let maybe_text = Maybe::new(42).map<Str>(fn(v) { "{v}" })
 ```
 
 ## The try Keyword
@@ -159,12 +159,12 @@ fn calculate() Int!Str {
 
 fn get_user_name(id: Int) Str? {
     let user = try find_user(id)  // If user not found, return early with none
-    Maybe::some(user.name)        // If we get here, user was found
+    Maybe::new(user.name)        // If we get here, user was found
 }
 
 fn get_user_display(id: Int) Str? {
     let name = try get_user_name(id)  // Int? -> Str?, compatible types
-    Maybe::some("User: {name}")
+    Maybe::new("User: {name}")
 }
 ```
 
@@ -277,9 +277,9 @@ fn get_user_bio_manual(user: User?) Str {
     match user {
         u => match u.profile {
             profile => profile.name,
-            _ => Maybe::none()
+            _ => Maybe::new()
         },
-        _ => Maybe::none()
+        _ => Maybe::new()
     } -> _ {
         "No bio available"
     }
@@ -329,14 +329,14 @@ fn create_person_with_message(name: Str, age_str: Str) Str {
 // Maybe type examples
 fn find_person(db: Database, id: Int) Person? {
     match db.users.get(id) {
-        person => Maybe::some(person),
-        _ => Maybe::none()
+        person => Maybe::new(person),
+        _ => Maybe::new()
     }
 }
 
 fn get_person_info(db: Database, id: Int) Str? {
     let person = try find_person(db, id)  // Early return none if not found
-    Maybe::some("Name: {person.name}, Age: {person.age}")
+    Maybe::new("Name: {person.name}, Age: {person.age}")
 }
 
 fn get_person_display(db: Database, id: Int) Str {

@@ -192,13 +192,13 @@ let same = a == 10
 let diff = 10 != a`,
 		},
 		{
-			name:        "overflowing literal operand is rejected",
-			input:       `let a: Int8 = 10
+			name: "overflowing literal operand is rejected",
+			input: `let a: Int8 = 10
 let sum = a + 1000`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Integer literal 1000 overflows Int8"}},
 		},
 		{
-			name: "two literals keep default Int typing",
+			name:  "two literals keep default Int typing",
 			input: `let sum: Int = 1 + 2`,
 		},
 	})

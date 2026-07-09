@@ -86,15 +86,15 @@ Use the `?` suffix after a type to declare the possibility of it not being prese
 
 ```ard
 
-mut maybe_name: Str? = Maybe::none()
-maybe_name = Maybe::some("Alice")
+mut maybe_name: Str? = Maybe::new()
+maybe_name = Maybe::new("Alice")
 ```
 
 When the wrapped type starts with `mut`, group it before adding `?`:
 
 ```ard
 
-let maybe_ref: (mut Widget)? = Maybe::none()
+let maybe_ref: (mut Widget)? = Maybe::new()
 ```
 
 ### Working with Maybe Types
@@ -122,7 +122,7 @@ let name: Str = maybe_name.or("Anonymous")
 ### Maybe Type Methods
 
 ```ard
-let maybe_value: Int? = Maybe::some(42)
+let maybe_value: Int? = Maybe::new(42)
 
 // Check if value is present
 let has_value: Bool = maybe_value.is_some()

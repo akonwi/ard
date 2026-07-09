@@ -167,8 +167,8 @@ let text = json::encode(scores).expect("encode")
 ```ard
 use ard/json
 
-let some_value: Int? = Maybe::some(42)
-let none_value: Int? = Maybe::none()
+let some_value: Int? = Maybe::new(42)
+let none_value: Int? = Maybe::new()
 
 let some_json = json::encode(some_value).expect("encode") // 42
 let none_json = json::encode(none_value).expect("encode") // null

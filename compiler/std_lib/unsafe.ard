@@ -1,6 +1,6 @@
 // Compiler-backed checked recovery from Any.
 fn cast(value: Any) $T? {
-  Maybe::none<$T>()
+  Maybe::new<$T>()
 }
 
 // Compiler-backed check for backend nil value state.

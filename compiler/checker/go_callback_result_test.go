@@ -62,7 +62,7 @@ fn main() {
 			input: `use go:cbshapes/ffi
 
 fn main() {
-  ffi::RunOk(fn(key: Str) Int? { Maybe::none() })
+  ffi::RunOk(fn(key: Str) Int? { Maybe::new() })
 }`,
 		},
 		{

@@ -11,16 +11,27 @@ func TestGoTargetMaybePreludeAndMutation(t *testing.T) {
 		{
 			name: "Maybe constructors need no import",
 			input: `fn main() Bool {
-  let a: Maybe<Int> = Maybe::some(40)
-  let b: Int? = Maybe::none<Int>()
+  let a: Maybe<Int> = Maybe::new(40)
+  let b: Int? = Maybe::new<Int>()
   a.or(0) == 40 and b.is_none()
+}`,
+			want: "true",
+		},
+		{
+			name: "new preserves existing maybe values",
+			input: `fn main() Bool {
+  let none: Int? = Maybe::new<Int>()
+  let a: Int? = Maybe::new(none)
+  let some: Int? = Maybe::new(7)
+  let b: Int? = Maybe::new(some)
+  a.is_none() and b.or(0) == 7
 }`,
 			want: "true",
 		},
 		{
 			name: "set and clear mutate in place",
 			input: `fn main() Bool {
-  mut m = Maybe::none<Int>()
+  mut m = Maybe::new<Int>()
   m.set(42)
   let after_set = m.or(0)
   m.clear()

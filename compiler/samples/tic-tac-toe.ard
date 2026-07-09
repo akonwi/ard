@@ -44,45 +44,45 @@ impl Board {
   }
 
   fn get_winner() Str? {
-    mut res: Str? = Maybe::none<Str>()
+    mut res: Str? = Maybe::new<Str>()
 
     if not self.cell(0).is_empty() {
       // check top row
       if self.cell(0) == self.cell(1) and self.cell(0) == self.cell(2) {
-        res = Maybe::some(self.cell(0))
+        res = Maybe::new(self.cell(0))
       }
       // check left column
       if self.cell(0) == self.cell(3) and self.cell(0) == self.cell(6) {
-        res = Maybe::some(self.cell(0))
+        res = Maybe::new(self.cell(0))
       }
       // check top-left to bottom-right
       if self.cell(0) == self.cell(4) and self.cell(0) == self.cell(8) {
-        res = Maybe::some(self.cell(0))
+        res = Maybe::new(self.cell(0))
       }
     }
 
     // check middle column
     if not self.cell(1).is_empty() {
       if self.cell(1) == self.cell(4) and self.cell(1) == self.cell(7) {
-        res = Maybe::some(self.cell(1))
+        res = Maybe::new(self.cell(1))
       }
     }
 
     if not self.cell(2).is_empty() {
       // check right column
       if self.cell(2) == self.cell(5) and self.cell(2) == self.cell(8) {
-        res = Maybe::some(self.cell(2))
+        res = Maybe::new(self.cell(2))
       }
       // check top-right to bottom-left
       if self.cell(2) == self.cell(4) and self.cell(2) == self.cell(6) {
-        res = Maybe::some(self.cell(2))
+        res = Maybe::new(self.cell(2))
       }
     }
 
     // check middle row
     if not self.cell(3).is_empty() {
       if self.cell(3) == self.cell(4) and self.cell(3) == self.cell(5) {
-        res = Maybe::some(self.cell(3))
+        res = Maybe::new(self.cell(3))
       }
     }
 

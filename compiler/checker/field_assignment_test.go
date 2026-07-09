@@ -142,7 +142,7 @@ fn main() {
   mut a = S{label: "one"}
   mut b = S{label: "two"}
   a.label = b.label
-  a.label = Maybe::none()
+  a.label = Maybe::new()
 }
 `))
 	})
