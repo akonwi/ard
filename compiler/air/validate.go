@@ -66,6 +66,13 @@ func validateTypeInfo(program *Program, typ TypeInfo) error {
 		if !validTypeID(program, typ.Elem) {
 			return fmt.Errorf("type %s has invalid elem type %d", typ.Name, typ.Elem)
 		}
+	case TypeFixedArray:
+		if typ.Length < 0 {
+			return fmt.Errorf("type %s has invalid fixed array length %d", typ.Name, typ.Length)
+		}
+		if !validTypeID(program, typ.Elem) {
+			return fmt.Errorf("type %s has invalid elem type %d", typ.Name, typ.Elem)
+		}
 	case TypeMap:
 		if !validTypeID(program, typ.Key) {
 			return fmt.Errorf("type %s has invalid key type %d", typ.Name, typ.Key)

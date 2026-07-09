@@ -21,6 +21,10 @@ func TestFormatIsIdempotent(t *testing.T) {
 			input: "test fn my_test() Void!Str {\n  try testing::assert(true, \"ok\")\n  Result::ok(())\n}\n",
 		},
 		{
+			name:  "fixed array type",
+			input: "let bytes: [Byte; 3] = [1, 2, 3]\nlet maybe: [Byte; 0]? = Maybe::new()\n",
+		},
+		{
 			name:  "test and regular functions together",
 			input: "fn helper() Int {\n  1\n}\ntest fn test_helper() Void!Str {\n  Result::ok(())\n}\n",
 		},

@@ -20,6 +20,7 @@ var compareOptions = cmp.Options{
 		BooleanType{},
 		VoidType{},
 		List{},
+		FixedArray{},
 		Map{},
 		CustomType{},
 		GenericType{},

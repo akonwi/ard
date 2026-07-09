@@ -2289,6 +2289,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMatchStr(fn, expr)
 	case air.ExprMakeList:
 		return l.lowerMakeList(fn, expr)
+	case air.ExprMakeFixedArray:
+		return l.lowerMakeList(fn, expr)
 	case air.ExprAsyncStart:
 		return l.lowerAsyncStart(fn, expr)
 	case air.ExprMakeChannel:
@@ -4108,6 +4110,12 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		return &ast.ArrayType{Elt: elem}, nil
+	case air.TypeFixedArray:
+		elem, err := l.goType(info.Elem)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.ArrayType{Len: ast.NewIdent(fmt.Sprintf("%d", info.Length)), Elt: elem}, nil
 	case air.TypeChannel:
 		elem, err := l.goType(info.Elem)
 		if err != nil {
@@ -6464,7 +6472,7 @@ func (l *lowerer) lowerMakeList(fn air.Function, expr air.Expr) (loweredExpr, er
 	stmts := []ast.Stmt{}
 	elemType := air.NoType
 	if validTypeID(l.program, expr.Type) {
-		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeList {
+		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeList || info.Kind == air.TypeFixedArray {
 			elemType = info.Elem
 		}
 	}

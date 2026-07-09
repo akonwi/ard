@@ -116,6 +116,7 @@ const (
 	TypeRune
 	TypeStr
 	TypeList
+	TypeFixedArray
 	TypeMap
 	TypeStruct
 	TypeEnum
@@ -143,6 +144,7 @@ type TypeInfo struct {
 
 	Elem        TypeID
 	ElemMutable bool
+	Length      int
 	Key         TypeID
 	Value       TypeID
 	Error       TypeID

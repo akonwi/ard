@@ -187,6 +187,10 @@ func collectGenericParamsFromDeclaredType(t parse.DeclaredType, params *[]string
 		collectGenericParamsFromDeclaredType(typ.Element, params, seen)
 	case parse.List:
 		collectGenericParamsFromDeclaredType(typ.Element, params, seen)
+	case *parse.FixedArray:
+		collectGenericParamsFromDeclaredType(typ.Element, params, seen)
+	case parse.FixedArray:
+		collectGenericParamsFromDeclaredType(typ.Element, params, seen)
 	case *parse.Map:
 		collectGenericParamsFromDeclaredType(typ.Key, params, seen)
 		collectGenericParamsFromDeclaredType(typ.Value, params, seen)

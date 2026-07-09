@@ -65,6 +65,11 @@ func (f *ForeignType) get(name string) Type {
 			return method
 		}
 	}
+	if arrayType, ok := f.Underlying.(*FixedArray); ok {
+		if method := arrayType.get(name); method != nil {
+			return method
+		}
+	}
 	if !f.FieldsLoaded && f.LoadFields != nil {
 		f.Fields, f.UnsupportedFields = f.LoadFields()
 		f.FieldsLoaded = true

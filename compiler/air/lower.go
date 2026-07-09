@@ -1156,6 +1156,12 @@ func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, 
 			return NoType, err
 		}
 		return fl.l.internSyntheticType("["+fl.l.typeName(elem)+"]", TypeInfo{Kind: TypeList, Elem: elem})
+	case *checker.FixedArray:
+		elem, err := fl.internResolvedType(typ.Of())
+		if err != nil {
+			return NoType, err
+		}
+		return fl.l.internSyntheticType(fmt.Sprintf("[%s; %d]", fl.l.typeName(elem), typ.Len()), TypeInfo{Kind: TypeFixedArray, Elem: elem, Length: typ.Len()})
 	case *checker.Chan:
 		elem, err := fl.internResolvedType(typ.Of())
 		if err != nil {
@@ -1248,6 +1254,12 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 			return NoType, err
 		}
 		return fl.l.internSyntheticType("["+fl.l.typeName(elem)+"]", TypeInfo{Kind: TypeList, Elem: elem})
+	case *checker.FixedArray:
+		elem, err := fl.internType(typ.Of())
+		if err != nil {
+			return NoType, err
+		}
+		return fl.l.internSyntheticType(fmt.Sprintf("[%s; %d]", fl.l.typeName(elem), typ.Len()), TypeInfo{Kind: TypeFixedArray, Elem: elem, Length: typ.Len()})
 	case *checker.Chan:
 		elem, err := fl.internType(typ.Of())
 		if err != nil {
@@ -2014,6 +2026,14 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 		info.Kind = TypeList
 		info.Elem = elem
+	case *checker.FixedArray:
+		elem, err := l.internType(typ.Of())
+		if err != nil {
+			return NoType, err
+		}
+		info.Kind = TypeFixedArray
+		info.Elem = elem
+		info.Length = typ.Len()
 	case *checker.Chan:
 		elem, err := l.internType(typ.Of())
 		if err != nil {
@@ -2412,6 +2432,8 @@ func typeContainsTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}) boo
 		return true
 	case *checker.List:
 		return typeContainsTypeVarSeen(typ.Of(), seen)
+	case *checker.FixedArray:
+		return typeContainsTypeVarSeen(typ.Of(), seen)
 	case *checker.Chan:
 		return typeContainsTypeVarSeen(typ.Of(), seen)
 	case *checker.Receiver:
@@ -2477,6 +2499,8 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 		return typeHasUnresolvedTypeVarSeen(typ.Actual(), seen)
 	case *checker.List:
 		return typeHasUnresolvedTypeVarSeen(typ.Of(), seen)
+	case *checker.FixedArray:
+		return typeHasUnresolvedTypeVarSeen(typ.Of(), seen)
 	case *checker.Chan:
 		return typeHasUnresolvedTypeVarSeen(typ.Of(), seen)
 	case *checker.Receiver:
@@ -2519,7 +2543,7 @@ func typeHasUnresolvedTypeVarSeen(t checker.Type, seen map[checker.Type]struct{}
 
 func canWrapAsAny(kind TypeKind) bool {
 	switch kind {
-	case TypeVoid, TypeInt, TypeScalar, TypeForeignType, TypeFloat64, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeChannel, TypeReceiver, TypeSender, TypeAny:
+	case TypeVoid, TypeInt, TypeScalar, TypeForeignType, TypeFloat64, TypeBool, TypeByte, TypeRune, TypeStr, TypeList, TypeFixedArray, TypeMap, TypeStruct, TypeEnum, TypeMaybe, TypeResult, TypeUnion, TypeChannel, TypeReceiver, TypeSender, TypeAny:
 		return true
 	default:
 		return false
@@ -2560,6 +2584,8 @@ func airTypeKeySeen(t checker.Type, seen map[checker.Type]struct{}) string {
 	switch typ := t.(type) {
 	case *checker.List:
 		return "list<" + airTypeKeySeen(typ.Of(), seen) + ">"
+	case *checker.FixedArray:
+		return fmt.Sprintf("fixed-array<%s;%d>", airTypeKeySeen(typ.Of(), seen), typ.Len())
 	case *checker.Chan:
 		return "channel<" + airTypeKeySeen(typ.Of(), seen) + ">"
 	case *checker.Receiver:
@@ -2750,13 +2776,18 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 	}
 	if list, ok := expr.(*checker.ListLiteral); ok {
 		if expectedInfo, hasInfo := fl.l.typeInfo(expected); hasInfo {
-			if expectedInfo.Kind == TypeList {
+			if expectedInfo.Kind == TypeList || expectedInfo.Kind == TypeFixedArray {
 				return fl.lowerListLiteral(expected, list, expectedInfo.Elem)
 			}
-			// A list literal against a named Go slice type keeps the named
-			// type so the composite literal is spelled with it.
+			// A list literal against a named Go slice or array type keeps the
+			// named type so the composite literal is spelled with it.
 			if expectedInfo.Kind == TypeForeignType && !expectedInfo.ForeignPointer && expectedInfo.Elem != NoType {
 				return fl.lowerListLiteral(expected, list, expectedInfo.Elem)
+			}
+			if expectedInfo.Kind == TypeForeignType && !expectedInfo.ForeignPointer && expectedInfo.Value != NoType {
+				if underlyingInfo, ok := fl.l.typeInfo(expectedInfo.Value); ok && underlyingInfo.Kind == TypeFixedArray {
+					return fl.lowerListLiteral(expected, list, underlyingInfo.Elem)
+				}
 			}
 		}
 	}
@@ -3589,7 +3620,7 @@ func (fl *functionLowerer) lowerForInList(loop *checker.ForInList) ([]Stmt, erro
 		return nil, err
 	}
 	listType, ok := fl.l.typeInfo(list.Type)
-	if !ok || listType.Kind != TypeList {
+	if !ok || (listType.Kind != TypeList && listType.Kind != TypeFixedArray) {
 		return nil, fmt.Errorf("for-in list lowered with non-list subject %s", loop.List.Type().String())
 	}
 
@@ -4542,7 +4573,11 @@ func (fl *functionLowerer) lowerListLiteral(typeID TypeID, list *checker.ListLit
 		}
 		args[i] = *lowered
 	}
-	return &Expr{Kind: ExprMakeList, Type: typeID, Args: args}, nil
+	kind := ExprMakeList
+	if info, ok := fl.l.typeInfo(typeID); ok && info.Kind == TypeFixedArray {
+		kind = ExprMakeFixedArray
+	}
+	return &Expr{Kind: kind, Type: typeID, Args: args}, nil
 }
 
 func (fl *functionLowerer) lowerMapLiteral(typeID TypeID, m *checker.MapLiteral, keyType, valueType TypeID) (*Expr, error) {
@@ -4945,7 +4980,18 @@ func (fl *functionLowerer) lowerListMethod(typeID TypeID, method *checker.ListMe
 		return nil, err
 	}
 	listType, ok := fl.l.typeInfo(target.Type)
-	if !ok || (listType.Kind != TypeList && !(listType.Kind == TypeForeignType && listType.Elem != NoType)) {
+	if !ok {
+		return nil, fmt.Errorf("List method lowered with non-list subject %s", method.Subject.Type().String())
+	}
+	isNamedFixedArray := false
+	if listType.Kind == TypeForeignType && listType.Value != NoType {
+		if underlying, ok := fl.l.typeInfo(listType.Value); ok && underlying.Kind == TypeFixedArray {
+			isNamedFixedArray = true
+			listType.Elem = underlying.Elem
+			listType.Length = underlying.Length
+		}
+	}
+	if listType.Kind != TypeList && listType.Kind != TypeFixedArray && !(listType.Kind == TypeForeignType && (listType.Elem != NoType || isNamedFixedArray)) {
 		return nil, fmt.Errorf("List method lowered with non-list subject %s", method.Subject.Type().String())
 	}
 
@@ -4956,6 +5002,9 @@ func (fl *functionLowerer) lowerListMethod(typeID TypeID, method *checker.ListMe
 
 	var kind ExprKind
 	var expected []TypeID
+	if (listType.Kind == TypeFixedArray || isNamedFixedArray) && method.Kind != checker.ListAt && method.Kind != checker.ListSize {
+		return nil, fmt.Errorf("unsupported fixed-array method %d", method.Kind)
+	}
 	switch method.Kind {
 	case checker.ListAt:
 		kind = ExprListAtChecked

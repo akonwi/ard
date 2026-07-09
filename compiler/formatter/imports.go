@@ -55,6 +55,10 @@ func collectImportUsesInType(t parse.DeclaredType, used map[string]bool) {
 		collectImportUsesInType(v.Element, used)
 	case parse.List:
 		collectImportUsesInType(v.Element, used)
+	case *parse.FixedArray:
+		collectImportUsesInType(v.Element, used)
+	case parse.FixedArray:
+		collectImportUsesInType(v.Element, used)
 	case *parse.Map:
 		collectImportUsesInType(v.Key, used)
 		collectImportUsesInType(v.Value, used)

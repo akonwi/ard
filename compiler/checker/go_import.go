@@ -5,6 +5,7 @@ import (
 	"go/importer"
 	"go/token"
 	"go/types"
+	"math"
 )
 
 // GoPackage is target metadata for a directly imported Go package. It is kept
@@ -422,6 +423,16 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 		}
 		return MakeList(elem), ""
 	}
+	if array, ok := t.Underlying().(*types.Array); ok {
+		elem, reason := typeFromGoWithMethods(array.Elem(), includeMethods)
+		if reason != "" {
+			return nil, "array element " + reason
+		}
+		if array.Len() > int64(math.MaxInt) {
+			return nil, "array length too large"
+		}
+		return MakeFixedArray(elem, int(array.Len())), ""
+	}
 	if goChan, ok := t.Underlying().(*types.Chan); ok {
 		elem, reason := typeFromGoWithMethods(goChan.Elem(), includeMethods)
 		if reason != "" {
@@ -510,6 +521,15 @@ func unsupportedForeignNamedUnderlying(underlying types.Type, pointer bool) stri
 		}
 		return ""
 	}
+	if goArray, ok := underlying.(*types.Array); ok {
+		if _, reason := typeFromGoWithMethods(goArray.Elem(), false); reason != "" {
+			return "array element " + reason
+		}
+		if goArray.Len() > int64(math.MaxInt) {
+			return "array length too large"
+		}
+		return ""
+	}
 	if _, ok := underlying.(*types.Interface); ok {
 		if pointer {
 			return "pointers to Go interface types are not supported"
@@ -528,6 +548,11 @@ func foreignNamedTypeFromGo(named *types.Named, pointer bool, includeMethods boo
 		qualifier = pkg.Name()
 	}
 	underlying, _ := primitiveTypeFromGo(named.Underlying())
+	if goArray, ok := named.Underlying().(*types.Array); ok {
+		if elem, reason := typeFromGoWithMethods(goArray.Elem(), false); reason == "" && goArray.Len() <= int64(math.MaxInt) {
+			underlying = MakeFixedArray(elem, int(goArray.Len()))
+		}
+	}
 	_, isStruct := named.Underlying().(*types.Struct)
 	_, isInterface := named.Underlying().(*types.Interface)
 	goType := types.Type(named)
