@@ -312,7 +312,6 @@ fn main() {
 ```ard
 use ard/decode
 use ard/io
-use ard/maybe
 
 struct Person {
   name: Str,

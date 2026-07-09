@@ -440,14 +440,13 @@ func TestLowerEnums(t *testing.T) {
 }
 func TestLowerMaybes(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		fn some() Int? {
-			maybe::some(42)
+			Maybe::new(42)
 		}
 
 		fn none() Int? {
-			maybe::none()
+			Maybe::new()
 		}
 
 		fn fallback(value: Int?) Int {
@@ -633,15 +632,14 @@ func TestLowerTraitObjectDispatch(t *testing.T) {
 }
 func TestLowerContextualMaybeTypesInNestedExpressions(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		fn pick(choices: [Any]) Any? {
 			let first_choice = match choices.size() {
-				0 => maybe::none(),
-				_ => maybe::some(choices.at(0).expect("bounds")),
+				0 => Maybe::new(),
+				_ => Maybe::new(choices.at(0).expect("bounds")),
 			}
-			let choice = try first_choice -> _ { maybe::none() }
-			maybe::some(choice)
+			let choice = try first_choice -> _ { Maybe::new() }
+			Maybe::new(choice)
 		}
 	`)
 
@@ -659,7 +657,7 @@ func TestLowerContextualMaybeTypesInNestedExpressions(t *testing.T) {
 		t.Fatalf("choice expr type = %q, want Any", got)
 	}
 	if pick.Body.Result == nil || pick.Body.Result.Target == nil {
-		t.Fatalf("result tree missing maybe::some target: %#v", pick.Body.Result)
+		t.Fatalf("result tree missing Maybe::new target: %#v", pick.Body.Result)
 	}
 	if got := testTypeInfo(t, program, pick.Body.Result.Target.Type).Name; got != "Any" {
 		t.Fatalf("result some target type = %q, want Any", got)
@@ -692,7 +690,6 @@ func TestLowerContextualResultTypesInNestedExpressions(t *testing.T) {
 }
 func TestLowerTryOps(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		fn result_value(result: Int!Str) Int!Str {
 			let value = try result
@@ -708,7 +705,7 @@ func TestLowerTryOps(t *testing.T) {
 
 		fn maybe_value(value: Int?) Int? {
 			let inner = try value
-			maybe::some(inner + 1)
+			Maybe::new(inner + 1)
 		}
 	`)
 
@@ -1305,8 +1302,7 @@ func TestLowerReceiverGenericUsedOnlyInMethodBody(t *testing.T) {
 	// struct's type parameter abstractly; this must lower without trying to
 	// monomorphize at an unbound type parameter.
 	_ = lowerSource(t, `
-		use ard/maybe
-		fn raw(key: Str) $T? { maybe::none() }
+		fn raw(key: Str) $T? { Maybe::new() }
 
 		struct Box {
 			item: $T

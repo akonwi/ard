@@ -60,10 +60,9 @@ fn main() {
 		{
 			name: "comma-ok callback takes a Maybe closure",
 			input: `use go:cbshapes/ffi
-use ard/maybe
 
 fn main() {
-  ffi::RunOk(fn(key: Str) Int? { maybe::none() })
+  ffi::RunOk(fn(key: Str) Int? { Maybe::new() })
 }`,
 		},
 		{

@@ -4474,6 +4474,11 @@ func (fl *functionLowerer) lowerResultConstructor(kind ExprKind, typeID TypeID, 
 
 func (fl *functionLowerer) lowerMaybeConstructor(kind ExprKind, typeID TypeID, call *checker.ModuleFunctionCall) (*Expr, error) {
 	switch kind {
+	case ExprMakeMaybeNew:
+		if len(call.Call.Args) != 1 {
+			return nil, fmt.Errorf("%s::%s expects one checked argument", call.Module, call.Call.Name)
+		}
+		return fl.lowerExprWithExpected(call.Call.Args[0], typeID)
 	case ExprMakeMaybeSome:
 		if len(call.Call.Args) != 1 {
 			return nil, fmt.Errorf("%s::%s expects one argument", call.Module, call.Call.Name)
@@ -4865,6 +4870,10 @@ func (fl *functionLowerer) lowerMaybeMethod(typeID TypeID, method *checker.Maybe
 		kind = ExprMaybeMap
 	case checker.MaybeAndThen:
 		kind = ExprMaybeAndThen
+	case checker.MaybeSet:
+		kind = ExprMaybeSet
+	case checker.MaybeClear:
+		kind = ExprMaybeClear
 	default:
 		return nil, fmt.Errorf("unsupported AIR Maybe method %d", method.Kind)
 	}
@@ -5202,10 +5211,12 @@ func resultConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {
 }
 
 func maybeConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {
-	if call.Module != "ard/maybe" {
+	if call.Module != "builtin/Maybe" {
 		return 0, false
 	}
 	switch call.Call.Name {
+	case "new":
+		return ExprMakeMaybeNew, true
 	case "some":
 		return ExprMakeMaybeSome, true
 	case "none":

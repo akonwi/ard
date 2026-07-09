@@ -232,12 +232,12 @@ func TestGenericCallTypeArgumentDiagnostics(t *testing.T) {
 		},
 		{
 			name:     "Empty static generic function type argument is rejected",
-			input:    "maybe::none<>()",
+			input:    "Maybe::new<>()",
 			wantErrs: []string{"Expected type argument"},
 		},
 		{
 			name:     "Invalid static generic function type argument keeps type diagnostic",
-			input:    "maybe::none<()>()",
+			input:    "Maybe::new<()>()",
 			wantErrs: []string{"Expected a type"},
 		},
 		{
@@ -252,7 +252,7 @@ func TestGenericCallTypeArgumentDiagnostics(t *testing.T) {
 		},
 		{
 			name:     "Static generic function call with implicit void function type argument missing greater than is diagnosed",
-			input:    "maybe::none<fn(Int)()",
+			input:    "Maybe::new<fn(Int)()",
 			wantErrs: []string{"Expected '>' after type arguments"},
 		},
 		{
@@ -262,7 +262,7 @@ func TestGenericCallTypeArgumentDiagnostics(t *testing.T) {
 		},
 		{
 			name:     "Static generic function call with implicit void function type argument and arguments missing greater than is diagnosed",
-			input:    "maybe::none<fn(Int)(1)",
+			input:    "Maybe::new<fn(Int)(1)",
 			wantErrs: []string{"Expected '>' after type arguments"},
 		},
 	})

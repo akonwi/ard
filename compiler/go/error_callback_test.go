@@ -72,7 +72,6 @@ func Named(cb WalkFunc) string {
 	}
 	mainPath := filepath.Join(projectDir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`use go:errcb/ffi
-use ard/maybe
 
 fn main() {
   // error-only callback: succeed for every value
@@ -105,8 +104,8 @@ fn main() {
   // comma-ok callback: Maybe return maps to (T, bool)
   let looked = ffi::Lookup(fn(key: Str) Int? {
     match key == "hit" {
-      true => maybe::some(7),
-      false => maybe::none(),
+      true => Maybe::new(7),
+      false => Maybe::new(),
     }
   })
   if not looked == "found" { panic("expected comma-ok lookup, got {looked}") }

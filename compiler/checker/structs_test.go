@@ -230,15 +230,14 @@ func TestStructsWithStaticFunctions(t *testing.T) {
 	run(t, []test{
 		{
 			name: "Structs can have static functions",
-			input: `use ard/maybe
-			struct Message {
+			input: `struct Message {
 				kind: Str,
 				stuff: Int?
 			}
 			fn Message::new(kind: Str, stuff: Int?) Message {
 				Message{kind: kind, stuff: stuff}
 			}
-			Message::new("info", maybe::some(42))
+			Message::new("info", Maybe::new(42))
 			`,
 			diagnostics: []checker.Diagnostic{},
 		},

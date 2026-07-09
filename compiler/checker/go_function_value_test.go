@@ -44,12 +44,11 @@ fn main() {
 		{
 			name: "variadic Go function value takes a trailing Maybe parameter",
 			input: `use go:fmt
-use ard/maybe
 
 fn main() {
   let print: fn(Any?) Int!Str = fmt::Println
   print("hello")
-  print(maybe::none())
+  print(Maybe::new())
 }`,
 		},
 		{

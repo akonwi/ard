@@ -1,4 +1,3 @@
-use ard/maybe
 use ard/testing
 
 fn new() [$T] {
@@ -50,10 +49,10 @@ fn map(list: [$A], transform: fn($A) $B) [$B] {
 
 // look for the first item in a list matching the predicate
 fn find(list: [$T], where: fn($T) Bool) $T? {
-  mut found = maybe::none<$T>()
+  mut found = Maybe::new<$T>()
   for t in list {
     if where(t) {
-      found = maybe::some(t)
+      found = Maybe::new(t)
       break
     }
   }

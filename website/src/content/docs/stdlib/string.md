@@ -99,15 +99,14 @@ When a byte boundary can produce invalid UTF-8 (file reads, network payloads)
 and you need to reject it, validate first with Go's `unicode/utf8` package:
 
 ```ard
-use ard/maybe
 use go:unicode/utf8
 
 fn decode(raw: [Byte]) Str? {
   let s = Str::from(raw)
   if utf8::ValidString(s) {
-    maybe::some(s)
+    Maybe::new(s)
   } else {
-    maybe::none()
+    Maybe::new()
   }
 }
 ```

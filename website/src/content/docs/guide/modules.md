@@ -39,7 +39,6 @@ use ard/io          // Input/output functions
 use ard/json        // JSON parsing and serialization
 use ard/http        // HTTP client functionality
 use ard/async       // Asynchronous programming
-use ard/maybe       // Maybe type utilities
 ```
 
 ## Project Structure

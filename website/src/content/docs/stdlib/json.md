@@ -114,7 +114,6 @@ let scores = json::parse<[Str:Int]>("\{\"Alice\":95,\"Bob\":87\}").expect("parse
 
 ```ard
 use ard/json
-use ard/maybe
 
 struct User {
   name: Str,
@@ -167,10 +166,9 @@ let text = json::encode(scores).expect("encode")
 
 ```ard
 use ard/json
-use ard/maybe
 
-let some_value: Int? = maybe::some(42)
-let none_value: Int? = maybe::none()
+let some_value: Int? = Maybe::new(42)
+let none_value: Int? = Maybe::new()
 
 let some_json = json::encode(some_value).expect("encode") // 42
 let none_json = json::encode(none_value).expect("encode") // null

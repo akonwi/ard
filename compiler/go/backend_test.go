@@ -958,14 +958,13 @@ func TestLowerProgramUsesIdiomaticGoABIForVoidResultReturn(t *testing.T) {
 
 func TestLowerProgramUsesIdiomaticGoABIForResultAndMaybeReturns(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		fn parse() Int!Str {
 			Result::ok(1)
 		}
 
 		fn find() Int? {
-			maybe::some(1)
+			Maybe::new(1)
 		}
 	`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
@@ -2653,10 +2652,9 @@ func TestLowerProgramSupportsStructsAndEnums(t *testing.T) {
 }
 func TestLowerProgramSupportsTryMaybeCatchAndEarlyReturn(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		fn missing() Int? {
-			maybe::none()
+			Maybe::new()
 		}
 
 		fn with_default() Int {
@@ -2666,7 +2664,7 @@ func TestLowerProgramSupportsTryMaybeCatchAndEarlyReturn(t *testing.T) {
 
 		fn passthrough() Int? {
 			let value = try missing()
-			maybe::some(value)
+			Maybe::new(value)
 		}
 
 		fn main() Int {
@@ -2767,13 +2765,12 @@ func TestArtifactWorkspacePreservesGoModuleFiles(t *testing.T) {
 }
 func TestLowerProgramUsesRuntimeMaybeForRecursiveNullableFields(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		struct Node { value: Int, parent: Node? }
 
 		fn main() Int {
-			let root = Node{value: 1, parent: maybe::none()}
-			let child = Node{value: 2, parent: maybe::some(root)}
+			let root = Node{value: 1, parent: Maybe::new()}
+			let child = Node{value: 2, parent: Maybe::new(root)}
 			child.parent.expect("").value
 		}
 	`)
@@ -2802,10 +2799,9 @@ func TestLowerProgramUsesRuntimeMaybeForRecursiveNullableFields(t *testing.T) {
 }
 func TestLowerProgramUsesExpectedLocalTypeForMaybeNone(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		fn main() Bool {
-			let found: Int? = maybe::none()
+			let found: Int? = Maybe::new()
 			found.is_none()
 		}
 	`)
@@ -2827,15 +2823,14 @@ func TestLowerProgramUsesExpectedLocalTypeForMaybeNone(t *testing.T) {
 }
 func TestLowerProgramUsesExpectedDefaultTypeForResultOr(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		fn fetch() Int?!Str {
-			let empty: Int? = maybe::none()
+			let empty: Int? = Maybe::new()
 			Result::ok(empty)
 		}
 
 		fn main() Bool {
-			let value = fetch().or(maybe::none())
+			let value = fetch().or(Maybe::new())
 			value.is_none()
 		}
 	`)
@@ -2847,10 +2842,9 @@ func TestLowerProgramUsesExpectedDefaultTypeForResultOr(t *testing.T) {
 }
 func TestLowerProgramSkipsVoidAssignmentForStatementMatchBranches(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		fn main() Bool {
-			match maybe::some(1) {
+			match Maybe::new(1) {
 				value => value == 1,
 				_ => (),
 			}
@@ -3002,12 +2996,11 @@ func TestLowerProgramSupportsCapturedClosureSort(t *testing.T) {
 }
 func TestLowerProgramInlinesNestedImmediateClosures(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		fn main() Int {
 			let bias = 2
-			let result = maybe::some(40).map(fn(value) {
-				maybe::some(value).map(fn(inner) { inner + bias }).or(0)
+			let result = Maybe::new(40).map(fn(value) {
+				Maybe::new(value).map(fn(inner) { inner + bias }).or(0)
 			})
 			result.or(0)
 		}
@@ -3030,11 +3023,10 @@ func TestLowerProgramInlinesNestedImmediateClosures(t *testing.T) {
 }
 func TestLowerProgramKeepsHelperForMutableCaptureClosure(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		fn main() Int {
 			mut total = 0
-			let result = maybe::some(1).map(fn(value) {
+			let result = Maybe::new(1).map(fn(value) {
 				total = total + value
 				total
 			})
@@ -3866,17 +3858,15 @@ func buildProgramFromGeneratedSources(t *testing.T, program *air.Program, output
 	}
 }
 func TestInlineClosureBuildsWithPredeclaredNameParameter(t *testing.T) {
-	program := lowerSource(t, `use ard/maybe
-fn main() {
-  maybe::some(1).map(fn(int64) { int64 + 1 }).or(0)
+	program := lowerSource(t, `fn main() {
+  Maybe::new(1).map(fn(int64) { int64 + 1 }).or(0)
 }`)
 	buildProgramFromGeneratedSources(t, program, "inline-closure-predeclared-param")
 }
 func TestInlineClosureBuildsWhenParamCollidesWithCaptureRewrite(t *testing.T) {
-	program := lowerSource(t, `use ard/maybe
-fn main() {
+	program := lowerSource(t, `fn main() {
   let x_0 = 10
-  maybe::some(1).map(fn(x) { x + x_0 }).or(0)
+  Maybe::new(1).map(fn(x) { x + x_0 }).or(0)
 }`)
 	buildProgramFromGeneratedSources(t, program, "inline-closure-capture-param-collision")
 }
@@ -4686,10 +4676,9 @@ func TestRunProgramExecutesZeroArgVariadicGoCalls(t *testing.T) {
 
 // TestRunProgramWrapsFieldAssignmentIntoMaybe pins the runtime behavior of
 // assigning a bare T into a T? struct field: the checker synthesizes a
-// maybe::some wrap, and resetting with maybe::none round-trips.
+// Maybe::new wraps, and resetting with Maybe::new() round-trips.
 func TestRunProgramWrapsFieldAssignmentIntoMaybe(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		struct S {
 			label: Str?,
@@ -4706,7 +4695,7 @@ func TestRunProgramWrapsFieldAssignmentIntoMaybe(t *testing.T) {
 			if s.label.or("missing") != "from variable" {
 				panic("variable wrap failed")
 			}
-			s.label = maybe::none()
+			s.label = Maybe::new()
 			if s.label.is_some() {
 				panic("none reset failed")
 			}
@@ -4751,12 +4740,11 @@ func TestRunProgramMutParameterWritesBack(t *testing.T) {
 // lowering to the (T, bool) multi-return shape.
 func TestRunProgramReturnsMaybeThroughABI(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		fn pick(flag: Bool) Str? {
-			mut res: Str? = maybe::none()
+			mut res: Str? = Maybe::new()
 			if flag {
-				res = maybe::some("value")
+				res = Maybe::new("value")
 			}
 			res
 		}
@@ -4782,13 +4770,12 @@ func TestRunProgramReturnsMaybeThroughABI(t *testing.T) {
 // *new(T), not the illegal composite literal T{}.
 func TestRunProgramReturnsGenericMaybeThroughABI(t *testing.T) {
 	program := lowerSource(t, `
-		use ard/maybe
 
 		fn first_match(items: [$T], pred: fn($T) Bool) $T? {
-			mut res: $T? = maybe::none()
+			mut res: $T? = Maybe::new()
 			for item in items {
 				if pred(item) {
-					res = maybe::some(item)
+					res = Maybe::new(item)
 					break
 				}
 			}
@@ -4953,7 +4940,6 @@ func TestRunProgramCompositeMarshalsThroughGoJSON(t *testing.T) {
 	program := lowerSource(t, `
 		use go:encoding/json
 		use go:fmt
-		use ard/maybe
 
 		enum Color {
 			Red,
@@ -4985,7 +4971,7 @@ func TestRunProgramCompositeMarshalsThroughGoJSON(t *testing.T) {
 			check(encoded, "\"due_note\":\"soon\"")
 			check(encoded, "\"color\":1")
 
-			let without = Task{task_name: "rest", due_note: maybe::none(), color: Color::Red}
+			let without = Task{task_name: "rest", due_note: Maybe::new(), color: Color::Red}
 			let encoded_null = encode(without)
 			check(encoded_null, "\"due_note\":null")
 			check(encoded_null, "\"color\":0")

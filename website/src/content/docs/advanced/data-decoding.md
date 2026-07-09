@@ -203,7 +203,7 @@ let users = decode::run(data, decode::field("users", decode::list(user_decoder))
 
 // Access user data
 let first_user = users.at(0)
-let is_active = first_user.get("active").or(maybe::some(false))
+let is_active = first_user.get("active").or(Maybe::new(false))
 ```
 
 ### Error Handling

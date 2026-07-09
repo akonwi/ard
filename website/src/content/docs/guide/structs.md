@@ -52,9 +52,8 @@ let config = Config{name: "app"}
 // Provide values directly — they are automatically wrapped
 let config = Config{name: "app", timeout: 30, retries: 3}
 
-// You can still use maybe::some() explicitly if you prefer
-use ard/maybe
-let config = Config{name: "app", timeout: maybe::some(30)}
+// You can still use Maybe::new() explicitly if you prefer
+let config = Config{name: "app", timeout: Maybe::new(30)}
 ```
 
 This is the same implicit wrapping behavior available for [nullable function parameters](/guide/functions#nullable-parameters).

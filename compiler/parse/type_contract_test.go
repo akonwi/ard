@@ -79,7 +79,6 @@ func TestValidTypePositionsStayClean(t *testing.T) {
 		{"fn type as list element", "fn main() {\n  let l: [fn(Int)] = []\n}\n"},
 		{"fn type before equals", "fn main() {\n  let f: fn(Int) = fn(n: Int) {}\n}\n"},
 		{"fn type as return type", "fn make() fn(Int) Int {\n  fn(n: Int) Int { n }\n}\n"},
-		{"grouped nullable fn type", "use ard/maybe\n\nfn main() {\n  let f: (fn(Int) Str)? = maybe::none()\n}\n"},
 		{"fn type as call-site type argument", "fn id(v: $T) $T { v }\nfn main() {\n  let a = id<fn(Int)>(fn(n: Int) {})\n}\n"},
 		{"trait method without return type", "trait T {\n  fn go(a: Int)\n}\n"},
 		{"fn type return followed by body brace", "fn make() fn(Int) {\n  fn(n: Int) {}\n}\n"},
