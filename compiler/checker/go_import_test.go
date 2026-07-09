@@ -468,7 +468,7 @@ fn main() Void!Str {
 }`,
 		},
 		{
-			name: "variadic foreign method is one Ard argument",
+			name: "variadic foreign method allows one repeated arg",
 			input: `use go:log
 
 fn main() {
@@ -486,14 +486,13 @@ fn main() {
 }`,
 		},
 		{
-			name: "variadic foreign method rejects multiple variadic args",
+			name: "variadic foreign method allows multiple repeated args",
 			input: `use go:log
 
 fn main() {
   let logger = log::Default()
   logger.Println("hello", "world")
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 1, got 2"}},
 		},
 		{
 			name: "foreign interface method argument type mismatch is reported",
@@ -983,7 +982,7 @@ http::HandleFunc()`,
 	})
 }
 
-func TestGoVariadicIsSingleArdArgument(t *testing.T) {
+func TestGoVariadicAcceptsRepeatedArguments(t *testing.T) {
 	run(t, []test{
 		{
 			name: "zero variadic arguments allowed",
@@ -1001,10 +1000,20 @@ fn main() {
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 1, got 0"}},
 		},
 		{
-			name: "multiple variadic arguments rejected",
+			name: "multiple variadic arguments allowed",
 			input: `use go:fmt
 fmt::Println("a", "b")`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Incorrect number of arguments: Expected 1, got 2"}},
+		},
+		{
+			name: "typed variadic arguments check each repeated value",
+			input: `use go:os/exec
+exec::Command("echo", "a", "b")`,
+		},
+		{
+			name: "typed variadic arguments reject incompatible repeated value",
+			input: `use go:os/exec
+exec::Command("echo", "a", 1)`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected Str, got Int"}},
 		},
 	})
 }

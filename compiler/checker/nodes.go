@@ -1390,9 +1390,10 @@ type ForeignValue struct {
 	// adapter so the value behaves exactly like a call to the function.
 	AdaptedFunction bool
 	// VariadicAdapter is set with AdaptedFunction when the Go function is
-	// variadic: the adapted signature's final parameter is a Maybe of the
-	// variadic element type, and the adapter passes the value when present
-	// and nothing otherwise, mirroring the call-site rule.
+	// variadic and is referenced as a function value: the adapted signature's
+	// final parameter is a Maybe of the variadic element type, and the adapter
+	// passes the value when present and nothing otherwise. Direct Go calls use
+	// repeated trailing arguments instead of this function-value adapter shape.
 	VariadicAdapter bool
 }
 
