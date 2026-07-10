@@ -22,6 +22,18 @@ enum HttpStatus {
 }
 ```
 
+Enums can have methods through `impl` blocks, just like structs:
+
+```ard
+enum Status { active, inactive }
+
+impl Status {
+  fn is_active() Bool {
+    self == Status::active
+  }
+}
+```
+
 ## Referencing Enum Values
 
 Use the static operator `::` to reference enum variants:
@@ -106,8 +118,7 @@ fn connect(state: ConnectionState) ConnectionState {
 
 Unlike some languages, Ard enums:
 - Cannot have associated data/values
-- Are essentially named integers
-- Cannot have methods defined on them directly
+- Are represented as named integer-like variants
 
 For actual discriminated unions of various types (A.K.A. sum types) like in Rust, consider using <a href="/guide/types/#type-unions">type unions</a>:
 
