@@ -45,7 +45,7 @@ count =+ 1
 
 ### One obvious way
 
-Ard keeps its surface small: expression-based functions with no `return` keyword, a single `match` construct for branching on values and types, and left-to-right type syntax. There is usually one clear way to write a given thing.
+Ard keeps its surface small: expression-based functions with no `return` keyword, a single `match` construct for branching on values and types, and left-to-right type syntax. The language favors a small set of consistent forms over many interchangeable spellings.
 
 ## The Go relationship
 

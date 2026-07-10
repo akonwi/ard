@@ -1,271 +1,124 @@
 ---
 title: Code Samples
-description: Practical examples demonstrating Ard language features and common programming patterns.
+description: Practical examples demonstrating current Ard language features.
 ---
 
-## Basic Examples
+These samples focus on core Ard syntax and the current Go backend. They use direct Go imports for output.
 
-### Hello World
-
-The simplest Ard program:
+## Hello World
 
 ```ard
-use ard/io
+use go:fmt
 
 fn main() {
-  io::print("Hello, World!")
+  fmt::Println("Hello, World!")
 }
 ```
 
-### FizzBuzz
-
-Classic FizzBuzz implementation showcasing control flow:
+## FizzBuzz
 
 ```ard
-use ard/io
+use go:fmt
+
+fn label(num: Int) Str {
+  match {
+    num % 15 == 0 => "FizzBuzz"
+    num % 3 == 0 => "Fizz"
+    num % 5 == 0 => "Buzz"
+    _ => num.to_str()
+  }
+}
 
 fn main() {
   for num in 1..100 {
-    match num {
-      n if n % 15 == 0 => io::print("FizzBuzz")
-      n if n % 3 == 0 => io::print("Fizz")
-      n if n % 5 == 0 => io::print("Buzz")
-      _ => io::print(num.to_str())
-    }
+    fmt::Println(label(num))
   }
 }
 ```
 
-### Fibonacci Sequence
-
-Recursive function demonstrating pattern matching:
+## Structs and Methods
 
 ```ard
-use ard/io
-
-fn fibonacci(n: Int) Int {
-  match n <= 1 {
-    true => n
-    false => fibonacci(n - 2) + fibonacci(n - 1)
-  }
-}
-
-fn main() {
-  for n in 1..20 {
-    io::print("fib({n.to_str()}) = {fibonacci(n).to_str()}")
-  }
-}
-```
-
-## Struct Examples
-
-### Todo List Application
-
-Complete todo list with structs and methods:
-
-```ard
-use ard/io
+use go:fmt
 
 struct Todo {
-  title: Str
-  completed: Bool
+  title: Str,
+  completed: Bool,
 }
 
 impl Todo {
-  fn get_str() Str {
+  fn text() Str {
     let box = match self.completed {
       true => "[x]"
       false => "[ ]"
     }
     "{box} {self.title}"
   }
-}
 
-fn Todo::new(title: Str) Todo {
-  Todo { title: title, completed: false }
-}
-
-fn render(list: [Todo]) {
-  io::print("Todo List:")
-  for todo in list {
-    io::print(todo.get_str())
+  fn mut complete() {
+    self.completed = true
   }
 }
 
 fn main() {
-  mut list: [Todo] = [
-    Todo { title: "Buy milk", completed: true }
-  ]
-
-  mut running = true
-  while running {
-    render(list)
-    io::print("What's your next todo?")
-    let title = io::read_line().unwrap_or("")
-    
-    match title.is_empty() {
-      true => running = false
-      false => {
-        list.push(Todo::new(title))
-        io::print("------")
-      }
-    }
-  }
+  mut todo = Todo{title: "Update docs", completed: false}
+  todo.complete()
+  fmt::Println(todo.text())
 }
 ```
 
-## Type Union Examples
-
-### Shape Calculator
-
-Using type unions for polymorphic behavior:
+## Maybe Values
 
 ```ard
-use ard/io
+use go:fmt
 
-struct Square { size: Float64 }
-struct Circle { radius: Float64 }
-
-type Shape = Square | Circle
-
-fn get_name(shape: Shape) Str {
-  match shape {
-    Square => "Square"
-    Circle => "Circle"
-  }
-}
-
-fn calculate_area(shape: Shape) Float64 {
-  match shape {
-    Square => it.size * it.size
-    Circle => 3.14159 * it.radius * it.radius
+fn find_name(id: Int) Str? {
+  match id == 1 {
+    true => Maybe::new("Ada")
+    false => Maybe::new()
   }
 }
 
 fn main() {
-  let square = Square { size: 10.0 }
-  let circle = Circle { radius: 5.0 }
-
-  let shapes: [Shape] = [square, circle]
-  for shape in shapes {
-    let name = get_name(shape)
-    let area = calculate_area(shape)
-    io::print("{name} area: {area.to_str()}")
+  match find_name(1) {
+    name => fmt::Println("Hello, {name}")
+    _ => fmt::Println("Unknown user")
   }
 }
 ```
 
-## Trait Examples
-
-### Custom Display Trait
-
-Implementing traits for custom types:
+## Result and `try`
 
 ```ard
-use ard/io
+use go:fmt
 
-struct Book {
-  title: Str
-  author: Str
-}
-
-impl String for Book {
-  fn to_str() Str {
-    "{self.title} by {self.author}"
-  }
-}
-
-fn display(item: String) {
-  io::print("Book: {item.to_str()}")
-}
-
-fn main() {
-  let book = Book { 
-    title: "The Hobbit", 
-    author: "J.R.R. Tolkien" 
-  }
-  display(book)
-}
-```
-
-## Error Handling Examples
-
-### Safe Division
-
-Demonstrating Result types and error handling:
-
-```ard
-use ard/io
-
-fn safe_divide(a: Int, b: Int) Int!Str {
+fn divide(a: Int, b: Int) Int!Str {
   match b == 0 {
-    true => Result::err("Cannot divide by zero")
+    true => Result::err("cannot divide by zero")
     false => Result::ok(a / b)
   }
 }
 
-fn calculate(operations: [(Int, Int)]) {
-  for pair in operations {
-    let a = pair.0
-    let b = pair.1
-    
-    match safe_divide(a, b) {
-      ok(result) => io::print("{a.to_str()} / {b.to_str()} = {result.to_str()}")
-      err(error) => io::print("Error: {error}")
-    }
-  }
+fn describe_division(a: Int, b: Int) Str!Str {
+  let value = try divide(a, b)
+  Result::ok("{a} / {b} = {value}")
 }
 
 fn main() {
-  let operations = [(10, 2), (15, 3), (8, 0), (20, 4)]
-  calculate(operations)
-}
-```
-
-### Chained Operations
-
-Using the `try` keyword for error propagation:
-
-```ard
-use ard/io
-
-fn parse_number(text: Str) Int!Str {
-  text.to_int().or_err("Invalid number format")
-}
-
-fn calculate_percentage(text1: Str, text2: Str) Float64!Str {
-  let num1 = try parse_number(text1)
-  let num2 = try parse_number(text2)
-  
-  match num2 == 0 {
-    true => Result::err("Cannot divide by zero")
-    false => Result::err("Int to Float64 conversion requires an explicit helper")
-  }
-}
-
-fn main() {
-  let inputs = [("75", "100"), ("50", "200"), ("abc", "100"), ("75", "0")]
-  
-  for pair in inputs {
-    match calculate_percentage(pair.0, pair.1) {
-      ok(percentage) => io::print("{pair.0}/{pair.1} = {percentage.to_str()}%")
-      err(error) => io::print("Error with {pair.0}/{pair.1}: {error}")
-    }
+  match describe_division(10, 2) {
+    ok(text) => fmt::Println(text)
+    err(message) => fmt::Println("Error: {message}")
   }
 }
 ```
 
-## Collection Examples
-
-### List Processing
-
-Working with lists and functional patterns:
+## Lists and Maps
 
 ```ard
-use ard/io
+use go:fmt
 
 fn filter_evens(numbers: [Int]) [Int] {
-  let mut result: [Int] = []
+  mut result: [Int] = []
   for num in numbers {
     if num % 2 == 0 {
       result.push(num)
@@ -274,134 +127,39 @@ fn filter_evens(numbers: [Int]) [Int] {
   result
 }
 
-fn sum_list(numbers: [Int]) Int {
-  mut total = 0
-  for num in numbers {
-    total =+ num
-  }
-  total
-}
-
 fn main() {
-  let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-  
-  io::print("Original: {numbers.to_str()}")
-  
+  let numbers = [1, 2, 3, 4, 5, 6]
   let evens = filter_evens(numbers)
-  io::print("Even numbers: {evens.to_str()}")
-  
-  let sum = sum_list(evens)
-  io::print("Sum of evens: {sum.to_str()}")
+  fmt::Println("Found {evens.size()} even numbers")
+
+  mut counts: [Str:Int] = [:]
+  counts.set("even", evens.size())
+  fmt::Println("even: {counts.get("even").or(0)}")
 }
 ```
 
-### Map Operations
-
-Using maps for data storage and lookup:
+## Fixed-Size Arrays
 
 ```ard
-use ard/io
-
-fn word_count(text: Str) [Str:Int] {
-  let words = Str::split(text, " ")
-  let mut counts: [Str:Int] = [:]
-  
-  for word in words {
-    let current = counts.get(word).or(0)
-    counts.set(word, current + 1)
-  }
-  
-  counts
-}
+use go:crypto/sha256
+use go:fmt
 
 fn main() {
-  let text = "the quick brown fox jumps over the lazy dog the fox"
-  let counts = word_count(text)
-  
-  io::print("Word frequencies:")
-  for word, count in counts {
-    io::print("{word}: {count.to_str()}")
-  }
+  mut bytes = "hello".bytes()
+  let digest: [Byte; 32] = sha256::Sum256(bytes)
+  let zero: Byte = 0
+  fmt::Println("digest bytes: {digest.size()}")
+  fmt::Println("first byte: {digest.at(0).or(zero)}")
 }
 ```
 
-## Server Example
-
-### Simple HTTP Server
-
-Basic HTTP server using the `ard/http` module:
+## Direct Go Variadic Calls
 
 ```ard
-use ard/http
-use ard/io
+use go:fmt
 
 fn main() {
-  io::print("Starting server on port 3000...")
-
-  let routes: [Str:http::HandlerFn] = [
-    "/": fn(req: http::Request, res: mut http::Response) {
-      res.body = "Welcome to Ard server!"
-    },
-    "/about": fn(req: http::Request, res: mut http::Response) {
-      let path = req.path().or("/")
-      res.body = "About page from {path}"
-    },
-    "/echo": fn(req: http::Request, res: mut http::Response) {
-      let path = req.path().or("/")
-      res.body = "You requested: {path}"
-    }
-  ]
-
-  http::serve(3000, routes).expect("Failed to start server")
+  fmt::Println()
+  fmt::Println("count", 3, "ready", true)
 }
 ```
-
-## Pattern Matching Examples
-
-### State Machine
-
-Using enums and pattern matching for state management:
-
-```ard
-use ard/io
-
-enum TrafficLight {
-  red,
-  yellow,
-  green
-}
-
-fn next_light(current: TrafficLight) TrafficLight {
-  match current {
-    TrafficLight::red => TrafficLight::green
-    TrafficLight::yellow => TrafficLight::red
-    TrafficLight::green => TrafficLight::yellow
-  }
-}
-
-fn light_duration(light: TrafficLight) Int {
-  match light {
-    TrafficLight::red => 30
-    TrafficLight::yellow => 5
-    TrafficLight::green => 25
-  }
-}
-
-fn main() {
-  mut current = TrafficLight::red
-  
-  for cycle in 1..10 {
-    let duration = light_duration(current)
-    let name = match current {
-      TrafficLight::red => "RED"
-      TrafficLight::yellow => "YELLOW"
-      TrafficLight::green => "GREEN"
-    }
-    
-    io::print("Cycle {cycle.to_str()}: {name} light for {duration.to_str()} seconds")
-    current = next_light(current)
-  }
-}
-```
-
-These examples demonstrate the core features of Ard and common programming patterns. Each example focuses on specific language features while solving practical problems.

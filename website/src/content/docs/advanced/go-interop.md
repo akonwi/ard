@@ -41,6 +41,21 @@ Raw Go pointer syntax does not appear in Ard source. Use Ard's mutable-reference
 - `gohttp::Response` lowers to `http.Response`
 - `mut gohttp::Response` lowers to `*http.Response`
 
+## Go Arrays, Slices, and Maps
+
+Go slices map to Ard lists (`[T]`), Go maps map to Ard maps (`[K:V]`), and Go fixed-size arrays map to Ard fixed-size arrays (`[T; N]`). The length is part of a fixed array's type, just like in Go.
+
+```ard
+use go:crypto/sha256
+
+mut bytes = "hello".bytes()
+let digest: [Byte; 32] = sha256::Sum256(bytes)
+let zero: Byte = 0
+let first = digest.at(0).or(zero)
+```
+
+Ard does not implicitly convert through containers. If a Go API needs `[Byte]` and you have `[Int]`, write the transformation explicitly with `Byte::from(...)` so allocation and truncation are visible in source.
+
 ## Numeric Conversions
 
 `T::from(value)` converts a numeric value into a bare sized scalar (`Int64`,
@@ -71,6 +86,20 @@ Uint8::from(300) // error: Integer literal 300 overflows Uint8
 Numeric literals already adopt a foreign scalar type directly in arithmetic and
 annotated bindings (`let d: time::Duration = 5 * time::Millisecond`); `from` is
 for converting **runtime** values.
+
+## Variadic Calls
+
+Direct Go variadic functions and methods can be called with repeated trailing arguments. Ard expands those arguments at the Go call site.
+
+```ard
+use go:fmt
+
+fmt::Println()
+fmt::Println("hello")
+fmt::Println("hello", 42, true)
+```
+
+Ard does not currently have spread syntax (`args...`) or Ard-native variadic function declarations. Forwarding an existing list to a Go variadic parameter still needs a Go helper or an explicit wrapper.
 
 ## Go Interfaces
 
@@ -208,5 +237,5 @@ Direct Go interop is intentionally incremental. Current limitations include:
 
 - embedded/promoted Go fields are not resolved through promotion;
 - Ard functions and closures cannot implement Go callback-shaped interfaces directly yet;
-- callbacks, variadics, and many compound Go shapes still need companion wrappers;
+- spread/forwarding for Go variadics still needs companion wrappers;
 - generic Go struct construction is not supported yet.

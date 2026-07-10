@@ -96,7 +96,7 @@ fn process(data: Str, options: Options?) {
   // Process with options
 }
 
-// Automatically wraps the provided value in maybe::some
+// Automatically wraps the provided value in Maybe
 process("data", Options{verbose: true})
 
 // Omits the parameter (becomes none)

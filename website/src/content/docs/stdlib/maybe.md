@@ -12,14 +12,14 @@ Maybe provides:
 - **Type safety** to prevent null pointer errors at compile time
 
 ```ard
-use ard/io
+use go:fmt
 
 fn main() {
   let maybe_name: Str? = Maybe::new("Alice")
   
   match maybe_name {
-    name => io::print("Hello, {name}"),
-    _ => io::print("Hello, stranger")
+    name => fmt::Println("Hello, {name}"),
+    _ => fmt::Println("Hello, stranger")
   }
 }
 ```
@@ -161,14 +161,14 @@ current.is_none() // true
 Use `match` expressions to safely handle optional values:
 
 ```ard
-use ard/io
+use go:fmt
 
 fn main() {
   let maybe_age: Int? = Maybe::new(30)
   
   match maybe_age {
-    age => io::print("Age: {age.to_str()}"),
-    _ => io::print("Age unknown")
+    age => fmt::Println("Age: {age.to_str()}"),
+    _ => fmt::Println("Age unknown")
   }
 }
 ```
@@ -182,15 +182,16 @@ When a `Maybe` value is matched:
 ### Check for Presence
 
 ```ard
-use ard/io
+use go:fmt
 
 fn main() {
   let email: Str? = Maybe::new()
   
   if email.is_some() {
-    io::print("Email: {email.or("")}")
+    let address = email.or("unknown")
+    fmt::Println("Email: {address}")
   } else {
-    io::print("No email provided")
+    fmt::Println("No email provided")
   }
 }
 ```
@@ -213,14 +214,14 @@ Nullable struct fields accept unwrapped values directly — they are automatical
 ```ard
 struct User {
   name: Str,
-  bio: Str?
+  bio: Str?,
 }
 
 fn main() {
   // bio is automatically wrapped in Maybe::new()
-  let user = User {
+  let user = User{
     name: "Alice",
-    bio: "Software engineer"
+    bio: "Software engineer",
   }
   
   match user.bio {
@@ -237,7 +238,7 @@ fn main() {
 ### Chain Operations with Maybe
 
 ```ard
-use ard/io
+use go:fmt
 
 fn get_user_name(user_id: Int) Str? {
   if user_id == 1 {
@@ -249,7 +250,7 @@ fn get_user_name(user_id: Int) Str? {
 
 fn main() {
   let name = get_user_name(1)
-  io::print(name.or("Unknown user"))
+  fmt::Println(name.or("Unknown user"))
 }
 ```
 
