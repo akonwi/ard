@@ -232,10 +232,6 @@ export default defineConfig({
             },
           ],
         },
-        {
-          label: "Examples",
-          items: [{ label: "Code Samples", slug: "examples/samples" }],
-        },
       ],
     }),
   ],
