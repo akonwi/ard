@@ -213,13 +213,23 @@ export default defineConfig({
         {
           label: "Standard Library",
           items: [
-            { label: "ard/async", slug: "stdlib/async" },
-            { label: "ard/list", slug: "stdlib/list" },
-            { label: "ard/map", slug: "stdlib/map" },
-            { label: "Maybe", slug: "stdlib/maybe" },
-            { label: "ard/result", slug: "stdlib/result" },
-            { label: "ard/testing", slug: "stdlib/testing" },
-            { label: "ard/unsafe", slug: "stdlib/unsafe" },
+            {
+              label: "Types",
+              items: [
+                { label: "Maybe", slug: "stdlib/maybe" },
+                { label: "Result", slug: "stdlib/result" },
+              ],
+            },
+            {
+              label: "Modules",
+              items: [
+                { label: "ard/async", slug: "stdlib/async" },
+                { label: "ard/list", slug: "stdlib/list" },
+                { label: "ard/map", slug: "stdlib/map" },
+                { label: "ard/testing", slug: "stdlib/testing" },
+                { label: "ard/unsafe", slug: "stdlib/unsafe" },
+              ],
+            },
           ],
         },
         {
