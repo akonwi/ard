@@ -216,6 +216,9 @@ export default defineConfig({
             {
               label: "Types",
               items: [
+                { label: "Array", slug: "stdlib/fixed-array-type" },
+                { label: "List", slug: "stdlib/list-type" },
+                { label: "Map", slug: "stdlib/map-type" },
                 { label: "Maybe", slug: "stdlib/maybe" },
                 { label: "Result", slug: "stdlib/result" },
               ],
