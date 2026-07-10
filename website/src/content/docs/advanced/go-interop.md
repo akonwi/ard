@@ -20,6 +20,47 @@ use go:net/http as gohttp
 
 A project that imports Go packages relies on the project's `go.mod`. Add Go dependencies with ordinary Go tooling, such as `go get`, before building the Ard project.
 
+## Project FFI Bindings
+
+When a Go API needs adaptation before it is pleasant or safe to use from Ard, put a small Go package under your project's `ffi/` directory and import that package with `use go:`. The import path uses your Go module path, or the Ard project name when the compiler generates a minimal Go module.
+
+```
+my_app/
+├── ard.toml
+├── go.mod
+├── main.ard
+└── ffi/
+    └── env.go
+```
+
+```go
+// ffi/env.go
+package ffi
+
+import (
+	"fmt"
+	"os"
+)
+
+func RequiredEnv(name string) (string, error) {
+	value, ok := os.LookupEnv(name)
+	if !ok {
+		return "", fmt.Errorf("missing environment variable: %s", name)
+	}
+	return value, nil
+}
+```
+
+```ard
+use go:my_app/ffi
+
+fn home_dir() Str!Str {
+  ffi::RequiredEnv("HOME")
+}
+```
+
+Project-local Go packages exposed to Ard should live under `ffi/`. Keep these packages small and use them to translate Go-specific shapes into Ard-facing APIs when direct imports are not enough.
+
 ## Direct Go Types
 
 Exported Go named types can appear directly in Ard signatures and fields.

@@ -207,7 +207,7 @@ export default defineConfig({
             { label: "Traits", slug: "advanced/traits" },
             { label: "Generics", slug: "advanced/generics" },
             { label: "Async Programming", slug: "advanced/async" },
-            { label: "Direct Go Interop", slug: "advanced/go-interop" },
+            { label: "Go Interop", slug: "advanced/go-interop" },
           ],
         },
         {
