@@ -18,7 +18,13 @@ struct Person {
 ## Creating Struct Instances
 
 ```ard
-let person = Person {
+struct Person {
+  name: Str,
+  age: Int,
+  email: Str,
+}
+
+let person = Person{
   name: "Alice",
   age: 30,
   email: "alice@example.com",
@@ -30,9 +36,18 @@ let person = Person {
 Use dot notation to access struct fields:
 
 ```ard
+use go:fmt
+
+struct Person {
+  name: Str,
+  age: Int,
+}
+
+let person = Person{name: "Alice", age: 30}
+
 let name = person.name        // "Alice"
 let age = person.age          // 30
-io::print("Hello, {person.name}!")
+fmt::Println("Hello, {person.name}!")
 ```
 
 ## Nullable Fields
@@ -47,13 +62,13 @@ struct Config {
 }
 
 // Omit nullable fields — they become none
-let config = Config{name: "app"}
+let default_config = Config{name: "app"}
 
 // Provide values directly — they are automatically wrapped
-let config = Config{name: "app", timeout: 30, retries: 3}
+let custom = Config{name: "app", timeout: 30, retries: 3}
 
 // You can still use Maybe::new() explicitly if you prefer
-let config = Config{name: "app", timeout: Maybe::new(30)}
+let explicit = Config{name: "app", timeout: Maybe::new(30)}
 ```
 
 This is the same implicit wrapping behavior available for [nullable function parameters](/guide/functions#nullable-parameters).
@@ -90,6 +105,11 @@ impl Rectangle {
 Within methods, use `self` to reference the current instance's fields:
 
 ```ard
+struct Person {
+  name: Str,
+  age: Int,
+}
+
 impl Person {
   fn get_intro() Str {
     "My name is {self.name} and I am {self.age} years old"
@@ -106,6 +126,11 @@ impl Person {
 Because Ard requires explicit data mutation, methods that can change the struct must be marked as mutating, with the `mut` keyword after `fn`.
 
 ```ard
+struct Person {
+  name: Str,
+  age: Int,
+}
+
 impl Person {
   fn mut grow_older() {
     self.age =+ 1
@@ -117,11 +142,22 @@ This method signature signals helps the compiler enforce the immutability constr
 Mutating methods can only be called on mutable instances.
 
 ```ard
-let alice = Person {...}
-alice.grow_older() // Cannot mutate immutable 'alice'
+struct Person {
+  name: Str,
+  age: Int,
+}
 
-mut alice = Person {...}
-alice.grow_older() // Ok
+impl Person {
+  fn mut grow_older() {
+    self.age =+ 1
+  }
+}
+
+mut bob = Person{name: "Bob", age: 30}
+bob.grow_older() // Ok
+
+let alice = Person{name: "Alice", age: 30}
+// alice.grow_older() would be an error: cannot mutate immutable 'alice'
 ```
 
 ## Method Privacy
@@ -129,13 +165,17 @@ alice.grow_older() // Ok
 Methods can be made private with the `private` keyword:
 
 ```ard
-impl User {
-  fn get_display_name() Str {
-    format_name(self.username) // Calls private method
-  }
+struct User {
+  username: Str,
+}
 
+impl User {
   private fn format_name(name: Str) Str {
     "User: {name}"
+  }
+
+  fn get_display_name() Str {
+    self.format_name(self.username) // Calls private method
   }
 }
 ```
@@ -152,13 +192,13 @@ The most common use of static functions is for constructors or factory helpers.
 
 ```ard
 struct Todo {
-  title: Str
-  completed: Bool
+  title: Str,
+  completed: Bool,
 }
 
 // Static constructor function
 fn Todo::new(title: Str) Todo {
-  Todo { title: title, completed: false }
+  Todo{title: title, completed: false}
 }
 
 let todo = Todo::new("Learn Ard")

@@ -1,16 +1,16 @@
 ---
-title: Ard Language
+title: Ard
 description: Ard is a modern, programming language designed for legibility, simplicity, and type-safety.
 template: splash
 hero:
-  tagline: A Really Dope Language
+  tagline: A general-purpose programming language designed for legibility, simplicity, and type-safety
   image:
     alt: Ard Logo
     dark: ../../assets/logo.webp
     light: ../../assets/logo-bordered.png
   actions:
-    - text: Learn More
-      link: /getting-started/introduction/
+    - text: Get Started
+      link: /getting-started/installation/
       icon: right-arrow
     - text: View on GitHub
       link: https://github.com/akonwi/ard
@@ -20,47 +20,63 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## What is Ard?
-
-Ard is a general-purpose programming language designed for legibility, simplicity, and type-safety.
-It combines elements from JavaScript, Swift, Go, and Rust.
-
 <CardGrid>
 	<Card title="Readable" icon="pencil">
-		Ard code should be easy to read and understand with clear, expressive syntax designed for readability.
+		Ard code is easy to read and understand with clear, expressive syntax designed for readability.
 	</Card>
 	<Card title="Simple" icon="approve-check">
-		There should be one obvious way to do things. Ard follows Go's philosophy for left-to-right readability.
+		There should be one obvious way to do things. 
 	</Card>
 	<Card title="Safe" icon="warning">
-		The compiler catches type errors and there are no unexpected runtime failures.
+	  Type errors are caught at compile time and runtime errors are handled as values.
 	</Card>
 	<Card title="Reliable" icon="star">
-		Built on Go's runtime, making it fast and efficient.
+		Ard compiles to Go, making it fast, efficient, and portable.
 	</Card>
 </CardGrid>
 
-## Quick Example
+## Example
 
 ```ard
-use ard/io
+use go:fmt
 
 fn main() {
   mut numbers: [Int] = []
-  io::print("numbers.size = {numbers.size()}")
+  fmt::Println("numbers.size = {numbers.size()}")
 
-  io::print("adding numbers from 0 to 10")
+  fmt::Println("adding numbers from 0 to 10")
   for i in 0..10 {
     numbers.push(i)
   }
 
-  io::print("numbers.size = {numbers.size()}")
+  fmt::Println("numbers.size = {numbers.size()}")
   for n in numbers {
-    io::print(n)
+    fmt::Println(n)
   }
 
-  io::print("7th element = {numbers.at(6)}")
+  fmt::Println("7th element = {numbers.at(6)}")
 }
 ```
 
-Read the [introduction guide](/getting-started/introduction/) to learn more.
+## Philosophy
+
+Ard combines elements from JavaScript, Swift, Go, and Rust. It follows Go's philosophy for readability from left to right, rather than the usual spiraling syntax found in C-based languages ([read more](https://c-faq.com/decl/spiral.anderson.html)).
+
+### No Exceptions
+
+Ard does not have exceptions. Instead, errors are represented as values using the built-in `Result<$Val, $Err>` type.
+This approach makes error handling explicit and facilitates fault-tolerant programming.
+
+### Static Typing with Inference
+
+Variables and functions are statically typed. The compiler can also infer types in most cases, reducing verbosity while maintaining safety.
+
+### Explicit Mutability
+
+Variables and data structures are immutable by default and must be marked as mutable to prevent unwanted data mutations.
+
+### No Return Keyword
+
+Without return keywords, the returned value of a function is always the last expression when a function signature states the return type.
+
+[Learn More](/guide/overview/).

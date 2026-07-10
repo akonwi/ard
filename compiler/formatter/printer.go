@@ -104,9 +104,6 @@ func importGroup(item parse.Import) int {
 	if strings.HasPrefix(item.Path, "ard/") {
 		return 0
 	}
-	if strings.HasPrefix(item.Path, "./") || strings.HasPrefix(item.Path, "../") {
-		return 2
-	}
 	return 1
 }
 

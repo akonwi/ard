@@ -10,7 +10,7 @@ typed channels. There are no `async`/`await` keywords and no promises. Instead,
 two small primitives compose into everything else:
 
 - [`ard/async`](/stdlib/async/) starts goroutines.
-- [channels](/stdlib/channel/) passes typed values between them.
+- Built-in channels (`Chan<T>`, `Receiver<T>`, and `Sender<T>`) pass typed values between them.
 
 Waiting for completion, returning results, joining a set of tasks, fan-in, and
 timeouts are all written in ordinary Ard on top of these — not baked into the

@@ -20,6 +20,47 @@ use go:net/http as gohttp
 
 A project that imports Go packages relies on the project's `go.mod`. Add Go dependencies with ordinary Go tooling, such as `go get`, before building the Ard project.
 
+## Project FFI Bindings
+
+When a Go API needs adaptation before it is pleasant or safe to use from Ard, put a small Go package under your project's `ffi/` directory and import that package with `use go:`. The import path uses your Go module path, or the Ard project name when the compiler generates a minimal Go module.
+
+```
+my_app/
+├── ard.toml
+├── go.mod
+├── main.ard
+└── ffi/
+    └── env.go
+```
+
+```go
+// ffi/env.go
+package ffi
+
+import (
+	"fmt"
+	"os"
+)
+
+func RequiredEnv(name string) (string, error) {
+	value, ok := os.LookupEnv(name)
+	if !ok {
+		return "", fmt.Errorf("missing environment variable: %s", name)
+	}
+	return value, nil
+}
+```
+
+```ard
+use go:my_app/ffi
+
+fn home_dir() Str!Str {
+  ffi::RequiredEnv("HOME")
+}
+```
+
+Project-local Go packages exposed to Ard should live under `ffi/`. Keep these packages small and use them to translate Go-specific shapes into Ard-facing APIs when direct imports are not enough.
+
 ## Direct Go Types
 
 Exported Go named types can appear directly in Ard signatures and fields.
@@ -40,6 +81,21 @@ Raw Go pointer syntax does not appear in Ard source. Use Ard's mutable-reference
 
 - `gohttp::Response` lowers to `http.Response`
 - `mut gohttp::Response` lowers to `*http.Response`
+
+## Go Arrays, Slices, and Maps
+
+Go slices map to Ard lists (`[T]`), Go maps map to Ard maps (`[K:V]`), and Go fixed-size arrays map to Ard fixed-size arrays (`[T; N]`). The length is part of a fixed array's type, just like in Go.
+
+```ard
+use go:crypto/sha256
+
+mut bytes = "hello".bytes()
+let digest: [Byte; 32] = sha256::Sum256(bytes)
+let zero: Byte = 0
+let first = digest.at(0).or(zero)
+```
+
+Ard does not implicitly convert through containers. If a Go API needs `[Byte]` and you have `[Int]`, write the transformation explicitly with `Byte::from(...)` so allocation and truncation are visible in source.
 
 ## Numeric Conversions
 
@@ -71,6 +127,20 @@ Uint8::from(300) // error: Integer literal 300 overflows Uint8
 Numeric literals already adopt a foreign scalar type directly in arithmetic and
 annotated bindings (`let d: time::Duration = 5 * time::Millisecond`); `from` is
 for converting **runtime** values.
+
+## Variadic Calls
+
+Direct Go variadic functions and methods can be called with repeated trailing arguments. Ard expands those arguments at the Go call site.
+
+```ard
+use go:fmt
+
+fmt::Println()
+fmt::Println("hello")
+fmt::Println("hello", 42, true)
+```
+
+Ard does not currently have spread syntax (`args...`) or Ard-native variadic function declarations. Forwarding an existing list to a Go variadic parameter still needs a Go helper or an explicit wrapper.
 
 ## Go Interfaces
 
@@ -208,5 +278,5 @@ Direct Go interop is intentionally incremental. Current limitations include:
 
 - embedded/promoted Go fields are not resolved through promotion;
 - Ard functions and closures cannot implement Go callback-shaped interfaces directly yet;
-- callbacks, variadics, and many compound Go shapes still need companion wrappers;
+- spread/forwarding for Go variadics still needs companion wrappers;
 - generic Go struct construction is not supported yet.

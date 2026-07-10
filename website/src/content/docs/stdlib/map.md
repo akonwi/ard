@@ -1,82 +1,31 @@
 ---
-title: Map Operations with ard/map
-description: Work with maps using utility functions from the ard/map module.
+title: ard/map
+description: Helper for creating empty string-keyed maps.
 ---
 
-The `ard/map` module provides utility functions for working with maps.
+The `ard/map` module currently provides one helper for creating empty maps with `Str` keys.
 
-:::note
-The `ard/map` module is a prelude module. It is automatically imported and aliased as `Map` in all programs, allowing methods to be accessed with the `Map::` namespace (e.g., `Map::new()`).
-:::
-
-The map module provides:
-- **Map creation** with `Map::new()` for easily initializing empty maps
+Import it explicitly when needed:
 
 ```ard
 use ard/map
-
-fn main() {
-  let config: [Str:Str] = Map::new()
-}
 ```
 
 ## API
 
-### `fn new() [Str:$V]`
+### `new() [Str: $V]`
 
-Create a new empty map with string keys. The value type must be explicitly specified.
-
-```ard
-use ard/map
-
-// Create an empty string-to-string map
-let map1: [Str:Str] = Map::new()
-
-// Create an empty string-to-int map
-let map2: [Str:Int] = Map::new()
-```
-
-## Examples
-
-### Initialize an Empty Map
-
-```ard
-use ard/map
-use ard/io
-
-fn main() {
-  let config: [Str:Str] = Map::new()
-  config.set("host", "localhost")
-  config.set("port", "8080")
-  
-  io::print(config.at("host"))  // localhost
-}
-```
-
-### Build a Configuration Map
+Create a new empty map with `Str` keys and values of type `$V`. The value type is usually inferred from the assignment context.
 
 ```ard
 use ard/map
 
-fn main() {
-  let settings: [Str:Str] = Map::new()
-  settings.set("theme", "dark")
-  settings.set("language", "en")
-  settings.set("timezone", "UTC")
-}
+let labels: [Str: Str] = map::new()
+let counts: [Str: Int] = map::new()
 ```
 
-### Create a Lookup Table
+This is equivalent to an empty map literal with an explicit type:
 
 ```ard
-use art/map
-
-fn main() {
-  let status_codes: [Str:Int] = Map::new()
-  status_codes.set("ok", 200)
-  status_codes.set("created", 201)
-  status_codes.set("bad_request", 400)
-  status_codes.set("unauthorized", 401)
-  status_codes.set("not_found", 404)
-}
+let labels: [Str: Str] = [:]
 ```

@@ -3,200 +3,179 @@ title: Modules
 description: Learn about Ard's module system, imports, and code organization.
 ---
 
-## Module Basics
-
-Each Ard file is a module that can be either a runnable program or used by other modules. Imports are declared at the top of files using the `use` keyword.
+Each Ard file is a module. A file with a `main` function can be run as a program; other files can be imported by path.
 
 ```ard
-use ard/io
-use my_project/utils as helpers
+use go:fmt
+use my_calculator/math/operations as ops
 
 fn main() {
-  io::print("Hello from main module")
-  helpers::calculate(42)
+  let result = ops::add(5, 3)
+  fmt::Println("Result: {result}")
 }
 ```
 
-A module with a `main` function is a program and can be run with `ard run [path]`.
+Run a program with:
+
+```sh
+ard run main.ard
+```
 
 ## Import Syntax
 
-The basic import syntax uses absolute paths from the project root:
+Use `use` at the top of a file:
 
 ```ard
 use path/to/module
 use path/to/module as alias
 ```
 
-By default, the imported module is available with the last segment of the path as the name. Use `as` to provide a custom name.
+By default, an imported Ard module is referenced by the last segment of its path.
 
-## Standard Library
-
-The Ard standard library consists of modules under the `ard/*` path:
+Go packages use the same `use` syntax with a `go:` prefix:
 
 ```ard
-use ard/io          // Input/output functions
-use ard/json        // JSON parsing and serialization
-use ard/http        // HTTP client functionality
-use ard/async       // Asynchronous programming
+use go:fmt
+use go:strings
+use go:net/http as gohttp
+```
+
+The imported Go package is available as a namespace, not as an Ard module.
+
+## Standard Library Imports
+
+Ard's standard library modules start with the `ard/` prefix:
+
+```ard
+use ard/list        // List helpers
+use ard/map         // Map helpers
+use ard/testing     // Test assertions
+use ard/unsafe      // Interop escape hatches
 ```
 
 ## Project Structure
 
-Project import paths are absolute from the project root, determined by the presence of an `ard.toml` file. Dependency import paths are absolute from the package that declares the dependency; see the [Dependencies](/guide/dependencies/) guide for lockfile and cache workflow details.
+Project import paths are absolute from the package root. The package root is determined by the nearest `ard.toml`; if no manifest exists, Ard uses the root directory name as the package name.
 
 ```
 my_calculator/
-├── ard.toml          # Project configuration
-├── main.ard          # Entry point
-├── utils.ard         # Utility functions
+├── ard.toml
+├── main.ard
+├── utils.ard
 └── math/
-    └── operations.ard # Math operations
+    └── operations.ard
 ```
 
-### Project Configuration
-
-The `ard.toml` file defines the project:
+A minimal `ard.toml` looks like this:
 
 ```toml
 name = "my_calculator"
-ard = ">= 0.13.0"
+ard = ">= 0.0.0"
 ```
 
-If no `ard.toml` file is present, the project name defaults to the root directory name.
-
-## Import Examples
-
-With the above project structure:
+With that structure, `main.ard` can import sibling modules by package path:
 
 ```ard
-// In main.ard
 use my_calculator/utils
 use my_calculator/math/operations
 
 fn main() {
   let result = operations::add(5, 3)
-  utils::log("Calculation complete")
+  utils::log("Calculation complete: {result}")
 }
 ```
 
 ```ard
-// In utils.ard
-use ard/io
+// utils.ard
+use go:fmt
 
 fn log(message: Str) {
-  io::print("[LOG] {message}")
-}
-
-fn format_number(num: Int) Str {
-  "Number: {num.to_str()}"
+  fmt::Println("[LOG] {message}")
 }
 ```
 
 ```ard
-// In math/operations.ard
+// math/operations.ard
 fn add(a: Int, b: Int) Int {
   a + b
 }
 
-fn multiply(a: Int, b: Int) Int {
-  a * b
-}
-
 fn divide(a: Int, b: Int) Int!Str {
   match b == 0 {
-    true => Result::err("Division by zero")
+    true => Result::err("division by zero")
     false => Result::ok(a / b)
   }
 }
 ```
 
+For dependencies and lockfile behavior, see the [Dependencies](/guide/dependencies/) guide.
+
 ## Public and Private Declarations
 
-### Functions, Structs, Enums, and Traits
-
-By default, functions, structs, enums, and traits are public and accessible from other modules:
+Functions, structs, enums, traits, and immutable top-level variables are public by default. Use `private` to keep a declaration module-local.
 
 ```ard
-// In utils.ard
-fn helper_function() Str {  // Public
-  "This can be called from other modules"
+// utils.ard
+fn public_name() Str {
+  private_name()
 }
 
-struct Config {  // Public
-  name: Str
+private fn private_name() Str {
+  "internal"
+}
+
+struct Config {
+  name: Str,
+}
+
+private struct InternalConfig {
+  secret: Str,
 }
 ```
 
-Use the `private` keyword to make these declarations module-local:
+Mutable top-level variables are private by default because they represent shared mutable module state.
 
 ```ard
-// In utils.ard
-fn public_function() Str {
-  private_helper()  // OK: same module
-}
+// constants.ard
+let API_URL = "https://api.example.com"  // public
+let MAX_RETRIES = 3                      // public
 
-private fn private_helper() Str {  // Private
-  "This cannot be called from other modules"
-}
-
-private struct InternalConfig {  // Private
-  secret: Str
-}
+mut internal_counter = 0                 // private
+mut debug_mode = false                   // private
 ```
 
-### Variables
-
-Variables have different privacy rules based on mutability:
-
-- **Immutable variables** (`let`) are **public by default**
-- **Mutable variables** (`mut`) are **private by default**
+From another module, only public declarations are accessible:
 
 ```ard
-// In constants.ard
-let API_URL = "https://api.example.com"  // Public (immutable)
-let MAX_RETRIES = 3                      // Public (immutable)
-
-mut internal_counter = 0                 // Private (mutable)
-mut debug_mode = false                   // Private (mutable)
-```
-
-Usage from another module:
-
-```ard
-// In main.ard
-use my_project/constants
+use my_calculator/constants
 
 fn main() {
-  // Access public immutable variables
-  let url = constants::API_URL           // ✅ Works
-  let max = constants::MAX_RETRIES       // ✅ Works
-  
-  // Cannot access private mutable variables
-  // let counter = constants::internal_counter  // ❌ Error
+  let url = constants::API_URL
+  let max = constants::MAX_RETRIES
+
+  // Not accessible from outside constants.ard:
+  // let counter = constants::internal_counter
 }
 ```
 
-## Struct Field Visibility
+## Struct Fields and Methods
 
-Struct fields are always public if the struct is public.
+Fields of a public Ard struct are public. Methods are public by default and can be marked `private`.
 
 ```ard
-// In user.ard
 struct User {
-  id: Int          // Public
-  username: Str    // Public
-  email: Str       // Public
+  id: Int,
+  username: Str,
+  email: Str,
 }
 
-// Methods can be private
 impl User {
-  fn get_display_name() Str {  // Public
-    format_name(self.username) // Calls private method
+  private fn format_name(name: Str) Str {
+    "User: {name}"
   }
 
-  private fn format_name(name: Str) Str {  // Private
-    "User: {name}"
+  fn display_name() Str {
+    self.format_name(self.username)
   }
 }
 ```

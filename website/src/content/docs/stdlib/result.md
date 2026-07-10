@@ -1,145 +1,99 @@
 ---
-title: Error Handling with ard/result
-description: Work with success and error values using the ard/result module.
+title: ard/result
+description: Constructors and methods for explicit success-or-error values.
 ---
 
-The `ard/result` module provides functions for working with results that can be either a success value or an error. The `Result` type represents the outcome of an operation that may fail.
-
-:::note
-The `ard/result` module is a prelude module. It is automatically imported and aliased as `Result` in all programs, allowing methods to be accessed with the `Result::` namespace (e.g., `Result::ok()`, `Result::err()`).
-:::
-
-The result module provides:
-- **Success values** with `Result::ok()`
-- **Error values** with `Result::err()`
-- **Type safety** for error handling without exceptions
-- **Result syntax sugar** with the `!` operator (e.g., `Int!Str` is equivalent to `Result<Int, Str>`)
+Ard represents recoverable errors as values with `Result`, commonly written with `!` syntax:
 
 ```ard
-use ard/result
-use ard/io
-
 fn divide(a: Int, b: Int) Int!Str {
   if b == 0 {
-    Result::err("Cannot divide by zero")
+    Result::err("division by zero")
   } else {
     Result::ok(a / b)
   }
 }
-
-fn main() {
-  match divide(10, 2) {
-    ok(result) => io::print(result.to_str()),
-    err(error) => io::print("Error: {error}")
-  }
-}
 ```
 
-## API
+`Result` is available from the prelude. You can also import `ard/result` when you want the module namespace explicitly.
 
-### `fn ok(val: $T) Result<$T, $E>`
+## Constructors
 
-Create a successful Result containing the given value.
+### `Result::ok(val: $T) $T!$E`
+
+Create a successful result.
 
 ```ard
-use ard/result
-
 let result: Int!Str = Result::ok(42)
 ```
 
-### `fn err(err: $E) Result<$T, $E>`
+### `Result::err(err: $E) $T!$E`
 
-Create a failed Result containing the given error.
+Create a failed result.
 
 ```ard
-use ard/result
-
-let result: Int!Str = Result::err("Something went wrong")
+let result: Int!Str = Result::err("failed")
 ```
 
-## Result Type Methods
+## Methods
 
-All `Result` types have the following methods:
+### `is_ok() Bool`
 
-### `fn is_ok() Bool`
-
-Check if the Result is a success.
+Return `true` when the result is successful.
 
 ```ard
-use ard/result
-
-let result: Int!Str = Result::ok(42)
 if result.is_ok() {
   // success
 }
 ```
 
-### `fn is_err() Bool`
+### `is_err() Bool`
 
-Check if the Result is an error.
+Return `true` when the result is an error.
 
 ```ard
-use ard/result
-
-let result: Int!Str = Result::err("failed")
 if result.is_err() {
   // error
 }
 ```
 
-### `fn or(default: $T) $T`
+### `expect(message: Str) $T`
 
-Get the success value, or return a default if the Result is an error.
-
-```ard
-use ard/result
-
-let result: Int!Str = Result::err("failed")
-let value = result.or(0)  // 0
-```
-
-### `fn expect(message: Str) $T`
-
-Get the success value, or panic with a message if the Result is an error.
+Return the success value or fail with `message`.
 
 ```ard
-use ard/result
-
-let result: Int!Str = Result::ok(42)
-let value = result.expect("Expected success")  // 42
+let value = result.expect("expected success")
 ```
 
-### `fn map(with: fn($T) $U) $U!$E`
+### `or(default: $T) $T`
 
-Transform the `ok` value with a function that **returns a plain value**. The result is automatically wrapped in `ok(...)`. If the Result is an error, the callback is not called and the error passes through unchanged.
+Return the success value or `default`.
 
-Use `map` when the transformation itself cannot fail.
+```ard
+let value = result.or(0)
+```
+
+### `map(with: fn($T) $U) $U!$E`
+
+Transform the success value while preserving errors.
 
 ```ard
 let result: Int!Str = Result::ok(21)
-let doubled = result.map(fn(v) { v * 2 })
-let value = doubled.or(0) // 42
-
-// Errors pass through untouched
-let err: Int!Str = Result::err("bad")
-err.map(fn(v) { v * 2 }).is_err() // true
+let doubled = result.map(fn(v: Int) Int { v * 2 })
 ```
 
-### `fn map_err(with: fn($E) $F) $T!$F`
+### `map_err(with: fn($E) $F) $T!$F`
 
-Transform the `err` value while preserving the same success type. The counterpart to `map` for the error side.
+Transform the error value while preserving success values.
 
 ```ard
 let result: Int!Str = Result::err("bad")
-let sized = result.map_err(fn(err) { err.size() })
-sized.is_err() // true (type is Int!Int)
+let sized = result.map_err(fn(err: Str) Int { err.size() })
 ```
 
-### `fn and_then(with: fn($T) $U!$E) $U!$E`
+### `and_then(with: fn($T) $U!$E) $U!$E`
 
-Chain operations that **return a Result themselves** (also known as `flat_map` in other languages). Unlike `map`, the callback is responsible for wrapping its return value in `ok(...)` or `err(...)`. This lets the callback itself decide whether to succeed or fail.
-
-Use `and_then` when the next step can produce its own error.
+Chain another operation that can fail.
 
 ```ard
 fn ensure_even(num: Int) Int!Str {
@@ -149,163 +103,28 @@ fn ensure_even(num: Int) Int!Str {
   }
 }
 
-let res: Int!Str = Result::ok(20)
-let checked = res.and_then(ensure_even)
-checked.is_ok() // true
-
-// The callback can fail, unlike map:
-let odd: Int!Str = Result::ok(21)
-odd.and_then(ensure_even).is_err() // true — "not even"
+let checked = Result::ok(20).and_then(ensure_even)
 ```
 
-You can provide explicit type arguments to guide inference when needed:
+## Pattern matching
+
+Use `match` to handle both cases:
 
 ```ard
-let as_text = res.and_then<Str>(fn(v) { Result::ok("{v}") })
-```
-
-## Pattern Matching with Result
-
-Use `match` expressions to handle both success and error cases:
-
-```ard
-use ard/result
-use ard/io
-
-fn main() {
-  let result: Int!Str = Result::ok(42)
-  
-  match result {
-    ok(value) => io::print("Success: {value.to_str()}"),
-    err(error) => io::print("Error: {error}")
-  }
+match divide(10, 2) {
+  ok(value) => value,
+  err(message) => 0,
 }
 ```
 
-## Result Syntax Sugar
+## Error propagation with `try`
 
-Results can be written in two equivalent ways:
-
-```ard
-// Verbose form
-fn divide_verbose(a: Int, b: Int) Result<Int, Str> { ... }
-
-// Concise form using ! syntax
-fn divide_concise(a: Int, b: Int) Int!Str { ... }
-```
-
-Both forms are identical. The `!` syntax is more readable for simple result types.
-
-## Error Propagation with try
-
-Use the `try` keyword to propagate errors to the caller:
+`try` unwraps an `ok` value. If the result is an error, the current function returns that error immediately.
 
 ```ard
-use ard/result
-
-fn divide(a: Int, b: Int) Int!Str {
-  if b == 0 {
-    Result::err("Cannot divide by zero")
-  } else {
-    Result::ok(a / b)
-  }
-}
-
 fn add_and_divide(a: Int, b: Int, divisor: Int) Int!Str {
   let sum = a + b
   let result = try divide(sum, divisor)
   Result::ok(result + 10)
-}
-
-fn main() {
-  match add_and_divide(5, 5, 2) {
-    ok(value) => io::print(value.to_str()),
-    err(error) => io::print(error)
-  }
-}
-```
-
-The `try` keyword unwraps the Result. If it's an error, the entire function returns that error immediately.
-
-## Examples
-
-### Simple Error Handling
-
-```ard
-use ard/result
-use ard/io
-
-fn main() {
-  let result: Int!Str = Result::ok(42)
-  
-  match result {
-    ok(value) => io::print(value.to_str()),
-    err(_) => io::print("Operation failed")
-  }
-}
-```
-
-### Propagate Errors
-
-```ard
-use ard/result
-
-fn parse_age(age_str: Str) Int!Str {
-  match Int::from_str(age_str) {
-    age => {
-      if age < 0 {
-        Result::err("Age cannot be negative")
-      } else {
-        Result::ok(age)
-      }
-    },
-    _ => Result::err("Invalid integer")
-  }
-}
-
-fn validate_age(age: Int) Void!Str {
-  if age < 18 {
-    Result::err("Must be 18 or older")
-  } else {
-    Result::ok(Void)
-  }
-}
-
-fn process_user(age_str: Str) Void!Str {
-  let age = try parse_age(age_str)
-  try validate_age(age)
-  Result::ok(Void)
-}
-```
-
-### Use Defaults on Error
-
-```ard
-use ard/result
-
-fn main() {
-  let result: Int!Str = Result::err("parsing failed")
-  let value = result.or(0)
-  
-  // value is 0
-}
-```
-
-### Create Helper Functions
-
-```ard
-use ard/result
-
-fn safe_divide(a: Int, b: Int) Int!Str {
-  if b == 0 {
-    Result::err("Division by zero")
-  } else {
-    Result::ok(a / b)
-  }
-}
-
-fn main() {
-  let r1 = safe_divide(10, 2)   // Success
-  let r2 = safe_divide(10, 0)   // Error
 }
 ```

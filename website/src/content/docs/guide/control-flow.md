@@ -8,12 +8,16 @@ description: Learn about conditional statements, loops, and pattern matching in 
 ### If-Else
 
 ```ard
+use go:fmt
+
+let temperature = 22
+
 if temperature > 30 {
-  io::print("It's hot!")
+  fmt::Println("It's hot!")
 } else if temperature < 10 {
-  io::print("It's cold!")
+  fmt::Println("It's cold!")
 } else {
-  io::print("Nice weather!")
+  fmt::Println("Nice weather!")
 }
 ```
 
@@ -26,58 +30,75 @@ Conditions must be boolean expressions. There are no implicit truthy/falsy coerc
 #### Iterating Over Collections
 
 ```ard
+use go:fmt
+
 let fruits = ["apple", "banana", "cherry"]
 for fruit, index in fruits {
-  io::print("{index}: {fruit}")
+  fmt::Println("{index}: {fruit}")
 }
 ```
 
 The index cursor can be omitted in list loops
 
 ```ard
+use go:fmt
+
 let fruits = ["apple", "banana", "cherry"]
 for fruit in fruits {
-  io::print(fruit)
+  fmt::Println(fruit)
 }
 ```
 
 #### Iterating Over Maps
 
 ```ard
+use go:fmt
+
 let scores: [Str:Int] = ["Alice": 95, "Bob": 87, "Carol": 92]
 for name, score in scores {
-  io::print("{name} scored {score.to_str()}")
+  fmt::Println("{name} scored {score.to_str()}")
 }
 ```
 
 #### Numeric Ranges
 
 ```ard
+use go:fmt
+
 // Inclusive range
 for i in 1..10 {
-  io::print(i)
+  fmt::Println(i)
 }
+```
 
-// With step (if supported)
-for i in 0..100 step 10 {
-  io::print(i)  // Prints 0, 10, 20, ..., 100
+To iterate with a step other than 1, use a C-style loop:
+
+```ard
+use go:fmt
+
+for mut i = 0; i <= 100; i =+ 10 {
+  fmt::Println(i)  // Prints 0, 10, 20, ..., 100
 }
 ```
 
 #### C-Style For Loop
 
 ```ard
+use go:fmt
+
 for mut i = 0; i <= 5; i =+ 1 {
-  io::print("Count: {i}")
+  fmt::Println("Count: {i}")
 }
 ```
 
 ### While Loops
 
 ```ard
+use go:fmt
+
 mut count = 0
 while count < 10 {
-  io::print("Count is {count}")
+  fmt::Println("Count is {count}")
   count =+ 1
 }
 ```
@@ -91,30 +112,36 @@ Match expressions are similar to `switch` expressions in most languages. They co
 Match expressions can be used without a subject to create clean conditional logic as an alternative to if-else chains:
 
 ```ard
+let score = 85
+
 let grade = match {
   score >= 90 => "A",
-  score >= 80 => "B", 
+  score >= 80 => "B",
   score >= 70 => "C",
   score >= 60 => "D",
-  _ => "F"
+  _ => "F",
 }
 ```
 
-This is equivalent to, but more concise than:
+This is equivalent to, but more concise than, the if-else chain:
 
 ```ard
-let grade = if score >= 90 {
-  "A"
-} else if score >= 80 {
-  "B"
-} else if score >= 70 {
-  "C"
-} else if score >= 60 {
-  "D"
-} else {
-  "F"
+fn grade(score: Int) Str {
+  if score >= 90 {
+    "A"
+  } else if score >= 80 {
+    "B"
+  } else if score >= 70 {
+    "C"
+  } else if score >= 60 {
+    "D"
+  } else {
+    "F"
+  }
 }
 ```
+
+Note that `if` blocks produce a value only as the final expression of a function body; they cannot be assigned directly with `let x = if ...`. Conditional `match` is the expression form.
 
 Conditional match expressions evaluate conditions in order and execute the first matching case. **A catch-all case (`_`) is required** to ensure the expression always returns a value.
 
@@ -123,19 +150,27 @@ Conditional match expressions evaluate conditions in order and execute the first
 You can use any boolean expressions as conditions:
 
 ```ard
+let age = 30
+let has_license = true
+let has_insurance = true
+
 let status = match {
   age < 16 => "Too young to drive",
-  not hasLicense => "Need to get a license",
-  not hasInsurance => "Need insurance", 
+  not has_license => "Need to get a license",
+  not has_insurance => "Need insurance",
   age >= 65 => "Senior driver",
-  _ => "Ready to drive"
+  _ => "Ready to drive",
 }
+
+let temperature = 75
+let sunny = true
+let weekend = false
 
 let activity = match {
   temperature > 80 and sunny => "Go to the beach",
-  temperature > 70 and weekend => "Have a picnic", 
+  temperature > 70 and weekend => "Have a picnic",
   temperature < 50 => "Stay inside and read",
-  _ => "Go for a walk"
+  _ => "Go for a walk",
 }
 ```
 
@@ -144,6 +179,8 @@ let activity = match {
 When ranges overlap, the first match wins:
 
 ```ard
+let score = 85
+
 let grade = match score {
   0 => "How?",
   1..59 => "F",
@@ -151,28 +188,36 @@ let grade = match score {
   70..79 => "C",
   80..89 => "B",
   90..100 => "A",
-  _ => "Invalid score"
+  _ => "Invalid score",
 }
 ```
 
 ### Boolean Matching
 
 ```ard
+let is_valid = true
+
 let response = match is_valid {
-  true => "Proceed"
-  false => "Error: invalid input"
+  true => "Proceed",
+  false => "Error: invalid input",
 }
 ```
 
 ### Enum Matching
 
 ```ard
-enum Status { active, inactive, pending }
+enum Status {
+  active,
+  inactive,
+  pending,
+}
+
+let user_status = Status::active
 
 let message = match user_status {
-  Status::active => "Welcome back!"
-  Status::inactive => "Please reactivate account"
-  Status::pending => "Account under review"
+  Status::active => "Welcome back!",
+  Status::inactive => "Please reactivate account",
+  Status::pending => "Account under review",
 }
 ```
 
@@ -181,19 +226,21 @@ let message = match user_status {
 Use match expressions to handle different types in a union:
 
 ```ard
+use go:fmt
+
 type Content = Str | Int | Bool
 
 fn describe(value: Content) Str {
   match value {
-    Str => "Text: {it}"
-    Int => "Number: {it.to_str()}"
-    Bool => "Flag: {it.to_str()}"
+    Str => "Text: {it}",
+    Int => "Number: {it.to_str()}",
+    Bool => "Flag: {it.to_str()}",
   }
 }
 
 let items: [Content] = ["hello", 42, true]
 for item in items {
-  io::print(describe(item))
+  fmt::Println(describe(item))
 }
 ```
 
@@ -214,17 +261,31 @@ Patterns are evaluated in the order they appear. More specific patterns should c
 - You're executing statements rather than returning values
 
 ```ard
+struct User {}
+
+impl User {
+  fn is_admin() Bool { true }
+  fn is_member() Bool { true }
+}
+
+fn should_skip(item: Int) Bool { false }
+fn process(item: Int) {}
+
+let user = User{}
+let items = [1, 2, 3]
+
 // Good: conditional match for values
 let message = match {
   user.is_admin() => "Admin access granted",
-  user.is_member() => "Member access granted", 
-  _ => "Access denied"
+  user.is_member() => "Member access granted",
+  _ => "Access denied",
 }
 
 // Good: if statement for control flow
 for item in items {
+  // break is a side effect - can't use match here
   if should_skip(item) {
-    break  // Side effect - can't use match here
+    break
   }
   process(item)
 }
@@ -235,6 +296,11 @@ for item in items {
 Ard supports the `break` keyword for early termination of loops.
 
 ```ard
+fn should_skip(item: Int) Bool { false }
+fn process(item: Int) {}
+
+let items = [1, 2, 3]
+
 for item in items {
   if should_skip(item) {
     break

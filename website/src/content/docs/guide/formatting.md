@@ -36,11 +36,22 @@ ard format --check <file-or-dir>
 - `3+` properties are formatted as multiline
 
 ```ard
+struct Point {
+  x: Int,
+  y: Int,
+}
+
+struct User {
+  name: Str,
+  age: Int,
+  role: Str,
+}
+
 // one line
-Point{x: 1, y: 2}
+let point = Point{x: 1, y: 2}
 
 // multiline
-User{
+let user = User{
   name: "A",
   age: 1,
   role: "admin",
@@ -53,6 +64,9 @@ User{
 - if a match arm body is a single expression and fits, it can stay inline
 
 ```ard
+let ok = true
+mut total = 0
+
 match ok {
   true => { total =+ 1 },
   false => { total =- 1 },
@@ -62,7 +76,14 @@ match ok {
 - `try ... -> var { ... }` catch blocks with a single expression stay inline when they fit
 
 ```ard
-let raw = try self.raw -> _ { "" }
+fn read() Str!Str {
+  Result::ok("data")
+}
+
+fn main() Str {
+  let raw = try read() -> _ { "" }
+  raw
+}
 ```
 
 ## Imports
@@ -71,7 +92,8 @@ let raw = try self.raw -> _ { "" }
 
 1. `ard/*`
 2. absolute package paths
-3. relative paths (`./`, `../`)
+
+Import paths are always absolute from the project root; Ard does not support relative imports.
 
 ## Comments and Spacing
 
