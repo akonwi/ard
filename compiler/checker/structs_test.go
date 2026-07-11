@@ -180,6 +180,25 @@ func TestMethods(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
+			name: "Impl method can call a sibling declared later",
+			input: fmt.Sprintf(
+				`%s
+				impl Shape {
+				  fn area_label() Str {
+						self.format_area(self.get_area())
+					}
+
+				  private fn format_area(area: Int) Str {
+						"Area: {area}"
+					}
+
+				  fn get_area() Int {
+						self.width * self.height
+					}
+				}`, shapeCode),
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
 			name: "The instance can't be mutated in a non-mutable impl block",
 			input: fmt.Sprintf(
 				`%s

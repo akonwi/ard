@@ -2812,9 +2812,24 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			switch def := sym.Type.(type) {
 			case *StructDef:
 				receiverGenerics := genericParamsForType(def)
-				for _, method := range s.Methods {
+				signatures := make([]*FunctionDef, len(s.Methods))
+				for i := range s.Methods {
+					method := &s.Methods[i]
 					if len(method.TypeParams) > 0 {
 						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						continue
+					}
+					c.pushMethodGenericAllowlist(receiverGenerics)
+					fnDef := c.resolveMethodSignature(method)
+					c.popMethodGenericAllowlist()
+					fnDef.Receiver = s.Receiver.Name
+					fnDef.Mutates = method.Mutates
+					signatures[i] = fnDef
+					c.addStructMethod(def, fnDef)
+				}
+				for i := range s.Methods {
+					method := &s.Methods[i]
+					if signatures[i] == nil {
 						continue
 					}
 					if c.spans != nil {
@@ -2825,18 +2840,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						})
 					}
 					c.pushMethodGenericAllowlist(receiverGenerics)
-					fnDef := c.checkFunction(&method, func() {
+					fnDef := c.checkFunctionWithSignature(method, func() {
 						c.scope.add(s.Receiver.Name, def, method.Mutates)
-					}, receiverGenerics...)
+					}, signatures[i], receiverGenerics...)
 					c.popMethodGenericAllowlist()
-					if fnDef != nil {
-						if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
-							c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
-							continue
-						}
-						fnDef.Receiver = s.Receiver.Name
-						fnDef.Mutates = method.Mutates
-						c.addStructMethod(def, fnDef)
+					if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
 					}
 				}
 				return &Statement{Stmt: def}
@@ -2845,7 +2854,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					def.Methods = make(map[string]*FunctionDef)
 				}
 				receiverGenerics := genericParamsForType(def)
-				for _, method := range s.Methods {
+				signatures := make([]*FunctionDef, len(s.Methods))
+				for i := range s.Methods {
+					method := &s.Methods[i]
 					if len(method.TypeParams) > 0 {
 						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
 						continue
@@ -2854,16 +2865,25 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						c.addError("Enum methods cannot be mutating", method.GetLocation())
 					}
 					c.pushMethodGenericAllowlist(receiverGenerics)
-					fnDef := c.checkFunction(&method, func() {
-						c.scope.add(s.Receiver.Name, def, false)
-					}, receiverGenerics...)
+					fnDef := c.resolveMethodSignature(method)
 					c.popMethodGenericAllowlist()
-					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
-						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+					fnDef.Receiver = s.Receiver.Name
+					signatures[i] = fnDef
+					def.Methods[method.Name] = fnDef
+				}
+				for i := range s.Methods {
+					method := &s.Methods[i]
+					if signatures[i] == nil {
 						continue
 					}
-					fnDef.Receiver = s.Receiver.Name
-					def.Methods[method.Name] = fnDef
+					c.pushMethodGenericAllowlist(receiverGenerics)
+					fnDef := c.checkFunctionWithSignature(method, func() {
+						c.scope.add(s.Receiver.Name, def, false)
+					}, signatures[i], receiverGenerics...)
+					c.popMethodGenericAllowlist()
+					if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
+						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+					}
 				}
 				return &Statement{Stmt: def}
 			default:
@@ -8921,7 +8941,29 @@ func bodyReturnMismatch(bodyStmts []parse.Statement, expected Type, got Type) st
 	return typeMismatch(expected, got)
 }
 
+func (c *Checker) resolveMethodSignature(def *parse.FunctionDeclaration) *FunctionDef {
+	params := c.resolveParametersWithContext(def.Parameters, nil)
+	returnType := c.resolveReturnTypeWithContext(def.ReturnType, nil)
+	for i, param := range def.Parameters {
+		if param.Type != nil && params[i].Type == nil {
+			panic(fmt.Errorf("Cannot resolve type for parameter %s", param.Name))
+		}
+	}
+	return &FunctionDef{
+		Name:          def.Name,
+		GenericParams: append([]string(nil), def.TypeParams...),
+		Parameters:    params,
+		ReturnType:    returnType,
+		Private:       def.Private,
+		IsTest:        def.IsTest,
+	}
+}
+
 func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func(), extraGenericParams ...string) *FunctionDef {
+	return c.checkFunctionWithSignature(def, init, nil, extraGenericParams...)
+}
+
+func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, init func(), signature *FunctionDef, extraGenericParams ...string) *FunctionDef {
 	if init != nil {
 		init()
 	}
@@ -8938,7 +8980,11 @@ func (c *Checker) checkFunction(def *parse.FunctionDeclaration, init func(), ext
 	var fn *FunctionDef
 	var params []Parameter
 	var returnType Type
-	if hoisted, ok := c.hoistedTopLevelFunctions[def]; ok && init == nil {
+	if signature != nil {
+		fn = signature
+		params = fn.Parameters
+		returnType = fn.ReturnType
+	} else if hoisted, ok := c.hoistedTopLevelFunctions[def]; ok && init == nil {
 		fn = hoisted
 		params = fn.Parameters
 		returnType = fn.ReturnType
