@@ -25,6 +25,34 @@ use vaxis
 use shared/strings
 ```
 
+### Root modules
+
+A bare dependency import loads that package's root module. The root module is the file whose name matches the dependency's `name` in its `ard.toml`.
+
+For example, a dependency with this manifest:
+
+```toml
+name = "decode"
+```
+
+and this layout:
+
+```text
+decode/
+├── ard.toml
+├── decode.ard
+└── path.ard
+```
+
+can be imported as:
+
+```ard
+use decode       // loads decode.ard
+use decode/path  // loads path.ard
+```
+
+You do not need to repeat the package name as `use decode/decode`. If a dependency alias differs from the package name, use the alias at the call site; Ard still finds the root module from the dependency's manifest.
+
 Dependency aliases are package-local. Your root project can import only its direct dependencies. A dependency's own dependencies are available to that dependency, but they are not automatically re-exported into your root project's import namespace.
 
 ## Adding a Git dependency

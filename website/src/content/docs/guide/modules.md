@@ -108,7 +108,15 @@ fn divide(a: Int, b: Int) Int!Str {
 }
 ```
 
-For dependencies and lockfile behavior, see the [Dependencies](/guide/dependencies/) guide.
+A dependency can expose a root module whose filename matches its manifest name. If a dependency named `decode` contains `decode.ard`, consumers can load that root module without repeating its name:
+
+```ard
+use decode
+
+let value = decode::run(input, decoder)
+```
+
+Nested dependency modules still use their full path, such as `use decode/path`. For dependency declarations, aliases, root modules, and lockfile behavior, see the [Dependencies](/guide/dependencies/) guide.
 
 ## Public and Private Declarations
 
