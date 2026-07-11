@@ -12,8 +12,10 @@ import (
 )
 
 // workspaceFor returns the shared analysis workspace, creating the engine on
-// first use. The project root comes from initialize when available, otherwise
-// it is discovered from the first document's directory.
+// first use. The nearest Ard project manifest takes precedence over the editor
+// workspace root, which may be a repository containing the project in a
+// subdirectory. The initialize root remains the fallback for manifest-less
+// files.
 func (s *Server) workspaceFor(filePath string) *analysis.Workspace {
 	s.engineMu.Lock()
 	defer s.engineMu.Unlock()
@@ -21,13 +23,17 @@ func (s *Server) workspaceFor(filePath string) *analysis.Workspace {
 		return s.workspace
 	}
 
-	root := s.projectRootPath()
-	if root == "" && filePath != "" {
+	root := ""
+	if filePath != "" {
 		if info, err := checker.FindProjectRoot(filepath.Dir(filePath)); err == nil {
 			root = info.RootPath
-		} else {
-			root = filepath.Dir(filePath)
 		}
+	}
+	if root == "" {
+		root = s.projectRootPath()
+	}
+	if root == "" && filePath != "" {
+		root = filepath.Dir(filePath)
 	}
 	if root == "" {
 		if wd, err := os.Getwd(); err == nil {
