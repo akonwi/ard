@@ -122,7 +122,3 @@ They are resolved from the path in `ard.toml` and are not copied into the cache.
 ## FFI companions
 
 Dependency packages may own Go FFI companions, such as `ffi/*.go`. The compiler routes extern calls to the package that declares them, so a dependency can provide both its Ard API and host-language implementation.
-
-## No default vendoring
-
-Ard no longer uses project-local `.ard/vendor` as the normal dependency source. Optional vendoring may return later as an export/offline workflow, but the default build input is `ard.lock` plus the shared cache.
