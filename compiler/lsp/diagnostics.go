@@ -24,22 +24,10 @@ func formatSource(source string, filePath string) (string, error) {
 	return string(formatted), nil
 }
 
-// checkerDiagnosticsToLSP converts checker.Diagnostics to LSP Diagnostics.
-// Always returns a non-nil slice so JSON serializes as [] not null.
-func checkerDiagnosticsToLSP(diagnostics []checker.Diagnostic) []protocol.Diagnostic {
-	return convertCheckerDiagnosticsToLSP(
-		diagnostics,
-		func(_ string, location parse.Location) protocol.Range { return checkerLocationToLSPRange(location) },
-		func(path string) string {
-			if abs, err := filepath.Abs(path); err == nil {
-				return abs
-			}
-			return path
-		},
-	)
-}
-
-func convertCheckerDiagnosticsToLSP(
+// checkerDiagnosticsToLSP converts checker diagnostics using source-aware
+// range and path resolution supplied by the caller. It always returns a
+// non-nil slice so JSON serializes as [] rather than null.
+func checkerDiagnosticsToLSP(
 	diagnostics []checker.Diagnostic,
 	rangeFor func(string, parse.Location) protocol.Range,
 	resolvePath func(string) string,
@@ -172,7 +160,7 @@ func (s *Server) checkerDiagnosticsToLSP(diagnostics []checker.Diagnostic, docUR
 			filtered = append(filtered, diagnostic)
 		}
 	}
-	return convertCheckerDiagnosticsToLSP(filtered, func(path string, location parse.Location) protocol.Range {
+	return checkerDiagnosticsToLSP(filtered, func(path string, location parse.Location) protocol.Range {
 		return s.diagnosticRangeFor(resolvePath(path), location)
 	}, resolvePath)
 }

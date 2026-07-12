@@ -471,17 +471,30 @@ func TestJSONRPCHandlerDoesNotBlockDocumentSyncBehindFeatureRequests(t *testing.
 	}
 }
 
+func checkerDiagnosticsToLSPForTest(diagnostics []checker.Diagnostic) []protocol.Diagnostic {
+	return checkerDiagnosticsToLSP(
+		diagnostics,
+		func(_ string, location parse.Location) protocol.Range { return checkerLocationToLSPRange(location) },
+		func(path string) string {
+			if abs, err := filepath.Abs(path); err == nil {
+				return abs
+			}
+			return path
+		},
+	)
+}
+
 // TestCheckerDiagnosticsToLSP verifies the diagnostic conversion handles edge cases.
 func TestCheckerDiagnosticsToLSP(t *testing.T) {
 	// Nil input should produce empty slice (not nil) so JSON is [] not null
-	if result := checkerDiagnosticsToLSP(nil); result == nil {
+	if result := checkerDiagnosticsToLSPForTest(nil); result == nil {
 		t.Error("expected non-nil empty slice for nil input")
 	} else if len(result) != 0 {
 		t.Errorf("expected empty slice, got %v", result)
 	}
 
 	// Empty input
-	if result := checkerDiagnosticsToLSP([]checker.Diagnostic{}); result == nil {
+	if result := checkerDiagnosticsToLSPForTest([]checker.Diagnostic{}); result == nil {
 		t.Error("expected non-nil empty slice for empty input")
 	} else if len(result) != 0 {
 		t.Errorf("expected empty slice, got %v", result)
@@ -499,7 +512,7 @@ func TestCheckerDiagnosticsToLSP(t *testing.T) {
 			},
 		),
 	}
-	result := checkerDiagnosticsToLSP(diags)
+	result := checkerDiagnosticsToLSPForTest(diags)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 diagnostic, got %d", len(result))
 	}
@@ -546,7 +559,7 @@ func TestCheckerDiagnosticsToLSPPreservesStructuredLabels(t *testing.T) {
 		}},
 	}
 
-	result := checkerDiagnosticsToLSP([]checker.Diagnostic{diagnostic})
+	result := checkerDiagnosticsToLSPForTest([]checker.Diagnostic{diagnostic})
 	if len(result) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", result)
 	}
