@@ -1376,6 +1376,16 @@ type ForeignInterfaceUpcast struct {
 
 func (p *ForeignInterfaceUpcast) Type() Type { return p.Iface }
 
+// DiscardingFunctionCoercion adapts a value-returning function to an otherwise
+// identical Void-returning function. Targets must evaluate Value once and
+// synthesize a wrapper that discards each call's result.
+type DiscardingFunctionCoercion struct {
+	Value      Expression
+	TargetType *FunctionDef
+}
+
+func (p *DiscardingFunctionCoercion) Type() Type { return p.TargetType }
+
 type ForeignValue struct {
 	Target     string
 	Namespace  string

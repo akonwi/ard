@@ -67,6 +67,9 @@ const (
 	ExprForeignStructInstance
 	ExprForeignValue
 	ExprForeignInterfaceUpcast
+	// ExprDiscardingFunctionCoercion wraps Target in the Void-returning
+	// function type named by Type, evaluating Target once and discarding calls' results.
+	ExprDiscardingFunctionCoercion
 	ExprUnsafeCast
 	ExprUnsafeIsNil
 	// ExprMutRef is the explicit `mut <operand>` expression (ADR 0045). Target

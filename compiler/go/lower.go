@@ -2744,6 +2744,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerForeignValue(expr)
 	case air.ExprForeignInterfaceUpcast:
 		return l.lowerForeignInterfaceUpcast(fn, expr)
+	case air.ExprDiscardingFunctionCoercion:
+		return l.lowerDiscardingFunctionCoercion(fn, expr)
 	case air.ExprUnsafeCast:
 		return l.lowerUnsafeCast(fn, expr)
 	case air.ExprUnsafeIsNil:
@@ -4579,6 +4581,57 @@ func (l *lowerer) finishCallWithWriteback(typeID air.TypeID, stmts []ast.Stmt, c
 	)
 	stmts = append(stmts, writeback...)
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(resultTemp)}, nil
+}
+
+func (l *lowerer) lowerDiscardingFunctionCoercion(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil {
+		return loweredExpr{}, fmt.Errorf("discarding function coercion missing target")
+	}
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	actualType, err := l.goType(expr.Target.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	expectedTypeExpr, err := l.goType(expr.Type)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	expectedType, ok := expectedTypeExpr.(*ast.FuncType)
+	if !ok {
+		return loweredExpr{}, fmt.Errorf("discarding function coercion target type %d is not a function", expr.Type)
+	}
+
+	args := make([]ast.Expr, 0, len(expectedType.Params.List))
+	params := make([]*ast.Field, 0, len(expectedType.Params.List))
+	variadic := false
+	for i, field := range expectedType.Params.List {
+		name := fmt.Sprintf("arg%d", i)
+		args = append(args, ast.NewIdent(name))
+		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: field.Type})
+		if i == len(expectedType.Params.List)-1 {
+			_, variadic = field.Type.(*ast.Ellipsis)
+		}
+	}
+	original := ast.NewIdent("original")
+	call := &ast.CallExpr{Fun: original, Args: args}
+	if variadic {
+		call.Ellipsis = token.Pos(1)
+	}
+	wrapper := &ast.FuncLit{
+		Type: &ast.FuncType{Params: &ast.FieldList{List: params}},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: call}}},
+	}
+	adapter := &ast.FuncLit{
+		Type: &ast.FuncType{
+			Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{original}, Type: actualType}}},
+			Results: &ast.FieldList{List: []*ast.Field{{Type: expectedTypeExpr}}},
+		},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{wrapper}}}},
+	}
+	return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: adapter, Args: []ast.Expr{target.expr}}}, nil
 }
 
 func (l *lowerer) adaptCallArg(fn air.Function, arg air.Expr, argExpr ast.Expr, param air.Param) ast.Expr {

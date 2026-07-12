@@ -1,10 +1,6 @@
 package checker_test
 
-import (
-	"testing"
-
-	checker "github.com/akonwi/ard/checker"
-)
+import "testing"
 
 func TestContextualVoidClosureDiscardsUnannotatedReturnValue(t *testing.T) {
 	run(t, []test{
@@ -19,7 +15,7 @@ each(fn(value) {
 })`,
 		},
 		{
-			name: "explicit return annotation is not coerced to Void",
+			name: "explicit value return is coerced to Void",
 			input: `fn each(callback: fn(Int)) {
   callback(1)
 }
@@ -27,9 +23,6 @@ each(fn(value) {
 each(fn(value) Int {
   value + 1
 })`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected fn(Int), got fn(Int) Int"},
-			},
 		},
 	})
 }

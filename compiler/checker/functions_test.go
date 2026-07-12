@@ -926,14 +926,51 @@ func TestClosureReturnTypeInference(t *testing.T) {
 			diagnostics: []checker.Diagnostic{},
 		},
 		{
-			name: "inferred non-void closure is rejected where a void callback is expected",
+			name: "inferred non-void closure is accepted where a void callback is expected",
 			input: `
 				fn run(cb: fn(Int)) {}
 				let produce = fn(x: Int) { x + 1 }
 				run(produce)
 			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "value-returning function is accepted in other void function contexts",
+			input: `
+				struct Handler { callback: fn(Int) }
+				fn produce(x: Int) Int { x + 1 }
+				let callback: fn(Int) = produce
+				let handler = Handler{callback: produce}
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "generic inference uses the value-returning callback parameters",
+			input: `
+				fn infer(cb: fn($T)) $T { panic("unused") }
+				let produce = fn(x: Int) { x + 1 }
+				let value: Int = infer(produce)
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "nullable generic void callback accepts and infers from a value-returning function",
+			input: `
+				fn infer(cb: (fn($T))?) $T { panic("unused") }
+				let produce = fn(x: Int) { x + 1 }
+				let value: Int = infer(produce)
+			`,
+			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "void function coercion still requires matching parameters",
+			input: `
+				fn run(cb: fn(Int)) {}
+				let produce = fn(x: Str) { x.size() }
+				run(produce)
+			`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected fn(Int), got fn(Int) Int"},
+				{Kind: checker.Error, Message: "Type mismatch: Expected fn(Int), got fn(Str) Int"},
 			},
 		},
 	})

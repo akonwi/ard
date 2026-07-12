@@ -4032,6 +4032,12 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return nil, err
 		}
 		return &Expr{Kind: ExprForeignInterfaceUpcast, Type: typeID, Target: value, ForeignInterfacePointer: e.Pointer}, nil
+	case *checker.DiscardingFunctionCoercion:
+		value, err := fl.lowerExpr(e.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprDiscardingFunctionCoercion, Type: typeID, Target: value}, nil
 	case *checker.ForeignStructInstance:
 		fields := make([]StructFieldValue, 0, len(e.Fields))
 		for name, valueExpr := range e.Fields {
