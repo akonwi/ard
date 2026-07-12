@@ -234,6 +234,25 @@ fn make() {
 	})
 }
 
+func TestGoImportSupportsExportedEmbeddedStructFields(t *testing.T) {
+	run(t, []test{
+		{
+			name: "reads embedded field explicitly",
+			input: `use go:bufio
+use go:io
+use go:strings
+
+fn reader() mut bufio::Reader {
+  let rw = bufio::ReadWriter{
+    Reader: bufio::NewReader(strings::NewReader("Ard")),
+    Writer: bufio::NewWriter(io::Discard),
+  }
+  rw.Reader
+}`,
+		},
+	})
+}
+
 func TestGoImportAssignsExportedStructFields(t *testing.T) {
 	run(t, []test{
 		{

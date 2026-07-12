@@ -1366,6 +1366,99 @@ func TestRunProgramConstructsGoStructLiterals(t *testing.T) {
 	}
 }
 
+func TestRunProgramSupportsEmbeddedGoFieldsWithoutPromotingThem(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"embeddedfields\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module embeddedfields\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
+
+type Base struct { Name string }
+
+func (b Base) Greeting() string { return "hello " + b.Name }
+func (b *Base) Rename(name string) { b.Name = name }
+
+type Outer struct { Base }
+type PointerOuter struct { *Base }
+
+type Box[T any] struct { Value T }
+type GenericOuter[T any] struct { Box[T] }
+
+func NewBase(name string) *Base { return &Base{Name: name} }
+func GenericValue(outer GenericOuter[string]) string { return outer.Box.Value }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use ard/unsafe
+use go:embeddedfields/ffi
+
+fn main() {
+  mut outer = ffi::Outer{Base: ffi::Base{Name: "Ard"}}
+  if not outer.Base.Name == "Ard" { panic("bad embedded value field") }
+  if not outer.Greeting() == "hello Ard" { panic("promoted value method regressed") }
+  outer.Base.Name = "Go"
+  if not outer.Base.Name == "Go" { panic("embedded value field mutation failed") }
+
+  let pointer_outer = ffi::PointerOuter{Base: ffi::NewBase("Ard")}
+  if not pointer_outer.Base.Name == "Ard" { panic("bad embedded pointer field") }
+  pointer_outer.Rename("Go")
+  if not pointer_outer.Base.Name == "Go" { panic("promoted pointer method regressed") }
+
+  let empty = ffi::PointerOuter{}
+  if not unsafe::is_nil(empty.Base) { panic("embedded nil pointer was not preserved") }
+
+  let generic = ffi::GenericOuter<Str>{Box: ffi::Box<Str>{Value: "Ard"}}
+  if not ffi::GenericValue(generic) == "Ard" { panic("generic embedded field failed") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+
+	invalidPath := filepath.Join(projectDir, "invalid.ard")
+	invalidSource := []byte(`use go:embeddedfields/ffi
+
+fn invalid() {
+  let outer = ffi::Outer{Base: ffi::Base{Name: "Ard"}}
+  let _ = outer.Name
+  let _ = ffi::Outer{Name: "Ard"}
+}
+`)
+	result := parse.Parse(invalidSource, invalidPath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse invalid fixture: %s", result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(projectDir)
+	if err != nil {
+		t.Fatalf("new module resolver: %v", err)
+	}
+	projectInfo := resolver.GetProjectInfo()
+	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
+	checked := checker.New(invalidPath, result.Program, resolver, checker.CheckOptions{GoResolver: goResolver})
+	checked.Check()
+	diagnostics := checked.Diagnostics()
+	if len(diagnostics) != 2 || diagnostics[0].Message != "Undefined: outer.Name" || diagnostics[1].Message != "Unknown field: Name" {
+		t.Fatalf("promoted field diagnostics = %v", diagnostics)
+	}
+}
+
 func TestRunProgramConstructsGenericGoStructLiterals(t *testing.T) {
 	projectDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"genericstructs\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {

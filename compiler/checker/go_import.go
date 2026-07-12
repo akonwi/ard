@@ -610,7 +610,7 @@ func goFieldsForStruct(strct *types.Struct) (map[string]Type, map[string]string)
 	unsupported := map[string]string{}
 	for i := 0; i < strct.NumFields(); i++ {
 		field := strct.Field(i)
-		if !field.Exported() || field.Embedded() {
+		if !field.Exported() {
 			continue
 		}
 		typ, reason := typeFromGoWithMethods(field.Type(), false)
