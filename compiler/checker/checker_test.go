@@ -21,6 +21,9 @@ var compareOptions = cmp.Options{
 	cmpopts.SortMaps(func(a, b string) bool { return a < b }),
 	cmpopts.IgnoreFields(checker.BoolMatch{}, "ResultType"),
 	cmpopts.IgnoreFields(checker.Parameter{}, "Loc"),
+	// Legacy table tests assert the compatibility message. Each migrated
+	// diagnostic family must assert its structured fields in diagnostics_test.go.
+	cmpopts.IgnoreFields(checker.Diagnostic{}, "Code", "Title", "Text", "Primary", "Secondary"),
 	cmpopts.IgnoreFields(checker.OptionMatch{}, "ResultType"),
 	cmpopts.IgnoreFields(checker.EnumMatch{}, "DiscriminantToIndex", "ResultType"),
 	cmpopts.IgnoreFields(checker.EnumVariant{}, "EnumType", "Discriminant"),

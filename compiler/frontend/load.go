@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/diagnostics"
 	"github.com/akonwi/ard/parse"
 )
 
@@ -36,12 +37,14 @@ func LoadModule(inputPath string) (*LoadResult, error) {
 		return nil, err
 	}
 
-	relPath, err := filepath.Rel(workingDir, inputPath)
-	if err != nil {
-		relPath = inputPath
+	projectInfo := moduleResolver.GetProjectInfo()
+	relPath := inputPath
+	if absInput, absErr := filepath.Abs(inputPath); absErr == nil {
+		if projectRelative, relErr := filepath.Rel(projectInfo.RootPath, absInput); relErr == nil {
+			relPath = projectRelative
+		}
 	}
 
-	projectInfo := moduleResolver.GetProjectInfo()
 	// The checker primes the resolver with the program's whole Go import
 	// closure before binding imports, so all Go types share a single
 	// go/types universe (ADR 0044).
@@ -49,8 +52,8 @@ func LoadModule(inputPath string) (*LoadResult, error) {
 	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{GoResolver: goResolver})
 	c.Check()
 	if c.HasErrors() {
-		for _, diagnostic := range c.Diagnostics() {
-			fmt.Println(diagnostic)
+		if err := diagnostics.Render(os.Stdout, c.Diagnostics(), diagnostics.FileSourceProvider(projectInfo.RootPath)); err != nil {
+			return nil, fmt.Errorf("render diagnostics: %w", err)
 		}
 		return nil, fmt.Errorf("type errors")
 	}

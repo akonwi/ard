@@ -33,41 +33,6 @@ type Module interface {
 	Symbols() map[string]Symbol
 }
 
-type DiagnosticKind string
-
-const (
-	Error DiagnosticKind = "error"
-	Warn  DiagnosticKind = "warn"
-)
-
-type Diagnostic struct {
-	Kind     DiagnosticKind
-	Message  string
-	filePath string
-	location parse.Location
-}
-
-func NewDiagnostic(kind DiagnosticKind, message string, filePath string, location parse.Location) Diagnostic {
-	return Diagnostic{
-		Kind:     kind,
-		Message:  message,
-		filePath: filePath,
-		location: location,
-	}
-}
-
-func (d Diagnostic) String() string {
-	return fmt.Sprintf("%s %s %s", d.filePath, d.location.Start, d.Message)
-}
-
-func (d Diagnostic) FilePath() string {
-	return d.filePath
-}
-
-func (d Diagnostic) Location() parse.Location {
-	return d.location
-}
-
 // deref follows TypeVar bindings to find the concrete type.
 // Used during type unification to ensure we see resolved types.
 // Only dereferences a single type node; for compound types use derefType.
@@ -607,21 +572,19 @@ func check(input *parse.Program, moduleResolver *ModuleResolver, filePath string
 }
 
 func (c *Checker) addError(msg string, location parse.Location) {
-	c.diagnostics = append(c.diagnostics, Diagnostic{
-		Kind:     Error,
-		Message:  msg,
-		filePath: c.filePath,
-		location: location,
-	})
+	c.diagnostics = append(c.diagnostics, NewDiagnostic(Error, msg, c.filePath, location))
 }
 
 func (c *Checker) addWarning(msg string, location parse.Location) {
-	c.diagnostics = append(c.diagnostics, Diagnostic{
-		Kind:     Warn,
-		Message:  msg,
-		filePath: c.filePath,
-		location: location,
-	})
+	c.diagnostics = append(c.diagnostics, NewDiagnostic(Warn, msg, c.filePath, location))
+}
+
+func (c *Checker) addDiagnostic(diagnostic Diagnostic) {
+	c.diagnostics = append(c.diagnostics, diagnostic)
+}
+
+func (c *Checker) sourceSpan(location parse.Location) SourceSpan {
+	return SourceSpan{FilePath: c.filePath, Location: location}
 }
 
 func (c *Checker) resolveModule(name string) Module {
@@ -2274,7 +2237,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						}
 					default:
 						if expected != nil {
-							val = c.checkExprAs(s.Value, expected)
+							expectedSpan := c.sourceSpan(s.Type.GetLocation())
+							val = c.checkExprAsWithExpectation(
+								s.Value,
+								expected,
+								&typeExpectation{Span: expectedSpan, Kind: expectationAnnotation},
+							)
 						}
 					}
 				}
@@ -2289,7 +2257,13 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			if s.Type != nil {
 				if expected := c.resolveType(s.Type); expected != nil {
 					if !c.areCompatible(expected, val.Type()) {
-						c.addError(typeMismatch(expected, val.Type()), s.Value.GetLocation())
+						expectedSpan := c.sourceSpan(s.Type.GetLocation())
+						c.addDiagnostic(typeMismatchDiagnostic{
+							Expected:    expected,
+							Actual:      val.Type(),
+							ActualSpan:  c.sourceSpan(s.Value.GetLocation()),
+							Expectation: &typeExpectation{Span: expectedSpan, Kind: expectationAnnotation},
+						}.build())
 						return nil
 					}
 					__type = expected
@@ -8579,7 +8553,11 @@ func (c *Checker) intLiteralFitsType(value int64, t Type) bool {
 }
 
 func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expression {
-	result := c.checkExprAsInner(expr, expectedType)
+	return c.checkExprAsWithExpectation(expr, expectedType, nil)
+}
+
+func (c *Checker) checkExprAsWithExpectation(expr parse.Expression, expectedType Type, expectation *typeExpectation) Expression {
+	result := c.checkExprAsInner(expr, expectedType, expectation)
 	if result != nil {
 		result = coerceDiscardingFunction(expectedType, result)
 		c.recordExprSpan(expr, result)
@@ -8619,7 +8597,7 @@ func discardingFunctionTypes(expected Type, actual Type) (*FunctionDef, *Functio
 	return target, source, true
 }
 
-func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type) Expression {
+func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, expectation *typeExpectation) Expression {
 	if literal := c.checkNumericLiteralAs(expr, expectedType); literal != nil {
 		return literal
 	}
@@ -8847,7 +8825,16 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type) Exp
 	}
 
 	if !c.areCompatible(expectedType, checked.Type()) {
-		c.addError(typeMismatch(expectedType, checked.Type()), expr.GetLocation())
+		if expectation != nil {
+			c.addDiagnostic(typeMismatchDiagnostic{
+				Expected:    expectedType,
+				Actual:      checked.Type(),
+				ActualSpan:  c.sourceSpan(expr.GetLocation()),
+				Expectation: expectation,
+			}.build())
+		} else {
+			c.addError(typeMismatch(expectedType, checked.Type()), expr.GetLocation())
+		}
 		return nil
 	}
 

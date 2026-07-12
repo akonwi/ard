@@ -100,7 +100,7 @@ func (d *docLines) positionToPoint(pos protocol.Position) parse.Point {
 }
 
 // locationToRange converts a parse location (1-based, byte columns) to an
-// LSP range (0-based, UTF-16 columns).
+// LSP range (0-based, UTF-16 columns). Callers define the end convention.
 func (d *docLines) locationToRange(loc parse.Location) protocol.Range {
 	start := protocol.Position{}
 	if loc.Start.Row > 0 {
@@ -133,4 +133,21 @@ func (s *Server) docLinesFor(filePath string) *docLines {
 // UTF-16 columns.
 func (s *Server) rangeFor(filePath string, loc parse.Location) protocol.Range {
 	return s.docLinesFor(filePath).locationToRange(loc)
+}
+
+// diagnosticRangeFor converts diagnostics' inclusive parse range into LSP's
+// exclusive UTF-16 range without changing the span convention used by other
+// semantic features.
+func (s *Server) diagnosticRangeFor(filePath string, loc parse.Location) protocol.Range {
+	return diagnosticLocationToRange(s.docLinesFor(filePath), loc)
+}
+
+func diagnosticLocationToRange(lines *docLines, loc parse.Location) protocol.Range {
+	if loc.End.Row > 0 && loc.End.Col > 0 {
+		loc.End.Col++
+	} else {
+		loc.End = loc.Start
+		loc.End.Col++
+	}
+	return lines.locationToRange(loc)
 }

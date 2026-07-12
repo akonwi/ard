@@ -519,11 +519,65 @@ func TestCheckerDiagnosticsToLSP(t *testing.T) {
 	if result[0].Range.End.Line != 2 {
 		t.Errorf("expected end line 2 (0-based), got %d", result[0].Range.End.Line)
 	}
-	if result[0].Range.End.Character != 9 {
-		t.Errorf("expected end character 9 (0-based), got %d", result[0].Range.End.Character)
+	if result[0].Range.End.Character != 10 {
+		t.Errorf("expected exclusive end character 10 (0-based), got %d", result[0].Range.End.Character)
 	}
 	if result[0].Source != "ard" {
 		t.Errorf("expected source 'ard', got %q", result[0].Source)
+	}
+}
+
+func TestCheckerDiagnosticsToLSPPreservesStructuredLabels(t *testing.T) {
+	diagnostic := checker.Diagnostic{
+		Kind:  checker.Error,
+		Code:  checker.DiagnosticCodeTypeMismatch,
+		Title: "Type mismatch",
+		Primary: checker.DiagnosticLabel{
+			Span: checker.SourceSpan{FilePath: "main.ard", Location: parse.Location{
+				Start: parse.Point{Row: 2, Col: 10}, End: parse.Point{Row: 2, Col: 11},
+			}},
+			Message: "this expression has type `Int`",
+		},
+		Secondary: []checker.DiagnosticLabel{{
+			Span: checker.SourceSpan{FilePath: "main.ard", Location: parse.Location{
+				Start: parse.Point{Row: 2, Col: 5}, End: parse.Point{Row: 2, Col: 7},
+			}},
+			Message: "this annotation requires `Str`",
+		}},
+	}
+
+	result := checkerDiagnosticsToLSP([]checker.Diagnostic{diagnostic})
+	if len(result) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", result)
+	}
+	if got, want := result[0].Message, "Type mismatch: this expression has type `Int`: this annotation requires `Str`"; got != want {
+		t.Fatalf("message = %q, want %q", got, want)
+	}
+	if result[0].Range.Start.Line != 1 || result[0].Range.Start.Character != 9 || result[0].Range.End.Character != 11 {
+		t.Fatalf("primary range = %#v", result[0].Range)
+	}
+	if len(result[0].RelatedInformation) != 1 {
+		t.Fatalf("related information = %#v, want one", result[0].RelatedInformation)
+	}
+	if result[0].RelatedInformation[0].Message != "this annotation requires `Str`" {
+		t.Fatalf("related message = %q", result[0].RelatedInformation[0].Message)
+	}
+}
+
+func TestServerDiagnosticsDoNotPublishAnotherFilesErrors(t *testing.T) {
+	root := t.TempDir()
+	server := NewServer()
+	server.projectRoot = root
+	diagnostic := checker.NewDiagnostic(
+		checker.Error,
+		"broken dependency",
+		filepath.Join("dependency", "main.ard"),
+		parse.Location{Start: parse.Point{Row: 8, Col: 2}, End: parse.Point{Row: 8, Col: 3}},
+	)
+
+	result := server.checkerDiagnosticsToLSP([]checker.Diagnostic{diagnostic}, uri.File(filepath.Join(root, "main.ard")))
+	if len(result) != 0 {
+		t.Fatalf("published another file's diagnostic: %#v", result)
 	}
 }
 

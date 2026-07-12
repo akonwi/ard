@@ -101,6 +101,33 @@ func TestParseRunArgs(t *testing.T) {
 		})
 	}
 }
+func TestLoadModuleRendersStructuredTypeMismatch(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"example\"\nard = \">= 0.27.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte("let name: Str = 42\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := captureStdout(t, func() {
+		if _, err := frontend.LoadModule(mainPath); err == nil {
+			t.Fatal("expected type error")
+		}
+	})
+	for _, want := range []string{
+		"error: Type mismatch",
+		"let name: Str = 42",
+		"this expression has type `Int`",
+		"this annotation requires `Str`",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestRunGoProgram(t *testing.T) {
 	tempDir := t.TempDir()
 	sourcePath := filepath.Join(tempDir, "main.ard")
