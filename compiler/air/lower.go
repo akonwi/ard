@@ -515,13 +515,20 @@ func genericParamNames(def *checker.FunctionDef) []string {
 // originalGenericFunctionDef returns the unsubstituted generic definition (with
 // $T parameters) for a call-site definition. Call sites carry a derefed clone
 // whose parameters are already concrete, so recover the original from the
-// registry (covers private/same-module) or the module's public symbols.
+// registry or the owning module's checked statements. The latter includes
+// private functions and does not depend on the declaring module being lowered
+// before an imported closure requests the specialization.
 func (l *lowerer) originalGenericFunctionDef(module ModuleID, callDef *checker.FunctionDef) *checker.FunctionDef {
 	if orig, ok := l.genericFunctionOriginals[functionKey(module, callDef.Name)]; ok {
 		return orig
 	}
-	if mod, ok := l.moduleByName[l.program.Modules[module].Path]; ok {
-		if orig, ok := mod.Get(callDef.Name).Type.(*checker.FunctionDef); ok {
+	mod := l.findReachableModule(l.program.Modules[module].Path)
+	if mod == nil || mod.Program() == nil {
+		return callDef
+	}
+	statements := mod.Program().Statements
+	for i := len(statements) - 1; i >= 0; i-- {
+		if orig, ok := statements[i].Expr.(*checker.FunctionDef); ok && orig.Name == callDef.Name {
 			return orig
 		}
 	}
