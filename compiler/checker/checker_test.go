@@ -2688,15 +2688,12 @@ fn main() {
 			},
 		},
 		{
-			name: "async start rejects non-void function",
+			name: "async start discards a function result",
 			input: `use ard/async
 fn value() Int { 1 }
 fn main() {
   async::start(value)
 }`,
-			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Type mismatch: Expected fn(), got fn() Int"},
-			},
 		},
 	})
 }

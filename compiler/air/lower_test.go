@@ -131,6 +131,32 @@ func TestLowerTransitiveStructMethodCanReadOwnerModuleGlobal(t *testing.T) {
 		t.Fatalf("greet result = %#v, want ExprLoadGlobal", greet.Body.Result)
 	}
 }
+func TestLowerDiscardingFunctionCoercion(t *testing.T) {
+	program := lowerSource(t, `
+		fn produce(value: Int) Int { value + 1 }
+		fn main() {
+			let callback: fn(Int) = produce
+			callback(1)
+		}
+	`)
+
+	mainFn := findFunction(t, program, "main")
+	if len(mainFn.Body.Stmts) == 0 || mainFn.Body.Stmts[0].Value == nil {
+		t.Fatalf("main body = %#v, want coerced callback binding", mainFn.Body)
+	}
+	coercion := mainFn.Body.Stmts[0].Value
+	if coercion.Kind != ExprDiscardingFunctionCoercion {
+		t.Fatalf("binding kind = %v, want ExprDiscardingFunctionCoercion", coercion.Kind)
+	}
+	if coercion.Target == nil || coercion.Target.Kind != ExprFunctionRef {
+		t.Fatalf("coercion target = %#v, want function reference", coercion.Target)
+	}
+	got := testTypeInfo(t, program, coercion.Type)
+	if got.Kind != TypeFunction || testTypeInfo(t, program, got.Return).Kind != TypeVoid {
+		t.Fatalf("coercion type = %#v, want Void-returning function", got)
+	}
+}
+
 func TestLowerFunctionCanReadModuleLevelLet(t *testing.T) {
 	program := lowerSource(t, `
 		let refresh_event = "inbox.refresh"

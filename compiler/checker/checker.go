@@ -8581,9 +8581,42 @@ func (c *Checker) intLiteralFitsType(value int64, t Type) bool {
 func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expression {
 	result := c.checkExprAsInner(expr, expectedType)
 	if result != nil {
+		result = coerceDiscardingFunction(expectedType, result)
 		c.recordExprSpan(expr, result)
 	}
 	return result
+}
+
+func coerceDiscardingFunction(expected Type, value Expression) Expression {
+	target, actual, ok := discardingFunctionTypes(expected, value.Type())
+	if !ok {
+		return value
+	}
+	for i := range target.Parameters {
+		want := target.Parameters[i]
+		got := actual.Parameters[i]
+		if want.Mutable != got.Mutable || want.Variadic != got.Variadic || !want.Type.equal(got.Type) {
+			return value
+		}
+	}
+	return &DiscardingFunctionCoercion{Value: value, TargetType: target}
+}
+
+func discardingFunctionTypes(expected Type, actual Type) (*FunctionDef, *FunctionDef, bool) {
+	target, ok := expected.(*FunctionDef)
+	if !ok || target.ReturnType != Void {
+		return nil, nil, false
+	}
+	source, ok := actual.(*FunctionDef)
+	if !ok || source.ReturnType == nil || source.ReturnType == Void || len(target.Parameters) != len(source.Parameters) {
+		return nil, nil, false
+	}
+	for i := range target.Parameters {
+		if target.Parameters[i].Mutable != source.Parameters[i].Mutable || target.Parameters[i].Variadic != source.Parameters[i].Variadic {
+			return nil, nil, false
+		}
+	}
+	return target, source, true
 }
 
 func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type) Expression {
@@ -8807,6 +8840,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type) Exp
 	if checked == nil {
 		return nil
 	}
+	checked = coerceDiscardingFunction(expectedType, checked)
 
 	if expectedType == Void {
 		return checked
@@ -9492,8 +9526,19 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// If parameter is Maybe<T> and argument is T, wrap it
 		if maybeParam, isMaybe := paramType.(*Maybe); isMaybe {
 			if argType := checkedArg.Type(); !argType.equal(paramType) {
+				if fnDef.hasGenerics() && genericScope != nil {
+					if target, source, ok := discardingFunctionTypes(maybeParam.Of(), checkedArg.Type()); ok {
+						for paramIndex := range target.Parameters {
+							if err := c.unifyTypes(target.Parameters[paramIndex].Type, source.Parameters[paramIndex].Type, genericScope); err != nil {
+								c.addError(err.Error(), resolvedExprs[i].GetLocation())
+								return nil, nil
+							}
+						}
+					}
+				}
+				checkedArg = coerceDiscardingFunction(maybeParam.Of(), checkedArg)
 				// Check if argument type matches the inner Maybe type
-				if c.areCompatible(maybeParam.Of(), argType) {
+				if c.areCompatible(maybeParam.Of(), checkedArg.Type()) {
 					// Wrap non-Maybe value in Maybe::new()
 					checkedArg = c.synthesizeMaybeSome(checkedArg, paramType)
 				}
@@ -9505,11 +9550,25 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// to mutate TypeVar instances in-place. This binds generics so that
 		// subsequent arguments see bound types.
 		if fnDef.hasGenerics() && genericScope != nil {
-			if err := c.unifyTypes(paramType, checkedArg.Type(), genericScope); err != nil {
-				c.addError(err.Error(), resolvedExprs[i].GetLocation())
-				return nil, nil
+			discardCoerced := false
+			if target, source, ok := discardingFunctionTypes(paramType, checkedArg.Type()); ok {
+				for paramIndex := range target.Parameters {
+					if err := c.unifyTypes(target.Parameters[paramIndex].Type, source.Parameters[paramIndex].Type, genericScope); err != nil {
+						c.addError(err.Error(), resolvedExprs[i].GetLocation())
+						return nil, nil
+					}
+				}
+				checkedArg = coerceDiscardingFunction(paramType, checkedArg)
+				discardCoerced = true
+			}
+			if !discardCoerced {
+				if err := c.unifyTypes(paramType, checkedArg.Type(), genericScope); err != nil {
+					c.addError(err.Error(), resolvedExprs[i].GetLocation())
+					return nil, nil
+				}
 			}
 		} else {
+			checkedArg = coerceDiscardingFunction(paramType, checkedArg)
 			// For non-generic functions, do regular type compatibility check
 			if !c.areCompatible(paramType, checkedArg.Type()) {
 				upcast, ok := c.foreignInterfaceArgUpcast(paramType, checkedArg)
