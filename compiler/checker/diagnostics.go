@@ -20,6 +20,8 @@ const (
 	DiagnosticCodeDuplicateDeclaration      DiagnosticCode = "duplicate_declaration"
 	DiagnosticCodeDuplicateFieldDeclaration DiagnosticCode = "duplicate_field_declaration"
 	DiagnosticCodeDuplicateImport           DiagnosticCode = "duplicate_import"
+	DiagnosticCodeUndefinedMember           DiagnosticCode = "undefined_member"
+	DiagnosticCodeUndefinedName             DiagnosticCode = "undefined_name"
 )
 
 type SourceSpan struct {
@@ -75,6 +77,81 @@ func (d Diagnostic) FilePath() string {
 
 func (d Diagnostic) Location() parse.Location {
 	return d.Primary.Span.Location
+}
+
+type undefinedNameKind uint8
+
+const (
+	undefinedVariable undefinedNameKind = iota
+	undefinedFunction
+)
+
+type undefinedNameDiagnostic struct {
+	Kind undefinedNameKind
+	Name string
+	Span SourceSpan
+}
+
+func (d undefinedNameDiagnostic) build() Diagnostic {
+	var nameKind string
+	switch d.Kind {
+	case undefinedVariable:
+		nameKind = "variable"
+	case undefinedFunction:
+		nameKind = "function"
+	default:
+		panic(fmt.Sprintf("unknown undefined-name kind: %d", d.Kind))
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Undefined %s: %s", nameKind, d.Name),
+		fmt.Sprintf("Undefined %s", nameKind),
+		"",
+		DiagnosticLabel{
+			Span:    d.Span,
+			Message: fmt.Sprintf("`%s` is not defined in this scope", d.Name),
+		},
+	)
+	diagnostic.Code = DiagnosticCodeUndefinedName
+	return diagnostic
+}
+
+type undefinedMemberKind uint8
+
+const (
+	undefinedField undefinedMemberKind = iota
+	undefinedMethod
+)
+
+type undefinedMemberDiagnostic struct {
+	Kind     undefinedMemberKind
+	Receiver string
+	Member   string
+	Span     SourceSpan
+}
+
+func (d undefinedMemberDiagnostic) build() Diagnostic {
+	var memberKind string
+	switch d.Kind {
+	case undefinedField:
+		memberKind = "field"
+	case undefinedMethod:
+		memberKind = "method"
+	default:
+		panic(fmt.Sprintf("unknown undefined-member kind: %d", d.Kind))
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Undefined: %s.%s", d.Receiver, d.Member),
+		fmt.Sprintf("Undefined %s", memberKind),
+		"",
+		DiagnosticLabel{
+			Span:    d.Span,
+			Message: fmt.Sprintf("`%s` is not defined for `%s`", d.Member, d.Receiver),
+		},
+	)
+	diagnostic.Code = DiagnosticCodeUndefinedMember
+	return diagnostic
 }
 
 type duplicateImportDiagnostic struct {

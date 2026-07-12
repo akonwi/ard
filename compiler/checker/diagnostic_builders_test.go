@@ -6,6 +6,62 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+func TestUndefinedNameDiagnostic(t *testing.T) {
+	span := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}}}
+	tests := []struct {
+		name   string
+		kind   undefinedNameKind
+		title  string
+		legacy string
+	}{
+		{name: "variable", kind: undefinedVariable, title: "Undefined variable", legacy: "Undefined variable: missing"},
+		{name: "function", kind: undefinedFunction, title: "Undefined function", legacy: "Undefined function: missing"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diagnostic := (undefinedNameDiagnostic{Kind: tt.kind, Name: "missing", Span: span}).build()
+			if diagnostic.Code != DiagnosticCodeUndefinedName || diagnostic.Title != tt.title || diagnostic.Message != tt.legacy {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+			if diagnostic.Primary.Span != span || diagnostic.Primary.Message != "`missing` is not defined in this scope" {
+				t.Fatalf("primary = %#v", diagnostic.Primary)
+			}
+		})
+	}
+}
+
+func TestUndefinedMemberDiagnostic(t *testing.T) {
+	span := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 2, Col: 8}}}
+	tests := []struct {
+		name        string
+		kind        undefinedMemberKind
+		title       string
+		legacy      string
+		primaryText string
+	}{
+		{name: "field", kind: undefinedField, title: "Undefined field", legacy: "Undefined: user.height", primaryText: "`height` is not defined for `user`"},
+		{name: "method", kind: undefinedMethod, title: "Undefined method", legacy: "Undefined: user.save", primaryText: "`save` is not defined for `user`"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			member := "height"
+			if tt.kind == undefinedMethod {
+				member = "save"
+			}
+			diagnostic := (undefinedMemberDiagnostic{Kind: tt.kind, Receiver: "user", Member: member, Span: span}).build()
+			if diagnostic.Code != DiagnosticCodeUndefinedMember || diagnostic.Title != tt.title || diagnostic.Message != tt.legacy {
+				t.Fatalf("code/title/message = %q/%q/%q", diagnostic.Code, diagnostic.Title, diagnostic.Message)
+			}
+			if diagnostic.Primary.Span != span || diagnostic.Primary.Message != tt.primaryText {
+				t.Fatalf("primary = %#v", diagnostic.Primary)
+			}
+			if len(diagnostic.Secondary) != 0 {
+				t.Fatalf("secondary = %#v, want none", diagnostic.Secondary)
+			}
+		})
+	}
+}
+
 func TestDuplicateDeclarationDiagnosticBuildsBothLabels(t *testing.T) {
 	original := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 8}}}
 	duplicate := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 2, Col: 6}}}

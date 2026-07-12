@@ -5644,7 +5644,11 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			c.recordSymbolUse(s, sym, nil)
 			return &Variable{*sym}
 		}
-		c.addError(fmt.Sprintf("Undefined variable: %s", s.Name), s.GetLocation())
+		c.addDiagnostic(undefinedNameDiagnostic{
+			Kind: undefinedVariable,
+			Name: s.Name,
+			Span: c.sourceSpan(s.GetLocation()),
+		}.build())
 		c.halted = true
 		return nil
 	case *parse.FunctionValueCall:
@@ -5680,7 +5684,11 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			// Find the function in the scope
 			fnSym, got := c.scope.get(s.Name)
 			if !got {
-				c.addError(fmt.Sprintf("Undefined function: %s", s.Name), s.GetLocation())
+				c.addDiagnostic(undefinedNameDiagnostic{
+					Kind: undefinedFunction,
+					Name: s.Name,
+					Span: c.sourceSpan(s.GetLocation()),
+				}.build())
 				return nil
 			}
 
@@ -5800,7 +5808,12 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						return nil
 					}
 				}
-				c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Property.Name), s.Property.GetLocation())
+				c.addDiagnostic(undefinedMemberDiagnostic{
+					Kind:     undefinedField,
+					Receiver: fmt.Sprint(subj),
+					Member:   s.Property.Name,
+					Span:     c.sourceSpan(s.Property.GetLocation()),
+				}.build())
 				return nil
 			}
 
@@ -5895,7 +5908,12 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					}
 				}
 				if sig == nil {
-					c.addError(fmt.Sprintf("Undefined: %s.%s", subj, s.Method.Name), s.Method.GetLocation())
+					c.addDiagnostic(undefinedMemberDiagnostic{
+						Kind:     undefinedMethod,
+						Receiver: fmt.Sprint(subj),
+						Member:   s.Method.Name,
+						Span:     c.sourceSpan(s.Method.GetLocation()),
+					}.build())
 					return nil
 				}
 			}
@@ -10028,7 +10046,12 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 
 		propType := innerType.get(p.Property.Name)
 		if propType == nil {
-			c.addError(fmt.Sprintf("Undefined: %s.%s", innerType, p.Property.Name), p.Property.GetLocation())
+			c.addDiagnostic(undefinedMemberDiagnostic{
+				Kind:     undefinedField,
+				Receiver: fmt.Sprint(innerType),
+				Member:   p.Property.Name,
+				Span:     c.sourceSpan(p.Property.GetLocation()),
+			}.build())
 			return nil
 		}
 
@@ -10090,7 +10113,12 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 					return call
 				}
 			}
-			c.addError(fmt.Sprintf("Undefined: %s.%s", innerType, p.Method.Name), p.Method.GetLocation())
+			c.addDiagnostic(undefinedMemberDiagnostic{
+				Kind:     undefinedMethod,
+				Receiver: fmt.Sprint(innerType),
+				Member:   p.Method.Name,
+				Span:     c.sourceSpan(p.Method.GetLocation()),
+			}.build())
 			return nil
 		}
 

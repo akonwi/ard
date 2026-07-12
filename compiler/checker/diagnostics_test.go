@@ -7,6 +7,127 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+func TestUndefinedMembersInMaybeAccessorChainsHaveStructuredDiagnostics(t *testing.T) {
+	prefix := "struct Profile { name: Str }\nfn test() {\n  let profile: Profile? = Maybe::new(Profile{name: \"A\"})\n  try "
+	tests := []struct {
+		name     string
+		expr     string
+		location func(parse.Statement) parse.Location
+		title    string
+		legacy   string
+	}{
+		{
+			name: "field after maybe", expr: "profile.missing",
+			location: func(stmt parse.Statement) parse.Location {
+				return stmt.(*parse.InstanceProperty).Property.GetLocation()
+			},
+			title: "Undefined field", legacy: "Undefined: Profile.missing",
+		},
+		{
+			name: "method after maybe", expr: "profile.missing()",
+			location: func(stmt parse.Statement) parse.Location { return stmt.(*parse.InstanceMethod).Method.GetLocation() },
+			title:    "Undefined method", legacy: "Undefined: Profile.missing",
+		},
+		{
+			name: "later member in chain", expr: "profile.name.missing",
+			location: func(stmt parse.Statement) parse.Location {
+				return stmt.(*parse.InstanceProperty).Property.GetLocation()
+			},
+			title: "Undefined field", legacy: "Undefined: Str.missing",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(prefix+tt.expr+" -> _ {\n  }\n}\n"), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			function := result.Program.Statements[len(result.Program.Statements)-1].(*parse.FunctionDeclaration)
+			tryExpr := function.Body[len(function.Body)-1].(*parse.Try)
+			location := tt.location(tryExpr.Expression)
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			if len(c.Diagnostics()) != 1 {
+				t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+			}
+			diagnostic := c.Diagnostics()[0]
+			if diagnostic.Code != checker.DiagnosticCodeUndefinedMember || diagnostic.Title != tt.title || diagnostic.Message != tt.legacy {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+			if diagnostic.Primary.Span.Location != location {
+				t.Fatalf("primary = %#v, want location %v", diagnostic.Primary, location)
+			}
+		})
+	}
+}
+
+func TestUndefinedNamesHaveStructuredDiagnostics(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		title   string
+		legacy  string
+		message string
+	}{
+		{name: "variable", source: "missing", title: "Undefined variable", legacy: "Undefined variable: missing", message: "`missing` is not defined in this scope"},
+		{name: "function", source: "missing()", title: "Undefined function", legacy: "Undefined function: missing", message: "`missing` is not defined in this scope"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			location := result.Program.Statements[0].GetLocation()
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			if len(c.Diagnostics()) != 1 {
+				t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+			}
+			diagnostic := c.Diagnostics()[0]
+			if diagnostic.Code != checker.DiagnosticCodeUndefinedName || diagnostic.Title != tt.title || diagnostic.Message != tt.legacy {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+			if diagnostic.Primary.Span.Location != location || diagnostic.Primary.Message != tt.message {
+				t.Fatalf("primary = %#v, want location %v", diagnostic.Primary, location)
+			}
+		})
+	}
+}
+
+func TestUndefinedInstanceMembersHaveStructuredDiagnostics(t *testing.T) {
+	const filePath = "main.ard"
+	result := parse.Parse([]byte("\"foo\".length\n\"foo\".save()\n"), filePath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	property := result.Program.Statements[0].(*parse.InstanceProperty)
+	method := result.Program.Statements[1].(*parse.InstanceMethod)
+
+	c := checker.New(filePath, result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 2 {
+		t.Fatalf("diagnostics = %#v, want two", c.Diagnostics())
+	}
+	tests := []struct {
+		diagnostic checker.Diagnostic
+		location   parse.Location
+		title      string
+		legacy     string
+	}{
+		{diagnostic: c.Diagnostics()[0], location: property.Property.GetLocation(), title: "Undefined field", legacy: `Undefined: "foo".length`},
+		{diagnostic: c.Diagnostics()[1], location: method.Method.GetLocation(), title: "Undefined method", legacy: `Undefined: "foo".save`},
+	}
+	for _, tt := range tests {
+		if tt.diagnostic.Code != checker.DiagnosticCodeUndefinedMember || tt.diagnostic.Title != tt.title || tt.diagnostic.Message != tt.legacy {
+			t.Fatalf("diagnostic = %#v", tt.diagnostic)
+		}
+		if tt.diagnostic.Primary.Span.Location != tt.location {
+			t.Fatalf("primary location = %v, want %v", tt.diagnostic.Primary.Span.Location, tt.location)
+		}
+	}
+}
+
 func TestDuplicateImportHasStructuredLabels(t *testing.T) {
 	const filePath = "main.ard"
 	result := parse.Parse([]byte("use ard/list\nuse ard/list\n"), filePath)
