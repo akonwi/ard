@@ -387,13 +387,17 @@ func isTopLevelExecutableStatement(stmt parse.Statement) bool {
 
 func (c *Checker) Check() {
 	c.primeGoResolver()
-	seenImportAliases := map[string]struct{}{}
+	seenImportAliases := map[string]parse.Location{}
 	for _, imp := range c.input.Imports {
-		if _, dup := seenImportAliases[imp.Name]; dup {
-			c.addWarning(fmt.Sprintf("%s Duplicate import: %s", imp.GetStart(), imp.Name), imp.GetLocation())
+		if original, dup := seenImportAliases[imp.Name]; dup {
+			c.addDiagnostic(duplicateImportDiagnostic{
+				Name:          imp.Name,
+				DuplicateSpan: c.sourceSpan(imp.GetLocation()),
+				OriginalSpan:  c.sourceSpan(original),
+			}.build())
 			continue
 		}
-		seenImportAliases[imp.Name] = struct{}{}
+		seenImportAliases[imp.Name] = imp.GetLocation()
 
 		if imp.Kind == parse.ImportKindGo {
 			resolver := c.options.GoResolver

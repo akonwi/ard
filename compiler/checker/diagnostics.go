@@ -16,7 +16,10 @@ const (
 type DiagnosticCode string
 
 const (
-	DiagnosticCodeTypeMismatch DiagnosticCode = "type_mismatch"
+	DiagnosticCodeTypeMismatch              DiagnosticCode = "type_mismatch"
+	DiagnosticCodeDuplicateDeclaration      DiagnosticCode = "duplicate_declaration"
+	DiagnosticCodeDuplicateFieldDeclaration DiagnosticCode = "duplicate_field_declaration"
+	DiagnosticCodeDuplicateImport           DiagnosticCode = "duplicate_import"
 )
 
 type SourceSpan struct {
@@ -72,6 +75,81 @@ func (d Diagnostic) FilePath() string {
 
 func (d Diagnostic) Location() parse.Location {
 	return d.Primary.Span.Location
+}
+
+type duplicateImportDiagnostic struct {
+	Name          string
+	DuplicateSpan SourceSpan
+	OriginalSpan  SourceSpan
+}
+
+func (d duplicateImportDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Warn,
+		fmt.Sprintf("%s Duplicate import: %s", d.DuplicateSpan.Location.Start, d.Name),
+		"Duplicate import",
+		"",
+		DiagnosticLabel{
+			Span:    d.DuplicateSpan,
+			Message: fmt.Sprintf("`%s` is imported again here", d.Name),
+		},
+		DiagnosticLabel{
+			Span:    d.OriginalSpan,
+			Message: "first imported here",
+		},
+	)
+	diagnostic.Code = DiagnosticCodeDuplicateImport
+	return diagnostic
+}
+
+type duplicateFieldDeclarationDiagnostic struct {
+	Name          string
+	DuplicateSpan SourceSpan
+	OriginalSpan  SourceSpan
+}
+
+func (d duplicateFieldDeclarationDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Duplicate field: %s", d.Name),
+		"Duplicate field declaration",
+		"",
+		DiagnosticLabel{
+			Span:    d.DuplicateSpan,
+			Message: fmt.Sprintf("field `%s` is declared again here", d.Name),
+		},
+		DiagnosticLabel{
+			Span:    d.OriginalSpan,
+			Message: "first declared here",
+		},
+	)
+	diagnostic.Code = DiagnosticCodeDuplicateFieldDeclaration
+	return diagnostic
+}
+
+type duplicateDeclarationDiagnostic struct {
+	Name          string
+	DuplicateSpan SourceSpan
+	OriginalSpan  SourceSpan
+}
+
+func (d duplicateDeclarationDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Duplicate declaration: %s", d.Name),
+		"Duplicate declaration",
+		"",
+		DiagnosticLabel{
+			Span:    d.DuplicateSpan,
+			Message: fmt.Sprintf("`%s` is declared again here", d.Name),
+		},
+		DiagnosticLabel{
+			Span:    d.OriginalSpan,
+			Message: "first declared here",
+		},
+	)
+	diagnostic.Code = DiagnosticCodeDuplicateDeclaration
+	return diagnostic
 }
 
 type typeMismatchDiagnostic struct {

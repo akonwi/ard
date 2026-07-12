@@ -6,6 +6,29 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+func TestDuplicateDeclarationDiagnosticBuildsBothLabels(t *testing.T) {
+	original := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 8}}}
+	duplicate := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 2, Col: 6}}}
+	diagnostic := (duplicateDeclarationDiagnostic{
+		Name:          "User",
+		DuplicateSpan: duplicate,
+		OriginalSpan:  original,
+	}).build()
+
+	if diagnostic.Kind != Error || diagnostic.Code != DiagnosticCodeDuplicateDeclaration {
+		t.Fatalf("kind/code = %q/%q", diagnostic.Kind, diagnostic.Code)
+	}
+	if diagnostic.Message != "Duplicate declaration: User" || diagnostic.Title != "Duplicate declaration" {
+		t.Fatalf("message/title = %q/%q", diagnostic.Message, diagnostic.Title)
+	}
+	if diagnostic.Primary.Span != duplicate || diagnostic.Primary.Message != "`User` is declared again here" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span != original || diagnostic.Secondary[0].Message != "first declared here" {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
 func TestTypeMismatchDiagnosticWithoutExpectationLabelsPrimary(t *testing.T) {
 	span := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}}}
 	diagnostic := (typeMismatchDiagnostic{

@@ -14,8 +14,12 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 		if !ok {
 			continue
 		}
-		if _, dup := seen[name]; dup {
-			c.addError(fmt.Sprintf("Duplicate declaration: %s", name), loc)
+		if original, dup := seen[name]; dup {
+			c.addDiagnostic(duplicateDeclarationDiagnostic{
+				Name:          name,
+				DuplicateSpan: c.sourceSpan(loc),
+				OriginalSpan:  c.sourceSpan(original),
+			}.build())
 			c.markDuplicateTopLevelTypeDeclaration(stmt)
 			continue
 		}
@@ -141,7 +145,7 @@ func topLevelTypeDeclarationName(stmt parse.Statement) (string, parse.Location, 
 	case *parse.TraitDefinition:
 		return s.Name.Name, s.Name.GetLocation(), true
 	case *parse.EnumDefinition:
-		return s.Name, s.GetLocation(), true
+		return s.Name, s.NameLocation, true
 	case *parse.TypeDeclaration:
 		return s.Name.Name, s.Name.GetLocation(), true
 	default:
@@ -291,16 +295,22 @@ func (c *Checker) populateStructDefinition(def *StructDef, decl *parse.StructDef
 	def.Private = decl.Private
 	resolvedGenericParams := []string{}
 	seenGenerics := make(map[string]bool)
+	fieldLocations := make(map[string]parse.Location)
 	for _, field := range decl.Fields {
 		fieldType := c.resolveType(field.Type)
 		if fieldType == nil {
 			continue
 		}
 
-		if _, dup := def.Fields[field.Name.Name]; dup {
-			c.addError(fmt.Sprintf("Duplicate field: %s", field.Name.Name), field.Name.GetLocation())
+		if original, dup := fieldLocations[field.Name.Name]; dup {
+			c.addDiagnostic(duplicateFieldDeclarationDiagnostic{
+				Name:          field.Name.Name,
+				DuplicateSpan: c.sourceSpan(field.Name.GetLocation()),
+				OriginalSpan:  c.sourceSpan(original),
+			}.build())
 			continue
 		}
+		fieldLocations[field.Name.Name] = field.Name.GetLocation()
 		def.Fields[field.Name.Name] = fieldType
 		if c.spans != nil {
 			c.spans.add(SpanRecord{
