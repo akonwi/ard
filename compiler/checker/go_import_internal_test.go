@@ -126,3 +126,29 @@ func TestTypeFromGoKeepsNamedFuncIdentity(t *testing.T) {
 		t.Fatalf("signature parameters = %#v, want (Str)", fn.Parameters)
 	}
 }
+
+func TestGoFieldsIncludeEmbeddedFieldWithoutPromotingChildren(t *testing.T) {
+	baseFields := []*types.Var{
+		types.NewField(token.NoPos, nil, "Name", types.Typ[types.String], false),
+	}
+	base := types.NewNamed(
+		types.NewTypeName(token.NoPos, nil, "Base", nil),
+		types.NewStruct(baseFields, nil),
+		nil,
+	)
+	outer := types.NewStruct(
+		[]*types.Var{types.NewField(token.NoPos, nil, "Base", base, true)},
+		nil,
+	)
+
+	fields, unsupported := goFieldsForStruct(outer)
+	if len(unsupported) != 0 {
+		t.Fatalf("unsupported fields = %v, want none", unsupported)
+	}
+	if fields["Base"] == nil {
+		t.Fatal("embedded field Base was not exposed")
+	}
+	if fields["Name"] != nil {
+		t.Fatal("embedded child field Name was promoted")
+	}
+}
