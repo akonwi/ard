@@ -185,11 +185,8 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 		paramsChanged := false
 		for i, param := range typ.Parameters {
 			derefParamType := derefTypeSeen(param.Type, seen)
-			newParams[i] = Parameter{
-				Name:    param.Name,
-				Type:    derefParamType,
-				Mutable: param.Mutable,
-			}
+			newParams[i] = param
+			newParams[i].Type = derefParamType
 			if derefParamType != param.Type {
 				paramsChanged = true
 			}
@@ -589,6 +586,23 @@ func (c *Checker) addDiagnostic(diagnostic Diagnostic) {
 
 func (c *Checker) sourceSpan(location parse.Location) SourceSpan {
 	return SourceSpan{FilePath: c.filePath, Location: location}
+}
+
+func (c *Checker) addIncorrectArgumentType(legacyMessage string, expected Type, actual Type, argumentLocation parse.Location, parameter Parameter, requiresMutable bool) {
+	var parameterSpan *SourceSpan
+	if parameter.declaredAt.FilePath != "" {
+		span := parameter.declaredAt
+		parameterSpan = &span
+	}
+	c.addDiagnostic(incorrectArgumentTypeDiagnostic{
+		LegacyMessage:   legacyMessage,
+		Expected:        expected,
+		Actual:          actual,
+		ArgumentSpan:    c.sourceSpan(argumentLocation),
+		ParameterName:   parameter.Name,
+		ParameterSpan:   parameterSpan,
+		RequiresMutable: requiresMutable,
+	}.build())
 }
 
 func (c *Checker) resolveModule(name string) Module {
@@ -1618,7 +1632,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 				c.addError(fmt.Sprintf("Go interface method '%s' parameter '%s' cannot be mutable because it would change the Go ABI", method.Name, param.Name), param.GetLocation())
 				valid = false
 			}
-			params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable}
+			params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable, Loc: param.GetLocation(), declaredAt: c.sourceSpan(param.GetLocation())}
 		}
 		returnType := Type(Void)
 		if method.ReturnType != nil {
@@ -1894,7 +1908,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						c.addUnresolvedReference(unrecognizedType, param.Type.GetName(), param.Type.GetLocation())
 						continue
 					}
-					params[j] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable}
+					params[j] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable, Loc: param.GetLocation(), declaredAt: c.sourceSpan(param.GetLocation())}
 				}
 
 				var returnType Type = Void
@@ -2021,7 +2035,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 							c.addError(fmt.Sprintf("Trait method '%s' parameter '%s' mutability mismatch", method.Name, param.Name), param.GetLocation())
 						}
 
-						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable}
+						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable, Loc: param.GetLocation(), declaredAt: c.sourceSpan(param.GetLocation())}
 					}
 
 					// Check return type
@@ -2112,7 +2126,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 							c.addError(fmt.Sprintf("Trait method '%s' parameter '%s' mutability mismatch", method.Name, param.Name), param.GetLocation())
 						}
 
-						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable}
+						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable, Loc: param.GetLocation(), declaredAt: c.sourceSpan(param.GetLocation())}
 					}
 
 					// Check return type
@@ -6555,20 +6569,22 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 				args := make([]Expression, len(resolvedExprs))
 				for i, expr := range resolvedExprs {
-					checkedArg := c.checkExprAs(expr, effectiveFnDef.Parameters[i].Type)
+					checkedArg := c.checkExprAsArgument(expr, effectiveFnDef.Parameters[i].Type, effectiveFnDef.Parameters[i])
 					if checkedArg == nil {
 						return nil
 					}
 					if !c.areCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) {
 						upcast, ok := c.foreignInterfaceArgUpcast(effectiveFnDef.Parameters[i].Type, checkedArg)
 						if !ok {
-							c.addError(typeMismatch(effectiveFnDef.Parameters[i].Type, checkedArg.Type()), expr.GetLocation())
+							legacyMessage := typeMismatch(effectiveFnDef.Parameters[i].Type, checkedArg.Type())
+							c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], false)
 							return nil
 						}
 						checkedArg = upcast
 					}
 					if effectiveFnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) && !freshContainerSatisfiesMutable(effectiveFnDef.Parameters[i].Type, checkedArg) {
-						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", effectiveFnDef.Parameters[i].Type.String()), expr.GetLocation())
+						legacyMessage := fmt.Sprintf("Type mismatch: Expected a mutable %s", effectiveFnDef.Parameters[i].Type.String())
+						c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], true)
 						return nil
 					}
 					args[i] = checkedArg
@@ -8582,8 +8598,17 @@ func (c *Checker) checkExprAs(expr parse.Expression, expectedType Type) Expressi
 	return c.checkExprAsWithExpectation(expr, expectedType, nil)
 }
 
+func (c *Checker) checkExprAsArgument(expr parse.Expression, expectedType Type, parameter Parameter) Expression {
+	result := c.checkExprAsInner(expr, expectedType, nil, &parameter)
+	if result != nil {
+		result = coerceDiscardingFunction(expectedType, result)
+		c.recordExprSpan(expr, result)
+	}
+	return result
+}
+
 func (c *Checker) checkExprAsWithExpectation(expr parse.Expression, expectedType Type, expectation *typeExpectation) Expression {
-	result := c.checkExprAsInner(expr, expectedType, expectation)
+	result := c.checkExprAsInner(expr, expectedType, expectation, nil)
 	if result != nil {
 		result = coerceDiscardingFunction(expectedType, result)
 		c.recordExprSpan(expr, result)
@@ -8623,7 +8648,7 @@ func discardingFunctionTypes(expected Type, actual Type) (*FunctionDef, *Functio
 	return target, source, true
 }
 
-func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, expectation *typeExpectation) Expression {
+func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, expectation *typeExpectation, argumentParameter *Parameter) Expression {
 	if literal := c.checkNumericLiteralAs(expr, expectedType); literal != nil {
 		return literal
 	}
@@ -8851,7 +8876,10 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 	}
 
 	if !c.areCompatible(expectedType, checked.Type()) {
-		if expectation != nil {
+		if argumentParameter != nil {
+			legacyMessage := typeMismatch(expectedType, checked.Type())
+			c.addIncorrectArgumentType(legacyMessage, expectedType, checked.Type(), expr.GetLocation(), *argumentParameter, false)
+		} else if expectation != nil {
 			c.addDiagnostic(typeMismatchDiagnostic{
 				Expected:    expectedType,
 				Actual:      checked.Type(),
@@ -8918,10 +8946,11 @@ func (c *Checker) resolveParametersWithContext(params []parse.Parameter, expecte
 		// Otherwise defaults to Void
 
 		result[i] = Parameter{
-			Name:    param.Name,
-			Type:    paramType,
-			Mutable: mutable,
-			Loc:     param.GetLocation(),
+			Name:       param.Name,
+			Type:       paramType,
+			Mutable:    mutable,
+			Loc:        param.GetLocation(),
+			declaredAt: c.sourceSpan(param.GetLocation()),
 		}
 	}
 	return result
@@ -9144,11 +9173,8 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		// Substitute generics in function parameters and return type
 		substitutedParams := make([]Parameter, len(typ.Parameters))
 		for i, param := range typ.Parameters {
-			substitutedParams[i] = Parameter{
-				Name:    param.Name,
-				Type:    substituteType(param.Type, typeMap),
-				Mutable: param.Mutable,
-			}
+			substitutedParams[i] = param
+			substitutedParams[i].Type = substituteType(param.Type, typeMap)
 		}
 		return &FunctionDef{
 			Name:                    typ.Name,
@@ -9522,10 +9548,10 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				if hasGenericsInType(expectedType) {
 					checkedArg = c.checkExpr(resolvedExprs[i])
 				} else {
-					checkedArg = c.checkExprAs(resolvedExprs[i], expectedType)
+					checkedArg = c.checkExprAsArgument(resolvedExprs[i], expectedType, fnDefCopy.Parameters[i])
 				}
 			case *parse.AnonymousFunction:
-				checkedArg = c.checkExprAs(resolvedExprs[i], expectedType)
+				checkedArg = c.checkExprAsArgument(resolvedExprs[i], expectedType, fnDefCopy.Parameters[i])
 			default:
 				checkedArg = c.checkExpr(resolvedExprs[i])
 			}
@@ -9543,7 +9569,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 					if target, source, ok := discardingFunctionTypes(maybeParam.Of(), checkedArg.Type()); ok {
 						for paramIndex := range target.Parameters {
 							if err := c.unifyTypes(target.Parameters[paramIndex].Type, source.Parameters[paramIndex].Type, genericScope); err != nil {
-								c.addError(err.Error(), resolvedExprs[i].GetLocation())
+								c.addIncorrectArgumentType(err.Error(), paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], false)
 								return nil, nil
 							}
 						}
@@ -9567,7 +9593,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			if target, source, ok := discardingFunctionTypes(paramType, checkedArg.Type()); ok {
 				for paramIndex := range target.Parameters {
 					if err := c.unifyTypes(target.Parameters[paramIndex].Type, source.Parameters[paramIndex].Type, genericScope); err != nil {
-						c.addError(err.Error(), resolvedExprs[i].GetLocation())
+						c.addIncorrectArgumentType(err.Error(), paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], false)
 						return nil, nil
 					}
 				}
@@ -9576,7 +9602,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			}
 			if !discardCoerced {
 				if err := c.unifyTypes(paramType, checkedArg.Type(), genericScope); err != nil {
-					c.addError(err.Error(), resolvedExprs[i].GetLocation())
+					c.addIncorrectArgumentType(err.Error(), paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], false)
 					return nil, nil
 				}
 			}
@@ -9586,7 +9612,8 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			if !c.areCompatible(paramType, checkedArg.Type()) {
 				upcast, ok := c.foreignInterfaceArgUpcast(paramType, checkedArg)
 				if !ok {
-					c.addError(typeMismatch(paramType, checkedArg.Type()), resolvedExprs[i].GetLocation())
+					legacyMessage := typeMismatch(paramType, checkedArg.Type())
+					c.addIncorrectArgumentType(legacyMessage, paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], false)
 					return nil, nil
 				}
 				checkedArg = upcast
@@ -9598,7 +9625,8 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// requests a defensive copy.
 		if fnDefCopy.Parameters[i].Mutable {
 			if (!c.isMutable(checkedArg) && !freshContainerSatisfiesMutable(paramType, checkedArg)) || foreignScalarNarrows(paramType, checkedArg.Type()) || foreignScalarWidens(paramType, checkedArg.Type()) {
-				c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDefCopy.Parameters[i].Type.String()), resolvedExprs[i].GetLocation())
+				legacyMessage := fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDefCopy.Parameters[i].Type.String())
+				c.addIncorrectArgumentType(legacyMessage, fnDefCopy.Parameters[i].Type, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], true)
 				return nil, nil
 			}
 			allExprs[i] = checkedArg
@@ -9657,9 +9685,12 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			// Replace generics in parameters
 			for i, param := range fnDefCopy.Parameters {
 				fnToUse.Parameters[i] = Parameter{
-					Name:    param.Name,
-					Type:    substituteType(param.Type, bindings),
-					Mutable: param.Mutable,
+					Name:       param.Name,
+					Type:       substituteType(param.Type, bindings),
+					Mutable:    param.Mutable,
+					Loc:        param.Loc,
+					declaredAt: param.declaredAt,
+					Variadic:   param.Variadic,
 				}
 			}
 		}
@@ -9746,11 +9777,8 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 
 	// Replace generics in parameters
 	for i, param := range fnDefCopy.Parameters {
-		specialized.Parameters[i] = Parameter{
-			Name:    param.Name,
-			Type:    substituteType(param.Type, bindings),
-			Mutable: param.Mutable,
-		}
+		specialized.Parameters[i] = param
+		specialized.Parameters[i].Type = substituteType(param.Type, bindings)
 	}
 
 	return specialized, nil

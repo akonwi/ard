@@ -1,6 +1,8 @@
 package checker_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -222,6 +224,147 @@ func TestImmutableAssignmentUsesInnermostBindingProvenance(t *testing.T) {
 	secondary := c.Diagnostics()[0].Secondary
 	if len(secondary) != 1 || secondary[0].Span.Location.Start.Row != 3 {
 		t.Fatalf("secondary = %#v, want inner declaration", secondary)
+	}
+}
+
+func TestMutableArgumentMismatchPointsToParameter(t *testing.T) {
+	result := parse.Parse([]byte("fn bump(value: mut Int) {}\nlet value = 1\nbump(value)\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[0].(*parse.FunctionDeclaration)
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeIncorrectArgumentType || diagnostic.Primary.Message != "this argument is not mutable" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.Parameters[0].GetLocation() {
+		t.Fatalf("secondary = %#v, want mutable parameter", diagnostic.Secondary)
+	}
+	if diagnostic.Secondary[0].Message != "parameter `value` requires a mutable `Int`" {
+		t.Fatalf("secondary label = %q", diagnostic.Secondary[0].Message)
+	}
+}
+
+func TestGenericArgumentMismatchRetainsParameterProvenance(t *testing.T) {
+	result := parse.Parse([]byte("fn same(first: $T, second: $T) {}\nsame(1, \"x\")\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[0].(*parse.FunctionDeclaration)
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeIncorrectArgumentType || len(diagnostic.Secondary) != 1 {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if diagnostic.Secondary[0].Span.Location != declaration.Parameters[1].GetLocation() {
+		t.Fatalf("secondary = %#v, want second parameter", diagnostic.Secondary[0])
+	}
+}
+
+func TestGoFunctionArgumentOmitsSyntheticParameterLabel(t *testing.T) {
+	result := parse.Parse([]byte("use go:fmt\nfmt::Fprint(\"hello\")\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeIncorrectArgumentType {
+		t.Fatalf("code = %q, want incorrect argument type", diagnostic.Code)
+	}
+	if len(diagnostic.Secondary) != 0 {
+		t.Fatalf("secondary = %#v, want no source label for Go parameter", diagnostic.Secondary)
+	}
+	if diagnostic.Primary.Message != "expected `io::Writer`, but this argument has type `Str`" {
+		t.Fatalf("primary label = %q", diagnostic.Primary.Message)
+	}
+}
+
+func TestImportedFunctionArgumentPointsToParameterModule(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.27.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	apiPath := filepath.Join(root, "api.ard")
+	apiSource := []byte("fn greet(name: Str) {}\n")
+	if err := os.WriteFile(apiPath, apiSource, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(root, "main.ard")
+	mainResult := parse.Parse([]byte("use app/api\napi::greet(42)\n"), mainPath)
+	if len(mainResult.Errors) > 0 {
+		t.Fatalf("main parse errors: %v", mainResult.Errors)
+	}
+	apiResult := parse.Parse(apiSource, apiPath)
+	if len(apiResult.Errors) > 0 {
+		t.Fatalf("api parse errors: %v", apiResult.Errors)
+	}
+	parameterLocation := apiResult.Program.Statements[0].(*parse.FunctionDeclaration).Parameters[0].GetLocation()
+
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, mainResult.Program, resolver)
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeIncorrectArgumentType || len(diagnostic.Secondary) != 1 {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	secondary := diagnostic.Secondary[0].Span
+	if filepath.Base(secondary.FilePath) != "api.ard" || secondary.Location != parameterLocation {
+		t.Fatalf("parameter span = %#v, want api.ard at %v", secondary, parameterLocation)
+	}
+}
+
+func TestIncorrectFunctionArgumentHasStructuredLabels(t *testing.T) {
+	const filePath = "main.ard"
+	result := parse.Parse([]byte("fn greet(name: Str) {}\ngreet(42)\n"), filePath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[0].(*parse.FunctionDeclaration)
+	call := result.Program.Statements[1].(*parse.FunctionCall)
+
+	c := checker.New(filePath, result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeIncorrectArgumentType {
+		t.Fatalf("code = %q, want incorrect argument type", diagnostic.Code)
+	}
+	if diagnostic.Message != "Type mismatch: Expected Str, got Int" || diagnostic.Title != "Incorrect argument type" {
+		t.Fatalf("message/title = %q/%q", diagnostic.Message, diagnostic.Title)
+	}
+	if diagnostic.Primary.Span.Location != call.Args[0].Value.GetLocation() || diagnostic.Primary.Message != "this argument has type `Int`" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.Parameters[0].GetLocation() {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+	if diagnostic.Secondary[0].Message != "parameter `name` requires `Str`" {
+		t.Fatalf("secondary label = %q", diagnostic.Secondary[0].Message)
 	}
 }
 

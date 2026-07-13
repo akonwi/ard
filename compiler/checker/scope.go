@@ -402,11 +402,8 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 	case *FunctionDef:
 		newParams := make([]Parameter, len(t.Parameters))
 		for i, p := range t.Parameters {
-			newParams[i] = Parameter{
-				Name:    p.Name,
-				Type:    replaceGeneric(p.Type, genericName, concreteType),
-				Mutable: p.Mutable,
-			}
+			newParams[i] = p
+			newParams[i].Type = replaceGeneric(p.Type, genericName, concreteType)
 		}
 		newReturnType := replaceGeneric(t.ReturnType, genericName, concreteType)
 		// Create a new FunctionDef, don't modify the original
@@ -492,10 +489,12 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 	newParams := make([]Parameter, len(fnDef.Parameters))
 	for i, param := range fnDef.Parameters {
 		newParams[i] = Parameter{
-			Name:     param.Name,
-			Type:     copyTypeWithTypeVarMap(param.Type, typeVarMap),
-			Mutable:  param.Mutable,
-			Variadic: param.Variadic,
+			Name:       param.Name,
+			Type:       copyTypeWithTypeVarMap(param.Type, typeVarMap),
+			Mutable:    param.Mutable,
+			Loc:        param.Loc,
+			declaredAt: param.declaredAt,
+			Variadic:   param.Variadic,
 		}
 	}
 

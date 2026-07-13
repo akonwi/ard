@@ -33,6 +33,7 @@ const (
 	DiagnosticCodeInvalidStaticMember       DiagnosticCode = "invalid_static_member"
 	DiagnosticCodeNotAStruct                DiagnosticCode = "not_a_struct"
 	DiagnosticCodeImmutableAssignment       DiagnosticCode = "immutable_assignment"
+	DiagnosticCodeIncorrectArgumentType     DiagnosticCode = "incorrect_argument_type"
 )
 
 type SourceSpan struct {
@@ -290,6 +291,45 @@ func (d immutableAssignmentDiagnostic) build() Diagnostic {
 		secondary...,
 	)
 	diagnostic.Code = DiagnosticCodeImmutableAssignment
+	return diagnostic
+}
+
+type incorrectArgumentTypeDiagnostic struct {
+	LegacyMessage   string
+	Expected        Type
+	Actual          Type
+	ArgumentSpan    SourceSpan
+	ParameterName   string
+	ParameterSpan   *SourceSpan
+	RequiresMutable bool
+}
+
+func (d incorrectArgumentTypeDiagnostic) build() Diagnostic {
+	primaryMessage := fmt.Sprintf("this argument has type `%s`", d.Actual)
+	if d.RequiresMutable {
+		primaryMessage = "this argument is not mutable"
+	}
+
+	secondary := make([]DiagnosticLabel, 0, 1)
+	if d.ParameterSpan != nil {
+		message := fmt.Sprintf("parameter `%s` requires `%s`", d.ParameterName, d.Expected)
+		if d.RequiresMutable {
+			message = fmt.Sprintf("parameter `%s` requires a mutable `%s`", d.ParameterName, d.Expected)
+		}
+		secondary = append(secondary, DiagnosticLabel{Span: *d.ParameterSpan, Message: message})
+	} else if !d.RequiresMutable {
+		primaryMessage = fmt.Sprintf("expected `%s`, but this argument has type `%s`", d.Expected, d.Actual)
+	}
+
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		d.LegacyMessage,
+		"Incorrect argument type",
+		"",
+		DiagnosticLabel{Span: d.ArgumentSpan, Message: primaryMessage},
+		secondary...,
+	)
+	diagnostic.Code = DiagnosticCodeIncorrectArgumentType
 	return diagnostic
 }
 
