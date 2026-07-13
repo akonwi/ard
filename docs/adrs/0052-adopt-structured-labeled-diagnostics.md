@@ -134,6 +134,163 @@ The first milestone is intentionally an end-to-end vertical slice rather than on
 
 After the reference diagnostic establishes the API, other high-value families can migrate independently, including unknown names, duplicate declarations, immutable mutation, incorrect function arguments, missing fields or methods, and import resolution errors.
 
+### Migration checklist
+
+This checklist tracks migration from compatibility diagnostics (`addError`, `addWarning`, and direct `NewDiagnostic` adaptation) to typed structured diagnostics. Check an item only when its relevant emitters use the canonical representation and focused tests cover their labels and source spans. A checked family may still gain new diagnostics later; it means the legacy emitters known at the time of migration have been addressed.
+
+#### Completed foundation and families
+
+- [x] Canonical diagnostic, label, and source-span representation
+- [x] Compatibility path for unmigrated diagnostics
+- [x] Source-aware plain-text CLI rendering
+- [x] Unicode-, wide-character-, combining-character-, and tab-aware terminal label alignment
+- [x] Source-aware UTF-16 LSP range conversion
+- [x] Multi-file LSP filtering and related information
+- [x] Type-mismatch reference vertical slice
+- [x] Unknown lexical variables and functions
+- [x] Unknown fields, methods, and accessor-chain members
+- [x] Unknown types, traits, modules, namespaces, qualified members, Go entities, enum variants, static members, constructors, assignment targets, and struct types
+- [x] Duplicate top-level type declarations
+- [x] Duplicate struct-field declarations
+- [x] Duplicate imports
+- [x] Direct immutable-variable assignment
+- [x] Incorrect function-argument types, including cross-file Ard parameter provenance and synthetic Go/builtin parameters
+
+#### Remaining checker migrations
+
+- [ ] **Import and module resolution**
+  - [ ] Failed Ard and Go imports
+  - [ ] Circular dependencies
+  - [ ] Module loading failures
+
+- [ ] **Type declarations and recursive types**
+  - [ ] Redeclaration of built-in types
+  - [ ] Recursive aliases
+  - [ ] Infinite-size recursive fields
+
+- [ ] **Generic type resolution**
+  - [ ] Unresolved and unbound generics
+  - [ ] Specialization of non-generic types
+  - [ ] Incorrect and missing type arguments
+  - [ ] Unsupported recursive generic references
+  - [ ] Method-introduced generic parameters
+
+- [ ] **Type validity**
+  - [ ] Invalid map key types
+  - [ ] Malformed internal type nodes
+
+- [ ] **Remaining type mismatches**
+  - [ ] Branch and return mismatches
+  - [ ] Assignment and property mismatches
+  - [ ] List, fixed-array, and map mismatches
+  - [ ] Struct-literal field mismatches
+  - [ ] `Result`, `Maybe`, and `try` mismatches
+  - [ ] Interface and trait parameter mismatches
+  - [ ] String interpolation mismatches
+
+- [ ] **Mutable references and indirect mutation**
+  - [ ] Mutable references to immutable values
+  - [ ] Reference rebinding and unreachable referent assignment
+  - [ ] Immutable property assignment
+  - [ ] Mutating calls and pointer-receiver calls on immutable values
+  - [ ] Assignment to Go constants and static properties
+
+- [ ] **Function and method call shape**
+  - [ ] Calling non-functions
+  - [ ] Incorrect argument counts and missing parameters
+  - [ ] Unknown named arguments
+  - [ ] Named arguments on unsupported Go and foreign calls
+  - [ ] Invalid function type arguments
+
+- [ ] **Function returns, closures, and tests**
+  - [ ] Function-body return mismatches
+  - [ ] Value-producing `if` without `else`
+  - [ ] Invalid test placement, parameters, generics, and return types
+
+- [ ] **Traits, interfaces, and implementations**
+  - [ ] Invalid implementation targets
+  - [ ] Methods absent from a trait or interface
+  - [ ] Incorrect method parameter counts and mutability
+  - [ ] Incorrect method return types
+  - [ ] Missing required methods
+  - [ ] Duplicate methods
+  - [ ] Mutating enum methods
+
+- [ ] **Enums**
+  - [ ] Empty enums
+  - [ ] Duplicate variants
+  - [ ] Non-integer discriminants
+  - [ ] Duplicate discriminant values
+
+- [ ] **Collection and struct literals**
+  - [ ] Empty untyped lists and maps
+  - [ ] Fixed-array length mismatches and mixed list element types
+  - [ ] Map key and value mismatches
+  - [ ] Repeated fields in struct literals
+  - [ ] Missing struct fields
+  - [ ] Invalid struct type arguments and Go struct literal forms
+
+- [ ] **Go FFI and generic Go entities**
+  - [ ] Incorrect Go type-argument counts
+  - [ ] Conflicting or uninferable type arguments
+  - [ ] Unsatisfied Go constraints
+  - [ ] Unsupported Go functions, methods, fields, constants, and variables
+  - [ ] Invalid generic Go type instantiation
+  - [ ] Generic Go functions referenced as values
+
+- [ ] **Control flow**
+  - [ ] Invalid `defer` placement and form
+  - [ ] Invalid `break`
+  - [ ] Non-boolean loop conditions
+  - [ ] Invalid `for` initialization and update
+  - [ ] Invalid ranges and unsupported iteration targets
+
+- [ ] **Operators and comparisons**
+  - [ ] Invalid unary negation
+  - [ ] Arithmetic between incompatible types
+  - [ ] Unsupported operand types
+  - [ ] Invalid comparisons and boolean operations
+  - [ ] Chained equality operators
+
+- [ ] **Conditionals**
+  - [ ] Non-boolean conditions
+  - [ ] Inconsistent branch result types
+  - [ ] Missing `else` when used as a value
+
+- [ ] **Match and pattern diagnostics**
+  - [ ] Invalid pattern forms
+  - [ ] Duplicate cases and catch-all cases
+  - [ ] Missing exhaustive cases
+  - [ ] Invalid foreign-type patterns
+  - [ ] Enum, union, boolean, string, rune, and integer match errors
+  - [ ] Invalid and duplicate `select` arms
+  - [ ] Ignored-pattern warnings
+
+- [ ] **`try`, `Result`, and `Maybe` propagation**
+  - [ ] Invalid `try` contexts, including deferred work
+  - [ ] Incompatible enclosing return types
+  - [ ] Invalid catch and result error types
+  - [ ] Invalid `Maybe::new` arguments
+
+- [ ] **Literal and conversion validation**
+  - [ ] Invalid rune, integer, and float literals
+  - [ ] Numeric overflow
+  - [ ] Invalid `Str::from` and numeric conversions
+  - [ ] Non-stringable interpolation values
+
+- [ ] **Unsafe API usage**
+  - [ ] Missing `ard/unsafe` imports
+  - [ ] Invalid `unsafe::cast` arguments and type arguments
+  - [ ] Invalid `unsafe::is_nil` arguments and type arguments
+
+- [ ] **Opaque helper-generated errors**
+  - [ ] Replace generic binding, argument resolution, and call-resolution `err.Error()` emissions with typed helper errors and diagnostics
+
+#### Diagnostics outside the checker
+
+- [ ] Adapt parser diagnostics into the canonical structured representation for LSP publication
+- [ ] Represent relevant frontend and resolver failures as structured diagnostics where source spans are available
+
 ## Consequences
 
 - Checker diagnostics can explain both where a failure occurs and why a constraint exists.
