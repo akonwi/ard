@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/width"
 
 	"github.com/akonwi/ard/checker"
 )
@@ -105,29 +108,61 @@ func renderLabel(w io.Writer, label checker.DiagnosticLabel, source SourceProvid
 	if _, err := fmt.Fprintf(w, "%d | %s\n", row, line); err != nil {
 		return err
 	}
-	start, width := underline(label, len(line))
-	_, err = fmt.Fprintf(w, "  | %s%s %s\n", strings.Repeat(" ", start), strings.Repeat("^", width), label.Message)
+	start, underlineWidth := underline(label, line)
+	_, err = fmt.Fprintf(w, "  | %s%s %s\n", strings.Repeat(" ", start), strings.Repeat("^", underlineWidth), label.Message)
 	return err
 }
 
-func underline(label checker.DiagnosticLabel, lineLength int) (int, int) {
-	start := label.Span.Location.Start.Col - 1
-	if start < 0 {
-		start = 0
+func underline(label checker.DiagnosticLabel, line string) (int, int) {
+	startByte := label.Span.Location.Start.Col - 1
+	if startByte < 0 {
+		startByte = 0
 	}
-	if start > lineLength {
-		start = lineLength
+	if startByte > len(line) {
+		startByte = len(line)
 	}
-	end := label.Span.Location.End.Col
+	endByte := label.Span.Location.End.Col
 	if label.Span.Location.End.Row != label.Span.Location.Start.Row {
-		end = lineLength
+		endByte = len(line)
 	}
-	width := end - start
-	if width < 1 {
-		width = 1
+	if endByte < startByte {
+		endByte = startByte
 	}
-	if start+width > lineLength && lineLength > start {
-		width = lineLength - start
+	if endByte > len(line) {
+		endByte = len(line)
 	}
-	return start, width
+
+	start := displayWidth(line[:startByte], 0)
+	underlineWidth := displayWidth(line[startByte:endByte], start)
+	if underlineWidth < 1 {
+		underlineWidth = 1
+	}
+	return start, underlineWidth
+}
+
+func displayWidth(s string, column int) int {
+	start := column
+	for _, r := range s {
+		switch {
+		case r == '\t':
+			column += 8 - column%8
+		case unicode.Is(unicode.Mn, r), unicode.Is(unicode.Me, r), unicode.Is(unicode.Cf, r):
+			// Combining and formatting runes occupy no terminal cell.
+		case isWideRune(r):
+			column += 2
+		default:
+			column++
+		}
+	}
+	return column - start
+}
+
+func isWideRune(r rune) bool {
+	kind := width.LookupRune(r).Kind()
+	if kind == width.EastAsianWide || kind == width.EastAsianFullwidth {
+		return true
+	}
+	// Emoji are generally classified as neutral by Unicode's East Asian width
+	// data but rendered as two cells by modern terminals.
+	return r >= 0x1F000 && r <= 0x1FAFF
 }

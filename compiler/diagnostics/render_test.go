@@ -49,6 +49,43 @@ func TestRenderLabeledDiagnostic(t *testing.T) {
 	}
 }
 
+func TestRenderUsesTerminalDisplayColumns(t *testing.T) {
+	tests := []struct {
+		name       string
+		line       string
+		startByte  int
+		wantSpaces int
+	}{
+		{name: "BMP rune", line: "é x", startByte: len("é "), wantSpaces: 2},
+		{name: "astral wide rune", line: "😀 x", startByte: len("😀 "), wantSpaces: 3},
+		{name: "tab", line: "\tx", startByte: 1, wantSpaces: 8},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diagnostic := checker.Diagnostic{
+				Kind: checker.Error,
+				Primary: checker.DiagnosticLabel{
+					Span: checker.SourceSpan{FilePath: "main.ard", Location: parse.Location{
+						Start: parse.Point{Row: 1, Col: tt.startByte + 1},
+						End:   parse.Point{Row: 1, Col: tt.startByte + 1},
+					}},
+					Message: "here",
+				},
+			}
+			provider := func(string) ([]byte, error) { return []byte(tt.line + "\n"), nil }
+
+			var output bytes.Buffer
+			if err := diagnostics.RenderDiagnostic(&output, diagnostic, provider); err != nil {
+				t.Fatal(err)
+			}
+			want := "  | " + string(bytes.Repeat([]byte(" "), tt.wantSpaces)) + "^ here\n"
+			if !bytes.Contains(output.Bytes(), []byte(want)) {
+				t.Fatalf("output missing %q:\n%s", want, output.String())
+			}
+		})
+	}
+}
+
 func TestRenderLoadsCrossFileSecondarySource(t *testing.T) {
 	diagnostic := checker.Diagnostic{
 		Kind:  checker.Error,
