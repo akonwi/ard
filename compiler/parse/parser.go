@@ -492,10 +492,11 @@ func (p *parser) parseVariableDef() (Statement, error) {
 	end := value.GetLocation().End
 	p.match(new_line)
 	return &VariableDeclaration{
-		Mutable: kind == mut,
-		Name:    name.text,
-		Value:   value,
-		Type:    declaredType,
+		Mutable:      kind == mut,
+		Name:         name.text,
+		NameLocation: name.getLocation(),
+		Value:        value,
+		Type:         declaredType,
 		Location: Location{
 			Start: Point{Row: start.line, Col: start.column},
 			End:   end,

@@ -32,6 +32,7 @@ const (
 	DiagnosticCodeUndefinedEnumVariant      DiagnosticCode = "undefined_enum_variant"
 	DiagnosticCodeInvalidStaticMember       DiagnosticCode = "invalid_static_member"
 	DiagnosticCodeNotAStruct                DiagnosticCode = "not_a_struct"
+	DiagnosticCodeImmutableAssignment       DiagnosticCode = "immutable_assignment"
 )
 
 type SourceSpan struct {
@@ -260,6 +261,35 @@ func (d undefinedMemberDiagnostic) build() Diagnostic {
 		},
 	)
 	diagnostic.Code = DiagnosticCodeUndefinedMember
+	return diagnostic
+}
+
+type immutableAssignmentDiagnostic struct {
+	Name            string
+	AssignmentSpan  SourceSpan
+	DeclarationSpan SourceSpan
+}
+
+func (d immutableAssignmentDiagnostic) build() Diagnostic {
+	secondary := []DiagnosticLabel{}
+	if d.DeclarationSpan.FilePath != "" {
+		secondary = append(secondary, DiagnosticLabel{
+			Span:    d.DeclarationSpan,
+			Message: fmt.Sprintf("`%s` was declared immutable here", d.Name),
+		})
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"Immutable variable: "+d.Name,
+		"Cannot assign to immutable variable",
+		"",
+		DiagnosticLabel{
+			Span:    d.AssignmentSpan,
+			Message: fmt.Sprintf("cannot assign to `%s`", d.Name),
+		},
+		secondary...,
+	)
+	diagnostic.Code = DiagnosticCodeImmutableAssignment
 	return diagnostic
 }
 

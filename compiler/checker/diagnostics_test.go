@@ -178,6 +178,53 @@ func TestUndefinedInstanceMembersHaveStructuredDiagnostics(t *testing.T) {
 	}
 }
 
+func TestImmutableVariableAssignmentHasStructuredLabels(t *testing.T) {
+	const filePath = "main.ard"
+	result := parse.Parse([]byte("let count = 0\ncount = 1\n"), filePath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+
+	declaration := result.Program.Statements[0].(*parse.VariableDeclaration).NameLocation
+	assignment := result.Program.Statements[1].(*parse.VariableAssignment).Target.GetLocation()
+	c := checker.New(filePath, result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Kind != checker.Error || diagnostic.Code != checker.DiagnosticCodeImmutableAssignment {
+		t.Fatalf("kind/code = %q/%q", diagnostic.Kind, diagnostic.Code)
+	}
+	if diagnostic.Message != "Immutable variable: count" || diagnostic.Title != "Cannot assign to immutable variable" {
+		t.Fatalf("message/title = %q/%q", diagnostic.Message, diagnostic.Title)
+	}
+	if diagnostic.Primary.Span != (checker.SourceSpan{FilePath: filePath, Location: assignment}) || diagnostic.Primary.Message != "cannot assign to `count`" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span != (checker.SourceSpan{FilePath: filePath, Location: declaration}) || diagnostic.Secondary[0].Message != "`count` was declared immutable here" {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
+func TestImmutableAssignmentUsesInnermostBindingProvenance(t *testing.T) {
+	result := parse.Parse([]byte("let value = 1\nfn main() {\n  let value = 2\n  value = 3\n}\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+	secondary := c.Diagnostics()[0].Secondary
+	if len(secondary) != 1 || secondary[0].Span.Location.Start.Row != 3 {
+		t.Fatalf("secondary = %#v, want inner declaration", secondary)
+	}
+}
+
 func TestDuplicateImportHasStructuredLabels(t *testing.T) {
 	const filePath = "main.ard"
 	result := parse.Parse([]byte("use ard/list\nuse ard/list\n"), filePath)

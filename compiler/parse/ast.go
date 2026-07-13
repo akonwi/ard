@@ -107,10 +107,11 @@ func (c Comment) String() string {
 
 type VariableDeclaration struct {
 	Location
-	Name    string
-	Mutable bool
-	Value   Expression
-	Type    DeclaredType
+	Name         string
+	NameLocation Location
+	Mutable      bool
+	Value        Expression
+	Type         DeclaredType
 }
 
 type DeclaredType interface {

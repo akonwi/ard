@@ -282,13 +282,24 @@ func (c *Checker) recordExprSpan(source parse.Expression, node Expression) {
 	c.spans.add(rec)
 }
 
-// recordBinding records a local symbol's definition site.
+// recordBinding retains a local symbol's definition site for diagnostics and,
+// when enabled, semantic span indexing.
 func (c *Checker) recordBinding(loc parse.Location, sym *Symbol) {
-	if c.spans == nil || sym == nil {
+	c.recordBindingWithSpan(loc, loc, sym)
+}
+
+// recordBindingWithSpan allows diagnostics to use a precise declaration name
+// while preserving a broader semantic span used by hover and navigation.
+func (c *Checker) recordBindingWithSpan(declarationLoc parse.Location, semanticLoc parse.Location, sym *Symbol) {
+	if sym == nil {
+		return
+	}
+	sym.declaredAt = c.sourceSpan(declarationLoc)
+	if c.spans == nil {
 		return
 	}
 	c.spans.add(SpanRecord{
-		Loc:   loc,
+		Loc:   semanticLoc,
 		Key:   sym,
 		IsDef: true,
 	})

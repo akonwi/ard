@@ -37,9 +37,10 @@ type SymbolTable struct {
 type GenericContext = map[string]*TypeVar
 
 type Symbol struct {
-	Name    string
-	Type    Type
-	mutable bool
+	Name       string
+	Type       Type
+	declaredAt SourceSpan
+	mutable    bool
 }
 
 func (s Symbol) IsZero() bool {

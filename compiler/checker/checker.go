@@ -2286,7 +2286,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				__type:  __type,
 			}
 			bound := c.scope.add(v.Name, v.__type, v.Mutable)
-			c.recordBinding(s.GetLocation(), bound)
+			c.recordBindingWithSpan(s.NameLocation, s.GetLocation(), bound)
 			if c.spans != nil && c.scope.parent == nil {
 				// Module-level values are importable; give them a canonical
 				// identity for cross-module references.
@@ -2327,7 +2327,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						return nil
 					}
 				} else if !target.mutable {
-					c.addError(fmt.Sprintf("Immutable variable: %s", target.Name), s.Target.GetLocation())
+					c.addDiagnostic(immutableAssignmentDiagnostic{
+						Name:            target.Name,
+						AssignmentSpan:  c.sourceSpan(s.Target.GetLocation()),
+						DeclarationSpan: target.declaredAt,
+					}.build())
 					return nil
 				}
 
