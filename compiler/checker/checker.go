@@ -418,7 +418,7 @@ func (c *Checker) Check() {
 			if mod, ok := findInStdLib(imp.Path); ok {
 				c.program.Imports[imp.Name] = mod
 			} else {
-				c.addError(fmt.Sprintf("Unknown module: %s", imp.Path), imp.GetLocation())
+				c.addUnresolvedReference(unknownModule, imp.Path, imp.GetLocation())
 			}
 		} else {
 			// Handle user module imports
@@ -997,7 +997,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 				}
 			}
 		}
-		c.addError(fmt.Sprintf("Unrecognized type: %s", t.GetName()), t.GetLocation())
+		c.addUnresolvedReference(unrecognizedType, t.GetName(), t.GetLocation())
 		return &TypeVar{name: "unknown"}
 	case *parse.GenericType:
 		if !c.genericAllowedInCurrentMethod(ty.Name) {
@@ -1178,7 +1178,7 @@ func (c *Checker) checkForeignTypeMatch(s *parse.MatchExpression, subject Expres
 			}
 			goPkg := c.program.GoImports[nsIdent.Name]
 			if goPkg == nil {
-				c.addError(fmt.Sprintf("Unknown Go namespace: %s", nsIdent.Name), nsIdent.GetLocation())
+				c.addUnresolvedReference(unknownGoNamespace, nsIdent.Name, nsIdent.GetLocation())
 				continue
 			}
 			typ := goPkg.Types[p.Function.Name]
@@ -1186,7 +1186,7 @@ func (c *Checker) checkForeignTypeMatch(s *parse.MatchExpression, subject Expres
 				if reason := goPkg.UnsupportedTypes[p.Function.Name]; reason != "" {
 					c.addError(fmt.Sprintf("Unsupported Go type %s::%s: %s", nsIdent.Name, p.Function.Name, reason), matchCase.Pattern.GetLocation())
 				} else {
-					c.addError(fmt.Sprintf("Unrecognized type: %s::%s", nsIdent.Name, p.Function.Name), matchCase.Pattern.GetLocation())
+					c.addUnresolvedReference(unrecognizedType, fmt.Sprintf("%s::%s", nsIdent.Name, p.Function.Name), matchCase.Pattern.GetLocation())
 				}
 				continue
 			}
@@ -1547,7 +1547,7 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementation, iface *ForeignType) *Statement {
 	typeSym, ok := c.scope.get(s.ForType.Name)
 	if !ok {
-		c.addError(fmt.Sprintf("Undefined type: %s", s.ForType.Name), s.ForType.GetLocation())
+		c.addUnresolvedReference(undefinedType, s.ForType.Name, s.ForType.GetLocation())
 		return nil
 	}
 	targetType, ok := typeSym.Type.(*StructDef)
@@ -1602,7 +1602,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 		for i, param := range method.Parameters {
 			paramType, paramMutable := c.resolveParameterType(param.Type)
 			if paramType == nil {
-				c.addError(fmt.Sprintf("Unrecognized type: %s", param.Type.GetName()), param.Type.GetLocation())
+				c.addUnresolvedReference(unrecognizedType, param.Type.GetName(), param.Type.GetLocation())
 				valid = false
 				continue
 			}
@@ -1624,7 +1624,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 		if method.ReturnType != nil {
 			returnType = c.resolveType(method.ReturnType)
 			if returnType == nil {
-				c.addError(fmt.Sprintf("Unrecognized return type: %s", method.ReturnType.GetName()), method.ReturnType.GetLocation())
+				c.addUnresolvedReference(unrecognizedReturnType, method.ReturnType.GetName(), method.ReturnType.GetLocation())
 				valid = false
 			}
 		}
@@ -1891,7 +1891,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				for j, param := range method.Parameters {
 					paramType, paramMutable := c.resolveParameterType(param.Type)
 					if paramType == nil {
-						c.addError(fmt.Sprintf("Unrecognized type: %s", param.Type.GetName()), param.Type.GetLocation())
+						c.addUnresolvedReference(unrecognizedType, param.Type.GetName(), param.Type.GetLocation())
 						continue
 					}
 					params[j] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable}
@@ -1901,7 +1901,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				if method.ReturnType != nil {
 					returnType = c.resolveType(method.ReturnType)
 					if returnType == nil {
-						c.addError(fmt.Sprintf("Unrecognized return type: %s", method.ReturnType.GetName()), method.ReturnType.GetLocation())
+						c.addUnresolvedReference(unrecognizedReturnType, method.ReturnType.GetName(), method.ReturnType.GetLocation())
 						continue
 					}
 				}
@@ -1952,7 +1952,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			if sym.IsZero() {
-				c.addError(fmt.Sprintf("Undefined trait: %s", s.Trait), s.Trait.GetLocation())
+				c.addUnresolvedReference(undefinedTrait, s.Trait.String(), s.Trait.GetLocation())
 				return nil
 			}
 
@@ -1968,7 +1968,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			// Check that the type exists
 			typeSym, ok := c.scope.get(s.ForType.Name)
 			if !ok {
-				c.addError(fmt.Sprintf("Undefined type: %s", s.ForType.Name), s.ForType.GetLocation())
+				c.addUnresolvedReference(undefinedType, s.ForType.Name, s.ForType.GetLocation())
 				return nil
 			}
 
@@ -2184,7 +2184,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			for i, declType := range s.Type {
 				resolvedType := c.resolveType(declType)
 				if resolvedType == nil {
-					c.addError(fmt.Sprintf("Unrecognized type: %s", declType.GetName()), declType.GetLocation())
+					c.addUnresolvedReference(unrecognizedType, declType.GetName(), declType.GetLocation())
 					return nil
 				}
 				types[i] = resolvedType
@@ -2308,7 +2308,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					c.recordSymbolUse(id, target, nil)
 				}
 				if !ok {
-					c.addError(fmt.Sprintf("Undefined: %s", id.Name), s.Target.GetLocation())
+					c.addUnresolvedReference(undefinedAssignmentTarget, id.Name, s.Target.GetLocation())
 					return nil
 				}
 
@@ -2443,7 +2443,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 								c.addError(fmt.Sprintf("Unsupported Go variable %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
 								return nil
 							}
-							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
+							c.addUnresolvedReference(undefinedQualifiedMember, fmt.Sprintf("%s::%s", id.Name, prop.Name), prop.GetLocation())
 							return nil
 						}
 					}
@@ -2780,7 +2780,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 		{
 			sym, ok := c.scope.get(s.Target.Name)
 			if !ok {
-				c.addError(fmt.Sprintf("Undefined: %s", s.Target), s.Target.GetLocation())
+				c.addUnresolvedReference(undefinedType, s.Target.String(), s.Target.GetLocation())
 				return nil
 			}
 			if isNominalType(sym.Type) {
@@ -4241,7 +4241,7 @@ func (c *Checker) validateForeignStructInstance(foreign *ForeignType, typeArgs [
 			if reason := foreign.UnsupportedFields[name]; reason != "" {
 				c.addError(fmt.Sprintf("Unsupported foreign field %s.%s: %s", foreign, name, reason), property.GetLocation())
 			} else {
-				c.addError(fmt.Sprintf("Unknown field: %s", name), property.GetLocation())
+				c.addUnresolvedReference(unknownStructField, name, property.GetLocation())
 			}
 			continue
 		}
@@ -4525,7 +4525,7 @@ func (c *Checker) resolveStructTypeArgs(instance *parse.StructInstance) ([]Type,
 	for i, arg := range instance.TypeArgs {
 		resolved := c.resolveType(arg)
 		if resolved == nil {
-			c.addError(fmt.Sprintf("Unrecognized type: %s", arg.GetName()), arg.GetLocation())
+			c.addUnresolvedReference(unrecognizedType, arg.GetName(), arg.GetLocation())
 			return nil, false
 		}
 		typeArgs[i] = resolved
@@ -4606,7 +4606,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		}
 
 		if !ok {
-			c.addError(fmt.Sprintf("Unknown field: %s", fieldName), property.GetLocation())
+			c.addUnresolvedReference(unknownStructField, fieldName, property.GetLocation())
 		} else {
 			providedFields[fieldName] = true
 
@@ -6525,7 +6525,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					if reason, ok := goPkg.UnsupportedFunctions[name]; ok {
 						c.addError(fmt.Sprintf("Unsupported Go function %s::%s: %s", modName, name, reason), s.GetLocation())
 					} else {
-						c.addError(fmt.Sprintf("Undefined Go function: %s::%s", modName, name), s.GetLocation())
+						c.addUnresolvedReference(undefinedGoFunction, fmt.Sprintf("%s::%s", modName, name), s.GetLocation())
 					}
 					return nil
 				}
@@ -6575,7 +6575,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			var fnDef *FunctionDef
 			mod := c.resolveModule(modName)
 			if mod == nil {
-				c.addError(fmt.Sprintf("Undefined module: %s", modName), s.Target.GetLocation())
+				c.addUnresolvedReference(undefinedModule, modName, s.Target.GetLocation())
 				return nil
 			}
 			if mod.Path() == "builtin/Maybe" && name == "new" {
@@ -6585,7 +6585,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			sym := mod.Get(name)
 			if sym.IsZero() {
 				targetName := s.Target.String()
-				c.addError(fmt.Sprintf("Undefined: %s::%s", targetName, s.Function.Name), s.GetLocation())
+				c.addUnresolvedReference(undefinedQualifiedMember, fmt.Sprintf("%s::%s", targetName, s.Function.Name), s.GetLocation())
 				return nil
 			}
 
@@ -7654,13 +7654,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							c.addError(fmt.Sprintf("Unsupported Go variable %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
 							return nil
 						}
-						c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
+						c.addUnresolvedReference(undefinedQualifiedMember, fmt.Sprintf("%s::%s", id.Name, prop.Name), prop.GetLocation())
 						return nil
 					case *parse.StructInstance:
 						typ := goPkg.Types[prop.Name.Name]
 						foreign, ok := typ.(*ForeignType)
 						if !ok {
-							c.addError(fmt.Sprintf("Undefined Go type: %s::%s", id.Name, prop.Name.Name), prop.Name.GetLocation())
+							c.addUnresolvedReference(undefinedGoType, fmt.Sprintf("%s::%s", id.Name, prop.Name.Name), prop.Name.GetLocation())
 							return nil
 						}
 						instance := c.validateForeignStructInstance(foreign, prop.TypeArgs, prop.Properties, prop.GetLocation())
@@ -7685,7 +7685,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						// Look up the struct symbol directly from the module
 						sym := mod.Get(prop.Name.Name)
 						if sym.IsZero() {
-							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name.Name), prop.Name.GetLocation())
+							c.addUnresolvedReference(undefinedQualifiedMember, fmt.Sprintf("%s::%s", id.Name, prop.Name.Name), prop.Name.GetLocation())
 							return nil
 						}
 
@@ -7714,7 +7714,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					case *parse.Identifier:
 						sym := mod.Get(prop.Name)
 						if sym.IsZero() {
-							c.addError(fmt.Sprintf("Undefined: %s::%s", id.Name, prop.Name), prop.GetLocation())
+							c.addUnresolvedReference(undefinedQualifiedMember, fmt.Sprintf("%s::%s", id.Name, prop.Name), prop.GetLocation())
 							return nil
 						}
 						node := &ModuleSymbol{Module: mod.Path(), Symbol: Symbol{Name: prop.Name, Type: sym.Type}}
@@ -7729,7 +7729,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				// Handle local enum variants or static functions (not from modules)
 				sym, ok := c.scope.get(id.Name)
 				if !ok {
-					c.addError(fmt.Sprintf("Undefined: %s", id.Name), id.GetLocation())
+					c.addUnresolvedReference(undefinedStaticRoot, id.Name, id.GetLocation())
 					return nil
 				}
 
@@ -7747,7 +7747,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				// Check if it's an enum variant
 				enum, ok := sym.Type.(*Enum)
 				if !ok {
-					c.addError(fmt.Sprintf("Undefined: %s::%s", sym.Name, s.Property), id.GetLocation())
+					c.addUnresolvedReference(invalidStaticMember, fmt.Sprintf("%s::%s", sym.Name, s.Property), id.GetLocation())
 					return nil
 				}
 
@@ -7759,7 +7759,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					}
 				}
 				if variant == -1 {
-					c.addError(fmt.Sprintf("Undefined: %s::%s", sym.Name, s.Property.(*parse.Identifier).Name), id.GetLocation())
+					c.addUnresolvedReference(undefinedEnumVariant, fmt.Sprintf("%s::%s", sym.Name, s.Property.(*parse.Identifier).Name), id.GetLocation())
 					return nil
 				}
 
@@ -7789,7 +7789,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						}
 					}
 					if variant == -1 {
-						c.addError(fmt.Sprintf("Undefined: %s::%s", enum.Name, s.Property.(*parse.Identifier).Name), s.Property.GetLocation())
+						c.addUnresolvedReference(undefinedEnumVariant, fmt.Sprintf("%s::%s", enum.Name, s.Property.(*parse.Identifier).Name), s.Property.GetLocation())
 						return nil
 					}
 
@@ -7814,13 +7814,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 		name := s.Name.Name
 		sym, ok := c.scope.get(name)
 		if !ok {
-			c.addError(fmt.Sprintf("Undefined: %s", name), s.GetLocation())
+			c.addUnresolvedReference(undefinedStructType, name, s.GetLocation())
 			return nil
 		}
 
 		structType, ok := sym.Type.(*StructDef)
 		if !ok {
-			c.addError(fmt.Sprintf("Undefined: %s", name), s.GetLocation())
+			c.addUnresolvedReference(notAStruct, name, s.GetLocation())
 			return nil
 		}
 		if !strings.Contains(name, "::") {
@@ -8767,13 +8767,13 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			moduleName := target.Name
 			mod := c.resolveModule(moduleName)
 			if mod == nil {
-				c.addError(fmt.Sprintf("Undefined: %s", moduleName), s.GetLocation())
+				c.addUnresolvedReference(undefinedStaticRoot, moduleName, s.GetLocation())
 				return nil
 			}
 
 			sym := mod.Get(s.Function.Name)
 			if sym.IsZero() {
-				c.addError(fmt.Sprintf("Undefined: %s::%s", moduleName, s.Function.Name), s.GetLocation())
+				c.addUnresolvedReference(undefinedQualifiedMember, fmt.Sprintf("%s::%s", moduleName, s.Function.Name), s.GetLocation())
 				return nil
 			}
 

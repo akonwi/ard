@@ -7,6 +7,56 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+func TestRemainingUnresolvedReferencesHaveStructuredDiagnostics(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		code    checker.DiagnosticCode
+		message string
+		span    func(*parse.Program) parse.Location
+	}{
+		{name: "type", source: "let value: Missing = 1", code: checker.DiagnosticCodeUndefinedType, message: "Unrecognized type: Missing"},
+		{name: "struct field", source: "struct User { name: Str }\nUser{name: \"A\", missing: 1}", code: checker.DiagnosticCodeUnknownField, message: "Unknown field: missing"},
+		{name: "assignment target", source: "missing = 1", code: checker.DiagnosticCodeUndefinedName, message: "Undefined: missing", span: func(program *parse.Program) parse.Location {
+			return program.Statements[0].(*parse.VariableAssignment).Target.GetLocation()
+		}},
+		{name: "static root", source: "Missing::value", code: checker.DiagnosticCodeUndefinedName, message: "Undefined: Missing", span: func(program *parse.Program) parse.Location {
+			return program.Statements[0].(*parse.StaticProperty).Target.GetLocation()
+		}},
+		{name: "enum variant", source: "enum Color { red }\nColor::missing", code: checker.DiagnosticCodeUndefinedEnumVariant, message: "Undefined: Color::missing", span: func(program *parse.Program) parse.Location {
+			return program.Statements[1].(*parse.StaticProperty).Target.GetLocation()
+		}},
+		{name: "undefined struct", source: "Missing{}", code: checker.DiagnosticCodeUndefinedType, message: "Undefined: Missing", span: func(program *parse.Program) parse.Location {
+			return program.Statements[0].(*parse.StructInstance).GetLocation()
+		}},
+		{name: "not a struct", source: "let value = 1\nvalue{}", code: checker.DiagnosticCodeNotAStruct, message: "Undefined: value", span: func(program *parse.Program) parse.Location {
+			return program.Statements[1].(*parse.StructInstance).GetLocation()
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			for _, diagnostic := range c.Diagnostics() {
+				if diagnostic.Message == tt.message {
+					if diagnostic.Code != tt.code || diagnostic.Primary.Message == "" {
+						t.Fatalf("diagnostic = %#v", diagnostic)
+					}
+					if tt.span != nil && diagnostic.Primary.Span.Location != tt.span(result.Program) {
+						t.Fatalf("primary span = %v, want %v", diagnostic.Primary.Span.Location, tt.span(result.Program))
+					}
+					return
+				}
+			}
+			t.Fatalf("diagnostics = %#v, missing %q", c.Diagnostics(), tt.message)
+		})
+	}
+}
+
 func TestUndefinedMembersInMaybeAccessorChainsHaveStructuredDiagnostics(t *testing.T) {
 	prefix := "struct Profile { name: Str }\nfn test() {\n  let profile: Profile? = Maybe::new(Profile{name: \"A\"})\n  try "
 	tests := []struct {

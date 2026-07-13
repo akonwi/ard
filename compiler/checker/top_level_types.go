@@ -416,7 +416,7 @@ func (c *Checker) resolveTopLevelTypeAlias(name string) Type {
 	}
 	resolvedType := c.resolveType(decl.Type[0])
 	if resolvedType == nil {
-		c.addError(fmt.Sprintf("Unrecognized type: %s", decl.Type[0].GetName()), decl.Type[0].GetLocation())
+		c.addUnresolvedReference(unrecognizedType, decl.Type[0].GetName(), decl.Type[0].GetLocation())
 		return nil
 	}
 	c.scope.add(decl.Name.Name, resolvedType, false)

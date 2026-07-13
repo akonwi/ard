@@ -6,6 +6,46 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+func TestUnresolvedReferenceDiagnostic(t *testing.T) {
+	span := SourceSpan{FilePath: "main.ard"}
+	tests := []struct {
+		kind    unresolvedReferenceKind
+		name    string
+		code    DiagnosticCode
+		message string
+		title   string
+	}{
+		{unrecognizedType, "Missing", DiagnosticCodeUndefinedType, "Unrecognized type: Missing", "Unrecognized type"},
+		{unrecognizedReturnType, "Missing", DiagnosticCodeUndefinedType, "Unrecognized return type: Missing", "Unrecognized return type"},
+		{undefinedType, "Missing", DiagnosticCodeUndefinedType, "Undefined type: Missing", "Undefined type"},
+		{undefinedTrait, "Missing", DiagnosticCodeUndefinedTrait, "Undefined trait: Missing", "Undefined trait"},
+		{unknownModule, "ard/missing", DiagnosticCodeUndefinedModule, "Unknown module: ard/missing", "Unknown module"},
+		{undefinedModule, "missing", DiagnosticCodeUndefinedModule, "Undefined module: missing", "Undefined module"},
+		{unknownGoNamespace, "missing", DiagnosticCodeUndefinedNamespace, "Unknown Go namespace: missing", "Unknown Go namespace"},
+		{unknownStructField, "missing", DiagnosticCodeUnknownField, "Unknown field: missing", "Unknown field"},
+		{undefinedAssignmentTarget, "missing", DiagnosticCodeUndefinedName, "Undefined: missing", "Undefined assignment target"},
+		{undefinedQualifiedMember, "mod::missing", DiagnosticCodeUndefinedQualifiedMember, "Undefined: mod::missing", "Undefined qualified member"},
+		{undefinedGoFunction, "fmt::Missing", DiagnosticCodeUndefinedGoFunction, "Undefined Go function: fmt::Missing", "Undefined Go function"},
+		{undefinedGoType, "image::Missing", DiagnosticCodeUndefinedType, "Undefined Go type: image::Missing", "Undefined Go type"},
+		{undefinedStaticRoot, "Missing", DiagnosticCodeUndefinedName, "Undefined: Missing", "Undefined name"},
+		{undefinedEnumVariant, "Color::missing", DiagnosticCodeUndefinedEnumVariant, "Undefined: Color::missing", "Undefined enum variant"},
+		{invalidStaticMember, "Str::missing", DiagnosticCodeInvalidStaticMember, "Undefined: Str::missing", "Invalid static member"},
+		{undefinedStructType, "Missing", DiagnosticCodeUndefinedType, "Undefined: Missing", "Undefined struct type"},
+		{notAStruct, "value", DiagnosticCodeNotAStruct, "Undefined: value", "Not a struct"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.title, func(t *testing.T) {
+			diagnostic := (unresolvedReferenceDiagnostic{Kind: tt.kind, Name: tt.name, Span: span}).build()
+			if diagnostic.Code != tt.code || diagnostic.Message != tt.message || diagnostic.Title != tt.title {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+			if diagnostic.Primary.Span != span || diagnostic.Primary.Message == "" {
+				t.Fatalf("primary = %#v", diagnostic.Primary)
+			}
+		})
+	}
+}
+
 func TestUndefinedNameDiagnostic(t *testing.T) {
 	span := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}}}
 	tests := []struct {

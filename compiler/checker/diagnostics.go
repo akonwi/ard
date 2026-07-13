@@ -22,6 +22,16 @@ const (
 	DiagnosticCodeDuplicateImport           DiagnosticCode = "duplicate_import"
 	DiagnosticCodeUndefinedMember           DiagnosticCode = "undefined_member"
 	DiagnosticCodeUndefinedName             DiagnosticCode = "undefined_name"
+	DiagnosticCodeUndefinedType             DiagnosticCode = "undefined_type"
+	DiagnosticCodeUndefinedTrait            DiagnosticCode = "undefined_trait"
+	DiagnosticCodeUndefinedModule           DiagnosticCode = "undefined_module"
+	DiagnosticCodeUndefinedNamespace        DiagnosticCode = "undefined_namespace"
+	DiagnosticCodeUnknownField              DiagnosticCode = "unknown_field"
+	DiagnosticCodeUndefinedQualifiedMember  DiagnosticCode = "undefined_qualified_member"
+	DiagnosticCodeUndefinedGoFunction       DiagnosticCode = "undefined_go_function"
+	DiagnosticCodeUndefinedEnumVariant      DiagnosticCode = "undefined_enum_variant"
+	DiagnosticCodeInvalidStaticMember       DiagnosticCode = "invalid_static_member"
+	DiagnosticCodeNotAStruct                DiagnosticCode = "not_a_struct"
 )
 
 type SourceSpan struct {
@@ -77,6 +87,105 @@ func (d Diagnostic) FilePath() string {
 
 func (d Diagnostic) Location() parse.Location {
 	return d.Primary.Span.Location
+}
+
+type unresolvedReferenceKind uint8
+
+const (
+	unrecognizedType unresolvedReferenceKind = iota
+	unrecognizedReturnType
+	undefinedType
+	undefinedTrait
+	unknownModule
+	undefinedModule
+	unknownGoNamespace
+	unknownStructField
+	undefinedAssignmentTarget
+	undefinedQualifiedMember
+	undefinedGoFunction
+	undefinedGoType
+	undefinedStaticRoot
+	undefinedEnumVariant
+	invalidStaticMember
+	undefinedStructType
+	notAStruct
+)
+
+type unresolvedReferenceDiagnostic struct {
+	Kind unresolvedReferenceKind
+	Name string
+	Span SourceSpan
+}
+
+func (d unresolvedReferenceDiagnostic) build() Diagnostic {
+	var code DiagnosticCode
+	var message, title, label string
+	switch d.Kind {
+	case unrecognizedType:
+		code, message, title = DiagnosticCodeUndefinedType, "Unrecognized type: "+d.Name, "Unrecognized type"
+		label = fmt.Sprintf("type `%s` could not be resolved", d.Name)
+	case unrecognizedReturnType:
+		code, message, title = DiagnosticCodeUndefinedType, "Unrecognized return type: "+d.Name, "Unrecognized return type"
+		label = fmt.Sprintf("return type `%s` could not be resolved", d.Name)
+	case undefinedType:
+		code, message, title = DiagnosticCodeUndefinedType, "Undefined type: "+d.Name, "Undefined type"
+		label = fmt.Sprintf("type `%s` is not defined", d.Name)
+	case undefinedTrait:
+		code, message, title = DiagnosticCodeUndefinedTrait, "Undefined trait: "+d.Name, "Undefined trait"
+		label = fmt.Sprintf("trait `%s` is not defined", d.Name)
+	case unknownModule:
+		code, message, title = DiagnosticCodeUndefinedModule, "Unknown module: "+d.Name, "Unknown module"
+		label = fmt.Sprintf("module `%s` could not be resolved", d.Name)
+	case undefinedModule:
+		code, message, title = DiagnosticCodeUndefinedModule, "Undefined module: "+d.Name, "Undefined module"
+		label = fmt.Sprintf("module `%s` is not defined", d.Name)
+	case unknownGoNamespace:
+		code, message, title = DiagnosticCodeUndefinedNamespace, "Unknown Go namespace: "+d.Name, "Unknown Go namespace"
+		label = fmt.Sprintf("Go namespace `%s` could not be resolved", d.Name)
+	case unknownStructField:
+		code, message, title = DiagnosticCodeUnknownField, "Unknown field: "+d.Name, "Unknown field"
+		label = fmt.Sprintf("`%s` is not a field of this struct", d.Name)
+	case undefinedAssignmentTarget:
+		code, message, title = DiagnosticCodeUndefinedName, "Undefined: "+d.Name, "Undefined assignment target"
+		label = fmt.Sprintf("`%s` is not defined in this scope", d.Name)
+	case undefinedQualifiedMember:
+		code, message, title = DiagnosticCodeUndefinedQualifiedMember, "Undefined: "+d.Name, "Undefined qualified member"
+		label = fmt.Sprintf("`%s` could not be resolved", d.Name)
+	case undefinedGoFunction:
+		code, message, title = DiagnosticCodeUndefinedGoFunction, "Undefined Go function: "+d.Name, "Undefined Go function"
+		label = fmt.Sprintf("Go function `%s` could not be resolved", d.Name)
+	case undefinedGoType:
+		code, message, title = DiagnosticCodeUndefinedType, "Undefined Go type: "+d.Name, "Undefined Go type"
+		label = fmt.Sprintf("Go type `%s` could not be used here", d.Name)
+	case undefinedStaticRoot:
+		code, message, title = DiagnosticCodeUndefinedName, "Undefined: "+d.Name, "Undefined name"
+		label = fmt.Sprintf("`%s` is not defined in this scope", d.Name)
+	case undefinedEnumVariant:
+		code, message, title = DiagnosticCodeUndefinedEnumVariant, "Undefined: "+d.Name, "Undefined enum variant"
+		label = fmt.Sprintf("enum variant `%s` is not defined", d.Name)
+	case invalidStaticMember:
+		code, message, title = DiagnosticCodeInvalidStaticMember, "Undefined: "+d.Name, "Invalid static member"
+		label = fmt.Sprintf("`%s` is not available as a static member", d.Name)
+	case undefinedStructType:
+		code, message, title = DiagnosticCodeUndefinedType, "Undefined: "+d.Name, "Undefined struct type"
+		label = fmt.Sprintf("struct type `%s` is not defined", d.Name)
+	case notAStruct:
+		code, message, title = DiagnosticCodeNotAStruct, "Undefined: "+d.Name, "Not a struct"
+		label = fmt.Sprintf("`%s` does not name a struct", d.Name)
+	default:
+		panic(fmt.Sprintf("unknown unresolved-reference kind: %d", d.Kind))
+	}
+	diagnostic := newLabeledDiagnostic(Error, message, title, "", DiagnosticLabel{Span: d.Span, Message: label})
+	diagnostic.Code = code
+	return diagnostic
+}
+
+func (c *Checker) addUnresolvedReference(kind unresolvedReferenceKind, name string, location parse.Location) {
+	c.addDiagnostic(unresolvedReferenceDiagnostic{
+		Kind: kind,
+		Name: name,
+		Span: c.sourceSpan(location),
+	}.build())
 }
 
 type undefinedNameKind uint8

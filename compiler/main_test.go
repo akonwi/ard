@@ -948,7 +948,7 @@ test fn private_access() Void!Str {
 	if ok {
 		t.Fatalf("expected private access test behavior to fail\n%s", output)
 	}
-	if !strings.Contains(output, "Undefined: utils::private_helper") {
+	if !strings.Contains(output, "Undefined qualified member") || !strings.Contains(output, "`utils::private_helper` could not be resolved") {
 		t.Fatalf("unexpected output:\n%s", output)
 	}
 }
