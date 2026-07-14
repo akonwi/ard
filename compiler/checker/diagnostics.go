@@ -114,6 +114,14 @@ const (
 	DiagnosticCodeInvalidBooleanOperation       DiagnosticCode = "invalid_boolean_operation"
 	DiagnosticCodeInvalidChainedComparison      DiagnosticCode = "invalid_chained_comparison"
 	DiagnosticCodeNonBooleanIfCondition         DiagnosticCode = "non_boolean_if_condition"
+	DiagnosticCodeInvalidMatchPattern           DiagnosticCode = "invalid_match_pattern"
+	DiagnosticCodeDuplicateMatchArm             DiagnosticCode = "duplicate_match_arm"
+	DiagnosticCodeNonExhaustiveMatch            DiagnosticCode = "non_exhaustive_match"
+	DiagnosticCodeInvalidMatchSubject           DiagnosticCode = "invalid_match_subject"
+	DiagnosticCodeInvalidForeignTypePattern     DiagnosticCode = "invalid_foreign_type_pattern"
+	DiagnosticCodeInvalidSelectArm              DiagnosticCode = "invalid_select_arm"
+	DiagnosticCodeIgnoredMatchPattern           DiagnosticCode = "ignored_match_pattern"
+	DiagnosticCodeNonBooleanMatchCondition      DiagnosticCode = "non_boolean_match_condition"
 )
 
 type SourceSpan struct {
@@ -1511,6 +1519,110 @@ type nonBooleanIfConditionDiagnostic struct {
 func (d nonBooleanIfConditionDiagnostic) build() Diagnostic {
 	diagnostic := newLabeledDiagnostic(Error, "If conditions must be boolean expressions", "Invalid if condition", "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected `Bool`, but found `%s`", d.Actual)})
 	diagnostic.Code = DiagnosticCodeNonBooleanIfCondition
+	return diagnostic
+}
+
+type invalidMatchPatternDiagnostic struct {
+	LegacyMessage string
+	Span          SourceSpan
+	Label         string
+}
+
+func (d invalidMatchPatternDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid match pattern", "", DiagnosticLabel{Span: d.Span, Message: d.Label})
+	diagnostic.Code = DiagnosticCodeInvalidMatchPattern
+	return diagnostic
+}
+
+type duplicateMatchArmDiagnostic struct {
+	Kind          DiagnosticKind
+	LegacyMessage string
+	Span          SourceSpan
+	OriginalSpan  *SourceSpan
+	Label         string
+}
+
+func (d duplicateMatchArmDiagnostic) build() Diagnostic {
+	secondary := []DiagnosticLabel{}
+	if d.OriginalSpan != nil {
+		secondary = append(secondary, DiagnosticLabel{Span: *d.OriginalSpan, Message: "first matched here"})
+	}
+	label := d.Label
+	if label == "" {
+		label = "this match arm is repeated"
+	}
+	diagnostic := newLabeledDiagnostic(d.Kind, d.LegacyMessage, "Duplicate match arm", "", DiagnosticLabel{Span: d.Span, Message: label}, secondary...)
+	diagnostic.Code = DiagnosticCodeDuplicateMatchArm
+	return diagnostic
+}
+
+type nonExhaustiveMatchDiagnostic struct {
+	LegacyMessage string
+	Span          SourceSpan
+	Label         string
+}
+
+func (d nonExhaustiveMatchDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Non-exhaustive match", "", DiagnosticLabel{Span: d.Span, Message: d.Label})
+	diagnostic.Code = DiagnosticCodeNonExhaustiveMatch
+	return diagnostic
+}
+
+type invalidMatchSubjectDiagnostic struct {
+	Actual        Type
+	Span          SourceSpan
+	LegacyMessage string
+}
+
+func (d invalidMatchSubjectDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid match subject", "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("values of type `%s` cannot be matched", d.Actual)})
+	diagnostic.Code = DiagnosticCodeInvalidMatchSubject
+	return diagnostic
+}
+
+type invalidForeignTypePatternDiagnostic struct {
+	LegacyMessage string
+	Span          SourceSpan
+	Label         string
+}
+
+func (d invalidForeignTypePatternDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid foreign-type pattern", "", DiagnosticLabel{Span: d.Span, Message: d.Label})
+	diagnostic.Code = DiagnosticCodeInvalidForeignTypePattern
+	return diagnostic
+}
+
+type invalidSelectArmDiagnostic struct {
+	LegacyMessage string
+	Span          SourceSpan
+	Label         string
+}
+
+func (d invalidSelectArmDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid select arm", "", DiagnosticLabel{Span: d.Span, Message: d.Label})
+	diagnostic.Code = DiagnosticCodeInvalidSelectArm
+	return diagnostic
+}
+
+type ignoredMatchPatternDiagnostic struct {
+	Span SourceSpan
+}
+
+func (d ignoredMatchPatternDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Warn, "Ignored pattern", "Ignored match pattern", "", DiagnosticLabel{Span: d.Span, Message: "expected an `ok` or `err` pattern"})
+	diagnostic.Code = DiagnosticCodeIgnoredMatchPattern
+	return diagnostic
+}
+
+type nonBooleanMatchConditionDiagnostic struct {
+	Actual Type
+	Span   SourceSpan
+}
+
+func (d nonBooleanMatchConditionDiagnostic) build() Diagnostic {
+	legacy := fmt.Sprintf("Condition must be of type Bool, got %s", d.Actual)
+	diagnostic := newLabeledDiagnostic(Error, legacy, "Invalid match condition", "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected `Bool`, but found `%s`", d.Actual)})
+	diagnostic.Code = DiagnosticCodeNonBooleanMatchCondition
 	return diagnostic
 }
 

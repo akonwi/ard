@@ -625,6 +625,26 @@ func (c *Checker) addError(msg string, location parse.Location) {
 	c.diagnostics = append(c.diagnostics, NewDiagnostic(Error, msg, c.filePath, location))
 }
 
+func (c *Checker) addInvalidMatchPattern(message string, location parse.Location, label string) {
+	c.addDiagnostic(invalidMatchPatternDiagnostic{LegacyMessage: message, Span: c.sourceSpan(location), Label: label}.build())
+}
+
+func (c *Checker) addInvalidForeignTypePattern(message string, location parse.Location, label string) {
+	c.addDiagnostic(invalidForeignTypePatternDiagnostic{LegacyMessage: message, Span: c.sourceSpan(location), Label: label}.build())
+}
+
+func (c *Checker) addDuplicateMatchArm(kind DiagnosticKind, message string, location parse.Location, original *SourceSpan) {
+	c.addDiagnostic(duplicateMatchArmDiagnostic{Kind: kind, LegacyMessage: message, Span: c.sourceSpan(location), OriginalSpan: original}.build())
+}
+
+func (c *Checker) addNonExhaustiveMatch(message string, location parse.Location, label string) {
+	c.addDiagnostic(nonExhaustiveMatchDiagnostic{LegacyMessage: message, Span: c.sourceSpan(location), Label: label}.build())
+}
+
+func (c *Checker) addInvalidSelectArm(message string, location parse.Location, label string) {
+	c.addDiagnostic(invalidSelectArmDiagnostic{LegacyMessage: message, Span: c.sourceSpan(location), Label: label}.build())
+}
+
 func (c *Checker) addWarning(msg string, location parse.Location) {
 	c.diagnostics = append(c.diagnostics, NewDiagnostic(Warn, msg, c.filePath, location))
 }
@@ -1303,24 +1323,27 @@ func isDynamicMatchSubject(t Type) bool {
 // narrowed value; the dynamic type set is open, so a catch-all is required.
 func (c *Checker) checkForeignTypeMatch(s *parse.MatchExpression, subject Expression, allowMixedVoid bool) Expression {
 	cases := []ForeignTypeCase{}
-	seen := map[string]bool{}
+	seen := map[string]SourceSpan{}
 	var catchAll *Block
+	var catchAllSpan *SourceSpan
 	for _, matchCase := range s.Cases {
 		switch p := matchCase.Pattern.(type) {
 		case *parse.Identifier:
 			if p.Name != "_" {
-				c.addError("Match on a dynamic value requires foreign type patterns like pkg::Type(binding) or a catch-all '_'", matchCase.Pattern.GetLocation())
+				c.addInvalidForeignTypePattern("Match on a dynamic value requires foreign type patterns like pkg::Type(binding) or a catch-all '_'", matchCase.Pattern.GetLocation(), "expected `pkg::Type(binding)` or `_`")
 				continue
 			}
 			if catchAll != nil {
-				c.addWarning("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+				c.addDuplicateMatchArm(Warn, "Duplicate catch-all case", matchCase.Pattern.GetLocation(), catchAllSpan)
 				continue
 			}
+			span := c.sourceSpan(matchCase.Pattern.GetLocation())
+			catchAllSpan = &span
 			catchAll = c.checkMatchArmBlock(matchCase.Body, nil)
 		case *parse.StaticFunction:
 			nsIdent, ok := p.Target.(*parse.Identifier)
 			if !ok {
-				c.addError("Foreign type pattern must be qualified as pkg::Type(binding)", matchCase.Pattern.GetLocation())
+				c.addInvalidForeignTypePattern("Foreign type pattern must be qualified as pkg::Type(binding)", matchCase.Pattern.GetLocation(), "qualify this pattern as `pkg::Type(binding)`")
 				continue
 			}
 			goPkg := c.program.GoImports[nsIdent.Name]
@@ -1341,23 +1364,24 @@ func (c *Checker) checkForeignTypeMatch(s *parse.MatchExpression, subject Expres
 			}
 			foreign, ok := typ.(*ForeignType)
 			if !ok || foreign.Interface {
-				c.addError(fmt.Sprintf("Foreign type pattern must name a concrete foreign type, got %s::%s", nsIdent.Name, p.Function.Name), matchCase.Pattern.GetLocation())
+				legacy := fmt.Sprintf("Foreign type pattern must name a concrete foreign type, got %s::%s", nsIdent.Name, p.Function.Name)
+				c.addInvalidForeignTypePattern(legacy, matchCase.Pattern.GetLocation(), "this pattern does not name a concrete foreign type")
 				continue
 			}
 			if len(p.Function.Args) != 1 {
-				c.addError("Foreign type pattern requires exactly one binding, like pkg::Type(binding)", matchCase.Pattern.GetLocation())
+				c.addInvalidForeignTypePattern("Foreign type pattern requires exactly one binding, like pkg::Type(binding)", matchCase.Pattern.GetLocation(), "provide exactly one binding")
 				continue
 			}
 			bindingIdent, ok := p.Function.Args[0].Value.(*parse.Identifier)
 			if !ok {
-				c.addError("Foreign type pattern binding must be an identifier", p.Function.Args[0].GetLocation())
+				c.addInvalidForeignTypePattern("Foreign type pattern binding must be an identifier", p.Function.Args[0].GetLocation(), "use an identifier binding here")
 				continue
 			}
-			if seen[foreign.String()] {
-				c.addWarning(fmt.Sprintf("Duplicate case: %s", foreign), matchCase.Pattern.GetLocation())
+			if original, exists := seen[foreign.String()]; exists {
+				c.addDuplicateMatchArm(Warn, fmt.Sprintf("Duplicate case: %s", foreign), matchCase.Pattern.GetLocation(), &original)
 				continue
 			}
-			seen[foreign.String()] = true
+			seen[foreign.String()] = c.sourceSpan(matchCase.Pattern.GetLocation())
 			body := c.checkMatchArmBlock(matchCase.Body, func() {
 				if bindingIdent.Name != "_" {
 					c.scope.add(bindingIdent.Name, foreign, false)
@@ -1365,11 +1389,11 @@ func (c *Checker) checkForeignTypeMatch(s *parse.MatchExpression, subject Expres
 			})
 			cases = append(cases, ForeignTypeCase{Type: foreign, Binding: bindingIdent.Name, Body: body})
 		default:
-			c.addError("Match on a dynamic value requires foreign type patterns like pkg::Type(binding) or a catch-all '_'", matchCase.Pattern.GetLocation())
+			c.addInvalidForeignTypePattern("Match on a dynamic value requires foreign type patterns like pkg::Type(binding) or a catch-all '_'", matchCase.Pattern.GetLocation(), "expected `pkg::Type(binding)` or `_`")
 		}
 	}
 	if catchAll == nil {
-		c.addError("Match on a dynamic value requires a catch-all '_' case because the type set is open", s.GetLocation())
+		c.addNonExhaustiveMatch("Match on a dynamic value requires a catch-all '_' case because the type set is open", s.GetLocation(), "add a catch-all `_` case for this open type set")
 		return nil
 	}
 	var resultType Type
@@ -7245,18 +7269,20 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 		sel := &Select{}
 		var resultType Type
-		hasDefault := false
+		var defaultSpan *SourceSpan
 
 		for _, arm := range s.Cases {
 			// Default arm: the head is the `_` identifier.
 			if id, ok := arm.Op.(*parse.Identifier); ok && id.Name == "_" {
 				if arm.Binding != nil {
-					c.addError("The default select arm cannot bind a value", arm.Op.GetLocation())
+					c.addInvalidSelectArm("The default select arm cannot bind a value", arm.Binding.GetLocation(), "the default arm cannot bind a value")
 				}
-				if hasDefault {
-					c.addError("Duplicate default (_) arm in select", arm.Op.GetLocation())
+				if defaultSpan != nil {
+					c.addDuplicateMatchArm(Error, "Duplicate default (_) arm in select", arm.Op.GetLocation(), defaultSpan)
+				} else {
+					span := c.sourceSpan(arm.Op.GetLocation())
+					defaultSpan = &span
 				}
-				hasDefault = true
 				body := c.checkMatchArmBlock(arm.Body, nil)
 				sel.Arms = append(sel.Arms, SelectArm{Kind: SelectArmDefault, Body: body})
 				if merged, ok := mergeMatchResultType(c, resultType, body.Type(), arm.Op.GetLocation(), allowMixedVoid); ok {
@@ -7267,7 +7293,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 			op, ok := arm.Op.(*parse.InstanceMethod)
 			if !ok {
-				c.addError("A select arm must be a channel recv() or send() operation", arm.Op.GetLocation())
+				c.addInvalidSelectArm("A select arm must be a channel recv() or send() operation", arm.Op.GetLocation(), "expected a channel `recv()` or `send()` operation")
 				continue
 			}
 
@@ -7277,18 +7303,20 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			}
 			elem, ok := channelElementType(channel.Type())
 			if !ok {
-				c.addError(fmt.Sprintf("A select arm operates on a channel, but got %s", channel.Type().String()), op.Target.GetLocation())
+				legacy := fmt.Sprintf("A select arm operates on a channel, but got %s", channel.Type().String())
+				c.addInvalidSelectArm(legacy, op.Target.GetLocation(), fmt.Sprintf("expected a channel, but found `%s`", channel.Type()))
 				continue
 			}
 
 			switch op.Method.Name {
 			case "recv":
 				if !channelCanRecv(channel.Type()) {
-					c.addError(fmt.Sprintf("recv() is not available on %s", channel.Type().String()), op.GetLocation())
+					legacy := fmt.Sprintf("recv() is not available on %s", channel.Type().String())
+					c.addInvalidSelectArm(legacy, op.GetLocation(), "this channel does not support receiving")
 					continue
 				}
 				if len(op.Method.Args) != 0 {
-					c.addError("recv() in a select arm takes no arguments", op.GetLocation())
+					c.addInvalidSelectArm("recv() in a select arm takes no arguments", op.GetLocation(), "remove the arguments from this `recv()` operation")
 				}
 				var binding *Identifier
 				if arm.Binding != nil {
@@ -7305,14 +7333,15 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			case "send":
 				if !channelCanSend(channel.Type()) {
-					c.addError(fmt.Sprintf("send() is not available on %s", channel.Type().String()), op.GetLocation())
+					legacy := fmt.Sprintf("send() is not available on %s", channel.Type().String())
+					c.addInvalidSelectArm(legacy, op.GetLocation(), "this channel does not support sending")
 					continue
 				}
 				if arm.Binding != nil {
-					c.addError("A select send arm cannot bind a value", arm.Op.GetLocation())
+					c.addInvalidSelectArm("A select send arm cannot bind a value", arm.Binding.GetLocation(), "a send arm cannot bind a received value")
 				}
 				if len(op.Method.Args) != 1 {
-					c.addError("send() in a select arm takes exactly one argument", op.GetLocation())
+					c.addInvalidSelectArm("send() in a select arm takes exactly one argument", op.GetLocation(), "provide exactly one value to send")
 					continue
 				}
 				value := c.checkExprAs(op.Method.Args[0].Value, elem)
@@ -7322,7 +7351,8 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					resultType = merged
 				}
 			default:
-				c.addError(fmt.Sprintf("A select arm must use recv() or send(), got %s()", op.Method.Name), op.GetLocation())
+				legacy := fmt.Sprintf("A select arm must use recv() or send(), got %s()", op.Method.Name)
+				c.addInvalidSelectArm(legacy, op.GetLocation(), "expected `recv()` or `send()` here")
 			}
 		}
 
@@ -7375,19 +7405,19 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						patternIdent = &Identifier{Name: id.Name}
 					}
 				} else {
-					c.addError("Pattern in Maybe match must be an identifier", matchCase.Pattern.GetLocation())
+					c.addInvalidMatchPattern("Pattern in Maybe match must be an identifier", matchCase.Pattern.GetLocation(), "expected a binding identifier or `_`")
 					return nil
 				}
 			}
 
 			// Ensure we have both some and none cases
 			if someBody == nil {
-				c.addError("Match on a Maybe type must include a binding case", s.GetLocation())
+				c.addNonExhaustiveMatch("Match on a Maybe type must include a binding case", s.GetLocation(), "add a binding case for the present value")
 				return nil
 			}
 
 			if noneBody == nil {
-				c.addError("Match on a Maybe type must include a wildcard (_) case", s.GetLocation())
+				c.addNonExhaustiveMatch("Match on a Maybe type must include a wildcard (_) case", s.GetLocation(), "add a wildcard `_` case for the absent value")
 				return nil
 			}
 
@@ -7413,9 +7443,12 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 		if enumType, ok := subject.Type().(*Enum); ok {
 			// Map to track which discriminant values we've seen. Imported Go enum-like
 			// constants may have multiple exported aliases for the same value.
-			seenDiscriminants := make(map[int]string)
+			seenDiscriminants := make(map[int]struct {
+				Name string
+				Span SourceSpan
+			})
 			// Track whether we've seen a catch-all case
-			hasCatchAll := false
+			var catchAllSpan *SourceSpan
 			// Cases in the match statement mapped to enum variants
 			cases := make([]*Block, len(enumType.Values))
 			var catchAllBody *Block
@@ -7425,12 +7458,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				if id, ok := matchCase.Pattern.(*parse.Identifier); ok {
 					if id.Name == "_" {
 						// This is a catch-all case
-						if hasCatchAll {
-							c.addError("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+						if catchAllSpan != nil {
+							c.addDuplicateMatchArm(Error, "Duplicate catch-all case", matchCase.Pattern.GetLocation(), catchAllSpan)
 							return nil
 						}
 
-						hasCatchAll = true
+						span := c.sourceSpan(matchCase.Pattern.GetLocation())
+						catchAllSpan = &span
 						catchAllBody = c.checkMatchArmBlock(matchCase.Body, nil)
 						continue
 					}
@@ -7447,14 +7481,14 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					// Check if the pattern resolves to an enum variant
 					enumVariant, ok := patternExpr.(*EnumVariant)
 					if !ok {
-						c.addError("Pattern in enum match must be an enum variant", staticProp.GetLocation())
+						c.addInvalidMatchPattern("Pattern in enum match must be an enum variant", staticProp.GetLocation(), "this does not resolve to an enum variant")
 						continue
 					}
 
 					// Verify that the variant's enum matches the subject's enum
 					if !enumVariant.enum.equal(enumType) {
-						c.addError(fmt.Sprintf("Cannot match %s variant against %s enum",
-							enumVariant.enum.Name, enumType.Name), staticProp.GetLocation())
+						legacy := fmt.Sprintf("Cannot match %s variant against %s enum", enumVariant.enum.Name, enumType.Name)
+						c.addInvalidMatchPattern(legacy, staticProp.GetLocation(), fmt.Sprintf("this variant belongs to `%s`, not `%s`", enumVariant.enum.Name, enumType.Name))
 						continue
 					}
 
@@ -7468,20 +7502,23 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					discriminant := enumType.Values[enumVariant.Variant].Value
 					current := fmt.Sprintf("%s::%s", enumType.Name, variantName)
 					if previous, found := seenDiscriminants[discriminant]; found {
-						if previous == current {
-							c.addError(fmt.Sprintf("Duplicate case: %s", current), staticProp.GetLocation())
-						} else {
-							c.addError(fmt.Sprintf("Duplicate case: %s has same value as %s", current, previous), staticProp.GetLocation())
+						legacy := fmt.Sprintf("Duplicate case: %s", current)
+						if previous.Name != current {
+							legacy = fmt.Sprintf("Duplicate case: %s has same value as %s", current, previous.Name)
 						}
+						c.addDuplicateMatchArm(Error, legacy, staticProp.GetLocation(), &previous.Span)
 						continue
 					}
-					seenDiscriminants[discriminant] = current
+					seenDiscriminants[discriminant] = struct {
+						Name string
+						Span SourceSpan
+					}{Name: current, Span: c.sourceSpan(staticProp.GetLocation())}
 
 					// Check the body for this case
 					body := c.checkMatchArmBlock(matchCase.Body, nil)
 					cases[variantIndex] = body
 				} else {
-					c.addError("Pattern in enum match must be an enum variant or wildcard", matchCase.Pattern.GetLocation())
+					c.addInvalidMatchPattern("Pattern in enum match must be an enum variant or wildcard", matchCase.Pattern.GetLocation(), "expected an enum variant or `_`")
 					return nil
 				}
 			}
@@ -7489,9 +7526,10 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			// Check if the match is exhaustive over distinct values. Aliases do not
 			// require separate arms. Imported open Go enum-like types always require
 			// a wildcard because Go may produce values outside exported constants.
-			if !hasCatchAll {
+			if catchAllSpan == nil {
 				if enumType.Open {
-					c.addError(fmt.Sprintf("Open enum-like Go type %s requires a catch-all (_) match case", enumType.Name), s.GetLocation())
+					legacy := fmt.Sprintf("Open enum-like Go type %s requires a catch-all (_) match case", enumType.Name)
+					c.addNonExhaustiveMatch(legacy, s.GetLocation(), "add a catch-all `_` case for this open enum-like type")
 				} else {
 					missingValues := map[int]bool{}
 					for i, value := range enumType.Values {
@@ -7499,7 +7537,8 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							continue
 						}
 						if cases[i] == nil && !missingValues[value.Value] {
-							c.addError(fmt.Sprintf("Incomplete match: missing case for '%s::%s'", enumType.Name, value.Name), s.GetLocation())
+							legacy := fmt.Sprintf("Incomplete match: missing case for '%s::%s'", enumType.Name, value.Name)
+							c.addNonExhaustiveMatch(legacy, s.GetLocation(), fmt.Sprintf("add a case for `%s::%s`", enumType.Name, value.Name))
 							missingValues[value.Value] = true
 						}
 					}
@@ -7548,14 +7587,14 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 		if subject.Type() == Bool {
 			var trueBody, falseBody *Block
 			// Track which cases we've seen
-			seenTrue, seenFalse := false, false
+			var trueSpan, falseSpan *SourceSpan
 
 			// Process the cases
 			for _, matchCase := range s.Cases {
 				if id, ok := matchCase.Pattern.(*parse.Identifier); ok {
 					if id.Name == "_" {
 						// Catch-all cases aren't allowed for boolean matches
-						c.addError("Catch-all case is not allowed for boolean matches", matchCase.Pattern.GetLocation())
+						c.addInvalidMatchPattern("Catch-all case is not allowed for boolean matches", matchCase.Pattern.GetLocation(), "use explicit `true` and `false` cases")
 						return nil
 					}
 				}
@@ -7563,12 +7602,12 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				// Handle boolean literal case
 				if boolLit, ok := matchCase.Pattern.(*parse.BoolLiteral); ok {
 					// Check for duplicates
-					if boolLit.Value && seenTrue {
-						c.addError("Duplicate case: 'true'", matchCase.Pattern.GetLocation())
+					if boolLit.Value && trueSpan != nil {
+						c.addDuplicateMatchArm(Error, "Duplicate case: 'true'", matchCase.Pattern.GetLocation(), trueSpan)
 						return nil
 					}
-					if !boolLit.Value && seenFalse {
-						c.addError("Duplicate case: 'false'", matchCase.Pattern.GetLocation())
+					if !boolLit.Value && falseSpan != nil {
+						c.addDuplicateMatchArm(Error, "Duplicate case: 'false'", matchCase.Pattern.GetLocation(), falseSpan)
 						return nil
 					}
 
@@ -7577,24 +7616,26 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 					// Store the body in the appropriate field
 					if boolLit.Value {
-						seenTrue = true
+						span := c.sourceSpan(matchCase.Pattern.GetLocation())
+						trueSpan = &span
 						trueBody = body
 					} else {
-						seenFalse = true
+						span := c.sourceSpan(matchCase.Pattern.GetLocation())
+						falseSpan = &span
 						falseBody = body
 					}
 				} else {
-					c.addError("Pattern in boolean match must be a boolean literal (true or false)", matchCase.Pattern.GetLocation())
+					c.addInvalidMatchPattern("Pattern in boolean match must be a boolean literal (true or false)", matchCase.Pattern.GetLocation(), "expected `true` or `false`")
 					return nil
 				}
 			}
 
 			// Check exhaustiveness
-			if !seenTrue || !seenFalse {
-				if !seenTrue {
-					c.addError("Incomplete match: Missing case for 'true'", s.GetLocation())
+			if trueSpan == nil || falseSpan == nil {
+				if trueSpan == nil {
+					c.addNonExhaustiveMatch("Incomplete match: Missing case for 'true'", s.GetLocation(), "add a case for `true`")
 				} else {
-					c.addError("Incomplete match: Missing case for 'false'", s.GetLocation())
+					c.addNonExhaustiveMatch("Incomplete match: Missing case for 'false'", s.GetLocation(), "add a case for `false`")
 				}
 				return nil
 			}
@@ -7620,8 +7661,10 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			bindingMutable := c.isMutable(subject)
 			// Track which union types we've seen and their corresponding bodies
 			typeCases := make(map[string]*Match)
+			typeCaseSpans := make(map[string]SourceSpan)
 			typeCasesByType := make(map[Type]*Match)
 			var catchAllBody *Block
+			var catchAllSpan *SourceSpan
 
 			// Record all types in the union
 			unionTypeSet := make(map[string]Type)
@@ -7635,8 +7678,10 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				case *parse.Identifier:
 					if p.Name == "_" {
 						if catchAllBody != nil {
-							c.addWarning("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+							c.addDuplicateMatchArm(Warn, "Duplicate catch-all case", matchCase.Pattern.GetLocation(), catchAllSpan)
 						} else {
+							span := c.sourceSpan(matchCase.Pattern.GetLocation())
+							catchAllSpan = &span
 							catchAllBody = c.checkMatchArmBlock(matchCase.Body, nil)
 						}
 						break
@@ -7644,11 +7689,12 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					// Allow union type name as implicit binding to "it"
 					matchedType, found := unionTypeSet[p.Name]
 					if !found {
-						c.addError("Catch-all case should be matched with '_'", matchCase.Pattern.GetLocation())
+						c.addInvalidMatchPattern("Catch-all case should be matched with '_'", matchCase.Pattern.GetLocation(), "use `_` for a catch-all case")
 						break
 					}
 					if _, exists := typeCases[p.Name]; exists {
-						c.addWarning(fmt.Sprintf("Duplicate case: %s", p.Name), matchCase.Pattern.GetLocation())
+						original := typeCaseSpans[p.Name]
+						c.addDuplicateMatchArm(Warn, fmt.Sprintf("Duplicate case: %s", p.Name), matchCase.Pattern.GetLocation(), &original)
 						break
 					}
 					body := c.checkMatchArmBlock(matchCase.Body, func() {
@@ -7659,6 +7705,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						Body:    body,
 					}
 					typeCases[p.Name] = matchNode
+					typeCaseSpans[p.Name] = c.sourceSpan(matchCase.Pattern.GetLocation())
 					typeCasesByType[matchedType] = matchNode
 				case *parse.FunctionCall:
 					varName := p.Args[0].Value.(*parse.Identifier).Name
@@ -7667,13 +7714,14 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					// Check if the type exists in the union
 					_, found := unionTypeSet[typeName]
 					if !found {
-						c.addError(fmt.Sprintf("Type %s is not part of union %s", typeName, unionType),
-							matchCase.Pattern.GetLocation())
+						legacy := fmt.Sprintf("Type %s is not part of union %s", typeName, unionType)
+						c.addInvalidMatchPattern(legacy, matchCase.Pattern.GetLocation(), fmt.Sprintf("`%s` is not a member of `%s`", typeName, unionType))
 					}
 
 					// Check for duplicates
 					if _, exists := typeCases[typeName]; exists {
-						c.addWarning(fmt.Sprintf("Duplicate case: %s", typeName), matchCase.Pattern.GetLocation())
+						original := typeCaseSpans[typeName]
+						c.addDuplicateMatchArm(Warn, fmt.Sprintf("Duplicate case: %s", typeName), matchCase.Pattern.GetLocation(), &original)
 					} else {
 
 						// Get the actual type object
@@ -7688,6 +7736,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							Body:    body,
 						}
 						typeCases[typeName] = matchNode
+						typeCaseSpans[typeName] = c.sourceSpan(matchCase.Pattern.GetLocation())
 						typeCasesByType[matchedType] = matchNode
 					}
 				}
@@ -7697,8 +7746,8 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			if catchAllBody == nil {
 				for typeName := range unionTypeSet {
 					if _, covered := typeCases[typeName]; !covered {
-						c.addError(fmt.Sprintf("Incomplete match: missing case for '%s'", typeName),
-							s.GetLocation())
+						legacy := fmt.Sprintf("Incomplete match: missing case for '%s'", typeName)
+						c.addNonExhaustiveMatch(legacy, s.GetLocation(), fmt.Sprintf("add a case for `%s`", typeName))
 					}
 				}
 			}
@@ -7736,7 +7785,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 		if resultType, ok := subject.Type().(*Result); ok {
 			bindingMutable := c.isMutable(subject)
 			if len(s.Cases) > 2 {
-				c.addError("Too many cases in match", s.GetLocation())
+				c.addInvalidMatchPattern("Too many cases in match", s.GetLocation(), "a `Result` match accepts only `ok` and `err` cases")
 				return nil
 			}
 
@@ -7762,7 +7811,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 								}),
 							}
 						default:
-							c.addWarning("Ignored pattern", p.GetLocation())
+							c.addDiagnostic(ignoredMatchPatternDiagnostic{Span: c.sourceSpan(p.GetLocation())}.build())
 						}
 					}
 				case *parse.FunctionCall: // use FunctionCall node as aliasing variable
@@ -7785,18 +7834,18 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 								}),
 							}
 						default:
-							c.addWarning("Ignored pattern", p.GetLocation())
+							c.addDiagnostic(ignoredMatchPatternDiagnostic{Span: c.sourceSpan(p.GetLocation())}.build())
 						}
 					}
 				}
 			}
 
 			if okCase == nil {
-				c.addError("Missing ok case", s.GetLocation())
+				c.addNonExhaustiveMatch("Missing ok case", s.GetLocation(), "add an `ok` case")
 				return nil
 			}
 			if errCase == nil {
-				c.addError("Missing err case", s.GetLocation())
+				c.addNonExhaustiveMatch("Missing err case", s.GetLocation(), "add an `err` case")
 				return nil
 			}
 
@@ -7816,15 +7865,19 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 		if subject.Type() == Str {
 			strCases := make(map[string]*Block)
+			strCaseSpans := make(map[string]SourceSpan)
 			var catchAll *Block
+			var catchAllSpan *SourceSpan
 			var strResultType Type
 
 			for _, matchCase := range s.Cases {
 				if id, ok := matchCase.Pattern.(*parse.Identifier); ok && id.Name == "_" {
 					if catchAll != nil {
-						c.addError("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+						c.addDuplicateMatchArm(Error, "Duplicate catch-all case", matchCase.Pattern.GetLocation(), catchAllSpan)
 						return nil
 					}
+					span := c.sourceSpan(matchCase.Pattern.GetLocation())
+					catchAllSpan = &span
 					catchAll = c.checkMatchArmBlock(matchCase.Body, nil)
 					var ok bool
 					strResultType, ok = mergeMatchResultType(c, strResultType, catchAll.Type(), matchCase.Pattern.GetLocation(), allowMixedVoid)
@@ -7836,15 +7889,17 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 				literal, ok := matchCase.Pattern.(*parse.StrLiteral)
 				if !ok {
-					c.addError("Pattern in Str match must be a string literal or '_'", matchCase.Pattern.GetLocation())
+					c.addInvalidMatchPattern("Pattern in Str match must be a string literal or '_'", matchCase.Pattern.GetLocation(), "expected a string literal or `_`")
 					return nil
 				}
 				if _, exists := strCases[literal.Value]; exists {
-					c.addError(fmt.Sprintf("Duplicate case: %q", literal.Value), matchCase.Pattern.GetLocation())
+					original := strCaseSpans[literal.Value]
+					c.addDuplicateMatchArm(Error, fmt.Sprintf("Duplicate case: %q", literal.Value), matchCase.Pattern.GetLocation(), &original)
 					return nil
 				}
 				caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
 				strCases[literal.Value] = caseBlock
+				strCaseSpans[literal.Value] = c.sourceSpan(matchCase.Pattern.GetLocation())
 				var mergeOK bool
 				strResultType, mergeOK = mergeMatchResultType(c, strResultType, caseBlock.Type(), matchCase.Pattern.GetLocation(), allowMixedVoid)
 				if !mergeOK {
@@ -7853,7 +7908,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			}
 
 			if catchAll == nil {
-				c.addError("Incomplete match: missing catch-all case for Str match", s.GetLocation())
+				c.addNonExhaustiveMatch("Incomplete match: missing catch-all case for Str match", s.GetLocation(), "add a catch-all `_` case")
 				return nil
 			}
 
@@ -7862,15 +7917,19 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 		if subject.Type() == Rune {
 			runeCases := make(map[int]*Block)
+			runeCaseSpans := make(map[int]SourceSpan)
 			var catchAll *Block
+			var catchAllSpan *SourceSpan
 			var runeResultType Type
 
 			for _, matchCase := range s.Cases {
 				if id, ok := matchCase.Pattern.(*parse.Identifier); ok && id.Name == "_" {
 					if catchAll != nil {
-						c.addError("Duplicate catch-all case", matchCase.Pattern.GetLocation())
+						c.addDuplicateMatchArm(Error, "Duplicate catch-all case", matchCase.Pattern.GetLocation(), catchAllSpan)
 						return nil
 					}
+					span := c.sourceSpan(matchCase.Pattern.GetLocation())
+					catchAllSpan = &span
 					catchAll = c.checkMatchArmBlock(matchCase.Body, nil)
 					var ok bool
 					runeResultType, ok = mergeMatchResultType(c, runeResultType, catchAll.Type(), matchCase.Pattern.GetLocation(), allowMixedVoid)
@@ -7882,7 +7941,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 				literal, ok := matchCase.Pattern.(*parse.RuneLiteral)
 				if !ok {
-					c.addError("Pattern in Rune match must be a rune literal or '_'", matchCase.Pattern.GetLocation())
+					c.addInvalidMatchPattern("Pattern in Rune match must be a rune literal or '_'", matchCase.Pattern.GetLocation(), "expected a rune literal or `_`")
 					return nil
 				}
 				value, valid := c.parseRuneLiteralValue(literal)
@@ -7891,11 +7950,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 				intValue := int(value)
 				if _, exists := runeCases[intValue]; exists {
-					c.addError(fmt.Sprintf("Duplicate case: %s", strconv.QuoteRune(value)), matchCase.Pattern.GetLocation())
+					original := runeCaseSpans[intValue]
+					c.addDuplicateMatchArm(Error, fmt.Sprintf("Duplicate case: %s", strconv.QuoteRune(value)), matchCase.Pattern.GetLocation(), &original)
 					return nil
 				}
 				caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
 				runeCases[intValue] = caseBlock
+				runeCaseSpans[intValue] = c.sourceSpan(matchCase.Pattern.GetLocation())
 				var mergeOK bool
 				runeResultType, mergeOK = mergeMatchResultType(c, runeResultType, caseBlock.Type(), matchCase.Pattern.GetLocation(), allowMixedVoid)
 				if !mergeOK {
@@ -7904,7 +7965,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			}
 
 			if catchAll == nil {
-				c.addError("Incomplete match: missing catch-all case for Rune match", s.GetLocation())
+				c.addNonExhaustiveMatch("Incomplete match: missing catch-all case for Rune match", s.GetLocation(), "add a catch-all `_` case")
 			}
 
 			return &IntMatch{
@@ -7936,7 +7997,8 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					// Convert string to int
 					value, err := strconv.Atoi(literal.Value)
 					if err != nil {
-						c.addError(fmt.Sprintf("Invalid integer literal: %s", literal.Value), matchCase.Pattern.GetLocation())
+						legacy := fmt.Sprintf("Invalid integer literal: %s", literal.Value)
+						c.addInvalidMatchPattern(legacy, matchCase.Pattern.GetLocation(), "this is not a valid integer pattern")
 						return nil
 					}
 					caseBlock := c.checkMatchArmBlock(matchCase.Body, nil)
@@ -7952,7 +8014,8 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						// Convert string to int and negate
 						value, err := strconv.Atoi(literal.Value)
 						if err != nil {
-							c.addError(fmt.Sprintf("Invalid integer literal: %s", literal.Value), literal.GetLocation())
+							legacy := fmt.Sprintf("Invalid integer literal: %s", literal.Value)
+							c.addInvalidMatchPattern(legacy, literal.GetLocation(), "this is not a valid integer pattern")
 							return nil
 						}
 						negativeValue := -value
@@ -7964,25 +8027,28 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							return nil
 						}
 					} else {
-						c.addError(fmt.Sprintf("Invalid pattern for Int match: %T", matchCase.Pattern), matchCase.Pattern.GetLocation())
+						legacy := fmt.Sprintf("Invalid pattern for Int match: %T", matchCase.Pattern)
+						c.addInvalidMatchPattern(legacy, matchCase.Pattern.GetLocation(), "expected an integer literal, range, enum variant, or `_`")
 						return nil
 					}
 				} else if rangeExpr, ok := matchCase.Pattern.(*parse.RangeExpression); ok {
 					// Handle range pattern like 1..10 or -10..5
 					startValue, startErr := c.extractIntFromPattern(rangeExpr.Start)
 					if startErr != nil {
-						c.addError(fmt.Sprintf("Invalid start value in range: %s", startErr.Error()), rangeExpr.Start.GetLocation())
+						legacy := fmt.Sprintf("Invalid start value in range: %s", startErr.Error())
+						c.addInvalidMatchPattern(legacy, rangeExpr.Start.GetLocation(), "range start must be an integer pattern")
 						return nil
 					}
 
 					endValue, endErr := c.extractIntFromPattern(rangeExpr.End)
 					if endErr != nil {
-						c.addError(fmt.Sprintf("Invalid end value in range: %s", endErr.Error()), rangeExpr.End.GetLocation())
+						legacy := fmt.Sprintf("Invalid end value in range: %s", endErr.Error())
+						c.addInvalidMatchPattern(legacy, rangeExpr.End.GetLocation(), "range end must be an integer pattern")
 						return nil
 					}
 
 					if startValue > endValue {
-						c.addError("Range start must be less than or equal to end", matchCase.Pattern.GetLocation())
+						c.addInvalidMatchPattern("Range start must be less than or equal to end", matchCase.Pattern.GetLocation(), "range start must not exceed its end")
 						return nil
 					}
 
@@ -8003,7 +8069,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					// Check if the pattern resolves to an enum variant
 					enumVariant, ok := patternExpr.(*EnumVariant)
 					if !ok {
-						c.addError("Pattern in Int match must be an integer literal, range, or enum variant", staticProp.GetLocation())
+						c.addInvalidMatchPattern("Pattern in Int match must be an integer literal, range, or enum variant", staticProp.GetLocation(), "this does not resolve to an enum variant")
 						continue
 					}
 
@@ -8017,14 +8083,15 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						return nil
 					}
 				} else {
-					c.addError(fmt.Sprintf("Invalid pattern for Int match: %T", matchCase.Pattern), matchCase.Pattern.GetLocation())
+					legacy := fmt.Sprintf("Invalid pattern for Int match: %T", matchCase.Pattern)
+					c.addInvalidMatchPattern(legacy, matchCase.Pattern.GetLocation(), "expected an integer literal, range, enum variant, or `_`")
 					return nil
 				}
 			}
 
 			// Validate that there is a catch-all case for Int match
 			if catchAll == nil {
-				c.addError("Incomplete match: missing catch-all case for Int match", s.GetLocation())
+				c.addNonExhaustiveMatch("Incomplete match: missing catch-all case for Int match", s.GetLocation(), "add a catch-all `_` case")
 			}
 
 			return &IntMatch{
@@ -8036,7 +8103,8 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			}
 		}
 
-		c.addError(fmt.Sprintf("Cannot match on %s", subject.Type()), s.GetLocation())
+		legacy := fmt.Sprintf("Cannot match on %s", subject.Type())
+		c.addDiagnostic(invalidMatchSubjectDiagnostic{Actual: subject.Type(), Span: c.sourceSpan(s.Subject.GetLocation()), LegacyMessage: legacy}.build())
 		return nil
 	case *parse.ConditionalMatchExpression:
 		allowMixedVoid := discardThisExpr || c.expectedExpr == Void
@@ -8047,14 +8115,17 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 		}()
 		var cases []ConditionalCase
 		var catchAll *Block
+		var catchAllSpan *SourceSpan
 		var conditionalResultType Type
 
 		for _, matchCase := range s.Cases {
 			if matchCase.Condition == nil {
 				// This is a catch-all case (_)
 				if catchAll != nil {
-					c.addError("Duplicate catch-all case", matchCase.GetLocation())
+					c.addDuplicateMatchArm(Error, "Duplicate catch-all case", matchCase.GetLocation(), catchAllSpan)
 				} else {
+					span := c.sourceSpan(matchCase.GetLocation())
+					catchAllSpan = &span
 					catchAll = c.checkMatchArmBlock(matchCase.Body, nil)
 					var ok bool
 					conditionalResultType, ok = mergeMatchResultType(c, conditionalResultType, catchAll.Type(), matchCase.GetLocation(), allowMixedVoid)
@@ -8067,7 +8138,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				if condition := c.checkExpr(matchCase.Condition); condition != nil {
 					// Ensure condition is boolean
 					if condition.Type() != Bool {
-						c.addError(fmt.Sprintf("Condition must be of type Bool, got %s", condition.Type().String()), matchCase.Condition.GetLocation())
+						c.addDiagnostic(nonBooleanMatchConditionDiagnostic{Actual: condition.Type(), Span: c.sourceSpan(matchCase.Condition.GetLocation())}.build())
 					}
 
 					body := c.checkMatchArmBlock(matchCase.Body, nil)
@@ -8087,7 +8158,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 		// Require catch-all case for conditional match to guarantee a return value
 		if catchAll == nil {
-			c.addError("Conditional match must include a catch-all (_) case", s.GetLocation())
+			c.addNonExhaustiveMatch("Conditional match must include a catch-all (_) case", s.GetLocation(), "add a catch-all `_` case")
 		}
 
 		return &ConditionalMatch{

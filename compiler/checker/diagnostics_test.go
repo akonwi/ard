@@ -485,6 +485,51 @@ func TestNonBooleanIfConditionDiagnosticIsStructured(t *testing.T) {
 	}
 }
 
+func TestMatchAndPatternDiagnosticsAreStructured(t *testing.T) {
+	tests := []struct {
+		name          string
+		source        string
+		code          checker.DiagnosticCode
+		legacyMessage string
+		kind          checker.DiagnosticKind
+		secondaries   int
+	}{
+		{"invalid pattern", "match true {\n  \"yes\" => 1,\n  false => 0,\n}\n", checker.DiagnosticCodeInvalidMatchPattern, "Pattern in boolean match must be a boolean literal (true or false)", checker.Error, 0},
+		{"duplicate arm", "match true {\n  true => 1,\n  true => 2,\n  false => 0,\n}\n", checker.DiagnosticCodeDuplicateMatchArm, "Duplicate case: 'true'", checker.Error, 1},
+		{"non-exhaustive", "match true {\n  true => 1,\n}\n", checker.DiagnosticCodeNonExhaustiveMatch, "Incomplete match: Missing case for 'false'", checker.Error, 0},
+		{"invalid subject", "match [1] {\n  _ => 0,\n}\n", checker.DiagnosticCodeInvalidMatchSubject, "Cannot match on [Int]", checker.Error, 0},
+		{"foreign pattern", "let value: Any = 1\nmatch value {\n  Str(text) => text,\n  _ => \"other\",\n}\n", checker.DiagnosticCodeInvalidForeignTypePattern, "Match on a dynamic value requires foreign type patterns like pkg::Type(binding) or a catch-all '_'", checker.Error, 0},
+		{"select arm", "select {\n  true => 1\n}\n", checker.DiagnosticCodeInvalidSelectArm, "A select arm must be a channel recv() or send() operation", checker.Error, 0},
+		{"ignored result pattern", "fn operation() Int!Str { Result::ok(1) }\nmatch operation() {\n  success => 0,\n  err(error) => 1,\n}\n", checker.DiagnosticCodeIgnoredMatchPattern, "Ignored pattern", checker.Warn, 0},
+		{"conditional condition", "match {\n  1 => \"one\",\n  _ => \"other\",\n}\n", checker.DiagnosticCodeNonBooleanMatchCondition, "Condition must be of type Bool, got Int", checker.Error, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if diagnostic.Kind != tt.kind || diagnostic.Message != tt.legacyMessage || diagnostic.Primary.Message == "" || len(diagnostic.Secondary) != tt.secondaries {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
+func TestDuplicateBooleanMatchLabelsBothCases(t *testing.T) {
+	result := parse.Parse([]byte("match true {\n  true => 1,\n  true => 2,\n  false => 0,\n}\n"), "main.ard")
+	match := result.Program.Statements[0].(*parse.MatchExpression)
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeDuplicateMatchArm)
+	if diagnostic.Primary.Span.Location != match.Cases[1].Pattern.GetLocation() || len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != match.Cases[0].Pattern.GetLocation() {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")

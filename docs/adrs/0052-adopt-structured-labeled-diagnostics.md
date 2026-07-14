@@ -257,14 +257,14 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Inconsistent branch result types
   - [x] Missing `else` when used as a value
 
-- [ ] **Match and pattern diagnostics**
-  - [ ] Invalid pattern forms
-  - [ ] Duplicate cases and catch-all cases
-  - [ ] Missing exhaustive cases
-  - [ ] Invalid foreign-type patterns
-  - [ ] Enum, union, boolean, string, rune, and integer match errors
-  - [ ] Invalid and duplicate `select` arms
-  - [ ] Ignored-pattern warnings
+- [x] **Match and pattern diagnostics**
+  - [x] Invalid pattern forms
+  - [x] Duplicate cases and catch-all cases
+  - [x] Missing exhaustive cases
+  - [x] Invalid foreign-type patterns
+  - [x] Enum, union, boolean, string, rune, and integer match errors
+  - [x] Invalid and duplicate `select` arms
+  - [x] Ignored-pattern warnings
 
 - [ ] **`try`, `Result`, and `Maybe` propagation**
   - [ ] Invalid `try` contexts, including deferred work
