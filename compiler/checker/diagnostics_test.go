@@ -380,6 +380,48 @@ func requireDiagnosticCode(t *testing.T, diagnostics []checker.Diagnostic, code 
 	return checker.Diagnostic{}
 }
 
+func TestInvalidMapKeyTypeHasStructuredDiagnostic(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		span   func(*parse.Program) parse.Location
+	}{
+		{
+			name:   "declared map key",
+			source: "let values: [[Int]: Str] = [:]\n",
+			span: func(program *parse.Program) parse.Location {
+				declaration := program.Statements[0].(*parse.VariableDeclaration)
+				return declaration.Type.(*parse.Map).Key.GetLocation()
+			},
+		},
+		{
+			name:   "inferred map key",
+			source: "let values = [[1]: \"one\"]\n",
+			span: func(program *parse.Program) parse.Location {
+				declaration := program.Statements[0].(*parse.VariableDeclaration)
+				return declaration.Value.(*parse.MapLiteral).Entries[0].Key.GetLocation()
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidMapKeyType)
+			if diagnostic.Primary.Span.Location != tt.span(result.Program) || diagnostic.Primary.Message != "`[Int]` cannot be used as a map key" {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+			if len(diagnostic.Secondary) != 0 {
+				t.Fatalf("secondary = %#v", diagnostic.Secondary)
+			}
+		})
+	}
+}
+
 func TestGenericTypeUsageHasStructuredDiagnostics(t *testing.T) {
 	tests := []struct {
 		name          string

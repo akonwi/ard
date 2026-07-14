@@ -1,7 +1,6 @@
 package checker_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -30,14 +29,18 @@ func TestNilTypeGuard(t *testing.T) {
 	t.Run("clean parse reports an internal error", func(t *testing.T) {
 		c := checker.New("test.ard", makeProgram(), nil, checker.CheckOptions{})
 		c.Check()
-		found := false
-		for _, diagnostic := range c.Diagnostics() {
-			if strings.Contains(diagnostic.Message, "internal error") {
-				found = true
-			}
+		if len(c.Diagnostics()) != 1 {
+			t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
 		}
-		if !found {
-			t.Fatalf("Expected an internal error diagnostic, got: %v", c.Diagnostics())
+		diagnostic := c.Diagnostics()[0]
+		if diagnostic.Code != checker.DiagnosticCodeMalformedTypeNode || diagnostic.Title != "Internal compiler error" {
+			t.Fatalf("code/title = %q/%q", diagnostic.Code, diagnostic.Title)
+		}
+		if diagnostic.Message != "internal error: malformed type node reached the checker (parser bug — please report)" {
+			t.Fatalf("legacy message = %q", diagnostic.Message)
+		}
+		if diagnostic.Primary.Span.FilePath != "test.ard" || diagnostic.Primary.Span.Location != (parse.Location{}) {
+			t.Fatalf("synthetic primary = %#v", diagnostic.Primary)
 		}
 	})
 
@@ -45,8 +48,8 @@ func TestNilTypeGuard(t *testing.T) {
 		c := checker.New("test.ard", makeProgram(), nil, checker.CheckOptions{HasParseErrors: true})
 		c.Check()
 		for _, diagnostic := range c.Diagnostics() {
-			if strings.Contains(diagnostic.Message, "internal error") {
-				t.Fatalf("Expected no internal error diagnostic on an error-carrying tree, got: %v", c.Diagnostics())
+			if diagnostic.Code == checker.DiagnosticCodeMalformedTypeNode {
+				t.Fatalf("expected no internal diagnostic on an error-carrying tree, got: %v", c.Diagnostics())
 			}
 		}
 	})

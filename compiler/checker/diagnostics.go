@@ -49,6 +49,8 @@ const (
 	DiagnosticCodeMissingTypeArguments      DiagnosticCode = "missing_type_arguments"
 	DiagnosticCodeRecursiveGenericReference DiagnosticCode = "recursive_generic_self_reference"
 	DiagnosticCodeMethodIntroducedGeneric   DiagnosticCode = "method_introduced_generic_parameter"
+	DiagnosticCodeInvalidMapKeyType         DiagnosticCode = "invalid_map_key_type"
+	DiagnosticCodeMalformedTypeNode         DiagnosticCode = "internal_malformed_type_node"
 )
 
 type SourceSpan struct {
@@ -345,6 +347,40 @@ func (d incorrectArgumentTypeDiagnostic) build() Diagnostic {
 		secondary...,
 	)
 	diagnostic.Code = DiagnosticCodeIncorrectArgumentType
+	return diagnostic
+}
+
+type invalidMapKeyTypeDiagnostic struct {
+	KeyType Type
+	Span    SourceSpan
+}
+
+func (d invalidMapKeyTypeDiagnostic) build() Diagnostic {
+	displayed := formatTypeForDisplay(d.KeyType)
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Invalid map key type %s: map keys must be comparable (primitives, enums, or structs)", displayed),
+		"Invalid map key type",
+		"Map keys must be comparable primitives, enums, or structs.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` cannot be used as a map key", displayed)},
+	)
+	diagnostic.Code = DiagnosticCodeInvalidMapKeyType
+	return diagnostic
+}
+
+type malformedTypeNodeDiagnostic struct {
+	Span SourceSpan
+}
+
+func (d malformedTypeNodeDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"internal error: malformed type node reached the checker (parser bug — please report)",
+		"Internal compiler error",
+		"A malformed type node reached the checker from a clean parse tree. This is a parser bug; please report it.",
+		DiagnosticLabel{Span: d.Span},
+	)
+	diagnostic.Code = DiagnosticCodeMalformedTypeNode
 	return diagnostic
 }
 

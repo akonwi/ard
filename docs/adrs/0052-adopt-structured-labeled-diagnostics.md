@@ -175,9 +175,9 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Unsupported recursive generic references
   - [x] Method-introduced generic parameters
 
-- [ ] **Type validity**
-  - [ ] Invalid map key types
-  - [ ] Malformed internal type nodes
+- [x] **Type validity**
+  - [x] Invalid map key types
+  - [x] Malformed internal type nodes
 
 - [ ] **Remaining type mismatches**
   - [ ] Branch and return mismatches

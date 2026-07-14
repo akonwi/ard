@@ -789,7 +789,7 @@ func (c *Checker) validateMapKeyType(key Type, loc parse.Location) {
 		return
 	}
 	c.reportedMapKeyErrors[loc] = true
-	c.addError(fmt.Sprintf("Invalid map key type %s: map keys must be comparable (primitives, enums, or structs)", formatTypeForDisplay(key)), loc)
+	c.addDiagnostic(invalidMapKeyTypeDiagnostic{KeyType: key, Span: c.sourceSpan(loc)}.build())
 }
 
 // makeMutableType resolves `mut T` annotations. A foreign Go named type's
@@ -880,7 +880,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 	// unknown type instead of dereferencing nil.
 	if t == nil {
 		if !c.options.HasParseErrors {
-			c.addError("internal error: malformed type node reached the checker (parser bug — please report)", parse.Location{})
+			c.addDiagnostic(malformedTypeNodeDiagnostic{Span: c.sourceSpan(parse.Location{})}.build())
 		}
 		return &TypeVar{name: "unknown"}
 	}
