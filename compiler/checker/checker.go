@@ -5313,7 +5313,8 @@ func (c *Checker) checkStrStatic(s *parse.StaticFunction) (Expression, bool) {
 		if list, ok := arg.Type().(*List); ok && (list.Of().equal(Byte) || list.Of().equal(Rune)) {
 			return &ScalarFrom{Value: arg, Target: Str}, true
 		}
-		c.addError(fmt.Sprintf("Str::from expects [Byte] or [Rune], got %s", arg.Type().String()), s.Function.Args[0].GetLocation())
+		legacy := fmt.Sprintf("Str::from expects [Byte] or [Rune], got %s", arg.Type().String())
+		c.addDiagnostic(invalidConversionDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(s.Function.Args[0].Value.GetLocation()), Label: fmt.Sprintf("expected `[Byte]` or `[Rune]`, but found `%s`", arg.Type())}.build())
 		return nil, true
 	}
 	return nil, false
@@ -5345,7 +5346,8 @@ func (c *Checker) checkScalarFrom(s *parse.StaticFunction, target Type) Expressi
 	// Defensive: only numeric targets convert. Foreign named types over Str or
 	// Bool underlyings are not numeric and must not reach here.
 	if !isNumericScalar(valueType) {
-		c.addError(fmt.Sprintf("%s::from requires a numeric type", target.String()), s.GetLocation())
+		legacy := fmt.Sprintf("%s::from requires a numeric type", target.String())
+		c.addDiagnostic(invalidConversionDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(s.GetLocation()), Label: fmt.Sprintf("`%s` is not a numeric conversion target", target)}.build())
 		return nil
 	}
 	floatTarget := isFloatScalar(valueType)
@@ -5370,7 +5372,8 @@ func (c *Checker) checkScalarFrom(s *parse.StaticFunction, target Type) Expressi
 		ok = ok || isRelationalFloatLike(argType)
 	}
 	if !ok {
-		c.addError(fmt.Sprintf("%s::from expects a numeric value, got %s", target.String(), argType.String()), s.Function.Args[0].GetLocation())
+		legacy := fmt.Sprintf("%s::from expects a numeric value, got %s", target.String(), argType.String())
+		c.addDiagnostic(invalidConversionDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(s.Function.Args[0].Value.GetLocation()), Label: fmt.Sprintf("`%s` cannot be converted to `%s`", argType, target)}.build())
 		return nil
 	}
 	return &ScalarFrom{Value: arg, Target: target}
@@ -6040,7 +6043,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 	case *parse.RuneLiteral:
 		runes := []rune(s.Value)
 		if len(runes) != 1 || !utf8.ValidRune(runes[0]) {
-			c.addError("Rune literal must contain exactly one Unicode scalar value", s.GetLocation())
+			c.addDiagnostic(invalidLiteralDiagnostic{LegacyMessage: "Rune literal must contain exactly one Unicode scalar value", Span: c.sourceSpan(s.GetLocation()), Label: "expected exactly one Unicode scalar value"}.build())
 			return &RuneLiteral{Value: 0}
 		}
 		return &RuneLiteral{Value: runes[0]}
@@ -6054,18 +6057,21 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			if strings.Contains(stripped, ".") {
 				value, err := strconv.ParseFloat(stripped, 64)
 				if err != nil {
-					c.addError(fmt.Sprintf("Invalid float: %s", s.Value), s.GetLocation())
+					legacy := fmt.Sprintf("Invalid float: %s", s.Value)
+					c.addDiagnostic(invalidLiteralDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(s.GetLocation()), Label: "this is not a valid floating-point literal"}.build())
 					return &FloatLiteral{Value: 0.0}
 				}
 				return &FloatLiteral{Value: value}
 			}
 			value64, err := strconv.ParseInt(stripped, 0, 64)
 			if err != nil {
-				c.addError(fmt.Sprintf("Invalid int: %s", s.Value), s.GetLocation())
+				legacy := fmt.Sprintf("Invalid int: %s", s.Value)
+				c.addDiagnostic(invalidLiteralDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(s.GetLocation()), Label: "this is not a valid integer literal"}.build())
 				return &IntLiteral{0}
 			}
 			if !c.intLiteralFitsType(value64, Int) {
-				c.addError(fmt.Sprintf("Integer literal %s overflows Int", s.Value), s.GetLocation())
+				legacy := fmt.Sprintf("Integer literal %s overflows Int", s.Value)
+				c.addDiagnostic(numericLiteralOverflowDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(s.GetLocation()), Target: Int}.build())
 			}
 			return &IntLiteral{int(value64)}
 		}
@@ -8648,7 +8654,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 func (c *Checker) parseRuneLiteralValue(literal *parse.RuneLiteral) (rune, bool) {
 	runes := []rune(literal.Value)
 	if len(runes) != 1 || !utf8.ValidRune(runes[0]) {
-		c.addError("Rune literal must contain exactly one Unicode scalar value", literal.GetLocation())
+		c.addDiagnostic(invalidLiteralDiagnostic{LegacyMessage: "Rune literal must contain exactly one Unicode scalar value", Span: c.sourceSpan(literal.GetLocation()), Label: "expected exactly one Unicode scalar value"}.build())
 		return 0, false
 	}
 	return runes[0], true
@@ -8779,17 +8785,17 @@ func bindInferredTypeVars(expected Type, actual Type) {
 func (c *Checker) checkNumericLiteralAs(expr parse.Expression, expected Type) Expression {
 	if unary, ok := expr.(*parse.UnaryExpression); ok && unary.Operator == parse.Minus {
 		if num, ok := unary.Operand.(*parse.NumLiteral); ok {
-			return c.checkSignedNumericLiteralAs(num, expected, true)
+			return c.checkSignedNumericLiteralAs(num, expected, true, unary.GetLocation())
 		}
 	}
 	num, ok := expr.(*parse.NumLiteral)
 	if !ok || expected == nil {
 		return nil
 	}
-	return c.checkSignedNumericLiteralAs(num, expected, false)
+	return c.checkSignedNumericLiteralAs(num, expected, false, num.GetLocation())
 }
 
-func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Type, negative bool) Expression {
+func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Type, negative bool, literalLocation parse.Location) Expression {
 	literalType := expected
 	if foreign, ok := expected.(*ForeignType); ok {
 		literalType = foreign.Underlying
@@ -8805,7 +8811,8 @@ func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Ty
 		clean := strings.ReplaceAll(literalText, "_", "")
 		value, err := strconv.ParseFloat(clean, 64)
 		if err != nil {
-			c.addError(fmt.Sprintf("Invalid float: %s", num.Value), num.GetLocation())
+			legacy := fmt.Sprintf("Invalid float: %s", num.Value)
+			c.addDiagnostic(invalidLiteralDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(literalLocation), Label: "this is not a valid floating-point literal"}.build())
 			return nil
 		}
 		if literalType == Float64 {
@@ -8817,7 +8824,8 @@ func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Ty
 		if literalType == Float32 {
 			float32Value, err := strconv.ParseFloat(clean, 32)
 			if err != nil {
-				c.addError(fmt.Sprintf("Float literal %s overflows Float32", num.Value), num.GetLocation())
+				legacy := fmt.Sprintf("Float literal %s overflows Float32", num.Value)
+				c.addDiagnostic(numericLiteralOverflowDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(literalLocation), Target: expected}.build())
 				return &TypedFloatLiteral{Value: float32Value, Text: clean, Typed: expected}
 			}
 			return &TypedFloatLiteral{Value: float32Value, Text: clean, Typed: expected}
@@ -8828,7 +8836,8 @@ func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Ty
 	if isUnsignedScalar(literalType) {
 		value := new(big.Int)
 		if _, ok := value.SetString(clean, 0); !ok || value.Sign() < 0 || !c.uintLiteralFitsType(value, literalType) {
-			c.addError(fmt.Sprintf("Integer literal %s overflows %s", literalText, expected), num.GetLocation())
+			legacy := fmt.Sprintf("Integer literal %s overflows %s", literalText, expected)
+			c.addDiagnostic(numericLiteralOverflowDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(literalLocation), Target: expected}.build())
 		}
 		return &TypedIntLiteral{Value: int(value.Int64()), Text: clean, Typed: expected}
 	}
@@ -8837,11 +8846,13 @@ func (c *Checker) checkSignedNumericLiteralAs(num *parse.NumLiteral, expected Ty
 	}
 	value64, err := strconv.ParseInt(clean, 0, 64)
 	if err != nil {
-		c.addError(fmt.Sprintf("Invalid int: %s", literalText), num.GetLocation())
+		legacy := fmt.Sprintf("Invalid int: %s", literalText)
+		c.addDiagnostic(invalidLiteralDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(literalLocation), Label: "this is not a valid integer literal"}.build())
 		return nil
 	}
 	if !c.intLiteralFitsType(value64, literalType) {
-		c.addError(fmt.Sprintf("Integer literal %s overflows %s", literalText, expected), num.GetLocation())
+		legacy := fmt.Sprintf("Integer literal %s overflows %s", literalText, expected)
+		c.addDiagnostic(numericLiteralOverflowDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(literalLocation), Target: expected}.build())
 		if isIntegerScalar(literalType) {
 			return &TypedIntLiteral{Value: int(value64), Text: clean, Typed: expected}
 		}

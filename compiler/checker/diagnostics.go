@@ -123,6 +123,9 @@ const (
 	DiagnosticCodeIgnoredMatchPattern           DiagnosticCode = "ignored_match_pattern"
 	DiagnosticCodeNonBooleanMatchCondition      DiagnosticCode = "non_boolean_match_condition"
 	DiagnosticCodeInvalidTry                    DiagnosticCode = "invalid_try"
+	DiagnosticCodeInvalidLiteral                DiagnosticCode = "invalid_literal"
+	DiagnosticCodeNumericLiteralOverflow        DiagnosticCode = "numeric_literal_overflow"
+	DiagnosticCodeInvalidConversion             DiagnosticCode = "invalid_conversion"
 )
 
 type SourceSpan struct {
@@ -1636,6 +1639,42 @@ type invalidTryDiagnostic struct {
 func (d invalidTryDiagnostic) build() Diagnostic {
 	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid try expression", "", DiagnosticLabel{Span: d.Span, Message: d.Label})
 	diagnostic.Code = DiagnosticCodeInvalidTry
+	return diagnostic
+}
+
+type invalidLiteralDiagnostic struct {
+	LegacyMessage string
+	Span          SourceSpan
+	Label         string
+}
+
+func (d invalidLiteralDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid literal", "", DiagnosticLabel{Span: d.Span, Message: d.Label})
+	diagnostic.Code = DiagnosticCodeInvalidLiteral
+	return diagnostic
+}
+
+type numericLiteralOverflowDiagnostic struct {
+	LegacyMessage string
+	Span          SourceSpan
+	Target        Type
+}
+
+func (d numericLiteralOverflowDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Numeric literal overflow", "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("this value cannot be represented as `%s`", d.Target)})
+	diagnostic.Code = DiagnosticCodeNumericLiteralOverflow
+	return diagnostic
+}
+
+type invalidConversionDiagnostic struct {
+	LegacyMessage string
+	Span          SourceSpan
+	Label         string
+}
+
+func (d invalidConversionDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid conversion", "", DiagnosticLabel{Span: d.Span, Message: d.Label})
+	diagnostic.Code = DiagnosticCodeInvalidConversion
 	return diagnostic
 }
 

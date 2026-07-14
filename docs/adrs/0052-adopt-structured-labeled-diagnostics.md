@@ -272,10 +272,10 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Invalid catch and result error types
   - [x] Invalid `Maybe::new` arguments
 
-- [ ] **Literal and conversion validation**
-  - [ ] Invalid rune, integer, and float literals
-  - [ ] Numeric overflow
-  - [ ] Invalid `Str::from` and numeric conversions
+- [x] **Literal and conversion validation**
+  - [x] Invalid rune, integer, and float literals
+  - [x] Numeric overflow
+  - [x] Invalid `Str::from` and numeric conversions
   - [x] Non-stringable interpolation values
 
 - [ ] **Unsafe API usage**

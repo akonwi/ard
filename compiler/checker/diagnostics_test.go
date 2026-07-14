@@ -598,6 +598,58 @@ func TestMaybeNewInvalidFormsUseStructuredDiagnostics(t *testing.T) {
 	}
 }
 
+func TestLiteralAndConversionDiagnosticsAreStructured(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		code    checker.DiagnosticCode
+		message string
+	}{
+		{"rune", "'ab'\n", checker.DiagnosticCodeInvalidLiteral, "Rune literal must contain exactly one Unicode scalar value"},
+		{"invalid integer", "9223372036854775808\n", checker.DiagnosticCodeInvalidLiteral, "Invalid int: 9223372036854775808"},
+		{"integer overflow", "let value: Int8 = 128\n", checker.DiagnosticCodeNumericLiteralOverflow, "Integer literal 128 overflows Int8"},
+		{"float overflow", "let value: Float32 = 340282400000000000000000000000000000000.0\n", checker.DiagnosticCodeNumericLiteralOverflow, "Float literal 340282400000000000000000000000000000000.0 overflows Float32"},
+		{"negative unsigned overflow", "let value: Uint8 = -1\n", checker.DiagnosticCodeNumericLiteralOverflow, "Integer literal -1 overflows Uint8"},
+		{"string conversion", "Str::from([1])\n", checker.DiagnosticCodeInvalidConversion, "Str::from expects [Byte] or [Rune], got [Int]"},
+		{"numeric conversion", "Int8::from(\"1\")\n", checker.DiagnosticCodeInvalidConversion, "Int8::from expects a numeric value, got Str"},
+		{"missing cast target", "use ard/unsafe\nunsafe::cast(1)\n", checker.DiagnosticCodeInvalidFunctionTypeArgs, "unsafe::cast requires exactly one explicit type argument"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if diagnostic.Message != tt.message || diagnostic.Primary.Message == "" {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
+func TestInvalidRuneDiagnosticLabelsFullSourceLiteral(t *testing.T) {
+	result := parse.Parse([]byte("'ab'\n"), "main.ard")
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidLiteral)
+	if diagnostic.Primary.Span.Location.Start.Col != 1 || diagnostic.Primary.Span.Location.End.Col != 4 {
+		t.Fatalf("span = %#v", diagnostic.Primary.Span.Location)
+	}
+}
+
+func TestNegativeNumericOverflowLabelsUnaryExpression(t *testing.T) {
+	result := parse.Parse([]byte("let value: Uint8 = -1\n"), "main.ard")
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeNumericLiteralOverflow)
+	if diagnostic.Primary.Span.Location.Start.Col != 20 || diagnostic.Primary.Span.Location.End.Col != 21 {
+		t.Fatalf("span = %#v", diagnostic.Primary.Span.Location)
+	}
+}
+
 func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")

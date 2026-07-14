@@ -95,17 +95,22 @@ const (
 )
 
 type token struct {
-	kind   kind
-	line   int
-	column int
-	text   string
-	err    string
+	kind         kind
+	line         int
+	column       int
+	text         string
+	sourceLength int
+	err          string
 }
 
 func (t token) getLocation() Location {
+	length := len(t.text)
+	if t.sourceLength > 0 {
+		length = t.sourceLength
+	}
 	return Location{
 		Start: Point{Row: t.line, Col: t.column},
-		End:   Point{Row: t.line, Col: t.column + len(t.text) - 1},
+		End:   Point{Row: t.line, Col: t.column + length - 1},
 	}
 }
 
@@ -542,18 +547,18 @@ func (l *lexer) takeRune(start char) (token, bool) {
 
 		if currChar.raw == '\'' {
 			l.advance() // Consume the closing quote.
-			return token{kind: rune_, line: start.line, column: start.col, text: sb.String()}, true
+			return token{kind: rune_, line: start.line, column: start.col, text: sb.String(), sourceLength: l.column - start.col}, true
 		}
 
 		if currChar.raw == '\n' {
-			return token{kind: rune_, line: start.line, column: start.col, text: sb.String(), err: "Unterminated rune literal"}, true
+			return token{kind: rune_, line: start.line, column: start.col, text: sb.String(), sourceLength: l.column - start.col, err: "Unterminated rune literal"}, true
 		}
 
 		sb.WriteByte(currChar.raw)
 		l.advance()
 	}
 
-	return token{kind: rune_, line: start.line, column: start.col, text: sb.String(), err: "Unterminated rune literal"}, true
+	return token{kind: rune_, line: start.line, column: start.col, text: sb.String(), sourceLength: l.column - start.col, err: "Unterminated rune literal"}, true
 }
 
 func (l *lexer) takeEscapedTemplateString(start char) (token, bool) {
