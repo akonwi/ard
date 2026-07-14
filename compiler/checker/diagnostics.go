@@ -113,6 +113,7 @@ const (
 	DiagnosticCodeInvalidEqualityOperation      DiagnosticCode = "invalid_equality_operation"
 	DiagnosticCodeInvalidBooleanOperation       DiagnosticCode = "invalid_boolean_operation"
 	DiagnosticCodeInvalidChainedComparison      DiagnosticCode = "invalid_chained_comparison"
+	DiagnosticCodeNonBooleanIfCondition         DiagnosticCode = "non_boolean_if_condition"
 )
 
 type SourceSpan struct {
@@ -1499,6 +1500,17 @@ type invalidChainedComparisonDiagnostic struct {
 func (d invalidChainedComparisonDiagnostic) build() Diagnostic {
 	diagnostic := newLabeledDiagnostic(Error, "equality operators cannot be chained", "Equality operators cannot be chained", "", DiagnosticLabel{Span: d.Span, Message: "split this into separate boolean expressions"})
 	diagnostic.Code = DiagnosticCodeInvalidChainedComparison
+	return diagnostic
+}
+
+type nonBooleanIfConditionDiagnostic struct {
+	Actual Type
+	Span   SourceSpan
+}
+
+func (d nonBooleanIfConditionDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, "If conditions must be boolean expressions", "Invalid if condition", "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected `Bool`, but found `%s`", d.Actual)})
+	diagnostic.Code = DiagnosticCodeNonBooleanIfCondition
 	return diagnostic
 }
 

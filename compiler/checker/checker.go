@@ -5821,7 +5821,7 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 			return nil
 		}
 		if condition.Type() != Bool {
-			c.addError("If conditions must be boolean expressions", current.GetLocation())
+			c.addDiagnostic(nonBooleanIfConditionDiagnostic{Actual: condition.Type(), Span: c.sourceSpan(current.Condition.GetLocation())}.build())
 			return nil
 		}
 		expectedType := c.expectedExpr

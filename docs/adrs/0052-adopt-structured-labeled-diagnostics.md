@@ -252,8 +252,8 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Invalid comparisons and boolean operations
   - [x] Chained equality operators
 
-- [ ] **Conditionals**
-  - [ ] Non-boolean conditions
+- [x] **Conditionals**
+  - [x] Non-boolean conditions
   - [x] Inconsistent branch result types
   - [x] Missing `else` when used as a value
 

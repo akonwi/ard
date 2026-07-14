@@ -473,6 +473,18 @@ func TestOperatorDiagnosticLabelSpans(t *testing.T) {
 	}
 }
 
+func TestNonBooleanIfConditionDiagnosticIsStructured(t *testing.T) {
+	result := parse.Parse([]byte("if true {\n} else if 42 {\n}\n"), "main.ard")
+	chain := result.Program.Statements[0].(*parse.IfStatement)
+	invalidBranch := chain.Else.(*parse.IfStatement)
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeNonBooleanIfCondition)
+	if diagnostic.Message != "If conditions must be boolean expressions" || diagnostic.Title != "Invalid if condition" || diagnostic.Primary.Span.Location != invalidBranch.Condition.GetLocation() || diagnostic.Primary.Message != "expected `Bool`, but found `Int`" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")
