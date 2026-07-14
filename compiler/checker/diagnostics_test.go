@@ -650,6 +650,38 @@ func TestNegativeNumericOverflowLabelsUnaryExpression(t *testing.T) {
 	}
 }
 
+func TestUnsafeAPIErrorsReuseStandardDiagnostics(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		code    checker.DiagnosticCode
+		message string
+	}{
+		{"cast module", "unsafe::cast<Int>(1)\n", checker.DiagnosticCodeUndefinedModule, "Undefined module: unsafe"},
+		{"is nil module", "unsafe::is_nil(1)\n", checker.DiagnosticCodeUndefinedModule, "Undefined module: unsafe"},
+		{"cast type arguments", "use ard/unsafe\nunsafe::cast(1)\n", checker.DiagnosticCodeInvalidFunctionTypeArgs, "unsafe::cast requires exactly one explicit type argument"},
+		{"cast value arguments", "use ard/unsafe\nunsafe::cast<Int>()\n", checker.DiagnosticCodeIncorrectArgumentCount, "Incorrect number of arguments: Expected 1, got 0"},
+		{"cast named argument", "use ard/unsafe\nunsafe::cast<Int>(source: 1)\n", checker.DiagnosticCodeUnknownNamedArgument, "unknown argument: source"},
+		{"is nil type arguments", "use ard/unsafe\nunsafe::is_nil<Int>(1)\n", checker.DiagnosticCodeInvalidFunctionTypeArgs, "unsafe::is_nil does not accept type arguments"},
+		{"is nil value arguments", "use ard/unsafe\nunsafe::is_nil()\n", checker.DiagnosticCodeIncorrectArgumentCount, "Incorrect number of arguments: Expected 1, got 0"},
+		{"is nil named argument", "use ard/unsafe\nunsafe::is_nil(source: 1)\n", checker.DiagnosticCodeUnknownNamedArgument, "unknown argument: source"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if diagnostic.Message != tt.message || diagnostic.Primary.Message == "" {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
 func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")

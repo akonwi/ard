@@ -278,10 +278,10 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Invalid `Str::from` and numeric conversions
   - [x] Non-stringable interpolation values
 
-- [ ] **Unsafe API usage**
-  - [ ] Missing `ard/unsafe` imports
-  - [ ] Invalid `unsafe::cast` arguments and type arguments
-  - [ ] Invalid `unsafe::is_nil` arguments and type arguments
+- [x] **Unsafe API usage**
+  - [x] Missing `ard/unsafe` imports
+  - [x] Invalid `unsafe::cast` arguments and type arguments
+  - [x] Invalid `unsafe::is_nil` arguments and type arguments
 
 - [ ] **Opaque helper-generated errors**
   - [ ] Replace generic binding, argument resolution, and call-resolution `err.Error()` emissions with typed helper errors and diagnostics

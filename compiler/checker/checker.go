@@ -1278,7 +1278,7 @@ func (c *Checker) resolveCallTypeArgs(typeArgs []parse.DeclaredType) []Type {
 func (c *Checker) checkUnsafeCast(s *parse.StaticFunction) Expression {
 	modName, _ := c.destructurePath(s)
 	if !c.hasExplicitImportAlias("ard/unsafe", modName) {
-		c.addError("unsafe::cast requires importing ard/unsafe", s.Target.GetLocation())
+		c.addUnresolvedReference(undefinedModule, modName, s.Target.GetLocation())
 		return nil
 	}
 	callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
@@ -1418,7 +1418,7 @@ func (c *Checker) checkForeignTypeMatch(s *parse.MatchExpression, subject Expres
 func (c *Checker) checkUnsafeIsNil(s *parse.StaticFunction) Expression {
 	modName, _ := c.destructurePath(s)
 	if !c.hasExplicitImportAlias("ard/unsafe", modName) {
-		c.addError("unsafe::is_nil requires importing ard/unsafe", s.Target.GetLocation())
+		c.addUnresolvedReference(undefinedModule, modName, s.Target.GetLocation())
 		return nil
 	}
 	if len(s.Function.TypeArgs) != 0 {
