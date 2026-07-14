@@ -181,6 +181,102 @@ func TestUndefinedInstanceMembersHaveStructuredDiagnostics(t *testing.T) {
 	}
 }
 
+func TestEmptyCollectionDiagnosticsLabelVariableBindings(t *testing.T) {
+	tests := []struct {
+		name       string
+		source     string
+		code       checker.DiagnosticCode
+		literalLoc func(*parse.VariableDeclaration) parse.Location
+	}{
+		{"list", "let values = []\n", checker.DiagnosticCodeUntypedEmptyList, func(v *parse.VariableDeclaration) parse.Location { return v.Value.GetLocation() }},
+		{"map", "let values = [:]\n", checker.DiagnosticCodeUntypedEmptyMap, func(v *parse.VariableDeclaration) parse.Location { return v.Value.GetLocation() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			declaration := result.Program.Statements[0].(*parse.VariableDeclaration)
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if diagnostic.Primary.Span.Location != declaration.NameLocation || len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != tt.literalLoc(declaration) {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
+func TestNestedEmptyCollectionDoesNotInheritOuterBinding(t *testing.T) {
+	source := "fn id(value: $T) $T { value }\nlet values = [id([])]\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	declaration := result.Program.Statements[1].(*parse.VariableDeclaration)
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUntypedEmptyList)
+	if diagnostic.Primary.Span.Location == declaration.NameLocation || len(diagnostic.Secondary) != 0 {
+		t.Fatalf("diagnostic inherited outer binding: %#v", diagnostic)
+	}
+}
+
+func TestEmptyCollectionWithoutBindingLabelsLiteral(t *testing.T) {
+	result := parse.Parse([]byte("[]\n"), "main.ard")
+	literal := result.Program.Statements[0]
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUntypedEmptyList)
+	if diagnostic.Primary.Span.Location != literal.GetLocation() || len(diagnostic.Secondary) != 0 {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestStructLiteralDiagnosticsAreStructured(t *testing.T) {
+	tests := []struct {
+		name          string
+		source        string
+		code          checker.DiagnosticCode
+		legacyMessage string
+		secondaries   int
+	}{
+		{
+			name: "duplicate Go field", source: "use go:image\nlet p = image::Point{X: 1, X: 2}\n",
+			code: checker.DiagnosticCodeDuplicateStructLiteralField, legacyMessage: "Duplicate field: X", secondaries: 1,
+		},
+		{
+			name: "missing Ard field", source: "struct Person {\n  name: Str,\n  age: Int\n}\nlet p = Person{name: \"Ada\"}\n",
+			code: checker.DiagnosticCodeMissingStructFields, legacyMessage: "Missing field: age",
+		},
+		{
+			name: "non-generic Ard struct", source: "struct Point {\n  x: Int\n}\nlet p = Point<Str>{x: 1}\n",
+			code: checker.DiagnosticCodeInvalidStructTypeArgs, legacyMessage: "Struct Point does not take type arguments",
+		},
+		{
+			name: "wrong Ard type argument count", source: "struct Box<$T> {\n  value: $T\n}\nlet b = Box<Str, Int>{value: \"x\"}\n",
+			code: checker.DiagnosticCodeInvalidStructTypeArgs, legacyMessage: "Expected 1 type argument(s), got 2",
+		},
+		{
+			name: "invalid Go literal target", source: "use go:time\nlet d = time::Duration{}\n",
+			code: checker.DiagnosticCodeInvalidGoStructLiteral, legacyMessage: "Go struct literals require a non-pointer Go struct type",
+		},
+		{
+			name: "non-generic Go struct", source: "use go:image\nlet p = image::Point<Int>{X: 1}\n",
+			code: checker.DiagnosticCodeInvalidGoStructTypeArgs, legacyMessage: "Go type image::Point is not generic",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if diagnostic.Message != tt.legacyMessage || len(diagnostic.Secondary) != tt.secondaries {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
 func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")

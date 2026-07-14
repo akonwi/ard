@@ -222,13 +222,13 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Non-integer discriminants
   - [x] Duplicate discriminant values
 
-- [ ] **Collection and struct literals**
-  - [ ] Empty untyped lists and maps
+- [x] **Collection and struct literals**
+  - [x] Empty untyped lists and maps
   - [x] Fixed-array length mismatches and mixed list element types
   - [x] Map key and value mismatches
-  - [ ] Repeated fields in struct literals
-  - [ ] Missing struct fields
-  - [ ] Invalid struct type arguments and Go struct literal forms
+  - [x] Repeated fields in struct literals
+  - [x] Missing struct fields
+  - [x] Invalid struct type arguments and Go struct literal forms
 
 - [ ] **Go FFI and generic Go entities**
   - [ ] Incorrect Go type-argument counts

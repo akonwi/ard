@@ -125,6 +125,13 @@ func TestDuplicateDeclarationDiagnosticBuildsBothLabels(t *testing.T) {
 	}
 }
 
+func TestDeclaredTypeLocationFallsBackForNil(t *testing.T) {
+	fallback := parse.Location{Start: parse.Point{Row: 3, Col: 4}, End: parse.Point{Row: 3, Col: 8}}
+	if got := declaredTypeLocation(nil, fallback); got != fallback {
+		t.Fatalf("location = %#v, want fallback %#v", got, fallback)
+	}
+}
+
 func TestDuplicateMethodDiagnosticUsesOriginalDeclaration(t *testing.T) {
 	original := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}}}
 	duplicate := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 2, Col: 1}}}

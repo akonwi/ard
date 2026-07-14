@@ -348,6 +348,7 @@ type Checker struct {
 	matchArmDiscardContext            bool
 	deferredWorkDepth                 int
 	reportedMapKeyErrors              map[parse.Location]bool
+	emptyCollectionBinding            *collectionBindingContext
 	goTypesContext                    *gotypes.Context
 	spans                             *SpanIndex
 	moduleFiles                       map[string]string
@@ -646,6 +647,13 @@ func sourceSpanIfPresent(span SourceSpan) *SourceSpan {
 		return nil
 	}
 	return &span
+}
+
+func declaredTypeLocation(declared parse.DeclaredType, fallback parse.Location) parse.Location {
+	if declared == nil {
+		return fallback
+	}
+	return declared.GetLocation()
 }
 
 func (c *Checker) addNonCallable(name string, location parse.Location, declaration *SourceSpan, style nonCallableLegacyStyle) {
@@ -2438,12 +2446,26 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				if s.Type == nil {
 					switch literal := s.Value.(type) {
 					case *parse.ListLiteral:
-						if expr := c.checkList(nil, literal); expr != nil {
-							val = expr
+						check := func() {
+							if expr := c.checkList(nil, literal); expr != nil {
+								val = expr
+							}
+						}
+						if len(literal.Items) == 0 {
+							c.withCollectionBinding(s.Name, s.NameLocation, check)
+						} else {
+							check()
 						}
 					case *parse.MapLiteral:
-						if expr := c.checkMap(nil, literal); expr != nil {
-							val = expr
+						check := func() {
+							if expr := c.checkMap(nil, literal); expr != nil {
+								val = expr
+							}
+						}
+						if len(literal.Entries) == 0 {
+							c.withCollectionBinding(s.Name, s.NameLocation, check)
+						} else {
+							check()
 						}
 					default:
 						val = c.checkExpr(s.Value)
@@ -3144,6 +3166,18 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 	}
 }
 
+type collectionBindingContext struct {
+	Name string
+	Span SourceSpan
+}
+
+func (c *Checker) withCollectionBinding(name string, location parse.Location, check func()) {
+	previous := c.emptyCollectionBinding
+	c.emptyCollectionBinding = &collectionBindingContext{Name: name, Span: c.sourceSpan(location)}
+	defer func() { c.emptyCollectionBinding = previous }()
+	check()
+}
+
 func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLiteral {
 	// A named Go slice or array type accepts an Ard list-like literal: Go assignability
 	// allows an unnamed composite value where the named type is expected.
@@ -3201,7 +3235,16 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 	}
 
 	if len(expr.Items) == 0 {
-		c.addError("Empty lists need an explicit type", expr.GetLocation())
+		var bindingSpan *SourceSpan
+		bindingName := ""
+		if c.emptyCollectionBinding != nil {
+			span := c.emptyCollectionBinding.Span
+			bindingSpan = &span
+			bindingName = c.emptyCollectionBinding.Name
+		}
+		c.addDiagnostic(emptyCollectionNeedsTypeDiagnostic{
+			Kind: emptyListCollection, LiteralSpan: c.sourceSpan(expr.GetLocation()), BindingName: bindingName, BindingSpan: bindingSpan,
+		}.build())
 		c.halted = true
 		listType := MakeList(Void)
 		return &ListLiteral{_type: listType, ListType: listType, Elements: []Expression{}}
@@ -4369,7 +4412,16 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 			}
 		} else {
 			// Empty map without a declared type is an error
-			c.addError("Empty maps need an explicit type", expr.GetLocation())
+			var bindingSpan *SourceSpan
+			bindingName := ""
+			if c.emptyCollectionBinding != nil {
+				span := c.emptyCollectionBinding.Span
+				bindingSpan = &span
+				bindingName = c.emptyCollectionBinding.Name
+			}
+			c.addDiagnostic(emptyCollectionNeedsTypeDiagnostic{
+				Kind: emptyMapCollection, LiteralSpan: c.sourceSpan(expr.GetLocation()), BindingName: bindingName, BindingSpan: bindingSpan,
+			}.build())
 			c.halted = true
 			mapType := MakeMap(Void, Void)
 			return &MapLiteral{
@@ -4496,7 +4548,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 
 func (c *Checker) validateForeignStructInstance(foreign *ForeignType, typeArgs []parse.DeclaredType, properties []parse.StructValue, loc parse.Location) *ForeignStructInstance {
 	if foreign == nil || foreign.Target != "go" || foreign.Pointer || !foreign.Struct {
-		c.addError("Go struct literals require a non-pointer Go struct type", loc)
+		c.addDiagnostic(invalidGoStructLiteralDiagnostic{Span: c.sourceSpan(loc), Message: "Go struct literals require a non-pointer Go struct type"}.build())
 		return nil
 	}
 	foreign = c.instantiateForeignStructForLiteral(foreign, typeArgs, properties, loc)
@@ -4508,7 +4560,7 @@ func (c *Checker) validateForeignStructInstance(foreign *ForeignType, typeArgs [
 		foreign.FieldsLoaded = true
 	}
 	fields := map[string]Expression{}
-	seen := map[string]bool{}
+	seen := map[string]SourceSpan{}
 	for _, property := range properties {
 		name := property.Name.Name
 		fieldType := foreign.Fields[name]
@@ -4520,11 +4572,13 @@ func (c *Checker) validateForeignStructInstance(foreign *ForeignType, typeArgs [
 			}
 			continue
 		}
-		if seen[name] {
-			c.addError(fmt.Sprintf("Duplicate field: %s", name), property.GetLocation())
+		if original, duplicate := seen[name]; duplicate {
+			c.addDiagnostic(duplicateStructLiteralFieldDiagnostic{
+				Name: name, Span: c.sourceSpan(property.Name.GetLocation()), PreviousSpan: original,
+			}.build())
 			continue
 		}
-		seen[name] = true
+		seen[name] = c.sourceSpan(property.Name.GetLocation())
 		value := c.checkExprAs(property.Value, fieldType)
 		if value == nil {
 			continue
@@ -4542,7 +4596,9 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 	named, ok := foreign.GoType.(*gotypes.Named)
 	if !ok {
 		if len(typeArgs) > 0 {
-			c.addError("Go struct literal type arguments require a named Go type", loc)
+			c.addDiagnostic(invalidGoStructTypeArgumentsDiagnostic{
+				Span: c.sourceSpan(declaredTypeLocation(typeArgs[0], loc)), LegacyMessage: "Go struct literal type arguments require a named Go type", Primary: "type arguments require a named Go type",
+			}.build())
 			return nil
 		}
 		return foreign
@@ -4550,7 +4606,10 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 	params := named.TypeParams()
 	if params == nil || params.Len() == 0 {
 		if len(typeArgs) > 0 {
-			c.addError(fmt.Sprintf("Go type %s is not generic", foreign), loc)
+			legacy := fmt.Sprintf("Go type %s is not generic", foreign)
+			c.addDiagnostic(invalidGoStructTypeArgumentsDiagnostic{
+				Span: c.sourceSpan(declaredTypeLocation(typeArgs[0], loc)), LegacyMessage: legacy, Primary: fmt.Sprintf("`%s` is not generic", foreign),
+			}.build())
 			return nil
 		}
 		return foreign
@@ -4560,7 +4619,14 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 	goArgs := make([]gotypes.Type, params.Len())
 	if len(typeArgs) > 0 {
 		if len(typeArgs) != params.Len() {
-			c.addError(fmt.Sprintf("Go type %s expects %d type argument(s), got %d", foreign, params.Len(), len(typeArgs)), loc)
+			legacy := fmt.Sprintf("Go type %s expects %d type argument(s), got %d", foreign, params.Len(), len(typeArgs))
+			span := c.sourceSpan(loc)
+			if len(typeArgs) > params.Len() {
+				span = c.sourceSpan(declaredTypeLocation(typeArgs[params.Len()], loc))
+			}
+			c.addDiagnostic(invalidGoStructTypeArgumentsDiagnostic{
+				Span: span, LegacyMessage: legacy, Primary: fmt.Sprintf("expected %d type argument(s), but found %d", params.Len(), len(typeArgs)),
+			}.build())
 			return nil
 		}
 		for i, typeArg := range typeArgs {
@@ -4570,7 +4636,10 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 			}
 			goArg, ok := checkerTypeToGoType(arg)
 			if !ok {
-				c.addError(fmt.Sprintf("Type argument %s cannot be used as a Go type argument", arg), loc)
+				legacy := fmt.Sprintf("Type argument %s cannot be used as a Go type argument", arg)
+				c.addDiagnostic(invalidGoStructTypeArgumentsDiagnostic{
+					Span: c.sourceSpan(declaredTypeLocation(typeArg, loc)), LegacyMessage: legacy, Primary: fmt.Sprintf("`%s` cannot be represented as a Go type argument", arg),
+				}.build())
 				return nil
 			}
 			args[i] = arg
@@ -4848,9 +4917,15 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		if len(typeArgs) > 0 {
 			switch {
 			case !structType.DeclaredGenerics && len(genericParams) > 1:
-				c.addError(fmt.Sprintf("Struct %s must declare its generic parameters to take explicit type arguments", structName), loc)
+				legacy := fmt.Sprintf("Struct %s must declare its generic parameters to take explicit type arguments", structName)
+				c.addDiagnostic(invalidStructTypeArgumentsDiagnostic{
+					Struct: structName, Actual: len(typeArgs), Reason: "undeclared_order", Span: c.sourceSpan(loc), LegacyMessage: legacy,
+				}.build())
 			case len(typeArgs) != len(genericParams):
-				c.addError(fmt.Sprintf("Expected %d type argument(s), got %d", len(genericParams), len(typeArgs)), loc)
+				legacy := fmt.Sprintf("Expected %d type argument(s), got %d", len(genericParams), len(typeArgs))
+				c.addDiagnostic(invalidStructTypeArgumentsDiagnostic{
+					Struct: structName, Expected: len(genericParams), Actual: len(typeArgs), Reason: "count", Span: c.sourceSpan(loc), LegacyMessage: legacy,
+				}.build())
 			default:
 				for i, actual := range typeArgs {
 					if err := genericScope.bindGeneric(genericParams[i], actual); err != nil {
@@ -4862,7 +4937,10 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		}
 	} else {
 		if len(typeArgs) > 0 {
-			c.addError(fmt.Sprintf("Struct %s does not take type arguments", structName), loc)
+			legacy := fmt.Sprintf("Struct %s does not take type arguments", structName)
+			c.addDiagnostic(invalidStructTypeArgumentsDiagnostic{
+				Struct: structName, Actual: len(typeArgs), Reason: "non_generic", Span: c.sourceSpan(loc), LegacyMessage: legacy,
+			}.build())
 		}
 		structDefCopy = structType
 	}
@@ -5038,7 +5116,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 		}
 	}
 	if len(missing) > 0 {
-		c.addError(fmt.Sprintf("Missing field: %s", strings.Join(missing, ", ")), loc)
+		c.addDiagnostic(missingStructFieldsDiagnostic{Fields: missing, Span: c.sourceSpan(loc)}.build())
 	}
 
 	instance.Fields = fields

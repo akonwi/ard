@@ -86,6 +86,13 @@ const (
 	DiagnosticCodeDuplicateEnumVariant          DiagnosticCode = "duplicate_enum_variant"
 	DiagnosticCodeInvalidEnumDiscriminant       DiagnosticCode = "invalid_enum_discriminant"
 	DiagnosticCodeDuplicateEnumDiscriminant     DiagnosticCode = "duplicate_enum_discriminant"
+	DiagnosticCodeUntypedEmptyList              DiagnosticCode = "untyped_empty_list"
+	DiagnosticCodeUntypedEmptyMap               DiagnosticCode = "untyped_empty_map"
+	DiagnosticCodeDuplicateStructLiteralField   DiagnosticCode = "duplicate_struct_literal_field"
+	DiagnosticCodeMissingStructFields           DiagnosticCode = "missing_struct_fields"
+	DiagnosticCodeInvalidStructTypeArgs         DiagnosticCode = "invalid_struct_type_arguments"
+	DiagnosticCodeInvalidGoStructLiteral        DiagnosticCode = "invalid_go_struct_literal"
+	DiagnosticCodeInvalidGoStructTypeArgs       DiagnosticCode = "invalid_go_struct_type_arguments"
 )
 
 type SourceSpan struct {
@@ -1004,6 +1011,127 @@ func (d duplicateEnumDiscriminantDiagnostic) build() Diagnostic {
 		secondary...,
 	)
 	diagnostic.Code = DiagnosticCodeDuplicateEnumDiscriminant
+	return diagnostic
+}
+
+type emptyCollectionKind uint8
+
+const (
+	emptyListCollection emptyCollectionKind = iota
+	emptyMapCollection
+)
+
+type emptyCollectionNeedsTypeDiagnostic struct {
+	Kind        emptyCollectionKind
+	LiteralSpan SourceSpan
+	BindingName string
+	BindingSpan *SourceSpan
+}
+
+func (d emptyCollectionNeedsTypeDiagnostic) build() Diagnostic {
+	code := DiagnosticCodeUntypedEmptyList
+	legacy := "Empty lists need an explicit type"
+	title := "Empty list requires a type"
+	literalMessage := "an empty list cannot infer its element type"
+	bindingMessage := "declare the list type here"
+	if d.Kind == emptyMapCollection {
+		code = DiagnosticCodeUntypedEmptyMap
+		legacy = "Empty maps need an explicit type"
+		title = "Empty map requires a type"
+		literalMessage = "an empty map cannot infer its key and value types"
+		bindingMessage = "declare the map type here"
+	}
+	primary := DiagnosticLabel{Span: d.LiteralSpan, Message: bindingMessage}
+	secondary := []DiagnosticLabel{}
+	if d.BindingSpan != nil {
+		primary = DiagnosticLabel{Span: *d.BindingSpan, Message: bindingMessage}
+		secondary = append(secondary, DiagnosticLabel{Span: d.LiteralSpan, Message: literalMessage})
+	} else {
+		primary.Message = literalMessage
+	}
+	diagnostic := newLabeledDiagnostic(Error, legacy, title, "", primary, secondary...)
+	diagnostic.Code = code
+	return diagnostic
+}
+
+type duplicateStructLiteralFieldDiagnostic struct {
+	Name         string
+	Span         SourceSpan
+	PreviousSpan SourceSpan
+}
+
+func (d duplicateStructLiteralFieldDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"Duplicate field: "+d.Name,
+		"Duplicate struct field",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("field `%s` is provided again here", d.Name)},
+		DiagnosticLabel{Span: d.PreviousSpan, Message: "first provided here"},
+	)
+	diagnostic.Code = DiagnosticCodeDuplicateStructLiteralField
+	return diagnostic
+}
+
+type missingStructFieldsDiagnostic struct {
+	Fields []string
+	Span   SourceSpan
+}
+
+func (d missingStructFieldsDiagnostic) build() Diagnostic {
+	names := strings.Join(d.Fields, ", ")
+	label := "missing field `" + names + "`"
+	if len(d.Fields) > 1 {
+		label = "missing required fields: " + names
+	}
+	diagnostic := newLabeledDiagnostic(Error, "Missing field: "+names, "Missing required struct field", "", DiagnosticLabel{Span: d.Span, Message: label})
+	diagnostic.Code = DiagnosticCodeMissingStructFields
+	return diagnostic
+}
+
+type invalidStructTypeArgumentsDiagnostic struct {
+	Struct        string
+	Expected      int
+	Actual        int
+	Reason        string
+	Span          SourceSpan
+	LegacyMessage string
+}
+
+func (d invalidStructTypeArgumentsDiagnostic) build() Diagnostic {
+	primary := "invalid explicit type arguments for `" + d.Struct + "`"
+	if d.Reason == "non_generic" {
+		primary = fmt.Sprintf("`%s` is not generic", d.Struct)
+	} else if d.Reason == "count" {
+		primary = fmt.Sprintf("expected %d type argument(s), but found %d", d.Expected, d.Actual)
+	} else if d.Reason == "undeclared_order" {
+		primary = "declare the struct's generic parameters explicitly"
+	}
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid struct type arguments", "", DiagnosticLabel{Span: d.Span, Message: primary})
+	diagnostic.Code = DiagnosticCodeInvalidStructTypeArgs
+	return diagnostic
+}
+
+type invalidGoStructLiteralDiagnostic struct {
+	Span    SourceSpan
+	Message string
+}
+
+func (d invalidGoStructLiteralDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.Message, "Invalid Go struct literal", "", DiagnosticLabel{Span: d.Span, Message: "this is not a valid Go struct literal form"})
+	diagnostic.Code = DiagnosticCodeInvalidGoStructLiteral
+	return diagnostic
+}
+
+type invalidGoStructTypeArgumentsDiagnostic struct {
+	Span          SourceSpan
+	LegacyMessage string
+	Primary       string
+}
+
+func (d invalidGoStructTypeArgumentsDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid Go struct type arguments", "", DiagnosticLabel{Span: d.Span, Message: d.Primary})
+	diagnostic.Code = DiagnosticCodeInvalidGoStructTypeArgs
 	return diagnostic
 }
 
