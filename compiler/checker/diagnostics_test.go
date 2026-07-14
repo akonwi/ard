@@ -369,6 +369,107 @@ func TestIncorrectFunctionArgumentHasStructuredLabels(t *testing.T) {
 	}
 }
 
+func requireDiagnosticCode(t *testing.T, diagnostics []checker.Diagnostic, code checker.DiagnosticCode) checker.Diagnostic {
+	t.Helper()
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == code {
+			return diagnostic
+		}
+	}
+	t.Fatalf("diagnostics = %#v, want code %q", diagnostics, code)
+	return checker.Diagnostic{}
+}
+
+func TestGenericTypeUsageHasStructuredDiagnostics(t *testing.T) {
+	tests := []struct {
+		name          string
+		source        string
+		code          checker.DiagnosticCode
+		legacyMessage string
+	}{
+		{
+			name:          "non-generic specialization",
+			source:        "struct Plain {\n  value: Int,\n}\nfn consume(value: Plain<Int>) {}\n",
+			code:          checker.DiagnosticCodeNonGenericSpecialization,
+			legacyMessage: "Type is not generic and cannot be specialized.",
+		},
+		{
+			name:          "incorrect type argument count",
+			source:        "struct Pair {\n  first: $A,\n  second: $B,\n}\nfn consume(value: Pair<Int>) {}\n",
+			code:          checker.DiagnosticCodeIncorrectTypeArgCount,
+			legacyMessage: "Incorrect number of type arguments: expected 2, got 1",
+		},
+		{
+			name:          "missing named type arguments",
+			source:        "struct Box {\n  value: $T,\n}\nfn consume(value: Box) {}\n",
+			code:          checker.DiagnosticCodeMissingTypeArguments,
+			legacyMessage: "Generic type Box requires type arguments",
+		},
+		{
+			name:          "missing builtin type arguments",
+			source:        "fn consume(value: Maybe) {}\n",
+			code:          checker.DiagnosticCodeIncorrectTypeArgCount,
+			legacyMessage: "Generic type Maybe requires type arguments",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if diagnostic.Message != tt.legacyMessage || diagnostic.Primary.Span.FilePath != "main.ard" || diagnostic.Primary.Message == "" {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
+func TestGenericDeclarationRulesHaveStructuredDiagnostics(t *testing.T) {
+	t.Run("recursive generic self-reference", func(t *testing.T) {
+		result := parse.Parse([]byte("struct Node {\n  next: Node<$T>,\n}\n"), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeRecursiveGenericReference)
+		if diagnostic.Message != "Recursive generic self-reference Node is not supported yet" {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+
+	t.Run("method introduced generic", func(t *testing.T) {
+		source := "struct Box {\n  item: Int,\n}\nimpl Box {\n  fn get(value: $U) Int { self.item }\n}\n"
+		result := parse.Parse([]byte(source), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeMethodIntroducedGeneric)
+		if diagnostic.Primary.Message != "`$U` is not a generic parameter of the receiver type" {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+}
+
+func TestUnboundGenericTypeArgumentHasStructuredDiagnostic(t *testing.T) {
+	result := parse.Parse([]byte("fn raw(value: $T) $T { value }\nraw<$U>(1)\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUnboundGenericTypeArg)
+	if diagnostic.Message != "unbound generic type argument $U" || diagnostic.Primary.Message != "`$U` cannot be used as a type argument here" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestBuiltInTypeRedeclarationHasStructuredDiagnostic(t *testing.T) {
 	result := parse.Parse([]byte("struct Sender {}\n"), "main.ard")
 	if len(result.Errors) > 0 {

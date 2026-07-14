@@ -570,7 +570,7 @@ func (c *Checker) scanForUnresolvedGenerics() {
 				loc = locatable.GetLocation()
 			}
 
-			c.addError(fmt.Sprintf("Unresolved generic: %s", typeVar.String()), loc)
+			c.addDiagnostic(unresolvedGenericDiagnostic{Generic: typeVar.String(), Span: c.sourceSpan(loc)}.build())
 			break
 		}
 	}
@@ -607,6 +607,23 @@ func (c *Checker) addDiagnostic(diagnostic Diagnostic) {
 
 func (c *Checker) sourceSpan(location parse.Location) SourceSpan {
 	return SourceSpan{FilePath: c.filePath, Location: location}
+}
+
+func (c *Checker) addMissingTypeArguments(typeName string, location parse.Location) {
+	c.addDiagnostic(missingTypeArgumentsDiagnostic{TypeName: typeName, Span: c.sourceSpan(location)}.build())
+}
+
+func (c *Checker) addIncorrectTypeArgumentCount(expected int, actual int, legacyMessage string, location parse.Location) {
+	c.addDiagnostic(incorrectTypeArgumentCountDiagnostic{
+		Expected:      expected,
+		Actual:        actual,
+		LegacyMessage: legacyMessage,
+		Span:          c.sourceSpan(location),
+	}.build())
+}
+
+func (c *Checker) addMethodIntroducedGeneric(name string, reason methodIntroducedGenericReason, location parse.Location) {
+	c.addDiagnostic(methodIntroducedGenericDiagnostic{Name: name, Reason: reason, Span: c.sourceSpan(location)}.build())
 }
 
 func (c *Checker) addIncorrectArgumentType(legacyMessage string, expected Type, actual Type, argumentLocation parse.Location, parameter Parameter, requiresMutable bool) {
@@ -709,18 +726,21 @@ func (c *Checker) specializeAliasedType(originalType Type, typeArgs []parse.Decl
 	collectGenericsFromType(originalType, &genericParams, seenGenerics)
 
 	if len(genericParams) == 0 {
-		c.addError("Type is not generic and cannot be specialized.", loc)
+		c.addDiagnostic(nonGenericTypeSpecializationDiagnostic{Span: c.sourceSpan(loc)}.build())
 		return originalType
 	}
 
 	if len(typeArgs) != len(genericParams) {
-		c.addError(fmt.Sprintf("Incorrect number of type arguments: expected %d, got %d", len(genericParams), len(typeArgs)), loc)
+		c.addIncorrectTypeArgumentCount(len(genericParams), len(typeArgs), "", loc)
 		return originalType
 	}
 
 	if structDef, ok := originalType.(*StructDef); ok {
 		if c.isResolvingStructDefinition(structDef) {
-			c.addError(fmt.Sprintf("Recursive generic self-reference %s is not supported yet", structDef.Name), loc)
+			c.addDiagnostic(recursiveGenericSelfReferenceDiagnostic{
+				TypeName: structDef.Name,
+				Span:     c.sourceSpan(loc),
+			}.build())
 			return structDef
 		}
 		c.ensureStructDefinitionResolved(structDef)
@@ -731,7 +751,7 @@ func (c *Checker) specializeAliasedType(originalType Type, typeArgs []parse.Decl
 			genericParams = append(genericParams, structDef.GenericParams...)
 		}
 		if len(typeArgs) != len(genericParams) {
-			c.addError(fmt.Sprintf("Incorrect number of type arguments: expected %d, got %d", len(genericParams), len(typeArgs)), loc)
+			c.addIncorrectTypeArgumentCount(len(genericParams), len(typeArgs), "", loc)
 			return originalType
 		}
 		typeVarMap := make(map[string]*TypeVar, len(genericParams))
@@ -948,28 +968,28 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			break
 		case "Maybe":
 			if len(ty.TypeArgs) != 1 {
-				c.addError("Generic type Maybe requires type arguments", ty.GetLocation())
+				c.addIncorrectTypeArgumentCount(1, len(ty.TypeArgs), "Generic type Maybe requires type arguments", ty.GetLocation())
 				return &TypeVar{name: "unknown"}
 			}
 			baseType = MakeMaybe(c.resolveType(ty.TypeArgs[0]))
 			break
 		case "Chan":
 			if len(ty.TypeArgs) != 1 {
-				c.addError("Generic type Chan requires type arguments", ty.GetLocation())
+				c.addIncorrectTypeArgumentCount(1, len(ty.TypeArgs), "Generic type Chan requires type arguments", ty.GetLocation())
 				return &TypeVar{name: "unknown"}
 			}
 			baseType = MakeChan(c.resolveType(ty.TypeArgs[0]))
 			break
 		case "Receiver":
 			if len(ty.TypeArgs) != 1 {
-				c.addError("Generic type Receiver requires type arguments", ty.GetLocation())
+				c.addIncorrectTypeArgumentCount(1, len(ty.TypeArgs), "Generic type Receiver requires type arguments", ty.GetLocation())
 				return &TypeVar{name: "unknown"}
 			}
 			baseType = MakeReceiver(c.resolveType(ty.TypeArgs[0]))
 			break
 		case "Sender":
 			if len(ty.TypeArgs) != 1 {
-				c.addError("Generic type Sender requires type arguments", ty.GetLocation())
+				c.addIncorrectTypeArgumentCount(1, len(ty.TypeArgs), "Generic type Sender requires type arguments", ty.GetLocation())
 				return &TypeVar{name: "unknown"}
 			}
 			baseType = MakeSender(c.resolveType(ty.TypeArgs[0]))
@@ -998,7 +1018,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 				baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
 			} else {
 				if namedTypeRequiresTypeArguments(sym.Type) {
-					c.addError(fmt.Sprintf("Generic type %s requires type arguments", t.GetName()), ty.GetLocation())
+					c.addMissingTypeArguments(t.GetName(), ty.GetLocation())
 				}
 				baseType = sym.Type
 			}
@@ -1028,7 +1048,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 						baseType = c.specializeAliasedType(sym.Type, ty.TypeArgs, ty.GetLocation())
 					} else {
 						if namedTypeRequiresTypeArguments(sym.Type) {
-							c.addError(fmt.Sprintf("Generic type %s::%s requires type arguments", ty.Type.Target, ty.Type.Property), ty.GetLocation())
+							c.addMissingTypeArguments(fmt.Sprintf("%s::%s", ty.Type.Target, ty.Type.Property), ty.GetLocation())
 						}
 						baseType = sym.Type
 					}
@@ -1040,7 +1060,7 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		return &TypeVar{name: "unknown"}
 	case *parse.GenericType:
 		if !c.genericAllowedInCurrentMethod(ty.Name) {
-			c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", ty.GetLocation())
+			c.addMethodIntroducedGeneric(ty.Name, methodGenericInvalidOccurrence, ty.GetLocation())
 		}
 		if existing := c.scope.findGeneric(ty.Name); existing != nil {
 			baseType = existing
@@ -1132,7 +1152,10 @@ func (c *Checker) validateExplicitCallTypeArg(typeArg parse.DeclaredType) {
 		if c.genericInCurrentContext(param) {
 			continue
 		}
-		c.addError(fmt.Sprintf("unbound generic type argument $%s", param), typeArg.GetLocation())
+		c.addDiagnostic(unboundGenericTypeArgumentDiagnostic{
+			Name: param,
+			Span: c.sourceSpan(typeArg.GetLocation()),
+		}.build())
 	}
 }
 
@@ -1611,7 +1634,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 	for _, method := range s.Methods {
 		if len(method.TypeParams) > 0 {
 			validImpl = false
-			c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+			c.addMethodIntroducedGeneric("", methodGenericExplicitDeclaration, method.GetLocation())
 			invalidImplementedMethods[method.Name] = true
 			continue
 		}
@@ -1688,7 +1711,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 		}
 		if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
 			validImpl = false
-			c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+			c.addMethodIntroducedGeneric("", methodGenericSemanticLeak, method.GetLocation())
 			invalidImplementedMethods[method.Name] = true
 			continue
 		}
@@ -2022,7 +2045,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Check each method in the implementation
 				for _, method := range s.Methods {
 					if len(method.TypeParams) > 0 {
-						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						c.addMethodIntroducedGeneric("", methodGenericExplicitDeclaration, method.GetLocation())
 						invalidImplementedMethods[method.Name] = true
 						continue
 					}
@@ -2080,7 +2103,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}, receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
-						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						c.addMethodIntroducedGeneric("", methodGenericSemanticLeak, method.GetLocation())
 						invalidImplementedMethods[method.Name] = true
 						continue
 					}
@@ -2113,7 +2136,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Check each method in the implementation
 				for _, method := range s.Methods {
 					if len(method.TypeParams) > 0 {
-						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						c.addMethodIntroducedGeneric("", methodGenericExplicitDeclaration, method.GetLocation())
 						invalidImplementedMethods[method.Name] = true
 						continue
 					}
@@ -2171,7 +2194,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}, receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
-						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						c.addMethodIntroducedGeneric("", methodGenericSemanticLeak, method.GetLocation())
 						invalidImplementedMethods[method.Name] = true
 						continue
 					}
@@ -2840,7 +2863,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				for i := range s.Methods {
 					method := &s.Methods[i]
 					if len(method.TypeParams) > 0 {
-						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						c.addMethodIntroducedGeneric("", methodGenericExplicitDeclaration, method.GetLocation())
 						continue
 					}
 					c.pushMethodGenericAllowlist(receiverGenerics)
@@ -2869,7 +2892,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}, signatures[i], receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
-						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						c.addMethodIntroducedGeneric("", methodGenericSemanticLeak, method.GetLocation())
 					}
 				}
 				return &Statement{Stmt: def}
@@ -2882,7 +2905,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				for i := range s.Methods {
 					method := &s.Methods[i]
 					if len(method.TypeParams) > 0 {
-						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						c.addMethodIntroducedGeneric("", methodGenericExplicitDeclaration, method.GetLocation())
 						continue
 					}
 					if method.Mutates {
@@ -2906,7 +2929,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}, signatures[i], receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
-						c.addError("methods cannot introduce generic type parameters; use the receiver type's generics", method.GetLocation())
+						c.addMethodIntroducedGeneric("", methodGenericSemanticLeak, method.GetLocation())
 					}
 				}
 				return &Statement{Stmt: def}

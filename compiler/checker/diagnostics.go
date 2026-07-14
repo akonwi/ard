@@ -42,6 +42,13 @@ const (
 	DiagnosticCodeBuiltInTypeRedeclaration  DiagnosticCode = "built_in_type_redeclaration"
 	DiagnosticCodeRecursiveTypeAlias        DiagnosticCode = "recursive_type_alias"
 	DiagnosticCodeRecursiveStructLayout     DiagnosticCode = "recursive_struct_layout"
+	DiagnosticCodeUnresolvedGeneric         DiagnosticCode = "unresolved_generic"
+	DiagnosticCodeUnboundGenericTypeArg     DiagnosticCode = "unbound_generic_type_argument"
+	DiagnosticCodeNonGenericSpecialization  DiagnosticCode = "non_generic_type_specialization"
+	DiagnosticCodeIncorrectTypeArgCount     DiagnosticCode = "incorrect_type_argument_count"
+	DiagnosticCodeMissingTypeArguments      DiagnosticCode = "missing_type_arguments"
+	DiagnosticCodeRecursiveGenericReference DiagnosticCode = "recursive_generic_self_reference"
+	DiagnosticCodeMethodIntroducedGeneric   DiagnosticCode = "method_introduced_generic_parameter"
 )
 
 type SourceSpan struct {
@@ -338,6 +345,152 @@ func (d incorrectArgumentTypeDiagnostic) build() Diagnostic {
 		secondary...,
 	)
 	diagnostic.Code = DiagnosticCodeIncorrectArgumentType
+	return diagnostic
+}
+
+type unresolvedGenericDiagnostic struct {
+	Generic string
+	Span    SourceSpan
+}
+
+func (d unresolvedGenericDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"Unresolved generic: "+d.Generic,
+		"Unresolved generic",
+		"The generic type could not be inferred from this expression.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("generic `%s` remains unresolved", d.Generic)},
+	)
+	diagnostic.Code = DiagnosticCodeUnresolvedGeneric
+	return diagnostic
+}
+
+type unboundGenericTypeArgumentDiagnostic struct {
+	Name string
+	Span SourceSpan
+}
+
+func (d unboundGenericTypeArgumentDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("unbound generic type argument $%s", d.Name),
+		"Unbound generic type argument",
+		fmt.Sprintf("`$%s` is not bound in this function or closure context.", d.Name),
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`$%s` cannot be used as a type argument here", d.Name)},
+	)
+	diagnostic.Code = DiagnosticCodeUnboundGenericTypeArg
+	return diagnostic
+}
+
+type nonGenericTypeSpecializationDiagnostic struct {
+	Span SourceSpan
+}
+
+func (d nonGenericTypeSpecializationDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"Type is not generic and cannot be specialized.",
+		"Type is not generic",
+		"Only generic types can take explicit type arguments.",
+		DiagnosticLabel{Span: d.Span, Message: "this type cannot be specialized"},
+	)
+	diagnostic.Code = DiagnosticCodeNonGenericSpecialization
+	return diagnostic
+}
+
+type incorrectTypeArgumentCountDiagnostic struct {
+	Expected      int
+	Actual        int
+	LegacyMessage string
+	Span          SourceSpan
+}
+
+func (d incorrectTypeArgumentCountDiagnostic) build() Diagnostic {
+	legacyMessage := d.LegacyMessage
+	if legacyMessage == "" {
+		legacyMessage = fmt.Sprintf("Incorrect number of type arguments: expected %d, got %d", d.Expected, d.Actual)
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		legacyMessage,
+		"Incorrect number of type arguments",
+		"",
+		DiagnosticLabel{
+			Span:    d.Span,
+			Message: fmt.Sprintf("expected %d type arguments, but found %d", d.Expected, d.Actual),
+		},
+	)
+	diagnostic.Code = DiagnosticCodeIncorrectTypeArgCount
+	return diagnostic
+}
+
+type missingTypeArgumentsDiagnostic struct {
+	TypeName string
+	Span     SourceSpan
+}
+
+func (d missingTypeArgumentsDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Generic type %s requires type arguments", d.TypeName),
+		"Missing type arguments",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("generic type `%s` requires type arguments", d.TypeName)},
+	)
+	diagnostic.Code = DiagnosticCodeMissingTypeArguments
+	return diagnostic
+}
+
+type recursiveGenericSelfReferenceDiagnostic struct {
+	TypeName string
+	Span     SourceSpan
+}
+
+func (d recursiveGenericSelfReferenceDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Recursive generic self-reference %s is not supported yet", d.TypeName),
+		"Recursive generic self-reference",
+		"Recursive generic specialization is not supported while the type is being defined.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is specialized while its definition is still being resolved", d.TypeName)},
+	)
+	diagnostic.Code = DiagnosticCodeRecursiveGenericReference
+	return diagnostic
+}
+
+type methodIntroducedGenericReason uint8
+
+const (
+	methodGenericExplicitDeclaration methodIntroducedGenericReason = iota
+	methodGenericInvalidOccurrence
+	methodGenericSemanticLeak
+)
+
+type methodIntroducedGenericDiagnostic struct {
+	Name   string
+	Reason methodIntroducedGenericReason
+	Span   SourceSpan
+}
+
+func (d methodIntroducedGenericDiagnostic) build() Diagnostic {
+	label := "methods cannot declare their own generic parameters"
+	switch d.Reason {
+	case methodGenericExplicitDeclaration:
+	case methodGenericInvalidOccurrence:
+		label = fmt.Sprintf("`$%s` is not a generic parameter of the receiver type", d.Name)
+	case methodGenericSemanticLeak:
+		label = "this method contains a generic not provided by its receiver type"
+	default:
+		panic(fmt.Sprintf("unknown method-introduced generic reason: %d", d.Reason))
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"methods cannot introduce generic type parameters; use the receiver type's generics",
+		"Method cannot introduce generic parameters",
+		"Methods may only use generic parameters declared by their receiver type.",
+		DiagnosticLabel{Span: d.Span, Message: label},
+	)
+	diagnostic.Code = DiagnosticCodeMethodIntroducedGeneric
 	return diagnostic
 }
 

@@ -168,12 +168,12 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Recursive aliases
   - [x] Infinite-size recursive fields
 
-- [ ] **Generic type resolution**
-  - [ ] Unresolved and unbound generics
-  - [ ] Specialization of non-generic types
-  - [ ] Incorrect and missing type arguments
-  - [ ] Unsupported recursive generic references
-  - [ ] Method-introduced generic parameters
+- [x] **Generic type resolution**
+  - [x] Unresolved and unbound generics
+  - [x] Specialization of non-generic types
+  - [x] Incorrect and missing type arguments
+  - [x] Unsupported recursive generic references
+  - [x] Method-introduced generic parameters
 
 - [ ] **Type validity**
   - [ ] Invalid map key types

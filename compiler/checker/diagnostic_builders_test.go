@@ -176,6 +176,26 @@ func TestTypeMismatchDiagnosticUsesNeutralExpectationLabel(t *testing.T) {
 	}
 }
 
+func TestMethodIntroducedGenericDiagnosticReasons(t *testing.T) {
+	span := SourceSpan{FilePath: "main.ard"}
+	tests := []struct {
+		name   string
+		reason methodIntroducedGenericReason
+		label  string
+	}{
+		{"explicit declaration", methodGenericExplicitDeclaration, "methods cannot declare their own generic parameters"},
+		{"semantic leak", methodGenericSemanticLeak, "this method contains a generic not provided by its receiver type"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diagnostic := (methodIntroducedGenericDiagnostic{Reason: tt.reason, Span: span}).build()
+			if diagnostic.Code != DiagnosticCodeMethodIntroducedGeneric || diagnostic.Primary.Message != tt.label {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
 func TestImportDiagnosticBuilders(t *testing.T) {
 	span := SourceSpan{FilePath: "main.ard", Location: parse.Location{
 		Start: parse.Point{Row: 1, Col: 5},

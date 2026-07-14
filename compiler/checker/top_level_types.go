@@ -1,7 +1,6 @@
 package checker
 
 import (
-	"fmt"
 	"sort"
 
 	"github.com/akonwi/ard/parse"
@@ -502,7 +501,7 @@ func (c *Checker) validateTopLevelTypeAliases() {
 			continue
 		}
 		if namedTypeRequiresTypeArguments(sym.Type) {
-			c.addError(fmt.Sprintf("Generic type %s requires type arguments", custom.GetName()), custom.GetLocation())
+			c.addMissingTypeArguments(custom.GetName(), custom.GetLocation())
 		}
 	}
 }
