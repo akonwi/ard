@@ -63,9 +63,10 @@ const (
 )
 
 type Import struct {
-	Path string
-	Name string
-	Kind ImportKind
+	Path         string
+	Name         string
+	Kind         ImportKind
+	PathLocation Location
 	Location
 }
 

@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/akonwi/ard/parse"
 )
@@ -34,6 +35,10 @@ const (
 	DiagnosticCodeNotAStruct                DiagnosticCode = "not_a_struct"
 	DiagnosticCodeImmutableAssignment       DiagnosticCode = "immutable_assignment"
 	DiagnosticCodeIncorrectArgumentType     DiagnosticCode = "incorrect_argument_type"
+	DiagnosticCodeGoImportResolution        DiagnosticCode = "go_import_resolution"
+	DiagnosticCodeImportResolution          DiagnosticCode = "import_resolution"
+	DiagnosticCodeCircularImport            DiagnosticCode = "circular_import"
+	DiagnosticCodeModuleLoadFailure         DiagnosticCode = "module_load_failure"
 )
 
 type SourceSpan struct {
@@ -333,16 +338,105 @@ func (d incorrectArgumentTypeDiagnostic) build() Diagnostic {
 	return diagnostic
 }
 
+type goImportResolutionDiagnostic struct {
+	Path  string
+	Cause string
+	Span  SourceSpan
+}
+
+func (d goImportResolutionDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Failed to resolve Go import '%s': %s", d.Path, d.Cause),
+		"Failed to resolve Go import",
+		d.Cause,
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("could not resolve Go package `%s`", d.Path)},
+	)
+	diagnostic.Code = DiagnosticCodeGoImportResolution
+	return diagnostic
+}
+
+type ardImportResolutionDiagnostic struct {
+	Path  string
+	Cause string
+	Span  SourceSpan
+}
+
+func (d ardImportResolutionDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Failed to resolve import '%s': %s", d.Path, d.Cause),
+		"Failed to resolve import",
+		d.Cause,
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("could not resolve module `%s`", d.Path)},
+	)
+	diagnostic.Code = DiagnosticCodeImportResolution
+	return diagnostic
+}
+
+type circularImportDiagnostic struct {
+	Chain       []string
+	ClosingSpan SourceSpan
+}
+
+func (d circularImportDiagnostic) build() Diagnostic {
+	chain := strings.Join(d.Chain, " -> ")
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"circular dependency detected: "+chain,
+		"Circular dependency",
+		chain,
+		DiagnosticLabel{Span: d.ClosingSpan, Message: "this import closes the dependency cycle"},
+	)
+	diagnostic.Code = DiagnosticCodeCircularImport
+	return diagnostic
+}
+
+func reanchorCircularImportDiagnostic(diagnostic Diagnostic, importerSpan SourceSpan) Diagnostic {
+	if diagnostic.Code != DiagnosticCodeCircularImport {
+		return diagnostic
+	}
+	secondary := make([]DiagnosticLabel, 0, len(diagnostic.Secondary)+1)
+	secondary = append(secondary, diagnostic.Primary)
+	secondary = append(secondary, diagnostic.Secondary...)
+	diagnostic.Primary = DiagnosticLabel{
+		Span:    importerSpan,
+		Message: "this import leads to a dependency cycle",
+	}
+	diagnostic.Secondary = secondary
+	return diagnostic
+}
+
+type moduleLoadDiagnostic struct {
+	ImportPath string
+	TargetFile string
+	Cause      string
+	ImportSpan SourceSpan
+}
+
+func (d moduleLoadDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Failed to load module %s: %s", d.TargetFile, d.Cause),
+		"Failed to load module",
+		fmt.Sprintf("%s: %s", d.TargetFile, d.Cause),
+		DiagnosticLabel{Span: d.ImportSpan, Message: fmt.Sprintf("module `%s` could not be loaded", d.ImportPath)},
+	)
+	diagnostic.Code = DiagnosticCodeModuleLoadFailure
+	return diagnostic
+}
+
 type duplicateImportDiagnostic struct {
-	Name          string
-	DuplicateSpan SourceSpan
-	OriginalSpan  SourceSpan
+	Name           string
+	StatementStart parse.Point
+	DuplicateSpan  SourceSpan
+	OriginalSpan   SourceSpan
 }
 
 func (d duplicateImportDiagnostic) build() Diagnostic {
 	diagnostic := newLabeledDiagnostic(
 		Warn,
-		fmt.Sprintf("%s Duplicate import: %s", d.DuplicateSpan.Location.Start, d.Name),
+		fmt.Sprintf("%s Duplicate import: %s", d.StatementStart, d.Name),
 		"Duplicate import",
 		"",
 		DiagnosticLabel{

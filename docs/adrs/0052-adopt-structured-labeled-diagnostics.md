@@ -158,10 +158,10 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
 
 #### Remaining checker migrations
 
-- [ ] **Import and module resolution**
-  - [ ] Failed Ard and Go imports
-  - [ ] Circular dependencies
-  - [ ] Module loading failures
+- [x] **Import and module resolution**
+  - [x] Failed Ard and Go imports
+  - [x] Circular dependencies
+  - [x] Module loading failures
 
 - [ ] **Type declarations and recursive types**
   - [ ] Redeclaration of built-in types

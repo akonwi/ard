@@ -166,6 +166,43 @@ let value = tools::new_name()
 }
 
 // TestPublishDiagnosticsLifecycle verifies the full cycle doesn't panic.
+func TestCircularImportIsPublishedOnInitiatingDocument(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "a.ard"), []byte("use app/b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "b.ard"), []byte("use app/a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(root, "main.ard")
+	source := "use app/a\n"
+	if err := os.WriteFile(mainPath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer()
+	docURI := uri.File(mainPath)
+	server.cache.Open(docURI, "ard", 1, source)
+	doc := server.cache.Get(docURI)
+	diagnostics, err := server.analyzeDiagnostics(doc, server.cache.Snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := server.checkerDiagnosticsToLSP(diagnostics, docURI)
+	if len(published) != 1 {
+		t.Fatalf("published diagnostics = %#v, want one", published)
+	}
+	if published[0].Range.Start.Line != 0 || published[0].Range.Start.Character != 4 || published[0].Range.End.Character != 9 {
+		t.Fatalf("range = %#v, want app/a path", published[0].Range)
+	}
+	if len(published[0].RelatedInformation) != 2 {
+		t.Fatalf("related information = %#v, want both imported cycle edges", published[0].RelatedInformation)
+	}
+}
+
 func TestPublishDiagnosticsLifecycle(t *testing.T) {
 	server := NewServer()
 	ctx := context.Background()

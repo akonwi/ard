@@ -388,13 +388,14 @@ func (c *Checker) Check() {
 	for _, imp := range c.input.Imports {
 		if original, dup := seenImportAliases[imp.Name]; dup {
 			c.addDiagnostic(duplicateImportDiagnostic{
-				Name:          imp.Name,
-				DuplicateSpan: c.sourceSpan(imp.GetLocation()),
-				OriginalSpan:  c.sourceSpan(original),
+				Name:           imp.Name,
+				StatementStart: imp.GetStart(),
+				DuplicateSpan:  c.sourceSpan(imp.PathLocation),
+				OriginalSpan:   c.sourceSpan(original),
 			}.build())
 			continue
 		}
-		seenImportAliases[imp.Name] = imp.GetLocation()
+		seenImportAliases[imp.Name] = imp.PathLocation
 
 		if imp.Kind == parse.ImportKindGo {
 			resolver := c.options.GoResolver
@@ -403,7 +404,11 @@ func (c *Checker) Check() {
 			}
 			pkg, err := resolver.ResolveGoPackage(imp.Path)
 			if err != nil {
-				c.addError(fmt.Sprintf("Failed to resolve Go import '%s': %v", imp.Path, err), imp.GetLocation())
+				c.addDiagnostic(goImportResolutionDiagnostic{
+					Path:  imp.Path,
+					Cause: err.Error(),
+					Span:  c.sourceSpan(imp.PathLocation),
+				}.build())
 				continue
 			}
 			c.program.GoImports[imp.Name] = pkg
@@ -425,7 +430,11 @@ func (c *Checker) Check() {
 
 			resolved, err := c.moduleResolver.ResolveImport(c.modulePath, imp.Path)
 			if err != nil {
-				c.addError(fmt.Sprintf("Failed to resolve import '%s': %v", imp.Path, err), imp.GetLocation())
+				c.addDiagnostic(ardImportResolutionDiagnostic{
+					Path:  imp.Path,
+					Cause: err.Error(),
+					Span:  c.sourceSpan(imp.PathLocation),
+				}.build())
 				continue
 			}
 			filePath := filepath.Clean(resolved.FilePath)
@@ -437,7 +446,10 @@ func (c *Checker) Check() {
 			}
 			if slices.Contains(c.moduleResolver.loadingChain, resolved.ModulePath) {
 				chain := append(append([]string{}, c.moduleResolver.loadingChain...), resolved.ModulePath)
-				c.addError(fmt.Sprintf("circular dependency detected: %s", strings.Join(chain, " -> ")), imp.GetLocation())
+				c.addDiagnostic(circularImportDiagnostic{
+					Chain:       chain,
+					ClosingSpan: c.sourceSpan(imp.PathLocation),
+				}.build())
 				continue
 			}
 			c.moduleResolver.loadingChain = append(c.moduleResolver.loadingChain, resolved.ModulePath)
@@ -446,7 +458,12 @@ func (c *Checker) Check() {
 			ast, err := c.moduleResolver.LoadModuleFile(filePath)
 			if err != nil {
 				c.moduleResolver.loadingChain = c.moduleResolver.loadingChain[:len(c.moduleResolver.loadingChain)-1]
-				c.addError(fmt.Sprintf("Failed to load module %s: %v", filePath, err), imp.GetLocation())
+				c.addDiagnostic(moduleLoadDiagnostic{
+					ImportPath: imp.Path,
+					TargetFile: filePath,
+					Cause:      err.Error(),
+					ImportSpan: c.sourceSpan(imp.PathLocation),
+				}.build())
 				continue
 			}
 
@@ -457,6 +474,7 @@ func (c *Checker) Check() {
 			if len(diagnostics) > 0 {
 				// Add all diagnostics from the imported module
 				for _, diag := range diagnostics {
+					diag = reanchorCircularImportDiagnostic(diag, c.sourceSpan(imp.PathLocation))
 					c.diagnostics = append(c.diagnostics, diag)
 				}
 				continue

@@ -175,3 +175,88 @@ func TestTypeMismatchDiagnosticUsesNeutralExpectationLabel(t *testing.T) {
 		t.Fatalf("secondary label = %#v", diagnostic.Secondary[0])
 	}
 }
+
+func TestImportDiagnosticBuilders(t *testing.T) {
+	span := SourceSpan{FilePath: "main.ard", Location: parse.Location{
+		Start: parse.Point{Row: 1, Col: 5},
+		End:   parse.Point{Row: 1, Col: 15},
+	}}
+	tests := []struct {
+		name    string
+		got     Diagnostic
+		code    DiagnosticCode
+		message string
+		title   string
+		label   string
+		text    string
+	}{
+		{
+			name: "Go resolution",
+			got: (goImportResolutionDiagnostic{
+				Path: "example.com/pkg", Cause: "package unavailable", Span: span,
+			}).build(),
+			code:    DiagnosticCodeGoImportResolution,
+			message: "Failed to resolve Go import 'example.com/pkg': package unavailable",
+			title:   "Failed to resolve Go import",
+			label:   "could not resolve Go package `example.com/pkg`",
+			text:    "package unavailable",
+		},
+		{
+			name: "Ard resolution",
+			got: (ardImportResolutionDiagnostic{
+				Path: "app/missing", Cause: "module not found", Span: span,
+			}).build(),
+			code:    DiagnosticCodeImportResolution,
+			message: "Failed to resolve import 'app/missing': module not found",
+			title:   "Failed to resolve import",
+			label:   "could not resolve module `app/missing`",
+			text:    "module not found",
+		},
+		{
+			name: "module load",
+			got: (moduleLoadDiagnostic{
+				ImportPath: "app/broken", TargetFile: "/app/broken.ard",
+				Cause: "parse failed", ImportSpan: span,
+			}).build(),
+			code:    DiagnosticCodeModuleLoadFailure,
+			message: "Failed to load module /app/broken.ard: parse failed",
+			title:   "Failed to load module",
+			label:   "module `app/broken` could not be loaded",
+			text:    "/app/broken.ard: parse failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got.Kind != Error || tt.got.Code != tt.code {
+				t.Fatalf("kind/code = %q/%q", tt.got.Kind, tt.got.Code)
+			}
+			if tt.got.Message != tt.message || tt.got.Title != tt.title || tt.got.Text != tt.text {
+				t.Fatalf("message/title/text = %q/%q/%q", tt.got.Message, tt.got.Title, tt.got.Text)
+			}
+			if tt.got.Primary.Span != span || tt.got.Primary.Message != tt.label {
+				t.Fatalf("primary = %#v", tt.got.Primary)
+			}
+			if len(tt.got.Secondary) != 0 {
+				t.Fatalf("secondary = %#v", tt.got.Secondary)
+			}
+		})
+	}
+}
+
+func TestCircularImportDiagnosticCopiesChainIntoOutput(t *testing.T) {
+	span := SourceSpan{FilePath: "b.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 5}}}
+	chain := []string{"app/a", "app/b", "app/a"}
+	diagnostic := (circularImportDiagnostic{Chain: append([]string(nil), chain...), ClosingSpan: span}).build()
+	chain[0] = "changed"
+
+	if diagnostic.Code != DiagnosticCodeCircularImport || diagnostic.Title != "Circular dependency" {
+		t.Fatalf("code/title = %q/%q", diagnostic.Code, diagnostic.Title)
+	}
+	if diagnostic.Message != "circular dependency detected: app/a -> app/b -> app/a" || diagnostic.Text != "app/a -> app/b -> app/a" {
+		t.Fatalf("message/text = %q/%q", diagnostic.Message, diagnostic.Text)
+	}
+	if diagnostic.Primary.Span != span || diagnostic.Primary.Message != "this import closes the dependency cycle" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+}

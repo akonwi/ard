@@ -519,6 +519,12 @@ func TestGoSessionRepricesForNewImports(t *testing.T) {
 		}
 		if strings.Contains(diag.Message, "Failed to resolve Go import") {
 			foundResolveError = true
+			if diag.Code != "go_import_resolution" {
+				t.Fatalf("diagnostic code = %q", diag.Code)
+			}
+			if filepath.Base(diag.Primary.Span.FilePath) != filepath.Base(path) || diag.Primary.Span.Location.Start.Row != 1 || diag.Primary.Span.Location.Start.Col != 8 || diag.Primary.Span.Location.End.Col != 14 {
+				t.Fatalf("diagnostic path span = %#v", diag.Primary.Span)
+			}
 		}
 	}
 	if !foundResolveError {

@@ -1,6 +1,7 @@
 package checker_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -368,9 +369,198 @@ func TestIncorrectFunctionArgumentHasStructuredLabels(t *testing.T) {
 	}
 }
 
+type failingGoResolver struct{}
+
+func (failingGoResolver) ResolveGoPackage(string) (*checker.GoPackage, error) {
+	return nil, errors.New("package unavailable")
+}
+
+func TestFailedGoImportHasStructuredDiagnostic(t *testing.T) {
+	const filePath = "main.ard"
+	result := parse.Parse([]byte("use go:example.invalid/pkg\n"), filePath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+
+	c := checker.New(filePath, result.Program, nil, checker.CheckOptions{GoResolver: failingGoResolver{}})
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeGoImportResolution || diagnostic.Text != "package unavailable" {
+		t.Fatalf("code/text = %q/%q", diagnostic.Code, diagnostic.Text)
+	}
+	if diagnostic.Primary.Span.Location != result.Program.Imports[0].PathLocation {
+		t.Fatalf("primary span = %v, want path span %v", diagnostic.Primary.Span.Location, result.Program.Imports[0].PathLocation)
+	}
+	if diagnostic.Primary.Message != "could not resolve Go package `example.invalid/pkg`" {
+		t.Fatalf("primary message = %q", diagnostic.Primary.Message)
+	}
+}
+
+func TestFailedArdImportHasStructuredDiagnostic(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(root, "main.ard")
+	result := parse.Parse([]byte("use app/missing\n"), filePath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+
+	c := checker.New(filePath, result.Program, resolver, checker.CheckOptions{ModulePath: "app/main"})
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeImportResolution {
+		t.Fatalf("code = %q", diagnostic.Code)
+	}
+	if diagnostic.Primary.Span.Location != result.Program.Imports[0].PathLocation || diagnostic.Primary.Message != "could not resolve module `app/missing`" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if diagnostic.Text == "" {
+		t.Fatal("resolution cause was omitted")
+	}
+}
+
+func TestCircularImportHasStructuredDiagnostic(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, contents string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("ard.toml", "name = \"app\"\nard = \">= 0.1.0\"\n")
+	write("a.ard", "use app/b\n")
+	write("b.ard", "use app/a\n")
+
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(root, "main.ard")
+	result := parse.Parse([]byte("use app/a\n"), filePath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	aResult := parse.Parse([]byte("use app/b\n"), filepath.Join(root, "a.ard"))
+	bResult := parse.Parse([]byte("use app/a\n"), filepath.Join(root, "b.ard"))
+
+	c := checker.New(filePath, result.Program, resolver, checker.CheckOptions{ModulePath: "app/main"})
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeCircularImport || diagnostic.Text != "app/a -> app/b -> app/a" {
+		t.Fatalf("code/text = %q/%q", diagnostic.Code, diagnostic.Text)
+	}
+	if diagnostic.Primary.Span.FilePath != filePath || diagnostic.Primary.Span.Location != result.Program.Imports[0].PathLocation {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 2 {
+		t.Fatalf("secondary = %#v, want both cycle edges", diagnostic.Secondary)
+	}
+	if diagnostic.Secondary[0].Span.FilePath != filepath.Join(root, "a.ard") || diagnostic.Secondary[0].Span.Location != aResult.Program.Imports[0].PathLocation {
+		t.Fatalf("first secondary = %#v", diagnostic.Secondary[0])
+	}
+	if diagnostic.Secondary[1].Span.FilePath != filepath.Join(root, "b.ard") || diagnostic.Secondary[1].Span.Location != bResult.Program.Imports[0].PathLocation {
+		t.Fatalf("second secondary = %#v", diagnostic.Secondary[1])
+	}
+}
+
+func TestModuleLoadFailureHasStructuredDiagnostic(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "broken.ard"), []byte("fn broken("), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(root, "main.ard")
+	result := parse.Parse([]byte("use app/broken\n"), filePath)
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+
+	c := checker.New(filePath, result.Program, resolver, checker.CheckOptions{ModulePath: "app/main"})
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeModuleLoadFailure {
+		t.Fatalf("code = %q", diagnostic.Code)
+	}
+	if diagnostic.Primary.Span.Location != result.Program.Imports[0].PathLocation || diagnostic.Primary.Message != "module `app/broken` could not be loaded" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if diagnostic.Text == "" {
+		t.Fatal("load cause was omitted")
+	}
+}
+
+func TestImportFailuresLeaveResolverReadyForLaterChecks(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, contents string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("ard.toml", "name = \"app\"\nard = \">= 0.1.0\"\n")
+	write("broken.ard", "fn broken(")
+	write("a.ard", "use app/b\n")
+	write("b.ard", "use app/a\n")
+	write("valid.ard", "fn value() Int { 1 }\n")
+
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkImport := func(fileName, modulePath, source string) []checker.Diagnostic {
+		t.Helper()
+		filePath := filepath.Join(root, fileName)
+		result := parse.Parse([]byte(source), filePath)
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New(filePath, result.Program, resolver, checker.CheckOptions{ModulePath: modulePath})
+		c.Check()
+		return c.Diagnostics()
+	}
+
+	if got := checkImport("first.ard", "app/first", "use app/broken\n"); len(got) != 1 || got[0].Code != checker.DiagnosticCodeModuleLoadFailure {
+		t.Fatalf("load diagnostics = %#v", got)
+	}
+	if got := checkImport("second.ard", "app/second", "use app/a\n"); len(got) != 1 || got[0].Code != checker.DiagnosticCodeCircularImport {
+		t.Fatalf("cycle diagnostics = %#v", got)
+	}
+	if got := checkImport("third.ard", "app/third", "use app/valid\n"); len(got) != 0 {
+		t.Fatalf("valid import after failures produced diagnostics: %#v", got)
+	}
+}
+
 func TestDuplicateImportHasStructuredLabels(t *testing.T) {
 	const filePath = "main.ard"
-	result := parse.Parse([]byte("use ard/list\nuse ard/list\n"), filePath)
+	result := parse.Parse([]byte("use ard/list as shared\nuse ard/map as shared\n"), filePath)
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
@@ -381,13 +571,16 @@ func TestDuplicateImportHasStructuredLabels(t *testing.T) {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
 	}
 
-	original := result.Program.Imports[0].GetLocation()
-	duplicate := result.Program.Imports[1].GetLocation()
+	original := result.Program.Imports[0].PathLocation
+	duplicate := result.Program.Imports[1].PathLocation
 	diagnostic := c.Diagnostics()[0]
 	if diagnostic.Kind != checker.Warn || diagnostic.Code != checker.DiagnosticCodeDuplicateImport {
 		t.Fatalf("kind/code = %q/%q", diagnostic.Kind, diagnostic.Code)
 	}
-	if diagnostic.Primary.Span.Location != duplicate || diagnostic.Primary.Message != "`list` is imported again here" {
+	if diagnostic.Message != "[2:1] Duplicate import: shared" {
+		t.Fatalf("legacy message = %q", diagnostic.Message)
+	}
+	if diagnostic.Primary.Span.Location != duplicate || diagnostic.Primary.Message != "`shared` is imported again here" {
 		t.Fatalf("primary = %#v", diagnostic.Primary)
 	}
 	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != original || diagnostic.Secondary[0].Message != "first imported here" {
