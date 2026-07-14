@@ -163,10 +163,10 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Circular dependencies
   - [x] Module loading failures
 
-- [ ] **Type declarations and recursive types**
-  - [ ] Redeclaration of built-in types
-  - [ ] Recursive aliases
-  - [ ] Infinite-size recursive fields
+- [x] **Type declarations and recursive types**
+  - [x] Redeclaration of built-in types
+  - [x] Recursive aliases
+  - [x] Infinite-size recursive fields
 
 - [ ] **Generic type resolution**
   - [ ] Unresolved and unbound generics

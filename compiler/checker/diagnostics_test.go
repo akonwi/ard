@@ -369,6 +369,150 @@ func TestIncorrectFunctionArgumentHasStructuredLabels(t *testing.T) {
 	}
 }
 
+func TestBuiltInTypeRedeclarationHasStructuredDiagnostic(t *testing.T) {
+	result := parse.Parse([]byte("struct Sender {}\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[0].(*parse.StructDefinition)
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeBuiltInTypeRedeclaration || diagnostic.Message != "Sender is a built-in type and cannot be redeclared" {
+		t.Fatalf("code/message = %q/%q", diagnostic.Code, diagnostic.Message)
+	}
+	if diagnostic.Primary.Span.Location != declaration.Name.GetLocation() || len(diagnostic.Secondary) != 0 {
+		t.Fatalf("labels = %#v / %#v", diagnostic.Primary, diagnostic.Secondary)
+	}
+}
+
+func TestRecursiveTypeAliasHasStructuredCycleLabels(t *testing.T) {
+	result := parse.Parse([]byte("type A = B\ntype B = A\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	first := result.Program.Statements[0].(*parse.TypeDeclaration)
+	second := result.Program.Statements[1].(*parse.TypeDeclaration)
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeRecursiveTypeAlias || diagnostic.Message != "Recursive type alias: A" {
+		t.Fatalf("code/message = %q/%q", diagnostic.Code, diagnostic.Message)
+	}
+	if diagnostic.Primary.Span.Location != second.Type[0].GetLocation() {
+		t.Fatalf("primary = %#v, want closing B -> A reference", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != first.Type[0].GetLocation() {
+		t.Fatalf("secondary = %#v, want opening A -> B reference", diagnostic.Secondary)
+	}
+}
+
+func TestRecursiveTypeAliasDirectCycleHasNoSecondaryLabel(t *testing.T) {
+	result := parse.Parse([]byte("type Node = Node\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[0].(*parse.TypeDeclaration)
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 1 || c.Diagnostics()[0].Code != checker.DiagnosticCodeRecursiveTypeAlias {
+		t.Fatalf("diagnostics = %#v", c.Diagnostics())
+	}
+	if c.Diagnostics()[0].Primary.Span.Location != declaration.Type[0].GetLocation() || len(c.Diagnostics()[0].Secondary) != 0 {
+		t.Fatalf("labels = %#v / %#v", c.Diagnostics()[0].Primary, c.Diagnostics()[0].Secondary)
+	}
+}
+
+func TestNestedRecursiveTypeAliasesHaveCompleteCycleLabels(t *testing.T) {
+	result := parse.Parse([]byte("type A = [B]\ntype B = A\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	first := result.Program.Statements[0].(*parse.TypeDeclaration)
+	second := result.Program.Statements[1].(*parse.TypeDeclaration)
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 1 || c.Diagnostics()[0].Code != checker.DiagnosticCodeRecursiveTypeAlias {
+		t.Fatalf("diagnostics = %#v", c.Diagnostics())
+	}
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Primary.Span.Location != second.Type[0].GetLocation() {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != first.Type[0].(*parse.List).Element.GetLocation() {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
+func TestNestedDirectRecursiveTypeAliasDoesNotPanic(t *testing.T) {
+	result := parse.Parse([]byte("type Node = [Node]\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 1 || c.Diagnostics()[0].Code != checker.DiagnosticCodeRecursiveTypeAlias {
+		t.Fatalf("diagnostics = %#v", c.Diagnostics())
+	}
+}
+
+func TestNonRecursiveTypeAliasChainIsAllowed(t *testing.T) {
+	result := parse.Parse([]byte("type A = [Int]\ntype B = A\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 0 {
+		t.Fatalf("diagnostics = %#v, want none", c.Diagnostics())
+	}
+}
+
+func TestRecursiveStructLayoutHasStructuredCycleLabels(t *testing.T) {
+	result := parse.Parse([]byte("struct A {\n  b: B,\n}\nstruct B {\n  a: A,\n}\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	first := result.Program.Statements[0].(*parse.StructDefinition)
+	second := result.Program.Statements[1].(*parse.StructDefinition)
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+	}
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Code != checker.DiagnosticCodeRecursiveStructLayout || diagnostic.Message != "Recursive field A.b has infinite size. "+"Put the recursive reference behind mut, list, map, nullable, trait, or function indirection." {
+		t.Fatalf("code/message = %q/%q", diagnostic.Code, diagnostic.Message)
+	}
+	if diagnostic.Primary.Span.Location != first.Fields[0].Name.GetLocation() {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != second.Fields[0].Name.GetLocation() {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
+func TestRecursiveStructLayoutAllowsIndirectRecursion(t *testing.T) {
+	result := parse.Parse([]byte("struct Node {\n  children: [Node],\n}\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 0 {
+		t.Fatalf("diagnostics = %#v, want none", c.Diagnostics())
+	}
+}
+
 type failingGoResolver struct{}
 
 func (failingGoResolver) ResolveGoPackage(string) (*checker.GoPackage, error) {

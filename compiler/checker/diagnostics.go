@@ -39,6 +39,9 @@ const (
 	DiagnosticCodeImportResolution          DiagnosticCode = "import_resolution"
 	DiagnosticCodeCircularImport            DiagnosticCode = "circular_import"
 	DiagnosticCodeModuleLoadFailure         DiagnosticCode = "module_load_failure"
+	DiagnosticCodeBuiltInTypeRedeclaration  DiagnosticCode = "built_in_type_redeclaration"
+	DiagnosticCodeRecursiveTypeAlias        DiagnosticCode = "recursive_type_alias"
+	DiagnosticCodeRecursiveStructLayout     DiagnosticCode = "recursive_struct_layout"
 )
 
 type SourceSpan struct {
@@ -335,6 +338,104 @@ func (d incorrectArgumentTypeDiagnostic) build() Diagnostic {
 		secondary...,
 	)
 	diagnostic.Code = DiagnosticCodeIncorrectArgumentType
+	return diagnostic
+}
+
+type builtInTypeRedeclarationDiagnostic struct {
+	Name string
+	Span SourceSpan
+}
+
+func (d builtInTypeRedeclarationDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("%s is a built-in type and cannot be redeclared", d.Name),
+		"Built-in type cannot be redeclared",
+		fmt.Sprintf("`%s` is reserved as a built-in type.", d.Name),
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` cannot be declared here", d.Name)},
+	)
+	diagnostic.Code = DiagnosticCodeBuiltInTypeRedeclaration
+	return diagnostic
+}
+
+type recursiveTypeAliasReference struct {
+	From string
+	To   string
+	Span SourceSpan
+}
+
+type recursiveTypeAliasDiagnostic struct {
+	Name         string
+	FallbackSpan SourceSpan
+	References   []recursiveTypeAliasReference
+}
+
+func (d recursiveTypeAliasDiagnostic) build() Diagnostic {
+	closing := recursiveTypeAliasReference{From: d.Name, To: d.Name, Span: d.FallbackSpan}
+	priorReferences := d.References
+	if len(d.References) > 0 {
+		closing = d.References[len(d.References)-1]
+		priorReferences = d.References[:len(d.References)-1]
+	}
+	secondary := make([]DiagnosticLabel, 0, len(priorReferences))
+	for _, reference := range priorReferences {
+		secondary = append(secondary, DiagnosticLabel{
+			Span:    reference.Span,
+			Message: fmt.Sprintf("`%s` refers to `%s` here", reference.From, reference.To),
+		})
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"Recursive type alias: "+d.Name,
+		"Recursive type alias",
+		fmt.Sprintf("Type alias `%s` eventually refers to itself.", d.Name),
+		DiagnosticLabel{
+			Span:    closing.Span,
+			Message: fmt.Sprintf("`%s` refers back to `%s` here", closing.From, closing.To),
+		},
+		secondary...,
+	)
+	diagnostic.Code = DiagnosticCodeRecursiveTypeAlias
+	return diagnostic
+}
+
+type recursiveStructLayoutReference struct {
+	StructName string
+	FieldName  string
+	Span       SourceSpan
+}
+
+type recursiveStructLayoutDiagnostic struct {
+	Cycle []recursiveStructLayoutReference
+}
+
+func (d recursiveStructLayoutDiagnostic) build() Diagnostic {
+	primary := d.Cycle[0]
+	secondary := make([]DiagnosticLabel, 0, len(d.Cycle)-1)
+	for _, reference := range d.Cycle[1:] {
+		secondary = append(secondary, DiagnosticLabel{
+			Span:    reference.Span,
+			Message: fmt.Sprintf("`%s.%s` continues the inline cycle", reference.StructName, reference.FieldName),
+		})
+	}
+	legacyMessage := fmt.Sprintf(
+		"Recursive field %s.%s has infinite size. %s",
+		primary.StructName,
+		primary.FieldName,
+		recursiveLayoutDiagnostic,
+	)
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		legacyMessage,
+		"Recursive field has infinite size",
+		recursiveLayoutDiagnostic,
+		DiagnosticLabel{
+			Span:    primary.Span,
+			Message: fmt.Sprintf("`%s.%s` creates an infinite-size recursive layout", primary.StructName, primary.FieldName),
+		},
+		secondary...,
+	)
+	diagnostic.Code = DiagnosticCodeRecursiveStructLayout
 	return diagnostic
 }
 

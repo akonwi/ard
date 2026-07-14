@@ -311,6 +311,9 @@ type Checker struct {
 	resolvingTopLevelStructs          map[string]bool
 	resolvedTopLevelStructs           map[string]bool
 	resolvingTopLevelAliases          map[string]bool
+	resolvingTopLevelAliasEdges       []typeAliasResolutionEdge
+	resolvingTopLevelAliasNames       []string
+	recursiveTopLevelAliases          map[string]bool
 	resolvedTopLevelAliases           map[string]bool
 	genericContextStack               []map[string]bool
 	methodGenericAllowlist            []map[string]bool
@@ -979,7 +982,11 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		}
 		if ty.Type.Target == nil && c.topLevelTypeAliases != nil {
 			if _, ok := c.topLevelTypeAliases[t.GetName()]; ok {
-				c.resolveTopLevelTypeAlias(t.GetName())
+				resolvedAlias := c.resolveTopLevelTypeAliasReference(t.GetName(), ty.GetLocation())
+				if c.recursiveTopLevelAliases[t.GetName()] {
+					baseType = resolvedAlias
+					break
+				}
 			}
 		}
 
@@ -2206,6 +2213,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			// Record before the hoisted-alias early return below, or plain
 			// aliases (already in scope) would never get a definition span.
 			c.recordDef(s.Name.GetLocation(), TypeKey(c.typeOwnerPath(), s.Name.Name))
+			if c.recursiveTopLevelAliases[s.Name.Name] {
+				return nil
+			}
 			if len(s.Type) == 1 {
 				if _, exists := c.scope.get(s.Name.Name); exists {
 					return nil
