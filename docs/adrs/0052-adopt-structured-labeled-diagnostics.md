@@ -203,8 +203,8 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [ ] Invalid function type arguments
 
 - [ ] **Function returns, closures, and tests**
-  - [ ] Function-body return mismatches
-  - [ ] Value-producing `if` without `else`
+  - [x] Function-body return mismatches
+  - [x] Value-producing `if` without `else`
   - [ ] Invalid test placement, parameters, generics, and return types
 
 - [ ] **Traits, interfaces, and implementations**
@@ -224,8 +224,8 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
 
 - [ ] **Collection and struct literals**
   - [ ] Empty untyped lists and maps
-  - [ ] Fixed-array length mismatches and mixed list element types
-  - [ ] Map key and value mismatches
+  - [x] Fixed-array length mismatches and mixed list element types
+  - [x] Map key and value mismatches
   - [ ] Repeated fields in struct literals
   - [ ] Missing struct fields
   - [ ] Invalid struct type arguments and Go struct literal forms
@@ -254,8 +254,8 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
 
 - [ ] **Conditionals**
   - [ ] Non-boolean conditions
-  - [ ] Inconsistent branch result types
-  - [ ] Missing `else` when used as a value
+  - [x] Inconsistent branch result types
+  - [x] Missing `else` when used as a value
 
 - [ ] **Match and pattern diagnostics**
   - [ ] Invalid pattern forms
@@ -268,7 +268,7 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
 
 - [ ] **`try`, `Result`, and `Maybe` propagation**
   - [ ] Invalid `try` contexts, including deferred work
-  - [ ] Incompatible enclosing return types
+  - [x] Incompatible enclosing return types
   - [ ] Invalid catch and result error types
   - [ ] Invalid `Maybe::new` arguments
 
@@ -276,7 +276,7 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [ ] Invalid rune, integer, and float literals
   - [ ] Numeric overflow
   - [ ] Invalid `Str::from` and numeric conversions
-  - [ ] Non-stringable interpolation values
+  - [x] Non-stringable interpolation values
 
 - [ ] **Unsafe API usage**
   - [ ] Missing `ard/unsafe` imports
