@@ -195,12 +195,12 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Mutating calls and pointer-receiver calls on immutable values
   - [x] Assignment to Go constants and static properties
 
-- [ ] **Function and method call shape**
-  - [ ] Calling non-functions
-  - [ ] Incorrect argument counts and missing parameters
-  - [ ] Unknown named arguments
-  - [ ] Named arguments on unsupported Go and foreign calls
-  - [ ] Invalid function type arguments
+- [x] **Function and method call shape**
+  - [x] Calling non-functions
+  - [x] Incorrect argument counts and missing parameters
+  - [x] Unknown named arguments
+  - [x] Named arguments on unsupported Go and foreign calls
+  - [x] Invalid function type arguments
 
 - [ ] **Function returns, closures, and tests**
   - [x] Function-body return mismatches

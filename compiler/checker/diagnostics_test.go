@@ -181,6 +181,115 @@ func TestUndefinedInstanceMembersHaveStructuredDiagnostics(t *testing.T) {
 	}
 }
 
+func TestNonCallableHasStructuredLabels(t *testing.T) {
+	result := parse.Parse([]byte("let value = 1\nvalue()\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[0].(*parse.VariableDeclaration)
+	call := result.Program.Statements[1]
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeNotCallable)
+	if diagnostic.Primary.Span.Location != call.GetLocation() || diagnostic.Message != "Not a function: value" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
+func TestMissingArgumentHasParameterProvenance(t *testing.T) {
+	result := parse.Parse([]byte("fn add(a: Int, b: Int) {}\nadd(1)\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	function := result.Program.Statements[0].(*parse.FunctionDeclaration)
+	call := result.Program.Statements[1]
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeMissingArgument)
+	if diagnostic.Primary.Span.Location != call.GetLocation() || diagnostic.Primary.Message != "this call is missing `b`" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != function.Parameters[1].GetLocation() {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
+func TestNamedArgumentBindingDiagnosticsUseArgumentSpans(t *testing.T) {
+	t.Run("unknown", func(t *testing.T) {
+		result := parse.Parse([]byte("fn greet(name: Str) {}\ngreet(who: \"A\")\n"), "main.ard")
+		call := result.Program.Statements[1].(*parse.FunctionCall)
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUnknownNamedArgument)
+		if diagnostic.Primary.Span.Location != call.Args[0].GetLocation() || diagnostic.Message != "unknown parameter name: who" {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+
+	t.Run("duplicate", func(t *testing.T) {
+		result := parse.Parse([]byte("fn greet(name: Str) {}\ngreet(name: \"A\", name: \"B\")\n"), "main.ard")
+		call := result.Program.Statements[1].(*parse.FunctionCall)
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeDuplicateArgument)
+		if diagnostic.Primary.Span.Location != call.Args[1].GetLocation() || len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != call.Args[0].GetLocation() {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+}
+
+func TestIncorrectArgumentCountHasStructuredDiagnostic(t *testing.T) {
+	result := parse.Parse([]byte("fn ping() {}\nping(1)\n"), "main.ard")
+	call := result.Program.Statements[1]
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeIncorrectArgumentCount)
+	if diagnostic.Primary.Span.Location != call.GetLocation() || diagnostic.Message != "Incorrect number of arguments: Expected 0, got 1" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestInvalidFunctionTypeArgumentsHasStructuredDiagnostic(t *testing.T) {
+	result := parse.Parse([]byte("fn ping() {}\nping<Int>()\n"), "main.ard")
+	call := result.Program.Statements[1]
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidFunctionTypeArgs)
+	if diagnostic.Primary.Span.Location != call.GetLocation() || diagnostic.Message != "function ping does not take type arguments" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestWrongFunctionTypeArgumentCountHasTruthfulLabel(t *testing.T) {
+	source := "fn choose(a: $A, b: $B) {}\nchoose<Int>(1, 2)\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidFunctionTypeArgs)
+	if diagnostic.Message != "Expected 2 type arguments, got 1" || diagnostic.Primary.Message != "expected 2 type argument(s), but found 1" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestGoNamedArgumentHasStructuredDiagnostic(t *testing.T) {
+	result := parse.Parse([]byte("use go:fmt\nfmt::Println(value: \"hello\")\n"), "main.ard")
+	call := result.Program.Statements[0].(*parse.StaticFunction)
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeNamedArgumentsUnsupported)
+	if diagnostic.Primary.Span.Location != call.Function.Args[0].GetLocation() || diagnostic.Message != "Go function calls do not support named arguments" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestImmutableMutableReferenceHasStructuredLabels(t *testing.T) {
 	result := parse.Parse([]byte("let counter = 0\nlet r = mut counter\n"), "main.ard")
 	if len(result.Errors) > 0 {

@@ -648,6 +648,30 @@ func sourceSpanIfPresent(span SourceSpan) *SourceSpan {
 	return &span
 }
 
+func (c *Checker) addNonCallable(name string, location parse.Location, declaration *SourceSpan, style nonCallableLegacyStyle) {
+	c.addDiagnostic(nonCallableDiagnostic{Name: name, Span: c.sourceSpan(location), DeclarationSpan: declaration, LegacyStyle: style}.build())
+}
+
+func (c *Checker) addArgumentCount(expected string, actual int, location parse.Location, legacyMessage string) {
+	c.addDiagnostic(argumentCountDiagnostic{Expected: expected, Actual: actual, Span: c.sourceSpan(location), LegacyMessage: legacyMessage}.build())
+}
+
+func (c *Checker) addMissingArgument(parameter Parameter, location parse.Location) {
+	c.addDiagnostic(missingArgumentDiagnostic{Parameter: parameter, Span: c.sourceSpan(location)}.build())
+}
+
+func (c *Checker) addUnknownNamedArgument(name string, location parse.Location, legacyMessage string) {
+	c.addDiagnostic(argumentBindingDiagnostic{Kind: unknownNamedArgument, Name: name, Span: c.sourceSpan(location), LegacyMessage: legacyMessage}.build())
+}
+
+func (c *Checker) addNamedArgumentsUnsupported(targetKind string, location parse.Location) {
+	c.addDiagnostic(namedArgumentsUnsupportedDiagnostic{TargetKind: targetKind, Span: c.sourceSpan(location)}.build())
+}
+
+func (c *Checker) addInvalidFunctionTypeArguments(name string, expected int, actual int, takesTypeArgs bool, location parse.Location, legacyMessage string) {
+	c.addDiagnostic(invalidFunctionTypeArgumentsDiagnostic{Name: name, Expected: expected, Actual: actual, TakesTypeArgs: takesTypeArgs, Span: c.sourceSpan(location), LegacyMessage: legacyMessage}.build())
+}
+
 func (c *Checker) addTypeMismatch(expected Type, actual Type, location parse.Location) {
 	c.addTypeMismatchWithLegacy(expected, actual, "", location)
 }
@@ -1231,15 +1255,16 @@ func (c *Checker) checkUnsafeCast(s *parse.StaticFunction) Expression {
 	}
 	callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
 	if len(callTypeArgs) != 1 {
-		c.addError("unsafe::cast requires exactly one explicit type argument", s.GetLocation())
+		c.addInvalidFunctionTypeArguments("unsafe::cast", 1, len(callTypeArgs), true, s.GetLocation(), "unsafe::cast requires exactly one explicit type argument")
 		return nil
 	}
 	if len(s.Function.Args) != 1 {
-		c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 1, got %d", len(s.Function.Args)), s.GetLocation())
+		c.addArgumentCount("1", len(s.Function.Args), s.GetLocation(), "")
 		return nil
 	}
 	if s.Function.Args[0].Name != "" && s.Function.Args[0].Name != "value" {
-		c.addError(fmt.Sprintf("unknown argument: %s", s.Function.Args[0].Name), s.Function.Args[0].GetLocation())
+		name := s.Function.Args[0].Name
+		c.addUnknownNamedArgument(name, s.Function.Args[0].GetLocation(), "unknown argument: "+name)
 		return nil
 	}
 	arg := c.checkExprAs(s.Function.Args[0].Value, Any)
@@ -1363,15 +1388,16 @@ func (c *Checker) checkUnsafeIsNil(s *parse.StaticFunction) Expression {
 		return nil
 	}
 	if len(s.Function.TypeArgs) != 0 {
-		c.addError("unsafe::is_nil does not accept type arguments", s.GetLocation())
+		c.addInvalidFunctionTypeArguments("unsafe::is_nil", 0, len(s.Function.TypeArgs), false, s.GetLocation(), "unsafe::is_nil does not accept type arguments")
 		return nil
 	}
 	if len(s.Function.Args) != 1 {
-		c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 1, got %d", len(s.Function.Args)), s.GetLocation())
+		c.addArgumentCount("1", len(s.Function.Args), s.GetLocation(), "")
 		return nil
 	}
 	if s.Function.Args[0].Name != "" && s.Function.Args[0].Name != "value" {
-		c.addError(fmt.Sprintf("unknown argument: %s", s.Function.Args[0].Name), s.Function.Args[0].GetLocation())
+		name := s.Function.Args[0].Name
+		c.addUnknownNamedArgument(name, s.Function.Args[0].GetLocation(), "unknown argument: "+name)
 		return nil
 	}
 	arg := c.checkExprAs(s.Function.Args[0].Value, Any)
@@ -5044,11 +5070,11 @@ func (c *Checker) checkStrStatic(s *parse.StaticFunction) (Expression, bool) {
 	switch s.Function.Name {
 	case "from":
 		if len(s.Function.TypeArgs) > 0 {
-			c.addError("Str::from does not take type arguments", s.GetLocation())
+			c.addInvalidFunctionTypeArguments("Str::from", 0, len(s.Function.TypeArgs), false, s.GetLocation(), "Str::from does not take type arguments")
 			return nil, true
 		}
 		if len(s.Function.Args) != 1 {
-			c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 1, got %d", len(s.Function.Args)), s.GetLocation())
+			c.addArgumentCount("1", len(s.Function.Args), s.GetLocation(), "")
 			return nil, true
 		}
 		// Str::from(bytes) and Str::from(runes) both build a Str, mirroring Go's
@@ -5081,11 +5107,12 @@ func (c *Checker) checkStrStatic(s *parse.StaticFunction) (Expression, bool) {
 // and the result is `target` (never optional). (#284)
 func (c *Checker) checkScalarFrom(s *parse.StaticFunction, target Type) Expression {
 	if len(s.Function.TypeArgs) > 0 {
-		c.addError(fmt.Sprintf("%s::from does not take type arguments", target.String()), s.GetLocation())
+		name := target.String() + "::from"
+		c.addInvalidFunctionTypeArguments(name, 0, len(s.Function.TypeArgs), false, s.GetLocation(), name+" does not take type arguments")
 		return nil
 	}
 	if len(s.Function.Args) != 1 {
-		c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 1, got %d", len(s.Function.Args)), s.GetLocation())
+		c.addArgumentCount("1", len(s.Function.Args), s.GetLocation(), "")
 		return nil
 	}
 	// The value type is the target itself for a bare scalar, or the foreign
@@ -5667,14 +5694,14 @@ func functionDefForCallableType(typ Type) (*FunctionDef, bool) {
 func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Argument, typeArgs []parse.DeclaredType, location parse.Location, displayName string) Expression {
 	fnDef, ok := functionDefForCallableType(callee.Type())
 	if !ok {
-		c.addError(fmt.Sprintf("%s is not a function", displayName), location)
+		c.addNonCallable(displayName, location, expressionBindingSpan(callee), nonCallableSuffix)
 		return nil
 	}
 
 	callTypeArgs := c.resolveCallTypeArgs(typeArgs)
 	resolvedExprs, err := c.resolveArguments(callArgs, fnDef.Parameters)
 	if err != nil {
-		c.addError(err.Error(), location)
+		c.addArgumentBindingError(err, location)
 		return nil
 	}
 
@@ -5682,13 +5709,13 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 	if len(resolvedExprs) < len(fnDef.Parameters) {
 		for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
 			if !parameterOmittable(fnDef.Parameters[i]) {
-				c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), location)
+				c.addMissingArgument(fnDef.Parameters[i], location)
 				return nil
 			}
 		}
 		numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
 	} else if len(resolvedExprs) > len(fnDef.Parameters) {
-		c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fnDef.Parameters), len(resolvedExprs)), location)
+		c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(resolvedExprs), location, "")
 		resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 	}
 
@@ -5700,7 +5727,7 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 	if len(callTypeArgs) > 0 {
 		specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, location)
 		if err != nil {
-			c.addError(err.Error(), location)
+			c.addGenericFunctionResolutionError(err, location)
 			return nil
 		}
 		fnToUse = specialized
@@ -5863,11 +5890,11 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 		{
 			if s.Name == "panic" {
 				if len(s.TypeArgs) > 0 {
-					c.addError("function panic does not take type arguments", s.GetLocation())
+					c.addInvalidFunctionTypeArguments("panic", 0, len(s.TypeArgs), false, s.GetLocation(), "")
 					return nil
 				}
 				if len(s.Args) != 1 {
-					c.addError("Incorrect number of arguments: 'panic' requires a message", s.GetLocation())
+					c.addArgumentCount("1", len(s.Args), s.GetLocation(), "Incorrect number of arguments: 'panic' requires a message")
 					return nil
 				}
 				message := c.checkExpr(s.Args[0].Value)
@@ -5900,7 +5927,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			// func values, which call through their underlying signature.
 			fnDef, ok = functionDefForCallableType(fnSym.Type)
 			if !ok {
-				c.addError(fmt.Sprintf("Not a function: %s", s.Name), s.GetLocation())
+				c.addNonCallable(s.Name, s.GetLocation(), sourceSpanIfPresent(fnSym.declaredAt), nonCallablePrefix)
 				return nil
 			}
 			c.recordCallAttempt(s, s.Name, fnDef)
@@ -5910,7 +5937,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			// Resolve named arguments to positional arguments (for expressions only)
 			resolvedExprs, err := c.resolveArguments(s.Args, fnDef.Parameters)
 			if err != nil {
-				c.addError(err.Error(), s.GetLocation())
+				c.addArgumentBindingError(err, s.GetLocation())
 				return nil
 			}
 
@@ -5920,14 +5947,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				// Find first non-nullable parameter that's missing
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
 					if !parameterOmittable(fnDef.Parameters[i]) {
-						c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
+						c.addMissingArgument(fnDef.Parameters[i], s.GetLocation())
 						return nil
 					}
 				}
 				numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
 			} else if len(resolvedExprs) > len(fnDef.Parameters) {
-				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
-					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
+				c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(resolvedExprs), s.GetLocation(), "")
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
@@ -5942,7 +5968,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			if len(callTypeArgs) > 0 {
 				specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, s.GetLocation())
 				if err != nil {
-					c.addError(err.Error(), s.GetLocation())
+					c.addGenericFunctionResolutionError(err, s.GetLocation())
 					return nil
 				}
 				fnToUse = specialized
@@ -6132,7 +6158,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 			fnDef, ok := sig.(*FunctionDef)
 			if !ok {
-				c.addError(fmt.Sprintf("%s.%s is not a function", subj, s.Method.Name), s.Method.GetLocation())
+				c.addNonCallable(fmt.Sprintf("%s.%s", subj, s.Method.Name), s.Method.GetLocation(), nil, nonCallableSuffix)
 				return nil
 			}
 
@@ -6150,7 +6176,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			// Resolve named and positional arguments to match parameters
 			resolvedExprs, err := c.resolveArguments(s.Method.Args, fnDef.Parameters)
 			if err != nil {
-				c.addError(err.Error(), s.GetLocation())
+				c.addArgumentBindingError(err, s.GetLocation())
 				return nil
 			}
 
@@ -6160,14 +6186,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				// Find first non-nullable parameter that's missing
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
 					if !parameterOmittable(fnDef.Parameters[i]) {
-						c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
+						c.addMissingArgument(fnDef.Parameters[i], s.GetLocation())
 						return nil
 					}
 				}
 				numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
 			} else if len(resolvedExprs) > len(fnDef.Parameters) && !(len(fnDef.Parameters) > 0 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic) {
-				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
-					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
+				c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(resolvedExprs), s.GetLocation(), "")
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
@@ -6225,11 +6250,11 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			if len(callTypeArgs) > 0 {
 				methodGenericParams := c.explicitMethodGenericParams(fnDef, subj.Type())
 				if len(methodGenericParams) == 0 {
-					c.addError(fmt.Sprintf("function %s does not take type arguments", fnDef.Name), s.GetLocation())
+					c.addInvalidFunctionTypeArguments(fnDef.Name, 0, len(callTypeArgs), false, s.GetLocation(), "")
 					return nil
 				}
 				if len(callTypeArgs) != len(methodGenericParams) {
-					c.addError(fmt.Sprintf("Expected %d type arguments, got %d", len(methodGenericParams), len(callTypeArgs)), s.GetLocation())
+					c.addInvalidFunctionTypeArguments(fnDef.Name, len(methodGenericParams), len(callTypeArgs), true, s.GetLocation(), "")
 					return nil
 				}
 				if genericScope == nil {
@@ -6264,7 +6289,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 				for _, arg := range s.Method.Args {
 					if arg.Name != "" {
-						c.addError("Foreign method calls do not support named arguments", arg.GetLocation())
+						c.addNamedArgumentsUnsupported("Foreign method", arg.GetLocation())
 						return nil
 					}
 				}
@@ -6638,7 +6663,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				// Resolve named and positional arguments to match parameters
 				resolvedExprs, err := c.resolveArguments(s.Function.Args, fnDef.Parameters)
 				if err != nil {
-					c.addError(err.Error(), s.GetLocation())
+					c.addArgumentBindingError(err, s.GetLocation())
 					return nil
 				}
 
@@ -6646,13 +6671,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				if len(resolvedExprs) < len(fnDef.Parameters) {
 					for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
 						if !parameterOmittable(fnDef.Parameters[i]) {
-							c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
+							c.addMissingArgument(fnDef.Parameters[i], s.GetLocation())
 							return nil
 						}
 					}
 					numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
 				} else if len(resolvedExprs) > len(fnDef.Parameters) {
-					c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
+					c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(resolvedExprs), s.GetLocation(), "")
 					resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 				}
 
@@ -6664,7 +6689,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				if len(callTypeArgs) > 0 {
 					specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, s.GetLocation())
 					if err != nil {
-						c.addError(err.Error(), s.GetLocation())
+						c.addGenericFunctionResolutionError(err, s.GetLocation())
 						return nil
 					}
 					fnToUse = specialized
@@ -6717,7 +6742,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					if named, ok := goPkg.Types[name]; ok && len(s.Function.TypeArgs) == 0 {
 						if prim := foreignScalarPrimitive(named); prim != nil {
 							if len(s.Function.Args) != 1 {
-								c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 1, got %d", len(s.Function.Args)), s.GetLocation())
+								c.addArgumentCount("1", len(s.Function.Args), s.GetLocation(), "")
 								return nil
 							}
 							arg := c.checkExprAs(s.Function.Args[0].Value, prim)
@@ -6749,13 +6774,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 				for _, arg := range s.Function.Args {
 					if arg.Name != "" {
-						c.addError("Go function calls do not support named arguments", arg.GetLocation())
+						c.addNamedArgumentsUnsupported("Go function", arg.GetLocation())
 						return nil
 					}
 				}
 				resolvedExprs, err := c.resolveArguments(s.Function.Args, fnDef.Parameters)
 				if err != nil {
-					c.addError(err.Error(), s.GetLocation())
+					c.addArgumentBindingError(err, s.GetLocation())
 					return nil
 				}
 				effectiveFnDef := expandFunctionDefForRepeatedVariadic(fnDef, len(resolvedExprs))
@@ -6763,7 +6788,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					// A trailing Go variadic argument may be omitted.
 					omittedVariadic := len(resolvedExprs) == len(fnDef.Parameters)-1 && fnDef.Parameters[len(fnDef.Parameters)-1].Variadic
 					if !omittedVariadic {
-						c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d", variadicExpectedArgumentCount(fnDef), len(resolvedExprs)), s.GetLocation())
+						c.addArgumentCount(fmt.Sprint(variadicExpectedArgumentCount(fnDef)), len(resolvedExprs), s.GetLocation(), "")
 						return nil
 					}
 				}
@@ -6821,7 +6846,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 			if !ok {
 				targetName := s.Target.String()
-				c.addError(fmt.Sprintf("%s::%s is not a function", targetName, s.Function.Name), s.GetLocation())
+				c.addNonCallable(fmt.Sprintf("%s::%s", targetName, s.Function.Name), s.GetLocation(), nil, nonCallableSuffix)
 				return nil
 			}
 			callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
@@ -6829,7 +6854,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			// Resolve named and positional arguments to match parameters
 			resolvedExprs, err := c.resolveArguments(s.Function.Args, fnDef.Parameters)
 			if err != nil {
-				c.addError(err.Error(), s.GetLocation())
+				c.addArgumentBindingError(err, s.GetLocation())
 				return nil
 			}
 
@@ -6839,14 +6864,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				// Find first non-nullable parameter that's missing
 				for i := len(resolvedExprs); i < len(fnDef.Parameters); i++ {
 					if !parameterOmittable(fnDef.Parameters[i]) {
-						c.addError(fmt.Sprintf("missing argument for parameter: %s", fnDef.Parameters[i].Name), s.GetLocation())
+						c.addMissingArgument(fnDef.Parameters[i], s.GetLocation())
 						return nil
 					}
 				}
 				numOmittedArgs = len(fnDef.Parameters) - len(resolvedExprs)
 			} else if len(resolvedExprs) > len(fnDef.Parameters) {
-				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
-					len(fnDef.Parameters), len(resolvedExprs)), s.GetLocation())
+				c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(resolvedExprs), s.GetLocation(), "")
 				resolvedExprs = resolvedExprs[:len(fnDef.Parameters)]
 			}
 
@@ -6861,7 +6885,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			if len(callTypeArgs) > 0 {
 				specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, s.GetLocation())
 				if err != nil {
-					c.addError(err.Error(), s.GetLocation())
+					c.addGenericFunctionResolutionError(err, s.GetLocation())
 					return nil
 				}
 				fnToUse = specialized
@@ -8926,8 +8950,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 
 			// Check parameter count
 			if len(s.Parameters) != len(expectedFnType.Parameters) {
-				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
-					len(expectedFnType.Parameters), len(s.Parameters)), s.GetLocation())
+				c.addArgumentCount(fmt.Sprint(len(expectedFnType.Parameters)), len(s.Parameters), s.GetLocation(), "")
 				return nil
 			}
 
@@ -9020,13 +9043,12 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			}
 
 			if !isFunc {
-				c.addError(fmt.Sprintf("%s::%s is not a function", moduleName, s.Function.Name), s.GetLocation())
+				c.addNonCallable(fmt.Sprintf("%s::%s", moduleName, s.Function.Name), s.GetLocation(), nil, nonCallableSuffix)
 				return nil
 			}
 
 			if len(s.Function.Args) != len(fnDef.Parameters) {
-				c.addError(fmt.Sprintf("Incorrect number of arguments: Expected %d, got %d",
-					len(fnDef.Parameters), len(s.Function.Args)), s.GetLocation())
+				c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(s.Function.Args), s.GetLocation(), "")
 				return nil
 			}
 
@@ -9557,11 +9579,11 @@ func (c *Checker) setupFunctionGenerics(fnDef *FunctionDef) (*FunctionDef, *Symb
 func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module) Expression {
 	callTypeArgs := c.resolveCallTypeArgs(s.Function.TypeArgs)
 	if len(callTypeArgs) > 1 {
-		c.addError("Maybe::new accepts at most one explicit type argument", s.GetLocation())
+		c.addInvalidFunctionTypeArguments("Maybe::new", 1, len(callTypeArgs), true, s.GetLocation(), "Maybe::new accepts at most one explicit type argument")
 		return nil
 	}
 	if len(s.Function.Args) > 1 {
-		c.addError(fmt.Sprintf("Incorrect number of arguments: Expected 0 or 1, got %d", len(s.Function.Args)), s.GetLocation())
+		c.addArgumentCount("0 or 1", len(s.Function.Args), s.GetLocation(), "")
 		return nil
 	}
 	typeVar := Type(&TypeVar{name: "T"})
@@ -9587,7 +9609,7 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module) Expre
 	}
 	arg := s.Function.Args[0]
 	if arg.Name != "" && arg.Name != "value" {
-		c.addError(fmt.Sprintf("unknown argument: %s", arg.Name), arg.GetLocation())
+		c.addUnknownNamedArgument(arg.Name, arg.GetLocation(), "unknown argument: "+arg.Name)
 		return nil
 	}
 	value := c.checkExpr(arg.Value)
@@ -9944,12 +9966,31 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 	return allExprs, fnToUse
 }
 
+type functionTypeArgumentError struct {
+	Name          string
+	Expected      int
+	Actual        int
+	TakesTypeArgs bool
+	Message       string
+}
+
+func (e *functionTypeArgumentError) Error() string { return e.Message }
+
+func (c *Checker) addGenericFunctionResolutionError(err error, location parse.Location) {
+	if typeArgErr, ok := err.(*functionTypeArgumentError); ok {
+		c.addInvalidFunctionTypeArguments(typeArgErr.Name, typeArgErr.Expected, typeArgErr.Actual, typeArgErr.TakesTypeArgs, location, typeArgErr.Message)
+		return
+	}
+	c.addError(err.Error(), location)
+}
+
 // New generic resolution using the enhanced symbol table
 func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, typeArgs []Type, _ parse.Location) (*FunctionDef, error) {
 	genericParams := genericParamsForFunction(fnDef)
 	if !fnDef.hasGenerics() || len(genericParams) == 0 {
 		if len(typeArgs) > 0 {
-			return nil, fmt.Errorf("function %s does not take type arguments", fnDef.Name)
+			message := fmt.Sprintf("function %s does not take type arguments", fnDef.Name)
+			return nil, &functionTypeArgumentError{Name: fnDef.Name, Actual: len(typeArgs), Message: message}
 		}
 		return fnDef, nil
 	}
@@ -9964,12 +10005,13 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 	// Handle explicit type arguments
 	if len(typeArgs) > 0 {
 		if len(typeArgs) != len(genericParams) {
-			return nil, fmt.Errorf("Expected %d type arguments, got %d", len(genericParams), len(typeArgs))
+			message := fmt.Sprintf("Expected %d type arguments, got %d", len(genericParams), len(typeArgs))
+			return nil, &functionTypeArgumentError{Name: fnDef.Name, Expected: len(genericParams), Actual: len(typeArgs), TakesTypeArgs: true, Message: message}
 		}
 
 		for i, actual := range typeArgs {
 			if actual == nil {
-				return nil, fmt.Errorf("could not resolve type argument")
+				return nil, &functionTypeArgumentError{Name: fnDef.Name, Expected: len(genericParams), Actual: len(typeArgs), TakesTypeArgs: true, Message: "could not resolve type argument"}
 			}
 
 			if err := genericScope.bindGeneric(genericParams[i], actual); err != nil {
@@ -10123,89 +10165,93 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 	}
 }
 
-// resolveArguments converts unified argument list to positional arguments
-func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([]parse.Expression, error) {
-	// Separate positional and named arguments
-	var positionalArgs []parse.Expression
-	var namedArgs []parse.Argument
+type argumentBindingError struct {
+	Kind      argumentBindingDiagnosticKind
+	Name      string
+	Location  parse.Location
+	Previous  *parse.Location
+	Parameter *Parameter
+}
 
+func (c *Checker) addArgumentBindingError(err *argumentBindingError, fallback parse.Location) {
+	if err.Parameter != nil {
+		c.addDiagnostic(missingArgumentDiagnostic{Parameter: *err.Parameter, Span: c.sourceSpan(fallback)}.build())
+		return
+	}
+	location := err.Location
+	if location == (parse.Location{}) {
+		location = fallback
+	}
+	var previous *SourceSpan
+	if err.Previous != nil {
+		span := c.sourceSpan(*err.Previous)
+		previous = &span
+	}
+	c.addDiagnostic(argumentBindingDiagnostic{
+		Kind:         err.Kind,
+		Name:         err.Name,
+		Span:         c.sourceSpan(location),
+		PreviousSpan: previous,
+	}.build())
+}
+
+// resolveArguments converts unified argument list to positional arguments.
+func (c *Checker) resolveArguments(args []parse.Argument, params []Parameter) ([]parse.Expression, *argumentBindingError) {
+	var positionalArgs []parse.Argument
+	var namedArgs []parse.Argument
 	for _, arg := range args {
 		if arg.Name == "" {
-			// Positional argument
-			positionalArgs = append(positionalArgs, arg.Value)
+			positionalArgs = append(positionalArgs, arg)
 		} else {
-			// Named argument
 			namedArgs = append(namedArgs, arg)
 		}
 	}
 
-	// If no named arguments, check if we can omit nullable parameters
 	if len(namedArgs) == 0 {
-		// Check if all provided positional arguments are present
-		if len(positionalArgs) <= len(params) {
-			// Check if remaining parameters are all nullable
-			allNullableOrProvidedMatches := true
-			for i := len(positionalArgs); i < len(params); i++ {
-				// Check if the parameter is omittable (nullable or Go variadic)
-				if !parameterOmittable(params[i]) {
-					allNullableOrProvidedMatches = false
-					break
-				}
-			}
-
-			// If all remaining parameters are nullable, allow omitting them
-			if allNullableOrProvidedMatches {
-				return positionalArgs, nil
-			}
+		result := make([]parse.Expression, len(positionalArgs))
+		for i := range positionalArgs {
+			result[i] = positionalArgs[i].Value
 		}
-		// Otherwise, return the positional arguments and let the count check handle the error
-		return positionalArgs, nil
+		return result, nil
 	}
 
-	// Create a map of parameter names to indices
 	paramMap := make(map[string]int)
 	for i, param := range params {
 		paramMap[param.Name] = i
 	}
-
-	// Create result array
 	result := make([]parse.Expression, len(params))
 	used := make([]bool, len(params))
+	usedAt := make([]parse.Location, len(params))
 
-	// Fill in positional arguments first
 	for i, arg := range positionalArgs {
 		if i >= len(params) {
-			return nil, fmt.Errorf("too many positional arguments")
+			return nil, &argumentBindingError{Kind: tooManyPositionalArguments, Location: arg.GetLocation()}
 		}
-		result[i] = arg
+		result[i] = arg.Value
 		used[i] = true
+		usedAt[i] = arg.GetLocation()
 	}
 
-	// Fill in named arguments
 	for _, namedArg := range namedArgs {
 		paramIndex, exists := paramMap[namedArg.Name]
 		if !exists {
-			return nil, fmt.Errorf("unknown parameter name: %s", namedArg.Name)
+			return nil, &argumentBindingError{Kind: unknownNamedArgument, Name: namedArg.Name, Location: namedArg.GetLocation()}
 		}
-
 		if used[paramIndex] {
-			return nil, fmt.Errorf("parameter %s specified multiple times", namedArg.Name)
+			previous := usedAt[paramIndex]
+			return nil, &argumentBindingError{Kind: duplicateArgument, Name: namedArg.Name, Location: namedArg.GetLocation(), Previous: &previous}
 		}
-
 		result[paramIndex] = namedArg.Value
 		used[paramIndex] = true
+		usedAt[paramIndex] = namedArg.GetLocation()
 	}
 
-	// Check that all parameters are provided (allow missing nullable parameters)
 	for i, param := range params {
-		if !used[i] {
-			// Allow omitting nullable and Go variadic parameters
-			if !parameterOmittable(params[i]) {
-				return nil, fmt.Errorf("missing argument for parameter: %s", param.Name)
-			}
+		if !used[i] && !parameterOmittable(param) {
+			parameter := param
+			return nil, &argumentBindingError{Name: param.Name, Parameter: &parameter}
 		}
 	}
-
 	return result, nil
 }
 
@@ -10393,7 +10439,7 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 
 		_, ok := sig.(*FunctionDef)
 		if !ok {
-			c.addError(fmt.Sprintf("%s.%s is not a function", innerType, p.Method.Name), p.Method.GetLocation())
+			c.addNonCallable(fmt.Sprintf("%s.%s", innerType, p.Method.Name), p.Method.GetLocation(), nil, nonCallableSuffix)
 			return nil
 		}
 

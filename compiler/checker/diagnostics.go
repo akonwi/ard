@@ -63,6 +63,13 @@ const (
 	DiagnosticCodeImmutablePointerReceiver      DiagnosticCode = "immutable_pointer_receiver"
 	DiagnosticCodeGoConstantAssignment          DiagnosticCode = "go_constant_assignment"
 	DiagnosticCodeNonAssignableStaticProperty   DiagnosticCode = "non_assignable_static_property"
+	DiagnosticCodeNotCallable                   DiagnosticCode = "not_callable"
+	DiagnosticCodeIncorrectArgumentCount        DiagnosticCode = "incorrect_argument_count"
+	DiagnosticCodeMissingArgument               DiagnosticCode = "missing_argument"
+	DiagnosticCodeUnknownNamedArgument          DiagnosticCode = "unknown_named_argument"
+	DiagnosticCodeDuplicateArgument             DiagnosticCode = "duplicate_argument"
+	DiagnosticCodeNamedArgumentsUnsupported     DiagnosticCode = "named_arguments_unsupported"
+	DiagnosticCodeInvalidFunctionTypeArgs       DiagnosticCode = "invalid_function_type_arguments"
 )
 
 type SourceSpan struct {
@@ -505,6 +512,187 @@ func (d nonAssignableStaticPropertyDiagnostic) build() Diagnostic {
 		primary = "Go constants are not assignable"
 	}
 	return mutationDiagnostic(code, legacy, title, "", DiagnosticLabel{Span: d.Span, Message: primary}, nil, "")
+}
+
+type nonCallableLegacyStyle uint8
+
+const (
+	nonCallableSuffix nonCallableLegacyStyle = iota
+	nonCallablePrefix
+)
+
+type nonCallableDiagnostic struct {
+	Name            string
+	Span            SourceSpan
+	DeclarationSpan *SourceSpan
+	LegacyStyle     nonCallableLegacyStyle
+}
+
+func (d nonCallableDiagnostic) build() Diagnostic {
+	legacy := fmt.Sprintf("%s is not a function", d.Name)
+	if d.LegacyStyle == nonCallablePrefix {
+		legacy = fmt.Sprintf("Not a function: %s", d.Name)
+	}
+	secondary := []DiagnosticLabel{}
+	if d.DeclarationSpan != nil {
+		secondary = append(secondary, DiagnosticLabel{Span: *d.DeclarationSpan, Message: fmt.Sprintf("`%s` is declared here", d.Name)})
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		legacy,
+		"Value is not callable",
+		"Only functions and function-typed values can be called.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is not a function", d.Name)},
+		secondary...,
+	)
+	diagnostic.Code = DiagnosticCodeNotCallable
+	return diagnostic
+}
+
+type argumentCountDiagnostic struct {
+	Expected      string
+	Actual        int
+	Span          SourceSpan
+	LegacyMessage string
+}
+
+func (d argumentCountDiagnostic) build() Diagnostic {
+	legacy := d.LegacyMessage
+	if legacy == "" {
+		legacy = fmt.Sprintf("Incorrect number of arguments: Expected %s, got %d", d.Expected, d.Actual)
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		legacy,
+		"Incorrect number of arguments",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected %s argument(s), but found %d", d.Expected, d.Actual)},
+	)
+	diagnostic.Code = DiagnosticCodeIncorrectArgumentCount
+	return diagnostic
+}
+
+type missingArgumentDiagnostic struct {
+	Parameter Parameter
+	Span      SourceSpan
+}
+
+func (d missingArgumentDiagnostic) build() Diagnostic {
+	secondary := []DiagnosticLabel{}
+	if d.Parameter.declaredAt.FilePath != "" {
+		secondary = append(secondary, DiagnosticLabel{
+			Span:    d.Parameter.declaredAt,
+			Message: fmt.Sprintf("parameter `%s` is required", d.Parameter.Name),
+		})
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("missing argument for parameter: %s", d.Parameter.Name),
+		"Missing required argument",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("this call is missing `%s`", d.Parameter.Name)},
+		secondary...,
+	)
+	diagnostic.Code = DiagnosticCodeMissingArgument
+	return diagnostic
+}
+
+type argumentBindingDiagnosticKind uint8
+
+const (
+	tooManyPositionalArguments argumentBindingDiagnosticKind = iota
+	unknownNamedArgument
+	duplicateArgument
+)
+
+type argumentBindingDiagnostic struct {
+	Kind          argumentBindingDiagnosticKind
+	Name          string
+	Span          SourceSpan
+	PreviousSpan  *SourceSpan
+	LegacyMessage string
+}
+
+func (d argumentBindingDiagnostic) build() Diagnostic {
+	code := DiagnosticCodeIncorrectArgumentCount
+	legacy := "too many positional arguments"
+	title := "Too many positional arguments"
+	primary := "this positional argument has no matching parameter"
+	if d.Kind == unknownNamedArgument {
+		code = DiagnosticCodeUnknownNamedArgument
+		legacy = fmt.Sprintf("unknown parameter name: %s", d.Name)
+		title = "Unknown named argument"
+		primary = fmt.Sprintf("no parameter named `%s`", d.Name)
+	} else if d.Kind == duplicateArgument {
+		code = DiagnosticCodeDuplicateArgument
+		legacy = fmt.Sprintf("parameter %s specified multiple times", d.Name)
+		title = "Argument specified multiple times"
+		primary = fmt.Sprintf("`%s` is supplied again here", d.Name)
+	}
+	if d.LegacyMessage != "" {
+		legacy = d.LegacyMessage
+	}
+	secondary := []DiagnosticLabel{}
+	if d.PreviousSpan != nil {
+		secondary = append(secondary, DiagnosticLabel{Span: *d.PreviousSpan, Message: "first supplied here"})
+	}
+	diagnostic := newLabeledDiagnostic(Error, legacy, title, "", DiagnosticLabel{Span: d.Span, Message: primary}, secondary...)
+	diagnostic.Code = code
+	return diagnostic
+}
+
+type namedArgumentsUnsupportedDiagnostic struct {
+	TargetKind string
+	Span       SourceSpan
+}
+
+func (d namedArgumentsUnsupportedDiagnostic) build() Diagnostic {
+	legacy := fmt.Sprintf("%s calls do not support named arguments", d.TargetKind)
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		legacy,
+		"Named arguments are not supported",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("use a positional argument for this %s call", strings.ToLower(d.TargetKind))},
+	)
+	diagnostic.Code = DiagnosticCodeNamedArgumentsUnsupported
+	return diagnostic
+}
+
+type invalidFunctionTypeArgumentsDiagnostic struct {
+	Name          string
+	Expected      int
+	Actual        int
+	TakesTypeArgs bool
+	Span          SourceSpan
+	LegacyMessage string
+}
+
+func (d invalidFunctionTypeArgumentsDiagnostic) build() Diagnostic {
+	legacy := d.LegacyMessage
+	primary := "type arguments are not accepted here"
+	if d.TakesTypeArgs {
+		primary = fmt.Sprintf("expected %d type argument(s), but found %d", d.Expected, d.Actual)
+		if legacy == "could not resolve type argument" {
+			primary = "this type argument could not be resolved"
+		}
+	}
+	if legacy == "" {
+		if !d.TakesTypeArgs {
+			legacy = fmt.Sprintf("function %s does not take type arguments", d.Name)
+		} else {
+			legacy = fmt.Sprintf("Expected %d type arguments, got %d", d.Expected, d.Actual)
+		}
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		legacy,
+		"Invalid function type arguments",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: primary},
+	)
+	diagnostic.Code = DiagnosticCodeInvalidFunctionTypeArgs
+	return diagnostic
 }
 
 type incorrectArgumentTypeDiagnostic struct {
