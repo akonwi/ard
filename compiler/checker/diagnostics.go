@@ -74,6 +74,14 @@ const (
 	DiagnosticCodeTestParametersNotAllowed      DiagnosticCode = "test_parameters_not_allowed"
 	DiagnosticCodeGenericTestNotAllowed         DiagnosticCode = "generic_test_not_allowed"
 	DiagnosticCodeInvalidTestReturnType         DiagnosticCode = "invalid_test_return_type"
+	DiagnosticCodeInvalidImplementationTarget   DiagnosticCode = "invalid_implementation_target"
+	DiagnosticCodeUnexpectedImplMethod          DiagnosticCode = "unexpected_implementation_method"
+	DiagnosticCodeImplParameterCount            DiagnosticCode = "implementation_parameter_count"
+	DiagnosticCodeImplParameterMutability       DiagnosticCode = "implementation_parameter_mutability"
+	DiagnosticCodeImplReturnType                DiagnosticCode = "implementation_return_type"
+	DiagnosticCodeMissingImplMethod             DiagnosticCode = "missing_implementation_method"
+	DiagnosticCodeDuplicateMethod               DiagnosticCode = "duplicate_method"
+	DiagnosticCodeMutatingEnumMethod            DiagnosticCode = "mutating_enum_method"
 )
 
 type SourceSpan struct {
@@ -737,6 +745,187 @@ func (d invalidTestFunctionDiagnostic) build() Diagnostic {
 	}
 	diagnostic := newLabeledDiagnostic(Error, legacy, title, "", DiagnosticLabel{Span: d.Span, Message: primary})
 	diagnostic.Code = code
+	return diagnostic
+}
+
+type invalidImplementationTargetDiagnostic struct {
+	Target          string
+	ContractKind    string
+	Span            SourceSpan
+	LegacyMessage   string
+	InvalidContract bool
+}
+
+func (d invalidImplementationTargetDiagnostic) build() Diagnostic {
+	title := "Invalid implementation target"
+	primary := fmt.Sprintf("`%s` cannot implement this %s", d.Target, d.ContractKind)
+	if d.InvalidContract {
+		title = "Invalid implementation contract"
+		primary = fmt.Sprintf("`%s` does not name a %s", d.Target, d.ContractKind)
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		d.LegacyMessage,
+		title,
+		"",
+		DiagnosticLabel{Span: d.Span, Message: primary},
+	)
+	diagnostic.Code = DiagnosticCodeInvalidImplementationTarget
+	return diagnostic
+}
+
+type unexpectedImplementationMethodDiagnostic struct {
+	Method       string
+	Contract     string
+	ContractKind string
+	Span         SourceSpan
+}
+
+func (d unexpectedImplementationMethodDiagnostic) build() Diagnostic {
+	legacy := fmt.Sprintf("Method %s is not part of trait %s", d.Method, d.Contract)
+	if d.ContractKind == "Go interface" {
+		legacy = fmt.Sprintf("Method %s is not part of Go interface %s", d.Method, d.Contract)
+	}
+	diagnostic := newLabeledDiagnostic(
+		Warn,
+		legacy,
+		"Method is not part of "+d.ContractKind,
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is not declared by %s `%s`", d.Method, d.ContractKind, d.Contract)},
+	)
+	diagnostic.Code = DiagnosticCodeUnexpectedImplMethod
+	return diagnostic
+}
+
+type implementationParameterCountDiagnostic struct {
+	Method   string
+	Expected int
+	Actual   int
+	Span     SourceSpan
+}
+
+func (d implementationParameterCountDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Method %s has wrong number of parameters", d.Method),
+		"Incorrect implementation method parameters",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected %d parameter(s), but found %d", d.Expected, d.Actual)},
+	)
+	diagnostic.Code = DiagnosticCodeImplParameterCount
+	return diagnostic
+}
+
+type implementationParameterMutabilityDiagnostic struct {
+	Method          string
+	Parameter       string
+	ExpectedMutable bool
+	Span            SourceSpan
+	ExpectedSpan    *SourceSpan
+	LegacyMessage   string
+}
+
+func (d implementationParameterMutabilityDiagnostic) build() Diagnostic {
+	actual := "mutable"
+	expected := "immutable"
+	if d.ExpectedMutable {
+		actual, expected = "immutable", "mutable"
+	}
+	secondary := []DiagnosticLabel{}
+	if d.ExpectedSpan != nil {
+		secondary = append(secondary, DiagnosticLabel{
+			Span:    *d.ExpectedSpan,
+			Message: fmt.Sprintf("the contract requires a %s parameter", expected),
+		})
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		d.LegacyMessage,
+		"Implementation parameter mutability mismatch",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("this parameter is %s", actual)},
+		secondary...,
+	)
+	diagnostic.Code = DiagnosticCodeImplParameterMutability
+	return diagnostic
+}
+
+type implementationReturnTypeDiagnostic struct {
+	Method        string
+	Expected      Type
+	Actual        Type
+	Span          SourceSpan
+	LegacyMessage string
+}
+
+func (d implementationReturnTypeDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		d.LegacyMessage,
+		"Implementation method return type mismatch",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("method `%s` must return `%s`, but returns `%s`", d.Method, d.Expected, d.Actual)},
+	)
+	diagnostic.Code = DiagnosticCodeImplReturnType
+	return diagnostic
+}
+
+type missingImplementationMethodDiagnostic struct {
+	Method        string
+	Contract      string
+	ContractKind  string
+	Span          SourceSpan
+	LegacyMessage string
+}
+
+func (d missingImplementationMethodDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		d.LegacyMessage,
+		"Missing required method",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("missing method `%s` required by %s `%s`", d.Method, d.ContractKind, d.Contract)},
+	)
+	diagnostic.Code = DiagnosticCodeMissingImplMethod
+	return diagnostic
+}
+
+type duplicateMethodDiagnostic struct {
+	Method       string
+	Span         SourceSpan
+	OriginalSpan *SourceSpan
+}
+
+func (d duplicateMethodDiagnostic) build() Diagnostic {
+	secondary := []DiagnosticLabel{}
+	if d.OriginalSpan != nil {
+		secondary = append(secondary, DiagnosticLabel{Span: *d.OriginalSpan, Message: "first declared here"})
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"Duplicate method: "+d.Method,
+		"Duplicate method",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is declared again here", d.Method)},
+		secondary...,
+	)
+	diagnostic.Code = DiagnosticCodeDuplicateMethod
+	return diagnostic
+}
+
+type mutatingEnumMethodDiagnostic struct {
+	Span SourceSpan
+}
+
+func (d mutatingEnumMethodDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"Enum methods cannot be mutating",
+		"Enum methods cannot mutate their receiver",
+		"Enums are immutable values.",
+		DiagnosticLabel{Span: d.Span, Message: "remove `mut` from this enum method"},
+	)
+	diagnostic.Code = DiagnosticCodeMutatingEnumMethod
 	return diagnostic
 }
 

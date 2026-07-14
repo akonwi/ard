@@ -1704,7 +1704,12 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 	}
 	targetType, ok := typeSym.Type.(*StructDef)
 	if !ok {
-		c.addError(fmt.Sprintf("%s cannot implement a Go interface", s.ForType.Name), s.ForType.GetLocation())
+		c.addDiagnostic(invalidImplementationTargetDiagnostic{
+			Target:        s.ForType.Name,
+			ContractKind:  "Go interface",
+			Span:          c.sourceSpan(s.ForType.GetLocation()),
+			LegacyMessage: fmt.Sprintf("%s cannot implement a Go interface", s.ForType.Name),
+		}.build())
 		return nil
 	}
 	if !iface.MethodsLoaded && iface.LoadMethods != nil {
@@ -1720,6 +1725,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 	implementedMethods := map[string]bool{}
 	invalidImplementedMethods := map[string]bool{}
 	pendingMethods := map[string]*FunctionDef{}
+	pendingMethodSpans := map[string]SourceSpan{}
 	receiverGenerics := genericParamsForType(targetType)
 	for _, method := range s.Methods {
 		if len(method.TypeParams) > 0 {
@@ -1739,13 +1745,20 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 			}
 		}
 		if interfaceMethod == nil {
-			c.addWarning(fmt.Sprintf("Method %s is not part of Go interface %s", method.Name, iface.String()), method.GetLocation())
+			c.addDiagnostic(unexpectedImplementationMethodDiagnostic{
+				Method:       method.Name,
+				Contract:     iface.String(),
+				ContractKind: "Go interface",
+				Span:         c.sourceSpan(method.GetLocation()),
+			}.build())
 			continue
 		}
 		implementedMethods[method.Name] = true
 		if len(method.Parameters) != len(interfaceMethod.Parameters) {
 			validImpl = false
-			c.addError(fmt.Sprintf("Method %s has wrong number of parameters", method.Name), method.GetLocation())
+			c.addDiagnostic(implementationParameterCountDiagnostic{
+				Method: method.Name, Expected: len(interfaceMethod.Parameters), Actual: len(method.Parameters), Span: c.sourceSpan(method.GetLocation()),
+			}.build())
 			invalidImplementedMethods[method.Name] = true
 			continue
 		}
@@ -1767,7 +1780,10 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 				valid = false
 			}
 			if paramMutable && mutableParamNeedsGoPointer(paramType) {
-				c.addError(fmt.Sprintf("Go interface method '%s' parameter '%s' cannot be mutable because it would change the Go ABI", method.Name, param.Name), param.GetLocation())
+				legacy := fmt.Sprintf("Go interface method '%s' parameter '%s' cannot be mutable because it would change the Go ABI", method.Name, param.Name)
+				c.addDiagnostic(implementationParameterMutabilityDiagnostic{
+					Method: method.Name, Parameter: param.Name, ExpectedMutable: false, Span: c.sourceSpan(param.GetLocation()), LegacyMessage: legacy,
+				}.build())
 				valid = false
 			}
 			params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable, Loc: param.GetLocation(), declaredAt: c.sourceSpan(param.GetLocation())}
@@ -1781,7 +1797,14 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 			}
 		}
 		if returnType != nil && (!c.areCompatible(interfaceMethod.ReturnType, returnType) || foreignScalarNarrows(interfaceMethod.ReturnType, returnType) || foreignScalarWidens(interfaceMethod.ReturnType, returnType) || foreignFuncCoerces(interfaceMethod.ReturnType, returnType)) {
-			c.addError(fmt.Sprintf("Go interface method '%s' has return type of %s", method.Name, interfaceMethod.ReturnType), method.GetLocation())
+			location := method.GetLocation()
+			if method.ReturnType != nil {
+				location = method.ReturnType.GetLocation()
+			}
+			legacy := fmt.Sprintf("Go interface method '%s' has return type of %s", method.Name, interfaceMethod.ReturnType)
+			c.addDiagnostic(implementationReturnTypeDiagnostic{
+				Method: method.Name, Expected: interfaceMethod.ReturnType, Actual: returnType, Span: c.sourceSpan(location), LegacyMessage: legacy,
+			}.build())
 			valid = false
 		}
 		if !valid {
@@ -1811,23 +1834,28 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 		if _, exists := c.structMethod(targetType, fnDef.Name); exists {
 			validImpl = false
 			invalidImplementedMethods[method.Name] = true
-			c.addError(fmt.Sprintf("Duplicate method: %s", fnDef.Name), method.GetLocation())
+			c.addDiagnostic(duplicateMethodDiagnostic{Method: fnDef.Name, Span: c.sourceSpan(method.GetLocation())}.build())
 			continue
 		}
 		if _, exists := pendingMethods[fnDef.Name]; exists {
 			validImpl = false
 			invalidImplementedMethods[method.Name] = true
-			c.addError(fmt.Sprintf("Duplicate method: %s", fnDef.Name), method.GetLocation())
+			original := pendingMethodSpans[fnDef.Name]
+			c.addDiagnostic(duplicateMethodDiagnostic{Method: fnDef.Name, Span: c.sourceSpan(method.GetLocation()), OriginalSpan: &original}.build())
 			continue
 		}
 		pendingMethods[fnDef.Name] = fnDef
+		pendingMethodSpans[fnDef.Name] = c.sourceSpan(method.GetLocation())
 	}
 
 	for goName := range iface.Methods {
 		ardName := goMethodNameToArdName(goName)
 		if !implementedMethods[ardName] && !invalidImplementedMethods[ardName] {
 			validImpl = false
-			c.addError(fmt.Sprintf("Missing method '%s' in Go interface '%s'", ardName, iface.String()), s.GetLocation())
+			legacy := fmt.Sprintf("Missing method '%s' in Go interface '%s'", ardName, iface.String())
+			c.addDiagnostic(missingImplementationMethodDiagnostic{
+				Method: ardName, Contract: iface.String(), ContractKind: "Go interface", Span: c.sourceSpan(s.GetLocation()), LegacyMessage: legacy,
+			}.build())
 		}
 	}
 	if !validImpl {
@@ -2113,7 +2141,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				if foreign, ok := sym.Type.(*ForeignType); ok && foreign.Interface {
 					return c.checkForeignInterfaceImplementation(s, foreign)
 				}
-				c.addError(fmt.Sprintf("%T is not a trait", sym.Type), s.Trait.GetLocation())
+				legacy := fmt.Sprintf("%T is not a trait", sym.Type)
+				c.addDiagnostic(invalidImplementationTargetDiagnostic{
+					Target: fmt.Sprint(s.Trait), ContractKind: "trait", Span: c.sourceSpan(s.Trait.GetLocation()), LegacyMessage: legacy, InvalidContract: true,
+				}.build())
 				return nil
 			}
 
@@ -2151,13 +2182,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}
 
 					if traitMethod == nil {
-						c.addWarning(fmt.Sprintf("Method %s is not part of trait %s", method.Name, trait.name()), method.GetLocation())
+						c.addDiagnostic(unexpectedImplementationMethodDiagnostic{
+							Method: method.Name, Contract: trait.name(), ContractKind: "trait", Span: c.sourceSpan(method.GetLocation()),
+						}.build())
 						continue
 					}
 
 					// Check parameter count
 					if len(method.Parameters) != len(traitMethod.Parameters) {
-						c.addError(fmt.Sprintf("Method %s has wrong number of parameters", method.Name), method.GetLocation())
+						c.addDiagnostic(implementationParameterCountDiagnostic{
+							Method: method.Name, Expected: len(traitMethod.Parameters), Actual: len(method.Parameters), Span: c.sourceSpan(method.GetLocation()),
+						}.build())
 						continue
 					}
 
@@ -2170,7 +2205,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						}
 
 						if paramMutable != traitMethod.Parameters[i].Mutable {
-							c.addError(fmt.Sprintf("Trait method '%s' parameter '%s' mutability mismatch", method.Name, param.Name), param.GetLocation())
+							legacy := fmt.Sprintf("Trait method '%s' parameter '%s' mutability mismatch", method.Name, param.Name)
+							c.addDiagnostic(implementationParameterMutabilityDiagnostic{
+								Method: method.Name, Parameter: param.Name, ExpectedMutable: traitMethod.Parameters[i].Mutable,
+								Span: c.sourceSpan(param.GetLocation()), ExpectedSpan: sourceSpanIfPresent(traitMethod.Parameters[i].declaredAt), LegacyMessage: legacy,
+							}.build())
 						}
 
 						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable, Loc: param.GetLocation(), declaredAt: c.sourceSpan(param.GetLocation())}
@@ -2182,7 +2221,14 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						returnType = c.resolveType(method.ReturnType)
 					}
 					if !traitMethod.ReturnType.equal(returnType) {
-						c.addError(fmt.Sprintf("Trait method '%s' has return type of %s", method.Name, traitMethod.ReturnType), method.GetLocation())
+						location := method.GetLocation()
+						if method.ReturnType != nil {
+							location = method.ReturnType.GetLocation()
+						}
+						legacy := fmt.Sprintf("Trait method '%s' has return type of %s", method.Name, traitMethod.ReturnType)
+						c.addDiagnostic(implementationReturnTypeDiagnostic{
+							Method: method.Name, Expected: traitMethod.ReturnType, Actual: returnType, Span: c.sourceSpan(location), LegacyMessage: legacy,
+						}.build())
 						continue
 					}
 
@@ -2206,7 +2252,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Check if all required methods are implemented
 				for _, method := range traitMethods {
 					if !implementedMethods[method.Name] && !invalidImplementedMethods[method.Name] {
-						c.addError(fmt.Sprintf("Missing method '%s' in trait '%s'", method.Name, trait.name()), s.GetLocation())
+						legacy := fmt.Sprintf("Missing method '%s' in trait '%s'", method.Name, trait.name())
+						c.addDiagnostic(missingImplementationMethodDiagnostic{
+							Method: method.Name, Contract: trait.name(), ContractKind: "trait", Span: c.sourceSpan(s.GetLocation()), LegacyMessage: legacy,
+						}.build())
 					}
 				}
 
@@ -2242,13 +2291,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}
 
 					if traitMethod == nil {
-						c.addWarning(fmt.Sprintf("Method %s is not part of trait %s", method.Name, trait.name()), method.GetLocation())
+						c.addDiagnostic(unexpectedImplementationMethodDiagnostic{
+							Method: method.Name, Contract: trait.name(), ContractKind: "trait", Span: c.sourceSpan(method.GetLocation()),
+						}.build())
 						continue
 					}
 
 					// Check parameter count
 					if len(method.Parameters) != len(traitMethod.Parameters) {
-						c.addError(fmt.Sprintf("Method %s has wrong number of parameters", method.Name), method.GetLocation())
+						c.addDiagnostic(implementationParameterCountDiagnostic{
+							Method: method.Name, Expected: len(traitMethod.Parameters), Actual: len(method.Parameters), Span: c.sourceSpan(method.GetLocation()),
+						}.build())
 						continue
 					}
 
@@ -2261,7 +2314,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						}
 
 						if paramMutable != traitMethod.Parameters[i].Mutable {
-							c.addError(fmt.Sprintf("Trait method '%s' parameter '%s' mutability mismatch", method.Name, param.Name), param.GetLocation())
+							legacy := fmt.Sprintf("Trait method '%s' parameter '%s' mutability mismatch", method.Name, param.Name)
+							c.addDiagnostic(implementationParameterMutabilityDiagnostic{
+								Method: method.Name, Parameter: param.Name, ExpectedMutable: traitMethod.Parameters[i].Mutable,
+								Span: c.sourceSpan(param.GetLocation()), ExpectedSpan: sourceSpanIfPresent(traitMethod.Parameters[i].declaredAt), LegacyMessage: legacy,
+							}.build())
 						}
 
 						params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable, Loc: param.GetLocation(), declaredAt: c.sourceSpan(param.GetLocation())}
@@ -2273,7 +2330,14 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						returnType = c.resolveType(method.ReturnType)
 					}
 					if !traitMethod.ReturnType.equal(returnType) {
-						c.addError(fmt.Sprintf("Trait method '%s' has return type of %s", method.Name, traitMethod.ReturnType), method.GetLocation())
+						location := method.GetLocation()
+						if method.ReturnType != nil {
+							location = method.ReturnType.GetLocation()
+						}
+						legacy := fmt.Sprintf("Trait method '%s' has return type of %s", method.Name, traitMethod.ReturnType)
+						c.addDiagnostic(implementationReturnTypeDiagnostic{
+							Method: method.Name, Expected: traitMethod.ReturnType, Actual: returnType, Span: c.sourceSpan(location), LegacyMessage: legacy,
+						}.build())
 						continue
 					}
 
@@ -2291,7 +2355,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					fnDef.Receiver = s.Receiver.Name
 					// Enums cannot have mutating methods
 					if method.Mutates {
-						c.addError("Enum methods cannot be mutating", method.GetLocation())
+						c.addDiagnostic(mutatingEnumMethodDiagnostic{Span: c.sourceSpan(method.GetLocation())}.build())
 					}
 					fnDef.Mutates = false // Enums are always immutable
 
@@ -2306,7 +2370,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				// Check if all required methods are implemented
 				for _, method := range traitMethods {
 					if !implementedMethods[method.Name] && !invalidImplementedMethods[method.Name] {
-						c.addError(fmt.Sprintf("Missing method '%s' in trait '%s'", method.Name, trait.name()), s.GetLocation())
+						legacy := fmt.Sprintf("Missing method '%s' in trait '%s'", method.Name, trait.name())
+						c.addDiagnostic(missingImplementationMethodDiagnostic{
+							Method: method.Name, Contract: trait.name(), ContractKind: "trait", Span: c.sourceSpan(s.GetLocation()), LegacyMessage: legacy,
+						}.build())
 					}
 				}
 
@@ -2317,7 +2384,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return &Statement{Stmt: targetType}
 
 			default:
-				c.addError(fmt.Sprintf("%s cannot implement a Trait", s.ForType.Name), s.ForType.GetLocation())
+				legacy := fmt.Sprintf("%s cannot implement a Trait", s.ForType.Name)
+				c.addDiagnostic(invalidImplementationTargetDiagnostic{
+					Target: s.ForType.Name, ContractKind: "trait", Span: c.sourceSpan(s.ForType.GetLocation()), LegacyMessage: legacy,
+				}.build())
 				return nil
 			}
 		}
@@ -3018,7 +3088,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						continue
 					}
 					if method.Mutates {
-						c.addError("Enum methods cannot be mutating", method.GetLocation())
+						c.addDiagnostic(mutatingEnumMethodDiagnostic{Span: c.sourceSpan(method.GetLocation())}.build())
 					}
 					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.resolveMethodSignature(method)
@@ -3043,7 +3113,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 				return &Statement{Stmt: def}
 			default:
-				c.addError(fmt.Sprintf("Can only implement methods on structs and enums, not %s", sym.Type), s.Target.GetLocation())
+				legacy := fmt.Sprintf("Can only implement methods on structs and enums, not %s", sym.Type)
+				c.addDiagnostic(invalidImplementationTargetDiagnostic{
+					Target: s.Target.Name, ContractKind: "method implementation", Span: c.sourceSpan(s.Target.GetLocation()), LegacyMessage: legacy,
+				}.build())
 				return nil
 			}
 		}

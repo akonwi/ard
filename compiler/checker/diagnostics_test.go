@@ -181,6 +181,94 @@ func TestUndefinedInstanceMembersHaveStructuredDiagnostics(t *testing.T) {
 	}
 }
 
+func TestImplementationDiagnosticsAreStructured(t *testing.T) {
+	tests := []struct {
+		name            string
+		source          string
+		code            checker.DiagnosticCode
+		legacyMessage   string
+		primaryMessage  string
+		secondaryLabels int
+	}{
+		{
+			name:          "invalid target",
+			source:        "trait T {\n}\ntrait U {\n}\nimpl T for U {\n}\n",
+			code:          checker.DiagnosticCodeInvalidImplementationTarget,
+			legacyMessage: "U cannot implement a Trait",
+		},
+		{
+			name:           "invalid contract",
+			source:         "struct NotATrait {}\nstruct S {}\nimpl NotATrait for S {\n}\n",
+			code:           checker.DiagnosticCodeInvalidImplementationTarget,
+			primaryMessage: "`NotATrait` does not name a trait",
+		},
+		{
+			name:          "unexpected method",
+			source:        "trait T {\n}\nstruct S {}\nimpl T for S {\n  fn extra() {}\n}\n",
+			code:          checker.DiagnosticCodeUnexpectedImplMethod,
+			legacyMessage: "Method extra is not part of trait T",
+		},
+		{
+			name:          "parameter count",
+			source:        "trait T {\n  fn run(value: Int)\n}\nstruct S {}\nimpl T for S {\n  fn run() {}\n}\n",
+			code:          checker.DiagnosticCodeImplParameterCount,
+			legacyMessage: "Method run has wrong number of parameters",
+		},
+		{
+			name:          "missing Go interface method",
+			source:        "use go:io\nstruct Sink {}\nimpl io::Writer for Sink {\n}\n",
+			code:          checker.DiagnosticCodeMissingImplMethod,
+			legacyMessage: "Missing method 'write' in Go interface 'io::Writer'",
+		},
+		{
+			name:            "parameter mutability",
+			source:          "struct State {}\ntrait T {\n  fn update(value: mut State)\n}\nstruct S {}\nimpl T for S {\n  fn update(value: State) {}\n}\n",
+			code:            checker.DiagnosticCodeImplParameterMutability,
+			legacyMessage:   "Trait method 'update' parameter 'value' mutability mismatch",
+			secondaryLabels: 1,
+		},
+		{
+			name:          "return type",
+			source:        "trait T {\n  fn id() Int\n}\nstruct S {}\nimpl T for S {\n  fn id() Str { \"s\" }\n}\n",
+			code:          checker.DiagnosticCodeImplReturnType,
+			legacyMessage: "Trait method 'id' has return type of Int",
+		},
+		{
+			name:          "missing method",
+			source:        "trait T {\n  fn run()\n}\nstruct S {}\nimpl T for S {\n}\n",
+			code:          checker.DiagnosticCodeMissingImplMethod,
+			legacyMessage: "Missing method 'run' in trait 'T'",
+		},
+		{
+			name:          "mutating enum method",
+			source:        "enum Status { Ready }\nimpl Status {\n  fn mut reset() {}\n}\n",
+			code:          checker.DiagnosticCodeMutatingEnumMethod,
+			legacyMessage: "Enum methods cannot be mutating",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if tt.legacyMessage != "" && diagnostic.Message != tt.legacyMessage {
+				t.Fatalf("legacy message = %q, want %q", diagnostic.Message, tt.legacyMessage)
+			}
+			if diagnostic.Primary.Span.FilePath != "main.ard" || tt.primaryMessage != "" && diagnostic.Primary.Message != tt.primaryMessage {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+			if len(diagnostic.Secondary) != tt.secondaryLabels {
+				t.Fatalf("secondary = %#v", diagnostic.Secondary)
+			}
+		})
+	}
+}
+
 func TestInvalidTestFunctionDiagnosticsUsePreciseSpans(t *testing.T) {
 	t.Run("parameters", func(t *testing.T) {
 		result := parse.Parse([]byte("test fn invalid(name: Str) Void!Str { Result::ok(()) }\n"), "main.ard")

@@ -125,6 +125,18 @@ func TestDuplicateDeclarationDiagnosticBuildsBothLabels(t *testing.T) {
 	}
 }
 
+func TestDuplicateMethodDiagnosticUsesOriginalDeclaration(t *testing.T) {
+	original := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}}}
+	duplicate := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 2, Col: 1}}}
+	diagnostic := duplicateMethodDiagnostic{Method: "save", Span: duplicate, OriginalSpan: &original}.build()
+	if diagnostic.Code != DiagnosticCodeDuplicateMethod || diagnostic.Primary.Span != duplicate {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span != original {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
 func TestGenericTestDiagnostic(t *testing.T) {
 	span := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}, End: parse.Point{Row: 1, Col: 20}}}
 	diagnostic := invalidTestFunctionDiagnostic{Kind: genericTestNotAllowed, Span: span}.build()

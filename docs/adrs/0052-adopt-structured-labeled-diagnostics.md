@@ -207,14 +207,14 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Value-producing `if` without `else`
   - [x] Invalid test placement, parameters, generics, and return types
 
-- [ ] **Traits, interfaces, and implementations**
-  - [ ] Invalid implementation targets
-  - [ ] Methods absent from a trait or interface
-  - [ ] Incorrect method parameter counts and mutability
-  - [ ] Incorrect method return types
-  - [ ] Missing required methods
-  - [ ] Duplicate methods
-  - [ ] Mutating enum methods
+- [x] **Traits, interfaces, and implementations**
+  - [x] Invalid implementation targets
+  - [x] Methods absent from a trait or interface
+  - [x] Incorrect method parameter counts and mutability
+  - [x] Incorrect method return types
+  - [x] Missing required methods
+  - [x] Duplicate methods
+  - [x] Mutating enum methods
 
 - [ ] **Enums**
   - [ ] Empty enums
