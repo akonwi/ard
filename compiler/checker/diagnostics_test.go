@@ -530,6 +530,74 @@ func TestDuplicateBooleanMatchLabelsBothCases(t *testing.T) {
 	}
 }
 
+func TestInvalidTryDiagnosticsAreStructured(t *testing.T) {
+	tests := []struct {
+		name          string
+		source        string
+		legacyMessage string
+	}{
+		{"outside function", "let res: Int!Str = Result::ok(1)\ntry res\n", "The `try` keyword can only be used in a function body"},
+		{"requires Result return", "fn run() Int {\n  let res: Int!Str = Result::ok(1)\n  try res\n}\n", "try without catch clause requires function to return a Result type"},
+		{"requires Maybe return", "fn run() Int {\n  let value: Int? = Maybe::new(1)\n  try value\n}\n", "try without catch clause on Maybe requires function to return a Maybe type"},
+		{"invalid operand", "fn run() Str {\n  try \"value\"\n}\n", "try can only be used on Result or Maybe types, got: Str"},
+		{"deferred", "fn close() Void!Str { Result::ok(()) }\nfn run() Void!Str {\n  defer { try close() }\n  Result::ok(())\n}\n", "try is not allowed inside deferred work; handle the Result or Maybe explicitly"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidTry)
+			if diagnostic.Message != tt.legacyMessage || diagnostic.Primary.Message == "" {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
+func TestTryCatchMismatchLabelsCatchResult(t *testing.T) {
+	result := parse.Parse([]byte("fn run() Str {\n  try Result::err(\"bad\") -> error {\n    42\n  }\n}\n"), "main.ard")
+	function := result.Program.Statements[0].(*parse.FunctionDeclaration)
+	tryExpr := function.Body[0].(*parse.Try)
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeTypeMismatch)
+	if diagnostic.Message != "Type mismatch: Expected Str, got Int" || diagnostic.Primary.Span.Location != tryExpr.CatchBlock[0].GetLocation() {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestMaybeNewInvalidFormsUseStructuredDiagnostics(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		code    checker.DiagnosticCode
+		message string
+	}{
+		{"type arguments", "Maybe::new<Int, Str>()\n", checker.DiagnosticCodeInvalidFunctionTypeArgs, "Maybe::new accepts at most one explicit type argument"},
+		{"value arguments", "Maybe::new(1, 2)\n", checker.DiagnosticCodeIncorrectArgumentCount, "Incorrect number of arguments: Expected 0 or 1, got 2"},
+		{"named argument", "Maybe::new(other: 1)\n", checker.DiagnosticCodeUnknownNamedArgument, "unknown argument: other"},
+		{"value type", "Maybe::new<Int>(\"value\")\n", checker.DiagnosticCodeTypeMismatch, "Type mismatch: Expected Int, got Str"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if diagnostic.Message != tt.message || diagnostic.Primary.Message == "" {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
 func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")

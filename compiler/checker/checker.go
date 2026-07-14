@@ -8392,7 +8392,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 	case *parse.Try:
 		{
 			if c.deferredWorkDepth > 0 {
-				c.addError("try is not allowed inside deferred work; handle the Result or Maybe explicitly", s.GetLocation())
+				c.addDiagnostic(invalidTryDiagnostic{LegacyMessage: "try is not allowed inside deferred work; handle the Result or Maybe explicitly", Span: c.sourceSpan(s.GetLocation()), Label: "`try` cannot propagate out of deferred work"}.build())
 				return nil
 			}
 			// Check if this is a property/method accessor chain that might need cascading Maybe handling
@@ -8402,7 +8402,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			}
 
 			if c.scope.getReturnType() == nil {
-				c.addError("The `try` keyword can only be used in a function body", s.GetLocation())
+				c.addDiagnostic(invalidTryDiagnostic{LegacyMessage: "The `try` keyword can only be used in a function body", Span: c.sourceSpan(s.GetLocation()), Label: "`try` requires an enclosing function return context"}.build())
 				return nil
 			}
 
@@ -8435,6 +8435,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					block := &Block{Stmts: catchBlock}
 					blockType := block.Type()
 					returnType := c.scope.getReturnType()
+					catchLocation := bodyResultLocation(s.CatchBlock, s.GetLocation())
 
 					// Validate catch block type compatibility
 					// If both are Results, only error types need to match (value types can differ, including generic $Val)
@@ -8444,18 +8445,18 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							typeOk = fnReturnResult.err.equal(blockResultType.err)
 							if !typeOk {
 								legacyMessage := fmt.Sprintf("Error type mismatch: Expected %s, got %s", fnReturnResult.err.String(), blockResultType.err.String())
-								c.addTypeMismatchWithLegacy(fnReturnResult.err, blockResultType.err, legacyMessage, s.GetLocation())
+								c.addTypeMismatchWithLegacy(fnReturnResult.err, blockResultType.err, legacyMessage, catchLocation)
 							}
 						} else {
 							// Catch block returns non-Result but function expects Result
 							typeOk = false
-							c.addTypeMismatch(returnType, blockType, s.GetLocation())
+							c.addTypeMismatch(returnType, blockType, catchLocation)
 						}
 					} else {
 						// Function return type is not a Result
 						typeOk = returnType.equal(blockType)
 						if !typeOk {
-							c.addTypeMismatch(returnType, blockType, s.GetLocation())
+							c.addTypeMismatch(returnType, blockType, catchLocation)
 						}
 					}
 
@@ -8474,7 +8475,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					// No catch clause: function must return a compatible Result type
 					fnReturnResult, ok := c.scope.getReturnType().(*Result)
 					if !ok {
-						c.addError("try without catch clause requires function to return a Result type", s.GetLocation())
+						c.addDiagnostic(invalidTryDiagnostic{LegacyMessage: "try without catch clause requires function to return a Result type", Span: c.sourceSpan(s.GetLocation()), Label: "uncaught Result errors require the function to return a Result"}.build())
 						// Return a try op with the unwrapped type to avoid cascading errors
 						return &TryOp{
 							expr:    expr,
@@ -8532,6 +8533,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					block := &Block{Stmts: catchBlock}
 					blockType := block.Type()
 					returnType := c.scope.getReturnType()
+					catchLocation := bodyResultLocation(s.CatchBlock, s.GetLocation())
 
 					// Validate catch block type compatibility
 					// For Maybe catch blocks, inner types must match (or both have unresolved generics)
@@ -8541,17 +8543,17 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							// Both are Maybe types - inner types should match
 							typeOk = fnReturnMaybe.of.equal(blockMaybeType.of)
 							if !typeOk {
-								c.addTypeMismatch(returnType, blockType, s.GetLocation())
+								c.addTypeMismatch(returnType, blockType, catchLocation)
 							}
 						} else {
 							typeOk = false
-							c.addTypeMismatch(returnType, blockType, s.GetLocation())
+							c.addTypeMismatch(returnType, blockType, catchLocation)
 						}
 					} else {
 						// Function return type is not a Maybe
 						typeOk = returnType.equal(blockType)
 						if !typeOk {
-							c.addTypeMismatch(returnType, blockType, s.GetLocation())
+							c.addTypeMismatch(returnType, blockType, catchLocation)
 						}
 					}
 
@@ -8569,7 +8571,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					// No catch clause: function must return a compatible Maybe type
 					fnReturnMaybe, ok := c.scope.getReturnType().(*Maybe)
 					if !ok {
-						c.addError("try without catch clause on Maybe requires function to return a Maybe type", s.GetLocation())
+						c.addDiagnostic(invalidTryDiagnostic{LegacyMessage: "try without catch clause on Maybe requires function to return a Maybe type", Span: c.sourceSpan(s.GetLocation()), Label: "uncaught absence requires the function to return a Maybe"}.build())
 						// Return a try op with the unwrapped type to avoid cascading errors
 						return &TryOp{
 							expr:   expr,
@@ -8594,7 +8596,8 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					}
 				}
 			default:
-				c.addError("try can only be used on Result or Maybe types, got: "+expr.Type().String(), s.Expression.GetLocation())
+				legacy := "try can only be used on Result or Maybe types, got: " + expr.Type().String()
+				c.addDiagnostic(invalidTryDiagnostic{LegacyMessage: legacy, Span: c.sourceSpan(s.Expression.GetLocation()), Label: fmt.Sprintf("this expression has type `%s`, not Result or Maybe", expr.Type())}.build())
 				// Return a try op with the expr type to avoid cascading errors
 				return &TryOp{
 					expr:    expr,

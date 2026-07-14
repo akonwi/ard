@@ -266,11 +266,11 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Invalid and duplicate `select` arms
   - [x] Ignored-pattern warnings
 
-- [ ] **`try`, `Result`, and `Maybe` propagation**
-  - [ ] Invalid `try` contexts, including deferred work
+- [x] **`try`, `Result`, and `Maybe` propagation**
+  - [x] Invalid `try` contexts, including deferred work
   - [x] Incompatible enclosing return types
-  - [ ] Invalid catch and result error types
-  - [ ] Invalid `Maybe::new` arguments
+  - [x] Invalid catch and result error types
+  - [x] Invalid `Maybe::new` arguments
 
 - [ ] **Literal and conversion validation**
   - [ ] Invalid rune, integer, and float literals

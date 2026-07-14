@@ -122,6 +122,7 @@ const (
 	DiagnosticCodeInvalidSelectArm              DiagnosticCode = "invalid_select_arm"
 	DiagnosticCodeIgnoredMatchPattern           DiagnosticCode = "ignored_match_pattern"
 	DiagnosticCodeNonBooleanMatchCondition      DiagnosticCode = "non_boolean_match_condition"
+	DiagnosticCodeInvalidTry                    DiagnosticCode = "invalid_try"
 )
 
 type SourceSpan struct {
@@ -1623,6 +1624,18 @@ func (d nonBooleanMatchConditionDiagnostic) build() Diagnostic {
 	legacy := fmt.Sprintf("Condition must be of type Bool, got %s", d.Actual)
 	diagnostic := newLabeledDiagnostic(Error, legacy, "Invalid match condition", "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected `Bool`, but found `%s`", d.Actual)})
 	diagnostic.Code = DiagnosticCodeNonBooleanMatchCondition
+	return diagnostic
+}
+
+type invalidTryDiagnostic struct {
+	LegacyMessage string
+	Span          SourceSpan
+	Label         string
+}
+
+func (d invalidTryDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid try expression", "", DiagnosticLabel{Span: d.Span, Message: d.Label})
+	diagnostic.Code = DiagnosticCodeInvalidTry
 	return diagnostic
 }
 
