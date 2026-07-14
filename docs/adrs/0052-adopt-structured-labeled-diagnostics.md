@@ -179,14 +179,14 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Invalid map key types
   - [x] Malformed internal type nodes
 
-- [ ] **Remaining type mismatches**
-  - [ ] Branch and return mismatches
-  - [ ] Assignment and property mismatches
-  - [ ] List, fixed-array, and map mismatches
-  - [ ] Struct-literal field mismatches
-  - [ ] `Result`, `Maybe`, and `try` mismatches
-  - [ ] Interface and trait parameter mismatches
-  - [ ] String interpolation mismatches
+- [x] **Remaining type mismatches**
+  - [x] Branch and return mismatches
+  - [x] Assignment and property mismatches
+  - [x] List, fixed-array, and map mismatches
+  - [x] Struct-literal field mismatches
+  - [x] `Result`, `Maybe`, and `try` mismatches
+  - [x] Interface and trait parameter mismatches
+  - [x] String interpolation mismatches
 
 - [ ] **Mutable references and indirect mutation**
   - [ ] Mutable references to immutable values

@@ -380,6 +380,85 @@ func requireDiagnosticCode(t *testing.T, diagnostics []checker.Diagnostic, code 
 	return checker.Diagnostic{}
 }
 
+func TestFunctionReturnMismatchHasStructuredLabels(t *testing.T) {
+	result := parse.Parse([]byte("fn answer() Int {\n  false\n}\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	function := result.Program.Statements[0].(*parse.FunctionDeclaration)
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeTypeMismatch)
+	if diagnostic.Primary.Span.Location != function.Body[0].GetLocation() || diagnostic.Primary.Message != "this expression has type `Bool`" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != function.ReturnType.GetLocation() || diagnostic.Secondary[0].Message != "this return annotation requires `Int`" {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
+func TestIfBranchMismatchHasStructuredLabels(t *testing.T) {
+	result := parse.Parse([]byte("if true {\n  1\n} else {\n  \"no\"\n}\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	chain := result.Program.Statements[0].(*parse.IfStatement)
+	elseBranch := chain.Else.(*parse.IfStatement)
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeBranchTypeMismatch)
+	if diagnostic.Message != "All branches must have the same result type" || diagnostic.Primary.Span.Location != elseBranch.Body[0].GetLocation() {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != chain.Body[0].GetLocation() {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
+func TestMatchBranchMismatchHasStructuredDiagnostic(t *testing.T) {
+	source := `
+fn side_effect() {}
+fn get() Str!Str { Result::ok("ok") }
+fn main() {
+  let category = match get() {
+    ok(value) => value,
+    err(_) => side_effect(),
+  }
+}
+`
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeBranchTypeMismatch)
+	if diagnostic.Message != "Type mismatch in match branches: expected Str, got Void" || diagnostic.Title != "Incompatible match branch types" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if diagnostic.Primary.Message != "this branch produces `Void`" || len(diagnostic.Secondary) != 0 {
+		t.Fatalf("labels = %#v / %#v", diagnostic.Primary, diagnostic.Secondary)
+	}
+}
+
+func TestValueIfWithoutElseHasStructuredDiagnostic(t *testing.T) {
+	result := parse.Parse([]byte("fn answer() Int {\n  if true {\n    1\n  }\n}\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	function := result.Program.Statements[0].(*parse.FunctionDeclaration)
+	chain := function.Body[0].(*parse.IfStatement)
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeNonExhaustiveValueIf)
+	if diagnostic.Message != "if used as a value must have an else branch" || diagnostic.Primary.Span.Location != chain.GetLocation() {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestInvalidMapKeyTypeHasStructuredDiagnostic(t *testing.T) {
 	tests := []struct {
 		name   string

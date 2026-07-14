@@ -609,6 +609,24 @@ func (c *Checker) sourceSpan(location parse.Location) SourceSpan {
 	return SourceSpan{FilePath: c.filePath, Location: location}
 }
 
+func (c *Checker) sourceSpanPtr(location parse.Location) *SourceSpan {
+	span := c.sourceSpan(location)
+	return &span
+}
+
+func (c *Checker) addTypeMismatch(expected Type, actual Type, location parse.Location) {
+	c.addTypeMismatchWithLegacy(expected, actual, "", location)
+}
+
+func (c *Checker) addTypeMismatchWithLegacy(expected Type, actual Type, legacyMessage string, location parse.Location) {
+	c.addDiagnostic(typeMismatchDiagnostic{
+		Expected:      expected,
+		Actual:        actual,
+		ActualSpan:    c.sourceSpan(location),
+		LegacyMessage: legacyMessage,
+	}.build())
+}
+
 func (c *Checker) addMissingTypeArguments(typeName string, location parse.Location) {
 	c.addDiagnostic(missingTypeArgumentsDiagnostic{TypeName: typeName, Span: c.sourceSpan(location)}.build())
 }
@@ -1195,7 +1213,7 @@ func (c *Checker) checkUnsafeCast(s *parse.StaticFunction) Expression {
 		return nil
 	}
 	if !c.areCompatible(Any, arg.Type()) {
-		c.addError(typeMismatch(Any, arg.Type()), s.Function.Args[0].Value.GetLocation())
+		c.addTypeMismatch(Any, arg.Type(), s.Function.Args[0].Value.GetLocation())
 		return nil
 	}
 	targetType := callTypeArgs[0]
@@ -1327,7 +1345,7 @@ func (c *Checker) checkUnsafeIsNil(s *parse.StaticFunction) Expression {
 		return nil
 	}
 	if !c.areCompatible(Any, arg.Type()) {
-		c.addError(typeMismatch(Any, arg.Type()), s.Function.Args[0].Value.GetLocation())
+		c.addTypeMismatch(Any, arg.Type(), s.Function.Args[0].Value.GetLocation())
 		return nil
 	}
 	return &UnsafeIsNil{Value: arg}
@@ -1471,7 +1489,13 @@ func mergeMatchResultType(c *Checker, current Type, next Type, loc parse.Locatio
 		return next, true
 	}
 	if expected, got, ok := mixedVoidMatchTypes(current, next); ok && !allowMixedVoid {
-		c.addError(matchBranchTypeMismatch(expected, got), loc)
+		c.addDiagnostic(branchTypeMismatchDiagnostic{
+			Expected:      expected,
+			Actual:        got,
+			ActualSpan:    c.sourceSpan(loc),
+			LegacyMessage: matchBranchTypeMismatch(expected, got),
+			Title:         "Incompatible match branch types",
+		}.build())
 		return nil, false
 	}
 	merged, ok := commonResultType(current, next)
@@ -1481,7 +1505,13 @@ func mergeMatchResultType(c *Checker, current Type, next Type, loc parse.Locatio
 	if c.expectedExpr != nil && c.areCompatible(c.expectedExpr, current) && c.areCompatible(c.expectedExpr, next) {
 		return c.expectedExpr, true
 	}
-	c.addError(typeMismatch(current, next), loc)
+	c.addDiagnostic(branchTypeMismatchDiagnostic{
+		Expected:      current,
+		Actual:        next,
+		ActualSpan:    c.sourceSpan(loc),
+		LegacyMessage: typeMismatch(current, next),
+		Title:         "Incompatible match branch types",
+	}.build())
 	return nil, false
 }
 
@@ -1673,7 +1703,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 			// signature, so the foreign scalar narrowing coercion cannot apply:
 			// the Go types must line up for interface satisfaction.
 			if !c.areCompatible(expectedType, paramType) || foreignScalarNarrows(expectedType, paramType) || foreignScalarWidens(expectedType, paramType) || foreignFuncCoerces(expectedType, paramType) {
-				c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
+				c.addTypeMismatch(expectedType, paramType, param.GetLocation())
 				valid = false
 			}
 			if paramMutable && mutableParamNeedsGoPointer(paramType) {
@@ -2076,7 +2106,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						paramType, paramMutable := c.resolveParameterType(param.Type)
 						expectedType := traitMethod.Parameters[i].Type
 						if !paramType.equal(expectedType) {
-							c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
+							c.addTypeMismatch(expectedType, paramType, param.GetLocation())
 						}
 
 						if paramMutable != traitMethod.Parameters[i].Mutable {
@@ -2167,7 +2197,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						paramType, paramMutable := c.resolveParameterType(param.Type)
 						expectedType := traitMethod.Parameters[i].Type
 						if !paramType.equal(expectedType) {
-							c.addError(typeMismatch(expectedType, paramType), param.GetLocation())
+							c.addTypeMismatch(expectedType, paramType, param.GetLocation())
 						}
 
 						if paramMutable != traitMethod.Parameters[i].Mutable {
@@ -2418,7 +2448,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 
 				if !c.areCompatible(expectedType, value.Type()) {
-					c.addError(typeMismatch(expectedType, value.Type()), s.Value.GetLocation())
+					c.addTypeMismatch(expectedType, value.Type(), s.Value.GetLocation())
 					return nil
 				}
 
@@ -2473,7 +2503,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}
 				}
 				if !c.areCompatible(fieldType, value.Type()) {
-					c.addError(typeMismatch(fieldType, value.Type()), s.Value.GetLocation())
+					c.addTypeMismatch(fieldType, value.Type(), s.Value.GetLocation())
 					return nil
 				}
 
@@ -2495,7 +2525,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 									return nil
 								}
 								if !c.areCompatible(typ, value.Type()) {
-									c.addError(typeMismatch(typ, value.Type()), s.Value.GetLocation())
+									c.addTypeMismatch(typ, value.Type(), s.Value.GetLocation())
 									return nil
 								}
 								return &Statement{Stmt: &Reassignment{Target: &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ, Assignable: true}, Value: value}}
@@ -2969,11 +2999,15 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 		} else if declaredArray, ok := declaredType.(*FixedArray); ok {
 			expectedElementType = declaredArray.of
 			if len(expr.Items) != declaredArray.length {
-				c.addError(fmt.Sprintf("Type mismatch: Expected %d elements, got %d", declaredArray.length, len(expr.Items)), expr.GetLocation())
+				c.addDiagnostic(fixedArrayLengthMismatchDiagnostic{
+					Expected: declaredArray.length,
+					Actual:   len(expr.Items),
+					Span:     c.sourceSpan(expr.GetLocation()),
+				}.build())
 				return nil
 			}
 		} else {
-			c.addError(fmt.Sprintf("Expected %s but got a list", formatTypeForDisplay(declaredType)), expr.GetLocation())
+			c.addDiagnostic(unexpectedListDiagnostic{Expected: declaredType, Span: c.sourceSpan(expr.GetLocation())}.build())
 			return nil
 		}
 		elements := make([]Expression, len(expr.Items))
@@ -2986,7 +3020,7 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 				continue
 			}
 			if !c.areCompatible(expectedElementType, element.Type()) {
-				c.addError(typeMismatch(expectedElementType, element.Type()), item.GetLocation())
+				c.addTypeMismatch(expectedElementType, element.Type(), item.GetLocation())
 				hasError = true
 				continue
 			}
@@ -3012,6 +3046,7 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 
 	hasError := false
 	var elementType Type
+	var elementSpan parse.Location
 	elements := make([]Expression, len(expr.Items))
 	for i := range expr.Items {
 		item := expr.Items[i]
@@ -3023,8 +3058,14 @@ func (c *Checker) checkList(declaredType Type, expr *parse.ListLiteral) *ListLit
 
 		if elementType == nil {
 			elementType = element.Type()
+			elementSpan = item.GetLocation()
 		} else if !elementType.equal(element.Type()) {
-			c.addError("Type mismatch: A list can only contain values of single type", item.GetLocation())
+			c.addDiagnostic(homogeneousListMismatchDiagnostic{
+				Expected:     elementType,
+				Actual:       element.Type(),
+				ExpectedSpan: c.sourceSpan(elementSpan),
+				ActualSpan:   c.sourceSpan(item.GetLocation()),
+			}.build())
 			hasError = true
 			continue
 		}
@@ -3729,12 +3770,12 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 			if catchResult, ok := e.CatchBlock.Type().(*Result); ok && catchResult.err.equal(resultType.err) {
 				for _, okType := range unsafeCatchOkValueTypes(e.CatchBlock) {
 					if !unsafeResultOkValueCompatible(resultType.val, okType) {
-						c.addError(typeMismatch(resultType, MakeResult(okType, catchResult.err)), loc)
+						c.addTypeMismatch(resultType, MakeResult(okType, catchResult.err), loc)
 					}
 				}
 				for _, errType := range unsafeCatchErrValueTypes(e.CatchBlock) {
 					if !unsafeResultOkValueCompatible(resultType.err, errType) {
-						c.addError(typeMismatch(resultType, MakeResult(catchResult.val, errType)), loc)
+						c.addTypeMismatch(resultType, MakeResult(catchResult.val, errType), loc)
 					}
 				}
 			}
@@ -4151,7 +4192,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 		if declaredType != nil {
 			mapType, ok := declaredType.(*Map)
 			if !ok {
-				c.addError(fmt.Sprintf("Expected map type but got %s", declaredType), expr.GetLocation())
+				c.addDiagnostic(expectedMapTypeDiagnostic{Actual: declaredType, Span: c.sourceSpan(expr.GetLocation())}.build())
 				return nil
 			}
 
@@ -4182,7 +4223,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 	if declaredType != nil {
 		mapType, ok := declaredType.(*Map)
 		if !ok {
-			c.addError(fmt.Sprintf("Expected map type but got %s", declaredType), expr.GetLocation())
+			c.addDiagnostic(expectedMapTypeDiagnostic{Actual: declaredType, Span: c.sourceSpan(expr.GetLocation())}.build())
 			return nil
 		}
 
@@ -4201,7 +4242,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 				continue
 			}
 			if !c.areCompatible(expectedKeyType, key.Type()) {
-				c.addError(typeMismatch(expectedKeyType, key.Type()), entry.Key.GetLocation())
+				c.addTypeMismatch(expectedKeyType, key.Type(), entry.Key.GetLocation())
 				hasError = true
 				continue
 			}
@@ -4214,7 +4255,7 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 				continue
 			}
 			if !c.areCompatible(expectedValueType, value.Type()) {
-				c.addError(typeMismatch(expectedValueType, value.Type()), entry.Value.GetLocation())
+				c.addTypeMismatch(expectedValueType, value.Type(), entry.Value.GetLocation())
 				hasError = true
 				continue
 			}
@@ -4259,7 +4300,8 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 			continue
 		}
 		if !keyType.equal(key.Type()) {
-			c.addError(fmt.Sprintf("Map key type mismatch: Expected %s, got %s", keyType, key.Type()), expr.Entries[i].Key.GetLocation())
+			legacyMessage := fmt.Sprintf("Map key type mismatch: Expected %s, got %s", keyType, key.Type())
+			c.addTypeMismatchWithLegacy(keyType, key.Type(), legacyMessage, expr.Entries[i].Key.GetLocation())
 			continue
 		}
 		keys[i] = key
@@ -4270,7 +4312,8 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 			continue
 		}
 		if !valueType.equal(value.Type()) {
-			c.addError(fmt.Sprintf("Map value type mismatch: Expected %s, got %s", valueType, value.Type()), expr.Entries[i].Value.GetLocation())
+			legacyMessage := fmt.Sprintf("Map value type mismatch: Expected %s, got %s", valueType, value.Type())
+			c.addTypeMismatchWithLegacy(valueType, value.Type(), legacyMessage, expr.Entries[i].Value.GetLocation())
 			continue
 		}
 		values[i] = value
@@ -4324,7 +4367,7 @@ func (c *Checker) validateForeignStructInstance(foreign *ForeignType, typeArgs [
 			continue
 		}
 		if !c.areCompatible(fieldType, value.Type()) {
-			c.addError(typeMismatch(fieldType, value.Type()), property.Value.GetLocation())
+			c.addTypeMismatch(fieldType, value.Type(), property.Value.GetLocation())
 			continue
 		}
 		fields[name] = value
@@ -4719,7 +4762,12 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				}
 
 				if fieldIsMutableRef && !c.isMutable(checkVal) {
-					c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fieldExpected.String()), property.GetLocation())
+					c.addDiagnostic(typeMismatchDiagnostic{
+						Expected:      fieldExpected,
+						Actual:        checkVal.Type(),
+						ActualSpan:    c.sourceSpan(property.GetLocation()),
+						LegacyMessage: fmt.Sprintf("Type mismatch: Expected a mutable %s", fieldExpected.String()),
+					}.build())
 					continue
 				}
 
@@ -4762,7 +4810,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 								if c.areCompatible(maybeField.Of(), val.Type()) {
 									val = c.synthesizeMaybeSome(val, fieldExpected)
 								} else {
-									c.addError(typeMismatch(fieldExpected, val.Type()), property.GetLocation())
+									c.addTypeMismatch(fieldExpected, val.Type(), property.GetLocation())
 									val = nil
 								}
 							}
@@ -4789,7 +4837,12 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				}
 				if val != nil {
 					if fieldIsMutableRef && !c.isMutable(val) {
-						c.addError(fmt.Sprintf("Type mismatch: Expected a mutable %s", fieldExpected.String()), property.GetLocation())
+						c.addDiagnostic(typeMismatchDiagnostic{
+							Expected:      fieldExpected,
+							Actual:        val.Type(),
+							ActualSpan:    c.sourceSpan(property.GetLocation()),
+							LegacyMessage: fmt.Sprintf("Type mismatch: Expected a mutable %s", fieldExpected.String()),
+						}.build())
 						continue
 					}
 					fields[fieldName] = val
@@ -5447,6 +5500,7 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 	branches := []IfBranch{}
 	var elseBlock *Block
 	var referenceType Type
+	var referenceSpan parse.Location
 	current := s
 	for current != nil {
 		if current.Condition == nil {
@@ -5468,7 +5522,14 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 					}
 					referenceType = Void
 				} else {
-					c.addError("All branches must have the same result type", current.GetLocation())
+					c.addDiagnostic(branchTypeMismatchDiagnostic{
+						Expected:      referenceType,
+						Actual:        block.Type(),
+						ExpectedSpan:  c.sourceSpanPtr(referenceSpan),
+						ActualSpan:    c.sourceSpan(bodyResultLocation(current.Body, current.GetLocation())),
+						LegacyMessage: "All branches must have the same result type",
+						Title:         "Incompatible if branch types",
+					}.build())
 					return nil
 				}
 			}
@@ -5489,6 +5550,7 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 		c.expectedExpr = expectedType
 		if referenceType == nil {
 			referenceType = body.Type()
+			referenceSpan = bodyResultLocation(current.Body, current.GetLocation())
 		} else if !body.Type().equal(referenceType) {
 			if referenceType == Void || body.Type() == Void {
 				if referenceType != Void {
@@ -5503,7 +5565,14 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 				}
 				referenceType = Void
 			} else {
-				c.addError("All branches must have the same result type", current.GetLocation())
+				c.addDiagnostic(branchTypeMismatchDiagnostic{
+					Expected:      referenceType,
+					Actual:        body.Type(),
+					ExpectedSpan:  c.sourceSpanPtr(referenceSpan),
+					ActualSpan:    c.sourceSpan(bodyResultLocation(current.Body, current.GetLocation())),
+					LegacyMessage: "All branches must have the same result type",
+					Title:         "Incompatible if branch types",
+				}.build())
 				return nil
 			}
 		}
@@ -5690,7 +5759,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				if strMod := c.findModuleByPath("ard/string"); strMod != nil {
 					toStringTrait := strMod.Get("ToString").Type.(*Trait)
 					if !cx.Type().hasTrait(toStringTrait) {
-						c.addError(typeMismatch(toStringTrait, cx.Type()), s.Chunks[i].GetLocation())
+						c.addTypeMismatch(toStringTrait, cx.Type(), s.Chunks[i].GetLocation())
 						// a non-stringable chunk stays empty
 						chunks[i] = &StrLiteral{}
 						continue
@@ -5703,7 +5772,10 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					continue
 				}
 
-				c.addError(fmt.Sprintf("Type mismatch: Expected stringable value, got %s", cx.Type()), s.Chunks[i].GetLocation())
+				c.addDiagnostic(stringInterpolationMismatchDiagnostic{
+					Actual: cx.Type(),
+					Span:   c.sourceSpan(s.Chunks[i].GetLocation()),
+				}.build())
 				chunks[i] = &StrLiteral{}
 			}
 			return &TemplateStr{chunks}
@@ -6587,7 +6659,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							if foreignScalarNarrows(prim, arg.Type()) {
 								return &ForeignScalarConvert{Value: &ForeignScalarConvert{Value: arg, Target: prim}, Target: named}
 							}
-							c.addError(typeMismatch(prim, arg.Type()), s.Function.Args[0].GetLocation())
+							c.addTypeMismatch(prim, arg.Type(), s.Function.Args[0].GetLocation())
 							return nil
 						}
 					}
@@ -6787,7 +6859,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 			// Validate return type
 			if !fn.InferReturnTypeFromBody && returnType != Void && !c.areCompatible(returnType, body.Type()) {
-				c.addError(bodyReturnMismatch(s.Body, returnType, body.Type()), s.GetLocation())
+				c.addBodyReturnMismatch(s.Body, returnType, body.Type(), s.GetLocation(), s.ReturnType)
 				return nil
 			}
 
@@ -7954,18 +8026,19 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						if blockResultType, ok := blockType.(*Result); ok {
 							typeOk = fnReturnResult.err.equal(blockResultType.err)
 							if !typeOk {
-								c.addError(fmt.Sprintf("Error type mismatch: Expected %s, got %s", fnReturnResult.err.String(), blockResultType.err.String()), s.GetLocation())
+								legacyMessage := fmt.Sprintf("Error type mismatch: Expected %s, got %s", fnReturnResult.err.String(), blockResultType.err.String())
+								c.addTypeMismatchWithLegacy(fnReturnResult.err, blockResultType.err, legacyMessage, s.GetLocation())
 							}
 						} else {
 							// Catch block returns non-Result but function expects Result
 							typeOk = false
-							c.addError(typeMismatch(returnType, blockType), s.GetLocation())
+							c.addTypeMismatch(returnType, blockType, s.GetLocation())
 						}
 					} else {
 						// Function return type is not a Result
 						typeOk = returnType.equal(blockType)
 						if !typeOk {
-							c.addError(typeMismatch(returnType, blockType), s.GetLocation())
+							c.addTypeMismatch(returnType, blockType, s.GetLocation())
 						}
 					}
 
@@ -7997,7 +8070,8 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 					// Error types must match for direct propagation
 					if !_type.err.equal(fnReturnResult.err) {
-						c.addError(fmt.Sprintf("Error type mismatch: Expected %s, got %s", fnReturnResult.err.String(), _type.err.String()), s.Expression.GetLocation())
+						legacyMessage := fmt.Sprintf("Error type mismatch: Expected %s, got %s", fnReturnResult.err.String(), _type.err.String())
+						c.addTypeMismatchWithLegacy(fnReturnResult.err, _type.err, legacyMessage, s.Expression.GetLocation())
 						// Return a try op with the unwrapped type to avoid cascading errors
 						return &TryOp{
 							expr:    expr,
@@ -8050,17 +8124,17 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							// Both are Maybe types - inner types should match
 							typeOk = fnReturnMaybe.of.equal(blockMaybeType.of)
 							if !typeOk {
-								c.addError(typeMismatch(returnType, blockType), s.GetLocation())
+								c.addTypeMismatch(returnType, blockType, s.GetLocation())
 							}
 						} else {
 							typeOk = false
-							c.addError(typeMismatch(returnType, blockType), s.GetLocation())
+							c.addTypeMismatch(returnType, blockType, s.GetLocation())
 						}
 					} else {
 						// Function return type is not a Maybe
 						typeOk = returnType.equal(blockType)
 						if !typeOk {
-							c.addError(typeMismatch(returnType, blockType), s.GetLocation())
+							c.addTypeMismatch(returnType, blockType, s.GetLocation())
 						}
 					}
 
@@ -8716,7 +8790,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 		// A value is expected, so the chain must be exhaustive: without an
 		// else there is a path that produces nothing (issue #267).
 		if expectedType != nil && expectedType != Void && !ifChainHasElse(s) {
-			c.addError("if used as a value must have an else branch", s.GetLocation())
+			c.addDiagnostic(nonExhaustiveValueIfDiagnostic{IfSpan: c.sourceSpan(s.GetLocation())}.build())
 			return nil
 		}
 		return c.withExpectedExpr(expectedType, func() Expression {
@@ -8821,7 +8895,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 
 			// Validate return type
 			if returnType != Void && !c.areCompatible(returnType, body.Type()) {
-				c.addError(bodyReturnMismatch(s.Body, returnType, body.Type()), s.GetLocation())
+				c.addBodyReturnMismatch(s.Body, returnType, body.Type(), s.GetLocation(), s.ReturnType)
 				return nil
 			}
 
@@ -8886,7 +8960,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 					return nil
 				}
 				if !resultType.Val().equal(arg.Type()) {
-					c.addError(typeMismatch(resultType.Val(), arg.Type()), s.Function.Args[0].Value.GetLocation())
+					c.addTypeMismatch(resultType.Val(), arg.Type(), s.Function.Args[0].Value.GetLocation())
 					return nil
 				}
 				bindInferredTypeVars(resultType.Val(), arg.Type())
@@ -8897,7 +8971,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 					return nil
 				}
 				if !resultType.Err().equal(arg.Type()) {
-					c.addError(typeMismatch(resultType.Err(), arg.Type()), s.Function.Args[0].Value.GetLocation())
+					c.addTypeMismatch(resultType.Err(), arg.Type(), s.Function.Args[0].Value.GetLocation())
 					return nil
 				}
 				bindInferredTypeVars(resultType.Err(), arg.Type())
@@ -8938,7 +9012,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 				Expectation: expectation,
 			}.build())
 		} else {
-			c.addError(typeMismatch(expectedType, checked.Type()), expr.GetLocation())
+			c.addTypeMismatch(expectedType, checked.Type(), expr.GetLocation())
 		}
 		return nil
 	}
@@ -9045,10 +9119,45 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 
 	// Check that the function's return type matches its body's type
 	if returnType != Void && !c.areCompatible(returnType, body.Type()) {
-		c.addError(bodyReturnMismatch(bodyStmts, returnType, body.Type()), location)
+		c.addBodyReturnMismatch(bodyStmts, returnType, body.Type(), location, nil)
 	}
 
 	return body
+}
+
+func bodyResultLocation(bodyStmts []parse.Statement, fallback parse.Location) parse.Location {
+	for i := len(bodyStmts) - 1; i >= 0; i-- {
+		if bodyStmts[i] == nil {
+			continue
+		}
+		if _, ok := bodyStmts[i].(*parse.Comment); ok {
+			continue
+		}
+		return bodyStmts[i].GetLocation()
+	}
+	return fallback
+}
+
+func (c *Checker) addBodyReturnMismatch(bodyStmts []parse.Statement, expected Type, got Type, fallback parse.Location, returnTypeNode parse.DeclaredType) {
+	if bodyReturnMismatch(bodyStmts, expected, got) == "if used as a value must have an else branch" {
+		c.addDiagnostic(nonExhaustiveValueIfDiagnostic{
+			IfSpan: c.sourceSpan(bodyResultLocation(bodyStmts, fallback)),
+		}.build())
+		return
+	}
+	var expectation *typeExpectation
+	if returnTypeNode != nil {
+		expectation = &typeExpectation{
+			Span: c.sourceSpan(returnTypeNode.GetLocation()),
+			Kind: expectationReturnAnnotation,
+		}
+	}
+	c.addDiagnostic(typeMismatchDiagnostic{
+		Expected:    expected,
+		Actual:      got,
+		ActualSpan:  c.sourceSpan(bodyResultLocation(bodyStmts, fallback)),
+		Expectation: expectation,
+	}.build())
 }
 
 // bodyReturnMismatch picks the diagnostic for a body whose type does not
@@ -9175,7 +9284,7 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 
 	// Validate return type
 	if returnType != Void && !c.areCompatible(returnType, body.Type()) {
-		c.addError(bodyReturnMismatch(def.Body, returnType, body.Type()), def.GetLocation())
+		c.addBodyReturnMismatch(def.Body, returnType, body.Type(), def.GetLocation(), def.ReturnType)
 	}
 
 	fn.Body = body
@@ -9410,7 +9519,7 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module) Expre
 	}
 	if valueMaybe, ok := value.Type().(*Maybe); ok {
 		if len(callTypeArgs) == 1 && !c.areCompatible(maybeType, value.Type()) {
-			c.addError(typeMismatch(maybeType, value.Type()), arg.GetLocation())
+			c.addTypeMismatch(maybeType, value.Type(), arg.GetLocation())
 			return nil
 		}
 		maybeType = value.Type()
@@ -9435,7 +9544,7 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module) Expre
 			return nil
 		}
 		if !c.areCompatible(typeVar, value.Type()) {
-			c.addError(typeMismatch(typeVar, value.Type()), arg.GetLocation())
+			c.addTypeMismatch(typeVar, value.Type(), arg.GetLocation())
 			return nil
 		}
 	}

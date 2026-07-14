@@ -51,6 +51,8 @@ const (
 	DiagnosticCodeMethodIntroducedGeneric   DiagnosticCode = "method_introduced_generic_parameter"
 	DiagnosticCodeInvalidMapKeyType         DiagnosticCode = "invalid_map_key_type"
 	DiagnosticCodeMalformedTypeNode         DiagnosticCode = "internal_malformed_type_node"
+	DiagnosticCodeBranchTypeMismatch        DiagnosticCode = "branch_type_mismatch"
+	DiagnosticCodeNonExhaustiveValueIf      DiagnosticCode = "non_exhaustive_value_if"
 )
 
 type SourceSpan struct {
@@ -347,6 +349,51 @@ func (d incorrectArgumentTypeDiagnostic) build() Diagnostic {
 		secondary...,
 	)
 	diagnostic.Code = DiagnosticCodeIncorrectArgumentType
+	return diagnostic
+}
+
+type branchTypeMismatchDiagnostic struct {
+	Expected      Type
+	Actual        Type
+	ExpectedSpan  *SourceSpan
+	ActualSpan    SourceSpan
+	LegacyMessage string
+	Title         string
+}
+
+func (d branchTypeMismatchDiagnostic) build() Diagnostic {
+	secondary := []DiagnosticLabel{}
+	if d.ExpectedSpan != nil {
+		secondary = append(secondary, DiagnosticLabel{
+			Span:    *d.ExpectedSpan,
+			Message: fmt.Sprintf("an earlier branch produces `%s`", d.Expected),
+		})
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		d.LegacyMessage,
+		d.Title,
+		"",
+		DiagnosticLabel{Span: d.ActualSpan, Message: fmt.Sprintf("this branch produces `%s`", d.Actual)},
+		secondary...,
+	)
+	diagnostic.Code = DiagnosticCodeBranchTypeMismatch
+	return diagnostic
+}
+
+type nonExhaustiveValueIfDiagnostic struct {
+	IfSpan SourceSpan
+}
+
+func (d nonExhaustiveValueIfDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"if used as a value must have an else branch",
+		"Value-producing if requires an else branch",
+		"Every control-flow path must produce a value.",
+		DiagnosticLabel{Span: d.IfSpan, Message: "not every path produces a value"},
+	)
+	diagnostic.Code = DiagnosticCodeNonExhaustiveValueIf
 	return diagnostic
 }
 
@@ -792,11 +839,101 @@ func (d duplicateDeclarationDiagnostic) build() Diagnostic {
 	return diagnostic
 }
 
+type fixedArrayLengthMismatchDiagnostic struct {
+	Expected int
+	Actual   int
+	Span     SourceSpan
+}
+
+func (d fixedArrayLengthMismatchDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Type mismatch: Expected %d elements, got %d", d.Expected, d.Actual),
+		"Fixed array length mismatch",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected %d elements, but found %d", d.Expected, d.Actual)},
+	)
+	diagnostic.Code = DiagnosticCodeTypeMismatch
+	return diagnostic
+}
+
+type homogeneousListMismatchDiagnostic struct {
+	Expected     Type
+	Actual       Type
+	ExpectedSpan SourceSpan
+	ActualSpan   SourceSpan
+}
+
+func (d homogeneousListMismatchDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"Type mismatch: A list can only contain values of single type",
+		"List element type mismatch",
+		"All values in a list must have the same type.",
+		DiagnosticLabel{Span: d.ActualSpan, Message: fmt.Sprintf("this element has type `%s`", d.Actual)},
+		DiagnosticLabel{Span: d.ExpectedSpan, Message: fmt.Sprintf("the first element established type `%s`", d.Expected)},
+	)
+	diagnostic.Code = DiagnosticCodeTypeMismatch
+	return diagnostic
+}
+
+type unexpectedListDiagnostic struct {
+	Expected Type
+	Span     SourceSpan
+}
+
+func (d unexpectedListDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Expected %s but got a list", formatTypeForDisplay(d.Expected)),
+		"Unexpected list",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected `%s`, but found a list", d.Expected)},
+	)
+	diagnostic.Code = DiagnosticCodeTypeMismatch
+	return diagnostic
+}
+
+type expectedMapTypeDiagnostic struct {
+	Actual Type
+	Span   SourceSpan
+}
+
+func (d expectedMapTypeDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Expected map type but got %s", d.Actual),
+		"Expected a map type",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is not a map type", d.Actual)},
+	)
+	diagnostic.Code = DiagnosticCodeTypeMismatch
+	return diagnostic
+}
+
+type stringInterpolationMismatchDiagnostic struct {
+	Actual Type
+	Span   SourceSpan
+}
+
+func (d stringInterpolationMismatchDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Type mismatch: Expected stringable value, got %s", d.Actual),
+		"Value cannot be interpolated",
+		"Interpolated values must support string conversion.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` cannot be converted to a string", d.Actual)},
+	)
+	diagnostic.Code = DiagnosticCodeTypeMismatch
+	return diagnostic
+}
+
 type typeMismatchDiagnostic struct {
-	Expected    Type
-	Actual      Type
-	ActualSpan  SourceSpan
-	Expectation *typeExpectation
+	Expected      Type
+	Actual        Type
+	ActualSpan    SourceSpan
+	Expectation   *typeExpectation
+	LegacyMessage string
 }
 
 type typeExpectation struct {
@@ -809,6 +946,7 @@ type typeExpectationKind uint8
 const (
 	expectationUnknown typeExpectationKind = iota
 	expectationAnnotation
+	expectationReturnAnnotation
 )
 
 func (d typeMismatchDiagnostic) build() Diagnostic {
@@ -820,15 +958,22 @@ func (d typeMismatchDiagnostic) build() Diagnostic {
 	secondary := make([]DiagnosticLabel, 0, 1)
 	if d.Expectation != nil {
 		message := fmt.Sprintf("this requires `%s`", d.Expected)
-		if d.Expectation.Kind == expectationAnnotation {
+		switch d.Expectation.Kind {
+		case expectationAnnotation:
 			message = fmt.Sprintf("this annotation requires `%s`", d.Expected)
+		case expectationReturnAnnotation:
+			message = fmt.Sprintf("this return annotation requires `%s`", d.Expected)
 		}
 		secondary = append(secondary, DiagnosticLabel{Span: d.Expectation.Span, Message: message})
 	}
 
+	legacyMessage := d.LegacyMessage
+	if legacyMessage == "" {
+		legacyMessage = typeMismatch(d.Expected, d.Actual)
+	}
 	diagnostic := newLabeledDiagnostic(
 		Error,
-		typeMismatch(d.Expected, d.Actual),
+		legacyMessage,
 		"Type mismatch",
 		"",
 		DiagnosticLabel{Span: d.ActualSpan, Message: primaryMessage},
