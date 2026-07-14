@@ -414,6 +414,65 @@ func TestControlFlowDiagnosticsAreStructured(t *testing.T) {
 	}
 }
 
+func TestOperatorDiagnosticsAreStructured(t *testing.T) {
+	tests := []struct {
+		name          string
+		source        string
+		code          checker.DiagnosticCode
+		legacyMessage string
+		secondaries   int
+	}{
+		{"unary minus", "-true\n", checker.DiagnosticCodeInvalidUnaryOperator, "Only signed numbers can be negated with '-'", 0},
+		{"unary not", "not \"value\"\n", checker.DiagnosticCodeInvalidUnaryOperator, "Only booleans can be negated with 'not'", 0},
+		{"incompatible arithmetic", "1 + \"two\"\n", checker.DiagnosticCodeInvalidArithmeticOperation, "Cannot add different types", 1},
+		{"unsupported arithmetic", "true * false\n", checker.DiagnosticCodeInvalidArithmeticOperation, "The '*' operator can only be used for Int or Float64", 1},
+		{"unsupported modulo", "10.0 % 3.0\n", checker.DiagnosticCodeInvalidArithmeticOperation, "The '%' operator can only be used for integer scalars", 1},
+		{"relational", "\"left\" < \"right\"\n", checker.DiagnosticCodeInvalidRelationalOperation, "Cannot compare different types", 1},
+		{"incompatible equality", "1 == \"one\"\n", checker.DiagnosticCodeInvalidEqualityOperation, "Invalid: Int == Str", 1},
+		{"unsupported equality", "[1] == [1]\n", checker.DiagnosticCodeInvalidEqualityOperation, "Invalid: [Int] == [Int]", 1},
+		{"and", "true and 1\n", checker.DiagnosticCodeInvalidBooleanOperation, "The 'and' operator can only be used between Bools", 0},
+		{"or", "true or 1\n", checker.DiagnosticCodeInvalidBooleanOperation, "The 'or' operator can only be used with Boolean values", 0},
+		{"chained equality", "1 < 2 == 1\n", checker.DiagnosticCodeInvalidChainedComparison, "equality operators cannot be chained", 0},
+		{"chained relational", "\"a\" < \"b\" < \"c\"\n", checker.DiagnosticCodeInvalidRelationalOperation, "The '<' operator can only be used for Int or Float64", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if diagnostic.Message != tt.legacyMessage || diagnostic.Primary.Message == "" || len(diagnostic.Secondary) != tt.secondaries {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
+func TestOperatorDiagnosticLabelSpans(t *testing.T) {
+	result := parse.Parse([]byte("-true\n1 + \"two\"\n1 < 2 == 1\n"), "main.ard")
+	unary := result.Program.Statements[0].(*parse.UnaryExpression)
+	binary := result.Program.Statements[1].(*parse.BinaryExpression)
+	chain := result.Program.Statements[2].(*parse.ChainedComparison)
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+
+	unaryDiagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidUnaryOperator)
+	if unaryDiagnostic.Primary.Span.Location != unary.Operand.GetLocation() {
+		t.Fatalf("unary primary = %#v", unaryDiagnostic.Primary)
+	}
+	arithmetic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidArithmeticOperation)
+	if arithmetic.Primary.Span.Location != binary.Right.GetLocation() || len(arithmetic.Secondary) != 1 || arithmetic.Secondary[0].Span.Location != binary.Left.GetLocation() {
+		t.Fatalf("arithmetic labels = %#v / %#v", arithmetic.Primary, arithmetic.Secondary)
+	}
+	chained := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidChainedComparison)
+	if chained.Primary.Span.Location != chain.GetLocation() {
+		t.Fatalf("chained primary = %#v, want whole chain", chained.Primary)
+	}
+}
+
 func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")

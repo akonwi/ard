@@ -107,6 +107,12 @@ const (
 	DiagnosticCodeInvalidForUpdate              DiagnosticCode = "invalid_for_update"
 	DiagnosticCodeInvalidRange                  DiagnosticCode = "invalid_range"
 	DiagnosticCodeUnsupportedIteration          DiagnosticCode = "unsupported_iteration"
+	DiagnosticCodeInvalidUnaryOperator          DiagnosticCode = "invalid_unary_operator"
+	DiagnosticCodeInvalidArithmeticOperation    DiagnosticCode = "invalid_arithmetic_operation"
+	DiagnosticCodeInvalidRelationalOperation    DiagnosticCode = "invalid_relational_operation"
+	DiagnosticCodeInvalidEqualityOperation      DiagnosticCode = "invalid_equality_operation"
+	DiagnosticCodeInvalidBooleanOperation       DiagnosticCode = "invalid_boolean_operation"
+	DiagnosticCodeInvalidChainedComparison      DiagnosticCode = "invalid_chained_comparison"
 )
 
 type SourceSpan struct {
@@ -1374,6 +1380,125 @@ type unsupportedIterationDiagnostic struct {
 func (d unsupportedIterationDiagnostic) build() Diagnostic {
 	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Value is not iterable", "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("values of type `%s` cannot be iterated", d.Actual)})
 	diagnostic.Code = DiagnosticCodeUnsupportedIteration
+	return diagnostic
+}
+
+type invalidUnaryOperatorDiagnostic struct {
+	Operator      string
+	Operand       Type
+	Span          SourceSpan
+	LegacyMessage string
+}
+
+func (d invalidUnaryOperatorDiagnostic) build() Diagnostic {
+	expected := "a supported operand"
+	if d.Operator == "-" {
+		expected = "a signed numeric value"
+	} else if d.Operator == "not" {
+		expected = "`Bool`"
+	}
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid unary operand", "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` requires %s, but found `%s`", d.Operator, expected, d.Operand)})
+	diagnostic.Code = DiagnosticCodeInvalidUnaryOperator
+	return diagnostic
+}
+
+type invalidArithmeticDiagnostic struct {
+	Operator      string
+	LeftType      Type
+	RightType     Type
+	LeftSpan      SourceSpan
+	RightSpan     SourceSpan
+	LegacyMessage string
+	Unsupported   bool
+}
+
+func (d invalidArithmeticDiagnostic) build() Diagnostic {
+	primary := DiagnosticLabel{Span: d.RightSpan, Message: fmt.Sprintf("right operand has type `%s`", d.RightType)}
+	secondary := DiagnosticLabel{Span: d.LeftSpan, Message: fmt.Sprintf("left operand has type `%s`", d.LeftType)}
+	title := "Incompatible arithmetic operands"
+	if d.Unsupported {
+		title = "Unsupported arithmetic operand"
+		primary.Message = fmt.Sprintf("operator `%s` cannot be applied to `%s`", d.Operator, d.RightType)
+		secondary.Message = fmt.Sprintf("left operand also has type `%s`", d.LeftType)
+	}
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, title, "", primary, secondary)
+	diagnostic.Code = DiagnosticCodeInvalidArithmeticOperation
+	return diagnostic
+}
+
+type invalidRelationalDiagnostic struct {
+	Operator      string
+	LeftType      Type
+	RightType     Type
+	LeftSpan      SourceSpan
+	RightSpan     SourceSpan
+	LegacyMessage string
+	Unsupported   bool
+}
+
+func (d invalidRelationalDiagnostic) build() Diagnostic {
+	primary := DiagnosticLabel{Span: d.RightSpan, Message: fmt.Sprintf("right operand has type `%s`", d.RightType)}
+	secondary := DiagnosticLabel{Span: d.LeftSpan, Message: fmt.Sprintf("left operand has type `%s`", d.LeftType)}
+	if d.Unsupported {
+		primary.Message = fmt.Sprintf("type `%s` does not support `%s` ordering", d.RightType, d.Operator)
+		secondary.Message = fmt.Sprintf("left operand also has type `%s`", d.LeftType)
+	}
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid comparison", "", primary, secondary)
+	diagnostic.Code = DiagnosticCodeInvalidRelationalOperation
+	return diagnostic
+}
+
+type invalidEqualityDiagnostic struct {
+	Operator      string
+	LeftType      Type
+	RightType     Type
+	LeftSpan      SourceSpan
+	RightSpan     SourceSpan
+	LegacyMessage string
+	Unsupported   bool
+}
+
+func (d invalidEqualityDiagnostic) build() Diagnostic {
+	primary := DiagnosticLabel{Span: d.RightSpan, Message: fmt.Sprintf("right operand has type `%s`", d.RightType)}
+	secondary := DiagnosticLabel{Span: d.LeftSpan, Message: fmt.Sprintf("left operand has type `%s`", d.LeftType)}
+	if d.Unsupported {
+		primary.Message = fmt.Sprintf("values of type `%s` do not support equality", d.RightType)
+		secondary.Message = fmt.Sprintf("left operand has the same non-comparable type `%s`", d.LeftType)
+	}
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Values cannot be compared", "", primary, secondary)
+	diagnostic.Code = DiagnosticCodeInvalidEqualityOperation
+	return diagnostic
+}
+
+type invalidBooleanOperationDiagnostic struct {
+	Operator      string
+	LeftType      Type
+	RightType     Type
+	LeftSpan      SourceSpan
+	RightSpan     SourceSpan
+	LegacyMessage string
+}
+
+func (d invalidBooleanOperationDiagnostic) build() Diagnostic {
+	primary := DiagnosticLabel{Span: d.RightSpan, Message: fmt.Sprintf("`%s` requires `Bool`, but found `%s`", d.Operator, d.RightType)}
+	secondary := []DiagnosticLabel{}
+	if d.RightType == Bool && d.LeftType != Bool {
+		primary = DiagnosticLabel{Span: d.LeftSpan, Message: fmt.Sprintf("`%s` requires `Bool`, but found `%s`", d.Operator, d.LeftType)}
+	} else if d.LeftType != Bool {
+		secondary = append(secondary, DiagnosticLabel{Span: d.LeftSpan, Message: fmt.Sprintf("left operand is `%s`, not `Bool`", d.LeftType)})
+	}
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid boolean operation", "", primary, secondary...)
+	diagnostic.Code = DiagnosticCodeInvalidBooleanOperation
+	return diagnostic
+}
+
+type invalidChainedComparisonDiagnostic struct {
+	Span SourceSpan
+}
+
+func (d invalidChainedComparisonDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, "equality operators cannot be chained", "Equality operators cannot be chained", "", DiagnosticLabel{Span: d.Span, Message: "split this into separate boolean expressions"})
+	diagnostic.Code = DiagnosticCodeInvalidChainedComparison
 	return diagnostic
 }
 

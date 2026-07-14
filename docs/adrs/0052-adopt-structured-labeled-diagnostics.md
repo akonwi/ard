@@ -245,12 +245,12 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Invalid `for` initialization and update
   - [x] Invalid ranges and unsupported iteration targets
 
-- [ ] **Operators and comparisons**
-  - [ ] Invalid unary negation
-  - [ ] Arithmetic between incompatible types
-  - [ ] Unsupported operand types
-  - [ ] Invalid comparisons and boolean operations
-  - [ ] Chained equality operators
+- [x] **Operators and comparisons**
+  - [x] Invalid unary negation
+  - [x] Arithmetic between incompatible types
+  - [x] Unsupported operand types
+  - [x] Invalid comparisons and boolean operations
+  - [x] Chained equality operators
 
 - [ ] **Conditionals**
   - [ ] Non-boolean conditions

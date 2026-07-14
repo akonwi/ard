@@ -5954,6 +5954,43 @@ func (c *Checker) checkFunctionFieldCall(subject Expression, method parse.Functi
 	return c.checkFunctionValueCall(field, method.Args, method.TypeArgs, location, fmt.Sprintf("%s.%s", subject, method.Name)), true
 }
 
+func comparisonOperatorText(operator parse.Operator) string {
+	switch operator {
+	case parse.GreaterThan:
+		return ">"
+	case parse.GreaterThanOrEqual:
+		return ">="
+	case parse.LessThan:
+		return "<"
+	case parse.LessThanOrEqual:
+		return "<="
+	case parse.Equal:
+		return "=="
+	case parse.NotEqual:
+		return "!="
+	default:
+		return fmt.Sprint(operator)
+	}
+}
+
+func (c *Checker) addInvalidArithmetic(operator string, left, right Expression, leftLoc, rightLoc parse.Location, legacy string, unsupported bool) {
+	c.addDiagnostic(invalidArithmeticDiagnostic{
+		Operator: operator, LeftType: left.Type(), RightType: right.Type(), LeftSpan: c.sourceSpan(leftLoc), RightSpan: c.sourceSpan(rightLoc), LegacyMessage: legacy, Unsupported: unsupported,
+	}.build())
+}
+
+func (c *Checker) addInvalidRelational(operator string, left, right Expression, leftLoc, rightLoc parse.Location, legacy string) {
+	c.addDiagnostic(invalidRelationalDiagnostic{
+		Operator: operator, LeftType: left.Type(), RightType: right.Type(), LeftSpan: c.sourceSpan(leftLoc), RightSpan: c.sourceSpan(rightLoc), LegacyMessage: legacy, Unsupported: left.Type().equal(right.Type()),
+	}.build())
+}
+
+func (c *Checker) addInvalidEquality(operator string, left, right Expression, leftLoc, rightLoc parse.Location, legacy string, unsupported bool) {
+	c.addDiagnostic(invalidEqualityDiagnostic{
+		Operator: operator, LeftType: left.Type(), RightType: right.Type(), LeftSpan: c.sourceSpan(leftLoc), RightSpan: c.sourceSpan(rightLoc), LegacyMessage: legacy, Unsupported: unsupported,
+	}.build())
+}
+
 func (c *Checker) checkExpr(expr parse.Expression) Expression {
 	result := c.checkExprInner(expr)
 	if result != nil {
@@ -6503,14 +6540,14 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			}
 			if s.Operator == parse.Minus {
 				if !isSignedArithmeticLike(value.Type()) {
-					c.addError("Only signed numbers can be negated with '-'", s.GetLocation())
+					c.addDiagnostic(invalidUnaryOperatorDiagnostic{Operator: "-", Operand: value.Type(), Span: c.sourceSpan(s.Operand.GetLocation()), LegacyMessage: "Only signed numbers can be negated with '-'"}.build())
 					return nil
 				}
 				return &Negation{value}
 			}
 
 			if value.Type() != Bool {
-				c.addError("Only booleans can be negated with 'not'", s.GetLocation())
+				c.addDiagnostic(invalidUnaryOperatorDiagnostic{Operator: "not", Operand: value.Type(), Span: c.sourceSpan(s.Operand.GetLocation()), LegacyMessage: "Only booleans can be negated with 'not'"}.build())
 				return nil
 			}
 			return &Not{value}
@@ -6526,7 +6563,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					}
 
 					if !left.Type().equal(right.Type()) {
-						c.addError("Cannot add different types", s.GetLocation())
+						c.addInvalidArithmetic("+", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "Cannot add different types", false)
 						return nil
 					}
 					if isArithmeticIntegerLike(left.Type()) {
@@ -6538,7 +6575,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					if left.Type() == Str {
 						return &StrAddition{left, right}
 					}
-					c.addError("The '-' operator can only be used for Int or Float64", s.GetLocation())
+					c.addInvalidArithmetic("+", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "The '-' operator can only be used for Int or Float64", true)
 					return nil
 				}
 			case parse.Minus:
@@ -6549,7 +6586,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					}
 
 					if !left.Type().equal(right.Type()) {
-						c.addError("Cannot subtract different types", s.GetLocation())
+						c.addInvalidArithmetic("-", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "Cannot subtract different types", false)
 						return nil
 					}
 					if isArithmeticIntegerLike(left.Type()) {
@@ -6558,7 +6595,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					if isArithmeticFloatLike(left.Type()) {
 						return &FloatSubtraction{left, right}
 					}
-					c.addError("The '+' operator can only be used for Int or Float64", s.GetLocation())
+					c.addInvalidArithmetic("-", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "The '+' operator can only be used for Int or Float64", true)
 					return nil
 				}
 			case parse.Multiply:
@@ -6569,7 +6606,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					}
 
 					if !left.Type().equal(right.Type()) {
-						c.addError("Cannot multiply different types", s.GetLocation())
+						c.addInvalidArithmetic("*", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "Cannot multiply different types", false)
 						return nil
 					}
 					if isArithmeticIntegerLike(left.Type()) {
@@ -6578,7 +6615,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					if isArithmeticFloatLike(left.Type()) {
 						return &FloatMultiplication{left, right}
 					}
-					c.addError("The '*' operator can only be used for Int or Float64", s.GetLocation())
+					c.addInvalidArithmetic("*", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "The '*' operator can only be used for Int or Float64", true)
 					return nil
 				}
 			case parse.Divide:
@@ -6589,7 +6626,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					}
 
 					if !left.Type().equal(right.Type()) {
-						c.addError("Cannot divide different types", s.GetLocation())
+						c.addInvalidArithmetic("/", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "Cannot divide different types", false)
 						return nil
 					}
 					if isArithmeticIntegerLike(left.Type()) {
@@ -6598,7 +6635,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					if isArithmeticFloatLike(left.Type()) {
 						return &FloatDivision{left, right}
 					}
-					c.addError("The '/' operator can only be used for Int or Float64", s.GetLocation())
+					c.addInvalidArithmetic("/", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "The '/' operator can only be used for Int or Float64", true)
 					return nil
 				}
 			case parse.Modulo:
@@ -6609,13 +6646,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					}
 
 					if !left.Type().equal(right.Type()) {
-						c.addError("Cannot modulo different types", s.GetLocation())
+						c.addInvalidArithmetic("%", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "Cannot modulo different types", false)
 						return nil
 					}
 					if isArithmeticIntegerLike(left.Type()) {
 						return &IntModulo{left, right}
 					}
-					c.addError("The '%' operator can only be used for integer scalars", s.GetLocation())
+					c.addInvalidArithmetic("%", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "The '%' operator can only be used for integer scalars", true)
 					return nil
 				}
 			case parse.GreaterThan:
@@ -6634,7 +6671,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							return &FloatGreater{left, right}
 						}
 					}
-					c.addError("Cannot compare different types", s.GetLocation())
+					c.addInvalidRelational(">", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "Cannot compare different types")
 					return nil
 				}
 			case parse.GreaterThanOrEqual:
@@ -6653,7 +6690,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							return &FloatGreaterEqual{left, right}
 						}
 					}
-					c.addError("Cannot compare different types", s.GetLocation())
+					c.addInvalidRelational(">=", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "Cannot compare different types")
 					return nil
 				}
 			case parse.LessThan:
@@ -6672,7 +6709,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							return &FloatLess{left, right}
 						}
 					}
-					c.addError("Cannot compare different types", s.GetLocation())
+					c.addInvalidRelational("<", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "Cannot compare different types")
 					return nil
 				}
 			case parse.LessThanOrEqual:
@@ -6691,7 +6728,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							return &FloatLessEqual{left, right}
 						}
 					}
-					c.addError("Cannot compare different types", s.GetLocation())
+					c.addInvalidRelational("<=", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "Cannot compare different types")
 					return nil
 				}
 			case parse.Equal, parse.NotEqual:
@@ -6717,7 +6754,8 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							return c.areCompatible(expected, actual) && !foreignScalarNarrows(expected, actual) && !foreignScalarWidens(expected, actual)
 						}
 						if leftInner != Void && rightInner != Void && !maybeEqualityCompatible(leftInner, rightInner) && !maybeEqualityCompatible(rightInner, leftInner) {
-							c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
+							legacy := fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type())
+							c.addInvalidEquality(operator, left, right, s.Left.GetLocation(), s.Right.GetLocation(), legacy, false)
 							return nil
 						}
 						// Equality is only supported on nullable primitives. The
@@ -6728,7 +6766,8 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							inner = rightInner
 						}
 						if inner != Void && !isComparableValueType(inner) {
-							c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
+							legacy := fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type())
+							c.addInvalidEquality(operator, left, right, s.Left.GetLocation(), s.Right.GetLocation(), legacy, true)
 							return nil
 						}
 						if s.Operator == parse.NotEqual {
@@ -6739,12 +6778,14 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 					// Allow Enum vs Int and Int vs Enum comparisons
 					if !c.areTypesComparable(left.Type(), right.Type()) {
-						c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
+						legacy := fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type())
+						c.addInvalidEquality(operator, left, right, s.Left.GetLocation(), s.Right.GetLocation(), legacy, false)
 						return nil
 					}
 
 					if !isComparableValueType(left.Type()) || !isComparableValueType(right.Type()) {
-						c.addError(fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type()), s.GetLocation())
+						legacy := fmt.Sprintf("Invalid: %s %s %s", left.Type(), operator, right.Type())
+						c.addInvalidEquality(operator, left, right, s.Left.GetLocation(), s.Right.GetLocation(), legacy, true)
 						return nil
 					}
 					if s.Operator == parse.NotEqual {
@@ -6760,7 +6801,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					}
 
 					if left.Type() != Bool || right.Type() != Bool {
-						c.addError("The 'and' operator can only be used between Bools", s.GetLocation())
+						c.addDiagnostic(invalidBooleanOperationDiagnostic{Operator: "and", LeftType: left.Type(), RightType: right.Type(), LeftSpan: c.sourceSpan(s.Left.GetLocation()), RightSpan: c.sourceSpan(s.Right.GetLocation()), LegacyMessage: "The 'and' operator can only be used between Bools"}.build())
 						return nil
 					}
 
@@ -6774,7 +6815,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					}
 
 					if left.Type() != Bool || right.Type() != Bool {
-						c.addError("The 'or' operator can only be used with Boolean values", s.GetLocation())
+						c.addDiagnostic(invalidBooleanOperationDiagnostic{Operator: "or", LeftType: left.Type(), RightType: right.Type(), LeftSpan: c.sourceSpan(s.Left.GetLocation()), RightSpan: c.sourceSpan(s.Right.GetLocation()), LegacyMessage: "The 'or' operator can only be used with Boolean values"}.build())
 						return nil
 					}
 
@@ -6790,7 +6831,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			// Validate that only relative operators are used (not == or !=)
 			for _, op := range s.Operators {
 				if op == parse.Equal || op == parse.NotEqual {
-					c.addError("equality operators cannot be chained", s.GetLocation())
+					c.addDiagnostic(invalidChainedComparisonDiagnostic{Span: c.sourceSpan(s.GetLocation())}.build())
 					return nil
 				}
 			}
@@ -10485,8 +10526,9 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 	}
 
 	// Allow Enum vs Int comparisons
+	operator := comparisonOperatorText(op)
 	if !c.areTypesComparable(left.Type(), right.Type()) {
-		c.addError("Cannot compare different types", leftExpr.GetLocation())
+		c.addInvalidRelational(operator, left, right, leftExpr.GetLocation(), rightExpr.GetLocation(), "Cannot compare different types")
 		return nil
 	}
 
@@ -10499,7 +10541,7 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 		if isRelationalFloatLike(left.Type()) {
 			return &FloatGreater{left, right}
 		}
-		c.addError("The '>' operator can only be used for Int or Float64", leftExpr.GetLocation())
+		c.addInvalidRelational(">", left, right, leftExpr.GetLocation(), rightExpr.GetLocation(), "The '>' operator can only be used for Int or Float64")
 		return nil
 
 	case parse.GreaterThanOrEqual:
@@ -10509,7 +10551,7 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 		if isRelationalFloatLike(left.Type()) {
 			return &FloatGreaterEqual{left, right}
 		}
-		c.addError("The '>=' operator can only be used for Int or Float64", leftExpr.GetLocation())
+		c.addInvalidRelational(">=", left, right, leftExpr.GetLocation(), rightExpr.GetLocation(), "The '>=' operator can only be used for Int or Float64")
 		return nil
 
 	case parse.LessThan:
@@ -10519,7 +10561,7 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 		if isRelationalFloatLike(left.Type()) {
 			return &FloatLess{left, right}
 		}
-		c.addError("The '<' operator can only be used for Int or Float64", leftExpr.GetLocation())
+		c.addInvalidRelational("<", left, right, leftExpr.GetLocation(), rightExpr.GetLocation(), "The '<' operator can only be used for Int or Float64")
 		return nil
 
 	case parse.LessThanOrEqual:
@@ -10529,11 +10571,12 @@ func (c *Checker) buildComparison(leftExpr parse.Expression, op parse.Operator, 
 		if isRelationalFloatLike(left.Type()) {
 			return &FloatLessEqual{left, right}
 		}
-		c.addError("The '<=' operator can only be used for Int or Float64", leftExpr.GetLocation())
+		c.addInvalidRelational("<=", left, right, leftExpr.GetLocation(), rightExpr.GetLocation(), "The '<=' operator can only be used for Int or Float64")
 		return nil
 
 	default:
-		c.addError(fmt.Sprintf("Unsupported operator in comparison: %v", op), leftExpr.GetLocation())
+		legacy := fmt.Sprintf("Unsupported operator in comparison: %v", op)
+		c.addInvalidRelational(operator, left, right, leftExpr.GetLocation(), rightExpr.GetLocation(), legacy)
 		return nil
 	}
 }
