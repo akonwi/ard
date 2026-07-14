@@ -126,6 +126,9 @@ let _ = ffi::UnsupportedVar`), "test.ard")
 	resolver := &recordingGoResolver{}
 	c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
 	c.Check()
+	if len(c.Diagnostics()) != 1 || c.Diagnostics()[0].Code != checker.DiagnosticCodeUnsupportedGoEntity {
+		t.Fatalf("structured diagnostic = %#v", c.Diagnostics())
+	}
 	want := []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go variable ffi::UnsupportedVar: named Go types with underlying chan int are not supported yet"}}
 	if diff := cmp.Diff(want, c.Diagnostics(), compareOptions); diff != "" {
 		t.Fatalf("Diagnostics mismatch (-want +got):\n%s", diff)
@@ -144,6 +147,9 @@ fn main() {
 	resolver := &recordingGoResolver{}
 	c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
 	c.Check()
+	if len(c.Diagnostics()) != 1 || c.Diagnostics()[0].Code != checker.DiagnosticCodeUnsupportedGoEntity {
+		t.Fatalf("structured diagnostic = %#v", c.Diagnostics())
+	}
 	want := []checker.Diagnostic{{Kind: checker.Error, Message: "Unsupported Go constant ffi::UnsupportedConst: named Go types with underlying chan int are not supported yet"}}
 	if diff := cmp.Diff(want, c.Diagnostics(), compareOptions); diff != "" {
 		t.Fatalf("Diagnostics mismatch (-want +got):\n%s", diff)

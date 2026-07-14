@@ -93,6 +93,13 @@ const (
 	DiagnosticCodeInvalidStructTypeArgs         DiagnosticCode = "invalid_struct_type_arguments"
 	DiagnosticCodeInvalidGoStructLiteral        DiagnosticCode = "invalid_go_struct_literal"
 	DiagnosticCodeInvalidGoStructTypeArgs       DiagnosticCode = "invalid_go_struct_type_arguments"
+	DiagnosticCodeInvalidGoFunctionTypeArgs     DiagnosticCode = "invalid_go_function_type_arguments"
+	DiagnosticCodeConflictingGoTypeInference    DiagnosticCode = "conflicting_go_type_argument_inference"
+	DiagnosticCodeGoTypeInferenceFailure        DiagnosticCode = "go_type_argument_inference_failure"
+	DiagnosticCodeGoConstraintViolation         DiagnosticCode = "go_constraint_violation"
+	DiagnosticCodeUnsupportedGoEntity           DiagnosticCode = "unsupported_go_entity"
+	DiagnosticCodeGoTypeInstantiationFailure    DiagnosticCode = "go_type_instantiation_failure"
+	DiagnosticCodeInvalidGoFunctionValue        DiagnosticCode = "invalid_go_function_value"
 )
 
 type SourceSpan struct {
@@ -1132,6 +1139,143 @@ type invalidGoStructTypeArgumentsDiagnostic struct {
 func (d invalidGoStructTypeArgumentsDiagnostic) build() Diagnostic {
 	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid Go struct type arguments", "", DiagnosticLabel{Span: d.Span, Message: d.Primary})
 	diagnostic.Code = DiagnosticCodeInvalidGoStructTypeArgs
+	return diagnostic
+}
+
+type invalidGoFunctionTypeArgumentsDiagnostic struct {
+	Name          string
+	Expected      int
+	Actual        int
+	Span          SourceSpan
+	LegacyMessage string
+	NonGeneric    bool
+}
+
+func (d invalidGoFunctionTypeArgumentsDiagnostic) build() Diagnostic {
+	message := fmt.Sprintf("expected %d type argument(s), but found %d", d.Expected, d.Actual)
+	if d.NonGeneric {
+		message = fmt.Sprintf("`%s` is not generic", d.Name)
+	}
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid Go function type arguments", "", DiagnosticLabel{Span: d.Span, Message: message})
+	diagnostic.Code = DiagnosticCodeInvalidGoFunctionTypeArgs
+	return diagnostic
+}
+
+type conflictingGoTypeInferenceDiagnostic struct {
+	Parameter     string
+	PreviousType  Type
+	CurrentType   Type
+	CurrentSpan   SourceSpan
+	PreviousSpan  *SourceSpan
+	LegacyMessage string
+}
+
+func (d conflictingGoTypeInferenceDiagnostic) build() Diagnostic {
+	secondary := []DiagnosticLabel{}
+	if d.PreviousSpan != nil {
+		secondary = append(secondary, DiagnosticLabel{Span: *d.PreviousSpan, Message: fmt.Sprintf("`%s` was previously inferred as `%s` here", d.Parameter, d.PreviousType)})
+	}
+	legacy := d.LegacyMessage
+	if legacy == "" {
+		legacy = fmt.Sprintf("Conflicting inferred type arguments for %s: %s and %s", d.Parameter, d.PreviousType, d.CurrentType)
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		legacy,
+		"Conflicting inferred Go type arguments",
+		"",
+		DiagnosticLabel{Span: d.CurrentSpan, Message: fmt.Sprintf("this infers `%s` as `%s`", d.Parameter, d.CurrentType)},
+		secondary...,
+	)
+	diagnostic.Code = DiagnosticCodeConflictingGoTypeInference
+	return diagnostic
+}
+
+type goTypeInferenceFailureDiagnostic struct {
+	Parameter     string
+	EntityKind    string
+	EntityName    string
+	Span          SourceSpan
+	LegacyMessage string
+}
+
+func (d goTypeInferenceFailureDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error, d.LegacyMessage, "Cannot infer Go type argument", "",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("type argument `%s` cannot be inferred for this Go %s", d.Parameter, d.EntityKind)},
+	)
+	diagnostic.Code = DiagnosticCodeGoTypeInferenceFailure
+	return diagnostic
+}
+
+type goConstraintDiagnostic struct {
+	Argument      Type
+	Constraint    string
+	Span          SourceSpan
+	LegacyMessage string
+	Unvalidated   bool
+}
+
+func (d goConstraintDiagnostic) build() Diagnostic {
+	message := fmt.Sprintf("`%s` does not satisfy Go constraint `%s`", d.Argument, d.Constraint)
+	if d.Unvalidated {
+		message = fmt.Sprintf("`%s` cannot be validated against Go constraint `%s`", d.Argument, d.Constraint)
+	}
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Go constraint is not satisfied", "", DiagnosticLabel{Span: d.Span, Message: message})
+	diagnostic.Code = DiagnosticCodeGoConstraintViolation
+	return diagnostic
+}
+
+type unsupportedGoEntityDiagnostic struct {
+	Kind          string
+	Name          string
+	Reason        string
+	Span          SourceSpan
+	LegacyMessage string
+}
+
+func (d unsupportedGoEntityDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error, d.LegacyMessage, "Unsupported Go "+d.Kind, d.Reason,
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("Go %s `%s` cannot be represented in Ard", d.Kind, d.Name)},
+	)
+	diagnostic.Code = DiagnosticCodeUnsupportedGoEntity
+	return diagnostic
+}
+
+func (c *Checker) addUnsupportedGoEntity(kind, name, reason, legacyPrefix string, location parse.Location) {
+	legacy := fmt.Sprintf("%s %s: %s", legacyPrefix, name, reason)
+	c.addDiagnostic(unsupportedGoEntityDiagnostic{Kind: kind, Name: name, Reason: reason, Span: c.sourceSpan(location), LegacyMessage: legacy}.build())
+}
+
+type goTypeInstantiationDiagnostic struct {
+	Name          string
+	Cause         string
+	Span          SourceSpan
+	LegacyMessage string
+}
+
+func (d goTypeInstantiationDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Cannot instantiate generic Go type", d.Cause, DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("Go type `%s` cannot be instantiated here", d.Name)})
+	diagnostic.Code = DiagnosticCodeGoTypeInstantiationFailure
+	return diagnostic
+}
+
+type invalidGoFunctionValueDiagnostic struct {
+	Name          string
+	Detail        string
+	Span          SourceSpan
+	LegacyMessage string
+	Generic       bool
+}
+
+func (d invalidGoFunctionValueDiagnostic) build() Diagnostic {
+	message := "this Go function cannot be represented as a value"
+	if d.Generic {
+		message = "its type parameters are not fixed here"
+	}
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Go function cannot be used as a value", d.Detail, DiagnosticLabel{Span: d.Span, Message: message})
+	diagnostic.Code = DiagnosticCodeInvalidGoFunctionValue
 	return diagnostic
 }
 

@@ -191,6 +191,14 @@ func Identity[T any](value T) T {
 	return value
 }
 
+func Pair[T any](first T, second T) T {
+	return first
+}
+
+func SlicePair[T any](first []T, second []T) T {
+	return first[0]
+}
+
 func First[T comparable](values []T) T {
 	return values[0]
 }

@@ -1331,7 +1331,9 @@ func (c *Checker) checkForeignTypeMatch(s *parse.MatchExpression, subject Expres
 			typ := goPkg.Types[p.Function.Name]
 			if typ == nil {
 				if reason := goPkg.UnsupportedTypes[p.Function.Name]; reason != "" {
-					c.addError(fmt.Sprintf("Unsupported Go type %s::%s: %s", nsIdent.Name, p.Function.Name, reason), matchCase.Pattern.GetLocation())
+					qualified := nsIdent.Name + "::" + p.Function.Name
+					legacy := fmt.Sprintf("Unsupported Go type %s: %s", qualified, reason)
+					c.addDiagnostic(unsupportedGoEntityDiagnostic{Kind: "type", Name: qualified, Reason: reason, Span: c.sourceSpan(matchCase.Pattern.GetLocation()), LegacyMessage: legacy}.build())
 				} else {
 					c.addUnresolvedReference(unrecognizedType, fmt.Sprintf("%s::%s", nsIdent.Name, p.Function.Name), matchCase.Pattern.GetLocation())
 				}
@@ -1728,7 +1730,9 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 	validImpl := true
 	for goName, reason := range iface.UnsupportedMethods {
 		validImpl = false
-		c.addError(fmt.Sprintf("Unsupported Go interface method %s::%s.%s: %s", iface.Qualifier, iface.Name, goName, reason), s.GetLocation())
+		qualified := fmt.Sprintf("%s::%s.%s", iface.Qualifier, iface.Name, goName)
+		legacy := fmt.Sprintf("Unsupported Go interface method %s: %s", qualified, reason)
+		c.addDiagnostic(unsupportedGoEntityDiagnostic{Kind: "interface method", Name: qualified, Reason: reason, Span: c.sourceSpan(s.GetLocation()), LegacyMessage: legacy}.build())
 	}
 	implementedMethods := map[string]bool{}
 	invalidImplementedMethods := map[string]bool{}
@@ -2702,11 +2706,15 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 								return nil
 							}
 							if reason := goPkg.UnsupportedConstants[prop.Name]; reason != "" {
-								c.addError(fmt.Sprintf("Unsupported Go constant %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+								qualified := id.Name + "::" + prop.Name
+								legacy := fmt.Sprintf("Unsupported Go constant %s: %s", qualified, reason)
+								c.addDiagnostic(unsupportedGoEntityDiagnostic{Kind: "constant", Name: qualified, Reason: reason, Span: c.sourceSpan(prop.GetLocation()), LegacyMessage: legacy}.build())
 								return nil
 							}
 							if reason := goPkg.UnsupportedVariables[prop.Name]; reason != "" {
-								c.addError(fmt.Sprintf("Unsupported Go variable %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+								qualified := id.Name + "::" + prop.Name
+								legacy := fmt.Sprintf("Unsupported Go variable %s: %s", qualified, reason)
+								c.addDiagnostic(unsupportedGoEntityDiagnostic{Kind: "variable", Name: qualified, Reason: reason, Span: c.sourceSpan(prop.GetLocation()), LegacyMessage: legacy}.build())
 								return nil
 							}
 							c.addUnresolvedReference(undefinedQualifiedMember, fmt.Sprintf("%s::%s", id.Name, prop.Name), prop.GetLocation())
@@ -4566,7 +4574,7 @@ func (c *Checker) validateForeignStructInstance(foreign *ForeignType, typeArgs [
 		fieldType := foreign.Fields[name]
 		if fieldType == nil {
 			if reason := foreign.UnsupportedFields[name]; reason != "" {
-				c.addError(fmt.Sprintf("Unsupported foreign field %s.%s: %s", foreign, name, reason), property.GetLocation())
+				c.addUnsupportedGoEntity("field", fmt.Sprintf("%s.%s", foreign, name), reason, "Unsupported foreign field", property.GetLocation())
 			} else {
 				c.addUnresolvedReference(unknownStructField, name, property.GetLocation())
 			}
@@ -4617,6 +4625,7 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 
 	args := make([]Type, params.Len())
 	goArgs := make([]gotypes.Type, params.Len())
+	inferenceSpans := make([]SourceSpan, params.Len())
 	if len(typeArgs) > 0 {
 		if len(typeArgs) != params.Len() {
 			legacy := fmt.Sprintf("Go type %s expects %d type argument(s), got %d", foreign, params.Len(), len(typeArgs))
@@ -4665,13 +4674,16 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 			if !ok {
 				continue
 			}
-			if !c.inferGoStructTypeArgs(field.Type(), value.Type(), goValue, params, inferredTypes, inferredGoTypes, property.GetLocation()) {
+			if !c.inferGoStructTypeArgs(field.Type(), value.Type(), goValue, params, inferredTypes, inferredGoTypes, inferenceSpans, property.GetLocation()) {
 				return nil
 			}
 		}
 		for i := 0; i < params.Len(); i++ {
 			if inferredTypes[i] == nil || inferredGoTypes[i] == nil {
-				c.addError(fmt.Sprintf("Could not infer type argument %s for Go type %s", params.At(i).Obj().Name(), foreign), loc)
+				legacy := fmt.Sprintf("Could not infer type argument %s for Go type %s", params.At(i).Obj().Name(), foreign)
+				c.addDiagnostic(goTypeInferenceFailureDiagnostic{
+					Parameter: params.At(i).Obj().Name(), EntityKind: "type", EntityName: foreign.String(), Span: c.sourceSpan(loc), LegacyMessage: legacy,
+				}.build())
 				return nil
 			}
 			args[i] = inferredTypes[i]
@@ -4682,18 +4694,27 @@ func (c *Checker) instantiateForeignStructForLiteral(foreign *ForeignType, typeA
 	for i, goArg := range goArgs {
 		constraint, ok := params.At(i).Constraint().Underlying().(*gotypes.Interface)
 		if ok && !gotypes.Satisfies(goArg, constraint) {
-			c.addError(fmt.Sprintf("Type argument %s does not satisfy Go constraint %s", args[i], params.At(i).Constraint()), loc)
+			legacy := fmt.Sprintf("Type argument %s does not satisfy Go constraint %s", args[i], params.At(i).Constraint())
+			span := c.sourceSpan(loc)
+			if len(typeArgs) > i {
+				span = c.sourceSpan(declaredTypeLocation(typeArgs[i], loc))
+			} else if inferenceSpans[i].FilePath != "" {
+				span = inferenceSpans[i]
+			}
+			c.addDiagnostic(goConstraintDiagnostic{Argument: args[i], Constraint: params.At(i).Constraint().String(), Span: span, LegacyMessage: legacy}.build())
 			return nil
 		}
 	}
 	instantiated, err := gotypes.Instantiate(c.goTypesContext, named, goArgs, true)
 	if err != nil {
-		c.addError(fmt.Sprintf("Could not instantiate Go type %s: %s", foreign, err), loc)
+		legacy := fmt.Sprintf("Could not instantiate Go type %s: %s", foreign, err)
+		c.addDiagnostic(goTypeInstantiationDiagnostic{Name: foreign.String(), Cause: err.Error(), Span: c.sourceSpan(loc), LegacyMessage: legacy}.build())
 		return nil
 	}
 	instNamed, ok := instantiated.(*gotypes.Named)
 	if !ok {
-		c.addError(fmt.Sprintf("Could not instantiate Go type %s", foreign), loc)
+		legacy := fmt.Sprintf("Could not instantiate Go type %s", foreign)
+		c.addDiagnostic(goTypeInstantiationDiagnostic{Name: foreign.String(), Span: c.sourceSpan(loc), LegacyMessage: legacy}.build())
 		return nil
 	}
 	inst := foreignNamedTypeFromGo(instNamed, false, true).(*ForeignType)
@@ -4763,7 +4784,7 @@ func exportedGoStructField(strct *gotypes.Struct, name string) *gotypes.Var {
 	return nil
 }
 
-func (c *Checker) inferGoStructTypeArgs(pattern gotypes.Type, actual Type, goActual gotypes.Type, params *gotypes.TypeParamList, inferred []Type, inferredGo []gotypes.Type, loc parse.Location) bool {
+func (c *Checker) inferGoStructTypeArgs(pattern gotypes.Type, actual Type, goActual gotypes.Type, params *gotypes.TypeParamList, inferred []Type, inferredGo []gotypes.Type, inferredSpans []SourceSpan, loc parse.Location) bool {
 	switch pattern := pattern.(type) {
 	case *gotypes.TypeParam:
 		for i := 0; i < params.Len(); i++ {
@@ -4771,8 +4792,13 @@ func (c *Checker) inferGoStructTypeArgs(pattern gotypes.Type, actual Type, goAct
 				continue
 			}
 			if inferred[i] != nil && !inferred[i].equal(actual) {
-				c.addError(fmt.Sprintf("Conflicting inferred type arguments for %s: %s and %s", pattern.Obj().Name(), inferred[i], actual), loc)
+				c.addDiagnostic(conflictingGoTypeInferenceDiagnostic{
+					Parameter: pattern.Obj().Name(), PreviousType: inferred[i], CurrentType: actual, CurrentSpan: c.sourceSpan(loc), PreviousSpan: sourceSpanIfPresent(inferredSpans[i]),
+				}.build())
 				return false
+			}
+			if inferred[i] == nil {
+				inferredSpans[i] = c.sourceSpan(loc)
 			}
 			inferred[i] = actual
 			inferredGo[i] = goActual
@@ -4781,7 +4807,7 @@ func (c *Checker) inferGoStructTypeArgs(pattern gotypes.Type, actual Type, goAct
 	case *gotypes.Slice:
 		if list, ok := actual.(*List); ok {
 			if goSlice, ok := goActual.Underlying().(*gotypes.Slice); ok {
-				return c.inferGoStructTypeArgs(pattern.Elem(), list.Of(), goSlice.Elem(), params, inferred, inferredGo, loc)
+				return c.inferGoStructTypeArgs(pattern.Elem(), list.Of(), goSlice.Elem(), params, inferred, inferredGo, inferredSpans, loc)
 			}
 		}
 	case *gotypes.Map:
@@ -4790,10 +4816,10 @@ func (c *Checker) inferGoStructTypeArgs(pattern gotypes.Type, actual Type, goAct
 			if !ok {
 				return true
 			}
-			if !c.inferGoStructTypeArgs(pattern.Key(), m.Key(), goMap.Key(), params, inferred, inferredGo, loc) {
+			if !c.inferGoStructTypeArgs(pattern.Key(), m.Key(), goMap.Key(), params, inferred, inferredGo, inferredSpans, loc) {
 				return false
 			}
-			return c.inferGoStructTypeArgs(pattern.Elem(), m.Value(), goMap.Elem(), params, inferred, inferredGo, loc)
+			return c.inferGoStructTypeArgs(pattern.Elem(), m.Value(), goMap.Elem(), params, inferred, inferredGo, inferredSpans, loc)
 		}
 	}
 	return true
@@ -6159,7 +6185,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					foreign.FieldsLoaded = true
 				}
 				if reason := foreign.UnsupportedFields[s.Property.Name]; reason != "" {
-					c.addError(fmt.Sprintf("Unsupported foreign field %s.%s: %s", foreign, s.Property.Name, reason), s.Property.GetLocation())
+					c.addUnsupportedGoEntity("field", fmt.Sprintf("%s.%s", foreign, s.Property.Name), reason, "Unsupported foreign field", s.Property.GetLocation())
 					return nil
 				}
 				if fieldType := foreign.Fields[s.Property.Name]; fieldType != nil {
@@ -6190,7 +6216,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						propType = pointerSig
 						foreignPointerReceiver = true
 					} else if reason := pointerForeign.UnsupportedMethods[s.Property.Name]; reason != "" {
-						c.addError(fmt.Sprintf("Unsupported foreign method %s.%s: %s", foreign, s.Property.Name, reason), s.Property.GetLocation())
+						c.addUnsupportedGoEntity("method", fmt.Sprintf("%s.%s", foreign, s.Property.Name), reason, "Unsupported foreign method", s.Property.GetLocation())
 						return nil
 					}
 				}
@@ -6198,7 +6224,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			if propType == nil {
 				if foreign, ok := subj.Type().(*ForeignType); ok {
 					if reason := foreign.UnsupportedMethods[s.Property.Name]; reason != "" {
-						c.addError(fmt.Sprintf("Unsupported foreign method %s.%s: %s", foreign, s.Property.Name, reason), s.Property.GetLocation())
+						c.addUnsupportedGoEntity("method", fmt.Sprintf("%s.%s", foreign, s.Property.Name), reason, "Unsupported foreign method", s.Property.GetLocation())
 						return nil
 					}
 				}
@@ -6265,7 +6291,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			if sig == nil {
 				if foreign, ok := subj.Type().(*ForeignType); ok {
 					if reason := foreign.UnsupportedMethods[s.Method.Name]; reason != "" {
-						c.addError(fmt.Sprintf("Unsupported foreign method %s.%s: %s", foreign, s.Method.Name, reason), s.Method.GetLocation())
+						c.addUnsupportedGoEntity("method", fmt.Sprintf("%s.%s", foreign, s.Method.Name), reason, "Unsupported foreign method", s.Method.GetLocation())
 						return nil
 					}
 					if !foreign.Pointer {
@@ -6288,7 +6314,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							sig = pointerSig
 							foreignPointerReceiver = true
 						} else if reason := pointerForeign.UnsupportedMethods[s.Method.Name]; reason != "" {
-							c.addError(fmt.Sprintf("Unsupported foreign method %s.%s: %s", foreign, s.Method.Name, reason), s.Method.GetLocation())
+							c.addUnsupportedGoEntity("method", fmt.Sprintf("%s.%s", foreign, s.Method.Name), reason, "Unsupported foreign method", s.Method.GetLocation())
 							return nil
 						}
 					}
@@ -6893,7 +6919,11 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						return nil
 					}
 				} else if fnDef != nil && len(s.Function.TypeArgs) > 0 {
-					c.addError(fmt.Sprintf("Go function %s::%s is not generic", modName, name), s.GetLocation())
+					qualified := modName + "::" + name
+					legacy := fmt.Sprintf("Go function %s is not generic", qualified)
+					c.addDiagnostic(invalidGoFunctionTypeArgumentsDiagnostic{
+						Name: qualified, Actual: len(s.Function.TypeArgs), Span: c.sourceSpan(declaredTypeLocation(s.Function.TypeArgs[0], s.GetLocation())), LegacyMessage: legacy, NonGeneric: true,
+					}.build())
 					return nil
 				}
 				if fnDef == nil {
@@ -6928,7 +6958,9 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						}
 					}
 					if reason, ok := goPkg.UnsupportedFunctions[name]; ok {
-						c.addError(fmt.Sprintf("Unsupported Go function %s::%s: %s", modName, name, reason), s.GetLocation())
+						qualified := modName + "::" + name
+						legacy := fmt.Sprintf("Unsupported Go function %s: %s", qualified, reason)
+						c.addDiagnostic(unsupportedGoEntityDiagnostic{Kind: "function", Name: qualified, Reason: reason, Span: c.sourceSpan(s.GetLocation()), LegacyMessage: legacy}.build())
 					} else {
 						c.addUnresolvedReference(undefinedGoFunction, fmt.Sprintf("%s::%s", modName, name), s.GetLocation())
 					}
@@ -8037,7 +8069,9 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							if reason := goPkg.AdaptedFunctions[prop.Name]; reason != "" {
 								valueType, variadic, ok := adaptedGoFunctionValueType(def)
 								if !ok {
-									c.addError(fmt.Sprintf("Go function %s::%s cannot be referenced as a value: %s; wrap it in a closure", id.Name, prop.Name, reason), prop.GetLocation())
+									qualified := id.Name + "::" + prop.Name
+									legacy := fmt.Sprintf("Go function %s cannot be referenced as a value: %s; wrap it in a closure", qualified, reason)
+									c.addDiagnostic(invalidGoFunctionValueDiagnostic{Name: qualified, Detail: reason, Span: c.sourceSpan(prop.GetLocation()), LegacyMessage: legacy}.build())
 									return nil
 								}
 								return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: valueType, AdaptedFunction: true, VariadicAdapter: variadic}
@@ -8045,19 +8079,21 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: def}
 						}
 						if _, isGeneric := goPkg.Generics[prop.Name]; isGeneric {
-							c.addError(fmt.Sprintf("Generic Go function %s::%s cannot be referenced as a value; wrap it in a closure so its type parameters are fixed", id.Name, prop.Name), prop.GetLocation())
+							qualified := id.Name + "::" + prop.Name
+							legacy := fmt.Sprintf("Generic Go function %s cannot be referenced as a value; wrap it in a closure so its type parameters are fixed", qualified)
+							c.addDiagnostic(invalidGoFunctionValueDiagnostic{Name: qualified, Span: c.sourceSpan(prop.GetLocation()), LegacyMessage: legacy, Generic: true}.build())
 							return nil
 						}
 						if reason := goPkg.UnsupportedFunctions[prop.Name]; reason != "" {
-							c.addError(fmt.Sprintf("Unsupported Go function %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+							c.addUnsupportedGoEntity("function", id.Name+"::"+prop.Name, reason, "Unsupported Go function", prop.GetLocation())
 							return nil
 						}
 						if reason := goPkg.UnsupportedConstants[prop.Name]; reason != "" {
-							c.addError(fmt.Sprintf("Unsupported Go constant %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+							c.addUnsupportedGoEntity("constant", id.Name+"::"+prop.Name, reason, "Unsupported Go constant", prop.GetLocation())
 							return nil
 						}
 						if reason := goPkg.UnsupportedVariables[prop.Name]; reason != "" {
-							c.addError(fmt.Sprintf("Unsupported Go variable %s::%s: %s", id.Name, prop.Name, reason), prop.GetLocation())
+							c.addUnsupportedGoEntity("variable", id.Name+"::"+prop.Name, reason, "Unsupported Go variable", prop.GetLocation())
 							return nil
 						}
 						c.addUnresolvedReference(undefinedQualifiedMember, fmt.Sprintf("%s::%s", id.Name, prop.Name), prop.GetLocation())

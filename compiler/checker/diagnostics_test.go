@@ -277,6 +277,107 @@ func TestStructLiteralDiagnosticsAreStructured(t *testing.T) {
 	}
 }
 
+func TestGenericGoFunctionDiagnosticsAreStructured(t *testing.T) {
+	root := t.TempDir()
+	writeGoGenericFuncPackage(t, root)
+	resolver := checker.NewGoPackagesResolver(root, nil)
+	tests := []struct {
+		name          string
+		source        string
+		code          checker.DiagnosticCode
+		legacyMessage string
+		secondaries   int
+	}{
+		{
+			name: "inference conflict", source: "use go:example.com/app/ffi\nlet value = ffi::Pair(\"first\", 2)\n",
+			code: checker.DiagnosticCodeConflictingGoTypeInference, legacyMessage: "Conflicting inferred type arguments for T: Str and Int", secondaries: 1,
+		},
+		{
+			name: "wrong type argument count", source: "use go:example.com/app/ffi\nfn f(c: mut ffi::StateCtx) { ffi::StateValue<Str, Int>(c) }\n",
+			code: checker.DiagnosticCodeInvalidGoFunctionTypeArgs, legacyMessage: "Go function ffi::StateValue expects 1 type argument(s), got 2",
+		},
+		{
+			name: "uninferable type argument", source: "use go:example.com/app/ffi\nfn f(c: mut ffi::StateCtx) { ffi::StateValue(c) }\n",
+			code: checker.DiagnosticCodeGoTypeInferenceFailure, legacyMessage: "Could not infer type argument T for Go function ffi::StateValue",
+		},
+		{
+			name: "constraint", source: "use go:example.com/app/ffi\nlet first = ffi::First<[Int]>([[1], [2]])\n",
+			code: checker.DiagnosticCodeGoConstraintViolation, legacyMessage: "Type argument [Int] does not satisfy Go constraint comparable",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if diagnostic.Message != tt.legacyMessage || diagnostic.Primary.Span.FilePath != "main.ard" || len(diagnostic.Secondary) != tt.secondaries {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
+func TestNestedGenericGoFunctionConflictLabelsBoundType(t *testing.T) {
+	root := t.TempDir()
+	writeGoGenericFuncPackage(t, root)
+	resolver := checker.NewGoPackagesResolver(root, nil)
+	result := parse.Parse([]byte("use go:example.com/app/ffi\nlet value = ffi::SlicePair([\"first\"], [2])\n"), "main.ard")
+	c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeConflictingGoTypeInference)
+	if diagnostic.Message != "Conflicting inferred type arguments for T: Str and [Int]" || diagnostic.Primary.Message != "this infers `T` as `Int`" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestGenericGoStructInferenceDiagnosticsAreStructured(t *testing.T) {
+	root := t.TempDir()
+	writeGoGenericStructPackage(t, root)
+	resolver := checker.NewGoPackagesResolver(root, nil)
+	tests := []struct {
+		name          string
+		source        string
+		code          checker.DiagnosticCode
+		legacyMessage string
+		secondaries   int
+	}{
+		{
+			name: "conflict", source: "use go:example.com/app/ffi\nlet radio = ffi::Radio{Value: \"compact\", GroupValue: 1}\n",
+			code: checker.DiagnosticCodeConflictingGoTypeInference, legacyMessage: "Conflicting inferred type arguments for T: Str and Int", secondaries: 1,
+		},
+		{
+			name: "uninferable", source: "use go:example.com/app/ffi\nlet box = ffi::Box{Label: \"empty\"}\n",
+			code: checker.DiagnosticCodeGoTypeInferenceFailure, legacyMessage: "Could not infer type argument T for Go type ffi::Box",
+		},
+		{
+			name: "constraint", source: "use go:example.com/app/ffi\nlet radio = ffi::Radio<[Int]>{Value: [1], GroupValue: [2]}\n",
+			code: checker.DiagnosticCodeGoConstraintViolation, legacyMessage: "Type argument [Int] does not satisfy Go constraint comparable",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if diagnostic.Message != tt.legacyMessage || len(diagnostic.Secondary) != tt.secondaries {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
+func TestGenericGoFunctionValueDiagnosticIsStructured(t *testing.T) {
+	result := parse.Parse([]byte("use go:slices\nlet sort = slices::Sort\n"), "main.ard")
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidGoFunctionValue)
+	if diagnostic.Message != "Generic Go function slices::Sort cannot be referenced as a value; wrap it in a closure so its type parameters are fixed" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")

@@ -230,13 +230,13 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Missing struct fields
   - [x] Invalid struct type arguments and Go struct literal forms
 
-- [ ] **Go FFI and generic Go entities**
-  - [ ] Incorrect Go type-argument counts
-  - [ ] Conflicting or uninferable type arguments
-  - [ ] Unsatisfied Go constraints
-  - [ ] Unsupported Go functions, methods, fields, constants, and variables
-  - [ ] Invalid generic Go type instantiation
-  - [ ] Generic Go functions referenced as values
+- [x] **Go FFI and generic Go entities**
+  - [x] Incorrect Go type-argument counts
+  - [x] Conflicting or uninferable type arguments
+  - [x] Unsatisfied Go constraints
+  - [x] Unsupported Go functions, methods, fields, constants, and variables
+  - [x] Invalid generic Go type instantiation
+  - [x] Generic Go functions referenced as values
 
 - [ ] **Control flow**
   - [ ] Invalid `defer` placement and form
