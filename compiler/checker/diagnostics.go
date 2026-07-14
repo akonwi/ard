@@ -17,42 +17,52 @@ const (
 type DiagnosticCode string
 
 const (
-	DiagnosticCodeTypeMismatch              DiagnosticCode = "type_mismatch"
-	DiagnosticCodeDuplicateDeclaration      DiagnosticCode = "duplicate_declaration"
-	DiagnosticCodeDuplicateFieldDeclaration DiagnosticCode = "duplicate_field_declaration"
-	DiagnosticCodeDuplicateImport           DiagnosticCode = "duplicate_import"
-	DiagnosticCodeUndefinedMember           DiagnosticCode = "undefined_member"
-	DiagnosticCodeUndefinedName             DiagnosticCode = "undefined_name"
-	DiagnosticCodeUndefinedType             DiagnosticCode = "undefined_type"
-	DiagnosticCodeUndefinedTrait            DiagnosticCode = "undefined_trait"
-	DiagnosticCodeUndefinedModule           DiagnosticCode = "undefined_module"
-	DiagnosticCodeUndefinedNamespace        DiagnosticCode = "undefined_namespace"
-	DiagnosticCodeUnknownField              DiagnosticCode = "unknown_field"
-	DiagnosticCodeUndefinedQualifiedMember  DiagnosticCode = "undefined_qualified_member"
-	DiagnosticCodeUndefinedGoFunction       DiagnosticCode = "undefined_go_function"
-	DiagnosticCodeUndefinedEnumVariant      DiagnosticCode = "undefined_enum_variant"
-	DiagnosticCodeInvalidStaticMember       DiagnosticCode = "invalid_static_member"
-	DiagnosticCodeNotAStruct                DiagnosticCode = "not_a_struct"
-	DiagnosticCodeImmutableAssignment       DiagnosticCode = "immutable_assignment"
-	DiagnosticCodeIncorrectArgumentType     DiagnosticCode = "incorrect_argument_type"
-	DiagnosticCodeGoImportResolution        DiagnosticCode = "go_import_resolution"
-	DiagnosticCodeImportResolution          DiagnosticCode = "import_resolution"
-	DiagnosticCodeCircularImport            DiagnosticCode = "circular_import"
-	DiagnosticCodeModuleLoadFailure         DiagnosticCode = "module_load_failure"
-	DiagnosticCodeBuiltInTypeRedeclaration  DiagnosticCode = "built_in_type_redeclaration"
-	DiagnosticCodeRecursiveTypeAlias        DiagnosticCode = "recursive_type_alias"
-	DiagnosticCodeRecursiveStructLayout     DiagnosticCode = "recursive_struct_layout"
-	DiagnosticCodeUnresolvedGeneric         DiagnosticCode = "unresolved_generic"
-	DiagnosticCodeUnboundGenericTypeArg     DiagnosticCode = "unbound_generic_type_argument"
-	DiagnosticCodeNonGenericSpecialization  DiagnosticCode = "non_generic_type_specialization"
-	DiagnosticCodeIncorrectTypeArgCount     DiagnosticCode = "incorrect_type_argument_count"
-	DiagnosticCodeMissingTypeArguments      DiagnosticCode = "missing_type_arguments"
-	DiagnosticCodeRecursiveGenericReference DiagnosticCode = "recursive_generic_self_reference"
-	DiagnosticCodeMethodIntroducedGeneric   DiagnosticCode = "method_introduced_generic_parameter"
-	DiagnosticCodeInvalidMapKeyType         DiagnosticCode = "invalid_map_key_type"
-	DiagnosticCodeMalformedTypeNode         DiagnosticCode = "internal_malformed_type_node"
-	DiagnosticCodeBranchTypeMismatch        DiagnosticCode = "branch_type_mismatch"
-	DiagnosticCodeNonExhaustiveValueIf      DiagnosticCode = "non_exhaustive_value_if"
+	DiagnosticCodeTypeMismatch                  DiagnosticCode = "type_mismatch"
+	DiagnosticCodeDuplicateDeclaration          DiagnosticCode = "duplicate_declaration"
+	DiagnosticCodeDuplicateFieldDeclaration     DiagnosticCode = "duplicate_field_declaration"
+	DiagnosticCodeDuplicateImport               DiagnosticCode = "duplicate_import"
+	DiagnosticCodeUndefinedMember               DiagnosticCode = "undefined_member"
+	DiagnosticCodeUndefinedName                 DiagnosticCode = "undefined_name"
+	DiagnosticCodeUndefinedType                 DiagnosticCode = "undefined_type"
+	DiagnosticCodeUndefinedTrait                DiagnosticCode = "undefined_trait"
+	DiagnosticCodeUndefinedModule               DiagnosticCode = "undefined_module"
+	DiagnosticCodeUndefinedNamespace            DiagnosticCode = "undefined_namespace"
+	DiagnosticCodeUnknownField                  DiagnosticCode = "unknown_field"
+	DiagnosticCodeUndefinedQualifiedMember      DiagnosticCode = "undefined_qualified_member"
+	DiagnosticCodeUndefinedGoFunction           DiagnosticCode = "undefined_go_function"
+	DiagnosticCodeUndefinedEnumVariant          DiagnosticCode = "undefined_enum_variant"
+	DiagnosticCodeInvalidStaticMember           DiagnosticCode = "invalid_static_member"
+	DiagnosticCodeNotAStruct                    DiagnosticCode = "not_a_struct"
+	DiagnosticCodeImmutableAssignment           DiagnosticCode = "immutable_assignment"
+	DiagnosticCodeIncorrectArgumentType         DiagnosticCode = "incorrect_argument_type"
+	DiagnosticCodeGoImportResolution            DiagnosticCode = "go_import_resolution"
+	DiagnosticCodeImportResolution              DiagnosticCode = "import_resolution"
+	DiagnosticCodeCircularImport                DiagnosticCode = "circular_import"
+	DiagnosticCodeModuleLoadFailure             DiagnosticCode = "module_load_failure"
+	DiagnosticCodeBuiltInTypeRedeclaration      DiagnosticCode = "built_in_type_redeclaration"
+	DiagnosticCodeRecursiveTypeAlias            DiagnosticCode = "recursive_type_alias"
+	DiagnosticCodeRecursiveStructLayout         DiagnosticCode = "recursive_struct_layout"
+	DiagnosticCodeUnresolvedGeneric             DiagnosticCode = "unresolved_generic"
+	DiagnosticCodeUnboundGenericTypeArg         DiagnosticCode = "unbound_generic_type_argument"
+	DiagnosticCodeNonGenericSpecialization      DiagnosticCode = "non_generic_type_specialization"
+	DiagnosticCodeIncorrectTypeArgCount         DiagnosticCode = "incorrect_type_argument_count"
+	DiagnosticCodeMissingTypeArguments          DiagnosticCode = "missing_type_arguments"
+	DiagnosticCodeRecursiveGenericReference     DiagnosticCode = "recursive_generic_self_reference"
+	DiagnosticCodeMethodIntroducedGeneric       DiagnosticCode = "method_introduced_generic_parameter"
+	DiagnosticCodeInvalidMapKeyType             DiagnosticCode = "invalid_map_key_type"
+	DiagnosticCodeMalformedTypeNode             DiagnosticCode = "internal_malformed_type_node"
+	DiagnosticCodeBranchTypeMismatch            DiagnosticCode = "branch_type_mismatch"
+	DiagnosticCodeNonExhaustiveValueIf          DiagnosticCode = "non_exhaustive_value_if"
+	DiagnosticCodeImmutableMutableReference     DiagnosticCode = "immutable_mutable_reference"
+	DiagnosticCodeUnsupportedMutableReference   DiagnosticCode = "unsupported_mutable_reference"
+	DiagnosticCodeInvalidForeignPointerBinding  DiagnosticCode = "invalid_foreign_pointer_binding"
+	DiagnosticCodeUnreachableReferentAssignment DiagnosticCode = "unreachable_referent_assignment"
+	DiagnosticCodeReferenceRebinding            DiagnosticCode = "reference_rebinding"
+	DiagnosticCodeImmutablePropertyAssignment   DiagnosticCode = "immutable_property_assignment"
+	DiagnosticCodeImmutableReceiver             DiagnosticCode = "immutable_receiver"
+	DiagnosticCodeImmutablePointerReceiver      DiagnosticCode = "immutable_pointer_receiver"
+	DiagnosticCodeGoConstantAssignment          DiagnosticCode = "go_constant_assignment"
+	DiagnosticCodeNonAssignableStaticProperty   DiagnosticCode = "non_assignable_static_property"
 )
 
 type SourceSpan struct {
@@ -311,6 +321,190 @@ func (d immutableAssignmentDiagnostic) build() Diagnostic {
 	)
 	diagnostic.Code = DiagnosticCodeImmutableAssignment
 	return diagnostic
+}
+
+func mutationDiagnostic(code DiagnosticCode, legacyMessage string, title string, text string, primary DiagnosticLabel, declaration *SourceSpan, declarationMessage string) Diagnostic {
+	secondary := []DiagnosticLabel{}
+	if declaration != nil {
+		secondary = append(secondary, DiagnosticLabel{Span: *declaration, Message: declarationMessage})
+	}
+	diagnostic := newLabeledDiagnostic(Error, legacyMessage, title, text, primary, secondary...)
+	diagnostic.Code = code
+	return diagnostic
+}
+
+type immutableMutableReferenceDiagnostic struct {
+	Place           string
+	Span            SourceSpan
+	DeclarationSpan *SourceSpan
+}
+
+func (d immutableMutableReferenceDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeImmutableMutableReference,
+		fmt.Sprintf("Cannot take a mutable reference to immutable '%s'", d.Place),
+		"Cannot take a mutable reference",
+		"A mutable reference requires mutable storage.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is immutable", d.Place)},
+		d.DeclarationSpan,
+		"this binding is immutable",
+	)
+}
+
+type unsupportedMutableReferenceDiagnostic struct {
+	Type Type
+	Span SourceSpan
+}
+
+func (d unsupportedMutableReferenceDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeUnsupportedMutableReference,
+		fmt.Sprintf("Cannot take a mutable reference to %s", d.Type),
+		"Unsupported mutable reference",
+		"This foreign value has no supported pointer form.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` cannot be referenced mutably", d.Type)},
+		nil,
+		"",
+	)
+}
+
+type invalidForeignPointerBindingDiagnostic struct{ Span SourceSpan }
+
+func (d invalidForeignPointerBindingDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeInvalidForeignPointerBinding,
+		"A mut reference from a Go call must be bound with let; rebinding it is not supported",
+		"Go pointer result must use let",
+		"A Go pointer result already refers to mutable storage and cannot be rebound.",
+		DiagnosticLabel{Span: d.Span, Message: "bind this pointer result with `let`"},
+		nil,
+		"",
+	)
+}
+
+type unreachableReferentAssignmentDiagnostic struct {
+	Name            string
+	Span            SourceSpan
+	DeclarationSpan *SourceSpan
+}
+
+func (d unreachableReferentAssignmentDiagnostic) build() Diagnostic {
+	legacy := fmt.Sprintf("Cannot assign a new value through '%s': element writes share storage, but the referent binding is not reachable. Assign to the original binding instead", d.Name)
+	return mutationDiagnostic(
+		DiagnosticCodeUnreachableReferentAssignment,
+		legacy,
+		"Referent binding is not reachable",
+		"Element writes share storage, but replacing the whole value requires assigning to the original binding.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("cannot replace the whole value through `%s`", d.Name)},
+		d.DeclarationSpan,
+		"this reference was declared here",
+	)
+}
+
+type referenceRebindingDiagnostic struct {
+	Span            SourceSpan
+	DeclarationSpan *SourceSpan
+}
+
+func (d referenceRebindingDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeReferenceRebinding,
+		"References cannot be rebound; assign the value directly",
+		"References cannot be rebound",
+		"Assignment through a reference updates its referent; it cannot change which value is referenced.",
+		DiagnosticLabel{Span: d.Span, Message: "this value would rebind the reference"},
+		d.DeclarationSpan,
+		"this reference was declared here",
+	)
+}
+
+type immutablePropertyAssignmentDiagnostic struct {
+	Property        string
+	Span            SourceSpan
+	DeclarationSpan *SourceSpan
+}
+
+func (d immutablePropertyAssignmentDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeImmutablePropertyAssignment,
+		fmt.Sprintf("Immutable: %s", d.Property),
+		"Cannot assign through an immutable value",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is immutable", d.Property)},
+		d.DeclarationSpan,
+		"this binding is immutable",
+	)
+}
+
+type immutableReceiverKind uint8
+
+const (
+	immutableArdReceiver immutableReceiverKind = iota
+	immutableMaybeReceiver
+	immutablePointerMethodAccess
+	immutablePointerMethodCall
+)
+
+type immutableReceiverDiagnostic struct {
+	Kind            immutableReceiverKind
+	Receiver        string
+	Method          string
+	Span            SourceSpan
+	DeclarationSpan *SourceSpan
+}
+
+func (d immutableReceiverDiagnostic) build() Diagnostic {
+	code := DiagnosticCodeImmutableReceiver
+	legacy := fmt.Sprintf("Cannot mutate immutable '%s' with '.%s()'", d.Receiver, d.Method)
+	primary := fmt.Sprintf("`.%s()` requires a mutable receiver", d.Method)
+	if d.Kind == immutableMaybeReceiver {
+		legacy = fmt.Sprintf("Immutable: Maybe.%s receiver", d.Method)
+		primary = fmt.Sprintf("`Maybe.%s` requires a mutable receiver", d.Method)
+	} else if d.Kind == immutablePointerMethodAccess {
+		code = DiagnosticCodeImmutablePointerReceiver
+		legacy = fmt.Sprintf("Cannot access pointer receiver method %s.%s on immutable value", d.Receiver, d.Method)
+		primary = "this method value requires a mutable receiver"
+	} else if d.Kind == immutablePointerMethodCall {
+		code = DiagnosticCodeImmutablePointerReceiver
+		legacy = fmt.Sprintf("Cannot call pointer receiver method %s.%s on immutable value", d.Receiver, d.Method)
+		primary = "this method call requires a mutable receiver"
+	}
+	return mutationDiagnostic(
+		code,
+		legacy,
+		"Cannot use mutating method on immutable receiver",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: primary},
+		d.DeclarationSpan,
+		"this receiver was bound immutably here",
+	)
+}
+
+type nonAssignableStaticPropertyKind uint8
+
+const (
+	staticPropertyAssignment nonAssignableStaticPropertyKind = iota
+	goConstantAssignment
+)
+
+type nonAssignableStaticPropertyDiagnostic struct {
+	Kind   nonAssignableStaticPropertyKind
+	Target string
+	Span   SourceSpan
+}
+
+func (d nonAssignableStaticPropertyDiagnostic) build() Diagnostic {
+	code := DiagnosticCodeNonAssignableStaticProperty
+	legacy := fmt.Sprintf("Cannot assign to static property: %s", d.Target)
+	title := "Cannot assign to static property"
+	primary := "this static property is not assignable"
+	if d.Kind == goConstantAssignment {
+		code = DiagnosticCodeGoConstantAssignment
+		legacy = fmt.Sprintf("Cannot assign to Go constant: %s", d.Target)
+		title = "Cannot assign to Go constant"
+		primary = "Go constants are not assignable"
+	}
+	return mutationDiagnostic(code, legacy, title, "", DiagnosticLabel{Span: d.Span, Message: primary}, nil, "")
 }
 
 type incorrectArgumentTypeDiagnostic struct {

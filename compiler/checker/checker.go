@@ -238,7 +238,11 @@ func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
 	switch operand.(type) {
 	case *Variable, *InstanceProperty, *ForeignFieldAccess:
 		if !c.isMutable(operand) {
-			c.addError(fmt.Sprintf("Cannot take a mutable reference to immutable '%s'", mutRefPlaceName(operand)), s.Operand.GetLocation())
+			c.addDiagnostic(immutableMutableReferenceDiagnostic{
+				Place:           mutRefPlaceName(operand),
+				Span:            c.sourceSpan(s.Operand.GetLocation()),
+				DeclarationSpan: expressionBindingSpan(operand),
+			}.build())
 			return nil
 		}
 	default:
@@ -254,13 +258,36 @@ func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
 		} else if pointer := foreign.PointerForm(); pointer != nil {
 			refType = pointer
 		} else {
-			c.addError(fmt.Sprintf("Cannot take a mutable reference to %s", foreign), s.GetLocation())
+			c.addDiagnostic(unsupportedMutableReferenceDiagnostic{
+				Type: foreign,
+				Span: c.sourceSpan(s.GetLocation()),
+			}.build())
 			return nil
 		}
 	} else {
 		refType = MakeMutableRef(operand.Type())
 	}
 	return &MutableRefExpr{Operand: operand, Fresh: fresh, _type: refType}
+}
+
+func expressionBindingSpan(expr Expression) *SourceSpan {
+	var span SourceSpan
+	switch e := expr.(type) {
+	case *Variable:
+		span = e.sym.declaredAt
+	case Variable:
+		span = e.sym.declaredAt
+	case *InstanceProperty:
+		return expressionBindingSpan(e.Subject)
+	case *ForeignFieldAccess:
+		return expressionBindingSpan(e.Subject)
+	case *MutableRefExpr:
+		return expressionBindingSpan(e.Operand)
+	}
+	if span.FilePath == "" {
+		return nil
+	}
+	return &span
 }
 
 func (c Checker) isMutable(expr Expression) bool {
@@ -611,6 +638,13 @@ func (c *Checker) sourceSpan(location parse.Location) SourceSpan {
 
 func (c *Checker) sourceSpanPtr(location parse.Location) *SourceSpan {
 	span := c.sourceSpan(location)
+	return &span
+}
+
+func sourceSpanIfPresent(span SourceSpan) *SourceSpan {
+	if span.FilePath == "" {
+		return nil
+	}
 	return &span
 }
 
@@ -2370,7 +2404,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			if call, ok := val.(*ForeignFunctionCall); ok && call.PointerResult && s.Mutable {
-				c.addError("A mut reference from a Go call must be bound with let; rebinding it is not supported", s.Value.GetLocation())
+				c.addDiagnostic(invalidForeignPointerBindingDiagnostic{Span: c.sourceSpan(s.Value.GetLocation())}.build())
 				return nil
 			}
 
@@ -2418,7 +2452,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					// referents: the alias shares element storage, not the
 					// binding slot (ADR 0040 / ADR 0045).
 					if !mutableParamNeedsGoPointer(refBase) {
-						c.addError(fmt.Sprintf("Cannot assign a new value through '%s': element writes share storage, but the referent binding is not reachable. Assign to the original binding instead", target.Name), s.Target.GetLocation())
+						c.addDiagnostic(unreachableReferentAssignmentDiagnostic{
+							Name:            target.Name,
+							Span:            c.sourceSpan(s.Target.GetLocation()),
+							DeclarationSpan: sourceSpanIfPresent(target.declaredAt),
+						}.build())
 						return nil
 					}
 				} else if !target.mutable {
@@ -2442,7 +2480,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					// A reference binding is not rebindable: writing a new
 					// reference through it has no storage to land in.
 					if _, valueIsRef := value.Type().(*MutableRef); valueIsRef || isPointerForeign(value.Type()) {
-						c.addError("References cannot be rebound; assign the value directly", s.Value.GetLocation())
+						c.addDiagnostic(referenceRebindingDiagnostic{
+							Span:            c.sourceSpan(s.Value.GetLocation()),
+							DeclarationSpan: sourceSpanIfPresent(target.declaredAt),
+						}.build())
 						return nil
 					}
 				}
@@ -2492,7 +2533,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 
 				if !c.isMutable(subject) {
-					c.addError(fmt.Sprintf("Immutable: %s", ip), s.Target.GetLocation())
+					c.addDiagnostic(immutablePropertyAssignmentDiagnostic{
+						Property:        ip.String(),
+						Span:            c.sourceSpan(s.Target.GetLocation()),
+						DeclarationSpan: expressionBindingSpan(subject),
+					}.build())
 					return nil
 				}
 				if maybeField, isMaybe := fieldType.(*Maybe); isMaybe && !value.Type().equal(fieldType) {
@@ -2531,7 +2576,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 								return &Statement{Stmt: &Reassignment{Target: &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: typ, Assignable: true}, Value: value}}
 							}
 							if goPkg.Constants[prop.Name] != nil {
-								c.addError(fmt.Sprintf("Cannot assign to Go constant: %s::%s", id.Name, prop.Name), s.Target.GetLocation())
+								c.addDiagnostic(nonAssignableStaticPropertyDiagnostic{
+									Kind:   goConstantAssignment,
+									Target: id.Name + "::" + prop.Name,
+									Span:   c.sourceSpan(s.Target.GetLocation()),
+								}.build())
 								return nil
 							}
 							if reason := goPkg.UnsupportedConstants[prop.Name]; reason != "" {
@@ -2547,7 +2596,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 						}
 					}
 				}
-				c.addError(fmt.Sprintf("Cannot assign to static property: %s", sp), s.Target.GetLocation())
+				c.addDiagnostic(nonAssignableStaticPropertyDiagnostic{
+					Kind:   staticPropertyAssignment,
+					Target: sp.String(),
+					Span:   c.sourceSpan(s.Target.GetLocation()),
+				}.build())
 				return nil
 			}
 
@@ -5334,7 +5387,13 @@ func (c *Checker) createMaybeMethod(subject Expression, methodName string, args 
 		panic(fmt.Sprintf("Unknown Maybe method: %s", methodName))
 	}
 	if (kind == MaybeSet || kind == MaybeClear) && !c.isMutable(subject) {
-		c.addError(fmt.Sprintf("Immutable: Maybe.%s receiver", methodName), loc)
+		c.addDiagnostic(immutableReceiverDiagnostic{
+			Kind:            immutableMaybeReceiver,
+			Receiver:        "Maybe",
+			Method:          methodName,
+			Span:            c.sourceSpan(loc),
+			DeclarationSpan: expressionBindingSpan(subject),
+		}.build())
 		return nil
 	}
 	return &MaybeMethod{
@@ -5931,7 +5990,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					pointerForeign.MethodsLoaded = pointerForeign.Methods != nil || pointerForeign.UnsupportedMethods != nil
 					if pointerSig := pointerForeign.get(s.Property.Name); pointerSig != nil {
 						if !c.isMutable(subj) {
-							c.addError(fmt.Sprintf("Cannot access pointer receiver method %s.%s on immutable value", foreign, s.Property.Name), s.Property.GetLocation())
+							c.addDiagnostic(immutableReceiverDiagnostic{
+								Kind:            immutablePointerMethodAccess,
+								Receiver:        foreign.String(),
+								Method:          s.Property.Name,
+								Span:            c.sourceSpan(s.Property.GetLocation()),
+								DeclarationSpan: expressionBindingSpan(subj),
+							}.build())
 							return nil
 						}
 						propType = pointerSig
@@ -6023,7 +6088,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						pointerForeign.MethodsLoaded = pointerForeign.Methods != nil || pointerForeign.UnsupportedMethods != nil
 						if pointerSig := pointerForeign.get(s.Method.Name); pointerSig != nil {
 							if !c.isMutable(subj) {
-								c.addError(fmt.Sprintf("Cannot call pointer receiver method %s.%s on immutable value", foreign, s.Method.Name), s.Method.GetLocation())
+								c.addDiagnostic(immutableReceiverDiagnostic{
+									Kind:            immutablePointerMethodCall,
+									Receiver:        foreign.String(),
+									Method:          s.Method.Name,
+									Span:            c.sourceSpan(s.Method.GetLocation()),
+									DeclarationSpan: expressionBindingSpan(subj),
+								}.build())
 								return nil
 							}
 							sig = pointerSig
@@ -6066,7 +6137,13 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			}
 
 			if fnDef.Mutates && !c.isMutable(subj) {
-				c.addError(fmt.Sprintf("Cannot mutate immutable '%s' with '.%s()'", subj, s.Method.Name), s.Method.GetLocation())
+				c.addDiagnostic(immutableReceiverDiagnostic{
+					Kind:            immutableArdReceiver,
+					Receiver:        fmt.Sprint(subj),
+					Method:          s.Method.Name,
+					Span:            c.sourceSpan(s.Method.GetLocation()),
+					DeclarationSpan: expressionBindingSpan(subj),
+				}.build())
 				return nil
 			}
 

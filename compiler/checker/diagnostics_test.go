@@ -181,6 +181,115 @@ func TestUndefinedInstanceMembersHaveStructuredDiagnostics(t *testing.T) {
 	}
 }
 
+func TestImmutableMutableReferenceHasStructuredLabels(t *testing.T) {
+	result := parse.Parse([]byte("let counter = 0\nlet r = mut counter\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[0].(*parse.VariableDeclaration)
+	borrow := result.Program.Statements[1].(*parse.VariableDeclaration)
+	operand := borrow.Value.(*parse.MutRef).Operand
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeImmutableMutableReference)
+	if diagnostic.Primary.Span.Location != operand.GetLocation() || diagnostic.Primary.Message != "`counter` is immutable" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation || diagnostic.Secondary[0].Message != "this binding is immutable" {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
+func TestReferenceRebindingHasStructuredLabels(t *testing.T) {
+	source := "mut first = 1\nmut second = 2\nlet ref = mut first\nref = mut second\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[2].(*parse.VariableDeclaration)
+	assignment := result.Program.Statements[3].(*parse.VariableAssignment)
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeReferenceRebinding)
+	if diagnostic.Primary.Span.Location != assignment.Value.GetLocation() || diagnostic.Primary.Message != "this value would rebind the reference" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
+func TestUnreachableReferentAssignmentHasStructuredLabels(t *testing.T) {
+	source := "mut items = [1, 2]\nlet ref = mut items\nref = [9, 9]\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[1].(*parse.VariableDeclaration)
+	assignment := result.Program.Statements[2].(*parse.VariableAssignment)
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUnreachableReferentAssignment)
+	if diagnostic.Primary.Span.Location != assignment.Target.GetLocation() || len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestImmutablePropertyAssignmentHasStructuredLabels(t *testing.T) {
+	source := "struct Box { value: Int }\nlet box = Box{value: 1}\nbox.value = 2\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[1].(*parse.VariableDeclaration)
+	assignment := result.Program.Statements[2].(*parse.VariableAssignment)
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeImmutablePropertyAssignment)
+	if diagnostic.Primary.Span.Location != assignment.Target.GetLocation() || diagnostic.Primary.Message != "`box.value` is immutable" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
+func TestImmutableMutatingReceiverHasStructuredLabels(t *testing.T) {
+	result := parse.Parse([]byte("let values = [1]\nvalues.push(2)\n"), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[0].(*parse.VariableDeclaration)
+
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeImmutableReceiver)
+	if diagnostic.Primary.Message != "`.push()` requires a mutable receiver" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {
+		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
+func TestGoConstantAssignmentHasStructuredDiagnostic(t *testing.T) {
+	source := "use go:time\nfn main() {\n  time::Nanosecond = 1\n}\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeGoConstantAssignment)
+	if diagnostic.Message != "Cannot assign to Go constant: time::Nanosecond" || diagnostic.Primary.Message != "Go constants are not assignable" || len(diagnostic.Secondary) != 0 {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestImmutableVariableAssignmentHasStructuredLabels(t *testing.T) {
 	const filePath = "main.ard"
 	result := parse.Parse([]byte("let count = 0\ncount = 1\n"), filePath)

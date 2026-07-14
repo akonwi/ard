@@ -188,12 +188,12 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Interface and trait parameter mismatches
   - [x] String interpolation mismatches
 
-- [ ] **Mutable references and indirect mutation**
-  - [ ] Mutable references to immutable values
-  - [ ] Reference rebinding and unreachable referent assignment
-  - [ ] Immutable property assignment
-  - [ ] Mutating calls and pointer-receiver calls on immutable values
-  - [ ] Assignment to Go constants and static properties
+- [x] **Mutable references and indirect mutation**
+  - [x] Mutable references to immutable values
+  - [x] Reference rebinding and unreachable referent assignment
+  - [x] Immutable property assignment
+  - [x] Mutating calls and pointer-receiver calls on immutable values
+  - [x] Assignment to Go constants and static properties
 
 - [ ] **Function and method call shape**
   - [ ] Calling non-functions
