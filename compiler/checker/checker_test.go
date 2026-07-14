@@ -1460,6 +1460,36 @@ func TestTraditionalForLoop(t *testing.T) {
 		},
 	})
 }
+func TestUnsupportedSameTypeRangeReportsDiagnostic(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		message string
+	}{
+		{"float", "for value in 1.0..2.0 {}\n", "Cannot create range of Float64"},
+		{"boolean", "for value in false..true {}\n", "Cannot create range of Bool"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "test.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("test.ard", result.Program, nil)
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("checker panicked: %v", recovered)
+				}
+			}()
+			c.Check()
+			want := []checker.Diagnostic{{Kind: checker.Error, Message: tt.message}}
+			if diff := cmp.Diff(want, c.Diagnostics(), compareOptions); diff != "" {
+				t.Fatalf("diagnostics mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestWhileLoops(t *testing.T) {
 	run(t, []test{
 		{

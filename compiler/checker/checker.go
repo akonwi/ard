@@ -2009,11 +2009,13 @@ func checkedBlockHasWork(block *Block) bool {
 
 func (c *Checker) checkDefer(s *parse.Defer) *Statement {
 	if c.scope.getReturnType() == nil && !c.scope.insideScript() {
-		c.addError("defer can only be used inside a function, method, closure, or script body", s.GetLocation())
+		legacy := "defer can only be used inside a function, method, closure, or script body"
+		c.addDiagnostic(invalidDeferDiagnostic{Span: c.sourceSpan(s.GetLocation()), LegacyMessage: legacy, Label: "`defer` cannot be used in a module initializer"}.build())
 		return nil
 	}
 	if c.scope.insideUnsafeBlock() {
-		c.addError("defer is not allowed inside unsafe blocks; move it outside the unsafe block", s.GetLocation())
+		legacy := "defer is not allowed inside unsafe blocks; move it outside the unsafe block"
+		c.addDiagnostic(invalidDeferDiagnostic{Span: c.sourceSpan(s.GetLocation()), LegacyMessage: legacy, Label: "move this deferred work outside the unsafe block"}.build())
 		return nil
 	}
 
@@ -2022,7 +2024,7 @@ func (c *Checker) checkDefer(s *parse.Defer) *Statement {
 
 	if s.Expr != nil {
 		if !isDeferCallExpression(s.Expr) {
-			c.addError("defer call form requires a call expression", s.Expr.GetLocation())
+			c.addDiagnostic(invalidDeferDiagnostic{Span: c.sourceSpan(s.Expr.GetLocation()), LegacyMessage: "defer call form requires a call expression", Label: "deferred expression must be a function or method call"}.build())
 			return nil
 		}
 		expr := c.withDiscardExprContext(func() Expression { return c.checkExpr(s.Expr) })
@@ -2039,7 +2041,7 @@ func (c *Checker) checkDefer(s *parse.Defer) *Statement {
 		c.scope.expectReturn(Void)
 	}, true)
 	if len(c.diagnostics) == diagnosticCount && !checkedBlockHasWork(body) {
-		c.addError("deferred block has no statements", s.GetLocation())
+		c.addDiagnostic(invalidDeferDiagnostic{Span: c.sourceSpan(s.GetLocation()), LegacyMessage: "deferred block has no statements", Label: "add work to this deferred block or remove it"}.build())
 		return nil
 	}
 	if len(c.diagnostics) != diagnosticCount {
@@ -2063,7 +2065,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			// The unsafe pre-scan already reports breaks inside unsafe
 			// blocks; avoid stacking a second diagnostic on the same token.
 			if !c.scope.insideUnsafeBlock() {
-				c.addError("break can only be used inside a loop", s.GetLocation())
+				c.addDiagnostic(invalidBreakDiagnostic{Span: c.sourceSpan(s.GetLocation()), LegacyMessage: "break can only be used inside a loop"}.build())
 			}
 			return nil
 		}
@@ -2749,7 +2751,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 			// Condition must be a boolean expression
 			if condition.Type() != Bool {
-				c.addError("While loop condition must be a boolean expression", s.Condition.GetLocation())
+				c.addDiagnostic(nonBooleanLoopConditionDiagnostic{Loop: "while", Actual: condition.Type(), Span: c.sourceSpan(s.Condition.GetLocation()), LegacyMessage: "While loop condition must be a boolean expression"}.build())
 				return nil
 			}
 
@@ -2778,12 +2780,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			initDeclStmt := parse.Statement(s.Init)
 			initStmt := c.checkStmt(&initDeclStmt)
 			if initStmt == nil || initStmt.Stmt == nil {
-				c.addError("Invalid for loop initialization", s.Init.GetLocation())
+				c.addDiagnostic(invalidForClauseDiagnostic{Clause: "initializer", Span: c.sourceSpan(s.Init.GetLocation()), LegacyMessage: "Invalid for loop initialization", Label: "this initializer could not be checked"}.build())
 				return nil
 			}
 			initVarDef, ok := initStmt.Stmt.(*VariableDef)
 			if !ok {
-				c.addError("For loop initialization must be a variable declaration", s.Init.GetLocation())
+				c.addDiagnostic(invalidForClauseDiagnostic{Clause: "initializer", Span: c.sourceSpan(s.Init.GetLocation()), LegacyMessage: "For loop initialization must be a variable declaration", Label: "for-loop initialization must declare a variable"}.build())
 				return nil
 			}
 
@@ -2795,7 +2797,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 			// Condition must be a boolean expression
 			if condition.Type() != Bool {
-				c.addError("For loop condition must be a boolean expression", s.Condition.GetLocation())
+				c.addDiagnostic(nonBooleanLoopConditionDiagnostic{Loop: "for", Actual: condition.Type(), Span: c.sourceSpan(s.Condition.GetLocation()), LegacyMessage: "For loop condition must be a boolean expression"}.build())
 				return nil
 			}
 
@@ -2803,12 +2805,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			incrStmt := parse.Statement(s.Incrementer)
 			updateStmt := c.checkStmt(&incrStmt)
 			if updateStmt == nil || updateStmt.Stmt == nil {
-				c.addError("Invalid for loop update expression", s.Incrementer.GetLocation())
+				c.addDiagnostic(invalidForClauseDiagnostic{Clause: "update", Span: c.sourceSpan(s.Incrementer.GetLocation()), LegacyMessage: "Invalid for loop update expression", Label: "this update expression could not be checked"}.build())
 				return nil
 			}
 			update, ok := updateStmt.Stmt.(*Reassignment)
 			if !ok {
-				c.addError("For loop update must be a reassignment", s.Incrementer.GetLocation())
+				c.addDiagnostic(invalidForClauseDiagnostic{Clause: "update", Span: c.sourceSpan(s.Incrementer.GetLocation()), LegacyMessage: "For loop update must be a reassignment", Label: "for-loop update must reassign a value"}.build())
 				return nil
 			}
 
@@ -2832,7 +2834,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return nil
 			}
 			if start.Type() != end.Type() {
-				c.addError(fmt.Sprintf("Invalid range: %s..%s", start.Type(), end.Type()), s.Start.GetLocation())
+				legacy := fmt.Sprintf("Invalid range: %s..%s", start.Type(), end.Type())
+				c.addDiagnostic(invalidRangeDiagnostic{StartType: start.Type(), EndType: end.Type(), StartSpan: c.sourceSpan(s.Start.GetLocation()), EndSpan: c.sourceSpan(s.End.GetLocation()), LegacyMessage: legacy}.build())
 				return nil
 			}
 
@@ -2853,7 +2856,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return &Statement{Stmt: loop}
 			}
 
-			panic(fmt.Errorf("Cannot create range of %s", start.Type()))
+			legacy := fmt.Sprintf("Cannot create range of %s", start.Type())
+			c.addDiagnostic(invalidRangeDiagnostic{StartType: start.Type(), EndType: end.Type(), StartSpan: c.sourceSpan(s.Start.GetLocation()), EndSpan: c.sourceSpan(s.End.GetLocation()), LegacyMessage: legacy, Unsupported: true}.build())
+			return nil
 		}
 	case *parse.ForInLoop:
 		{
@@ -2968,7 +2973,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			// Currently we only support string, integer, and List iteration
-			c.addError(fmt.Sprintf("Cannot iterate over a %s", iterValue.Type()), s.Iterable.GetLocation())
+			legacy := fmt.Sprintf("Cannot iterate over a %s", iterValue.Type())
+			c.addDiagnostic(unsupportedIterationDiagnostic{Actual: iterValue.Type(), Span: c.sourceSpan(s.Iterable.GetLocation()), LegacyMessage: legacy}.build())
 			return nil
 		}
 	case *parse.EnumDefinition:
@@ -8490,7 +8496,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 	case *parse.UnsafeBlock:
 		{
 			if parseStatementsContainBreak(s.Statements) {
-				c.addError("break is not allowed inside unsafe blocks", s.GetLocation())
+				c.addDiagnostic(invalidBreakDiagnostic{Span: c.sourceSpan(s.GetLocation()), LegacyMessage: "break is not allowed inside unsafe blocks", Unsafe: true}.build())
 			}
 			var expectedValue Type
 			if expectedResult, ok := c.expectedExpr.(*Result); ok {

@@ -238,12 +238,12 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Invalid generic Go type instantiation
   - [x] Generic Go functions referenced as values
 
-- [ ] **Control flow**
-  - [ ] Invalid `defer` placement and form
-  - [ ] Invalid `break`
-  - [ ] Non-boolean loop conditions
-  - [ ] Invalid `for` initialization and update
-  - [ ] Invalid ranges and unsupported iteration targets
+- [x] **Control flow**
+  - [x] Invalid `defer` placement and form
+  - [x] Invalid `break`
+  - [x] Non-boolean loop conditions
+  - [x] Invalid `for` initialization and update
+  - [x] Invalid ranges and unsupported iteration targets
 
 - [ ] **Operators and comparisons**
   - [ ] Invalid unary negation

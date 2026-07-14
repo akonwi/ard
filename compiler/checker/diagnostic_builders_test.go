@@ -125,6 +125,23 @@ func TestDuplicateDeclarationDiagnosticBuildsBothLabels(t *testing.T) {
 	}
 }
 
+func TestInvalidForClauseDiagnosticCodes(t *testing.T) {
+	span := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}, End: parse.Point{Row: 1, Col: 4}}}
+	tests := []struct {
+		clause string
+		code   DiagnosticCode
+	}{
+		{"initializer", DiagnosticCodeInvalidForInitializer},
+		{"update", DiagnosticCodeInvalidForUpdate},
+	}
+	for _, tt := range tests {
+		diagnostic := (invalidForClauseDiagnostic{Clause: tt.clause, Span: span, LegacyMessage: "legacy", Label: "invalid"}).build()
+		if diagnostic.Code != tt.code || diagnostic.Primary.Span != span {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	}
+}
+
 func TestDeclaredTypeLocationFallsBackForNil(t *testing.T) {
 	fallback := parse.Location{Start: parse.Point{Row: 3, Col: 4}, End: parse.Point{Row: 3, Col: 8}}
 	if got := declaredTypeLocation(nil, fallback); got != fallback {

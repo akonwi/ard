@@ -100,6 +100,13 @@ const (
 	DiagnosticCodeUnsupportedGoEntity           DiagnosticCode = "unsupported_go_entity"
 	DiagnosticCodeGoTypeInstantiationFailure    DiagnosticCode = "go_type_instantiation_failure"
 	DiagnosticCodeInvalidGoFunctionValue        DiagnosticCode = "invalid_go_function_value"
+	DiagnosticCodeInvalidDefer                  DiagnosticCode = "invalid_defer"
+	DiagnosticCodeInvalidBreak                  DiagnosticCode = "invalid_break"
+	DiagnosticCodeNonBooleanLoopCondition       DiagnosticCode = "non_boolean_loop_condition"
+	DiagnosticCodeInvalidForInitializer         DiagnosticCode = "invalid_for_initializer"
+	DiagnosticCodeInvalidForUpdate              DiagnosticCode = "invalid_for_update"
+	DiagnosticCodeInvalidRange                  DiagnosticCode = "invalid_range"
+	DiagnosticCodeUnsupportedIteration          DiagnosticCode = "unsupported_iteration"
 )
 
 type SourceSpan struct {
@@ -1276,6 +1283,97 @@ func (d invalidGoFunctionValueDiagnostic) build() Diagnostic {
 	}
 	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Go function cannot be used as a value", d.Detail, DiagnosticLabel{Span: d.Span, Message: message})
 	diagnostic.Code = DiagnosticCodeInvalidGoFunctionValue
+	return diagnostic
+}
+
+type invalidDeferDiagnostic struct {
+	Span          SourceSpan
+	LegacyMessage string
+	Label         string
+}
+
+func (d invalidDeferDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid defer", "", DiagnosticLabel{Span: d.Span, Message: d.Label})
+	diagnostic.Code = DiagnosticCodeInvalidDefer
+	return diagnostic
+}
+
+type invalidBreakDiagnostic struct {
+	Span          SourceSpan
+	LegacyMessage string
+	Unsafe        bool
+}
+
+func (d invalidBreakDiagnostic) build() Diagnostic {
+	label := "`break` can only target an enclosing loop"
+	if d.Unsafe {
+		label = "`break` cannot cross an unsafe block boundary"
+	}
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid break", "", DiagnosticLabel{Span: d.Span, Message: label})
+	diagnostic.Code = DiagnosticCodeInvalidBreak
+	return diagnostic
+}
+
+type nonBooleanLoopConditionDiagnostic struct {
+	Loop          string
+	Actual        Type
+	Span          SourceSpan
+	LegacyMessage string
+}
+
+func (d nonBooleanLoopConditionDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid "+d.Loop+" loop condition", "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected `Bool`, but found `%s`", d.Actual)})
+	diagnostic.Code = DiagnosticCodeNonBooleanLoopCondition
+	return diagnostic
+}
+
+type invalidForClauseDiagnostic struct {
+	Clause        string
+	Span          SourceSpan
+	LegacyMessage string
+	Label         string
+}
+
+func (d invalidForClauseDiagnostic) build() Diagnostic {
+	code := DiagnosticCodeInvalidForInitializer
+	if d.Clause == "update" {
+		code = DiagnosticCodeInvalidForUpdate
+	}
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid for-loop "+d.Clause, "", DiagnosticLabel{Span: d.Span, Message: d.Label})
+	diagnostic.Code = code
+	return diagnostic
+}
+
+type invalidRangeDiagnostic struct {
+	StartType     Type
+	EndType       Type
+	StartSpan     SourceSpan
+	EndSpan       SourceSpan
+	LegacyMessage string
+	Unsupported   bool
+}
+
+func (d invalidRangeDiagnostic) build() Diagnostic {
+	primary := DiagnosticLabel{Span: d.EndSpan, Message: fmt.Sprintf("range ends with `%s`", d.EndType)}
+	secondary := DiagnosticLabel{Span: d.StartSpan, Message: fmt.Sprintf("range starts with `%s`", d.StartType)}
+	if d.Unsupported {
+		primary = DiagnosticLabel{Span: d.StartSpan, Message: fmt.Sprintf("ranges over `%s` are not supported", d.StartType)}
+		secondary = DiagnosticLabel{Span: d.EndSpan, Message: "this endpoint has the same unsupported type"}
+	}
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Invalid range", "", primary, secondary)
+	diagnostic.Code = DiagnosticCodeInvalidRange
+	return diagnostic
+}
+
+type unsupportedIterationDiagnostic struct {
+	Actual        Type
+	Span          SourceSpan
+	LegacyMessage string
+}
+
+func (d unsupportedIterationDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(Error, d.LegacyMessage, "Value is not iterable", "", DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("values of type `%s` cannot be iterated", d.Actual)})
+	diagnostic.Code = DiagnosticCodeUnsupportedIteration
 	return diagnostic
 }
 

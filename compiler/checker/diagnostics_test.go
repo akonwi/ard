@@ -378,6 +378,42 @@ func TestGenericGoFunctionValueDiagnosticIsStructured(t *testing.T) {
 	}
 }
 
+func TestControlFlowDiagnosticsAreStructured(t *testing.T) {
+	tests := []struct {
+		name          string
+		source        string
+		code          checker.DiagnosticCode
+		legacyMessage string
+		secondaries   int
+	}{
+		{"defer placement", "fn cleanup() {}\nlet global = {\n  defer cleanup()\n  1\n}\n", checker.DiagnosticCodeInvalidDefer, "defer can only be used inside a function, method, closure, or script body", 0},
+		{"defer call form", "fn main() { defer 42 }\n", checker.DiagnosticCodeInvalidDefer, "defer call form requires a call expression", 0},
+		{"empty defer block", "fn main() { defer {} }\n", checker.DiagnosticCodeInvalidDefer, "deferred block has no statements", 0},
+		{"break", "break\n", checker.DiagnosticCodeInvalidBreak, "break can only be used inside a loop", 0},
+		{"unsafe break", "fn main() { unsafe { break } }\n", checker.DiagnosticCodeInvalidBreak, "break is not allowed inside unsafe blocks", 0},
+		{"while condition", "while 42 {}\n", checker.DiagnosticCodeNonBooleanLoopCondition, "While loop condition must be a boolean expression", 0},
+		{"for condition", "for mut i = 0; i; i = i + 1 {}\n", checker.DiagnosticCodeNonBooleanLoopCondition, "For loop condition must be a boolean expression", 0},
+		{"for update", "for mut i = 0; i < 10; i + 1 {}\n", checker.DiagnosticCodeInvalidForUpdate, "Invalid for loop update expression", 0},
+		{"range mismatch", "for value in 1..true {}\n", checker.DiagnosticCodeInvalidRange, "Invalid range: Int..Bool", 1},
+		{"unsupported range", "for value in 1.0..2.0 {}\n", checker.DiagnosticCodeInvalidRange, "Cannot create range of Float64", 1},
+		{"unsupported iteration", "for value in false {}\n", checker.DiagnosticCodeUnsupportedIteration, "Cannot iterate over a Bool", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if diagnostic.Message != tt.legacyMessage || diagnostic.Primary.Message == "" || len(diagnostic.Secondary) != tt.secondaries {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
 func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")
