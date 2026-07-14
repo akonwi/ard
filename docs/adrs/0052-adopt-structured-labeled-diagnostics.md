@@ -216,11 +216,11 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Duplicate methods
   - [x] Mutating enum methods
 
-- [ ] **Enums**
-  - [ ] Empty enums
-  - [ ] Duplicate variants
-  - [ ] Non-integer discriminants
-  - [ ] Duplicate discriminant values
+- [x] **Enums**
+  - [x] Empty enums
+  - [x] Duplicate variants
+  - [x] Non-integer discriminants
+  - [x] Duplicate discriminant values
 
 - [ ] **Collection and struct literals**
   - [ ] Empty untyped lists and maps

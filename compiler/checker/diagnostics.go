@@ -82,6 +82,10 @@ const (
 	DiagnosticCodeMissingImplMethod             DiagnosticCode = "missing_implementation_method"
 	DiagnosticCodeDuplicateMethod               DiagnosticCode = "duplicate_method"
 	DiagnosticCodeMutatingEnumMethod            DiagnosticCode = "mutating_enum_method"
+	DiagnosticCodeEmptyEnum                     DiagnosticCode = "empty_enum"
+	DiagnosticCodeDuplicateEnumVariant          DiagnosticCode = "duplicate_enum_variant"
+	DiagnosticCodeInvalidEnumDiscriminant       DiagnosticCode = "invalid_enum_discriminant"
+	DiagnosticCodeDuplicateEnumDiscriminant     DiagnosticCode = "duplicate_enum_discriminant"
 )
 
 type SourceSpan struct {
@@ -926,6 +930,80 @@ func (d mutatingEnumMethodDiagnostic) build() Diagnostic {
 		DiagnosticLabel{Span: d.Span, Message: "remove `mut` from this enum method"},
 	)
 	diagnostic.Code = DiagnosticCodeMutatingEnumMethod
+	return diagnostic
+}
+
+type emptyEnumDiagnostic struct {
+	Name string
+	Span SourceSpan
+}
+
+func (d emptyEnumDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"Enums must have at least one variant",
+		"Enum must define a variant",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("add at least one variant to `%s`", d.Name)},
+	)
+	diagnostic.Code = DiagnosticCodeEmptyEnum
+	return diagnostic
+}
+
+type duplicateEnumVariantDiagnostic struct {
+	Name string
+	Span SourceSpan
+}
+
+func (d duplicateEnumVariantDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"Duplicate variant: "+d.Name,
+		"Duplicate enum variant",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("variant `%s` is declared more than once", d.Name)},
+	)
+	diagnostic.Code = DiagnosticCodeDuplicateEnumVariant
+	return diagnostic
+}
+
+type invalidEnumDiscriminantDiagnostic struct {
+	Span SourceSpan
+}
+
+func (d invalidEnumDiscriminantDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		"Enum variant value must be an integer literal",
+		"Invalid enum discriminant",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: "enum discriminants must be integer literals"},
+	)
+	diagnostic.Code = DiagnosticCodeInvalidEnumDiscriminant
+	return diagnostic
+}
+
+type duplicateEnumDiscriminantDiagnostic struct {
+	Value        int
+	PreviousName string
+	Span         SourceSpan
+	PreviousSpan *SourceSpan
+}
+
+func (d duplicateEnumDiscriminantDiagnostic) build() Diagnostic {
+	secondary := []DiagnosticLabel{}
+	if d.PreviousSpan != nil {
+		secondary = append(secondary, DiagnosticLabel{Span: *d.PreviousSpan, Message: "first assigned here"})
+	}
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		fmt.Sprintf("Duplicate enum value %d (also used by variant %s)", d.Value, d.PreviousName),
+		"Duplicate enum discriminant",
+		"",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("value `%d` is already used by variant `%s`", d.Value, d.PreviousName)},
+		secondary...,
+	)
+	diagnostic.Code = DiagnosticCodeDuplicateEnumDiscriminant
 	return diagnostic
 }
 

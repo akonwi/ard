@@ -2949,7 +2949,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 			c.recordDef(s.NameLocation, TypeKey(c.typeOwnerPath(), s.Name))
 			if len(s.Variants) == 0 {
-				c.addError("Enums must have at least one variant", s.GetLocation())
+				c.addDiagnostic(emptyEnumDiagnostic{Name: s.Name, Span: c.sourceSpan(s.GetLocation())}.build())
 				return nil
 			}
 
@@ -2957,7 +2957,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			seenNames := make(map[string]bool)
 			for _, variant := range s.Variants {
 				if seenNames[variant.Name] {
-					c.addError(fmt.Sprintf("Duplicate variant: %s", variant.Name), s.GetLocation())
+					c.addDiagnostic(duplicateEnumVariantDiagnostic{Name: variant.Name, Span: c.sourceSpan(s.GetLocation())}.build())
 					return nil
 				}
 				seenNames[variant.Name] = true
@@ -2967,9 +2967,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			var computedValues []EnumValue
 			var nextValue int = 0
 			seenValues := make(map[int]string) // Detect duplicate discriminants
+			seenValueSpans := make(map[int]*SourceSpan)
 
 			for _, variant := range s.Variants {
 				var value int
+				var valueSpan *SourceSpan
 
 				if variant.Value != nil {
 					// Parse explicit value
@@ -2981,10 +2983,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					// Value must be an integer literal
 					intLit, ok := expr.(*IntLiteral)
 					if !ok {
-						c.addError("Enum variant value must be an integer literal", variant.Value.GetLocation())
+						c.addDiagnostic(invalidEnumDiscriminantDiagnostic{Span: c.sourceSpan(variant.Value.GetLocation())}.build())
 						continue
 					}
 					value = intLit.Value
+					span := c.sourceSpan(variant.Value.GetLocation())
+					valueSpan = &span
 					nextValue = value + 1
 				} else {
 					// Auto-assign
@@ -2994,10 +2998,17 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 				// Check for duplicate discriminant values
 				if existing, found := seenValues[value]; found {
-					c.addError(fmt.Sprintf("Duplicate enum value %d (also used by variant %s)", value, existing), s.GetLocation())
+					span := c.sourceSpan(s.GetLocation())
+					if valueSpan != nil {
+						span = *valueSpan
+					}
+					c.addDiagnostic(duplicateEnumDiscriminantDiagnostic{
+						Value: value, PreviousName: existing, Span: span, PreviousSpan: seenValueSpans[value],
+					}.build())
 					return nil
 				}
 				seenValues[value] = variant.Name
+				seenValueSpans[value] = valueSpan
 
 				computedValues = append(computedValues, EnumValue{
 					Name:  variant.Name,

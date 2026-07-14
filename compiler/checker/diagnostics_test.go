@@ -181,6 +181,66 @@ func TestUndefinedInstanceMembersHaveStructuredDiagnostics(t *testing.T) {
 	}
 }
 
+func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")
+		enum := result.Program.Statements[0].(*parse.EnumDefinition)
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeEmptyEnum)
+		if diagnostic.Primary.Span.Location != enum.GetLocation() || diagnostic.Message != "Enums must have at least one variant" {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+
+	t.Run("duplicate variant", func(t *testing.T) {
+		source := "enum Color {\n  Blue,\n  Green,\n  Blue\n}\n"
+		result := parse.Parse([]byte(source), "main.ard")
+		enum := result.Program.Statements[0].(*parse.EnumDefinition)
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeDuplicateEnumVariant)
+		if diagnostic.Primary.Span.Location != enum.GetLocation() || diagnostic.Message != "Duplicate variant: Blue" {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+
+	t.Run("invalid discriminant", func(t *testing.T) {
+		result := parse.Parse([]byte("enum Status { Ready = \"ready\" }\n"), "main.ard")
+		enum := result.Program.Statements[0].(*parse.EnumDefinition)
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidEnumDiscriminant)
+		if diagnostic.Primary.Span.Location != enum.Variants[0].Value.GetLocation() {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+
+	t.Run("duplicate explicit discriminant", func(t *testing.T) {
+		source := "enum Status {\n  Pending = 1,\n  Active = 1\n}\n"
+		result := parse.Parse([]byte(source), "main.ard")
+		enum := result.Program.Statements[0].(*parse.EnumDefinition)
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeDuplicateEnumDiscriminant)
+		if diagnostic.Primary.Span.Location != enum.Variants[1].Value.GetLocation() || len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != enum.Variants[0].Value.GetLocation() {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+
+	t.Run("auto-assigned original omits secondary", func(t *testing.T) {
+		source := "enum Status {\n  First = 1,\n  Second,\n  Third = 2\n}\n"
+		result := parse.Parse([]byte(source), "main.ard")
+		enum := result.Program.Statements[0].(*parse.EnumDefinition)
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeDuplicateEnumDiscriminant)
+		if diagnostic.Primary.Span.Location != enum.Variants[2].Value.GetLocation() || len(diagnostic.Secondary) != 0 {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+}
+
 func TestImplementationDiagnosticsAreStructured(t *testing.T) {
 	tests := []struct {
 		name            string
