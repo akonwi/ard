@@ -183,6 +183,15 @@ func (st *SymbolTable) createGenericScope(genericParams []string) *SymbolTable {
 	}
 }
 
+type genericBindingConflictError struct {
+	Name               string
+	Existing, Incoming Type
+}
+
+func (e *genericBindingConflictError) Error() string {
+	return fmt.Sprintf("generic %s already bound to %s, cannot bind to %s", e.Name, e.Existing, e.Incoming)
+}
+
 func (st *SymbolTable) bindGeneric(genericName string, concreteType Type) error {
 	if st.genericContext == nil {
 		return nil // No generic context, ignore
@@ -201,8 +210,7 @@ func (st *SymbolTable) bindGeneric(genericName string, concreteType Type) error 
 		actual := deref(typeVar.actual)
 		concrete := deref(concreteType)
 		if !actual.equal(concrete) {
-			return fmt.Errorf("generic %s already bound to %s, cannot bind to %s",
-				genericName, actual.String(), concrete.String())
+			return &genericBindingConflictError{Name: genericName, Existing: actual, Incoming: concrete}
 		}
 		return nil
 	}

@@ -283,8 +283,8 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Invalid `unsafe::cast` arguments and type arguments
   - [x] Invalid `unsafe::is_nil` arguments and type arguments
 
-- [ ] **Opaque helper-generated errors**
-  - [ ] Replace generic binding, argument resolution, and call-resolution `err.Error()` emissions with typed helper errors and diagnostics
+- [x] **Opaque helper-generated errors**
+  - [x] Replace generic binding, argument resolution, and call-resolution `err.Error()` emissions with typed helper errors and diagnostics
 
 #### Diagnostics outside the checker
 

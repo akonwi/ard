@@ -682,6 +682,41 @@ func TestUnsafeAPIErrorsReuseStandardDiagnostics(t *testing.T) {
 	}
 }
 
+func TestGenericHelperErrorsUseTypedDiagnostics(t *testing.T) {
+	t.Run("struct field unification", func(t *testing.T) {
+		source := "struct Box<$T> {\n  value: $T\n}\nBox<Str>{ value: 1 }\n"
+		result := parse.Parse([]byte(source), "main.ard")
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeTypeMismatch)
+		if diagnostic.Message != "type mismatch: expected Str, got Int" || diagnostic.Primary.Span.Location.Start.Row != 4 || diagnostic.Primary.Span.Location.Start.Col != 18 {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+
+	t.Run("explicit generic function argument", func(t *testing.T) {
+		source := "fn identity(of: $T) $T { of }\nidentity<Str>(1)\n"
+		result := parse.Parse([]byte(source), "main.ard")
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeIncorrectArgumentType)
+		if diagnostic.Message != "type mismatch: expected Str, got Int" || diagnostic.Primary.Span.Location.Start.Row != 2 || diagnostic.Primary.Span.Location.Start.Col != 15 || len(diagnostic.Secondary) != 1 {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+}
+
+func TestExplicitGenericMismatchWithOmittedArgumentDoesNotPanic(t *testing.T) {
+	source := "fn f(a: $T?, b: $T) $T { b }\nf<Str>(b: 1)\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeIncorrectArgumentType)
+	if diagnostic.Primary.Span.Location.Start.Row != 2 || diagnostic.Primary.Span.Location.Start.Col != 1 {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")

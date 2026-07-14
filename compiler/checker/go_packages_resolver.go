@@ -79,6 +79,14 @@ func (r *GoPackagesResolver) ResolveGoPackage(path string) (*GoPackage, error) {
 // Priming is a one-shot operation. Once primed, paths outside the primed set
 // indicate an incomplete pre-scan: loading them would silently create a
 // second type universe, so Prime reports the internal error instead.
+type goPrimeCoverageError struct {
+	Missing []string
+}
+
+func (e *goPrimeCoverageError) Error() string {
+	return fmt.Sprintf("internal compiler bug: Go packages %v were not collected by the import pre-scan; please report this", e.Missing)
+}
+
 func (r *GoPackagesResolver) Prime(paths []string) error {
 	if r.cache == nil {
 		r.cache = map[string]goPackageResolveResult{}
@@ -100,7 +108,7 @@ func (r *GoPackagesResolver) Prime(paths []string) error {
 		return nil
 	}
 	if r.primed {
-		return fmt.Errorf("internal compiler bug: Go packages %v were not collected by the import pre-scan; please report this", pending)
+		return &goPrimeCoverageError{Missing: pending}
 	}
 	defer func() { r.primed = true }()
 	if r.modulePathErr != nil {

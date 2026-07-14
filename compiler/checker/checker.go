@@ -4273,14 +4273,10 @@ func (c *Checker) primeGoResolver() {
 		return
 	}
 	paths := CollectGoImportPaths(c.moduleResolver, GoImportScanEntry{Program: c.input, ModulePath: c.modulePath})
-	if err := resolver.Prime(paths); err != nil {
-		for _, imp := range c.input.Imports {
-			if imp.Kind == parse.ImportKindGo {
-				c.addError(err.Error(), imp.GetLocation())
-				break
-			}
-		}
-	}
+	// A coverage miss is reported by the normal import-resolution pass below,
+	// which has the exact importing path and avoids duplicate diagnostics. A
+	// transitive-only miss is reported when that module is checked.
+	_ = resolver.Prime(paths)
 }
 
 // mutRefPlaceName renders a place expression for diagnostics without
@@ -4985,7 +4981,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 			default:
 				for i, actual := range typeArgs {
 					if err := genericScope.bindGeneric(genericParams[i], actual); err != nil {
-						c.addError(err.Error(), loc)
+						c.addUnificationTypeMismatch(err, actual, actual, loc)
 						break
 					}
 				}
@@ -5069,7 +5065,7 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				}
 
 				if err := c.unifyTypes(fieldExpected, checkVal.Type(), genericScope); err != nil {
-					c.addError(err.Error(), property.GetLocation())
+					c.addUnificationTypeMismatch(err, fieldExpected, checkVal.Type(), property.Value.GetLocation())
 					continue
 				}
 				// After unification, dereference to get the actual type
@@ -5948,7 +5944,7 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 	if len(callTypeArgs) > 0 {
 		specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, location)
 		if err != nil {
-			c.addGenericFunctionResolutionError(err, location)
+			c.addGenericFunctionResolutionError(err, location, resolvedExprs)
 			return nil
 		}
 		fnToUse = specialized
@@ -6229,7 +6225,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			if len(callTypeArgs) > 0 {
 				specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, s.GetLocation())
 				if err != nil {
-					c.addGenericFunctionResolutionError(err, s.GetLocation())
+					c.addGenericFunctionResolutionError(err, s.GetLocation(), resolvedExprs)
 					return nil
 				}
 				fnToUse = specialized
@@ -6524,7 +6520,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 				for i, actual := range callTypeArgs {
 					if err := genericScope.bindGeneric(methodGenericParams[i], actual); err != nil {
-						c.addError(err.Error(), s.GetLocation())
+						c.addUnificationTypeMismatch(err, actual, actual, s.Method.TypeArgs[i].GetLocation())
 						return nil
 					}
 				}
@@ -6954,7 +6950,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				if len(callTypeArgs) > 0 {
 					specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, s.GetLocation())
 					if err != nil {
-						c.addGenericFunctionResolutionError(err, s.GetLocation())
+						c.addGenericFunctionResolutionError(err, s.GetLocation(), resolvedExprs)
 						return nil
 					}
 					fnToUse = specialized
@@ -7156,7 +7152,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			if len(callTypeArgs) > 0 {
 				specialized, err := c.resolveGenericFunction(fnDef, args, callTypeArgs, s.GetLocation())
 				if err != nil {
-					c.addGenericFunctionResolutionError(err, s.GetLocation())
+					c.addGenericFunctionResolutionError(err, s.GetLocation(), resolvedExprs)
 					return nil
 				}
 				fnToUse = specialized
@@ -10174,7 +10170,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 					if target, source, ok := discardingFunctionTypes(maybeParam.Of(), checkedArg.Type()); ok {
 						for paramIndex := range target.Parameters {
 							if err := c.unifyTypes(target.Parameters[paramIndex].Type, source.Parameters[paramIndex].Type, genericScope); err != nil {
-								c.addIncorrectArgumentType(err.Error(), paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], false)
+								c.addUnificationArgumentMismatch(err, paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i])
 								return nil, nil
 							}
 						}
@@ -10198,7 +10194,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			if target, source, ok := discardingFunctionTypes(paramType, checkedArg.Type()); ok {
 				for paramIndex := range target.Parameters {
 					if err := c.unifyTypes(target.Parameters[paramIndex].Type, source.Parameters[paramIndex].Type, genericScope); err != nil {
-						c.addIncorrectArgumentType(err.Error(), paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], false)
+						c.addUnificationArgumentMismatch(err, paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i])
 						return nil, nil
 					}
 				}
@@ -10207,7 +10203,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			}
 			if !discardCoerced {
 				if err := c.unifyTypes(paramType, checkedArg.Type(), genericScope); err != nil {
-					c.addIncorrectArgumentType(err.Error(), paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], false)
+					c.addUnificationArgumentMismatch(err, paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i])
 					return nil, nil
 				}
 			}
@@ -10322,12 +10318,34 @@ type functionTypeArgumentError struct {
 
 func (e *functionTypeArgumentError) Error() string { return e.Message }
 
-func (c *Checker) addGenericFunctionResolutionError(err error, location parse.Location) {
-	if typeArgErr, ok := err.(*functionTypeArgumentError); ok {
-		c.addInvalidFunctionTypeArguments(typeArgErr.Name, typeArgErr.Expected, typeArgErr.Actual, typeArgErr.TakesTypeArgs, location, typeArgErr.Message)
-		return
+type genericFunctionArgumentError struct {
+	Index            int
+	Parameter        Parameter
+	Expected, Actual Type
+	Cause            error
+}
+
+func (e *genericFunctionArgumentError) Error() string { return e.Cause.Error() }
+
+type genericFunctionBindingError struct {
+	Function string
+	Cause    *genericBindingConflictError
+}
+
+func (e *genericFunctionBindingError) Error() string { return e.Cause.Error() }
+
+func (c *Checker) addGenericFunctionResolutionError(err error, location parse.Location, arguments []parse.Expression) {
+	switch typed := err.(type) {
+	case *functionTypeArgumentError:
+		c.addInvalidFunctionTypeArguments(typed.Name, typed.Expected, typed.Actual, typed.TakesTypeArgs, location, typed.Message)
+	case *genericFunctionArgumentError:
+		if typed.Index < len(arguments) && arguments[typed.Index] != nil {
+			location = arguments[typed.Index].GetLocation()
+		}
+		c.addUnificationArgumentMismatch(typed.Cause, typed.Expected, typed.Actual, location, typed.Parameter)
+	case *genericFunctionBindingError:
+		c.addUnificationTypeMismatch(typed.Cause, typed.Cause.Existing, typed.Cause.Incoming, location)
 	}
-	c.addError(err.Error(), location)
 }
 
 // New generic resolution using the enhanced symbol table
@@ -10361,7 +10379,7 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 			}
 
 			if err := genericScope.bindGeneric(genericParams[i], actual); err != nil {
-				return nil, err
+				return nil, &genericFunctionBindingError{Function: fnDef.Name, Cause: err.(*genericBindingConflictError)}
 			}
 		}
 	}
@@ -10370,7 +10388,7 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 	// The fresh TypeVar instances in fnDefCopy will be mutated as generics are bound
 	for i, param := range fnDefCopy.Parameters {
 		if err := c.unifyTypes(param.Type, args[i].Type(), genericScope); err != nil {
-			return nil, err
+			return nil, &genericFunctionArgumentError{Index: i, Parameter: fnDef.Parameters[i], Expected: param.Type, Actual: args[i].Type(), Cause: err}
 		}
 	}
 
@@ -10409,11 +10427,43 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 	return specialized, nil
 }
 
+type unificationError struct {
+	Expected, Actual Type
+	Legacy           string
+}
+
+func (e *unificationError) Error() string { return e.Legacy }
+
+func newUnificationError(expected, actual Type, legacy string) error {
+	return &unificationError{Expected: expected, Actual: actual, Legacy: legacy}
+}
+
 // unifyTypes performs type unification for generic function arguments.
 // It recursively walks the type tree, binding generics to concrete types.
 // When expected is a TypeVar (generic parameter), bindGeneric mutates the TypeVar in-place
 // with the concrete type, making the binding immediately visible to all callers.
 // This enables single-pass argument checking where later arguments see bindings from earlier ones.
+func unificationDiagnosticTypes(err error, expected, actual Type) (Type, Type) {
+	switch typed := err.(type) {
+	case *unificationError:
+		return typed.Expected, typed.Actual
+	case *genericBindingConflictError:
+		return typed.Existing, typed.Incoming
+	default:
+		return expected, actual
+	}
+}
+
+func (c *Checker) addUnificationTypeMismatch(err error, expected, actual Type, location parse.Location) {
+	expected, actual = unificationDiagnosticTypes(err, expected, actual)
+	c.addDiagnostic(typeMismatchDiagnostic{Expected: expected, Actual: actual, ActualSpan: c.sourceSpan(location), LegacyMessage: err.Error()}.build())
+}
+
+func (c *Checker) addUnificationArgumentMismatch(err error, expected, actual Type, location parse.Location, parameter Parameter) {
+	expected, actual = unificationDiagnosticTypes(err, expected, actual)
+	c.addIncorrectArgumentType(err.Error(), expected, actual, location, parameter, false)
+}
+
 func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTable) error {
 	expected = deref(expected)
 	actual = deref(actual)
@@ -10432,12 +10482,12 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 			actualParams = actualFn.Parameters
 			actualReturnType = actualFn.ReturnType
 		} else {
-			return fmt.Errorf("expected function, got %s", actual.String())
+			return newUnificationError(expected, actual, fmt.Sprintf("expected function, got %s", actual))
 		}
 
 		// Check parameter count
 		if len(expectedType.Parameters) != len(actualParams) {
-			return fmt.Errorf("parameter count mismatch")
+			return newUnificationError(expected, actual, "parameter count mismatch")
 		}
 
 		// Unify parameters
@@ -10456,36 +10506,36 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 			}
 			return c.unifyTypes(expectedType.err, actualResult.err, genericScope)
 		}
-		return fmt.Errorf("expected result type, got %T", actual)
+		return newUnificationError(expected, actual, fmt.Sprintf("expected result type, got %T", actual))
 	case *Maybe:
 		if actualMaybe, ok := actual.(*Maybe); ok {
 			return c.unifyTypes(expectedType.of, actualMaybe.of, genericScope)
 		}
-		return fmt.Errorf("expected maybe type, got %T", actual)
+		return newUnificationError(expected, actual, fmt.Sprintf("expected maybe type, got %T", actual))
 	case *List:
 		if actualList, ok := actual.(*List); ok {
 			return c.unifyTypes(expectedType.of, actualList.of, genericScope)
 		}
-		return fmt.Errorf("expected list type, got %T", actual)
+		return newUnificationError(expected, actual, fmt.Sprintf("expected list type, got %T", actual))
 	case *Chan:
 		if actualChannel, ok := actual.(*Chan); ok {
 			return c.unifyTypes(expectedType.of, actualChannel.of, genericScope)
 		}
-		return fmt.Errorf("expected channel type, got %T", actual)
+		return newUnificationError(expected, actual, fmt.Sprintf("expected channel type, got %T", actual))
 	case *Receiver:
 		if act, ok := actual.(*Receiver); ok {
 			return c.unifyTypes(expectedType.of, act.of, genericScope)
 		}
-		return fmt.Errorf("expected receiver type, got %T", actual)
+		return newUnificationError(expected, actual, fmt.Sprintf("expected receiver type, got %T", actual))
 	case *Sender:
 		if act, ok := actual.(*Sender); ok {
 			return c.unifyTypes(expectedType.of, act.of, genericScope)
 		}
-		return fmt.Errorf("expected sender type, got %T", actual)
+		return newUnificationError(expected, actual, fmt.Sprintf("expected sender type, got %T", actual))
 	case *StructDef:
 		actualStruct, ok := actual.(*StructDef)
 		if !ok || expectedType.Name != actualStruct.Name || namedTypeOwnersDiffer(expectedType.ModulePath, actualStruct.ModulePath) || len(expectedType.TypeArgs) != len(actualStruct.TypeArgs) {
-			return fmt.Errorf("type mismatch: expected %s, got %s", expected.String(), actual.String())
+			return newUnificationError(expected, actual, fmt.Sprintf("type mismatch: expected %s, got %s", expected, actual))
 		}
 		for i := range expectedType.TypeArgs {
 			if err := c.unifyTypes(expectedType.TypeArgs[i], actualStruct.TypeArgs[i], genericScope); err != nil {
@@ -10495,7 +10545,7 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 		for fieldName, expectedField := range expectedType.Fields {
 			actualField, ok := actualStruct.Fields[fieldName]
 			if !ok {
-				return fmt.Errorf("type mismatch: expected %s, got %s", expected.String(), actual.String())
+				return newUnificationError(expected, actual, fmt.Sprintf("type mismatch: expected %s, got %s", expected, actual))
 			}
 			if err := c.unifyTypes(expectedField, actualField, genericScope); err != nil {
 				return err
@@ -10505,7 +10555,7 @@ func (c *Checker) unifyTypes(expected Type, actual Type, genericScope *SymbolTab
 	default:
 		// Concrete types - must match exactly
 		if !expected.equal(actual) {
-			return fmt.Errorf("type mismatch: expected %s, got %s", expected.String(), actual.String())
+			return newUnificationError(expected, actual, fmt.Sprintf("type mismatch: expected %s, got %s", expected, actual))
 		}
 		return nil
 	}
