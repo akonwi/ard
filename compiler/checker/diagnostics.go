@@ -70,6 +70,10 @@ const (
 	DiagnosticCodeDuplicateArgument             DiagnosticCode = "duplicate_argument"
 	DiagnosticCodeNamedArgumentsUnsupported     DiagnosticCode = "named_arguments_unsupported"
 	DiagnosticCodeInvalidFunctionTypeArgs       DiagnosticCode = "invalid_function_type_arguments"
+	DiagnosticCodeTestNotTopLevel               DiagnosticCode = "test_not_top_level"
+	DiagnosticCodeTestParametersNotAllowed      DiagnosticCode = "test_parameters_not_allowed"
+	DiagnosticCodeGenericTestNotAllowed         DiagnosticCode = "generic_test_not_allowed"
+	DiagnosticCodeInvalidTestReturnType         DiagnosticCode = "invalid_test_return_type"
 )
 
 type SourceSpan struct {
@@ -692,6 +696,47 @@ func (d invalidFunctionTypeArgumentsDiagnostic) build() Diagnostic {
 		DiagnosticLabel{Span: d.Span, Message: primary},
 	)
 	diagnostic.Code = DiagnosticCodeInvalidFunctionTypeArgs
+	return diagnostic
+}
+
+type invalidTestFunctionKind uint8
+
+const (
+	testNotTopLevel invalidTestFunctionKind = iota
+	testParametersNotAllowed
+	genericTestNotAllowed
+	invalidTestReturnType
+)
+
+type invalidTestFunctionDiagnostic struct {
+	Kind invalidTestFunctionKind
+	Span SourceSpan
+}
+
+func (d invalidTestFunctionDiagnostic) build() Diagnostic {
+	code := DiagnosticCodeTestNotTopLevel
+	legacy := "test functions must be top-level declarations"
+	title := "Test function must be top-level"
+	primary := "move this test to the module level"
+	switch d.Kind {
+	case testParametersNotAllowed:
+		code = DiagnosticCodeTestParametersNotAllowed
+		legacy = "test functions must not take parameters"
+		title = "Test functions cannot take parameters"
+		primary = "remove test function parameters"
+	case genericTestNotAllowed:
+		code = DiagnosticCodeGenericTestNotAllowed
+		legacy = "test functions must not be generic"
+		title = "Test functions cannot be generic"
+		primary = "remove generic type parameters"
+	case invalidTestReturnType:
+		code = DiagnosticCodeInvalidTestReturnType
+		legacy = "test functions must return Void!Str"
+		title = "Invalid test return type"
+		primary = "test functions must return `Void!Str`"
+	}
+	diagnostic := newLabeledDiagnostic(Error, legacy, title, "", DiagnosticLabel{Span: d.Span, Message: primary})
+	diagnostic.Code = code
 	return diagnostic
 }
 

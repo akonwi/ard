@@ -9349,17 +9349,33 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 
 	if def.IsTest {
 		if init != nil {
-			c.addError("test functions must be top-level declarations", def.GetLocation())
+			c.addDiagnostic(invalidTestFunctionDiagnostic{
+				Kind: testNotTopLevel,
+				Span: c.sourceSpan(def.GetLocation()),
+			}.build())
 		}
 		if len(def.Parameters) > 0 {
-			c.addError("test functions must not take parameters", def.GetLocation())
+			c.addDiagnostic(invalidTestFunctionDiagnostic{
+				Kind: testParametersNotAllowed,
+				Span: c.sourceSpan(def.Parameters[0].GetLocation()),
+			}.build())
 		}
 		if len(def.TypeParams) > 0 {
-			c.addError("test functions must not be generic", def.GetLocation())
+			c.addDiagnostic(invalidTestFunctionDiagnostic{
+				Kind: genericTestNotAllowed,
+				Span: c.sourceSpan(def.GetLocation()),
+			}.build())
 		}
 		expectedReturnType := MakeResult(Void, Str)
 		if !returnType.equal(expectedReturnType) {
-			c.addError("test functions must return Void!Str", def.GetLocation())
+			location := def.GetLocation()
+			if def.ReturnType != nil {
+				location = def.ReturnType.GetLocation()
+			}
+			c.addDiagnostic(invalidTestFunctionDiagnostic{
+				Kind: invalidTestReturnType,
+				Span: c.sourceSpan(location),
+			}.build())
 		}
 	}
 

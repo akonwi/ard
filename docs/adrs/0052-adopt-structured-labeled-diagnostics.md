@@ -202,10 +202,10 @@ This checklist tracks migration from compatibility diagnostics (`addError`, `add
   - [x] Named arguments on unsupported Go and foreign calls
   - [x] Invalid function type arguments
 
-- [ ] **Function returns, closures, and tests**
+- [x] **Function returns, closures, and tests**
   - [x] Function-body return mismatches
   - [x] Value-producing `if` without `else`
-  - [ ] Invalid test placement, parameters, generics, and return types
+  - [x] Invalid test placement, parameters, generics, and return types
 
 - [ ] **Traits, interfaces, and implementations**
   - [ ] Invalid implementation targets

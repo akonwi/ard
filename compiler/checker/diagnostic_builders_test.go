@@ -125,6 +125,22 @@ func TestDuplicateDeclarationDiagnosticBuildsBothLabels(t *testing.T) {
 	}
 }
 
+func TestGenericTestDiagnostic(t *testing.T) {
+	span := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}, End: parse.Point{Row: 1, Col: 20}}}
+	diagnostic := invalidTestFunctionDiagnostic{Kind: genericTestNotAllowed, Span: span}.build()
+	if diagnostic.Code != DiagnosticCodeGenericTestNotAllowed || diagnostic.Message != "test functions must not be generic" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if diagnostic.Primary.Span != span || diagnostic.Primary.Message != "remove generic type parameters" {
+		t.Fatalf("primary = %#v", diagnostic.Primary)
+	}
+
+	nonTopLevel := invalidTestFunctionDiagnostic{Kind: testNotTopLevel, Span: span}.build()
+	if nonTopLevel.Code != DiagnosticCodeTestNotTopLevel || nonTopLevel.Primary.Message != "move this test to the module level" {
+		t.Fatalf("non-top-level diagnostic = %#v", nonTopLevel)
+	}
+}
+
 func TestTypeMismatchDiagnosticWithoutExpectationLabelsPrimary(t *testing.T) {
 	span := SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}}}
 	diagnostic := (typeMismatchDiagnostic{

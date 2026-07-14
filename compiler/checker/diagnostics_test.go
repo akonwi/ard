@@ -181,6 +181,50 @@ func TestUndefinedInstanceMembersHaveStructuredDiagnostics(t *testing.T) {
 	}
 }
 
+func TestInvalidTestFunctionDiagnosticsUsePreciseSpans(t *testing.T) {
+	t.Run("parameters", func(t *testing.T) {
+		result := parse.Parse([]byte("test fn invalid(name: Str) Void!Str { Result::ok(()) }\n"), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		function := result.Program.Statements[0].(*parse.FunctionDeclaration)
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeTestParametersNotAllowed)
+		if diagnostic.Primary.Span.Location != function.Parameters[0].GetLocation() || diagnostic.Primary.Message != "remove test function parameters" {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+
+	t.Run("return annotation", func(t *testing.T) {
+		result := parse.Parse([]byte("test fn invalid() Int { 42 }\n"), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		function := result.Program.Statements[0].(*parse.FunctionDeclaration)
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidTestReturnType)
+		if diagnostic.Primary.Span.Location != function.ReturnType.GetLocation() || diagnostic.Primary.Message != "test functions must return `Void!Str`" {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+
+	t.Run("missing return annotation", func(t *testing.T) {
+		result := parse.Parse([]byte("test fn invalid() {}\n"), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		function := result.Program.Statements[0].(*parse.FunctionDeclaration)
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidTestReturnType)
+		if diagnostic.Primary.Span.Location != function.GetLocation() {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+}
+
 func TestNonCallableHasStructuredLabels(t *testing.T) {
 	result := parse.Parse([]byte("let value = 1\nvalue()\n"), "main.ard")
 	if len(result.Errors) > 0 {
