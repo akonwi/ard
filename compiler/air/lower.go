@@ -2363,11 +2363,12 @@ func (l *lowerer) internTrait(trait *checker.Trait) (TraitID, error) {
 		loweredMethods[i] = TraitMethod{Name: method.Name, Signature: sig}
 	}
 	l.program.Traits[id] = Trait{
-		ID:         id,
-		Name:       trait.Name,
-		ModulePath: trait.ModulePath,
-		Private:    trait.IsPrivate(),
-		Methods:    loweredMethods,
+		ID:           id,
+		Name:         trait.Name,
+		ModulePath:   trait.ModulePath,
+		Private:      trait.IsPrivate(),
+		BuiltinError: checker.IsBuiltinError(trait),
+		Methods:      loweredMethods,
 	}
 	return id, nil
 }
@@ -2848,6 +2849,9 @@ func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, exp
 		}
 		if kind, ok := maybeConstructorKind(call); ok {
 			return fl.lowerMaybeConstructor(kind, expected, call)
+		}
+		if errorConstructor(call) {
+			return fl.lowerErrorConstructor(expected, call)
 		}
 	}
 	if match, ok := expr.(*checker.BoolMatch); ok {
@@ -4189,6 +4193,9 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if kind, ok := maybeConstructorKind(e); ok {
 			return fl.lowerMaybeConstructor(kind, typeID, e)
 		}
+		if errorConstructor(e) {
+			return fl.lowerErrorConstructor(typeID, e)
+		}
 		if e.Module == "ard/list" && e.Call.Name == "new" {
 			if len(e.Call.Args) != 0 {
 				return nil, fmt.Errorf("ard/list::new expects no arguments")
@@ -4521,6 +4528,17 @@ func (fl *functionLowerer) lowerResultConstructor(kind ExprKind, typeID TypeID, 
 		return nil, err
 	}
 	return &Expr{Kind: kind, Type: typeID, Target: value}, nil
+}
+
+func (fl *functionLowerer) lowerErrorConstructor(typeID TypeID, call *checker.ModuleFunctionCall) (*Expr, error) {
+	if len(call.Call.Args) != 1 {
+		return nil, fmt.Errorf("Error::new expects one argument")
+	}
+	message, err := fl.lowerExpr(call.Call.Args[0])
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: ExprMakeError, Type: typeID, Target: message}, nil
 }
 
 func (fl *functionLowerer) lowerMaybeConstructor(kind ExprKind, typeID TypeID, call *checker.ModuleFunctionCall) (*Expr, error) {
@@ -5277,6 +5295,10 @@ func resultConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func errorConstructor(call *checker.ModuleFunctionCall) bool {
+	return call.Module == "builtin/Error" && call.Call.Name == "new"
 }
 
 func maybeConstructorKind(call *checker.ModuleFunctionCall) (ExprKind, bool) {

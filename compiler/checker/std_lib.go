@@ -4,6 +4,7 @@ var prelude = map[string]Module{
 	"Result":   ResultPkg{},
 	"Maybe":    MaybePkg{},
 	"Chan":     ChannelStaticPkg{},
+	"Error":    ErrorPkg{},
 	"Receiver": EmptyBuiltinPkg{name: "Receiver"},
 	"Sender":   EmptyBuiltinPkg{name: "Sender"},
 }
@@ -47,6 +48,25 @@ func (pkg MaybePkg) Get(name string) Symbol {
 				ReturnType:    maybeType,
 			},
 		}
+	default:
+		return Symbol{}
+	}
+}
+
+type ErrorPkg struct{}
+
+func (pkg ErrorPkg) Path() string { return "builtin/Error" }
+
+func (pkg ErrorPkg) Program() *Program { return nil }
+
+func (pkg ErrorPkg) Get(name string) Symbol {
+	switch name {
+	case "new":
+		return Symbol{Name: name, Type: &FunctionDef{
+			Name:       name,
+			Parameters: []Parameter{{Name: "message", Type: Str}},
+			ReturnType: BuiltinError,
+		}}
 	default:
 		return Symbol{}
 	}
@@ -165,6 +185,7 @@ func (pkg ChannelStaticPkg) Get(name string) Symbol {
 // Symbols stay in sync.
 var BuiltinPkgNames = map[string][]string{
 	"builtin/Maybe": {"new"},
+	"builtin/Error": {"new"},
 	"ard/result":    {"ok", "err"},
 	"ard/async":     {"start"},
 	"ard/unsafe":    {"cast", "is_nil"},
@@ -172,6 +193,10 @@ var BuiltinPkgNames = map[string][]string{
 }
 
 func (pkg MaybePkg) Symbols() map[string]Symbol {
+	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
+}
+
+func (pkg ErrorPkg) Symbols() map[string]Symbol {
 	return symbolsByName(pkg, BuiltinPkgNames[pkg.Path()]...)
 }
 
@@ -203,8 +228,8 @@ func symbolsByName(mod Module, names ...string) map[string]Symbol {
 	return out
 }
 
-// PreludeModule returns a built-in prelude static package (Result, Chan,
-// Receiver, Sender) by its surface name. Tooling uses this for completion.
+// PreludeModule returns a built-in prelude static package (Result, Error,
+// Chan, Receiver, Sender) by its surface name. Tooling uses this for completion.
 func PreludeModule(name string) (Module, bool) {
 	mod, ok := prelude[name]
 	return mod, ok

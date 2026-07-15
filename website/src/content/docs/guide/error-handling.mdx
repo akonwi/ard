@@ -43,6 +43,38 @@ match result {
 
 Or use methods such as `.or(...)`, `.expect(...)`, `.map(...)`, and `.and_then(...)` for concise transformations. See [`ard/result`](/stdlib/result/) for the full API.
 
+## Go-compatible errors
+
+`Error` is Go's `error` interface, expressed in Ard as a builtin trait just like other Go interfaces. Use `Error::new` for a message-only error:
+
+```ard
+fn validate(port: Int) Void!Error {
+  match port > 0 {
+    true => Result::ok(())
+    false => Result::err(Error::new("port must be positive"))
+  }
+}
+```
+
+Define a struct and explicitly implement `Error` when an error needs structured state:
+
+```ard
+struct ValidationError {
+  field: Str,
+  message: Str,
+}
+
+impl Error for ValidationError {
+  fn error() Str {
+    "{self.field}: {self.message}"
+  }
+}
+```
+
+`T!Error` preserves the underlying Go error value when returned through generated Go APIs. `T!Str` remains supported and continues to use a message-only Go error at return boundaries. Result error types are otherwise unconstrained; use any `E` in `T!E` when Go error interoperability is not needed.
+
+Imported Go functions returning `error` continue to expose `T!Str` for compatibility. Go parameters and fields typed as `error` use builtin `Error`.
+
 ## Maybe Types
 
 Maybe types represent values that may be absent. They are written with `?` or as `Maybe<T>`:

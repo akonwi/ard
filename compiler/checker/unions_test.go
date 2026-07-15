@@ -53,9 +53,9 @@ func TestTypeUnions(t *testing.T) {
 			name: "Using unions in return declarations",
 			input: `
 				struct InvalidField { name: Str, message: Str }
-				type Error = InvalidField | Str
+				type AppError = InvalidField | Str
 
-				fn do_stuff() Error {
+				fn do_stuff() AppError {
 					"unknown failure"
 				}
 			`,
@@ -65,9 +65,9 @@ func TestTypeUnions(t *testing.T) {
 			name: "Using unions as err result",
 			input: `
 				struct InvalidField { name: Str, message: Str }
-				type Error = InvalidField | Str
+				type AppError = InvalidField | Str
 
-				fn do_stuff() Bool!Error {
+				fn do_stuff() Bool!AppError {
 					Result::err(InvalidField{ name: "foo", message: "bar" })
 				}
 			`,

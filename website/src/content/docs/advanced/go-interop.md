@@ -161,6 +161,28 @@ Interface-to-interface assignability also follows Go's rules, so a value such as
 
 Ard-defined structs can satisfy Go interfaces when their `impl` methods have Go-compatible method names and signatures. The Go backend emits receiver methods for those impls, including methods that are only needed by Go interface dispatch. Functions and closure adapters still need companion FFI wrappers.
 
+### Go errors
+
+Go's predeclared `error` interface maps to builtin `Error` in parameters, fields, and other value positions:
+
+```ard
+struct AppError {
+  message: Str,
+}
+
+impl Error for AppError {
+  fn error() Str {
+    self.message
+  }
+}
+
+let error: Error = AppError{message: "request failed"}
+```
+
+`Error::new("message")` creates a simple Go-compatible error. An explicit `impl Error` emits Go's `Error() string` method, so the Ard struct can be passed directly to Go APIs accepting `error`.
+
+For compatibility, conventional Go error returns retain their existing mapping: Go `error` becomes `Void!Str`, and `(T, error)` becomes `T!Str`. Ard functions returning `Void!Error` or `T!Error` also use Go's idiomatic error return ABI, while preserving the underlying error value.
+
 ## Struct Field Reads
 
 Exported Go struct fields use ordinary dot syntax. Field names match Go exactly, including casing.

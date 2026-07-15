@@ -608,6 +608,9 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 		unionDecl := &ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}
 		return []ast.Decl{unionDecl, l.unionMarshalJSONDecl(typ)}, nil
 	case air.TypeTraitObject:
+		if l.isBuiltinErrorType(typ.ID) {
+			return nil, nil
+		}
 		return l.lowerTraitObjectDecls(typ)
 	case air.TypeEnum:
 		typeSpec := &ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: ast.NewIdent("int")}
@@ -1451,7 +1454,7 @@ func (l *lowerer) lowerABIReturn(fn air.Function, expr air.Expr, returnType air.
 			if err != nil {
 				return nil, err
 			}
-			errExpr := ast.Expr(&ast.CallExpr{Fun: l.qualified("errors", "errors", "New"), Args: []ast.Expr{errValue.expr}})
+			errExpr := l.goErrorValueExpr(info.Error, errValue.expr)
 			if l.isVoidType(info.Value) {
 				return append(errValue.stmts, &ast.ReturnStmt{Results: []ast.Expr{errExpr}}), nil
 			}
@@ -1508,7 +1511,7 @@ func (l *lowerer) unpackABIResultExprs(typeID air.TypeID, expr ast.Expr) []ast.E
 		return []ast.Expr{expr}
 	}
 	info := l.program.Types[typeID-1]
-	if info.Kind == air.TypeResult && l.resultErrorIsStr(typeID) {
+	if info.Kind == air.TypeResult && l.resultUsesGoErrorABI(typeID) {
 		if l.isVoidType(info.Value) {
 			return []ast.Expr{expr}
 		}
@@ -1524,12 +1527,19 @@ func selectorExpr(target ast.Expr, field string) ast.Expr {
 	return &ast.SelectorExpr{X: target, Sel: ast.NewIdent(field)}
 }
 
+func (l *lowerer) goErrorValueExpr(errorType air.TypeID, expr ast.Expr) ast.Expr {
+	if l.isBuiltinErrorType(errorType) {
+		return expr
+	}
+	return &ast.CallExpr{Fun: l.qualified("errors", "errors", "New"), Args: []ast.Expr{expr}}
+}
+
 func (l *lowerer) returnPackedABIValue(typeID air.TypeID, expr ast.Expr) ([]ast.Stmt, error) {
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
 	case air.TypeResult:
 		errSel := selectorExpr(expr, "Err")
-		errExpr := ast.Expr(&ast.CallExpr{Fun: l.qualified("errors", "errors", "New"), Args: []ast.Expr{errSel}})
+		errExpr := l.goErrorValueExpr(info.Error, errSel)
 		if l.isVoidType(info.Value) {
 			return []ast.Stmt{
 				&ast.IfStmt{Cond: &ast.UnaryExpr{Op: token.NOT, X: selectorExpr(expr, "Ok")}, Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{errExpr}}}}},
@@ -2142,6 +2152,15 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerMakeClosure(fn, expr)
 	case air.ExprCallClosure:
 		return l.lowerCallClosure(fn, expr)
+	case air.ExprMakeError:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("error constructor missing message")
+		}
+		message, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		return loweredExpr{stmts: message.stmts, expr: &ast.CallExpr{Fun: l.qualified("errors", "errors", "New"), Args: []ast.Expr{message.expr}}}, nil
 	case air.ExprMakeMaybeSome:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("maybe some missing target")
@@ -3477,8 +3496,12 @@ func (l *lowerer) lowerGoErrorOnlyResultCall(expr air.Expr, stmts []ast.Stmt, ca
 	okLit := &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
 		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: ast.NewIdent("true")},
 	}}
+	errResult := ast.Expr(&ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(errTemp), Sel: ast.NewIdent("Error")}})
+	if resultInfo, ok := l.typeInfo(expr.Type); ok && resultInfo.Kind == air.TypeResult && l.isBuiltinErrorType(resultInfo.Error) {
+		errResult = ast.NewIdent(errTemp)
+	}
 	errLit := &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(errTemp), Sel: ast.NewIdent("Error")}}},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: errResult},
 	}}
 	stmts = append(stmts, &ast.IfStmt{
 		Cond: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.NEQ, Y: ast.NewIdent("nil")},
@@ -3559,7 +3582,7 @@ func (l *lowerer) lowerForeignMethodValue(fn air.Function, expr air.Expr) (lower
 	}
 	call := &ast.CallExpr{Fun: methodValue, Args: args}
 	var body []ast.Stmt
-	if retInfo.Kind == air.TypeResult && l.resultErrorIsStr(fnInfo.Return) && (shape == goResultValueError || shape == goResultErrorOnly) {
+	if retInfo.Kind == air.TypeResult && l.resultUsesGoErrorABI(fnInfo.Return) && (shape == goResultValueError || shape == goResultErrorOnly) {
 		body = append(bodyPrefix, &ast.ReturnStmt{Results: l.unpackABIResultExprs(fnInfo.Return, call)})
 	} else if retInfo.Kind == air.TypeMaybe && shape == goResultValueBool {
 		body = append(bodyPrefix, &ast.ReturnStmt{Results: l.unpackABIResultExprs(fnInfo.Return, call)})
@@ -3662,8 +3685,12 @@ func (l *lowerer) lowerGoValueErrorResultCall(expr air.Expr, stmts []ast.Stmt, c
 		&ast.KeyValueExpr{Key: ast.NewIdent("Value"), Value: ast.NewIdent(valueTemp)},
 		&ast.KeyValueExpr{Key: ast.NewIdent("Ok"), Value: ast.NewIdent("true")},
 	}}
+	errResult := ast.Expr(&ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(errTemp), Sel: ast.NewIdent("Error")}})
+	if exprInfo, ok := l.typeInfo(expr.Type); ok && exprInfo.Kind == air.TypeResult && l.isBuiltinErrorType(exprInfo.Error) {
+		errResult = ast.NewIdent(errTemp)
+	}
 	errLit := &ast.CompositeLit{Type: resultType, Elts: []ast.Expr{
-		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(errTemp), Sel: ast.NewIdent("Error")}}},
+		&ast.KeyValueExpr{Key: ast.NewIdent("Err"), Value: errResult},
 	}}
 	stmts = append(stmts, &ast.IfStmt{
 		Cond: &ast.BinaryExpr{X: ast.NewIdent(errTemp), Op: token.NEQ, Y: ast.NewIdent("nil")},
@@ -3893,7 +3920,7 @@ func (l *lowerer) goReturnFields(typeID air.TypeID) ([]*ast.Field, error) {
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
 	case air.TypeResult:
-		if !l.resultErrorIsStr(typeID) {
+		if !l.resultUsesGoErrorABI(typeID) {
 			typ, err := l.goType(typeID)
 			if err != nil {
 				return nil, err
@@ -3938,7 +3965,23 @@ func (l *lowerer) abiReturnShapeAvailable(typeID air.TypeID) bool {
 		return false
 	}
 	info := l.program.Types[typeID-1]
-	return (info.Kind == air.TypeResult && l.resultErrorIsStr(typeID)) || info.Kind == air.TypeMaybe
+	return (info.Kind == air.TypeResult && l.resultUsesGoErrorABI(typeID)) || info.Kind == air.TypeMaybe
+}
+
+func (l *lowerer) isBuiltinErrorType(typeID air.TypeID) bool {
+	if !validTypeID(l.program, typeID) {
+		return false
+	}
+	info := l.program.Types[typeID-1]
+	return info.Kind == air.TypeTraitObject && int(info.Trait) < len(l.program.Traits) && l.program.Traits[info.Trait].BuiltinError
+}
+
+func (l *lowerer) resultUsesGoErrorABI(typeID air.TypeID) bool {
+	if !validTypeID(l.program, typeID) {
+		return false
+	}
+	info := l.program.Types[typeID-1]
+	return info.Kind == air.TypeResult && (l.resultErrorIsStr(typeID) || l.isBuiltinErrorType(info.Error))
 }
 
 func (l *lowerer) resultErrorIsStr(typeID air.TypeID) bool {
@@ -4174,6 +4217,9 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 	case air.TypeAny:
 		return ast.NewIdent("any"), nil
 	case air.TypeTraitObject:
+		if l.isBuiltinErrorType(typeID) {
+			return ast.NewIdent("error"), nil
+		}
 		if l.usesNativeTraitInterface(typeID) {
 			return l.traitInterfaceTypeExpr(l.program.Traits[info.Trait]), nil
 		}
@@ -6347,7 +6393,7 @@ func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, e
 			if retInfo.Kind != air.TypeResult {
 				return loweredExpr{}, fmt.Errorf("cannot propagate Result try through non-Result ABI return")
 			}
-			errExpr := ast.Expr(&ast.CallExpr{Fun: l.qualified("errors", "errors", "New"), Args: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Err")}}})
+			errExpr := l.goErrorValueExpr(retInfo.Error, &ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Err")})
 			if l.isVoidType(retInfo.Value) {
 				elseBody = []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{errExpr}}}
 			} else {

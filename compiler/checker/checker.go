@@ -1067,6 +1067,9 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 		case "Byte":
 			baseType = Byte
 			break
+		case "Error":
+			baseType = BuiltinError
+			break
 		case "Rune":
 			baseType = Rune
 			break
@@ -2142,7 +2145,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			var sym Symbol
 			switch name := s.Trait.(type) {
 			case parse.Identifier:
-				if s, ok := c.scope.get(name.Name); ok {
+				if name.Name == "Error" {
+					sym = Symbol{Name: "Error", Type: BuiltinError}
+				} else if s, ok := c.scope.get(name.Name); ok {
 					sym = *s
 				}
 			case parse.StaticProperty:
@@ -2194,6 +2199,16 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			if !ok {
 				c.addUnresolvedReference(undefinedType, s.ForType.Name, s.ForType.GetLocation())
 				return nil
+			}
+
+			if IsBuiltinError(trait) {
+				if _, ok := typeSym.Type.(*StructDef); !ok {
+					legacy := fmt.Sprintf("%s cannot implement Error", s.ForType.Name)
+					c.addDiagnostic(invalidImplementationTargetDiagnostic{
+						Target: s.ForType.Name, ContractKind: "trait", Span: c.sourceSpan(s.ForType.GetLocation()), LegacyMessage: legacy,
+					}.build())
+					return nil
+				}
 			}
 
 			switch targetType := typeSym.Type.(type) {

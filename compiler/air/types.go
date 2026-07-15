@@ -198,11 +198,12 @@ type UnionMember struct {
 }
 
 type Trait struct {
-	ID         TraitID
-	Name       string
-	ModulePath string
-	Private    bool
-	Methods    []TraitMethod
+	ID           TraitID
+	Name         string
+	ModulePath   string
+	Private      bool
+	BuiltinError bool
+	Methods      []TraitMethod
 }
 
 type TraitMethod struct {

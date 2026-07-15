@@ -346,6 +346,9 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 	if tp, ok := t.(*types.TypeParam); ok {
 		return nil, fmt.Sprintf("type parameter %s requires instantiation", tp.Obj().Name())
 	}
+	if isGoError(t) {
+		return BuiltinError, ""
+	}
 	if isGoAny(t) {
 		return Any, ""
 	}
@@ -706,6 +709,6 @@ func isGoBool(t types.Type) bool {
 }
 
 func isGoError(t types.Type) bool {
-	named, ok := t.(*types.Named)
+	named, ok := types.Unalias(t).(*types.Named)
 	return ok && named.Obj().Pkg() == nil && named.Obj().Name() == "error"
 }

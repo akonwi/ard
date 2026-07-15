@@ -165,6 +165,7 @@ const (
 	ExprMakeMaybeSome
 	ExprMakeMaybeNone
 	ExprMakeMaybeNew
+	ExprMakeError
 	ExprMatchMaybe
 	ExprMaybeExpect
 	ExprMaybeIsNone

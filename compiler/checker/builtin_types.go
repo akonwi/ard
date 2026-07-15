@@ -5,7 +5,7 @@ func isReservedBuiltinTypeName(name string) bool {
 		return true
 	}
 	switch name {
-	case "Any", "Bool", "Byte", "Chan", "Float64", "Int", "Receiver", "Rune", "Sender", "Str", "Void":
+	case "Any", "Bool", "Byte", "Chan", "Error", "Float64", "Int", "Receiver", "Rune", "Sender", "Str", "Void":
 		return true
 	default:
 		return false
