@@ -104,6 +104,22 @@ type Trait struct {
 	private    bool
 }
 
+// Error is Ard's builtin contract for values that intentionally implement
+// Go's predeclared error interface.
+var BuiltinError = &Trait{
+	Name:       "Error",
+	ModulePath: "builtin/Error",
+	methods: []FunctionDef{{
+		Name:       "error",
+		ReturnType: Str,
+	}},
+}
+
+func IsBuiltinError(t Type) bool {
+	trait, ok := t.(*Trait)
+	return ok && trait.ModulePath == BuiltinError.ModulePath && trait.Name == BuiltinError.Name
+}
+
 func (t Trait) String() string {
 	return t.Name
 }
