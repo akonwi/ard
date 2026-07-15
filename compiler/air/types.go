@@ -71,8 +71,9 @@ type Function struct {
 }
 
 type Signature struct {
-	Params []Param
-	Return TypeID
+	Params          []Param
+	Return          TypeID
+	ReturnReference bool
 }
 
 type Param struct {
@@ -86,9 +87,9 @@ type Local struct {
 	Name    string
 	Type    TypeID
 	Mutable bool
-	// Reference marks a local bound to live mutable storage owned elsewhere
-	// (an Ard `mut T` value produced by a foreign call). The Go backend keeps
-	// the local pointer-backed so mutations flow through to the owner.
+	// Reference marks a local bound to live mutable storage owned elsewhere.
+	// The Go backend preserves the referent's sharing representation so
+	// mutations flow through to the owner.
 	Reference bool
 }
 
@@ -161,10 +162,11 @@ type TypeInfo struct {
 	EnumOpen bool
 	Members  []UnionMember
 
-	Params       []TypeID
-	ParamMutable []bool
-	Return       TypeID
-	Trait        TraitID
+	Params          []TypeID
+	ParamMutable    []bool
+	Return          TypeID
+	ReturnReference bool
+	Trait           TraitID
 
 	// Generic representation (ADR 0031). A generic definition sets TypeParams
 	// (the parameter names) and references them via TypeParam-kind fields. A

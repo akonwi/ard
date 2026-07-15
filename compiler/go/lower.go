@@ -802,7 +802,7 @@ func (l *lowerer) traitInterfaceMethodType(method air.TraitMethod) (*ast.FuncTyp
 		params = append(params, &ast.Field{Type: paramType})
 	}
 	fnType := &ast.FuncType{Params: &ast.FieldList{List: params}}
-	results, err := l.goReturnFields(method.Signature.Return)
+	results, err := l.goSignatureReturnFields(method.Signature, method.Signature.Return)
 	if err != nil {
 		return nil, err
 	}
@@ -837,7 +837,7 @@ func (l *lowerer) mutableTraitMethodFuncType(method air.TraitMethod) (ast.Expr, 
 		params = append(params, &ast.Field{Names: []*ast.Ident{ast.NewIdent(fmt.Sprintf("arg%d", i))}, Type: paramType})
 	}
 	fnType := &ast.FuncType{Params: &ast.FieldList{List: params}}
-	results, err := l.goReturnFields(method.Signature.Return)
+	results, err := l.goSignatureReturnFields(method.Signature, method.Signature.Return)
 	if err != nil {
 		return nil, err
 	}
@@ -1093,7 +1093,7 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 		return nil, err
 	}
 	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}, TypeParams: l.goFuncTypeParamList(fn)}
-	results, err := l.goReturnFields(returnTypeID)
+	results, err := l.goSignatureReturnFields(fn.Signature, returnTypeID)
 	if err != nil {
 		return nil, err
 	}
@@ -1262,7 +1262,7 @@ func (l *lowerer) lowerGoMethodWrapper(fn air.Function) (*ast.FuncDecl, bool, er
 		body = append(body, &ast.ReturnStmt{Results: l.unpackABIResultExprs(fn.Signature.Return, call)})
 	}
 	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
-	results, err := l.goReturnFields(fn.Signature.Return)
+	results, err := l.goSignatureReturnFields(fn.Signature, fn.Signature.Return)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1385,7 +1385,7 @@ func (l *lowerer) lowerBlock(fn air.Function, block air.Block, returnType air.Ty
 		stmts = append(stmts, lowered...)
 	}
 	if block.Result != nil {
-		if l.usesABIResultReturn(returnType) {
+		if !fn.Signature.ReturnReference && l.usesABIResultReturn(returnType) {
 			returnStmts, err := l.lowerABIReturn(fn, *block.Result, returnType)
 			if err != nil {
 				return nil, err
@@ -2764,10 +2764,10 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			fun = l.indexWithTypeArgs(fun, expr.TypeArgs)
 		}
 		call := &ast.CallExpr{Fun: fun, Args: args}
-		if l.abiReturnShapeAvailable(target.Signature.Return) && len(writeback) == 0 {
+		if !target.Signature.ReturnReference && l.abiReturnShapeAvailable(target.Signature.Return) && len(writeback) == 0 {
 			return l.packABICallResult(expr.Type, target.Signature.Return, stmts, call)
 		}
-		return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
+		return l.finishCallWithWriteback(expr.Type, target.Signature.ReturnReference, stmts, call, writeback)
 	case air.ExprEq, air.ExprNotEq:
 		leftTypeID := l.resolvedExprType(fn, *expr.Left)
 		rightTypeID := l.resolvedExprType(fn, *expr.Right)
@@ -3569,7 +3569,7 @@ func (l *lowerer) lowerForeignMethodValue(fn air.Function, expr air.Expr) (lower
 		body = append(bodyPrefix, &ast.ReturnStmt{Results: []ast.Expr{call}})
 	}
 	funcType := &ast.FuncType{Params: &ast.FieldList{List: params}}
-	results, err := l.goReturnFields(fnInfo.Return)
+	results, err := l.goTypeInfoReturnFields(fnInfo)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -3864,6 +3864,25 @@ func (l *lowerer) mutableTraitRefType(typeID air.TypeID) (ast.Expr, error) {
 	return ast.NewIdent(mutableTraitRefTypeName(l.program.Traits[traitID])), nil
 }
 
+func (l *lowerer) goTypeInfoReturnFields(info air.TypeInfo) ([]*ast.Field, error) {
+	return l.goReferenceAwareReturnFields(info.Return, info.ReturnReference)
+}
+
+func (l *lowerer) goSignatureReturnFields(signature air.Signature, typeID air.TypeID) ([]*ast.Field, error) {
+	return l.goReferenceAwareReturnFields(typeID, signature.ReturnReference)
+}
+
+func (l *lowerer) goReferenceAwareReturnFields(typeID air.TypeID, reference bool) ([]*ast.Field, error) {
+	if !reference || !l.mutableParamUsesPointer(typeID) {
+		return l.goReturnFields(typeID)
+	}
+	typ, err := l.mutableParamType(typeID)
+	if err != nil {
+		return nil, err
+	}
+	return []*ast.Field{{Type: typ}}, nil
+}
+
 func (l *lowerer) goReturnFields(typeID air.TypeID) ([]*ast.Field, error) {
 	if typeID == air.NoType || l.isVoidType(typeID) {
 		return nil, nil
@@ -4087,7 +4106,7 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			params = append(params, &ast.Field{Type: paramType})
 		}
 		fnType := &ast.FuncType{Params: &ast.FieldList{List: params}}
-		results, err := l.goReturnFields(info.Return)
+		results, err := l.goTypeInfoReturnFields(info)
 		if err != nil {
 			return nil, err
 		}
@@ -4561,7 +4580,7 @@ func (l *lowerer) lowerCallArgs(fn air.Function, rawArgs []air.Expr, params []ai
 	return args, stmts, writeback, nil
 }
 
-func (l *lowerer) finishCallWithWriteback(typeID air.TypeID, stmts []ast.Stmt, call ast.Expr, writeback []ast.Stmt) (loweredExpr, error) {
+func (l *lowerer) finishCallWithWriteback(typeID air.TypeID, returnReference bool, stmts []ast.Stmt, call ast.Expr, writeback []ast.Stmt) (loweredExpr, error) {
 	if len(writeback) == 0 {
 		return loweredExpr{stmts: stmts, expr: call}, nil
 	}
@@ -4572,6 +4591,9 @@ func (l *lowerer) finishCallWithWriteback(typeID air.TypeID, stmts []ast.Stmt, c
 	}
 	resultTemp := l.nextTemp()
 	resultType, err := l.goType(typeID)
+	if returnReference {
+		resultType, err = l.mutableParamType(typeID)
+	}
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -5917,7 +5939,7 @@ func (l *lowerer) lowerMaybeAndThen(fn air.Function, expr air.Expr) (loweredExpr
 	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{l.maybeValueExpr(targetExpr)}}
 	callExpr := ast.Expr(call)
 	callStmts := []ast.Stmt{}
-	if cbInfo, ok := l.functionTypeInfo(expr.Args[0].Type); ok && l.usesABIResultReturn(cbInfo.Return) {
+	if cbInfo, ok := l.functionTypeInfo(expr.Args[0].Type); ok && !cbInfo.ReturnReference && l.usesABIResultReturn(cbInfo.Return) {
 		packed, err := l.packABICallResult(expr.Type, cbInfo.Return, nil, call)
 		if err != nil {
 			return loweredExpr{}, err
@@ -6120,7 +6142,7 @@ func (l *lowerer) lowerResultAndThen(fn air.Function, expr air.Expr) (loweredExp
 	call := &ast.CallExpr{Fun: callback.expr, Args: []ast.Expr{&ast.SelectorExpr{X: targetExpr, Sel: ast.NewIdent("Value")}}}
 	callExpr := ast.Expr(call)
 	callStmts := []ast.Stmt{}
-	if cbInfo, ok := l.functionTypeInfo(expr.Args[0].Type); ok && l.usesABIResultReturn(cbInfo.Return) {
+	if cbInfo, ok := l.functionTypeInfo(expr.Args[0].Type); ok && !cbInfo.ReturnReference && l.usesABIResultReturn(cbInfo.Return) {
 		packed, err := l.packABICallResult(expr.Type, cbInfo.Return, nil, call)
 		if err != nil {
 			return loweredExpr{}, err
@@ -6305,7 +6327,7 @@ func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, e
 		}
 		elseBody = append(catchDecls, errBind, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(errName)}})
 		elseBody = append(elseBody, catchBody...)
-		if l.usesABIResultReturn(fn.Signature.Return) {
+		if !fn.Signature.ReturnReference && l.usesABIResultReturn(fn.Signature.Return) {
 			// The enclosing function uses the (T, error) tuple ABI (ADR 0038),
 			// so the caught Result must be unpacked into that shape rather than
 			// returned as a Result value. (#282)
@@ -6320,7 +6342,7 @@ func (l *lowerer) lowerTryResult(fn air.Function, expr air.Expr) (loweredExpr, e
 			elseBody = append(elseBody, &ast.ReturnStmt{})
 		}
 	} else {
-		if l.usesABIResultReturn(fn.Signature.Return) {
+		if !fn.Signature.ReturnReference && l.usesABIResultReturn(fn.Signature.Return) {
 			retInfo := l.program.Types[fn.Signature.Return-1]
 			if retInfo.Kind != air.TypeResult {
 				return loweredExpr{}, fmt.Errorf("cannot propagate Result try through non-Result ABI return")
@@ -6415,7 +6437,7 @@ func (l *lowerer) lowerTryMaybe(fn air.Function, expr air.Expr) (loweredExpr, er
 			return loweredExpr{}, err
 		}
 		noneBody = append(catchDecls, catchBody...)
-		if l.usesABIResultReturn(fn.Signature.Return) {
+		if !fn.Signature.ReturnReference && l.usesABIResultReturn(fn.Signature.Return) {
 			// Unpack the caught value into the enclosing function's tuple ABI
 			// rather than returning a Result/Maybe value directly. (#282)
 			packed, err := l.returnPackedABIValue(fn.Signature.Return, catchTarget)
@@ -6429,7 +6451,7 @@ func (l *lowerer) lowerTryMaybe(fn air.Function, expr air.Expr) (loweredExpr, er
 			noneBody = append(noneBody, &ast.ReturnStmt{})
 		}
 	} else {
-		if l.usesABIResultReturn(fn.Signature.Return) {
+		if !fn.Signature.ReturnReference && l.usesABIResultReturn(fn.Signature.Return) {
 			retInfo := l.program.Types[fn.Signature.Return-1]
 			if retInfo.Kind != air.TypeMaybe {
 				return loweredExpr{}, fmt.Errorf("cannot propagate Maybe try through non-Maybe ABI return")
@@ -6607,7 +6629,7 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	}
 	if funcType.Results == nil || len(funcType.Results.List) == 0 {
 		bodyStmts = append(bodyStmts, &ast.ExprStmt{X: call})
-	} else if l.usesABIResultReturn(closureFn.Signature.Return) {
+	} else if !closureFn.Signature.ReturnReference && l.usesABIResultReturn(closureFn.Signature.Return) {
 		bodyStmts = append(bodyStmts, &ast.ReturnStmt{Results: l.unpackABIResultExprs(closureFn.Signature.Return, call)})
 	} else {
 		bodyStmts = append(bodyStmts, &ast.ReturnStmt{Results: []ast.Expr{call}})
@@ -6740,10 +6762,10 @@ func (l *lowerer) lowerCallClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	}
 	stmts = append(append([]ast.Stmt{}, target.stmts...), stmts...)
 	call := &ast.CallExpr{Fun: target.expr, Args: args}
-	if hasFunctionType && l.abiReturnShapeAvailable(targetInfo.Return) && len(writeback) == 0 {
+	if hasFunctionType && !targetInfo.ReturnReference && l.abiReturnShapeAvailable(targetInfo.Return) && len(writeback) == 0 {
 		return l.packABICallResult(expr.Type, targetInfo.Return, stmts, call)
 	}
-	return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
+	return l.finishCallWithWriteback(expr.Type, hasFunctionType && targetInfo.ReturnReference, stmts, call, writeback)
 }
 
 func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, error) {
@@ -7499,7 +7521,7 @@ func (l *lowerer) lowerNativeTraitInterfaceCall(fn air.Function, target loweredE
 	stmts := append([]ast.Stmt{}, target.stmts...)
 	stmts = append(stmts, argStmts...)
 	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(methodName)}, Args: args}
-	return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
+	return l.finishCallWithWriteback(expr.Type, method.Signature.ReturnReference, stmts, call, writeback)
 }
 
 func (l *lowerer) exprIsMutableReference(fn air.Function, expr air.Expr) bool {
@@ -7533,24 +7555,27 @@ func (l *lowerer) lowerMutableTraitRefCall(fn air.Function, target loweredExpr, 
 	stmts := append([]ast.Stmt{}, target.stmts...)
 	stmts = append(stmts, argStmts...)
 	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(mutableTraitMethodFieldName(trait.ID, expr.Method))}, Args: args}
-	return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
+	return l.finishCallWithWriteback(expr.Type, method.Signature.ReturnReference, stmts, call, writeback)
 }
 
 func (l *lowerer) lowerTraitObjectCall(fn air.Function, target loweredExpr, expr air.Expr) (loweredExpr, error) {
 	isVoid := l.isVoidType(expr.Type)
 	stmts := append([]ast.Stmt{}, target.stmts...)
+	traitMethod := l.program.Traits[expr.Trait].Methods[expr.Method]
 
 	var resultTemp string
 	if !isVoid {
 		resultTemp = l.nextTemp()
 		resultType, err := l.goType(expr.Type)
+		if traitMethod.Signature.ReturnReference {
+			resultType, err = l.mutableParamType(expr.Type)
+		}
 		if err != nil {
 			return loweredExpr{}, err
 		}
 		stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(resultTemp)}, Type: resultType}}}})
 	}
 
-	traitMethod := l.program.Traits[expr.Trait].Methods[expr.Method]
 	loweredArgs := make([]loweredExpr, len(expr.Args))
 	for i, arg := range expr.Args {
 		var loweredArg loweredExpr

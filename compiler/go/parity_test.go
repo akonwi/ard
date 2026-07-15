@@ -1783,6 +1783,142 @@ func TestGoTargetParityMutableReferenceFieldUpdatesSharedStorage(t *testing.T) {
 		t.Fatalf("got %s, want 10", got)
 	}
 }
+func TestGoTargetParityMutableReferenceReturnUpdatesSharedStorage(t *testing.T) {
+	t.Run("native function and forwarding", func(t *testing.T) {
+		program := lowerParitySource(t, `
+		struct User {
+			name: Str,
+		}
+
+		fn get_user() mut User {
+			mut user = User{name: "Ada"}
+			(mut user)
+		}
+
+		fn forward_user() mut User {
+			get_user()
+		}
+
+		fn main() Str {
+			let user: mut User = forward_user()
+			let snapshot: User = user
+			user.name = "Joe"
+			snapshot.name + ":" + user.name
+		}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != `"Ada:Joe"` {
+			t.Fatalf("got %s, want Ada:Joe", got)
+		}
+	})
+
+	t.Run("method", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			struct User {
+				name: Str,
+			}
+
+			impl User {
+				fn mut alias() mut User {
+					(mut self)
+				}
+			}
+
+			fn main() Str {
+				mut original = User{name: "Ada"}
+				let user: mut User = original.alias()
+				user.name = "Joe"
+				original.name
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != `"Joe"` {
+			t.Fatalf("got %s, want Joe", got)
+		}
+	})
+
+	t.Run("descriptor-backed list", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			fn get_values() mut [Int] {
+				mut values = [1]
+				(mut values)
+			}
+
+			fn main() Int {
+				let values: mut [Int] = get_values()
+				values.set(0, 2)
+				values.at(0).expect("bounds")
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "2" {
+			t.Fatalf("got %s, want 2", got)
+		}
+	})
+
+	t.Run("mutable trait", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			trait View {
+				fn set(value: Int)
+				fn value() Int
+			}
+
+			struct Leaf {
+				n: Int,
+			}
+
+			impl View for Leaf {
+				fn mut set(value: Int) {
+					self.n = value
+				}
+
+				fn value() Int {
+					self.n
+				}
+			}
+
+			struct Node {
+				view: mut View,
+			}
+
+			fn borrow(view: mut View) mut View {
+				(mut view)
+			}
+
+			fn main() Int {
+				mut leaf = Leaf{n: 1}
+				let node = Node{view: leaf}
+				let view: mut View = borrow(node.view)
+				view.set(2)
+				leaf.n
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "2" {
+			t.Fatalf("got %s, want 2", got)
+		}
+	})
+
+	t.Run("function value", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			struct User {
+				name: Str,
+			}
+
+			fn get_user() mut User {
+				mut user = User{name: "Ada"}
+				(mut user)
+			}
+
+			fn main() Str {
+				let getter: fn() mut User = get_user
+				let user: mut User = getter()
+				user.name = "Joe"
+				user.name
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != `"Joe"` {
+			t.Fatalf("got %s, want Joe", got)
+		}
+	})
+}
+
 func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 	t.Run("struct", func(t *testing.T) {
 		program := lowerParitySource(t, `
