@@ -424,6 +424,7 @@ func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (Fu
 	if err != nil {
 		return NoFunction, err
 	}
+	returnReference := isMutableReferenceType(def.ReturnType)
 	id := FunctionID(len(l.program.Functions))
 	l.functions[key] = id
 	l.program.Functions = append(l.program.Functions, Function{
@@ -431,8 +432,9 @@ func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (Fu
 		Module: module,
 		Name:   def.Name,
 		Signature: Signature{
-			Params: params,
-			Return: returnType,
+			Params:          params,
+			Return:          returnType,
+			ReturnReference: returnReference,
 		},
 		IsTest:  def.IsTest,
 		Private: def.Private,
@@ -641,7 +643,7 @@ func (l *lowerer) declareClosureFunction(module ModuleID, keyName string, def *c
 		}
 		params[i] = Param{Name: param.Name, Type: typeInfo.Params[i], Mutable: mutable}
 	}
-	signature := Signature{Params: params, Return: typeInfo.Return}
+	signature := Signature{Params: params, Return: typeInfo.Return, ReturnReference: typeInfo.ReturnReference}
 	key := concreteFunctionKey(module, keyName, signature, "")
 	if id, ok := l.functions[key]; ok {
 		return id, nil
@@ -724,7 +726,7 @@ func (l *lowerer) declareGoAdapterFunction(module ModuleID, value *checker.Forei
 		ID:        id,
 		Module:    module,
 		Name:      fmt.Sprintf("go_adapter_%s_%s", sanitizeAdapterName(value.Qualifier), value.Symbol),
-		Signature: Signature{Params: params, Return: typeInfo.Return},
+		Signature: Signature{Params: params, Return: typeInfo.Return, ReturnReference: typeInfo.ReturnReference},
 		Locals:    locals,
 		Body:      Block{Result: result},
 		Private:   true,
@@ -1246,7 +1248,8 @@ func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, 
 			name += fl.l.typeName(param)
 		}
 		name += ") " + fl.l.typeName(returnType)
-		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeFunction, Params: params, ParamMutable: mutable, Return: returnType})
+		returnReference := isMutableReferenceType(typ.ReturnType)
+		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeFunction, Params: params, ParamMutable: mutable, Return: returnType, ReturnReference: returnReference})
 	}
 	return NoType, fmt.Errorf("unresolved generic type variable in %s", t.String())
 }
@@ -1344,7 +1347,8 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 			name += fl.l.typeName(param)
 		}
 		name += ") " + fl.l.typeName(returnType)
-		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeFunction, Params: params, ParamMutable: mutable, Return: returnType})
+		returnReference := isMutableReferenceType(typ.ReturnType)
+		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeFunction, Params: params, ParamMutable: mutable, Return: returnType, ReturnReference: returnReference})
 	default:
 		return fl.l.internType(t)
 	}
@@ -1559,6 +1563,7 @@ func (l *lowerer) declareMethodFunction(module ModuleID, owner checker.Type, tra
 	if err != nil {
 		return NoFunction, err
 	}
+	returnReference := isMutableReferenceType(def.ReturnType)
 
 	id := FunctionID(len(l.program.Functions))
 	l.functions[key] = id
@@ -1569,8 +1574,9 @@ func (l *lowerer) declareMethodFunction(module ModuleID, owner checker.Type, tra
 		Receiver:   ownerType,
 		MethodName: def.Name,
 		Signature: Signature{
-			Params: params,
-			Return: returnType,
+			Params:          params,
+			Return:          returnType,
+			ReturnReference: returnReference,
 		},
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
@@ -1623,7 +1629,8 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 		}
 	}
 
-	signature := Signature{Params: params, Return: returnType}
+	returnReference := isMutableReferenceType(def.ReturnType)
+	signature := Signature{Params: params, Return: returnType, ReturnReference: returnReference}
 	genericKey, err := l.genericBindingsKey(def)
 	if err != nil {
 		return NoFunction, err
@@ -1641,10 +1648,7 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 		Name:       ownerName + "." + def.Name,
 		Receiver:   ownerType,
 		MethodName: def.Name,
-		Signature: Signature{
-			Params: params,
-			Return: returnType,
-		},
+		Signature:  signature,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	return id, nil
@@ -1676,7 +1680,8 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 		}
 	}
 
-	signature := Signature{Params: params, Return: returnType}
+	returnReference := isMutableReferenceType(def.ReturnType)
+	signature := Signature{Params: params, Return: returnType, ReturnReference: returnReference}
 	genericKey, typeVars, err := fl.genericBindingsKeyAndTypeVars(def)
 	if err != nil {
 		return NoFunction, err
@@ -1696,10 +1701,7 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 		Name:       ownerName + "." + def.Name,
 		Receiver:   ownerType,
 		MethodName: def.Name,
-		Signature: Signature{
-			Params: params,
-			Return: returnType,
-		},
+		Signature:  signature,
 	})
 	fl.l.program.Modules[module].Functions = appendUniqueFunction(fl.l.program.Modules[module].Functions, id)
 	return id, nil
@@ -1812,7 +1814,8 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 		return NoFunction, nil, err
 	}
 
-	signature := Signature{Params: methodParams, Return: returnType}
+	returnReference := isMutableReferenceType(orig.ReturnType)
+	signature := Signature{Params: methodParams, Return: returnType, ReturnReference: returnReference}
 	id := FunctionID(len(fl.l.program.Functions))
 	fl.l.genericMethodDefs[key] = id
 	fl.l.functions[concreteFunctionKey(module, structDef.Name+"."+callDef.Name, signature, "genericmethod")] = id
@@ -1889,7 +1892,8 @@ func signatureForCallWithInterner(call *checker.FunctionCall, intern func(checke
 		if err != nil {
 			return Signature{}, err
 		}
-		return Signature{Params: params, Return: returnType}, nil
+		returnReference := isMutableReferenceType(call.Type())
+		return Signature{Params: params, Return: returnType, ReturnReference: returnReference}, nil
 	}
 	params := make([]Param, len(call.Args))
 	for i, arg := range call.Args {
@@ -1903,7 +1907,8 @@ func signatureForCallWithInterner(call *checker.FunctionCall, intern func(checke
 	if err != nil {
 		return Signature{}, err
 	}
-	return Signature{Params: params, Return: returnType}, nil
+	returnReference := isMutableReferenceType(call.Type())
+	return Signature{Params: params, Return: returnType, ReturnReference: returnReference}, nil
 }
 
 func genericStructDefKey(modulePath, name string) string {
@@ -2218,6 +2223,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 			return NoType, err
 		}
 		info.Return = returnType
+		info.ReturnReference = isMutableReferenceType(typ.ReturnType)
 	case *checker.Trait:
 		traitID, err := l.internTrait(typ)
 		if err != nil {
@@ -2288,7 +2294,7 @@ func syntheticTypeKey(name string, info TypeInfo) string {
 			}
 			parts[i] = fmt.Sprintf("%s%d", mut, param)
 		}
-		return fmt.Sprintf("fn:(%s)->%d", strings.Join(parts, ","), info.Return)
+		return fmt.Sprintf("fn:(%s)->%d:%t", strings.Join(parts, ","), info.Return, info.ReturnReference)
 	default:
 		return "synthetic:" + name
 	}
@@ -2383,7 +2389,8 @@ func signatureForFunctionWithInterner(params []checker.Parameter, returnType che
 	if err != nil {
 		return Signature{}, err
 	}
-	return Signature{Params: loweredParams, Return: returnID}, nil
+	returnReference := isMutableReferenceType(returnType)
+	return Signature{Params: loweredParams, Return: returnID, ReturnReference: returnReference}, nil
 }
 
 func functionHasUnresolvedTypeVar(def *checker.FunctionDef) bool {
@@ -2558,7 +2565,7 @@ func canWrapAsAny(kind TypeKind) bool {
 }
 
 func signaturesEqual(left, right Signature) bool {
-	if left.Return != right.Return || len(left.Params) != len(right.Params) {
+	if left.Return != right.Return || left.ReturnReference != right.ReturnReference || len(left.Params) != len(right.Params) {
 		return false
 	}
 	for i := range left.Params {
@@ -6362,7 +6369,7 @@ func signatureKey(signature Signature) string {
 		}
 		key += fmt.Sprintf("%s%d", mut, param.Type)
 	}
-	key += fmt.Sprintf(")->%d", signature.Return)
+	key += fmt.Sprintf(")->%d:%t", signature.Return, signature.ReturnReference)
 	return key
 }
 
@@ -6391,11 +6398,18 @@ func keyHasFunctionName(key, name string) bool {
 }
 
 // isMutableReferenceProducer reports whether an expression yields live mutable
-// storage represented as a Go pointer: a generic Go function call whose
-// instantiated result is `mut T` for an Ard-owned type. Foreign named types
-// carry pointer-ness in the type itself and do not need the local flag.
+// storage. Mutable-reference shape is distinct from the referent's value type
+// and must survive bindings so later reads and writes use the shared storage.
+func isMutableReferenceType(typ checker.Type) bool {
+	_, ok := typ.(*checker.MutableRef)
+	return ok
+}
+
 func isMutableReferenceProducer(expr checker.Expression) bool {
-	if _, ok := expr.(*checker.MutableRefExpr); ok {
+	if expr == nil {
+		return false
+	}
+	if _, ok := expr.Type().(*checker.MutableRef); ok {
 		return true
 	}
 	call, ok := expr.(*checker.ForeignFunctionCall)
