@@ -425,6 +425,8 @@ func TestOperatorDiagnosticsAreStructured(t *testing.T) {
 		{"unary minus", "-true\n", checker.DiagnosticCodeInvalidUnaryOperator, "Only signed numbers can be negated with '-'", 0},
 		{"unary not", "not \"value\"\n", checker.DiagnosticCodeInvalidUnaryOperator, "Only booleans can be negated with 'not'", 0},
 		{"incompatible arithmetic", "1 + \"two\"\n", checker.DiagnosticCodeInvalidArithmeticOperation, "Cannot add different types", 1},
+		{"unsupported plus", "true + false\n", checker.DiagnosticCodeInvalidArithmeticOperation, "The '+' operator can only be used for Int or Float64", 1},
+		{"unsupported minus", "\"left\" - \"right\"\n", checker.DiagnosticCodeInvalidArithmeticOperation, "The '-' operator can only be used for Int or Float64", 1},
 		{"unsupported arithmetic", "true * false\n", checker.DiagnosticCodeInvalidArithmeticOperation, "The '*' operator can only be used for Int or Float64", 1},
 		{"unsupported modulo", "10.0 % 3.0\n", checker.DiagnosticCodeInvalidArithmeticOperation, "The '%' operator can only be used for integer scalars", 1},
 		{"relational", "\"left\" < \"right\"\n", checker.DiagnosticCodeInvalidRelationalOperation, "Cannot compare different types", 1},

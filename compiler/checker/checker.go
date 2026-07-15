@@ -6622,7 +6622,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					if left.Type() == Str {
 						return &StrAddition{left, right}
 					}
-					c.addInvalidArithmetic("+", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "The '-' operator can only be used for Int or Float64", true)
+					c.addInvalidArithmetic("+", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "The '+' operator can only be used for Int or Float64", true)
 					return nil
 				}
 			case parse.Minus:
@@ -6642,7 +6642,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					if isArithmeticFloatLike(left.Type()) {
 						return &FloatSubtraction{left, right}
 					}
-					c.addInvalidArithmetic("-", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "The '+' operator can only be used for Int or Float64", true)
+					c.addInvalidArithmetic("-", left, right, s.Left.GetLocation(), s.Right.GetLocation(), "The '-' operator can only be used for Int or Float64", true)
 					return nil
 				}
 			case parse.Multiply:
