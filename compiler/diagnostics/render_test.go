@@ -126,6 +126,50 @@ func TestRenderLabeledDiagnostic(t *testing.T) {
 	}
 }
 
+func TestRenderUsesParserProducedStringSpans(t *testing.T) {
+	tests := []struct {
+		name, literal, carets string
+	}{
+		{name: "ordinary", literal: `"abc"`, carets: "^^^^^"},
+		{name: "escaped", literal: `"a\n"`, carets: "^^^^^"},
+		{name: "unicode", literal: `"é"`, carets: "^^^"},
+		{name: "interpolated", literal: `"value = {1}"`, carets: "^^^^^^^^^^^^^"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := "let value: Int = " + tt.literal + " // sentinel\n"
+			parsed := parse.Parse([]byte(source), "main.ard")
+			if len(parsed.Errors) != 0 {
+				t.Fatalf("parse errors: %#v", parsed.Errors)
+			}
+			c := checker.New("main.ard", parsed.Program, nil)
+			c.Check()
+			if len(c.Diagnostics()) != 1 {
+				t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+			}
+
+			provider := func(string) ([]byte, error) { return []byte(source), nil }
+			var output bytes.Buffer
+			if err := diagnostics.RenderDiagnosticWithOptions(&output, c.Diagnostics()[0], provider, diagnostics.RenderOptions{Color: diagnostics.ColorNever}); err != nil {
+				t.Fatal(err)
+			}
+			want := "" +
+				"error: Type mismatch\n" +
+				" --> main.ard:1:18\n" +
+				"  |\n" +
+				"1 | " + strings.TrimSuffix(source, "\n") + "\n" +
+				"  |                  " + tt.carets + " this expression has type `Str`\n" +
+				" --> main.ard:1:12\n" +
+				"  |\n" +
+				"1 | " + strings.TrimSuffix(source, "\n") + "\n" +
+				"  |            ^^^ this annotation requires `Int`\n"
+			if output.String() != want {
+				t.Fatalf("output:\n%s\nwant:\n%s", output.String(), want)
+			}
+		})
+	}
+}
+
 func TestRenderAlignsMultiDigitLineGutter(t *testing.T) {
 	source := "\n\n\n\n\n\n\n\n\n\n  fmt::Println(\"age = {age}\")\n"
 	diagnostic := checker.Diagnostic{
