@@ -2146,14 +2146,18 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					sym = *s
 				}
 			case parse.StaticProperty:
-				modName := name.Target.(*parse.Identifier).Name
+				target, ok := name.Target.(*parse.Identifier)
+				if !ok {
+					c.addUnresolvedReference(undefinedTrait, name.String(), name.GetLocation())
+					return nil
+				}
+				modName := target.Name
 				mod := c.resolveModule(modName)
 				if mod != nil {
 					if propId, ok := name.Property.(*parse.Identifier); ok {
 						sym = mod.Get(propId.Name)
 					} else {
-						c.addError(fmt.Sprintf("Bad path: %s", name), name.Property.GetLocation())
-						return nil
+						panic(fmt.Errorf("unexpected trait path property: %T", name.Property))
 					}
 				} else if goPkg := c.program.GoImports[modName]; goPkg != nil {
 					if propId, ok := name.Property.(*parse.Identifier); ok {
@@ -2161,8 +2165,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 							sym = Symbol{Name: propId.Name, Type: typ}
 						}
 					} else {
-						c.addError(fmt.Sprintf("Bad path: %s", name), name.Property.GetLocation())
-						return nil
+						panic(fmt.Errorf("unexpected trait path property: %T", name.Property))
 					}
 				}
 			default:
@@ -6331,7 +6334,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					c.addError(fmt.Sprintf("Cannot access property on type %s", subj.Type()), s.Property.GetLocation())
 				}
 			default:
-				// unreachable
+				// Native methods are callable but cannot currently be captured as values.
 				c.addError(fmt.Sprintf("Cannot access property on type %s", subj.Type()), s.Property.GetLocation())
 			}
 
@@ -6341,7 +6344,6 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 		{
 			subj := c.checkExpr(s.Target)
 			if subj == nil {
-				c.addError(fmt.Sprintf("Cannot access %s on Void", s.Method.Name), s.Method.GetLocation())
 				return nil
 			}
 
@@ -8231,8 +8233,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						}
 						return instance
 					default:
-						c.addError(fmt.Sprintf("Unsupported property type in %s::%s", id.Name, s.Property), s.Property.GetLocation())
-						return nil
+						panic(fmt.Errorf("unexpected Go static property: %T", s.Property))
 					}
 				}
 
@@ -8253,7 +8254,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 
 						structType, ok := sym.Type.(*StructDef)
 						if !ok {
-							c.addError(fmt.Sprintf("%s::%s is not a struct", id.Name, prop.Name.Name), prop.Name.GetLocation())
+							c.addUnresolvedReference(notAStruct, fmt.Sprintf("%s::%s", id.Name, prop.Name.Name), prop.Name.GetLocation())
 							return nil
 						}
 
@@ -8283,8 +8284,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 						c.recordTarget(prop, node, SpanTarget{Kind: TargetValue, Module: mod.Path(), Symbol: prop.Name})
 						return node
 					default:
-						c.addError(fmt.Sprintf("Unsupported property type in %s::%s", id.Name, prop), s.Property.GetLocation())
-						return nil
+						panic(fmt.Errorf("unexpected module static property: %T", s.Property))
 					}
 				}
 
@@ -8363,7 +8363,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 					}
 				}
 
-				c.addError(fmt.Sprintf("Cannot access property on %T", nestedSym.Type()), s.Property.GetLocation())
+				c.addUnresolvedReference(invalidStaticMember, fmt.Sprintf("%s::%s", s.Target, s.Property), s.Property.GetLocation())
 				return nil
 			}
 			panic(fmt.Errorf("Unexpected static property target: %T", s.Target))
@@ -9332,7 +9332,6 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 		{
 			subj := c.checkExpr(s.Target)
 			if subj == nil {
-				c.addError(fmt.Sprintf("Cannot access %s on Void", s.Method.Name), s.Method.GetLocation())
 				return nil
 			}
 		}

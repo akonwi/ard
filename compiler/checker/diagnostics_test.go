@@ -745,6 +745,64 @@ func TestStringTypeMismatchSpansRawSourceLiteral(t *testing.T) {
 	}
 }
 
+func TestFailedMethodTargetDoesNotAddVoidCascade(t *testing.T) {
+	for _, source := range []string{"missing.foo()\n", "let value: Int = missing.foo()\n"} {
+		result := parse.Parse([]byte(source), "main.ard")
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		if len(c.Diagnostics()) != 1 || c.Diagnostics()[0].Code != checker.DiagnosticCodeUndefinedName {
+			t.Fatalf("source %q diagnostics = %#v", source, c.Diagnostics())
+		}
+	}
+}
+
+func TestNestedTraitPathDiagnosesInsteadOfPanicking(t *testing.T) {
+	source := "struct S {}\nimpl foo::bar::Baz for S {\n}\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %#v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUndefinedTrait)
+	if diagnostic.Primary.Message == "" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestQualifiedStaticFailuresReuseStructuredDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "util.ard"), []byte("fn Thing() {}\nlet value = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name, expression string
+		code             checker.DiagnosticCode
+	}{
+		{"qualified non-struct", "util::Thing{}", checker.DiagnosticCodeNotAStruct},
+		{"nested non-enum member", "util::value::x", checker.DiagnosticCodeInvalidStaticMember},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := "use app/util\n" + tt.expression + "\n"
+			result := parse.Parse([]byte(source), filepath.Join(root, "main.ard"))
+			c := checker.New(filepath.Join(root, "main.ard"), result.Program, resolver)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
+			if diagnostic.Primary.Message == "" {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
 func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")
