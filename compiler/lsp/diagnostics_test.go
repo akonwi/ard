@@ -142,6 +142,30 @@ func TestParseAndCheckWithParseError(t *testing.T) {
 	}
 	t.Logf("parse error diagnostics: %v", diags)
 }
+func TestEOFParseErrorPublishesOneCharacterFallbackRange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "main.ard")
+	source := "let x ="
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer()
+	docURI := uri.File(path)
+	server.cache.Open(docURI, "ard", 1, source)
+	doc := server.cache.Get(docURI)
+	diagnostics, err := server.analyzeDiagnostics(doc, server.cache.Snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := server.checkerDiagnosticsToLSP(diagnostics, docURI)
+	if len(published) == 0 {
+		t.Fatal("expected an EOF parse diagnostic")
+	}
+	range_ := published[0].Range
+	if range_.Start.Line != 0 || range_.Start.Character != 0 || range_.End.Line != 0 || range_.End.Character != 1 {
+		t.Fatalf("range = %#v, want 0:0..0:1", range_)
+	}
+}
+
 func TestParseAndCheckUsesOpenDocumentOverlaysForImports(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {

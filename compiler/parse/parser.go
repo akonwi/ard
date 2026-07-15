@@ -3961,7 +3961,7 @@ func (p *parser) string() (Expression, error) {
 			Chunks: chunks,
 			Location: Location{
 				Start: str.GetLocation().Start,
-				End:   Point{Row: p.peek().line, Col: p.peek().column},
+				End:   p.previous().getLocation().End,
 			},
 		}, nil
 	}

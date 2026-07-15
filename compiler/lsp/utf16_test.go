@@ -6,6 +6,15 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+func TestDiagnosticLocationToRangeUsesOneCharacterFallbackForUnavailableLocation(t *testing.T) {
+	range_ := diagnosticLocationToRange(newDocLines("let x =\n"), parse.Location{
+		End: parse.Point{Col: -1},
+	})
+	if range_.Start.Line != 0 || range_.Start.Character != 0 || range_.End.Line != 0 || range_.End.Character != 1 {
+		t.Fatalf("range = %#v, want 0:0..0:1", range_)
+	}
+}
+
 func TestLocationToRangeUsesUTF16AndExclusiveEnd(t *testing.T) {
 	lines := newDocLines("é😀x\n")
 

@@ -143,6 +143,12 @@ func (s *Server) diagnosticRangeFor(filePath string, loc parse.Location) protoco
 }
 
 func diagnosticLocationToRange(lines *docLines, loc parse.Location) protocol.Range {
+	if loc.Start.Row <= 0 || loc.Start.Col <= 0 {
+		return protocol.Range{
+			Start: protocol.Position{Line: 0, Character: 0},
+			End:   protocol.Position{Line: 0, Character: 1},
+		}
+	}
 	if loc.End.Row > 0 && loc.End.Col > 0 {
 		loc.End.Col++
 	} else {

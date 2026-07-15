@@ -717,6 +717,34 @@ func TestExplicitGenericMismatchWithOmittedArgumentDoesNotPanic(t *testing.T) {
 	}
 }
 
+func TestStringTypeMismatchSpansRawSourceLiteral(t *testing.T) {
+	tests := []struct {
+		name    string
+		literal string
+		end     parse.Point
+	}{
+		{"ordinary", `"abc"`, parse.Point{Row: 1, Col: 22}},
+		{"escaped", `"a\n"`, parse.Point{Row: 1, Col: 22}},
+		{"unicode", `"é"`, parse.Point{Row: 1, Col: 21}},
+		{"interpolated", `"age = {1}"`, parse.Point{Row: 1, Col: 28}},
+		{"multiline", "\"a\nb\"", parse.Point{Row: 2, Col: 2}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte("let value: Int = "+tt.literal+"\n"), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %#v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeTypeMismatch)
+			if diagnostic.Primary.Span.Location.Start != (parse.Point{Row: 1, Col: 18}) || diagnostic.Primary.Span.Location.End != tt.end {
+				t.Fatalf("span = %#v, want 1:18..%v", diagnostic.Primary.Span.Location, tt.end)
+			}
+		})
+	}
+}
+
 func TestEnumDeclarationDiagnosticsAreStructured(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		result := parse.Parse([]byte("enum Empty {}\n"), "main.ard")

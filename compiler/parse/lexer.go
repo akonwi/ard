@@ -95,23 +95,24 @@ const (
 )
 
 type token struct {
-	kind         kind
-	line         int
-	column       int
-	text         string
-	sourceLength int
-	err          string
+	kind                           kind
+	line, column                   int
+	text                           string
+	sourceLength                   int
+	sourceEndLine, sourceEndColumn int
+	err                            string
 }
 
 func (t token) getLocation() Location {
+	start := Point{Row: t.line, Col: t.column}
+	if t.sourceEndLine > 0 && t.sourceEndColumn > 0 {
+		return Location{Start: start, End: Point{Row: t.sourceEndLine, Col: t.sourceEndColumn}}
+	}
 	length := len(t.text)
 	if t.sourceLength > 0 {
 		length = t.sourceLength
 	}
-	return Location{
-		Start: Point{Row: t.line, Col: t.column},
-		End:   Point{Row: t.line, Col: t.column + length - 1},
-	}
+	return Location{Start: start, End: Point{Row: t.line, Col: t.column + length - 1}}
 }
 
 type char struct {
@@ -428,6 +429,21 @@ func (l *lexer) comment(start *char) token {
 
 func (l *lexer) takeString(start char) (token, bool) {
 	sb := strings.Builder{}
+	lastConsumed := start
+	consumedAny := start.raw != 0
+	advance := func() *char {
+		consumed := l.advance()
+		if consumed != nil {
+			lastConsumed = *consumed
+			consumedAny = true
+		}
+		return consumed
+	}
+	advanceN := func(count int) {
+		for i := 0; i < count; i++ {
+			advance()
+		}
+	}
 
 	// Start a new state to track the string contents
 	inString := true
@@ -442,12 +458,12 @@ func (l *lexer) takeString(start char) (token, bool) {
 		if currChar.raw == '\\' {
 			if escaped, consumed, ok := l.takeEscape('"'); ok {
 				sb.WriteRune(escaped)
-				l.advanceN(consumed)
+				advanceN(consumed)
 				continue
 			}
-			l.advance() // Consume the backslash
+			advance() // Consume the backslash
 			if l.hasMore() {
-				escChar := l.advance() // Get the escaped character
+				escChar := advance() // Get the escaped character
 				switch escChar.raw {
 				case '{':
 					// Escaped opening brace - just add it literally
@@ -466,12 +482,12 @@ func (l *lexer) takeString(start char) (token, bool) {
 
 		// Check for interpolation start
 		if currChar.raw == '{' {
-			// This is an interpolation expression
-			str := token{
-				kind:   string_,
-				line:   start.line,
-				column: start.col,
-				text:   sb.String(),
+			// Use the last consumed source byte rather than deriving the endpoint
+			// from the delimiter. This remains correct when `{` starts a new line.
+			str := token{kind: string_, line: start.line, column: start.col, text: sb.String()}
+			if consumedAny {
+				str.sourceEndLine = lastConsumed.line
+				str.sourceEndColumn = lastConsumed.col
 			}
 
 			// Add the string content token
@@ -489,7 +505,7 @@ func (l *lexer) takeString(start char) (token, bool) {
 
 		// Check for end of string
 		if currChar.raw == '"' {
-			l.advance() // Consume the closing quote
+			advance() // Consume the closing quote
 			inString = false
 			break
 		}
@@ -497,22 +513,22 @@ func (l *lexer) takeString(start char) (token, bool) {
 		// Handle newlines properly
 		if currChar.raw == '\n' {
 			sb.WriteByte(currChar.raw)
-			l.advance()
+			advance()
 			l.line++
 			l.column = 1
 		} else {
 			// Regular character
 			sb.WriteByte(currChar.raw)
-			l.advance()
+			advance()
 		}
 	}
 
-	return token{
-		kind:   string_,
-		line:   start.line,
-		column: start.col,
-		text:   sb.String(),
-	}, true
+	str := token{kind: string_, line: start.line, column: start.col, text: sb.String()}
+	if consumedAny {
+		str.sourceEndLine = lastConsumed.line
+		str.sourceEndColumn = lastConsumed.col
+	}
+	return str, true
 }
 
 func (l *lexer) takeRune(start char) (token, bool) {
@@ -565,7 +581,20 @@ func (l *lexer) takeEscapedTemplateString(start char) (token, bool) {
 	// String literals inside interpolation are written with escaped quotes so
 	// they do not terminate the outer string, e.g. "{wrap(\"arg\")}".
 	// In template mode, treat \" as the delimiter for the nested string.
-	l.advance() // consume the opening quote after the backslash
+	lastConsumed := start
+	advance := func() *char {
+		consumed := l.advance()
+		if consumed != nil {
+			lastConsumed = *consumed
+		}
+		return consumed
+	}
+	advanceN := func(count int) {
+		for i := 0; i < count; i++ {
+			advance()
+		}
+	}
+	advance() // consume the opening quote after the backslash
 
 	sb := strings.Builder{}
 	for l.hasMore() {
@@ -576,20 +605,20 @@ func (l *lexer) takeEscapedTemplateString(start char) (token, bool) {
 
 		if currChar.raw == '\\' {
 			if l.cursor+1 < len(l.source) && l.source[l.cursor+1] == '"' {
-				l.advanceN(2)
-				return token{kind: string_, line: start.line, column: start.col, text: sb.String()}, true
+				advanceN(2)
+				return token{kind: string_, line: start.line, column: start.col, text: sb.String(), sourceEndLine: lastConsumed.line, sourceEndColumn: lastConsumed.col}, true
 			}
 			if escaped, consumed, ok := l.takeEscape('"'); ok {
 				sb.WriteRune(escaped)
-				l.advanceN(consumed)
+				advanceN(consumed)
 				continue
 			}
-			l.advance() // consume backslash
+			advance() // consume backslash
 			if !l.hasMore() {
 				sb.WriteByte('\\')
 				break
 			}
-			escChar := l.advance()
+			escChar := advance()
 			sb.WriteByte('\\')
 			sb.WriteByte(escChar.raw)
 			continue
@@ -597,17 +626,17 @@ func (l *lexer) takeEscapedTemplateString(start char) (token, bool) {
 
 		if currChar.raw == '\n' {
 			sb.WriteByte(currChar.raw)
-			l.advance()
+			advance()
 			l.line++
 			l.column = 1
 			continue
 		}
 
 		sb.WriteByte(currChar.raw)
-		l.advance()
+		advance()
 	}
 
-	return token{kind: string_, line: start.line, column: start.col, text: sb.String()}, true
+	return token{kind: string_, line: start.line, column: start.col, text: sb.String(), sourceEndLine: lastConsumed.line, sourceEndColumn: lastConsumed.col}, true
 }
 
 func (l *lexer) takePath(start *char) (token, bool) {
