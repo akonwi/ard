@@ -16,6 +16,35 @@ import (
 
 type SourceProvider func(path string) ([]byte, error)
 
+type ColorMode uint8
+
+const (
+	ColorAuto ColorMode = iota
+	ColorNever
+	ColorAlways
+)
+
+type RenderOptions struct {
+	Color ColorMode
+}
+
+const (
+	ansiReset      = "\x1b[0m"
+	ansiBoldRed    = "\x1b[1;31m"
+	ansiBoldYellow = "\x1b[1;33m"
+	ansiBoldCyan   = "\x1b[1;36m"
+	ansiRed        = "\x1b[31m"
+	ansiYellow     = "\x1b[33m"
+	ansiCyan       = "\x1b[36m"
+	ansiDim        = "\x1b[2m"
+)
+
+type renderStyle struct {
+	enabled           bool
+	header, primary   string
+	secondary, gutter string
+}
+
 func FileSourceProvider(roots ...string) SourceProvider {
 	return func(path string) ([]byte, error) {
 		if filepath.IsAbs(path) {
@@ -41,13 +70,18 @@ func FileSourceProvider(roots ...string) SourceProvider {
 }
 
 func Render(w io.Writer, diagnostics []checker.Diagnostic, source SourceProvider) error {
+	return RenderWithOptions(w, diagnostics, source, RenderOptions{Color: ColorAuto})
+}
+
+func RenderWithOptions(w io.Writer, diagnostics []checker.Diagnostic, source SourceProvider, options RenderOptions) error {
+	color := colorEnabled(w, options.Color)
 	for i, diagnostic := range diagnostics {
 		if i > 0 {
 			if _, err := fmt.Fprintln(w); err != nil {
 				return err
 			}
 		}
-		if err := RenderDiagnostic(w, diagnostic, source); err != nil {
+		if err := renderDiagnostic(w, diagnostic, source, diagnosticStyle(diagnostic.Kind, color)); err != nil {
 			return err
 		}
 	}
@@ -59,6 +93,10 @@ func Render(w io.Writer, diagnostics []checker.Diagnostic, source SourceProvider
 // of presentation while producing terminal paths resolvable from the caller's
 // working directory.
 func RenderRelative(w io.Writer, diagnostics []checker.Diagnostic, sourceRoot, displayRoot string) error {
+	return RenderRelativeWithOptions(w, diagnostics, sourceRoot, displayRoot, RenderOptions{Color: ColorAuto})
+}
+
+func RenderRelativeWithOptions(w io.Writer, diagnostics []checker.Diagnostic, sourceRoot, displayRoot string, options RenderOptions) error {
 	rebased := make([]checker.Diagnostic, len(diagnostics))
 	for i, diagnostic := range diagnostics {
 		rebased[i] = diagnostic
@@ -68,7 +106,7 @@ func RenderRelative(w io.Writer, diagnostics []checker.Diagnostic, sourceRoot, d
 			rebased[i].Secondary[j] = rebaseLabel(label, sourceRoot, displayRoot)
 		}
 	}
-	return Render(w, rebased, FileSourceProvider(displayRoot))
+	return RenderWithOptions(w, rebased, FileSourceProvider(displayRoot), options)
 }
 
 func rebaseLabel(label checker.DiagnosticLabel, sourceRoot, displayRoot string) checker.DiagnosticLabel {
@@ -88,17 +126,25 @@ func rebaseLabel(label checker.DiagnosticLabel, sourceRoot, displayRoot string) 
 }
 
 func RenderDiagnostic(w io.Writer, diagnostic checker.Diagnostic, source SourceProvider) error {
+	return RenderDiagnosticWithOptions(w, diagnostic, source, RenderOptions{Color: ColorAuto})
+}
+
+func RenderDiagnosticWithOptions(w io.Writer, diagnostic checker.Diagnostic, source SourceProvider, options RenderOptions) error {
+	return renderDiagnostic(w, diagnostic, source, diagnosticStyle(diagnostic.Kind, colorEnabled(w, options.Color)))
+}
+
+func renderDiagnostic(w io.Writer, diagnostic checker.Diagnostic, source SourceProvider, style renderStyle) error {
 	title := diagnostic.Title
 	if title == "" {
 		title = diagnostic.Message
 	}
-	if _, err := fmt.Fprintf(w, "%s: %s\n", diagnostic.Kind, title); err != nil {
+	if _, err := fmt.Fprintf(w, "%s%s: %s%s\n", style.header, diagnosticLevelLabel(diagnostic.Kind), title, style.reset()); err != nil {
 		return err
 	}
 
 	span := diagnostic.Primary.Span
 	if source == nil || span.FilePath == "" {
-		_, err := fmt.Fprintf(w, " --> %s:%d:%d\n", span.FilePath, span.Location.Start.Row, span.Location.Start.Col)
+		_, err := fmt.Fprintf(w, "%s --> %s:%d:%d%s\n", style.secondary, span.FilePath, span.Location.Start.Row, span.Location.Start.Col, style.reset())
 		return err
 	}
 	primary := diagnostic.Primary
@@ -107,36 +153,40 @@ func RenderDiagnostic(w io.Writer, diagnostic checker.Diagnostic, source SourceP
 	}
 	labels := append([]checker.DiagnosticLabel{primary}, diagnostic.Secondary...)
 	gutterWidth := 1
-	for _, label := range labels {
+	for i, label := range labels {
 		if width := len(strconv.Itoa(label.Span.Location.Start.Row)); width > gutterWidth {
 			gutterWidth = width
 		}
-		if err := renderLabel(w, label, source); err != nil {
+		labelColor := style.secondary
+		if i == 0 {
+			labelColor = style.primary
+		}
+		if err := renderLabel(w, label, source, style, labelColor); err != nil {
 			return err
 		}
 	}
 
 	if diagnostic.Text != "" {
-		if _, err := fmt.Fprintf(w, "%*s |\n%*s = %s\n", gutterWidth, "", gutterWidth, "", diagnostic.Text); err != nil {
+		if _, err := fmt.Fprintf(w, "%s%*s |%s\n%s%*s =%s %s\n", style.gutter, gutterWidth, "", style.reset(), style.gutter, gutterWidth, "", style.reset(), diagnostic.Text); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func renderLabel(w io.Writer, label checker.DiagnosticLabel, source SourceProvider) error {
+func renderLabel(w io.Writer, label checker.DiagnosticLabel, source SourceProvider, style renderStyle, labelColor string) error {
 	span := label.Span
 	contents, err := source(span.FilePath)
 	if err != nil {
-		_, writeErr := fmt.Fprintf(w, " --> %s:%d:%d %s\n", span.FilePath, span.Location.Start.Row, span.Location.Start.Col, label.Message)
+		_, writeErr := fmt.Fprintf(w, "%s --> %s:%d:%d%s %s%s%s\n", style.secondary, span.FilePath, span.Location.Start.Row, span.Location.Start.Col, style.reset(), labelColor, label.Message, style.reset())
 		return writeErr
 	}
-	if _, err := fmt.Fprintf(w, " --> %s:%d:%d\n", span.FilePath, span.Location.Start.Row, span.Location.Start.Col); err != nil {
+	if _, err := fmt.Fprintf(w, "%s --> %s:%d:%d%s\n", style.secondary, span.FilePath, span.Location.Start.Row, span.Location.Start.Col, style.reset()); err != nil {
 		return err
 	}
 	row := span.Location.Start.Row
 	gutterWidth := len(strconv.Itoa(row))
-	if _, err := fmt.Fprintf(w, "%*s |\n", gutterWidth, ""); err != nil {
+	if _, err := fmt.Fprintf(w, "%s%*s |%s\n", style.gutter, gutterWidth, "", style.reset()); err != nil {
 		return err
 	}
 	lines := strings.Split(string(contents), "\n")
@@ -144,11 +194,11 @@ func renderLabel(w io.Writer, label checker.DiagnosticLabel, source SourceProvid
 		return nil
 	}
 	line := lines[row-1]
-	if _, err := fmt.Fprintf(w, "%*d | %s\n", gutterWidth, row, line); err != nil {
+	if _, err := fmt.Fprintf(w, "%s%*d |%s %s\n", style.gutter, gutterWidth, row, style.reset(), line); err != nil {
 		return err
 	}
 	start, underlineWidth := underline(label, line)
-	_, err = fmt.Fprintf(w, "%*s | %s%s %s\n", gutterWidth, "", strings.Repeat(" ", start), strings.Repeat("^", underlineWidth), label.Message)
+	_, err = fmt.Fprintf(w, "%s%*s |%s %s%s%s%s %s%s%s\n", style.gutter, gutterWidth, "", style.reset(), strings.Repeat(" ", start), labelColor, strings.Repeat("^", underlineWidth), style.reset(), labelColor, label.Message, style.reset())
 	return err
 }
 
@@ -177,6 +227,54 @@ func underline(label checker.DiagnosticLabel, line string) (int, int) {
 		underlineWidth = 1
 	}
 	return start, underlineWidth
+}
+
+func colorEnabled(w io.Writer, mode ColorMode) bool {
+	switch mode {
+	case ColorAlways:
+		return true
+	case ColorNever:
+		return false
+	}
+	if _, disabled := os.LookupEnv("NO_COLOR"); disabled || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	file, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func diagnosticLevelLabel(kind checker.DiagnosticKind) string {
+	if kind == checker.Warn {
+		return "warning"
+	}
+	return string(kind)
+}
+
+func diagnosticStyle(kind checker.DiagnosticKind, enabled bool) renderStyle {
+	if !enabled {
+		return renderStyle{}
+	}
+	style := renderStyle{enabled: true, secondary: ansiCyan, gutter: ansiDim}
+	switch kind {
+	case checker.Error:
+		style.header, style.primary = ansiBoldRed, ansiRed
+	case checker.Warn:
+		style.header, style.primary = ansiBoldYellow, ansiYellow
+	default:
+		style.header, style.primary = ansiBoldCyan, ansiCyan
+	}
+	return style
+}
+
+func (s renderStyle) reset() string {
+	if s.enabled {
+		return ansiReset
+	}
+	return ""
 }
 
 func displayWidth(s string, column int) int {

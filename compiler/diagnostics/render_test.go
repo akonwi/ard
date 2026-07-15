@@ -13,6 +13,80 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+func TestRenderColorsDiagnosticLevels(t *testing.T) {
+	tests := []struct {
+		name   string
+		kind   checker.DiagnosticKind
+		header string
+		label  string
+	}{
+		{"error", checker.Error, "\x1b[1;31merror: Problem\x1b[0m", "\x1b[31m^\x1b[0m \x1b[31mhere\x1b[0m"},
+		{"warning", checker.Warn, "\x1b[1;33mwarning: Problem\x1b[0m", "\x1b[33m^\x1b[0m \x1b[33mhere\x1b[0m"},
+		{"information", checker.DiagnosticKind("information"), "\x1b[1;36minformation: Problem\x1b[0m", "\x1b[36m^\x1b[0m \x1b[36mhere\x1b[0m"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diagnostic := checker.Diagnostic{
+				Kind:  tt.kind,
+				Title: "Problem",
+				Primary: checker.DiagnosticLabel{
+					Span:    checker.SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}, End: parse.Point{Row: 1, Col: 1}}},
+					Message: "here",
+				},
+			}
+			provider := func(string) ([]byte, error) { return []byte("x\n"), nil }
+			var output bytes.Buffer
+			if err := diagnostics.RenderDiagnosticWithOptions(&output, diagnostic, provider, diagnostics.RenderOptions{Color: diagnostics.ColorAlways}); err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{tt.header, "\x1b[36m --> main.ard:1:1\x1b[0m", "\x1b[2m  |\x1b[0m", tt.label} {
+				if !strings.Contains(output.String(), want) {
+					t.Fatalf("output missing %q:\n%q", want, output.String())
+				}
+			}
+		})
+	}
+}
+
+func TestRenderColorDetailsAndNeverMode(t *testing.T) {
+	diagnostic := checker.Diagnostic{
+		Kind:  checker.Error,
+		Title: "Problem",
+		Text:  "plain explanation",
+		Primary: checker.DiagnosticLabel{
+			Span:    checker.SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}, End: parse.Point{Row: 1, Col: 1}}},
+			Message: "primary",
+		},
+		Secondary: []checker.DiagnosticLabel{{
+			Span:    checker.SourceSpan{FilePath: "main.ard", Location: parse.Location{Start: parse.Point{Row: 1, Col: 2}, End: parse.Point{Row: 1, Col: 2}}},
+			Message: "related",
+		}},
+	}
+	provider := func(string) ([]byte, error) { return []byte("xy\n"), nil }
+
+	var colored bytes.Buffer
+	if err := diagnostics.RenderDiagnosticWithOptions(&colored, diagnostic, provider, diagnostics.RenderOptions{Color: diagnostics.ColorAlways}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"\x1b[2m1 |\x1b[0m xy",
+		"\x1b[36m^\x1b[0m \x1b[36mrelated\x1b[0m",
+		"\x1b[2m  =\x1b[0m plain explanation\n",
+	} {
+		if !strings.Contains(colored.String(), want) {
+			t.Fatalf("colored output missing %q:\n%q", want, colored.String())
+		}
+	}
+
+	var plain bytes.Buffer
+	if err := diagnostics.RenderDiagnosticWithOptions(&plain, diagnostic, provider, diagnostics.RenderOptions{Color: diagnostics.ColorNever}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain.String(), "\x1b[") {
+		t.Fatalf("ColorNever output contains ANSI escapes: %q", plain.String())
+	}
+}
+
 func TestRenderLabeledDiagnostic(t *testing.T) {
 	diagnostic := checker.Diagnostic{
 		Kind:  checker.Error,
