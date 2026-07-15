@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"path/filepath"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -119,8 +120,23 @@ func (d *docLines) locationToRange(loc parse.Location) protocol.Range {
 	return protocol.Range{Start: start, End: end}
 }
 
-// docLinesFor loads a file's line index from the current snapshot.
+func docLinesFromDocuments(filePath string, docs []Doc) (*docLines, bool) {
+	cleanPath := filepath.Clean(filePath)
+	for _, doc := range docs {
+		path, err := filePathFromURI(doc.URI)
+		if err == nil && filepath.Clean(path) == cleanPath {
+			return newDocLines(doc.Text), true
+		}
+	}
+	return nil, false
+}
+
+// docLinesFor loads a file's line index, preferring the document cache because
+// open editor content is authoritative for diagnostic range conversion.
 func (s *Server) docLinesFor(filePath string) *docLines {
+	if lines, ok := docLinesFromDocuments(filePath, s.cache.Snapshot()); ok {
+		return lines
+	}
 	snap := s.workspaceFor(filePath).Snapshot()
 	content, err := snap.Content(filePath)
 	if err != nil {
@@ -139,6 +155,13 @@ func (s *Server) rangeFor(filePath string, loc parse.Location) protocol.Range {
 // exclusive UTF-16 range without changing the span convention used by other
 // semantic features.
 func (s *Server) diagnosticRangeFor(filePath string, loc parse.Location) protocol.Range {
+	return diagnosticLocationToRange(s.docLinesFor(filePath), loc)
+}
+
+func (s *Server) diagnosticRangeForDocuments(filePath string, loc parse.Location, docs []Doc) protocol.Range {
+	if lines, ok := docLinesFromDocuments(filePath, docs); ok {
+		return diagnosticLocationToRange(lines, loc)
+	}
 	return diagnosticLocationToRange(s.docLinesFor(filePath), loc)
 }
 

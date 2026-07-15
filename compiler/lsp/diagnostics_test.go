@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -224,6 +225,164 @@ func TestCircularImportIsPublishedOnInitiatingDocument(t *testing.T) {
 	}
 	if len(published[0].RelatedInformation) != 2 {
 		t.Fatalf("related information = %#v, want both imported cycle edges", published[0].RelatedInformation)
+	}
+}
+
+func TestPublishDiagnosticsIncludesCrossFileParameterProvenance(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	apiPath := filepath.Join(root, "api.ard")
+	if err := os.WriteFile(apiPath, []byte("fn greet(name: Str) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(root, "main.ard")
+	mainSource := "use app/api\n\napi::greet(42)\n"
+	if err := os.WriteFile(mainPath, []byte(mainSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer()
+	server.projectRoot = root
+	conn := newRecordingConn()
+	server.conn = conn
+	mainURI := uri.File(mainPath)
+	server.cache.Open(mainURI, "ard", 1, mainSource)
+	server.publishDiagnostics(context.Background(), mainURI)
+
+	params := conn.lastDiagnostics(t)
+	if len(params.Diagnostics) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", params.Diagnostics)
+	}
+	diagnostic := params.Diagnostics[0]
+	if diagnostic.Range.Start.Line != 2 || diagnostic.Range.Start.Character != 11 || diagnostic.Range.End.Character != 13 {
+		t.Fatalf("primary range = %#v, want line 3 `42`", diagnostic.Range)
+	}
+	if len(diagnostic.RelatedInformation) != 1 {
+		t.Fatalf("related information = %#v, want parameter declaration", diagnostic.RelatedInformation)
+	}
+	related := diagnostic.RelatedInformation[0]
+	if related.Location.URI != protocol.DocumentURI(uri.File(apiPath)) {
+		t.Fatalf("related URI = %q, want %q", related.Location.URI, uri.File(apiPath))
+	}
+	if related.Location.Range.Start.Line != 0 || related.Location.Range.Start.Character != 9 || related.Location.Range.End.Character != 13 {
+		t.Fatalf("related range = %#v, want `name: Str`", related.Location.Range)
+	}
+	if !strings.Contains(related.Message, "parameter") {
+		t.Fatalf("related message = %q", related.Message)
+	}
+}
+
+func TestPublishDiagnosticsUsesImportedOverlayAndClearsAfterUpdate(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	apiPath := filepath.Join(root, "api.ard")
+	if err := os.WriteFile(apiPath, []byte("fn greet(name: Int) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(root, "main.ard")
+	mainSource := "use app/api\n\napi::greet(42)\n"
+	if err := os.WriteFile(mainPath, []byte(mainSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer()
+	server.projectRoot = root
+	conn := newRecordingConn()
+	server.conn = conn
+	mainURI, apiURI := uri.File(mainPath), uri.File(apiPath)
+	server.cache.Open(mainURI, "ard", 1, mainSource)
+	server.cache.Open(apiURI, "ard", 1, "\nfn greet(name: Str) {}\n")
+	server.publishDiagnostics(context.Background(), mainURI)
+
+	first := conn.lastDiagnostics(t)
+	if len(first.Diagnostics) != 1 || len(first.Diagnostics[0].RelatedInformation) != 1 {
+		t.Fatalf("overlay diagnostics = %#v, want cross-file mismatch", first.Diagnostics)
+	}
+	related := first.Diagnostics[0].RelatedInformation[0]
+	if related.Location.URI != protocol.DocumentURI(apiURI) || related.Location.Range.Start.Line != 1 {
+		t.Fatalf("overlay related information = %#v, want open api.ard line 2", related)
+	}
+
+	server.cache.Update(apiURI, 2, "fn greet(name: Int) {}\n")
+	server.publishDiagnostics(context.Background(), mainURI)
+	second := conn.lastDiagnostics(t)
+	if len(second.Diagnostics) != 0 {
+		t.Fatalf("updated overlay did not clear diagnostics: %#v", second.Diagnostics)
+	}
+}
+
+func TestPublishDiagnosticsUsesOverlayUTF16ForCrossFileRelatedInformation(t *testing.T) {
+	root := t.TempDir()
+	mainPath, apiPath := filepath.Join(root, "main.ard"), filepath.Join(root, "api.ard")
+	mainSource := "bad\n"
+	apiOverlay := "😀name\n"
+
+	server := NewServer()
+	server.projectRoot = root
+	conn := newRecordingConn()
+	server.conn = conn
+	mainURI, apiURI := uri.File(mainPath), uri.File(apiPath)
+	server.cache.Open(mainURI, "ard", 1, mainSource)
+	server.cache.Open(apiURI, "ard", 1, apiOverlay)
+	server.diagnosticsAnalyzer = func(string, string, map[string]string) ([]checker.Diagnostic, error) {
+		return []checker.Diagnostic{{
+			Kind:  checker.Error,
+			Code:  checker.DiagnosticCodeTypeMismatch,
+			Title: "Type mismatch",
+			Primary: checker.DiagnosticLabel{
+				Span:    checker.SourceSpan{FilePath: mainPath, Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}, End: parse.Point{Row: 1, Col: 3}}},
+				Message: "primary",
+			},
+			Secondary: []checker.DiagnosticLabel{{
+				Span:    checker.SourceSpan{FilePath: apiPath, Location: parse.Location{Start: parse.Point{Row: 1, Col: 5}, End: parse.Point{Row: 1, Col: 8}}},
+				Message: "related",
+			}},
+		}}, nil
+	}
+	server.publishDiagnostics(context.Background(), mainURI)
+
+	params := conn.lastDiagnostics(t)
+	if len(params.Diagnostics) != 1 || len(params.Diagnostics[0].RelatedInformation) != 1 {
+		t.Fatalf("diagnostics = %#v", params.Diagnostics)
+	}
+	related := params.Diagnostics[0].RelatedInformation[0]
+	if related.Location.URI != protocol.DocumentURI(apiURI) || related.Location.Range.Start.Character != 2 || related.Location.Range.End.Character != 6 {
+		t.Fatalf("UTF-16 related location = %#v, want characters 2..6", related.Location)
+	}
+}
+
+func TestCheckerDiagnosticsToLSPUsesCapturedDocumentRevisionForRanges(t *testing.T) {
+	root := t.TempDir()
+	mainPath, apiPath := filepath.Join(root, "main.ard"), filepath.Join(root, "api.ard")
+	server := NewServer()
+	mainURI, apiURI := uri.File(mainPath), uri.File(apiPath)
+	server.cache.Open(mainURI, "ard", 1, "bad\n")
+	server.cache.Open(apiURI, "ard", 1, "😀name\n")
+	captured := server.cache.Snapshot()
+	server.cache.Update(apiURI, 2, "xxxxname\n")
+
+	diagnostic := checker.Diagnostic{
+		Kind: checker.Error,
+		Primary: checker.DiagnosticLabel{Span: checker.SourceSpan{
+			FilePath: mainPath,
+			Location: parse.Location{Start: parse.Point{Row: 1, Col: 1}, End: parse.Point{Row: 1, Col: 3}},
+		}},
+		Secondary: []checker.DiagnosticLabel{{Span: checker.SourceSpan{
+			FilePath: apiPath,
+			Location: parse.Location{Start: parse.Point{Row: 1, Col: 5}, End: parse.Point{Row: 1, Col: 8}},
+		}}},
+	}
+	published := server.checkerDiagnosticsToLSPForDocuments([]checker.Diagnostic{diagnostic}, mainURI, captured)
+	if len(published) != 1 || len(published[0].RelatedInformation) != 1 {
+		t.Fatalf("diagnostics = %#v", published)
+	}
+	range_ := published[0].RelatedInformation[0].Location.Range
+	if range_.Start.Character != 2 || range_.End.Character != 6 {
+		t.Fatalf("captured range = %#v, want old overlay characters 2..6", range_)
 	}
 }
 

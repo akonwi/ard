@@ -124,6 +124,10 @@ func diagnosticKindToLSPSeverity(kind checker.DiagnosticKind) protocol.Diagnosti
 }
 
 func (s *Server) checkerDiagnosticsToLSP(diagnostics []checker.Diagnostic, docURI uri.URI) []protocol.Diagnostic {
+	return s.checkerDiagnosticsToLSPForDocuments(diagnostics, docURI, s.cache.Snapshot())
+}
+
+func (s *Server) checkerDiagnosticsToLSPForDocuments(diagnostics []checker.Diagnostic, docURI uri.URI, docs []Doc) []protocol.Diagnostic {
 	docPath, err := filePathFromURI(docURI)
 	if err != nil {
 		return []protocol.Diagnostic{}
@@ -161,7 +165,7 @@ func (s *Server) checkerDiagnosticsToLSP(diagnostics []checker.Diagnostic, docUR
 		}
 	}
 	return checkerDiagnosticsToLSP(filtered, func(path string, location parse.Location) protocol.Range {
-		return s.diagnosticRangeFor(resolvePath(path), location)
+		return s.diagnosticRangeForDocuments(resolvePath(path), location, docs)
 	}, resolvePath)
 }
 
@@ -186,7 +190,11 @@ func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
 		return
 	}
 
-	s.sendDiagnostics(ctx, docURI, doc.Version, s.checkerDiagnosticsToLSP(diags, docURI))
+	published := s.checkerDiagnosticsToLSPForDocuments(diags, docURI, docs)
+	if !s.isDiagnosticSnapshotCurrent(docURI, doc.Version, revision) {
+		return
+	}
+	s.sendDiagnostics(ctx, docURI, doc.Version, published)
 }
 
 func findDiagnosticDocument(docs []Doc, docURI uri.URI) *Doc {
