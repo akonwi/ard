@@ -1068,7 +1068,11 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			baseType = Byte
 			break
 		case "Error":
-			baseType = BuiltinError
+			if sym, ok := c.scope.get("Error"); ok {
+				baseType = sym.Type
+			} else {
+				baseType = BuiltinError
+			}
 			break
 		case "Rune":
 			baseType = Rune
@@ -2145,10 +2149,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			var sym Symbol
 			switch name := s.Trait.(type) {
 			case parse.Identifier:
-				if name.Name == "Error" {
-					sym = Symbol{Name: "Error", Type: BuiltinError}
-				} else if s, ok := c.scope.get(name.Name); ok {
+				if s, ok := c.scope.get(name.Name); ok {
 					sym = *s
+				} else if name.Name == "Error" {
+					sym = Symbol{Name: "Error", Type: BuiltinError}
 				}
 			case parse.StaticProperty:
 				target, ok := name.Target.(*parse.Identifier)

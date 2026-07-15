@@ -21,7 +21,7 @@ Replacing the existing `Str` return mapping would break current Ard programs. Th
 
 ## Decision
 
-Add `Error` as a reserved builtin Ard contract corresponding to Go's predeclared `error` interface.
+Add `Error` as a builtin Ard contract corresponding to Go's predeclared `error` interface. For source compatibility, an existing module-local type named `Error` shadows the builtin within that module.
 
 Conceptually, the contract is:
 
@@ -120,7 +120,7 @@ The builtin contract does not change Ard's general rule that errors are values a
 
 The compiler recognizes this exact builtin contract in order to:
 
-- reserve the `Error` type name;
+- resolve builtin `Error` when no module-local type shadows it;
 - expose `Error::new`;
 - map it to Go's predeclared `error` type;
 - emit the required `Error() string` method for explicit implementations;
