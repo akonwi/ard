@@ -3,6 +3,9 @@ package diagnostics_test
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -46,6 +49,51 @@ func TestRenderLabeledDiagnostic(t *testing.T) {
 		"  |           ^^^ this annotation requires `Str`\n"
 	if output.String() != want {
 		t.Fatalf("output:\n%s\nwant:\n%s", output.String(), want)
+	}
+}
+
+func TestRenderAlignsMultiDigitLineGutter(t *testing.T) {
+	source := "\n\n\n\n\n\n\n\n\n\n  fmt::Println(\"age = {age}\")\n"
+	diagnostic := checker.Diagnostic{
+		Kind:  checker.Error,
+		Title: "Undefined variable",
+		Text:  "declare the variable before using it",
+		Primary: checker.DiagnosticLabel{
+			Span: checker.SourceSpan{FilePath: "variables.ard", Location: parse.Location{
+				Start: parse.Point{Row: 11, Col: 24}, End: parse.Point{Row: 11, Col: 26},
+			}},
+			Message: "`age` is not defined in this scope",
+		},
+	}
+	provider := func(string) ([]byte, error) { return []byte(source), nil }
+
+	var output bytes.Buffer
+	if err := diagnostics.RenderDiagnostic(&output, diagnostic, provider); err != nil {
+		t.Fatal(err)
+	}
+	want := "   |\n11 |   fmt::Println(\"age = {age}\")\n   |                        ^^^ `age` is not defined in this scope\n   |\n   = declare the variable before using it\n"
+	if !bytes.Contains(output.Bytes(), []byte(want)) {
+		t.Fatalf("output missing aligned gutter:\n%s", output.String())
+	}
+}
+
+func TestRenderRelativeRebasesProjectPathsToWorkingDirectory(t *testing.T) {
+	workingDir := t.TempDir()
+	projectRoot := filepath.Join(workingDir, "samples")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "variables.ard"), []byte("missing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	diagnostic := checker.NewDiagnostic(checker.Error, "Undefined variable: missing", "variables.ard", parse.Location{Start: parse.Point{Row: 1, Col: 1}, End: parse.Point{Row: 1, Col: 7}})
+
+	var output bytes.Buffer
+	if err := diagnostics.RenderRelative(&output, []checker.Diagnostic{diagnostic}, projectRoot, workingDir); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), " --> samples/variables.ard:1:1") {
+		t.Fatalf("output has wrong display path:\n%s", output.String())
 	}
 }
 

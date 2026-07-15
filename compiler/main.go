@@ -1019,7 +1019,11 @@ func loadGoTestModule(path string, program *parse.Program, resolver *checker.Mod
 		if projectInfo != nil && projectInfo.RootPath != "" {
 			root = projectInfo.RootPath
 		}
-		if err := diagnostics.Render(os.Stdout, c.Diagnostics(), diagnostics.FileSourceProvider(root)); err != nil {
+		displayRoot, err := os.Getwd()
+		if err != nil {
+			displayRoot = root
+		}
+		if err := diagnostics.RenderRelative(os.Stdout, c.Diagnostics(), root, displayRoot); err != nil {
 			return nil, fmt.Errorf("render diagnostics: %w", err)
 		}
 		return nil, fmt.Errorf("type errors")

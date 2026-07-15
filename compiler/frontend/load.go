@@ -52,7 +52,11 @@ func LoadModule(inputPath string) (*LoadResult, error) {
 	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{GoResolver: goResolver})
 	c.Check()
 	if c.HasErrors() {
-		if err := diagnostics.Render(os.Stdout, c.Diagnostics(), diagnostics.FileSourceProvider(projectInfo.RootPath)); err != nil {
+		displayRoot, err := os.Getwd()
+		if err != nil {
+			displayRoot = projectInfo.RootPath
+		}
+		if err := diagnostics.RenderRelative(os.Stdout, c.Diagnostics(), projectInfo.RootPath, displayRoot); err != nil {
 			return nil, fmt.Errorf("render diagnostics: %w", err)
 		}
 		return nil, fmt.Errorf("type errors")

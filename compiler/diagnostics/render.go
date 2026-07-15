@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -53,6 +54,39 @@ func Render(w io.Writer, diagnostics []checker.Diagnostic, source SourceProvider
 	return nil
 }
 
+// RenderRelative renders diagnostics with source paths rebased from sourceRoot
+// to displayRoot. This keeps canonical project-relative source identities out
+// of presentation while producing terminal paths resolvable from the caller's
+// working directory.
+func RenderRelative(w io.Writer, diagnostics []checker.Diagnostic, sourceRoot, displayRoot string) error {
+	rebased := make([]checker.Diagnostic, len(diagnostics))
+	for i, diagnostic := range diagnostics {
+		rebased[i] = diagnostic
+		rebased[i].Primary = rebaseLabel(diagnostic.Primary, sourceRoot, displayRoot)
+		rebased[i].Secondary = make([]checker.DiagnosticLabel, len(diagnostic.Secondary))
+		for j, label := range diagnostic.Secondary {
+			rebased[i].Secondary[j] = rebaseLabel(label, sourceRoot, displayRoot)
+		}
+	}
+	return Render(w, rebased, FileSourceProvider(displayRoot))
+}
+
+func rebaseLabel(label checker.DiagnosticLabel, sourceRoot, displayRoot string) checker.DiagnosticLabel {
+	path := label.Span.FilePath
+	if path == "" {
+		return label
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(sourceRoot, path)
+	}
+	if relative, err := filepath.Rel(displayRoot, path); err == nil {
+		label.Span.FilePath = relative
+	} else {
+		label.Span.FilePath = path
+	}
+	return label
+}
+
 func RenderDiagnostic(w io.Writer, diagnostic checker.Diagnostic, source SourceProvider) error {
 	title := diagnostic.Title
 	if title == "" {
@@ -72,14 +106,18 @@ func RenderDiagnostic(w io.Writer, diagnostic checker.Diagnostic, source SourceP
 		primary.Message = title
 	}
 	labels := append([]checker.DiagnosticLabel{primary}, diagnostic.Secondary...)
+	gutterWidth := 1
 	for _, label := range labels {
+		if width := len(strconv.Itoa(label.Span.Location.Start.Row)); width > gutterWidth {
+			gutterWidth = width
+		}
 		if err := renderLabel(w, label, source); err != nil {
 			return err
 		}
 	}
 
 	if diagnostic.Text != "" {
-		if _, err := fmt.Fprintf(w, "  |\n  = %s\n", diagnostic.Text); err != nil {
+		if _, err := fmt.Fprintf(w, "%*s |\n%*s = %s\n", gutterWidth, "", gutterWidth, "", diagnostic.Text); err != nil {
 			return err
 		}
 	}
@@ -96,20 +134,21 @@ func renderLabel(w io.Writer, label checker.DiagnosticLabel, source SourceProvid
 	if _, err := fmt.Fprintf(w, " --> %s:%d:%d\n", span.FilePath, span.Location.Start.Row, span.Location.Start.Col); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(w, "  |"); err != nil {
+	row := span.Location.Start.Row
+	gutterWidth := len(strconv.Itoa(row))
+	if _, err := fmt.Fprintf(w, "%*s |\n", gutterWidth, ""); err != nil {
 		return err
 	}
 	lines := strings.Split(string(contents), "\n")
-	row := span.Location.Start.Row
 	if row < 1 || row > len(lines) {
 		return nil
 	}
 	line := lines[row-1]
-	if _, err := fmt.Fprintf(w, "%d | %s\n", row, line); err != nil {
+	if _, err := fmt.Fprintf(w, "%*d | %s\n", gutterWidth, row, line); err != nil {
 		return err
 	}
 	start, underlineWidth := underline(label, line)
-	_, err = fmt.Fprintf(w, "  | %s%s %s\n", strings.Repeat(" ", start), strings.Repeat("^", underlineWidth), label.Message)
+	_, err = fmt.Fprintf(w, "%*s | %s%s %s\n", gutterWidth, "", strings.Repeat(" ", start), strings.Repeat("^", underlineWidth), label.Message)
 	return err
 }
 
