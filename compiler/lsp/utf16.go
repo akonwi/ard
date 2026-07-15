@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"path/filepath"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -100,7 +101,7 @@ func (d *docLines) positionToPoint(pos protocol.Position) parse.Point {
 }
 
 // locationToRange converts a parse location (1-based, byte columns) to an
-// LSP range (0-based, UTF-16 columns).
+// LSP range (0-based, UTF-16 columns). Callers define the end convention.
 func (d *docLines) locationToRange(loc parse.Location) protocol.Range {
 	start := protocol.Position{}
 	if loc.Start.Row > 0 {
@@ -119,8 +120,23 @@ func (d *docLines) locationToRange(loc parse.Location) protocol.Range {
 	return protocol.Range{Start: start, End: end}
 }
 
-// docLinesFor loads a file's line index from the current snapshot.
+func docLinesFromDocuments(filePath string, docs []Doc) (*docLines, bool) {
+	cleanPath := filepath.Clean(filePath)
+	for _, doc := range docs {
+		path, err := filePathFromURI(doc.URI)
+		if err == nil && filepath.Clean(path) == cleanPath {
+			return newDocLines(doc.Text), true
+		}
+	}
+	return nil, false
+}
+
+// docLinesFor loads a file's line index, preferring the document cache because
+// open editor content is authoritative for diagnostic range conversion.
 func (s *Server) docLinesFor(filePath string) *docLines {
+	if lines, ok := docLinesFromDocuments(filePath, s.cache.Snapshot()); ok {
+		return lines
+	}
 	snap := s.workspaceFor(filePath).Snapshot()
 	content, err := snap.Content(filePath)
 	if err != nil {
@@ -133,4 +149,34 @@ func (s *Server) docLinesFor(filePath string) *docLines {
 // UTF-16 columns.
 func (s *Server) rangeFor(filePath string, loc parse.Location) protocol.Range {
 	return s.docLinesFor(filePath).locationToRange(loc)
+}
+
+// diagnosticRangeFor converts diagnostics' inclusive parse range into LSP's
+// exclusive UTF-16 range without changing the span convention used by other
+// semantic features.
+func (s *Server) diagnosticRangeFor(filePath string, loc parse.Location) protocol.Range {
+	return diagnosticLocationToRange(s.docLinesFor(filePath), loc)
+}
+
+func (s *Server) diagnosticRangeForDocuments(filePath string, loc parse.Location, docs []Doc) protocol.Range {
+	if lines, ok := docLinesFromDocuments(filePath, docs); ok {
+		return diagnosticLocationToRange(lines, loc)
+	}
+	return diagnosticLocationToRange(s.docLinesFor(filePath), loc)
+}
+
+func diagnosticLocationToRange(lines *docLines, loc parse.Location) protocol.Range {
+	if loc.Start.Row <= 0 || loc.Start.Col <= 0 {
+		return protocol.Range{
+			Start: protocol.Position{Line: 0, Character: 0},
+			End:   protocol.Position{Line: 0, Character: 1},
+		}
+	}
+	if loc.End.Row > 0 && loc.End.Col > 0 {
+		loc.End.Col++
+	} else {
+		loc.End = loc.Start
+		loc.End.Col++
+	}
+	return lines.locationToRange(loc)
 }

@@ -271,11 +271,13 @@ func (p *parser) parseImport() *Import {
 	}
 
 	pathToken := p.advance()
+	pathLocation := pathToken.getLocation()
 	importKind := ImportKindModule
 	importPath := pathToken.text
 	if strings.HasPrefix(importPath, "go:") {
 		importKind = ImportKindGo
 		importPath = strings.TrimPrefix(importPath, "go:")
+		pathLocation.Start.Col += len("go:")
 		if importPath == "" {
 			p.addError(&pathToken, "Expected Go package path after 'go:'")
 			p.synchronize()
@@ -311,9 +313,10 @@ func (p *parser) parseImport() *Import {
 	end := Point{Row: pathToken.line, Col: endCol}
 
 	return &Import{
-		Path: importPath,
-		Name: name,
-		Kind: importKind,
+		Path:         importPath,
+		Name:         name,
+		Kind:         importKind,
+		PathLocation: pathLocation,
 		Location: Location{
 			Start: start,
 			End:   end,
@@ -492,10 +495,11 @@ func (p *parser) parseVariableDef() (Statement, error) {
 	end := value.GetLocation().End
 	p.match(new_line)
 	return &VariableDeclaration{
-		Mutable: kind == mut,
-		Name:    name.text,
-		Value:   value,
-		Type:    declaredType,
+		Mutable:      kind == mut,
+		Name:         name.text,
+		NameLocation: name.getLocation(),
+		Value:        value,
+		Type:         declaredType,
 		Location: Location{
 			Start: Point{Row: start.line, Col: start.column},
 			End:   end,
@@ -3957,7 +3961,7 @@ func (p *parser) string() (Expression, error) {
 			Chunks: chunks,
 			Location: Location{
 				Start: str.GetLocation().Start,
-				End:   Point{Row: p.peek().line, Col: p.peek().column},
+				End:   p.previous().getLocation().End,
 			},
 		}, nil
 	}

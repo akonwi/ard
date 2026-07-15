@@ -1210,6 +1210,9 @@ type Parameter struct {
 	// parsed source. Zero for synthesized parameters. Used only for tooling
 	// span recording.
 	Loc parse.Location
+	// declaredAt retains complete source provenance for diagnostics. It is zero
+	// for synthesized Go, builtin, and prelude parameters.
+	declaredAt SourceSpan
 	// Variadic marks the single Ard argument that maps to a Go variadic
 	// parameter. The argument may be omitted at the call site, mirroring
 	// Go's zero-argument variadic calls. Ard has no variadic parameters or

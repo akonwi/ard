@@ -37,9 +37,10 @@ type SymbolTable struct {
 type GenericContext = map[string]*TypeVar
 
 type Symbol struct {
-	Name    string
-	Type    Type
-	mutable bool
+	Name       string
+	Type       Type
+	declaredAt SourceSpan
+	mutable    bool
 }
 
 func (s Symbol) IsZero() bool {
@@ -182,6 +183,15 @@ func (st *SymbolTable) createGenericScope(genericParams []string) *SymbolTable {
 	}
 }
 
+type genericBindingConflictError struct {
+	Name               string
+	Existing, Incoming Type
+}
+
+func (e *genericBindingConflictError) Error() string {
+	return fmt.Sprintf("generic %s already bound to %s, cannot bind to %s", e.Name, e.Existing, e.Incoming)
+}
+
 func (st *SymbolTable) bindGeneric(genericName string, concreteType Type) error {
 	if st.genericContext == nil {
 		return nil // No generic context, ignore
@@ -200,8 +210,7 @@ func (st *SymbolTable) bindGeneric(genericName string, concreteType Type) error 
 		actual := deref(typeVar.actual)
 		concrete := deref(concreteType)
 		if !actual.equal(concrete) {
-			return fmt.Errorf("generic %s already bound to %s, cannot bind to %s",
-				genericName, actual.String(), concrete.String())
+			return &genericBindingConflictError{Name: genericName, Existing: actual, Incoming: concrete}
 		}
 		return nil
 	}
@@ -401,11 +410,8 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 	case *FunctionDef:
 		newParams := make([]Parameter, len(t.Parameters))
 		for i, p := range t.Parameters {
-			newParams[i] = Parameter{
-				Name:    p.Name,
-				Type:    replaceGeneric(p.Type, genericName, concreteType),
-				Mutable: p.Mutable,
-			}
+			newParams[i] = p
+			newParams[i].Type = replaceGeneric(p.Type, genericName, concreteType)
 		}
 		newReturnType := replaceGeneric(t.ReturnType, genericName, concreteType)
 		// Create a new FunctionDef, don't modify the original
@@ -491,10 +497,12 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 	newParams := make([]Parameter, len(fnDef.Parameters))
 	for i, param := range fnDef.Parameters {
 		newParams[i] = Parameter{
-			Name:     param.Name,
-			Type:     copyTypeWithTypeVarMap(param.Type, typeVarMap),
-			Mutable:  param.Mutable,
-			Variadic: param.Variadic,
+			Name:       param.Name,
+			Type:       copyTypeWithTypeVarMap(param.Type, typeVarMap),
+			Mutable:    param.Mutable,
+			Loc:        param.Loc,
+			declaredAt: param.declaredAt,
+			Variadic:   param.Variadic,
 		}
 	}
 

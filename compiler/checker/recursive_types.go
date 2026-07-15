@@ -69,7 +69,8 @@ func (c *Checker) checkRecursiveStructLayouts() {
 	reported := map[string]bool{}
 	for _, owner := range structs {
 		for _, edge := range edges[owner] {
-			if !recursivePathExists(edge.to, owner, edges, map[*StructDef]bool{}) {
+			path, found := recursivePath(edge.to, owner, edges, map[*StructDef]bool{})
+			if !found {
 				continue
 			}
 			key := recursiveCycleKey(owner, structs, edges)
@@ -77,7 +78,16 @@ func (c *Checker) checkRecursiveStructLayouts() {
 				continue
 			}
 			reported[key] = true
-			c.addError("Recursive field "+edge.from.Name+"."+edge.fieldName+" has infinite size. "+recursiveLayoutDiagnostic, edge.location)
+			cycle := append([]recursiveStructEdge{edge}, path...)
+			references := make([]recursiveStructLayoutReference, 0, len(cycle))
+			for _, cycleEdge := range cycle {
+				references = append(references, recursiveStructLayoutReference{
+					StructName: cycleEdge.from.Name,
+					FieldName:  cycleEdge.fieldName,
+					Span:       c.sourceSpan(cycleEdge.location),
+				})
+			}
+			c.addDiagnostic(recursiveStructLayoutDiagnostic{Cycle: references}.build())
 		}
 	}
 }
@@ -175,23 +185,28 @@ func recursiveMapKeyReferences(t Type, seen map[Type]bool) []*StructDef {
 	}
 }
 
-func recursivePathExists(from *StructDef, to *StructDef, edges map[*StructDef][]recursiveStructEdge, seen map[*StructDef]bool) bool {
+func recursivePath(from *StructDef, to *StructDef, edges map[*StructDef][]recursiveStructEdge, seen map[*StructDef]bool) ([]recursiveStructEdge, bool) {
 	if from == nil || to == nil {
-		return false
+		return nil, false
 	}
 	if from == to {
-		return true
+		return nil, true
 	}
 	if seen[from] {
-		return false
+		return nil, false
 	}
 	seen[from] = true
 	for _, edge := range edges[from] {
-		if recursivePathExists(edge.to, to, edges, seen) {
-			return true
+		if path, found := recursivePath(edge.to, to, edges, seen); found {
+			return append([]recursiveStructEdge{edge}, path...), true
 		}
 	}
-	return false
+	return nil, false
+}
+
+func recursivePathExists(from *StructDef, to *StructDef, edges map[*StructDef][]recursiveStructEdge, seen map[*StructDef]bool) bool {
+	_, found := recursivePath(from, to, edges, seen)
+	return found
 }
 
 func recursiveCycleKey(owner *StructDef, structs []*StructDef, edges map[*StructDef][]recursiveStructEdge) string {

@@ -25,6 +25,8 @@ type Expression interface {
 	Statement
 }
 
+// Point identifies a 1-based source position. Col is a byte column, not a
+// Unicode code-point or UTF-16 offset.
 type Point struct {
 	Row int
 	Col int
@@ -34,6 +36,8 @@ func (p Point) String() string {
 	return fmt.Sprintf("[%d:%d]", p.Row, p.Col)
 }
 
+// Location is an inclusive source range. A zero End denotes an unavailable
+// end position; consumers should render at least the Start position.
 type Location struct {
 	Start Point
 	End   Point
@@ -59,9 +63,10 @@ const (
 )
 
 type Import struct {
-	Path string
-	Name string
-	Kind ImportKind
+	Path         string
+	Name         string
+	Kind         ImportKind
+	PathLocation Location
 	Location
 }
 
@@ -103,10 +108,11 @@ func (c Comment) String() string {
 
 type VariableDeclaration struct {
 	Location
-	Name    string
-	Mutable bool
-	Value   Expression
-	Type    DeclaredType
+	Name         string
+	NameLocation Location
+	Mutable      bool
+	Value        Expression
+	Type         DeclaredType
 }
 
 type DeclaredType interface {

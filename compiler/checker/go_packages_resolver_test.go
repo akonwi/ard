@@ -7,7 +7,27 @@ import (
 	"testing"
 
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/parse"
 )
+
+func TestCheckerReportsPrimedGoImportCoverageMissOnce(t *testing.T) {
+	resolver := checker.NewGoPackagesResolver(t.TempDir(), nil)
+	if err := resolver.Prime(nil); err != nil {
+		t.Fatal(err)
+	}
+	result := parse.Parse([]byte("use go:fmt\n"), "main.ard")
+	c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
+	c.Check()
+	count := 0
+	for _, diagnostic := range c.Diagnostics() {
+		if diagnostic.Code == checker.DiagnosticCodeGoImportResolution {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("go import resolution diagnostics = %d; diagnostics: %#v", count, c.Diagnostics())
+	}
+}
 
 func TestGoPackagesResolverResolvesStdlibWithoutGoMod(t *testing.T) {
 	resolver := checker.NewGoPackagesResolver(t.TempDir(), nil)

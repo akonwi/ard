@@ -3,6 +3,9 @@ package lsp
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/akonwi/ard/checker"
 	"github.com/akonwi/ard/formatter"
@@ -21,9 +24,14 @@ func formatSource(source string, filePath string) (string, error) {
 	return string(formatted), nil
 }
 
-// checkerDiagnosticsToLSP converts checker.Diagnostics to LSP Diagnostics.
-// Always returns a non-nil slice so JSON serializes as [] not null.
-func checkerDiagnosticsToLSP(diagnostics []checker.Diagnostic) []protocol.Diagnostic {
+// checkerDiagnosticsToLSP converts checker diagnostics using source-aware
+// range and path resolution supplied by the caller. It always returns a
+// non-nil slice so JSON serializes as [] rather than null.
+func checkerDiagnosticsToLSP(
+	diagnostics []checker.Diagnostic,
+	rangeFor func(string, parse.Location) protocol.Range,
+	resolvePath func(string) string,
+) []protocol.Diagnostic {
 	if len(diagnostics) == 0 {
 		return []protocol.Diagnostic{}
 	}
@@ -31,14 +39,43 @@ func checkerDiagnosticsToLSP(diagnostics []checker.Diagnostic) []protocol.Diagno
 	result := make([]protocol.Diagnostic, 0, len(diagnostics))
 	for _, d := range diagnostics {
 		lspDiag := protocol.Diagnostic{
-			Range:    checkerLocationToLSPRange(d.Location()),
+			Range:    rangeFor(d.FilePath(), d.Location()),
 			Severity: diagnosticKindToLSPSeverity(d.Kind),
 			Source:   "ard",
-			Message:  d.Message,
+			Message:  checkerDiagnosticMessage(d),
+		}
+		for _, secondary := range d.Secondary {
+			path := resolvePath(secondary.Span.FilePath)
+			lspDiag.RelatedInformation = append(lspDiag.RelatedInformation, protocol.DiagnosticRelatedInformation{
+				Location: protocol.Location{
+					URI:   protocol.DocumentURI(uri.File(path)),
+					Range: rangeFor(path, secondary.Span.Location),
+				},
+				Message: secondary.Message,
+			})
 		}
 		result = append(result, lspDiag)
 	}
 	return result
+}
+
+func checkerDiagnosticMessage(d checker.Diagnostic) string {
+	if d.Code == "" {
+		return d.Message
+	}
+	parts := []string{d.Title}
+	if d.Primary.Message != "" {
+		parts = append(parts, d.Primary.Message)
+	}
+	if d.Text != "" {
+		parts = append(parts, d.Text)
+	}
+	for _, secondary := range d.Secondary {
+		if secondary.Message != "" {
+			parts = append(parts, secondary.Message)
+		}
+	}
+	return strings.Join(parts, ": ")
 }
 
 // checkerLocationToLSPRange converts a parse.Location to an LSP Range.
@@ -60,7 +97,8 @@ func checkerLocationToLSPRange(loc parse.Location) protocol.Range {
 		endLine = uint32(loc.End.Row - 1)
 	}
 	if loc.End.Col > 0 {
-		endChar = uint32(loc.End.Col - 1)
+		// parse.Location ends are inclusive; LSP ends are exclusive.
+		endChar = uint32(loc.End.Col)
 	} else {
 		// If end is zero, use start as a single point
 		endLine = startLine
@@ -85,6 +123,52 @@ func diagnosticKindToLSPSeverity(kind checker.DiagnosticKind) protocol.Diagnosti
 	}
 }
 
+func (s *Server) checkerDiagnosticsToLSP(diagnostics []checker.Diagnostic, docURI uri.URI) []protocol.Diagnostic {
+	return s.checkerDiagnosticsToLSPForDocuments(diagnostics, docURI, s.cache.Snapshot())
+}
+
+func (s *Server) checkerDiagnosticsToLSPForDocuments(diagnostics []checker.Diagnostic, docURI uri.URI, docs []Doc) []protocol.Diagnostic {
+	docPath, err := filePathFromURI(docURI)
+	if err != nil {
+		return []protocol.Diagnostic{}
+	}
+	docPath = filepath.Clean(docPath)
+	resolvePath := func(path string) string {
+		if filepath.IsAbs(path) {
+			return filepath.Clean(path)
+		}
+		candidates := make([]string, 0, 3)
+		if s.projectRoot != "" {
+			candidates = append(candidates, filepath.Join(s.projectRoot, path))
+		}
+		if abs, absErr := filepath.Abs(path); absErr == nil {
+			candidates = append(candidates, abs)
+		}
+		candidates = append(candidates, filepath.Join(filepath.Dir(docPath), path))
+		for _, candidate := range candidates {
+			if filepath.Clean(candidate) == docPath {
+				return docPath
+			}
+		}
+		for _, candidate := range candidates {
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				return filepath.Clean(candidate)
+			}
+		}
+		return filepath.Clean(candidates[0])
+	}
+
+	filtered := make([]checker.Diagnostic, 0, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		if resolvePath(diagnostic.FilePath()) == docPath {
+			filtered = append(filtered, diagnostic)
+		}
+	}
+	return checkerDiagnosticsToLSP(filtered, func(path string, location parse.Location) protocol.Range {
+		return s.diagnosticRangeForDocuments(resolvePath(path), location, docs)
+	}, resolvePath)
+}
+
 // publishDiagnostics analyzes the document at the given URI and publishes diagnostics.
 func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
 	docs, revision := s.cache.SnapshotWithRevision()
@@ -106,7 +190,11 @@ func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
 		return
 	}
 
-	s.sendDiagnostics(ctx, docURI, doc.Version, checkerDiagnosticsToLSP(diags))
+	published := s.checkerDiagnosticsToLSPForDocuments(diags, docURI, docs)
+	if !s.isDiagnosticSnapshotCurrent(docURI, doc.Version, revision) {
+		return
+	}
+	s.sendDiagnostics(ctx, docURI, doc.Version, published)
 }
 
 func findDiagnosticDocument(docs []Doc, docURI uri.URI) *Doc {

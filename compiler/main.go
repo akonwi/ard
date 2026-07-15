@@ -14,6 +14,7 @@ import (
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
+	"github.com/akonwi/ard/diagnostics"
 	"github.com/akonwi/ard/formatter"
 	"github.com/akonwi/ard/frontend"
 	gotarget "github.com/akonwi/ard/go"
@@ -1014,8 +1015,16 @@ func loadGoTestModule(path string, program *parse.Program, resolver *checker.Mod
 	c := checker.New(filePath, program, resolver, options)
 	c.Check()
 	if c.HasErrors() {
-		for _, diagnostic := range c.Diagnostics() {
-			fmt.Println(diagnostic)
+		root := filepath.Dir(path)
+		if projectInfo != nil && projectInfo.RootPath != "" {
+			root = projectInfo.RootPath
+		}
+		displayRoot, err := os.Getwd()
+		if err != nil {
+			displayRoot = root
+		}
+		if err := diagnostics.RenderRelative(os.Stdout, c.Diagnostics(), root, displayRoot); err != nil {
+			return nil, fmt.Errorf("render diagnostics: %w", err)
 		}
 		return nil, fmt.Errorf("type errors")
 	}

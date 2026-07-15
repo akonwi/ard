@@ -102,6 +102,9 @@ fn main() {
 			}
 			c := checker.New("test.ard", result.Program, nil, checker.CheckOptions{GoResolver: resolver})
 			c.Check()
+			if tt.name == "non-error non-bool tuple callback stays rejected" && (len(c.Diagnostics()) != 1 || c.Diagnostics()[0].Code != checker.DiagnosticCodeUnsupportedGoEntity) {
+				t.Fatalf("structured unsupported function diagnostic = %#v", c.Diagnostics())
+			}
 			if len(tt.diagnostics) > 0 || c.HasErrors() {
 				if diff := cmp.Diff(tt.diagnostics, c.Diagnostics(), compareOptions); diff != "" {
 					t.Fatalf("diagnostics mismatch (-want +got):\n%s", diff)

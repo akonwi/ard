@@ -4,6 +4,18 @@ import (
 	"testing"
 )
 
+func TestVariableDeclarationNameLocation(t *testing.T) {
+	result := Parse([]byte("let count = 1"), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	declaration := result.Program.Statements[0].(*VariableDeclaration)
+	want := Location{Start: Point{Row: 1, Col: 5}, End: Point{Row: 1, Col: 9}}
+	if declaration.NameLocation != want {
+		t.Fatalf("name location = %v, want %v", declaration.NameLocation, want)
+	}
+}
+
 func TestVariables(t *testing.T) {
 	tests := []test{
 		{

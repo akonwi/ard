@@ -1,7 +1,7 @@
 package checker
 
 import (
-	"fmt"
+	"sort"
 
 	"github.com/akonwi/ard/parse"
 )
@@ -14,14 +14,21 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 		if !ok {
 			continue
 		}
-		if _, dup := seen[name]; dup {
-			c.addError(fmt.Sprintf("Duplicate declaration: %s", name), loc)
+		if original, dup := seen[name]; dup {
+			c.addDiagnostic(duplicateDeclarationDiagnostic{
+				Name:          name,
+				DuplicateSpan: c.sourceSpan(loc),
+				OriginalSpan:  c.sourceSpan(original),
+			}.build())
 			c.markDuplicateTopLevelTypeDeclaration(stmt)
 			continue
 		}
 		seen[name] = loc
 		if isReservedBuiltinTypeName(name) {
-			c.addError(fmt.Sprintf("%s is a built-in type and cannot be redeclared", name), loc)
+			c.addDiagnostic(builtInTypeRedeclarationDiagnostic{
+				Name: name,
+				Span: c.sourceSpan(loc),
+			}.build())
 			c.markDuplicateTopLevelTypeDeclaration(stmt)
 			continue
 		}
@@ -141,7 +148,7 @@ func topLevelTypeDeclarationName(stmt parse.Statement) (string, parse.Location, 
 	case *parse.TraitDefinition:
 		return s.Name.Name, s.Name.GetLocation(), true
 	case *parse.EnumDefinition:
-		return s.Name, s.GetLocation(), true
+		return s.Name, s.NameLocation, true
 	case *parse.TypeDeclaration:
 		return s.Name.Name, s.Name.GetLocation(), true
 	default:
@@ -291,16 +298,22 @@ func (c *Checker) populateStructDefinition(def *StructDef, decl *parse.StructDef
 	def.Private = decl.Private
 	resolvedGenericParams := []string{}
 	seenGenerics := make(map[string]bool)
+	fieldLocations := make(map[string]parse.Location)
 	for _, field := range decl.Fields {
 		fieldType := c.resolveType(field.Type)
 		if fieldType == nil {
 			continue
 		}
 
-		if _, dup := def.Fields[field.Name.Name]; dup {
-			c.addError(fmt.Sprintf("Duplicate field: %s", field.Name.Name), field.Name.GetLocation())
+		if original, dup := fieldLocations[field.Name.Name]; dup {
+			c.addDiagnostic(duplicateFieldDeclarationDiagnostic{
+				Name:          field.Name.Name,
+				DuplicateSpan: c.sourceSpan(field.Name.GetLocation()),
+				OriginalSpan:  c.sourceSpan(original),
+			}.build())
 			continue
 		}
+		fieldLocations[field.Name.Name] = field.Name.GetLocation()
 		def.Fields[field.Name.Name] = fieldType
 		if c.spans != nil {
 			c.spans.add(SpanRecord{
@@ -369,13 +382,27 @@ func (c *Checker) hoistedUnion(name string) (*Union, bool) {
 	return unionType, true
 }
 
+type typeAliasResolutionEdge struct {
+	from     string
+	to       string
+	location parse.Location
+}
+
 func (c *Checker) predeclareTopLevelTypeAliases() {
+	names := make([]string, 0, len(c.topLevelTypeAliases))
 	for name := range c.topLevelTypeAliases {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
 		c.resolveTopLevelTypeAlias(name)
 	}
 }
 
 func (c *Checker) resolveTopLevelTypeAlias(name string) Type {
+	if c.recursiveTopLevelAliases[name] {
+		return &TypeVar{name: "unknown"}
+	}
 	if c.resolvedTopLevelAliases != nil && c.resolvedTopLevelAliases[name] {
 		if sym, ok := c.scope.get(name); ok {
 			return sym.Type
@@ -390,23 +417,49 @@ func (c *Checker) resolveTopLevelTypeAlias(name string) Type {
 		return nil
 	}
 	if c.resolvingTopLevelAliases != nil && c.resolvingTopLevelAliases[name] {
-		c.addError(fmt.Sprintf("Recursive type alias: %s", name), decl.Name.GetLocation())
+		references := make([]recursiveTypeAliasReference, 0, len(c.resolvingTopLevelAliasEdges))
+		cycleStart := 0
+		for i, edge := range c.resolvingTopLevelAliasEdges {
+			if edge.from == name {
+				cycleStart = i
+				break
+			}
+		}
+		if c.recursiveTopLevelAliases == nil {
+			c.recursiveTopLevelAliases = map[string]bool{}
+		}
+		for _, edge := range c.resolvingTopLevelAliasEdges[cycleStart:] {
+			c.recursiveTopLevelAliases[edge.from] = true
+			c.recursiveTopLevelAliases[edge.to] = true
+			references = append(references, recursiveTypeAliasReference{
+				From: edge.from,
+				To:   edge.to,
+				Span: c.sourceSpan(edge.location),
+			})
+		}
+		c.addDiagnostic(recursiveTypeAliasDiagnostic{
+			Name:         name,
+			FallbackSpan: c.sourceSpan(decl.Name.GetLocation()),
+			References:   references,
+		}.build())
 		return &TypeVar{name: "unknown"}
 	}
 	if c.resolvingTopLevelAliases == nil {
 		c.resolvingTopLevelAliases = map[string]bool{}
 	}
 	c.resolvingTopLevelAliases[name] = true
-	defer delete(c.resolvingTopLevelAliases, name)
+	c.resolvingTopLevelAliasNames = append(c.resolvingTopLevelAliasNames, name)
+	defer func() {
+		delete(c.resolvingTopLevelAliases, name)
+		c.resolvingTopLevelAliasNames = c.resolvingTopLevelAliasNames[:len(c.resolvingTopLevelAliasNames)-1]
+	}()
 
-	if custom, ok := decl.Type[0].(*parse.CustomType); ok && custom.Type.Target == nil {
-		if _, alias := c.topLevelTypeAliases[custom.GetName()]; alias {
-			c.resolveTopLevelTypeAlias(custom.GetName())
-		}
-	}
 	resolvedType := c.resolveType(decl.Type[0])
+	if c.recursiveTopLevelAliases[name] {
+		return &TypeVar{name: "unknown"}
+	}
 	if resolvedType == nil {
-		c.addError(fmt.Sprintf("Unrecognized type: %s", decl.Type[0].GetName()), decl.Type[0].GetLocation())
+		c.addUnresolvedReference(unrecognizedType, decl.Type[0].GetName(), decl.Type[0].GetLocation())
 		return nil
 	}
 	c.scope.add(decl.Name.Name, resolvedType, false)
@@ -417,10 +470,26 @@ func (c *Checker) resolveTopLevelTypeAlias(name string) Type {
 	return resolvedType
 }
 
+func (c *Checker) resolveTopLevelTypeAliasReference(name string, location parse.Location) Type {
+	if len(c.resolvingTopLevelAliasNames) == 0 {
+		return c.resolveTopLevelTypeAlias(name)
+	}
+	from := c.resolvingTopLevelAliasNames[len(c.resolvingTopLevelAliasNames)-1]
+	c.resolvingTopLevelAliasEdges = append(c.resolvingTopLevelAliasEdges, typeAliasResolutionEdge{
+		from:     from,
+		to:       name,
+		location: location,
+	})
+	defer func() {
+		c.resolvingTopLevelAliasEdges = c.resolvingTopLevelAliasEdges[:len(c.resolvingTopLevelAliasEdges)-1]
+	}()
+	return c.resolveTopLevelTypeAlias(name)
+}
+
 func (c *Checker) validateTopLevelTypeAliases() {
 	for i := range c.input.Statements {
 		decl, ok := c.input.Statements[i].(*parse.TypeDeclaration)
-		if !ok || len(decl.Type) != 1 {
+		if !ok || len(decl.Type) != 1 || c.recursiveTopLevelAliases[decl.Name.Name] {
 			continue
 		}
 		custom, ok := decl.Type[0].(*parse.CustomType)
@@ -432,7 +501,7 @@ func (c *Checker) validateTopLevelTypeAliases() {
 			continue
 		}
 		if namedTypeRequiresTypeArguments(sym.Type) {
-			c.addError(fmt.Sprintf("Generic type %s requires type arguments", custom.GetName()), custom.GetLocation())
+			c.addMissingTypeArguments(custom.GetName(), custom.GetLocation())
 		}
 	}
 }

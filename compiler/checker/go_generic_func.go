@@ -20,9 +20,17 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 	tparams := sig.TypeParams()
 	args := make([]Type, tparams.Len())
 
+	var inferenceSpans []SourceSpan
 	if len(s.Function.TypeArgs) > 0 {
 		if len(s.Function.TypeArgs) != tparams.Len() {
-			c.addError(fmt.Sprintf("Go function %s::%s expects %d type argument(s), got %d", modName, name, tparams.Len(), len(s.Function.TypeArgs)), s.GetLocation())
+			legacy := fmt.Sprintf("Go function %s::%s expects %d type argument(s), got %d", modName, name, tparams.Len(), len(s.Function.TypeArgs))
+			span := c.sourceSpan(s.GetLocation())
+			if len(s.Function.TypeArgs) > tparams.Len() {
+				span = c.sourceSpan(declaredTypeLocation(s.Function.TypeArgs[tparams.Len()], s.GetLocation()))
+			}
+			c.addDiagnostic(invalidGoFunctionTypeArgumentsDiagnostic{
+				Name: modName + "::" + name, Expected: tparams.Len(), Actual: len(s.Function.TypeArgs), Span: span, LegacyMessage: legacy,
+			}.build())
 			return nil, nil, false
 		}
 		for i, typeArg := range s.Function.TypeArgs {
@@ -34,6 +42,7 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 		}
 	} else {
 		inferred := make([]Type, tparams.Len())
+		inferenceSpans = make([]SourceSpan, tparams.Len())
 		for i := 0; i < sig.Params().Len() && i < len(s.Function.Args); i++ {
 			goParam := sig.Params().At(i).Type()
 			if sig.Variadic() && i == sig.Params().Len()-1 {
@@ -48,15 +57,22 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 			if value == nil {
 				continue
 			}
-			ok, conflictParam, previous := inferGoFuncTypeArgs(goParam, value.Type(), tparams, inferred)
+			currentSpan := c.sourceSpan(s.Function.Args[i].GetLocation())
+			ok, conflictParam, previous, current, previousSpan := inferGoFuncTypeArgs(goParam, value.Type(), tparams, inferred, inferenceSpans, currentSpan)
 			if !ok {
-				c.addError(fmt.Sprintf("Conflicting inferred type arguments for %s: %s and %s", conflictParam.Obj().Name(), previous, value.Type()), s.Function.Args[i].GetLocation())
+				legacy := fmt.Sprintf("Conflicting inferred type arguments for %s: %s and %s", conflictParam.Obj().Name(), previous, value.Type())
+				c.addDiagnostic(conflictingGoTypeInferenceDiagnostic{
+					Parameter: conflictParam.Obj().Name(), PreviousType: previous, CurrentType: current, CurrentSpan: currentSpan, PreviousSpan: sourceSpanIfPresent(previousSpan), LegacyMessage: legacy,
+				}.build())
 				return nil, nil, false
 			}
 		}
 		for i := 0; i < tparams.Len(); i++ {
 			if inferred[i] == nil {
-				c.addError(fmt.Sprintf("Could not infer type argument %s for Go function %s::%s", tparams.At(i).Obj().Name(), modName, name), s.GetLocation())
+				legacy := fmt.Sprintf("Could not infer type argument %s for Go function %s::%s", tparams.At(i).Obj().Name(), modName, name)
+				c.addDiagnostic(goTypeInferenceFailureDiagnostic{
+					Parameter: tparams.At(i).Obj().Name(), EntityKind: "function", EntityName: modName + "::" + name, Span: c.sourceSpan(s.GetLocation()), LegacyMessage: legacy,
+				}.build())
 				return nil, nil, false
 			}
 			args[i] = inferred[i]
@@ -68,13 +84,21 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 		tparam := tparams.At(i)
 		constraint, ok := tparam.Constraint().Underlying().(*types.Interface)
 		if ok && !constraint.Empty() {
+			span := c.sourceSpan(s.GetLocation())
+			if len(s.Function.TypeArgs) > i {
+				span = c.sourceSpan(declaredTypeLocation(s.Function.TypeArgs[i], s.GetLocation()))
+			} else if len(inferenceSpans) > i && inferenceSpans[i].FilePath != "" {
+				span = inferenceSpans[i]
+			}
 			goArg, representable := checkerTypeToGoType(args[i])
 			if !representable {
-				c.addError(fmt.Sprintf("Type argument %s cannot be validated against Go constraint %s", args[i], tparam.Constraint()), s.GetLocation())
+				legacy := fmt.Sprintf("Type argument %s cannot be validated against Go constraint %s", args[i], tparam.Constraint())
+				c.addDiagnostic(goConstraintDiagnostic{Argument: args[i], Constraint: tparam.Constraint().String(), Span: span, LegacyMessage: legacy, Unvalidated: true}.build())
 				return nil, nil, false
 			}
 			if !types.Satisfies(goArg, constraint) {
-				c.addError(fmt.Sprintf("Type argument %s does not satisfy Go constraint %s", args[i], tparam.Constraint()), s.GetLocation())
+				legacy := fmt.Sprintf("Type argument %s does not satisfy Go constraint %s", args[i], tparam.Constraint())
+				c.addDiagnostic(goConstraintDiagnostic{Argument: args[i], Constraint: tparam.Constraint().String(), Span: span, LegacyMessage: legacy}.build())
 				return nil, nil, false
 			}
 		}
@@ -83,7 +107,9 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 
 	fnDef, reason := functionDefFromGoSignatureBound(name, sig, bindings)
 	if reason != "" {
-		c.addError(fmt.Sprintf("Unsupported Go function %s::%s: %s", modName, name, reason), s.GetLocation())
+		qualified := modName + "::" + name
+		legacy := fmt.Sprintf("Unsupported Go function %s: %s", qualified, reason)
+		c.addDiagnostic(unsupportedGoEntityDiagnostic{Kind: "function", Name: qualified, Reason: reason, Span: c.sourceSpan(s.GetLocation()), LegacyMessage: legacy}.build())
 		return nil, nil, false
 	}
 	return fnDef, args, goSignatureHasPointerResult(sig, fnDef.ReturnType)
@@ -290,7 +316,7 @@ func mutableBoundType(bound Type) (Type, string) {
 // inferGoFuncTypeArgs unifies a generic Go parameter type against the Ard type
 // of a supplied argument, recording inferred bindings. It returns false when a
 // conflict is found (the caller reports the diagnostic).
-func inferGoFuncTypeArgs(pattern types.Type, actual Type, tparams *types.TypeParamList, inferred []Type) (bool, *types.TypeParam, Type) {
+func inferGoFuncTypeArgs(pattern types.Type, actual Type, tparams *types.TypeParamList, inferred []Type, inferredSpans []SourceSpan, currentSpan SourceSpan) (bool, *types.TypeParam, Type, Type, SourceSpan) {
 	// A `mut T` argument infers the referenced value type. Reference-ness is
 	// not part of the binding: a Go `T` parameter position receives a copy
 	// (ordinary pass-by-value), and only `*T` positions preserve the pointer.
@@ -304,28 +330,31 @@ func inferGoFuncTypeArgs(pattern types.Type, actual Type, tparams *types.TypePar
 				continue
 			}
 			if inferred[i] != nil && !inferred[i].equal(actual) {
-				return false, pattern, inferred[i]
+				return false, pattern, inferred[i], actual, inferredSpans[i]
+			}
+			if inferred[i] == nil {
+				inferredSpans[i] = currentSpan
 			}
 			inferred[i] = actual
-			return true, nil, nil
+			return true, nil, nil, nil, SourceSpan{}
 		}
 	case *types.Slice:
 		if list, ok := actual.(*List); ok {
-			return inferGoFuncTypeArgs(pattern.Elem(), list.Of(), tparams, inferred)
+			return inferGoFuncTypeArgs(pattern.Elem(), list.Of(), tparams, inferred, inferredSpans, currentSpan)
 		}
 	case *types.Map:
 		if m, ok := actual.(*Map); ok {
-			if ok, tp, prev := inferGoFuncTypeArgs(pattern.Key(), m.Key(), tparams, inferred); !ok {
-				return false, tp, prev
+			if ok, tp, prev, current, span := inferGoFuncTypeArgs(pattern.Key(), m.Key(), tparams, inferred, inferredSpans, currentSpan); !ok {
+				return false, tp, prev, current, span
 			}
-			return inferGoFuncTypeArgs(pattern.Elem(), m.Value(), tparams, inferred)
+			return inferGoFuncTypeArgs(pattern.Elem(), m.Value(), tparams, inferred, inferredSpans, currentSpan)
 		}
 	case *types.Pointer:
 		if foreign, ok := actual.(*ForeignType); ok && foreign.Pointer {
 			if value := foreign.ValueForm(); value != nil {
-				return inferGoFuncTypeArgs(pattern.Elem(), value, tparams, inferred)
+				return inferGoFuncTypeArgs(pattern.Elem(), value, tparams, inferred, inferredSpans, currentSpan)
 			}
 		}
 	}
-	return true, nil, nil
+	return true, nil, nil, nil, SourceSpan{}
 }
