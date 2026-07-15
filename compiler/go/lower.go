@@ -3005,7 +3005,7 @@ func (l *lowerer) lowerValueBlock(fn air.Function, block air.Block, resultType a
 			}
 		} else {
 			if l.isVoidType(block.Result.Type) || isVoidExpr(result.expr) {
-				return stmts, nil
+				return l.appendVoidValueEval(stmts, result.expr), nil
 			}
 			if target == nil {
 				return nil, fmt.Errorf("non-void block result missing target")
