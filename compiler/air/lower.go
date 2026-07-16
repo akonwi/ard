@@ -1105,19 +1105,42 @@ func (fl *functionLowerer) internStructTypeWithInterner(typ *checker.StructDef, 
 		}
 		info.Fields[i] = FieldInfo{Name: name, Type: fieldType, Index: i, Mutable: fieldMutable}
 	}
-	name := typ.Name
+	genericArgs := make([]TypeID, 0, len(typ.GenericParams))
 	if len(typ.TypeArgs) > 0 {
-		parts := make([]string, len(typ.TypeArgs))
-		for i, typeArg := range typ.TypeArgs {
+		for _, typeArg := range typ.TypeArgs {
 			typeID, err := intern(typeArg)
 			if err != nil {
 				return NoType, err
 			}
+			genericArgs = append(genericArgs, typeID)
+		}
+	} else if len(typ.GenericParams) > 0 {
+		// The checker represents an inferred generic self type (for example,
+		// `let box = self` inside `impl Box<$T>`) with generic parameters but
+		// no explicit type arguments. Recover the contextual self-instantiation
+		// from the function's type variables instead of interning `Box[]`.
+		for _, param := range typ.GenericParams {
+			typeID, ok := fl.typeVars[param]
+			if !ok {
+				return NoType, fmt.Errorf("cannot resolve generic argument %s for %s", param, typ.Name)
+			}
+			genericArgs = append(genericArgs, typeID)
+		}
+	}
+	name := typ.Name
+	if len(genericArgs) > 0 {
+		parts := make([]string, len(genericArgs))
+		for i, typeID := range genericArgs {
 			parts[i] = fl.l.typeName(typeID)
 		}
 		name += "<" + strings.Join(parts, ",") + ">"
 	}
-	key := "struct " + typ.ModulePath + "::" + name
+	key := "struct " + typ.ModulePath + "::" + typ.Name
+	if len(genericArgs) > 0 {
+		// Generic identity follows the ordered AIR argument IDs, not their
+		// display names; distinct types can legitimately render the same name.
+		key += typeIDsKey(genericArgs)
+	}
 	if id, ok := fl.l.typeByKey[key]; ok {
 		return id, nil
 	}
@@ -1135,16 +1158,9 @@ func (fl *functionLowerer) internStructTypeWithInterner(typ *checker.StructDef, 
 				}
 			}
 		}
-		if ok {
+		if ok && len(genericArgs) > 0 {
 			info.Generic = defID
-			info.GenericArgs = make([]TypeID, 0, len(typ.TypeArgs))
-			for _, typeArg := range typ.TypeArgs {
-				argID, err := intern(typeArg)
-				if err != nil {
-					return NoType, err
-				}
-				info.GenericArgs = append(info.GenericArgs, argID)
-			}
+			info.GenericArgs = append([]TypeID(nil), genericArgs...)
 		}
 	}
 	id := TypeID(len(fl.l.program.Types) + 1)
