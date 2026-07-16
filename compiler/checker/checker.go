@@ -6342,17 +6342,16 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			}
 			c.recordMember(s.Property.GetLocation(), TargetField, subj.Type(), s.Property.Name, prop)
 
-			// Pre-compute which kind of property this is based on subject type
-			switch subjType := subj.Type().(type) {
-			case *StructDef:
+			// Pre-compute which kind of property this is based on the effective
+			// subject type. Generic fields retain their TypeVar identity after
+			// substitution, so follow its binding before classifying the receiver.
+			subjType := deref(subj.Type())
+			if ref, ok := subjType.(*MutableRef); ok {
+				subjType = deref(ref.Of())
+			}
+			if _, ok := subjType.(*StructDef); ok {
 				prop.Kind = StructSubject
-			case *MutableRef:
-				if _, ok := subjType.Of().(*StructDef); ok {
-					prop.Kind = StructSubject
-				} else {
-					c.addError(fmt.Sprintf("Cannot access property on type %s", subj.Type()), s.Property.GetLocation())
-				}
-			default:
+			} else {
 				// Native methods are callable but cannot currently be captured as values.
 				c.addError(fmt.Sprintf("Cannot access property on type %s", subj.Type()), s.Property.GetLocation())
 			}
