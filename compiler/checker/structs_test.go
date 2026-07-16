@@ -353,5 +353,47 @@ func TestArdStructLiteralTypeArgs(t *testing.T) {
 				{Kind: checker.Error, Message: "Unrecognized type: Nope"},
 			},
 		},
+		{
+			name: "chained property access resolves an explicit generic field",
+			input: strings.Join([]string{
+				"struct Box<$T> {",
+				"  value: $T",
+				"}",
+				"struct User {",
+				"  name: Str",
+				"}",
+				"fn read(box: Box<User>) Str {",
+				"  box.value.name",
+				"}",
+			}, "\n"),
+		},
+		{
+			name: "chained property access resolves a mutable explicit generic field",
+			input: strings.Join([]string{
+				"struct Box<$T> {",
+				"  value: mut $T",
+				"}",
+				"struct User {",
+				"  name: Str",
+				"}",
+				"fn read(box: Box<User>) Str {",
+				"  box.value.name",
+				"}",
+			}, "\n"),
+		},
+		{
+			name: "chained property access resolves an explicit mutable generic argument",
+			input: strings.Join([]string{
+				"struct Box<$T> {",
+				"  value: $T",
+				"}",
+				"struct User {",
+				"  name: Str",
+				"}",
+				"fn read(box: Box<mut User>) Str {",
+				"  box.value.name",
+				"}",
+			}, "\n"),
+		},
 	})
 }
