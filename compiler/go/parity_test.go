@@ -2065,6 +2065,60 @@ func TestGoTargetParityMethodClosureCapturesSelf(t *testing.T) {
 	}
 }
 
+func TestGoTargetParityGenericMethodClosureCapturesInferredLocal(t *testing.T) {
+	program := lowerParitySource(t, `
+		struct Box<$T> {
+			value: $T,
+		}
+
+		impl Box {
+			fn read_with_closure() $T {
+				let box = self
+				let read = fn() $T {
+					box.value
+				}
+				read()
+			}
+		}
+
+		fn main() Int {
+			let box = Box<Int>{value: 42}
+			box.read_with_closure()
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "42" {
+		t.Fatalf("got %s, want 42", got)
+	}
+}
+
+func TestGoTargetParityGenericClosureCapturePreservesArgumentIdentityAndOrder(t *testing.T) {
+	program := lowerParitySource(t, `
+		struct Pair<$Left, $Right> {
+			left: $Left,
+			right: $Right,
+		}
+
+		impl Pair {
+			fn read_with_closure() $Left {
+				let pair = self
+				let read = fn() $Left {
+					pair.left
+				}
+				read()
+			}
+		}
+
+		fn main() Bool {
+			let first = Pair<Int, Str>{left: 1, right: "two"}
+			let second = Pair<Str, Int>{left: "three", right: 4}
+			first.read_with_closure() == 1 && second.read_with_closure() == "three"
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "true" {
+		t.Fatalf("got %s, want true", got)
+	}
+}
+
 func TestGoTargetParityStringHelpers(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{name: "int to str", input: `fn main() Str { 100.to_str() }`},
