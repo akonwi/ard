@@ -2091,6 +2091,68 @@ func TestGoTargetParityGenericMethodClosureCapturesInferredLocal(t *testing.T) {
 	}
 }
 
+func TestGoTargetParityNestedGenericClosuresPreserveNamedTypeIdentity(t *testing.T) {
+	program := lowerParitySource(t, `
+		private struct Value {
+			number: Int,
+		}
+
+		struct Context<$T> {
+			state: $T,
+			next: fn(mut Value),
+		}
+
+		type Handler = fn(mut Context<$T>, mut Value)
+
+		struct Box<$T> {
+			state: $T,
+			handlers: [Handler<$T>],
+		}
+
+		fn invoke(callback: fn()) {
+			callback()
+		}
+
+		impl Box {
+			fn handle() Int {
+				mut context = Context<$T>{state: self.state, next: fn(value: mut Value) {}}
+				let handlers = self.handlers
+				context.next = fn(value: mut Value) {
+					let handler = handlers.at(0).expect("handler")
+					handler(context, value)
+				}
+				mut value = Value{number: 0}
+				context.next(value)
+				value.number
+			}
+
+			fn run() {
+				let box = self
+				invoke(fn() {
+					box.handle()
+				})
+			}
+		}
+
+		mut observed = 0
+
+		fn main() Int {
+			let handlers = [
+				fn(context: mut Context<Int>, value: mut Value) {
+					value.number = 42
+					observed = value.number
+				},
+			]
+			let box = Box<Int>{state: 1, handlers: handlers}
+			box.run()
+			observed
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != "42" {
+		t.Fatalf("got %s, want 42", got)
+	}
+}
+
 func TestGoTargetParityGenericClosureCapturePreservesArgumentIdentityAndOrder(t *testing.T) {
 	program := lowerParitySource(t, `
 		struct Pair<$Left, $Right> {
