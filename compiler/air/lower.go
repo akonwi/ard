@@ -1995,17 +1995,67 @@ func (l *lowerer) internGenericStructDef(typ *checker.StructDef) (TypeID, error)
 	return id, nil
 }
 
+func structDefInModule(mod checker.Module, name string, generic bool) *checker.StructDef {
+	if mod == nil || mod.Program() == nil {
+		return nil
+	}
+	for _, stmt := range mod.Program().Statements {
+		sd, ok := stmt.Stmt.(*checker.StructDef)
+		if ok && sd.Name == name && (len(sd.GenericParams) > 0) == generic {
+			return sd
+		}
+	}
+	return nil
+}
+
+func collectReachableModules(mod checker.Module, seen map[string]checker.Module) {
+	if mod == nil || seen[mod.Path()] != nil {
+		return
+	}
+	seen[mod.Path()] = mod
+	if mod.Program() == nil {
+		return
+	}
+	for _, imported := range mod.Program().Imports {
+		collectReachableModules(imported, seen)
+	}
+}
+
+func (l *lowerer) lookupStructDef(modulePath, name string, generic bool) *checker.StructDef {
+	if name == "" {
+		return nil
+	}
+	if modulePath != "" {
+		mod := l.findReachableModule(modulePath)
+		return structDefInModule(mod, name, generic)
+	}
+
+	// Some checker-created closure signatures lose the owner path while copying
+	// an otherwise nominal type. Search the complete reachable import graph and
+	// recover only a unique declaration of the same generic shape. Ambiguity must
+	// not merge unrelated nominal types.
+	modules := map[string]checker.Module{}
+	for _, mod := range l.moduleByName {
+		collectReachableModules(mod, modules)
+	}
+	var found *checker.StructDef
+	for _, mod := range modules {
+		sd := structDefInModule(mod, name, generic)
+		if sd == nil {
+			continue
+		}
+		if found != nil && found != sd {
+			return nil
+		}
+		found = sd
+	}
+	return found
+}
+
 // lookupGenericStructDef finds the generic definition of a struct from the
 // checker module scope (its fields still reference the type variables).
 func (l *lowerer) lookupGenericStructDef(modulePath, name string) *checker.StructDef {
-	mod, ok := l.moduleByName[modulePath]
-	if !ok {
-		return nil
-	}
-	if sd, ok := mod.Get(name).Type.(*checker.StructDef); ok && len(sd.GenericParams) > 0 {
-		return sd
-	}
-	return nil
+	return l.lookupStructDef(modulePath, name, true)
 }
 
 func (l *lowerer) internType(t checker.Type) (TypeID, error) {
@@ -2027,6 +2077,15 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	}
 	if ref, ok := t.(*checker.MutableRef); ok {
 		return l.internType(ref.Of())
+	}
+	// Generic checker copies can contain distinct, temporarily incomplete
+	// representations of an otherwise ordinary named struct. Resolve those
+	// copies back to the declaration owned by the checked module before
+	// interning so one Ard nominal type cannot become multiple AIR identities.
+	if typ, ok := t.(*checker.StructDef); ok && len(typ.GenericParams) == 0 && len(typ.TypeArgs) == 0 {
+		if canonical := l.lookupStructDef(typ.ModulePath, typ.Name, false); canonical != nil {
+			t = canonical
+		}
 	}
 	key := airTypeKey(t)
 	// Within a generic definition, only types that actually reference a type
