@@ -89,6 +89,20 @@ func TestGoPackagesResolverMapsChannelDirections(t *testing.T) {
 func Both() chan int { return make(chan int) }
 func In(ch chan<- int) {}
 func Out() <-chan int { return make(chan int) }
+func Empty() struct{} { return struct{}{} }
+func EmptyBoth() chan struct{} { return make(chan struct{}) }
+func EmptyIn(ch chan<- struct{}) {}
+func EmptyOut() <-chan struct{} { return make(chan struct{}) }
+
+type EmptyAlias = struct{}
+type NamedEmpty struct{}
+
+func AliasedEmpty() EmptyAlias { return EmptyAlias{} }
+func Named() NamedEmpty { return NamedEmpty{} }
+func NamedChannel() chan NamedEmpty { return make(chan NamedEmpty) }
+func EmptyCallback(callback func() struct{}) { callback() }
+func EmptyErrorCallback(callback func() (struct{}, error)) { callback() }
+func EmptyOKCallback(callback func() (EmptyAlias, bool)) { callback() }
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -108,6 +122,39 @@ func Out() <-chan int { return make(chan int) }
 	}
 	if got := pkg.Functions["Out"].ReturnType.String(); got != "Receiver<Int>" {
 		t.Fatalf("Out return = %s, want Receiver<Int>", got)
+	}
+	if got := pkg.Functions["Empty"].ReturnType.String(); got != "Void" {
+		t.Fatalf("Empty return = %s, want Void", got)
+	}
+	if got := pkg.Functions["EmptyBoth"].ReturnType.String(); got != "Chan<Void>" {
+		t.Fatalf("EmptyBoth return = %s, want Chan<Void>", got)
+	}
+	if got := pkg.Functions["EmptyIn"].Parameters[0].Type.String(); got != "Sender<Void>" {
+		t.Fatalf("EmptyIn param = %s, want Sender<Void>", got)
+	}
+	if got := pkg.Functions["EmptyOut"].ReturnType.String(); got != "Receiver<Void>" {
+		t.Fatalf("EmptyOut return = %s, want Receiver<Void>", got)
+	}
+	if got := pkg.Functions["AliasedEmpty"].ReturnType.String(); got != "Void" {
+		t.Fatalf("AliasedEmpty return = %s, want Void", got)
+	}
+	if got := pkg.Functions["Named"].ReturnType.String(); got != "ffi::NamedEmpty" {
+		t.Fatalf("Named return = %s, want ffi::NamedEmpty", got)
+	}
+	if got := pkg.Functions["NamedChannel"].ReturnType.String(); got != "Chan<ffi::NamedEmpty>" {
+		t.Fatalf("NamedChannel return = %s, want Chan<ffi::NamedEmpty>", got)
+	}
+	if pkg.Functions["EmptyCallback"] != nil {
+		t.Fatal("EmptyCallback should remain unsupported until callback ABI adaptation exists")
+	}
+	if got := pkg.UnsupportedFunctions["EmptyCallback"]; got != "parameter 1 has unsupported type func() struct{}: callback result struct{} requires an ABI adapter" {
+		t.Fatalf("EmptyCallback unsupported reason = %q", got)
+	}
+	if got := pkg.UnsupportedFunctions["EmptyErrorCallback"]; got != "parameter 1 has unsupported type func() (struct{}, error): callback result 1 struct{} requires an ABI adapter" {
+		t.Fatalf("EmptyErrorCallback unsupported reason = %q", got)
+	}
+	if got := pkg.UnsupportedFunctions["EmptyOKCallback"]; got != "parameter 1 has unsupported type func() (example.com/app/ffi.EmptyAlias, bool): callback result 1 struct{} requires an ABI adapter" {
+		t.Fatalf("EmptyOKCallback unsupported reason = %q", got)
 	}
 }
 

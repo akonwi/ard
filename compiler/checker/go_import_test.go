@@ -353,6 +353,13 @@ fn main() {
   let ticks: Receiver<time::Time> = ticker.C
 }`,
 		},
+		{
+			name: "context Done returns receive-only Void channel",
+			input: `use go:context
+fn done(ctx: context::Context) Receiver<Void> {
+  ctx.Done()
+}`,
+		},
 	})
 }
 
