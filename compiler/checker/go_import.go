@@ -261,10 +261,17 @@ func callbackReturnTypeFromGo(results *types.Tuple) (Type, string) {
 	case 0:
 		return Void, ""
 	case 1:
-		if isGoError(results.At(0).Type()) {
+		resultType := results.At(0).Type()
+		if isGoError(resultType) {
 			return MakeResult(Void, Str), ""
 		}
-		return typeFromGoWithMethods(results.At(0).Type(), false)
+		// Ard Void functions have no Go result. They cannot satisfy a Go
+		// callback that returns a value-position struct{} without an adapter,
+		// and callback parameters are intentionally conversion-free.
+		if isGoEmptyStruct(types.Unalias(resultType)) {
+			return nil, "callback result struct{} requires an ABI adapter"
+		}
+		return typeFromGoWithMethods(resultType, false)
 	case 2:
 		// isGoError/isGoBool intentionally match only the universe error type
 		// and the basic bool: a named bool (`type MyBool bool`) or error-like
@@ -272,6 +279,9 @@ func callbackReturnTypeFromGo(results *types.Tuple) (Type, string) {
 		// (`(T, bool)` / `(T, error)`) un-assignable to the Go callback type,
 		// producing uncompilable Go. The restriction is load-bearing.
 		if isGoError(results.At(1).Type()) || isGoBool(results.At(1).Type()) {
+			if isGoEmptyStruct(types.Unalias(results.At(0).Type())) {
+				return nil, "callback result 1 struct{} requires an ABI adapter"
+			}
 			value, reason := typeFromGoWithMethods(results.At(0).Type(), false)
 			if reason != "" {
 				return nil, fmt.Sprintf("callback result 1 has unsupported type %s: %s", results.At(0).Type().String(), reason)
@@ -399,6 +409,13 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 			return nil, reason
 		}
 		return foreignNamedTypeFromGo(named, false, includeMethods), ""
+	}
+	// Go's unnamed empty struct carries no values and is the Go
+	// representation Ard already uses for value-position Void. Named empty
+	// structs are handled above and retain their distinct Go type identity;
+	// aliases reach this point through their unaliased target.
+	if isGoEmptyStruct(t) {
+		return Void, ""
 	}
 	if sig, ok := t.Underlying().(*types.Signature); ok {
 		fn, reason := functionDefFromGoCallbackSignature("<function>", sig)
@@ -688,6 +705,11 @@ func primitiveTypeFromGo(t types.Type) (Type, string) {
 		return Float64, ""
 	}
 	return nil, fmt.Sprintf("unsupported basic type %s", basic.Name())
+}
+
+func isGoEmptyStruct(t types.Type) bool {
+	strct, ok := t.(*types.Struct)
+	return ok && strct.NumFields() == 0
 }
 
 // isGoAny reports whether a Go type is the unnamed empty interface (`any` /
