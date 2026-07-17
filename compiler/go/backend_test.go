@@ -1774,18 +1774,51 @@ fn none_packed() (mut Str)? {
   missing
 }
 
+fn make_nested_replacer(value: mut Str) fn(Str) Void {
+  match borrow(mut value) {
+    found => fn(next: Str) {
+      let replace = fn() {
+        found = next
+      }
+      replace()
+    },
+    _ => fn(next: Str) {},
+  }
+}
+
+fn make_list_updater(values: mut [Int]) fn(Int) Void {
+  let list_ref = mut values
+  fn(value: Int) {
+    list_ref.set(0, value)
+    ()
+  }
+}
+
 fn main() {
   mut name = "Ada"
   match borrow(mut name) {
     found => {
       if not found == "Ada" { panic("mutable read failed") }
-      found = "Grace"
+      let replace = fn(value: Str) {
+        found = value
+      }
+      replace("Grace")
     },
     _ => panic("missing mutable value"),
   }
   if not name == "Grace" { panic("mutable assignment did not reach original") }
   if none_direct().is_some() { panic("direct none returned some") }
   if none_packed().is_some() { panic("packed none returned some") }
+
+  mut retained = "before"
+  let replace = make_nested_replacer(mut retained)
+  replace("after")
+  if not retained == "after" { panic("nested retained capture lost alias") }
+
+  mut values = [1]
+  let update = make_list_updater(mut values)
+  update(9)
+  if not values.at(0).or(0) == 9 { panic("descriptor capture lost alias") }
 }`)
 
 	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
@@ -1826,7 +1859,10 @@ use go:image
 fn replace_boxed(value: Any, replacement: $T) Bool {
   match unsafe::cast<mut $T>(value) {
     found => {
-      found = replacement
+      let replace = fn() {
+        found = replacement
+      }
+      replace()
       true
     },
     _ => false,
@@ -4550,7 +4586,10 @@ struct DemoState {
 
 fn bump(c: mut ffi::StateCtx) {
 	let state = ffi::StateRef<DemoState>(c)
-	state.ticks = state.ticks + 1
+	let increment = fn() {
+		state.ticks = state.ticks + 1
+	}
+	increment()
 }
 
 fn main() {
@@ -4596,7 +4635,7 @@ fn main() {
 	}
 }
 
-func TestLowerRejectsEscapingGenericGoPointerResults(t *testing.T) {
+func TestLowerRejectsIndirectGenericGoPointerResult(t *testing.T) {
 	ffiSource := `package ffi
 
 type StateCtx struct {
@@ -4619,24 +4658,6 @@ func NewCtx(value any) *StateCtx {
 		main    string
 		wantErr string
 	}{
-		{
-			name: "closure capture of pointer-backed local",
-			main: `use go:genericptr/ffi
-
-struct DemoState {
-	ticks: Int,
-}
-
-fn bump(c: mut ffi::StateCtx) {
-	let state = ffi::StateRef<DemoState>(c)
-	let f = fn() { state.ticks = state.ticks + 1 }
-	f()
-}
-
-fn main() {}
-`,
-			wantErr: "capturing a mut reference from a Go call is not supported yet",
-		},
 		{
 			name: "indirect initializer through match",
 			main: `use go:genericptr/ffi

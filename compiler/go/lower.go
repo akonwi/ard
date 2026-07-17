@@ -1060,7 +1060,8 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 	for _, capture := range fn.Captures {
 		captureParam := air.Param{Name: capture.Name, Type: capture.Type}
 		if int(capture.Local) >= 0 && int(capture.Local) < len(fn.Locals) {
-			captureParam.Mutable = fn.Locals[capture.Local].Mutable
+			local := fn.Locals[capture.Local]
+			captureParam.Mutable = local.Mutable || local.Reference
 		}
 		captureType, err := l.goParamType(captureParam)
 		if err != nil {
@@ -6649,7 +6650,8 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 			capture := closureFn.Captures[i]
 			captureParam := air.Param{Name: capture.Name, Type: capture.Type}
 			if int(capture.Local) >= 0 && int(capture.Local) < len(closureFn.Locals) {
-				captureParam.Mutable = closureFn.Locals[capture.Local].Mutable
+				local := closureFn.Locals[capture.Local]
+				captureParam.Mutable = local.Mutable || local.Reference
 			}
 			var setup []ast.Stmt
 			var post []ast.Stmt
@@ -8088,8 +8090,11 @@ func (l *lowerer) canInlineClosureFunction(fn air.Function) bool {
 		return false
 	}
 	for _, capture := range fn.Captures {
-		if int(capture.Local) >= 0 && int(capture.Local) < len(fn.Locals) && fn.Locals[capture.Local].Mutable {
-			return false
+		if int(capture.Local) >= 0 && int(capture.Local) < len(fn.Locals) {
+			local := fn.Locals[capture.Local]
+			if local.Mutable || local.Reference {
+				return false
+			}
 		}
 	}
 	return !functionDirectlyReferences(fn.Body, fn.ID)
