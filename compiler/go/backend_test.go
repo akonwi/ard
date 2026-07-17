@@ -1603,6 +1603,46 @@ fn main() {
 	}
 }
 
+func TestRunProgramExecutesGenericUnsafeValueCast(t *testing.T) {
+	program := lowerSource(t, `use ard/unsafe
+use go:image
+
+fn cast_value(value: Any) $T? {
+  unsafe::cast<$T>(value)
+}
+
+fn make_caster() fn(Any) $T? {
+  fn(value: Any) $T? {
+    unsafe::cast<$T>(value)
+  }
+}
+
+fn cast_mut_value(value: Any, witness: $T) Bool {
+  unsafe::cast<mut $T>(value).is_some()
+}
+
+
+fn main() {
+  let boxed: Any = "hello"
+  let direct = cast_value<Str>(boxed).expect("direct cast")
+  if not direct == "hello" { panic("bad direct cast") }
+
+  let cast = make_caster<Str>()
+  let captured = cast(boxed).expect("closure cast")
+  if not captured == "hello" { panic("bad closure cast") }
+
+  if cast_mut_value(boxed, "witness") { panic("value matched mutable string") }
+
+  let point_value = image::Point{X: 1, Y: 2}
+  let point: Any = point_value
+  if cast_mut_value(point, point_value) { panic("value matched mutable point") }
+}`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesUnsafeForeignValueCast(t *testing.T) {
 	program := lowerSource(t, `use ard/unsafe
 use go:image
@@ -1714,6 +1754,151 @@ fn main() {
 	program, err := air.Lower(loaded.Module)
 	if err != nil {
 		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramReturnsMutableMaybeReference(t *testing.T) {
+	program := lowerSource(t, `fn borrow(value: mut Str) (mut Str)? {
+  Maybe::new(mut value)
+}
+
+fn none_direct() (mut Str)? {
+  Maybe::new<mut Str>()
+}
+
+fn none_packed() (mut Str)? {
+  let missing: (mut Str)? = Maybe::new<mut Str>()
+  missing
+}
+
+fn make_nested_replacer(value: mut Str) fn(Str) Void {
+  match borrow(mut value) {
+    found => fn(next: Str) {
+      let replace = fn() {
+        found = next
+      }
+      replace()
+    },
+    _ => fn(next: Str) {},
+  }
+}
+
+fn make_list_updater(values: mut [Int]) fn(Int) Void {
+  let list_ref = mut values
+  fn(value: Int) {
+    list_ref.set(0, value)
+    ()
+  }
+}
+
+fn main() {
+  mut name = "Ada"
+  match borrow(mut name) {
+    found => {
+      if not found == "Ada" { panic("mutable read failed") }
+      let replace = fn(value: Str) {
+        found = value
+      }
+      replace("Grace")
+    },
+    _ => panic("missing mutable value"),
+  }
+  if not name == "Grace" { panic("mutable assignment did not reach original") }
+  if none_direct().is_some() { panic("direct none returned some") }
+  if none_packed().is_some() { panic("packed none returned some") }
+
+  mut retained = "before"
+  let replace = make_nested_replacer(mut retained)
+  replace("after")
+  if not retained == "after" { panic("nested retained capture lost alias") }
+
+  mut values = [1]
+  let update = make_list_updater(mut values)
+  update(9)
+  if not values.at(0).or(0) == 9 { panic("descriptor capture lost alias") }
+}`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramExecutesGenericUnsafeMutableCast(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"genericcast\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module genericcast\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
+
+import "image"
+
+var Name = "Ada"
+var Point = image.Point{X: 1, Y: 2}
+
+func BoxName() any { return &Name }
+func NameValue() string { return Name }
+func BoxPoint() any { return &Point }
+func PointX() int { return Point.X }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use ard/unsafe
+use go:genericcast/ffi
+use go:image
+
+fn replace_boxed(value: Any, replacement: $T) Bool {
+  match unsafe::cast<mut $T>(value) {
+    found => {
+      let replace = fn() {
+        found = replacement
+      }
+      replace()
+      true
+    },
+    _ => false,
+  }
+}
+
+
+fn main() {
+  if not replace_boxed(ffi::BoxName(), "Grace") { panic("mutable name did not match") }
+  if not ffi::NameValue() == "Grace" { panic("name mutation lost") }
+
+  let replacement = image::Point{X: 42, Y: 9}
+  if not replace_boxed(ffi::BoxPoint(), replacement) { panic("mutable point did not match") }
+  if not ffi::PointX() == 42 { panic("point mutation lost") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	foundReference := false
+	for _, fn := range program.Functions {
+		for _, local := range fn.Locals {
+			if local.Name == "found" && local.Reference {
+				foundReference = true
+			}
+		}
+	}
+	if !foundReference {
+		t.Fatal("generic mutable Maybe match binding is not reference-backed")
 	}
 	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
 		t.Fatalf("RunProgram error = %v", err)
@@ -4401,7 +4586,10 @@ struct DemoState {
 
 fn bump(c: mut ffi::StateCtx) {
 	let state = ffi::StateRef<DemoState>(c)
-	state.ticks = state.ticks + 1
+	let increment = fn() {
+		state.ticks = state.ticks + 1
+	}
+	increment()
 }
 
 fn main() {
@@ -4447,7 +4635,7 @@ fn main() {
 	}
 }
 
-func TestLowerRejectsEscapingGenericGoPointerResults(t *testing.T) {
+func TestLowerRejectsIndirectGenericGoPointerResult(t *testing.T) {
 	ffiSource := `package ffi
 
 type StateCtx struct {
@@ -4470,24 +4658,6 @@ func NewCtx(value any) *StateCtx {
 		main    string
 		wantErr string
 	}{
-		{
-			name: "closure capture of pointer-backed local",
-			main: `use go:genericptr/ffi
-
-struct DemoState {
-	ticks: Int,
-}
-
-fn bump(c: mut ffi::StateCtx) {
-	let state = ffi::StateRef<DemoState>(c)
-	let f = fn() { state.ticks = state.ticks + 1 }
-	f()
-}
-
-fn main() {}
-`,
-			wantErr: "capturing a mut reference from a Go call is not supported yet",
-		},
 		{
 			name: "indirect initializer through match",
 			main: `use go:genericptr/ffi

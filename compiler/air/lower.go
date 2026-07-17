@@ -4215,7 +4215,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			mutable = true
 			targetType = valueForm
 		}
-		targetTypeID, err := fl.l.internType(targetType)
+		targetTypeID, err := fl.internType(targetType)
 		if err != nil {
 			return nil, err
 		}
@@ -4970,6 +4970,7 @@ func (fl *functionLowerer) lowerOptionMatch(typeID TypeID, match *checker.Option
 	pattern := match.Some.Pattern.Name
 	oldLocal, hadOldLocal := fl.locals[pattern]
 	someLocal := fl.defineLocal(pattern, maybeType.Elem, false)
+	fl.fn.Locals[someLocal].Reference = maybeType.ElemMutable
 	someBlock, err := fl.lowerBlockWithDefault(match.Some.Body.Stmts, typeID)
 	if hadOldLocal {
 		fl.locals[pattern] = oldLocal
@@ -5859,10 +5860,9 @@ func (fl *functionLowerer) captureLocal(name string) (LocalID, TypeID, bool, boo
 	if err != nil || !ok {
 		return 0, NoType, false, ok, err
 	}
-	if int(sourceLocal) >= 0 && int(sourceLocal) < len(fl.parent.fn.Locals) && fl.parent.fn.Locals[sourceLocal].Reference {
-		return 0, NoType, false, false, fmt.Errorf("closures cannot capture %q: capturing a mut reference from a Go call is not supported yet", name)
-	}
+	sourceReference := int(sourceLocal) >= 0 && int(sourceLocal) < len(fl.parent.fn.Locals) && fl.parent.fn.Locals[sourceLocal].Reference
 	local := fl.defineLocal(name, typeID, mutable)
+	fl.fn.Locals[local].Reference = sourceReference
 	fl.captureByName[name] = local
 	fl.captureLocals = append(fl.captureLocals, sourceLocal)
 	fl.fn.Captures = append(fl.fn.Captures, Capture{Name: name, Type: typeID, Local: local})
