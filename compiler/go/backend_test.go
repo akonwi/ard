@@ -1760,6 +1760,39 @@ fn main() {
 	}
 }
 
+func TestRunProgramReturnsMutableMaybeReference(t *testing.T) {
+	program := lowerSource(t, `fn borrow(value: mut Str) (mut Str)? {
+  Maybe::new(mut value)
+}
+
+fn none_direct() (mut Str)? {
+  Maybe::new<mut Str>()
+}
+
+fn none_packed() (mut Str)? {
+  let missing: (mut Str)? = Maybe::new<mut Str>()
+  missing
+}
+
+fn main() {
+  mut name = "Ada"
+  match borrow(mut name) {
+    found => {
+      if not found == "Ada" { panic("mutable read failed") }
+      found = "Grace"
+    },
+    _ => panic("missing mutable value"),
+  }
+  if not name == "Grace" { panic("mutable assignment did not reach original") }
+  if none_direct().is_some() { panic("direct none returned some") }
+  if none_packed().is_some() { panic("packed none returned some") }
+}`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesGenericUnsafeMutableCast(t *testing.T) {
 	projectDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"genericcast\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -1790,19 +1823,24 @@ func PointX() int { return Point.X }
 use go:genericcast/ffi
 use go:image
 
-fn matches_boxed(value: Any, witness: $T) Bool {
+fn replace_boxed(value: Any, replacement: $T) Bool {
   match unsafe::cast<mut $T>(value) {
-    _found => true,
+    found => {
+      found = replacement
+      true
+    },
     _ => false,
   }
 }
 
 
 fn main() {
-  if not matches_boxed(ffi::BoxName(), "witness") { panic("mutable name did not match") }
+  if not replace_boxed(ffi::BoxName(), "Grace") { panic("mutable name did not match") }
+  if not ffi::NameValue() == "Grace" { panic("name mutation lost") }
 
-  let point_witness = image::Point{X: 0, Y: 0}
-  if not matches_boxed(ffi::BoxPoint(), point_witness) { panic("mutable point did not match") }
+  let replacement = image::Point{X: 42, Y: 9}
+  if not replace_boxed(ffi::BoxPoint(), replacement) { panic("mutable point did not match") }
+  if not ffi::PointX() == 42 { panic("point mutation lost") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -1814,6 +1852,17 @@ fn main() {
 	program, err := air.Lower(loaded.Module)
 	if err != nil {
 		t.Fatalf("lower: %v", err)
+	}
+	foundReference := false
+	for _, fn := range program.Functions {
+		for _, local := range fn.Locals {
+			if local.Name == "found" && local.Reference {
+				foundReference = true
+			}
+		}
+	}
+	if !foundReference {
+		t.Fatal("generic mutable Maybe match binding is not reference-backed")
 	}
 	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
 		t.Fatalf("RunProgram error = %v", err)

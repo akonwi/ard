@@ -1486,7 +1486,7 @@ func (l *lowerer) lowerABIReturn(fn air.Function, expr air.Expr, returnType air.
 			if l.isVoidType(info.Elem) {
 				return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("false")}}}, nil
 			}
-			zero, err := l.zeroValueExpr(info.Elem)
+			zero, err := l.maybeABIZeroValue(info)
 			if err != nil {
 				return nil, err
 			}
@@ -1560,7 +1560,7 @@ func (l *lowerer) returnPackedABIValue(typeID air.TypeID, expr ast.Expr) ([]ast.
 		if l.isVoidType(info.Elem) {
 			return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{l.maybeIsSomeExpr(expr)}}}, nil
 		}
-		zero, err := l.zeroValueExpr(info.Elem)
+		zero, err := l.maybeABIZeroValue(info)
 		if err != nil {
 			return nil, err
 		}
@@ -1572,6 +1572,13 @@ func (l *lowerer) returnPackedABIValue(typeID air.TypeID, expr ast.Expr) ([]ast.
 	default:
 		return []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{expr}}}, nil
 	}
+}
+
+func (l *lowerer) maybeABIZeroValue(info air.TypeInfo) (ast.Expr, error) {
+	if info.ElemMutable {
+		return ast.NewIdent("nil"), nil
+	}
+	return l.zeroValueExpr(info.Elem)
 }
 
 func (l *lowerer) functionTypeInfo(typeID air.TypeID) (air.TypeInfo, bool) {
@@ -3458,6 +3465,9 @@ func (l *lowerer) lowerGoValueBoolMaybeCall(expr air.Expr, stmts []ast.Stmt, cal
 	valueType, err := l.goType(info.Elem)
 	if err != nil {
 		return loweredExpr{}, err
+	}
+	if info.ElemMutable {
+		valueType = &ast.StarExpr{X: valueType}
 	}
 	stmts = append(stmts, decls...)
 	stmts = append(stmts, &ast.DeclStmt{Decl: &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(valueTemp)}, Type: valueType}}}})

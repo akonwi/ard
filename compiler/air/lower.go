@@ -4970,6 +4970,7 @@ func (fl *functionLowerer) lowerOptionMatch(typeID TypeID, match *checker.Option
 	pattern := match.Some.Pattern.Name
 	oldLocal, hadOldLocal := fl.locals[pattern]
 	someLocal := fl.defineLocal(pattern, maybeType.Elem, false)
+	fl.fn.Locals[someLocal].Reference = maybeType.ElemMutable
 	someBlock, err := fl.lowerBlockWithDefault(match.Some.Body.Stmts, typeID)
 	if hadOldLocal {
 		fl.locals[pattern] = oldLocal
