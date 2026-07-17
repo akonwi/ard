@@ -4215,7 +4215,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			mutable = true
 			targetType = valueForm
 		}
-		targetTypeID, err := fl.l.internType(targetType)
+		targetTypeID, err := fl.internType(targetType)
 		if err != nil {
 			return nil, err
 		}

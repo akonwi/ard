@@ -1603,6 +1603,46 @@ fn main() {
 	}
 }
 
+func TestRunProgramExecutesGenericUnsafeValueCast(t *testing.T) {
+	program := lowerSource(t, `use ard/unsafe
+use go:image
+
+fn cast_value(value: Any) $T? {
+  unsafe::cast<$T>(value)
+}
+
+fn make_caster() fn(Any) $T? {
+  fn(value: Any) $T? {
+    unsafe::cast<$T>(value)
+  }
+}
+
+fn cast_mut_value(value: Any, witness: $T) Bool {
+  unsafe::cast<mut $T>(value).is_some()
+}
+
+
+fn main() {
+  let boxed: Any = "hello"
+  let direct = cast_value<Str>(boxed).expect("direct cast")
+  if not direct == "hello" { panic("bad direct cast") }
+
+  let cast = make_caster<Str>()
+  let captured = cast(boxed).expect("closure cast")
+  if not captured == "hello" { panic("bad closure cast") }
+
+  if cast_mut_value(boxed, "witness") { panic("value matched mutable string") }
+
+  let point_value = image::Point{X: 1, Y: 2}
+  let point: Any = point_value
+  if cast_mut_value(point, point_value) { panic("value matched mutable point") }
+}`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesUnsafeForeignValueCast(t *testing.T) {
 	program := lowerSource(t, `use ard/unsafe
 use go:image
@@ -1703,6 +1743,66 @@ fn main() {
   if unsafe::cast<mut image::Point>(ffi::BoxNilPt()).is_some() { panic("nil pointer matched") }
   if unsafe::cast<mut image::Rectangle>(ffi::BoxPt()).is_some() { panic("wrong pointer type matched") }
   if not unsafe::cast<image::Point>(ffi::BoxPt()).expect("deref").X == 42 { panic("value cast did not deref") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramExecutesGenericUnsafeMutableCast(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"genericcast\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectDir, "ffi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "go.mod"), []byte("module genericcast\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "ffi", "ffi.go"), []byte(`package ffi
+
+import "image"
+
+var Name = "Ada"
+var Point = image.Point{X: 1, Y: 2}
+
+func BoxName() any { return &Name }
+func NameValue() string { return Name }
+func BoxPoint() any { return &Point }
+func PointX() int { return Point.X }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use ard/unsafe
+use go:genericcast/ffi
+use go:image
+
+fn matches_boxed(value: Any, witness: $T) Bool {
+  match unsafe::cast<mut $T>(value) {
+    _found => true,
+    _ => false,
+  }
+}
+
+
+fn main() {
+  if not matches_boxed(ffi::BoxName(), "witness") { panic("mutable name did not match") }
+
+  let point_witness = image::Point{X: 0, Y: 0}
+  if not matches_boxed(ffi::BoxPoint(), point_witness) { panic("mutable point did not match") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
