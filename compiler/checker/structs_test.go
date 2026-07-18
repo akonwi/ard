@@ -8,6 +8,25 @@ import (
 	checker "github.com/akonwi/ard/checker"
 )
 
+func TestRecursiveGenericStructThroughFunctionField(t *testing.T) {
+	run(t, []test{{
+		name: "recursive generic callback field",
+		input: `
+struct Context<$T> {
+  state: $T,
+  handlers: [fn(mut Context<$T>)],
+}
+
+fn use_context(context: mut Context<Int>) {
+  let handler = context.handlers.at(0).expect("handler")
+  handler(context)
+}
+
+fn main() {}
+`,
+	}})
+}
+
 func TestStructs(t *testing.T) {
 	personStructInput := strings.Join([]string{
 		"struct Person {",

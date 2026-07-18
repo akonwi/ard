@@ -2,6 +2,7 @@ package checker
 
 import (
 	"fmt"
+	gotypes "go/types"
 	"slices"
 )
 
@@ -318,6 +319,13 @@ func hasGenericsInTypeSeen(t Type, seen map[Type]struct{}) bool {
 		return hasGenericsInTypeSeen(t.of, seen)
 	case *Union:
 		return slices.ContainsFunc(t.Types, func(member Type) bool { return hasGenericsInTypeSeen(member, seen) })
+	case *ForeignType:
+		for _, typeArg := range t.TypeArgs {
+			if hasGenericsInTypeSeen(typeArg, seen) {
+				return true
+			}
+		}
+		return false
 	case *StructDef:
 		for _, typeArg := range t.TypeArgs {
 			if hasGenericsInTypeSeen(typeArg, seen) {
@@ -425,8 +433,22 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			Body:                    t.Body,
 			Private:                 t.Private,
 		}
+	case *ForeignType:
+		args := make([]Type, len(t.TypeArgs))
+		for i, arg := range t.TypeArgs {
+			args[i] = replaceGeneric(arg, genericName, concreteType)
+		}
+		return foreignTypeWithArgs(t, args)
 	case *StructDef:
-		// Struct value identity is fields/generics, not method signatures.
+		if t.Definition != nil {
+			newTypeArgs := make([]Type, len(t.TypeArgs))
+			for i, typeArg := range t.TypeArgs {
+				newTypeArgs[i] = replaceGeneric(typeArg, genericName, concreteType)
+			}
+			return newStructApplication(t, newTypeArgs)
+		}
+		// Canonical declarations are still copied for inference scratch values;
+		// ordinary named specialization uses nominal applications above.
 		anyChanged := false
 		newFields := make(map[string]Type)
 		for fieldName, fieldType := range t.Fields {
@@ -453,6 +475,7 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			GenericParams:    append([]string(nil), t.GenericParams...),
 			DeclaredGenerics: t.DeclaredGenerics,
 			TypeArgs:         newTypeArgs,
+			Definition:       t.Definition,
 			Private:          t.Private,
 		}
 	default:
@@ -474,6 +497,13 @@ func hasGeneric(t Type, genericName string) bool {
 		return hasGeneric(t.val, genericName) || hasGeneric(t.err, genericName)
 	case *MutableRef:
 		return hasGeneric(t.of, genericName)
+	case *ForeignType:
+		for _, typeArg := range t.TypeArgs {
+			if hasGeneric(typeArg, genericName) {
+				return true
+			}
+		}
+		return false
 	case *StructDef:
 		for _, typeArg := range t.TypeArgs {
 			if hasGeneric(typeArg, genericName) {
@@ -488,6 +518,201 @@ func hasGeneric(t Type, genericName string) bool {
 		return false
 	default:
 		return false
+	}
+}
+
+// StructDefinition returns the canonical declaration for a struct type.
+func StructDefinition(def *StructDef) *StructDef {
+	return canonicalStructDefinition(def)
+}
+
+// StructFields returns declaration fields specialized for the struct type's
+// ordered arguments. Callers must treat the returned map as read-only.
+func StructFields(def *StructDef) map[string]Type {
+	return structFields(def)
+}
+
+// StructField returns one declaration field specialized for the struct type's
+// ordered arguments.
+func StructField(def *StructDef, name string) (Type, bool) {
+	return structField(def, name)
+}
+
+func canonicalStructDefinition(def *StructDef) *StructDef {
+	if def == nil {
+		return nil
+	}
+	for def.Definition != nil && def.Definition != def {
+		def = def.Definition
+	}
+	return def
+}
+
+func newStructApplication(def *StructDef, typeArgs []Type) *StructDef {
+	definition := canonicalStructDefinition(def)
+	if definition == nil {
+		return nil
+	}
+	return &StructDef{
+		Name:             definition.Name,
+		ModulePath:       definition.ModulePath,
+		Self:             definition.Self,
+		Traits:           definition.Traits,
+		GenericParams:    append([]string(nil), definition.GenericParams...),
+		DeclaredGenerics: definition.DeclaredGenerics,
+		TypeArgs:         append([]Type(nil), typeArgs...),
+		Definition:       definition,
+		Private:          definition.Private,
+	}
+}
+
+func structTypeBindings(def *StructDef) map[string]Type {
+	definition := canonicalStructDefinition(def)
+	if definition == nil || len(def.TypeArgs) == 0 {
+		return nil
+	}
+	bindings := make(map[string]Type, len(definition.GenericParams))
+	for i, name := range definition.GenericParams {
+		if i < len(def.TypeArgs) {
+			bindings[name] = def.TypeArgs[i]
+		}
+	}
+	return bindings
+}
+
+func structFields(def *StructDef) map[string]Type {
+	definition := canonicalStructDefinition(def)
+	if definition == nil {
+		return nil
+	}
+	if def == definition || len(def.TypeArgs) == 0 {
+		return definition.Fields
+	}
+	bindings := structTypeBindings(def)
+	fields := make(map[string]Type, len(definition.Fields))
+	for name, fieldType := range definition.Fields {
+		fields[name] = substituteTypeBindings(fieldType, bindings)
+	}
+	return fields
+}
+
+func structField(def *StructDef, name string) (Type, bool) {
+	definition := canonicalStructDefinition(def)
+	if definition == nil {
+		return nil, false
+	}
+	field, ok := definition.Fields[name]
+	if !ok {
+		return nil, false
+	}
+	if def == definition || len(def.TypeArgs) == 0 {
+		return field, true
+	}
+	return substituteTypeBindings(field, structTypeBindings(def)), true
+}
+
+func foreignTypeWithArgs(typ *ForeignType, args []Type) *ForeignType {
+	copy := *typ
+	copy.TypeArgs = append([]Type(nil), args...)
+	if len(args) == 0 {
+		return &copy
+	}
+	goType := typ.GoType
+	pointer := typ.Pointer
+	if ptr, ok := goType.(*gotypes.Pointer); ok {
+		goType = ptr.Elem()
+		pointer = true
+	}
+	named, ok := goType.(*gotypes.Named)
+	if !ok || named.TypeParams() == nil || named.TypeParams().Len() != len(args) {
+		return &copy
+	}
+	goArgs := make([]gotypes.Type, len(args))
+	for i, arg := range args {
+		converted, ok := checkerTypeToGoType(arg)
+		if !ok {
+			return &copy
+		}
+		goArgs[i] = converted
+	}
+	instantiated, err := gotypes.Instantiate(gotypes.NewContext(), named.Origin(), goArgs, true)
+	if err != nil {
+		return &copy
+	}
+	instNamed, ok := instantiated.(*gotypes.Named)
+	if !ok {
+		return &copy
+	}
+	refreshed, ok := foreignNamedTypeFromGo(instNamed, pointer, true).(*ForeignType)
+	if !ok {
+		return &copy
+	}
+	refreshed.TypeArgs = append([]Type(nil), args...)
+	return refreshed
+}
+
+func substituteTypeBindings(t Type, bindings map[string]Type) Type {
+	switch typ := t.(type) {
+	case *TypeVar:
+		if replacement, ok := bindings[typ.name]; ok {
+			return replacement
+		}
+		if typ.bound && typ.actual != nil {
+			return substituteTypeBindings(typ.actual, bindings)
+		}
+		return typ
+	case *List:
+		return MakeList(substituteTypeBindings(typ.of, bindings))
+	case *FixedArray:
+		return MakeFixedArray(substituteTypeBindings(typ.of, bindings), typ.length)
+	case *Chan:
+		return MakeChan(substituteTypeBindings(typ.of, bindings))
+	case *Receiver:
+		return MakeReceiver(substituteTypeBindings(typ.of, bindings))
+	case *Sender:
+		return MakeSender(substituteTypeBindings(typ.of, bindings))
+	case *Map:
+		return MakeMap(substituteTypeBindings(typ.key, bindings), substituteTypeBindings(typ.value, bindings))
+	case *Maybe:
+		return MakeMaybe(substituteTypeBindings(typ.of, bindings))
+	case *Result:
+		return MakeResult(substituteTypeBindings(typ.val, bindings), substituteTypeBindings(typ.err, bindings))
+	case *MutableRef:
+		return MakeMutableRef(substituteTypeBindings(typ.of, bindings))
+	case *Union:
+		members := make([]Type, len(typ.Types))
+		for i, member := range typ.Types {
+			members[i] = substituteTypeBindings(member, bindings)
+		}
+		return &Union{Name: typ.Name, ModulePath: typ.ModulePath, Types: members, Private: typ.Private}
+	case *FunctionDef:
+		params := make([]Parameter, len(typ.Parameters))
+		for i, param := range typ.Parameters {
+			param.Type = substituteTypeBindings(param.Type, bindings)
+			params[i] = param
+		}
+		copy := *typ
+		copy.Parameters = params
+		copy.ReturnType = substituteTypeBindings(typ.ReturnType, bindings)
+		copy.GenericBindings = cloneTypeMap(typ.GenericBindings)
+		return &copy
+	case *ForeignType:
+		args := make([]Type, len(typ.TypeArgs))
+		for i, arg := range typ.TypeArgs {
+			args[i] = substituteTypeBindings(arg, bindings)
+		}
+		return foreignTypeWithArgs(typ, args)
+	case *StructDef:
+		if len(typ.TypeArgs) == 0 {
+			return typ
+		}
+		args := make([]Type, len(typ.TypeArgs))
+		for i, arg := range typ.TypeArgs {
+			args[i] = substituteTypeBindings(arg, bindings)
+		}
+		return newStructApplication(typ, args)
+	default:
+		return t
 	}
 }
 
@@ -533,6 +758,13 @@ func copyStructWithTypeVarMapSeen(structDef *StructDef, typeVarMap map[string]*T
 	if structDef == nil {
 		return nil
 	}
+	if structDef.Definition != nil {
+		args := make([]Type, len(structDef.TypeArgs))
+		for i, arg := range structDef.TypeArgs {
+			args[i] = copyTypeWithTypeVarMapSeen(arg, typeVarMap, seen)
+		}
+		return newStructApplication(structDef, args)
+	}
 	if existing, ok := seen[structDef]; ok {
 		return existing
 	}
@@ -545,6 +777,7 @@ func copyStructWithTypeVarMapSeen(structDef *StructDef, typeVarMap map[string]*T
 		Traits:           structDef.Traits,
 		GenericParams:    append([]string(nil), structDef.GenericParams...),
 		DeclaredGenerics: structDef.DeclaredGenerics,
+		Definition:       structDef.Definition,
 		Private:          structDef.Private,
 	}
 	seen[structDef] = structCopy
@@ -608,8 +841,15 @@ func collectUnboundGenericsFromType(t Type, params *[]string, seenGenerics map[s
 			collectUnboundGenericsFromType(member, params, seenGenerics, seenTypes)
 		}
 	case *StructDef:
+		for _, typeArg := range typ.TypeArgs {
+			collectUnboundGenericsFromType(typeArg, params, seenGenerics, seenTypes)
+		}
 		for _, fieldType := range typ.Fields {
 			collectUnboundGenericsFromType(fieldType, params, seenGenerics, seenTypes)
+		}
+	case *ForeignType:
+		for _, typeArg := range typ.TypeArgs {
+			collectUnboundGenericsFromType(typeArg, params, seenGenerics, seenTypes)
 		}
 	case *FunctionDef:
 		for _, param := range typ.Parameters {
@@ -658,6 +898,12 @@ func copyTypeWithTypeVarMapSeen(t Type, typeVarMap map[string]*TypeVar, seenStru
 			Types:      newTypes,
 			Private:    typ.Private,
 		}
+	case *ForeignType:
+		args := make([]Type, len(typ.TypeArgs))
+		for i, arg := range typ.TypeArgs {
+			args[i] = copyTypeWithTypeVarMapSeen(arg, typeVarMap, seenStructs)
+		}
+		return foreignTypeWithArgs(typ, args)
 	case *StructDef:
 		return copyStructWithTypeVarMapSeen(typ, typeVarMap, seenStructs)
 	case *FunctionDef:

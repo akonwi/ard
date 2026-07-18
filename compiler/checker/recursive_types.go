@@ -50,8 +50,7 @@ func (c *Checker) checkRecursiveStructLayouts() {
 			if !ok {
 				continue
 			}
-			refs := inlineStructReferences(fieldType, map[Type]bool{})
-			refs = append(refs, recursiveMapKeyReferences(fieldType, map[Type]bool{})...)
+			refs := inlineStructReferences(fieldType, map[Type]bool{}, map[string]bool{})
 			for _, ref := range refs {
 				if ref == nil || !structSet[ref] {
 					continue
@@ -92,42 +91,48 @@ func (c *Checker) checkRecursiveStructLayouts() {
 	}
 }
 
-func inlineStructReferences(t Type, seen map[Type]bool) []*StructDef {
-	return inlineStructReferencesWithNullable(t, seen, true)
+func inlineStructReferences(t Type, seen map[Type]bool, seenStructs map[string]bool) []*StructDef {
+	return inlineStructReferencesWithNullable(t, seen, seenStructs)
 }
 
-func inlineStructReferencesWithNullable(t Type, seen map[Type]bool, nullableIsBoundary bool) []*StructDef {
+func inlineStructReferencesWithNullable(t Type, seen map[Type]bool, seenStructs map[string]bool) []*StructDef {
 	t = deref(t)
 	if t == nil {
 		return nil
 	}
-	if _, ok := seen[t]; ok {
+	if typ, ok := t.(*StructDef); ok {
+		definition := canonicalStructDefinition(typ)
+		key := recursiveStructApplicationKey(typ)
+		if seenStructs[key] {
+			return []*StructDef{definition}
+		}
+		seenStructs[key] = true
+		defer delete(seenStructs, key)
+		refs := []*StructDef{definition}
+		for _, field := range structFields(typ) {
+			refs = append(refs, inlineStructReferencesWithNullable(field, seen, seenStructs)...)
+		}
+		return refs
+	}
+	if seen[t] {
 		return nil
 	}
 	seen[t] = true
+	defer delete(seen, t)
 
 	switch typ := t.(type) {
-	case *StructDef:
-		refs := []*StructDef{typ}
-		for _, field := range typ.Fields {
-			refs = append(refs, inlineStructReferencesWithNullable(field, seen, true)...)
-		}
-		return refs
-	case *Map:
-		return inlineStructReferencesWithNullable(typ.Key(), seen, false)
-	case *Maybe:
-		if nullableIsBoundary {
-			return nil
-		}
-		return inlineStructReferencesWithNullable(typ.Of(), seen, false)
+	case *FixedArray:
+		return inlineStructReferencesWithNullable(typ.Of(), seen, seenStructs)
+	case *Map, *Maybe:
+		return nil
 	case *Result:
-		refs := inlineStructReferencesWithNullable(typ.Val(), seen, false)
-		refs = append(refs, inlineStructReferencesWithNullable(typ.Err(), seen, false)...)
+		refs := inlineStructReferencesWithNullable(typ.Val(), seen, seenStructs)
+		refs = append(refs, inlineStructReferencesWithNullable(typ.Err(), seen, seenStructs)...)
 		return refs
 	case *Union:
 		refs := []*StructDef{}
 		for _, member := range typ.Types {
-			refs = append(refs, inlineStructReferencesWithNullable(member, seen, false)...)
+			refs = append(refs, inlineStructReferencesWithNullable(member, seen, seenStructs)...)
 		}
 		return refs
 	case *MutableRef, *List, *Trait, *FunctionDef:
@@ -137,52 +142,9 @@ func inlineStructReferencesWithNullable(t Type, seen map[Type]bool, nullableIsBo
 	}
 }
 
-func recursiveMapKeyReferences(t Type, seen map[Type]bool) []*StructDef {
-	t = deref(t)
-	if t == nil {
-		return nil
-	}
-	if _, ok := seen[t]; ok {
-		return nil
-	}
-	seen[t] = true
-	switch typ := t.(type) {
-	case *Map:
-		refs := inlineStructReferencesWithNullable(typ.Key(), map[Type]bool{}, false)
-		refs = append(refs, recursiveMapKeyReferences(typ.Key(), seen)...)
-		refs = append(refs, recursiveMapKeyReferences(typ.Value(), seen)...)
-		return refs
-	case *List:
-		return recursiveMapKeyReferences(typ.Of(), seen)
-	case *Maybe:
-		return recursiveMapKeyReferences(typ.Of(), seen)
-	case *Result:
-		refs := recursiveMapKeyReferences(typ.Val(), seen)
-		refs = append(refs, recursiveMapKeyReferences(typ.Err(), seen)...)
-		return refs
-	case *MutableRef:
-		return nil
-	case *Union:
-		refs := []*StructDef{}
-		for _, member := range typ.Types {
-			refs = append(refs, recursiveMapKeyReferences(member, seen)...)
-		}
-		return refs
-	case *StructDef:
-		refs := []*StructDef{}
-		for _, field := range typ.Fields {
-			refs = append(refs, recursiveMapKeyReferences(field, seen)...)
-		}
-		return refs
-	case *FunctionDef:
-		refs := recursiveMapKeyReferences(typ.ReturnType, seen)
-		for _, param := range typ.Parameters {
-			refs = append(refs, recursiveMapKeyReferences(param.Type, seen)...)
-		}
-		return refs
-	default:
-		return nil
-	}
+func recursiveStructApplicationKey(typ *StructDef) string {
+	definition := canonicalStructDefinition(typ)
+	return definition.ModulePath + "::" + definition.Name
 }
 
 func recursivePath(from *StructDef, to *StructDef, edges map[*StructDef][]recursiveStructEdge, seen map[*StructDef]bool) ([]recursiveStructEdge, bool) {

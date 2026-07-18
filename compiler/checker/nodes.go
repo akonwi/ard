@@ -1584,7 +1584,11 @@ type StructDef struct {
 	// for explicit literal type arguments.
 	DeclaredGenerics bool
 	TypeArgs         []Type
-	Private          bool
+	// Definition points from a generic struct application to its canonical
+	// declaration. Canonical declarations leave Definition nil and own the
+	// field templates; applications own only their ordered TypeArgs.
+	Definition *StructDef
+	Private    bool
 }
 
 func (def StructDef) NonProducing() {}
@@ -1606,10 +1610,8 @@ func (def StructDef) String() string {
 func (def StructDef) get(name string) Type {
 	// Struct type identity describes value shape. Method namespaces live on the
 	// checked Program side table and are resolved by the checker with module context.
-	if field, ok := def.Fields[name]; ok {
-		return field
-	}
-	return nil
+	field, _ := structField(&def, name)
+	return field
 }
 func (def StructDef) equal(other Type) bool {
 	return equalTypes(def, other)
@@ -1624,7 +1626,7 @@ func (def StructDef) hasGenerics() bool {
 			return true
 		}
 	}
-	for _, fieldType := range def.Fields {
+	for _, fieldType := range structFields(&def) {
 		if hasGenericsInType(fieldType) {
 			return true
 		}
@@ -1633,8 +1635,9 @@ func (def StructDef) hasGenerics() bool {
 }
 
 func (def StructDef) hasTrait(trait *Trait) bool {
-	for i := range def.Traits {
-		t := def.Traits[i]
+	definition := canonicalStructDefinition(&def)
+	for i := range definition.Traits {
+		t := definition.Traits[i]
 		if t.equal(trait) {
 			return true
 		}

@@ -1007,6 +1007,83 @@ func TestLowerGenericStructMethodBodyUsesReceiverBindings(t *testing.T) {
 		t.Fatalf("get return kind = %v, want TypeParam", typeKind(t, program, get.Signature.Return))
 	}
 }
+func TestReferenceSyntheticIdentityUsesReferentTypeID(t *testing.T) {
+	lowerer := newLowerer(LowerOptions{})
+	left := TypeID(len(lowerer.program.Types) + 1)
+	lowerer.program.Types = append(lowerer.program.Types, TypeInfo{ID: left, Kind: TypeStruct, Name: "Item", ModulePath: "left"})
+	right := TypeID(len(lowerer.program.Types) + 1)
+	lowerer.program.Types = append(lowerer.program.Types, TypeInfo{ID: right, Kind: TypeStruct, Name: "Item", ModulePath: "right"})
+	leftRef, err := lowerer.internSyntheticType("mut Item", TypeInfo{Kind: TypeReference, Elem: left})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rightRef, err := lowerer.internSyntheticType("mut Item", TypeInfo{Kind: TypeReference, Elem: right})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leftRef == rightRef {
+		t.Fatalf("references to distinct Item types share AIR type %d", leftRef)
+	}
+}
+
+func TestLowerMutableGenericArgumentHasDistinctNominalIdentity(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box<$T> { value: $T }
+		fn plain(value: Box<Int>) {}
+		fn borrowed(value: Box<mut Int>) {}
+	`)
+
+	plain := findFunction(t, program, "plain")
+	borrowed := findFunction(t, program, "borrowed")
+	plainType := plain.Signature.Params[0].Type
+	borrowedType := borrowed.Signature.Params[0].Type
+	if plainType == borrowedType {
+		t.Fatalf("Box<Int> and Box<mut Int> share AIR type %d", plainType)
+	}
+	borrowedInfo := testTypeInfo(t, program, borrowedType)
+	if len(borrowedInfo.GenericArgs) != 1 || typeKind(t, program, borrowedInfo.GenericArgs[0]) != TypeReference {
+		t.Fatalf("borrowed generic args = %v, want TypeReference", borrowedInfo.GenericArgs)
+	}
+}
+
+func TestLowerRecursiveGenericMethodUsesReceiverTypeParameterIdentity(t *testing.T) {
+	program := lowerSource(t, `
+		struct Context<$T> {
+			handlers: [fn(mut Context<$T>)],
+		}
+
+		impl Context {
+			fn first() fn(mut Context<$T>) {
+				self.handlers.at(0).expect("handler")
+			}
+		}
+
+		fn consume(context: Context<Int>) fn(mut Context<Int>) {
+			context.first()
+		}
+	`)
+
+	method := findFunction(t, program, "Context.first")
+	if len(method.Signature.Params) == 0 {
+		t.Fatal("generic method missing receiver parameter")
+	}
+	receiver := testTypeInfo(t, program, method.Signature.Params[0].Type)
+	callback := testTypeInfo(t, program, method.Signature.Return)
+	if len(receiver.GenericArgs) != 1 || len(callback.Params) != 1 {
+		t.Fatalf("receiver/callback types = %#v / %#v", receiver, callback)
+	}
+	callbackContext := testTypeInfo(t, program, callback.Params[0])
+	if method.Signature.Params[0].Type != callback.Params[0] {
+		t.Fatalf("receiver type = %d, callback context = %d, want one nominal application", method.Signature.Params[0].Type, callback.Params[0])
+	}
+	if len(callbackContext.GenericArgs) != 1 || receiver.GenericArgs[0] != callbackContext.GenericArgs[0] {
+		t.Fatalf("receiver arg = %v, callback arg = %v, want same TypeParam", receiver.GenericArgs, callbackContext.GenericArgs)
+	}
+	if typeKind(t, program, receiver.GenericArgs[0]) != TypeParam {
+		t.Fatalf("receiver generic arg kind = %v, want TypeParam", typeKind(t, program, receiver.GenericArgs[0]))
+	}
+}
+
 func TestLowerGenericStructMethodLowersOnceAsGeneric(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box {

@@ -1167,46 +1167,62 @@ func (l *lowerer) typeParamFieldList(typeParams []string, comparable map[string]
 // `comparable` constraint.
 func (l *lowerer) comparableTypeParams(signature air.Signature, locals []air.Local) map[string]bool {
 	result := map[string]bool{}
-	seen := map[air.TypeID]bool{}
-	var walk func(id air.TypeID)
-	walk = func(id air.TypeID) {
-		if id == air.NoType || seen[id] {
+	seen := map[air.TypeID]uint8{}
+	var walk func(id air.TypeID, requireComparable bool)
+	walk = func(id air.TypeID, requireComparable bool) {
+		if id == air.NoType {
 			return
 		}
-		seen[id] = true
+		flag := uint8(1)
+		if requireComparable {
+			flag = 2
+		}
+		if seen[id]&flag != 0 {
+			return
+		}
+		seen[id] |= flag
 		info, ok := l.typeInfo(id)
 		if !ok {
 			return
 		}
-		if info.Kind == air.TypeMap {
-			if key, ok := l.typeInfo(info.Key); ok && key.Kind == air.TypeParam {
-				result[key.Name] = true
+		if info.Kind == air.TypeParam {
+			if requireComparable {
+				result[info.Name] = true
 			}
+			return
 		}
-		walk(info.Elem)
-		walk(info.Key)
-		walk(info.Value)
-		walk(info.Return)
-		walk(info.Error)
+		if info.Kind == air.TypeMap {
+			walk(info.Key, true)
+			walk(info.Value, false)
+			return
+		}
+
+		structural := requireComparable && (info.Kind == air.TypeStruct || info.Kind == air.TypeFixedArray)
+		walk(info.Elem, structural)
+		walk(info.Key, false)
+		walk(info.Value, false)
+		walk(info.Return, false)
+		walk(info.Error, false)
 		for _, p := range info.Params {
-			walk(p)
+			walk(p, false)
 		}
 		for _, f := range info.Fields {
-			walk(f.Type)
+			walk(f.Type, structural && !f.Mutable)
 		}
 		for _, m := range info.Members {
-			walk(m.Type)
+			walk(m.Type, false)
 		}
-		for _, ga := range info.GenericArgs {
-			walk(ga)
+		for i, ga := range info.GenericArgs {
+			requiresComparable := i < len(info.GenericComparable) && info.GenericComparable[i]
+			walk(ga, requiresComparable)
 		}
 	}
 	for _, p := range signature.Params {
-		walk(p.Type)
+		walk(p.Type, false)
 	}
-	walk(signature.Return)
+	walk(signature.Return, false)
 	for _, loc := range locals {
-		walk(loc.Type)
+		walk(loc.Type, false)
 	}
 	return result
 }
@@ -4209,6 +4225,12 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 			return nil, err
 		}
 		return &ast.ChanType{Dir: ast.SEND, Value: elem}, nil
+	case air.TypeReference:
+		elem, err := l.goType(info.Elem)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.StarExpr{X: elem}, nil
 	case air.TypeMap:
 		key, err := l.goType(info.Key)
 		if err != nil {

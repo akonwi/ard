@@ -148,7 +148,34 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			Types:      newTypes,
 			Private:    typ.Private,
 		}
+	case *ForeignType:
+		newTypeArgs := make([]Type, len(typ.TypeArgs))
+		changed := false
+		for i, typeArg := range typ.TypeArgs {
+			newTypeArgs[i] = derefTypeSeen(typeArg, seen)
+			if newTypeArgs[i] != typeArg {
+				changed = true
+			}
+		}
+		if !changed {
+			return typ
+		}
+		return foreignTypeWithArgs(typ, newTypeArgs)
 	case *StructDef:
+		if typ.Definition != nil {
+			newTypeArgs := make([]Type, len(typ.TypeArgs))
+			changed := false
+			for i, typeArg := range typ.TypeArgs {
+				newTypeArgs[i] = derefTypeSeen(typeArg, seen)
+				if newTypeArgs[i] != typeArg {
+					changed = true
+				}
+			}
+			if !changed {
+				return typ
+			}
+			return newStructApplication(typ, newTypeArgs)
+		}
 		fieldsChanged := false
 		newFields := make(map[string]Type, len(typ.Fields))
 		for name, fieldType := range typ.Fields {
@@ -178,6 +205,7 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			GenericParams:    append([]string(nil), typ.GenericParams...),
 			DeclaredGenerics: typ.DeclaredGenerics,
 			TypeArgs:         newTypeArgs,
+			Definition:       typ.Definition,
 			Private:          typ.Private,
 		}
 	case *FunctionDef:
@@ -577,7 +605,9 @@ func (c *Checker) Check() {
 	}
 
 	c.validateTopLevelTypeAliases()
+	c.checkStructFieldMapKeyTypes()
 	c.checkRecursiveStructLayouts()
+	c.checkGenericInstantiationCycles()
 
 	// now that we're done with the aliases, use module paths for the import keys
 	for alias, mod := range c.program.Imports {
@@ -808,6 +838,10 @@ func collectGenericsFromType(t Type, params *[]string, seen map[string]bool) {
 	case *Result:
 		collectGenericsFromType(t.val, params, seen)
 		collectGenericsFromType(t.err, params, seen)
+	case *ForeignType:
+		for _, typeArg := range t.TypeArgs {
+			collectGenericsFromType(typeArg, params, seen)
+		}
 	case *StructDef:
 		if len(t.TypeArgs) == 0 {
 			for _, genericName := range t.GenericParams {
@@ -840,30 +874,20 @@ func (c *Checker) specializeAliasedType(originalType Type, typeArgs []parse.Decl
 	}
 
 	if structDef, ok := originalType.(*StructDef); ok {
-		if c.isResolvingStructDefinition(structDef) {
-			c.addDiagnostic(recursiveGenericSelfReferenceDiagnostic{
-				TypeName: structDef.Name,
-				Span:     c.sourceSpan(loc),
-			}.build())
-			return structDef
+		definition := canonicalStructDefinition(structDef)
+		if !c.isResolvingStructDefinition(definition) {
+			c.ensureStructDefinitionResolved(definition)
 		}
-		c.ensureStructDefinitionResolved(structDef)
-		genericParams = []string{}
-		seenGenerics = make(map[string]bool)
-		collectGenericsFromType(originalType, &genericParams, seenGenerics)
-		if len(genericParams) == 0 && len(structDef.GenericParams) > 0 {
-			genericParams = append(genericParams, structDef.GenericParams...)
-		}
+		genericParams = append([]string(nil), definition.GenericParams...)
 		if len(typeArgs) != len(genericParams) {
 			c.addIncorrectTypeArgumentCount(len(genericParams), len(typeArgs), "", loc)
 			return originalType
 		}
-		typeVarMap := make(map[string]*TypeVar, len(genericParams))
+		resolvedTypeArgs := make([]Type, len(typeArgs))
 		for i, typeArg := range typeArgs {
-			resolvedArgType := c.resolveType(typeArg)
-			typeVarMap[genericParams[i]] = &TypeVar{name: genericParams[i], actual: resolvedArgType, bound: true}
+			resolvedTypeArgs[i] = c.resolveType(typeArg)
 		}
-		return copyStructWithTypeVarMap(structDef, typeVarMap)
+		return newStructApplication(definition, resolvedTypeArgs)
 	}
 
 	// 3. Replace generics
@@ -933,17 +957,113 @@ func isComparableValueType(t Type) bool {
 	return isEnum
 }
 
+type mapKeyTypeContext struct {
+	seen         map[string]bool
+	complexities map[*StructDef][]int
+}
+
 func isValidMapKeyType(t Type) bool {
+	return isValidMapKeyTypeSeen(t, &mapKeyTypeContext{
+		seen:         map[string]bool{},
+		complexities: map[*StructDef][]int{},
+	})
+}
+
+func isValidMapKeyTypeSeen(t Type, context *mapKeyTypeContext) bool {
 	switch ty := t.(type) {
 	case *TypeVar:
 		if ty.actual != nil {
-			return isValidMapKeyType(ty.actual)
+			return isValidMapKeyTypeSeen(ty.actual, context)
 		}
 		return true
+	case *StructDef:
+		definition := canonicalStructDefinition(ty)
+		key := definition.ModulePath + "::" + ty.String()
+		if context.seen[key] {
+			return true
+		}
+		complexity := 0
+		for _, arg := range ty.TypeArgs {
+			complexity += mapKeyTypeComplexity(arg, map[Type]bool{})
+		}
+		for _, previous := range context.complexities[definition] {
+			if complexity > previous {
+				return false
+			}
+		}
+		context.seen[key] = true
+		context.complexities[definition] = append(context.complexities[definition], complexity)
+		defer func() {
+			delete(context.seen, key)
+			values := context.complexities[definition]
+			context.complexities[definition] = values[:len(values)-1]
+		}()
+		for _, field := range structFields(ty) {
+			if !isValidMapKeyTypeSeen(field, context) {
+				return false
+			}
+		}
+		return true
+	case *FixedArray:
+		return isValidMapKeyTypeSeen(ty.Of(), context)
+	case *ForeignType:
+		return ty.GoType == nil || gotypes.Comparable(ty.GoType)
 	case *Maybe, *List, *Map, *Result, *Union, *FunctionDef, *Trait, *anyType:
 		return false
 	default:
 		return true
+	}
+}
+
+func mapKeyTypeComplexity(t Type, seen map[Type]bool) int {
+	if t == nil || seen[t] {
+		return 0
+	}
+	seen[t] = true
+	switch typ := t.(type) {
+	case *TypeVar:
+		if typ.actual != nil {
+			return mapKeyTypeComplexity(typ.actual, seen)
+		}
+		return 0
+	case *StructDef:
+		total := 1
+		for _, arg := range typ.TypeArgs {
+			total += mapKeyTypeComplexity(arg, seen)
+		}
+		return total
+	case *List:
+		return 1 + mapKeyTypeComplexity(typ.Of(), seen)
+	case *FixedArray:
+		return 1 + mapKeyTypeComplexity(typ.Of(), seen)
+	case *Map:
+		return 1 + mapKeyTypeComplexity(typ.Key(), seen) + mapKeyTypeComplexity(typ.Value(), seen)
+	case *Maybe:
+		return 1 + mapKeyTypeComplexity(typ.Of(), seen)
+	case *Result:
+		return 1 + mapKeyTypeComplexity(typ.Val(), seen) + mapKeyTypeComplexity(typ.Err(), seen)
+	case *MutableRef:
+		return 1 + mapKeyTypeComplexity(typ.Of(), seen)
+	case *Union:
+		total := 1
+		for _, member := range typ.Types {
+			total += mapKeyTypeComplexity(member, seen)
+		}
+		return total
+	case *FunctionDef:
+		total := 1 + mapKeyTypeComplexity(typ.ReturnType, seen)
+		for _, param := range typ.Parameters {
+			total += mapKeyTypeComplexity(param.Type, seen)
+		}
+		return total
+	case *ForeignType:
+		total := 1
+		for _, arg := range typ.TypeArgs {
+			total += mapKeyTypeComplexity(arg, seen)
+		}
+		return total
+	default:
+		return 0
 	}
 }
 
@@ -1139,7 +1259,32 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			targetName := ty.Type.Target.(*parse.Identifier).Name
 			if goPkg := c.program.GoImports[targetName]; goPkg != nil {
 				if goType := goPkg.Types[ty.Type.Property.(*parse.Identifier).Name]; goType != nil {
-					baseType = goType
+					if foreign, ok := goType.(*ForeignType); ok && len(ty.TypeArgs) > 0 {
+						if named, ok := foreign.GoType.(*gotypes.Named); ok && named.TypeParams() != nil && named.TypeParams().Len() != len(ty.TypeArgs) {
+							expected := named.TypeParams().Len()
+							legacy := fmt.Sprintf("Go type %s expects %d type argument(s), got %d", foreign, expected, len(ty.TypeArgs))
+							c.addDiagnostic(invalidGoStructTypeArgumentsDiagnostic{
+								Span: c.sourceSpan(ty.GetLocation()), LegacyMessage: legacy, Primary: fmt.Sprintf("expected %d type argument(s), but found %d", expected, len(ty.TypeArgs)),
+							}.build())
+							baseType = foreign
+							break
+						}
+						resolvedArgs := make([]Type, len(ty.TypeArgs))
+						symbolic := false
+						for i, arg := range ty.TypeArgs {
+							resolvedArgs[i] = c.resolveType(arg)
+							symbolic = symbolic || hasGenericsInType(resolvedArgs[i])
+						}
+						if symbolic {
+							application := *foreign
+							application.TypeArgs = resolvedArgs
+							baseType = &application
+						} else {
+							baseType = c.instantiateForeignStructForLiteral(foreign, ty.TypeArgs, nil, ty.GetLocation())
+						}
+					} else {
+						baseType = goType
+					}
 					break
 				}
 			}
@@ -5206,16 +5351,11 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 	if len(genericParams) == 0 {
 		genericParams = nil
 	}
-	instance._type = &StructDef{
-		Name:             structDefCopy.Name,
-		ModulePath:       structDefCopy.ModulePath,
-		Fields:           fieldTypes,
-		Self:             structDefCopy.Self,
-		Traits:           structDefCopy.Traits,
-		GenericParams:    genericParams,
-		DeclaredGenerics: structDefCopy.DeclaredGenerics,
-		TypeArgs:         resolvedTypeArgs,
-		Private:          structDefCopy.Private,
+	definition := canonicalStructDefinition(structType)
+	if len(genericParams) > 0 {
+		instance._type = newStructApplication(definition, resolvedTypeArgs)
+	} else {
+		instance._type = definition
 	}
 	instance.StructType = instance._type
 	return instance
@@ -5725,8 +5865,9 @@ func (c *Checker) extractGenericBindingsFromSpecializedStruct(originalDef, speci
 
 	// Now compare original field types with specialized field types
 	// For each field that contains a generic in the original, extract its resolved type
+	specializedFields := structFields(specializedDef)
 	for fieldName, originalFieldType := range originalDef.Fields {
-		specializedFieldType, ok := specializedDef.Fields[fieldName]
+		specializedFieldType, ok := specializedFields[fieldName]
 		if !ok {
 			continue
 		}
@@ -5776,6 +5917,14 @@ func bindGenericTypes(original Type, specialized Type, bindings map[string]Type)
 		if spec, ok := specialized.(*Result); ok {
 			bindGenericTypes(orig.val, spec.val, bindings)
 			bindGenericTypes(orig.err, spec.err, bindings)
+		}
+	case *ForeignType:
+		if spec, ok := specialized.(*ForeignType); ok && orig.Target == spec.Target && orig.Namespace == spec.Namespace && orig.Name == spec.Name {
+			for i, originalArg := range orig.TypeArgs {
+				if i < len(spec.TypeArgs) {
+					bindGenericTypes(originalArg, spec.TypeArgs[i], bindings)
+				}
+			}
 		}
 	case *StructDef:
 		if spec, ok := specialized.(*StructDef); ok {

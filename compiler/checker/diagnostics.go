@@ -48,6 +48,7 @@ const (
 	DiagnosticCodeIncorrectTypeArgCount         DiagnosticCode = "incorrect_type_argument_count"
 	DiagnosticCodeMissingTypeArguments          DiagnosticCode = "missing_type_arguments"
 	DiagnosticCodeRecursiveGenericReference     DiagnosticCode = "recursive_generic_self_reference"
+	DiagnosticCodeGenericInstantiationCycle     DiagnosticCode = "generic_instantiation_cycle"
 	DiagnosticCodeMethodIntroducedGeneric       DiagnosticCode = "method_introduced_generic_parameter"
 	DiagnosticCodeInvalidMapKeyType             DiagnosticCode = "invalid_map_key_type"
 	DiagnosticCodeMalformedTypeNode             DiagnosticCode = "internal_malformed_type_node"
@@ -1903,6 +1904,48 @@ func (d recursiveGenericSelfReferenceDiagnostic) build() Diagnostic {
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is specialized while its definition is still being resolved", d.TypeName)},
 	)
 	diagnostic.Code = DiagnosticCodeRecursiveGenericReference
+	return diagnostic
+}
+
+type genericInstantiationCycleReference struct {
+	StructName string
+	FieldName  string
+	Span       SourceSpan
+}
+
+type genericInstantiationCycleDiagnostic struct {
+	Cycle []genericInstantiationCycleReference
+}
+
+func (d genericInstantiationCycleDiagnostic) build() Diagnostic {
+	if len(d.Cycle) == 0 {
+		panic("generic instantiation cycle diagnostic requires at least one reference")
+	}
+	primary := d.Cycle[0]
+	path := make([]string, len(d.Cycle))
+	secondary := make([]DiagnosticLabel, 0, len(d.Cycle)-1)
+	for i, reference := range d.Cycle {
+		path[i] = reference.StructName + "." + reference.FieldName
+		if i > 0 {
+			secondary = append(secondary, DiagnosticLabel{
+				Span:    reference.Span,
+				Message: fmt.Sprintf("`%s.%s` continues the growing instantiation cycle", reference.StructName, reference.FieldName),
+			})
+		}
+	}
+	message := "Generic instantiation cycle grows type arguments: " + strings.Join(path, " -> ")
+	diagnostic := newLabeledDiagnostic(
+		Error,
+		message,
+		"Generic instantiation cycle",
+		"Recursive generic applications must preserve a finite set of type arguments.",
+		DiagnosticLabel{
+			Span:    primary.Span,
+			Message: fmt.Sprintf("`%s.%s` participates in a cycle that grows type arguments", primary.StructName, primary.FieldName),
+		},
+		secondary...,
+	)
+	diagnostic.Code = DiagnosticCodeGenericInstantiationCycle
 	return diagnostic
 }
 

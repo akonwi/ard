@@ -192,17 +192,16 @@ func normalizedParamMutability(p Parameter) (bool, Type) {
 
 func equalStructDefSeen(left StructDef, right Type, seen map[typeEqualKey]struct{}) bool {
 	r, ok := right.(*StructDef)
-	if !ok || left.Name != r.Name || namedTypeOwnersDiffer(left.ModulePath, r.ModulePath) || len(left.Fields) != len(r.Fields) || len(left.TypeArgs) != len(r.TypeArgs) {
+	if !ok {
+		return false
+	}
+	leftDef := canonicalStructDefinition(&left)
+	rightDef := canonicalStructDefinition(r)
+	if leftDef.Name != rightDef.Name || leftDef.ModulePath != rightDef.ModulePath || len(left.TypeArgs) != len(r.TypeArgs) {
 		return false
 	}
 	for i := range left.TypeArgs {
 		if !equalTypesSeen(left.TypeArgs[i], r.TypeArgs[i], seen) {
-			return false
-		}
-	}
-	for name, fieldType := range left.Fields {
-		otherFieldType, ok := r.Fields[name]
-		if !ok || !equalTypesSeen(fieldType, otherFieldType, seen) {
 			return false
 		}
 	}
@@ -277,9 +276,6 @@ func typeEqualID(t Type) string {
 	case Enum:
 		return fmt.Sprintf("Enum:%s:%s", v.ModulePath, v.Name)
 	case *StructDef:
-		if v.Name != "" {
-			return fmt.Sprintf("Struct:%s:%s", v.ModulePath, v.Name)
-		}
 		return fmt.Sprintf("Struct:%p", v)
 	case StructDef:
 		return fmt.Sprintf("Struct:%s:%s", v.ModulePath, v.Name)
