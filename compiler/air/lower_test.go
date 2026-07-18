@@ -908,6 +908,24 @@ fn main() Str {
 		t.Fatalf("event_name result = %#v, want ExprLoadGlobal", featureFn.Body.Result)
 	}
 }
+func TestLowerContextualReturnOnlyGenericStaticCall(t *testing.T) {
+	program := lowerSource(t, `
+		struct Key<$T> {
+			marker: Bool,
+		}
+
+		fn Key::new() Key<$T> {
+			Key<$T>{marker: true}
+		}
+
+		fn main() {
+			let key: Key<Str> = Key::new()
+		}
+	`)
+
+	findFunction(t, program, "main")
+}
+
 func TestLowerImportedGenericModuleFunctionSpecialization(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/list

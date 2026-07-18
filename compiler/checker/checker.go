@@ -2640,7 +2640,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 				var value Expression
 				c.withValueExprContext(func() {
-					value = c.checkExpr(s.Value)
+					value = c.checkExprAs(s.Value, expectedType)
 				})
 				if value == nil {
 					return nil
@@ -3437,7 +3437,9 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 	}
 
 	switch stmt.(type) {
-	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.IfStatement, *parse.StaticFunction, *parse.FunctionValueCall, *parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction, *parse.UnsafeBlock:
+	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.IfStatement,
+		*parse.FunctionCall, *parse.FunctionValueCall, *parse.InstanceMethod, *parse.StaticFunction,
+		*parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction, *parse.UnsafeBlock:
 		return true
 	default:
 		return false
@@ -5930,7 +5932,7 @@ func functionDefForCallableType(typ Type) (*FunctionDef, bool) {
 	}
 }
 
-func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Argument, typeArgs []parse.DeclaredType, location parse.Location, displayName string) Expression {
+func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Argument, typeArgs []parse.DeclaredType, location parse.Location, displayName string, expectedReturn Type) Expression {
 	fnDef, ok := functionDefForCallableType(callee.Type())
 	if !ok {
 		c.addNonCallable(displayName, location, expressionBindingSpan(callee), nonCallableSuffix)
@@ -5959,7 +5961,7 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 	}
 
 	fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
-	args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+	args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), location)
 	if args == nil {
 		return nil
 	}
@@ -5980,7 +5982,7 @@ func (c *Checker) checkFunctionValueCall(callee Expression, callArgs []parse.Arg
 	}
 }
 
-func (c *Checker) checkFunctionFieldCall(subject Expression, method parse.FunctionCall, location parse.Location) (Expression, bool) {
+func (c *Checker) checkFunctionFieldCall(subject Expression, method parse.FunctionCall, location parse.Location, expectedReturn Type) (Expression, bool) {
 	if subject == nil || subject.Type() == nil {
 		return nil, false
 	}
@@ -5996,7 +5998,7 @@ func (c *Checker) checkFunctionFieldCall(subject Expression, method parse.Functi
 	if _, ok := subject.Type().(*StructDef); ok {
 		field.Kind = StructSubject
 	}
-	return c.checkFunctionValueCall(field, method.Args, method.TypeArgs, location, fmt.Sprintf("%s.%s", subject, method.Name)), true
+	return c.checkFunctionValueCall(field, method.Args, method.TypeArgs, location, fmt.Sprintf("%s.%s", subject, method.Name), expectedReturn), true
 }
 
 func comparisonOperatorText(operator parse.Operator) string {
@@ -6037,14 +6039,18 @@ func (c *Checker) addInvalidEquality(operator string, left, right Expression, le
 }
 
 func (c *Checker) checkExpr(expr parse.Expression) Expression {
-	result := c.checkExprInner(expr)
+	return c.checkExprWithExpectedCall(expr, nil)
+}
+
+func (c *Checker) checkExprWithExpectedCall(expr parse.Expression, expectedReturn Type) Expression {
+	result := c.checkExprInner(expr, expectedReturn)
 	if result != nil {
 		c.recordExprSpan(expr, result)
 	}
 	return result
 }
 
-func (c *Checker) checkExprInner(expr parse.Expression) Expression {
+func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Expression {
 	if c.halted {
 		return nil
 	}
@@ -6163,7 +6169,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			if callee == nil {
 				return nil
 			}
-			return c.checkFunctionValueCall(callee, s.Args, s.TypeArgs, s.GetLocation(), s.Callee.String())
+			return c.checkFunctionValueCall(callee, s.Args, s.TypeArgs, s.GetLocation(), s.Callee.String(), expectedReturn)
 		}
 	case *parse.FunctionCall:
 		{
@@ -6240,7 +6246,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
 
 			// Check and process arguments (handles both generics and mutability)
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation())
 			if args == nil {
 				return nil
 			}
@@ -6410,7 +6416,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 			}
 			if sig == nil {
-				if call, ok := c.checkFunctionFieldCall(subj, s.Method, s.GetLocation()); ok {
+				if call, ok := c.checkFunctionFieldCall(subj, s.Method, s.GetLocation(), expectedReturn); ok {
 					return call
 				}
 				// A foreign named scalar with no Go method of this name falls back
@@ -6550,7 +6556,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			fnDefCopy = expandFunctionDefForRepeatedVariadic(fnDefCopy, len(resolvedExprs))
 
 			// Check and process arguments (handles both generics and mutability)
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation())
 			if args == nil {
 				return nil
 			}
@@ -6963,7 +6969,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 				}
 
 				fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
-				args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+				args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation())
 				if args == nil {
 					return nil
 				}
@@ -7165,7 +7171,7 @@ func (c *Checker) checkExprInner(expr parse.Expression) Expression {
 			fnDefCopy, genericScope := c.setupFunctionGenerics(fnDef)
 
 			// Check and process arguments (handles both generics and mutability)
-			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs)
+			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation())
 			if args == nil {
 				return nil
 			}
@@ -9347,12 +9353,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			return fn
 		}
 	case *parse.InstanceMethod:
-		{
-			subj := c.checkExpr(s.Target)
-			if subj == nil {
-				return nil
-			}
-		}
+		return c.checkExprWithExpectedCall(s, expectedType)
 	case *parse.StaticFunction:
 		{
 			resultType, expectResult := expectedType.(*Result)
@@ -9389,6 +9390,9 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 				c.addNonCallable(fmt.Sprintf("%s::%s", moduleName, s.Function.Name), s.GetLocation(), nil, nonCallableSuffix)
 				return nil
 			}
+			if len(s.Function.TypeArgs) > 0 {
+				break
+			}
 
 			if len(s.Function.Args) != len(fnDef.Parameters) {
 				c.addArgumentCount(fmt.Sprint(len(fnDef.Parameters)), len(s.Function.Args), s.GetLocation(), "")
@@ -9419,20 +9423,27 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 				bindInferredTypeVars(resultType.Err(), arg.Type())
 			}
 
-			fnDef.ReturnType = resultType
+			callDef := *fnDef
+			callDef.ReturnType = resultType
 			return &ModuleFunctionCall{
 				Module: mod.Path(),
 				Call: &FunctionCall{
-					Name:       fnDef.name(),
+					Name:       callDef.name(),
 					Args:       []Expression{arg},
-					fn:         fnDef,
-					ReturnType: fnDef.ReturnType,
+					fn:         &callDef,
+					ReturnType: callDef.ReturnType,
 				},
 			}
 		}
 	}
 
-	checked := c.checkExpr(expr)
+	var checked Expression
+	switch expr.(type) {
+	case *parse.FunctionCall, *parse.FunctionValueCall, *parse.StaticFunction:
+		checked = c.checkExprWithExpectedCall(expr, expectedType)
+	default:
+		checked = c.checkExpr(expr)
+	}
 	if checked == nil {
 		return nil
 	}
@@ -10119,7 +10130,118 @@ func expandFunctionDefForRepeatedVariadic(fnDef *FunctionDef, argCount int) *Fun
 	return &expanded
 }
 
-func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int) ([]Expression, *FunctionDef) {
+func contextualGenericReturn(expected Type, explicitTypeArgs []Type) Type {
+	if expected == nil || expected == Void || len(explicitTypeArgs) > 0 {
+		return nil
+	}
+	return expected
+}
+
+// inferBindingsFromExpectedReturn treats the function return type as a pattern
+// and uses its contextual expected type to bind call-owned generics. Nominal
+// types are matched by identity and ordered type arguments; their fields are
+// deliberately not traversed.
+func (c *Checker) inferBindingsFromExpectedReturn(pattern Type, expected Type, genericScope *SymbolTable) error {
+	pattern = deref(pattern)
+	expected = deref(expected)
+
+	switch p := pattern.(type) {
+	case *TypeVar:
+		return genericScope.bindGeneric(p.name, expected)
+	case *StructDef:
+		e, ok := expected.(*StructDef)
+		if !ok || p.Name != e.Name || namedTypeOwnersDiffer(p.ModulePath, e.ModulePath) || len(p.TypeArgs) != len(e.TypeArgs) {
+			return newUnificationError(pattern, expected, fmt.Sprintf("type mismatch: expected %s, got %s", pattern, expected))
+		}
+		for i := range p.TypeArgs {
+			if err := c.inferBindingsFromExpectedReturn(p.TypeArgs[i], e.TypeArgs[i], genericScope); err != nil {
+				return err
+			}
+		}
+		return nil
+	case *Maybe:
+		e, ok := expected.(*Maybe)
+		if !ok {
+			return newUnificationError(pattern, expected, fmt.Sprintf("expected maybe type, got %s", expected))
+		}
+		return c.inferBindingsFromExpectedReturn(p.of, e.of, genericScope)
+	case *Result:
+		e, ok := expected.(*Result)
+		if !ok {
+			return newUnificationError(pattern, expected, fmt.Sprintf("expected result type, got %s", expected))
+		}
+		if err := c.inferBindingsFromExpectedReturn(p.val, e.val, genericScope); err != nil {
+			return err
+		}
+		return c.inferBindingsFromExpectedReturn(p.err, e.err, genericScope)
+	case *List:
+		e, ok := expected.(*List)
+		if !ok {
+			return newUnificationError(pattern, expected, fmt.Sprintf("expected list type, got %s", expected))
+		}
+		return c.inferBindingsFromExpectedReturn(p.of, e.of, genericScope)
+	case *FixedArray:
+		e, ok := expected.(*FixedArray)
+		if !ok || p.length != e.length {
+			return newUnificationError(pattern, expected, fmt.Sprintf("expected fixed array type, got %s", expected))
+		}
+		return c.inferBindingsFromExpectedReturn(p.of, e.of, genericScope)
+	case *Map:
+		e, ok := expected.(*Map)
+		if !ok {
+			return newUnificationError(pattern, expected, fmt.Sprintf("expected map type, got %s", expected))
+		}
+		if err := c.inferBindingsFromExpectedReturn(p.key, e.key, genericScope); err != nil {
+			return err
+		}
+		return c.inferBindingsFromExpectedReturn(p.value, e.value, genericScope)
+	case *MutableRef:
+		e, ok := expected.(*MutableRef)
+		if !ok {
+			return newUnificationError(pattern, expected, fmt.Sprintf("expected mutable reference, got %s", expected))
+		}
+		return c.inferBindingsFromExpectedReturn(p.of, e.of, genericScope)
+	case *Chan:
+		e, ok := expected.(*Chan)
+		if !ok {
+			return newUnificationError(pattern, expected, fmt.Sprintf("expected channel type, got %s", expected))
+		}
+		return c.inferBindingsFromExpectedReturn(p.of, e.of, genericScope)
+	case *Receiver:
+		e, ok := expected.(*Receiver)
+		if !ok {
+			return newUnificationError(pattern, expected, fmt.Sprintf("expected receiver type, got %s", expected))
+		}
+		return c.inferBindingsFromExpectedReturn(p.of, e.of, genericScope)
+	case *Sender:
+		e, ok := expected.(*Sender)
+		if !ok {
+			return newUnificationError(pattern, expected, fmt.Sprintf("expected sender type, got %s", expected))
+		}
+		return c.inferBindingsFromExpectedReturn(p.of, e.of, genericScope)
+	case *FunctionDef:
+		e, ok := expected.(*FunctionDef)
+		if !ok || len(p.Parameters) != len(e.Parameters) {
+			return newUnificationError(pattern, expected, fmt.Sprintf("expected function type, got %s", expected))
+		}
+		for i := range p.Parameters {
+			if p.Parameters[i].Mutable != e.Parameters[i].Mutable || p.Parameters[i].Variadic != e.Parameters[i].Variadic {
+				return newUnificationError(pattern, expected, "function parameter metadata mismatch")
+			}
+			if err := c.inferBindingsFromExpectedReturn(p.Parameters[i].Type, e.Parameters[i].Type, genericScope); err != nil {
+				return err
+			}
+		}
+		return c.inferBindingsFromExpectedReturn(p.ReturnType, e.ReturnType, genericScope)
+	default:
+		if !c.areCompatible(expected, pattern) {
+			return newUnificationError(pattern, expected, fmt.Sprintf("type mismatch: expected %s, got %s", pattern, expected))
+		}
+		return nil
+	}
+}
+
+func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []parse.Expression, fnDefCopy *FunctionDef, genericScope *SymbolTable, numOmittedArgs int, expectedReturn Type, callLocation parse.Location) ([]Expression, *FunctionDef) {
 	// Create the full argument list including synthesized Maybe::new() calls for omitted arguments
 	// Need to maintain parameter order, so use indexed assignment instead of appending
 	totalArgs := len(fnDefCopy.Parameters)
@@ -10267,6 +10389,13 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				paramType = derefType(paramType)
 			}
 			allExprs[i] = c.synthesizeMaybeNone(paramType)
+		}
+	}
+
+	if genericScope != nil && expectedReturn != nil {
+		if err := c.inferBindingsFromExpectedReturn(fnDefCopy.ReturnType, expectedReturn, genericScope); err != nil {
+			c.addUnificationTypeMismatch(err, expectedReturn, derefType(fnDefCopy.ReturnType), callLocation)
+			return nil, nil
 		}
 	}
 
@@ -10839,7 +10968,7 @@ func (c *Checker) checkAccessorChainWithMaybes(parseExpr parse.Expression) Expre
 		}
 		if sig == nil {
 			if !isMaybe {
-				if call, ok := c.checkFunctionFieldCall(target, p.Method, p.GetLocation()); ok {
+				if call, ok := c.checkFunctionFieldCall(target, p.Method, p.GetLocation(), nil); ok {
 					return call
 				}
 			}
