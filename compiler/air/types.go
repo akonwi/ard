@@ -130,6 +130,10 @@ const (
 	TypeReceiver
 	TypeSender
 	TypeTraitObject
+	// TypeReference is a pointer-shaped mutable-reference type used when a
+	// reference appears as a first-class generic argument. Ordinary mutable
+	// fields and parameters continue to use their dedicated mutability flags.
+	TypeReference
 	// TypeParam is a reference to a generic type parameter inside a generic
 	// definition (e.g. the `T` in `struct Partition { selected: [$T] }`). It only appears in
 	// the fields/signature of a generic definition, never in a concrete value.
@@ -173,10 +177,11 @@ type TypeInfo struct {
 	// concrete instantiation keeps its concrete Fields for AIR typing but also
 	// records Generic (the definition's TypeID) and GenericArgs (the type
 	// arguments), so the backend can emit it as `Def[args...]`.
-	TypeParams  []string
-	ParamIndex  int
-	Generic     TypeID
-	GenericArgs []TypeID
+	TypeParams        []string
+	ParamIndex        int
+	Generic           TypeID
+	GenericArgs       []TypeID
+	GenericComparable []bool
 }
 
 type FieldInfo struct {

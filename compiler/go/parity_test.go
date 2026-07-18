@@ -619,6 +619,96 @@ func TestGoTargetParityAnonymousFunctionInference(t *testing.T) {
 		},
 	})
 }
+func TestGoTargetParityRecursiveGenericFunctionField(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "recursive callback mutates its generic context",
+			input: `
+				struct Context<$T> {
+					state: $T,
+					handlers: [fn(mut Context<$T>)],
+				}
+
+				fn advance(context: mut Context<Int>) {
+					context.state = context.state + 1
+				}
+
+				fn main() Int {
+					mut context = Context<Int>{state: 41, handlers: [advance]}
+					let handler = context.handlers.at(0).expect("handler")
+					handler(context)
+					context.state
+				}
+			`,
+		},
+		{
+			name: "recursive generic receiver method returns callback",
+			input: `
+				struct Context<$T> {
+					state: $T,
+					handlers: [fn(mut Context<$T>)],
+				}
+
+				impl Context {
+					fn first() fn(mut Context<$T>) {
+						self.handlers.at(0).expect("handler")
+					}
+				}
+
+				fn advance(context: mut Context<Int>) {
+					context.state = context.state + 1
+				}
+
+				fn main() Int {
+					mut context = Context<Int>{state: 41, handlers: [advance]}
+					context.first()(context)
+					context.state
+				}
+			`,
+		},
+		{
+			name: "distinct recursive literal applications",
+			input: `
+				struct Node<$T> {
+					value: $T,
+					children: [Node<$T>],
+				}
+
+				fn main() Str {
+					let no_numbers: [Node<Int>] = []
+					let no_text: [Node<Str>] = []
+					let number = Node<Int>{value: 42, children: no_numbers}
+					let text = Node<Str>{value: "ok", children: no_text}
+					"{number.value}:{text.value}"
+				}
+			`,
+		},
+		{
+			name: "mutually recursive generic callbacks",
+			input: `
+				struct A<$T> {
+					value: $T,
+					from_b: fn(B<$T>) $T,
+				}
+
+				struct B<$T> {
+					value: $T,
+					from_a: fn(A<$T>) $T,
+				}
+
+				fn read_a(value: A<Int>) Int { value.value }
+				fn read_b(value: B<Int>) Int { value.value }
+
+				fn main() Int {
+					let a = A<Int>{value: 40, from_b: read_b}
+					let b = B<Int>{value: 2, from_a: read_a}
+					a.from_b(b) + b.from_a(a)
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityFunctionValuedStructFields(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{
@@ -699,6 +789,98 @@ func TestGoTargetParityFunctionValuedStructFields(t *testing.T) {
 		},
 	})
 }
+func TestGoTargetSymbolicForeignGenericApplication(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "foreign type arguments follow Ard function generics",
+			input: `
+				use go:sync/atomic
+
+				fn identity(value: atomic::Pointer<$T>) atomic::Pointer<$T> {
+					value
+				}
+
+				fn main() Int { 0 }
+			`,
+		},
+		{
+			name: "lazy foreign specialization refreshes methods",
+			input: `
+				use go:sync/atomic
+				use go:time
+
+				struct Holder<$T> {
+					pointer: atomic::Pointer<$T>,
+				}
+
+				fn inspect(holder: mut Holder<time::Time>) {
+					holder.pointer.Load()
+				}
+
+				fn main() Int { 0 }
+			`,
+		},
+		{
+			name: "foreign comparable constraint reaches Ard binder",
+			input: `
+				use go:unique
+
+				fn identity(value: unique::Handle<$T>) unique::Handle<$T> {
+					value
+				}
+
+				fn concrete(value: unique::Handle<Str>) unique::Handle<Str> {
+					identity<Str>(value)
+				}
+
+				fn main() Int { 0 }
+			`,
+		},
+	})
+}
+
+func TestGoTargetGenericStructuralMapKeyUsesComparableConstraint(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "type parameter nested in struct map key",
+			input: `
+				struct Box<$T> {
+					value: $T,
+				}
+
+				struct Index<$T> {
+					values: [Box<$T>:Int],
+				}
+
+				fn main() Int {
+					let key = Box<Int>{value: 1}
+					let values: [Box<Int>:Int] = [key: 42]
+					let index = Index<Int>{values: values}
+					index.values.get(key).or(0)
+				}
+			`,
+		},
+		{
+			name: "mutable generic field does not constrain referent",
+			input: `
+				struct Box<$T> {
+					value: mut $T,
+				}
+
+				struct Index<$T> {
+					values: [Box<$T>:Int],
+				}
+
+				fn main() Int {
+					let values: [Box<[Int]>:Int] = [:]
+					let index = Index<[Int]>{values: values}
+					index.values.size()
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityNullableStructFields(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{

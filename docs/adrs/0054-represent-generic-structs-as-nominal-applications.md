@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -58,7 +58,7 @@ type StructType struct {
 }
 ```
 
-The exact Go names may differ during implementation. The required invariant is:
+The initial implementation may encode the application as a `StructDef` carrying a `Definition` backpointer rather than introducing a separate Go struct immediately. The required invariant is:
 
 > A canonical struct declaration owns field templates and declaration metadata. An applied struct type references that declaration and owns only its ordered type arguments.
 
@@ -164,7 +164,7 @@ struct Node<$T> {
 }
 ```
 
-Mutually recursive direct containment is also invalid. Inline wrappers such as `Maybe<T>` and `Result<T, E>` do not break a layout cycle when their backend representation embeds the contained value.
+Mutually recursive direct containment is also invalid. `Maybe<T>` breaks a layout cycle because Ard's runtime representation stores its value indirectly. `Result<T, E>` does not break a layout cycle because its backend representation embeds its value and error payloads.
 
 The checker builds a graph of direct-layout struct edges and diagnoses self-loops or strongly connected components. Diagnostics should identify the field path forming the cycle and suggest an indirect representation.
 

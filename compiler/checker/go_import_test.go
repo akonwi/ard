@@ -6,6 +6,32 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+func TestForeignGenericArgumentsParticipateInInstantiationCycles(t *testing.T) {
+	run(t, []test{
+		{
+			name: "foreign generic wrapper grows recursive argument",
+			input: `use go:sync/atomic
+
+struct Chain<$T> {
+  next: fn(Chain<atomic::Pointer<$T>>),
+}
+`,
+			diagnostics: []checker.Diagnostic{{
+				Kind:    checker.Error,
+				Message: "Generic instantiation cycle grows type arguments: Chain.next",
+			}},
+		},
+		{
+			name:  "symbolic foreign application validates arity",
+			input: "use go:sync/atomic\nfn invalid(value: atomic::Pointer<$T, $T>) {}\n",
+			diagnostics: []checker.Diagnostic{{
+				Kind:    checker.Error,
+				Message: "Go type atomic::Pointer expects 1 type argument(s), got 2",
+			}},
+		},
+	})
+}
+
 func TestGoImportSupportsGoInterfaces(t *testing.T) {
 	run(t, []test{
 		{

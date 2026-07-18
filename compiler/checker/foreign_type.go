@@ -33,6 +33,33 @@ type ForeignType struct {
 	LoadMethods               func(pointer bool) (map[string]*FunctionDef, map[string]string)
 }
 
+// ComparableTypeArgs identifies foreign generic parameters whose Go
+// constraints require comparable arguments.
+func (f *ForeignType) ComparableTypeArgs() []bool {
+	if f == nil {
+		return nil
+	}
+	goType := f.GoType
+	if pointer, ok := goType.(*types.Pointer); ok {
+		goType = pointer.Elem()
+	}
+	named, ok := goType.(*types.Named)
+	if !ok {
+		return nil
+	}
+	params := named.Origin().TypeParams()
+	if params == nil {
+		return nil
+	}
+	out := make([]bool, params.Len())
+	for i := 0; i < params.Len(); i++ {
+		if constraint, ok := params.At(i).Constraint().Underlying().(*types.Interface); ok {
+			out[i] = constraint.Complete().IsComparable()
+		}
+	}
+	return out
+}
+
 func (f *ForeignType) String() string {
 	name := f.Name
 	if f.Qualifier != "" {

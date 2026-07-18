@@ -1583,16 +1583,74 @@ func TestGenericTypeUsageHasStructuredDiagnostics(t *testing.T) {
 	}
 }
 
+func TestGenericInstantiationCycleDiagnostics(t *testing.T) {
+	t.Run("growing self application", func(t *testing.T) {
+		result := parse.Parse([]byte("struct Chain<$T> {\n  next: fn(Chain<[$T]>),\n}\n"), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeGenericInstantiationCycle)
+		if diagnostic.Message != "Generic instantiation cycle grows type arguments: Chain.next" {
+			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+	})
+
+	t.Run("growing mutual application", func(t *testing.T) {
+		result := parse.Parse([]byte("struct A<$T> {\n  next: fn(B<[$T]>),\n}\nstruct B<$U> {\n  next: fn(A<$U>),\n}\n"), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		count := 0
+		for _, diagnostic := range c.Diagnostics() {
+			if diagnostic.Code == checker.DiagnosticCodeGenericInstantiationCycle {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("diagnostics = %#v, want one instantiation cycle", c.Diagnostics())
+		}
+	})
+
+	t.Run("growth composed from alternative fields", func(t *testing.T) {
+		result := parse.Parse([]byte("struct Cycle<$T, $U> {\n  swap: fn(Cycle<$U, $T>),\n  wrap: fn(Cycle<[$U], Int>),\n}\n"), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeGenericInstantiationCycle)
+	})
+
+	for _, source := range []string{
+		"struct Cached<$T> {\n  next: fn(Cached<Int>),\n}\n",
+		"struct A<$T, $U> {\n  next: fn(B<$U, $T>),\n}\nstruct B<$X, $Y> {\n  next: fn(A<$Y, $X>),\n}\n",
+	} {
+		result := parse.Parse([]byte(source), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		if c.HasErrors() {
+			t.Fatalf("diagnostics = %v, want none", c.Diagnostics())
+		}
+	}
+}
+
 func TestGenericDeclarationRulesHaveStructuredDiagnostics(t *testing.T) {
-	t.Run("recursive generic self-reference", func(t *testing.T) {
+	t.Run("recursive generic value layout", func(t *testing.T) {
 		result := parse.Parse([]byte("struct Node {\n  next: Node<$T>,\n}\n"), "main.ard")
 		if len(result.Errors) > 0 {
 			t.Fatalf("parse errors: %v", result.Errors)
 		}
 		c := checker.New("main.ard", result.Program, nil)
 		c.Check()
-		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeRecursiveGenericReference)
-		if diagnostic.Message != "Recursive generic self-reference Node is not supported yet" {
+		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeRecursiveStructLayout)
+		if diagnostic.Message != "Recursive field Node.next has infinite size. "+"Put the recursive reference behind mut, list, map, nullable, trait, or function indirection." {
 			t.Fatalf("diagnostic = %#v", diagnostic)
 		}
 	})
@@ -1757,15 +1815,71 @@ func TestRecursiveStructLayoutHasStructuredCycleLabels(t *testing.T) {
 	}
 }
 
-func TestRecursiveStructLayoutAllowsIndirectRecursion(t *testing.T) {
-	result := parse.Parse([]byte("struct Node {\n  children: [Node],\n}\n"), "main.ard")
-	if len(result.Errors) > 0 {
-		t.Fatalf("parse errors: %v", result.Errors)
+func TestRecursiveStructLayoutExpandsGenericApplications(t *testing.T) {
+	for _, source := range []string{
+		"struct Box<$T> { value: $T }\nstruct Node { next: Box<Node> }\n",
+		"struct Node { children: [Node; 1] }\n",
+		"struct Chain<$T> { next: Chain<[$T]> }\n",
+	} {
+		result := parse.Parse([]byte(source), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeRecursiveStructLayout)
 	}
-	c := checker.New("main.ard", result.Program, nil)
-	c.Check()
-	if len(c.Diagnostics()) != 0 {
-		t.Fatalf("diagnostics = %#v, want none", c.Diagnostics())
+}
+
+func TestRecursiveStructLayoutAllowsIndirectRecursion(t *testing.T) {
+	for _, source := range []string{
+		"struct Node {\n  children: [Node],\n}\n",
+		"struct Node {\n  child: Node?,\n}\n",
+		"struct Node {\n  children: [Node?; 1],\n}\n",
+	} {
+		result := parse.Parse([]byte(source), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		if len(c.Diagnostics()) != 0 {
+			t.Fatalf("diagnostics = %#v, want none", c.Diagnostics())
+		}
+	}
+}
+
+func TestRecursiveStructLayoutDistinguishesSiblingGenericApplications(t *testing.T) {
+	source := "struct Pair<$A, $B> { first: $A, second: $B }\nstruct Box<$T> { value: $T }\nstruct Node { pair: Pair<Box<Int>, Box<Node>> }\n"
+	for range 30 {
+		result := parse.Parse([]byte(source), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeRecursiveStructLayout)
+	}
+}
+
+func TestStructMapKeysAreStructurallyComparable(t *testing.T) {
+	for _, source := range []string{
+		"struct Node { children: [Node:Int] }\n",
+		"struct Key { values: [Int] }\nfn consume(values: [Key:Int]) {}\nfn main() {}\n",
+		"struct Wrap<$T> { value: $T }\nfn consume(values: [Wrap<Wrap<[Int]>>:Int]) {}\nfn main() {}\n",
+	} {
+		result := parse.Parse([]byte(source), "main.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors: %v", result.Errors)
+		}
+		c := checker.New("main.ard", result.Program, nil)
+		c.Check()
+		requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidMapKeyType)
+		for _, diagnostic := range c.Diagnostics() {
+			if diagnostic.Code == checker.DiagnosticCodeRecursiveStructLayout {
+				t.Fatalf("map key reported as recursive layout: %#v", diagnostic)
+			}
+		}
 	}
 }
 
