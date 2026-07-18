@@ -2061,12 +2061,8 @@ func (c *Checker) structImplementsForeignInterface(def *StructDef, iface *Foreig
 	if def == nil || iface == nil {
 		return false
 	}
-	for _, implemented := range c.program.ForeignInterfaceImpls[StructMethodOwner(def)] {
-		if implemented != nil && implemented.equal(iface) {
-			return true
-		}
-	}
-	return false
+	owner := StructMethodOwner(def)
+	return c.program.implementsForeignInterface(owner, iface) || foreignInterfaceImplementationInModules(c.program.Imports, owner, iface)
 }
 
 // freshContainerSatisfiesMutable reports whether arg may be passed to a

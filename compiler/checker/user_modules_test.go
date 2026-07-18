@@ -144,6 +144,51 @@ fn main() Int {
 		t.Error("Expected utils module to be a UserModule")
 	}
 }
+
+func TestImportedStructRetainsExplicitGoInterfaceImplementation(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"example\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "adapter.ard"), []byte(`use go:fmt
+
+struct Label {}
+
+fn new() Label {
+  Label{}
+}
+
+impl fmt::Stringer for Label {
+  fn string() Str {
+    "label"
+  }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mainPath := filepath.Join(tempDir, "main.ard")
+	result := parse.Parse([]byte(`use example/adapter
+use go:fmt
+
+fn main() {
+  let label: fmt::Stringer = adapter::new()
+}
+`), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
 func TestSameNamedGenericStructsFromDifferentModulesAreNominallyDistinct(t *testing.T) {
 	tempDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tempDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
