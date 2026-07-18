@@ -47,6 +47,18 @@ func (p *Program) StructMethodsFor(owner MethodOwner) map[string]*FunctionDef {
 	return p.StructMethods[owner]
 }
 
+func (p *Program) implementsForeignInterface(owner MethodOwner, iface *ForeignType) bool {
+	if p == nil || iface == nil {
+		return false
+	}
+	for _, implemented := range p.ForeignInterfaceImpls[owner] {
+		if implemented != nil && implemented.equal(iface) {
+			return true
+		}
+	}
+	return false
+}
+
 func StructMethodInModules(modules map[string]Module, owner MethodOwner, name string) (*FunctionDef, bool) {
 	return structMethodInModulesSeen(modules, owner, name, map[string]bool{})
 }
@@ -57,6 +69,27 @@ func StructMethodsInModules(modules map[string]Module, owner MethodOwner) map[st
 
 func StructDefinitionInModules(modules map[string]Module, owner MethodOwner) (*StructDef, bool) {
 	return structDefinitionInModulesSeen(modules, owner, map[string]bool{})
+}
+
+func foreignInterfaceImplementationInModules(modules map[string]Module, owner MethodOwner, iface *ForeignType) bool {
+	return foreignInterfaceImplementationInModulesSeen(modules, owner, iface, map[string]bool{})
+}
+
+func foreignInterfaceImplementationInModulesSeen(modules map[string]Module, owner MethodOwner, iface *ForeignType, seen map[string]bool) bool {
+	for _, mod := range modules {
+		if mod == nil || seen[mod.Path()] {
+			continue
+		}
+		seen[mod.Path()] = true
+		program := mod.Program()
+		if program == nil {
+			continue
+		}
+		if program.implementsForeignInterface(owner, iface) || foreignInterfaceImplementationInModulesSeen(program.Imports, owner, iface, seen) {
+			return true
+		}
+	}
+	return false
 }
 
 func structMethodInModulesSeen(modules map[string]Module, owner MethodOwner, name string, seen map[string]bool) (*FunctionDef, bool) {
