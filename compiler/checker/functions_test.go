@@ -8,6 +8,79 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+func TestContextualReturnTypeInfersGenericCall(t *testing.T) {
+	result := parse.Parse([]byte(`
+		struct Key<$T> { marker: Bool }
+		fn Key::new() Key<$T> { Key<$T>{marker: true} }
+		fn main() {
+			let key: Key<Str> = Key::new()
+			let count: Key<Int> = Key::new()
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+
+	var original, mainFn *checker.FunctionDef
+	for _, stmt := range c.Module().Program().Statements {
+		fn, ok := stmt.Expr.(*checker.FunctionDef)
+		if !ok {
+			continue
+		}
+		switch fn.Name {
+		case "Key::new":
+			original = fn
+		case "main":
+			mainFn = fn
+		}
+	}
+	if original == nil || mainFn == nil {
+		t.Fatalf("functions = original:%v main:%v", original, mainFn)
+	}
+	if len(original.GenericBindings) != 0 {
+		t.Fatalf("original bindings = %v, want none", original.GenericBindings)
+	}
+	definition := mainFn.Body.Stmts[0].Stmt.(*checker.VariableDef).Value.(*checker.FunctionCall).Definition()
+	if got := definition.GenericBindings["T"]; got == nil || got.String() != "Str" {
+		t.Fatalf("contextual binding T = %v, want Str", got)
+	}
+	if got := definition.ReturnType.String(); got != "Key<Str>" {
+		t.Fatalf("call return type = %s, want Key<Str>", got)
+	}
+	second := mainFn.Body.Stmts[1].Stmt.(*checker.VariableDef).Value.(*checker.FunctionCall).Definition()
+	if got := second.GenericBindings["T"]; got == nil || got.String() != "Int" {
+		t.Fatalf("second contextual binding T = %v, want Int", got)
+	}
+	if definition == second {
+		t.Fatal("distinct contextual specializations share a function definition")
+	}
+}
+
+func TestContextualReturnTypeDoesNotOverrideArgumentInference(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn identity(value: $T) $T { value }
+		fn main() {
+			let value: Str = identity(1)
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected Int versus Str mismatch")
+	}
+	if got := diagnosticsString(c.Diagnostics()); !strings.Contains(got, "Str") || !strings.Contains(got, "Int") {
+		t.Fatalf("diagnostics = %v, want Str versus Int mismatch", c.Diagnostics())
+	}
+}
+
 func TestUnknownParameterTypeMethodLookupReportsDiagnostics(t *testing.T) {
 	result := parse.Parse([]byte(strings.Join([]string{
 		`fn stringify(x: Missing) Str {`,

@@ -2153,6 +2153,44 @@ func TestGoTargetParityNestedGenericClosuresPreserveNamedTypeIdentity(t *testing
 	}
 }
 
+func TestGoTargetParityContextualGenericReturnInference(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "annotated static factory",
+			input: `
+				struct Key<$T> { marker: Bool }
+				fn Key::new() Key<$T> { Key<$T>{marker: true} }
+				fn main() Bool {
+					let key: Key<Str> = Key::new()
+					key.marker
+				}
+			`,
+		},
+		{
+			name: "nested maybe context",
+			input: `
+				fn make() $T? { Maybe::new() }
+				fn main() Bool {
+					let value: Str? = make()
+					value.is_none()
+				}
+			`,
+		},
+		{
+			name: "reassignment context",
+			input: `
+				struct Key<$T> { marker: Bool }
+				fn make() Key<$T> { Key<$T>{marker: true} }
+				fn main() Bool {
+					mut key: Key<Str> = Key<Str>{marker: false}
+					key = make()
+					key.marker
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityGenericClosureCapturePreservesArgumentIdentityAndOrder(t *testing.T) {
 	program := lowerParitySource(t, `
 		struct Pair<$Left, $Right> {
