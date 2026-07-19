@@ -258,6 +258,11 @@ func TestGenericCallTypeArgumentDiagnostics(t *testing.T) {
 			wantErrs: []string{"Expected '>' after type arguments"},
 		},
 		{
+			name:     "Keyword static generic function call missing greater than is diagnosed",
+			input:    `Value::use<Int()`,
+			wantErrs: []string{"Expected '>' after type arguments"},
+		},
+		{
 			name:     "Generic function call with implicit void function type argument missing greater than is diagnosed",
 			input:    "foo<fn(Int)()",
 			wantErrs: []string{"Expected '>' after type arguments"},

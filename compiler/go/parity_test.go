@@ -370,6 +370,65 @@ func TestGoTargetParityCoreCorpus(t *testing.T) {
 		},
 	})
 }
+
+func TestGoTargetParityUseKeywordAsMethodName(t *testing.T) {
+	runGoParityCases(t, []goParityCase{
+		{
+			name: "use keyword as method name",
+			input: `
+				struct Value { number: Int }
+
+				impl Value {
+					fn use() Int { self.number }
+					fn for() Int { self.number }
+				}
+
+				fn main() Int {
+					let value = Value{number: 42}
+					value.use() + value.for()
+				}
+			`,
+		},
+		{
+			name: "use keyword as trait method name",
+			input: `
+				trait Usable {
+					fn use() Int
+				}
+
+				struct Value { number: Int }
+
+				impl Usable for Value {
+					fn use() Int { self.number }
+				}
+
+				fn main() Int {
+					let value: Usable = Value{number: 42}
+					value.use()
+				}
+			`,
+		},
+		{
+			name: "mut keyword as mutating method name",
+			input: `
+				struct Counter { number: Int }
+
+				impl Counter {
+					fn mut mut() {
+						self.number = self.number + 1
+					}
+				}
+
+				fn main() Int {
+					mut counter = Counter{number: 41}
+					counter.mut()
+					counter.number
+				}
+			`,
+		},
+	})
+}
+
 func TestGoTargetParityLoops(t *testing.T) {
 	runGoParityCases(t, []goParityCase{
 		{

@@ -1138,12 +1138,15 @@ func (p *parser) traitDef(private bool) *TraitDefinition {
 		}
 		fnToken := p.advance()
 
-		if !p.check(identifier) {
+		if !p.check(identifier) && !p.isKeyword(p.peek().kind) {
 			p.addError(p.peek(), "Expected function name")
 			p.synchronizeToBlockEnd()
 			break
 		}
 		name := p.advance()
+		if name.text == "" {
+			name.text = string(name.kind)
+		}
 
 		if !p.check(left_paren) {
 			p.addError(p.peek(), "Expected '(' after function name")
@@ -2609,16 +2612,23 @@ func (p *parser) functionDef(asMethod bool, isTest bool) (Statement, error) {
 	if p.match(fn) {
 		keyword := p.previous()
 		var name any = ""
-		mutates := p.match(mut)
+		mutates := p.check(mut) && !(asMethod && p.check(mut, left_paren))
+		if mutates {
+			p.advance()
+		}
 		if !asMethod {
 			// should this signal warning of unnecessary `mut`?
 		}
 
 		if path := p.parseStaticPath(); path != nil {
 			name = path
-		} else if p.check(identifier) {
+		} else if p.check(identifier) || (asMethod && p.isKeyword(p.peek().kind)) {
 			nameToken := p.advance()
-			name = nameToken.text
+			if nameToken.text == "" {
+				name = string(nameToken.kind)
+			} else {
+				name = nameToken.text
+			}
 		} else if p.check(left_paren) {
 			// This is a valid anonymous function fn(...) pattern
 			name = "" // Anonymous function
@@ -3310,7 +3320,7 @@ func (p *parser) memberAccess() (Expression, error) {
 		}
 
 		if p.previous().kind == dot {
-			call, err := p.call()
+			call, err := p.memberCall()
 			if err != nil {
 				return nil, err
 			}
@@ -3341,7 +3351,7 @@ func (p *parser) memberAccess() (Expression, error) {
 			} else if ok {
 				expr = staticCall
 			} else {
-				call, err := p.call()
+				call, err := p.memberCall()
 				if err != nil {
 					return nil, err
 				}
@@ -3372,7 +3382,16 @@ func (p *parser) memberAccess() (Expression, error) {
 	return expr, nil
 }
 
+func (p *parser) memberCall() (Expression, error) {
+	restore := p.normalizeMemberName()
+	defer restore()
+	return p.call()
+}
+
 func (p *parser) tryStaticGenericFunctionCall(target Expression) (Expression, bool, error) {
+	restore := p.normalizeMemberName()
+	defer restore()
+
 	if !p.check(identifier, less_than) || !adjacent(p.peek().getLocation(), &p.tokens[p.index+1]) {
 		return nil, false, nil
 	}
@@ -3447,6 +3466,20 @@ func (p *parser) tryStaticGenericFunctionCall(target Expression) (Expression, bo
 			},
 		},
 	}, true, nil
+}
+
+func (p *parser) normalizeMemberName() func() {
+	if !p.isKeyword(p.peek().kind) {
+		return func() {}
+	}
+
+	// A member name is unambiguous after `.` or `::`. Reclassify only that
+	// token so keywords in call arguments retain their normal meaning.
+	index := p.index
+	keyword := p.tokens[index]
+	p.tokens[index].kind = identifier
+	p.tokens[index].text = string(keyword.kind)
+	return func() { p.tokens[index] = keyword }
 }
 
 func (p *parser) parseCallTypeArguments() []DeclaredType {
@@ -4019,6 +4052,16 @@ func (p *parser) isAllowedIdentifierKeyword(k kind) bool {
 		break_, while_, for_, use, as, in, if_, else_, type_, private,
 	}
 	return slices.Contains(keywords, k)
+}
+
+func (p *parser) isKeyword(k kind) bool {
+	switch k {
+	case and, not, or, true_, false_, struct_, enum, impl, trait, fn, let, mut,
+		break_, match, select_, while_, for_, use, as, in, if_, else_, type_, private, defer_:
+		return true
+	default:
+		return false
+	}
 }
 
 /* Error creation helpers */
