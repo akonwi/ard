@@ -23,6 +23,7 @@
 (mutable_type "mut" @keyword)
 (function_declaration "test" @keyword)
 (function_declaration "fn" @keyword)
+(function_declaration "mut" @keyword)
 (extern_function "extern" @keyword)
 (extern_function "fn" @keyword)
 (struct_declaration "struct" @keyword)
