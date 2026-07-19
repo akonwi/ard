@@ -1,6 +1,7 @@
 package parse
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -707,6 +708,114 @@ func TestMemberAccess(t *testing.T) {
 		},
 	})
 }
+
+func TestKeywordsAsMethodNames(t *testing.T) {
+	keywords := []string{
+		"and", "not", "or", "true", "false", "struct", "enum", "impl", "trait", "fn", "let", "mut",
+		"break", "match", "select", "while", "for", "use", "as", "in", "if", "else", "type", "private", "defer",
+	}
+
+	for _, keyword := range keywords {
+		t.Run(keyword, func(t *testing.T) {
+			source := fmt.Sprintf(`
+trait KeywordMethod {
+  fn %s() Int
+}
+
+struct Value {}
+
+impl KeywordMethod for Value {
+  fn %s() Int { 42 }
+}
+
+fn main() Int {
+  let value: KeywordMethod = Value{}
+  value.%s()
+}
+`, keyword, keyword, keyword)
+			result := Parse([]byte(source), "test.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("expected %q to parse as a method name: %v", keyword, result.Errors)
+			}
+
+			trait, ok := result.Program.Statements[0].(*TraitDefinition)
+			if !ok || len(trait.Methods) != 1 || trait.Methods[0].Name != keyword {
+				t.Fatalf("trait method name = %#v, want %q", trait, keyword)
+			}
+			implementation, ok := result.Program.Statements[2].(*TraitImplementation)
+			if !ok || len(implementation.Methods) != 1 || implementation.Methods[0].Name != keyword {
+				t.Fatalf("implementation method name = %#v, want %q", implementation, keyword)
+			}
+			main, ok := result.Program.Statements[3].(*FunctionDeclaration)
+			if !ok || len(main.Body) != 2 {
+				t.Fatalf("main declaration = %#v", result.Program.Statements[3])
+			}
+			call, ok := main.Body[1].(*InstanceMethod)
+			if !ok || call.Method.Name != keyword {
+				t.Fatalf("called method = %#v, want %q", main.Body[1], keyword)
+			}
+		})
+	}
+}
+
+func TestKeywordMethodParsingSemantics(t *testing.T) {
+	result := Parse([]byte(`
+struct Value {}
+
+impl Value {
+  fn mut() Int { 1 }
+  fn mut mut() Int { 2 }
+}
+
+fn main() {
+  let value = Value{}
+  value.use(true or false, not false)
+  value.select<Int>()
+  Value::use<Int>()
+}
+`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("unexpected parse errors: %v", result.Errors)
+	}
+
+	implementation := result.Program.Statements[1].(*ImplBlock)
+	if method := implementation.Methods[0]; method.Name != "mut" || method.Mutates {
+		t.Fatalf("fn mut() parsed as Name=%q Mutates=%t", method.Name, method.Mutates)
+	}
+	if method := implementation.Methods[1]; method.Name != "mut" || !method.Mutates {
+		t.Fatalf("fn mut mut() parsed as Name=%q Mutates=%t", method.Name, method.Mutates)
+	}
+
+	main := result.Program.Statements[2].(*FunctionDeclaration)
+	useCall := main.Body[1].(*InstanceMethod)
+	if _, ok := useCall.Method.Args[0].Value.(*BinaryExpression); !ok {
+		t.Fatalf("first use argument = %#v, want binary expression", useCall.Method.Args[0].Value)
+	}
+	if unary, ok := useCall.Method.Args[1].Value.(*UnaryExpression); !ok || unary.Operator != Not {
+		t.Fatalf("second use argument = %#v, want not expression", useCall.Method.Args[1].Value)
+	}
+	selectCall := main.Body[2].(*InstanceMethod)
+	if selectCall.Method.Name != "select" || len(selectCall.Method.TypeArgs) != 1 {
+		t.Fatalf("generic instance call = %#v", selectCall)
+	}
+	staticCall := main.Body[3].(*StaticFunction)
+	if staticCall.Function.Name != "use" || len(staticCall.Function.TypeArgs) != 1 {
+		t.Fatalf("generic static call = %#v", staticCall)
+	}
+}
+
+func TestKeywordNamesRemainInvalidForTopLevelFunctions(t *testing.T) {
+	for _, source := range []string{
+		"fn use() {}",
+		"fn Value::use() {}",
+	} {
+		result := Parse([]byte(source), "test.ard")
+		if len(result.Errors) == 0 {
+			t.Fatalf("expected top-level declaration %q to be rejected", source)
+		}
+	}
+}
+
 func TestInterpolatedStrings(t *testing.T) {
 	runTests(t, []test{
 		{
