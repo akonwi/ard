@@ -1112,6 +1112,7 @@ func discoverTestFiles(inputPath string) ([]string, error) {
 		return []string{filepath.Clean(inputPath)}, nil
 	}
 
+	inputPath = filepath.Clean(inputPath)
 	files := make([]string, 0)
 	seen := make(map[string]struct{})
 	err = filepath.WalkDir(inputPath, func(path string, entry os.DirEntry, walkErr error) error {
@@ -1119,8 +1120,16 @@ func discoverTestFiles(inputPath string) ([]string, error) {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if strings.HasPrefix(entry.Name(), ".") && path != inputPath {
+			if path == inputPath {
+				return nil
+			}
+			if strings.HasPrefix(entry.Name(), ".") {
 				return filepath.SkipDir
+			}
+			if _, manifestErr := os.Stat(filepath.Join(path, "ard.toml")); manifestErr == nil {
+				return filepath.SkipDir
+			} else if !os.IsNotExist(manifestErr) {
+				return manifestErr
 			}
 			return nil
 		}

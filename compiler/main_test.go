@@ -825,6 +825,39 @@ test fn panics() Void!Str {
 		}
 	})
 }
+func TestDiscoverTestFilesSkipsNestedProjects(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"root\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rootTest := filepath.Join(projectDir, "test", "root_test.ard")
+	if err := os.MkdirAll(filepath.Dir(rootTest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootTest, []byte("test fn root_test() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	nestedDir := filepath.Join(projectDir, "examples", "hello")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "ard.toml"), []byte("name = \"hello\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "main.ard"), []byte("fn main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := discoverTestFiles(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0] != rootTest {
+		t.Fatalf("discovered files = %v, want [%s]", files, rootTest)
+	}
+}
+
 func TestTestCommandDisambiguatesSameNamedTestsInSingleRun(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project")
