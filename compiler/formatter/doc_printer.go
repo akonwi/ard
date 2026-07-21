@@ -16,9 +16,13 @@ type printCmd struct {
 }
 
 func (p printer) printDoc(root doc) string {
+	return p.printDocAtColumn(root, 0)
+}
+
+func (p printer) printDocAtColumn(root doc, baseColumn int) string {
 	var out strings.Builder
 	stack := []printCmd{{indent: 0, mode: modeBreak, doc: root}}
-	column := 0
+	column := baseColumn
 
 	for len(stack) > 0 {
 		cmd := stack[len(stack)-1]
@@ -42,13 +46,19 @@ func (p printer) printDoc(root doc) string {
 			} else {
 				stack = append(stack, printCmd{indent: cmd.indent, mode: cmd.mode, doc: node.flat})
 			}
+		case docIfFits:
+			selected := node.fallback
+			if node.firstLineWidth <= p.maxLineWidth-column {
+				selected = node.preferred
+			}
+			stack = append(stack, printCmd{indent: cmd.indent, mode: cmd.mode, doc: selected})
 		case docLine:
 			if node.hard {
 				out.WriteByte('\n')
 				if cmd.indent > 0 {
 					out.WriteString(strings.Repeat(" ", cmd.indent))
 				}
-				column = cmd.indent
+				column = baseColumn + cmd.indent
 				continue
 			}
 			if cmd.mode == modeFlat {
@@ -62,7 +72,7 @@ func (p printer) printDoc(root doc) string {
 			if cmd.indent > 0 {
 				out.WriteString(strings.Repeat(" ", cmd.indent))
 			}
-			column = cmd.indent
+			column = baseColumn + cmd.indent
 		case docGroup:
 			testStack := append([]printCmd(nil), stack...)
 			testStack = append(testStack, printCmd{indent: cmd.indent, mode: modeFlat, doc: node.content})
@@ -97,6 +107,12 @@ func fits(remaining int, stack []printCmd) bool {
 			} else {
 				stack = append(stack, printCmd{indent: cmd.indent, mode: cmd.mode, doc: node.flat})
 			}
+		case docIfFits:
+			selected := node.fallback
+			if node.firstLineWidth <= remaining {
+				selected = node.preferred
+			}
+			stack = append(stack, printCmd{indent: cmd.indent, mode: cmd.mode, doc: selected})
 		case docLine:
 			if node.hard {
 				if cmd.mode == modeFlat {

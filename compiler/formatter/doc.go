@@ -16,6 +16,11 @@ type docIfBreak struct {
 	broken doc
 	flat   doc
 }
+type docIfFits struct {
+	firstLineWidth int
+	preferred      doc
+	fallback       doc
+}
 
 func (docText) isDoc()    {}
 func (docConcat) isDoc()  {}
@@ -23,6 +28,7 @@ func (docGroup) isDoc()   {}
 func (docIndent) isDoc()  {}
 func (docLine) isDoc()    {}
 func (docIfBreak) isDoc() {}
+func (docIfFits) isDoc()  {}
 
 func dText(value string) doc {
 	if value == "" {
@@ -69,6 +75,9 @@ func dLine() doc                        { return docLine{} }
 func dSoftLine() doc                    { return docLine{soft: true} }
 func dHardLine() doc                    { return docLine{hard: true} }
 func dIfBreak(broken doc, flat doc) doc { return docIfBreak{broken: broken, flat: flat} }
+func dIfFits(firstLineWidth int, preferred doc, fallback doc) doc {
+	return docIfFits{firstLineWidth: firstLineWidth, preferred: preferred, fallback: fallback}
+}
 
 func dJoin(separator doc, docs []doc) doc {
 	if len(docs) == 0 {

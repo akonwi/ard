@@ -57,6 +57,48 @@ func TestFormatIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestFormatHugsTrailingClosures(t *testing.T) {
+	boundaryArgument := strings.Repeat("x", 88)
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "route handler stays on opening line",
+			input: "fn register(router: mut App) {\n  router.get(\n    \"/fixtures/:id/outlook\",\n    fn(r: Request, w: mut Response) {\n      handle(r, w)\n    },\n  )\n}\n",
+			want:  "fn register(router: mut App) {\n  router.get(\"/fixtures/:id/outlook\", fn(r: Request, w: mut Response) {\n    handle(r, w)\n  })\n}\n",
+		},
+		{
+			name:  "long opening line uses expanded call",
+			input: "fn register(router: mut VeryLongApplicationRouterName) {\n  router.register_route_with_a_very_long_method_name(\n    \"/fixtures/:fixture_identifier/outlook-and-detailed-analysis\",\n    fn(request: VeryLongRequestType, response: mut VeryLongResponseType) {\n      handle(request, response)\n    },\n  )\n}\n",
+			want:  "fn register(router: mut VeryLongApplicationRouterName) {\n  router.register_route_with_a_very_long_method_name(\n    \"/fixtures/:fixture_identifier/outlook-and-detailed-analysis\",\n    fn(request: VeryLongRequestType, response: mut VeryLongResponseType) {\n      handle(request, response)\n    },\n  )\n}\n",
+		},
+		{
+			name:  "outer indentation counts toward line width",
+			input: "fn main() {\n  f(\"" + boundaryArgument + "\", fn() {\n    work()\n  })\n}\n",
+			want:  "fn main() {\n  f(\n    \"" + boundaryArgument + "\",\n    fn() {\n      work()\n    },\n  )\n}\n",
+		},
+		{
+			name:  "multiline preceding argument uses expanded call",
+			input: "fn configure(app: mut App) {\n  app.route(\n    match path {\n      some(value) => value,\n      _ => \"/\",\n    },\n    fn(request: Request) {\n      handle(request)\n    },\n  )\n}\n",
+			want:  "fn configure(app: mut App) {\n  app.route(\n    match path {\n      some(value) => value,\n      _ => \"/\",\n    },\n    fn(request: Request) {\n      handle(request)\n    },\n  )\n}\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Format([]byte(tt.input), "test.ard")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tt.want {
+				t.Fatalf("format mismatch:\ngot:\n%s\nwant:\n%s", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFormatGenericStructLiterals(t *testing.T) {
 	inputs := []struct {
 		name  string

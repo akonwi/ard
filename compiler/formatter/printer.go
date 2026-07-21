@@ -162,7 +162,7 @@ func (p printer) renderStatementDoc(statement parse.Statement) doc {
 		return p.renderTypeDeclarationDoc(node)
 	default:
 		if expr, ok := statement.(parse.Expression); ok {
-			return dText(p.renderExpression(expr, 0))
+			return p.renderExpressionValueDoc(expr, 0)
 		}
 		return dText(statement.String())
 	}
@@ -210,7 +210,7 @@ func (p printer) renderExpressionValueDoc(expression parse.Expression, parentPre
 	case *parse.UnsafeBlock:
 		return p.renderUnsafeBlockDoc(node)
 	default:
-		return dText(p.renderExpression(expression, parentPrecedence))
+		return p.renderExpressionDoc(expression, parentPrecedence)
 	}
 }
 
@@ -654,7 +654,7 @@ func (p printer) renderStatementsDoc(statements []parse.Statement) doc {
 }
 
 func (p printer) renderDocAtIndent(document doc, indent int) []string {
-	rendered := p.printDoc(document)
+	rendered := p.printDocAtColumn(document, indent*indentWidth)
 	if rendered == "" {
 		return nil
 	}
@@ -1263,12 +1263,43 @@ func (p printer) renderCallDoc(head string, typeArgs []parse.DeclaredType, args 
 		}
 	}
 
-	return dGroup(dConcat(
+	fallback := dGroup(dConcat(
 		dText(head+"("),
 		dIndent(dConcat(dSoftLine(), body)),
 		dSoftLine(),
 		dText(")"),
 	))
+
+	if len(comments) == 0 && len(args) > 0 {
+		last := len(args) - 1
+		if closure, ok := args[last].Value.(*parse.AnonymousFunction); ok && len(closure.Body) > 0 {
+			prior := make([]string, 0, last)
+			canHug := true
+			for _, argDoc := range argDocs[:last] {
+				rendered := p.printDoc(argDoc)
+				if strings.Contains(rendered, "\n") {
+					canHug = false
+					break
+				}
+				prior = append(prior, rendered)
+			}
+			closureRendered := p.printDoc(argDocs[last])
+			closureFirstLine, _, multiline := strings.Cut(closureRendered, "\n")
+			if !multiline || !strings.HasSuffix(closureFirstLine, "{") {
+				canHug = false
+			}
+			if canHug {
+				prefix := head + "("
+				if len(prior) > 0 {
+					prefix += strings.Join(prior, ", ") + ", "
+				}
+				preferred := dConcat(dText(prefix), argDocs[last], dText(")"))
+				return dIfFits(len(prefix)+len(closureFirstLine), preferred, fallback)
+			}
+		}
+	}
+
+	return fallback
 }
 
 func (p printer) renderMatchExpressionDoc(node *parse.MatchExpression) doc {
