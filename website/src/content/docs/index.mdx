@@ -1,82 +1,119 @@
 ---
 title: Ard
-description: Ard is a modern, programming language designed for legibility, simplicity, and type-safety.
+description: Ard is a general-purpose programming language with static typing, errors as values, and explicit mutable data access.
 template: splash
-hero:
-  tagline: A general-purpose programming language designed for legibility, simplicity, and type-safety
-  image:
-    alt: Ard Logo
-    dark: ../../assets/logo.webp
-    light: ../../assets/logo-bordered.png
-  actions:
-    - text: Get Started
-      link: /getting-started/installation/
-      icon: right-arrow
-    - text: View on GitHub
-      link: https://github.com/akonwi/ard
-      icon: external
-      variant: minimal
+pagefind: false
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import ardLogo from '../../assets/logo-bordered.png';
 
-<CardGrid>
-	<Card title="Readable" icon="pencil">
-		Ard code is easy to read and understand with clear, expressive syntax designed for readability.
-	</Card>
-	<Card title="Simple" icon="approve-check">
-		There should be one obvious way to do things. 
-	</Card>
-	<Card title="Safe" icon="warning">
-	  Type errors are caught at compile time and runtime errors are handled as values.
-	</Card>
-	<Card title="Reliable" icon="star">
-		Ard compiles to Go, making it fast, efficient, and portable.
-	</Card>
-</CardGrid>
+<div class="ard-home not-content">
+  <section class="ard-hero">
+    <div class="ard-hero-copy">
+      <h1>Easy to read,<br />write, and <em>rely on.</em></h1>
+      <p class="ard-hero-summary">Ard is a general-purpose programming language with static typing, errors as values, and explicit mutable data access.</p>
+      <div class="ard-actions">
+        <a class="ard-button ard-button-primary" href="/guide/overview/">Read the overview <span aria-hidden="true">→</span></a>
+        <a class="ard-button ard-button-secondary" href="/getting-started/installation/">Install Ard</a>
+      </div>
+      <p class="ard-hero-note">Ard is usable today, but it is still evolving and breaking changes are possible.</p>
+    </div>
 
-## Example
+    <div class="ard-code-stage">
+      <img class="ard-hero-mark" src={ardLogo.src} alt="" aria-hidden="true" />
+      <div class="ard-code-window">
+        <div class="ard-window-bar">
+          <span>fibonacci.ard</span>
+          <span class="ard-window-status">ARD</span>
+        </div>
 
 ```ard
 use go:fmt
 
+fn fib(n: Int) Int {
+  match n <= 1 {
+    true => n,
+    false => fib(n - 2) + fib(n - 1),
+  }
+}
+
 fn main() {
-  mut numbers: [Int] = []
-  fmt::Println("numbers.size = {numbers.size()}")
-
-  fmt::Println("adding numbers from 0 to 10")
-  for i in 0..10 {
-    numbers.push(i)
+  for n in 20 {
+    fmt::Println("fib({n}) = {fib(n)}")
   }
-
-  fmt::Println("numbers.size = {numbers.size()}")
-  for n in numbers {
-    fmt::Println(n)
-  }
-
-  fmt::Println("7th element = {numbers.at(6)}")
 }
 ```
+      </div>
+    </div>
+  </section>
 
-## Philosophy
+  <section class="ard-principles" aria-labelledby="principles-title">
+    <div class="ard-section-heading">
+      <h2 id="principles-title">What Ard makes explicit</h2>
+      <p>Ard has dedicated syntax for optional values, recoverable errors, and mutable data access.</p>
+    </div>
 
-Ard combines elements from JavaScript, Swift, Go, and Rust. It follows Go's philosophy for readability from left to right, rather than the usual spiraling syntax found in C-based languages ([read more](https://c-faq.com/decl/spiral.anderson.html)).
+    <div class="ard-feature-grid">
+      <article class="ard-feature">
+        <div>
+          <h3>Optional values</h3>
+          <p>Optional values use <code>T?</code> rather than nil, pointers, or zero values. The absent case must be handled before the value can be used.</p>
+        </div>
+        <pre aria-label="Optional value example"><code><b>let</b> user: User? = find_user(id)
+<b>let</b> name = user
+{'  '}.map(<b>fn</b>(u) &#123; u.name &#125;)
+{'  '}.or("guest")</code></pre>
+      </article>
 
-### No Exceptions
+      <article class="ard-feature">
+        <h3>Errors as values</h3>
+        <p>Functions that can fail return Results (<code>Val!Err</code>). Callers can handle the error where recovery is possible or propagate it with <code>try</code>.</p>
+        <pre aria-label="Explicit error example"><code><b>fn</b> divide(a: Int, b: Int) Int!Str &#123;
+{'  '}<b>match</b> b == 0 &#123;
+{'    '}<b>true</b> => Result::err("division by zero"),
+{'    '}<b>false</b> => Result::ok(a / b),
+{'  '}&#125;
+&#125;</code></pre>
+      </article>
 
-Ard does not have exceptions. Instead, errors are represented as values using the built-in `Result<$Val, $Err>` type.
-This approach makes error handling explicit and facilitates fault-tolerant programming.
+      <article class="ard-feature">
+        <h3>Mutable access</h3>
+        <p>The <code>mut</code> keyword makes mutation explicit for mutable bindings, references, and methods that can modify their receiver in place.</p>
+        <pre aria-label="Explicit mutability example"><code><b>impl</b> Board &#123;
+{'  '}<b>fn mut</b> play(player: Str, pos: Int) &#123;
+{'    '}self.cells.set(pos, player)
+{'  '}&#125;
+&#125;</code></pre>
+      </article>
+    </div>
+  </section>
 
-### Static Typing with Inference
+  <section class="ard-go-section" aria-labelledby="go-title">
+    <div class="ard-go-copy">
+      <h2 id="go-title">Ard compiles to Go.</h2>
+      <p>Ard programs use Go's robust runtime and standard library, with cross-platform support and performance suitable for general application development. Go packages can also be imported directly.</p>
+      <a class="ard-text-link" href="/advanced/go-interop/">Read about Go interoperability <span aria-hidden="true">→</span></a>
+    </div>
 
-Variables and functions are statically typed. The compiler can also infer types in most cases, reducing verbosity while maintaining safety.
+    <div class="ard-go-example">
+      <div class="ard-go-example-label"><span>Ard source</span><span>Go package</span></div>
 
-### Explicit Mutability
+```ard
+use go:net/http as http
+use go:fmt
 
-Variables and data structures are immutable by default and must be marked as mutable to prevent unwanted data mutations.
+fn main() {
+  let response = http::Get(
+    "https://ard-lang.dev"
+  ).expect("request")
+  fmt::Println(response.Status)
+}
+```
+    </div>
+  </section>
 
-### No Return Keyword
-
-Without return keywords, the returned value of a function is always the last expression when a function signature states the return type.
-
-[Learn More](/guide/overview/).
+  <div class="ard-final-cta">
+    <img src={ardLogo.src} alt="Ard logo" />
+    <a class="ard-button ard-button-primary" href="/guide/overview/">Read the overview <span aria-hidden="true">→</span></a>
+  </div>
+</div>
