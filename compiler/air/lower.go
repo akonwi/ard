@@ -665,6 +665,21 @@ func (l *lowerer) declareClosureFunction(module ModuleID, keyName string, def *c
 	return id, nil
 }
 
+func lowerForeignResultShape(shape checker.ForeignResultShape) ForeignResultShape {
+	switch shape {
+	case checker.ForeignResultDirect:
+		return ForeignResultDirect
+	case checker.ForeignResultValueError:
+		return ForeignResultValueError
+	case checker.ForeignResultErrorOnly:
+		return ForeignResultErrorOnly
+	case checker.ForeignResultValueBool:
+		return ForeignResultValueBool
+	default:
+		return ForeignResultUnknown
+	}
+}
+
 // declareGoAdapterFunction synthesizes the boundary adapter behind a
 // reference to an adapted Go function (ADR 0031 boundary contract): the
 // adapter's body is an ordinary foreign call, so the existing call lowering
@@ -691,7 +706,7 @@ func (l *lowerer) declareGoAdapterFunction(module ModuleID, value *checker.Forei
 		loads[i] = Expr{Kind: ExprLoadLocal, Type: paramType, Local: LocalID(i)}
 	}
 	foreignCall := func(args []Expr) *Expr {
-		return &Expr{Kind: ExprForeignCall, Type: typeInfo.Return, ForeignTarget: value.Target, ForeignNamespace: value.Namespace, ForeignQualifier: value.Qualifier, ForeignSymbol: value.Symbol, Args: args}
+		return &Expr{Kind: ExprForeignCall, Type: typeInfo.Return, ForeignTarget: value.Target, ForeignNamespace: value.Namespace, ForeignQualifier: value.Qualifier, ForeignSymbol: value.Symbol, ForeignResultShape: lowerForeignResultShape(value.ForeignResultShape), Args: args}
 	}
 	var result *Expr
 	if value.VariadicAdapter {
@@ -4390,7 +4405,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprForeignMethodValue, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol}, nil
+		return &Expr{Kind: ExprForeignMethodValue, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape)}, nil
 	case *checker.ForeignMethodCall:
 		target, err := fl.lowerExpr(e.Subject)
 		if err != nil {
@@ -4415,7 +4430,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			args[i] = *lowered
 		}
-		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, Args: args}, nil
+		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), Args: args}, nil
 	case *checker.UnsafeCast:
 		value, err := fl.lowerExprWithExpected(e.Value, fl.l.mustIntern(checker.Any))
 		if err != nil {
@@ -4482,7 +4497,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			typeArgs = append(typeArgs, argID)
 		}
-		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, Args: args}, nil
+		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), Args: args}, nil
 	case *checker.ModuleFunctionCall:
 		if kind, ok := resultConstructorKind(e); ok {
 			return fl.lowerResultConstructor(kind, typeID, e)
@@ -6358,6 +6373,7 @@ func (l *lowerer) moduleFunctionDefinitionForCall(call *checker.ModuleFunctionCa
 		GenericBindings:         def.GenericBindings,
 		Parameters:              def.Parameters,
 		ReturnType:              def.ReturnType,
+		ForeignResultShape:      def.ForeignResultShape,
 		InferReturnTypeFromBody: bodyDef.InferReturnTypeFromBody,
 		Mutates:                 bodyDef.Mutates,
 		IsTest:                  bodyDef.IsTest,
@@ -6388,6 +6404,7 @@ func (l *lowerer) moduleFunctionDefinitionForSymbol(symbol *checker.ModuleSymbol
 		GenericBindings:         def.GenericBindings,
 		Parameters:              def.Parameters,
 		ReturnType:              def.ReturnType,
+		ForeignResultShape:      def.ForeignResultShape,
 		InferReturnTypeFromBody: bodyDef.InferReturnTypeFromBody,
 		Mutates:                 bodyDef.Mutates,
 		IsTest:                  bodyDef.IsTest,

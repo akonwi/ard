@@ -187,6 +187,16 @@ const (
 	ExprTryMaybe
 )
 
+type ForeignResultShape uint8
+
+const (
+	ForeignResultUnknown ForeignResultShape = iota
+	ForeignResultDirect
+	ForeignResultValueError
+	ForeignResultErrorOnly
+	ForeignResultValueBool
+)
+
 type Expr struct {
 	Kind ExprKind
 	Type TypeID
@@ -211,6 +221,7 @@ type Expr struct {
 	ForeignReceiver         string
 	ForeignPointer          bool
 	ForeignInterfacePointer bool
+	ForeignResultShape      ForeignResultShape
 	TypeArgs                []TypeID
 	Impl                    ImplID
 	Trait                   TraitID

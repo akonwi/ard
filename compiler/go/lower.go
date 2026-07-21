@@ -3,17 +3,13 @@ package gotarget
 import (
 	"fmt"
 	"go/ast"
-	"go/importer"
 	"go/parser"
 	"go/token"
-	"go/types"
 	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-
-	"golang.org/x/tools/go/packages"
 
 	"github.com/akonwi/ard/air"
 	"github.com/akonwi/ard/checker"
@@ -47,7 +43,7 @@ type lowerer struct {
 	includeTests            bool
 	useModulePackages       bool
 	forceValueResultReturns bool
-	goTypesPackages         map[string]*types.Package
+	namePlan                *namePlan
 
 	// When the entry root lives in a module named `main` (main.ard) that no
 	// other module imports, that module is emitted as the root `package main`
@@ -66,11 +62,12 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 		return nil, err
 	}
 	l := &lowerer{program: program, packageName: defaultPackageName(options.PackageName), runtimeHelpers: map[string]bool{}, projectInfo: options.ProjectInfo, suppressMain: options.SuppressMain, includeTests: options.IncludeTests, useModulePackages: true}
-	l.reservedGoIdentifiers = l.buildReservedGoIdentifiers()
 	l.inlineClosures = l.collectInlineClosureFunctions()
 	l.goMethodCollisions = l.collectGoMethodCollisions()
 	l.emittedGoMethods = map[string]bool{}
 	l.functionModules = l.collectFunctionEmitModules()
+	l.namePlan = newNamePlan(l)
+	l.reservedGoIdentifiers = l.buildReservedGoIdentifiers()
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
 	mainModuleID := l.mainModuleID(rootID, hasRoot)
@@ -139,7 +136,7 @@ func (l *lowerer) synthesizeEntryMain(rootID air.FunctionID, entryModuleID air.M
 	}
 	alias := modulePackageName(l.program, entryModuleID)
 	importPath := l.moduleImportPath(entryModuleID)
-	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(functionName(l.program, fn))}}
+	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(alias), Sel: ast.NewIdent(l.functionName(fn))}}
 	var stmt ast.Stmt
 	if l.isVoidType(fn.Signature.Return) {
 		stmt = &ast.ExprStmt{X: call}
@@ -414,7 +411,7 @@ func (l *lowerer) goFunctionName(fn air.Function) string {
 	if l.entryAsMainPackage && fn.ID == l.entryMainFunctionID {
 		return "main"
 	}
-	return functionName(l.program, fn)
+	return l.functionName(fn)
 }
 
 func modulePackageFileName(program *air.Program, module air.ModuleID) string {
@@ -595,7 +592,7 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 				Tag:   &ast.BasicLit{Kind: token.STRING, Value: fmt.Sprintf("`json:%q`", field.Name)},
 			})
 		}
-		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), TypeParams: l.goTypeParamList(typ), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
+		return []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(l.typeName(typ)), TypeParams: l.goTypeParamList(typ), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}}, nil
 	case air.TypeUnion:
 		fields := []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(unionTagFieldName(typ))}, Type: ast.NewIdent("uint32")}}
 		for _, member := range typ.Members {
@@ -605,7 +602,7 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 			}
 			fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(unionMemberFieldName(typ, member))}, Type: memberType})
 		}
-		unionDecl := &ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}
+		unionDecl := &ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(l.typeName(typ)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}
 		return []ast.Decl{unionDecl, l.unionMarshalJSONDecl(typ)}, nil
 	case air.TypeTraitObject:
 		if l.isBuiltinErrorType(typ.ID) {
@@ -613,11 +610,11 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 		}
 		return l.lowerTraitObjectDecls(typ)
 	case air.TypeEnum:
-		typeSpec := &ast.TypeSpec{Name: ast.NewIdent(typeName(l.program, typ)), Type: ast.NewIdent("int")}
+		typeSpec := &ast.TypeSpec{Name: ast.NewIdent(l.typeName(typ)), Type: ast.NewIdent("int")}
 		specs := []ast.Spec{typeSpec}
 		for _, variant := range typ.Variants {
 			value := ast.Expr(&ast.BasicLit{Kind: token.INT, Value: fmt.Sprintf("%d", variant.Discriminant)})
-			specs = append(specs, &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(enumVariantName(l.program, typ, variant))}, Type: ast.NewIdent(typeName(l.program, typ)), Values: []ast.Expr{value}})
+			specs = append(specs, &ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(l.enumVariantName(typ, variant))}, Type: ast.NewIdent(l.typeName(typ)), Values: []ast.Expr{value}})
 		}
 		decls := []ast.Decl{&ast.GenDecl{Tok: token.TYPE, Specs: specs[:1]}}
 		if len(specs) > 1 {
@@ -673,7 +670,7 @@ func (l *lowerer) unionMarshalJSONDecl(typ air.TypeInfo) *ast.FuncDecl {
 		&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("nil"), &ast.CallExpr{Fun: l.qualified("fmt", "fmt", "Errorf"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"invalid union tag"`}}}}},
 	}}
 	return &ast.FuncDecl{
-		Recv: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(recv)}, Type: ast.NewIdent(typeName(l.program, typ))}}},
+		Recv: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent(recv)}, Type: ast.NewIdent(l.typeName(typ))}}},
 		Name: ast.NewIdent("MarshalJSON"),
 		Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: &ast.ArrayType{Elt: ast.NewIdent("byte")}}, {Type: ast.NewIdent("error")}}}},
 		Body: body,
@@ -851,6 +848,11 @@ func (l *lowerer) mutableTraitMethodFuncType(method air.TraitMethod) (ast.Expr, 
 }
 
 func (l *lowerer) traitInterfaceTypeName(trait air.Trait) string {
+	if l.namePlan != nil {
+		if name, ok := l.namePlan.traitNames[trait.ID]; ok {
+			return name
+		}
+	}
 	if name, ok := l.naturalTraitInterfaceTypeName(trait); ok {
 		return name
 	}
@@ -913,7 +915,7 @@ func (l *lowerer) namedTypeExpr(info air.TypeInfo) ast.Expr {
 		}
 		return &ast.IndexListExpr{X: base, Indices: args}
 	}
-	name := typeName(l.program, info)
+	name := l.typeName(info)
 	if !l.useModulePackages {
 		return ast.NewIdent(name)
 	}
@@ -929,7 +931,7 @@ func (l *lowerer) compositeTypeExpr(info air.TypeInfo) ast.Expr {
 }
 
 func (l *lowerer) enumVariantExpr(typ air.TypeInfo, variant air.VariantInfo) ast.Expr {
-	name := enumVariantName(l.program, typ, variant)
+	name := l.enumVariantName(typ, variant)
 	if !l.useModulePackages {
 		return ast.NewIdent(name)
 	}
@@ -950,7 +952,7 @@ func (l *lowerer) functionExpr(fn air.Function) ast.Expr {
 }
 
 func (l *lowerer) globalExpr(global air.Global) ast.Expr {
-	name := globalName(l.program, global)
+	name := l.globalName(global)
 	if !l.useModulePackages || global.Module == l.currentModule {
 		return ast.NewIdent(name)
 	}
@@ -1048,7 +1050,7 @@ func (l *lowerer) lowerGlobal(global air.Global) (ast.Decl, error) {
 		}}
 	}
 	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{
-		Names:  []*ast.Ident{ast.NewIdent(globalName(l.program, global))},
+		Names:  []*ast.Ident{ast.NewIdent(l.globalName(global))},
 		Type:   globalType,
 		Values: []ast.Expr{valueExpr},
 	}}}, nil
@@ -3330,144 +3332,25 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 		info := l.program.Types[expr.Type-1]
 		switch info.Kind {
 		case air.TypeResult:
-			shape, err := l.goForeignResultShape(importPath, functionName)
-			if err != nil {
-				return loweredExpr{}, err
+			if expr.ForeignResultShape == air.ForeignResultUnknown {
+				return loweredExpr{}, fmt.Errorf("Go foreign call %s.%s is missing its result shape", importPath, functionName)
 			}
-			switch shape {
-			case goResultValueError:
+			switch expr.ForeignResultShape {
+			case air.ForeignResultValueError:
 				return l.lowerGoValueErrorResultCall(expr, stmts, call, info)
-			case goResultErrorOnly:
+			case air.ForeignResultErrorOnly:
 				return l.lowerGoErrorOnlyResultCall(expr, stmts, call)
 			}
 		case air.TypeMaybe:
-			shape, err := l.goForeignResultShape(importPath, functionName)
-			if err != nil {
-				return loweredExpr{}, err
+			if expr.ForeignResultShape == air.ForeignResultUnknown {
+				return loweredExpr{}, fmt.Errorf("Go foreign call %s.%s is missing its result shape", importPath, functionName)
 			}
-			if shape == goResultValueBool {
+			if expr.ForeignResultShape == air.ForeignResultValueBool {
 				return l.lowerGoValueBoolMaybeCall(expr, stmts, call)
 			}
 		}
 	}
 	return loweredExpr{stmts: stmts, expr: call}, nil
-}
-
-type goResultShape int
-
-const (
-	goResultOther goResultShape = iota
-	goResultValueError
-	goResultErrorOnly
-	goResultValueBool
-)
-
-// loadGoTypesPackage resolves a Go package's type information. When the
-// program has project context, the load runs in the project module so
-// third-party and project-local FFI packages resolve; otherwise it falls back
-// to the standard-library importer.
-func (l *lowerer) loadGoTypesPackage(importPath string) (*types.Package, error) {
-	if l.goTypesPackages == nil {
-		l.goTypesPackages = map[string]*types.Package{}
-	}
-	if pkg, ok := l.goTypesPackages[importPath]; ok {
-		return pkg, nil
-	}
-	var pkg *types.Package
-	var err error
-	if l.projectInfo != nil && l.projectInfo.RootPath != "" {
-		cfg := &packages.Config{
-			Mode: packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps,
-			Dir:  l.projectInfo.RootPath,
-		}
-		if tags := l.projectInfo.Go.BuildTags; len(tags) > 0 {
-			cfg.BuildFlags = []string{"-tags=" + strings.Join(tags, ",")}
-		}
-		var loaded []*packages.Package
-		loaded, err = packages.Load(cfg, importPath)
-		if err == nil {
-			if len(loaded) == 0 || loaded[0].Types == nil {
-				err = fmt.Errorf("cannot load Go package %q", importPath)
-			} else if len(loaded[0].Errors) > 0 {
-				err = fmt.Errorf("load Go package %q: %s", importPath, loaded[0].Errors[0].Msg)
-			} else {
-				pkg = loaded[0].Types
-			}
-		}
-	} else {
-		pkg, err = importer.Default().Import(importPath)
-	}
-	if err != nil {
-		return nil, err
-	}
-	l.goTypesPackages[importPath] = pkg
-	return pkg, nil
-}
-
-func (l *lowerer) goForeignResultShape(importPath, functionName string) (goResultShape, error) {
-	pkg, err := l.loadGoTypesPackage(importPath)
-	if err != nil {
-		return goResultOther, err
-	}
-	fn, ok := pkg.Scope().Lookup(functionName).(*types.Func)
-	if !ok {
-		return goResultOther, fmt.Errorf("unknown Go function %s.%s", importPath, functionName)
-	}
-	results := fn.Type().(*types.Signature).Results()
-	if results.Len() == 1 && isGoErrorType(results.At(0).Type()) {
-		return goResultErrorOnly, nil
-	}
-	if results.Len() == 2 && isGoErrorType(results.At(1).Type()) {
-		return goResultValueError, nil
-	}
-	if results.Len() == 2 && isGoBoolType(results.At(1).Type()) {
-		return goResultValueBool, nil
-	}
-	return goResultOther, nil
-}
-
-func (l *lowerer) goForeignMethodResultShape(importPath, receiverName string, pointer bool, methodName string) (goResultShape, error) {
-	pkg, err := l.loadGoTypesPackage(importPath)
-	if err != nil {
-		return goResultOther, err
-	}
-	typeName, ok := pkg.Scope().Lookup(receiverName).(*types.TypeName)
-	if !ok {
-		return goResultOther, fmt.Errorf("unknown Go type %s.%s", importPath, receiverName)
-	}
-	var receiver types.Type = typeName.Type()
-	if pointer {
-		receiver = types.NewPointer(receiver)
-	}
-	selection := types.NewMethodSet(receiver).Lookup(pkg, methodName)
-	if selection == nil {
-		return goResultOther, fmt.Errorf("unknown Go method %s.%s", receiverName, methodName)
-	}
-	fn, ok := selection.Obj().(*types.Func)
-	if !ok {
-		return goResultOther, fmt.Errorf("Go selection %s.%s is not a method", receiverName, methodName)
-	}
-	results := fn.Type().(*types.Signature).Results()
-	if results.Len() == 1 && isGoErrorType(results.At(0).Type()) {
-		return goResultErrorOnly, nil
-	}
-	if results.Len() == 2 && isGoErrorType(results.At(1).Type()) {
-		return goResultValueError, nil
-	}
-	if results.Len() == 2 && isGoBoolType(results.At(1).Type()) {
-		return goResultValueBool, nil
-	}
-	return goResultOther, nil
-}
-
-func isGoBoolType(t types.Type) bool {
-	basic, ok := t.(*types.Basic)
-	return ok && basic.Kind() == types.Bool
-}
-
-func isGoErrorType(t types.Type) bool {
-	named, ok := t.(*types.Named)
-	return ok && named.Obj().Pkg() == nil && named.Obj().Name() == "error"
 }
 
 func (l *lowerer) lowerGoValueBoolMaybeCall(expr air.Expr, stmts []ast.Stmt, call *ast.CallExpr) (loweredExpr, error) {
@@ -3559,16 +3442,20 @@ func (l *lowerer) lowerForeignMethodValue(fn air.Function, expr air.Expr) (lower
 	}
 	retInfo := air.TypeInfo{}
 	adapt := false
-	shape := goResultOther
+	shape := expr.ForeignResultShape
 	if validTypeID(l.program, fnInfo.Return) {
 		retInfo = l.program.Types[fnInfo.Return-1]
 		switch retInfo.Kind {
-		case air.TypeResult, air.TypeMaybe:
-			shape, err = l.goForeignMethodResultShape(expr.ForeignNamespace, expr.ForeignReceiver, expr.ForeignPointer, expr.ForeignSymbol)
-			if err != nil {
-				return loweredExpr{}, err
+		case air.TypeResult:
+			if shape == air.ForeignResultUnknown {
+				return loweredExpr{}, fmt.Errorf("Go foreign method value %s.%s is missing its result shape", expr.ForeignReceiver, expr.ForeignSymbol)
 			}
-			adapt = (retInfo.Kind == air.TypeResult && (shape == goResultValueError || shape == goResultErrorOnly)) || (retInfo.Kind == air.TypeMaybe && shape == goResultValueBool)
+			adapt = shape == air.ForeignResultValueError || shape == air.ForeignResultErrorOnly
+		case air.TypeMaybe:
+			if shape == air.ForeignResultUnknown {
+				return loweredExpr{}, fmt.Errorf("Go foreign method value %s.%s is missing its result shape", expr.ForeignReceiver, expr.ForeignSymbol)
+			}
+			adapt = shape == air.ForeignResultValueBool
 		}
 	}
 	needsArgAdaptation := false
@@ -3609,9 +3496,9 @@ func (l *lowerer) lowerForeignMethodValue(fn air.Function, expr air.Expr) (lower
 	}
 	call := &ast.CallExpr{Fun: methodValue, Args: args}
 	var body []ast.Stmt
-	if retInfo.Kind == air.TypeResult && l.resultUsesGoErrorABI(fnInfo.Return) && (shape == goResultValueError || shape == goResultErrorOnly) {
+	if retInfo.Kind == air.TypeResult && l.resultUsesGoErrorABI(fnInfo.Return) && (shape == air.ForeignResultValueError || shape == air.ForeignResultErrorOnly) {
 		body = append(bodyPrefix, &ast.ReturnStmt{Results: l.unpackABIResultExprs(fnInfo.Return, call)})
-	} else if retInfo.Kind == air.TypeMaybe && shape == goResultValueBool {
+	} else if retInfo.Kind == air.TypeMaybe && shape == air.ForeignResultValueBool {
 		body = append(bodyPrefix, &ast.ReturnStmt{Results: l.unpackABIResultExprs(fnInfo.Return, call)})
 	} else if l.isVoidType(fnInfo.Return) {
 		body = append(bodyPrefix, &ast.ExprStmt{X: call})
@@ -3658,23 +3545,21 @@ func (l *lowerer) lowerForeignMethodCall(fn air.Function, expr air.Expr) (lowere
 	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(expr.ForeignSymbol)}, Args: args}
 	if validTypeID(l.program, expr.Type) {
 		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeResult {
-			shape, err := l.goForeignMethodResultShape(expr.ForeignNamespace, expr.ForeignReceiver, expr.ForeignPointer, expr.ForeignSymbol)
-			if err != nil {
-				return loweredExpr{}, err
+			if expr.ForeignResultShape == air.ForeignResultUnknown {
+				return loweredExpr{}, fmt.Errorf("Go foreign method call %s.%s is missing its result shape", expr.ForeignReceiver, expr.ForeignSymbol)
 			}
-			switch shape {
-			case goResultValueError:
+			switch expr.ForeignResultShape {
+			case air.ForeignResultValueError:
 				return l.lowerGoValueErrorResultCall(expr, stmts, call, info)
-			case goResultErrorOnly:
+			case air.ForeignResultErrorOnly:
 				return l.lowerGoErrorOnlyResultCall(expr, stmts, call)
 			}
 		}
 		if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeMaybe {
-			shape, err := l.goForeignMethodResultShape(expr.ForeignNamespace, expr.ForeignReceiver, expr.ForeignPointer, expr.ForeignSymbol)
-			if err != nil {
-				return loweredExpr{}, err
+			if expr.ForeignResultShape == air.ForeignResultUnknown {
+				return loweredExpr{}, fmt.Errorf("Go foreign method call %s.%s is missing its result shape", expr.ForeignReceiver, expr.ForeignSymbol)
 			}
-			if shape == goResultValueBool {
+			if expr.ForeignResultShape == air.ForeignResultValueBool {
 				return l.lowerGoValueBoolMaybeCall(expr, stmts, call)
 			}
 		}
@@ -4541,7 +4426,9 @@ func (l *lowerer) findMaybeTypeByElem(elem air.TypeID) air.TypeID {
 		return air.NoType
 	}
 	id := air.TypeID(len(l.program.Types) + 1)
-	l.program.Types = append(l.program.Types, air.TypeInfo{ID: id, Kind: air.TypeMaybe, Name: fmt.Sprintf("Maybe<%d>", elem), Elem: elem})
+	info := air.TypeInfo{ID: id, Kind: air.TypeMaybe, Name: fmt.Sprintf("Maybe<%d>", elem), Elem: elem}
+	l.program.Types = append(l.program.Types, info)
+	l.namePlan.addTypeDuringLowering(l, info)
 	return id
 }
 
@@ -5298,6 +5185,9 @@ func (l *lowerer) aliasReservedForImport(alias string, importPath string) bool {
 func (l *lowerer) importAliasCollidesWithTopLevel(alias string) bool {
 	if l.program == nil {
 		return false
+	}
+	if l.namePlan != nil {
+		return l.namePlan.importAliasCollides(l.useModulePackages, l.currentModule, alias)
 	}
 	if !l.useModulePackages {
 		return l.importAliasCollidesWithProgramTopLevel(alias)

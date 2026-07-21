@@ -169,7 +169,7 @@ func functionDefFromGoSignatureBound(name string, sig *types.Signature, bindings
 	if reason != "" {
 		return nil, reason
 	}
-	return &FunctionDef{Name: name, Parameters: params, ReturnType: ret}, ""
+	return &FunctionDef{Name: name, Parameters: params, ReturnType: ret, ForeignResultShape: foreignResultShape(sig.Results())}, ""
 }
 
 func boundReturnTypeFromGo(results *types.Tuple, tparams *types.TypeParamList, bindings goTypeParamBindings) (Type, string) {

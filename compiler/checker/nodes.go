@@ -1220,12 +1220,23 @@ type Parameter struct {
 	Variadic bool
 }
 
+type ForeignResultShape uint8
+
+const (
+	ForeignResultUnknown ForeignResultShape = iota
+	ForeignResultDirect
+	ForeignResultValueError
+	ForeignResultErrorOnly
+	ForeignResultValueBool
+)
+
 type FunctionDef struct {
 	Name                    string
 	Receiver                string
 	GenericParams           []string
 	Parameters              []Parameter
 	ReturnType              Type
+	ForeignResultShape      ForeignResultShape
 	InferReturnTypeFromBody bool
 	Mutates                 bool
 	IsTest                  bool
@@ -1327,10 +1338,11 @@ func (p *ModuleFunctionCall) Type() Type {
 }
 
 type ForeignFunctionCall struct {
-	Target    string
-	Namespace string
-	Qualifier string
-	Symbol    string
+	Target             string
+	Namespace          string
+	Qualifier          string
+	Symbol             string
+	ForeignResultShape ForeignResultShape
 	// TypeArgs instantiate a generic Go function. Empty for ordinary calls.
 	TypeArgs []Type
 	// PointerResult marks calls whose instantiated Go result is a raw pointer
@@ -1344,27 +1356,29 @@ func (p *ForeignFunctionCall) Type() Type {
 }
 
 type ForeignMethodValue struct {
-	Subject   Expression
-	Target    string
-	Namespace string
-	Qualifier string
-	Receiver  string
-	Pointer   bool
-	Symbol    string
-	_type     Type
+	Subject            Expression
+	Target             string
+	Namespace          string
+	Qualifier          string
+	Receiver           string
+	Pointer            bool
+	Symbol             string
+	ForeignResultShape ForeignResultShape
+	_type              Type
 }
 
 func (p *ForeignMethodValue) Type() Type { return p._type }
 
 type ForeignMethodCall struct {
-	Subject   Expression
-	Target    string
-	Namespace string
-	Qualifier string
-	Receiver  string
-	Pointer   bool
-	Symbol    string
-	Call      *FunctionCall
+	Subject            Expression
+	Target             string
+	Namespace          string
+	Qualifier          string
+	Receiver           string
+	Pointer            bool
+	Symbol             string
+	ForeignResultShape ForeignResultShape
+	Call               *FunctionCall
 }
 
 func (p *ForeignMethodCall) Type() Type {
@@ -1401,7 +1415,8 @@ type ForeignValue struct {
 	// becomes Maybe, a variadic tail becomes a trailing Maybe parameter).
 	// ValueType is the adapted signature; targets synthesize the boundary
 	// adapter so the value behaves exactly like a call to the function.
-	AdaptedFunction bool
+	AdaptedFunction    bool
+	ForeignResultShape ForeignResultShape
 	// VariadicAdapter is set with AdaptedFunction when the Go function is
 	// variadic and is referenced as a function value: the adapted signature's
 	// final parameter is a Maybe of the variadic element type, and the adapter
