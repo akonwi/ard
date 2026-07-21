@@ -334,10 +334,11 @@ fn main() Int!Str {
 						ReturnType: checker.MakeResult(checker.Int, checker.Str),
 						Body: &checker.Block{Stmts: []checker.Statement{
 							{Expr: &checker.ForeignFunctionCall{
-								Target:    "go",
-								Namespace: "fmt",
-								Qualifier: "fmt",
-								Symbol:    "Println",
+								Target:             "go",
+								Namespace:          "fmt",
+								Qualifier:          "fmt",
+								Symbol:             "Println",
+								ForeignResultShape: checker.ForeignResultValueError,
 								Call: &checker.FunctionCall{
 									Name:       "Println",
 									Args:       []checker.Expression{&checker.StrLiteral{Value: "hello"}},
@@ -416,10 +417,11 @@ fn main() Void!Str {
 						ReturnType: checker.MakeResult(checker.Void, checker.Str),
 						Body: &checker.Block{Stmts: []checker.Statement{
 							{Expr: &checker.ForeignFunctionCall{
-								Target:    "go",
-								Namespace: "os",
-								Qualifier: "os",
-								Symbol:    "Setenv",
+								Target:             "go",
+								Namespace:          "os",
+								Qualifier:          "os",
+								Symbol:             "Setenv",
+								ForeignResultShape: checker.ForeignResultErrorOnly,
 								Call: &checker.FunctionCall{
 									Name:       "Setenv",
 									Args:       []checker.Expression{&checker.StrLiteral{Value: "ARD_TEST"}, &checker.StrLiteral{Value: "ok"}},

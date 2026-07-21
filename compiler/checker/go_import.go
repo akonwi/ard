@@ -177,6 +177,19 @@ func functionDefFromGoSignature(name string, sig *types.Signature) (*FunctionDef
 	return functionDefFromGoSignatureWithMethods(name, sig, true)
 }
 
+func foreignResultShape(results *types.Tuple) ForeignResultShape {
+	switch {
+	case results.Len() == 1 && isGoError(results.At(0).Type()):
+		return ForeignResultErrorOnly
+	case results.Len() == 2 && isGoError(results.At(1).Type()):
+		return ForeignResultValueError
+	case results.Len() == 2 && isGoBool(results.At(1).Type()):
+		return ForeignResultValueBool
+	default:
+		return ForeignResultDirect
+	}
+}
+
 func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, includeMethods bool) (*FunctionDef, string) {
 	params := make([]Parameter, 0, sig.Params().Len())
 	for i := 0; i < sig.Params().Len(); i++ {
@@ -211,7 +224,7 @@ func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, in
 	if reason != "" {
 		return nil, reason
 	}
-	return &FunctionDef{Name: name, Parameters: params, ReturnType: ret}, ""
+	return &FunctionDef{Name: name, Parameters: params, ReturnType: ret, ForeignResultShape: foreignResultShape(sig.Results())}, ""
 }
 
 // functionDefFromGoCallbackSignature maps a Go callback parameter's

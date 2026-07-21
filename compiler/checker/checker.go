@@ -229,6 +229,7 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			GenericParams:           append([]string(nil), typ.GenericParams...),
 			Parameters:              newParams,
 			ReturnType:              derefReturnType,
+			ForeignResultShape:      typ.ForeignResultShape,
 			InferReturnTypeFromBody: typ.InferReturnTypeFromBody,
 			Body:                    typ.Body,
 			Mutates:                 typ.Mutates,
@@ -6482,7 +6483,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			if fnDef, ok := propType.(*FunctionDef); ok {
 				if foreign, ok := subj.Type().(*ForeignType); ok {
 					pointer := foreign.Pointer || foreignPointerReceiver
-					return &ForeignMethodValue{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Property.Name, _type: fnDef}
+					return &ForeignMethodValue{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Property.Name, ForeignResultShape: fnDef.ForeignResultShape, _type: fnDef}
 				}
 			}
 
@@ -6722,7 +6723,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					}
 				}
 				pointer := foreign.Pointer || foreignPointerReceiver
-				return &ForeignMethodCall{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Method.Name, Call: &FunctionCall{Name: s.Method.Name, Args: args, fn: fnToUse, ReturnType: fnToUse.ReturnType}}
+				return &ForeignMethodCall{Subject: subj, Target: foreign.Target, Namespace: foreign.Namespace, Qualifier: foreign.Qualifier, Receiver: foreign.Name, Pointer: pointer, Symbol: s.Method.Name, ForeignResultShape: fnToUse.ForeignResultShape, Call: &FunctionCall{Name: s.Method.Name, Args: args, fn: fnToUse, ReturnType: fnToUse.ReturnType}}
 			}
 			// Create function call
 			return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
@@ -7252,7 +7253,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					}
 					args[i] = checkedArg
 				}
-				return &ForeignFunctionCall{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: name, TypeArgs: callTypeArgs, PointerResult: pointerResult, Call: &FunctionCall{Name: name, Args: args, fn: effectiveFnDef, ReturnType: effectiveFnDef.ReturnType}}
+				return &ForeignFunctionCall{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: name, TypeArgs: callTypeArgs, PointerResult: pointerResult, ForeignResultShape: effectiveFnDef.ForeignResultShape, Call: &FunctionCall{Name: name, Args: args, fn: effectiveFnDef, ReturnType: effectiveFnDef.ReturnType}}
 			}
 
 			var fnDef *FunctionDef
@@ -8365,9 +8366,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 									c.addDiagnostic(invalidGoFunctionValueDiagnostic{Name: qualified, Detail: reason, Span: c.sourceSpan(prop.GetLocation()), LegacyMessage: legacy}.build())
 									return nil
 								}
-								return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: valueType, AdaptedFunction: true, VariadicAdapter: variadic}
+								return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: valueType, AdaptedFunction: true, ForeignResultShape: def.ForeignResultShape, VariadicAdapter: variadic}
 							}
-							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: def}
+							return &ForeignValue{Target: "go", Namespace: goPkg.Path, Qualifier: goPkg.TypesName, Symbol: prop.Name, ValueType: def, ForeignResultShape: def.ForeignResultShape}
 						}
 						if _, isGeneric := goPkg.Generics[prop.Name]; isGeneric {
 							qualified := id.Name + "::" + prop.Name
@@ -9955,6 +9956,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			GenericParams:           append([]string(nil), typ.GenericParams...),
 			Parameters:              substitutedParams,
 			ReturnType:              substituteType(typ.ReturnType, typeMap),
+			ForeignResultShape:      typ.ForeignResultShape,
 			InferReturnTypeFromBody: typ.InferReturnTypeFromBody,
 			Body:                    typ.Body,
 			Mutates:                 typ.Mutates,
@@ -10567,6 +10569,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				GenericParams:           append([]string(nil), fnDefCopy.GenericParams...),
 				Parameters:              make([]Parameter, len(fnDefCopy.Parameters)),
 				ReturnType:              substituteType(fnDefCopy.ReturnType, bindings),
+				ForeignResultShape:      fnDefCopy.ForeignResultShape,
 				InferReturnTypeFromBody: fnDefCopy.InferReturnTypeFromBody,
 				Body:                    fnDefCopy.Body,
 				Mutates:                 fnDefCopy.Mutates,
@@ -10702,6 +10705,7 @@ func (c *Checker) resolveGenericFunction(fnDef *FunctionDef, args []Expression, 
 		GenericParams:           append([]string(nil), fnDefCopy.GenericParams...),
 		Parameters:              make([]Parameter, len(fnDefCopy.Parameters)),
 		ReturnType:              substituteType(fnDefCopy.ReturnType, bindings),
+		ForeignResultShape:      fnDefCopy.ForeignResultShape,
 		InferReturnTypeFromBody: fnDefCopy.InferReturnTypeFromBody,
 		Body:                    fnDefCopy.Body,
 		Mutates:                 fnDefCopy.Mutates,
