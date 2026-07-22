@@ -246,6 +246,24 @@ func TestUnsafeBlock(t *testing.T) {
 		},
 	})
 }
+func TestTryMatchSubjectSyntax(t *testing.T) {
+	for _, subject := range []string{"Type{}", "pkg::Type{}"} {
+		parseOK(t, "match ("+subject+") {\n  _ => 0,\n}")
+	}
+
+	const want = "Try catch handlers are not allowed in match subjects; handle the error before matching"
+	for _, input := range []string{
+		"match try get_result() -> format_error {\n  5 => 1,\n  _ => 0,\n}",
+		"match try get_result() -> result::format_error {\n  5 => 1,\n  _ => 0,\n}",
+		"match try get_result() -> err {\n  recover(err)\n} {\n  5 => 1,\n  _ => 0,\n}",
+	} {
+		result := Parse([]byte(input), "test.ard")
+		if len(result.Errors) == 0 || result.Errors[0].Message != want {
+			t.Fatalf("errors = %v, want first error %q", result.Errors, want)
+		}
+	}
+}
+
 func TestTryKeyword(t *testing.T) {
 	runTests(t, []test{
 		{
@@ -259,6 +277,31 @@ func TestTryKeyword(t *testing.T) {
 							Name:     "get_result",
 							Args:     []Argument{},
 							Comments: []Comment{},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "try as match subject",
+			input: `match try get_result() {
+  5 => 1,
+  _ => 0,
+}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&MatchExpression{
+						Subject: &Try{
+							Expression: &FunctionCall{
+								Name:     "get_result",
+								Args:     []Argument{},
+								Comments: []Comment{},
+							},
+						},
+						Cases: []MatchCase{
+							{Pattern: &NumLiteral{Value: "5"}, Body: []Statement{&NumLiteral{Value: "1"}}},
+							{Pattern: &Identifier{Name: "_"}, Body: []Statement{&NumLiteral{Value: "0"}}},
 						},
 					},
 				},
