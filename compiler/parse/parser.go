@@ -2234,7 +2234,7 @@ func (p *parser) matchExpr() (Expression, error) {
 		// the match itself is a value expression. (#285)
 		prevAllowed := p.structOperandAllowed
 		p.structOperandAllowed = false
-		expr, err := p.or()
+		expr, err := p.try(false)
 		p.structOperandAllowed = prevAllowed
 		if err != nil {
 			return nil, err
@@ -2315,7 +2315,7 @@ func (p *parser) matchExpr() (Expression, error) {
 		return matchExpr, nil
 	}
 
-	return p.try()
+	return p.try(true)
 }
 
 func (p *parser) parseConditionalMatch(keyword token) (Expression, error) {
@@ -2407,7 +2407,7 @@ func (p *parser) parseConditionalMatch(keyword token) (Expression, error) {
 	return conditionalMatch, nil
 }
 
-func (p *parser) try() (Expression, error) {
+func (p *parser) try(allowCatch bool) (Expression, error) {
 	// Handle the explicit `try` keyword first
 	if p.check(identifier) && p.peek().text == "try" {
 		idToken := p.advance()
@@ -2415,9 +2415,29 @@ func (p *parser) try() (Expression, error) {
 			Name:     idToken.text,
 			Location: idToken.getLocation(),
 		}
-		expr, err := p.functionDef(false, false)
+		var expr Expression
+		var err error
+		if allowCatch {
+			expr, err = p.functionDef(false, false)
+		} else {
+			expr, err = p.or()
+		}
 		if err != nil {
 			return nil, err
+		}
+
+		if !allowCatch && p.check(thin_arrow) {
+			p.addError(p.peek(), "Try catch handlers are not allowed in match subjects; handle the error before matching")
+			p.advance()
+			if p.check(identifier) {
+				p.advance()
+				for p.match(colon_colon) {
+					if !p.check(identifier) {
+						break
+					}
+					p.advance()
+				}
+			}
 		}
 
 		var catchVar *Identifier
@@ -2425,7 +2445,7 @@ func (p *parser) try() (Expression, error) {
 		var catchEnd Point
 
 		// Check for catch clause: -> varname { ... } or -> function_name or -> qualified::function
-		if p.match(thin_arrow) {
+		if allowCatch && p.match(thin_arrow) {
 			if !p.check(identifier) {
 				return nil, p.makeError(p.peek(), "Expected identifier after '->' in try-catch")
 			}
@@ -2575,6 +2595,12 @@ func (p *parser) try() (Expression, error) {
 			CatchVar:   catchVar,
 			CatchBlock: catchBlock,
 		}, nil
+	}
+
+	// Match subjects enter at this level only to recognize a leading `try`;
+	// ordinary subjects retain their existing struct/block disambiguation.
+	if !allowCatch {
+		return p.or()
 	}
 
 	// Not a `try` expression: parse the underlying expression as usual.
