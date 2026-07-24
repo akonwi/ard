@@ -3205,7 +3205,7 @@ func TestLowerProgramUsesPointersForMutableStructParams(t *testing.T) {
 		t.Fatal("generated AST missing pointer call lowering")
 	}
 }
-func TestLowerProgramUsesDescriptorsForMutableListParams(t *testing.T) {
+func TestLowerProgramUsesPointersForNativeMutableListParams(t *testing.T) {
 	program := lowerSource(t, `
 		fn replace_first(values: mut [Int]) Void {
 			values.set(0, 1)
@@ -3222,21 +3222,45 @@ func TestLowerProgramUsesDescriptorsForMutableListParams(t *testing.T) {
 	if !ok || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
 		t.Fatalf("generated AST missing replace_first function")
 	}
-	if _, ok := fn.Type.Params.List[0].Type.(*ast.StarExpr); ok {
-		t.Fatalf("mutable list parameter should lower as descriptor, got pointer: %#v", fn.Type.Params.List[0].Type)
+	paramType, ok := fn.Type.Params.List[0].Type.(*ast.StarExpr)
+	if !ok {
+		t.Fatalf("native mutable list parameter should lower as pointer: %#v", fn.Type.Params.List[0].Type)
 	}
-	if _, ok := fn.Type.Params.List[0].Type.(*ast.ArrayType); !ok {
-		t.Fatalf("mutable list parameter should lower to slice: %#v", fn.Type.Params.List[0].Type)
+	if _, ok := paramType.X.(*ast.ArrayType); !ok {
+		t.Fatalf("native mutable list parameter should point to slice: %#v", fn.Type.Params.List[0].Type)
 	}
-	if astFilesContain(files, func(node ast.Node) bool {
+	if !astFilesContain(files, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
 		if !ok || astCallName(call) != "ReplaceFirst" || len(call.Args) == 0 {
 			return false
 		}
-		_, isAddr := call.Args[0].(*ast.UnaryExpr)
-		return isAddr
+		addr, isAddr := call.Args[0].(*ast.UnaryExpr)
+		return isAddr && addr.Op == token.AND
 	}) {
-		t.Fatal("mutable list call should not pass address")
+		t.Fatal("native mutable list call should pass the descriptor address")
+	}
+}
+
+func TestLowerProgramKeepsForeignMutableListParamsAsDescriptors(t *testing.T) {
+	program := lowerSource(t, `
+		use go:io
+
+		struct Sink {}
+
+		impl io::Writer for Sink {
+			fn write(bytes: mut [Byte]) Int!Str {
+				Result::ok(bytes.size())
+			}
+		}
+	`)
+
+	files := lowerProgramAST(t, program, Options{PackageName: "main"})
+	fn, ok := astFilesFunc(files, "Write")
+	if !ok || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
+		t.Fatalf("generated AST missing Write method")
+	}
+	if _, ok := fn.Type.Params.List[0].Type.(*ast.ArrayType); !ok {
+		t.Fatalf("foreign mutable list parameter must keep []byte ABI: %#v", fn.Type.Params.List[0].Type)
 	}
 }
 

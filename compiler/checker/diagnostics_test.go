@@ -1198,7 +1198,7 @@ func TestReferenceRebindingHasStructuredLabels(t *testing.T) {
 }
 
 func TestUnreachableReferentAssignmentHasStructuredLabels(t *testing.T) {
-	source := "mut items = [1, 2]\nlet ref = mut items\nref = [9, 9]\n"
+	source := "mut items = [1: 2]\nlet ref = mut items\nref = [9: 9]\n"
 	result := parse.Parse([]byte(source), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)

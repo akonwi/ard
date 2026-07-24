@@ -48,10 +48,11 @@ type genericBindingOrigin struct {
 }
 
 type Symbol struct {
-	Name       string
-	Type       Type
-	declaredAt SourceSpan
-	mutable    bool
+	Name              string
+	Type              Type
+	declaredAt        SourceSpan
+	mutable           bool
+	foreignDescriptor bool
 }
 
 func (s Symbol) IsZero() bool {
@@ -819,6 +820,7 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 			Parameters:              newParams,
 			ReturnType:              newReturnType,
 			ForeignResultShape:      t.ForeignResultShape,
+			ForeignABI:              t.ForeignABI,
 			InferReturnTypeFromBody: t.InferReturnTypeFromBody,
 			Mutates:                 t.Mutates,
 			Body:                    t.Body,
@@ -1131,6 +1133,7 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 		Parameters:              newParams,
 		ReturnType:              copyTypeWithTypeVarMap(fnDef.ReturnType, typeVarMap),
 		ForeignResultShape:      fnDef.ForeignResultShape,
+		ForeignABI:              fnDef.ForeignABI,
 		InferReturnTypeFromBody: fnDef.InferReturnTypeFromBody,
 		Body:                    fnDef.Body,
 		Mutates:                 fnDef.Mutates,

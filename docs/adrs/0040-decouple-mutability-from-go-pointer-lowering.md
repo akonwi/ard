@@ -2,7 +2,11 @@
 
 ## Status
 
-Proposed
+Accepted
+
+Amended: native Ard mutable list references include the list descriptor and lower
+pointer-shaped on the Go target. Descriptor-only mutable access is retained at
+foreign Go ABI boundaries whose signatures require a slice value.
 
 ## Context
 
@@ -38,21 +42,23 @@ func (s *Sink) Write(bytes *[]byte) (int, error)
 
 because `*[]byte` does not satisfy `io.Writer`.
 
-The same distinction applies outside interface implementations. An ordinary Ard function:
+The distinction differs for ordinary Ard functions. A native mutable list reference must reach the caller's entire list value, including the slice descriptor, so operations that grow or replace the list remain caller-visible:
 
 ```ard
-fn fill(mut xs: [Int]) {
-  // mutate elements
+fn fill(xs: mut [Int]) {
+  xs.push(1)
 }
 ```
 
-should lower to:
+On the Go target this lowers approximately as:
 
 ```go
-func Fill(xs []int)
+func Fill(xs *[]int) {
+    *xs = append(*xs, 1)
+}
 ```
 
-not `func Fill(xs *[]int)`, because the Go slice descriptor already carries mutable access to the backing array. Mutability is an Ard access capability; it is not synonymous with a Go pointer.
+Mutability remains an Ard access capability rather than a Go pointer spelling. The pointer is a backend representation for native list-reference semantics; it is omitted at foreign boundaries where the Go ABI fixes the parameter as a slice value.
 
 ## Decision
 
@@ -70,10 +76,11 @@ The Go backend should distinguish at least these mutable access shapes:
    - `mut Person` lowers as `*Person` when passed as a mutable parameter.
 
 2. **Descriptor mutable access**
-   - Used when the Go value is already a reference-like descriptor.
-   - Examples: slices, maps, channels, Go pointers, and Go interfaces.
-   - `mut [T]` lowers as `[]T`.
-   - `mut [K: V]` lowers as `map[K]V`.
+   - Used when all Ard mutations are naturally visible through a copied Go descriptor, or when a foreign ABI fixes the descriptor shape.
+   - Examples: maps, channels, Go pointers, Go interfaces, and slices in foreign ABI positions.
+   - Native `mut [T]` is excluded because list growth and replacement must update the owner; it lowers as `*[]T`.
+   - Foreign slice positions remain `[]T` and provide element-level mutable access only.
+   - `mut [K: V]` lowers as `map[K]V` because map entry mutation does not replace the map descriptor.
    - `mut foreign::PointerType` lowers as its Go pointer type, not as a pointer to that pointer.
 
 3. **Foreign ABI mutable access**
@@ -83,19 +90,19 @@ The Go backend should distinguish at least these mutable access shapes:
 
 ### Lists and slices
 
-Ard lists lower to Go slices. A mutable list parameter lowers to a Go slice parameter:
+Ard lists lower to Go slices, but native mutable list references lower as pointers to the slice descriptor:
 
 ```ard
-fn fill(mut xs: [Int])
+fn fill(xs: mut [Int])
 ```
 
 ```go
-func Fill(xs []int)
+func Fill(xs *[]int)
 ```
 
-This gives mutable access to the elements. Operations that rebind the slice header, such as `push` when it appends and assigns the resulting slice descriptor, update only the callee's local descriptor in this representation. Caller-visible growth requires returning the new list, assigning through an owning field/local, or a future explicit operation that writes back the descriptor.
+This makes element mutation, `push`, `prepend`, and whole-list assignment visible to the caller. Explicit aliases, nested forwarding, closures, function values, and generic functions preserve the same reference to the descriptor.
 
-The important rule for this ADR is that `mut [T]` does not automatically mean `*[]T`, and callers should not rely on mutable list parameters to rebind the caller's slice header.
+Foreign Go ABI positions remain exact. A Go parameter or interface method requiring `[]T` continues to receive `[]T`, not `*[]T`. Such a parameter may mutate elements, but the checker rejects descriptor-rebinding operations such as `push` and `prepend` because Go cannot propagate the replacement descriptor to its caller.
 
 ### Maps and channels
 
@@ -157,9 +164,9 @@ This avoids encoding Go pointer decisions into the core type system.
 - Ard's `mut` remains a language-level access concept rather than a Go pointer spelling.
 - Mutable slices/maps/channels can interoperate with idiomatic Go signatures.
 - Go interface implementations can use `mut` for descriptor-backed values without breaking interface satisfaction.
-- Ordinary Ard functions become more idiomatic in generated Go for descriptor-backed values.
-- The backend must distinguish element/content mutation from descriptor rebinding for lists and similar values.
-- Existing lowering that maps every mutable parameter to `*T` must be revised.
+- Native mutable list references satisfy Ard's caller-visible alias semantics even though their generated Go signature uses `*[]T`.
+- The checker and backend distinguish native list references from foreign slice descriptors.
+- Descriptor-rebinding list operations are rejected only where a foreign Go ABI cannot carry the updated descriptor.
 
 ## Related
 

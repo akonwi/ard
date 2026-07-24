@@ -56,6 +56,9 @@ type Function struct {
 	IsTest    bool
 	IsScript  bool
 	Private   bool
+	// ForeignABI preserves an exact foreign Go method signature. Mutable
+	// descriptor parameters remain value-shaped at this boundary.
+	ForeignABI bool
 
 	// TypeParams names the generic parameters for a generic function definition
 	// (ADR 0031). When set, the function is emitted as `func Name[T any](...)`

@@ -437,8 +437,9 @@ func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (Fu
 			Return:          returnType,
 			ReturnReference: returnReference,
 		},
-		IsTest:  def.IsTest,
-		Private: def.Private,
+		IsTest:     def.IsTest,
+		Private:    def.Private,
+		ForeignABI: def.ForeignABI,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	if def.Name == "main" {
@@ -484,12 +485,13 @@ func (l *lowerer) declareFunctionSpecializationWithSignatureAndGenericKey(module
 	id := FunctionID(len(l.program.Functions))
 	l.functions[key] = id
 	l.program.Functions = append(l.program.Functions, Function{
-		ID:        id,
-		Module:    module,
-		Name:      def.Name,
-		Signature: signature,
-		IsTest:    def.IsTest,
-		Private:   def.Private,
+		ID:         id,
+		Module:     module,
+		Name:       def.Name,
+		Signature:  signature,
+		IsTest:     def.IsTest,
+		Private:    def.Private,
+		ForeignABI: def.ForeignABI,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	return id, nil
@@ -573,6 +575,7 @@ func (l *lowerer) declareGenericFunctionDef(module ModuleID, callDef *checker.Fu
 		TypeParams: goParams,
 		IsTest:     def.IsTest,
 		Private:    def.Private,
+		ForeignABI: def.ForeignABI,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	typeVars := make(map[string]TypeID, len(params))
@@ -1787,6 +1790,7 @@ func (l *lowerer) declareMethodFunction(module ModuleID, owner checker.Type, tra
 		Name:       owner.String() + "." + traitName + "." + def.Name,
 		Receiver:   ownerType,
 		MethodName: def.Name,
+		ForeignABI: def.ForeignABI,
 		Signature: Signature{
 			Params:          params,
 			Return:          returnType,
@@ -1862,6 +1866,7 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 		Name:       ownerName + "." + def.Name,
 		Receiver:   ownerType,
 		MethodName: def.Name,
+		ForeignABI: def.ForeignABI,
 		Signature:  signature,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
@@ -1915,6 +1920,7 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 		Name:       ownerName + "." + def.Name,
 		Receiver:   ownerType,
 		MethodName: def.Name,
+		ForeignABI: def.ForeignABI,
 		Signature:  signature,
 	})
 	fl.l.program.Modules[module].Functions = appendUniqueFunction(fl.l.program.Modules[module].Functions, id)
@@ -2054,6 +2060,7 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 		Name:       structDef.Name + "." + callDef.Name,
 		Receiver:   recvType,
 		MethodName: callDef.Name,
+		ForeignABI: orig.ForeignABI,
 		Signature:  signature,
 		TypeParams: paramNames,
 	})

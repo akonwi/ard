@@ -84,7 +84,7 @@ There is no dereference operator. Creating an alias is the visibility-worthy act
 
 - Reads see through references implicitly: field access, method calls, and operators on a `mut T` operate on the referent.
 - Writes through a `mut T` place assign the referent; they do not rebind the reference.
-- A reference binding cannot be rebound: assigning another reference through it is rejected (`References cannot be rebound; assign the value directly`), and whole-value assignment through a descriptor-backed reference is rejected because the alias shares element storage, not the original binding slot.
+- A reference binding cannot be rebound: assigning another reference through it is rejected (`References cannot be rebound; assign the value directly`). Native mutable list references include the list descriptor, so whole-list assignment updates the referent. Descriptor-only foreign ABI parameters still cannot replace their caller's descriptor.
 - A value copy is produced whenever a reference flows into a value context — a `T` parameter, a binding, or a `T` field. Reads dereference, so binding a reference-typed place copies the referent:
 
 ```ard
@@ -109,7 +109,7 @@ This keeps the pairing uniform: copies are quiet, aliases are always spelled `mu
 - `mut <place>` where the place is already reference-shaped lowers to the reference itself — aliasing copies the pointer, never adding indirection.
 - Interface satisfaction needs no backend changes: the operand is already the pointer form when it reaches the boundary.
 
-Not every Ard reference is a Go pointer (ADR 0040): descriptor-backed types (lists, maps, channels) already share storage by value, so `mut` of those lowers to the descriptor itself. The backend's existing per-representation decision applies; `&` is emitted only where the representation requires a pointer.
+Not every Ard reference is a Go pointer (ADR 0040): maps and channels share all supported mutation through their descriptors. Native mutable list references are pointer-shaped because list growth and replacement must update the owner's descriptor. At foreign Go slice boundaries, the exact `[]T` ABI is retained and only element-level mutable access is available.
 
 ## Consequences
 

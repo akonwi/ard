@@ -58,6 +58,7 @@ const (
 	DiagnosticCodeUnsupportedMutableReference   DiagnosticCode = "unsupported_mutable_reference"
 	DiagnosticCodeInvalidForeignPointerBinding  DiagnosticCode = "invalid_foreign_pointer_binding"
 	DiagnosticCodeUnreachableReferentAssignment DiagnosticCode = "unreachable_referent_assignment"
+	DiagnosticCodeForeignDescriptorRebinding    DiagnosticCode = "foreign_descriptor_rebinding"
 	DiagnosticCodeReferenceRebinding            DiagnosticCode = "reference_rebinding"
 	DiagnosticCodeImmutablePropertyAssignment   DiagnosticCode = "immutable_property_assignment"
 	DiagnosticCodeImmutableReceiver             DiagnosticCode = "immutable_receiver"
@@ -462,6 +463,26 @@ func (d unreachableReferentAssignmentDiagnostic) build() Diagnostic {
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("cannot replace the whole value through `%s`", d.Name)},
 		d.DeclarationSpan,
 		"this reference was declared here",
+	)
+}
+
+type foreignDescriptorRebindingDiagnostic struct {
+	Name            string
+	Operation       string
+	Span            SourceSpan
+	DeclarationSpan *SourceSpan
+}
+
+func (d foreignDescriptorRebindingDiagnostic) build() Diagnostic {
+	legacy := fmt.Sprintf("Cannot call '%s' on foreign descriptor reference '%s': the Go ABI cannot propagate list growth", d.Operation, d.Name)
+	return mutationDiagnostic(
+		DiagnosticCodeForeignDescriptorRebinding,
+		legacy,
+		"Foreign descriptor cannot be replaced",
+		"This Go ABI parameter shares list elements, but list growth cannot update the caller's slice descriptor.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`.%s()` would only update a local descriptor", d.Operation)},
+		d.DeclarationSpan,
+		"foreign descriptor reference declared here",
 	)
 }
 
