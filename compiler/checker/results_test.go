@@ -110,7 +110,8 @@ func TestResults(t *testing.T) {
 				Result::err(true)
 			}`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: `Type mismatch: Expected Int!Str, got $Val!Bool`},
+				{Kind: checker.Error, Message: `Type mismatch: Expected Str, got Bool`},
+				{Kind: checker.Error, Message: `Type mismatch: Expected Int!Str, got Void`},
 			},
 		},
 		{

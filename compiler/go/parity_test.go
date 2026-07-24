@@ -2418,6 +2418,74 @@ func TestGoTargetParityContextualGenericReturnInference(t *testing.T) {
 			`,
 		},
 		{
+			name: "try result constructor uses enclosing error context",
+			input: `
+				fn work() Int!Str {
+					let value = try Result::ok(1)
+					Result::ok(value)
+				}
+				fn main() Bool { work().is_ok() }
+			`,
+		},
+		{
+			name: "builtin mapped generic does not capture enclosing generic",
+			input: `
+				fn discard(value: $Mapped?) {
+					value.and_then(fn(item) { Maybe::new() })
+				}
+				fn main() Bool {
+					discard(Maybe::new("x"))
+					true
+				}
+			`,
+		},
+		{
+			name: "generic fixed array and map shapes",
+			input: `
+				fn first(values: [$T; 2]) $T { values.at(0).expect("first") }
+				fn lookup(values: [$K: $V], key: $K) $V { values.get(key).expect("key") }
+				fn main() Bool {
+					first([1, 2]) == lookup(["one": 1], "one")
+				}
+			`,
+		},
+		{
+			name: "named arguments infer in source order",
+			input: `
+				fn apply(callback: fn($T) Int, value: $T) Int { callback(value) }
+				fn main() Int { apply(value: 1, callback: fn(x) { x + 1 }) }
+			`,
+		},
+		{
+			name: "generic maybe coercion binds before wrapping",
+			input: `
+				fn take(value: $T?) $T? { value }
+				fn main() Int {
+					take(1).or(0)
+				}
+			`,
+		},
+		{
+			name: "nested parameter context",
+			input: `
+				struct Key<$T> { marker: Bool }
+				fn Key::new() Key<$T> { Key<$T>{marker: true} }
+				fn consume(key: Key<Str>) Bool { key.marker }
+				fn main() Bool {
+					consume(Key::new())
+				}
+			`,
+		},
+		{
+			name: "explicit type contextualizes empty list",
+			input: `
+				fn collect(values: [$T]) [$T] { values }
+				fn main() Int {
+					collect<Str>([]).size()
+				}
+			`,
+		},
+		{
 			name: "reassignment context",
 			input: `
 				struct Key<$T> { marker: Bool }

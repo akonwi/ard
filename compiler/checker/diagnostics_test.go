@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -702,8 +703,11 @@ func TestGenericHelperErrorsUseTypedDiagnostics(t *testing.T) {
 		c := checker.New("main.ard", result.Program, nil)
 		c.Check()
 		diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeIncorrectArgumentType)
-		if diagnostic.Message != "type mismatch: expected Str, got Int" || diagnostic.Primary.Span.Location.Start.Row != 2 || diagnostic.Primary.Span.Location.Start.Col != 15 || len(diagnostic.Secondary) != 1 {
+		if diagnostic.Message != "type mismatch: expected Str, got Int" || diagnostic.Primary.Span.Location.Start.Row != 2 || diagnostic.Primary.Span.Location.Start.Col != 15 || len(diagnostic.Secondary) != 2 {
 			t.Fatalf("diagnostic = %#v", diagnostic)
+		}
+		if diagnostic.Secondary[0].Span.Location.Start.Row != 2 || diagnostic.Secondary[0].Span.Location.Start.Col != 10 || !strings.Contains(diagnostic.Secondary[0].Message, "explicit type argument") {
+			t.Fatalf("explicit type argument label = %#v", diagnostic.Secondary[0])
 		}
 	})
 }
@@ -714,8 +718,55 @@ func TestExplicitGenericMismatchWithOmittedArgumentDoesNotPanic(t *testing.T) {
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeIncorrectArgumentType)
-	if diagnostic.Primary.Span.Location.Start.Row != 2 || diagnostic.Primary.Span.Location.Start.Col != 1 {
+	if diagnostic.Primary.Span.Location.Start.Row != 2 || diagnostic.Primary.Span.Location.Start.Col != 11 || len(diagnostic.Secondary) != 2 {
 		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if diagnostic.Secondary[0].Span.Location.Start.Row != 2 || diagnostic.Secondary[0].Span.Location.Start.Col != 3 || !strings.Contains(diagnostic.Secondary[0].Message, "explicit type argument") {
+		t.Fatalf("explicit type argument label = %#v", diagnostic.Secondary[0])
+	}
+}
+
+func TestExpectedReturnConflictLabelsAnnotationAndArgumentEvidence(t *testing.T) {
+	source := "fn identity(value: $T) $T { value }\nlet value: Str = identity(1)\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeTypeMismatch)
+	if diagnostic.Primary.Span.Location.Start.Row != 2 || diagnostic.Primary.Span.Location.Start.Col != 12 || !strings.Contains(diagnostic.Primary.Message, "annotation") {
+		t.Fatalf("primary = %#v, want rejected Str annotation", diagnostic.Primary)
+	}
+	if len(diagnostic.Secondary) < 2 || diagnostic.Secondary[0].Span.Location.Start.Col != 27 || !strings.Contains(diagnostic.Secondary[0].Message, "earlier argument") {
+		t.Fatalf("secondary = %#v, want establishing argument and call", diagnostic.Secondary)
+	}
+}
+
+func TestGenericConflictLabelsEstablishingArgument(t *testing.T) {
+	source := "fn same(first: $T, second: $T) {}\nsame(1, \"x\")\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeIncorrectArgumentType)
+	if len(diagnostic.Secondary) != 2 {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	origin := diagnostic.Secondary[0]
+	if origin.Span.Location.Start.Row != 2 || origin.Span.Location.Start.Col != 6 || !strings.Contains(origin.Message, "earlier argument") {
+		t.Fatalf("establishing argument label = %#v", origin)
+	}
+}
+
+func TestExplicitGenericConflictUsesMatchingGenericOrigin(t *testing.T) {
+	source := "fn pair(a: $A, b: $B) {}\npair<Str, Str>(\"ok\", 1)\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeIncorrectArgumentType)
+	if len(diagnostic.Secondary) != 2 {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	origin := diagnostic.Secondary[0]
+	if origin.Span.Location.Start.Row != 2 || origin.Span.Location.Start.Col != 11 || !strings.Contains(origin.Message, "$B") {
+		t.Fatalf("explicit type argument label = %#v, want second Str for $B", origin)
 	}
 }
 
@@ -1299,11 +1350,11 @@ func TestGenericArgumentMismatchRetainsParameterProvenance(t *testing.T) {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
 	}
 	diagnostic := c.Diagnostics()[0]
-	if diagnostic.Code != checker.DiagnosticCodeIncorrectArgumentType || len(diagnostic.Secondary) != 1 {
+	if diagnostic.Code != checker.DiagnosticCodeIncorrectArgumentType || len(diagnostic.Secondary) != 2 {
 		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
-	if diagnostic.Secondary[0].Span.Location != declaration.Parameters[1].GetLocation() {
-		t.Fatalf("secondary = %#v, want second parameter", diagnostic.Secondary[0])
+	if diagnostic.Secondary[1].Span.Location != declaration.Parameters[1].GetLocation() {
+		t.Fatalf("parameter secondary = %#v, want second parameter", diagnostic.Secondary[1])
 	}
 }
 

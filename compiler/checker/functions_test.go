@@ -61,6 +61,373 @@ func TestContextualReturnTypeInfersGenericCall(t *testing.T) {
 	}
 }
 
+func TestParameterContextInfersNestedGenericCall(t *testing.T) {
+	result := parse.Parse([]byte(`
+		struct Key<$T> { marker: Bool }
+		fn Key::new() Key<$T> { Key<$T>{marker: true} }
+		fn consume(key: Key<Str>) {}
+		fn main() {
+			consume(Key::new())
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+
+	var mainFn *checker.FunctionDef
+	for _, stmt := range c.Module().Program().Statements {
+		if fn, ok := stmt.Expr.(*checker.FunctionDef); ok && fn.Name == "main" {
+			mainFn = fn
+			break
+		}
+	}
+	if mainFn == nil {
+		t.Fatal("main function not found")
+	}
+	outer := mainFn.Body.Stmts[0].Expr.(*checker.FunctionCall)
+	inner := outer.Args[0].(*checker.FunctionCall)
+	if got := inner.Definition().GenericBindings["T"]; got == nil || got.String() != "Str" {
+		t.Fatalf("nested contextual binding T = %v, want Str", got)
+	}
+	if got := inner.Type().String(); got != "Key<Str>" {
+		t.Fatalf("nested call type = %s, want Key<Str>", got)
+	}
+}
+
+func TestContextualReturnFlowsThroughNestedGenericCalls(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn make() $T { panic("no value") }
+		fn pass(value: $U) $U { value }
+		fn main() {
+			let value: Str = pass(make())
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestUninferredNestedGenericCallIsRejectedByChecker(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn make() $T { panic("no value") }
+		fn pass(value: $U) $U { value }
+		fn main() {
+			let value = pass(make())
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected unresolved generic diagnostic")
+	}
+	if got := diagnosticsString(c.Diagnostics()); !strings.Contains(got, "Unresolved generic") {
+		t.Fatalf("diagnostics = %v, want unresolved generic", c.Diagnostics())
+	}
+}
+
+func TestUnspecializedGenericFunctionValueIsRejectedByChecker(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn identity(value: $T) $T { value }
+		fn main() {
+			let function = identity
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; expected unresolved generic function value diagnostic")
+	}
+	if got := diagnosticsString(c.Diagnostics()); !strings.Contains(got, "Unresolved generic") {
+		t.Fatalf("diagnostics = %v, want unresolved generic", c.Diagnostics())
+	}
+}
+
+func TestExpectedContextPreviewPreservesEarlierArgumentBindings(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn make_callback() fn($X) $Y { panic("no callback") }
+		fn apply(seed: $T, callback: fn($T) $U) $U { callback(seed) }
+		fn main() {
+			let result: Str = apply(1, make_callback())
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestForwardGenericCallRequiresCompleteInference(t *testing.T) {
+	result := parse.Parse([]byte(`
+		let value = make()
+		fn make() $T { panic("no value") }
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() || !strings.Contains(diagnosticsString(c.Diagnostics()), "Unresolved generic") {
+		t.Fatalf("diagnostics = %v, want unresolved generic", c.Diagnostics())
+	}
+}
+
+func TestForwardFunctionNamedAndThenDoesNotUseBuiltinFallback(t *testing.T) {
+	result := parse.Parse([]byte(`
+		let value = and_then()
+		fn and_then() $T { panic("no value") }
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() || !strings.Contains(diagnosticsString(c.Diagnostics()), "Unresolved generic") {
+		t.Fatalf("diagnostics = %v, want unresolved generic", c.Diagnostics())
+	}
+}
+
+func TestForwardGenericFunctionValueIsRejected(t *testing.T) {
+	result := parse.Parse([]byte(`
+		let function = identity
+		fn identity(value: $T) $T { value }
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() || !strings.Contains(diagnosticsString(c.Diagnostics()), "Unresolved generic") {
+		t.Fatalf("diagnostics = %v, want unresolved generic", c.Diagnostics())
+	}
+}
+
+func TestGenericMaybeCoercionBindsInnerTypeBeforeWrapping(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn take(value: $T?) $T? { value }
+		fn main() { let value = take(1) }
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestIncompleteBuiltinConstructorsAreRejected(t *testing.T) {
+	for _, source := range []string{
+		`let value = Maybe::new()`,
+		`let result = Result::ok(1)`,
+		`let result = Result::err("no")`,
+		`let channel = Chan::new()`,
+	} {
+		result := parse.Parse([]byte(source), "test.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors for %q: %v", source, result.Errors)
+		}
+		c := checker.New("test.ard", result.Program, nil)
+		c.Check()
+		if !c.HasErrors() || !strings.Contains(diagnosticsString(c.Diagnostics()), "Unresolved generic") {
+			t.Fatalf("diagnostics for %q = %v, want unresolved generic", source, c.Diagnostics())
+		}
+	}
+}
+
+func TestTrySuppliesFunctionErrorContextToResultConstructor(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn work() Int!Str {
+			let value = try Result::ok(1)
+			Result::ok(value)
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestFunctionReturnContextInfersGenericCall(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn make() $T { panic("no value") }
+		fn helper() Str { make() }
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestLaterArgumentDoesNotContextualizeEarlierGenericCall(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn make() $T { panic("no value") }
+		fn choose(first: $T, second: $T) $T { first }
+		fn main() { let value = choose(make(), 1) }
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() || !strings.Contains(diagnosticsString(c.Diagnostics()), "Unresolved generic") {
+		t.Fatalf("diagnostics = %v, want unresolved generic", c.Diagnostics())
+	}
+}
+
+func TestNestedCallUsesConcretePartsOfPartiallyGenericContext(t *testing.T) {
+	result := parse.Parse([]byte(`
+		struct Pair<$A, $B> { first: $A, second: $B }
+		fn make(second: $B) Pair<$A, $B> { panic("no pair") }
+		fn consume(pair: Pair<Int, $U>) {}
+		fn main() { consume(make("value")) }
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestGenericShapeInferenceAndCallbackMetadata(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		wantError bool
+	}{
+		{
+			name: "fixed array",
+			source: `fn accept(values: [$T; 2]) {}
+				fn main() { accept([1, 2]) }`,
+		},
+		{
+			name: "map",
+			source: `fn accept(values: [$K: $V]) {}
+				fn main() { accept(["one": 1]) }`,
+		},
+		{
+			name: "callback mutability mismatch",
+			source: `fn apply(callback: fn($T) Int) {}
+				fn main() {
+					let callback: fn(mut Int) Int = fn(value: mut Int) Int { value }
+					apply(callback)
+				}`,
+			wantError: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "test.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("test.ard", result.Program, nil)
+			c.Check()
+			if tt.wantError && !c.HasErrors() {
+				t.Fatal("checker succeeded; expected callback metadata mismatch")
+			}
+			if !tt.wantError && c.HasErrors() {
+				t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+			}
+		})
+	}
+}
+
+func TestMaybeNewContextualizesItsArgument(t *testing.T) {
+	for _, source := range []string{
+		`let first: [Str]? = Maybe::new([])`,
+		`let second = Maybe::new<[Str]>([])`,
+	} {
+		result := parse.Parse([]byte(source), "test.ard")
+		if len(result.Errors) > 0 {
+			t.Fatalf("parse errors for %q: %v", source, result.Errors)
+		}
+		c := checker.New("test.ard", result.Program, nil)
+		c.Check()
+		if c.HasErrors() {
+			t.Fatalf("checker diagnostics for %q: %v", source, c.Diagnostics())
+		}
+	}
+}
+
+func TestNamedArgumentsRefineGenericsInSourceOrder(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn apply(callback: fn($T) Int, value: $T) Int { callback(value) }
+		fn main() Int { apply(value: 1, callback: fn(x) { x + 1 }) }
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestNamedArgumentsDoNotUseLaterEvidence(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn apply(value: $T, callback: fn($T) Int) Int { callback(value) }
+		fn main() Int { apply(callback: fn(x) { x + 1 }, value: 1) }
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if !c.HasErrors() {
+		t.Fatal("checker succeeded; later named argument must not contextualize earlier callback")
+	}
+}
+
+func TestExplicitTypeArgumentsContextualizeEmptyCollections(t *testing.T) {
+	result := parse.Parse([]byte(`
+		fn collect(values: [$T]) [$T] { values }
+		fn main() {
+			let values = collect<Str>([])
+		}
+	`), "test.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("test.ard", result.Program, nil)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
+	}
+}
+
 func TestContextualReturnTypeDoesNotOverrideArgumentInference(t *testing.T) {
 	result := parse.Parse([]byte(`
 		fn identity(value: $T) $T { value }

@@ -1231,9 +1231,20 @@ const (
 )
 
 type FunctionDef struct {
-	Name                    string
-	Receiver                string
-	GenericParams           []string
+	Name          string
+	Receiver      string
+	GenericParams []string
+	// CallGenericParams are generics introduced by this source function and
+	// instantiated independently at each call. They exclude receiver and
+	// enclosing-declaration generics referenced by methods and closures.
+	CallGenericParams []string
+	// DefaultVoidGeneric identifies a builtin adapter output that is
+	// unobservable when every path returns none/error and may therefore resolve
+	// to Void. User functions never set this field.
+	DefaultVoidGeneric string
+	// DeferCallCompleteness lets constructor adapters collect context from an
+	// enclosing match, catch, or binding before the expression-boundary check.
+	DeferCallCompleteness   bool
 	Parameters              []Parameter
 	ReturnType              Type
 	ForeignResultShape      ForeignResultShape
