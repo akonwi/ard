@@ -92,9 +92,11 @@ func (pkg ResultPkg) Get(name string) Symbol {
 		return Symbol{
 			Name: name,
 			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "val", Type: valType}},
-				ReturnType: MakeResult(valType, errType),
+				Name:                  name,
+				GenericParams:         []string{"Val", "Err"},
+				DeferCallCompleteness: true,
+				Parameters:            []Parameter{{Name: "val", Type: valType}},
+				ReturnType:            MakeResult(valType, errType),
 			},
 		}
 	case "err":
@@ -105,9 +107,11 @@ func (pkg ResultPkg) Get(name string) Symbol {
 		return Symbol{
 			Name: name,
 			Type: &FunctionDef{
-				Name:       name,
-				Parameters: []Parameter{{Name: "err", Type: errType}},
-				ReturnType: MakeResult(valType, errType),
+				Name:                  name,
+				GenericParams:         []string{"Val", "Err"},
+				DeferCallCompleteness: true,
+				Parameters:            []Parameter{{Name: "err", Type: errType}},
+				ReturnType:            MakeResult(valType, errType),
 			},
 		}
 	default:

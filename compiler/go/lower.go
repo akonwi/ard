@@ -1649,12 +1649,26 @@ func (l *lowerer) packABICallResult(exprType, returnType air.TypeID, stmts []ast
 	}
 }
 
+func concreteCallParams(expr air.Expr, target air.Function) []air.Param {
+	params := target.Signature.Params
+	if len(expr.TypeArgs) == 0 {
+		return params
+	}
+	params = append([]air.Param(nil), params...)
+	for i := range params {
+		if i < len(expr.Args) && expr.Args[i].Type != air.NoType {
+			params[i].Type = expr.Args[i].Type
+		}
+	}
+	return params
+}
+
 func (l *lowerer) lowerRawCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Kind != air.ExprCall || !validFunctionID(l.program, expr.Function) {
 		return loweredExpr{}, fmt.Errorf("not a valid call")
 	}
 	target := l.program.Functions[expr.Function]
-	args, stmts, writeback, err := l.lowerCallArgs(fn, expr.Args, target.Signature.Params)
+	args, stmts, writeback, err := l.lowerCallArgs(fn, expr.Args, concreteCallParams(expr, target))
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -2800,7 +2814,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, fmt.Errorf("invalid function id %d", expr.Function)
 		}
 		target := l.program.Functions[expr.Function]
-		args, stmts, writeback, err := l.lowerCallArgs(fn, expr.Args, target.Signature.Params)
+		args, stmts, writeback, err := l.lowerCallArgs(fn, expr.Args, concreteCallParams(expr, target))
 		if err != nil {
 			return loweredExpr{}, err
 		}

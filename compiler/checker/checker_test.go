@@ -31,6 +31,7 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(checker.InstanceMethod{}, "ReceiverKind", "StructType", "EnumType", "TraitType"),
 	cmpopts.IgnoreFields(checker.ModuleStructInstance{}, "StructType"),
 	cmpopts.IgnoreFields(checker.FunctionCall{}, "ReturnType"),
+	cmpopts.IgnoreFields(checker.FunctionDef{}, "CallGenericParams", "DefaultVoidGeneric", "DeferCallCompleteness"),
 	cmpopts.IgnoreFields(checker.FunctionCall{}, "TypeArgs"),
 	cmpopts.IgnoreFields(checker.MaybeMethod{}, "ReturnType"),
 	cmpopts.IgnoreFields(checker.ResultMethod{}, "ReturnType"),

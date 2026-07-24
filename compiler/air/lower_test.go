@@ -926,6 +926,18 @@ func TestLowerContextualReturnOnlyGenericStaticCall(t *testing.T) {
 	findFunction(t, program, "main")
 }
 
+func TestLowerNestedContextPreviewPreservesEarlierBindings(t *testing.T) {
+	program := lowerSource(t, `
+		fn make_callback() fn($X) $Y { panic("no callback") }
+		fn apply(seed: $T, callback: fn($T) $U) $U { callback(seed) }
+		fn main() {
+			let result: Str = apply(1, make_callback())
+		}
+	`)
+
+	findFunction(t, program, "main")
+}
+
 func TestLowerImportedGenericModuleFunctionSpecialization(t *testing.T) {
 	program := lowerSource(t, `
 		use ard/list

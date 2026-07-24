@@ -2,6 +2,20 @@ package checker
 
 import "testing"
 
+func TestGenericBindingRejectsStructuralOccursCycle(t *testing.T) {
+	root := makeScope(nil)
+	scope := root.createGenericScope([]string{"T"})
+	typeVar := (*scope.genericContext)["T"]
+
+	err := scope.bindGeneric("T", MakeList(typeVar))
+	if _, ok := err.(*genericOccursCheckError); !ok {
+		t.Fatalf("bind error = %T %v, want genericOccursCheckError", err, err)
+	}
+	if typeVar.bound || typeVar.actual != nil {
+		t.Fatalf("cyclic binding mutated type variable: %+v", typeVar)
+	}
+}
+
 func TestTraitEqualityIncludesModulePath(t *testing.T) {
 	left := &Trait{Name: "Drawable", ModulePath: "ui/drawable.ard"}
 	right := &Trait{Name: "Drawable", ModulePath: "svg/drawable.ard"}

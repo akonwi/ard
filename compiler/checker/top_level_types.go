@@ -97,6 +97,10 @@ func (c *Checker) hoistTopLevelFunctionSignatures() {
 			Private:       def.Private,
 			IsTest:        def.IsTest,
 		}
+		// Source functions introduce every generic visible in their signature.
+		// Recording ownership here lets calls distinguish those variables from
+		// generics merely captured by nested closures or receiver methods.
+		fn.CallGenericParams = append([]string{}, genericParamsForFunction(fn)...)
 		c.hoistedTopLevelFunctions[def] = fn
 		c.scope.add(def.Name, fn, false)
 	}

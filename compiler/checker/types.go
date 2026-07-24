@@ -981,9 +981,10 @@ func (m *Maybe) get(name string) Type {
 			ReturnType: Void,
 		}
 	case "map":
-		mapped := &TypeVar{name: "Mapped"}
+		mapped := &TypeVar{name: "__ard_maybe_mapped"}
 		return &FunctionDef{
-			Name: name,
+			Name:              name,
+			CallGenericParams: []string{"__ard_maybe_mapped"},
 			Parameters: []Parameter{{
 				Name: "with",
 				Type: &FunctionDef{
@@ -995,9 +996,11 @@ func (m *Maybe) get(name string) Type {
 			ReturnType: MakeMaybe(mapped),
 		}
 	case "and_then":
-		mapped := &TypeVar{name: "Mapped"}
+		mapped := &TypeVar{name: "__ard_maybe_mapped"}
 		return &FunctionDef{
-			Name: name,
+			Name:               name,
+			CallGenericParams:  []string{"__ard_maybe_mapped"},
+			DefaultVoidGeneric: "__ard_maybe_mapped",
 			Parameters: []Parameter{{
 				Name: "with",
 				Type: &FunctionDef{
@@ -1027,6 +1030,11 @@ type TypeVar struct {
 	name   string
 	actual Type
 	bound  bool
+	// owner is non-zero for a fresh call-local inference variable. Declaration
+	// generics remain owner zero and may legitimately flow through generic
+	// function and method bodies without being solved locally.
+	owner       uint64
+	provisional bool
 }
 
 func (a TypeVar) String() string {
@@ -1101,9 +1109,10 @@ func (r Result) get(name string) Type {
 			ReturnType: Bool,
 		}
 	case "map":
-		mappedVal := &TypeVar{name: "MappedVal"}
+		mappedVal := &TypeVar{name: "__ard_result_mapped_val"}
 		return &FunctionDef{
-			Name: name,
+			Name:              name,
+			CallGenericParams: []string{"__ard_result_mapped_val"},
 			Parameters: []Parameter{{
 				Name: "with",
 				Type: &FunctionDef{
@@ -1115,9 +1124,10 @@ func (r Result) get(name string) Type {
 			ReturnType: MakeResult(mappedVal, r.err),
 		}
 	case "map_err":
-		mappedErr := &TypeVar{name: "MappedErr"}
+		mappedErr := &TypeVar{name: "__ard_result_mapped_err"}
 		return &FunctionDef{
-			Name: name,
+			Name:              name,
+			CallGenericParams: []string{"__ard_result_mapped_err"},
 			Parameters: []Parameter{{
 				Name: "with",
 				Type: &FunctionDef{
@@ -1129,9 +1139,11 @@ func (r Result) get(name string) Type {
 			ReturnType: MakeResult(r.val, mappedErr),
 		}
 	case "and_then":
-		mappedVal := &TypeVar{name: "MappedVal"}
+		mappedVal := &TypeVar{name: "__ard_result_mapped_val"}
 		return &FunctionDef{
-			Name: name,
+			Name:               name,
+			CallGenericParams:  []string{"__ard_result_mapped_val"},
+			DefaultVoidGeneric: "__ard_result_mapped_val",
 			Parameters: []Parameter{{
 				Name: "with",
 				Type: &FunctionDef{

@@ -31,11 +31,21 @@ type SymbolTable struct {
 
 	// Generic context for this scope
 	genericContext *GenericContext
+	// genericOrigins records the earliest source that established a call-local
+	// binding so conflicts can label both constraints.
+	genericOrigins       map[string]genericBindingOrigin
+	genericPendingOrigin *genericBindingOrigin
+	genericOwner         uint64
 }
 
 // GenericContext maps generic parameter names to their TypeVar instances
 // The TypeVar instances are mutable - binding happens by setting TypeVar.actual and TypeVar.bound
 type GenericContext = map[string]*TypeVar
+
+type genericBindingOrigin struct {
+	Span SourceSpan
+	Kind string
+}
 
 type Symbol struct {
 	Name       string
@@ -181,6 +191,7 @@ func (st *SymbolTable) createGenericScope(genericParams []string) *SymbolTable {
 		symbols:        make(map[string]*Symbol),
 		isolated:       false,
 		genericContext: &gc,
+		genericOrigins: make(map[string]genericBindingOrigin),
 	}
 }
 
@@ -191,6 +202,15 @@ type genericBindingConflictError struct {
 
 func (e *genericBindingConflictError) Error() string {
 	return fmt.Sprintf("generic %s already bound to %s, cannot bind to %s", e.Name, e.Existing, e.Incoming)
+}
+
+type genericOccursCheckError struct {
+	Name     string
+	Incoming Type
+}
+
+func (e *genericOccursCheckError) Error() string {
+	return fmt.Sprintf("generic %s cannot contain itself in %s", e.Name, e.Incoming)
 }
 
 func (st *SymbolTable) bindGeneric(genericName string, concreteType Type) error {
@@ -216,10 +236,16 @@ func (st *SymbolTable) bindGeneric(genericName string, concreteType Type) error 
 		return nil
 	}
 
-	// Avoid self-referential binding (TypeVar bound to itself)
 	resolved := deref(concreteType)
 	if resolved == typeVar {
 		return nil
+	}
+	if typeContainsTypeVar(resolved, typeVar) {
+		return &genericOccursCheckError{Name: genericName, Incoming: resolved}
+	}
+
+	if _, exists := st.genericOrigins[genericName]; !exists && st.genericPendingOrigin != nil {
+		st.genericOrigins[genericName] = *st.genericPendingOrigin
 	}
 
 	// Bind it now - mutate the TypeVar in-place
@@ -309,6 +335,14 @@ func hasGenericsInTypeSeen(t Type, seen map[Type]struct{}) bool {
 		return true
 	case *List:
 		return hasGenericsInTypeSeen(t.of, seen)
+	case *FixedArray:
+		return hasGenericsInTypeSeen(t.of, seen)
+	case *Chan:
+		return hasGenericsInTypeSeen(t.of, seen)
+	case *Receiver:
+		return hasGenericsInTypeSeen(t.of, seen)
+	case *Sender:
+		return hasGenericsInTypeSeen(t.of, seen)
 	case *Map:
 		return hasGenericsInTypeSeen(t.key, seen) || hasGenericsInTypeSeen(t.value, seen)
 	case *Maybe:
@@ -348,6 +382,359 @@ func hasGenericsInTypeSeen(t Type, seen map[Type]struct{}) bool {
 	default:
 		return false
 	}
+}
+
+// hasUnresolvedGenericsFrom reports whether t contains an unresolved type
+// variable owned by the provided call-local generic context. Generic variables
+// from an enclosing declaration are valid contextual evidence and do not make
+// the current call's parameter context unsafe to pass into a nested call.
+func hasUnresolvedGenericsFrom(t Type, context *GenericContext) bool {
+	if context == nil {
+		return false
+	}
+	owned := make(map[*TypeVar]bool, len(*context))
+	for _, typeVar := range *context {
+		owned[typeVar] = true
+	}
+	var visit func(Type, map[Type]bool) bool
+	visit = func(current Type, seen map[Type]bool) bool {
+		if current == nil || seen[current] {
+			return false
+		}
+		seen[current] = true
+		switch current := current.(type) {
+		case *TypeVar:
+			if current.bound && current.actual != nil {
+				return visit(current.actual, seen)
+			}
+			return owned[current]
+		case *List:
+			return visit(current.of, seen)
+		case *FixedArray:
+			return visit(current.of, seen)
+		case *Map:
+			return visit(current.key, seen) || visit(current.value, seen)
+		case *Maybe:
+			return visit(current.of, seen)
+		case *Result:
+			return visit(current.val, seen) || visit(current.err, seen)
+		case *MutableRef:
+			return visit(current.of, seen)
+		case *Chan:
+			return visit(current.of, seen)
+		case *Receiver:
+			return visit(current.of, seen)
+		case *Sender:
+			return visit(current.of, seen)
+		case *Union:
+			for _, member := range current.Types {
+				if visit(member, seen) {
+					return true
+				}
+			}
+		case *ForeignType:
+			for _, typeArg := range current.TypeArgs {
+				if visit(typeArg, seen) {
+					return true
+				}
+			}
+		case *StructDef:
+			for _, typeArg := range current.TypeArgs {
+				if visit(typeArg, seen) {
+					return true
+				}
+			}
+		case *FunctionDef:
+			for _, param := range current.Parameters {
+				if visit(param.Type, seen) {
+					return true
+				}
+			}
+			return visit(current.ReturnType, seen)
+		}
+		return false
+	}
+	return visit(t, map[Type]bool{})
+}
+
+// maskUnresolvedGenericsFrom preserves concrete portions of a parent
+// parameter while replacing its unresolved call-owned variables with
+// provisional placeholders. A child may use the concrete portions, but a
+// placeholder that remains in its result fails recursive completeness.
+func maskUnresolvedGenericsFrom(t Type, context *GenericContext) Type {
+	if context == nil {
+		return t
+	}
+	owned := make(map[*TypeVar]bool, len(*context))
+	for _, typeVar := range *context {
+		owned[typeVar] = true
+	}
+	var visit func(Type, map[Type]Type) Type
+	visit = func(current Type, seen map[Type]Type) Type {
+		if current == nil {
+			return nil
+		}
+		if replacement, ok := seen[current]; ok {
+			return replacement
+		}
+		switch current := current.(type) {
+		case *TypeVar:
+			if current.bound && current.actual != nil {
+				return visit(current.actual, seen)
+			}
+			if owned[current] {
+				masked := &TypeVar{name: current.name, provisional: true}
+				seen[current] = masked
+				return masked
+			}
+			return current
+		case *List:
+			return MakeList(visit(current.of, seen))
+		case *FixedArray:
+			return MakeFixedArray(visit(current.of, seen), current.length)
+		case *Map:
+			return MakeMap(visit(current.key, seen), visit(current.value, seen))
+		case *Maybe:
+			return MakeMaybe(visit(current.of, seen))
+		case *Result:
+			return MakeResult(visit(current.val, seen), visit(current.err, seen))
+		case *MutableRef:
+			return MakeMutableRef(visit(current.of, seen))
+		case *Chan:
+			return &Chan{of: visit(current.of, seen)}
+		case *Receiver:
+			return &Receiver{of: visit(current.of, seen)}
+		case *Sender:
+			return &Sender{of: visit(current.of, seen)}
+		case *Union:
+			members := make([]Type, len(current.Types))
+			masked := &Union{Name: current.Name, ModulePath: current.ModulePath, Types: members, Private: current.Private}
+			seen[current] = masked
+			for i, member := range current.Types {
+				members[i] = visit(member, seen)
+			}
+			return masked
+		case *ForeignType:
+			args := make([]Type, len(current.TypeArgs))
+			for i, arg := range current.TypeArgs {
+				args[i] = visit(arg, seen)
+			}
+			return foreignTypeWithArgs(current, args)
+		case *StructDef:
+			masked := *current
+			seen[current] = &masked
+			masked.TypeArgs = make([]Type, len(current.TypeArgs))
+			for i, arg := range current.TypeArgs {
+				masked.TypeArgs[i] = visit(arg, seen)
+			}
+			return &masked
+		case *FunctionDef:
+			masked := *current
+			seen[current] = &masked
+			masked.Parameters = append([]Parameter(nil), current.Parameters...)
+			for i := range masked.Parameters {
+				masked.Parameters[i].Type = visit(current.Parameters[i].Type, seen)
+			}
+			masked.ReturnType = visit(current.ReturnType, seen)
+			return &masked
+		default:
+			return current
+		}
+	}
+	return visit(t, map[Type]Type{})
+}
+
+// firstUnresolvedCallTypeVar finds an unresolved variable owned by any call.
+// Declaration-owned variables (owner zero) are allowed to remain abstract
+// inside generic declarations; call-owned variables must never reach AIR.
+func typeContainsTypeVar(t Type, target *TypeVar) bool {
+	var visit func(Type, map[Type]bool) bool
+	visit = func(current Type, seen map[Type]bool) bool {
+		if current == nil || seen[current] {
+			return false
+		}
+		if current == target {
+			return true
+		}
+		seen[current] = true
+		switch current := current.(type) {
+		case *TypeVar:
+			return current.bound && current.actual != nil && visit(current.actual, seen)
+		case *List:
+			return visit(current.of, seen)
+		case *FixedArray:
+			return visit(current.of, seen)
+		case *Map:
+			return visit(current.key, seen) || visit(current.value, seen)
+		case *Maybe:
+			return visit(current.of, seen)
+		case *Result:
+			return visit(current.val, seen) || visit(current.err, seen)
+		case *MutableRef:
+			return visit(current.of, seen)
+		case *Chan:
+			return visit(current.of, seen)
+		case *Receiver:
+			return visit(current.of, seen)
+		case *Sender:
+			return visit(current.of, seen)
+		case *Union:
+			for _, member := range current.Types {
+				if visit(member, seen) {
+					return true
+				}
+			}
+		case *ForeignType:
+			for _, typeArg := range current.TypeArgs {
+				if visit(typeArg, seen) {
+					return true
+				}
+			}
+		case *StructDef:
+			for _, typeArg := range current.TypeArgs {
+				if visit(typeArg, seen) {
+					return true
+				}
+			}
+		case *FunctionDef:
+			for _, param := range current.Parameters {
+				if visit(param.Type, seen) {
+					return true
+				}
+			}
+			return visit(current.ReturnType, seen)
+		}
+		return false
+	}
+	return visit(t, map[Type]bool{})
+}
+
+func bindUnresolvedCallTypeVars(t Type, fallback Type) {
+	seen := map[Type]bool{}
+	var visit func(Type)
+	visit = func(current Type) {
+		if current == nil || seen[current] {
+			return
+		}
+		seen[current] = true
+		switch current := current.(type) {
+		case *TypeVar:
+			if current.bound && current.actual != nil {
+				visit(current.actual)
+			} else if current.owner != 0 || current.provisional {
+				current.actual = fallback
+				current.bound = true
+			}
+		case *List:
+			visit(current.of)
+		case *FixedArray:
+			visit(current.of)
+		case *Map:
+			visit(current.key)
+			visit(current.value)
+		case *Maybe:
+			visit(current.of)
+		case *Result:
+			visit(current.val)
+			visit(current.err)
+		case *MutableRef:
+			visit(current.of)
+		case *Chan:
+			visit(current.of)
+		case *Receiver:
+			visit(current.of)
+		case *Sender:
+			visit(current.of)
+		case *Union:
+			for _, member := range current.Types {
+				visit(member)
+			}
+		case *ForeignType:
+			for _, typeArg := range current.TypeArgs {
+				visit(typeArg)
+			}
+		case *StructDef:
+			for _, typeArg := range current.TypeArgs {
+				visit(typeArg)
+			}
+		case *FunctionDef:
+			for _, param := range current.Parameters {
+				visit(param.Type)
+			}
+			visit(current.ReturnType)
+		}
+	}
+	visit(t)
+}
+
+func firstUnresolvedCallTypeVar(t Type) *TypeVar {
+	var visit func(Type, map[Type]bool) *TypeVar
+	visit = func(current Type, seen map[Type]bool) *TypeVar {
+		if current == nil || seen[current] {
+			return nil
+		}
+		seen[current] = true
+		switch current := current.(type) {
+		case *TypeVar:
+			if current.bound && current.actual != nil {
+				return visit(current.actual, seen)
+			}
+			if current.owner != 0 || current.provisional {
+				return current
+			}
+		case *List:
+			return visit(current.of, seen)
+		case *FixedArray:
+			return visit(current.of, seen)
+		case *Map:
+			if found := visit(current.key, seen); found != nil {
+				return found
+			}
+			return visit(current.value, seen)
+		case *Maybe:
+			return visit(current.of, seen)
+		case *Result:
+			if found := visit(current.val, seen); found != nil {
+				return found
+			}
+			return visit(current.err, seen)
+		case *MutableRef:
+			return visit(current.of, seen)
+		case *Chan:
+			return visit(current.of, seen)
+		case *Receiver:
+			return visit(current.of, seen)
+		case *Sender:
+			return visit(current.of, seen)
+		case *Union:
+			for _, member := range current.Types {
+				if found := visit(member, seen); found != nil {
+					return found
+				}
+			}
+		case *ForeignType:
+			for _, typeArg := range current.TypeArgs {
+				if found := visit(typeArg, seen); found != nil {
+					return found
+				}
+			}
+		case *StructDef:
+			for _, typeArg := range current.TypeArgs {
+				if found := visit(typeArg, seen); found != nil {
+					return found
+				}
+			}
+		case *FunctionDef:
+			for _, param := range current.Parameters {
+				if found := visit(param.Type, seen); found != nil {
+					return found
+				}
+			}
+			return visit(current.ReturnType, seen)
+		}
+		return nil
+	}
+	return visit(t, map[Type]bool{})
 }
 
 // Type replacement functions
@@ -426,6 +813,9 @@ func replaceGeneric(t Type, genericName string, concreteType Type) Type {
 		return &FunctionDef{
 			Name:                    t.Name,
 			GenericParams:           append([]string(nil), t.GenericParams...),
+			CallGenericParams:       append([]string(nil), t.CallGenericParams...),
+			DefaultVoidGeneric:      t.DefaultVoidGeneric,
+			DeferCallCompleteness:   t.DeferCallCompleteness,
 			Parameters:              newParams,
 			ReturnType:              newReturnType,
 			ForeignResultShape:      t.ForeignResultShape,
@@ -735,6 +1125,9 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 	copy := &FunctionDef{
 		Name:                    fnDef.Name,
 		GenericParams:           append([]string(nil), fnDef.GenericParams...),
+		CallGenericParams:       append([]string(nil), fnDef.CallGenericParams...),
+		DefaultVoidGeneric:      fnDef.DefaultVoidGeneric,
+		DeferCallCompleteness:   fnDef.DeferCallCompleteness,
 		Parameters:              newParams,
 		ReturnType:              copyTypeWithTypeVarMap(fnDef.ReturnType, typeVarMap),
 		ForeignResultShape:      fnDef.ForeignResultShape,
@@ -828,6 +1221,14 @@ func collectUnboundGenericsFromType(t Type, params *[]string, seenGenerics map[s
 		}
 	case *List:
 		collectUnboundGenericsFromType(typ.of, params, seenGenerics, seenTypes)
+	case *FixedArray:
+		collectUnboundGenericsFromType(typ.of, params, seenGenerics, seenTypes)
+	case *Chan:
+		collectUnboundGenericsFromType(typ.of, params, seenGenerics, seenTypes)
+	case *Receiver:
+		collectUnboundGenericsFromType(typ.of, params, seenGenerics, seenTypes)
+	case *Sender:
+		collectUnboundGenericsFromType(typ.of, params, seenGenerics, seenTypes)
 	case *Map:
 		collectUnboundGenericsFromType(typ.key, params, seenGenerics, seenTypes)
 		collectUnboundGenericsFromType(typ.value, params, seenGenerics, seenTypes)
@@ -875,6 +1276,14 @@ func copyTypeWithTypeVarMapSeen(t Type, typeVarMap map[string]*TypeVar, seenStru
 		return typ // Keep as-is if not a generic parameter
 	case *List:
 		return &List{of: copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs)}
+	case *FixedArray:
+		return MakeFixedArray(copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs), typ.length)
+	case *Chan:
+		return &Chan{of: copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs)}
+	case *Receiver:
+		return &Receiver{of: copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs)}
+	case *Sender:
+		return &Sender{of: copyTypeWithTypeVarMapSeen(typ.of, typeVarMap, seenStructs)}
 	case *Map:
 		return &Map{
 			key:   copyTypeWithTypeVarMapSeen(typ.key, typeVarMap, seenStructs),
