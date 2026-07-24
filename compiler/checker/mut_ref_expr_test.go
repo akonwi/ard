@@ -120,11 +120,10 @@ r = mut other`,
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "References cannot be rebound; assign the value directly"}},
 		},
 		{
-			name: "whole-value writes through a descriptor reference are rejected",
+			name: "whole-list writes through a mutable reference are allowed",
 			input: `mut items = [1, 2]
 let r = mut items
 r = [9, 9]`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot assign a new value through 'r': element writes share storage, but the referent binding is not reachable. Assign to the original binding instead"}},
 		},
 		{
 			name: "immutable place diagnostic stays readable for complex subjects",

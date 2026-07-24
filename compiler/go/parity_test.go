@@ -2199,7 +2199,7 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 		}
 	})
 
-	t.Run("list descriptor header rebinding is local", func(t *testing.T) {
+	t.Run("native mutable list parameter preserves growth", func(t *testing.T) {
 		program := lowerParitySource(t, `
 			fn append_one(values: mut [Int]) {
 				values.push(1)
@@ -2211,8 +2211,61 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 				values.size()
 			}
 		`)
-		if got := runGoTargetParityJSON(t, program); got != "0" {
-			t.Fatalf("got %s, want 0", got)
+		if got := runGoTargetParityJSON(t, program); got != "1" {
+			t.Fatalf("got %s, want 1", got)
+		}
+	})
+
+	t.Run("native mutable list references preserve descriptor writes", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			type Grow = fn(mut [Int])
+
+			fn push_one(values: mut [Int]) {
+				values.push(1)
+			}
+
+			fn prepend_two(values: mut [Int]) {
+				values.prepend(2)
+			}
+
+			fn forward(values: mut [Int]) {
+				push_one(values)
+			}
+
+			fn push_generic(values: mut [$T], value: $T) {
+				values.push(value)
+			}
+
+			fn replace(values: mut [Int]) {
+				values = [9, 8]
+			}
+
+			fn later(values: mut [Int]) fn() {
+				fn() {
+					values.push(7)
+					()
+				}
+			}
+
+			fn main() Int {
+				mut values = [0]
+				push_one(values)
+				prepend_two(values)
+				forward(values)
+				push_generic(values, 3)
+				let alias = mut values
+				alias.push(4)
+				let grow: Grow = push_one
+				grow(values)
+				let grow_later = later(values)
+				grow_later()
+				let before_replace = values.size()
+				replace(values)
+				before_replace * 100 + values.at(0).expect("first") * 10 + values.size()
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "892" {
+			t.Fatalf("got %s, want 892", got)
 		}
 	})
 

@@ -239,6 +239,7 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			Parameters:              newParams,
 			ReturnType:              derefReturnType,
 			ForeignResultShape:      typ.ForeignResultShape,
+			ForeignABI:              typ.ForeignABI,
 			InferReturnTypeFromBody: typ.InferReturnTypeFromBody,
 			Body:                    typ.Body,
 			Mutates:                 typ.Mutates,
@@ -391,6 +392,7 @@ type Checker struct {
 	spans                             *SpanIndex
 	nextCallInferenceID               uint64
 	expectedCallExpectation           *typeExpectation
+	foreignABIFunctions               map[*parse.FunctionDeclaration]bool
 	moduleFiles                       map[string]string
 }
 
@@ -415,8 +417,9 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 			StructMethods:         map[MethodOwner]map[string]*FunctionDef{},
 			ForeignInterfaceImpls: map[MethodOwner][]*ForeignType{},
 		},
-		scope:          &rootScope,
-		goTypesContext: gotypes.NewContext(),
+		scope:               &rootScope,
+		goTypesContext:      gotypes.NewContext(),
+		foreignABIFunctions: map[*parse.FunctionDeclaration]bool{},
 	}
 	if checkOptions.RecordSpans {
 		c.spans = &SpanIndex{}
@@ -1997,7 +2000,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 				c.addTypeMismatch(expectedType, paramType, param.GetLocation())
 				valid = false
 			}
-			if paramMutable && mutableParamNeedsGoPointer(paramType) {
+			if paramMutable && mutableForeignParamChangesGoABI(paramType) {
 				legacy := fmt.Sprintf("Go interface method '%s' parameter '%s' cannot be mutable because it would change the Go ABI", method.Name, param.Name)
 				c.addDiagnostic(implementationParameterMutabilityDiagnostic{
 					Method: method.Name, Parameter: param.Name, ExpectedMutable: false, Span: c.sourceSpan(param.GetLocation()), LegacyMessage: legacy,
@@ -2031,6 +2034,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 			continue
 		}
 		c.pushMethodGenericAllowlist(receiverGenerics)
+		c.foreignABIFunctions[&method] = true
 		fnDef := c.checkFunction(&method, func() {
 			c.scope.add(s.Receiver.Name, targetType, method.Mutates)
 		}, receiverGenerics...)
@@ -2048,6 +2052,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 		}
 		fnDef.Receiver = s.Receiver.Name
 		fnDef.Mutates = method.Mutates
+		fnDef.ForeignABI = true
 		fnDef.Name = goMethodNameToArdName(interfaceMethodName)
 		if _, exists := c.structMethod(targetType, fnDef.Name); exists {
 			validImpl = false
@@ -2102,12 +2107,22 @@ func (c *Checker) structImplementsForeignInterface(def *StructDef, iface *Foreig
 // callee mutating the temporary is sound. Idiomatic Go passes container
 // literals to such parameters directly.
 func freshContainerSatisfiesMutable(paramType Type, arg Expression) bool {
-	if mutableParamNeedsGoPointer(paramType) {
-		return false
-	}
+	base, _ := mutableRefBase(paramType)
 	switch arg.(type) {
-	case *ListLiteral, *MapLiteral:
-		return true
+	case *ListLiteral:
+		_, ok := base.(*List)
+		if ok {
+			return true
+		}
+		foreign, ok := base.(*ForeignType)
+		return ok && foreign.Elem != nil
+	case *MapLiteral:
+		_, ok := base.(*Map)
+		if ok {
+			return true
+		}
+		foreign, ok := base.(*ForeignType)
+		return ok && foreign.MapKey != nil && foreign.MapValue != nil
 	}
 	return false
 }
@@ -2115,7 +2130,7 @@ func freshContainerSatisfiesMutable(paramType Type, arg Expression) bool {
 func mutableParamNeedsGoPointer(t Type) bool {
 	base, _ := mutableRefBase(t)
 	switch typ := base.(type) {
-	case *List, *Map, *Chan, *Receiver, *Sender:
+	case *Map, *Chan, *Receiver, *Sender:
 		return false
 	case *ForeignType:
 		// Named Go map and slice types are descriptors like their unnamed
@@ -2130,6 +2145,35 @@ func mutableParamNeedsGoPointer(t Type) bool {
 	default:
 		return true
 	}
+}
+
+func expressionUsesForeignDescriptor(expr Expression) bool {
+	switch value := expr.(type) {
+	case Variable:
+		return value.sym.foreignDescriptor
+	case *Variable:
+		return value.sym.foreignDescriptor
+	case *MutableRefExpr:
+		return expressionUsesForeignDescriptor(value.Operand)
+	default:
+		return false
+	}
+}
+
+func isDescriptorBackedMutableType(t Type) bool {
+	base, _ := mutableRefBase(t)
+	switch typ := base.(type) {
+	case *List, *Map, *Chan, *Receiver, *Sender:
+		return true
+	case *ForeignType:
+		return typ.Pointer || typ.Interface || typ.MapKey != nil || typ.Elem != nil
+	default:
+		return false
+	}
+}
+
+func mutableForeignParamChangesGoABI(t Type) bool {
+	return !isDescriptorBackedMutableType(t)
 }
 
 func (c *Checker) foreignInterfaceArgUpcast(expected Type, actual Expression) (Expression, bool) {
@@ -2768,6 +2812,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				__type:  __type,
 			}
 			bound := c.scope.add(v.Name, v.__type, v.Mutable)
+			_, bindingIsReference := mutableRefBase(v.__type)
+			bound.foreignDescriptor = bindingIsReference && expressionUsesForeignDescriptor(val)
 			c.recordBindingWithSpan(s.NameLocation, s.GetLocation(), bound)
 			if c.spans != nil && c.scope.parent == nil {
 				// Module-level values are importable; give them a canonical
@@ -2791,6 +2837,15 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 				if !ok {
 					c.addUnresolvedReference(undefinedAssignmentTarget, id.Name, s.Target.GetLocation())
+					return nil
+				}
+
+				if target.foreignDescriptor {
+					c.addDiagnostic(unreachableReferentAssignmentDiagnostic{
+						Name:            target.Name,
+						Span:            c.sourceSpan(s.Target.GetLocation()),
+						DeclarationSpan: sourceSpanIfPresent(target.declaredAt),
+					}.build())
 					return nil
 				}
 
@@ -5437,10 +5492,10 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 
 	// Check for collection types
 	if _, isList := subject.Type().(*List); isList {
-		return c.createListMethod(subject, methodName, args, fnDef)
+		return c.createListMethod(subject, methodName, args, fnDef, loc)
 	}
 	if _, isFixedArray := subject.Type().(*FixedArray); isFixedArray {
-		return c.createListMethod(subject, methodName, args, fnDef)
+		return c.createListMethod(subject, methodName, args, fnDef, loc)
 	}
 	if _, isMap := subject.Type().(*Map); isMap {
 		return c.createMapMethod(subject, methodName, args, fnDef)
@@ -5449,11 +5504,11 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 		return c.createMapMethod(subject, methodName, args, fnDef)
 	}
 	if foreign, isForeign := subject.Type().(*ForeignType); isForeign && foreign.Elem != nil {
-		return c.createListMethod(subject, methodName, args, fnDef)
+		return c.createListMethod(subject, methodName, args, fnDef, loc)
 	}
 	if foreign, isForeign := subject.Type().(*ForeignType); isForeign {
 		if _, ok := foreign.Underlying.(*FixedArray); ok {
-			return c.createListMethod(subject, methodName, args, fnDef)
+			return c.createListMethod(subject, methodName, args, fnDef, loc)
 		}
 	}
 	if _, isMaybe := subject.Type().(*Maybe); isMaybe {
@@ -5724,7 +5779,7 @@ func (c *Checker) createBoolMethod(subject Expression, methodName string) Expres
 	}
 }
 
-func (c *Checker) createListMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
+func (c *Checker) createListMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, loc parse.Location) Expression {
 	var elemType Type
 	if listType, ok := subject.Type().(*List); ok {
 		elemType = listType.of
@@ -5759,6 +5814,23 @@ func (c *Checker) createListMethod(subject Expression, methodName string, args [
 		kind = ListSwap
 	default:
 		panic(fmt.Sprintf("Unknown List method: %s", methodName))
+	}
+	if kind == ListPush || kind == ListPrepend {
+		var sym Symbol
+		switch variable := subject.(type) {
+		case Variable:
+			sym = variable.sym
+		case *Variable:
+			sym = variable.sym
+		}
+		if sym.foreignDescriptor {
+			c.addDiagnostic(foreignDescriptorRebindingDiagnostic{
+				Name:            sym.Name,
+				Operation:       methodName,
+				Span:            c.sourceSpan(loc),
+				DeclarationSpan: sourceSpanIfPresent(sym.declaredAt),
+			}.build())
+		}
 	}
 	return &ListMethod{
 		Subject:     subject,
@@ -9907,6 +9979,8 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 		}
 	}
 
+	fn.ForeignABI = c.foreignABIFunctions[def]
+
 	if def.IsTest {
 		if init != nil {
 			c.addDiagnostic(invalidTestFunctionDiagnostic{
@@ -9956,7 +10030,9 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 	body := c.checkBlockWithExpected(def.Body, func() {
 		c.scope.expectReturn(returnType)
 		for _, param := range params {
-			c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
+			sym := c.scope.add(param.Name, param.Type, param.Mutable)
+			sym.foreignDescriptor = fn.ForeignABI && param.Mutable && isDescriptorBackedMutableType(param.Type)
+			c.recordBinding(param.Loc, sym)
 		}
 	}, returnType, true)
 	c.popFunctionGenericContext()
@@ -10030,6 +10106,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			Parameters:              substitutedParams,
 			ReturnType:              substituteType(typ.ReturnType, typeMap),
 			ForeignResultShape:      typ.ForeignResultShape,
+			ForeignABI:              typ.ForeignABI,
 			InferReturnTypeFromBody: typ.InferReturnTypeFromBody,
 			Body:                    typ.Body,
 			Mutates:                 typ.Mutates,
@@ -10833,6 +10910,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				Parameters:              make([]Parameter, len(fnDefCopy.Parameters)),
 				ReturnType:              substituteType(fnDefCopy.ReturnType, bindings),
 				ForeignResultShape:      fnDefCopy.ForeignResultShape,
+				ForeignABI:              fnDefCopy.ForeignABI,
 				InferReturnTypeFromBody: fnDefCopy.InferReturnTypeFromBody,
 				Body:                    fnDefCopy.Body,
 				Mutates:                 fnDefCopy.Mutates,

@@ -84,6 +84,81 @@ impl io::Writer for Sink {
 }`,
 		},
 		{
+			name: "Go interface descriptor parameters reject list growth",
+			input: `use go:io
+
+struct Sink {}
+
+impl io::Writer for Sink {
+  fn write(bytes: mut [Byte]) Int!Str {
+    bytes.push(bytes.at(0).expect("byte"))
+    Result::ok(bytes.size())
+  }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call 'push' on foreign descriptor reference 'bytes': the Go ABI cannot propagate list growth"}},
+		},
+		{
+			name: "Go interface descriptor parameters reject whole-list assignment",
+			input: `use go:io
+
+struct Sink {}
+
+impl io::Writer for Sink {
+  fn write(bytes: mut [Byte]) Int!Str {
+    bytes = []
+    Result::ok(bytes.size())
+  }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot assign a new value through 'bytes': element writes share storage, but the referent binding is not reachable. Assign to the original binding instead"}},
+		},
+		{
+			name: "Go interface descriptor aliases reject list growth",
+			input: `use go:io
+
+struct Sink {}
+
+impl io::Writer for Sink {
+  fn write(bytes: mut [Byte]) Int!Str {
+    let alias = mut bytes
+    alias.prepend(bytes.at(0).expect("byte"))
+    Result::ok(bytes.size())
+  }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call 'prepend' on foreign descriptor reference 'alias': the Go ABI cannot propagate list growth"}},
+		},
+		{
+			name: "Go interface descriptor captures reject list growth",
+			input: `use go:io
+
+struct Sink {}
+
+impl io::Writer for Sink {
+  fn write(bytes: mut [Byte]) Int!Str {
+    let grow = fn() {
+      bytes.push(bytes.at(0).expect("byte"))
+      ()
+    }
+    grow()
+    Result::ok(bytes.size())
+  }
+}`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call 'push' on foreign descriptor reference 'bytes': the Go ABI cannot propagate list growth"}},
+		},
+		{
+			name: "Go interface descriptor value copies may grow independently",
+			input: `use go:io
+
+struct Sink {}
+
+impl io::Writer for Sink {
+  fn write(bytes: mut [Byte]) Int!Str {
+    mut copy = bytes
+    copy.push(bytes.at(0).expect("byte"))
+    Result::ok(copy.size())
+  }
+}`,
+		},
+		{
 			name: "mutable Go interface impl accepts mutable field",
 			input: `use go:io
 
