@@ -51,6 +51,7 @@ const (
 	DiagnosticCodeGenericInstantiationCycle     DiagnosticCode = "generic_instantiation_cycle"
 	DiagnosticCodeMethodIntroducedGeneric       DiagnosticCode = "method_introduced_generic_parameter"
 	DiagnosticCodeInvalidMapKeyType             DiagnosticCode = "invalid_map_key_type"
+	DiagnosticCodePrivateTypeExposure           DiagnosticCode = "private_type_exposure"
 	DiagnosticCodeMalformedTypeNode             DiagnosticCode = "internal_malformed_type_node"
 	DiagnosticCodeBranchTypeMismatch            DiagnosticCode = "branch_type_mismatch"
 	DiagnosticCodeNonExhaustiveValueIf          DiagnosticCode = "non_exhaustive_value_if"

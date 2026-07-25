@@ -170,6 +170,19 @@ fn main() {
 
 Fields of a public Ard struct are public. Methods are public by default and can be marked `private`.
 
+Because importing modules can use every public field and signature, public APIs cannot expose private types. This applies through containers and generic arguments as well as directly:
+
+```ard
+private struct InternalState {}
+
+// Invalid: the public field exposes InternalState outside this module.
+struct App {
+  state: InternalState?,
+}
+```
+
+Make the exposed type public, or keep it entirely within private declarations. The same rule applies to public functions, methods, traits, unions, type aliases, and immutable top-level variables.
+
 ```ard
 struct User {
   id: Int,

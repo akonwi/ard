@@ -623,6 +623,7 @@ func (c *Checker) Check() {
 	c.checkStructFieldMapKeyTypes()
 	c.checkRecursiveStructLayouts()
 	c.checkGenericInstantiationCycles()
+	c.validatePublicAPI()
 
 	// now that we're done with the aliases, use module paths for the import keys
 	for alias, mod := range c.program.Imports {
