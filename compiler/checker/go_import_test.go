@@ -185,7 +185,7 @@ fn main() {
 }`,
 		},
 		{
-			name: "mutable Go interface impl requires mutable value",
+			name: "mutable Go interface impl accepts an Ard value as an owned box",
 			input: `use go:io
 
 struct Sink {
@@ -205,7 +205,98 @@ fn main() {
   let sink = Sink{written: 0}
   consume(sink)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected io::Writer, got Sink"}},
+		},
+		{
+			name: "direct Go call accepts an Ard value as an owned interface box",
+			input: `use go:fmt
+use go:io
+
+struct Sink { written: Int }
+
+impl io::Writer for Sink {
+  fn mut write(bytes: [Byte]) Int!Str {
+    self.written =+ bytes.size()
+    Result::ok(bytes.size())
+  }
+}
+
+fn main() {
+  let sink = Sink{written: 0}
+  let _ = fmt::Fprint(sink, "hello")
+}`,
+		},
+		{
+			name: "direct Go call accepts an Ard mutable reference and preserves identity",
+			input: `use go:fmt
+use go:io
+
+struct Sink { written: Int }
+
+impl io::Writer for Sink {
+  fn mut write(bytes: [Byte]) Int!Str {
+    self.written =+ bytes.size()
+    Result::ok(bytes.size())
+  }
+}
+
+fn main() {
+  let sink: mut Sink = mut Sink{written: 0}
+  let _ = fmt::Fprint(sink, "hello")
+}`,
+		},
+		{
+			name: "explicit generic interface argument materializes the upcast",
+			input: `use go:io
+
+struct Sink { written: Int }
+
+impl io::Writer for Sink {
+  fn mut write(bytes: [Byte]) Int!Str {
+    self.written =+ bytes.size()
+    Result::ok(bytes.size())
+  }
+}
+
+fn discard(value: $T) {}
+
+fn main() {
+  let value = Sink{written: 0}
+  let reference: mut Sink = mut Sink{written: 0}
+  discard<io::Writer>(value)
+  discard<io::Writer>(reference)
+}`,
+		},
+		{
+			name: "declared interface destinations share contextual conversion",
+			input: `use go:io
+
+struct Sink { written: Int }
+struct Box { writer: io::Writer }
+
+impl io::Writer for Sink {
+  fn mut write(bytes: [Byte]) Int!Str {
+    self.written =+ bytes.size()
+    Result::ok(bytes.size())
+  }
+}
+
+fn as_writer(value: Sink) io::Writer { value }
+fn consume(writer: io::Writer) {}
+
+fn main() {
+  let value = Sink{written: 0}
+  let reference: mut Sink = mut Sink{written: 0}
+  let writer: io::Writer = value
+  mut reassigned: io::Writer = value
+  reassigned = reference
+  let box = Box{writer: reference}
+  let consume_value = consume
+  consume_value(value)
+  let _ = writer
+  let _ = reassigned
+  let _ = box
+  let _ = as_writer(value)
+}`,
 		},
 		{
 			name: "invalid Go interface impl is not recorded",

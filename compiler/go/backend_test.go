@@ -1509,6 +1509,83 @@ fn main() {
 	}
 }
 
+func TestRunProgramPreservesArdOwnershipAcrossGoInterfaceConversion(t *testing.T) {
+	program := lowerSource(t, `
+		use go:fmt
+		use go:io
+
+		struct Sink { written: Int }
+
+		impl io::Writer for Sink {
+			fn mut write(bytes: [Byte]) Int!Str {
+				self.written =+ bytes.size()
+				Result::ok(bytes.size())
+			}
+		}
+
+		fn consume(writer: io::Writer) Int!Str {
+			fmt::Fprint(writer, "x")
+		}
+
+		fn forward_reference(writer: mut Sink) Int!Str {
+			fmt::Fprint(writer, "x")
+		}
+
+		fn main() {
+			mut value = Sink{written: 0}
+			let _ = try consume(value) -> err { panic(err) }
+			if not value.written == 0 { panic("value interface conversion mutated original") }
+
+			let reference: mut Sink = mut Sink{written: 0}
+			let _ = try consume(reference) -> err { panic(err) }
+			if not reference.written == 1 { panic("reference interface conversion lost identity") }
+
+			let _ = try fmt::Fprint(value, "x") -> err { panic(err) }
+			if not value.written == 0 { panic("direct Go value conversion mutated original") }
+
+			let _ = try fmt::Fprint(reference, "x") -> err { panic(err) }
+			if not reference.written == 2 { panic("direct Go reference conversion lost identity") }
+
+			let _ = try forward_reference(reference) -> err { panic(err) }
+			if not reference.written == 3 { panic("mutable parameter interface conversion lost identity") }
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramPreservesDynamicTypeForValueReceiverInterfaces(t *testing.T) {
+	program := lowerSource(t, `
+		use go:fmt
+		use go:io
+
+		struct Sink {}
+
+		impl io::Writer for Sink {
+			fn write(bytes: [Byte]) Int!Str {
+				Result::ok(bytes.size())
+			}
+		}
+
+		fn dynamic_type(writer: io::Writer) Str {
+			fmt::Sprintf("%T", writer)
+		}
+
+		fn main() {
+			let value = Sink{}
+			let reference: mut Sink = mut Sink{}
+			if not dynamic_type(value) == "test.Sink" { panic("value interface did not preserve dynamic W") }
+			if not dynamic_type(reference) == "*test.Sink" { panic("reference interface did not preserve dynamic *W") }
+		}
+	`)
+
+	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramPassesMutableFieldToGoInterface(t *testing.T) {
 	program := lowerSource(t, `
 		use go:io

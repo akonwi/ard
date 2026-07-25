@@ -2181,24 +2181,36 @@ func (c *Checker) foreignInterfaceArgUpcast(expected Type, actual Expression) (E
 	if !ok || !iface.Interface || actual == nil {
 		return nil, false
 	}
-	actualBase, _ := mutableRefBase(actual.Type())
+	actualBase, reference := foreignInterfaceSource(actual)
 	def, ok := actualBase.(*StructDef)
 	if !ok || !c.structImplementsForeignInterface(def, iface) {
 		return nil, false
 	}
-	pointer := c.foreignInterfaceImplRequiresPointer(def, iface)
-	if pointer && !c.isAddressableForeignInterfaceUpcast(actual) {
-		return nil, false
+
+	mode := ForeignInterfaceValue
+	if reference {
+		// A mutable reference contributes its existing identity to the
+		// existential interface container (ADR 0056).
+		mode = ForeignInterfaceReference
+	} else if c.foreignInterfaceImplRequiresPointer(def, iface) {
+		// The Ard value remains a value. Go receives a pointer to a fresh,
+		// interface-owned copy so pointer-receiver methods can persist state.
+		mode = ForeignInterfaceOwnedPointer
 	}
-	return &ForeignInterfaceUpcast{Value: actual, Iface: iface, Pointer: pointer}, true
+	return &ForeignInterfaceUpcast{Value: actual, Iface: iface, Mode: mode}, true
 }
 
-func (c *Checker) isAddressableForeignInterfaceUpcast(expr Expression) bool {
-	switch expr.(type) {
-	case *Variable, *InstanceProperty:
-		return c.isMutable(expr)
+func foreignInterfaceSource(expr Expression) (Type, bool) {
+	switch value := expr.(type) {
+	case *Variable:
+		if value.IsReference() {
+			return value.Type(), true
+		}
+		return value.Type(), false
+	case *InstanceProperty:
+		return mutableRefBase(value._type)
 	default:
-		return false
+		return mutableRefBase(expr.Type())
 	}
 }
 
@@ -3660,6 +3672,20 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 			block.Stmts[i] = *stmt
 		}
 		if c.halted {
+			break
+		}
+	}
+	// Some final expressions are naturally checked before destination
+	// conversion to preserve generic inference behavior. Once checked, still
+	// materialize a representation-bearing foreign interface conversion.
+	if expectedFinal != nil && expectedFinal != Void {
+		for i := len(block.Stmts) - 1; i >= 0; i-- {
+			if block.Stmts[i].Expr == nil {
+				continue
+			}
+			if upcast, ok := c.foreignInterfaceArgUpcast(expectedFinal, block.Stmts[i].Expr); ok {
+				block.Stmts[i].Expr = upcast
+			}
 			break
 		}
 	}
@@ -7463,7 +7489,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			setup := func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
-					c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
+					sym := c.scope.add(param.Name, param.Type, param.Mutable)
+					sym.reference = param.Mutable
+					c.recordBinding(param.Loc, sym)
 				}
 			}
 			c.pushFunctionGenericContext(fn)
@@ -9597,7 +9625,9 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			body := c.checkBlockWithExpected(s.Body, func() {
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
-					c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
+					sym := c.scope.add(param.Name, param.Type, param.Mutable)
+					sym.reference = param.Mutable
+					c.recordBinding(param.Loc, sym)
 				}
 			}, returnType, true)
 			c.deferredWorkDepth = previousDeferredWorkDepth
@@ -9731,6 +9761,10 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 		return checked
 	}
 
+	if upcast, ok := c.foreignInterfaceArgUpcast(expectedType, checked); ok {
+		return upcast
+	}
+
 	if !c.areCompatible(expectedType, checked.Type()) {
 		if argumentParameter != nil {
 			legacyMessage := typeMismatch(expectedType, checked.Type())
@@ -9843,7 +9877,9 @@ func (c *Checker) checkFunctionBody(fn *FunctionDef, bodyStmts []parse.Statement
 		c.scope.expectReturn(returnType)
 		// Add parameters to scope
 		for _, param := range params {
-			c.recordBinding(param.Loc, c.scope.add(param.Name, param.Type, param.Mutable))
+			sym := c.scope.add(param.Name, param.Type, param.Mutable)
+			sym.reference = param.Mutable
+			c.recordBinding(param.Loc, sym)
 		}
 	}, returnType, true)
 	c.popFunctionGenericContext()
@@ -10031,6 +10067,7 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 		c.scope.expectReturn(returnType)
 		for _, param := range params {
 			sym := c.scope.add(param.Name, param.Type, param.Mutable)
+			sym.reference = param.Mutable
 			sym.foreignDescriptor = fn.ForeignABI && param.Mutable && isDescriptorBackedMutableType(param.Type)
 			c.recordBinding(param.Loc, sym)
 		}
@@ -10775,6 +10812,14 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			}
 		}
 
+		// A parameter made concrete by explicit, receiver, earlier-argument, or
+		// enclosing context can require a representation-bearing interface
+		// conversion even in a generic call. Materialize it before unification so
+		// the solved interface type validates without losing source ownership.
+		if upcast, ok := c.foreignInterfaceArgUpcast(paramType, checkedArg); ok {
+			checkedArg = upcast
+		}
+
 		// For generic functions, unify the argument type with the parameter type.
 		// unifyTypes uses deref() to see bound generics and calls bindGeneric()
 		// to mutate TypeVar instances in-place. This binds generics so that
@@ -10799,15 +10844,14 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			}
 		} else {
 			checkedArg = coerceDiscardingFunction(paramType, checkedArg)
-			// For non-generic functions, do regular type compatibility check
-			if !c.areCompatible(paramType, checkedArg.Type()) {
-				upcast, ok := c.foreignInterfaceArgUpcast(paramType, checkedArg)
-				if !ok {
-					legacyMessage := typeMismatch(paramType, checkedArg.Type())
-					c.addIncorrectArgumentType(legacyMessage, paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], false)
-					return nil, nil
-				}
+			// Foreign interface conversion is representation-bearing even when
+			// broad compatibility already accepts the nominal implementation.
+			if upcast, ok := c.foreignInterfaceArgUpcast(paramType, checkedArg); ok {
 				checkedArg = upcast
+			} else if !c.areCompatible(paramType, checkedArg.Type()) {
+				legacyMessage := typeMismatch(paramType, checkedArg.Type())
+				c.addIncorrectArgumentType(legacyMessage, paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], false)
+				return nil, nil
 			}
 		}
 
