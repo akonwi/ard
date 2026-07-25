@@ -52,6 +52,7 @@ type Symbol struct {
 	Type              Type
 	declaredAt        SourceSpan
 	mutable           bool
+	reference         bool
 	foreignDescriptor bool
 }
 

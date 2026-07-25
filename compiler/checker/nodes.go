@@ -191,6 +191,11 @@ func (v Variable) StorageType() Type {
 	return v.sym.Type
 }
 
+func (v Variable) IsReference() bool {
+	_, typedReference := mutableRefBase(v.sym.Type)
+	return typedReference || v.sym.reference
+}
+
 type SubjectKind uint8
 
 const (
@@ -1400,10 +1405,18 @@ func (p *ForeignMethodCall) Type() Type {
 	return p.Call.Type()
 }
 
+type ForeignInterfaceUpcastMode uint8
+
+const (
+	ForeignInterfaceValue ForeignInterfaceUpcastMode = iota
+	ForeignInterfaceOwnedPointer
+	ForeignInterfaceReference
+)
+
 type ForeignInterfaceUpcast struct {
-	Value   Expression
-	Iface   *ForeignType
-	Pointer bool
+	Value Expression
+	Iface *ForeignType
+	Mode  ForeignInterfaceUpcastMode
 }
 
 func (p *ForeignInterfaceUpcast) Type() Type { return p.Iface }

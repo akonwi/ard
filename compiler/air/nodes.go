@@ -197,6 +197,14 @@ const (
 	ForeignResultValueBool
 )
 
+type ForeignInterfaceMode uint8
+
+const (
+	ForeignInterfaceValue ForeignInterfaceMode = iota
+	ForeignInterfaceOwnedPointer
+	ForeignInterfaceReference
+)
+
 type Expr struct {
 	Kind ExprKind
 	Type TypeID
@@ -213,22 +221,22 @@ type Expr struct {
 	Local  LocalID
 	Global GlobalID
 
-	Function                FunctionID
-	ForeignTarget           string
-	ForeignNamespace        string
-	ForeignQualifier        string
-	ForeignSymbol           string
-	ForeignReceiver         string
-	ForeignPointer          bool
-	ForeignInterfacePointer bool
-	ForeignResultShape      ForeignResultShape
-	TypeArgs                []TypeID
-	Impl                    ImplID
-	Trait                   TraitID
-	Method                  int
-	Args                    []Expr
-	Entries                 []MapEntry
-	CaptureLocals           []LocalID
+	Function             FunctionID
+	ForeignTarget        string
+	ForeignNamespace     string
+	ForeignQualifier     string
+	ForeignSymbol        string
+	ForeignReceiver      string
+	ForeignPointer       bool
+	ForeignInterfaceMode ForeignInterfaceMode
+	ForeignResultShape   ForeignResultShape
+	TypeArgs             []TypeID
+	Impl                 ImplID
+	Trait                TraitID
+	Method               int
+	Args                 []Expr
+	Entries              []MapEntry
+	CaptureLocals        []LocalID
 
 	Fields []StructFieldValue
 	Target *Expr

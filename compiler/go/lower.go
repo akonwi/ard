@@ -3304,10 +3304,29 @@ func (l *lowerer) lowerForeignInterfaceUpcast(fn air.Function, expr air.Expr) (l
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	if expr.ForeignInterfacePointer {
-		target.expr = l.mutableReferenceArg(fn, *expr.Target, target.expr)
+	switch expr.ForeignInterfaceMode {
+	case air.ForeignInterfaceValue:
+		return target, nil
+	case air.ForeignInterfaceReference:
+		// Value lowering reads through reference locals and fields. Recover
+		// those representations; all other reference-producing expressions
+		// already lower to their pointer/reference result.
+		target.expr = l.existingMutableReferenceArg(fn, *expr.Target, target.expr)
+		return target, nil
+	case air.ForeignInterfaceOwnedPointer:
+		// Materialize fresh storage even when the source is addressable. Taking
+		// the caller's address would turn value conversion into borrowed aliasing.
+		tmp := l.nextTemp()
+		stmts := append([]ast.Stmt{}, target.stmts...)
+		stmts = append(stmts, &ast.AssignStmt{
+			Lhs: []ast.Expr{ast.NewIdent(tmp)},
+			Tok: token.DEFINE,
+			Rhs: []ast.Expr{target.expr},
+		})
+		return loweredExpr{stmts: stmts, expr: &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(tmp)}}, nil
+	default:
+		return loweredExpr{}, fmt.Errorf("unsupported foreign interface conversion mode %d", expr.ForeignInterfaceMode)
 	}
-	return target, nil
 }
 
 func (l *lowerer) foreignABIValueArg(arg air.Expr, value ast.Expr) ast.Expr {
@@ -5059,6 +5078,18 @@ func (l *lowerer) mutableTraitUpcastPlace(fn air.Function, arg air.Expr) (ast.Ex
 	default:
 		return nil, nil, false, nil
 	}
+}
+
+func (l *lowerer) existingMutableReferenceArg(fn air.Function, arg air.Expr, argExpr ast.Expr) ast.Expr {
+	if arg.Kind == air.ExprLoadLocal && l.localIsPointerParam(fn, arg.Local) {
+		return ast.NewIdent(l.localName(fn, arg.Local))
+	}
+	if arg.Kind == air.ExprGetField {
+		if fieldExpr, ok := l.mutableFieldReferenceExpr(fn, arg); ok {
+			return fieldExpr
+		}
+	}
+	return argExpr
 }
 
 func (l *lowerer) mutableReferenceArg(fn air.Function, arg air.Expr, argExpr ast.Expr) ast.Expr {

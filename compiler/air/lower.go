@@ -4368,7 +4368,17 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprForeignInterfaceUpcast, Type: typeID, Target: value, ForeignInterfacePointer: e.Pointer}, nil
+		mode := ForeignInterfaceValue
+		switch e.Mode {
+		case checker.ForeignInterfaceValue:
+		case checker.ForeignInterfaceOwnedPointer:
+			mode = ForeignInterfaceOwnedPointer
+		case checker.ForeignInterfaceReference:
+			mode = ForeignInterfaceReference
+		default:
+			return nil, fmt.Errorf("unsupported checker foreign interface conversion mode %d", e.Mode)
+		}
+		return &Expr{Kind: ExprForeignInterfaceUpcast, Type: typeID, Target: value, ForeignInterfaceMode: mode}, nil
 	case *checker.DiscardingFunctionCoercion:
 		value, err := fl.lowerExpr(e.Value)
 		if err != nil {
