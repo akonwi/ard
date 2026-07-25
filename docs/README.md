@@ -8,6 +8,10 @@ Architecture Decision Records (ADRs) live in [`adrs/`](./adrs/). Use ADRs to rec
 
 Detailed feature design notes can continue to live near the relevant area, such as `compiler/docs/` for compiler internals or `backlog/` for larger future work. When a design note leads to a durable decision, add or update an ADR and link back to the supporting material.
 
+## Technical References
+
+- [`go-interface-semantics.md`](./go-interface-semantics.md) records the Go type-system and runtime-interface behavior relevant to Ard interop.
+
 ## Adding an ADR
 
 1. Copy the structure from the existing ADRs.
