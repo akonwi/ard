@@ -4325,7 +4325,7 @@ private struct internal_config {
 }
 
 fn make_user() User { User{first_name: "Ada", type: 1} }
-fn main() internal_config { internal_config{secret_key: "s"} }`)
+private fn make_internal_config() internal_config { internal_config{secret_key: "s"} }`)
 	files := lowerProgramAST(t, program, Options{PackageName: "main"})
 	for _, field := range []string{"FirstName", "Type"} {
 		if !astFilesHaveStructField(files, "User", field) {

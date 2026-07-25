@@ -2391,14 +2391,14 @@ func TestGoTargetParityNestedGenericClosuresPreserveNamedTypeIdentity(t *testing
 			number: Int,
 		}
 
-		struct Context<$T> {
+		private struct Context<$T> {
 			state: $T,
 			next: fn(mut Value),
 		}
 
-		type Handler = fn(mut Context<$T>, mut Value)
+		private type Handler = fn(mut Context<$T>, mut Value)
 
-		struct Box<$T> {
+		private struct Box<$T> {
 			state: $T,
 			handlers: [Handler<$T>],
 		}
