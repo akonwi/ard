@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -223,16 +223,39 @@ Go assignability, as established by ADR 0039. This decision changes the adapter
 policy for Ard-owned explicit implementations; it does not replace Go's own
 assignability rules for Go-owned values.
 
-### Explicit implementation remains required
+### `Any` and named empty Go interfaces
 
-An Ard-owned value still requires an explicit foreign-interface implementation:
+Ard `Any` and named empty Go interfaces are runtime interface destinations and
+use the same ownership rule. An ordinary `T` value contributes its value, while
+an existing `mut T` contributes its reference identity. No explicit `impl` is
+required because these interfaces have no method contract:
+
+```ard
+fn store(value: Any) {}
+
+fn forward(value: mut $T) {
+  store(value) // the interface contains the existing reference
+}
+```
+
+A Go generic parameter constrained by `any` is different. After inference,
+`func accept[T any](value T)` has a concrete `T` destination rather than an
+interface-value destination, so ordinary `mut T -> T` snapshot semantics still
+apply. If `T` is explicitly or contextually resolved to Ard `Any`, the
+destination is an actual interface and preserves reference identity.
+
+### Explicit implementation remains required for nonempty interfaces
+
+An Ard-owned value still requires an explicit foreign-interface implementation
+to satisfy a named nonempty Go interface:
 
 ```ard
 impl http::ResponseWriter for W { ... }
 ```
 
 Matching generated method shapes without an explicit implementation does not
-establish Ard-level conformance.
+establish Ard-level conformance. `Any` and named empty interfaces are exempt
+because every Go value satisfies their empty method set.
 
 ### Contextual conversion pipeline
 
@@ -353,6 +376,10 @@ semantics. It was rejected in favor of an explicit interface-boxing adapter.
 - Go interfaces are an explicit exception to ordinary concrete `T` destination
   normalization because they can carry owned values or reference identity.
 - Generated Go pointer method sets no longer leak into Ard call compatibility.
+- Ard `Any`, named empty Go interfaces, and named nonempty Go interfaces share
+  the same value-versus-reference ownership policy.
+- Go generic parameters constrained by `any` remain concrete destinations after
+  inference and retain ordinary snapshot semantics unless resolved to `Any`.
 - Ard calls and direct imported Go calls use the same interface conversion
   policy.
 - A value-interface conversion may allocate compiler-owned storage when only a
@@ -365,7 +392,7 @@ semantics. It was rejected in favor of an explicit interface-boxing adapter.
   actual `mut W` or explicit `mut <place>` when identity must be preserved.
 - The checker, AIR, and Go backend need explicit owned-box and existing-reference
   foreign-interface conversion modes.
-- ADRs 0039 and 0045 require amendments if this proposal is accepted.
+- ADRs 0039 and 0045 are amended to defer runtime interface ownership and representation to this decision.
 - Other ordinary Go value, pointer, scalar, collection, and callback boundaries
   retain their existing Ard value/reference rules. The special adaptation is
   narrowly required by Go interface method-set representation.

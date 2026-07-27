@@ -117,7 +117,7 @@ For an `impl ForeignInterface for ArdType` block, the checker validates against 
 - Go method names map to Ard method names using the normal Ard-to-Go identifier conversion, reversed for lookup (`Write` ↔ `write`, `ReadFrom` ↔ `read_from`);
 - parameters must be compatible under direct-Go boundary rules;
 - return shapes must be compatible with ADR 0038 return-position ABI rules;
-- a mutating Ard method requires an addressable mutable value when upcast to the interface.
+- mutating Ard methods lower with pointer receivers, while source ownership at interface conversion follows ADR 0056.
 
 Common result/maybe mappings are valid in interface methods:
 
@@ -155,18 +155,22 @@ If an Ard type has multiple methods that would lower to the same Go receiver met
 
 ### Interface assignment and call compatibility
 
-An Ard-owned value may be assigned to or passed as a foreign Go interface only if the explicit foreign-interface impl exists.
+An Ard-owned value may be assigned to or passed as a named nonempty Go interface only if the explicit foreign-interface impl exists. ADR 0056 supersedes this ADR's original addressability requirement and defines source ownership independently from generated Go method sets:
 
-If the required impl methods are non-mutating, the value may be passed according to ordinary value rules. If any required impl method is mutating and therefore lowers with a pointer receiver, the value must be mutable and addressable at the upcast/call site.
-
-The initial implementation supports pointer-required upcasts for mutable local bindings and mutable Ard struct fields. Broader addressable foreign places can be added as the checker and AIR grow a more general addressable-place representation for foreign-interface upcasts.
+- a `T` value contributes an interface-owned value or boxed copy;
+- an existing `mut T` contributes its reference identity;
+- binding-slot reassignability has no role in the conversion;
+- `Any` and named empty interfaces require no explicit implementation but use the same ownership rule.
 
 ```ard
-mut sink = Sink { written: 0 }
-needs_writer(sink) // valid when Sink explicitly impls io::Writer with mutable write
+let value = Sink{written: 0}
+let reference: mut Sink = mut Sink{written: 0}
+
+needs_writer(value)     // interface owns a copy
+needs_writer(reference) // interface preserves the existing reference
 ```
 
-The backend may pass `&sink` or otherwise use the pointer receiver representation needed by Go.
+When only generated `*T` satisfies a nonempty interface, the backend boxes a value source in fresh storage and passes a pointer to that copy. It passes an existing reference source directly. See ADR 0056 for dynamic type, mutation, generic, and interface-to-interface behavior.
 
 ### Relationship to Ard traits
 

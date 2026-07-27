@@ -2801,8 +2801,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return l.lowerForeignStructInstance(fn, expr)
 	case air.ExprForeignValue:
 		return l.lowerForeignValue(expr)
-	case air.ExprForeignInterfaceUpcast:
-		return l.lowerForeignInterfaceUpcast(fn, expr)
+	case air.ExprInterfaceConversion:
+		return l.lowerInterfaceConversion(fn, expr)
 	case air.ExprDiscardingFunctionCoercion:
 		return l.lowerDiscardingFunctionCoercion(fn, expr)
 	case air.ExprUnsafeCast:
@@ -3153,7 +3153,14 @@ func sameAIRExpr(a air.Expr, b air.Expr) bool {
 }
 
 func (l *lowerer) declareTemp(typeID air.TypeID, name string) ([]ast.Stmt, error) {
+	return l.declareReferenceAwareTemp(typeID, name, false)
+}
+
+func (l *lowerer) declareReferenceAwareTemp(typeID air.TypeID, name string, reference bool) ([]ast.Stmt, error) {
 	typ, err := l.goType(typeID)
+	if reference && l.mutableParamUsesPointer(typeID) {
+		typ, err = l.mutableParamType(typeID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -3296,37 +3303,38 @@ func (l *lowerer) lowerForeignValue(expr air.Expr) (loweredExpr, error) {
 	return loweredExpr{expr: l.qualified(qualifier, expr.ForeignNamespace, expr.ForeignSymbol)}, nil
 }
 
-func (l *lowerer) lowerForeignInterfaceUpcast(fn air.Function, expr air.Expr) (loweredExpr, error) {
+func (l *lowerer) lowerInterfaceConversion(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil {
-		return loweredExpr{}, fmt.Errorf("foreign interface upcast missing target")
+		return loweredExpr{}, fmt.Errorf("interface conversion missing target")
 	}
 	target, err := l.lowerExpr(fn, *expr.Target)
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	switch expr.ForeignInterfaceMode {
-	case air.ForeignInterfaceValue:
-		return target, nil
-	case air.ForeignInterfaceReference:
+	switch expr.InterfaceMode {
+	case air.InterfaceValue:
+	case air.InterfaceReference:
 		// Value lowering reads through reference locals and fields. Recover
 		// those representations; all other reference-producing expressions
 		// already lower to their pointer/reference result.
 		target.expr = l.existingMutableReferenceArg(fn, *expr.Target, target.expr)
-		return target, nil
-	case air.ForeignInterfaceOwnedPointer:
+	case air.InterfaceOwnedPointer:
 		// Materialize fresh storage even when the source is addressable. Taking
 		// the caller's address would turn value conversion into borrowed aliasing.
 		tmp := l.nextTemp()
-		stmts := append([]ast.Stmt{}, target.stmts...)
-		stmts = append(stmts, &ast.AssignStmt{
+		target.stmts = append(target.stmts, &ast.AssignStmt{
 			Lhs: []ast.Expr{ast.NewIdent(tmp)},
 			Tok: token.DEFINE,
 			Rhs: []ast.Expr{target.expr},
 		})
-		return loweredExpr{stmts: stmts, expr: &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(tmp)}}, nil
+		target.expr = &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(tmp)}
 	default:
-		return loweredExpr{}, fmt.Errorf("unsupported foreign interface conversion mode %d", expr.ForeignInterfaceMode)
+		return loweredExpr{}, fmt.Errorf("unsupported interface conversion mode %d", expr.InterfaceMode)
 	}
+	if validTypeID(l.program, expr.Type) && l.program.Types[expr.Type-1].Kind == air.TypeAny {
+		target.expr = &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{target.expr}}
+	}
+	return target, nil
 }
 
 func (l *lowerer) foreignABIValueArg(arg air.Expr, value ast.Expr) ast.Expr {
@@ -5709,7 +5717,7 @@ func (l *lowerer) lowerMaybeExpect(fn air.Function, expr air.Expr) (loweredExpr,
 		return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 	}
 	temp := l.nextTemp()
-	decls, err := l.declareTemp(expr.Type, temp)
+	decls, err := l.declareReferenceAwareTemp(expr.Type, temp, expr.Bool)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -5763,7 +5771,7 @@ func (l *lowerer) lowerMaybeOr(fn air.Function, expr air.Expr) (loweredExpr, err
 	}
 	targetExpr := ast.NewIdent(targetTemp)
 	resultTemp := l.nextTemp()
-	resultDecls, err := l.declareTemp(expr.Type, resultTemp)
+	resultDecls, err := l.declareReferenceAwareTemp(expr.Type, resultTemp, expr.Bool)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -7586,6 +7594,8 @@ func (l *lowerer) exprIsMutableReference(fn air.Function, expr air.Expr) bool {
 		}
 		targetType := l.program.Types[expr.Target.Type-1]
 		return targetType.Kind == air.TypeStruct && expr.Field >= 0 && expr.Field < len(targetType.Fields) && targetType.Fields[expr.Field].Mutable
+	case air.ExprMaybeExpect, air.ExprMaybeOr:
+		return expr.Bool
 	default:
 		return false
 	}

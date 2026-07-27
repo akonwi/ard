@@ -159,7 +159,9 @@ let bytes = read_all(strings::NewReader("hello")).expect("read")
 
 Interface-to-interface assignability also follows Go's rules, so a value such as `io::ReadCloser` can be used where `io::Reader` or `io::Closer` is expected when the required methods match. Go slices and maps remain invariant: `[mut strings::Reader]` is not automatically converted to `[]io.Reader`.
 
-Ard-defined structs can satisfy Go interfaces when their `impl` methods have Go-compatible method names and signatures. The Go backend emits receiver methods for those impls, including methods that are only needed by Go interface dispatch. Functions and closure adapters still need companion FFI wrappers.
+At an interface destination—including Ard `Any` and named empty Go interfaces—an ordinary Ard value contributes a value copy, while an existing `mut T` contributes its reference identity. This lets APIs such as `json::Unmarshal(data, target)` receive the pointer represented by a mutable parameter. A Go generic parameter constrained by `any` is still a concrete `T` destination after inference and receives an ordinary value snapshot unless its type argument resolves to Ard `Any`.
+
+Ard-defined structs can satisfy nonempty Go interfaces when their `impl` methods have Go-compatible method names and signatures. The Go backend emits receiver methods for those impls, including methods that are only needed by Go interface dispatch. Functions and closure adapters still need companion FFI wrappers.
 
 ### Go errors
 

@@ -2177,31 +2177,47 @@ func mutableForeignParamChangesGoABI(t Type) bool {
 	return !isDescriptorBackedMutableType(t)
 }
 
-func (c *Checker) foreignInterfaceArgUpcast(expected Type, actual Expression) (Expression, bool) {
-	iface, ok := expected.(*ForeignType)
-	if !ok || !iface.Interface || actual == nil {
+func (c *Checker) interfaceConversion(expected Type, actual Expression) (Expression, bool) {
+	if actual == nil {
 		return nil, false
 	}
-	actualBase, reference := foreignInterfaceSource(actual)
+	if conversion, ok := actual.(*InterfaceConversion); ok && conversion.Destination.equal(expected) {
+		return conversion, true
+	}
+
+	actualBase, reference := interfaceConversionSource(actual)
+	mode := InterfaceValue
+	if reference {
+		// A mutable reference contributes its existing identity to the
+		// existential interface container (ADR 0056).
+		mode = InterfaceReference
+	}
+
+	if _, ok := expected.(*anyType); ok {
+		return &InterfaceConversion{Value: actual, Destination: expected, Mode: mode}, true
+	}
+
+	iface, ok := expected.(*ForeignType)
+	if !ok || !iface.Interface {
+		return nil, false
+	}
+	if iface.EmptyInterface() {
+		return &InterfaceConversion{Value: actual, Destination: iface, Mode: mode}, true
+	}
+
 	def, ok := actualBase.(*StructDef)
 	if !ok || !c.structImplementsForeignInterface(def, iface) {
 		return nil, false
 	}
-
-	mode := ForeignInterfaceValue
-	if reference {
-		// A mutable reference contributes its existing identity to the
-		// existential interface container (ADR 0056).
-		mode = ForeignInterfaceReference
-	} else if c.foreignInterfaceImplRequiresPointer(def, iface) {
+	if !reference && c.foreignInterfaceImplRequiresPointer(def, iface) {
 		// The Ard value remains a value. Go receives a pointer to a fresh,
 		// interface-owned copy so pointer-receiver methods can persist state.
-		mode = ForeignInterfaceOwnedPointer
+		mode = InterfaceOwnedPointer
 	}
-	return &ForeignInterfaceUpcast{Value: actual, Iface: iface, Mode: mode}, true
+	return &InterfaceConversion{Value: actual, Destination: iface, Mode: mode}, true
 }
 
-func foreignInterfaceSource(expr Expression) (Type, bool) {
+func interfaceConversionSource(expr Expression) (Type, bool) {
 	switch value := expr.(type) {
 	case *Variable:
 		if value.IsReference() {
@@ -2213,6 +2229,30 @@ func foreignInterfaceSource(expr Expression) (Type, bool) {
 	default:
 		return mutableRefBase(expr.Type())
 	}
+}
+
+// snapshotExplicitReference removes an explicit `mut <value>` wrapper when a
+// solved value destination requests the referent rather than its identity.
+// Pointer/reference destinations and runtime interfaces handle identity before
+// reaching this normalization step.
+func snapshotExplicitReference(expected Type, actual Expression) Expression {
+	if actual == nil {
+		return nil
+	}
+	expected = derefType(expected)
+	if _, isAny := expected.(*anyType); isAny {
+		return actual
+	}
+	if foreign, ok := expected.(*ForeignType); ok && foreign.Interface {
+		return actual
+	}
+	if _, expectsReference := expected.(*MutableRef); expectsReference || isPointerForeign(expected) {
+		return actual
+	}
+	if reference, ok := actual.(*MutableRefExpr); ok {
+		return reference.Operand
+	}
+	return actual
 }
 
 func (c *Checker) foreignInterfaceImplRequiresPointer(def *StructDef, iface *ForeignType) bool {
@@ -3678,13 +3718,13 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 	}
 	// Some final expressions are naturally checked before destination
 	// conversion to preserve generic inference behavior. Once checked, still
-	// materialize a representation-bearing foreign interface conversion.
+	// materialize a representation-bearing runtime interface conversion.
 	if expectedFinal != nil && expectedFinal != Void {
 		for i := len(block.Stmts) - 1; i >= 0; i-- {
 			if block.Stmts[i].Expr == nil {
 				continue
 			}
-			if upcast, ok := c.foreignInterfaceArgUpcast(expectedFinal, block.Stmts[i].Expr); ok {
+			if upcast, ok := c.interfaceConversion(expectedFinal, block.Stmts[i].Expr); ok {
 				block.Stmts[i].Expr = upcast
 			}
 			break
@@ -7361,14 +7401,17 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					if checkedArg == nil {
 						return nil
 					}
-					if !c.areCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) {
-						upcast, ok := c.foreignInterfaceArgUpcast(effectiveFnDef.Parameters[i].Type, checkedArg)
-						if !ok {
+					if converted, ok := c.interfaceConversion(effectiveFnDef.Parameters[i].Type, checkedArg); ok {
+						checkedArg = converted
+					} else {
+						if !effectiveFnDef.Parameters[i].Mutable {
+							checkedArg = snapshotExplicitReference(effectiveFnDef.Parameters[i].Type, checkedArg)
+						}
+						if !c.areCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) {
 							legacyMessage := typeMismatch(effectiveFnDef.Parameters[i].Type, checkedArg.Type())
 							c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], false)
 							return nil
 						}
-						checkedArg = upcast
 					}
 					if effectiveFnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) && !freshContainerSatisfiesMutable(effectiveFnDef.Parameters[i].Type, checkedArg) {
 						legacyMessage := fmt.Sprintf("Type mismatch: Expected a mutable %s", effectiveFnDef.Parameters[i].Type.String())
@@ -9762,8 +9805,8 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 		return checked
 	}
 
-	if upcast, ok := c.foreignInterfaceArgUpcast(expectedType, checked); ok {
-		return upcast
+	if converted, ok := c.interfaceConversion(expectedType, checked); ok {
+		return converted
 	}
 
 	if !c.areCompatible(expectedType, checked.Type()) {
@@ -10415,6 +10458,13 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module, expec
 		c.recordTarget(s, call, SpanTarget{Kind: TargetFunction, Module: mod.Path(), Symbol: "new"})
 		return &ModuleFunctionCall{Module: mod.Path(), Call: call}
 	}
+	if contextualInner {
+		if converted, ok := c.interfaceConversion(typeVar, value); ok {
+			value = converted
+		} else {
+			value = snapshotExplicitReference(typeVar, value)
+		}
+	}
 	if len(callTypeArgs) == 1 && !c.areCompatible(typeVar, value.Type()) {
 		value = c.checkExprAs(arg.Value, typeVar)
 		if value == nil {
@@ -10778,9 +10828,21 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// Check if we need to wrap the argument in Maybe::new() for nullable parameters
 		// If parameter is Maybe<T> and argument is T, wrap it
 		if maybeParam, isMaybe := paramType.(*Maybe); isMaybe {
-			if argType := checkedArg.Type(); !argType.equal(paramType) {
+			argType := checkedArg.Type()
+			_, argumentIsMaybe := argType.(*Maybe)
+			if !argumentIsMaybe {
+				// A concrete interface inner type is a conversion obligation, not
+				// generic evidence. Preserve ownership before structural unification.
+				if converted, ok := c.interfaceConversion(maybeParam.Of(), checkedArg); ok {
+					checkedArg = converted
+				} else if genericScope == nil || !hasUnresolvedGenericsFrom(maybeParam.Of(), genericScope.genericContext) {
+					checkedArg = snapshotExplicitReference(maybeParam.Of(), checkedArg)
+				}
+				argType = checkedArg.Type()
+			}
+			if !argType.equal(paramType) || !argumentIsMaybe {
 				if genericScope != nil {
-					if _, argumentIsMaybe := argType.(*Maybe); !argumentIsMaybe {
+					if !argumentIsMaybe {
 						if target, source, discardsReturn := discardingFunctionTypes(maybeParam.Of(), argType); discardsReturn {
 							for paramIndex := range target.Parameters {
 								if err := c.unifyTypes(target.Parameters[paramIndex].Type, source.Parameters[paramIndex].Type, genericScope); err != nil {
@@ -10805,6 +10867,11 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 					}
 				}
 				checkedArg = coerceDiscardingFunction(maybeParam.Of(), checkedArg)
+				// Interface ownership must be classified before wrapping the value in
+				// Maybe; after synthesis the original reference provenance is hidden.
+				if converted, ok := c.interfaceConversion(maybeParam.Of(), checkedArg); ok {
+					checkedArg = converted
+				}
 				// Check if argument type matches the inner Maybe type
 				if c.areCompatible(maybeParam.Of(), checkedArg.Type()) {
 					// Wrap non-Maybe value in Maybe::new()
@@ -10817,7 +10884,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// enclosing context can require a representation-bearing interface
 		// conversion even in a generic call. Materialize it before unification so
 		// the solved interface type validates without losing source ownership.
-		if upcast, ok := c.foreignInterfaceArgUpcast(paramType, checkedArg); ok {
+		if upcast, ok := c.interfaceConversion(paramType, checkedArg); ok {
 			checkedArg = upcast
 		}
 
@@ -10845,9 +10912,9 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			}
 		} else {
 			checkedArg = coerceDiscardingFunction(paramType, checkedArg)
-			// Foreign interface conversion is representation-bearing even when
+			// Runtime interface conversion is representation-bearing even when
 			// broad compatibility already accepts the nominal implementation.
-			if upcast, ok := c.foreignInterfaceArgUpcast(paramType, checkedArg); ok {
+			if upcast, ok := c.interfaceConversion(paramType, checkedArg); ok {
 				checkedArg = upcast
 			} else if !c.areCompatible(paramType, checkedArg.Type()) {
 				legacyMessage := typeMismatch(paramType, checkedArg.Type())
@@ -10855,6 +10922,17 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				return nil, nil
 			}
 		}
+
+		// Generic inference can turn an unresolved parameter into either an
+		// interface destination (preserve reference identity) or an ordinary
+		// value destination (read a snapshot). Normalize only after solving.
+		solvedParamType := derefType(fnDefCopy.Parameters[i].Type)
+		if converted, ok := c.interfaceConversion(solvedParamType, checkedArg); ok {
+			checkedArg = converted
+		} else if !fnDefCopy.Parameters[i].Mutable {
+			checkedArg = snapshotExplicitReference(solvedParamType, checkedArg)
+		}
+		paramType = solvedParamType
 
 		// Check mutable-reference constraints if needed. A mutable parameter
 		// requires an addressable mutable place; a call-site `mut` marker no longer

@@ -1405,21 +1405,23 @@ func (p *ForeignMethodCall) Type() Type {
 	return p.Call.Type()
 }
 
-type ForeignInterfaceUpcastMode uint8
+type InterfaceConversionMode uint8
 
 const (
-	ForeignInterfaceValue ForeignInterfaceUpcastMode = iota
-	ForeignInterfaceOwnedPointer
-	ForeignInterfaceReference
+	InterfaceValue InterfaceConversionMode = iota
+	InterfaceOwnedPointer
+	InterfaceReference
 )
 
-type ForeignInterfaceUpcast struct {
-	Value Expression
-	Iface *ForeignType
-	Mode  ForeignInterfaceUpcastMode
+// InterfaceConversion preserves source ownership while converting a value to
+// an existential runtime interface destination (Any or a named Go interface).
+type InterfaceConversion struct {
+	Value       Expression
+	Destination Type
+	Mode        InterfaceConversionMode
 }
 
-func (p *ForeignInterfaceUpcast) Type() Type { return p.Iface }
+func (p *InterfaceConversion) Type() Type { return p.Destination }
 
 // DiscardingFunctionCoercion adapts a value-returning function to an otherwise
 // identical Void-returning function. Targets must evaluate Value once and
