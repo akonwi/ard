@@ -107,14 +107,14 @@ This keeps the pairing uniform: copies are quiet, aliases are always spelled `mu
 - `mut <place>` lowers to `&place` for value-form storage.
 - `mut <value expression>` lowers to a fresh temporary plus `&tmp` (for struct literals, Go's `&Foo{...}` form directly).
 - `mut <place>` where the place is already reference-shaped lowers to the reference itself — aliasing copies the pointer, never adding indirection.
-- Interface satisfaction needs no backend changes: the operand is already the pointer form when it reaches the boundary.
+- Runtime interface conversion follows ADR 0056. An explicit reference preserves caller identity; an ordinary value contributes an owned value or boxed copy. The backend therefore carries explicit interface conversion metadata rather than inferring ownership from pointer shape.
 
 Not every Ard reference is a Go pointer (ADR 0040): maps and channels share all supported mutation through their descriptors. Native mutable list references are pointer-shaped because list growth and replacement must update the owner's descriptor. At foreign Go slice boundaries, the exact `[]T` ABI is retained and only element-level mutable access is available.
 
 ## Consequences
 
 - Mutable access becomes visible at call sites, opt-in today, with room to strengthen later.
-- Addressable mutable values can satisfy Go interfaces with pointer-receiver methods, closing the interop gap without adopting Go's implicit addressability.
+- Explicit references can satisfy Go interfaces with pointer-receiver methods while preserving caller identity. ADR 0056 additionally permits ordinary values through interface-owned boxing without adopting Go's implicit addressability.
 - `let r = mut x` introduces named aliases to mutable storage. This is already expressible through struct fields and parameters, so it adds no new aliasing power, but it makes aliasing easier to write; documentation should cover it.
 - The checker gains an addressability judgment for expressions. Its rules are attached to explicit syntax, so violations produce local, teachable errors.
 - Aliasing is uniformly loud: every expression that creates or propagates a reference is spelled `mut`, while dereferencing copies stay quiet.

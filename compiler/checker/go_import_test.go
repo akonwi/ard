@@ -506,8 +506,12 @@ fn main() Int!Str {
 								Symbol:             "Println",
 								ForeignResultShape: checker.ForeignResultValueError,
 								Call: &checker.FunctionCall{
-									Name:       "Println",
-									Args:       []checker.Expression{&checker.StrLiteral{Value: "hello"}},
+									Name: "Println",
+									Args: []checker.Expression{&checker.InterfaceConversion{
+										Value:       &checker.StrLiteral{Value: "hello"},
+										Destination: checker.Any,
+										Mode:        checker.InterfaceValue,
+									}},
 									ReturnType: checker.MakeResult(checker.Int, checker.Str),
 								},
 							}},

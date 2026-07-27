@@ -1417,7 +1417,7 @@ func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, 
 	case *checker.Maybe:
 		elemType := typ.Of()
 		elemMutable := false
-		if ref, ok := elemType.(*checker.MutableRef); ok {
+		if ref, ok := resolvedMutableReferenceType(elemType); ok {
 			elemMutable = true
 			elemType = ref.Of()
 		}
@@ -1518,7 +1518,7 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 	case *checker.Maybe:
 		elemType := typ.Of()
 		elemMutable := false
-		if ref, ok := elemType.(*checker.MutableRef); ok {
+		if ref, ok := resolvedMutableReferenceType(elemType); ok {
 			elemMutable = true
 			elemType = ref.Of()
 		}
@@ -2387,7 +2387,7 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	case *checker.Maybe:
 		elemType := typ.Of()
 		elemMutable := false
-		if ref, ok := elemType.(*checker.MutableRef); ok {
+		if ref, ok := resolvedMutableReferenceType(elemType); ok {
 			elemMutable = true
 			elemType = ref.Of()
 		}
@@ -4363,22 +4363,22 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			return &Expr{Kind: ExprFunctionRef, Type: typeID, Function: id}, nil
 		}
 		return &Expr{Kind: ExprForeignValue, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol}, nil
-	case *checker.ForeignInterfaceUpcast:
+	case *checker.InterfaceConversion:
 		value, err := fl.lowerExpr(e.Value)
 		if err != nil {
 			return nil, err
 		}
-		mode := ForeignInterfaceValue
+		mode := InterfaceValue
 		switch e.Mode {
-		case checker.ForeignInterfaceValue:
-		case checker.ForeignInterfaceOwnedPointer:
-			mode = ForeignInterfaceOwnedPointer
-		case checker.ForeignInterfaceReference:
-			mode = ForeignInterfaceReference
+		case checker.InterfaceValue:
+		case checker.InterfaceOwnedPointer:
+			mode = InterfaceOwnedPointer
+		case checker.InterfaceReference:
+			mode = InterfaceReference
 		default:
-			return nil, fmt.Errorf("unsupported checker foreign interface conversion mode %d", e.Mode)
+			return nil, fmt.Errorf("unsupported checker interface conversion mode %d", e.Mode)
 		}
-		return &Expr{Kind: ExprForeignInterfaceUpcast, Type: typeID, Target: value, ForeignInterfaceMode: mode}, nil
+		return &Expr{Kind: ExprInterfaceConversion, Type: typeID, Target: value, InterfaceMode: mode}, nil
 	case *checker.DiscardingFunctionCoercion:
 		value, err := fl.lowerExpr(e.Value)
 		if err != nil {
@@ -5259,6 +5259,10 @@ func (fl *functionLowerer) lowerMaybeMethod(typeID TypeID, method *checker.Maybe
 		return nil, err
 	}
 
+	returnsReference := false
+	if maybeType, ok := fl.l.typeInfo(target.Type); ok && maybeType.Kind == TypeMaybe {
+		returnsReference = maybeType.ElemMutable
+	}
 	var kind ExprKind
 	switch method.Kind {
 	case checker.MaybeExpect:
@@ -5280,7 +5284,7 @@ func (fl *functionLowerer) lowerMaybeMethod(typeID TypeID, method *checker.Maybe
 	default:
 		return nil, fmt.Errorf("unsupported AIR Maybe method %d", method.Kind)
 	}
-	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args}, nil
+	return &Expr{Kind: kind, Type: typeID, Target: target, Args: args, Bool: returnsReference && (method.Kind == checker.MaybeExpect || method.Kind == checker.MaybeOr)}, nil
 }
 
 func (fl *functionLowerer) lowerStrMethod(typeID TypeID, method *checker.StrMethod) (*Expr, error) {
@@ -6593,7 +6597,9 @@ func concreteFunctionKey(module ModuleID, name string, signature Signature, gene
 }
 
 func (l *lowerer) genericBindingsKey(def *checker.FunctionDef) (string, error) {
-	key, _, err := l.genericBindingsKeyWithInterner(def, l.internType)
+	key, _, err := l.genericBindingsKeyWithInterner(def, func(typ checker.Type) (TypeID, error) {
+		return l.internGenericArgument(typ, l.internType)
+	})
 	return key, err
 }
 
@@ -6603,7 +6609,9 @@ func (fl *functionLowerer) genericBindingsKey(def *checker.FunctionDef) (string,
 }
 
 func (fl *functionLowerer) genericBindingsKeyAndTypeVars(def *checker.FunctionDef) (string, map[string]TypeID, error) {
-	return fl.l.genericBindingsKeyWithInterner(def, fl.internResolvedType)
+	return fl.l.genericBindingsKeyWithInterner(def, func(typ checker.Type) (TypeID, error) {
+		return fl.l.internGenericArgument(typ, fl.internResolvedType)
+	})
 }
 
 // genericCallTypeArgs returns the concrete type arguments for a call to a
@@ -6619,7 +6627,7 @@ func (fl *functionLowerer) genericCallTypeArgs(def *checker.FunctionDef) ([]Type
 		if !ok {
 			return nil, fmt.Errorf("missing generic binding for %s in call to %s", p, def.Name)
 		}
-		id, err := fl.internResolvedType(binding)
+		id, err := fl.l.internGenericArgument(binding, fl.internResolvedType)
 		if err != nil {
 			return nil, err
 		}
@@ -6754,8 +6762,22 @@ func keyHasFunctionName(key, name string) bool {
 // storage. Mutable-reference shape is distinct from the referent's value type
 // and must survive bindings so later reads and writes use the shared storage.
 func isMutableReferenceType(typ checker.Type) bool {
-	_, ok := typ.(*checker.MutableRef)
+	_, ok := resolvedMutableReferenceType(typ)
 	return ok
+}
+
+func resolvedMutableReferenceType(typ checker.Type) (*checker.MutableRef, bool) {
+	seen := map[checker.Type]bool{}
+	for typ != nil && !seen[typ] {
+		seen[typ] = true
+		typeVar, ok := typ.(*checker.TypeVar)
+		if !ok || typeVar.Actual() == nil {
+			break
+		}
+		typ = typeVar.Actual()
+	}
+	ref, ok := typ.(*checker.MutableRef)
+	return ref, ok
 }
 
 func isMutableReferenceProducer(expr checker.Expression) bool {

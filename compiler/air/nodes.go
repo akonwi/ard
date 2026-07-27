@@ -66,7 +66,7 @@ const (
 	ExprForeignFieldAccess
 	ExprForeignStructInstance
 	ExprForeignValue
-	ExprForeignInterfaceUpcast
+	ExprInterfaceConversion
 	// ExprDiscardingFunctionCoercion wraps Target in the Void-returning
 	// function type named by Type, evaluating Target once and discarding calls' results.
 	ExprDiscardingFunctionCoercion
@@ -197,12 +197,12 @@ const (
 	ForeignResultValueBool
 )
 
-type ForeignInterfaceMode uint8
+type InterfaceConversionMode uint8
 
 const (
-	ForeignInterfaceValue ForeignInterfaceMode = iota
-	ForeignInterfaceOwnedPointer
-	ForeignInterfaceReference
+	InterfaceValue InterfaceConversionMode = iota
+	InterfaceOwnedPointer
+	InterfaceReference
 )
 
 type Expr struct {
@@ -221,22 +221,22 @@ type Expr struct {
 	Local  LocalID
 	Global GlobalID
 
-	Function             FunctionID
-	ForeignTarget        string
-	ForeignNamespace     string
-	ForeignQualifier     string
-	ForeignSymbol        string
-	ForeignReceiver      string
-	ForeignPointer       bool
-	ForeignInterfaceMode ForeignInterfaceMode
-	ForeignResultShape   ForeignResultShape
-	TypeArgs             []TypeID
-	Impl                 ImplID
-	Trait                TraitID
-	Method               int
-	Args                 []Expr
-	Entries              []MapEntry
-	CaptureLocals        []LocalID
+	Function           FunctionID
+	ForeignTarget      string
+	ForeignNamespace   string
+	ForeignQualifier   string
+	ForeignSymbol      string
+	ForeignReceiver    string
+	ForeignPointer     bool
+	InterfaceMode      InterfaceConversionMode
+	ForeignResultShape ForeignResultShape
+	TypeArgs           []TypeID
+	Impl               ImplID
+	Trait              TraitID
+	Method             int
+	Args               []Expr
+	Entries            []MapEntry
+	CaptureLocals      []LocalID
 
 	Fields []StructFieldValue
 	Target *Expr

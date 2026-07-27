@@ -370,6 +370,11 @@ ADR 0056 adopts these invariants for Ard-owned explicit implementations:
    value rather than nesting interfaces.
 10. Exact Go ABI implementation checks remain separate from interface argument
     conversion.
+11. Ard `Any` and named empty Go interfaces follow the same ownership rule even
+    though they require no explicit implementation.
+12. A Go generic parameter constrained by `any` is a concrete destination after
+    inference, not an interface-value destination; ordinary reference-to-value
+    snapshot semantics apply unless the type argument resolves to Ard `Any`.
 
 ## Related Ard documentation
 
