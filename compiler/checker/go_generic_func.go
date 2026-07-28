@@ -137,6 +137,26 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 			c.addDiagnostic(goConstraintDiagnostic{Argument: args[index], Constraint: tparam.Constraint().String(), Span: constraintSpan(index), LegacyMessage: legacy}.build())
 			return nil, nil, false
 		}
+	} else {
+		// An unrepresentable sibling binding must not disable validation for
+		// the representable arguments: check each one against its own
+		// constraint. Interdependent constraint shapes fall back to this
+		// weaker per-parameter check.
+		for i := 0; i < tparams.Len(); i++ {
+			if goArgs[i] == nil {
+				continue
+			}
+			tparam := tparams.At(i)
+			constraint, ok := tparam.Constraint().Underlying().(*types.Interface)
+			if !ok || constraint.Empty() {
+				continue
+			}
+			if !types.Satisfies(goArgs[i], constraint) {
+				legacy := fmt.Sprintf("Type argument %s does not satisfy Go constraint %s", args[i], tparam.Constraint())
+				c.addDiagnostic(goConstraintDiagnostic{Argument: args[i], Constraint: tparam.Constraint().String(), Span: constraintSpan(i), LegacyMessage: legacy}.build())
+				return nil, nil, false
+			}
+		}
 	}
 
 	fnDef, reason := functionDefFromGoSignatureBound(name, sig, bindings)

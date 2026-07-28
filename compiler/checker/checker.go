@@ -292,7 +292,14 @@ func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
 		return &MutableRefExpr{Operand: operand, Mode: ExistingReference, _type: operand.Type()}
 	}
 	mode := FreshValue
-	switch operand.(type) {
+	switch e := operand.(type) {
+	case *ForeignValue:
+		// An assignable imported Go global is addressable storage; a
+		// constant or non-assignable value materializes a fresh copy
+		// (ADR 0057).
+		if e.Assignable {
+			mode = AddressablePlace
+		}
 	case *Variable, *InstanceProperty, *ForeignFieldAccess:
 		if !c.isAddressablePlace(operand) {
 			c.addDiagnostic(nonAddressableBorrowDiagnostic{
@@ -381,13 +388,20 @@ func isReferenceType(t Type) bool {
 }
 
 // isAddressablePlace reports whether an explicit borrow may target the
-// expression's storage. Local and module-level bindings and fields reached
-// through an addressable or reference-valued base qualify; selectors on
-// non-addressable temporaries do not (ADR 0057).
+// expression's storage. Local and module-level bindings, assignable imported
+// globals, and fields reached through an addressable or reference-valued base
+// qualify; selectors on non-addressable temporaries do not (ADR 0057).
+// Function declarations and function-valued storage stay non-addressable in
+// the initial implementation: there is no lowerable stable address for them.
 func (c *Checker) isAddressablePlace(expr Expression) bool {
 	switch e := expr.(type) {
 	case *Variable:
+		if _, isFunction := e.sym.Type.(*FunctionDef); isFunction {
+			return false
+		}
 		return true
+	case *ForeignValue:
+		return e.Assignable
 	case *InstanceProperty:
 		if isReferenceValued(e.Subject) {
 			return true
@@ -492,6 +506,20 @@ func observedReferenceOperand(expr Expression) (Expression, bool) {
 	return nil, false
 }
 
+// equalityReferenceOperand recognizes a reference operand for pointer
+// identity comparison: an observationally loaded Ard reference or a foreign
+// pointer value, which is never observationally wrapped. Ard-owned and
+// foreign references follow the same equality rule (ADR 0057).
+func equalityReferenceOperand(expr Expression) (Expression, bool) {
+	if ref, ok := observedReferenceOperand(expr); ok {
+		return ref, true
+	}
+	if isPointerForeign(expr.Type()) {
+		return expr, true
+	}
+	return nil, false
+}
+
 func expressionBindingSpan(expr Expression) *SourceSpan {
 	var span SourceSpan
 	switch e := expr.(type) {
@@ -568,7 +596,7 @@ type Checker struct {
 	methodGenericAllowlist            []map[string]bool
 	discardExprContext                bool
 	matchArmDiscardContext            bool
-	pendingIsolatedClosure            bool
+	isolatedClosures                  map[*parse.AnonymousFunction]bool
 	deferredWorkDepth                 int
 	reportedMapKeyErrors              map[parse.Location]bool
 	emptyCollectionBinding            *collectionBindingContext
@@ -2065,12 +2093,26 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 	}
 	// There is no implicit `mut T -> T` conversion: a reference flows to a
 	// value destination only through an explicit `deref` (ADR 0057). A
-	// reference does satisfy a reference-typed destination whose referent is
-	// compatible, which covers concrete-to-trait reference projection
-	// (`mut Box` -> `mut View`).
+	// reference satisfies a reference-typed destination only for the same
+	// referent identity or the sanctioned concrete-to-trait projection
+	// (`mut Box` -> `mut View`). General value coercions (Any, Go
+	// interfaces, named descriptors) do not apply through a pointer: the
+	// referent storage shapes would differ.
 	if expectedRef, ok := expected.(*MutableRef); ok {
 		if actualRef, ok := actual.(*MutableRef); ok {
-			return c.areCompatible(expectedRef.Of(), actualRef.Of())
+			if expectedRef.Of().equal(actualRef.Of()) {
+				return true
+			}
+			if trait, ok := expectedRef.Of().(*Trait); ok {
+				return actualRef.Of().hasTrait(trait)
+			}
+			// Descriptor boundaries project the descriptor value, so Go's
+			// unnamed-to-named slice/map assignability applies through the
+			// reference wrapper (ADR 0057).
+			if isDescriptorBoundaryArdType(expectedRef.Of()) && isDescriptorBoundaryArdType(actualRef.Of()) {
+				return c.areCompatible(expectedRef.Of(), actualRef.Of())
+			}
+			return false
 		}
 	}
 	// A named Go map type accepts an Ard map with the same key/value shape,
@@ -3112,6 +3154,19 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 
+				// An isolated fiber must not write an outer reference slot:
+				// rebinding across the fiber boundary is a direct capture of
+				// outer mutable state (ADR 0057).
+				if isReferenceType(target.Type) && c.scope.isolationCrossed(id.Name) {
+					c.addDiagnostic(isolatedReferenceCaptureDiagnostic{
+						Name:            target.Name,
+						Borrow:          false,
+						Span:            c.sourceSpan(s.Target.GetLocation()),
+						DeclarationSpan: sourceSpanIfPresent(target.declaredAt),
+					}.build())
+					return nil
+				}
+
 				// Every named-binding assignment writes the binding slot
 				// itself (ADR 0057): an ordinary slot replaces its value and a
 				// reference-valued slot rebinds its handle. Writing through a
@@ -3304,7 +3359,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			if s.Condition == nil {
 				condition = &BoolLiteral{true}
 			} else {
-				condition = c.checkExpr(s.Condition)
+				// Conditions are observational reads (ADR 0057).
+				condition = observeReference(c.checkExpr(s.Condition))
 			}
 
 			if condition == nil {
@@ -3351,8 +3407,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return nil
 			}
 
-			// Check the condition expression
-			condition := c.checkExpr(s.Condition)
+			// Check the condition expression. Conditions are observational
+			// reads (ADR 0057).
+			condition := observeReference(c.checkExpr(s.Condition))
 			if condition == nil {
 				return nil
 			}
@@ -3391,7 +3448,8 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 		}
 	case *parse.RangeLoop:
 		{
-			start, end := c.checkExpr(s.Start), c.checkExpr(s.End)
+			// Range bounds are observational reads (ADR 0057).
+			start, end := observeReference(c.checkExpr(s.Start)), observeReference(c.checkExpr(s.End))
 			if start == nil || end == nil {
 				return nil
 			}
@@ -5457,10 +5515,14 @@ func checkerTypeToGoType(t Type) (gotypes.Type, bool) {
 	switch typ := t.(type) {
 	case *MutableRef:
 		// A reference validates its pointer-shaped boundary representation
-		// against Go constraints (ADR 0057).
+		// against Go constraints (ADR 0057). When the referent itself has no
+		// Go representation (an Ard-owned struct), the pointer is still
+		// comparable and method-free, so an opaque named referent stands in.
 		if referent, ok := checkerTypeToGoType(typ.Of()); ok {
 			return gotypes.NewPointer(referent), true
 		}
+		opaque := gotypes.NewNamed(gotypes.NewTypeName(0, nil, "ArdReferent", nil), gotypes.NewStruct(nil, nil), nil)
+		return gotypes.NewPointer(opaque), true
 	case *ForeignType:
 		if typ.GoType != nil {
 			return typ.GoType, true
@@ -6452,7 +6514,8 @@ func (c *Checker) checkIfChain(s *parse.IfStatement) Expression {
 			elseBlock = block
 			break
 		}
-		condition := c.checkExpr(current.Condition)
+		// Conditions are observational reads (ADR 0057).
+		condition := observeReference(c.checkExpr(current.Condition))
 		if condition == nil {
 			return nil
 		}
@@ -7409,8 +7472,8 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					// Reference equality is not an observational read: when both
 					// operands are references of the same referent type, `==` and
 					// `!=` compare current pointer identity (ADR 0057).
-					if leftRef, ok := observedReferenceOperand(left); ok {
-						if rightRef, ok := observedReferenceOperand(right); ok {
+					if leftRef, ok := equalityReferenceOperand(left); ok {
+						if rightRef, ok := equalityReferenceOperand(right); ok {
 							if leftRef.Type().equal(rightRef.Type()) || c.areCompatible(leftRef.Type(), rightRef.Type()) || c.areCompatible(rightRef.Type(), leftRef.Type()) {
 								if s.Operator == parse.NotEqual {
 									return &Inequality{leftRef, rightRef}
@@ -7795,10 +7858,18 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			}
 
 			// An async fiber's task closure is an isolated scope: it must not
-			// directly capture or borrow outer references (ADR 0057).
-			if mod.Path() == "ard/async" && name == "start" {
-				c.pendingIsolatedClosure = true
-				defer func() { c.pendingIsolatedClosure = false }()
+			// directly capture or borrow outer references (ADR 0057). Only the
+			// closure literal that IS the task argument isolates; closures
+			// nested in other expressions, and function values, follow the
+			// intentionally shallow policy.
+			if mod.Path() == "ard/async" && name == "start" && len(resolvedExprs) > 0 {
+				if task, ok := resolvedExprs[0].(*parse.AnonymousFunction); ok {
+					if c.isolatedClosures == nil {
+						c.isolatedClosures = map[*parse.AnonymousFunction]bool{}
+					}
+					c.isolatedClosures[task] = true
+					defer delete(c.isolatedClosures, task)
+				}
 			}
 
 			// Check and process arguments (handles both generics and mutability)
@@ -7846,8 +7917,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 
 			// Check body
 			setup := func() {
-				if c.pendingIsolatedClosure {
-					c.pendingIsolatedClosure = false
+				if c.isolatedClosures[s] {
 					c.scope.isolate()
 				}
 				c.scope.expectReturn(returnType)
@@ -8794,7 +8864,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				}
 			} else {
 				// Regular condition case
-				if condition := c.checkExpr(matchCase.Condition); condition != nil {
+				if condition := observeReference(c.checkExpr(matchCase.Condition)); condition != nil {
 					// Ensure condition is boolean
 					if condition.Type() != Bool {
 						c.addDiagnostic(nonBooleanMatchConditionDiagnostic{Actual: condition.Type(), Span: c.sourceSpan(matchCase.Condition.GetLocation())}.build())
@@ -9992,8 +10062,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			previousDeferredWorkDepth := c.deferredWorkDepth
 			c.deferredWorkDepth = 0
 			body := c.checkBlockWithExpected(s.Body, func() {
-				if c.pendingIsolatedClosure {
-					c.pendingIsolatedClosure = false
+				if c.isolatedClosures[s] {
 					c.scope.isolate()
 				}
 				c.scope.expectReturn(returnType)

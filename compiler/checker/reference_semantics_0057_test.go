@@ -188,6 +188,8 @@ let reference = mut values.at(0).expect("item")`},
 		{name: "temporary selector is rejected", source: `struct Outer { inner: Box }
 fn make() Outer { Outer{inner: Box{value: 1}} }
 let reference = mut make().inner`, wantError: true},
+		{name: "function declarations are not addressable", source: `fn helper() Int { 1 }
+let reference = mut helper`, wantError: true},
 		{name: "mut existing reference is idempotent", source: `let value = Box{value: 1}
 let reference = mut value
 let same: mut Box = mut reference`},

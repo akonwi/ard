@@ -72,6 +72,21 @@ let echoed: ffi::Item = ffi::Identity<ffi::Item>(deref reference)`},
 		{name: "comparable generic accepts reference identity", source: `let value = ffi::Item{N: 1}
 let reference = mut value
 let ok = ffi::IsComparable(reference)`},
+		{name: "comparable generic accepts Ard struct reference", source: `struct Native { N: Int }
+let value = Native{N: 1}
+let ok = ffi::IsComparable(mut value)`},
+		{name: "unrepresentable sibling does not skip constraint validation", source: `struct Native { N: Int }
+let values = [1, 2]
+let native = Native{N: 1}
+ffi::Two<[Int], Native>(mut values, native)`, wantError: true},
+		{name: "foreign pointer equality uses pointer identity", source: `let a = ffi::ItemPtr()
+let b = a
+let same = a == b
+let different = a != b`},
+		{name: "foreign struct references compare by pointer identity", source: `let value = ffi::Item{N: 1}
+let left = mut value
+let right = mut value
+let same = left == right`},
 		{name: "method constraint validates pointer representation", source: `let value = ffi::Item{N: 1}
 let reference = mut value
 ffi::UseBumper(reference)`},
@@ -251,6 +266,7 @@ func TakeInterfacePtr(value *Bumper) {}
 
 func Identity[T any](value T) T { return value }
 func IsComparable[T comparable](value T) bool { return value == value }
+func Two[T comparable, U any](t T, u U) {}
 func UseBumper[T interface{ Bump() }](value T) { value.Bump() }
 func SliceSize[S ~[]E, E any](value S) int { return len(value) }
 func MapSize[M ~map[K]V, K comparable, V any](value M) int { return len(value) }
