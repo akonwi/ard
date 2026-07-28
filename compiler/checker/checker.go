@@ -3424,7 +3424,10 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 		}
 	case *parse.ForInLoop:
 		{
-			iterValue := c.checkExpr(s.Iterable)
+			// Iteration is an observational read: a reference iterable
+			// resolves through its referent and shares the referent's element
+			// storage (ADR 0057).
+			iterValue := observeReference(c.checkExpr(s.Iterable))
 			if iterValue == nil {
 				return nil
 			}
@@ -3512,7 +3515,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 
 			if mapType, ok := iterValue.Type().(*Map); ok {
-				iterable := c.checkExpr(s.Iterable)
+				iterable := observeReference(c.checkExpr(s.Iterable))
 				if iterable == nil {
 					return nil
 				}
@@ -5625,9 +5628,11 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 					}
 				}
 
-				if fieldIsMutableRef && !c.isMutable(checkVal) {
+				if fieldIsMutableRef && !isReferenceValued(checkVal) {
+					// A reference-valued field accepts only an actual reference;
+					// a writable binding no longer borrows implicitly (ADR 0057).
 					c.addDiagnostic(typeMismatchDiagnostic{
-						Expected:      fieldExpected,
+						Expected:      MakeMutableRef(fieldExpected),
 						Actual:        checkVal.Type(),
 						ActualSpan:    c.sourceSpan(property.GetLocation()),
 						LegacyMessage: fmt.Sprintf("Type mismatch: Expected a mutable %s", fieldExpected.String()),
@@ -5700,9 +5705,11 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 					}
 				}
 				if val != nil {
-					if fieldIsMutableRef && !c.isMutable(val) {
+					if fieldIsMutableRef && !isReferenceValued(val) {
+						// A reference-valued field accepts only an actual
+						// reference (ADR 0057).
 						c.addDiagnostic(typeMismatchDiagnostic{
-							Expected:      fieldExpected,
+							Expected:      MakeMutableRef(fieldExpected),
 							Actual:        val.Type(),
 							ActualSpan:    c.sourceSpan(property.GetLocation()),
 							LegacyMessage: fmt.Sprintf("Type mismatch: Expected a mutable %s", fieldExpected.String()),
