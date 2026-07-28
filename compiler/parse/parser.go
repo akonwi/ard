@@ -3264,6 +3264,27 @@ func (p *parser) multiplication() (Expression, error) {
 }
 
 func (p *parser) unary() (Expression, error) {
+	// A keyword remains usable as a namespace/member name when `::` makes that
+	// role unambiguous (for example, `deref::new()`).
+	if p.check(deref) && p.peek2().kind == colon_colon {
+		p.tokens[p.index].kind = identifier
+		p.tokens[p.index].text = "deref"
+		return p.memberAccess()
+	}
+	if p.match(deref) {
+		keyword := p.previous()
+		operand, err := p.unary()
+		if err != nil {
+			return nil, err
+		}
+		return &Deref{
+			Location: Location{
+				Start: keyword.getLocation().Start,
+				End:   operand.GetLocation().End,
+			},
+			Operand: operand,
+		}, nil
+	}
 	if p.match(mut) {
 		mutToken := p.previous()
 		// In a value position, parse the operand through structInstance() so a
@@ -4082,7 +4103,7 @@ func (p *parser) isAllowedIdentifierKeyword(k kind) bool {
 
 func (p *parser) isKeyword(k kind) bool {
 	switch k {
-	case and, not, or, true_, false_, struct_, enum, impl, trait, fn, let, mut,
+	case and, not, or, true_, false_, struct_, enum, impl, trait, fn, let, mut, deref,
 		break_, match, select_, while_, for_, use, as, in, if_, else_, type_, private, defer_:
 		return true
 	default:

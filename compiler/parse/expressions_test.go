@@ -711,7 +711,7 @@ func TestMemberAccess(t *testing.T) {
 
 func TestKeywordsAsMethodNames(t *testing.T) {
 	keywords := []string{
-		"and", "not", "or", "true", "false", "struct", "enum", "impl", "trait", "fn", "let", "mut",
+		"and", "not", "or", "true", "false", "struct", "enum", "impl", "trait", "fn", "let", "mut", "deref",
 		"break", "match", "select", "while", "for", "use", "as", "in", "if", "else", "type", "private", "defer",
 	}
 

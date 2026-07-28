@@ -257,6 +257,10 @@ func collectImportUsesInExpression(expr parse.Expression, used map[string]bool) 
 		collectImportUsesInExpression(e.Right, used)
 	case *parse.UnaryExpression:
 		collectImportUsesInExpression(e.Operand, used)
+	case *parse.MutRef:
+		collectImportUsesInExpression(e.Operand, used)
+	case *parse.Deref:
+		collectImportUsesInExpression(e.Operand, used)
 	case *parse.ChainedComparison:
 		for _, operand := range e.Operands {
 			collectImportUsesInExpression(operand, used)
