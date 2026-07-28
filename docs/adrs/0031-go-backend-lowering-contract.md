@@ -4,6 +4,13 @@
 
 Accepted
 
+Superseded in part by ADR 0057. Ard-owned mutable references require explicit
+reference arguments, pointer-copy/rebind behavior, reference-aware capture
+metadata, and mutable-trait forwarding. Concrete references should use ordinary
+Go pointers where possible; trait and descriptor forwarding remain justified
+specialized representations. References use pointer identity for equality, map
+keys, and `comparable` constraints. Exact direct-Go ABI forms remain unchanged.
+
 ## Context
 
 The Go/native backend is the reference target for Ard (see `0002-use-air-as-backend-boundary.md`). It has grown incrementally, and its lowering rules now live mostly in code and accumulated test expectations rather than in a stated contract. This makes the backend hard to evolve and makes it unclear which behaviors are intentional Ard semantics, which are Go-specific conveniences, and which are historical accidents that should be removed.

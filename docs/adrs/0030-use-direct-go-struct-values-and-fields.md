@@ -4,6 +4,17 @@
 
 Proposed
 
+Superseded in part by accepted ADR 0057. A Go pointer result remains a foreign
+reference value when stored or propagated; it does not implicitly dereference
+into an annotated value type. `deref pointer` explicitly produces the shallow
+value. Mutable bindings may store and rebind foreign pointer
+values using Go pointer-copy semantics. Binding a Go struct value in a `mut`
+slot does not make its fields or pointer-receiver methods interior-mutable; an
+actual foreign pointer/reference is required, and an addressable `let` value may
+be borrowed explicitly. Examples and rules below relying on mutable-binding
+interior access are historical. ADR 0057 is normative where this proposal
+differs.
+
 ## Context
 
 ADR 0028 introduced direct Go imports so Ard code can reference Go packages, functions, methods, named types, scalar constants, enum-like typed constants, and package variables. Go named struct types can already appear in Ard signatures through direct Go type references, but their fields remain opaque to Ard.
@@ -147,7 +158,7 @@ Go package functions may be generic (`func StateRef[T any](c *StateCtx) *T`, `fu
 - Explicit or inferred type arguments must satisfy the Go type parameter's constraint. An empty constraint (`any`) accepts every representable Ard type; other constraints are validated with the Go type checker when the argument has a direct Go representation, and rejected otherwise.
 - The instantiated signature maps through the same representability and boundary rules as concrete signatures. A generic result `*T` follows the instantiated type's mapping: `StateRef<DemoState>` returns `mut DemoState`, live mutable access to the Go-side storage. `(T, error)`, `(T, bool)`, and error-only result adaptations apply after instantiation.
 - The backend always lowers to an explicitly instantiated Go call (`pkg.Fn[T1, T2](args)`), never relying on Go-side inference, so the generated code is deterministic.
-- A `mut T` result must be bound directly with `let`; the binding becomes a pointer-backed local so mutations flow through to the Go-side storage. A value-typed annotation (`let snap: T = ...`) snapshots a copy instead. Rebinding (`mut` bindings), closure capture, indirect initializers (match/if arms), wrapping in `Result`/`Maybe`, and discarding the result are rejected until their semantics are defined.
+- As amended by ADR 0057, a `mut T` result is a first-class foreign reference value. It may flow through bindings, fields, returns, containers, captures, and generic contexts that accept that reference type. A value-typed destination must dereference explicitly (`let snap: T = deref ffi::StateRef<T>(ctx)`). A `mut` binding may store and rebind the foreign pointer using normal Go pointer-copy semantics.
 
 ### Nil semantics and direct-Go safety boundary
 

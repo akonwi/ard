@@ -351,7 +351,7 @@ Primary references:
 
 ## Ard interop invariants
 
-ADR 0056 adopts these invariants for Ard-owned explicit implementations:
+ADRs 0056 and 0057 adopt these invariants for Ard-owned explicit implementations; ADR 0057 governs pointer-copy reference flow and boundary rebinding where the earlier decision differs:
 
 1. A foreign interface is an existential conversion boundary, not an ordinary
    concrete `T` destination.
@@ -364,17 +364,20 @@ ADR 0056 adopts these invariants for Ard-owned explicit implementations:
    dynamic Go type `*W`.
 7. Go does not need to distinguish owned and borrowed pointers; Ard source and
    conversion metadata do.
-8. A caller with `mut W` can request owned-copy behavior by first producing an
-   explicit `W` snapshot.
+8. A caller with `mut W` cannot implicitly request owned-value behavior. It
+   must use `deref reference` to produce the shallow `W` value before conversion;
+   deep `core::copy` semantics remain separate and deferred.
 9. Existing interface-to-interface conversions preserve the concrete dynamic
    value rather than nesting interfaces.
 10. Exact Go ABI implementation checks remain separate from interface argument
     conversion.
 11. Ard `Any` and named empty Go interfaces follow the same ownership rule even
     though they require no explicit implementation.
-12. A Go generic parameter constrained by `any` is a concrete destination after
-    inference, not an interface-value destination; ordinary reference-to-value
-    snapshot semantics apply unless the type argument resolves to Ard `Any`.
+12. A Go generic parameter constrained by `any` is not automatically an
+    interface-value destination. An inferred Ard reference contributes its
+    current pointer-shaped Go boundary type (for example `*W`); an explicitly
+    value-shaped `W` destination rejects bare `mut W` and accepts
+    `deref reference` as the explicit `W` value.
 
 ## Related Ard documentation
 
@@ -382,3 +385,4 @@ ADR 0056 adopts these invariants for Ard-owned explicit implementations:
 - [ADR 0040: Decouple Mutability from Go Pointer Lowering](./adrs/0040-decouple-mutability-from-go-pointer-lowering.md)
 - [ADR 0045: Support Explicit Mutable Reference Expressions](./adrs/0045-support-explicit-mutable-reference-expressions.md)
 - [ADR 0056: Preserve Ard Value Semantics When Lowering Go Interfaces](./adrs/0056-preserve-ard-value-semantics-when-lowering-go-interfaces.md)
+- [ADR 0057: Separate Binding Mutability from Mutable Reference Values](./adrs/0057-separate-binding-mutability-from-reference-values.md)

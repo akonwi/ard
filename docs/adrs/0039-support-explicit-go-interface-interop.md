@@ -4,6 +4,12 @@
 
 Accepted
 
+Clarified by ADR 0057. Ard may create an internal `mut ForeignInterface` that
+references addressable interface storage, but this does not add imported Go
+`*Interface` ABI support. A bare pointer-to-interface does not satisfy the value
+interface; use `deref` to copy the current interface descriptor. Exact imported
+`*Interface` parameters remain unsupported.
+
 ## Context
 
 Ard now imports Go packages directly through `use go:` and can call functions, use constants, work with named foreign types, call methods, access struct fields, construct Go structs, pass callbacks, interoperate with maps, and use `Any` for Go `any` values. ADR 0038 also changed Go lowering so `Result[T, Str]` and `Maybe[T]` use idiomatic Go ABI shapes in function and method return position:

@@ -9,6 +9,14 @@ single spelling; the former `fn f(mut s: S)` flag spelling is rejected by
 the parser with a pointer to the type-position form. Examples below using
 the old spelling are historical.
 
+Superseded in part by ADR 0057. In particular, binding mutability no longer
+implicitly creates or satisfies a mutable reference, an ordinary value in a
+`mut` binding is not interior-mutable, references remain first-class values when
+they flow, and whole-referent writes through references are no longer generally
+permitted. Examples below that mutate fields or call mutating methods directly
+through an ordinary `mut T-value` binding are historical. ADR 0057 is normative
+where the decisions conflict.
+
 ## Context
 
 Ard currently uses `mut` for two related but different ideas:

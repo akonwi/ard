@@ -4,6 +4,14 @@
 
 Accepted
 
+Clarified by ADR 0057. `unsafe::cast<T>` remains an explicit checked operation
+that may shallow-dereference a boxed non-nil `*T`; nil returns `none` under this
+fallible API rather than using direct `deref`'s panic behavior. For concrete and
+supported descriptor targets, `unsafe::cast<mut T>` recovers a pointer-like
+reference whose copies and rebinding follow ordinary pointer-value semantics.
+`unsafe::cast<mut Trait>` remains unsupported initially because it would need to
+reconstruct a forwarding table from an open set of dynamic pointer types.
+
 ## Context
 
 ADR 0031 defines `Any` as the Ard surface for Go's `any`. `Any` lowers to Go `any` and replaces the older dynamic object model. It exists primarily for FFI boundaries: Ard values can be boxed into `Any`, Go functions that accept `any` can receive Ard values, and Go functions that return `any` produce Ard `Any` values.
