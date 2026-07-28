@@ -83,14 +83,27 @@ func (st SymbolTable) get(name string) (*Symbol, bool) {
 	}
 
 	if st.parent != nil {
-		got, ok := st.parent.get(name)
-		// for isolated scopes, only read-only references are allowed
-		if ok && st.isolated && got.mutable {
-			return nil, false
-		}
-		return got, ok
+		return st.parent.get(name)
 	}
 	return nil, false
+}
+
+// isolationCrossed reports whether resolving name crosses an isolated scope
+// boundary: the symbol lives outside a fiber that must not directly capture
+// or borrow outer mutable state (ADR 0057). Callers decide which uses of such
+// a symbol are rejected.
+func (st SymbolTable) isolationCrossed(name string) bool {
+	if _, ok := st.symbols[name]; ok {
+		return false
+	}
+	if st.parent == nil {
+		return false
+	}
+	if st.isolated {
+		_, found := st.parent.get(name)
+		return found
+	}
+	return st.parent.isolationCrossed(name)
 }
 
 // findGeneric looks for an existing generic type with the given name in the scope chain

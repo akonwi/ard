@@ -108,22 +108,38 @@ reference.N = 2
 reference.Bump()`},
 		{name: "named Go interface accepts concrete reference", source: `let value = ffi::Item{N: 1}
 ffi::TakeBumper(mut value)`},
-		{name: "immediate Ard concrete to trait provenance satisfies named Go interface", source: `trait View { fn value() Int }
+		{name: "immediate Ard concrete to trait provenance satisfies named Go interface", source: `trait View {
+  fn value() Int
+}
 struct Native { N: Int }
-impl View for Native { fn value() Int { self.N } }
-impl ffi::Reader for Native { fn read() Int { self.N } }
+impl View for Native {
+  fn value() Int { self.N }
+}
+impl ffi::Reader for Native {
+  fn read() Int { self.N }
+}
 let value = Native{N: 1}
 ffi::TakeReader(mut value)`},
-		{name: "flowed mutable trait is rejected at named Go interface", source: `trait View { fn value() Int }
+		{name: "flowed mutable trait is rejected at named Go interface", source: `trait View {
+  fn value() Int
+}
 struct Native { N: Int }
-impl View for Native { fn value() Int { self.N } }
-impl ffi::Reader for Native { fn read() Int { self.N } }
+impl View for Native {
+  fn value() Int { self.N }
+}
+impl ffi::Reader for Native {
+  fn read() Int { self.N }
+}
 let value = Native{N: 1}
 let view: mut View = mut value
 ffi::TakeReader(view)`, wantError: true},
-		{name: "bare generic preserves mutable trait forwarding handle", source: `trait View { fn value() Int }
+		{name: "bare generic preserves mutable trait forwarding handle", source: `trait View {
+  fn value() Int
+}
 struct Native { N: Int }
-impl View for Native { fn value() Int { self.N } }
+impl View for Native {
+  fn value() Int { self.N }
+}
 fn take(value: mut View) {}
 let value = Native{N: 1}
 let view: mut View = mut value

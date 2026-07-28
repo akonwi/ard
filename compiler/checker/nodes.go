@@ -177,11 +177,12 @@ func (v Variable) Name() string {
 	return v.sym.Name
 }
 
-// Type returns the referent type for reference-typed storage: reads through
-// a `mut T` binding see the referent, mirroring InstanceProperty (ADR 0045).
-// The raw storage type stays available via StorageType.
+// Type returns the binding's stored type. A `mut T` binding is a first-class
+// reference value and reports `mut T`; observational reads resolve through the
+// referent at their use sites, and materializing `T` requires an explicit
+// `deref` (ADR 0057).
 func (v Variable) Type() Type {
-	return derefMutableRef(v.sym.Type)
+	return v.sym.Type
 }
 
 // StorageType returns the binding's declared type, keeping the `mut T`
@@ -203,11 +204,13 @@ const (
 )
 
 // MutableRefExpr is the explicit `mut <operand>` expression (ADR 0045). It
-// evaluates to a mutable reference to the operand's storage. Fresh marks a
-// value-expression operand that materializes new mutable storage rather than
-// referencing an existing place.
+// evaluates to a mutable reference. Mode classifies the operand per ADR 0057:
+// copy an existing handle, borrow addressable storage, or materialize fresh
+// storage. Fresh remains as the legacy AIR-facing bit and mirrors
+// Mode == FreshValue until Phase 3 migrates lowering onto Mode.
 type MutableRefExpr struct {
 	Operand Expression
+	Mode    ReferenceMode
 	Fresh   bool
 	_type   Type
 }
@@ -220,6 +223,25 @@ func (m *MutableRefExpr) String() string {
 	return fmt.Sprintf("mut %s", m.Operand)
 }
 
+// DerefExpr is the explicit one-layer dereference `deref <operand>` (ADR
+// 0057). The operand must be an actual reference value; the result is a
+// shallow, non-addressable copy of the current referent. Observational is set
+// for compiler-inserted referent reads (arithmetic, interpolation, matching),
+// which share the same shallow-load semantics.
+type DerefExpr struct {
+	Operand       Expression
+	Observational bool
+	_type         Type
+}
+
+func (d *DerefExpr) Type() Type {
+	return d._type
+}
+
+func (d *DerefExpr) String() string {
+	return fmt.Sprintf("deref %s", d.Operand)
+}
+
 type InstanceProperty struct {
 	Subject  Expression
 	Property string
@@ -227,8 +249,10 @@ type InstanceProperty struct {
 	Kind     SubjectKind // Pre-computed by checker based on subject type
 }
 
+// Type returns the field's stored type. A reference-valued field reports its
+// `mut T` handle type rather than implicitly dereferencing (ADR 0057).
 func (i *InstanceProperty) Type() Type {
-	return derefMutableRef(i._type)
+	return i._type
 }
 
 // String returns a string representation of the instance property

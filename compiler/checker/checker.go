@@ -264,37 +264,61 @@ func referenceArgType(expr Expression) Type {
 	return expr.Type()
 }
 
-// checkMutRef checks the explicit `mut <operand>` expression (ADR 0045).
+// ReferenceMode classifies an explicit `mut <operand>` expression's operand
+// (ADR 0057). Invalid places are diagnosed before this mode is assigned.
+type ReferenceMode uint8
+
+const (
+	// ExistingReference copies an existing pointer-like reference handle.
+	ExistingReference ReferenceMode = iota
+	// AddressablePlace creates a reference to existing stable storage.
+	AddressablePlace
+	// FreshValue materializes stable storage for a value expression and
+	// references it.
+	FreshValue
+)
+
+// checkMutRef checks the explicit `mut <operand>` expression (ADR 0045,
+// ADR 0057). Explicit borrowing depends on addressability, not binding
+// mutability: `mut place` is legal on a `let` binding.
 func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
 	operand := c.checkExpr(s.Operand)
 	if operand == nil {
 		return nil
 	}
-	// A place whose storage is already a reference aliases: the result is
-	// another reference to the same referent. Reads see through references,
-	// so `mut` is the only spelling that propagates one (ADR 0045).
-	fresh := false
+	// `mut` is idempotent on an existing reference value: the result copies
+	// the current handle rather than borrowing the slot that stores it.
+	if isReferenceValued(operand) {
+		return &MutableRefExpr{Operand: operand, Mode: ExistingReference, _type: operand.Type()}
+	}
+	mode := FreshValue
 	switch operand.(type) {
 	case *Variable, *InstanceProperty, *ForeignFieldAccess:
-		if !c.isMutable(operand) {
-			c.addDiagnostic(immutableMutableReferenceDiagnostic{
-				Place:           mutRefPlaceName(operand),
+		if !c.isAddressablePlace(operand) {
+			c.addDiagnostic(nonAddressableBorrowDiagnostic{
+				Span: c.sourceSpan(s.Operand.GetLocation()),
+			}.build())
+			return nil
+		}
+		// An isolated fiber must not explicitly borrow outer storage
+		// (ADR 0057).
+		if root, ok := rootPlaceVariable(operand); ok && c.scope.isolationCrossed(root.Name()) {
+			c.addDiagnostic(isolatedReferenceCaptureDiagnostic{
+				Name:            root.Name(),
+				Borrow:          true,
 				Span:            c.sourceSpan(s.Operand.GetLocation()),
 				DeclarationSpan: expressionBindingSpan(operand),
 			}.build())
 			return nil
 		}
+		mode = AddressablePlace
 	default:
 		// A value expression materializes fresh mutable storage; the
-		// reference points at it, equivalent to binding a mut local first.
-		fresh = true
+		// reference points at it, equivalent to binding a stable local first.
 	}
 	var refType Type
 	if foreign, ok := operand.Type().(*ForeignType); ok {
-		if foreign.Pointer {
-			// The place already holds a reference; aliasing copies it.
-			refType = foreign
-		} else if pointer := foreign.PointerForm(); pointer != nil {
+		if pointer := foreign.PointerForm(); pointer != nil {
 			refType = pointer
 		} else {
 			c.addDiagnostic(unsupportedMutableReferenceDiagnostic{
@@ -306,7 +330,160 @@ func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
 	} else {
 		refType = MakeMutableRef(operand.Type())
 	}
-	return &MutableRefExpr{Operand: operand, Fresh: fresh, _type: refType}
+	return &MutableRefExpr{Operand: operand, Mode: mode, Fresh: mode == FreshValue, _type: refType}
+}
+
+// checkDeref checks the explicit one-layer `deref <operand>` expression
+// (ADR 0057). Only an actual reference value qualifies; the result is a
+// shallow, non-addressable copy of the current referent.
+func (c *Checker) checkDeref(s *parse.Deref) Expression {
+	operand := c.checkExpr(s.Operand)
+	if operand == nil {
+		return nil
+	}
+	switch t := operand.Type().(type) {
+	case *MutableRef:
+		return &DerefExpr{Operand: operand, _type: t.Of()}
+	case *ForeignType:
+		if t.Pointer {
+			if value := t.ValueForm(); value != nil {
+				return &DerefExpr{Operand: operand, _type: value}
+			}
+		}
+	}
+	c.addDiagnostic(invalidDerefOperandDiagnostic{
+		Type: operand.Type(),
+		Span: c.sourceSpan(s.Operand.GetLocation()),
+	}.build())
+	return nil
+}
+
+// isReferenceValued reports whether an expression's value is an actual
+// reference: an Ard `mut T` or a pointer-shaped foreign value (ADR 0057).
+func isReferenceValued(expr Expression) bool {
+	if expr == nil {
+		return false
+	}
+	return isReferenceType(expr.Type())
+}
+
+func isReferenceType(t Type) bool {
+	if _, ok := t.(*MutableRef); ok {
+		return true
+	}
+	return isPointerForeign(t)
+}
+
+// isAddressablePlace reports whether an explicit borrow may target the
+// expression's storage. Local and module-level bindings and fields reached
+// through an addressable or reference-valued base qualify; selectors on
+// non-addressable temporaries do not (ADR 0057).
+func (c *Checker) isAddressablePlace(expr Expression) bool {
+	switch e := expr.(type) {
+	case *Variable:
+		return true
+	case *InstanceProperty:
+		if isReferenceValued(e.Subject) {
+			return true
+		}
+		return c.isAddressablePlace(e.Subject)
+	case *ForeignFieldAccess:
+		if isReferenceValued(e.Subject) {
+			return true
+		}
+		return c.isAddressablePlace(e.Subject)
+	}
+	return false
+}
+
+// permitsInteriorMutation reports whether interior mutation (field writes,
+// mutating methods, sanctioned container operations) may flow through the
+// expression. Interior mutation requires an actual reference somewhere along
+// the access chain; a writable ordinary binding slot does not qualify
+// (ADR 0057).
+func (c *Checker) permitsInteriorMutation(expr Expression) bool {
+	if isReferenceValued(expr) {
+		return true
+	}
+	switch e := expr.(type) {
+	case *InstanceProperty:
+		return c.permitsInteriorMutation(e.Subject)
+	case *ForeignFieldAccess:
+		return c.permitsInteriorMutation(e.Subject)
+	}
+	return false
+}
+
+// receiverBindingType returns the storage type for a method receiver. A
+// mutating method's receiver is an actual `mut T` reference (ADR 0057);
+// read-only receivers stay ordinary values. The binding slot itself is never
+// writable, so `self` cannot be rebound.
+func receiverBindingType(target Type, mutates bool) Type {
+	if !mutates {
+		return target
+	}
+	if isReferenceType(target) {
+		return target
+	}
+	if foreign, ok := target.(*ForeignType); ok {
+		if pointer := foreign.PointerForm(); pointer != nil {
+			return pointer
+		}
+		return target
+	}
+	return MakeMutableRef(target)
+}
+
+// rootPlaceVariable walks a place expression's subject chain to its root
+// variable, if any.
+func rootPlaceVariable(expr Expression) (*Variable, bool) {
+	switch e := expr.(type) {
+	case *Variable:
+		return e, true
+	case *InstanceProperty:
+		return rootPlaceVariable(e.Subject)
+	case *ForeignFieldAccess:
+		return rootPlaceVariable(e.Subject)
+	}
+	return nil, false
+}
+
+// assignmentSubjectBase returns the base expression a property-assignment
+// target reaches its field through, or nil when the target is not a field
+// access.
+func assignmentSubjectBase(expr Expression) Expression {
+	switch e := expr.(type) {
+	case *InstanceProperty:
+		return e.Subject
+	case *ForeignFieldAccess:
+		return e.Subject
+	}
+	return nil
+}
+
+// observeReference wraps a reference-valued expression in an observational
+// shallow referent load. Compiler-defined read-only operations (arithmetic,
+// interpolation, matching, conditions) resolve through the referent without
+// requiring an explicit deref (ADR 0057).
+func observeReference(expr Expression) Expression {
+	if expr == nil {
+		return nil
+	}
+	switch t := expr.Type().(type) {
+	case *MutableRef:
+		return &DerefExpr{Operand: expr, Observational: true, _type: t.Of()}
+	}
+	return expr
+}
+
+// observedReferenceOperand recovers the reference operand behind a
+// compiler-inserted observational load, letting reference-aware contexts
+// (pointer equality) undo the referent read.
+func observedReferenceOperand(expr Expression) (Expression, bool) {
+	if load, ok := expr.(*DerefExpr); ok && load.Observational {
+		return load.Operand, true
+	}
+	return nil, false
 }
 
 func expressionBindingSpan(expr Expression) *SourceSpan {
@@ -385,6 +562,7 @@ type Checker struct {
 	methodGenericAllowlist            []map[string]bool
 	discardExprContext                bool
 	matchArmDiscardContext            bool
+	pendingIsolatedClosure            bool
 	deferredWorkDepth                 int
 	reportedMapKeyErrors              map[parse.Location]bool
 	emptyCollectionBinding            *collectionBindingContext
@@ -1165,13 +1343,14 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 			if mutable {
 				// A `mut pkg::T` parameter in function-type position takes the
 				// foreign type's pointer form, matching named `mut` parameters,
-				// so annotations unify with imported Go signatures. Non-foreign
-				// types keep the Mutable-flag representation that call-site
-				// mutability checking relies on.
+				// so annotations unify with imported Go signatures. Everything
+				// else is a first-class `mut T` reference type (ADR 0057).
 				if foreign, ok := paramType.(*ForeignType); ok && !foreign.Pointer {
 					if pointer := foreign.PointerForm(); pointer != nil {
 						paramType = pointer
 					}
+				} else if !isReferenceType(paramType) {
+					paramType = MakeMutableRef(paramType)
 				}
 			}
 			params[i] = Parameter{
@@ -1484,6 +1663,17 @@ func (c *Checker) checkUnsafeCast(s *parse.StaticFunction) Expression {
 		return nil
 	}
 	targetType := callTypeArgs[0]
+	// Recovering a `mut Trait` forwarding handle from a dynamic value would
+	// require open-world vtable registration; it stays unsupported (ADR 0057).
+	if ref, ok := targetType.(*MutableRef); ok {
+		if _, isTrait := ref.Of().(*Trait); isTrait {
+			c.addDiagnostic(unsupportedTraitReferenceCastDiagnostic{
+				Type: targetType,
+				Span: c.sourceSpan(s.Function.TypeArgs[0].GetLocation()),
+			}.build())
+			return nil
+		}
+	}
 	return &UnsafeCast{Value: arg, TargetType: targetType, ReturnType: MakeMaybe(targetType)}
 }
 
@@ -1855,12 +2045,14 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 			return c.structImplementsForeignInterface(def, iface) && !c.foreignInterfaceImplRequiresPointer(def, iface)
 		}
 	}
-	// A `mut T` value satisfies an expected value `T`: the reader receives a
-	// dereferenced copy. Contexts that require mutable identity (mutable
-	// parameters, assignment targets) check mutability separately.
-	if ref, ok := actual.(*MutableRef); ok {
-		if _, expectsRef := expected.(*MutableRef); !expectsRef {
-			return c.areCompatible(expected, ref.Of())
+	// There is no implicit `mut T -> T` conversion: a reference flows to a
+	// value destination only through an explicit `deref` (ADR 0057). A
+	// reference does satisfy a reference-typed destination whose referent is
+	// compatible, which covers concrete-to-trait reference projection
+	// (`mut Box` -> `mut View`).
+	if expectedRef, ok := expected.(*MutableRef); ok {
+		if actualRef, ok := actual.(*MutableRef); ok {
+			return c.areCompatible(expectedRef.Of(), actualRef.Of())
 		}
 	}
 	// A named Go map type accepts an Ard map with the same key/value shape,
@@ -2037,7 +2229,7 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 		c.pushMethodGenericAllowlist(receiverGenerics)
 		c.foreignABIFunctions[&method] = true
 		fnDef := c.checkFunction(&method, func() {
-			c.scope.add(s.Receiver.Name, targetType, method.Mutates)
+			c.scope.add(s.Receiver.Name, receiverBindingType(targetType, method.Mutates), false)
 		}, receiverGenerics...)
 		c.popMethodGenericAllowlist()
 		if fnDef == nil {
@@ -2571,7 +2763,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					// if we made it this far, it's a valid implementation
 					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunction(&method, func() {
-						c.scope.add(s.Receiver.Name, targetType, method.Mutates)
+						c.scope.add(s.Receiver.Name, receiverBindingType(targetType, method.Mutates), false)
 					}, receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if fnDef != nil && !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
@@ -2893,34 +3085,11 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 
-				if target.foreignDescriptor {
-					c.addDiagnostic(unreachableReferentAssignmentDiagnostic{
-						Name:            target.Name,
-						Span:            c.sourceSpan(s.Target.GetLocation()),
-						DeclarationSpan: sourceSpanIfPresent(target.declaredAt),
-					}.build())
-					return nil
-				}
-
-				// Assignment through a mutable-reference binding writes the
-				// referent; it does not rebind, so the binding's own
-				// (im)mutability does not gate it (ADR 0045).
-				expectedType := target.Type
-				refBase, targetIsRef := mutableRefBase(target.Type)
-				if targetIsRef {
-					expectedType = refBase
-					// Whole-value writes cannot reach descriptor-backed
-					// referents: the alias shares element storage, not the
-					// binding slot (ADR 0040 / ADR 0045).
-					if !mutableParamNeedsGoPointer(refBase) {
-						c.addDiagnostic(unreachableReferentAssignmentDiagnostic{
-							Name:            target.Name,
-							Span:            c.sourceSpan(s.Target.GetLocation()),
-							DeclarationSpan: sourceSpanIfPresent(target.declaredAt),
-						}.build())
-						return nil
-					}
-				} else if !target.mutable {
+				// Every named-binding assignment writes the binding slot
+				// itself (ADR 0057): an ordinary slot replaces its value and a
+				// reference-valued slot rebinds its handle. Writing through a
+				// reference to replace the referent is not expressible here.
+				if !target.mutable {
 					c.addDiagnostic(immutableAssignmentDiagnostic{
 						Name:            target.Name,
 						AssignmentSpan:  c.sourceSpan(s.Target.GetLocation()),
@@ -2929,6 +3098,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 
+				expectedType := target.Type
 				var value Expression
 				c.withValueExprContext(func() {
 					value = c.checkExprAs(s.Value, expectedType)
@@ -2937,16 +3107,15 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 
-				if targetIsRef {
-					// A reference binding is not rebindable: writing a new
-					// reference through it has no storage to land in.
-					if _, valueIsRef := value.Type().(*MutableRef); valueIsRef || isPointerForeign(value.Type()) {
-						c.addDiagnostic(referenceRebindingDiagnostic{
-							Span:            c.sourceSpan(s.Value.GetLocation()),
-							DeclarationSpan: sourceSpanIfPresent(target.declaredAt),
-						}.build())
-						return nil
-					}
+				if isReferenceType(expectedType) && !isReferenceValued(value) {
+					// A reference slot rebinds only with another actual
+					// reference; an ordinary value would be a whole-referent
+					// write, which Ard does not support (ADR 0057).
+					c.addDiagnostic(wholeReferentAssignmentDiagnostic{
+						Place: target.Name,
+						Span:  c.sourceSpan(s.Target.GetLocation()),
+					}.build())
+					return nil
 				}
 
 				if !c.areCompatible(expectedType, value.Type()) {
@@ -2999,11 +3168,24 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					return nil
 				}
 
-				if !c.isMutable(subject) {
-					c.addDiagnostic(immutablePropertyAssignmentDiagnostic{
-						Property:        ip.String(),
+				// A field write is interior mutation of the containing value:
+				// it requires an actual reference along the subject chain, not
+				// merely a writable binding slot (ADR 0057).
+				if base := assignmentSubjectBase(subject); base == nil || !c.permitsInteriorMutation(base) {
+					c.addDiagnostic(valueInteriorMutationDiagnostic{
+						Place:           ip.String(),
 						Span:            c.sourceSpan(s.Target.GetLocation()),
 						DeclarationSpan: expressionBindingSpan(subject),
+					}.build())
+					return nil
+				}
+				if isReferenceType(fieldType) && !isReferenceValued(value) {
+					// Rebinding a reference-valued field slot requires another
+					// actual reference; an ordinary value would be a
+					// whole-referent write (ADR 0057).
+					c.addDiagnostic(wholeReferentAssignmentDiagnostic{
+						Place: ip.String(),
+						Span:  c.sourceSpan(s.Target.GetLocation()),
 					}.build())
 					return nil
 				}
@@ -3457,7 +3639,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					}
 					c.pushMethodGenericAllowlist(receiverGenerics)
 					fnDef := c.checkFunctionWithSignature(method, func() {
-						c.scope.add(s.Receiver.Name, def, method.Mutates)
+						c.scope.add(s.Receiver.Name, receiverBindingType(def, method.Mutates), false)
 					}, signatures[i], receiverGenerics...)
 					c.popMethodGenericAllowlist()
 					if !methodUsesOnlyReceiverGenerics(fnDef, receiverGenerics) {
@@ -6388,6 +6570,22 @@ func (c *Checker) addInvalidRelational(operator string, left, right Expression, 
 	}.build())
 }
 
+// rejectReferenceRelational rejects relational comparison when both operands
+// are references: references support only pointer identity, never ordering
+// (ADR 0057). Mixed reference/value operands observe the referent instead.
+func (c *Checker) rejectReferenceRelational(operator string, left, right Expression, leftLoc, rightLoc parse.Location) bool {
+	leftRef, leftOK := observedReferenceOperand(left)
+	rightRef, rightOK := observedReferenceOperand(right)
+	if !leftOK || !rightOK {
+		return false
+	}
+	legacy := fmt.Sprintf("Invalid: %s %s %s", leftRef.Type(), operator, rightRef.Type())
+	c.addDiagnostic(invalidRelationalDiagnostic{
+		Operator: operator, LeftType: leftRef.Type(), RightType: rightRef.Type(), LeftSpan: c.sourceSpan(leftLoc), RightSpan: c.sourceSpan(rightLoc), LegacyMessage: legacy, Unsupported: true,
+	}.build())
+	return true
+}
+
 func (c *Checker) addInvalidEquality(operator string, left, right Expression, leftLoc, rightLoc parse.Location, legacy string, unsupported bool) {
 	c.addDiagnostic(invalidEqualityDiagnostic{
 		Operator: operator, LeftType: left.Type(), RightType: right.Type(), LeftSpan: c.sourceSpan(leftLoc), RightSpan: c.sourceSpan(rightLoc), LegacyMessage: legacy, Unsupported: unsupported,
@@ -6459,7 +6657,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 		{
 			chunks := make([]Expression, len(s.Chunks))
 			for i := range s.Chunks {
-				cx := c.checkExpr(s.Chunks[i])
+				// Interpolation is an observational read: a reference chunk
+				// stringifies its current referent (ADR 0057).
+				cx := observeReference(c.checkExpr(s.Chunks[i]))
 				if cx == nil {
 					// skip bad expressions
 					chunks[i] = &StrLiteral{}
@@ -6510,6 +6710,18 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 	case *parse.Identifier:
 		if sym, ok := c.scope.get(s.Name); ok {
 			if c.rejectUnspecializedGenericFunctionValue(sym.Type, s.GetLocation()) {
+				return nil
+			}
+			// An isolated fiber must not directly capture an outer reference,
+			// for reads or writes alike (ADR 0057). References hidden in
+			// containers or dynamic values are intentionally not tracked.
+			if isReferenceType(sym.Type) && c.scope.isolationCrossed(s.Name) {
+				c.addDiagnostic(isolatedReferenceCaptureDiagnostic{
+					Name:            s.Name,
+					Borrow:          false,
+					Span:            c.sourceSpan(s.GetLocation()),
+					DeclarationSpan: sourceSpanIfPresent(sym.declaredAt),
+				}.build())
 				return nil
 			}
 			c.recordSymbolUse(s, sym, nil)
@@ -6654,7 +6866,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					pointerForeign.UnsupportedMethods = foreign.UnsupportedPointerMethods
 					pointerForeign.MethodsLoaded = pointerForeign.Methods != nil || pointerForeign.UnsupportedMethods != nil
 					if pointerSig := pointerForeign.get(s.Property.Name); pointerSig != nil {
-						if !c.isMutable(subj) {
+						if !c.permitsInteriorMutation(subj) {
 							c.addDiagnostic(immutableReceiverDiagnostic{
 								Kind:            immutablePointerMethodAccess,
 								Receiver:        foreign.String(),
@@ -6729,7 +6941,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				panic(fmt.Errorf("Cannot access %+v on nil: %s", subj.(*Variable).sym, s.Target))
 			}
 			var sig Type
-			if structDef, ok := subj.Type().(*StructDef); ok {
+			// A reference-valued subject resolves members through its referent:
+			// method calls are observational reads of the receiver expression
+			// (ADR 0057).
+			if structDef, ok := derefMutableRef(subj.Type()).(*StructDef); ok {
 				if method, ok := c.structMethod(structDef, s.Method.Name); ok {
 					sig = method
 				}
@@ -6750,7 +6965,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						pointerForeign.UnsupportedMethods = foreign.UnsupportedPointerMethods
 						pointerForeign.MethodsLoaded = pointerForeign.Methods != nil || pointerForeign.UnsupportedMethods != nil
 						if pointerSig := pointerForeign.get(s.Method.Name); pointerSig != nil {
-							if !c.isMutable(subj) {
+							if !c.permitsInteriorMutation(subj) {
 								c.addDiagnostic(immutableReceiverDiagnostic{
 									Kind:            immutablePointerMethodCall,
 									Receiver:        foreign.String(),
@@ -6799,7 +7014,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 
-			if fnDef.Mutates && !c.isMutable(subj) {
+			if fnDef.Mutates && !c.permitsInteriorMutation(subj) {
+				// A mutating method is interior mutation of the receiver: it
+				// requires an actual reference, not merely a writable binding
+				// slot (ADR 0057).
 				c.addDiagnostic(immutableReceiverDiagnostic{
 					Kind:            immutableArdReceiver,
 					Receiver:        fmt.Sprint(subj),
@@ -6898,9 +7116,11 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 		}
 	case *parse.MutRef:
 		return c.checkMutRef(s)
+	case *parse.Deref:
+		return c.checkDeref(s)
 	case *parse.UnaryExpression:
 		{
-			value := c.checkExpr(s.Operand)
+			value := observeReference(c.checkExpr(s.Operand))
 			if value == nil {
 				return nil
 			}
@@ -7027,6 +7247,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					if left == nil || right == nil {
 						return nil
 					}
+					if c.rejectReferenceRelational(">", left, right, s.Left.GetLocation(), s.Right.GetLocation()) {
+						return nil
+					}
 
 					// Allow Enum vs Int comparisons
 					if c.areTypesComparable(left.Type(), right.Type()) {
@@ -7044,6 +7267,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				{
 					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
+						return nil
+					}
+					if c.rejectReferenceRelational(">=", left, right, s.Left.GetLocation(), s.Right.GetLocation()) {
 						return nil
 					}
 
@@ -7065,6 +7291,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					if left == nil || right == nil {
 						return nil
 					}
+					if c.rejectReferenceRelational("<", left, right, s.Left.GetLocation(), s.Right.GetLocation()) {
+						return nil
+					}
 
 					// Allow Enum vs Int comparisons
 					if c.areTypesComparable(left.Type(), right.Type()) {
@@ -7082,6 +7311,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				{
 					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
+						return nil
+					}
+					if c.rejectReferenceRelational("<=", left, right, s.Left.GetLocation(), s.Right.GetLocation()) {
 						return nil
 					}
 
@@ -7107,6 +7339,20 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					left, right := c.checkScalarOperands(s.Left, s.Right)
 					if left == nil || right == nil {
 						return nil
+					}
+
+					// Reference equality is not an observational read: when both
+					// operands are references of the same referent type, `==` and
+					// `!=` compare current pointer identity (ADR 0057).
+					if leftRef, ok := observedReferenceOperand(left); ok {
+						if rightRef, ok := observedReferenceOperand(right); ok {
+							if leftRef.Type().equal(rightRef.Type()) || c.areCompatible(leftRef.Type(), rightRef.Type()) || c.areCompatible(rightRef.Type(), leftRef.Type()) {
+								if s.Operator == parse.NotEqual {
+									return &Inequality{leftRef, rightRef}
+								}
+								return &Equality{leftRef, rightRef}
+							}
+						}
 					}
 
 					leftMaybe, leftIsMaybe := left.Type().(*Maybe)
@@ -7486,6 +7732,13 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 
+			// An async fiber's task closure is an isolated scope: it must not
+			// directly capture or borrow outer references (ADR 0057).
+			if mod.Path() == "ard/async" && name == "start" {
+				c.pendingIsolatedClosure = true
+				defer func() { c.pendingIsolatedClosure = false }()
+			}
+
 			// Check and process arguments (handles both generics and mutability)
 			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation())
 			if args == nil {
@@ -7531,6 +7784,10 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 
 			// Check body
 			setup := func() {
+				if c.pendingIsolatedClosure {
+					c.pendingIsolatedClosure = false
+					c.scope.isolate()
+				}
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					sym := c.scope.add(param.Name, param.Type, param.Mutable)
@@ -7706,8 +7963,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			c.matchArmDiscardContext = previousArmDiscard
 		}()
 
-		// Check the subject
-		subject := c.checkExpr(s.Subject)
+		// Check the subject. Pattern matching is an observational read, so a
+		// reference subject resolves through its referent (ADR 0057).
+		subject := observeReference(c.checkExpr(s.Subject))
 		if subject == nil {
 			return nil
 		}
@@ -9373,6 +9631,11 @@ func isUntypedNumLiteral(expr parse.Expression) bool {
 // checkScalarOperands checks a binary operator's operands, letting an
 // untyped numeric literal adopt the other operand's scalar type.
 func (c *Checker) checkScalarOperands(leftExpr, rightExpr parse.Expression) (Expression, Expression) {
+	left, right := c.checkScalarOperandExprs(leftExpr, rightExpr)
+	return observeReference(left), observeReference(right)
+}
+
+func (c *Checker) checkScalarOperandExprs(leftExpr, rightExpr parse.Expression) (Expression, Expression) {
 	leftLit := isUntypedNumLiteral(leftExpr)
 	rightLit := isUntypedNumLiteral(rightExpr)
 	if leftLit == rightLit {
@@ -9667,6 +9930,10 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			previousDeferredWorkDepth := c.deferredWorkDepth
 			c.deferredWorkDepth = 0
 			body := c.checkBlockWithExpected(s.Body, func() {
+				if c.pendingIsolatedClosure {
+					c.pendingIsolatedClosure = false
+					c.scope.isolate()
+				}
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					sym := c.scope.add(param.Name, param.Type, param.Mutable)
@@ -9829,15 +10096,12 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 	return checked
 }
 
-// resolveParameterType resolves a parameter's declared type. Mutability is
-// type syntax (`name: mut T`); an outermost `mut` normalizes into the
-// internal flag representation:
-//
-//   - natives and descriptor types (lists, maps, channels, named Go
-//     slices/maps) carry their base type with the Mutable flag — content
-//     mutation flows through the value (ADR 0040);
-//   - other foreign types (structs, scalars) carry their pointer form so
-//     type identity lines up with `mut pkg::T` values and Go signatures.
+// resolveParameterType resolves a parameter's declared type. A `mut T`
+// parameter stores a first-class reference type (ADR 0057): the parameter's
+// value is an actual reference, and call sites must supply one. Foreign Go
+// named types use their pointer form so type identity lines up with
+// `mut pkg::T` values and Go signatures; everything else wraps in an Ard
+// mutable reference, including list/map descriptor references.
 func (c *Checker) resolveParameterType(t parse.DeclaredType) (Type, bool) {
 	var inner parse.DeclaredType
 	switch mt := t.(type) {
@@ -9860,7 +10124,10 @@ func (c *Checker) resolveParameterType(t parse.DeclaredType) (Type, bool) {
 			}
 		}
 	}
-	return derefMutableRef(base), true
+	if isReferenceType(base) {
+		return base, true
+	}
+	return MakeMutableRef(derefMutableRef(base)), true
 }
 
 func (c *Checker) resolveParametersWithContext(params []parse.Parameter, expectedFnType *FunctionDef) []Parameter {

@@ -293,8 +293,12 @@ let ordered = left < right`, wantError: true},
 		{name: "reference to noncomparable referent is a map key", source: `let values = [1, 2]
 let key = mut values
 let table: [mut [Int]: Str] = [key: "values"]`},
-		{name: "mutable trait reference supports identity and map keys", source: `trait View { fn get() Int }
-impl View for Box { fn get() Int { self.value } }
+		{name: "mutable trait reference supports identity and map keys", source: `trait View {
+  fn get() Int
+}
+impl View for Box {
+  fn get() Int { self.value }
+}
 let value = Box{value: 1}
 let first: mut View = mut value
 let second = first
@@ -388,8 +392,12 @@ let recovered: mut Box = unsafe::cast<mut Box>(boxed).expect("reference")`},
 let reference = mut value
 let boxed: Any = reference
 let copy: Box = unsafe::cast<Box>(boxed).expect("value")`},
-		{name: "mutable trait reconstruction is rejected", source: `trait View { fn get() Int }
-impl View for Box { fn get() Int { self.value } }
+		{name: "mutable trait reconstruction is rejected", source: `trait View {
+  fn get() Int
+}
+impl View for Box {
+  fn get() Int { self.value }
+}
 let view: mut View = mut Box{value: 1}
 let boxed: Any = view
 let recovered = unsafe::cast<mut View>(boxed)`, wantError: true},

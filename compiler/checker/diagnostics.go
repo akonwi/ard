@@ -56,6 +56,13 @@ const (
 	DiagnosticCodeBranchTypeMismatch            DiagnosticCode = "branch_type_mismatch"
 	DiagnosticCodeNonExhaustiveValueIf          DiagnosticCode = "non_exhaustive_value_if"
 	DiagnosticCodeImmutableMutableReference     DiagnosticCode = "immutable_mutable_reference"
+	DiagnosticCodeInvalidDerefOperand           DiagnosticCode = "invalid_deref_operand"
+	DiagnosticCodeNonAddressableBorrow          DiagnosticCode = "non_addressable_borrow"
+	DiagnosticCodeValueInteriorMutation         DiagnosticCode = "value_interior_mutation"
+	DiagnosticCodeWholeReferentAssignment       DiagnosticCode = "whole_referent_assignment"
+	DiagnosticCodeReferenceDestination          DiagnosticCode = "reference_destination_requires_reference"
+	DiagnosticCodeIsolatedReferenceCapture      DiagnosticCode = "isolated_reference_capture"
+	DiagnosticCodeUnsupportedTraitReferenceCast DiagnosticCode = "unsupported_trait_reference_cast"
 	DiagnosticCodeUnsupportedMutableReference   DiagnosticCode = "unsupported_mutable_reference"
 	DiagnosticCodeInvalidForeignPointerBinding  DiagnosticCode = "invalid_foreign_pointer_binding"
 	DiagnosticCodeUnreachableReferentAssignment DiagnosticCode = "unreachable_referent_assignment"
@@ -429,6 +436,134 @@ func (d unsupportedMutableReferenceDiagnostic) build() Diagnostic {
 		"Unsupported mutable reference",
 		"This foreign value has no supported pointer form.",
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` cannot be referenced mutably", d.Type)},
+		nil,
+		"",
+	)
+}
+
+type unsupportedTraitReferenceCastDiagnostic struct {
+	Type Type
+	Span SourceSpan
+}
+
+func (d unsupportedTraitReferenceCastDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeUnsupportedTraitReferenceCast,
+		fmt.Sprintf("unsafe::cast cannot reconstruct %s", formatTypeForDisplay(d.Type)),
+		"Cannot cast to a mutable trait reference",
+		"Reconstructing a trait forwarding table from a dynamic value is not supported.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` cannot be a cast target", formatTypeForDisplay(d.Type))},
+		nil,
+		"",
+	)
+}
+
+type isolatedReferenceCaptureDiagnostic struct {
+	Name            string
+	Borrow          bool
+	Span            SourceSpan
+	DeclarationSpan *SourceSpan
+}
+
+func (d isolatedReferenceCaptureDiagnostic) build() Diagnostic {
+	action := "capture reference"
+	label := fmt.Sprintf("`%s` is a reference from outside this fiber", d.Name)
+	if d.Borrow {
+		action = "borrow"
+		label = fmt.Sprintf("`%s` is storage from outside this fiber", d.Name)
+	}
+	return mutationDiagnostic(
+		DiagnosticCodeIsolatedReferenceCapture,
+		fmt.Sprintf("Cannot %s '%s' inside an isolated fiber", action, d.Name),
+		"Isolated fiber cannot share outer references",
+		"A fiber must not directly capture or borrow mutable state from its enclosing scope.",
+		DiagnosticLabel{Span: d.Span, Message: label},
+		d.DeclarationSpan,
+		"declared outside the fiber here",
+	)
+}
+
+type invalidDerefOperandDiagnostic struct {
+	Type Type
+	Span SourceSpan
+}
+
+func (d invalidDerefOperandDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeInvalidDerefOperand,
+		fmt.Sprintf("Cannot dereference a value of type %s", formatTypeForDisplay(d.Type)),
+		"Invalid deref operand",
+		"`deref` removes one reference layer, so its operand must be an actual reference value.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is not a reference", formatTypeForDisplay(d.Type))},
+		nil,
+		"",
+	)
+}
+
+type nonAddressableBorrowDiagnostic struct {
+	Span SourceSpan
+}
+
+func (d nonAddressableBorrowDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeNonAddressableBorrow,
+		"Cannot take a mutable reference to a non-addressable place",
+		"Cannot take a mutable reference",
+		"A selector on a temporary base has no stable storage to reference. Bind the base first.",
+		DiagnosticLabel{Span: d.Span, Message: "this place has no addressable storage"},
+		nil,
+		"",
+	)
+}
+
+type valueInteriorMutationDiagnostic struct {
+	Place           string
+	Span            SourceSpan
+	DeclarationSpan *SourceSpan
+}
+
+func (d valueInteriorMutationDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeValueInteriorMutation,
+		fmt.Sprintf("Cannot mutate '%s': it is an ordinary value, not a reference", d.Place),
+		"Interior mutation requires a reference",
+		"Interior mutation flows through an actual `mut T` reference value. A writable binding slot only permits replacing the whole value.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` holds an ordinary value", d.Place)},
+		d.DeclarationSpan,
+		"declared as an ordinary value here",
+	)
+}
+
+type wholeReferentAssignmentDiagnostic struct {
+	Place string
+	Span  SourceSpan
+}
+
+func (d wholeReferentAssignmentDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeWholeReferentAssignment,
+		fmt.Sprintf("Cannot assign through reference '%s': whole-referent assignment is not supported", d.Place),
+		"Cannot assign through a reference",
+		"Ard does not replace a referent through a reference. Rebind the slot with another reference, or mutate the referent's interior.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` holds a reference", d.Place)},
+		nil,
+		"",
+	)
+}
+
+type referenceDestinationDiagnostic struct {
+	Expected Type
+	Actual   Type
+	Span     SourceSpan
+}
+
+func (d referenceDestinationDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeReferenceDestination,
+		fmt.Sprintf("Type mismatch: Expected %s, got %s", formatTypeForDisplay(d.Expected), formatTypeForDisplay(d.Actual)),
+		"Reference destination requires a reference",
+		"A `mut T` destination accepts only an actual reference value. Use an explicit `mut` expression to create one.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected `%s`, found ordinary `%s`", formatTypeForDisplay(d.Expected), formatTypeForDisplay(d.Actual))},
 		nil,
 		"",
 	)
