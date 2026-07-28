@@ -1219,8 +1219,10 @@ func TestImmutablePropertyAssignmentHasStructuredLabels(t *testing.T) {
 
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
-	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeImmutablePropertyAssignment)
-	if diagnostic.Primary.Span.Location != assignment.Target.GetLocation() || diagnostic.Primary.Message != "`box.value` is immutable" {
+	// A field write on an ordinary value reports the ADR 0057 interior
+	// mutation diagnostic with the same structured labels.
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeValueInteriorMutation)
+	if diagnostic.Primary.Span.Location != assignment.Target.GetLocation() || diagnostic.Primary.Message != "`box.value` holds an ordinary value" {
 		t.Fatalf("primary = %#v", diagnostic.Primary)
 	}
 	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {

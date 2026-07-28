@@ -213,6 +213,13 @@ func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, in
 		if reason != "" {
 			return nil, fmt.Sprintf("parameter %d has unsupported type %s: %s", i+1, goType.String(), reason)
 		}
+		if mutable && !isReferenceType(ardType) {
+			// Every Go slice/map parameter is an explicit-reference-required
+			// descriptor boundary: only an actual list/map reference flows in,
+			// while lowering still projects the exact descriptor value the Go
+			// ABI requires (ADR 0057).
+			ardType = MakeMutableRef(ardType)
+		}
 		paramName := param.Name()
 		if paramName == "" {
 			paramName = fmt.Sprintf("arg%d", i+1)
@@ -446,6 +453,19 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 				return nil, reason
 			}
 			return foreignNamedTypeFromGo(named, true, includeMethods), ""
+		}
+		// Pointer-to-descriptor and multi-level pointers are reference
+		// boundaries (ADR 0057): only an actual reference flows in, and
+		// lowering projects the exact pointer shape. Ard cannot construct
+		// multi-level pointers itself; they flow only from compatible foreign
+		// values.
+		switch ptr.Elem().Underlying().(type) {
+		case *types.Slice, *types.Map, *types.Pointer:
+			inner, reason := typeFromGoWithMethods(ptr.Elem(), includeMethods)
+			if reason != "" {
+				return nil, reason
+			}
+			return MakeMutableRef(inner), ""
 		}
 		return nil, "only pointers to named Go types are supported"
 	}

@@ -320,6 +320,12 @@ func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
 	if foreign, ok := operand.Type().(*ForeignType); ok {
 		if pointer := foreign.PointerForm(); pointer != nil {
 			refType = pointer
+		} else if foreign.Interface {
+			// A reference to foreign-interface storage is a pointer to a Go
+			// interface descriptor. Go `*Interface` has no first-class
+			// foreign form, so the Ard reference wrapper carries it
+			// (ADR 0057).
+			refType = MakeMutableRef(foreign)
 		} else {
 			c.addDiagnostic(unsupportedMutableReferenceDiagnostic{
 				Type: foreign,
@@ -2037,12 +2043,24 @@ func (c *Checker) areCompatible(expected Type, actual Type) bool {
 		if iface.EmptyInterface() {
 			return true
 		}
-		actualBase, _ := mutableRefBase(actual)
+		if actualRef, ok := actual.(*MutableRef); ok {
+			if inner, ok := actualRef.Of().(*ForeignType); ok && inner.Interface {
+				// Go `*Interface` does not implement `Interface`; passing the
+				// stored interface value requires an explicit deref (ADR 0057).
+				return false
+			}
+		}
+		actualBase, actualIsReference := mutableRefBase(actual)
 		if actualForeign, ok := actualBase.(*ForeignType); ok {
 			return actualForeign.equal(iface) || foreignGoAssignableTo(actualForeign, iface)
 		}
 		if def, ok := actualBase.(*StructDef); ok {
-			return c.structImplementsForeignInterface(def, iface) && !c.foreignInterfaceImplRequiresPointer(def, iface)
+			if !c.structImplementsForeignInterface(def, iface) {
+				return false
+			}
+			// A reference argument contributes its concrete pointer, so a
+			// pointer-receiver method set is satisfied directly (ADR 0057).
+			return actualIsReference || !c.foreignInterfaceImplRequiresPointer(def, iface)
 		}
 	}
 	// There is no implicit `mut T -> T` conversion: a reference flows to a
@@ -2186,11 +2204,23 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 				continue
 			}
 			expectedType := interfaceMethod.Parameters[i].Type
+			// The generated Go method keeps the interface's exact ABI shape.
+			// The reference-boundary wrapper on imported descriptor parameters
+			// governs Ard call sites, not the Go->Ard callback ABI, so
+			// conformance compares the underlying descriptor shape (ADR 0057).
+			compareExpected := expectedType
+			if ref, ok := expectedType.(*MutableRef); ok && isDescriptorBoundaryArdType(ref.Of()) {
+				compareExpected = ref.Of()
+			}
+			compareActual := paramType
+			if ref, ok := paramType.(*MutableRef); ok && isDescriptorBoundaryArdType(ref.Of()) {
+				compareActual = ref.Of()
+			}
 			// The impl method's signature becomes the generated Go method's
 			// signature, so the foreign scalar narrowing coercion cannot apply:
 			// the Go types must line up for interface satisfaction.
-			if !c.areCompatible(expectedType, paramType) || foreignScalarNarrows(expectedType, paramType) || foreignScalarWidens(expectedType, paramType) || foreignFuncCoerces(expectedType, paramType) {
-				c.addTypeMismatch(expectedType, paramType, param.GetLocation())
+			if !c.areCompatible(compareExpected, compareActual) || foreignScalarNarrows(compareExpected, compareActual) || foreignScalarWidens(compareExpected, compareActual) || foreignFuncCoerces(compareExpected, compareActual) {
+				c.addTypeMismatch(compareExpected, compareActual, param.GetLocation())
 				valid = false
 			}
 			if paramMutable && mutableForeignParamChangesGoABI(paramType) {
@@ -2412,10 +2442,8 @@ func (c *Checker) interfaceConversion(expected Type, actual Expression) (Express
 func interfaceConversionSource(expr Expression) (Type, bool) {
 	switch value := expr.(type) {
 	case *Variable:
-		if value.IsReference() {
-			return value.Type(), true
-		}
-		return value.Type(), false
+		base, reference := mutableRefBase(value.Type())
+		return base, reference || value.IsReference()
 	case *InstanceProperty:
 		return mutableRefBase(value._type)
 	default:
@@ -3045,10 +3073,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				return nil
 			}
 
-			if call, ok := val.(*ForeignFunctionCall); ok && call.PointerResult && s.Mutable {
-				c.addDiagnostic(invalidForeignPointerBindingDiagnostic{Span: c.sourceSpan(s.Value.GetLocation())}.build())
-				return nil
-			}
+			// A `mut` binding of a Go pointer result is an ordinary writable
+			// reference slot: rebinding replaces only this slot's handle,
+			// matching Ard-owned references (ADR 0057).
 
 			v := &VariableDef{
 				Mutable: s.Mutable,
@@ -3099,9 +3126,19 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 
 				expectedType := target.Type
+				// Container literals type contextually through the referent so
+				// the whole-referent rejection below reports the real problem
+				// rather than a literal-typing error.
+				checkContext := expectedType
+				if ref, ok := expectedType.(*MutableRef); ok {
+					switch s.Value.(type) {
+					case *parse.ListLiteral, *parse.MapLiteral:
+						checkContext = ref.Of()
+					}
+				}
 				var value Expression
 				c.withValueExprContext(func() {
-					value = c.checkExprAs(s.Value, expectedType)
+					value = c.checkExprAs(s.Value, checkContext)
 				})
 				if value == nil {
 					return nil
@@ -5415,6 +5452,12 @@ func checkerTypeToGoType(t Type) (gotypes.Type, bool) {
 		return gotypes.NewInterfaceType(nil, nil), true
 	}
 	switch typ := t.(type) {
+	case *MutableRef:
+		// A reference validates its pointer-shaped boundary representation
+		// against Go constraints (ADR 0057).
+		if referent, ok := checkerTypeToGoType(typ.Of()); ok {
+			return gotypes.NewPointer(referent), true
+		}
 	case *ForeignType:
 		if typ.GoType != nil {
 			return typ.GoType, true
@@ -5723,8 +5766,11 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 // createPrimitiveMethodNode creates type-specific method nodes for primitives and collections
 // Falls back to generic InstanceMethod for user-defined types (structs, enums)
 func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, typeArgs []Type, loc parse.Location) Expression {
-	// Determine subject type - emit specialized nodes for all built-in types
-	switch subject.Type() {
+	// Determine subject type - emit specialized nodes for all built-in types.
+	// A reference-valued subject dispatches through its referent: method
+	// calls are observational reads of the receiver expression (ADR 0057).
+	subjectType := derefMutableRef(subject.Type())
+	switch subjectType {
 	case Str:
 		return c.createStrMethod(subject, methodName, args)
 	case Int:
@@ -5740,30 +5786,30 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 	}
 
 	// Check for collection types
-	if _, isList := subject.Type().(*List); isList {
+	if _, isList := subjectType.(*List); isList {
 		return c.createListMethod(subject, methodName, args, fnDef, loc)
 	}
-	if _, isFixedArray := subject.Type().(*FixedArray); isFixedArray {
+	if _, isFixedArray := subjectType.(*FixedArray); isFixedArray {
 		return c.createListMethod(subject, methodName, args, fnDef, loc)
 	}
-	if _, isMap := subject.Type().(*Map); isMap {
+	if _, isMap := subjectType.(*Map); isMap {
 		return c.createMapMethod(subject, methodName, args, fnDef)
 	}
-	if foreign, isForeign := subject.Type().(*ForeignType); isForeign && foreign.MapKey != nil && foreign.MapValue != nil {
+	if foreign, isForeign := subjectType.(*ForeignType); isForeign && foreign.MapKey != nil && foreign.MapValue != nil {
 		return c.createMapMethod(subject, methodName, args, fnDef)
 	}
-	if foreign, isForeign := subject.Type().(*ForeignType); isForeign && foreign.Elem != nil {
+	if foreign, isForeign := subjectType.(*ForeignType); isForeign && foreign.Elem != nil {
 		return c.createListMethod(subject, methodName, args, fnDef, loc)
 	}
-	if foreign, isForeign := subject.Type().(*ForeignType); isForeign {
+	if foreign, isForeign := subjectType.(*ForeignType); isForeign {
 		if _, ok := foreign.Underlying.(*FixedArray); ok {
 			return c.createListMethod(subject, methodName, args, fnDef, loc)
 		}
 	}
-	if _, isMaybe := subject.Type().(*Maybe); isMaybe {
+	if _, isMaybe := subjectType.(*Maybe); isMaybe {
 		return c.createMaybeMethod(subject, methodName, args, fnDef, loc)
 	}
-	if _, isResult := subject.Type().(*Result); isResult {
+	if _, isResult := subjectType.(*Result); isResult {
 		return c.createResultMethod(subject, methodName, args, fnDef)
 	}
 
@@ -5772,7 +5818,7 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 	var structType *StructDef
 	var enumType *Enum
 	var traitType *Trait
-	switch receiver := subject.Type().(type) {
+	switch receiver := subjectType.(type) {
 	case *StructDef:
 		receiverKind = ReceiverStruct
 		structType = receiver
@@ -6029,21 +6075,24 @@ func (c *Checker) createBoolMethod(subject Expression, methodName string) Expres
 }
 
 func (c *Checker) createListMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, loc parse.Location) Expression {
+	// A reference subject resolves list operations through its referent
+	// (ADR 0057).
+	subjectType := derefMutableRef(subject.Type())
 	var elemType Type
-	if listType, ok := subject.Type().(*List); ok {
+	if listType, ok := subjectType.(*List); ok {
 		elemType = listType.of
-	} else if arrayType, ok := subject.Type().(*FixedArray); ok {
+	} else if arrayType, ok := subjectType.(*FixedArray); ok {
 		elemType = arrayType.of
-	} else if foreign, ok := subject.Type().(*ForeignType); ok && foreign.Elem != nil {
+	} else if foreign, ok := subjectType.(*ForeignType); ok && foreign.Elem != nil {
 		elemType = foreign.Elem
-	} else if foreign, ok := subject.Type().(*ForeignType); ok {
+	} else if foreign, ok := subjectType.(*ForeignType); ok {
 		if arrayType, ok := foreign.Underlying.(*FixedArray); ok {
 			elemType = arrayType.of
 		} else {
-			panic(fmt.Sprintf("List method on non-list type: %s", subject.Type()))
+			panic(fmt.Sprintf("List method on non-list type: %s", subjectType))
 		}
 	} else {
-		panic(fmt.Sprintf("List method on non-list type: %s", subject.Type()))
+		panic(fmt.Sprintf("List method on non-list type: %s", subjectType))
 	}
 	var kind ListMethodKind
 	switch methodName {
@@ -6109,16 +6158,19 @@ func isMapMethodName(name string) bool {
 }
 
 func (c *Checker) createMapMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
+	// A reference subject resolves map operations through its referent
+	// (ADR 0057).
+	subjectType := derefMutableRef(subject.Type())
 	var keyType Type
 	var valueType Type
-	if mapType, ok := subject.Type().(*Map); ok {
+	if mapType, ok := subjectType.(*Map); ok {
 		keyType = mapType.Key()
 		valueType = mapType.Value()
-	} else if foreign, ok := subject.Type().(*ForeignType); ok && foreign.MapKey != nil && foreign.MapValue != nil {
+	} else if foreign, ok := subjectType.(*ForeignType); ok && foreign.MapKey != nil && foreign.MapValue != nil {
 		keyType = foreign.MapKey
 		valueType = foreign.MapValue
 	} else {
-		panic(fmt.Sprintf("Map method on non-map type: %s", subject.Type()))
+		panic(fmt.Sprintf("Map method on non-map type: %s", subjectType))
 	}
 	var kind MapMethodKind
 	switch methodName {
@@ -6148,7 +6200,7 @@ func (c *Checker) createMapMethod(subject Expression, methodName string, args []
 }
 
 func (c *Checker) createMaybeMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, loc parse.Location) Expression {
-	maybeType := subject.Type().(*Maybe)
+	maybeType := derefMutableRef(subject.Type()).(*Maybe)
 	var kind MaybeMethodKind
 	switch methodName {
 	case "expect":
@@ -6170,7 +6222,9 @@ func (c *Checker) createMaybeMethod(subject Expression, methodName string, args 
 	default:
 		panic(fmt.Sprintf("Unknown Maybe method: %s", methodName))
 	}
-	if (kind == MaybeSet || kind == MaybeClear) && !c.isMutable(subject) {
+	// Maybe.set / Maybe.clear are interior mutation: they require an actual
+	// reference, not merely a writable binding slot (ADR 0057).
+	if (kind == MaybeSet || kind == MaybeClear) && !c.permitsInteriorMutation(subject) {
 		c.addDiagnostic(immutableReceiverDiagnostic{
 			Kind:            immutableMaybeReceiver,
 			Receiver:        "Maybe",
@@ -7056,14 +7110,16 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			// explicitly marked method outputs are independently call-owned.
 			genericParams := append([]string(nil), callGenericParamsForFunction(fnDef)...)
 			var receiverBindings map[string]Type
-			if structType, isStruct := subj.Type().(*StructDef); isStruct {
+			// Receiver generics resolve through the referent for reference
+			// subjects (ADR 0057).
+			if structType, isStruct := derefMutableRef(subj.Type()).(*StructDef); isStruct {
 				if originalDef := c.structDefinition(structType); originalDef != nil && originalDef.hasGenerics() {
 					genericParams = appendUniqueStrings(genericParams, originalDef.GenericParams...)
 					receiverBindings = c.extractGenericBindingsFromSpecializedStruct(originalDef, structType)
 				}
 			}
 			callTypeArgs := c.resolveCallTypeArgs(s.Method.TypeArgs)
-			methodGenericParams := c.explicitMethodGenericParams(fnDef, subj.Type())
+			methodGenericParams := c.explicitMethodGenericParams(fnDef, derefMutableRef(subj.Type()))
 			fnDefCopy, genericScope, setupErr := c.setupFunctionCallWithBindings(
 				fnDef,
 				genericParams,
@@ -7092,7 +7148,9 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			if args == nil {
 				return nil
 			}
-			if foreign, ok := subj.Type().(*ForeignType); ok {
+			// A reference-valued receiver dispatches foreign methods through
+			// its referent's Go type (ADR 0057).
+			if foreign, ok := derefMutableRef(subj.Type()).(*ForeignType); ok {
 				if foreign.MapKey != nil && foreign.MapValue != nil && isMapMethodName(s.Method.Name) {
 					return c.createPrimitiveMethodNode(subj, s.Method.Name, args, fnToUse, callTypeArgs, s.Method.GetLocation())
 				}
@@ -7649,17 +7707,14 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					}
 					if converted, ok := c.interfaceConversion(effectiveFnDef.Parameters[i].Type, checkedArg); ok {
 						checkedArg = converted
-					} else {
-						if !effectiveFnDef.Parameters[i].Mutable {
-							checkedArg = snapshotExplicitReference(effectiveFnDef.Parameters[i].Type, checkedArg)
-						}
-						if !c.areCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) {
-							legacyMessage := typeMismatch(effectiveFnDef.Parameters[i].Type, checkedArg.Type())
-							c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], false)
-							return nil
-						}
+					} else if !c.areCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) {
+						legacyMessage := typeMismatch(effectiveFnDef.Parameters[i].Type, checkedArg.Type())
+						c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], false)
+						return nil
 					}
-					if effectiveFnDef.Parameters[i].Mutable && !c.isMutable(checkedArg) && !freshContainerSatisfiesMutable(effectiveFnDef.Parameters[i].Type, checkedArg) {
+					if effectiveFnDef.Parameters[i].Mutable && !isReferenceValued(checkedArg) {
+						// A Go descriptor or pointer boundary accepts only an
+						// actual reference (ADR 0057).
 						legacyMessage := fmt.Sprintf("Type mismatch: Expected a mutable %s", effectiveFnDef.Parameters[i].Type.String())
 						c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], true)
 						return nil
@@ -10728,8 +10783,6 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module, expec
 	if contextualInner {
 		if converted, ok := c.interfaceConversion(typeVar, value); ok {
 			value = converted
-		} else {
-			value = snapshotExplicitReference(typeVar, value)
 		}
 	}
 	if len(callTypeArgs) == 1 && !c.areCompatible(typeVar, value.Type()) {
@@ -11102,8 +11155,6 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				// generic evidence. Preserve ownership before structural unification.
 				if converted, ok := c.interfaceConversion(maybeParam.Of(), checkedArg); ok {
 					checkedArg = converted
-				} else if genericScope == nil || !hasUnresolvedGenericsFrom(maybeParam.Of(), genericScope.genericContext) {
-					checkedArg = snapshotExplicitReference(maybeParam.Of(), checkedArg)
 				}
 				argType = checkedArg.Type()
 			}
@@ -11190,14 +11241,12 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			}
 		}
 
-		// Generic inference can turn an unresolved parameter into either an
-		// interface destination (preserve reference identity) or an ordinary
-		// value destination (read a snapshot). Normalize only after solving.
+		// Generic inference can turn an unresolved parameter into an
+		// interface destination that preserves reference identity. Ordinary
+		// value destinations never implicitly read a referent (ADR 0057).
 		solvedParamType := derefType(fnDefCopy.Parameters[i].Type)
 		if converted, ok := c.interfaceConversion(solvedParamType, checkedArg); ok {
 			checkedArg = converted
-		} else if !fnDefCopy.Parameters[i].Mutable {
-			checkedArg = snapshotExplicitReference(solvedParamType, checkedArg)
 		}
 		paramType = solvedParamType
 
@@ -11209,7 +11258,9 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		}
 
 		if fnDefCopy.Parameters[i].Mutable {
-			if (!c.isMutable(checkedArg) && !freshContainerSatisfiesMutable(paramType, checkedArg)) || foreignScalarNarrows(paramType, checkedArg.Type()) || foreignScalarWidens(paramType, checkedArg.Type()) {
+			// A reference destination accepts only an actual reference value
+			// (ADR 0057).
+			if !isReferenceValued(checkedArg) || foreignScalarNarrows(paramType, checkedArg.Type()) || foreignScalarWidens(paramType, checkedArg.Type()) {
 				legacyMessage := fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDefCopy.Parameters[i].Type.String())
 				c.addIncorrectArgumentType(legacyMessage, fnDefCopy.Parameters[i].Type, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], true)
 				return nil, nil

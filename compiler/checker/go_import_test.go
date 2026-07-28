@@ -109,7 +109,7 @@ impl io::Writer for Sink {
     Result::ok(bytes.size())
   }
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot assign a new value through 'bytes': element writes share storage, but the referent binding is not reachable. Assign to the original binding instead"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot assign through reference 'bytes': whole-referent assignment is not supported"}},
 		},
 		{
 			name: "Go interface descriptor aliases reject list growth",
@@ -152,7 +152,7 @@ struct Sink {}
 
 impl io::Writer for Sink {
   fn write(bytes: mut [Byte]) Int!Str {
-    mut copy = bytes
+    let copy = mut deref bytes
     copy.push(bytes.at(0).expect("byte"))
     Result::ok(copy.size())
   }
@@ -452,7 +452,7 @@ func TestGoImportAssignsExportedStructFields(t *testing.T) {
 			input: `use go:image
 
 fn update() {
-  mut rect = image::Rect(1, 2, 3, 4)
+  let rect = mut image::Rect(1, 2, 3, 4)
   rect.Min.X = 10
 }`,
 		},
@@ -464,7 +464,7 @@ fn update() {
   let rect = image::Rect(1, 2, 3, 4)
   rect.Min.X = 10
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Immutable: rect.Min.X"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot mutate 'rect.Min.X': it is an ordinary value, not a reference"}},
 		},
 	})
 }
@@ -633,10 +633,10 @@ fn main() [Byte]!Str {
 			input: `use go:time
 
 fn main() Void!Str {
-  mut when = time::Now()
+  let when = mut time::Now()
   let unmarshal: fn(mut [Byte]) Void!Str = when.UnmarshalText
-  mut text = "2024-01-02T00:00:00Z".bytes()
-  unmarshal(text)
+  let text = "2024-01-02T00:00:00Z".bytes()
+  unmarshal(mut text)
 }`,
 		},
 		{
@@ -682,13 +682,13 @@ fn main() Str {
 }`,
 		},
 		{
-			name: "pointer receiver method on mutable opaque value",
+			name: "pointer receiver method on referenced opaque value",
 			input: `use go:time
 
 fn main() Void!Str {
-  mut when = time::Now()
-  mut text = "2024-01-02T00:00:00Z".bytes()
-  when.UnmarshalText(text)
+  let when = mut time::Now()
+  let text = "2024-01-02T00:00:00Z".bytes()
+  when.UnmarshalText(mut text)
 }`,
 		},
 		{
@@ -806,14 +806,13 @@ fn main() {
 			input: `use go:time
 
 fn bump(value: mut Int) {
-  value = value + 1
 }
 
 fn main() {
-  mut month = time::January
-  bump(month)
+  let month = time::January
+  bump(mut month)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected a mutable Int"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut Int, got mut time::Month"}},
 		},
 		{
 			name: "foreign scalar Maybe does not compare against primitive Maybe",
@@ -1262,19 +1261,15 @@ func TestGoSliceParametersRequireListReferences(t *testing.T) {
 		{
 			name: "ordinary mut list is not an implicit reference",
 			source: `use go:sort
-fn main() {
-  mut values = [3, 1, 2]
-  sort::Ints(values)
-}`,
+mut values = [3, 1, 2]
+sort::Ints(values)`,
 			wantError: true,
 		},
 		{
 			name: "explicit reference to let list is accepted",
 			source: `use go:sort
-fn main() {
-  let values = [3, 1, 2]
-  sort::Ints(mut values)
-}`,
+let values = [3, 1, 2]
+sort::Ints(mut values)`,
 		},
 	}
 	for _, tt := range tests {
@@ -1387,7 +1382,7 @@ fn peek(nums: sort::IntSlice) Int {
 			input: `use go:sort
 fn sorted(nums: mut sort::IntSlice) sort::IntSlice {
   nums.Sort()
-  nums
+  deref nums
 }`,
 		},
 		{
@@ -1412,32 +1407,28 @@ func TestFreshContainerLiteralsRequireExplicitReferences(t *testing.T) {
 		{
 			name: "bare list literal is rejected for mutable Go slice parameter",
 			source: `use go:sort
-fn main() {
-  sort::Ints([3, 1, 2])
-}`,
+sort::Ints([3, 1, 2])`,
 			wantError: true,
 		},
 		{
 			name: "explicit fresh list reference is accepted",
 			source: `use go:sort
-fn main() {
-  sort::Ints(mut [3, 1, 2])
-}`,
+sort::Ints(mut [3, 1, 2])`,
 		},
 		{
 			name: "bare map literal is rejected for mutable Ard parameter",
 			source: `fn consume(m: mut [Str: Int]) Int { m.size() }
-fn main() { let size = consume(["a": 1]) }`,
+let size = consume(["a": 1])`,
 			wantError: true,
 		},
 		{
 			name: "explicit fresh map reference is accepted",
 			source: `fn consume(m: mut [Str: Int]) Int { m.size() }
-fn main() { let size = consume(mut ["a": 1]) }`,
+let size = consume(mut ["a": 1])`,
 		},
 		{
 			name:      "list literal against non-list annotation remains rejected",
-			source:    `fn main() { let x: Int = [1] }`,
+			source:    `let x: Int = [1]`,
 			wantError: true,
 		},
 	}

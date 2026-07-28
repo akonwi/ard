@@ -20,9 +20,15 @@ func TestFunctionDefFromGoSignatureMarksMapParametersMutable(t *testing.T) {
 	if !fn.Parameters[0].Mutable {
 		t.Fatal("Go map parameter was not marked mutable")
 	}
-	m, ok := fn.Parameters[0].Type.(*Map)
+	// A Go map parameter is an explicit-reference-required descriptor
+	// boundary (ADR 0057): the source-facing type is `mut [Str:Int]`.
+	ref, ok := fn.Parameters[0].Type.(*MutableRef)
 	if !ok {
-		t.Fatalf("param type = %T, want *Map", fn.Parameters[0].Type)
+		t.Fatalf("param type = %T, want *MutableRef", fn.Parameters[0].Type)
+	}
+	m, ok := ref.Of().(*Map)
+	if !ok {
+		t.Fatalf("referent type = %T, want *Map", ref.Of())
 	}
 	if !equalTypes(m.Key(), Str) || !equalTypes(m.Value(), Int) {
 		t.Fatalf("param type = %s, want [Str:Int]", m)
@@ -44,9 +50,14 @@ func TestFunctionDefFromGoSignatureMarksNamedMapParametersMutable(t *testing.T) 
 	if !fn.Parameters[0].Mutable {
 		t.Fatal("named Go map parameter was not marked mutable")
 	}
-	foreign, ok := fn.Parameters[0].Type.(*ForeignType)
+	// Named descriptors are reference boundaries too (ADR 0057).
+	ref, ok := fn.Parameters[0].Type.(*MutableRef)
 	if !ok {
-		t.Fatalf("param type = %T, want *ForeignType", fn.Parameters[0].Type)
+		t.Fatalf("param type = %T, want *MutableRef", fn.Parameters[0].Type)
+	}
+	foreign, ok := ref.Of().(*ForeignType)
+	if !ok {
+		t.Fatalf("referent type = %T, want *ForeignType", ref.Of())
 	}
 	if foreign.MapKey == nil || foreign.MapValue == nil {
 		t.Fatalf("named map foreign type missing map key/value: %#v", foreign)

@@ -556,7 +556,9 @@ func TestFunctions(t *testing.T) {
 						Expr: &checker.FunctionDef{
 							Name: "update",
 							Parameters: []checker.Parameter{
-								{Name: "value", Type: checker.Int, Mutable: true},
+								// A `mut T` parameter stores a first-class
+								// reference type (ADR 0057).
+								{Name: "value", Type: checker.MakeMutableRef(checker.Int), Mutable: true},
 							},
 							ReturnType: checker.Void,
 							Body: &checker.Block{

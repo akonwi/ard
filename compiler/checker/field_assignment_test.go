@@ -53,7 +53,7 @@ func TestFieldAssignmentChecksValueType(t *testing.T) {
 }
 
 fn main() {
-  mut s = S{n: 1}
+  let s = mut S{n: 1}
   s.n = "oops"
 }
 `), "Type mismatch: Expected Int, got Str")
@@ -69,8 +69,8 @@ fn f(s: mut S) {
 }
 
 fn main() {
-  mut s = S{n: 1}
-  f(s)
+  let s = S{n: 1}
+  f(mut s)
 }
 `), "Type mismatch: Expected Int, got Str")
 	})
@@ -85,7 +85,7 @@ struct Outer {
 }
 
 fn main() {
-  mut o = Outer{inner: Inner{n: 1}}
+  let o = mut Outer{inner: Inner{n: 1}}
   o.inner.n = "oops"
 }
 `), "Type mismatch: Expected Int, got Str")
@@ -97,7 +97,7 @@ fn main() {
 }
 
 fn main() {
-  mut s = S{n: 1}
+  let s = mut S{n: 1}
   s.n = 2
 }
 `))
@@ -114,7 +114,7 @@ func TestFieldAssignmentMaybeWrapping(t *testing.T) {
 }
 
 fn main() {
-  mut s = S{label: "one"}
+  let s = mut S{label: "one"}
   s.label = "two"
 }
 `))
@@ -126,7 +126,7 @@ fn main() {
 }
 
 fn main() {
-  mut s = S{label: "one"}
+  let s = mut S{label: "one"}
   let name = "two"
   s.label = name
 }
@@ -139,8 +139,8 @@ fn main() {
 }
 
 fn main() {
-  mut a = S{label: "one"}
-  mut b = S{label: "two"}
+  let a = mut S{label: "one"}
+  let b = mut S{label: "two"}
   a.label = b.label
   a.label = Maybe::new()
 }
@@ -153,7 +153,7 @@ fn main() {
 }
 
 fn main() {
-  mut s = S{label: "one"}
+  let s = mut S{label: "one"}
   s.label = 42
 }
 `), "Type mismatch")
@@ -161,12 +161,28 @@ fn main() {
 }
 
 // Mutability is type syntax: `name: mut Type` is the only parameter
-// spelling, and a mut local satisfies a mut parameter (write-back flows to
-// caller storage). Regression tests for the call-boundary bug found by LSP
-// validation.
+// spelling. A `mut T` parameter is a reference destination: only an explicit
+// reference satisfies it, and a writable binding no longer borrows
+// implicitly (ADR 0057).
 func TestMutableParameterTypeSyntax(t *testing.T) {
-	t.Run("mut local satisfies mut parameter", func(t *testing.T) {
+	t.Run("explicit reference satisfies mut parameter", func(t *testing.T) {
 		wantClean(t, checkSource(t, `struct S {
+  n: Int,
+}
+
+fn f(s: mut S) {
+  s.n = 2
+}
+
+fn main() {
+  let s = S{n: 1}
+  f(mut s)
+}
+`))
+	})
+
+	t.Run("bare local is rejected", func(t *testing.T) {
+		wantError(t, checkSource(t, `struct S {
   n: Int,
 }
 
@@ -178,23 +194,7 @@ fn main() {
   mut s = S{n: 1}
   f(s)
 }
-`))
-	})
-
-	t.Run("immutable local is rejected", func(t *testing.T) {
-		wantError(t, checkSource(t, `struct S {
-  n: Int,
-}
-
-fn f(s: mut S) {
-  s.n = 2
-}
-
-fn main() {
-  let s = S{n: 1}
-  f(s)
-}
-`), "Expected a mutable")
+`), "Expected mut S")
 	})
 
 	t.Run("mut parameter forwards to mut parameter", func(t *testing.T) {
@@ -211,8 +211,8 @@ fn outer(s: mut S) {
 }
 
 fn main() {
-  mut s = S{n: 1}
-  outer(s)
+  let s = S{n: 1}
+  outer(mut s)
 }
 `))
 	})

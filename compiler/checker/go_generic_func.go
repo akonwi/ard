@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"errors"
 	"fmt"
 	"go/types"
 
@@ -67,6 +68,21 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 				return nil, nil, false
 			}
 		}
+		// Constraint-shape completion: a bound descriptor parameter's core
+		// type (for example `~[]E`) determines its element/key/value
+		// parameters, matching Go's own constraint type inference.
+		for round := 0; round < 2; round++ {
+			for i := 0; i < tparams.Len(); i++ {
+				if inferred[i] == nil {
+					continue
+				}
+				core := constraintCoreType(tparams.At(i))
+				if core == nil {
+					continue
+				}
+				inferGoFuncTypeArgs(core, inferred[i], tparams, inferred, inferenceSpans, inferenceSpans[i])
+			}
+		}
 		for i := 0; i < tparams.Len(); i++ {
 			if inferred[i] == nil {
 				legacy := fmt.Sprintf("Could not infer type argument %s for Go function %s::%s", tparams.At(i).Obj().Name(), modName, name)
@@ -80,29 +96,47 @@ func (c *Checker) instantiateGoFunctionCall(modName, name string, goFn *types.Fu
 	}
 
 	bindings := goTypeParamBindings{}
+	constraintSpan := func(i int) SourceSpan {
+		span := c.sourceSpan(s.GetLocation())
+		if len(s.Function.TypeArgs) > i {
+			span = c.sourceSpan(declaredTypeLocation(s.Function.TypeArgs[i], s.GetLocation()))
+		} else if len(inferenceSpans) > i && inferenceSpans[i].FilePath != "" {
+			span = inferenceSpans[i]
+		}
+		return span
+	}
+	goArgs := make([]types.Type, tparams.Len())
+	allRepresentable := true
 	for i := 0; i < tparams.Len(); i++ {
 		tparam := tparams.At(i)
-		constraint, ok := tparam.Constraint().Underlying().(*types.Interface)
-		if ok && !constraint.Empty() {
-			span := c.sourceSpan(s.GetLocation())
-			if len(s.Function.TypeArgs) > i {
-				span = c.sourceSpan(declaredTypeLocation(s.Function.TypeArgs[i], s.GetLocation()))
-			} else if len(inferenceSpans) > i && inferenceSpans[i].FilePath != "" {
-				span = inferenceSpans[i]
-			}
-			goArg, representable := checkerTypeToGoType(args[i])
-			if !representable {
+		goArg, representable := checkerTypeToGoType(args[i])
+		if representable {
+			goArgs[i] = goArg
+		} else {
+			allRepresentable = false
+			if constraint, ok := tparam.Constraint().Underlying().(*types.Interface); ok && !constraint.Empty() {
 				legacy := fmt.Sprintf("Type argument %s cannot be validated against Go constraint %s", args[i], tparam.Constraint())
-				c.addDiagnostic(goConstraintDiagnostic{Argument: args[i], Constraint: tparam.Constraint().String(), Span: span, LegacyMessage: legacy, Unvalidated: true}.build())
-				return nil, nil, false
-			}
-			if !types.Satisfies(goArg, constraint) {
-				legacy := fmt.Sprintf("Type argument %s does not satisfy Go constraint %s", args[i], tparam.Constraint())
-				c.addDiagnostic(goConstraintDiagnostic{Argument: args[i], Constraint: tparam.Constraint().String(), Span: span, LegacyMessage: legacy}.build())
+				c.addDiagnostic(goConstraintDiagnostic{Argument: args[i], Constraint: tparam.Constraint().String(), Span: constraintSpan(i), LegacyMessage: legacy, Unvalidated: true}.build())
 				return nil, nil, false
 			}
 		}
 		bindings[tparam] = args[i]
+	}
+	if allRepresentable {
+		// Instantiate substitutes every binding into the constraints before
+		// verifying them, so interdependent shapes (`S ~[]E`) validate against
+		// the solved element types.
+		if _, err := types.Instantiate(types.NewContext(), sig, goArgs, true); err != nil {
+			index := 0
+			var argErr *types.ArgumentError
+			if errors.As(err, &argErr) {
+				index = argErr.Index
+			}
+			tparam := tparams.At(index)
+			legacy := fmt.Sprintf("Type argument %s does not satisfy Go constraint %s", args[index], tparam.Constraint())
+			c.addDiagnostic(goConstraintDiagnostic{Argument: args[index], Constraint: tparam.Constraint().String(), Span: constraintSpan(index), LegacyMessage: legacy}.build())
+			return nil, nil, false
+		}
 	}
 
 	fnDef, reason := functionDefFromGoSignatureBound(name, sig, bindings)
@@ -157,6 +191,13 @@ func functionDefFromGoSignatureBound(name string, sig *types.Signature, bindings
 		ardType, reason := boundTypeFromGo(goType, sig.TypeParams(), bindings)
 		if reason != "" {
 			return nil, fmt.Sprintf("parameter %d has unsupported type %s: %s", i+1, goType.String(), reason)
+		}
+		if !variadic && !isReferenceType(ardType) && isDescriptorBoundaryArdType(ardType) {
+			// A descriptor-shaped instantiation is an explicit-reference-
+			// required boundary, matching non-generic Go slice/map parameters
+			// (ADR 0057).
+			mutable = true
+			ardType = MakeMutableRef(ardType)
 		}
 		paramName := param.Name()
 		if paramName == "" {
@@ -293,6 +334,18 @@ func boundTypeFromGo(t types.Type, tparams *types.TypeParamList, bindings goType
 	return nil, fmt.Sprintf("generic type %s is not supported yet", t.String())
 }
 
+// isDescriptorBoundaryArdType reports whether an instantiated parameter type
+// is a slice/map descriptor at the Go boundary.
+func isDescriptorBoundaryArdType(t Type) bool {
+	switch typ := t.(type) {
+	case *List, *Map:
+		return true
+	case *ForeignType:
+		return !typ.Pointer && (typ.Elem != nil || (typ.MapKey != nil && typ.MapValue != nil))
+	}
+	return false
+}
+
 // mutableBoundType maps a Go `*T` result/parameter whose type parameter is
 // bound to an Ard type. Foreign named types use their first-class pointer
 // form. An Ard struct becomes a mutable reference: the Go pointer is live
@@ -313,15 +366,95 @@ func mutableBoundType(bound Type) (Type, string) {
 	return nil, fmt.Sprintf("pointer to %s is not supported yet", bound)
 }
 
+// descriptorShapedTypeParam reports whether a Go type parameter's constraint
+// admits exclusively slice/map shapes (`S ~[]E`, the map equivalent, or their
+// named forms). Such parameters preclassify as explicit-reference-required
+// descriptor boundaries before argument inference (ADR 0057). Mixed type sets
+// have no core type and are not preclassified.
+func descriptorShapedTypeParam(tp *types.TypeParam) bool {
+	core := constraintCoreType(tp)
+	if core == nil {
+		return false
+	}
+	switch core.(type) {
+	case *types.Slice, *types.Map:
+		return true
+	}
+	return false
+}
+
+// constraintCoreType computes a type parameter's core type: the single
+// underlying type shared by every term of its constraint's type set, or nil
+// when the set is empty or mixed. This mirrors the Go spec's core-type rule
+// used by constraint type inference.
+func constraintCoreType(tp *types.TypeParam) types.Type {
+	iface, ok := tp.Constraint().Underlying().(*types.Interface)
+	if !ok {
+		return nil
+	}
+	var core types.Type
+	var collect func(iface *types.Interface) bool
+	collect = func(iface *types.Interface) bool {
+		for i := 0; i < iface.NumEmbeddeds(); i++ {
+			switch embedded := iface.EmbeddedType(i).(type) {
+			case *types.Union:
+				for j := 0; j < embedded.Len(); j++ {
+					underlying := embedded.Term(j).Type().Underlying()
+					if core == nil {
+						core = underlying
+					} else if !types.Identical(core, underlying) {
+						return false
+					}
+				}
+			case *types.Interface:
+				if !collect(embedded) {
+					return false
+				}
+			default:
+				if nested, ok := embedded.Underlying().(*types.Interface); ok {
+					if !collect(nested) {
+						return false
+					}
+					continue
+				}
+				underlying := embedded.Underlying()
+				if core == nil {
+					core = underlying
+				} else if !types.Identical(core, underlying) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	if !collect(iface) {
+		return nil
+	}
+	return core
+}
+
 // inferGoFuncTypeArgs unifies a generic Go parameter type against the Ard type
 // of a supplied argument, recording inferred bindings. It returns false when a
 // conflict is found (the caller reports the diagnostic).
 func inferGoFuncTypeArgs(pattern types.Type, actual Type, tparams *types.TypeParamList, inferred []Type, inferredSpans []SourceSpan, currentSpan SourceSpan) (bool, *types.TypeParam, Type, Type, SourceSpan) {
-	// A `mut T` argument infers the referenced value type. Reference-ness is
-	// not part of the binding: a Go `T` parameter position receives a copy
-	// (ordinary pass-by-value), and only `*T` positions preserve the pointer.
+	// A reference argument's contribution depends on the destination's shape
+	// (ADR 0057): descriptor-shaped syntax and constraints infer from the
+	// referent and project the descriptor; a bare type parameter binds the
+	// reference's static boundary representation; pointer syntax unifies the
+	// pointee against the referent.
 	if ref, ok := actual.(*MutableRef); ok {
-		actual = ref.Of()
+		switch p := pattern.(type) {
+		case *types.TypeParam:
+			if descriptorShapedTypeParam(p) {
+				actual = ref.Of()
+			}
+		case *types.Slice, *types.Map:
+			actual = ref.Of()
+		case *types.Pointer:
+			return inferGoFuncTypeArgs(p.Elem(), ref.Of(), tparams, inferred, inferredSpans, currentSpan)
+		default:
+			actual = ref.Of()
+		}
 	}
 	switch pattern := pattern.(type) {
 	case *types.TypeParam:
