@@ -196,6 +196,7 @@ func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, in
 		param := sig.Params().At(i)
 		goType := param.Type()
 		mutable := false
+		foreignABI := ForeignParameterExact
 		variadic := false
 		if sig.Variadic() && i == sig.Params().Len()-1 {
 			slice, ok := goType.(*types.Slice)
@@ -206,8 +207,10 @@ func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, in
 			variadic = true
 		} else if _, ok := goType.Underlying().(*types.Slice); ok {
 			mutable = true
+			foreignABI = ForeignParameterDescriptorValue
 		} else if _, ok := goType.Underlying().(*types.Map); ok {
 			mutable = true
+			foreignABI = ForeignParameterDescriptorValue
 		}
 		ardType, reason := typeFromGoWithMethods(goType, includeMethods)
 		if reason != "" {
@@ -224,7 +227,7 @@ func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, in
 		if paramName == "" {
 			paramName = fmt.Sprintf("arg%d", i+1)
 		}
-		params = append(params, Parameter{Name: paramName, Type: ardType, Mutable: mutable, Variadic: variadic})
+		params = append(params, Parameter{Name: paramName, Type: ardType, Mutable: mutable, ForeignABI: foreignABI, Variadic: variadic})
 	}
 
 	ret, reason := returnTypeFromGoWithMethods(sig.Results(), includeMethods)
@@ -459,15 +462,16 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 		// lowering projects the exact pointer shape. Ard cannot construct
 		// multi-level pointers itself; they flow only from compatible foreign
 		// values.
-		switch ptr.Elem().Underlying().(type) {
-		case *types.Slice, *types.Map, *types.Pointer:
-			inner, reason := typeFromGoWithMethods(ptr.Elem(), includeMethods)
-			if reason != "" {
-				return nil, reason
-			}
-			return MakeMutableRef(inner), ""
+		if _, pointerToInterface := ptr.Elem().Underlying().(*types.Interface); pointerToInterface {
+			return nil, "pointers to Go interfaces are unsupported"
 		}
-		return nil, "only pointers to named Go types are supported"
+		// Every otherwise representable single-level pointee, including Go
+		// primitives, is an explicit reference boundary (ADR 0057).
+		inner, reason := typeFromGoWithMethods(ptr.Elem(), includeMethods)
+		if reason != "" {
+			return nil, reason
+		}
+		return MakeMutableRef(inner), ""
 	}
 	if slice, ok := t.Underlying().(*types.Slice); ok {
 		elem, reason := typeFromGoWithMethods(slice.Elem(), includeMethods)

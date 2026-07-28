@@ -668,6 +668,20 @@ func (l *lowerer) declareClosureFunction(module ModuleID, keyName string, def *c
 	return id, nil
 }
 
+func lowerForeignArgModes(params []checker.Parameter, count int) []ForeignArgMode {
+	modes := make([]ForeignArgMode, count)
+	for index := 0; index < count && len(params) > 0; index++ {
+		paramIndex := index
+		if paramIndex >= len(params) {
+			paramIndex = len(params) - 1
+		}
+		if params[paramIndex].ForeignABI == checker.ForeignParameterDescriptorValue {
+			modes[index] = ForeignArgDescriptorValue
+		}
+	}
+	return modes
+}
+
 func lowerForeignResultShape(shape checker.ForeignResultShape) ForeignResultShape {
 	switch shape {
 	case checker.ForeignResultDirect:
@@ -3613,6 +3627,20 @@ func (fl *functionLowerer) lowerUnionWrapIfNeeded(expr checker.Expression, expec
 	return nil, false, nil
 }
 
+func referencePlaceRootLocal(expr *Expr) (LocalID, bool) {
+	if expr == nil {
+		return 0, false
+	}
+	switch expr.Kind {
+	case ExprLoadLocal:
+		return expr.Local, true
+	case ExprGetField, ExprForeignFieldAccess:
+		return referencePlaceRootLocal(expr.Target)
+	default:
+		return 0, false
+	}
+}
+
 func lowerReferenceMode(mode checker.ReferenceMode) (ReferenceMode, error) {
 	switch mode {
 	case checker.ExistingReference:
@@ -3782,6 +3810,7 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 			if err != nil {
 				return nil, err
 			}
+			fl.markCaptureSlot(local)
 			return &Stmt{Kind: StmtAssign, Local: local, Value: value}, nil
 		case *checker.InstanceProperty:
 			return fl.lowerFieldAssignment(target, s.Value)
@@ -4504,7 +4533,11 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			args[i] = *lowered
 		}
-		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), Args: args}, nil
+		var argModes []ForeignArgMode
+		if methodDef != nil {
+			argModes = lowerForeignArgModes(methodDef.Parameters, len(args))
+		}
+		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: argModes, Args: args}, nil
 	case *checker.UnsafeCast:
 		value, err := fl.lowerExprWithExpected(e.Value, fl.l.mustIntern(checker.Any))
 		if err != nil {
@@ -4546,6 +4579,11 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
+		if mode == AddressablePlace {
+			if root, ok := referencePlaceRootLocal(operand); ok {
+				fl.markCaptureSlot(root)
+			}
+		}
 		return &Expr{Kind: ExprMutRef, Type: typeID, Target: operand, ReferenceMode: mode}, nil
 	case *checker.DerefExpr:
 		operand, err := fl.lowerExpr(e.Operand)
@@ -4580,7 +4618,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			typeArgs = append(typeArgs, argID)
 		}
-		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), Args: args}, nil
+		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: lowerForeignArgModes(fnDef.Parameters, len(args)), Args: args}, nil
 	case *checker.ModuleFunctionCall:
 		if kind, ok := resultConstructorKind(e); ok {
 			return fl.lowerResultConstructor(kind, typeID, e)
@@ -5931,6 +5969,13 @@ func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef)
 	fn.Captures = child.fn.Captures
 	fn.Locals = child.fn.Locals
 	fl.l.program.Functions[id] = fn
+	for index, capture := range fn.Captures {
+		if capture.Mode == CaptureSlot && index < len(child.captureLocals) {
+			// A nested slot capture must propagate through every enclosing
+			// closure rather than degrading into a value snapshot.
+			fl.markCaptureSlot(child.captureLocals[index])
+		}
+	}
 
 	return &Expr{Kind: ExprMakeClosure, Type: typeID, Function: id, CaptureLocals: child.captureLocals}, nil
 }
@@ -6215,8 +6260,21 @@ func (fl *functionLowerer) captureLocal(name string) (LocalID, TypeID, bool, boo
 	fl.fn.Locals[local].Reference = sourceReference
 	fl.captureByName[name] = local
 	fl.captureLocals = append(fl.captureLocals, sourceLocal)
-	fl.fn.Captures = append(fl.fn.Captures, Capture{Name: name, Type: typeID, Local: local})
+	mode := CaptureValue
+	if info, ok := fl.l.typeInfo(typeID); ok && (info.Kind == TypeReference || info.Kind == TypeForeignType && info.ForeignPointer) {
+		mode = CaptureReference
+	}
+	fl.fn.Captures = append(fl.fn.Captures, Capture{Name: name, Type: typeID, Local: local, Mode: mode})
 	return local, typeID, mutable, true, nil
+}
+
+func (fl *functionLowerer) markCaptureSlot(local LocalID) {
+	for index := range fl.fn.Captures {
+		if fl.fn.Captures[index].Local == local {
+			fl.fn.Captures[index].Mode = CaptureSlot
+			return
+		}
+	}
 }
 
 func (fl *functionLowerer) localKind(local LocalID) TypeKind {

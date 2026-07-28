@@ -6,20 +6,21 @@ Accepted
 
 ## Implementation status
 
-In progress. Phase 1's parser, formatter, checker, AIR, Go-runtime/FFI, and
-Tree-sitter semantic contract tests are in place. Phases 2 and 3 are complete:
-`deref` is parsed, formatted, and grammar-supported; the checker implements
-first-class reference typing, capability judgments, explicit-borrow
+In progress. Phase 1's semantic contracts are in place, and Phases 2–6 are
+complete. `deref` is parsed, formatted, and grammar-supported; the checker
+implements first-class reference typing, capability judgments, explicit-borrow
 classification (`ExistingReference` / `AddressablePlace` / `FreshValue`), the
 uniform reference-destination policy, assignment target categories,
-observational reads, pointer-identity equality, async isolation, and the
-direct-Go boundary classification. AIR now preserves the three reference
-creation modes, represents explicit and observational dereferences directly,
-uses canonical recursive `TypeReference` identity in parameters, returns,
-fields, generics, and compound types, and carries concrete-to-trait reference
-projection metadata. The Go backend still implements pre-ADR reference
-lowering; its ADR 0057 runtime contracts remain intentionally red until Phases
-4–6.
+observational reads, pointer-identity equality, async isolation, and direct-Go
+boundary classification. AIR preserves the three creation modes, explicit and
+observational dereferences, canonical recursive `TypeReference` identity,
+concrete-to-trait projection metadata, creation-time reference-handle captures,
+and writable/address-taken slot captures. The Go backend lowers concrete and
+descriptor references as pointer-copy handles, preserves slot rebinding and
+escaping storage, emits comparable canonical mutable-trait forwarding handles,
+and projects exact pointer, descriptor, generic, `Any`, and Go-interface ABIs.
+All ADR 0057 Go runtime/FFI contracts pass. Phases 7–8 remain for diagnostics,
+documentation, and migration of pre-ADR samples and legacy backend fixtures.
 
 ## Context
 

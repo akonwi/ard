@@ -244,6 +244,26 @@ func TestADR0057ClosureCaptureDistinguishesHandleCopyAndSlotRebind(t *testing.T)
 	}
 }
 
+func TestADR0057InteriorBorrowOfCapturedStorageUsesOuterSlot(t *testing.T) {
+	program := lowerParitySource(t, `
+		struct Inner { value: Int }
+		struct Outer { inner: Inner }
+
+		fn main() Int {
+			mut outer = Outer{inner: Inner{value: 1}}
+			let update = fn() {
+				let reference = mut outer.inner
+				reference.value = 42
+			}
+			update()
+			outer.inner.value
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != `42` {
+		t.Fatalf("result = %s, want captured outer storage mutation", got)
+	}
+}
+
 func TestADR0057ReferencesUsePointerIdentityForEqualityAndMapKeys(t *testing.T) {
 	program := lowerParitySource(t, `
 		struct Box { value: Int }
@@ -333,11 +353,11 @@ func TestADR0057SanctionedReferenceAndChannelOperations(t *testing.T) {
 			}
 			channel.close()
 
-			[list.size(), list.at(0).or(0), mapping.size(), maybe.or(0), received]
+			[list.size(), list.at(0).or(0), mapping.size(), mapping.keys().size(), maybe.or(0), received]
 		}
 	`)
-	if got := runGoTargetParityJSON(t, program); got != `[2,9,1,7,5]` {
-		t.Fatalf("result = %s, want [2,9,1,7,5]", got)
+	if got := runGoTargetParityJSON(t, program); got != `[2,9,1,1,7,5]` {
+		t.Fatalf("result = %s, want [2,9,1,1,7,5]", got)
 	}
 }
 
@@ -579,6 +599,60 @@ fn main() {
 	}
 	if err := exec.Command(built).Run(); err == nil {
 		t.Fatal("expected nil foreign pointer dereference to panic")
+	}
+}
+
+func TestADR0057TraitTypedStorageReferencesDispatchThroughCurrentValue(t *testing.T) {
+	program := lowerParitySource(t, `
+		use ard/unsafe
+
+		trait View {
+			fn value() Int
+		}
+		struct Box { number: Int }
+		struct Other { number: Int }
+		impl View for Box {
+			fn value() Int { self.number }
+		}
+		impl View for Other {
+			fn value() Int { self.number }
+		}
+
+		fn main() [Int] {
+			mut current: View = Box{number: 4}
+			let reference = mut current
+			let boxed: Any = reference
+			let recovered = unsafe::cast<mut Box>(boxed).expect("box pointer")
+			recovered.number = 6
+			let before = reference.value()
+			current = Other{number: 9}
+			[before, reference.value()]
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != `[6,9]` {
+		t.Fatalf("result = %s, want trait storage forwarding and pointer projection", got)
+	}
+}
+
+func TestADR0057MixedConcreteAndTraitReferencesCompareTargetIdentity(t *testing.T) {
+	program := lowerParitySource(t, `
+		trait View {
+			fn value() Int
+		}
+		struct Box { number: Int }
+		impl View for Box {
+			fn value() Int { self.number }
+		}
+
+		fn main() Bool {
+			let box = Box{number: 1}
+			let concrete = mut box
+			let widened: mut View = concrete
+			concrete == widened
+		}
+	`)
+	if got := runGoTargetParityJSON(t, program); got != `true` {
+		t.Fatalf("result = %s, want shared target identity", got)
 	}
 }
 

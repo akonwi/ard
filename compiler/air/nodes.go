@@ -192,6 +192,13 @@ const (
 	ExprTryMaybe
 )
 
+type ForeignArgMode uint8
+
+const (
+	ForeignArgExact ForeignArgMode = iota
+	ForeignArgDescriptorValue
+)
+
 type ForeignResultShape uint8
 
 const (
@@ -248,6 +255,7 @@ type Expr struct {
 	ReferenceMode      ReferenceMode
 	Observational      bool
 	ForeignResultShape ForeignResultShape
+	ForeignArgModes    []ForeignArgMode
 	TypeArgs           []TypeID
 	Impl               ImplID
 	Trait              TraitID

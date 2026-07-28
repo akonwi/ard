@@ -206,6 +206,9 @@ func validateFunction(program *Program, fn Function) error {
 		}
 	}
 	for _, capture := range fn.Captures {
+		if capture.Mode > CaptureSlot {
+			return fmt.Errorf("function %s capture %s has invalid mode %d", fn.Name, capture.Name, capture.Mode)
+		}
 		if !validTypeID(program, capture.Type) {
 			return fmt.Errorf("function %s capture %s has invalid type %d", fn.Name, capture.Name, capture.Type)
 		}
@@ -372,6 +375,16 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		impl := program.Impls[expr.Impl]
 		if impl.Trait != expr.Trait || impl.ForType != source.Elem {
 			return fmt.Errorf("trait reference projection impl %d does not match source referent", expr.Impl)
+		}
+	}
+	if len(expr.ForeignArgModes) > 0 {
+		if len(expr.ForeignArgModes) != len(expr.Args) {
+			return fmt.Errorf("foreign expression has %d arg modes for %d args", len(expr.ForeignArgModes), len(expr.Args))
+		}
+		for _, mode := range expr.ForeignArgModes {
+			if mode > ForeignArgDescriptorValue {
+				return fmt.Errorf("foreign expression has invalid arg mode %d", mode)
+			}
 		}
 	}
 	if expr.Kind == ExprLoadGlobal && !validGlobalID(program, expr.Global) {

@@ -300,6 +300,14 @@ func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
 		if e.Assignable {
 			mode = AddressablePlace
 		}
+	case *ModuleSymbol:
+		// Imported Ard globals retain their module storage provenance.
+		// Function declarations remain non-addressable values.
+		if _, function := e.Symbol.Type.(*FunctionDef); function {
+			c.addDiagnostic(nonAddressableBorrowDiagnostic{Span: c.sourceSpan(s.Operand.GetLocation())}.build())
+			return nil
+		}
+		mode = AddressablePlace
 	case *Variable, *InstanceProperty, *ForeignFieldAccess:
 		if !c.isAddressablePlace(operand) {
 			c.addDiagnostic(nonAddressableBorrowDiagnostic{
@@ -9043,7 +9051,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						if c.rejectUnspecializedGenericFunctionValue(sym.Type, prop.GetLocation()) {
 							return nil
 						}
-						node := &ModuleSymbol{Module: mod.Path(), Symbol: Symbol{Name: prop.Name, Type: sym.Type}}
+						node := &ModuleSymbol{Module: mod.Path(), Symbol: sym}
 						c.recordTarget(prop, node, SpanTarget{Kind: TargetValue, Module: mod.Path(), Symbol: prop.Name})
 						return node
 					default:

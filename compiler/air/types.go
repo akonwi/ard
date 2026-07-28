@@ -96,10 +96,22 @@ type Local struct {
 	Reference bool
 }
 
+type CaptureMode uint8
+
+const (
+	// CaptureValue snapshots an ordinary value when the closure is created.
+	CaptureValue CaptureMode = iota
+	// CaptureReference snapshots a first-class reference handle.
+	CaptureReference
+	// CaptureSlot captures the binding slot itself for rebinding or address use.
+	CaptureSlot
+)
+
 type Capture struct {
 	Name  string
 	Type  TypeID
 	Local LocalID
+	Mode  CaptureMode
 }
 
 type Test struct {

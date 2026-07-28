@@ -1249,10 +1249,20 @@ type WhileLoop struct {
 
 func (w WhileLoop) NonProducing() {}
 
+type ForeignParameterABI uint8
+
+const (
+	ForeignParameterExact ForeignParameterABI = iota
+	// ForeignParameterDescriptorValue requires a source reference but passes
+	// the current slice/map descriptor value to Go (ADR 0057).
+	ForeignParameterDescriptorValue
+)
+
 type Parameter struct {
-	Name    string
-	Type    Type
-	Mutable bool
+	Name       string
+	Type       Type
+	Mutable    bool
+	ForeignABI ForeignParameterABI
 	// Loc is the parameter's source location when the parameter came from
 	// parsed source. Zero for synthesized parameters. Used only for tooling
 	// span recording.

@@ -195,6 +195,7 @@ func functionDefFromGoSignatureBound(name string, sig *types.Signature, bindings
 		param := sig.Params().At(i)
 		goType := param.Type()
 		mutable := false
+		foreignABI := ForeignParameterExact
 		variadic := false
 		if sig.Variadic() && i == sig.Params().Len()-1 {
 			slice, ok := goType.(*types.Slice)
@@ -205,8 +206,10 @@ func functionDefFromGoSignatureBound(name string, sig *types.Signature, bindings
 			variadic = true
 		} else if _, ok := goType.Underlying().(*types.Slice); ok {
 			mutable = true
+			foreignABI = ForeignParameterDescriptorValue
 		} else if _, ok := goType.Underlying().(*types.Map); ok {
 			mutable = true
+			foreignABI = ForeignParameterDescriptorValue
 		}
 		ardType, reason := boundTypeFromGo(goType, sig.TypeParams(), bindings)
 		if reason != "" {
@@ -217,13 +220,14 @@ func functionDefFromGoSignatureBound(name string, sig *types.Signature, bindings
 			// required boundary, matching non-generic Go slice/map parameters
 			// (ADR 0057).
 			mutable = true
+			foreignABI = ForeignParameterDescriptorValue
 			ardType = MakeMutableRef(ardType)
 		}
 		paramName := param.Name()
 		if paramName == "" {
 			paramName = fmt.Sprintf("arg%d", i+1)
 		}
-		params = append(params, Parameter{Name: paramName, Type: ardType, Mutable: mutable, Variadic: variadic})
+		params = append(params, Parameter{Name: paramName, Type: ardType, Mutable: mutable, ForeignABI: foreignABI, Variadic: variadic})
 	}
 
 	ret, reason := boundReturnTypeFromGo(sig.Results(), sig.TypeParams(), bindings)

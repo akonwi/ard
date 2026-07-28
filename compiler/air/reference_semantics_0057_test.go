@@ -7,6 +7,33 @@ import (
 	"github.com/akonwi/ard/checker"
 )
 
+func TestADR0057PreservesClosureCaptureModes(t *testing.T) {
+	program := lowerSource(t, `
+		struct Box { value: Int }
+		fn main() {
+			let count = 1
+			let first = Box{value: 1}
+			let second = Box{value: 2}
+			mut reference = mut first
+			let capture_value = fn() Int { count }
+			let capture_handle = fn() Int { reference.value }
+			let capture_slot = fn() { reference = mut second }
+		}
+	`)
+
+	seen := map[CaptureMode]bool{}
+	for _, function := range program.Functions {
+		for _, capture := range function.Captures {
+			seen[capture.Mode] = true
+		}
+	}
+	for _, mode := range []CaptureMode{CaptureValue, CaptureReference, CaptureSlot} {
+		if !seen[mode] {
+			t.Fatalf("capture mode %d missing from AIR: %#v", mode, program.Functions)
+		}
+	}
+}
+
 func TestADR0057BindsGenericReferentThroughReferenceType(t *testing.T) {
 	module := checkedModuleWithPath(t, "test", `fn take(value: mut $T) {}`)
 	definition, ok := module.Get("take").Type.(*checker.FunctionDef)
