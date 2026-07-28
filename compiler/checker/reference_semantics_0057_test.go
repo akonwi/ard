@@ -231,6 +231,12 @@ take(deref reference)`},
 let value = Box{value: 1}
 let reference = mut value
 let holder = Holder{item: reference}`, wantError: true},
+		{name: "reference field rejects writable ordinary binding", source: `struct Holder { item: mut Box }
+mut value = Box{value: 1}
+let holder = Holder{item: value}`, wantError: true},
+		{name: "reference field accepts explicit borrow", source: `struct Holder { item: mut Box }
+let value = Box{value: 1}
+let holder = Holder{item: (mut value)}`},
 		{name: "value field accepts deref", source: `struct Holder { item: Box }
 let value = Box{value: 1}
 let reference = mut value
@@ -269,6 +275,14 @@ func TestADR0057ReferenceObservationAssignmentAndComparability(t *testing.T) {
 		source    string
 		wantError bool
 	}{
+		{name: "iteration observes reference containers", source: `let boxes = mut [Box{value: 1}]
+let scores = mut ["a": 1]
+for box in boxes {
+  let observed = box.value
+}
+for key, score in scores {
+  let observed = score
+}`},
 		{name: "observational reads remain implicit", source: `let box = Box{value: 1}
 let reference = mut box
 let field = reference.value
