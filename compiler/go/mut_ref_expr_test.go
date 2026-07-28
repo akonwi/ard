@@ -9,11 +9,9 @@ import (
 	"github.com/akonwi/ard/frontend"
 )
 
-// TestRunProgramMutRefExpressions exercises ADR 0045 end to end: explicit
-// `mut` expressions create references whose writes are visible through the
-// original storage, fresh storage binds, aliases chain, descriptor-backed
-// referents share storage without pointers, and explicit `mut` arguments
-// reach `mut T` parameters.
+// TestRunProgramMutRefExpressions exercises ADR 0057 end to end: explicit
+// references can target let storage, flow as first-class values, mutate the
+// pointee, materialize shallow values with deref, and use fresh storage.
 func TestRunProgramMutRefExpressions(t *testing.T) {
 	projectDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"mutref\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -33,46 +31,34 @@ fn make_person() Person {
 }
 
 fn main() {
-  // Alias to a scalar binding: writes flow both ways.
-  mut counter = 0
-  let r = mut counter
-  r =+ 1
-  if not counter == 1 { panic("write through alias lost") }
-  counter =+ 1
-  let seen: Int = r
-  if not seen == 2 { panic("read through alias stale") }
+  // A let binding is stable addressable storage.
+  let alice = Person{age: 30}
+  let alice_ref = mut alice
+  grow(alice_ref)
+  if not alice.age == 31 { panic("explicit reference write lost") }
 
-  // Alias of an alias reaches the same storage.
-  let rr = mut r
-  rr =+ 1
-  if not counter == 3 { panic("chained alias write lost") }
+  // Copying a reference preserves pointee identity.
+  let alias = alice_ref
+  alias.age =+ 1
+  if not alice.age == 32 { panic("reference copy lost pointee identity") }
 
-  // Binding a reference without mut copies the referent.
-  let copy: Int = r
-  counter =+ 1
-  if not copy == 3 { panic("copy should not track referent") }
+  // Value materialization is explicit and shallow.
+  let snapshot: Person = deref alice_ref
+  alias.age =+ 1
+  if not snapshot.age == 32 { panic("deref snapshot tracked later mutation") }
 
-  // Fresh storage from a value expression.
+  // Fresh storage from value expressions.
   let fresh = mut Person{age: 30}
   fresh.age = 99
-  if not fresh.age == 99 { panic("fresh storage write lost") }
-
-  // Explicit mut argument to a mut parameter.
-  mut alice = Person{age: 30}
-  grow(mut alice)
-  if not alice.age == 31 { panic("explicit mut arg write lost") }
-
-  // Explicit mut argument of fresh storage.
+  if not fresh.age == 99 { panic("fresh literal storage write lost") }
   grow(mut Person{age: 1})
 
-  // Fresh storage from a call result (temporary + address-of path).
   let made = mut make_person()
   made.age =+ 5
   if not made.age == 15 { panic("fresh call storage write lost") }
 
-  // Descriptor-backed referent: element writes share storage by value,
-  // matching mut-parameter semantics.
-  mut items = [1, 2]
+  // Descriptor-backed references update the referenced descriptor/storage.
+  let items = [1, 2]
   let list_ref = mut items
   list_ref.set(0, 9)
   if not items.at(0).or(0) == 9 { panic("descriptor alias element write lost") }
@@ -94,8 +80,8 @@ fn main() {
 }
 
 // TestRunProgramMutRefSatisfiesGoInterface pins the motivating case from
-// issue #257: `mut <value>` produces the pointer form, so a Go interface
-// whose methods have pointer receivers is satisfied.
+// issue #257 and ADR 0057: `mut <addressable value>` produces the pointer form
+// independently of whether the source binding slot is writable.
 func TestRunProgramMutRefSatisfiesGoInterface(t *testing.T) {
 	projectDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"mutrefiface\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
@@ -131,7 +117,7 @@ func BumpTwice(b Bumper) {
 	if err := os.WriteFile(mainPath, []byte(`use go:mutrefiface/ffi
 
 fn main() {
-  mut counter = ffi::Counter{N: 0}
+  let counter = ffi::Counter{N: 0}
   ffi::BumpTwice(mut counter)
   if not counter.N == 2 { panic("pointer-receiver interface writes lost") }
 }

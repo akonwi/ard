@@ -6,9 +6,11 @@ Accepted
 
 ## Implementation status
 
-Planned. The current checker and backends still implement parts of the older
-rules superseded below. This ADR defines the target semantics and the migration
-plan; it does not claim that the implementation already conforms.
+In progress. Phase 1's parser, formatter, checker, AIR, Go-runtime/FFI, and
+Tree-sitter semantic contract tests have been added. They are intentionally red
+against the pre-ADR implementation and define the target for Phases 2–6. The
+current checker and backends still implement parts of the older rules superseded
+below; this ADR does not claim that the implementation already conforms.
 
 ## Context
 

@@ -1,117 +1,126 @@
 package checker_test
 
-import (
-	"testing"
-
-	"github.com/akonwi/ard/checker"
-)
+import "testing"
 
 func TestMutableReferenceFields(t *testing.T) {
-	run(t, []test{
+	tests := []struct {
+		name      string
+		source    string
+		wantError bool
+	}{
 		{
-			name: "immutable struct can expose mutable reference field",
-			input: `
-				struct Tree { count: Int }
-				struct Context { tree: mut Tree }
-
-				fn bump(tree: mut Tree) {
-					tree.count =+ 1
-				}
-
-				mut tree = Tree{count: 0}
-				let ctx = Context{tree: tree}
-				bump(ctx.tree)
-			`,
-			diagnostics: []checker.Diagnostic{},
+			name: "immutable struct can expose actual reference field",
+			source: `
+struct Tree { count: Int }
+struct Context { tree: mut Tree }
+fn bump(tree: mut Tree) { tree.count =+ 1 }
+let tree = Tree{count: 0}
+let ctx = Context{tree: mut tree}
+bump(ctx.tree)
+`,
 		},
 		{
-			name: "mutable reference field requires mutable value",
-			input: `
-				struct Tree { count: Int }
-				struct Context { tree: mut Tree }
-
-				let tree = Tree{count: 0}
-				let ctx = Context{tree: tree}
-			`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected a mutable Tree"}},
+			name: "reference field rejects ordinary value",
+			source: `
+struct Tree { count: Int }
+struct Context { tree: mut Tree }
+let tree = Tree{count: 0}
+let ctx = Context{tree: tree}
+`,
+			wantError: true,
 		},
 		{
-			name: "assignment to mutable reference field is allowed through immutable holder",
-			input: `
-				struct Tree { count: Int }
-				struct Context { tree: mut Tree }
-
-				mut tree = Tree{count: 0}
-				mut other = Tree{count: 1}
-				let ctx = Context{tree: tree}
-				ctx.tree = other
-			`,
-			diagnostics: []checker.Diagnostic{},
+			name: "immutable holder cannot rebind reference field",
+			source: `
+struct Tree { count: Int }
+struct Context { tree: mut Tree }
+let tree = Tree{count: 0}
+let other = Tree{count: 1}
+let ctx = Context{tree: mut tree}
+ctx.tree = mut other
+`,
+			wantError: true,
 		},
 		{
-			name: "nested field assignment through mutable reference field is allowed",
-			input: `
-				struct Tree { count: Int }
-				struct Context { tree: mut Tree }
-
-				mut tree = Tree{count: 0}
-				let ctx = Context{tree: tree}
-				ctx.tree.count = 2
-			`,
-			diagnostics: []checker.Diagnostic{},
+			name: "reference to holder can rebind reference field",
+			source: `
+struct Tree { count: Int }
+struct Context { tree: mut Tree }
+let tree = Tree{count: 0}
+let other = Tree{count: 1}
+let ctx = mut Context{tree: mut tree}
+ctx.tree = mut other
+`,
 		},
-	})
+		{
+			name: "reference field permits nested pointee mutation",
+			source: `
+struct Tree { count: Int }
+struct Context { tree: mut Tree }
+let tree = Tree{count: 0}
+let ctx = Context{tree: mut tree}
+ctx.tree.count = 2
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertReferenceCheckerResult(t, tt.source, tt.wantError)
+		})
+	}
 }
+
 func TestMutableReferenceParameters(t *testing.T) {
-	run(t, []test{
+	tests := []struct {
+		name      string
+		source    string
+		wantError bool
+	}{
 		{
-			name: "mutable parameter accepts mutable binding without call-site mut",
-			input: `
-				struct Person { age: Int }
-
-				fn grow(p: mut Person) {
-					p.age =+ 1
-				}
-				mut joe = Person{age: 20}
-				grow(joe)
-			`,
-			diagnostics: []checker.Diagnostic{},
+			name: "ordinary mut binding is rejected without explicit reference",
+			source: `
+struct Person { age: Int }
+fn grow(person: mut Person) { person.age =+ 1 }
+mut joe = Person{age: 20}
+grow(joe)
+`,
+			wantError: true,
 		},
 		{
-			name: "immutable binding cannot be passed to mutable parameter",
-			input: `
-				struct Person { age: Int }
-
-				fn grow(p: mut Person) {
-					p.age =+ 1
-				}
-				let joe = Person{age: 20}
-				grow(joe)
-			`,
-			diagnostics: []checker.Diagnostic{
-				{
-					Kind:    checker.Error,
-					Message: "Type mismatch: Expected a mutable Person",
-				},
-			},
+			name: "ordinary let binding is rejected without explicit reference",
+			source: `
+struct Person { age: Int }
+fn grow(person: mut Person) { person.age =+ 1 }
+let joe = Person{age: 20}
+grow(joe)
+`,
+			wantError: true,
 		},
 		{
-			name: "call-site mut of an immutable argument is rejected",
-			input: `
-				struct Person { age: Int }
-
-				fn grow(p: mut Person) {
-					p.age =+ 1
-				}
-				let joe = Person{age: 20}
-				grow(mut joe)
-			`,
-			diagnostics: []checker.Diagnostic{
-				{
-					Kind:    checker.Error,
-					Message: "Cannot take a mutable reference to immutable 'joe'",
-				},
-			},
+			name: "explicit reference to let storage is accepted",
+			source: `
+struct Person { age: Int }
+fn grow(person: mut Person) { person.age =+ 1 }
+let joe = Person{age: 20}
+grow(mut joe)
+`,
 		},
-	})
+		{
+			name: "existing reference is accepted",
+			source: `
+struct Person { age: Int }
+fn grow(person: mut Person) { person.age =+ 1 }
+let joe = Person{age: 20}
+let reference = mut joe
+grow(reference)
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertReferenceCheckerResult(t, tt.source, tt.wantError)
+		})
+	}
 }

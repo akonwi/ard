@@ -1253,26 +1253,35 @@ fmt::Println(a: "hello")`,
 	})
 }
 
-func TestGoSliceParametersRequireMutableLists(t *testing.T) {
-	run(t, []test{
+func TestGoSliceParametersRequireListReferences(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		wantError bool
+	}{
 		{
-			name: "mutable list accepted for Go slice parameter",
-			input: `use go:sort
+			name: "ordinary mut list is not an implicit reference",
+			source: `use go:sort
 fn main() {
   mut values = [3, 1, 2]
   sort::Ints(values)
 }`,
+			wantError: true,
 		},
 		{
-			name: "immutable list rejected for Go slice parameter",
-			input: `use go:sort
+			name: "explicit reference to let list is accepted",
+			source: `use go:sort
 fn main() {
   let values = [3, 1, 2]
-  sort::Ints(values)
+  sort::Ints(mut values)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected a mutable [Int]"}},
 		},
-	})
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertReferenceCheckerResult(t, tt.source, tt.wantError)
+		})
+	}
 }
 
 func TestGoSliceReturnsMapToLists(t *testing.T) {
@@ -1392,43 +1401,51 @@ fn bad() {
 	})
 }
 
-// A freshly constructed container literal is new storage with no other
-// observer, so it satisfies a mutable Go slice/map parameter directly.
-func TestFreshContainerLiteralsSatisfyMutableGoParams(t *testing.T) {
-	run(t, []test{
+// Fresh containers still need explicit reference-producing syntax at a
+// reference destination. `mut <literal>` owns the fresh stable storage.
+func TestFreshContainerLiteralsRequireExplicitReferences(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		wantError bool
+	}{
 		{
-			name: "list literal passes to a mutable Go slice parameter",
-			input: `use go:sort
+			name: "bare list literal is rejected for mutable Go slice parameter",
+			source: `use go:sort
 fn main() {
   sort::Ints([3, 1, 2])
 }`,
+			wantError: true,
 		},
 		{
-			name: "map literal passes to a mutable Ard map parameter",
-			input: `fn consume(m: mut [Str: Int]) Int {
-  m.size()
-}
+			name: "explicit fresh list reference is accepted",
+			source: `use go:sort
 fn main() {
-  let _ = consume(["a": 1])
+  sort::Ints(mut [3, 1, 2])
 }`,
 		},
 		{
-			name: "list literal against a non-list annotation reports a diagnostic",
-			input: `fn main() {
-  let x: Int = [1]
-}`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Expected Int but got a list"}},
+			name: "bare map literal is rejected for mutable Ard parameter",
+			source: `fn consume(m: mut [Str: Int]) Int { m.size() }
+fn main() { let size = consume(["a": 1]) }`,
+			wantError: true,
 		},
 		{
-			name: "immutable bindings are still rejected for mutable Go params",
-			input: `use go:sort
-fn main() {
-  let nums = [3, 1]
-  sort::Ints(nums)
-}`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected a mutable [Int]"}},
+			name: "explicit fresh map reference is accepted",
+			source: `fn consume(m: mut [Str: Int]) Int { m.size() }
+fn main() { let size = consume(mut ["a": 1]) }`,
 		},
-	})
+		{
+			name:      "list literal against non-list annotation remains rejected",
+			source:    `fn main() { let x: Int = [1] }`,
+			wantError: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertReferenceCheckerResult(t, tt.source, tt.wantError)
+		})
+	}
 }
 
 // Named empty Go interfaces keep their type identity (they are foreign
