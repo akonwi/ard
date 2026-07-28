@@ -62,7 +62,7 @@ func Validate(program *Program) error {
 
 func validateTypeInfo(program *Program, typ TypeInfo) error {
 	switch typ.Kind {
-	case TypeList, TypeMaybe, TypeChannel, TypeReceiver, TypeSender:
+	case TypeList, TypeMaybe, TypeChannel, TypeReceiver, TypeSender, TypeReference:
 		if !validTypeID(program, typ.Elem) {
 			return fmt.Errorf("type %s has invalid elem type %d", typ.Name, typ.Elem)
 		}
@@ -151,8 +151,15 @@ func validateImpl(program *Program, impl Impl) error {
 		if len(method.Signature.Params) != len(traitMethod.Signature.Params)+1 {
 			return fmt.Errorf("impl %d method %s has %d params, want receiver plus %d trait params", impl.ID, method.Name, len(method.Signature.Params), len(traitMethod.Signature.Params))
 		}
-		if method.Signature.Params[0].Type != impl.ForType {
-			return fmt.Errorf("impl %d method %s receiver type %d does not match impl type %d", impl.ID, method.Name, method.Signature.Params[0].Type, impl.ForType)
+		receiverType := method.Signature.Params[0].Type
+		receiverMatches := receiverType == impl.ForType
+		if !receiverMatches && method.Signature.Params[0].Mutable {
+			if receiver, err := typeInfo(program, receiverType); err == nil {
+				receiverMatches = receiver.Kind == TypeReference && receiver.Elem == impl.ForType
+			}
+		}
+		if !receiverMatches {
+			return fmt.Errorf("impl %d method %s receiver type %d does not match impl type %d", impl.ID, method.Name, receiverType, impl.ForType)
 		}
 		for paramIndex, traitParam := range traitMethod.Signature.Params {
 			methodParam := method.Signature.Params[paramIndex+1]
@@ -270,7 +277,7 @@ func validateBlock(program *Program, fn Function, block Block) error {
 			if stmt.Target == nil {
 				return fmt.Errorf("field set statement missing target")
 			}
-			targetType, err := typeInfo(program, stmt.Target.Type)
+			targetType, err := referentTypeInfo(program, stmt.Target.Type)
 			if err != nil {
 				return err
 			}
@@ -315,6 +322,57 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	}
 	if expr.Kind == ExprLoadLocal && (expr.Local < 0 || int(expr.Local) >= len(fn.Locals)) {
 		return fmt.Errorf("expression loads invalid local %d", expr.Local)
+	}
+	if expr.Kind == ExprMutRef {
+		if expr.ReferenceMode < ExistingReference || expr.ReferenceMode > FreshValue {
+			return fmt.Errorf("mutable reference expression has invalid mode %d", expr.ReferenceMode)
+		}
+		if expr.Target == nil {
+			return fmt.Errorf("mutable reference expression has no target")
+		}
+	}
+	if (expr.Kind == ExprDeref || expr.Kind == ExprTraitRefProject) && expr.Target == nil {
+		return fmt.Errorf("reference expression kind %d has no target", expr.Kind)
+	}
+	if expr.Kind == ExprDeref && expr.Target != nil {
+		targetType, err := typeInfo(program, expr.Target.Type)
+		if err != nil {
+			return err
+		}
+		if targetType.Kind == TypeReference {
+			if expr.Type != targetType.Elem {
+				return fmt.Errorf("dereference type %d does not match referent type %d", expr.Type, targetType.Elem)
+			}
+		} else if targetType.Kind != TypeForeignType || !targetType.ForeignPointer {
+			return fmt.Errorf("dereference target has non-reference type kind %d", targetType.Kind)
+		}
+	}
+	if expr.Kind == ExprTraitRefProject && expr.Target != nil {
+		destination, err := typeInfo(program, expr.Type)
+		if err != nil {
+			return err
+		}
+		source, err := typeInfo(program, expr.Target.Type)
+		if err != nil {
+			return err
+		}
+		if destination.Kind != TypeReference || source.Kind != TypeReference {
+			return fmt.Errorf("trait reference projection requires reference source and destination")
+		}
+		traitType, err := typeInfo(program, destination.Elem)
+		if err != nil {
+			return err
+		}
+		if traitType.Kind != TypeTraitObject || traitType.Trait != expr.Trait {
+			return fmt.Errorf("trait reference projection destination does not match trait %d", expr.Trait)
+		}
+		if !validImplID(program, expr.Impl) {
+			return fmt.Errorf("trait reference projection has invalid impl id %d", expr.Impl)
+		}
+		impl := program.Impls[expr.Impl]
+		if impl.Trait != expr.Trait || impl.ForType != source.Elem {
+			return fmt.Errorf("trait reference projection impl %d does not match source referent", expr.Impl)
+		}
 	}
 	if expr.Kind == ExprLoadGlobal && !validGlobalID(program, expr.Global) {
 		return fmt.Errorf("expression loads invalid global %d", expr.Global)
@@ -550,7 +608,7 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if expr.Target == nil {
 			return fmt.Errorf("trait call missing target")
 		}
-		targetType, err := typeInfo(program, expr.Target.Type)
+		targetType, err := referentTypeInfo(program, expr.Target.Type)
 		if err != nil {
 			return err
 		}
@@ -688,6 +746,17 @@ func typeInfo(program *Program, id TypeID) (TypeInfo, error) {
 		return TypeInfo{}, fmt.Errorf("invalid type id %d", id)
 	}
 	return program.Types[id-1], nil
+}
+
+func referentTypeInfo(program *Program, id TypeID) (TypeInfo, error) {
+	info, err := typeInfo(program, id)
+	if err != nil {
+		return TypeInfo{}, err
+	}
+	if info.Kind == TypeReference {
+		return typeInfo(program, info.Elem)
+	}
+	return info, nil
 }
 
 func unionMemberByTag(unionType TypeInfo, tag uint32) (UnionMember, bool) {

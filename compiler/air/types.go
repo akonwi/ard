@@ -133,9 +133,8 @@ const (
 	TypeReceiver
 	TypeSender
 	TypeTraitObject
-	// TypeReference is a pointer-shaped mutable-reference type used when a
-	// reference appears as a first-class generic argument. Ordinary mutable
-	// fields and parameters continue to use their dedicated mutability flags.
+	// TypeReference is the canonical pointer-shaped mutable-reference type.
+	// Elem names the referent at every nesting position (ADR 0057).
 	TypeReference
 	// TypeParam is a reference to a generic type parameter inside a generic
 	// definition (e.g. the `T` in `struct Partition { selected: [$T] }`). It only appears in

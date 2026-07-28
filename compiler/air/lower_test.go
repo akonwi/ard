@@ -1084,10 +1084,11 @@ func TestLowerRecursiveGenericMethodUsesReceiverTypeParameterIdentity(t *testing
 	if len(receiver.GenericArgs) != 1 || len(callback.Params) != 1 {
 		t.Fatalf("receiver/callback types = %#v / %#v", receiver, callback)
 	}
-	callbackContext := testTypeInfo(t, program, callback.Params[0])
-	if method.Signature.Params[0].Type != callback.Params[0] {
-		t.Fatalf("receiver type = %d, callback context = %d, want one nominal application", method.Signature.Params[0].Type, callback.Params[0])
+	callbackReference := testTypeInfo(t, program, callback.Params[0])
+	if callbackReference.Kind != TypeReference || callbackReference.Elem != method.Signature.Params[0].Type {
+		t.Fatalf("receiver type = %d, callback reference = %#v, want mut receiver type", method.Signature.Params[0].Type, callbackReference)
 	}
+	callbackContext := testTypeInfo(t, program, callbackReference.Elem)
 	if len(callbackContext.GenericArgs) != 1 || receiver.GenericArgs[0] != callbackContext.GenericArgs[0] {
 		t.Fatalf("receiver arg = %v, callback arg = %v, want same TypeParam", receiver.GenericArgs, callbackContext.GenericArgs)
 	}
@@ -1287,12 +1288,36 @@ func TestLowerTestsManifest(t *testing.T) {
 }
 func TestValidateRejectsBadTypeReference(t *testing.T) {
 	program := &Program{
-		Types:  []TypeInfo{{ID: 1, Kind: TypeList, Name: "[Missing]", Elem: 99}},
+		Types:  []TypeInfo{{ID: 1, Kind: TypeReference, Name: "mut Missing", Elem: 99}},
 		Entry:  NoFunction,
 		Script: NoFunction,
 	}
 	if err := Validate(program); err == nil {
-		t.Fatalf("Validate succeeded, want invalid type error")
+		t.Fatalf("Validate succeeded, want invalid reference elem error")
+	}
+}
+
+func TestValidateRejectsMutableReferenceWithoutMode(t *testing.T) {
+	program := &Program{
+		Types: []TypeInfo{
+			{ID: 1, Kind: TypeInt, Name: "Int"},
+			{ID: 2, Kind: TypeReference, Name: "mut Int", Elem: 1},
+		},
+		Functions: []Function{{
+			ID:        0,
+			Name:      "main",
+			Signature: Signature{Return: 1},
+			Body: Block{Result: &Expr{
+				Kind:   ExprMutRef,
+				Type:   2,
+				Target: &Expr{Kind: ExprConstInt, Type: 1, Int: "1"},
+			}},
+		}},
+		Entry:  0,
+		Script: NoFunction,
+	}
+	if err := Validate(program); err == nil {
+		t.Fatalf("Validate succeeded, want invalid reference mode error")
 	}
 }
 

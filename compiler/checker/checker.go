@@ -323,27 +323,31 @@ func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
 		// A value expression materializes fresh mutable storage; the
 		// reference points at it, equivalent to binding a stable local first.
 	}
-	var refType Type
-	if foreign, ok := operand.Type().(*ForeignType); ok {
-		if pointer := foreign.PointerForm(); pointer != nil {
-			refType = pointer
-		} else if foreign.Interface {
-			// A reference to foreign-interface storage is a pointer to a Go
-			// interface descriptor. Go `*Interface` has no first-class
-			// foreign form, so the Ard reference wrapper carries it
-			// (ADR 0057).
-			refType = MakeMutableRef(foreign)
-		} else {
-			c.addDiagnostic(unsupportedMutableReferenceDiagnostic{
-				Type: foreign,
-				Span: c.sourceSpan(s.GetLocation()),
-			}.build())
-			return nil
-		}
-	} else {
-		refType = MakeMutableRef(operand.Type())
+	refType := referenceTypeForOperand(operand.Type())
+	if refType == nil {
+		c.addDiagnostic(unsupportedMutableReferenceDiagnostic{
+			Type: operand.Type(),
+			Span: c.sourceSpan(s.GetLocation()),
+		}.build())
+		return nil
 	}
-	return &MutableRefExpr{Operand: operand, Mode: mode, Fresh: mode == FreshValue, _type: refType}
+	return &MutableRefExpr{Operand: operand, Mode: mode, _type: refType}
+}
+
+func referenceTypeForOperand(typ Type) Type {
+	if foreign, ok := typ.(*ForeignType); ok {
+		if pointer := foreign.PointerForm(); pointer != nil {
+			return pointer
+		}
+		if foreign.Interface {
+			// A reference to foreign-interface storage is a pointer to a Go
+			// interface descriptor. Go `*Interface` has no first-class foreign
+			// form, so the Ard reference wrapper carries it (ADR 0057).
+			return MakeMutableRef(foreign)
+		}
+		return nil
+	}
+	return MakeMutableRef(typ)
 }
 
 // checkDeref checks the explicit one-layer `deref <operand>` expression
@@ -2493,6 +2497,35 @@ func interfaceConversionSource(expr Expression) (Type, bool) {
 	}
 }
 
+// referenceTraitProjection records a concrete-reference-to-trait-reference
+// widening explicitly. The target cannot lower this as an ordinary pointer
+// copy because mutable trait references require forwarding metadata (ADR 0057).
+func referenceTraitProjection(expected Type, actual Expression) (Expression, bool) {
+	expectedRef, ok := expected.(*MutableRef)
+	if !ok {
+		return nil, false
+	}
+	trait, ok := expectedRef.Of().(*Trait)
+	if !ok {
+		return nil, false
+	}
+	actualRef, ok := actual.Type().(*MutableRef)
+	if !ok || actualRef.Of().equal(trait) || !actualRef.Of().hasTrait(trait) {
+		return nil, false
+	}
+	return &ReferenceTraitProjection{Value: actual, Destination: expected}, true
+}
+
+// destinationConversion centralizes representation-bearing contextual
+// conversions. Callers must apply it before structural compatibility erases
+// concrete reference provenance (ADR 0057).
+func (c *Checker) destinationConversion(expected Type, actual Expression) (Expression, bool) {
+	if converted, ok := c.interfaceConversion(expected, actual); ok {
+		return converted, true
+	}
+	return referenceTraitProjection(expected, actual)
+}
+
 // snapshotExplicitReference removes an explicit `mut <value>` wrapper when a
 // solved value destination requests the referent rather than its identity.
 // Pointer/reference destinations and runtime interfaces handle identity before
@@ -4004,8 +4037,8 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 			if block.Stmts[i].Expr == nil {
 				continue
 			}
-			if upcast, ok := c.interfaceConversion(expectedFinal, block.Stmts[i].Expr); ok {
-				block.Stmts[i].Expr = upcast
+			if converted, ok := c.destinationConversion(expectedFinal, block.Stmts[i].Expr); ok {
+				block.Stmts[i].Expr = converted
 			}
 			break
 		}
@@ -5110,27 +5143,17 @@ func (c *Checker) checkMap(declaredType Type, expr *parse.MapLiteral) *MapLitera
 
 		hasError := false
 		for i, entry := range expr.Entries {
-			// Type check the key
-			key := c.checkExpr(entry.Key)
+			// Check both sides against their destination types so nested
+			// literals and representation-bearing conversions retain context.
+			key := c.checkExprAs(entry.Key, expectedKeyType)
 			if key == nil {
-				hasError = true
-				continue
-			}
-			if !c.areCompatible(expectedKeyType, key.Type()) {
-				c.addTypeMismatch(expectedKeyType, key.Type(), entry.Key.GetLocation())
 				hasError = true
 				continue
 			}
 			keys[i] = key
 
-			// Type check the value
-			value := c.checkExpr(entry.Value)
+			value := c.checkExprAs(entry.Value, expectedValueType)
 			if value == nil {
-				hasError = true
-				continue
-			}
-			if !c.areCompatible(expectedValueType, value.Type()) {
-				c.addTypeMismatch(expectedValueType, value.Type(), entry.Value.GetLocation())
 				hasError = true
 				continue
 			}
@@ -5898,8 +5921,20 @@ func (c *Checker) createPrimitiveMethodNode(subject Expression, methodName strin
 		receiverKind = ReceiverTrait
 		traitType = receiver
 	}
+	var receiverMode *ReferenceMode
+	var receiverType Type
+	if fnDef != nil && fnDef.Mutates && !isReferenceValued(subject) {
+		// The checker already proved this interior receiver is reachable
+		// through reference-capable storage. Preserve that addressability as
+		// dedicated call metadata while leaving Subject unchanged for tooling.
+		mode := AddressablePlace
+		receiverMode = &mode
+		receiverType = referenceTypeForOperand(subject.Type())
+	}
 	return &InstanceMethod{
-		Subject: subject,
+		Subject:      subject,
+		ReceiverMode: receiverMode,
+		ReceiverType: receiverType,
 		Method: &FunctionCall{
 			Name:       methodName,
 			Args:       args,
@@ -7775,7 +7810,7 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					if checkedArg == nil {
 						return nil
 					}
-					if converted, ok := c.interfaceConversion(effectiveFnDef.Parameters[i].Type, checkedArg); ok {
+					if converted, ok := c.destinationConversion(effectiveFnDef.Parameters[i].Type, checkedArg); ok {
 						checkedArg = converted
 					} else if !c.areCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) {
 						legacyMessage := typeMismatch(effectiveFnDef.Parameters[i].Type, checkedArg.Type())
@@ -10145,23 +10180,15 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 
 			var arg Expression = nil
 			if fnDef.name() == "ok" {
-				arg = c.checkExpr(s.Function.Args[0].Value)
+				arg = c.checkExprAs(s.Function.Args[0].Value, resultType.Val())
 				if arg == nil {
-					return nil
-				}
-				if !resultType.Val().equal(arg.Type()) {
-					c.addTypeMismatch(resultType.Val(), arg.Type(), s.Function.Args[0].Value.GetLocation())
 					return nil
 				}
 				bindInferredTypeVars(resultType.Val(), arg.Type())
 			}
 			if fnDef.name() == "err" {
-				arg = c.checkExpr(s.Function.Args[0].Value)
+				arg = c.checkExprAs(s.Function.Args[0].Value, resultType.Err())
 				if arg == nil {
-					return nil
-				}
-				if !resultType.Err().equal(arg.Type()) {
-					c.addTypeMismatch(resultType.Err(), arg.Type(), s.Function.Args[0].Value.GetLocation())
 					return nil
 				}
 				bindInferredTypeVars(resultType.Err(), arg.Type())
@@ -10203,7 +10230,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 		return checked
 	}
 
-	if converted, ok := c.interfaceConversion(expectedType, checked); ok {
+	if converted, ok := c.destinationConversion(expectedType, checked); ok {
 		return converted
 	}
 
@@ -10235,30 +10262,42 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 // mutable reference, including list/map descriptor references.
 func (c *Checker) resolveParameterType(t parse.DeclaredType) (Type, bool) {
 	var inner parse.DeclaredType
+	nullable := false
 	switch mt := t.(type) {
 	case *parse.MutableType:
 		inner = mt.Inner
+		nullable = mt.IsNullable()
 	case parse.MutableType:
 		inner = mt.Inner
+		nullable = mt.IsNullable()
 	default:
 		return c.resolveType(t), false
 	}
 
 	base := c.resolveType(inner)
 	if base == nil {
-		return nil, true
+		return nil, !nullable
 	}
-	if foreign, ok := base.(*ForeignType); ok && !foreign.Pointer {
-		if mutableParamNeedsGoPointer(foreign) {
-			if pointer := foreign.PointerForm(); pointer != nil {
-				return pointer, true
-			}
+	var reference Type
+	if foreign, ok := base.(*ForeignType); ok && !foreign.Pointer && mutableParamNeedsGoPointer(foreign) {
+		if pointer := foreign.PointerForm(); pointer != nil {
+			reference = pointer
 		}
 	}
-	if isReferenceType(base) {
-		return base, true
+	if reference == nil {
+		if isReferenceType(base) {
+			reference = base
+		} else {
+			reference = MakeMutableRef(derefMutableRef(base))
+		}
 	}
-	return MakeMutableRef(derefMutableRef(base)), true
+	if nullable {
+		// The parser represents `(mut T)?` as a nullable MutableType node.
+		// Nullable applies outside the reference and therefore does not make
+		// the parameter itself a reference destination (ADR 0057).
+		return MakeMaybe(reference), false
+	}
+	return reference, true
 }
 
 func (c *Checker) resolveParametersWithContext(params []parse.Parameter, expectedFnType *FunctionDef) []Parameter {
@@ -10857,7 +10896,7 @@ func (c *Checker) checkMaybeNewStatic(s *parse.StaticFunction, mod Module, expec
 		return &ModuleFunctionCall{Module: mod.Path(), Call: call}
 	}
 	if contextualInner {
-		if converted, ok := c.interfaceConversion(typeVar, value); ok {
+		if converted, ok := c.destinationConversion(typeVar, value); ok {
 			value = converted
 		}
 	}
@@ -11229,7 +11268,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			if !argumentIsMaybe {
 				// A concrete interface inner type is a conversion obligation, not
 				// generic evidence. Preserve ownership before structural unification.
-				if converted, ok := c.interfaceConversion(maybeParam.Of(), checkedArg); ok {
+				if converted, ok := c.destinationConversion(maybeParam.Of(), checkedArg); ok {
 					checkedArg = converted
 				}
 				argType = checkedArg.Type()
@@ -11261,9 +11300,10 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 					}
 				}
 				checkedArg = coerceDiscardingFunction(maybeParam.Of(), checkedArg)
-				// Interface ownership must be classified before wrapping the value in
-				// Maybe; after synthesis the original reference provenance is hidden.
-				if converted, ok := c.interfaceConversion(maybeParam.Of(), checkedArg); ok {
+				// Interface ownership and trait-reference projection must be
+				// classified before wrapping the value in Maybe; after synthesis
+				// the original reference provenance is hidden.
+				if converted, ok := c.destinationConversion(maybeParam.Of(), checkedArg); ok {
 					checkedArg = converted
 				}
 				// Check if argument type matches the inner Maybe type
@@ -11278,8 +11318,8 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// enclosing context can require a representation-bearing interface
 		// conversion even in a generic call. Materialize it before unification so
 		// the solved interface type validates without losing source ownership.
-		if upcast, ok := c.interfaceConversion(paramType, checkedArg); ok {
-			checkedArg = upcast
+		if converted, ok := c.destinationConversion(paramType, checkedArg); ok {
+			checkedArg = converted
 		}
 
 		// For generic functions, unify the argument type with the parameter type.
@@ -11308,8 +11348,8 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			checkedArg = coerceDiscardingFunction(paramType, checkedArg)
 			// Runtime interface conversion is representation-bearing even when
 			// broad compatibility already accepts the nominal implementation.
-			if upcast, ok := c.interfaceConversion(paramType, checkedArg); ok {
-				checkedArg = upcast
+			if converted, ok := c.destinationConversion(paramType, checkedArg); ok {
+				checkedArg = converted
 			} else if !c.areCompatible(paramType, checkedArg.Type()) {
 				legacyMessage := typeMismatch(paramType, checkedArg.Type())
 				c.addIncorrectArgumentType(legacyMessage, paramType, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], false)
@@ -11321,7 +11361,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		// interface destination that preserves reference identity. Ordinary
 		// value destinations never implicitly read a referent (ADR 0057).
 		solvedParamType := derefType(fnDefCopy.Parameters[i].Type)
-		if converted, ok := c.interfaceConversion(solvedParamType, checkedArg); ok {
+		if converted, ok := c.destinationConversion(solvedParamType, checkedArg); ok {
 			checkedArg = converted
 		}
 		paramType = solvedParamType

@@ -7,15 +7,19 @@ Accepted
 ## Implementation status
 
 In progress. Phase 1's parser, formatter, checker, AIR, Go-runtime/FFI, and
-Tree-sitter semantic contract tests are in place. Phase 2 is complete: `deref`
-is parsed, formatted, and grammar-supported; the checker implements first-class
-reference typing, capability judgments, explicit-borrow classification
-(`ExistingReference` / `AddressablePlace` / `FreshValue`), the uniform
-reference-destination policy, assignment target categories, observational
-reads, pointer-identity equality, async isolation, and the direct-Go boundary
-classification, with precise diagnostics. AIR and the Go backend still
-implement pre-ADR lowering; their ADR 0057 contract tests remain intentionally
-red until Phases 3–6.
+Tree-sitter semantic contract tests are in place. Phases 2 and 3 are complete:
+`deref` is parsed, formatted, and grammar-supported; the checker implements
+first-class reference typing, capability judgments, explicit-borrow
+classification (`ExistingReference` / `AddressablePlace` / `FreshValue`), the
+uniform reference-destination policy, assignment target categories,
+observational reads, pointer-identity equality, async isolation, and the
+direct-Go boundary classification. AIR now preserves the three reference
+creation modes, represents explicit and observational dereferences directly,
+uses canonical recursive `TypeReference` identity in parameters, returns,
+fields, generics, and compound types, and carries concrete-to-trait reference
+projection metadata. The Go backend still implements pre-ADR reference
+lowering; its ADR 0057 runtime contracts remain intentionally red until Phases
+4–6.
 
 ## Context
 

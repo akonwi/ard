@@ -131,6 +131,13 @@ let maybe: (mut Box)? = Maybe::new(value)`, wantError: true},
 		{name: "Maybe preserves reference", source: `let value = Box{value: 1}
 let reference = mut value
 let maybe: (mut Box)? = Maybe::new(reference)`},
+		{name: "nullable reference parameter preserves outer Maybe", source: `fn take(value: (mut Box)?) {}
+let value = Box{value: 1}
+let reference = mut value
+take(Maybe::new(reference))`},
+		{name: "nullable reference parameter rejects Maybe value", source: `fn take(value: (mut Box)?) {}
+let value = Box{value: 1}
+take(Maybe::new(value))`, wantError: true},
 		{name: "Result rejects ordinary value", source: `let value = Box{value: 1}
 let result: (mut Box)!Str = Result::ok(value)`, wantError: true},
 		{name: "Result preserves reference", source: `let value = Box{value: 1}

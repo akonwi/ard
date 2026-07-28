@@ -203,15 +203,12 @@ const (
 	StructSubject SubjectKind = iota
 )
 
-// MutableRefExpr is the explicit `mut <operand>` expression (ADR 0045). It
-// evaluates to a mutable reference. Mode classifies the operand per ADR 0057:
-// copy an existing handle, borrow addressable storage, or materialize fresh
-// storage. Fresh remains as the legacy AIR-facing bit and mirrors
-// Mode == FreshValue until Phase 3 migrates lowering onto Mode.
+// MutableRefExpr is the explicit `mut <operand>` expression. It evaluates to
+// a mutable reference and preserves whether lowering copies an existing
+// handle, borrows addressable storage, or materializes fresh storage (ADR 0057).
 type MutableRefExpr struct {
 	Operand Expression
 	Mode    ReferenceMode
-	Fresh   bool
 	_type   Type
 }
 
@@ -240,6 +237,21 @@ func (d *DerefExpr) Type() Type {
 
 func (d *DerefExpr) String() string {
 	return fmt.Sprintf("deref %s", d.Operand)
+}
+
+// ReferenceTraitProjection is the explicit checked conversion from a concrete
+// reference to a trait reference. Targets need this metadata to construct a
+// forwarding handle rather than treating the conversion as a pointer copy
+// (ADR 0057).
+type ReferenceTraitProjection struct {
+	Value       Expression
+	Destination Type
+}
+
+func (p *ReferenceTraitProjection) Type() Type { return p.Destination }
+
+func (p *ReferenceTraitProjection) String() string {
+	return fmt.Sprintf("%s as %s", p.Value, p.Destination)
 }
 
 type InstanceProperty struct {
@@ -302,8 +314,14 @@ type ForeignStructInstance struct {
 func (f *ForeignStructInstance) Type() Type { return f._type }
 
 type InstanceMethod struct {
-	Subject      Expression
-	Method       *FunctionCall
+	Subject Expression
+	Method  *FunctionCall
+	// ReceiverMode/ReceiverType preserve an implicit sanctioned borrow for a
+	// mutating call on an addressable interior place. The subject remains
+	// unchanged for tooling and source-level signatures (ADR 0057).
+	ReceiverMode *ReferenceMode
+	ReceiverType Type
+
 	ReceiverKind InstanceReceiverKind
 	StructType   *StructDef
 	EnumType     *Enum
