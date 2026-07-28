@@ -7,10 +7,15 @@ Accepted
 ## Implementation status
 
 In progress. Phase 1's parser, formatter, checker, AIR, Go-runtime/FFI, and
-Tree-sitter semantic contract tests have been added. They are intentionally red
-against the pre-ADR implementation and define the target for Phases 2–6. The
-current checker and backends still implement parts of the older rules superseded
-below; this ADR does not claim that the implementation already conforms.
+Tree-sitter semantic contract tests are in place. Phase 2 is complete: `deref`
+is parsed, formatted, and grammar-supported; the checker implements first-class
+reference typing, capability judgments, explicit-borrow classification
+(`ExistingReference` / `AddressablePlace` / `FreshValue`), the uniform
+reference-destination policy, assignment target categories, observational
+reads, pointer-identity equality, async isolation, and the direct-Go boundary
+classification, with precise diagnostics. AIR and the Go backend still
+implement pre-ADR lowering; their ADR 0057 contract tests remain intentionally
+red until Phases 3–6.
 
 ## Context
 
