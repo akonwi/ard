@@ -825,7 +825,7 @@ fn lists_page(c: mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
 
 // 24 rows of scrollable content, built with a range loop + list push.
 fn scroll_demo_lines() ui::Widget {
-  let rows: mut [ui::Widget] = mut []
+  let rows = mut List::new<ui::Widget>()
   for i in 1..24 {
     rows.push(
       ui::RichText{
@@ -1186,7 +1186,7 @@ fn build(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
     true => [dialog_entry(c)],
     false => [],
   }
-  let overlays: mut [ui::OverlayEntry] = mut []
+  let overlays = mut List::new<ui::OverlayEntry>()
   for e in palette_list {
     overlays.push(e)
   }

@@ -1,5 +1,3 @@
-use ard/list as List
-
 use go:fmt
 
 fn main() {

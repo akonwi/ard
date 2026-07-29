@@ -5,7 +5,7 @@ description: Generic helpers for creating, transforming, searching, and partitio
 
 The `ard/list` module provides a small set of generic helpers for working with Ard lists.
 
-Import it explicitly when needed:
+It is available from the prelude as `List`. You can also import `ard/list` when you want the lowercase module namespace explicitly:
 
 ```ard
 use ard/list
@@ -25,12 +25,10 @@ let nums: [Int] = list::new()
 ```
 
 An explicit type argument composes with `mut` to start an empty mutable list
-without a binding annotation:
+without a binding annotation. Through the prelude alias this needs no import:
 
 ```ard
-use ard/list
-
-let items = mut list::new<Int>()
+let items = mut List::new<Int>()
 items.push(1)
 ```
 
