@@ -836,6 +836,12 @@ func (p *parser) enumDef(private bool) Statement {
 
 	p.match(new_line)
 	for !p.match(right_brace) {
+		// Stop at end of input so a missing '}' cannot loop or pass silently
+		// (issue #349).
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected '}' to close enum")
+			break
+		}
 		// Parse and collect comments
 		if c := p.parseInlineComment(); c != nil {
 			enum.Comments = append(enum.Comments, *c)
@@ -2143,6 +2149,11 @@ func (p *parser) selectExpr() (Expression, error) {
 	}
 
 	for !p.match(right_brace) {
+		// Stop at end of input so a missing '}' cannot loop forever (issue #349).
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected '}' to close select")
+			break
+		}
 		if c := p.parseInlineComment(); c != nil {
 			sel.Comments = append(sel.Comments, *c)
 			p.match(new_line)
@@ -2970,6 +2981,11 @@ func (p *parser) parseStructFields(name *Identifier) (*StructInstance, error) {
 	p.match(new_line)
 
 	for !p.match(right_brace) {
+		// Stop at end of input so a missing '}' cannot loop forever (issue #349).
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected '}' to close struct literal")
+			break
+		}
 		// Parse and collect comments between properties
 		if c := p.parseInlineComment(); c != nil {
 			instance.Comments = append(instance.Comments, *c)
@@ -3899,6 +3915,11 @@ func (p *parser) list() (Expression, error) {
 	items := []Expression{}
 	comments := []Comment{}
 	for !p.match(right_bracket) {
+		// Stop at end of input so a missing ']' cannot loop forever (issue #349).
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected ']' to close list")
+			break
+		}
 		// Parse and collect comments
 		if c := p.parseInlineComment(); c != nil {
 			comments = append(comments, *c)
@@ -3959,6 +3980,11 @@ func (p *parser) map_() (Expression, error) {
 	}
 
 	for !p.match(right_bracket) {
+		// Stop at end of input so a missing ']' cannot loop forever (issue #349).
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected ']' to close map")
+			break
+		}
 		// Parse and collect comments
 		if c := p.parseInlineComment(); c != nil {
 			node.Comments = append(node.Comments, *c)
