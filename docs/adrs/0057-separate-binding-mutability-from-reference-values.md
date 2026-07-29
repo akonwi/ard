@@ -6,7 +6,7 @@ Accepted
 
 ## Implementation status
 
-In progress. Phase 1's semantic contracts are in place, and Phases 2–6 are
+In progress. Phase 1's semantic contracts are in place, and Phases 2–7 are
 complete. `deref` is parsed, formatted, and grammar-supported; the checker
 implements first-class reference typing, capability judgments, explicit-borrow
 classification (`ExistingReference` / `AddressablePlace` / `FreshValue`), the
@@ -19,8 +19,12 @@ and writable/address-taken slot captures. The Go backend lowers concrete and
 descriptor references as pointer-copy handles, preserves slot rebinding and
 escaping storage, emits comparable canonical mutable-trait forwarding handles,
 and projects exact pointer, descriptor, generic, `Any`, and Go-interface ABIs.
-All ADR 0057 Go runtime/FFI contracts pass. Phases 7–8 remain for diagnostics,
-documentation, and migration of pre-ADR samples and legacy backend fixtures.
+All ADR 0057 Go runtime/FFI contracts pass. Diagnostics now distinguish
+addressability, actual-reference destinations, explicit value materialization,
+forbidden whole-referent writes, immutable slots, and reference-required
+receivers. The variables, functions, structs, generics, async, and Go interop
+guides document the new model and migration paths. Phase 8 remains for migration
+of pre-ADR samples and legacy backend fixtures.
 
 ## Context
 

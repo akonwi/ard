@@ -70,7 +70,7 @@ m.set("nope")`,
 			input: `let m = Maybe::new<Int>()
 m.set(1)`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Immutable: Maybe.set receiver"},
+				{Kind: checker.Error, Message: "Cannot call Maybe.set: receiver is not a reference"},
 			},
 		},
 		{
@@ -78,7 +78,7 @@ m.set(1)`,
 			input: `mut m = Maybe::new(1)
 m.clear()`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Immutable: Maybe.clear receiver"},
+				{Kind: checker.Error, Message: "Cannot call Maybe.clear: receiver is not a reference"},
 			},
 		},
 	})

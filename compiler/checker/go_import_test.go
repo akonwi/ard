@@ -647,7 +647,7 @@ fn main() {
   let when = time::Now()
   let _ = when.UnmarshalText
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot access pointer receiver method time::Time.UnmarshalText on immutable value"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot access pointer receiver method time::Time.UnmarshalText on an ordinary value"}},
 		},
 	})
 }
@@ -737,7 +737,7 @@ fn main() {
   mut text = "2024-01-02T00:00:00Z".bytes()
   when.UnmarshalText(text)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call pointer receiver method time::Time.UnmarshalText on immutable value"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call pointer receiver method time::Time.UnmarshalText on an ordinary value"}},
 		},
 	})
 }

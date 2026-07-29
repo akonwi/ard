@@ -32,20 +32,30 @@ fn print_message(msg: Str) {
 }
 ```
 
-### Mutating parameters
+### Reference parameters
 
-In order for a function to apply side-effects or mutations to parameters, the parameter type must be marked as mutable in the signature.
+A `mut T` parameter receives an actual mutable-reference value. Callers must pass an existing reference or create one explicitly with `mut expression`; declaring an ordinary binding with `mut` is not enough.
 
 ```ard
-use go:fmt
+struct Person { name: Str, age: Int }
 
-fn add_ten(value: mut Int) {
-  value =+ 10
+fn grow_older(person: mut Person) {
+  person.age =+ 1
 }
 
-mut count = 0
-add_ten(count)
-fmt::Println(count) // 10
+let alice = Person{name: "Alice", age: 30}
+grow_older(mut alice)
+
+let alice_reference = mut alice
+grow_older(alice_reference)
+```
+
+Reference parameters may mutate fields and call mutating methods, but Ard source does not support replacing a whole referent through the parameter. A function that needs an ordinary value must request `T`; callers with `mut T` use `deref` explicitly.
+
+```ard
+fn snapshot(person: mut Person) Person {
+  deref person
+}
 ```
 
 ## Return Values
@@ -156,21 +166,16 @@ create_user(name: "Charlie", 35, "charlie@example.com")
 Functions are first-class values and can be used as arguments:
 
 ```ard
-fn map(list: [Int], transform: fn(Int) Int) [Int] {
-  mut mapped: [Int] = []
-  for item in list {
-    mapped.push(transform(item))
-  }
-  mapped
+fn apply(value: Int, transform: fn(Int) Int) Int {
+  transform(value)
 }
 
 fn double(x: Int) Int {
   x * 2
 }
 
-// Pass function as argument
-let numbers = [1, 2, 3, 4]
-let doubled = map(numbers, double)
+// Pass a named function as an argument
+let doubled = apply(4, double)
 ```
 
 ## Anonymous Functions
@@ -178,15 +183,11 @@ let doubled = map(numbers, double)
 Functions can be defined inline without names:
 
 ```ard
-fn map(list: [Int], transform: fn(Int) Int) [Int] {
-  mut mapped: [Int] = []
-  for item in list {
-    mapped.push(transform(item))
-  }
-  mapped
+fn apply(value: Int, transform: fn(Int) Int) Int {
+  transform(value)
 }
 
-let squared = map([1, 2, 3], fn(x: Int) Int { x * x })
+let squared = apply(3, fn(x: Int) Int { x * x })
 ```
 
 ## Function Signatures

@@ -256,7 +256,7 @@ func TestMethods(t *testing.T) {
 				let square = Shape{width: 5, height: 5}
 				square.resize(8,8)`, shapeCode),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate immutable 'square' with '.resize()'"},
+				{Kind: checker.Error, Message: "Cannot call mutating method 'square.resize': receiver is not a reference"},
 			},
 		},
 	})

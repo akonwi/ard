@@ -51,19 +51,19 @@ let names = scores.keys()
 
 ### `fn set(key: K, value: V)`
 
-Set `key` to `value` in a mutable map.
+Set `key` to `value` through a map reference.
 
 ```ard
-mut scores: [Str:Int] = [:]
-scores.set("Ada", 10)
+let scores = mut ["Ada": 10]
+scores.set("Grace", 12)
 ```
 
 ### `fn delete(key: K)`
 
-Remove `key` from a mutable map. Deleting an absent key is allowed.
+Remove `key` through a map reference. Deleting an absent key is allowed.
 
 ```ard
-mut scores = ["Ada": 10]
+let scores = mut ["Ada": 10]
 scores.delete("Ada")
 ```
 

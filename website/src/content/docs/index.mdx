@@ -78,7 +78,7 @@ fn main() {
 
       <article class="ard-feature">
         <h3>Mutable access</h3>
-        <p>The <code>mut</code> keyword makes mutation explicit for mutable bindings, references, and methods that can modify their receiver in place.</p>
+        <p><code>mut name = expression</code> declares a writable binding slot; <code>mut expression</code> creates or copies a reference value; and <code>mut T</code> describes a reference type.</p>
         <pre aria-label="Explicit mutability example"><code><b>impl</b> Board &#123;
 {'  '}<b>fn mut</b> play(player: Str, pos: Int) &#123;
 {'    '}self.cells.set(pos, player)

@@ -36,9 +36,36 @@ fn main() {
 ```
 
 Because `start` returns nothing, you coordinate with a channel rather than a
-return value. Spawned closures follow Go's semantics: they capture by reference,
-and there is no isolation rule — shared state is coordinated through channels and
-data races are your responsibility.
+return value. The task closure is an isolated scope for direct mutable references:
+
+- directly capturing an outer `mut T` reference is rejected, even for a read;
+- creating `mut outer_value` inside the task is rejected;
+- references created entirely inside the task are allowed;
+- references hidden in containers, `Any`, Go interfaces, channels, globals, or other dynamic values are not tracked transitively.
+
+```ard
+use ard/async
+
+struct Counter { value: Int }
+
+fn main() {
+  let counter = Counter{value: 0}
+  let reference = mut counter
+
+  // Error: directly captures an outer reference.
+  // async::start(fn() { reference.value = 1 })
+
+  // Error: explicitly borrows outer storage inside the task.
+  // async::start(fn() { let local = mut counter })
+
+  async::start(fn() {
+    let local = mut Counter{value: 1}
+    local.value = 2 // reference was created inside this task
+  })
+}
+```
+
+This is intentionally shallow isolation, not a data-race guarantee. Hidden shared references and other shared Go values can still race; coordinate shared state through channels or another explicit synchronization mechanism.
 
 ## Coordinating with channels
 

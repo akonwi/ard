@@ -1804,7 +1804,7 @@ func TestLists(t *testing.T) {
 			  let list = [1,2,3]
 				list.push(4)`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate immutable 'list' with '.push()'"},
+				{Kind: checker.Error, Message: "Cannot call mutating method 'list.push': receiver is not a reference"},
 			},
 		},
 	})

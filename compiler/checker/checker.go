@@ -974,13 +974,62 @@ func (c *Checker) addTypeMismatch(expected Type, actual Type, location parse.Loc
 	c.addTypeMismatchWithLegacy(expected, actual, "", location)
 }
 
+func referenceReferentType(reference Type) (Type, bool) {
+	if mutable, ok := reference.(*MutableRef); ok {
+		return mutable.Of(), true
+	}
+	if foreign, ok := reference.(*ForeignType); ok && foreign.Pointer {
+		value := *foreign
+		value.Pointer = false
+		return &value, true
+	}
+	return nil, false
+}
+
+func (c *Checker) referenceDestinationMatches(expected Type, actual Type) bool {
+	referent, ok := referenceReferentType(expected)
+	return ok && !isReferenceType(actual) && c.areCompatible(referent, actual)
+}
+
+func (c *Checker) referenceValueMatches(expected Type, actual Type) bool {
+	referent, ok := referenceReferentType(actual)
+	return ok && !isReferenceType(expected) && c.areCompatible(expected, referent)
+}
+
+func appendTypeExpectation(diagnostic Diagnostic, expected Type, expectation *typeExpectation) Diagnostic {
+	if expectation == nil {
+		return diagnostic
+	}
+	message := fmt.Sprintf("this requires `%s`", expected)
+	switch expectation.Kind {
+	case expectationAnnotation:
+		message = fmt.Sprintf("this annotation requires `%s`", expected)
+	case expectationReturnAnnotation:
+		message = fmt.Sprintf("this return annotation requires `%s`", expected)
+	}
+	diagnostic.Secondary = append(diagnostic.Secondary, DiagnosticLabel{Span: expectation.Span, Message: message})
+	return diagnostic
+}
+
+func (c *Checker) buildTypeMismatch(d typeMismatchDiagnostic) Diagnostic {
+	if c.referenceDestinationMatches(d.Expected, d.Actual) {
+		diagnostic := referenceDestinationDiagnostic{Expected: d.Expected, Actual: d.Actual, Span: d.ActualSpan}.build()
+		return appendTypeExpectation(diagnostic, d.Expected, d.Expectation)
+	}
+	if c.referenceValueMatches(d.Expected, d.Actual) {
+		diagnostic := referenceValueMaterializationDiagnostic{Expected: d.Expected, Actual: d.Actual, Span: d.ActualSpan}.build()
+		return appendTypeExpectation(diagnostic, d.Expected, d.Expectation)
+	}
+	return d.build()
+}
+
 func (c *Checker) addTypeMismatchWithLegacy(expected Type, actual Type, legacyMessage string, location parse.Location) {
-	c.addDiagnostic(typeMismatchDiagnostic{
+	c.addDiagnostic(c.buildTypeMismatch(typeMismatchDiagnostic{
 		Expected:      expected,
 		Actual:        actual,
 		ActualSpan:    c.sourceSpan(location),
 		LegacyMessage: legacyMessage,
-	}.build())
+	}))
 }
 
 func (c *Checker) addMissingTypeArguments(typeName string, location parse.Location) {
@@ -1005,6 +1054,24 @@ func (c *Checker) addIncorrectArgumentType(legacyMessage string, expected Type, 
 	if parameter.declaredAt.FilePath != "" {
 		span := parameter.declaredAt
 		parameterSpan = &span
+	}
+	if c.referenceValueMatches(expected, actual) {
+		diagnostic := referenceValueMaterializationDiagnostic{Expected: expected, Actual: actual, Span: c.sourceSpan(argumentLocation)}.build()
+		if parameterSpan != nil {
+			diagnostic.Secondary = append(diagnostic.Secondary, DiagnosticLabel{Span: *parameterSpan, Message: fmt.Sprintf("parameter `%s` expects `%s`", parameter.Name, formatTypeForDisplay(expected))})
+		}
+		if len(related) > 0 {
+			diagnostic.Secondary = append(related, diagnostic.Secondary...)
+		}
+		c.addDiagnostic(diagnostic)
+		return
+	}
+	if c.referenceDestinationMatches(expected, actual) {
+		requiresMutable = true
+	} else if requiresMutable {
+		// A reference-shaped parameter with an incompatible referent is an
+		// ordinary type mismatch; suggesting only `mut` would not fix it.
+		requiresMutable = false
 	}
 	diagnostic := incorrectArgumentTypeDiagnostic{
 		LegacyMessage:   legacyMessage,
@@ -3140,12 +3207,12 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				if expected := c.resolveType(s.Type); expected != nil {
 					if !c.areCompatible(expected, val.Type()) {
 						expectedSpan := c.sourceSpan(s.Type.GetLocation())
-						c.addDiagnostic(typeMismatchDiagnostic{
+						c.addDiagnostic(c.buildTypeMismatch(typeMismatchDiagnostic{
 							Expected:    expected,
 							Actual:      val.Type(),
 							ActualSpan:  c.sourceSpan(s.Value.GetLocation()),
 							Expectation: &typeExpectation{Span: expectedSpan, Kind: expectationAnnotation},
-						}.build())
+						}))
 						return nil
 					}
 					__type = expected
@@ -3222,22 +3289,28 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 
 				expectedType := target.Type
-				// Container literals type contextually through the referent so
-				// the whole-referent rejection below reports the real problem
-				// rather than a literal-typing error.
-				checkContext := expectedType
-				if ref, ok := expectedType.(*MutableRef); ok {
-					switch s.Value.(type) {
-					case *parse.ListLiteral, *parse.MapLiteral:
-						checkContext = ref.Of()
-					}
-				}
 				var value Expression
 				c.withValueExprContext(func() {
-					value = c.checkExprAs(s.Value, checkContext)
+					if ref, ok := expectedType.(*MutableRef); ok {
+						// A reference-valued assignment target is a slot-rebind
+						// boundary. Check ordinary RHS expressions without reference
+						// context so they reach the whole-referent diagnostic below;
+						// only container literals need referent context to infer shape.
+						switch s.Value.(type) {
+						case *parse.ListLiteral, *parse.MapLiteral:
+							value = c.checkExprAs(s.Value, ref.Of())
+						default:
+							value = c.checkExpr(s.Value)
+						}
+						return
+					}
+					value = c.checkExprAs(s.Value, expectedType)
 				})
 				if value == nil {
 					return nil
+				}
+				if converted, ok := c.destinationConversion(expectedType, value); ok {
+					value = converted
 				}
 
 				if isReferenceType(expectedType) && !isReferenceValued(value) {
@@ -3245,8 +3318,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					// reference; an ordinary value would be a whole-referent
 					// write, which Ard does not support (ADR 0057).
 					c.addDiagnostic(wholeReferentAssignmentDiagnostic{
-						Place: target.Name,
-						Span:  c.sourceSpan(s.Target.GetLocation()),
+						Place:           target.Name,
+						Span:            c.sourceSpan(s.Target.GetLocation()),
+						DeclarationSpan: sourceSpanIfPresent(target.declaredAt),
 					}.build())
 					return nil
 				}
@@ -3274,6 +3348,15 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				fieldType := subject.Type()
 				var value Expression
 				c.withValueExprContext(func() {
+					if ref, isReferenceField := fieldType.(*MutableRef); isReferenceField {
+						switch s.Value.(type) {
+						case *parse.ListLiteral, *parse.MapLiteral:
+							value = c.checkExprAs(s.Value, ref.Of())
+						default:
+							value = c.checkExpr(s.Value)
+						}
+						return
+					}
 					if maybeField, isMaybe := fieldType.(*Maybe); isMaybe {
 						// Mirror call-argument checking for nullable targets:
 						// literals and anonymous functions check against the
@@ -3300,6 +3383,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				if value == nil {
 					return nil
 				}
+				if converted, ok := c.destinationConversion(fieldType, value); ok {
+					value = converted
+				}
 
 				// A field write is interior mutation of the containing value:
 				// it requires an actual reference along the subject chain, not
@@ -3317,8 +3403,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 					// actual reference; an ordinary value would be a
 					// whole-referent write (ADR 0057).
 					c.addDiagnostic(wholeReferentAssignmentDiagnostic{
-						Place: ip.String(),
-						Span:  c.sourceSpan(s.Target.GetLocation()),
+						Place:           ip.String(),
+						Span:            c.sourceSpan(s.Target.GetLocation()),
+						DeclarationSpan: expressionBindingSpan(subject),
 					}.build())
 					return nil
 				}
@@ -5724,11 +5811,10 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 				if fieldIsMutableRef && !isReferenceValued(checkVal) {
 					// A reference-valued field accepts only an actual reference;
 					// a writable binding no longer borrows implicitly (ADR 0057).
-					c.addDiagnostic(typeMismatchDiagnostic{
-						Expected:      MakeMutableRef(fieldExpected),
-						Actual:        checkVal.Type(),
-						ActualSpan:    c.sourceSpan(property.GetLocation()),
-						LegacyMessage: fmt.Sprintf("Type mismatch: Expected a mutable %s", fieldExpected.String()),
+					c.addDiagnostic(referenceDestinationDiagnostic{
+						Expected: MakeMutableRef(fieldExpected),
+						Actual:   checkVal.Type(),
+						Span:     c.sourceSpan(property.GetLocation()),
 					}.build())
 					continue
 				}
@@ -5801,11 +5887,10 @@ func (c *Checker) validateStructInstance(structType *StructDef, properties []par
 					if fieldIsMutableRef && !isReferenceValued(val) {
 						// A reference-valued field accepts only an actual
 						// reference (ADR 0057).
-						c.addDiagnostic(typeMismatchDiagnostic{
-							Expected:      MakeMutableRef(fieldExpected),
-							Actual:        val.Type(),
-							ActualSpan:    c.sourceSpan(property.GetLocation()),
-							LegacyMessage: fmt.Sprintf("Type mismatch: Expected a mutable %s", fieldExpected.String()),
+						c.addDiagnostic(referenceDestinationDiagnostic{
+							Expected: MakeMutableRef(fieldExpected),
+							Actual:   val.Type(),
+							Span:     c.sourceSpan(property.GetLocation()),
 						}.build())
 						continue
 					}
@@ -6337,8 +6422,8 @@ func (c *Checker) createMaybeMethod(subject Expression, methodName string, args 
 	// Maybe.set / Maybe.clear are interior mutation: they require an actual
 	// reference, not merely a writable binding slot (ADR 0057).
 	if (kind == MaybeSet || kind == MaybeClear) && !c.permitsInteriorMutation(subject) {
-		c.addDiagnostic(immutableReceiverDiagnostic{
-			Kind:            immutableMaybeReceiver,
+		c.addDiagnostic(referenceReceiverDiagnostic{
+			Kind:            referenceMaybeReceiver,
 			Receiver:        "Maybe",
 			Method:          methodName,
 			Span:            c.sourceSpan(loc),
@@ -7034,8 +7119,8 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					pointerForeign.MethodsLoaded = pointerForeign.Methods != nil || pointerForeign.UnsupportedMethods != nil
 					if pointerSig := pointerForeign.get(s.Property.Name); pointerSig != nil {
 						if !c.permitsInteriorMutation(subj) {
-							c.addDiagnostic(immutableReceiverDiagnostic{
-								Kind:            immutablePointerMethodAccess,
+							c.addDiagnostic(referenceReceiverDiagnostic{
+								Kind:            referencePointerMethodAccess,
 								Receiver:        foreign.String(),
 								Method:          s.Property.Name,
 								Span:            c.sourceSpan(s.Property.GetLocation()),
@@ -7133,8 +7218,8 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						pointerForeign.MethodsLoaded = pointerForeign.Methods != nil || pointerForeign.UnsupportedMethods != nil
 						if pointerSig := pointerForeign.get(s.Method.Name); pointerSig != nil {
 							if !c.permitsInteriorMutation(subj) {
-								c.addDiagnostic(immutableReceiverDiagnostic{
-									Kind:            immutablePointerMethodCall,
+								c.addDiagnostic(referenceReceiverDiagnostic{
+									Kind:            referencePointerMethodCall,
 									Receiver:        foreign.String(),
 									Method:          s.Method.Name,
 									Span:            c.sourceSpan(s.Method.GetLocation()),
@@ -7185,8 +7270,8 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				// A mutating method is interior mutation of the receiver: it
 				// requires an actual reference, not merely a writable binding
 				// slot (ADR 0057).
-				c.addDiagnostic(immutableReceiverDiagnostic{
-					Kind:            immutableArdReceiver,
+				c.addDiagnostic(referenceReceiverDiagnostic{
+					Kind:            referenceArdReceiver,
 					Receiver:        fmt.Sprint(subj),
 					Method:          s.Method.Name,
 					Span:            c.sourceSpan(s.Method.GetLocation()),
@@ -7818,18 +7903,18 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 					if checkedArg == nil {
 						return nil
 					}
+					if effectiveFnDef.Parameters[i].Mutable && !isReferenceValued(checkedArg) {
+						// A Go descriptor or pointer boundary accepts only an
+						// actual reference (ADR 0057).
+						legacyMessage := fmt.Sprintf("Type mismatch: Expected %s, got %s", formatTypeForDisplay(effectiveFnDef.Parameters[i].Type), formatTypeForDisplay(checkedArg.Type()))
+						c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], true)
+						return nil
+					}
 					if converted, ok := c.destinationConversion(effectiveFnDef.Parameters[i].Type, checkedArg); ok {
 						checkedArg = converted
 					} else if !c.areCompatible(effectiveFnDef.Parameters[i].Type, checkedArg.Type()) {
 						legacyMessage := typeMismatch(effectiveFnDef.Parameters[i].Type, checkedArg.Type())
 						c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], false)
-						return nil
-					}
-					if effectiveFnDef.Parameters[i].Mutable && !isReferenceValued(checkedArg) {
-						// A Go descriptor or pointer boundary accepts only an
-						// actual reference (ADR 0057).
-						legacyMessage := fmt.Sprintf("Type mismatch: Expected a mutable %s", effectiveFnDef.Parameters[i].Type.String())
-						c.addIncorrectArgumentType(legacyMessage, effectiveFnDef.Parameters[i].Type, checkedArg.Type(), expr.GetLocation(), effectiveFnDef.Parameters[i], true)
 						return nil
 					}
 					args[i] = checkedArg
@@ -10247,12 +10332,12 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			legacyMessage := typeMismatch(expectedType, checked.Type())
 			c.addIncorrectArgumentType(legacyMessage, expectedType, checked.Type(), expr.GetLocation(), *argumentParameter, false)
 		} else if expectation != nil {
-			c.addDiagnostic(typeMismatchDiagnostic{
+			c.addDiagnostic(c.buildTypeMismatch(typeMismatchDiagnostic{
 				Expected:    expectedType,
 				Actual:      checked.Type(),
 				ActualSpan:  c.sourceSpan(expr.GetLocation()),
 				Expectation: expectation,
-			}.build())
+			}))
 		} else {
 			c.addTypeMismatch(expectedType, checked.Type(), expr.GetLocation())
 		}
@@ -10408,12 +10493,12 @@ func (c *Checker) addBodyReturnMismatch(bodyStmts []parse.Statement, expected Ty
 			Kind: expectationReturnAnnotation,
 		}
 	}
-	c.addDiagnostic(typeMismatchDiagnostic{
+	c.addDiagnostic(c.buildTypeMismatch(typeMismatchDiagnostic{
 		Expected:    expected,
 		Actual:      got,
 		ActualSpan:  c.sourceSpan(bodyResultLocation(bodyStmts, fallback)),
 		Expectation: expectation,
-	}.build())
+	}))
 }
 
 // bodyReturnMismatch picks the diagnostic for a body whose type does not
@@ -11254,6 +11339,11 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 		if checkedArg == nil {
 			return nil, nil
 		}
+		if fnDefCopy.Parameters[i].Mutable && !isReferenceValued(checkedArg) {
+			legacyMessage := fmt.Sprintf("Type mismatch: Expected %s, got %s", formatTypeForDisplay(fnDefCopy.Parameters[i].Type), formatTypeForDisplay(checkedArg.Type()))
+			c.addIncorrectArgumentType(legacyMessage, fnDefCopy.Parameters[i].Type, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], true)
+			return nil, nil
+		}
 		if expectedArray, ok := expectedType.(*FixedArray); ok {
 			if literal, isLiteral := checkedArg.(*ListLiteral); isLiteral {
 				if actualList, isList := literal.Type().(*List); isList {
@@ -11385,7 +11475,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 			// A reference destination accepts only an actual reference value
 			// (ADR 0057).
 			if !isReferenceValued(checkedArg) || foreignScalarNarrows(paramType, checkedArg.Type()) || foreignScalarWidens(paramType, checkedArg.Type()) {
-				legacyMessage := fmt.Sprintf("Type mismatch: Expected a mutable %s", fnDefCopy.Parameters[i].Type.String())
+				legacyMessage := fmt.Sprintf("Type mismatch: Expected %s, got %s", formatTypeForDisplay(fnDefCopy.Parameters[i].Type), formatTypeForDisplay(checkedArg.Type()))
 				c.addIncorrectArgumentType(legacyMessage, fnDefCopy.Parameters[i].Type, checkedArg.Type(), resolvedExprs[i].GetLocation(), fnDefCopy.Parameters[i], true)
 				return nil, nil
 			}
@@ -11566,16 +11656,16 @@ func unificationDiagnosticTypes(err error, expected, actual Type) (Type, Type) {
 
 func (c *Checker) addUnificationTypeMismatch(err error, expected, actual Type, location parse.Location) {
 	expected, actual = unificationDiagnosticTypes(err, expected, actual)
-	c.addDiagnostic(typeMismatchDiagnostic{Expected: expected, Actual: actual, ActualSpan: c.sourceSpan(location), LegacyMessage: err.Error()}.build())
+	c.addDiagnostic(c.buildTypeMismatch(typeMismatchDiagnostic{Expected: expected, Actual: actual, ActualSpan: c.sourceSpan(location), LegacyMessage: err.Error()}))
 }
 
 func (c *Checker) addExpectedReturnConflict(expected, actual Type, location parse.Location, genericScope *SymbolTable, returnPattern Type) {
-	diagnostic := typeMismatchDiagnostic{
+	diagnostic := c.buildTypeMismatch(typeMismatchDiagnostic{
 		Expected:    expected,
 		Actual:      actual,
 		ActualSpan:  c.sourceSpan(location),
 		Expectation: c.expectedCallExpectation,
-	}.build()
+	})
 
 	patternNames := map[string]bool{}
 	extractGenericNames(returnPattern, patternNames)

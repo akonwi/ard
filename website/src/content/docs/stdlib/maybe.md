@@ -8,7 +8,7 @@ description: Work with optional values using the built-in Maybe type.
 Maybe provides:
 - **Value creation** with `Maybe::new(value)` and `Maybe::new<T>()`
 - **Nullable types** for safe representation of optional values
-- **Mutation helpers** (`set`/`clear`) for mutable optional slots
+- **Mutation helpers** (`set`/`clear`) through references to optional slots
 - **Type safety** to prevent null pointer errors at compile time
 
 ```ard
@@ -138,20 +138,20 @@ odd.is_none() // true
 
 ### `fn set(value: $T)`
 
-Mutate a `Maybe<T>` slot to contain `value`. The receiver must be mutable.
+Mutate a `Maybe<T>` slot to contain `value`. The receiver must be an actual reference.
 
 ```ard
-mut current = Maybe::new<Int>()
+let current = mut Maybe::new<Int>()
 current.set(42)
 current.expect("set") // 42
 ```
 
 ### `fn clear()`
 
-Mutate a `Maybe<T>` slot back to `none`. The receiver must be mutable.
+Mutate a `Maybe<T>` slot back to `none`. The receiver must be an actual reference.
 
 ```ard
-mut current = Maybe::new("ready")
+let current = mut Maybe::new("ready")
 current.clear()
 current.is_none() // true
 ```
