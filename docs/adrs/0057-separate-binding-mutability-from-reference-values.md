@@ -595,9 +595,22 @@ The initial async policy remains intentionally shallow:
   other dynamic values are not transitively tracked and remain allowed;
 - references created entirely inside the fiber remain allowed.
 
-This is a pragmatic enforcement boundary, not a claim that hidden shared
-references are race-free. Stronger transitive tracking or concurrency safety is
-deferred.
+Go itself places no static restriction on pointer access from goroutines. A
+pointer may be captured by a goroutine or sent to one; when pointed-to local
+storage escapes, Go's escape analysis arranges storage with a sufficient
+lifetime and the garbage collector keeps it alive. That lifetime handling does
+not provide synchronization. Concurrent access with at least one write must be
+ordered by a happens-before edge, for example through a channel, mutex, or
+atomic operation; otherwise the Go program has a data race (which can be found
+with Go's race detector).
+
+Ard's direct-capture and outer-borrow rejections are therefore a deliberately
+stricter, shallow front-end guard rather than a requirement imposed by the Go
+backend. References that pass the shallow boundary because they are hidden in a
+container, interface, channel, or global lower to ordinary Go pointer-shaped
+values and inherit Go's synchronization responsibilities. This policy is not a
+claim that hidden shared references are race-free. Stronger transitive tracking
+or concurrency safety is deferred.
 
 ### Go and FFI boundaries
 
