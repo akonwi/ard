@@ -1353,10 +1353,12 @@ Superseded or clarified:
   storage.
 - Consider optional concurrency diagnostics or race-tooling integration without
   restricting legal Go-style reference sharing.
-- Consider a follow-up auto-deref phase: implicitly reading a reference at
-  read-only ordinary value destinations (for example `render(list)` instead of
-  `render(deref list)`) without reintroducing implicit materialization at
-  mutating or identity-sensitive boundaries.
+- Auto-deref at ordinary value destinations was considered and rejected
+  (issue #348): Go never dereferences implicitly where a value is expected,
+  and the explicit `deref` keeps mutation-contract changes visible at every
+  call site. Implicit reads remain limited to the observational set (fields,
+  non-mutating methods, arithmetic, interpolation, match subjects, and
+  conditions).
 
 ## Related
 
