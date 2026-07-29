@@ -31,11 +31,11 @@ fn render(list: [Todo]) {
 
 fn main() {
   mut scanner = bufio::NewScanner(os::Stdin)
-  mut list: [Todo] = [Todo{title: "Buy milk", completed: true}]
+  let list = mut [Todo{title: "Buy milk", completed: true}]
 
   mut running = true
   while running {
-    render(list)
+    render(deref list)
     fmt::Println("What's your next todo?")
     if scanner.Scan() {
       let title = strings::TrimSpace(scanner.Text())

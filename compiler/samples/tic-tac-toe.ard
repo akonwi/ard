@@ -106,10 +106,10 @@ fn read_move(scanner: mut bufio::Scanner) Int {
 }
 
 fn main() {
-  mut board = Board{cells: ["", "", "", "", "", "", "", "", ""]}
+  let board = mut Board{cells: ["", "", "", "", "", "", "", "", ""]}
 
   let players = ["X", "O"]
-  mut scanner = bufio::NewScanner(os::Stdin)
+  let scanner = bufio::NewScanner(os::Stdin)
 
   fmt::Println("Starting Game")
   fmt::Println("---------------")

@@ -91,7 +91,8 @@ func TestRunProgramBreaksLoopFromMatchArm(t *testing.T) {
 	}
 	mainPath := filepath.Join(projectDir, "main.ard")
 	if err := os.WriteFile(mainPath, []byte(`fn main() {
-  mut seen: [Int] = []
+  let empty: [Int] = []
+  let seen = mut empty
   for item in [1, 2, 3] {
     match item {
       2 => break,

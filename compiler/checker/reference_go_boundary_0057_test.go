@@ -110,6 +110,10 @@ let reference = mut values
 let size = ffi::MixedSize(reference)`, wantError: true},
 		{name: "foreign pointer result flows as reference", source: `let pointer = ffi::ItemPtr()
 ffi::TakePtr(pointer)`},
+		{name: "foreign pointer satisfies Ard reference destination", source: `fn use_reference(value: mut ffi::Item) Int { value.N }
+let pointer = ffi::ItemPtr()
+let n = use_reference(pointer)`},
+
 		{name: "foreign pointer explicitly dereferences", source: `let copy: ffi::Item = deref ffi::ItemPtr()`},
 		{name: "imported global is explicitly addressable", source: `let reference = mut ffi::Global
 reference.N = 2`},

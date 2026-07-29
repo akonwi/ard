@@ -709,9 +709,9 @@ func TestLowerProgramTakesAddressOfLocalMutTraitArgs(t *testing.T) {
 		}
 
 		fn main() {
-			mut c = Counter{value: 0}
+			let c = Counter{value: 0}
 			let d: Bumpable = Doubler{}
-			d.poke(c)
+			d.poke(mut c)
 		}
 	`)
 
@@ -1096,8 +1096,8 @@ func TestRunProgramExecutesGoSliceFunctionCalls(t *testing.T) {
 		use go:strings
 
 		fn main() {
-			mut values = [3, 1, 2]
-			sort::Ints(values)
+			let values = [3, 1, 2]
+			sort::Ints(mut values)
 			if values.at(0).expect("bounds") != 1 {
 				panic("not sorted")
 			}
@@ -1254,8 +1254,8 @@ func TestRunProgramExecutesGoForeignMethods(t *testing.T) {
 				panic("bad time format")
 			}
 			let _ = time::Now().Local().Format(time::RFC3339)
-			mut mutable_when = time::Now()
-			mut text = "2024-01-02T00:00:00Z".bytes()
+			let mutable_when = mut time::Now()
+			let text = mut "2024-01-02T00:00:00Z".bytes()
 			try mutable_when.UnmarshalText(text) -> err { panic(err) }
 			if not mutable_when.Format(time::RFC3339) == "2024-01-02T00:00:00Z" {
 				panic("bad pointer receiver method call")
@@ -1285,9 +1285,9 @@ func TestRunProgramExecutesGoForeignMethodValues(t *testing.T) {
 			if bytes.size() == 0 {
 				panic("expected marshal bytes")
 			}
-			mut mutable_when = time::Now()
+			let mutable_when = mut time::Now()
 			let unmarshal: fn(mut [Byte]) Void!Str = mutable_when.UnmarshalText
-			mut text = "2024-01-02T00:00:00Z".bytes()
+			let text = mut "2024-01-02T00:00:00Z".bytes()
 			try unmarshal(text) -> err { panic(err) }
 			if not mutable_when.Format(time::RFC3339) == "2024-01-02T00:00:00Z" {
 				panic("expected unmarshal mutation")
@@ -1400,7 +1400,7 @@ func GenericValue(outer GenericOuter[string]) string { return outer.Box.Value }
 use go:embeddedfields/ffi
 
 fn main() {
-  mut outer = ffi::Outer{Base: ffi::Base{Name: "Ard"}}
+  let outer = mut ffi::Outer{Base: ffi::Base{Name: "Ard"}}
   if not outer.Base.Name == "Ard" { panic("bad embedded value field") }
   if not outer.Greeting() == "hello Ard" { panic("promoted value method regressed") }
   outer.Base.Name = "Go"
@@ -1586,7 +1586,7 @@ func TestRunProgramPreservesDynamicTypeForValueReceiverInterfaces(t *testing.T) 
 	}
 }
 
-func TestRunProgramPassesMutableFieldToGoInterface(t *testing.T) {
+func TestRunProgramPassesValueFieldToGoInterface(t *testing.T) {
 	program := lowerSource(t, `
 		use go:io
 
@@ -1601,12 +1601,12 @@ func TestRunProgramPassesMutableFieldToGoInterface(t *testing.T) {
 		}
 
 		fn consume(writer: io::Writer) Int!Str {
-			mut bytes: [Byte] = []
-			writer.Write(bytes)
+			let bytes: [Byte] = []
+			writer.Write(mut bytes)
 		}
 
 		fn main() {
-			mut box = Box{sink: Sink{written: 0}}
+			let box = Box{sink: Sink{written: 0}}
 			let _ = try consume(box.sink) -> err { panic(err) }
 			if not box.sink.written == 0 { panic("bad write count") }
 		}
@@ -1622,7 +1622,7 @@ func TestRunProgramWritesGoStructFields(t *testing.T) {
 		use go:image
 
 		fn main() {
-			mut rect = image::Rect(1, 2, 3, 4)
+			let rect = mut image::Rect(1, 2, 3, 4)
 			rect.Min.X = 10
 			rect.Max.Y = 20
 			if not rect.Min.X == 10 { panic("bad min x") }
@@ -1838,33 +1838,35 @@ fn main() {
 }
 
 func TestRunProgramReturnsMutableMaybeReference(t *testing.T) {
-	program := lowerSource(t, `fn borrow(value: mut Str) (mut Str)? {
-  Maybe::new(mut value)
+	program := lowerSource(t, `struct Box { value: Int }
+
+fn borrow(value: mut Box) (mut Box)? {
+  Maybe::new(value)
 }
 
-fn none_direct() (mut Str)? {
-  Maybe::new<mut Str>()
+fn none_direct() (mut Box)? {
+  Maybe::new<mut Box>()
 }
 
-fn none_packed() (mut Str)? {
-  let missing: (mut Str)? = Maybe::new<mut Str>()
+fn none_packed() (mut Box)? {
+  let missing: (mut Box)? = Maybe::new<mut Box>()
   missing
 }
 
-fn make_nested_replacer(value: mut Str) fn(Str) Void {
-  match borrow(mut value) {
-    found => fn(next: Str) {
-      let replace = fn() {
-        found = next
+fn make_nested_updater(value: mut Box) fn(Int) Void {
+  match borrow(value) {
+    found => fn(next: Int) {
+      let update = fn() {
+        found.value = next
       }
-      replace()
+      update()
     },
-    _ => fn(next: Str) {},
+    _ => fn(next: Int) {},
   }
 }
 
 fn make_list_updater(values: mut [Int]) fn(Int) Void {
-  let list_ref = mut values
+  let list_ref = values
   fn(value: Int) {
     list_ref.set(0, value)
     ()
@@ -1872,30 +1874,30 @@ fn make_list_updater(values: mut [Int]) fn(Int) Void {
 }
 
 fn main() {
-  mut name = "Ada"
-  match borrow(mut name) {
+  let box = Box{value: 1}
+  match borrow(mut box) {
     found => {
-      if not found == "Ada" { panic("mutable read failed") }
-      let replace = fn(value: Str) {
-        found = value
+      if found.value != 1 { panic("mutable read failed") }
+      let update = fn(value: Int) {
+        found.value = value
       }
-      replace("Grace")
+      update(2)
     },
     _ => panic("missing mutable value"),
   }
-  if not name == "Grace" { panic("mutable assignment did not reach original") }
+  if box.value != 2 { panic("interior mutation did not reach original") }
   if none_direct().is_some() { panic("direct none returned some") }
   if none_packed().is_some() { panic("packed none returned some") }
 
-  mut retained = "before"
-  let replace = make_nested_replacer(mut retained)
-  replace("after")
-  if not retained == "after" { panic("nested retained capture lost alias") }
+  let retained = Box{value: 3}
+  let update_retained = make_nested_updater(mut retained)
+  update_retained(4)
+  if retained.value != 4 { panic("nested retained capture lost alias") }
 
-  mut values = [1]
-  let update = make_list_updater(mut values)
-  update(9)
-  if not values.at(0).or(0) == 9 { panic("descriptor capture lost alias") }
+  let values = [1]
+  let update_list = make_list_updater(mut values)
+  update_list(9)
+  if values.at(0).or(0) != 9 { panic("descriptor capture lost alias") }
 }`)
 
 	if err := RunProgram(program, []string{"ard", "run", "sample.ard"}); err != nil {
@@ -1903,7 +1905,7 @@ fn main() {
 	}
 }
 
-func TestRunProgramExecutesGenericUnsafeMutableCast(t *testing.T) {
+func TestRunProgramExecutesGenericUnsafeMutableCastReference(t *testing.T) {
 	projectDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"genericcast\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1933,27 +1935,21 @@ func PointX() int { return Point.X }
 use go:genericcast/ffi
 use go:image
 
-fn replace_boxed(value: Any, replacement: $T) Bool {
+fn recover_boxed(value: Any, fallback: mut $T) mut $T {
   match unsafe::cast<mut $T>(value) {
-    found => {
-      let replace = fn() {
-        found = replacement
-      }
-      replace()
-      true
-    },
-    _ => false,
+    found => found,
+    _ => fallback,
   }
 }
 
-
 fn main() {
-  if not replace_boxed(ffi::BoxName(), "Grace") { panic("mutable name did not match") }
-  if not ffi::NameValue() == "Grace" { panic("name mutation lost") }
+  let fallback_name = "fallback"
+  let name = recover_boxed(ffi::BoxName(), mut fallback_name)
+  if deref name != "Ada" { panic("mutable name did not match") }
 
-  let replacement = image::Point{X: 42, Y: 9}
-  if not replace_boxed(ffi::BoxPoint(), replacement) { panic("mutable point did not match") }
-  if not ffi::PointX() == 42 { panic("point mutation lost") }
+  let point = unsafe::cast<mut image::Point>(ffi::BoxPoint()).expect("point")
+  point.X = 42
+  if ffi::PointX() != 42 { panic("point reference lost identity") }
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -2083,16 +2079,16 @@ func TestRunProgramExecutesGoNamedMapMethods(t *testing.T) {
 		use go:net/url
 
 		fn main() {
-			mut values = try url::ParseQuery("a=one") -> err { panic(err) }
-			if not values.has("a") {
+			let values = try url::ParseQuery("a=one") -> err { panic(err) }
+			if not values.Has("a") {
 				panic("missing")
 			}
-			values.set("b", ["two"])
-			if not values.has("b") {
+			values.Set("b", "two")
+			if not values.Has("b") {
 				panic("set failed")
 			}
-			values.delete("a")
-			if values.has("a") {
+			values.Del("a")
+			if values.Has("a") {
 				panic("delete failed")
 			}
 		}
@@ -2127,7 +2123,8 @@ func TestRunProgramBoundsChecksListAt(t *testing.T) {
 
 			// Lists of Maybe elements: for-loop desugaring keeps raw indexing
 			// while user-facing at produces a nested Maybe.
-			mut maybes: [Int?] = []
+			let maybe_values: [Int?] = []
+			let maybes = mut maybe_values
 			maybes.push(["a": 1].get("a"))
 			maybes.push(["a": 1].get("b"))
 			mut sum = 0
@@ -2197,12 +2194,12 @@ func TestRunProgramExecutesNamedGoContainerTypes(t *testing.T) {
 		fn main() {
 			// Named Go slice: literal contextual typing, list methods, Go methods,
 			// and fresh literals passing to mutable Go slice params.
-			mut nums: sort::IntSlice = [3, 1, 2]
+			let nums: sort::IntSlice = [3, 1, 2]
 			nums.Sort()
 			if nums.at(0).expect("bounds") != 1 or nums.at(2).expect("bounds") != 3 or nums.size() != 3 {
 				panic("sorted named slice wrong: {nums.at(0).or(-1)} {nums.at(1).or(-1)} {nums.at(2).or(-1)}")
 			}
-			sort::Ints([2, 1])
+			sort::Ints(mut [2, 1])
 
 			// Named Go map: literal contextual typing plus Go methods.
 			let values: url::Values = ["a": ["1"]]
@@ -2280,7 +2277,8 @@ func TestRunProgramSupportsStatementProducingGlobalInitializers(t *testing.T) {
 func TestRunProgramSupportsMutableModuleGlobals(t *testing.T) {
 	program := lowerSource(t, `
 		mut counter = 0
-		mut items: [Str] = []
+		let empty_items: [Str] = []
+		let items = mut empty_items
 
 		fn bump() {
 			counter = counter + 1
@@ -2809,13 +2807,14 @@ fn main() {
 func TestRunProgramSpecializesGenericEmptyListLocal(t *testing.T) {
 	program := lowerSource(t, `
 		fn drop(from: [$T], till: Int) [$T] {
-			mut out: [$T] = []
+			let empty: [$T] = []
+			let out = mut empty
 			for item, idx in from {
 				if idx >= till {
 					out.push(item)
 				}
 			}
-			out
+			deref out
 		}
 
 		fn main() Bool {
@@ -3242,7 +3241,7 @@ func TestTypeNameUsesModulePathAndUniqueFallback(t *testing.T) {
 // A `mut <direct-Go handle>` struct field is a pointer-valued handle (e.g.
 // *sql.DB), lowered as a plain pointer field with no mutable-reference (&/*)
 // machinery, since the Ard value already IS the Go pointer (ADR 0031).
-func TestLowerProgramUsesPointersForMutableStructParams(t *testing.T) {
+func TestLowerProgramUsesPointersForReferenceStructParams(t *testing.T) {
 	program := lowerSource(t, `
 		struct Response {
 			body: Str,
@@ -3253,8 +3252,8 @@ func TestLowerProgramUsesPointersForMutableStructParams(t *testing.T) {
 		}
 
 		fn main() Void {
-			mut res = Response{body: ""}
-			set_body(res)
+			let res = Response{body: ""}
+			set_body(mut res)
 		}
 	`)
 
@@ -3282,15 +3281,15 @@ func TestLowerProgramUsesPointersForMutableStructParams(t *testing.T) {
 		t.Fatal("generated AST missing pointer call lowering")
 	}
 }
-func TestLowerProgramUsesPointersForNativeMutableListParams(t *testing.T) {
+func TestLowerProgramUsesPointersForNativeReferenceListParams(t *testing.T) {
 	program := lowerSource(t, `
 		fn replace_first(values: mut [Int]) Void {
 			values.set(0, 1)
 		}
 
 		fn main() Void {
-			mut values = [0]
-			replace_first(values)
+			let values = [0]
+			replace_first(mut values)
 		}
 	`)
 
@@ -3344,7 +3343,7 @@ func TestLowerProgramKeepsForeignMutableListParamsAsDescriptors(t *testing.T) {
 func TestLowerProgramSupportsCapturedClosureSort(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
-			mut items = [3, 1, 2]
+			let items = mut [3, 1, 2]
 			let bias = 0
 			items.sort(fn(a: Int, b: Int) Bool {
 				a + bias < b + bias
@@ -3572,8 +3571,34 @@ func TestLowerProgramEmitsGoInterfaceForTraitObject(t *testing.T) {
 	}) {
 		t.Fatal("generated AST missing Go interface for Ard trait")
 	}
-	if !astFilesHaveTypeSpec(files, "ardMutTrait_Renderable_0") {
-		t.Fatal("generated AST should keep mutable trait reference type")
+	// A program without any `mut Renderable` use emits no handle machinery;
+	// ordinary trait dispatch stays on the native Go interface (ADR 0057).
+	if astFilesHaveTypeSpec(files, "ardMutTrait_Renderable_0") {
+		t.Fatal("generated AST should not emit unused mutable trait reference type")
+	}
+
+	mutProgram := lowerSource(t, `
+		trait Renderable {
+			fn render() Str
+		}
+
+		struct Block {
+			title: Str,
+		}
+
+		impl Renderable for Block {
+			fn render() Str {
+				self.title
+			}
+		}
+
+		fn draw(value: mut Renderable) Str {
+			value.render()
+		}
+	`)
+	mutFiles := lowerProgramAST(t, mutProgram, Options{PackageName: "main"})
+	if !astFilesHaveTypeSpec(mutFiles, "ardMutTrait_Renderable_0") {
+		t.Fatal("generated AST should keep mutable trait reference type for mut trait use")
 	}
 }
 func TestLowerProgramSkipsGoMethodWrapperWhenStructFieldCollides(t *testing.T) {
@@ -3902,7 +3927,7 @@ fn main() { demo::run() }
 func TestLowerProgramSupportsListSwapAndMapKeys(t *testing.T) {
 	program := lowerSource(t, `
 		fn main() Int {
-			mut items = [1, 2, 3]
+			let items = mut [1, 2, 3]
 			items.swap(0, 2)
 			let values = ["b": 2, "a": 1]
 			let keys = values.keys()
@@ -3949,7 +3974,7 @@ func TestLowerProgramSupportsFieldMutation(t *testing.T) {
 		}
 
 		fn bump(counter: Counter) Int {
-			mut current = counter
+			let current = mut counter
 			current.value = current.value + 1
 			current.value
 		}
@@ -4705,18 +4730,19 @@ fn main() {
 	if not replaced.ticks == 10 { panic("expected StateSet to replace state") }
 	let echoed = ffi::Identity("hello")
 	if not echoed == "hello" { panic("expected inferred Identity call") }
-	// A mut reference argument infers the value type: the callee stores a copy.
+	// A reference argument infers its pointer-shaped type and preserves identity.
 	let other: Any = DemoState{ticks: 0}
 	mut c2 = ffi::NewCtx(other)
 	let live = ffi::StateRef<DemoState>(c)
 	ffi::StateSet(c2, live)
 	live.ticks = 99
 	let copied = ffi::StateValue<DemoState>(c2)
-	if not copied.ticks == 10 { panic("expected StateSet to store a copy, got {copied.ticks}") }
+	if not copied.ticks == 99 { panic("expected StateSet to preserve reference identity, got {copied.ticks}") }
 	let echoed_state = ffi::Identity(live)
-	if not echoed_state.ticks == 99 { panic("expected Identity to echo a value copy") }
-	// A value-typed annotation snapshots instead of aliasing.
-	let snap: DemoState = ffi::StateRef<DemoState>(c)
+	if not echoed_state.ticks == 99 { panic("expected Identity to preserve reference identity") }
+	// A value-typed annotation requires an explicit shallow snapshot.
+	let snap_reference = ffi::StateRef<DemoState>(c)
+	let snap: DemoState = deref snap_reference
 	live.ticks = 123
 	if not snap.ticks == 99 { panic("expected value-typed binding to snapshot, got {snap.ticks}") }
 }
@@ -4865,7 +4891,8 @@ func TestRunProgramExecutesListPushOnStructField(t *testing.T) {
 		}
 
 		fn main() {
-			mut log = Log{entries: []}
+			let log_value = Log{entries: []}
+			let log = mut log_value
 			add(log, "one")
 			log.entries.push("two")
 			if log.entries.size() != 2 {
@@ -5049,7 +5076,7 @@ func TestRunProgramWrapsFieldAssignmentIntoMaybe(t *testing.T) {
 		}
 
 		fn main() {
-			mut s = S{label: "start"}
+			let s = mut S{label: "start"}
 			s.label = "wrapped"
 			if s.label.or("missing") != "wrapped" {
 				panic("literal wrap failed")
@@ -5071,8 +5098,8 @@ func TestRunProgramWrapsFieldAssignmentIntoMaybe(t *testing.T) {
 	}
 }
 
-// TestRunProgramMutParameterWritesBack pins the runtime write-back contract
-// for `name: mut Type` parameters called with mut locals.
+// TestRunProgramMutParameterWritesBack pins shared interior mutation through
+// explicit references passed to `name: mut Type` parameters.
 func TestRunProgramMutParameterWritesBack(t *testing.T) {
 	program := lowerSource(t, `
 		struct S {
@@ -5084,7 +5111,7 @@ func TestRunProgramMutParameterWritesBack(t *testing.T) {
 		}
 
 		fn main() {
-			mut s = S{n: 1}
+			let s = mut S{n: 1}
 			bump(s)
 			bump(s)
 			if s.n != 3 {

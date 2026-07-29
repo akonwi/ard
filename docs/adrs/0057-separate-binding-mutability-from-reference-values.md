@@ -6,8 +6,8 @@ Accepted
 
 ## Implementation status
 
-In progress. Phase 1's semantic contracts are in place, and Phases 2–7 are
-complete. `deref` is parsed, formatted, and grammar-supported; the checker
+Complete. Phase 1's semantic contracts are in place, and Phases 2–8 are
+done. `deref` is parsed, formatted, and grammar-supported; the checker
 implements first-class reference typing, capability judgments, explicit-borrow
 classification (`ExistingReference` / `AddressablePlace` / `FreshValue`), the
 uniform reference-destination policy, assignment target categories,
@@ -24,8 +24,17 @@ All ADR 0057 Go runtime/FFI contracts pass. Diagnostics now distinguish
 addressability, actual-reference destinations, explicit value materialization,
 forbidden whole-referent writes, immutable slots, and reference-required
 receivers. The variables, functions, structs, generics, async, and Go interop
-guides document the new model and migration paths. Phase 8 remains for migration
-of pre-ADR samples and legacy backend fixtures.
+guides document the new model and migration paths. Phase 8 migrated the
+compiler samples, the Go backend fixture corpus, and the vaxis-demo example to
+explicit references and `deref`; the full compiler test suite, formatter
+verification, and the LSP harness pass. Downstream migration also hardened the
+backend: the mutable-trait storage vtable dispatches through impl functions
+directly instead of assuming a native Go interface, foreign-method values
+project descriptor arguments through the exact Go ABI, and unused mutable-trait
+handle machinery is no longer emitted for traits without any reference use.
+Known deferred gaps: contextual typing does not flow into an empty container
+literal through `mut` (use a typed binding first), and generic `mut $T`
+parameters do not yet unify with concrete foreign pointer values.
 
 ## Context
 

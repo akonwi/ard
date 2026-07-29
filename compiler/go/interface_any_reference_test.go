@@ -97,63 +97,64 @@ func TestRunProgramPreservesMutableReferencesConvertedToAny(t *testing.T) {
 		}
 
 		fn unmarshal(data: [Byte], target: mut $T) Void!Str {
-			mut input = data
+			let input = mut data
 			json::Unmarshal(input, target)
 		}
 
 		fn main() {
-			mut user = User{name: "Joe"}
-			if not generic_reference_type(user) == "*test.User" {
+			let user = User{name: "Joe"}
+			let user_reference = mut user
+			if not generic_reference_type(user_reference) == "*test.User" {
 				panic("generic mutable reference lost identity")
 			}
-			if not concrete_reference_type(user) == "*test.User" {
+			if not concrete_reference_type(user_reference) == "*test.User" {
 				panic("concrete mutable reference lost identity")
 			}
 			if not value_type(user) == "test.User" {
 				panic("ordinary value should remain a value")
 			}
-			if not maybe_reference_type(user) == "*test.User" {
+			if not maybe_reference_type(user_reference) == "*test.User" {
 				panic("Maybe<Any> conversion lost reference identity")
 			}
-			if not maybe_user_name(mut user) == "Joe" {
+			if not maybe_user_name(deref user_reference) == "Joe" {
 				panic("explicit reference was not snapshotted before Maybe wrapping")
 			}
-			if not inferred_maybe_type(mut user) == "*test.User" {
+			if not inferred_maybe_type(user_reference) == "*test.User" {
 				panic("unresolved Maybe generic did not infer mutable reference")
 			}
-			let reference = identity_maybe(mut user).expect("some")
+			let reference = identity_maybe(user_reference).expect("some")
 			reference.name = "Grace"
 			if not user.name == "Grace" {
 				panic("Maybe.expect lost mutable reference identity")
 			}
-			mut fallback = User{name: "Fallback"}
-			let selected = identity_maybe(mut user).or(mut fallback)
+			let fallback = User{name: "Fallback"}
+			let selected = identity_maybe(user_reference).or(mut fallback)
 			selected.name = "Selected"
 			if not user.name == "Selected" {
 				panic("Maybe.or lost mutable reference identity")
 			}
-			if not maybe_type(explicit_maybe_reference(user)) == "*test.User" {
+			if not maybe_type(explicit_maybe_reference(user_reference)) == "*test.User" {
 				panic("explicit Maybe::new<Any> lost reference identity")
 			}
-			if not maybe_type(contextual_maybe_reference(user)) == "*test.User" {
+			if not maybe_type(contextual_maybe_reference(user_reference)) == "*test.User" {
 				panic("contextual Maybe::new lost reference identity")
 			}
-			if not maybe_type(normalize_maybe(contextual_maybe_reference(user))) == "*test.User" {
+			if not maybe_type(normalize_maybe(contextual_maybe_reference(user_reference))) == "*test.User" {
 				panic("Maybe::new double-wrapped an existing Maybe")
 			}
-			if not generic_optional_reference(user) == "*test.User" {
+			if not generic_optional_reference(user_reference) == "*test.User" {
 				panic("generic call rejected optional interface conversion")
 			}
-			if not dynamic_type(return_reference(user)) == "*test.User" {
+			if not dynamic_type(return_reference(user_reference)) == "*test.User" {
 				panic("return conversion lost reference identity")
 			}
-			if not dynamic_type(box_reference(user).value) == "*test.User" {
+			if not dynamic_type(box_reference(user_reference).value) == "*test.User" {
 				panic("field conversion lost reference identity")
 			}
-			if not dynamic_type(assign_reference(user)) == "*test.User" {
+			if not dynamic_type(assign_reference(user_reference)) == "*test.User" {
 				panic("assignment conversion lost reference identity")
 			}
-			let _ = try unmarshal("\{\"name\":\"Ada\"\}".bytes(), user) -> err { panic(err) }
+			let _ = try unmarshal("\{\"name\":\"Ada\"\}".bytes(), user_reference) -> err { panic(err) }
 			if not user.name == "Ada" {
 				panic("json.Unmarshal did not mutate caller storage")
 			}
@@ -203,7 +204,7 @@ fn named_empty_reference(value: mut $T) Bool {
   ffi::IsPointer(value)
 }
 
-fn generic_value_snapshot(value: mut $T) Bool {
+fn generic_inferred_reference(value: mut $T) Bool {
   ffi::GenericIsPointer(value)
 }
 
@@ -212,17 +213,18 @@ fn explicit_any_reference(value: mut $T) Bool {
 }
 
 fn main() {
-  mut user = User{name: "Joe"}
-  if not named_empty_reference(user) {
+  let user = User{name: "Joe"}
+  let reference = mut user
+  if not named_empty_reference(reference) {
     panic("named empty interface lost reference identity")
   }
-  if generic_value_snapshot(user) {
-    panic("ordinary Go generic value parameter should receive a snapshot")
+  if not generic_inferred_reference(reference) {
+    panic("inferred Go generic parameter lost reference identity")
   }
-  if ffi::GenericIsPointer(mut user) {
-    panic("explicit mutable reference should snapshot for an inferred Go generic value parameter")
+  if not ffi::GenericIsPointer(reference) {
+    panic("explicit mutable reference lost identity for an inferred Go generic parameter")
   }
-  if not explicit_any_reference(user) {
+  if not explicit_any_reference(reference) {
     panic("explicit Go generic Any destination lost reference identity")
   }
 }

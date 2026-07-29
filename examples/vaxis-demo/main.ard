@@ -106,7 +106,7 @@ fn palette_nav_item(c: mut ffi::StateCtx, label: Str, name: Str, page: Int) ui::
 }
 
 fn command_palette_items(c: mut ffi::StateCtx) [ui::CommandPaletteItem] {
-  mut items: [ui::CommandPaletteItem] = [
+  let items = mut [
     palette_nav_item(c, "Home", "home", 0),
     palette_nav_item(c, "Text layout", "text", 1),
     palette_nav_item(c, "Controls", "controls", 2),
@@ -156,7 +156,7 @@ fn command_palette_items(c: mut ffi::StateCtx) [ui::CommandPaletteItem] {
       },
     },
   )
-  items
+  deref items
 }
 
 // A modal command-palette overlay entry, shown when state.palette is set.
@@ -481,23 +481,26 @@ fn theme_text_span(name: Str, foreground: ui::Color) ui::TextSpan {
 // Row indent (2) + a 2-space gap before each span reproduces the reference's
 // "    span  span  span" spacing without a per-item index check.
 fn theme_swatch_row(spans: [ui::TextSpan]) ui::Widget {
-  mut row: [ui::TextSpan] = [ui::TextSpan{Text: "  "}]
+  let row = mut [ui::TextSpan{Text: "  "}]
   for span in spans {
     row.push(ui::TextSpan{Text: "  "})
     row.push(span)
   }
-  ui::RichText{Spans: row}
+  ui::RichText{Spans: deref row}
 }
 
 fn theme_group(name: Str, children: [ui::Widget]) ui::Widget {
-  mut kids: [ui::Widget] = [ui::RichText{Spans: [ui::TextSpan{Text: "  "}, ui::TextSpan{Text: name, Style: bold()}]}]
+  let first_kids: [ui::Widget] = [
+    ui::RichText{Spans: [ui::TextSpan{Text: "  "}, ui::TextSpan{Text: name, Style: bold()}]},
+  ]
+  let kids = mut first_kids
   for child in children {
     kids.push(child)
   }
   ui::Flex{
     Axis: ui::Vertical,
     CrossAxisAlignment: ui::CrossAxisStart,
-    Children: kids,
+    Children: deref kids,
   }
 }
 
@@ -823,7 +826,8 @@ fn lists_page(c: mut ffi::StateCtx, s: DemoState, theme: ui::Theme) ui::Widget {
 
 // 24 rows of scrollable content, built with a range loop + list push.
 fn scroll_demo_lines() ui::Widget {
-  mut rows: [ui::Widget] = []
+  let empty_rows: [ui::Widget] = []
+  let rows = mut empty_rows
   for i in 1..24 {
     rows.push(
       ui::RichText{
@@ -837,7 +841,7 @@ fn scroll_demo_lines() ui::Widget {
   ui::Flex{
     Axis: ui::Vertical,
     CrossAxisAlignment: ui::CrossAxisStart,
-    Children: rows,
+    Children: deref rows,
   }
 }
 
@@ -1184,7 +1188,8 @@ fn build(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
     true => [dialog_entry(c)],
     false => [],
   }
-  mut overlays: [ui::OverlayEntry] = []
+  let no_overlays: [ui::OverlayEntry] = []
+  let overlays = mut no_overlays
   for e in palette_list {
     overlays.push(e)
   }
@@ -1227,7 +1232,7 @@ fn build(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
         ui::EventHandled
       },
     ],
-    Child: ui::Shortcuts{Bindings: shortcuts, Child: ui::Overlay{Child: body, Entries: overlays}},
+    Child: ui::Shortcuts{Bindings: shortcuts, Child: ui::Overlay{Child: body, Entries: deref overlays}},
   }
 }
 

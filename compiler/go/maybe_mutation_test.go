@@ -31,7 +31,7 @@ func TestGoTargetMaybePreludeAndMutation(t *testing.T) {
 		{
 			name: "set and clear mutate in place",
 			input: `fn main() Bool {
-  mut m = Maybe::new<Int>()
+  let m = mut Maybe::new<Int>()
   m.set(42)
   let after_set = m.or(0)
   m.clear()

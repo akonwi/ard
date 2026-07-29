@@ -378,8 +378,14 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		}
 	}
 	if len(expr.ForeignArgModes) > 0 {
-		if len(expr.ForeignArgModes) != len(expr.Args) {
-			return fmt.Errorf("foreign expression has %d arg modes for %d args", len(expr.ForeignArgModes), len(expr.Args))
+		argCount := len(expr.Args)
+		if expr.Kind == ExprForeignMethodValue && validTypeID(program, expr.Type) {
+			if functionType := program.Types[expr.Type-1]; functionType.Kind == TypeFunction {
+				argCount = len(functionType.Params)
+			}
+		}
+		if len(expr.ForeignArgModes) != argCount {
+			return fmt.Errorf("foreign expression has %d arg modes for %d args", len(expr.ForeignArgModes), argCount)
 		}
 		for _, mode := range expr.ForeignArgModes {
 			if mode > ForeignArgDescriptorValue {

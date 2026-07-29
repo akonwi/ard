@@ -9,17 +9,19 @@ struct WordCount {
 }
 
 fn count_words(words: [Str]) [WordCount] {
-  mut counts: [Str: Int] = [:]
+  let empty_counts: [Str: Int] = [:]
+  let counts = mut empty_counts
 
   for word in words {
     counts.set(word, counts.get(word).or(0) + 1)
   }
 
-  mut res: [WordCount] = []
+  let empty_result: [WordCount] = []
+  let res = mut empty_result
   for word, count in counts {
     res.push(WordCount{word: word, count: count})
   }
-  res
+  deref res
 }
 
 fn main() {
@@ -29,7 +31,7 @@ fn main() {
   if scanner.Scan() {
     let text = strings::TrimSpace(scanner.Text())
     let words = strings::Split(text, " ")
-    mut word_counts = count_words(words)
+    let word_counts = mut count_words(words)
 
     fmt::Println("\nWord Frequency Analysis:")
     fmt::Println("------------------------")
@@ -37,11 +39,9 @@ fn main() {
     fmt::Println("Unique words: {word_counts.size()}")
 
     fmt::Println("\nMost frequent words:")
-    word_counts.sort(
-      fn(a: WordCount, b: WordCount) Bool {
-        a.count > b.count
-      },
-    )
+    word_counts.sort(fn(a: WordCount, b: WordCount) Bool {
+      a.count > b.count
+    })
 
     for entry, rank in word_counts {
       fmt::Println("{rank + 1}. {entry.word}: {entry.count}")
