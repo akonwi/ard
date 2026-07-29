@@ -2867,6 +2867,58 @@ fn main() Bool {
 }`,
 			want: "true",
 		},
+		{
+			name: "captured reference shares its pointee",
+			input: `use ard/async
+struct Box { value: Int }
+fn main() Int {
+  let box = Box{value: 1}
+  let reference = mut box
+  let done = Chan::new<Bool>()
+  async::start(fn() {
+    reference.value = 2
+    done.send(true)
+  })
+  done.recv().expect("done")
+  box.value
+}`,
+			want: "2",
+		},
+		{
+			name: "task may borrow outer storage",
+			input: `use ard/async
+struct Box { value: Int }
+fn main() Int {
+  let box = Box{value: 1}
+  let done = Chan::new<Bool>()
+  async::start(fn() {
+    let reference = mut box
+    reference.value = 2
+    done.send(true)
+  })
+  done.recv().expect("done")
+  box.value
+}`,
+			want: "2",
+		},
+		{
+			name: "task may rebind outer reference slot",
+			input: `use ard/async
+struct Box { value: Int }
+fn main() Int {
+  let first = Box{value: 1}
+  let second = Box{value: 2}
+  mut current = mut first
+  let done = Chan::new<Bool>()
+  async::start(fn() {
+    current = mut second
+    done.send(true)
+  })
+  done.recv().expect("done")
+  current.value
+}`,
+			want: "2",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

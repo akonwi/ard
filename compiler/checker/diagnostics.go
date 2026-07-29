@@ -61,7 +61,6 @@ const (
 	DiagnosticCodeWholeReferentAssignment       DiagnosticCode = "whole_referent_assignment"
 	DiagnosticCodeReferenceDestination          DiagnosticCode = "reference_destination_requires_reference"
 	DiagnosticCodeReferenceValueMaterialization DiagnosticCode = "reference_value_requires_deref"
-	DiagnosticCodeIsolatedReferenceCapture      DiagnosticCode = "isolated_reference_capture"
 	DiagnosticCodeUnsupportedTraitReferenceCast DiagnosticCode = "unsupported_trait_reference_cast"
 	DiagnosticCodeUnsupportedMutableReference   DiagnosticCode = "unsupported_mutable_reference"
 	DiagnosticCodeInvalidForeignPointerBinding  DiagnosticCode = "invalid_foreign_pointer_binding"
@@ -434,31 +433,6 @@ func (d unsupportedTraitReferenceCastDiagnostic) build() Diagnostic {
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` cannot be a cast target", formatTypeForDisplay(d.Type))},
 		nil,
 		"",
-	)
-}
-
-type isolatedReferenceCaptureDiagnostic struct {
-	Name            string
-	Borrow          bool
-	Span            SourceSpan
-	DeclarationSpan *SourceSpan
-}
-
-func (d isolatedReferenceCaptureDiagnostic) build() Diagnostic {
-	action := "capture reference"
-	label := fmt.Sprintf("`%s` is a reference from outside this fiber", d.Name)
-	if d.Borrow {
-		action = "borrow"
-		label = fmt.Sprintf("`%s` is storage from outside this fiber", d.Name)
-	}
-	return mutationDiagnostic(
-		DiagnosticCodeIsolatedReferenceCapture,
-		fmt.Sprintf("Cannot %s '%s' inside an isolated fiber", action, d.Name),
-		"Isolated fiber cannot share outer references",
-		"A fiber must not directly capture or borrow mutable state from its enclosing scope.",
-		DiagnosticLabel{Span: d.Span, Message: label},
-		d.DeclarationSpan,
-		"declared outside the fiber here",
 	)
 }
 

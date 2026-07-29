@@ -315,17 +315,6 @@ func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
 			}.build())
 			return nil
 		}
-		// An isolated fiber must not explicitly borrow outer storage
-		// (ADR 0057).
-		if root, ok := rootPlaceVariable(operand); ok && c.scope.isolationCrossed(root.Name()) {
-			c.addDiagnostic(isolatedReferenceCaptureDiagnostic{
-				Name:            root.Name(),
-				Borrow:          true,
-				Span:            c.sourceSpan(s.Operand.GetLocation()),
-				DeclarationSpan: expressionBindingSpan(operand),
-			}.build())
-			return nil
-		}
 		mode = AddressablePlace
 	default:
 		// A value expression materializes fresh mutable storage; the
@@ -466,20 +455,6 @@ func receiverBindingType(target Type, mutates bool) Type {
 	return MakeMutableRef(target)
 }
 
-// rootPlaceVariable walks a place expression's subject chain to its root
-// variable, if any.
-func rootPlaceVariable(expr Expression) (*Variable, bool) {
-	switch e := expr.(type) {
-	case *Variable:
-		return e, true
-	case *InstanceProperty:
-		return rootPlaceVariable(e.Subject)
-	case *ForeignFieldAccess:
-		return rootPlaceVariable(e.Subject)
-	}
-	return nil, false
-}
-
 // assignmentSubjectBase returns the base expression a property-assignment
 // target reaches its field through, or nil when the target is not a field
 // access.
@@ -608,7 +583,6 @@ type Checker struct {
 	methodGenericAllowlist            []map[string]bool
 	discardExprContext                bool
 	matchArmDiscardContext            bool
-	isolatedClosures                  map[*parse.AnonymousFunction]bool
 	deferredWorkDepth                 int
 	reportedMapKeyErrors              map[parse.Location]bool
 	emptyCollectionBinding            *collectionBindingContext
@@ -3259,19 +3233,6 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 				}
 				if !ok {
 					c.addUnresolvedReference(undefinedAssignmentTarget, id.Name, s.Target.GetLocation())
-					return nil
-				}
-
-				// An isolated fiber must not write an outer reference slot:
-				// rebinding across the fiber boundary is a direct capture of
-				// outer mutable state (ADR 0057).
-				if isReferenceType(target.Type) && c.scope.isolationCrossed(id.Name) {
-					c.addDiagnostic(isolatedReferenceCaptureDiagnostic{
-						Name:            target.Name,
-						Borrow:          false,
-						Span:            c.sourceSpan(s.Target.GetLocation()),
-						DeclarationSpan: sourceSpanIfPresent(target.declaredAt),
-					}.build())
 					return nil
 				}
 
@@ -6964,18 +6925,6 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 			if c.rejectUnspecializedGenericFunctionValue(sym.Type, s.GetLocation()) {
 				return nil
 			}
-			// An isolated fiber must not directly capture an outer reference,
-			// for reads or writes alike (ADR 0057). References hidden in
-			// containers or dynamic values are intentionally not tracked.
-			if isReferenceType(sym.Type) && c.scope.isolationCrossed(s.Name) {
-				c.addDiagnostic(isolatedReferenceCaptureDiagnostic{
-					Name:            s.Name,
-					Borrow:          false,
-					Span:            c.sourceSpan(s.GetLocation()),
-					DeclarationSpan: sourceSpanIfPresent(sym.declaredAt),
-				}.build())
-				return nil
-			}
 			c.recordSymbolUse(s, sym, nil)
 			return &Variable{*sym}
 		}
@@ -7985,21 +7934,6 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 				return nil
 			}
 
-			// An async fiber's task closure is an isolated scope: it must not
-			// directly capture or borrow outer references (ADR 0057). Only the
-			// closure literal that IS the task argument isolates; closures
-			// nested in other expressions, and function values, follow the
-			// intentionally shallow policy.
-			if mod.Path() == "ard/async" && name == "start" && len(resolvedExprs) > 0 {
-				if task, ok := resolvedExprs[0].(*parse.AnonymousFunction); ok {
-					if c.isolatedClosures == nil {
-						c.isolatedClosures = map[*parse.AnonymousFunction]bool{}
-					}
-					c.isolatedClosures[task] = true
-					defer delete(c.isolatedClosures, task)
-				}
-			}
-
 			// Check and process arguments (handles both generics and mutability)
 			args, fnToUse := c.checkAndProcessArguments(fnDef, resolvedExprs, fnDefCopy, genericScope, numOmittedArgs, contextualGenericReturn(expectedReturn, callTypeArgs), s.GetLocation())
 			if args == nil {
@@ -8045,9 +7979,6 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 
 			// Check body
 			setup := func() {
-				if c.isolatedClosures[s] {
-					c.scope.isolate()
-				}
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					sym := c.scope.add(param.Name, param.Type, param.Mutable)
@@ -10190,9 +10121,6 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			previousDeferredWorkDepth := c.deferredWorkDepth
 			c.deferredWorkDepth = 0
 			body := c.checkBlockWithExpected(s.Body, func() {
-				if c.isolatedClosures[s] {
-					c.scope.isolate()
-				}
 				c.scope.expectReturn(returnType)
 				for _, param := range params {
 					sym := c.scope.add(param.Name, param.Type, param.Mutable)

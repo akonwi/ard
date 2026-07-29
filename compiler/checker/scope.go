@@ -13,9 +13,6 @@ type SymbolTable struct {
 	// for scopes that expect a return value
 	returnType Type
 
-	// isolated means only read-only references in outer scopes are allowed
-	isolated bool
-
 	// inLoop marks a loop body scope; break statements bind to the nearest
 	// enclosing loop within the current function
 	inLoop bool
@@ -86,24 +83,6 @@ func (st SymbolTable) get(name string) (*Symbol, bool) {
 		return st.parent.get(name)
 	}
 	return nil, false
-}
-
-// isolationCrossed reports whether resolving name crosses an isolated scope
-// boundary: the symbol lives outside a fiber that must not directly capture
-// or borrow outer mutable state (ADR 0057). Callers decide which uses of such
-// a symbol are rejected.
-func (st SymbolTable) isolationCrossed(name string) bool {
-	if _, ok := st.symbols[name]; ok {
-		return false
-	}
-	if st.parent == nil {
-		return false
-	}
-	if st.isolated {
-		_, found := st.parent.get(name)
-		return found
-	}
-	return st.parent.isolationCrossed(name)
 }
 
 // findGeneric looks for an existing generic type with the given name in the scope chain
@@ -184,10 +163,6 @@ func (st *SymbolTable) insideScript() bool {
 	return false
 }
 
-func (st *SymbolTable) isolate() {
-	st.isolated = true
-}
-
 // Generic context methods
 func (st *SymbolTable) createGenericScope(genericParams []string) *SymbolTable {
 	gc := make(GenericContext)
@@ -204,7 +179,6 @@ func (st *SymbolTable) createGenericScope(genericParams []string) *SymbolTable {
 	return &SymbolTable{
 		parent:         st,
 		symbols:        make(map[string]*Symbol),
-		isolated:       false,
 		genericContext: &gc,
 		genericOrigins: make(map[string]genericBindingOrigin),
 	}

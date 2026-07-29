@@ -34,6 +34,34 @@ func TestADR0057PreservesClosureCaptureModes(t *testing.T) {
 	}
 }
 
+func TestADR0057AsyncTasksPreserveOrdinaryClosureCaptureModes(t *testing.T) {
+	program := lowerSource(t, `
+		use ard/async
+		struct Box { value: Int }
+		fn main() {
+			let first = Box{value: 1}
+			let storage = Box{value: 2}
+			let reference = mut first
+			async::start(fn() {
+				reference.value = 3
+				let borrowed = mut storage
+				borrowed.value = 4
+			})
+		}
+	`)
+
+	for _, function := range program.Functions {
+		modes := map[string]CaptureMode{}
+		for _, capture := range function.Captures {
+			modes[capture.Name] = capture.Mode
+		}
+		if modes["reference"] == CaptureReference && modes["storage"] == CaptureSlot {
+			return
+		}
+	}
+	t.Fatalf("async task capture modes missing from AIR: %#v", program.Functions)
+}
+
 func TestADR0057BindsGenericReferentThroughReferenceType(t *testing.T) {
 	module := checkedModuleWithPath(t, "test", `fn take(value: mut $T) {}`)
 	definition, ok := module.Get("take").Type.(*checker.FunctionDef)

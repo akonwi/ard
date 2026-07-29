@@ -11,8 +11,9 @@ complete. `deref` is parsed, formatted, and grammar-supported; the checker
 implements first-class reference typing, capability judgments, explicit-borrow
 classification (`ExistingReference` / `AddressablePlace` / `FreshValue`), the
 uniform reference-destination policy, assignment target categories,
-observational reads, pointer-identity equality, async isolation, and direct-Go
-boundary classification. AIR preserves the three creation modes, explicit and
+observational reads, pointer-identity equality, ordinary async closure
+captures, and direct-Go boundary classification. AIR preserves the three
+creation modes, explicit and
 observational dereferences, canonical recursive `TypeReference` identity,
 concrete-to-trait projection metadata, creation-time reference-handle captures,
 and writable/address-taken slot captures. The Go backend lowers concrete and
@@ -585,32 +586,30 @@ user = User{name: "Second"}
 reference.name // "Second"
 ```
 
-### Async and fiber boundaries
+### Async and goroutine boundaries
 
-The initial async policy remains intentionally shallow:
+`async::start` applies the same capture rules as any other Ard closure; it does
+not introduce a reference-isolation boundary:
 
-- directly capturing a mutable reference from an outer scope is rejected;
-- explicitly borrowing outer storage inside an isolated fiber is rejected;
-- references hidden in containers, `Any`, Go interfaces, channels, globals, or
-  other dynamic values are not transitively tracked and remain allowed;
-- references created entirely inside the fiber remain allowed.
+- capturing an existing reference copies its current handle, so the task and
+  caller share the pointee;
+- explicitly borrowing outer addressable storage captures the required outer
+  binding slot;
+- rebinding an outer writable reference binding captures and updates that slot;
+- nested closures propagate those capture requirements normally.
 
-Go itself places no static restriction on pointer access from goroutines. A
-pointer may be captured by a goroutine or sent to one; when pointed-to local
-storage escapes, Go's escape analysis arranges storage with a sufficient
-lifetime and the garbage collector keeps it alive. That lifetime handling does
-not provide synchronization. Concurrent access with at least one write must be
-ordered by a happens-before edge, for example through a channel, mutex, or
-atomic operation; otherwise the Go program has a data race (which can be found
-with Go's race detector).
+This follows ADR 0033's Go-like concurrency model. Go places no static
+restriction on pointer access from goroutines. A pointer may be captured by a
+goroutine or sent to one; when pointed-to local storage escapes, Go's escape
+analysis arranges storage with a sufficient lifetime and the garbage collector
+keeps it alive.
 
-Ard's direct-capture and outer-borrow rejections are therefore a deliberately
-stricter, shallow front-end guard rather than a requirement imposed by the Go
-backend. References that pass the shallow boundary because they are hidden in a
-container, interface, channel, or global lower to ordinary Go pointer-shaped
-values and inherit Go's synchronization responsibilities. This policy is not a
-claim that hidden shared references are race-free. Stronger transitive tracking
-or concurrency safety is deferred.
+Lifetime handling does not provide synchronization. Concurrent access with at
+least one write must be ordered by a happens-before edge, for example through a
+channel, mutex, or atomic operation; otherwise the generated Go program has a
+data race. Ard does not reject or implicitly synchronize such sharing. Race
+safety remains the program's responsibility and can be checked with Go's race
+detector.
 
 ### Go and FFI boundaries
 
@@ -787,8 +786,7 @@ Use separate judgments for:
 - explicit-borrow addressability;
 - explicit-dereference operand validity;
 - writable reference-valued field slot;
-- stable comparability;
-- isolated-scope direct capture/borrow.
+- stable comparability.
 
 The existing broad `isMutable` judgment must not continue to answer all of
 these questions.
@@ -946,7 +944,8 @@ Add runtime/backend tests for:
   `unsafe::cast<mut Trait>`;
 - sanctioned list, map, `Maybe`, and channel operations;
 - rejected whole replacement;
-- direct async rejection and intentionally allowed hidden-reference cases;
+- async reference-handle capture, outer-storage borrowing, reference-slot
+  rebinding, and channel-synchronized mutation;
 - `Any`, named Go interfaces, issue #344 behavior, and target-pointer snapshots;
 - exact non-generic Go pointer, slice, map, channel, and pointer-to-descriptor
   parameter projections and their mutation visibility;
@@ -1027,8 +1026,8 @@ Add runtime/backend tests for:
   classification is `AddressablePlace`; `ExistingReference` copies the handle.
 - Propagate capture requirements through nested closures.
 - Make inlining depend on finalized capture metadata.
-- Enforce the selected shallow async rule for direct captures and explicit outer
-  borrows without introducing transitive taint tracking.
+- Apply those ordinary capture modes unchanged to `async::start` tasks; do not
+  add an async-specific reference-isolation boundary.
 
 ### Phase 6: Lower boundary exceptions
 
@@ -1114,8 +1113,8 @@ Retained:
 - references may escape and require stable storage;
 - explicit reference creation makes the initial alias to storage visible;
 - copying and rebinding references follows ordinary pointer-value behavior;
-- cross-fiber reference sharing remains restricted according to the policy in
-  this ADR;
+- references may cross goroutine boundaries under ADR 0033's Go-like
+  synchronization and data-race responsibilities;
 - explicit deep-copy semantics remain desirable but deferred; shallow
   reference-to-value conversion is now the `deref` expression.
 
@@ -1328,8 +1327,8 @@ Superseded or clarified:
   or descriptor update, not shared retargeting cells.
 - Ard and Go references share the same pointer-copy/rebind intuition, while
   exact FFI ABI and nil behavior remain documented boundary concerns.
-- The shallow async policy permits hidden shared references and is not a data-race
-  guarantee.
+- Async tasks may share references and outer binding slots exactly like ordinary
+  closures; Ard adds no data-race protection or implicit synchronization.
 - References use pointer identity for equality, map keys, hashing, and
   comparable constraints; referent-value comparison requires `deref`.
 - Diagnostics become more precise because slot writability, addressability,
@@ -1341,7 +1340,8 @@ Superseded or clarified:
   `deref`.
 - Consider whether temporary selectors should materialize fresh projected
   storage.
-- Consider stronger transitive async/reference safety.
+- Consider optional concurrency diagnostics or race-tooling integration without
+  restricting legal Go-style reference sharing.
 
 ## Related
 

@@ -432,24 +432,32 @@ let recovered = unsafe::cast<mut View>(boxed)`, wantError: true},
 	}
 }
 
-func TestADR0057AsyncReferenceBoundaryIsIntentionallyShallow(t *testing.T) {
+func TestADR0057AsyncReferencesFollowOrdinaryClosureCaptureRules(t *testing.T) {
 	tests := []struct {
-		name      string
-		source    string
-		wantError bool
+		name   string
+		source string
 	}{
-		{name: "direct mutating reference capture is rejected", source: `let value = Box{value: 1}
+		{name: "direct mutating reference capture", source: `let value = Box{value: 1}
 let reference = mut value
-async::start(fn() { reference.value = 2 })`, wantError: true},
-		{name: "direct read-only reference capture is rejected", source: `let value = Box{value: 1}
+async::start(fn() { reference.value = 2 })`},
+		{name: "direct read-only reference capture", source: `let value = Box{value: 1}
 let reference = mut value
-async::start(fn() { let observed = reference.value })`, wantError: true},
-		{name: "explicit borrow of outer storage is rejected", source: `let value = Box{value: 1}
-async::start(fn() { let reference = mut value })`, wantError: true},
-		{name: "reference hidden in a container is allowed", source: `let value = Box{value: 1}
+async::start(fn() { let observed = reference.value })`},
+		{name: "explicit borrow of outer storage", source: `let value = Box{value: 1}
+async::start(fn() { let reference = mut value })`},
+		{name: "outer reference slot rebind", source: `let first = Box{value: 1}
+let second = Box{value: 2}
+mut reference = mut first
+async::start(fn() { reference = mut second })`},
+		{name: "nested closure propagates outer slot capture", source: `let value = Box{value: 1}
+async::start(fn() {
+  let nested = fn() { let reference = mut value }
+  nested()
+})`},
+		{name: "reference hidden in a container", source: `let value = Box{value: 1}
 let references = [mut value]
 async::start(fn() { let observed = references.at(0).expect("reference").value })`},
-		{name: "reference created inside fiber is allowed", source: `async::start(fn() {
+		{name: "reference created inside task", source: `async::start(fn() {
   let value = Box{value: 1}
   let reference = mut value
   reference.value = 2
@@ -458,7 +466,7 @@ async::start(fn() { let observed = references.at(0).expect("reference").value })
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assertReferenceCheckerResult(t, "use ard/async\n"+referenceBoxPrelude+tt.source, tt.wantError)
+			assertReferenceCheckerResult(t, "use ard/async\n"+referenceBoxPrelude+tt.source, false)
 		})
 	}
 }
