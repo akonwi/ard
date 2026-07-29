@@ -43,10 +43,15 @@ ffi::TakeMap(mut values)`},
 ffi::TakeNumbers(values)`, wantError: true},
 		{name: "named slice accepts actual reference", source: `let values = [1, 2]
 ffi::TakeNumbers(mut values)`},
+		{name: "named slice accepts fresh literal reference", source: `ffi::TakeNumbers(mut [1, 2])`},
+		{name: "named slice types fresh empty literal", source: `ffi::TakeNumbers(mut [])`},
+		{name: "named slice binding borrow keeps descriptor reference", source: `let values: ffi::Numbers = [1, 2]
+ffi::TakeNumbers(mut values)`},
 		{name: "named map rejects bare value", source: `let values = ["a": 1]
 ffi::TakeScores(values)`, wantError: true},
 		{name: "named map accepts actual reference", source: `let values = ["a": 1]
 ffi::TakeScores(mut values)`},
+		{name: "named map types fresh empty literal", source: `ffi::TakeScores(mut [:])`},
 		{name: "channel remains an ordinary handle", source: `let channel = Chan::new<Int>()
 ffi::TakeChan(channel)`},
 		{name: "pointer to descriptor accepts actual reference", source: `let values = [1, 2]

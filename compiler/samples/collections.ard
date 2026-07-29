@@ -1,8 +1,7 @@
 use go:fmt
 
 fn main() {
-  let empty: [Int] = []
-  let numbers = mut empty
+  let numbers: mut [Int] = mut []
   fmt::Println("numbers.size = {numbers.size()}")
 
   fmt::Println("adding numbers from 0 to 10")

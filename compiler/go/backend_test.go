@@ -2277,8 +2277,7 @@ func TestRunProgramSupportsStatementProducingGlobalInitializers(t *testing.T) {
 func TestRunProgramSupportsMutableModuleGlobals(t *testing.T) {
 	program := lowerSource(t, `
 		mut counter = 0
-		let empty_items: [Str] = []
-		let items = mut empty_items
+		let items: mut [Str] = mut []
 
 		fn bump() {
 			counter = counter + 1

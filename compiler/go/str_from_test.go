@@ -35,8 +35,7 @@ func TestGoTargetStrFrom(t *testing.T) {
 		{
 			name: "invalid utf-8 bytes are carried through unchecked",
 			input: `fn main() Int {
-  let empty: [Byte] = []
-  let partial = mut empty
+  let partial: mut [Byte] = mut []
   partial.push("é".bytes().at(0).expect("first byte"))
   Str::from(deref partial).size()
 }`,

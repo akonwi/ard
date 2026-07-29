@@ -9,15 +9,13 @@ struct WordCount {
 }
 
 fn count_words(words: [Str]) [WordCount] {
-  let empty_counts: [Str: Int] = [:]
-  let counts = mut empty_counts
+  let counts: mut [Str: Int] = mut [:]
 
   for word in words {
     counts.set(word, counts.get(word).or(0) + 1)
   }
 
-  let empty_result: [WordCount] = []
-  let res = mut empty_result
+  let res: mut [WordCount] = mut []
   for word, count in counts {
     res.push(WordCount{word: word, count: count})
   }

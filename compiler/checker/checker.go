@@ -282,7 +282,22 @@ const (
 // ADR 0057). Explicit borrowing depends on addressability, not binding
 // mutability: `mut place` is legal on a `let` binding.
 func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
-	operand := c.checkExpr(s.Operand)
+	return c.checkMutRefFromOperand(s, c.checkExpr(s.Operand))
+}
+
+// checkMutRefAs checks `mut <operand>` at a reference destination whose
+// referent type is known. Container literals infer their element shape from
+// the referent (so `let rows: mut [Int] = mut []` types the fresh storage);
+// every other operand classifies from its own type as usual (ADR 0057).
+func (c *Checker) checkMutRefAs(s *parse.MutRef, referent Type) Expression {
+	switch s.Operand.(type) {
+	case *parse.ListLiteral, *parse.MapLiteral:
+		return c.checkMutRefFromOperand(s, c.checkExprAs(s.Operand, referent))
+	}
+	return c.checkMutRef(s)
+}
+
+func (c *Checker) checkMutRefFromOperand(s *parse.MutRef, operand Expression) Expression {
 	if operand == nil {
 		return nil
 	}
@@ -333,6 +348,13 @@ func (c *Checker) checkMutRef(s *parse.MutRef) Expression {
 
 func referenceTypeForOperand(typ Type) Type {
 	if foreign, ok := typ.(*ForeignType); ok {
+		// Named Go slice and map types stay descriptors under a reference,
+		// exactly like their unnamed shapes: the canonical reference form is
+		// the Ard wrapper, not a Go pointer (ADR 0057). This matches
+		// mutableParamNeedsGoPointer's boundary classification.
+		if !foreign.Pointer && (foreign.Elem != nil || foreign.MapKey != nil && foreign.MapValue != nil) {
+			return MakeMutableRef(foreign)
+		}
 		if pointer := foreign.PointerForm(); pointer != nil {
 			return pointer
 		}
@@ -4104,15 +4126,27 @@ func (c *Checker) checkBlockWithExpected(stmts []parse.Statement, setup func(), 
 
 func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, expectedFinal Type, onlyMatchFinal bool) bool {
 	if onlyMatchFinal && expectedFinal != Void {
-		switch stmt.(type) {
+		switch s := stmt.(type) {
 		case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.IfStatement,
 			*parse.FunctionCall, *parse.FunctionValueCall, *parse.InstanceMethod, *parse.StaticFunction,
 			*parse.Try, *parse.UnsafeBlock:
 			return true
+		case *parse.MutRef:
+			// `mut <container literal>` needs the reference destination's
+			// referent to type the fresh storage (ADR 0057).
+			if _, ok := expectedFinal.(*MutableRef); !ok || hasGenericsInType(expectedFinal) {
+				return false
+			}
+			switch s.Operand.(type) {
+			case *parse.ListLiteral, *parse.MapLiteral:
+				return true
+			}
+			return false
 		default:
 			return false
 		}
 	}
+
 	if expectedFinal == Void {
 		switch stmt.(type) {
 		case *parse.StrLiteral, *parse.RuneLiteral, *parse.BoolLiteral, *parse.VoidLiteral, *parse.NumLiteral, *parse.InterpolatedStr,
@@ -4130,7 +4164,7 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 	switch stmt.(type) {
 	case *parse.MatchExpression, *parse.ConditionalMatchExpression, *parse.SelectExpression, *parse.IfStatement,
 		*parse.FunctionCall, *parse.FunctionValueCall, *parse.InstanceMethod, *parse.StaticFunction,
-		*parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction, *parse.UnsafeBlock:
+		*parse.ListLiteral, *parse.MapLiteral, *parse.AnonymousFunction, *parse.UnsafeBlock, *parse.MutRef:
 		return true
 	default:
 		return false
@@ -10026,6 +10060,28 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 		return literal
 	}
 	switch s := (expr).(type) {
+	case *parse.MutRef:
+		// A reference destination lets `mut <container literal>` infer the
+		// literal's shape from the referent type (ADR 0057).
+		if expectedRef, ok := expectedType.(*MutableRef); ok && !hasGenericsInType(expectedType) {
+			switch s.Operand.(type) {
+			case *parse.ListLiteral, *parse.MapLiteral:
+				checked := c.checkMutRefAs(s, expectedRef.Of())
+				if checked == nil {
+					return nil
+				}
+				if !c.areCompatible(expectedType, checked.Type()) {
+					c.addDiagnostic(c.buildTypeMismatch(typeMismatchDiagnostic{
+						Expected:    expectedType,
+						Actual:      checked.Type(),
+						ActualSpan:  c.sourceSpan(expr.GetLocation()),
+						Expectation: expectation,
+					}))
+					return nil
+				}
+				return checked
+			}
+		}
 	case *parse.MatchExpression:
 		return c.withExpectedExpr(expectedType, func() Expression {
 			return c.checkExpr(s)
@@ -10079,8 +10135,15 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 			return nil
 		}
 	case *parse.MapLiteral:
-		// Only use collection-specific inference when the expected type is a map.
+		// Only use collection-specific inference when the expected type is a
+		// map, including named Go map types (mirroring the list-literal case).
+		mapExpected := false
 		if _, ok := expectedType.(*Map); ok {
+			mapExpected = true
+		} else if foreign, ok := expectedType.(*ForeignType); ok && !foreign.Pointer && foreign.MapKey != nil && foreign.MapValue != nil {
+			mapExpected = true
+		}
+		if mapExpected {
 			if result := c.checkMap(expectedType, s); result != nil {
 				return result
 			}
@@ -11239,12 +11302,27 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 
 		var checkedArg Expression
 		c.withValueExprContext(func() {
-			switch resolvedExprs[i].(type) {
+			switch arg := resolvedExprs[i].(type) {
 			case *parse.ListLiteral, *parse.MapLiteral:
 				if hasGenericsInType(expectedType) {
 					checkedArg = c.checkExpr(resolvedExprs[i])
 				} else {
 					checkedArg = c.checkExprAsArgument(resolvedExprs[i], expectedType, fnDefCopy.Parameters[i])
+				}
+			case *parse.MutRef:
+				// `mut <container literal>` at a reference parameter infers the
+				// literal's shape from the referent type (ADR 0057).
+				contextualLiteral := false
+				if _, isRef := expectedType.(*MutableRef); isRef && !hasGenericsInType(expectedType) {
+					switch arg.Operand.(type) {
+					case *parse.ListLiteral, *parse.MapLiteral:
+						contextualLiteral = true
+					}
+				}
+				if contextualLiteral {
+					checkedArg = c.checkExprAsArgument(resolvedExprs[i], expectedType, fnDefCopy.Parameters[i])
+				} else {
+					checkedArg = c.checkExpr(resolvedExprs[i])
 				}
 			case *parse.AnonymousFunction:
 				checkedArg = c.checkExprAsArgument(resolvedExprs[i], expectedType, fnDefCopy.Parameters[i])

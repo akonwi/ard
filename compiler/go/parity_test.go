@@ -1509,8 +1509,7 @@ func TestGoTargetParityMutableParameterClosureInFunctionTypedMap(t *testing.T) {
 
 		fn main() Int {
 			let base = 41
-			let empty: [Str: fn(mut Box)] = [:]
-			let handlers = mut empty
+			let handlers: mut [Str: fn(mut Box)] = mut [:]
 			handlers.set("a", fn(b: mut Box) {})
 			handlers.size() + base
 		}
@@ -2038,8 +2037,7 @@ func TestGoTargetParityMutableReferenceParameterUpdatesCaller(t *testing.T) {
 			}
 
 			fn main() Int {
-				let empty: [Int] = []
-				let values = mut empty
+				let values: mut [Int] = mut []
 				append_one(values)
 				values.size()
 			}

@@ -32,9 +32,11 @@ backend: the mutable-trait storage vtable dispatches through impl functions
 directly instead of assuming a native Go interface, foreign-method values
 project descriptor arguments through the exact Go ABI, and unused mutable-trait
 handle machinery is no longer emitted for traits without any reference use.
-Known deferred gaps: contextual typing does not flow into an empty container
-literal through `mut` (use a typed binding first), and generic `mut $T`
-parameters do not yet unify with concrete foreign pointer values.
+Contextual typing flows into container literals through `mut` at concrete
+reference destinations (`let rows: mut [Int] = mut []`). Known deferred gaps:
+generic reference destinations (`mut [$T]`) do not yet type empty container
+literals, and generic `mut $T` parameters do not yet unify with concrete
+foreign pointer values.
 
 ## Context
 
@@ -1351,6 +1353,10 @@ Superseded or clarified:
   storage.
 - Consider optional concurrency diagnostics or race-tooling integration without
   restricting legal Go-style reference sharing.
+- Consider a follow-up auto-deref phase: implicitly reading a reference at
+  read-only ordinary value destinations (for example `render(list)` instead of
+  `render(deref list)`) without reintroducing implicit materialization at
+  mutating or identity-sensitive boundaries.
 
 ## Related
 

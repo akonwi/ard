@@ -203,6 +203,16 @@ let same: mut Box = mut reference`},
 		{name: "Ard owned nested reference type is rejected", source: `let value = Box{value: 1}
 let reference = mut value
 let nested: mut mut Box = mut reference`, wantError: true},
+		{name: "annotation types empty list through mut", source: `let rows: mut [Int] = mut []
+rows.push(1)`},
+		{name: "annotation types empty map through mut", source: `let scores: mut [Str: Int] = mut [:]
+scores.set("a", 1)`},
+		{name: "return annotation types empty list through mut", source: `fn make() mut [Int] { (mut []) }
+let rows = make()
+rows.push(1)`},
+		{name: "reference parameter types fresh empty list", source: `fn take(values: mut [Int]) { values.push(1) }
+take(mut [])`},
+		{name: "annotation rejects mismatched fresh list element", source: `let rows: mut [Int] = mut ["a"]`, wantError: true},
 	}
 
 	for _, tt := range tests {
