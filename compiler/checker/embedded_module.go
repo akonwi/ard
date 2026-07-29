@@ -39,15 +39,16 @@ func FindEmbeddedModule(path string) (Module, bool) {
 	}
 	program := result.Program
 
-	// Type check the program to create a Program with symbols
-	// Use the check function which returns a Module and diagnostics
-	module, diagnostics := check(program, nil, path, path, CheckOptions{})
-	if len(diagnostics) > 0 {
-		// For now, we'll continue even with diagnostics
-		// In a production system, you might want to handle this differently
-
-	}
-
+	// Type check the program to create a Program with symbols.
+	//
+	// Load-time diagnostics are deliberately not surfaced here (issue #350):
+	// the embedded standard library ships with the compiler and is validated
+	// at compiler build time by TestEmbeddedStdLibModulesCheckCleanly, so
+	// importers trust it rather than re-reporting its internals. Every other
+	// imported Ard module — project-owned and dependencies alike — is
+	// re-validated at check time with diagnostics attributed to the module
+	// (see the user-module import path in checker.go).
+	module, _ := check(program, nil, path, path, CheckOptions{})
 	return module, true
 }
 

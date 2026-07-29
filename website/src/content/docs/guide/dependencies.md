@@ -122,3 +122,9 @@ They are resolved from the path in `ard.toml` and are not copied into the cache.
 ## FFI companions
 
 Dependency packages may own Go FFI companions, such as `ffi/*.go`. The compiler routes extern calls to the package that declares them, so a dependency can provide both its Ard API and host-language implementation.
+
+## Validation
+
+Every imported Ard module is type-checked by your compiler when it is loaded — project-owned modules and dependencies alike — and any diagnostics are reported against the module's own source. If a dependency reports errors you did not write, it usually means the dependency has not been updated for your compiler version; pin an older compatible tag or update the dependency.
+
+The standard library is the one exception: it ships inside the compiler and is validated when the compiler itself is built, so imports never re-report its internals.
