@@ -1,7 +1,11 @@
+use ard/list as List
+
 use go:fmt
 
 fn main() {
-  let numbers: mut [Int] = mut []
+  // List::new<T>() names the element type, so the binding needs no
+  // annotation; `mut` references the fresh empty list for interior mutation.
+  let numbers = mut List::new<Int>()
   fmt::Println("numbers.size = {numbers.size()}")
 
   fmt::Println("adding numbers from 0 to 10")

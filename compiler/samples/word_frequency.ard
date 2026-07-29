@@ -1,3 +1,6 @@
+use ard/list
+use ard/map
+
 use go:bufio
 use go:fmt
 use go:os
@@ -9,13 +12,13 @@ struct WordCount {
 }
 
 fn count_words(words: [Str]) [WordCount] {
-  let counts: mut [Str: Int] = mut [:]
+  let counts = mut map::new<Int>()
 
   for word in words {
     counts.set(word, counts.get(word).or(0) + 1)
   }
 
-  let res: mut [WordCount] = mut []
+  let res = mut list::new<WordCount>()
   for word, count in counts {
     res.push(WordCount{word: word, count: count})
   }

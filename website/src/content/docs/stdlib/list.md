@@ -15,12 +15,23 @@ use ard/list
 
 ### `new() [$T]`
 
-Create a new empty list. The expected type is usually inferred from context.
+Create a new empty list. The expected type is usually inferred from context, or
+named with an explicit type argument.
 
 ```ard
 use ard/list
 
 let nums: [Int] = list::new()
+```
+
+An explicit type argument composes with `mut` to start an empty mutable list
+without a binding annotation:
+
+```ard
+use ard/list
+
+let items = mut list::new<Int>()
+items.push(1)
 ```
 
 ### `concat(a: [$T], b: [$T]) [$T]`
