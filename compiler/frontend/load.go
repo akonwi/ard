@@ -49,6 +49,7 @@ func LoadModule(inputPath string) (*LoadResult, error) {
 	// closure before binding imports, so all Go types share a single
 	// go/types universe (ADR 0044).
 	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
+	goResolver.DependencyModuleRoots = checker.DependencyGoModuleRoots(projectInfo)
 	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{GoResolver: goResolver})
 	c.Check()
 	if c.HasErrors() {

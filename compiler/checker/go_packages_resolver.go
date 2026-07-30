@@ -11,11 +11,17 @@ import (
 )
 
 type GoPackagesResolver struct {
-	ProjectRoot   string
-	BuildTags     []string
-	modulePath    string
-	modulePathErr error
-	cache         map[string]goPackageResolveResult
+	ProjectRoot string
+	BuildTags   []string
+	// DependencyModuleRoots maps a dependency's Go module path to the local
+	// directory backing it (its locked git checkout). Injected as go.mod
+	// replace directives during resolution so a dependency's Go FFI resolves
+	// at the same commit as its Ard source rather than whatever the consuming
+	// project's go.mod pins (#353).
+	DependencyModuleRoots map[string]string
+	modulePath            string
+	modulePathErr         error
+	cache                 map[string]goPackageResolveResult
 	// primed marks that the whole-program import pre-scan has loaded every
 	// Go package into one shared go/types universe (ADR 0044). After
 	// priming, a cache miss means the pre-scan failed to collect a path,
@@ -158,7 +164,69 @@ func (r *GoPackagesResolver) loadConfig() *packages.Config {
 	if len(r.BuildTags) > 0 {
 		cfg.BuildFlags = []string{"-tags=" + strings.Join(r.BuildTags, ",")}
 	}
+	if overlay := r.dependencyReplaceOverlay(); overlay != nil {
+		cfg.Overlay = overlay
+	}
 	return cfg
+}
+
+// dependencyReplaceOverlay synthesizes a go.mod overlay that redirects each
+// dependency's Go module to its locked checkout via a replace directive, so
+// go/packages resolves a dependency's FFI at the same commit as its Ard source
+// (#353). It returns nil when there is nothing to redirect or no project
+// go.mod to overlay. The user's on-disk go.mod is never modified.
+func (r *GoPackagesResolver) dependencyReplaceOverlay() map[string][]byte {
+	if len(r.DependencyModuleRoots) == 0 || r.ProjectRoot == "" {
+		return nil
+	}
+	goModPath := filepath.Join(r.ProjectRoot, "go.mod")
+	data, err := os.ReadFile(goModPath)
+	if err != nil {
+		return nil
+	}
+	file, err := modfile.Parse("go.mod", data, nil)
+	if err != nil {
+		return nil
+	}
+	changed := false
+	for modulePath, dir := range r.DependencyModuleRoots {
+		if modulePath == "" || dir == "" {
+			continue
+		}
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			continue
+		}
+		// A local replace needs the module to be required to enter the build
+		// graph; add a placeholder require when the consumer's go.mod omits it.
+		if !moduleRequired(file, modulePath) {
+			if err := file.AddRequire(modulePath, "v0.0.0"); err != nil {
+				continue
+			}
+		}
+		if err := file.AddReplace(modulePath, "", absDir, ""); err != nil {
+			continue
+		}
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	file.Cleanup()
+	formatted, err := file.Format()
+	if err != nil {
+		return nil
+	}
+	return map[string][]byte{goModPath: formatted}
+}
+
+func moduleRequired(file *modfile.File, modulePath string) bool {
+	for _, require := range file.Require {
+		if require.Mod.Path == modulePath {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *GoPackagesResolver) packageFromLoadResult(path string, pkg *packages.Package) (*GoPackage, error) {
@@ -172,6 +240,39 @@ func (r *GoPackagesResolver) packageFromLoadResult(path string, pkg *packages.Pa
 		return nil, fmt.Errorf("package has no type information")
 	}
 	return goPackageFromTypesPackage(path, pkg.Types), nil
+}
+
+// DependencyGoModuleRoots maps each git-sourced dependency's Go module path to
+// its locked checkout directory, so a dependency's Go FFI resolves from the
+// same commit as its Ard source instead of whatever the consuming project's
+// go.mod pins (#353). Dependencies without a Go module (pure-Ard, no FFI) are
+// omitted. Path dependencies are excluded: their Go module already resolves
+// from the same local directory as their Ard source, so they cannot drift.
+func DependencyGoModuleRoots(info *ProjectInfo) map[string]string {
+	if info == nil {
+		return nil
+	}
+	roots := map[string]string{}
+	add := func(git, root string) {
+		if git == "" || root == "" {
+			return
+		}
+		modulePath, err := readGoModulePath(root)
+		if err != nil || modulePath == "" {
+			return
+		}
+		roots[modulePath] = root
+	}
+	for _, dep := range info.Dependencies {
+		add(dep.Git, dep.RootPath)
+	}
+	for _, pkg := range info.Packages {
+		add(pkg.Git, pkg.RootPath)
+	}
+	if len(roots) == 0 {
+		return nil
+	}
+	return roots
 }
 
 func readGoModulePath(projectRoot string) (string, error) {

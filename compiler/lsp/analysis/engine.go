@@ -155,6 +155,7 @@ func (e *Engine) goResolverFor(projectInfo *checker.ProjectInfo, goPaths []strin
 	}
 	sort.Strings(union)
 	resolver := checker.NewGoPackagesResolver(root, tags)
+	resolver.DependencyModuleRoots = checker.DependencyGoModuleRoots(projectInfo)
 	// Prime on a fresh resolver cannot fail: load-level failures (for
 	// example an unreadable go.mod) are recorded per path and surface as
 	// diagnostics at each Go import.
