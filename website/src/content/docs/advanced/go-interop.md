@@ -336,29 +336,6 @@ fn request_path_or_default(req: mut gohttp::Request) Str {
 
 `unsafe` recovers panics in the same goroutine and converts them to `Str` errors. It does not undo partial mutation, and `break` is currently rejected inside unsafe blocks.
 
-## Migrating older interop code
-
-Older Ard code could implicitly borrow writable bindings or snapshot pointer values. Make the intended boundary explicit:
-
-```ard
-// Go pointer/slice/map parameter
-// before: ffi::Mutate(value)
-ffi::Mutate(mut value)
-
-// Go value destination from a pointer result
-// before: let item: ffi::Item = ffi::NewItem()
-let pointer = ffi::NewItem()
-let item: ffi::Item = deref pointer
-
-// Explicitly value-shaped Go generic
-let copied = ffi::Identity<ffi::Item>(deref pointer)
-
-// Interface value instead of pointer identity
-ffi::SaveReader(deref pointer)
-```
-
-Pass `pointer` without `deref` when Go should receive or infer the pointer itself.
-
 ## Current Limits
 
 Direct Go interop is intentionally incremental. Current limitations include:

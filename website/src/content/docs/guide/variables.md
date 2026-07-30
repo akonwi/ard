@@ -157,39 +157,6 @@ context.tree = mut other // rebinds the field's reference slot
 
 The containing value must itself be reached through a reference to rebind a reference-valued field. Reading or mutating the referenced tree does not require the field's binding slot to be reassignable.
 
-## Migrating older reference code
-
-Older Ard code could implicitly borrow mutable bindings or silently turn references into values. Make both boundaries explicit:
-
-```ard
-// Reference parameter
-// before: update(user)
-update(mut user)
-
-// Value binding
-// before: let copy: User = reference
-let copy: User = deref reference
-
-// Value argument
-// before: consume(reference)
-consume(deref reference)
-
-// Value return
-fn snapshot(reference: mut User) User { deref reference }
-
-// Value field or container element
-let holder = Holder{user: deref reference}
-let users: [User] = [deref reference]
-
-// Explicitly value-shaped Go generic call
-ffi::Identity<User>(deref reference)
-
-// Referent-value comparison through a comparable field
-let equal_name = (deref left).name == (deref right).name
-```
-
-Use an existing reference directly when identity should flow through a binding, field, parameter, return, container, or inferred generic.
-
 ## Shadowing
 
 Redeclaring a name in the same scope creates a new binding:
