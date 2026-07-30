@@ -15,6 +15,11 @@ func TestParseSemver(t *testing.T) {
 		{"1.2.3", Semver{1, 2, 3}, false},
 		{"0.1", Semver{0, 1, 0}, false},
 		{"v1.0", Semver{1, 0, 0}, false},
+		// pre-release and build suffixes are tolerated and dropped
+		{"0.33.0-rc1", Semver{0, 33, 0}, false},
+		{"v0.33.0-rc1", Semver{0, 33, 0}, false},
+		{"v0.33.0-rc.2", Semver{0, 33, 0}, false},
+		{"1.2.3+build.5", Semver{1, 2, 3}, false},
 		{"", Semver{}, true},
 		{"abc", Semver{}, true},
 		{"1.2.3.4", Semver{}, true},
@@ -115,6 +120,10 @@ func TestConstraintCheck(t *testing.T) {
 		// bare version = >=
 		{"0.13.0", "0.13.0", true},
 		{"0.13.0", "0.12.0", false},
+		// a release candidate satisfies constraints as its target version, so
+		// downstream projects can test the RC compiler against their ard.toml
+		{">= 0.1.0", "v0.33.0-rc1", true},
+		{">= 0.33.0", "0.33.0-rc1", true},
 	}
 
 	for _, tt := range tests {
@@ -171,4 +180,24 @@ func TestCheckVersionWithRealVersion(t *testing.T) {
 			t.Fatal("expected bare version check to fail")
 		}
 	})
+}
+
+// TestCheckVersionWithReleaseCandidate pins that a release-candidate compiler
+// build (version injected verbatim from the git tag, e.g. "v0.33.0-rc1") still
+// resolves ard.toml constraints instead of failing to parse its own version.
+func TestCheckVersionWithReleaseCandidate(t *testing.T) {
+	original := Version
+	defer func() { Version = original }()
+
+	Version = "v0.33.0-rc1"
+
+	if err := CheckVersion(">= 0.1.0"); err != nil {
+		t.Fatalf("expected rc build to satisfy constraint: %v", err)
+	}
+	if err := CheckVersion(">= 0.33.0"); err != nil {
+		t.Fatalf("expected rc build to satisfy its target-version constraint: %v", err)
+	}
+	if err := CheckVersion(">= 0.34.0"); err == nil {
+		t.Fatal("expected rc build to fail a constraint above its target version")
+	}
 }

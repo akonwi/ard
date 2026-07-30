@@ -47,9 +47,16 @@ func (v Semver) Compare(other Semver) int {
 	return Equal
 }
 
-// ParseSemver parses a version string like "0.13.0" or "v0.13.0".
+// ParseSemver parses a version string like "0.13.0" or "v0.13.0". A semver
+// pre-release ("-rc1") or build-metadata ("+meta") suffix is tolerated and
+// dropped: the constraint checker only compares MAJOR.MINOR.PATCH, so a
+// release-candidate build like "v0.33.0-rc1" is treated as its target
+// version "0.33.0" rather than failing to parse.
 func ParseSemver(s string) (Semver, error) {
 	s = strings.TrimPrefix(s, "v")
+	if i := strings.IndexAny(s, "-+"); i >= 0 {
+		s = s[:i]
+	}
 	parts := strings.Split(s, ".")
 
 	if len(parts) < 2 || len(parts) > 3 {
