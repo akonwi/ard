@@ -111,7 +111,7 @@ func TestConfiguredGoResolverProvidesPointerForeignMethods(t *testing.T) {
 	checkWithRecordingGoResolver(t, `use go:example.com/ffi as ffi
 
 fn main() {
-  mut counter = ffi::NewCounter()
+  let counter = mut ffi::NewCounter()
   counter.Reset()
 }`)
 }

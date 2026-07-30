@@ -13,9 +13,6 @@ type SymbolTable struct {
 	// for scopes that expect a return value
 	returnType Type
 
-	// isolated means only read-only references in outer scopes are allowed
-	isolated bool
-
 	// inLoop marks a loop body scope; break statements bind to the nearest
 	// enclosing loop within the current function
 	inLoop bool
@@ -83,12 +80,7 @@ func (st SymbolTable) get(name string) (*Symbol, bool) {
 	}
 
 	if st.parent != nil {
-		got, ok := st.parent.get(name)
-		// for isolated scopes, only read-only references are allowed
-		if ok && st.isolated && got.mutable {
-			return nil, false
-		}
-		return got, ok
+		return st.parent.get(name)
 	}
 	return nil, false
 }
@@ -171,10 +163,6 @@ func (st *SymbolTable) insideScript() bool {
 	return false
 }
 
-func (st *SymbolTable) isolate() {
-	st.isolated = true
-}
-
 // Generic context methods
 func (st *SymbolTable) createGenericScope(genericParams []string) *SymbolTable {
 	gc := make(GenericContext)
@@ -191,7 +179,6 @@ func (st *SymbolTable) createGenericScope(genericParams []string) *SymbolTable {
 	return &SymbolTable{
 		parent:         st,
 		symbols:        make(map[string]*Symbol),
-		isolated:       false,
 		genericContext: &gc,
 		genericOrigins: make(map[string]genericBindingOrigin),
 	}

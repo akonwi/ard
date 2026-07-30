@@ -36,9 +36,40 @@ fn main() {
 ```
 
 Because `start` returns nothing, you coordinate with a channel rather than a
-return value. Spawned closures follow Go's semantics: they capture by reference,
-and there is no isolation rule — shared state is coordinated through channels and
-data races are your responsibility.
+return value. Task functions use ordinary closure capture rules. They may
+capture existing references, explicitly borrow outer storage, and rebind outer
+writable reference slots.
+
+```ard
+use ard/async
+use go:fmt
+
+struct Counter { value: Int }
+
+fn main() {
+  let counter = Counter{value: 0}
+  let reference = mut counter
+  let done = Chan::new<Bool>()
+
+  async::start(fn() {
+    reference.value = 1
+    done.send(true)
+  })
+
+  done.recv().expect("done") // synchronizes before the read below
+  fmt::Println(counter.value)
+}
+```
+
+Capturing an existing reference copies its current handle, so both goroutines
+share the pointee. Explicitly borrowing outer storage or rebinding an outer
+writable binding captures the required binding slot. Go's escape analysis gives
+captured storage a sufficient lifetime.
+
+Ard does not add synchronization or data-race protection. Concurrent access
+with at least one write must be ordered through a channel, mutex, atomic
+operation, or another Go-compatible synchronization mechanism. Unsynchronized
+conflicting access is a data race, just as it is in Go.
 
 ## Coordinating with channels
 
@@ -72,20 +103,21 @@ that replaces a result-returning task: start the work, then receive its value.
 
 ```ard
 use ard/async
+use go:fmt
 
 fn compute() Int {
   // ... expensive work ...
   42
 }
 
-fn main() Int {
+fn main() {
   let result = Chan::new<Int>()
 
   async::start(fn() {
     result.send(compute())
   })
 
-  result.recv().or(0)
+  fmt::Println(result.recv().or(0))
 }
 ```
 
@@ -96,9 +128,9 @@ once per goroutine:
 
 ```ard
 use ard/async
-use ard/list as List
+use go:fmt
 
-fn main() Int {
+fn main() {
   let inputs = [1, 2, 3, 4]
   let results = Chan::new<Int>(inputs.size())
 
@@ -112,7 +144,7 @@ fn main() Int {
   for _ in inputs {
     total = total + results.recv().or(0)
   }
-  total // 30
+  fmt::Println(total) // 30
 }
 ```
 
@@ -123,8 +155,9 @@ until `recv()` returns `none`, the closed-and-drained signal:
 
 ```ard
 use ard/async
+use go:fmt
 
-fn main() Int {
+fn main() {
   let jobs = Chan::new<Int>()
 
   async::start(fn() {
@@ -142,7 +175,7 @@ fn main() Int {
       _ => { draining = false },
     }
   }
-  total // 6
+  fmt::Println(total) // 6
 }
 ```
 
@@ -201,7 +234,7 @@ naturally as a `select` arm:
 ```ard
 use go:time
 
-fn main() Int {
+fn wait_for_work() Int {
   let work = Chan::new<Int>()
   // ... a goroutine may eventually send on `work` ...
 

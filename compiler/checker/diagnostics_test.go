@@ -1157,48 +1157,39 @@ func TestGoNamedArgumentHasStructuredDiagnostic(t *testing.T) {
 	}
 }
 
-func TestImmutableMutableReferenceHasStructuredLabels(t *testing.T) {
-	result := parse.Parse([]byte("let counter = 0\nlet r = mut counter\n"), "main.ard")
+func TestExplicitReferenceToLetStorageHasNoDiagnostic(t *testing.T) {
+	result := parse.Parse([]byte("let counter = 0\nlet reference = mut counter\n"), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	declaration := result.Program.Statements[0].(*parse.VariableDeclaration)
-	borrow := result.Program.Statements[1].(*parse.VariableDeclaration)
-	operand := borrow.Value.(*parse.MutRef).Operand
-
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
-	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeImmutableMutableReference)
-	if diagnostic.Primary.Span.Location != operand.GetLocation() || diagnostic.Primary.Message != "`counter` is immutable" {
-		t.Fatalf("primary = %#v", diagnostic.Primary)
-	}
-	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation || diagnostic.Secondary[0].Message != "this binding is immutable" {
-		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	if c.HasErrors() {
+		t.Fatalf("diagnostics = %#v, want addressable let storage to be borrowable", c.Diagnostics())
 	}
 }
 
-func TestReferenceRebindingHasStructuredLabels(t *testing.T) {
-	source := "mut first = 1\nmut second = 2\nlet ref = mut first\nref = mut second\n"
+func TestImmutableReferenceSlotRebindingPointsToDeclaration(t *testing.T) {
+	source := "let first = 1\nlet second = 2\nlet ref = mut first\nref = mut second\n"
 	result := parse.Parse([]byte(source), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
 	declaration := result.Program.Statements[2].(*parse.VariableDeclaration)
-	assignment := result.Program.Statements[3].(*parse.VariableAssignment)
 
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
-	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeReferenceRebinding)
-	if diagnostic.Primary.Span.Location != assignment.Value.GetLocation() || diagnostic.Primary.Message != "this value would rebind the reference" {
-		t.Fatalf("primary = %#v", diagnostic.Primary)
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one immutable-slot error", c.Diagnostics())
 	}
-	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {
-		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	diagnostic := c.Diagnostics()[0]
+	if diagnostic.Kind != checker.Error || len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {
+		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
 }
 
-func TestUnreachableReferentAssignmentHasStructuredLabels(t *testing.T) {
-	source := "mut items = [1: 2]\nlet ref = mut items\nref = [9: 9]\n"
+func TestWholeReferentAssignmentPointsToReferenceDeclaration(t *testing.T) {
+	source := "let items = [1: 2]\nmut ref = mut items\nref = [9: 9]\n"
 	result := parse.Parse([]byte(source), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
@@ -1208,8 +1199,11 @@ func TestUnreachableReferentAssignmentHasStructuredLabels(t *testing.T) {
 
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
-	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeUnreachableReferentAssignment)
-	if diagnostic.Primary.Span.Location != assignment.Target.GetLocation() || len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {
+	if len(c.Diagnostics()) != 1 {
+		t.Fatalf("diagnostics = %#v, want one whole-referent error", c.Diagnostics())
+	}
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeWholeReferentAssignment)
+	if diagnostic.Kind != checker.Error || diagnostic.Primary.Span.Location != assignment.Target.GetLocation() || len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {
 		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
 }
@@ -1225,8 +1219,10 @@ func TestImmutablePropertyAssignmentHasStructuredLabels(t *testing.T) {
 
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
-	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeImmutablePropertyAssignment)
-	if diagnostic.Primary.Span.Location != assignment.Target.GetLocation() || diagnostic.Primary.Message != "`box.value` is immutable" {
+	// A field write on an ordinary value reports the ADR 0057 interior
+	// mutation diagnostic with the same structured labels.
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeValueInteriorMutation)
+	if diagnostic.Primary.Span.Location != assignment.Target.GetLocation() || diagnostic.Primary.Message != "`box.value` holds an ordinary value" {
 		t.Fatalf("primary = %#v", diagnostic.Primary)
 	}
 	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {
@@ -1234,8 +1230,8 @@ func TestImmutablePropertyAssignmentHasStructuredLabels(t *testing.T) {
 	}
 }
 
-func TestImmutableMutatingReceiverHasStructuredLabels(t *testing.T) {
-	result := parse.Parse([]byte("let values = [1]\nvalues.push(2)\n"), "main.ard")
+func TestOrdinaryMutableBindingReceiverRequiresReference(t *testing.T) {
+	result := parse.Parse([]byte("mut values = [1]\nvalues.push(2)\n"), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
@@ -1243,12 +1239,135 @@ func TestImmutableMutatingReceiverHasStructuredLabels(t *testing.T) {
 
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
-	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeImmutableReceiver)
-	if diagnostic.Primary.Message != "`.push()` requires a mutable receiver" {
-		t.Fatalf("primary = %#v", diagnostic.Primary)
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeValueInteriorMutation)
+	if diagnostic.Title != "Mutating method requires a reference" || diagnostic.Primary.Message != "`.push()` requires an actual reference receiver" || strings.Contains(strings.ToLower(diagnostic.Text), "immutable") {
+		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
 	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.NameLocation {
 		t.Fatalf("secondary = %#v", diagnostic.Secondary)
+	}
+}
+
+func TestReferenceDestinationRequiresActualReference(t *testing.T) {
+	source := "struct Box { value: Int }\nlet value = Box{value: 1}\nlet reference: mut Box = value\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeReferenceDestination)
+	if diagnostic.Title != "Reference destination requires a reference" || !strings.Contains(diagnostic.Text, "explicit `mut`") {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestReferenceParameterRequiresActualReference(t *testing.T) {
+	source := "struct Box { value: Int }\nfn take(value: mut Box) {}\nlet box = Box{value: 1}\ntake(box)\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeReferenceDestination)
+	if diagnostic.Title != "Reference parameter requires a reference" || len(diagnostic.Secondary) != 1 {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestReferenceValueDestinationSuggestsDeref(t *testing.T) {
+	source := "struct Box { value: Int }\nlet value = Box{value: 1}\nlet reference = mut value\nlet snapshot: Box = reference\n"
+	result := parse.Parse([]byte(source), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeReferenceValueMaterialization)
+	if diagnostic.Title != "Value destination requires deref" || !strings.Contains(diagnostic.Text, "shallow value copy") {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
+func TestReferenceHintsRequireCompatibleReferentTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		source   string
+		rejected checker.DiagnosticCode
+	}{
+		{
+			name:     "deref does not fix incompatible value destination",
+			source:   "let count = 1\nlet reference = mut count\nlet text: Str = reference\n",
+			rejected: checker.DiagnosticCodeReferenceValueMaterialization,
+		},
+		{
+			name:     "mut does not fix incompatible reference parameter",
+			source:   "struct Box { value: Int }\nfn take(value: mut Box) {}\ntake(\"wrong\")\n",
+			rejected: checker.DiagnosticCodeReferenceDestination,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := parse.Parse([]byte(test.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			if len(c.Diagnostics()) == 0 {
+				t.Fatal("expected diagnostic")
+			}
+			for _, diagnostic := range c.Diagnostics() {
+				if diagnostic.Code == test.rejected {
+					t.Fatalf("incompatible referent received misleading diagnostic: %#v", diagnostic)
+				}
+			}
+		})
+	}
+}
+
+func TestWholeReferentDiagnosticsCoverScalarStructAndFieldWrites(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{name: "scalar", source: "let value = 1\nmut reference = mut value\nreference = 2\n"},
+		{name: "struct", source: "struct Box { value: Int }\nlet value = Box{value: 1}\nmut reference = mut value\nreference = Box{value: 2}\n"},
+		{name: "reference field", source: "struct Box { value: Int }\nstruct Holder { current: mut Box }\nlet value = Box{value: 1}\nlet holder = mut Holder{current: mut value}\nholder.current = Box{value: 2}\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := parse.Parse([]byte(test.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeWholeReferentAssignment)
+		})
+	}
+}
+
+func TestBorrowAndDerefFailuresUseDistinctDiagnostics(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		code   checker.DiagnosticCode
+	}{
+		{name: "non-addressable borrow", source: "struct Box { value: Int }\nfn make() Box { Box{value: 1} }\nlet reference = mut make().value\n", code: checker.DiagnosticCodeNonAddressableBorrow},
+		{name: "ordinary deref operand", source: "let value = 1\nlet snapshot = deref value\n", code: checker.DiagnosticCodeInvalidDerefOperand},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := parse.Parse([]byte(test.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+			requireDiagnosticCode(t, c.Diagnostics(), test.code)
+		})
 	}
 }
 
@@ -1313,8 +1432,8 @@ func TestImmutableAssignmentUsesInnermostBindingProvenance(t *testing.T) {
 	}
 }
 
-func TestMutableArgumentMismatchPointsToParameter(t *testing.T) {
-	result := parse.Parse([]byte("fn bump(value: mut Int) {}\nlet value = 1\nbump(value)\n"), "main.ard")
+func TestReferenceArgumentMismatchPointsToParameter(t *testing.T) {
+	result := parse.Parse([]byte("fn bump(value: mut Int) {}\nmut value = 1\nbump(value)\n"), "main.ard")
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
@@ -1323,17 +1442,14 @@ func TestMutableArgumentMismatchPointsToParameter(t *testing.T) {
 	c := checker.New("main.ard", result.Program, nil)
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
-		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())
+		t.Fatalf("diagnostics = %#v, want one reference-required error", c.Diagnostics())
 	}
 	diagnostic := c.Diagnostics()[0]
-	if diagnostic.Code != checker.DiagnosticCodeIncorrectArgumentType || diagnostic.Primary.Message != "this argument is not mutable" {
+	if diagnostic.Kind != checker.Error {
 		t.Fatalf("diagnostic = %#v", diagnostic)
 	}
 	if len(diagnostic.Secondary) != 1 || diagnostic.Secondary[0].Span.Location != declaration.Parameters[0].GetLocation() {
-		t.Fatalf("secondary = %#v, want mutable parameter", diagnostic.Secondary)
-	}
-	if diagnostic.Secondary[0].Message != "parameter `value` requires a mutable `Int`" {
-		t.Fatalf("secondary label = %q", diagnostic.Secondary[0].Message)
+		t.Fatalf("secondary = %#v, want reference parameter", diagnostic.Secondary)
 	}
 }
 

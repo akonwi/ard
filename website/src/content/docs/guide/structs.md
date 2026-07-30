@@ -138,8 +138,7 @@ impl Person {
 }
 ```
 
-This method signature signals helps the compiler enforce the immutability constraints.
-Mutating methods can only be called on mutable instances.
+This signature lets the compiler require an actual `mut Person` reference receiver. A writable ordinary binding is not enough: `mut bob = Person{...}` permits replacing `bob`, but it still stores an ordinary value.
 
 ```ard
 struct Person {
@@ -153,12 +152,33 @@ impl Person {
   }
 }
 
-mut bob = Person{name: "Bob", age: 30}
-bob.grow_older() // Ok
+let bob = Person{name: "Bob", age: 30}
+let bob_reference = mut bob
+bob_reference.grow_older() // OK
 
-let alice = Person{name: "Alice", age: 30}
-// alice.grow_older() would be an error: cannot mutate immutable 'alice'
+mut alice = Person{name: "Alice", age: 30}
+// alice.grow_older() // Error: alice stores an ordinary Person
+alice = Person{name: "Alice", age: 31} // OK: replaces alice's slot
 ```
+
+## Reference-valued fields
+
+A field typed as `mut T` stores a reference handle. Initialization and rebinding require actual references:
+
+```ard
+struct Session {
+  user: mut Person,
+}
+
+let first = Person{name: "Ada", age: 30}
+let second = Person{name: "Grace", age: 35}
+let session = mut Session{user: mut first}
+
+session.user.grow_older()
+session.user = mut second
+```
+
+Copying `session.user` copies its current reference handle. Rebinding the field changes only that field slot; previously copied references keep their original pointee. Use `deref session.user` when an ordinary `Person` field or value is required.
 
 ## Method Privacy
 

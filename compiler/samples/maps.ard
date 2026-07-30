@@ -1,7 +1,7 @@
 use go:fmt
 
 fn main() {
-  mut nums_to_str = [1: "one"]
+  let nums_to_str = mut [1: "one"]
   fmt::Println("size is {nums_to_str.size().to_str()}")
 
   for n in 2..5 {

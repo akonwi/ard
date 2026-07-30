@@ -20,8 +20,8 @@ fn pass_value(value: $T) {
 }
 
 fn main() {
-  mut user = User{}
-  pass_reference(user)
+  let user = User{}
+  pass_reference(mut user)
   pass_value(user)
 }
 `)

@@ -8,6 +8,12 @@ Amended: native Ard mutable list references include the list descriptor and lowe
 pointer-shaped on the Go target. Descriptor-only mutable access is retained at
 foreign Go ABI boundaries whose signatures require a slice value.
 
+Superseded in part by ADR 0057. Binding mutability must not select a reference
+representation, native list pointer shape supports sanctioned interior methods
+rather than whole-list assignment, and all references follow pointer-copy/rebind
+behavior even when descriptor or trait forwarding requires a specialized
+handle.
+
 ## Context
 
 Ard uses `mut` to express mutable access. In earlier Go lowering, mutable parameters were often treated as Go pointer parameters. That is correct for some values, such as structs or scalars whose storage must be mutated through an address, but it is not correct as a universal rule.

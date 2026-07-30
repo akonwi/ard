@@ -836,6 +836,12 @@ func (p *parser) enumDef(private bool) Statement {
 
 	p.match(new_line)
 	for !p.match(right_brace) {
+		// Stop at end of input so a missing '}' cannot loop or pass silently
+		// (issue #349).
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected '}' to close enum")
+			break
+		}
 		// Parse and collect comments
 		if c := p.parseInlineComment(); c != nil {
 			enum.Comments = append(enum.Comments, *c)
@@ -2143,6 +2149,11 @@ func (p *parser) selectExpr() (Expression, error) {
 	}
 
 	for !p.match(right_brace) {
+		// Stop at end of input so a missing '}' cannot loop forever (issue #349).
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected '}' to close select")
+			break
+		}
 		if c := p.parseInlineComment(); c != nil {
 			sel.Comments = append(sel.Comments, *c)
 			p.match(new_line)
@@ -2970,6 +2981,11 @@ func (p *parser) parseStructFields(name *Identifier) (*StructInstance, error) {
 	p.match(new_line)
 
 	for !p.match(right_brace) {
+		// Stop at end of input so a missing '}' cannot loop forever (issue #349).
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected '}' to close struct literal")
+			break
+		}
 		// Parse and collect comments between properties
 		if c := p.parseInlineComment(); c != nil {
 			instance.Comments = append(instance.Comments, *c)
@@ -3264,6 +3280,27 @@ func (p *parser) multiplication() (Expression, error) {
 }
 
 func (p *parser) unary() (Expression, error) {
+	// A keyword remains usable as a namespace/member name when `::` makes that
+	// role unambiguous (for example, `deref::new()`).
+	if p.check(deref) && p.peek2().kind == colon_colon {
+		p.tokens[p.index].kind = identifier
+		p.tokens[p.index].text = "deref"
+		return p.memberAccess()
+	}
+	if p.match(deref) {
+		keyword := p.previous()
+		operand, err := p.unary()
+		if err != nil {
+			return nil, err
+		}
+		return &Deref{
+			Location: Location{
+				Start: keyword.getLocation().Start,
+				End:   operand.GetLocation().End,
+			},
+			Operand: operand,
+		}, nil
+	}
 	if p.match(mut) {
 		mutToken := p.previous()
 		// In a value position, parse the operand through structInstance() so a
@@ -3878,6 +3915,11 @@ func (p *parser) list() (Expression, error) {
 	items := []Expression{}
 	comments := []Comment{}
 	for !p.match(right_bracket) {
+		// Stop at end of input so a missing ']' cannot loop forever (issue #349).
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected ']' to close list")
+			break
+		}
 		// Parse and collect comments
 		if c := p.parseInlineComment(); c != nil {
 			comments = append(comments, *c)
@@ -3938,6 +3980,11 @@ func (p *parser) map_() (Expression, error) {
 	}
 
 	for !p.match(right_bracket) {
+		// Stop at end of input so a missing ']' cannot loop forever (issue #349).
+		if p.isAtEnd() {
+			p.addError(p.peek(), "Expected ']' to close map")
+			break
+		}
 		// Parse and collect comments
 		if c := p.parseInlineComment(); c != nil {
 			node.Comments = append(node.Comments, *c)
@@ -4082,7 +4129,7 @@ func (p *parser) isAllowedIdentifierKeyword(k kind) bool {
 
 func (p *parser) isKeyword(k kind) bool {
 	switch k {
-	case and, not, or, true_, false_, struct_, enum, impl, trait, fn, let, mut,
+	case and, not, or, true_, false_, struct_, enum, impl, trait, fn, let, mut, deref,
 		break_, match, select_, while_, for_, use, as, in, if_, else_, type_, private, defer_:
 		return true
 	default:

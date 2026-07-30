@@ -93,7 +93,7 @@ fn read(c: mut ffi::StateCtx) {
 			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Go function ffi::StateValue expects 1 type argument(s), got 2"}},
 		},
 		{
-			name: "infer value binding from a mut reference argument",
+			name: "inferred generic preserves reference and explicit value generic dereferences",
 			input: `use go:example.com/app/ffi
 
 struct DemoState {
@@ -102,24 +102,24 @@ struct DemoState {
 
 fn copy_state(c: mut ffi::StateCtx, c2: mut ffi::StateCtx) {
   let state = ffi::StateRef<DemoState>(c)
-  // T infers to DemoState (a value), not mut DemoState: the callee gets a copy.
-  ffi::StateSet(c2, state)
-  let echoed = ffi::Identity(state)
+  let echoed: mut DemoState = ffi::Identity(state)
+  let snapshot: DemoState = ffi::Identity<DemoState>(deref state)
+  ffi::StateSet(c2, snapshot)
   let ticks: Int = echoed.ticks
 }`,
 		},
 		{
-			name: "reject mut binding of a Go pointer result",
+			name: "mutable binding may rebind a Go pointer result",
 			input: `use go:example.com/app/ffi
 
 struct DemoState {
   ticks: Int,
 }
 
-fn bump(c: mut ffi::StateCtx) {
+fn bump(c: mut ffi::StateCtx, other: mut ffi::StateCtx) {
   mut state = ffi::StateRef<DemoState>(c)
+  state = ffi::StateRef<DemoState>(other)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "A mut reference from a Go call must be bound with let; rebinding it is not supported"}},
 		},
 		{
 			name: "enforce Go constraints on type args",

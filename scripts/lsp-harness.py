@@ -193,9 +193,9 @@ def definition(line, char, label, want_line=None):
             ok = l0["range"]["start"]["line"] == want_line
     record(f"definition {label} ({line}:{char})", ok, ms, detail)
 
-definition(642, 5, "set_page call -> decl", want_line=33)   # set_page(c, page)
+definition(644, 4, "set_page call -> decl", want_line=33)   # set_page(c, page)
 definition(22, 7, "state var use -> decl")                   # state.ticks's state? line 23? use 22
-definition(1221, 9, "set_page in Actions binding", want_line=33)
+definition(1223, 8, "set_page in Actions binding", want_line=33)
 
 print("== references ==")
 msg, ms = request("textDocument/references", {

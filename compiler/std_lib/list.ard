@@ -6,45 +6,45 @@ fn new() [$T] {
 }
 
 fn concat(a: [$T], b: [$T]) [$T] {
-  mut res = a
+  let res = mut a
   for i in b {
     res.push(i)
   }
-  res
+  deref res
 }
 
 // returns a new list of the items, dropping the elements before the given index
 fn drop(from: [$T], till: Int) [$T] {
-  mut out: [$T] = []
+  let out = mut new<$T>()
   for t, idx in from {
     if idx >= till {
       out.push(t)
     }
   }
 
-  out
+  deref out
 }
 
 // given a list of items and a predicate, returns a new list of items matching the predicate
 fn keep(list: [$T], where: fn($T) Bool) [$T] {
-  mut out: [$T] = []
+  let out = mut new<$T>()
   for t in list {
     if where(t) {
       out.push(t)
     }
   }
 
-  out
+  deref out
 }
 
 // transforms a list of items using a given function
 fn map(list: [$A], transform: fn($A) $B) [$B] {
-  mut out: [$B] = []
+  let out = mut new<$B>()
   for t in list {
     out.push(transform(t))
   }
 
-  out
+  deref out
 }
 
 // look for the first item in a list matching the predicate
@@ -72,8 +72,8 @@ struct IntPartition {
 }
 
 fn partition(list: [$T], where: fn($T) Bool) Partition<$T> {
-  mut selected: [$T] = []
-  mut others: [$T] = []
+  let selected = mut new<$T>()
+  let others = mut new<$T>()
 
   for t in list {
     match where(t) {
@@ -82,12 +82,12 @@ fn partition(list: [$T], where: fn($T) Bool) Partition<$T> {
     }
   }
 
-  Partition{selected: selected, others: others}
+  Partition{selected: deref selected, others: deref others}
 }
 
 fn partition_int(list: [Int], where: fn(Int) Bool) IntPartition {
-  mut selected: [Int] = []
-  mut others: [Int] = []
+  let selected: mut [Int] = mut []
+  let others: mut [Int] = mut []
 
   for t in list {
     match where(t) {
@@ -96,7 +96,7 @@ fn partition_int(list: [Int], where: fn(Int) Bool) IntPartition {
     }
   }
 
-  IntPartition{selected: selected, others: others}
+  IntPartition{selected: deref selected, others: deref others}
 }
 
 test fn test_concat_combines_lists() Void!Str {
@@ -127,24 +127,18 @@ test fn test_drop_zero_returns_all_elements() Void!Str {
 
 test fn test_map_transforms_in_order() Void!Str {
   let nums = [1, 2, 3]
-  let doubled: [Int] = map(
-    nums,
-    fn(n: Int) Int {
-      n * 2
-    },
-  )
+  let doubled: [Int] = map(nums, fn(n: Int) Int {
+    n * 2
+  })
   try testing::assert(doubled.size() == 3, "map should preserve list size")
   try testing::assert(doubled.at(0).expect("bounds") == 2, "map should transform the first element")
   testing::assert(doubled.at(2).expect("bounds") == 6, "map should transform later elements too")
 }
 
 test fn test_find_returns_some_for_match() Void!Str {
-  let found = find(
-    [1, 2, 3, 4, 5],
-    fn(n: Int) Bool {
-      n == 3
-    },
-  )
+  let found = find([1, 2, 3, 4, 5], fn(n: Int) Bool {
+    n == 3
+  })
   match found {
     value => testing::assert(value == 3, "find should return the matching value"),
     _ => testing::fail("find should have returned some(3)"),
@@ -152,12 +146,9 @@ test fn test_find_returns_some_for_match() Void!Str {
 }
 
 test fn test_partition_splits_matching_and_other_values() Void!Str {
-  let parts = partition_int(
-    [1, 2, 3, 4, 5],
-    fn(n: Int) Bool {
-      n > 2
-    },
-  )
+  let parts = partition_int([1, 2, 3, 4, 5], fn(n: Int) Bool {
+    n > 2
+  })
   try testing::assert(parts.selected.size() == 3, "partition should collect matches")
   try testing::assert(parts.others.size() == 2, "partition should collect non-matches")
   try testing::assert(

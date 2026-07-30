@@ -122,11 +122,21 @@ func TestStructs(t *testing.T) {
 			},
 		},
 		{
-			name: "Can reassign to properties of mutable structs",
+			// Interior mutation flows through an actual reference (ADR 0057).
+			name: "Can reassign to properties through a struct reference",
 			input: fmt.Sprintf(`%s
-				mut p = Person{name: "Alice", age: 30, employed: true}
+				let p = mut Person{name: "Alice", age: 30, employed: true}
 				p.age = 31`, personStructInput),
 			diagnostics: []checker.Diagnostic{},
+		},
+		{
+			name: "Can't reassign to properties of ordinary struct values",
+			input: fmt.Sprintf(`%s
+						mut p = Person{name: "Alice", age: 30, employed: true}
+						p.age = 31`, personStructInput),
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Cannot mutate 'p.age': it is an ordinary value, not a reference"},
+			},
 		},
 		{
 			name: "Can't reassign to properties of immutable structs",
@@ -134,7 +144,7 @@ func TestStructs(t *testing.T) {
 						let p = Person{name: "Alice", age: 30, employed: true}
 						p.age = 31`, personStructInput),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Immutable: p.age"},
+				{Kind: checker.Error, Message: "Cannot mutate 'p.age': it is an ordinary value, not a reference"},
 			},
 		},
 		{
@@ -228,8 +238,8 @@ func TestMethods(t *testing.T) {
 					}
 				}`, shapeCode),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Immutable: self.width"},
-				{Kind: checker.Error, Message: "Immutable: self.height"},
+				{Kind: checker.Error, Message: "Cannot mutate 'self.width': it is an ordinary value, not a reference"},
+				{Kind: checker.Error, Message: "Cannot mutate 'self.height': it is an ordinary value, not a reference"},
 			},
 		},
 		{
@@ -246,7 +256,7 @@ func TestMethods(t *testing.T) {
 				let square = Shape{width: 5, height: 5}
 				square.resize(8,8)`, shapeCode),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate immutable 'square' with '.resize()'"},
+				{Kind: checker.Error, Message: "Cannot call mutating method 'square.resize': receiver is not a reference"},
 			},
 		},
 	})

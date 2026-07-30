@@ -583,7 +583,7 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 			if err != nil {
 				return nil, err
 			}
-			if field.Mutable {
+			if field.Mutable && !l.isReferenceType(field.Type) {
 				fieldType = &ast.StarExpr{X: fieldType}
 			}
 			fields = append(fields, &ast.Field{
@@ -641,11 +641,11 @@ func (l *lowerer) markedMutableTraitRefDecls() ([]ast.Decl, error) {
 		if !validTraitID(l.program, traitID) {
 			continue
 		}
-		decl, err := l.lowerMutableTraitRefDecl(l.program.Traits[traitID])
+		traitDecls, err := l.lowerMutableTraitRefDecl(l.program.Traits[traitID])
 		if err != nil {
 			return nil, err
 		}
-		decls = append(decls, decl)
+		decls = append(decls, traitDecls...)
 		l.emittedMutableTraitRefs[traitID] = true
 	}
 	return decls, nil
@@ -690,15 +690,33 @@ func (l *lowerer) lowerTraitObjectDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 	if ok {
 		decls = append(decls, interfaceDecl)
 	}
-	mutableDecl, err := l.lowerMutableTraitRefDecl(trait)
-	if err != nil {
-		return nil, err
-	}
-	decls = append(decls, mutableDecl)
-	if l.emittedMutableTraitRefs != nil {
-		l.emittedMutableTraitRefs[trait.ID] = true
+	// The mutable-handle machinery (handle struct, vtables, storage vtable)
+	// is only meaningful when the program actually references the trait
+	// mutably. Skipping it otherwise keeps ordinary trait dispatch on the
+	// native Go interface without dead type-switch scaffolding (ADR 0057).
+	if l.traitHasMutableTraitUse(trait.ID) || l.traitHasReferenceTypeUse(trait.ID) {
+		mutableDecls, err := l.lowerMutableTraitRefDecl(trait)
+		if err != nil {
+			return nil, err
+		}
+		decls = append(decls, mutableDecls...)
+		if l.emittedMutableTraitRefs != nil {
+			l.emittedMutableTraitRefs[trait.ID] = true
+		}
 	}
 	return decls, nil
+}
+
+// traitHasReferenceTypeUse reports whether any first-class reference type in
+// the program points at this trait (`mut Trait` locals, parameters, fields,
+// returns, or containers intern such a type).
+func (l *lowerer) traitHasReferenceTypeUse(traitID air.TraitID) bool {
+	for _, typ := range l.program.Types {
+		if typ.Kind == air.TypeReference && l.typeIDIsTrait(typ.Elem, traitID) {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *lowerer) lowerTraitInterfaceDecl(trait air.Trait) (ast.Decl, bool, error) {
@@ -812,19 +830,63 @@ func (l *lowerer) traitInterfaceMethodType(method air.TraitMethod) (*ast.FuncTyp
 	return fnType, nil
 }
 
-func (l *lowerer) lowerMutableTraitRefDecl(trait air.Trait) (ast.Decl, error) {
-	fields := []*ast.Field{
-		{Names: []*ast.Ident{ast.NewIdent(mutableTraitLoadFieldName(trait))}, Type: &ast.FuncType{Params: &ast.FieldList{}, Results: &ast.FieldList{List: []*ast.Field{{Type: ast.NewIdent("any")}}}}},
-		{Names: []*ast.Ident{ast.NewIdent(mutableTraitAssignFieldName(trait))}, Type: &ast.FuncType{Params: &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("value")}, Type: ast.NewIdent("any")}}}}},
+func (l *lowerer) lowerMutableTraitRefDecl(trait air.Trait) ([]ast.Decl, error) {
+	traitTypeID := l.traitObjectTypeID(trait.ID)
+	if traitTypeID == air.NoType {
+		return nil, fmt.Errorf("missing trait object type for %s", trait.Name)
+	}
+	ordinaryTraitType, err := l.goType(traitTypeID)
+	if err != nil {
+		return nil, err
+	}
+	handleFields := []*ast.Field{
+		{Names: []*ast.Ident{ast.NewIdent(mutableTraitTargetFieldName(trait))}, Type: ast.NewIdent("any")},
+		{Names: []*ast.Ident{ast.NewIdent(mutableTraitVTableFieldName(trait))}, Type: &ast.StarExpr{X: ast.NewIdent(mutableTraitVTableTypeName(trait))}},
+	}
+	vtableFields := []*ast.Field{
+		{
+			Names: []*ast.Ident{ast.NewIdent(mutableTraitLoadFieldName(trait))},
+			Type: &ast.FuncType{
+				Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("target")}, Type: ast.NewIdent("any")}}},
+				Results: &ast.FieldList{List: []*ast.Field{{Type: ordinaryTraitType}}},
+			},
+		},
+		{
+			Names: []*ast.Ident{ast.NewIdent(mutableTraitProjectFieldName(trait))},
+			Type: &ast.FuncType{
+				Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("target")}, Type: ast.NewIdent("any")}}},
+				Results: &ast.FieldList{List: []*ast.Field{{Type: ast.NewIdent("any")}}},
+			},
+		},
 	}
 	for i, method := range trait.Methods {
-		fieldType, err := l.mutableTraitMethodFuncType(method)
+		fieldType, err := l.mutableTraitVTableMethodFuncType(method)
 		if err != nil {
 			return nil, err
 		}
-		fields = append(fields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(mutableTraitMethodFieldName(trait.ID, i))}, Type: fieldType})
+		vtableFields = append(vtableFields, &ast.Field{Names: []*ast.Ident{ast.NewIdent(mutableTraitMethodFieldName(trait.ID, i))}, Type: fieldType})
 	}
-	return &ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{&ast.TypeSpec{Name: ast.NewIdent(mutableTraitRefTypeName(trait)), Type: &ast.StructType{Fields: &ast.FieldList{List: fields}}}}}, nil
+	typesDecl := &ast.GenDecl{Tok: token.TYPE, Specs: []ast.Spec{
+		&ast.TypeSpec{Name: ast.NewIdent(mutableTraitRefTypeName(trait)), Type: &ast.StructType{Fields: &ast.FieldList{List: handleFields}}},
+		&ast.TypeSpec{Name: ast.NewIdent(mutableTraitVTableTypeName(trait)), Type: &ast.StructType{Fields: &ast.FieldList{List: vtableFields}}},
+	}}
+	decls := []ast.Decl{typesDecl}
+	for _, impl := range l.program.Impls {
+		if impl.Trait != trait.ID {
+			continue
+		}
+		decl, err := l.mutableTraitImplVTableDecl(trait, impl, traitTypeID)
+		if err != nil {
+			return nil, err
+		}
+		decls = append(decls, decl)
+	}
+	storageDecl, err := l.mutableTraitStorageVTableDecl(trait, traitTypeID)
+	if err != nil {
+		return nil, err
+	}
+	decls = append(decls, storageDecl)
+	return decls, nil
 }
 
 func (l *lowerer) mutableTraitMethodFuncType(method air.TraitMethod) (ast.Expr, error) {
@@ -845,6 +907,247 @@ func (l *lowerer) mutableTraitMethodFuncType(method air.TraitMethod) (ast.Expr, 
 		fnType.Results = &ast.FieldList{List: results}
 	}
 	return fnType, nil
+}
+
+func (l *lowerer) mutableTraitVTableMethodFuncType(method air.TraitMethod) (ast.Expr, error) {
+	methodType, err := l.mutableTraitMethodFuncType(method)
+	if err != nil {
+		return nil, err
+	}
+	fnType := methodType.(*ast.FuncType)
+	params := []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("target")}, Type: ast.NewIdent("any")}}
+	params = append(params, fnType.Params.List...)
+	fnType.Params = &ast.FieldList{List: params}
+	return fnType, nil
+}
+
+func (l *lowerer) traitObjectTypeID(traitID air.TraitID) air.TypeID {
+	for _, info := range l.program.Types {
+		if info.Kind == air.TypeTraitObject && info.Trait == traitID {
+			return info.ID
+		}
+	}
+	return air.NoType
+}
+
+func (l *lowerer) mutableTraitImplVTableDecl(trait air.Trait, impl air.Impl, traitTypeID air.TypeID) (ast.Decl, error) {
+	if !validTypeID(l.program, impl.ForType) {
+		return nil, fmt.Errorf("mutable trait vtable has invalid impl type %d", impl.ForType)
+	}
+	concreteType, err := l.goType(impl.ForType)
+	if err != nil {
+		return nil, err
+	}
+	ordinaryTraitType, err := l.goType(traitTypeID)
+	if err != nil {
+		return nil, err
+	}
+	target := ast.NewIdent("target")
+	pointerType := &ast.StarExpr{X: concreteType}
+	pointerValue := &ast.TypeAssertExpr{X: target, Type: pointerType}
+	loadBody := []ast.Stmt{}
+	loadValue := ast.Expr(&ast.StarExpr{X: pointerValue})
+	if l.implRequiresPointerReceiver(impl.ID) {
+		copyName := ast.NewIdent("copy")
+		loadBody = append(loadBody, &ast.AssignStmt{Lhs: []ast.Expr{copyName}, Tok: token.DEFINE, Rhs: []ast.Expr{loadValue}})
+		loadValue = &ast.UnaryExpr{Op: token.AND, X: copyName}
+	}
+	loadBody = append(loadBody, &ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: ordinaryTraitType, Args: []ast.Expr{loadValue}}}})
+	load := &ast.FuncLit{
+		Type: &ast.FuncType{
+			Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{target}, Type: ast.NewIdent("any")}}},
+			Results: &ast.FieldList{List: []*ast.Field{{Type: ordinaryTraitType}}},
+		},
+		Body: &ast.BlockStmt{List: loadBody},
+	}
+	project := &ast.FuncLit{
+		Type: &ast.FuncType{
+			Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("target")}, Type: ast.NewIdent("any")}}},
+			Results: &ast.FieldList{List: []*ast.Field{{Type: ast.NewIdent("any")}}},
+		},
+		Body: &ast.BlockStmt{List: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{ast.NewIdent("target")}}}},
+	}
+	elts := []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitLoadFieldName(trait)), Value: load},
+		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitProjectFieldName(trait)), Value: project},
+	}
+	for methodIndex, traitMethod := range trait.Methods {
+		if methodIndex >= len(impl.Methods) || !validFunctionID(l.program, impl.Methods[methodIndex]) {
+			return nil, fmt.Errorf("impl %d missing method %d for trait %s", impl.ID, methodIndex, trait.Name)
+		}
+		methodFn := l.program.Functions[impl.Methods[methodIndex]]
+		fnTypeExpr, err := l.mutableTraitVTableMethodFuncType(traitMethod)
+		if err != nil {
+			return nil, err
+		}
+		fnType := fnTypeExpr.(*ast.FuncType)
+		callArgs := []ast.Expr{}
+		if len(methodFn.Signature.Params) > 0 {
+			receiver := ast.Expr(&ast.StarExpr{X: &ast.TypeAssertExpr{X: ast.NewIdent("target"), Type: pointerType}})
+			if l.isReferenceType(methodFn.Signature.Params[0].Type) {
+				receiver = &ast.TypeAssertExpr{X: ast.NewIdent("target"), Type: pointerType}
+			}
+			callArgs = append(callArgs, receiver)
+		}
+		for index := range traitMethod.Signature.Params {
+			callArgs = append(callArgs, ast.NewIdent(fmt.Sprintf("arg%d", index)))
+		}
+		call := &ast.CallExpr{Fun: l.functionExpr(methodFn), Args: callArgs}
+		body := []ast.Stmt{}
+		if l.isVoidType(traitMethod.Signature.Return) {
+			body = append(body, &ast.ExprStmt{X: call})
+		} else {
+			body = append(body, &ast.ReturnStmt{Results: []ast.Expr{call}})
+		}
+		elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitMethodFieldName(trait.ID, methodIndex)), Value: &ast.FuncLit{Type: fnType, Body: &ast.BlockStmt{List: body}}})
+	}
+	value := &ast.CompositeLit{Type: ast.NewIdent(mutableTraitVTableTypeName(trait)), Elts: elts}
+	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(mutableTraitImplVTableName(trait, impl.ID))}, Values: []ast.Expr{value}}}}, nil
+}
+
+func (l *lowerer) mutableTraitStorageVTableDecl(trait air.Trait, traitTypeID air.TypeID) (ast.Decl, error) {
+	ordinaryTraitType, err := l.goType(traitTypeID)
+	if err != nil {
+		return nil, err
+	}
+	currentName := ast.NewIdent("current")
+	loadCases := []ast.Stmt{}
+	for _, impl := range l.program.Impls {
+		if impl.Trait != trait.ID || !validTypeID(l.program, impl.ForType) {
+			continue
+		}
+		concreteType, err := l.goType(impl.ForType)
+		if err != nil {
+			return nil, err
+		}
+		if !l.implRequiresPointerReceiver(impl.ID) {
+			loadCases = append(loadCases, &ast.CaseClause{List: []ast.Expr{concreteType}, Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{currentName}}}})
+		}
+		copyName := ast.NewIdent("copy")
+		returnCopy := ast.Expr(copyName)
+		if l.implRequiresPointerReceiver(impl.ID) {
+			returnCopy = &ast.UnaryExpr{Op: token.AND, X: copyName}
+		}
+		loadCases = append(loadCases, &ast.CaseClause{
+			List: []ast.Expr{&ast.StarExpr{X: concreteType}},
+			Body: []ast.Stmt{
+				&ast.AssignStmt{Lhs: []ast.Expr{copyName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.StarExpr{X: currentName}}},
+				&ast.ReturnStmt{Results: []ast.Expr{returnCopy}},
+			},
+		})
+	}
+	loadCases = append(loadCases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"unsupported trait storage value"`}}}}}})
+	targetAsStorage := &ast.TypeAssertExpr{X: ast.NewIdent("target"), Type: &ast.StarExpr{X: ordinaryTraitType}}
+	load := &ast.FuncLit{
+		Type: &ast.FuncType{
+			Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("target")}, Type: ast.NewIdent("any")}}},
+			Results: &ast.FieldList{List: []*ast.Field{{Type: ordinaryTraitType}}},
+		},
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{currentName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.StarExpr{X: targetAsStorage}}},
+			&ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{currentName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: currentName}}}, Body: &ast.BlockStmt{List: loadCases}},
+		}},
+	}
+	projectCases := []ast.Stmt{}
+	for _, impl := range l.program.Impls {
+		if impl.Trait != trait.ID || !validTypeID(l.program, impl.ForType) {
+			continue
+		}
+		concreteType, err := l.goType(impl.ForType)
+		if err != nil {
+			return nil, err
+		}
+		if !l.implRequiresPointerReceiver(impl.ID) {
+			copyName := ast.NewIdent("copy")
+			pointerName := ast.NewIdent("pointer")
+			projectCases = append(projectCases, &ast.CaseClause{
+				List: []ast.Expr{concreteType},
+				Body: []ast.Stmt{
+					&ast.AssignStmt{Lhs: []ast.Expr{copyName}, Tok: token.DEFINE, Rhs: []ast.Expr{currentName}},
+					&ast.AssignStmt{Lhs: []ast.Expr{pointerName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.UnaryExpr{Op: token.AND, X: copyName}}},
+					&ast.AssignStmt{Lhs: []ast.Expr{&ast.StarExpr{X: ast.NewIdent("storage")}}, Tok: token.ASSIGN, Rhs: []ast.Expr{pointerName}},
+					&ast.ReturnStmt{Results: []ast.Expr{pointerName}},
+				},
+			})
+		}
+		projectCases = append(projectCases, &ast.CaseClause{List: []ast.Expr{&ast.StarExpr{X: concreteType}}, Body: []ast.Stmt{&ast.ReturnStmt{Results: []ast.Expr{currentName}}}})
+	}
+	projectCases = append(projectCases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"unsupported trait storage value"`}}}}}})
+	project := &ast.FuncLit{
+		Type: &ast.FuncType{
+			Params:  &ast.FieldList{List: []*ast.Field{{Names: []*ast.Ident{ast.NewIdent("target")}, Type: ast.NewIdent("any")}}},
+			Results: &ast.FieldList{List: []*ast.Field{{Type: ast.NewIdent("any")}}},
+		},
+		Body: &ast.BlockStmt{List: []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("storage")}, Tok: token.DEFINE, Rhs: []ast.Expr{targetAsStorage}},
+			&ast.AssignStmt{Lhs: []ast.Expr{currentName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.StarExpr{X: ast.NewIdent("storage")}}},
+			&ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{currentName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: currentName}}}, Body: &ast.BlockStmt{List: projectCases}},
+		}},
+	}
+	elts := []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitLoadFieldName(trait)), Value: load},
+		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitProjectFieldName(trait)), Value: project},
+	}
+	// Dispatch through the impl functions directly (like the load/project
+	// cases) rather than through generated Go interface methods: the trait's
+	// ordinary representation may be `any` when no native interface is
+	// available. Mutating impls always reach storage as pointers (upcast
+	// boxing and Project's promotion maintain that invariant), so the value
+	// case only exists for value-receiver impls (ADR 0057).
+	for methodIndex, method := range trait.Methods {
+		fnTypeExpr, err := l.mutableTraitVTableMethodFuncType(method)
+		if err != nil {
+			return nil, err
+		}
+		args := make([]ast.Expr, len(method.Signature.Params))
+		for index := range args {
+			args[index] = ast.NewIdent(fmt.Sprintf("arg%d", index))
+		}
+		methodCases := []ast.Stmt{}
+		for _, impl := range l.program.Impls {
+			if impl.Trait != trait.ID || !validTypeID(l.program, impl.ForType) {
+				continue
+			}
+			if methodIndex >= len(impl.Methods) || !validFunctionID(l.program, impl.Methods[methodIndex]) {
+				return nil, fmt.Errorf("impl %d missing method %d for trait %s", impl.ID, methodIndex, trait.Name)
+			}
+			methodFn := l.program.Functions[impl.Methods[methodIndex]]
+			concreteType, err := l.goType(impl.ForType)
+			if err != nil {
+				return nil, err
+			}
+			pointerReceiver := len(methodFn.Signature.Params) > 0 && l.isReferenceType(methodFn.Signature.Params[0].Type)
+			buildCall := func(receiver ast.Expr) ast.Stmt {
+				callArgs := []ast.Expr{}
+				if len(methodFn.Signature.Params) > 0 {
+					callArgs = append(callArgs, receiver)
+				}
+				callArgs = append(callArgs, args...)
+				call := &ast.CallExpr{Fun: l.functionExpr(methodFn), Args: callArgs}
+				if l.isVoidType(method.Signature.Return) {
+					return &ast.ExprStmt{X: call}
+				}
+				return &ast.ReturnStmt{Results: []ast.Expr{call}}
+			}
+			if !l.implRequiresPointerReceiver(impl.ID) {
+				methodCases = append(methodCases, &ast.CaseClause{List: []ast.Expr{concreteType}, Body: []ast.Stmt{buildCall(currentName)}})
+			}
+			pointerBody := buildCall(&ast.StarExpr{X: currentName})
+			if pointerReceiver {
+				pointerBody = buildCall(currentName)
+			}
+			methodCases = append(methodCases, &ast.CaseClause{List: []ast.Expr{&ast.StarExpr{X: concreteType}}, Body: []ast.Stmt{pointerBody}})
+		}
+		methodCases = append(methodCases, &ast.CaseClause{Body: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: `"unsupported trait storage value"`}}}}}})
+		methodBody := []ast.Stmt{
+			&ast.AssignStmt{Lhs: []ast.Expr{currentName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.StarExpr{X: targetAsStorage}}},
+			&ast.TypeSwitchStmt{Assign: &ast.AssignStmt{Lhs: []ast.Expr{currentName}, Tok: token.DEFINE, Rhs: []ast.Expr{&ast.TypeAssertExpr{X: currentName}}}, Body: &ast.BlockStmt{List: methodCases}},
+		}
+		elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitMethodFieldName(trait.ID, methodIndex)), Value: &ast.FuncLit{Type: fnTypeExpr.(*ast.FuncType), Body: &ast.BlockStmt{List: methodBody}}})
+	}
+
+	value := &ast.CompositeLit{Type: ast.NewIdent(mutableTraitVTableTypeName(trait)), Elts: elts}
+	return &ast.GenDecl{Tok: token.VAR, Specs: []ast.Spec{&ast.ValueSpec{Names: []*ast.Ident{ast.NewIdent(mutableTraitStorageVTableName(trait))}, Values: []ast.Expr{value}}}}, nil
 }
 
 func (l *lowerer) traitInterfaceTypeName(trait air.Trait) string {
@@ -1004,8 +1307,32 @@ func mutableTraitRefTypeName(trait air.Trait) string {
 	return fmt.Sprintf("ardMutTrait_%s_%d", sanitizeName(trait.Name), trait.ID)
 }
 
+func mutableTraitVTableTypeName(trait air.Trait) string {
+	return fmt.Sprintf("ardMutTraitVTable_%s_%d", sanitizeName(trait.Name), trait.ID)
+}
+
+func mutableTraitImplVTableName(trait air.Trait, impl air.ImplID) string {
+	return fmt.Sprintf("ardMutTraitVTable_%s_%d_impl_%d", sanitizeName(trait.Name), trait.ID, impl)
+}
+
+func mutableTraitStorageVTableName(trait air.Trait) string {
+	return fmt.Sprintf("ardMutTraitVTable_%s_%d_storage", sanitizeName(trait.Name), trait.ID)
+}
+
+func mutableTraitTargetFieldName(trait air.Trait) string {
+	return fmt.Sprintf("ardMutTraitTarget_%d", trait.ID)
+}
+
+func mutableTraitVTableFieldName(trait air.Trait) string {
+	return fmt.Sprintf("ardMutTraitVTable_%d", trait.ID)
+}
+
 func mutableTraitLoadFieldName(trait air.Trait) string {
 	return fmt.Sprintf("ardMutTraitLoad_%d", trait.ID)
+}
+
+func mutableTraitProjectFieldName(trait air.Trait) string {
+	return fmt.Sprintf("ardMutTraitProject_%d", trait.ID)
 }
 
 func mutableTraitAssignFieldName(trait air.Trait) string {
@@ -1060,14 +1387,12 @@ func (l *lowerer) lowerFunction(fn air.Function) (ast.Decl, error) {
 	l.declaredLocals = map[air.LocalID]bool{}
 	params := []*ast.Field{}
 	for _, capture := range fn.Captures {
-		captureParam := air.Param{Name: capture.Name, Type: capture.Type}
-		if int(capture.Local) >= 0 && int(capture.Local) < len(fn.Locals) {
-			local := fn.Locals[capture.Local]
-			captureParam.Mutable = local.Mutable || local.Reference
-		}
-		captureType, err := l.goParamType(captureParam)
+		captureType, err := l.goType(capture.Type)
 		if err != nil {
 			return nil, err
+		}
+		if capture.Mode == air.CaptureSlot {
+			captureType = &ast.StarExpr{X: captureType}
 		}
 		params = append(params, &ast.Field{
 			Names: []*ast.Ident{ast.NewIdent(l.localName(fn, capture.Local))},
@@ -1884,6 +2209,12 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			return nil, fmt.Errorf("invalid field set target type %d", stmt.Target.Type)
 		}
 		targetType := l.program.Types[stmt.Target.Type-1]
+		if targetType.Kind == air.TypeReference {
+			if !validTypeID(l.program, targetType.Elem) {
+				return nil, fmt.Errorf("field set target has invalid referent %d", targetType.Elem)
+			}
+			targetType = l.program.Types[targetType.Elem-1]
+		}
 		if targetType.Kind != air.TypeStruct {
 			return nil, fmt.Errorf("field set target must be struct, got kind %d", targetType.Kind)
 		}
@@ -1908,7 +2239,7 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			out = append(out, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: fieldTarget, Sel: ast.NewIdent(l.mutableTraitAssignFieldNameForType(field.Type))}, Args: []ast.Expr{assignValue}}})
 			return out, nil
 		}
-		if field.Mutable {
+		if field.Mutable && !l.isReferenceType(field.Type) {
 			fieldTarget = &ast.StarExpr{X: fieldTarget}
 		}
 		valueExpr := value.expr
@@ -2113,6 +2444,8 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: convertType, Args: []ast.Expr{target.expr}}}, nil
+	case air.ExprTraitRefProject:
+		return l.lowerTraitReferenceProjection(fn, expr)
 	case air.ExprTraitUpcast:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("trait upcast missing target")
@@ -2188,6 +2521,28 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("float64"), Args: []ast.Expr{target.expr}}}, nil
 	case air.ExprMutRef:
 		return l.lowerMutRef(fn, expr)
+	case air.ExprDeref:
+		if expr.Target == nil {
+			return loweredExpr{}, fmt.Errorf("deref missing operand")
+		}
+		target, err := l.lowerExpr(fn, *expr.Target)
+		if err != nil {
+			return loweredExpr{}, err
+		}
+		if l.isReferenceType(expr.Target.Type) {
+			reference := l.program.Types[expr.Target.Type-1]
+			if l.isTraitObjectType(reference.Elem) {
+				trait := l.program.Traits[l.program.Types[reference.Elem-1].Trait]
+				handleName := l.nextTemp()
+				stmts := append([]ast.Stmt{}, target.stmts...)
+				stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(handleName)}, Tok: token.DEFINE, Rhs: []ast.Expr{target.expr}})
+				handle := ast.NewIdent(handleName)
+				vtable := &ast.SelectorExpr{X: handle, Sel: ast.NewIdent(mutableTraitVTableFieldName(trait))}
+				load := &ast.SelectorExpr{X: vtable, Sel: ast.NewIdent(mutableTraitLoadFieldName(trait))}
+				return loweredExpr{stmts: stmts, expr: &ast.CallExpr{Fun: load, Args: []ast.Expr{&ast.SelectorExpr{X: handle, Sel: ast.NewIdent(mutableTraitTargetFieldName(trait))}}}}, nil
+			}
+		}
+		return loweredExpr{stmts: target.stmts, expr: &ast.StarExpr{X: target.expr}}, nil
 	case air.ExprMakeClosure:
 		return l.lowerMakeClosure(fn, expr)
 	case air.ExprCallClosure:
@@ -2207,7 +2562,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		expected := air.NoType
 		if validTypeID(l.program, expr.Type) {
-			if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeMaybe && !info.ElemMutable {
+			if info := l.program.Types[expr.Type-1]; info.Kind == air.TypeMaybe {
 				expected = info.Elem
 			}
 		}
@@ -2557,7 +2912,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target.expr}}}, nil
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{l.valueThroughReference(expr.Target.Type, target.expr)}}}, nil
 	case air.ExprListAt:
 		if expr.Target == nil {
 			return loweredExpr{}, fmt.Errorf("list at missing target")
@@ -2574,7 +2929,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, err
 		}
 		stmts := append(target.stmts, index.stmts...)
-		return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: target.expr, Index: index.expr}}, nil
+		return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: l.valueThroughReference(expr.Target.Type, target.expr), Index: index.expr}}, nil
 	case air.ExprListAtChecked:
 		// User-facing list.at: a bounds-checked access producing Maybe(elem).
 		if expr.Target == nil {
@@ -2604,7 +2959,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		sliceTemp := l.nextTemp()
 		indexTemp := l.nextTemp()
 		stmts = append(stmts,
-			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(sliceTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{target.expr}},
+			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(sliceTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{l.valueThroughReference(expr.Target.Type, target.expr)}},
 			&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(indexTemp)}, Tok: token.DEFINE, Rhs: []ast.Expr{index.expr}},
 		)
 		cond := &ast.BinaryExpr{
@@ -2645,7 +3000,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		if err != nil {
 			return loweredExpr{}, err
 		}
-		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{target.expr}}}, nil
+		return loweredExpr{stmts: target.stmts, expr: &ast.CallExpr{Fun: ast.NewIdent("len"), Args: []ast.Expr{l.valueThroughReference(expr.Target.Type, target.expr)}}}, nil
 	case air.ExprMapHas:
 		return l.lowerMapHas(fn, expr)
 	case air.ExprMapGet:
@@ -2697,22 +3052,20 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 				stmts = l.appendVoidValueEval(stmts, fieldValue)
 				fieldValue = l.voidValueExpr()
 			}
-			if hasFieldInfo {
-				if fieldInfo.Mutable {
-					if l.isTraitObjectType(fieldInfo.Type) {
-						adapted, setup, _, ok, err := l.mutableTraitObjectArg(fn, field.Value, fieldValue, air.Param{Type: fieldInfo.Type, Mutable: true})
-						if err != nil {
-							return loweredExpr{}, err
-						}
-						if ok {
-							stmts = append(stmts, setup...)
-							fieldValue = adapted
-						} else {
-							fieldValue = l.mutableReferenceArg(fn, field.Value, fieldValue)
-						}
+			if hasFieldInfo && fieldInfo.Mutable && !l.isReferenceType(fieldInfo.Type) {
+				if l.isTraitObjectType(fieldInfo.Type) {
+					adapted, setup, _, ok, err := l.mutableTraitObjectArg(fn, field.Value, fieldValue, air.Param{Type: fieldInfo.Type, Mutable: true})
+					if err != nil {
+						return loweredExpr{}, err
+					}
+					if ok {
+						stmts = append(stmts, setup...)
+						fieldValue = adapted
 					} else {
 						fieldValue = l.mutableReferenceArg(fn, field.Value, fieldValue)
 					}
+				} else {
+					fieldValue = l.mutableReferenceArg(fn, field.Value, fieldValue)
 				}
 			}
 			elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(typ, field.Name)), Value: fieldValue})
@@ -2730,6 +3083,12 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			return loweredExpr{}, fmt.Errorf("invalid target type id %d", expr.Target.Type)
 		}
 		targetType := l.program.Types[expr.Target.Type-1]
+		if targetType.Kind == air.TypeReference {
+			if !validTypeID(l.program, targetType.Elem) {
+				return loweredExpr{}, fmt.Errorf("invalid reference elem type id %d", targetType.Elem)
+			}
+			targetType = l.program.Types[targetType.Elem-1]
+		}
 		if targetType.Kind == air.TypeMaybe {
 			if !validTypeID(l.program, targetType.Elem) {
 				return loweredExpr{}, fmt.Errorf("invalid maybe elem type id %d", targetType.Elem)
@@ -2779,7 +3138,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		field := targetType.Fields[expr.Field]
 		fieldExpr := &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))}
-		if field.Mutable {
+		if field.Mutable && !l.isReferenceType(field.Type) {
 			return loweredExpr{stmts: target.stmts, expr: &ast.StarExpr{X: fieldExpr}}, nil
 		}
 		return loweredExpr{stmts: target.stmts, expr: fieldExpr}, nil
@@ -2848,6 +3207,17 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		if err != nil {
 			return loweredExpr{}, err
+		}
+		leftTrait, leftIsTraitReference := l.traitReference(leftTypeID)
+		rightTrait, rightIsTraitReference := l.traitReference(rightTypeID)
+		if leftIsTraitReference != rightIsTraitReference {
+			if leftIsTraitReference {
+				left.expr = &ast.SelectorExpr{X: left.expr, Sel: ast.NewIdent(mutableTraitTargetFieldName(leftTrait))}
+				right.expr = &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{right.expr}}
+			} else {
+				left.expr = &ast.CallExpr{Fun: ast.NewIdent("any"), Args: []ast.Expr{left.expr}}
+				right.expr = &ast.SelectorExpr{X: right.expr, Sel: ast.NewIdent(mutableTraitTargetFieldName(rightTrait))}
+			}
 		}
 		l.castEnumIntComparisonOperands(&left, leftTypeID, &right, rightTypeID)
 		var equality ast.Expr = &ast.BinaryExpr{X: left.expr, Op: l.binaryToken(expr.Kind), Y: right.expr}
@@ -3314,10 +3684,18 @@ func (l *lowerer) lowerInterfaceConversion(fn air.Function, expr air.Expr) (lowe
 	switch expr.InterfaceMode {
 	case air.InterfaceValue:
 	case air.InterfaceReference:
-		// Value lowering reads through reference locals and fields. Recover
-		// those representations; all other reference-producing expressions
-		// already lower to their pointer/reference result.
-		target.expr = l.existingMutableReferenceArg(fn, *expr.Target, target.expr)
+		if l.isReferenceType(expr.Target.Type) {
+			reference := l.program.Types[expr.Target.Type-1]
+			if l.isTraitObjectType(reference.Elem) {
+				trait := l.program.Traits[l.program.Types[reference.Elem-1].Trait]
+				handleName := l.nextTemp()
+				target.stmts = append(target.stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(handleName)}, Tok: token.DEFINE, Rhs: []ast.Expr{target.expr}})
+				handle := ast.NewIdent(handleName)
+				vtable := &ast.SelectorExpr{X: handle, Sel: ast.NewIdent(mutableTraitVTableFieldName(trait))}
+				project := &ast.SelectorExpr{X: vtable, Sel: ast.NewIdent(mutableTraitProjectFieldName(trait))}
+				target.expr = &ast.CallExpr{Fun: project, Args: []ast.Expr{&ast.SelectorExpr{X: handle, Sel: ast.NewIdent(mutableTraitTargetFieldName(trait))}}}
+			}
+		}
 	case air.InterfaceOwnedPointer:
 		// Materialize fresh storage even when the source is addressable. Taking
 		// the caller's address would turn value conversion into borrowed aliasing.
@@ -3337,12 +3715,9 @@ func (l *lowerer) lowerInterfaceConversion(fn air.Function, expr air.Expr) (lowe
 	return target, nil
 }
 
-func (l *lowerer) foreignABIValueArg(arg air.Expr, value ast.Expr) ast.Expr {
-	if arg.Kind != air.ExprMutRef || !validTypeID(l.program, arg.Type) {
-		return value
-	}
-	if l.program.Types[arg.Type-1].Kind == air.TypeList {
-		return &ast.StarExpr{X: value}
+func (l *lowerer) foreignABIValueArg(arg air.Expr, value ast.Expr, mode air.ForeignArgMode) ast.Expr {
+	if mode == air.ForeignArgDescriptorValue {
+		return l.valueThroughReference(arg.Type, value)
 	}
 	return value
 }
@@ -3363,7 +3738,11 @@ func (l *lowerer) lowerForeignCall(fn air.Function, expr air.Expr) (loweredExpr,
 			return loweredExpr{}, err
 		}
 		stmts = append(stmts, arg.stmts...)
-		args = append(args, l.foreignABIValueArg(expr.Args[i], arg.expr))
+		mode := air.ForeignArgExact
+		if i < len(expr.ForeignArgModes) {
+			mode = expr.ForeignArgModes[i]
+		}
+		args = append(args, l.foreignABIValueArg(expr.Args[i], arg.expr, mode))
 	}
 	importPath := expr.ForeignNamespace
 	functionName := expr.ForeignSymbol
@@ -3542,6 +3921,11 @@ func (l *lowerer) lowerForeignMethodValue(fn air.Function, expr air.Expr) (lower
 				argExpr = &ast.StarExpr{X: ast.NewIdent(name)}
 			}
 		}
+		mode := air.ForeignArgExact
+		if i < len(expr.ForeignArgModes) {
+			mode = expr.ForeignArgModes[i]
+		}
+		argExpr = l.foreignABIValueArg(air.Expr{Type: paramType}, argExpr, mode)
 		params[i] = &ast.Field{Names: []*ast.Ident{ast.NewIdent(name)}, Type: typ}
 		args[i] = argExpr
 	}
@@ -3591,7 +3975,11 @@ func (l *lowerer) lowerForeignMethodCall(fn air.Function, expr air.Expr) (lowere
 			return loweredExpr{}, err
 		}
 		stmts = append(stmts, arg.stmts...)
-		args = append(args, l.foreignABIValueArg(expr.Args[i], arg.expr))
+		mode := air.ForeignArgExact
+		if i < len(expr.ForeignArgModes) {
+			mode = expr.ForeignArgModes[i]
+		}
+		args = append(args, l.foreignABIValueArg(expr.Args[i], arg.expr, mode))
 	}
 	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(expr.ForeignSymbol)}, Args: args}
 	if validTypeID(l.program, expr.Type) {
@@ -3784,7 +4172,7 @@ func (l *lowerer) zeroValueExpr(typeID air.TypeID) (ast.Expr, error) {
 		return ast.NewIdent("false"), nil
 	case air.TypeStr:
 		return &ast.BasicLit{Kind: token.STRING, Value: "\"\""}, nil
-	case air.TypeAny, air.TypeFunction, air.TypeTraitObject:
+	case air.TypeAny, air.TypeFunction, air.TypeTraitObject, air.TypeReference:
 		return ast.NewIdent("nil"), nil
 	case air.TypeParam:
 		// A composite literal T{} is illegal for a type parameter; *new(T)
@@ -3808,10 +4196,10 @@ func (l *lowerer) isMaybeType(typeID air.TypeID) bool {
 }
 
 func (l *lowerer) mapKeyValueTypes(mapTypeID air.TypeID) (air.TypeID, air.TypeID) {
-	if !validTypeID(l.program, mapTypeID) {
+	info, ok := l.typeInfoThroughReference(mapTypeID)
+	if !ok {
 		return air.NoType, air.NoType
 	}
-	info := l.program.Types[mapTypeID-1]
 	if info.Kind != air.TypeMap && !(info.Kind == air.TypeForeignType && validTypeID(l.program, info.Key) && validTypeID(l.program, info.Value)) {
 		return air.NoType, air.NoType
 	}
@@ -3834,6 +4222,49 @@ func (l *lowerer) lowerMapKeyArg(fn air.Function, mapTypeID air.TypeID, expr air
 		key = l.materializeVoidValue(key)
 	}
 	return key, nil
+}
+
+func (l *lowerer) isReferenceType(typeID air.TypeID) bool {
+	return validTypeID(l.program, typeID) && l.program.Types[typeID-1].Kind == air.TypeReference
+}
+
+func (l *lowerer) traitReference(typeID air.TypeID) (air.Trait, bool) {
+	if !l.isReferenceType(typeID) {
+		return air.Trait{}, false
+	}
+	elem := l.program.Types[typeID-1].Elem
+	if !l.isTraitObjectType(elem) {
+		return air.Trait{}, false
+	}
+	traitID := l.program.Types[elem-1].Trait
+	if !validTraitID(l.program, traitID) {
+		return air.Trait{}, false
+	}
+	return l.program.Traits[traitID], true
+}
+
+func (l *lowerer) referentType(typeID air.TypeID) (air.TypeID, bool) {
+	if !l.isReferenceType(typeID) {
+		return typeID, false
+	}
+	return l.program.Types[typeID-1].Elem, true
+}
+
+func (l *lowerer) valueThroughReference(typeID air.TypeID, value ast.Expr) ast.Expr {
+	if l.isReferenceType(typeID) {
+		return &ast.StarExpr{X: value}
+	}
+	return value
+}
+
+func (l *lowerer) typeInfoThroughReference(typeID air.TypeID) (air.TypeInfo, bool) {
+	if referent, reference := l.referentType(typeID); reference {
+		typeID = referent
+	}
+	if !validTypeID(l.program, typeID) {
+		return air.TypeInfo{}, false
+	}
+	return l.program.Types[typeID-1], true
 }
 
 func (l *lowerer) isTraitObjectType(typeID air.TypeID) bool {
@@ -3863,7 +4294,7 @@ func (l *lowerer) goSignatureReturnFields(signature air.Signature, typeID air.Ty
 }
 
 func (l *lowerer) goReferenceAwareReturnFields(typeID air.TypeID, reference bool) ([]*ast.Field, error) {
-	if !reference || !l.mutableParamUsesPointer(typeID) {
+	if l.isReferenceType(typeID) || !reference || !l.mutableParamUsesPointer(typeID) {
 		return l.goReturnFields(typeID)
 	}
 	typ, err := l.mutableParamType(typeID)
@@ -3905,9 +4336,6 @@ func (l *lowerer) goReturnFields(typeID air.TypeID) ([]*ast.Field, error) {
 		elemType, err := l.goType(info.Elem)
 		if err != nil {
 			return nil, err
-		}
-		if info.ElemMutable {
-			elemType = &ast.StarExpr{X: elemType}
 		}
 		return []*ast.Field{{Type: elemType}, {Type: ast.NewIdent("bool")}}, nil
 	default:
@@ -3961,6 +4389,10 @@ func (l *lowerer) mutableParamUsesPointer(typeID air.TypeID) bool {
 	}
 	info := l.program.Types[typeID-1]
 	switch info.Kind {
+	case air.TypeReference:
+		// The type already is the pointer-shaped handle; legacy mutable flags
+		// must not add another layer (ADR 0057).
+		return false
 	case air.TypeMap, air.TypeChannel, air.TypeReceiver, air.TypeSender:
 		return false
 	case air.TypeForeignType:
@@ -4022,6 +4454,12 @@ func (l *lowerer) goParamType(param air.Param) (ast.Expr, error) {
 }
 
 func (l *lowerer) goFunctionParamType(fn air.Function, param air.Param) (ast.Expr, error) {
+	if fn.ForeignABI && param.Mutable && l.isReferenceType(param.Type) {
+		referent := l.program.Types[param.Type-1].Elem
+		if l.foreignABIKeepsMutableDescriptor(referent) {
+			return l.goType(referent)
+		}
+	}
 	if param.Mutable && !l.functionMutableParamUsesPointer(fn, param.Type) {
 		return l.goType(param.Type)
 	}
@@ -4118,9 +4556,6 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		if info.ElemMutable {
-			elem = &ast.StarExpr{X: elem}
-		}
 		return &ast.IndexExpr{X: l.runtimeQualified("Maybe"), Index: elem}, nil
 	case air.TypeFunction:
 		params := make([]*ast.Field, 0, len(info.Params))
@@ -4188,6 +4623,9 @@ func (l *lowerer) goType(typeID air.TypeID) (ast.Expr, error) {
 		}
 		return &ast.ChanType{Dir: ast.SEND, Value: elem}, nil
 	case air.TypeReference:
+		if l.isTraitObjectType(info.Elem) {
+			return l.mutableTraitRefType(info.Elem)
+		}
 		elem, err := l.goType(info.Elem)
 		if err != nil {
 			return nil, err
@@ -4700,7 +5138,7 @@ func (l *lowerer) lowerDiscardingFunctionCoercion(fn air.Function, expr air.Expr
 }
 
 func (l *lowerer) adaptCallArg(fn air.Function, arg air.Expr, argExpr ast.Expr, param air.Param) ast.Expr {
-	if !param.Mutable || !l.mutableParamUsesPointer(param.Type) {
+	if l.isReferenceType(param.Type) || !param.Mutable || !l.mutableParamUsesPointer(param.Type) {
 		return argExpr
 	}
 	return l.mutableReferenceArg(fn, arg, argExpr)
@@ -4708,7 +5146,7 @@ func (l *lowerer) adaptCallArg(fn air.Function, arg air.Expr, argExpr ast.Expr, 
 
 func (l *lowerer) adaptCallArgWithStmts(fn air.Function, arg air.Expr, argExpr ast.Expr, param air.Param, foreignABI bool) (ast.Expr, []ast.Stmt, []ast.Stmt, error) {
 	usesPointer := l.mutableParamUsesPointer(param.Type) && !(foreignABI && l.foreignABIKeepsMutableDescriptor(param.Type))
-	if !param.Mutable || !usesPointer {
+	if l.isReferenceType(param.Type) || !param.Mutable || !usesPointer {
 		return argExpr, nil, nil, nil
 	}
 	if adapted, setup, writeback, ok, err := l.mutableTraitObjectArg(fn, arg, argExpr, param); ok || err != nil {
@@ -5116,10 +5554,9 @@ func (l *lowerer) mutableReferenceArg(fn air.Function, arg air.Expr, argExpr ast
 	return &ast.UnaryExpr{Op: token.AND, X: argExpr}
 }
 
-// lowerMutRef lowers the explicit `mut <operand>` expression (ADR 0045). The
-// result is a Go pointer only when the referent's representation requires one
-// (ADR 0040): descriptor-backed types already share storage by value, so the
-// operand passes through unchanged.
+// lowerMutRef lowers one of AIR's explicit reference creation modes. Every
+// Ard-owned TypeReference is represented by a direct Go pointer, including
+// descriptor referents; copying a reference therefore copies only the handle.
 func (l *lowerer) lowerMutRef(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("mut ref missing operand")
@@ -5128,34 +5565,51 @@ func (l *lowerer) lowerMutRef(fn air.Function, expr air.Expr) (loweredExpr, erro
 	if err != nil {
 		return loweredExpr{}, err
 	}
-	// The representation decision follows the operand: an already
-	// pointer-shaped operand aliases by copying the pointer, and descriptor
-	// referents share storage by value. Only value forms whose mutation
-	// needs identity take an address.
-	if validTypeID(l.program, expr.Target.Type) {
-		if info := l.program.Types[expr.Target.Type-1]; info.Kind == air.TypeForeignType && info.ForeignPointer {
-			return target, nil
+	if l.isReferenceType(expr.Type) {
+		reference := l.program.Types[expr.Type-1]
+		if l.isTraitObjectType(reference.Elem) && expr.ReferenceMode != air.ExistingReference {
+			trait := l.program.Traits[l.program.Types[reference.Elem-1].Trait]
+			stmts := append([]ast.Stmt{}, target.stmts...)
+			var place ast.Expr
+			switch expr.ReferenceMode {
+			case air.AddressablePlace:
+				place = addressOfPlace(target.expr)
+			case air.FreshValue:
+				temp := l.nextTemp()
+				stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.DEFINE, Rhs: []ast.Expr{target.expr}})
+				place = &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(temp)}
+			default:
+				return loweredExpr{}, fmt.Errorf("trait mut ref has invalid mode %d", expr.ReferenceMode)
+			}
+			refType, err := l.mutableTraitRefType(reference.Elem)
+			if err != nil {
+				return loweredExpr{}, err
+			}
+			handle := &ast.CompositeLit{Type: refType, Elts: []ast.Expr{
+				&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitTargetFieldName(trait)), Value: place},
+				&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitVTableFieldName(trait)), Value: &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(mutableTraitStorageVTableName(trait))}},
+			}}
+			return loweredExpr{stmts: stmts, expr: handle}, nil
 		}
 	}
-	if !l.mutableParamUsesPointer(expr.Target.Type) {
+	switch expr.ReferenceMode {
+	case air.ExistingReference:
 		return target, nil
-	}
-	if expr.Bool {
-		// Fresh storage: a struct literal is addressable directly with Go's
-		// &T{...} form; other value expressions materialize a temporary.
+	case air.AddressablePlace:
+		return loweredExpr{stmts: target.stmts, expr: addressOfPlace(target.expr)}, nil
+	case air.FreshValue:
+		// Composite literals can be addressed directly. Every other expression
+		// is evaluated once into escaping stable storage first.
 		if _, isComposite := target.expr.(*ast.CompositeLit); isComposite {
 			return loweredExpr{stmts: target.stmts, expr: &ast.UnaryExpr{Op: token.AND, X: target.expr}}, nil
 		}
 		tmp := l.nextTemp()
 		stmts := append([]ast.Stmt{}, target.stmts...)
-		stmts = append(stmts, &ast.AssignStmt{
-			Lhs: []ast.Expr{ast.NewIdent(tmp)},
-			Tok: token.DEFINE,
-			Rhs: []ast.Expr{target.expr},
-		})
+		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(tmp)}, Tok: token.DEFINE, Rhs: []ast.Expr{target.expr}})
 		return loweredExpr{stmts: stmts, expr: &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(tmp)}}, nil
+	default:
+		return loweredExpr{}, fmt.Errorf("mut ref has invalid mode %d", expr.ReferenceMode)
 	}
-	return loweredExpr{stmts: target.stmts, expr: l.mutableReferenceArg(fn, *expr.Target, target.expr)}, nil
 }
 
 func (l *lowerer) mutableFieldReferenceExpr(fn air.Function, arg air.Expr) (ast.Expr, bool) {
@@ -5179,6 +5633,17 @@ func (l *lowerer) mutableFieldReferenceExpr(fn air.Function, arg air.Expr) (ast.
 
 func (l *lowerer) localValueExpr(fn air.Function, local air.LocalID) ast.Expr {
 	name := ast.Expr(ast.NewIdent(l.localName(fn, local)))
+	if l.foreignABIValueReferenceParam(fn, local) {
+		return &ast.UnaryExpr{Op: token.AND, X: name}
+	}
+	if l.captureMode(fn, local) == air.CaptureSlot {
+		return &ast.StarExpr{X: name}
+	}
+	if int(local) >= 0 && int(local) < len(fn.Locals) && l.isReferenceType(fn.Locals[local].Type) {
+		// First-class references load their current handle. Only ExprDeref
+		// reads the referent (ADR 0057).
+		return name
+	}
 	if l.localIsPointerParam(fn, local) {
 		return &ast.StarExpr{X: name}
 	}
@@ -5186,7 +5651,34 @@ func (l *lowerer) localValueExpr(fn air.Function, local air.LocalID) ast.Expr {
 }
 
 func (l *lowerer) localAssignExpr(fn air.Function, local air.LocalID) ast.Expr {
+	if l.captureMode(fn, local) == air.CaptureSlot {
+		return &ast.StarExpr{X: ast.NewIdent(l.localName(fn, local))}
+	}
+	if int(local) >= 0 && int(local) < len(fn.Locals) && l.isReferenceType(fn.Locals[local].Type) {
+		return ast.NewIdent(l.localName(fn, local))
+	}
 	return l.localValueExpr(fn, local)
+}
+
+func (l *lowerer) foreignABIValueReferenceParam(fn air.Function, local air.LocalID) bool {
+	index := int(local)
+	if !fn.ForeignABI || index < 0 || index >= len(fn.Signature.Params) {
+		return false
+	}
+	param := fn.Signature.Params[index]
+	if !param.Mutable || !l.isReferenceType(param.Type) {
+		return false
+	}
+	return l.foreignABIKeepsMutableDescriptor(l.program.Types[param.Type-1].Elem)
+}
+
+func (l *lowerer) captureMode(fn air.Function, local air.LocalID) air.CaptureMode {
+	for _, capture := range fn.Captures {
+		if capture.Local == local {
+			return capture.Mode
+		}
+	}
+	return air.CaptureValue
 }
 
 func (l *lowerer) localIsReference(fn air.Function, local air.LocalID) bool {
@@ -5195,6 +5687,10 @@ func (l *lowerer) localIsReference(fn air.Function, local air.LocalID) bool {
 }
 
 func (l *lowerer) localIsPointerParam(fn air.Function, local air.LocalID) bool {
+	idx := int(local)
+	if idx >= 0 && idx < len(fn.Locals) && l.isReferenceType(fn.Locals[idx].Type) {
+		return false
+	}
 	if l.localIsReference(fn, local) {
 		// Reference locals hold a Go pointer only when the referent's
 		// representation requires one; descriptor-backed referents are
@@ -5205,7 +5701,6 @@ func (l *lowerer) localIsPointerParam(fn air.Function, local air.LocalID) bool {
 		}
 		return true
 	}
-	idx := int(local)
 	if idx >= 0 && idx < len(fn.Signature.Params) {
 		param := fn.Signature.Params[idx]
 		return param.Mutable && l.functionMutableParamUsesPointer(fn, param.Type)
@@ -5844,7 +6339,11 @@ func (l *lowerer) lowerMaybeSet(fn air.Function, expr air.Expr) (loweredExpr, er
 	if !validTypeID(l.program, expr.Target.Type) {
 		return loweredExpr{}, fmt.Errorf("maybe set target type is invalid")
 	}
-	maybeInfo := l.program.Types[expr.Target.Type-1]
+	maybeType := expr.Target.Type
+	if referent, reference := l.referentType(maybeType); reference {
+		maybeType = referent
+	}
+	maybeInfo := l.program.Types[maybeType-1]
 	if maybeInfo.Kind != air.TypeMaybe {
 		return loweredExpr{}, fmt.Errorf("maybe set target is not Maybe")
 	}
@@ -5864,13 +6363,14 @@ func (l *lowerer) lowerMaybeSet(fn air.Function, expr air.Expr) (loweredExpr, er
 		target = loweredTarget.expr
 		targetStmts = loweredTarget.stmts
 	}
+	target = l.valueThroughReference(expr.Target.Type, target)
 	valueExpr := value.expr
 	stmts := append(append([]ast.Stmt{}, targetStmts...), value.stmts...)
 	if l.isVoidType(maybeInfo.Elem) || isVoidExpr(valueExpr) {
 		stmts = l.appendVoidValueEval(stmts, valueExpr)
 		valueExpr = l.voidValueExpr()
 	}
-	some, err := l.maybeSomeExpr(expr.Target.Type, valueExpr)
+	some, err := l.maybeSomeExpr(maybeType, valueExpr)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -5888,7 +6388,11 @@ func (l *lowerer) lowerMaybeClear(fn air.Function, expr air.Expr) (loweredExpr, 
 	if !validTypeID(l.program, expr.Target.Type) {
 		return loweredExpr{}, fmt.Errorf("maybe clear target type is invalid")
 	}
-	maybeInfo := l.program.Types[expr.Target.Type-1]
+	maybeType := expr.Target.Type
+	if referent, reference := l.referentType(maybeType); reference {
+		maybeType = referent
+	}
+	maybeInfo := l.program.Types[maybeType-1]
 	if maybeInfo.Kind != air.TypeMaybe {
 		return loweredExpr{}, fmt.Errorf("maybe clear target is not Maybe")
 	}
@@ -5904,7 +6408,8 @@ func (l *lowerer) lowerMaybeClear(fn air.Function, expr air.Expr) (loweredExpr, 
 		target = loweredTarget.expr
 		targetStmts = loweredTarget.stmts
 	}
-	none, err := l.maybeNoneExpr(expr.Target.Type)
+	target = l.valueThroughReference(expr.Target.Type, target)
+	none, err := l.maybeNoneExpr(maybeType)
 	if err != nil {
 		return loweredExpr{}, err
 	}
@@ -6647,24 +7152,20 @@ func (l *lowerer) lowerMakeClosure(fn air.Function, expr air.Expr) (loweredExpr,
 	callArgs := make([]ast.Expr, 0, len(expr.CaptureLocals)+len(closureFn.Signature.Params))
 	stmts := []ast.Stmt{}
 	for i, local := range expr.CaptureLocals {
-		argExpr := ast.Expr(ast.NewIdent(l.localName(fn, local)))
-		if i < len(closureFn.Captures) {
-			capture := closureFn.Captures[i]
-			captureParam := air.Param{Name: capture.Name, Type: capture.Type}
-			if int(capture.Local) >= 0 && int(capture.Local) < len(closureFn.Locals) {
-				local := closureFn.Locals[capture.Local]
-				captureParam.Mutable = local.Mutable || local.Reference
-			}
-			var setup []ast.Stmt
-			var post []ast.Stmt
-			argExpr, setup, post, err = l.adaptCallArgWithStmts(fn, air.Expr{Kind: air.ExprLoadLocal, Type: capture.Type, Local: local}, argExpr, captureParam, false)
-			if err != nil {
-				return loweredExpr{}, err
-			}
-			stmts = append(stmts, setup...)
-			stmts = append(stmts, post...)
+		if i >= len(closureFn.Captures) {
+			return loweredExpr{}, fmt.Errorf("closure %s missing capture metadata %d", closureFn.Name, i)
 		}
-		callArgs = append(callArgs, argExpr)
+		capture := closureFn.Captures[i]
+		captured := l.localValueExpr(fn, local)
+		if capture.Mode == air.CaptureSlot {
+			captured = addressOfPlace(l.localAssignExpr(fn, local))
+		}
+		// Snapshot either the current value/handle or the stable slot pointer
+		// when the closure value is created. The wrapper must not reevaluate an
+		// outer variable on each invocation (ADR 0057).
+		temp := l.nextTemp()
+		stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.DEFINE, Rhs: []ast.Expr{captured}})
+		callArgs = append(callArgs, ast.NewIdent(temp))
 	}
 	params := []*ast.Field{}
 	for i, param := range closureFn.Signature.Params {
@@ -6841,10 +7342,8 @@ func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, err
 		return loweredExpr{}, err
 	}
 	elemType := air.NoType
-	if validTypeID(l.program, expr.Target.Type) {
-		if info := l.program.Types[expr.Target.Type-1]; info.Kind == air.TypeList {
-			elemType = info.Elem
-		}
+	if info, ok := l.typeInfoThroughReference(expr.Target.Type); ok && info.Kind == air.TypeList {
+		elemType = info.Elem
 	}
 	var value loweredExpr
 	if elemType != air.NoType {
@@ -6857,12 +7356,13 @@ func (l *lowerer) lowerListSet(fn air.Function, expr air.Expr) (loweredExpr, err
 	}
 	stmts := append(target.stmts, index.stmts...)
 	stmts = append(stmts, value.stmts...)
+	targetExpr := l.valueThroughReference(expr.Target.Type, target.expr)
 	valueExpr := value.expr
 	if l.isVoidType(elemType) || isVoidExpr(valueExpr) {
 		stmts = l.appendVoidValueEval(stmts, valueExpr)
 		valueExpr = l.voidValueExpr()
 	}
-	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: index.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}})
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: targetExpr, Index: index.expr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("true")}, nil
 }
 
@@ -6884,12 +7384,13 @@ func (l *lowerer) lowerListSwap(fn air.Function, expr air.Expr) (loweredExpr, er
 	}
 	leftName := l.nextTemp()
 	rightName := l.nextTemp()
+	targetExpr := l.valueThroughReference(expr.Target.Type, target.expr)
 	stmts := append(target.stmts, left.stmts...)
 	stmts = append(stmts, right.stmts...)
 	stmts = append(stmts,
 		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(leftName)}, Tok: token.DEFINE, Rhs: []ast.Expr{left.expr}},
 		&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(rightName)}, Tok: token.DEFINE, Rhs: []ast.Expr{right.expr}},
-		&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: ast.NewIdent(leftName)}, &ast.IndexExpr{X: target.expr, Index: ast.NewIdent(rightName)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: ast.NewIdent(rightName)}, &ast.IndexExpr{X: target.expr, Index: ast.NewIdent(leftName)}}},
+		&ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: targetExpr, Index: ast.NewIdent(leftName)}, &ast.IndexExpr{X: targetExpr, Index: ast.NewIdent(rightName)}}, Tok: token.ASSIGN, Rhs: []ast.Expr{&ast.IndexExpr{X: targetExpr, Index: ast.NewIdent(rightName)}, &ast.IndexExpr{X: targetExpr, Index: ast.NewIdent(leftName)}}},
 	)
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 }
@@ -6905,6 +7406,9 @@ func (l *lowerer) lowerListPrepend(fn air.Function, expr air.Expr) (loweredExpr,
 		return loweredExpr{}, fmt.Errorf("invalid list prepend target type")
 	}
 	listInfo := l.program.Types[expr.Target.Type-1]
+	if listInfo.Kind == air.TypeReference && validTypeID(l.program, listInfo.Elem) {
+		listInfo = l.program.Types[listInfo.Elem-1]
+	}
 	if listInfo.Kind != air.TypeList {
 		return loweredExpr{}, fmt.Errorf("list prepend target type kind %d", listInfo.Kind)
 	}
@@ -6925,6 +7429,7 @@ func (l *lowerer) lowerListPrepend(fn air.Function, expr air.Expr) (loweredExpr,
 		}
 		target = l.globalExpr(l.program.Globals[expr.Target.Global])
 	}
+	target = l.valueThroughReference(expr.Target.Type, target)
 	valueExpr := value.expr
 	stmts := append([]ast.Stmt{}, value.stmts...)
 	if l.isVoidType(listInfo.Elem) || isVoidExpr(valueExpr) {
@@ -6949,6 +7454,7 @@ func (l *lowerer) lowerListSort(fn air.Function, expr air.Expr) (loweredExpr, er
 		return loweredExpr{}, err
 	}
 	sortAlias := l.registerImport("sort", "sort")
+	targetExpr := l.valueThroughReference(expr.Target.Type, target.expr)
 	lessFunc := &ast.FuncLit{
 		Type: &ast.FuncType{
 			Params: &ast.FieldList{List: []*ast.Field{
@@ -6959,13 +7465,13 @@ func (l *lowerer) lowerListSort(fn air.Function, expr air.Expr) (loweredExpr, er
 		},
 		Body: &ast.BlockStmt{List: []ast.Stmt{
 			&ast.ReturnStmt{Results: []ast.Expr{&ast.CallExpr{Fun: cmp.expr, Args: []ast.Expr{
-				&ast.IndexExpr{X: target.expr, Index: ast.NewIdent("i")},
-				&ast.IndexExpr{X: target.expr, Index: ast.NewIdent("j")},
+				&ast.IndexExpr{X: targetExpr, Index: ast.NewIdent("i")},
+				&ast.IndexExpr{X: targetExpr, Index: ast.NewIdent("j")},
 			}}}},
 		}},
 	}
 	stmts := append(target.stmts, cmp.stmts...)
-	stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(sortAlias), Sel: ast.NewIdent("SliceStable")}, Args: []ast.Expr{target.expr, lessFunc}}})
+	stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: ast.NewIdent(sortAlias), Sel: ast.NewIdent("SliceStable")}, Args: []ast.Expr{targetExpr, lessFunc}}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 }
 
@@ -6981,12 +7487,8 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 	}
 	var value loweredExpr
 	var err error
-	if validTypeID(l.program, expr.Target.Type) {
-		if info := l.program.Types[expr.Target.Type-1]; info.Kind == air.TypeList {
-			value, err = l.lowerExprWithExpectedType(fn, expr.Args[0], info.Elem)
-		} else {
-			value, err = l.lowerExpr(fn, expr.Args[0])
-		}
+	if info, ok := l.typeInfoThroughReference(expr.Target.Type); ok && info.Kind == air.TypeList {
+		value, err = l.lowerExprWithExpectedType(fn, expr.Args[0], info.Elem)
 	} else {
 		value, err = l.lowerExpr(fn, expr.Args[0])
 	}
@@ -7005,13 +7507,12 @@ func (l *lowerer) lowerListPush(fn air.Function, expr air.Expr) (loweredExpr, er
 		target = loweredTarget.expr
 		targetStmts = loweredTarget.stmts
 	}
+	target = l.valueThroughReference(expr.Target.Type, target)
 	valueExpr := value.expr
 	stmts := append(append([]ast.Stmt{}, targetStmts...), value.stmts...)
-	if validTypeID(l.program, expr.Target.Type) {
-		if info := l.program.Types[expr.Target.Type-1]; info.Kind == air.TypeList && l.isVoidType(info.Elem) {
-			stmts = l.appendVoidValueEval(stmts, valueExpr)
-			valueExpr = l.voidValueExpr()
-		}
+	if info, ok := l.typeInfoThroughReference(expr.Target.Type); ok && info.Kind == air.TypeList && l.isVoidType(info.Elem) {
+		stmts = l.appendVoidValueEval(stmts, valueExpr)
+		valueExpr = l.voidValueExpr()
 	}
 	if isVoidExpr(valueExpr) {
 		valueExpr = l.voidValueExpr()
@@ -7089,7 +7590,7 @@ func (l *lowerer) lowerMapHas(fn air.Function, expr air.Expr) (loweredExpr, erro
 	okName := l.nextTemp()
 	stmts := append(target.stmts, key.stmts...)
 	stmts = append(stmts, decls...)
-	lookup := &ast.IndexExpr{X: target.expr, Index: key.expr}
+	lookup := &ast.IndexExpr{X: l.valueThroughReference(expr.Target.Type, target.expr), Index: key.expr}
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("_"), ast.NewIdent(okName)}, Tok: token.DEFINE, Rhs: []ast.Expr{lookup}})
 	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(temp)}, Tok: token.ASSIGN, Rhs: []ast.Expr{ast.NewIdent(okName)}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent(temp)}, nil
@@ -7342,7 +7843,7 @@ func (l *lowerer) lowerMapGet(fn air.Function, expr air.Expr) (loweredExpr, erro
 	}
 	valueTemp := l.nextTemp()
 	okName := l.nextTemp()
-	lookup := ast.Expr(&ast.IndexExpr{X: target.expr, Index: key.expr})
+	lookup := ast.Expr(&ast.IndexExpr{X: l.valueThroughReference(expr.Target.Type, target.expr), Index: key.expr})
 	stmts := append(target.stmts, key.stmts...)
 	stmts = append(stmts, decls...)
 	someExpr, err := l.maybeSomeExpr(expr.Type, ast.NewIdent(valueTemp))
@@ -7398,7 +7899,7 @@ func (l *lowerer) lowerMapSet(fn air.Function, expr air.Expr) (loweredExpr, erro
 		stmts = l.appendVoidValueEval(stmts, valueExpr)
 		valueExpr = l.voidValueExpr()
 	}
-	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: target.expr, Index: keyExpr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}})
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{&ast.IndexExpr{X: l.valueThroughReference(expr.Target.Type, target.expr), Index: keyExpr}}, Tok: token.ASSIGN, Rhs: []ast.Expr{valueExpr}})
 	return loweredExpr{stmts: stmts, expr: l.voidValueExpr()}, nil
 }
 
@@ -7415,7 +7916,7 @@ func (l *lowerer) lowerMapDelete(fn air.Function, expr air.Expr) (loweredExpr, e
 		return loweredExpr{}, err
 	}
 	stmts := append(target.stmts, key.stmts...)
-	stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("delete"), Args: []ast.Expr{target.expr, key.expr}}})
+	stmts = append(stmts, &ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("delete"), Args: []ast.Expr{l.valueThroughReference(expr.Target.Type, target.expr), key.expr}}})
 	return loweredExpr{stmts: stmts, expr: ast.NewIdent("nil")}, nil
 }
 
@@ -7472,18 +7973,23 @@ func (l *lowerer) lowerMapValueAt(fn air.Function, expr air.Expr) (loweredExpr, 
 		return loweredExpr{}, err
 	}
 	keyExpr := &ast.IndexExpr{X: keys, Index: index.expr}
-	return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: target.expr, Index: keyExpr}}, nil
+	return loweredExpr{stmts: stmts, expr: &ast.IndexExpr{X: l.valueThroughReference(expr.Target.Type, target.expr), Index: keyExpr}}, nil
 }
 
 func (l *lowerer) mapKeysExpr(typeID air.TypeID, mapExpr ast.Expr) (ast.Expr, error) {
-	if !validTypeID(l.program, typeID) {
+	info, ok := l.typeInfoThroughReference(typeID)
+	if !ok {
 		return nil, fmt.Errorf("invalid map type %d", typeID)
 	}
-	info := l.program.Types[typeID-1]
+	mapExpr = l.valueThroughReference(typeID, mapExpr)
 	if info.Kind != air.TypeMap && !(info.Kind == air.TypeForeignType && validTypeID(l.program, info.Key) && validTypeID(l.program, info.Value)) {
 		return nil, fmt.Errorf("type %s is not a map", info.Name)
 	}
-	mapType, err := l.goType(typeID)
+	mapValueType := typeID
+	if referent, reference := l.referentType(typeID); reference {
+		mapValueType = referent
+	}
+	mapType, err := l.goType(mapValueType)
 	if err != nil {
 		return nil, err
 	}
@@ -7529,6 +8035,35 @@ func mustTypeExpr(l *lowerer, typeID air.TypeID) ast.Expr {
 	return typ
 }
 
+func (l *lowerer) lowerTraitReferenceProjection(fn air.Function, expr air.Expr) (loweredExpr, error) {
+	if expr.Target == nil || !l.isReferenceType(expr.Type) || !validImplID(l.program, expr.Impl) {
+		return loweredExpr{}, fmt.Errorf("invalid mutable trait reference projection")
+	}
+	reference := l.program.Types[expr.Type-1]
+	if !l.isTraitObjectType(reference.Elem) {
+		return loweredExpr{}, fmt.Errorf("mutable trait projection destination is not a trait reference")
+	}
+	traitID := l.program.Types[reference.Elem-1].Trait
+	if !validTraitID(l.program, traitID) {
+		return loweredExpr{}, fmt.Errorf("invalid mutable trait projection trait %d", traitID)
+	}
+	trait := l.program.Traits[traitID]
+	target, err := l.lowerExpr(fn, *expr.Target)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	refType, err := l.mutableTraitRefType(reference.Elem)
+	if err != nil {
+		return loweredExpr{}, err
+	}
+	impl := l.program.Impls[expr.Impl]
+	value := &ast.CompositeLit{Type: refType, Elts: []ast.Expr{
+		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitTargetFieldName(trait)), Value: target.expr},
+		&ast.KeyValueExpr{Key: ast.NewIdent(mutableTraitVTableFieldName(trait)), Value: &ast.UnaryExpr{Op: token.AND, X: ast.NewIdent(mutableTraitImplVTableName(trait, impl.ID))}},
+	}}
+	return loweredExpr{stmts: target.stmts, expr: value}, nil
+}
+
 func (l *lowerer) lowerTraitCall(fn air.Function, expr air.Expr) (loweredExpr, error) {
 	if expr.Target == nil {
 		return loweredExpr{}, fmt.Errorf("trait call missing target")
@@ -7546,6 +8081,9 @@ func (l *lowerer) lowerTraitCall(fn air.Function, expr air.Expr) (loweredExpr, e
 	}
 	method := trait.Methods[expr.Method]
 	targetIsTraitObject := validTypeID(l.program, expr.Target.Type) && l.program.Types[expr.Target.Type-1].Kind == air.TypeTraitObject
+	if l.isReferenceType(expr.Target.Type) {
+		targetIsTraitObject = l.isTraitObjectType(l.program.Types[expr.Target.Type-1].Elem)
+	}
 	if trait.Name == "ToString" && method.Name == "to_str" && !targetIsTraitObject {
 		return loweredExpr{stmts: target.stmts, expr: l.toStringExpr(expr.Target.Type, target.expr)}, nil
 	}
@@ -7585,6 +8123,9 @@ func (l *lowerer) lowerNativeTraitInterfaceCall(fn air.Function, target loweredE
 }
 
 func (l *lowerer) exprIsMutableReference(fn air.Function, expr air.Expr) bool {
+	if l.isReferenceType(expr.Type) {
+		return true
+	}
 	switch expr.Kind {
 	case air.ExprLoadLocal:
 		return l.localIsPointerParam(fn, expr.Local)
@@ -7616,7 +8157,13 @@ func (l *lowerer) lowerMutableTraitRefCall(fn air.Function, target loweredExpr, 
 	}
 	stmts := append([]ast.Stmt{}, target.stmts...)
 	stmts = append(stmts, argStmts...)
-	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(mutableTraitMethodFieldName(trait.ID, expr.Method))}, Args: args}
+	handleName := l.nextTemp()
+	stmts = append(stmts, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(handleName)}, Tok: token.DEFINE, Rhs: []ast.Expr{target.expr}})
+	handle := ast.NewIdent(handleName)
+	callArgs := []ast.Expr{&ast.SelectorExpr{X: handle, Sel: ast.NewIdent(mutableTraitTargetFieldName(trait))}}
+	callArgs = append(callArgs, args...)
+	vtable := &ast.SelectorExpr{X: handle, Sel: ast.NewIdent(mutableTraitVTableFieldName(trait))}
+	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: vtable, Sel: ast.NewIdent(mutableTraitMethodFieldName(trait.ID, expr.Method))}, Args: callArgs}
 	return l.finishCallWithWriteback(expr.Type, method.Signature.ReturnReference, stmts, call, writeback)
 }
 
@@ -8094,11 +8641,13 @@ func (l *lowerer) canInlineClosureFunction(fn air.Function) bool {
 		return false
 	}
 	for _, capture := range fn.Captures {
-		if int(capture.Local) >= 0 && int(capture.Local) < len(fn.Locals) {
-			local := fn.Locals[capture.Local]
-			if local.Mutable || local.Reference {
-				return false
-			}
+		if capture.Mode != air.CaptureValue {
+			// Reference-handle snapshots and slot pointers must consume finalized
+			// capture metadata through the lifted wrapper (ADR 0057).
+			return false
+		}
+		if int(capture.Local) >= 0 && int(capture.Local) < len(fn.Locals) && fn.Locals[capture.Local].Mutable {
+			return false
 		}
 	}
 	return !functionDirectlyReferences(fn.Body, fn.ID)

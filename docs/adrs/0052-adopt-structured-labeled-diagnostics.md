@@ -4,6 +4,11 @@
 
 Accepted
 
+Amended by ADR 0057. The structured diagnostic architecture remains accepted,
+but diagnostics described as mutable references to immutable values are
+replaced by addressability, reference-destination, slot-write, and
+whole-referent-write diagnostics.
+
 ## Context
 
 Ard checker diagnostics currently contain a severity, one message, one file path, and one parser location:

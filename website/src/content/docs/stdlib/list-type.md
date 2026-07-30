@@ -32,46 +32,46 @@ let missing = values.at(9)     // Int?
 
 ### `fn push(value: T) Int`
 
-Append `value` to a mutable list and return the new length.
+Append `value` through a list reference and return the new length.
 
 ```ard
-mut values: [Int] = []
+let values = mut [1]
 let size = values.push(42)
 ```
 
 ### `fn prepend(value: T) Int`
 
-Insert `value` at the beginning of a mutable list and return the new length.
+Insert `value` at the beginning through a list reference and return the new length.
 
 ```ard
-mut values = [2, 3]
+let values = mut [2, 3]
 values.prepend(1)
 ```
 
 ### `fn set(index: Int, value: T) Bool`
 
-Replace the element at `index` in a mutable list. Returns `true` if the index existed, or `false` if it was out of bounds.
+Replace the element at `index` through a list reference. Returns `true` if the index existed, or `false` if it was out of bounds.
 
 ```ard
-mut values = [1, 2, 3]
+let values = mut [1, 2, 3]
 let updated = values.set(1, 20)
 ```
 
 ### `fn swap(l: Int, r: Int)`
 
-Swap two elements in a mutable list.
+Swap two elements through a list reference.
 
 ```ard
-mut values = [1, 2, 3]
+let values = mut [1, 2, 3]
 values.swap(0, 2)
 ```
 
 ### `fn sort(cmp: fn(T, T) Bool)`
 
-Sort a mutable list using a comparison callback. The callback returns `true` when the first argument should come before the second.
+Sort through a list reference using a comparison callback. The callback returns `true` when the first argument should come before the second.
 
 ```ard
-mut values = [3, 1, 2]
+let values = mut [3, 1, 2]
 values.sort(fn(a: Int, b: Int) Bool { a < b })
 ```
 

@@ -4,6 +4,16 @@
 
 Accepted
 
+Superseded in part by ADR 0057. Trait-specific forwarding remains the interior
+dispatch representation for `mut Trait`, but ordinary values no longer
+implicitly borrow into it, ordinary `mut T-value` bindings are not
+interior-mutable, references do not materialize trait values implicitly, and
+Ard source no longer performs whole-referent assignment through the forwarding
+table. The motivating example below uses historical implicit-borrow and
+direct-field-mutation forms; ADR 0057 requires explicit references at those
+sites. Forwarding handles copy and rebind with the pointer-value behavior defined
+by ADR 0057.
+
 ## Context
 
 ADR 0022 defines `mut T` in type positions as a mutable reference. For concrete types, backends can usually represent that reference with a pointer, cell, or equivalent stable storage handle.

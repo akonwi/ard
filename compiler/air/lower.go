@@ -668,6 +668,20 @@ func (l *lowerer) declareClosureFunction(module ModuleID, keyName string, def *c
 	return id, nil
 }
 
+func lowerForeignArgModes(params []checker.Parameter, count int) []ForeignArgMode {
+	modes := make([]ForeignArgMode, count)
+	for index := 0; index < count && len(params) > 0; index++ {
+		paramIndex := index
+		if paramIndex >= len(params) {
+			paramIndex = len(params) - 1
+		}
+		if params[paramIndex].ForeignABI == checker.ForeignParameterDescriptorValue {
+			modes[index] = ForeignArgDescriptorValue
+		}
+	}
+	return modes
+}
+
 func lowerForeignResultShape(shape checker.ForeignResultShape) ForeignResultShape {
 	switch shape {
 	case checker.ForeignResultDirect:
@@ -919,7 +933,9 @@ func (fl *functionLowerer) bindTypeVars(pattern checker.Type, actual TypeID) {
 			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
 		}
 	case *checker.MutableRef:
-		fl.bindTypeVars(typ.Of(), actual)
+		if actualInfo.Kind == TypeReference {
+			fl.bindTypeVars(typ.Of(), actualInfo.Elem)
+		}
 	case *checker.Result:
 		if actualInfo.Kind == TypeResult {
 			fl.bindTypeVars(typ.Val(), actualInfo.Value)
@@ -1082,39 +1098,27 @@ func (fl *functionLowerer) internResolvedStructType(typ *checker.StructDef) (Typ
 	return fl.internStructTypeWithInterner(typ, fl.internResolvedType)
 }
 
-// internFunctionParamType interns a function parameter's type and reports its
-// effective AIR mutability, reconciling the two ways a `mut T` parameter is
-// represented (a MutableRef baked into the type, or the Mutable flag with a
-// plain type).
+// internFunctionParamType preserves first-class reference identity in the
+// parameter TypeID. Mutable remains a derived compatibility flag for targets
+// that have not yet migrated off the pre-ADR AIR shape.
 func (l *lowerer) internFunctionParamType(param checker.Parameter, intern func(checker.Type) (TypeID, error)) (TypeID, bool, error) {
-	underlying := param.Type
 	mutable := param.Mutable
-	if ref, ok := param.Type.(*checker.MutableRef); ok {
-		underlying = ref.Of()
+	if _, ok := param.Type.(*checker.MutableRef); ok {
 		mutable = true
 	}
-	// A pointer-shaped foreign Go param is its own mutability marker: imported
-	// Go signatures never set the Mutable flag while `mut pkg::T` spellings
-	// do. Normalize to mutable so checker-equal function types intern to the
-	// same AIR type (mirrors checker.normalizedParamMutability).
-	if foreign, ok := underlying.(*checker.ForeignType); ok && foreign.Pointer {
+	// An exact foreign pointer remains a foreign pointer type rather than an
+	// Ard TypeReference, but still carries the legacy parameter flag.
+	if foreign, ok := param.Type.(*checker.ForeignType); ok && foreign.Pointer {
 		mutable = true
 	}
-	if mutable {
-		id, err := intern(underlying)
-		return id, true, err
-	}
-	id, err := intern(underlying)
-	return id, false, err
+	id, err := intern(param.Type)
+	return id, mutable, err
 }
 
 func (l *lowerer) internStructFieldType(fieldTypeValue checker.Type, intern func(checker.Type) (TypeID, error)) (TypeID, bool, error) {
-	if ref, ok := fieldTypeValue.(*checker.MutableRef); ok {
-		id, err := intern(ref.Of())
-		return id, true, err
-	}
+	_, reference := fieldTypeValue.(*checker.MutableRef)
 	id, err := intern(fieldTypeValue)
-	return id, false, err
+	return id, reference, err
 }
 
 func nominalStructApplicationKey(modulePath, name string, args []TypeID) string {
@@ -1124,11 +1128,7 @@ func nominalStructApplicationKey(modulePath, name string, args []TypeID) string 
 func (l *lowerer) internGenericArgument(t checker.Type, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
 	switch typ := t.(type) {
 	case *checker.MutableRef:
-		elem, err := l.internGenericArgument(typ.Of(), intern)
-		if err != nil {
-			return NoType, err
-		}
-		return l.internSyntheticType("mut "+l.typeName(elem), TypeInfo{Kind: TypeReference, Elem: elem})
+		return intern(typ)
 	case *checker.List:
 		elem, err := l.internGenericArgument(typ.Of(), intern)
 		if err != nil {
@@ -1415,21 +1415,17 @@ func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, 
 		}
 		return fl.l.internSyntheticType("["+fl.l.typeName(key)+":"+fl.l.typeName(value)+"]", TypeInfo{Kind: TypeMap, Key: key, Value: value})
 	case *checker.Maybe:
-		elemType := typ.Of()
-		elemMutable := false
-		if ref, ok := resolvedMutableReferenceType(elemType); ok {
-			elemMutable = true
-			elemType = ref.Of()
-		}
-		elem, err := fl.internResolvedType(elemType)
+		elem, err := fl.internResolvedType(typ.Of())
 		if err != nil {
 			return NoType, err
 		}
-		name := fl.l.typeName(elem) + "?"
-		if elemMutable {
-			name = "(mut " + fl.l.typeName(elem) + ")?"
+		return fl.l.internSyntheticType(fl.l.typeName(elem)+"?", TypeInfo{Kind: TypeMaybe, Elem: elem})
+	case *checker.MutableRef:
+		elem, err := fl.internResolvedType(typ.Of())
+		if err != nil {
+			return NoType, err
 		}
-		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeMaybe, Elem: elem, ElemMutable: elemMutable})
+		return fl.l.internSyntheticType("mut "+fl.l.typeName(elem), TypeInfo{Kind: TypeReference, Elem: elem})
 	case *checker.Result:
 		value, err := fl.internResolvedType(typ.Val())
 		if err != nil {
@@ -1516,21 +1512,17 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 		}
 		return fl.l.internSyntheticType("["+fl.l.typeName(key)+":"+fl.l.typeName(value)+"]", TypeInfo{Kind: TypeMap, Key: key, Value: value})
 	case *checker.Maybe:
-		elemType := typ.Of()
-		elemMutable := false
-		if ref, ok := resolvedMutableReferenceType(elemType); ok {
-			elemMutable = true
-			elemType = ref.Of()
-		}
-		elem, err := fl.internType(elemType)
+		elem, err := fl.internType(typ.Of())
 		if err != nil {
 			return NoType, err
 		}
-		name := fl.l.typeName(elem) + "?"
-		if elemMutable {
-			name = "(mut " + fl.l.typeName(elem) + ")?"
+		return fl.l.internSyntheticType(fl.l.typeName(elem)+"?", TypeInfo{Kind: TypeMaybe, Elem: elem})
+	case *checker.MutableRef:
+		elem, err := fl.internType(typ.Of())
+		if err != nil {
+			return NoType, err
 		}
-		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeMaybe, Elem: elem, ElemMutable: elemMutable})
+		return fl.l.internSyntheticType("mut "+fl.l.typeName(elem), TypeInfo{Kind: TypeReference, Elem: elem})
 	case *checker.Result:
 		value, err := fl.internType(typ.Val())
 		if err != nil {
@@ -1767,8 +1759,12 @@ func (l *lowerer) declareMethodFunction(module ModuleID, owner checker.Type, tra
 	if receiver == "" {
 		receiver = "self"
 	}
+	receiverType, err := l.methodReceiverType(ownerType, def.Mutates)
+	if err != nil {
+		return NoFunction, err
+	}
 	params := make([]Param, 0, len(def.Parameters)+1)
-	params = append(params, Param{Name: receiver, Type: ownerType, Mutable: def.Mutates})
+	params = append(params, Param{Name: receiver, Type: receiverType, Mutable: def.Mutates})
 	for _, param := range def.Parameters {
 		typeID, err := l.internType(param.Type)
 		if err != nil {
@@ -1826,8 +1822,12 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 	if receiver == "" {
 		receiver = "self"
 	}
+	receiverType, err := l.methodReceiverType(ownerType, def.Mutates)
+	if err != nil {
+		return NoFunction, err
+	}
 	params := make([]Param, 0, len(def.Parameters)+1)
-	params = append(params, Param{Name: receiver, Type: ownerType, Mutable: def.Mutates})
+	params = append(params, Param{Name: receiver, Type: receiverType, Mutable: def.Mutates})
 	for i, param := range def.Parameters {
 		paramType := param.Type
 		if typeHasUnresolvedTypeVar(paramType) && i < len(args) {
@@ -1878,8 +1878,12 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 	if receiver == "" {
 		receiver = "self"
 	}
+	receiverType, err := fl.l.methodReceiverType(ownerType, def.Mutates)
+	if err != nil {
+		return NoFunction, err
+	}
 	params := make([]Param, 0, len(def.Parameters)+1)
-	params = append(params, Param{Name: receiver, Type: ownerType, Mutable: def.Mutates})
+	params = append(params, Param{Name: receiver, Type: receiverType, Mutable: def.Mutates})
 	for i, param := range def.Parameters {
 		paramType := param.Type
 		if typeHasUnresolvedTypeVar(paramType) && i < len(args) {
@@ -2031,8 +2035,14 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 	prevOwner := fl.l.defParamOwner
 	fl.l.defParams = params
 	fl.l.defParamOwner = paramOwner
+	receiverType, err := fl.l.methodReceiverType(recvType, orig.Mutates)
+	if err != nil {
+		fl.l.defParams = prev
+		fl.l.defParamOwner = prevOwner
+		return NoFunction, nil, err
+	}
 	methodParams := make([]Param, 0, len(orig.Parameters)+1)
-	methodParams = append(methodParams, Param{Name: receiver, Type: recvType, Mutable: orig.Mutates})
+	methodParams = append(methodParams, Param{Name: receiver, Type: receiverType, Mutable: orig.Mutates})
 	for _, p := range orig.Parameters {
 		tid, err := fl.l.internType(p.Type)
 		if err != nil {
@@ -2300,7 +2310,11 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		}
 	}
 	if ref, ok := t.(*checker.MutableRef); ok {
-		return l.internType(ref.Of())
+		elem, err := l.internType(ref.Of())
+		if err != nil {
+			return NoType, err
+		}
+		return l.internSyntheticType("mut "+l.typeName(elem), TypeInfo{Kind: TypeReference, Elem: elem})
 	}
 	if typ, ok := t.(*checker.StructDef); ok && len(typ.TypeArgs) > 0 {
 		return l.internStructApplicationWithInterner(typ, l.internType)
@@ -2385,21 +2399,12 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		info.Key = key
 		info.Value = value
 	case *checker.Maybe:
-		elemType := typ.Of()
-		elemMutable := false
-		if ref, ok := resolvedMutableReferenceType(elemType); ok {
-			elemMutable = true
-			elemType = ref.Of()
-		}
-		elem, err := l.internType(elemType)
+		elem, err := l.internType(typ.Of())
 		if err != nil {
 			return NoType, err
 		}
 		info.Kind = TypeMaybe
 		info.Elem = elem
-		info.ElemMutable = elemMutable
-	case *checker.MutableRef:
-		return l.internType(typ.Of())
 	case *checker.Result:
 		value, err := l.internType(typ.Val())
 		if err != nil {
@@ -2568,6 +2573,16 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	return id, nil
 }
 
+func (l *lowerer) methodReceiverType(owner TypeID, mutates bool) (TypeID, error) {
+	if !mutates {
+		return owner, nil
+	}
+	if info, ok := l.typeInfo(owner); ok && info.Kind == TypeReference {
+		return owner, nil
+	}
+	return l.internSyntheticType("mut "+l.typeName(owner), TypeInfo{Kind: TypeReference, Elem: owner})
+}
+
 func (l *lowerer) internSyntheticType(name string, info TypeInfo) (TypeID, error) {
 	key := syntheticTypeKey(name, info)
 	if id, ok := l.typeByKey[key]; ok {
@@ -2598,7 +2613,7 @@ func syntheticTypeKey(name string, info TypeInfo) string {
 	case TypeMap:
 		return fmt.Sprintf("map:%d:%d", info.Key, info.Value)
 	case TypeMaybe:
-		return fmt.Sprintf("maybe:%d:%t", info.Elem, info.ElemMutable)
+		return fmt.Sprintf("maybe:%d", info.Elem)
 	case TypeResult:
 		return fmt.Sprintf("result:%d:%d", info.Value, info.Error)
 	case TypeFunction:
@@ -3612,6 +3627,76 @@ func (fl *functionLowerer) lowerUnionWrapIfNeeded(expr checker.Expression, expec
 	return nil, false, nil
 }
 
+func referencePlaceRootLocal(expr *Expr) (LocalID, bool) {
+	if expr == nil {
+		return 0, false
+	}
+	switch expr.Kind {
+	case ExprLoadLocal:
+		return expr.Local, true
+	case ExprGetField, ExprForeignFieldAccess:
+		return referencePlaceRootLocal(expr.Target)
+	default:
+		return 0, false
+	}
+}
+
+func lowerReferenceMode(mode checker.ReferenceMode) (ReferenceMode, error) {
+	switch mode {
+	case checker.ExistingReference:
+		return ExistingReference, nil
+	case checker.AddressablePlace:
+		return AddressablePlace, nil
+	case checker.FreshValue:
+		return FreshValue, nil
+	default:
+		return InvalidReferenceMode, fmt.Errorf("unsupported checker reference mode %d", mode)
+	}
+}
+
+func (fl *functionLowerer) lowerReferenceTraitProjection(typeID TypeID, projection *checker.ReferenceTraitProjection) (*Expr, error) {
+	expectedRef, ok := fl.l.typeInfo(typeID)
+	if !ok || expectedRef.Kind != TypeReference {
+		return nil, fmt.Errorf("trait reference projection has non-reference destination %d", typeID)
+	}
+	traitInfo, ok := fl.l.typeInfo(expectedRef.Elem)
+	if !ok || traitInfo.Kind != TypeTraitObject {
+		return nil, fmt.Errorf("trait reference projection has non-trait referent %d", expectedRef.Elem)
+	}
+	actualRefID, err := fl.internType(projection.Value.Type())
+	if err != nil {
+		return nil, err
+	}
+	actualRef, ok := fl.l.typeInfo(actualRefID)
+	if !ok || actualRef.Kind != TypeReference {
+		return nil, fmt.Errorf("trait reference projection source has non-reference type %d", actualRefID)
+	}
+	if err := fl.l.ensureModuleImportTraitImplsDeclared(fl.fn.Module); err != nil {
+		return nil, err
+	}
+	if actualInfo, ok := fl.l.typeInfo(actualRef.Elem); ok && actualInfo.ModulePath != "" {
+		if err := fl.l.ensureModuleTraitImplsDeclared(actualInfo.ModulePath); err != nil {
+			return nil, err
+		}
+	}
+	impl, ok := fl.l.lookupImpl(traitInfo.Trait, actualRef.Elem)
+	if !ok {
+		var declareErr error
+		impl, ok, declareErr = fl.l.declareBuiltinTraitImpl(fl.fn.Module, traitInfo.Trait, actualRef.Elem)
+		if declareErr != nil {
+			return nil, declareErr
+		}
+	}
+	if !ok {
+		return nil, fmt.Errorf("missing trait impl %d for reference referent %d", traitInfo.Trait, actualRef.Elem)
+	}
+	value, err := fl.lowerExpr(projection.Value)
+	if err != nil {
+		return nil, err
+	}
+	return &Expr{Kind: ExprTraitRefProject, Type: typeID, Target: value, Impl: impl, Trait: traitInfo.Trait}, nil
+}
+
 func (fl *functionLowerer) lowerTraitUpcastIfNeeded(expr checker.Expression, expected TypeID) (*Expr, bool, error) {
 	expectedInfo, ok := fl.l.typeInfo(expected)
 	if !ok || expectedInfo.Kind != TypeTraitObject {
@@ -3725,6 +3810,7 @@ func (fl *functionLowerer) lowerStmt(stmt checker.Statement) (*Stmt, error) {
 			if err != nil {
 				return nil, err
 			}
+			fl.markCaptureSlot(local)
 			return &Stmt{Kind: StmtAssign, Local: local, Value: value}, nil
 		case *checker.InstanceProperty:
 			return fl.lowerFieldAssignment(target, s.Value)
@@ -4422,7 +4508,11 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Expr{Kind: ExprForeignMethodValue, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape)}, nil
+		var argModes []ForeignArgMode
+		if methodDef, ok := e.Type().(*checker.FunctionDef); ok {
+			argModes = lowerForeignArgModes(methodDef.Parameters, len(methodDef.Parameters))
+		}
+		return &Expr{Kind: ExprForeignMethodValue, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: argModes}, nil
 	case *checker.ForeignMethodCall:
 		target, err := fl.lowerExpr(e.Subject)
 		if err != nil {
@@ -4447,7 +4537,11 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			args[i] = *lowered
 		}
-		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), Args: args}, nil
+		var argModes []ForeignArgMode
+		if methodDef != nil {
+			argModes = lowerForeignArgModes(methodDef.Parameters, len(args))
+		}
+		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: argModes, Args: args}, nil
 	case *checker.UnsafeCast:
 		value, err := fl.lowerExprWithExpected(e.Value, fl.l.mustIntern(checker.Any))
 		if err != nil {
@@ -4485,10 +4579,24 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		// typeID interns the referent type (MutableRef interns to its base;
-		// pointer foreigns keep their pointer identity). The backend decides
-		// per representation whether an address-of is involved.
-		return &Expr{Kind: ExprMutRef, Type: typeID, Target: operand, Bool: e.Fresh}, nil
+		mode, err := lowerReferenceMode(e.Mode)
+		if err != nil {
+			return nil, err
+		}
+		if mode == AddressablePlace {
+			if root, ok := referencePlaceRootLocal(operand); ok {
+				fl.markCaptureSlot(root)
+			}
+		}
+		return &Expr{Kind: ExprMutRef, Type: typeID, Target: operand, ReferenceMode: mode}, nil
+	case *checker.DerefExpr:
+		operand, err := fl.lowerExpr(e.Operand)
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprDeref, Type: typeID, Target: operand, Observational: e.Observational}, nil
+	case *checker.ReferenceTraitProjection:
+		return fl.lowerReferenceTraitProjection(typeID, e)
 	case *checker.ForeignFunctionCall:
 		if e.PointerResult && fl.directLetValue != checker.Expression(e) {
 			return nil, fmt.Errorf("a Go call returning %s must be bound directly with let", e.Call.Type())
@@ -4514,7 +4622,7 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			typeArgs = append(typeArgs, argID)
 		}
-		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), Args: args}, nil
+		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: lowerForeignArgModes(fnDef.Parameters, len(args)), Args: args}, nil
 	case *checker.ModuleFunctionCall:
 		if kind, ok := resultConstructorKind(e); ok {
 			return fl.lowerResultConstructor(kind, typeID, e)
@@ -5224,7 +5332,9 @@ func (fl *functionLowerer) lowerOptionMatch(typeID TypeID, match *checker.Option
 	pattern := match.Some.Pattern.Name
 	oldLocal, hadOldLocal := fl.locals[pattern]
 	someLocal := fl.defineLocal(pattern, maybeType.Elem, false)
-	fl.fn.Locals[someLocal].Reference = maybeType.ElemMutable
+	if elem, ok := fl.l.typeInfo(maybeType.Elem); ok {
+		fl.fn.Locals[someLocal].Reference = elem.Kind == TypeReference || (elem.Kind == TypeForeignType && elem.ForeignPointer)
+	}
 	someBlock, err := fl.lowerBlockWithDefault(match.Some.Body.Stmts, typeID)
 	if hadOldLocal {
 		fl.locals[pattern] = oldLocal
@@ -5260,8 +5370,10 @@ func (fl *functionLowerer) lowerMaybeMethod(typeID TypeID, method *checker.Maybe
 	}
 
 	returnsReference := false
-	if maybeType, ok := fl.l.typeInfo(target.Type); ok && maybeType.Kind == TypeMaybe {
-		returnsReference = maybeType.ElemMutable
+	if maybeType, ok := fl.l.referentTypeInfo(target.Type); ok && maybeType.Kind == TypeMaybe {
+		if elem, ok := fl.l.typeInfo(maybeType.Elem); ok {
+			returnsReference = elem.Kind == TypeReference
+		}
 	}
 	var kind ExprKind
 	switch method.Kind {
@@ -5351,7 +5463,7 @@ func (fl *functionLowerer) lowerListMethod(typeID TypeID, method *checker.ListMe
 	if err != nil {
 		return nil, err
 	}
-	listType, ok := fl.l.typeInfo(target.Type)
+	listType, ok := fl.l.referentTypeInfo(target.Type)
 	if !ok {
 		return nil, fmt.Errorf("List method lowered with non-list subject %s", method.Subject.Type().String())
 	}
@@ -5413,7 +5525,7 @@ func (fl *functionLowerer) lowerMapMethod(typeID TypeID, method *checker.MapMeth
 	if err != nil {
 		return nil, err
 	}
-	mapType, ok := fl.l.typeInfo(target.Type)
+	mapType, ok := fl.l.referentTypeInfo(target.Type)
 	if !ok || (mapType.Kind != TypeMap && !(mapType.Kind == TypeForeignType && mapType.Key != NoType && mapType.Value != NoType)) {
 		return nil, fmt.Errorf("Map method lowered with non-map subject %s", method.Subject.Type().String())
 	}
@@ -5757,7 +5869,7 @@ func (fl *functionLowerer) lowerInstanceProperty(typeID TypeID, prop *checker.In
 	if err != nil {
 		return nil, err
 	}
-	targetInfo, ok := fl.l.typeInfo(target.Type)
+	targetInfo, ok := fl.l.referentTypeInfo(target.Type)
 	if !ok || targetInfo.Kind != TypeStruct {
 		return nil, fmt.Errorf("property access on non-struct AIR type %s", prop.Subject.Type().String())
 	}
@@ -5808,7 +5920,7 @@ func (fl *functionLowerer) lowerFieldAssignment(prop *checker.InstanceProperty, 
 	if err != nil {
 		return nil, err
 	}
-	targetInfo, ok := fl.l.typeInfo(target.Type)
+	targetInfo, ok := fl.l.referentTypeInfo(target.Type)
 	if !ok || targetInfo.Kind != TypeStruct {
 		return nil, fmt.Errorf("field assignment on non-struct AIR type %s", prop.Subject.Type().String())
 	}
@@ -5861,6 +5973,13 @@ func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef)
 	fn.Captures = child.fn.Captures
 	fn.Locals = child.fn.Locals
 	fl.l.program.Functions[id] = fn
+	for index, capture := range fn.Captures {
+		if capture.Mode == CaptureSlot && index < len(child.captureLocals) {
+			// A nested slot capture must propagate through every enclosing
+			// closure rather than degrading into a value snapshot.
+			fl.markCaptureSlot(child.captureLocals[index])
+		}
+	}
 
 	return &Expr{Kind: ExprMakeClosure, Type: typeID, Function: id, CaptureLocals: child.captureLocals}, nil
 }
@@ -5896,7 +6015,21 @@ func (fl *functionLowerer) lowerInstanceMethod(typeID TypeID, method *checker.In
 	if err != nil {
 		return nil, err
 	}
-	typeInfo, ok := fl.l.typeInfo(target.Type)
+	if method.ReceiverMode != nil {
+		if method.ReceiverType == nil {
+			return nil, fmt.Errorf("mutating interior receiver has no reference type")
+		}
+		referenceType, err := fl.internType(method.ReceiverType)
+		if err != nil {
+			return nil, err
+		}
+		mode, err := lowerReferenceMode(*method.ReceiverMode)
+		if err != nil {
+			return nil, err
+		}
+		target = &Expr{Kind: ExprMutRef, Type: referenceType, Target: target, ReferenceMode: mode}
+	}
+	typeInfo, ok := fl.l.referentTypeInfo(target.Type)
 	if !ok {
 		return nil, fmt.Errorf("unsupported AIR instance method %s on %s", method.Method.Name, method.Subject.Type().String())
 	}
@@ -5964,6 +6097,14 @@ func (fl *functionLowerer) lowerChanMethod(typeID TypeID, target *Expr, method *
 
 func (fl *functionLowerer) lowerUserInstanceMethod(typeID TypeID, target *Expr, typeInfo TypeInfo, method *checker.InstanceMethod) (*Expr, error) {
 	def := method.Method.Definition()
+	if def != nil && !def.Mutates {
+		if reference, ok := fl.l.typeInfo(target.Type); ok && reference.Kind == TypeReference {
+			// A value-receiver method observes through a reference rather than
+			// passing the handle to a value-shaped receiver parameter. Preserve
+			// that implicit read as an explicit AIR dereference (ADR 0057).
+			target = &Expr{Kind: ExprDeref, Type: reference.Elem, Target: target, Observational: true}
+		}
+	}
 	if def == nil || def.Body == nil {
 		if expr, ok, err := fl.lowerStaticTraitMethod(typeID, target, method); ok || err != nil {
 			return expr, err
@@ -6035,7 +6176,7 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 	// concrete type arguments and lowers its arguments against their concrete
 	// types.
 	if typeInfo.Generic != NoType && methodUsesOnlyStructTypeParams(def, fl.l.program.Types[typeInfo.Generic-1].TypeParams) {
-		id, typeArgs, err := fl.declareGenericInstanceMethodFunction(module, target.Type, method.StructType, def)
+		id, typeArgs, err := fl.declareGenericInstanceMethodFunction(module, typeInfo.ID, method.StructType, def)
 		if err != nil {
 			return nil, err
 		}
@@ -6056,7 +6197,7 @@ func (fl *functionLowerer) lowerUserDefinedInstanceMethod(typeID TypeID, target 
 		args = append(args, loweredArgs...)
 		return &Expr{Kind: ExprCall, Type: typeID, Function: id, Args: args, TypeArgs: typeArgs}, nil
 	}
-	id, err := fl.declareInstanceMethodFunction(module, typeInfo.Name, target.Type, def, method.Method.Args, typeID)
+	id, err := fl.declareInstanceMethodFunction(module, typeInfo.Name, typeInfo.ID, def, method.Method.Args, typeID)
 	if err != nil {
 		return nil, err
 	}
@@ -6123,8 +6264,21 @@ func (fl *functionLowerer) captureLocal(name string) (LocalID, TypeID, bool, boo
 	fl.fn.Locals[local].Reference = sourceReference
 	fl.captureByName[name] = local
 	fl.captureLocals = append(fl.captureLocals, sourceLocal)
-	fl.fn.Captures = append(fl.fn.Captures, Capture{Name: name, Type: typeID, Local: local})
+	mode := CaptureValue
+	if info, ok := fl.l.typeInfo(typeID); ok && (info.Kind == TypeReference || info.Kind == TypeForeignType && info.ForeignPointer) {
+		mode = CaptureReference
+	}
+	fl.fn.Captures = append(fl.fn.Captures, Capture{Name: name, Type: typeID, Local: local, Mode: mode})
 	return local, typeID, mutable, true, nil
+}
+
+func (fl *functionLowerer) markCaptureSlot(local LocalID) {
+	for index := range fl.fn.Captures {
+		if fl.fn.Captures[index].Local == local {
+			fl.fn.Captures[index].Mode = CaptureSlot
+			return
+		}
+	}
 }
 
 func (fl *functionLowerer) localKind(local LocalID) TypeKind {
@@ -6492,6 +6646,20 @@ func (l *lowerer) typeInfo(id TypeID) (TypeInfo, bool) {
 		return TypeInfo{}, false
 	}
 	return l.program.Types[id-1], true
+}
+
+// referentTypeInfo resolves the one reference layer that observational member
+// and builtin operations act through while preserving the operand's own AIR
+// type and handle identity (ADR 0057).
+func (l *lowerer) referentTypeInfo(id TypeID) (TypeInfo, bool) {
+	info, ok := l.typeInfo(id)
+	if !ok {
+		return TypeInfo{}, false
+	}
+	if info.Kind == TypeReference {
+		return l.typeInfo(info.Elem)
+	}
+	return info, true
 }
 
 func (l *lowerer) lookupImpl(trait TraitID, forType TypeID) (ImplID, bool) {

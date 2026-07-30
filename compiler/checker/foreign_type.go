@@ -162,8 +162,19 @@ func isPointerForeign(t Type) bool {
 // when the type has no supported pointer form (interfaces, maps, already
 // pointer-shaped values, or types without Go metadata).
 func (f *ForeignType) PointerForm() *ForeignType {
-	if f == nil || f.Pointer || f.Interface || f.Target != "go" || f.GoType == nil {
+	if f == nil || f.Pointer || f.Interface || f.Target != "go" {
 		return nil
+	}
+	if f.GoType == nil {
+		// A synthetic foreign type without go/types metadata (embedded or
+		// test resolvers) takes a shallow pointer form so explicit
+		// references still work.
+		pointer := *f
+		pointer.Pointer = true
+		pointer.Methods = f.PointerMethods
+		pointer.UnsupportedMethods = f.UnsupportedPointerMethods
+		pointer.MethodsLoaded = pointer.Methods != nil || pointer.UnsupportedMethods != nil
+		return &pointer
 	}
 	named, ok := f.GoType.(*types.Named)
 	if !ok {

@@ -196,6 +196,7 @@ func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, in
 		param := sig.Params().At(i)
 		goType := param.Type()
 		mutable := false
+		foreignABI := ForeignParameterExact
 		variadic := false
 		if sig.Variadic() && i == sig.Params().Len()-1 {
 			slice, ok := goType.(*types.Slice)
@@ -206,18 +207,27 @@ func functionDefFromGoSignatureWithMethods(name string, sig *types.Signature, in
 			variadic = true
 		} else if _, ok := goType.Underlying().(*types.Slice); ok {
 			mutable = true
+			foreignABI = ForeignParameterDescriptorValue
 		} else if _, ok := goType.Underlying().(*types.Map); ok {
 			mutable = true
+			foreignABI = ForeignParameterDescriptorValue
 		}
 		ardType, reason := typeFromGoWithMethods(goType, includeMethods)
 		if reason != "" {
 			return nil, fmt.Sprintf("parameter %d has unsupported type %s: %s", i+1, goType.String(), reason)
 		}
+		if mutable && !isReferenceType(ardType) {
+			// Every Go slice/map parameter is an explicit-reference-required
+			// descriptor boundary: only an actual list/map reference flows in,
+			// while lowering still projects the exact descriptor value the Go
+			// ABI requires (ADR 0057).
+			ardType = MakeMutableRef(ardType)
+		}
 		paramName := param.Name()
 		if paramName == "" {
 			paramName = fmt.Sprintf("arg%d", i+1)
 		}
-		params = append(params, Parameter{Name: paramName, Type: ardType, Mutable: mutable, Variadic: variadic})
+		params = append(params, Parameter{Name: paramName, Type: ardType, Mutable: mutable, ForeignABI: foreignABI, Variadic: variadic})
 	}
 
 	ret, reason := returnTypeFromGoWithMethods(sig.Results(), includeMethods)
@@ -447,7 +457,21 @@ func typeFromGoWithMethods(t types.Type, includeMethods bool) (Type, string) {
 			}
 			return foreignNamedTypeFromGo(named, true, includeMethods), ""
 		}
-		return nil, "only pointers to named Go types are supported"
+		// Pointer-to-descriptor and multi-level pointers are reference
+		// boundaries (ADR 0057): only an actual reference flows in, and
+		// lowering projects the exact pointer shape. Ard cannot construct
+		// multi-level pointers itself; they flow only from compatible foreign
+		// values.
+		if _, pointerToInterface := ptr.Elem().Underlying().(*types.Interface); pointerToInterface {
+			return nil, "pointers to Go interfaces are unsupported"
+		}
+		// Every otherwise representable single-level pointee, including Go
+		// primitives, is an explicit reference boundary (ADR 0057).
+		inner, reason := typeFromGoWithMethods(ptr.Elem(), includeMethods)
+		if reason != "" {
+			return nil, reason
+		}
+		return MakeMutableRef(inner), ""
 	}
 	if slice, ok := t.Underlying().(*types.Slice); ok {
 		elem, reason := typeFromGoWithMethods(slice.Elem(), includeMethods)

@@ -72,11 +72,16 @@ const (
 	ExprDiscardingFunctionCoercion
 	ExprUnsafeCast
 	ExprUnsafeIsNil
-	// ExprMutRef is the explicit `mut <operand>` expression (ADR 0045). Target
-	// is the referenced place (or the value expression when Bool marks fresh
-	// storage); Type is the referent type. The backend chooses per
-	// representation whether a Go pointer is involved.
+	// ExprMutRef is the explicit `mut <operand>` expression. ReferenceMode
+	// determines whether Target is an existing handle, an addressable place,
+	// or a value requiring fresh stable storage (ADR 0057).
 	ExprMutRef
+	// ExprDeref performs one shallow read through a reference. It is distinct
+	// from reference creation and is never an assignment place (ADR 0057).
+	ExprDeref
+	// ExprTraitRefProject constructs a mutable trait forwarding handle from a
+	// concrete reference using Trait and Impl metadata (ADR 0057).
+	ExprTraitRefProject
 	ExprMatchForeignType
 	// ExprScalarConvert converts Target's foreign named scalar value to the
 	// primitive scalar named by Type (for example Go's string(v)).
@@ -187,6 +192,13 @@ const (
 	ExprTryMaybe
 )
 
+type ForeignArgMode uint8
+
+const (
+	ForeignArgExact ForeignArgMode = iota
+	ForeignArgDescriptorValue
+)
+
 type ForeignResultShape uint8
 
 const (
@@ -203,6 +215,17 @@ const (
 	InterfaceValue InterfaceConversionMode = iota
 	InterfaceOwnedPointer
 	InterfaceReference
+)
+
+// ReferenceMode classifies the operand of an explicit mutable-reference
+// expression. InvalidReferenceMode is reserved for validation failures.
+type ReferenceMode uint8
+
+const (
+	InvalidReferenceMode ReferenceMode = iota
+	ExistingReference
+	AddressablePlace
+	FreshValue
 )
 
 type Expr struct {
@@ -229,7 +252,10 @@ type Expr struct {
 	ForeignReceiver    string
 	ForeignPointer     bool
 	InterfaceMode      InterfaceConversionMode
+	ReferenceMode      ReferenceMode
+	Observational      bool
 	ForeignResultShape ForeignResultShape
+	ForeignArgModes    []ForeignArgMode
 	TypeArgs           []TypeID
 	Impl               ImplID
 	Trait              TraitID

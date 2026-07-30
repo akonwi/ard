@@ -1,124 +1,169 @@
 ---
 title: Variables
-description: Learn about variable declaration, mutability, and type inference in Ard.
+description: Learn about bindings, mutable references, explicit dereferencing, and type inference in Ard.
 ---
 
-## Declaration Keywords
+## Declaration keywords
 
-Ard uses two keywords for variable declaration:
+Ard uses two declaration keywords:
 
-- `let` for immutable bindings
-- `mut` for mutable bindings
+- `let` creates a binding whose slot cannot be reassigned.
+- `mut` creates a binding whose slot can be reassigned.
 
-## Type Inference
-
-Variable types can be inferred from their initial values:
+The keyword controls the **binding slot**, not whether the stored value has mutable interior access.
 
 ```ard
-let count = 42
-let pi = 3.14
-let greeting = "Hello"
-let active = true
+let name = "Ada"
+// name = "Grace" // Error: the binding slot is immutable
+
+mut count = 1
+count = 2
+count =+ 1
 ```
 
-## Explicit Type Annotations
+## Type inference and annotations
 
-Types can be optionally be declared:
+Types are normally inferred, but annotations are available:
 
 ```ard
 let name: Str = "Bob"
 let temperature: Float64 = 98.6
 let items: [Int] = [1, 2, 3]
-let map: [Str:Int] = ["a": 1, "b": 2]
+let labels: [Str: Int] = ["a": 1, "b": 2]
 ```
 
-## Immutability with `let`
-
-An immutable binding is read-only meaning it can neither be reassigned or mutated:
+A reference value keeps its reference type during inference:
 
 ```ard
-let x = 10
-x = 20        // Error: cannot reassign immutable variable
+struct User { name: Str }
 
-let numbers = [1, 2, 3]
-numbers.push(4)  // Error: cannot mutate immutable variable
+let user = User{name: "Ada"}
+let reference = mut user // inferred as mut User
+let alias = reference    // also mut User; copies the reference handle
 ```
 
-## Mutability with `mut`
+## Binding mutability and reference values
 
-Variables declared with `mut` can be modified:
+Binding mutability and mutable-reference values are independent:
+
+| Declaration | Slot can be reassigned | Stored value is a reference | Interior mutation |
+| --- | ---: | ---: | ---: |
+| `let user = User{name: "Ada"}` | no | no | no |
+| `mut user = User{name: "Ada"}` | yes | no | no |
+| `let user = mut User{name: "Ada"}` | no | yes | yes |
+| `mut user = mut User{name: "Ada"}` | yes | yes | yes |
+
+A mutable ordinary binding permits whole-slot replacement, but not interior mutation:
 
 ```ard
-mut counter = 0
-counter = 5           // OK
-counter =+ 1          // OK, increment by 1
+struct User { name: Str }
+
+mut user = User{name: "Ada"}
+user = User{name: "Grace"} // OK: replaces the binding slot
+// user.name = "Lin"       // Error: user stores an ordinary User value
 ```
 
-## Increment and Decrement
-
-Ard uses a unique syntax for compound assignment operators, placing the `=` first for left-to-right readability:
+Create an actual reference to mutate a value's interior. The source storage may be declared with either `let` or `mut`:
 
 ```ard
-mut value = 10
-
-value =+ 5    // Equivalent to value = value + 5
-value =- 2    // Equivalent to value = value - 2
+let user = User{name: "Ada"}
+let reference = mut user
+reference.name = "Grace"
 ```
 
-There are no `++` or `--` operators in Ard and only increment (=+) and decrement (=-) are supported.
-
-## Mutable References
-
-A `mut` binding creates mutable storage. In type positions, `mut T` means mutable reference to a `T`.
-
-A function parameter marked `mut` receives mutable access to caller-owned storage, so the caller must pass an addressable mutable value. There is no extra `mut` marker at the call site:
+A `let` reference cannot be rebound, but it can mutate its pointee. A `mut` reference binding can also replace its own stored handle:
 
 ```ard
-struct Person { name: Str, age: Int }
+let first = User{name: "First"}
+let second = User{name: "Second"}
+mut current = mut first
+let alias = current
 
-fn age_person(person: mut Person) {
-    person.age =+ 1  // Mutates
+current = mut second // rebinds only current
+alias.name = "One"   // still mutates first
+current.name = "Two" // mutates second
+```
+
+## Explicit reference destinations
+
+`mut T` in a type position means “a mutable reference to `T`.” Such a destination requires an actual reference value; a writable ordinary binding is not borrowed implicitly.
+
+```ard
+fn rename(user: mut User, name: Str) {
+  user.name = name
 }
 
-mut alice = Person { name: "Alice", age: 30 }
-age_person(alice)
-// alice.age is now 31
+let user = User{name: "Ada"}
+rename(mut user, "Grace")
+
+let reference = mut user
+rename(reference, "Lin")
 ```
 
-Passing an immutable value to a mutable parameter is a compile-time error:
+`mut expression` has three useful behaviors:
+
+- borrowing addressable local, field, or module storage;
+- copying an existing reference handle (`mut reference` is idempotent);
+- creating stable fresh storage for a value expression such as a literal or call result.
+
+Copy-producing accessors still produce fresh storage rather than a reference into the container.
+
+## Explicit shallow values with `deref`
+
+References remain references during ordinary value flow. Use `deref` when a destination needs the current `T` value:
 
 ```ard
-let bob = Person { name: "Bob", age: 30 }
-update_person(bob) // Error: expected a mutable Person
+let user = User{name: "Ada"}
+let reference = mut user
+let snapshot: User = deref reference
 ```
 
-Mutable references may alias. If two `mut T` references point at the same mutable storage, mutations through either reference are visible through the other.
+`deref` removes exactly one outer reference layer and evaluates its operand once. The copy is **shallow**:
 
-### Mutable Reference Fields
+- structs, fixed arrays, and primitive values copy their current value;
+- reference-valued fields keep copied reference handles;
+- lists initially share their existing backing storage, although later growth may detach one descriptor;
+- maps continue sharing map contents;
+- channels and foreign handles retain their intrinsic sharing behavior.
 
-Struct fields can hold mutable references:
+`deref` is not a deep-copy operation, and Ard does not provide one. Programs that need an independent deep copy construct it explicitly.
+
+References compare by pointer identity. Compare referent values explicitly when their value types support equality:
 
 ```ard
-struct Context {
-  tree: mut ViewTree,
-}
+let same_place = reference == mut user
 
-let ctx = Context{tree: tree}
-ctx.tree.add_child(child)
+let count = 1
+let count_reference = mut count
+let count_snapshot = deref count_reference
+let same_value = deref count_reference == count_snapshot
 ```
 
-The `ctx` binding is immutable, but `ctx.tree` is mutable access to the referenced `ViewTree`. Field assignment writes through the reference; it does not rebind the field slot.
+## Reference-valued fields
 
-`mut T` is also a representation boundary for recursive types, so it can be used to model linked structures and retained object graphs that require identity.
+Struct fields can store references:
+
+```ard
+struct Tree { value: Int }
+struct Context { tree: mut Tree }
+
+let tree = Tree{value: 1}
+let context = mut Context{tree: mut tree}
+context.tree.value = 2
+
+let other = Tree{value: 3}
+context.tree = mut other // rebinds the field's reference slot
+```
+
+The containing value must itself be reached through a reference to rebind a reference-valued field. Reading or mutating the referenced tree does not require the field's binding slot to be reassignable.
 
 ## Shadowing
 
-Redeclaring a variable with the same name in the same scope is allowed.
-This acts as a wipe of the binding and is only valid if their usages are consisten.
+Redeclaring a name in the same scope creates a new binding:
 
 ```ard
 let x = 5
-let x = x + 1    // Creates new variable, x is now 6
-let x: Str = "hello"  // Creates new variable with different type
-x.size() // x is now a string and can only be used as a string
+let x = x + 1
+let x: Str = "hello"
+x.size()
 ```

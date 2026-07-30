@@ -239,6 +239,7 @@ func TestTraitDefinitions(t *testing.T) {
 			}
 			`,
 			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Type mismatch: Expected mut Counter, got Counter"},
 				{Kind: checker.Error, Message: "Trait method 'poke' parameter 'c' mutability mismatch"},
 			},
 		},

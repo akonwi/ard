@@ -177,11 +177,12 @@ func (v Variable) Name() string {
 	return v.sym.Name
 }
 
-// Type returns the referent type for reference-typed storage: reads through
-// a `mut T` binding see the referent, mirroring InstanceProperty (ADR 0045).
-// The raw storage type stays available via StorageType.
+// Type returns the binding's stored type. A `mut T` binding is a first-class
+// reference value and reports `mut T`; observational reads resolve through the
+// referent at their use sites, and materializing `T` requires an explicit
+// `deref` (ADR 0057).
 func (v Variable) Type() Type {
-	return derefMutableRef(v.sym.Type)
+	return v.sym.Type
 }
 
 // StorageType returns the binding's declared type, keeping the `mut T`
@@ -202,13 +203,12 @@ const (
 	StructSubject SubjectKind = iota
 )
 
-// MutableRefExpr is the explicit `mut <operand>` expression (ADR 0045). It
-// evaluates to a mutable reference to the operand's storage. Fresh marks a
-// value-expression operand that materializes new mutable storage rather than
-// referencing an existing place.
+// MutableRefExpr is the explicit `mut <operand>` expression. It evaluates to
+// a mutable reference and preserves whether lowering copies an existing
+// handle, borrows addressable storage, or materializes fresh storage (ADR 0057).
 type MutableRefExpr struct {
 	Operand Expression
-	Fresh   bool
+	Mode    ReferenceMode
 	_type   Type
 }
 
@@ -220,6 +220,40 @@ func (m *MutableRefExpr) String() string {
 	return fmt.Sprintf("mut %s", m.Operand)
 }
 
+// DerefExpr is the explicit one-layer dereference `deref <operand>` (ADR
+// 0057). The operand must be an actual reference value; the result is a
+// shallow, non-addressable copy of the current referent. Observational is set
+// for compiler-inserted referent reads (arithmetic, interpolation, matching),
+// which share the same shallow-load semantics.
+type DerefExpr struct {
+	Operand       Expression
+	Observational bool
+	_type         Type
+}
+
+func (d *DerefExpr) Type() Type {
+	return d._type
+}
+
+func (d *DerefExpr) String() string {
+	return fmt.Sprintf("deref %s", d.Operand)
+}
+
+// ReferenceTraitProjection is the explicit checked conversion from a concrete
+// reference to a trait reference. Targets need this metadata to construct a
+// forwarding handle rather than treating the conversion as a pointer copy
+// (ADR 0057).
+type ReferenceTraitProjection struct {
+	Value       Expression
+	Destination Type
+}
+
+func (p *ReferenceTraitProjection) Type() Type { return p.Destination }
+
+func (p *ReferenceTraitProjection) String() string {
+	return fmt.Sprintf("%s as %s", p.Value, p.Destination)
+}
+
 type InstanceProperty struct {
 	Subject  Expression
 	Property string
@@ -227,8 +261,10 @@ type InstanceProperty struct {
 	Kind     SubjectKind // Pre-computed by checker based on subject type
 }
 
+// Type returns the field's stored type. A reference-valued field reports its
+// `mut T` handle type rather than implicitly dereferencing (ADR 0057).
 func (i *InstanceProperty) Type() Type {
-	return derefMutableRef(i._type)
+	return i._type
 }
 
 // String returns a string representation of the instance property
@@ -278,8 +314,14 @@ type ForeignStructInstance struct {
 func (f *ForeignStructInstance) Type() Type { return f._type }
 
 type InstanceMethod struct {
-	Subject      Expression
-	Method       *FunctionCall
+	Subject Expression
+	Method  *FunctionCall
+	// ReceiverMode/ReceiverType preserve an implicit sanctioned borrow for a
+	// mutating call on an addressable interior place. The subject remains
+	// unchanged for tooling and source-level signatures (ADR 0057).
+	ReceiverMode *ReferenceMode
+	ReceiverType Type
+
 	ReceiverKind InstanceReceiverKind
 	StructType   *StructDef
 	EnumType     *Enum
@@ -1207,10 +1249,20 @@ type WhileLoop struct {
 
 func (w WhileLoop) NonProducing() {}
 
+type ForeignParameterABI uint8
+
+const (
+	ForeignParameterExact ForeignParameterABI = iota
+	// ForeignParameterDescriptorValue requires a source reference but passes
+	// the current slice/map descriptor value to Go (ADR 0057).
+	ForeignParameterDescriptorValue
+)
+
 type Parameter struct {
-	Name    string
-	Type    Type
-	Mutable bool
+	Name       string
+	Type       Type
+	Mutable    bool
+	ForeignABI ForeignParameterABI
 	// Loc is the parameter's source location when the parameter came from
 	// parsed source. Zero for synthesized parameters. Used only for tooling
 	// span recording.

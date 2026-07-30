@@ -1,7 +1,7 @@
 use go:fmt
 
 fn main() {
-  mut numbers: [Int] = []
+  let numbers = mut List::new<Int>()
   fmt::Println("numbers.size = {numbers.size()}")
 
   fmt::Println("adding numbers from 0 to 10")

@@ -12,16 +12,12 @@ Generics allow writing code that works with multiple types while maintaining typ
 Generic types begin with `$` in function and struct declarations:
 
 ```ard
-fn map(list: [$A], transform: fn($A) $B) [$B] {
-  mut result: [$B] = []
-  for item in list {
-    result.push(transform(item))
-  }
-  result
+fn apply(value: $A, transform: fn($A) $B) $B {
+  transform(value)
 }
 ```
 
-In this example, `$A` and `$B` are generic type parameters. The function accepts a list of type `$A` and returns a list of type `$B`.
+In this example, `$A` and `$B` are generic type parameters. The function accepts a value of type `$A` and returns the `$B` produced by the callback.
 
 ## Type Inference
 
@@ -37,13 +33,31 @@ let text = identity("hello")     // $T inferred as Str
 let flag = identity(true)        // $T inferred as Bool
 ```
 
+Reference identity is preserved during generic inference. If `$T` is inferred from a `mut User`, the result is also `mut User`:
+
+```ard
+struct User { name: Str }
+
+let user = User{name: "Ada"}
+let reference = mut user
+let alias = identity(reference) // $T is mut User
+alias.name = "Grace"
+```
+
+A generic destination explicitly fixed to ordinary `User` does not silently copy the referent. Use `deref` to select a shallow value:
+
+```ard
+let snapshot = identity<User>(deref reference)
+```
+
+The same rule applies when references appear inside generic lists, maps, `Maybe`, `Result`, channels, callbacks, and struct fields: the reference type remains part of the generic shape.
+
 ## Explicit Type Arguments
 
 When type inference isn't sufficient, provide explicit type arguments:
 
 ```ard
-let ints = [1, 2, 3]
-let labels = map<Int, Str>(ints, fn(value: Int) Str { value.to_str() })
+let label = apply<Int, Str>(42, fn(value: Int) Str { value.to_str() })
 ```
 
 Type arguments correspond to the order of generics introduced in the signature.

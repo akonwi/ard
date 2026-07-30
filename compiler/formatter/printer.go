@@ -819,6 +819,7 @@ func renderableExpressionStatement(statement parse.Statement) (parse.Expression,
 		*parse.Try,
 		*parse.BlockExpression,
 		*parse.MutRef, parse.MutRef,
+		*parse.Deref, parse.Deref,
 		*parse.UnsafeBlock:
 		return statement.(parse.Expression), true
 	default:
@@ -871,6 +872,10 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 		return dConcat(dText("mut "), p.renderExpressionValueDoc(node.Operand, parentPrecedence))
 	case parse.MutRef:
 		return dConcat(dText("mut "), p.renderExpressionValueDoc(node.Operand, parentPrecedence))
+	case *parse.Deref:
+		return dText(p.renderDeref(node.Operand, parentPrecedence))
+	case parse.Deref:
+		return dText(p.renderDeref(node.Operand, parentPrecedence))
 	case *parse.UnaryExpression:
 		return dText(p.renderUnary(node, parentPrecedence))
 	case parse.UnaryExpression:
@@ -1474,6 +1479,14 @@ const (
 	precedenceUnary
 	precedenceCall
 )
+
+func (p printer) renderDeref(operand parse.Expression, parentPrecedence int) string {
+	text := "deref " + p.renderExpression(operand, precedenceUnary)
+	if precedenceUnary < parentPrecedence {
+		return "(" + text + ")"
+	}
+	return text
+}
 
 func (p printer) renderUnary(node *parse.UnaryExpression, parentPrecedence int) string {
 	operator := p.operatorString(node.Operator)

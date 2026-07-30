@@ -63,6 +63,7 @@ const (
 	fn      = "fn"
 	let     = "let"
 	mut     = "mut"
+	deref   = "deref"
 	break_  = "break"
 	match   = "match"
 	select_ = "select"
@@ -712,6 +713,8 @@ func (l *lexer) takeIdentifier() token {
 		return makeKeyword(let)
 	case "mut":
 		return makeKeyword(mut)
+	case "deref":
+		return makeKeyword(deref)
 	case "break":
 		return makeKeyword(break_)
 	case "match":

@@ -9,6 +9,21 @@ single spelling; the former `fn f(mut s: S)` flag spelling is rejected by
 the parser with a pointer to the type-position form. Examples below using
 the old spelling are historical.
 
+Superseded in part by ADR 0057. In particular, binding mutability no longer
+implicitly creates or satisfies a mutable reference, an ordinary value in a
+`mut` binding is not interior-mutable, references remain first-class values when
+they flow, and whole-referent writes through references are no longer generally
+permitted. Examples below that mutate fields or call mutating methods directly
+through an ordinary `mut T-value` binding are historical. ADR 0033 also
+supersedes this ADR's conservative fiber restriction: references may cross
+`async::start` boundaries with Go-style synchronization and data-race
+responsibilities. ADRs 0033 and 0057 are normative where the decisions conflict.
+
+The `ard/core::copy` deep-copy operation proposed below was never implemented
+and has been dropped: `deref` (ADR 0057) is the only reference-to-value
+materialization and is deliberately shallow. Passages below describing
+`core::copy` are historical.
+
 ## Context
 
 Ard currently uses `mut` for two related but different ideas:
@@ -117,7 +132,7 @@ fn make_context() Context {
 
 Creating a mutable reference still requires an addressable mutable place. Passing immutable bindings, literals, or non-reference return values to `mut T` parameters should be rejected unless the language later defines a stable temporary/reference-return rule.
 
-Fiber boundaries are different from ordinary lexical escape. Mutable references should not be captured by `async::start`, `async::eval`, or other cross-fiber closures until Ard defines explicit concurrency safety rules for shared mutable references.
+ADR 0033 subsequently removed capture isolation. Mutable references may be captured by `async::start` tasks using ordinary closure capture semantics. Ard does not add implicit synchronization or data-race protection.
 
 ## Consequences
 
@@ -132,18 +147,19 @@ Fiber boundaries are different from ordinary lexical escape. Mutable references 
 - Escaping mutable references require stable storage. The compiler/backends must heap-lift or box referenced locals when mutable references escape through returns, struct fields, or closures.
 - AIR needs first-class mutable-reference types and operations such as reference load, field mutation through a reference, and reference capture.
 - Backends need finite mutable-reference representations. Go can generally use pointers or pointer-backed wrappers; JavaScript can use object cells or object references where necessary.
-- Async/fiber rules need to stay conservative. Mutable references should not be captured by fibers unless Ard defines safe sharing rules for those references.
+- Mutable references may cross `async::start` boundaries under ADR 0033's Go-like concurrency model; synchronization and data-race safety are the program's responsibility.
 - Documentation must be updated to replace the current “`mut` means copy” explanation with “`mut` means mutable access/reference” and separate explicit `core::copy` semantics.
 
 ## Deferred Work
 
-- Define the implementation strategy and type coverage for generic deep copying in `ard/core::copy`.
-- Define concurrency rules for mutable references that cross fiber boundaries.
+- ~~Define the implementation strategy and type coverage for generic deep copying in `ard/core::copy`.~~ Dropped; see the status note above.
 
 ## Related
 
 - `docs/adrs/0020-support-recursive-struct-fields-through-indirection.md`
 - `docs/adrs/0003-use-generic-fibers-for-async-eval.md`
+- `docs/adrs/0033-async-is-goroutines-and-channels.md`
+- `docs/adrs/0057-separate-binding-mutability-from-reference-values.md`
 - `README.md`
 - `compiler/checker`
 - `compiler/air`

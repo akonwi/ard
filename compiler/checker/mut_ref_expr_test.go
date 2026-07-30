@@ -1,139 +1,92 @@
 package checker_test
 
-import (
-	"testing"
+import "testing"
 
-	"github.com/akonwi/ard/checker"
-)
-
+// TestMutRefExpressions keeps the original ADR 0045 regression surface aligned
+// with ADR 0057. The exhaustive capability matrix lives in
+// reference_semantics_0057_test.go.
 func TestMutRefExpressions(t *testing.T) {
-	run(t, []test{
+	tests := []struct {
+		name      string
+		source    string
+		wantError bool
+	}{
 		{
-			name: "mut ref of a mutable binding",
-			input: `mut counter = 0
-let r = mut counter`,
+			name: "let storage can be explicitly referenced",
+			source: `let counter = 0
+let reference: mut Int = mut counter`,
 		},
 		{
-			name: "mut ref binding has the reference type",
-			input: `mut counter = 0
-let r: mut Int = mut counter`,
+			name: "mut on an existing reference is idempotent",
+			source: `let counter = 0
+let reference = mut counter
+let again: mut Int = mut reference`,
 		},
 		{
-			name: "mut ref of an immutable binding is rejected",
-			input: `let counter = 0
-let r = mut counter`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot take a mutable reference to immutable 'counter'"}},
+			name: "unannotated binding preserves the reference",
+			source: `let counter = 0
+let reference = mut counter
+let alias: mut Int = reference`,
 		},
 		{
-			name: "mut ref of a mut ref aliases the same referent",
-			input: `mut counter = 0
-let r = mut counter
-let again: mut Int = mut r`,
+			name: "ordinary mut binding does not implicitly satisfy reference parameter",
+			source: `fn take(value: mut Int) {}
+mut counter = 0
+take(counter)`,
+			wantError: true,
 		},
 		{
-			name: "binding a reference without mut copies the referent",
-			input: `mut counter = 0
-let r = mut counter
-let copy: Int = r`,
+			name: "explicit reference satisfies reference parameter",
+			source: `fn take(value: mut Int) {}
+let counter = 0
+take(mut counter)`,
 		},
 		{
-			name: "explicit mut argument satisfies a mut parameter",
-			input: `struct Person { age: Int }
-fn update(person: mut Person) {
-  person.age = 99
-}
-mut alice = Person{age: 30}
-update(mut alice)`,
+			name: "reference does not implicitly materialize a value",
+			source: `let counter = 0
+let reference = mut counter
+let copy: Int = reference`,
+			wantError: true,
 		},
 		{
-			name: "implicit passing to a mut parameter remains valid",
-			input: `struct Person { age: Int }
-fn update(person: mut Person) {
-  person.age = 99
-}
-mut alice = Person{age: 30}
-update(alice)`,
+			name: "explicit deref materializes a value",
+			source: `let counter = 0
+let reference = mut counter
+let copy: Int = deref reference`,
 		},
 		{
-			name: "explicit mut argument of an immutable binding is rejected",
-			input: `struct Person { age: Int }
-fn update(person: mut Person) {
-  person.age = 99
-}
-let alice = Person{age: 30}
-update(mut alice)`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot take a mutable reference to immutable 'alice'"}},
+			name: "fresh literal storage remains supported",
+			source: `struct Person { age: Int }
+let reference = mut Person{age: 30}
+reference.age = 99`,
 		},
 		{
-			name: "mut ref of a struct literal creates fresh storage",
-			input: `struct Person { age: Int }
-fn update(person: mut Person) {
-  person.age = 99
-}
-update(mut Person{age: 30})`,
+			name: "writable reference slot can rebind",
+			source: `let first = 0
+let second = 1
+mut reference = mut first
+reference = mut second`,
 		},
 		{
-			name: "fresh storage can be bound",
-			input: `struct Person { age: Int }
-let r = mut Person{age: 30}
-r.age = 99`,
+			name: "whole list write through reference is rejected",
+			source: `let items = [1, 2]
+let reference = mut items
+reference = [9, 9]`,
+			wantError: true,
 		},
 		{
-			name: "mut ref of a field through a mutable binding",
-			input: `struct Inner { n: Int }
+			name: "temporary selector remains nonaddressable",
+			source: `struct Inner { n: Int }
 struct Outer { inner: Inner }
-fn bump(inner: mut Inner) {
-  inner.n =+ 1
-}
-mut o = Outer{inner: Inner{n: 0}}
-bump(mut o.inner)`,
+fn make() Outer { Outer{inner: Inner{n: 0}} }
+let reference = mut make().inner`,
+			wantError: true,
 		},
-		{
-			name: "mut ref of a field through an immutable binding is rejected",
-			input: `struct Inner { n: Int }
-struct Outer { inner: Inner }
-let o = Outer{inner: Inner{n: 0}}
-let r = mut o.inner`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot take a mutable reference to immutable 'o.inner'"}},
-		},
-		{
-			name: "mut ref of a mut field aliases the same referent",
-			input: `struct Tree {}
-struct Ctx { tree: mut Tree }
-mut tree = Tree{}
-let ctx = Ctx{tree: tree}
-let r: mut Tree = mut ctx.tree`,
-		},
-		{
-			name: "alias writes are visible through the original binding",
-			input: `mut counter = 0
-let r = mut counter
-r =+ 1
-let snapshot: Int = r`,
-		},
-		{
-			name: "references cannot be rebound",
-			input: `mut counter = 0
-mut other = 10
-let r = mut counter
-r = mut other`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "References cannot be rebound; assign the value directly"}},
-		},
-		{
-			name: "whole-list writes through a mutable reference are allowed",
-			input: `mut items = [1, 2]
-let r = mut items
-r = [9, 9]`,
-		},
-		{
-			name: "immutable place diagnostic stays readable for complex subjects",
-			input: `struct Inner { n: Int }
-struct Outer { inner: Inner }
-fn make() Outer {
-  Outer{inner: Inner{n: 0}}
-}
-let r = mut make().inner`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot take a mutable reference to immutable 'value.inner'"}},
-		},
-	})
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertReferenceCheckerResult(t, tt.source, tt.wantError)
+		})
+	}
 }

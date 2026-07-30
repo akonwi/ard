@@ -49,34 +49,36 @@ let b = Maybe::none<Int>()`,
 func TestMaybeMutableMethods(t *testing.T) {
 	run(t, []test{
 		{
-			name: "set and clear mutate a maybe",
-			input: `mut m = Maybe::new<Int>()
+			name: "set and clear mutate through a reference",
+			input: `let value = Maybe::new<Int>()
+let m = mut value
 m.set(42)
 m.clear()
 let done: Bool = m.is_none()`,
 		},
 		{
 			name: "set requires an inner value",
-			input: `mut m = Maybe::new<Int>()
+			input: `let value = Maybe::new<Int>()
+let m = mut value
 m.set("nope")`,
 			diagnostics: []checker.Diagnostic{
 				{Kind: checker.Error, Message: "Type mismatch: Expected Int, got Str"},
 			},
 		},
 		{
-			name: "set requires mutable receiver",
+			name: "ordinary let value rejects mutating method",
 			input: `let m = Maybe::new<Int>()
 m.set(1)`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Immutable: Maybe.set receiver"},
+				{Kind: checker.Error, Message: "Cannot call Maybe.set: receiver is not a reference"},
 			},
 		},
 		{
-			name: "clear requires mutable receiver",
-			input: `let m = Maybe::new(1)
+			name: "ordinary mut value also rejects mutating method",
+			input: `mut m = Maybe::new(1)
 m.clear()`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Immutable: Maybe.clear receiver"},
+				{Kind: checker.Error, Message: "Cannot call Maybe.clear: receiver is not a reference"},
 			},
 		},
 	})

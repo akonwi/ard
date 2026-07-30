@@ -55,15 +55,18 @@ const (
 	DiagnosticCodeMalformedTypeNode             DiagnosticCode = "internal_malformed_type_node"
 	DiagnosticCodeBranchTypeMismatch            DiagnosticCode = "branch_type_mismatch"
 	DiagnosticCodeNonExhaustiveValueIf          DiagnosticCode = "non_exhaustive_value_if"
-	DiagnosticCodeImmutableMutableReference     DiagnosticCode = "immutable_mutable_reference"
+	DiagnosticCodeInvalidDerefOperand           DiagnosticCode = "invalid_deref_operand"
+	DiagnosticCodeNonAddressableBorrow          DiagnosticCode = "non_addressable_borrow"
+	DiagnosticCodeValueInteriorMutation         DiagnosticCode = "value_interior_mutation"
+	DiagnosticCodeWholeReferentAssignment       DiagnosticCode = "whole_referent_assignment"
+	DiagnosticCodeReferenceDestination          DiagnosticCode = "reference_destination_requires_reference"
+	DiagnosticCodeReferenceValueMaterialization DiagnosticCode = "reference_value_requires_deref"
+	DiagnosticCodeUnsupportedTraitReferenceCast DiagnosticCode = "unsupported_trait_reference_cast"
 	DiagnosticCodeUnsupportedMutableReference   DiagnosticCode = "unsupported_mutable_reference"
 	DiagnosticCodeInvalidForeignPointerBinding  DiagnosticCode = "invalid_foreign_pointer_binding"
 	DiagnosticCodeUnreachableReferentAssignment DiagnosticCode = "unreachable_referent_assignment"
 	DiagnosticCodeForeignDescriptorRebinding    DiagnosticCode = "foreign_descriptor_rebinding"
 	DiagnosticCodeReferenceRebinding            DiagnosticCode = "reference_rebinding"
-	DiagnosticCodeImmutablePropertyAssignment   DiagnosticCode = "immutable_property_assignment"
-	DiagnosticCodeImmutableReceiver             DiagnosticCode = "immutable_receiver"
-	DiagnosticCodeImmutablePointerReceiver      DiagnosticCode = "immutable_pointer_receiver"
 	DiagnosticCodeGoConstantAssignment          DiagnosticCode = "go_constant_assignment"
 	DiagnosticCodeNonAssignableStaticProperty   DiagnosticCode = "non_assignable_static_property"
 	DiagnosticCodeNotCallable                   DiagnosticCode = "not_callable"
@@ -399,24 +402,6 @@ func mutationDiagnostic(code DiagnosticCode, legacyMessage string, title string,
 	return diagnostic
 }
 
-type immutableMutableReferenceDiagnostic struct {
-	Place           string
-	Span            SourceSpan
-	DeclarationSpan *SourceSpan
-}
-
-func (d immutableMutableReferenceDiagnostic) build() Diagnostic {
-	return mutationDiagnostic(
-		DiagnosticCodeImmutableMutableReference,
-		fmt.Sprintf("Cannot take a mutable reference to immutable '%s'", d.Place),
-		"Cannot take a mutable reference",
-		"A mutable reference requires mutable storage.",
-		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is immutable", d.Place)},
-		d.DeclarationSpan,
-		"this binding is immutable",
-	)
-}
-
 type unsupportedMutableReferenceDiagnostic struct {
 	Type Type
 	Span SourceSpan
@@ -429,6 +414,128 @@ func (d unsupportedMutableReferenceDiagnostic) build() Diagnostic {
 		"Unsupported mutable reference",
 		"This foreign value has no supported pointer form.",
 		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` cannot be referenced mutably", d.Type)},
+		nil,
+		"",
+	)
+}
+
+type unsupportedTraitReferenceCastDiagnostic struct {
+	Type Type
+	Span SourceSpan
+}
+
+func (d unsupportedTraitReferenceCastDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeUnsupportedTraitReferenceCast,
+		fmt.Sprintf("unsafe::cast cannot reconstruct %s", formatTypeForDisplay(d.Type)),
+		"Cannot cast to a mutable trait reference",
+		"Reconstructing a trait forwarding table from a dynamic value is not supported.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` cannot be a cast target", formatTypeForDisplay(d.Type))},
+		nil,
+		"",
+	)
+}
+
+type invalidDerefOperandDiagnostic struct {
+	Type Type
+	Span SourceSpan
+}
+
+func (d invalidDerefOperandDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeInvalidDerefOperand,
+		fmt.Sprintf("Cannot dereference a value of type %s", formatTypeForDisplay(d.Type)),
+		"Invalid deref operand",
+		"`deref` removes one reference layer, so its operand must be an actual reference value.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is not a reference", formatTypeForDisplay(d.Type))},
+		nil,
+		"",
+	)
+}
+
+type nonAddressableBorrowDiagnostic struct {
+	Span SourceSpan
+}
+
+func (d nonAddressableBorrowDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeNonAddressableBorrow,
+		"Cannot take a mutable reference to a non-addressable place",
+		"Cannot take a mutable reference",
+		"A selector on a temporary base has no stable storage to reference. Bind the base first.",
+		DiagnosticLabel{Span: d.Span, Message: "this place has no addressable storage"},
+		nil,
+		"",
+	)
+}
+
+type valueInteriorMutationDiagnostic struct {
+	Place           string
+	Span            SourceSpan
+	DeclarationSpan *SourceSpan
+}
+
+func (d valueInteriorMutationDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeValueInteriorMutation,
+		fmt.Sprintf("Cannot mutate '%s': it is an ordinary value, not a reference", d.Place),
+		"Interior mutation requires a reference",
+		"Interior mutation flows through an actual `mut T` reference value. A writable binding slot only permits replacing the whole value.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` holds an ordinary value", d.Place)},
+		d.DeclarationSpan,
+		"declared as an ordinary value here",
+	)
+}
+
+type wholeReferentAssignmentDiagnostic struct {
+	Place           string
+	Span            SourceSpan
+	DeclarationSpan *SourceSpan
+}
+
+func (d wholeReferentAssignmentDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeWholeReferentAssignment,
+		fmt.Sprintf("Cannot assign through reference '%s': whole-referent assignment is not supported", d.Place),
+		"Cannot assign through a reference",
+		"Ard does not replace a referent through a reference. Rebind the slot with another reference, or mutate the referent's interior.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` holds a reference", d.Place)},
+		d.DeclarationSpan,
+		"this reference-valued slot was declared here",
+	)
+}
+
+type referenceDestinationDiagnostic struct {
+	Expected Type
+	Actual   Type
+	Span     SourceSpan
+}
+
+func (d referenceDestinationDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeReferenceDestination,
+		fmt.Sprintf("Type mismatch: Expected %s, got %s", formatTypeForDisplay(d.Expected), formatTypeForDisplay(d.Actual)),
+		"Reference destination requires a reference",
+		"A `mut T` destination accepts only an actual reference value. Use an explicit `mut` expression to create one.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("expected `%s`, found ordinary `%s`", formatTypeForDisplay(d.Expected), formatTypeForDisplay(d.Actual))},
+		nil,
+		"",
+	)
+}
+
+type referenceValueMaterializationDiagnostic struct {
+	Expected Type
+	Actual   Type
+	Span     SourceSpan
+}
+
+func (d referenceValueMaterializationDiagnostic) build() Diagnostic {
+	return mutationDiagnostic(
+		DiagnosticCodeReferenceValueMaterialization,
+		fmt.Sprintf("Type mismatch: Expected %s, got %s", formatTypeForDisplay(d.Expected), formatTypeForDisplay(d.Actual)),
+		"Value destination requires deref",
+		"References preserve identity in value flow. Use `deref reference` to make an explicit shallow value copy.",
+		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is a reference; this destination expects `%s`", formatTypeForDisplay(d.Actual), formatTypeForDisplay(d.Expected))},
 		nil,
 		"",
 	)
@@ -504,65 +611,47 @@ func (d referenceRebindingDiagnostic) build() Diagnostic {
 	)
 }
 
-type immutablePropertyAssignmentDiagnostic struct {
-	Property        string
-	Span            SourceSpan
-	DeclarationSpan *SourceSpan
-}
-
-func (d immutablePropertyAssignmentDiagnostic) build() Diagnostic {
-	return mutationDiagnostic(
-		DiagnosticCodeImmutablePropertyAssignment,
-		fmt.Sprintf("Immutable: %s", d.Property),
-		"Cannot assign through an immutable value",
-		"",
-		DiagnosticLabel{Span: d.Span, Message: fmt.Sprintf("`%s` is immutable", d.Property)},
-		d.DeclarationSpan,
-		"this binding is immutable",
-	)
-}
-
-type immutableReceiverKind uint8
+type referenceReceiverKind uint8
 
 const (
-	immutableArdReceiver immutableReceiverKind = iota
-	immutableMaybeReceiver
-	immutablePointerMethodAccess
-	immutablePointerMethodCall
+	referenceArdReceiver referenceReceiverKind = iota
+	referenceMaybeReceiver
+	referencePointerMethodAccess
+	referencePointerMethodCall
 )
 
-type immutableReceiverDiagnostic struct {
-	Kind            immutableReceiverKind
+type referenceReceiverDiagnostic struct {
+	Kind            referenceReceiverKind
 	Receiver        string
 	Method          string
 	Span            SourceSpan
 	DeclarationSpan *SourceSpan
 }
 
-func (d immutableReceiverDiagnostic) build() Diagnostic {
-	code := DiagnosticCodeImmutableReceiver
-	legacy := fmt.Sprintf("Cannot mutate immutable '%s' with '.%s()'", d.Receiver, d.Method)
-	primary := fmt.Sprintf("`.%s()` requires a mutable receiver", d.Method)
-	if d.Kind == immutableMaybeReceiver {
-		legacy = fmt.Sprintf("Immutable: Maybe.%s receiver", d.Method)
-		primary = fmt.Sprintf("`Maybe.%s` requires a mutable receiver", d.Method)
-	} else if d.Kind == immutablePointerMethodAccess {
-		code = DiagnosticCodeImmutablePointerReceiver
-		legacy = fmt.Sprintf("Cannot access pointer receiver method %s.%s on immutable value", d.Receiver, d.Method)
-		primary = "this method value requires a mutable receiver"
-	} else if d.Kind == immutablePointerMethodCall {
-		code = DiagnosticCodeImmutablePointerReceiver
-		legacy = fmt.Sprintf("Cannot call pointer receiver method %s.%s on immutable value", d.Receiver, d.Method)
-		primary = "this method call requires a mutable receiver"
+func (d referenceReceiverDiagnostic) build() Diagnostic {
+	legacy := fmt.Sprintf("Cannot call mutating method '%s.%s': receiver is not a reference", d.Receiver, d.Method)
+	title := "Mutating method requires a reference"
+	primary := fmt.Sprintf("`.%s()` requires an actual reference receiver", d.Method)
+	if d.Kind == referenceMaybeReceiver {
+		legacy = fmt.Sprintf("Cannot call Maybe.%s: receiver is not a reference", d.Method)
+		primary = fmt.Sprintf("`Maybe.%s` requires an actual reference receiver", d.Method)
+	} else if d.Kind == referencePointerMethodAccess {
+		legacy = fmt.Sprintf("Cannot access pointer receiver method %s.%s on an ordinary value", d.Receiver, d.Method)
+		title = "Pointer receiver method requires a reference"
+		primary = "this method value requires an actual reference receiver"
+	} else if d.Kind == referencePointerMethodCall {
+		legacy = fmt.Sprintf("Cannot call pointer receiver method %s.%s on an ordinary value", d.Receiver, d.Method)
+		title = "Pointer receiver method requires a reference"
+		primary = "this method call requires an actual reference receiver"
 	}
 	return mutationDiagnostic(
-		code,
+		DiagnosticCodeValueInteriorMutation,
 		legacy,
-		"Cannot use mutating method on immutable receiver",
-		"",
+		title,
+		"A writable binding slot does not grant interior access. Create or pass an explicit `mut T` reference.",
 		DiagnosticLabel{Span: d.Span, Message: primary},
 		d.DeclarationSpan,
-		"this receiver was bound immutably here",
+		"this binding stores an ordinary value",
 	)
 }
 
@@ -1713,16 +1802,19 @@ type incorrectArgumentTypeDiagnostic struct {
 
 func (d incorrectArgumentTypeDiagnostic) build() Diagnostic {
 	primaryMessage := fmt.Sprintf("this argument has type `%s`", d.Actual)
+	title := "Incorrect argument type"
+	text := ""
+	code := DiagnosticCodeIncorrectArgumentType
 	if d.RequiresMutable {
-		primaryMessage = "this argument is not mutable"
+		code = DiagnosticCodeReferenceDestination
+		title = "Reference parameter requires a reference"
+		text = "A `mut T` parameter accepts only an actual reference value. Pass an existing reference or create one with `mut expression`."
+		primaryMessage = fmt.Sprintf("found ordinary `%s`; this parameter requires `%s`", formatTypeForDisplay(d.Actual), formatTypeForDisplay(d.Expected))
 	}
 
 	secondary := make([]DiagnosticLabel, 0, 1)
 	if d.ParameterSpan != nil {
-		message := fmt.Sprintf("parameter `%s` requires `%s`", d.ParameterName, d.Expected)
-		if d.RequiresMutable {
-			message = fmt.Sprintf("parameter `%s` requires a mutable `%s`", d.ParameterName, d.Expected)
-		}
+		message := fmt.Sprintf("parameter `%s` requires `%s`", d.ParameterName, formatTypeForDisplay(d.Expected))
 		secondary = append(secondary, DiagnosticLabel{Span: *d.ParameterSpan, Message: message})
 	} else if !d.RequiresMutable {
 		primaryMessage = fmt.Sprintf("expected `%s`, but this argument has type `%s`", d.Expected, d.Actual)
@@ -1731,12 +1823,12 @@ func (d incorrectArgumentTypeDiagnostic) build() Diagnostic {
 	diagnostic := newLabeledDiagnostic(
 		Error,
 		d.LegacyMessage,
-		"Incorrect argument type",
-		"",
+		title,
+		text,
 		DiagnosticLabel{Span: d.ArgumentSpan, Message: primaryMessage},
 		secondary...,
 	)
-	diagnostic.Code = DiagnosticCodeIncorrectArgumentType
+	diagnostic.Code = code
 	return diagnostic
 }
 

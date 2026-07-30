@@ -70,9 +70,16 @@ var compareOptions = cmp.Options{
 		checker.MapLiteral{},
 		checker.StructInstance{},
 		checker.Result{},
+		checker.MutableRef{},
 		checker.TryOp{},
 		checker.UserModule{},
 	),
+	cmp.Comparer(func(a, b *checker.MutableRef) bool {
+		if a == nil || b == nil {
+			return a == b
+		}
+		return a.String() == b.String()
+	}),
 }
 
 func run(t *testing.T, tests []test) {
@@ -307,7 +314,10 @@ func TestVariables(t *testing.T) {
 			},
 		},
 		{
-			name: "Match binding inherits mutability from mutable Maybe",
+			// A match binding is an ordinary value copy: interior mutation
+			// requires an actual reference, regardless of the subject
+			// binding's mutability (ADR 0057).
+			name: "Match binding is an ordinary value",
 			input: strings.Join([]string{
 				`struct State { cursor: Int }`,
 				`fn main() {`,
@@ -318,7 +328,9 @@ func TestVariables(t *testing.T) {
 				`  }`,
 				`}`,
 			}, "\n"),
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Cannot mutate 'cur.cursor': it is an ordinary value, not a reference"},
+			},
 		},
 		{
 			name: "Match binding from immutable Maybe stays immutable",
@@ -333,11 +345,13 @@ func TestVariables(t *testing.T) {
 				`}`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Immutable: cur.cursor"},
+				{Kind: checker.Error, Message: "Cannot mutate 'cur.cursor': it is an ordinary value, not a reference"},
 			},
 		},
 		{
-			name: "For-in list binding inherits mutability from mutable list",
+			// A for-in binding is an ordinary value copy: interior mutation
+			// requires an actual reference (ADR 0057).
+			name: "For-in list binding is an ordinary value",
 			input: strings.Join([]string{
 				`struct Item { v: Int }`,
 				`fn main() {`,
@@ -347,7 +361,9 @@ func TestVariables(t *testing.T) {
 				`  }`,
 				`}`,
 			}, "\n"),
-			diagnostics: []checker.Diagnostic{},
+			diagnostics: []checker.Diagnostic{
+				{Kind: checker.Error, Message: "Cannot mutate 'it.v': it is an ordinary value, not a reference"},
+			},
 		},
 		{
 			name: "For-in list binding from immutable list stays immutable",
@@ -361,7 +377,7 @@ func TestVariables(t *testing.T) {
 				`}`,
 			}, "\n"),
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Immutable: it.v"},
+				{Kind: checker.Error, Message: "Cannot mutate 'it.v': it is an ordinary value, not a reference"},
 			},
 		},
 		{
@@ -1788,7 +1804,7 @@ func TestLists(t *testing.T) {
 			  let list = [1,2,3]
 				list.push(4)`,
 			diagnostics: []checker.Diagnostic{
-				{Kind: checker.Error, Message: "Cannot mutate immutable 'list' with '.push()'"},
+				{Kind: checker.Error, Message: "Cannot call mutating method 'list.push': receiver is not a reference"},
 			},
 		},
 	})
@@ -2557,7 +2573,7 @@ func TestGenerics(t *testing.T) {
 						self.item = new
 					}
 				}
-				mut int_box = Box{ item: 42 }
+				let int_box = mut Box{ item: 42 }
 				let forty_four = int_box.item + 2
 
 				int_box.put(false) // not allowed
@@ -2599,7 +2615,7 @@ func TestGenerics(t *testing.T) {
 						self.second = new
 					}
 				}
-				mut pair = Pair{ first: 42, second: "hello" }
+				let pair = mut Pair{ first: 42, second: "hello" }
 				pair.swap_first(100)
 				pair.swap_second("world")
 				pair.swap_first("wrong") // type error

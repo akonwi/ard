@@ -109,7 +109,7 @@ impl io::Writer for Sink {
     Result::ok(bytes.size())
   }
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot assign a new value through 'bytes': element writes share storage, but the referent binding is not reachable. Assign to the original binding instead"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot assign through reference 'bytes': whole-referent assignment is not supported"}},
 		},
 		{
 			name: "Go interface descriptor aliases reject list growth",
@@ -152,7 +152,7 @@ struct Sink {}
 
 impl io::Writer for Sink {
   fn write(bytes: mut [Byte]) Int!Str {
-    mut copy = bytes
+    let copy = mut deref bytes
     copy.push(bytes.at(0).expect("byte"))
     Result::ok(copy.size())
   }
@@ -452,7 +452,7 @@ func TestGoImportAssignsExportedStructFields(t *testing.T) {
 			input: `use go:image
 
 fn update() {
-  mut rect = image::Rect(1, 2, 3, 4)
+  let rect = mut image::Rect(1, 2, 3, 4)
   rect.Min.X = 10
 }`,
 		},
@@ -464,7 +464,7 @@ fn update() {
   let rect = image::Rect(1, 2, 3, 4)
   rect.Min.X = 10
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Immutable: rect.Min.X"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot mutate 'rect.Min.X': it is an ordinary value, not a reference"}},
 		},
 	})
 }
@@ -633,10 +633,10 @@ fn main() [Byte]!Str {
 			input: `use go:time
 
 fn main() Void!Str {
-  mut when = time::Now()
+  let when = mut time::Now()
   let unmarshal: fn(mut [Byte]) Void!Str = when.UnmarshalText
-  mut text = "2024-01-02T00:00:00Z".bytes()
-  unmarshal(text)
+  let text = "2024-01-02T00:00:00Z".bytes()
+  unmarshal(mut text)
 }`,
 		},
 		{
@@ -647,7 +647,7 @@ fn main() {
   let when = time::Now()
   let _ = when.UnmarshalText
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot access pointer receiver method time::Time.UnmarshalText on immutable value"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot access pointer receiver method time::Time.UnmarshalText on an ordinary value"}},
 		},
 	})
 }
@@ -682,13 +682,13 @@ fn main() Str {
 }`,
 		},
 		{
-			name: "pointer receiver method on mutable opaque value",
+			name: "pointer receiver method on referenced opaque value",
 			input: `use go:time
 
 fn main() Void!Str {
-  mut when = time::Now()
-  mut text = "2024-01-02T00:00:00Z".bytes()
-  when.UnmarshalText(text)
+  let when = mut time::Now()
+  let text = "2024-01-02T00:00:00Z".bytes()
+  when.UnmarshalText(mut text)
 }`,
 		},
 		{
@@ -737,7 +737,7 @@ fn main() {
   mut text = "2024-01-02T00:00:00Z".bytes()
   when.UnmarshalText(text)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call pointer receiver method time::Time.UnmarshalText on immutable value"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Cannot call pointer receiver method time::Time.UnmarshalText on an ordinary value"}},
 		},
 	})
 }
@@ -806,14 +806,13 @@ fn main() {
 			input: `use go:time
 
 fn bump(value: mut Int) {
-  value = value + 1
 }
 
 fn main() {
-  mut month = time::January
-  bump(month)
+  let month = time::January
+  bump(mut month)
 }`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected a mutable Int"}},
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected mut Int, got mut time::Month"}},
 		},
 		{
 			name: "foreign scalar Maybe does not compare against primitive Maybe",
@@ -1253,26 +1252,31 @@ fmt::Println(a: "hello")`,
 	})
 }
 
-func TestGoSliceParametersRequireMutableLists(t *testing.T) {
-	run(t, []test{
+func TestGoSliceParametersRequireListReferences(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		wantError bool
+	}{
 		{
-			name: "mutable list accepted for Go slice parameter",
-			input: `use go:sort
-fn main() {
-  mut values = [3, 1, 2]
-  sort::Ints(values)
-}`,
+			name: "ordinary mut list is not an implicit reference",
+			source: `use go:sort
+mut values = [3, 1, 2]
+sort::Ints(values)`,
+			wantError: true,
 		},
 		{
-			name: "immutable list rejected for Go slice parameter",
-			input: `use go:sort
-fn main() {
-  let values = [3, 1, 2]
-  sort::Ints(values)
-}`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected a mutable [Int]"}},
+			name: "explicit reference to let list is accepted",
+			source: `use go:sort
+let values = [3, 1, 2]
+sort::Ints(mut values)`,
 		},
-	})
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertReferenceCheckerResult(t, tt.source, tt.wantError)
+		})
+	}
 }
 
 func TestGoSliceReturnsMapToLists(t *testing.T) {
@@ -1378,7 +1382,7 @@ fn peek(nums: sort::IntSlice) Int {
 			input: `use go:sort
 fn sorted(nums: mut sort::IntSlice) sort::IntSlice {
   nums.Sort()
-  nums
+  deref nums
 }`,
 		},
 		{
@@ -1392,43 +1396,47 @@ fn bad() {
 	})
 }
 
-// A freshly constructed container literal is new storage with no other
-// observer, so it satisfies a mutable Go slice/map parameter directly.
-func TestFreshContainerLiteralsSatisfyMutableGoParams(t *testing.T) {
-	run(t, []test{
+// Fresh containers still need explicit reference-producing syntax at a
+// reference destination. `mut <literal>` owns the fresh stable storage.
+func TestFreshContainerLiteralsRequireExplicitReferences(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		wantError bool
+	}{
 		{
-			name: "list literal passes to a mutable Go slice parameter",
-			input: `use go:sort
-fn main() {
-  sort::Ints([3, 1, 2])
-}`,
+			name: "bare list literal is rejected for mutable Go slice parameter",
+			source: `use go:sort
+sort::Ints([3, 1, 2])`,
+			wantError: true,
 		},
 		{
-			name: "map literal passes to a mutable Ard map parameter",
-			input: `fn consume(m: mut [Str: Int]) Int {
-  m.size()
-}
-fn main() {
-  let _ = consume(["a": 1])
-}`,
+			name: "explicit fresh list reference is accepted",
+			source: `use go:sort
+sort::Ints(mut [3, 1, 2])`,
 		},
 		{
-			name: "list literal against a non-list annotation reports a diagnostic",
-			input: `fn main() {
-  let x: Int = [1]
-}`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Expected Int but got a list"}},
+			name: "bare map literal is rejected for mutable Ard parameter",
+			source: `fn consume(m: mut [Str: Int]) Int { m.size() }
+let size = consume(["a": 1])`,
+			wantError: true,
 		},
 		{
-			name: "immutable bindings are still rejected for mutable Go params",
-			input: `use go:sort
-fn main() {
-  let nums = [3, 1]
-  sort::Ints(nums)
-}`,
-			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Type mismatch: Expected a mutable [Int]"}},
+			name: "explicit fresh map reference is accepted",
+			source: `fn consume(m: mut [Str: Int]) Int { m.size() }
+let size = consume(mut ["a": 1])`,
 		},
-	})
+		{
+			name:      "list literal against non-list annotation remains rejected",
+			source:    `let x: Int = [1]`,
+			wantError: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertReferenceCheckerResult(t, tt.source, tt.wantError)
+		})
+	}
 }
 
 // Named empty Go interfaces keep their type identity (they are foreign

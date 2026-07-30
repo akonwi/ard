@@ -89,13 +89,38 @@ Go slices map to Ard lists (`[T]`), Go maps map to Ard maps (`[K:V]`), and Go fi
 ```ard
 use go:crypto/sha256
 
-mut bytes = "hello".bytes()
+let bytes = mut "hello".bytes()
 let digest: [Byte; 32] = sha256::Sum256(bytes)
 let zero: Byte = 0
 let first = digest.at(0).or(zero)
 ```
 
 Ard does not implicitly convert through containers. If a Go API needs `[Byte]` and you have `[Int]`, write the transformation explicitly with `Byte::from(...)` so allocation and truncation are visible in source.
+
+## Reference arguments and exact Go ABI
+
+Representable single-level Go pointer parameters (`*T` where `T` is not an interface), plus Go slice and map parameters, require actual Ard references. Binding an ordinary value with `mut` does not satisfy that requirement; use `mut expression` or pass an existing reference.
+
+```ard
+use go:sort
+
+let numbers = [3, 1, 2]
+sort::Ints(mut numbers)
+
+let number_reference = mut numbers
+sort::Ints(number_reference)
+```
+
+The source-level reference requirement is separate from Go's raw ABI:
+
+- a representable single-level Go `*T` receives the current `*T` pointer;
+- exact Go `*Interface` parameters remain unsupported;
+- multi-level pointers can flow only from an already compatible foreign pointer value—pure Ard cannot create them by applying another `mut`;
+- a Go `[]T` or `map[K]V` receives the current descriptor value from an Ard reference;
+- a Go `*[]T` or `*map[K]V` receives the pointer to that descriptor;
+- Go functions and channels remain ordinary values.
+
+Each boundary copies the selected current pointer or descriptor. Later rebinding of an Ard reference slot does not retarget a value already passed to or retained by Go. Foreign code receiving a pointer may replace its pointee; this is part of the explicit FFI trust boundary.
 
 ## Numeric Conversions
 
@@ -159,7 +184,20 @@ let bytes = read_all(strings::NewReader("hello")).expect("read")
 
 Interface-to-interface assignability also follows Go's rules, so a value such as `io::ReadCloser` can be used where `io::Reader` or `io::Closer` is expected when the required methods match. Go slices and maps remain invariant: `[mut strings::Reader]` is not automatically converted to `[]io.Reader`.
 
-At an interface destination—including Ard `Any` and named empty Go interfaces—an ordinary Ard value contributes a value copy, while an existing `mut T` contributes its reference identity. This lets APIs such as `json::Unmarshal(data, target)` receive the pointer represented by a mutable parameter. A Go generic parameter constrained by `any` is still a concrete `T` destination after inference and receives an ordinary value snapshot unless its type argument resolves to Ard `Any`.
+At an interface destination—including Ard `Any` and named empty Go interfaces—an ordinary Ard value contributes a value copy, while an existing `mut T` contributes its current pointer identity. Use `deref reference` to deliberately select the ordinary shallow-value path instead. Every conversion copies the selected current pointer or value, so later rebinding of the Ard reference slot is not visible through an interface value already created.
+
+A concrete `mut T` appears to Go as dynamic `*T`. A `mut Trait` projects its current dynamic concrete pointer at `Any` and named empty-interface boundaries. A flowed first-class `mut Trait` cannot be passed to a named nonempty Go interface because its runtime implementation is no longer statically provable. An immediate concrete-reference-to-trait expression may be accepted when the compiler still has concrete provenance and can prove the exact Go method set.
+
+A reference to foreign-interface storage is different: it contributes a pointer-to-interface to `Any` and requires `deref interface_reference` when the destination needs the interface value itself.
+
+A bare imported Go generic such as `func Identity[T any](T) T` infers a reference argument as its pointer-shaped representation. If `T` is explicitly fixed to an ordinary value type, use `deref`:
+
+```ard
+let echoed_reference = ffi::Identity(reference)
+let copied_value = ffi::Identity<User>(deref reference)
+```
+
+Exclusively slice/map-shaped generic parameters still require a reference but project the exact descriptor value required by the instantiated Go signature.
 
 Ard-defined structs can satisfy nonempty Go interfaces when their `impl` methods have Go-compatible method names and signatures. The Go backend emits receiver methods for those impls, including methods that are only needed by Go interface dispatch. Functions and closure adapters still need companion FFI wrappers.
 
@@ -209,7 +247,7 @@ fn request_path(req: mut gohttp::Request) Str {
 
 ## Struct Field Writes
 
-Assignments to exported Go fields also use ordinary field syntax. The target must be mutable or a mutable Go pointer.
+Assignments to exported Go fields also use ordinary field syntax. The target must be an actual reference or foreign Go pointer. A writable ordinary `mut T` binding can be replaced as a whole, but it does not permit field writes or pointer-receiver calls.
 
 ```ard
 use go:net/http as gohttp
@@ -256,7 +294,9 @@ use go:net/http as gohttp
 let missing: (mut gohttp::Request)? = Maybe::new()
 ```
 
-Use `(mut T)?` when an Ard API intentionally models an optional reference. Direct-Go pointer fields are not automatically wrapped in `Maybe`; Go pointer values remain `mut go::T` and preserve Go nil behavior.
+Use `(mut T)?` when an Ard API intentionally models an optional reference. Direct-Go pointer fields and pointer-returning calls are not automatically wrapped in `Maybe`; Go pointer values remain `mut go::T` and preserve Go nil behavior.
+
+Use `deref pointer` when an ordinary Go value is required. This makes a shallow value copy and panics with Go's normal behavior when the foreign pointer is nil. In contrast, `unsafe::cast<T>(boxed_pointer)` is a fallible checked conversion and returns `none` for nil.
 
 ## Checking for Nil
 
@@ -303,4 +343,6 @@ Direct Go interop is intentionally incremental. Current limitations include:
 - embedded/promoted Go fields are not resolved through promotion;
 - Ard functions and closures cannot implement Go callback-shaped interfaces directly yet;
 - spread/forwarding for Go variadics still needs companion wrappers;
-- generic Go struct construction is not supported yet.
+- generic Go struct construction is not supported yet;
+- exact Go `*Interface` parameters are unsupported;
+- pure Ard cannot construct multi-level Go pointers—an exact compatible foreign pointer must already exist.

@@ -572,6 +572,17 @@ func (m MutRef) String() string {
 	return fmt.Sprintf("mut %s", m.Operand)
 }
 
+// Deref is the explicit one-layer dereference expression `deref <operand>`
+// (ADR 0057). The checker requires Operand to have reference type.
+type Deref struct {
+	Location
+	Operand Expression
+}
+
+func (d Deref) String() string {
+	return fmt.Sprintf("deref %s", d.Operand)
+}
+
 type FunctionCall struct {
 	Location
 	Name     string
