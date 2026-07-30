@@ -966,6 +966,7 @@ func loadGoTestModules(inputPath string, files []string, filter string) ([]loade
 	}
 	projectInfo := resolver.GetProjectInfo()
 	goResolver := checker.NewGoPackagesResolver(projectInfo.RootPath, projectInfo.Go.BuildTags)
+	goResolver.DependencyModuleRoots = checker.DependencyGoModuleRoots(projectInfo)
 	// Load every test module's Go imports in one go/packages session so all
 	// Go types share a single go/types universe (ADR 0044).
 	scanEntries := make([]checker.GoImportScanEntry, 0, len(files))

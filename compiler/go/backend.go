@@ -325,9 +325,24 @@ func generatedGoMod(dir string, program *air.Program, projectInfo *checker.Proje
 
 	replaceSeen := replaceKeys(goMod)
 	replaces := make([]string, 0)
+	addDependencyGoModCheckoutReplaces(&replaces, replaceSeen, program, projectInfo)
 	addDependencyGoModReplaces(&replaces, replaceSeen, program, projectInfo)
 	goMod += formatReplaceBlock(replaces)
 	return goMod, nil
+}
+
+// addDependencyGoModCheckoutReplaces redirects each git dependency's Go module
+// to its locked checkout, so the generated program builds its FFI at the same
+// commit as the dependency's Ard source (#353). This mirrors the checker's
+// resolution overlay, keeping type-checking and the build in agreement.
+func addDependencyGoModCheckoutReplaces(out *[]string, seen map[string]bool, program *air.Program, projectInfo *checker.ProjectInfo) {
+	for modulePath, root := range dependencyGoModPackages(program, projectInfo) {
+		abs, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		addGoModReplace(out, seen, fmt.Sprintf("%s => %s", modulePath, abs))
+	}
 }
 
 func generatedModulePath(projectInfo *checker.ProjectInfo) string {
@@ -848,7 +863,7 @@ func fileExists(path string) bool {
 }
 
 func dependencyGoModPackages(program *air.Program, projectInfo *checker.ProjectInfo) map[string]string {
-	return map[string]string{}
+	return checker.DependencyGoModuleRoots(projectInfo)
 }
 
 func dependencyAliasForModulePath(modulePath string, projectInfo *checker.ProjectInfo) (string, bool) {
