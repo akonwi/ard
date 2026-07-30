@@ -19,6 +19,11 @@ supersedes this ADR's conservative fiber restriction: references may cross
 `async::start` boundaries with Go-style synchronization and data-race
 responsibilities. ADRs 0033 and 0057 are normative where the decisions conflict.
 
+The `ard/core::copy` deep-copy operation proposed below was never implemented
+and has been dropped: `deref` (ADR 0057) is the only reference-to-value
+materialization and is deliberately shallow. Passages below describing
+`core::copy` are historical.
+
 ## Context
 
 Ard currently uses `mut` for two related but different ideas:
@@ -147,7 +152,7 @@ ADR 0033 subsequently removed capture isolation. Mutable references may be captu
 
 ## Deferred Work
 
-- Define the implementation strategy and type coverage for generic deep copying in `ard/core::copy`.
+- ~~Define the implementation strategy and type coverage for generic deep copying in `ard/core::copy`.~~ Dropped; see the status note above.
 
 ## Related
 

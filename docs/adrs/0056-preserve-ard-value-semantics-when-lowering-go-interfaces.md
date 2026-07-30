@@ -159,7 +159,7 @@ let value: W = deref reference
 consume_response_writer(value)
 ```
 
-This is a shallow value dereference, not deep `core::copy` semantics.
+This is a shallow value dereference; Ard provides no deep-copy operation.
 
 ### Pointer-required Go representation
 

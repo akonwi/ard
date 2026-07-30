@@ -126,7 +126,7 @@ let snapshot: User = deref reference
 - maps continue sharing map contents;
 - channels and foreign handles retain their intrinsic sharing behavior.
 
-`deref` is not a deep-copy operation. Recursive deep-copy semantics for a future `core::copy` remain separate and are not currently available.
+`deref` is not a deep-copy operation, and Ard does not provide one. Programs that need an independent deep copy construct it explicitly.
 
 References compare by pointer identity. Compare referent values explicitly when their value types support equality:
 

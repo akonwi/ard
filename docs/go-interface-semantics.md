@@ -365,8 +365,8 @@ ADRs 0056 and 0057 adopt these invariants for Ard-owned explicit implementations
 7. Go does not need to distinguish owned and borrowed pointers; Ard source and
    conversion metadata do.
 8. A caller with `mut W` cannot implicitly request owned-value behavior. It
-   must use `deref reference` to produce the shallow `W` value before conversion;
-   deep `core::copy` semantics remain separate and deferred.
+   must use `deref reference` to produce the shallow `W` value before
+   conversion; Ard provides no deep-copy operation.
 9. Existing interface-to-interface conversions preserve the concrete dynamic
    value rather than nesting interfaces.
 10. Exact Go ABI implementation checks remain separate from interface argument

@@ -328,9 +328,10 @@ value-shaped imported Go generic destination supplies that concrete value;
 without `deref`, reference-aware inference and projection follow the rules in
 this ADR.
 
-ADR 0022's proposed `core::copy` remains deferred and distinct: `deref` is a
-shallow one-layer reference load, while `core::copy` would recursively break Ard
-value identity according to its future deep-copy contract.
+ADR 0022's proposed `core::copy` has been dropped entirely: `deref` is a
+shallow one-layer reference load, and Ard provides no recursive deep-copy
+operation. Programs that need independent deep copies construct them
+explicitly.
 
 Every operation that currently relies on an implicit dereference must migrate to
 an explicit `deref` or produce a diagnostic.
@@ -1077,7 +1078,7 @@ Add runtime/backend tests for:
 - Update the variables, functions, structs, generics, async, and Go interop
   guides.
 - Document `deref` as the explicit shallow value operation and keep it distinct
-  from deferred deep `core::copy` semantics.
+  from any deep-copy notion.
 - Add migration examples using `deref` for every formerly implicit
   reference-to-value conversion.
 
@@ -1347,8 +1348,9 @@ Superseded or clarified:
 
 ## Deferred work
 
-- Design and implement deep `core::copy` semantics separately from shallow
-  `deref`.
+- Deep-copy semantics (ADR 0022's proposed `core::copy`) were considered and
+  dropped: `deref` is deliberately shallow, and programs that need independent
+  deep copies construct them explicitly.
 - Consider whether temporary selectors should materialize fresh projected
   storage.
 - Consider optional concurrency diagnostics or race-tooling integration without
