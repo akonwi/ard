@@ -121,6 +121,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
         with:
+          # Release-candidate tags carry an -rc suffix (e.g. v1.2.3-rc1).
+          # Mark those GitHub releases as prereleases so they are opt-in.
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
           files: |
             dist/*.tar.gz
             dist/checksums.txt
@@ -132,6 +135,9 @@ jobs:
   update-homebrew-tap:
     needs: release
     runs-on: ubuntu-latest
+    # Never advance the stable Homebrew formula for a release-candidate tag
+    # (e.g. v1.2.3-rc1); those are opt-in and must not reach `brew install`.
+    if: ${{ !contains(github.ref_name, '-rc') }}
     permissions:
       contents: read
 
