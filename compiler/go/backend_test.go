@@ -2806,8 +2806,7 @@ fn main() {
 func TestRunProgramSpecializesGenericEmptyListLocal(t *testing.T) {
 	program := lowerSource(t, `
 		fn drop(from: [$T], till: Int) [$T] {
-			let empty: [$T] = []
-			let out = mut empty
+			let out: mut [$T] = mut []
 			for item, idx in from {
 				if idx >= till {
 					out.push(item)

@@ -213,6 +213,27 @@ rows.push(1)`},
 		{name: "reference parameter types fresh empty list", source: `fn take(values: mut [Int]) { values.push(1) }
 take(mut [])`},
 		{name: "annotation rejects mismatched fresh list element", source: `let rows: mut [Int] = mut ["a"]`, wantError: true},
+		{name: "generic annotation types empty list through mut", source: `fn keep_all(from: [$T]) [$T] {
+  let out: mut [$T] = mut []
+  for t in from {
+    out.push(t)
+  }
+  deref out
+}
+let kept = keep_all([1, 2])`},
+		{name: "generic annotation types empty map through mut", source: `fn index(values: [$V]) [Str: $V] {
+  let out: mut [Str: $V] = mut [:]
+  for v, i in values {
+    out.set("{i}", v)
+  }
+  deref out
+}
+let indexed = index([1, 2])`},
+		{name: "generic return annotation types empty list through mut", source: `fn fresh(seed: $T) mut [$T] {
+  (mut [])
+}
+let rows = fresh(1)
+rows.push(2)`},
 	}
 
 	for _, tt := range tests {

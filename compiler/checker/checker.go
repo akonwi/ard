@@ -4133,8 +4133,10 @@ func (c *Checker) canCheckStatementAsExpectedExpression(stmt parse.Statement, ex
 			return true
 		case *parse.MutRef:
 			// `mut <container literal>` needs the reference destination's
-			// referent to type the fresh storage (ADR 0057).
-			if _, ok := expectedFinal.(*MutableRef); !ok || hasGenericsInType(expectedFinal) {
+			// referent to type the fresh storage. Declaration-scope generics
+			// participate; only unresolved call-inference variables opt out
+			// (ADR 0057).
+			if _, ok := expectedFinal.(*MutableRef); !ok || firstUnresolvedCallTypeVar(expectedFinal) != nil {
 				return false
 			}
 			switch s.Operand.(type) {
@@ -10063,7 +10065,7 @@ func (c *Checker) checkExprAsInner(expr parse.Expression, expectedType Type, exp
 	case *parse.MutRef:
 		// A reference destination lets `mut <container literal>` infer the
 		// literal's shape from the referent type (ADR 0057).
-		if expectedRef, ok := expectedType.(*MutableRef); ok && !hasGenericsInType(expectedType) {
+		if expectedRef, ok := expectedType.(*MutableRef); ok && firstUnresolvedCallTypeVar(expectedType) == nil {
 			switch s.Operand.(type) {
 			case *parse.ListLiteral, *parse.MapLiteral:
 				checked := c.checkMutRefAs(s, expectedRef.Of())
@@ -11313,7 +11315,7 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				// `mut <container literal>` at a reference parameter infers the
 				// literal's shape from the referent type (ADR 0057).
 				contextualLiteral := false
-				if _, isRef := expectedType.(*MutableRef); isRef && !hasGenericsInType(expectedType) {
+				if _, isRef := expectedType.(*MutableRef); isRef && firstUnresolvedCallTypeVar(expectedType) == nil {
 					switch arg.Operand.(type) {
 					case *parse.ListLiteral, *parse.MapLiteral:
 						contextualLiteral = true
