@@ -36,7 +36,8 @@ Contextual typing flows into container literals through `mut` at reference
 destinations, including declaration-scope generics (`let out: mut [$T] =
 mut []`); only unresolved call-inference variables still require an explicit
 element type. Known deferred gap: generic `mut $T` parameters do not yet unify
-with concrete foreign pointer values.
+with concrete foreign pointer values; this is deliberately deprioritized —
+concrete `mut ffi::T` signatures cover the practical cases.
 
 ## Context
 
@@ -1354,7 +1355,8 @@ Superseded or clarified:
 - Consider whether temporary selectors should materialize fresh projected
   storage.
 - Consider optional concurrency diagnostics or race-tooling integration without
-  restricting legal Go-style reference sharing.
+  restricting legal Go-style reference sharing. Plumbing Go's race detector
+  through the CLI is backlogged as issue #351.
 - Auto-deref at ordinary value destinations was considered and rejected
   (issue #348): Go never dereferences implicitly where a value is expected,
   and the explicit `deref` keeps mutation-contract changes visible at every
