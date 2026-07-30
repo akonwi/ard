@@ -72,7 +72,33 @@ ard add github.com/akonwi/vaxis-ard@latest
 3. writes the resolved graph to `ard.lock`, and
 4. fetches Git dependencies into Ard's shared cache.
 
-To update an existing dependency, run `ard add` again with a new tag, commit, or `latest`.
+## Updating dependencies
+
+Use `ard update` to move Git dependencies to the latest commit on their default branch:
+
+```sh
+ard update            # update every direct Git dependency
+ard update vaxis      # update one dependency
+ard update vaxis tui  # update several
+```
+
+`ard update`:
+
+1. resolves the latest commit for each target,
+2. rewrites the dependency's `ard.toml` entry to the resolved commit,
+3. updates `ard.lock`, and
+4. fetches the new commit into the shared cache.
+
+A dependency that is already at the latest commit is left untouched. Path dependencies are skipped, since they track a local directory rather than a commit.
+
+Updating pins the resolved commit for that Git source across the whole graph. If the same repository is also pulled in transitively by another dependency, it is updated there too — Ard keeps a single commit per Git source, and the explicit update wins over the commit a transitive dependency pinned.
+
+You can still update a single dependency to a specific ref with `ard add`:
+
+```sh
+ard add github.com/akonwi/vaxis-ard@v0.2.0
+ard add github.com/akonwi/vaxis-ard@latest
+```
 
 ## Lockfile and cache
 

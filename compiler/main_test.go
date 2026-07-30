@@ -1036,6 +1036,83 @@ func TestParseManifestName(t *testing.T) {
 		t.Fatalf("parseManifestName = %q, %v", name, ok)
 	}
 }
+func gitRun(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestRunUpdateCommandUpdatesGitDependency exercises `ard update <alias>`
+// end-to-end against a local git repo: it must advance the manifest and lock to
+// the latest commit, then report the dependency as up to date on a second run.
+func TestRunUpdateCommandUpdatesGitDependency(t *testing.T) {
+	t.Setenv("ARD_CACHE_DIR", t.TempDir())
+	workspace := t.TempDir()
+
+	repo := filepath.Join(workspace, "helper")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(repo, "ard.toml"), []byte("name = \"helper\"\nard = \">= 0.1.0\"\n"), 0o644)
+	os.WriteFile(filepath.Join(repo, "helper.ard"), []byte("fn value() Int { 1 }\n"), 0o644)
+	gitRun(t, repo, "init")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "one")
+	c1 := gitRun(t, repo, "rev-parse", "HEAD")
+
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \"" + repo + "\", commit = \"" + c1 + "\" }\n"
+	os.WriteFile(filepath.Join(root, "ard.toml"), []byte(manifest), 0o644)
+	lock, err := checker.LockDependencyGraph(root, "app", "helper", checker.DependencyInfo{Alias: "helper", Name: "helper", Git: repo, Commit: c1}, "helper", c1)
+	if err != nil {
+		t.Fatalf("initial lock: %v", err)
+	}
+	if err := checker.WriteDependencyLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	os.WriteFile(filepath.Join(repo, "helper.ard"), []byte("fn value() Int { 2 }\n"), 0o644)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-m", "two")
+	c2 := gitRun(t, repo, "rev-parse", "HEAD")
+	if c1 == c2 {
+		t.Fatal("expected a distinct second commit")
+	}
+
+	t.Chdir(root)
+	if err := runUpdateCommand([]string{"helper"}); err != nil {
+		t.Fatalf("runUpdateCommand: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(root, "ard.toml"))
+	if !strings.Contains(string(data), c2) {
+		t.Fatalf("manifest not updated to %s:\n%s", c2, data)
+	}
+	if strings.Contains(string(data), c1) {
+		t.Fatalf("manifest still pins old commit %s:\n%s", c1, data)
+	}
+	lockData, _ := os.ReadFile(filepath.Join(root, "ard.lock"))
+	if !strings.Contains(string(lockData), c2) || strings.Contains(string(lockData), c1) {
+		t.Fatalf("lock not updated to new commit:\n%s", lockData)
+	}
+
+	// Second run is a no-op: the dependency is already at the latest commit.
+	if err := runUpdateCommand([]string{"helper"}); err != nil {
+		t.Fatalf("runUpdateCommand (second): %v", err)
+	}
+	if data2, _ := os.ReadFile(filepath.Join(root, "ard.toml")); !strings.Contains(string(data2), c2) {
+		t.Fatalf("second update disturbed the manifest:\n%s", data2)
+	}
+}
+
 func TestAddDependencyToManifest(t *testing.T) {
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "ard.toml")

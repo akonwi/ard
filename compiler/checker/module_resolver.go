@@ -683,6 +683,20 @@ func LockDependencyGraphReplacingAliases(projectRoot string, projectName string,
 	if commit != "" {
 		dep.Commit = commit
 	}
+	// The explicitly added dependency pins its git source across the whole
+	// graph, so a shared/transitive reference to the same repo updates too
+	// instead of conflicting with the previously locked commit. Clearing the
+	// stale pin lets the override take effect without a spurious conflict.
+	if dep.Git != "" && dep.Commit != "" {
+		peeled, err := resolveGitRefCommit(dep.Git, dep.Commit)
+		if err != nil {
+			return LockFile{}, err
+		}
+		dep.Commit = peeled
+		key := CanonicalGitSource(dep.Git)
+		builder.overrides[key] = peeled
+		delete(builder.gitCommits, key)
+	}
 	packageID, err := builder.resolveDependencyPackage(dep, alias, true)
 	if err != nil {
 		return LockFile{}, err
@@ -693,7 +707,130 @@ func LockDependencyGraphReplacingAliases(projectRoot string, projectName string,
 	}
 	rootPkg.Dependencies[alias] = packageID
 	builder.packages[rootPkg.ID] = rootPkg
+	// Repoint any transitive edges that still target an older commit of the
+	// same git so the graph keeps a single commit per source.
+	if dep.Git != "" {
+		builder.repointGitEdges(dep.Git, packageID)
+	}
 	return builder.lockFile(), nil
+}
+
+// ReadManifestDependencies returns the direct dependencies declared in the
+// project's ard.toml, keyed by alias. Unlike ProjectInfo.Dependencies it is not
+// overlaid with lockfile metadata, so callers see the git source and ref exactly
+// as declared.
+func ReadManifestDependencies(projectRoot string) (map[string]DependencyInfo, error) {
+	return parseProjectDependencies(filepath.Join(projectRoot, "ard.toml"), projectRoot)
+}
+
+// UpdateDependencyGraph re-resolves the entire dependency graph from the root
+// manifest, forcing each updated git source (canonical form -> commit) to its
+// new commit. Every direct git dependency is made authoritative for its source,
+// so a repository shared transitively resolves to the root's chosen commit
+// deterministically, independent of the order updates are requested. Packages
+// whose commit does not change keep their recorded integrity and are not
+// refetched.
+func UpdateDependencyGraph(projectRoot string, projectName string, updates map[string]string) (LockFile, error) {
+	builder, err := newLockGraphBuilder(projectRoot, projectName)
+	if err != nil {
+		return LockFile{}, err
+	}
+	rootDeps, err := parseProjectDependencies(filepath.Join(projectRoot, "ard.toml"), projectRoot)
+	if err != nil {
+		return LockFile{}, err
+	}
+	aliases := make([]string, 0, len(rootDeps))
+	for alias := range rootDeps {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+
+	// Phase 1: make every direct git dependency authoritative for its source.
+	// Updated targets pin their new commit; the rest pin the commit their
+	// manifest ref currently resolves to. Transitive references to any of these
+	// sources then yield to the root's choice instead of conflicting.
+	for _, alias := range aliases {
+		dep := rootDeps[alias]
+		if dep.Git == "" {
+			continue
+		}
+		key := CanonicalGitSource(dep.Git)
+		commit := updates[key]
+		if commit == "" {
+			resolved, err := resolveGitDependencyCommit(dep)
+			if err != nil {
+				return LockFile{}, err
+			}
+			commit = resolved
+		} else {
+			peeled, err := resolveGitRefCommit(dep.Git, commit)
+			if err != nil {
+				return LockFile{}, err
+			}
+			commit = peeled
+			// This target is now pinned to the resolved commit; record it so the
+			// lock's requested ref matches the manifest entry rewritten by the
+			// caller instead of retaining the previous pin.
+			dep.Commit = commit
+			dep.Tag = ""
+			dep.Requested = commit
+			rootDeps[alias] = dep
+		}
+		// Two direct aliases that name the same repository must agree on a
+		// commit; the graph keeps a single commit per source. A shared source
+		// that is being updated already resolves to the same target commit for
+		// every alias, so only genuinely divergent manifest pins conflict here.
+		if prev, ok := builder.overrides[key]; ok && prev != commit {
+			return LockFile{}, fmt.Errorf("dependency conflict for %s: direct dependencies pin different commits (%s and %s)", dep.Git, prev, commit)
+		}
+		builder.overrides[key] = commit
+	}
+
+	// Phase 2: rebuild the root dependency set with the overrides applied.
+	// Discard the pins seeded from the previous lock so a transitive dependency
+	// whose commit legitimately moves in the rebuilt graph is not rejected
+	// against a stale value; genuine conflicts are still detected while
+	// traversing the fresh graph.
+	builder.gitCommits = map[string]string{}
+	rootPkg := builder.packages[builder.lock.Root]
+	rootPkg.Dependencies = map[string]string{}
+	builder.packages[rootPkg.ID] = rootPkg
+	for _, alias := range aliases {
+		packageID, err := builder.resolveDependencyPackage(rootDeps[alias], alias, true)
+		if err != nil {
+			return LockFile{}, err
+		}
+		rootPkg = builder.packages[builder.lock.Root]
+		rootPkg.Dependencies[alias] = packageID
+		builder.packages[rootPkg.ID] = rootPkg
+	}
+	return builder.lockFile(), nil
+}
+
+// repointGitEdges redirects every dependency edge whose target package shares
+// the given git source to newID, then prunes the now-unreachable old commits.
+func (b *lockGraphBuilder) repointGitEdges(git string, newID string) {
+	key := CanonicalGitSource(git)
+	for id, pkg := range b.packages {
+		if pkg.Dependencies == nil {
+			continue
+		}
+		changed := false
+		for alias, childID := range pkg.Dependencies {
+			if childID == newID {
+				continue
+			}
+			child := b.packages[childID]
+			if child.Git != "" && CanonicalGitSource(child.Git) == key {
+				pkg.Dependencies[alias] = newID
+				changed = true
+			}
+		}
+		if changed {
+			b.packages[id] = pkg
+		}
+	}
+	b.pruneUnreachablePackages()
 }
 
 type lockGraphBuilder struct {
@@ -703,6 +840,10 @@ type lockGraphBuilder struct {
 	packages    map[string]LockedPackage
 	gitCommits  map[string]string
 	visiting    map[string]bool
+	// overrides forces a git source (canonical form) to a specific commit for
+	// every reference in the graph, so an explicit add/update wins over the
+	// commits transitive dependencies pin in their own manifests.
+	overrides map[string]string
 }
 
 func newLockGraphBuilder(projectRoot string, projectName string) (*lockGraphBuilder, error) {
@@ -726,6 +867,7 @@ func newLockGraphBuilder(projectRoot string, projectName string) (*lockGraphBuil
 		packages:    map[string]LockedPackage{},
 		gitCommits:  map[string]string{},
 		visiting:    map[string]bool{},
+		overrides:   map[string]string{},
 	}
 	for _, pkg := range lock.Packages {
 		if pkg.Dependencies == nil {
@@ -855,9 +997,16 @@ func (b *lockGraphBuilder) resolveGitDependencyPackage(dep DependencyInfo, prefe
 	if !preferMetadata {
 		dep.Git = b.transportForGitSource(sourceKey, dep.Git)
 	}
-	commit, err := resolveGitDependencyCommit(dep)
-	if err != nil {
-		return "", err
+	// An explicit add/update pins this git source; the forced commit wins over
+	// whatever commit this reference pins in its own manifest, keeping the
+	// single-commit-per-git graph consistent.
+	commit := b.overrides[sourceKey]
+	if commit == "" {
+		resolved, err := resolveGitDependencyCommit(dep)
+		if err != nil {
+			return "", err
+		}
+		commit = resolved
 	}
 	if existing := b.gitCommits[sourceKey]; existing != "" && existing != commit {
 		return "", fmt.Errorf("dependency conflict for %s: already locked to %s, requested %s", dep.Git, existing, commit)

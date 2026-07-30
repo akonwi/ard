@@ -980,6 +980,203 @@ func runGit(t *testing.T, dir string, args ...string) {
 	_ = runGitOutput(t, dir, args...)
 }
 
+// addGitCommit writes files into an existing repo and creates a new commit,
+// returning the new HEAD commit hash.
+func addGitCommit(t *testing.T, repo string, files map[string]string, message string) string {
+	t.Helper()
+	for path, content := range files {
+		full := filepath.Join(repo, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", message)
+	return strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+}
+
+// TestUpdateDependencyGraphFollowsTransitiveBumpFromUpdatedTarget checks that
+// updating a direct dependency also moves a transitive dependency that the
+// target's new version bumped, instead of conflicting against the commit the
+// previous lock recorded.
+func TestUpdateDependencyGraphFollowsTransitiveBumpFromUpdatedTarget(t *testing.T) {
+	t.Setenv("ARD_CACHE_DIR", t.TempDir())
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	x, x1 := createGitPackageRepo(t, workspace, "x", map[string]string{
+		"ard.toml": "name = \"x\"\nard = \">= 0.1.0\"\n",
+		"x.ard":    "fn value() Int { 1 }\n",
+	})
+	x2 := addGitCommit(t, x, map[string]string{"x.ard": "fn value() Int { 2 }\n"}, "x two")
+
+	// a1 pins x@x1; a2 bumps its own dep to x@x2.
+	aPinsX1 := "name = \"a\"\nard = \">= 0.1.0\"\n\n[dependencies]\nx = { git = \"" + x + "\", commit = \"" + x1 + "\" }\n"
+	a, a1 := createGitPackageRepo(t, workspace, "a", map[string]string{"ard.toml": aPinsX1, "a.ard": "fn a() Int { 1 }\n"})
+	aPinsX2 := "name = \"a\"\nard = \">= 0.1.0\"\n\n[dependencies]\nx = { git = \"" + x + "\", commit = \"" + x2 + "\" }\n"
+	a2 := addGitCommit(t, a, map[string]string{"ard.toml": aPinsX2, "a.ard": "fn a() Int { 2 }\n"}, "a two")
+
+	rootManifest := "name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\na = { git = \"" + a + "\", commit = \"" + a1 + "\" }\n"
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte(rootManifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := checker.UpdateDependencyGraph(root, "app", map[string]string{})
+	if err != nil {
+		t.Fatalf("initial resolve: %v", err)
+	}
+	if got := lockedPackagesByID(lock)[checker.GitPackageID(a, a1)].Dependencies["x"]; got != checker.GitPackageID(x, x1) {
+		t.Fatalf("initial a@a1.x = %q, want x@x1", got)
+	}
+	if err := checker.WriteDependencyLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	// Update a to a2; its transitive x must move to x2 without conflict.
+	lock, err = checker.UpdateDependencyGraph(root, "app", map[string]string{checker.CanonicalGitSource(a): a2})
+	if err != nil {
+		t.Fatalf("update a: %v", err)
+	}
+	pkgs := lockedPackagesByID(lock)
+	if _, ok := pkgs[checker.GitPackageID(x, x1)]; ok {
+		t.Fatalf("stale x@x1 still present after updating a")
+	}
+	if got := pkgs[checker.GitPackageID(a, a2)].Dependencies["x"]; got != checker.GitPackageID(x, x2) {
+		t.Fatalf("a@a2.x = %q, want x@x2", got)
+	}
+}
+
+// TestUpdateDependencyGraphKeepsRootPinForCrossReferencingDependency covers the
+// order-independent case behind `ard update`: the root pins helper@H2 directly
+// while a sibling dependency `mid` still pins helper@H1 in its own manifest.
+// Updating `mid` must keep the root's helper@H2 authoritative everywhere
+// instead of conflicting with mid's transitive helper@H1 pin.
+func TestUpdateDependencyGraphKeepsRootPinForCrossReferencingDependency(t *testing.T) {
+	t.Setenv("ARD_CACHE_DIR", t.TempDir())
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	helper, h1 := createGitPackageRepo(t, workspace, "helper", map[string]string{
+		"ard.toml":   "name = \"helper\"\nard = \">= 0.1.0\"\n",
+		"helper.ard": "fn value() Int { 1 }\n",
+	})
+	h2 := addGitCommit(t, helper, map[string]string{"helper.ard": "fn value() Int { 2 }\n"}, "helper two")
+
+	// mid pins helper@h1 in both of its commits.
+	midHelperPin := "name = \"mid\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \"" + helper + "\", commit = \"" + h1 + "\" }\n"
+	mid, m1 := createGitPackageRepo(t, workspace, "mid", map[string]string{"ard.toml": midHelperPin, "mid.ard": "fn m() Int { 1 }\n"})
+	m2 := addGitCommit(t, mid, map[string]string{"mid.ard": "fn m() Int { 2 }\n"}, "mid two")
+
+	// Root pins helper@h2 directly and mid@m1.
+	rootManifest := "name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \"" + helper + "\", commit = \"" + h2 + "\" }\nmid = { git = \"" + mid + "\", commit = \"" + m1 + "\" }\n"
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte(rootManifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lock, err := checker.UpdateDependencyGraph(root, "app", map[string]string{})
+	if err != nil {
+		t.Fatalf("initial resolve: %v", err)
+	}
+	if err := checker.WriteDependencyLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	// Update only mid; helper must stay at the root's h2 across the graph.
+	lock, err = checker.UpdateDependencyGraph(root, "app", map[string]string{checker.CanonicalGitSource(mid): m2})
+	if err != nil {
+		t.Fatalf("update mid: %v", err)
+	}
+	pkgs := lockedPackagesByID(lock)
+	helperH2 := checker.GitPackageID(helper, h2)
+	helperH1 := checker.GitPackageID(helper, h1)
+	if _, ok := pkgs[helperH1]; ok {
+		t.Fatalf("helper@h1 leaked into the graph via mid")
+	}
+	if _, ok := pkgs[helperH2]; !ok {
+		t.Fatalf("helper@h2 missing")
+	}
+	midM2 := checker.GitPackageID(mid, m2)
+	if got := pkgs[midM2].Dependencies["helper"]; got != helperH2 {
+		t.Fatalf("mid@m2.helper = %q, want %q", got, helperH2)
+	}
+	if got := pkgs[lock.Root].Dependencies["mid"]; got != midM2 {
+		t.Fatalf("root.mid = %q, want %q", got, midM2)
+	}
+}
+
+// TestLockDependencyGraphUpdatesSharedGitDependency covers `ard add <repo>@latest`
+// (and `ard update`) when the same git source is also a transitive dependency:
+// the explicit new commit must win across the whole graph instead of conflicting
+// with the previously locked commit.
+func TestLockDependencyGraphUpdatesSharedGitDependency(t *testing.T) {
+	t.Setenv("ARD_CACHE_DIR", t.TempDir())
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	helper, hc1 := createGitPackageRepo(t, workspace, "helper", map[string]string{
+		"ard.toml":   "name = \"helper\"\nard = \">= 0.1.0\"\n",
+		"helper.ard": "fn value() Int { 1 }\n",
+	})
+	midManifest := "name = \"mid\"\nard = \">= 0.1.0\"\n\n[dependencies]\nhelper = { git = \"" + helper + "\", commit = \"" + hc1 + "\" }\n"
+	mid, mc := createGitPackageRepo(t, workspace, "mid", map[string]string{"ard.toml": midManifest, "mid.ard": "fn m() Int { 1 }\n"})
+
+	lock, err := checker.LockDependencyGraph(root, "app", "mid", checker.DependencyInfo{Alias: "mid", Name: "mid", Git: mid, Commit: mc}, "mid", mc)
+	if err != nil {
+		t.Fatalf("lock mid: %v", err)
+	}
+	if err := checker.WriteDependencyLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+	lock, err = checker.LockDependencyGraph(root, "app", "helper", checker.DependencyInfo{Alias: "helper", Name: "helper", Git: helper, Commit: hc1}, "helper", hc1)
+	if err != nil {
+		t.Fatalf("lock helper: %v", err)
+	}
+	if err := checker.WriteDependencyLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	hc2 := addGitCommit(t, helper, map[string]string{"helper.ard": "fn value() Int { 2 }\n"}, "bump helper")
+	if hc1 == hc2 {
+		t.Fatal("expected a distinct new helper commit")
+	}
+
+	lock, err = checker.LockDependencyGraphReplacingAliases(root, "app", "helper", nil, checker.DependencyInfo{Alias: "helper", Name: "helper", Git: helper, Commit: hc2, Requested: "latest"}, "helper", hc2)
+	if err != nil {
+		t.Fatalf("update shared helper: %v", err)
+	}
+
+	pkgs := lockedPackagesByID(lock)
+	newID := checker.GitPackageID(helper, hc2)
+	oldID := checker.GitPackageID(helper, hc1)
+	if _, ok := pkgs[newID]; !ok {
+		t.Fatalf("helper not updated to new commit %s", hc2[:7])
+	}
+	if _, ok := pkgs[oldID]; ok {
+		t.Fatalf("stale helper@%s still present in lock", hc1[:7])
+	}
+	midID := checker.GitPackageID(mid, mc)
+	if got := pkgs[midID].Dependencies["helper"]; got != newID {
+		t.Fatalf("mid.helper = %q, want %q (transitive edge not repointed)", got, newID)
+	}
+	if got := pkgs[lock.Root].Dependencies["helper"]; got != newID {
+		t.Fatalf("root.helper = %q, want %q", got, newID)
+	}
+}
+
 func runGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)

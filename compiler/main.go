@@ -126,6 +126,14 @@ func main() {
 			}
 			os.Exit(0)
 		}
+	case "update":
+		{
+			if err := runUpdateCommand(os.Args[2:]); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
 	case "deps":
 		{
 			if err := runDepsCommand(os.Args[2:]); err != nil {
@@ -186,6 +194,7 @@ Commands:
   build <file.ard> [--out <path>]    Build a program
   test [path] [--filter <pattern>]   Run Ard tests
   add <git-source@ref> [as alias]    Add or update a Git dependency and lock it
+  update [alias...]                  Update Git dependencies to their latest commit
   remove <alias>                     Remove a direct dependency
   deps fetch                         Restore locked Git dependencies into the cache
   deps verify                        Verify cached dependencies against ard.lock
@@ -335,6 +344,117 @@ func runRemoveCommand(args []string) error {
 	}
 	fmt.Printf("Removed %s\n", alias)
 	return nil
+}
+
+// runUpdateCommand updates one or more Git dependencies to the latest commit on
+// their default branch. With no arguments it updates every direct Git
+// dependency. All targets are resolved and re-locked in a single graph rebuild,
+// so the result is independent of update order and a repository shared
+// transitively is updated everywhere it appears.
+func runUpdateCommand(args []string) error {
+	project, err := checker.FindProjectRoot(".")
+	if err != nil {
+		return err
+	}
+	manifestPath := filepath.Join(project.RootPath, "ard.toml")
+	if _, err := os.Stat(manifestPath); err != nil {
+		return fmt.Errorf("ard update requires an ard.toml project")
+	}
+	// Read the git sources as declared, not overlaid with lockfile metadata, so
+	// a manually edited source is honored.
+	declared, err := checker.ReadManifestDependencies(project.RootPath)
+	if err != nil {
+		return err
+	}
+
+	targets := append([]string{}, args...)
+	if len(targets) == 0 {
+		for alias, dep := range declared {
+			if dep.Git != "" {
+				targets = append(targets, alias)
+			}
+		}
+		sort.Strings(targets)
+		if len(targets) == 0 {
+			fmt.Println("No Git dependencies to update")
+			return nil
+		}
+	}
+
+	// updates maps a canonical git source to the newly resolved commit.
+	updates := map[string]string{}
+	for _, alias := range targets {
+		dep, ok := declared[alias]
+		if !ok {
+			return fmt.Errorf("dependency %q is not declared in ard.toml", alias)
+		}
+		if dep.Git == "" {
+			fmt.Printf("Skipping %s (path dependency)\n", alias)
+			continue
+		}
+		latest, err := resolveGitLatestCommit(dep.Git)
+		if err != nil {
+			return err
+		}
+		locked := ""
+		lockedGit := ""
+		if info, ok := project.Dependencies[alias]; ok {
+			locked = info.Commit
+			lockedGit = info.Git
+		}
+		sameSource := checker.CanonicalGitSource(dep.Git) == checker.CanonicalGitSource(lockedGit)
+		if latest == locked && sameSource {
+			fmt.Printf("%s is already up to date (%s)\n", alias, shortCommit(latest))
+			continue
+		}
+		updates[checker.CanonicalGitSource(dep.Git)] = latest
+	}
+	if len(updates) == 0 {
+		fmt.Println("All dependencies are up to date")
+		return nil
+	}
+
+	lock, err := checker.UpdateDependencyGraph(project.RootPath, project.ProjectName, updates)
+	if err != nil {
+		return err
+	}
+
+	// Rewrite every manifest entry whose git source was updated (covers sibling
+	// aliases that point at the same repository).
+	updatedAliases := []string{}
+	for alias, dep := range declared {
+		if dep.Git == "" {
+			continue
+		}
+		commit, ok := updates[checker.CanonicalGitSource(dep.Git)]
+		if !ok {
+			continue
+		}
+		entry := checker.DependencyInfo{Alias: alias, Git: dep.Git, Commit: commit}
+		if err := replaceDependencyInManifest(manifestPath, nil, entry); err != nil {
+			return err
+		}
+		updatedAliases = append(updatedAliases, alias)
+	}
+	sort.Strings(updatedAliases)
+
+	if err := checker.WriteDependencyLock(project.RootPath, lock); err != nil {
+		return err
+	}
+	for _, alias := range updatedAliases {
+		if _, err := checker.FetchDependency(project.RootPath, alias); err != nil {
+			return err
+		}
+		fmt.Printf("Updated %s -> %s\n", alias, shortCommit(updates[checker.CanonicalGitSource(declared[alias].Git)]))
+	}
+	return nil
+}
+
+func shortCommit(commit string) string {
+	if len(commit) > 7 {
+		return commit[:7]
+	}
+	return commit
 }
 
 func runDepsCommand(args []string) error {
