@@ -5246,9 +5246,9 @@ func (fl *functionLowerer) lowerUnionMatch(typeID TypeID, match *checker.UnionMa
 		return nil, fmt.Errorf("union match lowered with non-union subject %s", match.Subject.Type().String())
 	}
 
-	cases := make([]UnionMatchCase, 0, len(match.TypeCases))
-	for _, member := range unionType.Members {
-		matchCase := match.TypeCases[member.Name]
+	cases := make([]UnionMatchCase, 0, len(match.TypeCasesByIndex))
+	for memberIndex, member := range unionType.Members {
+		matchCase := match.TypeCasesByIndex[memberIndex]
 		if matchCase == nil {
 			continue
 		}

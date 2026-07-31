@@ -1742,6 +1742,88 @@ fn main() {
 	}
 }
 
+func TestRunProgramMatchesQualifiedForeignTypesInClosedUnions(t *testing.T) {
+	program := lowerSource(t, `use go:image
+
+ type Shape = image::Point | image::Rectangle
+ type ShapeRef = mut image::Point | mut image::Rectangle
+
+ fn describe(shape: Shape) Int {
+   match shape {
+     image::Point(point) => point.X,
+     image::Rectangle => it.Max.Y,
+   }
+ }
+
+ fn move_x(shape: ShapeRef) {
+   match shape {
+     image::Point(point) => { point.X = 9 },
+     image::Rectangle(rectangle) => { rectangle.Min.X = 9 },
+   }
+ }
+
+ fn main() {
+   let point: Shape = image::Point{X: 3, Y: 4}
+   if not describe(point) == 3 { panic("qualified value pattern failed") }
+
+   let rectangle: Shape = image::Rect(1, 2, 4, 6)
+   if not describe(rectangle) == 6 { panic("qualified implicit pattern failed") }
+
+   let point_ref = mut image::Point{X: 1, Y: 2}
+   move_x(point_ref)
+   if not point_ref.X == 9 { panic("qualified reference pattern lost identity") }
+ }`)
+	if err := RunProgram(program, nil); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
+func TestRunProgramMatchesSameNamedQualifiedUnionMembers(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"qualified_union\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "left.ard"), []byte("struct Item { value: Int }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "right.ard"), []byte("struct Item { value: Int }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	if err := os.WriteFile(mainPath, []byte(`use qualified_union/left
+use qualified_union/right
+
+type Subject = left::Item | right::Item
+
+fn read(subject: Subject) Int {
+  match subject {
+    left::Item(item) => item.value + 10,
+    right::Item(item) => item.value + 20,
+  }
+}
+
+fn main() {
+  let left_item: Subject = left::Item{value: 1}
+  let right_item: Subject = right::Item{value: 2}
+  if read(left_item) != 11 { panic("left case used wrong body") }
+  if read(right_item) != 22 { panic("right case used wrong body") }
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := frontend.LoadModule(mainPath)
+	if err != nil {
+		t.Fatalf("load module: %v", err)
+	}
+	program, err := air.Lower(loaded.Module)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if err := RunProgram(program, []string{"ard", "run", mainPath}, loaded.ProjectInfo); err != nil {
+		t.Fatalf("RunProgram error = %v", err)
+	}
+}
+
 func TestRunProgramExecutesForeignTypeMatch(t *testing.T) {
 	program := lowerSource(t, `use go:image
 use go:time

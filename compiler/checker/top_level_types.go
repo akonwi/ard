@@ -40,17 +40,17 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 			}
 			c.topLevelStructDeclarations[name] = s
 			genericParams := genericParamsFromStructDeclaration(s)
-			c.scope.add(name, &StructDef{
+			c.scope.addType(name, &StructDef{
 				Name:          s.Name.Name,
 				ModulePath:    c.typeOwnerPath(),
 				Fields:        make(map[string]Type),
 				GenericParams: genericParams,
 				Private:       s.Private,
-			}, false)
+			})
 		case *parse.TraitDefinition:
-			c.scope.add(name, &Trait{Name: s.Name.Name, ModulePath: c.typeOwnerPath(), private: s.Private}, false)
+			c.scope.addType(name, &Trait{Name: s.Name.Name, ModulePath: c.typeOwnerPath(), private: s.Private})
 		case *parse.EnumDefinition:
-			c.scope.add(name, &Enum{Name: s.Name, ModulePath: c.typeOwnerPath(), Private: s.Private, Methods: make(map[string]*FunctionDef), Location: s.GetLocation()}, false)
+			c.scope.addType(name, &Enum{Name: s.Name, ModulePath: c.typeOwnerPath(), Private: s.Private, Methods: make(map[string]*FunctionDef), Location: s.GetLocation()})
 		case *parse.TypeDeclaration:
 			if len(s.Type) == 1 {
 				if c.topLevelTypeAliases == nil {
@@ -58,7 +58,7 @@ func (c *Checker) hoistTopLevelTypeDeclarations() {
 				}
 				c.topLevelTypeAliases[name] = s
 			} else {
-				c.scope.add(name, &Union{Name: s.Name.Name, ModulePath: c.typeOwnerPath(), Private: s.Private}, false)
+				c.scope.addType(name, &Union{Name: s.Name.Name, ModulePath: c.typeOwnerPath(), Private: s.Private})
 			}
 		}
 	}
@@ -466,7 +466,7 @@ func (c *Checker) resolveTopLevelTypeAlias(name string) Type {
 		c.addUnresolvedReference(unrecognizedType, decl.Type[0].GetName(), decl.Type[0].GetLocation())
 		return nil
 	}
-	c.scope.add(decl.Name.Name, resolvedType, false)
+	c.scope.addType(decl.Name.Name, resolvedType)
 	if c.resolvedTopLevelAliases == nil {
 		c.resolvedTopLevelAliases = map[string]bool{}
 	}

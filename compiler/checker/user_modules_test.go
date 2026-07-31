@@ -80,6 +80,187 @@ ard = ">= 0.1.0"`
 		t.Errorf("Expected nested path '%s', got '%s'", expectedPath, filePath)
 	}
 }
+func TestQualifiedModuleTypePatternsInClosedUnions(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "models.ard"), []byte(`struct User { id: Int }
+struct Team { id: Int }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	mainSource := `use demo/models
+
+type Subject = models::User | models::Team
+
+fn id(subject: Subject) Int {
+  match subject {
+    models::User(user) => user.id,
+    models::Team => it.id,
+  }
+}
+`
+	if err := os.WriteFile(mainPath, []byte(mainSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := parse.Parse([]byte(mainSource), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, result.Program, resolver)
+	c.Check()
+	if c.HasErrors() {
+		t.Fatalf("unexpected diagnostics: %v", c.Diagnostics())
+	}
+}
+
+func TestQualifiedUnionPatternExhaustivenessNamesSameNamedMembers(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "left.ard"), []byte("struct Item { left: Int }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "right.ard"), []byte("struct Item { right: Int }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	mainSource := `use demo/left
+use demo/right
+
+type Subject = left::Item | right::Item
+
+fn inspect(subject: Subject) Int {
+  match subject {
+    left::Item(item) => item.left,
+  }
+}
+`
+	result := parse.Parse([]byte(mainSource), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, result.Program, resolver)
+	c.Check()
+	diagnostics := c.Diagnostics()
+	found := false
+	for _, diagnostic := range diagnostics {
+		if strings.Contains(diagnostic.Message, "right::Item") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("diagnostics = %v, want missing right::Item case", diagnostics)
+	}
+}
+
+func TestQualifiedUnionPatternPreservesReexportAliasNames(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "left.ard"), []byte("struct Item { value: Int }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "right.ard"), []byte("struct Item { value: Int }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "models.ard"), []byte(`use demo/left
+use demo/right
+
+type LeftItem = left::Item
+type RightItem = right::Item
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	mainSource := `use demo/models
+
+type Subject = models::LeftItem | models::RightItem
+
+struct Box<$T> {
+  marker: $T,
+  subject: Subject,
+}
+
+fn inspect(box: Box<Int>) Int {
+  match box.subject {
+    models::LeftItem(item) => item.value,
+  }
+}
+`
+	result := parse.Parse([]byte(mainSource), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, result.Program, resolver)
+	c.Check()
+	diagnostics := c.Diagnostics()
+	found := false
+	for _, diagnostic := range diagnostics {
+		if strings.Contains(diagnostic.Message, "models::RightItem") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("diagnostics = %v, want missing models::RightItem case", diagnostics)
+	}
+}
+
+func TestQualifiedUnionPatternRejectsModuleValues(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"demo\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "models.ard"), []byte(`struct User { id: Int }
+let default_user = User{id: 1}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(projectDir, "main.ard")
+	mainSource := `use demo/models
+
+type Subject = models::User | Int
+
+fn id(subject: Subject) Int {
+  match subject {
+    models::default_user(user) => user.id,
+    _ => 0,
+  }
+}
+`
+	result := parse.Parse([]byte(mainSource), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	resolver, err := checker.NewModuleResolver(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := checker.New(mainPath, result.Program, resolver)
+	c.Check()
+	if !c.HasErrors() || !strings.Contains(c.Diagnostics()[0].Message, "Type models::default_user is not part of union Subject") {
+		t.Fatalf("diagnostics = %v, want module value rejected as union type pattern", c.Diagnostics())
+	}
+}
+
 func TestUserModuleImports(t *testing.T) {
 	// Create a temporary project for testing
 	tempDir, err := os.MkdirTemp("", "ard_checker_integration_*")
