@@ -5706,11 +5706,9 @@ func (l *lowerer) localIsPointerParam(fn air.Function, local air.LocalID) bool {
 		return param.Mutable && l.functionMutableParamUsesPointer(fn, param.Type)
 	}
 	for _, capture := range fn.Captures {
-		if capture.Local != local || idx < 0 || idx >= len(fn.Locals) {
-			continue
+		if capture.Local == local {
+			return capture.Mode == air.CaptureSlot
 		}
-		captured := fn.Locals[idx]
-		return captured.Mutable && l.mutableParamUsesPointer(captured.Type)
 	}
 	return false
 }

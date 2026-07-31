@@ -1582,6 +1582,53 @@ func TestGoTargetParityNestedClosureCaptures(t *testing.T) {
 		}
 	})
 }
+
+func TestGoTargetParityClosureSnapshotsReassignedMutableLocal(t *testing.T) {
+	t.Run("scalar", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			fn make_reader(items: [Int]) fn() Int {
+				mut cursor = 0
+				for value, idx in items {
+					if value == 2 {
+						cursor = idx
+					}
+				}
+				fn() Int { cursor }
+			}
+
+			fn main() Int {
+				let read = make_reader([1, 2, 3])
+				read()
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "1" {
+			t.Fatalf("got %s, want 1", got)
+		}
+	})
+
+	t.Run("maybe", func(t *testing.T) {
+		program := lowerParitySource(t, `
+			fn make_reader(items: [Int]) fn() Int? {
+				mut chosen: Int? = Maybe::new()
+				for value in items {
+					if value == 2 {
+						chosen = Maybe::new(value)
+					}
+				}
+				fn() Int? { chosen }
+			}
+
+			fn main() Int {
+				let read = make_reader([1, 2, 3])
+				read().or(0)
+			}
+		`)
+		if got := runGoTargetParityJSON(t, program); got != "2" {
+			t.Fatalf("got %s, want 2", got)
+		}
+	})
+}
+
 func TestGoTargetParityMutatingTraitImplClosureCapturesSelf(t *testing.T) {
 	program := lowerParitySource(t, `
 		trait Initializer {
