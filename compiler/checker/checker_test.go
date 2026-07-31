@@ -41,7 +41,7 @@ var compareOptions = cmp.Options{
 	cmpopts.IgnoreFields(checker.TryOp{}, "OkType"),
 	cmpopts.IgnoreFields(checker.IntMatch{}, "ResultType"),
 	cmpopts.IgnoreFields(checker.StrMatch{}, "ResultType"),
-	cmpopts.IgnoreFields(checker.UnionMatch{}, "TypeCasesByType", "ResultType"),
+	cmpopts.IgnoreFields(checker.UnionMatch{}, "TypeCasesByType", "TypeCasesByIndex", "ResultType"),
 	cmpopts.IgnoreFields(checker.ConditionalMatch{}, "ResultType"),
 	cmpopts.IgnoreUnexported(
 		checker.TypeVar{},

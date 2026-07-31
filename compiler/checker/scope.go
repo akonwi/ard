@@ -51,6 +51,7 @@ type Symbol struct {
 	mutable           bool
 	reference         bool
 	foreignDescriptor bool
+	typeDeclaration   bool
 }
 
 func (s Symbol) IsZero() bool {
@@ -72,6 +73,12 @@ func (st *SymbolTable) add(name string, type_ Type, mutable bool) *Symbol {
 	}
 	st.symbols[name] = &sym
 	return &sym
+}
+
+func (st *SymbolTable) addType(name string, type_ Type) *Symbol {
+	sym := st.add(name, type_, false)
+	sym.typeDeclaration = true
+	return sym
 }
 
 func (st SymbolTable) get(name string) (*Symbol, bool) {
@@ -497,7 +504,7 @@ func maskUnresolvedGenericsFrom(t Type, context *GenericContext) Type {
 			return &Sender{of: visit(current.of, seen)}
 		case *Union:
 			members := make([]Type, len(current.Types))
-			masked := &Union{Name: current.Name, ModulePath: current.ModulePath, Types: members, Private: current.Private}
+			masked := &Union{Name: current.Name, ModulePath: current.ModulePath, Types: members, MemberNames: copyUnionMemberNames(current), Private: current.Private}
 			seen[current] = masked
 			for i, member := range current.Types {
 				members[i] = visit(member, seen)
@@ -1065,7 +1072,7 @@ func substituteTypeBindings(t Type, bindings map[string]Type) Type {
 		for i, member := range typ.Types {
 			members[i] = substituteTypeBindings(member, bindings)
 		}
-		return &Union{Name: typ.Name, ModulePath: typ.ModulePath, Types: members, Private: typ.Private}
+		return &Union{Name: typ.Name, ModulePath: typ.ModulePath, Types: members, MemberNames: copyUnionMemberNames(typ), Private: typ.Private}
 	case *FunctionDef:
 		params := make([]Parameter, len(typ.Parameters))
 		for i, param := range typ.Parameters {
@@ -1295,10 +1302,11 @@ func copyTypeWithTypeVarMapSeen(t Type, typeVarMap map[string]*TypeVar, seenStru
 			newTypes[i] = copyTypeWithTypeVarMapSeen(t, typeVarMap, seenStructs)
 		}
 		return &Union{
-			Name:       typ.Name,
-			ModulePath: typ.ModulePath,
-			Types:      newTypes,
-			Private:    typ.Private,
+			Name:        typ.Name,
+			ModulePath:  typ.ModulePath,
+			Types:       newTypes,
+			MemberNames: copyUnionMemberNames(typ),
+			Private:     typ.Private,
 		}
 	case *ForeignType:
 		args := make([]Type, len(typ.TypeArgs))

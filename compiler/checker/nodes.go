@@ -945,11 +945,12 @@ func (i *IntMatch) Type() Type {
 }
 
 type UnionMatch struct {
-	Subject         Expression
-	TypeCases       map[string]*Match
-	TypeCasesByType map[Type]*Match // Pre-computed type lookup
-	CatchAll        *Block
-	ResultType      Type
+	Subject          Expression
+	TypeCases        map[string]*Match // Qualified display-name lookup.
+	TypeCasesByType  map[Type]*Match   // Pre-computed type lookup
+	TypeCasesByIndex map[int]*Match    // Stable lookup for same-named members from different modules.
+	CatchAll         *Block
+	ResultType       Type
 }
 
 func (u *UnionMatch) Type() Type {
@@ -957,7 +958,7 @@ func (u *UnionMatch) Type() Type {
 		return u.ResultType
 	}
 	// Find the first non-nil case and return its type
-	for _, block := range u.TypeCases {
+	for _, block := range u.TypeCasesByIndex {
 		if block != nil {
 			return block.Body.Type()
 		}
@@ -1633,10 +1634,18 @@ func (ev EnumVariant) String() string {
 }
 
 type Union struct {
-	Name       string
-	ModulePath string
-	Types      []Type
-	Private    bool
+	Name        string
+	ModulePath  string
+	Types       []Type
+	MemberNames []string // Declared source spelling, parallel to Types.
+	Private     bool
+}
+
+func copyUnionMemberNames(union *Union) []string {
+	if union == nil {
+		return nil
+	}
+	return append([]string(nil), union.MemberNames...)
 }
 
 func (u Union) NonProducing() {}

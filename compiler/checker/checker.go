@@ -149,10 +149,11 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			return typ // No change, return original
 		}
 		return &Union{
-			Name:       typ.Name,
-			ModulePath: typ.ModulePath,
-			Types:      newTypes,
-			Private:    typ.Private,
+			Name:        typ.Name,
+			ModulePath:  typ.ModulePath,
+			Types:       newTypes,
+			MemberNames: copyUnionMemberNames(typ),
+			Private:     typ.Private,
 		}
 	case *ForeignType:
 		newTypeArgs := make([]Type, len(typ.TypeArgs))
@@ -2057,6 +2058,65 @@ func formatTypeForDisplay(t Type) string {
 	return t.String()
 }
 
+func unionPatternBinding(call parse.FunctionCall) (string, bool) {
+	if len(call.TypeArgs) != 0 || len(call.Args) != 1 || call.Args[0].Name != "" {
+		return "", false
+	}
+	binding, ok := call.Args[0].Value.(*parse.Identifier)
+	if !ok {
+		return "", false
+	}
+	return binding.Name, true
+}
+
+func unionPatternBaseType(t Type) Type {
+	if ref, ok := t.(*MutableRef); ok {
+		t = ref.Of()
+	}
+	if foreign, ok := t.(*ForeignType); ok && foreign.Pointer {
+		value := *foreign
+		value.Pointer = false
+		return &value
+	}
+	return t
+}
+
+func (c *Checker) qualifiedUnionPatternMember(unionType *Union, target, property parse.Expression) (Type, int, bool, bool) {
+	targetID, targetOK := target.(*parse.Identifier)
+	propertyID, propertyOK := property.(*parse.Identifier)
+	if !targetOK || !propertyOK {
+		return nil, 0, false, false
+	}
+
+	var patternType Type
+	if goPkg := c.program.GoImports[targetID.Name]; goPkg != nil {
+		patternType = goPkg.Types[propertyID.Name]
+	} else if mod := c.resolveModule(targetID.Name); mod != nil {
+		symbol := mod.Get(propertyID.Name)
+		if !symbol.IsZero() && symbol.typeDeclaration {
+			patternType = symbol.Type
+		}
+	}
+	if patternType == nil {
+		return nil, 0, false, false
+	}
+
+	patternBase := unionPatternBaseType(patternType)
+	var matched Type
+	matchedIndex := 0
+	for memberIndex, member := range unionType.Types {
+		if !equalTypes(unionPatternBaseType(member), patternBase) {
+			continue
+		}
+		if matched != nil {
+			return nil, 0, false, true
+		}
+		matched = member
+		matchedIndex = memberIndex
+	}
+	return matched, matchedIndex, matched != nil, false
+}
+
 func mergeMatchResultType(c *Checker, current Type, next Type, loc parse.Location, allowMixedVoid bool) (Type, bool) {
 	if current == nil {
 		return next, true
@@ -3108,7 +3168,9 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			}
 			// Handle type declaration (type unions/aliases)
 			types := make([]Type, len(s.Type))
+			memberNames := make([]string, len(s.Type))
 			for i, declType := range s.Type {
+				memberNames[i] = declType.GetName()
 				resolvedType := c.resolveType(declType)
 				if resolvedType == nil {
 					c.addUnresolvedReference(unrecognizedType, declType.GetName(), declType.GetLocation())
@@ -3119,7 +3181,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 
 			if len(types) == 1 {
 				// It's a type alias
-				c.scope.add(s.Name.Name, types[0], false)
+				c.scope.addType(s.Name.Name, types[0])
 				return nil
 			}
 
@@ -3130,6 +3192,7 @@ func (c *Checker) checkStmt(stmt *parse.Statement) *Statement {
 			unionType.Name = s.Name.Name
 			unionType.ModulePath = c.typeOwnerPath()
 			unionType.Types = types
+			unionType.MemberNames = memberNames
 			unionType.Private = s.Private
 			return &Statement{Stmt: unionType}
 		}
@@ -4430,7 +4493,7 @@ func unsafeCatchOkValueTypesFromExpression(expr Expression, aliases map[string][
 		return out
 	case *UnionMatch:
 		var out []Type
-		for _, match := range e.TypeCases {
+		for _, match := range e.TypeCasesByIndex {
 			if match != nil {
 				out = append(out, unsafeCatchOkValueTypesInBlock(match.Body, aliases)...)
 			}
@@ -4572,7 +4635,7 @@ func unsafeCatchErrValueTypesFromExpression(expr Expression, aliases map[string]
 		return out
 	case *UnionMatch:
 		var out []Type
-		for _, match := range e.TypeCases {
+		for _, match := range e.TypeCasesByIndex {
 			if match != nil {
 				out = append(out, unsafeCatchErrValueTypesInBlock(match.Body, aliases)...)
 			}
@@ -4815,7 +4878,7 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 		c.validateUnsafeCatchResults(e.CatchAll, resultType, loc)
 	case *UnionMatch:
 		c.validateUnsafeCatchResultsInExpression(e.Subject, resultType, loc)
-		for _, match := range e.TypeCases {
+		for _, match := range e.TypeCasesByIndex {
 			if match != nil {
 				c.validateUnsafeCatchResults(match.Body, resultType, loc)
 			}
@@ -8483,17 +8546,51 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 		// For Union types, generate a UnionMatch
 		if unionType, ok := subject.Type().(*Union); ok {
 			bindingMutable := c.isMutable(subject)
-			// Track which union types we've seen and their corresponding bodies
+			// Keep display-name maps for compatibility, but use declaration-order
+			// member indexes for coverage and lowering. Distinct imported types can
+			// have the same display name (for example left::Item | right::Item).
 			typeCases := make(map[string]*Match)
-			typeCaseSpans := make(map[string]SourceSpan)
 			typeCasesByType := make(map[Type]*Match)
+			typeCasesByIndex := make(map[int]*Match)
+			typeCaseSpans := make(map[int]SourceSpan)
+			unionTypeIndices := make(map[string][]int)
+			unionMemberNames := make([]string, len(unionType.Types))
+			for i, member := range unionType.Types {
+				unionTypeIndices[member.String()] = append(unionTypeIndices[member.String()], i)
+				unionMemberNames[i] = member.String()
+				if i < len(unionType.MemberNames) && unionType.MemberNames[i] != "" {
+					unionMemberNames[i] = unionType.MemberNames[i]
+				}
+			}
 			var catchAllBody *Block
 			var catchAllSpan *SourceSpan
 
-			// Record all types in the union
-			unionTypeSet := make(map[string]Type)
-			for _, t := range unionType.Types {
-				unionTypeSet[t.String()] = t
+			unqualifiedMember := func(typeName string) (Type, int, bool, bool) {
+				indices := unionTypeIndices[typeName]
+				if len(indices) == 0 {
+					return nil, 0, false, false
+				}
+				if len(indices) > 1 {
+					return nil, 0, false, true
+				}
+				index := indices[0]
+				return unionType.Types[index], index, true, false
+			}
+
+			addTypeCase := func(typeName, varName string, matchedType Type, memberIndex int, matchCase parse.MatchCase) {
+				if _, exists := typeCasesByIndex[memberIndex]; exists {
+					original := typeCaseSpans[memberIndex]
+					c.addDuplicateMatchArm(Warn, fmt.Sprintf("Duplicate case: %s", typeName), matchCase.Pattern.GetLocation(), &original)
+					return
+				}
+				body := c.checkMatchArmBlock(matchCase.Body, func() {
+					c.scope.add(varName, matchedType, bindingMutable)
+				})
+				matchNode := &Match{Pattern: &Identifier{Name: varName}, Body: body}
+				typeCases[unionMemberNames[memberIndex]] = matchNode
+				typeCasesByType[matchedType] = matchNode
+				typeCasesByIndex[memberIndex] = matchNode
+				typeCaseSpans[memberIndex] = c.sourceSpan(matchCase.Pattern.GetLocation())
 			}
 
 			// Process the cases
@@ -8510,75 +8607,83 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 						}
 						break
 					}
-					// Allow union type name as implicit binding to "it"
-					matchedType, found := unionTypeSet[p.Name]
+					matchedType, memberIndex, found, ambiguous := unqualifiedMember(p.Name)
+					if ambiguous {
+						c.addInvalidMatchPattern(fmt.Sprintf("Pattern %s is ambiguous in union %s", p.Name, unionType), matchCase.Pattern.GetLocation(), "qualify the union member type")
+						break
+					}
 					if !found {
 						c.addInvalidMatchPattern("Catch-all case should be matched with '_'", matchCase.Pattern.GetLocation(), "use `_` for a catch-all case")
 						break
 					}
-					if _, exists := typeCases[p.Name]; exists {
-						original := typeCaseSpans[p.Name]
-						c.addDuplicateMatchArm(Warn, fmt.Sprintf("Duplicate case: %s", p.Name), matchCase.Pattern.GetLocation(), &original)
+					addTypeCase(p.Name, "it", matchedType, memberIndex, matchCase)
+				case *parse.FunctionCall:
+					varName, valid := unionPatternBinding(*p)
+					if !valid {
+						c.addInvalidMatchPattern("Invalid union match pattern", matchCase.Pattern.GetLocation(), "use `Type(binding)` with exactly one identifier binding")
 						break
 					}
-					body := c.checkMatchArmBlock(matchCase.Body, func() {
-						c.scope.add("it", matchedType, bindingMutable)
-					})
-					matchNode := &Match{
-						Pattern: &Identifier{Name: "it"},
-						Body:    body,
+					matchedType, memberIndex, found, ambiguous := unqualifiedMember(p.Name)
+					if ambiguous {
+						c.addInvalidMatchPattern(fmt.Sprintf("Pattern %s is ambiguous in union %s", p.Name, unionType), matchCase.Pattern.GetLocation(), "qualify the union member type")
+						break
 					}
-					typeCases[p.Name] = matchNode
-					typeCaseSpans[p.Name] = c.sourceSpan(matchCase.Pattern.GetLocation())
-					typeCasesByType[matchedType] = matchNode
-				case *parse.FunctionCall:
-					varName := p.Args[0].Value.(*parse.Identifier).Name
-					typeName := p.Name
-
-					// Check if the type exists in the union
-					_, found := unionTypeSet[typeName]
+					if !found {
+						legacy := fmt.Sprintf("Type %s is not part of union %s", p.Name, unionType)
+						c.addInvalidMatchPattern(legacy, matchCase.Pattern.GetLocation(), fmt.Sprintf("`%s` is not a member of `%s`", p.Name, unionType))
+						break
+					}
+					addTypeCase(p.Name, varName, matchedType, memberIndex, matchCase)
+				case *parse.StaticProperty:
+					typeName := p.String()
+					matchedType, memberIndex, found, ambiguous := c.qualifiedUnionPatternMember(unionType, p.Target, p.Property)
+					if ambiguous {
+						c.addInvalidMatchPattern(fmt.Sprintf("Pattern %s is ambiguous in union %s", typeName, unionType), matchCase.Pattern.GetLocation(), "the union contains both value and reference forms of this type")
+						break
+					}
 					if !found {
 						legacy := fmt.Sprintf("Type %s is not part of union %s", typeName, unionType)
 						c.addInvalidMatchPattern(legacy, matchCase.Pattern.GetLocation(), fmt.Sprintf("`%s` is not a member of `%s`", typeName, unionType))
+						break
 					}
-
-					// Check for duplicates
-					if _, exists := typeCases[typeName]; exists {
-						original := typeCaseSpans[typeName]
-						c.addDuplicateMatchArm(Warn, fmt.Sprintf("Duplicate case: %s", typeName), matchCase.Pattern.GetLocation(), &original)
-					} else {
-
-						// Get the actual type object
-						matchedType := unionTypeSet[typeName]
-
-						// Process the body with the matched type binding
-						body := c.checkMatchArmBlock(matchCase.Body, func() {
-							c.scope.add(varName, matchedType, bindingMutable)
-						})
-						matchNode := &Match{
-							Pattern: &Identifier{Name: varName},
-							Body:    body,
-						}
-						typeCases[typeName] = matchNode
-						typeCaseSpans[typeName] = c.sourceSpan(matchCase.Pattern.GetLocation())
-						typeCasesByType[matchedType] = matchNode
+					addTypeCase(typeName, "it", matchedType, memberIndex, matchCase)
+				case *parse.StaticFunction:
+					varName, valid := unionPatternBinding(p.Function)
+					if !valid {
+						c.addInvalidMatchPattern("Invalid union match pattern", matchCase.Pattern.GetLocation(), "use `pkg::Type(binding)` with exactly one identifier binding")
+						break
 					}
+					typeName := fmt.Sprintf("%s::%s", p.Target, p.Function.Name)
+					matchedType, memberIndex, found, ambiguous := c.qualifiedUnionPatternMember(unionType, p.Target, &parse.Identifier{Name: p.Function.Name})
+					if ambiguous {
+						c.addInvalidMatchPattern(fmt.Sprintf("Pattern %s is ambiguous in union %s", typeName, unionType), matchCase.Pattern.GetLocation(), "the union contains both value and reference forms of this type")
+						break
+					}
+					if !found {
+						legacy := fmt.Sprintf("Type %s is not part of union %s", typeName, unionType)
+						c.addInvalidMatchPattern(legacy, matchCase.Pattern.GetLocation(), fmt.Sprintf("`%s` is not a member of `%s`", typeName, unionType))
+						break
+					}
+					addTypeCase(typeName, varName, matchedType, memberIndex, matchCase)
+				default:
+					c.addInvalidMatchPattern("Invalid union match pattern", matchCase.Pattern.GetLocation(), "use a union member type with an optional binding")
 				}
 			}
 
-			// Check exhaustiveness if no catch-all is provided
+			// Check exhaustiveness if no catch-all is provided.
 			if catchAllBody == nil {
-				for typeName := range unionTypeSet {
-					if _, covered := typeCases[typeName]; !covered {
+				for memberIndex := range unionType.Types {
+					if _, covered := typeCasesByIndex[memberIndex]; !covered {
+						typeName := unionMemberNames[memberIndex]
 						legacy := fmt.Sprintf("Incomplete match: missing case for '%s'", typeName)
 						c.addNonExhaustiveMatch(legacy, s.GetLocation(), fmt.Sprintf("add a case for `%s`", typeName))
 					}
 				}
 			}
 
-			// Ensure all cases return compatible types
+			// Ensure all cases return compatible types.
 			var unionResultType Type
-			for _, caseBody := range typeCases {
+			for _, caseBody := range typeCasesByIndex {
 				if caseBody == nil {
 					continue
 				}
@@ -8598,11 +8703,12 @@ func (c *Checker) checkExprInner(expr parse.Expression, expectedReturn Type) Exp
 
 			// Create and return the UnionMatch
 			return &UnionMatch{
-				Subject:         subject,
-				TypeCases:       typeCases,
-				TypeCasesByType: typeCasesByType,
-				CatchAll:        catchAllBody,
-				ResultType:      unionResultType,
+				Subject:          subject,
+				TypeCases:        typeCases,
+				TypeCasesByType:  typeCasesByType,
+				TypeCasesByIndex: typeCasesByIndex,
+				CatchAll:         catchAllBody,
+				ResultType:       unionResultType,
 			}
 		}
 
@@ -10687,7 +10793,7 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 		for i, member := range typ.Types {
 			types[i] = substituteType(member, typeMap)
 		}
-		return &Union{Name: typ.Name, ModulePath: typ.ModulePath, Types: types, Private: typ.Private}
+		return &Union{Name: typ.Name, ModulePath: typ.ModulePath, Types: types, MemberNames: copyUnionMemberNames(typ), Private: typ.Private}
 	case *StructDef:
 		var out Type = typ
 		for genericName, concrete := range typeMap {

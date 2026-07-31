@@ -1001,6 +1001,114 @@ fn reset(value: Any) {
 	})
 }
 
+func TestQualifiedForeignTypePatternsInClosedUnions(t *testing.T) {
+	run(t, []test{
+		{
+			name: "qualified foreign union members with explicit bindings",
+			input: `use go:image
+
+ type Shape = image::Point | image::Rectangle
+
+ fn describe(shape: Shape) Int {
+   match shape {
+     image::Point(point) => point.X,
+     image::Rectangle(rectangle) => rectangle.Min.X,
+   }
+ }`,
+		},
+		{
+			name: "qualified foreign union members with implicit bindings",
+			input: `use go:image
+
+ type Shape = image::Point | image::Rectangle
+
+ fn describe(shape: Shape) Int {
+   match shape {
+     image::Point => it.X,
+     image::Rectangle => it.Min.X,
+   }
+ }`,
+		},
+		{
+			name: "qualified patterns bind exact mutable foreign members",
+			input: `use go:database/sql
+
+ type QueryTarget = mut sql::DB | mut sql::Tx
+
+ fn use_db(db: mut sql::DB) {}
+ fn use_tx(tx: mut sql::Tx) {}
+
+ fn run(target: QueryTarget) {
+   match target {
+     sql::DB(db) => use_db(db),
+     sql::Tx(tx) => use_tx(tx),
+   }
+ }`,
+		},
+		{
+			name: "qualified exhaustiveness preserves Go import aliases",
+			input: `use go:image as img
+
+ type Shape = img::Point | img::Rectangle
+
+ fn inspect(value: Shape) {
+   match value {
+     img::Point(point) => {},
+   }
+ }`,
+			diagnostics: []checker.Diagnostic{{
+				Kind:    checker.Error,
+				Message: "Incomplete match: missing case for 'img::Rectangle'",
+			}},
+		},
+		{
+			name: "qualified patterns reject type arguments",
+			input: `use go:image
+
+ type Shape = image::Point | image::Rectangle
+
+ fn inspect(value: Shape) {
+   match value {
+     image::Point<Int>(point) => {},
+     _ => {},
+   }
+ }`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid union match pattern"}},
+		},
+		{
+			name: "qualified patterns reject named bindings",
+			input: `use go:image
+
+ type Shape = image::Point | image::Rectangle
+
+ fn inspect(value: Shape) {
+   match value {
+     image::Point(value: point) => {},
+     _ => {},
+   }
+ }`,
+			diagnostics: []checker.Diagnostic{{Kind: checker.Error, Message: "Invalid union match pattern"}},
+		},
+		{
+			name: "qualified pattern rejects ambiguous value and reference members",
+			input: `use go:image
+
+ type Ambiguous = image::Point | mut image::Point
+
+ fn inspect(value: Ambiguous) {
+   match value {
+     image::Point(point) => {},
+     _ => {},
+   }
+ }`,
+			diagnostics: []checker.Diagnostic{{
+				Kind:    checker.Error,
+				Message: "Pattern image::Point is ambiguous in union Ambiguous",
+			}},
+		},
+	})
+}
+
 func TestForeignTypeMatchOverDynamicSubjects(t *testing.T) {
 	run(t, []test{
 		{

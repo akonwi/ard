@@ -174,6 +174,23 @@ for item in items {
 // Boolean: true
 ```
 
+Union members imported through a module or Go package use qualified patterns. The binding receives the exact member type, including mutable-reference types:
+
+```ard
+use go:database/sql
+
+type QueryTarget = mut sql::DB | mut sql::Tx
+
+fn close(target: QueryTarget) Void!Str {
+  match target {
+    sql::DB(db) => db.Close(),
+    sql::Tx(tx) => tx.Rollback(),
+  }
+}
+```
+
+Omit the binding to use the implicit `it` variable, such as `sql::DB => it.Close()`. A union containing both `T` and `mut T` requires a different representation because the qualified pattern name would be ambiguous.
+
 ## Matching on Maybes
 
 ```ard
