@@ -67,6 +67,7 @@ func lowerProgram(program *air.Program, options Options) (map[string]*ast.File, 
 	l.emittedGoMethods = map[string]bool{}
 	l.functionModules = l.collectFunctionEmitModules()
 	l.namePlan = newNamePlan(l)
+	l.topLevelReserved = l.namePlan.localReserved
 	l.reservedGoIdentifiers = l.buildReservedGoIdentifiers()
 	files := map[string]*ast.File{}
 	rootID, hasRoot := findRootFunction(program)
@@ -164,7 +165,7 @@ func (l *lowerer) lowerModule(module air.Module) (*ast.File, error) {
 	rootID, hasRoot := findRootFunction(l.program)
 	mainModuleID := l.mainModuleID(rootID, hasRoot)
 	for _, typ := range l.typesForModule(module.ID, mainModuleID) {
-		typeDecls, err := l.lowerTypeDecls(typ)
+		typeDecls, err := l.lowerTypeDecls(*typ)
 		if err != nil {
 			return nil, fmt.Errorf("module %s type %s: %w", module.Path, typ.Name, err)
 		}
@@ -422,22 +423,26 @@ func modulePackageFileName(program *air.Program, module air.ModuleID) string {
 	return name + ".go"
 }
 
-func (l *lowerer) typesForModule(moduleID air.ModuleID, mainModuleID air.ModuleID) []air.TypeInfo {
+// typesForModule returns pointers to avoid copying large TypeInfo values. Go
+// lowering only appends to Program.Types; it never mutates existing entries, so
+// pointers remain valid snapshots even if an append moves the backing array.
+func (l *lowerer) typesForModule(moduleID air.ModuleID, mainModuleID air.ModuleID) []*air.TypeInfo {
 	declaredInAnyModule := map[air.TypeID]bool{}
 	for _, module := range l.program.Modules {
 		for _, typeID := range module.Types {
 			declaredInAnyModule[typeID] = true
 		}
 	}
-	out := []air.TypeInfo{}
+	out := []*air.TypeInfo{}
 	if int(moduleID) >= 0 && int(moduleID) < len(l.program.Modules) {
 		for _, typeID := range l.program.Modules[moduleID].Types {
 			if validTypeID(l.program, typeID) {
-				out = append(out, l.program.Types[typeID-1])
+				out = append(out, &l.program.Types[typeID-1])
 			}
 		}
 	}
-	for _, typ := range l.program.Types {
+	for i := range l.program.Types {
+		typ := &l.program.Types[i]
 		if declaredInAnyModule[typ.ID] {
 			continue
 		}
@@ -3556,7 +3561,10 @@ func (l *lowerer) lowerForeignStructInstance(fn air.Function, expr air.Expr) (lo
 	}
 	var stmts []ast.Stmt
 	elts := make([]ast.Expr, 0, len(expr.Fields))
-	fields := append([]air.StructFieldValue{}, expr.Fields...)
+	fields := make([]*air.StructFieldValue, len(expr.Fields))
+	for i := range expr.Fields {
+		fields[i] = &expr.Fields[i]
+	}
 	sort.Slice(fields, func(i, j int) bool { return fields[i].Name < fields[j].Name })
 	for _, field := range fields {
 		value, err := l.lowerExpr(fn, field.Value)
@@ -5807,7 +5815,7 @@ func (l *lowerer) importAliasCollidesWithProgramTopLevel(alias string) bool {
 
 func (l *lowerer) importAliasCollidesWithModuleTopLevel(alias string, moduleID air.ModuleID) bool {
 	for _, typ := range l.typesForModule(moduleID, moduleID) {
-		if l.typeTopLevelNameCollidesWithImportAlias(typ, alias) {
+		if l.typeTopLevelNameCollidesWithImportAlias(*typ, alias) {
 			return true
 		}
 	}

@@ -7,12 +7,17 @@ package gotarget
 
 import "github.com/akonwi/ard/air"
 
-func predeclaredGoIdentifiers() []string {
-	return []string{"any", "bool", "byte", "comparable", "complex64", "complex128", "error", "float32", "float64", "int", "int8", "int16", "int32", "int64", "rune", "string", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "true", "false", "iota", "nil", "append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len", "make", "max", "min", "new", "panic", "print", "println", "real", "recover"}
+func isPredeclaredGoIdentifier(name string) bool {
+	switch name {
+	case "any", "bool", "byte", "comparable", "complex64", "complex128", "error", "float32", "float64", "int", "int8", "int16", "int32", "int64", "rune", "string", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "true", "false", "iota", "nil", "append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len", "make", "max", "min", "new", "panic", "print", "println", "real", "recover":
+		return true
+	default:
+		return false
+	}
 }
 
-func runtimePreludeTopLevelNames() []string {
-	return []string{"Maybe", "Result"}
+func isRuntimePreludeTopLevelName(name string) bool {
+	return name == "Maybe" || name == "Result"
 }
 
 func collectTopLevelReservedNames(program *air.Program) map[string]bool {

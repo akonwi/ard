@@ -22,6 +22,7 @@ type namePlan struct {
 
 	programTopLevel map[string]bool
 	moduleTopLevel  map[air.ModuleID]map[string]bool
+	localReserved   map[string]bool
 }
 
 type enumVariantKey struct {
@@ -40,31 +41,213 @@ func newNamePlan(l *lowerer) *namePlan {
 		variantNames:    map[enumVariantKey]string{},
 		programTopLevel: map[string]bool{},
 		moduleTopLevel:  map[air.ModuleID]map[string]bool{},
+		localReserved:   map[string]bool{},
 	}
 	if l.program == nil {
 		return plan
 	}
 
+	planner := newTopLevelNamePlanner(l.program)
 	naturalTypeNames := map[air.TypeID]string{}
 	for _, typ := range l.program.Types {
-		plan.typeNames[typ.ID] = typeName(l.program, typ)
-		if name, ok := naturalTypeName(l.program, typ); ok {
+		plan.typeNames[typ.ID] = planner.typeName(typ)
+		if typ.Name != "" {
+			plan.localReserved[plan.typeNames[typ.ID]] = true
+		}
+		if name, ok := planner.naturalTypeName(typ); ok {
 			naturalTypeNames[typ.ID] = name
 		}
 	}
 	for _, trait := range l.program.Traits {
-		plan.traitNames[trait.ID] = l.traitInterfaceTypeName(trait)
+		plan.traitNames[trait.ID] = planner.traitName(trait)
 	}
 	for _, fn := range l.program.Functions {
-		plan.functionNames[fn.ID] = functionName(l.program, fn)
+		plan.functionNames[fn.ID] = planner.functionName(fn)
+		if fn.Name != "" {
+			plan.localReserved[plan.functionNames[fn.ID]] = true
+		}
 	}
 	for _, global := range l.program.Globals {
-		plan.globalNames[global.ID] = globalName(l.program, global)
+		plan.globalNames[global.ID] = planner.globalName(global)
+		if global.Name != "" {
+			plan.localReserved[plan.globalNames[global.ID]] = true
+		}
 	}
 
 	plan.buildVariantNames(naturalTypeNames)
 	plan.buildImportCollisionSets(l)
 	return plan
+}
+
+type topLevelNameKey struct {
+	kind topLevelNameKind
+	id   int
+}
+
+type plannedNaturalName struct {
+	key      topLevelNameKey
+	name     string
+	owner    air.ModuleID
+	hasOwner bool
+}
+
+// topLevelNamePlanner indexes natural declaration names once. The standalone
+// naming helpers intentionally remain simple reference implementations, while
+// code generation uses this index to avoid rescanning every AIR declaration
+// for every generated name.
+type topLevelNamePlanner struct {
+	program              *air.Program
+	naturalByKey         map[topLevelNameKey]plannedNaturalName
+	naturalByName        map[string][]plannedNaturalName
+	legacyTypeBase       map[air.TypeID]string
+	legacyTypeBaseCounts map[string]int
+}
+
+func newTopLevelNamePlanner(program *air.Program) *topLevelNamePlanner {
+	p := &topLevelNamePlanner{
+		program:              program,
+		naturalByKey:         map[topLevelNameKey]plannedNaturalName{},
+		naturalByName:        map[string][]plannedNaturalName{},
+		legacyTypeBase:       map[air.TypeID]string{},
+		legacyTypeBaseCounts: map[string]int{},
+	}
+	add := func(key topLevelNameKey, name string) {
+		owner, hasOwner := topLevelNameModule(program, key.kind, key.id)
+		planned := plannedNaturalName{key: key, name: name, owner: owner, hasOwner: hasOwner}
+		p.naturalByKey[key] = planned
+		p.naturalByName[name] = append(p.naturalByName[name], planned)
+	}
+	for _, typ := range program.Types {
+		base := typeNameBase(program, typ)
+		p.legacyTypeBase[typ.ID] = base
+		p.legacyTypeBaseCounts[base]++
+		if naturalTypeNameEligible(typ) {
+			add(topLevelNameKey{kind: topLevelNameType, id: int(typ.ID)}, naturalGoIdentifier(typ.Name, !typ.Private))
+		}
+	}
+	for _, trait := range program.Traits {
+		if trait.Name != "" {
+			add(topLevelNameKey{kind: topLevelNameTrait, id: int(trait.ID)}, naturalGoIdentifier(trait.Name, !trait.Private))
+		}
+	}
+	for _, fn := range program.Functions {
+		if naturalFunctionNameEligible(fn) {
+			add(topLevelNameKey{kind: topLevelNameFunction, id: int(fn.ID)}, naturalGoIdentifier(fn.Name, !fn.Private))
+		}
+	}
+	for _, global := range program.Globals {
+		if global.Name != "" {
+			add(topLevelNameKey{kind: topLevelNameGlobal, id: int(global.ID)}, naturalGoIdentifier(global.Name, !global.Private))
+		}
+	}
+	return p
+}
+
+func (p *topLevelNamePlanner) naturalName(key topLevelNameKey) (string, bool) {
+	planned, ok := p.naturalByKey[key]
+	if !ok || planned.name == "" || planned.name == "_" {
+		return "", false
+	}
+	return planned.name, true
+}
+
+func (p *topLevelNamePlanner) collides(key topLevelNameKey, name string, typeOrTraitOnly bool) bool {
+	self := p.naturalByKey[key]
+	for _, other := range p.naturalByName[name] {
+		if other.key == key {
+			continue
+		}
+		if typeOrTraitOnly && other.key.kind != topLevelNameType && other.key.kind != topLevelNameTrait {
+			continue
+		}
+		if nameScopesOverlap(self.owner, self.hasOwner, other.owner, other.hasOwner) {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *topLevelNamePlanner) naturalTypeName(typ air.TypeInfo) (string, bool) {
+	key := topLevelNameKey{kind: topLevelNameType, id: int(typ.ID)}
+	name, ok := p.naturalName(key)
+	if !ok || isReservedTopLevelName(name) || p.collides(key, name, true) {
+		return "", false
+	}
+	return name, true
+}
+
+func (p *topLevelNamePlanner) typeName(typ air.TypeInfo) string {
+	if name, ok := p.naturalTypeName(typ); ok {
+		return name
+	}
+	base := p.legacyTypeBase[typ.ID]
+	if p.legacyTypeBaseCounts[base] > 1 {
+		base = fmt.Sprintf("%s_%d", base, typ.ID)
+	}
+	if !typ.Private {
+		base = upperFirst(base)
+	}
+	return base
+}
+
+func (p *topLevelNamePlanner) traitName(trait air.Trait) string {
+	key := topLevelNameKey{kind: topLevelNameTrait, id: int(trait.ID)}
+	name, ok := p.naturalName(key)
+	if !ok || isReservedTopLevelName(name) || p.collides(key, name, true) {
+		return legacyTraitInterfaceTypeName(trait)
+	}
+	return name
+}
+
+func (p *topLevelNamePlanner) functionName(fn air.Function) string {
+	if fn.IsScript {
+		return fmt.Sprintf("ArdScript_%d", fn.ID)
+	}
+	key := topLevelNameKey{kind: topLevelNameFunction, id: int(fn.ID)}
+	name, ok := p.naturalName(key)
+	if !ok {
+		return legacyFunctionName(p.program, fn)
+	}
+	return p.valueNameAlias(key, name)
+}
+
+func (p *topLevelNamePlanner) globalName(global air.Global) string {
+	key := topLevelNameKey{kind: topLevelNameGlobal, id: int(global.ID)}
+	name, ok := p.naturalName(key)
+	if !ok {
+		return legacyGlobalName(p.program, global)
+	}
+	return p.valueNameAlias(key, name)
+}
+
+func (p *topLevelNamePlanner) valueNameAlias(key topLevelNameKey, base string) string {
+	suffix := 0
+	if isSpecialGoTopLevelName(base) || p.collides(key, base, false) {
+		suffix = 1 + p.earlierAliasedValueCount(key, base)
+	}
+	for {
+		name := base
+		if suffix > 0 {
+			name = fmt.Sprintf("%s_%d", base, suffix)
+		}
+		if !isSpecialGoTopLevelName(name) && !p.collides(key, name, false) {
+			return name
+		}
+		suffix++
+	}
+}
+
+func (p *topLevelNamePlanner) earlierAliasedValueCount(key topLevelNameKey, base string) int {
+	count := 0
+	for _, other := range p.naturalByName[base] {
+		if other.key == key || (other.key.kind != topLevelNameFunction && other.key.kind != topLevelNameGlobal) {
+			continue
+		}
+		if topLevelValuePrecedes(other.key.kind, other.key.id, key.kind, key.id) && (isSpecialGoTopLevelName(base) || p.collides(other.key, base, false)) {
+			count++
+		}
+	}
+	return count
 }
 
 type plannedTopLevelName struct {
@@ -175,7 +358,7 @@ func (p *namePlan) buildImportCollisionSets(l *lowerer) {
 		occupied := map[string]bool{}
 		p.moduleTopLevel[module.ID] = occupied
 		for _, typ := range l.typesForModule(module.ID, module.ID) {
-			p.addTypeNames(occupied, typ)
+			p.addTypeNames(occupied, *typ)
 		}
 		for _, globalID := range module.Globals {
 			if globalID >= 0 && int(globalID) < len(p.program.Globals) {
