@@ -57,7 +57,7 @@ func TestTypesForModuleKeepsOwnedTypesWithOwningModule(t *testing.T) {
 	}
 }
 
-func typeNames(types []air.TypeInfo) []string {
+func typeNames(types []*air.TypeInfo) []string {
 	out := make([]string, len(types))
 	for i, typ := range types {
 		out[i] = typ.Name

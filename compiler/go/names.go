@@ -5,7 +5,6 @@ import (
 	"go/token"
 	"path"
 	"path/filepath"
-	"slices"
 	"strings"
 	"unicode"
 
@@ -299,41 +298,32 @@ func isSpecialGoTopLevelName(name string) bool {
 	if name == "main" || name == "ardRunTest" || name == "ardTestOutcome" {
 		return true
 	}
-	if slices.Contains(predeclaredGoIdentifiers(), name) {
+	if isPredeclaredGoIdentifier(name) {
 		return true
 	}
-	if slices.Contains(runtimePreludeTopLevelNames(), name) {
+	if isRuntimePreludeTopLevelName(name) {
 		return true
 	}
-	return slices.Contains(generatedImportAliases(), name)
+	_, ok := generatedImportAliasPath(name)
+	return ok
 }
 
-func generatedImportAliases() []string {
-	aliases := make([]string, 0, len(generatedImportAliasPaths()))
-	for alias := range generatedImportAliasPaths() {
-		aliases = append(aliases, alias)
-	}
-	return aliases
+var generatedImportPaths = map[string]string{
+	"ardmath":  "math",
+	"ardutf8":  "unicode/utf8",
+	"bytes":    "bytes",
+	"fmt":      "fmt",
+	"json":     "encoding/json/v2",
+	"jsontext": "encoding/json/jsontext",
+	"slices":   "slices",
+	"sort":     "sort",
+	"strconv":  "strconv",
+	"strings":  "strings",
 }
 
 func generatedImportAliasPath(alias string) (string, bool) {
-	path, ok := generatedImportAliasPaths()[alias]
+	path, ok := generatedImportPaths[alias]
 	return path, ok
-}
-
-func generatedImportAliasPaths() map[string]string {
-	return map[string]string{
-		"ardmath":  "math",
-		"ardutf8":  "unicode/utf8",
-		"bytes":    "bytes",
-		"fmt":      "fmt",
-		"json":     "encoding/json/v2",
-		"jsontext": "encoding/json/jsontext",
-		"slices":   "slices",
-		"sort":     "sort",
-		"strconv":  "strconv",
-		"strings":  "strings",
-	}
 }
 
 func topLevelNaturalNameCollides(program *air.Program, selfKind topLevelNameKind, selfID int, name string) bool {
@@ -405,6 +395,13 @@ func topLevelNameModule(program *air.Program, kind topLevelNameKind, id int) (ai
 	}
 	switch kind {
 	case topLevelNameType:
+		if id > 0 && id <= len(program.Types) && int(program.Types[id-1].ID) == id {
+			typ := program.Types[id-1]
+			if typ.ModulePath != "" {
+				return moduleIDForPath(program, typ.ModulePath)
+			}
+			return moduleIDForDeclaredType(program, typ.ID)
+		}
 		for _, typ := range program.Types {
 			if int(typ.ID) != id {
 				continue
@@ -412,31 +409,47 @@ func topLevelNameModule(program *air.Program, kind topLevelNameKind, id int) (ai
 			if typ.ModulePath != "" {
 				return moduleIDForPath(program, typ.ModulePath)
 			}
-			for _, module := range program.Modules {
-				for _, typeID := range module.Types {
-					if typeID == typ.ID {
-						return module.ID, true
-					}
-				}
+			return moduleIDForDeclaredType(program, typ.ID)
+		}
+	case topLevelNameTrait:
+		if id >= 0 && id < len(program.Traits) && int(program.Traits[id].ID) == id {
+			if modulePath := program.Traits[id].ModulePath; modulePath != "" {
+				return moduleIDForPath(program, modulePath)
 			}
 			return 0, false
 		}
-	case topLevelNameTrait:
 		for _, trait := range program.Traits {
 			if int(trait.ID) == id && trait.ModulePath != "" {
 				return moduleIDForPath(program, trait.ModulePath)
 			}
 		}
 	case topLevelNameFunction:
+		if id >= 0 && id < len(program.Functions) && int(program.Functions[id].ID) == id {
+			return program.Functions[id].Module, true
+		}
 		for _, fn := range program.Functions {
 			if int(fn.ID) == id {
 				return fn.Module, true
 			}
 		}
 	case topLevelNameGlobal:
+		if id >= 0 && id < len(program.Globals) && int(program.Globals[id].ID) == id {
+			return program.Globals[id].Module, true
+		}
 		for _, global := range program.Globals {
 			if int(global.ID) == id {
 				return global.Module, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func moduleIDForDeclaredType(program *air.Program, typeID air.TypeID) (air.ModuleID, bool) {
+	for _, module := range program.Modules {
+		for _, declaredID := range module.Types {
+			if declaredID == typeID {
+				return module.ID, true
 			}
 		}
 	}
@@ -751,7 +764,7 @@ func (n *localNamer) reservedName(name string) bool {
 // when that enclosing local is actually referenced within the new local's
 // scope; an unused outer binding can be harmlessly shadowed. A nil scopeRefs is
 // conservative and rejects any shadow.
-func (n *localNamer) mustSuffix(name string, scopeRefs map[air.LocalID]bool) bool {
+func (n *localNamer) mustSuffix(name string, scopeRefs map[air.LocalID]int) bool {
 	if n.reservedName(name) {
 		return true
 	}
@@ -762,13 +775,13 @@ func (n *localNamer) mustSuffix(name string, scopeRefs map[air.LocalID]bool) boo
 		if outer, ok := n.frames[i][name]; ok {
 			// Only the innermost enclosing holder matters: any further-out holder
 			// of this name is already shadowed by it within this scope.
-			return scopeRefs == nil || scopeRefs[outer]
+			return scopeRefs == nil || scopeRefs[outer] > 0
 		}
 	}
 	return false
 }
 
-func (n *localNamer) assign(id air.LocalID, scopeRefs map[air.LocalID]bool) {
+func (n *localNamer) assign(id air.LocalID, scopeRefs map[air.LocalID]int) {
 	if _, ok := n.names[id]; ok {
 		return
 	}
@@ -788,6 +801,12 @@ func (n *localNamer) assign(id air.LocalID, scopeRefs map[air.LocalID]bool) {
 }
 
 func (n *localNamer) walkBlock(b air.Block) {
+	if len(b.Stmts) == 0 {
+		if b.Result != nil {
+			n.walkExpr(*b.Result)
+		}
+		return
+	}
 	n.push()
 	n.walkStmts(b)
 	n.pop()
@@ -797,9 +816,22 @@ func (n *localNamer) walkBlock(b air.Block) {
 // its initializer, and its scope is the remainder of the block, so a let only
 // shadows an enclosing local that the remaining statements actually reference.
 func (n *localNamer) walkStmts(b air.Block) {
-	suffix := blockSuffixRefs(b)
+	if len(b.Stmts) == 0 {
+		if b.Result != nil {
+			n.walkExpr(*b.Result)
+		}
+		return
+	}
+	remainingRefs := map[air.LocalID]int{}
 	for i := range b.Stmts {
-		n.walkStmt(b.Stmts[i], suffix[i+1])
+		collectStmtRefCounts(b.Stmts[i], remainingRefs, 1)
+	}
+	if b.Result != nil {
+		collectExprRefCounts(*b.Result, remainingRefs, 1)
+	}
+	for i := range b.Stmts {
+		collectStmtRefCounts(b.Stmts[i], remainingRefs, -1)
+		n.walkStmt(b.Stmts[i], remainingRefs)
 	}
 	if b.Result != nil {
 		n.walkExpr(*b.Result)
@@ -810,19 +842,25 @@ func (n *localNamer) walkStmts(b air.Block) {
 // union case) scoped to that block. The local is bound only when the owning
 // construct actually has one, since the *Local fields default to id 0.
 func (n *localNamer) walkBindingBlock(bind bool, local air.LocalID, b air.Block) {
+	if !bind && len(b.Stmts) == 0 {
+		if b.Result != nil {
+			n.walkExpr(*b.Result)
+		}
+		return
+	}
 	n.push()
 	if bind {
 		// A pattern-bound local is scoped to the whole block, so it shadows an
 		// enclosing local only if that local is referenced anywhere in the block.
-		scope := map[air.LocalID]bool{}
-		collectBlockRefs(b, scope)
+		scope := map[air.LocalID]int{}
+		collectBlockRefCounts(b, scope, 1)
 		n.assign(local, scope)
 	}
 	n.walkStmts(b)
 	n.pop()
 }
 
-func (n *localNamer) walkStmt(s air.Stmt, scopeRefs map[air.LocalID]bool) {
+func (n *localNamer) walkStmt(s air.Stmt, scopeRefs map[air.LocalID]int) {
 	switch s.Kind {
 	case air.StmtLet:
 		if s.Value != nil {
@@ -839,8 +877,8 @@ func (n *localNamer) walkStmt(s air.Stmt, scopeRefs map[air.LocalID]bool) {
 			n.walkExpr(*s.Target)
 		}
 		n.push()
-		scope := map[air.LocalID]bool{}
-		collectBlockRefs(s.Body, scope)
+		scope := map[air.LocalID]int{}
+		collectBlockRefCounts(s.Body, scope, 1)
 		n.assign(s.Local, scope)
 		n.assign(s.ValueLocal, scope)
 		n.walkStmts(s.Body)
@@ -920,124 +958,111 @@ func (n *localNamer) walkExpr(e air.Expr) {
 	}
 }
 
-// blockSuffixRefs returns, for each statement index i (and a trailing entry for
-// the block result), the set of locals referenced from that point to the end of
-// the block. suffix[i] covers statements[i:] plus the result, so the scope of a
-// let at index i is suffix[i+1].
-func blockSuffixRefs(b air.Block) []map[air.LocalID]bool {
-	suffix := make([]map[air.LocalID]bool, len(b.Stmts)+1)
-	tail := map[air.LocalID]bool{}
-	if b.Result != nil {
-		collectExprRefs(*b.Result, tail)
-	}
-	suffix[len(b.Stmts)] = tail
-	for i := len(b.Stmts) - 1; i >= 0; i-- {
-		cur := map[air.LocalID]bool{}
-		for id := range suffix[i+1] {
-			cur[id] = true
-		}
-		collectStmtRefs(b.Stmts[i], cur)
-		suffix[i] = cur
-	}
-	return suffix
-}
-
-// collectBlockRefs/collectStmtRefs/collectExprRefs record every local that is
-// *referenced* (not bound) within a subtree. The reference sites are loads
-// (ExprLoadLocal), assignment targets (StmtAssign), and closure captures
-// (ExprMakeClosure.CaptureLocals); field-sets reference their local through an
-// ExprLoadLocal target. This must stay complete: a missed reference could let a
-// shadowing local keep a bare name that then captures the reference.
-func collectBlockRefs(b air.Block, into map[air.LocalID]bool) {
+// collectBlockRefCounts/collectStmtRefCounts/collectExprRefCounts count every
+// local that is referenced (not bound) within a subtree. The local namer adds
+// all remaining statement references once, then subtracts each statement as it
+// advances, avoiding a copied suffix map for every statement. The reference
+// sites are loads (ExprLoadLocal), assignment targets (StmtAssign), and closure
+// captures (ExprMakeClosure.CaptureLocals); field-sets reference their local
+// through an ExprLoadLocal target. This must stay complete: a missed reference
+// could let a shadowing local keep a bare name that then captures the reference.
+func collectBlockRefCounts(b air.Block, into map[air.LocalID]int, delta int) {
 	for i := range b.Stmts {
-		collectStmtRefs(b.Stmts[i], into)
+		collectStmtRefCounts(b.Stmts[i], into, delta)
 	}
 	if b.Result != nil {
-		collectExprRefs(*b.Result, into)
+		collectExprRefCounts(*b.Result, into, delta)
 	}
 }
 
-func collectStmtRefs(s air.Stmt, into map[air.LocalID]bool) {
+func collectStmtRefCounts(s air.Stmt, into map[air.LocalID]int, delta int) {
 	if s.Kind == air.StmtAssign {
-		into[s.Local] = true
+		adjustLocalRefCount(into, s.Local, delta)
 	}
 	if s.Value != nil {
-		collectExprRefs(*s.Value, into)
+		collectExprRefCounts(*s.Value, into, delta)
 	}
 	if s.Expr != nil {
-		collectExprRefs(*s.Expr, into)
+		collectExprRefCounts(*s.Expr, into, delta)
 	}
 	if s.Target != nil {
-		collectExprRefs(*s.Target, into)
+		collectExprRefCounts(*s.Target, into, delta)
 	}
 	if s.Condition != nil {
-		collectExprRefs(*s.Condition, into)
+		collectExprRefCounts(*s.Condition, into, delta)
 	}
-	collectBlockRefs(s.Body, into)
+	collectBlockRefCounts(s.Body, into, delta)
 }
 
-func collectExprRefs(e air.Expr, into map[air.LocalID]bool) {
+func collectExprRefCounts(e air.Expr, into map[air.LocalID]int, delta int) {
 	if e.Kind == air.ExprLoadLocal {
-		into[e.Local] = true
+		adjustLocalRefCount(into, e.Local, delta)
 	}
 	for _, c := range e.CaptureLocals {
-		into[c] = true
+		adjustLocalRefCount(into, c, delta)
 	}
 	for i := range e.Args {
-		collectExprRefs(e.Args[i], into)
+		collectExprRefCounts(e.Args[i], into, delta)
 	}
 	for i := range e.Entries {
-		collectExprRefs(e.Entries[i].Key, into)
-		collectExprRefs(e.Entries[i].Value, into)
+		collectExprRefCounts(e.Entries[i].Key, into, delta)
+		collectExprRefCounts(e.Entries[i].Value, into, delta)
 	}
 	for i := range e.Fields {
-		collectExprRefs(e.Fields[i].Value, into)
+		collectExprRefCounts(e.Fields[i].Value, into, delta)
 	}
 	if e.Target != nil {
-		collectExprRefs(*e.Target, into)
+		collectExprRefCounts(*e.Target, into, delta)
 	}
 	if e.Left != nil {
-		collectExprRefs(*e.Left, into)
+		collectExprRefCounts(*e.Left, into, delta)
 	}
 	if e.Right != nil {
-		collectExprRefs(*e.Right, into)
+		collectExprRefCounts(*e.Right, into, delta)
 	}
 	if e.Condition != nil {
-		collectExprRefs(*e.Condition, into)
+		collectExprRefCounts(*e.Condition, into, delta)
 	}
-	collectBlockRefs(e.Body, into)
-	collectBlockRefs(e.Then, into)
-	collectBlockRefs(e.Else, into)
-	collectBlockRefs(e.None, into)
-	collectBlockRefs(e.CatchAll, into)
-	collectBlockRefs(e.Some, into)
-	collectBlockRefs(e.Ok, into)
-	collectBlockRefs(e.Err, into)
-	collectBlockRefs(e.Catch, into)
+	collectBlockRefCounts(e.Body, into, delta)
+	collectBlockRefCounts(e.Then, into, delta)
+	collectBlockRefCounts(e.Else, into, delta)
+	collectBlockRefCounts(e.None, into, delta)
+	collectBlockRefCounts(e.CatchAll, into, delta)
+	collectBlockRefCounts(e.Some, into, delta)
+	collectBlockRefCounts(e.Ok, into, delta)
+	collectBlockRefCounts(e.Err, into, delta)
+	collectBlockRefCounts(e.Catch, into, delta)
 	for i := range e.EnumCases {
-		collectBlockRefs(e.EnumCases[i].Body, into)
+		collectBlockRefCounts(e.EnumCases[i].Body, into, delta)
 	}
 	for i := range e.IntCases {
-		collectBlockRefs(e.IntCases[i].Body, into)
+		collectBlockRefCounts(e.IntCases[i].Body, into, delta)
 	}
 	for i := range e.StrCases {
-		collectBlockRefs(e.StrCases[i].Body, into)
+		collectBlockRefCounts(e.StrCases[i].Body, into, delta)
 	}
 	for i := range e.RangeCases {
-		collectBlockRefs(e.RangeCases[i].Body, into)
+		collectBlockRefCounts(e.RangeCases[i].Body, into, delta)
 	}
 	for i := range e.UnionCases {
-		collectBlockRefs(e.UnionCases[i].Body, into)
+		collectBlockRefCounts(e.UnionCases[i].Body, into, delta)
 	}
 	for i := range e.SelectCases {
 		arm := e.SelectCases[i]
 		if arm.Channel != nil {
-			collectExprRefs(*arm.Channel, into)
+			collectExprRefCounts(*arm.Channel, into, delta)
 		}
 		if arm.Value != nil {
-			collectExprRefs(*arm.Value, into)
+			collectExprRefCounts(*arm.Value, into, delta)
 		}
-		collectBlockRefs(arm.Body, into)
+		collectBlockRefCounts(arm.Body, into, delta)
+	}
+}
+
+func adjustLocalRefCount(counts map[air.LocalID]int, id air.LocalID, delta int) {
+	counts[id] += delta
+	if counts[id] == 0 {
+		delete(counts, id)
 	}
 }
 
@@ -1052,10 +1077,10 @@ func isReservedLocalName(name string) bool {
 	if name == "main" {
 		return true
 	}
-	if slices.Contains(predeclaredGoIdentifiers(), name) {
+	if isPredeclaredGoIdentifier(name) {
 		return true
 	}
-	return slices.Contains(runtimePreludeTopLevelNames(), name)
+	return isRuntimePreludeTopLevelName(name)
 }
 
 func sanitizeName(raw string) string {
