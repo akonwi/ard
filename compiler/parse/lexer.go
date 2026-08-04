@@ -455,6 +455,14 @@ func (l *lexer) takeString(start char) (token, bool) {
 			break
 		}
 
+		// A doubled brace represents one literal brace. Check this before
+		// interpolation so `{{` is not mistaken for an expression opening.
+		if (currChar.raw == '{' || currChar.raw == '}') && l.cursor+1 < len(l.source) && l.source[l.cursor+1] == currChar.raw {
+			sb.WriteByte(currChar.raw)
+			advanceN(2)
+			continue
+		}
+
 		// Handle escape sequences
 		if currChar.raw == '\\' {
 			if escaped, consumed, ok := l.takeEscape('"'); ok {
@@ -462,21 +470,19 @@ func (l *lexer) takeString(start char) (token, bool) {
 				advanceN(consumed)
 				continue
 			}
+			// Braces are no longer backslash escapes. Preserve the backslash and
+			// let the brace be interpreted normally on the next iteration.
+			if l.cursor+1 < len(l.source) && (l.source[l.cursor+1] == '{' || l.source[l.cursor+1] == '}') {
+				sb.WriteByte('\\')
+				advance()
+				continue
+			}
 			advance() // Consume the backslash
 			if l.hasMore() {
 				escChar := advance() // Get the escaped character
-				switch escChar.raw {
-				case '{':
-					// Escaped opening brace - just add it literally
-					sb.WriteByte('{')
-				case '}':
-					// Escaped closing brace - just add it literally
-					sb.WriteByte('}')
-				default:
-					// For unrecognized escapes, output both chars
-					sb.WriteByte('\\')
-					sb.WriteByte(escChar.raw)
-				}
+				// For unrecognized escapes, output both chars.
+				sb.WriteByte('\\')
+				sb.WriteByte(escChar.raw)
 			}
 			continue
 		}

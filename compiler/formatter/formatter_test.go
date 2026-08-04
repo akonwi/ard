@@ -203,6 +203,28 @@ func TestFormatMutRefExpressions(t *testing.T) {
 	}
 }
 
+func TestFormatStringBraceEscapes(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "literal braces", input: "let text = \"{{value}}\"\n"},
+		{name: "literal braces around interpolation", input: "let text = \"{{{value}}}\"\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			formatted, err := Format([]byte(tt.input), "test.ard")
+			if err != nil {
+				t.Fatalf("format: %v", err)
+			}
+			if string(formatted) != tt.input {
+				t.Fatalf("formatted = %q, want unchanged %q", string(formatted), tt.input)
+			}
+		})
+	}
+}
+
 func TestFormatDefer(t *testing.T) {
 	input := "fn main() {\n  defer cleanup(  value )\n  defer {\n  cleanup()\n  log(\"done\")\n}\n}\n"
 	formatted, err := Format([]byte(input), "test.ard")

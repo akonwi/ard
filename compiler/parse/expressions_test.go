@@ -819,6 +819,31 @@ func TestKeywordNamesRemainInvalidForTopLevelFunctions(t *testing.T) {
 func TestInterpolatedStrings(t *testing.T) {
 	runTests(t, []test{
 		{
+			name:  "Doubled braces are literal braces",
+			input: `"Hello, {{name}}"`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&StrLiteral{Value: "Hello, {name}"},
+				},
+			},
+		},
+		{
+			name:  "Backslash does not escape interpolation",
+			input: `"\{name}"`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&InterpolatedStr{
+						Chunks: []Expression{
+							&StrLiteral{Value: "\\"},
+							&Identifier{Name: "name"},
+						},
+					},
+				},
+			},
+		},
+		{
 			name:  "Interpolated string",
 			input: `"Hello, {name}"`,
 			output: Program{
@@ -828,6 +853,22 @@ func TestInterpolatedStrings(t *testing.T) {
 						Chunks: []Expression{
 							&StrLiteral{Value: "Hello, "},
 							&Identifier{Name: "name"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:  "Doubled braces around interpolation",
+			input: `"{{{name}}}"`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&InterpolatedStr{
+						Chunks: []Expression{
+							&StrLiteral{Value: "{"},
+							&Identifier{Name: "name"},
+							&StrLiteral{Value: "}"},
 						},
 					},
 				},

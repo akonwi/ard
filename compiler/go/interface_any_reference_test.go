@@ -154,7 +154,7 @@ func TestRunProgramPreservesMutableReferencesConvertedToAny(t *testing.T) {
 			if not dynamic_type(assign_reference(user_reference)) == "*test.User" {
 				panic("assignment conversion lost reference identity")
 			}
-			let _ = try unmarshal("\{\"name\":\"Ada\"\}".bytes(), user_reference) -> err { panic(err) }
+			let _ = try unmarshal("{{\"name\":\"Ada\"}}".bytes(), user_reference) -> err { panic(err) }
 			if not user.name == "Ada" {
 				panic("json.Unmarshal did not mutate caller storage")
 			}
