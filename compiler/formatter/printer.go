@@ -1097,28 +1097,17 @@ func quoteArdRune(value string) string {
 
 func escapeArdBraces(value string) string {
 	var builder strings.Builder
-	builder.Grow(len(value))
+	builder.Grow(len(value) * 2)
 
 	for i := 0; i < len(value); i++ {
 		ch := value[i]
-		if (ch == '{' || ch == '}') && !isEscaped(value, i) {
-			builder.WriteByte('\\')
+		if ch == '{' || ch == '}' {
+			builder.WriteByte(ch)
 		}
 		builder.WriteByte(ch)
 	}
 
 	return builder.String()
-}
-
-func isEscaped(value string, idx int) bool {
-	count := 0
-	for i := idx - 1; i >= 0; i-- {
-		if value[i] != '\\' {
-			break
-		}
-		count++
-	}
-	return count%2 == 1
 }
 
 func (p printer) renderListLiteralDoc(list *parse.ListLiteral) doc {
