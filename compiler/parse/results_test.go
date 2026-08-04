@@ -155,6 +155,31 @@ func TestResultTypeInSignature(t *testing.T) {
 			},
 		},
 		{
+			name:  "Result sugar with qualified maybe value",
+			input: `fn load() db::Item?!Str {}`,
+			output: Program{
+				Imports: []Import{},
+				Statements: []Statement{
+					&FunctionDeclaration{
+						Name:       "load",
+						Parameters: []Parameter{},
+						ReturnType: &ResultType{
+							Val: &CustomType{
+								Name: "db::Item",
+								Type: StaticProperty{
+									Target:   &Identifier{Name: "db"},
+									Property: &Identifier{Name: "Item"},
+								},
+								nullable: true,
+							},
+							Err: &StringType{},
+						},
+						Body: []Statement{},
+					},
+				},
+			},
+		},
+		{
 			name:  "Result sugar with list types",
 			input: `fn foo() [Int]!Str {}`,
 			output: Program{

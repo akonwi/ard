@@ -1590,6 +1590,13 @@ func (p *parser) tryParseType() DeclaredType {
 		if p.check(less_than) {
 			typeArgs = p.parseTypeArguments()
 		}
+		valType := &CustomType{
+			Name:     static.String(),
+			Location: static.Location,
+			Type:     *static,
+			nullable: p.match(question_mark),
+			TypeArgs: typeArgs,
+		}
 
 		// Check for Result sugar syntax
 		if p.match(bang) {
@@ -1597,14 +1604,6 @@ func (p *parser) tryParseType() DeclaredType {
 			errType := p.parseType()
 			// Check for nullable
 			nullable := p.match(question_mark)
-			// Create the value type as a CustomType with StaticProperty
-			valType := &CustomType{
-				Name:     static.String(),
-				Location: static.Location,
-				Type:     *static,
-				nullable: false,
-				TypeArgs: typeArgs,
-			}
 			// Return ResultType using sugar syntax
 			return &ResultType{
 				Val:      valType,
@@ -1616,13 +1615,7 @@ func (p *parser) tryParseType() DeclaredType {
 				},
 			}
 		}
-		return &CustomType{
-			Name:     static.String(),
-			Location: static.Location,
-			Type:     *static,
-			nullable: p.match(question_mark),
-			TypeArgs: typeArgs,
-		}
+		return valType
 	}
 
 	// Check for function type: fn(ParamType) ReturnType
