@@ -829,17 +829,12 @@ func TestInterpolatedStrings(t *testing.T) {
 			},
 		},
 		{
-			name:  "Backslash does not escape interpolation",
-			input: `"\{name}"`,
+			name:  "Legacy backslash brace escapes",
+			input: `"\{name\}"`,
 			output: Program{
 				Imports: []Import{},
 				Statements: []Statement{
-					&InterpolatedStr{
-						Chunks: []Expression{
-							&StrLiteral{Value: "\\"},
-							&Identifier{Name: "name"},
-						},
-					},
+					&StrLiteral{Value: "{name}"},
 				},
 			},
 		},

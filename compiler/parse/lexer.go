@@ -470,19 +470,18 @@ func (l *lexer) takeString(start char) (token, bool) {
 				advanceN(consumed)
 				continue
 			}
-			// Braces are no longer backslash escapes. Preserve the backslash and
-			// let the brace be interpreted normally on the next iteration.
-			if l.cursor+1 < len(l.source) && (l.source[l.cursor+1] == '{' || l.source[l.cursor+1] == '}') {
-				sb.WriteByte('\\')
-				advance()
-				continue
-			}
 			advance() // Consume the backslash
 			if l.hasMore() {
 				escChar := advance() // Get the escaped character
-				// For unrecognized escapes, output both chars.
-				sb.WriteByte('\\')
-				sb.WriteByte(escChar.raw)
+				if escChar.raw == '{' || escChar.raw == '}' {
+					// Continue accepting legacy brace escapes. The formatter
+					// canonicalizes these as doubled braces.
+					sb.WriteByte(escChar.raw)
+				} else {
+					// For unrecognized escapes, output both chars.
+					sb.WriteByte('\\')
+					sb.WriteByte(escChar.raw)
+				}
 			}
 			continue
 		}

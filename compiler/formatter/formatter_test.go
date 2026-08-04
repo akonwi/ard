@@ -207,9 +207,11 @@ func TestFormatStringBraceEscapes(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
+		want  string
 	}{
-		{name: "literal braces", input: "let text = \"{{value}}\"\n"},
-		{name: "literal braces around interpolation", input: "let text = \"{{{value}}}\"\n"},
+		{name: "literal braces", input: "let text = \"{{value}}\"\n", want: "let text = \"{{value}}\"\n"},
+		{name: "literal braces around interpolation", input: "let text = \"{{{value}}}\"\n", want: "let text = \"{{{value}}}\"\n"},
+		{name: "legacy backslash escapes", input: "let text = \"\\{value\\}\"\n", want: "let text = \"{{value}}\"\n"},
 	}
 
 	for _, tt := range tests {
@@ -218,8 +220,8 @@ func TestFormatStringBraceEscapes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("format: %v", err)
 			}
-			if string(formatted) != tt.input {
-				t.Fatalf("formatted = %q, want unchanged %q", string(formatted), tt.input)
+			if string(formatted) != tt.want {
+				t.Fatalf("formatted = %q, want %q", string(formatted), tt.want)
 			}
 		})
 	}
