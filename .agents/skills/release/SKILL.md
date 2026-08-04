@@ -1,113 +1,132 @@
 ---
 name: release
-description: Cut a new Ard version release end-to-end. Creates and pushes a new version tag, waits for the Release Binaries workflow to build and publish the GitHub release, then drafts and updates release notes. Use when a batch of changes is ready to ship as a new version.
+description: Cut a new Ard version release end-to-end. Prepares release notes, dispatches build/test jobs, waits for approval, then verifies the workflow-created tag, release, assets, and Homebrew update.
 ---
 
 # Release (Ard)
 
 ## Overview
 
-Cut a new version of the Ard compiler and publish release notes. This skill handles the full flow: tag → CI → release notes. For notes-only updates to an existing release, use the `release-notes` skill instead.
+Releases are prepared and built before a tag exists. A manual `Release Binaries` workflow run tests and builds one exact `main` commit, then pauses at the protected `release` environment. Approval creates the tag and GitHub release together from those tested artifacts. Stable releases update `akonwi/homebrew-tap` afterward; release candidates do not. The Homebrew step refuses to replace a newer or equal formula version.
 
-In this repo, the release process is driven by pushing a `v*` git tag. That tag triggers the `Release Binaries` GitHub Actions workflow, and the workflow creates the GitHub release plus uploaded binaries. The workflow also updates `akonwi/homebrew-tap` with the new `Formula/ard.rb` using the `HOMEBREW_TAP_TOKEN` repository secret.
+Do not create or push release tags locally.
 
 ## Prerequisites
 
-- On `main`, working tree clean, up to date with `origin/main`
-- All PRs intended for this release are already merged
-- CI is currently green on `main`
-
-Sanity-check first:
+- Local branch is `main`, clean, and synchronized with `origin/main`.
+- All intended changes are merged.
+- CI on `main` is green.
+- The GitHub `release` environment requires manual approval.
+- No other `Release Binaries` run is active or waiting for approval; releases are intentionally serialized.
 
 ```bash
 git status --short --branch
 git log --oneline -5
+git tag --sort=-version:refname | head -5
+gh run list --workflow "Release Binaries" --limit 5
 ```
 
-## Workflow
+## 1. Pick the next version
 
-### 1. Pick the next version
+Use SemVer:
 
-List existing tags and decide on the next semver:
+- Patch: fixes only.
+- Minor: backward-compatible features or APIs.
+- Major: breaking changes after 1.0; before 1.0, use a minor bump and clearly document breaks.
 
-```bash
-git tag --sort=-v:refname | head -5
-```
+Supported workflow versions are `vX.Y.Z` and `vX.Y.Z-rcN`.
 
-Version bump rules:
-- **Patch** (`0.13.0` → `0.13.1`) — bug fixes only, no new APIs
-- **Minor** (`0.13.0` → `0.14.0`) — new features, stdlib additions, backward-compatible changes
-- **Major** (`0.x.y` → `1.0.0`) — breaking changes (Ard is pre-1.0, so minor bumps may include breaks; call them out clearly)
-
-Quick survey of what's in the release before deciding:
+Inspect the range from the latest stable tag:
 
 ```bash
 git log <previous-tag>..HEAD --oneline
+git diff <previous-tag>..HEAD --stat
 ```
 
-If ambiguous, ask the user to confirm the version.
+## 2. Prepare final release notes
 
-### 2. Tag and push
+Follow the `release-notes` skill. Write final user-facing notes to a temporary file such as:
+
+```text
+/tmp/ard-vX.Y.Z-notes.md
+```
+
+The notes must be complete before dispatch because the workflow uses them when it creates the release. There should be no post-publication notes-edit step in the normal flow.
+
+## 3. Dispatch from main
 
 ```bash
-git tag v<major>.<minor>.<patch>
-git push origin v<major>.<minor>.<patch>
+gh workflow run "Release Binaries" \
+  --ref main \
+  -f version=vX.Y.Z \
+  -f notes="$(cat /tmp/ard-vX.Y.Z-notes.md)"
 ```
 
-### 3. Wait for the release workflow
-
-Pushing a `v*` tag triggers `.github/workflows/build.yml` ("Release Binaries"). It runs tests, builds darwin/linux (amd64/arm64) binaries, creates a GitHub release with the assets attached, and commits the updated Homebrew formula to `akonwi/homebrew-tap`.
-
-Wait for it to finish before drafting notes (otherwise `gh release edit` may race with the workflow's `gh release create`):
+Find the run for that version:
 
 ```bash
-gh run watch $(gh run list --workflow "Release Binaries" --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run list --workflow "Release Binaries" --limit 10
 ```
 
-Or poll manually:
+The workflow validates that:
+
+- it was dispatched from `main`;
+- the version is valid;
+- the tag and release do not already exist.
+
+It then runs tests and builds darwin/linux archives for amd64/arm64. No tag exists yet.
+
+## 4. Inspect and approve
+
+Wait until the `release` job is waiting on the protected `release` environment. Before approving, inspect the successful jobs and, when desired, download/test the uploaded artifacts.
+
+If anything is wrong:
+
+1. Reject or cancel the run.
+2. Fix and merge/amend `main`.
+3. Dispatch the same version again from the new `main` commit.
+
+Because no tag exists yet, the version remains reusable.
+
+Approve only when the tested artifacts are ready to publish.
+
+## 5. Verify publication
+
+After approval, the release job atomically creates the tag ref at the exact tested `${{ github.sha }}`, verifies it, and then creates the GitHub release with its assets and final notes. If another actor creates the tag during the approval wait, publication fails rather than using that tag.
+
+Wait for completion:
 
 ```bash
-gh run list --workflow "Release Binaries" --limit 1
+gh run watch <run-id> --exit-status
 ```
 
-All jobs (`test`, `build (darwin/linux × amd64/arm64)`, `release`, `update-homebrew-tap`) must be green. If the workflow fails, stop and investigate — do not proceed to notes.
-
-### 4. Draft release notes
-
-Follow the `release-notes` skill for tone, structure, and publishing:
-
-- Audience: Ard language users, not contributors
-- Categories: New Features, Improvements, Bug Fixes, Breaking Changes, Migration Guide (only when relevant)
-- Reference previous releases for tone: `gh release view <previous-tag>`
-- End with version tag and commit hash
-
-Generate the diff and classify:
+Verify the release and compare the tag with the exact workflow-run commit:
 
 ```bash
-git log <previous-tag>..v<new> --oneline
-git diff <previous-tag>..v<new> --stat
+gh release view vX.Y.Z
+git fetch --tags
+RUN_SHA="$(gh run view <run-id> --json headSha --jq .headSha)"
+test "$(git rev-parse vX.Y.Z^{commit})" = "$RUN_SHA"
 ```
 
-Write notes to a temp file (e.g. `/tmp/ard-v<new>-notes.md`).
+All jobs must pass:
 
-### 5. Publish notes
+- `validate`
+- `test`
+- four platform `build` jobs
+- `release`
+- `update-homebrew-tap` for stable releases
 
-Update the release the workflow already created:
+Release candidates are marked prerelease and skip Homebrew.
 
-```bash
-gh release edit v<new> --notes "$(cat /tmp/ard-v<new>-notes.md)"
-```
+## Recovery
 
-Verify:
+Never move an existing release tag. Inspect the publication state before acting:
 
-```bash
-gh release view v<new>
-```
+- **No tag and no release:** fix the cause and dispatch the whole workflow again.
+- **Tag exists at the tested run SHA but no release:** download the original run artifacts with `gh run download <run-id>` and create the release for that existing tag. Do not rebuild from another commit.
+- **Release exists but assets are incomplete:** download the original run artifacts and upload the missing assets to the same release.
+- **Tag exists at any other SHA:** stop; do not publish or move the tag. Investigate the conflicting publication.
+- **Only Homebrew failed:** rerun or repair the Homebrew step without recreating the tag or release.
 
-## Notes
-
-- This skill assumes the workflow creates the release. Do not call `gh release create` — it will conflict with the CI job.
-- The Homebrew tap update requires the `HOMEBREW_TAP_TOKEN` secret to have push access to `akonwi/homebrew-tap`.
-- If the workflow races ahead and you need to rewrite notes later, that's what the `release-notes` skill is for.
-- If the tag was pushed but the workflow hasn't started yet, give GitHub a few seconds and re-query `gh run list`.
-- Do not tag from a feature branch. Always tag from `main`.
+Always compare an existing tag against the run's `headSha` before recovery.
