@@ -249,6 +249,32 @@ func TestFormatPreservesParenthesesAroundTryPostfixTarget(t *testing.T) {
 	}
 }
 
+func TestFormatExpandedLiteralsIsIdempotent(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "map", input: "fn example() {\n  let value: [Str: Any] = [\"identifier\": 123456789, \"email_address\": \"person@example.com\", \"display_name\": \"Example Person\"]\n  let next = value\n}\n"},
+		{name: "qualified struct", input: "fn example() {\n  let value = module::Item{first: 123456789, second: 987654321, third: 456789123, fourth: 321987654}\n  let next = value\n}\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			first, err := Format([]byte(tt.input), "test.ard")
+			if err != nil {
+				t.Fatalf("first format: %v", err)
+			}
+			second, err := Format(first, "test.ard")
+			if err != nil {
+				t.Fatalf("second format: %v", err)
+			}
+			if string(second) != string(first) {
+				t.Fatalf("format is not idempotent: first=%q second=%q", string(first), string(second))
+			}
+		})
+	}
+}
+
 func TestFormatDefer(t *testing.T) {
 	input := "fn main() {\n  defer cleanup(  value )\n  defer {\n  cleanup()\n  log(\"done\")\n}\n}\n"
 	formatted, err := Format([]byte(input), "test.ard")

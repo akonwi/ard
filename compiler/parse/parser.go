@@ -2892,6 +2892,7 @@ func (p *parser) structInstance() (Expression, error) {
 
 		if static != nil {
 			static.Property = instance
+			static.Location.End = instance.GetLocation().End
 			return static, nil
 		}
 
@@ -2945,6 +2946,7 @@ func (p *parser) tryGenericStructInstance(index int, static *StaticProperty) (Ex
 
 	if static != nil {
 		static.Property = instance
+		static.Location.End = instance.GetLocation().End
 		return static, true, nil
 	}
 	return instance, true, nil
@@ -3969,6 +3971,7 @@ func (p *parser) map_() (Expression, error) {
 			p.addError(p.peek(), "Expected ']' after ':' in empty map")
 			p.synchronizeToTokens(equal, new_line, comma, right_paren)
 		}
+		node.Location.End = p.previous().getLocation().End
 		return node, nil
 	}
 
@@ -4024,6 +4027,7 @@ func (p *parser) map_() (Expression, error) {
 	if len(node.Comments) == 0 {
 		node.Comments = nil // Keep nil for backward compatibility
 	}
+	node.Location.End = p.previous().getLocation().End
 	return node, nil
 }
 
