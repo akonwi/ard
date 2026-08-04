@@ -204,7 +204,7 @@ func (p printer) renderExpressionValueDoc(expression parse.Expression, parentPre
 	case *parse.AnonymousFunction:
 		return p.renderAnonymousFunctionDoc(node)
 	case *parse.Try:
-		return p.renderTryDoc(node)
+		return p.renderTryDoc(node, parentPrecedence)
 	case *parse.BlockExpression:
 		return p.renderBlockExpressionDoc(node)
 	case *parse.UnsafeBlock:
@@ -963,7 +963,7 @@ func (p printer) renderExpressionDoc(expression parse.Expression, parentPreceden
 	case *parse.AnonymousFunction:
 		return p.renderAnonymousFunctionDoc(node)
 	case *parse.Try:
-		return p.renderTryDoc(node)
+		return p.renderTryDoc(node, parentPrecedence)
 	case *parse.BlockExpression:
 		return p.renderBlockExpressionDoc(node)
 	case *parse.UnsafeBlock:
@@ -989,14 +989,14 @@ func (p printer) renderAnonymousFunctionDoc(node *parse.AnonymousFunction) doc {
 	))
 }
 
-func (p printer) renderTryDoc(node *parse.Try) doc {
+func (p printer) renderTryDoc(node *parse.Try, parentPrecedence int) doc {
 	prefix := "try " + p.renderExpression(node.Expression, precedenceUnary)
 	if node.CatchVar == nil {
-		return dText(prefix)
+		return wrapTryDoc(dText(prefix), parentPrecedence)
 	}
 	prefix += " -> " + node.CatchVar.Name
 	if len(node.CatchBlock) == 0 {
-		return dText(prefix + " {}")
+		return wrapTryDoc(dText(prefix+" {}"), parentPrecedence)
 	}
 	if len(node.CatchBlock) == 1 {
 		if expr, ok := renderableExpressionStatement(node.CatchBlock[0]); ok {
@@ -1004,17 +1004,24 @@ func (p printer) renderTryDoc(node *parse.Try) doc {
 			if !strings.Contains(rendered, "\n") {
 				oneLine := prefix + " { " + rendered + " }"
 				if len(oneLine) <= p.maxLineWidth {
-					return dText(oneLine)
+					return wrapTryDoc(dText(oneLine), parentPrecedence)
 				}
 			}
 		}
 	}
-	return dGroup(dConcat(
+	return wrapTryDoc(dGroup(dConcat(
 		dText(prefix+" {"),
 		dIndent(dConcat(dHardLine(), p.renderStatementsDoc(node.CatchBlock))),
 		dHardLine(),
 		dText("}"),
-	))
+	)), parentPrecedence)
+}
+
+func wrapTryDoc(rendered doc, parentPrecedence int) doc {
+	if precedenceLowest < parentPrecedence {
+		return dConcat(dText("("), rendered, dText(")"))
+	}
+	return rendered
 }
 
 func (p printer) renderBlockExpressionDoc(node *parse.BlockExpression) doc {
@@ -1505,12 +1512,6 @@ func (p printer) renderBinary(node *parse.BinaryExpression, parentPrecedence int
 		rightPrecedence = precedence
 	}
 	right := p.renderExpression(node.Right, rightPrecedence)
-	if isTryExpression(node.Left) {
-		left = "(" + left + ")"
-	}
-	if isTryExpression(node.Right) {
-		right = "(" + right + ")"
-	}
 	if isUnaryNotExpression(node.Left) {
 		left = "(" + left + ")"
 	}
@@ -1530,15 +1531,6 @@ func (p printer) renderBinary(node *parse.BinaryExpression, parentPrecedence int
 		return "(" + text + ")"
 	}
 	return text
-}
-
-func isTryExpression(expression parse.Expression) bool {
-	switch expression.(type) {
-	case *parse.Try, parse.Try:
-		return true
-	default:
-		return false
-	}
 }
 
 func isUnaryNotExpression(expression parse.Expression) bool {
