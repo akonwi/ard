@@ -227,6 +227,17 @@ func TestFormatStringBraceEscapes(t *testing.T) {
 	}
 }
 
+func TestFormatQualifiedMaybeInsideResultType(t *testing.T) {
+	input := "use foo/bar\n\nprivate fn load() bar::Item?!Str {}\n"
+	formatted, err := Format([]byte(input), "test.ard")
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+	if string(formatted) != input {
+		t.Fatalf("formatted = %q, want unchanged %q", string(formatted), input)
+	}
+}
+
 func TestFormatDefer(t *testing.T) {
 	input := "fn main() {\n  defer cleanup(  value )\n  defer {\n  cleanup()\n  log(\"done\")\n}\n}\n"
 	formatted, err := Format([]byte(input), "test.ard")
