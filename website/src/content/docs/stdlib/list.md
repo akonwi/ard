@@ -82,6 +82,18 @@ use ard/list
 let found = list::find([1, 2, 3], fn(n: Int) Bool { n == 2 })
 ```
 
+### `contains(list: [$T], where: fn($T) Bool) Bool`
+
+Return `true` when any element matches the predicate. Evaluation stops after the first match.
+
+```ard
+use ard/list
+
+let has_even = list::contains([1, 2, 3], fn(n: Int) Bool { n % 2 == 0 })
+```
+
+Matching is defined entirely by the predicate, so `contains` works with any element type accepted by `find`.
+
 ### `partition(list: [$T], where: fn($T) Bool) Partition<$T>`
 
 Split a list into matching and non-matching values.
