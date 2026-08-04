@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+go_version=1.26.0
+go_sha256=aac1b08a0fb0c4e0a7c1555beb7b59180b05dfc5a3d62e40e9de90cd42f88235
+go_root="$HOME/.local/go-$go_version"
+gopls_bin="$HOME/.local/bin/gopls"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ ! -x "$go_root/bin/go" ]]; then
+  echo "Installing Go $go_version"
+  archive="$(mktemp)"
+  trap 'rm -f "$archive"' EXIT
+  curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o "$archive"
+  echo "$go_sha256  $archive" | sha256sum --check --status
+  rm -rf "$go_root"
+  mkdir -p "$go_root"
+  tar -xzf "$archive" --strip-components=1 -C "$go_root"
+fi
+
+mkdir -p "$HOME/.local/bin"
+ln -sf "$go_root/bin/go" "$HOME/.local/bin/go"
+ln -sf "$go_root/bin/gofmt" "$HOME/.local/bin/gofmt"
+
+if [[ ! -x "$gopls_bin" ]] || ! "$gopls_bin" version | grep -Fq 'v0.23.0'; then
+  echo "Installing gopls v0.23.0"
+  GOBIN="$HOME/.local/bin" "$go_root/bin/go" install golang.org/x/tools/gopls@v0.23.0
+fi
+
+echo "Downloading compiler dependencies"
+"$go_root/bin/go" -C "$repo_root/compiler" mod download
+
+echo "Orb setup complete"
