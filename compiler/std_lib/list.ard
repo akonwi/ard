@@ -60,6 +60,11 @@ fn find(list: [$T], where: fn($T) Bool) $T? {
   found
 }
 
+// returns whether any item in a list matches the predicate
+fn contains(list: [$T], where: fn($T) Bool) Bool {
+  find(list, where).is_some()
+}
+
 // split a list into two based on which match the given predicate
 struct Partition {
   selected: [$T],
@@ -143,6 +148,64 @@ test fn test_find_returns_some_for_match() Void!Str {
     value => testing::assert(value == 3, "find should return the matching value"),
     _ => testing::fail("find should have returned some(3)"),
   }
+}
+
+test fn test_contains_returns_false_for_empty_list() Void!Str {
+  let empty: [Int] = []
+  testing::assert(
+    not contains(empty, fn(n: Int) Bool {
+      n == n
+    }),
+    "contains should return false for an empty list",
+  )
+}
+
+test fn test_contains_finds_match_and_reports_missing_value() Void!Str {
+  try testing::assert(
+    contains([1, 2, 3], fn(n: Int) Bool {
+      n == 2
+    }),
+    "contains should return true for a matching element",
+  )
+  testing::assert(
+    not contains([1, 2, 3], fn(n: Int) Bool {
+      n == 4
+    }),
+    "contains should return false when no element matches",
+  )
+}
+
+private struct ContainsItem {
+  id: Int,
+}
+
+test fn test_contains_supports_struct_elements() Void!Str {
+  testing::assert(
+    contains([ContainsItem{id: 1}, ContainsItem{id: 2}], fn(item: ContainsItem) Bool {
+      item.id == 2
+    }),
+    "contains should delegate matching for non-primitive elements to the predicate",
+  )
+}
+
+private struct ContainsCounter {
+  calls: Int,
+}
+
+impl ContainsCounter {
+  fn mut matches(n: Int) Bool {
+    self.calls = self.calls + 1
+    n == 2
+  }
+}
+
+test fn test_contains_stops_after_first_match() Void!Str {
+  let counter = mut ContainsCounter{calls: 0}
+  let found = contains([1, 2, 3], fn(n: Int) Bool {
+    counter.matches(n)
+  })
+  try testing::assert(found, "contains should find the matching element")
+  testing::assert(counter.calls == 2, "contains should not evaluate elements after the first match")
 }
 
 test fn test_partition_splits_matching_and_other_values() Void!Str {
