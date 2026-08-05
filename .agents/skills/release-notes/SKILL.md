@@ -1,103 +1,99 @@
 ---
 name: release-notes
-description: Generate release notes for a new Ard version tag. Compares the diff between two tags, summarizes user-facing changes (features, fixes, breaking changes), and publishes via `gh release edit`. Use when a new version tag has been pushed and needs release notes.
+description: Draft final user-facing Ard release notes before dispatching the build-before-tag release workflow, or exceptionally repair notes on an existing release.
 ---
 
 # Release Notes
 
 ## Overview
 
-Write release notes for a new Ard compiler/language version. Notes target **end-users** of the language and compiler — not internal contributors.
+Write final release notes for an Ard compiler/language version. Notes target language users, not contributors.
 
-In this repo, releases are created by the GitHub Actions release workflow after pushing a `v*` git tag. This skill assumes the tag has already been pushed and the workflow-created GitHub release already exists.
+In the normal release flow, notes are completed before the `Release Binaries` workflow is dispatched. The workflow receives them as its `notes` input and publishes them when it creates the tag and release after build approval.
 
-## Workflow
+## 1. Identify the version range
 
-### 1. Identify the version range
-
-Determine the new tag and the previous tag:
+Use the latest stable release tag, ignoring prerelease tags when appropriate:
 
 ```bash
-git tag --sort=-creatordate | head -5
+git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -5
 ```
 
-### 2. Generate the diff
-
-Get the commit log and diff summary between the two tags:
+## 2. Generate the diff
 
 ```bash
-git log <previous-tag>..<new-tag> --oneline
-git diff <previous-tag>..<new-tag> --stat
+git log <previous-tag>..HEAD --oneline
+git diff <previous-tag>..HEAD --stat
 ```
 
-For detailed changes when needed:
+Inspect detailed source diffs when commit subjects are insufficient.
 
-```bash
-git diff <previous-tag>..<new-tag> -- compiler
-```
+## 3. Classify changes
 
-### 3. Classify changes
+Use applicable categories and omit empty ones:
 
-Organize changes into these categories (omit empty categories):
+- **New Features**
+- **Improvements**
+- **Bug Fixes**
+- **Breaking Changes**
+- **Migration Guide**
 
-- **New Features** — new language features, stdlib additions, CLI commands
-- **Improvements** — enhancements to existing features, performance, ergonomics
-- **Bug Fixes** — corrected behavior, resolved crashes or type errors
-- **Breaking Changes** — anything requiring user code updates
-- **Migration Guide** — only if there are breaking changes; show before/after examples
+## 4. Write final notes
 
-### 4. Write the notes
-
-Follow this template:
+Suggested shape:
 
 ```markdown
 ## Overview
 
-One or two sentences summarizing the release theme.
+One or two sentences describing the release theme.
 
 ## <Category>
 
 ### <Change Title>
 
-Brief description of what changed and why it matters to users.
-
-Code examples showing the new usage (when applicable):
+Explain what changed and why it matters to users.
 
 \`\`\`ard
-// example
+// practical example when useful
 \`\`\`
+
+---
+
+**Release**: vX.Y.Z<br>
+**Commit**: <short commit>
 ```
 
-#### Style guidelines
+Guidelines:
 
-- **Audience**: Ard language users, not compiler contributors
-- **Tone**: Present features positively; explain what users can now do
-- **Code examples**: Show practical usage, not internal implementation
-- **Tests**: Don't describe test additions unless they demonstrate confidence in a fix
-- **Internal refactors**: Omit unless they have user-visible impact
-- **Keep it concise**: A few sentences per change is usually enough
-- **Version and commit**: End with the version tag and commit hash
+- Explain user-visible behavior, not internal implementation work.
+- Include practical examples where syntax or migration changed.
+- Do not describe tests unless they communicate compatibility confidence.
+- Clearly call out breaking changes and provide before/after migration examples.
+- Keep notes concise and complete; normal releases do not edit notes after publication.
 
-### 5. Publish
-
-Update the existing GitHub release with the notes:
+Write them to a temporary file:
 
 ```bash
-gh release edit <tag> --notes "$(cat notes.md)"
+cat > /tmp/ard-vX.Y.Z-notes.md <<'EOF'
+...
+EOF
 ```
 
-Do **not** normally run `gh release create` in this repo. The expected flow is:
-
-1. create and push a `v*` git tag
-2. let the `Release Binaries` GitHub Actions workflow create the release and upload assets
-3. update that workflow-created release with `gh release edit`
-
-Only use manual `gh release create` as an exceptional recovery step if the workflow failed to create the release and you are intentionally bypassing the normal process.
-
-## Reference
-
-Look at previous releases for tone and structure:
+The release skill passes this file to the workflow:
 
 ```bash
-gh release view <previous-tag>
+gh workflow run "Release Binaries" \
+  --ref main \
+  -f version=vX.Y.Z \
+  -f notes="$(cat /tmp/ard-vX.Y.Z-notes.md)"
 ```
+
+## Exceptional repair
+
+If an already-published release has incorrect notes, repair them explicitly:
+
+```bash
+gh release edit vX.Y.Z --notes-file /tmp/ard-vX.Y.Z-notes.md
+```
+
+This is recovery, not the normal release sequence. Never recreate or move the tag merely to update notes.
