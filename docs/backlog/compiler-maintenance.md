@@ -12,7 +12,7 @@ Statuses: `planned`, `in progress`, `completed`, or `deferred`.
 
 | ID | Priority | Status | Opportunity |
 | --- | --- | --- | --- |
-| COMP-001 | P0 | in progress | Cache checked embedded standard-library modules |
+| COMP-001 | P0 | completed | Cache checked embedded standard-library modules |
 | COMP-002 | P1 | planned | Make AIR fully typed and Go lowering read-only |
 | COMP-003 | P1 | planned | Finish the ADR 0057 AIR representation migration |
 | COMP-004 | P0 | planned | Contain module imports within package roots and propagate filesystem errors |
@@ -26,8 +26,7 @@ Statuses: `planned`, `in progress`, `completed`, or `deferred`.
 
 **Tracking:** [PR #370](https://github.com/akonwi/ard/pull/370)
 
-**Status:** implementation complete with CI passing; remains in progress until
-PR #370 lands.
+**Status:** completed in PR #370 with CI passing.
 
 Every normal checker invocation auto-imports six embedded modules. Each lookup
 previously read, parsed, and checked immutable embedded source again. An initial
