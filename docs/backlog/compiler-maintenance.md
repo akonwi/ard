@@ -21,7 +21,7 @@ Statuses: `planned`, `in progress`, `completed`, or `deferred`.
 | COMP-007 | P2 | completed | Remove the fallback Go importer |
 | COMP-008 | P2 | completed | Consolidate unsafe-catch result analysis |
 | COMP-009 | P2 | completed | Retire checker-node fallback type rules |
-| COMP-010 | P0 | in progress | Stop requesting unused Go expression type information |
+| COMP-010 | P0 | completed | Stop requesting unused Go expression type information |
 
 ## 2026-08-08 profile audit
 
@@ -288,8 +288,9 @@ Bounded outcome:
 
 ## COMP-010: Stop requesting unused Go expression type information
 
-**Status:** implementation and verification complete on
-`perf/compiler-profile-audit`; awaiting merge.
+**Tracking:** [PR #378](https://github.com/akonwi/ard/pull/378)
+
+**Status:** completed in PR #378.
 
 `GoPackagesResolver` previously requested `packages.NeedTypesInfo`, which asks
 `go/types` to retain expression-level identifier, use, selection, and
