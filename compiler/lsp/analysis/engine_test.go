@@ -4,8 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func writeProject(t *testing.T, files map[string]string) string {
@@ -117,6 +120,131 @@ func TestDependencyOverlayInvalidatesDependent(t *testing.T) {
 	}
 	if len(fa2.Diagnostics) == 0 {
 		t.Fatal("expected arity diagnostic after dependency change")
+	}
+}
+
+func TestAffectedFilesTracksTransitiveDependents(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"ard.toml":  "name = \"proj\"\nard = \">= 0.1.0\"\n",
+		"leaf.ard":  "fn value() Int { 1 }\n",
+		"mid.ard":   "use proj/leaf\n\nfn value() Int { leaf::value() }\n",
+		"main.ard":  "use proj/mid\n\nfn main() { let _ = mid::value() }\n",
+		"other.ard": "fn other() {}\n",
+	})
+	engine := NewEngine(root)
+	ws := NewWorkspace(engine)
+	paths := []string{
+		filepath.Join(root, "leaf.ard"),
+		filepath.Join(root, "main.ard"),
+		filepath.Join(root, "mid.ard"),
+		filepath.Join(root, "other.ard"),
+	}
+	if _, err := ws.Snapshot().Analyze(filepath.Join(root, "main.ard")); err != nil {
+		t.Fatal(err)
+	}
+	if _, complete := engine.AffectedFiles(filepath.Join(root, "leaf.ard"), paths); complete {
+		t.Fatal("dependency information reported complete before every candidate was analyzed")
+	}
+	if _, err := ws.Snapshot().Analyze(filepath.Join(root, "other.ard")); err != nil {
+		t.Fatal(err)
+	}
+
+	got, complete := engine.AffectedFiles(filepath.Join(root, "leaf.ard"), paths)
+	if !complete {
+		t.Fatal("dependency information remained incomplete after every candidate was analyzed")
+	}
+	want := []string{
+		filepath.Join(root, "leaf.ard"),
+		filepath.Join(root, "main.ard"),
+		filepath.Join(root, "mid.ard"),
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("affected files = %#v, want %#v", got, want)
+	}
+}
+
+func TestStaleSnapshotCannotRestoreRemovedDependencyEdge(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"ard.toml": "name = \"proj\"\nard = \">= 0.1.0\"\n",
+		"leaf.ard": "fn value() Int { 1 }\n",
+		"main.ard": "use proj/leaf\n\nfn main() { let _ = leaf::value() }\n",
+	})
+	engine := NewEngine(root)
+	ws := NewWorkspace(engine)
+	mainPath := filepath.Join(root, "main.ard")
+	leafPath := filepath.Join(root, "leaf.ard")
+	old := ws.Snapshot()
+	if _, err := old.Analyze(mainPath); err != nil {
+		t.Fatal(err)
+	}
+
+	ws.SetOverlay(mainPath, "fn main() {}\n")
+	if _, err := ws.Snapshot().Analyze(mainPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Analyze(mainPath); err != nil {
+		t.Fatal(err)
+	}
+
+	got, complete := engine.AffectedFiles(leafPath, []string{leafPath, mainPath})
+	if !complete {
+		t.Fatal("dependency information is incomplete")
+	}
+	if want := []string{leafPath}; !slices.Equal(got, want) {
+		t.Fatalf("affected files after stale analysis = %#v, want %#v", got, want)
+	}
+}
+
+func TestAffectedFilesIsIncompleteForUnresolvedDependencyClosure(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"ard.toml": "name = \"proj\"\nard = \">= 0.1.0\"\n",
+		"main.ard": "use proj/missing\n\nfn main() {}\n",
+	})
+	engine := NewEngine(root)
+	ws := NewWorkspace(engine)
+	mainPath := filepath.Join(root, "main.ard")
+	if _, err := ws.Snapshot().Analyze(mainPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, complete := engine.AffectedFiles(mainPath, []string{mainPath}); complete {
+		t.Fatal("unresolved import closure reported complete dependency information")
+	}
+}
+
+func TestEphemeralAnalysisDoesNotChangeDependencies(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"ard.toml": "name = \"proj\"\nard = \">= 0.1.0\"\n",
+		"leaf.ard": "fn value() Int { 1 }\n",
+		"main.ard": "fn main() {}\n",
+	})
+	engine := NewEngine(root)
+	ws := NewWorkspace(engine)
+	mainPath := filepath.Join(root, "main.ard")
+	leafPath := filepath.Join(root, "leaf.ard")
+	for _, path := range []string{mainPath, leafPath} {
+		if _, err := ws.Snapshot().Analyze(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	candidates := []string{leafPath, mainPath}
+	withImport := "use proj/leaf\n\nfn main() { let _ = leaf::value() }\n"
+	if _, err := ws.Snapshot().WithOverlay(mainPath, withImport).AnalyzeEphemeral(context.Background(), mainPath); err != nil {
+		t.Fatal(err)
+	}
+	if got, complete := engine.AffectedFiles(leafPath, candidates); !complete || !slices.Equal(got, []string{leafPath}) {
+		t.Fatalf("affected files after synthetic import = %#v, complete %t", got, complete)
+	}
+
+	ws.SetOverlay(mainPath, withImport)
+	if _, err := ws.Snapshot().Analyze(mainPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ws.Snapshot().WithOverlay(mainPath, "fn main() {}\n").AnalyzeEphemeral(context.Background(), mainPath); err != nil {
+		t.Fatal(err)
+	}
+	if got, complete := engine.AffectedFiles(leafPath, candidates); !complete || !slices.Equal(got, candidates) {
+		t.Fatalf("affected files after synthetic import removal = %#v, complete %t", got, complete)
 	}
 }
 
@@ -294,6 +422,121 @@ func TestConcurrentAnalyzeIsPointerStable(t *testing.T) {
 	}
 }
 
+func TestConcurrentCheckIsDeduplicated(t *testing.T) {
+	engine := NewEngine(t.TempDir())
+	want := &FileAnalysis{Signature: "shared"}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var runs atomic.Int32
+	run := func() (*FileAnalysis, error) {
+		if runs.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		return want, nil
+	}
+
+	const workers = 8
+	results := make(chan *FileAnalysis, workers)
+	errs := make(chan error, workers)
+	for range workers {
+		go func() {
+			result, err := engine.checkOnce(context.Background(), "shared", true, run)
+			results <- result
+			errs <- err
+		}()
+	}
+	<-started
+	close(release)
+	for range workers {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+		if result := <-results; result != want {
+			t.Fatalf("result = %p, want shared result %p", result, want)
+		}
+	}
+	if got := runs.Load(); got != 1 {
+		t.Fatalf("check ran %d times, want once", got)
+	}
+}
+
+func TestCanceledCheckWaiterDoesNotCancelSharedWork(t *testing.T) {
+	engine := NewEngine(t.TempDir())
+	want := &FileAnalysis{Signature: "shared"}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var runs atomic.Int32
+	run := func() (*FileAnalysis, error) {
+		runs.Add(1)
+		close(started)
+		<-release
+		return want, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := engine.checkOnce(ctx, "shared", true, run)
+		firstDone <- err
+	}()
+	<-started
+	cancel()
+	select {
+	case err := <-firstDone:
+		if err != context.Canceled {
+			t.Fatalf("canceled waiter error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled waiter did not return while shared check was running")
+	}
+
+	secondDone := make(chan *FileAnalysis, 1)
+	secondErr := make(chan error, 1)
+	go func() {
+		result, err := engine.checkOnce(context.Background(), "shared", true, run)
+		secondDone <- result
+		secondErr <- err
+	}()
+	close(release)
+	if err := <-secondErr; err != nil {
+		t.Fatal(err)
+	}
+	if result := <-secondDone; result != want {
+		t.Fatalf("shared result = %p, want %p", result, want)
+	}
+	if got := runs.Load(); got != 1 {
+		t.Fatalf("check ran %d times after waiter cancellation, want once", got)
+	}
+}
+
+func TestPanickedCheckIsSharedButNotCached(t *testing.T) {
+	engine := NewEngine(t.TempDir())
+	var runs atomic.Int32
+	_, err := engine.checkOnce(context.Background(), "panic", true, func() (*FileAnalysis, error) {
+		runs.Add(1)
+		panic("checker exploded")
+	})
+	if err == nil || !strings.Contains(err.Error(), "analysis panic: checker exploded") {
+		t.Fatalf("panic error = %v", err)
+	}
+
+	want := &FileAnalysis{Signature: "panic"}
+	got, err := engine.checkOnce(context.Background(), "panic", true, func() (*FileAnalysis, error) {
+		runs.Add(1)
+		return want, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("retry result = %p, want %p", got, want)
+	}
+	if count := runs.Load(); count != 2 {
+		t.Fatalf("check attempts = %d, want panic plus retry", count)
+	}
+}
+
 func TestCheckCacheEviction(t *testing.T) {
 	root := writeProject(t, map[string]string{
 		"main.ard": "fn main() {\n}\n",
@@ -343,26 +586,43 @@ func TestOverlayOnlyFileAnalyzes(t *testing.T) {
 	}
 }
 
-func TestSyncOverlaysRemovesAbsentFiles(t *testing.T) {
+func TestSnapshotWithOverlayIsIsolated(t *testing.T) {
 	root := writeProject(t, map[string]string{
 		"main.ard": "fn main() {\n}\n",
+		"api.ard":  "let disk_value = 0\n",
 	})
 	engine := NewEngine(root)
 	ws := NewWorkspace(engine)
-	stale := filepath.Join(root, "stale.ard")
-	keep := filepath.Join(root, "main.ard")
+	mainPath := filepath.Join(root, "main.ard")
+	apiPath := filepath.Join(root, "api.ard")
+	ws.SetOverlay(apiPath, "let api_overlay = 1\n")
+	base := ws.Snapshot()
+	synthetic := base.WithOverlay(mainPath, "let synthetic = 2\n")
+	ws.SetOverlay(apiPath, "let later_workspace = 3\n")
 
-	ws.SetOverlay(stale, "fn stale() {\n}\n")
-	ws.SetOverlay(keep, "fn main() {\n}\n")
-
-	rev := ws.SyncOverlays(map[string]string{keep: "fn main() {\n}\n"})
-	snap := ws.Snapshot()
-	if _, ok := snap.overlays[stale]; ok {
-		t.Fatal("stale overlay survived authoritative sync")
+	for _, test := range []struct {
+		name string
+		snap *Snapshot
+		path string
+		want string
+	}{
+		{name: "synthetic target", snap: synthetic, path: mainPath, want: "let synthetic = 2\n"},
+		{name: "synthetic sibling", snap: synthetic, path: apiPath, want: "let api_overlay = 1\n"},
+		{name: "base target", snap: base, path: mainPath, want: "fn main() {\n}\n"},
+		{name: "base sibling", snap: base, path: apiPath, want: "let api_overlay = 1\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			content, err := test.snap.Content(test.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(content) != test.want {
+				t.Fatalf("content = %q, want %q", content, test.want)
+			}
+		})
 	}
-	// A second identical sync must not bump the revision.
-	if again := ws.SyncOverlays(map[string]string{keep: "fn main() {\n}\n"}); again != rev {
-		t.Fatalf("no-op sync bumped revision %d -> %d", rev, again)
+	if synthetic.Revision() != base.Revision() {
+		t.Fatalf("synthetic revision = %d, want base revision %d", synthetic.Revision(), base.Revision())
 	}
 }
 

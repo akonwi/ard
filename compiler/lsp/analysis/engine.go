@@ -34,12 +34,15 @@ import (
 type Engine struct {
 	projectRoot string
 
-	mu         sync.Mutex
-	goResolver *lockedGoResolver
-	goModHash  string
-	goPrimed   map[string]bool        // go import paths primed into the session
-	parseCache map[string]*parseEntry // content hash -> parse result
-	checkCache map[string]*FileAnalysis
+	mu           sync.Mutex
+	goResolver   *lockedGoResolver
+	goModHash    string
+	goPrimed     map[string]bool        // go import paths primed into the session
+	parseCache   map[string]*parseEntry // content hash -> parse result
+	checkCache   map[string]*FileAnalysis
+	checkCalls   map[string]*checkCall // content signature -> in-flight check
+	dependencies map[string]dependencyEntry
+	dependents   map[string]map[string]struct{}
 	// insertion order for simple bounded eviction
 	parseOrder []string
 	checkOrder []string
@@ -57,6 +60,19 @@ const (
 type parseEntry struct {
 	program *parse.Program
 	errors  []parse.ParseError
+}
+
+type checkCall struct {
+	done     chan struct{}
+	analysis *FileAnalysis
+	err      error
+	cache    bool
+}
+
+type dependencyEntry struct {
+	revision uint64
+	known    bool
+	imports  map[string]struct{}
 }
 
 // FileAnalysis is the immutable result of analyzing one file. It retains
@@ -82,9 +98,12 @@ type FileAnalysis struct {
 // NewEngine creates an engine rooted at the given project directory.
 func NewEngine(projectRoot string) *Engine {
 	return &Engine{
-		projectRoot: projectRoot,
-		parseCache:  map[string]*parseEntry{},
-		checkCache:  map[string]*FileAnalysis{},
+		projectRoot:  projectRoot,
+		parseCache:   map[string]*parseEntry{},
+		checkCache:   map[string]*FileAnalysis{},
+		checkCalls:   map[string]*checkCall{},
+		dependencies: map[string]dependencyEntry{},
+		dependents:   map[string]map[string]struct{}{},
 	}
 }
 
@@ -261,32 +280,6 @@ func (w *Workspace) SetOverlay(filePath string, content string) uint64 {
 	return w.revision
 }
 
-// SyncOverlays replaces the overlay set atomically: files present in the map
-// are set, files absent are removed. The revision only bumps when content
-// actually changed. This lets the server make its document cache
-// authoritative and heal races between doc-sync and feature requests.
-func (w *Workspace) SyncOverlays(overlays map[string]string) uint64 {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	changed := false
-	for path, content := range overlays {
-		if existing, ok := w.overlays[path]; !ok || existing != content {
-			w.overlays[path] = content
-			changed = true
-		}
-	}
-	for path := range w.overlays {
-		if _, ok := overlays[path]; !ok {
-			delete(w.overlays, path)
-			changed = true
-		}
-	}
-	if changed {
-		w.revision++
-	}
-	return w.revision
-}
-
 // DeleteOverlay removes editor content for a closed file.
 func (w *Workspace) DeleteOverlay(filePath string) uint64 {
 	w.mu.Lock()
@@ -331,6 +324,18 @@ type Snapshot struct {
 
 // Revision returns the workspace revision this snapshot was taken at.
 func (s *Snapshot) Revision() uint64 { return s.revision }
+
+// WithOverlay derives an immutable snapshot with one file replaced. The base
+// snapshot and workspace remain unchanged. Synthetic completion and signature
+// requests use this to retain one coherent set of sibling overlays.
+func (s *Snapshot) WithOverlay(filePath string, content string) *Snapshot {
+	overlays := make(map[string]string, len(s.overlays)+1)
+	for path, source := range s.overlays {
+		overlays[path] = source
+	}
+	overlays[filePath] = content
+	return &Snapshot{engine: s.engine, overlays: overlays, revision: s.revision}
+}
 
 // Content returns the file's current content: the overlay when open,
 // otherwise the on-disk bytes.
@@ -393,6 +398,7 @@ func (s *Snapshot) analyze(ctx context.Context, filePath string, cache bool) (an
 		return nil, fmt.Errorf("parse returned no program for %s", filePath)
 	}
 	if len(entry.errors) > 0 && cache {
+		s.engine.updateDependencies(filePath, nil, s.revision, false)
 		// Parse errors block checking on the cached path; not cached in
 		// checkCache because the parse cache already makes this cheap.
 		// Ephemeral (tooling-patched) analyses continue: signature help and
@@ -410,46 +416,177 @@ func (s *Snapshot) analyze(ctx context.Context, filePath string, cache bool) (an
 	}
 	moduleResolver, relPath, err := s.newModuleResolver(filePath)
 	if err != nil {
+		if cache {
+			s.engine.updateDependencies(filePath, nil, s.revision, false)
+		}
 		return nil, err
 	}
 
-	sig := s.signature(filePath, content, entry.program, moduleResolver, relPath)
-
-	s.engine.mu.Lock()
-	if cached, ok := s.engine.checkCache[sig]; ok {
-		s.engine.mu.Unlock()
-		return cached, nil
-	}
-	s.engine.mu.Unlock()
-
+	sig := s.signature(filePath, content, entry.program, moduleResolver, relPath, cache)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	analysis, err = s.check(filePath, relPath, entry.program, entry.errors, moduleResolver, sig)
-	if err != nil {
-		return nil, err
-	}
+	return s.engine.checkOnce(ctx, sig, cache, func() (*FileAnalysis, error) {
+		return s.check(filePath, relPath, entry.program, entry.errors, moduleResolver, sig)
+	})
+}
 
-	if !cache {
-		return analysis, nil
-	}
-
-	s.engine.mu.Lock()
-	if cached, ok := s.engine.checkCache[sig]; ok {
-		// A concurrent analysis won the insert race; serve the cached
-		// instance so memoization stays pointer-stable.
-		s.engine.mu.Unlock()
+// checkOnce shares one in-flight check for a content signature. Each caller
+// waits with its own context; cancellation stops that waiter without aborting
+// work still needed by other requests. Failed checks are shared but not cached.
+func (e *Engine) checkOnce(ctx context.Context, sig string, cache bool, run func() (*FileAnalysis, error)) (*FileAnalysis, error) {
+	e.mu.Lock()
+	if cached, ok := e.checkCache[sig]; ok {
+		e.mu.Unlock()
 		return cached, nil
 	}
-	s.engine.checkCache[sig] = analysis
-	s.engine.checkOrder = append(s.engine.checkOrder, sig)
-	if len(s.engine.checkOrder) > maxCheckEntries {
-		evict := s.engine.checkOrder[0]
-		s.engine.checkOrder = s.engine.checkOrder[1:]
-		delete(s.engine.checkCache, evict)
+	if err := ctx.Err(); err != nil {
+		e.mu.Unlock()
+		return nil, err
 	}
-	s.engine.mu.Unlock()
-	return analysis, nil
+	call := e.checkCalls[sig]
+	start := false
+	if call == nil {
+		call = &checkCall{done: make(chan struct{}), cache: cache}
+		e.checkCalls[sig] = call
+		start = true
+	} else if cache {
+		// An ephemeral request may have started the call. Upgrade it when a
+		// normal analysis joins so the successful result is retained.
+		call.cache = true
+	}
+	e.mu.Unlock()
+
+	if start {
+		go e.finishCheckCall(sig, call, run)
+	}
+
+	select {
+	case <-call.done:
+		return call.analysis, call.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (e *Engine) finishCheckCall(sig string, call *checkCall, run func() (*FileAnalysis, error)) {
+	analysis, err := runCheckSafely(run)
+
+	e.mu.Lock()
+	if err == nil && call.cache {
+		if cached, ok := e.checkCache[sig]; ok {
+			analysis = cached
+		} else {
+			e.checkCache[sig] = analysis
+			e.checkOrder = append(e.checkOrder, sig)
+			if len(e.checkOrder) > maxCheckEntries {
+				evict := e.checkOrder[0]
+				e.checkOrder = e.checkOrder[1:]
+				delete(e.checkCache, evict)
+			}
+		}
+	}
+	call.analysis = analysis
+	call.err = err
+	if e.checkCalls[sig] == call {
+		delete(e.checkCalls, sig)
+	}
+	close(call.done)
+	e.mu.Unlock()
+}
+
+func runCheckSafely(run func() (*FileAnalysis, error)) (analysis *FileAnalysis, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			analysis = nil
+			err = fmt.Errorf("analysis panic: %v\n%s", r, debug.Stack())
+		}
+	}()
+	return run()
+}
+
+func (e *Engine) updateDependencies(filePath string, imports []string, revision uint64, known bool) {
+	filePath = filepath.Clean(filePath)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	previous, exists := e.dependencies[filePath]
+	if exists && previous.revision > revision {
+		return
+	}
+	for imported := range previous.imports {
+		delete(e.dependents[imported], filePath)
+		if len(e.dependents[imported]) == 0 {
+			delete(e.dependents, imported)
+		}
+	}
+	entry := dependencyEntry{revision: revision, known: known, imports: map[string]struct{}{}}
+	if known {
+		for _, imported := range imports {
+			imported = filepath.Clean(imported)
+			if imported == filePath {
+				continue
+			}
+			entry.imports[imported] = struct{}{}
+			if e.dependents[imported] == nil {
+				e.dependents[imported] = map[string]struct{}{}
+			}
+			e.dependents[imported][filePath] = struct{}{}
+		}
+	}
+	e.dependencies[filePath] = entry
+}
+
+// AffectedFiles returns candidate files equal to or transitively dependent on
+// changedPath. complete is false when any candidate's import closure has not
+// been resolved successfully, so callers can safely fall back to broader
+// invalidation.
+func (e *Engine) AffectedFiles(changedPath string, candidates []string) (affected []string, complete bool) {
+	changedPath = filepath.Clean(changedPath)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	candidateSet := make(map[string]struct{}, len(candidates))
+	known := make(map[string]struct{}, len(candidates))
+	queue := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = filepath.Clean(candidate)
+		candidateSet[candidate] = struct{}{}
+		queue = append(queue, candidate)
+	}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if _, ok := known[current]; ok {
+			continue
+		}
+		known[current] = struct{}{}
+		entry, ok := e.dependencies[current]
+		if !ok || !entry.known {
+			return nil, false
+		}
+		for imported := range entry.imports {
+			queue = append(queue, imported)
+		}
+	}
+	seen := map[string]struct{}{changedPath: {}}
+	queue = []string{changedPath}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for dependent := range e.dependents[current] {
+			if _, ok := seen[dependent]; ok {
+				continue
+			}
+			seen[dependent] = struct{}{}
+			queue = append(queue, dependent)
+		}
+	}
+	for filePath := range seen {
+		if _, ok := candidateSet[filePath]; ok {
+			affected = append(affected, filePath)
+		}
+	}
+	sort.Strings(affected)
+	return affected, true
 }
 
 // newModuleResolver builds a resolver rooted at the project with snapshot
@@ -509,7 +646,7 @@ func (s *Snapshot) check(filePath string, relPath string, program *parse.Program
 //
 // Standard-library imports (ard/*) are skipped: the stdlib is embedded in the
 // compiler binary and immutable for the lifetime of the LSP process.
-func (s *Snapshot) signature(filePath string, content []byte, program *parse.Program, moduleResolver *checker.ModuleResolver, relPath string) string {
+func (s *Snapshot) signature(filePath string, content []byte, program *parse.Program, moduleResolver *checker.ModuleResolver, relPath string, trackDependencies bool) string {
 	h := sha256.New()
 	h.Write([]byte(filePath))
 	h.Write([]byte{0})
@@ -517,8 +654,8 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 	h.Write([]byte{0})
 
 	seen := map[string]bool{filePath: true}
-	var visit func(prog *parse.Program, importerModulePath string)
-	visit = func(prog *parse.Program, importerModulePath string) {
+	var visit func(prog *parse.Program, importerModulePath string, importerFilePath string)
+	visit = func(prog *parse.Program, importerModulePath string, importerFilePath string) {
 		if prog == nil {
 			return
 		}
@@ -527,12 +664,14 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 			module string
 		}
 		deps := make([]dep, 0, len(prog.Imports))
+		known := true
 		for _, imp := range prog.Imports {
 			if imp.Kind == parse.ImportKindGo || strings.HasPrefix(imp.Path, "ard/") {
 				continue
 			}
 			resolved, err := moduleResolver.ResolveImport(importerModulePath, imp.Path)
 			if err != nil || resolved.FilePath == "" {
+				known = false
 				// Unresolvable imports still influence the hash so adding the
 				// missing module later invalidates this analysis.
 				h.Write([]byte(imp.Path))
@@ -543,6 +682,13 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 			deps = append(deps, dep{file: resolved.FilePath, module: resolved.ModulePath})
 		}
 		sort.Slice(deps, func(a, b int) bool { return deps[a].file < deps[b].file })
+		if trackDependencies {
+			imports := make([]string, 0, len(deps))
+			for _, dependency := range deps {
+				imports = append(imports, dependency.file)
+			}
+			s.engine.updateDependencies(importerFilePath, imports, s.revision, known)
+		}
 		for _, d := range deps {
 			if seen[d.file] {
 				continue
@@ -550,6 +696,9 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 			seen[d.file] = true
 			depContent, err := s.Content(d.file)
 			if err != nil {
+				if trackDependencies {
+					s.engine.updateDependencies(d.file, nil, s.revision, false)
+				}
 				h.Write([]byte(d.file))
 				h.Write([]byte(":missing"))
 				h.Write([]byte{0})
@@ -560,10 +709,16 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 			h.Write(depContent)
 			h.Write([]byte{0})
 			entry := s.engine.parseFile(depContent, d.file)
-			visit(entry.program, d.module)
+			if len(entry.errors) > 0 {
+				if trackDependencies {
+					s.engine.updateDependencies(d.file, nil, s.revision, false)
+				}
+				continue
+			}
+			visit(entry.program, d.module, d.file)
 		}
 	}
-	visit(program, strings.TrimSuffix(relPath, ".ard"))
+	visit(program, strings.TrimSuffix(relPath, ".ard"), filePath)
 
 	// Project manifest and Go module metadata participate so dependency and
 	// FFI configuration changes invalidate checks.

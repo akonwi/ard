@@ -42,6 +42,14 @@ func (s *Server) workspaceFor(filePath string) *analysis.Workspace {
 	}
 	s.engine = analysis.NewEngine(root)
 	s.workspace = analysis.NewWorkspace(s.engine)
+	// Document notifications normally update the workspace incrementally. Seed
+	// documents that were already open before the lazily-created engine so the
+	// workspace is authoritative from its first snapshot onward.
+	for _, doc := range s.cache.Snapshot() {
+		if path, err := filePathFromURI(doc.URI); err == nil {
+			s.workspace.SetOverlay(path, doc.Text)
+		}
+	}
 	return s.workspace
 }
 
@@ -75,26 +83,23 @@ func (s *Server) dropOverlay(docURI uri.URI) {
 	s.workspaceFor(filePath).DeleteOverlay(filePath)
 }
 
-// analyzeSnapshot analyzes the document against the current snapshot. Open
-// document contents are synced from the document cache first, so the cache
-// remains the single source of truth for editor state. The context cancels
-// between analysis stages (watchdog and superseded requests).
+// workspaceSnapshotFor captures authoritative analysis state without
+// observing a partial document metadata and overlay transition.
+func (s *Server) workspaceSnapshotFor(filePath string) *analysis.Snapshot {
+	s.documentStateMu.Lock()
+	defer s.documentStateMu.Unlock()
+	return s.workspaceFor(filePath).Snapshot()
+}
+
+// analyzeSnapshot analyzes the document against the current workspace
+// snapshot. The context cancels between analysis stages (watchdog and
+// superseded requests).
 func (s *Server) analyzeSnapshot(ctx context.Context, docURI uri.URI) (*analysis.FileAnalysis, error) {
 	filePath, err := filePathFromURI(docURI)
 	if err != nil {
 		return nil, err
 	}
-	ws := s.workspaceFor(filePath)
-	// The document cache is authoritative: sync the full overlay set so
-	// closed documents are removed even if a didClose raced an earlier sync.
-	overlays := map[string]string{}
-	for _, doc := range s.cache.Snapshot() {
-		if p, err := filePathFromURI(doc.URI); err == nil {
-			overlays[p] = doc.Text
-		}
-	}
-	ws.SyncOverlays(overlays)
-	snap := ws.Snapshot()
+	snap := s.workspaceSnapshotFor(filePath)
 	fa, err := snap.AnalyzeCtx(ctx, filePath)
 	if err != nil {
 		return nil, fmt.Errorf("analyze %s: %w", filePath, err)

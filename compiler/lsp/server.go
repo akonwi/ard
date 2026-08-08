@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -34,12 +35,22 @@ func (s *stdio) Close() error {
 	return err2
 }
 
+type diagnosticJob struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	timer  *time.Timer
+}
+
 // Server is the Ard LSP server.
 type Server struct {
 	cache       *DocumentCache
 	handlers    map[string]jsonrpc2.Handler
 	conn        jsonrpc2.Conn
 	projectRoot string
+
+	// documentStateMu makes DocumentCache metadata and analysis workspace
+	// overlays transition as one state for concurrent snapshot capture.
+	documentStateMu sync.Mutex
 
 	engineMu  sync.Mutex
 	engine    *analysis.Engine
@@ -50,7 +61,7 @@ type Server struct {
 	requestTimeout time.Duration
 
 	diagnosticsMu        sync.Mutex
-	diagnosticsTimers    map[uri.URI]*time.Timer
+	diagnosticJobs       map[uri.URI]*diagnosticJob
 	diagnosticsDelay     time.Duration
 	diagnosticsPublisher func(context.Context, uri.URI)
 	diagnosticsAnalyzer  diagnosticAnalyzer
@@ -61,7 +72,7 @@ func NewServer() *Server {
 	s := &Server{
 		cache:                NewDocumentCache(),
 		handlers:             make(map[string]jsonrpc2.Handler),
-		diagnosticsTimers:    make(map[uri.URI]*time.Timer),
+		diagnosticJobs:       make(map[uri.URI]*diagnosticJob),
 		diagnosticsDelay:     100 * time.Millisecond,
 		requestTimeout:       5 * time.Second,
 		diagnosticsPublisher: nil,
@@ -352,22 +363,25 @@ func (s *Server) handleExit(ctx context.Context, reply jsonrpc2.Replier, req jso
 }
 
 func (s *Server) scheduleDiagnostics(docURI uri.URI) {
-	if s.diagnosticsDelay <= 0 {
-		go s.runDiagnostics(docURI)
+	ctx, cancel := context.WithCancel(context.Background())
+	job := &diagnosticJob{ctx: ctx, cancel: cancel}
+	s.diagnosticsMu.Lock()
+	if previous := s.diagnosticJobs[docURI]; previous != nil {
+		previous.cancel()
+		if previous.timer != nil {
+			previous.timer.Stop()
+		}
+	}
+	s.diagnosticJobs[docURI] = job
+	if s.diagnosticsDelay > 0 {
+		job.timer = time.AfterFunc(s.diagnosticsDelay, func() {
+			s.runDiagnostics(docURI, job)
+		})
+		s.diagnosticsMu.Unlock()
 		return
 	}
-
-	s.diagnosticsMu.Lock()
-	defer s.diagnosticsMu.Unlock()
-	if timer := s.diagnosticsTimers[docURI]; timer != nil {
-		timer.Stop()
-	}
-	s.diagnosticsTimers[docURI] = time.AfterFunc(s.diagnosticsDelay, func() {
-		s.diagnosticsMu.Lock()
-		delete(s.diagnosticsTimers, docURI)
-		s.diagnosticsMu.Unlock()
-		s.runDiagnostics(docURI)
-	})
+	s.diagnosticsMu.Unlock()
+	go s.runDiagnostics(docURI, job)
 }
 
 func (s *Server) scheduleDiagnosticsForOpenDocuments() {
@@ -376,17 +390,64 @@ func (s *Server) scheduleDiagnosticsForOpenDocuments() {
 	}
 }
 
-func (s *Server) runDiagnostics(docURI uri.URI) {
+func (s *Server) scheduleDiagnosticsForAffectedOpenDocuments(changedURI uri.URI) {
+	changedPath, err := filePathFromURI(changedURI)
+	if err != nil {
+		s.scheduleDiagnosticsForOpenDocuments()
+		return
+	}
+	docs := s.cache.Snapshot()
+	paths := make([]string, 0, len(docs))
+	uriByPath := make(map[string]uri.URI, len(docs))
+	for _, doc := range docs {
+		path, err := filePathFromURI(doc.URI)
+		if err != nil {
+			s.scheduleDiagnosticsForOpenDocuments()
+			return
+		}
+		path = filepath.Clean(path)
+		paths = append(paths, path)
+		uriByPath[path] = doc.URI
+	}
+	affected, complete := s.workspaceFor(changedPath).Engine().AffectedFiles(changedPath, paths)
+	if !complete {
+		s.scheduleDiagnosticsForOpenDocuments()
+		return
+	}
+	for _, path := range affected {
+		s.scheduleDiagnostics(uriByPath[path])
+	}
+}
+
+func (s *Server) runDiagnostics(docURI uri.URI, job *diagnosticJob) {
+	s.diagnosticsMu.Lock()
+	if s.diagnosticJobs[docURI] != job {
+		s.diagnosticsMu.Unlock()
+		return
+	}
+	job.timer = nil
+	s.diagnosticsMu.Unlock()
+	defer func() {
+		job.cancel()
+		s.diagnosticsMu.Lock()
+		if s.diagnosticJobs[docURI] == job {
+			delete(s.diagnosticJobs, docURI)
+		}
+		s.diagnosticsMu.Unlock()
+	}()
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "ard-lsp panic publishing diagnostics for %s: %v\n%s", docURI, r, debug.Stack())
 		}
 	}()
+	if job.ctx.Err() != nil {
+		return
+	}
 	publisher := s.diagnosticsPublisher
 	if publisher == nil {
 		publisher = s.publishDiagnostics
 	}
-	publisher(context.Background(), docURI)
+	publisher(job.ctx, docURI)
 }
 
 //-------------------------------------------------------------------------
@@ -410,6 +471,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
 
+	s.documentStateMu.Lock()
 	s.cache.Open(
 		params.TextDocument.URI,
 		string(params.TextDocument.LanguageID),
@@ -417,6 +479,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		params.TextDocument.Text,
 	)
 	s.syncOverlay(params.TextDocument.URI, params.TextDocument.Text)
+	s.documentStateMu.Unlock()
 	s.scheduleDiagnosticsForOpenDocuments()
 
 	return reply(ctx, nil, nil)
@@ -428,19 +491,26 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
 
+	s.documentStateMu.Lock()
+	var changeErr error
 	if len(params.ContentChanges) > 0 {
 		doc := s.cache.Get(params.TextDocument.URI)
 		if doc != nil {
 			updated, err := applyDocumentChanges(doc.Text, params.ContentChanges)
 			if err != nil {
-				return reply(ctx, nil, fmt.Errorf("invalid document change: %w", err))
+				changeErr = err
+			} else {
+				s.cache.Update(params.TextDocument.URI, params.TextDocument.Version, updated)
+				s.syncOverlay(params.TextDocument.URI, updated)
 			}
-			s.cache.Update(params.TextDocument.URI, params.TextDocument.Version, updated)
-			s.syncOverlay(params.TextDocument.URI, updated)
 		}
 	}
+	s.documentStateMu.Unlock()
+	if changeErr != nil {
+		return reply(ctx, nil, fmt.Errorf("invalid document change: %w", changeErr))
+	}
 
-	s.scheduleDiagnosticsForOpenDocuments()
+	s.scheduleDiagnosticsForAffectedOpenDocuments(params.TextDocument.URI)
 
 	return reply(ctx, nil, nil)
 }
@@ -455,8 +525,10 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
 
+	s.documentStateMu.Lock()
 	s.cache.Close(params.TextDocument.URI)
 	s.dropOverlay(params.TextDocument.URI)
+	s.documentStateMu.Unlock()
 	s.scheduleDiagnostics(params.TextDocument.URI)
 	s.scheduleDiagnosticsForOpenDocuments()
 
@@ -549,18 +621,13 @@ func (s *Server) handleReferences(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, []protocol.Location{}, nil)
 	}
 
-	var locations []protocol.Location
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				locations = []protocol.Location{}
-			}
-		}()
-		if _, ok := docFilePath(doc); !ok {
-			return
-		}
-		locations = s.referencesFromSpans(ctx, params.TextDocument.URI, params.Position, params.Context.IncludeDeclaration)
-	}()
+	if _, ok := docFilePath(doc); !ok {
+		return reply(ctx, []protocol.Location{}, nil)
+	}
+	locations, err := s.referencesFromSpans(ctx, params.TextDocument.URI, params.Position, params.Context.IncludeDeclaration)
+	if err != nil {
+		return reply(ctx, nil, fmt.Errorf("find references: %w", err))
+	}
 	if locations == nil {
 		locations = []protocol.Location{}
 	}
@@ -776,6 +843,9 @@ func (s *Server) handleRename(ctx context.Context, reply jsonrpc2.Replier, req j
 	if _, ok := docFilePath(doc); !ok {
 		return reply(ctx, nil, nil)
 	}
-	edit := s.renameFromSpans(ctx, params.TextDocument.URI, params.Position, params.NewName)
+	edit, err := s.renameFromSpans(ctx, params.TextDocument.URI, params.Position, params.NewName)
+	if err != nil {
+		return reply(ctx, nil, fmt.Errorf("rename: %w", err))
+	}
 	return reply(ctx, edit, nil)
 }

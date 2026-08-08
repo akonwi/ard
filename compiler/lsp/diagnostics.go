@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 	"go.lsp.dev/uri"
 )
 
-type diagnosticAnalyzer func(source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error)
+type diagnosticAnalyzer func(ctx context.Context, source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error)
 
 func formatSource(source string, filePath string) (string, error) {
 	formatted, err := formatter.Format([]byte(source), filePath)
@@ -171,6 +172,9 @@ func (s *Server) checkerDiagnosticsToLSPForDocuments(diagnostics []checker.Diagn
 
 // publishDiagnostics analyzes the document at the given URI and publishes diagnostics.
 func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
+	if ctx.Err() != nil {
+		return
+	}
 	docs, revision := s.cache.SnapshotWithRevision()
 	doc := findDiagnosticDocument(docs, docURI)
 	if doc == nil {
@@ -179,7 +183,10 @@ func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
 		return
 	}
 
-	diags, err := s.analyzeDiagnostics(doc, docs)
+	diags, err := s.analyzeDiagnostics(ctx, doc, docs)
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
 	if !s.isDiagnosticSnapshotCurrent(docURI, doc.Version, revision) {
 		return
 	}
@@ -191,7 +198,7 @@ func (s *Server) publishDiagnostics(ctx context.Context, docURI uri.URI) {
 	}
 
 	published := s.checkerDiagnosticsToLSPForDocuments(diags, docURI, docs)
-	if !s.isDiagnosticSnapshotCurrent(docURI, doc.Version, revision) {
+	if ctx.Err() != nil || !s.isDiagnosticSnapshotCurrent(docURI, doc.Version, revision) {
 		return
 	}
 	s.sendDiagnostics(ctx, docURI, doc.Version, published)
@@ -206,7 +213,7 @@ func findDiagnosticDocument(docs []Doc, docURI uri.URI) *Doc {
 	return nil
 }
 
-func (s *Server) analyzeDiagnostics(doc *Doc, docs []Doc) (diagnostics []checker.Diagnostic, err error) {
+func (s *Server) analyzeDiagnostics(ctx context.Context, doc *Doc, docs []Doc) (diagnostics []checker.Diagnostic, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			diagnostics = nil
@@ -221,9 +228,9 @@ func (s *Server) analyzeDiagnostics(doc *Doc, docs []Doc) (diagnostics []checker
 	// Tests may inject a custom analyzer; the default path goes through the
 	// snapshot engine so parses and checks are memoized.
 	if s.diagnosticsAnalyzer != nil {
-		return s.diagnosticsAnalyzer(doc.Text, filePath, overlaySources(docs))
+		return s.diagnosticsAnalyzer(ctx, doc.Text, filePath, overlaySources(docs))
 	}
-	fa, err := s.analyzeSnapshot(context.Background(), doc.URI)
+	fa, err := s.analyzeSnapshot(ctx, doc.URI)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +261,7 @@ func (s *Server) isDiagnosticSnapshotCurrent(docURI uri.URI, version int32, revi
 // sendDiagnostics sends a textDocument/publishDiagnostics notification to the client.
 // diags is converted to an empty slice if nil so JSON serializes as [] not null.
 func (s *Server) sendDiagnostics(ctx context.Context, docURI uri.URI, version int32, diags []protocol.Diagnostic) {
-	if s.conn == nil {
+	if ctx.Err() != nil || s.conn == nil {
 		return
 	}
 	if diags == nil {

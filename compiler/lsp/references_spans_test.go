@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,33 @@ import (
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
+
+func TestProjectArdFilesDoesNotSilentlyTruncate(t *testing.T) {
+	root := t.TempDir()
+	const total = 2001
+	for i := range total {
+		path := filepath.Join(root, fmt.Sprintf("module-%04d.ard", i))
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files, err := projectArdFiles(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(files); got != total {
+		t.Fatalf("project files = %d, want %d", got, total)
+	}
+	if _, err := projectArdFiles(context.Background(), filepath.Join(root, "missing")); err == nil {
+		t.Fatal("missing project root did not return a traversal error")
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := projectArdFiles(canceled, root); err == nil {
+		t.Fatal("canceled traversal did not return an error")
+	}
+}
 
 // TestReferencesModuleValueFromDefinition covers TargetValue kind derivation
 // when the query starts at the module-level value's definition.
@@ -26,7 +54,10 @@ func TestReferencesModuleValueFromDefinition(t *testing.T) {
 	srv := NewServer()
 	docURI := uri.File(valuesPath)
 	srv.cache.Open(docURI, "ard", 1, valuesSource)
-	refs := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: 0, Character: 5}, true)
+	refs, err := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: 0, Character: 5}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(refs) != 2 {
 		t.Fatalf("expected def + cross-file use, got %d: %#v", len(refs), refs)
 	}
@@ -42,13 +73,20 @@ func TestRenameFromSpansRejectsInvalidNames(t *testing.T) {
 	docURI := uri.File(path)
 	srv.cache.Open(docURI, "ard", 1, source)
 
-	if edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, "1 bad name!"); edit != nil {
+	if edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, "1 bad name!"); err != nil {
+		t.Fatal(err)
+	} else if edit != nil {
 		t.Fatal("invalid identifier accepted")
 	}
-	if edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, "count"); edit != nil {
+	if edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, "count"); err != nil {
+		t.Fatal(err)
+	} else if edit != nil {
 		t.Fatal("no-op rename produced edits")
 	}
-	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, "total")
+	edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, "total")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if edit == nil || len(edit.Changes[docURI]) != 2 {
 		t.Fatalf("expected 2 edits for local rename, got %#v", edit)
 	}
@@ -65,7 +103,10 @@ func TestRenameFromSpansNominalSameFile(t *testing.T) {
 	docURI := uri.File(path)
 	srv.cache.Open(docURI, "ard", 1, source)
 
-	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 5, Character: 11}, "renamed")
+	edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 5, Character: 11}, "renamed")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if edit == nil {
 		t.Fatal("expected rename edit")
 	}
@@ -165,7 +206,10 @@ func TestRenameFromSpansCrossFile(t *testing.T) {
 	docURI := uri.File(mainPath)
 	srv.cache.Open(docURI, "ard", 1, mainSource)
 
-	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 9}, "bump")
+	edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 9}, "bump")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if edit == nil {
 		t.Fatal("expected cross-file rename edit")
 	}
@@ -451,13 +495,19 @@ func TestNonASCIIColumns(t *testing.T) {
 
 	// References on `greeting`: the declaration line contains multi-byte
 	// runes, so the returned columns must be UTF-16.
-	refs := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 11}, true)
+	refs, err := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 11}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(refs) != 2 {
 		t.Fatalf("expected decl + use, got %#v", refs)
 	}
 
 	// Rename must verify and produce edits despite the multi-byte line.
-	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 11}, "message")
+	edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 11}, "message")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if edit == nil || len(edit.Changes[docURI]) != 2 {
 		t.Fatalf("rename across non-ASCII line failed: %#v", edit)
 	}
@@ -474,11 +524,17 @@ func TestSurrogatePairColumns(t *testing.T) {
 	docURI := uri.File(path)
 	srv.cache.Open(docURI, "ard", 1, source)
 
-	refs := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, true)
+	refs, err := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(refs) != 2 {
 		t.Fatalf("expected decl + use over emoji line, got %#v", refs)
 	}
-	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, "label")
+	edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 2, Character: 11}, "label")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if edit == nil || len(edit.Changes[docURI]) != 2 {
 		t.Fatalf("rename over emoji line failed: %#v", edit)
 	}
