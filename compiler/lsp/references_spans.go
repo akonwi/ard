@@ -2,6 +2,8 @@ package lsp
 
 import (
 	"context"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,15 +20,17 @@ import (
 // referencesFromSpans resolves find-references through the span table
 // (ADR 0043). References span the whole project: the definition module's
 // own records join records in other files that target the same entity.
-// Nil result lets callers fall back to legacy heuristics.
-func (s *Server) referencesFromSpans(ctx context.Context, docURI uri.URI, position protocol.Position, includeDeclaration bool) []protocol.Location {
+func (s *Server) referencesFromSpans(ctx context.Context, docURI uri.URI, position protocol.Position, includeDeclaration bool) ([]protocol.Location, error) {
 	filePath, err := filePathFromURI(docURI)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("reference document URI: %w", err)
 	}
-	group := s.spanGroupAt(ctx, docURI, position)
+	group, err := s.spanGroupAt(ctx, docURI, position)
+	if err != nil {
+		return nil, err
+	}
 	if group == nil {
-		return nil
+		return nil, nil
 	}
 
 	var out []protocol.Location
@@ -46,9 +50,17 @@ func (s *Server) referencesFromSpans(ctx context.Context, docURI uri.URI, positi
 	// other files, and when the position itself was a cross-module use,
 	// gather the definition module's own group.
 	if _, isLocal := group.key.(*checker.Symbol); !isLocal {
-		out = append(out, s.workspaceReferences(ctx, filePath, group, includeDeclaration)...)
+		workspaceLocations, err := s.workspaceReferences(ctx, filePath, group, includeDeclaration)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, workspaceLocations...)
 		if includeDeclaration {
-			if defLoc, ok := s.definitionLocation(ctx, group, filePath); ok {
+			defLoc, ok, err := s.definitionLocation(ctx, group, filePath)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
 				out = append(out, defLoc)
 			}
 		}
@@ -57,7 +69,11 @@ func (s *Server) referencesFromSpans(ctx context.Context, docURI uri.URI, positi
 	out = dedupeLocations(out)
 	sortLocationsByFile(out)
 	// Definition first: editors expect the declaration to lead the list.
-	if defLoc, ok := s.definitionLocation(ctx, group, filePath); ok {
+	defLoc, ok, err := s.definitionLocation(ctx, group, filePath)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
 		for i, loc := range out {
 			if loc == defLoc && i > 0 {
 				copy(out[1:i+1], out[:i])
@@ -66,50 +82,55 @@ func (s *Server) referencesFromSpans(ctx context.Context, docURI uri.URI, positi
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
 // definitionLocation finds the group's definition as an LSP location.
-func (s *Server) definitionLocation(ctx context.Context, group *spanGroup, fromFile string) (protocol.Location, bool) {
+func (s *Server) definitionLocation(ctx context.Context, group *spanGroup, fromFile string) (protocol.Location, bool, error) {
 	for _, rec := range group.records {
 		if rec.IsDef {
 			return protocol.Location{
 				URI:   protocol.DocumentURI(uri.File(fromFile)),
 				Range: s.rangeFor(fromFile, s.refLocation(rec, group.name, fromFile)),
-			}, true
+			}, true, nil
 		}
 	}
 	if group.target != nil && group.target.File != "" {
 		snap := s.workspaceFor(fromFile).Snapshot()
-		if fa, err := snap.AnalyzeCtx(ctx, group.target.File); err == nil && fa != nil && fa.Spans != nil {
-			// The defining module's own key uses its local module path, which
-			// differs from the canonical import path in the target; match by
-			// kind/symbol/owner suffix instead of exact key.
-			for _, rec := range fa.Spans.Records() {
-				if !rec.IsDef {
-					continue
-				}
-				key, ok := rec.Key.(string)
-				if !ok || !keyMatches(key, group.target.Kind, group.target.Symbol, group.target.Owner) {
-					continue
-				}
-				return protocol.Location{
-					URI:   protocol.DocumentURI(uri.File(group.target.File)),
-					Range: s.rangeFor(group.target.File, s.refLocation(rec, group.name, group.target.File)),
-				}, true
+		fa, err := snap.AnalyzeCtx(ctx, group.target.File)
+		if err != nil {
+			return protocol.Location{}, false, fmt.Errorf("analyze definition %s: %w", group.target.File, err)
+		}
+		if fa == nil || fa.Spans == nil {
+			return protocol.Location{}, false, fmt.Errorf("analyze definition %s: span information unavailable", group.target.File)
+		}
+		// The defining module's own key uses its local module path, which
+		// differs from the canonical import path in the target; match by
+		// kind/symbol/owner suffix instead of exact key.
+		for _, rec := range fa.Spans.Records() {
+			if !rec.IsDef {
+				continue
 			}
+			key, ok := rec.Key.(string)
+			if !ok || !keyMatches(key, group.target.Kind, group.target.Symbol, group.target.Owner) {
+				continue
+			}
+			return protocol.Location{
+				URI:   protocol.DocumentURI(uri.File(group.target.File)),
+				Range: s.rangeFor(group.target.File, s.refLocation(rec, group.name, group.target.File)),
+			}, true, nil
 		}
 	}
-	return protocol.Location{}, false
+	return protocol.Location{}, false, nil
 }
 
 // workspaceReferences finds records in other project files that refer to the
 // same entity as group.
-func (s *Server) workspaceReferences(ctx context.Context, fromFile string, group *spanGroup, includeDeclaration bool) []protocol.Location {
+func (s *Server) workspaceReferences(ctx context.Context, fromFile string, group *spanGroup, includeDeclaration bool) ([]protocol.Location, error) {
 	snap := s.workspaceFor(fromFile).Snapshot()
 	root := snap.Engine().ProjectRoot()
 	if root == "" {
-		return nil
+		return nil, fmt.Errorf("find workspace references: project root unavailable")
 	}
 
 	// Establish the defining file and symbol identity.
@@ -130,7 +151,7 @@ func (s *Server) workspaceReferences(ctx context.Context, fromFile string, group
 		case strings.HasPrefix(key, "val:"):
 			kind = checker.TargetValue
 		default:
-			return nil
+			return nil, nil
 		}
 		if kind == checker.TargetField || kind == checker.TargetMethod {
 			tail := key[strings.LastIndex(key, ":")+1:]
@@ -161,18 +182,21 @@ func (s *Server) workspaceReferences(ctx context.Context, fromFile string, group
 	defFileCanon := canonicalPath(defFile)
 	seenFiles := map[string]bool{canonicalPath(fromFile): true}
 
-	addMatches := func(path string) {
-		if ctx.Err() != nil {
-			return
+	addMatches := func(path string) error {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		canon := canonicalPath(path)
 		if seenFiles[canon] {
-			return
+			return nil
 		}
 		seenFiles[canon] = true
 		fa, err := snap.AnalyzeCtx(ctx, path)
-		if err != nil || fa == nil || fa.Spans == nil {
-			return
+		if err != nil {
+			return fmt.Errorf("analyze references in %s: %w", path, err)
+		}
+		if fa == nil || fa.Spans == nil {
+			return fmt.Errorf("analyze references in %s: span information unavailable", path)
 		}
 		isDefFile := canon == defFileCanon
 		pathLines := s.docLinesFor(path)
@@ -198,11 +222,16 @@ func (s *Server) workspaceReferences(ctx context.Context, fromFile string, group
 				})
 			}
 		}
+		return nil
 	}
 
-	for _, path := range projectArdFiles(root) {
-		if ctx.Err() != nil {
-			break
+	files, err := projectArdFiles(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		// Import-graph filter: a file can only reference the entity if it
 		// imports the defining module (or is the defining module itself).
@@ -210,9 +239,11 @@ func (s *Server) workspaceReferences(ctx context.Context, fromFile string, group
 		if canonicalPath(path) != defFileCanon && !snapImportsFile(snap, path, defFileCanon) {
 			continue
 		}
-		addMatches(path)
+		if err := addMatches(path); err != nil {
+			return nil, err
+		}
 	}
-	return out
+	return out, nil
 }
 
 // snapImportsFile reports whether the file's parsed imports may resolve to
@@ -337,7 +368,7 @@ func (s *Server) highlightsFromSpans(ctx context.Context, docURI uri.URI, positi
 	if err != nil {
 		return nil
 	}
-	group := s.spanGroupAt(ctx, docURI, position)
+	group, _ := s.spanGroupAt(ctx, docURI, position)
 	if group == nil {
 		return nil
 	}
@@ -367,25 +398,31 @@ func (s *Server) highlightsFromSpans(ctx context.Context, docURI uri.URI, positi
 // Local symbols edit the current file; nominal entities (functions, types,
 // members, module values) rename project-wide through the same reference
 // machinery as find-references.
-func (s *Server) renameFromSpans(ctx context.Context, docURI uri.URI, position protocol.Position, newName string) *protocol.WorkspaceEdit {
+func (s *Server) renameFromSpans(ctx context.Context, docURI uri.URI, position protocol.Position, newName string) (*protocol.WorkspaceEdit, error) {
 	if _, err := filePathFromURI(docURI); err != nil {
-		return nil
+		return nil, fmt.Errorf("rename document URI: %w", err)
 	}
 	if !isValidRenameIdentifier(newName) {
-		return nil
+		return nil, nil
 	}
-	group := s.spanGroupAt(ctx, docURI, position)
+	group, err := s.spanGroupAt(ctx, docURI, position)
+	if err != nil {
+		return nil, err
+	}
 	if group == nil || group.name == "" {
-		return nil
+		return nil, nil
 	}
 	if group.name == newName {
-		return nil
+		return nil, nil
 	}
 
 	// The full reference set (declaration included) is the edit set.
-	refs := s.referencesFromSpans(ctx, docURI, position, true)
+	refs, err := s.referencesFromSpans(ctx, docURI, position, true)
+	if err != nil {
+		return nil, err
+	}
 	if len(refs) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	changes := map[uri.URI][]protocol.TextEdit{}
@@ -397,16 +434,15 @@ func (s *Server) renameFromSpans(ctx context.Context, docURI uri.URI, position p
 		seen[ref] = true
 		// Guard: every edit range must currently hold exactly the old
 		// identifier. A single unverifiable range aborts the whole rename —
-		// a partial rename would corrupt the workspace — and the caller
-		// falls back to the legacy path.
+		// a partial rename would corrupt the workspace.
 		if !s.rangeHoldsIdentifier(ref, group.name) {
-			return nil
+			return nil, fmt.Errorf("cannot verify rename target %s at %s", group.name, ref.URI)
 		}
 		target := uri.URI(ref.URI)
 		changes[target] = append(changes[target], protocol.TextEdit{Range: ref.Range, NewText: newName})
 	}
 	if len(changes) == 0 {
-		return nil
+		return nil, nil
 	}
 	for _, edits := range changes {
 		sort.Slice(edits, func(a, b int) bool {
@@ -416,7 +452,7 @@ func (s *Server) renameFromSpans(ctx context.Context, docURI uri.URI, position p
 			return edits[a].Range.Start.Character < edits[b].Range.Start.Character
 		})
 	}
-	return &protocol.WorkspaceEdit{Changes: changes}
+	return &protocol.WorkspaceEdit{Changes: changes}, nil
 }
 
 // rangeHoldsIdentifier verifies the range's current text is exactly name, so
@@ -445,7 +481,7 @@ func (s *Server) prepareRenameFromSpans(ctx context.Context, docURI uri.URI, pos
 	if err != nil {
 		return nil
 	}
-	group := s.spanGroupAt(ctx, docURI, position)
+	group, _ := s.spanGroupAt(ctx, docURI, position)
 	if group == nil || group.name == "" {
 		return nil
 	}
@@ -470,14 +506,17 @@ type spanGroup struct {
 }
 
 // spanGroupAt resolves the identity group for the symbol at a position.
-func (s *Server) spanGroupAt(ctx context.Context, docURI uri.URI, position protocol.Position) *spanGroup {
+func (s *Server) spanGroupAt(ctx context.Context, docURI uri.URI, position protocol.Position) (*spanGroup, error) {
 	fa, err := s.analyzeSnapshot(ctx, docURI)
-	if err != nil || fa == nil || fa.Spans == nil {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if fa == nil || fa.Spans == nil {
+		return nil, fmt.Errorf("span information unavailable for %s", docURI)
 	}
 	filePath, pathErr := filePathFromURI(docURI)
 	if pathErr != nil {
-		return nil
+		return nil, pathErr
 	}
 	point := s.docLinesFor(filePath).positionToPoint(position)
 	records := fa.Spans.At(point)
@@ -496,7 +535,7 @@ func (s *Server) spanGroupAt(ctx context.Context, docURI uri.URI, position proto
 					if rec.IsDef && !onDeclarationLine(rec.Loc, point) {
 						break
 					}
-					return group
+					return group, nil
 				}
 			}
 		}
@@ -512,7 +551,7 @@ func (s *Server) spanGroupAt(ctx context.Context, docURI uri.URI, position proto
 		if rec.Key != nil {
 			group := &spanGroup{key: rec.Key, records: fa.Spans.ByKey(rec.Key)}
 			group.name = groupSymbolName(rec)
-			return group
+			return group, nil
 		}
 		if rec.Target != nil {
 			// Cross-module use with no local key: group by target identity.
@@ -522,10 +561,10 @@ func (s *Server) spanGroupAt(ctx context.Context, docURI uri.URI, position proto
 				records: recordsTargeting(fa.Spans.Records(), rec.Target),
 			}
 			group.target = rec.Target
-			return group
+			return group, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // onDeclarationLine reports whether the point sits on the first line of a
@@ -659,35 +698,34 @@ func spanContainsPoint(loc parse.Location, p parse.Point) bool {
 	return true
 }
 
-// projectArdFiles enumerates .ard files under the project root, bounded to
-// keep reference searches cheap in large trees.
-func projectArdFiles(root string) []string {
-	const maxFiles = 2000
+// projectArdFiles enumerates every .ard file under the project root. It must
+// return an error rather than a partial list: references and rename rely on
+// complete traversal to avoid plausible but incomplete results.
+func projectArdFiles(ctx context.Context, root string) ([]string, error) {
 	var files []string
-	_ = filepathWalk(root, &files, maxFiles)
-	return files
-}
-
-func filepathWalk(root string, files *[]string, limit int) error {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if len(*files) >= limit {
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case "ard-out", ".git", "node_modules":
+				if path != root {
+					return fs.SkipDir
+				}
+			}
 			return nil
 		}
-		name := entry.Name()
-		if entry.IsDir() {
-			if name == "ard-out" || name == ".git" || name == "node_modules" {
-				continue
-			}
-			_ = filepathWalk(root+"/"+name, files, limit)
-			continue
+		if len(entry.Name()) > len(".ard") && strings.HasSuffix(entry.Name(), ".ard") {
+			files = append(files, path)
 		}
-		if len(name) > 4 && name[len(name)-4:] == ".ard" {
-			*files = append(*files, root+"/"+name)
-		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk Ard project %s: %w", root, err)
 	}
-	return nil
+	return files, nil
 }

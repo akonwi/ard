@@ -17,7 +17,7 @@ Statuses: `planned`, `in progress`, `completed`, or `deferred`.
 | COMP-003 | P1 | completed | Finish the ADR 0057 AIR representation migration |
 | COMP-004 | P0 | completed | Contain module imports within package roots and propagate filesystem errors |
 | COMP-005 | P1 | completed | Complete LSP cancellation and dependency-aware invalidation |
-| COMP-006 | P1 | planned | Stop silently returning incomplete project-wide references and renames |
+| COMP-006 | P1 | completed | Stop silently returning incomplete project-wide references and renames |
 | COMP-007 | P2 | planned | Remove the fallback Go importer |
 | COMP-008 | P2 | planned | Consolidate unsafe-catch result analysis |
 | COMP-009 | P2 | planned | Retire checker-node fallback type rules |
@@ -157,15 +157,18 @@ Bounded outcome:
 
 ## COMP-006: Make incomplete reference searches explicit
 
-Project-wide references and rename scan at most 2,000 Ard files and discard
-recursive directory-read errors. They can therefore return plausible but
-incomplete results without warning.
+**Status:** completed. Project-wide references and rename now traverse every
+Ard source under the project root except intentionally excluded generated,
+version-control, and dependency directories. Traversal honors request
+cancellation and propagates directory, file, and analysis failures to the LSP
+client instead of returning accumulated locations. Rename constructs a
+workspace edit only after the complete reference search succeeds.
 
 Bounded outcome:
 
-- Propagate traversal errors.
-- Remove the arbitrary cap or return an explicit incomplete-search error.
-- Never apply a workspace rename from a known-partial result.
+- [x] Propagate traversal errors.
+- [x] Remove the arbitrary cap or return an explicit incomplete-search error.
+- [x] Never apply a workspace rename from a known-partial result.
 
 ## COMP-007: Remove the fallback Go importer
 

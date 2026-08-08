@@ -621,18 +621,13 @@ func (s *Server) handleReferences(ctx context.Context, reply jsonrpc2.Replier, r
 		return reply(ctx, []protocol.Location{}, nil)
 	}
 
-	var locations []protocol.Location
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				locations = []protocol.Location{}
-			}
-		}()
-		if _, ok := docFilePath(doc); !ok {
-			return
-		}
-		locations = s.referencesFromSpans(ctx, params.TextDocument.URI, params.Position, params.Context.IncludeDeclaration)
-	}()
+	if _, ok := docFilePath(doc); !ok {
+		return reply(ctx, []protocol.Location{}, nil)
+	}
+	locations, err := s.referencesFromSpans(ctx, params.TextDocument.URI, params.Position, params.Context.IncludeDeclaration)
+	if err != nil {
+		return reply(ctx, nil, fmt.Errorf("find references: %w", err))
+	}
 	if locations == nil {
 		locations = []protocol.Location{}
 	}
@@ -848,6 +843,9 @@ func (s *Server) handleRename(ctx context.Context, reply jsonrpc2.Replier, req j
 	if _, ok := docFilePath(doc); !ok {
 		return reply(ctx, nil, nil)
 	}
-	edit := s.renameFromSpans(ctx, params.TextDocument.URI, params.Position, params.NewName)
+	edit, err := s.renameFromSpans(ctx, params.TextDocument.URI, params.Position, params.NewName)
+	if err != nil {
+		return reply(ctx, nil, fmt.Errorf("rename: %w", err))
+	}
 	return reply(ctx, edit, nil)
 }

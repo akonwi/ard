@@ -942,7 +942,10 @@ func assertDefinitionStart(t *testing.T, loc protocol.Location, filePath string,
 func requireReferences(t *testing.T, source string, filePath string, line uint32, char uint32, includeDeclaration bool) []protocol.Location {
 	t.Helper()
 	srv, docURI := spanServer(t, source, filePath)
-	locations := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: line, Character: char}, includeDeclaration)
+	locations, err := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: line, Character: char}, includeDeclaration)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(locations) == 0 {
 		t.Fatalf("expected references at %d:%d, got none", line, char)
 	}
@@ -1218,6 +1221,81 @@ fn other() Int {
 	})
 }
 
+func TestReferencesAndRenameRejectIncompleteWorkspaceScan(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"test_project\"\nard = \">= 0.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mathPath := filepath.Join(root, "math.ard")
+	if err := os.WriteFile(mathPath, []byte("fn inc(value: Int) Int { value + 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainSource := "use test_project/math\n\nfn main() Int {\n  math::inc(1)\n}\n"
+	mainPath := filepath.Join(root, "main.ard")
+	brokenPath := filepath.Join(root, "broken.ard")
+	if err := os.Symlink(filepath.Join(root, "missing.ard"), brokenPath); err != nil {
+		t.Skipf("cannot create dangling symlink: %v", err)
+	}
+	srv, docURI := spanServer(t, mainSource, mainPath)
+	position := protocol.Position{Line: 3, Character: 9}
+
+	tests := []struct {
+		name   string
+		method string
+		params any
+		handle jsonrpc2.Handler
+	}{
+		{
+			name:   "references",
+			method: protocol.MethodTextDocumentReferences,
+			params: protocol.ReferenceParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+					Position:     position,
+				},
+				Context: protocol.ReferenceContext{IncludeDeclaration: true},
+			},
+			handle: srv.handleReferences,
+		},
+		{
+			name:   "rename",
+			method: protocol.MethodTextDocumentRename,
+			params: protocol.RenameParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: docURI},
+					Position:     position,
+				},
+				NewName: "bump",
+			},
+			handle: srv.handleRename,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), tt.method, tt.params)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result any
+			var replyErr error
+			reply := jsonrpc2.Replier(func(ctx context.Context, got interface{}, err error) error {
+				result = got
+				replyErr = err
+				return nil
+			})
+			if err := tt.handle(context.Background(), reply, req); err != nil {
+				t.Fatal(err)
+			}
+			if replyErr == nil || !strings.Contains(replyErr.Error(), brokenPath) {
+				t.Fatalf("reply error = %v, want unreadable workspace file", replyErr)
+			}
+			if result != nil {
+				t.Fatalf("partial result returned with error: %#v", result)
+			}
+		})
+	}
+}
+
 // TestReferencesOpenDocumentOverlays verifies references use unsaved open-document content.
 func TestReferencesOpenDocumentOverlays(t *testing.T) {
 	root := t.TempDir()
@@ -1256,7 +1334,10 @@ fn other() Int {
 	if err := os.WriteFile(otherPath, []byte(otherOverlay), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	refs := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 9}, true)
+	refs, err := srv.referencesFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 9}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(refs) != 3 {
 		t.Fatalf("expected 3 refs, got %d: %#v", len(refs), refs)
 	}
@@ -2290,7 +2371,10 @@ func TestRenameLocalVariable(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv, docURI := spanServer(t, source, filePath)
-	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 1, Character: 7}, "total")
+	edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 1, Character: 7}, "total")
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertRenameEdits(t, edit, filePath, []renameWant{{1, 6, 11}, {2, 13, 18}, {3, 2, 7}})
 }
 func TestRenameImportedFunction(t *testing.T) {
@@ -2317,7 +2401,10 @@ fn main() {
 		t.Fatal(err)
 	}
 	srv, docURI := spanServer(t, mainSource, mainPath)
-	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 15}, "error_json")
+	edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 3, Character: 15}, "error_json")
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertRenameEdits(t, edit, modPath, []renameWant{{0, 3, 13}})
 	assertRenameEdits(t, edit, mainPath, []renameWant{{3, 13, 23}})
 }
@@ -2336,7 +2423,10 @@ fn main(board: Board) {
 		t.Fatal(err)
 	}
 	srv, docURI := spanServer(t, source, filePath)
-	edit := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 1, Character: 3}, "spaces")
+	edit, err := srv.renameFromSpans(context.Background(), docURI, protocol.Position{Line: 1, Character: 3}, "spaces")
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertRenameEdits(t, edit, filePath, []renameWant{{1, 2, 7}, {5, 20, 25}})
 }
 
