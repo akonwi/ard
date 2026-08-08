@@ -61,6 +61,9 @@ func Validate(program *Program) error {
 }
 
 func validateTypeInfo(program *Program, typ TypeInfo) error {
+	if typ.ElemMutable {
+		return fmt.Errorf("type %s uses legacy mutable-element metadata", typ.Name)
+	}
 	switch typ.Kind {
 	case TypeList, TypeMaybe, TypeChannel, TypeReceiver, TypeSender, TypeReference:
 		if !validTypeID(program, typ.Elem) {
@@ -106,13 +109,19 @@ func validateTypeInfo(program *Program, typ TypeInfo) error {
 		if len(typ.ParamMutable) > 0 && len(typ.ParamMutable) != len(typ.Params) {
 			return fmt.Errorf("type %s has %d function param mutability flags for %d params", typ.Name, len(typ.ParamMutable), len(typ.Params))
 		}
-		for _, param := range typ.Params {
+		for i, param := range typ.Params {
 			if !validTypeID(program, param) {
 				return fmt.Errorf("type %s has invalid function param type %d", typ.Name, param)
+			}
+			if len(typ.ParamMutable) > 0 && typ.ParamMutable[i] != legacyReferenceFlag(program, param) {
+				return fmt.Errorf("type %s function param %d contradicts canonical reference type %d", typ.Name, i, param)
 			}
 		}
 		if !validTypeID(program, typ.Return) {
 			return fmt.Errorf("type %s has invalid function return type %d", typ.Name, typ.Return)
+		}
+		if typ.ReturnReference != isAIRReferenceType(program, typ.Return) {
+			return fmt.Errorf("type %s return metadata contradicts canonical return type %d", typ.Name, typ.Return)
 		}
 	case TypeTraitObject:
 		if !validTraitID(program, typ.Trait) {
@@ -242,11 +251,29 @@ func validateSignature(program *Program, sig Signature) error {
 		if err := validateABIParamMode(program, param.Type, param.ABI); err != nil {
 			return fmt.Errorf("parameter %s: %w", param.Name, err)
 		}
+		if (param.Mutable && !legacyReferenceFlag(program, param.Type)) || (isAIRReferenceType(program, param.Type) && !param.Mutable) {
+			return fmt.Errorf("parameter %s mutability metadata contradicts canonical type %d", param.Name, param.Type)
+		}
 	}
 	if !validTypeID(program, sig.Return) {
 		return fmt.Errorf("signature has invalid return type %d", sig.Return)
 	}
+	if sig.ReturnReference != isAIRReferenceType(program, sig.Return) {
+		return fmt.Errorf("signature return metadata contradicts canonical type %d", sig.Return)
+	}
 	return nil
+}
+
+func isAIRReferenceType(program *Program, typeID TypeID) bool {
+	return validTypeID(program, typeID) && program.Types[typeID-1].Kind == TypeReference
+}
+
+func legacyReferenceFlag(program *Program, typeID TypeID) bool {
+	if !validTypeID(program, typeID) {
+		return false
+	}
+	typ := program.Types[typeID-1]
+	return typ.Kind == TypeReference || typ.Kind == TypeForeignType && typ.ForeignPointer
 }
 
 func validateABIParamMode(program *Program, typeID TypeID, mode ABIParamMode) error {

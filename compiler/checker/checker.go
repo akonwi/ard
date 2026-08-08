@@ -613,7 +613,7 @@ type Checker struct {
 	spans                             *SpanIndex
 	nextCallInferenceID               uint64
 	expectedCallExpectation           *typeExpectation
-	foreignABIFunctions               map[*parse.FunctionDeclaration]bool
+	foreignABIParameters              map[*parse.FunctionDeclaration][]ForeignParameterABI
 	moduleFiles                       map[string]string
 }
 
@@ -638,9 +638,9 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 			StructMethods:         map[MethodOwner]map[string]*FunctionDef{},
 			ForeignInterfaceImpls: map[MethodOwner][]*ForeignType{},
 		},
-		scope:               &rootScope,
-		goTypesContext:      gotypes.NewContext(),
-		foreignABIFunctions: map[*parse.FunctionDeclaration]bool{},
+		scope:                &rootScope,
+		goTypesContext:       gotypes.NewContext(),
+		foreignABIParameters: map[*parse.FunctionDeclaration][]ForeignParameterABI{},
 	}
 	if checkOptions.RecordSpans {
 		c.spans = &SpanIndex{}
@@ -2423,11 +2423,15 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 				}.build())
 				valid = false
 			}
+			foreignABI := ForeignParameterExact
+			if paramMutable {
+				foreignABI = interfaceMethod.Parameters[i].ForeignABI
+			}
 			params[i] = Parameter{
 				Name:       param.Name,
 				Type:       paramType,
 				Mutable:    paramMutable,
-				ForeignABI: interfaceMethod.Parameters[i].ForeignABI,
+				ForeignABI: foreignABI,
 				Loc:        param.GetLocation(),
 				declaredAt: c.sourceSpan(param.GetLocation()),
 			}
@@ -2457,7 +2461,11 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 			continue
 		}
 		c.pushMethodGenericAllowlist(receiverGenerics)
-		c.foreignABIFunctions[&method] = true
+		paramABI := make([]ForeignParameterABI, len(params))
+		for i := range params {
+			paramABI[i] = params[i].ForeignABI
+		}
+		c.foreignABIParameters[&method] = paramABI
 		fnDef := c.checkFunction(&method, func() {
 			c.scope.add(s.Receiver.Name, receiverBindingType(targetType, method.Mutates), false)
 		}, receiverGenerics...)
@@ -10711,7 +10719,15 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 		}
 	}
 
-	fn.ForeignABI = c.foreignABIFunctions[def]
+	if paramABI, foreignABI := c.foreignABIParameters[def]; foreignABI {
+		fn.ForeignABI = true
+		for i := range fn.Parameters {
+			if i < len(paramABI) {
+				fn.Parameters[i].ForeignABI = paramABI[i]
+				params[i].ForeignABI = paramABI[i]
+			}
+		}
+	}
 
 	if def.IsTest {
 		if init != nil {
@@ -10764,7 +10780,7 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 		for _, param := range params {
 			sym := c.scope.add(param.Name, param.Type, param.Mutable)
 			sym.reference = param.Mutable
-			sym.foreignDescriptor = fn.ForeignABI && param.Mutable && isDescriptorBackedMutableType(param.Type)
+			sym.foreignDescriptor = param.ForeignABI == ForeignParameterDescriptorValue
 			c.recordBinding(param.Loc, sym)
 		}
 	}, returnType, true)

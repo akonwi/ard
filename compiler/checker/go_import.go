@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"math"
+	"slices"
 )
 
 // GoPackage is target metadata for a directly imported Go package. It is kept
@@ -135,7 +136,10 @@ func adaptedGoFunctionValueType(def *FunctionDef) (*FunctionDef, bool, bool) {
 	case *Result, *Maybe:
 		resultAdapted = true
 	}
-	if !variadic && !resultAdapted {
+	descriptorAdapted := slices.ContainsFunc(def.Parameters, func(param Parameter) bool {
+		return param.ForeignABI == ForeignParameterDescriptorValue
+	})
+	if !variadic && !resultAdapted && !descriptorAdapted {
 		return nil, false, false
 	}
 	if !variadic {
@@ -147,7 +151,8 @@ func adaptedGoFunctionValueType(def *FunctionDef) (*FunctionDef, bool, bool) {
 	params := make([]Parameter, len(def.Parameters))
 	copy(params, def.Parameters)
 	last := params[len(params)-1]
-	params[len(params)-1] = Parameter{Name: last.Name, Type: MakeMaybe(last.Type)}
+	last.Type = MakeMaybe(last.Type)
+	params[len(params)-1] = last
 	value := *def
 	value.Parameters = params
 	return &value, true, true
@@ -159,6 +164,12 @@ func adaptedGoFunctionValueType(def *FunctionDef) (*FunctionDef, bool, bool) {
 func goSignatureAdaptation(sig *types.Signature) string {
 	if sig.Variadic() {
 		return "it is variadic"
+	}
+	for i := 0; i < sig.Params().Len(); i++ {
+		switch sig.Params().At(i).Type().Underlying().(type) {
+		case *types.Slice, *types.Map:
+			return "a descriptor parameter requires reference projection at call boundaries"
+		}
 	}
 	results := sig.Results()
 	switch {

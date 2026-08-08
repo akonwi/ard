@@ -723,7 +723,8 @@ func (l *lowerer) declareGoAdapterFunction(module ModuleID, value *checker.Forei
 	loads := make([]Expr, len(typeInfo.Params))
 	for i, paramType := range typeInfo.Params {
 		name := fmt.Sprintf("arg%d", i)
-		params[i] = Param{Name: name, Type: paramType}
+		mutable := i < len(typeInfo.ParamMutable) && typeInfo.ParamMutable[i]
+		params[i] = Param{Name: name, Type: paramType, Mutable: mutable}
 		locals[i] = Local{ID: LocalID(i), Name: name, Type: paramType}
 		loads[i] = Expr{Kind: ExprLoadLocal, Type: paramType, Local: LocalID(i)}
 	}
