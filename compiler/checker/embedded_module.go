@@ -1,9 +1,19 @@
 package checker
 
 import (
+	"sync"
+
 	"github.com/akonwi/ard/parse"
 	"github.com/akonwi/ard/std_lib"
 )
+
+type embeddedModuleCacheEntry struct {
+	once   sync.Once
+	module Module
+	ok     bool
+}
+
+var embeddedModuleCache sync.Map
 
 // EmbeddedModule represents a standard library module loaded from embedded .ard files
 type EmbeddedModule struct {
@@ -25,7 +35,21 @@ func (m EmbeddedModule) Get(name string) Symbol {
 }
 
 // FindEmbeddedModule loads a .ard standard library module from embedded files.
+// Embedded source is immutable for the process lifetime, so parsed and checked
+// modules are shared across checker invocations.
 func FindEmbeddedModule(path string) (Module, bool) {
+	loaded, ok := embeddedModuleCache.Load(path)
+	if !ok {
+		loaded, _ = embeddedModuleCache.LoadOrStore(path, &embeddedModuleCacheEntry{})
+	}
+	entry := loaded.(*embeddedModuleCacheEntry)
+	entry.once.Do(func() {
+		entry.module, entry.ok = loadEmbeddedModule(path)
+	})
+	return entry.module, entry.ok
+}
+
+func loadEmbeddedModule(path string) (Module, bool) {
 	// Read the embedded file using std_lib.Find
 	content, err := std_lib.Find(path)
 	if err != nil {
