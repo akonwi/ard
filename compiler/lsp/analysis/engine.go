@@ -40,6 +40,7 @@ type Engine struct {
 	goPrimed   map[string]bool        // go import paths primed into the session
 	parseCache map[string]*parseEntry // content hash -> parse result
 	checkCache map[string]*FileAnalysis
+	checkCalls map[string]*checkCall // content signature -> in-flight check
 	// insertion order for simple bounded eviction
 	parseOrder []string
 	checkOrder []string
@@ -57,6 +58,13 @@ const (
 type parseEntry struct {
 	program *parse.Program
 	errors  []parse.ParseError
+}
+
+type checkCall struct {
+	done     chan struct{}
+	analysis *FileAnalysis
+	err      error
+	cache    bool
 }
 
 // FileAnalysis is the immutable result of analyzing one file. It retains
@@ -85,6 +93,7 @@ func NewEngine(projectRoot string) *Engine {
 		projectRoot: projectRoot,
 		parseCache:  map[string]*parseEntry{},
 		checkCache:  map[string]*FileAnalysis{},
+		checkCalls:  map[string]*checkCall{},
 	}
 }
 
@@ -400,42 +409,86 @@ func (s *Snapshot) analyze(ctx context.Context, filePath string, cache bool) (an
 	}
 
 	sig := s.signature(filePath, content, entry.program, moduleResolver, relPath)
-
-	s.engine.mu.Lock()
-	if cached, ok := s.engine.checkCache[sig]; ok {
-		s.engine.mu.Unlock()
-		return cached, nil
-	}
-	s.engine.mu.Unlock()
-
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	analysis, err = s.check(filePath, relPath, entry.program, entry.errors, moduleResolver, sig)
-	if err != nil {
-		return nil, err
-	}
+	return s.engine.checkOnce(ctx, sig, cache, func() (*FileAnalysis, error) {
+		return s.check(filePath, relPath, entry.program, entry.errors, moduleResolver, sig)
+	})
+}
 
-	if !cache {
-		return analysis, nil
-	}
-
-	s.engine.mu.Lock()
-	if cached, ok := s.engine.checkCache[sig]; ok {
-		// A concurrent analysis won the insert race; serve the cached
-		// instance so memoization stays pointer-stable.
-		s.engine.mu.Unlock()
+// checkOnce shares one in-flight check for a content signature. Each caller
+// waits with its own context; cancellation stops that waiter without aborting
+// work still needed by other requests. Failed checks are shared but not cached.
+func (e *Engine) checkOnce(ctx context.Context, sig string, cache bool, run func() (*FileAnalysis, error)) (*FileAnalysis, error) {
+	e.mu.Lock()
+	if cached, ok := e.checkCache[sig]; ok {
+		e.mu.Unlock()
 		return cached, nil
 	}
-	s.engine.checkCache[sig] = analysis
-	s.engine.checkOrder = append(s.engine.checkOrder, sig)
-	if len(s.engine.checkOrder) > maxCheckEntries {
-		evict := s.engine.checkOrder[0]
-		s.engine.checkOrder = s.engine.checkOrder[1:]
-		delete(s.engine.checkCache, evict)
+	if err := ctx.Err(); err != nil {
+		e.mu.Unlock()
+		return nil, err
 	}
-	s.engine.mu.Unlock()
-	return analysis, nil
+	call := e.checkCalls[sig]
+	start := false
+	if call == nil {
+		call = &checkCall{done: make(chan struct{}), cache: cache}
+		e.checkCalls[sig] = call
+		start = true
+	} else if cache {
+		// An ephemeral request may have started the call. Upgrade it when a
+		// normal analysis joins so the successful result is retained.
+		call.cache = true
+	}
+	e.mu.Unlock()
+
+	if start {
+		go e.finishCheckCall(sig, call, run)
+	}
+
+	select {
+	case <-call.done:
+		return call.analysis, call.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (e *Engine) finishCheckCall(sig string, call *checkCall, run func() (*FileAnalysis, error)) {
+	analysis, err := runCheckSafely(run)
+
+	e.mu.Lock()
+	if err == nil && call.cache {
+		if cached, ok := e.checkCache[sig]; ok {
+			analysis = cached
+		} else {
+			e.checkCache[sig] = analysis
+			e.checkOrder = append(e.checkOrder, sig)
+			if len(e.checkOrder) > maxCheckEntries {
+				evict := e.checkOrder[0]
+				e.checkOrder = e.checkOrder[1:]
+				delete(e.checkCache, evict)
+			}
+		}
+	}
+	call.analysis = analysis
+	call.err = err
+	if e.checkCalls[sig] == call {
+		delete(e.checkCalls, sig)
+	}
+	close(call.done)
+	e.mu.Unlock()
+}
+
+func runCheckSafely(run func() (*FileAnalysis, error)) (analysis *FileAnalysis, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			analysis = nil
+			err = fmt.Errorf("analysis panic: %v\n%s", r, debug.Stack())
+		}
+	}()
+	return run()
 }
 
 // newModuleResolver builds a resolver rooted at the project with snapshot

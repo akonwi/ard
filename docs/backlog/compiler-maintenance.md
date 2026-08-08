@@ -139,6 +139,9 @@ snapshot engine, and exit without publishing cancellation as an analysis error.
 The analysis workspace now owns overlays incrementally, with document metadata
 and overlay transitions synchronized for coherent snapshots. Synthetic
 completion and signature analysis derives from one immutable workspace snapshot.
+Concurrent requests for one content signature now share a single engine-owned
+check while retaining independent cancellation; failures are shared with current
+waiters but remain retryable instead of entering the cache.
 Broad scheduling remains in place until reverse dependencies can identify
 affected open documents safely.
 
@@ -146,7 +149,7 @@ Bounded outcome:
 
 - [x] Cancel superseded per-document diagnostic work.
 - [x] Make the analysis workspace authoritative for incremental overlay updates.
-- [ ] Deduplicate concurrent checks for one content signature.
+- [x] Deduplicate concurrent checks for one content signature.
 - [ ] Track reverse dependencies and schedule only affected open documents.
 
 ## COMP-006: Make incomplete reference searches explicit

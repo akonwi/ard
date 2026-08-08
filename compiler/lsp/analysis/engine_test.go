@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func writeProject(t *testing.T, files map[string]string) string {
@@ -291,6 +293,121 @@ func TestConcurrentAnalyzeIsPointerStable(t *testing.T) {
 		if results[i] != winner {
 			t.Fatalf("worker %d returned a non-cached instance; insert race must serve the cached winner", i)
 		}
+	}
+}
+
+func TestConcurrentCheckIsDeduplicated(t *testing.T) {
+	engine := NewEngine(t.TempDir())
+	want := &FileAnalysis{Signature: "shared"}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var runs atomic.Int32
+	run := func() (*FileAnalysis, error) {
+		if runs.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		return want, nil
+	}
+
+	const workers = 8
+	results := make(chan *FileAnalysis, workers)
+	errs := make(chan error, workers)
+	for range workers {
+		go func() {
+			result, err := engine.checkOnce(context.Background(), "shared", true, run)
+			results <- result
+			errs <- err
+		}()
+	}
+	<-started
+	close(release)
+	for range workers {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+		if result := <-results; result != want {
+			t.Fatalf("result = %p, want shared result %p", result, want)
+		}
+	}
+	if got := runs.Load(); got != 1 {
+		t.Fatalf("check ran %d times, want once", got)
+	}
+}
+
+func TestCanceledCheckWaiterDoesNotCancelSharedWork(t *testing.T) {
+	engine := NewEngine(t.TempDir())
+	want := &FileAnalysis{Signature: "shared"}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var runs atomic.Int32
+	run := func() (*FileAnalysis, error) {
+		runs.Add(1)
+		close(started)
+		<-release
+		return want, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := engine.checkOnce(ctx, "shared", true, run)
+		firstDone <- err
+	}()
+	<-started
+	cancel()
+	select {
+	case err := <-firstDone:
+		if err != context.Canceled {
+			t.Fatalf("canceled waiter error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled waiter did not return while shared check was running")
+	}
+
+	secondDone := make(chan *FileAnalysis, 1)
+	secondErr := make(chan error, 1)
+	go func() {
+		result, err := engine.checkOnce(context.Background(), "shared", true, run)
+		secondDone <- result
+		secondErr <- err
+	}()
+	close(release)
+	if err := <-secondErr; err != nil {
+		t.Fatal(err)
+	}
+	if result := <-secondDone; result != want {
+		t.Fatalf("shared result = %p, want %p", result, want)
+	}
+	if got := runs.Load(); got != 1 {
+		t.Fatalf("check ran %d times after waiter cancellation, want once", got)
+	}
+}
+
+func TestPanickedCheckIsSharedButNotCached(t *testing.T) {
+	engine := NewEngine(t.TempDir())
+	var runs atomic.Int32
+	_, err := engine.checkOnce(context.Background(), "panic", true, func() (*FileAnalysis, error) {
+		runs.Add(1)
+		panic("checker exploded")
+	})
+	if err == nil || !strings.Contains(err.Error(), "analysis panic: checker exploded") {
+		t.Fatalf("panic error = %v", err)
+	}
+
+	want := &FileAnalysis{Signature: "panic"}
+	got, err := engine.checkOnce(context.Background(), "panic", true, func() (*FileAnalysis, error) {
+		runs.Add(1)
+		return want, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("retry result = %p, want %p", got, want)
+	}
+	if count := runs.Load(); count != 2 {
+		t.Fatalf("check attempts = %d, want panic plus retry", count)
 	}
 }
 
