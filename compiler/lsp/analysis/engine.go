@@ -261,32 +261,6 @@ func (w *Workspace) SetOverlay(filePath string, content string) uint64 {
 	return w.revision
 }
 
-// SyncOverlays replaces the overlay set atomically: files present in the map
-// are set, files absent are removed. The revision only bumps when content
-// actually changed. This lets the server make its document cache
-// authoritative and heal races between doc-sync and feature requests.
-func (w *Workspace) SyncOverlays(overlays map[string]string) uint64 {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	changed := false
-	for path, content := range overlays {
-		if existing, ok := w.overlays[path]; !ok || existing != content {
-			w.overlays[path] = content
-			changed = true
-		}
-	}
-	for path := range w.overlays {
-		if _, ok := overlays[path]; !ok {
-			delete(w.overlays, path)
-			changed = true
-		}
-	}
-	if changed {
-		w.revision++
-	}
-	return w.revision
-}
-
 // DeleteOverlay removes editor content for a closed file.
 func (w *Workspace) DeleteOverlay(filePath string) uint64 {
 	w.mu.Lock()
@@ -331,6 +305,18 @@ type Snapshot struct {
 
 // Revision returns the workspace revision this snapshot was taken at.
 func (s *Snapshot) Revision() uint64 { return s.revision }
+
+// WithOverlay derives an immutable snapshot with one file replaced. The base
+// snapshot and workspace remain unchanged. Synthetic completion and signature
+// requests use this to retain one coherent set of sibling overlays.
+func (s *Snapshot) WithOverlay(filePath string, content string) *Snapshot {
+	overlays := make(map[string]string, len(s.overlays)+1)
+	for path, source := range s.overlays {
+		overlays[path] = source
+	}
+	overlays[filePath] = content
+	return &Snapshot{engine: s.engine, overlays: overlays, revision: s.revision}
+}
 
 // Content returns the file's current content: the overlay when open,
 // otherwise the on-disk bytes.

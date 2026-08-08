@@ -29,18 +29,10 @@ func (s *Server) completionFromSpans(ctx context.Context, docURI uri.URI, source
 	}
 
 	// Patch a placeholder identifier after the dot so the file parses, then
-	// analyze it in a scratch workspace sharing the engine's caches.
+	// analyze it against one immutable snapshot of the workspace overlays.
 	patched := source[:cctx.sepEnd] + completionPlaceholder + source[cctx.offset:]
-	ws := s.workspaceFor(filePath)
-	scratch := analysis.NewWorkspace(ws.Engine())
-	// Carry over sibling overlays so imports resolve against editor state.
-	for _, doc := range s.cache.Snapshot() {
-		if p, err := filePathFromURI(doc.URI); err == nil && p != filePath {
-			scratch.SetOverlay(p, doc.Text)
-		}
-	}
-	scratch.SetOverlay(filePath, patched)
-	fa, err := scratch.Snapshot().AnalyzeEphemeral(ctx, filePath)
+	snap := s.workspaceSnapshotFor(filePath).WithOverlay(filePath, patched)
+	fa, err := snap.AnalyzeEphemeral(ctx, filePath)
 	if err != nil || fa == nil || fa.Spans == nil {
 		return nil
 	}

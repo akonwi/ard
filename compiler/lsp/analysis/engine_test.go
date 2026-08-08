@@ -343,26 +343,43 @@ func TestOverlayOnlyFileAnalyzes(t *testing.T) {
 	}
 }
 
-func TestSyncOverlaysRemovesAbsentFiles(t *testing.T) {
+func TestSnapshotWithOverlayIsIsolated(t *testing.T) {
 	root := writeProject(t, map[string]string{
 		"main.ard": "fn main() {\n}\n",
+		"api.ard":  "let disk_value = 0\n",
 	})
 	engine := NewEngine(root)
 	ws := NewWorkspace(engine)
-	stale := filepath.Join(root, "stale.ard")
-	keep := filepath.Join(root, "main.ard")
+	mainPath := filepath.Join(root, "main.ard")
+	apiPath := filepath.Join(root, "api.ard")
+	ws.SetOverlay(apiPath, "let api_overlay = 1\n")
+	base := ws.Snapshot()
+	synthetic := base.WithOverlay(mainPath, "let synthetic = 2\n")
+	ws.SetOverlay(apiPath, "let later_workspace = 3\n")
 
-	ws.SetOverlay(stale, "fn stale() {\n}\n")
-	ws.SetOverlay(keep, "fn main() {\n}\n")
-
-	rev := ws.SyncOverlays(map[string]string{keep: "fn main() {\n}\n"})
-	snap := ws.Snapshot()
-	if _, ok := snap.overlays[stale]; ok {
-		t.Fatal("stale overlay survived authoritative sync")
+	for _, test := range []struct {
+		name string
+		snap *Snapshot
+		path string
+		want string
+	}{
+		{name: "synthetic target", snap: synthetic, path: mainPath, want: "let synthetic = 2\n"},
+		{name: "synthetic sibling", snap: synthetic, path: apiPath, want: "let api_overlay = 1\n"},
+		{name: "base target", snap: base, path: mainPath, want: "fn main() {\n}\n"},
+		{name: "base sibling", snap: base, path: apiPath, want: "let api_overlay = 1\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			content, err := test.snap.Content(test.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(content) != test.want {
+				t.Fatalf("content = %q, want %q", content, test.want)
+			}
+		})
 	}
-	// A second identical sync must not bump the revision.
-	if again := ws.SyncOverlays(map[string]string{keep: "fn main() {\n}\n"}); again != rev {
-		t.Fatalf("no-op sync bumped revision %d -> %d", rev, again)
+	if synthetic.Revision() != base.Revision() {
+		t.Fatalf("synthetic revision = %d, want base revision %d", synthetic.Revision(), base.Revision())
 	}
 }
 

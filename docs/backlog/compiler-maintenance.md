@@ -128,21 +128,24 @@ Bounded outcome:
 
 ## COMP-005: Complete LSP cancellation and invalidation
 
-Every document change schedules diagnostics for every open document. Running
-diagnostics previously used a background context, semantic requests
-resynchronize every overlay, and concurrent cache misses may duplicate complete
-checks.
+Every document change still schedules diagnostics for every open document.
+Before this work, running diagnostics used a background context and semantic
+requests resynchronized every overlay. Concurrent cache misses may still
+duplicate complete checks.
 
 **Status:** in progress. Superseded per-document diagnostic jobs now cancel
 their debounce timer or running analysis, propagate that context through the
 snapshot engine, and exit without publishing cancellation as an analysis error.
-Broad scheduling remains in place until reverse dependencies can identify the
+The analysis workspace now owns overlays incrementally, with document metadata
+and overlay transitions synchronized for coherent snapshots. Synthetic
+completion and signature analysis derives from one immutable workspace snapshot.
+Broad scheduling remains in place until reverse dependencies can identify
 affected open documents safely.
 
 Bounded outcome:
 
 - [x] Cancel superseded per-document diagnostic work.
-- [ ] Make the analysis workspace authoritative for incremental overlay updates.
+- [x] Make the analysis workspace authoritative for incremental overlay updates.
 - [ ] Deduplicate concurrent checks for one content signature.
 - [ ] Track reverse dependencies and schedule only affected open documents.
 

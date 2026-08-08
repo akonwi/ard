@@ -47,6 +47,10 @@ type Server struct {
 	conn        jsonrpc2.Conn
 	projectRoot string
 
+	// documentStateMu makes DocumentCache metadata and analysis workspace
+	// overlays transition as one state for concurrent snapshot capture.
+	documentStateMu sync.Mutex
+
 	engineMu  sync.Mutex
 	engine    *analysis.Engine
 	workspace *analysis.Workspace
@@ -437,6 +441,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
 
+	s.documentStateMu.Lock()
 	s.cache.Open(
 		params.TextDocument.URI,
 		string(params.TextDocument.LanguageID),
@@ -444,6 +449,7 @@ func (s *Server) handleDidOpen(ctx context.Context, reply jsonrpc2.Replier, req 
 		params.TextDocument.Text,
 	)
 	s.syncOverlay(params.TextDocument.URI, params.TextDocument.Text)
+	s.documentStateMu.Unlock()
 	s.scheduleDiagnosticsForOpenDocuments()
 
 	return reply(ctx, nil, nil)
@@ -455,16 +461,23 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
 
+	s.documentStateMu.Lock()
+	var changeErr error
 	if len(params.ContentChanges) > 0 {
 		doc := s.cache.Get(params.TextDocument.URI)
 		if doc != nil {
 			updated, err := applyDocumentChanges(doc.Text, params.ContentChanges)
 			if err != nil {
-				return reply(ctx, nil, fmt.Errorf("invalid document change: %w", err))
+				changeErr = err
+			} else {
+				s.cache.Update(params.TextDocument.URI, params.TextDocument.Version, updated)
+				s.syncOverlay(params.TextDocument.URI, updated)
 			}
-			s.cache.Update(params.TextDocument.URI, params.TextDocument.Version, updated)
-			s.syncOverlay(params.TextDocument.URI, updated)
 		}
+	}
+	s.documentStateMu.Unlock()
+	if changeErr != nil {
+		return reply(ctx, nil, fmt.Errorf("invalid document change: %w", changeErr))
 	}
 
 	s.scheduleDiagnosticsForOpenDocuments()
@@ -482,8 +495,10 @@ func (s *Server) handleDidClose(ctx context.Context, reply jsonrpc2.Replier, req
 		return reply(ctx, nil, fmt.Errorf("%s: %w", jsonrpc2.ErrParse, err))
 	}
 
+	s.documentStateMu.Lock()
 	s.cache.Close(params.TextDocument.URI)
 	s.dropOverlay(params.TextDocument.URI)
+	s.documentStateMu.Unlock()
 	s.scheduleDiagnostics(params.TextDocument.URI)
 	s.scheduleDiagnosticsForOpenDocuments()
 

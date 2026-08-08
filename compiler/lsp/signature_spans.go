@@ -22,16 +22,9 @@ func (s *Server) signatureHelpFromSpans(ctx context.Context, docURI uri.URI, sou
 	// Complete calls analyze as-is; in-progress calls (unbalanced parens or
 	// a dangling comma) need the legacy paren-patching to parse. Patching a
 	// valid call would corrupt it, so try the plain source first.
-	ws := s.workspaceFor(filePath)
-	scratch := analysis.NewWorkspace(ws.Engine())
-	for _, doc := range s.cache.Snapshot() {
-		if p, err := filePathFromURI(doc.URI); err == nil && p != filePath {
-			scratch.SetOverlay(p, doc.Text)
-		}
-	}
+	base := s.workspaceSnapshotFor(filePath)
 	analyzeWith := func(text string, allowPartial bool) *analysis.FileAnalysis {
-		scratch.SetOverlay(filePath, text)
-		fa, err := scratch.Snapshot().AnalyzeEphemeral(ctx, filePath)
+		fa, err := base.WithOverlay(filePath, text).AnalyzeEphemeral(ctx, filePath)
 		if err != nil || fa == nil || fa.Spans == nil {
 			return nil
 		}

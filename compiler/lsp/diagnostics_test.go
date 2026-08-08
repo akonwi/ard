@@ -307,7 +307,11 @@ func TestPublishDiagnosticsUsesImportedOverlayAndClearsAfterUpdate(t *testing.T)
 		t.Fatalf("overlay related information = %#v, want open api.ard line 2", related)
 	}
 
-	server.cache.Update(apiURI, 2, "fn greet(name: Int) {}\n")
+	updatedAPI := "fn greet(name: Int) {}\n"
+	server.documentStateMu.Lock()
+	server.cache.Update(apiURI, 2, updatedAPI)
+	server.syncOverlay(apiURI, updatedAPI)
+	server.documentStateMu.Unlock()
 	server.publishDiagnostics(context.Background(), mainURI)
 	second := conn.lastDiagnostics(t)
 	if len(second.Diagnostics) != 0 {
