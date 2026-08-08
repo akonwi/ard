@@ -12,6 +12,10 @@ Detailed feature design notes can continue to live near the relevant area, such 
 
 - [`go-interface-semantics.md`](./go-interface-semantics.md) records the Go type-system and runtime-interface behavior relevant to Ard interop.
 
+## Backlogs
+
+- [`backlog/compiler-maintenance.md`](./backlog/compiler-maintenance.md) tracks prioritized compiler performance, reliability, and technical-debt work.
+
 ## Adding an ADR
 
 1. Copy the structure from the existing ADRs.
