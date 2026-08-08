@@ -24,8 +24,10 @@ Statuses: `planned`, `in progress`, `completed`, or `deferred`.
 
 ## COMP-001: Cache checked embedded standard-library modules
 
-**Status:** implementation complete on `perf/cache-embedded-stdlib`; remains in
-progress until the change lands.
+**Tracking:** [PR #370](https://github.com/akonwi/ard/pull/370)
+
+**Status:** implementation complete with CI passing; remains in progress until
+PR #370 lands.
 
 Every normal checker invocation auto-imports six embedded modules. Each lookup
 previously read, parsed, and checked immutable embedded source again. An initial
