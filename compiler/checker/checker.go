@@ -6261,25 +6261,6 @@ func (c *Checker) createBoolMethod(subject Expression, methodName string) Expres
 }
 
 func (c *Checker) createListMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, loc parse.Location) Expression {
-	// A reference subject resolves list operations through its referent
-	// (ADR 0057).
-	subjectType := derefMutableRef(subject.Type())
-	var elemType Type
-	if listType, ok := subjectType.(*List); ok {
-		elemType = listType.of
-	} else if arrayType, ok := subjectType.(*FixedArray); ok {
-		elemType = arrayType.of
-	} else if foreign, ok := subjectType.(*ForeignType); ok && foreign.Elem != nil {
-		elemType = foreign.Elem
-	} else if foreign, ok := subjectType.(*ForeignType); ok {
-		if arrayType, ok := foreign.Underlying.(*FixedArray); ok {
-			elemType = arrayType.of
-		} else {
-			panic(fmt.Sprintf("List method on non-list type: %s", subjectType))
-		}
-	} else {
-		panic(fmt.Sprintf("List method on non-list type: %s", subjectType))
-	}
 	var kind ListMethodKind
 	switch methodName {
 	case "at":
@@ -6317,11 +6298,10 @@ func (c *Checker) createListMethod(subject Expression, methodName string, args [
 		}
 	}
 	return &ListMethod{
-		Subject:     subject,
-		Kind:        kind,
-		Args:        args,
-		ElementType: elemType,
-		fn:          fnDef,
+		Subject:    subject,
+		Kind:       kind,
+		Args:       args,
+		ReturnType: fnDef.ReturnType,
 	}
 }
 
@@ -6344,20 +6324,6 @@ func isMapMethodName(name string) bool {
 }
 
 func (c *Checker) createMapMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
-	// A reference subject resolves map operations through its referent
-	// (ADR 0057).
-	subjectType := derefMutableRef(subject.Type())
-	var keyType Type
-	var valueType Type
-	if mapType, ok := subjectType.(*Map); ok {
-		keyType = mapType.Key()
-		valueType = mapType.Value()
-	} else if foreign, ok := subjectType.(*ForeignType); ok && foreign.MapKey != nil && foreign.MapValue != nil {
-		keyType = foreign.MapKey
-		valueType = foreign.MapValue
-	} else {
-		panic(fmt.Sprintf("Map method on non-map type: %s", subjectType))
-	}
 	var kind MapMethodKind
 	switch methodName {
 	case "keys":
@@ -6376,17 +6342,14 @@ func (c *Checker) createMapMethod(subject Expression, methodName string, args []
 		panic(fmt.Sprintf("Unknown Map method: %s", methodName))
 	}
 	return &MapMethod{
-		Subject:   subject,
-		Kind:      kind,
-		Args:      args,
-		KeyType:   keyType,
-		ValueType: valueType,
-		fn:        fnDef,
+		Subject:    subject,
+		Kind:       kind,
+		Args:       args,
+		ReturnType: fnDef.ReturnType,
 	}
 }
 
 func (c *Checker) createMaybeMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef, loc parse.Location) Expression {
-	maybeType := derefMutableRef(subject.Type()).(*Maybe)
 	var kind MaybeMethodKind
 	switch methodName {
 	case "expect":
@@ -6424,14 +6387,11 @@ func (c *Checker) createMaybeMethod(subject Expression, methodName string, args 
 		Subject:    subject,
 		Kind:       kind,
 		Args:       args,
-		InnerType:  maybeType.Of(),
-		fn:         fnDef,
 		ReturnType: fnDef.ReturnType,
 	}
 }
 
 func (c *Checker) createResultMethod(subject Expression, methodName string, args []Expression, fnDef *FunctionDef) Expression {
-	resultType := subject.Type().(*Result)
 	var kind ResultMethodKind
 	switch methodName {
 	case "expect":
@@ -6455,9 +6415,6 @@ func (c *Checker) createResultMethod(subject Expression, methodName string, args
 		Subject:    subject,
 		Kind:       kind,
 		Args:       args,
-		OkType:     resultType.Val(),
-		ErrType:    resultType.Err(),
-		fn:         fnDef,
 		ReturnType: fnDef.ReturnType,
 	}
 }

@@ -524,33 +524,14 @@ const (
 )
 
 type ListMethod struct {
-	Subject     Expression
-	Kind        ListMethodKind
-	Args        []Expression
-	ElementType Type         // Pre-computed element type
-	fn          *FunctionDef // Function definition for return type resolution
+	Subject    Expression
+	Kind       ListMethodKind
+	Args       []Expression
+	ReturnType Type // Resolved from the specialized method signature; required.
 }
 
 func (m *ListMethod) Type() Type {
-	// Use function return type if available (handles generics properly)
-	if m.fn != nil {
-		return m.fn.ReturnType
-	}
-	// Fallback to computed type (for backwards compatibility)
-	switch m.Kind {
-	case ListAt:
-		return MakeMaybe(m.ElementType)
-	case ListPrepend, ListPush:
-		return MakeList(m.ElementType)
-	case ListSet:
-		return Bool
-	case ListSize:
-		return Int
-	case ListSort, ListSwap:
-		return Void
-	default:
-		return Void
-	}
+	return m.ReturnType
 }
 
 type MapMethodKind uint8
@@ -565,36 +546,14 @@ const (
 )
 
 type MapMethod struct {
-	Subject   Expression
-	Kind      MapMethodKind
-	Args      []Expression
-	KeyType   Type         // Pre-computed key type
-	ValueType Type         // Pre-computed value type
-	fn        *FunctionDef // Function definition for return type resolution
+	Subject    Expression
+	Kind       MapMethodKind
+	Args       []Expression
+	ReturnType Type // Resolved from the specialized method signature; required.
 }
 
 func (m *MapMethod) Type() Type {
-	// Use function return type if available (handles generics properly)
-	if m.fn != nil {
-		return m.fn.ReturnType
-	}
-	// Fallback to computed type (for backwards compatibility)
-	switch m.Kind {
-	case MapKeys:
-		return MakeList(m.KeyType)
-	case MapSize:
-		return Int
-	case MapGet:
-		return MakeMaybe(m.ValueType)
-	case MapSet:
-		return Void
-	case MapDelete:
-		return Void
-	case MapHas:
-		return Bool
-	default:
-		return Void
-	}
+	return m.ReturnType
 }
 
 type MaybeMethodKind uint8
@@ -614,28 +573,11 @@ type MaybeMethod struct {
 	Subject    Expression
 	Kind       MaybeMethodKind
 	Args       []Expression
-	InnerType  Type         // Pre-computed inner type
-	fn         *FunctionDef // Function definition for return type resolution
-	ReturnType Type         // Pre-computed by checker
+	ReturnType Type // Resolved from the specialized method signature; required.
 }
 
 func (m *MaybeMethod) Type() Type {
-	if m.ReturnType != nil {
-		return m.ReturnType
-	}
-	if m.fn != nil {
-		return m.fn.ReturnType
-	}
-	switch m.Kind {
-	case MaybeExpect, MaybeOr:
-		return m.InnerType
-	case MaybeIsNone, MaybeIsSome:
-		return Bool
-	case MaybeSet, MaybeClear:
-		return Void
-	default:
-		return Void
-	}
+	return m.ReturnType
 }
 
 type ResultMethodKind uint8
@@ -654,29 +596,11 @@ type ResultMethod struct {
 	Subject    Expression
 	Kind       ResultMethodKind
 	Args       []Expression
-	OkType     Type         // Pre-computed OK type
-	ErrType    Type         // Pre-computed Error type
-	fn         *FunctionDef // Function definition for return type resolution
-	ReturnType Type         // Pre-computed by checker
+	ReturnType Type // Resolved from the specialized method signature; required.
 }
 
 func (m *ResultMethod) Type() Type {
-	// Use function return type if available (handles generics properly)
-	if m.ReturnType != nil {
-		return m.ReturnType
-	}
-	if m.fn != nil {
-		return m.fn.ReturnType
-	}
-	// Fallback to computed type (for backwards compatibility)
-	switch m.Kind {
-	case ResultExpect, ResultOr:
-		return m.OkType
-	case ResultIsOk, ResultIsErr:
-		return Bool
-	default:
-		return Void
-	}
+	return m.ReturnType
 }
 
 type Negation struct {
