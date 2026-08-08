@@ -205,16 +205,18 @@ Bounded outcome:
 
 ## COMP-009: Retire checker-node fallback type rules
 
-Collection method nodes can derive return types both from resolved function
-signatures and from hard-coded method-kind switches. Production constructors
-already carry resolved signatures, so the fallback rules are a second source of
-truth that can drift from embedded standard-library declarations.
+**Status:** completed. List, map, maybe, and result method nodes now store the
+return type resolved from their specialized standard-library signature, and
+`Type()` returns only that value. The private function-definition references,
+hard-coded return-type switches, and element/key/value metadata used only by
+those fallbacks have been removed. Checker expectations now assert resolved
+method return types.
 
 Bounded outcome:
 
-- Require a resolved return type when constructing collection method nodes.
-- Migrate expected checker test nodes.
-- Remove fallback type switches and redundant precomputed fields where unused.
+- [x] Require a resolved return type when constructing collection method nodes.
+- [x] Migrate expected checker test nodes.
+- [x] Remove fallback type switches and redundant precomputed fields where unused.
 
 ## Profile-guided watchlist
 

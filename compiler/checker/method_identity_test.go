@@ -448,3 +448,24 @@ func TestExplicitGenericStructCanUseTypeParamOnlyInMethods(t *testing.T) {
 		t.Fatalf("checker diagnostics: %v", c.Diagnostics())
 	}
 }
+
+func TestCollectionMethodNodesUseResolvedReturnType(t *testing.T) {
+	resolved := MakeList(Str)
+	tests := []struct {
+		name   string
+		method Expression
+	}{
+		{name: "list", method: &ListMethod{Kind: ListSize, ReturnType: resolved}},
+		{name: "map", method: &MapMethod{Kind: MapSize, ReturnType: resolved}},
+		{name: "maybe", method: &MaybeMethod{Kind: MaybeIsSome, ReturnType: resolved}},
+		{name: "result", method: &ResultMethod{Kind: ResultIsOk, ReturnType: resolved}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.method.Type(); got == nil || !got.equal(resolved) {
+				t.Fatalf("Type() = %v, want resolved return type %s", got, resolved)
+			}
+		})
+	}
+}
