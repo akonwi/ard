@@ -79,10 +79,24 @@ type Signature struct {
 	ReturnReference bool
 }
 
+// ABIParamMode describes the host ABI projection applied to one canonical AIR
+// parameter. Reference identity remains in the parameter TypeID; the mode only
+// records boundary behavior that cannot be derived from that identity.
+type ABIParamMode uint8
+
+const (
+	// ABIParamExact passes the canonical AIR value representation unchanged.
+	ABIParamExact ABIParamMode = iota
+	// ABIParamDescriptorValue requires a TypeReference to a slice/map
+	// descriptor, but passes the current descriptor value to the host ABI.
+	ABIParamDescriptorValue
+)
+
 type Param struct {
 	Name    string
 	Type    TypeID
 	Mutable bool
+	ABI     ABIParamMode
 }
 
 type Local struct {

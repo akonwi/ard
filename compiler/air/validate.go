@@ -239,11 +239,39 @@ func validateSignature(program *Program, sig Signature) error {
 		if !validTypeID(program, param.Type) {
 			return fmt.Errorf("parameter %s has invalid type %d", param.Name, param.Type)
 		}
+		if err := validateABIParamMode(program, param.Type, param.ABI); err != nil {
+			return fmt.Errorf("parameter %s: %w", param.Name, err)
+		}
 	}
 	if !validTypeID(program, sig.Return) {
 		return fmt.Errorf("signature has invalid return type %d", sig.Return)
 	}
 	return nil
+}
+
+func validateABIParamMode(program *Program, typeID TypeID, mode ABIParamMode) error {
+	if mode > ABIParamDescriptorValue {
+		return fmt.Errorf("invalid ABI parameter mode %d", mode)
+	}
+	if mode != ABIParamDescriptorValue {
+		return nil
+	}
+	if !validTypeID(program, typeID) {
+		return fmt.Errorf("descriptor-value ABI has invalid type %d", typeID)
+	}
+	reference := program.Types[typeID-1]
+	if reference.Kind != TypeReference || !validTypeID(program, reference.Elem) {
+		return fmt.Errorf("descriptor-value ABI requires a reference type, got %s", reference.Name)
+	}
+	referent := program.Types[reference.Elem-1]
+	if referent.Kind == TypeList || referent.Kind == TypeMap {
+		return nil
+	}
+	if referent.Kind == TypeForeignType && !referent.ForeignPointer &&
+		(referent.Elem != NoType || referent.Key != NoType && referent.Value != NoType) {
+		return nil
+	}
+	return fmt.Errorf("descriptor-value ABI requires a slice or map referent, got %s", referent.Name)
 }
 
 func validateBlock(program *Program, fn Function, block Block) error {
@@ -409,19 +437,33 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return fmt.Errorf("trait reference projection impl %d does not match source referent", expr.Impl)
 		}
 	}
-	if len(expr.ForeignArgModes) > 0 {
+	if len(expr.ForeignArgModes) > 0 || len(expr.ForeignArgABI) > 0 {
 		argCount := len(expr.Args)
+		argTypes := make([]TypeID, argCount)
+		for i := range expr.Args {
+			argTypes[i] = expr.Args[i].Type
+		}
 		if expr.Kind == ExprForeignMethodValue && validTypeID(program, expr.Type) {
 			if functionType := program.Types[expr.Type-1]; functionType.Kind == TypeFunction {
 				argCount = len(functionType.Params)
+				argTypes = functionType.Params
 			}
 		}
 		if len(expr.ForeignArgModes) != argCount {
 			return fmt.Errorf("foreign expression has %d arg modes for %d args", len(expr.ForeignArgModes), argCount)
 		}
-		for _, mode := range expr.ForeignArgModes {
+		if len(expr.ForeignArgABI) != argCount {
+			return fmt.Errorf("foreign expression has %d ABI parameter modes for %d args", len(expr.ForeignArgABI), argCount)
+		}
+		for i, mode := range expr.ForeignArgABI {
 			if mode > ForeignArgDescriptorValue {
 				return fmt.Errorf("foreign expression has invalid arg mode %d", mode)
+			}
+			if expr.ForeignArgModes[i] != mode {
+				return fmt.Errorf("foreign expression arg %d has contradictory ABI modes %d and %d", i, expr.ForeignArgModes[i], mode)
+			}
+			if err := validateABIParamMode(program, argTypes[i], mode); err != nil {
+				return fmt.Errorf("foreign expression arg %d: %w", i, err)
 			}
 		}
 	}

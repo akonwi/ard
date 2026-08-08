@@ -419,7 +419,7 @@ func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (Fu
 		if err != nil {
 			return NoFunction, err
 		}
-		params[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable}
+		params[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable, ABI: lowerABIParamMode(param)}
 	}
 	returnType, err := l.internType(def.ReturnType)
 	if err != nil {
@@ -668,16 +668,21 @@ func (l *lowerer) declareClosureFunction(module ModuleID, keyName string, def *c
 	return id, nil
 }
 
-func lowerForeignArgModes(params []checker.Parameter, count int) []ForeignArgMode {
-	modes := make([]ForeignArgMode, count)
+func lowerABIParamMode(param checker.Parameter) ABIParamMode {
+	if param.ForeignABI == checker.ForeignParameterDescriptorValue {
+		return ABIParamDescriptorValue
+	}
+	return ABIParamExact
+}
+
+func lowerForeignArgModes(params []checker.Parameter, count int) []ABIParamMode {
+	modes := make([]ABIParamMode, count)
 	for index := 0; index < count && len(params) > 0; index++ {
 		paramIndex := index
 		if paramIndex >= len(params) {
 			paramIndex = len(params) - 1
 		}
-		if params[paramIndex].ForeignABI == checker.ForeignParameterDescriptorValue {
-			modes[index] = ForeignArgDescriptorValue
-		}
+		modes[index] = lowerABIParamMode(params[paramIndex])
 	}
 	return modes
 }
@@ -722,8 +727,13 @@ func (l *lowerer) declareGoAdapterFunction(module ModuleID, value *checker.Forei
 		locals[i] = Local{ID: LocalID(i), Name: name, Type: paramType}
 		loads[i] = Expr{Kind: ExprLoadLocal, Type: paramType, Local: LocalID(i)}
 	}
+	var foreignParams []checker.Parameter
+	if def, ok := value.ValueType.(*checker.FunctionDef); ok {
+		foreignParams = def.Parameters
+	}
 	foreignCall := func(args []Expr) *Expr {
-		return &Expr{Kind: ExprForeignCall, Type: typeInfo.Return, ForeignTarget: value.Target, ForeignNamespace: value.Namespace, ForeignQualifier: value.Qualifier, ForeignSymbol: value.Symbol, ForeignResultShape: lowerForeignResultShape(value.ForeignResultShape), Args: args}
+		argABI := lowerForeignArgModes(foreignParams, len(args))
+		return &Expr{Kind: ExprForeignCall, Type: typeInfo.Return, ForeignTarget: value.Target, ForeignNamespace: value.Namespace, ForeignQualifier: value.Qualifier, ForeignSymbol: value.Symbol, ForeignResultShape: lowerForeignResultShape(value.ForeignResultShape), ForeignArgModes: argABI, ForeignArgABI: argABI, Args: args}
 	}
 	var result *Expr
 	if value.VariadicAdapter {
@@ -1770,7 +1780,7 @@ func (l *lowerer) declareMethodFunction(module ModuleID, owner checker.Type, tra
 		if err != nil {
 			return NoFunction, err
 		}
-		params = append(params, Param{Name: param.Name, Type: typeID, Mutable: param.Mutable})
+		params = append(params, Param{Name: param.Name, Type: typeID, Mutable: param.Mutable, ABI: lowerABIParamMode(param)})
 	}
 	returnType, err := l.internType(def.ReturnType)
 	if err != nil {
@@ -1837,7 +1847,7 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 		if err != nil {
 			return NoFunction, err
 		}
-		params = append(params, Param{Name: param.Name, Type: typeID, Mutable: param.Mutable})
+		params = append(params, Param{Name: param.Name, Type: typeID, Mutable: param.Mutable, ABI: lowerABIParamMode(param)})
 	}
 	if !validTypeID(&l.program, returnType) {
 		var err error
@@ -1893,7 +1903,7 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 		if err != nil {
 			return NoFunction, err
 		}
-		params = append(params, Param{Name: param.Name, Type: typeID, Mutable: param.Mutable})
+		params = append(params, Param{Name: param.Name, Type: typeID, Mutable: param.Mutable, ABI: lowerABIParamMode(param)})
 	}
 	if !validTypeID(&fl.l.program, returnType) {
 		var err error
@@ -2050,7 +2060,7 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 			fl.l.defParamOwner = prevOwner
 			return NoFunction, nil, err
 		}
-		methodParams = append(methodParams, Param{Name: p.Name, Type: tid, Mutable: p.Mutable})
+		methodParams = append(methodParams, Param{Name: p.Name, Type: tid, Mutable: p.Mutable, ABI: lowerABIParamMode(p)})
 	}
 	returnType, err := fl.l.internType(orig.ReturnType)
 	fl.l.defParams = prev
@@ -2132,7 +2142,7 @@ func signatureForCallWithInterner(call *checker.FunctionCall, intern func(checke
 			if err != nil {
 				return Signature{}, err
 			}
-			params[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable}
+			params[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable, ABI: lowerABIParamMode(param)}
 		}
 		returnType, err := intern(call.Type())
 		if err != nil {
@@ -2207,12 +2217,7 @@ func (l *lowerer) internGenericStructDef(typ *checker.StructDef) (TypeID, error)
 	info.Fields = make([]FieldInfo, len(fieldNames))
 	for i, name := range fieldNames {
 		ft := typ.Fields[name]
-		mut := false
-		if ref, ok := ft.(*checker.MutableRef); ok {
-			ft = ref.Of()
-			mut = true
-		}
-		ftid, err := l.internType(ft)
+		ftid, mut, err := l.internStructFieldType(ft, l.internType)
 		if err != nil {
 			l.defParams = prev
 			l.defParamOwner = prevOwner
@@ -2715,7 +2720,7 @@ func signatureForFunctionWithInterner(params []checker.Parameter, returnType che
 		if err != nil {
 			return Signature{}, err
 		}
-		loweredParams[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable}
+		loweredParams[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable, ABI: lowerABIParamMode(param)}
 	}
 	returnID, err := intern(returnType)
 	if err != nil {
@@ -2915,7 +2920,7 @@ func signaturesEqual(left, right Signature) bool {
 		return false
 	}
 	for i := range left.Params {
-		if left.Params[i].Type != right.Params[i].Type || left.Params[i].Mutable != right.Params[i].Mutable {
+		if left.Params[i].Type != right.Params[i].Type || left.Params[i].Mutable != right.Params[i].Mutable || left.Params[i].ABI != right.Params[i].ABI {
 			return false
 		}
 	}
@@ -4515,11 +4520,11 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		var argModes []ForeignArgMode
+		var argModes []ABIParamMode
 		if methodDef, ok := e.Type().(*checker.FunctionDef); ok {
 			argModes = lowerForeignArgModes(methodDef.Parameters, len(methodDef.Parameters))
 		}
-		return &Expr{Kind: ExprForeignMethodValue, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: argModes}, nil
+		return &Expr{Kind: ExprForeignMethodValue, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: argModes, ForeignArgABI: argModes}, nil
 	case *checker.ForeignMethodCall:
 		target, err := fl.lowerExpr(e.Subject)
 		if err != nil {
@@ -4544,11 +4549,11 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			args[i] = *lowered
 		}
-		var argModes []ForeignArgMode
+		var argModes []ABIParamMode
 		if methodDef != nil {
 			argModes = lowerForeignArgModes(methodDef.Parameters, len(args))
 		}
-		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: argModes, Args: args}, nil
+		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: argModes, ForeignArgABI: argModes, Args: args}, nil
 	case *checker.UnsafeCast:
 		value, err := fl.lowerExprWithExpected(e.Value, fl.l.mustIntern(checker.Any))
 		if err != nil {
@@ -4629,7 +4634,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			typeArgs = append(typeArgs, argID)
 		}
-		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: lowerForeignArgModes(fnDef.Parameters, len(args)), Args: args}, nil
+		argABI := lowerForeignArgModes(fnDef.Parameters, len(args))
+		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: argABI, ForeignArgABI: argABI, Args: args}, nil
 	case *checker.ModuleFunctionCall:
 		if kind, ok := resultConstructorKind(e); ok {
 			return fl.lowerResultConstructor(kind, typeID, e)
@@ -6903,7 +6909,7 @@ func signatureKey(signature Signature) string {
 		if param.Mutable {
 			mut = "mut "
 		}
-		key += fmt.Sprintf("%s%d", mut, param.Type)
+		key += fmt.Sprintf("%s%d:%d", mut, param.Type, param.ABI)
 	}
 	key += fmt.Sprintf(")->%d:%t", signature.Return, signature.ReturnReference)
 	return key

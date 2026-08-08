@@ -1113,6 +1113,7 @@ func copyFunctionWithTypeVarMap(fnDef *FunctionDef, typeVarMap map[string]*TypeV
 			Name:       param.Name,
 			Type:       copyTypeWithTypeVarMap(param.Type, typeVarMap),
 			Mutable:    param.Mutable,
+			ForeignABI: param.ForeignABI,
 			Loc:        param.Loc,
 			declaredAt: param.declaredAt,
 			Variadic:   param.Variadic,

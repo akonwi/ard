@@ -2423,7 +2423,14 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 				}.build())
 				valid = false
 			}
-			params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable, Loc: param.GetLocation(), declaredAt: c.sourceSpan(param.GetLocation())}
+			params[i] = Parameter{
+				Name:       param.Name,
+				Type:       paramType,
+				Mutable:    paramMutable,
+				ForeignABI: interfaceMethod.Parameters[i].ForeignABI,
+				Loc:        param.GetLocation(),
+				declaredAt: c.sourceSpan(param.GetLocation()),
+			}
 		}
 		returnType := Type(Void)
 		if method.ReturnType != nil {

@@ -192,11 +192,13 @@ const (
 	ExprTryMaybe
 )
 
-type ForeignArgMode uint8
+// ForeignArgMode is retained as a migration alias while foreign-expression
+// consumers move to the normalized parameter ABI classification.
+type ForeignArgMode = ABIParamMode
 
 const (
-	ForeignArgExact ForeignArgMode = iota
-	ForeignArgDescriptorValue
+	ForeignArgExact           = ABIParamExact
+	ForeignArgDescriptorValue = ABIParamDescriptorValue
 )
 
 type ForeignResultShape uint8
@@ -256,6 +258,7 @@ type Expr struct {
 	Observational      bool
 	ForeignResultShape ForeignResultShape
 	ForeignArgModes    []ForeignArgMode
+	ForeignArgABI      []ABIParamMode
 	TypeArgs           []TypeID
 	Impl               ImplID
 	Trait              TraitID

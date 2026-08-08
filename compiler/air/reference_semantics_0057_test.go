@@ -203,6 +203,37 @@ func TestADR0057LowersReferenceShapedCompoundTypes(t *testing.T) {
 	}
 }
 
+func TestADR0057GenericDefinitionPreservesReferenceFieldIdentity(t *testing.T) {
+	program := lowerSource(t, `
+		struct Holder<$T> { value: mut $T }
+		fn keep(value: Holder<Int>) Holder<Int> { value }
+	`)
+
+	for _, typ := range program.Types {
+		if typ.Name != "Holder" || len(typ.TypeParams) == 0 {
+			continue
+		}
+		if len(typ.Fields) != 1 || typeKind(t, program, typ.Fields[0].Type) != TypeReference {
+			t.Fatalf("generic Holder fields = %#v, want canonical TypeReference", typ.Fields)
+		}
+		reference := testTypeInfo(t, program, typ.Fields[0].Type)
+		if typeKind(t, program, reference.Elem) != TypeParam {
+			t.Fatalf("generic Holder reference = %#v, want TypeParam referent", reference)
+		}
+		return
+	}
+	t.Fatal("generic Holder definition not found")
+}
+
+func TestADR0057NormalizesForeignDescriptorParameterABI(t *testing.T) {
+	if got := lowerABIParamMode(checker.Parameter{}); got != ABIParamExact {
+		t.Fatalf("ordinary parameter ABI = %v, want exact", got)
+	}
+	if got := lowerABIParamMode(checker.Parameter{ForeignABI: checker.ForeignParameterDescriptorValue}); got != ABIParamDescriptorValue {
+		t.Fatalf("descriptor parameter ABI = %v, want descriptor value", got)
+	}
+}
+
 func TestADR0057PreservesReferenceHandlesAcrossFieldsCallsAndReturns(t *testing.T) {
 	program := lowerSource(t, `
 		struct Box { value: Int }
