@@ -319,7 +319,7 @@ func TestStructLiteralDiagnosticsAreStructured(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if diagnostic.Message != tt.legacyMessage || len(diagnostic.Secondary) != tt.secondaries {
@@ -422,7 +422,7 @@ func TestGenericGoStructInferenceDiagnosticsAreStructured(t *testing.T) {
 
 func TestGenericGoFunctionValueDiagnosticIsStructured(t *testing.T) {
 	result := parse.Parse([]byte("use go:slices\nlet sort = slices::Sort\n"), "main.ard")
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeInvalidGoFunctionValue)
 	if diagnostic.Message != "Generic Go function slices::Sort cannot be referenced as a value; wrap it in a closure so its type parameters are fixed" {
@@ -1039,7 +1039,7 @@ func TestImplementationDiagnosticsAreStructured(t *testing.T) {
 			if len(result.Errors) > 0 {
 				t.Fatalf("parse errors: %v", result.Errors)
 			}
-			c := checker.New("main.ard", result.Program, nil)
+			c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
 			c.Check()
 			diagnostic := requireDiagnosticCode(t, c.Diagnostics(), tt.code)
 			if tt.legacyMessage != "" && diagnostic.Message != tt.legacyMessage {
@@ -1200,7 +1200,7 @@ func TestWrongFunctionTypeArgumentCountHasTruthfulLabel(t *testing.T) {
 func TestGoNamedArgumentHasStructuredDiagnostic(t *testing.T) {
 	result := parse.Parse([]byte("use go:fmt\nfmt::Println(value: \"hello\")\n"), "main.ard")
 	call := result.Program.Statements[0].(*parse.StaticFunction)
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeNamedArgumentsUnsupported)
 	if diagnostic.Primary.Span.Location != call.Function.Args[0].GetLocation() || diagnostic.Message != "Go function calls do not support named arguments" {
@@ -1428,7 +1428,7 @@ func TestGoConstantAssignmentHasStructuredDiagnostic(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
 	c.Check()
 	diagnostic := requireDiagnosticCode(t, c.Diagnostics(), checker.DiagnosticCodeGoConstantAssignment)
 	if diagnostic.Message != "Cannot assign to Go constant: time::Nanosecond" || diagnostic.Primary.Message != "Go constants are not assignable" || len(diagnostic.Secondary) != 0 {
@@ -1530,7 +1530,7 @@ func TestGoFunctionArgumentOmitsSyntheticParameterLabel(t *testing.T) {
 	if len(result.Errors) > 0 {
 		t.Fatalf("parse errors: %v", result.Errors)
 	}
-	c := checker.New("main.ard", result.Program, nil)
+	c := checker.New("main.ard", result.Program, nil, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
 	c.Check()
 	if len(c.Diagnostics()) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", c.Diagnostics())

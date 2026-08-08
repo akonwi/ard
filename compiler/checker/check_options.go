@@ -10,6 +10,8 @@ type CheckOptions struct {
 	// ModulePath overrides the checked module identity while keeping filePath for diagnostics.
 	ModulePath string
 	Target     TargetInfo
+	// GoResolver overrides the project-aware go/packages resolver created for
+	// checked programs that import Go.
 	GoResolver GoPackageResolver
 	// RecordSpans makes the checker record a position-indexed table of
 	// resolved source spans for tooling (see SpanIndex). Off for normal

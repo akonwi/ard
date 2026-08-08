@@ -18,7 +18,7 @@ Statuses: `planned`, `in progress`, `completed`, or `deferred`.
 | COMP-004 | P0 | completed | Contain module imports within package roots and propagate filesystem errors |
 | COMP-005 | P1 | completed | Complete LSP cancellation and dependency-aware invalidation |
 | COMP-006 | P1 | completed | Stop silently returning incomplete project-wide references and renames |
-| COMP-007 | P2 | planned | Remove the fallback Go importer |
+| COMP-007 | P2 | completed | Remove the fallback Go importer |
 | COMP-008 | P2 | planned | Consolidate unsafe-catch result analysis |
 | COMP-009 | P2 | planned | Retire checker-node fallback type rules |
 
@@ -172,15 +172,21 @@ Bounded outcome:
 
 ## COMP-007: Remove the fallback Go importer
 
-Checkers created without options use `go/importer`, while production compilation
-uses the primed `go/packages` resolver. This leaves tests and production with
-different build-context and type-universe behavior.
+**Status:** completed. A checker without an explicit Go resolver now creates the
+same project-aware `GoPackagesResolver` used by production, configured with the
+module root, build tags, and dependency checkout roots before priming the full
+import closure. Recursive module checks reuse that resolver. Starting a later
+default session invalidates checked user modules that could retain foreign types
+from the prior `go/types` universe, while explicit resolver owners retain their
+existing cache lifecycle. Standard-library-heavy checker tests share one
+pre-primed resolver to avoid repeated `go/packages` loads.
 
 Bounded outcome:
 
-- Give direct checker tests a shared primed resolver fixture.
-- Require a resolver whenever a checked program imports Go.
-- Delete `ImporterGoPackageResolver` and its fallback branch.
+- [x] Give direct checker tests a shared primed resolver fixture.
+- [x] Default Go-importing checks to a project-aware, primed resolver.
+- [x] Preserve one Go type universe across recursive and cached module checks.
+- [x] Delete `ImporterGoPackageResolver` and its fallback branch.
 
 ## COMP-008: Consolidate unsafe-catch result analysis
 

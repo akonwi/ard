@@ -697,11 +697,7 @@ func (c *Checker) Check() {
 		seenImportAliases[imp.Name] = imp.PathLocation
 
 		if imp.Kind == parse.ImportKindGo {
-			resolver := c.options.GoResolver
-			if resolver == nil {
-				resolver = ImporterGoPackageResolver{}
-			}
-			pkg, err := resolver.ResolveGoPackage(imp.Path)
+			pkg, err := c.options.GoResolver.ResolveGoPackage(imp.Path)
 			if err != nil {
 				c.addDiagnostic(goImportResolutionDiagnostic{
 					Path:  imp.Path,
@@ -5098,24 +5094,56 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 	}
 }
 
-// primeGoResolver loads the check's whole Go import closure into the
-// resolver's shared session before any import binds (ADR 0044). Priming is
-// idempotent — drivers that already primed (frontend, test loader) resolve
-// everything from cache — and it makes directly constructed checkers
+// primeGoResolver loads the check's whole Go import closure into one
+// go/packages session before any import binds (ADR 0044). When a caller did
+// not provide a resolver, the checker builds the same project-aware resolver
+// used by production drivers. Priming is idempotent — drivers that already
+// primed resolve everything from cache — and directly constructed checkers
 // (tests, tools) share one go/types universe too. A prime error means the
-// pre-scan missed a path, which is a compiler bug; when the miss lives only
-// in a transitive module, the sub-module's own check surfaces it at its
-// `use` statement instead.
+// pre-scan missed a path, which is a compiler bug; when the miss lives only in
+// a transitive module, the sub-module's own check surfaces it at its `use`
+// statement instead.
 //
 // The type assertion is part of the contract: the LSP wraps its resolver
 // (lockedGoResolver), intentionally opting out of per-check auto-prime
 // because the engine owns session priming with the workspace-wide union.
 func (c *Checker) primeGoResolver() {
 	resolver, ok := c.options.GoResolver.(*GoPackagesResolver)
-	if !ok || resolver == nil {
+	if ok && resolver == nil {
+		// A typed nil carries a non-nil interface value; treat it like an
+		// omitted resolver rather than panicking during import resolution.
+		c.options.GoResolver = nil
+	} else if c.options.GoResolver != nil && !ok {
 		return
 	}
 	paths := CollectGoImportPaths(c.moduleResolver, GoImportScanEntry{Program: c.input, ModulePath: c.modulePath})
+	if len(paths) == 0 {
+		return
+	}
+	if resolver == nil {
+		projectRoot := filepath.Dir(c.filePath)
+		var buildTags []string
+		var projectInfo *ProjectInfo
+		if c.moduleResolver != nil {
+			projectInfo = c.moduleResolver.GetProjectInfo()
+			if projectInfo != nil {
+				if projectInfo.RootPath != "" {
+					projectRoot = projectInfo.RootPath
+				}
+				buildTags = projectInfo.Go.BuildTags
+			}
+		}
+		resolver = NewGoPackagesResolver(projectRoot, buildTags)
+		resolver.DependencyModuleRoots = DependencyGoModuleRoots(projectInfo)
+		c.options.GoResolver = resolver
+		if c.moduleResolver != nil {
+			// Checked modules may retain foreign types from an earlier default
+			// resolver. A fresh Go session has a different go/types universe,
+			// so those modules must be checked again in this session. Explicit
+			// resolver owners retain their cache and session lifecycle.
+			c.moduleResolver.moduleCache = map[string]Module{}
+		}
+	}
 	// A coverage miss is reported by the normal import-resolution pass below,
 	// which has the exact importing path and avoids duplicate diagnostics. A
 	// transitive-only miss is reported when that module is checked.
