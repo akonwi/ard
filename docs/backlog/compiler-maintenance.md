@@ -190,15 +190,18 @@ Bounded outcome:
 
 ## COMP-008: Consolidate unsafe-catch result analysis
 
-Separate recursive walkers collect successful and error result types. They
-duplicate alias tracking and enumeration of every checked expression and match
-form, making traversal support easy to update on only one side.
+**Status:** completed. Unsafe-catch validation now collects successful and error
+result value types in one traversal. Each alias stores the combined analysis,
+and branch-local walks clone that single environment so updates cannot leak
+between paths. Focused tests cover direct results, canonical constructors,
+user-defined result modules, aliases, and every supported branching expression
+family.
 
 Bounded outcome:
 
-- Use one traversal that returns both successful and error value types.
-- Preserve one alias environment per path.
-- Add exhaustive tests for expression families handled by the analysis.
+- [x] Use one traversal that returns both successful and error value types.
+- [x] Preserve one alias environment per path.
+- [x] Add exhaustive tests for expression families handled by the analysis.
 
 ## COMP-009: Retire checker-node fallback type rules
 

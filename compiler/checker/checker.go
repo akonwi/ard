@@ -4413,13 +4413,23 @@ func parseExpressionContainsBreak(expr parse.Expression) bool {
 	return false
 }
 
-func unsafeCatchOkValueTypes(block *Block) []Type {
-	return unsafeCatchOkValueTypesInBlock(block, nil)
+type unsafeCatchResultValueTypes struct {
+	ok  []Type
+	err []Type
 }
 
-func unsafeCatchOkValueTypesInBlock(block *Block, aliases map[string][]Type) []Type {
+func (t *unsafeCatchResultValueTypes) append(other unsafeCatchResultValueTypes) {
+	t.ok = append(t.ok, other.ok...)
+	t.err = append(t.err, other.err...)
+}
+
+func unsafeCatchValueTypes(block *Block) unsafeCatchResultValueTypes {
+	return unsafeCatchValueTypesInBlock(block, nil)
+}
+
+func unsafeCatchValueTypesInBlock(block *Block, aliases map[string]unsafeCatchResultValueTypes) unsafeCatchResultValueTypes {
 	if block == nil {
-		return nil
+		return unsafeCatchResultValueTypes{}
 	}
 	finalExprIndex := -1
 	for i := len(block.Stmts) - 1; i >= 0; i-- {
@@ -4429,7 +4439,7 @@ func unsafeCatchOkValueTypesInBlock(block *Block, aliases map[string][]Type) []T
 		}
 	}
 	if finalExprIndex == -1 {
-		return nil
+		return unsafeCatchResultValueTypes{}
 	}
 	aliases = cloneUnsafeCatchTypeAliases(aliases)
 	for _, stmt := range block.Stmts[:finalExprIndex] {
@@ -4437,30 +4447,30 @@ func unsafeCatchOkValueTypesInBlock(block *Block, aliases map[string][]Type) []T
 			continue
 		}
 		if stmt.Break {
-			aliases = map[string][]Type{}
+			aliases = map[string]unsafeCatchResultValueTypes{}
 			continue
 		}
 		switch s := stmt.Stmt.(type) {
 		case nil:
 			continue
 		case *VariableDef:
-			aliases[s.Name] = unsafeCatchOkValueTypesFromExpression(s.Value, aliases)
+			aliases[s.Name] = unsafeCatchValueTypesFromExpression(s.Value, aliases)
 		case *Reassignment:
 			if target, ok := s.Target.(*Variable); ok {
-				aliases[target.Name()] = unsafeCatchOkValueTypesFromExpression(s.Value, aliases)
+				aliases[target.Name()] = unsafeCatchValueTypesFromExpression(s.Value, aliases)
 			} else {
-				aliases = map[string][]Type{}
+				aliases = map[string]unsafeCatchResultValueTypes{}
 			}
 		default:
-			aliases = map[string][]Type{}
+			aliases = map[string]unsafeCatchResultValueTypes{}
 		}
 	}
-	return unsafeCatchOkValueTypesFromExpression(block.Stmts[finalExprIndex].Expr, aliases)
+	return unsafeCatchValueTypesFromExpression(block.Stmts[finalExprIndex].Expr, aliases)
 }
 
-func unsafeCatchOkValueTypesFromExpression(expr Expression, aliases map[string][]Type) []Type {
+func unsafeCatchValueTypesFromExpression(expr Expression, aliases map[string]unsafeCatchResultValueTypes) unsafeCatchResultValueTypes {
 	if expr == nil {
-		return nil
+		return unsafeCatchResultValueTypes{}
 	}
 	switch e := expr.(type) {
 	case *Variable:
@@ -4472,236 +4482,97 @@ func unsafeCatchOkValueTypesFromExpression(expr Expression, aliases map[string][
 			switch e.Call.Name {
 			case "ok":
 				if len(e.Call.Args) == 1 {
-					return []Type{e.Call.Args[0].Type()}
+					return unsafeCatchResultValueTypes{ok: []Type{e.Call.Args[0].Type()}}
 				}
-				return nil
-			case "err":
-				return nil
-			}
-		}
-	case *Block:
-		return unsafeCatchOkValueTypesInBlock(e, aliases)
-	case *If:
-		var out []Type
-		for _, branch := range e.Branches {
-			out = append(out, unsafeCatchOkValueTypesInBlock(branch.Body, aliases)...)
-		}
-		out = append(out, unsafeCatchOkValueTypesInBlock(e.Else, aliases)...)
-		return out
-	case *BoolMatch:
-		out := unsafeCatchOkValueTypesInBlock(e.True, aliases)
-		out = append(out, unsafeCatchOkValueTypesInBlock(e.False, aliases)...)
-		return out
-	case *IntMatch:
-		var out []Type
-		for _, block := range e.IntCases {
-			out = append(out, unsafeCatchOkValueTypesInBlock(block, aliases)...)
-		}
-		for _, block := range e.RangeCases {
-			out = append(out, unsafeCatchOkValueTypesInBlock(block, aliases)...)
-		}
-		out = append(out, unsafeCatchOkValueTypesInBlock(e.CatchAll, aliases)...)
-		return out
-	case *StrMatch:
-		var out []Type
-		for _, block := range e.Cases {
-			out = append(out, unsafeCatchOkValueTypesInBlock(block, aliases)...)
-		}
-		out = append(out, unsafeCatchOkValueTypesInBlock(e.CatchAll, aliases)...)
-		return out
-	case *EnumMatch:
-		var out []Type
-		for _, block := range e.Cases {
-			out = append(out, unsafeCatchOkValueTypesInBlock(block, aliases)...)
-		}
-		out = append(out, unsafeCatchOkValueTypesInBlock(e.CatchAll, aliases)...)
-		return out
-	case *UnionMatch:
-		var out []Type
-		for _, match := range e.TypeCasesByIndex {
-			if match != nil {
-				out = append(out, unsafeCatchOkValueTypesInBlock(match.Body, aliases)...)
-			}
-		}
-		out = append(out, unsafeCatchOkValueTypesInBlock(e.CatchAll, aliases)...)
-		return out
-	case *ConditionalMatch:
-		var out []Type
-		for _, matchCase := range e.Cases {
-			out = append(out, unsafeCatchOkValueTypesInBlock(matchCase.Body, aliases)...)
-		}
-		out = append(out, unsafeCatchOkValueTypesInBlock(e.CatchAll, aliases)...)
-		return out
-	case *OptionMatch:
-		var out []Type
-		if e.Some != nil {
-			out = append(out, unsafeCatchOkValueTypesInBlock(e.Some.Body, aliases)...)
-		}
-		out = append(out, unsafeCatchOkValueTypesInBlock(e.None, aliases)...)
-		return out
-	case *ResultMatch:
-		var out []Type
-		if e.Ok != nil {
-			out = append(out, unsafeCatchOkValueTypesInBlock(e.Ok.Body, aliases)...)
-		}
-		if e.Err != nil {
-			out = append(out, unsafeCatchOkValueTypesInBlock(e.Err.Body, aliases)...)
-		}
-		return out
-	}
-	if result, ok := expr.Type().(*Result); ok {
-		return []Type{result.val}
-	}
-	return nil
-}
-
-func unsafeCatchErrValueTypes(block *Block) []Type {
-	return unsafeCatchErrValueTypesInBlock(block, nil)
-}
-
-func unsafeCatchErrValueTypesInBlock(block *Block, aliases map[string][]Type) []Type {
-	if block == nil {
-		return nil
-	}
-	finalExprIndex := -1
-	for i := len(block.Stmts) - 1; i >= 0; i-- {
-		if block.Stmts[i].Expr != nil {
-			finalExprIndex = i
-			break
-		}
-	}
-	if finalExprIndex == -1 {
-		return nil
-	}
-	aliases = cloneUnsafeCatchTypeAliases(aliases)
-	for _, stmt := range block.Stmts[:finalExprIndex] {
-		if stmt.Expr != nil {
-			continue
-		}
-		if stmt.Break {
-			aliases = map[string][]Type{}
-			continue
-		}
-		switch s := stmt.Stmt.(type) {
-		case nil:
-			continue
-		case *VariableDef:
-			aliases[s.Name] = unsafeCatchErrValueTypesFromExpression(s.Value, aliases)
-		case *Reassignment:
-			if target, ok := s.Target.(*Variable); ok {
-				aliases[target.Name()] = unsafeCatchErrValueTypesFromExpression(s.Value, aliases)
-			} else {
-				aliases = map[string][]Type{}
-			}
-		default:
-			aliases = map[string][]Type{}
-		}
-	}
-	return unsafeCatchErrValueTypesFromExpression(block.Stmts[finalExprIndex].Expr, aliases)
-}
-
-func unsafeCatchErrValueTypesFromExpression(expr Expression, aliases map[string][]Type) []Type {
-	if expr == nil {
-		return nil
-	}
-	switch e := expr.(type) {
-	case *Variable:
-		if types, ok := aliases[e.Name()]; ok {
-			return types
-		}
-	case *ModuleFunctionCall:
-		if (e.Module == "Result" || e.Module == "ard/result") && e.Call != nil {
-			switch e.Call.Name {
-			case "ok":
-				return nil
+				return unsafeCatchResultValueTypes{}
 			case "err":
 				if len(e.Call.Args) == 1 {
-					return []Type{e.Call.Args[0].Type()}
+					return unsafeCatchResultValueTypes{err: []Type{e.Call.Args[0].Type()}}
 				}
-				return nil
+				return unsafeCatchResultValueTypes{}
 			}
 		}
 	case *Block:
-		return unsafeCatchErrValueTypesInBlock(e, aliases)
+		return unsafeCatchValueTypesInBlock(e, aliases)
 	case *If:
-		var out []Type
+		var out unsafeCatchResultValueTypes
 		for _, branch := range e.Branches {
-			out = append(out, unsafeCatchErrValueTypesInBlock(branch.Body, aliases)...)
+			out.append(unsafeCatchValueTypesInBlock(branch.Body, aliases))
 		}
-		out = append(out, unsafeCatchErrValueTypesInBlock(e.Else, aliases)...)
+		out.append(unsafeCatchValueTypesInBlock(e.Else, aliases))
 		return out
 	case *BoolMatch:
-		out := unsafeCatchErrValueTypesInBlock(e.True, aliases)
-		out = append(out, unsafeCatchErrValueTypesInBlock(e.False, aliases)...)
+		out := unsafeCatchValueTypesInBlock(e.True, aliases)
+		out.append(unsafeCatchValueTypesInBlock(e.False, aliases))
 		return out
 	case *IntMatch:
-		var out []Type
+		var out unsafeCatchResultValueTypes
 		for _, block := range e.IntCases {
-			out = append(out, unsafeCatchErrValueTypesInBlock(block, aliases)...)
+			out.append(unsafeCatchValueTypesInBlock(block, aliases))
 		}
 		for _, block := range e.RangeCases {
-			out = append(out, unsafeCatchErrValueTypesInBlock(block, aliases)...)
+			out.append(unsafeCatchValueTypesInBlock(block, aliases))
 		}
-		out = append(out, unsafeCatchErrValueTypesInBlock(e.CatchAll, aliases)...)
+		out.append(unsafeCatchValueTypesInBlock(e.CatchAll, aliases))
 		return out
 	case *StrMatch:
-		var out []Type
+		var out unsafeCatchResultValueTypes
 		for _, block := range e.Cases {
-			out = append(out, unsafeCatchErrValueTypesInBlock(block, aliases)...)
+			out.append(unsafeCatchValueTypesInBlock(block, aliases))
 		}
-		out = append(out, unsafeCatchErrValueTypesInBlock(e.CatchAll, aliases)...)
+		out.append(unsafeCatchValueTypesInBlock(e.CatchAll, aliases))
 		return out
 	case *EnumMatch:
-		var out []Type
+		var out unsafeCatchResultValueTypes
 		for _, block := range e.Cases {
-			out = append(out, unsafeCatchErrValueTypesInBlock(block, aliases)...)
+			out.append(unsafeCatchValueTypesInBlock(block, aliases))
 		}
-		out = append(out, unsafeCatchErrValueTypesInBlock(e.CatchAll, aliases)...)
+		out.append(unsafeCatchValueTypesInBlock(e.CatchAll, aliases))
 		return out
 	case *UnionMatch:
-		var out []Type
+		var out unsafeCatchResultValueTypes
 		for _, match := range e.TypeCasesByIndex {
 			if match != nil {
-				out = append(out, unsafeCatchErrValueTypesInBlock(match.Body, aliases)...)
+				out.append(unsafeCatchValueTypesInBlock(match.Body, aliases))
 			}
 		}
-		out = append(out, unsafeCatchErrValueTypesInBlock(e.CatchAll, aliases)...)
+		out.append(unsafeCatchValueTypesInBlock(e.CatchAll, aliases))
 		return out
 	case *ConditionalMatch:
-		var out []Type
+		var out unsafeCatchResultValueTypes
 		for _, matchCase := range e.Cases {
-			out = append(out, unsafeCatchErrValueTypesInBlock(matchCase.Body, aliases)...)
+			out.append(unsafeCatchValueTypesInBlock(matchCase.Body, aliases))
 		}
-		out = append(out, unsafeCatchErrValueTypesInBlock(e.CatchAll, aliases)...)
+		out.append(unsafeCatchValueTypesInBlock(e.CatchAll, aliases))
 		return out
 	case *OptionMatch:
-		var out []Type
+		var out unsafeCatchResultValueTypes
 		if e.Some != nil {
-			out = append(out, unsafeCatchErrValueTypesInBlock(e.Some.Body, aliases)...)
+			out.append(unsafeCatchValueTypesInBlock(e.Some.Body, aliases))
 		}
-		out = append(out, unsafeCatchErrValueTypesInBlock(e.None, aliases)...)
+		out.append(unsafeCatchValueTypesInBlock(e.None, aliases))
 		return out
 	case *ResultMatch:
-		var out []Type
+		var out unsafeCatchResultValueTypes
 		if e.Ok != nil {
-			out = append(out, unsafeCatchErrValueTypesInBlock(e.Ok.Body, aliases)...)
+			out.append(unsafeCatchValueTypesInBlock(e.Ok.Body, aliases))
 		}
 		if e.Err != nil {
-			out = append(out, unsafeCatchErrValueTypesInBlock(e.Err.Body, aliases)...)
+			out.append(unsafeCatchValueTypesInBlock(e.Err.Body, aliases))
 		}
 		return out
 	}
 	if result, ok := expr.Type().(*Result); ok {
-		return []Type{result.err}
+		return unsafeCatchResultValueTypes{ok: []Type{result.val}, err: []Type{result.err}}
 	}
-	return nil
+	return unsafeCatchResultValueTypes{}
 }
 
-func cloneUnsafeCatchTypeAliases(aliases map[string][]Type) map[string][]Type {
+func cloneUnsafeCatchTypeAliases(aliases map[string]unsafeCatchResultValueTypes) map[string]unsafeCatchResultValueTypes {
 	if len(aliases) == 0 {
-		return map[string][]Type{}
+		return map[string]unsafeCatchResultValueTypes{}
 	}
-	cloned := make(map[string][]Type, len(aliases))
+	cloned := make(map[string]unsafeCatchResultValueTypes, len(aliases))
 	for name, types := range aliases {
 		cloned[name] = types
 	}
@@ -4851,12 +4722,13 @@ func (c *Checker) validateUnsafeCatchResultsInExpression(expr Expression, result
 		c.validateUnsafeCatchResultsInExpression(e.Expr(), resultType, loc)
 		if e.CatchBlock != nil {
 			if catchResult, ok := e.CatchBlock.Type().(*Result); ok && catchResult.err.equal(resultType.err) {
-				for _, okType := range unsafeCatchOkValueTypes(e.CatchBlock) {
+				catchTypes := unsafeCatchValueTypes(e.CatchBlock)
+				for _, okType := range catchTypes.ok {
 					if !unsafeResultOkValueCompatible(resultType.val, okType) {
 						c.addTypeMismatch(resultType, MakeResult(okType, catchResult.err), loc)
 					}
 				}
-				for _, errType := range unsafeCatchErrValueTypes(e.CatchBlock) {
+				for _, errType := range catchTypes.err {
 					if !unsafeResultOkValueCompatible(resultType.err, errType) {
 						c.addTypeMismatch(resultType, MakeResult(catchResult.val, errType), loc)
 					}
