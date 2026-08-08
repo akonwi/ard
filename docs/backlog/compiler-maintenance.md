@@ -13,7 +13,7 @@ Statuses: `planned`, `in progress`, `completed`, or `deferred`.
 | ID | Priority | Status | Opportunity |
 | --- | --- | --- | --- |
 | COMP-001 | P0 | completed | Cache checked embedded standard-library modules |
-| COMP-002 | P1 | planned | Make AIR fully typed and Go lowering read-only |
+| COMP-002 | P1 | completed | Make AIR fully typed and Go lowering read-only |
 | COMP-003 | P1 | planned | Finish the ADR 0057 AIR representation migration |
 | COMP-004 | P0 | planned | Contain module imports within package roots and propagate filesystem errors |
 | COMP-005 | P1 | planned | Complete LSP cancellation and dependency-aware invalidation |
@@ -54,18 +54,32 @@ Command: `go test ./go -run '^$' -bench '^BenchmarkGoPipeline/warm_check$'
 
 ## COMP-002: Make AIR fully typed and Go lowering read-only
 
-The Go backend currently repairs weak local and expression types by recursively
-searching function bodies. It can also append `Maybe` types to `Program.Types`
-after AIR validation. This duplicates frontend type inference, makes backend
-cost depend on repeated tree scans, and weakens AIR's role as the validated
-frontend/backend contract.
+**Status:** completed. AIR lowering now resolves contextual executable types,
+AIR validation rejects incoherent local, constructor, try, and function-result
+types, and Go lowering consumes AIR without recursively inferring types or
+mutating `Program.Types`.
+
+The checker also warns when source explicitly declares `Void?` or
+`Maybe<Void>`. These types remain valid because they can represent
+absence/presence, and inferred `Maybe<Void>` and `Result<Void, E>` remain
+warning-free.
 
 Bounded outcome:
 
-- Reproduce the existing server-edge fixtures at the AIR level.
-- Resolve contextual local, list, `Maybe`, and `Result` types in AIR lowering.
-- Make AIR validation reject unresolved types required by targets.
-- Remove Go-side recursive type inference and type-table mutation.
+- [x] Reproduce contextual typing edge cases at the AIR level.
+- [x] Resolve contextual local, list, `Maybe`, `Result`, and panic expression
+  types in AIR lowering.
+- [x] Make AIR validation reject incoherent executable types required by
+  targets while accepting assignable named Go types.
+- [x] Remove Go-side recursive type inference and type-table mutation.
+- [x] Verify Go lowering leaves serialized AIR byte-identical.
+- [x] Warn on explicit `Void?` and `Maybe<Void>` without rejecting the module or
+  warning on inferred types.
+
+The `go_ast_lower` benchmark remained effectively neutral. Median of five runs
+at 500 iterations per run was 3,539,270 ns/op before and 3,497,064 ns/op after;
+both recorded 16,404 allocations/op. Command: `go test ./go -run '^$' -bench
+'^BenchmarkGoPipeline/go_ast_lower$' -benchmem -benchtime=500x -count=5`.
 
 ## COMP-003: Finish the ADR 0057 AIR representation migration
 
