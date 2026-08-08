@@ -3,6 +3,7 @@ package air
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/akonwi/ard/checker"
@@ -714,6 +715,168 @@ func TestLowerContextualResultTypesInNestedExpressions(t *testing.T) {
 		t.Fatalf("result type = %q, want Int!Str", got)
 	}
 }
+
+func TestValidateRejectsIncoherentExecutableTypes(t *testing.T) {
+	t.Run("let initializer", func(t *testing.T) {
+		program := lowerSource(t, `
+			fn main() Int {
+				let value = 1
+				let flag = true
+				value
+			}
+		`)
+		main := findFunction(t, program, "main")
+		main.Body.Stmts[0].Value.Type = main.Body.Stmts[1].Type
+		program.Functions[main.ID] = main
+
+		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "initializer type") {
+			t.Fatalf("Validate error = %v, want initializer type mismatch", err)
+		}
+	})
+
+	t.Run("local load", func(t *testing.T) {
+		program := lowerSource(t, `
+			fn main() Int {
+				let value = 1
+				let flag = true
+				value
+			}
+		`)
+		main := findFunction(t, program, "main")
+		main.Body.Result.Type = main.Body.Stmts[1].Type
+		program.Functions[main.ID] = main
+
+		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "local load type") {
+			t.Fatalf("Validate error = %v, want local load type mismatch", err)
+		}
+	})
+
+	t.Run("Maybe payload", func(t *testing.T) {
+		program := lowerSource(t, `
+			fn main() Int? {
+				let signal: Void? = Maybe::new()
+				Maybe::new(1)
+			}
+		`)
+		main := findFunction(t, program, "main")
+		main.Body.Result.Type = main.Body.Stmts[0].Type
+		program.Functions[main.ID] = main
+
+		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "Maybe constructor") {
+			t.Fatalf("Validate error = %v, want Maybe constructor type mismatch", err)
+		}
+	})
+
+	t.Run("function return", func(t *testing.T) {
+		program := lowerSource(t, `
+			fn main() Int {
+				let flag = true
+				1
+			}
+		`)
+		main := findFunction(t, program, "main")
+		main.Body.Result = main.Body.Stmts[0].Value
+		program.Functions[main.ID] = main
+
+		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "return type") {
+			t.Fatalf("Validate error = %v, want function return type mismatch", err)
+		}
+	})
+
+	t.Run("try result", func(t *testing.T) {
+		program := lowerSource(t, `
+			fn value(input: Int?) Int {
+				let flag = true
+				try input -> _ { 0 }
+			}
+		`)
+		value := findFunction(t, program, "value")
+		value.Body.Result.Type = findType(t, program, "Bool").ID
+		program.Functions[value.ID] = value
+
+		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "try result type") {
+			t.Fatalf("Validate error = %v, want try result type mismatch", err)
+		}
+	})
+
+	t.Run("foreign named scalar is not its primitive", func(t *testing.T) {
+		program := lowerSource(t, `
+			fn main() Int {
+				let value = 1
+				value
+			}
+		`)
+		main := findFunction(t, program, "main")
+		intType := main.Locals[0].Type
+		namedScalar := TypeID(len(program.Types) + 1)
+		program.Types = append(program.Types, TypeInfo{
+			ID: namedScalar, Kind: TypeForeignType, Name: "ffi::NamedInt",
+			ForeignTarget: "go", ForeignNamespace: "ffi", ForeignSymbol: "NamedInt",
+			Value: intType,
+		})
+		main.Body.Stmts[0].Value.Type = namedScalar
+		program.Functions[main.ID] = main
+
+		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "initializer type") {
+			t.Fatalf("Validate error = %v, want named scalar initializer mismatch", err)
+		}
+	})
+
+	t.Run("Maybe match binding", func(t *testing.T) {
+		program := lowerSource(t, `
+			fn value(input: Int?) Int {
+				match input {
+					value => 1,
+					_ => 0,
+				}
+			}
+		`)
+		value := findFunction(t, program, "value")
+		match := value.Body.Result
+		value.Locals[match.SomeLocal].Type = findType(t, program, "Bool").ID
+		program.Functions[value.ID] = value
+
+		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "Maybe match local type") {
+			t.Fatalf("Validate error = %v, want Maybe match binding mismatch", err)
+		}
+	})
+
+	t.Run("Result match bindings", func(t *testing.T) {
+		program := lowerSource(t, `
+			fn value(input: Int!Str) Int {
+				match input {
+					ok(value) => 1,
+					err(message) => 0,
+				}
+			}
+		`)
+		value := findFunction(t, program, "value")
+		match := value.Body.Result
+		value.Locals[match.ErrLocal].Type = findType(t, program, "Bool").ID
+		program.Functions[value.ID] = value
+
+		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "Result err match local type") {
+			t.Fatalf("Validate error = %v, want Result match binding mismatch", err)
+		}
+	})
+
+	t.Run("Result try catch binding", func(t *testing.T) {
+		program := lowerSource(t, `
+			fn value(input: Int!Str) Int {
+				try input -> message { 0 }
+			}
+		`)
+		value := findFunction(t, program, "value")
+		tryExpr := value.Body.Result
+		value.Locals[tryExpr.CatchLocal].Type = findType(t, program, "Bool").ID
+		program.Functions[value.ID] = value
+
+		if err := Validate(program); err == nil || !strings.Contains(err.Error(), "Result try catch local type") {
+			t.Fatalf("Validate error = %v, want Result try catch binding mismatch", err)
+		}
+	})
+}
+
 func TestLowerTryOps(t *testing.T) {
 	program := lowerSource(t, `
 

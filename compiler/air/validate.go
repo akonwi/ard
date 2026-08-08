@@ -222,6 +222,15 @@ func validateFunction(program *Program, fn Function) error {
 	if err := validateBlock(program, fn, fn.Body); err != nil {
 		return fmt.Errorf("function %s: %w", fn.Name, err)
 	}
+	returnType := program.Types[fn.Signature.Return-1]
+	if returnType.Kind != TypeVoid {
+		if fn.Body.Result == nil {
+			return fmt.Errorf("function %s has no result for return type %d", fn.Name, fn.Signature.Return)
+		}
+		if !typesAssignable(program, fn.Signature.Return, fn.Body.Result.Type) {
+			return fmt.Errorf("function %s result type %d does not match return type %d", fn.Name, fn.Body.Result.Type, fn.Signature.Return)
+		}
+	}
 	return nil
 }
 
@@ -262,6 +271,21 @@ func validateBlock(program *Program, fn Function, block Block) error {
 				return err
 			}
 		}
+		if stmt.Kind == StmtLet || stmt.Kind == StmtAssign {
+			if stmt.Local < 0 || int(stmt.Local) >= len(fn.Locals) {
+				return fmt.Errorf("local statement references invalid local %d", stmt.Local)
+			}
+			if stmt.Value == nil {
+				return fmt.Errorf("local statement for %s has no value", fn.Locals[stmt.Local].Name)
+			}
+			localType := fn.Locals[stmt.Local].Type
+			if stmt.Kind == StmtLet && stmt.Type != localType {
+				return fmt.Errorf("let statement type %d does not match local %s type %d", stmt.Type, fn.Locals[stmt.Local].Name, localType)
+			}
+			if !typesAssignable(program, localType, stmt.Value.Type) {
+				return fmt.Errorf("local %s initializer type %d (%s) does not match local type %d (%s)", fn.Locals[stmt.Local].Name, stmt.Value.Type, program.Types[stmt.Value.Type-1].Name, localType, program.Types[localType-1].Name)
+			}
+		}
 		if stmt.Kind == StmtAssignGlobal {
 			if !validGlobalID(program, stmt.Global) {
 				return fmt.Errorf("global assignment references invalid global %d", stmt.Global)
@@ -274,6 +298,9 @@ func validateBlock(program *Program, fn Function, block Block) error {
 			}
 			if stmt.Type != NoType && stmt.Type != program.Globals[stmt.Global].Type {
 				return fmt.Errorf("global assignment type %d does not match global type %d", stmt.Type, program.Globals[stmt.Global].Type)
+			}
+			if !typesAssignable(program, program.Globals[stmt.Global].Type, stmt.Value.Type) {
+				return fmt.Errorf("global assignment value type %d does not match global type %d", stmt.Value.Type, program.Globals[stmt.Global].Type)
 			}
 		}
 		if stmt.Kind == StmtSetField {
@@ -323,8 +350,13 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 	if !validTypeID(program, expr.Type) {
 		return fmt.Errorf("expression has invalid type %d", expr.Type)
 	}
-	if expr.Kind == ExprLoadLocal && (expr.Local < 0 || int(expr.Local) >= len(fn.Locals)) {
-		return fmt.Errorf("expression loads invalid local %d", expr.Local)
+	if expr.Kind == ExprLoadLocal {
+		if expr.Local < 0 || int(expr.Local) >= len(fn.Locals) {
+			return fmt.Errorf("expression loads invalid local %d", expr.Local)
+		}
+		if expr.Type != fn.Locals[expr.Local].Type {
+			return fmt.Errorf("local load type %d does not match local %s type %d", expr.Type, fn.Locals[expr.Local].Name, fn.Locals[expr.Local].Type)
+		}
 	}
 	if expr.Kind == ExprMutRef {
 		if expr.ReferenceMode < ExistingReference || expr.ReferenceMode > FreshValue {
@@ -393,8 +425,49 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			}
 		}
 	}
-	if expr.Kind == ExprLoadGlobal && !validGlobalID(program, expr.Global) {
-		return fmt.Errorf("expression loads invalid global %d", expr.Global)
+	if expr.Kind == ExprLoadGlobal {
+		if !validGlobalID(program, expr.Global) {
+			return fmt.Errorf("expression loads invalid global %d", expr.Global)
+		}
+		if expr.Type != program.Globals[expr.Global].Type {
+			return fmt.Errorf("global load type %d does not match global %s type %d", expr.Type, program.Globals[expr.Global].Name, program.Globals[expr.Global].Type)
+		}
+	}
+	if expr.Kind == ExprMakeMaybeSome || expr.Kind == ExprMakeMaybeNone {
+		maybeType, err := typeInfo(program, expr.Type)
+		if err != nil {
+			return err
+		}
+		if maybeType.Kind != TypeMaybe {
+			return fmt.Errorf("Maybe constructor has type kind %d", maybeType.Kind)
+		}
+		if expr.Kind == ExprMakeMaybeSome {
+			if expr.Target == nil {
+				return fmt.Errorf("Maybe constructor missing value")
+			}
+			if expr.Target.Type != maybeType.Elem {
+				return fmt.Errorf("Maybe constructor value type %d does not match element type %d", expr.Target.Type, maybeType.Elem)
+			}
+		}
+	}
+	if expr.Kind == ExprMakeResultOk || expr.Kind == ExprMakeResultErr {
+		resultType, err := typeInfo(program, expr.Type)
+		if err != nil {
+			return err
+		}
+		if resultType.Kind != TypeResult {
+			return fmt.Errorf("Result constructor has type kind %d", resultType.Kind)
+		}
+		if expr.Target == nil {
+			return fmt.Errorf("Result constructor missing value")
+		}
+		expected := resultType.Value
+		if expr.Kind == ExprMakeResultErr {
+			expected = resultType.Error
+		}
+		if expr.Target.Type != expected {
+			return fmt.Errorf("Result constructor value type %d does not match variant type %d", expr.Target.Type, expected)
+		}
 	}
 	if expr.Kind == ExprFunctionRef && !validFunctionID(program, expr.Function) {
 		return fmt.Errorf("expression references invalid function %d", expr.Function)
@@ -650,8 +723,21 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		}
 	}
 	if expr.Kind == ExprMatchMaybe {
+		if expr.Target == nil {
+			return fmt.Errorf("Maybe match missing target")
+		}
+		maybeType, err := typeInfo(program, expr.Target.Type)
+		if err != nil {
+			return err
+		}
+		if maybeType.Kind != TypeMaybe {
+			return fmt.Errorf("Maybe match target has type kind %d", maybeType.Kind)
+		}
 		if expr.SomeLocal < 0 || int(expr.SomeLocal) >= len(fn.Locals) {
 			return fmt.Errorf("Maybe match binds invalid local %d", expr.SomeLocal)
+		}
+		if fn.Locals[expr.SomeLocal].Type != maybeType.Elem {
+			return fmt.Errorf("Maybe match local type %d does not match element type %d", fn.Locals[expr.SomeLocal].Type, maybeType.Elem)
 		}
 		if err := validateBlock(program, fn, expr.Some); err != nil {
 			return err
@@ -671,11 +757,27 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		}
 	}
 	if expr.Kind == ExprMatchResult {
+		if expr.Target == nil {
+			return fmt.Errorf("Result match missing target")
+		}
+		resultType, err := typeInfo(program, expr.Target.Type)
+		if err != nil {
+			return err
+		}
+		if resultType.Kind != TypeResult {
+			return fmt.Errorf("Result match target has type kind %d", resultType.Kind)
+		}
 		if expr.OkLocal < 0 || int(expr.OkLocal) >= len(fn.Locals) {
 			return fmt.Errorf("Result match binds invalid ok local %d", expr.OkLocal)
 		}
 		if expr.ErrLocal < 0 || int(expr.ErrLocal) >= len(fn.Locals) {
 			return fmt.Errorf("Result match binds invalid err local %d", expr.ErrLocal)
+		}
+		if fn.Locals[expr.OkLocal].Type != resultType.Value {
+			return fmt.Errorf("Result ok match local type %d does not match value type %d", fn.Locals[expr.OkLocal].Type, resultType.Value)
+		}
+		if fn.Locals[expr.ErrLocal].Type != resultType.Error {
+			return fmt.Errorf("Result err match local type %d does not match error type %d", fn.Locals[expr.ErrLocal].Type, resultType.Error)
 		}
 		if err := validateBlock(program, fn, expr.Ok); err != nil {
 			return err
@@ -698,6 +800,13 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if expr.Kind == ExprTryMaybe && targetType.Kind != TypeMaybe {
 			return fmt.Errorf("Maybe try target has type kind %d", targetType.Kind)
 		}
+		resultType := targetType.Value
+		if expr.Kind == ExprTryMaybe {
+			resultType = targetType.Elem
+		}
+		if !typesAssignable(program, resultType, expr.Type) {
+			return fmt.Errorf("try result type %d does not match target value type %d", expr.Type, resultType)
+		}
 		if !expr.HasCatch {
 			returnType, err := typeInfo(program, fn.Signature.Return)
 			if err != nil {
@@ -713,6 +822,9 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 		if expr.HasCatch {
 			if expr.Kind == ExprTryResult && (expr.CatchLocal < 0 || int(expr.CatchLocal) >= len(fn.Locals)) {
 				return fmt.Errorf("Result try catch binds invalid local %d", expr.CatchLocal)
+			}
+			if expr.Kind == ExprTryResult && fn.Locals[expr.CatchLocal].Type != targetType.Error {
+				return fmt.Errorf("Result try catch local type %d does not match error type %d", fn.Locals[expr.CatchLocal].Type, targetType.Error)
 			}
 			if err := validateBlock(program, fn, expr.Catch); err != nil {
 				return err
@@ -758,6 +870,105 @@ func validTraitID(program *Program, id TraitID) bool {
 
 func validImplID(program *Program, id ImplID) bool {
 	return id >= 0 && int(id) < len(program.Impls)
+}
+
+func typesAssignable(program *Program, destination TypeID, source TypeID) bool {
+	if destination == source {
+		return true
+	}
+	if !validTypeID(program, destination) || !validTypeID(program, source) {
+		return false
+	}
+	destinationInfo := program.Types[destination-1]
+	sourceInfo := program.Types[source-1]
+	return foreignTypeAssignableTo(program, destinationInfo, source, sourceInfo) ||
+		foreignTypeAssignableTo(program, sourceInfo, destination, destinationInfo) ||
+		typesStructurallyEquivalent(program, destination, source, map[[2]TypeID]bool{})
+}
+
+func foreignTypeAssignableTo(program *Program, foreign TypeInfo, otherID TypeID, other TypeInfo) bool {
+	if foreign.Kind != TypeForeignType || foreign.ForeignPointer {
+		return false
+	}
+	if foreign.Key == NoType && validTypeID(program, foreign.Value) && foreign.Value == otherID {
+		underlying := program.Types[foreign.Value-1]
+		switch underlying.Kind {
+		case TypeVoid, TypeInt, TypeScalar, TypeFloat64, TypeBool, TypeByte, TypeRune, TypeStr:
+			// Named Go scalars require an explicit AIR conversion. Treating their
+			// underlying primitive as directly assignable would let malformed AIR
+			// pass validation and produce invalid Go assignments.
+			return false
+		default:
+			return true
+		}
+	}
+	if validTypeID(program, foreign.Key) && validTypeID(program, foreign.Value) && other.Kind == TypeMap {
+		return foreign.Key == other.Key && foreign.Value == other.Value
+	}
+	if validTypeID(program, foreign.Elem) && other.Kind == TypeList {
+		return foreign.Elem == other.Elem
+	}
+	return false
+}
+
+func typesStructurallyEquivalent(program *Program, leftID TypeID, rightID TypeID, seen map[[2]TypeID]bool) bool {
+	if leftID == rightID {
+		return true
+	}
+	if !validTypeID(program, leftID) || !validTypeID(program, rightID) {
+		return false
+	}
+	pair := [2]TypeID{leftID, rightID}
+	if seen[pair] {
+		return true
+	}
+	seen[pair] = true
+	left := program.Types[leftID-1]
+	right := program.Types[rightID-1]
+	if left.Kind != right.Kind {
+		return false
+	}
+	equivalent := func(a, b TypeID) bool {
+		return typesStructurallyEquivalent(program, a, b, seen)
+	}
+	switch left.Kind {
+	case TypeVoid, TypeInt, TypeFloat64, TypeBool, TypeByte, TypeRune, TypeStr, TypeAny:
+		return true
+	case TypeScalar:
+		return left.Name == right.Name
+	case TypeParam:
+		return left.ParamIndex == right.ParamIndex && left.Name == right.Name
+	case TypeList, TypeMaybe, TypeChannel, TypeReceiver, TypeSender, TypeReference:
+		return equivalent(left.Elem, right.Elem)
+	case TypeFixedArray:
+		return left.Length == right.Length && equivalent(left.Elem, right.Elem)
+	case TypeMap:
+		return equivalent(left.Key, right.Key) && equivalent(left.Value, right.Value)
+	case TypeResult:
+		return equivalent(left.Value, right.Value) && equivalent(left.Error, right.Error)
+	case TypeFunction:
+		if len(left.Params) != len(right.Params) || len(left.ParamMutable) != len(right.ParamMutable) || left.ReturnReference != right.ReturnReference {
+			return false
+		}
+		for i := range left.Params {
+			if left.ParamMutable[i] != right.ParamMutable[i] || !equivalent(left.Params[i], right.Params[i]) {
+				return false
+			}
+		}
+		return equivalent(left.Return, right.Return)
+	case TypeStruct:
+		if left.Generic == NoType || left.Generic != right.Generic || len(left.GenericArgs) != len(right.GenericArgs) {
+			return false
+		}
+		for i := range left.GenericArgs {
+			if !equivalent(left.GenericArgs[i], right.GenericArgs[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func typeInfo(program *Program, id TypeID) (TypeInfo, error) {

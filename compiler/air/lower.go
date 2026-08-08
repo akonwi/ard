@@ -3108,6 +3108,13 @@ func (fl *functionLowerer) lowerExprWithExpected(expr checker.Expression, expect
 }
 
 func (fl *functionLowerer) lowerExprWithExpectedRaw(expr checker.Expression, expected TypeID) (*Expr, error) {
+	if panicExpr, ok := expr.(*checker.Panic); ok && validTypeID(&fl.l.program, expected) {
+		message, err := fl.lowerExprWithExpected(panicExpr.Message, fl.l.mustIntern(checker.Str))
+		if err != nil {
+			return nil, err
+		}
+		return &Expr{Kind: ExprPanic, Type: expected, Target: message}, nil
+	}
 	if wrapped, ok, err := fl.lowerUnionWrapIfNeeded(expr, expected); ok || err != nil {
 		return wrapped, err
 	}
