@@ -1,10 +1,50 @@
 package frontend
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestLoadModuleReportsWarningsWithoutFailing(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"warnings\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "main.ard"), []byte("let value: Void? = Maybe::new()\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalStdout := os.Stdout
+	os.Stdout = writer
+	loaded, loadErr := LoadModule(filepath.Join(projectDir, "main.ard"))
+	os.Stdout = originalStdout
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output, readErr := io.ReadAll(reader)
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if loadErr != nil {
+		t.Fatalf("LoadModule returned an error for a warning: %v", loadErr)
+	}
+	if loaded == nil || loaded.Module == nil {
+		t.Fatal("LoadModule returned no module")
+	}
+	if got := string(output); !strings.Contains(got, "warning: Redundant nullable Void") {
+		t.Fatalf("diagnostic output = %q, want redundant nullable Void warning", got)
+	}
+}
 
 // TestLoadModuleSharesOneGoTypeUniverse pins ADR 0044: all `use go:` imports
 // across the whole Ard program — including imports that only appear in

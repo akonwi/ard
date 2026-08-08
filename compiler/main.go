@@ -1135,7 +1135,7 @@ func loadGoTestModule(path string, program *parse.Program, resolver *checker.Mod
 	options := checker.CheckOptions{ModulePath: modulePath, GoResolver: goResolver}
 	c := checker.New(filePath, program, resolver, options)
 	c.Check()
-	if c.HasErrors() {
+	if len(c.Diagnostics()) > 0 {
 		root := filepath.Dir(path)
 		if projectInfo != nil && projectInfo.RootPath != "" {
 			root = projectInfo.RootPath
@@ -1147,6 +1147,8 @@ func loadGoTestModule(path string, program *parse.Program, resolver *checker.Mod
 		if err := diagnostics.RenderRelative(os.Stdout, c.Diagnostics(), root, displayRoot); err != nil {
 			return nil, fmt.Errorf("render diagnostics: %w", err)
 		}
+	}
+	if c.HasErrors() {
 		return nil, fmt.Errorf("type errors")
 	}
 	return c.Module(), nil

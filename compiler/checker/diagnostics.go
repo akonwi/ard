@@ -132,6 +132,7 @@ const (
 	DiagnosticCodeInvalidLiteral                DiagnosticCode = "invalid_literal"
 	DiagnosticCodeNumericLiteralOverflow        DiagnosticCode = "numeric_literal_overflow"
 	DiagnosticCodeInvalidConversion             DiagnosticCode = "invalid_conversion"
+	DiagnosticCodeRedundantNullableVoid         DiagnosticCode = "redundant_nullable_void"
 )
 
 type SourceSpan struct {
@@ -187,6 +188,35 @@ func (d Diagnostic) FilePath() string {
 
 func (d Diagnostic) Location() parse.Location {
 	return d.Primary.Span.Location
+}
+
+type redundantNullableVoidDiagnostic struct {
+	Span SourceSpan
+}
+
+func (d redundantNullableVoidDiagnostic) build() Diagnostic {
+	diagnostic := newLabeledDiagnostic(
+		Warn,
+		"Redundant nullable type: Void?",
+		"Redundant nullable Void",
+		"`Void?` distinguishes only absence from presence. Prefer `Bool` for a presence flag, or `Void` when absence is not meaningful.",
+		DiagnosticLabel{
+			Span:    d.Span,
+			Message: "this optional type carries no value other than presence",
+		},
+	)
+	diagnostic.Code = DiagnosticCodeRedundantNullableVoid
+	return diagnostic
+}
+
+func (c *Checker) addRedundantNullableVoid(location parse.Location) {
+	span := c.sourceSpan(location)
+	for _, diagnostic := range c.diagnostics {
+		if diagnostic.Code == DiagnosticCodeRedundantNullableVoid && diagnostic.Primary.Span == span {
+			return
+		}
+	}
+	c.addDiagnostic(redundantNullableVoidDiagnostic{Span: span}.build())
 }
 
 type unresolvedReferenceKind uint8

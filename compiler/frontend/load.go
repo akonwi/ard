@@ -52,7 +52,7 @@ func LoadModule(inputPath string) (*LoadResult, error) {
 	goResolver.DependencyModuleRoots = checker.DependencyGoModuleRoots(projectInfo)
 	c := checker.New(relPath, program, moduleResolver, checker.CheckOptions{GoResolver: goResolver})
 	c.Check()
-	if c.HasErrors() {
+	if len(c.Diagnostics()) > 0 {
 		displayRoot, err := os.Getwd()
 		if err != nil {
 			displayRoot = projectInfo.RootPath
@@ -60,6 +60,8 @@ func LoadModule(inputPath string) (*LoadResult, error) {
 		if err := diagnostics.RenderRelative(os.Stdout, c.Diagnostics(), projectInfo.RootPath, displayRoot); err != nil {
 			return nil, fmt.Errorf("render diagnostics: %w", err)
 		}
+	}
+	if c.HasErrors() {
 		return nil, fmt.Errorf("type errors")
 	}
 
