@@ -4,7 +4,20 @@ import (
 	"go/token"
 	"go/types"
 	"testing"
+
+	"golang.org/x/tools/go/packages"
 )
+
+func TestGoPackagesResolverDoesNotRequestUnusedTypesInfo(t *testing.T) {
+	resolver := NewGoPackagesResolver(t.TempDir(), nil)
+	mode := resolver.loadConfig().Mode
+	if mode&packages.NeedTypes == 0 {
+		t.Fatal("load mode does not request package type information")
+	}
+	if mode&packages.NeedTypesInfo != 0 {
+		t.Fatal("load mode requests unused expression type information")
+	}
+}
 
 func TestConstTypeFromGoRejectsUnsupportedConstantType(t *testing.T) {
 	if _, reason := constTypeFromGo(types.Typ[types.UntypedComplex]); reason == "" {

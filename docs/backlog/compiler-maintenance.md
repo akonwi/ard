@@ -19,8 +19,76 @@ Statuses: `planned`, `in progress`, `completed`, or `deferred`.
 | COMP-005 | P1 | completed | Complete LSP cancellation and dependency-aware invalidation |
 | COMP-006 | P1 | completed | Stop silently returning incomplete project-wide references and renames |
 | COMP-007 | P2 | completed | Remove the fallback Go importer |
-| COMP-008 | P2 | planned | Consolidate unsafe-catch result analysis |
-| COMP-009 | P2 | planned | Retire checker-node fallback type rules |
+| COMP-008 | P2 | completed | Consolidate unsafe-catch result analysis |
+| COMP-009 | P2 | completed | Retire checker-node fallback type rules |
+| COMP-010 | P0 | in progress | Stop requesting unused Go expression type information |
+
+## 2026-08-08 profile audit
+
+The current compiler at `45d799456c0ffa3b942e5ef7150fe4a349227975`
+was profiled on Linux/amd64 with Go 1.26.0 and an Intel Xeon 2.60 GHz CPU.
+The audit used three valid projects of different shapes:
+
+| Workload | Revision | Ard files | Ard lines | Ard bytes |
+| --- | --- | ---: | ---: | ---: |
+| `examples/vaxis-demo` | compiler revision above | 1 | 1,259 | 38,101 |
+| `tinear` | `251c8a5139fd6e63e1679282e0356001f54e62ee` | 34 | 8,949 | 291,239 |
+| `maestro/server` | `52e57e1d216a61730b504c160c54a5bfb5c9779f` | 49 | 6,460 | 219,684 |
+
+Tinear's sibling Vaxis checkout was pinned to
+`24ba647481e9d881463f041093560d821fedc167`. The `site` repository at
+`0fefe2ab8df49b32ba9b64eb3d55e2b90ed8a7f0` and the repository's
+`examples/chi-server` were excluded because they still use the pre-ADR-0057
+implicit reference syntax and do not check with the current language rules.
+They are compatibility exclusions, not failed performance workloads.
+
+Five separate `ard check` processes produced these median wall times and peak
+resident-memory ranges:
+
+| Workload | Median wall time | Peak RSS range |
+| --- | ---: | ---: |
+| `vaxis-demo` | 1.10 s | 449-500 MiB |
+| `tinear` | 1.14 s | 474-500 MiB |
+| `maestro/server` | 3.52 s | 940-1,024 MiB |
+
+Command, run from each project root:
+
+```sh
+for i in 1 2 3 4 5; do
+  /usr/bin/time -f "run=$i wall_s=%e max_rss_kb=%M" \
+    /path/to/ard check main.ard >/dev/null
+done
+```
+
+`ARD_PIPELINE_PROFILE=1 ard build` separated the compiler-owned stages from
+the Go toolchain. Frontend loading and checking took 0.96-1.04 seconds for
+`vaxis-demo`, 1.08-1.16 seconds for Tinear, and 3.38-3.55 seconds for Maestro.
+AIR lowering took only 2.7-3.7 milliseconds, 40-44 milliseconds, and 57-77
+milliseconds respectively. Go build time was additional and cache-dependent.
+This makes the frontend, rather than AIR lowering, the material compiler-owned
+build stage on all three workloads.
+
+The reproducible cold-frontend benchmark below used three benchmark runs of
+three measured iterations. The table records the median run:
+
+| Workload | Time | Allocated bytes | Allocations |
+| --- | ---: | ---: | ---: |
+| `vaxis-demo` | 941.96 ms/op | 746.72 MB/op | 7,727,281 allocs/op |
+| `tinear` | 954.63 ms/op | 805.09 MB/op | 8,215,779 allocs/op |
+| `maestro/server` | 3,493.21 ms/op | 1,700.66 MB/op | 16,357,016 allocs/op |
+
+```sh
+ARD_BENCH_INPUT=/absolute/path/to/main.ard \
+go test ./go -run '^$' \
+  -bench '^BenchmarkGoPipeline/frontend_load_and_check$' \
+  -benchmem -benchtime=3x -count=3
+```
+
+The Maestro CPU and allocation profiles attribute the cold cost primarily to
+`go/packages` parsing and Go type checking. `go/types.recordTypeAndValue` alone
+accounts for 35.08% of allocation space, while
+`go/packages.(*loader).loadPackage` accounts for 71.46% cumulatively. This led
+to COMP-010; the older internal candidates remain deferred below.
 
 ## COMP-001: Cache checked embedded standard-library modules
 
@@ -218,10 +286,58 @@ Bounded outcome:
 - [x] Migrate expected checker test nodes.
 - [x] Remove fallback type switches and redundant precomputed fields where unused.
 
+## COMP-010: Stop requesting unused Go expression type information
+
+**Status:** implementation and verification complete on
+`perf/compiler-profile-audit`; awaiting merge.
+
+`GoPackagesResolver` previously requested `packages.NeedTypesInfo`, which asks
+`go/types` to retain expression-level identifier, use, selection, and
+type-and-value maps. Ard reads `packages.Package.Types`, `GoFiles`, and
+`Errors`, but never reads `TypesInfo`; `packages.NeedTypes` already provides the
+package type information needed by the FFI bridge.
+
+The implementation removes only `NeedTypesInfo`. The full compiler suite and
+the Vaxis, Tinear, and Maestro audit checks pass. The same cold-frontend
+benchmark produced these median changes on the implementation branch:
+
+| Workload | Time before | Time without `NeedTypesInfo` | Change | Bytes before | Bytes without `NeedTypesInfo` | Change |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `vaxis-demo` | 941.96 ms/op | 669.61 ms/op | -28.9% | 746.72 MB/op | 425.28 MB/op | -43.0% |
+| `tinear` | 954.63 ms/op | 777.85 ms/op | -18.5% | 805.09 MB/op | 474.13 MB/op | -41.1% |
+| `maestro/server` | 3,493.21 ms/op | 2,094.41 ms/op | -40.0% | 1,700.66 MB/op | 899.38 MB/op | -47.1% |
+
+Allocation counts fell only 1.7-2.5%; the material gain comes from no longer
+building and retaining the large unused maps.
+
+Bounded outcome:
+
+- [x] Remove `packages.NeedTypesInfo` without changing the shared `go/types`
+  universe or requested build configuration.
+- [x] Verify direct, generic, interface, callback, local-boundary, build-tag,
+  and dependency-checkout Go FFI resolution.
+- [x] Run the full compiler suite and check all three audit workloads.
+- [x] Repeat the cold-frontend benchmark and record the branch results here.
+
 ## Profile-guided watchlist
 
-The initial audit also considered AIR lexical-scope map cloning, repeated
-closure self-reference walks, and the checker's multiple top-level declaration
-passes. They are not prioritized because they were small or absent in the
-current vaxis profile. Reconsider them only with a representative benchmark or
-profile demonstrating material cost.
+The 2026-08-08 audit re-measured the earlier candidates:
+
+- AIR lexical-scope map cloning accounted for 0.40% of CPU samples and 0.83%
+  of allocation space in a 100-iteration Maestro AIR-lowering profile.
+- `functionDirectlyReferences` and `canInlineClosureFunction` had no CPU
+  samples in 100-iteration Go-lowering profiles for Vaxis, Tinear, or Maestro.
+  The entire closure-use collection was at most 0.75% cumulatively.
+- Each checker top-level declaration or validation pass accounted for at most
+  0.06% of CPU samples in a 100-iteration Maestro project-check profile;
+  `hoistTopLevelFunctionSignatures` was the largest allocation contributor at
+  0.17%.
+- Re-running `CollectGoImportPaths` with an already primed concrete resolver
+  was visible in a synthetic cached-check loop (6.89% of CPU samples and
+  27.44% of allocation space), but it was only 0.33% and 1.14% respectively in
+  the cold frontend profile. The LSP's resolver wrapper already bypasses this
+  per-check scan, so no production-critical item is promoted yet.
+
+These remain deferred because they are small, absent, or not material on the
+measured production paths. Reconsider them only when a representative profile
+shows a larger cost or the resolver lifecycle changes.
