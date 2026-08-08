@@ -15,7 +15,7 @@ Statuses: `planned`, `in progress`, `completed`, or `deferred`.
 | COMP-001 | P0 | completed | Cache checked embedded standard-library modules |
 | COMP-002 | P1 | completed | Make AIR fully typed and Go lowering read-only |
 | COMP-003 | P1 | completed | Finish the ADR 0057 AIR representation migration |
-| COMP-004 | P0 | planned | Contain module imports within package roots and propagate filesystem errors |
+| COMP-004 | P0 | completed | Contain module imports within package roots and propagate filesystem errors |
 | COMP-005 | P1 | planned | Complete LSP cancellation and dependency-aware invalidation |
 | COMP-006 | P1 | planned | Stop silently returning incomplete project-wide references and renames |
 | COMP-007 | P2 | planned | Remove the fallback Go importer |
@@ -110,17 +110,21 @@ Bounded outcome:
 
 ## COMP-004: Contain imports and propagate filesystem errors
 
-Ard import tokens permit dots, while module resolution joins unchecked module
-segments to a package root. A path containing `..` can escape that root.
-Resolution also treats non-`IsNotExist` `Stat` errors as success until a later
-read fails.
+**Status:** completed. Module resolution now validates logical import segments
+before constructing filesystem paths, verifies the resulting file remains
+within its owning package root, and preserves unexpected filesystem errors.
+Package roots, package manifests, and every component of a resolved module path
+must not be symlinks. Symlinks above the declared package root remain valid, as
+do path dependencies outside the application root when their own roots and
+module paths satisfy the same policy.
 
 Bounded outcome:
 
-- Reject empty, `.`, `..`, and absolute module paths.
-- Verify cleaned destinations remain inside the owning package root.
-- Define and test the policy for symlinks crossing package boundaries.
-- Return unexpected filesystem errors at the resolution boundary.
+- [x] Reject empty, `.`, `..`, and absolute module paths.
+- [x] Verify cleaned destinations remain inside the owning package root.
+- [x] Reject symlinked package roots, manifests, module directories, and module
+  files without rejecting symlinked ancestors above the root.
+- [x] Return unexpected filesystem errors at the resolution boundary.
 
 ## COMP-005: Complete LSP cancellation and invalidation
 

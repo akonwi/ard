@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -104,7 +105,15 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 	for {
 		// Check for ard.toml file
 		tomlPath := filepath.Join(current, "ard.toml")
-		if _, err := os.Stat(tomlPath); err == nil {
+		manifestInfo, statErr := os.Lstat(tomlPath)
+		if statErr == nil {
+			if manifestInfo.Mode()&os.ModeSymlink != 0 {
+				return nil, fmt.Errorf("package manifest must not be a symlink: %s", tomlPath)
+			}
+			current, err = validatePackageRoot(current)
+			if err != nil {
+				return nil, err
+			}
 			// Found ard.toml, parse project name
 			projectName, err := parseProjectName(tomlPath)
 			if err != nil {
@@ -153,25 +162,57 @@ func FindProjectRoot(startPath string) (*ProjectInfo, error) {
 				RootPackageID: rootPackageID,
 				Packages:      packages,
 			}, nil
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("failed to inspect package manifest %s: %w", tomlPath, statErr)
 		}
 
 		// Move up one directory
 		parent := filepath.Dir(current)
 		if parent == current {
 			// Reached filesystem root, use directory name as fallback
-			dirName := filepath.Base(absPath)
+			rootPath, err := validatePackageRoot(absPath)
+			if err != nil {
+				return nil, err
+			}
+			dirName := filepath.Base(rootPath)
 			return &ProjectInfo{
-				RootPath:      absPath,
+				RootPath:      rootPath,
 				ProjectName:   dirName,
 				Dependencies:  map[string]DependencyInfo{},
 				RootPackageID: "root",
 				Packages: map[string]PackageInfo{
-					"root": {ID: "root", Name: dirName, RootPath: absPath, Path: ".", Dependencies: map[string]string{}},
+					"root": {ID: "root", Name: dirName, RootPath: rootPath, Path: ".", Dependencies: map[string]string{}},
 				},
 			}, nil
 		}
 		current = parent
 	}
+}
+
+func validatePackageRoot(rootPath string) (string, error) {
+	absPath, err := filepath.Abs(rootPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to get absolute package root path: %w", err)
+	}
+	info, err := os.Lstat(absPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect package root %s: %w", absPath, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("package root must not be a symlink: %s", absPath)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("package root is not a directory: %s", absPath)
+	}
+	manifestPath := filepath.Join(absPath, "ard.toml")
+	manifestInfo, err := os.Lstat(manifestPath)
+	if err == nil && manifestInfo.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("package manifest must not be a symlink: %s", manifestPath)
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("failed to inspect package manifest %s: %w", manifestPath, err)
+	}
+	return absPath, nil
 }
 
 // parseProjectName extracts the project name from ard.toml
@@ -1500,13 +1541,13 @@ func (mr *ModuleResolver) ResolveImportPath(importPath string) (string, error) {
 }
 
 func (mr *ModuleResolver) ResolveImport(importerModulePath string, importPath string) (ResolvedImport, error) {
+	if err := validateLogicalImportPath(importPath); err != nil {
+		return ResolvedImport{}, err
+	}
 	if strings.HasPrefix(importPath, "ard/") {
 		return ResolvedImport{}, fmt.Errorf("standard library imports should be handled separately")
 	}
 	parts := strings.Split(importPath, "/")
-	if len(parts) < 1 || parts[0] == "" {
-		return ResolvedImport{}, fmt.Errorf("invalid import path: %s", importPath)
-	}
 	importerPackageID := mr.packageIDForModule(importerModulePath)
 	pkg := mr.packageInfo(importerPackageID)
 	rootName := parts[0]
@@ -1545,6 +1586,18 @@ func (mr *ModuleResolver) ResolveImport(importerModulePath string, importPath st
 		return ResolvedImport{}, fmt.Errorf("unknown import root %q for package %q; import path '%s' does not match project name '%s' or a dependency alias", rootName, pkg.Name, importPath, mr.project.ProjectName)
 	}
 	return ResolvedImport{}, fmt.Errorf("unknown import root %q for package %q", rootName, pkg.Name)
+}
+
+func validateLogicalImportPath(importPath string) error {
+	if importPath == "" || strings.HasPrefix(importPath, "/") || filepath.IsAbs(importPath) || strings.Contains(importPath, `\`) {
+		return fmt.Errorf("invalid import path: %q", importPath)
+	}
+	for _, segment := range strings.Split(importPath, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return fmt.Errorf("invalid import path: %q", importPath)
+		}
+	}
+	return nil
 }
 
 func (mr *ModuleResolver) packageIDForModule(modulePath string) string {
@@ -1621,15 +1674,23 @@ func (mr *ModuleResolver) resolveDependencyModule(dep DependencyInfo, modulePath
 	if depRoot == "" {
 		return ResolvedImport{}, fmt.Errorf("dependency %q has no source root", dep.Alias)
 	}
-	if _, err := os.Stat(depRoot); os.IsNotExist(err) {
+	validatedRoot, err := validatePackageRoot(depRoot)
+	if errors.Is(err, os.ErrNotExist) {
 		if dep.Git != "" {
 			return ResolvedImport{}, fmt.Errorf("dependency %q is not available in Ard cache at %s; run `ard deps fetch`", dep.Alias, depRoot)
 		}
 		return ResolvedImport{}, fmt.Errorf("dependency %q path does not exist: %s", dep.Alias, depRoot)
 	}
-	fullPath := filepath.Join(depRoot, modulePath+".ard")
-	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-		return ResolvedImport{}, fmt.Errorf("module file not found: %s", fullPath)
+	if err != nil {
+		return ResolvedImport{}, fmt.Errorf("failed to resolve dependency %q: %w", dep.Alias, err)
+	}
+	fullPath, err := resolveContainedModulePath(validatedRoot, modulePath)
+	if errors.Is(err, os.ErrNotExist) {
+		expectedPath := filepath.Join(validatedRoot, filepath.FromSlash(modulePath)+".ard")
+		return ResolvedImport{}, fmt.Errorf("module file not found: %s", expectedPath)
+	}
+	if err != nil {
+		return ResolvedImport{}, err
 	}
 	packageID := dep.PackageID
 	if packageID == "" {
@@ -1640,6 +1701,36 @@ func (mr *ModuleResolver) resolveDependencyModule(dep DependencyInfo, modulePath
 		mr.modulePackages[canonicalModulePath] = packageID
 	}
 	return ResolvedImport{FilePath: fullPath, ModulePath: canonicalModulePath, PackageID: packageID}, nil
+}
+
+func resolveContainedModulePath(packageRoot string, modulePath string) (string, error) {
+	if err := validateLogicalImportPath(modulePath); err != nil {
+		return "", err
+	}
+
+	components := strings.Split(modulePath, "/")
+	components[len(components)-1] += ".ard"
+	fullPath := filepath.Join(packageRoot, filepath.Join(components...))
+	rel, err := filepath.Rel(packageRoot, fullPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to verify module path containment: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("invalid import path: module resolves outside package root")
+	}
+
+	current := packageRoot
+	for _, component := range components {
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if err != nil {
+			return "", fmt.Errorf("failed to inspect module path %s: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("module path must not contain a symlink: %s", current)
+		}
+	}
+	return fullPath, nil
 }
 
 func (mr *ModuleResolver) canonicalModulePath(packageID string, packageName string, modulePath string) string {
