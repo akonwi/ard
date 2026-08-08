@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -119,6 +120,131 @@ func TestDependencyOverlayInvalidatesDependent(t *testing.T) {
 	}
 	if len(fa2.Diagnostics) == 0 {
 		t.Fatal("expected arity diagnostic after dependency change")
+	}
+}
+
+func TestAffectedFilesTracksTransitiveDependents(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"ard.toml":  "name = \"proj\"\nard = \">= 0.1.0\"\n",
+		"leaf.ard":  "fn value() Int { 1 }\n",
+		"mid.ard":   "use proj/leaf\n\nfn value() Int { leaf::value() }\n",
+		"main.ard":  "use proj/mid\n\nfn main() { let _ = mid::value() }\n",
+		"other.ard": "fn other() {}\n",
+	})
+	engine := NewEngine(root)
+	ws := NewWorkspace(engine)
+	paths := []string{
+		filepath.Join(root, "leaf.ard"),
+		filepath.Join(root, "main.ard"),
+		filepath.Join(root, "mid.ard"),
+		filepath.Join(root, "other.ard"),
+	}
+	if _, err := ws.Snapshot().Analyze(filepath.Join(root, "main.ard")); err != nil {
+		t.Fatal(err)
+	}
+	if _, complete := engine.AffectedFiles(filepath.Join(root, "leaf.ard"), paths); complete {
+		t.Fatal("dependency information reported complete before every candidate was analyzed")
+	}
+	if _, err := ws.Snapshot().Analyze(filepath.Join(root, "other.ard")); err != nil {
+		t.Fatal(err)
+	}
+
+	got, complete := engine.AffectedFiles(filepath.Join(root, "leaf.ard"), paths)
+	if !complete {
+		t.Fatal("dependency information remained incomplete after every candidate was analyzed")
+	}
+	want := []string{
+		filepath.Join(root, "leaf.ard"),
+		filepath.Join(root, "main.ard"),
+		filepath.Join(root, "mid.ard"),
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("affected files = %#v, want %#v", got, want)
+	}
+}
+
+func TestStaleSnapshotCannotRestoreRemovedDependencyEdge(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"ard.toml": "name = \"proj\"\nard = \">= 0.1.0\"\n",
+		"leaf.ard": "fn value() Int { 1 }\n",
+		"main.ard": "use proj/leaf\n\nfn main() { let _ = leaf::value() }\n",
+	})
+	engine := NewEngine(root)
+	ws := NewWorkspace(engine)
+	mainPath := filepath.Join(root, "main.ard")
+	leafPath := filepath.Join(root, "leaf.ard")
+	old := ws.Snapshot()
+	if _, err := old.Analyze(mainPath); err != nil {
+		t.Fatal(err)
+	}
+
+	ws.SetOverlay(mainPath, "fn main() {}\n")
+	if _, err := ws.Snapshot().Analyze(mainPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Analyze(mainPath); err != nil {
+		t.Fatal(err)
+	}
+
+	got, complete := engine.AffectedFiles(leafPath, []string{leafPath, mainPath})
+	if !complete {
+		t.Fatal("dependency information is incomplete")
+	}
+	if want := []string{leafPath}; !slices.Equal(got, want) {
+		t.Fatalf("affected files after stale analysis = %#v, want %#v", got, want)
+	}
+}
+
+func TestAffectedFilesIsIncompleteForUnresolvedDependencyClosure(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"ard.toml": "name = \"proj\"\nard = \">= 0.1.0\"\n",
+		"main.ard": "use proj/missing\n\nfn main() {}\n",
+	})
+	engine := NewEngine(root)
+	ws := NewWorkspace(engine)
+	mainPath := filepath.Join(root, "main.ard")
+	if _, err := ws.Snapshot().Analyze(mainPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, complete := engine.AffectedFiles(mainPath, []string{mainPath}); complete {
+		t.Fatal("unresolved import closure reported complete dependency information")
+	}
+}
+
+func TestEphemeralAnalysisDoesNotChangeDependencies(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"ard.toml": "name = \"proj\"\nard = \">= 0.1.0\"\n",
+		"leaf.ard": "fn value() Int { 1 }\n",
+		"main.ard": "fn main() {}\n",
+	})
+	engine := NewEngine(root)
+	ws := NewWorkspace(engine)
+	mainPath := filepath.Join(root, "main.ard")
+	leafPath := filepath.Join(root, "leaf.ard")
+	for _, path := range []string{mainPath, leafPath} {
+		if _, err := ws.Snapshot().Analyze(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	candidates := []string{leafPath, mainPath}
+	withImport := "use proj/leaf\n\nfn main() { let _ = leaf::value() }\n"
+	if _, err := ws.Snapshot().WithOverlay(mainPath, withImport).AnalyzeEphemeral(context.Background(), mainPath); err != nil {
+		t.Fatal(err)
+	}
+	if got, complete := engine.AffectedFiles(leafPath, candidates); !complete || !slices.Equal(got, []string{leafPath}) {
+		t.Fatalf("affected files after synthetic import = %#v, complete %t", got, complete)
+	}
+
+	ws.SetOverlay(mainPath, withImport)
+	if _, err := ws.Snapshot().Analyze(mainPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ws.Snapshot().WithOverlay(mainPath, "fn main() {}\n").AnalyzeEphemeral(context.Background(), mainPath); err != nil {
+		t.Fatal(err)
+	}
+	if got, complete := engine.AffectedFiles(leafPath, candidates); !complete || !slices.Equal(got, candidates) {
+		t.Fatalf("affected files after synthetic import removal = %#v, complete %t", got, complete)
 	}
 }
 

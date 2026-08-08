@@ -34,13 +34,15 @@ import (
 type Engine struct {
 	projectRoot string
 
-	mu         sync.Mutex
-	goResolver *lockedGoResolver
-	goModHash  string
-	goPrimed   map[string]bool        // go import paths primed into the session
-	parseCache map[string]*parseEntry // content hash -> parse result
-	checkCache map[string]*FileAnalysis
-	checkCalls map[string]*checkCall // content signature -> in-flight check
+	mu           sync.Mutex
+	goResolver   *lockedGoResolver
+	goModHash    string
+	goPrimed     map[string]bool        // go import paths primed into the session
+	parseCache   map[string]*parseEntry // content hash -> parse result
+	checkCache   map[string]*FileAnalysis
+	checkCalls   map[string]*checkCall // content signature -> in-flight check
+	dependencies map[string]dependencyEntry
+	dependents   map[string]map[string]struct{}
 	// insertion order for simple bounded eviction
 	parseOrder []string
 	checkOrder []string
@@ -67,6 +69,12 @@ type checkCall struct {
 	cache    bool
 }
 
+type dependencyEntry struct {
+	revision uint64
+	known    bool
+	imports  map[string]struct{}
+}
+
 // FileAnalysis is the immutable result of analyzing one file. It retains
 // only what features consume — not the whole Checker — so the bounded cache
 // stays small.
@@ -90,10 +98,12 @@ type FileAnalysis struct {
 // NewEngine creates an engine rooted at the given project directory.
 func NewEngine(projectRoot string) *Engine {
 	return &Engine{
-		projectRoot: projectRoot,
-		parseCache:  map[string]*parseEntry{},
-		checkCache:  map[string]*FileAnalysis{},
-		checkCalls:  map[string]*checkCall{},
+		projectRoot:  projectRoot,
+		parseCache:   map[string]*parseEntry{},
+		checkCache:   map[string]*FileAnalysis{},
+		checkCalls:   map[string]*checkCall{},
+		dependencies: map[string]dependencyEntry{},
+		dependents:   map[string]map[string]struct{}{},
 	}
 }
 
@@ -388,6 +398,7 @@ func (s *Snapshot) analyze(ctx context.Context, filePath string, cache bool) (an
 		return nil, fmt.Errorf("parse returned no program for %s", filePath)
 	}
 	if len(entry.errors) > 0 && cache {
+		s.engine.updateDependencies(filePath, nil, s.revision, false)
 		// Parse errors block checking on the cached path; not cached in
 		// checkCache because the parse cache already makes this cheap.
 		// Ephemeral (tooling-patched) analyses continue: signature help and
@@ -405,10 +416,13 @@ func (s *Snapshot) analyze(ctx context.Context, filePath string, cache bool) (an
 	}
 	moduleResolver, relPath, err := s.newModuleResolver(filePath)
 	if err != nil {
+		if cache {
+			s.engine.updateDependencies(filePath, nil, s.revision, false)
+		}
 		return nil, err
 	}
 
-	sig := s.signature(filePath, content, entry.program, moduleResolver, relPath)
+	sig := s.signature(filePath, content, entry.program, moduleResolver, relPath, cache)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -491,6 +505,90 @@ func runCheckSafely(run func() (*FileAnalysis, error)) (analysis *FileAnalysis, 
 	return run()
 }
 
+func (e *Engine) updateDependencies(filePath string, imports []string, revision uint64, known bool) {
+	filePath = filepath.Clean(filePath)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	previous, exists := e.dependencies[filePath]
+	if exists && previous.revision > revision {
+		return
+	}
+	for imported := range previous.imports {
+		delete(e.dependents[imported], filePath)
+		if len(e.dependents[imported]) == 0 {
+			delete(e.dependents, imported)
+		}
+	}
+	entry := dependencyEntry{revision: revision, known: known, imports: map[string]struct{}{}}
+	if known {
+		for _, imported := range imports {
+			imported = filepath.Clean(imported)
+			if imported == filePath {
+				continue
+			}
+			entry.imports[imported] = struct{}{}
+			if e.dependents[imported] == nil {
+				e.dependents[imported] = map[string]struct{}{}
+			}
+			e.dependents[imported][filePath] = struct{}{}
+		}
+	}
+	e.dependencies[filePath] = entry
+}
+
+// AffectedFiles returns candidate files equal to or transitively dependent on
+// changedPath. complete is false when any candidate's import closure has not
+// been resolved successfully, so callers can safely fall back to broader
+// invalidation.
+func (e *Engine) AffectedFiles(changedPath string, candidates []string) (affected []string, complete bool) {
+	changedPath = filepath.Clean(changedPath)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	candidateSet := make(map[string]struct{}, len(candidates))
+	known := make(map[string]struct{}, len(candidates))
+	queue := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = filepath.Clean(candidate)
+		candidateSet[candidate] = struct{}{}
+		queue = append(queue, candidate)
+	}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if _, ok := known[current]; ok {
+			continue
+		}
+		known[current] = struct{}{}
+		entry, ok := e.dependencies[current]
+		if !ok || !entry.known {
+			return nil, false
+		}
+		for imported := range entry.imports {
+			queue = append(queue, imported)
+		}
+	}
+	seen := map[string]struct{}{changedPath: {}}
+	queue = []string{changedPath}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for dependent := range e.dependents[current] {
+			if _, ok := seen[dependent]; ok {
+				continue
+			}
+			seen[dependent] = struct{}{}
+			queue = append(queue, dependent)
+		}
+	}
+	for filePath := range seen {
+		if _, ok := candidateSet[filePath]; ok {
+			affected = append(affected, filePath)
+		}
+	}
+	sort.Strings(affected)
+	return affected, true
+}
+
 // newModuleResolver builds a resolver rooted at the project with snapshot
 // overlays applied, and returns the file's project-relative module path.
 func (s *Snapshot) newModuleResolver(filePath string) (*checker.ModuleResolver, string, error) {
@@ -548,7 +646,7 @@ func (s *Snapshot) check(filePath string, relPath string, program *parse.Program
 //
 // Standard-library imports (ard/*) are skipped: the stdlib is embedded in the
 // compiler binary and immutable for the lifetime of the LSP process.
-func (s *Snapshot) signature(filePath string, content []byte, program *parse.Program, moduleResolver *checker.ModuleResolver, relPath string) string {
+func (s *Snapshot) signature(filePath string, content []byte, program *parse.Program, moduleResolver *checker.ModuleResolver, relPath string, trackDependencies bool) string {
 	h := sha256.New()
 	h.Write([]byte(filePath))
 	h.Write([]byte{0})
@@ -556,8 +654,8 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 	h.Write([]byte{0})
 
 	seen := map[string]bool{filePath: true}
-	var visit func(prog *parse.Program, importerModulePath string)
-	visit = func(prog *parse.Program, importerModulePath string) {
+	var visit func(prog *parse.Program, importerModulePath string, importerFilePath string)
+	visit = func(prog *parse.Program, importerModulePath string, importerFilePath string) {
 		if prog == nil {
 			return
 		}
@@ -566,12 +664,14 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 			module string
 		}
 		deps := make([]dep, 0, len(prog.Imports))
+		known := true
 		for _, imp := range prog.Imports {
 			if imp.Kind == parse.ImportKindGo || strings.HasPrefix(imp.Path, "ard/") {
 				continue
 			}
 			resolved, err := moduleResolver.ResolveImport(importerModulePath, imp.Path)
 			if err != nil || resolved.FilePath == "" {
+				known = false
 				// Unresolvable imports still influence the hash so adding the
 				// missing module later invalidates this analysis.
 				h.Write([]byte(imp.Path))
@@ -582,6 +682,13 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 			deps = append(deps, dep{file: resolved.FilePath, module: resolved.ModulePath})
 		}
 		sort.Slice(deps, func(a, b int) bool { return deps[a].file < deps[b].file })
+		if trackDependencies {
+			imports := make([]string, 0, len(deps))
+			for _, dependency := range deps {
+				imports = append(imports, dependency.file)
+			}
+			s.engine.updateDependencies(importerFilePath, imports, s.revision, known)
+		}
 		for _, d := range deps {
 			if seen[d.file] {
 				continue
@@ -589,6 +696,9 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 			seen[d.file] = true
 			depContent, err := s.Content(d.file)
 			if err != nil {
+				if trackDependencies {
+					s.engine.updateDependencies(d.file, nil, s.revision, false)
+				}
 				h.Write([]byte(d.file))
 				h.Write([]byte(":missing"))
 				h.Write([]byte{0})
@@ -599,10 +709,16 @@ func (s *Snapshot) signature(filePath string, content []byte, program *parse.Pro
 			h.Write(depContent)
 			h.Write([]byte{0})
 			entry := s.engine.parseFile(depContent, d.file)
-			visit(entry.program, d.module)
+			if len(entry.errors) > 0 {
+				if trackDependencies {
+					s.engine.updateDependencies(d.file, nil, s.revision, false)
+				}
+				continue
+			}
+			visit(entry.program, d.module, d.file)
 		}
 	}
-	visit(program, strings.TrimSuffix(relPath, ".ard"))
+	visit(program, strings.TrimSuffix(relPath, ".ard"), filePath)
 
 	// Project manifest and Go module metadata participate so dependency and
 	// FFI configuration changes invalidate checks.

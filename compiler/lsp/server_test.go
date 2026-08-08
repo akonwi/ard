@@ -288,6 +288,90 @@ func TestDocumentSyncSchedulesDiagnosticsForAllOpenDocuments(t *testing.T) {
 	})
 }
 
+func TestDidChangeSchedulesOnlyAffectedOpenDocuments(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"ard.toml":      "name = \"app\"\nard = \">= 0.1.0\"\n",
+		"main.ard":      "use app/mid\n\nfn main() { let _ = mid::value() }\n",
+		"mid.ard":       "use app/tools\n\nfn value() Int { tools::value() }\n",
+		"tools.ard":     "fn value() Int { 1 }\n",
+		"unrelated.ard": "fn unrelated() {}\n",
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := NewServer()
+	server.projectRoot = root
+	mainURI := uri.File(filepath.Join(root, "main.ard"))
+	toolsURI := uri.File(filepath.Join(root, "tools.ard"))
+	unrelatedURI := uri.File(filepath.Join(root, "unrelated.ard"))
+	server.documentStateMu.Lock()
+	for docURI, source := range map[uri.URI]string{
+		mainURI:      files["main.ard"],
+		toolsURI:     files["tools.ard"],
+		unrelatedURI: files["unrelated.ard"],
+	} {
+		server.cache.Open(docURI, "ard", 1, source)
+		server.syncOverlay(docURI, source)
+	}
+	server.documentStateMu.Unlock()
+	for _, docURI := range []uri.URI{mainURI, toolsURI, unrelatedURI} {
+		if _, err := server.analyzeSnapshot(context.Background(), docURI); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	server.diagnosticsDelay = 0
+	scheduled := make(chan uri.URI, 4)
+	server.diagnosticsPublisher = func(ctx context.Context, docURI uri.URI) {
+		scheduled <- docURI
+	}
+	updatedTools := "fn value() Int { 2 }\n"
+	req, err := jsonrpc2.NewCall(jsonrpc2.NewNumberID(1), protocol.MethodTextDocumentDidChange, didChangeParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: toolsURI},
+			Version:                2,
+		},
+		ContentChanges: []documentContentChange{{Text: updatedTools}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply := jsonrpc2.Replier(func(ctx context.Context, result interface{}, err error) error { return err })
+	if err := server.handleDidChange(context.Background(), reply, req); err != nil {
+		t.Fatal(err)
+	}
+
+	assertOnlyScheduledDiagnostics(t, scheduled, mainURI, toolsURI)
+}
+
+func assertOnlyScheduledDiagnostics(t *testing.T, scheduled <-chan uri.URI, expected ...uri.URI) {
+	t.Helper()
+	remaining := map[uri.URI]bool{}
+	for _, docURI := range expected {
+		remaining[docURI] = true
+	}
+	deadline := time.After(time.Second)
+	for len(remaining) > 0 {
+		select {
+		case got := <-scheduled:
+			if !remaining[got] {
+				t.Fatalf("unexpected diagnostics scheduled for %s", got)
+			}
+			delete(remaining, got)
+		case <-deadline:
+			t.Fatalf("missing scheduled diagnostics for %#v", remaining)
+		}
+	}
+	select {
+	case got := <-scheduled:
+		t.Fatalf("unexpected extra diagnostics scheduled for %s", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestScheduleDiagnosticsCancelsSupersededRun(t *testing.T) {
 	server := NewServer()
 	server.diagnosticsDelay = 10 * time.Millisecond

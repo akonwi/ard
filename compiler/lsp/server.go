@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -389,6 +390,35 @@ func (s *Server) scheduleDiagnosticsForOpenDocuments() {
 	}
 }
 
+func (s *Server) scheduleDiagnosticsForAffectedOpenDocuments(changedURI uri.URI) {
+	changedPath, err := filePathFromURI(changedURI)
+	if err != nil {
+		s.scheduleDiagnosticsForOpenDocuments()
+		return
+	}
+	docs := s.cache.Snapshot()
+	paths := make([]string, 0, len(docs))
+	uriByPath := make(map[string]uri.URI, len(docs))
+	for _, doc := range docs {
+		path, err := filePathFromURI(doc.URI)
+		if err != nil {
+			s.scheduleDiagnosticsForOpenDocuments()
+			return
+		}
+		path = filepath.Clean(path)
+		paths = append(paths, path)
+		uriByPath[path] = doc.URI
+	}
+	affected, complete := s.workspaceFor(changedPath).Engine().AffectedFiles(changedPath, paths)
+	if !complete {
+		s.scheduleDiagnosticsForOpenDocuments()
+		return
+	}
+	for _, path := range affected {
+		s.scheduleDiagnostics(uriByPath[path])
+	}
+}
+
 func (s *Server) runDiagnostics(docURI uri.URI, job *diagnosticJob) {
 	s.diagnosticsMu.Lock()
 	if s.diagnosticJobs[docURI] != job {
@@ -480,7 +510,7 @@ func (s *Server) handleDidChange(ctx context.Context, reply jsonrpc2.Replier, re
 		return reply(ctx, nil, fmt.Errorf("invalid document change: %w", changeErr))
 	}
 
-	s.scheduleDiagnosticsForOpenDocuments()
+	s.scheduleDiagnosticsForAffectedOpenDocuments(params.TextDocument.URI)
 
 	return reply(ctx, nil, nil)
 }
