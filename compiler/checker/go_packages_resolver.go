@@ -154,7 +154,6 @@ func (r *GoPackagesResolver) loadConfig() *packages.Config {
 	cfg := &packages.Config{
 		Mode: packages.NeedName |
 			packages.NeedTypes |
-			packages.NeedTypesInfo |
 			packages.NeedImports |
 			packages.NeedDeps |
 			packages.NeedFiles,
