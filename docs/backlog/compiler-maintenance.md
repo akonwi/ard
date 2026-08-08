@@ -14,7 +14,7 @@ Statuses: `planned`, `in progress`, `completed`, or `deferred`.
 | --- | --- | --- | --- |
 | COMP-001 | P0 | completed | Cache checked embedded standard-library modules |
 | COMP-002 | P1 | completed | Make AIR fully typed and Go lowering read-only |
-| COMP-003 | P1 | planned | Finish the ADR 0057 AIR representation migration |
+| COMP-003 | P1 | completed | Finish the ADR 0057 AIR representation migration |
 | COMP-004 | P0 | planned | Contain module imports within package roots and propagate filesystem errors |
 | COMP-005 | P1 | planned | Complete LSP cancellation and dependency-aware invalidation |
 | COMP-006 | P1 | planned | Stop silently returning incomplete project-wide references and renames |
@@ -83,17 +83,30 @@ both recorded 16,404 allocations/op. Command: `go test ./go -run '^$' -bench
 
 ## COMP-003: Finish the ADR 0057 AIR representation migration
 
-`TypeReference` is canonical, but AIR and Go lowering still consume parallel
-compatibility metadata such as `Param.Mutable`, `ReturnReference`,
-`ParamMutable`, and `ElemMutable`. Some separate storage metadata is necessary,
-but reference type identity and foreign ABI shape should not compete.
+**Status:** completed. AIR now represents reference type identity solely with
+`TypeReference`. Binding mutability, local live-storage provenance, and capture
+modes remain separate storage semantics. Foreign descriptor-value boundaries
+use the per-parameter `ABIParamMode` projection, while exact foreign pointer
+types retain their canonical foreign type identity; result adaptation continues
+to use the single `ForeignResultShape` projection.
+
+The migration removed `Param.Mutable`, `ReturnReference`, `ParamMutable`,
+`ElemMutable`, `FieldInfo.Mutable`, the function-level foreign ABI flag, and the
+duplicate foreign-expression argument mode. AIR validation checks ABI mode
+cardinality and rejects descriptor-value projections unless the parameter is a
+reference to a supported slice or map descriptor. Contradictory legacy
+reference combinations are no longer structurally representable.
 
 Bounded outcome:
 
-- Define one normalized foreign ABI classification for parameters and results.
-- Keep binding mutability and capture modes as storage semantics.
-- Remove compatibility fields as consumers migrate.
-- Reject contradictory AIR combinations during validation.
+- [x] Normalize descriptor parameter ABI projection alongside the existing
+  normalized foreign result shape.
+- [x] Keep binding mutability and capture modes as storage semantics.
+- [x] Migrate Go lowering to canonical reference types and normalized ABI
+  metadata without compatibility fallbacks.
+- [x] Remove compatibility fields after producers and consumers migrate.
+- [x] Reject malformed ABI/type combinations during AIR validation.
+- [x] Verify AIR, checker, Go target, and full compiler tests pass.
 
 ## COMP-004: Contain imports and propagate filesystem errors
 

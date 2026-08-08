@@ -419,13 +419,12 @@ func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (Fu
 		if err != nil {
 			return NoFunction, err
 		}
-		params[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable}
+		params[i] = Param{Name: param.Name, Type: typeID, ABI: lowerABIParamMode(param)}
 	}
 	returnType, err := l.internType(def.ReturnType)
 	if err != nil {
 		return NoFunction, err
 	}
-	returnReference := isMutableReferenceType(def.ReturnType)
 	id := FunctionID(len(l.program.Functions))
 	l.functions[key] = id
 	l.program.Functions = append(l.program.Functions, Function{
@@ -433,13 +432,11 @@ func (l *lowerer) declareFunction(module ModuleID, def *checker.FunctionDef) (Fu
 		Module: module,
 		Name:   def.Name,
 		Signature: Signature{
-			Params:          params,
-			Return:          returnType,
-			ReturnReference: returnReference,
+			Params: params,
+			Return: returnType,
 		},
-		IsTest:     def.IsTest,
-		Private:    def.Private,
-		ForeignABI: def.ForeignABI,
+		IsTest:  def.IsTest,
+		Private: def.Private,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	if def.Name == "main" {
@@ -485,13 +482,12 @@ func (l *lowerer) declareFunctionSpecializationWithSignatureAndGenericKey(module
 	id := FunctionID(len(l.program.Functions))
 	l.functions[key] = id
 	l.program.Functions = append(l.program.Functions, Function{
-		ID:         id,
-		Module:     module,
-		Name:       def.Name,
-		Signature:  signature,
-		IsTest:     def.IsTest,
-		Private:    def.Private,
-		ForeignABI: def.ForeignABI,
+		ID:        id,
+		Module:    module,
+		Name:      def.Name,
+		Signature: signature,
+		IsTest:    def.IsTest,
+		Private:   def.Private,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	return id, nil
@@ -575,7 +571,6 @@ func (l *lowerer) declareGenericFunctionDef(module ModuleID, callDef *checker.Fu
 		TypeParams: goParams,
 		IsTest:     def.IsTest,
 		Private:    def.Private,
-		ForeignABI: def.ForeignABI,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
 	typeVars := make(map[string]TypeID, len(params))
@@ -642,16 +637,11 @@ func (l *lowerer) declareClosureFunction(module ModuleID, keyName string, def *c
 	}
 	params := make([]Param, len(def.Parameters))
 	for i, param := range def.Parameters {
-		// Match the expected function type's interned parameter shape exactly so
-		// the closure's Go signature agrees with it. The expected type already
-		// reconciled the two `mut T` representations via internFunctionParamType.
-		mutable := param.Mutable
-		if i < len(typeInfo.ParamMutable) {
-			mutable = typeInfo.ParamMutable[i]
-		}
-		params[i] = Param{Name: param.Name, Type: typeInfo.Params[i], Mutable: mutable}
+		// Match the expected function type's canonical parameter shape exactly so
+		// the closure's Go signature agrees with it.
+		params[i] = Param{Name: param.Name, Type: typeInfo.Params[i]}
 	}
-	signature := Signature{Params: params, Return: typeInfo.Return, ReturnReference: typeInfo.ReturnReference}
+	signature := Signature{Params: params, Return: typeInfo.Return}
 	key := concreteFunctionKey(module, keyName, signature, "")
 	if id, ok := l.functions[key]; ok {
 		return id, nil
@@ -668,16 +658,21 @@ func (l *lowerer) declareClosureFunction(module ModuleID, keyName string, def *c
 	return id, nil
 }
 
-func lowerForeignArgModes(params []checker.Parameter, count int) []ForeignArgMode {
-	modes := make([]ForeignArgMode, count)
+func lowerABIParamMode(param checker.Parameter) ABIParamMode {
+	if param.ForeignABI == checker.ForeignParameterDescriptorValue {
+		return ABIParamDescriptorValue
+	}
+	return ABIParamExact
+}
+
+func lowerABIParamModes(params []checker.Parameter, count int) []ABIParamMode {
+	modes := make([]ABIParamMode, count)
 	for index := 0; index < count && len(params) > 0; index++ {
 		paramIndex := index
 		if paramIndex >= len(params) {
 			paramIndex = len(params) - 1
 		}
-		if params[paramIndex].ForeignABI == checker.ForeignParameterDescriptorValue {
-			modes[index] = ForeignArgDescriptorValue
-		}
+		modes[index] = lowerABIParamMode(params[paramIndex])
 	}
 	return modes
 }
@@ -722,8 +717,13 @@ func (l *lowerer) declareGoAdapterFunction(module ModuleID, value *checker.Forei
 		locals[i] = Local{ID: LocalID(i), Name: name, Type: paramType}
 		loads[i] = Expr{Kind: ExprLoadLocal, Type: paramType, Local: LocalID(i)}
 	}
+	var foreignParams []checker.Parameter
+	if def, ok := value.ValueType.(*checker.FunctionDef); ok {
+		foreignParams = def.Parameters
+	}
 	foreignCall := func(args []Expr) *Expr {
-		return &Expr{Kind: ExprForeignCall, Type: typeInfo.Return, ForeignTarget: value.Target, ForeignNamespace: value.Namespace, ForeignQualifier: value.Qualifier, ForeignSymbol: value.Symbol, ForeignResultShape: lowerForeignResultShape(value.ForeignResultShape), Args: args}
+		argABI := lowerABIParamModes(foreignParams, len(args))
+		return &Expr{Kind: ExprForeignCall, Type: typeInfo.Return, ForeignTarget: value.Target, ForeignNamespace: value.Namespace, ForeignQualifier: value.Qualifier, ForeignSymbol: value.Symbol, ForeignResultShape: lowerForeignResultShape(value.ForeignResultShape), ForeignArgABI: argABI, Args: args}
 	}
 	var result *Expr
 	if value.VariadicAdapter {
@@ -763,7 +763,7 @@ func (l *lowerer) declareGoAdapterFunction(module ModuleID, value *checker.Forei
 		ID:        id,
 		Module:    module,
 		Name:      fmt.Sprintf("go_adapter_%s_%s", sanitizeAdapterName(value.Qualifier), value.Symbol),
-		Signature: Signature{Params: params, Return: typeInfo.Return, ReturnReference: typeInfo.ReturnReference},
+		Signature: Signature{Params: params, Return: typeInfo.Return},
 		Locals:    locals,
 		Body:      Block{Result: result},
 		Private:   true,
@@ -828,7 +828,7 @@ func (l *lowerer) lowerFunctionByID(id FunctionID, def *checker.FunctionDef) err
 	fn := l.program.Functions[id]
 	fl := l.newFunctionLowerer(&fn, def, nil)
 	for _, param := range fn.Signature.Params {
-		fl.defineLocal(param.Name, param.Type, param.Mutable)
+		fl.defineLocal(param.Name, param.Type, false)
 	}
 	if def.Body == nil {
 		l.program.Functions[id] = fn
@@ -1099,26 +1099,13 @@ func (fl *functionLowerer) internResolvedStructType(typ *checker.StructDef) (Typ
 }
 
 // internFunctionParamType preserves first-class reference identity in the
-// parameter TypeID. Mutable remains a derived compatibility flag for targets
-// that have not yet migrated off the pre-ADR AIR shape.
-func (l *lowerer) internFunctionParamType(param checker.Parameter, intern func(checker.Type) (TypeID, error)) (TypeID, bool, error) {
-	mutable := param.Mutable
-	if _, ok := param.Type.(*checker.MutableRef); ok {
-		mutable = true
-	}
-	// An exact foreign pointer remains a foreign pointer type rather than an
-	// Ard TypeReference, but still carries the legacy parameter flag.
-	if foreign, ok := param.Type.(*checker.ForeignType); ok && foreign.Pointer {
-		mutable = true
-	}
-	id, err := intern(param.Type)
-	return id, mutable, err
+// parameter TypeID.
+func (l *lowerer) internFunctionParamType(param checker.Parameter, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
+	return intern(param.Type)
 }
 
-func (l *lowerer) internStructFieldType(fieldTypeValue checker.Type, intern func(checker.Type) (TypeID, error)) (TypeID, bool, error) {
-	_, reference := fieldTypeValue.(*checker.MutableRef)
-	id, err := intern(fieldTypeValue)
-	return id, reference, err
+func (l *lowerer) internStructFieldType(fieldTypeValue checker.Type, intern func(checker.Type) (TypeID, error)) (TypeID, error) {
+	return intern(fieldTypeValue)
 }
 
 func nominalStructApplicationKey(modulePath, name string, args []TypeID) string {
@@ -1269,11 +1256,11 @@ func (l *lowerer) internStructApplicationWithInterner(typ *checker.StructDef, in
 	fields := sortedFieldNames(structFields)
 	info.Fields = make([]FieldInfo, len(fields))
 	for i, fieldName := range fields {
-		fieldType, fieldMutable, err := l.internStructFieldType(structFields[fieldName], intern)
+		fieldType, err := l.internStructFieldType(structFields[fieldName], intern)
 		if err != nil {
 			return NoType, err
 		}
-		info.Fields[i] = FieldInfo{Name: fieldName, Type: fieldType, Index: i, Mutable: fieldMutable}
+		info.Fields[i] = FieldInfo{Name: fieldName, Type: fieldType, Index: i}
 	}
 	l.program.Types[idx] = info
 	return id, nil
@@ -1358,11 +1345,11 @@ func (fl *functionLowerer) internStructTypeWithInterner(typ *checker.StructDef, 
 	fields := sortedFieldNames(structFields)
 	info.Fields = make([]FieldInfo, len(fields))
 	for i, fieldName := range fields {
-		fieldType, fieldMutable, err := fl.l.internStructFieldType(structFields[fieldName], intern)
+		fieldType, err := fl.l.internStructFieldType(structFields[fieldName], intern)
 		if err != nil {
 			return NoType, err
 		}
-		info.Fields[i] = FieldInfo{Name: fieldName, Type: fieldType, Index: i, Mutable: fieldMutable}
+		info.Fields[i] = FieldInfo{Name: fieldName, Type: fieldType, Index: i}
 	}
 	fl.l.program.Types[idx] = info
 	return id, nil
@@ -1438,14 +1425,12 @@ func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, 
 		return fl.l.internSyntheticType(fl.l.typeName(value)+"!"+fl.l.typeName(errType), TypeInfo{Kind: TypeResult, Value: value, Error: errType})
 	case *checker.FunctionDef:
 		params := make([]TypeID, len(typ.Parameters))
-		mutable := make([]bool, len(typ.Parameters))
 		for i, param := range typ.Parameters {
-			paramType, paramMut, err := fl.l.internFunctionParamType(param, fl.internResolvedType)
+			paramType, err := fl.l.internFunctionParamType(param, fl.internResolvedType)
 			if err != nil {
 				return NoType, err
 			}
 			params[i] = paramType
-			mutable[i] = paramMut
 		}
 		returnType, err := fl.internResolvedType(typ.ReturnType)
 		if err != nil {
@@ -1459,8 +1444,7 @@ func (fl *functionLowerer) internResolvedCompositeType(t checker.Type) (TypeID, 
 			name += fl.l.typeName(param)
 		}
 		name += ") " + fl.l.typeName(returnType)
-		returnReference := isMutableReferenceType(typ.ReturnType)
-		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeFunction, Params: params, ParamMutable: mutable, Return: returnType, ReturnReference: returnReference})
+		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeFunction, Params: params, Return: returnType})
 	}
 	return NoType, fmt.Errorf("unresolved generic type variable in %s", t.String())
 }
@@ -1535,14 +1519,12 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 		return fl.l.internSyntheticType(fl.l.typeName(value)+"!"+fl.l.typeName(errType), TypeInfo{Kind: TypeResult, Value: value, Error: errType})
 	case *checker.FunctionDef:
 		params := make([]TypeID, len(typ.Parameters))
-		mutable := make([]bool, len(typ.Parameters))
 		for i, param := range typ.Parameters {
-			paramType, paramMut, err := fl.l.internFunctionParamType(param, fl.internType)
+			paramType, err := fl.l.internFunctionParamType(param, fl.internType)
 			if err != nil {
 				return NoType, err
 			}
 			params[i] = paramType
-			mutable[i] = paramMut
 		}
 		returnType, err := fl.internType(typ.ReturnType)
 		if err != nil {
@@ -1556,8 +1538,7 @@ func (fl *functionLowerer) internCompositeType(t checker.Type) (TypeID, error) {
 			name += fl.l.typeName(param)
 		}
 		name += ") " + fl.l.typeName(returnType)
-		returnReference := isMutableReferenceType(typ.ReturnType)
-		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeFunction, Params: params, ParamMutable: mutable, Return: returnType, ReturnReference: returnReference})
+		return fl.l.internSyntheticType(name, TypeInfo{Kind: TypeFunction, Params: params, Return: returnType})
 	default:
 		return fl.l.internType(t)
 	}
@@ -1764,20 +1745,18 @@ func (l *lowerer) declareMethodFunction(module ModuleID, owner checker.Type, tra
 		return NoFunction, err
 	}
 	params := make([]Param, 0, len(def.Parameters)+1)
-	params = append(params, Param{Name: receiver, Type: receiverType, Mutable: def.Mutates})
+	params = append(params, Param{Name: receiver, Type: receiverType})
 	for _, param := range def.Parameters {
 		typeID, err := l.internType(param.Type)
 		if err != nil {
 			return NoFunction, err
 		}
-		params = append(params, Param{Name: param.Name, Type: typeID, Mutable: param.Mutable})
+		params = append(params, Param{Name: param.Name, Type: typeID, ABI: lowerABIParamMode(param)})
 	}
 	returnType, err := l.internType(def.ReturnType)
 	if err != nil {
 		return NoFunction, err
 	}
-	returnReference := isMutableReferenceType(def.ReturnType)
-
 	id := FunctionID(len(l.program.Functions))
 	l.functions[key] = id
 	l.program.Functions = append(l.program.Functions, Function{
@@ -1786,11 +1765,9 @@ func (l *lowerer) declareMethodFunction(module ModuleID, owner checker.Type, tra
 		Name:       owner.String() + "." + traitName + "." + def.Name,
 		Receiver:   ownerType,
 		MethodName: def.Name,
-		ForeignABI: def.ForeignABI,
 		Signature: Signature{
-			Params:          params,
-			Return:          returnType,
-			ReturnReference: returnReference,
+			Params: params,
+			Return: returnType,
 		},
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
@@ -1804,7 +1781,7 @@ func (l *lowerer) lowerMethodFunction(id FunctionID, def *checker.FunctionDef) e
 	fn := l.program.Functions[id]
 	fl := l.newFunctionLowerer(&fn, def, nil)
 	for _, param := range fn.Signature.Params {
-		fl.defineLocal(param.Name, param.Type, param.Mutable)
+		fl.defineLocal(param.Name, param.Type, false)
 	}
 	if def.Body != nil {
 		body, err := fl.lowerBlock(def.Body.Stmts)
@@ -1827,7 +1804,7 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 		return NoFunction, err
 	}
 	params := make([]Param, 0, len(def.Parameters)+1)
-	params = append(params, Param{Name: receiver, Type: receiverType, Mutable: def.Mutates})
+	params = append(params, Param{Name: receiver, Type: receiverType})
 	for i, param := range def.Parameters {
 		paramType := param.Type
 		if typeHasUnresolvedTypeVar(paramType) && i < len(args) {
@@ -1837,7 +1814,7 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 		if err != nil {
 			return NoFunction, err
 		}
-		params = append(params, Param{Name: param.Name, Type: typeID, Mutable: param.Mutable})
+		params = append(params, Param{Name: param.Name, Type: typeID, ABI: lowerABIParamMode(param)})
 	}
 	if !validTypeID(&l.program, returnType) {
 		var err error
@@ -1847,8 +1824,7 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 		}
 	}
 
-	returnReference := isMutableReferenceType(def.ReturnType)
-	signature := Signature{Params: params, Return: returnType, ReturnReference: returnReference}
+	signature := Signature{Params: params, Return: returnType}
 	genericKey, err := l.genericBindingsKey(def)
 	if err != nil {
 		return NoFunction, err
@@ -1866,7 +1842,6 @@ func (l *lowerer) declareInstanceMethodFunction(module ModuleID, ownerName strin
 		Name:       ownerName + "." + def.Name,
 		Receiver:   ownerType,
 		MethodName: def.Name,
-		ForeignABI: def.ForeignABI,
 		Signature:  signature,
 	})
 	l.program.Modules[module].Functions = appendUniqueFunction(l.program.Modules[module].Functions, id)
@@ -1883,7 +1858,7 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 		return NoFunction, err
 	}
 	params := make([]Param, 0, len(def.Parameters)+1)
-	params = append(params, Param{Name: receiver, Type: receiverType, Mutable: def.Mutates})
+	params = append(params, Param{Name: receiver, Type: receiverType})
 	for i, param := range def.Parameters {
 		paramType := param.Type
 		if typeHasUnresolvedTypeVar(paramType) && i < len(args) {
@@ -1893,7 +1868,7 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 		if err != nil {
 			return NoFunction, err
 		}
-		params = append(params, Param{Name: param.Name, Type: typeID, Mutable: param.Mutable})
+		params = append(params, Param{Name: param.Name, Type: typeID, ABI: lowerABIParamMode(param)})
 	}
 	if !validTypeID(&fl.l.program, returnType) {
 		var err error
@@ -1903,8 +1878,7 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 		}
 	}
 
-	returnReference := isMutableReferenceType(def.ReturnType)
-	signature := Signature{Params: params, Return: returnType, ReturnReference: returnReference}
+	signature := Signature{Params: params, Return: returnType}
 	genericKey, typeVars, err := fl.genericBindingsKeyAndTypeVars(def)
 	if err != nil {
 		return NoFunction, err
@@ -1924,7 +1898,6 @@ func (fl *functionLowerer) declareInstanceMethodFunction(module ModuleID, ownerN
 		Name:       ownerName + "." + def.Name,
 		Receiver:   ownerType,
 		MethodName: def.Name,
-		ForeignABI: def.ForeignABI,
 		Signature:  signature,
 	})
 	fl.l.program.Modules[module].Functions = appendUniqueFunction(fl.l.program.Modules[module].Functions, id)
@@ -2042,7 +2015,7 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 		return NoFunction, nil, err
 	}
 	methodParams := make([]Param, 0, len(orig.Parameters)+1)
-	methodParams = append(methodParams, Param{Name: receiver, Type: receiverType, Mutable: orig.Mutates})
+	methodParams = append(methodParams, Param{Name: receiver, Type: receiverType})
 	for _, p := range orig.Parameters {
 		tid, err := fl.l.internType(p.Type)
 		if err != nil {
@@ -2050,7 +2023,7 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 			fl.l.defParamOwner = prevOwner
 			return NoFunction, nil, err
 		}
-		methodParams = append(methodParams, Param{Name: p.Name, Type: tid, Mutable: p.Mutable})
+		methodParams = append(methodParams, Param{Name: p.Name, Type: tid, ABI: lowerABIParamMode(p)})
 	}
 	returnType, err := fl.l.internType(orig.ReturnType)
 	fl.l.defParams = prev
@@ -2059,8 +2032,7 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 		return NoFunction, nil, err
 	}
 
-	returnReference := isMutableReferenceType(orig.ReturnType)
-	signature := Signature{Params: methodParams, Return: returnType, ReturnReference: returnReference}
+	signature := Signature{Params: methodParams, Return: returnType}
 	id := FunctionID(len(fl.l.program.Functions))
 	fl.l.genericMethodDefs[key] = id
 	fl.l.functions[concreteFunctionKey(module, structDef.Name+"."+callDef.Name, signature, "genericmethod")] = id
@@ -2070,7 +2042,6 @@ func (fl *functionLowerer) declareGenericInstanceMethodFunction(module ModuleID,
 		Name:       structDef.Name + "." + callDef.Name,
 		Receiver:   recvType,
 		MethodName: callDef.Name,
-		ForeignABI: orig.ForeignABI,
 		Signature:  signature,
 		TypeParams: paramNames,
 	})
@@ -2132,14 +2103,13 @@ func signatureForCallWithInterner(call *checker.FunctionCall, intern func(checke
 			if err != nil {
 				return Signature{}, err
 			}
-			params[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable}
+			params[i] = Param{Name: param.Name, Type: typeID, ABI: lowerABIParamMode(param)}
 		}
 		returnType, err := intern(call.Type())
 		if err != nil {
 			return Signature{}, err
 		}
-		returnReference := isMutableReferenceType(call.Type())
-		return Signature{Params: params, Return: returnType, ReturnReference: returnReference}, nil
+		return Signature{Params: params, Return: returnType}, nil
 	}
 	params := make([]Param, len(call.Args))
 	for i, arg := range call.Args {
@@ -2153,8 +2123,7 @@ func signatureForCallWithInterner(call *checker.FunctionCall, intern func(checke
 	if err != nil {
 		return Signature{}, err
 	}
-	returnReference := isMutableReferenceType(call.Type())
-	return Signature{Params: params, Return: returnType, ReturnReference: returnReference}, nil
+	return Signature{Params: params, Return: returnType}, nil
 }
 
 func genericStructDefKey(modulePath, name string) string {
@@ -2207,18 +2176,13 @@ func (l *lowerer) internGenericStructDef(typ *checker.StructDef) (TypeID, error)
 	info.Fields = make([]FieldInfo, len(fieldNames))
 	for i, name := range fieldNames {
 		ft := typ.Fields[name]
-		mut := false
-		if ref, ok := ft.(*checker.MutableRef); ok {
-			ft = ref.Of()
-			mut = true
-		}
-		ftid, err := l.internType(ft)
+		ftid, err := l.internStructFieldType(ft, l.internType)
 		if err != nil {
 			l.defParams = prev
 			l.defParamOwner = prevOwner
 			return NoType, err
 		}
-		info.Fields[i] = FieldInfo{Name: name, Type: ftid, Index: i, Mutable: mut}
+		info.Fields[i] = FieldInfo{Name: name, Type: ftid, Index: i}
 	}
 	l.defParams = prev
 	l.defParamOwner = prevOwner
@@ -2424,11 +2388,11 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 		fields := sortedFieldNames(structFields)
 		info.Fields = make([]FieldInfo, len(fields))
 		for i, name := range fields {
-			fieldType, fieldMutable, err := l.internStructFieldType(structFields[name], l.internType)
+			fieldType, err := l.internStructFieldType(structFields[name], l.internType)
 			if err != nil {
 				return NoType, err
 			}
-			info.Fields[i] = FieldInfo{Name: name, Type: fieldType, Index: i, Mutable: fieldMutable}
+			info.Fields[i] = FieldInfo{Name: name, Type: fieldType, Index: i}
 		}
 		// Tag concrete instantiations of a generic struct (ADR 0031). The
 		// generic definition is interned lazily from the checker module scope,
@@ -2522,19 +2486,17 @@ func (l *lowerer) internType(t checker.Type) (TypeID, error) {
 	case *checker.FunctionDef:
 		info.Kind = TypeFunction
 		for _, param := range typ.Parameters {
-			paramType, paramMut, err := l.internFunctionParamType(param, l.internType)
+			paramType, err := l.internFunctionParamType(param, l.internType)
 			if err != nil {
 				return NoType, err
 			}
 			info.Params = append(info.Params, paramType)
-			info.ParamMutable = append(info.ParamMutable, paramMut)
 		}
 		returnType, err := l.internType(typ.ReturnType)
 		if err != nil {
 			return NoType, err
 		}
 		info.Return = returnType
-		info.ReturnReference = isMutableReferenceType(typ.ReturnType)
 	case *checker.Trait:
 		traitID, err := l.internTrait(typ)
 		if err != nil {
@@ -2619,13 +2581,9 @@ func syntheticTypeKey(name string, info TypeInfo) string {
 	case TypeFunction:
 		parts := make([]string, len(info.Params))
 		for i, param := range info.Params {
-			mut := ""
-			if i < len(info.ParamMutable) && info.ParamMutable[i] {
-				mut = "mut "
-			}
-			parts[i] = fmt.Sprintf("%s%d", mut, param)
+			parts[i] = fmt.Sprintf("%d", param)
 		}
-		return fmt.Sprintf("fn:(%s)->%d:%t", strings.Join(parts, ","), info.Return, info.ReturnReference)
+		return fmt.Sprintf("fn:(%s)->%d", strings.Join(parts, ","), info.Return)
 	default:
 		return "synthetic:" + name
 	}
@@ -2715,14 +2673,13 @@ func signatureForFunctionWithInterner(params []checker.Parameter, returnType che
 		if err != nil {
 			return Signature{}, err
 		}
-		loweredParams[i] = Param{Name: param.Name, Type: typeID, Mutable: param.Mutable}
+		loweredParams[i] = Param{Name: param.Name, Type: typeID, ABI: lowerABIParamMode(param)}
 	}
 	returnID, err := intern(returnType)
 	if err != nil {
 		return Signature{}, err
 	}
-	returnReference := isMutableReferenceType(returnType)
-	return Signature{Params: loweredParams, Return: returnID, ReturnReference: returnReference}, nil
+	return Signature{Params: loweredParams, Return: returnID}, nil
 }
 
 func functionHasUnresolvedTypeVar(def *checker.FunctionDef) bool {
@@ -2911,11 +2868,11 @@ func canWrapAsAny(kind TypeKind) bool {
 }
 
 func signaturesEqual(left, right Signature) bool {
-	if left.Return != right.Return || left.ReturnReference != right.ReturnReference || len(left.Params) != len(right.Params) {
+	if left.Return != right.Return || len(left.Params) != len(right.Params) {
 		return false
 	}
 	for i := range left.Params {
-		if left.Params[i].Type != right.Params[i].Type || left.Params[i].Mutable != right.Params[i].Mutable {
+		if left.Params[i].Type != right.Params[i].Type || left.Params[i].ABI != right.Params[i].ABI {
 			return false
 		}
 	}
@@ -3037,15 +2994,6 @@ func airFunctionTypeKeySeen(params []checker.Parameter, returnType checker.Type,
 	for i, param := range params {
 		if i > 0 {
 			key += ","
-		}
-		mutable := param.Mutable
-		// Mirror internFunctionParamType: pointer-shaped foreign params are
-		// canonically mutable so checker-equal function types share one key.
-		if foreign, ok := param.Type.(*checker.ForeignType); ok && foreign.Pointer {
-			mutable = true
-		}
-		if mutable {
-			key += "mut "
 		}
 		key += airTypeKeySeen(param.Type, seen)
 	}
@@ -4515,11 +4463,11 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		var argModes []ForeignArgMode
+		var argABI []ABIParamMode
 		if methodDef, ok := e.Type().(*checker.FunctionDef); ok {
-			argModes = lowerForeignArgModes(methodDef.Parameters, len(methodDef.Parameters))
+			argABI = lowerABIParamModes(methodDef.Parameters, len(methodDef.Parameters))
 		}
-		return &Expr{Kind: ExprForeignMethodValue, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: argModes}, nil
+		return &Expr{Kind: ExprForeignMethodValue, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgABI: argABI}, nil
 	case *checker.ForeignMethodCall:
 		target, err := fl.lowerExpr(e.Subject)
 		if err != nil {
@@ -4544,11 +4492,11 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			args[i] = *lowered
 		}
-		var argModes []ForeignArgMode
+		var argABI []ABIParamMode
 		if methodDef != nil {
-			argModes = lowerForeignArgModes(methodDef.Parameters, len(args))
+			argABI = lowerABIParamModes(methodDef.Parameters, len(args))
 		}
-		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: argModes, Args: args}, nil
+		return &Expr{Kind: ExprForeignMethodCall, Type: typeID, Target: target, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignReceiver: e.Receiver, ForeignPointer: e.Pointer, ForeignSymbol: e.Symbol, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgABI: argABI, Args: args}, nil
 	case *checker.UnsafeCast:
 		value, err := fl.lowerExprWithExpected(e.Value, fl.l.mustIntern(checker.Any))
 		if err != nil {
@@ -4629,7 +4577,8 @@ func (fl *functionLowerer) lowerExpr(expr checker.Expression) (*Expr, error) {
 			}
 			typeArgs = append(typeArgs, argID)
 		}
-		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgModes: lowerForeignArgModes(fnDef.Parameters, len(args)), Args: args}, nil
+		argABI := lowerABIParamModes(fnDef.Parameters, len(args))
+		return &Expr{Kind: ExprForeignCall, Type: typeID, ForeignTarget: e.Target, ForeignNamespace: e.Namespace, ForeignQualifier: e.Qualifier, ForeignSymbol: e.Symbol, TypeArgs: typeArgs, ForeignPointer: e.PointerResult, ForeignResultShape: lowerForeignResultShape(e.ForeignResultShape), ForeignArgABI: argABI, Args: args}, nil
 	case *checker.ModuleFunctionCall:
 		if kind, ok := resultConstructorKind(e); ok {
 			return fl.lowerResultConstructor(kind, typeID, e)
@@ -5968,7 +5917,7 @@ func (fl *functionLowerer) lowerClosure(typeID TypeID, def *checker.FunctionDef)
 	child := fl.l.newFunctionLowerer(&fn, def, fl)
 	child.captureByName = map[string]LocalID{}
 	for _, param := range fn.Signature.Params {
-		child.defineLocal(param.Name, param.Type, param.Mutable)
+		child.defineLocal(param.Name, param.Type, false)
 	}
 	if def.Body != nil {
 		body, err := child.lowerBlock(def.Body.Stmts)
@@ -6899,13 +6848,9 @@ func signatureKey(signature Signature) string {
 		if i > 0 {
 			key += ","
 		}
-		mut := ""
-		if param.Mutable {
-			mut = "mut "
-		}
-		key += fmt.Sprintf("%s%d", mut, param.Type)
+		key += fmt.Sprintf("%d:%d", param.Type, param.ABI)
 	}
-	key += fmt.Sprintf(")->%d:%t", signature.Return, signature.ReturnReference)
+	key += fmt.Sprintf(")->%d", signature.Return)
 	return key
 }
 
@@ -6931,28 +6876,6 @@ func keyHasFunctionName(key, name string) bool {
 		}
 	}
 	return key == name
-}
-
-// isMutableReferenceProducer reports whether an expression yields live mutable
-// storage. Mutable-reference shape is distinct from the referent's value type
-// and must survive bindings so later reads and writes use the shared storage.
-func isMutableReferenceType(typ checker.Type) bool {
-	_, ok := resolvedMutableReferenceType(typ)
-	return ok
-}
-
-func resolvedMutableReferenceType(typ checker.Type) (*checker.MutableRef, bool) {
-	seen := map[checker.Type]bool{}
-	for typ != nil && !seen[typ] {
-		seen[typ] = true
-		typeVar, ok := typ.(*checker.TypeVar)
-		if !ok || typeVar.Actual() == nil {
-			break
-		}
-		typ = typeVar.Actual()
-	}
-	ref, ok := typ.(*checker.MutableRef)
-	return ref, ok
 }
 
 func isMutableReferenceProducer(expr checker.Expression) bool {

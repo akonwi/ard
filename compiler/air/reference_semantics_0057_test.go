@@ -182,7 +182,7 @@ func TestADR0057LowersReferenceShapedCompoundTypes(t *testing.T) {
 		t.Fatalf("list type = %#v, want [mut Box]", list)
 	}
 	maybe := testTypeInfo(t, program, keep.Signature.Params[1].Type)
-	if maybe.Kind != TypeMaybe || maybe.ElemMutable || typeKind(t, program, maybe.Elem) != TypeReference {
+	if maybe.Kind != TypeMaybe || typeKind(t, program, maybe.Elem) != TypeReference {
 		t.Fatalf("maybe type = %#v, want (mut Box)? represented recursively", maybe)
 	}
 	holder := testTypeInfo(t, program, keep.Signature.Params[2].Type)
@@ -200,6 +200,37 @@ func TestADR0057LowersReferenceShapedCompoundTypes(t *testing.T) {
 	result := testTypeInfo(t, program, keep.Signature.Params[5].Type)
 	if result.Kind != TypeResult || typeKind(t, program, result.Value) != TypeReference {
 		t.Fatalf("result type = %#v, want (mut Box)!Str", result)
+	}
+}
+
+func TestADR0057GenericDefinitionPreservesReferenceFieldIdentity(t *testing.T) {
+	program := lowerSource(t, `
+		struct Holder<$T> { value: mut $T }
+		fn keep(value: Holder<Int>) Holder<Int> { value }
+	`)
+
+	for _, typ := range program.Types {
+		if typ.Name != "Holder" || len(typ.TypeParams) == 0 {
+			continue
+		}
+		if len(typ.Fields) != 1 || typeKind(t, program, typ.Fields[0].Type) != TypeReference {
+			t.Fatalf("generic Holder fields = %#v, want canonical TypeReference", typ.Fields)
+		}
+		reference := testTypeInfo(t, program, typ.Fields[0].Type)
+		if typeKind(t, program, reference.Elem) != TypeParam {
+			t.Fatalf("generic Holder reference = %#v, want TypeParam referent", reference)
+		}
+		return
+	}
+	t.Fatal("generic Holder definition not found")
+}
+
+func TestADR0057NormalizesForeignDescriptorParameterABI(t *testing.T) {
+	if got := lowerABIParamMode(checker.Parameter{}); got != ABIParamExact {
+		t.Fatalf("ordinary parameter ABI = %v, want exact", got)
+	}
+	if got := lowerABIParamMode(checker.Parameter{ForeignABI: checker.ForeignParameterDescriptorValue}); got != ABIParamDescriptorValue {
+		t.Fatalf("descriptor parameter ABI = %v, want descriptor value", got)
 	}
 }
 
@@ -347,7 +378,7 @@ func TestADR0057MaybeMatchReferenceLocalMetadataAgreesWithType(t *testing.T) {
 	}
 	local := read.Locals[read.Body.Result.SomeLocal]
 	if typeKind(t, program, local.Type) != TypeReference || !local.Reference {
-		t.Fatalf("some local = %#v, want reference type and compatibility metadata", local)
+		t.Fatalf("some local = %#v, want reference type and live-storage metadata", local)
 	}
 }
 

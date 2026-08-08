@@ -475,7 +475,8 @@ fn main() {
   }
 
   let values = [1, 2]
-  ffi::MutateSlice(mut values)
+  let mutate_slice = ffi::MutateSlice
+  mutate_slice(mut values)
   ffi::ReplaceSlice(mut values)
   if not values.at(0).or(0) == 9 { panic("slice element mutation lost") }
   if not values.size() == 3 { panic("pointer-to-slice replacement lost") }

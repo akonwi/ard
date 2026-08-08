@@ -135,6 +135,12 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 			return nil, err
 		}
 		return goRuntimeGeneric(runtimeQualifier, "Maybe", elem), nil
+	case TypeReference:
+		elem, err := goTypeExpr(program, typ.Elem, runtimeQualifier)
+		if err != nil {
+			return nil, err
+		}
+		return &ast.StarExpr{X: elem}, nil
 	case TypeResult:
 		value, err := goTypeExpr(program, typ.Value, runtimeQualifier)
 		if err != nil {
@@ -149,13 +155,10 @@ func goTypeExpr(program *Program, typeID TypeID, runtimeQualifier string) (ast.E
 		return ast.NewIdent("any"), nil
 	case TypeFunction:
 		params := make([]*ast.Field, 0, len(typ.Params))
-		for i, param := range typ.Params {
+		for _, param := range typ.Params {
 			paramType, err := goTypeExpr(program, param, runtimeQualifier)
 			if err != nil {
 				return nil, err
-			}
-			if i < len(typ.ParamMutable) && typ.ParamMutable[i] {
-				paramType = &ast.StarExpr{X: paramType}
 			}
 			params = append(params, &ast.Field{Type: paramType})
 		}

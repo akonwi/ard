@@ -56,9 +56,6 @@ type Function struct {
 	IsTest    bool
 	IsScript  bool
 	Private   bool
-	// ForeignABI preserves an exact foreign Go method signature. Mutable
-	// descriptor parameters remain value-shaped at this boundary.
-	ForeignABI bool
 
 	// TypeParams names the generic parameters for a generic function definition
 	// (ADR 0031). When set, the function is emitted as `func Name[T any](...)`
@@ -74,15 +71,27 @@ type Function struct {
 }
 
 type Signature struct {
-	Params          []Param
-	Return          TypeID
-	ReturnReference bool
+	Params []Param
+	Return TypeID
 }
 
+// ABIParamMode describes the host ABI projection applied to one canonical AIR
+// parameter. Reference identity remains in the parameter TypeID; the mode only
+// records boundary behavior that cannot be derived from that identity.
+type ABIParamMode uint8
+
+const (
+	// ABIParamExact passes the canonical AIR value representation unchanged.
+	ABIParamExact ABIParamMode = iota
+	// ABIParamDescriptorValue requires a TypeReference to a slice/map
+	// descriptor, but passes the current descriptor value to the host ABI.
+	ABIParamDescriptorValue
+)
+
 type Param struct {
-	Name    string
-	Type    TypeID
-	Mutable bool
+	Name string
+	Type TypeID
+	ABI  ABIParamMode
 }
 
 type Local struct {
@@ -161,12 +170,11 @@ type TypeInfo struct {
 	ModulePath string
 	Private    bool
 
-	Elem        TypeID
-	ElemMutable bool
-	Length      int
-	Key         TypeID
-	Value       TypeID
-	Error       TypeID
+	Elem   TypeID
+	Length int
+	Key    TypeID
+	Value  TypeID
+	Error  TypeID
 
 	ForeignTarget    string
 	ForeignNamespace string
@@ -180,11 +188,9 @@ type TypeInfo struct {
 	EnumOpen bool
 	Members  []UnionMember
 
-	Params          []TypeID
-	ParamMutable    []bool
-	Return          TypeID
-	ReturnReference bool
-	Trait           TraitID
+	Params []TypeID
+	Return TypeID
+	Trait  TraitID
 
 	// Generic representation (ADR 0031). A generic definition sets TypeParams
 	// (the parameter names) and references them via TypeParam-kind fields. A
@@ -199,10 +205,9 @@ type TypeInfo struct {
 }
 
 type FieldInfo struct {
-	Name    string
-	Type    TypeID
-	Index   int
-	Mutable bool
+	Name  string
+	Type  TypeID
+	Index int
 }
 
 type VariantInfo struct {

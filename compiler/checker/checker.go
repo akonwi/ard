@@ -240,7 +240,6 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			Parameters:              newParams,
 			ReturnType:              derefReturnType,
 			ForeignResultShape:      typ.ForeignResultShape,
-			ForeignABI:              typ.ForeignABI,
 			InferReturnTypeFromBody: typ.InferReturnTypeFromBody,
 			Body:                    typ.Body,
 			Mutates:                 typ.Mutates,
@@ -613,7 +612,7 @@ type Checker struct {
 	spans                             *SpanIndex
 	nextCallInferenceID               uint64
 	expectedCallExpectation           *typeExpectation
-	foreignABIFunctions               map[*parse.FunctionDeclaration]bool
+	foreignABIParameters              map[*parse.FunctionDeclaration][]ForeignParameterABI
 	moduleFiles                       map[string]string
 }
 
@@ -638,9 +637,9 @@ func New(filePath string, input *parse.Program, moduleResolver *ModuleResolver, 
 			StructMethods:         map[MethodOwner]map[string]*FunctionDef{},
 			ForeignInterfaceImpls: map[MethodOwner][]*ForeignType{},
 		},
-		scope:               &rootScope,
-		goTypesContext:      gotypes.NewContext(),
-		foreignABIFunctions: map[*parse.FunctionDeclaration]bool{},
+		scope:                &rootScope,
+		goTypesContext:       gotypes.NewContext(),
+		foreignABIParameters: map[*parse.FunctionDeclaration][]ForeignParameterABI{},
 	}
 	if checkOptions.RecordSpans {
 		c.spans = &SpanIndex{}
@@ -2423,7 +2422,18 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 				}.build())
 				valid = false
 			}
-			params[i] = Parameter{Name: param.Name, Type: paramType, Mutable: paramMutable, Loc: param.GetLocation(), declaredAt: c.sourceSpan(param.GetLocation())}
+			foreignABI := ForeignParameterExact
+			if paramMutable {
+				foreignABI = interfaceMethod.Parameters[i].ForeignABI
+			}
+			params[i] = Parameter{
+				Name:       param.Name,
+				Type:       paramType,
+				Mutable:    paramMutable,
+				ForeignABI: foreignABI,
+				Loc:        param.GetLocation(),
+				declaredAt: c.sourceSpan(param.GetLocation()),
+			}
 		}
 		returnType := Type(Void)
 		if method.ReturnType != nil {
@@ -2450,7 +2460,11 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 			continue
 		}
 		c.pushMethodGenericAllowlist(receiverGenerics)
-		c.foreignABIFunctions[&method] = true
+		paramABI := make([]ForeignParameterABI, len(params))
+		for i := range params {
+			paramABI[i] = params[i].ForeignABI
+		}
+		c.foreignABIParameters[&method] = paramABI
 		fnDef := c.checkFunction(&method, func() {
 			c.scope.add(s.Receiver.Name, receiverBindingType(targetType, method.Mutates), false)
 		}, receiverGenerics...)
@@ -2468,7 +2482,6 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 		}
 		fnDef.Receiver = s.Receiver.Name
 		fnDef.Mutates = method.Mutates
-		fnDef.ForeignABI = true
 		fnDef.Name = goMethodNameToArdName(interfaceMethodName)
 		if _, exists := c.structMethod(targetType, fnDef.Name); exists {
 			validImpl = false
@@ -10704,7 +10717,14 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 		}
 	}
 
-	fn.ForeignABI = c.foreignABIFunctions[def]
+	if paramABI, foreignABI := c.foreignABIParameters[def]; foreignABI {
+		for i := range fn.Parameters {
+			if i < len(paramABI) {
+				fn.Parameters[i].ForeignABI = paramABI[i]
+				params[i].ForeignABI = paramABI[i]
+			}
+		}
+	}
 
 	if def.IsTest {
 		if init != nil {
@@ -10757,7 +10777,7 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 		for _, param := range params {
 			sym := c.scope.add(param.Name, param.Type, param.Mutable)
 			sym.reference = param.Mutable
-			sym.foreignDescriptor = fn.ForeignABI && param.Mutable && isDescriptorBackedMutableType(param.Type)
+			sym.foreignDescriptor = param.ForeignABI == ForeignParameterDescriptorValue
 			c.recordBinding(param.Loc, sym)
 		}
 	}, returnType, true)
@@ -10832,7 +10852,6 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			Parameters:              substitutedParams,
 			ReturnType:              substituteType(typ.ReturnType, typeMap),
 			ForeignResultShape:      typ.ForeignResultShape,
-			ForeignABI:              typ.ForeignABI,
 			InferReturnTypeFromBody: typ.InferReturnTypeFromBody,
 			Body:                    typ.Body,
 			Mutates:                 typ.Mutates,
@@ -11695,7 +11714,6 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				Parameters:              make([]Parameter, len(fnDefCopy.Parameters)),
 				ReturnType:              substituteType(fnDefCopy.ReturnType, bindings),
 				ForeignResultShape:      fnDefCopy.ForeignResultShape,
-				ForeignABI:              fnDefCopy.ForeignABI,
 				InferReturnTypeFromBody: fnDefCopy.InferReturnTypeFromBody,
 				Body:                    fnDefCopy.Body,
 				Mutates:                 fnDefCopy.Mutates,

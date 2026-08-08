@@ -1460,6 +1460,24 @@ func TestValidateRejectsBadTypeReference(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsDescriptorABIWithoutReferenceType(t *testing.T) {
+	program := &Program{Types: []TypeInfo{{ID: 1, Kind: TypeInt, Name: "Int"}}}
+	if err := validateABIParamMode(program, 1, ABIParamDescriptorValue); err == nil {
+		t.Fatal("descriptor-value ABI accepted a non-reference type")
+	}
+}
+
+func TestValidateAcceptsDescriptorABIForListReference(t *testing.T) {
+	program := &Program{Types: []TypeInfo{
+		{ID: 1, Kind: TypeInt, Name: "Int"},
+		{ID: 2, Kind: TypeList, Name: "[Int]", Elem: 1},
+		{ID: 3, Kind: TypeReference, Name: "mut [Int]", Elem: 2},
+	}}
+	if err := validateABIParamMode(program, 3, ABIParamDescriptorValue); err != nil {
+		t.Fatalf("descriptor-value ABI rejected list reference: %v", err)
+	}
+}
+
 func TestValidateRejectsMutableReferenceWithoutMode(t *testing.T) {
 	program := &Program{
 		Types: []TypeInfo{
