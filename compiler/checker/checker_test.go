@@ -2,6 +2,7 @@ package checker_test
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	checker "github.com/akonwi/ard/checker"
@@ -15,6 +16,61 @@ type test struct {
 	input       string
 	output      *checker.Program
 	diagnostics []checker.Diagnostic
+}
+
+type sharedTestGoResolver struct {
+	resolver *checker.GoPackagesResolver
+}
+
+// ResolveGoPackage intentionally hides the concrete resolver type from the
+// checker so each test consumes the already-primed, read-only package set
+// without attempting to extend its single go/types session.
+func (r sharedTestGoResolver) ResolveGoPackage(path string) (*checker.GoPackage, error) {
+	return r.resolver.ResolveGoPackage(path)
+}
+
+var (
+	standardGoResolverOnce sync.Once
+	standardGoResolver     checker.GoPackageResolver
+	standardGoResolverErr  error
+)
+
+func standardLibraryGoResolver(t *testing.T) checker.GoPackageResolver {
+	t.Helper()
+	standardGoResolverOnce.Do(func() {
+		resolver := checker.NewGoPackagesResolver(".", nil)
+		standardGoResolverErr = resolver.Prime([]string{
+			"bufio",
+			"bytes",
+			"context",
+			"crypto/sha256",
+			"database/sql",
+			"database/sql/driver",
+			"encoding/json",
+			"encoding/xml",
+			"fmt",
+			"html/template",
+			"image",
+			"io",
+			"log",
+			"math",
+			"net/http",
+			"net/url",
+			"os",
+			"os/exec",
+			"regexp",
+			"slices",
+			"sort",
+			"strings",
+			"sync/atomic",
+			"time",
+		})
+		standardGoResolver = sharedTestGoResolver{resolver: resolver}
+	})
+	if standardGoResolverErr != nil {
+		t.Fatalf("prime standard-library Go resolver: %v", standardGoResolverErr)
+	}
+	return standardGoResolver
 }
 
 var compareOptions = cmp.Options{
@@ -90,7 +146,11 @@ func run(t *testing.T, tests []test) {
 				t.Fatalf("Parse errors: %v", result.Errors[0].Message)
 			}
 			ast := result.Program
-			c := checker.New("test.ard", ast, nil)
+			var options []checker.CheckOptions
+			if strings.Contains(tt.input, "use go:") {
+				options = append(options, checker.CheckOptions{GoResolver: standardLibraryGoResolver(t)})
+			}
+			c := checker.New("test.ard", ast, nil, options...)
 			c.Check()
 			if len(tt.diagnostics) > 0 || c.HasErrors() {
 				if diff := cmp.Diff(tt.diagnostics, c.Diagnostics(), compareOptions); diff != "" {

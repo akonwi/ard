@@ -75,6 +75,88 @@ func Greet(name string) string { return "hello " + name }
 	}
 }
 
+func TestCheckerDefaultsToProjectGoPackagesResolver(t *testing.T) {
+	root := t.TempDir()
+	manifest := "name = \"app\"\nard = \">= 0.1.0\"\n\n[go]\nbuild_tags = [\"special\"]\n"
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ffiDir := filepath.Join(root, "ffi")
+	if err := os.MkdirAll(ffiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ffiDir, "ffi.go"), []byte("package ffi\n\nfunc Always() string { return \"always\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taggedSource := "//go:build special\n\npackage ffi\n\nfunc Tagged() string { return \"tagged\" }\n"
+	if err := os.WriteFile(filepath.Join(ffiDir, "tagged.go"), []byte(taggedSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(root, "main.ard")
+	result := parse.Parse([]byte("use go:example.com/app/ffi as ffi\n\nfn main() Str { ffi::Tagged() }\n"), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	moduleResolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checked := checker.New(mainPath, result.Program, moduleResolver)
+	checked.Check()
+	if checked.HasErrors() {
+		t.Fatalf("checker diagnostics: %v", checked.Diagnostics())
+	}
+	if checked.Module().Program().GoImports["ffi"].Functions["Tagged"] == nil {
+		t.Fatal("build-tagged function missing from default Go resolver")
+	}
+
+	result = parse.Parse([]byte("use go:example.com/app/ffi as ffi\n\nfn main() Str { ffi::Always() }\n"), mainPath)
+	checked = checker.New(mainPath, result.Program, nil)
+	checked.Check()
+	if checked.HasErrors() {
+		t.Fatalf("checker without module resolver diagnostics: %v", checked.Diagnostics())
+	}
+	var nilResolver *checker.GoPackagesResolver
+	checked = checker.New(mainPath, result.Program, nil, checker.CheckOptions{GoResolver: nilResolver})
+	checked.Check()
+	if checked.HasErrors() {
+		t.Fatalf("checker with typed-nil resolver diagnostics: %v", checked.Diagnostics())
+	}
+}
+
+func TestDefaultGoResolverDoesNotReuseForeignModuleCache(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	serverSource := "use go:net/http\n\nfn handler() mut http::ServeMux { http::NewServeMux() }\n"
+	if err := os.WriteFile(filepath.Join(root, "server.ard"), []byte(serverSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mainPath := filepath.Join(root, "main.ard")
+	mainSource := "use app/server\nuse go:net/http\n\nfn main() { http::ListenAndServe(\":0\", server::handler()) }\n"
+	result := parse.Parse([]byte(mainSource), mainPath)
+	if len(result.Errors) > 0 {
+		t.Fatal(result.Errors[0].Message)
+	}
+	moduleResolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for checkNumber := 1; checkNumber <= 2; checkNumber++ {
+		checked := checker.New(mainPath, result.Program, moduleResolver)
+		checked.Check()
+		if checked.HasErrors() {
+			t.Fatalf("check %d diagnostics: %v", checkNumber, checked.Diagnostics())
+		}
+	}
+}
+
 func TestGoPackagesResolverMapsChannelDirections(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.21\n"), 0644); err != nil {
