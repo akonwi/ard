@@ -1,10 +1,12 @@
 package checker_test
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -68,6 +70,31 @@ func TestFindProjectRootFallback(t *testing.T) {
 		t.Errorf("Expected project name '%s', got '%s'", expectedName, project.ProjectName)
 	}
 }
+
+func TestFindProjectRootPropagatesFilesystemErrors(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are required for this test")
+	}
+	privateDir := filepath.Join(t.TempDir(), "private")
+	if err := os.Mkdir(privateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(privateDir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(privateDir, 0o755) })
+
+	if _, err := os.Lstat(filepath.Join(privateDir, "ard.toml")); err == nil {
+		t.Skip("filesystem does not enforce directory permissions for this user")
+	} else if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("Lstat setup error = %v, want permission error", err)
+	}
+	_, err := checker.FindProjectRoot(privateDir)
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("FindProjectRoot error = %v, want wrapped permission error", err)
+	}
+}
+
 func TestGoBuildTagsConfig(t *testing.T) {
 	t.Run("parses configured tags", func(t *testing.T) {
 		dir := t.TempDir()
@@ -267,6 +294,274 @@ func TestResolveImportPath(t *testing.T) {
 				t.Errorf("Expected path '%s', got '%s'", tt.expected, resolved)
 			}
 		})
+	}
+}
+
+func TestResolveImportRejectsUnsafeModulePaths(t *testing.T) {
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		filepath.Join(root, "inside.ard"),
+		filepath.Join(root, "client.v2.ard"),
+		filepath.Join(workspace, "outside.ard"),
+	} {
+		if err := os.WriteFile(path, []byte("fn value() Int { 42 }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, importPath := range []string{
+		"app/../outside",
+		"app/./inside",
+		"app//inside",
+		"app/inside/",
+		filepath.ToSlash(filepath.Join(string(filepath.Separator), "app", "inside")),
+	} {
+		t.Run(importPath, func(t *testing.T) {
+			if _, err := resolver.ResolveImportPath(importPath); err == nil || !strings.Contains(err.Error(), "invalid import path") {
+				t.Fatalf("ResolveImportPath(%q) error = %v, want invalid import path", importPath, err)
+			}
+		})
+	}
+
+	path, err := resolver.ResolveImportPath("app/client.v2")
+	if err != nil {
+		t.Fatalf("resolve dotted module name: %v", err)
+	}
+	if path != filepath.Join(root, "client.v2.ard") {
+		t.Fatalf("dotted module path = %q, want %q", path, filepath.Join(root, "client.v2.ard"))
+	}
+}
+
+func TestResolveImportCannotEscapePathDependencyRoot(t *testing.T) {
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "app")
+	dep := filepath.Join(workspace, "dep")
+	for _, dir := range []string{root, dep} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dep, "ard.toml"), []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "outside.ard"), []byte("fn value() Int { 42 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolver.ResolveImportPath("dep/../outside"); err == nil || !strings.Contains(err.Error(), "invalid import path") {
+		t.Fatalf("path dependency traversal error = %v, want invalid import path", err)
+	}
+}
+
+func TestModuleResolutionSymlinkPolicy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation is not reliably available on Windows")
+	}
+	workspace := t.TempDir()
+	writeProject := func(t *testing.T, root string, name string) {
+		t.Helper()
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		manifest := fmt.Sprintf("name = %q\nard = \">= 0.1.0\"\n", name)
+		if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte(manifest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	requireSymlink := func(t *testing.T, target string, path string) {
+		t.Helper()
+		if err := os.Symlink(target, path); err != nil {
+			t.Skipf("create symlink: %v", err)
+		}
+	}
+
+	t.Run("package root", func(t *testing.T) {
+		realRoot := filepath.Join(workspace, "real-root")
+		writeProject(t, realRoot, "app")
+		linkedRoot := filepath.Join(workspace, "linked-root")
+		requireSymlink(t, realRoot, linkedRoot)
+		if _, err := checker.NewModuleResolver(linkedRoot); err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("NewModuleResolver error = %v, want symlink rejection", err)
+		}
+	})
+
+	t.Run("package manifest", func(t *testing.T) {
+		root := filepath.Join(workspace, "linked-manifest-project")
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		realManifest := filepath.Join(workspace, "real-manifest.toml")
+		if err := os.WriteFile(realManifest, []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		requireSymlink(t, realManifest, filepath.Join(root, "ard.toml"))
+		if _, err := checker.NewModuleResolver(root); err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("NewModuleResolver error = %v, want symlink rejection", err)
+		}
+	})
+
+	t.Run("ancestor above package root", func(t *testing.T) {
+		realParent := filepath.Join(workspace, "real-parent")
+		root := filepath.Join(realParent, "app")
+		writeProject(t, root, "app")
+		if err := os.WriteFile(filepath.Join(root, "value.ard"), []byte("fn value() Int { 42 }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		linkedParent := filepath.Join(workspace, "linked-parent")
+		requireSymlink(t, realParent, linkedParent)
+		linkedRoot := filepath.Join(linkedParent, "app")
+		resolver, err := checker.NewModuleResolver(linkedRoot)
+		if err != nil {
+			t.Fatalf("NewModuleResolver through ancestor symlink: %v", err)
+		}
+		path, err := resolver.ResolveImportPath("app/value")
+		if err != nil {
+			t.Fatalf("ResolveImportPath through ancestor symlink: %v", err)
+		}
+		if path != filepath.Join(linkedRoot, "value.ard") {
+			t.Fatalf("resolved path = %q, want %q", path, filepath.Join(linkedRoot, "value.ard"))
+		}
+	})
+
+	t.Run("module directory", func(t *testing.T) {
+		root := filepath.Join(workspace, "directory-project")
+		writeProject(t, root, "app")
+		realDir := filepath.Join(root, "real")
+		if err := os.MkdirAll(realDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(realDir, "value.ard"), []byte("fn value() Int { 42 }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		requireSymlink(t, realDir, filepath.Join(root, "linked"))
+		resolver, err := checker.NewModuleResolver(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := resolver.ResolveImportPath("app/linked/value"); err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("ResolveImportPath error = %v, want symlink rejection", err)
+		}
+	})
+
+	t.Run("module file", func(t *testing.T) {
+		root := filepath.Join(workspace, "file-project")
+		writeProject(t, root, "app")
+		realFile := filepath.Join(root, "real.ard")
+		if err := os.WriteFile(realFile, []byte("fn value() Int { 42 }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		requireSymlink(t, realFile, filepath.Join(root, "linked.ard"))
+		resolver, err := checker.NewModuleResolver(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := resolver.ResolveImportPath("app/linked"); err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("ResolveImportPath error = %v, want symlink rejection", err)
+		}
+	})
+
+	t.Run("path dependency root", func(t *testing.T) {
+		root := filepath.Join(workspace, "dependency-project")
+		realDep := filepath.Join(workspace, "real-dependency")
+		writeProject(t, root, "app")
+		writeProject(t, realDep, "dep")
+		if err := os.WriteFile(filepath.Join(realDep, "dep.ard"), []byte("fn value() Int { 42 }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		linkedDep := filepath.Join(workspace, "linked-dependency")
+		requireSymlink(t, realDep, linkedDep)
+		manifest := "name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../linked-dependency\" }\n"
+		if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte(manifest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		resolver, err := checker.NewModuleResolver(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := resolver.ResolveImportPath("dep"); err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("ResolveImportPath error = %v, want symlink rejection", err)
+		}
+	})
+
+	t.Run("path dependency manifest", func(t *testing.T) {
+		root := filepath.Join(workspace, "dependency-manifest-project")
+		dep := filepath.Join(workspace, "dependency-with-linked-manifest")
+		writeProject(t, root, "app")
+		if err := os.MkdirAll(dep, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		realManifest := filepath.Join(workspace, "dependency-manifest.toml")
+		if err := os.WriteFile(realManifest, []byte("name = \"dep\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		requireSymlink(t, realManifest, filepath.Join(dep, "ard.toml"))
+		if err := os.WriteFile(filepath.Join(dep, "dep.ard"), []byte("fn value() Int { 42 }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		manifest := "name = \"app\"\nard = \">= 0.1.0\"\n\n[dependencies]\ndep = { path = \"../dependency-with-linked-manifest\" }\n"
+		if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte(manifest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		resolver, err := checker.NewModuleResolver(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := resolver.ResolveImportPath("dep"); err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("ResolveImportPath error = %v, want symlink rejection", err)
+		}
+	})
+}
+
+func TestResolveImportPropagatesFilesystemErrors(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits are required for this test")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	privateDir := filepath.Join(root, "private")
+	if err := os.Mkdir(privateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(privateDir, "value.ard"), []byte("fn value() Int { 42 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := checker.NewModuleResolver(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(privateDir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(privateDir, 0o755) })
+
+	if _, err := os.Lstat(filepath.Join(privateDir, "value.ard")); err == nil {
+		t.Skip("filesystem does not enforce directory permissions for this user")
+	} else if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("Lstat setup error = %v, want permission error", err)
+	}
+	_, err = resolver.ResolveImportPath("app/private/value")
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("ResolveImportPath error = %v, want wrapped permission error", err)
 	}
 }
 
