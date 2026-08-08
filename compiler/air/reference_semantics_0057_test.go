@@ -182,7 +182,7 @@ func TestADR0057LowersReferenceShapedCompoundTypes(t *testing.T) {
 		t.Fatalf("list type = %#v, want [mut Box]", list)
 	}
 	maybe := testTypeInfo(t, program, keep.Signature.Params[1].Type)
-	if maybe.Kind != TypeMaybe || maybe.ElemMutable || typeKind(t, program, maybe.Elem) != TypeReference {
+	if maybe.Kind != TypeMaybe || typeKind(t, program, maybe.Elem) != TypeReference {
 		t.Fatalf("maybe type = %#v, want (mut Box)? represented recursively", maybe)
 	}
 	holder := testTypeInfo(t, program, keep.Signature.Params[2].Type)
@@ -378,7 +378,7 @@ func TestADR0057MaybeMatchReferenceLocalMetadataAgreesWithType(t *testing.T) {
 	}
 	local := read.Locals[read.Body.Result.SomeLocal]
 	if typeKind(t, program, local.Type) != TypeReference || !local.Reference {
-		t.Fatalf("some local = %#v, want reference type and compatibility metadata", local)
+		t.Fatalf("some local = %#v, want reference type and live-storage metadata", local)
 	}
 }
 

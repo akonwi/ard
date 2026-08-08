@@ -1302,14 +1302,10 @@ type FunctionDef struct {
 	DefaultVoidGeneric string
 	// DeferCallCompleteness lets constructor adapters collect context from an
 	// enclosing match, catch, or binding before the expression-boundary check.
-	DeferCallCompleteness bool
-	Parameters            []Parameter
-	ReturnType            Type
-	ForeignResultShape    ForeignResultShape
-	// ForeignABI marks an Ard method whose generated Go signature must exactly
-	// match a foreign interface method. Mutable descriptor parameters retain
-	// their Go value shape at this boundary.
-	ForeignABI              bool
+	DeferCallCompleteness   bool
+	Parameters              []Parameter
+	ReturnType              Type
+	ForeignResultShape      ForeignResultShape
 	InferReturnTypeFromBody bool
 	Mutates                 bool
 	IsTest                  bool

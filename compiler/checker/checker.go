@@ -240,7 +240,6 @@ func derefTypeSeen(t Type, seen map[Type]bool) Type {
 			Parameters:              newParams,
 			ReturnType:              derefReturnType,
 			ForeignResultShape:      typ.ForeignResultShape,
-			ForeignABI:              typ.ForeignABI,
 			InferReturnTypeFromBody: typ.InferReturnTypeFromBody,
 			Body:                    typ.Body,
 			Mutates:                 typ.Mutates,
@@ -2483,7 +2482,6 @@ func (c *Checker) checkForeignInterfaceImplementation(s *parse.TraitImplementati
 		}
 		fnDef.Receiver = s.Receiver.Name
 		fnDef.Mutates = method.Mutates
-		fnDef.ForeignABI = true
 		fnDef.Name = goMethodNameToArdName(interfaceMethodName)
 		if _, exists := c.structMethod(targetType, fnDef.Name); exists {
 			validImpl = false
@@ -10720,7 +10718,6 @@ func (c *Checker) checkFunctionWithSignature(def *parse.FunctionDeclaration, ini
 	}
 
 	if paramABI, foreignABI := c.foreignABIParameters[def]; foreignABI {
-		fn.ForeignABI = true
 		for i := range fn.Parameters {
 			if i < len(paramABI) {
 				fn.Parameters[i].ForeignABI = paramABI[i]
@@ -10855,7 +10852,6 @@ func substituteType(t Type, typeMap map[string]Type) Type {
 			Parameters:              substitutedParams,
 			ReturnType:              substituteType(typ.ReturnType, typeMap),
 			ForeignResultShape:      typ.ForeignResultShape,
-			ForeignABI:              typ.ForeignABI,
 			InferReturnTypeFromBody: typ.InferReturnTypeFromBody,
 			Body:                    typ.Body,
 			Mutates:                 typ.Mutates,
@@ -11718,7 +11714,6 @@ func (c *Checker) checkAndProcessArguments(fnDef *FunctionDef, resolvedExprs []p
 				Parameters:              make([]Parameter, len(fnDefCopy.Parameters)),
 				ReturnType:              substituteType(fnDefCopy.ReturnType, bindings),
 				ForeignResultShape:      fnDefCopy.ForeignResultShape,
-				ForeignABI:              fnDefCopy.ForeignABI,
 				InferReturnTypeFromBody: fnDefCopy.InferReturnTypeFromBody,
 				Body:                    fnDefCopy.Body,
 				Mutates:                 fnDefCopy.Mutates,

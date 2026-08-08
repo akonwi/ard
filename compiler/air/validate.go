@@ -61,9 +61,6 @@ func Validate(program *Program) error {
 }
 
 func validateTypeInfo(program *Program, typ TypeInfo) error {
-	if typ.ElemMutable {
-		return fmt.Errorf("type %s uses legacy mutable-element metadata", typ.Name)
-	}
 	switch typ.Kind {
 	case TypeList, TypeMaybe, TypeChannel, TypeReceiver, TypeSender, TypeReference:
 		if !validTypeID(program, typ.Elem) {
@@ -106,22 +103,13 @@ func validateTypeInfo(program *Program, typ TypeInfo) error {
 			}
 		}
 	case TypeFunction:
-		if len(typ.ParamMutable) > 0 && len(typ.ParamMutable) != len(typ.Params) {
-			return fmt.Errorf("type %s has %d function param mutability flags for %d params", typ.Name, len(typ.ParamMutable), len(typ.Params))
-		}
-		for i, param := range typ.Params {
+		for _, param := range typ.Params {
 			if !validTypeID(program, param) {
 				return fmt.Errorf("type %s has invalid function param type %d", typ.Name, param)
-			}
-			if len(typ.ParamMutable) > 0 && typ.ParamMutable[i] != legacyReferenceFlag(program, param) {
-				return fmt.Errorf("type %s function param %d contradicts canonical reference type %d", typ.Name, i, param)
 			}
 		}
 		if !validTypeID(program, typ.Return) {
 			return fmt.Errorf("type %s has invalid function return type %d", typ.Name, typ.Return)
-		}
-		if typ.ReturnReference != isAIRReferenceType(program, typ.Return) {
-			return fmt.Errorf("type %s return metadata contradicts canonical return type %d", typ.Name, typ.Return)
 		}
 	case TypeTraitObject:
 		if !validTraitID(program, typ.Trait) {
@@ -162,7 +150,7 @@ func validateImpl(program *Program, impl Impl) error {
 		}
 		receiverType := method.Signature.Params[0].Type
 		receiverMatches := receiverType == impl.ForType
-		if !receiverMatches && method.Signature.Params[0].Mutable {
+		if !receiverMatches {
 			if receiver, err := typeInfo(program, receiverType); err == nil {
 				receiverMatches = receiver.Kind == TypeReference && receiver.Elem == impl.ForType
 			}
@@ -251,29 +239,11 @@ func validateSignature(program *Program, sig Signature) error {
 		if err := validateABIParamMode(program, param.Type, param.ABI); err != nil {
 			return fmt.Errorf("parameter %s: %w", param.Name, err)
 		}
-		if (param.Mutable && !legacyReferenceFlag(program, param.Type)) || (isAIRReferenceType(program, param.Type) && !param.Mutable) {
-			return fmt.Errorf("parameter %s mutability metadata contradicts canonical type %d", param.Name, param.Type)
-		}
 	}
 	if !validTypeID(program, sig.Return) {
 		return fmt.Errorf("signature has invalid return type %d", sig.Return)
 	}
-	if sig.ReturnReference != isAIRReferenceType(program, sig.Return) {
-		return fmt.Errorf("signature return metadata contradicts canonical type %d", sig.Return)
-	}
 	return nil
-}
-
-func isAIRReferenceType(program *Program, typeID TypeID) bool {
-	return validTypeID(program, typeID) && program.Types[typeID-1].Kind == TypeReference
-}
-
-func legacyReferenceFlag(program *Program, typeID TypeID) bool {
-	if !validTypeID(program, typeID) {
-		return false
-	}
-	typ := program.Types[typeID-1]
-	return typ.Kind == TypeReference || typ.Kind == TypeForeignType && typ.ForeignPointer
 }
 
 func validateABIParamMode(program *Program, typeID TypeID, mode ABIParamMode) error {
@@ -464,7 +434,8 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 			return fmt.Errorf("trait reference projection impl %d does not match source referent", expr.Impl)
 		}
 	}
-	if len(expr.ForeignArgModes) > 0 || len(expr.ForeignArgABI) > 0 {
+	isForeignCall := expr.Kind == ExprForeignCall || expr.Kind == ExprForeignMethodCall || expr.Kind == ExprForeignMethodValue
+	if isForeignCall {
 		argCount := len(expr.Args)
 		argTypes := make([]TypeID, argCount)
 		for i := range expr.Args {
@@ -476,23 +447,19 @@ func validateExpr(program *Program, fn Function, expr Expr) error {
 				argTypes = functionType.Params
 			}
 		}
-		if len(expr.ForeignArgModes) != argCount {
-			return fmt.Errorf("foreign expression has %d arg modes for %d args", len(expr.ForeignArgModes), argCount)
-		}
 		if len(expr.ForeignArgABI) != argCount {
 			return fmt.Errorf("foreign expression has %d ABI parameter modes for %d args", len(expr.ForeignArgABI), argCount)
 		}
 		for i, mode := range expr.ForeignArgABI {
-			if mode > ForeignArgDescriptorValue {
+			if mode > ABIParamDescriptorValue {
 				return fmt.Errorf("foreign expression has invalid arg mode %d", mode)
-			}
-			if expr.ForeignArgModes[i] != mode {
-				return fmt.Errorf("foreign expression arg %d has contradictory ABI modes %d and %d", i, expr.ForeignArgModes[i], mode)
 			}
 			if err := validateABIParamMode(program, argTypes[i], mode); err != nil {
 				return fmt.Errorf("foreign expression arg %d: %w", i, err)
 			}
 		}
+	} else if len(expr.ForeignArgABI) > 0 {
+		return fmt.Errorf("non-foreign expression has ABI parameter modes")
 	}
 	if expr.Kind == ExprLoadGlobal {
 		if !validGlobalID(program, expr.Global) {
@@ -1016,11 +983,11 @@ func typesStructurallyEquivalent(program *Program, leftID TypeID, rightID TypeID
 	case TypeResult:
 		return equivalent(left.Value, right.Value) && equivalent(left.Error, right.Error)
 	case TypeFunction:
-		if len(left.Params) != len(right.Params) || len(left.ParamMutable) != len(right.ParamMutable) || left.ReturnReference != right.ReturnReference {
+		if len(left.Params) != len(right.Params) {
 			return false
 		}
 		for i := range left.Params {
-			if left.ParamMutable[i] != right.ParamMutable[i] || !equivalent(left.Params[i], right.Params[i]) {
+			if !equivalent(left.Params[i], right.Params[i]) {
 				return false
 			}
 		}

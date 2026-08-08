@@ -578,18 +578,9 @@ func (l *lowerer) lowerTypeDecls(typ air.TypeInfo) ([]ast.Decl, error) {
 	case air.TypeStruct:
 		fields := make([]*ast.Field, 0, len(typ.Fields))
 		for _, field := range typ.Fields {
-			var fieldType ast.Expr
-			var err error
-			if field.Mutable && l.isTraitObjectType(field.Type) {
-				fieldType, err = l.mutableTraitRefType(field.Type)
-			} else {
-				fieldType, err = l.goType(field.Type)
-			}
+			fieldType, err := l.goType(field.Type)
 			if err != nil {
 				return nil, err
-			}
-			if field.Mutable && !l.isReferenceType(field.Type) {
-				fieldType = &ast.StarExpr{X: fieldType}
 			}
 			fields = append(fields, &ast.Field{
 				Names: []*ast.Ident{ast.NewIdent(l.goFieldName(typ, field.Name))},
@@ -1539,7 +1530,7 @@ func (l *lowerer) comparableTypeParams(signature air.Signature, locals []air.Loc
 			walk(p, false)
 		}
 		for _, f := range info.Fields {
-			walk(f.Type, structural && !f.Mutable)
+			walk(f.Type, structural)
 		}
 		for _, m := range info.Members {
 			walk(m.Type, false)
@@ -2224,26 +2215,13 @@ func (l *lowerer) lowerStmt(fn air.Function, stmt air.Stmt) ([]ast.Stmt, error) 
 			return nil, fmt.Errorf("invalid field set index %d", stmt.Field)
 		}
 		field := targetType.Fields[stmt.Field]
-		var value loweredExpr
-		if field.Mutable && l.isTraitObjectType(field.Type) {
-			value, err = l.lowerExpr(fn, *stmt.Value)
-		} else {
-			value, err = l.lowerExprWithExpectedType(fn, *stmt.Value, field.Type)
-		}
+		value, err := l.lowerExprWithExpectedType(fn, *stmt.Value, field.Type)
 		if err != nil {
 			return nil, err
 		}
 		out := append([]ast.Stmt{}, target.stmts...)
 		out = append(out, value.stmts...)
 		fieldTarget := ast.Expr(&ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))})
-		if field.Mutable && l.isTraitObjectType(field.Type) {
-			assignValue := l.mutableTraitAssignValueExpr(fn, *stmt.Value, value.expr, field.Type)
-			out = append(out, &ast.ExprStmt{X: &ast.CallExpr{Fun: &ast.SelectorExpr{X: fieldTarget, Sel: ast.NewIdent(l.mutableTraitAssignFieldNameForType(field.Type))}, Args: []ast.Expr{assignValue}}})
-			return out, nil
-		}
-		if field.Mutable && !l.isReferenceType(field.Type) {
-			fieldTarget = &ast.StarExpr{X: fieldTarget}
-		}
 		valueExpr := value.expr
 		if l.isVoidType(field.Type) || isVoidExpr(valueExpr) {
 			out = l.appendVoidValueEval(out, valueExpr)
@@ -3040,7 +3018,7 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			fieldInfo, hasFieldInfo := structFieldByName(typ, field.Name)
 			var value loweredExpr
 			var err error
-			if hasFieldInfo && !fieldInfo.Mutable {
+			if hasFieldInfo {
 				value, err = l.lowerExprWithExpectedType(fn, field.Value, fieldInfo.Type)
 			} else {
 				value, err = l.lowerExpr(fn, field.Value)
@@ -3053,22 +3031,6 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 			if hasFieldInfo && l.isVoidType(fieldInfo.Type) {
 				stmts = l.appendVoidValueEval(stmts, fieldValue)
 				fieldValue = l.voidValueExpr()
-			}
-			if hasFieldInfo && fieldInfo.Mutable && !l.isReferenceType(fieldInfo.Type) {
-				if l.isTraitObjectType(fieldInfo.Type) {
-					adapted, setup, _, ok, err := l.mutableTraitObjectArg(fn, field.Value, fieldValue, air.Param{Type: fieldInfo.Type, Mutable: true})
-					if err != nil {
-						return loweredExpr{}, err
-					}
-					if ok {
-						stmts = append(stmts, setup...)
-						fieldValue = adapted
-					} else {
-						fieldValue = l.mutableReferenceArg(fn, field.Value, fieldValue)
-					}
-				} else {
-					fieldValue = l.mutableReferenceArg(fn, field.Value, fieldValue)
-				}
 			}
 			elts = append(elts, &ast.KeyValueExpr{Key: ast.NewIdent(l.goFieldName(typ, field.Name)), Value: fieldValue})
 		}
@@ -3140,9 +3102,6 @@ func (l *lowerer) lowerExpr(fn air.Function, expr air.Expr) (loweredExpr, error)
 		}
 		field := targetType.Fields[expr.Field]
 		fieldExpr := &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))}
-		if field.Mutable && !l.isReferenceType(field.Type) {
-			return loweredExpr{stmts: target.stmts, expr: &ast.StarExpr{X: fieldExpr}}, nil
-		}
 		return loweredExpr{stmts: target.stmts, expr: fieldExpr}, nil
 	case air.ExprBlock:
 		return l.lowerBlockExpr(fn, expr)
@@ -3675,8 +3634,8 @@ func (l *lowerer) lowerInterfaceConversion(fn air.Function, expr air.Expr) (lowe
 	return target, nil
 }
 
-func (l *lowerer) foreignABIValueArg(arg air.Expr, value ast.Expr, mode air.ForeignArgMode) ast.Expr {
-	if mode == air.ForeignArgDescriptorValue {
+func (l *lowerer) foreignABIValueArg(arg air.Expr, value ast.Expr, mode air.ABIParamMode) ast.Expr {
+	if mode == air.ABIParamDescriptorValue {
 		return l.valueThroughReference(arg.Type, value)
 	}
 	return value
@@ -4707,44 +4666,6 @@ func (l *lowerer) adaptCallArgWithStmts(_ air.Function, arg air.Expr, argExpr as
 	return argExpr, nil, nil, nil
 }
 
-func (l *lowerer) mutableTraitObjectArg(fn air.Function, arg air.Expr, argExpr ast.Expr, param air.Param) (ast.Expr, []ast.Stmt, []ast.Stmt, bool, error) {
-	if !l.isTraitObjectType(param.Type) {
-		return nil, nil, nil, false, nil
-	}
-	if ref, setup, ok, err := l.mutableTraitRefPointerExpr(fn, arg); ok || err != nil {
-		return ref, setup, nil, ok, err
-	}
-	if arg.Kind == air.ExprTraitUpcast && arg.Target != nil {
-		place, setup, ok, err := l.mutableTraitUpcastPlace(fn, *arg.Target)
-		if err != nil {
-			return nil, nil, nil, true, err
-		}
-		if !ok {
-			return nil, nil, nil, true, fmt.Errorf("mutable trait object argument is not an assignable place")
-		}
-		ref, err := l.mutableTraitForwarderExpr(arg, place, param.Type)
-		if err != nil {
-			return nil, nil, nil, true, err
-		}
-		return &ast.UnaryExpr{Op: token.AND, X: ref}, setup, nil, true, nil
-	}
-	if l.isTraitObjectType(arg.Type) {
-		place, setup, ok, err := l.mutableTraitUpcastPlace(fn, arg)
-		if err != nil {
-			return nil, nil, nil, true, err
-		}
-		if !ok {
-			return nil, nil, nil, true, fmt.Errorf("mutable trait object argument is not an assignable place")
-		}
-		ref, err := l.mutableTraitAnyForwarderExpr(place, param.Type)
-		if err != nil {
-			return nil, nil, nil, true, err
-		}
-		return &ast.UnaryExpr{Op: token.AND, X: ref}, setup, nil, true, nil
-	}
-	return nil, nil, nil, false, nil
-}
-
 func (l *lowerer) implRequiresPointerReceiver(implID air.ImplID) bool {
 	if implID < 0 || int(implID) >= len(l.program.Impls) {
 		return false
@@ -4759,36 +4680,6 @@ func (l *lowerer) implRequiresPointerReceiver(implID air.ImplID) bool {
 		}
 	}
 	return false
-}
-
-func (l *lowerer) mutableTraitRefPointerExpr(fn air.Function, arg air.Expr) (ast.Expr, []ast.Stmt, bool, error) {
-	if !l.isTraitObjectType(arg.Type) {
-		return nil, nil, false, nil
-	}
-	switch arg.Kind {
-	case air.ExprLoadLocal:
-		if l.localIsPointerParam(fn, arg.Local) {
-			return ast.NewIdent(l.localName(fn, arg.Local)), nil, true, nil
-		}
-	case air.ExprGetField:
-		if arg.Target == nil || !validTypeID(l.program, arg.Target.Type) {
-			return nil, nil, false, nil
-		}
-		targetType := l.program.Types[arg.Target.Type-1]
-		if targetType.Kind != air.TypeStruct || arg.Field < 0 || arg.Field >= len(targetType.Fields) {
-			return nil, nil, false, nil
-		}
-		field := targetType.Fields[arg.Field]
-		if !field.Mutable || !l.isTraitObjectType(field.Type) {
-			return nil, nil, false, nil
-		}
-		target, err := l.lowerExpr(fn, *arg.Target)
-		if err != nil {
-			return nil, nil, false, err
-		}
-		return &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))}, target.stmts, true, nil
-	}
-	return nil, nil, false, nil
 }
 
 func (l *lowerer) mutableTraitAssignValueExpr(fn air.Function, arg air.Expr, argExpr ast.Expr, traitTypeID air.TypeID) ast.Expr {
@@ -4943,7 +4834,7 @@ func (l *lowerer) mutableTraitImplForwardingCase(traitMethod air.TraitMethod, me
 	writeback := false
 	if len(methodFn.Signature.Params) > 0 {
 		receiverParam := methodFn.Signature.Params[0]
-		if receiverParam.Mutable && validTypeID(l.program, receiverParam.Type) && l.program.Types[receiverParam.Type-1].Kind == air.TypeStruct {
+		if receiverType, reference := l.referentType(receiverParam.Type); reference && validTypeID(l.program, receiverType) && l.program.Types[receiverType-1].Kind == air.TypeStruct {
 			callReceiver = &ast.UnaryExpr{Op: token.AND, X: receiver}
 			writeback = true
 		}
@@ -5026,7 +4917,7 @@ func (l *lowerer) mutableTraitForwarderMethodExpr(traitMethod air.TraitMethod, m
 	if len(methodFn.Signature.Params) > 0 {
 		receiver := place
 		receiverParam := methodFn.Signature.Params[0]
-		if receiverParam.Mutable && validTypeID(l.program, receiverParam.Type) && l.program.Types[receiverParam.Type-1].Kind == air.TypeStruct {
+		if receiverType, reference := l.referentType(receiverParam.Type); reference && validTypeID(l.program, receiverType) && l.program.Types[receiverType-1].Kind == air.TypeStruct {
 			receiver = addressOfPlace(place)
 		}
 		args = append(args, receiver)
@@ -5064,46 +4955,21 @@ func (l *lowerer) mutableTraitUpcastPlace(fn air.Function, arg air.Expr) (ast.Ex
 			return nil, nil, ok, err
 		}
 		targetType := l.program.Types[arg.Target.Type-1]
+		if targetType.Kind == air.TypeReference && validTypeID(l.program, targetType.Elem) {
+			targetType = l.program.Types[targetType.Elem-1]
+		}
 		if targetType.Kind != air.TypeStruct || arg.Field < 0 || arg.Field >= len(targetType.Fields) {
 			return nil, nil, false, nil
 		}
 		field := targetType.Fields[arg.Field]
 		fieldTarget := ast.Expr(&ast.SelectorExpr{X: targetPlace, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))})
-		if field.Mutable {
+		if l.isReferenceType(field.Type) {
 			fieldTarget = &ast.StarExpr{X: fieldTarget}
 		}
 		return fieldTarget, setup, true, nil
 	default:
 		return nil, nil, false, nil
 	}
-}
-
-func (l *lowerer) existingMutableReferenceArg(fn air.Function, arg air.Expr, argExpr ast.Expr) ast.Expr {
-	if arg.Kind == air.ExprLoadLocal && l.localIsPointerParam(fn, arg.Local) {
-		return ast.NewIdent(l.localName(fn, arg.Local))
-	}
-	if arg.Kind == air.ExprGetField {
-		if fieldExpr, ok := l.mutableFieldReferenceExpr(fn, arg); ok {
-			return fieldExpr
-		}
-	}
-	return argExpr
-}
-
-func (l *lowerer) mutableReferenceArg(fn air.Function, arg air.Expr, argExpr ast.Expr) ast.Expr {
-	if arg.Kind == air.ExprMutRef {
-		// An explicit `mut` expression already produced the reference.
-		return argExpr
-	}
-	if arg.Kind == air.ExprLoadLocal && l.localIsPointerParam(fn, arg.Local) {
-		return ast.NewIdent(l.localName(fn, arg.Local))
-	}
-	if arg.Kind == air.ExprGetField {
-		if fieldExpr, ok := l.mutableFieldReferenceExpr(fn, arg); ok {
-			return fieldExpr
-		}
-	}
-	return &ast.UnaryExpr{Op: token.AND, X: argExpr}
 }
 
 // lowerMutRef lowers one of AIR's explicit reference creation modes. Every
@@ -5162,25 +5028,6 @@ func (l *lowerer) lowerMutRef(fn air.Function, expr air.Expr) (loweredExpr, erro
 	default:
 		return loweredExpr{}, fmt.Errorf("mut ref has invalid mode %d", expr.ReferenceMode)
 	}
-}
-
-func (l *lowerer) mutableFieldReferenceExpr(fn air.Function, arg air.Expr) (ast.Expr, bool) {
-	if arg.Target == nil || !validTypeID(l.program, arg.Target.Type) {
-		return nil, false
-	}
-	targetType := l.program.Types[arg.Target.Type-1]
-	if targetType.Kind != air.TypeStruct || arg.Field < 0 || arg.Field >= len(targetType.Fields) {
-		return nil, false
-	}
-	field := targetType.Fields[arg.Field]
-	if !field.Mutable {
-		return nil, false
-	}
-	target, err := l.lowerExpr(fn, *arg.Target)
-	if err != nil {
-		return nil, false
-	}
-	return &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(l.goFieldName(targetType, field.Name))}, true
 }
 
 func (l *lowerer) localValueExpr(fn air.Function, local air.LocalID) ast.Expr {
