@@ -16,7 +16,7 @@ Statuses: `planned`, `in progress`, `completed`, or `deferred`.
 | COMP-002 | P1 | completed | Make AIR fully typed and Go lowering read-only |
 | COMP-003 | P1 | completed | Finish the ADR 0057 AIR representation migration |
 | COMP-004 | P0 | completed | Contain module imports within package roots and propagate filesystem errors |
-| COMP-005 | P1 | planned | Complete LSP cancellation and dependency-aware invalidation |
+| COMP-005 | P1 | in progress | Complete LSP cancellation and dependency-aware invalidation |
 | COMP-006 | P1 | planned | Stop silently returning incomplete project-wide references and renames |
 | COMP-007 | P2 | planned | Remove the fallback Go importer |
 | COMP-008 | P2 | planned | Consolidate unsafe-catch result analysis |
@@ -129,15 +129,22 @@ Bounded outcome:
 ## COMP-005: Complete LSP cancellation and invalidation
 
 Every document change schedules diagnostics for every open document. Running
-diagnostics use a background context, semantic requests resynchronize every
-overlay, and concurrent cache misses may duplicate complete checks.
+diagnostics previously used a background context, semantic requests
+resynchronize every overlay, and concurrent cache misses may duplicate complete
+checks.
+
+**Status:** in progress. Superseded per-document diagnostic jobs now cancel
+their debounce timer or running analysis, propagate that context through the
+snapshot engine, and exit without publishing cancellation as an analysis error.
+Broad scheduling remains in place until reverse dependencies can identify the
+affected open documents safely.
 
 Bounded outcome:
 
-- Cancel superseded per-document diagnostic work.
-- Make the analysis workspace authoritative for incremental overlay updates.
-- Deduplicate concurrent checks for one content signature.
-- Track reverse dependencies and schedule only affected open documents.
+- [x] Cancel superseded per-document diagnostic work.
+- [ ] Make the analysis workspace authoritative for incremental overlay updates.
+- [ ] Deduplicate concurrent checks for one content signature.
+- [ ] Track reverse dependencies and schedule only affected open documents.
 
 ## COMP-006: Make incomplete reference searches explicit
 

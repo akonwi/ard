@@ -288,6 +288,49 @@ func TestDocumentSyncSchedulesDiagnosticsForAllOpenDocuments(t *testing.T) {
 	})
 }
 
+func TestScheduleDiagnosticsCancelsSupersededRun(t *testing.T) {
+	server := NewServer()
+	server.diagnosticsDelay = 10 * time.Millisecond
+	started := make(chan context.Context, 2)
+	release := make(chan struct{})
+	defer close(release)
+	server.diagnosticsPublisher = func(ctx context.Context, docURI uri.URI) {
+		started <- ctx
+		select {
+		case <-ctx.Done():
+		case <-release:
+		}
+	}
+	docURI := uri.New("file:///main.ard")
+
+	server.scheduleDiagnostics(docURI)
+	var first context.Context
+	select {
+	case first = <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first diagnostic run did not start")
+	}
+
+	server.scheduleDiagnostics(docURI)
+	var second context.Context
+	select {
+	case second = <-started:
+	case <-time.After(time.Second):
+		t.Fatal("replacement diagnostic run did not start")
+	}
+
+	select {
+	case <-first.Done():
+	case <-time.After(time.Second):
+		t.Fatal("superseded diagnostic run was not canceled")
+	}
+	select {
+	case <-second.Done():
+		t.Fatal("replacement diagnostic run was canceled")
+	default:
+	}
+}
+
 func assertScheduledDiagnostics(t *testing.T, scheduled <-chan uri.URI, expected ...uri.URI) {
 	t.Helper()
 	remaining := map[uri.URI]bool{}

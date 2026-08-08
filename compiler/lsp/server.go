@@ -34,6 +34,12 @@ func (s *stdio) Close() error {
 	return err2
 }
 
+type diagnosticJob struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	timer  *time.Timer
+}
+
 // Server is the Ard LSP server.
 type Server struct {
 	cache       *DocumentCache
@@ -50,7 +56,7 @@ type Server struct {
 	requestTimeout time.Duration
 
 	diagnosticsMu        sync.Mutex
-	diagnosticsTimers    map[uri.URI]*time.Timer
+	diagnosticJobs       map[uri.URI]*diagnosticJob
 	diagnosticsDelay     time.Duration
 	diagnosticsPublisher func(context.Context, uri.URI)
 	diagnosticsAnalyzer  diagnosticAnalyzer
@@ -61,7 +67,7 @@ func NewServer() *Server {
 	s := &Server{
 		cache:                NewDocumentCache(),
 		handlers:             make(map[string]jsonrpc2.Handler),
-		diagnosticsTimers:    make(map[uri.URI]*time.Timer),
+		diagnosticJobs:       make(map[uri.URI]*diagnosticJob),
 		diagnosticsDelay:     100 * time.Millisecond,
 		requestTimeout:       5 * time.Second,
 		diagnosticsPublisher: nil,
@@ -352,22 +358,25 @@ func (s *Server) handleExit(ctx context.Context, reply jsonrpc2.Replier, req jso
 }
 
 func (s *Server) scheduleDiagnostics(docURI uri.URI) {
-	if s.diagnosticsDelay <= 0 {
-		go s.runDiagnostics(docURI)
+	ctx, cancel := context.WithCancel(context.Background())
+	job := &diagnosticJob{ctx: ctx, cancel: cancel}
+	s.diagnosticsMu.Lock()
+	if previous := s.diagnosticJobs[docURI]; previous != nil {
+		previous.cancel()
+		if previous.timer != nil {
+			previous.timer.Stop()
+		}
+	}
+	s.diagnosticJobs[docURI] = job
+	if s.diagnosticsDelay > 0 {
+		job.timer = time.AfterFunc(s.diagnosticsDelay, func() {
+			s.runDiagnostics(docURI, job)
+		})
+		s.diagnosticsMu.Unlock()
 		return
 	}
-
-	s.diagnosticsMu.Lock()
-	defer s.diagnosticsMu.Unlock()
-	if timer := s.diagnosticsTimers[docURI]; timer != nil {
-		timer.Stop()
-	}
-	s.diagnosticsTimers[docURI] = time.AfterFunc(s.diagnosticsDelay, func() {
-		s.diagnosticsMu.Lock()
-		delete(s.diagnosticsTimers, docURI)
-		s.diagnosticsMu.Unlock()
-		s.runDiagnostics(docURI)
-	})
+	s.diagnosticsMu.Unlock()
+	go s.runDiagnostics(docURI, job)
 }
 
 func (s *Server) scheduleDiagnosticsForOpenDocuments() {
@@ -376,17 +385,35 @@ func (s *Server) scheduleDiagnosticsForOpenDocuments() {
 	}
 }
 
-func (s *Server) runDiagnostics(docURI uri.URI) {
+func (s *Server) runDiagnostics(docURI uri.URI, job *diagnosticJob) {
+	s.diagnosticsMu.Lock()
+	if s.diagnosticJobs[docURI] != job {
+		s.diagnosticsMu.Unlock()
+		return
+	}
+	job.timer = nil
+	s.diagnosticsMu.Unlock()
+	defer func() {
+		job.cancel()
+		s.diagnosticsMu.Lock()
+		if s.diagnosticJobs[docURI] == job {
+			delete(s.diagnosticJobs, docURI)
+		}
+		s.diagnosticsMu.Unlock()
+	}()
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "ard-lsp panic publishing diagnostics for %s: %v\n%s", docURI, r, debug.Stack())
 		}
 	}()
+	if job.ctx.Err() != nil {
+		return
+	}
 	publisher := s.diagnosticsPublisher
 	if publisher == nil {
 		publisher = s.publishDiagnostics
 	}
-	publisher(context.Background(), docURI)
+	publisher(job.ctx, docURI)
 }
 
 //-------------------------------------------------------------------------

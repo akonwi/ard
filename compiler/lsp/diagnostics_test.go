@@ -98,7 +98,7 @@ func analyzeDiagnosticsForTest(t *testing.T, source string, filePath string, ove
 		server.cache.Open(uri.File(path), "ard", 1, text)
 	}
 	doc := server.cache.Get(docURI)
-	diags, err := server.analyzeDiagnostics(doc, server.cache.Snapshot())
+	diags, err := server.analyzeDiagnostics(context.Background(), doc, server.cache.Snapshot())
 	if err != nil {
 		t.Fatalf("analyze failed: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestEOFParseErrorPublishesOneCharacterFallbackRange(t *testing.T) {
 	docURI := uri.File(path)
 	server.cache.Open(docURI, "ard", 1, source)
 	doc := server.cache.Get(docURI)
-	diagnostics, err := server.analyzeDiagnostics(doc, server.cache.Snapshot())
+	diagnostics, err := server.analyzeDiagnostics(context.Background(), doc, server.cache.Snapshot())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestCircularImportIsPublishedOnInitiatingDocument(t *testing.T) {
 	docURI := uri.File(mainPath)
 	server.cache.Open(docURI, "ard", 1, source)
 	doc := server.cache.Get(docURI)
-	diagnostics, err := server.analyzeDiagnostics(doc, server.cache.Snapshot())
+	diagnostics, err := server.analyzeDiagnostics(context.Background(), doc, server.cache.Snapshot())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestPublishDiagnosticsUsesOverlayUTF16ForCrossFileRelatedInformation(t *tes
 	mainURI, apiURI := uri.File(mainPath), uri.File(apiPath)
 	server.cache.Open(mainURI, "ard", 1, mainSource)
 	server.cache.Open(apiURI, "ard", 1, apiOverlay)
-	server.diagnosticsAnalyzer = func(string, string, map[string]string) ([]checker.Diagnostic, error) {
+	server.diagnosticsAnalyzer = func(context.Context, string, string, map[string]string) ([]checker.Diagnostic, error) {
 		return []checker.Diagnostic{{
 			Kind:  checker.Error,
 			Code:  checker.DiagnosticCodeTypeMismatch,
@@ -447,7 +447,7 @@ func TestPublishDiagnosticsDiscardsStaleOverlaySnapshot(t *testing.T) {
 
 	started := make(chan struct{})
 	release := make(chan struct{})
-	server.diagnosticsAnalyzer = func(source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error) {
+	server.diagnosticsAnalyzer = func(ctx context.Context, source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error) {
 		close(started)
 		<-release
 		return nil, nil
@@ -468,6 +468,35 @@ func TestPublishDiagnosticsDiscardsStaleOverlaySnapshot(t *testing.T) {
 		t.Fatalf("published %d stale diagnostic notifications, want none", got)
 	}
 }
+
+func TestPublishDiagnosticsSilentlyStopsCanceledAnalysis(t *testing.T) {
+	server := NewServer()
+	conn := newRecordingConn()
+	server.conn = conn
+	docURI := uri.New("file:///tmp/main.ard")
+	server.cache.Open(docURI, "ard", 1, "let value = 1\n")
+	started := make(chan struct{})
+	server.diagnosticsAnalyzer = func(ctx context.Context, source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		server.publishDiagnostics(ctx, docURI)
+		close(done)
+	}()
+	<-started
+	cancel()
+	<-done
+
+	if got := conn.notificationCount(); got != 0 {
+		t.Fatalf("published %d diagnostic notifications for canceled analysis, want none", got)
+	}
+}
+
 func TestPublishDiagnosticsHandlesNonFileURI(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
@@ -508,7 +537,7 @@ func TestPublishDiagnosticsReportsAnalysisPanic(t *testing.T) {
 	server := NewServer()
 	conn := newRecordingConn()
 	server.conn = conn
-	server.diagnosticsAnalyzer = func(source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error) {
+	server.diagnosticsAnalyzer = func(ctx context.Context, source string, filePath string, overlays map[string]string) ([]checker.Diagnostic, error) {
 		panic("checker exploded")
 	}
 	docURI := uri.New("file:///tmp/test.ard")
