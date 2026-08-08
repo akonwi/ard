@@ -1,6 +1,7 @@
 package gotarget
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -3255,6 +3256,33 @@ func TestLowerProgramUsesExpectedLocalTypeForMaybeNone(t *testing.T) {
 		t.Fatal("generated AST used untyped maybe none")
 	}
 }
+
+func TestLowerProgramDoesNotMutateAIR(t *testing.T) {
+	program := lowerSource(t, `
+		fn main() Bool {
+			let found: Int? = match 1 {
+				1 => Maybe::new(1),
+				_ => Maybe::new(),
+			}
+			found.is_some()
+		}
+	`)
+	before, err := air.SerializeProgram(program)
+	if err != nil {
+		t.Fatalf("serialize AIR before Go lowering: %v", err)
+	}
+
+	lowerProgramAST(t, program, Options{PackageName: "main"})
+
+	after, err := air.SerializeProgram(program)
+	if err != nil {
+		t.Fatalf("serialize AIR after Go lowering: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("Go lowering mutated AIR")
+	}
+}
+
 func TestLowerProgramUsesExpectedDefaultTypeForResultOr(t *testing.T) {
 	program := lowerSource(t, `
 

@@ -386,22 +386,6 @@ func (p *namePlan) addTypeNames(occupied map[string]bool, typ air.TypeInfo) {
 	}
 }
 
-func (p *namePlan) addTypeDuringLowering(l *lowerer, typ air.TypeInfo) {
-	if p == nil {
-		return
-	}
-	p.typeNames[typ.ID] = typeName(p.program, typ)
-	p.addTypeNames(p.programTopLevel, typ)
-	for _, module := range p.program.Modules {
-		for _, moduleType := range l.typesForModule(module.ID, module.ID) {
-			if moduleType.ID == typ.ID {
-				p.addTypeNames(p.moduleTopLevel[module.ID], typ)
-				break
-			}
-		}
-	}
-}
-
 func (p *namePlan) typeName(typ air.TypeInfo) string {
 	if p == nil {
 		return typeName(nil, typ)
