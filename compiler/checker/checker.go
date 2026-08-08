@@ -658,7 +658,12 @@ func (c *Checker) typeOwnerPath() string {
 }
 
 func (c *Checker) HasErrors() bool {
-	return len(c.diagnostics) > 0
+	for _, diagnostic := range c.diagnostics {
+		if diagnostic.Kind == Error {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Checker) Diagnostics() []Diagnostic {
@@ -768,11 +773,15 @@ func (c *Checker) Check() {
 			c.moduleResolver.loadingChain = c.moduleResolver.loadingChain[:len(c.moduleResolver.loadingChain)-1]
 			if len(diagnostics) > 0 {
 				// Add all diagnostics from the imported module
+				hasErrors := false
 				for _, diag := range diagnostics {
 					diag = reanchorCircularImportDiagnostic(diag, c.sourceSpan(imp.PathLocation))
 					c.diagnostics = append(c.diagnostics, diag)
+					hasErrors = hasErrors || diag.Kind == Error
 				}
-				continue
+				if hasErrors {
+					continue
+				}
 			}
 
 			// Set the correct module path for the module
@@ -1519,7 +1528,11 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 				c.addIncorrectTypeArgumentCount(1, len(ty.TypeArgs), "Generic type Maybe requires type arguments", ty.GetLocation())
 				return &TypeVar{name: "unknown"}
 			}
-			baseType = MakeMaybe(c.resolveType(ty.TypeArgs[0]))
+			inner := c.resolveType(ty.TypeArgs[0])
+			baseType = MakeMaybe(inner)
+			if inner == Void {
+				c.addRedundantNullableVoid(ty.GetLocation())
+			}
 			break
 		case "Chan":
 			if len(ty.TypeArgs) != 1 {
@@ -1646,6 +1659,9 @@ func (c *Checker) resolveType(t parse.DeclaredType) Type {
 
 	// If the type is nullable, wrap it in a Maybe
 	if t.IsNullable() {
+		if baseType == Void {
+			c.addRedundantNullableVoid(t.GetLocation())
+		}
 		return &Maybe{of: baseType}
 	}
 

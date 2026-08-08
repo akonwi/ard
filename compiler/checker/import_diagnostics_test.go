@@ -68,6 +68,27 @@ func TestProjectModuleBodyDiagnosticsSurfaceAtImport(t *testing.T) {
 	requireModuleBodyDiagnostic(t, diagnostics, "util.ard")
 }
 
+func TestWarningOnlyImportedModuleRemainsUsable(t *testing.T) {
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, "ard.toml"), []byte("name = \"app\"\nard = \">= 0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "util.ard"), []byte(`let signal: Void? = Maybe::new()
+
+fn answer() Int { 42 }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diagnostics := checkImporter(t, projectDir, "use app/util\n\nfn main() Int { util::answer() }\n")
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics = %#v, want one imported-module warning", diagnostics)
+	}
+	if diagnostic := diagnostics[0]; diagnostic.Kind != checker.Warn || diagnostic.Code != checker.DiagnosticCodeRedundantNullableVoid {
+		t.Fatalf("diagnostic = %#v, want redundant nullable Void warning", diagnostic)
+	}
+}
+
 func TestPathDependencyBodyDiagnosticsSurfaceAtImport(t *testing.T) {
 	workspace := t.TempDir()
 	app := filepath.Join(workspace, "app")

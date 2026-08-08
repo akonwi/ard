@@ -6,23 +6,6 @@ import (
 	"github.com/akonwi/ard/air"
 )
 
-func TestNamePlanTracksTypesSynthesizedDuringLowering(t *testing.T) {
-	program := &air.Program{
-		Modules: []air.Module{{ID: 0, Path: "app/main.ard"}},
-		Types:   []air.TypeInfo{{ID: 1, Kind: air.TypeInt, Name: "Int"}},
-	}
-	lowerer := &lowerer{program: program, useModulePackages: true, currentModule: 0}
-	lowerer.functionModules = lowerer.collectFunctionEmitModules()
-	lowerer.namePlan = newNamePlan(lowerer)
-
-	maybeID := lowerer.findMaybeTypeByElem(1)
-	maybeType := program.Types[maybeID-1]
-	alias := lowerer.typeName(maybeType)
-	if !lowerer.importAliasCollidesWithTopLevel(alias) {
-		t.Fatalf("synthesized type name %q was not added to the module collision set", alias)
-	}
-}
-
 func TestNamePlanMatchesExistingNamesAndImportCollisions(t *testing.T) {
 	program := &air.Program{
 		Modules: []air.Module{

@@ -11,6 +11,57 @@ import (
 	"github.com/akonwi/ard/parse"
 )
 
+func TestExplicitNullableVoidHasStructuredWarning(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{name: "nullable sugar", source: "let value: Void? = Maybe::new()\n"},
+		{name: "generic spelling", source: "let value: Maybe<Void> = Maybe::new()\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parse.Parse([]byte(tt.source), "main.ard")
+			if len(result.Errors) > 0 {
+				t.Fatalf("parse errors: %v", result.Errors)
+			}
+			declaration := result.Program.Statements[0].(*parse.VariableDeclaration)
+			c := checker.New("main.ard", result.Program, nil)
+			c.Check()
+
+			if c.HasErrors() {
+				t.Fatalf("warning made checker fail: %#v", c.Diagnostics())
+			}
+			if len(c.Diagnostics()) != 1 {
+				t.Fatalf("diagnostics = %#v, want one warning", c.Diagnostics())
+			}
+			diagnostic := c.Diagnostics()[0]
+			if diagnostic.Kind != checker.Warn || diagnostic.Code != checker.DiagnosticCodeRedundantNullableVoid {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+			if diagnostic.Title != "Redundant nullable Void" || diagnostic.Primary.Span.Location != declaration.Type.GetLocation() {
+				t.Fatalf("diagnostic = %#v", diagnostic)
+			}
+		})
+	}
+}
+
+func TestInferredMaybeVoidAndVoidResultDoNotWarn(t *testing.T) {
+	result := parse.Parse([]byte(`
+		let inferred = Maybe::new(())
+		let result: Void!Str = Result::ok(())
+	`), "main.ard")
+	if len(result.Errors) > 0 {
+		t.Fatalf("parse errors: %v", result.Errors)
+	}
+	c := checker.New("main.ard", result.Program, nil)
+	c.Check()
+	if len(c.Diagnostics()) != 0 {
+		t.Fatalf("diagnostics = %#v, want none", c.Diagnostics())
+	}
+}
+
 func TestRemainingUnresolvedReferencesHaveStructuredDiagnostics(t *testing.T) {
 	tests := []struct {
 		name    string

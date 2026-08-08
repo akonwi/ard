@@ -58,6 +58,14 @@ fn main() {
   ffi::RunPlain(fn(x: Int) {
     "count: {x}".size()
   })
+
+  // Retaining a contextually Void closure forces Go lowering to emit its
+  // captured helper instead of inlining it. Its final value is still discarded.
+  let prefix = "count: "
+  let retained: fn(Int) Void = fn(x: Int) {
+    "{prefix}{x}".size()
+  }
+  ffi::RunPlain(retained)
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
