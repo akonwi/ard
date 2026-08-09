@@ -7655,6 +7655,9 @@ func (l *lowerer) lowerNativeTraitInterfaceCall(fn air.Function, target loweredE
 	stmts := append([]ast.Stmt{}, target.stmts...)
 	stmts = append(stmts, argStmts...)
 	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: target.expr, Sel: ast.NewIdent(methodName)}, Args: args}
+	if l.abiReturnShapeAvailable(method.Signature.Return) && len(writeback) == 0 {
+		return l.packABICallResult(expr.Type, method.Signature.Return, stmts, call)
+	}
 	return l.finishCallWithWriteback(expr.Type, stmts, call, writeback)
 }
 
